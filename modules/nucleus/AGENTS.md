@@ -21,10 +21,10 @@ covers only what's specific to the contract.
 - **Core options live in the core flake; the contract declares only the paint
   half.** `enable`/`root`/`checkout`/`auditLog`/`terminal`/`user`/
   `sessionTarget` are `pkgs/aoide/module/options.nix`'s contract now, pulled in
-  by the nucleus module (`lib/aoideos.nix`'s `nucleusModule`) — the one place
+  by the nucleus module (`lib/strillix.nix`'s `nucleusModule`) — the one place
   that closes over Aoide's own flake inputs, since neither a file here nor an
   `imports` list can read a module argument that `_module.args` supplies. A new
-  CORE option (portable, cargo-buildable, no `modules/`/`song/` reach) is added
+  CORE option (portable, cargo-buildable, no `modules/`/`rice/` reach) is added
   there, never here; a new PAINT option (theme, layout, surfaces, an
   enable fact, a lane toggle) is added here, never there. Door toggles and member
   settings are not declared here: each lives in the member that reads it
@@ -48,8 +48,8 @@ covers only what's specific to the contract.
   the member fails eval; `aoideOptions` lists it whether or not any host selects
   the member, since it evaluates the whole catalogue.
 - **Changes here land by ordered lane, not by rice edit** (root `AGENTS.md`
-  house rule 1 — a rice agent writes only `rices/<song>/`; everything
-  outside `song/`, this directory included, changes only on a lane the User
+  house rule 1 — a rice agent writes only `rices/<rice>/`; everything
+  outside `rice/`, this directory included, changes only on a lane the User
   ordered, with that lane's scope named). A rice agent proposing a contract
   change writes the diff and gets it reviewed/merged the normal way, same as
   any other core-structure change.

@@ -15,7 +15,7 @@
 #     the `compositor` capability)
 #     Anything derived from `aoide.theme`: border colours, gaps, rounding,
 #     blur, the aoide-* layerrules, hyprglass, the kitty rounding
-#     rules. Re-riced whenever the song changes. That file also owns the
+#     rules. Re-riced whenever the rice changes. That file also owns the
 #     session plumbing (programs.hyprland, the systemd/Wayland env handoff,
 #     hyprpolkitagent, xdg.portal).
 #
@@ -24,7 +24,7 @@
 #     devices, tiling layout, misc quality-of-life, and behavioural window
 #     rules (float/workspace-assignment/idle — as opposed to the *appearance*
 #     window rules, which are theme's business and stay in the look).
-#     Swapping songs must never disturb any of it.
+#     Swapping rices must never disturb any of it.
 #
 # The look reads `aoide.theme` and is a paint dendrite (CONTRACTS.md §2); this
 # module reads no theme and renders nothing, so its own options stay a
@@ -40,7 +40,7 @@
 #   1500 mkAfter   the strillix renderer   — one `source` line, last
 # Plain (unordered) is deliberate: the theme block must land first so these
 # behaviour keys are never overwritten by it. The strillix renderer's line sources
-# the rice (`~/.local/state/strillix/rice.conf`) after everything else, so a song's
+# the rice (`~/.local/state/strillix/rice.conf`) after everything else, so a rice's
 # binds and layout override the defaults above (strillix/AGENTS.md).
 #
 # Enabling this without the compositor is harmless: home-manager only writes
@@ -210,17 +210,17 @@ in
         # Wallpaper picker (Hyprland global shortcut → AoideWallpaperPicker's
         # GlobalShortcut). Registers `aoide:wallpaper` in-process, same
         # global-shortcuts-v1 seam as the launcher. A press opens the launcher
-        # body's own Desktop Pictures (`openPictures()`) when the song's
-        # launcher has one, else the plain cover grid over $STRILLIX_ROOT/wallpapers/; a pick
+        # body's own Desktop Pictures (`openPictures()`) when the rice's
+        # launcher has one, else the plain wallpaper grid over $STRILLIX_ROOT/wallpapers/; a pick
         # shells `strillix wallpaper set <path>`, which hot-swaps the live wallpaper.
         # No CLI toggle command, no inbound socket.
         bind = SUPER, W, global, aoide:wallpaper
 
-        # `aoide:switcher` (the window switcher: a song's widgets/switcher.qml,
+        # `aoide:switcher` (the window switcher: a rice's widgets/switcher.qml,
         # else the plain AoideSwitcher) is registered by shell.qml but not bound
         # here: the venue binds its combo.
 
-        # Lock screen: `strillix lock`, the one lock entry (the staged song's face
+        # Lock screen: `strillix lock`, the one lock entry (the staged rice's face
         # through the shell's LockHost, else hyprlock). The shellbridge
         # powermenu's PowerAction::Lock and the `lock` alias run the same
         # command. Bare name, as the rice binds below.

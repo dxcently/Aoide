@@ -1,6 +1,6 @@
 # modules/dendrites/strillix/lock.nix — the `lock` slot's strillix provider: the
 # Quickshell lock (LockHost.qml) on the strillix runtime, which it brings by path
-# (README.md), with the hyprlock fallback a song without a `lockscreen` face
+# (README.md), with the hyprlock fallback a rice without a `lockscreen` face
 # locks with. The declared lock dress (`$STRILLIX_ROOT/declared/hyprlock.conf`) is
 # staging data and is seeded by the runtime, not here.
 { config, pkgs, ... }:
@@ -12,13 +12,13 @@
 
   # ── The lock (`strillix lock`) ──────────────────────────────────────────────
   # `strillix lock` runs one of two lockers, and this provider carries both and
-  # their PAM services. A song with a `lockscreen` face is
+  # their PAM services. A rice with a `lockscreen` face is
   # locked by the shell's LockHost.qml, whose one PamContext authenticates
   # through `aoide-lock`: a service of its own rather than `login`, whose
   # stack carries session and tty modules (lastlog, motd, the greeter's
   # own additions) that have no business in a re-authentication, and a
   # name a host can tune for the lock alone (a fingerprint reader, a key).
-  # Every other song runs hyprlock through `hyprlock`, the service name it
+  # Every other rice runs hyprlock through `hyprlock`, the service name it
   # opens. The package goes in directly (systemPackages below), not through
   # `programs.hyprlock.enable`, which would also switch on a config-less
   # hypridle this provider does not want to own.
@@ -30,7 +30,7 @@
   # their own; a host that writes one keeps it. It defines the ten
   # `$aoide_lock_*` variables with the plain look as their values, sources
   # the declared and then the staged dress (CONTRACTS.md §4, the lock
-  # dress), and only then draws, so the staged song wins and a missing or
+  # dress), and only then draws, so the staged rice wins and a missing or
   # broken fragment costs the dress and never the lock. A variable is read
   # by a paint key only, never by a text key, which hyprlock can run as a
   # command. The plain values are hyprlock 0.9.6's own field defaults.

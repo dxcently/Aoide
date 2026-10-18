@@ -71,7 +71,7 @@ Item {
 
     // ── The ledger file — read-only, watched ───────────────────────────────
     // notifications.json is a CONDUCTING file (CONTRACTS.md §4) — state/stage/,
-    // not song/stage/.
+    // not rice/stage/.
     readonly property string notificationsPath:
         (Quickshell.env("AOIDE_ROOT") || (Quickshell.env("HOME") + "/.aoide")) + "/state/stage/notifications.json"
     property var records: []

@@ -8,9 +8,9 @@
 # catalogue names THIS directory (`wallpaper = ./dendrites/wallpaper;`) and
 # nothing names a provider file but this line — one place each.
 #
-# WHO PAINTS A SONG'S WALLPAPER is a host's choice, the way its compositor is.
+# WHO PAINTS A RICE'S WALLPAPER is a host's choice, the way its compositor is.
 # `strillix` is the default: the shell's own `aoide-wallpaper` layer draws the
-# song's default AND the user's picks. `skwd-wall` hands picks to the external
+# rice's default AND the user's picks. `skwd-wall` hands picks to the external
 # engine of that name, which paints them on its own surface while the shell's
 # layer stays mapped and paints nothing. Both bring the strillix runtime by path
 # (the shell's picker and layer stay), both write `aoide.components.wallpaper`,

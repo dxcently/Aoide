@@ -1,6 +1,6 @@
 // ricemode.qml — sonata's "ricemode" slot: the ONE rice-mode control. Every
-// song's bar embeds it as `WidgetSlot { slot: "ricemode" }`, and this body is
-// the floor for every song that does not dress the slot itself.
+// rice's bar embeds it as `WidgetSlot { slot: "ricemode" }`, and this body is
+// the floor for every rice that does not dress the slot itself.
 //
 // WidgetSlot-hosted Item with no extras beyond the universal `theme`/`bridge`
 // (pkgs/strillix-shell/qml/slots.md). It reports its own footprint and reaches the
@@ -20,22 +20,22 @@
 // Left, right and middle click all do one thing: open the menu, or close it.
 // The cell never switches; nothing changes until a row is chosen. The menu
 // (bridge.riceMenu(cb)), top to bottom:
-//   songs                  the runtime songbook; a row stages that song
-//                          (bridge.riceMode("stage", name)). A song that does not
+//   rices                  the runtime rices; a row stages that rice
+//                          (bridge.riceMode("stage", name)). A rice that does not
 //                          load is a dim row that does nothing
-//   declarative · <song>   locks back to the declared song
+//   declarative · <rice>   locks back to the declared rice
 //                          (bridge.riceMode("declarative"))
-//   drafts · <song>        the staged song's saved drafts (an `enter` row each),
+//   drafts · <rice>        the staged rice's saved drafts (an `enter` row each),
 //                          `+ new draft`, and `save current as draft`, which is
 //                          offered in staging only (in draft mode writes already
 //                          land in the draft, in declarative nothing is unsaved)
-// Marks: a full dot for the song staged now and for the declarative row while it
-// is locked, in that mode's colour; a ring on the last-staged song while locked;
+// Marks: a full dot for the rice staged now and for the declarative row while it
+// is locked, in that mode's colour; a ring on the last-staged rice while locked;
 // a dot on the current draft. The marked rows only close the menu. In draft mode
-// the drafted song's row is live: it leaves the draft for plain staging.
+// the drafted rice's row is live: it leaves the draft for plain staging.
 // A stage, a declarative, an enter and a new each change what is live, so the
 // word reads `…` and every click is swallowed until theme.riceMode, the draft
-// name or the song changes, or 10s pass: the double click that sent two
+// name or the rice changes, or 10s pass: the double click that sent two
 // switches. A `save` changes nothing and holds nothing.
 //
 // ── The menu ────────────────────────────────────────────────────────────────
@@ -91,7 +91,7 @@ Item {
     //     workspace) AND the state tier's own working→gold partnering
     //     (grammar §2): the engine is literally in its working state.
     //   draft       → 𝄋 draft — dal segno: stage writes route through a
-    //     saved mark (a draft snapshot), never the committed song. Aegean
+    //     saved mark (a draft snapshot), never the committed rice. Aegean
     //     holoBlue — the PREVIEW register (the workspace hover-ring's
     //     "a copy, not the real thing"), distinct from both resting ink
     //     and live gold. Not urgent: no mode is an alarm.
@@ -117,7 +117,7 @@ Item {
     // ── State ───────────────────────────────────────────────────────────────
     readonly property string mode: root.theme.riceMode
     readonly property string draft: (root.theme.modeRaw && root.theme.modeRaw.draft) || ""
-    readonly property string song: root.theme.songName
+    readonly property string rice: root.theme.riceName
     readonly property bool canMenu: !!root.bridge && typeof root.bridge.riceMenu === "function"
 
     property bool pending: false       // a mode change was sent and has not landed
@@ -126,12 +126,12 @@ Item {
     property int asked: 0              // which ask a reply belongs to
     property Item hotRow: null         // the menu row under the pointer
     readonly property bool ready: !!root.answer && root.answer.ok === true
-    readonly property var songs: root.ready && Array.isArray(root.answer.songs) ? root.answer.songs : []
+    readonly property var rices: root.ready && Array.isArray(root.answer.rices) ? root.answer.rices : []
     readonly property var drafts: root.ready && Array.isArray(root.answer.drafts) ? root.answer.drafts : []
 
     onModeChanged: root.pending = false
     onDraftChanged: root.pending = false
-    onSongChanged: root.pending = false
+    onRiceChanged: root.pending = false
     Timer { interval: 10000; running: root.pending; onTriggered: root.pending = false }
 
     function gesture() {
@@ -319,7 +319,7 @@ Item {
                     PickRow {
                         live: false
                         ink: 0.55
-                        label: "songs"
+                        label: "rices"
                     }
                     PickRow {
                         visible: !root.ready
@@ -328,11 +328,11 @@ Item {
                         label: !root.answer ? "…" : "" + (root.answer.message || "no answer")
                     }
                     Repeater {
-                        model: root.songs
+                        model: root.rices
                         PickRow {
                             required property var modelData
-                            readonly property bool here: root.ready && root.mode === "staging" && modelData.name === root.answer.song
-                            readonly property bool last: root.ready && root.mode === "declarative" && modelData.name === root.answer.stagingSong
+                            readonly property bool here: root.ready && root.mode === "staging" && modelData.name === root.answer.rice
+                            readonly property bool last: root.ready && root.mode === "declarative" && modelData.name === root.answer.stagingRice
                             live: !!modelData.ok
                             ink: modelData.ok ? 0.88 : 0.4
                             label: modelData.ok ? "" + modelData.name
@@ -358,7 +358,7 @@ Item {
                     PickRow {
                         live: false
                         ink: 0.55
-                        label: root.ready && root.answer.draftsSong ? "drafts · " + root.answer.draftsSong : "drafts"
+                        label: root.ready && root.answer.draftsRice ? "drafts · " + root.answer.draftsRice : "drafts"
                     }
                     PickRow {
                         visible: root.ready && root.drafts.length === 0

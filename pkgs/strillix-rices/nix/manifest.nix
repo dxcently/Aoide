@@ -1,7 +1,7 @@
-# manifest.nix — the rices generator, as SHIPPED (S9, concepts/song/
+# manifest.nix — the rices generator, as SHIPPED (S9, concepts/rice/
 # Self-Ricing.md "the runtime reads").
 #
-# This file is the entry `aoide-song::widgets` evaluates with a plain
+# This file is the entry `strillix-rice::widgets` evaluates with a plain
 # `nix-instantiate --eval --strict --json` over a FILE:
 #
 #   nix-instantiate --eval --strict --json --expr \
@@ -14,7 +14,7 @@
 # `pkgs/strillix-rices/default.nix`:
 #
 #   rices.nix   `lib/rices.nix`, verbatim — THE generator
-#   song.nix       `lib/song.nix`, verbatim — `composeSong`, which the shelf
+#   rice.nix       `lib/rice.nix`, verbatim — `composeRice`, which the shelf
 #                  records reach through
 #   lib/           the locked nixpkgs `lib/`, tests dropped
 #
@@ -24,17 +24,17 @@
 # running this cannot drift from the build that deployed it.
 #
 # ── What it returns ────────────────────────────────────────────────────────
-#   manifest   `<song>` → `{ <slot> = { owner; file; }; }`, songs with no slot
+#   manifest   `<rice>` → `{ <slot> = { owner; file; }; }`, rices with no slot
 #              omitted (the same asymmetry `ricesManifest` carries)
-#   registry   `<song>` → that song's widget-TYPE registry entry, EVERY song
+#   registry   `<rice>` → that rice's widget-TYPE registry entry, EVERY rice
 #              including the empty ones
-#   packages   `<song>` → the package NAMES that song needs installed, its
+#   packages   `<rice>` → the package NAMES that rice needs installed, its
 #              borrow-closure included
 #
-# `packages` is what `aoide rice stage` checks a machine-rices song against
-# `builtin.json.packages` before staging it: a song whose lender is not built
-# in needs the lender's packages too, so the closure — not the song's own
-# record alone — is what "this song's needs" means. Same list, same closure
+# `packages` is what `aoide rice stage` checks a machine-rices rice against
+# `builtin.json.packages` before staging it: a rice whose lender is not built
+# in needs the lender's packages too, so the closure — not the rice's own
+# record alone — is what "this rice's needs" means. Same list, same closure
 # `lib/rices.nix`'s `builtIn` gives a host, so the two sides of that
 # comparison are the same arithmetic.
 { ricesRoot }:
@@ -53,5 +53,5 @@ in
         available = [ ];
       }
     )
-  ) ricesData.songs;
+  ) ricesData.riceDirs;
 }

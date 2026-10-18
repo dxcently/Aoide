@@ -1,5 +1,5 @@
 # tests/quickshell-seam/hosts/test-quickshell-bare.nix — the second strillix-less
-# shape: a bare AoideOS shell.
+# shape: a bare Strillix shell.
 #
 # Same selection as `test-quickshell-only`, minus the config: the package is
 # installed and no service runs, no graphical-session anchor is claimed, and

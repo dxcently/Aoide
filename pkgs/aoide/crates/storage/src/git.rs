@@ -122,7 +122,7 @@ pub fn installed() -> bool {
 /// `git status --porcelain -- <rel>` in `repo`: one line per path under `rel`
 /// that differs from HEAD or is untracked and not ignored, as git prints it.
 /// Empty when `rel` is clean. The whole of what `rice declare` needs to know
-/// about uncommitted work in a song folder.
+/// about uncommitted work in a rice folder.
 pub fn status_under(repo: &Path, rel: &str) -> Result<Vec<String>, String> {
     let out = run_git(Some(repo), &["--no-optional-locks", "status", "--porcelain", "--", rel])?;
     Ok(String::from_utf8_lossy(&out).lines().filter(|l| !l.trim().is_empty()).map(str::to_string).collect())

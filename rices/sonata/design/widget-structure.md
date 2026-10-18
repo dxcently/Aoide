@@ -1,6 +1,6 @@
 # Widget Structure — mechanism and hard contracts
 
-**Song:** sonata
+**Rice:** sonata
 
 How a `widgets/*.qml` file gets from disk to screen, what it is handed, what
 its host draws for it, and the contracts it cannot break. Verified against the
@@ -18,15 +18,15 @@ The full mechanism is `pkgs/strillix-shell/qml/slots.md` and
 `CONTRACTS.md §5`; this only orients an author.
 
 ```
-rices/<song>/widgets/<slot>.qml
+rices/<rice>/widgets/<slot>.qml
         │
-        ├── nixos-rebuild ──> $out/qml/songs/<song>/<slot>.qml + manifest.json
+        ├── nixos-rebuild ──> $out/qml/rices/<rice>/<slot>.qml + manifest.json
         │
-        └── aoide rice stage <song> ──> ~/Aoide/run/qml/songs/<song>/<slot>.qml
+        └── aoide rice stage <rice> ──> ~/Aoide/run/qml/rices/<rice>/<slot>.qml
                                         (+ auto quickshell reload when a body changed)
         │
-   StagingEngine.resolveSong(activeSong, slot)
-        │   active song's own file  →  else SONATA's  →  else ""
+   StagingEngine.resolveRice(activeRice, slot)
+        │   active rice's own file  →  else SONATA's  →  else ""
         ▼
    WidgetSlot (Item root)          SurfaceSlot (PanelWindow root)
         │ parents + sizes                │ creates, hands back `.item`
@@ -36,8 +36,8 @@ rices/<song>/widgets/<slot>.qml
 
 Three consequences worth internalising:
 
-- **sonata IS the floor.** Every other song falls back to these files, so a
-  sonata widget is never "just this song's" — it is the shipped default.
+- **sonata IS the floor.** Every other rice falls back to these files, so a
+  sonata widget is never "just this rice's" — it is the shipped default.
 - **Being carried is not being rendered.** Nothing appears until a host
   surface embeds an anchor for that exact slot name. Dropping
   `widgets/whatever.qml` with no anchor wired is inert.
@@ -71,8 +71,8 @@ In practice, inside a `widgets/*.qml`:
 - **A new API lands as a bridge FIRST and the QML picks it up second.** Never
   the reverse; never only in QML.
 
-This is also the lane/song line: `pkgs/strillix-shell/qml/` keeps agnostic
-bridges and APIs, the song keeps everything that paints.
+This is also the lane/rice line: `pkgs/strillix-shell/qml/` keeps agnostic
+bridges and APIs, the rice keeps everything that paints.
 
 ---
 
@@ -101,7 +101,7 @@ without them) but `shared` as `property var shared: null`, commented
 "Optional/null-safe so a standalone bar load never errors." Both choices sit
 in the same file, three lines apart.
 
-**No widget ever receives `config.*`.** A song widget is store-copied score,
+**No widget ever receives `config.*`.** A rice widget is store-copied score,
 structurally incapable of reaching nix options through this surface —
 `WidgetSlot.qml`, `SurfaceSlot.qml` and `StagingEngine.qml` all restate this.
 
@@ -114,10 +114,10 @@ From `pkgs/strillix-shell/qml/ThemeState.qml`:
   `noteColor(id)` for one distinct hue per small integer id.
 - **component tiers** — `barBg/barFg/barAccent`, `notifBg/notifFg/notifUrgent`,
   `windowBorder/windowBorderInactive`. In sonata the `bar.*` and `notif.*`
-  tiers are all-null in the song, so they resolve to the palette values;
+  tiers are all-null in the rice, so they resolve to the palette values;
   `notifications.qml` reads the `notif*` names anyway (correct — it makes the
-  card re-skinnable per song), and `bar.qml` reads the palette names directly.
-- **live state** — `songName` (drives slot resolution) and `riceMode`
+  card re-skinnable per rice), and `bar.qml` reads the palette names directly.
+- **live state** — `riceName` (drives slot resolution) and `riceMode`
   (`declarative|staging|draft`, hot from `stage/mode.json`).
 - **shared computations** — `ctxBar/ctxPercent/ctxColor/ctxCompact/ctxRollup`
   (context-window gauges), `elapsedSince(iso, nowMs)`, `usageResetIn(...)`,
@@ -154,7 +154,7 @@ layerrules match on for glass, so the string travels with the slot as part of
 its contract (catalogued in `slots.md`).
 
 The `bar` slot is the odd one: a `WidgetSlot`-hosted whole-content slot whose
-`PanelWindow` stays in the shell. The song owns its own footprint —
+`PanelWindow` stays in the shell. The rice owns its own footprint —
 `shell.qml` binds the window's `implicitHeight` AND `exclusiveZone` to
 `barSlot.implicitHeight` — and the widget binds `width: parent ? parent.width
 : implicitWidth`, because under `Component.createObject(root, props)` its
@@ -266,7 +266,7 @@ above is the anomaly worth flagging in review.
 
 Plain `Column` / `Row` / `Item` with explicit `width: parent.width` and
 anchor-between-siblings for flexible text. That is the idiom throughout
-`GadgetFrame`, `AoidePanel`, `PowerVitalsGadget` and every song widget.
+`GadgetFrame`, `AoidePanel`, `PowerVitalsGadget` and every rice widget.
 
 **`QtQuick.Layouts` is not used by any widget.** `notifications.qml`'s header
 records why: a v1 card hit a real Qt Quick Layouts sizing-negotiation loop
@@ -469,5 +469,5 @@ in QML (`modules/dendrites/compositor/hyprland/default.nix`):
 
 A widget earns the frosted read by which host anchor and namespace it hangs
 under, not by anything it paints. Changing how glassy a popout feels is a
-lane edit (out of a song widget's scope) or a hosting choice — never a blur
+lane edit (out of a rice widget's scope) or a hosting choice — never a blur
 effect in QML.

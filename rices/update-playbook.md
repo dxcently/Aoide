@@ -1,15 +1,15 @@
 # Rices update playbook
 
 Referenced by `CONTRACTS.md` §5. Practical steps for authoring/updating a
-song — its theme, plus the slots the staging engine resolves for it.
+rice — its theme, plus the slots the staging engine resolves for it.
 
-## Song bodies (v0 to v1: `rice.nix` as a body)
+## Rice bodies (v0 to v1: `rice.nix` as a body)
 
-A song's `rice.nix` is an attrset, the body the constructor reads as data:
+A rice's `rice.nix` is an attrset, the body the constructor reads as data:
 `system` (the paint: the ten `strillix` providers and the `module` of theme and
 layout) and `home` (the `strillix` renderer and `rice.hyprland.conf`). This is
-the migration of a v0 song (`CONTRACTS.md` §5, "Enforcement"), and the step list
-for a new song is the same:
+the migration of a v0 rice (`CONTRACTS.md` §5, "Enforcement"), and the step list
+for a new rice is the same:
 
 1. Write `rice.nix` as the body in the shape `rices/sonata/rice.nix` has
    (or `pkgs/aoide/crates/strillix-rice` scaffolds with `aoide rice compose`).
@@ -21,10 +21,10 @@ for a new song is the same:
 4. Write `hyprland.conf` beside it: the binds, unbinds, layout and animations.
    An empty file (a header only) is valid. The gaps, rounding, borders, blur
    and colours are the theme's: `checks.rice-shape` refuses them in this file.
-5. Name the song's module arguments by what they are: `lib` (for `lib.mkDefault`),
-   `song` and `borrow`, and `pkgs` only when used. `{ lib, ... }:` is the usual
+5. Name the rice's module arguments by what they are: `lib` (for `lib.mkDefault`),
+   `rice` and `borrow`, and `pkgs` only when used. `{ lib, ... }:` is the usual
    shape for a module that sets only theme.
-6. Remove any self-gate: a body is read only when its song is performed, so
+6. Remove any self-gate: a body is read only when its rice is performed, so
    `config.aoide.rice == "<name>"` has no place in it.
 7. Run `checks.rice-shape` (`nix build .#checks.x86_64-linux.rice-shape`) and
    `tests/selection/run.sh`.
@@ -32,16 +32,16 @@ for a new song is the same:
 The `theme.json` beside the body is the same values as a hand- or agent-
 maintained JSON file, kept in sync with `system.module`, not derived from it.
 
-A song's `rice.nix` is handed two things by ARGUMENT and never by a path
-(`CONTRACTS.md` §5): `song` — the `lib/song.nix` API — and `borrow`, where
-`borrow "sonata"` is sonata's rolled-up `_widgets/` (the one cross-song idiom).
-A shelf's `_widgets/default.nix` is `{ lib, song, borrow, ... }:`, and takes
-only the arguments it uses. A `../` path literal in any `.nix` under a song
+A rice's `rice.nix` is handed two things by ARGUMENT and never by a path
+(`CONTRACTS.md` §5): `rice` — the `lib/rice.nix` API — and `borrow`, where
+`borrow "sonata"` is sonata's rolled-up `_widgets/` (the one cross-rice idiom).
+A shelf's `_widgets/default.nix` is `{ lib, rice, borrow, ... }:`, and takes
+only the arguments it uses. A `../` path literal in any `.nix` under a rice
 folder breaks every machine whose rices is not this checkout — which is what
 `pkgs/strillix-rices`, `aoideSeedRices` and the offline generator assume — and
 `checks.rice-shape` scans for it.
 
-## Per-song flavor widgets (`widgets/<slot>.qml`)
+## Per-rice flavor widgets (`widgets/<slot>.qml`)
 
 **Which slots are live is not listed here.**
 `pkgs/strillix-shell/qml/slots.md` is the catalog and the only place
@@ -54,7 +54,7 @@ come back here for the steps. To dress a slot:
 1. Create `rices/<name>/widgets/<slot>.qml`.
 2. Declare the fixed injected-prop contract: `required property var theme`
    and `required property var bridge` (even if `bridge` goes unused — every
-   song widget carries both, so the resolver's creation-time property
+   rice widget carries both, so the resolver's creation-time property
    assignment always has somewhere to put them). A slot may also receive
    extras; the catalog's table says which, per slot.
 3. Size via `implicitWidth`/`implicitHeight` — the host anchor
@@ -64,46 +64,46 @@ come back here for the steps. To dress a slot:
    for you.
 4. Colour **only** from `theme.*` roles (`paletteBg/Fg/Accent/Urgent/Hot`,
    the `base16`-derived accents) — never a hardcoded hex, so the widget stays
-   correct if the song's palette changes later.
+   correct if the rice's palette changes later.
 5. Nothing else is reachable: a widget sees `theme` + `bridge` (+ declared
    extras) only, never nix `config.*` (CONTRACTS.md §5 containment).
 
 **Every bar embeds `ricemode`.** The rice-mode control is one slot, and every
 `bar.qml` carries `WidgetSlot { slot: "ricemode" … }`, spelled exactly
 `slot: "ricemode"` (the check reads that literal). The slot resolves through
-the baseline chain below: a song with no `widgets/ricemode.qml` is dressed by
-sonata's, and a song may author its own to put the control in its own grammar,
+the baseline chain below: a rice with no `widgets/ricemode.qml` is dressed by
+sonata's, and a rice may author its own to put the control in its own grammar,
 provided it keeps the contract: any click opens the rice menu over
-`bridge.riceMenu(cb)` (the cell itself never switches), a song row calls
+`bridge.riceMenu(cb)` (the cell itself never switches), a rice row calls
 `bridge.riceMode("stage", name)`, the declarative row calls
 `bridge.riceMode("declarative")`, the draft rows call
 `bridge.riceDraft(action, name)`, and a bridge without `riceMenu` shows no
 menu. `checks.bar-ricemode` fails a bar body that omits the embed, and a
 rices whose sonata has no `ricemode`. It reads the committed rices, so a
-song that exists only in the runtime rices is checked when `rice declare`
+rice that exists only in the runtime rices is checked when `rice declare`
 brings it into the checkout.
 
 **Build carry-over:** on the next `nixos-rebuild`, the strillix lane's
-derivation copies the new file to `$out/qml/songs/<name>/<slot>.qml` and adds
-`<name>` → `[…, "<slot>"]` to the generated `songs/manifest.json` — every
-committed song's slot files are carried at once, not just the active one.
+derivation copies the new file to `$out/qml/rices/<name>/<slot>.qml` and adds
+`<name>` → `[…, "<slot>"]` to the generated `rices/manifest.json` — every
+committed rice's slot files are carried at once, not just the active one.
 
 **Live preview, no rebuild:** once a slot file exists anywhere in
-`$out/qml/songs/` (i.e. after at least one rebuild has carried it), switch
-which song is *active* live with:
+`$out/qml/rices/` (i.e. after at least one rebuild has carried it), switch
+which rice is *active* live with:
 
 ```
 aoide rice preview <name>
 ```
 
-This stages `<name>`'s `theme.json` (with `song` injected) into
+This stages `<name>`'s `theme.json` (with `rice` injected) into
 `/stage/theme.json`; `ThemeState.qml` hot-reloads it, and every
-`WidgetSlot` re-resolves against the new `songName` — a song's slot bodies
+`WidgetSlot` re-resolves against the new `riceName` — a rice's slot bodies
 swap with no restart, exactly like its colours do.
 
 What an unauthored slot falls back to is per-slot, and the catalog's
 `fallback` column is where that lives. The general chain is: the active
-song's own file, else sonata's (the shipped baseline), else — `WidgetSlot`
+rice's own file, else sonata's (the shipped baseline), else — `WidgetSlot`
 only — the anchor's lane-side `fallback` Component, else nothing rendered.
 
 ## Migration — the theme rename
@@ -117,8 +117,8 @@ was a namespace/file rename, not a content migration:
   out-of-tree host or stale rices `rice.nix` that still set the old name
   evaluating during the transition; the alias was dropped when Phase 4 closed
   the window.
-- **Rices data file:** the per-song theme file is now
-  `rices/<song>/theme.json`.
+- **Rices data file:** the per-rice theme file is now
+  `rices/<rice>/theme.json`.
 - **Live stage file:** `/stage/theme.json` is canonical. During the
   transition window writers mirrored to a legacy stage name and readers fell
   back to it when `theme.json` was absent, so a running desktop never read a
@@ -127,7 +127,7 @@ was a namespace/file rename, not a content migration:
 
 ## What this playbook does NOT cover
 
-The other four surfaces named in early per-song-widget sketches — `greeter`,
+The other four surfaces named in early per-rice-widget sketches — `greeter`,
 `lockscreen`, `osd`, `nowPlaying` — have **no host anchor built** and are not
 part of the live slot enum. See `rices/sonata/design/greek-grammar.md`
 §7 for that as-built/not-built boundary.

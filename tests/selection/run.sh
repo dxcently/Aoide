@@ -6,7 +6,7 @@
 # error is a failing test, not a passing one.
 #
 #   ./tests/selection/run.sh            # all cases
-#   ./tests/selection/run.sh songDiscovery
+#   ./tests/selection/run.sh riceDiscovery
 set -uo pipefail
 cd "$(dirname "$0")" || exit 1
 root=$(cd ../.. && pwd)
@@ -20,22 +20,22 @@ habit="(builtins.getFlake \"github:dxcently/habit/$habitRev\")"
 
 # case                              expect  substring the error must contain
 cases=$(cat <<'EOF'
-realRegistryResolvesAoideos         ok      "compositor,hyprland,stylix:hyprland"
+realRegistryResolvesStrillix         ok      "compositor,hyprland,stylix:hyprland"
 realRegistryDendritesImport         ok      true
-realRegistryInventory               ok      "agents,aoideos,desktop,nucleus"
-songDiscovery                       ok      "alpha landmine noshelf"
-songLandmineUnread                  ok      "1:true"
-songLandmineFires                   throws  rices landmine: an unselected rice's rice.nix was imported
-songUnknownName                     throws  'nope' is not in the rices; discovered: alpha, landmine, noshelf
-songAvailableUnknown                throws  'nope2' is not in the rices; discovered: alpha, landmine, noshelf
-songNoRice                          throws  rice noshelf has no rice.nix
-songStrayEnabled                    throws  rice aggregation lender is enabled, but habit.rice.declared = "borrower"
-songNameClash                       throws  share a name with an aggregation
-songDeclaredBuilds                  ok      1
-songEscapeClean                     ok      ""
-songEscapeFound                     ok      "escaper/rice.nix"
-songBorrowClosure                   ok      "borrower lender"
-songBorrowOwnersResolve             ok      "all-resolve"
+realRegistryInventory               ok      "agents,desktop,nucleus,strillix"
+riceDiscovery                       ok      "alpha landmine noshelf"
+riceLandmineUnread                  ok      "1:true"
+riceLandmineFires                   throws  rices landmine: an unselected rice's rice.nix was imported
+riceUnknownName                     throws  'nope' is not in the rices; discovered: alpha, landmine, noshelf
+riceAvailableUnknown                throws  'nope2' is not in the rices; discovered: alpha, landmine, noshelf
+riceNoRice                          throws  rice noshelf has no rice.nix
+riceStrayEnabled                    throws  rice aggregation lender is enabled, but habit.rice.declared = "borrower"
+riceNameClash                       throws  share a name with an aggregation
+riceDeclaredBuilds                  ok      1
+riceEscapeClean                     ok      ""
+riceEscapeFound                     ok      "escaper/rice.nix"
+riceBorrowClosure                   ok      "borrower lender"
+riceBorrowOwnersResolve             ok      "all-resolve"
 barRicemodeOmitted                  throws  bar-ricemode FAILED: bar bodies without `slot: "ricemode"`: mute/widgets/bar.qml
 barRicemodeEmbedded                 ok      "built aoide-check-bar-ricemode"
 barRicemodeNoFloor                  throws  bar-ricemode FAILED: sonata has no `ricemode` slot

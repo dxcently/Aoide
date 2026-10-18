@@ -13,9 +13,9 @@
 # dunst owns org.freedesktop.Notifications — the bus name, the spec, history,
 # stacking, pause levels, and the rule engine. It does NOT draw. Every rule
 # below sets `skip_display`, and a `script` hands the notification to
-# `aoide notifications push`, which packs it over the shellbridge socket into
+# `strx notifications push`, which packs it over the shellbridge socket into
 # state/stage/notifications.json (CONDUCTING, CONTRACTS.md §4), where the Quickshell
-# notifications reads it and draws the real widget (song slot `notifications` for the
+# notifications reads it and draws the real widget (rice slot `notifications` for the
 # popup, `notifications-center` for the dock ledger).
 #
 # Why: the previous dunstrc carried the entire card as Pango markup in `format`
@@ -134,7 +134,7 @@
         # script still runs for a notification dunst would otherwise consider
         # suppressed.
         #
-        # The script is `aoide notifications push`, which reads the DUNST_* environment
+        # The script is `strx notifications push`, which reads the DUNST_* environment
         # and writes the record over $AOIDE_BRIDGE_SOCKET. It is a real command and
         # not a shell wrapper on purpose: notification bodies are arbitrary
         # sender text, and hand-rolled shell JSON escaping is a bug farm.

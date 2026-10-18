@@ -45,7 +45,7 @@ pub struct UndyingRegistry {
 /// The undying file path: `state/undying.json` — the same gitignored
 /// root-runtime `state/` dir `nodes.json`/`usage.json` live in
 /// (CONTRACTS.md), NOT inside either stage tree (`state/stage/` or
-/// `song/stage/`): an undying mark is durable operator state, never staged
+/// `rice/stage/`): an undying mark is durable operator state, never staged
 /// rehearsal/registry state.
 pub fn undying_path() -> std::path::PathBuf {
     state_dir().join("undying.json")

@@ -4,11 +4,11 @@ created: 2026-09-13
 tags: [aoide, desktop, strillix, quickshell, preview, widgets, design]
 ---
 
-# Widget-Preview — the canvas a song widget is designed on
+# Widget-Preview — the canvas a rice widget is designed on
 
-`strx preview` opens one song widget on a human-driven canvas: any size, any
+`strx preview` opens one rice widget on a human-driven canvas: any size, any
 anchor, any viewport, any fixture, against an isolated root that can never
-reach the live desktop. It is the design surface for the per-song widgets
+reach the live desktop. It is the design surface for the per-rice widgets
 ([[Widget-Bridge-Contract]] says what a widget reads; `qml/slots.md` says
 what each slot is handed) and the successor to the seven single-purpose
 `*Preview.qml` screenshot rigs, which stay for their fixed-size snapshots.
@@ -20,8 +20,8 @@ strx preview conductor                       # sonata's conductor.qml, fixture `
 strx preview terminals --fixture long-text   # another slot, another fixture set
 strx preview /home/khoa/Aoide/rices/sonata/widgets/conductor.qml
 strx preview set --width 280 --anchor br --viewport portrait --zoom 1
-strx preview set --theme cadenza           # any song, `live`, a theme file, or a base16 scheme
-strx preview declare                         # the previewed body + palette become the checkout song's
+strx preview set --theme cadenza           # any rice, `live`, a theme file, or a base16 scheme
+strx preview declare                         # the previewed body + palette become the checkout rice's
 strx preview shot --what widget --out /tmp/w.png  # the widget alone at 1:1 (also: screen, canvas, element)
 strx preview tree --at 120,40               # the live element under a point, with its file:line
 strx preview notes --json                    # what the designer highlighted, each resolved to element + file:line
@@ -35,9 +35,9 @@ drive it with `set`, `shot`, `tree` and `notes` from any other shell. On
 Hyprland the window is floated and centered on the focused monitor once it
 maps; on any other compositor it opens wherever the compositor puts it.
 
-The positional is a slot name (`conductor`, resolved against `--song`,
-default `sonata`), a `song/slot` pair, or a path. A working-tree path under
-`rices/<song>/widgets/` is rewritten to `songs/<song>/<file>` so
+The positional is a slot name (`conductor`, resolved against `--rice`,
+default `sonata`), a `rice/slot` pair, or a path. A working-tree path under
+`rices/<rice>/widgets/` is rewritten to `rices/<rice>/<file>` so
 the widget's `import "../.."` resolves inside the canvas root exactly as it
 does in the deployed tree; any other path loads verbatim and its error is
 shown on the canvas. The command blocks while the canvas is open and prints
@@ -47,12 +47,12 @@ its envelope when the window closes.
 
 ```
 $XDG_RUNTIME_DIR/aoide-preview/            the ISOLATED root (never under aoide/, the daemon's socket dir)
-├─ $STRILLIX_ROOT/stage/theme.json                  the song's committed theme + {"song": …}, or --theme's file
-├─ state/stage/{sessions,projects,hooks,herald}.json    one fixture set, copied in
+├─ $STRILLIX_ROOT/stage/theme.json                  the rice's committed theme + {"rice": …}, or --theme's file
+├─ state/stage/{sessions,projects,hooks,notifications}.json    one fixture set, copied in
 ├─ run/qml/*.qml                           COPIES of checkout pkgs/strillix-shell/qml/*.qml
-├─ run/qml/songs/<song>/                   COPIES of checkout rices/<song>/widgets/ (every song)
+├─ run/qml/rices/<rice>/                   COPIES of checkout rices/<rice>/widgets/ (every rice)
 ├─ run/qml/icons/                          COPIES of checkout pkgs/strillix-shell/icons/ (the toolbar's Iconoir glyphs)
-├─ run/qml/songs/{manifest,registry}.json  copies of the deployed owner map
+├─ run/qml/rices/{manifest,registry}.json  copies of the deployed owner map
 ├─ preview.json                            the control file — the rail and `strx preview set` write the same document
 └─ preview.pid                             one canvas per root; `--root` for a second
 ```
@@ -115,7 +115,7 @@ live bar or dock.
 
 | control | values | rule |
 |---|---|---|
-| widget | path field · file picker, opened at the current widget's folder | working-tree path rewritten to `songs/<song>/<file>`; errors shown in the pane |
+| widget | path field · file picker, opened at the current widget's folder | working-tree path rewritten to `rices/<rice>/<file>`; errors shown in the pane |
 | widget width / height | number · `auto`, per axis | a number forces `item.width`/`height`; `auto` follows the item's implicit size |
 | widget aspect lock | lock/unlock glyph | editing one axis recomputes the other from the current box ratio; ignored while an axis is `auto` |
 | anchor · margin | 3×3 arrows (`tl t tr l c r bl b br`) · px | places the widget box inside the viewport; never resizes it |
@@ -124,9 +124,9 @@ live bar or dock.
 | zoom | `fit` · number | `fit` = min(pane/viewport) capped at 1.0, never upscaling; a number scales exactly. Zoom scales the rendered viewport only — the widget lays out at logical size |
 | background | `theme` · `checker` | palette ground, or an 8 px checkerboard to see transparent edges |
 | fixture | a set name · a directory | copied into `state/stage/` by `strx preview set --fixture`; widgets hot-reload through their own file watches |
-| palette (theme) | `live` · a song name · a theme file · a base16 scheme (`.json` or flat `.yaml`) | resolved through the theme engine (the document `strx theme emit` writes for its `stage` target, fallbacks applied) into `/stage/theme.json` with `song` injected; a bare base16 scheme gets its palette from CONTRACTS §1's column (bg=base00, fg=base05, accent=base0D, urgent=base08, hot=base0B), the reverse of the Stylix lane's synthesis. `live` is the resolved stage twin, host overrides included. Every widget recolours in place; a swatch strip shows the five roles and all sixteen base16 slots |
-| auto-reload · reload · recreate | on/off · — · — | auto-reload watches every `*.qml` in the song's `widgets/` dir (the `watch` list) and rebuilds the canvas within a second of a save; reload does the same by hand (state returns from `preview.json`); recreate rebuilds only the widget item — an edited body needs a reload, since components are cached per URL |
-| declare | arm, then confirm | `strx preview declare`: the previewed body becomes `rices/<song>/widgets/<slot>.qml` when it came from elsewhere, and the previewed palette becomes the song's `theme.json` tiers when it is not the song's own — byte-identical is a no-op, git and the rebuild stay yours ([[Self-Ricing]]'s `rice declare` vocabulary) |
+| palette (theme) | `live` · a rice name · a theme file · a base16 scheme (`.json` or flat `.yaml`) | resolved through the theme engine (the document `strx theme emit` writes for its `stage` target, fallbacks applied) into `/stage/theme.json` with `rice` injected; a bare base16 scheme gets its palette from CONTRACTS §1's column (bg=base00, fg=base05, accent=base0D, urgent=base08, hot=base0B), the reverse of the Stylix lane's synthesis. `live` is the resolved stage twin, host overrides included. Every widget recolours in place; a swatch strip shows the five roles and all sixteen base16 slots |
+| auto-reload · reload · recreate | on/off · — · — | auto-reload watches every `*.qml` in the rice's `widgets/` dir (the `watch` list) and rebuilds the canvas within a second of a save; reload does the same by hand (state returns from `preview.json`); recreate rebuilds only the widget item — an edited body needs a reload, since components are cached per URL |
+| declare | arm, then confirm | `strx preview declare`: the previewed body becomes `rices/<rice>/widgets/<slot>.qml` when it came from elsewhere, and the previewed palette becomes the rice's `theme.json` tiers when it is not the rice's own — byte-identical is a no-op, git and the rebuild stay yours ([[Self-Ricing]]'s `rice declare` vocabulary) |
 | annotate | off · pick · rect · ellipse · arrow · line · note | pick outlines the element under the pointer and a click attaches the rail's note to it; the shapes sketch where something should go; every entry is saved to the root's `notes.json` in widget-local coordinates and read back by `strx preview notes` with its element path and source `file:line` |
 
 Every control writes `preview.json`; `strx preview set` writes the same

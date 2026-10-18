@@ -1227,7 +1227,7 @@
   is why: `zenity` is a shell-out declared by NAME (`watch::ZENITY_CMD`),
   the SAME feature-detection shape `enroll::render_qr` already uses for
   `qrencode` — it is reachable from ANY shell with `zenity` on `PATH`, not
-  only a Quickshell/AoideOS session, so it belongs beside the tty prompt it
+  only a Quickshell/Strillix session, so it belongs beside the tty prompt it
   is an alternative to, not in `strillix`. A future RICE-SHAPED popup (matching
   the desktop's own look, replacing zenity's default GTK chrome) would be
   the `strillix`-side consumer of `secrets watch --json` this note originally

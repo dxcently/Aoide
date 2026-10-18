@@ -133,7 +133,7 @@ Item {
 
     // ── Stage files (QS_STAGE override — the preview-harness seam) ──────────
     // CONDUCTING files (sessions/projects/hooks/notifications) live under
-    // state/stage/, not song/stage/ (CONTRACTS.md §4, command-defrag S2) —
+    // state/stage/, not rice/stage/ (CONTRACTS.md §4, command-defrag S2) —
     // this temple never reads a rice file.
     readonly property string stageDir: {
         var s = Quickshell.env("QS_STAGE")

@@ -1,6 +1,6 @@
-//! `strillix rice declare <song> --host` — make `<song>` the one this host
+//! `strillix rice declare <rice> --host` — make `<rice>` the one this host
 //! performs on its next rebuild, by rewriting the host config's
-//! `habit.song.declared = "<name>";` line (CONTRACTS.md §3, the rice commands).
+//! `habit.rice.declared = "<name>";` line (CONTRACTS.md §3, the rice commands).
 //!
 //! The host file is [`aoide_storage::fs::host_config`] (`aoide.hostConfig`).
 //! The line must occur EXACTLY once, in the shape nixfmt writes it: leading
@@ -12,13 +12,13 @@
 //! It cannot see an override set elsewhere (an `mkForce` in another module),
 //! so what the next rebuild performs is the rebuild's answer, not this one's.
 //!
-//! A song can be declared only when the rices the host builds from carries
-//! it as a performer: the build's built-in set, `builtin.json`'s `songs` in
+//! A rice can be declared only when the rices the host builds from carries
+//! it as a performer: the build's built-in set, `builtin.json`'s `rices` in
 //! the shipped templates (`declared ∪ available`, closed under borrows), with
-//! the song's own `rice.nix` shipped beside it (`lib/rices.nix` refuses to
-//! declare a song without one, so a lending-only song is refused here first).
-//! A song that is only in the machine's runtime rices is refused, and so is
-//! a staged draft: a draft is not a song.
+//! the rice's own `rice.nix` shipped beside it (`lib/rices.nix` refuses to
+//! declare a rice without one, so a lending-only rice is refused here first).
+//! A rice that is only in the machine's runtime rices is refused, and so is
+//! a staged draft: a draft is not a rice.
 //!
 //! Only the bytes between the quotes change, written to a temp file in the
 //! file's own directory, created with the file's mode, and renamed over it,
@@ -27,7 +27,7 @@
 //! overwritten. That narrows the window for losing someone else's edit to the
 //! microseconds between the re-stat and the rename; it does not close it. No
 //! git, no rebuild (house rule 2): the answer says it takes effect on the next
-//! rebuild, and `stagedDiffers` says when the machine copy of the song carries
+//! rebuild, and `stagedDiffers` says when the machine copy of the rice carries
 //! theme or widget edits the build's copy lacks, since the rebuild builds the
 //! rices version.
 
@@ -42,14 +42,14 @@ use std::ops::Range;
 use std::path::{Path, PathBuf};
 
 const CMD: &str = "rice.declare";
-const KEY: &str = "habit.song.declared";
+const KEY: &str = "habit.rice.declared";
 
 /// Run the declare against this machine's host file and shipped templates. A
-/// declared song whose checkout folder holds uncommitted changes is still
+/// declared rice whose checkout folder holds uncommitted changes is still
 /// declared (this path never refuses for git), with a warning field: the
 /// rebuild builds the committed rices, so those edits are not in it.
 pub fn declare_on_host(name: &str) -> Outcome {
-    let out = declare(name, shellbridge::host_config(), shellbridge::song_templates_dir());
+    let out = declare(name, shellbridge::host_config(), shellbridge::rice_templates_dir());
     if out.status != Status::Ok {
         return out;
     }
@@ -83,26 +83,26 @@ fn declare_racing(
     templates: Option<PathBuf>,
     before_rename: &dyn Fn(),
 ) -> Outcome {
-    if !crate::compose::valid_song_name(name) {
+    if !crate::compose::valid_rice_name(name) {
         return refuse(
             Kind::Usage,
             "invalid-name",
-            format!("`{name}` is not a song name"),
-            "a song name is lowercase letters, digits and hyphens, with no leading hyphen".into(),
+            format!("`{name}` is not a rice name"),
+            "a rice name is lowercase letters, digits and hyphens, with no leading hyphen".into(),
             Fix::Run("strillix rice list".into()),
         );
     }
 
     let marker = load_mode_marker();
     if marker.mode == RiceMode::Draft
-        && (marker.song.as_deref() == Some(name) || marker.draft.as_deref() == Some(name))
+        && (marker.rice.as_deref() == Some(name) || marker.draft.as_deref() == Some(name))
     {
         let draft = marker.draft.unwrap_or_default();
         return refuse(
             Kind::Refused,
             "staged-draft",
-            format!("the stage holds draft `{draft}`, not the song `{name}`"),
-            "only a song can be declared, and a draft lives in the machine's rices alone".into(),
+            format!("the stage holds draft `{draft}`, not the rice `{name}`"),
+            "only a rice can be declared, and a draft lives in the machine's rices alone".into(),
             Fix::Run("strillix rice mode stage".into()),
         );
     }
@@ -144,7 +144,7 @@ fn declare_racing(
                 lines.len()
             ),
             "the declare rewrites exactly one line and never guesses which one a host means".into(),
-            Fix::Set(format!("exactly one `{KEY} = \"<song>\";` line in `{}`", file.display())),
+            Fix::Set(format!("exactly one `{KEY} = \"<rice>\";` line in `{}`", file.display())),
         )
         .with_fields(json!({ "hostConfig": file.to_string_lossy(), "count": lines.len() }));
     }
@@ -175,19 +175,19 @@ fn declare_racing(
     if previous == name {
         return Outcome::ok(
             CMD,
-            format!("`{name}` is already {host}'s declared song in {}.{caveat}", file.display()),
+            format!("`{name}` is already {host}'s declared rice in {}.{caveat}", file.display()),
         )
         .gated(true)
         .with_data(data(false));
     }
 
     let built_in = match templates.as_deref().map(read_builtin) {
-        Some(Ok(b)) => b.songs,
+        Some(Ok(b)) => b.rices,
         Some(Err(e)) => {
             return refuse(
                 Kind::Failed,
                 "builtin-unreadable",
-                "cannot read the songs this host builds".into(),
+                "cannot read the rices this host builds".into(),
                 e.error,
                 Fix::None("the shipped templates are broken; a rebuild replaces them"),
             )
@@ -196,17 +196,17 @@ fn declare_racing(
     };
     if !built_in.iter().any(|s| s == name) {
         let carried = match templates {
-            None => "the build's song list is unknown (no shipped templates)".to_string(),
-            Some(_) if built_in.is_empty() => "this build carries no song".to_string(),
+            None => "the build's rice list is unknown (no shipped templates)".to_string(),
+            Some(_) if built_in.is_empty() => "this build carries no rice".to_string(),
             Some(_) => format!("this build carries {}", built_in.join(", ")),
         };
         return refuse(
             Kind::Refused,
             "not-built-in",
             format!("`{name}` is not in the rices {host} builds from"),
-            format!("{carried}; a song staged only from the machine's rices does not exist for the rebuild"),
+            format!("{carried}; a rice staged only from the machine's rices does not exist for the rebuild"),
             Fix::Set(format!(
-                "`habit.song.available` to include \"{name}\" in `{}`, rebuild, then declare",
+                "`habit.rice.available` to include \"{name}\" in `{}`, rebuild, then declare",
                 file.display()
             )),
         )
@@ -218,7 +218,7 @@ fn declare_racing(
             Kind::Refused,
             "no-rice-nix",
             format!("`{name}` ships no rice.nix in this build"),
-            "the build carries it only as a lender of widgets; a declared song needs its own rice.nix to perform".into(),
+            "the build carries it only as a lender of widgets; a declared rice needs its own rice.nix to perform".into(),
             Fix::Set(format!("a `rices/{name}/rice.nix`, rebuild, then declare")),
         )
         .with_fields(json!({ "builtIn": built_in }));
@@ -253,7 +253,7 @@ fn declare_racing(
     Outcome::ok(
         CMD,
         format!(
-            "declared `{name}` as {host}'s song in {} (was `{previous}`); takes effect on the next rebuild.{caveat}",
+            "declared `{name}` as {host}'s rice in {} (was `{previous}`); takes effect on the next rebuild.{caveat}",
             file.display()
         ),
     )
@@ -263,7 +263,7 @@ fn declare_racing(
 }
 
 /// The byte range of the quoted value on every live line that is exactly one
-/// `habit.song.declared = "<value>";` statement, whitespace aside. A line is
+/// `habit.rice.declared = "<value>";` statement, whitespace aside. A line is
 /// live when it starts outside a comment or string ([`Lexer`]).
 fn declared_values(text: &str) -> Vec<Range<usize>> {
     let mut out = Vec::new();
@@ -416,28 +416,28 @@ mod tests {
     }
 
     /// A scratch runtime root, a host file holding `host_text`, and shipped
-    /// templates whose `builtin.json` builds `built_in`, each song shipped with
+    /// templates whose `builtin.json` builds `built_in`, each rice shipped with
     /// a `theme.json` and one widget.
     fn rig(tag: &str, host_text: &str, built_in: &[&str]) -> Rig {
         let env = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         let root = unique_tmp(tag);
-        std::env::set_var("AOIDE_STAGE_DIR", root.join("song").join("stage"));
-        std::fs::create_dir_all(root.join("song").join("stage")).unwrap();
+        std::env::set_var("AOIDE_STAGE_DIR", root.join("rice").join("stage"));
+        std::fs::create_dir_all(root.join("rice").join("stage")).unwrap();
         let host = root.join("hosts").join("box").join("default.nix");
         std::fs::create_dir_all(host.parent().unwrap()).unwrap();
         std::fs::write(&host, host_text).unwrap();
         let templates = root.join("templates");
-        for song in built_in {
-            let dir = templates.join(song).join("widgets");
+        for rice in built_in {
+            let dir = templates.join(rice).join("widgets");
             std::fs::create_dir_all(&dir).unwrap();
-            std::fs::write(templates.join(song).join("theme.json"), format!("{{\"song\":\"{song}\"}}")).unwrap();
+            std::fs::write(templates.join(rice).join("theme.json"), format!("{{\"rice\":\"{rice}\"}}")).unwrap();
             std::fs::write(dir.join("bar.qml"), "Item {}\n").unwrap();
-            std::fs::write(templates.join(song).join("rice.nix"), "{ ... }: { }\n").unwrap();
+            std::fs::write(templates.join(rice).join("rice.nix"), "{ ... }: { }\n").unwrap();
         }
         std::fs::create_dir_all(&templates).unwrap();
         std::fs::write(
             templates.join("builtin.json"),
-            json!({ "declared": "sonata", "songs": built_in, "packages": [] }).to_string(),
+            json!({ "declared": "sonata", "rices": built_in, "packages": [] }).to_string(),
         )
         .unwrap();
         Rig { root, host, templates, _env: env }
@@ -461,7 +461,7 @@ mod tests {
         }
     }
 
-    const HOST: &str = "{ ... }:\n{\n  habit.song.declared = \"sonata\";\n  habit.song.available = [ ];\n}\n";
+    const HOST: &str = "{ ... }:\n{\n  habit.rice.declared = \"sonata\";\n  habit.rice.available = [ ];\n}\n";
 
     #[test]
     fn one_line_is_rewritten_between_the_quotes_only() {
@@ -481,7 +481,7 @@ mod tests {
     #[test]
     fn no_line_is_refused_naming_the_file_and_the_count() {
         let _g = env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let text = "{\n  # habit.song.declared = \"sonata\";\n  habit.song = { declared = \"sonata\"; };\n}\n";
+        let text = "{\n  # habit.rice.declared = \"sonata\";\n  habit.rice = { declared = \"sonata\"; };\n}\n";
         let r = rig("hd-zero", text, &["sonata", "barcarolle"]);
         let out = r.run("barcarolle");
         assert_eq!(out.status, Status::Error);
@@ -494,7 +494,7 @@ mod tests {
     #[test]
     fn two_lines_are_refused_never_guessed() {
         let _g = env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let text = "{\n  habit.song.declared = \"sonata\";\n  habit.song.declared = \"solo\";\n}\n";
+        let text = "{\n  habit.rice.declared = \"sonata\";\n  habit.rice.declared = \"solo\";\n}\n";
         let r = rig("hd-two", text, &["sonata", "barcarolle"]);
         let out = r.run("barcarolle");
         assert_eq!(Rig::reason(&out), "host-line-count");
@@ -505,33 +505,33 @@ mod tests {
     #[test]
     fn nixfmt_spacing_variants_match_and_anything_else_does_not() {
         for line in [
-            "habit.song.declared = \"sonata\";",
-            "    habit.song.declared = \"sonata\";",
-            "\thabit.song.declared=\"sonata\";",
-            "habit.song.declared  =  \"sonata\" ;  ",
-            "habit.song.declared = \"sonata\";\r",
+            "habit.rice.declared = \"sonata\";",
+            "    habit.rice.declared = \"sonata\";",
+            "\thabit.rice.declared=\"sonata\";",
+            "habit.rice.declared  =  \"sonata\" ;  ",
+            "habit.rice.declared = \"sonata\";\r",
         ] {
             let r = value_in(line).unwrap_or_else(|| panic!("should match: {line:?}"));
             assert_eq!(&line[r], "sonata", "{line:?}");
         }
         for line in [
-            "# habit.song.declared = \"sonata\";",
-            "habit.song.declared = \"sonata\"; # performs",
-            "habit.song.declared = \"son${x}ata\";",
-            "habit.song.declared = lib.mkDefault \"sonata\";",
-            "habit.song.declaredX = \"sonata\";",
-            "habit.song.declared = \"sonata\"",
-            "habit.song.available = [ \"sonata\" ];",
+            "# habit.rice.declared = \"sonata\";",
+            "habit.rice.declared = \"sonata\"; # performs",
+            "habit.rice.declared = \"son${x}ata\";",
+            "habit.rice.declared = lib.mkDefault \"sonata\";",
+            "habit.rice.declaredX = \"sonata\";",
+            "habit.rice.declared = \"sonata\"",
+            "habit.rice.available = [ \"sonata\" ];",
         ] {
             assert!(value_in(line).is_none(), "should not match: {line:?}");
         }
     }
 
     #[test]
-    fn an_unknown_song_is_refused_with_the_built_in_set() {
+    fn an_unknown_rice_is_refused_with_the_built_in_set() {
         let _g = env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let r = rig("hd-unknown", HOST, &["sonata"]);
-        std::fs::create_dir_all(r.root.join("song").join("rices").join("fugue")).unwrap();
+        std::fs::create_dir_all(r.root.join("rice").join("rices").join("fugue")).unwrap();
         let out = r.run("fugue");
         assert_eq!(out.status, Status::Error);
         assert_eq!(Rig::reason(&out), "not-built-in");
@@ -666,32 +666,32 @@ mod tests {
     #[test]
     fn a_line_inside_a_block_comment_counts_as_none() {
         let _g = env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let text = "{\n  /* old:\n  habit.song.declared = \"sonata\";\n  */\n}\n";
+        let text = "{\n  /* old:\n  habit.rice.declared = \"sonata\";\n  */\n}\n";
         let r = rig("hd-block", text, &["sonata", "barcarolle"]);
         let out = r.run("barcarolle");
         assert_eq!(Rig::reason(&out), "host-line-count");
         assert_eq!(out.data.as_ref().unwrap()["count"], 0);
         assert_eq!(r.host_text(), text);
 
-        let live = "{\n  /* a note */\n  habit.song.declared = \"sonata\";\n}\n";
+        let live = "{\n  /* a note */\n  habit.rice.declared = \"sonata\";\n}\n";
         assert_eq!(declared_values(live).len(), 1, "a closed comment leaves the next line live");
     }
 
     #[test]
     fn a_line_inside_an_indented_string_counts_as_none() {
         let _g = env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let text = "{\n  environment.etc.x.text = ''\n  habit.song.declared = \"sonata\";\n  it's ''' and ''${x}\n  '';\n}\n";
+        let text = "{\n  environment.etc.x.text = ''\n  habit.rice.declared = \"sonata\";\n  it's ''' and ''${x}\n  '';\n}\n";
         let r = rig("hd-indented", text, &["sonata", "barcarolle"]);
         let out = r.run("barcarolle");
         assert_eq!(Rig::reason(&out), "host-line-count");
         assert_eq!(out.data.as_ref().unwrap()["count"], 0);
         assert_eq!(r.host_text(), text);
 
-        let after = format!("{text}  habit.song.declared = \"sonata\";\n");
+        let after = format!("{text}  habit.rice.declared = \"sonata\";\n");
         assert_eq!(declared_values(&after).len(), 1, "the string's close leaves the next line live");
-        let quoted = "{\n  x = \"a\n  habit.song.declared = \\\"sonata\\\";\n  b\";\n}\n";
+        let quoted = "{\n  x = \"a\n  habit.rice.declared = \\\"sonata\\\";\n  b\";\n}\n";
         assert_eq!(declared_values(quoted).len(), 0, "a multi-line \"…\" string is not code either");
-        assert_eq!(declared_values("# x /* not a comment opener\nhabit.song.declared = \"s\";\n").len(), 1);
+        assert_eq!(declared_values("# x /* not a comment opener\nhabit.rice.declared = \"s\";\n").len(), 1);
     }
 
     #[test]
@@ -711,7 +711,7 @@ mod tests {
     }
 
     #[test]
-    fn a_song_without_its_own_rice_nix_is_refused() {
+    fn a_rice_without_its_own_rice_nix_is_refused() {
         let _g = env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let r = rig("hd-lender", HOST, &["sonata", "lender"]);
         std::fs::remove_file(r.templates.join("lender").join("rice.nix")).unwrap();
@@ -722,13 +722,13 @@ mod tests {
     }
 
     #[test]
-    fn no_templates_says_the_song_list_is_unknown() {
+    fn no_templates_says_the_rice_list_is_unknown() {
         let _g = env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let r = rig("hd-notemplates", HOST, &["sonata"]);
         let out = declare("barcarolle", Some(r.host.clone()), None);
         assert_eq!(Rig::reason(&out), "not-built-in");
         let why = out.data.as_ref().unwrap().pointer("/refusal/why").and_then(Value::as_str).unwrap_or("").to_string();
-        assert!(why.contains("the build's song list is unknown"), "{why}");
+        assert!(why.contains("the build's rice list is unknown"), "{why}");
         assert!(!why.contains("carries none"), "{why}");
     }
 }

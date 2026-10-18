@@ -19,7 +19,7 @@ Handlers live in `pkgs/aoide/crates/strillix/src/commands/apps.rs`. They read
 through `pkgs/aoide/crates/strillix/src/xdg/`, the workspace's one freedesktop
 key-file reader: `entry.rs` (`.desktop` files and the listing filter),
 `icon_theme.rs` (themes and icon lookup), `keyfile.rs` (the shared grammar).
-`strx launch` (planned, phase L5b) will read the same module; no second
+The planned launch command (phase L5b, not yet in `strx schema --json`) will read the same module; no second
 parser exists. The document
 shape, the listing filter and the icon rules are CONTRACTS.md §4,
 "`/stage/apps.json`".
@@ -44,7 +44,7 @@ and scale 1.
 Every text field an entry carries (`name`, `genericName`, `comment`,
 `keywords`, `startupWMClass`, action names) is untrusted data from a file
 anyone can install. `Exec`, `Path` and `TryExec` are never emitted: launching
-is by id, through the planned `strx launch` (phase L5b).
+is by id, through the planned launch command (phase L5b).
 
 ## strx apps list
 

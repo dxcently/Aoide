@@ -11,17 +11,17 @@ function waiting(answer) {
     return { label: !answer ? "…" : "" + (answer.message || "no answer"), mark: "", live: false, kind: "", name: "", here: false }
 }
 
-// every song in the runtime songbook, then the declared build (kind "declarative", the last row)
+// every rice in the runtime rices, then the declared build (kind "declarative", the last row)
 function switchRows(answer, mode) {
     if (!ready(answer)) return [waiting(answer)]
     var rows = []
-    var songs = Array.isArray(answer.songs) ? answer.songs : []
-    for (var i = 0; i < songs.length; i++) {
-        var name = "" + songs[i].name
-        var here = mode === "staging" && name === answer.song
-        var back = mode === "declarative" && name === answer.stagingSong
-        rows.push({ label: songs[i].ok ? name : name + " · unreadable", mark: here ? "✓" : (back ? "○" : ""),
-                    live: !!songs[i].ok, kind: "stage", name: name, here: here })
+    var rices = Array.isArray(answer.rices) ? answer.rices : []
+    for (var i = 0; i < rices.length; i++) {
+        var name = "" + rices[i].name
+        var here = mode === "staging" && name === answer.rice
+        var back = mode === "declarative" && name === answer.stagingRice
+        rows.push({ label: rices[i].ok ? name : name + " · unreadable", mark: here ? "✓" : (back ? "○" : ""),
+                    live: !!rices[i].ok, kind: "stage", name: name, here: here })
     }
     var decl = mode === "declarative"
     rows.push({ label: "Declarative" + (answer.declared ? ": " + answer.declared : ""), mark: decl ? "✓" : "",
@@ -29,7 +29,7 @@ function switchRows(answer, mode) {
     return rows
 }
 
-// the staged song's saved drafts (answer.draftsSong names it)
+// the staged rice's saved drafts (answer.draftsRice names it)
 function draftRows(answer) {
     if (!ready(answer)) return [waiting(answer)]
     var drafts = Array.isArray(answer.drafts) ? answer.drafts : []
@@ -47,12 +47,12 @@ function dropDraft(draft) {
 
 function saveDraft(mode) { return { label: "Save as Draft", mark: "", live: mode === "staging", kind: "save", name: "", here: false } }
 
-// the staged song becomes the one this host performs on its next rebuild; never a draft, never the song already declared.
+// the staged rice becomes the one this host performs on its next rebuild; never a draft, never the rice already declared.
 // `can` is whether the bridge speaks riceDeclare. The surface asks first (declareQuestion), then calls declare().
 function declareRow(answer, mode, can) {
-    var song = ready(answer) && answer.song ? "" + answer.song : ""
-    var live = !!can && mode === "staging" && song !== "" && song !== answer.declared
-    return { label: song !== "" ? "Declare " + song + "\u2026" : "Declare\u2026", mark: "", live: live, kind: "declare", name: song, here: false }
+    var rice = ready(answer) && answer.rice ? "" + answer.rice : ""
+    var live = !!can && mode === "staging" && rice !== "" && rice !== answer.declared
+    return { label: rice !== "" ? "Declare " + rice + "\u2026" : "Declare\u2026", mark: "", live: live, kind: "declare", name: rice, here: false }
 }
 
 function declareQuestion(answer, row) {
@@ -79,11 +79,11 @@ function declared(reply, host, file) {
         ? reply.name + " is already " + (reply.host || "this computer") + "\u2019s rice. It takes effect on the next rebuild."
         : reply.name + " is declared. It takes effect on the next rebuild."
     if (reply.stagedDiffers === true)
-        text += " The staged copy has edits the songbook copy lacks; the rebuild builds the songbook copy."
+        text += " The staged copy has edits the rices copy lacks; the rebuild builds the rices copy."
     return { ok: true, title: "Declared", text: text }
 }
 
-// runs a row; true when the surface should show "…" until the theme's mode/song/draft changes (or 10 s pass);
+// runs a row; true when the surface should show "…" until the theme's mode/rice/draft changes (or 10 s pass);
 // save and drop change none of those, so they never wait; declare asks first, so act never runs it
 function act(bridge, row) {
     if (!row.live || row.here || row.kind === "" || row.kind === "declare") return false

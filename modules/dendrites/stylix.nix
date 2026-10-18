@@ -16,7 +16,7 @@
 #   * It reads the `aoide.surfaces` ownership registry and stands down (disables
 #     its own derivation) for any surface the shell lane already owns (overlap
 #     resolution). Tolerates the registry being empty.
-#   * Never reads a `song/` runtime path at build time — a `song/` tree has no
+#   * Never reads a `rice/` runtime path at build time — a `rice/` tree has no
 #     runtime dirs at all (`checks.rice-runtime-untracked`).
 #   * It carries its OWN dependency: the Stylix NixOS module, imported by the
 #     nucleus module when the `stylix` input is present (below).
@@ -25,7 +25,7 @@
 # `aoide.stylix.enable` (declared in modules/nucleus/options.nix) to true.
 #
 # The Stylix NixOS module is this dendrite's own dependency, and it is imported
-# by the nucleus module (`lib/aoideos.nix`'s `nucleusModule`), not here — the one
+# by the nucleus module (`lib/strillix.nix`'s `nucleusModule`), not here — the one
 # place that closes over Aoide's own inputs lexically. An `imports` list is
 # resolved while the module list is still being built, and a name provided
 # through `_module.args` is read from `config`, which is computed FROM that
@@ -93,9 +93,9 @@ let
   };
 
   # ── base16 scheme ─────────────────────────────────────────────────────────
-  # Preferred source: the song's full base16 note tier (`aoide.theme.base16`,
+  # Preferred source: the rice's full base16 note tier (`aoide.theme.base16`,
   # all 16 slots, base16-standard semantics) — the real scheme, baked verbatim.
-  # Fallback: synthesise from the 4-anchor palette (v0 behaviour) so songs
+  # Fallback: synthesise from the 4-anchor palette (v0 behaviour) so rices
   # that carry no scheme still theme coherently.
   scheme = if t.base16 != null then lib.mapAttrs (_: stripHash) t.base16 else synthesisedScheme;
 
@@ -121,8 +121,8 @@ let
     base0F = stripHash p.urgent; # brown
   };
 
-  # ── the song's face (CONTRACTS.md §1, font tier) ────────────────────────
-  # Additive-optional: the song's `aoide.theme.fonts.monospace` when it
+  # ── the rice's face (CONTRACTS.md §1, font tier) ────────────────────────
+  # Additive-optional: the rice's `aoide.theme.fonts.monospace` when it
   # carries one, else this lane's own default. Read straight off the option,
   # not through `resolve` — the venue recolour is a colour pass, and a face
   # is not a colour. The role shape is Stylix's own ({ package, name }), so
@@ -137,16 +137,16 @@ let
       };
 
   # Deterministic solid-colour fallback wallpaper: a PNG from palette.bg. This
-  # is the cover this lane bakes when the song carries no `notes.wallpaper` —
+  # is the wallpaper this lane bakes when the rice carries no `notes.wallpaper` —
   # it keeps the baked path buildable without shipping a binary asset and with
-  # NO song/ read. ImageMagick is a pure build-time input.
+  # NO rice/ read. ImageMagick is a pure build-time input.
   solidWallpaper = pkgs.runCommand "aoide-wallpaper.png" { } ''
     ${pkgs.imagemagick}/bin/magick -size 1920x1080 "xc:#${stripHash p.bg}" "$out"
   '';
 
-  # The cover-art note (CONTRACTS.md §1): a song MAY carry a real wallpaper as a
+  # The wallpaper-art note (CONTRACTS.md §1): a rice MAY carry a real wallpaper as a
   # literal nix path (`aoide.theme.wallpaper`), which the option system copies to
-  # the store — this is note data, not a song/ runtime read. When the note is
+  # the store — this is note data, not a rice/ runtime read. When the note is
   # null this lane bakes the deterministic solid-colour fallback above, so the
   # path stays buildable and drift-free either way.
   wallpaper = if t.wallpaper != null then t.wallpaper else solidWallpaper;
@@ -244,7 +244,7 @@ in
     (lib.optionalAttrs stylixPresent {
       stylix = {
         enable = true;
-        # The song's ground (CONTRACTS.md §1, polarity): the register the
+        # The rice's ground (CONTRACTS.md §1, polarity): the register the
         # base16 ramp reads as, read straight off the option — the venue
         # recolour `resolve` applies is a colour pass, and a register is not
         # a colour. mkDefault, unchanged from before the field existed, so
@@ -254,7 +254,7 @@ in
         # The ONE base16 scheme — the baked fan-out's single source.
         base16Scheme = scheme;
 
-        # Wallpaper: the song's cover-art note (`aoide.theme.wallpaper`) when it
+        # Wallpaper: the rice's wallpaper-art note (`aoide.theme.wallpaper`) when it
         # carries one, else a deterministic solid-colour fallback (from
         # palette.bg). mkDefault keeps it host/rice-overridable. We set this EVEN
         # WHEN quickshell owns the `wallpaper` surface
@@ -270,7 +270,7 @@ in
           size = 40;
         };
 
-        # Fonts: the song's face tier (`aoide.theme.fonts`) when it carries
+        # Fonts: the rice's face tier (`aoide.theme.fonts`) when it carries
         # one, else this lane's default. `monospace` is the tier's only
         # role today — the terminal, where agents live. The remaining roles
         # stay Linux Libertine: Aoide's primary face is a humanist serif,

@@ -8,15 +8,15 @@ import Quickshell.Wayland
 // widget reads real UPower (battery) + /proc/net/route (network) live. On a
 // desktop with no battery it exercises the honest "AC — no battery" path.
 //
-// The power body is per-song score (song/songbook/<song>/widgets/), NOT a
+// The power body is per-rice score (rices/<rice>/widgets/), NOT a
 // shared-tree component, so this harness loads it by URL — the
 // CalendarPreview precedent. Quickshell's virtual qs:@ filesystem black-holes
 // relative paths that escape the config root, so from a repo checkout point
-// POWER_WIDGET at the songbook file (QS_STAGE precedent — previews honour env
+// POWER_WIDGET at the rices file (QS_STAGE precedent — previews honour env
 // seams):
-//   POWER_WIDGET=file://$PWD/song/songbook/sonata/widgets/power.qml \
+//   POWER_WIDGET=file://$PWD/rices/sonata/widgets/power.qml \
 //     qs -p pkgs/strillix-shell/qml/PowerPreview.qml
-// In the deployed tree ($out/qml/, where songs/ sits beside this file) the
+// In the deployed tree ($out/qml/, where rices/ sits beside this file) the
 // default relative source resolves with no env needed.
 //
 // power.qml declares `theme` AND `bridge` as `required property` (the
@@ -69,7 +69,7 @@ ShellRoot {
             anchors.left: parent.left
             Component.onCompleted: {
                 var src = Quickshell.env("POWER_WIDGET")
-                if (!src || src === "") src = "songs/sonata/power.qml"
+                if (!src || src === "") src = "rices/sonata/power.qml"
                 setSource(src, { "theme": win.stubTheme, "bridge": win.stubBridge })
             }
         }

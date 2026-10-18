@@ -1,0 +1,106 @@
+// RiceGadgets.qml — visual host for the active rice's DECLARED dock-kind
+// widgets (CONTRACTS.md §5's "Per-rice flavor widgets"; `aoide.layout
+// .widgets`, `modules/nucleus/options.nix` — the `kind = "dock"` v2
+// expansion of the same declared widget-type registry `RiceSurfaces.qml`
+// hosts the `kind = "surface"` half of). Same data source
+// (`stagingEngine.declaredWidgets(rice)`), same overall shape as
+// RiceSurfaces.qml, but the opposite mount: a `dock` entry has no layer
+// surface of its own (the compositor lane already filters it out of
+// layerrule generation) — it mounts as a plain Item straight into sonata's
+// `widgets/dock.qml`'s existing gadget column, alongside the shipped
+// conductor/terminals/etc. `WidgetSlot`s.
+//
+// Rooted at Repeater, not Instantiator: RiceSurfaces.qml hosts non-visual
+// `SurfaceSlot` QtObjects, so Instantiator (QtQml.Models) is the only tool
+// that fits. This is the opposite case — a VISUAL delegate list going
+// straight into dock.qml's `Column { id: stack }` — so `Repeater` is
+// correct: it's `transparentForPositioner`, so zero delegates (today, since
+// no committed rice declares a `kind: "dock"` entry) contributes zero
+// footprint and zero spacing, matching every other `Repeater`-in-a-`Column`
+// idiom already in this tree (e.g. sonata's `bar.qml`).
+//
+// `order` (options.nix `widgetType.order`, dock-only): the registry is
+// serialized through `serde_json::Value`/`BTreeMap` on the Rust side (no
+// `preserve_order`), so a rice's declared widget keys do NOT preserve
+// authored order between the build-time nix walk and the native hot-sync —
+// `order` is the only deterministic layout signal among multiple `dock`
+// entries. Sorted here explicitly by `(order ?? 0, slot-name)`, both
+// ascending, order first with slot name as the tie-break — never relying on
+// `Object.keys()` iteration order.
+//
+// Delegate: the real `WidgetSlot.qml` component directly (the same one
+// `notifications-center` uses in dock.qml) — resolve/load logic is not
+// reimplemented here. Fixed injected-prop contract (CONTRACTS.md §5
+// containment): `theme` + `bridge` only, nothing else. Dock gadgets take
+// that fixed contract by choice, not the wider `theme+bridge+shared` the
+// shipped lane gadgets get, so no `extraProps` is passed. Were one passed,
+// `WidgetSlot` assigns each extra onto the live widget in place and
+// rebuilds only when the resolved source changes (its header states the
+// rebuild key), so an `extraProps` literal could never rebuild a gadget.
+//
+// A declared dock slot whose declaring rice has no actual
+// `widgets/<slot>.qml` body (neither the active rice nor the sonata
+// baseline) resolves through WidgetSlot's own existing fallback chain and
+// renders nothing — WidgetSlot itself stays silent in that case (it only
+// warns on a load/create failure, never on "no rice provides this slot").
+// So both declared kinds fail loudly the same way, this warns explicitly at
+// the `[aoide/ricegadgets]` prefix, mirroring `SurfaceSlot.qml`'s
+// `[aoide/surfaceslot]` "no rice (active or baseline) provides slot" warning,
+// keyed off the same signal WidgetSlot itself computes: `resolvedRice === ""`.
+
+import QtQuick
+
+Repeater {
+    id: root
+
+    required property var theme
+    required property var bridge
+    required property var stagingEngine
+    property real gadgetW: 360
+
+    // [{ slot, decl, order }, …] — every dock-kind entry the active rice
+    // declares, sorted by (order ?? 0, slot-name) ascending. Empty for a
+    // rice with no declared dock widgets (every committed rice today), so
+    // the Repeater below holds zero delegates: a structural no-op, not an
+    // accident of which rice happens to be active.
+    readonly property var dockEntries: {
+        var decl = root.stagingEngine.declaredWidgets(root.theme.riceName)
+        var keys = Object.keys(decl)
+        var out = []
+        for (var i = 0; i < keys.length; i++) {
+            var slot = keys[i]
+            var w = decl[slot]
+            if (w && w.kind === "dock") {
+                var order = (w.order === undefined || w.order === null) ? 0 : w.order
+                out.push({ slot: slot, decl: w, order: order })
+            }
+        }
+        out.sort(function (a, b) {
+            if (a.order !== b.order) return a.order - b.order
+            return a.slot < b.slot ? -1 : (a.slot > b.slot ? 1 : 0)
+        })
+        return out
+    }
+
+    model: root.dockEntries
+
+    delegate: WidgetSlot {
+        id: dockSlot
+        required property var modelData
+
+        width: root.gadgetW
+        slot: modelData.slot
+        theme: root.theme
+        bridge: root.bridge
+        stagingEngine: root.stagingEngine
+
+        onResolvedRiceChanged: dockSlot._warnIfUnresolved()
+        Component.onCompleted: dockSlot._warnIfUnresolved()
+
+        function _warnIfUnresolved() {
+            if (dockSlot.resolvedRice === "") {
+                console.warn("[aoide/ricegadgets] no rice (active or baseline) provides dock slot", dockSlot.slot)
+            }
+        }
+    }
+}

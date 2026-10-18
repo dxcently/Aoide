@@ -68,7 +68,7 @@
     lock = {
       providers.strillix = ./dendrites/strillix/lock.nix;
     };
-    # The rice renderer: writes the song's rice to the state link. The runtime
+    # The rice renderer: writes the rice's rice to the state link. The runtime
     # comes only through the component providers above (`dendrites/strillix/README.md`).
     strillix = ./dendrites/strillix;
     mcfly = ./dendrites/mcfly.nix;

@@ -1246,13 +1246,13 @@ impl App {
 
     /// The CONDUCTING stage dir (`sessions.json`/`hooks.json`/`projects.json`/
     /// `graph.json`) — `state/stage/` (command-defrag S1). Distinct from
-    /// [`App::rice_stage`], which stays `song/stage/` for `theme.json`; the
+    /// [`App::rice_stage`], which stays `rice/stage/` for `theme.json`; the
     /// two coincide whenever `$AOIDE_STAGE_DIR` is set (every test fixture
     /// here does), and diverge only on the default production layout.
     fn stage() -> PathBuf {
         conducting_stage_dir()
     }
-    /// The rice/paint stage dir (`theme.json`) — unchanged, `song/stage/`.
+    /// The rice/paint stage dir (`theme.json`) — unchanged, `rice/stage/`.
     fn rice_stage() -> PathBuf {
         stage_dir()
     }
@@ -5839,7 +5839,7 @@ mod tests {
     /// the duration of `f`, restoring whatever was set before. Any test that
     /// calls `App::dispatch` or `App::poll_refresh` needs this — both read
     /// the real stage dirs otherwise, and on this machine that's the live
-    /// `~/Aoide/state/stage` (conducting) and `~/Aoide/song/stage` (rice),
+    /// `~/Aoide/state/stage` (conducting) and `~/Aoide/rice/stage` (rice),
     /// not a fixture. `AOIDE_STAGE_DIR` overrides both at once, same as
     /// today — see `App::stage`/`App::rice_stage`.
     /// [`with_isolated_stage`] as a guard, for a test that needs the isolated

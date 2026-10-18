@@ -32,7 +32,7 @@ struct Demo {
 impl Demo {
     fn new(tag: &str) -> Self {
         let root = tmp(tag);
-        let stage = root.join("song").join("stage");
+        let stage = root.join("rice").join("stage");
         std::fs::create_dir_all(&stage).unwrap();
         std::fs::create_dir_all(root.join("state")).unwrap();
         Self { root, stage }

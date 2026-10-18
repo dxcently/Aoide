@@ -9,8 +9,8 @@ Three payloads under `$out/share/strillix/`, one per consumer:
 
 | path | what reads it |
 |---|---|
-| `rices/` — the song folders this instance ships, plus `manifest.json`, `registry.json` and (when a host selected songs) `builtin.json` | `aoide_storage::fs::song_templates_dir`, through `STRILLIX_TEMPLATES` or the exe-sibling `../share/strillix/rices` |
-| `nix/` — the OFFLINE generator: `manifest.nix` + copies of `lib/rices.nix` and `lib/song.nix` + the locked nixpkgs `lib/` (tests dropped) | `strillix-rice::widgets`'s `plan_stage`, which evaluates `nix/manifest.nix` with a plain `nix-instantiate --eval --strict --json` over the machine's own rices |
+| `rices/` — the rice folders this instance ships, plus `manifest.json`, `registry.json` and (when a host selected rices) `builtin.json` | `aoide_storage::fs::rice_templates_dir`, through `STRILLIX_TEMPLATES` or the exe-sibling `../share/strillix/rices` |
+| `nix/` — the OFFLINE generator: `manifest.nix` + copies of `lib/rices.nix` and `lib/rice.nix` + the locked nixpkgs `lib/` (tests dropped) | `strillix-rice::widgets`'s `plan_stage`, which evaluates `nix/manifest.nix` with a plain `nix-instantiate --eval --strict --json` over the machine's own rices |
 | `aoide-options.json` — `lib/options.nix`'s output | `strillix`'s `onboard`, through `fs::strillix_share_dir` (this dir) |
 
 Only `strillix-rice`/`strillix` read any of it, and only `strillix` links them, so
@@ -20,15 +20,15 @@ the package is wired onto the units whose process actually execs `strillix`.
 
 | argument | default | what it does |
 |---|---|---|
-| `songs` | `null` | `null` ships every discovered song; a list ships those folders |
-| `builtin` | `null` | `{ declared, songs, packages }`, written to `builtin.json`; `null` writes none |
+| `rices` | `null` | `null` ships every discovered rice; a list ships those folders |
+| `builtin` | `null` | `{ declared, rices, packages }`, written to `builtin.json`; `null` writes none |
 | `rices` | `../../rices` | the directory those names live in |
-| `songDirs` | `null` | name to song directory, when already discovered (a merged rices's registry); `null` discovers `rices`. Reading `rices` itself at eval would make a merged rices import-from-derivation |
+| `riceDirs` | `null` | name to rice directory, when already discovered (a merged rices's registry); `null` discovers `rices`. Reading `rices` itself at eval would make a merged rices import-from-derivation |
 
 The flake's own `packages.strillix-rices` uses the defaults. The `strillix` lane
 overrides both per host (`lib/rices.nix`'s `builtIn`), which is what makes the
-package the byte-level meaning of "built in": a host that performs one song ships
-one song's folders and records the selection in `builtin.json`.
+package the byte-level meaning of "built in": a host that performs one rice ships
+one rice's folders and records the selection in `builtin.json`.
 
 `aoideOptions` is a third, REQUIRED argument — the `aoide.*` option doc list,
 which `callPackage` cannot derive (it comes from the flake's `inputs`). It
@@ -39,21 +39,21 @@ through `lib/pkgs.nix`'s `extra`, and a host through the strillix lane's own
 ## The `nix/` payload — one generator, shipped
 
 `nix/manifest.nix` is a thin entry (`{ rices }: { manifest; registry;
-packages; }`) over `nix/rices.nix` and `nix/song.nix`, which are COPIES of
-`lib/rices.nix` and `lib/song.nix` made at build time, and `nix/lib/` is the
+packages; }`) over `nix/rices.nix` and `nix/rice.nix`, which are COPIES of
+`lib/rices.nix` and `lib/rice.nix` made at build time, and `nix/lib/` is the
 locked nixpkgs `lib/`. So the machine evaluates the same generator this build
-deployed — no second implementation to drift, and no subset that a song's
+deployed — no second implementation to drift, and no subset that a rice's
 `_widgets/` shelf could silently outgrow.
 
-`packages` is per song and CLOSED UNDER BORROWS: a song whose slot borrows
-another song's body needs that lender's packages too (`lib/rices.nix`'s
+`packages` is per rice and CLOSED UNDER BORROWS: a rice whose slot borrows
+another rice's body needs that lender's packages too (`lib/rices.nix`'s
 `builtIn`), which is exactly the arithmetic the host's `builtin.json.packages`
 carries — the two sides of `aoide rice stage`'s needs-check.
 
 ## What a derivation reads — the part that is not tidiness
 
-Each shipped song enters the build as **its own store path**
-(`builtins.path { path = <song>; name = "strillix-song-<song>"; }`), never as a
+Each shipped rice enters the build as **its own store path**
+(`builtins.path { path = <rice>; name = "strillix-rice-<rice>"; }`), never as a
 subdirectory of the whole `rices` tree, and the baked
 `manifest.json`/`registry.json` are `builtins.toFile` over the shipped set only.
 
@@ -63,8 +63,8 @@ store path is a STRING in a host's `environment.sessionVariables`
 the `etc` and `activate` derivations of a NixOS system name it — which means
 anything that rehashes this derivation moves the host's **toplevel drvPath**
 even when no configuration changed. While the build read the rices directory,
-that was true of every song in the repo: editing a song a host does not even
-build in moved that host's system. Now it is true only of the songs it ships.
+that was true of every rice in the repo: editing a rice a host does not even
+build in moved that host's system. Now it is true only of the rices it ships.
 
 ## Consumers
 

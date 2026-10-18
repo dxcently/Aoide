@@ -1,12 +1,12 @@
 # hosts/_mac/default.nix — TEMPLATE (forward-looking): macOS / nix-darwin host.
 #
 # Shelved (the `_` prefix): not discovered by flake.nix, so nothing builds or
-# evaluates it. NOT EVALUABLE TODAY — lib/aoideos.nix builds NixOS hosts only.
+# evaluates it. NOT EVALUABLE TODAY — lib/strillix.nix builds NixOS hosts only.
 # Habit's composition has the class (`mkDarwinHost`); landing a mac host needs
 # Aoide to call it:
 #   1. flake.nix: a nix-darwin input (follows nixpkgs), `aarch64-darwin` in
 #      `systems`, a `darwinConfigurations` output
-#   2. lib/aoideos.nix: a builder calling `mkDarwinHost` — nix-darwin's
+#   2. lib/strillix.nix: a builder calling `mkDarwinHost` — nix-darwin's
 #      `darwinSystem` plus home-manager's and stylix's *darwinModules* instead
 #      of the nixosModules sets
 #   3. modules/dendrites/aoided.nix: a launchd twin for the aoided/shellbridge user services
@@ -17,7 +17,7 @@
 # See docs/architecture/PACKAGE-LAYOUT.md — "NixOS optional, never required."
 #
 # The shape once that lands — Aoide core only (the paint lanes are Linux:
-# Hyprland); songs still RESOLVE (a rice.nix only sets aoide.theme.*, our own
+# Hyprland); rices still RESOLVE (a rice.nix only sets aoide.theme.*, our own
 # option namespace) but nothing renders them on macOS. NOTE: no
 # `imports = [ ../common ]` here on purpose — common carries NixOS-only
 # options (and defaults the blocked-off dendrites below ON), so until it gets
@@ -41,9 +41,9 @@
   #   aoide.audio       (services.pipewire)        aoide.clipboard (systemd service)
   #   aoide.screenshot  (hyprshot/grim, wayland)   aoide.vision    (grim/slurp)
   #   aoide.obsidian    (systemd service)          aoide.firefox   (broken on nixpkgs-darwin)
-  #   aoide.hyprland + every paint lane            (the AoideOS desktop is Linux)
+  #   aoide.hyprland + every paint lane            (the Strillix desktop is Linux)
 
-  # No paint lane — the desktop is AoideOS-on-Linux. What a mac host runs:
+  # No paint lane — the desktop is Strillix-on-Linux. What a mac host runs:
   # aoided, the session graph, conduct, agent hooks — the headless profile,
   # same as _server.
   #

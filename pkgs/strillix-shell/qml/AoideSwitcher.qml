@@ -1,8 +1,8 @@
 // AoideSwitcher.qml — the plain window switcher, the `switcher` slot's floor.
 //
 // shell.qml hosts it as the lane-side `fallback` of `SurfaceSlot { slot:
-// "switcher" }`: a song that ships `widgets/switcher.qml` dresses the slot and
-// this file is never created; every other song gets this one. The lane owns the
+// "switcher" }`: a rice that ships `widgets/switcher.qml` dresses the slot and
+// this file is never created; every other rice gets this one. The lane owns the
 // one `aoide:switcher` GlobalShortcut (shell.qml) and calls `.toggle()` on
 // whichever body the slot holds, so this file registers no shortcut of its own.
 //

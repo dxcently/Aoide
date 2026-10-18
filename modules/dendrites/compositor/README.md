@@ -27,8 +27,8 @@ modules/dendrites/compositor/
   compositor-side theme (gaps/radius/borders/blur, the `aoide-*` layerrules,
   hyprglass, kitty rounding) at build time, and exposes the Hyprland IPC
   socket for shellbridge to consume. Selecting it is the switch; it sets no fact.
-  The hyprglass block's two enable keys are the song's own
-  `geometry.blurEnabled`, so a blur-off song is glassless in the bake exactly as
+  The hyprglass block's two enable keys are the rice's own
+  `geometry.blurEnabled`, so a blur-off rice is glassless in the bake exactly as
   it is after a stage.
 - **`hyprland/behaviour.nix` — the BEHAVIOUR.** Keybinds, input devices, tiling
   layout, misc quality-of-life, behavioural window rules — everything a re-rice
@@ -36,10 +36,10 @@ modules/dendrites/compositor/
   `.scrollingMonitor`) stay a host-facing surface, which is why the catalogue
   keeps the name `hyprland` for this file while the look is reached through
   `compositor`.
-- **`modules/dendrites/greeter.nix` — the greeter.** When the declared song
+- **`modules/dendrites/greeter.nix` — the greeter.** When the declared rice
   ships `widgets/greeter.qml` (`aoide.rices.greeter`), greetd running
   `cage` + Quickshell as its greeter user on a store tree (the lane's
-  `GreeterHost.qml`, the face and the song's `icons/` from the shipped
+  `GreeterHost.qml`, the face and the rice's `icons/` from the shipped
   rices, the dress, and the
   display manager's session wrapper with the default session's Exec — the
   default session must be named, evaluation fails otherwise; cage types in
@@ -71,6 +71,6 @@ only writes `hyprland.conf` when its own hyprland module is enabled.
 
 `hyprland.conf` has three writers, in order: the look (mkBefore, 500), the
 behaviour and screenshot binds (1000), and the strillix renderer (mkAfter, 1500),
-whose one `source = ~/.local/state/strillix/rice.conf` line makes the song's rice
+whose one `source = ~/.local/state/strillix/rice.conf` line makes the rice's rice
 the last word. The renderer is the only writer that names a file outside Nix's
 own output: the state link is retargeted by `strx rice stage` without a rebuild.

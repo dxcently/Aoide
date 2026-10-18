@@ -73,7 +73,7 @@
 //     the SAME spine axis (equal angles about one shared axis compose into
 //     exactly the old whole-spread turn).
 //
-// ── The ledger — `song/stage/grimoire.json` (CONTRACTS.md §4) ──────────────
+// ── The ledger — `rice/stage/grimoire.json` (CONTRACTS.md §4) ──────────────
 // `GrimoireLedger.qml` stays in the shell (a data seam, not chrome) and is
 // injected here as the `ledger` extra — shell.qml instantiates the ONE
 // instance and hands it to this slot's SurfaceSlot, the same way `clipboard`
@@ -545,7 +545,7 @@ PanelWindow {
     }
 
     // ══ Dim scrim — a click anywhere outside dismisses. Umber veil keyed off
-    // the song's ink so the darken belongs to the palette. ═══════════════════
+    // the rice's ink so the darken belongs to the palette. ═══════════════════
     MouseArea {
         anchors.fill: parent
         onClicked: root.hide()

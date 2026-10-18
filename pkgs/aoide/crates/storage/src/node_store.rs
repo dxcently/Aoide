@@ -4,8 +4,8 @@
 //! response per node (CONTRACTS.md §7).
 //!
 //! Lives under `state/` (tolerate-missing reads, atomic writes) rather than
-//! the literal `song/stage/` location the originating plan sketched — a node
-//! roster is account/global external-registry state, not song-scoped
+//! the literal `rice/stage/` location the originating plan sketched — a node
+//! roster is account/global external-registry state, not rice-scoped
 //! rehearsal state; see CONTRACTS.md §7's note on this judgment call.
 //!
 //! `aoide-server`'s A2A door (inbound, the non-loopback pending-gate fix)
@@ -1105,12 +1105,12 @@ pub fn clear_hub(nodes: &mut [Node], name: &str) -> Result<HubChange, String> {
 }
 
 /// A valid node nickname: `^[a-z0-9][a-z0-9-]*$` — the same shape as
-/// `strillix_rice::compose::valid_song_name` (this crate sits below `song` in
+/// `strillix_rice::compose::valid_rice_name` (this crate sits below `rice` in
 /// the dependency graph, so it defines its own copy rather than depending
 /// upward). A node's nickname is joined directly into
 /// [`node_cache_path`]'s `state/node-cache/<name>.json` — this one check
 /// rejects path traversal (`..`, `/`) by construction, the same way it does
-/// for a song name.
+/// for a rice name.
 pub fn valid_node_name(name: &str) -> bool {
     let mut chars = name.chars();
     let first_ok = matches!(chars.next(), Some(c) if c.is_ascii_lowercase() || c.is_ascii_digit());

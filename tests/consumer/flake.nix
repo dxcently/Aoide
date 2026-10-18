@@ -2,7 +2,7 @@
 #
 # The point of this file is what it does NOT contain: no path concatenated onto
 # Aoide's source tree anywhere, and no threading of Aoide's own inputs.
-# Everything AoideOS offers a stranger arrives through the root flake's exports
+# Everything Strillix offers a stranger arrives through the root flake's exports
 # — `nixosModules.nucleus`, `lib.{composition,theme,rices,catalogue}`,
 # `ricesRoot` and `overlays.default` — and the flake inputs Aoide's own modules need (quickshell, stylix, nvf, hyprland,
 # the core itself) are closed over by `nixosModules.nucleus`, which is why this
@@ -77,8 +77,8 @@
         overrides = { };
       };
 
-      # One rices per host: the consumer's own (`./songs`), or Aoide's
-      # through the `ricesRoot` export. The song hook is one call: it answers
+      # One rices per host: the consumer's own (`./rices`), or Aoide's
+      # through the `ricesRoot` export. The rice hook is one call: it answers
       # the registry, the selection and the platform modules for the rices it
       # is handed.
       mkHost =
@@ -94,15 +94,15 @@
       # merge of several books (`aoide.lib.rices.merge`), whose `dir` is the
       # directory the hook and the strillix lane read.
       mkHostOver =
-        name: songs:
+        name: rices:
         let
-          song = songs.hook { inherit registry; };
+          rice = rices.hook { inherit registry; };
         in
         composition.mkNixosHost {
           inherit nixpkgs system;
           hostName = name;
           knownHosts = [ name ];
-          inherit (song) registry selectionModules extraModulesFor;
+          inherit (rice) registry selectionModules extraModulesFor;
           extraModules = [ aoide.nixosModules.nucleus ];
           host = ./hosts + "/${name}.nix";
           homeManagerModule = home-manager.nixosModules.home-manager;
@@ -116,9 +116,9 @@
       # `inventory` what the host resolved and from which file (the sources the
       # fixture names the parts through).
       hosts = {
-        consumer = mkHost "consumer" ./songs;
-        aoide-songs = mkHost "aoide-songs" aoide.ricesRoot;
-        stubbed = mkHost "stubbed" ./songs;
+        consumer = mkHost "consumer" ./rices;
+        aoide-rices = mkHost "aoide-rices" aoide.ricesRoot;
+        stubbed = mkHost "stubbed" ./rices;
         # Aoide's rices and the consumer's own, merged into one directory
         # before anything reads it: `encore` (the consumer's) borrows `sonata`
         # (Aoide's) across the two.
@@ -127,7 +127,7 @@
             inherit lib pkgs;
             books = [
               aoide.ricesRoot
-              ./songs-merge
+              ./rices-merge
             ];
           }
         );

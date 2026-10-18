@@ -19,7 +19,7 @@ source: "[[references/AOIDE-HANDOFF]]"
 | Surface | Role |
 |---|---|
 | Bar | Workspaces, agent sessions, connection state |
-| Herald | Notification popup + dock ledger, drawn from dunst's history — dunst owns the `org.freedesktop.Notifications` bus name and draws nothing itself |
+| Notifications | Notification popup + dock ledger, drawn from dunst's history — dunst owns the `org.freedesktop.Notifications` bus name and draws nothing itself |
 | Agent widgets | Per-session status and controls |
 | Launcher | Keyboard-driven app launcher (`AoideLauncher.qml`): enumerates apps via Quickshell `DesktopEntries`, fuzzy-filters, launches via `DesktopEntry.execute()`; triggered by `SUPER+SPACE` as an in-process Hyprland global shortcut |
 | OSD | On-screen display |
@@ -27,7 +27,7 @@ source: "[[references/AOIDE-HANDOFF]]"
 | Greeter | Login greeter |
 | Wallpaper layer | Managed wallpaper display |
 
-No mako or swaync for popups — dunst holds the notification-delivery role (the `aoide.dunst` dendrite), and the herald lives on as a dock notification center polling `dunstctl history`; launcher/wallpaper/lockscreen remain Quickshell's. Styling comes exclusively from theme; structural patterns draw from unixporn canon (quickshell/ags bars, swaync-style centers, anyrun launchers) but are never copied directly.
+No mako or swaync for popups — dunst holds the notification-delivery role (the `aoide.dunst` dendrite), and the notifications surface lives on as a dock notification center polling `dunstctl history`; launcher/wallpaper/lockscreen remain Quickshell's. Styling comes exclusively from theme; structural patterns draw from unixporn canon (quickshell/ags bars, swaync-style centers, anyrun launchers) but are never copied directly.
 
 ## Bridge: shellbridge
 

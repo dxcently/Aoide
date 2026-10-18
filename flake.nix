@@ -49,7 +49,7 @@
 
     # nvf (Neovim-Flake) — the neovim dendrite's config framework (dxflake
     # form, verbatim). Inputs can only live here; the dendrite reaches it via
-    # specialArgs (lib/aoideos.nix threads `inputs` into home-manager too).
+    # specialArgs (lib/strillix.nix threads `inputs` into home-manager too).
     nvf = {
       url = "github:notashelf/nvf";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -78,30 +78,30 @@
       inherit (nixpkgs) lib;
 
       # Per-host assembly (selection constructor + host module + home-manager).
-      aoideos = import ./lib/aoideos.nix {
+      strillix = import ./lib/strillix.nix {
         inherit inputs lib;
         system = "x86_64-linux";
         username = "khoa";
       };
 
-      # The machines this flake builds. `hostNames` lives in lib/aoideos.nix —
+      # The machines this flake builds. `hostNames` lives in lib/strillix.nix —
       # the ONE site that reads `hosts/` — so what this file builds and what
       # `mkHost` takes as `knownHosts` cannot disagree. `_desktop`/`_laptop`/
       # `_server` are the templates to copy; `_mac` needs the darwin seam first.
-      inherit (aoideos) hostNames;
+      inherit (strillix) hostNames;
 
       # One per discovered host; lazy per attribute, so an output that names one
       # host never forces the others.
-      hosts = lib.genAttrs hostNames aoideos.mkHost;
+      hosts = lib.genAttrs hostNames strillix.mkHost;
 
-      # The rices's own discovery — the same file a host's song selection is
+      # The rices's own discovery — the same file a host's rice selection is
       # validated against, so the `rice-shape` check and the selection can never
-      # disagree about what a song is.
+      # disagree about what a rice is.
       ricesLib = import ./lib/rices.nix { inherit lib; };
 
       # The packages walker — auto-discovers pkgs/<name>/default.nix. One source
       # feeds the `packages` output, the auto-generated `pkg-<name>` checks, and
-      # the host + vm overlays (lib/aoideos.nix, tests/vm-boot.nix).
+      # the host + vm overlays (lib/strillix.nix, tests/vm-boot.nix).
       #
       # `extra` is the walker's special-args escape hatch (lib/pkgs.nix's
       # header): `strillix-rices` ships the `aoide.*` option doc list, which
@@ -168,7 +168,7 @@
       # The SAME generator `modules/dendrites/strillix/runtime.nix`'s
       # `quickshellConfig` derivation uses at build time
       # (`lib/rices.nix`), exposed as a lean flake output so
-      # `pkgs/aoide/crates/song/src/widgets.rs` can shell out to `nix eval
+      # `pkgs/aoide/crates/strillix-rice/src/widgets.rs` can shell out to `nix eval
       # --json .#ricesManifest` at RUNTIME and regenerate
       # `manifest.json`/`registry.json` whole — the hot-sync half of `rice
       # stage`, no rebuild. Deliberately system-independent (`nixpkgs.lib` is
@@ -176,7 +176,7 @@
       # deliberately NOT `self.nixosConfigurations.*` or anything under it:
       # evaluating this attribute must never force a host's full module
       # system (`config.aoide.*`), only `lib` + `rices/` +
-      # `lib/song.nix` (nix is lazy — the songs loop above is a SEPARATE
+      # `lib/rice.nix` (nix is lazy — the rices loop above is a SEPARATE
       # thunk this output shares no dependency with beyond `lib`).
       ricesManifest =
         let
@@ -235,8 +235,8 @@
       };
 
       # ── The export surface a consumer builds against ───────────────────────
-      # Everything here is for a flake that consumes AoideOS as a stranger
-      # (PACKAGE-LAYOUT's "AoideOS's export surface"): it names no path inside
+      # Everything here is for a flake that consumes Strillix as a stranger
+      # (PACKAGE-LAYOUT's "Strillix's export surface"): it names no path inside
       # this tree, and the flake inputs Aoide's own lanes need are closed over
       # by `nixosModules.nucleus` instead of being threaded through the
       # consumer's `specialArgs`.
@@ -254,7 +254,7 @@
       # `_module.args.aoideInputs`, which is also what `mkHost` passes as an
       # extra module. A consumer's catalogue is that attrset minus `nucleus`.
       nixosModules = {
-        nucleus = aoideos.nucleusModule;
+        nucleus = strillix.nucleusModule;
       }
       // registry.catalogue;
 
@@ -270,9 +270,9 @@
         };
 
       # Aoide's rices directory, for a consumer whose hosts perform Aoide's
-      # songs: what it hands `lib.rices` and its songs hook's
+      # rices: what it hands `lib.rices` and its rices hook's
       # `_module.args.rices`.
-      inherit (aoideos) ricesRoot;
+      inherit (strillix) ricesRoot;
 
       # ── The front door: parts and rices (CONTRACTS.md §2, §5) ───────────────
       # `parts.<component>` is the PROVIDER module of a component slot's
@@ -308,8 +308,8 @@
             set.providers.strillix
           );
 
-      # Every committed song with a `rice.nix`, name → that file: the aggregation
-      # body the song hook registers for it (`lib/rices.nix`'s `rices`, the
+      # Every committed rice with a `rice.nix`, name → that file: the aggregation
+      # body the rice hook registers for it (`lib/rices.nix`'s `rices`, the
       # one discovery). A consumer performs one of them through its own hook over
       # `ricesRoot`; the parts above are the components those bodies pick.
       inherit (ricesLib) rices;
@@ -348,17 +348,17 @@
         pkgChecks
         // {
           surface-ownership = checks.surfaceOwnership (hostCfg.aoide.surfaces or { });
-          # A song's runtime dirs are gitignored state; this fails if one was
-          # committed anyway (it replaced `no-song-read`, which scanned module
+          # A rice's runtime dirs are gitignored state; this fails if one was
+          # committed anyway (it replaced `no-rice-read`, which scanned module
           # paths for those names and could not fire).
           rice-runtime-untracked = checks.riceRuntimeUntracked self;
-          # Every discovered song carries rice.nix + theme.json and holds no
+          # Every discovered rice carries rice.nix + theme.json and holds no
           # other `.nix` (`lib/rices.nix`'s strayNixFiles, builtins.readDir —
           # the walker is gone). What a host builds in is the host's selection,
           # not this check's business.
           rice-shape = checks.riceShape {
             inherit (ricesLib)
-              songNames
+              discoveredNames
               strayNixFiles
               escapingNixFiles
               borrow
@@ -393,7 +393,7 @@
           # this source (see lib/checks.nix's Check 6).
           phantom-commands = checks.phantomCommands self inputs.aoide.packages.${system}.default;
           # Core's crate closure (derived from pkgs/aoide/Cargo.toml, walked
-          # from crates/cli) never reaches aoide-song/aoide-screen/strillix
+          # from crates/cli) never reaches strillix-rice/aoide-screen/strillix
           # and never shells out to nix — AGENTS.md's nix-independence claim
           # made a real gate (see lib/checks.nix's Check 7).
           nix-independence = checks.nixIndependence self;
@@ -409,7 +409,7 @@
             };
           };
           # §9(e): and it answers the same over a COPY of that rices outside
-          # the repo — §7.4's "a song is a self-contained folder" and "no
+          # the repo — §7.4's "a rice is a self-contained folder" and "no
           # repo-absolute paths", which is what a machine's own rices needs.
           generator-relocatable = checks.generatorRelocatable {
             strillixRices = (pkgsWalk.discover pkgs).strillix-rices;
@@ -425,7 +425,7 @@
           # commands pass).  Requires KVM on the build host.
           vm-boot = import ./tests/vm-boot.nix { inherit pkgs inputs lib; };
           # The login screen and the screen lock on a graphical VM: the
-          # Quickshell greeter and LockHost for a song that ships faces, ly and
+          # Quickshell greeter and LockHost for a rice that ships faces, ly and
           # hyprlock for one that does not. Requires KVM on the build host.
           vm-lock-greeter = import ./tests/vm-lock-greeter.nix { inherit pkgs inputs lib; };
           # Static artifact is genuinely portable — zero PT_INTERP segments,

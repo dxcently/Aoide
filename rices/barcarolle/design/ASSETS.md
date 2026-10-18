@@ -2,8 +2,8 @@
 
 | file | derived from | author | licence |
 |---|---|---|---|
-| `../cover/barcarolle-desktop.jpg` (3840×2160) | `frutigerAero_Wallpaper_Green_NoPerson_4k.jpg` | KnightAnNi | CC0 1.0 Universal |
-| `../cover/barcarolle-logon.jpg` (3840×2160) | `frutigerAero_Wallpaper_Green_Person_4k.jpg` | KnightAnNi | CC0 1.0 Universal |
+| `../wallpaper/barcarolle-desktop.jpg` (3840×2160) | `frutigerAero_Wallpaper_Green_NoPerson_4k.jpg` | KnightAnNi | CC0 1.0 Universal |
+| `../wallpaper/barcarolle-logon.jpg` (3840×2160) | `frutigerAero_Wallpaper_Green_Person_4k.jpg` | KnightAnNi | CC0 1.0 Universal |
 | `../icons/brand/nix-snowflake.svg` | NixOS logo (`nix-snowflake-white.svg`, nixos-icons), <https://github.com/NixOS/nixos-artwork> | NixOS/nixos-artwork | [CC-BY 4.0](https://creativecommons.org/licenses/by/4.0/) |
 
 - Source: "Frutiger Aero Wallpapers" by KnightAnNi,
@@ -17,7 +17,7 @@
   or re-crop. The source match is by image comparison against the zip's
   contents; each matched its listed original more closely than any other.
 - `../icons/agents/{shell,agent}.svg` are original drawings made here for
-  this song; no vendor logo is reproduced, traced or imitated.
+  this rice; no vendor logo is reproduced, traced or imitated.
 - `../icons/agents/kimi.svg` carries Moonshot AI's mark traced with potrace
   from a reference image the user supplied (8× Lanczos upscale, threshold,
   cropped to the mark). The mark is Moonshot AI's trademark; it

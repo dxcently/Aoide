@@ -5,7 +5,7 @@
 # still instantiates the shell's own `AoideWallpaperPicker` directly — so it
 # registers nothing today.
 #
-# No `packages`: it runs `Process { command: ["ls", "-1", coversDir] }`
+# No `packages`: it runs `Process { command: ["ls", "-1", wallpapersDir] }`
 # (coreutils — not a thing a venue can fail to stock, so not worth declaring)
 # and `Quickshell.execDetached(["aoide", "wallpaper", "set", path])` (the
 # project's own CLI, always present, not a swappable external tool).

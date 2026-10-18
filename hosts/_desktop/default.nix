@@ -13,13 +13,13 @@
 {
   habit.aggregation.nucleus.enable = true;
   habit.aggregation.desktop.enable = true;
-  habit.aggregation.aoideos.enable = true;
+  habit.aggregation.strillix.enable = true;
 
   # Agents are a workstation's business, not the desktop's; a host that runs one
   # names it here.
   habit.dendrites.claude-code.enable = true;
 
-  # The song this host performs, and what it additionally builds in. `sonata` is
+  # The rice this host performs, and what it additionally builds in. `sonata` is
   # the shipped standard, the guaranteed-present baseline. Any committed rice is
   # reachable from the machine's own rices without a rebuild
   # (`aoide rice stage <n>`) — `declared` is only what is painted at boot.

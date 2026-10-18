@@ -34,7 +34,7 @@
 // Every read a widget performs is already rooted at $AOIDE_ROOT — ThemeState
 // (stage/theme.json), conductor.qml (state/stage/ via its own stageDir),
 // terminals.qml (`stagePath`), SessionMenu (AOIDE_STATE_DIR), StagingEngine
-// (run/qml/songs/manifest.json) — so pointing AOIDE_ROOT at a fixture root
+// (run/qml/rices/manifest.json) — so pointing AOIDE_ROOT at a fixture root
 // isolates every read with nothing else to configure. `QS_STAGE` must be
 // UNSET or it overrides conductor's stage dir back out of the root.
 // Writes are isolated by construction: this file never instantiates
@@ -84,10 +84,10 @@
 //    property/fixture change. An EDITED widget BODY needs "Reload"
 //    (`requestReload()`), which refreshes the copies and rebuilds from disk.
 //
-// Song-blind (slots.md's paint test): this file names no aesthetic
+// Rice-blind (slots.md's paint test): this file names no aesthetic
 // decision of its own. It has no palette — it MIXES one out of whatever
 // ThemeState is holding (see "Chrome, mixed out of the theme" below), so
-// the instrument panel is dressed by the song being previewed rather than
+// the instrument panel is dressed by the rice being previewed rather than
 // by a taste this file asserts. Reading `theme.paletteFg` is picking up an
 // API; deciding what a gauge looks like is not, and nothing here does that.
 import QtQuick
@@ -106,8 +106,8 @@ ShellRoot {
     readonly property string controlPath: canvas.aoideRoot + "/preview.json"
 
     // ── Control state — every field of preview.json v0 ─────────────────────
-    property string widgetPath: "songs/sonata/conductor.qml"
-    property string songName: "sonata"
+    property string widgetPath: "rices/sonata/conductor.qml"
+    property string riceName: "sonata"
     property var widgetWidth: "auto"      // number (logical px) or "auto"
     property var widgetHeight: "auto"
     property bool widgetAspectLock: false
@@ -129,13 +129,13 @@ ShellRoot {
     property string fixturesDir: ""
     property var fixtures: []
     // `themeSource` is the SPEC last applied, not a resolved file: `live`, a
-    // song name, a theme.json path, or a base16 scheme file. `strillix preview
+    // rice name, a theme.json path, or a base16 scheme file. `strillix preview
     // set --theme <spec>` resolves every form into ROOT/stage/theme.json
     // and ThemeState hot-reloads it, so a palette swap needs no reload here.
     property string themeSource: ""
     property var themes: []
     // Auto-reload: the absolute paths whose edit should rebuild the config
-    // (`strillix preview` writes the loaded widget plus its song's widgets dir),
+    // (`strillix preview` writes the loaded widget plus its rice's widgets dir),
     // and the toggle that gates it.
     property var watchPaths: []
     // src -> dst: the checkout file each watched path is, and the root's own
@@ -251,7 +251,7 @@ ShellRoot {
         // ShellBridge.riceMenu, answered ASYNCHRONOUSLY (Qt.callLater, for
         // the same reason sessionAction is) so the menu's pending state
         // renders. The mode is the canvas theme's own and the rice set is the
-        // canvas song alone; the control file's `drafts` key replaces the one
+        // canvas rice alone; the control file's `drafts` key replaces the one
         // canned draft, so a canvas run can pin an empty list or a long one,
         // and its `hostConfig` key the canned host file a late balloon names.
         function riceMenu(callback) {
@@ -260,14 +260,14 @@ ShellRoot {
             Qt.callLater(function () {
                 callback({ ok: true, stub: true,
                            mode: canvas.themeState.riceMode,
-                           song: canvas.songName,
+                           rice: canvas.riceName,
                            draft: null,
-                           stagingSong: canvas.songName,
+                           stagingRice: canvas.riceName,
                            declared: null,
                            host: "preview",
                            hostConfig: canvas.controlDoc.hostConfig || "/preview/hosts/preview/default.nix",
-                           songs: [{ name: canvas.songName, ok: true }],
-                           draftsSong: canvas.songName,
+                           rices: [{ name: canvas.riceName, ok: true }],
+                           draftsRice: canvas.riceName,
                            drafts: canvas.controlDoc.drafts
                                || [{ name: "draft-1", savedAt: "2026-01-01T00:00:00Z",
                                      current: false }] })
@@ -297,11 +297,11 @@ ShellRoot {
                     callback({ ok: false, stub: true, reason: "no-reply", message: "no reply from shellbridge" })
                 else if (how === "refused")
                     callback({ ok: false, stub: true, reason: "not-built-in",
-                               message: "`" + name + "` is not in the rices preview builds from: this build carries " + canvas.songName })
+                               message: "`" + name + "` is not in the rices preview builds from: this build carries " + canvas.riceName })
                 else
                     callback({ ok: true, stub: true, name: "" + name, host: "preview", changed: true,
                                stagedDiffers: how === "differs",
-                               message: "declared `" + name + "` as preview's song; takes effect on the next rebuild." })
+                               message: "declared `" + name + "` as preview's rice; takes effect on the next rebuild." })
             })
         }
         // The trace query stub — same signature and callback contract as
@@ -409,7 +409,7 @@ ShellRoot {
         canvas.applying = true
         canvas.controlDoc = doc
         if (doc.widget !== undefined) canvas.widgetPath = "" + doc.widget
-        if (doc.song !== undefined) canvas.songName = "" + doc.song
+        if (doc.rice !== undefined) canvas.riceName = "" + doc.rice
         if (doc.widgetWidth !== undefined) canvas.widgetWidth = canvas.readAxis(doc.widgetWidth)
         if (doc.widgetHeight !== undefined) canvas.widgetHeight = canvas.readAxis(doc.widgetHeight)
         if (doc.widgetAspectLock !== undefined) canvas.widgetAspectLock = !!doc.widgetAspectLock
@@ -469,7 +469,7 @@ ShellRoot {
         for (var i = 0; i < keys.length; i++) doc[keys[i]] = canvas.controlDoc[keys[i]]
         doc.schemaVersion = "0"
         doc.widget = canvas.widgetPath
-        doc.song = canvas.songName
+        doc.rice = canvas.riceName
         doc.widgetWidth = canvas.widgetWidth
         doc.widgetHeight = canvas.widgetHeight
         doc.widgetAspectLock = canvas.widgetAspectLock
@@ -497,7 +497,7 @@ ShellRoot {
     }
 
     onWidgetPathChanged: { canvas.scheduleWrite(); if (canvas.built) canvas.rebuildWidget() }
-    onSongNameChanged: canvas.scheduleWrite()
+    onRiceNameChanged: canvas.scheduleWrite()
     onWidgetWidthChanged: { canvas.scheduleWrite(); canvas.applySizing() }
     onWidgetHeightChanged: { canvas.scheduleWrite(); canvas.applySizing() }
     onWidgetAspectLockChanged: canvas.scheduleWrite()
@@ -674,7 +674,7 @@ ShellRoot {
     }
 
     // ── Declare ────────────────────────────────────────────────────────────
-    // Writing the previewed body and palette back into the checkout song is
+    // Writing the previewed body and palette back into the checkout rice is
     // the one irreversible thing the canvas can ask for, so it arms first and
     // fires on the second click; the arming lapses after five seconds.
     property bool declareArmed: false
@@ -688,7 +688,7 @@ ShellRoot {
         if (!canvas.declareArmed) {
             canvas.declareArmed = true
             declareDisarm.restart()
-            canvas.log("declare ARMED — click again within 5s to write into the checkout song")
+            canvas.log("declare ARMED — click again within 5s to write into the checkout rice")
             return
         }
         canvas.declareArmed = false
@@ -701,18 +701,18 @@ ShellRoot {
     property string widgetUrlText: ""
 
     // A path under a checkout's `rices/<s>/widgets/<file>` is rewritten
-    // to `songs/<s>/<file>` so it loads from INSIDE the config root, where the
+    // to `rices/<s>/<file>` so it loads from INSIDE the config root, where the
     // lane types (MoodFaces, ScrollRail, …) its `import "../.."` needs
     // actually sit. Loading the same file as a bare `file://` URL puts it
     // outside the root and every such import fails — the exact reason
     // ConductorPreview needs its CONDUCTOR_WIDGET dance.
     // The checkout file behind `widgetPath`: an absolute path is itself, the
-    // `songs/<s>/<file>` and bare-slot spellings are found through the stage
+    // `rices/<s>/<file>` and bare-slot spellings are found through the stage
     // map's source side (the copy under run/qml is never the answer).
     function widgetCheckoutPath() {
         var p = ("" + canvas.widgetPath).trim()
         if (p.charAt(0) === "/") return p
-        var m = /^songs\/([^\/]+)\/(.+)$/.exec(p)
+        var m = /^rices\/([^\/]+)\/(.+)$/.exec(p)
         var tail = m ? "/rices/" + m[1] + "/widgets/" + m[2] : "/pkgs/strillix-shell/qml/" + p
         for (var k in canvas.stageMap) if (k.length > tail.length && k.slice(-tail.length) === tail) return k
         return ""
@@ -730,7 +730,7 @@ ShellRoot {
         if (p.indexOf("://") > 0) return p
         if (p.charAt(0) !== "/") return Qt.resolvedUrl(p)
         var m = /\/rices\/([^\/]+)\/widgets\/(.+)$/.exec(p)
-        if (m) return Qt.resolvedUrl("songs/" + m[1] + "/" + m[2])
+        if (m) return Qt.resolvedUrl("rices/" + m[1] + "/" + m[2])
         return "file://" + p
     }
 
@@ -1284,7 +1284,7 @@ ShellRoot {
     // pushes the canonical values back into the fields here.
     function syncFields() {
         widgetField.setText(canvas.widgetPath)
-        songField.setText(canvas.songName)
+        riceField.setText(canvas.riceName)
         wField.setText(canvas.axisText(canvas.widgetWidth))
         hField.setText(canvas.axisText(canvas.widgetHeight))
         marginField.setText("" + canvas.margin)
@@ -1780,7 +1780,7 @@ ShellRoot {
                         id: widgetField
                         width: railColumn.width
                         value: canvas.widgetPath
-                        placeholder: "songs/<song>/<slot>.qml"
+                        placeholder: "rices/<rice>/<slot>.qml"
                         onCommitted: function (text) { canvas.widgetPath = text.trim() }
                     }
                     Row {
@@ -1805,24 +1805,24 @@ ShellRoot {
                         }
                     }
                     RailButton {
-                        label: canvas.declareArmed ? "Declare → click again to write into the checkout song"
+                        label: canvas.declareArmed ? "Declare → click again to write into the checkout rice"
                                                    : "Declare"
                         active: canvas.declareArmed
                         onClicked: canvas.declare()
                     }
 
-                    // 2 ── song ────────────────────────────────────────────
-                    RailLabel { text: "song" }
+                    // 2 ── rice ────────────────────────────────────────────
+                    RailLabel { text: "rice" }
                     RailInput {
-                        id: songField
+                        id: riceField
                         width: railColumn.width
-                        value: canvas.songName
+                        value: canvas.riceName
                         placeholder: "sonata"
-                        onCommitted: function (text) { canvas.songName = text.trim() }
+                        onCommitted: function (text) { canvas.riceName = text.trim() }
                     }
                     Text {
                         width: railColumn.width
-                        text: "theme song: " + (canvas.themeState.songName === "" ? "(none)" : canvas.themeState.songName)
+                        text: "theme rice: " + (canvas.themeState.riceName === "" ? "(none)" : canvas.themeState.riceName)
                              + " — slots inside the widget resolve off THAT, not this field"
                         color: canvas.chromeDim
                         font.pixelSize: 9
@@ -1992,7 +1992,7 @@ ShellRoot {
                         font.family: "monospace"
                     }
                     // 9 ── palette (the same shell seam) ───────────────────
-                    // A palette spec is a FILE RESOLUTION (song theme, live
+                    // A palette spec is a FILE RESOLUTION (rice theme, live
                     // stage, a base16 scheme), so it goes the same way the
                     // fixture does: one `strillix preview set --theme <spec>`, and
                     // ThemeState's own watch on ROOT/stage/theme.json
@@ -2021,7 +2021,7 @@ ShellRoot {
                         id: themeField
                         width: railColumn.width
                         value: canvas.themeSource
-                        placeholder: "song name, /abs/theme.json, base16.yaml"
+                        placeholder: "rice name, /abs/theme.json, base16.yaml"
                         onCommitted: function (text) {
                             if (text.trim().length > 0) canvas.previewSet(["--theme", text.trim()], "--theme " + text.trim())
                         }

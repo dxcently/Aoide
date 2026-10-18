@@ -314,7 +314,7 @@ const OCR_PSM: u8 = 11;
 /// stdout, exit 0 means stdout holds the result — CONFIRMED live on this rig
 /// (2026-08-16): `Estimating resolution as N` / `Empty page!!` land on
 /// stderr only, never stdout, so there is no output-vs-exit-code mismatch to
-/// guard against here (unlike `song::ipc`'s quirky void-IPC case). NOT
+/// guard against here (unlike `rice::ipc`'s quirky void-IPC case). NOT
 /// unit-tested itself (spawns a real process); [`tesseract_argv`] is.
 pub fn run_tesseract_tsv(image: &Path, psm: u8) -> Result<String, OcrError> {
     let argv = tesseract_argv(image, psm);

@@ -1,12 +1,12 @@
-//! `rice refresh` — a built-in song takes the repo's changes to the files the
+//! `rice refresh` — a built-in rice takes the repo's changes to the files the
 //! machine never edited, and keeps the rest.
 //!
-//! The activation seed copies a built-in song into the machine rices once and
+//! The activation seed copies a built-in rice into the machine rices once and
 //! never overwrites, so a fix shipped in the templates would never arrive. This
 //! is the three-way rule that lets it arrive without clobbering an edit. Per
 //! file: S = the shipped templates copy, M = the machine copy, R = the hash this
-//! command last wrote, kept in `aoide_storage::fs::rice_record(song)` —
-//! outside the song folder, so the §7.5 folder-equality gate, `rice declare`,
+//! command last wrote, kept in `aoide_storage::fs::rice_record(rice)` —
+//! outside the rice folder, so the §7.5 folder-equality gate, `rice declare`,
 //! `rice list`, `rice history` and the widget sync never see it.
 //!
 //! ```text
@@ -38,8 +38,8 @@ use std::path::{Path, PathBuf};
 pub fn register(r: &mut Registry) {
     r.insert(cmd!(
         path: ["rice", "refresh"],
-        summary: "Bring a built-in song's machine copy up to the shipped one: files the machine never edited take the repo's changes, edited files are kept. No <name>: every song in the shipped builtin.json. --check writes nothing and reports each file's state.",
-        args: [arg!("name", "string", false, "Built-in song to refresh; defaults to every song the shipped builtin.json lists.")],
+        summary: "Bring a built-in rice's machine copy up to the shipped one: files the machine never edited take the repo's changes, edited files are kept. No <name>: every rice in the shipped builtin.json. --check writes nothing and reports each file's state.",
+        args: [arg!("name", "string", false, "Built-in rice to refresh; defaults to every rice the shipped builtin.json lists.")],
         flags: [
             flag!("check", "bool", "Report what would change, write nothing."),
             flag!("json", "bool", "Machine-readable output."),
@@ -103,18 +103,18 @@ struct Entry {
     action: Action,
 }
 
-pub(crate) struct SongReport {
-    song: String,
+pub(crate) struct RiceReport {
+    rice: String,
     pub(crate) skipped: Option<String>,
     seeded: bool,
     entries: Vec<Entry>,
     modes: usize,
 }
 
-impl SongReport {
+impl RiceReport {
     fn to_json(&self) -> Value {
         json!({
-            "song": self.song,
+            "rice": self.rice,
             "skipped": self.skipped,
             "seeded": self.seeded,
             "modesFixed": self.modes,
@@ -127,7 +127,7 @@ impl SongReport {
 
 fn handle_rice_refresh(inv: &Invocation) -> Outcome {
     let check = inv.flag_present("check");
-    let Some(templates) = shellbridge::song_templates_dir() else {
+    let Some(templates) = shellbridge::rice_templates_dir() else {
         return Outcome::refuse(
             "rice.refresh",
             Kind::Refused,
@@ -138,19 +138,19 @@ fn handle_rice_refresh(inv: &Invocation) -> Outcome {
     };
     let names: Vec<String> = match inv.args.first() {
         Some(name) => {
-            if !crate::compose::valid_song_name(name) || !templates.join(name).is_dir() {
+            if !crate::compose::valid_rice_name(name) || !templates.join(name).is_dir() {
                 return Outcome::refuse(
                     "rice.refresh",
                     Kind::Refused,
                     format!("`{name}` is not shipped in {}", templates.display()),
-                    "refresh only brings in a song the shipped rices carries",
+                    "refresh only brings in a rice the shipped rices carries",
                     Fix::Run("strillix rice refresh --check".into()),
                 );
             }
             vec![name.clone()]
         }
         None => match read_builtin(&templates) {
-            Ok(b) => b.songs,
+            Ok(b) => b.rices,
             Err(e) => return Outcome::error("rice.refresh", e.error),
         },
     };
@@ -158,17 +158,17 @@ fn handle_rice_refresh(inv: &Invocation) -> Outcome {
     let (mut reports, mut errors) = (Vec::new(), Vec::new());
     shellbridge::with_stage_lock(|| {
         for name in &names {
-            if !crate::compose::valid_song_name(name) {
-                reports.push(SongReport {
-                    song: name.clone(),
-                    skipped: Some("not a valid song name".into()),
+            if !crate::compose::valid_rice_name(name) {
+                reports.push(RiceReport {
+                    rice: name.clone(),
+                    skipped: Some("not a valid rice name".into()),
                     seeded: false,
                     entries: vec![],
                     modes: 0,
                 });
                 continue;
             }
-            match refresh_song(name, &templates, check) {
+            match refresh_rice(name, &templates, check) {
                 Ok(report) => reports.push(report),
                 Err(e) => errors.push(format!("{name}: {e}")),
             }
@@ -179,7 +179,7 @@ fn handle_rice_refresh(inv: &Invocation) -> Outcome {
     let mut changed = Vec::new();
     for r in &reports {
         if let Some(why) = &r.skipped {
-            lines.push(format!("{}: skipped, {why}", r.song));
+            lines.push(format!("{}: skipped, {why}", r.rice));
             continue;
         }
         let acts = |a: Action| r.entries.iter().filter(|e| e.action == a).count();
@@ -187,16 +187,16 @@ fn handle_rice_refresh(inv: &Invocation) -> Outcome {
         let seeded = if r.seeded { "seeded whole, " } else { "" };
         lines.push(format!(
             "{}: {seeded}{} replaced, {} added, {} deleted, {kept} kept, {} in sync",
-            r.song,
+            r.rice,
             acts(Action::Replace),
             acts(Action::Add),
             acts(Action::Delete),
             r.entries.iter().filter(|e| e.state == State::InSync).count(),
         ));
         for e in r.entries.iter().filter(|e| e.state != State::InSync) {
-            lines.push(format!("  {:<15} {:<7} {}/{}", e.state.word(), e.action.word(), r.song, e.path));
+            lines.push(format!("  {:<15} {:<7} {}/{}", e.state.word(), e.action.word(), r.rice, e.path));
             if !check && matches!(e.action, Action::Replace | Action::Add | Action::Delete) {
-                changed.push(format!("{}/{}", r.song, e.path));
+                changed.push(format!("{}/{}", r.rice, e.path));
             }
         }
     }
@@ -207,14 +207,14 @@ fn handle_rice_refresh(inv: &Invocation) -> Outcome {
     let message = if lines.is_empty() {
         format!("nothing built in to {}", if check { "check" } else { "refresh" })
     } else {
-        format!("{verb} {} song(s)\n{}", reports.len(), lines.join("\n"))
+        format!("{verb} {} rice(s)\n{}", reports.len(), lines.join("\n"))
     };
     let status = if errors.is_empty() { Status::Ok } else { Status::Error };
     Outcome::new("rice.refresh", status, message)
         .changed(changed)
         .with_data(json!({
             "check": check,
-            "songs": reports.iter().map(SongReport::to_json).collect::<Vec<_>>(),
+            "rices": reports.iter().map(RiceReport::to_json).collect::<Vec<_>>(),
             "errors": errors,
         }))
 }
@@ -262,13 +262,13 @@ fn hash_file(path: &Path) -> Result<String, String> {
         .map_err(|e| format!("cannot read {}: {e}", path.display()))
 }
 
-/// True when the machine copy of `song` carries a `theme.json`, `rice.nix`,
+/// True when the machine copy of `rice` carries a `theme.json`, `rice.nix`,
 /// `hyprland.conf` or `widgets/` file whose hash differs from the shipped
 /// copy's, or a file the other side lacks — the edits a declare does not carry,
-/// because a rebuild builds the rices version. A song with no machine copy
+/// because a rebuild builds the rices version. A rice with no machine copy
 /// differs in nothing. Symlinks on either side are not compared.
-pub(crate) fn staged_differs(song: &str, templates: &Path) -> Result<bool, String> {
-    let machine = shellbridge::rice_dir(song);
+pub(crate) fn staged_differs(rice: &str, templates: &Path) -> Result<bool, String> {
+    let machine = shellbridge::rice_dir(rice);
     if !machine.is_dir() {
         return Ok(false);
     }
@@ -280,7 +280,7 @@ pub(crate) fn staged_differs(song: &str, templates: &Path) -> Result<bool, Strin
             })
             .collect()
     };
-    let shipped = dressed(walk(&templates.join(song), false)?);
+    let shipped = dressed(walk(&templates.join(rice), false)?);
     let staged = dressed(walk(&machine, false)?);
     if !shipped.keys().eq(staged.keys()) {
         return Ok(true);
@@ -313,7 +313,7 @@ fn path_is_clean(root: &Path, path: &Path) -> bool {
 /// Write beside `target` and rename over it. Deliberately not
 /// `atomic_write_bytes`, whose stale-temp sweep would delete a machine-only
 /// `*.tmp.<pid>` file in the same directory; the dotfile name cannot collide
-/// with a song file.
+/// with a rice file.
 fn write_beside(target: &Path, bytes: &[u8]) -> std::io::Result<()> {
     use std::io::Write;
     let name = target.file_name().expect("file target").to_string_lossy();
@@ -364,8 +364,8 @@ fn fix_modes(path: &Path, apply: bool, root: bool) -> Result<usize, String> {
 
 type Record = BTreeMap<String, String>;
 
-fn read_record(song: &str) -> Result<Record, String> {
-    let path = shellbridge::rice_record(song);
+fn read_record(rice: &str) -> Result<Record, String> {
+    let path = shellbridge::rice_record(rice);
     let raw = match std::fs::read_to_string(&path) {
         Ok(raw) => raw,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Record::new()),
@@ -379,10 +379,10 @@ fn read_record(song: &str) -> Result<Record, String> {
         .unwrap_or_default())
 }
 
-fn write_record(song: &str, source: &Path, files: &Record) -> Result<(), String> {
-    let path = shellbridge::rice_record(song);
+fn write_record(rice: &str, source: &Path, files: &Record) -> Result<(), String> {
+    let path = shellbridge::rice_record(rice);
     let doc = json!({
-        "schemaVersion": "0", "song": song, "source": source.to_string_lossy(), "files": files,
+        "schemaVersion": "0", "rice": rice, "source": source.to_string_lossy(), "files": files,
     });
     let mut text = serde_json::to_string_pretty(&doc).expect("record serializes");
     text.push('\n');
@@ -404,14 +404,14 @@ fn prune_empty_parents(root: &Path, mut dir: &Path) {
     }
 }
 
-pub(crate) fn refresh_song(song: &str, templates: &Path, check: bool) -> Result<SongReport, String> {
-    shellbridge::with_stage_lock(|| refresh_song_locked(song, templates, check))
+pub(crate) fn refresh_rice(rice: &str, templates: &Path, check: bool) -> Result<RiceReport, String> {
+    shellbridge::with_stage_lock(|| refresh_rice_locked(rice, templates, check))
 }
 
-fn refresh_song_locked(song: &str, templates: &Path, check: bool) -> Result<SongReport, String> {
-    let source = templates.join(song);
-    let machine = shellbridge::rice_dir(song);
-    let mut report = SongReport { song: song.into(), skipped: None, seeded: false, entries: vec![], modes: 0 };
+fn refresh_rice_locked(rice: &str, templates: &Path, check: bool) -> Result<RiceReport, String> {
+    let source = templates.join(rice);
+    let machine = shellbridge::rice_dir(rice);
+    let mut report = RiceReport { rice: rice.into(), skipped: None, seeded: false, entries: vec![], modes: 0 };
 
     let store = walk(&source, true)?;
     let store_hashes: BTreeMap<&String, String> =
@@ -440,10 +440,10 @@ fn refresh_song_locked(song: &str, templates: &Path, check: bool) -> Result<Song
                 .and_then(|()| std::fs::rename(&tmp, &machine).map_err(|e| e.to_string()));
             if let Err(e) = seeded {
                 let _ = std::fs::remove_dir_all(&tmp);
-                return Err(format!("failed to seed rices `{song}` from {}: {e}", source.display()));
+                return Err(format!("failed to seed rices `{rice}` from {}: {e}", source.display()));
             }
             let record = store_hashes.iter().map(|(k, h)| ((*k).clone(), h.clone())).collect();
-            write_record(song, &source, &record)?;
+            write_record(rice, &source, &record)?;
             return Ok(report);
         }
         Err(e) => return Err(io_cause("stat", &machine, &e).why),
@@ -451,7 +451,7 @@ fn refresh_song_locked(song: &str, templates: &Path, check: bool) -> Result<Song
 
     report.modes = fix_modes(&machine, !check, true)?;
     let on_machine = walk(&machine, false)?;
-    let old = read_record(song)?;
+    let old = read_record(rice)?;
     let mut record = old.clone();
 
     for (rel, s_hash) in &store_hashes {
@@ -516,7 +516,7 @@ fn refresh_song_locked(song: &str, templates: &Path, check: bool) -> Result<Song
     report.entries.sort_by(|a, b| a.path.cmp(&b.path));
 
     if !check {
-        write_record(song, &source, &record)?;
+        write_record(rice, &source, &record)?;
     }
     Ok(report)
 }
@@ -548,8 +548,8 @@ mod tests {
             fx.builtin(&["sonata"]);
             fx
         }
-        fn builtin(&self, songs: &[&str]) {
-            let doc = json!({ "declared": "sonata", "songs": songs, "packages": [] });
+        fn builtin(&self, rices: &[&str]) {
+            let doc = json!({ "declared": "sonata", "rices": rices, "packages": [] });
             std::fs::write(self.templates.join("builtin.json"), doc.to_string()).unwrap();
         }
         fn store(&self, rel: &str, body: &str) {
@@ -589,7 +589,7 @@ mod tests {
     }
 
     fn file_state(out: &Outcome, rel: &str) -> (String, String) {
-        let f = out.data.as_ref().unwrap()["songs"][0]["files"]
+        let f = out.data.as_ref().unwrap()["rices"][0]["files"]
             .as_array()
             .unwrap()
             .iter()
@@ -723,7 +723,7 @@ mod tests {
         let out = fx.run(&[], false);
         assert_eq!(file_state(&out, "widgets/dock.qml"), ("gone".into(), "delete".into()));
         assert!(!shellbridge::rice_dir("sonata").join("widgets").exists());
-        assert!(shellbridge::rice_dir("sonata").is_dir(), "never the song root");
+        assert!(shellbridge::rice_dir("sonata").is_dir(), "never the rice root");
         assert!(!fx.record().contains_key("widgets/dock.qml"));
     }
 
@@ -761,7 +761,7 @@ mod tests {
         fx.machine("notes.md", "mine");
         let link = shellbridge::rice_dir("sonata").join("link.qml");
         std::os::unix::fs::symlink("/nonexistent", &link).unwrap();
-        fx.store("history/9/x", "shipped takes are not a song file");
+        fx.store("history/9/x", "shipped takes are not a rice file");
         let before = snapshot(&shellbridge::rice_dir("sonata"));
         let out = fx.run(&[], false);
         assert!(out.changed.is_empty());
@@ -788,22 +788,22 @@ mod tests {
     fn read_only_tree_has_its_modes_fixed_and_refreshes() {
         let fx = Fx::new("refresh-modes");
         seeded(&fx);
-        let song = shellbridge::rice_dir("sonata");
+        let rice = shellbridge::rice_dir("sonata");
         fx.store("bar.qml", "B2");
-        std::fs::set_permissions(song.join("bar.qml"), std::fs::Permissions::from_mode(0o444)).unwrap();
-        std::fs::set_permissions(song.join("widgets/dock.qml"), std::fs::Permissions::from_mode(0o444)).unwrap();
-        std::fs::set_permissions(song.join("widgets"), std::fs::Permissions::from_mode(0o555)).unwrap();
-        std::fs::set_permissions(&song, std::fs::Permissions::from_mode(0o555)).unwrap();
+        std::fs::set_permissions(rice.join("bar.qml"), std::fs::Permissions::from_mode(0o444)).unwrap();
+        std::fs::set_permissions(rice.join("widgets/dock.qml"), std::fs::Permissions::from_mode(0o444)).unwrap();
+        std::fs::set_permissions(rice.join("widgets"), std::fs::Permissions::from_mode(0o555)).unwrap();
+        std::fs::set_permissions(&rice, std::fs::Permissions::from_mode(0o555)).unwrap();
         let out = fx.run(&[], false);
         assert_eq!(out.status, Status::Ok, "{}", out.message);
         assert_eq!(fx.read("bar.qml").unwrap(), "B2");
-        for p in [song.clone(), song.join("widgets"), song.join("widgets/dock.qml")] {
+        for p in [rice.clone(), rice.join("widgets"), rice.join("widgets/dock.qml")] {
             assert_ne!(mode(&p) & 0o200, 0, "{}", p.display());
         }
     }
 
     #[test]
-    fn symlinked_song_folder_is_skipped() {
+    fn symlinked_rice_folder_is_skipped() {
         let fx = Fx::new("refresh-symlinked");
         shipped(&fx);
         let elsewhere = fx.root.join("elsewhere");
@@ -812,7 +812,7 @@ mod tests {
         std::os::unix::fs::symlink(&elsewhere, shellbridge::rice_dir("sonata")).unwrap();
         let out = fx.run(&[], false);
         assert_eq!(out.status, Status::Ok);
-        assert!(out.data.as_ref().unwrap()["songs"][0]["skipped"].is_string());
+        assert!(out.data.as_ref().unwrap()["rices"][0]["skipped"].is_string());
         assert_eq!(std::fs::read_dir(&elsewhere).unwrap().count(), 0);
         assert!(!shellbridge::rice_record("sonata").exists());
     }
@@ -825,15 +825,15 @@ mod tests {
         fx.store("widgets/clock.qml", "C1");
         fx.machine("theme.json", "MINE");
         fx.store("theme.json", "L2");
-        let song = shellbridge::rice_dir("sonata");
-        let tree = snapshot(&song);
+        let rice = shellbridge::rice_dir("sonata");
+        let tree = snapshot(&rice);
         let record = std::fs::read(shellbridge::rice_record("sonata")).unwrap();
         let checked = fx.run(&[], true);
-        assert_eq!(snapshot(&song), tree);
+        assert_eq!(snapshot(&rice), tree);
         assert_eq!(std::fs::read(shellbridge::rice_record("sonata")).unwrap(), record);
         assert!(checked.changed.is_empty());
         let applied = fx.run(&[], false);
-        assert_eq!(checked.data.as_ref().unwrap()["songs"], applied.data.as_ref().unwrap()["songs"]);
+        assert_eq!(checked.data.as_ref().unwrap()["rices"], applied.data.as_ref().unwrap()["rices"]);
         assert_eq!(file_state(&checked, "theme.json"), ("edited".into(), "keep".into()));
     }
 
@@ -848,12 +848,12 @@ mod tests {
     }
 
     #[test]
-    fn no_arg_covers_builtin_json_songs_and_an_unknown_name_is_refused() {
+    fn no_arg_covers_builtin_json_rices_and_an_unknown_name_is_refused() {
         let fx = Fx::new("refresh-names");
         shipped(&fx);
         put(&fx.templates.join("other/theme.json"), "O");
         let out = fx.run(&[], false);
-        assert_eq!(out.data.as_ref().unwrap()["songs"].as_array().unwrap().len(), 1);
+        assert_eq!(out.data.as_ref().unwrap()["rices"].as_array().unwrap().len(), 1);
         assert!(!shellbridge::rice_dir("other").exists(), "not in builtin.json");
         let named = fx.run(&["other"], false);
         assert_eq!(named.status, Status::Ok);
@@ -866,7 +866,7 @@ mod tests {
     }
 
     #[test]
-    fn a_refreshed_unedited_song_equals_the_store() {
+    fn a_refreshed_unedited_rice_equals_the_store() {
         let fx = Fx::new("refresh-equal");
         seeded(&fx);
         fx.machine("history/1/x", "scratch");
@@ -888,12 +888,12 @@ mod tests {
         seeded(&fx);
         fx.store("bar.qml", "B2");
         assert!(!fx.run(&[], false).changed.is_empty());
-        let song = shellbridge::rice_dir("sonata");
-        let tree = snapshot(&song);
+        let rice = shellbridge::rice_dir("sonata");
+        let tree = snapshot(&rice);
         let record = std::fs::read(shellbridge::rice_record("sonata")).unwrap();
         let again = fx.run(&[], false);
         assert!(again.changed.is_empty());
-        assert_eq!(snapshot(&song), tree);
+        assert_eq!(snapshot(&rice), tree);
         assert_eq!(std::fs::read(shellbridge::rice_record("sonata")).unwrap(), record);
     }
 
@@ -928,15 +928,15 @@ mod tests {
         fx.machine("bar.qml", "B");
         let outside = fx.root.join("outside");
         put(&outside.join("dock.qml"), "PRECIOUS");
-        let song = shellbridge::rice_dir("sonata");
-        std::os::unix::fs::symlink(&outside, song.join("widgets")).unwrap();
+        let rice = shellbridge::rice_dir("sonata");
+        std::os::unix::fs::symlink(&outside, rice.join("widgets")).unwrap();
         let out = fx.run(&[], false);
         assert_eq!(out.status, Status::Ok, "{}", out.message);
         assert_eq!(std::fs::read_to_string(outside.join("dock.qml")).unwrap(), "PRECIOUS");
         assert_eq!(std::fs::read_dir(&outside).unwrap().count(), 1, "nothing new outside");
         assert_eq!(file_state(&out, "widgets/dock.qml").1, "keep");
         assert_eq!(file_state(&out, "widgets/clock.qml").1, "keep");
-        assert!(is_symlink(&song.join("widgets")));
+        assert!(is_symlink(&rice.join("widgets")));
     }
 
     #[test]
@@ -945,16 +945,16 @@ mod tests {
         seeded(&fx);
         fx.machine("history/1/theme.json", "T");
         fx.machine("drafts/d.json", "D");
-        let song = shellbridge::rice_dir("sonata");
+        let rice = shellbridge::rice_dir("sonata");
         for rel in ["history/1/theme.json", "drafts/d.json"] {
-            std::fs::set_permissions(song.join(rel), std::fs::Permissions::from_mode(0o444)).unwrap();
+            std::fs::set_permissions(rice.join(rel), std::fs::Permissions::from_mode(0o444)).unwrap();
         }
-        std::fs::set_permissions(song.join("history/1"), std::fs::Permissions::from_mode(0o555)).unwrap();
+        std::fs::set_permissions(rice.join("history/1"), std::fs::Permissions::from_mode(0o555)).unwrap();
         fx.run(&[], false);
-        assert_eq!(mode(&song.join("history/1/theme.json")), 0o444);
-        assert_eq!(mode(&song.join("drafts/d.json")), 0o444);
-        assert_eq!(mode(&song.join("history/1")), 0o555);
-        std::fs::set_permissions(song.join("history/1"), std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert_eq!(mode(&rice.join("history/1/theme.json")), 0o444);
+        assert_eq!(mode(&rice.join("drafts/d.json")), 0o444);
+        assert_eq!(mode(&rice.join("history/1")), 0o555);
+        std::fs::set_permissions(rice.join("history/1"), std::fs::Permissions::from_mode(0o755)).unwrap();
     }
 
     #[test]
@@ -978,11 +978,11 @@ mod tests {
         put(&fx.root.join("x/theme.json"), "X");
         fx.builtin(&["../x", "sonata"]);
         let out = fx.run(&[], false);
-        let songs = out.data.as_ref().unwrap()["songs"].as_array().unwrap().clone();
-        assert_eq!(songs[0]["song"], "../x");
-        assert!(songs[0]["skipped"].is_string());
+        let rices = out.data.as_ref().unwrap()["rices"].as_array().unwrap().clone();
+        assert_eq!(rices[0]["rice"], "../x");
+        assert!(rices[0]["skipped"].is_string());
         assert!(shellbridge::rice_dir("sonata").is_dir());
-        assert!(!fx.root.join("aoide/song/x").exists() && !shellbridge::rices_root().join("../x").exists());
+        assert!(!fx.root.join("aoide/rice/x").exists() && !shellbridge::rices_root().join("../x").exists());
     }
 
     #[test]
@@ -1015,7 +1015,7 @@ mod tests {
         write_record("sonata", &fx.templates.join("sonata"), &rec).unwrap();
         let out = fx.run(&[], false);
         assert_eq!(fx.read("history/1/x").unwrap(), "T");
-        assert!(out.data.as_ref().unwrap()["songs"][0]["files"].as_array().unwrap().iter().all(|f| f["path"] != "history/1/x"));
+        assert!(out.data.as_ref().unwrap()["rices"][0]["files"].as_array().unwrap().iter().all(|f| f["path"] != "history/1/x"));
     }
 
     #[test]
@@ -1024,10 +1024,10 @@ mod tests {
         seeded(&fx);
         std::fs::remove_file(fx.templates.join("sonata/widgets/dock.qml")).unwrap();
         std::fs::remove_dir(fx.templates.join("sonata/widgets")).unwrap();
-        let song = shellbridge::rice_dir("sonata");
-        std::fs::set_permissions(song.join("widgets"), std::fs::Permissions::from_mode(0o555)).unwrap();
+        let rice = shellbridge::rice_dir("sonata");
+        std::fs::set_permissions(rice.join("widgets"), std::fs::Permissions::from_mode(0o555)).unwrap();
         let out = fx.run(&[], false);
         assert_eq!(file_state(&out, "widgets/dock.qml"), ("gone".into(), "delete".into()));
-        assert!(!song.join("widgets").exists());
+        assert!(!rice.join("widgets").exists());
     }
 }

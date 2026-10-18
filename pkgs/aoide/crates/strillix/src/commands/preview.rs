@@ -44,15 +44,15 @@ use aoide_protocol::Door;
 pub fn register(r: &mut Registry) {
     r.insert(cmd!(
         path: ["preview"],
-        summary: "Build an isolated preview root (rice stage, fixture state, run/qml copies of the checkout's QML) and launch the standalone quickshell canvas against it -- never the live daemon or its socket dir. <widget> is a bare slot (uses --song), `<song>/<slot>`, or an absolute path under a rices's own widgets/.",
-        args: [arg!("widget", "string", false, "Initial widget to preview: a bare slot name, `<song>/<slot>`, or an absolute rices widgets/ path.")],
+        summary: "Build an isolated preview root (rice stage, fixture state, run/qml copies of the checkout's QML) and launch the standalone quickshell canvas against it -- never the live daemon or its socket dir. <widget> is a bare slot (uses --rice), `<rice>/<slot>`, or an absolute path under a rices's own widgets/.",
+        args: [arg!("widget", "string", false, "Initial widget to preview: a bare slot name, `<rice>/<slot>`, or an absolute rices widgets/ path.")],
         flags: [
-            flag!("song", "string", "Song whose default theme/widgets seed the preview (default \"sonata\")."),
+            flag!("rice", "string", "Rice whose default theme/widgets seed the preview (default \"sonata\")."),
             flag!("fixture", "string", "Fixture set name under pkgs/strillix-shell/preview/fixtures/, or a directory path (default \"many\")."),
             flag!(
                 "theme",
                 "string",
-                "Palette source, resolved through the theme engine: `live` (the resolved live stage twin, read-only), a song name (that song's own rices theme.json), a path to a theme file, or a path to a base16 scheme (JSON or flat key:value lines). Default: the preview's own --song."
+                "Palette source, resolved through the theme engine: `live` (the resolved live stage twin, read-only), a rice name (that rice's own rices theme.json), a path to a theme file, or a path to a base16 scheme (JSON or flat key:value lines). Default: the preview's own --rice."
             ),
             flag!("root", "string", "Preview root directory (default $XDG_RUNTIME_DIR/aoide-preview)."),
             flag!("no-launch", "bool", "Build the root and print it; never spawn quickshell.")
@@ -68,7 +68,7 @@ pub fn register(r: &mut Registry) {
         flags: [
             flag!("root", "string", "Preview root directory (default $XDG_RUNTIME_DIR/aoide-preview)."),
             flag!("widget", "string", "Widget to preview -- same mapping as `strillix preview`'s positional."),
-            flag!("song", "string", "Song context a bare <slot> widget maps under."),
+            flag!("rice", "string", "Rice context a bare <slot> widget maps under."),
             flag!("width", "string", "Widget width in px, or `auto`."),
             flag!("height", "string", "Widget height in px, or `auto`."),
             flag!("anchor", "string", "One of: tl, t, tr, l, c, r, bl, b, br."),
@@ -82,7 +82,7 @@ pub fn register(r: &mut Registry) {
             flag!(
                 "theme",
                 "string",
-                "Palette source, resolved through the theme engine: `live`, a song name, a theme file path, or a base16 scheme path -- same four forms as `strillix preview --theme`."
+                "Palette source, resolved through the theme engine: `live`, a rice name, a theme file path, or a base16 scheme path -- same four forms as `strillix preview --theme`."
             )
         ],
         gated: false,
@@ -92,11 +92,11 @@ pub fn register(r: &mut Registry) {
     ));
     r.insert(cmd!(
         path: ["preview", "declare"],
-        summary: "Copy the previewed widget body and/or palette from a preview root into the checkout's rices/<song> -- the canvas's counterpart of `rice declare`. Byte-identical -> no-op; git commit and rebuild stay the user's own.",
+        summary: "Copy the previewed widget body and/or palette from a preview root into the checkout's rices/<rice> -- the canvas's counterpart of `rice declare`. Byte-identical -> no-op; git commit and rebuild stay the user's own.",
         args: [],
         flags: [
             flag!("root", "string", "Preview root directory (default $XDG_RUNTIME_DIR/aoide-preview)."),
-            flag!("slot", "string", "Widget slot name under rices/<song>/widgets/ (default: the previewed widget file's own basename).")
+            flag!("slot", "string", "Widget slot name under rices/<rice>/widgets/ (default: the previewed widget file's own basename).")
         ],
         gated: true,
         implemented: true,
@@ -177,22 +177,22 @@ fn handle_preview(inv: &Invocation) -> Outcome {
     let control_path = root.join("preview.json");
     let existing = read_control(&control_path);
 
-    let song = inv
+    let rice = inv
         .flags
-        .get("song")
+        .get("rice")
         .cloned()
         .or_else(|| {
             existing
                 .as_ref()
-                .and_then(|d| d.get("song"))
+                .and_then(|d| d.get("rice"))
                 .and_then(Value::as_str)
                 .map(String::from)
         })
         .unwrap_or_else(|| "sonata".to_string());
-    if !strillix_rice::compose::valid_song_name(&song) {
+    if !strillix_rice::compose::valid_rice_name(&rice) {
         return Outcome::usage(
             cmd,
-            format!("`--song {song}` is not a valid song name: must match `^[a-z0-9][a-z0-9-]*$`"),
+            format!("`--rice {rice}` is not a valid rice name: must match `^[a-z0-9][a-z0-9-]*$`"),
         );
     }
 
@@ -220,21 +220,21 @@ fn handle_preview(inv: &Invocation) -> Outcome {
                 .and_then(Value::as_str)
                 .map(String::from)
         })
-        .unwrap_or_else(|| song.clone());
+        .unwrap_or_else(|| rice.clone());
 
     // ── build the root ──────────────────────────────────────────
-    let stage_song_dir = root.join("stage");
-    if let Err(e) = std::fs::create_dir_all(&stage_song_dir) {
-        return Outcome::error(cmd, format!("creating {}: {e}", stage_song_dir.display()));
+    let stage_rice_dir = root.join("stage");
+    if let Err(e) = std::fs::create_dir_all(&stage_rice_dir) {
+        return Outcome::error(cmd, format!("creating {}: {e}", stage_rice_dir.display()));
     }
-    let theme_dst = stage_song_dir.join("theme.json");
-    if let Err(e) = stage_theme(&theme_spec, &song, &checkout, &theme_dst) {
+    let theme_dst = stage_rice_dir.join("theme.json");
+    if let Err(e) = stage_theme(&theme_spec, &rice, &checkout, &theme_dst) {
         return match e {
             ThemeStageError::Usage(m) => Outcome::usage(cmd, m),
             ThemeStageError::Error(m) => Outcome::error(cmd, m),
         };
     }
-    if let Err(e) = write_mode_json(&root, &song) {
+    if let Err(e) = write_mode_json(&root, &rice) {
         return Outcome::error(cmd, e);
     }
     if let Err(e) = seed_static_stage_files(&root) {
@@ -254,11 +254,11 @@ fn handle_preview(inv: &Invocation) -> Outcome {
     if let Err(e) = stage_qml_copies(&checkout, &run_qml_dir) {
         return Outcome::error(cmd, e);
     }
-    let run_qml_songs = run_qml_dir.join("songs");
-    if let Err(e) = stage_song_copies(&checkout, &run_qml_songs) {
+    let run_qml_rices = run_qml_dir.join("rices");
+    if let Err(e) = stage_rice_copies(&checkout, &run_qml_rices) {
         return Outcome::error(cmd, e);
     }
-    if let Err(e) = stage_songs_manifest(&run_qml_songs) {
+    if let Err(e) = stage_rices_manifest(&run_qml_rices) {
         return Outcome::error(cmd, e);
     }
 
@@ -273,12 +273,12 @@ fn handle_preview(inv: &Invocation) -> Outcome {
         }
         doc.insert(
             "widget".to_string(),
-            json!(map_widget(widget, &song, &checkout)),
+            json!(map_widget(widget, &rice, &checkout)),
         );
     }
     doc.entry("widget".to_string())
-        .or_insert_with(|| json!(format!("songs/{song}/conductor.qml")));
-    doc.insert("song".to_string(), json!(song));
+        .or_insert_with(|| json!(format!("rices/{rice}/conductor.qml")));
+    doc.insert("rice".to_string(), json!(rice));
     doc.entry("widgetWidth".to_string())
         .or_insert_with(|| json!("auto"));
     doc.entry("widgetHeight".to_string())
@@ -331,7 +331,7 @@ fn handle_preview(inv: &Invocation) -> Outcome {
         .unwrap_or_default()
         .to_string();
     let widget_abs = resolve_widget_abs(&checkout, &widget_field);
-    let watch = compute_watch_list(&checkout, &song, widget_abs.as_deref());
+    let watch = compute_watch_list(&checkout, &rice, widget_abs.as_deref());
     doc.insert(
         "stage".to_string(),
         Value::Object(compute_stage_map(&checkout, &root, &watch)),
@@ -411,18 +411,18 @@ fn handle_preview_set(inv: &Invocation) -> Outcome {
     let checkout = aoide_storage::fs::flake_root();
     let mut changed: Vec<String> = Vec::new();
 
-    if let Some(song) = inv.flags.get("song") {
-        if !strillix_rice::compose::valid_song_name(song) {
+    if let Some(rice) = inv.flags.get("rice") {
+        if !strillix_rice::compose::valid_rice_name(rice) {
             return Outcome::usage(
                 cmd,
                 format!(
-                    "`--song {song}` is not a valid song name: must match `^[a-z0-9][a-z0-9-]*$`"
+                    "`--rice {rice}` is not a valid rice name: must match `^[a-z0-9][a-z0-9-]*$`"
                 ),
             );
         }
-        doc.insert("song".to_string(), json!(song));
-        changed.push("song".to_string());
-        if let Err(e) = write_mode_json(&root, song) {
+        doc.insert("rice".to_string(), json!(rice));
+        changed.push("rice".to_string());
+        if let Err(e) = write_mode_json(&root, rice) {
             return Outcome::error(cmd, e);
         }
         changed.push("mode".to_string());
@@ -435,21 +435,21 @@ fn handle_preview_set(inv: &Invocation) -> Outcome {
                 format!("--widget `{widget}` may not contain a `..` component"),
             );
         }
-        let song = doc
-            .get("song")
+        let rice = doc
+            .get("rice")
             .and_then(Value::as_str)
             .unwrap_or("sonata")
             .to_string();
         doc.insert(
             "widget".to_string(),
-            json!(map_widget(widget, &song, &checkout)),
+            json!(map_widget(widget, &rice, &checkout)),
         );
         changed.push("widget".to_string());
     }
 
-    if inv.flags.get("widget").is_some() || inv.flags.get("song").is_some() {
-        let song = doc
-            .get("song")
+    if inv.flags.get("widget").is_some() || inv.flags.get("rice").is_some() {
+        let rice = doc
+            .get("rice")
             .and_then(Value::as_str)
             .unwrap_or("sonata")
             .to_string();
@@ -459,7 +459,7 @@ fn handle_preview_set(inv: &Invocation) -> Outcome {
             .unwrap_or_default()
             .to_string();
         let widget_abs = resolve_widget_abs(&checkout, &widget_field);
-        let watch = compute_watch_list(&checkout, &song, widget_abs.as_deref());
+        let watch = compute_watch_list(&checkout, &rice, widget_abs.as_deref());
         doc.insert(
             "stage".to_string(),
             Value::Object(compute_stage_map(&checkout, &root, &watch)),
@@ -577,13 +577,13 @@ fn handle_preview_set(inv: &Invocation) -> Outcome {
     }
 
     if let Some(theme_spec) = inv.flags.get("theme") {
-        let song = doc
-            .get("song")
+        let rice = doc
+            .get("rice")
             .and_then(Value::as_str)
             .unwrap_or("sonata")
             .to_string();
         let dst = root.join("stage").join("theme.json");
-        if let Err(e) = stage_theme(theme_spec, &song, &checkout, &dst) {
+        if let Err(e) = stage_theme(theme_spec, &rice, &checkout, &dst) {
             return match e {
                 ThemeStageError::Usage(m) => Outcome::usage(cmd, m),
                 ThemeStageError::Error(m) => Outcome::error(cmd, m),
@@ -615,7 +615,7 @@ fn handle_preview_set(inv: &Invocation) -> Outcome {
 /// half of the stage-vs-commit split"): the previewed body/palette become
 /// checkout truth. `git commit`/rebuild stay the user's own — this command
 /// never touches git, the live stage, `~/.aoide`, or `run/qml`, only the
-/// checkout's `rices/<song>/`.
+/// checkout's `rices/<rice>/`.
 fn handle_preview_declare(inv: &Invocation) -> Outcome {
     let cmd = "preview.declare";
     let root = match resolve_root(inv.flags.get("root").map(String::as_str)) {
@@ -644,27 +644,27 @@ fn handle_preview_declare(inv: &Invocation) -> Outcome {
         );
     }
 
-    let song = match doc.get("song").and_then(Value::as_str) {
+    let rice = match doc.get("rice").and_then(Value::as_str) {
         Some(s) => s.to_string(),
         None => {
             return Outcome::error(
                 cmd,
                 format!(
-                    "{}: no `song` key -- run `strillix preview` to build the root first",
+                    "{}: no `rice` key -- run `strillix preview` to build the root first",
                     control_path.display()
                 ),
             )
         }
     };
-    // A hand-edited or corrupted `preview.json` could carry a `song` with a
+    // A hand-edited or corrupted `preview.json` could carry a `rice` with a
     // `/` or `..` in it -- validate before it's ever joined into a path
     // (the checkout's `widgets_dir`/`checkout_theme_path` below both key
     // off it directly).
-    if !strillix_rice::compose::valid_song_name(&song) {
+    if !strillix_rice::compose::valid_rice_name(&rice) {
         return Outcome::usage(
             cmd,
             format!(
-                "{}: `song` (`{song}`) is not a valid song name: must match `^[a-z0-9][a-z0-9-]*$`",
+                "{}: `rice` (`{rice}`) is not a valid rice name: must match `^[a-z0-9][a-z0-9-]*$`",
                 control_path.display()
             ),
         );
@@ -686,20 +686,20 @@ fn handle_preview_declare(inv: &Invocation) -> Outcome {
 
     // ── widget body ─────────────────────────────────────
     // Never declare a lane file or an out-of-rices path -- only a
-    // widget under `run/qml/songs/` (mirrors a real rices's own
-    // `<song>/widgets/`) is something `preview declare` has any business
+    // widget under `run/qml/rices/` (mirrors a real rices's own
+    // `<rice>/widgets/`) is something `preview declare` has any business
     // copying back into the checkout. The prefix check alone is a STRING
     // match and nothing more: a `..`-laden field
-    // (`songs/demo/../../../../pkgs/strillix-shell/qml/ShellBridge`)
+    // (`rices/demo/../../../../pkgs/strillix-shell/qml/ShellBridge`)
     // satisfies it while resolving to a lane file entirely outside any
     // rices -- so a `..` component is refused outright, and (the
     // structural check underneath the string one) the field's resolved
     // CHECKOUT file is required to land inside the real checkout rices.
-    if has_parent_dir_component(&widget_field) || !widget_field.starts_with("songs/") {
+    if has_parent_dir_component(&widget_field) || !widget_field.starts_with("rices/") {
         return Outcome::usage(
             cmd,
             format!(
-                "`widget` (`{widget_field}`) is outside run/qml/songs/ -- `preview declare` only declares a song's own widget body, never a lane file"
+                "`widget` (`{widget_field}`) is outside run/qml/rices/ -- `preview declare` only declares a rice's own widget body, never a lane file"
             ),
         );
     }
@@ -730,7 +730,7 @@ fn handle_preview_declare(inv: &Invocation) -> Outcome {
 
     let slot = match inv.flags.get("slot") {
         Some(s) => {
-            if !strillix_rice::compose::valid_song_name(s) {
+            if !strillix_rice::compose::valid_rice_name(s) {
                 return Outcome::usage(
                     cmd,
                     format!(
@@ -756,7 +756,7 @@ fn handle_preview_declare(inv: &Invocation) -> Outcome {
 
     let widgets_dir = checkout
         .join("rices")
-        .join(&song)
+        .join(&rice)
         .join("widgets");
     let target = widgets_dir.join(format!("{slot}.qml"));
 
@@ -789,7 +789,7 @@ fn handle_preview_declare(inv: &Invocation) -> Outcome {
         .get("themeSource")
         .and_then(Value::as_str)
         .unwrap_or("");
-    let palette_status = if theme_source == song {
+    let palette_status = if theme_source == rice {
         "own"
     } else {
         let stage_theme_path = root.join("stage").join("theme.json");
@@ -808,7 +808,7 @@ fn handle_preview_declare(inv: &Invocation) -> Outcome {
 
         let checkout_theme_path = checkout
             .join("rices")
-            .join(&song)
+            .join(&rice)
             .join("theme.json");
         let original_raw = std::fs::read_to_string(&checkout_theme_path).ok();
         let mut checkout_obj: Map<String, Value> = match &original_raw {
@@ -838,7 +838,7 @@ fn handle_preview_declare(inv: &Invocation) -> Outcome {
                 }
             }
         }
-        checkout_obj.remove("song");
+        checkout_obj.remove("rice");
 
         let pretty = match serde_json::to_string_pretty(&Value::Object(checkout_obj)) {
             Ok(s) => s + "\n",
@@ -864,12 +864,12 @@ fn handle_preview_declare(inv: &Invocation) -> Outcome {
     };
 
     let message = if changed.is_empty() {
-        format!("`{song}` already matches the preview -- commit and rebuild are yours")
+        format!("`{rice}` already matches the preview -- commit and rebuild are yours")
     } else {
         format!(
             "{} file(s) declared into {} -- commit and rebuild are yours",
             changed.len(),
-            checkout.join("rices").join(&song).display()
+            checkout.join("rices").join(&rice).display()
         )
     };
 
@@ -1059,7 +1059,7 @@ enum ThemeStageError {
 ///   - `"live"` — the resolved LIVE stage twin (`aoide_storage::fs::
 ///     stage_dir().join("theme.json")`, host overrides included) — read
 ///     only, never written by this command.
-///   - a bare valid song name that has a rices dir — that song's own
+///   - a bare valid rice name that has a rices dir — that rice's own
 ///     `rices/<name>/theme.json`.
 ///   - anything else — a literal path, either to a theme file or to a
 ///     base16 scheme file (JSON or the flat line shape); [`parse_theme_or_base16`]
@@ -1068,7 +1068,7 @@ fn load_theme_container(spec: &str, checkout: &Path) -> Result<Value, ThemeStage
     let src: PathBuf = if spec == "live" {
         aoide_storage::fs::stage_dir().join("theme.json")
     } else if !spec.contains('/')
-        && strillix_rice::compose::valid_song_name(spec)
+        && strillix_rice::compose::valid_rice_name(spec)
         && checkout.join("rices").join(spec).is_dir()
     {
         checkout
@@ -1217,7 +1217,7 @@ fn theme_from_base16(
 /// Every rices dir under the checkout with a `theme.json` of its own,
 /// sorted, `_`-prefixed (shelved) dirs skipped — `preview.json`'s
 /// `"themes"` list, so a future picker UI (or a human reading the
-/// control file) can see every `<song>` form `--theme` will accept
+/// control file) can see every `<rice>` form `--theme` will accept
 /// without having to `ls` the rices by hand.
 fn list_themes(checkout: &Path) -> Vec<String> {
     let rices = checkout.join("rices");
@@ -1243,13 +1243,13 @@ fn list_themes(checkout: &Path) -> Vec<String> {
 /// form to a raw container, `strillix_rice::theme::resolve::resolve` +
 /// `to_json_string` fully resolve it (fallbacks applied — the document
 /// `strillix theme resolve` itself prints; `ThemeState` on the QML side never
-/// sees a null), the string is reparsed, given `"song": <song>`, pretty-
+/// sees a null), the string is reparsed, given `"rice": <rice>`, pretty-
 /// printed with a trailing newline, and atomic-written. A resolve failure
 /// returns [`ThemeStageError::Error`] and leaves `dst` untouched — the
 /// caller must not have already deleted or truncated it.
 fn stage_theme(
     spec: &str,
-    song: &str,
+    rice: &str,
     checkout: &Path,
     dst: &Path,
 ) -> Result<(), ThemeStageError> {
@@ -1265,7 +1265,7 @@ fn stage_theme(
             )))
         }
     };
-    obj.insert("song".to_string(), json!(song));
+    obj.insert("rice".to_string(), json!(rice));
     let pretty = serde_json::to_string_pretty(&Value::Object(obj))
         .map_err(|e| ThemeStageError::Error(format!("serializing resolved theme: {e}")))?
         + "\n";
@@ -1278,10 +1278,10 @@ fn stage_theme(
 /// `ROOT/stage/mode.json` -- the lane QML's own rice-mode read
 /// (`ThemeState.qml`'s `modeFile`, and its callers all expect this file
 /// to exist). Rewritten UNCONDITIONALLY on every `strillix preview` build and
-/// on `preview set --song`: the canvas's mode is always "staging" of the
-/// PREVIEWED song, never whatever the live root's own `rice mode` last
+/// on `preview set --rice`: the canvas's mode is always "staging" of the
+/// PREVIEWED rice, never whatever the live root's own `rice mode` last
 /// set -- there is no live mode to reflect inside an isolated preview.
-fn write_mode_json(root: &Path, song: &str) -> Result<(), String> {
+fn write_mode_json(root: &Path, rice: &str) -> Result<(), String> {
     let path = root.join("stage").join("mode.json");
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)
@@ -1289,8 +1289,8 @@ fn write_mode_json(root: &Path, song: &str) -> Result<(), String> {
     }
     let doc = json!({
         "mode": "staging",
-        "song": song,
-        "stagingSong": song,
+        "rice": rice,
+        "stagingRice": rice,
         "since": aoide_storage::time::now_iso_utc(),
     });
     let pretty = serde_json::to_string_pretty(&doc).map_err(|e| e.to_string())? + "\n";
@@ -1514,14 +1514,14 @@ fn stage_qml_copies(checkout: &Path, run_qml_dir: &Path) -> Result<(), String> {
     Ok(())
 }
 
-/// One copied tree per song dir under `CHECKOUT/rices/` that has a
+/// One copied tree per rice dir under `CHECKOUT/rices/` that has a
 /// `widgets/` dir, `_`-prefixed (shelved) dirs skipped — `ROOT/run/qml/
-/// songs/<song>/` mirrors that song's OWN `widgets/` dir, so `import
+/// rices/<rice>/` mirrors that rice's OWN `widgets/` dir, so `import
 /// "../.."`-shaped relative imports inside a widget resolve exactly as
 /// they do under the live deployed tree.
-fn stage_song_copies(checkout: &Path, run_qml_songs: &Path) -> Result<(), String> {
-    std::fs::create_dir_all(run_qml_songs)
-        .map_err(|e| format!("creating {}: {e}", run_qml_songs.display()))?;
+fn stage_rice_copies(checkout: &Path, run_qml_rices: &Path) -> Result<(), String> {
+    std::fs::create_dir_all(run_qml_rices)
+        .map_err(|e| format!("creating {}: {e}", run_qml_rices.display()))?;
     let rices = checkout.join("rices");
     let Ok(entries) = std::fs::read_dir(&rices) else {
         return Ok(());
@@ -1538,7 +1538,7 @@ fn stage_song_copies(checkout: &Path, run_qml_songs: &Path) -> Result<(), String
         }
         let widgets_dir = path.join("widgets");
         if widgets_dir.is_dir() {
-            copy_tree_fresh(&widgets_dir, &run_qml_songs.join(&name))?;
+            copy_tree_fresh(&widgets_dir, &run_qml_rices.join(&name))?;
         }
     }
     Ok(())
@@ -1546,7 +1546,7 @@ fn stage_song_copies(checkout: &Path, run_qml_songs: &Path) -> Result<(), String
 
 /// `src -> dst` for every `watch` entry that has a copy under `ROOT/run/
 /// qml/`: a rices widget file (`CHECKOUT/rices/<s>/widgets/<rest>`
-/// -> `ROOT/run/qml/songs/<s>/<rest>`) or a shell file
+/// -> `ROOT/run/qml/rices/<s>/<rest>`) or a shell file
 /// (`CHECKOUT/<STRILLIX_SHELL_SRC>/qml/<f>` -> `ROOT/run/qml/<f>`, the flat
 /// one-copy-per-`*.qml` [`stage_qml_copies`] writes — a watch entry nested
 /// deeper than the shell's qml dir has no copy and so no entry). The canvas
@@ -1568,7 +1568,7 @@ fn compute_stage_map(checkout: &Path, root: &Path, watch: &[String]) -> Map<Stri
             let comps = comps_of(rel);
             if comps.len() >= 3 && comps[1] == "widgets" {
                 let dst = run_qml
-                    .join("songs")
+                    .join("rices")
                     .join(&comps[0])
                     .join(comps[2..].join("/"));
                 out.insert(src.clone(), json!(dst.to_string_lossy()));
@@ -1587,14 +1587,14 @@ fn compute_stage_map(checkout: &Path, root: &Path, watch: &[String]) -> Map<Stri
     out
 }
 
-/// `ROOT/run/qml/songs/{manifest,registry}.json` — copied verbatim from the
+/// `ROOT/run/qml/rices/{manifest,registry}.json` — copied verbatim from the
 /// LIVE deployed tree (`aoide_storage::fs::run_qml_dir()`) when present,
 /// else the literal `{}` (a fresh host with no `strillix rice stage` history
 /// yet has neither file).
-fn stage_songs_manifest(run_qml_songs: &Path) -> Result<(), String> {
+fn stage_rices_manifest(run_qml_rices: &Path) -> Result<(), String> {
     for name in ["manifest.json", "registry.json"] {
-        let src = aoide_storage::fs::run_qml_dir().join("songs").join(name);
-        let dst = run_qml_songs.join(name);
+        let src = aoide_storage::fs::run_qml_dir().join("rices").join(name);
+        let dst = run_qml_rices.join(name);
         match std::fs::read(&src) {
             Ok(bytes) => aoide_storage::fs::atomic_write_bytes(&dst, &bytes),
             Err(_) => aoide_storage::fs::atomic_write(&dst, "{}"),
@@ -1608,7 +1608,7 @@ fn stage_songs_manifest(run_qml_songs: &Path) -> Result<(), String> {
 
 /// True if any component of `s` is a literal `..` -- the structural half of
 /// every widget-path guard in this module: a `..`-laden widget spec
-/// resolves (`songs/<song>/../../..`) to a file entirely outside the tree
+/// resolves (`rices/<rice>/../../..`) to a file entirely outside the tree
 /// a string-prefix check thinks it's confined to. Checked at every site a
 /// widget spec enters this module raw -- the positional arg in `preview`,
 /// `--widget` in `preview set`, and (as a second, independent guard) the
@@ -1620,12 +1620,12 @@ fn has_parent_dir_component(s: &str) -> bool {
 }
 
 /// Pure: an absolute path under `CHECKOUT/rices/<s>/widgets/<file>`
-/// rewrites to `songs/<s>/<file>` (so it resolves inside the isolated
+/// rewrites to `rices/<s>/<file>` (so it resolves inside the isolated
 /// root's own run/qml copies); any other absolute path is kept verbatim (the
 /// canvas reports the load error live — this never checks existence);
-/// `<song>/<slot>` and a bare `<slot>` (against `song`) both map to
-/// `songs/<song>/<slot>.qml`.
-fn map_widget(widget: &str, song: &str, checkout: &Path) -> String {
+/// `<rice>/<slot>` and a bare `<slot>` (against `rice`) both map to
+/// `rices/<rice>/<slot>.qml`.
+fn map_widget(widget: &str, rice: &str, checkout: &Path) -> String {
     let p = Path::new(widget);
     if p.is_absolute() {
         let rices = checkout.join("rices");
@@ -1636,30 +1636,30 @@ fn map_widget(widget: &str, song: &str, checkout: &Path) -> String {
                 .collect();
             if comps.len() >= 3 && comps[1] == "widgets" {
                 let file = comps[2..].join("/");
-                return format!("songs/{}/{file}", comps[0]);
+                return format!("rices/{}/{file}", comps[0]);
             }
         }
         return widget.to_string();
     }
-    if widget.starts_with("songs/") {
+    if widget.starts_with("rices/") {
         // Already the canvas's own spelling -- and exactly what
         // `preview.json`'s `widget` field itself holds, so `preview set
-        // --widget songs/sonata/conductor.qml` (round-tripping a value
+        // --widget rices/sonata/conductor.qml` (round-tripping a value
         // read back from the control file) must pass through unchanged.
         // Falling into the `split_once` branch below would double-prefix
-        // it (`songs/songs/sonata/conductor.qml.qml`).
+        // it (`rices/rices/sonata/conductor.qml.qml`).
         return widget.to_string();
     }
     if let Some((s, slot)) = widget.split_once('/') {
-        return format!("songs/{s}/{slot}.qml");
+        return format!("rices/{s}/{slot}.qml");
     }
-    format!("songs/{song}/{widget}.qml")
+    format!("rices/{rice}/{widget}.qml")
 }
 
 /// Resolve a `preview.json` `widget` field to the CHECKOUT file it names
 /// (the file the designer edits -- never the root's own copy of it):
 /// absolute already (an out-of-rices path `map_widget` passed through
-/// verbatim) is canonicalized directly; `songs/<s>/<rest>` maps to
+/// verbatim) is canonicalized directly; `rices/<s>/<rest>` maps to
 /// `CHECKOUT/rices/<s>/widgets/<rest>`; any other relative
 /// spelling is a shell file, `CHECKOUT/pkgs/strillix-shell/qml/
 /// <rest>`. A `..` component is refused (`None`), as is a missing file --
@@ -1672,11 +1672,11 @@ pub(crate) fn resolve_widget_abs(checkout: &Path, widget_field: &str) -> Option<
     let p = Path::new(widget_field);
     let candidate = if p.is_absolute() {
         p.to_path_buf()
-    } else if let Some(rest) = widget_field.strip_prefix("songs/") {
-        let (song, file) = rest.split_once('/')?;
+    } else if let Some(rest) = widget_field.strip_prefix("rices/") {
+        let (rice, file) = rest.split_once('/')?;
         checkout
             .join("rices")
-            .join(song)
+            .join(rice)
             .join("widgets")
             .join(file)
     } else {
@@ -1689,16 +1689,16 @@ pub(crate) fn resolve_widget_abs(checkout: &Path, widget_field: &str) -> Option<
 }
 
 /// The P2 canvas's hot-reload watch set (task: live reload + `preview
-/// declare`): every `*.qml` under the CURRENT song's own
-/// `checkout/rices/<song>/widgets/` (sorted), plus the previewed
+/// declare`): every `*.qml` under the CURRENT rice's own
+/// `checkout/rices/<rice>/widgets/` (sorted), plus the previewed
 /// widget's own resolved file when it lives somewhere else -- a foreign
-/// song's widget, or a lane path passed in verbatim. Pure over an
+/// rice's widget, or a lane path passed in verbatim. Pure over an
 /// already-resolved absolute widget path so it needs no env, no preview
 /// root, and no live filesystem beyond the two directories it's handed.
-fn compute_watch_list(checkout: &Path, song: &str, widget_abs: Option<&Path>) -> Vec<String> {
+fn compute_watch_list(checkout: &Path, rice: &str, widget_abs: Option<&Path>) -> Vec<String> {
     let widgets_dir = checkout
         .join("rices")
-        .join(song)
+        .join(rice)
         .join("widgets");
     let mut out: Vec<String> = Vec::new();
     if let Ok(entries) = std::fs::read_dir(&widgets_dir) {
@@ -2032,7 +2032,7 @@ mod tests {
     }
     use std::collections::BTreeMap;
 
-    /// A fake CHECKOUT: `flake.nix`, a couple of lane qml files, two songs
+    /// A fake CHECKOUT: `flake.nix`, a couple of lane qml files, two rices
     /// (one with a `_`-prefixed shelved sibling that must be skipped).
     fn fake_checkout(dir: &Path) {
         std::fs::create_dir_all(dir).unwrap();
@@ -2086,7 +2086,7 @@ mod tests {
 
     #[test]
     fn root_builder_creates_the_exact_tree_with_manifest_fallback() {
-        // `stage_songs_manifest` reads `aoide_storage::fs::run_qml_dir()`,
+        // `stage_rices_manifest` reads `aoide_storage::fs::run_qml_dir()`,
         // which honors `$AOIDE_STAGE_DIR` (process-global,
         // `pkgs/aoide/crates/AGENTS.md`'s "per-crate tests only" note) --
         // pin it at a scratch dir with no deployed manifest so this test
@@ -2103,13 +2103,13 @@ mod tests {
         fake_checkout(&checkout);
         std::env::set_var("AOIDE_STAGE_DIR", base.join("unrelated-live-stage"));
 
-        let stage_song_dir = root.join("stage");
-        std::fs::create_dir_all(&stage_song_dir).unwrap();
+        let stage_rice_dir = root.join("stage");
+        std::fs::create_dir_all(&stage_rice_dir).unwrap();
         stage_theme(
             "sonata",
             "sonata",
             &checkout,
-            &stage_song_dir.join("theme.json"),
+            &stage_rice_dir.join("theme.json"),
         )
         .unwrap();
         write_mode_json(&root, "sonata").unwrap();
@@ -2122,9 +2122,9 @@ mod tests {
 
         let run_qml_dir = root.join("run").join("qml");
         stage_qml_copies(&checkout, &run_qml_dir).unwrap();
-        let run_qml_songs = run_qml_dir.join("songs");
-        stage_song_copies(&checkout, &run_qml_songs).unwrap();
-        stage_songs_manifest(&run_qml_songs).unwrap();
+        let run_qml_rices = run_qml_dir.join("rices");
+        stage_rice_copies(&checkout, &run_qml_rices).unwrap();
+        stage_rices_manifest(&run_qml_rices).unwrap();
 
         // qml copies: only *.qml, regular files holding the checkout's bytes.
         let bridge = run_qml_dir.join("ShellBridge.qml");
@@ -2142,25 +2142,25 @@ mod tests {
             .is_symlink());
         assert_eq!(std::fs::read_to_string(&icon).unwrap(), "<svg/>\n");
 
-        // song copies: sonata + etude present as real dirs, _shelved skipped.
-        assert!(!std::fs::symlink_metadata(run_qml_songs.join("sonata"))
+        // rice copies: sonata + etude present as real dirs, _shelved skipped.
+        assert!(!std::fs::symlink_metadata(run_qml_rices.join("sonata"))
             .unwrap()
             .file_type()
             .is_symlink());
         assert_eq!(
-            std::fs::read_to_string(run_qml_songs.join("sonata/conductor.qml")).unwrap(),
+            std::fs::read_to_string(run_qml_rices.join("sonata/conductor.qml")).unwrap(),
             "// conductor\n"
         );
-        assert!(run_qml_songs.join("etude").is_dir());
-        assert!(!run_qml_songs.join("_shelved").exists());
+        assert!(run_qml_rices.join("etude").is_dir());
+        assert!(!run_qml_rices.join("_shelved").exists());
 
-        // manifest/registry fallback to `{}` (no deployed run/qml/songs on this host env).
+        // manifest/registry fallback to `{}` (no deployed run/qml/rices on this host env).
         assert_eq!(
-            std::fs::read_to_string(run_qml_songs.join("manifest.json")).unwrap(),
+            std::fs::read_to_string(run_qml_rices.join("manifest.json")).unwrap(),
             "{}"
         );
         assert_eq!(
-            std::fs::read_to_string(run_qml_songs.join("registry.json")).unwrap(),
+            std::fs::read_to_string(run_qml_rices.join("registry.json")).unwrap(),
             "{}"
         );
 
@@ -2181,15 +2181,15 @@ mod tests {
         // GrimoireLedger (grimoire.json), and state/usage.json -- so none
         // of those components starts with a parse warning.
         let mode: Value = serde_json::from_str(
-            &std::fs::read_to_string(stage_song_dir.join("mode.json")).unwrap(),
+            &std::fs::read_to_string(stage_rice_dir.join("mode.json")).unwrap(),
         )
         .unwrap();
         assert_eq!(mode["mode"], "staging");
-        assert_eq!(mode["song"], "sonata");
-        assert_eq!(mode["stagingSong"], "sonata");
+        assert_eq!(mode["rice"], "sonata");
+        assert_eq!(mode["stagingRice"], "sonata");
         assert!(mode["since"].as_str().is_some_and(|s| !s.is_empty()));
-        assert!(stage_song_dir.join("wallpaper.json").is_file());
-        assert!(stage_song_dir.join("grimoire.json").is_file());
+        assert!(stage_rice_dir.join("wallpaper.json").is_file());
+        assert!(stage_rice_dir.join("grimoire.json").is_file());
         assert!(root.join("state").join("usage.json").is_file());
 
         match saved_stage_dir {
@@ -2346,7 +2346,7 @@ mod tests {
         let dst = base.join("out-theme.json");
         stage_theme("live", "sonata", &checkout, &dst).unwrap();
         let v: Value = serde_json::from_str(&std::fs::read_to_string(&dst).unwrap()).unwrap();
-        assert_eq!(v["song"], "sonata");
+        assert_eq!(v["rice"], "sonata");
         assert_eq!(v["palette"]["bg"], "#010101");
         assert_eq!(v["palette"]["accent"], "#ab00ab");
 
@@ -2357,19 +2357,19 @@ mod tests {
     }
 
     #[test]
-    fn spec_song_name_reads_that_songs_own_rices_theme() {
-        let base = scratch("theme_song");
+    fn spec_rice_name_reads_that_rices_own_rices_theme() {
+        let base = scratch("theme_rice");
         let checkout = base.join("checkout");
         fake_checkout(&checkout);
         let dst = base.join("out-theme.json");
 
-        // spec is "etude" while the preview's own --song is "sonata" --
-        // the two are independent: --theme names ANY rices song.
+        // spec is "etude" while the preview's own --rice is "sonata" --
+        // the two are independent: --theme names ANY rices rice.
         stage_theme("etude", "sonata", &checkout, &dst).unwrap();
         let v: Value = serde_json::from_str(&std::fs::read_to_string(&dst).unwrap()).unwrap();
         assert_eq!(
-            v["song"], "sonata",
-            "the CURRENT preview song is inserted, not the theme's source song"
+            v["rice"], "sonata",
+            "the CURRENT preview rice is inserted, not the theme's source rice"
         );
         assert_eq!(v["palette"]["bg"], "#222222");
         assert_eq!(v["palette"]["accent"], "#00ffff");
@@ -2389,7 +2389,7 @@ mod tests {
         assert!(body.ends_with('\n'));
         assert!(!body.ends_with("\n\n"));
         let v: Value = serde_json::from_str(&body).unwrap();
-        assert_eq!(v["song"], "sonata");
+        assert_eq!(v["rice"], "sonata");
         assert_eq!(v["palette"]["bg"], "#000000");
         // resolved output, not a verbatim copy: the null component tiers
         // fall back to concrete palette-derived colours.
@@ -2411,7 +2411,7 @@ mod tests {
 
         stage_theme(&src.to_string_lossy(), "sonata", &checkout, &dst).unwrap();
         let v: Value = serde_json::from_str(&std::fs::read_to_string(&dst).unwrap()).unwrap();
-        assert_eq!(v["song"], "sonata");
+        assert_eq!(v["rice"], "sonata");
         assert_eq!(v["palette"]["bg"], "#1e1e2e"); // base00
         assert_eq!(v["palette"]["fg"], "#d8d8e8"); // base05
         assert_eq!(v["palette"]["accent"], "#8888e8"); // base0D
@@ -2491,11 +2491,11 @@ mod tests {
     }
 
     #[test]
-    fn themes_list_is_sorted_and_skips_shelved_and_theme_less_songs() {
+    fn themes_list_is_sorted_and_skips_shelved_and_theme_less_rices() {
         let base = scratch("themes_list");
         let checkout = base.join("checkout");
         fake_checkout(&checkout);
-        // a third song with no theme.json of its own -- must not appear.
+        // a third rice with no theme.json of its own -- must not appear.
         std::fs::create_dir_all(checkout.join("rices/no-theme/widgets")).unwrap();
 
         let got = list_themes(&checkout);
@@ -2521,8 +2521,8 @@ mod tests {
         std::fs::create_dir_all(root).unwrap();
         let mut doc = serde_json::Map::new();
         doc.insert("schemaVersion".to_string(), json!("0"));
-        doc.insert("widget".to_string(), json!("songs/sonata/conductor.qml"));
-        doc.insert("song".to_string(), json!("sonata"));
+        doc.insert("widget".to_string(), json!("rices/sonata/conductor.qml"));
+        doc.insert("rice".to_string(), json!("sonata"));
         doc.insert("widgetWidth".to_string(), json!("auto"));
         doc.insert("widgetHeight".to_string(), json!("auto"));
         doc.insert("widgetAspectLock".to_string(), json!(false));
@@ -2596,7 +2596,7 @@ mod tests {
             ("viewport", "nonsense"),
             ("aspect-lock", "maybe"),
             ("widget-aspect-lock", "sure"),
-            ("song", "Not_Valid"),
+            ("rice", "Not_Valid"),
         ];
         for (flag, value) in bad {
             let outcome =
@@ -2615,7 +2615,7 @@ mod tests {
         // child env this root's own quickshell process runs under
         // (`child_env` -- AOIDE_DAEMON_SOCKET repointed into the root,
         // XDG_RUNTIME_DIR elsewhere) must not make `preview set --root
-        // <root> --theme <song>` refuse itself, which is exactly the
+        // <root> --theme <rice>` refuse itself, which is exactly the
         // regression owner 588 found (every rail→CLI action dead from
         // inside any canvas). Live computer-use evidence of a real click is
         // the coordinator's job, not this test's.
@@ -2690,16 +2690,16 @@ mod tests {
         let abs = checkout.join("rices/sonata/widgets/conductor.qml");
         assert_eq!(
             map_widget(&abs.to_string_lossy(), "sonata", &checkout),
-            "songs/sonata/conductor.qml"
+            "rices/sonata/conductor.qml"
         );
 
         assert_eq!(
             map_widget("sonata/conductor", "etude", &checkout),
-            "songs/sonata/conductor.qml"
+            "rices/sonata/conductor.qml"
         );
         assert_eq!(
             map_widget("conductor", "etude", &checkout),
-            "songs/etude/conductor.qml"
+            "rices/etude/conductor.qml"
         );
 
         assert_eq!(
@@ -2709,11 +2709,11 @@ mod tests {
 
         // already the canvas's own spelling (round-tripped from
         // `preview.json` itself, e.g. `preview set --widget
-        // songs/sonata/conductor.qml`) -- must pass through unchanged,
-        // never double-prefixed to `songs/songs/sonata/conductor.qml.qml`.
+        // rices/sonata/conductor.qml`) -- must pass through unchanged,
+        // never double-prefixed to `rices/rices/sonata/conductor.qml.qml`.
         assert_eq!(
-            map_widget("songs/sonata/conductor.qml", "etude", &checkout),
-            "songs/sonata/conductor.qml"
+            map_widget("rices/sonata/conductor.qml", "etude", &checkout),
+            "rices/sonata/conductor.qml"
         );
     }
 
@@ -2798,7 +2798,7 @@ mod tests {
     // ── watch list (pure) ──────────────────────────────────────
 
     #[test]
-    fn compute_watch_list_lists_song_widgets_plus_a_foreign_widget_file() {
+    fn compute_watch_list_lists_rice_widgets_plus_a_foreign_widget_file() {
         let base = scratch("watch_list");
         let checkout = base.join("checkout");
         fake_checkout(&checkout);
@@ -2808,8 +2808,8 @@ mod tests {
             .join("rices/sonata/widgets/conductor.qml")
             .to_string_lossy()
             .into_owned();
-        let only_song = compute_watch_list(&checkout, "sonata", None);
-        assert_eq!(only_song, vec![sonata_conductor.clone()]);
+        let only_rice = compute_watch_list(&checkout, "sonata", None);
+        assert_eq!(only_rice, vec![sonata_conductor.clone()]);
 
         // a foreign widget (etude's dock.qml) is appended, staying sorted.
         let foreign = checkout.join("rices/etude/widgets/dock.qml");
@@ -2823,7 +2823,7 @@ mod tests {
             expected
         );
 
-        // the widget's own file, when it's ALREADY inside the song's own
+        // the widget's own file, when it's ALREADY inside the rice's own
         // widgets/, is never duplicated.
         let own = checkout.join("rices/sonata/widgets/conductor.qml");
         assert_eq!(
@@ -2865,14 +2865,14 @@ mod tests {
     }
 
     #[test]
-    fn declare_refuses_a_widget_outside_songs_prefix() {
+    fn declare_refuses_a_widget_outside_rices_prefix() {
         let base = scratch("declare_refuse_facet");
         let checkout = base.join("checkout");
         fake_checkout(&checkout);
         let root = base.join("root");
         write_seed_control(
             &root,
-            json!({"widget": "ShellBridge.qml", "song": "sonata"}),
+            json!({"widget": "ShellBridge.qml", "rice": "sonata"}),
         );
 
         let outcome = with_flake_root(&checkout, || {
@@ -2888,20 +2888,20 @@ mod tests {
         fake_checkout(&checkout);
         let root = base.join("root");
 
-        // "songs/etude/dock.qml" resolves to the CHECKOUT's own
+        // "rices/etude/dock.qml" resolves to the CHECKOUT's own
         // `rices/etude/widgets/dock.qml` -- never to anything under
         // `root` -- and the containment check requires exactly that file
         // to live inside a real rices `widgets/` dir. The stale link
         // planted under `root` below must be ignored, not followed.
         let etude_dock = checkout.join("rices/etude/widgets/dock.qml");
         std::fs::write(&etude_dock, "// foreign dock body\n").unwrap();
-        let link_dir = root.join("run/qml/songs/etude");
+        let link_dir = root.join("run/qml/rices/etude");
         std::fs::create_dir_all(&link_dir).unwrap();
         std::os::unix::fs::symlink(&etude_dock, link_dir.join("dock.qml")).unwrap();
 
         write_seed_control(
             &root,
-            json!({"widget": "songs/etude/dock.qml", "song": "sonata", "themeSource": "sonata"}),
+            json!({"widget": "rices/etude/dock.qml", "rice": "sonata", "themeSource": "sonata"}),
         );
 
         let outcome = with_flake_root(&checkout, || {
@@ -2933,7 +2933,7 @@ mod tests {
         fake_checkout(&checkout);
         let root = base.join("root");
 
-        let link_dir = root.join("run/qml/songs/sonata");
+        let link_dir = root.join("run/qml/rices/sonata");
         std::fs::create_dir_all(&link_dir).unwrap();
         std::os::unix::fs::symlink(
             checkout.join("rices/sonata/widgets/conductor.qml"),
@@ -2943,7 +2943,7 @@ mod tests {
 
         write_seed_control(
             &root,
-            json!({"widget": "songs/sonata/conductor.qml", "song": "sonata", "themeSource": "sonata"}),
+            json!({"widget": "rices/sonata/conductor.qml", "rice": "sonata", "themeSource": "sonata"}),
         );
 
         let outcome = with_flake_root(&checkout, || {
@@ -2973,7 +2973,7 @@ mod tests {
         // rices per the containment check (BLOCKER 1 fix-up).
         let etude_dock = checkout.join("rices/etude/widgets/dock.qml");
         std::fs::write(&etude_dock, "// same body\n").unwrap();
-        let link_dir = root.join("run/qml/songs/etude");
+        let link_dir = root.join("run/qml/rices/etude");
         std::fs::create_dir_all(&link_dir).unwrap();
         std::os::unix::fs::symlink(&etude_dock, link_dir.join("dock.qml")).unwrap();
 
@@ -2983,7 +2983,7 @@ mod tests {
 
         write_seed_control(
             &root,
-            json!({"widget": "songs/etude/dock.qml", "song": "sonata", "themeSource": "sonata"}),
+            json!({"widget": "rices/etude/dock.qml", "rice": "sonata", "themeSource": "sonata"}),
         );
 
         let outcome = with_flake_root(&checkout, || {
@@ -3001,7 +3001,7 @@ mod tests {
     }
 
     #[test]
-    fn declare_palette_merge_preserves_foreign_keys_and_drops_song() {
+    fn declare_palette_merge_preserves_foreign_keys_and_drops_rice() {
         let base = scratch("declare_palette_merge");
         let checkout = base.join("checkout");
         fake_checkout(&checkout);
@@ -3009,7 +3009,7 @@ mod tests {
 
         // widget body already matches its own slot -- isolates this test to
         // the palette half.
-        let link_dir = root.join("run/qml/songs/sonata");
+        let link_dir = root.join("run/qml/rices/sonata");
         std::fs::create_dir_all(&link_dir).unwrap();
         std::os::unix::fs::symlink(
             checkout.join("rices/sonata/widgets/conductor.qml"),
@@ -3021,20 +3021,20 @@ mod tests {
         std::fs::create_dir_all(&stage_dir).unwrap();
         std::fs::write(
             stage_dir.join("theme.json"),
-            r##"{"schemaVersion":"0","palette":{"bg":"#010101","fg":"#fefefe","accent":"#ab00ab","urgent":"#cd0000"},"bar":{"bg":"#010101","fg":"#fefefe","accent":"#ab00ab"},"notif":{"bg":"#010101","fg":"#fefefe","urgent":"#cd0000"},"window":{"border":"#ab00ab","borderInactive":"#010101"},"song":"sonata"}"##,
+            r##"{"schemaVersion":"0","palette":{"bg":"#010101","fg":"#fefefe","accent":"#ab00ab","urgent":"#cd0000"},"bar":{"bg":"#010101","fg":"#fefefe","accent":"#ab00ab"},"notif":{"bg":"#010101","fg":"#fefefe","urgent":"#cd0000"},"window":{"border":"#ab00ab","borderInactive":"#010101"},"rice":"sonata"}"##,
         )
         .unwrap();
 
         let checkout_theme = checkout.join("rices/sonata/theme.json");
         std::fs::write(
             &checkout_theme,
-            r##"{"schemaVersion":"0","song":"stale","widgets":{"conductor":{"kind":"surface"}},"wallpaperPick":"cover.png","palette":{"bg":"#111111","fg":"#eeeeee","accent":"#ff00ff","urgent":"#ff0000"}}"##,
+            r##"{"schemaVersion":"0","rice":"stale","widgets":{"conductor":{"kind":"surface"}},"wallpaperPick":"wallpaper.png","palette":{"bg":"#111111","fg":"#eeeeee","accent":"#ff00ff","urgent":"#ff0000"}}"##,
         )
         .unwrap();
 
         write_seed_control(
             &root,
-            json!({"widget": "songs/sonata/conductor.qml", "song": "sonata", "themeSource": "live"}),
+            json!({"widget": "rices/sonata/conductor.qml", "rice": "sonata", "themeSource": "live"}),
         );
 
         let outcome = with_flake_root(&checkout, || {
@@ -3053,24 +3053,24 @@ mod tests {
             serde_json::from_str(&std::fs::read_to_string(&checkout_theme).unwrap()).unwrap();
         assert_eq!(merged["palette"]["bg"], "#010101");
         assert!(
-            merged.get("song").is_none(),
-            "song key must never be written to the checkout theme.json"
+            merged.get("rice").is_none(),
+            "rice key must never be written to the checkout theme.json"
         );
         assert_eq!(
             merged["widgets"]["conductor"]["kind"], "surface",
             "foreign keys survive the merge"
         );
-        assert_eq!(merged["wallpaperPick"], "cover.png");
+        assert_eq!(merged["wallpaperPick"], "wallpaper.png");
     }
 
     #[test]
-    fn declare_skips_palette_when_theme_source_is_the_songs_own() {
+    fn declare_skips_palette_when_theme_source_is_the_rices_own() {
         let base = scratch("declare_palette_own");
         let checkout = base.join("checkout");
         fake_checkout(&checkout);
         let root = base.join("root");
 
-        let link_dir = root.join("run/qml/songs/sonata");
+        let link_dir = root.join("run/qml/rices/sonata");
         std::fs::create_dir_all(&link_dir).unwrap();
         std::os::unix::fs::symlink(
             checkout.join("rices/sonata/widgets/conductor.qml"),
@@ -3080,7 +3080,7 @@ mod tests {
 
         write_seed_control(
             &root,
-            json!({"widget": "songs/sonata/conductor.qml", "song": "sonata", "themeSource": "sonata"}),
+            json!({"widget": "rices/sonata/conductor.qml", "rice": "sonata", "themeSource": "sonata"}),
         );
 
         // no root/stage/theme.json at all -- if the palette step tried
@@ -3101,9 +3101,9 @@ mod tests {
     #[test]
     fn declare_refuses_a_widget_field_with_a_parent_dir_component_even_when_it_resolves_through_a_real_symlink(
     ) {
-        // BLOCKER 1: `starts_with("songs/")` alone is a string match -- a
+        // BLOCKER 1: `starts_with("rices/")` alone is a string match -- a
         // `..`-laden persisted `widget` field satisfies it while
-        // canonicalizing, through a REAL `run/qml/songs/<song>` directory
+        // canonicalizing, through a REAL `run/qml/rices/<rice>` directory
         // symlink (what an older, symlinking root left behind), straight out
         // to a lane file entirely outside any rices. Reproduces the
         // coordinator's own review shape (`demo/../../../../pkgs/strillix-shell/
@@ -3113,17 +3113,17 @@ mod tests {
         fake_checkout(&checkout);
         let root = base.join("root");
 
-        let songs_dir = root.join("run/qml/songs");
-        std::fs::create_dir_all(&songs_dir).unwrap();
+        let rices_dir = root.join("run/qml/rices");
+        std::fs::create_dir_all(&rices_dir).unwrap();
         std::os::unix::fs::symlink(
             checkout.join("rices/sonata/widgets"),
-            songs_dir.join("sonata"),
+            rices_dir.join("sonata"),
         )
         .unwrap();
 
         write_seed_control(
             &root,
-            json!({"widget": format!("songs/sonata/../../../../{STRILLIX_SHELL_SRC}/qml/ShellBridge.qml"), "song": "sonata"}),
+            json!({"widget": format!("rices/sonata/../../../../{STRILLIX_SHELL_SRC}/qml/ShellBridge.qml"), "rice": "sonata"}),
         );
 
         let outcome = with_flake_root(&checkout, || {
@@ -3142,13 +3142,13 @@ mod tests {
     fn declare_refuses_an_invalid_slot_name() {
         // BLOCKER 2: `--slot` was joined into `widgets_dir.join(...)`
         // completely unvalidated -- `--slot "../../../pwned/evil"` wrote
-        // `song/pwned/evil.qml`, outside the intended `widgets/` dir.
+        // `rice/pwned/evil.qml`, outside the intended `widgets/` dir.
         let base = scratch("declare_bad_slot");
         let checkout = base.join("checkout");
         fake_checkout(&checkout);
         let root = base.join("root");
 
-        let link_dir = root.join("run/qml/songs/sonata");
+        let link_dir = root.join("run/qml/rices/sonata");
         std::fs::create_dir_all(&link_dir).unwrap();
         std::os::unix::fs::symlink(
             checkout.join("rices/sonata/widgets/conductor.qml"),
@@ -3158,7 +3158,7 @@ mod tests {
 
         write_seed_control(
             &root,
-            json!({"widget": "songs/sonata/conductor.qml", "song": "sonata", "themeSource": "sonata"}),
+            json!({"widget": "rices/sonata/conductor.qml", "rice": "sonata", "themeSource": "sonata"}),
         );
 
         let outcome = with_flake_root(&checkout, || {
@@ -3182,7 +3182,7 @@ mod tests {
         let run_qml_dir = base.join("root/run/qml");
         // A root built by an earlier, symlinking build: the link must be
         // replaced by a copy, never written through.
-        std::fs::create_dir_all(run_qml_dir.join("songs")).unwrap();
+        std::fs::create_dir_all(run_qml_dir.join("rices")).unwrap();
         std::os::unix::fs::symlink(
             checkout.join(STRILLIX_SHELL_SRC).join("qml").join("ShellBridge.qml"),
             run_qml_dir.join("ShellBridge.qml"),
@@ -3190,12 +3190,12 @@ mod tests {
         .unwrap();
         std::os::unix::fs::symlink(
             checkout.join("rices/sonata/widgets"),
-            run_qml_dir.join("songs/sonata"),
+            run_qml_dir.join("rices/sonata"),
         )
         .unwrap();
 
         stage_qml_copies(&checkout, &run_qml_dir).unwrap();
-        stage_song_copies(&checkout, &run_qml_dir.join("songs")).unwrap();
+        stage_rice_copies(&checkout, &run_qml_dir.join("rices")).unwrap();
 
         for (copy, original) in [
             (
@@ -3203,7 +3203,7 @@ mod tests {
                 checkout.join(STRILLIX_SHELL_SRC).join("qml").join("ShellBridge.qml"),
             ),
             (
-                run_qml_dir.join("songs/sonata/conductor.qml"),
+                run_qml_dir.join("rices/sonata/conductor.qml"),
                 checkout.join("rices/sonata/widgets/conductor.qml"),
             ),
         ] {
@@ -3224,7 +3224,7 @@ mod tests {
                 copy.display()
             );
         }
-        assert!(!std::fs::symlink_metadata(run_qml_dir.join("songs/sonata"))
+        assert!(!std::fs::symlink_metadata(run_qml_dir.join("rices/sonata"))
             .unwrap()
             .file_type()
             .is_symlink());
@@ -3244,8 +3244,8 @@ mod tests {
         assert_eq!(
             Value::Object(map),
             json!({
-                "/c/rices/sonata/widgets/conductor.qml": "/r/run/qml/songs/sonata/conductor.qml",
-                "/c/rices/etude/widgets/parts/Knob.qml": "/r/run/qml/songs/etude/parts/Knob.qml",
+                "/c/rices/sonata/widgets/conductor.qml": "/r/run/qml/rices/sonata/conductor.qml",
+                "/c/rices/etude/widgets/parts/Knob.qml": "/r/run/qml/rices/etude/parts/Knob.qml",
                 "/c/pkgs/strillix-shell/qml/ShellBridge.qml": "/r/run/qml/ShellBridge.qml",
             })
         );
@@ -3254,8 +3254,8 @@ mod tests {
     /// The shell arm's `src` set is the shell's qml dir's OWN direct children
     /// — nothing else may enter, and the rices arm keeps claiming every
     /// rices path (a rices path that contains the shell prefix still
-    /// belongs to the rices arm; `stage_song_copies` mirrors it under
-    /// `songs/`, which is where its own `import "../.."` expects to be).
+    /// belongs to the rices arm; `stage_rice_copies` mirrors it under
+    /// `rices/`, which is where its own `import "../.."` expects to be).
     #[test]
     fn compute_stage_map_rices_arm_is_unaffected_by_the_shell_arm() {
         let checkout = Path::new("/c");
@@ -3263,7 +3263,7 @@ mod tests {
         let rice_widget = "/c/rices/sonata/widgets/conductor.qml";
         let rices_lookalike =
             format!("/c/rices/sonata/widgets/{STRILLIX_SHELL_SRC}/qml/ShellBridge.qml");
-        let nested_shell = format!("/c/{STRILLIX_SHELL_SRC}/qml/songs/etude/widgets/Knob.qml");
+        let nested_shell = format!("/c/{STRILLIX_SHELL_SRC}/qml/rices/etude/widgets/Knob.qml");
         let not_qml = format!("/c/{STRILLIX_SHELL_SRC}/qml/slots.md");
         let watch = vec![
             rice_widget.to_string(),
@@ -3275,12 +3275,12 @@ mod tests {
         assert_eq!(map.len(), 2);
         assert_eq!(
             map.get(rice_widget),
-            Some(&json!("/r/run/qml/songs/sonata/conductor.qml"))
+            Some(&json!("/r/run/qml/rices/sonata/conductor.qml"))
         );
         assert_eq!(
             map.get(&rices_lookalike),
             Some(&json!(
-                "/r/run/qml/songs/sonata/pkgs/strillix-shell/qml/ShellBridge.qml"
+                "/r/run/qml/rices/sonata/pkgs/strillix-shell/qml/ShellBridge.qml"
             ))
         );
         assert!(!map.contains_key(&nested_shell));
@@ -3294,7 +3294,7 @@ mod tests {
         fake_checkout(&checkout);
         let real = checkout.canonicalize().unwrap();
         assert_eq!(
-            resolve_widget_abs(&checkout, "songs/sonata/conductor.qml"),
+            resolve_widget_abs(&checkout, "rices/sonata/conductor.qml"),
             Some(real.join("rices/sonata/widgets/conductor.qml"))
         );
         assert_eq!(
@@ -3304,15 +3304,15 @@ mod tests {
         assert_eq!(
             resolve_widget_abs(
                 &checkout,
-                &format!("songs/sonata/../../../{STRILLIX_SHELL_SRC}/qml/ShellBridge.qml")
+                &format!("rices/sonata/../../../{STRILLIX_SHELL_SRC}/qml/ShellBridge.qml")
             ),
             None
         );
         assert_eq!(
-            resolve_widget_abs(&checkout, "songs/sonata/missing.qml"),
+            resolve_widget_abs(&checkout, "rices/sonata/missing.qml"),
             None
         );
-        assert_eq!(resolve_widget_abs(&checkout, "songs/sonata"), None);
+        assert_eq!(resolve_widget_abs(&checkout, "rices/sonata"), None);
     }
 
     #[test]

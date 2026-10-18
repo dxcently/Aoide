@@ -7,7 +7,7 @@
 //! (best-effort) applies it to a running compositor, and renders + pushes
 //! the staged terminal colours to open kitty windows. `notes`/`live` are
 //! dependency-free leaves (Phase 5a). `compose` (the pure `rice compose`
-//! scaffolding/rendering engine) and `cover` (cover-art derivation +
+//! scaffolding/rendering engine) and `wallpaper` (wallpaper-art derivation +
 //! resolution) land in Phase 5b with a `aoide-storage` dependency
 //! (`aoide_storage::fs::strillix_dir`).
 

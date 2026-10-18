@@ -1,6 +1,6 @@
 # Greek Grammar — sonata's drawing vocabulary
 
-**Song:** sonata
+**Rice:** sonata
 
 The concrete kit an author picks from: faces, glyphs, type tiers, the opacity
 ladder, rule idioms, state treatments, and which `theme.*` role plays which
@@ -59,7 +59,7 @@ needs a live check before you trust it (`hazards.md` §1).
 | half note | `𝅗𝅥` | volume at 0 |
 | barlines / marks | `𝄂` fine, `𝄇` da capo, `𝄌` coda, `𝄐` fermata, `𝄑` fermata below | powermenu endings, closing frames, tray toggle |
 | network | `𝆹𝅥𝅮` wifi, `𝆺𝅥𝅯` ethernet | bar right stave |
-| stand-ins where no clef fits | `ϟ` koppa (Power), `❧` rotated fleuron (Herald), `♫` (Audio) | crowns |
+| stand-ins where no clef fits | `ϟ` koppa (Power), `❧` rotated fleuron (Notifications), `♫` (Audio) | crowns |
 
 **Box drawing.** `┌ ┐ └ ┘ ─ ┤ ├` for TUI frames; `═ ║ ▔ ▁` for `GadgetFrame`'s
 entablature and stylobate; `▓ ░` for ASCII gauges (`battBar()`,
@@ -188,9 +188,9 @@ Full derivation of the hues in `intent.md`; this is which role plays what.
 
 Alongside these, `ThemeState` exposes the component tiers
 `notifBg/notifFg/notifUrgent`, `barBg/barFg/barAccent` and
-`windowBorder/windowBorderInactive`. In sonata they are all-null in the song,
+`windowBorder/windowBorderInactive`. In sonata they are all-null in the rice,
 so they resolve to the palette values; `notifications.qml` reads the `notif*`
-names anyway, which is what lets a future song re-skin the card without
+names anyway, which is what lets a future rice re-skin the card without
 touching the palette.
 
 Three names resolve to the same terracotta here (`paletteUrgent`,
@@ -221,7 +221,7 @@ for body copy (`intent.md`, Contrast). Same standing rule as the verdigris cap.
 | tier | size | face / weight | used for |
 |---|---|---|---|
 | crown | 20–24 | music or serif, per-widget | the clef-position glyph |
-| carved name | 13–15 | serif DemiBold, `letterSpacing: 3–4` | HERALD, AUDIO, KALENDAE, LOCK, GRIMOIRE |
+| carved name | 13–15 | serif DemiBold, `letterSpacing: 3–4` | NOTIFICATIONS, AUDIO, KALENDAE, LOCK, GRIMOIRE |
 | display | 27 | serif DemiBold, `letterSpacing: 12` | `ΕΞΟΔΟΣ` — the one full-screen title |
 | title / body | 13–14 | serif bold (title) or regular; mono on the bar | notification title (serif bold 14), launcher entry name (serif 14), bar strip cells (mono 13–14) |
 | chapter head | 13 | serif, `letterSpacing: 3` | launcher running headers |
@@ -335,7 +335,7 @@ rendered as tofu-adjacent junk live.
 
 **The bilingual inscription.** A carved Latin/English name answered beneath by
 a small italic Greek line — `AoidePanel`'s `AOIDE ⁄ ᾠδή` idiom. In use:
-`KALENDAE` / `ἡμερολόγιον`; `ΕΞΟΔΟΣ` / `the closing song — πῶς τελευτᾷ ἡ
+`KALENDAE` / `ἡμερολόγιον`; `ΕΞΟΔΟΣ` / `the closing rice — πῶς τελευτᾷ ἡ
 ᾠδή;`; `MOST SUMMONED` / `ἕξις · σελίς I`; `GRIMOIRE ·` / `βίβλος` split
 across the two cover boards. Three of five widgets use it.
 `notifications.qml` deliberately does not — its austerity is the point. It is
@@ -360,6 +360,6 @@ Every surface with more than one text tier orders them explicitly, and
 The generalized rule: **frame → cut → title → context**, one tempo between the
 gaps, one ornament (the frieze) above the frame, and any value shown in the
 ledger removed from the frame label. The card's `[ notify ]` tag is ghosted to
-0.55 so the `HERALD` wordmark owns the entablature band; the ledger's
+0.55 so the `NOTIFICATIONS` wordmark owns the entablature band; the ledger's
 right-hand ink is a live arrival clock, and the urgency word appears only in
 the bottom frame — because it would otherwise read twice.

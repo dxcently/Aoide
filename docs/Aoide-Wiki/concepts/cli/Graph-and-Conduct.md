@@ -41,7 +41,7 @@ node to deliver.
 
 Path resolution (`pkgs/aoide/crates/storage/src/fs.rs`): the conducting stage
 dir is `$AOIDE_STAGE_DIR` when absolute, else `$AOIDE_ROOT/state/stage/` — so
-`state/stage/{projects,sessions,hooks,graph,pending,herald}.json` all ride
+`state/stage/{projects,sessions,hooks,graph,pending,notifications}.json` all ride
 that one override (`aoide_storage::fs::conducting_stage_dir`, distinct from
 the rice `stage_dir` under `/stage/`). The state dir is
 `$AOIDE_STATE_DIR` else `$AOIDE_ROOT/state/` (default `~/.aoide/state/`).
@@ -463,7 +463,7 @@ aoide session hook [--agent <claude|kimi|pi>] [--json]   # reads ONE hook JSON o
   `awaiting`-only-if-still-`working` (idle ping), SessionEnd→end. On an
   unconditional `awaiting` it spawns `aoide session permit --id <id>
   [--what <notification message>]` DETACHED (opt-out:
-  `AOIDE_HERALD_PERMIT` in {0,false,no,off}); the harness's message rides as
+  `AOIDE_NOTIFICATIONS_PERMIT` in {0,false,no,off}); the harness's message rides as
   untrusted display data. A session whose record was ended/pruned mid-process
   self-heals by re-registering on its next event (`hook_ensure_session`). A
   door that cannot approve (MCP, A2A) is refused before stdin is read: the
@@ -869,7 +869,7 @@ aoide session trace <id> [--tail N] [--follow] [--json]
   ```
   #131  04:13:41  TurnSettled  end_turn · in 9570000 out 71900
   #2  04:16:49  AssistantMessage  I should read the slot catalog first…  Let me read the slot catalog first.  → read
-  #3  04:16:49  ToolResult  # Per-song widget slots — catalog
+  #3  04:16:49  ToolResult  # Per-rice widget slots — catalog
   #4  04:16:50  ToolResult  ! ENOENT: no such file
   ```
 
@@ -918,9 +918,9 @@ aoide session permit --id <id> [--tool <name>] [--what <text>] [--json]
   confirms, no trailing submit byte), deny `3`; pi has none and a summons
   stays off for it).
 - **Writes:** none directly. Publishes the summons card by sending one
-  newline-delimited JSON line `{"cmd": "heraldpush", "notification": {…}}` to
+  newline-delimited JSON line `{"cmd": "notificationspush", "notification": {…}}` to
   the shellbridge socket `$XDG_RUNTIME_DIR/aoide/shellbridge.sock`; the daemon
-  (single writer) folds it into `state/stage/herald.json`. Card: id
+  (single writer) folds it into `state/stage/notifications.json`. Card: id
   `permit-<sessionId>`, `kind: "summons"`, category `x-aoide.permission`,
   `stackTag: aoide-permit-<sessionId>` (a second prompt in the same session
   REPLACES the standing card), `timeoutMs: 0` (never expires on its own).
@@ -931,7 +931,7 @@ aoide session permit --id <id> [--tool <name>] [--what <text>] [--json]
 - **Notes:** the two guards — no control socket, no card; and the verdict is
   typed only while the session is still canonically `awaiting` (else
   `already-answered`, nothing injected). The human's click returns as
-  `{"cmd": "heraldverdict", …}` over the shellbridge, and `answer_summons`
+  `{"cmd": "notificationsverdict", …}` over the shellbridge, and `answer_summons`
   types the bare digit (no newline) through `session_send` in-process with
   `--yes` — audited by the send door.
 

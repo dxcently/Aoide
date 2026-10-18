@@ -1,4 +1,4 @@
-//! The wallpaper provider's bridge — who paints a song's wallpaper here, and
+//! The wallpaper provider's bridge — who paints a rice's wallpaper here, and
 //! what that provider should be showing right now.
 //!
 //! The shell's own `aoide-wallpaper` layer is the DEFAULT provider and needs no
@@ -10,7 +10,7 @@
 //! a test that reached a real provider would repaint the operator's desktop).
 //!
 //! The host's choice is the fact `aoide.wallpaper.provider`, which the `strillix`
-//! lane publishes as `song/stage/wallpaper-provider` — one name, in the runtime
+//! lane publishes as `rice/stage/wallpaper-provider` — one name, in the runtime
 //! root, so the CLI, the QML and this module read the same word. Absent (a host
 //! that never activated the lane) means the shell's own layer.
 //!
@@ -63,28 +63,28 @@ pub fn provider() -> String {
         .unwrap_or_else(|| PROVIDER_QUICKSHELL.to_string())
 }
 
-/// The pick that APPLIES right now: the staged cover's own `(kind, identity)`
-/// when it is marked a pick AND stamped for the song staged right now — or
-/// stamped for NO song, the legacy shape, which applies wherever it lands
-/// (`wallpaper::staged_song`'s own rule). Anything else is `None`, which is the read
-/// the shell's own layer makes before it draws the song's default instead.
+/// The pick that APPLIES right now: the staged wallpaper's own `(kind, identity)`
+/// when it is marked a pick AND stamped for the rice staged right now — or
+/// stamped for NO rice, the legacy shape, which applies wherever it lands
+/// (`wallpaper::staged_rice`'s own rule). Anything else is `None`, which is the read
+/// the shell's own layer makes before it draws the rice's default instead.
 pub fn applying_pick() -> Option<(String, String)> {
     if !wallpaper::staged_is_pick() {
         return None;
     }
-    if let Some(stamped) = wallpaper::staged_song() {
-        if Some(stamped) != staged_song() {
+    if let Some(stamped) = wallpaper::staged_rice() {
+        if Some(stamped) != staged_rice() {
             return None;
         }
     }
     wallpaper::staged_identity()
 }
 
-/// The song the stage file names.
-fn staged_song() -> Option<String> {
+/// The rice the stage file names.
+fn staged_rice() -> Option<String> {
     let raw = std::fs::read_to_string(aoide_storage::fs::stage_dir().join("theme.json")).ok()?;
     let doc: Value = serde_json::from_str(&raw).ok()?;
-    doc.get("song")?.as_str().map(str::to_string)
+    doc.get("rice")?.as_str().map(str::to_string)
 }
 
 /// The step-aside image's store path, or `None` on a host whose lane did not
@@ -108,7 +108,7 @@ pub enum Action {
 }
 
 /// The decision: an external provider shows the staged pick when one applies and
-/// nothing at all otherwise (which is what makes a song switch step aside for
+/// nothing at all otherwise (which is what makes a rice switch step aside for
 /// free — the pick stops applying). Every other provider stands down.
 pub fn action(provider: &str, pick: Option<(String, String)>) -> Action {
     if provider != PROVIDER_SKWD_WALL {
@@ -263,8 +263,8 @@ mod tests {
         stage
     }
 
-    fn stage_song(stage: &std::path::Path, song: &str) {
-        std::fs::write(stage.join("theme.json"), format!(r#"{{"song":"{song}"}}"#)).unwrap();
+    fn stage_rice(stage: &std::path::Path, rice: &str) {
+        std::fs::write(stage.join("theme.json"), format!(r#"{{"rice":"{rice}"}}"#)).unwrap();
     }
 
     /// The whole decision, as a truth table: every provider, with and without a
@@ -345,18 +345,18 @@ mod tests {
         std::fs::remove_dir_all(&root).unwrap();
     }
 
-    /// A pick applies only while it is marked AND stamped for the song staged
+    /// A pick applies only while it is marked AND stamped for the rice staged
     /// right now — the read the shell's own layer makes, from the other side —
-    /// except that a cover stamped for NO song is the legacy shape and applies
-    /// wherever it lands (`wallpaper::staged_song`).
+    /// except that a wallpaper stamped for NO rice is the legacy shape and applies
+    /// wherever it lands (`wallpaper::staged_rice`).
     #[test]
-    fn a_pick_applies_for_its_own_staged_song_and_for_the_legacy_shape() {
+    fn a_pick_applies_for_its_own_staged_rice_and_for_the_legacy_shape() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
         let root = unique_tmp("provider-applying-pick");
         let stage = stage(&root);
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
-        stage_song(&stage, "cadenza");
+        stage_rice(&stage, "cadenza");
 
         wallpaper::stage_pick(std::path::Path::new("/tmp/clip.mp4"), Some("cadenza"), None).unwrap();
         assert_eq!(
@@ -364,16 +364,16 @@ mod tests {
             Some((wallpaper::KIND_VIDEO.to_string(), "/tmp/clip.mp4".to_string()))
         );
 
-        // A cover stamped for another song stops applying, which is what makes a
+        // A wallpaper stamped for another rice stops applying, which is what makes a
         // switch step aside with no extra call.
         std::fs::write(
             stage.join("wallpaper.json"),
-            r#"{"path":"/tmp/clip.mp4","kind":"video","pick":true,"song":"dusk"}"#,
+            r#"{"path":"/tmp/clip.mp4","kind":"video","pick":true,"rice":"dusk"}"#,
         )
         .unwrap();
         assert_eq!(applying_pick(), None);
 
-        // The legacy shape — a pick with no `song` field — applies here too.
+        // The legacy shape — a pick with no `rice` field — applies here too.
         std::fs::write(
             stage.join("wallpaper.json"),
             r#"{"path":"/tmp/old.png","pick":true}"#,
@@ -384,11 +384,11 @@ mod tests {
             Some((wallpaper::KIND_STATIC.to_string(), "/tmp/old.png".to_string()))
         );
 
-        // The song's own default is never a pick, and neither is a marker with
+        // The rice's own default is never a pick, and neither is a marker with
         // nothing named.
-        wallpaper::stage_default(std::path::Path::new("/tmp/song.png"), "cadenza").unwrap();
+        wallpaper::stage_default(std::path::Path::new("/tmp/rice.png"), "cadenza").unwrap();
         assert_eq!(applying_pick(), None);
-        std::fs::write(stage.join("wallpaper.json"), r#"{"pick":true,"song":"cadenza"}"#).unwrap();
+        std::fs::write(stage.join("wallpaper.json"), r#"{"pick":true,"rice":"cadenza"}"#).unwrap();
         assert_eq!(applying_pick(), None);
         std::fs::remove_dir_all(&root).unwrap();
     }
@@ -422,7 +422,7 @@ mod tests {
         assert!(sync_waiting().starts_with("not the wallpaper provider"));
 
         std::fs::write(stage.join(PROVIDER_FILE), PROVIDER_SKWD_WALL).unwrap();
-        stage_song(&stage, "cadenza");
+        stage_rice(&stage, "cadenza");
         wallpaper::stage_scene("123", Some("cadenza")).unwrap();
         for status in [sync(), sync_waiting()] {
             assert_eq!(status, "skipped (this crate's own test build: no live skwd-helm)");

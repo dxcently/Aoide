@@ -1067,8 +1067,8 @@ mod tests {
     // pin their own halves against.
     const START: &str = r#"{"id":0,"parent":null,"ts_ms":1789603005561,"kind":{"SessionStart":{"model":"ollama:deepseek-v4.1-flash","cwd":"/home/khoa/Aoide","system":null}}}"#;
     const USER: &str = r##"{"id":1,"parent":0,"ts_ms":1789603005570,"kind":{"UserMessage":{"role":"user","content":[{"type":"text","text":"# Brief A: …"}]}}}"##;
-    const ASSISTANT: &str = r#"{"id":2,"parent":1,"ts_ms":1789603009102,"kind":{"AssistantMessage":{"role":"assistant","content":[{"type":"thinking","thinking":"I should read the slot catalog first, and then compare it against the facets directory to see which surfaces each song claims for itself.","signature":"…"},{"type":"text","text":"Let me read the slot catalog first."},{"type":"tool_use","id":"call_8vr43zri","name":"read","input":{"path":"modules/facets/quickshell/qml/slots.md"}}]}}}"#;
-    const RESULT: &str = r#"{"id":3,"parent":2,"ts_ms":1789603009140,"kind":{"ToolResult":{"tool_use_id":"call_8vr43zri","content":"     1\t# Per-song widget slots\n     2\tcatalog\n","is_error":false}}}"#;
+    const ASSISTANT: &str = r#"{"id":2,"parent":1,"ts_ms":1789603009102,"kind":{"AssistantMessage":{"role":"assistant","content":[{"type":"thinking","thinking":"I should read the slot catalog first, and then compare it against the facets directory to see which surfaces each rice claims for itself.","signature":"…"},{"type":"text","text":"Let me read the slot catalog first."},{"type":"tool_use","id":"call_8vr43zri","name":"read","input":{"path":"modules/facets/quickshell/qml/slots.md"}}]}}}"#;
+    const RESULT: &str = r#"{"id":3,"parent":2,"ts_ms":1789603009140,"kind":{"ToolResult":{"tool_use_id":"call_8vr43zri","content":"     1\t# Per-rice widget slots\n     2\tcatalog\n","is_error":false}}}"#;
     const RESULT_ERR: &str = r#"{"id":4,"parent":3,"ts_ms":1789603009200,"kind":{"ToolResult":{"tool_use_id":"call_9","content":"ENOENT: no such file\nmore","is_error":true}}}"#;
     const SETTLED: &str = r#"{"id":131,"parent":130,"ts_ms":1789606421000,"kind":{"TurnSettled":{"stop_reason":"end_turn","usage":{"input_tokens":9570000,"output_tokens":71900,"cache_creation_input_tokens":0,"cache_read_input_tokens":9430000}}}}"#;
     const CANCELLED: &str = r#"{"id":77,"parent":76,"ts_ms":1789626990000,"kind":"Cancelled"}"#;
@@ -1188,7 +1188,7 @@ mod tests {
     fn a_tool_result_shows_its_first_line_and_flags_an_error() {
         let ok = render_line(&eidolon_trace_record(RESULT).unwrap(), false);
         assert!(ok.contains("ToolResult"), "{ok}");
-        assert!(ok.contains("# Per-song widget slots"), "{ok}");
+        assert!(ok.contains("# Per-rice widget slots"), "{ok}");
         assert!(!ok.contains("catalog"), "only the FIRST line is shown: {ok}");
         assert!(!ok.contains("! "), "{ok}");
 
@@ -1502,7 +1502,7 @@ mod tests {
         assert_eq!(ok.len(), 1);
         assert_eq!(ok[0].kind, "result");
         assert!(!ok[0].error);
-        assert_eq!(ok[0].text, "1\t# Per-song widget slots", "first line only, no `!` prefix");
+        assert_eq!(ok[0].text, "1\t# Per-rice widget slots", "first line only, no `!` prefix");
         assert!(!ok[0].text.contains("catalog"));
 
         let err = steps_of(&eidolon_trace_record(RESULT_ERR).unwrap(), Clip::Detail);

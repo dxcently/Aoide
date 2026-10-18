@@ -94,7 +94,7 @@ PanelWindow {
 
     // ── The ledger file — read-only, watched (bar.qml's sessions.json idiom) ─
     // notifications.json is a CONDUCTING file (CONTRACTS.md §4) — state/stage/,
-    // not song/stage/.
+    // not rice/stage/.
     readonly property string notificationsPath:
         (Quickshell.env("AOIDE_ROOT") || (Quickshell.env("HOME") + "/.aoide")) + "/state/stage/notifications.json"
     property var records: []
@@ -127,7 +127,7 @@ PanelWindow {
     // Keyed by id AND `receivedAt`, not id alone: dunst's `stack_duplicates`
     // (modules/dendrites/dunst.nix) reuses ONE notification id for a repeated
     // identical summary+body — e.g. two back-to-back "nothing to reap" reap
-    // pings carry the same DUNST_ID. `aoide notifications push` still stamps a FRESH
+    // pings carry the same DUNST_ID. `strx notifications push` still stamps a FRESH
     // `receivedAt` on every call (its own wall clock, `notifications.rs`), so the
     // record in the file genuinely changed even though its id didn't. Without
     // the receivedAt check, `lapsed[id]` latched TRUE the first time that id's

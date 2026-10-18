@@ -44,7 +44,7 @@ fn effective_comment(operator: Option<&str>, sidecar: Option<&str>) -> Option<St
 /// `comment:` line, then optional OCR text as its own labelled block (so a
 /// receiving agent gets the words on-screen without re-OCRing the same
 /// capture). Pure — exhaustively unit-tested over all four presence
-/// combinations, `song::ipc`'s "the pure core gets the exhaustive tests"
+/// combinations, `rice::ipc`'s "the pure core gets the exhaustive tests"
 /// convention.
 pub fn compose_message(path: &str, comment: Option<&str>, ocr_text: Option<&str>) -> String {
     let mut lines = vec![format!("screenshot: {path}")];

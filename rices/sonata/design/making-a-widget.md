@@ -1,12 +1,12 @@
 # Making a sonata widget — what makes one BELONG
 
-**Song:** sonata
+**Rice:** sonata
 **Read before:** writing any new `widgets/*.qml`, or redesigning an existing one.
 
-> This song has no per-popup notification card: dunst owns notification
-> delivery. The notification center is `widgets/herald-center.qml`, the dock's,
+> This rice has no per-popup notification card: dunst owns notification
+> delivery. The notification center is `widgets/notifications-center.qml`, the dock's,
 > which carries the SAME grammar (Tuscan stele, ❧ crown, rust signature). Read
-> `herald-center.qml` wherever this file says `notifications.qml`; the grammar
+> `notifications-center.qml` wherever this file says `notifications.qml`; the grammar
 > analysis below applies to it unchanged.
 
 The other three files in this folder tell you what is *available*
@@ -49,7 +49,7 @@ The entablature row is the same three elements every time:
 ```qml
 // notifications.qml            AudioColonnade.qml         calendar.qml
 crown  ❧ serif 20 bold sig     ♫ music 22 sig             𝄴 music 24 clay
-name   "HERALD" serif 13       "AUDIO" serif 15           "KALENDAE" serif 15
+name   "NOTIFICATIONS" serif 13       "AUDIO" serif 15           "KALENDAE" serif 15
        DemiBold, spacing 3     DemiBold, spacing 4        DemiBold, spacing 4
 tag    "[ notify ]" mono 10    "[ pipewire ]" mono 10     "[ fasti ]" mono 10
        sig @ 0.55              sig @ 0.9                  clay @ 0.9
@@ -437,7 +437,7 @@ window".
 
 ## 10. Worked example (short) — `AudioColonnade.qml`, the bar-popout reference
 
-Song-side (`rices/sonata/widgets/AudioColonnade.qml`), not the shell's
+Rice-side (`rices/sonata/widgets/AudioColonnade.qml`), not the shell's
 QML — but it is the live precedent for **a bar popout body**, so a new
 popout should be read against it rather than against the bar itself.
 
@@ -512,7 +512,7 @@ aoide rice mode status
 aoide rice mode stage sonata
 
 # 1. push the edited widget bodies into the live runtime tree.
-#    This syncs rices/<song>/widgets/*.qml -> run/qml/songs/<song>/
+#    This syncs rices/<rice>/widgets/*.qml -> run/qml/rices/<rice>/
 #    AND auto-triggers a Quickshell IPC reload *when a widget body changed*
 #    (a no-op re-stage deliberately skips the reload).
 aoide rice stage sonata

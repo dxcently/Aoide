@@ -25,11 +25,11 @@ by being added to a list.
   itself on its own `enable`/`aoide.rice`, rather than a parent module
   turning it on.
 - **Resolution by name, not by import.** A widget resolves through
-  `StagingEngine.resolveSong(song, slot)` — by slot *name*, falling back to
+  `StagingEngine.resolveRice(rice, slot)` — by slot *name*, falling back to
   sonata — so no host surface ever imports a concrete widget
-  ([[Widget-Maker#The staging engine — a song overrides desktop chrome]]).
+  ([[Widget-Maker#The staging engine — a rice overrides desktop chrome]]).
 - **A closed, named service set.** Paint lanes read `aoide.theme`,
-  `aoide.layout` and `aoide.surfaces`, plus the core scalars and the song
+  `aoide.layout` and `aoide.surfaces`, plus the core scalars and the rice
   selection root `AGENTS.md` house rule 5 enumerates, and nothing else — a closed
   set of named services,
   never another module's internals.

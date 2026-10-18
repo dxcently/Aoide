@@ -1,6 +1,6 @@
 # barcarolle — intent
 
-Windows 7 Aero, rebuilt as an AoideOS rice: a glass superbar along the bottom,
+Windows 7 Aero, rebuilt as an Strillix rice: a glass superbar along the bottom,
 the Start orb and its Win7 Start menu, an iMac G3 app launcher on
 SUPER+Space, white-plate flyouts and balloons (the agent sessions among
 them), and CPU-meter gadgets, all over a teal
@@ -36,7 +36,7 @@ Glass is a frame, content is a plate, light comes from above.
 │ ┌Start──────────┐                                       │ approve/deny      │  │
 │ │ pinned │ name  │                                      └──────┬────────────┘  │
 │ │ recent │ places│                  ┌vol┐ ┌RICE menu┐ ┌Agents──┊────────────┐  │
-│ │ All ▸  │       │   ┌Peek ws7┐     │   │ │ songs   │ │ sessions by ws      │  │
+│ │ All ▸  │       │   ┌Peek ws7┐     │   │ │ rices   │ │ sessions by ws      │  │
 │ │ search │ Lock ▸│   │ rows   │     │   │ │ drafts  │ │ + New terminal      │  │
 ├─┴───────┴───────┴──────────────────────────────────────────────┊───────────────┤
 │◉ [1][2][3][4][5][6][7][8] ┆ mag scr +                 Stage▾ ^ ⧉ ⚑ ▭ ◁)) 3:42 ▐│
@@ -56,7 +56,7 @@ Glass is a frame, content is a plate, light comes from above.
   the workspace, then the plate list of its windows; an agent's window
   carries its state dot and tool. The miniature is 240px wide in the
   monitor's aspect: each window streams into its real position over the
-  song's cover at 15 fps, shown or hidden workspace alike, and the streams
+  rice's wallpaper at 15 fps, shown or hidden workspace alike, and the streams
   stop when the peek closes. A window that cannot be captured shows its icon.
   On a scrolling workspace the miniature is the stretch of the strip on the
   monitor, and a `+N` chip counts the windows scrolled off it.
@@ -70,7 +70,7 @@ Glass is a frame, content is a plate, light comes from above.
 - **Launcher**: SUPER+Space opens the iMac G3 in the middle of the focused
   monitor; its screen is a Mac OS 9 Finder of apps, clipboard and emoji
   (see Launcher: iMac G3 below).
-- **Shut Down dialog** (the powermenu): Win7's Alt+F4 dialog in the song's
+- **Shut Down dialog** (the powermenu): Win7's Alt+F4 dialog in the rice's
   glass, a ♪ barcarolle banner, "What do you want the computer to do?" with
   Log off / Lock / Restart / Sleep / Hibernate / Shut down and a line
   describing the choice, OK / Cancel / Help, centred over a near-clear
@@ -85,18 +85,18 @@ Glass is a frame, content is a plate, light comes from above.
   window), rows with the agent's icon (28px) wearing its state orb, agent ·
   title, tool and cwd tail, and a context meter. Subagents indent. An
   awaiting row knocks: its ask with Approve / Deny, or "Answer in terminal"
-  when the herald holds no summons. Under the list, a small room log
-  (joins, leaves, state changes, herald toasts, asks), then `New terminal`.
+  when the notifications holds no summons. Under the list, a small room log
+  (joins, leaves, state changes, notifications toasts, asks), then `New terminal`.
   No text input anywhere. It closes on a click outside, Escape or its close
   box, and counts as the open flyout on its own monitor only.
 - **RICE cell + menu**: the cell shows the mode glyph and word (`Stage`) with
-  a chevron. The menu: header `Rice · <song> · <mode>`, songs with the
+  a chevron. The menu: header `Rice · <rice> · <mode>`, rices with the
   current one ticked (staged / declared tags), `Back to declarative ·
-  <declared>`, drafts of the current song, `+ New draft`, `Save current as
+  <declared>`, drafts of the current rice, `+ New draft`, `Save current as
   draft`, `Declare`. Declare is greyed while a draft is staged or the staged
-  song is already the declared one; it asks in a Platinum alert (Cancel the
+  rice is already the declared one; it asks in a Platinum alert (Cancel the
   default, Return and Escape cancel) and then rewrites the host config's
-  declared-song line, for the next rebuild. Its balloon says Declared, Not
+  declared-rice line, for the next rebuild. Its balloon says Declared, Not
   declared with the refusal, or No answer yet when the bridge timed out,
   naming the host file to check (the menu's `hostConfig`).
 - **Tray flyouts**: the Win7 narrow volume flyout (device, slider, percent,
@@ -127,7 +127,7 @@ Glass is a frame, content is a plate, light comes from above.
   machine with no battery.
 - **Lock** (panel in the board, 0.45 scale): the logon picture with its baked
   person tile, the `$USER` label at −21% and the 400×60 hyprlock field at
-  −26% below centre. Nothing else; the song supplies only the picture and
+  −26% below centre. Nothing else; the rice supplies only the picture and
   colours (hyprlock dress contract).
 
 ## Launcher: iMac G3
@@ -161,7 +161,7 @@ timelines) and `launcher-finder.png` (the screen).
   a Platinum menu bar across the full width, its pixel ♪ Apple menu and
   titles set 56px in and its Find field ending 62px from the right, clear
   of the curve;
-  the song's cover shrunk onto the little desktop (a teal dither without
+  the rice's wallpaper shrunk onto the little desktop (a teal dither without
   one), with this computer's disk (the Platinum drive, `finder-disk.svg`,
   labelled with the hostname) and the Trash in the bottom-right corner,
   10px up; the disk's window, titled with the
@@ -210,7 +210,7 @@ masks, clips or text), so QtSvg renders them as Chromium does.
 - Brightness is a `MultiEffect.brightness` on the screen and face.
 - Every art URL carries a per-load `?v=` stamp: Qt's image cache lives as
   long as the shell process and is keyed by URL alone, so without it a
-  reload keeps drawing art the song has since changed.
+  reload keeps drawing art the rice has since changed.
 
 ### Open, 460 ms
 
@@ -328,7 +328,7 @@ Consolas → Noto Sans Mono.
   theme. Agent icons: see above.
 - **Start**: `mock.html` draws the orb's Start menu; the G3 launcher is on
   `launcher-g3.html` and `launcher-finder.png` only.
-- **Data**: workspaces, sessions, songs and drafts are hard-coded sample
+- **Data**: workspaces, sessions, rices and drafts are hard-coded sample
   data. Nothing reads `desktop.json`, `sessions.json` or `mode.json`.
 - **Board-only placement**: every surface is open at once, though only one
   flyout opens at a time. The peek is shifted right to clear the open Start

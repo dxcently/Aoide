@@ -1,4 +1,4 @@
-# cadenza cover — the circuit board
+# cadenza wallpaper — the circuit board
 
 `pcb-<w>x<h>.png` is the wallpaper of intent §3.9: a routed board (tracks in
 `base02`, hollow pads and vias in `base03`) on the CRT black, quiet in the
@@ -11,11 +11,11 @@ to fit another size. Shoot that size instead.
 
 ```sh
 export AOIDE_FLAKE_ROOT=<checkout>
-R=$XDG_RUNTIME_DIR/cadenza-cover
+R=$XDG_RUNTIME_DIR/cadenza-wallpaper
 W=$AOIDE_FLAKE_ROOT/rices/cadenza/widgets/WallpaperPcb.qml
-strx preview "$W" --song cadenza --theme cadenza --root "$R" --no-launch
+strx preview "$W" --rice cadenza --theme cadenza --root "$R" --no-launch
 # set "autoReload": false in $R/preview.json, then:
-setsid -f strx preview "$W" --song cadenza --theme cadenza --root "$R"
+setsid -f strx preview "$W" --rice cadenza --theme cadenza --root "$R"
 strx preview set --root "$R" --viewport 1080x1920 --width 1080 --height 1920 --anchor tl --margin 0
 sleep 10   # a worker generates the board (~3 s a size), and a shot before it lands is bare ground
 strx preview shot --root "$R" --what widget --out /tmp/pcb.png
@@ -27,24 +27,24 @@ The canvas warns that WallpaperPcb has no `clipboard`, `dock`, `ledger`,
 `powermenu`, `shared`, `stagePath` or `stagingEngine` property. The canvas
 passes the same props to every widget, so these warnings are expected.
 
-Stage live with `strx wallpaper set <abs path>`. Declaring the cover into
+Stage live with `strx wallpaper set <abs path>`. Declaring the wallpaper into
 `aoide.theme.wallpaper` for the rebuild is the User's call.
 
 ## The live board — `widgets/wallpaper.qml`
 
 The PNG is the still shot. The board itself is also drawn LIVE: the lane
-anchors a song-owned `wallpaper` slot inside the per-screen Background
+anchors a rice-owned `wallpaper` slot inside the per-screen Background
 surface (`pkgs/strillix-shell/qml/slots.md`), and `widgets/wallpaper.qml` fills
 it — `WallpaperPcb` for the copper, one transparent Canvas over it for the light
 (`widgets/Trace.js` is the engine; intent §3.9 is the grammar). This widget is
 what a live shell draws; the PNG above is what draws where no such slot
 exists, and what `strx wallpaper set` stages.
 
-The slot has NO baseline floor (`slots.md`): the board draws only for the song
-that authors it, and only while that song's own cover is what is staged. A
+The slot has NO baseline floor (`slots.md`): the board draws only for the rice
+that authors it, and only while that rice's own wallpaper is what is staged. A
 `strx wallpaper set` pick is what shows, full stop — the shell destroys the board
-rather than hiding it, so no repaint runs under the chosen image (a cover also
-carries the song it was staged for, and one naming another song is ignored,
+rather than hiding it, so no repaint runs under the chosen image (a wallpaper also
+carries the rice it was staged for, and one naming another rice is ignored,
 CONTRACTS.md §4).
 
 Same board, same seed, same size — the two cannot disagree: the widget
@@ -58,7 +58,7 @@ is needed):
 export AOIDE_FLAKE_ROOT=<checkout>
 R=$XDG_RUNTIME_DIR/cadenza-wall
 strx preview "$AOIDE_FLAKE_ROOT/rices/cadenza/widgets/WallpaperPreview.qml" \
-    --song cadenza --fixture "$AOIDE_FLAKE_ROOT/rices/cadenza/design/fixtures/board" --root "$R"
+    --rice cadenza --fixture "$AOIDE_FLAKE_ROOT/rices/cadenza/design/fixtures/board" --root "$R"
 strx preview set --root "$R" --viewport 1920x1080 --width 1920 --height 1080 --anchor tl --margin 0
 strx preview shot --root "$R" --what widget --out /tmp/board.png
 ```

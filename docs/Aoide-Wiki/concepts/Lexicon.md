@@ -7,7 +7,7 @@ tags: [aoide, naming, meta, architecture]
 
 # Lexicon — the Vocabulary, the Flow, and Why the Words
 
-Every name in Aoide is load-bearing. This page explains the whole vocabulary at once: where each word family comes from, what it names, how the named things flow into each other. Three families — **the Muses** (who acts), **the snowflake** (what is frozen), **the song** (what is performed) — plus the **machinery words** connecting them.
+Every name in Aoide is load-bearing. This page explains the whole vocabulary at once: where each word family comes from, what it names, how the named things flow into each other. Three families — **the Muses** (who acts), **the snowflake** (what is frozen), **the rice** (what is performed) — plus the **machinery words** connecting them.
 
 ## The Greek stuff — the three original Muses
 
@@ -15,7 +15,7 @@ Before the familiar nine, Greek tradition (Pausanias, describing the cult at Mou
 
 | Muse | Greek | Domain | In this system |
 |---|---|---|---|
-| **Aoide** | Ἀοιδή | song, voice | the running, performing system — the orchestration core singing, headless or as the full AoideOS desktop |
+| **Aoide** | Ἀοιδή | song, voice | the running, performing system — the orchestration core singing, headless or as the full Strillix desktop |
 | **Melete** | Μελέτη | practice, exercise | [[Melete]] — the coding agent, the **doer**: it practices, writes, builds, rehearses |
 | **Mneme** | Μνήμη | memory | [[Mneme]] — the knowledge server, the **rememberer**: the vault, the wiki, what was learned |
 
@@ -48,20 +48,20 @@ Radial distance from the nucleus encodes the mutation policy ([[Governance]]): t
 
 A **paint lane** is a dendrite that renders — `quickshell`, `stylix`, `compositor`, `greeter`, `strillix`. It is a branch like any other, and the only nix that renders appearance; each reads only the namespaces root `AGENTS.md` house rule 5 enumerates.
 
-## The performed family — song vocabulary
+## The performed family — rice vocabulary
 
-Full map: [[Song-Vocabulary]]. A **rice is a song**: a thing the system *performs*, differently at each venue. One metaphor, extended consistently, is a namespace — if you know what a liner or a cover is for an album, you know what it is here.
+Full map: [[Rice-Vocabulary]]. A **rice is a piece**: a thing the system *performs*, differently at each venue. One metaphor, extended consistently, is a namespace — if you know what a liner or a cover is for an album, you know what it is here.
 
 | Term | Is | Term | Is |
 |---|---|---|---|
-| song | a rice | key | its palette |
+| rice | a rice | key | its palette |
 | melody | semantic tier | component tier | bar / notif / window overrides |
 | instruments | the paint lanes that sound it | venue | the host performing it |
-| cover | wallpaper | chimes | notification/system sounds |
-| liner | per-song design notes | rices | cross-cutting design memory |
+| wallpaper | wallpaper | chimes | notification/system sounds |
+| liner | per-rice design notes | rices | cross-cutting design memory |
 | rehearsal | live preview (stage) | recording | adopted, committed, rebuilt |
-| repertoire | committed songs, collectively | the standard | the shipped standard song (`sonata`) |
-| replay | same song, new venue | transpose | same song, new key |
+| repertoire | committed rices, collectively | the standard | the shipped standard rice (`sonata`) |
+| replay | same rice, new venue | transpose | same rice, new key |
 | stage | live state (gitignored) | auditions | the propose gate |
 
 ## The machinery words
@@ -76,15 +76,15 @@ Terms naming the connective tissue rather than either half:
 
 ## Why the seam is a theme
 
-A **theme** is the single set of house colours a whole retinue wears in unison — a servant, a ship, a herald read at a glance as one household's. The industry term for this layer is *design tokens* (W3C design-tokens format, `CONTRACTS.md` §1), but a token names a single value; the engine dresses *every* surface in one song's identity, which a token alone doesn't capture. One word covers both the values and the act of stamping them.
+A **theme** is the single set of house colours a whole retinue wears in unison — a servant, a ship, a herald read at a glance as one household's. The industry term for this layer is *design tokens* (W3C design-tokens format, `CONTRACTS.md` §1), but a token names a single value; the engine dresses *every* surface in one rice's identity, which a token alone doesn't capture. One word covers both the values and the act of stamping them.
 
-The seam sits on neither of the two existing axes — the Greek axis (who acts) or the music axis (what is made and performed) — a seam-level name of its own. `aoide.layout` sits at the same seam, theme's structural sibling: theme is the song's DRESS (palette · base16 · component tiers · geometry · fonts · cover), layout is its STRUCTURE — which widget/surface TYPES a song brings into existence (`modules/nucleus/options.nix`), stored in the same `theme.json` and read under the same closed paint-read whitelist (`AGENTS.md` house rule 5).
+The seam sits on neither of the two existing axes — the Greek axis (who acts) or the music axis (what is made and performed) — a seam-level name of its own. `aoide.layout` sits at the same seam, theme's structural sibling: theme is the rice's DRESS (palette · base16 · component tiers · geometry · fonts · wallpaper), layout is its STRUCTURE — which widget/surface TYPES a rice brings into existence (`modules/nucleus/options.nix`), stored in the same `theme.json` and read under the same closed paint-read whitelist (`AGENTS.md` house rule 5).
 
 ## How it all flows
 
 One loop, in the vocabulary:
 
-1. **Melete practices.** The agent writes — a new song, a new dendrite branch, a new widget — entering through a door, landing in the audit log.
+1. **Melete practices.** The agent writes — a new rice, a new dendrite branch, a new widget — entering through a door, landing in the audit log.
 2. **The walker freezes.** The nix layer picks up what was written by accretion; the score now contains it.
 3. **Rehearsal sounds it.** Before any rebuild, the live side performs the theme from `stage/theme.json` — quickshell surfaces and hyprctl repaint in place, the frozen side untouched.
 4. **The gate records it.** On human admission, the rehearsed state bakes through the stylix lane and the compositor, committed to the clone. Rehearsal and recording derive from the same theme, so they cannot disagree.
@@ -98,7 +98,7 @@ Because agents read this system as much as humans do. A consistent metaphor is c
 
 ## Related
 
-- [[Song-Vocabulary]] — the performed half, term by term
+- [[Rice-Vocabulary]] — the performed half, term by term
 - [[Snowflake-Anatomy]] — the frozen half, layer by layer
 - [[theme]] — the seam where they meet
 - [[Melete]] · [[Mneme]] — the other two Muses

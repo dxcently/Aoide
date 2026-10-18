@@ -8,7 +8,7 @@
 # Wires Hyprland as the NixOS Wayland compositor and applies compositor-side
 # theme live via hyprctl. Theme values (gaps, radius, borders, blur)
 # are baked into the Hyprland config at build time so they take effect on
-# session start; the theme engine (crates/song) can re-dispatch
+# session start; the theme engine (crates/strillix-rice) can re-dispatch
 # them live via hyprctl during a rehearsal (preview) pass.
 #
 # Scope: LOOK + session plumbing only. Everything host-invariant — keybinds,
@@ -31,7 +31,7 @@
 # rule 5). Here that is `aoide.theme` (palette + component tiers) and
 # `aoide.layout` (declared widget/surface types).
 #   - Component-tier fallback applied locally.
-#   - NEVER reads song/ runtime paths (structurally: checks.rice-runtime-untracked).
+#   - NEVER reads rice/ runtime paths (structurally: checks.rice-runtime-untracked).
 {
   config,
   lib,
@@ -47,21 +47,21 @@ let
 
   # ── Component-tier fallback helpers ────────────────────────────────────────
   # No hex lives here by design (CONTRACTS.md §1/§5): this file is host- and
-  # song-agnostic, so border colour is ALWAYS a note read, never a literal.
+  # rice-agnostic, so border colour is ALWAYS a note read, never a literal.
   # This IS the substitution seam — window.border/window.borderInactive (or
-  # their palette.accent/palette.bg fallback) are set per-song in that song's
+  # their palette.accent/palette.bg fallback) are set per-rice in that rice's
   # rice.nix (e.g. rices/sonata/rice.nix), which maps its own base16
-  # roles onto the component tier. A song owns that assignment; this file only
-  # reads it, so changing a rendered border colour is always a song-side edit.
+  # roles onto the component tier. A rice owns that assignment; this file only
+  # reads it, so changing a rendered border colour is always a rice-side edit.
   windowBorder = if t.window.border != null then t.window.border else t.palette.accent;
   windowBorderInactive =
     if t.window.borderInactive != null then t.window.borderInactive else t.palette.bg;
 
   # ── Derived geometry values ───────────────────────────────────────────────
-  # v0 geometry tier (additive-optional, CONTRACTS.md §1): a song MAY set
+  # v0 geometry tier (additive-optional, CONTRACTS.md §1): a rice MAY set
   # aoide.theme.geometry.*; every field is nullOr and falls back to the
   # opinionated defaults below when unset (component-tier fallback pattern,
-  # same as windowBorder/windowBorderInactive above). No song sets geometry
+  # same as windowBorder/windowBorderInactive above). No rice sets geometry
   # today, so these fallbacks ARE the immutable baseline in practice.
   geo = t.geometry;
   gapOuter = if geo.gapsOut != null then geo.gapsOut else 8;
@@ -76,11 +76,11 @@ let
 
   # ── Declared widget-type registry → compositor layerrules (v1) ───────────
   # aoide.layout.widgets (nucleus/options.nix, Phase 1) is the registry a
-  # song uses to declare a brand-new surface-kind widget TYPE. It is empty
-  # for every song until Phase 3/4/6 land (Sonata, the only committed song
+  # rice uses to declare a brand-new surface-kind widget TYPE. It is empty
+  # for every rice until Phase 3/4/6 land (Sonata, the only committed rice
   # today, declares nothing) — mapAttrsToList over {} yields [ ], so every
   # derived value below is [ ] / "" in practice right now: a structural
-  # no-op, not an accident of which song happens to be active.
+  # no-op, not an accident of which rice happens to be active.
   #
   # Each entry's namespace is its declared `namespace` field, or else
   # "aoide-<slot>" from the attribute key (the option doc's contract — a
@@ -124,7 +124,7 @@ let
   );
 
   # ── Hyprland config fragment — notes baked in at build time ──────────────
-  # The theme emitter (crates/song) re-runs hyprctl keyword dispatch
+  # The theme emitter (crates/strillix-rice) re-runs hyprctl keyword dispatch
   # during rehearsal to live-patch these values without a rebuild.
   hyprNoteConfig = ''
     # ── Aoide notes — compositor lane ───────────────────────────────────
@@ -150,7 +150,7 @@ let
     }
 
     # Glass for the quickshell surfaces — the lane's fixed namespace set,
-    # not a per-song choice: the bar (aoide-bar) is never glassed (opaque
+    # not a per-rice choice: the bar (aoide-bar) is never glassed (opaque
     # marble), the center-left dock (aoide-dock) layer IS blurred/glassed
     # (its panels are mostly opaque marble — only the TERMINALS temple is
     # translucent, so the blur + hyprglass
@@ -187,19 +187,19 @@ let
 
     # aoide.layout.widgets (declared widget-type registry, v1): one
     # layerrule pair (or a pinned blur-off) per registered slot, same idiom
-    # as the aoide-* rules above. Empty today for every song — expands only
-    # once a song's rice.nix actually populates .widgets (Phase 3/4/6).
+    # as the aoide-* rules above. Empty today for every rice — expands only
+    # once a rice's rice.nix actually populates .widgets (Phase 3/4/6).
     ${widgetLayerRules}
     # hyprglass (pkgs/hyprglass, loaded via the HM plugins list below):
     # Liquid Glass on the quickshell surfaces, ON TOP of the blur+gloss —
     # refraction/fresnel the flat gradient can't fake. Same namespaces as
     # the layerrules; the wallpaper surface stays untouched.
     #
-    # THE SONG DECIDES, and the BAKE agrees with the STAGE: the two enable
+    # THE RICE DECIDES, and the BAKE agrees with the STAGE: the two enable
     # keys below are `geometry.blurEnabled` as resolved above, the same two
-    # keys `aoide-song`'s `live::apply_live` sends as keywords — so a song
+    # keys `strillix-rice`'s `live::apply_live` sends as keywords — so a rice
     # that turns blur off (cadenza) reads glassless whether the desktop
-    # booted into it or staged it, and a song with NO opinion gets the
+    # booted into it or staged it, and a rice with NO opinion gets the
     # host's bake (both on): a live stage sends no glass keyword for it
     # and reloads this file first. `enabled` is the
     # global window-glass switch, `layers.enabled` the layer-surface one;
@@ -217,7 +217,7 @@ let
     # fragments), so opaque windows (Firefox &c.) are untouched while the
     # frosted kitty gains hyprglass refraction/fresnel ON TOP of Hyprland's own
     # blur. The `light` preset override below is the lane's fixed set, not a
-    # song choice (no song gates it): a slightly brighter frost, which reads
+    # rice choice (no rice gates it): a slightly brighter frost, which reads
     # right on the light keys this desktop ships and is one lane constant
     # away from changing.
     plugin:hyprglass {
@@ -236,8 +236,8 @@ let
     }
 
     # ── Terminal corners ──────────────────────────────────────────────────────
-    # The terminal's corners follow the song, like every other window's: rounded
-    # under a song that asks for rounding, square under one that does not. The
+    # The terminal's corners follow the rice, like every other window's: rounded
+    # under a rice that asks for rounding, square under one that does not. The
     # rule stays explicit — rather than letting the global carry the terminal —
     # because kitty is the one class that has wanted a radius of its own (a
     # `rounding 3` that softened only the terminal, before the radius-0 house

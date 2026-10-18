@@ -4,7 +4,7 @@
 
 - **nixpkgs-only.** This directory lives inside the core flake (root
   `AGENTS.md`, "Two binaries") — no file here reaches into `modules/`
-  or `song/`, and none may gain an input beyond nixpkgs.
+  or `rice/`, and none may gain an input beyond nixpkgs.
 - **Explicit `imports`, no walker.** `default.nix` names every sibling
   it pulls in by hand. The catalogue's one-line-per-dendrite naming is a
   different tree's convention; this one stays a plain, readable list —
@@ -14,7 +14,7 @@
   flips it); nothing in this bundle wires behavior a host didn't ask
   for.
 - **The core module never reads a lane's option.** A paint-dependent
-  value enters as a core option the AoideOS side sets, never a direct
+  value enters as a core option the Strillix side sets, never a direct
   read of a paint lane's own enable flag from here — `aoided.nix`'s unit
   anchors to `aoide.sessionTarget` (declared in `options.nix`,
   default `default.target`) rather than the strillix fact

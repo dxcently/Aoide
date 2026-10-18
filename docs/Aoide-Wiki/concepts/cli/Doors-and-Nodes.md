@@ -135,14 +135,14 @@ strx shellbridge [--run] [--json]
   with their empty v0 registry shapes, atomic and only when absent or corrupt
   (`seed_if_absent` — a populated roster survives a restart); binds
   `$XDG_RUNTIME_DIR/aoide/shellbridge.sock` (a stale socket file is removed
-  first); maintains `state/stage/herald.json` (notification ledger, v0,
+  first); maintains `state/stage/notifications.json` (notification ledger, v0,
   capped at 20 cards, atomic read-modify-write serialised by a stage lock —
   not by the accept loop, which is thread-per-connection);
   appends audit records (door `daemon`) to the default audit log for every
   dispatched command. All six of these are the CONDUCTING stage files
   (`CONTRACTS.md §4`) — shellbridge writes them into `state/stage/` even
   though the `shellbridge` command itself ships in `strillix`; rice staging
-  (`mode.json`, `theme.json`, `grimoire.json`, `cover.json`) stays under
+  (`mode.json`, `theme.json`, `grimoire.json`, `wallpaper.json`) stays under
   `/stage/`, untouched by this split.
 - **Output:** blocks forever serving the socket (systemd unit is
   `Type=simple`); returns an error document only on bind failure
@@ -156,7 +156,7 @@ strx shellbridge [--run] [--json]
   `stage <name>|declarative` whitelist: re-execs `strx rice mode stage <name>` /
   a bare `strx rice mode declarative` with `--json`, waits, then fires a
   detached `notify-send "Aoide" <message>` on success and failure; the audit
-  line is `ricemode action <action>: <ok|failed>`, never a song), `ricedraft` (the draft picker's gesture, a
+  line is `ricemode action <action>: <ok|failed>`, never a rice), `ricedraft` (the draft picker's gesture, a
   closed `enter|new|save|drop` whitelist, fire-and-forget like `ricemode`:
   re-execs `strx rice mode draft <name>` / `strx rice draft save` / `strx rice
   draft drop <name>` with `--json` — from declarative, `enter` and `new` first
@@ -166,20 +166,20 @@ strx shellbridge [--run] [--json]
   enter-or-create, because the CLI forks the stage into a name that is not
   there yet; the audit line is `ricedraft action <action>: <ok|partial|
   failed>`, never a name), `ricemenu` (the menu's READ: re-execs `strx rice
-  list --json`, then `strx rice draft list <song> --json` when the mode names a
-  song, under one 4 s budget, and answers one line, the list's `{mode, song,
-  draft, stagingSong, declared, songs}` plus `{draftsSong, drafts: [{name,
+  list --json`, then `strx rice draft list <rice> --json` when the mode names a
+  rice, under one 4 s budget, and answers one line, the list's `{mode, rice,
+  draft, stagingRice, declared, rices}` plus `{draftsRice, drafts: [{name,
   savedAt, current}]}` and this machine's `host` and `hostConfig` (the file
   the declare rewrites), or `{ok:false, reason, message}`; it takes no fields, so
   it has no gate to fail), `ricedeclare` (the menu's Declare row, ANSWERED on
-  its connection: `name` is a song name, it re-execs `strx rice declare
-  <name> --host --json` — which rewrites the host config's declared-song line
+  its connection: `name` is a rice name, it re-execs `strx rice declare
+  <name> --host --json` — which rewrites the host config's declared-rice line
   and never rebuilds — and answers `{ok:true, message, name, host, changed,
   stagedDiffers}` or `{ok:false, reason, message}`; the audit line is
-  `ricedeclare action <song>: <ok changed|ok unchanged|failed>`), `refreshusage` (detached re-exec
+  `ricedeclare action <rice>: <ok changed|ok unchanged|failed>`), `refreshusage` (detached re-exec
   `usage --json`; the gadget picks up the `state/usage.json` write itself),
   `rechecksessions` (detached re-exec `session reap --announce --json`),
-  `heraldpush` / `heraldverdict` / `heralddismiss` (the ledger; a verdict
+  `notificationspush` / `notificationsverdict` / `notificationsdismiss` (the ledger; a verdict
   types the answer into the waiting session through `send`), `sessionaction`
   (a closed five-action whitelist — `undying`, `project`, `kill`,
   `createproject`, `editproject` — that re-execs the matching `aoide
@@ -190,7 +190,7 @@ strx shellbridge [--run] [--json]
   verbatim when there is one; a line the whitelist refuses is dropped with
   no reply at all), and `projectaction` (a closed three-action whitelist —
   `create`, `edit`, `removehost` — for zero-session project creation and
-  editing from the song-side project picker: no session id anywhere on the
+  editing from the rice-side project picker: no session id anywhere on the
   wire, in the plan, the reply, or the audit line, the reply keyed by
   `name` where `sessionaction` is keyed by `sessionId`; `create`/`edit`
   re-exec `aoide project add|edit <name> <paths…>` then, per `hosts` entry,
@@ -236,7 +236,7 @@ strx shellbridge [--run] [--json]
   a same-uid caller passes, so the floor is no defense against the
   operator's own uid. Each accepted connection is served on its own thread,
   so one client idling between commands never blocks another's. Client half:
-  `shellbridge::send_line` is how `strx herald push` and `session permit` reach
+  `shellbridge::send_line` is how `strx notifications push` and `session permit` reach
   the daemon, which stays the single ledger writer. See [[shellbridge]].
 
 ### aoide adapter melete

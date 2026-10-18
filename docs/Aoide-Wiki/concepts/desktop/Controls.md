@@ -44,10 +44,10 @@ modifier.
 | Keybind | Action |
 |---|---|
 | `SUPER + SPACE` | Toggle the launcher — a Hyprland global shortcut (`global, aoide:launcher`) reaching the QML surface directly; no CLI command. |
-| `SUPER + W` | Open the wallpaper picker (`global, aoide:wallpaper`): the launcher's own Desktop Pictures when the song's launcher has one (`openPictures()`), else the plain cover picker; picking a cover shells `strx cover set <path>`. |
+| `SUPER + W` | Open the wallpaper picker (`global, aoide:wallpaper`): the launcher's own Desktop Pictures when the rice's launcher has one (`openPictures()`), else the plain wallpaper picker; picking a wallpaper shells `strx wallpaper set <path>`. |
 | `SUPER + G` | Toggle the gadget dock (`global, aoide:dock`) — see [[Gadget-Dock]]. |
 | `SUPER + C` | Toggle clipboard history — opens the launcher on its clipboard chapter (`global, aoide:clipboard`). |
-| `SUPER + ESCAPE` | Lock the screen — `exec, strx lock`: the shell's lock host in the staged song's face when the song dresses `lockscreen`, else hyprlock. |
+| `SUPER + ESCAPE` | Lock the screen — `exec, strx lock`: the shell's lock host in the staged rice's face when the rice dresses `lockscreen`, else hyprlock. |
 | `SUPER SHIFT + P` | Bound to `strx rice preview` in `modules/dendrites/hyprland.nix` — a retired command, so the keybind is a no-op until repointed to `rice stage` (report only, not repointed). |
 | `SUPER SHIFT + A` | Bound to `strx rice adopt` in `modules/dendrites/hyprland.nix` — a retired command, so the keybind is a no-op until repointed to `rice declare` (a stub — `implemented: false`; report only, not repointed). |
 | `SUPER + RETURN` | Open a terminal (kitty). |
@@ -59,7 +59,7 @@ modifier.
 | `SUPER + 1–0` | Switch to workspace 1–10. |
 | `SUPER SHIFT + 1–0` | Move window to workspace 1–10. |
 | `ALT + Tab` | Previous workspace. |
-| — | `aoide:switcher`, the window switcher (a song's `widgets/switcher.qml`, else the plain one), is registered but not bound here: the venue binds it. |
+| — | `aoide:switcher`, the window switcher (a rice's `widgets/switcher.qml`, else the plain one), is registered but not bound here: the venue binds it. |
 | `SUPER + X` / `SUPER + Z` | Toggle special workspace `magic` / `scratch` (`SHIFT` = move window there). |
 | `SUPER + leftdrag` / `rightdrag` | Move / resize window with the mouse. |
 
@@ -70,13 +70,13 @@ modifier.
 
 ### Bar cell interactions
 
-`rices/sonata/widgets/bar.qml` (the bar is the song's body, resolved by
-slot name; see [[Song-Anatomy]]):
+`rices/sonata/widgets/bar.qml` (the bar is the rice's body, resolved by
+slot name; see [[Rice-Anatomy]]):
 
 | Cell | Interaction |
 |---|---|
 | Sessions (`✎N`, left) | Click → toggle the gadget dock. |
-| Clock + date (left) | Click → toggle the calendar popout, if the active song authors one. |
+| Clock + date (left) | Click → toggle the calendar popout, if the active rice authors one. |
 | Volume / mic (right) | Scroll = adjust, click = toggle the audio colonnade, hover = a cue readout (no separate slider). |
 | Battery (right) | Hover → time-remaining + charge-bar popout; no click. |
 | Network (right) | Click → toggle the DIKTYON network stele; no hover popout. |

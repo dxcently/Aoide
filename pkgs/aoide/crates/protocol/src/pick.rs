@@ -5,7 +5,7 @@
 //!
 //! **Location is a decision, not a default** (advisor verdict, fork 5): the
 //! picker is door behavior — [`Door`] and [`interactive`]'s tty gate both
-//! live here in `aoide-protocol` because every domain crate (`song`, and
+//! live here in `aoide-protocol` because every domain crate (`rice`, and
 //! whichever comes after it) already depends on this crate, and a per-domain
 //! copy would duplicate the exact same read/parse/reprompt loop for no
 //! reason. `rice back`'s bare-tty branch (`crates/strillix-rice/src/commands/history.rs`,

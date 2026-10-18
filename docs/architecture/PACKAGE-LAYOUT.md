@@ -5,7 +5,7 @@
 > commands (`commands` modules), the app shell is `crates/cli` (package
 > `aoide-cli`, lib `aoide`), and the root `Cargo.toml` is a VIRTUAL workspace
 > with one `[workspace.dependencies]` version source — `src/` no longer
-> exists. `management` was paired with `song`
+> exists. `management` was paired with `rice`
 > in the original Phase 5 plan but was deferred, not dropped (see the Phase 5
 > status note below). Phase 6 planning found `cli` isn't a separate crate to
 > build — the root `aoide` package already is the DAG sink (depends on
@@ -38,11 +38,11 @@ invariant structural rather than conventional.
 > **Aoide** — *she scores her own stage, conducts every agent on it, and travels
 > light.* A **self-ricing, agent-conducting** environment distributed as a single
 > **flake**: clone it onto any Linux and Nix provisions its own world. **NixOS
-> optional, never required** — that distro is *AoideOS*; this is the muse herself.
+> optional, never required** — that distro is *Strillix*; this is the muse herself.
 
 This crate split is the *how* for a load-bearing goal: **Aoide-the-core ships as
 its own package/flake, runnable on any Linux distribution through Nix — the
-package manager, not the OS.** Nix runs on Arch, Debian, Fedora, macOS; AoideOS
+package manager, not the OS.** Nix runs on Arch, Debian, Fedora, macOS; Strillix
 (this repo's NixOS distribution) is one *target*, not the substrate. The muse
 provisions and version-pins her *own* world (binaries, theme assets, the agent's
 tools) via Nix, so a user on any distro does `nix run`/`nix profile install` and
@@ -60,8 +60,8 @@ for the steward especially):**
   **portable-Nix backend** (home-manager-style profile / `nix profile` / an
   Aoide-owned generation) selected at runtime by what the host actually is.
   Rebuild/switch, service control, and sudo-tracking route through that seam.
-- **`song` rices portably.** Theming can't require Stylix/NixOS-module plumbing;
-  the ricing engine must also apply a song on a generic-Linux host (writing the
+- **`rice` rices portably.** Theming can't require Stylix/NixOS-module plumbing;
+  the ricing engine must also apply a rice on a generic-Linux host (writing the
   base16 surfaces + reloading Quickshell) so *self-ricing* holds off-NixOS.
 - **The `steward` manages packages via Nix, not the distro's.** Its tools
   install/pin/upgrade through Aoide's own Nix-managed set — the same on Fedora as
@@ -83,7 +83,7 @@ for the steward especially):**
 | `tui` (terminal UI library) | **`conductor`** | aoide already has its TUI: `conductor/` (app/ui/graphview/theme). It doubles as the control surface for the steward. |
 | `coding-agent` (the concrete app) | **`cli`** | the `aoide`/`aoided` bins + `commands/` that wire every crate into the two shipped binaries. |
 | *(none)* | **`conduct`** | aoide-unique: the PTY multiplexer + session DAG + hook plumbing. The core that makes every terminal a tracked, conductable session. |
-| *(none)* | **`song`** | aoide-unique: the ricing / design engine (notes → theme, songs, stage, the Pantheon design language). |
+| *(none)* | **`rice`** | aoide-unique: the ricing / design engine (notes → theme, rices, stage, the Pantheon design language). |
 | *(none)* | **`management`** | aoide-unique: the privileged **hands** — rebuild/switch, `rice mint`, hypr control, service/daemon ops, sudo-tracking. |
 
 **Two additions beyond a literal port, both driven by this request:**
@@ -128,13 +128,13 @@ pkgs/aoide/
       src/ scan · commands (soundcheck) · checklane (session-hook wired)
     steward/             ★NEW   # the STEWARD — system-management agent
       src/ harness/      —  the run loop (turn loop, tool dispatch, compaction)
-           tools/        —  system-management commands (wraps management/conduct/song)
+           tools/        —  system-management commands (wraps management/conduct/rice)
            canon/        —  memory of DESIGN PRIMITIVES + how-the-user-likes-things
            audit/        —  self-auditing (checks its work vs canon + contracts)
-           skills/       —  packaged procedures (rebuild · mint a song · wire a gadget)
-    song/                       # ricing / design engine
-      src/ theme · notes · rice · cover · stage · palette
-           · commands/ (rice*, cover set — Phase 9)
+           skills/       —  packaged procedures (rebuild · mint a rice · wire a gadget)
+    rice/                       # ricing / design engine
+      src/ theme · notes · rice · wallpaper · stage · palette
+           · commands/ (rice*, wallpaper set — Phase 9)
     management/                 # privileged host-ops — the hands
       src/ hypr · infra · rebuild · service · sudo-track
     evals/               ★NEW   # eval harness
@@ -150,7 +150,7 @@ pkgs/aoide/
     strillix/                       # the paint app: strillix bin, second composition
                                 # root over the rice/screen/quickshell bundle
       src/ bin/strillix · dispatch/registry(own golden) · guide
-           · commands/ (song*, screen*, shellbridge/herald regs, onboard)
+           · commands/ (rice*, screen*, shellbridge/notifications regs, onboard)
 ```
 
 ## Per-crate charter
@@ -165,21 +165,21 @@ pkgs/aoide/
 | **secrets** | The secrets broker: policy-gated resolve over a unix socket, TOTP enrollment, pluggable backends (`file` built-in), admin commands — plus its CLI commands (`secrets *`). A secret's value never crosses into a `Serialize`/`Deserialize` type; audit happens broker-side only. | `crates/secrets/` (broker·client·policy·backend·enroll·store·commands) | landed (Workstream SECRETS, P-V1–P-V4f) |
 | **test-support** | Shared test rig (scratch dirs, `EnvSaver`, fixture payloads, the single `env_lock`). **Dev-dependency only** — never a production edge. | `commands/mod.rs::test_support`, root `env_lock` | landed (Phase 9) |
 | **upkeep** | Mechanical integrity on the working tree: the gap `nix flake check` structurally can't see (gitignored/uncommitted state, a stray file at repo root, an untracked `.nix` file). `aoide soundcheck` (human/agent-invoked report) and `checklane` (the same gap wired into the agent loop via `session hook`'s SessionStart/Stop/UserPromptSubmit events) — plus its CLI command (`soundcheck`). Report-only, forever: neither ever moves, deletes, formats, or repairs. | *(new)* | landed |
-| **steward** ★ | A system-management agent driven by the conductor. Runs a harness loop; its tools act on the host via `management`/`conduct`/`song`; it remembers design primitives in `canon`; it self-audits against canon + contracts. | *(new)* | skeleton — DEFER (Phase 7) |
-| **song** | The ricing / design engine: the native theme engine (`src/theme/` — schema · resolve · emit; formerly a standalone Node package), apply songs, mint palettes, write the stage, the Pantheon design language — plus its CLI commands (`rice *`, `theme *`, `cover set`). **Rices portably** — applies a song on generic Linux too, not only via Stylix/NixOS modules. | `notes.rs`, `commands/rice.rs`, `commands/cover.rs` | landed (Phase 5a+5b); commands landed (Phase 9) |
+| **steward** ★ | A system-management agent driven by the conductor. Runs a harness loop; its tools act on the host via `management`/`conduct`/`rice`; it remembers design primitives in `canon`; it self-audits against canon + contracts. | *(new)* | skeleton — DEFER (Phase 7) |
+| **rice** | The ricing / design engine: the native theme engine (`src/theme/` — schema · resolve · emit; formerly a standalone Node package), apply rices, mint palettes, write the stage, the Pantheon design language — plus its CLI commands (`rice *`, `theme *`, `wallpaper set`). **Rices portably** — applies a rice on generic Linux too, not only via Stylix/NixOS modules. | `notes.rs`, `commands/rice.rs`, `commands/wallpaper.rs` | landed (Phase 5a+5b); commands landed (Phase 9) |
 | **management** | The privileged hands: rebuild/switch, `rice mint`, hypr control, service/daemon ops, sudo-tracking. **Host-abstracted** — a NixOS backend (nixos-rebuild/modules) and a portable-Nix backend (`nix profile`/home-manager-style) behind one seam, chosen by what the host is. The capabilities the steward's tools invoke. | `hypr.rs`, `commands/infra.rs`(host ops), sudo-track (44c6ec9) | carve-out — DEFERRED out of Phase 5 (no ETA) |
 | **evals** | Eval harness: golden snapshots (existing), agent-behavior evals for the steward, door-contract evals, ricing/design evals. | golden-snapshot tests | elevate — DEFER (Phase 8) |
 | **conductor** | The CLI/TUI surface: session DAG view, roster, and the steward's control panel — plus its one CLI command (`conductor`). | `crates/conductor/` (app·ui·graphview·theme), `commands/infra.rs`(conductor command) | landed (Phase 6a+6b); commands landed (Phase 9) |
 | **cli** | The app that wires everything into `aoide` + `aoided`: arg parse, the single dispatcher, registry assembly (`commands/mod.rs::all()`), guide/onboarding, and the three root-coupled groups (`meta`, `stubs`, `mcp serve`) that read the assembled registry. The DAG sink: depends on everything, nothing depends on it. Its lib keeps the name `aoide` so no caller changes. | `crates/cli/` (bin/*, cli.rs, dispatch.rs, registry.rs, commands/{mod,meta,stubs,infra}.rs, guide.rs, lib.rs) | landed as `crates/cli` (Phase 9 — supersedes the Phase 6 "stays the root package" finding, see the Phase 9 status note) |
 | **screen** | Read-only desktop view for agents plus pointer synthesis: `screen info` (hyprctl monitors/cursor/workspace/clients), `screen shot` (grim/slurp + JSON sidecar), `screen point` (native `zwlr_virtual_pointer_v1` synthesis, no `wlrctl`), `screen ocr` (tesseract), `screen diff` (pixel/inventory act-verification), `screen point text` (click by OCR'd word) — plus its CLI commands. Carries the workspace's only heavy deps (`wayland-client`, `wayland-protocols-wlr`, `image`); `strillix`-only, core never depends on it. | `conduct`'s former screen/pointer modules | landed (P-A1) |
-| **strillix** | The paint app crate: bin `strillix`, package `strillix` — the second composition root over the same domain-crate handler code `cli` assembles, its own independent `Registry`/dispatcher/golden command-path snapshot. Owns the self-ricing loop, `screen`, `herald`, `shellbridge`, and `quickshell`; deliberately never conducting, the graph, A2A, nodes, or the daemon — those stay core identity in `cli`. The one binary allowed to be nix-dependent. | *(new)* | landed (Workstream A, P-A0–A8) |
+| **strillix** | The paint app crate: bin `strillix`, package `strillix` — the second composition root over the same domain-crate handler code `cli` assembles, its own independent `Registry`/dispatcher/golden command-path snapshot. Owns the self-ricing loop, `screen`, `notifications`, `shellbridge`, and `quickshell`; deliberately never conducting, the graph, A2A, nodes, or the daemon — those stay core identity in `cli`. The one binary allowed to be nix-dependent. | *(new)* | landed (Workstream A, P-A0–A8) |
 
 ## The steward (`steward`) — detail
 
 The headline new package. What it is and is not:
 
 - **System management, not coding.** Its job is to keep the running Aoide
-  coherent — rebuild/switch, run design/ricing passes, wire gadgets, tend songs,
+  coherent — rebuild/switch, run design/ricing passes, wire gadgets, tend rices,
   watch the session DAG. Its tools are `management` commands, not file edits in a repo.
 - **Distro-agnostic by construction.** The steward manages packages, themes, and
   services through Aoide's *own* Nix-managed world via `management`'s backend
@@ -232,13 +232,13 @@ this is structure, not features.
 - **Phase 4c — extract `server`. LANDED (5ae9f6d).** `daemon`/`mcp` + the A2A
   serve half → `server`. (The original blueprint listed this as one Phase 4 —
   landed as three units.)
-- **Phase 5a — birth `song`. LANDED (de63880).** `notes.rs` → `song`, as a
+- **Phase 5a — birth `rice`. LANDED (de63880).** `notes.rs` → `rice`, as a
   leaf crate with `notes` + `live` modules (no `storage` dependency yet).
-- **Phase 5b — `song` gains `mint` + `cover`. LANDED (c56faa7).**
-  `commands/rice.rs` + `commands/cover.rs` fold in as `song::mint` /
-  `song::cover`, adding a `storage` dependency.
+- **Phase 5b — `rice` gains `mint` + `wallpaper`. LANDED (c56faa7).**
+  `commands/rice.rs` + `commands/wallpaper.rs` fold in as `rice::mint` /
+  `rice::wallpaper`, adding a `storage` dependency.
 - **`management` — DEFERRED out of Phase 5, indefinitely.** The blueprint
-  originally paired `management` with `song` as one phase ("extract `song` +
+  originally paired `management` with `rice` as one phase ("extract `rice` +
   `management`"). Planning research for Phase 5 found `management`'s charter
   is largely *aspirational*, not just unextracted: there is no
   `nixos-rebuild`/`switch`/package-install-or-upgrade code anywhere in the
@@ -247,10 +247,10 @@ this is structure, not features.
   explicitly user-triggered, never autonomous: `shellbridge`'s power actions
   (`systemctl suspend`/`hibernate`/`reboot`/`poweroff`, `hyprctl dispatch
   exit`, fired only by a UI button press) and, inside the ricing surface
-  itself, one env-guarded `hyprctl` call in `song::live` — none of it reaches
+  itself, one env-guarded `hyprctl` call in `rice::live` — none of it reaches
   `nixos-rebuild`, `switch`, or service *installation*, the shape
   `management`'s charter actually names. The env-guarded `hyprctl` call
-  stayed a function separate from `song::live::geometry_keywords` so a
+  stayed a function separate from `rice::live::geometry_keywords` so a
   future `management` crate could lift just the host-effect half out later
   without touching the pure computation. `management` is deferred
   indefinitely until real host-ops commands (rebuild/switch/service
@@ -310,7 +310,7 @@ this is structure, not features.
   package's `src/commands/` — this phase finishes the blueprint's own target
   table by moving each handler group into its domain crate's `commands`
   module (nushell-style: a domain's CLI commands live with the domain;
-  `graph`/`hooks` → conduct, `rice`/`cover`/`design` → song, `usage` →
+  `graph`/`hooks` → conduct, `rice`/`wallpaper`/`design` → rice, `usage` →
   storage, `a2a serve`/`daemon`/`shellbridge` → server, the `a2a agent`
   commands/`adapter melete` → client, `conductor` → conductor). Shared
   prerequisites: `cmd!`/`arg!`/`flag!` + `audit_log_path` → `protocol`;
@@ -342,15 +342,15 @@ reasoning is fixed before code follows it (Workstream A, phase P-A0 of
 Core keeps `aoide`/`aoided` over `protocol` · `storage` · `client` ·
 `conduct` · `server` · `secrets` · `conductor` · `upkeep` · `cli`. A second binary —
 **`strillix`** (crate `strillix`, `crates/strillix`) — owns the
-rice/draft/mode/cover/theme/quickshell/screen/shellbridge/herald command
+rice/draft/mode/wallpaper/theme/quickshell/screen/shellbridge/notifications command
 surface: everything that paints, or that only a desktop needs.
 
 - **Naming.** Muse names (`Aoide`, `Melete`, `Mneme`) name SYSTEMS, not
   binaries; a binary living inside a system takes an INSTRUMENT name — the
   desktop is the instrument the muse plays. Considered and rejected:
   `terpsichore` (spends a muse name on a binary — the wrong tier — and at
-  12 characters is a poor CLI command prefix); `aoide-rice` (mislabels the
-  ~40% of the surface — screen, shellbridge, herald, quickshell — that
+  12 characters is a poor CLI command prefix); `strillix-rice` (mislabels the
+  ~40% of the surface — screen, shellbridge, notifications, quickshell — that
   isn't rice at all).
 - **`conductor` stays core.** It is the messaging/orchestration surface a
   headless box needs most, not a painting tool: pure Rust (ratatui), no
@@ -358,10 +358,10 @@ surface: everything that paints, or that only a desktop needs.
   identity — see "What Aoide is" above ("she conducts every agent on
   it"). It ships in `aoide`/`aoided`, never `strillix`.
 - **Charter exceptions (deliberate — recorded here as the smudge they
-  are).** `shellbridge.rs` and `herald.rs` stay as FILES in `conduct` —
+  are).** `shellbridge.rs` and `notifications.rs` stay as FILES in `conduct` —
   only their REGISTRY lines (the CLI commands) move to `strillix` — because both
   are entangled with core: `permit.rs:413` publishes summons through
-  `herald`, and `conductor/ui.rs:508` reads the socket path `shellbridge`
+  `notifications`, and `conductor/ui.rs:508` reads the socket path `shellbridge`
   owns. `storage::takes` and `storage::mode` stay in `storage` for the
   same shape of reason: zero dependency weight, and `mode` is read by
   `shellbridge`, which itself stays core-crate-resident. None of these
@@ -383,7 +383,7 @@ surface: everything that paints, or that only a desktop needs.
   `github.com/deepseek-ai/deepseek-harness`, the repo behind the Cordis
   paper CONTRACTS §0 already cites.
 - **Nix-independence.** Core (`aoide`/`aoided`) builds with `cargo` and
-  runs on any Linux: no nix shell-outs, no NixOS assumption. `song`'s
+  runs on any Linux: no nix shell-outs, no NixOS assumption. `rice`'s
   `widgets.rs` `nix eval` call lives in `strillix` now — only `strillix` may be
   nix-dependent. This is the load-bearing half of "What Aoide is" above,
   made structural rather than aspirational.
@@ -408,7 +408,7 @@ surface: everything that paints, or that only a desktop needs.
   verbatim as `${pkgs.strillix-shell}/share/strillix/{qml,icons,preview}`. Plain
   source: it runs nothing and names no config, so it is not a shell — the
   directory a shell runs is `aoide.quickshell.config`, and what fills it is a
-  song's business. Core cannot read it (this flake is rooted at `pkgs/aoide`
+  rice's business. Core cannot read it (this flake is rooted at `pkgs/aoide`
   and never walks the root repo), and `strillix` reads the CHECKOUT's copy rather
   than the store path, naming it once as
   `aoide_storage::fs::STRILLIX_SHELL_SRC`. Published by the root flake as
@@ -419,27 +419,27 @@ surface: everything that paints, or that only a desktop needs.
   meaning, per flake.
 
 - **The shipped rices is a package — `pkgs/strillix-rices`.** The score a
-  machine with no checkout falls back to: `share/strillix/rices/` holding the song
+  machine with no checkout falls back to: `share/strillix/rices/` holding the rice
   folders this instance ships plus baked `manifest.json`/`registry.json` and —
-  for a host that selected songs — `builtin.json`; beside it
+  for a host that selected rices — `builtin.json`; beside it
   `share/strillix/nix/` (the OFFLINE generator: `manifest.nix`, copies of
-  `lib/rices.nix`/`lib/song.nix`, and the locked nixpkgs `lib/`) and
+  `lib/rices.nix`/`lib/rice.nix`, and the locked nixpkgs `lib/`) and
   `share/strillix/aoide-options.json` (`lib/options.nix`'s output, read by
-  `strx onboard`). `aoide_storage::fs::song_templates_dir` finds the rices
+  `strx onboard`). `aoide_storage::fs::rice_templates_dir` finds the rices
   through `STRILLIX_TEMPLATES` or the exe-sibling path, and `fs::strillix_share_dir`
   is that path's parent; only `strillix-rice`/`strillix` read either. THREE
-  arguments: `songs` (which folders ship) and `builtin` (the selection, written to
+  arguments: `rices` (which folders ship) and `builtin` (the selection, written to
   `builtin.json`), both defaulted for this flake's own
-  `packages.<system>.strillix-rices` (every discovered song) and both overridden
+  `packages.<system>.strillix-rices` (every discovered rice) and both overridden
   per host by the `strillix` dendrite, plus `aoideOptions` (the option doc list, which
   `callPackage` cannot derive — each build context names it through
   `lib/pkgs.nix`'s `extra`). **What it copies is a host contract,**
-  not tidiness: each shipped song enters the derivation as its OWN store path
+  not tidiness: each shipped rice enters the derivation as its OWN store path
   and the baked manifest/registry are over the shipped set only, because this
   package's path is a STRING in a host's session variables and activation — so
   anything that rehashes it moves that host's toplevel drvPath. While the build
-  read the rices DIRECTORY, every song in the repo could move a host that
-  builds one song in.
+  read the rices DIRECTORY, every rice in the repo could move a host that
+  builds one rice in.
 
 ## Flake outputs — the export surface
 
@@ -488,7 +488,7 @@ The stability contract — what a consumer may rely on staying true:
   `terminal`/`user`/`sessionTarget` itself): the module that carries
   `overlays.default` is the core one (`pkgs/aoide/module`'s
   `nixosModules.default`), and it is imported by the nucleus module
-  (`lib/aoideos.nix`'s `nucleusModule`), which is also what `tests/vm-boot.nix`
+  (`lib/strillix.nix`'s `nucleusModule`), which is also what `tests/vm-boot.nix`
   takes — so the constructor and the VM read one import site rather than each
   carrying their own copy of the injection lambda. And
   `modules/dendrites/quickshell/system.nix` sets `aoide.sessionTarget` to
@@ -499,7 +499,7 @@ The stability contract — what a consumer may rely on staying true:
 - `checks`, `devShells` and `apps` are development surfaces, not a
   consumer contract.
 
-**Consumer proof.** A stranger's flake runs `aoided` with no AoideOS
+**Consumer proof.** A stranger's flake runs `aoided` with no Strillix
 import — no `modules/` import, no `inputs.quickshell`/`hyprland`/`nvf`
 in specialArgs; the five-line shape lives in `pkgs/aoide/module/README.md`.
 Acceptance evidence (`system.build.toplevel.drvPath`, `aoide.root`,
@@ -516,23 +516,23 @@ assumption:
   self-gates; splitting stays reversible.
 - an `aoide.package` option — nothing overrides the package, and
   `overlays.default` already answers that.
-- the door/secrets/usage/pair-watch units — still AoideOS-side.
+- the door/secrets/usage/pair-watch units — still Strillix-side.
 - `ricesManifest` / `aoideOptions` from the core flake — both need
-  `song/` and `modules/`, which this flake never walks.
+  `rice/` and `modules/`, which this flake never walks.
 - a `strillix` flake, or any Quickshell/rice export — `strillix` is paint, per
   root `AGENTS.md`; the shell's own source package is the ROOT flake's
   `packages.<system>.strillix-shell`, never anything exported here.
 - `lib/walk.nix` did NOT stay: the rices's discovery is
   `lib/rices.nix`'s typed `discover` now — the same file that validates a
-  host's song selection and generates the manifest — so there is nothing left
+  host's rice selection and generates the manifest — so there is nothing left
   for a second walker to do.
 
-## The root flake — AoideOS's export surface
+## The root flake — Strillix's export surface
 
-`flake.nix` (this repo) is the seam a consumer builds AoideOS against, and it is
+`flake.nix` (this repo) is the seam a consumer builds Strillix against, and it is
 consumed ONLY through these outputs — never through a path into this tree, which
 is the reach-in the table below retires. `tests/consumer/` is the fixture that
-proves it: a stranger's flake handing over the nucleus module (the option contract), selecting the aoide services from its own `nucleus` aggregation, the shell, the songs and
+proves it: a stranger's flake handing over the nucleus module (the option contract), selecting the aoide services from its own `nucleus` aggregation, the shell, the rices and
 the theme, whose only inputs besides nixpkgs are home-manager and Aoide, with one
 host performing from its own rices and one performing Aoide's `sonata`.
 
@@ -550,7 +550,7 @@ flake.nix
 │                             which is exactly what a catalogue value is
 ├── lib.composition           the constructor, a function of `{ lib }`
 ├── lib.theme                the venue-recolour resolver, a function of `{ lib }`
-├── lib.rices              discovery, selection and the songs' module list,
+├── lib.rices              discovery, selection and the rices' module list,
 │                             a function of `{ lib, rices ? … }`
 ├── lib.rices.merge         several rices DIRECTORIES as one, a function of
 │                             `{ lib, pkgs, books }`: the `registry`, the merged
@@ -558,14 +558,14 @@ flake.nix
 ├── lib.catalogue             the whole catalogue as DATA — the bulk form of
 │                             `nixosModules.<name>`
 ├── ricesRoot              Aoide's own rices DIRECTORY (`rices`),
-│                             the value `lib/aoideos.nix` builds this flake's
+│                             the value `lib/strillix.nix` builds this flake's
 │                             hosts from — a PATH, not a function
 ├── parts.<component>         the `strillix` PROVIDER module of each component slot
 │                             (bar, launcher, powermenu, notifications, wallpaper,
 │                             dock, calendar, switcher, lock, greeter), a bare
 │                             PATH; a consumer's own slot names one beside its own
-├── rices.<song>              every committed song with a `rice.nix`, name → that
-│                             file, the aggregation body the song hook registers
+├── rices.<rice>              every committed rice with a `rice.nix`, name → that
+│                             file, the aggregation body the rice hook registers
 ├── inventory / nixosConfigurations   (a consumer builds its own; see below)
 └── overlays.default          every `pkgs/<name>` this tree discovers plus
                               `aoide` (never `strillix`: nixpkgs owns that name)
@@ -576,7 +576,7 @@ What a consumer's flake writes, in the shapes the outputs are:
 | consumer's reach-in (before) | replacement export | produced by |
 |---|---|---|
 | `inputs.aoide + "/modules/default.nix"` | `nixosModules.nucleus` + `nixosModules.<name>` per catalogue entry; `lib.catalogue` for bulk use | S10 |
-| five `rices/*/rice.nix` | `lib.rices.hook { registry }`, whose `registry` / `selectionModules` / `extraModulesFor` go to `lib.composition`, over `ricesRoot` when the host performs Aoide's songs. There is no shim for the removed `selectionModule`, `check` and `songModules` exports: a consumer takes the hook | S8 (exported S10) |
+| five `rices/*/rice.nix` | `lib.rices.hook { registry }`, whose `registry` / `selectionModules` / `extraModulesFor` go to `lib.composition`, over `ricesRoot` when the host performs Aoide's rices. There is no shim for the removed `selectionModule`, `check` and `riceModules` exports: a consumer takes the hook | S8 (exported S10) |
 | an `import` of `lib/pkgs.nix` for the overlay | `overlays.default` | S10 |
 | `inputs.aoide.packages.<sys>.default` | `packages.<sys>.aoide` (and `.strillix`, `.strillix-shell`, `.strillix-rices`) | exists / S3 |
 | `import … "/lib/theme.nix"` `.resolve` | `lib.theme.resolve` | S10 |
@@ -605,7 +605,7 @@ The stability contract:
 
 A dendrite reads Aoide's own flake inputs (quickshell, nvf, stylix, hyprland, the
 core) as the module argument `aoideInputs`, and a consumer threads nothing. The
-value is closed over in `nixosModules.nucleus` (`lib/aoideos.nix`). It arrives
+value is closed over in `nixosModules.nucleus` (`lib/strillix.nix`). It arrives
 through three doors because the module system asks for an argument in three
 different moments, and a door that answers the wrong moment is a broken
 evaluation, not a style choice:
@@ -653,12 +653,12 @@ registry.catalogue = removeAttrs aoide.lib.catalogue [ "bar" ] // slots;
   and nothing else: it brings the strillix runtime by path, and it reads the
   constructor's own facts. A host that selects one passes `nixosModules.nucleus`
   in its `extraModules`, applies `overlays.default`, and gets the hook's
-  `_module.args` (`song`, `borrow`, `rices`) from `lib.rices.hook`'s
+  `_module.args` (`rice`, `borrow`, `rices`) from `lib.rices.hook`'s
   `extraModulesFor`.
 - **Value slots need habit >= 0.4.0.** A provider set written inline in a
   catalogue entry is what habit's value-slot support reads.
 - **A rice is registered by the hook, not merged.** `aoide.rices` names each
-  committed song's aggregation body. The hook over the SAME rices already
+  committed rice's aggregation body. The hook over the SAME rices already
   registers those bodies under their names. Merging `aoide.rices` into the
   registry a second time is a name collision, and the hook refuses it.
 - **Which part answered.** habit's inventory names a value slot's source as the
@@ -669,13 +669,13 @@ The proof is `tests/consumer/` (`front` checks in `run.sh`): a host mixes a
 consumer's `bar` with Aoide's `dock`, and two throw-on-read stubs are never
 read.
 
-### Songs, from a consumer's side
+### Rices, from a consumer's side
 
 A consumer performs from one rices DIRECTORY per host: Aoide's own, exported
 as `ricesRoot`, or one in the CONSUMER's tree. `lib.rices` takes the
 directory (`rices ? …`); the consumer passes the same value, once, into the
-song hook it calls (`lib.rices.hook`, which sets `_module.args.rices`
-beside `song` and `borrow`); and the dendrite that paints the built-in songs and
+rice hook it calls (`lib.rices.hook`, which sets `_module.args.rices`
+beside `rice` and `borrow`); and the dendrite that paints the built-in rices and
 `pkgs/strillix-rices` take it as an argument instead of naming a path in this
 repo. A host that performs Aoide's `sonata` therefore writes
 `rices = aoide.ricesRoot` in both places and `habit.rice.declared = "sonata"` in
@@ -684,14 +684,14 @@ performs (`habit.rice.declared`) and what it merely builds in (`habit.rice.avail
 the borrow closure and the machine-owned rices unchanged from §5.
 
 Discovery, selection and `borrow` all read that one directory. A host whose
-songs come from both Aoide's rices and the consumer's takes them through
-`lib.rices.merge { inherit lib pkgs; books = [ aoide.ricesRoot ./songs ]; }`:
-the call returns the registry (song name to its directory in the book that
+rices come from both Aoide's rices and the consumer's takes them through
+`lib.rices.merge { inherit lib pkgs; books = [ aoide.ricesRoot ./rices ]; }`:
+the call returns the registry (rice name to its directory in the book that
 defines it), the merged directory (`dir`, one copy of the registry built in one
 derivation) and the rices record, all together. The record discovers through
 the registry, so a `borrow` resolves across the books and nothing at evaluation
-reads the derivation (no import-from-derivation). A song name two books define is
-refused, naming the song and both books.
+reads the derivation (no import-from-derivation). A rice name two books define is
+refused, naming the rice and both books.
 
 **Stylix.** A consumer must NOT import the stylix module itself once it selects
 the `stylix` dendrite: the dendrite's module comes from Aoide's own inputs, and two
@@ -707,7 +707,7 @@ anything Quickshell-shaped (paint ships as `packages.<sys>.strillix-*`).
 
 - **Naming — DECIDED (hybrid).** Plain names where the concept is universal
   (`protocol`, `server`, `client`, `storage`, `evals`, `cli`); the already-coined
-  aoide vocabulary kept (`conduct`, `song`, `conductor`); and voice only where the
+  aoide vocabulary kept (`conduct`, `rice`, `conductor`); and voice only where the
   crate is aoide's own — the agent is **`steward`** (with `canon` + `audit`
   inside). Rejected: fully-literal (`agent`), the stagecraft scheme
   (`podium`/`cue`/…), and the deep-pantheon scheme (`nomos`/`tekton`/…) — the

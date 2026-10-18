@@ -10,7 +10,7 @@ source: "[[entities/theme]]"
 
 An external wallpaper engine — picker, control daemon and renderer — that
 paints a user's PICKS: images, videos and Wallpaper Engine scenes, each on its
-own layer-shell surface. It never paints a song's own DEFAULT cover; it is what
+own layer-shell surface. It never paints a rice's own DEFAULT wallpaper; it is what
 a host can choose to paint what the user picked.
 
 Aoide takes it from the flake input (`flake.nix`, branch `v2` of
@@ -41,21 +41,21 @@ key is the one thing that decides which of the two is in front of the other.
 
 ## The two directions
 
-- **Aoide → engine.** `strx cover sync` (CONTRACTS.md §4) is the only write:
+- **Aoide → engine.** `strx wallpaper sync` (CONTRACTS.md §4) is the only write:
   the staged pick is applied (`skwd-helm apply <path|we:<id>> -o '*'`) while one
-  applies to the staged song, and steps aside otherwise: the provider's own
+  applies to the staged rice, and steps aside otherwise: the provider's own
   `clear` verb where the installed release has one, and a 1x1 fully transparent
   PNG applied to every output otherwise (the step-aside image, since the release
   Aoide first shipped against has no `clear`). It is the one door that waits for
   a provider which has not answered yet — up to ~5 s, because the unit's
-  `ExecStartPost` races the daemon's own socket — while `cover set`, `--clear`,
+  `ExecStartPost` races the daemon's own socket — while `wallpaper set`, `--clear`,
   `rice stage` and `rice back` each make a single attempt. It is what the
   lane's unit runs in `ExecStartPost`, and what every pick write runs. Only
   the identity crosses: a still's `tile` and `position` (CONTRACTS.md §4) are
   the shell's own layer's to paint, so the engine lays out a picture named
   `*_tile*` or set with `--position tile` the way it lays out every other.
 - **Engine → Aoide.** The daemon's `postProcessing` hook runs exactly one
-  command, `strx cover set --from-skwd --kind %type% %path%`, which RECORDS what
+  command, `strx wallpaper set --from-skwd --kind %type% %path%`, which RECORDS what
   the engine now shows and applies nothing back — that asymmetry is what makes
   the round trip terminate (the engine is source-blind: it cannot tell an Aoide
   apply from the user's own pick, so a hook that re-applied would loop

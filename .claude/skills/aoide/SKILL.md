@@ -1,6 +1,6 @@
 ---
 name: aoide
-description: Working in the Aoide repo, driving the aoide/aoided or strillix binaries, conducting agent sessions, or ricing AoideOS. Routes to the canonical onboarding; restates no rule.
+description: Working in the Aoide repo, driving the aoide/aoided or strillix binaries, conducting agent sessions, or ricing Strillix. Routes to the canonical onboarding; restates no rule.
 ---
 
 # Aoide onboarding route

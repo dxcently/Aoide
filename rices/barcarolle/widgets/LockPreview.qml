@@ -30,13 +30,13 @@
 // battery, then the time) and, on a lock, the Now Playing gadget under it read
 // Quickshell's services directly and read-only; a badge whose service is
 // missing is not drawn. The network badge names the link kind only (Wired,
-// Wi-Fi, Not connected), never a network's name, and the cover art loads only
+// Wi-Fi, Not connected), never a network's name, and the wallpaper art loads only
 // a `file:` URL — anything else keeps the placeholder tile, so a locked screen
 // fetches nothing. `layoutName` comes from the slot. Caps Lock is read
 // from the letters typed (Qt has no lock-key state), so its balloon shows from
 // the first letter on.
 //
-// The tile picture follows the Start menu's rule: `~/.face`, else the song's
+// The tile picture follows the Start menu's rule: `~/.face`, else the rice's
 // `icons/user/chrome-sash.svg` under $AOIDE_ROOT. A logon reads no home, so it
 // always shows chrome-sash. The account cards live here too, one `Tile` each,
 // named by the account name alone.
@@ -154,7 +154,7 @@ Item {
             var baked = Quickshell.env("AOIDE_WALLPAPER") || ""
             try {
                 var d = JSON.parse(text())
-                var applies = !!d && !!d.path && (!d.song || d.song === (root.theme ? root.theme.songName : ""))
+                var applies = !!d && !!d.path && (!d.rice || d.rice === (root.theme ? root.theme.riceName : ""))
                 root.wallpaperPath = applies ? "" + d.path : baked
                 root.wallpaperTile = applies && d.pick === true && d.tile === true
             } catch (e) { root.wallpaperPath = baked; root.wallpaperTile = false }
@@ -320,7 +320,7 @@ Item {
         }
     }
 
-    // A tray glyph from the song's own tray icons, the taskbar's vocabulary.
+    // A tray glyph from the rice's own tray icons, the taskbar's vocabulary.
     component TrayGlyph: Image {
         property string name: ""
         width: 16

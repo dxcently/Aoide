@@ -165,9 +165,9 @@ fn checkout_root() -> Option<PathBuf> {
 /// but onboarding runs before any daemon exists to dispatch to, so this
 /// calls `register_bootstrap_project` (the onboarding-only bootstrap entry,
 /// `conduct/src/graph/manage.rs`) directly rather than `project_add`, which
-/// is daemon-owned and would error with no daemon running; Song-Anatomy.md/
-/// Song-Vocabulary.md/Clone-and-Run.md all separately state "onboard links
-/// `~/song` -> `~/Aoide/song`", so the second act is the symlink they
+/// is daemon-owned and would error with no daemon running; Rice-Anatomy.md/
+/// Rice-Vocabulary.md/Clone-and-Run.md all separately state "onboard links
+/// `~/rice` -> `~/Aoide/rice`", so the second act is the symlink they
 /// already document, made real. Never a clobber: an existing correct link
 /// is a no-op, anything else at either path is left alone with a note. A
 /// failed registration is never silent: the note is prefixed
@@ -189,46 +189,46 @@ fn register_clone(root: &Path) -> (Vec<String>, Vec<String>) {
     });
     changed.extend(out.changed);
 
-    let home_song = aoide_home().join("song");
-    let root_song = root.join("song");
-    match std::fs::symlink_metadata(&home_song) {
+    let home_rice = aoide_home().join("rice");
+    let root_rice = root.join("rice");
+    match std::fs::symlink_metadata(&home_rice) {
         Ok(meta) if meta.file_type().is_symlink() => {
             // The exact-path compare catches a symlink correctly aimed at
-            // `root_song` whose target doesn't (yet) exist -- canonicalize
+            // `root_rice` whose target doesn't (yet) exist -- canonicalize
             // fails on a dangling target, which would otherwise misreport a
             // correctly-targeted link as "elsewhere" just because the read
-            // happened before `root/song` existed. The canonicalize fallback
+            // happened before `root/rice` existed. The canonicalize fallback
             // still catches an equivalent but differently-spelled target
             // (relative vs absolute, a symlink chain) once it resolves.
-            let same_target = std::fs::read_link(&home_song).map(|t| t == root_song).unwrap_or(false);
+            let same_target = std::fs::read_link(&home_rice).map(|t| t == root_rice).unwrap_or(false);
             let resolves = same_target
                 || matches!(
-                    (std::fs::canonicalize(&home_song), std::fs::canonicalize(&root_song)),
+                    (std::fs::canonicalize(&home_rice), std::fs::canonicalize(&root_rice)),
                     (Ok(l), Ok(s)) if l == s
                 );
             if resolves {
-                notes.push(format!("~/song already links to {}", root_song.display()));
+                notes.push(format!("~/rice already links to {}", root_rice.display()));
             } else {
-                let target = std::fs::read_link(&home_song)
+                let target = std::fs::read_link(&home_rice)
                     .map(|p| p.display().to_string())
                     .unwrap_or_else(|_| "<unreadable>".to_string());
                 notes.push(format!(
                     "{} is already a symlink to {target}, not to {} -- leaving it (remove it yourself to relink)",
-                    home_song.display(),
-                    root_song.display()
+                    home_rice.display(),
+                    root_rice.display()
                 ));
             }
         }
         Ok(_) => notes.push(format!(
             "{} already exists and is not a symlink -- leaving it (move it aside to let onboard link it)",
-            home_song.display()
+            home_rice.display()
         )),
-        Err(_) => match aoide_storage::fs::link_dir(&root_song, &home_song) {
+        Err(_) => match aoide_storage::fs::link_dir(&root_rice, &home_rice) {
             Ok(()) => {
-                notes.push(format!("linked {} -> {}", home_song.display(), root_song.display()));
-                changed.push(format!("~/song -> {}", root_song.display()));
+                notes.push(format!("linked {} -> {}", home_rice.display(), root_rice.display()));
+                changed.push(format!("~/rice -> {}", root_rice.display()));
             }
-            Err(e) => notes.push(format!("could not link {}: {e}", home_song.display())),
+            Err(e) => notes.push(format!("could not link {}: {e}", home_rice.display())),
         },
     }
 
@@ -238,7 +238,7 @@ fn register_clone(root: &Path) -> (Vec<String>, Vec<String>) {
 /// "seed rices" (ONBOARD.md's stub-summary contract, decision 1):
 /// `rices/` travels committed with the clone itself
 /// (`learnings.md`/`update-playbook.md` are already there on any fresh
-/// checkout) — the one root file Song-Anatomy.md documents as part of the
+/// checkout) — the one root file Rice-Anatomy.md documents as part of the
 /// rices's cross-cutting trio that a fresh clone still lacks is
 /// `preferences.md`. Idempotent: only ever created, never overwritten.
 fn seed_rices(root: &Path) -> (bool, String) {
@@ -249,7 +249,7 @@ fn seed_rices(root: &Path) -> (bool, String) {
     let body = "\
 # Rices Preferences
 
-Cross-cutting preferences that apply across songs, not any one song's
+Cross-cutting preferences that apply across rices, not any one rice's
 `design/` folder -- the sibling of `learnings.md`. Sparse today; the agent
 reads this before every ricing iteration and appends after declare/reject
 decisions, the same write-back discipline `learnings.md` already holds.
@@ -349,7 +349,7 @@ fn strillix_bin_if_resolved() -> Option<String> {
 /// decision 3's "nothing nix-shaped is ever spoken").
 fn probe_and_delegate_strillix(inv: &Invocation) -> String {
     let Some(bin) = strillix_bin_if_resolved() else {
-        return "strillix: not found (no AOIDE_RICE_BIN, no sibling binary, not on PATH) -- skipping the desktop half; core setup is complete".to_string();
+        return "strillix: not found (no STRILLIX_BIN, no sibling binary, not on PATH) -- skipping the desktop half; core setup is complete".to_string();
     };
 
     let mut cmd = Command::new(&bin);
@@ -379,34 +379,34 @@ mod tests {
     use super::*;
     use aoide_test_support::{env_lock, unique_tmp, EnvSaver};
 
-    // ── register_clone: the ~/song symlink's never-clobber contract ─────
+    // ── register_clone: the ~/rice symlink's never-clobber contract ─────
 
     #[test]
-    fn register_clone_links_song_when_absent_and_is_idempotent_on_rerun() {
+    fn register_clone_links_rice_when_absent_and_is_idempotent_on_rerun() {
         let _g = env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _env = EnvSaver::capture(&["HOME", "AOIDE_STAGE_DIR"]);
         let root = unique_tmp("onboard-clone-fresh");
-        std::fs::create_dir_all(root.join("song")).unwrap();
+        std::fs::create_dir_all(root.join("rice")).unwrap();
         let home = unique_tmp("onboard-clone-fresh-home");
         std::env::set_var("HOME", &home);
-        std::env::set_var("AOIDE_STAGE_DIR", home.join("Aoide/song/stage"));
-        let home_song = home.join("song");
+        std::env::set_var("AOIDE_STAGE_DIR", home.join("Aoide/rice/stage"));
+        let home_rice = home.join("rice");
 
         let (changed, notes) = register_clone(&root);
-        let meta = std::fs::symlink_metadata(&home_song).unwrap();
-        assert!(meta.file_type().is_symlink(), "~/song was not created as a symlink");
+        let meta = std::fs::symlink_metadata(&home_rice).unwrap();
+        assert!(meta.file_type().is_symlink(), "~/rice was not created as a symlink");
         assert_eq!(
-            std::fs::canonicalize(&home_song).unwrap(),
-            std::fs::canonicalize(root.join("song")).unwrap()
+            std::fs::canonicalize(&home_rice).unwrap(),
+            std::fs::canonicalize(root.join("rice")).unwrap()
         );
-        assert!(notes.iter().any(|n| n.contains("linked") && n.contains("song")), "notes: {notes:?}");
-        assert!(changed.iter().any(|c| c.starts_with("~/song ->")), "changed: {changed:?}");
+        assert!(notes.iter().any(|n| n.contains("linked") && n.contains("rice")), "notes: {notes:?}");
+        assert!(changed.iter().any(|c| c.starts_with("~/rice ->")), "changed: {changed:?}");
 
         // Re-run: no-op, reported present, never re-listed as changed.
         let (changed2, notes2) = register_clone(&root);
         assert!(notes2.iter().any(|n| n.contains("already links to")), "notes2: {notes2:?}");
         assert!(
-            !changed2.iter().any(|c| c.starts_with("~/song ->")),
+            !changed2.iter().any(|c| c.starts_with("~/rice ->")),
             "a second run must not re-report the symlink as changed: {changed2:?}"
         );
 
@@ -425,21 +425,21 @@ mod tests {
         let _g = env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _env = EnvSaver::capture(&["HOME", "AOIDE_STAGE_DIR"]);
         let root = unique_tmp("onboard-clone-wrong");
-        std::fs::create_dir_all(root.join("song")).unwrap();
+        std::fs::create_dir_all(root.join("rice")).unwrap();
         let home = unique_tmp("onboard-clone-wrong-home");
         std::env::set_var("HOME", &home);
-        std::env::set_var("AOIDE_STAGE_DIR", home.join("Aoide/song/stage"));
-        let home_song = home.join("song");
+        std::env::set_var("AOIDE_STAGE_DIR", home.join("Aoide/rice/stage"));
+        let home_rice = home.join("rice");
         let elsewhere = unique_tmp("onboard-clone-wrong-elsewhere");
-        std::os::unix::fs::symlink(&elsewhere, &home_song).unwrap();
+        std::os::unix::fs::symlink(&elsewhere, &home_rice).unwrap();
 
         let (changed, notes) = register_clone(&root);
         assert!(
             notes.iter().any(|n| n.contains("is already a symlink to") && n.contains(&elsewhere.display().to_string())),
             "notes: {notes:?}"
         );
-        assert!(!changed.iter().any(|c| c.starts_with("~/song ->")));
-        assert_eq!(std::fs::read_link(&home_song).unwrap(), elsewhere, "the wrong link must survive untouched");
+        assert!(!changed.iter().any(|c| c.starts_with("~/rice ->")));
+        assert_eq!(std::fs::read_link(&home_rice).unwrap(), elsewhere, "the wrong link must survive untouched");
 
         let _ = std::fs::remove_dir_all(&root);
         let _ = std::fs::remove_dir_all(&home);
@@ -451,20 +451,20 @@ mod tests {
         let _g = env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _env = EnvSaver::capture(&["HOME", "AOIDE_STAGE_DIR"]);
         let root = unique_tmp("onboard-clone-file");
-        std::fs::create_dir_all(root.join("song")).unwrap();
+        std::fs::create_dir_all(root.join("rice")).unwrap();
         let home = unique_tmp("onboard-clone-file-home");
         std::env::set_var("HOME", &home);
-        std::env::set_var("AOIDE_STAGE_DIR", home.join("Aoide/song/stage"));
-        let home_song = home.join("song");
-        std::fs::write(&home_song, "not a symlink").unwrap();
+        std::env::set_var("AOIDE_STAGE_DIR", home.join("Aoide/rice/stage"));
+        let home_rice = home.join("rice");
+        std::fs::write(&home_rice, "not a symlink").unwrap();
 
         let (changed, notes) = register_clone(&root);
         assert!(
             notes.iter().any(|n| n.contains("already exists and is not a symlink")),
             "notes: {notes:?}"
         );
-        assert!(!changed.iter().any(|c| c.starts_with("~/song ->")));
-        assert_eq!(std::fs::read_to_string(&home_song).unwrap(), "not a symlink", "the file must survive untouched");
+        assert!(!changed.iter().any(|c| c.starts_with("~/rice ->")));
+        assert_eq!(std::fs::read_to_string(&home_rice).unwrap(), "not a symlink", "the file must survive untouched");
 
         let _ = std::fs::remove_dir_all(&root);
         let _ = std::fs::remove_dir_all(&home);
@@ -484,13 +484,13 @@ mod tests {
         let _g = env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _env = EnvSaver::capture(&["HOME", "AOIDE_STAGE_DIR"]);
         let root = unique_tmp("onboard-clone-dangling");
-        // Deliberately no `root/song` directory yet -- the link below points
+        // Deliberately no `root/rice` directory yet -- the link below points
         // at a path that does not exist on disk.
         let home = unique_tmp("onboard-clone-dangling-home");
         std::env::set_var("HOME", &home);
-        std::env::set_var("AOIDE_STAGE_DIR", home.join("Aoide/song/stage"));
-        let home_song = home.join("song");
-        std::os::unix::fs::symlink(root.join("song"), &home_song).unwrap();
+        std::env::set_var("AOIDE_STAGE_DIR", home.join("Aoide/rice/stage"));
+        let home_rice = home.join("rice");
+        std::os::unix::fs::symlink(root.join("rice"), &home_rice).unwrap();
 
         let (_changed, notes) = register_clone(&root);
         assert!(notes.iter().any(|n| n.contains("already links to")), "notes: {notes:?}");
@@ -515,7 +515,7 @@ mod tests {
         let _env = EnvSaver::capture(&["HOME", "AOIDE_STAGE_DIR", "AOIDE_DAEMON_SOCKET"]);
         let root = unique_tmp("onboard-register-clone-no-daemon-root");
         let home = unique_tmp("onboard-register-clone-no-daemon-home");
-        let stage = home.join("Aoide/song/stage");
+        let stage = home.join("Aoide/rice/stage");
         std::env::set_var("HOME", &home);
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
         std::env::set_var("AOIDE_DAEMON_SOCKET", stage.join("no-such-daemon.sock"));

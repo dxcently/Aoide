@@ -60,7 +60,7 @@
 // mid-flight is absorbed, and any motion that must not run across the morph
 // (calendar.qml's page slide) tests it instead of naming an animation id.
 //
-// Reachable from a song widget: as of P2 it is an uppercase helper in
+// Reachable from a rice widget: as of P2 it is an uppercase helper in
 // sonata's own widgets/ dir (carried by the build, never independently
 // resolvable as a slot), so a widget in the same directory — calendar.qml,
 // AudioColonnade.qml — reaches it same-dir, with no import needed

@@ -3,10 +3,10 @@
 //
 // The greeter lane (modules/dendrites/greeter.nix) builds a store tree with
 // this file as `run/qml/shell.qml`, ThemeState + StagingEngine beside it, the
-// DECLARED song's widgets under `songs/<owner>/` (with a `qmldir` naming its
+// DECLARED rice's widgets under `rices/<owner>/` (with a `qmldir` naming its
 // uppercase helpers as types, as strillix's tree does), its `icons/` (when it has
-// one) at `song/songbook/<owner>/icons` — where a face finds them under
-// `AOIDE_ROOT` in the session too — and its dress as `song/stage/theme.json`,
+// one) at `rices/<owner>/icons` — where a face finds them under
+// `AOIDE_ROOT` in the session too — and its dress as `rice/stage/theme.json`,
 // and points `AOIDE_ROOT` at it — nothing here reads /home. greetd runs it as its greeter user inside cage.
 //
 // Authentication is greetd's (`Quickshell.Services.Greetd`): `createSession`,
@@ -18,7 +18,7 @@
 // from a readiness no answer earned. After a cancel the next conversation
 // waits out greetd's reply to it (`settle`).
 //
-// The face — the declared song's `widgets/greeter.qml` — receives `theme`,
+// The face — the declared rice's `widgets/greeter.qml` — receives `theme`,
 // `bridge` (null: a greeter has no shellbridge) and one extra, `auth`:
 // `message`, `messageIsError`, `responseRequired`, `responseVisible`, `busy`,
 // `failures` (a failure's message stays up until the next answer, under the
@@ -46,7 +46,7 @@ ShellRoot {
     StagingEngine { id: stagingEngine }
 
     readonly property string faceSource:
-        stagingEngine.has(theme.songName, "greeter") ? stagingEngine.source(theme.songName, "greeter") : ""
+        stagingEngine.has(theme.riceName, "greeter") ? stagingEngine.source(theme.riceName, "greeter") : ""
 
     readonly property int faceReadyMs: 3000
     property var sessionCommand: []

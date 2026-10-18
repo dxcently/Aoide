@@ -2606,9 +2606,9 @@ pub fn rm_older_than(max_age_secs: u64) -> Result<usize, String> {
 /// letter, `d` (days) or `h` (hours) — `"7d"`, `"12h"`. Returns the
 /// threshold in seconds; anything else (empty, no digits, a zero count, a
 /// third unit, trailing junk) is `None`, a usage error before anything
-/// runs. Ported verbatim from `song/src/commands/history.rs::parse_older_than`
+/// runs. Ported verbatim from `rice/src/commands/history.rs::parse_older_than`
 /// (architect's ruling 10) rather than shared: `storage` may not depend on
-/// `song`, and the two crates live in different workspaces after the
+/// `rice`, and the two crates live in different workspaces after the
 /// crate split.
 pub fn parse_older_than(raw: &str) -> Option<u64> {
     if raw.len() < 2 {

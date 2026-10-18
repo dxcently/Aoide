@@ -46,7 +46,7 @@
 // ── Wiring ─────────────────────────────────────────────────────────────────
 // shell.qml instantiates a `SurfaceSlot { id: powermenuSlot; slot: "powermenu" }`,
 // which resolves + dynamically creates this file and hands `powermenuSlot.item`
-// to AoideBar (the loaded song widget itself, not a declared-by-name
+// to AoideBar (the loaded rice widget itself, not a declared-by-name
 // instance — SurfaceSlot's whole point); the bar's treble clef
 // (𝄞, "the powermenu key") calls `.toggle()` on that handle directly. A
 // Hyprland global shortcut (`aoide:powermenu`) is the second trigger — the
@@ -178,7 +178,7 @@ PanelWindow {
     ]
 
     // ══ Dim scrim — the ink veil the glass frosts through; a click anywhere
-    // outside the steles stays. Keyed off the song's ink (launcher idiom). ═══
+    // outside the steles stays. Keyed off the rice's ink (launcher idiom). ═══
     MouseArea {
         anchors.fill: parent
         onClicked: root.hide()
@@ -602,7 +602,7 @@ PanelWindow {
             Text {
                 anchors.top: titleRow.bottom; anchors.topMargin: 17
                 anchors.horizontalCenter: parent.horizontalCenter
-                text: "the closing song — πῶς τελευτᾷ ἡ ᾠδή;"
+                text: "the closing rice — πῶς τελευτᾷ ἡ ᾠδή;"
                 font.family: root.faceMono
                 font.pixelSize: 11
                 color: root.withA(root.theme.paletteBg, 0.75)

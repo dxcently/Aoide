@@ -7,16 +7,16 @@ import Quickshell
 // surface, not an `Item` a `Loader` can parent into — so this uses the same
 // `Qt.createComponent` + `Component.createObject(null, props)` mechanism,
 // no `Loader`. Like calendar.qml (CalendarPreview's target), the dock body
-// is per-song score (song/songbook/<song>/widgets/), not a shared-tree
+// is per-rice score (rices/<rice>/widgets/), not a shared-tree
 // component, so this loads it BY URL with the CAL_WIDGET-style env-var
 // override for a source-tree checkout (QS_STAGE precedent — previews
 // honour env seams):
-//   DOCK_WIDGET=file://$PWD/song/songbook/sonata/widgets/dock.qml \
+//   DOCK_WIDGET=file://$PWD/rices/sonata/widgets/dock.qml \
 //     qs -p pkgs/strillix-shell/qml/DockPreview.qml
-// In the deployed tree ($out/qml/, where songs/ sits beside this file) the
+// In the deployed tree ($out/qml/, where rices/ sits beside this file) the
 // default relative source resolves with no env needed.
 //
-// The default source, `songs/sonata/dock.qml`, is sonata's real dock body —
+// The default source, `rices/sonata/dock.qml`, is sonata's real dock body —
 // an ANCHORED PanelWindow hosting every gadget slot as a `WidgetSlot`. That
 // body declares `theme`, `bridge`, `shared` and `stagingEngine` as REQUIRED
 // properties, so all four must appear in the `createObject` prop map below
@@ -29,7 +29,7 @@ import Quickshell
 // a single already-known widget file straight to `Loader`/`createObject`
 // and never touch slot resolution at all), the dock body's whole point is
 // to host further `WidgetSlot`s of its own (meters, terminals, …), and
-// those need a working `stagingEngine.resolveSong`/`source` to load
+// those need a working `stagingEngine.resolveRice`/`source` to load
 // anything. A stub would test nothing about resolution.
 ShellRoot {
     id: harness
@@ -44,9 +44,9 @@ ShellRoot {
         property string holoBlue:      "#345f81"   // aegean
         property string violet:        "#6f4373"   // murex
         property string base09:        "#c06a35"   // clay
-        // WidgetSlot.resolvedSong keys off this — the dock's own embedded
-        // slots resolve against whichever song this preview stands in for.
-        property string songName: "sonata"
+        // WidgetSlot.resolvedRice keys off this — the dock's own embedded
+        // slots resolve against whichever rice this preview stands in for.
+        property string riceName: "sonata"
     }
 
     property var stubBridge: QtObject {
@@ -61,7 +61,7 @@ ShellRoot {
 
     Component.onCompleted: {
         var src = Quickshell.env("DOCK_WIDGET")
-        if (!src || src === "") src = "songs/sonata/dock.qml"
+        if (!src || src === "") src = "rices/sonata/dock.qml"
         var comp = Qt.createComponent(src)
         if (comp.status === Component.Error) {
             console.log("[DockPreview] createComponent failed:", comp.errorString())

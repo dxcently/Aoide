@@ -2,7 +2,7 @@
 // dock's gadget column (WidgetSlot host — root is an Item that sizes itself
 // off its content, same as every other slot in this directory).
 //
-// Ported from the shell's MetersGadget.qml (per-song widget-slot expansion,
+// Ported from the shell's MetersGadget.qml (per-rice widget-slot expansion,
 // CONTRACTS.md §5) — ownership moved from the shell to sonata's score. Live:
 // sonata's own `widgets/dock.qml` embeds `WidgetSlot { slot: "meters" }` in
 // its gadget column (slots.md's wired table). The shell's MetersGadget.qml
@@ -43,7 +43,7 @@ Item {
     id: gadget
 
     required property var theme            // palette roles
-    required property var bridge           // ShellBridge — WidgetSlot._songProps() always
+    required property var bridge           // ShellBridge — WidgetSlot._riceProps() always
                                             // passes this; unused today, declared per the
                                             // universal widget contract (slots.md)
     property string statPath: "/proc/stat"

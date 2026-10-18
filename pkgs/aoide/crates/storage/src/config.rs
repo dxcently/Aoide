@@ -208,7 +208,7 @@ impl Default for Pairing {
 pub struct Upkeep {
     /// The shell command the check lane runs to answer "is the working tree
     /// clean" — on a nix host, a `nix flake check` invocation naming the fast
-    /// checks only (fmt/nix-lint/discovery/song-shape/no-song-read/
+    /// checks only (fmt/nix-lint/discovery/rice-shape/no-rice-read/
     /// surface-ownership: the vm-boot/pkg-*/portability checks are too slow
     /// for a hook and stay manual); on a non-nix host, `cargo test`/`make
     /// check`/whatever the project uses. Empty (the default) disables the

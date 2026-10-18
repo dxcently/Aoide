@@ -1,6 +1,6 @@
-# tests/lock-greeter/rices/nocturne/rice.nix — a fixture song for tests/vm-lock-greeter.nix: a greeter face that never reports ready.
+# tests/lock-greeter/rices/nocturne/rice.nix — a fixture rice for tests/vm-lock-greeter.nix: a greeter face that never reports ready.
 #
-# A body (CONTRACTS.md §5): read only when this song is selected.
+# A body (CONTRACTS.md §5): read only when this rice is selected.
 {
   system = {
     providers = {

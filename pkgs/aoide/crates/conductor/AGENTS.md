@@ -225,7 +225,7 @@
   schema.
 - All exit paths preserve `TermGuard` restoration and panic-hook cleanup.
   Keep terminal/mouse state correct after normal exit, errors and panics.
-- No Wayland, image, Qt, Nix or song runtime dependency enters this core
+- No Wayland, image, Qt, Nix or rice runtime dependency enters this core
   frontend. The bundled logo is plain text branding, sourced from the
   Fastfetch art, not a runtime call to the desktop module.
 

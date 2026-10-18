@@ -3,7 +3,7 @@
 // helper files.
 //
 // Sharing mechanism (design/kit.md §1): NOTHING in cadenza is resolved by
-// type name across files. A sibling `Pane { }` needs a per-song qmldir, which
+// type name across files. A sibling `Pane { }` needs a per-rice qmldir, which
 // the nix build writes but `strillix preview` and `rice stage` hot-sync do not —
 // cadenza goes live through hot-sync, so a name-resolved helper would not be
 // a type there. Instead:

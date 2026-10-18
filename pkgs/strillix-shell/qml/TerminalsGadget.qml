@@ -65,7 +65,7 @@ Item {
     required property var bridge           // socket sender (bridge.focusSession)
     property var shared: null              // cross-widget state (shared.tracedSessionId)
     // sessions.json is a CONDUCTING file (CONTRACTS.md §4) — state/stage/,
-    // not song/stage/.
+    // not rice/stage/.
     property string stagePath: (Quickshell.env("AOIDE_ROOT") || (Quickshell.env("HOME") + "/.aoide")) + "/state/stage/sessions.json"
 
     implicitWidth: 360
@@ -1089,7 +1089,7 @@ Item {
                                               + Math.round(row.ctxPct) + "% · "
                                               + theme.ctxCompact(modelData.contextTokens)
                                         font.family: gadget.faceMono; font.pixelSize: 10
-                                        // song accent → paletteUrgent past ~85%, the
+                                        // rice accent → paletteUrgent past ~85%, the
                                         // shared urgency threshold.
                                         color: theme.ctxColor(row.ctxPct, gadget.sig)
                                     }

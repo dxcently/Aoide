@@ -3,14 +3,14 @@
 //! routing + `rice mode draft`, the User 2026-08-14).
 //!
 //! A draft is a saved snapshot living at
-//! `rices/<song>/drafts/<name>/theme.json` (+ `wallpaper.json` when the
-//! stage had one) — nested under the song it varies, not a flat top-level
-//! dir: a draft is fundamentally a variation of an ALREADY COMPOSED song, so
-//! it belongs inside that song's own directory, not a separate global
+//! `rices/<rice>/drafts/<name>/theme.json` (+ `wallpaper.json` when the
+//! stage had one) — nested under the rice it varies, not a flat top-level
+//! dir: a draft is fundamentally a variation of an ALREADY COMPOSED rice, so
+//! it belongs inside that rice's own directory, not a separate global
 //! namespace. Gitignored, outside `stage/`, and never committed/declared
 //! truth (that distinction from `rices/<name>/`'s own committed
 //! files is the entire point of this feature; `lib/checks.nix`'s
-//! `noSongRead` bans the nested `drafts/` path at nix-eval time, same
+//! `noRiceRead` bans the nested `drafts/` path at nix-eval time, same
 //! treatment as `stage/`).
 //!
 //! **Reaching a draft is `rice mode draft <name>`'s job now**
@@ -27,14 +27,14 @@
 //!   one, or saving a snapshot while in plain `Staging` without ever
 //!   entering `Draft` mode). Upserts. Never touches `mode.json` — it doesn't
 //!   change what's currently routed/active, only what's saved. With no
-//!   `<name>` it mints the lowest free `draft-<n>` for the staged song
+//!   `<name>` it mints the lowest free `draft-<n>` for the staged rice
 //!   ([`mint_draft_name`]) and returns it as `data.name`: the one place a
 //!   draft name is minted, so a surface that offers "new draft" asks here
 //!   instead of inventing a name of its own.
 //!   [`fork_stage_into`] is the reusable core; `rice mode draft <name>`'s own
 //!   "create the draft if it doesn't exist yet" step calls the SAME
 //!   function rather than reimplementing the read/write.
-//! - **`rice draft list [<song>]`** — enumerate saved drafts.
+//! - **`rice draft list [<rice>]`** — enumerate saved drafts.
 //! - **`rice draft drop <name>`** — delete a draft outright. Refuses if it's
 //!   the draft the CURRENT `Draft` mode is routed to (rather than silently
 //!   also tearing down the symlink and falling back to `Staging` — a `drop`
@@ -65,8 +65,8 @@ use aoide_protocol::Door;
 pub fn register(r: &mut Registry) {
     r.insert(cmd!(
         path: ["rice", "draft", "save"],
-        summary: "Fork the current stage (stage/theme.json, required; stage/wallpaper.json if present) into rices/<song>/drafts/<name>/ — <song> is the currently staged song. With no <name>, mints the lowest free `draft-<n>` for it. Upserts; independent of mode (never switches modes).",
-        args: [arg!("name", "string", false, "Draft name; omit it to mint the lowest free `draft-<n>` for the staged song.")],
+        summary: "Fork the current stage (stage/theme.json, required; stage/wallpaper.json if present) into rices/<rice>/drafts/<name>/ — <rice> is the currently staged rice. With no <name>, mints the lowest free `draft-<n>` for it. Upserts; independent of mode (never switches modes).",
+        args: [arg!("name", "string", false, "Draft name; omit it to mint the lowest free `draft-<n>` for the staged rice.")],
         flags: [],
         gated: false,
         implemented: true,
@@ -75,8 +75,8 @@ pub fn register(r: &mut Registry) {
     ));
     r.insert(cmd!(
         path: ["rice", "draft", "list"],
-        summary: "List saved drafts: name, song, saved-at, and whether it's the currently-loaded draft (mode.json is in Draft mode, routed to it). No arg walks every song's drafts/; <song> scopes to just that song.",
-        args: [arg!("song", "string", false, "Scope the listing to one song's drafts; omit to list every song's.")],
+        summary: "List saved drafts: name, rice, saved-at, and whether it's the currently-loaded draft (mode.json is in Draft mode, routed to it). No arg walks every rice's drafts/; <rice> scopes to just that rice.",
+        args: [arg!("rice", "string", false, "Scope the listing to one rice's drafts; omit to list every rice's.")],
         flags: [],
         gated: false,
         implemented: true,
@@ -85,8 +85,8 @@ pub fn register(r: &mut Registry) {
     ));
     r.insert(cmd!(
         path: ["rice", "draft", "drop"],
-        summary: "Delete a saved draft of the currently staged song. Errors if the name doesn't exist (not idempotent), or if it's the draft `rice mode draft` currently has the stage routed to (switch modes first).",
-        args: [arg!("name", "string", true, "Draft name to delete, from the current song's drafts/.")],
+        summary: "Delete a saved draft of the currently staged rice. Errors if the name doesn't exist (not idempotent), or if it's the draft `rice mode draft` currently has the stage routed to (switch modes first).",
+        args: [arg!("name", "string", true, "Draft name to delete, from the current rice's drafts/.")],
         flags: [],
         gated: false,
         implemented: true,
@@ -94,38 +94,38 @@ pub fn register(r: &mut Registry) {
     ));
 }
 
-/// The shared "no song is currently staged, nothing to resolve a draft
+/// The shared "no rice is currently staged, nothing to resolve a draft
 /// directory under" error — [`handle_draft_drop`] has no other reason to
-/// touch `stage/theme.json`, so it resolves the song purely through
-/// [`super::mode::current_staged_song`] and reports this single reason on
-/// failure (a fresh box, or a stage file with no `"song"` breadcrumb, are
+/// touch `stage/theme.json`, so it resolves the rice purely through
+/// [`super::mode::current_staged_rice`] and reports this single reason on
+/// failure (a fresh box, or a stage file with no `"rice"` breadcrumb, are
 /// the only ways to hit it).
-fn no_resolvable_song(cmd: &str) -> Outcome {
+fn no_resolvable_rice(cmd: &str) -> Outcome {
     Outcome::error(
         cmd,
-        "no song is currently staged — nothing to resolve a draft directory under \
-         (stage a song first: `aoide rice stage <name>` or `aoide rice mode stage <name>`)",
+        "no rice is currently staged — nothing to resolve a draft directory under \
+         (stage a rice first: `aoide rice stage <name>` or `aoide rice mode stage <name>`)",
     )
-    .with_data(json!({ "reason": "no-resolvable-song" }))
+    .with_data(json!({ "reason": "no-resolvable-rice" }))
 }
 
 /// `rice draft save [<name>]` — fork the current stage into
-/// `rices/<song>/drafts/<name>/`, where `<song>` is whatever
-/// `stage/theme.json`'s own `"song"` field names right now. `stage/theme.json`
-/// is required (error if absent/unparseable/song-less — there is nothing to
-/// snapshot, or nowhere to nest it, without one). The song resolves BEFORE the
-/// name because a minted name is the lowest free one of THAT song's drafts.
+/// `rices/<rice>/drafts/<name>/`, where `<rice>` is whatever
+/// `stage/theme.json`'s own `"rice"` field names right now. `stage/theme.json`
+/// is required (error if absent/unparseable/rice-less — there is nothing to
+/// snapshot, or nowhere to nest it, without one). The rice resolves BEFORE the
+/// name because a minted name is the lowest free one of THAT rice's drafts.
 ///
 /// Reads + validates the stage itself (rather than delegating to
 /// [`fork_stage_into`] for that part) so a missing file, invalid JSON, and a
-/// valid-but-song-less file each keep their own distinct, specific error
+/// valid-but-rice-less file each keep their own distinct, specific error
 /// reason; the actual write is [`fork_stage_into`], shared with `rice mode
 /// draft`'s fork-on-first-entry step.
 ///
 /// Not gated by `rice mode declarative`, and never touches `mode.json` —
 /// it only reads the stage (transparently through a `Draft`-mode symlink if
 /// one is currently routed there) and writes outside it
-/// (`rices/<song>/drafts/`, never `stage/`), so it works in any mode
+/// (`rices/<rice>/drafts/`, never `stage/`), so it works in any mode
 /// without changing what's currently active.
 fn handle_draft_save(inv: &Invocation) -> Outcome {
     let theme_src = shellbridge::stage_dir().join("theme.json");
@@ -152,20 +152,20 @@ fn handle_draft_save(inv: &Invocation) -> Outcome {
             .with_data(json!({ "reason": "invalid-json", "theme": theme_src.to_string_lossy() }));
         }
     };
-    let song = match parsed.get("song").and_then(Value::as_str) {
+    let rice = match parsed.get("rice").and_then(Value::as_str) {
         Some(s) => s.to_string(),
         None => {
             return Outcome::error(
                 "rice.draft.save",
-                "staged theme.json carries no `song` field — nothing to nest this draft under \
-                 (stage a named song first: `aoide rice stage <name>`)",
+                "staged theme.json carries no `rice` field — nothing to nest this draft under \
+                 (stage a named rice first: `aoide rice stage <name>`)",
             )
-            .with_data(json!({ "reason": "no-resolvable-song" }));
+            .with_data(json!({ "reason": "no-resolvable-rice" }));
         }
     };
 
-    let name = inv.args.first().cloned().unwrap_or_else(|| mint_draft_name(&song));
-    if !crate::compose::valid_song_name(&name) {
+    let name = inv.args.first().cloned().unwrap_or_else(|| mint_draft_name(&rice));
+    if !crate::compose::valid_rice_name(&name) {
         return Outcome::error(
             "rice.draft.save",
             format!(
@@ -176,16 +176,16 @@ fn handle_draft_save(inv: &Invocation) -> Outcome {
         .with_data(json!({ "reason": "invalid-name", "name": name }));
     }
 
-    fork_stage_into(&song, &name)
+    fork_stage_into(&rice, &name)
 }
 
-/// `draft-<n>` for the lowest positive `n` no entry of `<song>`'s `drafts/`
+/// `draft-<n>` for the lowest positive `n` no entry of `<rice>`'s `drafts/`
 /// is already named. Any entry counts as taken, a directory with no
 /// `theme.json` included, so a half-written draft is never overwritten; an
 /// absent `drafts/` is empty. Candidates carry no leading zero, so `draft-01`,
 /// `draft-0` and `draft-x` never collide with one.
-fn mint_draft_name(song: &str) -> String {
-    let taken: Vec<String> = std::fs::read_dir(shellbridge::song_drafts_dir(song))
+fn mint_draft_name(rice: &str) -> String {
+    let taken: Vec<String> = std::fs::read_dir(shellbridge::rice_drafts_dir(rice))
         .map(|read| {
             read.flatten()
                 .map(|e| e.file_name().to_string_lossy().into_owned())
@@ -203,22 +203,22 @@ fn mint_draft_name(song: &str) -> String {
 }
 
 /// The reusable core of a draft snapshot: atomic-write the CURRENT
-/// `stage/theme.json` into `rices/<song>/drafts/<name>/theme.json`
+/// `stage/theme.json` into `rices/<rice>/drafts/<name>/theme.json`
 /// (reading it fresh — transparently through a `Draft`-mode symlink if one
 /// is currently routed there, same as any other reader), mirroring
-/// `stage/wallpaper.json` in if present, or removing a stale draft cover if the
+/// `stage/wallpaper.json` in if present, or removing a stale draft wallpaper if the
 /// current stage no longer has one (a draft always mirrors the stage
 /// exactly at save/fork time, never a merge of old + new).
 ///
 /// `pub(crate)`, not private: [`handle_draft_save`] (above) and `rice mode
 /// draft <name>`'s "create the draft if it doesn't exist yet" step
 /// (`commands/mode.rs::handle_mode_draft`) both call this for the identical
-/// read/write, rather than each reimplementing it. Takes `song`/`name`
+/// read/write, rather than each reimplementing it. Takes `rice`/`name`
 /// already resolved — callers own how they got there (`handle_draft_save`
-/// derives it from the stage's own `"song"` field with distinct error
+/// derives it from the stage's own `"rice"` field with distinct error
 /// reasons; `handle_mode_draft` already has it via
-/// [`super::mode::current_staged_song`]).
-pub(crate) fn fork_stage_into(song: &str, name: &str) -> Outcome {
+/// [`super::mode::current_staged_rice`]).
+pub(crate) fn fork_stage_into(rice: &str, name: &str) -> Outcome {
     let stage = shellbridge::stage_dir();
     let theme_src = stage.join("theme.json");
     let raw = match std::fs::read_to_string(&theme_src) {
@@ -242,7 +242,7 @@ pub(crate) fn fork_stage_into(song: &str, name: &str) -> Outcome {
         .with_data(json!({ "reason": "invalid-json", "theme": theme_src.to_string_lossy() }));
     }
 
-    let dir = shellbridge::draft_dir(song, name);
+    let dir = shellbridge::draft_dir(rice, name);
     let theme_dst = dir.join("theme.json");
     if let Err(e) = shellbridge::atomic_write(&theme_dst, &raw) {
         return Outcome::error(
@@ -288,7 +288,7 @@ pub(crate) fn fork_stage_into(song: &str, name: &str) -> Outcome {
     Outcome::ok(
         "rice.draft.save",
         format!(
-            "saved draft `{name}` for `{song}` — {} file(s) snapshotted under {}",
+            "saved draft `{name}` for `{rice}` — {} file(s) snapshotted under {}",
             changed.len(),
             dir.display()
         ),
@@ -296,18 +296,18 @@ pub(crate) fn fork_stage_into(song: &str, name: &str) -> Outcome {
     .changed(changed)
     .with_data(json!({
         "name": name,
-        "song": song,
+        "rice": rice,
         "theme": theme_dst.to_string_lossy(),
         "wallpaperPick": wallpaper_path,
     }))
 }
 
-/// `rice draft list [<song>]` — enumerate saved drafts. With `<song>`, scans
-/// only `rices/<song>/drafts/*/theme.json`; with no arg, walks every
-/// song under `rices/` and reports drafts from all of them. Each entry
-/// carries its song (structural — the rices dir it was found under),
+/// `rice draft list [<rice>]` — enumerate saved drafts. With `<rice>`, scans
+/// only `rices/<rice>/drafts/*/theme.json`; with no arg, walks every
+/// rice under `rices/` and reports drafts from all of them. Each entry
+/// carries its rice (structural — the rices dir it was found under),
 /// name, saved-at (the theme.json file's mtime), and whether it is the
-/// currently-loaded draft — `mode.json`'s `song`+`draft` pair, which is only
+/// currently-loaded draft — `mode.json`'s `rice`+`draft` pair, which is only
 /// ever set together (`draft` is non-null iff `mode == Draft`). A directory
 /// with no `theme.json` is not a draft and is silently skipped. An
 /// absent/empty scope is `ok` with an empty list — never an error.
@@ -315,7 +315,7 @@ fn handle_draft_list(inv: &Invocation) -> Outcome {
     let scope = inv.args.first().cloned();
     let marker = load_mode_marker();
 
-    let songs: Vec<String> = match &scope {
+    let rices: Vec<String> = match &scope {
         Some(s) => vec![s.clone()],
         None => {
             let root = shellbridge::strillix_dir().join("rices");
@@ -334,8 +334,8 @@ fn handle_draft_list(inv: &Invocation) -> Outcome {
     };
 
     let mut entries: Vec<((String, String), Value)> = Vec::new();
-    for song in &songs {
-        let dir = shellbridge::song_drafts_dir(song);
+    for rice in &rices {
+        let dir = shellbridge::rice_drafts_dir(rice);
         let Ok(read) = std::fs::read_dir(&dir) else {
             continue;
         };
@@ -355,11 +355,11 @@ fn handle_draft_list(inv: &Invocation) -> Outcome {
                 .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
                 .map(|d| aoide_storage::time::iso_utc_from_epoch(d.as_secs() as i64));
             let is_current =
-                marker.song.as_deref() == Some(song.as_str()) && marker.draft.as_deref() == Some(name.as_str());
+                marker.rice.as_deref() == Some(rice.as_str()) && marker.draft.as_deref() == Some(name.as_str());
             entries.push((
-                (song.clone(), name.clone()),
+                (rice.clone(), name.clone()),
                 json!({
-                    "song": song,
+                    "rice": rice,
                     "name": name,
                     "savedAt": saved_at,
                     "current": is_current,
@@ -374,8 +374,8 @@ fn handle_draft_list(inv: &Invocation) -> Outcome {
         .with_data(json!({ "drafts": drafts, "scope": scope }))
 }
 
-/// `rice draft drop <name>` — delete the CURRENTLY staged song's
-/// `rices/<song>/drafts/<name>/` outright. Missing draft → error
+/// `rice draft drop <name>` — delete the CURRENTLY staged rice's
+/// `rices/<rice>/drafts/<name>/` outright. Missing draft → error
 /// `draft-not-found` (NOT idempotent-silent, unlike this codebase's usual
 /// tolerate-missing marker discipline — a named drop of nothing is almost
 /// certainly a typo the caller should see).
@@ -388,7 +388,7 @@ fn handle_draft_list(inv: &Invocation) -> Outcome {
 /// already-documented way to leave `Draft` mode first.
 fn handle_draft_drop(inv: &Invocation) -> Outcome {
     let name = inv.args.first().cloned().unwrap_or_default();
-    if !crate::compose::valid_song_name(&name) {
+    if !crate::compose::valid_rice_name(&name) {
         return Outcome::error(
             "rice.draft.drop",
             format!(
@@ -398,37 +398,37 @@ fn handle_draft_drop(inv: &Invocation) -> Outcome {
         )
         .with_data(json!({ "reason": "invalid-name", "name": name }));
     }
-    let song = match super::mode::current_staged_song() {
+    let rice = match super::mode::current_staged_rice() {
         Some(s) => s,
-        None => return no_resolvable_song("rice.draft.drop"),
+        None => return no_resolvable_rice("rice.draft.drop"),
     };
 
     let existing = load_mode_marker();
     if existing.mode == RiceMode::Draft
-        && existing.song.as_deref() == Some(song.as_str())
+        && existing.rice.as_deref() == Some(rice.as_str())
         && existing.draft.as_deref() == Some(name.as_str())
     {
         return Outcome::error(
             "rice.draft.drop",
             format!(
-                "cannot drop `{name}` — it's the live draft for `{song}` \
+                "cannot drop `{name}` — it's the live draft for `{rice}` \
                  (stage/theme.json is routed to it); switch modes first \
                  (`aoide rice mode stage` or `aoide rice mode declarative`), then drop it"
             ),
         )
-        .with_data(json!({ "reason": "draft-is-live", "name": name, "song": song }));
+        .with_data(json!({ "reason": "draft-is-live", "name": name, "rice": rice }));
     }
 
-    let dir = shellbridge::draft_dir(&song, &name);
+    let dir = shellbridge::draft_dir(&rice, &name);
     if !dir.is_dir() {
         return Outcome::error(
             "rice.draft.drop",
-            format!("no draft `{name}` for `{song}` at {}", dir.display()),
+            format!("no draft `{name}` for `{rice}` at {}", dir.display()),
         )
         .with_data(json!({
             "reason": "draft-not-found",
             "name": name,
-            "song": song,
+            "rice": rice,
             "expected": dir.to_string_lossy(),
         }));
     }
@@ -440,9 +440,9 @@ fn handle_draft_drop(inv: &Invocation) -> Outcome {
         .with_data(json!({ "reason": "remove-failed", "target": dir.to_string_lossy() }));
     }
 
-    Outcome::ok("rice.draft.drop", format!("dropped draft `{name}` for `{song}`"))
+    Outcome::ok("rice.draft.drop", format!("dropped draft `{name}` for `{rice}`"))
         .changed(vec![dir.to_string_lossy().into_owned()])
-        .with_data(json!({ "name": name, "song": song }))
+        .with_data(json!({ "name": name, "rice": rice }))
 }
 
 // ── Tests (rice draft save/list/drop) ────────────────────────────────────────
@@ -453,14 +453,14 @@ mod tests {
     use aoide_storage::mode::{save_mode_marker, ModeMarker};
     use aoide_test_support::*;
 
-    /// Every test's stage carries a `"song"` breadcrumb — `save`/`drop` both
-    /// resolve their target song off it now, so a bare `VALID_NOTES` (which
-    /// has no `"song"` field) needs this written first.
-    fn stage_with_song(stage: &std::path::Path, song: &str) {
+    /// Every test's stage carries a `"rice"` breadcrumb — `save`/`drop` both
+    /// resolve their target rice off it now, so a bare `VALID_NOTES` (which
+    /// has no `"rice"` field) needs this written first.
+    fn stage_with_rice(stage: &std::path::Path, rice: &str) {
         std::fs::write(
             stage.join("theme.json"),
             format!(
-                r##"{{"schemaVersion":"0","song":"{song}","palette":{{"bg":"#0b1021","fg":"#c8d3f5","accent":"#82aaff","urgent":"#ff757f"}}}}"##
+                r##"{{"schemaVersion":"0","rice":"{rice}","palette":{{"bg":"#0b1021","fg":"#c8d3f5","accent":"#82aaff","urgent":"#ff757f"}}}}"##
             ),
         )
         .unwrap();
@@ -469,13 +469,13 @@ mod tests {
     // ── rice draft save ──────────────────────────────────────────────────
 
     #[test]
-    fn save_creates_the_draft_dir_nested_under_its_song_and_files() {
+    fn save_creates_the_draft_dir_nested_under_its_rice_and_files() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
         let root = unique_tmp("draft-save-ok");
         let stage = root.join("stage");
         std::fs::create_dir_all(&stage).unwrap();
-        stage_with_song(&stage, "sonata");
+        stage_with_rice(&stage, "sonata");
         std::fs::write(stage.join("wallpaper.json"), r#"{"path":"x.png"}"#).unwrap();
         crate::commands::test_support::ensure_default_rices_fixture();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
@@ -499,7 +499,7 @@ mod tests {
             .any(|c| c.ends_with("rices/sonata/drafts/neon-night/wallpaper.json")));
         let data = out.data.unwrap();
         assert_eq!(data["name"], "neon-night");
-        assert_eq!(data["song"], "sonata");
+        assert_eq!(data["rice"], "sonata");
         assert!(data["wallpaperPick"].as_str().unwrap().ends_with("wallpaper.json"));
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -519,19 +519,19 @@ mod tests {
     }
 
     #[test]
-    fn save_with_a_songless_staged_theme_errors_no_resolvable_song() {
+    fn save_with_a_riceless_staged_theme_errors_no_resolvable_rice() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
-        let stage = unique_tmp("draft-save-nosong");
+        let stage = unique_tmp("draft-save-norice");
         std::fs::create_dir_all(&stage).unwrap();
-        // VALID_NOTES parses fine but carries no "song" field.
+        // VALID_NOTES parses fine but carries no "rice" field.
         std::fs::write(stage.join("theme.json"), VALID_NOTES).unwrap();
         crate::commands::test_support::ensure_default_rices_fixture();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
 
         let out = handle_draft_save(&inv(&["rice", "draft", "save"], &["neon-night"]));
         assert_eq!(out.status, Status::Error);
-        assert_eq!(out.data.unwrap()["reason"], "no-resolvable-song");
+        assert_eq!(out.data.unwrap()["reason"], "no-resolvable-rice");
         let _ = std::fs::remove_dir_all(&stage);
     }
 
@@ -542,13 +542,13 @@ mod tests {
         let root = unique_tmp("draft-save-upsert");
         let stage = root.join("stage");
         std::fs::create_dir_all(&stage).unwrap();
-        stage_with_song(&stage, "sonata");
+        stage_with_rice(&stage, "sonata");
         crate::commands::test_support::ensure_default_rices_fixture();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
 
         handle_draft_save(&inv(&["rice", "draft", "save"], &["neon-night"]));
 
-        let updated = r##"{"schemaVersion":"0","song":"sonata","palette":{"bg":"#111111"}}"##;
+        let updated = r##"{"schemaVersion":"0","rice":"sonata","palette":{"bg":"#111111"}}"##;
         std::fs::write(stage.join("theme.json"), updated).unwrap();
         let out = handle_draft_save(&inv(&["rice", "draft", "save"], &["neon-night"]));
         assert_eq!(out.status, Status::Ok, "{:?}", out.data);
@@ -565,10 +565,10 @@ mod tests {
     fn save_clears_a_stale_wallpaper_when_the_current_stage_has_none() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
-        let root = unique_tmp("draft-save-stale-cover");
+        let root = unique_tmp("draft-save-stale-wallpaper");
         let stage = root.join("stage");
         std::fs::create_dir_all(&stage).unwrap();
-        stage_with_song(&stage, "sonata");
+        stage_with_rice(&stage, "sonata");
         std::fs::write(stage.join("wallpaper.json"), r#"{"path":"x.png"}"#).unwrap();
         crate::commands::test_support::ensure_default_rices_fixture();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
@@ -580,7 +580,7 @@ mod tests {
         std::fs::remove_file(stage.join("wallpaper.json")).unwrap();
         let out = handle_draft_save(&inv(&["rice", "draft", "save"], &["neon-night"]));
         assert_eq!(out.status, Status::Ok, "{:?}", out.data);
-        assert!(!dir.join("wallpaper.json").exists(), "stale cover removed on re-save");
+        assert!(!dir.join("wallpaper.json").exists(), "stale wallpaper removed on re-save");
         assert!(out.data.unwrap()["wallpaperPick"].is_null());
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -592,12 +592,12 @@ mod tests {
         let root = unique_tmp("draft-save-independent");
         let stage = root.join("stage");
         std::fs::create_dir_all(&stage).unwrap();
-        stage_with_song(&stage, "sonata");
+        stage_with_rice(&stage, "sonata");
         crate::commands::test_support::ensure_default_rices_fixture();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
 
         handle_draft_save(&inv(&["rice", "draft", "save"], &["amber-dusk"]));
-        let updated = r##"{"schemaVersion":"0","song":"sonata","palette":{"bg":"#222222"}}"##;
+        let updated = r##"{"schemaVersion":"0","rice":"sonata","palette":{"bg":"#222222"}}"##;
         std::fs::write(stage.join("theme.json"), updated).unwrap();
         handle_draft_save(&inv(&["rice", "draft", "save"], &["neon-night"]));
 
@@ -616,18 +616,18 @@ mod tests {
     }
 
     #[test]
-    fn drafts_of_two_different_songs_never_collide_even_with_the_same_name() {
+    fn drafts_of_two_different_rices_never_collide_even_with_the_same_name() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
-        let root = unique_tmp("draft-save-cross-song");
+        let root = unique_tmp("draft-save-cross-rice");
         let stage = root.join("stage");
         std::fs::create_dir_all(&stage).unwrap();
-        stage_with_song(&stage, "sonata");
+        stage_with_rice(&stage, "sonata");
         crate::commands::test_support::ensure_default_rices_fixture();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
         handle_draft_save(&inv(&["rice", "draft", "save"], &["neon-night"]));
 
-        stage_with_song(&stage, "moonlight");
+        stage_with_rice(&stage, "moonlight");
         handle_draft_save(&inv(&["rice", "draft", "save"], &["neon-night"]));
 
         assert!(root
@@ -662,7 +662,7 @@ mod tests {
         std::fs::create_dir_all(&stage).unwrap();
         let existing_dir = root.join("rices").join("sonata").join("drafts").join("neon-night");
         std::fs::create_dir_all(&existing_dir).unwrap();
-        let routed_notes = r##"{"schemaVersion":"0","song":"sonata","palette":{"bg":"#routed"}}"##;
+        let routed_notes = r##"{"schemaVersion":"0","rice":"sonata","palette":{"bg":"#routed"}}"##;
         std::fs::write(existing_dir.join("theme.json"), routed_notes).unwrap();
         std::os::unix::fs::symlink(&existing_dir.join("theme.json"), stage.join("theme.json")).unwrap();
         crate::commands::test_support::ensure_default_rices_fixture();
@@ -679,13 +679,13 @@ mod tests {
     }
 
     #[test]
-    fn save_with_no_name_mints_draft_1_for_a_song_with_no_drafts() {
+    fn save_with_no_name_mints_draft_1_for_a_rice_with_no_drafts() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
         let root = unique_tmp("draft-mint-first");
         let stage = root.join("stage");
         std::fs::create_dir_all(&stage).unwrap();
-        stage_with_song(&stage, "sonata");
+        stage_with_rice(&stage, "sonata");
         crate::commands::test_support::ensure_default_rices_fixture();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
 
@@ -708,7 +708,7 @@ mod tests {
         let root = unique_tmp("draft-mint-gap");
         let stage = root.join("stage");
         std::fs::create_dir_all(&stage).unwrap();
-        stage_with_song(&stage, "sonata");
+        stage_with_rice(&stage, "sonata");
         crate::commands::test_support::ensure_default_rices_fixture();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
         let drafts = root.join("rices").join("sonata").join("drafts");
@@ -728,7 +728,7 @@ mod tests {
         let root = unique_tmp("draft-mint-ignores");
         let stage = root.join("stage");
         std::fs::create_dir_all(&stage).unwrap();
-        stage_with_song(&stage, "sonata");
+        stage_with_rice(&stage, "sonata");
         crate::commands::test_support::ensure_default_rices_fixture();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
         let drafts = root.join("rices").join("sonata").join("drafts");
@@ -748,7 +748,7 @@ mod tests {
         let root = unique_tmp("draft-mint-halfwritten");
         let stage = root.join("stage");
         std::fs::create_dir_all(&stage).unwrap();
-        stage_with_song(&stage, "sonata");
+        stage_with_rice(&stage, "sonata");
         crate::commands::test_support::ensure_default_rices_fixture();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
         let half = root.join("rices").join("sonata").join("drafts").join("draft-1");
@@ -762,13 +762,13 @@ mod tests {
     }
 
     #[test]
-    fn minting_counts_only_the_staged_songs_drafts() {
+    fn minting_counts_only_the_staged_rices_drafts() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
-        let root = unique_tmp("draft-mint-per-song");
+        let root = unique_tmp("draft-mint-per-rice");
         let stage = root.join("stage");
         std::fs::create_dir_all(&stage).unwrap();
-        stage_with_song(&stage, "sonata");
+        stage_with_rice(&stage, "sonata");
         crate::commands::test_support::ensure_default_rices_fixture();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
         std::fs::create_dir_all(root.join("rices").join("moonlight").join("drafts").join("draft-1")).unwrap();
@@ -779,10 +779,10 @@ mod tests {
     }
 
     #[test]
-    fn save_with_no_name_and_no_staged_song_refuses_and_creates_nothing() {
+    fn save_with_no_name_and_no_staged_rice_refuses_and_creates_nothing() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
-        let root = unique_tmp("draft-mint-nosong");
+        let root = unique_tmp("draft-mint-norice");
         let stage = root.join("stage");
         std::fs::create_dir_all(&stage).unwrap();
         std::fs::write(stage.join("theme.json"), VALID_NOTES).unwrap();
@@ -791,7 +791,7 @@ mod tests {
 
         let out = handle_draft_save(&inv(&["rice", "draft", "save"], &[]));
         assert_eq!(out.status, Status::Error);
-        assert_eq!(out.data.unwrap()["reason"], "no-resolvable-song");
+        assert_eq!(out.data.unwrap()["reason"], "no-resolvable-rice");
         assert!(!root.join("rices").exists(), "nothing is created for a refused mint");
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -803,7 +803,7 @@ mod tests {
         let root = unique_tmp("draft-mint-data-name");
         let stage = root.join("stage");
         std::fs::create_dir_all(&stage).unwrap();
-        stage_with_song(&stage, "sonata");
+        stage_with_rice(&stage, "sonata");
         crate::commands::test_support::ensure_default_rices_fixture();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
 
@@ -811,8 +811,8 @@ mod tests {
         let minted = handle_draft_save(&inv(&["rice", "draft", "save"], &[])).data.unwrap();
         assert_eq!(given["name"], "neon");
         assert_eq!(minted["name"], "draft-1");
-        assert_eq!(given["song"], "sonata");
-        assert_eq!(minted["song"], "sonata");
+        assert_eq!(given["rice"], "sonata");
+        assert_eq!(minted["rice"], "sonata");
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -833,7 +833,7 @@ mod tests {
     }
 
     #[test]
-    fn list_scoped_to_a_song_with_no_drafts_is_ok_with_an_empty_list() {
+    fn list_scoped_to_a_rice_with_no_drafts_is_ok_with_an_empty_list() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
         let root = unique_tmp("draft-list-scoped-empty");
@@ -850,13 +850,13 @@ mod tests {
     }
 
     #[test]
-    fn list_surfaces_multiple_drafts_of_one_song_with_the_current_one_flagged() {
+    fn list_surfaces_multiple_drafts_of_one_rice_with_the_current_one_flagged() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
         let root = unique_tmp("draft-list-multi");
         let stage = root.join("stage");
         std::fs::create_dir_all(&stage).unwrap();
-        stage_with_song(&stage, "sonata");
+        stage_with_rice(&stage, "sonata");
         crate::commands::test_support::ensure_default_rices_fixture();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
 
@@ -865,7 +865,7 @@ mod tests {
 
         save_mode_marker(&ModeMarker {
             mode: RiceMode::Draft,
-            song: Some("sonata".to_string()),
+            rice: Some("sonata".to_string()),
             draft: Some("neon-night".to_string()),
             ..Default::default()
         })
@@ -877,7 +877,7 @@ mod tests {
         assert_eq!(drafts.len(), 2);
         let neon = drafts.iter().find(|d| d["name"] == "neon-night").unwrap();
         assert_eq!(neon["current"], true);
-        assert_eq!(neon["song"], "sonata");
+        assert_eq!(neon["rice"], "sonata");
         assert!(neon["savedAt"].is_string());
         let amber = drafts.iter().find(|d| d["name"] == "amber-dusk").unwrap();
         assert_eq!(amber["current"], false);
@@ -885,26 +885,26 @@ mod tests {
     }
 
     #[test]
-    fn list_with_no_arg_walks_every_song_and_scoping_by_name_narrows_it() {
+    fn list_with_no_arg_walks_every_rice_and_scoping_by_name_narrows_it() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
-        let root = unique_tmp("draft-list-allsongs");
+        let root = unique_tmp("draft-list-allrices");
         let stage = root.join("stage");
         std::fs::create_dir_all(&stage).unwrap();
-        stage_with_song(&stage, "sonata");
+        stage_with_rice(&stage, "sonata");
         crate::commands::test_support::ensure_default_rices_fixture();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
         handle_draft_save(&inv(&["rice", "draft", "save"], &["neon-night"]));
 
-        stage_with_song(&stage, "moonlight");
+        stage_with_rice(&stage, "moonlight");
         handle_draft_save(&inv(&["rice", "draft", "save"], &["amber-dusk"]));
 
         let out_all = handle_draft_list(&inv(&["rice", "draft", "list"], &[]));
         assert_eq!(out_all.status, Status::Ok, "{:?}", out_all.data);
         let all = out_all.data.unwrap()["drafts"].as_array().unwrap().clone();
-        assert_eq!(all.len(), 2, "both songs' drafts surface with no scope");
-        assert!(all.iter().any(|d| d["song"] == "sonata" && d["name"] == "neon-night"));
-        assert!(all.iter().any(|d| d["song"] == "moonlight" && d["name"] == "amber-dusk"));
+        assert_eq!(all.len(), 2, "both rices' drafts surface with no scope");
+        assert!(all.iter().any(|d| d["rice"] == "sonata" && d["name"] == "neon-night"));
+        assert!(all.iter().any(|d| d["rice"] == "moonlight" && d["name"] == "amber-dusk"));
 
         let out_scoped = handle_draft_list(&inv(&["rice", "draft", "list"], &["sonata"]));
         let scoped = out_scoped.data.unwrap()["drafts"].as_array().unwrap().clone();
@@ -922,7 +922,7 @@ mod tests {
         let root = unique_tmp("draft-drop-ok");
         let stage = root.join("stage");
         std::fs::create_dir_all(&stage).unwrap();
-        stage_with_song(&stage, "sonata");
+        stage_with_rice(&stage, "sonata");
         crate::commands::test_support::ensure_default_rices_fixture();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
 
@@ -943,11 +943,11 @@ mod tests {
         let root = unique_tmp("draft-drop-traversal");
         let stage = root.join("stage");
         std::fs::create_dir_all(&stage).unwrap();
-        stage_with_song(&stage, "sonata");
+        stage_with_rice(&stage, "sonata");
         crate::commands::test_support::ensure_default_rices_fixture();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
 
-        // `draft_dir(song, name)` joins `name` straight into a path — a
+        // `draft_dir(rice, name)` joins `name` straight into a path — a
         // traversal name must be rejected before it ever reaches
         // `remove_dir_all`, same guard `handle_draft_save` already applies.
         let out = handle_draft_drop(&inv(&["rice", "draft", "drop"], &["../../evil"]));
@@ -978,7 +978,7 @@ mod tests {
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
         let stage = unique_tmp("draft-drop-missing");
         std::fs::create_dir_all(&stage).unwrap();
-        stage_with_song(&stage, "sonata");
+        stage_with_rice(&stage, "sonata");
         crate::commands::test_support::ensure_default_rices_fixture();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
 
@@ -990,16 +990,16 @@ mod tests {
     }
 
     #[test]
-    fn drop_with_no_resolvable_song_errors() {
+    fn drop_with_no_resolvable_rice_errors() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
-        let stage = unique_tmp("draft-drop-nosong");
+        let stage = unique_tmp("draft-drop-norice");
         crate::commands::test_support::ensure_default_rices_fixture();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
 
         let out = handle_draft_drop(&inv(&["rice", "draft", "drop"], &["neon-night"]));
         assert_eq!(out.status, Status::Error);
-        assert_eq!(out.data.unwrap()["reason"], "no-resolvable-song");
+        assert_eq!(out.data.unwrap()["reason"], "no-resolvable-rice");
         let _ = std::fs::remove_dir_all(&stage);
     }
 
@@ -1010,14 +1010,14 @@ mod tests {
         let root = unique_tmp("draft-drop-live");
         let stage = root.join("stage");
         std::fs::create_dir_all(&stage).unwrap();
-        stage_with_song(&stage, "sonata");
+        stage_with_rice(&stage, "sonata");
         crate::commands::test_support::ensure_default_rices_fixture();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
 
         handle_draft_save(&inv(&["rice", "draft", "save"], &["neon-night"]));
         save_mode_marker(&ModeMarker {
             mode: RiceMode::Draft,
-            song: Some("sonata".to_string()),
+            rice: Some("sonata".to_string()),
             draft: Some("neon-night".to_string()),
             ..Default::default()
         })
@@ -1046,7 +1046,7 @@ mod tests {
         let root = unique_tmp("draft-drop-other");
         let stage = root.join("stage");
         std::fs::create_dir_all(&stage).unwrap();
-        stage_with_song(&stage, "sonata");
+        stage_with_rice(&stage, "sonata");
         crate::commands::test_support::ensure_default_rices_fixture();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
 
@@ -1054,7 +1054,7 @@ mod tests {
         handle_draft_save(&inv(&["rice", "draft", "save"], &["neon-night"]));
         save_mode_marker(&ModeMarker {
             mode: RiceMode::Draft,
-            song: Some("sonata".to_string()),
+            rice: Some("sonata".to_string()),
             draft: Some("neon-night".to_string()),
             ..Default::default()
         })

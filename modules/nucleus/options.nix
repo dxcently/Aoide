@@ -3,7 +3,7 @@
 # Every other module (dendrites) builds against the options
 # declared here. This is versioned in CONTRACTS.md (theme schema v0). A paint
 # lane reads `aoide.theme`, `aoide.layout` and `aoide.surfaces` from here,
-# plus the core scalars and the song selection declared beside them — the
+# plus the core scalars and the rice selection declared beside them — the
 # enumerated, closed set root `AGENTS.md` house rule 5 states in full; no module
 # reads another module. That discipline is a documented convention, backed by
 # code review — `lib/checks.nix` has no check that inspects a lane's reads, as
@@ -143,12 +143,12 @@ let
       terminalOpacity = mkOption {
         type = types.nullOr (types.numbers.between 0 1);
         default = null;
-        description = "Terminal (kitty) background opacity, 0–1. Live-side only, in two files: the activation seed writes it into `$STRILLIX_ROOT/declared/terminal-opacity.conf` (deleted when null), and `rice stage` writes it into the staged terminal file (only for a song with an opinion) and has open kitty windows reload their config. The staged file is included second, so an opinionated stage wins; null is no opinion and the host's bake in kitty.conf shows, with no Aoide constant behind it.";
+        description = "Terminal (kitty) background opacity, 0–1. Live-side only, in two files: the activation seed writes it into `$STRILLIX_ROOT/declared/terminal-opacity.conf` (deleted when null), and `rice stage` writes it into the staged terminal file (only for a rice with an opinion) and has open kitty windows reload their config. The staged file is included second, so an opinionated stage wins; null is no opinion and the host's bake in kitty.conf shows, with no Aoide constant behind it.";
       };
     };
   };
 
-  # ── Font submodule (v0 optional overrides: the face the song wears) ───────
+  # ── Font submodule (v0 optional overrides: the face the rice wears) ───────
   # Additive-optional, the geometry tier's posture: an absent tier means "the
   # stylix lane's own default". The ROLE shape is Stylix's own — `{ package,
   # name }` — because the stylix lane is the tier's one consumer and passes the
@@ -160,7 +160,7 @@ let
   # a rebuild. (Geometry rides the stage file because `hyprctl keyword` CAN set
   # it live; a terminal cannot be re-faced mid-session.)
   #
-  # A song names `package` as a literal nix value (the `wallpaper` note's
+  # A rice names `package` as a literal nix value (the `wallpaper` note's
   # precedent), not a string attribute name — Stylix needs the derivation to
   # install the face, and a face nobody installed is a silent fallback.
   fontRoleType = types.submodule {
@@ -184,7 +184,7 @@ let
         description = ''
           The fixed-pitch face — the terminal, where agents live. Falls back to
           the stylix lane's default ("Linux Libertine Mono O") when null. The
-          one role a song uses today; the remaining roles stay the lane's.
+          one role a rice uses today; the remaining roles stay the lane's.
         '';
       };
     };
@@ -226,13 +226,13 @@ let
     };
   };
 
-  # ── Override tier (venue recolour — HOST-set, never song-set) ─────────────
+  # ── Override tier (venue recolour — HOST-set, never rice-set) ─────────────
   # The five palette anchors, each optional. Semantics (CONTRACTS.md §1,
   # "Override tier"): an overridden anchor rewrites EVERY theme colour equal
-  # to the song's authored value for that anchor — palette, base16, component
+  # to the rice's authored value for that anchor — palette, base16, component
   # tiers — in one simultaneous pass, in BOTH fan-outs (baked Stylix scheme
   # and the $STRILLIX_ROOT/stage/theme.json seed). A recolour, never a re-key: slots
-  # not carrying an overridden anchor's value stay the song's. Same
+  # not carrying an overridden anchor's value stay the rice's. Same
   # nullOr-hex-per-field shape as the component tier above (mkComponent).
   #
   # Phase 1b (named-key overrides): sibling sub-tiers `base16`/`bar`/`notif`/
@@ -242,7 +242,7 @@ let
   # (anchors are bg/fg/accent/urgent/hot; the sub-tiers are base16/bar/
   # notif/window). `base16` is its OWN all-optional submodule here, built
   # from `base16Roles` the same way `base16Type` is (NOT `base16Type`
-  # itself — that one requires all 16 slots once given, right for a song's
+  # itself — that one requires all 16 slots once given, right for a rice's
   # scheme, wrong for a slot-exact override where every field must default
   # to null). `bar`/`notif`/`window` reuse `barType`/`notifType`/`windowType`
   # verbatim: those are already nullOr-per-field with default null (the
@@ -261,11 +261,11 @@ let
           }
         )
         {
-          bg = "Venue recolour of the song's bg anchor (and every slot carrying its value).";
-          fg = "Venue recolour of the song's fg anchor (and every slot carrying its value).";
-          accent = "Venue recolour of the song's accent anchor (and every slot carrying its value).";
-          urgent = "Venue recolour of the song's urgent anchor (and every slot carrying its value).";
-          hot = "Venue recolour of the song's hot anchor; when the song left hot null, sets it directly.";
+          bg = "Venue recolour of the rice's bg anchor (and every slot carrying its value).";
+          fg = "Venue recolour of the rice's fg anchor (and every slot carrying its value).";
+          accent = "Venue recolour of the rice's accent anchor (and every slot carrying its value).";
+          urgent = "Venue recolour of the rice's urgent anchor (and every slot carrying its value).";
+          hot = "Venue recolour of the rice's hot anchor; when the rice left hot null, sets it directly.";
         }
       // {
         base16 = mkOption {
@@ -301,7 +301,7 @@ let
   };
 
   # ── Base16 scheme submodule (optional full-scheme tier) ───────────────────
-  # A song MAY carry a complete base16 scheme following the base16 standard's
+  # A rice MAY carry a complete base16 scheme following the base16 standard's
   # slot semantics (https://github.com/chriskempson/base16 — 00..07 the
   # grayscale ramp, 08..0F the accent set). When present, the stylix lane
   # bakes it verbatim instead of synthesising a degenerate scheme from the
@@ -352,12 +352,12 @@ let
   };
 
   # ── Declared widget-type registry entry (v1) ──────────────────────────────
-  # Lets a song register a brand-new widget TYPE via nix, apart from the
-  # shipped/anchored slot catalog (CONTRACTS.md §5 "Per-song flavor
+  # Lets a rice register a brand-new widget TYPE via nix, apart from the
+  # shipped/anchored slot catalog (CONTRACTS.md §5 "Per-rice flavor
   # widgets"). Keyed by slot name in `layout.widgets` below — the attribute
   # name IS the slot name, expected shape `[a-z0-9][a-z0-9-]*` (documented
   # convention, not enforced at this layer — same permissive-here,
-  # `rice lint`-is-authoritative posture as `hexColor` above). The song's own
+  # `rice lint`-is-authoritative posture as `hexColor` above). The rice's own
   # QML body for a declared slot still lives at
   # `rices/<name>/widgets/<slot>.qml` same as any other slot — this
   # option only declares that the slot IS a widget-type registration, not
@@ -401,7 +401,7 @@ let
         description = ''
           A GlobalShortcut name (e.g. "aoide:<slot>") a venue's compositor
           config may bind a key to. Naming a shortcut is not binding it —
-          the venue owns the actual keybind, keeping the song/venue split
+          the venue owns the actual keybind, keeping the rice/venue split
           intact.
         '';
       };
@@ -417,7 +417,7 @@ let
           Sort key for deterministic layout among multiple declared `dock`
           entries. The registry is serialized through
           `serde_json::Value`/`BTreeMap` on the Rust side (no
-          `preserve_order` feature enabled), so a song's declared widget
+          `preserve_order` feature enabled), so a rice's declared widget
           keys do NOT preserve authored order between the build-time nix
           walk and the native hot-sync — `order` is the only way to get
           deterministic layout among multiple `dock` widgets. Consumers
@@ -460,46 +460,46 @@ in
 {
   # The core's own module (`pkgs/aoide/module`, `nixosModules.default` of the
   # `aoide` input) is imported by the nucleus module that closes over this flake's
-  # inputs — `lib/aoideos.nix`'s `nucleusModule` — and not here: an `imports`
+  # inputs — `lib/strillix.nix`'s `nucleusModule` — and not here: an `imports`
   # list cannot read a module argument that `_module.args` supplies (the module
   # list is what `config` is assembled from, so the read is a cycle), and this
   # file must keep evaluating when a bare `evalModules` imports it without any
   # lane around it (`lib/options.nix` reads the option declarations that way).
   options.aoide = {
-    # ── Song selection — the replay seam ───────────────────────────────────
-    # The song (rice) this host performs. A song is host-agnostic: ANY host in
-    # the fleet replays any committed song by naming it here — one line, no
-    # other edits. The shipped standard is song "sonata"; committed songs live
-    # under rices/<name>/ as bodies that the selected song alone brings
+    # ── Rice selection — the replay seam ───────────────────────────────────
+    # The rice (rice) this host performs. A rice is host-agnostic: ANY host in
+    # the fleet replays any committed rice by naming it here — one line, no
+    # other edits. The shipped standard is rice "sonata"; committed rices live
+    # under rices/<name>/ as bodies that the selected rice alone brings
     # in (the same selection discipline as a dendrite — see CONTRACTS.md §5).
     #
     # The VENUE (host) decides its instruments (dendrites, hardware);
-    # the SONG carries only the theme (palette + component tiers). A song must
+    # the RICE carries only the theme (palette + component tiers). A rice must
     # never set host options or enable dendrites.
     rice = mkOption {
       type = types.nullOr types.str;
       default = null;
       example = "sonata";
       description = ''
-        The song (rice) this host performs. Set to a committed song name
+        The rice (rice) this host performs. Set to a committed rice name
         (a folder under rices/<name>/) to replay it on this host;
         the theme fan-out swaps with zero other edits. Null (the default)
-        means no song is named: a paint lane reads this null and deploys
+        means no rice is named: a paint lane reads this null and deploys
         nothing — no QML tree, no seeded stage, no rice restart — rather than
-        an empty surface, and no song's body is imported. Naming a song is what
+        an empty surface, and no rice's body is imported. Naming a rice is what
         puts a shell tree under the runtime root;
         a host that brings its own config directory still runs a shell on it
-        (`aoide.quickshell.config`), song or no song. A host wanting the
-        desktop names its song explicitly, e.g.
+        (`aoide.quickshell.config`), rice or no rice. A host wanting the
+        desktop names its rice explicitly, e.g.
         `aoide.rice = "sonata";` for the shipped standard.
       '';
     };
 
-    # The songs this host BUILDS IN — the host's `habit.rice.declared ∪
+    # The rices this host BUILDS IN — the host's `habit.rice.declared ∪
     # habit.rice.available`, derived and set by the constructor's hook
-    # (`lib/aoideos.nix`, over `lib/rices.nix`'s `builtIn`). A FACT about the
+    # (`lib/strillix.nix`, over `lib/rices.nix`'s `builtIn`). A FACT about the
     # selection, exactly as `aoide.rice` is, and never hand-set: the lane that
-    # builds a song's widgets, installs its packages and seeds its folder reads
+    # builds a rice's widgets, installs its packages and seeds its folder reads
     # it instead of asking the host, which it cannot see.
     #
     # It is declared here, in the unconditional core, because the hook sets it
@@ -512,20 +512,20 @@ in
       default = [ ];
       example = [ "sonata" ];
       description = ''
-        The songs built into this system: the `rice.nix` files imported, the
+        The rices built into this system: the `rice.nix` files imported, the
         widgets copied into the deployed shell tree, the packages installed and
         the folders the machine rices is seeded with. Derived from the host
-        record's song selection — and CLOSED UNDER BORROWS (CONTRACTS.md §5): a
-        song whose records borrow another song's slots builds the lender in too,
-        because the borrower's slots resolve to `songs/<owner>/<file>` on disk.
+        record's rice selection — and CLOSED UNDER BORROWS (CONTRACTS.md §5): a
+        rice whose records borrow another rice's slots builds the lender in too,
+        because the borrower's slots resolve to `rices/<owner>/<file>` on disk.
         A host never sets it.
       '';
     };
 
-    # The declared song's greeter face — a fact about the selection, derived
-    # and set by the same hook as `builtIn` (`lib/aoideos.nix`, over
+    # The declared rice's greeter face — a fact about the selection, derived
+    # and set by the same hook as `builtIn` (`lib/strillix.nix`, over
     # `lib/rices.nix`'s `greeter`) and never hand-set. The greeter lane
-    # reads it to choose between a song-painted Quickshell greeter and ly,
+    # reads it to choose between a rice-painted Quickshell greeter and ly,
     # and to find the face's files in the shipped rices.
     rices.greeter = mkOption {
       type = types.nullOr (types.attrsOf types.str);
@@ -535,11 +535,11 @@ in
         file = "greeter.qml";
       };
       description = ''
-        The declared song's `greeter` slot record, `{ owner, file }`: the
-        song whose `widgets/` holds the face (the declared song itself, or
-        the song it borrows the slot from) and the file's name there. `null`
-        when the declared song ships no greeter face, or no song is
-        declared. Derived from the host record's song selection; a host
+        The declared rice's `greeter` slot record, `{ owner, file }`: the
+        rice whose `widgets/` holds the face (the declared rice itself, or
+        the rice it borrows the slot from) and the file's name there. `null`
+        when the declared rice ships no greeter face, or no rice is
+        declared. Derived from the host record's rice selection; a host
         never sets it.
       '';
     };
@@ -570,7 +570,7 @@ in
             ];
             default = "light";
             description = ''
-              The register the base16 ramp reads as — "light" or "dark". A song
+              The register the base16 ramp reads as — "light" or "dark". A rice
               declares it beside its palette (a palette brings its polarity),
               and the stylix lane hands it to `stylix.polarity`, which themes
               every Stylix-managed target from it. The default keeps every host
@@ -579,7 +579,7 @@ in
               BAKED ONLY, the font tier's posture: no emitter carries it and
               `rice stage` does not apply it — GTK/Qt and Stylix read it at
               build time, so flipping it is a user-gated rebuild, not a stage.
-              It is still carried in a song's `theme.json` beside `palette`
+              It is still carried in a rice's `theme.json` beside `palette`
               and validated by `rice lint` (exactly "light"|"dark", or absent
               for "no opinion"), and it reaches `$STRILLIX_ROOT/stage/theme.json` through
               the activation seed like every other top-level key — where nothing
@@ -627,15 +627,15 @@ in
             default = { };
             description = ''
               Font tier (v0 optional overrides, the geometry tier's posture):
-              the face this song wears, per Stylix font role — `monospace`
+              the face this rice wears, per Stylix font role — `monospace`
               today, the terminal an agent lands in. Null means "the stylix
-              lane's own default" (Linux Libertine), so a song that sets no
+              lane's own default" (Linux Libertine), so a rice that sets no
               face bakes exactly the theme it baked before.
 
               BAKED ONLY — like `wallpaper`, and unlike `geometry`: this tier
               has no `stage/theme.json` twin and no engine schema entry,
               because a face cannot hot-swap. It lands on the user-gated
-              rebuild, and a staged song cannot re-face the terminal without
+              rebuild, and a staged rice cannot re-face the terminal without
               one.
             '';
           };
@@ -643,10 +643,10 @@ in
             type = types.nullOr types.path;
             default = null;
             description = ''
-              The cover-art note: the wallpaper image this song carries, as a
-              literal nix path (copied to the store — never a song/ runtime
+              The wallpaper-art note: the wallpaper image this rice carries, as a
+              literal nix path (copied to the store — never a rice/ runtime
               read). Paint dendrites bake it as the stylix base-context image. null
-              "no cover" — the stylix lane falls back to its deterministic
+              "no wallpaper" — the stylix lane falls back to its deterministic
               solid-colour derivation (from palette.bg), so the baked path stays
               buildable with no binary asset.
             '';
@@ -656,7 +656,7 @@ in
             default = { };
             description = ''
               Venue recolour tier (CONTRACTS.md §1, "Override tier"). Set by
-              the HOST (never by a song) to repaint the performed song's
+              the HOST (never by a rice) to repaint the performed rice's
               anchors without editing the rices. Consumers apply it
               through lib/theme.nix's `resolve` — the option system stores
               it inert, same posture as the component-tier nulls.
@@ -670,9 +670,9 @@ in
     layout = mkOption {
       description = ''
         The v1 layout schema — one of the three namespaces a paint lane may
-        read. Where `aoide.theme` carries the song's DRESS (palette · base16
-        · component tiers · geometry · fonts · cover), layout carries its
-        STRUCTURE: which widget/surface TYPES the song brings into existence
+        read. Where `aoide.theme` carries the rice's DRESS (palette · base16
+        · component tiers · geometry · fonts · wallpaper), layout carries its
+        STRUCTURE: which widget/surface TYPES the rice brings into existence
         (`widgets`) and which painted surfaces it expects to stay mapped
         (`surfaces`). Dress and structure are different questions, so they
         are different option trees; the paint read-whitelist stays an
@@ -686,19 +686,19 @@ in
             type = types.attrsOf widgetType;
             default = { };
             description = ''
-              Declared widget-type registry: lets a song register a brand-new
+              Declared widget-type registry: lets a rice register a brand-new
               widget TYPE via nix, apart from the shipped/anchored slot
               catalog. Two kinds exist (`kind`, on each entry): `surface`
               owns its own PanelWindow/layer (powermenu/launcher-style);
               `dock` mounts as an Item into AoidePanel's existing gadget
               column. Keyed by slot name (the attribute name IS the slot
-              name). The song's own QML body for a declared slot still lives at
+              name). The rice's own QML body for a declared slot still lives at
               `rices/<name>/widgets/<slot>.qml` same as any other slot
               (CONTRACTS.md §5) — this option only declares that the slot IS a
               widget-type registration, not just inert score.
 
-              PHYSICAL STORAGE is unchanged by the layout rename: a song's
-              declarations live in that song's `theme.json` under a flat
+              PHYSICAL STORAGE is unchanged by the layout rename: a rice's
+              declarations live in that rice's `theme.json` under a flat
               top-level `.widgets` key, sibling to `.palette`/`.base16`/`.bar`
               (theme.json's fields are flat-per-concern, never nested under a
               `"theme"` key). theme.json is the one stage/draft-ROUTED twin
@@ -707,7 +707,7 @@ in
               atomically consistent across the flip. The option-tree split is a
               NIX NAMESPACE decision about what paint lanes may read; it is not a
               file split. Precedent: theme.json already carries a top-level
-              `song` key with no `aoide.theme.song` option (CONTRACTS.md §4).
+              `rice` key with no `aoide.theme.rice` option (CONTRACTS.md §4).
             '';
           };
           surfaces = mkOption {
@@ -717,17 +717,17 @@ in
               { bar.perMonitor = true; wallpaper.perMonitor = true; dock.perMonitor = false; }
             '';
             description = ''
-              Which painted surfaces this song EXPECTS to be mapped, declared
+              Which painted surfaces this rice EXPECTS to be mapped, declared
               so a health consumer can assert what SHOULD be painted instead
               of only counting whatever is. Keyed by slot name; each key
               resolves to the layer-shell namespace `aoide-<slot>` (the same
               derivation `widgetType.namespace` applies when null), so the
               consumer compares declarations directly against the
               compositor's live layer list and derives nothing of its own.
-              The build publishes this as `run/qml/songs/surfaces.json`
+              The build publishes this as `run/qml/rices/surfaces.json`
               (CONTRACTS.md §5), which is what the consumer reads; it is NOT
-              keyed by song, since an expectation is about what the ACTIVE
-              song should have mapped right now.
+              keyed by rice, since an expectation is about what the ACTIVE
+              rice should have mapped right now.
 
               Declare only surfaces that are PERSISTENTLY mapped — a surface
               summoned on demand (a launcher, an OSD, a preview) must NOT be
@@ -736,14 +736,14 @@ in
 
               This declares an EXPECTATION and instantiates nothing. It is a
               different question from `layout.widgets` above, which
-              declares and INSTANTIATES per-song flavor widget types: the
+              declares and INSTANTIATES per-rice flavor widget types: the
               lane-owned surfaces named here are hardcoded in the shell and
               are never widget registrations, so declaring one here must
               never be read as asking for a second copy of it.
 
               An EMPTY set (the default) declares nothing and expects
               nothing: a consumer must then fall back to its previous
-              behaviour, so a song that says nothing here keeps it. Nothing
+              behaviour, so a rice that says nothing here keeps it. Nothing
               else populates this option — the default is the whole of the
               no-declaration case.
             '';
@@ -850,7 +850,7 @@ in
       '';
     };
 
-    # ── Who paints a song's wallpaper — the capability's fact ──────────────
+    # ── Who paints a rice's wallpaper — the capability's fact ──────────────
     # Not an `enable`: this capability ALWAYS has an answer (the shell's own
     # layer is the default), and a host picks between alternatives exactly the
     # way it picks its compositor (`habit.dendrites.wallpaper.provider`).
@@ -862,9 +862,9 @@ in
       type = types.str;
       default = "quickshell";
       description = ''
-        Which provider paints a song's wallpaper on this host, by the name the
+        Which provider paints a rice's wallpaper on this host, by the name the
         host selected in the `wallpaper` capability's registry: `"quickshell"`
-        (the default — the shell's own `aoide-wallpaper` layer draws the song's
+        (the default — the shell's own `aoide-wallpaper` layer draws the rice's
         default AND the user's picks) or `"skwd-wall"` (the external engine
         paints picks on its own surface while the shell's layer stays mapped
         and paints nothing).

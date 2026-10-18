@@ -299,9 +299,9 @@
         # `quickshell` rides the same rule for the strillix dialog path:
         # `strillix secrets ask` spawns it by bare name, so the unit that spawns
         # strillix must carry it — the live gap that let the first unit-spawned
-        # dialog fail silently (strillix resolved via AOIDE_RICE_BIN, its
+        # dialog fail silently (strillix resolved via STRILLIX_BIN, its
         # quickshell ENOENT'd, the ask just stayed parked). Gated on the same
-        # flag as `AOIDE_RICE_BIN` below, and for the same reason: a unit can
+        # flag as `STRILLIX_BIN` below, and for the same reason: a unit can
         # only spawn strillix when the strillix fact put the binary on this host, and
         # a host without strillix takes the zenity path and has no use for
         # quickshell in its closure — the pair-watch unit's own pattern
@@ -329,7 +329,7 @@
             "STRILLIX_ROOT=${config.aoide.strillix.root}"
             "AOIDE_FLAKE_ROOT=${config.aoide.checkout}"
           ]
-          # `watch::resolve_strillix_bin` resolves `strillix` via `AOIDE_RICE_BIN` (tier
+          # `watch::resolve_strillix_bin` resolves `strillix` via `STRILLIX_BIN` (tier
           # 1, trusted unconditionally) or a sibling of `current_exe()` (tier
           # 2) — but `strillix` ships from `pkgs.aoide.strillix`, a SEPARATE output
           # from the `aoide` binary this unit execs (P-A8 of the binary-split
@@ -340,7 +340,7 @@
           # shellbridge.nix's own guard, since a host with the lane on but
           # strillix explicitly disabled has no `pkgs.aoide.strillix` output to point
           # at.
-          ++ lib.optional config.aoide.strillix.enable "AOIDE_RICE_BIN=${pkgs.aoide.strillix}/bin/strillix";
+          ++ lib.optional config.aoide.strillix.enable "STRILLIX_BIN=${pkgs.aoide.strillix}/bin/strillix";
 
           NoNewPrivileges = true;
           StandardOutput = "journal";

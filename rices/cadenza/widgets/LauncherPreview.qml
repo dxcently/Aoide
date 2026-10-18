@@ -3,7 +3,7 @@
 // live path never loads this file.
 //
 //   AOIDE_FLAKE_ROOT=<worktree> strillix preview \
-//       <worktree>/song/songbook/cadenza/widgets/LauncherPreview.qml --song cadenza
+//       <worktree>/rices/cadenza/widgets/LauncherPreview.qml --rice cadenza
 //
 // The canvas hands every widget `clipboard: null, ledger: null` (both extras
 // reach the system), so this harness builds two inert stand-ins with the

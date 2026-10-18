@@ -1,4 +1,4 @@
-//! The stage emitter — `song/stage/theme.json` for Quickshell
+//! The stage emitter — `rice/stage/theme.json` for Quickshell
 //! (CONTRACTS.md §4). Port of `emitters.js::emitStage`.
 //!
 //! The resolved, flattened values — component fallbacks are already applied

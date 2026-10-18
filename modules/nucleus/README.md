@@ -1,7 +1,7 @@
 # modules/nucleus
 
 The contract: the option tree and the platform assertions every host carries.
-`lib/aoideos.nix`'s `nucleusModule` (exported as `nixosModules.nucleus`) imports
+`lib/strillix.nix`'s `nucleusModule` (exported as `nixosModules.nucleus`) imports
 this directory and is handed to the constructor as an `extraModules` entry, so
 it reaches a host whatever the host selects. It declares options and checks
 invariants; it configures nothing. Every other module builds against what it
@@ -27,7 +27,7 @@ aggregation is the part any host can.
   (`null` is the bare case: package installed, no shell service) — and
   `aoide.wallpaper.provider` (default `"quickshell"`), the one fact that names
   an ALTERNATIVE rather than a capability: which provider of the `wallpaper`
-  registry paints a song's wallpaper here. Beside the facts it declares
+  registry paints a rice's wallpaper here. Beside the facts it declares
   `aoide.components` — `attrsOf { provider : str; actions : attrsOf (listOf
   str) }`, keyed by component slot — which each slot's chosen provider writes
   for itself; it is a contract option rather than the strillix runtime's because
@@ -39,7 +39,7 @@ aggregation is the part any host can.
   `auditLog`, `terminal`, `user`, `sessionTarget`) arrives by import from
   `pkgs/aoide/module/options.nix` — the core flake's own option contract,
   nixpkgs-only and portable to any consumer. The import is written by the
-  module that closes over Aoide's own inputs (`lib/aoideos.nix`'s
+  module that closes over Aoide's own inputs (`lib/strillix.nix`'s
   `nucleusModule`, exported as `nixosModules.nucleus`), not by a file here: a
   file in this directory cannot see the flake's inputs, and an `imports` list
   cannot read a value that `_module.args` supplies.
@@ -48,7 +48,7 @@ aggregation is the part any host can.
   constructor's gate pass (habit's composition), for the failures only an
   evaluated module graph can see. It reads the identity scalar `aoide.rice`
   and the lane facts and declares nothing, so it adds no option, no unit and
-  no package. Today: a song named with no `strillix` lane to paint it fails the
+  no package. Today: a rice named with no `strillix` lane to paint it fails the
   host's own evaluation with the taught fix, and forcing the three facts fails
   a host write that takes effect, whether or not a lane reads that fact.
 
@@ -60,7 +60,7 @@ members (`modules/dendrites/README.md`, "The core-service dendrites"):
 
 | catalogue name   | file                                    | what it is                                             |
 |------------------|-----------------------------------------|--------------------------------------------------------|
-| `aoided`         | `modules/dendrites/aoided.nix`          | the AoideOS deltas on the core `aoided.service` (which `aoide.enable` alone provides): the a2a/mcp/mail doors, the pair-watch popup, the usage poller and timer, the discovery firewall carve, `STRILLIX_TEMPLATES` |
+| `aoided`         | `modules/dendrites/aoided.nix`          | the Strillix deltas on the core `aoided.service` (which `aoide.enable` alone provides): the a2a/mcp/mail doors, the pair-watch popup, the usage poller and timer, the discovery firewall carve, `STRILLIX_TEMPLATES` |
 | `melete-adapter` | `modules/dendrites/melete-adapter.nix`  | the thin adapter on the `aoided` event stream          |
 | `aoide-nix`      | `modules/dendrites/aoide-nix.nix`       | flake-native nix settings                              |
 | `aoide-packages` | `modules/dendrites/aoide-packages.nix`  | the `aoide`/`strillix` binaries on the system `PATH`       |

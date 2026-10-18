@@ -9,7 +9,7 @@ a scan has been committed.
 
 `flake.nix` reads this directory one level deep: every immediate child holding a
 `default.nix`, minus the `_`-prefixed shelved ones. Adding a machine is a new
-directory and nothing else — no list in `flake.nix`, no line in `lib/aoideos.nix`.
+directory and nothing else — no list in `flake.nix`, no line in `lib/strillix.nix`.
 A name with no directory is unreachable, which is what shelving means here.
 
 `_desktop`, `_laptop` and `_server` are templates to copy (`cp -r hosts/_desktop
@@ -45,10 +45,10 @@ darwin constructor to answer it.
   host-only overlay.
 - **A group's member is turned off the ordinary way** —
   `habit.dendrites.kitty.enable = false` outranks the group's `mkDefault`.
-- **The song** is named here (`habit.rice.declared = "sonata";`), and the songs
+- **The rice** is named here (`habit.rice.declared = "sonata";`), and the rices
   a host may switch to are `habit.rice.available`. The keys are `habit`'s, added
-  by the song hook (`lib/rices.nix`'s `hook`, which `lib/aoideos.nix` calls),
-  so selection resolves them with everything else. The declared song's body is
+  by the rice hook (`lib/rices.nix`'s `hook`, which `lib/strillix.nix` calls),
+  so selection resolves them with everything else. The declared rice's body is
   an aggregation the same hook registers, and it brings the paint.
 
 ## What a host may read

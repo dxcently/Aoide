@@ -1,7 +1,7 @@
 // wallpaper-picker.qml — sonata's "wallpaper-picker" slot: the wallpaper
 // switcher (surface: "wallpaper").
 //
-// Ported from the shell's AoideWallpaperPicker.qml (per-song widget-slot
+// Ported from the shell's AoideWallpaperPicker.qml (per-rice widget-slot
 // expansion, CONTRACTS.md §5) — ownership moves from the shell to sonata's
 // score; the shell original stays in place until a later phase (Phase 6)
 // retires it, so this file and AoideWallpaperPicker.qml are momentarily
@@ -17,15 +17,15 @@
 // idiom (ShellBridge is OUTBOUND-only, no inbound CLI command to toggle a
 // surface). That keybind stays a FACET contract on purpose, same rationale
 // as dock.qml's own GlobalShortcut carve-out: Phase 6 keeps it in shell.qml,
-// dispatching into this slot, so a future song's wallpaper-picker body can't
+// dispatching into this slot, so a future rice's wallpaper-picker body can't
 // silently forget to bind it. This file instead exposes the unconditional
 // `show()`/`hide()`/`toggle()` trio on its own root (below) — the same shape
 // powermenu.qml, launcher.qml and dock.qml already expose — for the host to
 // call once SurfaceSlot hands back `.item`.
 //
-// Quickshell-native wallpaper picker over the shared cover library
-// song/wallpapers/. A summoned overlay: hidden by default, it drops onto the
-// OVERLAY layer with an EXCLUSIVE keyboard grab, shows a GridView of cover
+// Quickshell-native wallpaper picker over the shared wallpaper library
+// rice/wallpapers/. A summoned overlay: hidden by default, it drops onto the
+// OVERLAY layer with an EXCLUSIVE keyboard grab, shows a GridView of wallpaper
 // thumbnails, and on pick switches the LIVE wallpaper. Escape / a scrim
 // click / a pick dismisses it.
 //
@@ -35,20 +35,20 @@
 // here. Instead a pick shells out through the ONE CLI command built for this —
 // `strillix wallpaper set <path>` (Quickshell.execDetached, the same exec idiom
 // ConductorGadget uses) — which atomic-writes stage/wallpaper.json as a pick
-// (CONTRACTS.md §4). `cover` left
+// (CONTRACTS.md §4). `wallpaper` left
 // core's registry at P-A5 of the binary-split workstream and lives only in
 // `strillix` now (bare name resolves via PATH: modules/dendrites/aoide-packages.nix puts
 // strillix's own droppable output, pkgs.aoide.strillix, on systemPackages whenever
 // aoide.strillix.enable is on — P-A8 — which defaults to true here since this
 // widget only exists under the quickshell shell).
 // AoideWallpaper.qml FileView-watches that file and hot-swaps the live
-// wallpaper, and a pick suppresses the active song's own board. No new socket,
+// wallpaper, and a pick suppresses the active rice's own board. No new socket,
 // no QML file write.
 //
-// ── Enumerate covers ────────────────────────────────────────────────────────
-// The covers dir is listed with a Quickshell.Io Process (`ls -1`) whose stdout
+// ── Enumerate wallpapers ────────────────────────────────────────────────────────
+// The wallpapers dir is listed with a Quickshell.Io Process (`ls -1`) whose stdout
 // a StdioCollector gathers; we keep the recognised image extensions and build
-// absolute file:// paths. Re-lists on every summon so a freshly dropped cover
+// absolute file:// paths. Re-lists on every summon so a freshly dropped wallpaper
 // shows up. (Quickshell 0.3 ships no folder-model primitive; a Process is the
 // house idiom for a one-shot side read.)
 //
@@ -83,23 +83,23 @@ PanelWindow {
     visible: root.shown
     WlrLayershell.layer: WlrLayer.Overlay
     // NOT "aoide-wallpaper" — that string belongs to the Background surface
-    // the desktop cover is painted on (shell.qml), and the shell original
+    // the desktop wallpaper is painted on (shell.qml), and the shell original
     // this file was ported from shared it. Two surfaces under one namespace
     // are indistinguishable to the compositor's layerrules, so glassing this
     // summon pane the way aoide-launcher/aoide-powermenu are glassed would
     // have blurred the desktop background along with it. Renamed here, while
     // the slot is still unanchored and the string is nobody's contract yet:
     // once a host wires this slot the namespace becomes documented contract
-    // (slots.md, "Window-owning slot namespaces") and is no longer a song
+    // (slots.md, "Window-owning slot namespaces") and is no longer a rice
     // widget's to rename.
     WlrLayershell.namespace: "aoide-wallpaper-picker"
     WlrLayershell.keyboardFocus: root.shown ? WlrKeyboardFocus.Exclusive
                                             : WlrKeyboardFocus.None
 
-    // ── Cover enumeration ───────────────────────────────────────────────────
-    readonly property string coversDir: (Quickshell.env("STRILLIX_ROOT") || (Quickshell.env("HOME") + "/.strillix")) + "/wallpapers"
+    // ── Wallpaper enumeration ───────────────────────────────────────────────────
+    readonly property string wallpapersDir: (Quickshell.env("STRILLIX_ROOT") || (Quickshell.env("HOME") + "/.strillix")) + "/wallpapers"
     readonly property var wallpaperExts: ["webp", "png", "jpg", "jpeg"]
-    property var covers: []           // [{ name, path }]
+    property var wallpapers: []           // [{ name, path }]
     property int selIndex: 0
 
     // One-shot directory read. `ls -1` gives bare filenames; we filter by
@@ -107,7 +107,7 @@ PanelWindow {
     // stream, then we parse once on streamFinished.
     Process {
         id: lister
-        command: ["ls", "-1", root.coversDir]
+        command: ["ls", "-1", root.wallpapersDir]
         stdout: StdioCollector {
             id: wallpaperOut
             onStreamFinished: {
@@ -120,12 +120,12 @@ PanelWindow {
                     if (dot < 0) continue
                     var ext = name.substring(dot + 1).toLowerCase()
                     if (root.wallpaperExts.indexOf(ext) === -1) continue
-                    out.push({ "name": name, "path": root.coversDir + "/" + name })
+                    out.push({ "name": name, "path": root.wallpapersDir + "/" + name })
                 }
                 out.sort(function (a, b) {
                     return a.name < b.name ? -1 : (a.name > b.name ? 1 : 0)
                 })
-                root.covers = out
+                root.wallpapers = out
                 if (root.selIndex >= out.length)
                     root.selIndex = Math.max(0, out.length - 1)
             }
@@ -137,7 +137,7 @@ PanelWindow {
 
     // ── Navigation + apply ──────────────────────────────────────────────────
     function move(delta) {
-        var n = root.covers.length
+        var n = root.wallpapers.length
         if (n === 0) return
         var i = root.selIndex + delta
         if (i < 0) i = 0
@@ -146,14 +146,14 @@ PanelWindow {
         grid.positionViewAtIndex(i, GridView.Contain)
     }
     function applySelected() {
-        if (root.selIndex < 0 || root.selIndex >= root.covers.length) return
-        var c = root.covers[root.selIndex]
+        if (root.selIndex < 0 || root.selIndex >= root.wallpapers.length) return
+        var c = root.wallpapers[root.selIndex]
         if (c && c.path)
             Quickshell.execDetached(["strillix", "wallpaper", "set", c.path])
         root.hide()
     }
     function applyAt(index) {
-        if (index < 0 || index >= root.covers.length) return
+        if (index < 0 || index >= root.wallpapers.length) return
         root.selIndex = index
         root.applySelected()
     }
@@ -162,7 +162,7 @@ PanelWindow {
     onShownChanged: if (root.shown) keyCatch.forceActiveFocus()
 
     // ══ Dim scrim — a click anywhere outside the pane dismisses. Soft umber
-    // veil keyed off the song's ink (matches launcher.qml). ═════════════════
+    // veil keyed off the rice's ink (matches launcher.qml). ═════════════════
     MouseArea {
         anchors.fill: parent
         onClicked: root.hide()
@@ -217,7 +217,7 @@ PanelWindow {
             width: parent.width
             spacing: 8
 
-            // ── Cover grid ────────────────────────────────────────────────────
+            // ── Wallpaper grid ────────────────────────────────────────────────────
             GridView {
                 id: grid
                 width: parent.width
@@ -227,15 +227,15 @@ PanelWindow {
                 readonly property int gutter: 8
                 cellWidth: Math.floor(width / columns)
                 cellHeight: Math.round(cellWidth * 0.62)
-                model: root.covers
+                model: root.wallpapers
                 currentIndex: root.selIndex
                 boundsBehavior: Flickable.StopAtBounds
 
                 // Empty state.
                 Text {
                     anchors.centerIn: parent
-                    visible: root.covers.length === 0
-                    text: "no covers in song/wallpapers/ ♪(´ε｀ )"
+                    visible: root.wallpapers.length === 0
+                    text: "no wallpapers in rice/wallpapers/ ♪(´ε｀ )"
                     color: root.theme.paletteFg
                     opacity: 0.5
                     font.family: "monospace"

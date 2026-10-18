@@ -14,12 +14,12 @@ Item {
     readonly property string mode: root.theme.riceMode || "declarative"
     readonly property bool staging: root.mode !== "declarative"
     readonly property string draft: (root.theme.modeRaw && root.theme.modeRaw.draft) || ""
-    readonly property string song: root.theme.songName || ""
+    readonly property string rice: root.theme.riceName || ""
     readonly property bool canMenu: !!root.bridge && typeof root.bridge.riceMenu === "function"
     readonly property string iconDir: (Quickshell.env("STRILLIX_ROOT") || (Quickshell.env("HOME") + "/.strillix")) + "/rices/barcarolle/icons/tray/"
     readonly property string hint: root.staging
-        ? "Staging · " + root.song + (root.draft ? " · " + root.draft : "")
-        : "Declarative · " + (Rice.ready(root.answer) && root.answer.declared ? root.answer.declared : root.song)
+        ? "Staging · " + root.rice + (root.draft ? " · " + root.draft : "")
+        : "Declarative · " + (Rice.ready(root.answer) && root.answer.declared ? root.answer.declared : root.rice)
 
     property bool open: false
     property var answer: null
@@ -27,7 +27,7 @@ Item {
     property bool pending: false
     property real goneAt: 0
     property bool tipShown: false
-    readonly property string key: root.mode + "/" + root.song + "/" + root.draft
+    readonly property string key: root.mode + "/" + root.rice + "/" + root.draft
     onKeyChanged: root.pending = false
     Timer { interval: 10000; running: root.pending; onTriggered: root.pending = false }
 

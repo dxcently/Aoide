@@ -8,12 +8,12 @@ tags: [aoide, melete, agent, coding-agent, harness, integration]
 
 # Melete
 
-The coding harness AoideOS integrates and launches — the **doer**. Melete is an
+The coding harness Strillix integrates and launches — the **doer**. Melete is an
 integrated, independently-owned, long-running daemon (its own self-updating
 runtime; the repo ships only the launcher `modules/dendrites/melete.nix` + the
 `melete-adapter`, not Melete's source) that dispatches autonomous coding runs,
 executes shell commands, drives a headless `claude` CLI, and reaches out to
-GitHub and a rented fleet. It is the engine that makes AoideOS a declarative
+GitHub and a rented fleet. It is the engine that makes Strillix a declarative
 [[Widget-Maker|widget maker]]: because Melete writes code, new integrations are
 generated. The relationship runs both ways — `melete aoide …` routes into
 Aoide's CLI trunk, so Melete can also drive Aoide.

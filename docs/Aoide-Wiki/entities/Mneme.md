@@ -8,12 +8,12 @@ tags: [aoide, mneme, knowledge, vault, mcp, content]
 
 # Mneme
 
-The knowledge server AoideOS integrates — the **door**. Mneme is an integrated,
+The knowledge server Strillix integrates — the **door**. Mneme is an integrated,
 independently-owned vault API for the client that has no shell (the repo ships
 the launcher `modules/dendrites/mneme.nix`, not Mneme's source). It serves a
 folder of text notes over MCP: read, write, snapshot, search, and serve
 conventions and skills — CRUD over a directory, with version history and trash.
-In AoideOS it is the substrate behind the [[Content-Pipeline]] and the
+In Strillix it is the substrate behind the [[Content-Pipeline]] and the
 [[Wiki-Protocol]].
 
 **The muse.** Mneme is the *memory* Muse in the three-Boeotian-Muses naming

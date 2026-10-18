@@ -1,9 +1,9 @@
-# Per-song widget slots — catalog
+# Per-rice widget slots — catalog
 
-Companion to CONTRACTS.md §5 ("Per-song flavor widgets"). That section owns
+Companion to CONTRACTS.md §5 ("Per-rice flavor widgets"). That section owns
 the mechanism (build walk, manifest, resolution, injected-prop contract);
 this file owns the catalog — which slot names actually have a host anchor
-wired today, so a song author knows what's real to dress.
+wired today, so a rice author knows what's real to dress.
 
 ## Three anchor kinds
 
@@ -25,7 +25,7 @@ Every slot below is hosted by one of three anchors:
   one `WlSessionLock` and one `PamContext`. Per screen it creates a
   `WlSessionLockSurface` and, inside it, the face: an `Item`-rooted body the
   host fills to the surface. It resolves the face through the staging engine
-  from the ACTIVE song alone (`stagingEngine.has`), never the baseline, and
+  from the ACTIVE rice alone (`stagingEngine.has`), never the baseline, and
   its own plain password field — the floor — is under every face and shows
   whenever the face is absent, fails to load, or has not set `auth.ready`
   within 3 s of its creation (that face is destroyed). Authentication, the
@@ -46,57 +46,57 @@ Every slot below is hosted by one of three anchors:
   start while `LockedHint` is still `yes` (a crashed shell's lock, taken
   back).
   Its login twin, `GreeterHost.qml`, hosts the `greeter` face the same way
-  (the face from the DECLARED song only, the floor under it), but as the
+  (the face from the DECLARED rice only, the floor under it), but as the
   entry point of its own shell: the greeter lane builds a store tree with it
   as `shell.qml` and runs it as greetd's greeter in cage, where greetd's IPC
   authenticates and launches the session. That tree is the face's
-  `AOIDE_ROOT`, and it carries the song's `icons/` at the same
+  `AOIDE_ROOT`, and it carries the rice's `icons/` at the same
   `rices/<owner>/icons` a face reads in the session, so a face
-  loads its icons by one path in both places. Its song folder carries a
-  `qmldir` naming the song's uppercase helpers as types, as strillix's tree
+  loads its icons by one path in both places. Its rice folder carries a
+  `qmldir` naming the rice's uppercase helpers as types, as strillix's tree
   does, so a face uses the same helper types in both places too.
 
   Both faces run inside their host's own process — the session shell, or
   the greeter's — with that process's rights: QML has no sandbox. That a
   face spawns nothing (no `Process`, no `execDetached`) and reaches the
-  system only through `auth` is a review rule for song authors, not a
+  system only through `auth` is a review rule for rice authors, not a
   boundary the host enforces; a null `bridge` removes the shellbridge, not
   QML's own reach.
 
 Both anchor kinds resolve through the SAME baseline-fallback chain
-(`StagingEngine.resolveSong`, CONTRACTS.md §5): the active song's own file if
-it authored the slot, else **sonata's** (the shipped standard song — the
-baseline every song falls back to, a fixed constant independent of
+(`StagingEngine.resolveRice`, CONTRACTS.md §5): the active rice's own file if
+it authored the slot, else **sonata's** (the shipped standard rice — the
+baseline every rice falls back to, a fixed constant independent of
 `aoide.rice`'s own default, which is null), else the anchor's own lane-side
 `fallback` Component, else nothing. Most `SurfaceSlot` slots give no
 `fallback`: sonata's file IS their floor, since a window-owning slot moves as
 one whole unit. `switcher` is the one that gives one — the plain
-`AoideSwitcher.qml` — because no shipped song authors a switcher, and the
-shortcut must open something in every song.
+`AoideSwitcher.qml` — because no shipped rice authors a switcher, and the
+shortcut must open something in every rice.
 
 **`wallpaper` is the one exception: it has NO baseline floor.** Its anchor
-(`AoideWallpaper.qml`) does not use `resolveSong` at all — it gates on
-`stagingEngine.has(<active song>, "wallpaper")`, so the board draws for a song
+(`AoideWallpaper.qml`) does not use `resolveRice` at all — it gates on
+`stagingEngine.has(<active rice>, "wallpaper")`, so the board draws for a rice
 that authors its OWN `widgets/wallpaper.qml` and for nothing else, and sonata
-ships no body for this slot, so no other song's version can be resolved into
+ships no body for this slot, so no other rice's version can be resolved into
 it as a floor. An unauthored `wallpaper` slot means NOTHING is drawn: the
-staged cover image (or the baked/palette fallback) stands alone. The anchor
+staged wallpaper image (or the baked/palette fallback) stands alone. The anchor
 also destroys the board — not merely hides it — while a `wallpaper set` pick
 applies (CONTRACTS.md §4's wallpaper.json entry).
 
 **What a pick is painted BY is the host's choice**, and it decides whether this
 anchored layer draws at all: `/stage/wallpaper-provider` names the provider
 (the fact `aoide.wallpaper.provider`), and while it is `skwd-wall` AND a pick
-applies to the staged song, the anchor paints
-NOTHING — no cover image, no board, and no palette rectangle — because the
+applies to the staged rice, the anchor paints
+NOTHING — no wallpaper image, no board, and no palette rectangle — because the
 external provider has that pick on screen and this surface stays mapped and
 transparent underneath it. Every other case is exactly what it always was: the
-song's own default (image, and its board if it authors one), or the user's pick
+rice's own default (image, and its board if it authors one), or the user's pick
 for the shell to draw.
 
 ## The universal widget contract
 
-Any `rices/<name>/widgets/<slot>.qml` file that a song drops is
+Any `rices/<name>/widgets/<slot>.qml` file that a rice drops is
 carried by the build (`modules/dendrites/strillix/runtime.nix`) and becomes
 resolvable by name — the build imposes no fixed slot enum. But **being
 carried is not being rendered**: nothing shows on screen until a host
@@ -104,8 +104,8 @@ surface embeds a `WidgetSlot` anchor for that exact slot name (see the
 table below). Dropping a file for a slot no anchor names yet is inert —
 carried to disk, never loaded.
 
-`aoide rice stage` now hot-syncs an edited **existing** song widget file
-(and any helper/asset files alongside it) into `run/qml/songs/<song>/`
+`aoide rice stage` now hot-syncs an edited **existing** rice widget file
+(and any helper/asset files alongside it) into `run/qml/rices/<rice>/`
 live, no rebuild — Quickshell's own file-watcher picks the edit up. A
 **brand-new** slot file still needs `systemctl --user restart
 aoide-quickshell.service` to be discovered (`manifest.json` is only read at
@@ -118,11 +118,11 @@ Every widget QML file, whatever slot it fills, must follow this shape:
   one exception is a FULL-BLEED slot — `wallpaper`, which its host anchors to
   the surface and which therefore reports no footprint of its own; see the
   wired-slot row.)
-- **Declares `required property var theme`** — the active song's
+- **Declares `required property var theme`** — the active rice's
   `ThemeState`, injected by every anchor unconditionally.
 - **Declares `required property var bridge`** — the `ShellBridge`, injected
   by every anchor unconditionally (`WidgetSlot` guards the fallback path,
-  but a song widget is always given this).
+  but a rice widget is always given this).
 - **Declares any slot-specific extras as `required property`** — e.g. the
   bar slot's `shared` (see table). Extras are per-slot, not
   universal; check the table for what a given slot's anchor passes.
@@ -137,7 +137,7 @@ Every widget QML file, whatever slot it fills, must follow this shape:
 - **Sizes itself via `implicitWidth`/`implicitHeight`** — the host
   positions the `WidgetSlot`, not the widget; the widget only needs to
   report its own footprint.
-- **NEVER receives `config.*`.** A song widget is store-copied score,
+- **NEVER receives `config.*`.** A rice widget is store-copied score,
   structurally incapable of reaching host/lane nix options through this
   surface — no anchor passes anything nix-shaped in, ever.
 
@@ -167,7 +167,7 @@ is instantiated only when it holds:
 An absent or unreadable `components.json` is the empty set: nothing above is
 instantiated (fail closed). The infrastructure is never gated: `ThemeState`,
 `ShellBridge`, `StagingEngine`, `AoideIpc`, `AoideClipboard`,
-`GrimoireLedger` and `SongSurfaces` exist in every session. The `component` IPC target
+`GrimoireLedger` and `RiceSurfaces` exist in every session. The `component` IPC target
 (`ipc call component act <slot> <verb> <arg>`, run by `strx component` through
 the bridge) reaches a slot's live item by name, and only for the closed verbs
 `toggle`, `show`, `hide`, `openTab` and `openPictures`; it answers `true` when
@@ -194,13 +194,13 @@ declared surface only when its component is selected.
 | `power` | `WidgetSlot` | `dock.qml` (sonata) — the dock's gadget column (`WidgetSlot { slot: "power" }`) | none | none — sonata's own `widgets/power.qml` IS the baseline floor |
 | `notifications-center` | `WidgetSlot` | `dock.qml` (sonata) — the dock's gadget column (`WidgetSlot { slot: "notifications-center" }`), the column's last shipped gadget | none | none — sonata's own `widgets/notifications-center.qml` IS the baseline floor; no lane-side Component fallback is wired |
 | `powermenu` | `SurfaceSlot` | `shell.qml` (lane) — `SurfaceSlot { slot: "powermenu" }`, behind the `powermenu` component; the bar's clef asks the bridge (`bridge.component("powermenu", "toggle")`) | none | none — sonata's `widgets/powermenu.qml` is the floor |
-| `launcher` | `SurfaceSlot` | `shell.qml` (lane) — `SurfaceSlot { slot: "launcher" }`, behind the `launcher` component; `AoideWallpaperPicker`'s `aoide:wallpaper` shortcut asks the bridge for `openPictures` when the launcher reports that verb (`launcherHasPictures`), else the plain cover picker opens | `clipboard` (the `AoideClipboard` instance), `ledger` (`GrimoireLedger` — stays in the lane, a data seam not chrome) | none — sonata's `widgets/launcher.qml` is the floor |
-| `switcher` | `SurfaceSlot` | `shell.qml` (lane) — `SurfaceSlot { slot: "switcher" }`, behind the `switcher` component; the lane's one `aoide:switcher` `GlobalShortcut` calls `.item.toggle()` (the venue binds the combo; a body registers no shortcut of its own) | none | the lane-side `fallback` `AoideSwitcher.qml`: the plain window switcher (Hyprland clients, icon + title, the focused workspace first; ←/→/Tab/Shift+Tab move, Enter or the modifier's release focuses through `bridge.focusWindow`, Esc cancels). A song dresses it by shipping `widgets/switcher.qml`, whose `PanelWindow` exposes `toggle()` |
+| `launcher` | `SurfaceSlot` | `shell.qml` (lane) — `SurfaceSlot { slot: "launcher" }`, behind the `launcher` component; `AoideWallpaperPicker`'s `aoide:wallpaper` shortcut asks the bridge for `openPictures` when the launcher reports that verb (`launcherHasPictures`), else the plain wallpaper picker opens | `clipboard` (the `AoideClipboard` instance), `ledger` (`GrimoireLedger` — stays in the lane, a data seam not chrome) | none — sonata's `widgets/launcher.qml` is the floor |
+| `switcher` | `SurfaceSlot` | `shell.qml` (lane) — `SurfaceSlot { slot: "switcher" }`, behind the `switcher` component; the lane's one `aoide:switcher` `GlobalShortcut` calls `.item.toggle()` (the venue binds the combo; a body registers no shortcut of its own) | none | the lane-side `fallback` `AoideSwitcher.qml`: the plain window switcher (Hyprland clients, icon + title, the focused workspace first; ←/→/Tab/Shift+Tab move, Enter or the modifier's release focuses through `bridge.focusWindow`, Esc cancels). A rice dresses it by shipping `widgets/switcher.qml`, whose `PanelWindow` exposes `toggle()` |
 | `bar` | `WidgetSlot` | `shell.qml` (lane) — the bar's `PanelWindow` content, `WidgetSlot { slot: "bar" }`, behind the `bar` component | `shared` (session-state QtObject: the calendar's anchor, the dock's state), `stagingEngine` (so the bar's embedded ricemode `WidgetSlot` can resolve) | none — sonata's `widgets/bar.qml` is the floor |
-| `ricemode` | `WidgetSlot` | every bar body — `WidgetSlot { slot: "ricemode" }` in the bar's right stave, enforced by `checks.bar-ricemode`; the shared rice-mode control (any click opens the one menu: the runtime rices's songs, back to declarative, then the draft rows, which a song's body may leave to another surface of its own, as barcarolle's Start menu does; nothing switches until a row is chosen) | none | none — sonata's `widgets/ricemode.qml` IS the baseline floor; a song may dress it with its own body (cadenza does) |
-| `lockscreen` | session-lock host | `LockHost.qml` (lane), anchored in `shell.qml` behind the `lock` component; `strx lock` locks through it (`ipc call lock lock`) when the staged song's own manifest entry has this slot, else runs hyprlock | `theme`, `bridge` (null: no shellbridge, so no power or other bridge action, behind a locked screen), `auth`: `message`, `messageIsError`, `responseRequired`, `responseVisible`, `busy`, `failures` (wrong answers this lock), `userName` (the passwd name), `respond(text)`, signal `unlocked()`; the face sets `ready` to `true` once up, within 3 s | the host's floor password field (also for a face not ready in time): no baseline song is ever borrowed, so a song without a face is a hyprlock song |
-| `greeter` | greeter host | `GreeterHost.qml` (lane), the `shell.qml` of the greeter lane's store tree (`modules/dendrites/greeter.nix`), chosen at build time when the DECLARED song ships this slot (`aoide.rices.greeter`); a song that ships none logs in through ly | `theme`, `bridge` (null: no shellbridge before login), `auth`: `message`, `messageIsError`, `responseRequired`, `responseVisible`, `busy`, `failures`, `users` (`[{ name, realName }]`, passwd uid ≥ 1000 with a login shell), `selectedUser`, `selectUser(name)` (`""` goes back to choosing), `respond(text)`; the face sets `ready` to `true` once up, within 3 s | the host's floor user + password fields (also for a face not ready in time) |
-| `wallpaper` | `WidgetSlot` | `AoideWallpaper.qml` (lane) — inside the per-screen Background layer surface (behind the `wallpaper` component), over the staged cover image | none | none — this slot has NO baseline floor: the anchor gates on `stagingEngine.has(<active song>, "wallpaper")`, so an unauthored `wallpaper` slot renders NOTHING and the cover image stands (sonata ships no body here, so its twin can never be resolved in as a floor); cadenza's `widgets/wallpaper.qml` is the live board, and the anchor DESTROYS it (not hides it) while a `wallpaper set` pick applies — and, when the host's provider is `skwd-wall`, paints nothing at all (no image, no board, no palette rectangle) while a pick applies, since that provider has the pick on screen |
+| `ricemode` | `WidgetSlot` | every bar body — `WidgetSlot { slot: "ricemode" }` in the bar's right stave, enforced by `checks.bar-ricemode`; the shared rice-mode control (any click opens the one menu: the runtime rices's rices, back to declarative, then the draft rows, which a rice's body may leave to another surface of its own, as barcarolle's Start menu does; nothing switches until a row is chosen) | none | none — sonata's `widgets/ricemode.qml` IS the baseline floor; a rice may dress it with its own body (cadenza does) |
+| `lockscreen` | session-lock host | `LockHost.qml` (lane), anchored in `shell.qml` behind the `lock` component; `strx lock` locks through it (`ipc call lock lock`) when the staged rice's own manifest entry has this slot, else runs hyprlock | `theme`, `bridge` (null: no shellbridge, so no power or other bridge action, behind a locked screen), `auth`: `message`, `messageIsError`, `responseRequired`, `responseVisible`, `busy`, `failures` (wrong answers this lock), `userName` (the passwd name), `respond(text)`, signal `unlocked()`; the face sets `ready` to `true` once up, within 3 s | the host's floor password field (also for a face not ready in time): no baseline rice is ever borrowed, so a rice without a face is a hyprlock rice |
+| `greeter` | greeter host | `GreeterHost.qml` (lane), the `shell.qml` of the greeter lane's store tree (`modules/dendrites/greeter.nix`), chosen at build time when the DECLARED rice ships this slot (`aoide.rices.greeter`); a rice that ships none logs in through ly | `theme`, `bridge` (null: no shellbridge before login), `auth`: `message`, `messageIsError`, `responseRequired`, `responseVisible`, `busy`, `failures`, `users` (`[{ name, realName }]`, passwd uid ≥ 1000 with a login shell), `selectedUser`, `selectUser(name)` (`""` goes back to choosing), `respond(text)`; the face sets `ready` to `true` once up, within 3 s | the host's floor user + password fields (also for a face not ready in time) |
+| `wallpaper` | `WidgetSlot` | `AoideWallpaper.qml` (lane) — inside the per-screen Background layer surface (behind the `wallpaper` component), over the staged wallpaper image | none | none — this slot has NO baseline floor: the anchor gates on `stagingEngine.has(<active rice>, "wallpaper")`, so an unauthored `wallpaper` slot renders NOTHING and the wallpaper image stands (sonata ships no body here, so its twin can never be resolved in as a floor); cadenza's `widgets/wallpaper.qml` is the live board, and the anchor DESTROYS it (not hides it) while a `wallpaper set` pick applies — and, when the host's provider is `skwd-wall`, paints nothing at all (no image, no board, no palette rectangle) while a pick applies, since that provider has the pick on screen |
 
 ### Window-owning slot namespaces (`SurfaceSlot` contract)
 
@@ -215,12 +215,12 @@ declared surface only when its component is selected.
 The compositor lane's glass layerrules (`modules/dendrites/compositor/hyprland/default.nix`)
 match on these namespaces (`layerrule blur` + hyprglass) — the namespace
 string is part of the slot's documented contract, not an implementation
-detail a song widget is free to rename.
+detail a rice widget is free to rename.
 
-A namespace in this table is a **mapped layer surface** — and a song declares
+A namespace in this table is a **mapped layer surface** — and a rice declares
 which of those it expects to be persistently mapped, by namespace, in
 `aoide.layout.surfaces` (`CONTRACTS.md` §5, published as
-`run/qml/songs/surfaces.json`): `bar`/`wallpaper` per-monitor, `dock` single.
+`run/qml/rices/surfaces.json`): `bar`/`wallpaper` per-monitor, `dock` single.
 Surfaces summoned on demand — `powermenu`/`launcher`/`switcher`/`calendar` here, plus the OSD
 and `*Preview` surfaces — are deliberately **not** declared. The lock screen is no
 layer surface at all: it is a session-lock surface the session-lock host owns,
@@ -228,7 +228,7 @@ and the greeter runs before any session, in its own compositor.
 
 A slot is added to this table **only once a real anchor (`WidgetSlot` or
 `SurfaceSlot`) is wired for it** — matching CONTRACTS.md §5's "what IS
-built, not what's speculatively planned" discipline. A song authoring
+built, not what's speculatively planned" discipline. A rice authoring
 `widgets/<slot>.qml` for a slot not yet in this table is carried by the
 build (harmless, forward-compatible) but has no anchor to load it until one
 is wired.
@@ -236,60 +236,60 @@ is wired.
 ### Helper files (multi-file widgets)
 
 A widget that needs its own helper components (e.g. `bar.qml` needs a
-workspace-row component) drops them alongside it under the same song's
+workspace-row component) drops them alongside it under the same rice's
 `widgets/` dir, with an **uppercase** filename — QML's own type-file
 convention marks these as helper components, not slots. The build
 (`modules/dendrites/strillix/runtime.nix`) copies the WHOLE `widgets/` dir
-per song (helper files, asset subdirs, all of it) but only manifests
+per rice (helper files, asset subdirs, all of it) but only manifests
 top-level **lowercase-kebab** `.qml` files as slots; `.gitkeep` is always
 skipped. A helper file is carried to disk but never independently
 resolvable as a slot.
 
-### Lane or song?
+### Lane or rice?
 
 **The lane is not a component library.** The destination for a shared
-visual component is the song's `widgets/` dir with an uppercase name —
+visual component is the rice's `widgets/` dir with an uppercase name —
 the helper mechanism directly above — not this directory.
 
 `CONTRACTS.md §0`'s test runs first and decides **bridge vs QML**: delete
 every `.qml` in the repo; if the capability is no longer reachable from a
 terminal, it was never QML's to hold. The test below decides **lane QML
-vs song QML**, and only applies to a file that already passed §0.
+vs rice QML**, and only applies to a file that already passed §0.
 
 > ### The paint test
 >
 > A file stays in `pkgs/strillix-shell/qml/` **iff all three are YES**:
 >
-> 1. **Song-blind.** Does the file name zero aesthetic decisions? Reading
+> 1. **Rice-blind.** Does the file name zero aesthetic decisions? Reading
 >    `theme.paletteFg` is fine — that is picking up an API. *Deciding* that a
 >    gauge is drawn `[▓▓░░]`, that a frame wears a pediment, that a face is a
 >    kaomoji, that a morph takes 340ms because that is the house tier, or that
 >    the accent cycle runs rust→murex→aegean — those are not.
-> 2. **Song-plural.** Would a second, unrelated song use this file **unchanged**?
+> 2. **Rice-plural.** Would a second, unrelated rice use this file **unchanged**?
 >    Not "could be adapted to". Unchanged.
 > 3. **Bridge or mechanism.** Is its job one of exactly three: (a) publish system
->    or aoide state as **data**; (b) resolve, host, or inject a song's own QML;
+>    or aoide state as **data**; (b) resolve, host, or inject a rice's own QML;
 >    (c) be the process entry point that wires (a) into (b)? "It draws something
 >    reusable" is not a fourth category.
 >
-> Any NO → it belongs in `rices/<song>/widgets/`.
+> Any NO → it belongs in `rices/<rice>/widgets/`.
 >
 > **Tie-breaker**, when an agent honestly cannot call question 2: *would a
-> reviewer file this file's diff under "design change"?* If yes, it is song. A
+> reviewer file this file's diff under "design change"?* If yes, it is rice. A
 > lane file's diff is always a mechanism change.
 >
 > **What the test is not.** It is not "does it paint" — `WidgetSlot` is an
 > `Item` and `SurfaceSlot` hosts a `PanelWindow`, and both are lane. It is not
 > "is it a `QtObject`" — `MoodFaces` and `MorphState` are `QtObject`s and both
-> are song. It is not line count — `AudioColonnade` is 1940 lines of song and
+> are rice. It is not line count — `AudioColonnade` is 1940 lines of rice and
 > `AoideIpc` is 24 lines of lane. It is not "is it shared" — shared across
-> *widgets* is not shared across *songs*, and only the second earns a lane home.
+> *widgets* is not shared across *rices*, and only the second earns a lane home.
 >
 > **The corollary for a new API**: a new capability lands as a lane bridge that
-> answers **with data**, never with a component to instantiate, and the song
+> answers **with data**, never with a component to instantiate, and the rice
 > picks it up by name. Concretely: a lane bridge exposes `paletteAccent`; it
 > does not expose `ctxBar()`. If the natural shape of the new thing is "a
-> component every widget instantiates", it is not an API — it is a song helper,
+> component every widget instantiates", it is not an API — it is a rice helper,
 > and it goes in `widgets/` with an uppercase name.
 
 Question 3 is the load-bearing one, and it is where every genuine argument in
@@ -299,14 +299,14 @@ this tree lives.
 
 Everything above is the **anchored** catalog: a slot name a host surface
 already wired a `WidgetSlot`/`SurfaceSlot` for. This section is a second,
-independent mechanism — a **declared** slot: a song registers a brand-new
+independent mechanism — a **declared** slot: a rice registers a brand-new
 slot name via nix, apart from the fixed catalog above, instead of merely
 dressing a name the lane already anchored.
 
 `aoide.layout.widgets.<slot>` (`modules/nucleus/options.nix`, sibling
-of `aoide.theme`) is the registration. It is twin-written into that song's
+of `aoide.theme`) is the registration. It is twin-written into that rice's
 `theme.json` under a flat top-level `.widgets` key — the same twin-write
-pattern every other song field uses — and validated strictly by `rice lint`
+pattern every other rice field uses — and validated strictly by `rice lint`
 (closed, kind-conditional field rejection;
 `pkgs/aoide/crates/strillix-rice/src/theme/schema.rs`). The slot's QML body still
 lives at the normal `rices/<name>/widgets/<slot>.qml` path, same
@@ -318,11 +318,11 @@ exclusive (`rice lint` rejects a field from the wrong kind):
 
 | kind | fields | renders |
 | --- | --- | --- |
-| `surface` | `namespace` (nullOr str; derives `aoide-<slot>` when null), `layer` (`overlay` \| `top`, default `overlay`), `shortcut` (nullOr str — a `GlobalShortcut` name, split on `:` into appid/name), `blur` (bool, default true) | its own `PanelWindow`/layer-shell surface — hosted by `SongSurfaces.qml`, a non-visual `Instantiator` of `SurfaceSlot`s, one per declared surface-kind entry the active song carries |
-| `dock` | `order` (nullOr int, sort key; default treated as 0) | an `Item` mounted into sonata's `dock.qml`'s gadget column — hosted by `SongGadgets.qml`, a `Repeater` of `WidgetSlot`s, sorted `(order ?? 0, slot-name)` ascending; mounted as the column's last children, after the shipped gadgets and `notifications-center` |
+| `surface` | `namespace` (nullOr str; derives `aoide-<slot>` when null), `layer` (`overlay` \| `top`, default `overlay`), `shortcut` (nullOr str — a `GlobalShortcut` name, split on `:` into appid/name), `blur` (bool, default true) | its own `PanelWindow`/layer-shell surface — hosted by `RiceSurfaces.qml`, a non-visual `Instantiator` of `SurfaceSlot`s, one per declared surface-kind entry the active rice carries |
+| `dock` | `order` (nullOr int, sort key; default treated as 0) | an `Item` mounted into sonata's `dock.qml`'s gadget column — hosted by `RiceGadgets.qml`, a `Repeater` of `WidgetSlot`s, sorted `(order ?? 0, slot-name)` ascending; mounted as the column's last children, after the shipped gadgets and `notifications-center` |
 
 `order` exists because the registry is serialized through
-`serde_json::Value`/`BTreeMap` (no `preserve_order` feature), so a song's
+`serde_json::Value`/`BTreeMap` (no `preserve_order` feature), so a rice's
 declared widget keys do NOT preserve authored order between the build-time
 nix walk and the native hot-sync — `order` is the only way to get
 deterministic layout among multiple `dock` entries. It only sorts declared
@@ -330,28 +330,28 @@ deterministic layout among multiple `dock` entries. It only sorts declared
 among the shipped gadgets ahead of it in the column.
 
 **Injected-prop contract — unchanged, still just `theme` + `bridge`.** Both
-`SongSurfaces.qml` and `SongGadgets.qml` pass the same fixed pair every
+`RiceSurfaces.qml` and `RiceGadgets.qml` pass the same fixed pair every
 anchor above does — deliberately WITHOUT `shared` (the session-state
 QtObject only the `bar` slot receives): a declared widget is store-copied
 score like any other slot body, no wider surface than the rest of this
 contract grants.
 
-**Bodyless-slot warning.** A song can declare a slot's TYPE with no actual
-`widgets/<slot>.qml` body — neither the active song nor the sonata baseline
-carries one. Both hosts detect this via the same `resolvedSong === ""`
+**Bodyless-slot warning.** A rice can declare a slot's TYPE with no actual
+`widgets/<slot>.qml` body — neither the active rice nor the sonata baseline
+carries one. Both hosts detect this via the same `resolvedRice === ""`
 signal the anchored catalog's own resolution already computes:
-`SongSurfaces.qml` reuses `SurfaceSlot`'s own existing
-`console.warn("[aoide/surfaceslot] no song (active or baseline) provides
-slot", …)` path unchanged; `SongGadgets.qml` warns at
-`console.warn("[aoide/songgadgets] no song (active or baseline) provides
+`RiceSurfaces.qml` reuses `SurfaceSlot`'s own existing
+`console.warn("[aoide/surfaceslot] no rice (active or baseline) provides
+slot", …)` path unchanged; `RiceGadgets.qml` warns at
+`console.warn("[aoide/ricegadgets] no rice (active or baseline) provides
 dock slot", …)`. Either way: a console warning, nothing rendered — a
 declaration with no body is inert, not an error.
 
-The worked example is a surface declared in a song's `rice.nix`:
+The worked example is a surface declared in a rice's `rice.nix`:
 `aoide.layout.widgets.demo = { kind = "surface"; namespace =
-"aoide-<song>-demo"; layer = "overlay"; shortcut = "aoide:<song>-demo"; blur =
+"aoide-<rice>-demo"; layer = "overlay"; shortcut = "aoide:<rice>-demo"; blur =
 true; }`, with `widgets/demo.qml` its `PanelWindow`-rooted body — proving
 build-walk → `rice lint` → `rice stage`/`preview` hot-sync →
-`SongSurfaces.qml` end to end. No committed song declares a `kind: "dock"`
-entry yet; `SongGadgets.qml`'s `Repeater` holds zero delegates in practice
-today, a structural no-op rather than an accident of which song is active.
+`RiceSurfaces.qml` end to end. No committed rice declares a `kind: "dock"`
+entry yet; `RiceGadgets.qml`'s `Repeater` holds zero delegates in practice
+today, a structural no-op rather than an accident of which rice is active.

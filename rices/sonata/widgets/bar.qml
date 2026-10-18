@@ -1,10 +1,10 @@
 // bar.qml — sonata's "bar" slot (was AoideBar.qml, moved out of the shell
 // as of the widget-slot expansion, CONTRACTS.md §5). THE MEASURE — a
-// clean-slate redesign in the SONG vein.
+// clean-slate redesign in the RICE vein.
 //
 // Whole-content slot, hosted by `WidgetSlot`, not `SurfaceSlot` — the bar's
 // `PanelWindow` stays in the shell (shell.qml); only its CONTENT is this
-// per-song widget. The song fully owns its own footprint: the shell reads
+// per-rice widget. The rice fully owns its own footprint: the shell reads
 // this file's `implicitHeight` back and binds the `PanelWindow`'s own
 // `implicitHeight`/`exclusiveZone` to it (see shell.qml), rather than the
 // shell pinning a fixed height. Extras this file needs beyond the universal
@@ -45,10 +45,10 @@
 // Drawn structure (staff lines, barlines, playhead) carries the geometry; glyphs
 // (clef, rests, note-marks) carry the ornament. It should read as sheet music.
 //
-// Geometry: `stripHeight` (36) is this song's own choice, read back by the
+// Geometry: `stripHeight` (36) is this rice's own choice, read back by the
 // shell rather than pinned by it (see the widget-slot note above) — the
 // number happens to stay 36 for now, but the MECHANISM is dynamic, so a
-// future song's `bar.qml` is free to pick a different footprint. Everything
+// future rice's `bar.qml` is free to pick a different footprint. Everything
 // is drawn INSIDE the strip — no apron, no taller transparent surface (that
 // scar, the wallpaper-bleed under a hairline, stays closed); the clef is
 // sized to fit.
@@ -60,14 +60,14 @@
 // structural ink (staff lines, barlines, page rail) follows theme.barFg,
 // not a literal — sonata's own bar.fg (#2f2a33) sits near-black on the
 // marble page, so this reads the same as the old #000000 did here, but a
-// song that borrows this widget carries its own bar foreground with it
-// (a borrowing song whose bar.fg is null falls through to paletteFg, bone-white
+// rice that borrows this widget carries its own bar foreground with it
+// (a borrowing rice whose bar.fg is null falls through to paletteFg, bone-white
 // #e4e6eb — the staff stays legible on graphite instead of vanishing). The
-// TEXT ink is the song's umber (theme.paletteFg #423420) drawn CLEAN — the
+// TEXT ink is the rice's umber (theme.paletteFg #423420) drawn CLEAN — the
 // old white legibility outline is dropped, since dark text on the opaque
 // sheet needs no halo (that outline was a relic of the old dark bar and
 // only muddied the type on cream).
-// One restrained STATE accent survives from the song (ThemeState): the ACTIVE
+// One restrained STATE accent survives from the rice (ThemeState): the ACTIVE
 // workspace note-head fills with paletteAccent, the BLOCKED ✎ pulse + low battery
 // go glitchPink, and open/hover toggles (volume) flash paletteAccent.
 // Everything at rest follows theme.barFg.
@@ -173,10 +173,10 @@ import Quickshell.Networking
 // bar-specific content, so it stays in the shell rather than moving here.
 // BarPopout and AudioColonnade moved to sonata/widgets/ in P1, and StelePopout
 // in P2; they resolve same-dir.
-// Deployed-tree relative path: this file lands at $out/qml/songs/sonata/
-// bar.qml, so two levels up ($out/qml/songs/ → $out/qml/) is the shell's
+// Deployed-tree relative path: this file lands at $out/qml/rices/sonata/
+// bar.qml, so two levels up ($out/qml/rices/ → $out/qml/) is the shell's
 // own qml/ root (the strillix lane's build walk, modules/dendrites/strillix/default.nix, fixes
-// that depth by construction — see its own comment on the songs/ copy).
+// that depth by construction — see its own comment on the rices/ copy).
 import "../.."
 
 Item {
@@ -199,7 +199,7 @@ Item {
     // proven-working precedent in this codebase.
     //
     // The melody: workspaces as SOLID NOTE GLYPHS on the staff. Clean-slate
-// redesign in the SONG vein (the entablature colonnade is gone). The bar is
+// redesign in the RICE vein (the entablature colonnade is gone). The bar is
 // one measure of music; the workspaces are the theme written on it. Each
 // live Hyprland workspace is a SOLID (filled) musical note, one distinct
 // glyph per workspace id:
@@ -475,7 +475,7 @@ component WorkspaceRow: Item {
     required property var bridge
     // The staging engine (StagingEngine singleton, injected as an extra —
     // it isn't part of WidgetSlot's universal theme/bridge contract). The
-    // embedded ricemode WidgetSlot resolves its song through the same handle.
+    // embedded ricemode WidgetSlot resolves its rice through the same handle.
     required property var stagingEngine
     // The powermenu and the dock are not handed in. The clef and the dock cell
     // ask the bridge (`bridge.component(...)`), and the bridge runs whichever
@@ -494,7 +494,7 @@ component WorkspaceRow: Item {
     // `Component.createObject(root, props)` (WidgetSlot's mechanism), this
     // item's `parent` IS the WidgetSlot instance, and shell.qml anchors
     // THAT to fill the bar's PanelWindow — so this resolves to the real
-    // window width once wired. `implicitHeight` stays this song's own
+    // window width once wired. `implicitHeight` stays this rice's own
     // number (see the geometry note above); only width follows the host.
     width: parent ? parent.width : implicitWidth
 
@@ -979,7 +979,7 @@ component WorkspaceRow: Item {
         }
         return false
     }
-    // CONDUCTING files (CONTRACTS.md §4) — state/stage/, not song/stage/.
+    // CONDUCTING files (CONTRACTS.md §4) — state/stage/, not rice/stage/.
     readonly property string sessionsPath:
         (Quickshell.env("AOIDE_ROOT") || (Quickshell.env("HOME") + "/.aoide")) + "/state/stage/sessions.json"
     readonly property string hooksPath:
@@ -1275,7 +1275,7 @@ component WorkspaceRow: Item {
         radius: 0                        // EDGED — hard square corners, no round
         // Fully opaque paletteBg — no glass, no translucency. The bar reads
         // as a flat solid strip; the black staff ink sits directly on the
-        // song's page colour with no blur or gradient behind it.
+        // rice's page colour with no blur or gradient behind it.
         color: Qt.rgba(Qt.color(root.theme.paletteBg).r,
                        Qt.color(root.theme.paletteBg).g,
                        Qt.color(root.theme.paletteBg).b, 1.0)
@@ -1380,7 +1380,7 @@ component WorkspaceRow: Item {
             font.pixelSize: 14
             font.bold: true
 
-            // Click toggles the calendar surface. A song that authored no
+            // Click toggles the calendar surface. A rice that authored no
             // calendar has no surface to open, and the bridge's call finds none.
             MouseArea {
                 anchors.fill: parent
@@ -1452,7 +1452,7 @@ component WorkspaceRow: Item {
         // shared `ricemode` slot (sonata's widgets/ricemode.qml is the floor,
         // and carries the glyphs, the gestures and the draft picker). It LEADS
         // the right stave, apart from the hardware expression marks
-        // (vol/mic/batt/net) that follow — song-state before instrument-state,
+        // (vol/mic/batt/net) that follow — rice-state before instrument-state,
         // mirroring how the ✎N Aoide cell leads the left stave.
         WidgetSlot {
             theme: root.theme

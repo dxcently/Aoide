@@ -30,7 +30,7 @@ in
 
         `~/Aoide` (this option's sibling, `aoide.checkout`) is NOT the
         runtime root on any host — it is purely the dev git checkout. A
-        pre-L-C2 host's old `~/Aoide/{song/stage,state,log}` trees migrate
+        pre-L-C2 host's old `~/Aoide/{rice/stage,state,log}` trees migrate
         into this root's equivalents one-shot, at the first real
         `aoide`/`aoided`/`strillix` invocation after the switch (see
         `aoide_storage::fs::migrate_root_once`'s own doc for the exact
@@ -63,7 +63,7 @@ in
         `AOIDE_FLAKE_ROOT` on the same units, and in `aoide.user`'s own login
         shells, as `aoide.root` is.
         Separate from the runtime root (`aoide.root`) since L-C2: composing
-        a song happens under the runtime root, committing it happens in
+        a rice happens under the runtime root, committing it happens in
         this checkout. Core code default, matching this option's own
         default exactly: `~/Aoide`.
       '';
@@ -75,8 +75,8 @@ in
       defaultText = literalExpression ''"''${config.aoide.checkout}/hosts/''${config.networking.hostName}/default.nix"'';
       description = ''
         This machine's host config file — the module holding its one
-        `habit.rice.declared = "<song>";` line, which `strillix rice declare
-        <song> --host` rewrites so the next rebuild performs that song.
+        `habit.rice.declared = "<rice>";` line, which `strillix rice declare
+        <rice> --host` rewrites so the next rebuild performs that rice.
         Exported as `AOIDE_HOST_CONFIG` on the same units, and in
         `aoide.user`'s own login shells, as `aoide.checkout` is. A consumer
         whose hosts live elsewhere sets its own path. Core code default,

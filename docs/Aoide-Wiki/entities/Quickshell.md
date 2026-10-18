@@ -30,35 +30,35 @@ colours in one pass on an atomic replace, the hot-reload), **`ShellBridge`**
 (the unix-socket client, the sole outbound channel from QML —
 `focusSession(address)` → shellbridge → hyprctl, no MCP/HTTP/shell-exec from
 QML), **`AoideIpc`** (the external-reload IPC target, below), and
-**`StagingEngine`** (resolves which song dresses a slot and where its QML
+**`StagingEngine`** (resolves which rice dresses a slot and where its QML
 lives) — plus a plain `QtObject` holding cross-widget session state (the
 floating-gadget model, the hover-trace link).
 
 Two surfaces are lane-owned `Item`s wrapped in their own `PanelWindow`, one
 per output (a `Variants` delegate over `Quickshell.screens`, so each re-homes
 itself after an output blip): **`AoideWallpaper`** (the background layer,
-`WlrLayer.Background`) and the **bar** (`WlrLayer.Top`, exclusive height), whose content is a per-song
+`WlrLayer.Background`) and the **bar** (`WlrLayer.Top`, exclusive height), whose content is a per-rice
 widget loaded through `WidgetSlot` (`slot: "bar"`) rather than a lane
-component — the song owns its own footprint. **`AoidePanel`** (the
+component — the rice owns its own footprint. **`AoidePanel`** (the
 [[Gadget-Dock]]) owns its PanelWindow, layer, and toggle shortcut
 internally. Four more surfaces are **`SurfaceSlot`**-rooted overlays —
-`powermenu`, `launcher`, `herald` (the notification popup) and `switcher`
-(the window switcher) — each resolving a song widget through the same
-baseline-fallback chain `WidgetSlot` uses (song override → sonata, the
-shipped baseline every song falls back to → the anchor's lane-side
+`powermenu`, `launcher`, `notifications` (the notification popup) and `switcher`
+(the window switcher) — each resolving a rice widget through the same
+baseline-fallback chain `WidgetSlot` uses (rice override → sonata, the
+shipped baseline every rice falls back to → the anchor's lane-side
 `fallback`, which only `switcher` gives: the plain `AoideSwitcher`), but as a
 non-visual `QtObject` sibling instead of
 a sized `Item`, since each slot's root IS its own `PanelWindow` rather than
-content parented into an existing layout. `SongSurfaces` hosts one more
-`SurfaceSlot` per surface-kind entry the active song's `aoide.layout`
+content parented into an existing layout. `RiceSurfaces` hosts one more
+`SurfaceSlot` per surface-kind entry the active rice's `aoide.layout`
 declares (empty for sonata today, so a no-op). `AoideClipboard` and
 `GrimoireLedger` are lane-owned utility singletons injected into the
 launcher slot as extras; `AoideWallpaperPicker` answers `aoide:wallpaper`
 (`SUPER+W`), handing it to the launcher body's `openPictures()` when it has
-one and opening its own plain cover picker otherwise.
+one and opening its own plain wallpaper picker otherwise.
 
 The repo root carries no `qml/` directory — widget source lives in
-`pkgs/strillix-shell/qml/` and each active song's `widgets/`, and the strillix lane's
+`pkgs/strillix-shell/qml/` and each active rice's `widgets/`, and the strillix lane's
 `home.activation.aoideDeployQml` rsyncs the built config tree
 (`rsync -a --delete --chmod=u+w`) into `$AOIDE_ROOT/run/qml/` (default
 `~/.aoide/run/qml/` — the runtime root, outside the git checkout), which
@@ -66,10 +66,10 @@ Quickshell reads as its entry point (`quickshell -p
 $AOIDE_ROOT/run/qml/shell.qml`). The deployed tree is self-healing: it is a
 deploy target, never a source, and every activation's rsync reasserts the
 store's build over it, so a hand edit under `$AOIDE_ROOT/run/qml/` is lost at
-the next switch. A song is edited in the runtime rices
-(`$AOIDE_ROOT/rices/<song>`), and a STAGED song is restored from
+the next switch. A rice is edited in the runtime rices
+(`$AOIDE_ROOT/rices/<rice>`), and a STAGED rice is restored from
 there: after the switch the strillix lane's `aoide-rice-reload` unit runs `strillix
-reload`, which syncs its widget bodies back into `run/qml/songs/<song>/`.
+reload`, which syncs its widget bodies back into `run/qml/rices/<rice>/`.
 `hyprland.conf` is owned by
 home-manager's `wayland.windowManager.hyprland`: the compositor lane
 writes theme + keybind fragments with `mkBefore`, and the quickshell
@@ -81,7 +81,7 @@ compose the one config file without collision.
 `ThemeState`'s `FileView` watch (above) covers exactly one tier:
 `stage/theme.json`. Quickshell's own built-in file watcher — the thing that
 would otherwise auto-reload on any QML edit — only tracks files reached
-through a static `import` statement; every song/lane widget loads
+through a static `import` statement; every rice/lane widget loads
 dynamically via `Qt.createComponent(url)` (`WidgetSlot`/`SurfaceSlot`, see
 [[Widget-Maker]]), which that watcher never sees. Lane-owned QML unreachable
 by static import sits in the same blind spot — `shell.qml`, `ShellBridge.qml`,
@@ -114,7 +114,7 @@ restart does — it's just faster, and skips cycling the systemd unit and
 re-registering windows with the compositor.
 
 `strx rice stage` (`crates/strillix-rice/src/commands/rice.rs`) auto-triggers this
-after `sync_song_widgets` reports actually-changed widget files — the
+after `sync_rice_widgets` reports actually-changed widget files — the
 palette/notes tier is already covered by `ThemeState`'s own watch, so a
 re-stage with no widget-body changes never reloads. Whether this also closes
 the *separate* gap of a brand-new widget file needing a restart to be
@@ -125,10 +125,10 @@ landing.
 
 dunst owns notification delivery — the D-Bus bus name, history, stacking, and
 pause levels — but draws nothing (`skip_display` on every rule,
-`modules/dendrites/dunst.nix`). Quickshell owns the surface: the `herald`
-popup slot and the dock's `herald-center` ledger, both drawn from
-`stage/herald.json`. The per-card body
-(`rices/sonata/widgets/herald.qml`, the shipped baseline every song
+`modules/dendrites/dunst.nix`). Quickshell owns the surface: the `notifications`
+popup slot and the dock's `notifications-center` ledger, both drawn from
+`stage/notifications.json`. The per-card body
+(`rices/sonata/widgets/notifications.qml`, the shipped baseline every rice
 falls back to) reads the `Notification` payload into three differentiated
 tiers, top to bottom: the **program title** (a box-drawing frame), the
 notification's own **title** (bold serif), and the **context** (dimmer,
@@ -154,9 +154,9 @@ frame label.
 The strillix lane declares nine `owner = "quickshell"` surfaces
 (`modules/dendrites/strillix/runtime.nix`: bar, notifications, launcher, osd,
 lockscreen, greeter, wallpaper, agentWidgets, sessionGraph). Five have a
-live QML body today: **bar** (song `bar.qml` via `WidgetSlot`),
-**notifications** (dunst as daemon, the `herald`/`herald-center` popup and
-ledger as the drawn surface), **launcher** (song
+live QML body today: **bar** (rice `bar.qml` via `WidgetSlot`),
+**notifications** (dunst as daemon, the `notifications`/`notifications-center` popup and
+ledger as the drawn surface), **launcher** (rice
 `launcher.qml` via `SurfaceSlot`, below), **wallpaper** (`AoideWallpaper.qml`),
 and **agentWidgets** (the [[Gadget-Dock]], `AoidePanel.qml`: a left-edge
 panel holding four core self-framed gadgets — Conductor, Terminals, Meters,
@@ -166,18 +166,18 @@ unacknowledged, and slides fully in on a 6 px hot-edge hover or on `SUPER+G`,
 an in-process Hyprland global shortcut the panel itself registers
 (`aoide:dock`), not a CLI command).
 
-The rest are registry-only or painted only by a song that ships the face:
+The rest are registry-only or painted only by a rice that ships the face:
 
 - **`osd`** — a stand-down declaration against [[Stylix]]
   (`aoide.surfaces.<name>.owner = "quickshell"` tells Stylix not to theme its
-  own equivalent target) with no lane or song QML implementing the surface.
-- **`lockscreen`**, **`greeter`** — painted only by a song that ships the face
+  own equivalent target) with no lane or rice QML implementing the surface.
+- **`lockscreen`**, **`greeter`** — painted only by a rice that ships the face
   (`widgets/lockscreen.qml`, `widgets/greeter.qml`). The lock is the shell's
   `LockHost.qml` (one session lock and one PAM conversation, the face inside,
-  a plain password field under it), entered by `strx lock`; a song without a
-  face locks with hyprlock. The greeter is the declared song's face in greetd
+  a plain password field under it), entered by `strx lock`; a rice without a
+  face locks with hyprlock. The greeter is the declared rice's face in greetd
   + cage + Quickshell (`GreeterHost.qml`, greetd's IPC for the login); a
-  declared song without one logs in through ly. `pkgs/strillix-shell/qml/slots.md`
+  declared rice without one logs in through ly. `pkgs/strillix-shell/qml/slots.md`
   holds both contracts.
 - **`sessionGraph`** — declared but has no QML body: the standalone DAG
   overlay this surface once named is no longer part of the QML tree.
@@ -253,7 +253,7 @@ None of the three catch the placeholder-screen lockup: after a transient
 output blip, Qt's wayland QPA backend can fall onto an internal placeholder
 screen and never reattach even once the real output returns. The process
 stays `active` — no crash, no exit — so systemd has nothing to restart on,
-and the desktop (bar/dock/wallpaper/herald) sits bare until something
+and the desktop (bar/dock/wallpaper/notifications) sits bare until something
 restarts the unit. `Quickshell.screens` is populated below QML by
 `QGuiApplication`'s wayland platform plugin, so no in-process
 `Quickshell.reload()`/`onScreensChanged` handler can reach or reset that
@@ -274,9 +274,9 @@ own restart was meant to clear — instead of finishing green over a bare
 desktop.
 
 The check asks two independent signals, in order, and they answer different
-questions. `hyprctl layers -j` is compared against what the active song
+questions. `hyprctl layers -j` is compared against what the active rice
 DECLARED should be painted — `aoide.layout.surfaces`, published by the
-lane's build as `run/qml/songs/surfaces.json` (CONTRACTS.md §5): each
+lane's build as `run/qml/rices/surfaces.json` (CONTRACTS.md §5): each
 declared `aoide-<slot>` namespace must be mapped on every enabled output
 when it is `perMonitor`, and at least once otherwise. A declared surface
 that is missing is the user-visible failure, true right now, and it decides
@@ -294,7 +294,7 @@ unreported for 22 minutes on two hosts.
 
 The expectation is declared, never hardcoded, because the same watchdog
 runs on a host where waybar owns the bar: expecting `aoide-bar` there would
-restart a healthy desktop every fifteen minutes forever. A host whose song
+restart a healthy desktop every fifteen minutes forever. A host whose rice
 declares nothing, or whose lane has not yet published the file, falls back
 to the bare total — zero `aoide-*` surfaces anywhere is the blank desktop —
 which is what the check was before surfaces went per-output. A total cannot
@@ -320,7 +320,7 @@ output is never abandoned. An hour of quiet
 resets the ladder to its bottom rung. A notification fires once, only when
 the ladder reaches its floor, reporting the output connection as suspect.
 The journal carries the authoritative record of what happened: dunst is
-configured `skip_display` and only forwards to the herald ledger, which the
+configured `skip_display` and only forwards to the notifications ledger, which the
 stuck shell itself draws, so the notification cannot render while the
 failure it describes is still live. `AoideIpc.qml` logs every
 `Quickshell.screens` change (`onScreensChanged`) to the journal as a further
@@ -333,11 +333,11 @@ the sole live painter (Stylix's `hyprpaper` is force-disabled via the
 `aoide.surfaces.wallpaper` owner registry; no `swww`/`swaybg`/`mpvpaper`
 elsewhere). So a shell crash takes the wallpaper *and* the bar/dock/gadgets with
 it in one stroke — they are one process, not four. The wallpaper's own
-source-of-truth is the live-watched `stage/cover.json` (written by `strx rice
-stage` when the song's cover derives or, for a direct hot-swap, `strx cover set
-<path-or-name>`; it carries the song it was staged for, so a cover for another
-song is ignored, and its `"pick": true` marks the user's own choice, which the
-shell refuses to draw the song's live board over, and its `"tile": true` repeats
+source-of-truth is the live-watched `stage/wallpaper.json` (written by `strx rice
+stage` when the rice's wallpaper derives or, for a direct hot-swap, `strx wallpaper set
+<path-or-name>`; it carries the rice it was staged for, so a wallpaper for another
+rice is ignored, and its `"pick": true` marks the user's own choice, which the
+shell refuses to draw the rice's live board over, and its `"tile": true` repeats
 a picked still at 1:1 instead of cropping it), falling back to the baked `AOIDE_WALLPAPER` env store path so the
 background survives reboots/rebuilds even though `stage/` is ephemeral. Swap is a
 hard cut — no crossfade.

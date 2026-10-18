@@ -8,19 +8,19 @@
 # (`strillix/README.md`).
 #
 # The login prompt, in one of two shapes chosen at build time by the DECLARED
-# song (`aoide.rices.greeter`, the fact the selection hook derives):
+# rice (`aoide.rices.greeter`, the fact the selection hook derives):
 #
-#   * The declared song ships `widgets/greeter.qml` → greetd with a Quickshell
+#   * The declared rice ships `widgets/greeter.qml` → greetd with a Quickshell
 #     greeter. greetd runs `cage` as its greeter user, and in it Quickshell on
 #     a store tree this file builds: the lane's `GreeterHost.qml` as the
 #     tree's `shell.qml`, `ThemeState`/`StagingEngine` beside it, the face's
-#     song folder from the shipped rices (`pkgs.strillix-rices`) with a
+#     rice folder from the shipped rices (`pkgs.strillix-rices`) with a
 #     `qmldir` naming its uppercase helpers as types (the face loads by a
 #     `qs:` URL, where a sibling file is no type otherwise — strillix's tree
 #     writes the same), that
-#     song's `icons/` (when it has one) at `rices/<owner>/icons` —
+#     rice's `icons/` (when it has one) at `rices/<owner>/icons` —
 #     the `$AOIDE_ROOT`-relative path a face loads its icons from in the
-#     session too — its `cover/` folder at `rices/<owner>/wallpaper`,
+#     session too — its `wallpaper/` folder at `rices/<owner>/wallpaper`,
 #     with `stage/wallpaper.json` naming the logon picture
 #     (`<owner>-logon.<ext>`) as the face's background when it ships one,
 #     the dress as `stage/theme.json`, and
@@ -34,7 +34,7 @@
 #     guess. cage takes its keyboard layout from the host's
 #     `services.xserver.xkb`, so a password types as it will in the session.
 #     `AOIDE_ROOT` and `STRILLIX_ROOT` point at the tree,
-#     so nothing reads /home and a staged song never reaches the login screen.
+#     so nothing reads /home and a staged rice never reaches the login screen.
 #     Authentication is greetd's: the host creates a session for the chosen
 #     account, answers its prompts with what the face hands `respond()`, and
 #     launches the user's session only once greetd reports it ready. Nothing
@@ -51,7 +51,7 @@
 # registers a real login for it.
 #
 # Filling the slot is the switch: a host that does not select it boots to the
-# tty it lands on. Reads the dress (`aoide.theme`), the song selection
+# tty it lands on. Reads the dress (`aoide.theme`), the rice selection
 # (`aoide.rice`, `aoide.rices.greeter`), the session the display manager
 # registers (`services.displayManager.sessionData`, which ly reads too) and
 # the host's keyboard (`services.xserver.xkb`) — root AGENTS.md house rule 5.
@@ -78,12 +78,12 @@ let
 
   # The dress as the shell reads it: the resolved theme without its override
   # tier and without null tiers (ThemeState reads a present tier as set),
-  # stamped with the declared song so the staging engine resolves its face.
+  # stamped with the declared rice so the staging engine resolves its face.
   dress = pkgs.writeText "aoide-greeter-theme.json" (
     builtins.toJSON (
       lib.filterAttrsRecursive (_: v: v != null) (removeAttrs t [ "override" ])
       // {
-        song = config.aoide.rice;
+        rice = config.aoide.rice;
       }
     )
   );
@@ -110,39 +110,39 @@ let
 
   tree = pkgs.runCommand "aoide-greeter-tree" { nativeBuildInputs = [ pkgs.jq ]; } ''
     q=$out/run/qml
-    mkdir -p "$q/songs/${face.owner}" "$out/stage"
+    mkdir -p "$q/rices/${face.owner}" "$out/stage"
     cp ${pkgs.strillix-shell}/share/strillix/qml/ThemeState.qml ${pkgs.strillix-shell}/share/strillix/qml/StagingEngine.qml "$q/"
     cp ${pkgs.strillix-shell}/share/strillix/qml/GreeterHost.qml "$q/shell.qml"
-    song=${pkgs.strillix-rices}/share/strillix/rices/${face.owner}
-    cp -r "$song/widgets/." "$q/songs/${face.owner}/"
-    for h in "$song/widgets/"[A-Z]*.qml; do
+    rice=${pkgs.strillix-rices}/share/strillix/rices/${face.owner}
+    cp -r "$rice/widgets/." "$q/rices/${face.owner}/"
+    for h in "$rice/widgets/"[A-Z]*.qml; do
       [ -e "$h" ] || continue
       t=$(basename "$h" .qml)
-      printf '%s 1.0 %s.qml\n' "$t" "$t" >> "$q/songs/${face.owner}/qmldir"
+      printf '%s 1.0 %s.qml\n' "$t" "$t" >> "$q/rices/${face.owner}/qmldir"
     done
-    if [ -d "$song/icons" ]; then
+    if [ -d "$rice/icons" ]; then
       mkdir -p "$out/rices/${face.owner}"
-      cp -r "$song/icons" "$out/rices/${face.owner}/icons"
+      cp -r "$rice/icons" "$out/rices/${face.owner}/icons"
     fi
-    # The face's cover folder, whole, at the same `rices/<owner>/` path
+    # The face's wallpaper folder, whole, at the same `rices/<owner>/` path
     # the session reads it from. Its logon picture (`<owner>-logon.<ext>`), when
     # it ships one, is the background the logon face draws: `stage/wallpaper.json`
-    # names it in the one shape every surface reads a cover by, stamped with the
-    # declared song the way the seed stamps its default.
-    if [ -d "$song/wallpaper" ]; then
+    # names it in the one shape every surface reads a wallpaper by, stamped with the
+    # declared rice the way the seed stamps its default.
+    if [ -d "$rice/wallpaper" ]; then
       mkdir -p "$out/rices/${face.owner}"
-      cp -r "$song/wallpaper" "$out/rices/${face.owner}/wallpaper"
+      cp -r "$rice/wallpaper" "$out/rices/${face.owner}/wallpaper"
       for ext in webp png jpg jpeg; do
         logon="$out/rices/${face.owner}/wallpaper/${face.owner}-logon.$ext"
         if [ -f "$logon" ]; then
-          jq -n --arg p "$logon" --arg s ${lib.escapeShellArg config.aoide.rice} '{path: $p, song: $s}' \
+          jq -n --arg p "$logon" --arg s ${lib.escapeShellArg config.aoide.rice} '{path: $p, rice: $s}' \
             > "$out/stage/wallpaper.json"
           break
         fi
       done
     fi
-    cp ${manifest} "$q/songs/manifest.json"
-    echo '{}' > "$q/songs/registry.json"
+    cp ${manifest} "$q/rices/manifest.json"
+    echo '{}' > "$q/rices/registry.json"
     cp ${dress} "$out/stage/theme.json"
 
     pick=${sessions}/share/wayland-sessions/${defaultSession}.desktop

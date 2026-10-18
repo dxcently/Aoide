@@ -1,5 +1,5 @@
 # tests/consumer/aggregations/default.nix — the consumer's aggregation
-# discovery, the same one-level scan AoideOS's registry uses: every child
+# discovery, the same one-level scan Strillix's registry uses: every child
 # directory holding a `default.nix` is an aggregation, named by its directory,
 # and NO body is imported here (the constructor imports only the bodies a host
 # selected).

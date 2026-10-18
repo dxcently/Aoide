@@ -1,19 +1,19 @@
-// WidgetSlot.qml — the fixed per-slot anchor: song override, baseline
+// WidgetSlot.qml — the fixed per-slot anchor: rice override, baseline
 // fallback, shared fallback.
 //
 // One WidgetSlot sits wherever a host surface (AoideBar's calendar popout,
-// AoideNotifications' card repeater, …) wants to let the active song replace
+// AoideNotifications' card repeater, …) wants to let the active rice replace
 // a piece of chrome with its own QML. It asks the staging engine to resolve
 // `slot` against a baseline-fallback chain (CONTRACTS.md §5): the active
-// song (`theme.songName`) if it authored the slot, else sonata (the shipped
-// baseline every song can fall back to), else the anchor's own lane-side
+// rice (`theme.riceName`) if it authored the slot, else sonata (the shipped
+// baseline every rice can fall back to), else the anchor's own lane-side
 // `fallback` Component, else nothing.
 //
 // Fixed injected-prop contract (CONTRACTS.md §5 containment): whatever loads
-// — song override or fallback — receives `theme` always, `bridge` only when
+// — rice override or fallback — receives `theme` always, `bridge` only when
 // it actually declares that property, plus each key of `extraProps`
 // (slot-specific extras, e.g. notifications' `notification`). Never nix
-// `config.*` — a song widget is store-copied score, structurally incapable
+// `config.*` — a rice widget is store-copied score, structurally incapable
 // of reaching host/lane options through this surface. Both slots in scope
 // this pass (calendar's proof stubs, per the fixed contract) declare both
 // `theme` and `bridge` as `required` even though bridge goes unused today.
@@ -31,7 +31,7 @@
 // source changes (`_rebuild()` below). Extras are not part of that key. An
 // `extraProps` binding is an object literal — a fresh JS object on every
 // re-evaluation, same instances inside — and an extra can itself change while
-// a song switch is in flight (the bar's `powermenu`/`dock` are the live
+// a rice switch is in flight (the bar's `powermenu`/`dock` are the live
 // `.item` of another slot, null while that slot rebuilds). Extras are assigned
 // onto the live widget key by key (an identical value signals nothing), so a
 // widget reads an extra at use time and never assumes the value it was
@@ -50,33 +50,33 @@ Item {
     property var extraProps: ({})
     property Component fallback: null
 
-    // Reactive off theme.songName (so live `aoide rice preview <name>` swaps
+    // Reactive off theme.riceName (so live `aoide rice preview <name>` swaps
     // the loaded widget with no restart) and off stagingEngine.manifest (so a
     // rebuild's new manifest is picked up). Resolves through the baseline
-    // chain (CONTRACTS.md §5): the active song if it authored `slot`, else
-    // sonata (the baseline), else "" — an empty resolvedSong means neither
-    // the active song nor the baseline provide it, so `_rebuild` falls
+    // chain (CONTRACTS.md §5): the active rice if it authored `slot`, else
+    // sonata (the baseline), else "" — an empty resolvedRice means neither
+    // the active rice nor the baseline provide it, so `_rebuild` falls
     // through to the lane-side `fallback` Component.
-    readonly property string resolvedSong: stagingEngine.resolveSong(theme.songName, slot)
-    readonly property bool songProvides: resolvedSong !== ""
+    readonly property string resolvedRice: stagingEngine.resolveRice(theme.riceName, slot)
+    readonly property bool riceProvides: resolvedRice !== ""
 
-    // The resolved widget URL, or "" when no song (active or baseline)
-    // provides this slot. Rebuild keys off THIS, not just `songProvides` —
-    // two different songs can both provide the same slot (`songProvides`
-    // stays true→true across a preview switch, or across the active song
+    // The resolved widget URL, or "" when no rice (active or baseline)
+    // provides this slot. Rebuild keys off THIS, not just `riceProvides` —
+    // two different rices can both provide the same slot (`riceProvides`
+    // stays true→true across a preview switch, or across the active rice
     // falling through to the baseline), so a bool-only trigger would
     // silently keep rendering the FIRST resolved widget forever. Reacting to
     // the actual resolved path catches that case too.
     readonly property string resolvedSource:
-        songProvides ? stagingEngine.source(resolvedSong, slot) : ""
+        riceProvides ? stagingEngine.source(resolvedRice, slot) : ""
 
     property Item _item: null
 
     // The resolved source the live `_item` was built from. `_rebuild` tears
     // down and reloads only when it differs. Covers both branches below: the
-    // song-provides branch keys off `resolvedSource` (non-empty while a song
+    // rice-provides branch keys off `resolvedSource` (non-empty while a rice
     // owns the slot), and the `fallback` branch keys off the same field
-    // staying `""` (its stable value whenever `songProvides` is false).
+    // staying `""` (its stable value whenever `riceProvides` is false).
     property string _builtSource: ""
 
     // Hosts size to content (BarPopout's slot Item uses
@@ -98,9 +98,9 @@ Item {
             root._item = null
         }
         root._builtSource = root.resolvedSource
-        if (root.songProvides) {
-            var comp = Qt.createComponent(root.stagingEngine.source(root.resolvedSong, root.slot))
-            root._create(comp, root._songProps())
+        if (root.riceProvides) {
+            var comp = Qt.createComponent(root.stagingEngine.source(root.resolvedRice, root.slot))
+            root._create(comp, root._riceProps())
         } else if (root.fallback) {
             root._create(root.fallback, root._fallbackProps())
         }
@@ -119,7 +119,7 @@ Item {
         }
     }
 
-    function _songProps() {
+    function _riceProps() {
         return root._merge({ "theme": root.theme, "bridge": root.bridge })
     }
 

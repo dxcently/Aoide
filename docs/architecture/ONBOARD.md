@@ -43,7 +43,7 @@ and fallback behavior.
    `aoide.*` option the modules declare, DERIVED from the declarations
    themselves — never a hand-list — each entry spelled with its default
    and one-line description. Env knobs (`AOIDE_CONDUCT_AUTOGATE`,
-   `AOIDE_TERMINAL`, `AOIDE_CORE_BIN`/`AOIDE_RICE_BIN`, discovery
+   `AOIDE_TERMINAL`, `AOIDE_CORE_BIN`/`STRILLIX_BIN`, discovery
    advertise) ride along as commented entries.
 6. **Emit and teach, never edit.** The file lands at a stated path
    (default `./aoide.nix`, `--out` overrides); onboard prints the

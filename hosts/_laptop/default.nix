@@ -5,7 +5,7 @@
 {
   habit.aggregation.nucleus.enable = true;
   habit.aggregation.desktop.enable = true;
-  habit.aggregation.aoideos.enable = true;
+  habit.aggregation.strillix.enable = true;
 
   habit.dendrites.claude-code.enable = true;
 

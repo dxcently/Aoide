@@ -1,7 +1,7 @@
 // dock.qml — sonata's "dock" slot: the center-left DOCK (surface: "dock").
 //
 // The shell's former AoidePanel.qml is retired; this file is the dock —
-// ownership moved from the shell to sonata's score (per-song widget-slot
+// ownership moved from the shell to sonata's score (per-rice widget-slot
 // expansion, CONTRACTS.md §5). Hosted by `SurfaceSlot`, not `WidgetSlot` —
 // the root below is a `PanelWindow`, not an `Item`, so it owns its own
 // layer, namespace and keyboard focus, the same contract powermenu.qml and
@@ -22,7 +22,7 @@
 // dispatching into `dockSlot.item.toggle()` — ShellBridge is OUTBOUND-only
 // and there is no inbound CLI command to toggle a surface, same rationale as
 // AoideLauncher's. That keybind is a FACET contract on purpose, kept out of
-// this file, so a future song's dock body can't silently forget to bind it.
+// this file, so a future rice's dock body can't silently forget to bind it.
 // This file instead exposes the unconditional `show()`/`hide()`/`toggle()`
 // trio on its own root (below) — the same shape powermenu.qml and
 // launcher.qml already expose — for the host to call via `.item`.
@@ -56,8 +56,8 @@
 // wheel too, so the peeking page-block doubles as a scroll rail.
 // Conductor/Terminals/Usage/Meters/Power are now WidgetSlot anchors (the
 // widget-slot expansion, CONTRACTS.md §5) rather than direct shell-gadget
-// instantiations — each resolves this same song's own widgets/<slot>.qml (or
-// sonata's own baseline) through the shared song-slot mechanism the
+// instantiations — each resolves this same rice's own widgets/<slot>.qml (or
+// sonata's own baseline) through the shared rice-slot mechanism the
 // notifications-center anchor already used. WidgetSlot forwards `theme` + `bridge`
 // to every loaded widget unconditionally (the universal widget contract,
 // slots.md); Conductor/Terminals additionally receive `shared` as a slot
@@ -72,11 +72,11 @@ import Quickshell.Wayland
 import Quickshell.Hyprland
 import Quickshell.Io
 // Reaches the shell's shared components — WidgetSlot (every gadget anchor
-// below), SongGadgets (the declared dock-kind widget host) and ScrollRail
+// below), RiceGadgets (the declared dock-kind widget host) and ScrollRail
 // (the draggable scrollbar) — none of which is dock-specific content, so
 // they stay in the shell rather than moving here. Deployed-tree relative
-// path: this file lands at $out/qml/songs/sonata/dock.qml, so two levels up
-// ($out/qml/songs/ → $out/qml/) is the shell's own qml/ root (the same
+// path: this file lands at $out/qml/rices/sonata/dock.qml, so two levels up
+// ($out/qml/rices/ → $out/qml/) is the shell's own qml/ root (the same
 // bar.qml/conductor.qml idiom documented in their own headers) — this only
 // resolves in the DEPLOYED layout, not from the source tree.
 import "../.."
@@ -89,7 +89,7 @@ PanelWindow {
     required property var theme
     required property var bridge
     required property var shared
-    // the song-slot resolver — every WidgetSlot anchor below needs it to
+    // the rice-slot resolver — every WidgetSlot anchor below needs it to
     // resolve its own slot
     required property var stagingEngine
 
@@ -164,7 +164,7 @@ PanelWindow {
     FileView {
         id: stage
         // sessions.json is a CONDUCTING file (CONTRACTS.md §4) — state/stage/,
-        // not song/stage/.
+        // not rice/stage/.
         path: (Quickshell.env("AOIDE_ROOT") || (Quickshell.env("HOME") + "/.aoide")) + "/state/stage/sessions.json"
         watchChanges: true
         blockLoading: false
@@ -641,9 +641,9 @@ PanelWindow {
                         }
 
                         // Notifications — the notification CENTER, the dock's BOTTOM
-                        // gadget (song slot; dunst owns the popups themselves
+                        // gadget (rice slot; dunst owns the popups themselves
                         // since 2026-08-16). Content-height passthrough from the
-                        // loaded song widget (WidgetSlot sizes to its item);
+                        // loaded rice widget (WidgetSlot sizes to its item);
                         // width pinned here so the column stays flush.
                         WidgetSlot {
                             slot: "notifications-center"
@@ -654,12 +654,12 @@ PanelWindow {
                         }
 
                         // Declared dock-kind widgets — the v2 expansion of the
-                        // declared widget-type registry (SongGadgets.qml, the
-                        // dock counterpart to SongSurfaces.qml's surface-kind
-                        // host). Empty today (no committed song declares a
+                        // declared widget-type registry (RiceGadgets.qml, the
+                        // dock counterpart to RiceSurfaces.qml's surface-kind
+                        // host). Empty today (no committed rice declares a
                         // `kind: "dock"` entry), so this contributes zero
                         // footprint and zero spacing — a structural no-op.
-                        SongGadgets {
+                        RiceGadgets {
                             theme: root.theme
                             bridge: root.bridge
                             stagingEngine: root.stagingEngine

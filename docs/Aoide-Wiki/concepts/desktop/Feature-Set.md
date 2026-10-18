@@ -7,14 +7,14 @@ tags: [aoide, features, integration, melete, mneme]
 
 # Feature Set — Batteries Included
 
-What a fresh **AoideOS** clone comes with. AoideOS wires the whole
+What a fresh **Strillix** clone comes with. Strillix wires the whole
 personal-computing stack together — the desktop
 ([[Desktop-Architecture]]) and orchestrator ([[aoided]]) it **owns**, plus the
 independently-owned coding harness **[[Melete]]** and knowledge server
 **[[Mneme]]** it **integrates and launches** (adapters + launchers, not vendored
 code) — and it exposes every one of their capabilities through the same system
 hooks (event stream → adapters → widgets; [[Agent-Interface|CLI trunk + MCP
-façade]]). Many capabilities below are Melete's, *surfaced* through AoideOS —
+façade]]). Many capabilities below are Melete's, *surfaced* through Strillix —
 see the "Provided by" column.
 
 Every integration is a dendrite ([[Snowflake-Anatomy]]): opt-in, flag-toggled,

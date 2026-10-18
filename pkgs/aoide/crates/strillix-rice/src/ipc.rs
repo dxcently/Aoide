@@ -3,7 +3,7 @@
 //!
 //! `rice stage` (and widget-body sync, `widgets.rs`) already write bytes
 //! onto disk that Quickshell's own file watcher can pick up for STATICALLY
-//! `import`ed QML — but every song widget loads dynamically via
+//! `import`ed QML — but every rice widget loads dynamically via
 //! `Qt.createComponent`, and lane-owned QML (`shell.qml`,
 //! `ShellBridge.qml`, `StagingEngine.qml`, `WidgetSlot.qml`,
 //! `SurfaceSlot.qml`) isn't watched at all. `Quickshell.reload(hard: bool)`
@@ -46,7 +46,7 @@
 //! command would need its own success test rather than this one.
 //!
 //! This matters more than it looks: quickshell's own file watcher only scans
-//! the TOP LEVEL of `run/qml/`, never `run/qml/songs/`, so a `rice stage`
+//! the TOP LEVEL of `run/qml/`, never `run/qml/rices/`, so a `rice stage`
 //! can never trigger a reload on its own — it depends entirely on this call.
 //! A silently-unearned "reloaded" therefore reads as "your edit is live"
 //! while nothing on screen has changed.

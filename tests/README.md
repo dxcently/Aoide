@@ -3,7 +3,7 @@
 Test content that isn't cargo's: whole-system and whole-artifact checks that
 need Nix — a build, or an evaluation of the whole configuration — to even
 exist. `lib/` holds build/eval machinery
-(`checks.nix`, `aoideos.nix`, `pkgs.nix`, `rices.nix`);
+(`checks.nix`, `strillix.nix`, `pkgs.nix`, `rices.nix`);
 this directory holds
 what those checks actually test.
 
@@ -47,7 +47,7 @@ what those checks actually test.
   itself is habit's and is tested in habit; three cases only show Aoide's real
   registry still composes through it. The rest are the rices's
   (`lib/rices.nix`) over the fixture rices beside it, one of which
-  `throw`s on import, which is how "an unselected song stays unread" is proved
+  `throw`s on import, which is how "an unselected rice stays unread" is proved
   instead of asserted, and the packages walker's overlay (`lib/pkgs.nix`): a
   name in `intentionalOverrides` yields to the overlay that replaced it, and any
   other walker name another overlay provides is refused by name. `lib` and
@@ -62,9 +62,9 @@ what those checks actually test.
   hosts through the real constructor (habit's composition) with the real
   catalogue and nucleus, and checks the quickshell/strillix seam: a host with its
   own `quickshell.config` runs the `aoide-quickshell` service on that directory
-  and owes strillix nothing (no rice binary, no `songs/`, no shellbridge, no
+  and owes strillix nothing (no rice binary, no `rices/`, no shellbridge, no
   healthcheck); a host with no config gets the package and no service; and a
-  song with no `strillix` lane fails its own evaluation with the taught message.
+  rice with no `strillix` lane fails its own evaluation with the taught message.
   `fixtures.nix` holds the readings, `hosts/` the three host modules. The ref
   IS the tree under test — fixtures, host modules, catalogue and nucleus are
   all read out of it, so a commit ref tests that commit and `path:` (the
@@ -74,18 +74,18 @@ what those checks actually test.
   have, so an absence check that could never fail is not one.
 - `distrobox.md` — manual container-based portability suite; not a gate.
 - `consumer/` — `tests/consumer/run.sh`, the export-surface fixture: a
-  stranger's flake (`flake.nix`, its own host modules, user, aggregation, songs
-  and rices) that reaches AoideOS ONLY through the root flake's public
+  stranger's flake (`flake.nix`, its own host modules, user, aggregation, rices
+  and rices) that reaches Strillix ONLY through the root flake's public
   outputs. The runner greps the fixture for any path into Aoide's tree (and
   proves that grep can fire), then applies the fixture's `outputs` to the ref
   under test's own inputs — so a commit ref really freezes the tree the consumer
   is built against — and reads the resulting hosts. `consumer` performs from the
-  fixture's own rices: the nucleus contract and its own `nucleus` group, the shell, the theme, one performed song plus
+  fixture's own rices: the nucleus contract and its own `nucleus` group, the shell, the theme, one performed rice plus
   one built in that BORROWS the performer's widgets, the deployed config, the
-  seeded rices, and the templates on the units. `aoide-songs` performs
+  seeded rices, and the templates on the units. `aoide-rices` performs
   Aoide's own `sonata` through the `ricesRoot` export, and its strillix lane is
   handed that same directory. The contract it exercises is PACKAGE-LAYOUT's
-  "The root flake — AoideOS's export surface".
+  "The root flake — Strillix's export surface".
   The value-slot proof: the consumer's own `bar`, `dock` and `lock` slots each
   name a provider of its own beside Aoide's `parts`. The `stubbed` host mixes
   its `bar` (a stub that brings no runtime) with Aoide's `dock`, and must give

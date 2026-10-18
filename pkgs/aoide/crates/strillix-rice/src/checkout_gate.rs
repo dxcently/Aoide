@@ -1,5 +1,5 @@
-//! The no-archive gate for `strillix rice declare <song>` (CONTRACTS.md §5, "The
-//! rices is versioned score"): the copy writes over `rices/<song>/`
+//! The no-archive gate for `strillix rice declare <rice>` (CONTRACTS.md §5, "The
+//! rices is versioned score"): the copy writes over `rices/<rice>/`
 //! in the checkout, so it runs only when git can show nothing uncommitted in
 //! that folder. Git history is the archive; a copy over an uncommitted edit is
 //! the one loss this seam can cause, and the gate is what refuses it.
@@ -8,7 +8,7 @@
 //! the checkout not a git repository, and uncommitted changes under the folder
 //! (tracked edits and untracked files alike). `--host` never refuses; it reads
 //! [`dirty_lines`] and reports the same changes as a warning. A fourth refusal,
-//! [`is_old_song_shape`], is the copy's other guard: a staged `rice.nix` still
+//! [`is_old_rice_shape`], is the copy's other guard: a staged `rice.nix` still
 //! in the old function-module shape would break the checkout's build.
 
 use aoide_protocol::output::{Fix, Kind, Outcome};
@@ -16,7 +16,7 @@ use aoide_storage::git;
 use serde_json::json;
 use std::path::Path;
 
-/// Why a song folder in the checkout cannot be copied over.
+/// Why a rice folder in the checkout cannot be copied over.
 #[derive(Debug, PartialEq, Eq)]
 pub enum Blocked {
     GitMissing,
@@ -58,7 +58,7 @@ pub fn dirty_lines(checkout: &Path, folder: &str) -> Vec<String> {
     }
 }
 
-/// True when a staged `rice.nix` is NOT a song shape v1 body (CONTRACTS.md
+/// True when a staged `rice.nix` is NOT a rice shape v1 body (CONTRACTS.md
 /// §5): the body is a plain attrset, its first code character is `{`, and that
 /// brace's match ends the file. The old shape opens with a function header,
 /// `{ lib, config, ... }:`, whose first brace is followed by `:`; that is what
@@ -66,7 +66,7 @@ pub fn dirty_lines(checkout: &Path, folder: &str) -> Vec<String> {
 /// skipped first, and braces are counted raw, so a brace inside a string or an
 /// inline comment can miscount. A miscount only ever refuses (a body that never
 /// closes, or closes too early, reads as old), never copies an old file.
-pub fn is_old_song_shape(rice: &str) -> bool {
+pub fn is_old_rice_shape(rice: &str) -> bool {
     let code: String = rice
         .lines()
         .filter(|line| !line.trim_start().starts_with('#'))
@@ -99,13 +99,13 @@ impl Blocked {
             Blocked::GitMissing => (
                 "git-missing",
                 format!("cannot check `{folder}` for uncommitted changes: `git` is not on PATH"),
-                "`rice declare` copies over a song folder only when git shows nothing uncommitted in it; git history is the archive".to_string(),
+                "`rice declare` copies over a rice folder only when git shows nothing uncommitted in it; git history is the archive".to_string(),
                 Fix::Set("`git` on PATH, then declare again".into()),
             ),
             Blocked::NotARepo => (
                 "not-a-git-repo",
                 format!("`{}` is not a git repository, so `{folder}` cannot be checked", checkout.display()),
-                "`rice declare` copies over a song folder only when git shows nothing uncommitted in it; git history is the archive".to_string(),
+                "`rice declare` copies over a rice folder only when git shows nothing uncommitted in it; git history is the archive".to_string(),
                 Fix::Set("`$AOIDE_FLAKE_ROOT` at the checkout's git repository".into()),
             ),
             Blocked::Dirty(lines) => (
@@ -211,21 +211,21 @@ mod tests {
 
     #[test]
     fn a_plain_attrset_body_is_the_v1_shape() {
-        let body = "# rices/dusk/rice.nix\n{\n  system = {\n    module = { lib, song, ... }: {\n      config = lib.mkDefault { };\n    };\n  };\n}\n";
-        assert!(!is_old_song_shape(body));
+        let body = "# rices/dusk/rice.nix\n{\n  system = {\n    module = { lib, rice, ... }: {\n      config = lib.mkDefault { };\n    };\n  };\n}\n";
+        assert!(!is_old_rice_shape(body));
     }
 
     #[test]
     fn a_function_header_is_the_old_shape() {
-        let old = "{\n  lib,\n  config,\n  song,\n  borrow,\n  ...\n}:\nlet\n  widgets = borrow \"dusk\";\nin\n{\n  config = lib.mkIf (config.aoide.song == \"dusk\") { };\n}\n";
-        assert!(is_old_song_shape(old));
-        assert!(is_old_song_shape("{ ... }: { }\n"));
+        let old = "{\n  lib,\n  config,\n  rice,\n  borrow,\n  ...\n}:\nlet\n  widgets = borrow \"dusk\";\nin\n{\n  config = lib.mkIf (config.aoide.rice == \"dusk\") { };\n}\n";
+        assert!(is_old_rice_shape(old));
+        assert!(is_old_rice_shape("{ ... }: { }\n"));
     }
 
     #[test]
     fn a_file_that_is_not_an_attrset_is_the_old_shape() {
-        assert!(is_old_song_shape("let x = 1; in { }\n"));
-        assert!(is_old_song_shape(""));
+        assert!(is_old_rice_shape("let x = 1; in { }\n"));
+        assert!(is_old_rice_shape(""));
     }
 
     #[test]

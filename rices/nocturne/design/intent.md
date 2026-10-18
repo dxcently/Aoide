@@ -9,12 +9,12 @@ throwaway dark palette, not a real design pass
 **Throwaway proof-of-concept.** `nocturne` exists solely as Phase 12's
 end-to-end live proof for two things at once: (1) the `kind = "dock"`
 layout-registry widget type, live for the first time (Phases 8-10 only
-unit-tested/no-op-verified it), and (2) `StagingEngine.resolveSong`'s
+unit-tested/no-op-verified it), and (2) `StagingEngine.resolveRice`'s
 baseline-fallback inheritance — nocturne authors NO `bar.qml` or
-`herald-center.qml` of its own; those slots fall through to sonata's own
+`notifications-center.qml` of its own; those slots fall through to sonata's own
 committed bodies wholesale (identical structure/layout, only the palette
 differs). It declares one `vigil` dock widget (`widgets/vigil.qml`) as the
-only file this song authors beyond its notes. Not a real dressed song — no
+only file this rice authors beyond its notes. Not a real dressed rice — no
 design intent beyond proving the pipeline. See `CONTRACTS.md` §5's "declared
 widget-type registry" subsection and `pkgs/strillix-shell/qml/slots.md`'s
 "Declared slots" section for the mechanism this proves.
@@ -36,6 +36,6 @@ widget-type registry" subsection and `pkgs/strillix-shell/qml/slots.md`'s
 ## How to fill this rice
 
 - Slot catalog (which slots a host wires today, what each expects): `pkgs/strillix-shell/qml/slots.md`
-- Per-song widget contract: `CONTRACTS.md` §5, "Per-song flavor widgets"
+- Per-rice widget contract: `CONTRACTS.md` §5, "Per-rice flavor widgets"
 - Rices playbook: `rices/update-playbook.md`
 - Drop a `widgets/<slot>.qml` here to dress a slot — any file under `widgets/` becomes a slot named for its basename; nothing renders until a host surface embeds a `WidgetSlot` anchor for that name.

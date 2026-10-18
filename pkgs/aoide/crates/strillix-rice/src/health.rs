@@ -65,26 +65,26 @@
 //! Answering that question needs a set to compare against, and the set
 //! cannot be hardcoded here: on a host where waybar owns the bar, expecting
 //! `aoide-bar` would restart a healthy desktop every fifteen minutes
-//! forever. So it is DECLARED by the active song
+//! forever. So it is DECLARED by the active rice
 //! (`aoide.layout.surfaces`) and published to
-//! `run/qml/songs/surfaces.json` by the strillix lane's build
+//! `run/qml/rices/surfaces.json` by the strillix lane's build
 //! (CONTRACTS.md §5). When that file is present this checks the declared
 //! namespaces against what is actually mapped, per monitor where the
 //! declaration says per-monitor; when it is absent, unreadable, or names no
 //! surface at all, nothing is declared and the old total count decides,
 //! unchanged.
 //!
-//! A song declares surfaces for the components it dresses, but the host
+//! A rice declares surfaces for the components it dresses, but the host
 //! decides which components exist: the shell instantiates a component anchor
 //! only when its slot is in `run/qml/components.json` (CONTRACTS.md §4). So
-//! the declared set is intersected with that file's slots first — a song that
+//! the declared set is intersected with that file's slots first — a rice that
 //! declares `dock` on a host without the dock component does not report the
 //! dock lost. A surface key is its slot's name (`aoide-<slot>`), so the
 //! intersection matches the two directly. When the file is absent or not an
 //! object nothing is intersected, as before it existed; when the
-//! intersection leaves nothing, the song declared something but the host
+//! intersection leaves nothing, the rice declared something but the host
 //! selected none of it, and there is nothing to assert. The empty case matters: the lane publishes the file on every
-//! host, so a song that declares nothing ships `{"surfaces": {}}`, and that
+//! host, so a rice that declares nothing ships `{"surfaces": {}}`, and that
 //! must be the old check — not a check with nothing to assert, which would
 //! read a blank desktop as healthy on exactly the hosts that never opted in.
 //! A host that declares nothing pays for nothing.
@@ -146,7 +146,7 @@ pub enum HealthOutcome {
     NotRunning { state: String },
     /// The shell isn't painting the desktop it should be, and this watchdog
     /// cannot say why: either the declared surface set falls short of what
-    /// `run/qml/songs/surfaces.json` says should be mapped, or — with no
+    /// `run/qml/rices/surfaces.json` says should be mapped, or — with no
     /// expectation published — zero `aoide-*` layer surfaces anywhere exist,
     /// and in both cases there is no placeholder-screen line in the journal
     /// since the unit went active. Either way the user sees a desktop that is
@@ -247,7 +247,7 @@ pub(crate) fn total_aoide_layers(layers: &Value) -> usize {
 /// [`HealthOutcome::Blank`], which is only reported.
 ///
 /// This is the NO-EXPECTATION fallback: [`run_healthcheck`] asks it only
-/// when nothing published `run/qml/songs/surfaces.json`, so a host that
+/// when nothing published `run/qml/rices/surfaces.json`, so a host that
 /// declares no surfaces keeps exactly the behaviour it had before that file
 /// existed. When an expectation IS declared, [`surfaces_fall_short`] decides
 /// instead — and on a multi-monitor host the two differ deliberately: this
@@ -270,7 +270,7 @@ pub(crate) fn shell_has_zero_layers(layers: &Value) -> bool {
 /// `perMonitor` flag — `None` when `v` is not the object
 /// [`published_surfaces`] would have handed over, i.e. not an object
 /// carrying a `surfaces` object. Read straight off the generated
-/// `run/qml/songs/surfaces.json` (CONTRACTS.md §5), whose keys are already
+/// `run/qml/rices/surfaces.json` (CONTRACTS.md §5), whose keys are already
 /// the RESOLVED layer-shell namespaces (`aoide-<slot>`) precisely so this
 /// function derives nothing of its own and compares them directly against
 /// the compositor's own layer list.
@@ -298,12 +298,12 @@ pub(crate) fn parse_expectation(v: &Value) -> Option<BTreeMap<String, bool>> {
 /// Pure: the expectation the check asserts, or `None` when there is nothing
 /// to assert. Three cases collapse into `None` on purpose — no file, an
 /// unreadable or malformed one, and a file whose `surfaces` object is EMPTY —
-/// because all three mean the same thing to the watchdog: this song declared
+/// because all three mean the same thing to the watchdog: this rice declared
 /// no surface, so the old total count decides, exactly as before the
 /// declaration existed (CONTRACTS.md §5, `aoide.layout.surfaces`).
 ///
 /// The empty case is not hypothetical. The strillix lane publishes the
-/// file unconditionally, so every host whose song declares nothing carries a
+/// file unconditionally, so every host whose rice declares nothing carries a
 /// published `{"surfaces": {}}`. Handing that to [`surfaces_fall_short`] would
 /// be a check with nothing to fail — a blank desktop read as healthy — on
 /// precisely the hosts that never opted into the declared check, which is
@@ -313,7 +313,7 @@ pub(crate) fn parse_expectation(v: &Value) -> Option<BTreeMap<String, bool>> {
 /// object, only the namespaces whose slot (`aoide-<slot>`) is one of its keys
 /// stay: the shell never instantiates an unselected component, so its
 /// surface is never expected. A declaration the intersection empties stays
-/// `Some(empty)`, which [`surfaces_fall_short`] never fails: the song did
+/// `Some(empty)`, which [`surfaces_fall_short`] never fails: the rice did
 /// declare, so the total count is not the right fallback for it.
 pub(crate) fn asserted_expectation(
     published: Option<&Value>,
@@ -417,7 +417,7 @@ pub(crate) fn namespace_coverage(layers: &Value) -> BTreeMap<String, usize> {
 /// Pure: does the desktop fall short of the published expectation? `true` is
 /// the NEW bad-state predicate — the shell is not painting what it declared —
 /// and it is what [`run_healthcheck`] asks when
-/// `run/qml/songs/surfaces.json` exists.
+/// `run/qml/rices/surfaces.json` exists.
 ///
 /// A declared namespace is "genuinely missing" when its [`namespace_coverage`]
 /// is below what the declaration demands: `perMonitor` demands coverage equal
@@ -430,7 +430,7 @@ pub(crate) fn namespace_coverage(layers: &Value) -> BTreeMap<String, usize> {
 /// comparison cannot be made in good faith:
 ///
 /// - an EMPTY expectation declares nothing, so nothing can fall short — a
-///   song that says nothing is never unhealthy;
+///   rice that says nothing is never unhealthy;
 /// - `layers` not being an object, or `monitors` not being an array, is a
 ///   failed/unconfirmed system call (both come back as [`Value::Null`] from
 ///   `hyprctl_json`), and this watchdog never acts on a reading it does not
@@ -666,7 +666,7 @@ fn hyprctl_json(subcommand: &str) -> Value {
 }
 
 /// The published expected-paint declaration, read from the live deployed
-/// tree: `run/qml/songs/surfaces.json` beside `manifest.json` and
+/// tree: `run/qml/rices/surfaces.json` beside `manifest.json` and
 /// `registry.json` (CONTRACTS.md §5). The path resolves through
 /// [`aoide_storage::fs::run_qml_dir`] like every other reader of that tree
 /// (`crate::ipc`'s `shell.qml` lookup is the sibling case) rather than
@@ -687,7 +687,7 @@ fn hyprctl_json(subcommand: &str) -> Value {
 /// and [`surfaces_fall_short`] is a plain [`Value`] so the judgement itself
 /// stays unit-testable against literal fixtures.
 fn published_surfaces() -> Option<Value> {
-    published_json(&aoide_storage::fs::run_qml_dir().join("songs").join("surfaces.json"))
+    published_json(&aoide_storage::fs::run_qml_dir().join("rices").join("surfaces.json"))
 }
 
 /// The selected components, `run/qml/components.json` (CONTRACTS.md §4),
@@ -769,7 +769,7 @@ pub fn run_healthcheck() -> HealthOutcome {
     // a published, non-empty expectation the declared set decides, and
     // `hyprctl monitors` is read because a `perMonitor` namespace is judged
     // against the real output count. With none — no file, or a file that
-    // names no surface, which is what every non-declaring song publishes —
+    // names no surface, which is what every non-declaring rice publishes —
     // the old total count decides and the monitors call is never made at
     // all: a host that declares nothing pays nothing for a mechanism it
     // opted out of, and keeps the check it had.
@@ -884,7 +884,7 @@ mod tests {
     // carries zero layers must not read as stuck. It stays correct for what
     // it now is — the fallback a host that publishes no expectation keeps —
     // and the per-monitor demand that WOULD flag this host lives in
-    // `surfaces_fall_short`, asked only when a song declares one.
+    // `surfaces_fall_short`, asked only when a rice declares one.
     #[test]
     fn two_monitor_host_with_one_painted_and_one_legitimately_empty_is_healthy() {
         assert!(!shell_has_zero_layers(&two_monitor_one_painted()));
@@ -914,13 +914,13 @@ mod tests {
     // ── The declared-expectation predicate ────────────────────────────────
     //
     // The published shape, verbatim from the strillix lane's own output
-    // (`surfacesJsonFile`, CONTRACTS.md §5): one object, NOT keyed by song,
+    // (`surfacesJsonFile`, CONTRACTS.md §5): one object, NOT keyed by rice,
     // whose keys are the
     // already-RESOLVED layer-shell namespaces. That resolution is why nothing
     // here derives `aoide-<slot>` itself.
     fn sonata_expectation() -> Value {
         json!({
-            "song": "sonata",
+            "rice": "sonata",
             "surfaces": {
                 "aoide-bar": { "perMonitor": true },
                 "aoide-wallpaper": { "perMonitor": true },
@@ -952,7 +952,7 @@ mod tests {
         assert_eq!(parse_expectation(&json!([1, 2])), None);
         // An object, but not this file's shape — a bare namespace map under
         // some other key is not a declaration this reads.
-        assert_eq!(parse_expectation(&json!({ "song": "sonata" })), None);
+        assert_eq!(parse_expectation(&json!({ "rice": "sonata" })), None);
         assert_eq!(parse_expectation(&json!({ "surfaces": "aoide-bar" })), None);
     }
 
@@ -962,34 +962,34 @@ mod tests {
     // call, below — the parser does not fold it.
     #[test]
     fn parse_expectation_keeps_an_empty_declaration_distinct_from_no_declaration() {
-        let empty = parse_expectation(&json!({ "song": "nocturne", "surfaces": {} })).unwrap();
+        let empty = parse_expectation(&json!({ "rice": "nocturne", "surfaces": {} })).unwrap();
         assert!(empty.is_empty());
     }
 
     // ── asserted_expectation: what the check actually asserts ─────────────
     //
-    // The lane publishes the file on EVERY host, so a song that declares
-    // nothing ships `{"surfaces": {}}` — the shape every non-declaring song
+    // The lane publishes the file on EVERY host, so a rice that declares
+    // nothing ships `{"surfaces": {}}` — the shape every non-declaring rice
     // carries. That must be the old count, not a check with nothing to fail:
     // a blank desktop on such a host is exactly the incident the watchdog
     // exists for, and a "declared" branch with an empty set would call it
     // healthy.
     #[test]
     fn an_empty_published_declaration_is_nothing_to_assert() {
-        let published = json!({ "song": "etude", "surfaces": {} });
+        let published = json!({ "rice": "etude", "surfaces": {} });
         assert_eq!(asserted_expectation(Some(&published), None), None);
     }
 
     #[test]
     fn nothing_published_is_nothing_to_assert() {
         assert_eq!(asserted_expectation(None, None), None);
-        let malformed = json!({ "song": "etude" });
+        let malformed = json!({ "rice": "etude" });
         assert_eq!(asserted_expectation(Some(&malformed), None), None);
     }
 
     #[test]
     fn a_populated_declaration_is_asserted() {
-        let published = json!({ "song": "sonata", "surfaces": { "aoide-bar": { "perMonitor": true } } });
+        let published = json!({ "rice": "sonata", "surfaces": { "aoide-bar": { "perMonitor": true } } });
         let exp = asserted_expectation(Some(&published), None).unwrap();
         assert_eq!(exp.get("aoide-bar"), Some(&true));
     }
@@ -1037,7 +1037,7 @@ mod tests {
 
     #[test]
     fn components_never_turn_an_empty_declaration_into_an_assertion() {
-        let published = json!({ "song": "etude", "surfaces": {} });
+        let published = json!({ "rice": "etude", "surfaces": {} });
         assert_eq!(asserted_expectation(Some(&published), Some(&components(&["bar"]))), None);
     }
 
@@ -1297,7 +1297,7 @@ mod tests {
         assert!(!surfaces_fall_short(&exp, &blank_layers, &fallback_only));
     }
 
-    // The empty expectation and the zero-monitor guard must compose: a song
+    // The empty expectation and the zero-monitor guard must compose: a rice
     // declaring nothing on a host in blackout is the most stand-down case
     // there is.
     #[test]

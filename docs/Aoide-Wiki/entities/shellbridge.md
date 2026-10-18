@@ -77,21 +77,21 @@ The conductor card and its Details page are its only callers
 flight, stopped the moment nothing is looked at — a snapshot while viewed, never
 a token stream). Refusals are audited; a successful poll is not.
 
-**The RICE menu** is three verbs over the runtime rices and the song's
+**The RICE menu** is three verbs over the runtime rices and the rice's
 saved rice drafts, all re-execs of the sibling `strillix` (`rice` lives there) and
 none holding a rice rule of its own — the CLI owns the name regexes, the
-minting and every refusal, and conduct never depends on the song crate. Any
+minting and every refusal, and conduct never depends on the rice crate. Any
 click on the bar's RICE cell opens the one menu; nothing switches until a row
 is chosen.
 
 `{cmd:"ricemenu"}` is the socket's other READ. It runs `strx rice list --json`
-and passes its `data` through (`mode`, `song`, `draft`, `stagingSong`,
-`declared`, `songs`), then names the drafts' song through the mode marker —
-`stagingSong` first while declarative is locked (the song an unlock lands on),
-`song` first in every other mode — and runs `strx rice draft list <song>
+and passes its `data` through (`mode`, `rice`, `draft`, `stagingRice`,
+`declared`, `rices`), then names the drafts' rice through the mode marker —
+`stagingRice` first while declarative is locked (the rice an unlock lands on),
+`rice` first in every other mode — and runs `strx rice draft list <rice>
 --json` with the budget left of one 4 s wall clock, below the QML client's own
-5 s. The answer is one line, the list's data plus `draftsSong` and
-`drafts:[{name, savedAt, current}]`; with no song to name it is `drafts:[]` and
+5 s. The answer is one line, the list's data plus `draftsRice` and
+`drafts:[{name, savedAt, current}]`; with no rice to name it is `drafts:[]` and
 only one child ran. A child that fails or answers nothing readable is a
 refusal, `{ok:false, reason:"cli-failed"|"no-answer", message}`, never an
 empty answer, and a failed `rice list` starts no second child. Refusals are
@@ -102,7 +102,7 @@ fire-and-forget: `stage` needs a `name` that is one argv token and runs `rice
 mode stage <name>`; `declarative` refuses a `name` and runs a bare `rice mode
 declarative`, whose declared twin the CLI resolves. The outcome is a
 `notify-send` toast carrying the CLI's own message, on success and on failure;
-the audit line is `ricemode action <action>: <ok|failed>`, never a song.
+the audit line is `ricemode action <action>: <ok|failed>`, never a rice.
 
 `{cmd:"ricedraft", action:"enter"|"new"|"save"|"drop", name?}` is the
 gesture, and fire-and-forget like `ricemode`: the outcome is a `notify-send`
@@ -117,28 +117,28 @@ exist yet. So `enter` is enter-or-create, and the bridge cannot tell the two
 apart: a stale menu row, or a draft dropped elsewhere since the last
 `ricemenu`, comes back as a fresh copy of the stage rather than a refusal.
 `enter` runs `rice mode draft <name>`; `new` runs `rice draft save` with no
-name, which mints the lowest free `draft-<n>` of the staged song, then enters
+name, which mints the lowest free `draft-<n>` of the staged rice, then enters
 the `data.name` it answered with; `save` runs `rice draft save` and never
 changes the mode; `drop` runs `rice draft drop <name>`, deleting a saved draft
-of the staged song, and never changes the mode either. A `drop` of a draft
+of the staged rice, and never changes the mode either. A `drop` of a draft
 that does not exist, or of the draft in force, is the CLI's refusal, toasted
 as its own message.
 
 Entering a draft is refused while declarative is locked, so `enter` and `new`
 from there first run a BARE `rice mode stage` — which restores the remembered
-`stagingSong` (house rule 10), never the declared song. `save` and `drop` have
+`stagingRice` (house rule 10), never the declared rice. `save` and `drop` have
 no such step: they are REFUSED while declarative is locked, with the toast
 `declarative mode is locked — unlock first, then save the draft` (or `…then
-delete the draft`), because the lock re-pins the stage to the declared song
-and `rice draft save`/`drop` act on the song the stage names, while `ricemenu`
-lists `stagingSong`. A save there would land under, and a drop would delete
-from, a song the menu never shows; unlocking first would change the mode as a
+delete the draft`), because the lock re-pins the stage to the declared rice
+and `rice draft save`/`drop` act on the rice the stage names, while `ricemenu`
+lists `stagingRice`. A save there would land under, and a drop would delete
+from, a rice the menu never shows; unlocking first would change the mode as a
 side effect of a save or a delete. The refusal runs nothing, and is `failed`, not `partial`. Steps stop at the first
 failure. A failure after an earlier step succeeded is `partial`: nothing rolls
 back (the unlock stands, a minted draft stays saved), and the toast says so,
 prefixed `partial: `. The audit line is one per action, event `ricedraft`,
 `ricedraft-partial` or `ricedraft-failed`, detail `ricedraft action <enter|
-new|save|drop>: <ok|partial|failed>` — never a draft or song name, which only the
+new|save|drop>: <ok|partial|failed>` — never a draft or rice name, which only the
 toast carries. A malformed line is dropped with the plain `unparseable` audit
 and no reply.
 
@@ -148,14 +148,14 @@ a balloon rather than a toast. `name` must be one argv token; a line without
 one is dropped with no reply. The bridge runs `strx rice declare <name> --host
 --json`, which rewrites the one `habit.rice.declared` line in the host config
 (`aoide.hostConfig`) and never commits or rebuilds, so the change takes effect
-on the next rebuild. Every rule about which song may be declared is the CLI's:
-a song the build does not carry, a staged draft, or a host file without exactly
+on the next rebuild. Every rule about which rice may be declared is the CLI's:
+a rice the build does not carry, a staged draft, or a host file without exactly
 one such line is its refusal. The answer is `{ok:true, message, name, host,
 changed, stagedDiffers}` (`changed` false when the host already declared it,
 `stagedDiffers` true when the staged copy holds edits the rebuild will not
 carry) or `{ok:false, reason, message}`, the message carrying the refusal's
-what and why. `name` must be a song name (lowercase letters, digits, hyphens),
-and the audit line names it: `ricedeclare action <song>: <ok changed|ok
+what and why. `name` must be a rice name (lowercase letters, digits, hyphens),
+and the audit line names it: `ricedeclare action <rice>: <ok changed|ok
 unchanged|failed>`. The bridge's own timeout answers `reason: "no-reply"`,
 which never means refused: the declare may still land. The `ricemenu` answer carries the machine's `host` name for the row's
 alert to speak, and `hostConfig`, the file the declare rewrites (resolved as

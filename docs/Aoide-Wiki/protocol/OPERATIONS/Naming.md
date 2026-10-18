@@ -10,11 +10,11 @@
 
 Create kind folders lazily — only when the first note of that kind is minted.
 
-A kind folder may group its pages into subfolders by domain (e.g. `concepts/song/`) once it grows large enough to warrant it — nesting is allowed because the bare-name wikilink rule below keeps every link resolvable regardless of subfolder.
+A kind folder may group its pages into subfolders by domain (e.g. `concepts/rice/`) once it grows large enough to warrant it — nesting is allowed because the bare-name wikilink rule below keeps every link resolvable regardless of subfolder.
 
 ## File names
 
-Use readable title case with hyphens for multi-word names: `Self-Ricing.md`, `Song-Vocabulary.md`, `Song-Anatomy.md`.
+Use readable title case with hyphens for multi-word names: `Self-Ricing.md`, `Rice-Vocabulary.md`, `Rice-Anatomy.md`.
 
 **Source capitalization wins** for proper nouns and code identifiers, even when they are lowercase or unconventional: `aoided.md`, `shellbridge.md`.
 
@@ -25,7 +25,7 @@ Files always present at a wiki root: `SCHEMA.md` (all-caps) and `Overview.md` (t
 The H1 of each page may be richer than the filename — a subtitle, parenthetical, or fuller description is fine. The filename is the stable identifier; the H1 is the human-readable title.
 
 Examples:
-- File: `Song-Vocabulary.md` → H1: `# Song Vocabulary — the Performed Half`
+- File: `Rice-Vocabulary.md` → H1: `# Rice Vocabulary — the Performed Half`
 - File: `aoided.md` → H1: `# aoided`
 
 ## Summary table
@@ -35,7 +35,7 @@ Examples:
 | Kind folder | lowercase, no prefix | `concepts/` |
 | Wiki directory | source capitalization | `Aoide-Wiki/` |
 | Protocol rule folder | ALL-CAPS | `OPERATIONS/` |
-| Generic file | title case, hyphens | `Song-Vocabulary.md` |
+| Generic file | title case, hyphens | `Rice-Vocabulary.md` |
 | Code identifier file | source capitalization | `aoided.md` |
 | Wiki root files | as specified | `SCHEMA.md`, `Overview.md` |
 

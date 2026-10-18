@@ -1,31 +1,31 @@
 # lib/rices-merge.nix — several rices directories as ONE rices.
 #
-#   aoide.lib.rices.merge { inherit lib pkgs; books = [ aoide.ricesRoot ./songs ]; }
+#   aoide.lib.rices.merge { inherit lib pkgs; books = [ aoide.ricesRoot ./rices ]; }
 #
 # Returns `{ registry, dir }` and the `lib/rices.nix` record over the merge:
 #
-#   registry  song name -> that song's directory INSIDE the book that defines it
+#   registry  rice name -> that rice's directory INSIDE the book that defines it
 #             (a pure readDir over the input directories, no derivation built).
 #   dir       the merged directory, as a store path string: one copy of every
 #             registry entry, built from the same registry in one call.
 #
 # The record's discovery is the registry, so the hook, borrow resolution and
 # `builtIn` never read `dir` (no import-from-derivation); only the paint lane's
-# rices package consumes `dir`'s contents. A consumer hands `dir` to the song
+# rices package consumes `dir`'s contents. A consumer hands `dir` to the rice
 # hook (`rices = …`) and to the strillix lane's per-host rices, and reads
-# `songNames` / `songs` / `rices` off the same record.
+# `discoveredNames` / `riceDirs` / `rices` off the same record.
 #
-# Merge happens BEFORE borrow resolution: every song is visible in one registry
-# first, so a song may borrow a slot from a song that came from another book (a
-# consumer's song borrowing Aoide's sonata across books is the case this exists
-# for: tests/consumer's `encore`). A song name that two books define is a
-# refusal, not a choice: the throw names the song and every book that defines
+# Merge happens BEFORE borrow resolution: every rice is visible in one registry
+# first, so a rice may borrow a slot from a rice that came from another book (a
+# consumer's rice borrowing Aoide's sonata across books is the case this exists
+# for: tests/consumer's `encore`). A rice name that two books define is a
+# refusal, not a choice: the throw names the rice and every book that defines
 # it, the same posture habit's `mergeRegistries` takes for a name two registries
 # share.
 #
 # Discovery is the one `lib/rices.nix` uses: an immediate child directory,
 # `_`-prefixed entries shelved. A book's loose files (`learnings.md`, a
-# `.gitkeep`) are not songs and are not copied.
+# `.gitkeep`) are not rices and are not copied.
 {
   lib,
   # The store copy of the merged directory is a derivation; the caller's own
@@ -45,7 +45,7 @@ let
 
   perBook = map (book: {
     inherit book;
-    names = (ricesOf book).songNames;
+    names = (ricesOf book).discoveredNames;
   }) books;
 
   allNames = lib.unique (lib.concatMap (b: b.names) perBook);
@@ -76,7 +76,7 @@ let
 in
 lib.throwIf (clashing != [ ])
   (
-    "rices merge: song(s) ${lib.concatStringsSep ", " clashing} defined by more than one book — "
+    "rices merge: rice(s) ${lib.concatStringsSep ", " clashing} defined by more than one book — "
     + lib.concatStringsSep "; " (
       map (
         name: "'${name}' is in ${lib.concatStringsSep " and " (map toString (booksDefining name))}"

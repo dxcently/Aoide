@@ -486,7 +486,7 @@ stripping one, and a held spawn shows as its whole command.
   scripted form (one spelling per capability). The picker itself reaches
   `aoide_protocol::pick::choose_many` DIRECTLY — no new seam: that function
   already supports pre-checked defaults and a clean `None` on Esc/EOF, and
-  this crate already depends on `aoide-protocol` the same way `song`'s own
+  this crate already depends on `aoide-protocol` the same way `rice`'s own
   `prune_picker` does; there was no missing primitive to add to `pick.rs`.
   Rows come from this box's own roster (`merged_sessions`, never
   re-derived) plus every registered node's CACHED graph via `who.rs`'s
@@ -960,7 +960,7 @@ stripping one, and a held spawn shows as its whole command.
   refused); names may carry ordinary spaces; `paths` has no count cap; the
   reply carries the CLI outcome's `data` verbatim when there is one.
   `projectaction` is a closed three-action whitelist (`create`, `edit`,
-  `removehost`) for the song-side project picker to create or edit a
+  `removehost`) for the rice-side project picker to create or edit a
   project — local roots and per-host membership together — without ever
   needing a session to hang the request off of: `create`/`edit` run
   `project add|edit <name> <paths…>` then, per entry in an optional
@@ -1081,21 +1081,21 @@ stripping one, and a held spawn shows as its whole command.
   `RiceMode`, `RiceDraft`, `RiceDeclare`).** Any click on the bar's RICE cell opens the one
   menu; nothing switches until a row is chosen. All four re-exec the sibling
   `strillix` (`daemon::bin::rice_bin()`): `rice` lives there and conduct never
-  depends on the song crate, so the name regexes, the minting and every refusal
+  depends on the rice crate, so the name regexes, the minting and every refusal
   stay the CLI's.
   `{"cmd":"ricemenu"}` is the second READ, answered on its own connection and
   thread like `sessiontrace`: `dispatch_rice_menu` runs `rice list --json`
   under one 4 s budget (`RICE_MENU_TIMEOUT`, under the QML client's 5 s) and
-  passes its `data` through (`mode`, `song`, `draft`, `stagingSong`,
-  `declared`, `songs`) with this machine's `host` name and `hostConfig` (the
+  passes its `data` through (`mode`, `rice`, `draft`, `stagingRice`,
+  `declared`, `rices`) with this machine's `host` name and `hostConfig` (the
   file `rice declare --host` rewrites, from `aoide_storage::fs::host_config`,
-  null when none resolves) beside it; then, when `drafts_song` names a song from the mode
-  marker (`stagingSong` first while declarative is locked, since an unlock
-  lands there; `song` first otherwise), runs `rice draft list <song> --json`
-  with the budget left. The answer adds `draftsSong` and `drafts:
+  null when none resolves) beside it; then, when `drafts_rice` names a rice from the mode
+  marker (`stagingRice` first while declarative is locked, since an unlock
+  lands there; `rice` first otherwise), runs `rice draft list <rice> --json`
+  with the budget left. The answer adds `draftsRice` and `drafts:
   [{name, savedAt, current}]`, or is `{ok:false, reason: cli-failed|no-answer,
   message}`: a child that did not answer is never an empty list, and a failed
-  `rice list` starts no second child. With no song `drafts` is empty and one
+  `rice list` starts no second child. With no rice `drafts` is empty and one
   child ran.
   `{"cmd":"ricemode","action":"stage|declarative","name"?}` is the switch,
   fire-and-forget: `stage` takes a `name` that is one argv token and runs `rice
@@ -1103,7 +1103,7 @@ stripping one, and a held spawn shows as its whole command.
   declarative` (the CLI resolves the declared twin); anything else is dropped.
   The outcome is a toast through the shared `notify`, on success and failure;
   the audit line is `ricemode action <stage|declarative>: <ok|failed>` and
-  carries no song name.
+  carries no rice name.
   `{"cmd":"ricedraft","action":"enter|new|save|drop","name"?}` is
   fire-and-forget like `ricemode`, its outcome a toast through the shared
   `notify`. The set is closed (`RiceDraftAction::from_wire`: `enter` and `drop`
@@ -1112,30 +1112,30 @@ stripping one, and a held spawn shows as its whole command.
   step by `dispatch_rice_draft`, each step `strx rice … --json`, unbounded,
   stopping at the first failure — `partial` when an earlier step had
   succeeded, which nothing rolls back. From declarative, `enter` and `new` first
-  run a BARE `rice mode stage` (house rule 10: it restores `stagingSong`,
-  never the declared song), and `save` and `drop` are taught refusals,
+  run a BARE `rice mode stage` (house rule 10: it restores `stagingRice`,
+  never the declared rice), and `save` and `drop` are taught refusals,
   `declarative mode is locked — unlock first, then save the draft` / `…then
-  delete the draft`: the stage there is the declared song, `rice draft
-  save`/`drop` act on the song the stage names, and the listing names
-  `stagingSong`, so a save would land, and a drop would delete, where the menu
+  delete the draft`: the stage there is the declared rice, `rice draft
+  save`/`drop` act on the rice the stage names, and the listing names
+  `stagingRice`, so a save would land, and a drop would delete, where the menu
   never looks (unlocking first would change the mode as a side effect).
   Elsewhere `drop` is one step, `rice draft drop <name>`; a missing draft or
   the draft in force is the CLI's refusal, toasted as its own message.
   `enter` is enter-or-create: `rice mode draft` forks the stage into a name
   that does not exist yet, and the bridge cannot tell. The audit line is one
   per action (`ricedraft action <enter|new|save|drop>: <ok|partial|failed>`) and carries
-  neither a draft nor a song name.
-  `{"cmd":"ricedeclare","name":"<song>"}` is the Declare row, ANSWERED on its
+  neither a draft nor a rice name.
+  `{"cmd":"ricedeclare","name":"<rice>"}` is the Declare row, ANSWERED on its
   own connection and thread like `ricemenu` because the surface paints the
-  outcome as a balloon: `name` is a song name (lowercase letters, digits,
+  outcome as a balloon: `name` is a rice name (lowercase letters, digits,
   hyphens; anything else is dropped with no reply), and `dispatch_rice_declare` runs `strx rice declare <name>
   --host --json`, unbounded like every mutation, which rewrites the host
   config's `habit.rice.declared` line and never rebuilds. `rice_declare_reply`
   answers `{ok:true, message, name, host, changed, stagedDiffers}` or
   `{ok:false, reason, message}`, the message carrying the refusal's what and
   why, `reason` the CLI's own (`not-built-in`, `staged-draft`,
-  `host-line-count`, …) or `cli-failed`. The audit line names the song and
-  whether the host file changed: `ricedeclare action <song>: <ok changed|ok
+  `host-line-count`, …) or `cli-failed`. The audit line names the rice and
+  whether the host file changed: `ricedeclare action <rice>: <ok changed|ok
   unchanged|failed>`.
 - **The durable session ledger + resurrect (P-D8, `docs/architecture/
   AOIDED.md`'s "L5"):** `graph/doc.rs::ledger_session_exit` is the ONE
@@ -1463,7 +1463,7 @@ stripping one, and a held spawn shows as its whole command.
   precedent (`shellbridge::cross_uid_gate`/`daemon::cross_uid_gate`, pure
   and unit-tested without a real different-uid connection). **This is a
   CROSS-uid floor only** — under OQ1-A every legitimate connector on both
-  sockets (the QML notifications/bar widgets, `aoide notifications push`, `session
+  sockets (the QML notifications/bar widgets, `strx notifications push`, `session
   permit`'s own raise, the CLI's `daemon_dispatch` proxy) already shares
   the operator's own uid, so a same-uid attacker synthesizing a
   `notificationsverdict` on shellbridge's verdict door is an OQ1-A-inherent

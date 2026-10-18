@@ -234,7 +234,7 @@ optional target:
   (`aoide.quickshell.enable`), which says only that Aoide paints a shell here:
   a host painted by something else has the session and takes the zenity path.
   What follows `aoide.strillix.enable` is the unit's `quickshell` entry on `path`
-  (and `AOIDE_RICE_BIN`), since a host without strillix has no use for either. A
+  (and `STRILLIX_BIN`), since a host without strillix has no use for either. A
   host with a2a on does
   not get the popup unless it also opts in.
 - **`--allow read,spawn`** stamps the grant this commit makes — first

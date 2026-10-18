@@ -3,7 +3,7 @@
 Cross-module rules only. A directory's own `AGENTS.md` holds what's local to
 it; this file holds what would otherwise be repeated in each of the four. Points
 up to the root `AGENTS.md` for house rule 5 (the closed paint-read whitelist),
-house rule 1 (a rice agent writes only `rices/<song>/`; `modules/`
+house rule 1 (a rice agent writes only `rices/<rice>/`; `modules/`
 changes only on a lane the User ordered, whose scope is named, or additively as
 a new dendrite plus its catalogue line) and house rule 7 (everything is
 a plugin).

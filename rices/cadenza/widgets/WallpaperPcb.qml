@@ -1,4 +1,4 @@
-// WallpaperPcb.qml — the cover: a routed circuit board on the CRT black
+// WallpaperPcb.qml — the wallpaper: a routed circuit board on the CRT black
 // (intent §3.9). An uppercase helper, never a slot: nothing loads it live.
 // The preview canvas shoots it at each monitor's size into
 // `wallpaper/pcb-<w>x<h>.png` (wallpaper/README.md), and `strillix wallpaper set` stages the

@@ -2,7 +2,7 @@
 // in the dock's gadget column (WidgetSlot host — root is an Item that sizes
 // itself off its content, same as every other slot in this directory).
 //
-// Ported from the shell's TerminalsGadget.qml (per-song widget-slot
+// Ported from the shell's TerminalsGadget.qml (per-rice widget-slot
 // expansion, CONTRACTS.md §5) — ownership moved from the shell to sonata's
 // score. Live: sonata's own `widgets/dock.qml` embeds
 // `WidgetSlot { slot: "terminals" }` in its gadget column (slots.md's wired
@@ -16,8 +16,8 @@ import Quickshell.Io
 // Reaches the shell's shared components — MoodFaces (the kaomoji troupe)
 // and ScrollRail (the draggable scrollbar) — neither of which is
 // terminals-specific chrome, so they stay in the shell rather than moving
-// here. Deployed-tree relative path: this file lands at $out/qml/songs/
-// sonata/terminals.qml, so two levels up ($out/qml/songs/ → $out/qml/) is
+// here. Deployed-tree relative path: this file lands at $out/qml/rices/
+// sonata/terminals.qml, so two levels up ($out/qml/rices/ → $out/qml/) is
 // the shell's own qml/ root (bar.qml idiom; see that file's own header).
 import "../.."
 
@@ -85,7 +85,7 @@ Item {
     required property var bridge           // socket sender (bridge.focusSession)
     property var shared: null              // cross-widget state (shared.tracedSessionId)
     // sessions.json is a CONDUCTING file (CONTRACTS.md §4) — state/stage/,
-    // not song/stage/.
+    // not rice/stage/.
     property string stagePath: (Quickshell.env("AOIDE_ROOT") || (Quickshell.env("HOME") + "/.aoide")) + "/state/stage/sessions.json"
 
     Loader {
@@ -1308,7 +1308,7 @@ Item {
                                               + Math.round(row.ctxPct) + "% · "
                                               + theme.ctxCompact(modelData.contextTokens)
                                         font.family: gadget.faceMono; font.pixelSize: 10
-                                        // song accent → paletteUrgent past ~85%, the
+                                        // rice accent → paletteUrgent past ~85%, the
                                         // shared urgency threshold.
                                         color: theme.ctxColor(row.ctxPct, gadget.sig)
                                     }

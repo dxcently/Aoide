@@ -8,7 +8,7 @@ The standalone wiki for the Aoide project — the agent-agnostic Hyprland/Quicks
 
 ## Read the whole thing
 
-Working entry cost, in order: `Overview.md` → every page under `concepts/` (including its `orchestration/`, `desktop/`, `song/`, `governance/`, and `cli/` subfolders) and `entities/`. `ingest/index.md` is the catalog if you need to jump; `references/` holds source material (`AOIDE-HANDOFF.md` — the design contract; the handoff and ricing design docs; `pantheon/` — the design reference stills). The dev-facing CLI reference lives at `concepts/cli/` (`CLI-Reference.md` is its hub). The development agent's operating manual is the self-contained set under `protocol/dev/`, entered at `protocol/dev/DEV.md`. The wiki is deliberately small enough to read end to end. **Rice design memory lives in the rices under `song/`, per song** — each song's current elements in `rices/<name>/design/` ([[Song-Anatomy]]). The cross-cutting house grammar is historical reference at `references/pantheon/pantheon-grammar.md`; `concepts/song/Ricing-Protocol.md` carries protocol only. Design content written about a rice goes to that rice's `design/` folder in the repo, not here.
+Working entry cost, in order: `Overview.md` → every page under `concepts/` (including its `orchestration/`, `desktop/`, `rice/`, `governance/`, and `cli/` subfolders) and `entities/`. `ingest/index.md` is the catalog if you need to jump; `references/` holds source material (`AOIDE-HANDOFF.md` — the design contract; the handoff and ricing design docs; `pantheon/` — the design reference stills). The dev-facing CLI reference lives at `concepts/cli/` (`CLI-Reference.md` is its hub). The development agent's operating manual is the self-contained set under `protocol/dev/`, entered at `protocol/dev/DEV.md`. The wiki is deliberately small enough to read end to end. **Rice design memory lives in the rices under `rice/`, per rice** — each rice's current elements in `rices/<name>/design/` ([[Rice-Anatomy]]). The cross-cutting house grammar is historical reference at `references/pantheon/pantheon-grammar.md`; `concepts/rice/Ricing-Protocol.md` carries protocol only. Design content written about a rice goes to that rice's `design/` folder in the repo, not here.
 
 ## The shape
 
@@ -19,7 +19,7 @@ Aoide-Wiki/
   concepts/        ← ideas, mechanisms, frameworks — grouped by part of Aoide
     orchestration/   ← agent sessions, the graph, the conductor channel, the conductor
     desktop/         ← the Quickshell/Hyprland desktop surfaces
-    song/            ← the performed half — song anatomy, vocabulary, self-ricing, ricing protocol
+    rice/            ← the performed half — rice anatomy, vocabulary, self-ricing, ricing protocol
     governance/      ← the rebuild gate, clone-and-run, wiki protocol
     cli/             ← the dev-facing CLI reference: signature/reads/writes/output per command, hub + eight group pages
     (root)           ← cross-cutting: Codebase, Full-Architecture, Snowflake-Anatomy, Lexicon, Package-Layout, Plugin-Architecture
@@ -51,7 +51,7 @@ This shape comes from the **wiki protocol**, a shipped shape + rule set that Mne
 - Let the Notes manifest below drift from the files on disk.
 - Write history, a rejected alternative, or a what-if into a content page. Pages state the system at HEAD in the present indicative; history goes to `ingest/log.md`, open questions to its `## Open Threads`, actionable work to the dev handoff ledger. See [[Assertion]].
 - Write filler: throat-clearing, contrast rhetoric, symmetric slogan lists, empty intensifiers, restating summaries. Every sentence carries a fact an agent needs. See [[Style]].
-- Invent a new top-level directory — in this wiki OR in the Aoide repo. Both roots are closed. New content lands inside the existing tree at its designated place; look the place up (repo content paths in [[Song-Vocabulary#The Song Map]], repo shape in `CONTRACTS.md` §2). A new root directory is a contract change, not a convenience.
+- Invent a new top-level directory — in this wiki OR in the Aoide repo. Both roots are closed. New content lands inside the existing tree at its designated place; look the place up (repo content paths in [[Rice-Vocabulary#The Rice Map]], repo shape in `CONTRACTS.md` §2). A new root directory is a contract change, not a convenience.
 
 ## You maintain yourself
 
@@ -65,7 +65,7 @@ snapshot: 2026-08-25
 
 ### Tags
 
-a2a · agent · aliases · aoide · architecture · auto-discovery · base16 · blueprint · bridge · cli · coding-agent · compositor · computer-use · conductor · content · crate · daemon · dag · declarative · deployment · design · desktop · dxflake · editor · extensibility · features · flake · gadget · git · glyph · governance · graph · harness · hooks · hyprland · integration · ipc · keybinds · knowledge · theme · strillix · mcp · melete · meta · mneme · naming · nix · node · notification · onboarding · orchestration · orchestrator · paint · pantheon · pipeline · plugin · pointer · policy · protocol · pty · qml · quickshell · rebuild · reference · rice · rust · schema · screen · secrets · security · session · shell · song · stylix · terminal · theming · totp · tui · ui · upkeep · vault · vision · wayland · widget · wiki
+a2a · agent · aliases · aoide · architecture · auto-discovery · base16 · blueprint · bridge · cli · coding-agent · compositor · computer-use · conductor · content · crate · daemon · dag · declarative · deployment · design · desktop · dxflake · editor · extensibility · features · flake · gadget · git · glyph · governance · graph · harness · hooks · hyprland · integration · ipc · keybinds · knowledge · theme · strillix · mcp · melete · meta · mneme · naming · nix · node · notification · onboarding · orchestration · orchestrator · paint · pantheon · pipeline · plugin · pointer · policy · protocol · pty · qml · quickshell · rebuild · reference · rice · rust · schema · screen · secrets · security · session · shell · rice · stylix · terminal · theming · totp · tui · ui · upkeep · vault · vision · wayland · widget · wiki
 
 ### Notes
 
@@ -111,10 +111,10 @@ concepts/orchestration/Pairing-Ceremony.md
 concepts/orchestration/Screen-Control.md
 concepts/orchestration/Secrets-Broker.md
 concepts/orchestration/Session-Graph.md
-concepts/song/Ricing-Protocol.md
-concepts/song/Self-Ricing.md
-concepts/song/Song-Anatomy.md
-concepts/song/Song-Vocabulary.md
+concepts/rice/Ricing-Protocol.md
+concepts/rice/Self-Ricing.md
+concepts/rice/Rice-Anatomy.md
+concepts/rice/Rice-Vocabulary.md
 entities/Hyprland.md
 entities/Melete.md
 entities/Mneme.md

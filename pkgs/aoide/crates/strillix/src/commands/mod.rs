@@ -15,7 +15,7 @@
 //! like `meta`, appended right after it: a root-level command, registered
 //! before `mcp.serve`, matching core's own relative placement of `onboard`
 //! in `crates/cli/src/commands/mod.rs::all()`), rice, draft,
-//! mode, cover, theme, rice-late stubs (declare/transpose only — NOT
+//! mode, wallpaper, theme, rice-late stubs (declare/transpose only — NOT
 //! content/make/update, which stay core), shellbridge, quickshell
 //! (healthcheck only — the placeholder-screen watchdog), reload (the one
 //! mode-aware iteration command, `strillix reload` design settled 2026-08-31 —
@@ -45,7 +45,7 @@
 //! `icon` (`icon collections`/`icon list`/`icon resolve`, the pinned Iconify
 //! glyphs) and `apps` (`apps list`/`apps show`/`apps publish`, over
 //! `crate::xdg`: the installed desktop apps with their resolved icons, and
-//! `song/stage/apps.json`) follow, and `clipboard` (`clipboard delete`/
+//! `rice/stage/apps.json`) follow, and `clipboard` (`clipboard delete`/
 //! `clipboard clear`, over the `cliphist` on `PATH`: one history entry or all
 //! of them, with the launcher's cached thumbnails) follows, and `lock` (`lock`,
 //! the one lock entry, and `lock hint`, logind's LockedHint for the shell's
@@ -71,11 +71,11 @@ use crate::registry::{Layout, Registry};
 
 /// How `strillix` lists its commands (see core's `LAYOUT` for the contract).
 const LAYOUT: Layout = Layout {
-    tagline: "paint AoideOS: songs, themes and the desktop surfaces",
+    tagline: "paint Strillix: rices, themes and the desktop surfaces",
     sections: &[
         ("Start here", &[("guide", ""), ("onboard", "")]),
         (
-            "Songs & themes",
+            "Rices & themes",
             &[
                 ("rice", "Compose, stage, declare and keep history snapshots of a rice"),
                 ("theme", "Resolve, lint and emit a theme"),
@@ -97,7 +97,7 @@ const LAYOUT: Layout = Layout {
             "Screen control",
             &[
                 ("screen", "See and drive the desktop: info, shots, pointer, OCR, diff"),
-                ("lock", "Lock the screen in the staged song's face, or with hyprlock"),
+                ("lock", "Lock the screen in the staged rice's face, or with hyprlock"),
             ],
         ),
         (
@@ -120,7 +120,7 @@ pub fn all() -> Registry {
     onboard::register(&mut r); // onboard (P-I3: the nix half of the onboarding flow, root-coupled like meta)
     infra::register_mcp(&mut r); // mcp serve (root-coupled: reads this assembled registry)
     strillix_rice::commands::rice::register(&mut r); // rice lint, list, stage, compose
-    strillix_rice::commands::refresh::register(&mut r); // rice refresh — a built-in song takes the repo's changes to files the machine never edited
+    strillix_rice::commands::refresh::register(&mut r); // rice refresh — a built-in rice takes the repo's changes to files the machine never edited
     strillix_rice::commands::draft::register(&mut r); // rice draft save/list/drop
     strillix_rice::commands::mode::register(&mut r); // rice mode status/stage/declarative/draft
     strillix_rice::commands::wallpaper::register(&mut r); // wallpaper set
@@ -138,9 +138,9 @@ pub fn all() -> Registry {
     preview::register(&mut r); // preview + preview.set + preview.declare — an isolated quickshell canvas for one widget (P1, then a same-lane follow-up added declare)
     preview_tools::register(&mut r); // preview.shot + preview.tree + preview.notes — shell-first agent tools over that same canvas (P6): screenshots, the live/static-joined item tree, and scaffolding notes
     icon::register(&mut r); // icon.collections + icon.list + icon.resolve — the pinned icon collections (Iconify data) resolved into the lane's own SVG tree, no network at render (I1)
-    apps::register(&mut r); // apps list/show/publish — installed desktop apps with resolved icons, song/stage/apps.json
+    apps::register(&mut r); // apps list/show/publish — installed desktop apps with resolved icons, rice/stage/apps.json
     clipboard::register(&mut r); // clipboard delete/clear — remove cliphist history entries and their cached thumbnails
-    lock::register(&mut r); // lock + lock.hint — the one lock entry (the shell's LockHost for a song with a face, else hyprlock) and logind's LockedHint
+    lock::register(&mut r); // lock + lock.hint — the one lock entry (the shell's LockHost for a rice with a face, else hyprlock) and logind's LockedHint
     component::register(&mut r); // component — a cross-component call: the slot's provider answers the verb (strillix shell, or its declared argv)
 
     r.arrange(LAYOUT);

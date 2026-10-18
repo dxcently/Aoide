@@ -51,7 +51,7 @@ each declares `aoide.surfaces.wallpaper` and writes its own
 - **The bridge is `strx wallpaper sync`** (CONTRACTS.md §4), not a link between
   files: whichever provider is active, the CLI reconciles the provider with
   `/stage/wallpaper.json` — the staged pick while one applies to the staged
-  song, nothing (the step-aside image) otherwise. The engine lane calls it from
+  rice, nothing (the step-aside image) otherwise. The engine lane calls it from
   its unit's `ExecStartPost`, and every pick write calls it; it is the door that
   waits for a provider still coming up (~5 s), where the pick writes each make a
   single attempt.

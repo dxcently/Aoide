@@ -1,6 +1,6 @@
 # modules
 
-The AoideOS module tree: everything a host needs beyond the core flake's own
+The Strillix module tree: everything a host needs beyond the core flake's own
 `nixosModules.default`. Four directories — `nucleus/` (the unconditional option contract),
 `dendrites/` (opt-in capabilities), and the two records read beside them,
 `aggregations/` (named groups of catalogue entries) and `overrides/`
@@ -21,7 +21,7 @@ the catalogue that names what can be selected.
   selection kept.
 - `nucleus/default.nix` — the option contract's aggregate. It names only the
   files inside its own directory, and has no catalogue name to be found by.
-  `lib/aoideos.nix` hands it to the constructor as an `extraModules` entry, and
+  `lib/strillix.nix` hands it to the constructor as an `extraModules` entry, and
   `nixosModules.nucleus` exports it for a consumer's own `extraModules`. It
   declares options and assertions and configures nothing; the services every
   host carries are catalogue entries, members of the `nucleus` aggregation.
@@ -55,9 +55,9 @@ also defines an order-sensitive list option (`environment.systemPackages`, a
 position in the host's module list.
 
 `rices/` is not a fourth layer here and carries no `default.nix` of
-its own — a committed song is found by `lib/rices.nix`'s own typed scan
-(`rices/<song>/rice.nix`), the one exception house rule 1 already
-draws around `song/`.
+its own — a committed rice is found by `lib/rices.nix`'s own typed scan
+(`rices/<rice>/rice.nix`), the one exception house rule 1 already
+draws around `rice/`.
 
 ## What it consumes
 
@@ -65,4 +65,4 @@ Nothing above itself. The catalogue plus the contract aggregate are the whole
 surface a host sees; the layers below never read from outside their own
 directory tree (root `AGENTS.md` house rule 5 is the one enumerated exception,
 for paint lanes reading `aoide.theme`/`aoide.layout`/`aoide.surfaces`
-plus the core scalars and the song selection).
+plus the core scalars and the rice selection).

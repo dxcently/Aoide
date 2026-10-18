@@ -7,7 +7,7 @@ tags: [aoide, extensibility, declarative, widget, agent]
 
 # Widget Maker — Extensible and Declarative by Construction
 
-AoideOS integrates whatever you see fit and surfaces it as a widget, a command, or a system hook. [[Feature-Set]] lists what ships; those are exemplars of one underlying capability: making more of them, on demand, declaratively.
+Strillix integrates whatever you see fit and surfaces it as a widget, a command, or a system hook. [[Feature-Set]] lists what ships; those are exemplars of one underlying capability: making more of them, on demand, declaratively.
 
 ## Why: the agent is a coding agent
 
@@ -56,11 +56,11 @@ A widget body anchors only the edges it genuinely occupies, and its
 `screen.height`/`screen.width` is a number tuned for one aspect ratio, not a
 size.
 
-`herald.qml` anchors `{ bottom: true; right: true }` and sets
+`notifications.qml` anchors `{ bottom: true; right: true }` and sets
 `implicitHeight: Math.max(1, stack.implicitHeight)`: two edges occupied,
 height following the notification stack it draws. `bar.qml` anchors
 `{ top: true; left: true; right: true }` in `shell.qml`, which reads the
-song's own `implicitHeight` back onto the `PanelWindow`'s
+rice's own `implicitHeight` back onto the `PanelWindow`'s
 `implicitHeight`/`exclusiveZone` rather than a lane-pinned constant —
 sonata's strip picks 36px for itself, and the shell only reads it back.
 
@@ -71,30 +71,30 @@ the output, so the content inside it must size and centre itself — a
 grimoire page, a power stele — and never take its dimensions from the
 frame it happens to sit in.
 
-## The staging engine — a song overrides desktop chrome
+## The staging engine — a rice overrides desktop chrome
 
-A narrower, sibling mechanism to the make-a-widget loop: a **song** ([[Song-Anatomy]]) replacing a piece of *existing* chrome with its own QML, rather than the agent building a new capability. **The staging engine** (`StagingEngine.qml`) resolves the active song's theme tokens to per-slot QML; a host surface embeds one of two fixed per-slot anchors, which asks the engine whether the active song dressed that slot and loads its file, or falls back to shared chrome:
+A narrower, sibling mechanism to the make-a-widget loop: a **rice** ([[Rice-Anatomy]]) replacing a piece of *existing* chrome with its own QML, rather than the agent building a new capability. **The staging engine** (`StagingEngine.qml`) resolves the active rice's theme tokens to per-slot QML; a host surface embeds one of two fixed per-slot anchors, which asks the engine whether the active rice dressed that slot and loads its file, or falls back to shared chrome:
 
 - **`WidgetSlot.qml`** — an `Item`. Sizes itself off the loaded child and parents it into an existing layout, for a slot whose widget root is an ordinary `Item`.
 - **`SurfaceSlot.qml`** — a non-visual `QtObject`, for a slot whose root IS its own `PanelWindow` (own Overlay layer, own WlrLayershell namespace, own keyboard focus, own `GlobalShortcut`). Resolves and creates the widget, exposing the live instance as `.item` for the host to call directly.
 
-Both anchors build the widget via `Qt.createComponent` → `Component.createObject`, never a declarative `Loader` — QML resolves `required property` at object-creation time, and a `Loader` only lets properties be assigned after the item has already loaded. Both resolve through the same baseline-fallback chain (`StagingEngine.resolveSong`, `CONTRACTS.md §5`): the active song's own file if it authored the slot, else sonata's (the shipped baseline every song falls back to), else the anchor's own lane-side `fallback` Component, else nothing. Most `SurfaceSlot` slots give no `fallback` (sonata's file is their floor, since a window-owning slot moves as one whole unit); `switcher` gives the plain `AoideSwitcher.qml`, because no shipped song authors one and its shortcut must open something in every song.
+Both anchors build the widget via `Qt.createComponent` → `Component.createObject`, never a declarative `Loader` — QML resolves `required property` at object-creation time, and a `Loader` only lets properties be assigned after the item has already loaded. Both resolve through the same baseline-fallback chain (`StagingEngine.resolveRice`, `CONTRACTS.md §5`): the active rice's own file if it authored the slot, else sonata's (the shipped baseline every rice falls back to), else the anchor's own lane-side `fallback` Component, else nothing. Most `SurfaceSlot` slots give no `fallback` (sonata's file is their floor, since a window-owning slot moves as one whole unit); `switcher` gives the plain `AoideSwitcher.qml`, because no shipped rice authors one and its shortcut must open something in every rice.
 
-A song authors a slot by dropping `rices/<name>/widgets/<slot>.qml` ([[Song-Anatomy]]); the build imposes no fixed slot enum — the strillix lane's build copies any `widgets/*.qml` file a committed song carries into `$out/qml/songs/<name>/<slot>.qml`, alongside a generated `manifest.json` (`{song: [slots]}`, distinct from the type-declaration `registry.json` below) the engine reads to answer `has(song, slot)`/`source(song, slot)`. A slot only renders once a host surface embeds a `WidgetSlot`/`SurfaceSlot` anchor naming it — presence is the host's call, which variant fills it is the song's, via the manifest. Seven slots are wired today: `calendar`, `herald-center`, `bar` via `WidgetSlot`; `herald` (the notification popup), `powermenu`, `launcher` and `switcher` via `SurfaceSlot`. The full catalog lives in `pkgs/strillix-shell/qml/slots.md`, alongside the shape every widget file follows: an `Item` root for a `WidgetSlot` widget, a `PanelWindow` root for `SurfaceSlot`; `required property var theme`/`bridge` injected by every anchor unconditionally, slot-specific extras as their own `required property`, never `config.*`.
+A rice authors a slot by dropping `rices/<name>/widgets/<slot>.qml` ([[Rice-Anatomy]]); the build imposes no fixed slot enum — the strillix lane's build copies any `widgets/*.qml` file a committed rice carries into `$out/qml/rices/<name>/<slot>.qml`, alongside a generated `manifest.json` (`{rice: [slots]}`, distinct from the type-declaration `registry.json` below) the engine reads to answer `has(rice, slot)`/`source(rice, slot)`. A slot only renders once a host surface embeds a `WidgetSlot`/`SurfaceSlot` anchor naming it — presence is the host's call, which variant fills it is the rice's, via the manifest. Seven slots are wired today: `calendar`, `notifications-center`, `bar` via `WidgetSlot`; `notifications` (the notification popup), `powermenu`, `launcher` and `switcher` via `SurfaceSlot`. The full catalog lives in `pkgs/strillix-shell/qml/slots.md`, alongside the shape every widget file follows: an `Item` root for a `WidgetSlot` widget, a `PanelWindow` root for `SurfaceSlot`; `required property var theme`/`bridge` injected by every anchor unconditionally, slot-specific extras as their own `required property`, never `config.*`.
 
-Because `ThemeState.songName` is what `strx rice stage <name>` stages, switching the staged song hot-swaps every anchor's loaded body live — no rebuild, no restart — the same discipline as the rice loop itself, applied to widget bodies instead of colour. Adding a *new* song's widget files to the carried set still needs a rebuild; swapping which already-carried song is active does not.
+Because `ThemeState.riceName` is what `strx rice stage <name>` stages, switching the staged rice hot-swaps every anchor's loaded body live — no rebuild, no restart — the same discipline as the rice loop itself, applied to widget bodies instead of colour. Adding a *new* rice's widget files to the carried set still needs a rebuild; swapping which already-carried rice is active does not.
 
-Editing the *content* of an already-carried widget file needs no restart: `strx rice stage` re-syncs the changed widget file into `run/qml/songs/<name>/` and, if that changed something, triggers `AoideIpc.qml`'s `Quickshell.reload(false)` via `strx reload`, rebuilding the scene fresh so the edit renders live — closing the gap left by Quickshell's own file watcher, which doesn't track `Qt.createComponent`-loaded QML ([[Quickshell]]).
+Editing the *content* of an already-carried widget file needs no restart: `strx rice stage` re-syncs the changed widget file into `run/qml/rices/<name>/` and, if that changed something, triggers `AoideIpc.qml`'s `Quickshell.reload(false)` via `strx reload`, rebuilding the scene fresh so the edit renders live — closing the gap left by Quickshell's own file watcher, which doesn't track `Qt.createComponent`-loaded QML ([[Quickshell]]).
 
-**Containment invariant** (`CONTRACTS.md §5`): a loaded song widget receives only `theme` and `bridge`, plus whatever slot-specific extras the anchor declares — never nix `config.*`. A song's `rice.nix` still sets only `aoide.theme`; widget bodies are committed QML files the build carries, not nix options, so a song widget is structurally incapable of reaching host/lane options through this surface. `greeter`/`lockscreen`/`osd`/`nowPlaying` remain unbuilt slots — no host anchor exists for them yet.
+**Containment invariant** (`CONTRACTS.md §5`): a loaded rice widget receives only `theme` and `bridge`, plus whatever slot-specific extras the anchor declares — never nix `config.*`. A rice's `rice.nix` still sets only `aoide.theme`; widget bodies are committed QML files the build carries, not nix options, so a rice widget is structurally incapable of reaching host/lane options through this surface. `greeter`/`lockscreen`/`osd`/`nowPlaying` remain unbuilt slots — no host anchor exists for them yet.
 
 ## A third way onto the screen — the declared widget-type registry
 
-The staging engine above resolves a slot NAME the shell already anchored. `aoide.layout.widgets` (`modules/nucleus/options.nix`, sibling of `aoide.theme`) is a third, independent way a song puts something on screen: a song **registers an entirely new slot** via nix — one no host anchor names — instead of dressing one that already exists.
+The staging engine above resolves a slot NAME the shell already anchored. `aoide.layout.widgets` (`modules/nucleus/options.nix`, sibling of `aoide.theme`) is a third, independent way a rice puts something on screen: a rice **registers an entirely new slot** via nix — one no host anchor names — instead of dressing one that already exists.
 
-A song's `rice.nix` declares `aoide.layout.widgets.<slot> = { kind = "surface" | "dock"; … }`; the declaration is twin-written into that song's `theme.json` under a flat `.widgets` key and validated strictly by `rice lint` (`pkgs/aoide/crates/strillix-rice/src/theme/schema.rs`) — closed, and the two kinds' extra fields are mutually exclusive. `kind = "surface"` owns its own `PanelWindow`/layer-shell surface (namespace/layer/shortcut/blur fields); `kind = "dock"` mounts as an `Item` into `AoidePanel`'s existing gadget column alongside the shipped gadgets, ordered by an `order` field. The slot's QML body still lives at the ordinary `rices/<name>/widgets/<slot>.qml` path.
+A rice's `rice.nix` declares `aoide.layout.widgets.<slot> = { kind = "surface" | "dock"; … }`; the declaration is twin-written into that rice's `theme.json` under a flat `.widgets` key and validated strictly by `rice lint` (`pkgs/aoide/crates/strillix-rice/src/theme/schema.rs`) — closed, and the two kinds' extra fields are mutually exclusive. `kind = "surface"` owns its own `PanelWindow`/layer-shell surface (namespace/layer/shortcut/blur fields); `kind = "dock"` mounts as an `Item` into `AoidePanel`'s existing gadget column alongside the shipped gadgets, ordered by an `order` field. The slot's QML body still lives at the ordinary `rices/<name>/widgets/<slot>.qml` path.
 
-This is reuse, not a fourth rendering mechanism: a declared slot resolves through the same `WidgetSlot`/`SurfaceSlot` primitives above. `SongSurfaces.qml` hosts every `kind = "surface"` entry as an `Instantiator` of `SurfaceSlot`s; `SongGadgets.qml` hosts every `kind = "dock"` entry as a `Repeater` of `WidgetSlot`s, sorted by `order`. A declared slot with no actual `widgets/<slot>.qml` body warns and renders nothing, the same inert posture as an unauthored anchored slot. `rices/nocturne/` declares one `kind = "dock"` entry (`vigil`) and exercises the whole pipeline: nix option → build-time `registry.json` walk → `rice lint` → `rice stage` hot-sync → render. Full mechanism: `CONTRACTS.md` §5; full field/table reference: `pkgs/strillix-shell/qml/slots.md`.
+This is reuse, not a fourth rendering mechanism: a declared slot resolves through the same `WidgetSlot`/`SurfaceSlot` primitives above. `RiceSurfaces.qml` hosts every `kind = "surface"` entry as an `Instantiator` of `SurfaceSlot`s; `RiceGadgets.qml` hosts every `kind = "dock"` entry as a `Repeater` of `WidgetSlot`s, sorted by `order`. A declared slot with no actual `widgets/<slot>.qml` body warns and renders nothing, the same inert posture as an unauthored anchored slot. `rices/nocturne/` declares one `kind = "dock"` entry (`vigil`) and exercises the whole pipeline: nix option → build-time `registry.json` walk → `rice lint` → `rice stage` hot-sync → render. Full mechanism: `CONTRACTS.md` §5; full field/table reference: `pkgs/strillix-shell/qml/slots.md`.
 
 ## What this makes Aoide
 
@@ -113,4 +113,4 @@ This is reuse, not a fourth rendering mechanism: a declared slot resolves throug
 - [[Melete]]
 - [[Gadget-Dock]]
 - [[Widget-Bridge-Contract]]
-- [[Song-Anatomy]] — where a song's `widgets/` folder lives on disk
+- [[Rice-Anatomy]] — where a rice's `widgets/` folder lives on disk

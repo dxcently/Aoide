@@ -1,4 +1,4 @@
-//! `wallpaper set` — the live wallpaper write-path (song/wallpapers/).
+//! `wallpaper set` — the live wallpaper write-path (rice/wallpapers/).
 
 use aoide_protocol::Invocation;
 use aoide_protocol::output::{Fix, Kind, Outcome};
@@ -8,10 +8,10 @@ use serde_json::{json, Value};
 pub fn register(r: &mut Registry) {
     r.insert(cmd!(
         path: ["wallpaper", "set"],
-        summary: "Set the live wallpaper: stage stage/wallpaper.json (hot-swap) from a cover path or a bare name in song/wallpapers/ — a PICK, which survives re-staging the same song. A still is cropped to fill the screen, or tiled at 1:1 when its file name carries `_tile` or `--position tile` forces it. `--clear` drops it and returns to the active song's own default. Refuses while `rice mode declarative` is locked, except for `--from-skwd`, which records what an external provider is already showing.",
-        args: [arg!("path", "string", false, "Absolute cover path, a bare filename resolved against song/wallpapers/, or a `we:<id>` Wallpaper Engine scene token. Omitted with `--clear`.")],
+        summary: "Set the live wallpaper: stage stage/wallpaper.json (hot-swap) from a wallpaper path or a bare name in rice/wallpapers/ — a PICK, which survives re-staging the same rice. A still is cropped to fill the screen, or tiled at 1:1 when its file name carries `_tile` or `--position tile` forces it. `--clear` drops it and returns to the active rice's own default. Refuses while `rice mode declarative` is locked, except for `--from-skwd`, which records what an external provider is already showing.",
+        args: [arg!("path", "string", false, "Absolute wallpaper path, a bare filename resolved against rice/wallpapers/, or a `we:<id>` Wallpaper Engine scene token. Omitted with `--clear`.")],
         flags: [
-            flag!("clear", "bool", "Drop the pick: return the active song to its own default (its derivable cover staged as a song default, else no stage/wallpaper.json at all — the baked/palette fallback and the song's own live board)."),
+            flag!("clear", "bool", "Drop the pick: return the active rice to its own default (its derivable wallpaper staged as a rice default, else no stage/wallpaper.json at all — the baked/palette fallback and the rice's own live board)."),
             flag!("from-skwd", "bool", "RECORD ONLY: the skwd-wall provider reports what it now shows, and this writes it into stage/wallpaper.json without applying anything back (the hook's own door). Ignored when the host's provider is not skwd-wall, and when the identity is the step-aside image."),
             flag!("kind", "string", "With `--from-skwd`: the provider's own `%type%` — static, video or we (a scene, whose identity is the workshop id)."),
             flag!("position", "string", "How a still is laid on the screen: auto (the default: tiled at 1:1 when the file name carries `_tile`, else cropped to fill), tile, or fill. Not for a video or a `we:<id>` scene.", value: "position", values: &crate::wallpaper::POSITIONS, conflicts: &["clear", "from-skwd"]),
@@ -89,10 +89,10 @@ fn handle_wallpaper_set_entry(inv: &Invocation) -> Outcome {
 
 /// `wallpaper set <path>` — the live wallpaper write path.
 ///
-/// Resolves `<path>` (absolute, or a bare name under `song/wallpapers/`) and stages
-/// it as a pick for the song staged right now (CONTRACTS.md §4): what the user
-/// chose shows, the song's own board does not draw over it, and re-staging that
-/// song leaves it alone. Nothing is committed; the baked `AOIDE_WALLPAPER`
+/// Resolves `<path>` (absolute, or a bare name under `rice/wallpapers/`) and stages
+/// it as a pick for the rice staged right now (CONTRACTS.md §4): what the user
+/// chose shows, the rice's own board does not draw over it, and re-staging that
+/// rice leaves it alone. Nothing is committed; the baked `AOIDE_WALLPAPER`
 /// remains the boot fallback.
 fn handle_wallpaper_set(inv: &Invocation) -> Outcome {
     // Opposite intents, refused together rather than silently picking one (and
@@ -122,7 +122,7 @@ fn handle_wallpaper_set(inv: &Invocation) -> Outcome {
         }
     };
 
-    let song = super::mode::current_staged_song();
+    let rice = super::mode::current_staged_rice();
     let position = inv.flags.get("position").map(String::as_str);
 
     // A scene token names the provider's own library entry: there is no file to
@@ -132,7 +132,7 @@ fn handle_wallpaper_set(inv: &Invocation) -> Outcome {
         if position.is_some() {
             return position_refusal(&arg, "a Wallpaper Engine scene");
         }
-        return match crate::wallpaper::stage_scene(we_id, song.as_deref()) {
+        return match crate::wallpaper::stage_scene(we_id, rice.as_deref()) {
             Ok(dst) => Outcome::ok(
                 "wallpaper.set",
                 format!("wallpaper set to the Wallpaper Engine scene {we_id} — stage/wallpaper.json live for hot-swap"),
@@ -144,7 +144,7 @@ fn handle_wallpaper_set(inv: &Invocation) -> Outcome {
                 "weId": we_id,
                 "wallpaperJson": dst.to_string_lossy(),
                 "pick": true,
-                "song": song,
+                "rice": rice,
                 "wallpaper": crate::wallpaper_provider::sync(),
                 "seam": "AoideWallpaper.qml FileView-watches stage/wallpaper.json and hot-swaps live",
             })),
@@ -166,16 +166,16 @@ fn handle_wallpaper_set(inv: &Invocation) -> Outcome {
     if !resolved.is_file() {
         return Outcome::error(
             "wallpaper.set",
-            format!("no cover at {}: not a file", resolved.display()),
+            format!("no wallpaper at {}: not a file", resolved.display()),
         )
         .with_data(json!({
-            "reason": "cover-not-found",
+            "reason": "wallpaper-not-found",
             "arg": arg,
             "resolved": resolved.to_string_lossy(),
         }));
     }
 
-    let wallpaper_dst = match crate::wallpaper::stage_pick(&resolved, song.as_deref(), position) {
+    let wallpaper_dst = match crate::wallpaper::stage_pick(&resolved, rice.as_deref(), position) {
         Ok(dst) => dst,
         Err(e) => {
             return Outcome::error("wallpaper.set", format!("failed to stage wallpaper.json: {e}"))
@@ -190,9 +190,9 @@ fn handle_wallpaper_set(inv: &Invocation) -> Outcome {
     let laid = if tile { ", tiled at 1:1" } else { "" };
     Outcome::ok(
         "wallpaper.set",
-        match &song {
-            Some(song) => format!(
-                "wallpaper set to {}{laid} for `{song}` — stage/wallpaper.json live for hot-swap",
+        match &rice {
+            Some(rice) => format!(
+                "wallpaper set to {}{laid} for `{rice}` — stage/wallpaper.json live for hot-swap",
                 resolved.display()
             ),
             None => format!(
@@ -209,7 +209,7 @@ fn handle_wallpaper_set(inv: &Invocation) -> Outcome {
         "position": position.unwrap_or(crate::wallpaper::POSITION_AUTO),
         "tile": tile,
         "pick": true,
-        "song": song,
+        "rice": rice,
         "wallpaper": crate::wallpaper_provider::sync(),
         "seam": "AoideWallpaper.qml FileView-watches stage/wallpaper.json and hot-swaps live",
     }))
@@ -230,7 +230,7 @@ fn position_refusal(arg: &str, what: &str) -> Outcome {
 
 /// `wallpaper set --from-skwd --kind <static|video|we> <path|id>` — the RECORD
 /// direction of the provider bridge: an external provider says what it now
-/// shows, and this writes it into `stage/wallpaper.json` for the staged song.
+/// shows, and this writes it into `stage/wallpaper.json` for the staged rice.
 ///
 /// Record-only, deliberately: nothing here is applied back. A provider that
 /// re-applied what it was just told would be told again by its own
@@ -244,7 +244,7 @@ fn position_refusal(arg: &str, what: &str) -> Outcome {
 ///     report about a surface nothing is looking at is not a pick),
 ///   * the identity is this host's step-aside image (the provider showed
 ///     *nothing*, which is not something to record),
-///   * the staged pick already names this identity for this song: Aoide applied
+///   * the staged pick already names this identity for this rice: Aoide applied
 ///     it, the provider's hook came back, and the second report is already true.
 fn handle_wallpaper_from_skwd(inv: &Invocation) -> Outcome {
     const USAGE: &str = "usage: aoide wallpaper set --from-skwd --kind <static|video|we> <path|id> [--json]";
@@ -277,7 +277,7 @@ fn handle_wallpaper_from_skwd(inv: &Invocation) -> Outcome {
         }));
     }
 
-    let song = super::mode::current_staged_song();
+    let rice = super::mode::current_staged_rice();
 
     let provider = crate::wallpaper_provider::provider();
     if provider != crate::wallpaper_provider::PROVIDER_SKWD_WALL {
@@ -289,7 +289,7 @@ fn handle_wallpaper_from_skwd(inv: &Invocation) -> Outcome {
             "recorded": false,
             "ignored": "provider",
             "provider": provider,
-            "song": song,
+            "rice": rice,
         }));
     }
 
@@ -303,14 +303,14 @@ fn handle_wallpaper_from_skwd(inv: &Invocation) -> Outcome {
             "recorded": false,
             "ignored": "standin",
             "provider": provider,
-            "song": song,
+            "rice": rice,
         }));
     }
 
     let staged = crate::wallpaper::staged_identity();
     if staged.as_ref() == Some(&(kind.clone(), identity.clone()))
         && crate::wallpaper::staged_is_pick()
-        && crate::wallpaper::staged_song() == song
+        && crate::wallpaper::staged_rice() == rice
     {
         return Outcome::ok(
             "wallpaper.set",
@@ -322,16 +322,16 @@ fn handle_wallpaper_from_skwd(inv: &Invocation) -> Outcome {
             "kind": kind,
             "identity": identity,
             "provider": provider,
-            "song": song,
+            "rice": rice,
         }));
     }
 
-    match crate::wallpaper::stage_provider_pick(&kind, &identity, song.as_deref()) {
+    match crate::wallpaper::stage_provider_pick(&kind, &identity, rice.as_deref()) {
         Ok(dst) => Outcome::ok(
             "wallpaper.set",
-            match &song {
-                Some(song) => {
-                    format!("recorded {kind} {identity} as `{song}`'s pick — stage/wallpaper.json live for hot-swap")
+            match &rice {
+                Some(rice) => {
+                    format!("recorded {kind} {identity} as `{rice}`'s pick — stage/wallpaper.json live for hot-swap")
                 }
                 None => format!("recorded {kind} {identity} — stage/wallpaper.json live for hot-swap"),
             },
@@ -345,7 +345,7 @@ fn handle_wallpaper_from_skwd(inv: &Invocation) -> Outcome {
             "pick": true,
             "recorded": true,
             "provider": provider,
-            "song": song,
+            "rice": rice,
             "seam": "the provider's postProcessing hook reports what it applied; nothing is applied back (see `strillix wallpaper sync`)",
         })),
         Err(e) => Outcome::error("wallpaper.set", format!("failed to stage wallpaper.json: {e}"))
@@ -356,8 +356,8 @@ fn handle_wallpaper_from_skwd(inv: &Invocation) -> Outcome {
     }
 }
 
-/// `wallpaper set --clear` — drop the pick and give the staged song back its own
-/// default. With no song staged there is no default to derive, so the clear is
+/// `wallpaper set --clear` — drop the pick and give the staged rice back its own
+/// default. With no rice staged there is no default to derive, so the clear is
 /// a removal.
 fn handle_wallpaper_clear(inv: &Invocation) -> Outcome {
     if !inv.args.is_empty() {
@@ -368,12 +368,12 @@ fn handle_wallpaper_clear(inv: &Invocation) -> Outcome {
         .with_data(json!({ "reason": "clear-takes-no-path" }));
     }
 
-    let song = super::mode::current_staged_song();
+    let rice = super::mode::current_staged_rice();
     let dropped_pick =
-        crate::wallpaper::staged_is_pick() && crate::wallpaper::staged_song() == song;
+        crate::wallpaper::staged_is_pick() && crate::wallpaper::staged_rice() == rice;
     let wallpaper_dst = crate::wallpaper::staged_wallpaper_json();
-    let staged = match &song {
-        Some(song) => crate::wallpaper::stage_song_default(song),
+    let staged = match &rice {
+        Some(rice) => crate::wallpaper::stage_rice_default(rice),
         None => crate::wallpaper::clear_staged(),
     };
     let staged = match staged {
@@ -391,8 +391,8 @@ fn handle_wallpaper_clear(inv: &Invocation) -> Outcome {
         crate::wallpaper::WallpaperWrite::Written(path) => Outcome::ok(
             "wallpaper.set",
             format!(
-                "pick dropped — {} is back to its own cover {}",
-                song.as_deref().unwrap_or("the song"),
+                "pick dropped — {} is back to its own wallpaper {}",
+                rice.as_deref().unwrap_or("the rice"),
                 path.display()
             ),
         )
@@ -407,20 +407,20 @@ fn handle_wallpaper_clear(inv: &Invocation) -> Outcome {
         })),
         write => {
             let removed = matches!(write, crate::wallpaper::WallpaperWrite::Removed);
-            let whose = match &song {
-                Some(song) => format!("`{song}` has no derivable cover"),
-                None => "no song is staged".to_string(),
+            let whose = match &rice {
+                Some(rice) => format!("`{rice}` has no derivable wallpaper"),
+                None => "no rice is staged".to_string(),
             };
             let note = if dropped_pick {
                 "pick dropped"
             } else if removed {
-                "no pick for this song to drop"
+                "no pick for this rice to drop"
             } else {
                 "no pick staged"
             };
             let mut out = Outcome::ok(
                 "wallpaper.set",
-                format!("{note} — {whose}; the song's own default (the baked/palette fallback, \
+                format!("{note} — {whose}; the rice's own default (the baked/palette fallback, \
                          and its own live board) shows again"),
             )
             .with_data(json!({
@@ -450,7 +450,7 @@ mod tests {
     fn wallpaper_set_stages_an_absolute_path() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
-        let root = unique_tmp("cover-abs");
+        let root = unique_tmp("wallpaper-abs");
         let stage = root.join("stage");
         std::fs::create_dir_all(&stage).unwrap();
         let img = root.join("elsewhere.png");
@@ -460,12 +460,12 @@ mod tests {
         let out = handle_wallpaper_set(&inv(&["wallpaper", "set"], &[img.to_str().unwrap()]));
         assert_eq!(out.status, Status::Ok);
         // wallpaper.json landed in the stage and points at the absolute path.
-        let cover = std::fs::read_to_string(stage.join("wallpaper.json")).unwrap();
-        assert!(cover.contains("elsewhere.png"), "wallpaper.json points at the file: {cover}");
-        assert!(cover.ends_with("\n"), "trailing newline mirrors rice stage");
+        let wallpaper = std::fs::read_to_string(stage.join("wallpaper.json")).unwrap();
+        assert!(wallpaper.contains("elsewhere.png"), "wallpaper.json points at the file: {wallpaper}");
+        assert!(wallpaper.ends_with("\n"), "trailing newline mirrors rice stage");
         assert!(
-            cover.contains("\"pick\": true"),
-            "`wallpaper set` stages a PICK, not a song default: {cover}"
+            wallpaper.contains("\"pick\": true"),
+            "`wallpaper set` stages a PICK, not a rice default: {wallpaper}"
         );
         assert!(out.changed.iter().any(|c| c.ends_with("wallpaper.json")));
         let data = out.data.unwrap();
@@ -475,15 +475,15 @@ mod tests {
     }
 
     #[test]
-    fn wallpaper_set_resolves_a_bare_name_against_the_covers_library() {
+    fn wallpaper_set_resolves_a_bare_name_against_the_wallpapers_library() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
-        let root = unique_tmp("cover-name");
+        let root = unique_tmp("wallpaper-name");
         let stage = root.join("stage");
-        let covers = root.join("wallpapers");
+        let wallpapers = root.join("wallpapers");
         std::fs::create_dir_all(&stage).unwrap();
-        std::fs::create_dir_all(&covers).unwrap();
-        std::fs::write(covers.join("sonata.webp"), b"RIFF stub").unwrap();
+        std::fs::create_dir_all(&wallpapers).unwrap();
+        std::fs::write(wallpapers.join("sonata.webp"), b"RIFF stub").unwrap();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
 
         let out = handle_wallpaper_set(&inv(&["wallpaper", "set"], &["sonata.webp"]));
@@ -491,10 +491,10 @@ mod tests {
         let staged = out.data.unwrap()["wallpaperPick"].as_str().unwrap().to_string();
         assert!(
             staged.ends_with("wallpapers/sonata.webp"),
-            "bare name resolved under the shared covers library: {staged}"
+            "bare name resolved under the shared wallpapers library: {staged}"
         );
-        let cover = std::fs::read_to_string(stage.join("wallpaper.json")).unwrap();
-        assert!(cover.contains("wallpapers/sonata.webp"));
+        let wallpaper = std::fs::read_to_string(stage.join("wallpaper.json")).unwrap();
+        assert!(wallpaper.contains("wallpapers/sonata.webp"));
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -502,7 +502,7 @@ mod tests {
     fn wallpaper_set_missing_file_is_error_exit_1() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
-        let root = unique_tmp("cover-missing");
+        let root = unique_tmp("wallpaper-missing");
         let stage = root.join("stage");
         std::fs::create_dir_all(&stage).unwrap();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
@@ -510,7 +510,7 @@ mod tests {
         let out = handle_wallpaper_set(&inv(&["wallpaper", "set"], &["nope.png"]));
         assert_eq!(out.status, Status::Error);
         assert_eq!(out.render(false).1, aoide_protocol::output::exit::ERROR);
-        assert_eq!(out.data.unwrap()["reason"], "cover-not-found");
+        assert_eq!(out.data.unwrap()["reason"], "wallpaper-not-found");
         // Nothing was staged for a missing file.
         assert!(!stage.join("wallpaper.json").exists());
         let _ = std::fs::remove_dir_all(&root);
@@ -523,32 +523,32 @@ mod tests {
         assert_eq!(out.render(false).1, aoide_protocol::output::exit::USAGE);
     }
 
-    // ── wallpaper set --clear: drop the pick, back to the song's default ─────────
+    // ── wallpaper set --clear: drop the pick, back to the rice's default ─────────
 
-    /// `wallpaper set --clear` returns the ACTIVE song to its own default. With a
-    /// derivable cover that means the song's cover comes back (as a default,
+    /// `wallpaper set --clear` returns the ACTIVE rice to its own default. With a
+    /// derivable wallpaper that means the rice's wallpaper comes back (as a default,
     /// never as a pick); with none it means no `wallpaper.json` at all (the baked
-    /// /palette fallback, plus the song's own live board).
+    /// /palette fallback, plus the rice's own live board).
     #[test]
-    fn clear_drops_the_pick_and_restores_the_songs_own_default() {
+    fn clear_drops_the_pick_and_restores_the_rices_own_default() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
-        let root = unique_tmp("cover-clear");
+        let root = unique_tmp("wallpaper-clear");
         let stage = root.join("stage");
-        let covers = root.join("wallpapers");
+        let wallpapers = root.join("wallpapers");
         std::fs::create_dir_all(&stage).unwrap();
-        std::fs::create_dir_all(&covers).unwrap();
-        std::fs::write(covers.join("dusk.png"), b"\x89PNG stub").unwrap();
+        std::fs::create_dir_all(&wallpapers).unwrap();
+        std::fs::write(wallpapers.join("dusk.png"), b"\x89PNG stub").unwrap();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
 
-        // What `rice stage dusk` leaves: the song, and dusk's own cover as a
+        // What `rice stage dusk` leaves: the rice, and dusk's own wallpaper as a
         // DEFAULT.
         std::fs::write(
             stage.join("theme.json"),
-            r#"{"schemaVersion":"0","song":"dusk"}"#,
+            r#"{"schemaVersion":"0","rice":"dusk"}"#,
         )
         .unwrap();
-        crate::wallpaper::stage_default(&covers.join("dusk.png"), "dusk").unwrap();
+        crate::wallpaper::stage_default(&wallpapers.join("dusk.png"), "dusk").unwrap();
         assert!(!crate::wallpaper::staged_is_pick());
 
         // The user picks something else…
@@ -558,32 +558,32 @@ mod tests {
         assert_eq!(set.status, Status::Ok);
         assert!(crate::wallpaper::staged_is_pick());
 
-        // …and clears it: dusk's own cover is back, unmarked.
+        // …and clears it: dusk's own wallpaper is back, unmarked.
         let cleared = handle_wallpaper_set(&clear_inv(&[]));
         assert_eq!(cleared.status, Status::Ok, "{:?}", cleared.data);
         let data = cleared.data.unwrap();
         assert_eq!(data["wallpaperStage"], "default");
         assert_eq!(data["cleared"], false);
         assert!(data["wallpaperPick"].as_str().unwrap().ends_with("wallpapers/dusk.png"));
-        assert!(!crate::wallpaper::staged_is_pick(), "the restored cover is a default");
+        assert!(!crate::wallpaper::staged_is_pick(), "the restored wallpaper is a default");
         assert!(cleared.changed.iter().any(|c| c.ends_with("wallpaper.json")));
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// A song with NO derivable cover: the clear removes the file, and a second
+    /// A rice with NO derivable wallpaper: the clear removes the file, and a second
     /// clear is a quiet no-op rather than an error.
     #[test]
-    fn clear_removes_the_file_when_the_song_derives_none_and_is_idempotent() {
+    fn clear_removes_the_file_when_the_rice_derives_none_and_is_idempotent() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
-        let root = unique_tmp("cover-clear-none");
+        let root = unique_tmp("wallpaper-clear-none");
         let stage = root.join("stage");
         std::fs::create_dir_all(&stage).unwrap();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
 
         std::fs::write(
             stage.join("theme.json"),
-            r#"{"schemaVersion":"0","song":"moonlight"}"#,
+            r#"{"schemaVersion":"0","rice":"moonlight"}"#,
         )
         .unwrap();
         crate::wallpaper::stage_pick(std::path::Path::new("/tmp/old-choice.png"), Some("moonlight"), None)
@@ -605,13 +605,13 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// With no stage file at all there is no song to derive a default for —
+    /// With no stage file at all there is no rice to derive a default for —
     /// the clear is just the removal (the baked/palette fallback shows).
     #[test]
     fn clear_with_nothing_staged_only_removes() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
-        let root = unique_tmp("cover-clear-nosong");
+        let root = unique_tmp("wallpaper-clear-norice");
         let stage = root.join("stage");
         std::fs::create_dir_all(&stage).unwrap();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
@@ -639,7 +639,7 @@ mod tests {
     fn clear_entry_refuses_while_declarative_mode_is_locked() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
-        let root = unique_tmp("cover-clear-locked");
+        let root = unique_tmp("wallpaper-clear-locked");
         let stage = root.join("stage");
         std::fs::create_dir_all(&stage).unwrap();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
@@ -659,7 +659,7 @@ mod tests {
     fn from_skwd_no_op_mints_no_take_in_draft_mode() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SKWD_WALL_STANDIN"]);
-        let root = unique_tmp("cover-from-skwd-draft-noop");
+        let root = unique_tmp("wallpaper-from-skwd-draft-noop");
         let stage = root.join("stage");
         std::fs::create_dir_all(&stage).unwrap();
         std::fs::write(stage.join("theme.json"), VALID_NOTES).unwrap();
@@ -669,7 +669,7 @@ mod tests {
 
         aoide_storage::mode::save_mode_marker(&aoide_storage::mode::ModeMarker {
             mode: aoide_storage::mode::RiceMode::Draft,
-            song: Some("moonlight".to_string()),
+            rice: Some("moonlight".to_string()),
             draft: Some("neon-night".to_string()),
             ..Default::default()
         })
@@ -727,7 +727,7 @@ mod tests {
     fn clear_with_from_skwd_is_a_usage_refusal_and_keeps_the_pick() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SKWD_WALL_STANDIN"]);
-        let root = unique_tmp("cover-clear-from-skwd");
+        let root = unique_tmp("wallpaper-clear-from-skwd");
         let stage = root.join("stage");
         stage_theme(&stage, Some("skwd-wall"));
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
@@ -763,7 +763,7 @@ mod tests {
     fn from_skwd_refuses_a_scene_token_as_its_identity() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SKWD_WALL_STANDIN"]);
-        let root = unique_tmp("cover-from-skwd-token");
+        let root = unique_tmp("wallpaper-from-skwd-token");
         let stage = root.join("stage");
         stage_theme(&stage, Some("skwd-wall"));
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
@@ -788,7 +788,7 @@ mod tests {
     fn from_skwd_is_exempt_from_the_declarative_lock() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SKWD_WALL_STANDIN"]);
-        let root = unique_tmp("cover-from-skwd-locked");
+        let root = unique_tmp("wallpaper-from-skwd-locked");
         let stage = root.join("stage");
         stage_theme(&stage, Some("skwd-wall"));
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
@@ -808,8 +808,8 @@ mod tests {
         let data = recorded.data.unwrap();
         assert_eq!(data["recorded"], true);
         assert_eq!(data["provider"], "skwd-wall");
-        let cover = std::fs::read_to_string(stage.join("wallpaper.json")).unwrap();
-        assert!(cover.contains("\"kind\": \"video\""), "{cover}");
+        let wallpaper = std::fs::read_to_string(stage.join("wallpaper.json")).unwrap();
+        assert!(wallpaper.contains("\"kind\": \"video\""), "{wallpaper}");
 
         // The lock still holds for the pick-maker: a plain set, and a clear.
         let img = root.join("elsewhere.png");
@@ -823,7 +823,7 @@ mod tests {
         assert_eq!(cleared.data.unwrap()["reason"], "declarative-mode-locked");
         assert_eq!(
             std::fs::read_to_string(stage.join("wallpaper.json")).unwrap(),
-            cover,
+            wallpaper,
             "the refusal left the recorded pick exactly as it stood"
         );
         let _ = std::fs::remove_dir_all(&root);
@@ -833,7 +833,7 @@ mod tests {
     fn wallpaper_set_entry_refuses_while_declarative_mode_is_locked() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
-        let root = unique_tmp("cover-entry-locked");
+        let root = unique_tmp("wallpaper-entry-locked");
         let stage = root.join("stage");
         std::fs::create_dir_all(&stage).unwrap();
         let img = root.join("elsewhere.png");
@@ -851,7 +851,7 @@ mod tests {
     fn wallpaper_set_entry_allows_writes_once_staging_mode_is_unlocked() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
-        let root = unique_tmp("cover-entry-unlocked");
+        let root = unique_tmp("wallpaper-entry-unlocked");
         let stage = root.join("stage");
         std::fs::create_dir_all(&stage).unwrap();
         let img = root.join("elsewhere.png");
@@ -876,7 +876,7 @@ mod tests {
     fn wallpaper_set_entry_in_draft_mode_mints_an_auto_take_on_a_real_change() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
-        let root = unique_tmp("cover-autotake-fires");
+        let root = unique_tmp("wallpaper-autotake-fires");
         let stage = root.join("stage");
         std::fs::create_dir_all(&stage).unwrap();
         std::fs::write(stage.join("theme.json"), VALID_NOTES).unwrap();
@@ -886,7 +886,7 @@ mod tests {
 
         aoide_storage::mode::save_mode_marker(&aoide_storage::mode::ModeMarker {
             mode: aoide_storage::mode::RiceMode::Draft,
-            song: Some("moonlight".to_string()),
+            rice: Some("moonlight".to_string()),
             draft: Some("neon-night".to_string()),
             ..Default::default()
         })
@@ -908,7 +908,7 @@ mod tests {
     fn wallpaper_set_entry_in_draft_mode_mints_again_on_a_content_identical_reset() {
         // The pinned invariant (orchestrator correction over this step's own
         // earlier draft): a take records EVERY write, not just the ones that
-        // changed something. Setting the SAME cover twice in a row produces
+        // changed something. Setting the SAME wallpaper twice in a row produces
         // byte-identical content to what take 1 already holds — it must
         // STILL mint a second take. Suppressing on no drift would make the
         // take tree an incomplete record of write events; the resulting
@@ -916,7 +916,7 @@ mod tests {
         // not this hook's.
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
-        let root = unique_tmp("cover-autotake-repeat");
+        let root = unique_tmp("wallpaper-autotake-repeat");
         let stage = root.join("stage");
         std::fs::create_dir_all(&stage).unwrap();
         std::fs::write(stage.join("theme.json"), VALID_NOTES).unwrap();
@@ -926,7 +926,7 @@ mod tests {
 
         aoide_storage::mode::save_mode_marker(&aoide_storage::mode::ModeMarker {
             mode: aoide_storage::mode::RiceMode::Draft,
-            song: Some("moonlight".to_string()),
+            rice: Some("moonlight".to_string()),
             draft: Some("neon-night".to_string()),
             ..Default::default()
         })
@@ -940,7 +940,7 @@ mod tests {
         assert_eq!(second.status, Status::Ok, "{:?}", second.data);
         assert_eq!(
             second.data.unwrap()["take"], 2,
-            "a content-identical cover reset still mints its own take"
+            "a content-identical wallpaper reset still mints its own take"
         );
         assert!(second.changed.iter().any(|c| c.ends_with("history/0002.json")));
 
@@ -964,7 +964,7 @@ mod tests {
         i
     }
 
-    /// `rice stage`'s theme for the staged song, plus — when `provider` is
+    /// `rice stage`'s theme for the staged rice, plus — when `provider` is
     /// given — the provider name the `strillix` lane publishes beside it. Absent
     /// means the shell's own layer, which is what a host with no provider
     /// selected reports.
@@ -972,7 +972,7 @@ mod tests {
         std::fs::create_dir_all(stage).unwrap();
         std::fs::write(
             stage.join("theme.json"),
-            r#"{"schemaVersion":"0","song":"cadenza"}"#,
+            r#"{"schemaVersion":"0","rice":"cadenza"}"#,
         )
         .unwrap();
         match provider {
@@ -990,7 +990,7 @@ mod tests {
     fn wallpaper_set_stages_a_scene_token_as_a_scene_pick() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
-        let root = unique_tmp("cover-scene-token");
+        let root = unique_tmp("wallpaper-scene-token");
         let stage = root.join("stage");
         stage_theme(&stage, None);
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
@@ -1001,14 +1001,14 @@ mod tests {
         assert_eq!(data["kind"], "we");
         assert_eq!(data["weId"], "123");
         assert_eq!(data["pick"], true);
-        let cover = std::fs::read_to_string(stage.join("wallpaper.json")).unwrap();
-        assert!(cover.contains("\"weId\": \"123\""), "{cover}");
-        assert!(!cover.contains("path"), "a scene has no path: {cover}");
+        let wallpaper = std::fs::read_to_string(stage.join("wallpaper.json")).unwrap();
+        assert!(wallpaper.contains("\"weId\": \"123\""), "{wallpaper}");
+        assert!(!wallpaper.contains("path"), "a scene has no path: {wallpaper}");
 
         // An empty id is not a scene token (and not a file either).
         let out = handle_wallpaper_set(&inv(&["wallpaper", "set"], &["we:"]));
         assert_eq!(out.status, Status::Error);
-        assert_eq!(out.data.unwrap()["reason"], "cover-not-found");
+        assert_eq!(out.data.unwrap()["reason"], "wallpaper-not-found");
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -1018,7 +1018,7 @@ mod tests {
     fn wallpaper_set_takes_the_kind_from_a_video_extension() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
-        let root = unique_tmp("cover-video-kind");
+        let root = unique_tmp("wallpaper-video-kind");
         let stage = root.join("stage");
         stage_theme(&stage, None);
         let clip = root.join("clip.mp4");
@@ -1043,7 +1043,7 @@ mod tests {
     fn wallpaper_set_position_forces_or_follows_the_file_name() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
-        let root = unique_tmp("cover-position-set");
+        let root = unique_tmp("wallpaper-position-set");
         let stage = root.join("stage");
         stage_theme(&stage, None);
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
@@ -1082,7 +1082,7 @@ mod tests {
     fn wallpaper_set_position_refuses_a_scene_and_a_video() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
-        let root = unique_tmp("cover-position-refused");
+        let root = unique_tmp("wallpaper-position-refused");
         let stage = root.join("stage");
         stage_theme(&stage, None);
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
@@ -1112,7 +1112,7 @@ mod tests {
     fn wallpaper_set_position_is_declared_against_clear_from_skwd_and_other_words() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
-        let root = unique_tmp("cover-position-declared");
+        let root = unique_tmp("wallpaper-position-declared");
         let stage = root.join("stage");
         stage_theme(&stage, None);
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
@@ -1149,13 +1149,13 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// The provider's own report is RECORDED for the staged song — and the
+    /// The provider's own report is RECORDED for the staged rice — and the
     /// envelope says so.
     #[test]
-    fn from_skwd_records_the_providers_pick_for_the_staged_song() {
+    fn from_skwd_records_the_providers_pick_for_the_staged_rice() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SKWD_WALL_STANDIN"]);
-        let root = unique_tmp("cover-from-skwd");
+        let root = unique_tmp("wallpaper-from-skwd");
         let stage = root.join("stage");
         stage_theme(&stage, Some("skwd-wall"));
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
@@ -1170,28 +1170,28 @@ mod tests {
         assert_eq!(data["recorded"], true);
         assert_eq!(data["kind"], "video");
         assert_eq!(data["provider"], "skwd-wall");
-        assert_eq!(data["song"], "cadenza");
-        let cover = std::fs::read_to_string(stage.join("wallpaper.json")).unwrap();
-        assert!(cover.contains("\"kind\": \"video\""), "{cover}");
-        assert!(cover.contains("\"pick\": true"), "{cover}");
-        assert!(cover.contains("\"song\": \"cadenza\""), "{cover}");
+        assert_eq!(data["rice"], "cadenza");
+        let wallpaper = std::fs::read_to_string(stage.join("wallpaper.json")).unwrap();
+        assert!(wallpaper.contains("\"kind\": \"video\""), "{wallpaper}");
+        assert!(wallpaper.contains("\"pick\": true"), "{wallpaper}");
+        assert!(wallpaper.contains("\"rice\": \"cadenza\""), "{wallpaper}");
 
         // A scene records the id and no path.
         let out = handle_wallpaper_set(&set_inv(&["123"], &[("from-skwd", "true"), ("kind", "we")]));
         assert_eq!(out.status, Status::Ok);
         assert_eq!(out.data.unwrap()["recorded"], true);
-        let cover = std::fs::read_to_string(stage.join("wallpaper.json")).unwrap();
-        assert!(cover.contains("\"weId\": \"123\""), "{cover}");
+        let wallpaper = std::fs::read_to_string(stage.join("wallpaper.json")).unwrap();
+        assert!(wallpaper.contains("\"weId\": \"123\""), "{wallpaper}");
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// The shell's own layer paints this song: the report is ignored, and
+    /// The shell's own layer paints this rice: the report is ignored, and
     /// nothing is written.
     #[test]
     fn from_skwd_is_ignored_when_the_shell_paints() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SKWD_WALL_STANDIN"]);
-        let root = unique_tmp("cover-from-skwd-shell");
+        let root = unique_tmp("wallpaper-from-skwd-shell");
         let stage = root.join("stage");
         stage_theme(&stage, None);
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
@@ -1208,7 +1208,7 @@ mod tests {
         assert_eq!(data["provider"], "quickshell");
         assert!(!stage.join("wallpaper.json").exists(), "nothing recorded");
 
-        // …and the same with no song staged at all.
+        // …and the same with no rice staged at all.
         std::fs::remove_file(stage.join("theme.json")).unwrap();
         let out = handle_wallpaper_set(&set_inv(
             &["/tmp/library/a.png"],
@@ -1225,7 +1225,7 @@ mod tests {
     fn from_skwd_ignores_the_standin_image() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SKWD_WALL_STANDIN"]);
-        let root = unique_tmp("cover-from-skwd-standin");
+        let root = unique_tmp("wallpaper-from-skwd-standin");
         let stage = root.join("stage");
         stage_theme(&stage, Some("skwd-wall"));
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
@@ -1250,7 +1250,7 @@ mod tests {
     fn from_skwd_is_a_no_op_when_the_pick_already_matches() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SKWD_WALL_STANDIN"]);
-        let root = unique_tmp("cover-from-skwd-noop");
+        let root = unique_tmp("wallpaper-from-skwd-noop");
         let stage = root.join("stage");
         stage_theme(&stage, Some("skwd-wall"));
         std::env::set_var("AOIDE_STAGE_DIR", &stage);

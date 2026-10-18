@@ -6,7 +6,7 @@ tags: [aoide, agent, cli, screen, pointer, vision, computer-use]
 
 # Screen Control — the `strx screen` family
 
-`strx screen` is AoideOS's computer-use surface: an agent's whole loop for
+`strx screen` is Strillix's computer-use surface: an agent's whole loop for
 looking at the desktop, grounding a target on it, acting on it, and
 verifying the act landed — fourteen commands
 (`info`/`shot`/`ocr`/`diff`/`send`, plus nine `screen point <command>`s) behind

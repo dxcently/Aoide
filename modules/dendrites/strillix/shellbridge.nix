@@ -160,11 +160,11 @@ lib.mkIf (config.aoide.enable && config.aoide.strillix.enable) {
         "STRILLIX_ROOT=${config.aoide.strillix.root}"
         "AOIDE_FLAKE_ROOT=${config.aoide.checkout}"
         # The host file the RICE menu's Declare row rewrites
-        # (`ricedeclare` → `strillix rice declare <song> --host`).
+        # (`ricedeclare` → `strillix rice declare <rice> --host`).
         "AOIDE_HOST_CONFIG=${config.aoide.hostConfig}"
         # This unit execs `strillix shellbridge --run` (below) — the ONE unit in
         # this file whose process actually reads `STRILLIX_TEMPLATES`
-        # (`aoide-song::widgets`, `strillix`-only). `aoide-graph-reap` further
+        # (`strillix-rice::widgets`, `strillix`-only). `aoide-graph-reap` further
         # down execs plain `aoide`, never touches paint data, and does not
         # carry this var — review finding, task #107: paint data belongs on
         # the unit that paints, not every unit this file happens to declare.

@@ -274,7 +274,7 @@ for Quickshell: render surfaces only]]) applied to the roster widgets:
    `arg`: the bridge runs `strx component`, which asks the provider that fills
    the slot — the strillix shell or its declared argv), and the RICE menu's four verbs — the read `ricemenu`, the switch
    `ricemode` (`stage <name>`/`declarative`), the gesture `ricedraft`
-   (`enter`/`new`/`save`/`drop`) and the answered `ricedeclare <song>` (the
+   (`enter`/`new`/`save`/`drop`) and the answered `ricedeclare <rice>` (the
    host performs it on the next rebuild) — nothing else leaves QML. A new
    verb is one of two shapes: a READ answers on its own connection, with the
    daemon's bound under the client's reply timeout; an ACTION is

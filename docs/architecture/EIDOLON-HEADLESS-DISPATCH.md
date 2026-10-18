@@ -33,7 +33,7 @@ Model calls and tool results are counted from the `.eid` journals
 | R1 resumed | `resume` + `send --wake` STOP | 6 min | 2 | 5 | 1 | 0 | settled, report written |
 
 R1's report (`report-review1-recovered.md`) carried the defect R2 missed:
-an EMPTY published `surfaces.json` — what every non-declaring song ships —
+an EMPTY published `surfaces.json` — what every non-declaring rice ships —
 took the declared branch and disabled the placeholder watchdog on every
 non-sonata host. Fixed in `83bbe1a`. R2 missed it because the brief told
 it the empty set was healthy; a reviewer checks the invariant it is handed.

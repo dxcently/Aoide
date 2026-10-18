@@ -27,15 +27,15 @@
   `to_json_string` engine call `strx theme resolve` itself uses (never a
   hand-rolled shortcut for any one form):** `live` (the resolved LIVE stage
   twin, `aoide_storage::fs::stage_dir().join("theme.json")` — read only,
-  never written); a bare song name (that song's own
+  never written); a bare rice name (that rice's own
   `rices/<name>/theme.json` — independent of the preview's own
-  `--song`); a path to a theme file; or a path to a base16 scheme (JSON
+  `--rice`); a path to a theme file; or a path to a base16 scheme (JSON
   `{"base00": …, …}` or the flat `key: value` line shape — detected by
   `base00` present and `palette` absent, synthesized into a palette by
   `theme_from_base16` per CONTRACTS.md §1's base16 column reversed). A
   resolve failure is an error that leaves the previous staged file intact —
   never a partial write. Default (no `--theme`) is the preview's own
-  `--song`.
+  `--rice`.
 - **`preview.json` never carries a bare `theme` key.** The P2 canvas
   treats it as a legacy alias of `themeSource` and deletes it on every
   save of its own; the builder and `preview set` do the same on every
@@ -50,10 +50,10 @@
   `preview set` entirely, which is exactly why a canvas launched by an
   older or different binary must not trust PATH for its own rail.
 - **`commands::preview`'s root seeds four OTHER lane-read stage files a
-  song's own widgets/theme never touch, so nothing starts with a parse
+  rice's own widgets/theme never touch, so nothing starts with a parse
   warning on a missing file:** `/stage/mode.json`
   (`ThemeState.qml`'s convention) is REWRITTEN on every build and on
-  `preview set --song` — it always names the CURRENT song, never stale;
+  `preview set --rice` — it always names the CURRENT rice, never stale;
   `/stage/wallpaper.json`, `/stage/grimoire.json` (`GrimoireLedger`'s
   `launches` is an OBJECT keyed by app id, never an array — matches the
   live file's own shape), and `state/usage.json` are written ONCE, only
@@ -62,18 +62,18 @@
 - **`commands::preview declare` copies checkout-ward, never the reverse.**
   It is the canvas's own `rice declare` counterpart (same "stage vs.
   commit" split, `Self-Ricing.md`): the previewed widget body and/or
-  resolved palette become `rices/<song>/` truth, byte-diffed so a
+  resolved palette become `rices/<rice>/` truth, byte-diffed so a
   repeat with nothing new is a true no-op, and it NEVER runs `git`, touches
   the live stage, `~/.aoide`, or `run/qml` — commit and rebuild stay the
-  user's own gate (house rule 2). A `widget` field outside `run/qml/songs/`
+  user's own gate (house rule 2). A `widget` field outside `run/qml/rices/`
   (a lane symlink) is refused with a usage error, never silently declared
-  — and the `starts_with("songs/")` check alone is a STRING match, not a
+  — and the `starts_with("rices/")` check alone is a STRING match, not a
   boundary: a `..` component is rejected outright, and the canonicalized
   source is additionally required to land inside a real rices
   `widgets/` dir, since a `..`-laden field can otherwise satisfy the
   prefix check while resolving straight out to a lane file. `--slot` is
   validated against the
-  same shape as a song name (`valid_song_name`) before it is ever joined
+  same shape as a rice name (`valid_rice_name`) before it is ever joined
   into a path — an unvalidated slot is exactly the same class of escape.
 - **`rice declare --host` is CLI-door-only and lives in `strillix-rice`.** The
   flag's `doors: &[Door::Cli]` is the registration's own (it changes what the
@@ -85,12 +85,12 @@
   append, never reorder (see `pkgs/aoide/crates/AGENTS.md`).
 - **Every `run/qml/` entry under EVERY preview root is a COPY of a
   checkout file, never a symlink into it** (`commands::preview`'s
-  `stage_qml_copies`/`stage_song_copies`; `remove_stale` replaces a link
+  `stage_qml_copies`/`stage_rice_copies`; `remove_stale` replaces a link
   left by an older root). The checkout is edited in the checkout; the
   root's copies are refreshed by the canvas from `preview.json`'s `stage`
   map before every reload and by a `--no-launch` rebuild — one entry per
   watched file that HAS a copy: a rices widget mapped under
-  `songs/<s>/<rest>`, a shell qml file mapped flat to its own
+  `rices/<s>/<rest>`, a shell qml file mapped flat to its own
   `run/qml/<f>`; a watched file with no copy (a nested path under the
   shell's qml dir, a foreign path) gets none, since the canvas rewrites
   each `dst` from its `src`. Nothing in
@@ -211,7 +211,7 @@
   contract — when in doubt about a P7 file-naming convention, check the
   files it actually wrote before trusting a Rust API's own naming
   intuition.
-- **May be nix-dependent — the one binary allowed to.** `song::widgets`'s
+- **May be nix-dependent — the one binary allowed to.** `rice::widgets`'s
   `nix-instantiate` over the SHIPPED generator is the only shell-out left
   reachable from here (`commands::onboard` reads a shipped JSON instead); that
   dependency must never migrate toward
@@ -373,8 +373,8 @@
   `LockedHint` is cleared only after hyprlock holds the screen: a failed
   hyprlock leaves it standing, because the restarted shell re-locks on it.
   The face is
-  decided by the staged song's OWN manifest entry: never the baseline song,
-  so a song without a face is a hyprlock song. The command is run by the
+  decided by the staged rice's OWN manifest entry: never the baseline rice,
+  so a rice without a face is a hyprlock rice. The command is run by the
   compositor or a terminal, never as the child of a NoNewPrivileges unit
   (unix_chkpwd). Its tests put builtins-only `quickshell`, `hyprlock`,
   `busctl` and `loginctl` stand-ins on a `PATH` holding nothing else, under a
@@ -393,7 +393,7 @@
 ## Extension points
 
 - **A new paint command** adds a `cmd!`/`register` entry in the owning domain
-  crate (`song`, `screen`, or `conduct` for shellbridge/notifications), wired into
+  crate (`rice`, `screen`, or `conduct` for shellbridge/notifications), wired into
   strillix's `commands::all()`.
 - **A new special-cased command** extends the `special` closure passed to
   `aoide_protocol::door::run` in `run_strillix`.

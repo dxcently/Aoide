@@ -2,7 +2,7 @@
 //! unlocked: `rice stage`/`wallpaper set` write live), DECLARATIVE mode (nix/
 //! home-manager is the only writer; staging writers refuse), or DRAFT mode
 //! (`stage/theme.json` is a symlink routed into a saved
-//! `rices/<song>/drafts/<name>/theme.json` — every writer that ever
+//! `rices/<rice>/drafts/<name>/theme.json` — every writer that ever
 //! touches the stage lands directly in the draft file, transparently, via
 //! [`crate::fs::atomic_write`]'s symlink-resolving rename) — Self-Ricing's
 //! mode-toggle extension (khoa, 2026-08-14; draft mode, khoa, 2026-08-14).
@@ -38,7 +38,7 @@ impl Default for RiceMode {
     }
 }
 
-/// The active mode marker. `song` names what a `staging`- or `draft`-mode
+/// The active mode marker. `rice` names what a `staging`- or `draft`-mode
 /// session is pointed at (absent in the common
 /// `declarative`-with-no-marker-file case). `draft` is `Some(name)`
 /// **if and only if** `mode == Draft` — every other mode always carries
@@ -48,21 +48,21 @@ pub struct ModeMarker {
     #[serde(default)]
     pub mode: RiceMode,
     #[serde(default, rename = "rice", skip_serializing_if = "Option::is_none")]
-    pub song: Option<String>,
+    pub rice: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub draft: Option<String>,
-    /// The last song actively used in `Staging` mode — distinct from `song`
-    /// (the CURRENTLY active song, which `Declarative` locking legitimately
+    /// The last rice actively used in `Staging` mode — distinct from `rice`
+    /// (the CURRENTLY active rice, which `Declarative` locking legitimately
     /// overwrites). Locking declarative must never touch or clear this
     /// field: it is the only durable memory of "what was I staging" that
     /// survives a declarative round-trip, so a bare `rice mode stage` (no
-    /// explicit name — the CLI default, never the RICE menu, which names its song) can resolve back to it
-    /// instead of re-reading `stage/theme.json`'s own `"song"` field (which
+    /// explicit name — the CLI default, never the RICE menu, which names its rice) can resolve back to it
+    /// instead of re-reading `stage/theme.json`'s own `"rice"` field (which
     /// `Declarative` just overwrote to something else). Absent on a fresh
     /// marker or one written before this field existed — callers fall back
-    /// to `current_staged_song()` in that cold-start case.
-    #[serde(default, rename = "stagingSong", skip_serializing_if = "Option::is_none")]
-    pub staging_song: Option<String>,
+    /// to `current_staged_rice()` in that cold-start case.
+    #[serde(default, rename = "stagingRice", skip_serializing_if = "Option::is_none")]
+    pub staging_rice: Option<String>,
     /// ISO-8601 UTC (`aoide_storage::time::now_iso_utc`) — when this mode was
     /// entered. Empty string on the zero-value `Default` (no marker ever
     /// written), never fabricated.
@@ -100,10 +100,10 @@ mod tests {
     use serde_json::Value;
 
     #[test]
-    fn default_marker_is_declarative_with_no_song_or_draft() {
+    fn default_marker_is_declarative_with_no_rice_or_draft() {
         let m = ModeMarker::default();
         assert_eq!(m.mode, RiceMode::Declarative);
-        assert_eq!(m.song, None);
+        assert_eq!(m.rice, None);
         assert_eq!(m.draft, None);
         assert_eq!(m.since, "");
     }
@@ -137,9 +137,9 @@ mod tests {
 
         let marker = ModeMarker {
             mode: RiceMode::Staging,
-            song: Some("moonlight".to_string()),
+            rice: Some("moonlight".to_string()),
             draft: None,
-            staging_song: None,
+            staging_rice: None,
             since: "2026-08-14T00:00:00Z".to_string(),
         };
         save_mode_marker(&marker).unwrap();
@@ -151,7 +151,7 @@ mod tests {
         assert_eq!(v["mode"], "staging");
         assert_eq!(v["rice"], "moonlight");
         assert!(v.get("draft").is_none(), "draft omitted when None");
-        assert!(v.get("stagingSong").is_none(), "stagingSong omitted when None");
+        assert!(v.get("stagingRice").is_none(), "stagingRice omitted when None");
 
         let _ = std::fs::remove_dir_all(&dir);
         match saved {
@@ -170,9 +170,9 @@ mod tests {
 
         let marker = ModeMarker {
             mode: RiceMode::Draft,
-            song: Some("sonata".to_string()),
+            rice: Some("sonata".to_string()),
             draft: Some("neon-night".to_string()),
-            staging_song: Some("sonata".to_string()),
+            staging_rice: Some("sonata".to_string()),
             since: "2026-08-14T00:00:00Z".to_string(),
         };
         save_mode_marker(&marker).unwrap();
@@ -183,7 +183,7 @@ mod tests {
         let v: Value = serde_json::from_str(&raw).unwrap();
         assert_eq!(v["mode"], "draft");
         assert_eq!(v["draft"], "neon-night");
-        assert_eq!(v["stagingSong"], "sonata");
+        assert_eq!(v["stagingRice"], "sonata");
 
         let _ = std::fs::remove_dir_all(&dir);
         match saved {

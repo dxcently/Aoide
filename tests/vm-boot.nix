@@ -2,11 +2,11 @@
 # desktop stack.
 #
 # Lives in tests/, not lib/: lib/ holds build/eval machinery (checks.nix,
-# aoideos.nix, pkgs.nix, rices.nix); this is test content. See tests/README.md.
+# strillix.nix, pkgs.nix, rices.nix); this is test content. See tests/README.md.
 #
 # Exercises the module tree through the SAME assembly a real host gets — the
 # constructor (habit's `composition.mkNixosModules`, as
-# lib/aoideos.nix does) over the host module below — plus the aoide package, greeter
+# lib/strillix.nix does) over the host module below — plus the aoide package, greeter
 # wiring, the aoided user service, and the graph commands, without real hardware
 # or external network access. shellbridge is NOT exercised: its module gates on
 # the strillix enable fact (it exists to feed the painted shell), and this VM does
@@ -28,7 +28,7 @@
 #     wires programs.hyprland, and the greeter lane because the test asserts the
 #     ly unit.  Not selecting strillix also means shellbridge.service does not
 #     exist: shellbridge.nix gates on the strillix fact, so the test neither starts
-#     nor asserts it. With strillix unselected the VM also names NO song: a song
+#     nor asserts it. With strillix unselected the VM also names NO rice: a rice
 #     with no strillix lane to paint it is refused by the platform
 #     (`modules/nucleus/assertions.nix`), and the palette the greeter reads is
 #     then nucleus's own default — still palette-shaped and non-stock, which is
@@ -62,29 +62,29 @@
 }:
 let
   # The constructor, exactly as a real host reaches it: the same module-list
-  # assembly `lib/aoideos.nix` drives, with the VM's own record in place of
+  # assembly `lib/strillix.nix` drives, with the VM's own record in place of
   # `hosts/<name>/`. `lib/mkHost.nix` used to hand-assemble this list; that file
   # is gone, so the test that exists to exercise the real assembly goes through
   # the real assembly.
   composition = inputs.habit.lib.composition { inherit lib; };
 
   # The pkgs overlay injecting the discovered packages — literally the same
-  # source `lib/aoideos.nix` hands a real host: both import lib/pkgs.nix's
+  # source `lib/strillix.nix` hands a real host: both import lib/pkgs.nix's
   # overlay, which auto-discovers pkgs/<name> and guards each name against
   # shadowing a nixpkgs attribute. `aoide` itself is self-flaked
   # (pkgs/aoide/flake.nix) and named by neither aggregate — it arrives via
   # `aoideInputs.aoide.nixosModules.default`, imported by the nucleus module
-  # (`lib/aoideos.nix`'s `nucleusModule`) and carrying `overlays.default` with it, the
+  # (`lib/strillix.nix`'s `nucleusModule`) and carrying `overlays.default` with it, the
   # same way a real host picks it up.
   overlay = (import ../lib/pkgs.nix { inherit lib; }).overlay {
     stock = inputs.nixpkgs.legacyPackages.${system};
   };
 
-  # The nucleus module as `lib/aoideos.nix` builds it for a real host — the same
+  # The nucleus module as `lib/strillix.nix` builds it for a real host — the same
   # value the flake exports as `nixosModules.nucleus`, and the ONE module that
   # sets `_module.args.aoideInputs` (which is how every dendrite reaches Aoide's
   # own inputs now; nothing threads them through specialArgs).
-  aoideos = import ../lib/aoideos.nix {
+  strillix = import ../lib/strillix.nix {
     inherit inputs lib system;
     username = "khoa";
   };
@@ -133,10 +133,10 @@ let
     hostName = "vm-test";
     registry = import ../modules;
     host = vmHost;
-    extraModules = [ aoideos.nucleusModule ];
+    extraModules = [ strillix.nucleusModule ];
     homeManagerModule = inputs.home-manager.nixosModules.home-manager;
     overlays = [ overlay ];
-    # specialArgs mirror what lib/aoideos.nix passes: `username`, and NOT
+    # specialArgs mirror what lib/strillix.nix passes: `username`, and NOT
     # `inputs` — the dendrites reach Aoide's own inputs as `aoideInputs`, which the
     # nucleus module above defines once. The node is named "vm-test".
     specialArgs = {
@@ -184,8 +184,8 @@ pkgs.testers.runNixOSTest {
             # lanes are never imported. With strillix off, shellbridge.service does
             # not exist at all, so the test neither starts nor asserts it.
             #
-            # No song: the song half of the stack is strillix's (deploy, stage seed,
-            # restart), and a song named with no strillix lane is refused by the
+            # No rice: the rice half of the stack is strillix's (deploy, stage seed,
+            # restart), and a rice named with no strillix lane is refused by the
             # platform (`modules/nucleus/assertions.nix`). The theme the greeter
             # reads is then nucleus's own default palette — still palette-shaped
             # and non-stock, which is all the ly assertion below claims.
@@ -263,7 +263,7 @@ pkgs.testers.runNixOSTest {
     # The rice half. The greeter's colours are a theme read (the greeter lane,
     # `lyPlain`/`lyBold`), so assert the generated config carries palette-shaped
     # values AND that they are not ly's stock ones. Shape plus "not stock"
-    # rather than a specific hex: pinning the song's palette here would turn
+    # rather than a specific hex: pinning the rice's palette here would turn
     # every re-rice into a test edit.
     ly_cfg = machine.succeed("cat /etc/ly/config.ini")
     theme_keys = (

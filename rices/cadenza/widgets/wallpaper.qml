@@ -1,6 +1,6 @@
 // wallpaper.qml — cadenza's `wallpaper` slot: the BOARD, live (intent §3.9).
 //
-// The cover is the song's circuit board (WallpaperPcb.qml generates it, one fixed
+// The wallpaper is the rice's circuit board (WallpaperPcb.qml generates it, one fixed
 // seed, and the static PNG under this widget is the same board). This body
 // adds the one thing a still cannot have: LIGHT MOVING ON THE COPPER.
 //
@@ -69,14 +69,14 @@ Item {
         Quickshell.env("AOIDE_ROOT") || (Quickshell.env("HOME") + "/.aoide")
 
     // ════════════════════════════════════════════════════════════════════════
-    // THE COPPER — WallpaperPcb, by URL, with the song's own loading idiom
+    // THE COPPER — WallpaperPcb, by URL, with the rice's own loading idiom
     // ════════════════════════════════════════════════════════════════════════
     // `setSource` with initial properties (bar.qml's `Use` and BarPreview's own
     // loader do exactly this for helpers that declare `required property var
     // theme`): the props are applied at object creation, which is what a
     // required property needs. `z: 1` keeps the board under every light item.
     Loader {
-        id: cover
+        id: wallpaper
         anchors.fill: parent
         z: 1
         Component.onCompleted: setSource(root.kit.helper("WallpaperPcb"), {
@@ -84,7 +84,7 @@ Item {
             bridge: root.bridge
         })
     }
-    readonly property var board: cover.item ? cover.item.board : null
+    readonly property var board: wallpaper.item ? wallpaper.item.board : null
 
     // The board's little graph: which ring each track end lands on. Built once
     // per board (a few hundred tracks), never per frame.

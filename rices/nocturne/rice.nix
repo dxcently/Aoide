@@ -2,18 +2,18 @@
 # the layout registry's `kind = "dock"` widget type live (only unit-
 # tested/no-op-verified before this — Phase 12) and (b) baseline-fallback
 # structural inheritance (CONTRACTS.md §5): nocturne authors NO bar.qml or
-# notifications-center.qml of its own — StagingEngine.resolveSong falls those slots
+# notifications-center.qml of its own — StagingEngine.resolveRice falls those slots
 # through to sonata's OWN committed widget bodies wholesale (identical
 # structure/layout/text, only the palette differs). Scaffolded via `aoide
 # rice compose nocturne --from sonata`, then hand-edited: `rice compose` has
 # no template for `aoide.layout` —
 # this block is authored directly, matching the shape `rice lint`
 # (`theme/schema.rs`) validates. Name deliberately avoids "moonlight-sonata"
-# — that name is reserved for a separate, real future design-song; nocturne
+# — that name is reserved for a separate, real future design-rice; nocturne
 # is a throwaway demo only.
 #
-# HOST-AGNOSTIC DISCIPLINE (CONTRACTS.md §5): a song sets ONLY aoide.theme
-# and aoide.layout. All values are literal nix (no song/ runtime reads).
+# HOST-AGNOSTIC DISCIPLINE (CONTRACTS.md §5): a rice sets ONLY aoide.theme
+# and aoide.layout. All values are literal nix (no rice/ runtime reads).
 {
   system = {
     providers = {
@@ -51,7 +51,7 @@
 
         # ── Layout — declares ONE brand-new dock-kind widget type ──────────
         # Phase 12's actual technical proof: the "dock" kind mounts as an Item
-        # into AoidePanel's gadget column (SongGadgets.qml), alongside the six
+        # into AoidePanel's gadget column (RiceGadgets.qml), alongside the six
         # shipped gadgets and notifications-center. `order = 0` is the only sort key
         # among declared dock entries; the widget body lives at
         # rices/nocturne/widgets/vigil.qml, same convention as any slot.

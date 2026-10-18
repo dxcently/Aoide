@@ -5,7 +5,7 @@
 //! could resolve to nothing off `PATH`.
 //!
 //! Three tiers, tried in order:
-//!   1. an explicit env var override (`AOIDE_CORE_BIN`/`AOIDE_RICE_BIN`) —
+//!   1. an explicit env var override (`AOIDE_CORE_BIN`/`STRILLIX_BIN`) —
 //!      the tier a nix unit sets across store-path boundaries, where
 //!      sibling resolution cannot work (P-A8: `strillix` moves to its own
 //!      output, so it is never actually `current_exe()`'s sibling on a
@@ -197,12 +197,12 @@ pub fn core_bin() -> String {
 }
 
 /// Resolve the paint binary `strillix` for a cross-binary re-exec:
-/// `AOIDE_RICE_BIN` env override, else `current_exe()`'s sibling named
+/// `STRILLIX_BIN` env override, else `current_exe()`'s sibling named
 /// `strillix` (`strillix.exe` on Windows) if it exists, else the bare name `"strillix"`
 /// for `PATH` resolution at spawn time. See the module doc for the
 /// with_stage_lock hazard this exists to route around, not to walk into.
 pub fn rice_bin() -> String {
-    resolve_bin("AOIDE_RICE_BIN", "strillix")
+    resolve_bin("STRILLIX_BIN", "strillix")
 }
 
 /// Is `name` a program discoverable on `PATH`? The proactive probe the tier

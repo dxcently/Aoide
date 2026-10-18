@@ -48,7 +48,7 @@ fn argv0_strx_prints_exactly_what_strillix_prints() {
 }
 
 #[test]
-fn a_boot_moves_the_lyra_state_link_once() {
+fn a_boot_moves_the_strillix_state_link_once() {
     let home = private_home("boot");
     let target = home.join("declared-rice.conf");
     std::fs::write(&target, "source\n").unwrap();

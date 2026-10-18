@@ -1,7 +1,7 @@
-//! Cover-art derivation + resolution for the shared library `song/wallpapers/`,
+//! Wallpaper-art derivation + resolution for the shared library `rice/wallpapers/`,
 //! and the stage seam that decides what `stage/wallpaper.json` holds: a user pick
-//! or the song's own default (CONTRACTS.md §4). Moved out of
-//! `pkgs/aoide/src/commands/{rice,cover}.rs` (Phase 5b restructure,
+//! or the rice's own default (CONTRACTS.md §4). Moved out of
+//! `pkgs/aoide/src/commands/{rice,wallpaper}.rs` (Phase 5b restructure,
 //! docs/architecture/PACKAGE-LAYOUT.md). Reads env-derived paths and stats
 //! candidates; the stage writers are the only side effects.
 //!
@@ -13,17 +13,17 @@
 
 use std::path::{Path, PathBuf};
 
-/// Extensions we recognise as cover art, in preference order.
+/// Extensions we recognise as wallpaper art, in preference order.
 pub const WALLPAPER_EXTS: &[&str] = &["webp", "png", "jpg", "jpeg"];
 
 /// Marks `stage/wallpaper.json` as the USER's pick. Absent — in every file written
-/// before the field existed, and in every `rice stage` write — means the song's
+/// before the field existed, and in every `rice stage` write — means the rice's
 /// own default.
 pub const PICK_FIELD: &str = "pick";
 
-/// The song a cover was staged for. Every writer stamps it; a file without it
-/// is legacy and applies to whichever song is staged.
-pub const SONG_FIELD: &str = "song";
+/// The rice a wallpaper was staged for. Every writer stamps it; a file without it
+/// is legacy and applies to whichever rice is staged.
+pub const RICE_FIELD: &str = "rice";
 
 /// WHAT a pick is (CONTRACTS.md §4): a still, a video, or a Wallpaper Engine
 /// scene. Additive — absent reads as [`KIND_STATIC`], which is every file
@@ -111,35 +111,35 @@ pub fn parse_scene_token(arg: &str) -> Option<&str> {
         .filter(|id| !id.is_empty())
 }
 
-/// The stem of a song's own desktop picture, inside its `cover/` folder:
+/// The stem of a rice's own desktop picture, inside its `wallpaper/` folder:
 /// `wallpaper/<name>-desktop.<ext>`. The declared `aoide.theme.wallpaper` names
 /// the same file at build time, so the seed and a staged rice agree on it.
 pub const DESKTOP_WALLPAPER_STEM: &str = "desktop";
 
-/// Derive a physical cover-art file for a song, or `None` when none exists.
+/// Derive a physical wallpaper-art file for a rice, or `None` when none exists.
 ///
-/// Two places, in order. The song's own picture — `rices/<name>/wallpaper/
-/// <name>-desktop.<ext>`, the runtime copy of the folder the song ships — wins;
-/// then the shared library `song/wallpapers/<name>.<ext>`, one dir any song (or
-/// other consumer) draws from. A bare `cover.<ext>` would be ambiguous in the
-/// shared dir, so both names carry the song's name.
+/// Two places, in order. The rice's own picture — `rices/<name>/wallpaper/
+/// <name>-desktop.<ext>`, the runtime copy of the folder the rice ships — wins;
+/// then the shared library `rice/wallpapers/<name>.<ext>`, one dir any rice (or
+/// other consumer) draws from. A bare `wallpaper.<ext>` would be ambiguous in the
+/// shared dir, so both names carry the rice's name.
 pub fn derive_wallpaper(name: &str) -> Option<PathBuf> {
     let own = aoide_storage::fs::rice_dir(name).join("wallpaper");
-    let covers = aoide_storage::fs::strillix_dir().join("wallpapers");
+    let wallpapers = aoide_storage::fs::strillix_dir().join("wallpapers");
     WALLPAPER_EXTS
         .iter()
         .map(|ext| own.join(format!("{name}-{DESKTOP_WALLPAPER_STEM}.{ext}")))
         .chain(
             WALLPAPER_EXTS
                 .iter()
-                .map(|ext| covers.join(format!("{name}.{ext}"))),
+                .map(|ext| wallpapers.join(format!("{name}.{ext}"))),
         )
         .find(|p| p.is_file())
 }
 
-/// The lock picture a song ships: `lockscreen.<ext>` at the root of its own
+/// The lock picture a rice ships: `lockscreen.<ext>` at the root of its own
 /// folder, the first of [`WALLPAPER_EXTS`] that exists. The name is the render
-/// surface's (`aoide.surfaces.lockscreen`), so a song declares nothing: the
+/// surface's (`aoide.surfaces.lockscreen`), so a rice declares nothing: the
 /// file is the whole opinion, and deleting it takes the opinion away.
 pub fn lockscreen_image(strillix_dir: &Path) -> Option<PathBuf> {
     WALLPAPER_EXTS
@@ -148,10 +148,10 @@ pub fn lockscreen_image(strillix_dir: &Path) -> Option<PathBuf> {
         .find(|p| p.is_file())
 }
 
-/// Resolve a `wallpaper set <path|name>` argument to an absolute cover path.
+/// Resolve a `wallpaper set <path|name>` argument to an absolute wallpaper path.
 ///
 /// An absolute `arg` is taken literally; anything else resolves against the
-/// shared cover library `song/wallpapers/`. Does NOT check existence — the caller
+/// shared wallpaper library `rice/wallpapers/`. Does NOT check existence — the caller
 /// (`handle_wallpaper_set`) does that so it can render its own "no such file"
 /// error with the resolved path in it.
 pub fn resolve_wallpaper_arg(arg: &str) -> PathBuf {
@@ -163,7 +163,7 @@ pub fn resolve_wallpaper_arg(arg: &str) -> PathBuf {
     }
 }
 
-// ── The stage seam: the song's own cover, or the user's pick for it ──────────
+// ── The stage seam: the rice's own wallpaper, or the user's pick for it ──────────
 
 /// `<stage>/wallpaper.json`.
 pub fn staged_wallpaper_json() -> PathBuf {
@@ -175,18 +175,18 @@ fn read_staged() -> Option<serde_json::Value> {
     serde_json::from_str(&raw).ok()
 }
 
-/// The cover path `stage/wallpaper.json` names, or `None` when the file is absent,
+/// The wallpaper path `stage/wallpaper.json` names, or `None` when the file is absent,
 /// unreadable, or carries no non-empty `path`.
 pub fn staged_path() -> Option<String> {
     let path = read_staged()?.get("path")?.as_str()?.to_string();
     (!path.is_empty()).then_some(path)
 }
 
-/// The song the staged cover was written for. `None` is a legacy file, written
-/// before writers stamped it — it applies to whichever song is staged.
-pub fn staged_song() -> Option<String> {
+/// The rice the staged wallpaper was written for. `None` is a legacy file, written
+/// before writers stamped it — it applies to whichever rice is staged.
+pub fn staged_rice() -> Option<String> {
     read_staged()?
-        .get(SONG_FIELD)?
+        .get(RICE_FIELD)?
         .as_str()
         .map(str::to_string)
 }
@@ -219,7 +219,7 @@ pub fn staged_identity() -> Option<(String, String)> {
     }
 }
 
-/// Is the staged cover the user's pick? Requires the marker AND an identity to
+/// Is the staged wallpaper the user's pick? Requires the marker AND an identity to
 /// show — a path, or (for a scene) a workshop id. The same pair the shell's own
 /// gate requires.
 pub fn staged_is_pick() -> bool {
@@ -229,18 +229,18 @@ pub fn staged_is_pick() -> bool {
     doc.get(PICK_FIELD).and_then(|v| v.as_bool()).unwrap_or(false) && staged_identity().is_some()
 }
 
-/// Stage a pick — what `wallpaper set` writes. `song` is the song staged at write
+/// Stage a pick — what `wallpaper set` writes. `rice` is the rice staged at write
 /// time; `None` (nothing staged) writes the legacy shape, which applies to
-/// whichever song loads. The kind follows the file: a video extension stages a
+/// whichever rice loads. The kind follows the file: a video extension stages a
 /// video pick, anything else a still. A still carries `position` when it was
 /// forced to `tile` or `fill`, and `tile: true` when it tiles ([`pick_tiles`]);
 /// a video carries neither.
-pub fn stage_pick(path: &Path, song: Option<&str>, position: Option<&str>) -> std::io::Result<PathBuf> {
+pub fn stage_pick(path: &Path, rice: Option<&str>, position: Option<&str>) -> std::io::Result<PathBuf> {
     let kind = kind_for_path(path);
     let mut doc = serde_json::json!({ "path": path.to_string_lossy(), KIND_FIELD: kind, PICK_FIELD: true });
     if let Some(obj) = doc.as_object_mut() {
-        if let Some(song) = song {
-            obj.insert(SONG_FIELD.to_string(), serde_json::Value::String(song.to_string()));
+        if let Some(rice) = rice {
+            obj.insert(RICE_FIELD.to_string(), serde_json::Value::String(rice.to_string()));
         }
         if let Some(forced) = position.filter(|p| kind == KIND_STATIC && [POSITION_TILE, POSITION_FILL].contains(p)) {
             obj.insert(POSITION_FIELD.to_string(), serde_json::Value::String(forced.to_string()));
@@ -254,10 +254,10 @@ pub fn stage_pick(path: &Path, song: Option<&str>, position: Option<&str>) -> st
 
 /// Stage a Wallpaper Engine scene as a pick: the workshop id IS the identity, so
 /// there is no path (CONTRACTS.md §4).
-pub fn stage_scene(we_id: &str, song: Option<&str>) -> std::io::Result<PathBuf> {
-    write_wallpaper(match song {
-        Some(song) => serde_json::json!({
-            KIND_FIELD: KIND_WE, WE_ID_FIELD: we_id, PICK_FIELD: true, SONG_FIELD: song
+pub fn stage_scene(we_id: &str, rice: Option<&str>) -> std::io::Result<PathBuf> {
+    write_wallpaper(match rice {
+        Some(rice) => serde_json::json!({
+            KIND_FIELD: KIND_WE, WE_ID_FIELD: we_id, PICK_FIELD: true, RICE_FIELD: rice
         }),
         None => serde_json::json!({
             KIND_FIELD: KIND_WE, WE_ID_FIELD: we_id, PICK_FIELD: true
@@ -270,7 +270,7 @@ pub fn stage_scene(we_id: &str, song: Option<&str>) -> std::io::Result<PathBuf> 
 /// scene. The shape is `stage_pick`'s, off the kind the CALLER resolved (the
 /// provider's own `%type%`), which is why the kind is not re-derived from the
 /// identity here.
-pub fn stage_provider_pick(kind: &str, identity: &str, song: Option<&str>) -> std::io::Result<PathBuf> {
+pub fn stage_provider_pick(kind: &str, identity: &str, rice: Option<&str>) -> std::io::Result<PathBuf> {
     let mut doc = if kind == KIND_WE {
         serde_json::json!({ KIND_FIELD: KIND_WE, WE_ID_FIELD: identity })
     } else {
@@ -278,16 +278,16 @@ pub fn stage_provider_pick(kind: &str, identity: &str, song: Option<&str>) -> st
     };
     if let Some(obj) = doc.as_object_mut() {
         obj.insert(PICK_FIELD.to_string(), serde_json::Value::Bool(true));
-        if let Some(song) = song {
-            obj.insert(SONG_FIELD.to_string(), serde_json::Value::String(song.to_string()));
+        if let Some(rice) = rice {
+            obj.insert(RICE_FIELD.to_string(), serde_json::Value::String(rice.to_string()));
         }
     }
     write_wallpaper(doc)
 }
 
-/// Stage `song`'s own cover as a default — what `rice stage` writes.
-pub fn stage_default(path: &Path, song: &str) -> std::io::Result<PathBuf> {
-    write_wallpaper(serde_json::json!({ "path": path.to_string_lossy(), SONG_FIELD: song }))
+/// Stage `rice`'s own wallpaper as a default — what `rice stage` writes.
+pub fn stage_default(path: &Path, rice: &str) -> std::io::Result<PathBuf> {
+    write_wallpaper(serde_json::json!({ "path": path.to_string_lossy(), RICE_FIELD: rice }))
 }
 
 /// Remove `stage/wallpaper.json`.
@@ -301,9 +301,9 @@ pub fn clear_staged() -> std::io::Result<WallpaperWrite> {
 
 /// What a default write did to `stage/wallpaper.json`.
 pub enum WallpaperWrite {
-    /// The song's own cover, written as a default.
+    /// The rice's own wallpaper, written as a default.
     Written(PathBuf),
-    /// A `wallpaper.json` that no longer belonged to this song was removed.
+    /// A `wallpaper.json` that no longer belonged to this rice was removed.
     Removed,
     /// Nothing derivable, and nothing there to remove.
     Absent,
@@ -320,36 +320,36 @@ impl WallpaperWrite {
     }
 }
 
-/// [`stage_for_song`]'s answer.
+/// [`stage_for_rice`]'s answer.
 pub enum WallpaperStage {
-    /// A pick for THIS song was standing: left byte-identical.
+    /// A pick for THIS rice was standing: left byte-identical.
     PickKept,
-    /// The song's own default was (re)established.
+    /// The rice's own default was (re)established.
     Wrote(WallpaperWrite),
 }
 
-/// `song`'s own default: its derivable cover, else no `wallpaper.json` at all.
-/// Keeps no pick — a caller that wants one preserved asks [`stage_for_song`].
-pub fn stage_song_default(song: &str) -> std::io::Result<WallpaperWrite> {
-    match derive_wallpaper(song) {
+/// `rice`'s own default: its derivable wallpaper, else no `wallpaper.json` at all.
+/// Keeps no pick — a caller that wants one preserved asks [`stage_for_rice`].
+pub fn stage_rice_default(rice: &str) -> std::io::Result<WallpaperWrite> {
+    match derive_wallpaper(rice) {
         Some(path) => {
-            stage_default(&path, song)?;
+            stage_default(&path, rice)?;
             Ok(WallpaperWrite::Written(path))
         }
         None => clear_staged(),
     }
 }
 
-/// `rice stage <song>`'s cover half (CONTRACTS.md §4). A cover carries its
-/// song: a pick the user made for THIS song is what shows, so re-staging that
-/// song — a bare `rice stage`, a `rice mode` re-pin, a rebuild — leaves it
-/// alone. Any other cover standing (another song's pick or default, nothing at
-/// all) is replaced by this song's own default.
-pub fn stage_for_song(song: &str) -> std::io::Result<WallpaperStage> {
-    if staged_is_pick() && staged_song().as_deref() == Some(song) {
+/// `rice stage <rice>`'s wallpaper half (CONTRACTS.md §4). A wallpaper carries its
+/// rice: a pick the user made for THIS rice is what shows, so re-staging that
+/// rice — a bare `rice stage`, a `rice mode` re-pin, a rebuild — leaves it
+/// alone. Any other wallpaper standing (another rice's pick or default, nothing at
+/// all) is replaced by this rice's own default.
+pub fn stage_for_rice(rice: &str) -> std::io::Result<WallpaperStage> {
+    if staged_is_pick() && staged_rice().as_deref() == Some(rice) {
         return Ok(WallpaperStage::PickKept);
     }
-    stage_song_default(song).map(WallpaperStage::Wrote)
+    stage_rice_default(rice).map(WallpaperStage::Wrote)
 }
 
 fn write_wallpaper(value: serde_json::Value) -> std::io::Result<PathBuf> {
@@ -366,12 +366,12 @@ mod tests {
 
     #[test]
     fn resolve_wallpaper_arg_takes_an_absolute_path_literally() {
-        let resolved = resolve_wallpaper_arg("/tmp/somewhere/cover.png");
-        assert_eq!(resolved, PathBuf::from("/tmp/somewhere/cover.png"));
+        let resolved = resolve_wallpaper_arg("/tmp/somewhere/wallpaper.png");
+        assert_eq!(resolved, PathBuf::from("/tmp/somewhere/wallpaper.png"));
     }
 
     #[test]
-    fn resolve_wallpaper_arg_resolves_a_bare_name_against_the_covers_library() {
+    fn resolve_wallpaper_arg_resolves_a_bare_name_against_the_wallpapers_library() {
         // Shares `aoide_test_support::env_lock()` with every other env-touching
         // test in the crate (rice.rs, mode.rs, draft.rs) — this used to lock a
         // separate crate-local mutex, so its `set_var("AOIDE_STAGE_DIR", …)`
@@ -379,12 +379,12 @@ mod tests {
         // its env mid-flight.
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
-        std::env::set_var("AOIDE_STAGE_DIR", "/tmp/aoide-cover-test/stage");
+        std::env::set_var("AOIDE_STAGE_DIR", "/tmp/aoide-wallpaper-test/stage");
 
         let resolved = resolve_wallpaper_arg("sonata.webp");
         assert_eq!(
             resolved,
-            PathBuf::from("/tmp/aoide-cover-test/wallpapers/sonata.webp")
+            PathBuf::from("/tmp/aoide-wallpaper-test/wallpapers/sonata.webp")
         );
     }
 
@@ -393,38 +393,38 @@ mod tests {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
         let root =
-            std::env::temp_dir().join(format!("strillix-rice-derive-cover-{}", std::process::id()));
+            std::env::temp_dir().join(format!("strillix-rice-derive-wallpaper-{}", std::process::id()));
         let stage = root.join("stage");
-        let covers = root.join("wallpapers");
+        let wallpapers = root.join("wallpapers");
         std::fs::create_dir_all(&stage).unwrap();
-        std::fs::create_dir_all(&covers).unwrap();
-        std::fs::write(covers.join("dusk.png"), b"\x89PNG stub").unwrap();
+        std::fs::create_dir_all(&wallpapers).unwrap();
+        std::fs::write(wallpapers.join("dusk.png"), b"\x89PNG stub").unwrap();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
 
-        assert_eq!(derive_wallpaper("dusk"), Some(covers.join("dusk.png")));
+        assert_eq!(derive_wallpaper("dusk"), Some(wallpapers.join("dusk.png")));
         assert_eq!(derive_wallpaper("nope"), None);
 
         let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
-    fn derive_wallpaper_prefers_the_songs_own_desktop_picture_over_the_shared_library() {
+    fn derive_wallpaper_prefers_the_rices_own_desktop_picture_over_the_shared_library() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
-        let root = std::env::temp_dir().join(format!("strillix-rice-own-cover-{}", std::process::id()));
+        let root = std::env::temp_dir().join(format!("strillix-rice-own-wallpaper-{}", std::process::id()));
         let stage = root.join("stage");
         let own = root.join("rices").join("barcarolle").join("wallpaper");
-        let covers = root.join("wallpapers");
+        let wallpapers = root.join("wallpapers");
         std::fs::create_dir_all(&stage).unwrap();
         std::fs::create_dir_all(&own).unwrap();
-        std::fs::create_dir_all(&covers).unwrap();
-        std::fs::write(covers.join("barcarolle.png"), b"\x89PNG shared").unwrap();
+        std::fs::create_dir_all(&wallpapers).unwrap();
+        std::fs::write(wallpapers.join("barcarolle.png"), b"\x89PNG shared").unwrap();
         // The logon picture is the greeter's, never the desktop default.
         std::fs::write(own.join("barcarolle-logon.jpg"), b"logon").unwrap();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
 
-        // Only the logon picture in the song's cover/: the shared library wins.
-        assert_eq!(derive_wallpaper("barcarolle"), Some(covers.join("barcarolle.png")));
+        // Only the logon picture in the rice's wallpaper/: the shared library wins.
+        assert_eq!(derive_wallpaper("barcarolle"), Some(wallpapers.join("barcarolle.png")));
 
         std::fs::write(own.join("barcarolle-desktop.jpg"), b"desktop").unwrap();
         assert_eq!(derive_wallpaper("barcarolle"), Some(own.join("barcarolle-desktop.jpg")));
@@ -433,38 +433,38 @@ mod tests {
     }
 
     #[test]
-    fn lockscreen_image_is_the_first_of_the_wallpaper_extensions_in_the_song_folder() {
+    fn lockscreen_image_is_the_first_of_the_wallpaper_extensions_in_the_rice_folder() {
         let root = unique_tmp("lockscreen-image");
-        let song = root.join("barcarolle");
-        std::fs::create_dir_all(&song).unwrap();
-        assert_eq!(lockscreen_image(&song), None);
+        let rice = root.join("barcarolle");
+        std::fs::create_dir_all(&rice).unwrap();
+        assert_eq!(lockscreen_image(&rice), None);
 
-        std::fs::write(song.join("cover.png"), b"").unwrap();
-        std::fs::create_dir(song.join("lockscreen.webp")).unwrap();
-        assert_eq!(lockscreen_image(&song), None, "another name, or a directory, is no picture");
+        std::fs::write(rice.join("wallpaper.png"), b"").unwrap();
+        std::fs::create_dir(rice.join("lockscreen.webp")).unwrap();
+        assert_eq!(lockscreen_image(&rice), None, "another name, or a directory, is no picture");
 
-        std::fs::write(song.join("lockscreen.jpeg"), b"").unwrap();
-        assert_eq!(lockscreen_image(&song), Some(song.join("lockscreen.jpeg")));
-        std::fs::write(song.join("lockscreen.jpg"), b"").unwrap();
-        assert_eq!(lockscreen_image(&song), Some(song.join("lockscreen.jpg")));
-        std::fs::write(song.join("lockscreen.png"), b"").unwrap();
-        assert_eq!(lockscreen_image(&song), Some(song.join("lockscreen.png")));
-        std::fs::remove_dir(song.join("lockscreen.webp")).unwrap();
-        std::fs::write(song.join("lockscreen.webp"), b"").unwrap();
-        assert_eq!(lockscreen_image(&song), Some(song.join("lockscreen.webp")));
+        std::fs::write(rice.join("lockscreen.jpeg"), b"").unwrap();
+        assert_eq!(lockscreen_image(&rice), Some(rice.join("lockscreen.jpeg")));
+        std::fs::write(rice.join("lockscreen.jpg"), b"").unwrap();
+        assert_eq!(lockscreen_image(&rice), Some(rice.join("lockscreen.jpg")));
+        std::fs::write(rice.join("lockscreen.png"), b"").unwrap();
+        assert_eq!(lockscreen_image(&rice), Some(rice.join("lockscreen.png")));
+        std::fs::remove_dir(rice.join("lockscreen.webp")).unwrap();
+        std::fs::write(rice.join("lockscreen.webp"), b"").unwrap();
+        assert_eq!(lockscreen_image(&rice), Some(rice.join("lockscreen.webp")));
 
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    // ── The stage seam: a pick vs a song default (CONTRACTS.md §4) ───────────
+    // ── The stage seam: a pick vs a rice default (CONTRACTS.md §4) ───────────
 
-    /// A pick is marked; the song's own default is NOT. This is the whole
+    /// A pick is marked; the rice's own default is NOT. This is the whole
     /// discriminator AoideWallpaper.qml's board gate rides.
     #[test]
     fn a_pick_is_marked_and_a_default_is_not() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
-        let root = unique_tmp("cover-pick-field");
+        let root = unique_tmp("wallpaper-pick-field");
         let stage = root.join("stage");
         std::fs::create_dir_all(&stage).unwrap();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
@@ -472,21 +472,21 @@ mod tests {
         stage_pick(Path::new("/tmp/user-choice.png"), Some("dusk"), None).unwrap();
         assert!(staged_is_pick());
         assert_eq!(staged_path().as_deref(), Some("/tmp/user-choice.png"));
-        assert_eq!(staged_song().as_deref(), Some("dusk"));
+        assert_eq!(staged_rice().as_deref(), Some("dusk"));
 
-        stage_default(Path::new("/tmp/song-default.png"), "dusk").unwrap();
-        assert!(!staged_is_pick(), "a song default carries no pick field");
-        assert_eq!(staged_path().as_deref(), Some("/tmp/song-default.png"));
-        assert_eq!(staged_song().as_deref(), Some("dusk"));
+        stage_default(Path::new("/tmp/rice-default.png"), "dusk").unwrap();
+        assert!(!staged_is_pick(), "a rice default carries no pick field");
+        assert_eq!(staged_path().as_deref(), Some("/tmp/rice-default.png"));
+        assert_eq!(staged_rice().as_deref(), Some("dusk"));
 
-        // A pick with no song to attribute it to (nothing was staged) keeps
+        // A pick with no rice to attribute it to (nothing was staged) keeps
         // the whole path requirement: the marker needs a path to mean anything.
         stage_pick(Path::new("/tmp/user-choice.png"), None, None).unwrap();
         assert!(staged_is_pick());
-        assert_eq!(staged_song(), None);
+        assert_eq!(staged_rice(), None);
         std::fs::write(
             staged_wallpaper_json(),
-            "{\"path\":\"\",\"pick\":true,\"song\":\"dusk\"}\n",
+            "{\"path\":\"\",\"pick\":true,\"rice\":\"dusk\"}\n",
         )
         .unwrap();
         assert!(!staged_is_pick(), "the marker alone is not a pick");
@@ -494,14 +494,14 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// Back-compat: a file with no `song` field is legacy and applies to
-    /// whichever song is staged — but a legacy PICK is not kept by a re-stage,
-    /// because keeping one requires knowing which song it was made for.
+    /// Back-compat: a file with no `rice` field is legacy and applies to
+    /// whichever rice is staged — but a legacy PICK is not kept by a re-stage,
+    /// because keeping one requires knowing which rice it was made for.
     #[test]
-    fn a_legacy_wallpaper_json_without_the_song_field_is_never_kept() {
+    fn a_legacy_wallpaper_json_without_the_rice_field_is_never_kept() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
-        let root = unique_tmp("cover-v0-field");
+        let root = unique_tmp("wallpaper-v0-field");
         let stage = root.join("stage");
         std::fs::create_dir_all(&stage).unwrap();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
@@ -509,14 +509,14 @@ mod tests {
         std::fs::write(staged_wallpaper_json(), "{\"path\":\"/tmp/old.png\"}\n").unwrap();
         assert!(!staged_is_pick());
         assert_eq!(staged_path().as_deref(), Some("/tmp/old.png"));
-        assert_eq!(staged_song(), None);
+        assert_eq!(staged_rice(), None);
 
         // …and an explicit `false` (or garbage) is not a pick either.
         std::fs::write(staged_wallpaper_json(), "{\"path\":\"/tmp/old.png\",\"pick\":false}").unwrap();
         assert!(!staged_is_pick());
         std::fs::write(staged_wallpaper_json(), "{not json").unwrap();
         assert!(!staged_is_pick(), "a torn file is never a pick");
-        assert_eq!(staged_song(), None);
+        assert_eq!(staged_rice(), None);
 
         std::fs::write(
             staged_wallpaper_json(),
@@ -525,48 +525,48 @@ mod tests {
         .unwrap();
         assert!(staged_is_pick());
         assert!(matches!(
-            stage_for_song("dusk").unwrap(),
+            stage_for_rice("dusk").unwrap(),
             WallpaperStage::Wrote(WallpaperWrite::Removed)
         ));
 
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// The ruling, in one test: re-staging the pick's OWN song keeps it; any
-    /// other song replaces it with that song's own default.
+    /// The ruling, in one test: re-staging the pick's OWN rice keeps it; any
+    /// other rice replaces it with that rice's own default.
     #[test]
-    fn restaging_the_same_song_keeps_a_pick_and_a_song_switch_drops_it() {
+    fn restaging_the_same_rice_keeps_a_pick_and_a_rice_switch_drops_it() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
-        let root = unique_tmp("cover-song-switch");
+        let root = unique_tmp("wallpaper-rice-switch");
         let stage = root.join("stage");
-        let covers = root.join("wallpapers");
+        let wallpapers = root.join("wallpapers");
         std::fs::create_dir_all(&stage).unwrap();
-        std::fs::create_dir_all(&covers).unwrap();
-        std::fs::write(covers.join("dusk.png"), b"\x89PNG stub").unwrap();
+        std::fs::create_dir_all(&wallpapers).unwrap();
+        std::fs::write(wallpapers.join("dusk.png"), b"\x89PNG stub").unwrap();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
 
         stage_pick(Path::new("/tmp/user-choice.png"), Some("cadenza"), None).unwrap();
-        assert!(matches!(stage_for_song("cadenza").unwrap(), WallpaperStage::PickKept));
-        assert!(staged_is_pick(), "the pick's own song is staged");
+        assert!(matches!(stage_for_rice("cadenza").unwrap(), WallpaperStage::PickKept));
+        assert!(staged_is_pick(), "the pick's own rice is staged");
         assert_eq!(staged_path().as_deref(), Some("/tmp/user-choice.png"));
 
-        // A different song takes its own cover, as a default.
-        match stage_for_song("dusk").unwrap() {
+        // A different rice takes its own wallpaper, as a default.
+        match stage_for_rice("dusk").unwrap() {
             WallpaperStage::Wrote(WallpaperWrite::Written(path)) => {
                 assert!(path.ends_with("wallpapers/dusk.png"), "{path:?}");
             }
-            _ => panic!("a switch stages the new song's own default"),
+            _ => panic!("a switch stages the new rice's own default"),
         }
-        assert!(!staged_is_pick(), "the new song's default is not a pick");
-        assert_eq!(staged_song().as_deref(), Some("dusk"));
+        assert!(!staged_is_pick(), "the new rice's default is not a pick");
+        assert_eq!(staged_rice().as_deref(), Some("dusk"));
         assert!(staged_path().unwrap().ends_with("wallpapers/dusk.png"));
 
-        // A song with nothing derivable leaves no cover at all, so the
-        // previous song's wallpaper cannot stand over it.
+        // A rice with nothing derivable leaves no wallpaper at all, so the
+        // previous rice's wallpaper cannot stand over it.
         stage_pick(Path::new("/tmp/user-choice.png"), Some("cadenza"), None).unwrap();
         assert!(matches!(
-            stage_for_song("nocturne").unwrap(),
+            stage_for_rice("nocturne").unwrap(),
             WallpaperStage::Wrote(WallpaperWrite::Removed)
         ));
         assert!(!staged_wallpaper_json().exists());
@@ -574,7 +574,7 @@ mod tests {
 
         // Nothing staged and nothing derivable: idempotent, not an error.
         assert!(matches!(
-            stage_for_song("nocturne").unwrap(),
+            stage_for_rice("nocturne").unwrap(),
             WallpaperStage::Wrote(WallpaperWrite::Absent)
         ));
 
@@ -608,12 +608,12 @@ mod tests {
 
     /// A scene pick carries NO path: the identity is the workshop id, and it is
     /// what makes the pick a pick (and what keeps it across a re-stage of its
-    /// own song).
+    /// own rice).
     #[test]
     fn a_scene_pick_is_marked_with_an_id_and_no_path() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
-        let root = unique_tmp("cover-scene");
+        let root = unique_tmp("wallpaper-scene");
         let stage = root.join("stage");
         std::fs::create_dir_all(&stage).unwrap();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
@@ -625,7 +625,7 @@ mod tests {
         assert_eq!(staged_path(), None, "a scene has no path to render");
         assert_eq!(staged_identity(), Some((KIND_WE.to_string(), "123".to_string())));
         assert!(matches!(
-            stage_for_song("cadenza").unwrap(),
+            stage_for_rice("cadenza").unwrap(),
             WallpaperStage::PickKept
         ));
 
@@ -686,12 +686,12 @@ mod tests {
 
     /// `position` is written only when forced to tile or fill, `tile` only when
     /// the pick tiles, and a video carries neither. Re-staging the pick's own
-    /// song leaves both exactly as they were.
+    /// rice leaves both exactly as they were.
     #[test]
     fn a_pick_carries_position_only_when_forced_and_tile_only_when_it_tiles() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
-        let root = unique_tmp("cover-position");
+        let root = unique_tmp("wallpaper-position");
         let stage = root.join("stage");
         std::fs::create_dir_all(&stage).unwrap();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
@@ -715,32 +715,32 @@ mod tests {
 
         stage_pick(Path::new("/x/plain.png"), Some("cadenza"), Some(POSITION_TILE)).unwrap();
         let before = std::fs::read_to_string(staged_wallpaper_json()).unwrap();
-        assert!(matches!(stage_for_song("cadenza").unwrap(), WallpaperStage::PickKept));
+        assert!(matches!(stage_for_rice("cadenza").unwrap(), WallpaperStage::PickKept));
         assert_eq!(std::fs::read_to_string(staged_wallpaper_json()).unwrap(), before, "pick-kept is verbatim");
 
         let _ = std::fs::remove_dir_all(&root);
     }
 
     /// What a provider reports is stamped exactly like a pick the user made —
-    /// same marker, same `song` — off the kind the CALLER named.
+    /// same marker, same `rice` — off the kind the CALLER named.
     #[test]
     fn a_provider_pick_is_stamped_like_any_other() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
-        let root = unique_tmp("cover-engine-pick");
+        let root = unique_tmp("wallpaper-engine-pick");
         let stage = root.join("stage");
         std::fs::create_dir_all(&stage).unwrap();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
 
         stage_provider_pick(KIND_VIDEO, "/tmp/clip.mp4", Some("cadenza")).unwrap();
         assert!(staged_is_pick());
-        assert_eq!(staged_song().as_deref(), Some("cadenza"));
+        assert_eq!(staged_rice().as_deref(), Some("cadenza"));
         assert_eq!(staged_kind(), KIND_VIDEO);
         assert_eq!(staged_path().as_deref(), Some("/tmp/clip.mp4"));
 
         stage_provider_pick(KIND_WE, "456", None).unwrap();
-        assert!(staged_is_pick(), "no song staged: the legacy shape still applies");
-        assert_eq!(staged_song(), None);
+        assert!(staged_is_pick(), "no rice staged: the legacy shape still applies");
+        assert_eq!(staged_rice(), None);
         assert_eq!(staged_we_id().as_deref(), Some("456"));
         assert_eq!(staged_path(), None);
 

@@ -62,7 +62,7 @@
 //! command that actually invoked it (`"rice.stage"`, `"wallpaper.set"`), not
 //! `"rice.history"`. Every caller passes its own dotted name straight through,
 //! exactly like [`resolve_scope(cmd)`] already did and following the
-//! `no_resolvable_song(cmd)` precedent in `draft.rs`.
+//! `no_resolvable_rice(cmd)` precedent in `draft.rs`.
 
 use aoide_protocol::Invocation;
 use aoide_protocol::output::Outcome;
@@ -149,8 +149,8 @@ pub fn register(r: &mut Registry) {
 }
 
 /// The shared "must be staged or routed into a draft" guard every take
-/// command starts with: takes live inside `rices/<song>/history/` when
-/// staged directly, `rices/<song>/drafts/<draft>/history/` when routed into
+/// command starts with: takes live inside `rices/<rice>/history/` when
+/// staged directly, `rices/<rice>/drafts/<draft>/history/` when routed into
 /// a draft ([`aoide_storage::history::history_dir`]) — the staging-mode reach
 /// `strillix reload`'s design (settled 2026-08-31) extends `rice history`/`rice
 /// back` to, so nothing about them is resolvable outside `Staging`/`Draft`
@@ -163,9 +163,9 @@ pub fn register(r: &mut Registry) {
 /// helper's.
 pub(crate) fn resolve_scope(cmd: &str) -> Result<(String, Option<String>), Outcome> {
     let marker = mode::load_mode_marker();
-    match (marker.mode, marker.song, marker.draft) {
-        (RiceMode::Draft, Some(song), Some(draft)) => Ok((song, Some(draft))),
-        (RiceMode::Staging, Some(song), _) => Ok((song, None)),
+    match (marker.mode, marker.rice, marker.draft) {
+        (RiceMode::Draft, Some(rice), Some(draft)) => Ok((rice, Some(draft))),
+        (RiceMode::Staging, Some(rice), _) => Ok((rice, None)),
         _ => Err(Outcome::error(
             cmd,
             "no rice currently staged or drafted — takes only exist while unlocked \
@@ -175,16 +175,16 @@ pub(crate) fn resolve_scope(cmd: &str) -> Result<(String, Option<String>), Outco
     }
 }
 
-/// Render a `(song, draft)` scope for a message: `<song>/<draft>` when
-/// routed into a draft, bare `<song>` when staged directly (the staging-mode
+/// Render a `(rice, draft)` scope for a message: `<rice>/<draft>` when
+/// routed into a draft, bare `<rice>` when staged directly (the staging-mode
 /// take/back reach, `strillix reload` design, settled 2026-08-31) — the single
 /// formatting rule every take/back/prune message in this file uses instead
 /// of interpolating `draft` (an `Option<&str>`, with no `Display` of its
 /// own) directly.
-fn scope_label(song: &str, draft: Option<&str>) -> String {
+fn scope_label(rice: &str, draft: Option<&str>) -> String {
     match draft {
-        Some(d) => format!("{song}/{d}"),
-        None => song.to_string(),
+        Some(d) => format!("{rice}/{d}"),
+        None => rice.to_string(),
     }
 }
 
@@ -192,7 +192,7 @@ fn scope_label(song: &str, draft: Option<&str>) -> String {
 /// into a single `Value` so `strillix reload`'s dedupe-against-head
 /// ([`snapshot_if_identical_to_head_unlocked`]) is ONE `diff_theme` call
 /// over the whole captured content, never three separate comparisons (the
-/// User's own framing, 2026-08-31: "reuses take diff's own key-wise
+/// User's own framing, 2026-08-31: "reuses history diff's own key-wise
 /// machinery, never a text diff, never a second differ").
 fn take_content_value(theme: &Value, wallpaper: &Option<Value>, widgets: &Value) -> Value {
     json!({ "theme": theme, "wallpaperPick": wallpaper, "widgets": widgets })
@@ -250,17 +250,17 @@ fn read_staged_content(cmd: &str) -> Result<(Value, Option<Value>), Outcome> {
 /// `"drift"` — distinct from an `Outcome` reason string,
 /// `aoide_storage::history`' `HistoryRecord::cause` doc explains why).
 pub(crate) fn snapshot_unlocked(cmd: &str, cause: &str) -> Result<HistoryRecord, Outcome> {
-    let (song, draft) = resolve_scope(cmd)?;
+    let (rice, draft) = resolve_scope(cmd)?;
     let (theme, wallpaper) = read_staged_content(cmd)?;
-    let widgets = crate::widgets::snapshot_widget_bodies(&song).map_err(|e| {
+    let widgets = crate::widgets::snapshot_widget_bodies(&rice).map_err(|e| {
         Outcome::error(cmd, format!("failed to snapshot widget bodies: {}", e.error))
             .with_data(json!({ "reason": "widget-snapshot-failed", "target": e.target }))
     })?;
 
-    let take = history::next_history_number(&song, draft.as_deref());
+    let take = history::next_history_number(&rice, draft.as_deref());
     let record = HistoryRecord {
         take,
-        parent: history::load_head(&song, draft.as_deref()),
+        parent: history::load_head(&rice, draft.as_deref()),
         at: aoide_storage::time::now_iso_utc(),
         session_id: std::env::var("AOIDE_SESSION_ID").ok(),
         cause: cause.to_string(),
@@ -269,11 +269,11 @@ pub(crate) fn snapshot_unlocked(cmd: &str, cause: &str) -> Result<HistoryRecord,
         widgets,
     };
 
-    history::save_history(&song, draft.as_deref(), &record).map_err(|e| {
+    history::save_history(&rice, draft.as_deref(), &record).map_err(|e| {
         Outcome::error(cmd, format!("failed to write take {take}: {e}"))
             .with_data(json!({ "reason": "write-failed" }))
     })?;
-    history::save_head(&song, draft.as_deref(), take).map_err(|e| {
+    history::save_head(&rice, draft.as_deref(), take).map_err(|e| {
         Outcome::error(cmd, format!("failed to advance the head cursor: {e}"))
             .with_data(json!({ "reason": "write-failed" }))
     })?;
@@ -310,10 +310,10 @@ pub(crate) fn snapshot(cmd: &str, cause: &str) -> Result<HistoryRecord, Outcome>
 /// there is nothing here for the drift check's "preserve what's about to be
 /// overwritten" rationale to protect.
 pub(crate) fn snapshot_if_drifted_unlocked(cmd: &str, cause: &str) -> Result<Option<HistoryRecord>, Outcome> {
-    let (song, draft) = resolve_scope(cmd)?;
+    let (rice, draft) = resolve_scope(cmd)?;
 
     let head_take =
-        history::load_head(&song, draft.as_deref()).and_then(|n| history::load_history(&song, draft.as_deref(), n));
+        history::load_head(&rice, draft.as_deref()).and_then(|n| history::load_history(&rice, draft.as_deref(), n));
     if let Some(head_take) = &head_take {
         let (theme, wallpaper) = read_staged_content(cmd)?;
         if theme == head_take.theme && wallpaper == head_take.wallpaper {
@@ -336,18 +336,18 @@ pub(crate) fn snapshot_if_drifted_unlocked(cmd: &str, cause: &str) -> Result<Opt
 /// one call) rather than [`snapshot_if_drifted_unlocked`]'s own `==`
 /// comparison — that core predates widget bodies and only ever compared
 /// theme+wallpaper; this one folds all three fields the way the User's own
-/// framing asks for ("reuses take diff's own key-wise machinery, never a
+/// framing asks for ("reuses history diff's own key-wise machinery, never a
 /// text diff, never a second differ"). `Ok(None)` is the dedupe no-op — the
 /// caller still runs its sync/reload beats regardless, only the TAKE is
 /// skipped. `cmd`/`cause` thread through like every other core in this file.
 pub(crate) fn snapshot_if_identical_to_head_unlocked(cmd: &str, cause: &str) -> Result<Option<HistoryRecord>, Outcome> {
-    let (song, draft) = resolve_scope(cmd)?;
+    let (rice, draft) = resolve_scope(cmd)?;
 
     let head_take =
-        history::load_head(&song, draft.as_deref()).and_then(|n| history::load_history(&song, draft.as_deref(), n));
+        history::load_head(&rice, draft.as_deref()).and_then(|n| history::load_history(&rice, draft.as_deref(), n));
     if let Some(head_take) = &head_take {
         let (theme, wallpaper) = read_staged_content(cmd)?;
-        let widgets = crate::widgets::snapshot_widget_bodies(&song).map_err(|e| {
+        let widgets = crate::widgets::snapshot_widget_bodies(&rice).map_err(|e| {
             Outcome::error(cmd, format!("failed to snapshot widget bodies: {}", e.error))
                 .with_data(json!({ "reason": "widget-snapshot-failed", "target": e.target }))
         })?;
@@ -371,7 +371,7 @@ pub(crate) fn snapshot_if_identical_to_head(cmd: &str, cause: &str) -> Result<Op
 
 /// Fold the take a write minted into that write's outcome, the one shape
 /// `rice stage`, `wallpaper set` and `rice mode draft` share: the take and head
-/// files join `changed` (when `marker` names the song and draft they live
+/// files join `changed` (when `marker` names the rice and draft they live
 /// under) and `data.take` is the bare take number, `null` when the dedupe core
 /// minted nothing. A failed mint is never fatal — it reads `data.take` null
 /// and `data.takeError`, because the write it records already landed.
@@ -379,9 +379,9 @@ pub(crate) fn snapshot_if_identical_to_head(cmd: &str, cause: &str) -> Result<Op
 pub(crate) fn attach_take(out: &mut Outcome, marker: &mode::ModeMarker, minted: Result<Option<HistoryRecord>, Outcome>) {
     let take = match minted {
         Ok(Some(record)) => {
-            if let (Some(song), Some(draft)) = (&marker.song, &marker.draft) {
-                out.changed.push(history::history_path(song, Some(draft), record.take).to_string_lossy().into_owned());
-                out.changed.push(history::head_path(song, Some(draft)).to_string_lossy().into_owned());
+            if let (Some(rice), Some(draft)) = (&marker.rice, &marker.draft) {
+                out.changed.push(history::history_path(rice, Some(draft), record.take).to_string_lossy().into_owned());
+                out.changed.push(history::head_path(rice, Some(draft)).to_string_lossy().into_owned());
             }
             json!(record.take)
         }
@@ -404,15 +404,15 @@ pub(crate) fn attach_take(out: &mut Outcome, marker: &mode::ModeMarker, minted: 
 /// and branching actually happen. This handler's own write is not folded
 /// into anything else, so [`snapshot`]'s single lock is exactly right.
 fn handle_rice_take(_inv: &Invocation) -> Outcome {
-    let (song, draft) = match resolve_scope("rice.history") {
+    let (rice, draft) = match resolve_scope("rice.history") {
         Ok(v) => v,
         Err(o) => return o,
     };
 
     match snapshot("rice.history", "explicit") {
         Ok(record) => {
-            let take_file = history::history_path(&song, draft.as_deref(), record.take);
-            let head_file = history::head_path(&song, draft.as_deref());
+            let take_file = history::history_path(&rice, draft.as_deref(), record.take);
+            let head_file = history::head_path(&rice, draft.as_deref());
             let message = match record.parent {
                 Some(parent) => format!("take {:04} minted — from take {parent:04}", record.take),
                 None => format!("take {:04} minted — the draft's first take", record.take),
@@ -445,7 +445,7 @@ fn mark_letters_for(marks: &BTreeMap<String, u32>, take: u32) -> Vec<String> {
     marks.iter().filter(|(_, v)| **v == take).map(|(k, _)| k.clone()).collect()
 }
 
-/// Depth-first ASCII rendering of the take tree's BODY — no header line (no song/draft name to
+/// Depth-first ASCII rendering of the take tree's BODY — no header line (no rice/draft name to
 /// print one with; the caller, [`handle_rice_take_list`], prepends that) — so this stays a
 /// **pure** function of exactly what a take store already knows, unit-testable with zero
 /// terminal and zero clock. Children are walked in ascending number order
@@ -579,17 +579,17 @@ fn render_node(
 /// nothing ever taken yet) is `ok` with an empty `takes` array, never an error — the `rice draft
 /// list` precedent (`draft.rs::handle_draft_list`, no drafts found is `ok` too).
 fn handle_rice_take_list(_inv: &Invocation) -> Outcome {
-    let (song, draft) = match resolve_scope("rice.history.list") {
+    let (rice, draft) = match resolve_scope("rice.history.list") {
         Ok(v) => v,
         Err(o) => return o,
     };
 
-    let recs = history::list_history(&song, draft.as_deref());
-    let head = history::load_head(&song, draft.as_deref());
-    let marks = history::load_marks(&song, draft.as_deref());
+    let recs = history::list_history(&rice, draft.as_deref());
+    let head = history::load_head(&rice, draft.as_deref());
+    let marks = history::load_marks(&rice, draft.as_deref());
 
     let head_label = head.map(|n| format!("{n:04}")).unwrap_or_else(|| "-".to_string());
-    let scope = scope_label(&song, draft.as_deref());
+    let scope = scope_label(&rice, draft.as_deref());
     let mut message = format!("{} take(s) for {scope} \u{2014} head \u{2192} {head_label}", recs.len());
     let tree = render_tree(&recs, head, &marks);
     if !tree.is_empty() {
@@ -614,7 +614,7 @@ fn handle_rice_take_list(_inv: &Invocation) -> Outcome {
         .collect();
 
     Outcome::ok("rice.history.list", message)
-        .with_data(json!({ "song": song, "draft": draft, "head": head, "history": entries }))
+        .with_data(json!({ "rice": rice, "draft": draft, "head": head, "history": entries }))
 }
 
 /// A single letter `A`-`Z` — [`handle_rice_take_mark`]'s whole validation of
@@ -652,18 +652,18 @@ fn valid_mark_letter(s: &str) -> bool {
 /// fork 4 / D6, recorded in the module doc): a mark stamp or move is this
 /// ONE `save_marks` call, full stop.
 pub(crate) fn mark_unlocked(cmd: &str, letter: &str, target: u32) -> Result<(u32, bool, Option<u32>), Outcome> {
-    let (song, draft) = resolve_scope(cmd)?;
+    let (rice, draft) = resolve_scope(cmd)?;
 
-    if history::load_history(&song, draft.as_deref(), target).is_none() {
+    if history::load_history(&rice, draft.as_deref(), target).is_none() {
         return Err(Outcome::error(cmd, format!("take {target:04} does not exist — nothing to mark"))
             .with_data(json!({ "reason": "take-not-found", "take": target })));
     }
 
-    let mut marks = history::load_marks(&song, draft.as_deref());
+    let mut marks = history::load_marks(&rice, draft.as_deref());
     let previous = marks.get(letter).copied();
     let moved = previous.is_some_and(|p| p != target);
     marks.insert(letter.to_string(), target);
-    history::save_marks(&song, draft.as_deref(), &marks).map_err(|e| {
+    history::save_marks(&rice, draft.as_deref(), &marks).map_err(|e| {
         Outcome::error(cmd, format!("failed to write marks.json: {e}"))
             .with_data(json!({ "reason": "write-failed" }))
     })?;
@@ -713,7 +713,7 @@ fn handle_rice_take_mark(inv: &Invocation) -> Outcome {
         .with_data(json!({ "reason": "invalid-mark", "mark": letter }));
     }
 
-    let (song, draft) = match resolve_scope("rice.history.mark") {
+    let (rice, draft) = match resolve_scope("rice.history.mark") {
         Ok(v) => v,
         Err(o) => return o,
     };
@@ -729,7 +729,7 @@ fn handle_rice_take_mark(inv: &Invocation) -> Outcome {
                 .with_data(json!({ "reason": "invalid-take", "take": raw }));
             }
         },
-        None => match history::load_head(&song, draft.as_deref()) {
+        None => match history::load_head(&rice, draft.as_deref()) {
             Some(h) => h,
             None => {
                 return Outcome::error(
@@ -743,7 +743,7 @@ fn handle_rice_take_mark(inv: &Invocation) -> Outcome {
 
     match mark("rice.history.mark", &letter, target) {
         Ok((take, moved, previous)) => {
-            let marks_file = history::marks_path(&song, draft.as_deref()).to_string_lossy().into_owned();
+            let marks_file = history::marks_path(&rice, draft.as_deref()).to_string_lossy().into_owned();
             let message = if moved {
                 format!(
                     "mark {letter} moved from take {:04} to take {take:04}",
@@ -849,14 +849,14 @@ fn render_diff_value(v: &Value) -> String {
 /// a plain membership set, never sorted or compared by letter.
 fn resolve_base(
     cmd: &str,
-    song: &str,
+    rice: &str,
     draft: Option<&str>,
     take_flag: Option<u32>,
     mark_flag: Option<String>,
     head: Option<u32>,
 ) -> Result<Option<u32>, Outcome> {
     if let Some(n) = take_flag {
-        return if history::load_history(song, draft, n).is_some() {
+        return if history::load_history(rice, draft, n).is_some() {
             Ok(Some(n))
         } else {
             Err(Outcome::error(cmd, format!("take {n:04} does not exist — nothing to diff against"))
@@ -864,9 +864,9 @@ fn resolve_base(
         };
     }
     if let Some(letter) = mark_flag {
-        let marks = history::load_marks(song, draft);
+        let marks = history::load_marks(rice, draft);
         return match marks.get(&letter).copied() {
-            Some(n) if history::load_history(song, draft, n).is_some() => Ok(Some(n)),
+            Some(n) if history::load_history(rice, draft, n).is_some() => Ok(Some(n)),
             _ => Err(Outcome::error(cmd, format!("mark `{letter}` is not stamped on any take"))
                 .with_data(json!({ "reason": "mark-not-found", "mark": letter }))),
         };
@@ -875,8 +875,8 @@ fn resolve_base(
     let Some(head) = head else {
         return Ok(None); // an empty store — nothing minted yet, nothing to diff against.
     };
-    let all = history::list_history(song, draft);
-    let marks = history::load_marks(song, draft);
+    let all = history::list_history(rice, draft);
+    let marks = history::load_marks(rice, draft);
     let marked: BTreeSet<u32> = marks.values().copied().collect();
     let anc = history::ancestry(&all, head); // [head, parent, grandparent, ..., root]
     if let Some(&nearest) = anc.iter().find(|n| marked.contains(n)) {
@@ -922,13 +922,13 @@ fn handle_rice_take_diff(inv: &Invocation) -> Outcome {
         None => None,
     };
 
-    let (song, draft) = match resolve_scope("rice.history.diff") {
+    let (rice, draft) = match resolve_scope("rice.history.diff") {
         Ok(v) => v,
         Err(o) => return o,
     };
 
-    let head = history::load_head(&song, draft.as_deref());
-    let base = match resolve_base("rice.history.diff", &song, draft.as_deref(), take_flag, mark_flag, head) {
+    let head = history::load_head(&rice, draft.as_deref());
+    let base = match resolve_base("rice.history.diff", &rice, draft.as_deref(), take_flag, mark_flag, head) {
         Ok(v) => v,
         Err(o) => return o,
     };
@@ -946,7 +946,7 @@ fn handle_rice_take_diff(inv: &Invocation) -> Outcome {
         Ok(v) => v,
         Err(o) => return o,
     };
-    let base_record = history::load_history(&song, draft.as_deref(), base).expect("resolve_base only returns an existing take");
+    let base_record = history::load_history(&rice, draft.as_deref(), base).expect("resolve_base only returns an existing take");
 
     let diff = diff_theme(&base_record.theme, &staged);
     let message = if diff.is_empty() {
@@ -1055,10 +1055,10 @@ struct PrunePlan {
 /// ancestry rail and the mark filter) — see the module banner above for why
 /// multiple given selectors combine as AND. `force` decides whether a
 /// marked take can survive into `candidates` at all.
-fn plan_prune(song: &str, draft: Option<&str>, older_than: Option<u64>, keep: Option<usize>, force: bool) -> PrunePlan {
-    let all = history::list_history(song, draft);
-    let head = history::load_head(song, draft);
-    let marks = history::load_marks(song, draft);
+fn plan_prune(rice: &str, draft: Option<&str>, older_than: Option<u64>, keep: Option<usize>, force: bool) -> PrunePlan {
+    let all = history::list_history(rice, draft);
+    let head = history::load_head(rice, draft);
+    let marks = history::load_marks(rice, draft);
     let marked: BTreeSet<u32> = marks.values().copied().collect();
 
     let protected_ancestry: BTreeSet<u32> =
@@ -1142,9 +1142,9 @@ struct PruneResult {
 /// parent was ALSO pruned in this same pass still lands its surviving
 /// children on the nearest ancestor that makes it through the whole pass,
 /// however `doomed` happens to be ordered.
-fn prune_unlocked(song: &str, draft: Option<&str>, doomed: &[u32]) -> Result<PruneResult, String> {
-    let before = history::list_history(song, draft);
-    let head = history::load_head(song, draft);
+fn prune_unlocked(rice: &str, draft: Option<&str>, doomed: &[u32]) -> Result<PruneResult, String> {
+    let before = history::list_history(rice, draft);
+    let head = history::load_head(rice, draft);
     let protected_now: BTreeSet<u32> = head.map(|h| history::ancestry(&before, h).into_iter().collect()).unwrap_or_default();
 
     let mut skipped_now_protected = Vec::new();
@@ -1175,14 +1175,14 @@ fn prune_unlocked(song: &str, draft: Option<&str>, doomed: &[u32]) -> Result<Pru
     for rec in &after {
         let old_parent = before.iter().find(|t| t.take == rec.take).and_then(|t| t.parent);
         if old_parent != rec.parent {
-            history::save_history(song, draft, rec).map_err(|e| format!("failed to re-parent take {}: {e}", rec.take))?;
-            changed.push(history::history_path(song, draft, rec.take).to_string_lossy().into_owned());
+            history::save_history(rice, draft, rec).map_err(|e| format!("failed to re-parent take {}: {e}", rec.take))?;
+            changed.push(history::history_path(rice, draft, rec.take).to_string_lossy().into_owned());
             reparented.push((rec.take, old_parent, rec.parent));
         }
     }
 
     for &n in &doomed {
-        let path = history::history_path(song, draft, n);
+        let path = history::history_path(rice, draft, n);
         if path.is_file() {
             std::fs::remove_file(&path).map_err(|e| format!("failed to remove take {n}: {e}"))?;
             changed.push(path.to_string_lossy().into_owned());
@@ -1190,7 +1190,7 @@ fn prune_unlocked(song: &str, draft: Option<&str>, doomed: &[u32]) -> Result<Pru
     }
 
     let doomed_set: BTreeSet<u32> = doomed.iter().copied().collect();
-    let mut marks = history::load_marks(song, draft);
+    let mut marks = history::load_marks(rice, draft);
     let mut dropped_marks = Vec::new();
     marks.retain(|letter, take| {
         if doomed_set.contains(take) {
@@ -1201,8 +1201,8 @@ fn prune_unlocked(song: &str, draft: Option<&str>, doomed: &[u32]) -> Result<Pru
         }
     });
     if !dropped_marks.is_empty() {
-        history::save_marks(song, draft, &marks).map_err(|e| format!("failed to write marks.json: {e}"))?;
-        changed.push(history::marks_path(song, draft).to_string_lossy().into_owned());
+        history::save_marks(rice, draft, &marks).map_err(|e| format!("failed to write marks.json: {e}"))?;
+        changed.push(history::marks_path(rice, draft).to_string_lossy().into_owned());
     }
 
     Ok(PruneResult { pruned: doomed, reparented, dropped_marks, changed, skipped_now_protected })
@@ -1212,8 +1212,8 @@ fn prune_unlocked(song: &str, draft: Option<&str>, doomed: &[u32]) -> Result<Pru
 /// around [`prune_unlocked`]'s whole splice-persist-delete-remark body — the
 /// crate's one-hold-per-mutator rule (module doc's "Locking discipline"
 /// section), the same shape every other mutator in this file uses.
-fn prune(song: &str, draft: Option<&str>, doomed: &[u32]) -> Result<PruneResult, String> {
-    shellbridge::with_stage_lock(|| prune_unlocked(song, draft, doomed))
+fn prune(rice: &str, draft: Option<&str>, doomed: &[u32]) -> Result<PruneResult, String> {
+    shellbridge::with_stage_lock(|| prune_unlocked(rice, draft, doomed))
 }
 
 /// One picker row for a prune candidate — same fields as
@@ -1232,8 +1232,8 @@ fn prune_row(rec: &HistoryRecord, marks: &BTreeMap<String, u32>) -> String {
 /// left to pick) return. `Ok`, not `Usage`: nothing was asked for that this
 /// refuses, this is the informational default the plan's own "prints the
 /// dry run and changes nothing" describes.
-fn dry_run_outcome(song: &str, draft: Option<&str>, plan: &PrunePlan) -> Outcome {
-    let scope = scope_label(song, draft);
+fn dry_run_outcome(rice: &str, draft: Option<&str>, plan: &PrunePlan) -> Outcome {
+    let scope = scope_label(rice, draft);
     let numbers: Vec<u32> = plan.candidates.iter().map(|t| t.take).collect();
     let message = if numbers.is_empty() {
         format!(
@@ -1261,8 +1261,8 @@ fn dry_run_outcome(song: &str, draft: Option<&str>, plan: &PrunePlan) -> Outcome
 /// [`Outcome`] — shared by the flag-driven path and the tty picker's success
 /// arm, mirroring how [`render_back_outcome`] is shared by `rice back`'s two
 /// entrances.
-fn render_prune_outcome(song: &str, draft: Option<&str>, result: PruneResult, plan: &PrunePlan) -> Outcome {
-    let scope = scope_label(song, draft);
+fn render_prune_outcome(rice: &str, draft: Option<&str>, result: PruneResult, plan: &PrunePlan) -> Outcome {
+    let scope = scope_label(rice, draft);
     let reparent_note = if result.reparented.is_empty() {
         String::new()
     } else {
@@ -1305,17 +1305,17 @@ fn render_prune_outcome(song: &str, draft: Option<&str>, result: PruneResult, pl
 /// An empty candidate set is still `Ok` ("nothing to prune"), never an
 /// error — the same "idempotent no-op is success" shape
 /// [`snapshot_if_drifted_unlocked`]'s no-drift case uses.
-fn execute_prune(song: &str, draft: Option<&str>, plan: &PrunePlan) -> Outcome {
+fn execute_prune(rice: &str, draft: Option<&str>, plan: &PrunePlan) -> Outcome {
     let doomed: Vec<u32> = plan.candidates.iter().map(|t| t.take).collect();
     if doomed.is_empty() {
-        let scope = scope_label(song, draft);
+        let scope = scope_label(rice, draft);
         return Outcome::ok("rice.history.prune", format!("nothing to prune for {scope}")).with_data(json!({
             "pruned": Vec::<u32>::new(),
             "protectedByMark": plan.protected_by_mark.iter().map(|t| t.take).collect::<Vec<_>>(),
         }));
     }
-    match prune(song, draft, &doomed) {
-        Ok(result) => render_prune_outcome(song, draft, result, plan),
+    match prune(rice, draft, &doomed) {
+        Ok(result) => render_prune_outcome(rice, draft, result, plan),
         Err(e) => Outcome::error("rice.history.prune", format!("prune failed: {e}")).with_data(json!({ "reason": "write-failed" })),
     }
 }
@@ -1329,18 +1329,18 @@ fn execute_prune(song: &str, draft: Option<&str>, plan: &PrunePlan) -> Outcome {
 /// returns the same dry-run report the non-tty path would. Choosing rows
 /// IS the confirm (see the module banner) — there is no separate y/n
 /// prompt.
-fn prune_picker(song: &str, draft: Option<&str>, plan: &PrunePlan) -> Outcome {
+fn prune_picker(rice: &str, draft: Option<&str>, plan: &PrunePlan) -> Outcome {
     if plan.candidates.is_empty() {
-        return dry_run_outcome(song, draft, plan);
+        return dry_run_outcome(rice, draft, plan);
     }
-    let marks = history::load_marks(song, draft);
+    let marks = history::load_marks(rice, draft);
     let rows: Vec<String> = plan.candidates.iter().map(|t| prune_row(t, &marks)).collect();
-    let prompt = format!("prune which take(s) for {}?", scope_label(song, draft));
+    let prompt = format!("prune which take(s) for {}?", scope_label(rice, draft));
     match pick::choose_many(&prompt, &rows, &[]) {
         Some(indices) => {
             let doomed: Vec<u32> = indices.iter().filter_map(|&i| plan.candidates.get(i)).map(|t| t.take).collect();
-            match prune(song, draft, &doomed) {
-                Ok(result) => render_prune_outcome(song, draft, result, plan),
+            match prune(rice, draft, &doomed) {
+                Ok(result) => render_prune_outcome(rice, draft, result, plan),
                 Err(e) => Outcome::error("rice.history.prune", format!("prune failed: {e}"))
                     .with_data(json!({ "reason": "write-failed" })),
             }
@@ -1390,20 +1390,20 @@ fn handle_rice_take_prune(inv: &Invocation) -> Outcome {
     let force = inv.flag_present("force");
     let selector_given = older_than.is_some() || keep.is_some() || all_but_marks;
 
-    let (song, draft) = match resolve_scope("rice.history.prune") {
+    let (rice, draft) = match resolve_scope("rice.history.prune") {
         Ok(v) => v,
         Err(o) => return o,
     };
 
-    let plan = plan_prune(&song, draft.as_deref(), older_than, keep, force);
+    let plan = plan_prune(&rice, draft.as_deref(), older_than, keep, force);
 
     if selector_given {
-        return execute_prune(&song, draft.as_deref(), &plan);
+        return execute_prune(&rice, draft.as_deref(), &plan);
     }
     if pick::interactive(inv.door) {
-        return prune_picker(&song, draft.as_deref(), &plan);
+        return prune_picker(&rice, draft.as_deref(), &plan);
     }
-    dry_run_outcome(&song, draft.as_deref(), &plan)
+    dry_run_outcome(&rice, draft.as_deref(), &plan)
 }
 
 // ── `rice back` — the revert that lands the branch-from-any-mark ask ───────
@@ -1451,7 +1451,7 @@ struct BackResult {
 /// taken) — this function's job is resolving WHICH one names a real take and
 /// then acting on it.
 fn back_unlocked(cmd: &str, take_flag: Option<u32>, mark_flag: Option<String>) -> Result<BackResult, Outcome> {
-    let (song, draft) = resolve_scope(cmd)?;
+    let (rice, draft) = resolve_scope(cmd)?;
 
     // D7: refuse before touching anything if the DRAFT's routing symlink is
     // gone, dangling, or was ever replaced by a plain file. `atomic_write`'s
@@ -1498,16 +1498,16 @@ fn back_unlocked(cmd: &str, take_flag: Option<u32>, mark_flag: Option<String>) -
     // reason for the same practical failure (mirrors `mark_unlocked`'s own
     // take-not-found/no-head collapse just above).
     let (target, mark_used) = if let Some(n) = take_flag {
-        if history::load_history(&song, draft.as_deref(), n).is_none() {
+        if history::load_history(&rice, draft.as_deref(), n).is_none() {
             return Err(Outcome::error(cmd, format!("take {n:04} does not exist — nothing to revert to"))
                 .with_data(json!({ "reason": "take-not-found", "take": n })));
         }
         (n, None)
     } else {
         let letter = mark_flag.expect("handle_rice_back guarantees take_flag or mark_flag is Some");
-        let marks = history::load_marks(&song, draft.as_deref());
+        let marks = history::load_marks(&rice, draft.as_deref());
         match marks.get(&letter).copied() {
-            Some(n) if history::load_history(&song, draft.as_deref(), n).is_some() => (n, Some(letter)),
+            Some(n) if history::load_history(&rice, draft.as_deref(), n).is_some() => (n, Some(letter)),
             _ => {
                 return Err(
                     Outcome::error(cmd, format!("mark `{letter}` is not stamped on any take"))
@@ -1517,7 +1517,7 @@ fn back_unlocked(cmd: &str, take_flag: Option<u32>, mark_flag: Option<String>) -
         }
     };
     let target_record =
-        history::load_history(&song, draft.as_deref(), target).expect("existence just confirmed above");
+        history::load_history(&rice, draft.as_deref(), target).expect("existence just confirmed above");
 
     // §7.5's gate, at the HEAD of the back path — above the drift snapshot
     // below, which is itself a write (it mints a take). A refusal here leaves
@@ -1526,12 +1526,12 @@ fn back_unlocked(cmd: &str, take_flag: Option<u32>, mark_flag: Option<String>) -
     // The revert itself needs no nix; only the registry sync does — and
     // refusing the whole operation BEFORE its first write is what makes that
     // sync's refusal safe to inherit.
-    let rices = crate::widgets::plan_stage(&song).map_err(|e| {
+    let rices = crate::widgets::plan_stage(&rice).map_err(|e| {
         Outcome::error(cmd, e.error)
             .with_data(json!({ "reason": "stage-refused", "target": e.target }))
     })?;
 
-    let head_before = history::load_head(&song, draft.as_deref());
+    let head_before = history::load_head(&rice, draft.as_deref());
 
     // The rail that makes "nothing is destroyed" literally true even for
     // un-taken hand-edits: preserve whatever is CURRENTLY on the stage
@@ -1543,8 +1543,8 @@ fn back_unlocked(cmd: &str, take_flag: Option<u32>, mark_flag: Option<String>) -
 
     let mut changed = Vec::new();
     if let Some(rec) = &drifted {
-        changed.push(history::history_path(&song, draft.as_deref(), rec.take).to_string_lossy().into_owned());
-        changed.push(history::head_path(&song, draft.as_deref()).to_string_lossy().into_owned());
+        changed.push(history::history_path(&rice, draft.as_deref(), rec.take).to_string_lossy().into_owned());
+        changed.push(history::head_path(&rice, draft.as_deref()).to_string_lossy().into_owned());
     }
 
     // The write-back IS the routing (plan §5.2): the identical `atomic_write`
@@ -1576,17 +1576,17 @@ fn back_unlocked(cmd: &str, take_flag: Option<u32>, mark_flag: Option<String>) -
         crate::live::terminal_colors(&target_record.theme).as_deref(),
     );
     changed.extend(terminal_changed);
-    // And the lock screen's dress, off the same theme: the song's own picture
+    // And the lock screen's dress, off the same theme: the rice's own picture
     // from the runtime rices, or nothing, which clears the dress a later
-    // staged song left behind.
-    let lock_image = crate::wallpaper::lockscreen_image(&shellbridge::rice_dir(&song));
+    // staged rice left behind.
+    let lock_image = crate::wallpaper::lockscreen_image(&shellbridge::rice_dir(&rice));
     let (lock_changed, lock_screen) = super::rice::stage_lockscreen(
         crate::live::lockscreen_fragment(&target_record.theme, lock_image.as_deref()),
         lock_image.as_deref(),
     );
     changed.extend(lock_changed);
 
-    // Cover restore is narrowed to the STAGE ONLY (advisor verdict D4):
+    // Wallpaper restore is narrowed to the STAGE ONLY (advisor verdict D4):
     // `stage/wallpaper.json` is not symlink-routed the way `theme.json` is
     // (`storage/src/mode.rs`'s `handle_mode_draft` symlinks exactly one
     // file), so this writes the same seam `wallpaper set` writes
@@ -1629,7 +1629,7 @@ fn back_unlocked(cmd: &str, take_flag: Option<u32>, mark_flag: Option<String>) -
     // omission. The gate that approves this rices ran at the HEAD of this
     // function, above the drift snapshot — that is what makes a refusal here
     // cost the operator nothing.
-    let registry_sync = crate::widgets::sync_song_registry(&song, &rices).map_err(|e| {
+    let registry_sync = crate::widgets::sync_rice_registry(&rice, &rices).map_err(|e| {
         Outcome::error(cmd, format!("failed to sync widget-type registry: {}", e.error))
             .with_data(json!({ "reason": "registry-sync-failed", "target": e.target }))
     })?;
@@ -1639,11 +1639,11 @@ fn back_unlocked(cmd: &str, take_flag: Option<u32>, mark_flag: Option<String>) -
     // moves. This is the step where branching actually happens: the NEXT
     // snapshot parents off whatever `save_head` names here, not off
     // whatever the head happened to be a moment ago.
-    history::save_head(&song, draft.as_deref(), target).map_err(|e| {
+    history::save_head(&rice, draft.as_deref(), target).map_err(|e| {
         Outcome::error(cmd, format!("failed to advance the head cursor: {e}"))
             .with_data(json!({ "reason": "write-failed" }))
     })?;
-    changed.push(history::head_path(&song, draft.as_deref()).to_string_lossy().into_owned());
+    changed.push(history::head_path(&rice, draft.as_deref()).to_string_lossy().into_owned());
 
     Ok(BackResult {
         from: head_before,
@@ -1814,20 +1814,20 @@ fn default_row_index(recs: &[HistoryRecord], head: Option<u32>, lane: &[(u32, St
 /// practical outcome is identical either way: nothing was picked, nothing
 /// was written.
 fn handle_rice_back_picker() -> Outcome {
-    let (song, draft) = match resolve_scope("rice.back") {
+    let (rice, draft) = match resolve_scope("rice.back") {
         Ok(v) => v,
         Err(o) => return o,
     };
 
-    let recs = history::list_history(&song, draft.as_deref());
-    let head = history::load_head(&song, draft.as_deref());
-    let marks = history::load_marks(&song, draft.as_deref());
+    let recs = history::list_history(&rice, draft.as_deref());
+    let head = history::load_head(&rice, draft.as_deref());
+    let marks = history::load_marks(&rice, draft.as_deref());
     let lane = take_lane_rows(&recs, head, &marks);
 
     let default_idx = default_row_index(&recs, head, &lane);
     let rows: Vec<String> = lane.iter().map(|(_, row)| row.clone()).collect();
 
-    let prompt = format!("revert {} to which take?", scope_label(&song, draft.as_deref()));
+    let prompt = format!("revert {} to which take?", scope_label(&rice, draft.as_deref()));
     match pick::choose(&prompt, &rows, default_idx) {
         Some(idx) => {
             let target = lane[idx].0;
@@ -1877,16 +1877,16 @@ mod tests {
         std::fs::create_dir_all(&stage).unwrap();
         crate::commands::test_support::ensure_default_rices_fixture();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
-        let song = "sonata".to_string();
+        let rice = "sonata".to_string();
         let draft = "neon-night".to_string();
         save_mode_marker(&ModeMarker {
             mode: RiceMode::Draft,
-            song: Some(song.clone()),
+            rice: Some(rice.clone()),
             draft: Some(draft.clone()),
             ..Default::default()
         })
         .unwrap();
-        (root, song, draft)
+        (root, rice, draft)
     }
 
     // ── snapshot: numbering + parent chain ──────────────────────────────
@@ -1896,14 +1896,14 @@ mod tests {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID"]);
         std::env::remove_var("AOIDE_SESSION_ID");
-        let (root, song, draft) = routed_draft("take-first");
+        let (root, rice, draft) = routed_draft("take-first");
         std::fs::write(shellbridge::stage_dir().join("theme.json"), VALID_NOTES).unwrap();
 
         let record = snapshot("rice.history", "explicit").unwrap();
         assert_eq!(record.take, 1);
         assert_eq!(record.parent, None, "the very first take has no parent");
         assert_eq!(record.cause, "explicit");
-        assert_eq!(history::load_head(&song, Some(&draft)), Some(1));
+        assert_eq!(history::load_head(&rice, Some(&draft)), Some(1));
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -1912,7 +1912,7 @@ mod tests {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID"]);
         std::env::remove_var("AOIDE_SESSION_ID");
-        let (root, song, draft) = routed_draft("take-second");
+        let (root, rice, draft) = routed_draft("take-second");
         std::fs::write(shellbridge::stage_dir().join("theme.json"), VALID_NOTES).unwrap();
 
         let first = snapshot("rice.history", "stage").unwrap();
@@ -1926,7 +1926,7 @@ mod tests {
         let second = snapshot("rice.history", "stage").unwrap();
         assert_eq!(second.take, 2);
         assert_eq!(second.parent, Some(1), "hangs off the head at the time of the mint");
-        assert_eq!(history::load_head(&song, Some(&draft)), Some(2));
+        assert_eq!(history::load_head(&rice, Some(&draft)), Some(2));
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -1956,10 +1956,10 @@ mod tests {
 
     /// The staging-mode take/back reach itself (`strillix reload` design,
     /// settled 2026-08-31): `Staging` mode is NOT refused — `rice history`
-    /// mints straight onto `rices/<song>/history/`, sibling to `drafts/`,
+    /// mints straight onto `rices/<rice>/history/`, sibling to `drafts/`,
     /// never nested under one that doesn't exist in this mode.
     #[test]
-    fn snapshot_in_staging_mode_takes_off_the_song_directly() {
+    fn snapshot_in_staging_mode_takes_off_the_rice_directly() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID"]);
         std::env::remove_var("AOIDE_SESSION_ID");
@@ -1971,7 +1971,7 @@ mod tests {
 
         save_mode_marker(&ModeMarker {
             mode: RiceMode::Staging,
-            song: Some("sonata".to_string()),
+            rice: Some("sonata".to_string()),
             ..Default::default()
         })
         .unwrap();
@@ -1985,7 +1985,7 @@ mod tests {
             "the take lives directly under rices/sonata/history/"
         );
         assert!(
-            !shellbridge::song_drafts_dir("sonata").is_dir(),
+            !shellbridge::rice_drafts_dir("sonata").is_dir(),
             "no drafts/ directory was ever created for a staging-mode take"
         );
         let _ = std::fs::remove_dir_all(&root);
@@ -2043,7 +2043,7 @@ mod tests {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID"]);
         std::env::remove_var("AOIDE_SESSION_ID");
-        let (root, song, draft) = routed_draft("take-drift");
+        let (root, rice, draft) = routed_draft("take-drift");
         std::fs::write(shellbridge::stage_dir().join("theme.json"), VALID_NOTES).unwrap();
 
         let first = snapshot("rice.history", "stage").unwrap();
@@ -2055,7 +2055,7 @@ mod tests {
         std::fs::write(shellbridge::stage_dir().join("theme.json"), reserialized).unwrap();
         let noop = snapshot_if_drifted_unlocked("rice.history", "drift").unwrap();
         assert!(noop.is_none(), "byte-different, value-identical content is not drift");
-        assert_eq!(history::list_history(&song, Some(&draft)).len(), 1, "no new take minted");
+        assert_eq!(history::list_history(&rice, Some(&draft)).len(), 1, "no new take minted");
 
         // A genuine change mints a take, parented off the head it drifted from.
         std::fs::write(
@@ -2076,7 +2076,7 @@ mod tests {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID"]);
         std::env::remove_var("AOIDE_SESSION_ID");
-        let (root, _song, _draft) = routed_draft("take-drift-empty");
+        let (root, _rice, _draft) = routed_draft("take-drift-empty");
         std::fs::write(shellbridge::stage_dir().join("theme.json"), VALID_NOTES).unwrap();
 
         // No head exists yet — there is nothing to compare against, so the
@@ -2094,7 +2094,7 @@ mod tests {
     fn take_carries_session_id_when_set_and_omits_when_not() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID"]);
-        let (root, _song, _draft) = routed_draft("take-session");
+        let (root, _rice, _draft) = routed_draft("take-session");
         std::fs::write(shellbridge::stage_dir().join("theme.json"), VALID_NOTES).unwrap();
 
         std::env::remove_var("AOIDE_SESSION_ID");
@@ -2114,7 +2114,7 @@ mod tests {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID"]);
         std::env::remove_var("AOIDE_SESSION_ID");
-        let (root, song, draft) = routed_draft("take-handler-ok");
+        let (root, rice, draft) = routed_draft("take-handler-ok");
         std::fs::write(shellbridge::stage_dir().join("theme.json"), VALID_NOTES).unwrap();
 
         let out = handle_rice_take(&inv(&["rice", "history"], &[]));
@@ -2125,7 +2125,7 @@ mod tests {
         assert_eq!(data["cause"], "explicit");
         assert!(out.changed.iter().any(|c| c.ends_with("history/0001.json")));
         assert!(out.changed.iter().any(|c| c.ends_with("history/head.json")));
-        assert_eq!(history::load_head(&song, Some(&draft)), Some(1));
+        assert_eq!(history::load_head(&rice, Some(&draft)), Some(1));
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -2163,7 +2163,7 @@ mod tests {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID"]);
         std::env::remove_var("AOIDE_SESSION_ID");
-        let (root, song, draft) = routed_draft("mark-head-default");
+        let (root, rice, draft) = routed_draft("mark-head-default");
         std::fs::write(shellbridge::stage_dir().join("theme.json"), VALID_NOTES).unwrap();
         let first = snapshot("rice.history", "explicit").unwrap();
         assert_eq!(first.take, 1);
@@ -2176,7 +2176,7 @@ mod tests {
         assert_eq!(data["moved"], false, "a fresh letter is a stamp, not a move");
         assert!(data["from"].is_null());
         assert!(out.changed.iter().any(|c| c.ends_with("history/marks.json")));
-        assert_eq!(history::load_marks(&song, Some(&draft)).get("A"), Some(&1));
+        assert_eq!(history::load_marks(&rice, Some(&draft)).get("A"), Some(&1));
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -2185,7 +2185,7 @@ mod tests {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID"]);
         std::env::remove_var("AOIDE_SESSION_ID");
-        let (root, song, draft) = routed_draft("mark-take-flag");
+        let (root, rice, draft) = routed_draft("mark-take-flag");
         std::fs::write(shellbridge::stage_dir().join("theme.json"), VALID_NOTES).unwrap();
         snapshot("rice.history", "explicit").unwrap(); // take 1
         std::fs::write(
@@ -2195,13 +2195,13 @@ mod tests {
         .unwrap();
         let second = snapshot("rice.history", "explicit").unwrap(); // take 2, now head
         assert_eq!(second.take, 2);
-        assert_eq!(history::load_head(&song, Some(&draft)), Some(2));
+        assert_eq!(history::load_head(&rice, Some(&draft)), Some(2));
 
         // Explicitly mark take 1, even though the head has since moved to 2.
         let out = handle_rice_take_mark(&inv_with_take("A", 1));
         assert_eq!(out.status, Status::Ok, "{:?}", out.data);
         assert_eq!(out.data.unwrap()["take"], 1);
-        assert_eq!(history::load_marks(&song, Some(&draft)).get("A"), Some(&1));
+        assert_eq!(history::load_marks(&rice, Some(&draft)).get("A"), Some(&1));
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -2210,7 +2210,7 @@ mod tests {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID"]);
         std::env::remove_var("AOIDE_SESSION_ID");
-        let (root, song, draft) = routed_draft("mark-move");
+        let (root, rice, draft) = routed_draft("mark-move");
         std::fs::write(shellbridge::stage_dir().join("theme.json"), VALID_NOTES).unwrap();
         let first = snapshot("rice.history", "explicit").unwrap();
         std::fs::write(
@@ -2220,8 +2220,8 @@ mod tests {
         .unwrap();
         let second = snapshot("rice.history", "explicit").unwrap();
         assert_eq!((first.take, second.take), (1, 2));
-        let take_1_raw_before = std::fs::read_to_string(history::history_path(&song, Some(&draft), 1)).unwrap();
-        let take_2_raw_before = std::fs::read_to_string(history::history_path(&song, Some(&draft), 2)).unwrap();
+        let take_1_raw_before = std::fs::read_to_string(history::history_path(&rice, Some(&draft), 1)).unwrap();
+        let take_2_raw_before = std::fs::read_to_string(history::history_path(&rice, Some(&draft), 2)).unwrap();
 
         let stamped = handle_rice_take_mark(&inv_with_take("A", 1));
         assert_eq!(stamped.status, Status::Ok, "{:?}", stamped.data);
@@ -2235,19 +2235,19 @@ mod tests {
 
         // Old take loses the letter, new take has it — as one map, not a
         // per-take field: exactly one entry, naming the new take.
-        let marks = history::load_marks(&song, Some(&draft));
+        let marks = history::load_marks(&rice, Some(&draft));
         assert_eq!(marks.len(), 1, "moving overwrote the entry, it did not duplicate it");
         assert_eq!(marks.get("A"), Some(&2));
 
         // D6/fork 4: marks live OUTSIDE the take record — stamping or moving
         // a letter must never rewrite an NNNN.json.
         assert_eq!(
-            std::fs::read_to_string(history::history_path(&song, Some(&draft), 1)).unwrap(),
+            std::fs::read_to_string(history::history_path(&rice, Some(&draft), 1)).unwrap(),
             take_1_raw_before,
             "take 1's own file is untouched by the mark ever moving off it"
         );
         assert_eq!(
-            std::fs::read_to_string(history::history_path(&song, Some(&draft), 2)).unwrap(),
+            std::fs::read_to_string(history::history_path(&rice, Some(&draft), 2)).unwrap(),
             take_2_raw_before,
             "take 2's own file is untouched by the mark landing on it"
         );
@@ -2259,7 +2259,7 @@ mod tests {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID"]);
         std::env::remove_var("AOIDE_SESSION_ID");
-        let (root, _song, _draft) = routed_draft("mark-invalid");
+        let (root, _rice, _draft) = routed_draft("mark-invalid");
         std::fs::write(shellbridge::stage_dir().join("theme.json"), VALID_NOTES).unwrap();
         snapshot("rice.history", "explicit").unwrap();
 
@@ -2275,7 +2275,7 @@ mod tests {
     fn mark_missing_letter_arg_is_a_usage_error() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
-        let (root, _song, _draft) = routed_draft("mark-missing-arg");
+        let (root, _rice, _draft) = routed_draft("mark-missing-arg");
 
         let out = handle_rice_take_mark(&inv(&["rice", "history", "mark"], &[]));
         assert_eq!(out.status, Status::Usage);
@@ -2302,7 +2302,7 @@ mod tests {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID"]);
         std::env::remove_var("AOIDE_SESSION_ID");
-        let (root, _song, _draft) = routed_draft("mark-take-missing");
+        let (root, _rice, _draft) = routed_draft("mark-take-missing");
         std::fs::write(shellbridge::stage_dir().join("theme.json"), VALID_NOTES).unwrap();
         snapshot("rice.history", "explicit").unwrap(); // only take 1 exists
 
@@ -2316,7 +2316,7 @@ mod tests {
     fn mark_with_no_takes_at_all_and_no_take_flag_errors_take_not_found() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
-        let (root, _song, _draft) = routed_draft("mark-empty-store");
+        let (root, _rice, _draft) = routed_draft("mark-empty-store");
 
         // Draft mode, but nothing has ever been taken — no head to default
         // to, which reads the same as "that take doesn't exist".
@@ -2331,7 +2331,7 @@ mod tests {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID"]);
         std::env::remove_var("AOIDE_SESSION_ID");
-        let (root, _song, _draft) = routed_draft("mark-take-flag-invalid");
+        let (root, _rice, _draft) = routed_draft("mark-take-flag-invalid");
         std::fs::write(shellbridge::stage_dir().join("theme.json"), VALID_NOTES).unwrap();
         snapshot("rice.history", "explicit").unwrap();
 
@@ -2360,21 +2360,21 @@ mod tests {
         std::fs::create_dir_all(&stage).unwrap();
         crate::commands::test_support::ensure_default_rices_fixture();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
-        let song = "sonata".to_string();
+        let rice = "sonata".to_string();
         let draft = "neon-night".to_string();
-        let draft_dir = shellbridge::draft_dir(&song, &draft);
+        let draft_dir = shellbridge::draft_dir(&rice, &draft);
         std::fs::create_dir_all(&draft_dir).unwrap();
         let draft_theme = draft_dir.join("theme.json");
         std::fs::write(&draft_theme, "{}").unwrap();
         std::os::unix::fs::symlink(&draft_theme, stage.join("theme.json")).unwrap();
         save_mode_marker(&ModeMarker {
             mode: RiceMode::Draft,
-            song: Some(song.clone()),
+            rice: Some(rice.clone()),
             draft: Some(draft.clone()),
             ..Default::default()
         })
         .unwrap();
-        (root, song, draft, draft_theme)
+        (root, rice, draft, draft_theme)
     }
 
     /// Writes new content THROUGH the routing symlink — plain `std::fs::write`
@@ -2414,7 +2414,7 @@ mod tests {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID"]);
         std::env::remove_var("AOIDE_SESSION_ID");
-        let (root, song, draft, draft_theme) = routed_draft_symlinked("back-branch-acceptance");
+        let (root, rice, draft, draft_theme) = routed_draft_symlinked("back-branch-acceptance");
         let stage = shellbridge::stage_dir();
 
         write_theme(&stage, "#111111");
@@ -2430,7 +2430,7 @@ mod tests {
         write_theme(&stage, "#333333");
         let take3 = snapshot("rice.history", "stage").unwrap();
         assert_eq!((take3.take, take3.parent), (3, Some(2)));
-        assert_eq!(history::load_head(&song, Some(&draft)), Some(3));
+        assert_eq!(history::load_head(&rice, Some(&draft)), Some(3));
 
         // `rice back --mark A` — the stage exactly matches the head (take 3)
         // it's about to overwrite, so nothing drifts.
@@ -2445,14 +2445,14 @@ mod tests {
             data.get("reload").is_none(),
             "a revert never touches Quickshell IPC (D1) — no reload field at all, unlike `rice stage`'s outcome"
         );
-        assert_eq!(history::load_head(&song, Some(&draft)), Some(2), "head moved to the mark's take");
+        assert_eq!(history::load_head(&rice, Some(&draft)), Some(2), "head moved to the mark's take");
 
         let restored: Value = serde_json::from_str(&std::fs::read_to_string(&draft_theme).unwrap()).unwrap();
         assert_eq!(restored, take2.theme, "the draft file (through the symlink) now holds take 2's content");
 
         // Takes 3 is completely untouched — nothing destroyed, nothing
         // renumbered.
-        let take3_after = history::load_history(&song, Some(&draft), 3).unwrap();
+        let take3_after = history::load_history(&rice, Some(&draft), 3).unwrap();
         assert_eq!(take3_after, take3);
 
         // Branch out again: the next write hangs off the REVERTED head (2),
@@ -2463,9 +2463,9 @@ mod tests {
 
         // Take 3 is STILL there, still parented on 2 — a sibling of take 4,
         // not overwritten and not renumbered.
-        let take3_final = history::load_history(&song, Some(&draft), 3).unwrap();
+        let take3_final = history::load_history(&rice, Some(&draft), 3).unwrap();
         assert_eq!(take3_final.parent, Some(2));
-        assert_eq!(history::children(&history::list_history(&song, Some(&draft)), 2), vec![3, 4], "two branches off the same mark");
+        assert_eq!(history::children(&history::list_history(&rice, Some(&draft)), 2), vec![3, 4], "two branches off the same mark");
 
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -2475,7 +2475,7 @@ mod tests {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID"]);
         std::env::remove_var("AOIDE_SESSION_ID");
-        let (root, song, draft, draft_theme) = routed_draft_symlinked("back-by-take");
+        let (root, rice, draft, draft_theme) = routed_draft_symlinked("back-by-take");
         let stage = shellbridge::stage_dir();
 
         write_theme(&stage, "#aaaaaa");
@@ -2488,7 +2488,7 @@ mod tests {
         let data = out.data.unwrap();
         assert_eq!(data["to"], 1);
         assert!(data["mark"].is_null(), "a --take selection reports no mark");
-        assert_eq!(history::load_head(&song, Some(&draft)), Some(1));
+        assert_eq!(history::load_head(&rice, Some(&draft)), Some(1));
 
         let restored: Value = serde_json::from_str(&std::fs::read_to_string(&draft_theme).unwrap()).unwrap();
         assert_eq!(restored, take1.theme);
@@ -2496,16 +2496,16 @@ mod tests {
     }
 
     /// `rice back` redresses the lock off the take it restores, the same
-    /// writer `rice stage` uses: the target take's colours with the song's own
-    /// picture, and nothing once the song ships none.
+    /// writer `rice stage` uses: the target take's colours with the rice's own
+    /// picture, and nothing once the rice ships none.
     #[test]
     fn back_restores_the_lock_dress_off_the_target_take() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID"]);
         std::env::remove_var("AOIDE_SESSION_ID");
-        let (root, song, _draft, _draft_theme) = routed_draft_symlinked("back-lock-dress");
+        let (root, rice, _draft, _draft_theme) = routed_draft_symlinked("back-lock-dress");
         let stage = shellbridge::stage_dir();
-        let picture = shellbridge::rice_dir(&song).join("lockscreen.png");
+        let picture = shellbridge::rice_dir(&rice).join("lockscreen.png");
         std::fs::write(&picture, b"").unwrap();
         let write_full = |bg: &str| {
             std::fs::write(
@@ -2550,7 +2550,7 @@ mod tests {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID"]);
         std::env::remove_var("AOIDE_SESSION_ID");
-        let (root, song, draft, _draft_theme) = routed_draft_symlinked("back-take-target-has-mark");
+        let (root, rice, draft, _draft_theme) = routed_draft_symlinked("back-take-target-has-mark");
         let stage = shellbridge::stage_dir();
 
         write_theme(&stage, "#111111");
@@ -2565,7 +2565,7 @@ mod tests {
             out.data.unwrap()["mark"].is_null(),
             "selected via --take, not --mark — the report says null even though take 1 owns mark A"
         );
-        assert_eq!(history::load_head(&song, Some(&draft)), Some(1));
+        assert_eq!(history::load_head(&rice, Some(&draft)), Some(1));
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -2574,7 +2574,7 @@ mod tests {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID"]);
         std::env::remove_var("AOIDE_SESSION_ID");
-        let (root, song, draft, draft_theme) = routed_draft_symlinked("back-drift-preserved");
+        let (root, rice, draft, draft_theme) = routed_draft_symlinked("back-drift-preserved");
         let stage = shellbridge::stage_dir();
 
         write_theme(&stage, "#111111");
@@ -2591,7 +2591,7 @@ mod tests {
         assert_eq!(drifted_take, 2, "the drift take hangs off the head it preserved");
 
         // The un-taken edit is recoverable: it is exactly what take 2 holds.
-        let preserved = history::load_history(&song, Some(&draft), 2).unwrap();
+        let preserved = history::load_history(&rice, Some(&draft), 2).unwrap();
         assert_eq!(preserved.cause, "drift");
         assert_eq!(preserved.parent, Some(1));
         assert_eq!(preserved.theme["palette"]["bg"], "#hand-edited");
@@ -2599,7 +2599,7 @@ mod tests {
         // And the revert itself still landed — take 1's content is now live.
         let restored: Value = serde_json::from_str(&std::fs::read_to_string(&draft_theme).unwrap()).unwrap();
         assert_eq!(restored["palette"]["bg"], "#111111");
-        assert_eq!(history::load_head(&song, Some(&draft)), Some(1));
+        assert_eq!(history::load_head(&rice, Some(&draft)), Some(1));
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -2608,7 +2608,7 @@ mod tests {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID"]);
         std::env::remove_var("AOIDE_SESSION_ID");
-        let (root, song, draft, _draft_theme) = routed_draft_symlinked("back-no-drift");
+        let (root, rice, draft, _draft_theme) = routed_draft_symlinked("back-no-drift");
         let stage = shellbridge::stage_dir();
 
         write_theme(&stage, "#111111");
@@ -2618,7 +2618,7 @@ mod tests {
         assert_eq!(out.status, Status::Ok, "{:?}", out.data);
         assert!(out.data.unwrap()["drifted"].is_null(), "nothing differed from the head — nothing to preserve");
         assert_eq!(
-            history::list_history(&song, Some(&draft)).len(),
+            history::list_history(&rice, Some(&draft)).len(),
             1,
             "no phantom take minted when there was nothing to drift-capture"
         );
@@ -2638,7 +2638,7 @@ mod tests {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID"]);
         std::env::remove_var("AOIDE_SESSION_ID");
-        let (root, song, draft, _draft_theme) = routed_draft_symlinked("back-repeat-same-target");
+        let (root, rice, draft, _draft_theme) = routed_draft_symlinked("back-repeat-same-target");
         let stage = shellbridge::stage_dir();
 
         write_theme(&stage, "#111111");
@@ -2648,7 +2648,7 @@ mod tests {
 
         let first = handle_rice_back(&inv_back(None, Some(1)));
         assert_eq!(first.status, Status::Ok, "{:?}", first.data);
-        let count_after_first = history::list_history(&song, Some(&draft)).len();
+        let count_after_first = history::list_history(&rice, Some(&draft)).len();
 
         let second = handle_rice_back(&inv_back(None, Some(1)));
         assert_eq!(second.status, Status::Ok, "{:?}", second.data);
@@ -2657,7 +2657,7 @@ mod tests {
             "the second revert to the same target drifts nothing — the stage already IS take 1"
         );
         assert_eq!(
-            history::list_history(&song, Some(&draft)).len(),
+            history::list_history(&rice, Some(&draft)).len(),
             count_after_first,
             "two consecutive reverts to the same target mint zero takes between them"
         );
@@ -2669,7 +2669,7 @@ mod tests {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID"]);
         std::env::remove_var("AOIDE_SESSION_ID");
-        let (root, _song, _draft, _draft_theme) = routed_draft_symlinked("back-wallpaper-clear");
+        let (root, _rice, _draft, _draft_theme) = routed_draft_symlinked("back-wallpaper-clear");
         let stage = shellbridge::stage_dir();
 
         write_theme(&stage, "#111111");
@@ -2695,7 +2695,7 @@ mod tests {
     /// A take carries the wallpaper VALUE as-is (CONTRACTS.md §4's `rice back`:
     /// the identical `{"path": …}` seam, verbatim), so a take minted from a
     /// user PICK must come back AS a pick — `"pick": true` and all, or a
-    /// restored wallpaper would stop being the user's choice and the song's
+    /// restored wallpaper would stop being the user's choice and the rice's
     /// live board would start drawing over it. And a take minted with NO wallpaper
     /// must not leave one (of either kind) lying on the stage.
     #[test]
@@ -2703,11 +2703,11 @@ mod tests {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID"]);
         std::env::remove_var("AOIDE_SESSION_ID");
-        let (root, _song, _draft, _draft_theme) = routed_draft_symlinked("back-wallpaper-pick");
+        let (root, _rice, _draft, _draft_theme) = routed_draft_symlinked("back-wallpaper-pick");
         let stage = shellbridge::stage_dir();
 
         write_theme(&stage, "#111111");
-        crate::wallpaper::stage_default(std::path::Path::new("/tmp/song-wallpaper.png"), "sonata")
+        crate::wallpaper::stage_default(std::path::Path::new("/tmp/rice-wallpaper.png"), "sonata")
             .unwrap();
         let take1 = snapshot("rice.history", "stage").unwrap();
         assert!(take1.wallpaper.is_some());
@@ -2725,7 +2725,7 @@ mod tests {
         let to_default = handle_rice_back(&inv_back(None, Some(1)));
         assert_eq!(to_default.status, Status::Ok, "{:?}", to_default.data);
         assert!(!crate::wallpaper::staged_is_pick(), "the default take restored no pick");
-        assert_eq!(crate::wallpaper::staged_path().as_deref(), Some("/tmp/song-wallpaper.png"));
+        assert_eq!(crate::wallpaper::staged_path().as_deref(), Some("/tmp/rice-wallpaper.png"));
 
         let to_pick = handle_rice_back(&inv_back(None, Some(2)));
         assert_eq!(to_pick.status, Status::Ok, "{:?}", to_pick.data);
@@ -2749,14 +2749,14 @@ mod tests {
         std::fs::create_dir_all(&stage).unwrap();
         crate::commands::test_support::ensure_default_rices_fixture();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
-        let song = "sonata".to_string();
+        let rice = "sonata".to_string();
         let draft = "neon-night".to_string();
         // Draft mode claimed, but stage/theme.json is a PLAIN file, never
         // routed through `rice mode draft`'s symlink.
         std::fs::write(stage.join("theme.json"), VALID_NOTES).unwrap();
         save_mode_marker(&ModeMarker {
             mode: RiceMode::Draft,
-            song: Some(song.clone()),
+            rice: Some(rice.clone()),
             draft: Some(draft.clone()),
             ..Default::default()
         })
@@ -2767,7 +2767,7 @@ mod tests {
         // fallback in `load_head` lands on 1 whether or not `save_head` ever
         // ran, so that assertion would hold even if the routing-broken
         // refusal secretly still moved the cursor.
-        std::fs::create_dir_all(shellbridge::draft_dir(&song, &draft).join("history")).unwrap();
+        std::fs::create_dir_all(shellbridge::draft_dir(&rice, &draft).join("history")).unwrap();
         let seed = |n: u32, parent: Option<u32>| HistoryRecord {
             take: n,
             parent,
@@ -2778,8 +2778,8 @@ mod tests {
             wallpaper: None,
             widgets: serde_json::json!({}),
         };
-        history::save_history(&song, Some(&draft), &seed(1, None)).unwrap();
-        history::save_history(&song, Some(&draft), &seed(2, Some(1))).unwrap();
+        history::save_history(&rice, Some(&draft), &seed(1, None)).unwrap();
+        history::save_history(&rice, Some(&draft), &seed(2, Some(1))).unwrap();
 
         let out = handle_rice_back(&inv_back(None, Some(1)));
         assert_eq!(out.status, Status::Error);
@@ -2794,7 +2794,7 @@ mod tests {
             "a routing-broken refusal writes nothing"
         );
         assert_eq!(
-            history::load_head(&song, Some(&draft)),
+            history::load_head(&rice, Some(&draft)),
             Some(2),
             "head stays at the pre-existing fallback (2), never claimed down to the target (1) by this call"
         );
@@ -2809,7 +2809,7 @@ mod tests {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID"]);
         std::env::remove_var("AOIDE_SESSION_ID");
-        let (root, song, draft, _draft_theme) = routed_draft_symlinked("back-both-flags-take-wins");
+        let (root, rice, draft, _draft_theme) = routed_draft_symlinked("back-both-flags-take-wins");
         let stage = shellbridge::stage_dir();
 
         write_theme(&stage, "#111111");
@@ -2823,7 +2823,7 @@ mod tests {
         let data = out.data.unwrap();
         assert_eq!(data["to"], 1, "--take wins over a co-present --mark naming a different take");
         assert!(data["mark"].is_null(), "the winning selector was --take, so mark reports null");
-        assert_eq!(history::load_head(&song, Some(&draft)), Some(1));
+        assert_eq!(history::load_head(&rice, Some(&draft)), Some(1));
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -2832,7 +2832,7 @@ mod tests {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID"]);
         std::env::remove_var("AOIDE_SESSION_ID");
-        let (root, _song, _draft, _draft_theme) = routed_draft_symlinked("back-not-found");
+        let (root, _rice, _draft, _draft_theme) = routed_draft_symlinked("back-not-found");
         let stage = shellbridge::stage_dir();
         write_theme(&stage, "#111111");
         snapshot("rice.history", "stage").unwrap(); // only take 1 exists, no marks
@@ -2867,7 +2867,7 @@ mod tests {
         std::env::remove_var("STRILLIX_TEMPLATES");
 
         let root = unique_tmp("back-gate-refused");
-        let stage = root.join("aoide").join("song").join("stage");
+        let stage = root.join("aoide").join("rice").join("stage");
         std::fs::create_dir_all(&stage).unwrap();
         let templates = root.join("templates");
         std::fs::create_dir_all(&templates).unwrap();
@@ -2875,10 +2875,10 @@ mod tests {
         std::fs::write(templates.join("registry.json"), r#"{"sonata":{}}"#).unwrap();
         // Built in, but its machine copy DIFFERS (the templates carry no
         // `sonata/` folder at all), so case 2 applies — and the generator
-        // answers that this song needs a package the system does not carry.
+        // answers that this rice needs a package the system does not carry.
         std::fs::write(
             templates.join("builtin.json"),
-            r#"{"declared":"sonata","songs":["sonata"],"packages":[]}"#,
+            r#"{"declared":"sonata","rices":["sonata"],"packages":[]}"#,
         )
         .unwrap();
         crate::commands::test_support::nix_instantiate_recorder(
@@ -2900,7 +2900,7 @@ mod tests {
         // takes only exist while unlocked — a mode refusal would mask the gate.
         save_mode_marker(&ModeMarker {
             mode: RiceMode::Staging,
-            song: Some("sonata".to_string()),
+            rice: Some("sonata".to_string()),
             ..Default::default()
         })
         .unwrap();
@@ -2940,13 +2940,13 @@ mod tests {
         assert_eq!(
             crate::commands::test_support::tree_snapshot(&[&stage, &strillix_dir]),
             before,
-            "a refused `rice back` writes nothing: stage/ and the song dir are byte-unchanged"
+            "a refused `rice back` writes nothing: stage/ and the rice dir are byte-unchanged"
         );
         assert_eq!(
             history::load_head("sonata", None),
             head_before,
             "and the head cursor never moved (it is `Some(1)` here — the max-take \
-             fallback for a song with no `head.json`)"
+             fallback for a rice with no `head.json`)"
         );
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -2974,7 +2974,7 @@ mod tests {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID"]);
         std::env::remove_var("AOIDE_SESSION_ID");
-        let (root, song, draft, _draft_theme) = routed_draft_symlinked("back-bare-refuses");
+        let (root, rice, draft, _draft_theme) = routed_draft_symlinked("back-bare-refuses");
         let stage = shellbridge::stage_dir();
         write_theme(&stage, "#111111");
         snapshot("rice.history", "stage").unwrap();
@@ -2983,8 +2983,8 @@ mod tests {
         // just the head cursor — the plan's requirement is that the STORE
         // is untouched, and a head-only assertion would miss a future
         // regression that (say) wrote marks.json without moving the head.
-        let before_take_count = history::list_history(&song, Some(&draft)).len();
-        let before_marks = history::load_marks(&song, Some(&draft));
+        let before_take_count = history::list_history(&rice, Some(&draft)).len();
+        let before_marks = history::load_marks(&rice, Some(&draft));
         let theme_path = stage.join("theme.json");
         let before_theme = std::fs::read(&theme_path).unwrap();
         let wallpaper_path = stage.join("wallpaper.json");
@@ -2998,9 +2998,9 @@ mod tests {
         let out = handle_rice_back(&inv_back(None, None));
         assert_eq!(out.status, Status::Usage);
         assert_eq!(out.data.unwrap()["reason"], "no-selection");
-        assert_eq!(history::load_head(&song, Some(&draft)), Some(1), "the bare refusal moved nothing");
-        assert_eq!(history::list_history(&song, Some(&draft)).len(), before_take_count, "no take was minted or removed");
-        assert_eq!(history::load_marks(&song, Some(&draft)), before_marks, "marks.json is untouched");
+        assert_eq!(history::load_head(&rice, Some(&draft)), Some(1), "the bare refusal moved nothing");
+        assert_eq!(history::list_history(&rice, Some(&draft)).len(), before_take_count, "no take was minted or removed");
+        assert_eq!(history::load_marks(&rice, Some(&draft)), before_marks, "marks.json is untouched");
         assert_eq!(std::fs::read(&theme_path).unwrap(), before_theme, "the stage theme is byte-identical");
         assert_eq!(std::fs::read(&wallpaper_path).ok(), before_wallpaper, "the stage wallpaper is byte-identical (still absent)");
         let _ = std::fs::remove_dir_all(&root);
@@ -3016,7 +3016,7 @@ mod tests {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID"]);
         std::env::remove_var("AOIDE_SESSION_ID");
-        let (root, song, draft, _draft_theme) = routed_draft_symlinked("back-bare-verbatim");
+        let (root, rice, draft, _draft_theme) = routed_draft_symlinked("back-bare-verbatim");
         let stage = shellbridge::stage_dir();
         write_theme(&stage, "#111111");
         snapshot("rice.history", "stage").unwrap();
@@ -3030,7 +3030,7 @@ mod tests {
              this door is not one, so pass --take or --mark)"
         );
         assert_eq!(out.data.unwrap()["reason"], "no-selection");
-        assert_eq!(history::load_head(&song, Some(&draft)), Some(1), "writes nothing");
+        assert_eq!(history::load_head(&rice, Some(&draft)), Some(1), "writes nothing");
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -3216,7 +3216,7 @@ mod tests {
     fn rice_take_list_handler_on_an_empty_store_is_ok_with_an_empty_list() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
-        let (root, _song, _draft) = routed_draft("take-list-empty");
+        let (root, _rice, _draft) = routed_draft("take-list-empty");
 
         let out = handle_rice_take_list(&inv(&["rice", "history", "list"], &[]));
         assert_eq!(out.status, Status::Ok, "{:?}", out.data);
@@ -3245,7 +3245,7 @@ mod tests {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID"]);
         std::env::remove_var("AOIDE_SESSION_ID");
-        let (root, song, draft) = routed_draft("take-list-json-shape");
+        let (root, rice, draft) = routed_draft("take-list-json-shape");
         std::fs::write(shellbridge::stage_dir().join("theme.json"), VALID_NOTES).unwrap();
 
         let take1 = snapshot("rice.history", "explicit").unwrap(); // 1, no parent
@@ -3261,7 +3261,7 @@ mod tests {
         let out = handle_rice_take_list(&inv(&["rice", "history", "list"], &[]));
         assert_eq!(out.status, Status::Ok, "{:?}", out.data);
         let data = out.data.unwrap();
-        assert_eq!(data["song"], song);
+        assert_eq!(data["rice"], rice);
         assert_eq!(data["draft"], draft);
         assert_eq!(data["head"], 2);
 
@@ -3284,7 +3284,7 @@ mod tests {
         // builder ever gets rewritten to reuse the tree instead.
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
-        let (root, song, draft) = routed_draft("take-list-json-orphan");
+        let (root, rice, draft) = routed_draft("take-list-json-orphan");
 
         let seed = |n: u32, parent: Option<u32>| HistoryRecord {
             take: n,
@@ -3296,8 +3296,8 @@ mod tests {
             wallpaper: None,
             widgets: serde_json::json!({}),
         };
-        history::save_history(&song, Some(&draft), &seed(1, None)).unwrap();
-        history::save_history(&song, Some(&draft), &seed(5, Some(2))).unwrap(); // parent 2 never existed
+        history::save_history(&rice, Some(&draft), &seed(1, None)).unwrap();
+        history::save_history(&rice, Some(&draft), &seed(5, Some(2))).unwrap(); // parent 2 never existed
 
         let out = handle_rice_take_list(&inv(&["rice", "history", "list"], &[]));
         assert_eq!(out.status, Status::Ok, "{:?}", out.data);
@@ -3386,7 +3386,7 @@ mod tests {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID"]);
         std::env::remove_var("AOIDE_SESSION_ID");
-        let (root, song, draft, _draft_theme) = routed_draft_symlinked("diff-nearest-ancestral-mark");
+        let (root, rice, draft, _draft_theme) = routed_draft_symlinked("diff-nearest-ancestral-mark");
         let stage = shellbridge::stage_dir();
 
         // take 1 — the root.
@@ -3417,7 +3417,7 @@ mod tests {
         write_theme(&stage, "#333333");
         let take4 = snapshot("rice.history", "stage").unwrap();
         assert_eq!(take4.parent, Some(2));
-        assert_eq!(history::load_head(&song, Some(&draft)), Some(4));
+        assert_eq!(history::load_head(&rice, Some(&draft)), Some(4));
 
         let out = handle_rice_take_diff(&inv_diff(None, None));
         assert_eq!(out.status, Status::Ok, "{:?}", out.data);
@@ -3447,7 +3447,7 @@ mod tests {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID"]);
         std::env::remove_var("AOIDE_SESSION_ID");
-        let (root, _song, _draft) = routed_draft("diff-depth-three-mark");
+        let (root, _rice, _draft) = routed_draft("diff-depth-three-mark");
         std::fs::write(shellbridge::stage_dir().join("theme.json"), VALID_NOTES).unwrap();
         snapshot("rice.history", "stage").unwrap(); // take 1 — the root, marked
         mark("rice.history.mark", "A", 1).unwrap();
@@ -3487,7 +3487,7 @@ mod tests {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID"]);
         std::env::remove_var("AOIDE_SESSION_ID");
-        let (root, _song, _draft) = routed_draft("diff-fallback-parent");
+        let (root, _rice, _draft) = routed_draft("diff-fallback-parent");
         std::fs::write(shellbridge::stage_dir().join("theme.json"), VALID_NOTES).unwrap();
         snapshot("rice.history", "stage").unwrap(); // take 1
         std::fs::write(
@@ -3507,7 +3507,7 @@ mod tests {
     fn diff_on_an_entirely_empty_store_reports_nothing_to_diff_against() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
-        let (root, _song, _draft) = routed_draft("diff-empty-store");
+        let (root, _rice, _draft) = routed_draft("diff-empty-store");
 
         let out = handle_rice_take_diff(&inv_diff(None, None));
         assert_eq!(out.status, Status::Ok, "{:?}", out.data);
@@ -3522,7 +3522,7 @@ mod tests {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID"]);
         std::env::remove_var("AOIDE_SESSION_ID");
-        let (root, _song, _draft) = routed_draft("diff-root-only-unmarked");
+        let (root, _rice, _draft) = routed_draft("diff-root-only-unmarked");
         std::fs::write(shellbridge::stage_dir().join("theme.json"), VALID_NOTES).unwrap();
         snapshot("rice.history", "stage").unwrap(); // take 1 — the only take, no parent, no mark
 
@@ -3539,7 +3539,7 @@ mod tests {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID"]);
         std::env::remove_var("AOIDE_SESSION_ID");
-        let (root, _song, _draft) = routed_draft("diff-identical-self-mark");
+        let (root, _rice, _draft) = routed_draft("diff-identical-self-mark");
         std::fs::write(shellbridge::stage_dir().join("theme.json"), VALID_NOTES).unwrap();
         let take1 = snapshot("rice.history", "stage").unwrap();
         mark("rice.history.mark", "A", take1.take).unwrap();
@@ -3559,7 +3559,7 @@ mod tests {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID"]);
         std::env::remove_var("AOIDE_SESSION_ID");
-        let (root, _song, _draft) = routed_draft("diff-take-flag");
+        let (root, _rice, _draft) = routed_draft("diff-take-flag");
         std::fs::write(shellbridge::stage_dir().join("theme.json"), VALID_NOTES).unwrap();
         snapshot("rice.history", "stage").unwrap(); // take 1
         std::fs::write(
@@ -3580,7 +3580,7 @@ mod tests {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID"]);
         std::env::remove_var("AOIDE_SESSION_ID");
-        let (root, _song, _draft) = routed_draft("diff-mark-flag");
+        let (root, _rice, _draft) = routed_draft("diff-mark-flag");
         std::fs::write(shellbridge::stage_dir().join("theme.json"), VALID_NOTES).unwrap();
         snapshot("rice.history", "stage").unwrap(); // take 1
         mark("rice.history.mark", "A", 1).unwrap();
@@ -3608,7 +3608,7 @@ mod tests {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID"]);
         std::env::remove_var("AOIDE_SESSION_ID");
-        let (root, song, draft) = routed_draft("diff-mark-dangling");
+        let (root, rice, draft) = routed_draft("diff-mark-dangling");
         std::fs::write(shellbridge::stage_dir().join("theme.json"), VALID_NOTES).unwrap();
         snapshot("rice.history", "stage").unwrap(); // take 1
         std::fs::write(
@@ -3621,7 +3621,7 @@ mod tests {
 
         // Take 1's own file is removed out from under the map — `marks.json` still says A -> 1,
         // but take 1 itself is gone (a hand edit, or pruning without a matching map rewrite).
-        std::fs::remove_file(history::history_path(&song, Some(&draft), 1)).unwrap();
+        std::fs::remove_file(history::history_path(&rice, Some(&draft), 1)).unwrap();
 
         let out = handle_rice_take_diff(&inv_diff(Some("A"), None));
         assert_eq!(out.status, Status::Error, "{:?}", out.data);
@@ -3637,7 +3637,7 @@ mod tests {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID"]);
         std::env::remove_var("AOIDE_SESSION_ID");
-        let (root, _song, _draft) = routed_draft("diff-both-flags-take-wins");
+        let (root, _rice, _draft) = routed_draft("diff-both-flags-take-wins");
         std::fs::write(shellbridge::stage_dir().join("theme.json"), VALID_NOTES).unwrap();
         snapshot("rice.history", "stage").unwrap(); // take 1
         std::fs::write(
@@ -3659,7 +3659,7 @@ mod tests {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID"]);
         std::env::remove_var("AOIDE_SESSION_ID");
-        let (root, _song, _draft) = routed_draft("diff-not-found");
+        let (root, _rice, _draft) = routed_draft("diff-not-found");
         std::fs::write(shellbridge::stage_dir().join("theme.json"), VALID_NOTES).unwrap();
         snapshot("rice.history", "stage").unwrap(); // only take 1 exists, no marks
 
@@ -3710,7 +3710,7 @@ mod tests {
     /// build a tree with specific ages and branch points without minting
     /// through the stage. Optionally stamps a mark letter onto it in the
     /// same call.
-    fn seed(song: &str, draft: Option<&str>, take: u32, parent: Option<u32>, at: &str, mark: Option<char>) -> HistoryRecord {
+    fn seed(rice: &str, draft: Option<&str>, take: u32, parent: Option<u32>, at: &str, mark: Option<char>) -> HistoryRecord {
         let record = HistoryRecord {
             take,
             parent,
@@ -3721,11 +3721,11 @@ mod tests {
             wallpaper: None,
             widgets: serde_json::json!({}),
         };
-        history::save_history(song, draft, &record).unwrap();
+        history::save_history(rice, draft, &record).unwrap();
         if let Some(c) = mark {
-            let mut marks = history::load_marks(song, draft);
+            let mut marks = history::load_marks(rice, draft);
             marks.insert(c.to_string(), take);
-            history::save_marks(song, draft, &marks).unwrap();
+            history::save_marks(rice, draft, &marks).unwrap();
         }
         record
     }
@@ -3779,14 +3779,14 @@ mod tests {
     fn plan_prune_never_lets_the_head_or_its_ancestry_into_candidates_even_with_force() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
-        let (root, song, draft) = routed_draft("prune-plan-ancestry-rail");
-        seed(&song, Some(&draft), 1, None, OLD_AT, None);
-        seed(&song, Some(&draft), 2, Some(1), OLD_AT, None);
-        seed(&song, Some(&draft), 3, Some(2), OLD_AT, None);
-        seed(&song, Some(&draft), 4, Some(1), OLD_AT, None); // a branch off root 1, not on head 3's line.
-        history::save_head(&song, Some(&draft), 3).unwrap();
+        let (root, rice, draft) = routed_draft("prune-plan-ancestry-rail");
+        seed(&rice, Some(&draft), 1, None, OLD_AT, None);
+        seed(&rice, Some(&draft), 2, Some(1), OLD_AT, None);
+        seed(&rice, Some(&draft), 3, Some(2), OLD_AT, None);
+        seed(&rice, Some(&draft), 4, Some(1), OLD_AT, None); // a branch off root 1, not on head 3's line.
+        history::save_head(&rice, Some(&draft), 3).unwrap();
 
-        let plan = plan_prune(&song, Some(&draft), None, None, true); // force=true changes nothing about the rail.
+        let plan = plan_prune(&rice, Some(&draft), None, None, true); // force=true changes nothing about the rail.
         assert_eq!(plan.protected_ancestry, BTreeSet::from([1, 2, 3]));
         let candidate_numbers: Vec<u32> = plan.candidates.iter().map(|t| t.take).collect();
         assert_eq!(candidate_numbers, vec![4], "only the off-line branch is ever a candidate");
@@ -3799,13 +3799,13 @@ mod tests {
     fn prune_bare_non_tty_prints_the_dry_run_and_changes_nothing() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
-        let (root, song, draft) = routed_draft("prune-dry-run");
-        seed(&song, Some(&draft), 1, None, OLD_AT, None);
-        seed(&song, Some(&draft), 2, Some(1), OLD_AT, None);
-        history::save_head(&song, Some(&draft), 1).unwrap();
+        let (root, rice, draft) = routed_draft("prune-dry-run");
+        seed(&rice, Some(&draft), 1, None, OLD_AT, None);
+        seed(&rice, Some(&draft), 2, Some(1), OLD_AT, None);
+        history::save_head(&rice, Some(&draft), 1).unwrap();
 
-        let before_count = history::list_history(&song, Some(&draft)).len();
-        let before_marks = history::load_marks(&song, Some(&draft));
+        let before_count = history::list_history(&rice, Some(&draft)).len();
+        let before_marks = history::load_marks(&rice, Some(&draft));
 
         // No selector flag, and cargo test's stdin/stdout are never a real
         // tty, so `pick::interactive` reads false here exactly like
@@ -3816,9 +3816,9 @@ mod tests {
         assert_eq!(data["dryRun"], true);
         assert_eq!(data["candidates"], json!([2]));
         assert!(out.changed.is_empty(), "a dry run changes nothing");
-        assert_eq!(history::list_history(&song, Some(&draft)).len(), before_count, "no take removed");
-        assert_eq!(history::load_marks(&song, Some(&draft)), before_marks, "marks.json untouched");
-        assert!(history::load_history(&song, Some(&draft), 2).is_some(), "take 2 still on disk");
+        assert_eq!(history::list_history(&rice, Some(&draft)).len(), before_count, "no take removed");
+        assert_eq!(history::load_marks(&rice, Some(&draft)), before_marks, "marks.json untouched");
+        assert!(history::load_history(&rice, Some(&draft), 2).is_some(), "take 2 still on disk");
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -3826,23 +3826,23 @@ mod tests {
     fn prune_never_selects_the_head_or_its_ancestry_under_force_and_all_but_marks() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
-        let (root, song, draft) = routed_draft("prune-force-ancestry-rail");
-        seed(&song, Some(&draft), 1, None, OLD_AT, None);
-        seed(&song, Some(&draft), 2, Some(1), OLD_AT, None);
-        seed(&song, Some(&draft), 3, Some(2), OLD_AT, None); // head's line: 1 <- 2 <- 3
-        seed(&song, Some(&draft), 4, Some(1), OLD_AT, None); // off-line branch, off root
-        seed(&song, Some(&draft), 5, Some(2), OLD_AT, None); // off-line branch, off 2
-        history::save_head(&song, Some(&draft), 3).unwrap();
+        let (root, rice, draft) = routed_draft("prune-force-ancestry-rail");
+        seed(&rice, Some(&draft), 1, None, OLD_AT, None);
+        seed(&rice, Some(&draft), 2, Some(1), OLD_AT, None);
+        seed(&rice, Some(&draft), 3, Some(2), OLD_AT, None); // head's line: 1 <- 2 <- 3
+        seed(&rice, Some(&draft), 4, Some(1), OLD_AT, None); // off-line branch, off root
+        seed(&rice, Some(&draft), 5, Some(2), OLD_AT, None); // off-line branch, off 2
+        history::save_head(&rice, Some(&draft), 3).unwrap();
 
         let out = handle_rice_take_prune(&inv_prune(None, None, true, true)); // --all-but-marks --force
         assert_eq!(out.status, Status::Ok, "{:?}", out.data);
         assert_eq!(out.data.unwrap()["pruned"], json!([4, 5]));
-        assert_eq!(history::load_head(&song, Some(&draft)), Some(3), "head untouched");
+        assert_eq!(history::load_head(&rice, Some(&draft)), Some(3), "head untouched");
         for n in [1u32, 2, 3] {
-            assert!(history::load_history(&song, Some(&draft), n).is_some(), "take {n} on the head's ancestry survives --force");
+            assert!(history::load_history(&rice, Some(&draft), n).is_some(), "take {n} on the head's ancestry survives --force");
         }
-        assert!(history::load_history(&song, Some(&draft), 4).is_none());
-        assert!(history::load_history(&song, Some(&draft), 5).is_none());
+        assert!(history::load_history(&rice, Some(&draft), 4).is_none());
+        assert!(history::load_history(&rice, Some(&draft), 5).is_none());
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -3850,18 +3850,18 @@ mod tests {
     fn prune_keep_n_keeps_the_newest_n_eligible_takes() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
-        let (root, song, draft) = routed_draft("prune-keep-n");
-        seed(&song, Some(&draft), 1, None, OLD_AT, None);
+        let (root, rice, draft) = routed_draft("prune-keep-n");
+        seed(&rice, Some(&draft), 1, None, OLD_AT, None);
         for n in 2u32..=6 {
-            seed(&song, Some(&draft), n, Some(1), OLD_AT, None);
+            seed(&rice, Some(&draft), n, Some(1), OLD_AT, None);
         }
-        history::save_head(&song, Some(&draft), 1).unwrap();
+        history::save_head(&rice, Some(&draft), 1).unwrap();
 
         let out = handle_rice_take_prune(&inv_prune(None, Some(2), false, false));
         assert_eq!(out.status, Status::Ok, "{:?}", out.data);
         assert_eq!(out.data.unwrap()["pruned"], json!([2, 3, 4]), "the newest 2 (5, 6) are kept");
-        assert!(history::load_history(&song, Some(&draft), 5).is_some());
-        assert!(history::load_history(&song, Some(&draft), 6).is_some());
+        assert!(history::load_history(&rice, Some(&draft), 5).is_some());
+        assert!(history::load_history(&rice, Some(&draft), 6).is_some());
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -3869,16 +3869,16 @@ mod tests {
     fn prune_keep_n_exceeding_the_take_count_prunes_nothing() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
-        let (root, song, draft) = routed_draft("prune-keep-exceeds");
-        seed(&song, Some(&draft), 1, None, OLD_AT, None);
-        seed(&song, Some(&draft), 2, Some(1), OLD_AT, None);
-        history::save_head(&song, Some(&draft), 1).unwrap();
+        let (root, rice, draft) = routed_draft("prune-keep-exceeds");
+        seed(&rice, Some(&draft), 1, None, OLD_AT, None);
+        seed(&rice, Some(&draft), 2, Some(1), OLD_AT, None);
+        history::save_head(&rice, Some(&draft), 1).unwrap();
 
         let out = handle_rice_take_prune(&inv_prune(None, Some(100), false, false));
         assert_eq!(out.status, Status::Ok, "{:?}", out.data);
         assert_eq!(out.data.unwrap()["pruned"], json!([]));
         assert!(out.changed.is_empty());
-        assert!(history::load_history(&song, Some(&draft), 2).is_some());
+        assert!(history::load_history(&rice, Some(&draft), 2).is_some());
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -3886,16 +3886,16 @@ mod tests {
     fn prune_older_than_selects_only_takes_past_the_threshold() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
-        let (root, song, draft) = routed_draft("prune-older-than");
-        seed(&song, Some(&draft), 1, None, OLD_AT, None);
-        seed(&song, Some(&draft), 2, Some(1), OLD_AT, None); // 2020 — well past any sane threshold.
-        seed(&song, Some(&draft), 3, Some(1), &now_iso_utc(), None); // just minted — never "old enough".
-        history::save_head(&song, Some(&draft), 1).unwrap();
+        let (root, rice, draft) = routed_draft("prune-older-than");
+        seed(&rice, Some(&draft), 1, None, OLD_AT, None);
+        seed(&rice, Some(&draft), 2, Some(1), OLD_AT, None); // 2020 — well past any sane threshold.
+        seed(&rice, Some(&draft), 3, Some(1), &now_iso_utc(), None); // just minted — never "old enough".
+        history::save_head(&rice, Some(&draft), 1).unwrap();
 
         let out = handle_rice_take_prune(&inv_prune(Some("1d"), None, false, false));
         assert_eq!(out.status, Status::Ok, "{:?}", out.data);
         assert_eq!(out.data.unwrap()["pruned"], json!([2]));
-        assert!(history::load_history(&song, Some(&draft), 3).is_some(), "too recent to be a candidate");
+        assert!(history::load_history(&rice, Some(&draft), 3).is_some(), "too recent to be a candidate");
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -3903,16 +3903,16 @@ mod tests {
     fn prune_older_than_malformed_value_is_a_usage_error_that_changes_nothing() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
-        let (root, song, draft) = routed_draft("prune-older-than-bad");
-        seed(&song, Some(&draft), 1, None, OLD_AT, None);
-        seed(&song, Some(&draft), 2, Some(1), OLD_AT, None);
-        history::save_head(&song, Some(&draft), 1).unwrap();
-        let before = history::list_history(&song, Some(&draft)).len();
+        let (root, rice, draft) = routed_draft("prune-older-than-bad");
+        seed(&rice, Some(&draft), 1, None, OLD_AT, None);
+        seed(&rice, Some(&draft), 2, Some(1), OLD_AT, None);
+        history::save_head(&rice, Some(&draft), 1).unwrap();
+        let before = history::list_history(&rice, Some(&draft)).len();
 
         let out = handle_rice_take_prune(&inv_prune(Some("nonsense"), None, false, false));
         assert_eq!(out.status, Status::Usage);
         assert_eq!(out.data.unwrap()["reason"], "invalid-older-than");
-        assert_eq!(history::list_history(&song, Some(&draft)).len(), before, "nothing was pruned");
+        assert_eq!(history::list_history(&rice, Some(&draft)).len(), before, "nothing was pruned");
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -3932,27 +3932,27 @@ mod tests {
     fn prune_marks_survive_by_default_and_go_under_force_dropping_the_letter_from_the_map() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
-        let (root, song, draft) = routed_draft("prune-marks-protection");
-        seed(&song, Some(&draft), 1, None, OLD_AT, None);
-        seed(&song, Some(&draft), 2, Some(1), OLD_AT, Some('A'));
-        seed(&song, Some(&draft), 3, Some(1), OLD_AT, None);
-        history::save_head(&song, Some(&draft), 1).unwrap();
+        let (root, rice, draft) = routed_draft("prune-marks-protection");
+        seed(&rice, Some(&draft), 1, None, OLD_AT, None);
+        seed(&rice, Some(&draft), 2, Some(1), OLD_AT, Some('A'));
+        seed(&rice, Some(&draft), 3, Some(1), OLD_AT, None);
+        history::save_head(&rice, Some(&draft), 1).unwrap();
 
         // Without --force, the marked take (2) is protected — only 3 goes.
         let out = handle_rice_take_prune(&inv_prune(None, None, true, false));
         assert_eq!(out.status, Status::Ok, "{:?}", out.data);
         assert_eq!(out.data.unwrap()["pruned"], json!([3]));
-        assert!(history::load_history(&song, Some(&draft), 2).is_some(), "marked take survives by default");
-        assert_eq!(history::load_marks(&song, Some(&draft)).get("A"), Some(&2));
+        assert!(history::load_history(&rice, Some(&draft), 2).is_some(), "marked take survives by default");
+        assert_eq!(history::load_marks(&rice, Some(&draft)).get("A"), Some(&2));
 
         // With --force, the marked take is now a candidate too, and its
         // letter leaves the map in the SAME pass.
         let out = handle_rice_take_prune(&inv_prune(None, None, true, true));
         assert_eq!(out.status, Status::Ok, "{:?}", out.data);
         assert_eq!(out.data.unwrap()["pruned"], json!([2]));
-        assert!(history::load_history(&song, Some(&draft), 2).is_none());
+        assert!(history::load_history(&rice, Some(&draft), 2).is_none());
         assert!(
-            history::load_marks(&song, Some(&draft)).get("A").is_none(),
+            history::load_marks(&rice, Some(&draft)).get("A").is_none(),
             "the mark's letter no longer names a deleted take"
         );
         let _ = std::fs::remove_dir_all(&root);
@@ -3964,23 +3964,23 @@ mod tests {
     fn prune_reparents_surviving_children_and_ancestry_still_resolves() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
-        let (root, song, draft) = routed_draft("prune-splice");
-        seed(&song, Some(&draft), 1, None, OLD_AT, None);
-        seed(&song, Some(&draft), 2, Some(1), OLD_AT, None);
-        seed(&song, Some(&draft), 3, Some(2), OLD_AT, None);
-        seed(&song, Some(&draft), 4, Some(2), OLD_AT, None);
-        history::save_head(&song, Some(&draft), 1).unwrap();
+        let (root, rice, draft) = routed_draft("prune-splice");
+        seed(&rice, Some(&draft), 1, None, OLD_AT, None);
+        seed(&rice, Some(&draft), 2, Some(1), OLD_AT, None);
+        seed(&rice, Some(&draft), 3, Some(2), OLD_AT, None);
+        seed(&rice, Some(&draft), 4, Some(2), OLD_AT, None);
+        history::save_head(&rice, Some(&draft), 1).unwrap();
 
-        let result = prune(&song, Some(&draft), &[2]).unwrap();
+        let result = prune(&rice, Some(&draft), &[2]).unwrap();
         assert_eq!(result.pruned, vec![2]);
         let mut reparented = result.reparented.clone();
         reparented.sort_by_key(|(t, _, _)| *t);
         assert_eq!(reparented, vec![(3, Some(2), Some(1)), (4, Some(2), Some(1))]);
-        assert!(history::load_history(&song, Some(&draft), 2).is_none());
-        assert_eq!(history::load_history(&song, Some(&draft), 3).unwrap().parent, Some(1));
-        assert_eq!(history::load_history(&song, Some(&draft), 4).unwrap().parent, Some(1));
-        assert_eq!(history::ancestry(&history::list_history(&song, Some(&draft)), 3), vec![3, 1]);
-        assert_eq!(history::ancestry(&history::list_history(&song, Some(&draft)), 4), vec![4, 1]);
+        assert!(history::load_history(&rice, Some(&draft), 2).is_none());
+        assert_eq!(history::load_history(&rice, Some(&draft), 3).unwrap().parent, Some(1));
+        assert_eq!(history::load_history(&rice, Some(&draft), 4).unwrap().parent, Some(1));
+        assert_eq!(history::ancestry(&history::list_history(&rice, Some(&draft)), 3), vec![3, 1]);
+        assert_eq!(history::ancestry(&history::list_history(&rice, Some(&draft)), 4), vec![4, 1]);
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -3993,23 +3993,23 @@ mod tests {
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
 
         for (tag, order) in [("prune-cascade-fwd", [9u32, 17]), ("prune-cascade-rev", [17, 9])] {
-            let (root, song, draft) = routed_draft(tag);
-            seed(&song, Some(&draft), 1, None, OLD_AT, None);
-            seed(&song, Some(&draft), 9, Some(1), OLD_AT, None);
-            seed(&song, Some(&draft), 17, Some(9), OLD_AT, None);
-            seed(&song, Some(&draft), 25, Some(17), OLD_AT, None);
-            history::save_head(&song, Some(&draft), 1).unwrap();
+            let (root, rice, draft) = routed_draft(tag);
+            seed(&rice, Some(&draft), 1, None, OLD_AT, None);
+            seed(&rice, Some(&draft), 9, Some(1), OLD_AT, None);
+            seed(&rice, Some(&draft), 17, Some(9), OLD_AT, None);
+            seed(&rice, Some(&draft), 25, Some(17), OLD_AT, None);
+            history::save_head(&rice, Some(&draft), 1).unwrap();
 
-            let result = prune(&song, Some(&draft), &order).unwrap();
+            let result = prune(&rice, Some(&draft), &order).unwrap();
             let mut pruned = result.pruned.clone();
             pruned.sort_unstable();
             assert_eq!(pruned, vec![9, 17], "order {order:?}");
             assert_eq!(
-                history::load_history(&song, Some(&draft), 25).unwrap().parent,
+                history::load_history(&rice, Some(&draft), 25).unwrap().parent,
                 Some(1),
                 "grandchild lands on the nearest surviving ancestor regardless of fold order {order:?}"
             );
-            assert_eq!(history::ancestry(&history::list_history(&song, Some(&draft)), 25), vec![25, 1]);
+            assert_eq!(history::ancestry(&history::list_history(&rice, Some(&draft)), 25), vec![25, 1]);
             let _ = std::fs::remove_dir_all(&root);
         }
     }
@@ -4018,16 +4018,16 @@ mod tests {
     fn prune_an_orphan_take_is_prunable_and_does_not_corrupt_the_store() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
-        let (root, song, draft) = routed_draft("prune-orphan");
-        seed(&song, Some(&draft), 1, None, OLD_AT, None);
-        seed(&song, Some(&draft), 2, Some(999), OLD_AT, None); // dangling parent — A6 established this is reachable.
-        history::save_head(&song, Some(&draft), 1).unwrap();
+        let (root, rice, draft) = routed_draft("prune-orphan");
+        seed(&rice, Some(&draft), 1, None, OLD_AT, None);
+        seed(&rice, Some(&draft), 2, Some(999), OLD_AT, None); // dangling parent — A6 established this is reachable.
+        history::save_head(&rice, Some(&draft), 1).unwrap();
 
-        let result = prune(&song, Some(&draft), &[2]).unwrap();
+        let result = prune(&rice, Some(&draft), &[2]).unwrap();
         assert_eq!(result.pruned, vec![2]);
         assert!(result.reparented.is_empty(), "the orphan has no children to splice");
-        assert!(history::load_history(&song, Some(&draft), 2).is_none());
-        let remaining = history::list_history(&song, Some(&draft));
+        assert!(history::load_history(&rice, Some(&draft), 2).is_none());
+        let remaining = history::list_history(&rice, Some(&draft));
         assert_eq!(remaining.iter().map(|t| t.take).collect::<Vec<_>>(), vec![1]);
         assert_eq!(history::ancestry(&remaining, 1), vec![1], "the surviving root is untouched");
         let _ = std::fs::remove_dir_all(&root);
@@ -4045,21 +4045,21 @@ mod tests {
     fn prune_re_checks_the_ancestry_rail_against_a_fresh_read_and_skips_a_stale_candidate() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
-        let (root, song, draft) = routed_draft("prune-stale-plan-race");
-        seed(&song, Some(&draft), 1, None, OLD_AT, None);
-        seed(&song, Some(&draft), 2, Some(1), OLD_AT, None); // now the head — as if `rice back --take 2` raced the plan.
-        seed(&song, Some(&draft), 3, Some(1), OLD_AT, None); // a genuine, still-off-ancestry candidate.
-        history::save_head(&song, Some(&draft), 2).unwrap();
+        let (root, rice, draft) = routed_draft("prune-stale-plan-race");
+        seed(&rice, Some(&draft), 1, None, OLD_AT, None);
+        seed(&rice, Some(&draft), 2, Some(1), OLD_AT, None); // now the head — as if `rice back --take 2` raced the plan.
+        seed(&rice, Some(&draft), 3, Some(1), OLD_AT, None); // a genuine, still-off-ancestry candidate.
+        history::save_head(&rice, Some(&draft), 2).unwrap();
 
         // A stale plan that offered both 2 and 3 as candidates before the
         // head moved to 2 — `prune_unlocked` must not trust it verbatim.
-        let result = prune(&song, Some(&draft), &[2, 3]).unwrap();
+        let result = prune(&rice, Some(&draft), &[2, 3]).unwrap();
         assert_eq!(result.pruned, vec![3], "the now-protected candidate never reaches the doomed set");
         assert_eq!(result.skipped_now_protected, vec![2]);
-        assert!(history::load_history(&song, Some(&draft), 2).is_some(), "the take that raced into being the head survives");
-        assert_eq!(history::load_history(&song, Some(&draft), 2).unwrap().parent, Some(1), "and is untouched, not just un-deleted");
-        assert!(history::load_history(&song, Some(&draft), 3).is_none());
-        assert_eq!(history::load_head(&song, Some(&draft)), Some(2), "the head itself is exactly where it raced to");
+        assert!(history::load_history(&rice, Some(&draft), 2).is_some(), "the take that raced into being the head survives");
+        assert_eq!(history::load_history(&rice, Some(&draft), 2).unwrap().parent, Some(1), "and is untouched, not just un-deleted");
+        assert!(history::load_history(&rice, Some(&draft), 3).is_none());
+        assert_eq!(history::load_head(&rice, Some(&draft)), Some(2), "the head itself is exactly where it raced to");
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -4070,17 +4070,17 @@ mod tests {
     fn prune_re_checks_the_whole_fresh_ancestry_not_just_the_bare_head() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
-        let (root, song, draft) = routed_draft("prune-stale-plan-ancestry-race");
-        seed(&song, Some(&draft), 1, None, OLD_AT, None);
-        seed(&song, Some(&draft), 2, Some(1), OLD_AT, None); // about to become the head's PARENT.
-        seed(&song, Some(&draft), 3, Some(2), OLD_AT, None); // the new head.
-        history::save_head(&song, Some(&draft), 3).unwrap();
+        let (root, rice, draft) = routed_draft("prune-stale-plan-ancestry-race");
+        seed(&rice, Some(&draft), 1, None, OLD_AT, None);
+        seed(&rice, Some(&draft), 2, Some(1), OLD_AT, None); // about to become the head's PARENT.
+        seed(&rice, Some(&draft), 3, Some(2), OLD_AT, None); // the new head.
+        history::save_head(&rice, Some(&draft), 3).unwrap();
 
-        let result = prune(&song, Some(&draft), &[2]).unwrap();
+        let result = prune(&rice, Some(&draft), &[2]).unwrap();
         assert_eq!(result.pruned, Vec::<u32>::new());
         assert_eq!(result.skipped_now_protected, vec![2]);
-        assert!(history::load_history(&song, Some(&draft), 2).is_some());
-        assert_eq!(history::load_history(&song, Some(&draft), 3).unwrap().parent, Some(2), "no splice ran — 2 was never touched");
+        assert!(history::load_history(&rice, Some(&draft), 2).is_some());
+        assert_eq!(history::load_history(&rice, Some(&draft), 3).unwrap().parent, Some(2), "no splice ran — 2 was never touched");
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -4091,16 +4091,16 @@ mod tests {
     fn prune_changed_never_lists_a_path_the_rail_re_check_stripped() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
-        let (root, song, draft) = routed_draft("prune-changed-accuracy-stale");
-        seed(&song, Some(&draft), 1, None, OLD_AT, None);
-        seed(&song, Some(&draft), 2, Some(1), OLD_AT, None); // races into being the head.
-        seed(&song, Some(&draft), 3, Some(1), OLD_AT, None); // genuinely pruned.
-        history::save_head(&song, Some(&draft), 2).unwrap();
+        let (root, rice, draft) = routed_draft("prune-changed-accuracy-stale");
+        seed(&rice, Some(&draft), 1, None, OLD_AT, None);
+        seed(&rice, Some(&draft), 2, Some(1), OLD_AT, None); // races into being the head.
+        seed(&rice, Some(&draft), 3, Some(1), OLD_AT, None); // genuinely pruned.
+        history::save_head(&rice, Some(&draft), 2).unwrap();
 
-        let result = prune(&song, Some(&draft), &[2, 3]).unwrap();
-        let take2_path = history::history_path(&song, Some(&draft), 2).to_string_lossy().into_owned();
+        let result = prune(&rice, Some(&draft), &[2, 3]).unwrap();
+        let take2_path = history::history_path(&rice, Some(&draft), 2).to_string_lossy().into_owned();
         assert!(!result.changed.contains(&take2_path), "take 2 was skipped, not touched — must not be reported as changed");
-        assert_eq!(result.changed, vec![history::history_path(&song, Some(&draft), 3).to_string_lossy().into_owned()]);
+        assert_eq!(result.changed, vec![history::history_path(&rice, Some(&draft), 3).to_string_lossy().into_owned()]);
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -4112,13 +4112,13 @@ mod tests {
     fn prune_changed_never_lists_a_doomed_take_whose_file_was_already_gone() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
-        let (root, song, draft) = routed_draft("prune-changed-accuracy-already-gone");
-        seed(&song, Some(&draft), 1, None, OLD_AT, None);
-        seed(&song, Some(&draft), 2, Some(1), OLD_AT, None);
-        history::save_head(&song, Some(&draft), 1).unwrap();
-        std::fs::remove_file(history::history_path(&song, Some(&draft), 2)).unwrap(); // simulate a concurrent removal.
+        let (root, rice, draft) = routed_draft("prune-changed-accuracy-already-gone");
+        seed(&rice, Some(&draft), 1, None, OLD_AT, None);
+        seed(&rice, Some(&draft), 2, Some(1), OLD_AT, None);
+        history::save_head(&rice, Some(&draft), 1).unwrap();
+        std::fs::remove_file(history::history_path(&rice, Some(&draft), 2)).unwrap(); // simulate a concurrent removal.
 
-        let result = prune(&song, Some(&draft), &[2]).unwrap();
+        let result = prune(&rice, Some(&draft), &[2]).unwrap();
         assert!(result.changed.is_empty(), "nothing was actually removed by THIS call");
         let _ = std::fs::remove_dir_all(&root);
     }

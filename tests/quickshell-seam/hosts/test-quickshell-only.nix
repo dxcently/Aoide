@@ -2,9 +2,9 @@
 # shape: a host that brings its OWN quickshell config.
 #
 # It selects the `quickshell` dendrite and nothing else from the paint set, and
-# it names no song — so the shell it runs is the fixture directory's, started by
+# it names no rice — so the shell it runs is the fixture directory's, started by
 # the quickshell lane, with no strillix anywhere in the evaluation (no rice binary,
-# no `songs/`, no shellbridge unit, no healthcheck).
+# no `rices/`, no shellbridge unit, no healthcheck).
 _: {
   # The services the nucleus aggregation carries, by name: the daemon's units
   # and the `aoide` binaries are what the absences below are read against.

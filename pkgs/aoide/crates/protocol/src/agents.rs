@@ -4168,7 +4168,7 @@ mod tests {
     const TRACE_USER_MESSAGE: &str = r##"{"id":1,"parent":0,"ts_ms":1789603005570,"kind":{"UserMessage":{"role":"user","content":[{"type":"text","text":"# Brief A: read the slot catalog first"}]}}}"##;
     const TRACE_MODEL_CHANGED: &str = r#"{"id":2,"parent":1,"ts_ms":1789603009102,"kind":{"ModelChanged":{"model":"claude-cli:opus"}}}"#;
     const TRACE_ASSISTANT: &str = r#"{"id":3,"parent":2,"ts_ms":1789603009140,"kind":{"AssistantMessage":{"role":"assistant","content":[{"type":"thinking","thinking":"the slots catalogue is the thing to read","signature":"sig"},{"type":"text","text":"Let me read the slot catalog first."},{"type":"tool_use","id":"call_8vr43zri","name":"read","input":{"path":"modules/facets/quickshell/qml/slots.md"}}]}}}"#;
-    const TRACE_TOOL_RESULT: &str = r#"{"id":4,"parent":3,"ts_ms":1789603009200,"kind":{"ToolResult":{"tool_use_id":"call_8vr43zri","content":"     1\t# Per-song widget slots — catalog","is_error":false}}}"#;
+    const TRACE_TOOL_RESULT: &str = r#"{"id":4,"parent":3,"ts_ms":1789603009200,"kind":{"ToolResult":{"tool_use_id":"call_8vr43zri","content":"     1\t# Per-rice widget slots — catalog","is_error":false}}}"#;
     const TRACE_TOOL_RESULT_ERR: &str = r#"{"id":5,"parent":4,"ts_ms":1789603009300,"kind":{"ToolResult":{"tool_use_id":"call_8vr43zri","content":"qmllint: 3 errors","is_error":true}}}"#;
     const TRACE_SETTLED: &str = r#"{"id":131,"parent":130,"ts_ms":1789606421000,"kind":{"TurnSettled":{"stop_reason":"end_turn","usage":{"input_tokens":9570000,"output_tokens":71900,"cache_creation_input_tokens":0,"cache_read_input_tokens":9430000}}}}"#;
     const TRACE_CANCELLED: &str = r#"{"id":77,"parent":76,"ts_ms":1789626990000,"kind":"Cancelled"}"#;

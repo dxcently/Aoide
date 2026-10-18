@@ -2,18 +2,18 @@
 //!
 //! dunst owns `org.freedesktop.Notifications` and draws NOTHING (every rule in
 //! `modules/dendrites/dunst.nix` sets `skip_display`). Each notification is
-//! handed to `aoide notifications push` through dunst's `script` hook, which reads the
+//! handed to `strx notifications push` through dunst's `script` hook, which reads the
 //! `DUNST_*` environment and sends the record over the shellbridge socket. The
 //! bridge daemon — the single writer, as it already is for `sessions.json` —
 //! folds it into `state/stage/notifications.json`, and the QML notifications reads that file
 //! and draws the real widget.
 //!
-//!   notification → dunst (daemon only) → `aoide notifications push` → bridge socket
+//!   notification → dunst (daemon only) → `strx notifications push` → bridge socket
 //!                → state/stage/notifications.json → Quickshell
 //!
 //! ── Why the socket hop, and not a direct write ────────────────────────────
 //! dunst runs its script asynchronously, so two notifications arriving together
-//! are two `aoide notifications push` processes. Both would read-modify-write the same
+//! are two `strx notifications push` processes. Both would read-modify-write the same
 //! ledger, and the loser's entry would vanish — a silently dropped
 //! notification, which is the one failure a notification system must not have.
 //! The bridge's accept loop serialises them for free.
@@ -103,7 +103,7 @@ pub struct NotificationsFile {
 }
 
 /// `state/stage/notifications.json` (command-defrag S1, 2026-08-27) -- core
-/// conducting state, moved off `song/stage/` (strillix's tree).
+/// conducting state, moved off `rice/stage/` (strillix's tree).
 pub fn notifications_path() -> std::path::PathBuf {
     aoide_storage::fs::conducting_stage_dir().join("notifications.json")
 }
@@ -200,7 +200,7 @@ where
     }
 }
 
-/// `aoide notifications push` — dunst's `script` hook. Reads the `DUNST_*`
+/// `strx notifications push` — dunst's `script` hook. Reads the `DUNST_*`
 /// environment, builds the record, and hands it to the bridge.
 ///
 /// dunst appends its own five positional arguments (appname summary body icon

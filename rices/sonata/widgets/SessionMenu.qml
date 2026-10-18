@@ -97,7 +97,7 @@ Item {
     property real pointY: 0
     visible: false
     property string face: "JetBrainsMono Nerd Font"
-    // The song serif face for the agent own voice - the trace panel paints
+    // The rice serif face for the agent own voice - the trace panel paints
     // thinking/say in it exactly as the card voice lane does (same name,
     // same value as conductor.qml faceSerif).
     property string faceSerif: "Noto Serif"

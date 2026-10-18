@@ -4,7 +4,7 @@
 # Two things and nothing else: the quickshell PACKAGE, and the
 # `aoide-quickshell` user service, started from the config directory a host (or
 # another lane) has named. This lane renders no QML, deploys nothing, and knows
-# no song: it starts the shell on whatever `aoide.quickshell.config` points at.
+# no rice: it starts the shell on whatever `aoide.quickshell.config` points at.
 #
 # A plain module with no `habit` key, imported only BY PATH: by this
 # directory's `default.nix` (the catalogue entry) and by any lane that brings
@@ -29,10 +29,10 @@
 #     service runs. No shell, no graphical-session anchor, nothing to fail.
 #
 # Reading discipline (house rule 5): the dress and the core scalars this lane
-# genuinely uses — `aoide.theme.wallpaper` (the shell's baked cover env, so a
-# wallpapered song survives a rebuild) and `aoide.root` (the runtime root the
-# QML reads its stage files from). Nothing else, and no `song/` path at all:
-# what this lane starts is a directory, not a song.
+# genuinely uses — `aoide.theme.wallpaper` (the shell's baked wallpaper env, so a
+# wallpapered rice survives a rebuild) and `aoide.root` (the runtime root the
+# QML reads its stage files from). Nothing else, and no `rice/` path at all:
+# what this lane starts is a directory, not a rice.
 {
   config,
   lib,
@@ -82,7 +82,7 @@ in
     # a second one is a conflict worth failing on.
     #
     # A graphical session exists whether or not strillix paints it, which is why
-    # this rides the CONFIG fact and not a song: a host running its own
+    # this rides the CONFIG fact and not a rice: a host running its own
     # quickshell config is a painting host too. The bare shape names no
     # config and so anchors nothing — package only, no session claim.
     aoide.sessionTarget = lib.mkIf (configDir != null) "graphical-session.target";
@@ -119,8 +119,8 @@ in
     # unit needs to change to grow that second producer.
     #
     # Gated on the CONFIG, never on `aoide.rice`: a shell that paints a
-    # host's own config has no song and starts exactly the same way. The
-    # song-gated half (deploy the tree, seed the stage, restart the rice)
+    # host's own config has no rice and starts exactly the same way. The
+    # rice-gated half (deploy the tree, seed the stage, restart the rice)
     # is the `strillix` lane's, which is also the lane that sets this config.
     aoide.quickshell.home =
       { lib, ... }:
@@ -145,7 +145,7 @@ in
             ExecStopPost = "${pkgs.bash}/bin/sh -c 'echo \"aoide-quickshell ended: result=$SERVICE_RESULT code=$EXIT_CODE status=$EXIT_STATUS\"'";
             # Qt6's qtbase ships only jpeg/png/gif/ico imageformats plugins (plus
             # qtsvg); webp/tiff/etc. live in a SEPARATE qtimageformats plugin the
-            # quickshell wrapper does not carry. A song cover may be any of those
+            # quickshell wrapper does not carry. A rice wallpaper may be any of those
             # formats (sonata's is .webp), and AoideWallpaper renders it through a
             # Qt Image — with no webp plugin the Image can't decode and the layer
             # falls back to the solid palette colour (the "wallpaper didn't run
@@ -175,10 +175,10 @@ in
               "AOIDE_ROOT=${config.aoide.root}"
               "STRILLIX_ROOT=${config.aoide.strillix.root}"
             ]
-            # Export the song's baked wallpaper (immutable store path) so
-            # AoideWallpaper always has the right cover on boot/rebuild — the live
+            # Export the rice's baked wallpaper (immutable store path) so
+            # AoideWallpaper always has the right wallpaper on boot/rebuild — the live
             # stage/wallpaper.json overrides it, but nothing re-seeded it from the
-            # song before, so a rebuild lost the background. Null → no env.
+            # rice before, so a rebuild lost the background. Null → no env.
             ++ lib.optionals (config.aoide.theme.wallpaper != null) [
               "AOIDE_WALLPAPER=${config.aoide.theme.wallpaper}"
             ]
@@ -193,9 +193,9 @@ in
             # picker) — and any strillix whose STAGING path runs under this
             # process tree resolves the shipped templates from this
             # environment: `strillix rice stage`/`strillix reload` gated on
-            # `song/src/widgets.rs`'s `plan_stage`, and `rice compose --from`'s
+            # `rice/src/widgets.rs`'s `plan_stage`, and `rice compose --from`'s
             # template fallback plus the first-stage seed in
-            # `song/src/commands/rice.rs`. (`wallpaper set` never reads them.)
+            # `rice/src/commands/rice.rs`. (`wallpaper set` never reads them.)
             # Declared here, a restart is enough. Gated on the
             # strillix dendrite for the same reason the nucleus delta is: a
             # shell with no `strillix` installed has no reader for it.

@@ -6,7 +6,7 @@
 //!   * **the rices gate's test-only fixture** — `rice stage` now evaluates
 //!     `crate::widgets::plan_stage` (the §7.5 gate) before it writes anything,
 //!     and the gate wants a shipped templates dir or a real `nix-instantiate`.
-//!     A test about staging MECHANICS (notes, covers, drafts, takes, mode) has
+//!     A test about staging MECHANICS (notes, wallpapers, drafts, takes, mode) has
 //!     no business standing either up, so [`ensure_default_rices_fixture`]
 //!     points `widgets`'s seam (`STRILLIX_RICES_EVAL_FIXTURE`) at an empty
 //!     payload. A test that IS about the gate unsets the seam deliberately and
@@ -150,24 +150,24 @@ pub(crate) fn tree_snapshot(roots: &[&Path]) -> String {
 }
 
 /// The `{ manifest, registry, packages }` JSON a correct generator answers with
-/// for `rices_root`'s songs — the SHELF-LESS shape (`rice compose` never
+/// for `rices_root`'s rices — the SHELF-LESS shape (`rice compose` never
 /// writes a `_widgets/` shelf), which is the shape every fixture rices in
 /// these tests has: manifest from a `widgets/*.qml` scan, registry from the
-/// song's `theme.json` `.widgets // {}`, and an empty package list.
+/// rice's `theme.json` `.widgets // {}`, and an empty package list.
 pub(crate) fn generator_payload(rices_root: &Path) -> String {
     let mut manifest = serde_json::Map::new();
     let mut registry = serde_json::Map::new();
     let mut packages = serde_json::Map::new();
     let entries = std::fs::read_dir(rices_root)
         .expect("fixture rices root must exist");
-    let mut songs: Vec<String> = entries
+    let mut rices: Vec<String> = entries
         .filter_map(|e| e.ok())
         .filter(|e| e.path().is_dir())
         .map(|e| e.file_name().to_string_lossy().into_owned())
         .collect();
-    songs.sort();
-    for song in songs {
-        let dir = rices_root.join(&song);
+    rices.sort();
+    for rice in rices {
+        let dir = rices_root.join(&rice);
         let slots: Vec<String> = {
             let mut slots: Vec<String> = std::fs::read_dir(dir.join("widgets"))
                 .map(|entries| {
@@ -194,18 +194,18 @@ pub(crate) fn generator_payload(rices_root: &Path) -> String {
             for slot in &slots {
                 entry.insert(
                     slot.clone(),
-                    serde_json::json!({ "owner": song, "file": format!("{slot}.qml") }),
+                    serde_json::json!({ "owner": rice, "file": format!("{slot}.qml") }),
                 );
             }
-            manifest.insert(song.clone(), serde_json::Value::Object(entry));
+            manifest.insert(rice.clone(), serde_json::Value::Object(entry));
         }
         let widgets = std::fs::read_to_string(dir.join("theme.json"))
             .ok()
             .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
             .and_then(|parsed| parsed.get("widgets").cloned())
             .unwrap_or_else(|| serde_json::Value::Object(serde_json::Map::new()));
-        registry.insert(song.clone(), widgets);
-        packages.insert(song, serde_json::json!([]));
+        registry.insert(rice.clone(), widgets);
+        packages.insert(rice, serde_json::json!([]));
     }
     serde_json::json!({
         "manifest": serde_json::Value::Object(manifest),

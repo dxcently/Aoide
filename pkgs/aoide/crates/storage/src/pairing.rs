@@ -13,7 +13,7 @@
 //! ceremony when B's approval callback arrives, possibly long after the
 //! `pair` CLI process that sent it has exited. Same `state/`
 //! dir family as `node_store`'s own `state/nodes.json` (account/global
-//! runtime, not song-scoped), same tolerate-missing/additive-round-trip
+//! runtime, not rice-scoped), same tolerate-missing/additive-round-trip
 //! discipline, same atomic writes.
 //!
 //! **Commit-then-reveal, not "both nonces in the clear in one round trip"

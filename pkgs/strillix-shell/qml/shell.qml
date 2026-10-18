@@ -8,14 +8,14 @@
 // behavior difference observed on this rig.
 //
 // Entry point for the Quickshell session. Instantiates the infrastructure
-// (theme, bridge, staging engine, IPC, clipboard, ledger, SongSurfaces)
+// (theme, bridge, staging engine, IPC, clipboard, ledger, RiceSurfaces)
 // unconditionally and each component anchor only when its slot is in
 // `components.json` (the component gate below), and wires the shared theme
-// loader (ThemeState) so every widget hot-reloads from song/stage/theme.json
+// loader (ThemeState) so every widget hot-reloads from rice/stage/theme.json
 // when it changes.
 //
 // Communication discipline (CONTRACTS.md / entities/Quickshell):
-//   - Reads state files from song/stage/ (ThemeState watches theme.json).
+//   - Reads state files from rice/stage/ (ThemeState watches theme.json).
 //   - Issues commands to shellbridge via unix socket (ShellBridge singleton).
 //   - Never speaks MCP or any agent protocol.
 //
@@ -49,7 +49,7 @@ ShellRoot {
     // WidgetSlot inside a delegate resolve to the anchor's own not-yet-set
     // property and settle at undefined — silently, exactly like the theme
     // case above, with the loud symptom landing one layer down ("Cannot read
-    // property 'songName' of undefined" from WidgetSlot's own resolver). Ids
+    // property 'riceName' of undefined" from WidgetSlot's own resolver). Ids
     // nothing collides with (`shared`, `clipboard`, `ledger`) still
     // resolve. Every root singleton a delegate reaches gets a handle for that
     // reason.
@@ -110,7 +110,7 @@ ShellRoot {
     // ── Shared singletons (one instance for the whole session) ─────────────
     ThemeState { id: theme }
     ShellBridge { id: bridge }
-    // `strillix reload`'s IPC target (crates/song/src/ipc.rs) — no
+    // `strillix reload`'s IPC target (crates/strillix-rice/src/ipc.rs) — no
     // properties, wired for its side effect (Quickshell.reload) alone.
     AoideIpc { id: ipc }
     // The `component` IPC target: `strillix component <slot> <verb> [arg]` through
@@ -128,8 +128,8 @@ ShellRoot {
         }
     }
     // The staging engine (CONTRACTS.md §5) — reads the manifest
-    // the strillix lane's build carries into $AOIDE_ROOT/run/qml/songs/, resolves
-    // WidgetSlot's "does the active song dress this slot" / "where's its QML".
+    // the strillix lane's build carries into $AOIDE_ROOT/run/qml/rices/, resolves
+    // WidgetSlot's "does the active rice dress this slot" / "where's its QML".
     StagingEngine { id: stagingEngine }
 
     // ── Shared session state (floating gadgets + DAG trace link) ───────────
@@ -187,11 +187,11 @@ ShellRoot {
     }
 
     // ── Wallpaper (background layer, full screen, click-through) ───────────
-    // Solid palette-bg fallback until a cover is staged; sits beneath every
+    // Solid palette-bg fallback until a wallpaper is staged; sits beneath every
     // window. Empty input mask → never intercepts desktop clicks.
     //
     // ONE LAYER SURFACE PER OUTPUT. A bare PanelWindow binds to a single
-    // screen, so on a multi-head rig the cover painted exactly one monitor and
+    // screen, so on a multi-head rig the wallpaper painted exactly one monitor and
     // every other output fell through to bare compositor ground — invisible on
     // a single-panel laptop, immediate on a two-monitor desk (osaka, 2026-08-30).
     // Variants is quickshell's idiom for this: its default property IS the
@@ -200,10 +200,10 @@ ShellRoot {
     // output. The delegate needs `required property var modelData` for Variants
     // to inject the row at all.
     //
-    // Every instance draws the SAME cover — AoideWallpaper resolves one path
-    // (AOIDE_WALLPAPER, or stage/wallpaper.json when staged), and the cover note is
-    // a single value on the song. Per-output DIFFERENT covers would need a
-    // per-screen cover map in the theme schema; deliberately not invented here.
+    // Every instance draws the SAME wallpaper — AoideWallpaper resolves one path
+    // (AOIDE_WALLPAPER, or stage/wallpaper.json when staged), and the wallpaper note is
+    // a single value on the rice. Per-output DIFFERENT wallpapers would need a
+    // per-screen wallpaper map in the theme schema; deliberately not invented here.
     Variants {
         model: shellRoot.has("wallpaper") ? Quickshell.screens : []
 
@@ -216,7 +216,7 @@ ShellRoot {
             // -1 = ignore other surfaces' exclusive zones, so the Background layer
             // spans the WHOLE output (0,0 → full) and reaches UNDER the bar's 36px
             // reservation. With 0 the bar's exclusiveZone evicts the wallpaper to
-            // y=36 and the cover never renders behind the translucent strip.
+            // y=36 and the wallpaper never renders behind the translucent strip.
             exclusiveZone: -1
             color: "transparent"
             WlrLayershell.layer: WlrLayer.Background
@@ -227,7 +227,7 @@ ShellRoot {
                 anchors.fill: parent
                 // Root-qualified on purpose — see shellRoot.themeRef above.
                 theme: shellRoot.themeRef
-                // The `wallpaper` slot's own needs (slots.md): the active song's
+                // The `wallpaper` slot's own needs (slots.md): the active rice's
                 // board is resolved through the staging engine, and a board that
                 // reads the machine gets the same bridge every other widget does.
                 bridge: shellRoot.bridgeRef
@@ -239,8 +239,8 @@ ShellRoot {
     // ── Bar (top edge, exclusive — reserves its height) ────────────────────
     // Whole-content slot (CONTRACTS.md §5, slots.md): the PanelWindow itself
     // — layer, namespace, exclusive-zone reservation — stays lane-owned;
-    // only its CONTENT is the per-song `bar` widget, loaded through
-    // WidgetSlot like calendar/notifications. The song fully owns its own
+    // only its CONTENT is the per-rice `bar` widget, loaded through
+    // WidgetSlot like calendar/notifications. The rice fully owns its own
     // footprint now: implicitHeight/exclusiveZone read back from the loaded
     // item's own implicitHeight rather than a lane-pinned constant.
     //
@@ -298,10 +298,10 @@ ShellRoot {
     // keyboard focus — the same `SurfaceSlot` contract powermenu/launcher/
     // notifications already carry (slots.md); it replaced the lane's own
     // `AoidePanel.qml`, retired once this slot anchor landed. The toggle
-    // keybind stays a lane contract on purpose (so a song's dock body can
+    // keybind stays a lane contract on purpose (so a rice's dock body can
     // never forget to bind it): `aoide:dock` (SUPER+G) is a Hyprland global
     // shortcut registered here, dispatching into whatever `.item` the slot
-    // resolves — the same pattern SongSurfaces uses for a declared widget's
+    // resolves — the same pattern RiceSurfaces uses for a declared widget's
     // own shortcut.
     //
     // Gated like every component anchor: the slot and its shortcut live in one
@@ -346,17 +346,17 @@ ShellRoot {
     // each behind its component's gate (`launcher`, `powermenu`, `wallpaper`
     // for the picker, `switcher`, `notifications` for notifications).
     //   - launcher (SurfaceSlot) : SUPER+Space launcher (bridge-toggled),
-    //                              song/songbook/sonata/widgets/launcher.qml
+    //                              rices/sonata/widgets/launcher.qml
     //   - powermenu (SurfaceSlot): the powermenu (bar clef 𝄞 → powermenu.toggle()),
-    //                              song/songbook/sonata/widgets/powermenu.qml
+    //                              rices/sonata/widgets/powermenu.qml
     //   - AoideWallpaperPicker   : aoide:wallpaper — the launcher's openPictures(),
-    //                              else the plain cover picker (global-shortcut)
-    //   - switcher (SurfaceSlot) : aoide:switcher window switcher, the song's
+    //                              else the plain wallpaper picker (global-shortcut)
+    //   - switcher (SurfaceSlot) : aoide:switcher window switcher, the rice's
     //                              widgets/switcher.qml or the plain AoideSwitcher
     //   - notifications (SurfaceSlot)   : the notification popup,
-    //                              song/songbook/sonata/widgets/notifications.qml
+    //                              rices/sonata/widgets/notifications.qml
     // (No AoideNotifications anymore — dunst owns org.freedesktop.Notifications
-    // as the DAEMON, but draws nothing. It feeds `aoide notifications push`, the
+    // as the DAEMON, but draws nothing. It feeds `strx notifications push`, the
     // shellbridge files each notification into state/stage/notifications.json, and
     // the `notifications` slot below draws the popup — with the images and progress bars
     // inside the frame, and real hit-tested approve/deny buttons on a
@@ -367,7 +367,7 @@ ShellRoot {
     // chrome, CONTRACTS.md §4), injected into the launcher slot as an extra.
     GrimoireLedger { id: ledger }
     // powermenu/launcher: window-owning slots (SurfaceSlot, not WidgetSlot —
-    // each roots its own PanelWindow). `.item` is the loaded song widget's
+    // each roots its own PanelWindow). `.item` is the loaded rice widget's
     // live handle, resolved through the baseline chain (sonata is the
     // floor, so `.item` is only null if sonata itself somehow lacks the
     // file — shouldn't happen once these slots are populated).
@@ -438,10 +438,10 @@ ShellRoot {
     }
     // The declared widget-type registry's runtime half (CONTRACTS.md §5;
     // aoide.layout.widgets, registry.json): hosts one SurfaceSlot per
-    // surface-kind entry the active song declares. Empty registry (sonata
+    // surface-kind entry the active rice declares. Empty registry (sonata
     // today) → no-op, same as powermenu/launcher above but data-driven
     // instead of a fixed slot name.
-    SongSurfaces {
+    RiceSurfaces {
         theme: theme
         bridge: bridge
         stagingEngine: stagingEngine
@@ -460,7 +460,7 @@ ShellRoot {
     }
 
     // The session lock (LockHost.qml): one WlSessionLock + PamContext, the
-    // active song's own `lockscreen.qml` face on every screen, and the floor
+    // active rice's own `lockscreen.qml` face on every screen, and the floor
     // field under it. `strillix lock` is its only entry (`ipc call lock lock`),
     // so a host without the `lock` component has no `lock` IPC target.
     LazyLoader {
@@ -473,7 +473,7 @@ ShellRoot {
     }
 
     // aoide:switcher: the one registration; it toggles whichever body the
-    // `switcher` slot holds — the active song's widgets/switcher.qml, else
+    // `switcher` slot holds — the active rice's widgets/switcher.qml, else
     // sonata's, else the plain AoideSwitcher below (the floor). Not bound
     // here: the venue binds a combo to it.
     LazyLoader {

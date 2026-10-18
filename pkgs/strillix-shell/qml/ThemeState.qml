@@ -31,9 +31,9 @@ QtObject {
     id: root
 
     // ── theme file path ────────────────────────────────────────────────────
-    // Stage path: $AOIDE_ROOT/song/stage/theme.json (runtime root, default
+    // Stage path: $STRILLIX_ROOT/stage/theme.json (runtime root, default
     // ~/.aoide — L-C2; the nix build never depends on this path —
-    // checks.song-runtime-untracked enforces that).
+    // checks.rice-runtime-untracked enforces that).
     readonly property string themePath:
         (Quickshell.env("STRILLIX_ROOT") || (Quickshell.env("HOME") + "/.strillix")) + "/stage/theme.json"
 
@@ -47,14 +47,14 @@ QtObject {
         "window": { "border": "#40897a", "borderInactive": "#eaddc6" }
     })
 
-    // ── Song name ───────────────────────────────────────────────────────────
-    // Additive optional field (`aoide rice preview <name>` injects `song` into
-    // the staged theme — dispatch.rs handle_rice_preview) — drives per-song
+    // ── Rice name ───────────────────────────────────────────────────────────
+    // Additive optional field (`aoide rice preview <name>` injects `rice` into
+    // the staged theme — dispatch.rs handle_rice_preview) — drives per-rice
     // flavor-widget resolution (the staging engine: StagingEngine.qml /
     // WidgetSlot.qml). Absent (a
-    // theme file staged some other way) means "no song identity" — resolvers
+    // theme file staged some other way) means "no rice identity" — resolvers
     // treat "" as "nothing authored", never a crash.
-    readonly property string songName: (raw.song) ? raw.song : ""
+    readonly property string riceName: (raw.rice) ? raw.rice : ""
 
     // ── Palette shortcuts ──────────────────────────────────────────────────
     readonly property color paletteBg:     raw.palette ? raw.palette.bg     : "#f4ecdc"
@@ -161,7 +161,7 @@ QtObject {
         s += "]"
         return s
     }
-    // Fill colour: the song accent, shifting to `paletteUrgent` at/above 85%
+    // Fill colour: the rice accent, shifting to `paletteUrgent` at/above 85%
     // (a session about to overflow its window reads as urgent at a glance) —
     // the same 85% threshold and accent→urgent swap MetersGadget's CPU/RAM
     // gauges already use.
@@ -299,8 +299,8 @@ QtObject {
     }
 
     // ── The wallpaper provider — hot-reloaded from stage/wallpaper-provider ──
-    // ONE word naming who paints a song's wallpaper (CONTRACTS.md §4); the CLI
-    // reads the same file (`aoide-song`'s `wallpaper_provider::provider`).
+    // ONE word naming who paints a rice's wallpaper (CONTRACTS.md §4); the CLI
+    // reads the same file (`strillix-rice`'s `wallpaper_provider::provider`).
     // Absent/unreadable — a host that never activated the lane — reads as the
     // shell's own layer.
     readonly property string providerPath:

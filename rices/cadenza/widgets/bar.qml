@@ -71,7 +71,7 @@
 // ── Jacks, ties and lamps (paint of core's `ties` + `activeAt`) — a schematic
 // Every jack is a PAD: a round 1px outline hugging its number — a circle the
 // pad row's 14px across for one digit, a pill of the same height for two
-// (the digits' cells + half a pad height; the song's one rounded shape), centred in a slot
+// (the digits' cells + half a pad height; the rice's one rounded shape), centred in a slot
 // of (digits + 1) cells — drawn for every jack — ink when
 // occupied, dim when empty, filled `title` with a `ground` number when
 // active, red when a session on it is awaiting. The project label follows
@@ -938,7 +938,7 @@ Item {
                 property int dur: 600
                 property real t: 0
                 // the walker itself lives in Trace.js (one implementation for
-                // the bar's lamps and the cover's pulses) — `flat` adapts this
+                // the bar's lamps and the wallpaper's pulses) — `flat` adapts this
                 // lamp's `[{x, y}, …]` to the flat polylines the engine reads.
                 readonly property var flatPts: Trace.flat(pts)
                 readonly property var at: Trace.at(flatPts, t * Trace.length(flatPts))
@@ -1643,7 +1643,7 @@ Item {
                 height: root.barH
 
                 // the pad: a round 1px outline (a circle, a pill for two
-                // digits) — the song's one rounded shape (intent §3.2) —
+                // digits) — the rice's one rounded shape (intent §3.2) —
                 // filled `title` when active; the board's row hover fills it
                 // `select`; a working pad breathes (pulseRing/pulseFill)
                 Rectangle {
@@ -2317,7 +2317,7 @@ Item {
 
     // ── CLOCK → the calendar surface, asked through the bridge ────────────
     // The clock measures its cell into shared.calendarAnchor, then the bridge
-    // toggles the calendar on this bar's screen. A song with no calendar has no
+    // toggles the calendar on this bar's screen. A rice with no calendar has no
     // surface to open, and the bridge's call finds none.
     readonly property string screenName: QsWindow.window && QsWindow.window.screen ? QsWindow.window.screen.name : ""
     function toggleCalendar(cell) {

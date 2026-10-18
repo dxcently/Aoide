@@ -2,17 +2,17 @@
 //
 // A plain QtObject, instantiated by shell.qml and injected into the
 // "launcher" slot as the `ledger` extra (as of the widget-slot expansion,
-// CONTRACTS.md §5 — the launcher itself, `song/songbook/sonata/widgets/
+// CONTRACTS.md §5 — the launcher itself, `rices/sonata/widgets/
 // launcher.qml`, moved out of the lane, but this ledger stays: it's a data
-// seam that owns `song/stage/grimoire.json`, not chrome, so launch-frequency
-// history stays song-agnostic rather than moving with the song). NOT a
+// seam that owns `rice/stage/grimoire.json`, not chrome, so launch-frequency
+// history stays rice-agnostic rather than moving with the rice). NOT a
 // per-widget singleton either — nothing else needs to read launch-frequency
 // data. Tracks how often each .desktop entry is launched so the Grimoire's
 // frequency chapter ("most commonly opened") can rank real usage instead of
 // guessing.
 //
 // ── The file (CONTRACTS.md §4) ──────────────────────────────────────────────
-// `$AOIDE_ROOT/song/stage/grimoire.json` (default ~/.aoide) — gitignored runtime, v0 schema:
+// `$STRILLIX_ROOT/stage/grimoire.json` (default ~/.aoide) — gitignored runtime, v0 schema:
 //   { "schemaVersion": "0",
 //     "launches": { "<desktop-entry-id>": { "count": N, "lastAt": "<iso8601>" } } }
 // Written directly by this QML (`atomicWrites: true` on the FileView — a

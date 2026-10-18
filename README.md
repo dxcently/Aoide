@@ -1,12 +1,12 @@
 # Aoide
 
-**Aoide (the core) vs AoideOS (the distribution) — don't conflate the two.** *Aoide* tracks and conducts terminal and agent sessions. Sessions collaborate across agents and across hosts, with the human in the loop — and become the parts you build larger systems out of. Any agent with a shell is fully capable, no MCP required; **every terminal is a conductable, tracked session by default**, so a central agent can speak into any other running session (see [Conducting](#conducting--every-terminal-is-a-tracked-session)). The core runs anywhere there is a shell — portable, headless-capable, agent-first. *AoideOS* is the **distribution built on that core**: the NixOS flake that ADDITIONALLY ships the Quickshell widget-making toolkit (bar, dock, gadgets, the DAG/conductor surfaces) and the specialized ricer (the song/notes theming engine). Aoide is the engine; AoideOS is the desktop around it — a capability that works with only a shell is "Aoide", one that is desktop/Quickshell/rice is "AoideOS".
+**Aoide (the core) vs Strillix (the distribution) — don't conflate the two.** *Aoide* tracks and conducts terminal and agent sessions. Sessions collaborate across agents and across hosts, with the human in the loop — and become the parts you build larger systems out of. Any agent with a shell is fully capable, no MCP required; **every terminal is a conductable, tracked session by default**, so a central agent can speak into any other running session (see [Conducting](#conducting--every-terminal-is-a-tracked-session)). The core runs anywhere there is a shell — portable, headless-capable, agent-first. *Strillix* is the **distribution built on that core**: the NixOS flake that ADDITIONALLY ships the Quickshell widget-making toolkit (bar, dock, gadgets, the DAG/conductor surfaces) and the specialized ricer (the rice/notes theming engine). Aoide is the engine; Strillix is the desktop around it — a capability that works with only a shell is "Aoide", one that is desktop/Quickshell/rice is "Strillix".
 
-**AoideOS** is the OS harness for your harness — Hyprland compositor, Quickshell shell, an orchestrator daemon (`aoided`), a content pipeline, and a self-ricing engine — built on the shell-only Aoide core, that you **clone and run**, not install. Its naming thesis in one line: architecture is frozen music — the nix layer is the score, the running desktop is the performance, a rice is a song the system sings. The Aoide·Melete·Mneme naming is a three-Muses theme: Aoide is the *song* (this repo), [Melete](#melete--the-doer) is *practice* (the coding harness), [Mneme](#mneme--the-door) is *memory* (the knowledge vault) — the other two are independently-owned systems Aoide **integrates and launches**, never vendors.
+**Strillix** is the OS harness for your harness — Hyprland compositor, Quickshell shell, an orchestrator daemon (`aoided`), a content pipeline, and a self-ricing engine — built on the shell-only Aoide core, that you **clone and run**, not install. Its naming thesis in one line: architecture is frozen music — the nix layer is the score, the running desktop is the performance, a rice is a song the system sings. The Aoide·Melete·Mneme naming is a three-Muses theme: Aoide is the *song* (this repo), [Melete](#melete--the-doer) is *practice* (the coding harness), [Mneme](#mneme--the-door) is *memory* (the knowledge vault) — the other two are independently-owned systems Aoide **integrates and launches**, never vendors.
 
 > Status — walking skeleton. The desktop, the flake, the `graph` group, the daemon, and the theming fan-out are **real and running live** (yomi-strix is switched onto this flake). A handful of commands (`rice declare`/`transpose`, the `content` group, `make`, `update`) are **structured stubs** that return exit `64` (`not-implemented`) with the right shape — the trunk is wired, the muscle is being grown. See [`aoide-cli`](docs/Aoide-Wiki/entities/aoide-cli.md) for exactly which.
 
-This README explains what Aoide/AoideOS *is* — architecture, features, the Melete/Mneme integration, and how to install it. For day-to-day driving (every keybind, alias, and CLI command) see the linked wiki pages in [§6](#6-further-documentation) — nothing here duplicates a reference table that already lives there.
+This README explains what Aoide/Strillix *is* — architecture, features, the Melete/Mneme integration, and how to install it. For day-to-day driving (every keybind, alias, and CLI command) see the linked wiki pages in [§6](#6-further-documentation) — nothing here duplicates a reference table that already lives there.
 
 ## Contents
 
@@ -21,7 +21,7 @@ This README explains what Aoide/AoideOS *is* — architecture, features, the Mel
 
 ## 1. Architecture
 
-The repo is a **snowflake**: a capability enters by one file plus one line — a dendrite by its line in `modules/default.nix`'s catalogue, an aggregation or an override by its directory's own scan, an option-contract file by its line in `modules/nucleus/default.nix`. `lib/aoideos.nix`'s constructor builds a host from its host module and habit's composition (`inputs.habit`, re-exported as `lib.composition`) resolves selection before any module graph exists, importing only what was kept. Drop a `.nix` file in the right directory, add its one line, done. A `/_`-prefixed path (`_wip.nix`, `_scratch/`) is never catalogued and never listed, so it is shelved without being deleted.
+The repo is a **snowflake**: a capability enters by one file plus one line — a dendrite by its line in `modules/default.nix`'s catalogue, an aggregation or an override by its directory's own scan, an option-contract file by its line in `modules/nucleus/default.nix`. `lib/strillix.nix`'s constructor builds a host from its host module and habit's composition (`inputs.habit`, re-exported as `lib.composition`) resolves selection before any module graph exists, importing only what was kept. Drop a `.nix` file in the right directory, add its one line, done. A `/_`-prefixed path (`_wip.nix`, `_scratch/`) is never catalogued and never listed, so it is shelved without being deleted.
 
 ```
 ~/Aoide/
@@ -35,8 +35,8 @@ The repo is a **snowflake**: a capability enters by one file plus one line — a
 ├── hosts/             one record per machine (`_`-prefixed = template to copy)
 ├── pkgs/              aoide (Rust, its own flake, consumed as a path input),
 │                      strillix-shell (the QML skeleton), strillix-rices (templates)
-├── lib/               aoideos.nix (constructor) + composition + checks + discovery
-├── song/              the performed half (rices, covers)
+├── lib/               strillix.nix (constructor) + composition + checks + discovery
+├── rice/              the performed half (rices, wallpapers)
 └── flake.nix          inputs + outputs (never edited to add a module)
 ```
 
@@ -46,15 +46,15 @@ A catalogue at the centre and radial distance from it governing who may change w
 |---|---|---|
 | `modules/nucleus/` | upstream | The option contract and assertions every host carries. The daemon and the rest of the floor are dendrites in the `nucleus` aggregation; the secrets broker is one a host selects by name. |
 | `modules/dendrites/` | shipped + you | Opt-in lanes, one flat tree; new personal lanes are additive files — the paint lanes (strillix, quickshell, compositor, stylix, greeter) read only the namespaces root `AGENTS.md` house rule 5 enumerates. |
-| `rices/<song>/` | you (agent-written) | The performed half: a committed song — rice.nix, theme.json, palettes, widgets, design notes. Everything outside `song/` changes only on a lane the User ordered. |
+| `rices/<rice>/` | you (agent-written) | The performed half: a committed rice — rice.nix, theme.json, palettes, widgets, design notes. Everything outside `rice/` changes only on a lane the User ordered. |
 
 Deeper reads:
 
 - [Full Architecture](docs/Aoide-Wiki/concepts/Full-Architecture.md) — the whole-body map: every subsystem, its inputs/outputs, where the frozen and performed halves meet at the theme seam.
 - [Codebase](docs/Aoide-Wiki/concepts/Codebase.md) — how the built repo actually works: the flake, the catalogue + constructor + overlay, the option contract, the systemd/service map, socket + stage-file contracts, real vs stubbed.
 - [Desktop Architecture](docs/Aoide-Wiki/concepts/desktop/Desktop-Architecture.md) — how `aoided`, `shellbridge`, Quickshell, and the compositor compose into one agent-ready desktop body.
-- [Package Layout](docs/Aoide-Wiki/concepts/Package-Layout.md) — the `pkgs/aoide` Rust crate split (protocol, storage, conduct, song, cli, …) and its phased migration.
-- [Song Anatomy](docs/Aoide-Wiki/concepts/song/Song-Anatomy.md) / [Song Vocabulary](docs/Aoide-Wiki/concepts/song/Song-Vocabulary.md) — the performed half's own tree and naming map.
+- [Package Layout](docs/Aoide-Wiki/concepts/Package-Layout.md) — the `pkgs/aoide` Rust crate split (protocol, storage, conduct, rice, cli, …) and its phased migration.
+- [Rice Anatomy](docs/Aoide-Wiki/concepts/rice/Rice-Anatomy.md) / [Rice Vocabulary](docs/Aoide-Wiki/concepts/rice/Rice-Vocabulary.md) — the performed half's own tree and naming map.
 
 ---
 
@@ -62,7 +62,7 @@ Deeper reads:
 
 ### Self-ricing
 
-The headline feature. An agent generates, lints, stages (hot-loads live, nothing committed), and adopts a **rice** — a song the system performs, drawn from a wallpaper or a prompt. Committed songs live in `rices/<name>/`; any host performs any committed song by naming it (`aoide.rice = "moonlight";`). Staging vs declarative mode lets an agent hot-iterate on a rice live without ever touching the committed, home-manager-declared state until an explicit `adopt`. → [Self-Ricing](docs/Aoide-Wiki/concepts/song/Self-Ricing.md), [Ricing Protocol](docs/Aoide-Wiki/concepts/song/Ricing-Protocol.md).
+The headline feature. An agent generates, lints, stages (hot-loads live, nothing committed), and adopts a **rice** — a rice the system performs, drawn from a wallpaper or a prompt. Committed rices live in `rices/<name>/`; any host performs any committed rice by naming it (`aoide.rice = "moonlight";`). Staging vs declarative mode lets an agent hot-iterate on a rice live without ever touching the committed, home-manager-declared state until an explicit `adopt`. → [Self-Ricing](docs/Aoide-Wiki/concepts/rice/Self-Ricing.md), [Ricing Protocol](docs/Aoide-Wiki/concepts/rice/Ricing-Protocol.md).
 
 ### Conducting — every terminal is a tracked session
 
@@ -74,7 +74,7 @@ Two instances become nodes through a mutual, two-code ceremony, named here by se
 
 ### Widget-maker
 
-Because [Melete](#melete--the-doer) writes code, you extend AoideOS by asking it to *generate* a new integration — a dendrite (nix) + widget (QML) + adapter — rather than hunting for a plugin. The same gated stage → adopt loop as self-ricing governs what lands. → [Widget Maker](docs/Aoide-Wiki/concepts/desktop/Widget-Maker.md), [Feature Set](docs/Aoide-Wiki/concepts/desktop/Feature-Set.md).
+Because [Melete](#melete--the-doer) writes code, you extend Strillix by asking it to *generate* a new integration — a dendrite (nix) + widget (QML) + adapter — rather than hunting for a plugin. The same gated stage → adopt loop as self-ricing governs what lands. → [Widget Maker](docs/Aoide-Wiki/concepts/desktop/Widget-Maker.md), [Feature Set](docs/Aoide-Wiki/concepts/desktop/Feature-Set.md).
 
 ### Content pipeline
 
@@ -109,11 +109,11 @@ An independently-owned vault API serving a folder of notes over MCP — read, wr
 Two installs, one boundary between them (the two-binary split, [Package Layout](docs/architecture/PACKAGE-LAYOUT.md)):
 
 - **Aoide (the core)** — `aoide` and `aoided`, sessions and conduct, the doors — needs no nix at all: `cargo install` from a checkout on any Linux, [docs/INSTALL.md](docs/INSTALL.md).
-- **AoideOS (this distribution)** — the same core plus `strillix`, the paint half — is a flake you clone and run, below.
+- **Strillix (this distribution)** — the same core plus `strillix`, the paint half — is a flake you clone and run, below.
 
-### AoideOS — clone and run (Nix flakes)
+### Strillix — clone and run (Nix flakes)
 
-AoideOS is a framework you **clone and run**, not a package you install — the upstream repo ships the shape-making machinery (engine, contracts, catalogue, paint lanes) but never the shapes themselves. Your clone is your instance, and shared git history means upstream improvements arrive as an ordinary merge. A remote fork is optional — for backup, fleet sync, or contributing back.
+Strillix is a framework you **clone and run**, not a package you install — the upstream repo ships the shape-making machinery (engine, contracts, catalogue, paint lanes) but never the shapes themselves. Your clone is your instance, and shared git history means upstream improvements arrive as an ordinary merge. A remote fork is optional — for backup, fleet sync, or contributing back.
 
 **Prerequisites:** a NixOS box with flakes enabled (`nix.settings.experimental-features = [ "nix-command" "flakes" ];` in your existing config, or `experimental-features = nix-command flakes` in `/etc/nix/nix.conf`).
 
@@ -126,7 +126,7 @@ cd ~/Aoide
 #    never names a machine. Start from a shelved skeleton (hosts/_desktop,
 #    _laptop, _server; _mac is the forward-looking darwin one, pending the
 #    darwin seam) or copy hosts/yomi-strix/, the living reference. The
-#    host module selects aggregations, lone dendrites and its song
+#    host module selects aggregations, lone dendrites and its rice
 #    (`habit.rice.declared`), then carries the machine's own platform settings.
 #    A committed hardware.nix is imported guardedly if present.
 
@@ -134,7 +134,7 @@ cd ~/Aoide
 sudo nixos-rebuild switch --flake .#<host>
 ```
 
-From then on the flake ships its own rebuild aliases (`adbuild`/`adtest`/`adrebuild`/…) for the everyday loop — see [Controls](docs/Aoide-Wiki/concepts/desktop/Controls.md). `aoide onboard` does steps 2–3's setup in one shot (register the clone, seed `song/`, wire the harness hooks, delegate the nix half to `strx onboard` when `strillix` resolves) and is idempotent; it needs the `aoide` binary on `PATH` first, which is [docs/INSTALL.md](docs/INSTALL.md) § 1–3. Full onboarding narrative, done-state checks, and self-update: [Clone and Run](docs/Aoide-Wiki/concepts/governance/Clone-and-Run.md).
+From then on the flake ships its own rebuild aliases (`adbuild`/`adtest`/`adrebuild`/…) for the everyday loop — see [Controls](docs/Aoide-Wiki/concepts/desktop/Controls.md). `aoide onboard` does steps 2–3's setup in one shot (register the clone, seed `rice/`, wire the harness hooks, delegate the nix half to `strx onboard` when `strillix` resolves) and is idempotent; it needs the `aoide` binary on `PATH` first, which is [docs/INSTALL.md](docs/INSTALL.md) § 1–3. Full onboarding narrative, done-state checks, and self-update: [Clone and Run](docs/Aoide-Wiki/concepts/governance/Clone-and-Run.md).
 
 ---
 

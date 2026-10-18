@@ -8,7 +8,7 @@ tags: [aoide, cli, strillix, quickshell, rice, paint]
 
 # strillix (the paint binary)
 
-`strillix` is the AoideOS paint binary: a second composition root over the same
+`strillix` is the Strillix paint binary: a second composition root over the same
 domain-crate handlers `aoide-cli` assembles. In Cordis terms
 (`CONTRACTS.md` §0) it is a BUNDLE, same as `cli` — its own ordered
 `commands::all()` profile over an independent `Registry`. The crate root is
@@ -20,7 +20,7 @@ the muse plays.
 
 ## What it owns / never owns
 
-Owns the self-ricing loop, `screen`, `herald`, `shellbridge`, `quickshell`
+Owns the self-ricing loop, `screen`, `notifications`, `shellbridge`, `quickshell`
 — everything that paints, or that only a desktop needs. Never owns
 conducting, the graph, A2A, nodes, or the daemon: those are core `aoide`
 identity and ship only in `aoide`/`aoided`. `conductor` stays core for the
@@ -34,9 +34,9 @@ serve --stdio`, and raw `guide`/`schema`/`theme` output. `a2a serve` and
 `conductor` are deliberately absent from it.
 
 Two deliberate charter exceptions carry over from core: `shellbridge.rs`
-and `herald.rs` stay as FILES in `aoide-conduct` — only their registry
+and `notifications.rs` stay as FILES in `aoide-conduct` — only their registry
 lines (the CLI commands) move to `strillix` — because both are entangled with
-core (`permit.rs` publishes summons through `herald`; `conductor/ui.rs`
+core (`permit.rs` publishes summons through `notifications`; `conductor/ui.rs`
 reads the socket path `shellbridge` owns).
 
 ## The command surface
@@ -48,12 +48,12 @@ own golden-snapshot test in `crates/strillix/src/registry.rs`. 47 are real;
 | Group | Leaves | Detail |
 |---|---|---|
 | `rice` | 18 | `lint`/`stage`/`compose`/`back`/`declare`/`transpose`(stub); the 3-command `draft` group; the 4-command `mode` group; the 5-command `take` rehearsal-snapshot group — [[Rice-and-Theme]] |
-| `cover set` | 1 | wallpaper staging — [[Rice-and-Theme]] |
+| `wallpaper set` | 1 | wallpaper staging — [[Rice-and-Theme]] |
 | `theme` | 3 | `lint`/`resolve`/`emit`, the native design-token engine — [[theme]] |
-| `element seed` | 1 | renders a song's committed `elements/*/element.json` into `run/elements/` — verbatim copy for `template:false`, theme-rendered for `template:true`, atomic per file — [[Song-Anatomy]] |
+| `element seed` | 1 | renders a rice's committed `elements/*/element.json` into `run/elements/` — verbatim copy for `template:false`, theme-rendered for `template:true`, atomic per file — [[Rice-Anatomy]] |
 | `shellbridge` | 1 | the desktop state bridge daemon — [[Doors-and-Nodes]] |
 | `quickshell` | 2 | `reload` (the Quickshell IPC hot-reload trigger) and `healthcheck` (the placeholder-screen lockup watchdog) — [[Meta-and-Upkeep]] |
-| `herald push` | 1 | dunst's notification-ledger hook — [[Content-and-Hooks]] |
+| `notifications push` | 1 | dunst's notification-ledger hook — [[Content-and-Hooks]] |
 | `screen` | 14 | capture, OCR, and synthesized-pointer control — [[Screen-Commands]] |
 | `guide`, `schema`, `mcp serve` | 3 | the same commands as their `aoide` spellings, over strillix's own registry |
 | `onboard` | 1 | the nix half of clone onboarding — generates `./aoide.nix` with every `aoide.*` module option's default commented out, never edits the user's flake — [[Clone-and-Run]] |
@@ -62,7 +62,7 @@ own golden-snapshot test in `crates/strillix/src/registry.rs`. 47 are real;
 
 ## The nix boundary
 
-`strillix` is the one binary allowed to depend on nix: `song::widgets`'s `nix
+`strillix` is the one binary allowed to depend on nix: `rice::widgets`'s `nix
 eval` call lives here. Core (`aoide`/`aoided`) stays cargo-buildable on any
 Linux, zero nix shell-outs, no NixOS assumption — the boundary the root
 `AGENTS.md` states as "core is nix-independent."

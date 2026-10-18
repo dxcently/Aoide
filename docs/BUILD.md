@@ -62,7 +62,7 @@ only, by their own directories' discovery files:
 `default.nix`, minus the `_`-prefixed shelved ones — and builds
 `nixosConfigurations.<name>` and `inventory.<name>` from that same list. Adding a
 machine is a new directory; no file is edited to add one. A host module's shape is
-`hosts/README.md`; the constructor that assembles it is `lib/aoideos.nix`, over
+`hosts/README.md`; the constructor that assembles it is `lib/strillix.nix`, over
 habit's composition (`inputs.habit`). `nix eval --json .#inventory.<host>` is the review surface
 for what a host selected.
 
@@ -77,11 +77,11 @@ no fact.
 | Option                         | Type                         | Notes |
 | ------------------------------ | ---------------------------- | ----- |
 | `aoide.enable`                 | bool                         | core switch: set `true` by each nucleus member, not written by hand |
-| `aoide.rice`                   | nullOr str (default `null`)  | the song this host performs; names a `rices/<name>/`. Null — no song named — means a paint lane deploys nothing: no QML tree, no seeded stage, no rice restart |
+| `aoide.rice`                   | nullOr str (default `null`)  | the rice this host performs; names a `rices/<name>/`. Null — no rice named — means a paint lane deploys nothing: no QML tree, no seeded stage, no rice restart |
 | `aoide.user`                   | str (default `"khoa"`)       | owner of the `~/Aoide` clone |
 | `aoide.root`                   | str (default `"~/.aoide"`)   | the RUNTIME root — `/stage/`, `/declared/`, `state/`, `run/qml/`, composed `rices/`; exported as `AOIDE_ROOT` (to `aoide.user`'s login shells). Core code default, nix-independent (L-C2, task #107) |
 | `aoide.checkout`               | str (default `"~/Aoide"`)    | the dev git checkout — `rice declare`'s commit-in target, `soundcheck`'s scan root, the rices `nix eval` registry regen; exported as `AOIDE_FLAKE_ROOT` (to `aoide.user`'s login shells) |
-| `aoide.hostConfig`             | str (default `"<checkout>/hosts/<hostName>/default.nix"`) | the host's own config file, whose one `habit.rice.declared` line `strx rice declare <song> --host` rewrites; exported as `AOIDE_HOST_CONFIG` (to `aoide.user`'s login shells) |
+| `aoide.hostConfig`             | str (default `"<checkout>/hosts/<hostName>/default.nix"`) | the host's own config file, whose one `habit.rice.declared` line `strx rice declare <rice> --host` rewrites; exported as `AOIDE_HOST_CONFIG` (to `aoide.user`'s login shells) |
 | `aoide.theme.palette.{bg,fg,accent,urgent}` | hex        | v0 palette (base16) |
 | `aoide.theme.bar.{bg,fg,accent}` | nullOr hex                | component override; null → palette |
 | `aoide.theme.notif.{bg,fg,urgent}` | nullOr hex              | component override; null → palette |
@@ -109,7 +109,7 @@ That
 package (`pkgs/strillix-rices/default.nix`) bakes the built-in
 `rices/` tree plus `manifest.json`/`registry.json` (via
 `lib/rices.nix`) at build time, so a repo-less host's `rice compose --from
-<song>` and its registry/manifest regeneration both have something to fall
+<rice>` and its registry/manifest regeneration both have something to fall
 back to with no `nix eval` shell-out. See `CONTRACTS.md`'s path-model section
 for the full resolution ladder.
 
@@ -142,7 +142,7 @@ hosts.
 
 A paint lane renders appearance: it reads the dress (`aoide.theme`), the
 structure (`aoide.layout`), the surface registry (`aoide.surfaces`), the
-core scalars and the song selection — root `AGENTS.md` house rule 5, and nothing
+core scalars and the rice selection — root `AGENTS.md` house rule 5, and nothing
 else. If it owns a surface it declares that in `aoide.surfaces`. Apply component
 fallbacks yourself.
 
@@ -171,25 +171,25 @@ owner; the stylix lane must read `config.aoide.surfaces` and disable its own
 derivation for any surface already owned (overlap resolution,
 `concepts/Notes`).
 
-**Never read `song/` runtime paths at build time.** The `rice-runtime-untracked`
-check fails if a `song/` runtime dir (`stage/`, `auditions/`, `declared/`) is
+**Never read `rice/` runtime paths at build time.** The `rice-runtime-untracked`
+check fails if a `rice/` runtime dir (`stage/`, `auditions/`, `declared/`) is
 committed into the source tree at all. `stage/` is live
 state, never load-bearing for the nix build.
 
 ---
 
-## Authoring a song (replayable rice)
+## Authoring a rice (replayable rice)
 
-A **song** is a committed, host-agnostic rice. Any host in the fleet performs it
+A **rice** is a committed, host-agnostic rice. Any host in the fleet performs it
 by naming it — the score adapts to that host's specifics and its enabled
-dendrite set. **The venue (host) decides its instruments; the song
+dendrite set. **The venue (host) decides its instruments; the rice
 carries only the notes.**
 
 Drop a folder under `rices/<name>/` and select it in the host module
 (`habit.rice.declared`, or `habit.rice.available` to keep it built in to stage):
-one typed scan finds `rices/<name>/rice.nix`, and the song hook
+one typed scan finds `rices/<name>/rice.nix`, and the rice hook
 (`lib/rices.nix`'s `hook`) registers it as an aggregation, so there is no
-import list to edit. The song's `rice.nix` is a BODY: habit reads it as data,
+import list to edit. The rice's `rice.nix` is a BODY: habit reads it as data,
 and imports only the one the host performs.
 
 ```nix
@@ -224,23 +224,23 @@ and imports only the one the host performs.
 ```
 
 Naming it performs it on one line in `hosts/<host>/default.nix`:
-`habit.rice.declared = "moonlight";`. Naming no song performs no song: a host
-with no song named gets no deployed QML and no shell service, not an empty
-surface, and no song's body is imported (`aoide.rice` is null). Name a song
+`habit.rice.declared = "moonlight";`. Naming no rice performs no rice: a host
+with no rice named gets no deployed QML and no shell service, not an empty
+surface, and no rice's body is imported (`aoide.rice` is null). Name a rice
 explicitly to get a desktop, `habit.rice.declared = "sonata";` for the shipped
 standard (`rices/sonata/rice.nix`).
 
-**Host-agnostic rules (CONTRACTS.md §5):** a song's `system.module` sets ONLY
+**Host-agnostic rules (CONTRACTS.md §5):** a rice's `system.module` sets ONLY
 `aoide.theme` and `aoide.layout`, and its body selects only the paint: the
 ten component providers and the `strillix` renderer. It NEVER selects host
 capabilities (monitors, hardware, services, people). Note values are literal
-nix; a song never reads `song/` runtime paths. The `rices/**` tree is
+nix; a rice never reads `rice/` runtime paths. The `rices/**` tree is
 versioned score (not a runtime dir), so reading it does not violate
 `checks.rice-runtime-untracked`. `checks.rice-shape` asserts the body's shape,
-that each song carries `rice.nix`, `theme.json` and `hyprland.conf`, that
+that each rice carries `rice.nix`, `theme.json` and `hyprland.conf`, that
 `hyprland.conf` holds no theme-owned key, that no stray `.nix` sits outside a
-song's `rice.nix`/`_widgets/`, and that no `../` path literal appears in a
-song's `.nix` text.
+rice's `rice.nix`/`_widgets/`, and that no `../` path literal appears in a
+rice's `.nix` text.
 
 ---
 
@@ -267,7 +267,7 @@ file path and the `callPackage` signature; the walker never needs the file list.
 
 ### Agent A — the theme engine (native, `crates/strillix-rice/src/theme/`)
 
-The standalone Node note engine was folded into the song crate by the theme
+The standalone Node note engine was folded into the rice crate by the theme
 merge (THEME-MERGE.md); it is now native Rust, one module
 tree inside `crates/strillix-rice`:
 
@@ -343,7 +343,7 @@ session records) are contract §4.
 
 ## Non-cargo tests (`tests/`)
 
-`lib/` holds build/eval machinery (`checks.nix`, `aoideos.nix`,
+`lib/` holds build/eval machinery (`checks.nix`, `strillix.nix`,
 `pkgs.nix`, `rices.nix`); `tests/` holds what those checks actually test — the headless VM
 boot (`vm-boot.nix`) and the static-artifact portability assertions
 (`portability.nix`), plus the manual container suite (`distrobox.md`).
@@ -354,13 +354,13 @@ See `tests/README.md` for why Rust's own tests do NOT live here.
 `lib/checks.nix` rides as flake `checks`:
 
 - `surface-ownership` — every `aoide.surfaces.<name>` names a non-empty owner.
-- `rice-runtime-untracked` — no `song/` **runtime** dir (`stage/`, `auditions/`,
+- `rice-runtime-untracked` — no `rice/` **runtime** dir (`stage/`, `auditions/`,
   `declared/`) exists in the source tree at all (`rices/**` is versioned
   score, legitimately read at eval).
-- `rice-shape` — the rices's shape: no stray `.nix` outside a song's
-  `rice.nix`/`_widgets/`, no `../` path literal in a song's `.nix` text, every
-  song carrying `rice.nix` and `theme.json`
-  (host-agnostic song discipline; CONTRACTS.md §5).
+- `rice-shape` — the rices's shape: no stray `.nix` outside a rice's
+  `rice.nix`/`_widgets/`, no `../` path literal in a rice's `.nix` text, every
+  rice carrying `rice.nix` and `theme.json`
+  (host-agnostic rice discipline; CONTRACTS.md §5).
 - `phantom-commands` — every backticked `aoide …`/`strillix …` spelling in
   `AGENTS.md`, `docs/agent/*.md`, `docs/INSTALL.md` and the wiki
   (`docs/Aoide-Wiki/**/*.md`, minus the ingest ledger, the `references/`
@@ -376,7 +376,7 @@ See `tests/README.md` for why Rust's own tests do NOT live here.
 - `vm-boot` — headless NixOS boot of the whole stack (`tests/vm-boot.nix`).
 - `vm-lock-greeter` — the login screen and the screen lock on a graphical VM
   (`tests/vm-lock-greeter.nix`): the Quickshell greeter and LockHost for a
-  song that ships faces, ly and hyprlock for one that does not, the floors
+  rice that ships faces, ly and hyprlock for one that does not, the floors
   under faces that fail, and hyprlock when the lock's PAM service is gone.
 - `portability` — `packages.aoide-static`'s `aoide`/`aoided` carry zero
   `PT_INTERP` segments, bake in no real `/nix/store/<hash>-…` path, and run

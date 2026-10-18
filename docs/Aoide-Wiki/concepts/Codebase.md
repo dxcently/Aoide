@@ -23,7 +23,7 @@ never touch it. Inputs: `nixpkgs` (unstable), `home-manager`, `stylix`,
 Outputs, all tolerant of empty layers so eval stays robust:
 
 - `nixosConfigurations.yomi-strix` — assembled by the constructor,
-  `lib/aoideos.nix` over habit's composition (`inputs.habit`), from the host's own record.
+  `lib/strillix.nix` over habit's composition (`inputs.habit`), from the host's own record.
 - `packages` — **auto-discovered** by `lib/pkgs.nix` from `pkgs/<name>/default.nix`
   (`callPackage`, `_`-shelving); currently `{aoide, chatgpt-linux, eidolon,
   hyprglass, iconify-data, kimi-code, strillix-shell, strillix-rices, melete,
@@ -35,7 +35,7 @@ Outputs, all tolerant of empty layers so eval stays robust:
   `nixosModules.<name>` per catalogue entry plus `nucleus` (the module that
   closes over Aoide's own inputs), the base package overlay, the constructor
   files (`lib.composition`, `lib.theme`, `lib.rices`, `lib.catalogue`),
-  Aoide's own rices directory for a host that performs Aoide's songs, and the
+  Aoide's own rices directory for a host that performs Aoide's rices, and the
   derived `aoide.*` option list `strx onboard` reads.
 - `checks` — the contractual coupling discipline from `lib/checks.nix`
   (`surface-ownership`, `rice-runtime-untracked`, `rice-shape`, `fmt`,
@@ -76,11 +76,11 @@ from a single new folder. Its `overlay` form guards each name against
 accidentally masking a nixpkgs attribute; a deliberate shadow is listed in
 `intentionalShadows`, and the walker yields a name it supplies only to the
 overlays listed in `intentionalOverrides` (the strillix lane replacing
-`strillix-rices` with a host's built-in songs is the one case today); a
+`strillix-rices` with a host's built-in rices is the one case today); a
 non-standard build arg goes through a documented
 `//` escape hatch (kept in this file to preserve the single source).
 
-**`lib/aoideos.nix`** is the host constructor: `hostNames` is discovered from
+**`lib/strillix.nix`** is the host constructor: `hostNames` is discovered from
 `hosts/` (every immediate child with a `default.nix`, minus the `_`-prefixed
 templates), and `mkHost name` assembles that host's outputs — its
 `nixosSystem`, its `inventory`, and the module values a consumer may want.
@@ -90,24 +90,24 @@ Aoide's own flake inputs once, in `nucleusModule` (the same value exported as
 **discovered-packages overlay** from `lib/pkgs.nix` — the *same* source the
 flake's `packages` output and the `pkg-<name>` checks read, so paint lanes
 reference `pkgs.aoide` / `pkgs.strillix-shell` … without drift — and wires the two
-song hooks (`selectionModules` puts `habit.rice.declared`/`habit.rice.available` on the host
-module; `extraModulesFor` turns the selection into the built-in songs'
+rice hooks (`selectionModules` puts `habit.rice.declared`/`habit.rice.available` on the host
+module; `extraModulesFor` turns the selection into the built-in rices'
 `rice.nix` files and the `aoide.rice`/`aoide.rices.builtIn` facts). Each
-song's `rice.nix` is a body: habit imports the performed song's body and no
-other, so a host performs the one song it declares and builds in the ones it
-lists (see [[Song-Vocabulary#Replay — any song, any host]]).
+rice's `rice.nix` is a body: habit imports the performed rice's body and no
+other, so a host performs the one rice it declares and builds in the ones it
+lists (see [[Rice-Vocabulary#Replay — any rice, any host]]).
 
 **`lib/rices.nix`** is the rices generator and its discovery (the one
 generator two callers share: the strillix lane's build-time `manifest.json`/
 `registry.json` derivation, and the `ricesManifest` flake output
 [[Self-Ricing|`rice stage`]] shells out to via `nix eval --json` for its
 hot-sync half). The same generator also feeds `pkgs/strillix-rices`, which
-bakes the built-in songs plus a prebaked
+bakes the built-in rices plus a prebaked
 `manifest.json`/`registry.json`/`builtin.json` into `share/strillix/rices` — the shipped
 templates a repo-less host's registry/manifest regen reads nix-free
 (`CONTRACTS.md` §4). **`lib/theme.nix`** resolves `aoide.theme.override.*`, the
-host-set venue-recolour tier (`CONTRACTS.md` §1). **`lib/song.nix`** builds
-each song's widget records from its `_widgets/<slot>.nix` functions — the nix
+host-set venue-recolour tier (`CONTRACTS.md` §1). **`lib/rice.nix`** builds
+each rice's widget records from its `_widgets/<slot>.nix` functions — the nix
 analogue of `WidgetSlot.qml` — and `lib/options.nix` is the `aoideOptions`
 walk `strx onboard` reads.
 
@@ -116,16 +116,16 @@ discipline, written to throw legibly at eval time on a violation:
 
 - **`surface-ownership`** — every declared `aoide.surfaces.<name>` names a
   non-empty owner (a paint lane asserting it is the sole owner of a render surface).
-- **`rice-runtime-untracked`** — no `song/` runtime dir (`stage/`,
+- **`rice-runtime-untracked`** — no `rice/` runtime dir (`stage/`,
   `auditions/`, `declared/`) exists in the source tree at all, so the nix build
   can never come to depend on ephemeral runtime state. `stage/` stays non-load-
   bearing structurally. This boundary is about runtime dirs only; committed
   `rices/**` is versioned score and is legitimately read at eval.
 - **`rice-shape`** — the assertions on the committed rices: each `rice.nix`
-  is a body of the aggregation shape, every song carries `rice.nix`,
+  is a body of the aggregation shape, every rice carries `rice.nix`,
   `theme.json` and `hyprland.conf`, `hyprland.conf` holds no theme-owned key,
-  no stray `.nix` sits outside a song's `rice.nix`/`_widgets/`, and no `../` path
-  literal appears in a song's `.nix` text (the host-agnostic song discipline,
+  no stray `.nix` sits outside a rice's `rice.nix`/`_widgets/`, and no `../` path
+  literal appears in a rice's `.nix` text (the host-agnostic rice discipline,
   `CONTRACTS.md §5`).
 
 Alongside these, `flake.nix` auto-generates a `pkg-<name>` check per discovered
@@ -149,7 +149,7 @@ linger active with the `aoided` user unit finishing
 seeded at `schemaVersion` 0; and a `project add → graph` round-trip landing
 `graph.json` (every stage mutation restages it automatically, so there is no
 separate emit step to round-trip through). The test node trims the stylix,
-quickshell and strillix lanes and names no song
+quickshell and strillix lanes and names no rice
 (headless closure cost; the compositor stays for the greeter). The script runs in
 about 16 s of wall clock: `nix build .#checks.x86_64-linux.vm-boot -L`. It
 also confirmed in-VM that the unit's `AOIDE_STAGE_DIR` and the binary's
@@ -179,20 +179,20 @@ no behaviour, so an empty config evaluates. The surface:
   regen. `aoide.hostConfig` (default `<checkout>/hosts/<hostName>/default.nix`,
   exported as `AOIDE_HOST_CONFIG`) — the host file whose one
   `habit.rice.declared` line `rice declare --host` rewrites.
-- `aoide.rice` (`nullOr str`, default `null`) — which song this host performs.
-  Null performs no song: the paint lanes read the null and deploy nothing (no
+- `aoide.rice` (`nullOr str`, default `null`) — which rice this host performs.
+  Null performs no rice: the paint lanes read the null and deploy nothing (no
   QML tree, no shell service). Set once in `hosts/<host>/default.nix` (and
   `habit.rice.available` with it, for what the host keeps built in); the
-  performed song's body is the only one imported. See [[Song-Vocabulary#Replay — any song, any host]].
+  performed rice's body is the only one imported. See [[Rice-Vocabulary#Replay — any rice, any host]].
 - `aoide.theme` — the v0 theme schema: closed `palette.{bg,fg,accent,urgent}`
   (base16, permissive hex type) + optional component tiers `bar.*` / `notif.*` /
   `window.*` (each `nullOr` hex, `null` → palette), the additive-optional tiers
   (`base16`, `geometry.*`, `fonts.monospace`, `wallpaper`), and an `override.*`
   venue tier (host-set only, [[theme|resolved by `lib/theme.nix`]]).
 - `aoide.layout` — the v1 layout schema: which widget/surface types
-  a song brings into existence. `aoide.theme`, `aoide.layout` and
+  a rice brings into existence. `aoide.theme`, `aoide.layout` and
   `aoide.surfaces` are the whole paint-lane read set, with the core scalars and
-  the song selection root `AGENTS.md` house rule 5 enumerates — no module reads
+  the rice selection root `AGENTS.md` house rule 5 enumerates — no module reads
   another module's options.
 - `aoide.surfaces.<name>.owner` — the surface-ownership registry.
 - `aoide.mcp.enable`, `aoide.a2a.enable`, `aoide.usage.enable` — each off by
@@ -244,10 +244,10 @@ switched on by selecting their dendrite (each sets `aoide.enable`):
 | `aoide-obsidian-register` | `dendrites/obsidian.nix` | oneshot; registers a window class with shellbridge |
 
 `systemd.user.tmpfiles.rules` create `${config.aoide.root}/log` (0700),
-`${config.aoide.root}/song/stage` (0755, rice staging),
+`${config.aoide.root}/rice/stage` (0755, rice staging),
 `${config.aoide.root}/state` (0700), and `${config.aoide.root}/state/stage`
 (0755, conducting state) at runtime — with the default root, `~/.aoide/log`,
-`~/.aoide/song/stage`, `~/.aoide/state`, `~/.aoide/state/stage`;
+`~/.aoide/rice/stage`, `~/.aoide/state`, `~/.aoide/state/stage`;
 systemd-tmpfiles deduplicates the shared rules declared in both
 aoided and shellbridge.
 
@@ -272,26 +272,26 @@ Live-side state, all under the runtime root (`$AOIDE_ROOT`, default
   it.
 - **Stage files** split by owner into two trees (command-defrag lane S1):
   `/stage/` holds rice/paint staging — `theme.json` (resolved theme
-  colours, written by [[theme]]'s `rice stage`/`cover set`/other emitters at
+  colours, written by [[theme]]'s `rice stage`/`wallpaper set`/other emitters at
   rehearsal — both refuse under `rice mode declarative`, see
   [[Self-Ricing#Staging vs Declarative Mode]] — and reseeded from the active
-  song's committed
-  `rices/<song>/theme.json` on every activation by
+  rice's committed
+  `rices/<rice>/theme.json` on every activation by
   `home.activation.aoideSeedStage` in `modules/dendrites/strillix/runtime.nix`
-  — a write-temp-then-rename script that injects the same `"song"` field
+  — a write-temp-then-rename script that injects the same `"rice"` field
   `rice stage` writes, so a host that boots without ever staging still
   carries a correct live stage twin from the baked default; when `mode.json`
-  names a staged or drafted song, `strx reload`, run by the lane's
+  names a staged or drafted rice, `strx reload`, run by the lane's
   `aoide-rice-reload` unit at every login and after every switch, re-stages it
   over that seed), `mode.json`
   (the staging/declarative mode marker — absent reads as `declarative`), and
   `grimoire.json` (QML-only writer). That same seed also publishes the
-  DECLARED twin at `/declared/theme.json` — the declared song's
+  DECLARED twin at `/declared/theme.json` — the declared rice's
   committed notes with the venue recolour applied, one `jq` run to two
   destinations (`CONTRACTS.md §4`). It exists because the live stage is
   rewritten by the runtime writers and so cannot itself state what the venue
-  declared: `rice mode declarative` re-pins from it, and its `"song"` field
-  names the declared song. The staging writers derive every song from the
+  declared: `rice mode declarative` re-pins from it, and its `"rice"` field
+  names the declared rice. The staging writers derive every rice from the
   runtime rices and, for the declared one, lay the seed's
   `/declared/venue.json` (the slots the venue recolours and the geometry the host
   sets, `{}` with neither) over it. `state/stage/` holds
@@ -301,12 +301,12 @@ Live-side state, all under the runtime root (`$AOIDE_ROOT`, default
   `hooks.json` (live Claude Code hook phases), `projects.json` (the project
   registry, kept by `aoide project add/remove/list`), `graph.json` (the
   resolved project/session DAG, restaged automatically by every graph
-  mutation for Quickshell — see [[Session-Graph]]), `herald.json` (the
-  notification ledger the Quickshell herald draws from — the shellbridge
+  mutation for Quickshell — see [[Session-Graph]]), `notifications.json` (the
+  notification ledger the Quickshell notifications draws from — the shellbridge
   daemon is the single writer), and `pending.json` (the held-injection queue
   `send`/the A2A door write when their gate doesn't clear immediate
-  delivery, resolved by `session pending list/approve/deny`). `cover.json`
-  (the wallpaper note, written by `cover set`) is rice staging and stays
+  delivery, resolved by `session pending list/approve/deny`). `wallpaper.json`
+  (the wallpaper note, written by `wallpaper set`) is rice staging and stays
   under `/stage/`. Each has a v0 shape in `CONTRACTS.md §4`; writes are
   atomic (write-temp-then-rename), and the graph rewriters round-trip unknown
   fields so concurrent writers never lose data.
@@ -320,7 +320,7 @@ Live-side state, all under the runtime root (`$AOIDE_ROOT`, default
   precedence) — the documented CLI ↔ unit seam,
   pinned by a serialized precedence test. On first run the binaries run a
   one-shot root migration (`fs::migrate_root_once()`) moving pre-existing
-  `~/Aoide/{song/stage,state,log}` into the root, each piece gated on its
+  `~/Aoide/{rice/stage,state,log}` into the root, each piece gated on its
   own override being unset. The first no-override resolution
   of `conducting_stage_dir()` runs a one-shot migration moving any of the
   six conducting files still sitting at the old `/stage/` location into
@@ -331,7 +331,7 @@ Live-side state, all under the runtime root (`$AOIDE_ROOT`, default
 
 - **`CONTRACTS.md`** — §0 design philosophy plus the versioned contracts §1–8:
   note schema, dendrite shape, `aoide schema --json` output, stage-file
-  formats, song shape, A2A door, node federation, screen capture + pointer
+  formats, rice shape, A2A door, node federation, screen capture + pointer
   synthesis. The `checks` fail a merge that breaks one; bumping a version
   needs a playbook migration.
 - **`AGENTS.md`** — the tier-0 agent entry: the core-vs-paint boundary, the
@@ -399,7 +399,7 @@ tests across the crate (above). The QML tree's non-stub surfaces: the
 `ConductorGadget.qml`, `TerminalsGadget.qml`, `MetersGadget.qml`,
 `PowerVitalsGadget.qml`), `AoideLauncher.qml` (the launcher), and
 `AoideNotifications.qml` (the notification daemon — per-card body from the
-song's `widgets/notifications.qml`) —
+rice's `widgets/notifications.qml`) —
 across the strillix lane's nine `owner = "quickshell"` surfaces (bar, notifications,
 launcher, osd, lockscreen, greeter, wallpaper, agentWidgets, sessionGraph; see
 [[Full-Architecture]]). `sessionGraph` is declared but has no QML body today
@@ -417,8 +417,8 @@ since. `hyprland` is the host-invariant
 half of the compositor: keybinds, input devices, tiling layout, misc, and
 behavioural window rules, split out so a re-rice cannot disturb them (the
 compositor lane keeps the theme-derived look and the session plumbing). The `nvf` flake input threads to home-manager via
-`extraSpecialArgs`; the cover-art token (`aoide.theme.wallpaper` → the shared
-`/covers/`) backs the shipped wallpapers; Lekton Nerd Font Mono is the stylix
+`extraSpecialArgs`; the wallpaper-art token (`aoide.theme.wallpaper` → the shared
+`/wallpapers/`) backs the shipped wallpapers; Lekton Nerd Font Mono is the stylix
 face. `neovim`'s own `vim.extraPackages` (nvf) also carries `pkgs.rustc`/
 `pkgs.cargo`, scoped to nvim's wrapped PATH only — its built-in rust-analyzer
 `root_dir` detection shells out to `rustc` directly and needs it, while the rest
@@ -437,7 +437,7 @@ the `rice draft` group are **real** — `rice stage` stages
 `/stage/theme.json` for Quickshell hot-reload, applies geometry,
 borders and the hyprglass switch over `hyprctl`, recolours kitty through
 `stage/terminal-colors.conf` and kitty's control socket, and dresses the lock
-screen of a song that ships a lock picture through `stage/hyprlock.conf`. There is
+screen of a rice that ships a lock picture through `stage/hyprlock.conf`. There is
 no `rice gen` — a speculative prompt/wallpaper generator that was cut
 outright rather than left as a stub with no design behind it.)
 

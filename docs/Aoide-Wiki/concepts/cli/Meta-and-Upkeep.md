@@ -114,10 +114,10 @@ aoide onboard [--harness <a,b,...>] [--yes] [--out <path>] [--json]
   outside a checkout the run fails exit 1, `reason: "no-checkout"`. PATH
   probes for each known harness (`claude`, `kimi`, `pi` via
   `aoide_protocol::agents`) and for the strillix binary (`rice_bin()`:
-  `$AOIDE_RICE_BIN`, a sibling binary, then PATH).
+  `$STRILLIX_BIN`, a sibling binary, then PATH).
 - **Writes:** registers the clone by dispatching the already-registered
   `project add aoide <checkout>` handler (stage-file effects per
-  [[Graph-and-Conduct]]); links `~/song` → `<checkout>/song` when nothing is
+  [[Graph-and-Conduct]]); links `~/rice` → `<checkout>/rice` when nothing is
   there (a correct existing link is a no-op; a wrong-target symlink or a
   non-symlink is left alone with a note, never clobbered); seeds
   `rices/preferences.md` when absent (created once, never
@@ -154,7 +154,7 @@ strx onboard [--out <path>] [--yes] [--json]
   user imports, listing every `aoide.*` module option commented out at its
   current default with a one-line description each, plus a commented
   env-knob appendix (`AOIDE_CONDUCT_AUTOGATE`, `AOIDE_TERMINAL`,
-  `AOIDE_CORE_BIN`/`AOIDE_RICE_BIN`, `AOIDE_DISCOVERY_ADVERTISE`). Re-running
+  `AOIDE_CORE_BIN`/`STRILLIX_BIN`, `AOIDE_DISCOVERY_ADVERTISE`). Re-running
   over a file it generated warns and backs the old file up to `<out>.bak`
   (an interactive confirm unless `--yes`); a file it did not generate is
   refused, never overwritten.
@@ -219,10 +219,10 @@ strx reload [--json]
   (`pkgs/aoide/crates/strillix-rice/src/commands/reload.rs`).
   - `declarative` — the shell reload only; nothing is unlocked, so nothing is
     synced or snapshotted.
-  - `staging` — `strx rice stage <song>`'s own body for the marker's `song`:
-    re-derives `stage/theme.json`, the cover and the terminal colours, applies
-    the hyprctl keywords, and syncs the song's widget bodies, `manifest.json`
-    and the widget-type registry into `run/qml/songs/`.
+  - `staging` — `strx rice stage <rice>`'s own body for the marker's `rice`:
+    re-derives `stage/theme.json`, the wallpaper and the terminal colours, applies
+    the hyprctl keywords, and syncs the rice's widget bodies, `manifest.json`
+    and the widget-type registry into `run/qml/rices/`.
   - `draft` — the same, except that `stage/theme.json` is the draft's own
     content through its routing symlink and is never re-derived; the sync
     applies hyprctl and the terminal colours off the staged content and syncs
@@ -236,10 +236,10 @@ strx reload [--json]
     refused before anything is written.
 - **Writes:** nothing in `declarative`. In `staging` and `draft`, after the
   sync, a take of the now-synced stage and widget bodies, deduped against the
-  head (`rices/<song>/takes/`, or `rices/<song>/drafts/<name>/takes/`
+  head (`rices/<rice>/takes/`, or `rices/<rice>/drafts/<name>/takes/`
   in a draft), so an unchanged reload mints nothing and every iteration is
   reversible with `strx rice back`. The sync runs before the snapshot: its
-  write is a pure function of the song, so the snapshot settles into a stable
+  write is a pure function of the rice, so the snapshot settles into a stable
   value and dedupes. `changed` lists the stage files, terminal colours, widget
   bodies, manifest, registry and take written, and in a draft re-route the
   link and `stage/mode.json`.
@@ -256,20 +256,20 @@ strx reload [--json]
   (printing `Not ready to accept queries yet.`), and `reload()` is a void
   function, so a landed call prints nothing — empty stdout at exit 0 is the
   only real success. `--json` data: `declarative` gives `{status: "reloaded"
-  | "not-running" | "failed"}`; `staging`/`draft` give `{mode, song, draft,
+  | "not-running" | "failed"}`; `staging`/`draft` give `{mode, rice, draft,
   take, sync, reload}` where `take` is `{take: N, deduped: false}`,
   `{take: null, deduped: true}` or `{take: null, takeError}`, `sync` is the
   sync's own data, and `reload` is `{status, message}`. The human line reads
-  "reloaded <song> (<mode>) — " and then the shell reload's message.
+  "reloaded <rice> (<mode>) — " and then the shell reload's message.
 - **Notes:** not gated. The shell reload is best-effort: `not-running`
   (service absent: no IPC attempted) and `failed` are reported facts, never
-  command failures. A sync that refuses or fails (no `song` in the marker,
-  an unreadable stage file, a song this system cannot stage) ends the
+  command failures. A sync that refuses or fails (no `rice` in the marker,
+  an unreadable stage file, a rice this system cannot stage) ends the
   command with exit 1 before any snapshot or shell reload. The vanished-draft
   refusal is a taught one: it names the draft and the missing path, and its
   fix is `strx rice mode stage`, which leaves draft mode. `strx reload` is
-  also what brings a staged or drafted song back after a login or a switch:
-  the activation lays the declared song over the runtime tree, and the strillix
+  also what brings a staged or drafted rice back after a login or a switch:
+  the activation lays the declared rice over the runtime tree, and the strillix
   lane runs this command from its `aoide-rice-reload` unit. It is the reload
   lane for dynamically-loaded widget QML (`Qt.createComponent`) and
   lane-owned QML that Quickshell's own file watcher never tracks
@@ -307,9 +307,9 @@ strx quickshell healthcheck [--json]
   `systemctl`/`journalctl`/`hyprctl` call reads as `healthy` (nothing
   confirmed), never as a command failure. The two signals are asked in
   order: a live `hyprctl layers -j` reading is compared against the active
-  song's declared surfaces (`run/qml/songs/surfaces.json`, per-output where
+  rice's declared surfaces (`run/qml/rices/surfaces.json`, per-output where
   declared `perMonitor`; a host whose declaration is absent or empty — every
-  song that declares nothing publishes an empty one — falls back to "zero
+  rice that declares nothing publishes an empty one — falls back to "zero
   `aoide-*` surfaces anywhere"), and a shortfall decides `healthy` on
   its own; the journal's placeholder-screen line (scoped to the unit's own
   `ActiveEnterTimestamp`, so a recovered occurrence can never re-trigger)

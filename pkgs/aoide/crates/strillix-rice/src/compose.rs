@@ -13,11 +13,11 @@ use serde_json::Value;
 
 use crate::theme::schema::{POLARITY_DEFAULT, POLARITY_VALUES};
 
-/// A valid `rice compose` song name: `^[a-z0-9][a-z0-9-]*$`. This one check
+/// A valid `rice compose` rice name: `^[a-z0-9][a-z0-9-]*$`. This one check
 /// also rejects path traversal (`..`, `/`) and case/underscore variance by
 /// construction — nothing outside `[a-z0-9-]` is accepted, and the first
 /// character can never be a `-`.
-pub fn valid_song_name(name: &str) -> bool {
+pub fn valid_rice_name(name: &str) -> bool {
     let mut chars = name.chars();
     let first_ok = matches!(chars.next(), Some(c) if c.is_ascii_lowercase() || c.is_ascii_digit());
     first_ok && chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
@@ -68,9 +68,9 @@ pub const GEOMETRY_KEYS: &[&str] = &[
 /// The window (border-colour) component tier's fixed key set.
 pub const WINDOW_KEYS: &[&str] = &["border", "borderInactive"];
 
-/// The ten component slots a song's body selects, each filled by its `strillix`
-/// provider (CONTRACTS.md §5). A scaffolded song names all ten, as every
-/// committed one does: a song that paints a desktop paints all of it.
+/// The ten component slots a rice's body selects, each filled by its `strillix`
+/// provider (CONTRACTS.md §5). A scaffolded rice names all ten, as every
+/// committed one does: a rice that paints a desktop paints all of it.
 pub const STRILLIX_SLOTS: &[&str] = &[
     "bar",
     "launcher",
@@ -84,10 +84,10 @@ pub const STRILLIX_SLOTS: &[&str] = &[
     "greeter",
 ];
 
-/// Render one `rice.nix` for `rice compose`: a song body (CONTRACTS.md §5,
-/// song shape v1) — the `system` half selects the ten `strillix` providers and
+/// Render one `rice.nix` for `rice compose`: a rice body (CONTRACTS.md §5,
+/// rice shape v1) — the `system` half selects the ten `strillix` providers and
 /// sets the theme copied from `notes` (palette, polarity, window, geometry),
-/// the `home` half selects the `strillix` renderer and names this song's
+/// the `home` half selects the `strillix` renderer and names this rice's
 /// `hyprland.conf`. `from` is named in each block's comment, so a reader
 /// tells an inherited value from a null fill template.
 pub fn render_rice_nix(name: &str, from: &str, notes: &Value) -> String {
@@ -104,7 +104,7 @@ pub fn render_rice_nix(name: &str, from: &str, notes: &Value) -> String {
     // The polarity field (CONTRACTS.md §1): a validated top-level scalar beside
     // `palette` — "a palette brings its polarity". Copied from the source
     // document when it carries one, and the option's own default otherwise, so
-    // a composed song declares its ground explicitly in the same key as its
+    // a composed rice declares its ground explicitly in the same key as its
     // palette rather than inheriting whatever the default becomes later.
     let declared = notes
         .get("polarity")
@@ -112,7 +112,7 @@ pub fn render_rice_nix(name: &str, from: &str, notes: &Value) -> String {
         .filter(|s| POLARITY_VALUES.contains(s));
     let polarity = declared.unwrap_or(POLARITY_DEFAULT);
     let polarity_comment = if declared.is_some() {
-        format!("inherited from song \"{from}\"")
+        format!("inherited from rice \"{from}\"")
     } else {
         format!(
             "\"{from}\" carries no polarity — the default ({POLARITY_DEFAULT}); \
@@ -123,7 +123,7 @@ pub fn render_rice_nix(name: &str, from: &str, notes: &Value) -> String {
     let window_obj = notes.get("window").and_then(Value::as_object);
     let window_lines = nix_fixed_fields(window_obj, WINDOW_KEYS, "        ");
     let window_comment = if window_obj.is_some() {
-        format!("inherited from song \"{from}\"")
+        format!("inherited from rice \"{from}\"")
     } else {
         format!("\"{from}\" set no window-colour overrides — null falls back to palette.accent/bg")
     };
@@ -131,7 +131,7 @@ pub fn render_rice_nix(name: &str, from: &str, notes: &Value) -> String {
     let geometry_obj = notes.get("geometry").and_then(Value::as_object);
     let geometry_lines = nix_fixed_fields(geometry_obj, GEOMETRY_KEYS, "        ");
     let geometry_comment = if geometry_obj.is_some() {
-        format!("inherited from song \"{from}\"")
+        format!("inherited from rice \"{from}\"")
     } else {
         format!(
             "fill template — \"{from}\" carries no geometry tier; null leaves the \
@@ -146,13 +146,13 @@ pub fn render_rice_nix(name: &str, from: &str, notes: &Value) -> String {
 
     let mut s = String::new();
     s.push_str(&format!(
-        "# rices/{name}/rice.nix — scaffolded via `aoide rice compose` from song \"{from}\".\n"
+        "# rices/{name}/rice.nix — scaffolded via `aoide rice compose` from rice \"{from}\".\n"
     ));
     s.push_str("#\n");
-    s.push_str("# A body (CONTRACTS.md §5): habit reads it only when this song is performed\n");
+    s.push_str("# A body (CONTRACTS.md §5): habit reads it only when this rice is performed\n");
     s.push_str("# or built in. The `system` half selects the paint; the `home` half the renderer.\n");
-    s.push_str("# HOST-AGNOSTIC DISCIPLINE (CONTRACTS.md §5): the song sets ONLY aoide.theme\n");
-    s.push_str("# and aoide.layout; its literal values are no reads of song/ or of config.\n");
+    s.push_str("# HOST-AGNOSTIC DISCIPLINE (CONTRACTS.md §5): the rice sets ONLY aoide.theme\n");
+    s.push_str("# and aoide.layout; its literal values are no reads of rice/ or of config.\n");
     s.push_str("{\n");
     s.push_str("  system = {\n");
     s.push_str("    providers = {\n");
@@ -187,12 +187,12 @@ pub fn render_rice_nix(name: &str, from: &str, notes: &Value) -> String {
     s
 }
 
-/// The `hyprland.conf` a scaffolded song starts from when `--from` ships none:
+/// The `hyprland.conf` a scaffolded rice starts from when `--from` ships none:
 /// a header and no keys (`rice.hyprland.conf`, CONTRACTS.md §5). The binds stay
 /// in `behaviour.nix`, so an empty file is the honest start.
 pub fn render_hyprland_conf(name: &str) -> String {
     format!(
-        "# rices/{name}/hyprland.conf — the song's own binds, unbinds, layout and animations. No keys yet: behaviour.nix keeps the binds.\n"
+        "# rices/{name}/hyprland.conf — the rice's own binds, unbinds, layout and animations. No keys yet: behaviour.nix keeps the binds.\n"
     )
 }
 
@@ -226,7 +226,7 @@ pub fn render_intent_md(name: &str, from: &str) -> String {
          \n\
          - Slot catalog (which slots a host wires today, what each expects): \
            `{STRILLIX_SHELL_SRC}/qml/slots.md`\n\
-         - Per-song widget contract: `CONTRACTS.md` §5, \"Per-song flavor widgets\"\n\
+         - Per-rice widget contract: `CONTRACTS.md` §5, \"Per-rice flavor widgets\"\n\
          - Rices playbook: `rices/update-playbook.md`\n\
          - Drop a `widgets/<slot>.qml` here to dress a slot — any file under `widgets/` \
            becomes a slot named for its basename; nothing renders until a host surface \
@@ -260,12 +260,12 @@ mod tests {
     }
 
     #[test]
-    fn valid_song_name_accepts_the_expected_shape() {
-        for good in ["moonlight", "dusk2", "a", "song-two-3"] {
-            assert!(valid_song_name(good), "`{good}` should be valid");
+    fn valid_rice_name_accepts_the_expected_shape() {
+        for good in ["moonlight", "dusk2", "a", "rice-two-3"] {
+            assert!(valid_rice_name(good), "`{good}` should be valid");
         }
         for bad in ["Dusk", "dusk_two", "-dusk", "dusk/two", "..", ""] {
-            assert!(!valid_song_name(bad), "`{bad}` should be invalid");
+            assert!(!valid_rice_name(bad), "`{bad}` should be invalid");
         }
     }
 }

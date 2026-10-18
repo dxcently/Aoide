@@ -1,6 +1,6 @@
 import QtQuick
 
-// A picture painted the way the desktop paints the cover, shrunk to this item: cropped to fill, or,
+// A picture painted the way the desktop paints the wallpaper, shrunk to this item: cropped to fill, or,
 // when `tile`, the pattern repeated at the size its tiles have on a `screenWidth`-wide screen (1:1 there).
 Item {
     id: art

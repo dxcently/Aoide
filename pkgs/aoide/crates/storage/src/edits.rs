@@ -11,12 +11,12 @@
 //! validation (a `project` string here is whatever the caller already
 //! resolved via `graph project list` — validating that it names a real,
 //! registered project is one layer up, same posture `history.rs` leaves
-//! song/draft-name checks to `compose::valid_song_name`).
+//! rice/draft-name checks to `compose::valid_rice_name`).
 //!
 //! **One file for every project, not one per project** (plan §2.2): this
 //! sidesteps the unvalidated-project-name-as-path-segment hazard a
 //! per-project directory would reopen (`records.rs`'s `Project.name` has no
-//! `valid_song_name` equivalent), and filtering by `project` on read is a
+//! `valid_rice_name` equivalent), and filtering by `project` on read is a
 //! cold-path predicate, not a directory split.
 //!
 //! **Every fold below is pure and IO-free** — [`by_path`], [`session_plan`],

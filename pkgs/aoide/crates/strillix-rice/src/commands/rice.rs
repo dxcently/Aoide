@@ -18,7 +18,7 @@ pub fn register(r: &mut Registry) {
     r.insert(cmd!(
         path: ["rice", "lint"],
         summary: "Validate a rice against the note schema (native theme engine).",
-        args: [arg!("name", "string", false, "Rice/song name to lint; defaults to the staged rice.")],
+        args: [arg!("name", "string", false, "Rice/rice name to lint; defaults to the staged rice.")],
         flags: [],
         gated: false,
         implemented: true,
@@ -27,7 +27,7 @@ pub fn register(r: &mut Registry) {
     ));
     r.insert(cmd!(
         path: ["rice", "list"],
-        summary: "List the runtime rices's songs — what `rice mode stage <name>` switches to — with the rice mode, the live and last-staged song and the declared one.",
+        summary: "List the runtime rices's rices — what `rice mode stage <name>` switches to — with the rice mode, the live and last-staged rice and the declared one.",
         args: [],
         flags: [],
         gated: false,
@@ -37,8 +37,8 @@ pub fn register(r: &mut Registry) {
     ));
     r.insert(cmd!(
         path: ["rice", "stage"],
-        summary: "Hot-load a rice live — ALWAYS the declared committed content, ignoring any saved draft (stage/theme.json hot-reload + best-effort hyprctl geometry/border/glass apply + stage/terminal-colors.conf pushed to open kitty windows + stage/hyprlock.conf, the lock screen's dress); nothing committed. No <name>: re-stages the currently active song's declared content, overriding whatever draft `rice mode stage` may have auto-loaded. Refuses while `rice mode declarative` is locked.",
-        args: [arg!("name", "string", false, "Rice/song name to stage; defaults to the currently active song's declared content.")],
+        summary: "Hot-load a rice live — ALWAYS the declared committed content, ignoring any saved draft (stage/theme.json hot-reload + best-effort hyprctl geometry/border/glass apply + stage/terminal-colors.conf pushed to open kitty windows + stage/hyprlock.conf, the lock screen's dress); nothing committed. No <name>: re-stages the currently active rice's declared content, overriding whatever draft `rice mode stage` may have auto-loaded. Refuses while `rice mode declarative` is locked.",
+        args: [arg!("name", "string", false, "Rice/rice name to stage; defaults to the currently active rice's declared content.")],
         flags: [],
         gated: false,
         implemented: true,
@@ -47,11 +47,11 @@ pub fn register(r: &mut Registry) {
     ));
     r.insert(cmd!(
         path: ["rice", "compose"],
-        summary: "Scaffold a new song under rices/<name>/ by copying --from's notes (rice.nix, theme.json, design/intent.md, widgets/).",
-        args: [arg!("name", "string", true, "New song name: ^[a-z0-9][a-z0-9-]*$ (lowercase, digits, hyphens).")],
+        summary: "Scaffold a new rice under rices/<name>/ by copying --from's notes (rice.nix, theme.json, design/intent.md, widgets/).",
+        args: [arg!("name", "string", true, "New rice name: ^[a-z0-9][a-z0-9-]*$ (lowercase, digits, hyphens).")],
         flags: [
-            flag!("from", "string", "Source song to copy notes from (default \"sonata\")."),
-            flag!("force", "bool", "Overwrite the song's scaffolded files if it already exists."),
+            flag!("from", "string", "Source rice to copy notes from (default \"sonata\")."),
+            flag!("force", "bool", "Overwrite the rice's scaffolded files if it already exists."),
         ],
         gated: false,
         implemented: true,
@@ -62,14 +62,14 @@ pub fn register(r: &mut Registry) {
 }
 
 fn handle_rice_list(_inv: &Invocation) -> Outcome {
-    let mut songs: Vec<Value> = std::fs::read_dir(shellbridge::rices_root())
+    let mut rices: Vec<Value> = std::fs::read_dir(shellbridge::rices_root())
         .into_iter()
         .flatten()
         .flatten()
         .filter(|e| e.path().is_dir())
         .filter_map(|e| e.file_name().into_string().ok())
         .filter(|name| {
-            crate::compose::valid_song_name(name) && shellbridge::rice_notes(name).is_file()
+            crate::compose::valid_rice_name(name) && shellbridge::rice_notes(name).is_file()
         })
         .map(|name| {
             let parsed = std::fs::read_to_string(shellbridge::rice_notes(&name))
@@ -83,15 +83,15 @@ fn handle_rice_list(_inv: &Invocation) -> Outcome {
             }
         })
         .collect();
-    songs.sort_by(|a, b| a["name"].as_str().cmp(&b["name"].as_str()));
+    rices.sort_by(|a, b| a["name"].as_str().cmp(&b["name"].as_str()));
     let m = aoide_storage::mode::load_mode_marker();
-    Outcome::ok("rice.list", format!("{} song(s)", songs.len())).with_data(json!({
+    Outcome::ok("rice.list", format!("{} rice(s)", rices.len())).with_data(json!({
         "mode": super::mode::mode_word(m.mode),
-        "song": m.song,
+        "rice": m.rice,
         "draft": m.draft,
-        "stagingSong": m.staging_song,
-        "declared": declared_song(),
-        "songs": songs,
+        "stagingRice": m.staging_rice,
+        "declared": declared_rice(),
+        "rices": rices,
     }))
 }
 
@@ -100,8 +100,8 @@ fn handle_rice_list(_inv: &Invocation) -> Outcome {
 /// * **no arg** — the staged notes (`<stage>/theme.json`) if present, else
 ///   a usage error (exit 2). We never lint with no file.
 /// * **an arg that names an existing file** — taken as a literal path.
-/// * **otherwise the arg is a committed-song NAME** →
-///   `<song>/rices/<name>/theme.json` (resolved through the same stage-dir
+/// * **otherwise the arg is a committed-rice NAME** →
+///   `<rice>/rices/<name>/theme.json` (resolved through the same stage-dir
 ///   seam as `graph view`, so an `AOIDE_STAGE_DIR` override relocates it too).
 ///
 /// The `theme` command group (`commands/theme.rs`) re-implements this SAME rule
@@ -145,7 +145,7 @@ pub(crate) fn resolve_rice_notes(inv: &Invocation, cmd: &str) -> Result<PathBuf,
 ///
 /// Runs the NATIVE `theme::lint` engine in-process — no external binary, no
 /// PATH lookup. The no-arg form lints
-/// the staged rice; a bare `<name>` resolves to the committed song's notes
+/// the staged rice; a bare `<name>` resolves to the committed rice's notes
 /// (never treated as a literal path). An error envelope always carries a
 /// non-zero exit (schema failure → exit 1).
 fn handle_rice_lint(inv: &Invocation) -> Outcome {
@@ -179,28 +179,28 @@ fn handle_rice_lint(inv: &Invocation) -> Outcome {
 /// before this call (the marker only flips to `declarative` after that
 /// write succeeds).
 ///
-/// No `<name>`: resolves the current song the same way `rice mode stage`'s
-/// own no-arg form does ([`super::mode::current_staged_song`], off
-/// `stage/theme.json`'s own `"song"` field) and stages its committed
+/// No `<name>`: resolves the current rice the same way `rice mode stage`'s
+/// own no-arg form does ([`super::mode::current_staged_rice`], off
+/// `stage/theme.json`'s own `"rice"` field) and stages its committed
 /// content — so "restage the declared truth for whatever's active" never
-/// requires retyping the song name. No resolvable song → the same
+/// requires retyping the rice name. No resolvable rice → the same
 /// `missing-name` usage error a truly bare call always had.
 ///
 /// **Marker bookkeeping while in `Staging` mode:** on success, updates
-/// `mode.json`'s `song` and `stagingSong` to the name just staged (`draft`
+/// `mode.json`'s `rice` and `stagingRice` to the name just staged (`draft`
 /// stays/becomes `None` — this handler always writes plain declared content,
-/// never a draft). The staged song is always the last one staged, by either
+/// never a draft). The staged rice is always the last one staged, by either
 /// door. **While in `Draft` mode, the marker is left completely
 /// untouched.** This is deliberate, not an oversight: `stage/theme.json`
-/// may currently be a symlink into `rices/<song>/drafts/<name>/theme.json`
+/// may currently be a symlink into `rices/<rice>/drafts/<name>/theme.json`
 /// (`rice mode draft`, `commands/mode.rs`), and `handle_rice_stage`'s write
 /// below carries zero symlink-awareness — it transparently lands wherever
 /// the symlink points (`aoide_storage::fs::atomic_write` is
 /// symlink-transparent), so the routing itself is unaffected and the
-/// `mode`/`song`/`draft` triple the marker already carries stays accurate.
-/// Mutating `song`/`draft` here while `mode` stays `Draft` would violate the
+/// `mode`/`rice`/`draft` triple the marker already carries stays accurate.
+/// Mutating `rice`/`draft` here while `mode` stays `Draft` would violate the
 /// "`draft` is `Some` iff `mode == Draft`" invariant if this handler ever
-/// diverged from the song the draft actually belongs to — leaving the
+/// diverged from the rice the draft actually belongs to — leaving the
 /// marker alone sidesteps that entirely. Only `rice mode stage`/`rice mode
 /// declarative` ever transition OUT of `Draft` (tearing the symlink down
 /// first); this entrypoint is not one of those.
@@ -217,7 +217,7 @@ pub(crate) fn handle_rice_stage_entry(inv: &Invocation) -> Outcome {
     let resolved_inv: Invocation;
     let inv: &Invocation = if inv.args.first().is_some() {
         inv
-    } else if let Some(name) = super::mode::current_staged_song() {
+    } else if let Some(name) = super::mode::current_staged_rice() {
         resolved_inv = Invocation {
             path: inv.path.clone(),
             args: vec![name],
@@ -233,8 +233,8 @@ pub(crate) fn handle_rice_stage_entry(inv: &Invocation) -> Outcome {
     // BEFORE `handle_rice_stage` (the sync) ever reads `rice_dir(name)`
     // — task #41, see `seed_rices_from_templates`'s own doc for why this
     // sits here and not inside the sync itself. No-op whenever the
-    // rices already has ANYTHING for this song, or nothing is shipped
-    // for it either — the ordinary "song not found" error path still fires
+    // rices already has ANYTHING for this rice, or nothing is shipped
+    // for it either — the ordinary "rice not found" error path still fires
     // unchanged in that second case.
     let name = inv.args.first().cloned();
     let seeded_from = match &name {
@@ -321,9 +321,9 @@ pub(crate) fn handle_rice_stage_entry(inv: &Invocation) -> Outcome {
         if let Some(name) = inv.args.first() {
             let updated = aoide_storage::mode::ModeMarker {
                 mode: mode_marker.mode,
-                song: Some(name.clone()),
+                rice: Some(name.clone()),
                 draft: None,
-                staging_song: Some(name.clone()),
+                staging_rice: Some(name.clone()),
                 since: mode_marker.since,
             };
             if aoide_storage::mode::save_mode_marker(&updated).is_ok() {
@@ -335,55 +335,55 @@ pub(crate) fn handle_rice_stage_entry(inv: &Invocation) -> Outcome {
     out
 }
 
-/// The song the DECLARED twin (`song/declared/theme.json`, CONTRACTS.md §4)
-/// describes, read straight off that file's own `"song"` field — the one place
-/// a runtime call can learn "the declared song" rather than "the currently
-/// staged song" (`mode.json`'s own `song`, which a staging round-trip
+/// The rice the DECLARED twin (`rice/declared/theme.json`, CONTRACTS.md §4)
+/// describes, read straight off that file's own `"rice"` field — the one place
+/// a runtime call can learn "the declared rice" rather than "the currently
+/// staged rice" (`mode.json`'s own `rice`, which a staging round-trip
 /// legitimately diverges from). `None` when the twin is absent, unreadable,
-/// not JSON, not an object, carries no string `"song"`, or carries one that
-/// fails [`crate::compose::valid_song_name`].
+/// not JSON, not an object, carries no string `"rice"`, or carries one that
+/// fails [`crate::compose::valid_rice_name`].
 ///
 /// Only the nix side's activation seed writes that file; this crate only
 /// ever reads it.
-/// The name-shape guard mirrors [`super::mode::current_staged_song`]'s own
+/// The name-shape guard mirrors [`super::mode::current_staged_rice`]'s own
 /// read-side guard — the result is joined into a rices path by callers, so
 /// a hand-poisoned field must resolve to nothing rather than to something
 /// unsafe.
-pub(crate) fn declared_song() -> Option<String> {
+pub(crate) fn declared_rice() -> Option<String> {
     let raw = std::fs::read_to_string(shellbridge::declared_notes()).ok()?;
     let parsed: Value = serde_json::from_str(&raw).ok()?;
-    let song = parsed.get("song")?.as_str()?.to_string();
-    crate::compose::valid_song_name(&song).then_some(song)
+    let rice = parsed.get("rice")?.as_str()?.to_string();
+    crate::compose::valid_rice_name(&rice).then_some(rice)
 }
 
 /// The notes file `rice mode declarative`'s re-pin derives from: the declared
-/// twin ([`shellbridge::declared_notes`]) when it exists AND names THIS song
-/// off its own `"song"` field, else the runtime
+/// twin ([`shellbridge::declared_notes`]) when it exists AND names THIS rice
+/// off its own `"rice"` field, else the runtime
 /// [`shellbridge::rice_notes(name)`].
 ///
-/// The twin is the lane's activation seed: the DECLARED song's committed
+/// The twin is the lane's activation seed: the DECLARED rice's committed
 /// notes with the venue's `aoide.theme.override` already applied — declared
-/// truth, which is what a re-pin restores, so an edit made to the runtime song
+/// truth, which is what a re-pin restores, so an edit made to the runtime rice
 /// stays out of declarative mode. The staging writers do not read it: they
 /// derive from the runtime rices and lay the venue over it
-/// ([`overlay_venue`]). The `"song"` equality test is what scopes it — the
-/// twin describes exactly ONE song, so re-pinning any other song derives from
-/// that song's own notes. `name` is already shape-validated by the caller.
+/// ([`overlay_venue`]). The `"rice"` equality test is what scopes it — the
+/// twin describes exactly ONE rice, so re-pinning any other rice derives from
+/// that rice's own notes. `name` is already shape-validated by the caller.
 fn notes_source(name: &str) -> PathBuf {
-    if declared_song().as_deref() == Some(name) {
+    if declared_rice().as_deref() == Some(name) {
         shellbridge::declared_notes()
     } else {
         shellbridge::rice_notes(name)
     }
 }
 
-/// Lay the venue over the declared song's parsed notes: each tier object in
-/// `song/declared/venue.json` (CONTRACTS.md §4) sets its keys on the notes'
+/// Lay the venue over the declared rice's parsed notes: each tier object in
+/// `rice/declared/venue.json` (CONTRACTS.md §4) sets its keys on the notes'
 /// same tier. A colour tier the notes do not hold as an object is skipped,
 /// because the venue recolours and there is nothing to recolour; `geometry`
 /// is created when the notes hold none (or null), because the venue sets
 /// that value. The venue wins on the fields it names; everywhere else the
-/// notes stand, so an edit to the runtime song shows. An absent file is the
+/// notes stand, so an edit to the runtime rice shows. An absent file is the
 /// identity; one that cannot be read or parsed is refused, before anything
 /// is written.
 fn overlay_venue(notes: &mut Value) -> Result<(), Outcome> {
@@ -415,21 +415,21 @@ fn venue_refusal(cause: Cause) -> Outcome {
     Outcome::refuse(
         "rice.stage",
         Kind::Failed,
-        "the declared song's venue overlay cannot be applied",
+        "the declared rice's venue overlay cannot be applied",
         format!("{}; a rebuild republishes it", cause.why),
         Fix::Run("strillix rice mode declarative".to_string()),
     )
     .with_detail(cause.detail)
 }
 
-/// `rice stage <name>` — hot-load a committed song live: stage its
-/// `theme.json` (plus a derivable cover) into `<stage>/` so the Quickshell
+/// `rice stage <name>` — hot-load a committed rice live: stage its
+/// `theme.json` (plus a derivable wallpaper) into `<stage>/` so the Quickshell
 /// surfaces hot-reload it, AND best-effort live-apply its geometry + border
 /// colours to the running compositor: `hyprctl reload config-only`, then
 /// `hyprctl --batch keyword …` over it (guarded on
 /// `$HYPRLAND_INSTANCE_SIGNATURE`; see `crate::live::apply_live`). ALSO syncs the
-/// song's widget QML bodies (`rices/<name>/widgets/*.qml`) into the
-/// live runtime tree (`run/qml/songs/<name>/`, `crate::widgets`) so
+/// rice's widget QML bodies (`rices/<name>/widgets/*.qml`) into the
+/// live runtime tree (`run/qml/rices/<name>/`, `crate::widgets`) so
 /// Quickshell's own file-watcher hot-reloads an edited EXISTING widget file
 /// too — no rebuild for that either (a brand-new widget file still needs a
 /// service restart to be discovered). Nothing is committed; the hyprctl
@@ -438,16 +438,16 @@ fn venue_refusal(cause: Cause) -> Outcome {
 ///
 /// This is the honest form of the hand-copy agents had been doing: drive the
 /// runtime rices's notes into the stage so the shell has a palette to
-/// render. For the DECLARED song the venue
-/// (`song/declared/venue.json`, [`overlay_venue`], CONTRACTS.md §4) is laid
+/// render. For the DECLARED rice the venue
+/// (`rice/declared/venue.json`, [`overlay_venue`], CONTRACTS.md §4) is laid
 /// over them, so the host's venue holds on the slots it recolours and the
-/// geometry it sets, and an edit to the song shows everywhere else.
+/// geometry it sets, and an edit to the rice shows everywhere else.
 ///
 /// `pub(crate)`, not private: `rice mode`'s `stage`/`declarative` handlers
 /// (`commands/mode.rs`) call this directly to get the SAME live-apply side
 /// effects a bare `rice stage <name>` has, rather than reimplementing them
 /// — it hands this the identical `Invocation` it was given (both commands
-/// take the song name as their first positional arg, and this function reads
+/// take the rice name as their first positional arg, and this function reads
 /// nothing else off `inv`), so no adapter/duplication is needed. Writes
 /// through `aoide_storage::fs::atomic_write`, which is symlink-transparent —
 /// while `stage/theme.json` is routed into a draft (`rice mode draft`,
@@ -480,9 +480,9 @@ pub(crate) struct StagePlan {
 /// and §7.5's rices gate. Writes nothing.
 ///
 /// `repin` is `rice mode declarative`'s re-pin: everything `rice stage` does
-/// except the cover half, deriving from declared truth ([`notes_source`]) where
-/// `rice stage` derives from the runtime rices. A lock is not a song switch,
-/// and the read-side rule already hides a cover stamped for another song
+/// except the wallpaper half, deriving from declared truth ([`notes_source`]) where
+/// `rice stage` derives from the runtime rices. A lock is not a rice switch,
+/// and the read-side rule already hides a wallpaper stamped for another rice
 /// (CONTRACTS.md §4).
 pub(crate) fn plan_rice_stage(inv: &Invocation, repin: bool) -> Result<StagePlan, Outcome> {
     let name = match inv.args.first() {
@@ -496,14 +496,14 @@ pub(crate) fn plan_rice_stage(inv: &Invocation, repin: bool) -> Result<StagePlan
     // joined straight into `rice_notes(&name)` below (a read path — an
     // unvalidated `../../x` would let `rice stage` read any JSON-parseable
     // file on the box) AND gets written verbatim into the staged notes'
-    // `"song"` field, which `current_staged_song()` later trusts for
+    // `"rice"` field, which `current_staged_rice()` later trusts for
     // `draft`/`mode` commands' own path-building. Reject it here, once, at the
     // source.
-    if !crate::compose::valid_song_name(&name) {
+    if !crate::compose::valid_rice_name(&name) {
         return Err(Outcome::error(
             "rice.stage",
             format!(
-                "`{name}` is not a valid song name: must match `^[a-z0-9][a-z0-9-]*$` \
+                "`{name}` is not a valid rice name: must match `^[a-z0-9][a-z0-9-]*$` \
                  (lowercase letters, digits, hyphens; no leading hyphen, no `/`, no `..`)"
             ),
         )
@@ -520,10 +520,10 @@ pub(crate) fn plan_rice_stage(inv: &Invocation, repin: bool) -> Result<StagePlan
         Err(e) => {
             return Err(Outcome::error(
                 "rice.stage",
-                format!("no song `{name}`: cannot read {} ({e})", notes_src.display()),
+                format!("no rice `{name}`: cannot read {} ({e})", notes_src.display()),
             )
             .with_data(json!({
-                "reason": "song-not-found",
+                "reason": "rice-not-found",
                 "name": name,
                 "expected": notes_src.to_string_lossy(),
             })));
@@ -545,7 +545,7 @@ pub(crate) fn plan_rice_stage(inv: &Invocation, repin: bool) -> Result<StagePlan
             })));
         }
     };
-    if !repin && declared_song().as_deref() == Some(name.as_str()) {
+    if !repin && declared_rice().as_deref() == Some(name.as_str()) {
         overlay_venue(&mut parsed)?;
     }
 
@@ -555,14 +555,14 @@ pub(crate) fn plan_rice_stage(inv: &Invocation, repin: bool) -> Result<StagePlan
     let hypr_keywords = crate::live::geometry_keywords(&parsed);
     // The terminal half, off the same parsed notes (see `stage_terminal_colors`).
     let terminal_conf = crate::live::terminal_colors(&parsed);
-    // The lock-screen half: only a song that ships its own picture dresses
+    // The lock-screen half: only a rice that ships its own picture dresses
     // the lock, and the picture comes from the runtime rices alone, never
     // the checkout (see `stage_lockscreen`).
     let lock_image = crate::wallpaper::lockscreen_image(&shellbridge::rice_dir(&name));
     let lock_conf = crate::live::lockscreen_fragment(&parsed, lock_image.as_deref());
 
-    // Inject the song name into the staged notes: ThemeState.qml's
-    // `songName` property reads this to resolve per-song flavor widgets
+    // Inject the rice name into the staged notes: ThemeState.qml's
+    // `riceName` property reads this to resolve per-rice flavor widgets
     // (StagingEngine.qml / WidgetSlot.qml) — CONTRACTS.md §4's "additive"
     // precedent (mirrors `parentSessionId` on session records). When the
     // notes don't parse as an object (shouldn't happen for a valid notes
@@ -570,14 +570,14 @@ pub(crate) fn plan_rice_stage(inv: &Invocation, repin: bool) -> Result<StagePlan
     // unchanged rather than fabricating a shape.
     let staged = match parsed {
         Value::Object(mut obj) => {
-            obj.insert("song".to_string(), json!(name));
+            obj.insert("rice".to_string(), json!(name));
             serde_json::to_string_pretty(&Value::Object(obj)).unwrap_or(raw.clone()) + "\n"
         }
         _ => raw.clone(),
     };
 
     // §7.5's gate, BEFORE anything is written: a refusal (not built in with no
-    // `nix`, or a machine-rices song needing packages this system lacks)
+    // `nix`, or a machine-rices rice needing packages this system lacks)
     // must leave stage/ and run/qml byte-unchanged — and the theme write
     // below is already a change to stage/. The approved rices is handed to
     // both syncs, so one `rice stage` evaluates the rices once.
@@ -595,10 +595,10 @@ pub(crate) fn plan_rice_stage(inv: &Invocation, repin: bool) -> Result<StagePlan
 }
 
 /// The file the rice state link points at for `name`, read-only (CONTRACTS.md
-/// §4). A stage links the song's own runtime `hyprland.conf`; a re-pin
+/// §4). A stage links the rice's own runtime `hyprland.conf`; a re-pin
 /// (`repin`, `rice mode declarative`) links the declared twin. Either falls
-/// back to the staging-owned empty file when its song ships no `hyprland.conf`,
-/// so a stage never leaves the previous song's binds standing.
+/// back to the staging-owned empty file when its rice ships no `hyprland.conf`,
+/// so a stage never leaves the previous rice's binds standing.
 pub(crate) fn rice_target_for(name: &str, repin: bool) -> std::path::PathBuf {
     let own = if repin {
         shellbridge::declared_rice_conf()
@@ -642,12 +642,12 @@ pub(crate) fn apply_rice_stage(plan: StagePlan) -> Outcome {
     let (lock_changed, lock_data) = stage_lockscreen(lock_conf, lock_image.as_deref());
     changed.extend(lock_changed);
 
-    // Cover: the song's own default, or the user's pick for it (CONTRACTS.md
-    // §4). The song is stamped into whatever is written, which is what lets a
-    // pick survive a re-stage of its own song and be replaced by any other.
+    // Wallpaper: the rice's own default, or the user's pick for it (CONTRACTS.md
+    // §4). The rice is stamped into whatever is written, which is what lets a
+    // pick survive a re-stage of its own rice and be replaced by any other.
     let wallpaper_dst = crate::wallpaper::staged_wallpaper_json();
     let (wallpaper_note, wallpaper_stage_word) = if !repin {
-        let wallpaper_stage = match crate::wallpaper::stage_for_song(&name) {
+        let wallpaper_stage = match crate::wallpaper::stage_for_rice(&name) {
             Ok(staged) => staged,
             Err(e) => {
                 return Outcome::error("rice.stage", format!("failed to stage wallpaper.json: {e}"))
@@ -660,14 +660,14 @@ pub(crate) fn apply_rice_stage(plan: StagePlan) -> Outcome {
             }
             crate::wallpaper::WallpaperStage::Wrote(crate::wallpaper::WallpaperWrite::Written(path)) => {
                 changed.push(wallpaper_dst.to_string_lossy().into_owned());
-                format!("staged cover {}", path.display())
+                format!("staged wallpaper {}", path.display())
             }
             crate::wallpaper::WallpaperStage::Wrote(crate::wallpaper::WallpaperWrite::Removed) => {
                 changed.push(wallpaper_dst.to_string_lossy().into_owned());
-                format!("no derivable cover for `{name}`; cleared the staged cover")
+                format!("no derivable wallpaper for `{name}`; cleared the staged wallpaper")
             }
             crate::wallpaper::WallpaperStage::Wrote(crate::wallpaper::WallpaperWrite::Absent) => {
-                format!("no derivable cover for `{name}`; no cover staged")
+                format!("no derivable wallpaper for `{name}`; no wallpaper staged")
             }
         };
         let word = match &wallpaper_stage {
@@ -678,7 +678,7 @@ pub(crate) fn apply_rice_stage(plan: StagePlan) -> Outcome {
     } else {
         ("wallpaper.json left alone".to_string(), "left-alone")
     };
-    let cover = crate::wallpaper::staged_path();
+    let wallpaper = crate::wallpaper::staged_path();
 
     // Captured BEFORE the widget sync below so the outcome message's "N
     // stage file(s) live for hot-reload" clause keeps meaning "stage-dir
@@ -686,12 +686,12 @@ pub(crate) fn apply_rice_stage(plan: StagePlan) -> Outcome {
     let stage_file_count = changed.len();
 
     // Widget bodies: the runtime-tree half of `rice stage` — carries
-    // rices/<name>/widgets/*.qml into run/qml/songs/<name>/ so
+    // rices/<name>/widgets/*.qml into run/qml/rices/<name>/ so
     // Quickshell's own file-watcher hot-reloads an edited EXISTING widget
-    // file too, no rebuild. Fatal on failure, mirroring the cover-write
+    // file too, no rebuild. Fatal on failure, mirroring the wallpaper-write
     // IO-failure path above: a torn widget copy/manifest write is worse
     // than refusing the whole call.
-    let widget_sync = match crate::widgets::sync_song_widgets(&name, &rices) {
+    let widget_sync = match crate::widgets::sync_rice_widgets(&name, &rices) {
         Ok(sync) => sync,
         Err(e) => {
             return Outcome::error(
@@ -708,10 +708,10 @@ pub(crate) fn apply_rice_stage(plan: StagePlan) -> Outcome {
     // counterpart to the build-time registry.json walk — regenerates
     // registry.json WHOLE from the committed rices (`nix eval`, same
     // generator the widget-body sync above just called for manifest.json),
-    // then reads THIS song's entry back out of the fresh result. Same call
+    // then reads THIS rice's entry back out of the fresh result. Same call
     // site, same trigger (unconditional on `rice stage`/`preview`), same
     // fatal-on-IO posture as the widget-body sync just above.
-    let registry_sync = match crate::widgets::sync_song_registry(&name, &rices) {
+    let registry_sync = match crate::widgets::sync_rice_registry(&name, &rices) {
         Ok(sync) => sync,
         Err(e) => {
             return Outcome::error(
@@ -751,7 +751,7 @@ pub(crate) fn apply_rice_stage(plan: StagePlan) -> Outcome {
     .with_data(json!({
         "name": name,
         "theme": notes_dst.to_string_lossy(),
-        "wallpaperPick": cover,
+        "wallpaperPick": wallpaper,
         "wallpaperStage": wallpaper_stage_word,
         "wallpaper": crate::wallpaper_provider::sync(),
         "hyprctl": hyprctl_status,
@@ -767,7 +767,7 @@ pub(crate) fn apply_rice_stage(plan: StagePlan) -> Outcome {
                  live via best-effort, guarded `hyprctl reload config-only` then \
                  `hyprctl --batch keyword …` (see live.rs); terminal colours land in \
                  stage/terminal-colors.conf (every new kitty window includes it) and \
-                 open kitty windows reload their config over kitty's control socket; a song that \
+                 open kitty windows reload their config over kitty's control socket; a rice that \
                  ships a lock picture also dresses stage/hyprlock.conf, which hyprlock \
                  reads at every lock",
     }))
@@ -819,7 +819,7 @@ pub(crate) fn stage_terminal_colors(conf: Option<&str>) -> (Vec<String>, Value) 
 /// Point the rice state link (`~/.local/state/strillix/rice.conf`,
 /// [`shellbridge::rice_conf_link`]) at `target`, the file [`rice_target_for`]
 /// chose. The renderer's Nix side sources that link from Hyprland, so this is
-/// the one writer that makes a staged song's binds and layout take effect.
+/// the one writer that makes a staged rice's binds and layout take effect.
 ///
 /// Mirrors [`stage_lockscreen`]: never fatal (`stage/theme.json` is already
 /// written), reported in the envelope, and idempotent — a link already naming
@@ -880,9 +880,9 @@ pub(crate) fn stage_rice_conf(target: &std::path::Path) -> (Vec<String>, Value) 
 /// The one lock writer every stage path shares, so no path can move the shell
 /// and leave the lock behind. It rides each caller's mode gate and adds none,
 /// is never fatal (`stage/theme.json` is already written), and pushes
-/// nothing: hyprlock reads its config afresh at every lock. A song with no
+/// nothing: hyprlock reads its config afresh at every lock. A rice with no
 /// picture writes the fragment that dresses nothing, which clears what an
-/// earlier staged song left. A fragment that could not be rendered leaves the
+/// earlier staged rice left. A fragment that could not be rendered leaves the
 /// previous file as it was.
 pub(crate) fn stage_lockscreen(
     conf: Result<String, String>,
@@ -917,12 +917,12 @@ pub(crate) fn stage_lockscreen(
     )
 }
 
-/// Resolve `--from <song>`'s source `theme.json` for `rice compose`
+/// Resolve `--from <rice>`'s source `theme.json` for `rice compose`
 /// (L-C3, strillix-carrier lane, task #107): the host rices
 /// (`rice_dir(from)`) first — same precedence every other `--from`
 /// consumer here already holds — else the shipped/env templates dir
 /// (`<templates>/<from>/theme.json`,
-/// [`aoide_storage::fs::song_templates_dir`]), so a repo-less host's `rice
+/// [`aoide_storage::fs::rice_templates_dir`]), so a repo-less host's `rice
 /// compose` still has something to copy from. `Err` names BOTH locations
 /// checked, never just the one that happened to be tried last.
 fn resolve_from_notes_path(from: &str) -> Result<PathBuf, String> {
@@ -931,14 +931,14 @@ fn resolve_from_notes_path(from: &str) -> Result<PathBuf, String> {
         return Ok(rice_notes);
     }
 
-    match shellbridge::song_templates_dir() {
+    match shellbridge::rice_templates_dir() {
         Some(templates) => {
             let templated_notes = templates.join(from).join("theme.json");
             if templated_notes.is_file() {
                 Ok(templated_notes)
             } else {
                 Err(format!(
-                    "--from song `{from}` not found: checked the rices at {} and the \
+                    "--from rice `{from}` not found: checked the rices at {} and the \
                      shipped templates at {}",
                     rice_notes.display(),
                     templated_notes.display(),
@@ -946,7 +946,7 @@ fn resolve_from_notes_path(from: &str) -> Result<PathBuf, String> {
             }
         }
         None => Err(format!(
-            "--from song `{from}` not found: checked the rices at {} — no shipped templates \
+            "--from rice `{from}` not found: checked the rices at {} — no shipped templates \
              dir either ($STRILLIX_TEMPLATES is unset, and no `share/strillix/rices` sits \
              beside this binary)",
             rice_notes.display(),
@@ -957,7 +957,7 @@ fn resolve_from_notes_path(from: &str) -> Result<PathBuf, String> {
 /// Seed a first-stage runtime rices entry for `name` from the shipped
 /// template tree (task #41) — a repo-less/fresh host's `rices/` starts
 /// with nothing in it, so before the very first `rice stage <name>`/`rice
-/// mode stage <name>` for a SHIPPED (never-composed-on-this-host) song can
+/// mode stage <name>` for a SHIPPED (never-composed-on-this-host) rice can
 /// do anything, the write-back home house rule 3's read-and-append loop
 /// needs — `rice_dir(name)` — has to exist. Called from both staging
 /// entry points ([`handle_rice_stage_entry`] and `commands::mode`'s
@@ -967,14 +967,14 @@ fn resolve_from_notes_path(from: &str) -> Result<PathBuf, String> {
 /// own re-pin (also routed through `handle_rice_stage`) stays a pure lock
 /// with no seeding side effect, and `strillix reload`'s staging arm (which
 /// calls `handle_rice_stage` directly too, `commands/reload.rs`) needs
-/// nothing extra: it only ever runs once `mode.json`'s `song` field is
+/// nothing extra: it only ever runs once `mode.json`'s `rice` field is
 /// set, which only happens after one of the two seed-checking entry points
-/// already resolved that song successfully.
+/// already resolved that rice successfully.
 ///
-/// Reuses [`shellbridge::song_templates_dir`] — the SAME shipped/env
+/// Reuses [`shellbridge::rice_templates_dir`] — the SAME shipped/env
 /// templates resolver [`resolve_from_notes_path`] above already falls back
 /// to for `rice compose --from`, never a second resolver — and
-/// [`super::refresh::refresh_song`] for the copy: its absent-folder arm is
+/// [`super::refresh::refresh_rice`] for the copy: its absent-folder arm is
 /// the whole-tree seed (sibling tmp dir, then rename, so a copy that fails
 /// partway never leaves a half-seeded `rice_dir(name)` behind) and it
 /// records what it wrote, which is what later lets `rice refresh` tell an
@@ -984,12 +984,12 @@ fn resolve_from_notes_path(from: &str) -> Result<PathBuf, String> {
 /// `rice_dir(name)` existing AT ALL — even missing half its files from
 /// a prior partial edit — skips the seed outright and proceeds to the
 /// normal stage flow unchanged; never a per-file fill (mixing template
-/// halves into a user-edited song is worse than a missing file). A second
-/// stage of an already-seeded song is therefore automatically a no-op —
+/// halves into a user-edited rice is worse than a missing file). A second
+/// stage of an already-seeded rice is therefore automatically a no-op —
 /// idempotence falls out of this same existence check, nothing extra
 /// needed. Silently `Ok(None)` too when nothing is shipped for `name`
 /// either (no `$STRILLIX_TEMPLATES` resolvable, or no `<templates>/<name>/`
-/// entry in it) — the caller's own existing "song not found" error already
+/// entry in it) — the caller's own existing "rice not found" error already
 /// reports that honestly; this function has no error text of its own for
 /// the ordinary case.
 ///
@@ -998,7 +998,7 @@ fn resolve_from_notes_path(from: &str) -> Result<PathBuf, String> {
 /// the seed is never silent, per task #41's outcome contract. `Err` only
 /// for a copy that started and then failed partway.
 pub(crate) fn seed_rices_from_templates(name: &str) -> Result<Option<PathBuf>, String> {
-    if !crate::compose::valid_song_name(name) {
+    if !crate::compose::valid_rice_name(name) {
         // `handle_rice_stage` rejects an invalid name with its own clean,
         // specific error; seeding has nothing safe to do with one (a
         // traversal-shaped name joined into a path below, unvalidated).
@@ -1008,29 +1008,29 @@ pub(crate) fn seed_rices_from_templates(name: &str) -> Result<Option<PathBuf>, S
     if target.exists() {
         return Ok(None);
     }
-    let Some(templates) = shellbridge::song_templates_dir() else {
+    let Some(templates) = shellbridge::rice_templates_dir() else {
         return Ok(None);
     };
     let source = templates.join(name);
     if !source.is_dir() {
         return Ok(None);
     }
-    let report = super::refresh::refresh_song(name, &templates, false)?;
+    let report = super::refresh::refresh_rice(name, &templates, false)?;
     Ok(report.skipped.is_none().then_some(source))
 }
 
-/// `rice compose <name> [--from <song>] [--force]` — scaffold a new
-/// committed song under `rices/<name>/` by copying an existing
-/// song's notes.
+/// `rice compose <name> [--from <rice>] [--force]` — scaffold a new
+/// committed rice under `rices/<name>/` by copying an existing
+/// rice's notes.
 ///
 /// Writes ONLY inside `rices/<name>/` (house rule 1): `rice.nix` (a
 /// body — the `system` half's ten strillix providers and the theme, the `home`
-/// half's `strillix` renderer; the sole `.nix` file, satisfying `checks.song-shape`),
+/// half's `strillix` renderer; the sole `.nix` file, satisfying `checks.rice-shape`),
 /// `hyprland.conf` (`--from`'s when it ships one, else a header with no keys),
 /// `theme.json` (a mirror of `--from`'s, INCLUDING any geometry block, so
 /// `aoide rice stage <name>` renders + live-applies immediately),
 /// `design/intent.md` (honest-empty — no fabricated rationale), and
-/// `widgets/.gitkeep` (no per-song widgets yet). Geometry lives in the theme
+/// `widgets/.gitkeep` (no per-rice widgets yet). Geometry lives in the theme
 /// tier; the hyprlang file carries only binds, layout and animations.
 fn handle_rice_compose(inv: &Invocation) -> Outcome {
     let name = match inv.args.first() {
@@ -1038,17 +1038,17 @@ fn handle_rice_compose(inv: &Invocation) -> Outcome {
         None => {
             return Outcome::usage(
                 "rice.compose",
-                "usage: aoide rice compose <name> [--from <song>] [--force] [--json]",
+                "usage: aoide rice compose <name> [--from <rice>] [--force] [--json]",
             )
             .with_data(json!({ "reason": "missing-name" }));
         }
     };
 
-    if !crate::compose::valid_song_name(&name) {
+    if !crate::compose::valid_rice_name(&name) {
         return Outcome::error(
             "rice.compose",
             format!(
-                "`{name}` is not a valid song name: must match `^[a-z0-9][a-z0-9-]*$` \
+                "`{name}` is not a valid rice name: must match `^[a-z0-9][a-z0-9-]*$` \
                  (lowercase letters, digits, hyphens; no leading hyphen, no `/`, no `..`)"
             ),
         )
@@ -1061,11 +1061,11 @@ fn handle_rice_compose(inv: &Invocation) -> Outcome {
         .cloned()
         .unwrap_or_else(|| "sonata".to_string());
 
-    if !crate::compose::valid_song_name(&from) {
+    if !crate::compose::valid_rice_name(&from) {
         return Outcome::error(
             "rice.compose",
             format!(
-                "`--from {from}` is not a valid song name: must match `^[a-z0-9][a-z0-9-]*$` \
+                "`--from {from}` is not a valid rice name: must match `^[a-z0-9][a-z0-9-]*$` \
                  (lowercase letters, digits, hyphens; no leading hyphen, no `/`, no `..`)"
             ),
         )
@@ -1086,7 +1086,7 @@ fn handle_rice_compose(inv: &Invocation) -> Outcome {
         return Outcome::error(
             "rice.compose",
             format!(
-                "song `{name}` already exists at {} (pass --force to overwrite)",
+                "rice `{name}` already exists at {} (pass --force to overwrite)",
                 target.display()
             ),
         )
@@ -1101,7 +1101,7 @@ fn handle_rice_compose(inv: &Invocation) -> Outcome {
         Ok(p) => p,
         Err(msg) => {
             return Outcome::error("rice.compose", msg)
-                .with_data(json!({ "reason": "from-song-not-found", "from": from }));
+                .with_data(json!({ "reason": "from-rice-not-found", "from": from }));
         }
     };
     let raw_notes = match std::fs::read_to_string(&from_notes_path) {
@@ -1110,12 +1110,12 @@ fn handle_rice_compose(inv: &Invocation) -> Outcome {
             return Outcome::error(
                 "rice.compose",
                 format!(
-                    "--from song `{from}`'s notes at {} could not be read: {e}",
+                    "--from rice `{from}`'s notes at {} could not be read: {e}",
                     from_notes_path.display()
                 ),
             )
             .with_data(json!({
-                "reason": "from-song-not-found",
+                "reason": "from-rice-not-found",
                 "from": from,
                 "expected": from_notes_path.to_string_lossy(),
             }));
@@ -1126,7 +1126,7 @@ fn handle_rice_compose(inv: &Invocation) -> Outcome {
         Err(e) => {
             return Outcome::error(
                 "rice.compose",
-                format!("--from song `{from}`'s notes are not valid JSON: {e}"),
+                format!("--from rice `{from}`'s notes are not valid JSON: {e}"),
             )
             .with_data(json!({
                 "reason": "invalid-json",
@@ -1164,7 +1164,7 @@ fn handle_rice_compose(inv: &Invocation) -> Outcome {
     Outcome::ok(
         "rice.compose",
         format!(
-            "composed song `{name}` from `{from}` — {} file(s) written under {}",
+            "composed rice `{name}` from `{from}` — {} file(s) written under {}",
             changed.len(),
             target.display()
         ),
@@ -1174,7 +1174,7 @@ fn handle_rice_compose(inv: &Invocation) -> Outcome {
         "name": name,
         "from": from,
         "nextSteps": [
-            format!("truth: set habit.song.declared = \"{name}\" in hosts/<host> and rebuild"),
+            format!("truth: set habit.rice.declared = \"{name}\" in hosts/<host> and rebuild"),
             format!("sketch: `aoide rice stage {name}` to hot-load it live, no rebuild"),
         ],
     }))
@@ -1204,7 +1204,7 @@ mod tests {
         (root, saver)
     }
 
-    fn put_song(root: &std::path::Path, name: &str, body: &str) {
+    fn put_rice(root: &std::path::Path, name: &str, body: &str) {
         let dir = root.join("rices").join(name);
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("theme.json"), body).unwrap();
@@ -1217,7 +1217,7 @@ mod tests {
         let out = handle_rice_list(&inv(&["rice", "list"], &[]));
         assert_eq!(out.status, Status::Ok, "{:?}", out.data);
         let d = out.data.unwrap();
-        assert!(d["songs"].as_array().unwrap().is_empty());
+        assert!(d["rices"].as_array().unwrap().is_empty());
         assert_eq!(d["mode"], "declarative");
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -1226,17 +1226,17 @@ mod tests {
     fn list_keeps_only_valid_named_dirs_with_notes_sorted() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let (root, _s) = list_fixture("rice-list-filter");
-        put_song(&root, "b-song", "{}");
-        put_song(&root, "a-song", "{}");
-        put_song(&root, "Bad_Name", "{}");
-        put_song(&root, "x.seed-tmp.1", "{}");
+        put_rice(&root, "b-rice", "{}");
+        put_rice(&root, "a-rice", "{}");
+        put_rice(&root, "Bad_Name", "{}");
+        put_rice(&root, "x.seed-tmp.1", "{}");
         std::fs::create_dir_all(root.join("rices").join("notheme")).unwrap();
         let out = handle_rice_list(&inv(&["rice", "list"], &[]));
         let d = out.data.unwrap();
         let names: Vec<&str> =
-            d["songs"].as_array().unwrap().iter().map(|s| s["name"].as_str().unwrap()).collect();
-        assert_eq!(names, ["a-song", "b-song"]);
-        assert_eq!(out.message, "2 song(s)");
+            d["rices"].as_array().unwrap().iter().map(|s| s["name"].as_str().unwrap()).collect();
+        assert_eq!(names, ["a-rice", "b-rice"]);
+        assert_eq!(out.message, "2 rice(s)");
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -1244,35 +1244,35 @@ mod tests {
     fn list_flags_invalid_json_notes() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let (root, _s) = list_fixture("rice-list-badjson");
-        put_song(&root, "broken", "{not json");
-        put_song(&root, "fine", "{}");
+        put_rice(&root, "broken", "{not json");
+        put_rice(&root, "fine", "{}");
         let out = handle_rice_list(&inv(&["rice", "list"], &[]));
         assert_eq!(out.status, Status::Ok);
         let d = out.data.unwrap();
-        let songs = d["songs"].as_array().unwrap();
-        assert_eq!(songs[0]["name"], "broken");
-        assert_eq!(songs[0]["ok"], false);
-        assert_eq!(songs[0]["reason"], "invalid-json");
-        assert_eq!(songs[1]["ok"], true);
+        let rices = d["rices"].as_array().unwrap();
+        assert_eq!(rices[0]["name"], "broken");
+        assert_eq!(rices[0]["ok"], false);
+        assert_eq!(rices[0]["reason"], "invalid-json");
+        assert_eq!(rices[1]["ok"], true);
         let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
-    fn list_echoes_the_mode_the_last_staged_and_the_declared_song() {
+    fn list_echoes_the_mode_the_last_staged_and_the_declared_rice() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let (root, _s) = list_fixture("rice-list-mode");
         std::fs::write(
             root.join("stage").join("mode.json"),
-            r#"{"mode":"declarative","rice":"sonata","stagingSong":"cadenza"}"#,
+            r#"{"mode":"declarative","rice":"sonata","stagingRice":"cadenza"}"#,
         )
         .unwrap();
         std::fs::create_dir_all(root.join("declared")).unwrap();
-        std::fs::write(root.join("declared").join("theme.json"), r#"{"song":"sonata"}"#).unwrap();
+        std::fs::write(root.join("declared").join("theme.json"), r#"{"rice":"sonata"}"#).unwrap();
         let out = handle_rice_list(&inv(&["rice", "list"], &[]));
         let d = out.data.unwrap();
         assert_eq!(d["mode"], "declarative");
-        assert_eq!(d["song"], "sonata");
-        assert_eq!(d["stagingSong"], "cadenza");
+        assert_eq!(d["rice"], "sonata");
+        assert_eq!(d["stagingRice"], "cadenza");
         assert_eq!(d["declared"], "sonata");
         assert!(d["draft"].is_null());
         let _ = std::fs::remove_dir_all(&root);
@@ -1319,10 +1319,10 @@ mod tests {
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
         let root = unique_tmp("lint-name");
         let stage = root.join("stage");
-        let song = root.join("rices").join("moonlight");
+        let rice = root.join("rices").join("moonlight");
         std::fs::create_dir_all(&stage).unwrap();
-        std::fs::create_dir_all(&song).unwrap();
-        std::fs::write(song.join("theme.json"), VALID_NOTES).unwrap();
+        std::fs::create_dir_all(&rice).unwrap();
+        std::fs::write(rice.join("theme.json"), VALID_NOTES).unwrap();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
 
         // `moonlight` is a NAME, not a path — it must resolve under rices/.
@@ -1331,7 +1331,7 @@ mod tests {
         let notes = out.data.unwrap()["theme"].as_str().unwrap().to_string();
         assert!(
             notes.ends_with("rices/moonlight/theme.json"),
-            "bare name resolved to the rices song: {notes}"
+            "bare name resolved to the rices rice: {notes}"
         );
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -1378,20 +1378,20 @@ mod tests {
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
         let root = unique_tmp("stage-ok");
         let stage = root.join("stage");
-        let song = root.join("rices").join("moonlight");
+        let rice = root.join("rices").join("moonlight");
         std::fs::create_dir_all(&stage).unwrap();
-        std::fs::create_dir_all(&song).unwrap();
-        std::fs::write(song.join("theme.json"), VALID_NOTES).unwrap();
+        std::fs::create_dir_all(&rice).unwrap();
+        std::fs::write(rice.join("theme.json"), VALID_NOTES).unwrap();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
 
         let out = handle_rice_stage(&inv(&["rice", "stage"], &["moonlight"]));
         assert_eq!(out.status, Status::Ok);
-        // theme.json landed in the stage with the song name injected, its
+        // theme.json landed in the stage with the rice name injected, its
         // original fields (e.g. the palette) survived the round-trip, and no
         // legacy mirror is written any more (Phase 4 dropped it).
         let staged = std::fs::read_to_string(stage.join("theme.json")).unwrap();
         let parsed: Value = serde_json::from_str(&staged).unwrap();
-        assert_eq!(parsed["song"], "moonlight");
+        assert_eq!(parsed["rice"], "moonlight");
         assert_eq!(parsed["palette"]["bg"], "#0b1021");
         assert_eq!(
             out.changed.len(),
@@ -1414,7 +1414,7 @@ mod tests {
             .iter()
             .any(|c| c.ends_with("stage/terminal-colors.conf")));
         assert_eq!(out.data.as_ref().unwrap()["terminal"]["status"], "skipped");
-        // The lock half: a song with no lock picture dresses nothing, and says so.
+        // The lock half: a rice with no lock picture dresses nothing, and says so.
         assert_eq!(
             std::fs::read_to_string(stage.join("hyprlock.conf")).unwrap(),
             crate::theme::emit::hyprlock::NO_DRESS
@@ -1427,25 +1427,25 @@ mod tests {
         let data = out.data.unwrap();
         assert!(data["wallpaperPick"].is_null());
         assert_eq!(data["wallpaperStage"], "none");
-        assert!(out.message.contains("no derivable cover for `moonlight`"));
+        assert!(out.message.contains("no derivable wallpaper for `moonlight`"));
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// Only a song that ships its own lock picture dresses the lock, and the
+    /// Only a rice that ships its own lock picture dresses the lock, and the
     /// picture is the RUNTIME rices's (CONTRACTS.md §4 `hyprlock.conf`):
-    /// staging a song without one afterwards clears the dress, so a lock never
-    /// outlives the song that dressed it.
+    /// staging a rice without one afterwards clears the dress, so a lock never
+    /// outlives the rice that dressed it.
     #[test]
-    fn stage_dresses_the_lock_only_for_a_song_that_ships_a_lock_picture() {
+    fn stage_dresses_the_lock_only_for_a_rice_that_ships_a_lock_picture() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
         let root = unique_tmp("stage-lock-dress");
         let stage = root.join("stage");
         let barcarolle = root.join("rices").join("barcarolle");
         let sonata = root.join("rices").join("sonata");
-        for song in [&barcarolle, &sonata] {
-            std::fs::create_dir_all(song).unwrap();
-            std::fs::write(song.join("theme.json"), VALID_NOTES).unwrap();
+        for rice in [&barcarolle, &sonata] {
+            std::fs::create_dir_all(rice).unwrap();
+            std::fs::write(rice.join("theme.json"), VALID_NOTES).unwrap();
         }
         std::fs::create_dir_all(&stage).unwrap();
         std::fs::write(barcarolle.join("lockscreen.png"), b"").unwrap();
@@ -1469,7 +1469,7 @@ mod tests {
         assert_eq!(
             std::fs::read_to_string(stage.join("hyprlock.conf")).unwrap(),
             crate::theme::emit::hyprlock::NO_DRESS,
-            "a song with no lock picture clears the previous song's dress"
+            "a rice with no lock picture clears the previous rice's dress"
         );
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -1498,27 +1498,27 @@ mod tests {
     }
 
     #[test]
-    fn stage_writes_a_derivable_wallpaper_from_the_covers_library() {
+    fn stage_writes_a_derivable_wallpaper_from_the_wallpapers_library() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
-        let root = unique_tmp("stage-cover");
+        let root = unique_tmp("stage-wallpaper");
         let stage = root.join("stage");
-        let song = root.join("rices").join("dusk");
-        let covers = root.join("wallpapers");
+        let rice = root.join("rices").join("dusk");
+        let wallpapers = root.join("wallpapers");
         std::fs::create_dir_all(&stage).unwrap();
-        std::fs::create_dir_all(&song).unwrap();
-        std::fs::create_dir_all(&covers).unwrap();
-        std::fs::write(song.join("theme.json"), VALID_NOTES).unwrap();
-        std::fs::write(covers.join("dusk.png"), b"\x89PNG stub").unwrap();
+        std::fs::create_dir_all(&rice).unwrap();
+        std::fs::create_dir_all(&wallpapers).unwrap();
+        std::fs::write(rice.join("theme.json"), VALID_NOTES).unwrap();
+        std::fs::write(wallpapers.join("dusk.png"), b"\x89PNG stub").unwrap();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
 
         let out = handle_rice_stage(&inv(&["rice", "stage"], &["dusk"]));
         assert_eq!(out.status, Status::Ok);
-        let cover = std::fs::read_to_string(stage.join("wallpaper.json")).unwrap();
-        assert!(cover.contains("dusk.png"), "wallpaper.json points at the derived file");
+        let wallpaper = std::fs::read_to_string(stage.join("wallpaper.json")).unwrap();
+        assert!(wallpaper.contains("dusk.png"), "wallpaper.json points at the derived file");
         assert!(
-            !cover.contains("\"pick\""),
-            "a song's own cover is a DEFAULT, never marked as a pick: {cover}"
+            !wallpaper.contains("\"pick\""),
+            "a rice's own wallpaper is a DEFAULT, never marked as a pick: {wallpaper}"
         );
         assert!(out.changed.iter().any(|c| c.ends_with("wallpaper.json")));
         let data = out.data.unwrap();
@@ -1528,22 +1528,22 @@ mod tests {
     }
 
     /// The ruling (2026-09-28): a user's wallpaper pick is what shows, and
-    /// re-staging the SAME song must not quietly revert it to the song's
+    /// re-staging the SAME rice must not quietly revert it to the rice's
     /// default. `rice mode stage` (the no-arg call, the CLI default, that
     /// re-stages the current rice) and a declarative re-seed both land here.
     #[test]
-    fn restaging_the_same_song_keeps_a_pick() {
+    fn restaging_the_same_rice_keeps_a_pick() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
-        let root = unique_tmp("stage-same-song-pick");
+        let root = unique_tmp("stage-same-rice-pick");
         let stage = root.join("stage");
-        let song = root.join("rices").join("dusk");
-        let covers = root.join("wallpapers");
+        let rice = root.join("rices").join("dusk");
+        let wallpapers = root.join("wallpapers");
         std::fs::create_dir_all(&stage).unwrap();
-        std::fs::create_dir_all(&song).unwrap();
-        std::fs::create_dir_all(&covers).unwrap();
-        std::fs::write(song.join("theme.json"), VALID_NOTES).unwrap();
-        std::fs::write(covers.join("dusk.png"), b"\x89PNG stub").unwrap();
+        std::fs::create_dir_all(&rice).unwrap();
+        std::fs::create_dir_all(&wallpapers).unwrap();
+        std::fs::write(rice.join("theme.json"), VALID_NOTES).unwrap();
+        std::fs::write(wallpapers.join("dusk.png"), b"\x89PNG stub").unwrap();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
 
         let first = handle_rice_stage(&inv(&["rice", "stage"], &["dusk"]));
@@ -1554,8 +1554,8 @@ mod tests {
         crate::wallpaper::stage_pick(std::path::Path::new("/tmp/chosen.png"), Some("dusk"), None).unwrap();
         assert!(crate::wallpaper::staged_is_pick());
 
-        // …and re-staging the SAME song leaves that pick exactly where it was,
-        // even though `dusk` has a derivable cover of its own.
+        // …and re-staging the SAME rice leaves that pick exactly where it was,
+        // even though `dusk` has a derivable wallpaper of its own.
         let again = handle_rice_stage(&inv(&["rice", "stage"], &["dusk"]));
         assert_eq!(again.status, Status::Ok);
         assert_eq!(again.data.as_ref().unwrap()["wallpaperStage"], "pick-kept");
@@ -1570,14 +1570,14 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// …and a song SWITCH resets to the new song's default: the pick is
-    /// dropped, and with it any cover the previous song left — the leak
-    /// `rice stage <song>` used to have whenever the new song derived none.
+    /// …and a rice SWITCH resets to the new rice's default: the pick is
+    /// dropped, and with it any wallpaper the previous rice left — the leak
+    /// `rice stage <rice>` used to have whenever the new rice derived none.
     #[test]
-    fn a_song_switch_drops_a_pick_and_clears_a_wallpaper_with_no_default() {
+    fn a_rice_switch_drops_a_pick_and_clears_a_wallpaper_with_no_default() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
-        let root = unique_tmp("stage-song-switch-pick");
+        let root = unique_tmp("stage-rice-switch-pick");
         let stage = root.join("stage");
         let rices = root.join("rices");
         std::fs::create_dir_all(&stage).unwrap();
@@ -1593,8 +1593,8 @@ mod tests {
         crate::wallpaper::stage_pick(std::path::Path::new("/tmp/chosen.png"), Some("dusk"), None).unwrap();
         assert!(crate::wallpaper::staged_is_pick());
 
-        // Switching to a song with NO derivable cover drops the pick AND the
-        // wallpaper.json the previous song left behind.
+        // Switching to a rice with NO derivable wallpaper drops the pick AND the
+        // wallpaper.json the previous rice left behind.
         let switched = handle_rice_stage(&inv(&["rice", "stage"], &["moonlight"]));
         assert_eq!(switched.status, Status::Ok);
         assert_eq!(switched.data.as_ref().unwrap()["wallpaperStage"], "cleared");
@@ -1602,7 +1602,7 @@ mod tests {
         assert!(switched.changed.iter().any(|c| c.ends_with("wallpaper.json")));
         assert!(
             !stage.join("wallpaper.json").exists(),
-            "the previous song's wallpaper must not leak onto the new song"
+            "the previous rice's wallpaper must not leak onto the new rice"
         );
 
         // Switching back is a switch too — the pick is NOT resurrected.
@@ -1615,32 +1615,32 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// The declared song (`song/declared/theme.json`'s own `"song"` field,
-    /// CONTRACTS.md §4) is a runtime song like any other: staging it reads the
-    /// runtime rices, so an edit shows — then lays `song/declared/venue.json`
+    /// The declared rice (`rice/declared/theme.json`'s own `"rice"` field,
+    /// CONTRACTS.md §4) is a runtime rice like any other: staging it reads the
+    /// runtime rices, so an edit shows — then lays `rice/declared/venue.json`
     /// over it, so the host's venue holds on the slots it recolours. The twin
     /// itself is not read: its accent here is neither the runtime's nor the
     /// venue's.
     #[test]
-    fn stage_reads_the_runtime_song_with_the_venue_over_it_for_the_declared_song() {
+    fn stage_reads_the_runtime_rice_with_the_venue_over_it_for_the_declared_rice() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
         let root = unique_tmp("stage-declared-venue");
         ensure_default_rices_fixture();
         let stage = root.join("stage");
-        let song = root.join("rices").join("sonata");
+        let rice = root.join("rices").join("sonata");
         let declared = root.join("declared");
         std::fs::create_dir_all(&stage).unwrap();
-        std::fs::create_dir_all(&song).unwrap();
+        std::fs::create_dir_all(&rice).unwrap();
         std::fs::create_dir_all(&declared).unwrap();
         std::fs::write(
-            song.join("theme.json"),
+            rice.join("theme.json"),
             r##"{"schemaVersion":"0","palette":{"bg":"#0b1021","fg":"#c8d3f5","accent":"#123456","urgent":"#ff757f"}}"##,
         )
         .unwrap();
         std::fs::write(
             declared.join("theme.json"),
-            r##"{"palette":{"accent":"#ebbcba","bg":"#191724","fg":"#c8d3f5","urgent":"#ff757f"},"schemaVersion":"0","song":"sonata"}"##,
+            r##"{"palette":{"accent":"#ebbcba","bg":"#191724","fg":"#c8d3f5","urgent":"#ff757f"},"schemaVersion":"0","rice":"sonata"}"##,
         )
         .unwrap();
         std::fs::write(declared.join("venue.json"), r##"{"palette":{"bg":"#191724"}}"##).unwrap();
@@ -1651,7 +1651,7 @@ mod tests {
         let parsed: Value =
             serde_json::from_str(&std::fs::read_to_string(stage.join("theme.json")).unwrap())
                 .unwrap();
-        assert_eq!(parsed["song"], "sonata");
+        assert_eq!(parsed["rice"], "sonata");
         assert_eq!(parsed["palette"]["bg"], "#191724", "the venue's recolour holds its slot");
         assert_eq!(
             parsed["palette"]["accent"], "#123456",
@@ -1661,23 +1661,23 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// A venue colour tier the song does not hold as an object has nothing to
+    /// A venue colour tier the rice does not hold as an object has nothing to
     /// recolour, and is skipped rather than created (`geometry` is the one
     /// tier the venue creates, below).
     #[test]
-    fn stage_skips_a_venue_tier_the_song_does_not_hold() {
+    fn stage_skips_a_venue_tier_the_rice_does_not_hold() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
         let root = unique_tmp("stage-declared-venue-skip");
         ensure_default_rices_fixture();
         let stage = root.join("stage");
-        let song = root.join("rices").join("sonata");
+        let rice = root.join("rices").join("sonata");
         let declared = root.join("declared");
         std::fs::create_dir_all(&stage).unwrap();
-        std::fs::create_dir_all(&song).unwrap();
+        std::fs::create_dir_all(&rice).unwrap();
         std::fs::create_dir_all(&declared).unwrap();
-        std::fs::write(song.join("theme.json"), VALID_NOTES).unwrap();
-        std::fs::write(declared.join("theme.json"), r##"{"schemaVersion":"0","song":"sonata"}"##)
+        std::fs::write(rice.join("theme.json"), VALID_NOTES).unwrap();
+        std::fs::write(declared.join("theme.json"), r##"{"schemaVersion":"0","rice":"sonata"}"##)
             .unwrap();
         std::fs::write(
             declared.join("venue.json"),
@@ -1696,23 +1696,23 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// The venue SETS geometry (a value the host chooses), so a song that holds
+    /// The venue SETS geometry (a value the host chooses), so a rice that holds
     /// none gets the venue's block rather than a skip. Its terminal opacity
     /// reaches the staged terminal file.
     #[test]
-    fn stage_creates_the_geometry_the_song_does_not_hold_from_the_venue() {
+    fn stage_creates_the_geometry_the_rice_does_not_hold_from_the_venue() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
         let root = unique_tmp("stage-declared-venue-geometry");
         ensure_default_rices_fixture();
         let stage = root.join("stage");
-        let song = root.join("rices").join("sonata");
+        let rice = root.join("rices").join("sonata");
         let declared = root.join("declared");
         std::fs::create_dir_all(&stage).unwrap();
-        std::fs::create_dir_all(&song).unwrap();
+        std::fs::create_dir_all(&rice).unwrap();
         std::fs::create_dir_all(&declared).unwrap();
-        std::fs::write(song.join("theme.json"), VALID_NOTES).unwrap();
-        std::fs::write(declared.join("theme.json"), r##"{"schemaVersion":"0","song":"sonata"}"##)
+        std::fs::write(rice.join("theme.json"), VALID_NOTES).unwrap();
+        std::fs::write(declared.join("theme.json"), r##"{"schemaVersion":"0","rice":"sonata"}"##)
             .unwrap();
         std::fs::write(declared.join("venue.json"), r##"{"geometry":{"terminalOpacity":1}}"##)
             .unwrap();
@@ -1729,7 +1729,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// A geometry the song already holds merges: the venue wins the fields it
+    /// A geometry the rice already holds merges: the venue wins the fields it
     /// names, and an edit to any other field shows.
     #[test]
     fn stage_shows_a_geometry_edit_while_the_venue_wins_its_field() {
@@ -1738,17 +1738,17 @@ mod tests {
         let root = unique_tmp("stage-declared-venue-geometry-merge");
         ensure_default_rices_fixture();
         let stage = root.join("stage");
-        let song = root.join("rices").join("sonata");
+        let rice = root.join("rices").join("sonata");
         let declared = root.join("declared");
         std::fs::create_dir_all(&stage).unwrap();
-        std::fs::create_dir_all(&song).unwrap();
+        std::fs::create_dir_all(&rice).unwrap();
         std::fs::create_dir_all(&declared).unwrap();
         std::fs::write(
-            song.join("theme.json"),
+            rice.join("theme.json"),
             r##"{"schemaVersion":"0","palette":{"bg":"#0b1021","fg":"#c8d3f5","accent":"#82aaff","urgent":"#ff757f"},"geometry":{"gapsIn":10,"terminalOpacity":0.7}}"##,
         )
         .unwrap();
-        std::fs::write(declared.join("theme.json"), r##"{"schemaVersion":"0","song":"sonata"}"##)
+        std::fs::write(declared.join("theme.json"), r##"{"schemaVersion":"0","rice":"sonata"}"##)
             .unwrap();
         std::fs::write(declared.join("venue.json"), r##"{"geometry":{"terminalOpacity":1}}"##)
             .unwrap();
@@ -1765,23 +1765,23 @@ mod tests {
     }
 
     /// No `venue.json` is the ordinary host with no venue (or one that never
-    /// activated the lane): the runtime song stages as it is.
+    /// activated the lane): the runtime rice stages as it is.
     #[test]
-    fn stage_with_no_venue_file_stages_the_runtime_song_as_it_is() {
+    fn stage_with_no_venue_file_stages_the_runtime_rice_as_it_is() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
         let root = unique_tmp("stage-declared-no-venue");
         ensure_default_rices_fixture();
         let stage = root.join("stage");
-        let song = root.join("rices").join("sonata");
+        let rice = root.join("rices").join("sonata");
         let declared = root.join("declared");
         std::fs::create_dir_all(&stage).unwrap();
-        std::fs::create_dir_all(&song).unwrap();
+        std::fs::create_dir_all(&rice).unwrap();
         std::fs::create_dir_all(&declared).unwrap();
-        std::fs::write(song.join("theme.json"), VALID_NOTES).unwrap();
+        std::fs::write(rice.join("theme.json"), VALID_NOTES).unwrap();
         std::fs::write(
             declared.join("theme.json"),
-            r##"{"palette":{"accent":"#ebbcba","bg":"#191724"},"schemaVersion":"0","song":"sonata"}"##,
+            r##"{"palette":{"accent":"#ebbcba","bg":"#191724"},"schemaVersion":"0","rice":"sonata"}"##,
         )
         .unwrap();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
@@ -1805,16 +1805,16 @@ mod tests {
         let root = unique_tmp("stage-declared-bad-venue");
         ensure_default_rices_fixture();
         let stage = root.join("stage");
-        let song = root.join("rices").join("sonata");
+        let rice = root.join("rices").join("sonata");
         let declared = root.join("declared");
         std::fs::create_dir_all(&stage).unwrap();
-        std::fs::create_dir_all(&song).unwrap();
+        std::fs::create_dir_all(&rice).unwrap();
         std::fs::create_dir_all(&declared).unwrap();
-        std::fs::write(song.join("theme.json"), VALID_NOTES).unwrap();
-        std::fs::write(declared.join("theme.json"), r##"{"schemaVersion":"0","song":"sonata"}"##)
+        std::fs::write(rice.join("theme.json"), VALID_NOTES).unwrap();
+        std::fs::write(declared.join("theme.json"), r##"{"schemaVersion":"0","rice":"sonata"}"##)
             .unwrap();
         std::fs::write(declared.join("venue.json"), "{ not json").unwrap();
-        let before = r##"{"schemaVersion":"0","song":"nocturne","palette":{"bg":"#000000"}}"##;
+        let before = r##"{"schemaVersion":"0","rice":"nocturne","palette":{"bg":"#000000"}}"##;
         std::fs::write(stage.join("theme.json"), before).unwrap();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
 
@@ -1836,11 +1836,11 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// The venue belongs to the DECLARED song alone. Staging any OTHER song
-    /// derives from that song's own runtime notes, with no venue applied and
+    /// The venue belongs to the DECLARED rice alone. Staging any OTHER rice
+    /// derives from that rice's own runtime notes, with no venue applied and
     /// the declared twin unread.
     #[test]
-    fn stage_applies_no_venue_to_another_song() {
+    fn stage_applies_no_venue_to_another_rice() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
         let root = unique_tmp("stage-declared-venue-other");
@@ -1857,7 +1857,7 @@ mod tests {
         std::fs::write(nocturne.join("theme.json"), VALID_NOTES).unwrap();
         std::fs::write(
             declared.join("theme.json"),
-            r##"{"palette":{"accent":"#ebbcba","bg":"#0b1021","fg":"#c8d3f5","urgent":"#ff757f"},"schemaVersion":"0","song":"sonata"}"##,
+            r##"{"palette":{"accent":"#ebbcba","bg":"#0b1021","fg":"#c8d3f5","urgent":"#ff757f"},"schemaVersion":"0","rice":"sonata"}"##,
         )
         .unwrap();
         std::fs::write(
@@ -1871,7 +1871,7 @@ mod tests {
         assert_eq!(out.status, Status::Ok, "{:?}", out.data);
         let staged = std::fs::read_to_string(stage.join("theme.json")).unwrap();
         let parsed: Value = serde_json::from_str(&staged).unwrap();
-        assert_eq!(parsed["song"], "nocturne");
+        assert_eq!(parsed["rice"], "nocturne");
         assert_eq!(
             parsed["palette"]["accent"], "#82aaff",
             "nocturne's own accent, not the venue's recolour of sonata"
@@ -1882,22 +1882,22 @@ mod tests {
     }
 
     /// `rice mode declarative`'s re-pin restores declared truth: it reads the
-    /// declared twin, venue recolour included, and neither the runtime song's
+    /// declared twin, venue recolour included, and neither the runtime rice's
     /// edits nor `venue.json` reach it.
     #[test]
-    fn repin_reads_the_declared_twin_for_the_declared_song() {
+    fn repin_reads_the_declared_twin_for_the_declared_rice() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
         let root = unique_tmp("repin-declared-twin");
         ensure_default_rices_fixture();
         let stage = root.join("stage");
-        let song = root.join("rices").join("sonata");
+        let rice = root.join("rices").join("sonata");
         let declared = root.join("declared");
         std::fs::create_dir_all(&stage).unwrap();
-        std::fs::create_dir_all(&song).unwrap();
+        std::fs::create_dir_all(&rice).unwrap();
         std::fs::create_dir_all(&declared).unwrap();
-        std::fs::write(song.join("theme.json"), VALID_NOTES).unwrap();
-        let twin = r##"{"palette":{"accent":"#ebbcba","bg":"#0b1021","fg":"#c8d3f5","urgent":"#ff757f"},"schemaVersion":"0","song":"sonata"}"##;
+        std::fs::write(rice.join("theme.json"), VALID_NOTES).unwrap();
+        let twin = r##"{"palette":{"accent":"#ebbcba","bg":"#0b1021","fg":"#c8d3f5","urgent":"#ff757f"},"schemaVersion":"0","rice":"sonata"}"##;
         std::fs::write(declared.join("theme.json"), twin).unwrap();
         std::fs::write(declared.join("venue.json"), r##"{"palette":{"bg":"#191724"}}"##).unwrap();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
@@ -1907,16 +1907,16 @@ mod tests {
         let parsed: Value =
             serde_json::from_str(&std::fs::read_to_string(stage.join("theme.json")).unwrap())
                 .unwrap();
-        assert_eq!(parsed["palette"]["accent"], "#ebbcba", "the twin's recolour, not the song's");
+        assert_eq!(parsed["palette"]["accent"], "#ebbcba", "the twin's recolour, not the rice's");
         assert_eq!(parsed["palette"]["bg"], "#0b1021", "venue.json is not laid over the twin");
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// `rice stage` has no declared-song shortcut: with no runtime copy of the
-    /// declared song there is nothing to derive from, and the twin is not
+    /// `rice stage` has no declared-rice shortcut: with no runtime copy of the
+    /// declared rice there is nothing to derive from, and the twin is not
     /// read in its place — only the re-pin restores from it.
     #[test]
-    fn stage_of_the_declared_song_needs_its_runtime_copy() {
+    fn stage_of_the_declared_rice_needs_its_runtime_copy() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
         let root = unique_tmp("stage-declared-no-runtime-copy");
@@ -1925,19 +1925,19 @@ mod tests {
         let declared = root.join("declared");
         std::fs::create_dir_all(&stage).unwrap();
         std::fs::create_dir_all(&declared).unwrap();
-        std::fs::write(declared.join("theme.json"), r##"{"schemaVersion":"0","song":"sonata"}"##)
+        std::fs::write(declared.join("theme.json"), r##"{"schemaVersion":"0","rice":"sonata"}"##)
             .unwrap();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
 
         let out = handle_rice_stage(&inv(&["rice", "stage"], &["sonata"]));
         assert_eq!(out.status, Status::Error, "{:?}", out.data);
-        assert_eq!(out.data.as_ref().unwrap()["reason"], "song-not-found");
+        assert_eq!(out.data.as_ref().unwrap()["reason"], "rice-not-found");
         assert!(!stage.join("theme.json").exists());
         let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
-    fn stage_missing_song_is_error_exit_1() {
+    fn stage_missing_rice_is_error_exit_1() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
         let stage = unique_tmp("stage-missing").join("stage");
@@ -1947,7 +1947,7 @@ mod tests {
         let out = handle_rice_stage(&inv(&["rice", "stage"], &["nope"]));
         assert_eq!(out.status, Status::Error);
         assert_eq!(out.render(false).1, aoide_protocol::output::exit::ERROR);
-        assert_eq!(out.data.unwrap()["reason"], "song-not-found");
+        assert_eq!(out.data.unwrap()["reason"], "rice-not-found");
     }
 
     #[test]
@@ -1984,10 +1984,10 @@ mod tests {
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
         let root = unique_tmp("stage-entry-locked");
         let stage = root.join("stage");
-        let song = root.join("rices").join("moonlight");
+        let rice = root.join("rices").join("moonlight");
         std::fs::create_dir_all(&stage).unwrap();
-        std::fs::create_dir_all(&song).unwrap();
-        std::fs::write(song.join("theme.json"), VALID_NOTES).unwrap();
+        std::fs::create_dir_all(&rice).unwrap();
+        std::fs::write(rice.join("theme.json"), VALID_NOTES).unwrap();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
 
         // No marker file at all IS declarative (the safe default) — the
@@ -2005,10 +2005,10 @@ mod tests {
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
         let root = unique_tmp("stage-entry-unlocked");
         let stage = root.join("stage");
-        let song = root.join("rices").join("moonlight");
+        let rice = root.join("rices").join("moonlight");
         std::fs::create_dir_all(&stage).unwrap();
-        std::fs::create_dir_all(&song).unwrap();
-        std::fs::write(song.join("theme.json"), VALID_NOTES).unwrap();
+        std::fs::create_dir_all(&rice).unwrap();
+        std::fs::write(rice.join("theme.json"), VALID_NOTES).unwrap();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
 
         aoide_storage::mode::save_mode_marker(&aoide_storage::mode::ModeMarker {
@@ -2023,25 +2023,25 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    // ── rice stage: bare form auto-resolves the current song (khoa
-    // ── 2026-08-14) — same "no name = current song" convenience `rice mode
+    // ── rice stage: bare form auto-resolves the current rice (khoa
+    // ── 2026-08-14) — same "no name = current rice" convenience `rice mode
     // ── stage` already documents its own no-arg form with ─────────────────
 
     #[test]
-    fn stage_entry_with_no_name_resolves_the_current_song() {
+    fn stage_entry_with_no_name_resolves_the_current_rice() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
         let root = unique_tmp("stage-entry-bare-resolve");
         let stage = root.join("stage");
-        let song = root.join("rices").join("moonlight");
+        let rice = root.join("rices").join("moonlight");
         std::fs::create_dir_all(&stage).unwrap();
-        std::fs::create_dir_all(&song).unwrap();
-        std::fs::write(song.join("theme.json"), VALID_NOTES).unwrap();
-        // The stage already carries the "song" breadcrumb `current_staged_song`
+        std::fs::create_dir_all(&rice).unwrap();
+        std::fs::write(rice.join("theme.json"), VALID_NOTES).unwrap();
+        // The stage already carries the "rice" breadcrumb `current_staged_rice`
         // reads, as if a prior `rice mode stage moonlight` had run.
         std::fs::write(
             stage.join("theme.json"),
-            r##"{"schemaVersion":"0","song":"moonlight",
+            r##"{"schemaVersion":"0","rice":"moonlight",
                 "palette":{"bg":"#111111","fg":"#000000","accent":"#000000","urgent":"#000000"}}"##,
         )
         .unwrap();
@@ -2058,7 +2058,7 @@ mod tests {
         let restaged = std::fs::read_to_string(stage.join("theme.json")).unwrap();
         assert!(restaged.contains("#82aaff"), "VALID_NOTES's declared accent landed: {restaged}");
         let marker = aoide_storage::mode::load_mode_marker();
-        assert_eq!(marker.song, Some("moonlight".to_string()));
+        assert_eq!(marker.rice, Some("moonlight".to_string()));
         assert_eq!(marker.draft, None);
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -2071,19 +2071,19 @@ mod tests {
         // <name>` call still writes its declared content — but that write
         // transparently lands in the draft file (atomic_write is
         // symlink-transparent), and this entrypoint deliberately leaves
-        // `mode.json` completely alone: the routing (mode/song/draft) is
+        // `mode.json` completely alone: the routing (mode/rice/draft) is
         // unaffected by this write, so touching the marker here would be
         // both unnecessary and risk contradicting it.
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
         let root = unique_tmp("stage-entry-draft-mode-symlink");
         let stage = root.join("stage");
-        let song = root.join("rices").join("moonlight");
-        let draft_dir = song.join("drafts").join("neon-night");
+        let rice = root.join("rices").join("moonlight");
+        let draft_dir = rice.join("drafts").join("neon-night");
         std::fs::create_dir_all(&stage).unwrap();
-        std::fs::create_dir_all(&song).unwrap();
+        std::fs::create_dir_all(&rice).unwrap();
         std::fs::create_dir_all(&draft_dir).unwrap();
-        std::fs::write(song.join("theme.json"), VALID_NOTES).unwrap();
+        std::fs::write(rice.join("theme.json"), VALID_NOTES).unwrap();
         let draft_theme = draft_dir.join("theme.json");
         std::fs::write(&draft_theme, "stale draft content").unwrap();
         std::os::unix::fs::symlink(&draft_theme, stage.join("theme.json")).unwrap();
@@ -2091,7 +2091,7 @@ mod tests {
 
         aoide_storage::mode::save_mode_marker(&aoide_storage::mode::ModeMarker {
             mode: aoide_storage::mode::RiceMode::Draft,
-            song: Some("moonlight".to_string()),
+            rice: Some("moonlight".to_string()),
             draft: Some("neon-night".to_string()),
             ..Default::default()
         })
@@ -2107,7 +2107,7 @@ mod tests {
         // The marker is completely untouched — still Draft, still neon-night.
         let marker = aoide_storage::mode::load_mode_marker();
         assert_eq!(marker.mode, aoide_storage::mode::RiceMode::Draft);
-        assert_eq!(marker.song, Some("moonlight".to_string()));
+        assert_eq!(marker.rice, Some("moonlight".to_string()));
         assert_eq!(marker.draft, Some("neon-night".to_string()));
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -2125,10 +2125,10 @@ mod tests {
     fn draft_routed_for_auto_take(tag: &str) -> (PathBuf, PathBuf, PathBuf) {
         let root = unique_tmp(tag);
         let stage = root.join("stage");
-        let song = root.join("rices").join("moonlight");
-        let draft_dir = song.join("drafts").join("neon-night");
+        let rice = root.join("rices").join("moonlight");
+        let draft_dir = rice.join("drafts").join("neon-night");
         std::fs::create_dir_all(&stage).unwrap();
-        std::fs::create_dir_all(&song).unwrap();
+        std::fs::create_dir_all(&rice).unwrap();
         std::fs::create_dir_all(&draft_dir).unwrap();
         let draft_theme = draft_dir.join("theme.json");
         std::fs::write(&draft_theme, "{}").unwrap();
@@ -2137,20 +2137,20 @@ mod tests {
 
         aoide_storage::mode::save_mode_marker(&aoide_storage::mode::ModeMarker {
             mode: aoide_storage::mode::RiceMode::Draft,
-            song: Some("moonlight".to_string()),
+            rice: Some("moonlight".to_string()),
             draft: Some("neon-night".to_string()),
             ..Default::default()
         })
         .unwrap();
-        (root, stage, song)
+        (root, stage, rice)
     }
 
     #[test]
     fn stage_entry_in_draft_mode_mints_an_auto_take_on_a_real_change() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
-        let (root, _stage, song) = draft_routed_for_auto_take("stage-autotake-fires");
-        std::fs::write(song.join("theme.json"), VALID_NOTES).unwrap();
+        let (root, _stage, rice) = draft_routed_for_auto_take("stage-autotake-fires");
+        std::fs::write(rice.join("theme.json"), VALID_NOTES).unwrap();
 
         let out = handle_rice_stage_entry(&inv(&["rice", "stage"], &["moonlight"]));
         assert_eq!(out.status, Status::Ok, "{:?}", out.data);
@@ -2179,8 +2179,8 @@ mod tests {
         // not this hook's.
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
-        let (root, _stage, song) = draft_routed_for_auto_take("stage-autotake-repeat");
-        std::fs::write(song.join("theme.json"), VALID_NOTES).unwrap();
+        let (root, _stage, rice) = draft_routed_for_auto_take("stage-autotake-repeat");
+        std::fs::write(rice.join("theme.json"), VALID_NOTES).unwrap();
 
         let first = handle_rice_stage_entry(&inv(&["rice", "stage"], &["moonlight"]));
         assert_eq!(first.status, Status::Ok, "{:?}", first.data);
@@ -2236,10 +2236,10 @@ mod tests {
         std::env::remove_var("HYPRLAND_INSTANCE_SIGNATURE");
         let root = unique_tmp("stage-hypr-off");
         let stage = root.join("stage");
-        let song = root.join("rices").join("moonlight");
+        let rice = root.join("rices").join("moonlight");
         std::fs::create_dir_all(&stage).unwrap();
-        std::fs::create_dir_all(&song).unwrap();
-        std::fs::write(song.join("theme.json"), NOTES_WITH_WINDOW).unwrap();
+        std::fs::create_dir_all(&rice).unwrap();
+        std::fs::write(rice.join("theme.json"), NOTES_WITH_WINDOW).unwrap();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
 
         let out = handle_rice_stage(&inv(&["rice", "stage"], &["moonlight"]));
@@ -2258,10 +2258,10 @@ mod tests {
         std::env::set_var("HYPRLAND_INSTANCE_SIGNATURE", "test-signature");
         let root = unique_tmp("stage-hypr-empty");
         let stage = root.join("stage");
-        let song = root.join("rices").join("moonlight");
+        let rice = root.join("rices").join("moonlight");
         std::fs::create_dir_all(&stage).unwrap();
-        std::fs::create_dir_all(&song).unwrap();
-        std::fs::write(song.join("theme.json"), VALID_NOTES).unwrap();
+        std::fs::create_dir_all(&rice).unwrap();
+        std::fs::write(rice.join("theme.json"), VALID_NOTES).unwrap();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
 
         let out = handle_rice_stage(&inv(&["rice", "stage"], &["moonlight"]));
@@ -2283,7 +2283,7 @@ mod tests {
     // would resolve OUTSIDE the test's own tmp root (a sibling of `<root>`
     // itself) — fine for tests that never touch it, but wrong for these.
     // `widget_sync_tmp` adds one more level (`<root>/aoide/…`) so
-    // `run_qml_dir()` lands under the SAME per-test root as `song/stage`/
+    // `run_qml_dir()` lands under the SAME per-test root as `rice/stage`/
     // `rices`, keeping these tests isolated from each other and
     // from any stray `/tmp/run` a prior run might have left behind.
 
@@ -2294,7 +2294,7 @@ mod tests {
     fn widget_sync_tmp(tag: &str) -> (PathBuf, PathBuf, PathBuf) {
         let root = unique_tmp(tag);
         let aoide_root = root.join("aoide");
-        let stage = aoide_root.join("song").join("stage");
+        let stage = aoide_root.join("rice").join("stage");
         let run_qml = aoide_root.join("run").join("qml");
         std::fs::create_dir_all(&stage).unwrap();
         ensure_default_rices_fixture();
@@ -2327,24 +2327,24 @@ mod tests {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", crate::widgets::RICES_EVAL_FIXTURE_VAR]);
         let (root, stage, run_qml) = widget_sync_tmp("stage-widget-edit");
-        let song = root.join("aoide").join("song").join("rices").join("moonlight");
-        std::fs::create_dir_all(song.join("widgets")).unwrap();
-        std::fs::write(song.join("theme.json"), VALID_NOTES).unwrap();
-        std::fs::write(song.join("widgets").join("bar.qml"), "// new bar body\n").unwrap();
-        let runtime_song_dir = run_qml.join("songs").join("moonlight");
-        std::fs::create_dir_all(&runtime_song_dir).unwrap();
-        std::fs::write(runtime_song_dir.join("bar.qml"), "// stale bar body\n").unwrap();
+        let rice = root.join("aoide").join("rice").join("rices").join("moonlight");
+        std::fs::create_dir_all(rice.join("widgets")).unwrap();
+        std::fs::write(rice.join("theme.json"), VALID_NOTES).unwrap();
+        std::fs::write(rice.join("widgets").join("bar.qml"), "// new bar body\n").unwrap();
+        let runtime_rice_dir = run_qml.join("rices").join("moonlight");
+        std::fs::create_dir_all(&runtime_rice_dir).unwrap();
+        std::fs::write(runtime_rice_dir.join("bar.qml"), "// stale bar body\n").unwrap();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
         set_rices_eval_fixture(&root, r#"{"manifest":{},"registry":{}}"#);
 
         let out = handle_rice_stage(&inv(&["rice", "stage"], &["moonlight"]));
         assert_eq!(out.status, Status::Ok, "{:?}", out.data);
         assert_eq!(
-            std::fs::read_to_string(runtime_song_dir.join("bar.qml")).unwrap(),
+            std::fs::read_to_string(runtime_rice_dir.join("bar.qml")).unwrap(),
             "// new bar body\n"
         );
         assert!(
-            out.changed.iter().any(|c| c.ends_with("run/qml/songs/moonlight/bar.qml")),
+            out.changed.iter().any(|c| c.ends_with("run/qml/rices/moonlight/bar.qml")),
             "the synced runtime widget is reported changed: {:?}",
             out.changed
         );
@@ -2358,25 +2358,25 @@ mod tests {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", crate::widgets::RICES_EVAL_FIXTURE_VAR]);
         let (root, stage, run_qml) = widget_sync_tmp("stage-widget-unchanged");
-        let song = root.join("aoide").join("song").join("rices").join("moonlight");
-        std::fs::create_dir_all(song.join("widgets")).unwrap();
-        std::fs::write(song.join("theme.json"), VALID_NOTES).unwrap();
+        let rice = root.join("aoide").join("rice").join("rices").join("moonlight");
+        std::fs::create_dir_all(rice.join("widgets")).unwrap();
+        std::fs::write(rice.join("theme.json"), VALID_NOTES).unwrap();
         let body = "// stable bar body\n";
-        std::fs::write(song.join("widgets").join("bar.qml"), body).unwrap();
-        let runtime_song_dir = run_qml.join("songs").join("moonlight");
-        std::fs::create_dir_all(&runtime_song_dir).unwrap();
-        std::fs::write(runtime_song_dir.join("bar.qml"), body).unwrap();
+        std::fs::write(rice.join("widgets").join("bar.qml"), body).unwrap();
+        let runtime_rice_dir = run_qml.join("rices").join("moonlight");
+        std::fs::create_dir_all(&runtime_rice_dir).unwrap();
+        std::fs::write(runtime_rice_dir.join("bar.qml"), body).unwrap();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
         set_rices_eval_fixture(&root, r#"{"manifest":{},"registry":{}}"#);
 
         let out = handle_rice_stage(&inv(&["rice", "stage"], &["moonlight"]));
         assert_eq!(out.status, Status::Ok, "{:?}", out.data);
         assert!(
-            !out.changed.iter().any(|c| c.ends_with("run/qml/songs/moonlight/bar.qml")),
+            !out.changed.iter().any(|c| c.ends_with("run/qml/rices/moonlight/bar.qml")),
             "a byte-identical widget body must not be reported as changed: {:?}",
             out.changed
         );
-        assert_eq!(std::fs::read_to_string(runtime_song_dir.join("bar.qml")).unwrap(), body);
+        assert_eq!(std::fs::read_to_string(runtime_rice_dir.join("bar.qml")).unwrap(), body);
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -2395,29 +2395,29 @@ mod tests {
 
     /// Every manifest entry is `{ "<slot>": { "owner": "...", "file":
     /// "..." } }` — never a bare list. This is the shape assertion the
-    /// pre-C4 stale test never made (it only ever checked ONE song's
+    /// pre-C4 stale test never made (it only ever checked ONE rice's
     /// shape), which is how the list-shape regression stayed hidden.
     fn assert_every_entry_is_owner_map_shaped(manifest: &Value) {
         let obj = manifest.as_object().expect("manifest.json is an object");
-        for (song, entry) in obj {
+        for (rice, entry) in obj {
             let slots = entry
                 .as_object()
-                .unwrap_or_else(|| panic!("{song}'s manifest entry is list-shaped, not owner-map: {entry:?}"));
+                .unwrap_or_else(|| panic!("{rice}'s manifest entry is list-shaped, not owner-map: {entry:?}"));
             for (slot, record) in slots {
                 assert!(
                     record.get("owner").and_then(Value::as_str).is_some(),
-                    "{song}/{slot} has no string `owner`: {record:?}"
+                    "{rice}/{slot} has no string `owner`: {record:?}"
                 );
                 assert!(
                     record.get("file").and_then(Value::as_str).is_some(),
-                    "{song}/{slot} has no string `file`: {record:?}"
+                    "{rice}/{slot} has no string `file`: {record:?}"
                 );
             }
         }
     }
 
     #[test]
-    fn stage_regenerates_the_manifest_and_heals_every_songs_shape_not_just_the_staged_one() {
+    fn stage_regenerates_the_manifest_and_heals_every_rices_shape_not_just_the_staged_one() {
         // The regression this whole commit exists for: a prior stray write
         // (the pre-C4 hazard) left `sonata` in the OLD bare-list shape.
         // `fugue` is untouched by the bug in this fixture (already
@@ -2425,7 +2425,7 @@ mod tests {
         // manifest where BOTH `sonata` (rewritten from list → owner-map)
         // AND `fugue` (regenerated fresh, not merely preserved) come out
         // correctly shaped, because whole-file regeneration from the eval
-        // source can't reproduce the old bug's failure mode: every song's
+        // source can't reproduce the old bug's failure mode: every rice's
         // entry, staged or not, comes from the same eval every time. The
         // eval source itself is a fixture (`set_rices_eval_fixture`), not
         // a real `nix eval` of the committed rices: this test is about
@@ -2434,14 +2434,14 @@ mod tests {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", crate::widgets::RICES_EVAL_FIXTURE_VAR]);
         let (root, stage, run_qml) = widget_sync_tmp("stage-manifest-heal");
-        let song = root.join("aoide").join("song").join("rices").join("sonata");
-        std::fs::create_dir_all(song.join("widgets")).unwrap();
-        std::fs::write(song.join("theme.json"), VALID_NOTES).unwrap();
-        std::fs::write(song.join("widgets").join("bar.qml"), "// bar\n").unwrap();
-        let songs_dir = run_qml.join("songs");
-        std::fs::create_dir_all(&songs_dir).unwrap();
+        let rice = root.join("aoide").join("rice").join("rices").join("sonata");
+        std::fs::create_dir_all(rice.join("widgets")).unwrap();
+        std::fs::write(rice.join("theme.json"), VALID_NOTES).unwrap();
+        std::fs::write(rice.join("widgets").join("bar.qml"), "// bar\n").unwrap();
+        let rices_dir = run_qml.join("rices");
+        std::fs::create_dir_all(&rices_dir).unwrap();
         std::fs::write(
-            songs_dir.join("manifest.json"),
+            rices_dir.join("manifest.json"),
             r#"{"sonata":["bar","calendar"],"fugue":{"bar":{"owner":"fugue","file":"bar.qml"},"notifications":{"owner":"fugue","file":"notifications.qml"}}}"#,
         )
         .unwrap();
@@ -2464,7 +2464,7 @@ mod tests {
         let out = handle_rice_stage(&inv(&["rice", "stage"], &["sonata"]));
         assert_eq!(out.status, Status::Ok, "{:?}", out.data);
         let manifest: Value = serde_json::from_str(
-            &std::fs::read_to_string(songs_dir.join("manifest.json")).unwrap(),
+            &std::fs::read_to_string(rices_dir.join("manifest.json")).unwrap(),
         )
         .unwrap();
 
@@ -2494,10 +2494,10 @@ mod tests {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
         let (root, stage, _run_qml) = widget_sync_tmp("stage-widget-no-runtime");
-        let song = root.join("aoide").join("song").join("rices").join("moonlight");
-        std::fs::create_dir_all(song.join("widgets")).unwrap();
-        std::fs::write(song.join("theme.json"), VALID_NOTES).unwrap();
-        std::fs::write(song.join("widgets").join("bar.qml"), "// bar\n").unwrap();
+        let rice = root.join("aoide").join("rice").join("rices").join("moonlight");
+        std::fs::create_dir_all(rice.join("widgets")).unwrap();
+        std::fs::write(rice.join("theme.json"), VALID_NOTES).unwrap();
+        std::fs::write(rice.join("widgets").join("bar.qml"), "// bar\n").unwrap();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
 
         let out = handle_rice_stage(&inv(&["rice", "stage"], &["moonlight"]));
@@ -2512,18 +2512,18 @@ mod tests {
     }
 
     #[test]
-    fn stage_skips_widget_sync_when_song_has_no_widgets_dir() {
+    fn stage_skips_widget_sync_when_rice_has_no_widgets_dir() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", crate::widgets::RICES_EVAL_FIXTURE_VAR]);
         let (root, stage, run_qml) = widget_sync_tmp("stage-widget-no-widgets-dir");
-        let song = root.join("aoide").join("song").join("rices").join("moonlight");
-        std::fs::create_dir_all(&song).unwrap();
-        std::fs::write(song.join("theme.json"), VALID_NOTES).unwrap();
+        let rice = root.join("aoide").join("rice").join("rices").join("moonlight");
+        std::fs::create_dir_all(&rice).unwrap();
+        std::fs::write(rice.join("theme.json"), VALID_NOTES).unwrap();
         std::fs::create_dir_all(&run_qml).unwrap();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
         // "moonlight" isn't in the fixture at all (mirrors it not being a
-        // real committed song); "fugue" is present with an empty widget-type
-        // registry entry (mirrors a real committed song that declares no
+        // real committed rice); "fugue" is present with an empty widget-type
+        // registry entry (mirrors a real committed rice that declares no
         // widget types).
         set_rices_eval_fixture(&root, r#"{"manifest":{},"registry":{"fugue":{}}}"#);
 
@@ -2532,9 +2532,9 @@ mod tests {
         // theme.json is staged; manifest.json AND registry.json are BOTH
         // (re)generated whole from the rices eval (C4) — a runtime tree
         // exists, so both regenerate unconditionally, regardless of whether
-        // the ACTIVE song ("moonlight", fake, not in the fixture) has a
+        // the ACTIVE rice ("moonlight", fake, not in the fixture) has a
         // local widgets/ dir. No widget BODIES are copied though: no LOCAL
-        // widgets/ dir → no per-song run/qml songs/moonlight/ dir.
+        // widgets/ dir → no per-rice run/qml rices/moonlight/ dir.
         assert_eq!(
             out.changed.len(),
             5,
@@ -2544,16 +2544,16 @@ mod tests {
         );
         assert!(out.changed.iter().any(|c| c.ends_with("stage/theme.json")));
         assert!(out.changed.iter().any(|c| c.ends_with("stage/terminal-colors.conf")));
-        assert!(out.changed.iter().any(|c| c.ends_with("run/qml/songs/manifest.json")));
-        assert!(out.changed.iter().any(|c| c.ends_with("run/qml/songs/registry.json")));
-        assert!(!run_qml.join("songs").join("moonlight").exists());
+        assert!(out.changed.iter().any(|c| c.ends_with("run/qml/rices/manifest.json")));
+        assert!(out.changed.iter().any(|c| c.ends_with("run/qml/rices/registry.json")));
+        assert!(!run_qml.join("rices").join("moonlight").exists());
         let registry: Value = serde_json::from_str(
-            &std::fs::read_to_string(run_qml.join("songs").join("registry.json")).unwrap(),
+            &std::fs::read_to_string(run_qml.join("rices").join("registry.json")).unwrap(),
         )
         .unwrap();
         assert!(
             registry.get("moonlight").is_none(),
-            "moonlight isn't a real committed song, so it has no registry entry at all: {registry:?}"
+            "moonlight isn't a real committed rice, so it has no registry entry at all: {registry:?}"
         );
         assert_eq!(
             registry["fugue"],
@@ -2567,18 +2567,18 @@ mod tests {
     #[ignore = "real `nix eval` of the committed rices — no flake checkout/network/`nix` in \
                 the nix package build's sandboxed checkPhase; run with --ignored"]
     fn stage_regenerates_the_registry_from_the_real_rices() {
-        // C4/W3: `registry.json` no longer reads THIS song's local
+        // C4/W3: `registry.json` no longer reads THIS rice's local
         // `theme.json` at all — it comes entirely from nix's eval of the
         // committed rices, same as `manifest.json`. So this test doesn't
         // author a fixture `.widgets` block; it stages an arbitrary real
-        // song and checks that every OTHER real song's registry entry comes
+        // rice and checks that every OTHER real rice's registry entry comes
         // out correct: nocturne's `vigil` (dock, with `order`), and
-        // barcarolle's empty entry (a song that declares no widget types).
+        // barcarolle's empty entry (a rice that declares no widget types).
         // Run with `STRILLIX_TEMPLATES=<strillix-rices>/share/strillix/rices`:
         // the shipped rices is both the templates and the machine's own
         // rices (symlinked in below), so the generator evaluates the real
         // committed folders and no fixture stands in for it.
-        let templates = aoide_storage::fs::song_templates_dir()
+        let templates = aoide_storage::fs::rice_templates_dir()
             .expect("run with STRILLIX_TEMPLATES=<strillix-rices>/share/strillix/rices");
         let _g = aoide_test_support::env_lock()
             .lock()
@@ -2587,7 +2587,7 @@ mod tests {
         std::env::remove_var(crate::widgets::RICES_EVAL_FIXTURE_VAR);
         let _real = crate::commands::test_support::require_the_real_rices_path();
         let (root, stage, run_qml) = widget_sync_tmp("stage-registry-real-kinds");
-        std::os::unix::fs::symlink(&templates, root.join("aoide").join("song").join("rices"))
+        std::os::unix::fs::symlink(&templates, root.join("aoide").join("rice").join("rices"))
             .unwrap();
         std::fs::create_dir_all(&run_qml).unwrap();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
@@ -2597,12 +2597,12 @@ mod tests {
         assert!(
             out.changed
                 .iter()
-                .any(|c| c.ends_with("run/qml/songs/registry.json")),
+                .any(|c| c.ends_with("run/qml/rices/registry.json")),
             "registry.json write is reported changed: {:?}",
             out.changed
         );
         let registry: Value = serde_json::from_str(
-            &std::fs::read_to_string(run_qml.join("songs").join("registry.json")).unwrap(),
+            &std::fs::read_to_string(run_qml.join("rices").join("registry.json")).unwrap(),
         )
         .unwrap();
         assert_eq!(
@@ -2624,7 +2624,7 @@ mod tests {
 
     #[test]
     fn stage_leaves_the_registry_untouched_when_already_current() {
-        // Idempotency: stage the SAME song twice with nothing changed in
+        // Idempotency: stage the SAME rice twice with nothing changed in
         // between. The first call writes the fixture's content; the second
         // call must report no registry.json write at all. Content doesn't
         // matter here — only that it's stable across the two calls, so an
@@ -2632,9 +2632,9 @@ mod tests {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", crate::widgets::RICES_EVAL_FIXTURE_VAR]);
         let (root, stage, run_qml) = widget_sync_tmp("stage-registry-unchanged");
-        let song = root.join("aoide").join("song").join("rices").join("fugue");
-        std::fs::create_dir_all(&song).unwrap();
-        std::fs::write(song.join("theme.json"), VALID_NOTES).unwrap();
+        let rice = root.join("aoide").join("rice").join("rices").join("fugue");
+        std::fs::create_dir_all(&rice).unwrap();
+        std::fs::write(rice.join("theme.json"), VALID_NOTES).unwrap();
         std::fs::create_dir_all(&run_qml).unwrap();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
         set_rices_eval_fixture(
@@ -2645,7 +2645,7 @@ mod tests {
         let first = handle_rice_stage(&inv(&["rice", "stage"], &["fugue"]));
         assert_eq!(first.status, Status::Ok, "{:?}", first.data);
         assert!(
-            first.changed.iter().any(|c| c.ends_with("run/qml/songs/registry.json")),
+            first.changed.iter().any(|c| c.ends_with("run/qml/rices/registry.json")),
             "the first stage call writes registry.json: {:?}",
             first.changed
         );
@@ -2653,7 +2653,7 @@ mod tests {
         let second = handle_rice_stage(&inv(&["rice", "stage"], &["fugue"]));
         assert_eq!(second.status, Status::Ok, "{:?}", second.data);
         assert!(
-            !second.changed.iter().any(|c| c.ends_with("run/qml/songs/registry.json")),
+            !second.changed.iter().any(|c| c.ends_with("run/qml/rices/registry.json")),
             "a byte-identical second regeneration must not be reported as changed: {:?}",
             second.changed
         );
@@ -2690,11 +2690,11 @@ mod tests {
         // `moonlight`'s own committed rices dir — a widgets/ slot plus a
         // theme.json `.widgets` block, the ONLY shape `rice compose` ever
         // produces (no `_widgets/` shelf).
-        let song = root.join("aoide").join("song").join("rices").join("moonlight");
-        std::fs::create_dir_all(song.join("widgets")).unwrap();
-        std::fs::write(song.join("widgets").join("bar.qml"), "// bar\n").unwrap();
+        let rice = root.join("aoide").join("rice").join("rices").join("moonlight");
+        std::fs::create_dir_all(rice.join("widgets")).unwrap();
+        std::fs::write(rice.join("widgets").join("bar.qml"), "// bar\n").unwrap();
         std::fs::write(
-            song.join("theme.json"),
+            rice.join("theme.json"),
             r##"{ "schemaVersion":"0",
                 "palette": {"bg":"#0b1021","fg":"#c8d3f5","accent":"#82aaff","urgent":"#ff757f"},
                 "widgets": {"bar":{"kind":"dock","order":0}} }"##,
@@ -2705,8 +2705,8 @@ mod tests {
         std::fs::create_dir_all(&flake_root).unwrap();
 
         // The shipped templates dir: prebaked manifest.json/registry.json
-        // carrying only ANOTHER song's entry — the baseline every OTHER
-        // committed song's entry must survive from.
+        // carrying only ANOTHER rice's entry — the baseline every OTHER
+        // committed rice's entry must survive from.
         let templates = root.join("templates");
         std::fs::create_dir_all(&templates).unwrap();
         std::fs::write(
@@ -2729,37 +2729,37 @@ mod tests {
         assert_eq!(out.status, Status::Ok, "{:?}", out.data);
 
         let manifest: Value = serde_json::from_str(
-            &std::fs::read_to_string(run_qml.join("songs").join("manifest.json")).unwrap(),
+            &std::fs::read_to_string(run_qml.join("rices").join("manifest.json")).unwrap(),
         )
         .unwrap();
         assert_eq!(
             manifest["fugue"],
             json!({ "other": { "owner": "fugue", "file": "other.qml" } }),
-            "the templated baseline entry for another song survives: {manifest:?}"
+            "the templated baseline entry for another rice survives: {manifest:?}"
         );
         assert_eq!(
             manifest["moonlight"],
             json!({ "bar": { "owner": "moonlight", "file": "bar.qml" } }),
-            "the freshly-composed song's own entry comes from a direct scan: {manifest:?}"
+            "the freshly-composed rice's own entry comes from a direct scan: {manifest:?}"
         );
 
         let registry: Value = serde_json::from_str(
-            &std::fs::read_to_string(run_qml.join("songs").join("registry.json")).unwrap(),
+            &std::fs::read_to_string(run_qml.join("rices").join("registry.json")).unwrap(),
         )
         .unwrap();
         assert_eq!(registry["fugue"], json!({}), "the templated baseline registry entry survives");
         assert_eq!(
             registry["moonlight"],
             json!({ "bar": { "kind": "dock", "order": 0 } }),
-            "the freshly-composed song's own registry entry comes from its own theme.json: {registry:?}"
+            "the freshly-composed rice's own registry entry comes from its own theme.json: {registry:?}"
         );
 
         let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
-    fn stage_refuses_a_machine_song_on_a_host_with_no_nix() {
-        // §7.5 case 3's first form: the song is not built into this system
+    fn stage_refuses_a_machine_rice_on_a_host_with_no_nix() {
+        // §7.5 case 3's first form: the rice is not built into this system
         // (`builtin.json` ships none), lives only in the machine's own
         // rices, and this host has no `nix-instantiate` to regenerate the
         // manifest with. NOTHING may be staged — refusing is the point, not a
@@ -2767,7 +2767,7 @@ mod tests {
         //
         // (The `_widgets/` shelf this fixture carries is deliberate: a shelf is
         // exactly what the old repo-less path could not resolve, and what the
-        // shipped generator CAN — `composeSong` runs inside the generator. It
+        // shipped generator CAN — `composeRice` runs inside the generator. It
         // is here so this test also pins that the refusal is about `nix`, not
         // about shelves.)
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
@@ -2781,9 +2781,9 @@ mod tests {
         let _armed = crate::commands::test_support::require_the_real_rices_path();
         let (root, stage, run_qml) = widget_sync_tmp("stage-no-nix-refused");
 
-        let song = root.join("aoide").join("song").join("rices").join("sonata");
-        std::fs::create_dir_all(song.join("_widgets")).unwrap();
-        std::fs::write(song.join("theme.json"), VALID_NOTES).unwrap();
+        let rice = root.join("aoide").join("rice").join("rices").join("sonata");
+        std::fs::create_dir_all(rice.join("_widgets")).unwrap();
+        std::fs::write(rice.join("theme.json"), VALID_NOTES).unwrap();
 
         let templates = root.join("templates");
         std::fs::create_dir_all(&templates).unwrap();
@@ -2807,7 +2807,7 @@ mod tests {
             out.message
         );
         assert!(
-            out.message.contains("add it to habit.song.available and rebuild"),
+            out.message.contains("add it to habit.rice.available and rebuild"),
             "the taught refusal names the way out: {}",
             out.message
         );
@@ -2823,8 +2823,8 @@ mod tests {
     fn stage_refuses_when_no_shipped_templates_dir_exists() {
         // A host with no shipped templates dir at all (`$STRILLIX_TEMPLATES`
         // unset, nothing beside the binary) has nowhere to read a built-in
-        // song's baked manifest/registry from and no generator to resolve a
-        // machine song with: a taught error naming both places looked in, not a
+        // rice's baked manifest/registry from and no generator to resolve a
+        // machine rice with: a taught error naming both places looked in, not a
         // panic.
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&[
@@ -2837,9 +2837,9 @@ mod tests {
         let _armed = crate::commands::test_support::require_the_real_rices_path();
         let (root, stage, run_qml) = widget_sync_tmp("stage-templates-neither");
 
-        let song = root.join("aoide").join("song").join("rices").join("moonlight");
-        std::fs::create_dir_all(&song).unwrap();
-        std::fs::write(song.join("theme.json"), VALID_NOTES).unwrap();
+        let rice = root.join("aoide").join("rice").join("rices").join("moonlight");
+        std::fs::create_dir_all(&rice).unwrap();
+        std::fs::write(rice.join("theme.json"), VALID_NOTES).unwrap();
 
         std::fs::create_dir_all(&run_qml).unwrap();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
@@ -2929,13 +2929,13 @@ mod tests {
     }
 
     #[test]
-    fn stage_from_templates_preserves_a_sibling_composed_songs_entry_across_regens() {
-        // The MUST-FIX regression this test exists for: staging a SECOND song
-        // must not drop the FIRST song's manifest/registry entry. Neither is in
-        // the baked baseline, and the generated answer only covers the songs
+    fn stage_from_templates_preserves_a_sibling_composed_rices_entry_across_regens() {
+        // The MUST-FIX regression this test exists for: staging a SECOND rice
+        // must not drop the FIRST rice's manifest/registry entry. Neither is in
+        // the baked baseline, and the generated answer only covers the rices
         // the machine's rices holds — so the merge in `plan_stage` (shipped
         // baseline, then this system's own generated answer on top) is what
-        // keeps every still-live song's entry.
+        // keeps every still-live rice's entry.
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&[
             "AOIDE_STAGE_DIR",
@@ -2955,7 +2955,7 @@ mod tests {
         compose_and_stage(&payload, "beta");
 
         let manifest: Value = serde_json::from_str(
-            &std::fs::read_to_string(run_qml.join("songs").join("manifest.json")).unwrap(),
+            &std::fs::read_to_string(run_qml.join("rices").join("manifest.json")).unwrap(),
         )
         .unwrap();
         assert_eq!(
@@ -2970,7 +2970,7 @@ mod tests {
         );
 
         let registry: Value = serde_json::from_str(
-            &std::fs::read_to_string(run_qml.join("songs").join("registry.json")).unwrap(),
+            &std::fs::read_to_string(run_qml.join("rices").join("registry.json")).unwrap(),
         )
         .unwrap();
         assert_eq!(
@@ -2993,7 +2993,7 @@ mod tests {
     /// patch has no directory to scan, and replacing the entry with an empty
     /// scan deleted sonata from the manifest and blanked every surface.
     #[test]
-    fn stage_from_templates_keeps_a_shipped_songs_baked_entry_when_its_rices_dir_is_absent() {
+    fn stage_from_templates_keeps_a_shipped_rices_baked_entry_when_its_rices_dir_is_absent() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&[
             "AOIDE_STAGE_DIR",
@@ -3017,7 +3017,7 @@ mod tests {
         // needs no generator stand-in.
         std::fs::write(
             root.join("templates").join("builtin.json"),
-            r#"{"declared":null,"songs":["sonata"],"packages":[]}"#,
+            r#"{"declared":null,"rices":["sonata"],"packages":[]}"#,
         )
         .unwrap();
 
@@ -3025,7 +3025,7 @@ mod tests {
         std::fs::create_dir_all(declared.parent().unwrap()).unwrap();
         std::fs::write(
             &declared,
-            r##"{"palette":{"accent":"#ebbcba","bg":"#191724","fg":"#e0def4","urgent":"#eb6f92"},"schemaVersion":"0","song":"sonata"}"##,
+            r##"{"palette":{"accent":"#ebbcba","bg":"#191724","fg":"#e0def4","urgent":"#eb6f92"},"schemaVersion":"0","rice":"sonata"}"##,
         )
         .unwrap();
         assert!(!shellbridge::rice_dir("sonata").is_dir(), "no runtime rices entry for sonata");
@@ -3034,12 +3034,12 @@ mod tests {
         assert_eq!(out.status, Status::Ok, "re-pin sonata from the declared twin: {:?}", out.data);
 
         let manifest: Value = serde_json::from_str(
-            &std::fs::read_to_string(run_qml.join("songs").join("manifest.json")).unwrap(),
+            &std::fs::read_to_string(run_qml.join("rices").join("manifest.json")).unwrap(),
         )
         .unwrap();
         assert_eq!(manifest["sonata"], baked_manifest["sonata"], "baked manifest entry survives: {manifest:?}");
         let registry: Value = serde_json::from_str(
-            &std::fs::read_to_string(run_qml.join("songs").join("registry.json")).unwrap(),
+            &std::fs::read_to_string(run_qml.join("rices").join("registry.json")).unwrap(),
         )
         .unwrap();
         assert_eq!(registry["sonata"], baked_registry["sonata"], "baked registry entry survives: {registry:?}");
@@ -3048,10 +3048,10 @@ mod tests {
     }
 
     #[test]
-    fn stage_from_templates_prunes_a_composed_songs_entry_once_its_rices_dir_is_gone() {
+    fn stage_from_templates_prunes_a_composed_rices_entry_once_its_rices_dir_is_gone() {
         // The other half of the same fix: the overlay must NOT keep an
-        // immortal stale key. Once a composed song's rices directory is
-        // removed, the next regen for a DIFFERENT song must drop it — it is
+        // immortal stale key. Once a composed rice's rices directory is
+        // removed, the next regen for a DIFFERENT rice must drop it — it is
         // in neither the frozen baseline nor the on-disk overlay's
         // surviving set.
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
@@ -3073,7 +3073,7 @@ mod tests {
         compose_and_stage(&payload, "beta");
 
         // alpha's rices dir is gone — simulating a deleted/never-declared
-        // composed song.
+        // composed rice.
         std::fs::remove_dir_all(shellbridge::rice_dir("alpha")).unwrap();
 
         // Re-stage beta: nothing about beta itself changed, but the regen
@@ -3083,7 +3083,7 @@ mod tests {
         assert_eq!(out.status, Status::Ok, "{:?}", out.data);
 
         let manifest: Value = serde_json::from_str(
-            &std::fs::read_to_string(run_qml.join("songs").join("manifest.json")).unwrap(),
+            &std::fs::read_to_string(run_qml.join("rices").join("manifest.json")).unwrap(),
         )
         .unwrap();
         assert!(
@@ -3097,7 +3097,7 @@ mod tests {
         );
 
         let registry: Value = serde_json::from_str(
-            &std::fs::read_to_string(run_qml.join("songs").join("registry.json")).unwrap(),
+            &std::fs::read_to_string(run_qml.join("rices").join("registry.json")).unwrap(),
         )
         .unwrap();
         assert!(
@@ -3142,10 +3142,10 @@ mod tests {
         std::env::set_var("AOIDE_FLAKE_ROOT", &checkout);
         std::env::set_var("STRILLIX_TEMPLATES", root.join("templates"));
 
-        let song = shellbridge::rice_dir("moonlight");
-        std::fs::create_dir_all(song.join("widgets")).unwrap();
-        std::fs::write(song.join("theme.json"), VALID_NOTES).unwrap();
-        std::fs::write(song.join("widgets").join("bar.qml"), "// bar\n").unwrap();
+        let rice = shellbridge::rice_dir("moonlight");
+        std::fs::create_dir_all(rice.join("widgets")).unwrap();
+        std::fs::write(rice.join("theme.json"), VALID_NOTES).unwrap();
+        std::fs::write(rice.join("widgets").join("bar.qml"), "// bar\n").unwrap();
         refresh_payload(&payload);
 
         let out = handle_rice_stage(&inv(&["rice", "stage"], &["moonlight"]));
@@ -3181,7 +3181,7 @@ mod tests {
     }
 
     #[test]
-    fn stage_of_a_built_in_song_never_invokes_the_generator() {
+    fn stage_of_a_built_in_rice_never_invokes_the_generator() {
         // §9(a)'s other half: case 1 needs no nix, and this proves it by
         // leaving a recording `nix-instantiate` on PATH and asserting the
         // record is empty.
@@ -3212,18 +3212,18 @@ mod tests {
         .unwrap();
         std::fs::write(
             templates.join("builtin.json"),
-            r#"{"declared":null,"songs":["sonata"],"packages":[]}"#,
+            r#"{"declared":null,"rices":["sonata"],"packages":[]}"#,
         )
         .unwrap();
 
-        // The declared twin, written AFTER the stage dir is pinned — the song
+        // The declared twin, written AFTER the stage dir is pinned — the rice
         // has no rices copy at all, which is case 1's other half.
         // Only the re-pin can stage it: `rice stage` needs the runtime copy.
         let declared = shellbridge::declared_notes();
         std::fs::create_dir_all(declared.parent().unwrap()).unwrap();
         std::fs::write(
             &declared,
-            r##"{"palette":{"accent":"#ebbcba","bg":"#191724","fg":"#e0def4","urgent":"#eb6f92"},"schemaVersion":"0","song":"sonata"}"##,
+            r##"{"palette":{"accent":"#ebbcba","bg":"#191724","fg":"#e0def4","urgent":"#eb6f92"},"schemaVersion":"0","rice":"sonata"}"##,
         )
         .unwrap();
 
@@ -3231,24 +3231,24 @@ mod tests {
         assert_eq!(out.status, Status::Ok, "{:?}", out.data);
         assert!(
             !root.join("nix-instantiate-argv.txt").exists(),
-            "a built-in song with no differing machine copy stages with no nix at all"
+            "a built-in rice with no differing machine copy stages with no nix at all"
         );
 
         let manifest: Value = serde_json::from_str(
-            &std::fs::read_to_string(run_qml.join("songs").join("manifest.json")).unwrap(),
+            &std::fs::read_to_string(run_qml.join("rices").join("manifest.json")).unwrap(),
         )
         .unwrap();
         assert_eq!(
             manifest["sonata"],
             json!({ "bar": { "owner": "sonata", "file": "bar.qml" } }),
-            "the baked baseline is what a built-in song stages from: {manifest:?}"
+            "the baked baseline is what a built-in rice stages from: {manifest:?}"
         );
         let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
     fn stage_refuses_and_leaves_stage_and_run_qml_byte_unchanged_when_packages_are_missing() {
-        // §9(d): a machine-rices song whose `packages` are absent from
+        // §9(d): a machine-rices rice whose `packages` are absent from
         // `builtin.json.packages` is refused, and NOTHING is staged — not the
         // theme, not a widget body, not the manifest.
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
@@ -3268,13 +3268,13 @@ mod tests {
         // machine's own copy of moonlight needs a package that is not here.
         std::fs::write(
             root.join("templates").join("builtin.json"),
-            r#"{"declared":"sonata","songs":["sonata"],"packages":[]}"#,
+            r#"{"declared":"sonata","rices":["sonata"],"packages":[]}"#,
         )
         .unwrap();
-        let song = shellbridge::rice_dir("moonlight");
-        std::fs::create_dir_all(song.join("widgets")).unwrap();
-        std::fs::write(song.join("theme.json"), VALID_NOTES).unwrap();
-        std::fs::write(song.join("widgets").join("bar.qml"), "// bar\n").unwrap();
+        let rice = shellbridge::rice_dir("moonlight");
+        std::fs::create_dir_all(rice.join("widgets")).unwrap();
+        std::fs::write(rice.join("theme.json"), VALID_NOTES).unwrap();
+        std::fs::write(rice.join("widgets").join("bar.qml"), "// bar\n").unwrap();
         std::fs::write(
             &payload,
             json!({
@@ -3286,9 +3286,9 @@ mod tests {
         )
         .unwrap();
 
-        std::fs::create_dir_all(run_qml.join("songs")).unwrap();
-        std::fs::write(run_qml.join("songs").join("manifest.json"), "{}\n").unwrap();
-        std::fs::write(run_qml.join("songs").join("registry.json"), "{}\n").unwrap();
+        std::fs::create_dir_all(run_qml.join("rices")).unwrap();
+        std::fs::write(run_qml.join("rices").join("manifest.json"), "{}\n").unwrap();
+        std::fs::write(run_qml.join("rices").join("registry.json"), "{}\n").unwrap();
 
         let before = crate::commands::test_support::tree_snapshot(&[&stage, &run_qml]);
         let out = handle_rice_stage(&inv(&["rice", "stage"], &["moonlight"]));
@@ -3297,12 +3297,12 @@ mod tests {
             out.message.contains(
                 "rebuild needed: moonlight needs not-installed-pkg (not in this system)"
             ),
-            "the taught refusal names the song and the missing packages: {}",
+            "the taught refusal names the rice and the missing packages: {}",
             out.message
         );
         assert!(
             out.message
-                .contains("add \"moonlight\" to habit.song.available"),
+                .contains("add \"moonlight\" to habit.rice.available"),
             "…and the way out: {}",
             out.message
         );
@@ -3315,14 +3315,14 @@ mod tests {
     }
 
     #[test]
-    fn a_snapshot_in_a_seeded_built_in_song_still_stages_with_no_nix() {
-        // H2: the machine's own runtime dirs are NOT a difference in the SONG.
+    fn a_snapshot_in_a_seeded_built_in_rice_still_stages_with_no_nix() {
+        // H2: the machine's own runtime dirs are NOT a difference in the RICE.
         // `rice history`, `rice back` (its drift snapshot), `rice draft save` and
         // `rice element seed` all write INSIDE the machine's copy of a built-in
-        // song — and comparing those names against the shipped folder made the
-        // song "differing", which on a host with no nix reads as `is not built
+        // rice — and comparing those names against the shipped folder made the
+        // rice "differing", which on a host with no nix reads as `is not built
         // into this system` (false on its face) and disables stage/reload/back
-        // for that song. One snapshot must not do that.
+        // for that rice. One snapshot must not do that.
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&[
             "AOIDE_STAGE_DIR",
@@ -3339,7 +3339,7 @@ mod tests {
         std::env::set_var("STRILLIX_TEMPLATES", &templates);
         std::fs::write(
             templates.join("builtin.json"),
-            r#"{"declared":"sonata","songs":["sonata"],"packages":[]}"#,
+            r#"{"declared":"sonata","rices":["sonata"],"packages":[]}"#,
         )
         .unwrap();
 
@@ -3364,7 +3364,7 @@ mod tests {
         assert_eq!(out.status, Status::Ok, "{:?}", out.data);
         assert!(
             !root.join("nix-instantiate-argv.txt").exists(),
-            "a seeded built-in song with a take and a draft is still case 1 — no nix at all"
+            "a seeded built-in rice with a take and a draft is still case 1 — no nix at all"
         );
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -3372,11 +3372,11 @@ mod tests {
     #[test]
     fn staging_a_borrower_carries_its_lenders_widget_bodies_too() {
         // M4: a borrowed slot's BODY lives in the lender's `widgets/`, and
-        // `StagingEngine.qml` resolves a slot to `songs/<owner>/<file>` — so
+        // `StagingEngine.qml` resolves a slot to `rices/<owner>/<file>` — so
         // staging a borrower without its lender's bodies leaves a dead slot
         // with no error anywhere. The owners come from the entry `plan_stage`
         // resolved, which for a machine-authored composition is the
-        // generator's own answer (that is where `composeSong` resolves
+        // generator's own answer (that is where `composeRice` resolves
         // borrowed ownership).
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&[
@@ -3414,14 +3414,14 @@ mod tests {
         let out = handle_rice_stage(&inv(&["rice", "stage"], &["borrower"]));
         assert_eq!(out.status, Status::Ok, "{:?}", out.data);
         assert_eq!(
-            std::fs::read_to_string(run_qml.join("songs").join("lender").join("bar.qml")).unwrap(),
+            std::fs::read_to_string(run_qml.join("rices").join("lender").join("bar.qml")).unwrap(),
             "// lender bar\n",
-            "the lender's body is carried, so `songs/<owner>/<file>` resolves"
+            "the lender's body is carried, so `rices/<owner>/<file>` resolves"
         );
         assert!(
             out.changed
                 .iter()
-                .any(|c| c.ends_with("run/qml/songs/lender/bar.qml")),
+                .any(|c| c.ends_with("run/qml/rices/lender/bar.qml")),
             "…and is reported: {:?}",
             out.changed
         );
@@ -3433,13 +3433,13 @@ mod tests {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
         let (root, stage, run_qml) = widget_sync_tmp("stage-entry-widget-locked");
-        let song = root.join("aoide").join("song").join("rices").join("moonlight");
-        std::fs::create_dir_all(song.join("widgets")).unwrap();
-        std::fs::write(song.join("theme.json"), VALID_NOTES).unwrap();
-        std::fs::write(song.join("widgets").join("bar.qml"), "// new bar body\n").unwrap();
-        let runtime_song_dir = run_qml.join("songs").join("moonlight");
-        std::fs::create_dir_all(&runtime_song_dir).unwrap();
-        std::fs::write(runtime_song_dir.join("bar.qml"), "// stale bar body\n").unwrap();
+        let rice = root.join("aoide").join("rice").join("rices").join("moonlight");
+        std::fs::create_dir_all(rice.join("widgets")).unwrap();
+        std::fs::write(rice.join("theme.json"), VALID_NOTES).unwrap();
+        std::fs::write(rice.join("widgets").join("bar.qml"), "// new bar body\n").unwrap();
+        let runtime_rice_dir = run_qml.join("rices").join("moonlight");
+        std::fs::create_dir_all(&runtime_rice_dir).unwrap();
+        std::fs::write(runtime_rice_dir.join("bar.qml"), "// stale bar body\n").unwrap();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
 
         // No marker file at all IS declarative (the safe default).
@@ -3447,7 +3447,7 @@ mod tests {
         assert_eq!(out.status, Status::Error);
         assert_eq!(out.data.unwrap()["reason"], "declarative-mode-locked");
         assert_eq!(
-            std::fs::read_to_string(runtime_song_dir.join("bar.qml")).unwrap(),
+            std::fs::read_to_string(runtime_rice_dir.join("bar.qml")).unwrap(),
             "// stale bar body\n",
             "the declarative-mode lock covers widget bodies too, not just theme.json"
         );
@@ -3455,22 +3455,22 @@ mod tests {
     }
 
     #[test]
-    fn stage_entry_with_no_name_syncs_the_current_songs_widgets() {
+    fn stage_entry_with_no_name_syncs_the_current_rices_widgets() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", crate::widgets::RICES_EVAL_FIXTURE_VAR]);
         let (root, stage, run_qml) = widget_sync_tmp("stage-entry-widget-bare");
-        let song = root.join("aoide").join("song").join("rices").join("moonlight");
-        std::fs::create_dir_all(song.join("widgets")).unwrap();
-        std::fs::write(song.join("theme.json"), VALID_NOTES).unwrap();
-        std::fs::write(song.join("widgets").join("bar.qml"), "// new bar body\n").unwrap();
-        let runtime_song_dir = run_qml.join("songs").join("moonlight");
-        std::fs::create_dir_all(&runtime_song_dir).unwrap();
-        std::fs::write(runtime_song_dir.join("bar.qml"), "// stale bar body\n").unwrap();
-        // The stage already carries the "song" breadcrumb `current_staged_song`
+        let rice = root.join("aoide").join("rice").join("rices").join("moonlight");
+        std::fs::create_dir_all(rice.join("widgets")).unwrap();
+        std::fs::write(rice.join("theme.json"), VALID_NOTES).unwrap();
+        std::fs::write(rice.join("widgets").join("bar.qml"), "// new bar body\n").unwrap();
+        let runtime_rice_dir = run_qml.join("rices").join("moonlight");
+        std::fs::create_dir_all(&runtime_rice_dir).unwrap();
+        std::fs::write(runtime_rice_dir.join("bar.qml"), "// stale bar body\n").unwrap();
+        // The stage already carries the "rice" breadcrumb `current_staged_rice`
         // reads, as if a prior `rice mode stage moonlight` had run.
         std::fs::write(
             stage.join("theme.json"),
-            r##"{"schemaVersion":"0","song":"moonlight",
+            r##"{"schemaVersion":"0","rice":"moonlight",
                 "palette":{"bg":"#111111","fg":"#000000","accent":"#000000","urgent":"#000000"}}"##,
         )
         .unwrap();
@@ -3486,9 +3486,9 @@ mod tests {
         let out = handle_rice_stage_entry(&inv(&["rice", "stage"], &[]));
         assert_eq!(out.status, Status::Ok, "{:?}", out.data);
         assert_eq!(
-            std::fs::read_to_string(runtime_song_dir.join("bar.qml")).unwrap(),
+            std::fs::read_to_string(runtime_rice_dir.join("bar.qml")).unwrap(),
             "// new bar body\n",
-            "the no-arg path syncs widgets the same as the named-song path"
+            "the no-arg path syncs widgets the same as the named-rice path"
         );
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -3498,33 +3498,33 @@ mod tests {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", crate::widgets::RICES_EVAL_FIXTURE_VAR]);
         let (root, stage, run_qml) = widget_sync_tmp("stage-widget-helpers");
-        let song = root.join("aoide").join("song").join("rices").join("moonlight");
-        std::fs::create_dir_all(song.join("widgets").join("assets")).unwrap();
-        std::fs::write(song.join("theme.json"), VALID_NOTES).unwrap();
-        std::fs::write(song.join("widgets").join("bar.qml"), "// bar\n").unwrap();
+        let rice = root.join("aoide").join("rice").join("rices").join("moonlight");
+        std::fs::create_dir_all(rice.join("widgets").join("assets")).unwrap();
+        std::fs::write(rice.join("theme.json"), VALID_NOTES).unwrap();
+        std::fs::write(rice.join("widgets").join("bar.qml"), "// bar\n").unwrap();
         std::fs::write(
-            song.join("widgets").join("WorkspaceRow.qml"),
+            rice.join("widgets").join("WorkspaceRow.qml"),
             "// helper component\n",
         )
         .unwrap();
-        std::fs::write(song.join("widgets").join("assets").join("logo.txt"), "logo data").unwrap();
+        std::fs::write(rice.join("widgets").join("assets").join("logo.txt"), "logo data").unwrap();
         std::fs::create_dir_all(&run_qml).unwrap();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
         set_rices_eval_fixture(&root, r#"{"manifest":{},"registry":{}}"#);
 
         let out = handle_rice_stage(&inv(&["rice", "stage"], &["moonlight"]));
         assert_eq!(out.status, Status::Ok, "{:?}", out.data);
-        let runtime_song_dir = run_qml.join("songs").join("moonlight");
+        let runtime_rice_dir = run_qml.join("rices").join("moonlight");
         assert_eq!(
-            std::fs::read_to_string(runtime_song_dir.join("bar.qml")).unwrap(),
+            std::fs::read_to_string(runtime_rice_dir.join("bar.qml")).unwrap(),
             "// bar\n"
         );
         assert_eq!(
-            std::fs::read_to_string(runtime_song_dir.join("WorkspaceRow.qml")).unwrap(),
+            std::fs::read_to_string(runtime_rice_dir.join("WorkspaceRow.qml")).unwrap(),
             "// helper component\n"
         );
         assert_eq!(
-            std::fs::read_to_string(runtime_song_dir.join("assets").join("logo.txt")).unwrap(),
+            std::fs::read_to_string(runtime_rice_dir.join("assets").join("logo.txt")).unwrap(),
             "logo data"
         );
         let data = out.data.unwrap();
@@ -3540,7 +3540,7 @@ mod tests {
     //
     // A repo-less/fresh host's runtime rices starts with nothing in it —
     // these prove `rice stage <name>` (`handle_rice_stage_entry`) copies a
-    // SHIPPED song's whole template tree in, once, idempotently, and never
+    // SHIPPED rice's whole template tree in, once, idempotently, and never
     // touches a rices dir that already has anything in it, even
     // partially. Same `$STRILLIX_TEMPLATES` fixture shape
     // `compose_falls_back_to_the_templates_dir_when_the_rices_has_nothing`
@@ -3553,14 +3553,14 @@ mod tests {
         let root = unique_tmp("seed-when-absent");
         let stage = root.join("stage");
         let templates = root.join("templates");
-        let templated_song = templates.join("moonlight");
+        let templated_rice = templates.join("moonlight");
         std::fs::create_dir_all(&stage).unwrap();
-        std::fs::create_dir_all(templated_song.join("design")).unwrap();
-        std::fs::create_dir_all(templated_song.join("widgets")).unwrap();
-        std::fs::write(templated_song.join("theme.json"), VALID_NOTES).unwrap();
-        std::fs::write(templated_song.join("rice.nix"), "# shipped rice.nix\n").unwrap();
-        std::fs::write(templated_song.join("design").join("intent.md"), "# intent\n").unwrap();
-        std::fs::write(templated_song.join("widgets").join("bar.qml"), "// bar\n").unwrap();
+        std::fs::create_dir_all(templated_rice.join("design")).unwrap();
+        std::fs::create_dir_all(templated_rice.join("widgets")).unwrap();
+        std::fs::write(templated_rice.join("theme.json"), VALID_NOTES).unwrap();
+        std::fs::write(templated_rice.join("rice.nix"), "# shipped rice.nix\n").unwrap();
+        std::fs::write(templated_rice.join("design").join("intent.md"), "# intent\n").unwrap();
+        std::fs::write(templated_rice.join("widgets").join("bar.qml"), "// bar\n").unwrap();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
         std::env::set_var("STRILLIX_TEMPLATES", &templates);
 
@@ -3577,30 +3577,30 @@ mod tests {
             "the seed is reported honestly, never silent: {}",
             out.message
         );
-        assert_eq!(out.data.unwrap()["seeded"], json!(templated_song.to_string_lossy()));
+        assert_eq!(out.data.unwrap()["seeded"], json!(templated_rice.to_string_lossy()));
 
         // The whole shipped tree arrived, byte for byte.
-        let rices_song = shellbridge::rice_dir("moonlight");
+        let rices_rice = shellbridge::rice_dir("moonlight");
         assert_eq!(
-            std::fs::read_to_string(rices_song.join("theme.json")).unwrap(),
+            std::fs::read_to_string(rices_rice.join("theme.json")).unwrap(),
             VALID_NOTES
         );
         assert_eq!(
-            std::fs::read_to_string(rices_song.join("rice.nix")).unwrap(),
+            std::fs::read_to_string(rices_rice.join("rice.nix")).unwrap(),
             "# shipped rice.nix\n"
         );
         assert_eq!(
-            std::fs::read_to_string(rices_song.join("design").join("intent.md")).unwrap(),
+            std::fs::read_to_string(rices_rice.join("design").join("intent.md")).unwrap(),
             "# intent\n"
         );
         assert_eq!(
-            std::fs::read_to_string(rices_song.join("widgets").join("bar.qml")).unwrap(),
+            std::fs::read_to_string(rices_rice.join("widgets").join("bar.qml")).unwrap(),
             "// bar\n"
         );
         assert!(
             out.changed
                 .iter()
-                .any(|c| c == &rices_song.to_string_lossy().into_owned()),
+                .any(|c| c == &rices_rice.to_string_lossy().into_owned()),
             "the seeded rices dir is reported in `changed` too: {:?}",
             out.changed
         );
@@ -3613,16 +3613,16 @@ mod tests {
     }
 
     #[test]
-    fn stage_entry_seeds_nothing_on_a_second_stage_of_an_already_seeded_song() {
+    fn stage_entry_seeds_nothing_on_a_second_stage_of_an_already_seeded_rice() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "STRILLIX_TEMPLATES"]);
         let root = unique_tmp("seed-idempotence");
         let stage = root.join("stage");
         let templates = root.join("templates");
-        let templated_song = templates.join("moonlight");
+        let templated_rice = templates.join("moonlight");
         std::fs::create_dir_all(&stage).unwrap();
-        std::fs::create_dir_all(&templated_song).unwrap();
-        std::fs::write(templated_song.join("theme.json"), VALID_NOTES).unwrap();
+        std::fs::create_dir_all(&templated_rice).unwrap();
+        std::fs::write(templated_rice.join("theme.json"), VALID_NOTES).unwrap();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
         std::env::set_var("STRILLIX_TEMPLATES", &templates);
 
@@ -3640,7 +3640,7 @@ mod tests {
         assert_eq!(second.status, Status::Ok, "{:?}", second.data);
         assert!(
             !second.message.contains("seeded rices"),
-            "a second stage of an already-seeded song seeds nothing: {}",
+            "a second stage of an already-seeded rice seeds nothing: {}",
             second.message
         );
         assert_eq!(
@@ -3652,39 +3652,39 @@ mod tests {
     }
 
     #[test]
-    fn seed_rices_from_templates_never_clobbers_an_existing_even_partial_song_dir() {
+    fn seed_rices_from_templates_never_clobbers_an_existing_even_partial_rice_dir() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "STRILLIX_TEMPLATES"]);
         let root = unique_tmp("seed-never-clobber");
         let stage = root.join("stage");
         let templates = root.join("templates");
-        let templated_song = templates.join("moonlight");
+        let templated_rice = templates.join("moonlight");
         std::fs::create_dir_all(&stage).unwrap();
-        std::fs::create_dir_all(&templated_song).unwrap();
-        std::fs::write(templated_song.join("theme.json"), VALID_NOTES).unwrap();
-        std::fs::write(templated_song.join("rice.nix"), "# shipped rice.nix\n").unwrap();
+        std::fs::create_dir_all(&templated_rice).unwrap();
+        std::fs::write(templated_rice.join("theme.json"), VALID_NOTES).unwrap();
+        std::fs::write(templated_rice.join("rice.nix"), "# shipped rice.nix\n").unwrap();
 
-        // The runtime rices already has SOMETHING for this song — a
+        // The runtime rices already has SOMETHING for this rice — a
         // hand-edited `theme.json` and nothing else (a partial dir, the
         // shape a prior interrupted edit could leave). Deliberately
         // DIFFERENT content from the template's own, so a clobber would be
         // caught immediately.
-        let existing_song = root.join("rices").join("moonlight");
-        std::fs::create_dir_all(&existing_song).unwrap();
+        let existing_rice = root.join("rices").join("moonlight");
+        std::fs::create_dir_all(&existing_rice).unwrap();
         const HAND_EDITED: &str = r##"{"schemaVersion":"0","palette":{"bg":"#111111"}}"##;
-        std::fs::write(existing_song.join("theme.json"), HAND_EDITED).unwrap();
+        std::fs::write(existing_rice.join("theme.json"), HAND_EDITED).unwrap();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
         std::env::set_var("STRILLIX_TEMPLATES", &templates);
 
         let seeded = seed_rices_from_templates("moonlight").unwrap();
         assert!(seeded.is_none(), "an existing, even partial, rices dir skips the seed entirely");
         assert_eq!(
-            std::fs::read_to_string(existing_song.join("theme.json")).unwrap(),
+            std::fs::read_to_string(existing_rice.join("theme.json")).unwrap(),
             HAND_EDITED,
             "the existing file stays byte-identical"
         );
         assert!(
-            !existing_song.join("rice.nix").exists(),
+            !existing_rice.join("rice.nix").exists(),
             "never a per-file fill — the missing rice.nix is NOT backfilled from the template"
         );
 
@@ -3693,7 +3693,7 @@ mod tests {
 
     // ── rice compose (Phase E) ────────────────────────────────────────────────
     //
-    // The PURE `nix_scalar`/`valid_song_name` unit tests moved to
+    // The PURE `nix_scalar`/`valid_rice_name` unit tests moved to
     // `crate::compose`'s own test module (Phase 5b restructure) alongside
     // the functions they exercise. Everything below is handler-level: it
     // drives `handle_rice_compose` through `Invocation`/`Outcome`.
@@ -3792,10 +3792,10 @@ mod tests {
     }
 
     #[test]
-    fn compose_missing_from_song_is_error() {
+    fn compose_missing_from_rice_is_error() {
         // Neither location has it (L-C3, task #107): no rices entry, and
         // `STRILLIX_TEMPLATES` unset with no real `share/strillix/rices`
-        // beside the test binary — `song_templates_dir()` resolves to
+        // beside the test binary — `rice_templates_dir()` resolves to
         // `None`. Taught error naming both, never a panic.
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "STRILLIX_TEMPLATES"]);
@@ -3808,7 +3808,7 @@ mod tests {
         let out = handle_rice_compose(&inv(&["rice", "compose"], &["moonlight"]));
         assert_eq!(out.status, Status::Error);
         assert_eq!(out.render(false).1, aoide_protocol::output::exit::ERROR);
-        assert_eq!(out.data.unwrap()["reason"], "from-song-not-found");
+        assert_eq!(out.data.unwrap()["reason"], "from-rice-not-found");
         assert!(
             out.message.contains("rices") && out.message.contains("templates"),
             "the taught error names both locations checked: {}",
@@ -3828,10 +3828,10 @@ mod tests {
         let root = unique_tmp("compose-templates-fallback");
         let stage = root.join("stage");
         let templates = root.join("templates");
-        let templated_song = templates.join("sonata");
+        let templated_rice = templates.join("sonata");
         std::fs::create_dir_all(&stage).unwrap();
-        std::fs::create_dir_all(&templated_song).unwrap();
-        std::fs::write(templated_song.join("theme.json"), VALID_NOTES).unwrap();
+        std::fs::create_dir_all(&templated_rice).unwrap();
+        std::fs::write(templated_rice.join("theme.json"), VALID_NOTES).unwrap();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
         std::env::set_var("STRILLIX_TEMPLATES", &templates);
 
@@ -3852,7 +3852,7 @@ mod tests {
     }
 
     #[test]
-    fn compose_prefers_the_rices_over_the_templates_dir_when_both_have_the_song() {
+    fn compose_prefers_the_rices_over_the_templates_dir_when_both_have_the_rice() {
         // Resolution ladder, tier ordering: `rice_dir(from)` wins even
         // when `$STRILLIX_TEMPLATES` ALSO has an entry for the same name —
         // the templates dir is a fallback, never a shadow.
@@ -3860,14 +3860,14 @@ mod tests {
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "STRILLIX_TEMPLATES"]);
         let root = unique_tmp("compose-templates-precedence");
         let stage = root.join("stage");
-        let rices_song = root.join("rices").join("sonata");
+        let rices_rice = root.join("rices").join("sonata");
         let templates = root.join("templates");
-        let templated_song = templates.join("sonata");
+        let templated_rice = templates.join("sonata");
         std::fs::create_dir_all(&stage).unwrap();
-        std::fs::create_dir_all(&rices_song).unwrap();
-        std::fs::create_dir_all(&templated_song).unwrap();
-        std::fs::write(rices_song.join("theme.json"), VALID_NOTES).unwrap();
-        std::fs::write(templated_song.join("theme.json"), NOTES_WITH_WINDOW).unwrap();
+        std::fs::create_dir_all(&rices_rice).unwrap();
+        std::fs::create_dir_all(&templated_rice).unwrap();
+        std::fs::write(rices_rice.join("theme.json"), VALID_NOTES).unwrap();
+        std::fs::write(templated_rice.join("theme.json"), NOTES_WITH_WINDOW).unwrap();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
         std::env::set_var("STRILLIX_TEMPLATES", &templates);
 
@@ -3881,7 +3881,7 @@ mod tests {
     }
 
     #[test]
-    fn compose_scaffolds_every_file_from_a_from_song_with_no_window_or_geometry() {
+    fn compose_scaffolds_every_file_from_a_from_rice_with_no_window_or_geometry() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
         let root = unique_tmp("compose-ok");
@@ -3902,14 +3902,14 @@ mod tests {
         assert!(target.join("theme.json").is_file());
         assert!(target.join("design").join("intent.md").is_file());
         assert!(target.join("widgets").join(".gitkeep").is_file());
-        // No stray .nix files (checks.song-shape requires rice.nix to be the
+        // No stray .nix files (checks.rice-shape requires rice.nix to be the
         // ONLY .nix under a rices entry).
         assert!(!target.join("hypr").exists());
 
         let rice_nix = std::fs::read_to_string(target.join("rice.nix")).unwrap();
         assert!(rice_nix.contains("bar = \"strillix\";"), "the system half selects the paint: {rice_nix}");
         assert!(rice_nix.contains("members = [ \"strillix\" ];"), "the home half selects the renderer");
-        assert!(!rice_nix.contains("config.aoide.song"), "a body is never self-gated: {rice_nix}");
+        assert!(!rice_nix.contains("config.aoide.rice"), "a body is never self-gated: {rice_nix}");
         let hypr = std::fs::read_to_string(target.join("hyprland.conf")).unwrap();
         assert!(hypr.contains("No keys yet"), "no --from hyprland.conf: the header is written: {hypr}");
         assert!(rice_nix.contains("\"#0b1021\""), "palette bg copied: {rice_nix}");
@@ -3968,7 +3968,7 @@ mod tests {
         assert!(rice_nix.contains("terminalOpacity = null;"));
         assert!(rice_nix.contains("border = \"#82aaff\";"));
         assert!(rice_nix.contains("borderInactive = \"#0b1021\";"));
-        assert!(rice_nix.contains("inherited from song \"sonata\""));
+        assert!(rice_nix.contains("inherited from rice \"sonata\""));
 
         let mirrored = std::fs::read_to_string(target.join("theme.json")).unwrap();
         assert_eq!(mirrored, NOTES_WITH_GEOMETRY, "geometry block mirrored verbatim");
@@ -4032,7 +4032,7 @@ mod rice_link_tests {
         let root = unique_tmp(tag);
         let home = root.join("home");
         std::fs::create_dir_all(&home).unwrap();
-        std::fs::create_dir_all(root.join("aoide").join("song").join("stage")).unwrap();
+        std::fs::create_dir_all(root.join("aoide").join("rice").join("stage")).unwrap();
         std::env::set_var("HOME", &home);
         std::env::set_var("AOIDE_ROOT", root.join("aoide"));
         std::env::set_var("STRILLIX_ROOT", root.join("aoide"));
@@ -4041,7 +4041,7 @@ mod rice_link_tests {
         (root, saver)
     }
 
-    fn rices_song(name: &str, hyprland: Option<&str>) {
+    fn rices_rice(name: &str, hyprland: Option<&str>) {
         let dir = shellbridge::rice_dir(name);
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("theme.json"), NOTES).unwrap();
@@ -4055,11 +4055,11 @@ mod rice_link_tests {
     }
 
     #[test]
-    fn a_stage_links_the_song_conf_and_falls_back_to_the_empty_file_never_the_last_song() {
+    fn a_stage_links_the_rice_conf_and_falls_back_to_the_empty_file_never_the_last_rice() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let (root, _env) = rig("rice-link-song-then-empty");
-        rices_song("moonlight", Some("bind = SUPER, Q, killactive\n"));
-        rices_song("dusk", None);
+        let (root, _env) = rig("rice-link-rice-then-empty");
+        rices_rice("moonlight", Some("bind = SUPER, Q, killactive\n"));
+        rices_rice("dusk", None);
         let link = shellbridge::rice_conf_link();
         let empty = shellbridge::empty_rice_conf();
 
@@ -4068,7 +4068,7 @@ mod rice_link_tests {
         assert_eq!(std::fs::read_link(&link).unwrap(), shellbridge::rice_dir("moonlight").join("hyprland.conf"));
         assert_eq!(out.data.as_ref().unwrap()["riceConf"]["status"], "linked");
 
-        // The next song has no hyprland.conf: the link moves to the empty
+        // The next rice has no hyprland.conf: the link moves to the empty
         // staging-owned file, so moonlight's binds stop applying.
         let out = stage("dusk");
         assert_eq!(out.status, Status::Ok, "{:?}", out.data);
@@ -4094,14 +4094,14 @@ mod rice_link_tests {
     fn the_repin_names_the_declared_twin_and_falls_back_to_the_empty_file() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let (root, _env) = rig("rice-link-repin");
-        rices_song("moonlight", Some("bind = SUPER, Q, killactive\n"));
+        rices_rice("moonlight", Some("bind = SUPER, Q, killactive\n"));
 
         assert_eq!(rice_target_for("moonlight", true), shellbridge::empty_rice_conf());
         let twin = shellbridge::declared_rice_conf();
         std::fs::create_dir_all(twin.parent().unwrap()).unwrap();
         std::fs::write(&twin, "bind = SUPER, T, exec, foot\n").unwrap();
         assert_eq!(rice_target_for("moonlight", true), twin);
-        // A stage ignores the twin and takes the song's own file.
+        // A stage ignores the twin and takes the rice's own file.
         assert_eq!(
             rice_target_for("moonlight", false),
             shellbridge::rice_dir("moonlight").join("hyprland.conf"),

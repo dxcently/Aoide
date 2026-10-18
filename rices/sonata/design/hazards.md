@@ -1,6 +1,6 @@
 # Hazards — what has actually failed on this rig
 
-**Song:** sonata
+**Rice:** sonata
 
 Each entry below was found the hard way on yomi-strix — most of them with a
 screenshot or a journalctl line — and is recorded in the comments of the file
@@ -108,7 +108,7 @@ Other glyph findings:
   properties: `property FileView noteFile: FileView { … }` in `ThemeState`,
   `property Connections _manifestWatch: Connections { … }` in `SurfaceSlot`.
 - **Transitive reactivity is not guaranteed for a non-visual root.**
-  `SurfaceSlot` found that its `resolvedSong`/`resolvedSource` chain did not
+  `SurfaceSlot` found that its `resolvedRice`/`resolvedSource` chain did not
   reliably re-trigger on a late `stagingEngine.manifest` load the way
   `WidgetSlot`'s Item-rooted version does, and forces the dependency with an
   explicit `Connections` rather than depending on it.
@@ -288,7 +288,7 @@ resetting to zero.
 
 - **`aoide rice stage` refuses while the rice mode is `declarative`** (the
   default) with `reason: "declarative-mode-locked"`. Run
-  `aoide rice mode stage [<song>]` first; `aoide rice mode declarative` locks
+  `aoide rice mode stage [<rice>]` first; `aoide rice mode declarative` locks
   it back.
 - **A re-stage that changes no widget body deliberately skips the Quickshell
   reload** ("no widget bodies changed; nothing to reload"). If you need a
@@ -298,8 +298,8 @@ resetting to zero.
 - **The CLI command is `quickshell reload`, not `shell reload`** — renamed
   because `shell` collided with `--agent shell`.
 - **Quickshell's file watcher only scans the TOP LEVEL of `run/qml/`, never
-  `run/qml/songs/`.** So editing a song widget can never trigger a reload on
-  its own — `aoide rice stage <song>`'s IPC call is the *only* thing that
+  `run/qml/rices/`.** So editing a rice widget can never trigger a reload on
+  its own — `aoide rice stage <rice>`'s IPC call is the *only* thing that
   makes the edit render. There is no watcher fallback behind it.
 - **`quickshell ipc call` exits 0 even when the call never reached a
   handler**, printing `Not ready to accept queries yet.` to **stdout** (not
@@ -390,7 +390,7 @@ render threads.
   infinite animation and every timer shorter than a minute reads its item's
   `visible`. The gadgets gated this way: `usage.qml` clef shimmer and spin
   frame, `conductor.qml` card pulses, pi pen and hook spinner, `terminals.qml`
-  row pulses, kaomoji frame and the 1 s clock; `herald-center.qml` critical
+  row pulses, kaomoji frame and the 1 s clock; `notifications-center.qml` critical
   breath.
 - **The peek is a mapped codex too.** While any session awaits, the dock rests
   at `peekReveal` with the whole book visible and only the fore-edge sliver on

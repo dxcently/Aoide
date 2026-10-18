@@ -7,8 +7,8 @@ widget reads it exactly as it reads the live desktop's stage: the canvas
 never talks to `aoided`, so these four files ARE the world the previewed
 widget sees.
 
-Song-blind, like the rest of this shell source: a fixture describes
-session/project/hook/notifications *shapes*, never a song's taste.
+Rice-blind, like the rest of this shell source: a fixture describes
+session/project/hook/notifications *shapes*, never a rice's taste.
 
 ## The four files
 

@@ -5,7 +5,7 @@
 //! - `apps show <id>` is one entry in the same shape, plus the `.desktop` file
 //!   it came from, whether the shell lists it, and the filter that says why
 //!   not.
-//! - `apps publish` writes `song/stage/apps.json` (CONTRACTS.md §4, "apps.json
+//! - `apps publish` writes `rice/stage/apps.json` (CONTRACTS.md §4, "apps.json
 //!   v0"). With `--run` it keeps that file current until stopped: every 2 s it
 //!   recomputes a [`fingerprint`] of everything the document is read from, and
 //!   only a changed fingerprint rebuilds it. The planned `aoide-apps` user unit
@@ -61,12 +61,12 @@ pub fn register(r: &mut Registry) {
     ));
     r.insert(cmd!(
         path: ["apps", "publish"],
-        summary: "Write song/stage/apps.json, the app list the shell reads; rewritten only when the apps differ from the file on disk.",
+        summary: "Write rice/stage/apps.json, the app list the shell reads; rewritten only when the apps differ from the file on disk.",
         args: [],
         flags: [flag!(
             "run",
             "bool",
-            "Keep song/stage/apps.json current until stopped: re-check every 2 s, rewrite only on change.",
+            "Keep rice/stage/apps.json current until stopped: re-check every 2 s, rewrite only on change.",
             doors: &[Door::Cli]
         )],
         gated: false,

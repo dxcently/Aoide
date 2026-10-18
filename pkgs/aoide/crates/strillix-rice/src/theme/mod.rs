@@ -1,8 +1,8 @@
-//! `theme` — the native design-token engine, ported into song from the standalone
+//! `theme` — the native design-token engine, ported into rice from the standalone
 //! Node engine (see docs/architecture/THEME-MERGE.md).
 //!
 //! The engine is a pure-Rust port of the standalone Node token engine's
-//! `{schema,resolve,emitters,cli}.js`, folded into song's charter ("the
+//! `{schema,resolve,emitters,cli}.js`, folded into rice's charter ("the
 //! ricing / design engine"):
 //!
 //! ```text
@@ -21,7 +21,7 @@
 //! Pure computation only: the effectful half (running `hyprctl --batch`,
 //! atomically writing the stage file) lives outside — `live::apply_live` and
 //! `shellbridge::atomic_write` — so the engine is golden-testable and the
-//! host-apply seam stays exactly where song already draws it.
+//! host-apply seam stays exactly where rice already draws it.
 
 pub mod emit;
 pub mod resolve;

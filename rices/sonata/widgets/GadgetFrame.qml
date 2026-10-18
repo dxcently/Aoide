@@ -1,6 +1,6 @@
 // GadgetFrame.qml — one sonata TEMPLE BAY (Greek-grammar reskin of the pane).
 //
-// Sonata's house grammar (song/songbook/sonata/design/greek-grammar.md §4) recasts
+// Sonata's house grammar (rices/sonata/design/greek-grammar.md §4) recasts
 // the former Pantheon wireframe pane as a FLAT typographic temple bay: an
 // entablature drawn from box characters over the SAME translucent Aero glass body
 // + gloss (glass untouched — blur, sheen, frost stay). The 3D vanishing-point
@@ -79,7 +79,7 @@ Item {
     // ── Glass tuning ────────────────────────────────────────────────────────
     property real glassOpacity: 0.72
 
-    // ── Chrome colour overrides (additive; default to the song's note reads) ──
+    // ── Chrome colour overrides (additive; default to the rice's note reads) ──
     // The dock leaves these at their defaults, so its bays render unchanged. The
     // bar's BarPopout overrides them to the popout palette (opaque glass, ink
     // chrome/label) so the bar's popouts match the sheet-music bar.

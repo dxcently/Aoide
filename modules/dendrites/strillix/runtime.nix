@@ -15,13 +15,13 @@
 # (the registry it declares its own surfaces in), `aoide.layout`, the
 # core scalars (`aoide.enable`, `aoide.root`, `aoide.checkout`,
 # `aoide.hostConfig`, `aoide.user`),
-# the song selection (`aoide.rice`) and the derived fact
-# `aoide.rices.builtIn` (the songs this host builds in — what this lane's
+# the rice selection (`aoide.rice`) and the derived fact
+# `aoide.rices.builtIn` (the rices this host builds in — what this lane's
 # deployed manifest, widget copy, installed packages, shipped templates and seed
 # are built FROM) and its own fact.
 #   - Component-tier fallback (null → palette) applied locally, never pushed
 #     back into the option system.
-#   - NEVER reads song/ runtime paths at build time (checks.rice-shape and
+#   - NEVER reads rice/ runtime paths at build time (checks.rice-shape and
 #     checks.rice-runtime-untracked are the structural half).
 #
 # Communication discipline (entities/Quickshell):
@@ -39,13 +39,13 @@
 }:
 let
 
-  # Committed songs live here (CONTRACTS.md §5) — versioned score, read at
-  # build time (nothing here reads a song/ RUNTIME dir; the check that used
+  # Committed rices live here (CONTRACTS.md §5) — versioned score, read at
+  # build time (nothing here reads a rice/ RUNTIME dir; the check that used
   # to assert that scanned module PATHS and is gone — what replaced it is
   # `checks.rice-shape`'s `strayNixFiles` and `checks.rice-runtime-untracked`).
   #
   # Handed in as a module argument by the same hook that sets
-  # `aoide.rices.builtIn` (lib/aoideos.nix, and every consumer's copy of
+  # `aoide.rices.builtIn` (lib/strillix.nix, and every consumer's copy of
   # that wiring): a consumer's rices may be its own tree's or Aoide's
   # exported `ricesRoot`, so this lane must not name a path inside
   # Aoide's.
@@ -55,9 +55,9 @@ let
   # constructor's hook into the fact `aoide.rices.builtIn`. Everything below
   # the deployed manifest and registry, the widget bodies, the installed
   # packages, the shipped templates and the machine-rices seed all run over
-  # these names, never over every committed song.
+  # these names, never over every committed rice.
   #
-  # A song that is NOT built in is still stageable from the machine's own
+  # A rice that is NOT built in is still stageable from the machine's own
   # rices (`aoide rice stage <n>`) — the runtime keeps a wider manifest
   # than this deployed tree carries, which is exactly the seam
   # `builtin.json`'s `packages` exists to check (§7.5).
@@ -82,47 +82,47 @@ let
 
   refreshCmd = "${pkgs.coreutils}/bin/env AOIDE_ROOT=${config.aoide.root} STRILLIX_ROOT=${config.aoide.strillix.root} STRILLIX_TEMPLATES=${pkgs.strillix-rices}/share/strillix/rices ${pkgs.aoide.strillix}/bin/strillix rice refresh";
 
-  # ── The songs this derivation reads, as their OWN store paths ────────────
+  # ── The rices this derivation reads, as their OWN store paths ────────────
   # The same contract `pkgs/strillix-rices` keeps, for the same reason: a path
-  # literal that names the rices DIRECTORY makes every song in the repo
+  # literal that names the rices DIRECTORY makes every rice in the repo
   # part of this derivation, and this derivation's path rides the deploy
-  # activation — so editing a song this host does not even build in moved its
+  # activation — so editing a rice this host does not even build in moved its
   # whole toplevel drvPath. `builtins.path` copies the folder, so the input
-  # is exactly the built-in set. Same `name` as the package's copy of a song,
-  # so the two derivations share one store path per song.
-  songDirOf =
+  # is exactly the built-in set. Same `name` as the package's copy of a rice,
+  # so the two derivations share one store path per rice.
+  riceDirOf =
     name:
     builtins.path {
-      path = ricesLib.songs.${name};
-      name = "strillix-song-${name}";
+      path = ricesLib.riceDirs.${name};
+      name = "strillix-rice-${name}";
     };
 
-  # The deployed tree describes the songs the shell can actually resolve: a
-  # slot record naming a song whose `widgets/` is not in this tree would
+  # The deployed tree describes the rices the shell can actually resolve: a
+  # slot record naming a rice whose `widgets/` is not in this tree would
   # point at nothing.
   onlyBuiltIn = lib.filterAttrs (name: _: builtins.elem name builtIn);
 
-  # ── Active song's committed theme — also a legitimate build-time read ─────
+  # ── Active rice's committed theme — also a legitimate build-time read ─────
   # `rices/<name>/theme.json` is versioned score
-  # (checks.rice-runtime-untracked only names song/{stage,auditions,declared}/,
+  # (checks.rice-runtime-untracked only names rice/{stage,auditions,declared}/,
   # never rices/), so
-  # naming the ACTIVE song's theme file here is allowed for the same reason
+  # naming the ACTIVE rice's theme file here is allowed for the same reason
   # `rices` above is. Path concatenation (not string-interpolating the
   # whole `rices` dir) so only this one file gets copied into the store.
-  activeSongTheme = ricesLib.songs.${config.aoide.rice} + "/theme.json";
+  activeRiceTheme = ricesLib.riceDirs.${config.aoide.rice} + "/theme.json";
 
   theme = import ../../../lib/theme.nix { inherit lib; };
 
-  committedTheme = builtins.fromJSON (builtins.readFile activeSongTheme);
+  committedTheme = builtins.fromJSON (builtins.readFile activeRiceTheme);
 
   # The stage twin is the committed theme with the VENUE applied — the same
   # `aoide.theme.override` recolour the Stylix and compositor fan-outs get
   # (CONTRACTS.md §1, override tier), through the same `lib/theme.nix`, and
   # the geometry the host resolves (`aoide.theme.geometry`, which
-  # `hyprland.conf` and the kitty fragment already bake) laid over the song's
+  # `hyprland.conf` and the kitty fragment already bake) laid over the rice's
   # own, so the twin equals the bake. Not a second rule: `stagePatch` is
   # `resolve`'s two passes against the file's own shape. Identity when the
-  # host sets no override and no geometry beyond the song's own, so a host
+  # host sets no override and no geometry beyond the rice's own, so a host
   # without a venue stages exactly the committed bytes it staged before.
   stageTheme = pkgs.writeText "aoide-stage-theme.json" (
     builtins.toJSON (theme.stagePatch config.aoide.theme committedTheme)
@@ -132,32 +132,32 @@ let
   # sets differently in the committed theme, `{}` when the host sets
   # neither (`lib/theme.nix`'s `venueDelta`). Published beside the declared
   # twin as `$STRILLIX_ROOT/declared/venue.json`: the runtime stage reads the declared
-  # song from the runtime rices and overlays this, so the recolour law
+  # rice from the runtime rices and overlays this, so the recolour law
   # stays in nix alone.
   venueFile = pkgs.writeText "aoide-declared-venue.json" (
     builtins.toJSON (theme.venueDelta config.aoide.theme committedTheme)
   );
 
-  # The declared song's lock-screen dress (CONTRACTS.md §4,
+  # The declared rice's lock-screen dress (CONTRACTS.md §4,
   # `$STRILLIX_ROOT/declared/hyprlock.conf`), rendered at build time by the strillix binary
   # from the venue-recoloured notes above: the same bytes a stage of this
-  # song writes, with no second copy of the colour mapping to go stale. The
-  # picture is the shipped rices's store copy; a song with no
+  # rice writes, with no second copy of the colour mapping to go stale. The
+  # picture is the shipped rices's store copy; a rice with no
   # `lockscreen.<ext>` renders comments only.
   declaredLockscreen = pkgs.runCommand "aoide-declared-hyprlock.conf" { } ''
     export HOME=$TMPDIR AOIDE_ROOT=$TMPDIR/root
     ${pkgs.aoide.strillix}/bin/strillix theme emit hyprlock ${stageTheme} \
-      --song-dir ${pkgs.strillix-rices}/share/strillix/rices/${config.aoide.rice} \
+      --rice-dir ${pkgs.strillix-rices}/share/strillix/rices/${config.aoide.rice} \
       --out "$TMPDIR/hyprlock.conf"
     cp "$TMPDIR/hyprlock.conf" "$out"
   '';
 
-  # The active song's terminal opacity (`aoide.theme.geometry.terminalOpacity`,
+  # The active rice's terminal opacity (`aoide.theme.geometry.terminalOpacity`,
   # CONTRACTS.md §1): `null` is "no opinion" and leaves the kitty dendrite's
   # baked value standing. The seed below publishes it as the one-line
   # `$STRILLIX_ROOT/declared/terminal-opacity.conf`, which kitty includes BEFORE the
-  # staged colours — so a host that has never staged a song still opens its
-  # terminal at the song's opacity. This lane carries the read because it is
+  # staged colours — so a host that has never staged a rice still opens its
+  # terminal at the rice's opacity. This lane carries the read because it is
   # the lane that already reads the dress (root AGENTS.md rule 5); the kitty
   # lane names only the file's path under `aoide.root`.
   opacity = config.aoide.theme.geometry.terminalOpacity;
@@ -165,20 +165,20 @@ let
   # ── Rices manifest + registry, typed (W3a/W3b), generated once (C4) ──
   # `manifest.json`/`registry.json` source from eval-time nix: a `_widgets/`
   # shelf when present (sonata today) is authoritative and runs through
-  # `composeSong`; a shelf-less song (barcarolle, cadenza, nocturne today)
+  # `composeRice`; a shelf-less rice (barcarolle, cadenza, nocturne today)
   # synthesizes straight from a `widgets/` directory scan, with the registry
   # falling back to `theme.json`'s `.widgets // {}`. `manifest.json`'s SHAPE
   # is the owner map (`{ "<slot>": { "owner": "...", "file": "..." } }`,
-  # W3b) — an OBJECT, so per-song key order is not semantically load-bearing
+  # W3b) — an OBJECT, so per-rice key order is not semantically load-bearing
   # for it; `registry.json` keeps whatever field order its source produced.
   # Full reasoning (the shelf/scan split, the shelf-covers-scan guards, the
   # manifest/registry emptiness asymmetry, why `registry.json`'s type flip
   # landed a commit later than `manifest.json`'s) lives in `git log` on this
-  # file up to W3b and in `lib/song.nix`'s header — not restated here.
+  # file up to W3b and in `lib/rice.nix`'s header — not restated here.
   #
   # C4/W3: the computation itself now lives in `lib/rices.nix`, shared
   # verbatim with the `ricesManifest` flake output that
-  # `pkgs/aoide/crates/song/src/widgets.rs` shells out to at runtime (`nix
+  # `pkgs/aoide/crates/strillix-rice/src/widgets.rs` shells out to at runtime (`nix
   # eval --json`) to regenerate `manifest.json`/`registry.json` WHOLE — the
   # hot-sync half of `rice stage`. One generator, two callers: this
   # derivation and the runtime shell-out can never drift apart because they
@@ -192,24 +192,24 @@ let
   registryJsonFile = pkgs.writeText "aoide-quickshell-registry.json" (builtins.toJSON registryAttrs);
 
   # ── Expected paint, published (v1 `aoide.layout.surfaces`) ─────────
-  # The ACTIVE song's expected-paint declaration, published so a health
+  # The ACTIVE rice's expected-paint declaration, published so a health
   # consumer can assert what SHOULD be mapped instead of only counting what
-  # is (`strillix quickshell healthcheck`). Deliberately NOT keyed by song, unlike
+  # is (`strillix quickshell healthcheck`). Deliberately NOT keyed by rice, unlike
   # the two files above: those describe the whole rices because
-  # `rice preview` can switch songs at runtime, while an expectation is about
-  # what the ACTIVE song should have mapped right now — and
+  # `rice preview` can switch rices at runtime, while an expectation is about
+  # what the ACTIVE rice should have mapped right now — and
   # `config.aoide.layout.surfaces` already IS that (only the performed
-  # song's body is imported). `song` names which song's declaration
+  # rice's body is imported). `rice` names which rice's declaration
   # this is; the keys are the RESOLVED layer-shell namespaces (`aoide-<slot>`
   # — the same derivation `widgetType.namespace` applies when null), so the
   # consumer compares them directly against the compositor's layer list and
-  # derives nothing of its own. A song that declares none gets an empty
+  # derives nothing of its own. A rice that declares none gets an empty
   # `surfaces` object — emitted rather than omitted, and read by the consumer
   # exactly as an absent file: no expectation, the old count decides
   # (CONTRACTS.md §5).
   surfacesJsonFile = pkgs.writeText "aoide-quickshell-surfaces.json" (
     builtins.toJSON {
-      song = config.aoide.rice;
+      rice = config.aoide.rice;
       surfaces = lib.mapAttrs' (
         slot: entry: lib.nameValuePair "aoide-${slot}" entry
       ) config.aoide.layout.surfaces;
@@ -220,27 +220,27 @@ let
   # `aoide.components` as the shell reads it: `{ "<slot>": { provider,
   # actions } }`, one entry per component slot this host filled (CONTRACTS.md
   # §4). It sits at the TOP of the deployed tree, beside `shell.qml`, because
-  # it is build data and not song data: staging syncs only under `songs/`
-  # (`song/src/widgets.rs`), so no stage ever changes it.
+  # it is build data and not rice data: staging syncs only under `rices/`
+  # (`rice/src/widgets.rs`), so no stage ever changes it.
   componentsJsonFile = pkgs.writeText "aoide-quickshell-components.json" (
     builtins.toJSON config.aoide.components
   );
 
   # ── Seed script for `home.activation.aoideSeedStage` (below) ───────────────
-  # Lays down the DECLARED song on every activation: the ACTIVE song's
+  # Lays down the DECLARED rice on every activation: the ACTIVE rice's
   # committed theme, with the venue applied (`stageTheme`, above),
   # into the live stage twin (`$STRILLIX_ROOT/stage/theme.json`, CONTRACTS.md §4) AND
   # its declared twin (`$STRILLIX_ROOT/declared/theme.json`), injecting the same
-  # `"song"` field `strillix rice stage` injects (jq's `. + {song: …}`; `-S` sorts
+  # `"rice"` field `strillix rice stage` injects (jq's `. + {rice: …}`; `-S` sorts
   # keys to match serde_json::Value's BTreeMap ordering). The declared twin is
-  # what `rice mode declarative` re-pins the declared song from — that song's
+  # what `rice mode declarative` re-pins the declared rice from — that rice's
   # notes with the venue's recolour and geometry already applied. The staging
   # writers (`rice stage`, `rice mode stage`, `strillix reload`) derive the
-  # declared song from the runtime rices instead, with the venue's slots
+  # declared rice from the runtime rices instead, with the venue's slots
   # and geometry (`$STRILLIX_ROOT/declared/venue.json`, `venueFile` above) laid over
-  # it, so an edit to the song shows and the venue still stands.
+  # it, so an edit to the rice shows and the venue still stands.
   # The seed is declared truth and nothing else: when `stage/mode.json` names
-  # a staged or drafted song, `aoide-rice-reload` (below) puts that one back
+  # a staged or drafted rice, `aoide-rice-reload` (below) puts that one back
   # once the session is up.
   # Write-temp-then-rename in the SAME directory as each destination (so each
   # rename is atomic) mirrors `shellbridge::atomic_write`
@@ -254,7 +254,7 @@ let
     set -euo pipefail
     mkdir -p "${config.aoide.strillix.root}/stage" "${config.aoide.strillix.root}/declared"
     tmp=$(mktemp "${config.aoide.strillix.root}/stage/.theme.json.XXXXXX")
-    ${pkgs.jq}/bin/jq -S '. + {song: $song}' --arg song "${config.aoide.rice}" \
+    ${pkgs.jq}/bin/jq -S '. + {rice: $rice}' --arg rice "${config.aoide.rice}" \
       "${stageTheme}" > "$tmp"
     # The declared twin is the SAME bytes, published in its own directory
     # (CONTRACTS.md §4) — copied into a temp there rather than renamed across
@@ -273,23 +273,23 @@ let
     provider=$(mktemp "${config.aoide.strillix.root}/stage/.wallpaper-provider.XXXXXX")
     printf '%s\n' ${lib.escapeShellArg config.aoide.wallpaper.provider} > "$provider"
     mv -f "$provider" "${config.aoide.strillix.root}/stage/wallpaper-provider"
-    # The declared song's own cover, as the default (CONTRACTS.md §4): the
+    # The declared rice's own wallpaper, as the default (CONTRACTS.md §4): the
     # picture `aoide.theme.wallpaper` names, published as `stage/wallpaper.json`
     # the way `rice stage` writes a default. A standing pick is left standing
-    # (lib/wallpaper-seed.sh). A song with no picture leaves the file alone: the
-    # layer ignores a cover that names another song.
+    # (lib/wallpaper-seed.sh). A rice with no picture leaves the file alone: the
+    # layer ignores a wallpaper that names another rice.
     ${lib.optionalString (config.aoide.theme.wallpaper != null) ''
       ${pkgs.bash}/bin/bash ${../../../lib/wallpaper-seed.sh} ${pkgs.jq}/bin/jq \
         "${config.aoide.strillix.root}" "${config.aoide.rice}" "${config.aoide.theme.wallpaper}"
     ''}
-    # The declared song's terminal opacity, as a one-line kitty fragment
+    # The declared rice's terminal opacity, as a one-line kitty fragment
     # (CONTRACTS.md §4). The kitty dendrite includes this BEFORE the staged
     # colours, and kitty's last-include-wins keeps a live stage authoritative
     # — so a host that has NEVER staged anything still opens its terminal at
-    # the song's own opacity instead of the baked default, while a stage
+    # the rice's own opacity instead of the baked default, while a stage
     # still overrides it the moment one runs. `null` (no opinion) DELETES the
     # file rather than writing a default: absent is what makes kitty fall
-    # through to the baked value, and a stale 0.7 from a previous song must
+    # through to the baked value, and a stale 0.7 from a previous rice must
     # not outlive it.
     ${lib.optionalString (opacity == null) ''
       rm -f "${config.aoide.strillix.root}/declared/terminal-opacity.conf"
@@ -299,11 +299,11 @@ let
       printf 'background_opacity %s\n' "$(printf '%g' ${toString opacity})" > "$otmp"
       mv -f "$otmp" "${config.aoide.strillix.root}/declared/terminal-opacity.conf"
     ''}
-    # The declared song's lock-screen dress (CONTRACTS.md §4), rendered at
+    # The declared rice's lock-screen dress (CONTRACTS.md §4), rendered at
     # build time. The lock sources it BEFORE the staged one, so a host that
-    # never staged anything locks in the declared song. It is always
-    # written, comments only for a song with no lock picture, so no earlier
-    # song's dress can outlive a switch.
+    # never staged anything locks in the declared rice. It is always
+    # written, comments only for a rice with no lock picture, so no earlier
+    # rice's dress can outlive a switch.
     ltmp=$(mktemp "${config.aoide.strillix.root}/declared/.hyprlock.conf.XXXXXX")
     cp ${declaredLockscreen} "$ltmp"
     mv -f "$ltmp" "${config.aoide.strillix.root}/declared/hyprlock.conf"
@@ -319,12 +319,12 @@ let
   # a FileView; the build only installs the structural QML, not the note
   # values themselves.
   #
-  # ── Per-song flavor widgets (CONTRACTS.md §5) ───────────────────────────
-  # Beyond the shared, song-blind QML tree above, this also carries per-song
-  # widget QML from rices/<song>/widgets/ — versioned score, not
-  # runtime — for the songs this host BUILT IN (`aoide.rices.builtIn`, from
+  # ── Per-rice flavor widgets (CONTRACTS.md §5) ───────────────────────────
+  # Beyond the shared, rice-blind QML tree above, this also carries per-rice
+  # widget QML from rices/<rice>/widgets/ — versioned score, not
+  # runtime — for the rices this host BUILT IN (`aoide.rices.builtIn`, from
   # its record), so a live `aoide rice preview <name>` can hot-swap a
-  # widget's BODY (not just its colours) with no rebuild. A song built in as
+  # widget's BODY (not just its colours) with no rebuild. A rice built in as
   # `available` but not declared is carried here too: that is what "can stage
   # without a rebuild" means. The
   # WHOLE widgets/ dir is carried (helper components + asset subdirs travel
@@ -332,8 +332,8 @@ let
   # `.qml` files become slots, named for their basename; an UPPERCASE-first
   # filename is a helper component (QML's own type-file convention — only an
   # uppercase-first name is a valid QML type), carried but never
-  # independently a slot; `.gitkeep` is always skipped. A song's other files
-  # (outside widgets/) are ignored. `manifest.json` records which songs
+  # independently a slot; `.gitkeep` is always skipped. A rice's other files
+  # (outside widgets/) are ignored. `manifest.json` records which rices
   # authored which slots (computed above, `manifestJsonFile` — typed nix, see
   # that comment for the shelf/scan split), so runtime QML (the staging
   # engine, StagingEngine.qml) can check availability without probing the
@@ -341,21 +341,21 @@ let
   # actually resolves at runtime) lives in qml/slots.md, not here.
   #
   # ── Declared widget-type registry (Phase 2) ─────────────────────────────
-  # `$out/qml/songs/registry.json`, shaped `{ "<song>": { "<slot>": {
-  # …declaration… } } }` — which slots a song declares as widget-TYPE
+  # `$out/qml/rices/registry.json`, shaped `{ "<rice>": { "<slot>": {
+  # …declaration… } } }` — which slots a rice declares as widget-TYPE
   # registrations (a rarer, smaller set than manifest.json's "which slot
   # bodies exist"). Computed above (`registryAttrs`) from each committed
-  # song's `theme.json` (`.widgets // {}`) for a shelf-less song, or
-  # `composeSong`'s own `layout.widgets` for a shelf-present one — never
+  # rice's `theme.json` (`.widgets // {}`) for a shelf-less rice, or
+  # `composeRice`'s own `layout.widgets` for a shelf-present one — never
   # from any nix OPTION: `config.aoide.layout.widgets` (Phase 1) only
-  # exists for the ACTIVE song at eval time (only the performed song's body is
-  # imported), so cross-song data has to come from
-  # committed FILES. Every committed song gets an entry — `{}` when the song
+  # exists for the ACTIVE rice at eval time (only the performed rice's body is
+  # imported), so cross-rice data has to come from
+  # committed FILES. Every committed rice gets an entry — `{}` when the rice
   # has no `theme.json`/no `.widgets` key, or (shelf-present) no declared
-  # widget — never an error, never a skipped song. The shelf-less path stays
+  # widget — never an error, never a skipped rice. The shelf-less path stays
   # permissive: whatever's under `.widgets` passes through unjudged; shape
   # validation is Phase 3's job (the Rust-side `rice lint` engine). The
-  # shelf-present path is exactly as permissive in effect — `composeSong`
+  # shelf-present path is exactly as permissive in effect — `composeRice`
   # types the fields but does not reject an undeclared (`kind = null`)
   # widget, it just excludes it, same as `.widgets` omitting a key.
   quickshellConfig = pkgs.runCommand "aoide-quickshell-config" { nativeBuildInputs = [ pkgs.jq ]; } ''
@@ -369,24 +369,24 @@ let
     # nothing it is handed; both files' key order is whatever nix's
     # `toJSON` already produced (alphabetic per level; consumers read keys,
     # never their order).
-    mkdir -p "$out/qml/songs"
-    manifest="$out/qml/songs/manifest.json"
+    mkdir -p "$out/qml/rices"
+    manifest="$out/qml/rices/manifest.json"
     jq . ${manifestJsonFile} > "$manifest"
-    registry="$out/qml/songs/registry.json"
+    registry="$out/qml/rices/registry.json"
     jq . ${registryJsonFile} > "$registry"
-    # The ACTIVE song's expected-paint declaration (CONTRACTS.md §5) —
-    # `surfacesJsonFile` above. NOT keyed by song, unlike the two above it:
-    # the expectation is about what the active song should have mapped now,
+    # The ACTIVE rice's expected-paint declaration (CONTRACTS.md §5) —
+    # `surfacesJsonFile` above. NOT keyed by rice, unlike the two above it:
+    # the expectation is about what the active rice should have mapped now,
     # and the option it comes from already is that. A consumer finds this file
-    # absent (an older host, or a lane that never deployed) or empty (a song
+    # absent (an older host, or a lane that never deployed) or empty (a rice
     # that declares none) and falls back to its previous behaviour.
-    surfaces="$out/qml/songs/surfaces.json"
+    surfaces="$out/qml/rices/surfaces.json"
     jq . ${surfacesJsonFile} > "$surfaces"
     # The selected components (`componentsJsonFile` above), top level.
     jq . ${componentsJsonFile} > "$out/qml/components.json"
 
-    # ── Carry over per-song flavor widgets ──────────────────────────────────
-    # Copy the WHOLE widgets/ dir per song (bring any helper .qml/asset
+    # ── Carry over per-rice flavor widgets ──────────────────────────────────
+    # Copy the WHOLE widgets/ dir per rice (bring any helper .qml/asset
     # subdirs along — a multi-file widget like sonata's bar.qml needs its
     # WorkspaceRow.qml helper sitting right beside it). A file starting
     # uppercase is a helper component (QML's own type-file convention: only
@@ -394,19 +394,19 @@ let
     # disk so the slot file's relative imports resolve, but never
     # independently resolvable as a slot itself (nix already decided the
     # slot list, above — this loop no longer re-derives it).
-    # Each song's folder is a nix-built store path (`songDirOf`), handed to
+    # Each rice's folder is a nix-built store path (`riceDirOf`), handed to
     # the shell as `<name>:<dir>`; nothing here interpolates the rices
-    # directory, so this derivation reads the built-in songs and no others.
-    for entry in ${lib.concatStringsSep " " (map (name: "\"${name}:${songDirOf name}\"") builtIn)}; do
+    # directory, so this derivation reads the built-in rices and no others.
+    for entry in ${lib.concatStringsSep " " (map (name: "\"${name}:${riceDirOf name}\"") builtIn)}; do
       name="''${entry%%:*}"
       d="''${entry#*:}/"
       if [ -d "$d/widgets" ]; then
-        mkdir -p "$out/qml/songs/$name"
-        cp -r "$d/widgets/." "$out/qml/songs/$name/"
+        mkdir -p "$out/qml/rices/$name"
+        cp -r "$d/widgets/." "$out/qml/rices/$name/"
 
-        # ── qmldir: register this song's helper types ────────────────────────
+        # ── qmldir: register this rice's helper types ────────────────────────
         # A slot body is loaded by WidgetSlot/SurfaceSlot through
-        # `Qt.createComponent(Qt.resolvedUrl("songs/<song>/<slot>.qml"))`
+        # `Qt.createComponent(Qt.resolvedUrl("rices/<rice>/<slot>.qml"))`
         # (StagingEngine.qml's `source`), which yields a `qs:` URL. QML's
         # implicit "types in my own directory" resolution does NOT apply to a
         # component loaded from that scheme, and this subdirectory is not on
@@ -424,7 +424,7 @@ let
         for h in "$d/widgets/"[A-Z]*.qml; do
           [ -e "$h" ] || continue
           t=$(basename "$h" .qml)
-          printf '%s 1.0 %s.qml\n' "$t" "$t" >> "$out/qml/songs/$name/qmldir"
+          printf '%s 1.0 %s.qml\n' "$t" "$t" >> "$out/qml/rices/$name/qmldir"
         done
       fi
     done
@@ -462,20 +462,20 @@ in
   config = {
     aoide.strillix.enable = true;
 
-    # name -> song directory, the rices's registry. The song hook sets it
-    # (lib/rices.nix's `riceDirs`) so a merged rices's songs come from
+    # name -> rice directory, the rices's registry. The rice hook sets it
+    # (lib/rices.nix's `riceDirs`) so a merged rices's rices come from
     # the input books; a host that wires only `rices` gets the directory's
     # own discovery, at the lower priority the hook's value overrides.
     _module.args.riceDirs =
       lib.mkDefault
-        (import ../../../lib/rices.nix { inherit lib ricesRoot; }).songs;
+        (import ../../../lib/rices.nix { inherit lib ricesRoot; }).riceDirs;
 
     # ── What this lane brings into existence ────────────────────────────────
     # One thing, and it is a FACT rather than this lane's own option: the
     # directory the shell runs. Quickshell itself is the `quickshell` lane's
     # (package and the `aoide-quickshell` service); no module reads another
     # module (root AGENTS.md house rule 5), so this lane NAMES the config it
-    # deploys into and the shell lane reads that name. Strillix paints a song —
+    # deploys into and the shell lane reads that name. Strillix paints a rice —
     # deploy the tree, seed the stage, restart the rice — and the shell lane
     # is what knows how to run a shell on the result.
     #
@@ -491,8 +491,8 @@ in
     # `packages` output); a host overrides it with what it actually built
     # in, so a `_server` ships an empty templates dir and yomi ships
     # sonata's folder and no other. `builtin.json` records the selection
-    # itself — `{ declared, songs, packages }` — which is what runtime
-    # staging checks a non-built-in song's needs against before refusing to
+    # itself — `{ declared, rices, packages }` — which is what runtime
+    # staging checks a non-built-in rice's needs against before refusing to
     # stage it (the machine owns its rices; the baseline is the fallback).
     #
     # An overlay rather than a reference, because the templates dir is read
@@ -503,7 +503,7 @@ in
       (_final: prev: {
         # A FRESH `callPackage`, never `.override` on whatever the walker's
         # overlay left in `prev`: application order across the base
-        # (lib/aoideos.nix) and this lane is not a contract, so
+        # (lib/strillix.nix) and this lane is not a contract, so
         # `prev.strillix-rices` may not exist yet. A fresh call also names
         # every argument here rather than inheriting them — including
         # `aoideOptions`, which this lane derives itself because the
@@ -512,14 +512,14 @@ in
         # step-aside makes whichever is applied second yield, so this
         # lane's answer wins in either order.
         strillix-rices = prev.callPackage ../../../pkgs/strillix-rices {
-          songs = builtIn;
+          rices = builtIn;
           builtin = {
             declared = config.aoide.rice;
-            songs = builtIn;
+            rices = builtIn;
             packages = ricesLib.packagesFor builtIn;
           };
           inherit aoideOptions ricesRoot;
-          songDirs = ricesLib.songs;
+          riceDirs = ricesLib.riceDirs;
         };
       })
     ];
@@ -551,19 +551,19 @@ in
     #                      compiled qmltypes).
     #
     # Sonata's `_widgets/bar.nix` declares those same two names (the record
-    # is what a song says it needs), so the hard-coded pair and
+    # is what a rice says it needs), so the hard-coded pair and
     # `packagesFor builtIn` agree today — `lib.unique` is what makes that a
     # checked coincidence rather than an assumption: the union is a set, not
-    # a concatenation, and a song declaring a package the lane already
+    # a concatenation, and a rice declaring a package the lane already
     # carries adds nothing.
     environment.systemPackages = lib.unique (
       [
         pkgs.pavucontrol
         pkgs.pulseaudio # for `pactl` only; pipewire-pulse remains the server
       ]
-      # …plus what the built-in songs' own widgets declare. `composeSong`
-      # reads each `_widgets/` record's `packages` (lib/song.nix); until this
-      # slice nothing installed them. A shelf-less song declares none —
+      # …plus what the built-in rices' own widgets declare. `composeRice`
+      # reads each `_widgets/` record's `packages` (lib/rice.nix); until this
+      # slice nothing installed them. A shelf-less rice declares none —
       # there is no record to declare them in.
       ++ map (name: pkgs.${name}) (ricesLib.packagesFor builtIn)
     );
@@ -576,7 +576,7 @@ in
     # `home.file` would manage this as a tree of symlinks into the nix
     # store, which is the RIGHT semantics for most home-manager-installed
     # config — but the runtime writes into this tree (`strillix rice stage`
-    # syncs a staged song's widget bodies into run/qml/songs/<song>/, and
+    # syncs a staged rice's widget bodies into run/qml/rices/<rice>/, and
     # Quickshell live-reloads on file change). A symlink tree makes that
     # permanently hostile to the NEXT switch: home-manager finds a real
     # file where it expects to manage a symlink and refuses to activate
@@ -586,9 +586,9 @@ in
     # `rsync -a --delete` makes the deployed tree self-healing instead: a
     # switch always reasserts the store over it, rather than refusing to
     # proceed. run/qml is a deploy target, never a source: a hand edit
-    # there is lost at the next switch. A song is edited in the runtime
-    # rices (`$AOIDE_ROOT/rices/<song>`, house rule 10), and a
-    # STAGED song lives there, not here — `aoide-rice-reload` (below)
+    # there is lost at the next switch. A rice is edited in the runtime
+    # rices (`$AOIDE_ROOT/rices/<rice>`, house rule 10), and a
+    # STAGED rice lives there, not here — `aoide-rice-reload` (below)
     # re-syncs its widget bodies into run/qml once the switch is done.
     # NOTE: this is a home-manager submodule FUNCTION (`{ lib, ... }:`), not a bare
     # attrset — so `lib` here is home-manager's EXTENDED lib (carrying `lib.hm.dag`),
@@ -596,28 +596,28 @@ in
     # still resolve lexically to the outer module scope, unshadowed by the pattern.
     # ── The machine's own rices first (house rule 10) ─────────────────────
     # The machine OWNS `~/.aoide/rices` (CONTRACTS.md §5): its
-    # built-in songs plus whatever it made itself, never a link to or a sync
+    # built-in rices plus whatever it made itself, never a link to or a sync
     # of the repo. Activation runs `strillix rice refresh` over the built-in set,
     # which applies one three-way rule per file (shipped copy, machine copy,
     # the hash recorded at the last refresh):
     #
     #   - a file the machine never edited takes the repo's change, and a
-    #     built-in song absent from the machine is added whole;
+    #     built-in rice absent from the machine is added whole;
     #   - a file the machine edited, or one with no record, is kept and
     #     reported, never overwritten;
-    #   - `history/` and `drafts/` and any symlink at a song's path are never
+    #   - `history/` and `drafts/` and any symlink at a rice's path are never
     #     touched.
     #
     # What refresh wrote is recorded in
-    # `$AOIDE_ROOT/$STRILLIX_ROOT/declared/rices/<song>.json`, outside the song
+    # `$AOIDE_ROOT/$STRILLIX_ROOT/declared/rices/<rice>.json`, outside the rice
     # folder so nothing that reads the rices sees it. The command is the
     # CLI twin of this step: `strillix rice refresh [--check]` does by hand what
     # activation does, and `--check` writes nothing and reports each file's
     # state. A dry-run activation runs exactly that `--check`. A failure
     # fails the activation.
     #
-    # Gated on the BUILT-IN set, not on the active song: a host that builds a
-    # song in as `available` without performing it still gets refreshed, and
+    # Gated on the BUILT-IN set, not on the active rice: a host that builds a
+    # rice in as `available` without performing it still gets refreshed, and
     # a host that built none in gets no refresh step at all. Its OWN
     # definition of the user's home — two definitions of one submodule MERGE
     # (that is the module system's job), while a single `//` between them
@@ -647,22 +647,22 @@ in
             '';
           })
 
-          # ── No song, nothing to paint ──────────────────────────────────────
-          # Every entry below reaches for the ACTIVE song (activeSongTheme,
-          # seedStageScript's jq --arg, or a shell entry deployed FROM the song's
-          # QML) — with `aoide.rice` null there is no active song to bake, so this
+          # ── No rice, nothing to paint ──────────────────────────────────────
+          # Every entry below reaches for the ACTIVE rice (activeRiceTheme,
+          # seedStageScript's jq --arg, or a shell entry deployed FROM the rice's
+          # QML) — with `aoide.rice` null there is no active rice to bake, so this
           # whole block is `lib.optionalAttrs`-gated on `config.aoide.rice != null`
           # rather than `lib.mkIf`: optionalAttrs never forces its `attrs` argument
           # when the condition is false (plain nix laziness, no module-system
-          # merging involved at this attrset-literal level), so a null-song host's
+          # merging involved at this attrset-literal level), so a null-rice host's
           # eval never touches `${config.aoide.rice}` here — no deployed QML, no
           # seeded stage, no restart of the rice; not an empty surface, simply
-          # absent. A host that names a song gets exactly today's behaviour.
+          # absent. A host that names a rice gets exactly today's behaviour.
           #
           # The `aoide-quickshell` unit is NOT part of this gate: it belongs to the
           # `quickshell` lane, which starts a shell on whatever config this lane
-          # deployed — or on a directory the host brought itself, song or no song.
-          # A null-song host with no such directory still runs no shell (that lane's
+          # deployed — or on a directory the host brought itself, rice or no rice.
+          # A null-rice host with no such directory still runs no shell (that lane's
           # own bare case).
           (lib.optionalAttrs (config.aoide.rice != null) {
             home.activation.aoideDeployQml = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
@@ -671,19 +671,19 @@ in
                 "${quickshellConfig}/qml/" "${config.aoide.root}/run/qml/"
             '';
 
-            # ── Seed the live stage twin from the active song ──────────────────────
+            # ── Seed the live stage twin from the active rice ──────────────────────
             # `$STRILLIX_ROOT/stage/theme.json` is what ThemeState.qml hot-reloads
             # (CONTRACTS.md §4). A host that never ran `strillix rice stage <name>` would
             # otherwise carry a stale/absent stage twin even though the
-            # compositor/Stylix/QML tree were all built from the active song. This
-            # writes the declared song into both twins — `$STRILLIX_ROOT/stage/theme.json`
+            # compositor/Stylix/QML tree were all built from the active rice. This
+            # writes the declared rice into both twins — `$STRILLIX_ROOT/stage/theme.json`
             # and `$STRILLIX_ROOT/declared/theme.json` — on every activation:
             # `seedStageScript` (above) does the actual write. It RENAMES over
-            # `stage/theme.json` and never writes through it, so a drafted song's
+            # `stage/theme.json` and never writes through it, so a drafted rice's
             # own file is untouched while its routing link is replaced.
             # `$STRILLIX_ROOT/stage/wallpaper.json` is never touched (CONTRACTS.md §4). The seed
             # is declared truth, written the same way whatever the mode: the staged
-            # or drafted song `stage/mode.json` names is brought back afterwards by
+            # or drafted rice `stage/mode.json` names is brought back afterwards by
             # `aoide-rice-reload` (below).
             home.activation.aoideSeedStage = lib.hm.dag.entryBetween [ "reloadSystemd" ] [ "writeBoundary" ] ''
               run ${seedStageScript}
@@ -701,7 +701,7 @@ in
             #
             # ONE try-restart names both units, so systemd orders them: the shell is
             # stopped, `aoide-rice-reload` (Before the shell, below) writes the staged
-            # or drafted song over the declared seed, and only then does the shell
+            # or drafted rice over the declared seed, and only then does the shell
             # start. Ordered after the three writes (the QML rsync, the stage seed and
             # the rices seed, which the reload reads), so the reload lands over the
             # fresh seed and the restarted shell reads the new tree, never the old
@@ -712,7 +712,7 @@ in
             # applied live. (The compositor lane sets that package to null, so there
             # only Hyprland's own file watcher reloads the config.) Both units no-op
             # when inactive (a boot activation has no session); the session's own
-            # start of them is what restores the song then. The switch waits for both
+            # start of them is what restores the rice then. The switch waits for both
             # jobs, and the reload is bounded (below), so a hung child delays it by
             # that bound and no more.
             #
@@ -765,7 +765,7 @@ in
             # is structurally blind to this lockup: the process never exits, it just
             # sits `active` painted onto Qt's internal placeholder screen, so
             # systemd has nothing to restart on. `strillix quickshell healthcheck`
-            # (crates/song/src/health.rs) is the periodic check that closes the gap
+            # (crates/strillix-rice/src/health.rs) is the periodic check that closes the gap
             # — it confirms BOTH the journal's placeholder-screen line AND a live
             # `hyprctl layers` zero-surface reading before acting (health.rs's own
             # module doc carries the two-signal reasoning), then restarts the unit
@@ -848,18 +848,18 @@ in
               Install.WantedBy = [ "graphical-session.target" ];
             };
 
-            # ── Bring the staged or drafted song back after a login or a switch ────
+            # ── Bring the staged or drafted rice back after a login or a switch ────
             # The activation lays DECLARED truth over the runtime tree (the rsync
             # and the seed above), and a login or a switch would leave the desktop
-            # on it. `stage/mode.json` is what remembers the last staged song or
+            # on it. `stage/mode.json` is what remembers the last staged rice or
             # the routed draft, and `strillix reload` is its reader: it re-stages that
-            # song (staging), re-routes and re-syncs the draft (draft), or reloads
-            # the shell alone (declarative) — palette, cover, widget bodies, slot
+            # rice (staging), re-routes and re-syncs the draft (draft), or reloads
+            # the shell alone (declarative) — palette, wallpaper, widget bodies, slot
             # map, registry, compositor keywords and terminal colours. Nix never
             # reads the mode; this unit only runs the reader.
             #
             # Four constraints are invisible from this file:
-            #   - BEFORE the shell, so the shell's first frame is the staged song,
+            #   - BEFORE the shell, so the shell's first frame is the staged rice,
             #     not the declared one; the activation's try-restart (above) orders
             #     the same way, the shell being down while the reload writes.
             #   - In the user MANAGER, never as an activation step: home-manager's
@@ -884,7 +884,7 @@ in
             #     leave it failed, and a try-restart skips a failed unit.
             systemd.user.services.aoide-rice-reload = {
               Unit = {
-                Description = "Aoide rice reload: bring the staged or drafted song back after a login or a switch";
+                Description = "Aoide rice reload: bring the staged or drafted rice back after a login or a switch";
                 After = [ "graphical-session.target" ];
                 PartOf = [ "graphical-session.target" ];
                 Before = [ "aoide-quickshell.service" ];

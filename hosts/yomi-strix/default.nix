@@ -11,12 +11,12 @@
 {
   # ── Aggregations ───────────────────────────────────────────────────────────
   # nucleus is the floor; desktop is the session's platform; agents is the coding
-  # agents a workstation runs; aoideos is the desktop's floor. The paint is the
-  # performed song's, selected below.
+  # agents a workstation runs; strillix is the desktop's floor. The paint is the
+  # performed rice's, selected below.
   habit.aggregation.nucleus.enable = true;
   habit.aggregation.desktop.enable = true;
   habit.aggregation.agents.enable = true;
-  habit.aggregation.aoideos.enable = true;
+  habit.aggregation.strillix.enable = true;
 
   # ── Lone capabilities ──────────────────────────────────────────────────────
   # What no aggregation speaks for. `qbittorrent` is here because no group
@@ -31,19 +31,19 @@
   habit.dendrites.aoide-secrets.enable = true;
 
   # ── Who paints a wallpaper pick ────────────────────────────────────────────
-  # The compositor line's twin: the performed song ships the shell's own layer
+  # The compositor line's twin: the performed rice ships the shell's own layer
   # (`strillix`) as the setter, and this host names the external engine instead.
-  # A plain write here outranks the song's default. The engine's lane is what
+  # A plain write here outranks the rice's default. The engine's lane is what
   # makes that real (packages, daemon, config), and the runtime reads the
   # resulting fact to decide whose picks the stage file records.
   habit.dendrites.wallpaper.provider = "skwd-wall";
 
-  # ── Songs ──────────────────────────────────────────────────────────────────
-  # `habit.rice.declared` is the song this host PERFORMS: it becomes the fact
-  # `aoide.rice` and selects that song's body. `available` is what it builds in
+  # ── Rices ──────────────────────────────────────────────────────────────────
+  # `habit.rice.declared` is the rice this host PERFORMS: it becomes the fact
+  # `aoide.rice` and selects that rice's body. `available` is what it builds in
   # to STAGE without a rebuild but does not perform.
   #
-  # yomi performs barcarolle: Windows 7 Aero rebuilt on the AoideOS slots — a
+  # yomi performs barcarolle: Windows 7 Aero rebuilt on the Strillix slots — a
   # glass superbar whose buttons are Hyprland workspaces, the Start menu and its
   # flyouts, the iMac G3 launcher, white-plate balloons, over a teal Frutiger
   # Aero wallpaper. Declaring is what bakes the half a stage cannot: Stylix

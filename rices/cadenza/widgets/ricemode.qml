@@ -7,24 +7,24 @@
 // verbs. Left, right and middle click all do one thing: open the menu, or close
 // it. The cell never switches; nothing changes until a row is chosen.
 // bridge.riceMenu(cb) fills the Pane, top to bottom:
-//   songs                  the runtime songbook; a row sends
-//                          bridge.riceMode("stage", name). A song that does not
+//   rices                  the runtime rices; a row sends
+//                          bridge.riceMode("stage", name). A rice that does not
 //                          load is a dim `<name> · unreadable` row that does nothing
 //                          (the reason does not fit the 22-cell row)
-//   [declarative] <song>   sends bridge.riceMode("declarative")
-//   drafts · <song>        the staged song's drafts, a row sends
+//   [declarative] <rice>   sends bridge.riceMode("declarative")
+//   drafts · <rice>        the staged rice's drafts, a row sends
 //                          bridge.riceDraft("enter", name); the two fixed rows
 //                          send ("new") and ("save"); `save` is offered in
 //                          staging only (in draft mode writes already land in
 //                          the draft, in declarative nothing is unsaved)
-// The lamp column marks what is live: a full lamp for the song staged now (in
+// The lamp column marks what is live: a full lamp for the rice staged now (in
 // the staging colour), for the declarative row while it is locked, and for the
-// current draft; a hollow lamp, dim, on the last-staged song while locked. The
-// marked rows only close the menu. In draft mode the drafted song's row is live:
+// current draft; a hollow lamp, dim, on the last-staged rice while locked. The
+// marked rows only close the menu. In draft mode the drafted rice's row is live:
 // it leaves the draft for plain staging.
 // A stage, a declarative, an enter and a new each change what is live, so the
 // word reads a dim `…` and every click is swallowed until theme.riceMode, the
-// draft name or the song changes, or 10s pass: the double click that sent two
+// draft name or the rice changes, or 10s pass: the double click that sent two
 // switches. A `save` changes nothing and holds nothing.
 //
 // The menu is marked by a chevron after the word (kit.glyph.ricePick, the icon
@@ -63,7 +63,7 @@ Item {
 
     readonly property string mode: root.theme.riceMode || "declarative"
     readonly property string draft: (root.theme.modeRaw && root.theme.modeRaw.draft) || ""
-    readonly property string song: root.theme.songName
+    readonly property string rice: root.theme.riceName
     readonly property bool canMenu: !!root.bridge && typeof root.bridge.riceMenu === "function"
 
     property bool pending: false       // a mode change was sent and has not landed
@@ -72,17 +72,17 @@ Item {
     property int asked: 0              // which ask a reply belongs to
     property Item hotRow: null         // the menu row under the pointer
     readonly property bool ready: !!root.answer && root.answer.ok === true
-    readonly property var songs: root.ready && Array.isArray(root.answer.songs) ? root.answer.songs : []
+    readonly property var rices: root.ready && Array.isArray(root.answer.rices) ? root.answer.rices : []
     readonly property var drafts: root.ready && Array.isArray(root.answer.drafts) ? root.answer.drafts : []
     readonly property string note: !root.answer ? "…"
         : (!root.answer.ok ? "" + (root.answer.message || "no answer") : "")
-    readonly property int pickLines: 1 + (root.ready ? root.songs.length : 1) + 2
+    readonly property int pickLines: 1 + (root.ready ? root.rices.length : 1) + 2
                                      + (root.ready && root.drafts.length === 0 ? 1 : 0) + root.drafts.length
                                      + 1 + (root.mode === "staging" ? 1 : 0)
 
     onModeChanged: root.pending = false
     onDraftChanged: root.pending = false
-    onSongChanged: root.pending = false
+    onRiceChanged: root.pending = false
     Timer { interval: 10000; running: root.pending; onTriggered: root.pending = false }
 
     function gesture() {
@@ -205,7 +205,7 @@ Item {
         Column {
             PickRow {
                 live: false
-                name: "songs"
+                name: "rices"
                 nameColor: root.kit.dim
             }
             PickRow {
@@ -215,11 +215,11 @@ Item {
                 nameColor: root.kit.dim
             }
             Repeater {
-                model: root.songs
+                model: root.rices
                 PickRow {
                     required property var modelData
-                    readonly property bool here: root.ready && root.mode === "staging" && modelData.name === root.answer.song
-                    readonly property bool last: root.ready && root.mode === "declarative" && modelData.name === root.answer.stagingSong
+                    readonly property bool here: root.ready && root.mode === "staging" && modelData.name === root.answer.rice
+                    readonly property bool last: root.ready && root.mode === "declarative" && modelData.name === root.answer.stagingRice
                     live: !!modelData.ok
                     lamp: here ? root.kit.lampGlyph("working") : (last ? root.kit.lampGlyph("idle") : "")
                     lampColor: here ? root.modeColor("staging") : root.kit.dim
@@ -243,7 +243,7 @@ Item {
             }
             PickRow {
                 live: false
-                name: root.ready && root.answer.draftsSong ? "drafts · " + root.answer.draftsSong : "drafts"
+                name: root.ready && root.answer.draftsRice ? "drafts · " + root.answer.draftsRice : "drafts"
                 nameColor: root.kit.dim
             }
             PickRow {
@@ -305,7 +305,7 @@ Item {
                 Component.onCompleted: setSource(root.kit.helper("Pane"), {
                     kit: Qt.binding(() => root.kit),
                     title: "rice",
-                    stat: Qt.binding(() => root.answer && root.answer.ok ? "" + (root.answer.song || "no song") : ""),
+                    stat: Qt.binding(() => root.answer && root.answer.ok ? "" + (root.answer.rice || "no rice") : ""),
                     focused: true,
                     animateOnCreate: true,
                     innerGlow: false,

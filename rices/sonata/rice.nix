@@ -1,21 +1,21 @@
-# rices/sonata/rice.nix — the "sonata" song (the Greek key).
+# rices/sonata/rice.nix — the "sonata" rice (the Greek key).
 #
 # sonata is re-keyed to a GREEK register: a light MARBLE ground, plum/charcoal
 # ink kept dark (its own polarity — declared below beside the palette as
-# `aoide.theme.polarity = "light"`, so the ground is the song's and not the
+# `aoide.theme.polarity = "light"`, so the ground is the rice's and not the
 # stylix lane's default), a deep
 # ATTIC-GOLD chrome accent, a TERRACOTTA urgent, and a true LAUREL leaf-green
 # one-hot trace — the single blaze the grammar reserves for the live/traced
 # element. Aegean blue steps back to a preview/info role. The look is a temple
 # in daylight: pale stone, dark ink, gold-and-terracotta chrome. There is no
-# cover — the wallpaper note is null, so the stylix lane bakes a deterministic
-# bright-marble solid from palette.bg (the default song's mechanism). The
+# wallpaper — the wallpaper note is null, so the stylix lane bakes a deterministic
+# bright-marble solid from palette.bg (the default rice's mechanism). The
 # typographic-Greek house grammar this key wears is in design/greek-grammar.md
-# (sonata's own grammar, a deliberate divergence from the default song's
+# (sonata's own grammar, a deliberate divergence from the default rice's
 # Pantheon wireframe grammar).
 #
-# HOST-AGNOSTIC DISCIPLINE (CONTRACTS.md §5): a song sets ONLY aoide.theme.
-# All theme values are literal nix expressions (no song/ runtime reads).
+# HOST-AGNOSTIC DISCIPLINE (CONTRACTS.md §5): a rice sets ONLY aoide.theme.
+# All theme values are literal nix expressions (no rice/ runtime reads).
 {
   system = {
     providers = {
@@ -32,24 +32,24 @@
     };
     module =
       {
-        song,
+        rice,
         borrow,
         lib,
         ...
       }:
       let
-        # `_widgets/` is the widget-record shelf (lib/song.nix's header) — one
+        # `_widgets/` is the widget-record shelf (lib/rice.nix's header) — one
         # plain function per slot, rolled up and bound to owner "sonata" by
-        # `_widgets/default.nix`. `composeSong` validates every record and folds
+        # `_widgets/default.nix`. `composeRice` validates every record and folds
         # them into `layout.widgets` (empty today: all 14 records leave `kind`
         # unset, so none is a declared registry entry — see each file for why).
-        # Its OWN shelf, through the name-keyed door any other song would use:
+        # Its OWN shelf, through the name-keyed door any other rice would use:
         # `borrow` is the one place a shelf is opened (CONTRACTS.md §5).
         widgets = borrow "sonata";
       in
       {
         config = lib.mkDefault {
-          aoide.layout.widgets = (song.composeSong widgets).layout.widgets;
+          aoide.layout.widgets = (rice.composeRice widgets).layout.widgets;
 
           # ── Expected paint — the three surfaces sonata keeps mapped ────────────
           # bar/wallpaper are one mapped layer surface PER enabled output (each is a
@@ -135,19 +135,19 @@
           # focused window reads as the "live" one. The inactive frame steps back
           # to base0C bronze-verdigris, a cool blue-teal that recedes without
           # vanishing into the ground. The window key stays a component-tier note
-          # the song owns.
+          # the rice owns.
           aoide.theme.window = {
             border = "#a07414"; # base0A Attic gold — active (= palette.accent)
             borderInactive = "#3f867e"; # base0C bronze-verdigris — inactive (cool teal)
           };
 
-          # ── Cover-art note ─────────────────────────────────────────────────────
+          # ── Wallpaper-art note ─────────────────────────────────────────────────────
           # null → the stylix lane bakes a DETERMINISTIC bright-marble solid from
           # palette.bg (#f2ebde) — the same null-wallpaper-to-solid mechanism the
-          # stylix lane applies to any song with no cover note. The retired
+          # stylix lane applies to any rice with no wallpaper note. The retired
           # wallpapers/yuki-sonata.png reference is dropped: sonata's colours fit the
           # Greek theme, not a photograph (khoa). The wallpaper switcher handles photos
-          # live; the song's DEFAULT ground is a clean bright marble field, which keeps
+          # live; the rice's DEFAULT ground is a clean bright marble field, which keeps
           # the light-polarity contrast valid under the now-more-transparent bar.
           aoide.theme.wallpaper = null;
         };

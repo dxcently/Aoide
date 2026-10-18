@@ -10,20 +10,20 @@
 //! [`apply_live`] runs `hyprctl reload config-only` first, as its own call:
 //! the compositor re-reads the host's baked `hyprland.conf`, so every field
 //! starts from what the host bakes, and the keyword batch lays only what the
-//! song has an opinion about over it. A field the song says nothing about
-//! therefore shows the host's baked value, whatever the previous song or an
+//! rice has an opinion about over it. A field the rice says nothing about
+//! therefore shows the host's baked value, whatever the previous rice or an
 //! out-of-band `hyprctl keyword` set, and no baked value is named in this
 //! crate: only the compositor knows its host's.
 //!
 //! The terminal half (below the compositor functions) renders the staged
 //! terminal file (every colour slot through the theme engine's `kitty`
-//! emitter, plus a `background_opacity` only when the song has an opinion)
+//! emitter, plus a `background_opacity` only when the rice has an opinion)
 //! and tells every open kitty over its control socket to reload its own
 //! config, which includes that file. The
 //! write itself stays with the caller (`commands::rice::stage_terminal_colors`),
 //! like the stage file's: this module holds no storage dependency.
 //!
-//! The lock-screen half ([`lockscreen_fragment`]) renders the staged song's
+//! The lock-screen half ([`lockscreen_fragment`]) renders the staged rice's
 //! hyprlock dress, which nothing pushes: hyprlock reads its config afresh on
 //! every lock. Its writer is `commands::rice::stage_lockscreen`.
 
@@ -43,11 +43,11 @@ use serde_json::Value;
 ///   so these two keywords are effectively unconditional for any valid
 ///   staged notes document.
 /// * **Geometry** (`geometry.*`) is additive-optional (§1): a notes file with
-///   no `geometry` block, or a block with a `null` field, means "this song
+///   no `geometry` block, or a block with a `null` field, means "this rice
 ///   never opted in" — we skip that keyword rather than asserting the
 ///   compositor's own fallback constant (8/6/2/0/true/8/3). The reload
 ///   [`apply_live`] runs first has already put the host's baked value there,
-///   so a song with no opinion shows that.
+///   so a rice with no opinion shows that.
 pub fn geometry_keywords(notes: &Value) -> Vec<String> {
     let geo = notes.get("geometry");
     let mut out = Vec::new();
@@ -87,14 +87,14 @@ pub fn geometry_keywords(notes: &Value) -> Vec<String> {
     push_int(&mut out, geo, "blurSize", "decoration:blur:size");
     push_int(&mut out, geo, "blurPasses", "decoration:blur:passes");
 
-    // hyprglass follows the same switch: a song with blur off wants no glass
+    // hyprglass follows the same switch: a rice with blur off wants no glass
     // either, and one with blur on gets it back. Both of the plugin's own
     // enable keys are read per frame (static config pointers), so a keyword
     // turns the glass off live without unloading the plugin: `enabled` is the
     // global window-glass switch, `layers:enabled` the layer-surface one the
     // compositor lane resolves for the aoide-* namespaces — the BAKE takes
-    // both from that same `blurEnabled`, so a staged song agrees with a
-    // desktop that booted straight into it. A song with no opinion sends
+    // both from that same `blurEnabled`, so a staged rice agrees with a
+    // desktop that booted straight into it. A rice with no opinion sends
     // neither: the reload put the host's glass back. [`apply_live`] partitions
     // them out and sends them as their own batch, so a host without the plugin
     // loses its glass batch alone — the borders, gaps and blur keywords are
@@ -135,13 +135,13 @@ pub fn batch_command(keywords: &[String]) -> String {
 ///
 /// Guard: only runs `hyprctl` when `$HYPRLAND_INSTANCE_SIGNATURE` is set
 /// (off-Hyprland — headless, VM, or the common test path — is a silent
-/// no-op). An empty keyword list is not a reason to skip: a song with no
+/// no-op). An empty keyword list is not a reason to skip: a rice with no
 /// opinion at all still gets the reload, which is what puts the host's bake
 /// back under it.
 ///
 /// What it runs is [`hyprctl_calls`]: the config reload, then the keyword
 /// batches. The reload is the reset and the batches the overlay, so out-of-band
-/// `hyprctl keyword` tweaks do not survive a stage, and a song's no-opinion
+/// `hyprctl keyword` tweaks do not survive a stage, and a rice's no-opinion
 /// fields show the host's bake. The `plugin:hyprglass:*` keywords go in their
 /// own batch after the core one, so a host that never loaded the plugin (a
 /// compositor without it, or a non-nix host) cannot fail the batch the
@@ -299,14 +299,14 @@ fn run_hyprctl(args: &[String]) -> Batch {
 // (`kitty @ load-config`, with no path, so kitty re-reads its own kitty.conf
 // and every include), never a raw OSC write to a pty — an OSC write
 // interleaves with whatever the program in that pty is printing and gets
-// eaten. A reload resets every window to the configured state, so a song
+// eaten. A reload resets every window to the configured state, so a rice
 // with no opinion lands on the host's bake with no value copied here. The
 // sockets are found by the path pattern the kitty dendrite configures
 // (`listen_on unix:${XDG_RUNTIME_DIR}/kitty-{kitty_pid}`), a plain directory
 // listing — no process-table or /proc walk.
 
 /// The staged terminal colour file's name inside the stage dir — the runtime
-/// root's contract path `$AOIDE_ROOT/song/stage/terminal-colors.conf`, the
+/// root's contract path `$STRILLIX_ROOT/stage/terminal-colors.conf`, the
 /// file the kitty dendrite includes.
 pub const TERMINAL_COLORS_FILE: &str = "terminal-colors.conf";
 
@@ -314,7 +314,7 @@ pub const TERMINAL_COLORS_FILE: &str = "terminal-colors.conf";
 /// whose kitty is wedged must not stall `rice stage`.
 const KITTY_CALL_LIMIT: std::time::Duration = std::time::Duration::from_secs(3);
 
-/// The song's terminal background opacity opinion: `geometry.terminalOpacity`
+/// The rice's terminal background opacity opinion: `geometry.terminalOpacity`
 /// when it is a plain number in [0, 1]. `None` is no opinion (absent, null,
 /// or a value lint would reject, which is never written): the host's bake
 /// shows, because kitty falls through to its own config.
@@ -327,7 +327,7 @@ pub fn terminal_opacity(notes: &Value) -> Option<f64> {
 
 /// Render the staged terminal file one notes document implies: the theme
 /// engine's `kitty` emitter (every colour slot), then a `background_opacity`
-/// line from [`terminal_opacity`] only for a song with an opinion. The file
+/// line from [`terminal_opacity`] only for a rice with an opinion. The file
 /// is the last include of kitty.conf, so a line here beats the declared
 /// fragment and the bake; without one kitty falls through to them. `None`
 /// when the notes don't resolve (a torn or reference-cyclic notes file) — the
@@ -342,15 +342,15 @@ pub fn terminal_colors(notes: &Value) -> Option<String> {
 }
 
 /// The staged lock-screen dress's name inside the stage dir — the runtime
-/// root's contract path `$AOIDE_ROOT/song/stage/hyprlock.conf`, the file the
+/// root's contract path `$STRILLIX_ROOT/stage/hyprlock.conf`, the file the
 /// host's hyprlock lane sources.
 pub const LOCKSCREEN_FILE: &str = "hyprlock.conf";
 
 /// Render the staged lock-screen dress one notes document implies, through the
-/// theme engine's `hyprlock` emitter. `image` is the song's own lock picture
-/// ([`crate::wallpaper::lockscreen_image`]): without one the song dresses nothing
-/// and the notes are not even read, so a song that ships no picture always
-/// clears what an earlier staged song left. `Err` carries the reason the
+/// theme engine's `hyprlock` emitter. `image` is the rice's own lock picture
+/// ([`crate::wallpaper::lockscreen_image`]): without one the rice dresses nothing
+/// and the notes are not even read, so a rice that ships no picture always
+/// clears what an earlier staged rice left. `Err` carries the reason the
 /// notes did not resolve or the emitter refused; the caller leaves the
 /// previous file in place rather than writing a guess.
 pub fn lockscreen_fragment(notes: &Value, image: Option<&std::path::Path>) -> Result<String, String> {
@@ -551,7 +551,7 @@ mod tests {
         let off = geometry_keywords(&json!({ "geometry": { "blurEnabled": false, "rounding": 0 } }));
         assert!(off.contains(&"keyword plugin:hyprglass:enabled 0".to_string()));
         assert!(off.contains(&"keyword plugin:hyprglass:layers:enabled 0".to_string()));
-        // A song that wants blur turns the glass back on.
+        // A rice that wants blur turns the glass back on.
         let on = geometry_keywords(&json!({ "geometry": { "blurEnabled": true } }));
         assert!(on.contains(&"keyword plugin:hyprglass:enabled 1".to_string()));
         assert!(on.contains(&"keyword plugin:hyprglass:layers:enabled 1".to_string()));
@@ -678,7 +678,7 @@ mod tests {
             core.iter().all(|k| !k.contains("plugin:hyprglass:")),
             "the core batch must hold no glass keyword: {core:?}"
         );
-        assert!(!core.is_empty(), "and it must not be empty for a real song");
+        assert!(!core.is_empty(), "and it must not be empty for a real rice");
     }
 
     #[test]
@@ -718,7 +718,7 @@ mod tests {
     }
 
     #[test]
-    fn the_config_reload_comes_first_and_a_song_with_no_blur_opinion_sends_no_glass() {
+    fn the_config_reload_comes_first_and_a_rice_with_no_blur_opinion_sends_no_glass() {
         let kw = geometry_keywords(&json!({
             "window": { "border": "#89b4fa", "borderInactive": "#1e1e2e" },
             "geometry": { "gapsIn": 4 }
@@ -735,7 +735,7 @@ mod tests {
     }
 
     #[test]
-    fn a_song_with_a_blur_opinion_sends_the_glass_batch_after_the_core_one() {
+    fn a_rice_with_a_blur_opinion_sends_the_glass_batch_after_the_core_one() {
         let kw = geometry_keywords(&json!({
             "window": { "border": "#89b4fa" },
             "geometry": { "blurEnabled": false }
@@ -803,9 +803,9 @@ mod tests {
     fn terminal_colors_render_the_staged_base16_through_the_kitty_emitter() {
         let raw = std::fs::read_to_string("tests/fixtures/valid-base16.json").unwrap();
         let mut notes: Value = serde_json::from_str(&raw).unwrap();
-        // A staged notes document carries the injected `"song"` and a
+        // A staged notes document carries the injected `"rice"` and a
         // geometry block the resolver ignores.
-        notes["song"] = json!("cadenza");
+        notes["rice"] = json!("cadenza");
         notes["geometry"] = json!({ "blurEnabled": false });
         let out = terminal_colors(&notes).expect("valid notes resolve");
         assert!(out.lines().any(|l| l == "background #0a0a0d"), "{out}");
@@ -814,7 +814,7 @@ mod tests {
     }
 
     #[test]
-    fn terminal_opacity_is_the_songs_opinion_or_no_line() {
+    fn terminal_opacity_is_the_rices_opinion_or_no_line() {
         let raw = std::fs::read_to_string("tests/fixtures/valid-base16.json").unwrap();
         let mut notes: Value = serde_json::from_str(&raw).unwrap();
         for (geometry, want) in [

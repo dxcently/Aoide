@@ -8,10 +8,10 @@
 #
 # What this is NOT: a shell. Nothing runs from here, nothing is installed from
 # here, and no config is named here — which directory quickshell is pointed at
-# is `aoide.quickshell.config`, and what fills that directory (a song's
+# is `aoide.quickshell.config`, and what fills that directory (a rice's
 # widgets, its manifest/registry/surfaces) is a host's own business. The
 # copy-out is the consumer's step: the strillix lane's build copies `qml/`
-# into its generated config, and the strillix dendrite does the same with the songs
+# into its generated config, and the strillix dendrite does the same with the rices
 # staged alongside.
 #
 # Discovered by `lib/pkgs.nix` like every other `pkgs/<name>` — no hand-list

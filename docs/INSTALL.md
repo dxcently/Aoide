@@ -3,14 +3,14 @@
 There are two installs and one boundary between them (root `AGENTS.md`,
 `docs/architecture/PACKAGE-LAYOUT.md`): **Aoide** is the core — `aoide` and
 `aoided`, sessions and the DAG, conduct, the doors — and installs with cargo on
-any Linux, no nix. **AoideOS** is the distribution built on that core, and its
+any Linux, no nix. **Strillix** is the distribution built on that core, and its
 paint half (`strillix`, the bar, the dock, the rice loop) ships only through the
 nix flake.
 
 | you want | binaries | how it installs |
 |---|---|---|
 | Aoide (core) | `aoide`, `aoided` | `cargo install` from a checkout — **this page** |
-| AoideOS (the desktop) | the same, plus `strillix` | the flake: `README.md` § 4, [Clone and Run](Aoide-Wiki/concepts/governance/Clone-and-Run.md) |
+| Strillix (the desktop) | the same, plus `strillix` | the flake: `README.md` § 4, [Clone and Run](Aoide-Wiki/concepts/governance/Clone-and-Run.md) |
 
 Nothing here installs `strillix`, and nothing here needs nix, a NixOS host, or a
 graphical session. `strillix` is a separate crate with the paint dependency weight
@@ -86,7 +86,7 @@ cd ~/Aoide && aoide onboard            # ~/.cargo/bin/aoide
 ```
 
 It is idempotent, and the core half is four acts: register the clone as a graph
-project, link `~/song` → `<checkout>/song` (never clobbering an existing file),
+project, link `~/rice` → `<checkout>/rice` (never clobbering an existing file),
 seed `rices/preferences.md` when absent, then ask which agent harnesses
 to wire and run `hooks install` for each chosen harness.
 
@@ -113,7 +113,7 @@ are what "is this install healthy" means.
 
 ## 6. Start `aoided`
 
-**The declared path is the nix module.** On an AoideOS host,
+**The declared path is the nix module.** On an Strillix host,
 `pkgs/aoide/module/aoided.nix` writes the systemd **user** unit
 (`systemd.user.services.aoided`), and `modules/dendrites/aoided.nix` anchors it to
 `aoide.sessionTarget`. Below is the portable equivalent — the same binary, the
@@ -151,7 +151,7 @@ WantedBy=default.target
 ```
 
 ```sh
-mkdir -p ~/.aoide/{log,state/stage,song/stage}
+mkdir -p ~/.aoide/{log,state/stage,rice/stage}
 systemctl --user daemon-reload
 systemctl --user enable --now aoided
 systemctl --user status aoided
@@ -227,7 +227,7 @@ curl -sS -o /dev/null -w '%{http_code}\n' \
   `aoided.service.wants/`, so the door is never a second thing to remember.
 - The door is loopback-only by construction; `AOIDE_A2A_BIND` exists for an
   operator's deliberate choice, not as a default.
-- `AOIDE_FLAKE_ROOT` is song/paint data — a host that has a checkout to rice
+- `AOIDE_FLAKE_ROOT` is rice/paint data — a host that has a checkout to rice
   sets it (the WSL twin in § 7.3 does); core's door runs without it.
 - On a host running two nodes (native + WSL, § 7.3), this unit is where one
   node's identity and port differ from the other's.
@@ -283,7 +283,7 @@ whatever one you have — a foreground terminal, `supervisord`, a container
 export AOIDE_ROOT="$HOME/.aoide" AOIDE_FLAKE_ROOT="$HOME/Aoide" AOIDE_USER="$USER"
 export AOIDE_AUDIT_LOG="$AOIDE_ROOT/log"
 export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/tmp/aoide-$UID}"   # short: a unix socket path has a ceiling
-mkdir -p "$XDG_RUNTIME_DIR" "$AOIDE_ROOT"/{log,state/stage,song/stage}
+mkdir -p "$XDG_RUNTIME_DIR" "$AOIDE_ROOT"/{log,state/stage,rice/stage}
 aoided
 ```
 
@@ -319,7 +319,7 @@ path beside it.
 | you want | how |
 |---|---|
 | the core, native — `aoide`, `aoided`, no WSL/MSYS/Cygwin | § 7.1, then start it at logon (§ 7.2) |
-| the Linux path, and the AoideOS beta | § 7.3 — WSL2, everything above unchanged |
+| the Linux path, and the Strillix beta | § 7.3 — WSL2, everything above unchanged |
 
 ### 7.1 Native Windows (core)
 
@@ -344,7 +344,7 @@ Linux. `aoided` spawns neither.
 
 ### 7.2 Start `aoided` at logon — a per-user scheduled task
 
-The declared path on an AoideOS host is still the nix module
+The declared path on an Strillix host is still the nix module
 (`pkgs/aoide/module/aoided.nix`); § 6 is the portable Linux equivalent. This is
 the portable Windows one: **per-user environment variables for the process's
 environment, and per-user logon tasks for its lifetime** — the OS's own

@@ -17,12 +17,12 @@ and the compositor's live keywords (`hyprctl keyword`, applied by
 runs when it isn't Quickshell's, the notification daemon's config, a
 launcher's theme file — is either Stylix-derived (rebuild-gated,
 templated by someone else's derivation) or simply outside the loop.
-A song cannot carry a waybar config; `rice stage` cannot restage one;
+A rice cannot carry a waybar config; `rice stage` cannot restage one;
 capturing an existing rice from a foreign flake means transcribing
 config text by hand. The `theme emit file` template engine already
 renders `{{palette.bg}}` into any text file — pure, proven — but its
 effectful half ("write the rendered text into some live config") was
-explicitly deferred (`song/src/theme/emit/file.rs`, "the deferred
+explicitly deferred (`rice/src/theme/emit/file.rs`, "the deferred
 management seam"). This lane completes that seam.
 
 ## Settled decisions
@@ -32,7 +32,7 @@ management seam"). This lane completes that seam.
    authoring tool), foreign-flake drop-in polish last (the venue).
    The design center is the EDIT/SAVE/DRAFT loop for element rices.
 2. **Runtime mirrors `run/qml`.** The elements lane renders the declared
-   song's element configs into `$AOIDE_ROOT/run/elements/<element>/`;
+   rice's element configs into `$AOIDE_ROOT/run/elements/<element>/`;
    units and exec-onces point THERE — never store symlinks in
    `~/.config`. `strx rice stage` overwrites the staged configs and
    RESTARTS the element; a rebuild re-seeds (stage-beats-declared
@@ -44,11 +44,11 @@ management seam"). This lane completes that seam.
    live `hyprctl keyword` seam; niri or anything else is
    restart/rebuild-only until someone adds a descriptor line. No
    bespoke hot-reload engineering per element class.
-3. **A song grows `elements/<name>/`** — raw config files
+3. **A rice grows `elements/<name>/`** — raw config files
    byte-for-byte plus ONE small descriptor per element (which files
    land where under `run/elements/`, how the element starts, the
    optional reload/restart overrides). The element set flows through
-   `aoide.layout` (the existing "which TYPES a song brings into
+   `aoide.layout` (the existing "which TYPES a rice brings into
    existence" namespace) and each element declares `aoide.surfaces`
    ownership — waybar owning `bar` makes the quickshell lane and
    Stylix stand down through the EXISTING
@@ -56,7 +56,7 @@ management seam"). This lane completes that seam.
    whitelist (theme/layout/surfaces) does NOT grow.
 4. **Capture is verbatim.** Byte-for-byte, frozen into nix as files
    REFERENCED from nix (home-manager/xdg-style seeding from the
-   store copy of the song dir) — never config text transcribed
+   store copy of the rice dir) — never config text transcribed
    through an LLM's context. Agents drive capture: the AGENT decides
    which elements exist, which files matter, how each starts; the
    helper command `strx rice capture` does only the mechanical freeze.
@@ -96,7 +96,7 @@ restarted. That is the whole contract, and it is uniform:
   (the same discipline `rice stage` already holds for hyprctl).
 
 Everything-is-a-plugin holds by construction: an element enters by a
-directory existing at `rices/<song>/elements/<name>/`, needs
+directory existing at `rices/<rice>/elements/<name>/`, needs
 no import-list edit anywhere, and is removable without trace by
 deleting that directory. The `_`-prefix shelving convention applies
 (`elements/_waybar/` is skipped everywhere a `_widgets/` slot would
@@ -106,7 +106,7 @@ be). The delete-every-qml test passes: with every paint lane gone,
 
 ## The descriptor
 
-One file per element: `rices/<song>/elements/<element>/element.json`.
+One file per element: `rices/<rice>/elements/<element>/element.json`.
 
 ```json
 {
@@ -128,7 +128,7 @@ same commit that lands the parser):
 - `v` — descriptor version, `0`. Unknown versions refuse with a
   taught error.
 - `element` — must equal the directory name and pass the same
-  `^[a-z0-9][a-z0-9-]*$` shape `rice stage` already enforces on song
+  `^[a-z0-9][a-z0-9-]*$` shape `rice stage` already enforces on rice
   names (it is joined into paths and process names).
 - `files` — the ordered manifest. `src` is relative to the element
   dir; `dest` is relative to `run/elements/<element>/` and defaults
@@ -170,9 +170,9 @@ $AOIDE_ROOT/run/elements/            (sibling of run/qml — storage
 
 Two writers, one rank rule — the same stage-beats-declared convention
 `run/qml` and the stage twin already hold. Between rebuilds, `rice
-stage` overwrites freely; a rebuild reasserts the declared song's
+stage` overwrites freely; a rebuild reasserts the declared rice's
 store truth, exactly as the strillix lane's `rsync -a --delete`
-reasserts `run/qml`, and a staged song is then restored from the
+reasserts `run/qml`, and a staged rice is then restored from the
 runtime rices by `strx reload` (the strillix lane's
 `aoide-rice-reload` unit), as it restores the rest of the stage.
 
@@ -181,11 +181,11 @@ runtime rices by `strx reload` (the strillix lane's
 **Stage — the edit loop (this lane's design center):**
 
 ```
-strx rice stage <song>
+strx rice stage <rice>
   ├─ theme.json → $STRILLIX_ROOT/stage/theme.json          (existing, atomic)
   ├─ hyprctl keyword batch                          (existing, live tier)
   ├─ widget QML → run/qml + IPC reload              (existing)
-  └─ NEW: for each rices/<song>/elements/<e>/element.json
+  └─ NEW: for each rices/<rice>/elements/<e>/element.json
        ├─ verbatim files copied, template files rendered
        │    against the STAGED theme → run/elements/<e>/
        │    (atomic per file; a render error fails that element,
@@ -198,12 +198,12 @@ strx rice stage <song>
 
 ```
 nixos-rebuild / home-manager switch          (user-gated, house rule 2)
-  eval: the elements lane readDirs the declared song's elements/
+  eval: the elements lane readDirs the declared rice's elements/
     ├─ aoide.layout.elements.<e> = { surfaces, via }   (the TYPE set)
     ├─ aoide.surfaces.<s>.owner = "<e>"                     (claims)
     └─ units / exec-once lines generated, ExecStart → run/elements/<e>/
-  activation: strx element seed <song>
-    renders the STORE copy of the song's elements against the
+  activation: strx element seed <rice>
+    renders the STORE copy of the rice's elements against the
     declared theme → run/elements/   (re-seeds; then EVERY element
     unit is try-restarted unconditionally — the house ruling that
     activation always brings the rice elements back up, same as the
@@ -214,10 +214,10 @@ nixos-rebuild / home-manager switch          (user-gated, house rule 2)
 **Capture — the mechanical freeze:**
 
 ```
-strx rice capture <song> <element> --config <path>...
+strx rice capture <rice> <element> --config <path>...
                   [--unit <u> | --exec <cmd>] [--surface <s>]...
-  ├─ auto-creates rices/<song>/elements/<element>/   (zero ceremony;
-  │    the song dir itself auto-creates too, compose-style)
+  ├─ auto-creates rices/<rice>/elements/<element>/   (zero ceremony;
+  │    the rice dir itself auto-creates too, compose-style)
   ├─ copies each --config byte-for-byte, RESOLVING symlinks first
   │    (a ~/.config store symlink freezes as the real bytes it
   │     points at — the rendered ground truth, per decision 4)
@@ -238,7 +238,7 @@ never transcribes, never rewrites file contents.
 | --- | --- | --- | --- |
 | live | stage-file watch (QML FileView) · `hyprctl keyword` · OSC | instant | Quickshell widgets, hyprland borders/geometry, terminals |
 | hot | `{{palette.*}}` templates rendered at stage + element reload/restart | seconds | tokenized elements (`template: true` files) |
-| rebuild-gated | Stylix auto-targets the song doesn't own · untokenized captures | one switch | GTK/Qt (Stylix stays the right tool), fresh captures |
+| rebuild-gated | Stylix auto-targets the rice doesn't own · untokenized captures | one switch | GTK/Qt (Stylix stays the right tool), fresh captures |
 
 Every capture is born rebuild-gated (hardcoded colors by design);
 each tokenization pass flips files to `template: true` and promotes
@@ -273,11 +273,11 @@ with the full count-site checklist (git show 9c2d05c). Docs land in
 the same commit as the seams they describe.
 
 - **L-E1 — descriptor + renderer (cargo, M).** New
-  `song/src/elements/` module: serde descriptor (v0), name/path
+  `rice/src/elements/` module: serde descriptor (v0), name/path
   validation, `{run}` substitution, the render pipeline (verbatim
   copy + `emit::file::render` for templated files), and
   `run_elements_dir()` in `storage/src/fs.rs` beside
-  `run_qml_dir()`. Plumbing command `strx element seed <song>` (golden
+  `run_qml_dir()`. Plumbing command `strx element seed <rice>` (golden
   +1) doing a full render into `run/elements/` from the rices —
   the shell-reachable bridge the elements lane will call. CONTRACTS §5
   "Elements" subsection in the same commit. Tests: descriptor
@@ -285,27 +285,27 @@ the same commit as the seams they describe.
   render, unknown-placeholder structured error, traversal refusal,
   `_`-shelving skip.
 - **L-E2 — stage integration + restart contract (cargo, M).**
-  `rice stage` renders the song's elements after the widget sync;
+  `rice stage` renders the rice's elements after the widget sync;
   restart/reload execution: unit → `systemctl --user restart`,
   exec-once → exact-name kill + detached respawn, `reload` preferred,
   `restart` override honored, all best-effort with per-element
   status in the Outcome (the hyprctl discipline). Files:
-  `song/src/commands/rice.rs`, `song/src/elements/`. Tests:
+  `rice/src/commands/rice.rs`, `rice/src/elements/`. Tests:
   changed-detection (unchanged element is not poked), restart
   derivation table (unit/exec-once/reload/override), render failure
   leaves the old config and reports.
 - **L-E3 — the elements lane (nix, L).** `modules/dendrites/elements/`
-  (its plain module, README + AGENTS): readDir the declared song's
+  (its plain module, README + AGENTS): readDir the declared rice's
   `elements/`, parse descriptors at eval, populate
   `aoide.layout.elements` (new option under the existing
   layout namespace, declared in nucleus options.nix) and the
   `aoide.surfaces` claims; generate `aoide-element-<name>.service`
   units and compositor exec-once lines pointing at
   `run/elements/`; activation hook runs `strx element seed` against
-  the declared song (store-referenced files, decision 4). Gate: a
+  the declared rice (store-referenced files, decision 4). Gate: a
   host with no `elements/` dirs evals byte-identical to today
   (drv-identity check — pass the worktree as a path literal); a
-  fixture song with a waybar element produces the unit, the claims,
+  fixture rice with a waybar element produces the unit, the claims,
   and the seeded tree.
 - **L-E4 — surface stand-down (nix, S).** Strillix-lane owners →
   `mkDefault`; bar render gated on ownership;
@@ -315,14 +315,14 @@ the same commit as the seams they describe.
   elements — drv-identical to today.
 - **L-E5 — `strx rice capture` (cargo, M).** The freeze command (golden
   +1): copy-with-symlink-resolve, scaffold, `--unit`/`--exec`/
-  `--surface` flags, auto-create of the song and element dirs,
+  `--surface` flags, auto-create of the rice and element dirs,
   idempotent re-capture (same files → same bytes, manifest merged
-  not duplicated). Files: `song/src/commands/capture.rs` +
+  not duplicated). Files: `rice/src/commands/capture.rs` +
   registration in strillix's registry. Tests: byte-for-byte through a
   symlink, scaffold shape vectors, name validation, re-capture
   idempotence.
 - **L-E6 — the waybar venue proof (nix + live, M).** Capture
-  dxflake's waybar into a song for real: `rice capture` against the
+  dxflake's waybar into a rice for real: `rice capture` against the
   rendered `~/.config` ground truth, agent-edited descriptor
   (`{run}` paths, `reload` = SIGUSR2), declared through the lane on
   the User's rig. The rebuild is user-run (house rule 2). Live
@@ -332,7 +332,7 @@ the same commit as the seams they describe.
   append to `rices/learnings.md`.
 - **L-E7 — drop-in guidance (docs + S cargo touch).** Foreign-flake
   wiring guidance into `aoide guide` (strillix's guide.rs) and the wiki
-  (`concepts/song/` page for elements; the KIMI librarian owns wiki
+  (`concepts/rice/` page for elements; the KIMI librarian owns wiki
   prose — this phase supplies the facts): flake-input import, host
   `aoide.*` settings, standalone home-manager on non-NixOS, where
   capture puts things when there is no repo checkout (the L-C3
@@ -391,5 +391,5 @@ the built system.
 - No `~/.config` management, ever — not even a symlink. The config
   dir contract is `run/elements/` or nothing.
 - Core (`aoide`/`aoided`) stays nix-free and element-free: every
-  crate change in this lane lands in the song/storage/strillix side of
+  crate change in this lane lands in the rice/storage/strillix side of
   the two-binary split.

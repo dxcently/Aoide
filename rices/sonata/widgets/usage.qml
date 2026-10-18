@@ -2,7 +2,7 @@
 // the dock's gadget column (WidgetSlot host — root is an Item that sizes
 // itself off its content, same as every other slot in this directory).
 //
-// Ported from the shell's UsageGadget.qml (per-song widget-slot expansion,
+// Ported from the shell's UsageGadget.qml (per-rice widget-slot expansion,
 // CONTRACTS.md §5) — ownership moved from the shell to sonata's score. Live:
 // sonata's own `widgets/dock.qml` embeds `WidgetSlot { slot: "usage" }` in
 // its gadget column (slots.md's wired table). The shell's UsageGadget.qml
@@ -61,7 +61,7 @@ Item {
     required property var theme            // palette roles
     property string usagePath: (Quickshell.env("AOIDE_ROOT") || (Quickshell.env("HOME") + "/.aoide")) + "/state/usage.json"
 
-    // WidgetSlot._songProps() always passes bridge unconditionally (universal
+    // WidgetSlot._riceProps() always passes bridge unconditionally (universal
     // widget contract, slots.md) — promoted from the shell's nullable
     // `bridge: null` to required. Still used only for the OUTBOUND-only
     // (hazards §5) `refreshusage` command via refreshUsage(); the manual-refresh

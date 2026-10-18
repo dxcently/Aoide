@@ -3,7 +3,7 @@
 // — root is an Item that sizes itself off its content, same as every other
 // slot in this directory).
 //
-// Ported from the shell's ConductorGadget.qml (per-song widget-slot
+// Ported from the shell's ConductorGadget.qml (per-rice widget-slot
 // expansion, CONTRACTS.md §5) — ownership moved from the shell to sonata's
 // score. Live: sonata's own `widgets/dock.qml` embeds
 // `WidgetSlot { slot: "conductor" }` in its gadget column (slots.md's wired
@@ -155,8 +155,8 @@ import Quickshell.Io
 // Reaches the shell's shared components — MoodFaces (the kaomoji troupe)
 // and ScrollRail (the draggable scrollbar) — neither of which is
 // conductor-specific chrome, so they stay in the shell rather than moving
-// here. Deployed-tree relative path: this file lands at $out/qml/songs/
-// sonata/conductor.qml, so two levels up ($out/qml/songs/ → $out/qml/) is
+// here. Deployed-tree relative path: this file lands at $out/qml/rices/
+// sonata/conductor.qml, so two levels up ($out/qml/rices/ → $out/qml/) is
 // the shell's own qml/ root (bar.qml idiom; see that file's own header).
 import "../.."
 
@@ -823,7 +823,7 @@ Item {
 
     // ── Stage files (QS_STAGE override — the preview-harness seam) ──────────
     // CONDUCTING files (sessions/projects/hooks/notifications) live under
-    // state/stage/, not song/stage/ (CONTRACTS.md §4, command-defrag S2) —
+    // state/stage/, not rice/stage/ (CONTRACTS.md §4, command-defrag S2) —
     // this temple never reads a rice file.
     readonly property string stageDir: {
         var s = Quickshell.env("QS_STAGE")

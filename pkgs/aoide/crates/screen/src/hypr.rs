@@ -8,17 +8,17 @@
 //! this discipline for a narrow window-focus lookup and is left as-is; it is
 //! not this module's concern to change).
 //!
-//! ── Shell-out doctrine (mirrors `song::ipc`'s house standard) ─────────────
+//! ── Shell-out doctrine (mirrors `rice::ipc`'s house standard) ─────────────
 //! [`classify_json`] is the pure judge of one already-finished `hyprctl -j`
 //! invocation (exit status + stdout/stderr → `Result<T, String>`), unit-tested
 //! below against REAL fixtures captured live on this rig (2026-08-16,
 //! Hyprland 0.56.0, one monitor `DP-1` 1920x1080) — trimmed and embedded, not
 //! invented. [`run_hyprctl_json`], the function that actually spawns
 //! `hyprctl`, is NOT unit-tested (environment-dependent: no compositor in the
-//! build sandbox) — the same split `song::ipc::quickshell_ipc_reload` /
+//! build sandbox) — the same split `rice::ipc::quickshell_ipc_reload` /
 //! `classify_call` already establishes.
 //!
-//! Unlike `song::ipc`'s quirky void-IPC call, `hyprctl -j` has no
+//! Unlike `rice::ipc`'s quirky void-IPC call, `hyprctl -j` has no
 //! silent-success trap: exit 0 means it printed the JSON it was asked for,
 //! nonzero means it printed an error to stderr. Judgement is the ordinary
 //! "exit code, then does the body parse" — no output-vs-exit-code mismatch to
@@ -288,7 +288,7 @@ impl HyprError {
 /// pure (no spawning), generic over the target shape, unit-tested against
 /// real captured fixtures. `stderr` is read only on the failure path (a
 /// success carries its payload in stdout, never stderr, per `hyprctl -j`'s
-/// own contract — unlike `song::ipc`'s quirky void-call case, there is no
+/// own contract — unlike `rice::ipc`'s quirky void-call case, there is no
 /// silent-success ambiguity to resolve here).
 fn classify_json<T: serde::de::DeserializeOwned>(
     exited_ok: bool,

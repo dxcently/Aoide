@@ -4,11 +4,11 @@
 //! a first-class rice target with the same EDIT/SAVE/DRAFT loop the QML
 //! widgets already have.
 //!
-//! A song carries raw config files byte-for-byte under
-//! `rices/<song>/elements/<element>/`, plus ONE small descriptor
+//! A rice carries raw config files byte-for-byte under
+//! `rices/<rice>/elements/<element>/`, plus ONE small descriptor
 //! (`element.json`, v0 — [`Descriptor`]) naming which files land where
 //! under `run/elements/<element>/`, verbatim or theme-templated, and how
-//! the element starts. [`seed_tree`]/[`seed_song`] are the render pipeline:
+//! the element starts. [`seed_tree`]/[`seed_rice`] are the render pipeline:
 //! verbatim byte copy for `template: false` files,
 //! `crate::theme::emit::file::render` for `template: true` ones, against
 //! the resolved theme. A render error fails only that element and leaves
@@ -16,9 +16,9 @@
 //! element is rendered into memory FIRST, and only written once all of them
 //! succeed (`render_files` / `write_files`'s own split).
 //!
-//! `commands::elements` (`element seed <song>`) is the shell-reachable
+//! `commands::elements` (`element seed <rice>`) is the shell-reachable
 //! bridge this module backs; `rice stage` (L-E2) and the elements lane's
-//! activation hook (L-E3) are later phases calling the same [`seed_song`]/
+//! activation hook (L-E3) are later phases calling the same [`seed_rice`]/
 //! [`seed_tree`] primitives — nothing here is lane- or stage-specific.
 
 use crate::theme::resolve::Resolved;
@@ -94,7 +94,7 @@ impl std::error::Error for ElementsError {}
 ///
 /// `dir_name` is the element directory `raw` was read from — [`Descriptor::element`]
 /// must equal it, the same "declared name matches directory name" discipline
-/// `rice compose`'s own song-name validation holds.
+/// `rice compose`'s own rice-name validation holds.
 pub fn parse_descriptor(dir_name: &str, raw: &str) -> Result<Descriptor, ElementsError> {
     let d: Descriptor = serde_json::from_str(raw)
         .map_err(|e| ElementsError::new(format!("element.json is not valid JSON: {e}")))?;
@@ -105,7 +105,7 @@ pub fn parse_descriptor(dir_name: &str, raw: &str) -> Result<Descriptor, Element
             d.v
         )));
     }
-    if !crate::compose::valid_song_name(&d.element) {
+    if !crate::compose::valid_rice_name(&d.element) {
         return Err(ElementsError::new(format!(
             "\"element\": \"{}\" is not a valid element name: must match \
              `^[a-z0-9][a-z0-9-]*$` (lowercase letters, digits, hyphens; no leading hyphen)",
@@ -326,10 +326,10 @@ fn render_one_element(element_dir: &Path, run_dir: &Path, name: &str, resolved: 
 /// `resolved`. `_`-prefixed directories are skipped (the same shelving
 /// convention `elements/_waybar/` gets everywhere a `_widgets/` slot would),
 /// as are non-directory entries. A missing `elements_root` reports an empty
-/// [`SeedReport`], not an error — most songs carry no elements at all.
+/// [`SeedReport`], not an error — most rices carry no elements at all.
 ///
 /// Pure with respect to global state (explicit paths only) so it's testable
-/// without touching `$AOIDE_ROOT`/`$AOIDE_STAGE_DIR` — [`seed_song`] is the
+/// without touching `$AOIDE_ROOT`/`$AOIDE_STAGE_DIR` — [`seed_rice`] is the
 /// thin env-resolving wrapper around this.
 pub fn seed_tree(elements_root: &Path, run_root: &Path, resolved: &Resolved) -> Result<SeedReport, ElementsError> {
     let mut report = SeedReport::default();
@@ -364,16 +364,16 @@ pub fn seed_tree(elements_root: &Path, run_root: &Path, resolved: &Resolved) -> 
     Ok(report)
 }
 
-/// Full render of `song`'s committed `elements/*/element.json` into
+/// Full render of `rice`'s committed `elements/*/element.json` into
 /// `run/elements/` — the shell-reachable bridge `element seed` calls,
-/// against `song`'s own committed `theme.json` (the "declared" tier,
+/// against `rice`'s own committed `theme.json` (the "declared" tier,
 /// docs/architecture/ELEMENTS.md's "Declared" flow — a rebuild's activation
 /// hook re-seeds from the STORE copy the same way).
-pub fn seed_song(song: &str) -> Result<SeedReport, ElementsError> {
-    let elements_root = aoide_storage::fs::rice_dir(song).join("elements");
+pub fn seed_rice(rice: &str) -> Result<SeedReport, ElementsError> {
+    let elements_root = aoide_storage::fs::rice_dir(rice).join("elements");
     let run_root = aoide_storage::fs::run_elements_dir();
 
-    let notes_path = aoide_storage::fs::rice_notes(song);
+    let notes_path = aoide_storage::fs::rice_notes(rice);
     let raw_notes = std::fs::read_to_string(&notes_path)
         .map_err(|e| ElementsError::new(format!("cannot read {}: {e}", notes_path.display())))?;
     let notes: serde_json::Value = serde_json::from_str(&raw_notes)
@@ -621,7 +621,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    // ── seed_tree: render-error isolation, `_`-shelving, whole-song walk ──
+    // ── seed_tree: render-error isolation, `_`-shelving, whole-rice walk ──
 
     #[test]
     fn seed_tree_renders_every_element_and_reports_per_element_status() {

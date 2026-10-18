@@ -28,8 +28,8 @@
 // nothing, so the live path and the preview path are the same bar.
 //
 //   AOIDE_FLAKE_ROOT=<worktree> strillix preview \
-//       <worktree>/song/songbook/cadenza/widgets/BarPreview.qml --song cadenza \
-//       --fixture <worktree>/song/songbook/cadenza/design/fixtures/switchboard \
+//       <worktree>/rices/cadenza/widgets/BarPreview.qml --rice cadenza \
+//       --fixture <worktree>/rices/cadenza/design/fixtures/switchboard \
 //       --root $XDG_RUNTIME_DIR/cadenza-bar
 import QtQuick
 import Quickshell

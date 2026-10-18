@@ -62,7 +62,7 @@ Item {
             var baked = Quickshell.env("AOIDE_WALLPAPER") || ""
             try {
                 var d = JSON.parse(text())
-                var applies = !!(d && d.path && (!d.song || d.song === root.theme.songName))
+                var applies = !!(d && d.path && (!d.rice || d.rice === root.theme.riceName))
                 root.wallpaperPath = applies ? "" + d.path : baked
                 root.wallpaperTile = applies && d.pick === true && d.tile === true
             } catch (e) { root.wallpaperPath = baked; root.wallpaperTile = false }
@@ -1939,7 +1939,7 @@ Item {
         Flyout {
             name: "action"
             cell: flag
-            gate: !!root.stagingEngine && root.stagingEngine.resolveSong(root.theme.songName, "notifications-center") !== ""
+            gate: !!root.stagingEngine && root.stagingEngine.resolveRice(root.theme.riceName, "notifications-center") !== ""
             implicitWidth: acRim.width
             implicitHeight: acRim.height + 6
             Rim {
@@ -2397,12 +2397,12 @@ Item {
                     property var riceAnswer: null
                     property int riceAsked: 0
                     property bool ricePending: false
-                    readonly property string riceKey: root.theme.riceMode + "/" + root.theme.songName + "/" + ((root.theme.modeRaw && root.theme.modeRaw.draft) || "")
+                    readonly property string riceKey: root.theme.riceMode + "/" + root.theme.riceName + "/" + ((root.theme.modeRaw && root.theme.modeRaw.draft) || "")
                     onRiceKeyChanged: sm.ricePending = false
                     Timer { interval: 10000; running: sm.ricePending; onTriggered: sm.ricePending = false }
                     readonly property var stageRows: sm.ricePending ? [Rice.waiting(null)] : Rice.switchRows(sm.riceAnswer, root.theme.riceMode)
                     readonly property var draftRows: sm.ricePending || !Rice.ready(sm.riceAnswer) ? [] : [{
-                        head: "drafts" + (sm.riceAnswer.draftsSong ? " · " + sm.riceAnswer.draftsSong : ""),
+                        head: "drafts" + (sm.riceAnswer.draftsRice ? " · " + sm.riceAnswer.draftsRice : ""),
                         label: "", mark: "", live: false, kind: "", name: "", here: false
                     }].concat(Rice.draftRows(sm.riceAnswer), [Rice.newDraft(), Rice.saveDraft(root.theme.riceMode),
                         Rice.declareRow(sm.riceAnswer, root.theme.riceMode, !!root.bridge && typeof root.bridge.riceDeclare === "function")])
@@ -2845,25 +2845,25 @@ Item {
             readonly property int rise: 24
             readonly property string home: Quickshell.env("HOME") || ""
             readonly property string face: picFly.home + "/.face"
-            readonly property string songDir: root.iconDir + "user/"
-            readonly property string fallback: picFly.songDir + "chrome-sash.svg"
+            readonly property string riceDir: root.iconDir + "user/"
+            readonly property string fallback: picFly.riceDir + "chrome-sash.svg"
             readonly property string cacheDir: (Quickshell.env("XDG_CACHE_HOME") || (picFly.home + "/.cache")) + "/barcarolle/picture"
-            readonly property var songTiles: [
-                { path: picFly.fallback, key: picFly.cacheDir + "/chrome-sash.png", song: true },
-                { path: picFly.songDir + "silhouette.svg", key: picFly.cacheDir + "/silhouette.png", song: true },
-                { path: picFly.songDir + "pixel-face.svg", key: picFly.cacheDir + "/pixel-face.png", song: true }
+            readonly property var riceTiles: [
+                { path: picFly.fallback, key: picFly.cacheDir + "/chrome-sash.png", rice: true },
+                { path: picFly.riceDir + "silhouette.svg", key: picFly.cacheDir + "/silhouette.png", rice: true },
+                { path: picFly.riceDir + "pixel-face.svg", key: picFly.cacheDir + "/pixel-face.png", rice: true }
             ]
             property string pictDir: picFly.home + "/Pictures/avatars"
             readonly property string shownDir: picFly.home !== "" && picFly.pictDir.indexOf(picFly.home + "/") === 0 ? "~" + picFly.pictDir.substring(picFly.home.length) : picFly.pictDir
             property var folderTiles: []
-            readonly property var listed: picFly.songTiles.concat(picFly.folderTiles)
+            readonly property var listed: picFly.riceTiles.concat(picFly.folderTiles)
             property var hashes: ({})
             readonly property string faceHash: picFly.hashes[picFly.face] || ""
             readonly property bool faceListed: {
                 for (var i = 0; i < picFly.listed.length; i++) if (picFly.hashes[picFly.listed[i].key] === picFly.faceHash) return true
                 return false
             }
-            readonly property var handTiles: picFly.faceHash === "" || picFly.faceListed ? [] : [{ path: picFly.face, key: picFly.face, song: false, hand: true }]
+            readonly property var handTiles: picFly.faceHash === "" || picFly.faceListed ? [] : [{ path: picFly.face, key: picFly.face, rice: false, hand: true }]
             readonly property var tiles: picFly.handTiles.concat(picFly.listed)
             property string picked: ""
             property string note: ""
@@ -2919,7 +2919,7 @@ Item {
             })
 
             function isCurrent(t) {
-                if (picFly.faceHash === "") return t.song && t.path === picFly.fallback
+                if (picFly.faceHash === "") return t.rice && t.path === picFly.fallback
                 return picFly.hashes[t.key] === picFly.faceHash
             }
             function tileFor(path) {
@@ -2930,7 +2930,7 @@ Item {
                 if (picRead.running) return
                 picFly.note = ""
                 picRead.run(["find", picFly.pictDir, "-maxdepth", "1", "-type", "f", "(", "-iname", "*.png", "-o", "-iname", "*.jpg", "-o", "-iname", "*.jpeg", "-o", "-iname", "*.webp", "-o", "-iname", "*.gif", ")"], function (code, text) {
-                    picFly.folderTiles = ("" + text).split("\n").filter(function (p) { return p !== "" }).sort().map(function (p) { return { path: p, key: p, song: false } })
+                    picFly.folderTiles = ("" + text).split("\n").filter(function (p) { return p !== "" }).sort().map(function (p) { return { path: p, key: p, rice: false } })
                     picFly.hashTiles()
                 })
             }
@@ -2992,7 +2992,7 @@ Item {
                 })
             }
             function stage(t) {
-                if (!t.song) {
+                if (!t.rice) {
                     picFly.probing = t.path
                     probeImg.source = ""
                     probeImg.source = "file://" + t.path + root.bust

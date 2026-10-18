@@ -11,7 +11,7 @@ import Quickshell
 // logs the power command instead of dispatching it — the preview must never
 // actually suspend the box.
 //
-// The powermenu body is per-song score (song/songbook/<song>/widgets/), NOT
+// The powermenu body is per-rice score (rices/<rice>/widgets/), NOT
 // a shared-tree component, so this harness loads it by URL — the
 // CalendarPreview precedent, adapted: powermenu.qml roots a `PanelWindow`,
 // not an `Item`, so it can't go through a `Loader` (a Loader parents its
@@ -20,9 +20,9 @@ import Quickshell
 // SurfaceSlot.qml uses for the real slot instead. CAL_WIDGET-style env-var
 // indirection for a source-tree checkout (QS_STAGE precedent — previews
 // honour env seams):
-//   POWERMENU_WIDGET=file://$PWD/song/songbook/sonata/widgets/powermenu.qml \
+//   POWERMENU_WIDGET=file://$PWD/rices/sonata/widgets/powermenu.qml \
 //     qs -p pkgs/strillix-shell/qml/ExodosPreview.qml
-// In the deployed tree ($out/qml/, where songs/ sits beside this file) the
+// In the deployed tree ($out/qml/, where rices/ sits beside this file) the
 // default relative source resolves with no env needed.
 ShellRoot {
     id: harness
@@ -49,7 +49,7 @@ ShellRoot {
 
     Component.onCompleted: {
         var src = Quickshell.env("POWERMENU_WIDGET")
-        if (!src || src === "") src = "songs/sonata/powermenu.qml"
+        if (!src || src === "") src = "rices/sonata/powermenu.qml"
         var comp = Qt.createComponent(src)
         if (comp.status === Component.Error) {
             console.log("[ExodosPreview] createComponent failed:", comp.errorString())

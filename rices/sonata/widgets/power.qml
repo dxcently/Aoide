@@ -2,7 +2,7 @@
 // dock's gadget column (WidgetSlot host — root is an Item that sizes itself
 // off its content, same as every other slot in this directory).
 //
-// Ported from the shell's PowerVitalsGadget.qml (per-song widget-slot
+// Ported from the shell's PowerVitalsGadget.qml (per-rice widget-slot
 // expansion, CONTRACTS.md §5) — ownership moved from the shell to sonata's
 // score. Live: sonata's own `widgets/dock.qml` embeds
 // `WidgetSlot { slot: "power" }` in its gadget column (slots.md's wired
@@ -46,7 +46,7 @@ Item {
     id: gadget
 
     required property var theme            // palette roles
-    required property var bridge           // ShellBridge — WidgetSlot._songProps() always
+    required property var bridge           // ShellBridge — WidgetSlot._riceProps() always
                                             // passes this; unused today, declared per the
                                             // universal widget contract (slots.md)
     property string routePath: "/proc/net/route"

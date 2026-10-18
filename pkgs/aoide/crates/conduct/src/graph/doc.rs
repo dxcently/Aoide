@@ -216,7 +216,7 @@ pub(crate) fn build_graph_as(
         }
         // The PULSE timestamp (§E): the latest hook `updatedAt`, else
         // `startedAt` — the value a tie's and a workspace's own `activeAt` is
-        // the max over, and what the song watches advance between two reads.
+        // the max over, and what the rice watches advance between two reads.
         // Rides under the SAME gate as the block it feeds: with no workspace in
         // play there is nothing to pulse, and a document that never carried
         // this key must not grow it for no reason.
@@ -445,7 +445,7 @@ fn windowed_ancestor<'a>(
 ///   live sessions, so an unbound workspace with a project's sessions on it
 ///   still labels itself (and one with neither stays an empty list).
 /// - A **project tie** is one per shared project, for every pair of workspaces
-///   whose `projects` intersect — a clique at three or more, which the song
+///   whose `projects` intersect — a clique at three or more, which the rice
 ///   collapses itself. A **spawned tie** is the parent's (or nearest windowed
 ///   ancestor's) workspace to the child's, ONLY when the two differ; a headless
 ///   child has no workspace and therefore no tie of its own.

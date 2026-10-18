@@ -4,8 +4,8 @@
 //
 // Unlike the *Preview.qml files (which load a real widget body to eyeball on
 // screen), this loads nothing but a real `StagingEngine` and drives its
-// public functions (`has`/`source`/`resolveSong`) against whatever
-// songs/manifest.json sits under `$HOME/Aoide/run/qml/`. Run it against a
+// public functions (`has`/`source`/`resolveRice`) against whatever
+// rices/manifest.json sits under `$HOME/Aoide/run/qml/`. Run it against a
 // SCRATCH `$HOME` pointed at a real BUILT `aoide-quickshell-config`
 // derivation's manifest.json (never a hand-written fixture — the standing
 // lesson this harness exists to honour) with an offscreen QPA platform:
@@ -51,20 +51,20 @@ ShellRoot {
 
     function _run() {
         var m = harness.engine.manifest
-        console.log("loaded manifest songs:", JSON.stringify(Object.keys(m).sort()))
+        console.log("loaded manifest rices:", JSON.stringify(Object.keys(m).sort()))
 
         // ── a slot absent everywhere resolves to "" ─────────────────────────
-        harness.check("has() false for a slot no song provides",
+        harness.check("has() false for a slot no rice provides",
             harness.engine.has("nocturne", "nonexistent-slot"), false)
-        harness.check("resolveSong() \"\" for a slot absent from the active song AND the baseline",
-            harness.engine.resolveSong("nocturne", "nonexistent-slot"), "")
+        harness.check("resolveRice() \"\" for a slot absent from the active rice AND the baseline",
+            harness.engine.resolveRice("nocturne", "nonexistent-slot"), "")
 
-        // ── a song whose map is fully inherited resolves identically to
+        // ── a rice whose map is fully inherited resolves identically to
         // today's baseline floor ────────────────────────────────────────────
-        // A sonata-only slot is one no OTHER song OWNS — generalised (not
-        // hardcoded to nocturne) so the next song added to the songbook cannot
+        // A sonata-only slot is one no OTHER rice OWNS — generalised (not
+        // hardcoded to nocturne) so the next rice added to the rices cannot
         // silently hollow this assertion out. This checks OWNERSHIP, not mere
-        // key presence: a record a song borrows carries its lender's owner, so
+        // key presence: a record a rice borrows carries its lender's owner, so
         // a key-presence-only test would wrongly exclude it.
         var sonataOnlySlots = Object.keys(m.sonata).filter(function (slot) {
             return Object.keys(m).filter(function (s) { return s !== "sonata" })
@@ -75,7 +75,7 @@ ShellRoot {
         var inheritedOk = true
         for (var i = 0; i < sonataOnlySlots.length; i++) {
             var slot = sonataOnlySlots[i]
-            var resolved = harness.engine.resolveSong("nocturne", slot)
+            var resolved = harness.engine.resolveRice("nocturne", slot)
             if (resolved !== "sonata") {
                 inheritedOk = false
                 console.log("  MISMATCH:", slot, "resolved to", JSON.stringify(resolved), "expected \"sonata\"")
@@ -86,40 +86,40 @@ ShellRoot {
 
         // ── every declared slot resolves, source() honouring owner ───────────
         // Ground truth read from the REAL BUILT manifest's own `owner` field
-        // per record, not assumed to equal the song name. resolveSong(song, slot)
-        // always returns the BORROWER (song), but source(song, slot) must
+        // per record, not assumed to equal the rice name. resolveRice(rice, slot)
+        // always returns the BORROWER (rice), but source(rice, slot) must
         // resolve under the OWNER's directory and file, per the manifest record.
-        var songs = Object.keys(m)
+        var rices = Object.keys(m)
         var slotCount = 0
         var allOk = true
-        for (var s = 0; s < songs.length; s++) {
-            var song = songs[s]
-            var slots = Object.keys(m[song])
+        for (var s = 0; s < rices.length; s++) {
+            var rice = rices[s]
+            var slots = Object.keys(m[rice])
             for (var sl = 0; sl < slots.length; sl++) {
                 slotCount++
                 var sn = slots[sl]
-                var rec = m[song][sn]
-                var resolvedSong = harness.engine.resolveSong(song, sn)
-                if (resolvedSong !== song) {
+                var rec = m[rice][sn]
+                var resolvedRice = harness.engine.resolveRice(rice, sn)
+                if (resolvedRice !== rice) {
                     allOk = false
-                    console.log("  MISMATCH:", song, sn, "resolveSong ->", JSON.stringify(resolvedSong), "expected", JSON.stringify(song))
+                    console.log("  MISMATCH:", rice, sn, "resolveRice ->", JSON.stringify(resolvedRice), "expected", JSON.stringify(rice))
                 }
-                var src = harness.engine.source(song, sn)
-                var expectedSrc = Qt.resolvedUrl("songs/" + rec.owner + "/" + rec.file)
+                var src = harness.engine.source(rice, sn)
+                var expectedSrc = Qt.resolvedUrl("rices/" + rec.owner + "/" + rec.file)
                 if (src !== expectedSrc) {
                     allOk = false
-                    console.log("  SRC MISMATCH:", song, sn, "->", src, "expected", expectedSrc)
+                    console.log("  SRC MISMATCH:", rice, sn, "->", src, "expected", expectedSrc)
                 }
             }
         }
-        harness.check("real built manifest declares exactly 36 slots across 4 songs",
+        harness.check("real built manifest declares exactly 36 slots across 4 rices",
             slotCount, 36)
-        harness.check("all 36 declared slots resolve to their own song (resolveSong) and their record's owner (source)",
+        harness.check("all 36 declared slots resolve to their own rice (resolveRice) and their record's owner (source)",
             allOk, true)
 
-        // The cross-song borrow is not exercised here: no committed song borrows
-        // a slot (the manifest above has every owner equal to its song). The
-        // borrow path is proved by tests/selection/songbook-borrow and by the
+        // The cross-rice borrow is not exercised here: no committed rice borrows
+        // a slot (the manifest above has every owner equal to its rice). The
+        // borrow path is proved by tests/selection/rices-borrow and by the
         // consumer's merged host in tests/consumer, whose manifest names Aoide's
         // sonata as the owner of the borrowed slots.
 

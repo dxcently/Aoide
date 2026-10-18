@@ -8,15 +8,15 @@ import Quickshell.Wayland
 // Point at a different stage file with QS_STAGE (e.g. an empty one) to exercise
 // the empty state:  QS_STAGE=/tmp/empty.json qs -p .../TerminalsPreview.qml
 //
-// The terminals body is per-song score (song/songbook/<song>/widgets/), NOT
+// The terminals body is per-rice score (rices/<rice>/widgets/), NOT
 // a shared-tree component, so this harness loads it by URL — the
 // CalendarPreview precedent. Quickshell's virtual qs:@ filesystem
 // black-holes relative paths that escape the config root, so from a repo
-// checkout point TERMINALS_WIDGET at the songbook file (QS_STAGE
+// checkout point TERMINALS_WIDGET at the rices file (QS_STAGE
 // precedent — previews honour env seams):
-//   TERMINALS_WIDGET=file://$PWD/song/songbook/sonata/widgets/terminals.qml \
+//   TERMINALS_WIDGET=file://$PWD/rices/sonata/widgets/terminals.qml \
 //     qs -p pkgs/strillix-shell/qml/TerminalsPreview.qml
-// In the deployed tree ($out/qml/, where songs/ sits beside this file) the
+// In the deployed tree ($out/qml/, where rices/ sits beside this file) the
 // default relative source resolves with no env needed.
 //
 // terminals.qml declares `theme` AND `bridge` as `required property`
@@ -122,7 +122,7 @@ ShellRoot {
             anchors.left: parent.left
             Component.onCompleted: {
                 var src = Quickshell.env("TERMINALS_WIDGET")
-                if (!src || src === "") src = "songs/sonata/terminals.qml"
+                if (!src || src === "") src = "rices/sonata/terminals.qml"
                 setSource(src, {
                     "theme": win.stubTheme,
                     "bridge": win.stubBridge,

@@ -9,19 +9,19 @@
 #      the same registry and disables derivation for owned surfaces. Two
 #      modules claiming the same surface is a build-time error.
 #
-#   2. rice-runtime-untracked — a song's RUNTIME dirs (`$STRILLIX_ROOT/stage/`,
-#      `song/auditions/`, `$STRILLIX_ROOT/declared/`) must not exist in the source tree at
+#   2. rice-runtime-untracked — a rice's RUNTIME dirs (`$STRILLIX_ROOT/stage/`,
+#      `rice/auditions/`, `$STRILLIX_ROOT/declared/`) must not exist in the source tree at
 #      all. This replaces `no-song-read`, which scanned module PATHS for those
 #      names and was vacuously true — a module never reads through its own path.
 #      What actually keeps runtime state out of evaluation is that pure flake
 #      eval reads only TRACKED files and `.gitignore` covers those three; this
 #      check is what fails if one is ever committed or left behind.
 #
-#   3. rice-shape — a committed song under rices/<name>/ carries its
+#   3. rice-shape — a committed rice under rices/<name>/ carries its
 #      body (`rice.nix`), its `theme.json` and its `hyprland.conf`, the body
 #      is the aggregation shape, the `hyprland.conf` keeps the theme's keys
 #      out, and a rice's module values sit under lib.mkDefault. No `.nix`
-#      anywhere else: an extra module in a song folder would join the merge
+#      anywhere else: an extra module in a rice folder would join the merge
 #      silently and could set arbitrary host options.
 #
 #   4. fmt — `nixfmt --check` over every `.nix` file in the flake's own
@@ -46,7 +46,7 @@
 #      `pkgs/aoide/Cargo.toml`'s `[workspace.dependencies]` and a transitive
 #      walk of `[dependencies]`/`[build-dependencies]` starting at
 #      `crates/cli` (never `[dev-dependencies]` — test-support never ships),
-#      then asserts the closure never reaches `aoide-song`/`aoide-screen`/
+#      then asserts the closure never reaches `strillix-rice`/`aoide-screen`/
 #      `strillix` and that no closure crate's `src/` shells out to nix.
 #
 #   8. portability — the static artifact (`packages.aoide-static`, Phase C)
@@ -65,7 +65,7 @@
 #   10. theme-fanout — the two fan-outs (baked Stylix, `$STRILLIX_ROOT/stage/
 #       theme.json` seed) resolve an `aoide.theme.override` identically.
 #       Proves the general law against a fixed in-file fixture (never a real
-#       host or committed song): `lib/theme.nix`'s `stagePatch`'s palette
+#       host or committed rice): `lib/theme.nix`'s `stagePatch`'s palette
 #       output matches `resolve`'s under a one-anchor override,
 #       `stagePatch` is the identity with no override set, `venueDelta`
 #       is exactly the one recoloured slot (`{ }` with no override), and a
@@ -79,7 +79,7 @@
 #   13. bar-ricemode — every bar body embeds the shared rice-mode control:
 #       the literal `slot: "ricemode"` is in the body of every distinct bar the
 #       rices's manifest names (a borrowed bar is checked once, under its
-#       owner; a song with no bar of its own renders sonata's), and sonata
+#       owner; a rice with no bar of its own renders sonata's), and sonata
 #       carries the `ricemode` record every bar's slot falls back to.
 #
 # 1–3 and 5 are written so they PASS TRIVIALLY where nothing populates the
@@ -147,16 +147,16 @@ let
       present == [ ]
     ) "the source tree holds gitignored rice runtime state: ${builtins.toString present}";
 
-  # ── Check 3: song shape (CONTRACTS.md §5, song shape v1) ───────────────────
-  # A committed song under rices/<name>/ is a folder of notes and one
+  # ── Check 3: rice shape (CONTRACTS.md §5, rice shape v1) ───────────────────
+  # A committed rice under rices/<name>/ is a folder of notes and one
   # body. Four things are checked, each because a failure is silent elsewhere:
   #
   #   - `rice.nix` is an attrset of `system` and/or `home` halves, and a half
   #     takes only `members`, `providers` and `module` (habit's readBody refuses
-  #     anything else, but only for a SELECTED song; this runs for every song);
+  #     anything else, but only for a SELECTED rice; this runs for every rice);
   #   - `theme.json` and `hyprland.conf` exist. `hyprland.conf` may be empty,
-  #     and the staging engine links to a staging-owned empty file when a song
-  #     ships none, so a song with no binds never keeps the previous one's;
+  #     and the staging engine links to a staging-owned empty file when a rice
+  #     ships none, so a rice with no binds never keeps the previous one's;
   #   - `hyprland.conf` carries no key the THEME owns (gaps, rounding, borders,
   #     blur, colours). The theme renders those into the same rice, so a second
   #     writer would race it: the rice file keeps binds, layout and animations;
@@ -165,7 +165,7 @@ let
   #     (`moduleProblemList`, below);
   #   - no stray `.nix` joins the module merge, and no `.nix` names a path out of
   #     its own folder (`strayNixFiles`, `escapingNixFiles`).
-  #   - a declared `aoide.theme.wallpaper` is the song's own `wallpaper/<song>-desktop.<ext>`,
+  #   - a declared `aoide.theme.wallpaper` is the rice's own `wallpaper/<rice>-desktop.<ext>`,
   #     the one name the activation seed and `rice stage` both resolve.
   #
   # The body, the hyprland.conf and the rice modules are the reads here that look
@@ -174,13 +174,13 @@ let
   riceShape =
     {
       ricesRoot,
-      songNames,
+      discoveredNames,
       strayNixFiles,
       escapingNixFiles,
       borrow,
     }:
     let
-      songLib = import ./song.nix { inherit lib; };
+      riceLib = import ./rice.nix { inherit lib; };
       bodyKeys = [
         "description"
         "system"
@@ -245,13 +245,13 @@ let
         !(builtins.pathExists (ricesRoot + "/${name}/rice.nix"))
         || !(builtins.pathExists (ricesRoot + "/${name}/theme.json"))
         || !(builtins.pathExists (ricesRoot + "/${name}/hyprland.conf"))
-      ) songNames;
+      ) discoveredNames;
       badBodies = builtins.filter (
         name: builtins.pathExists (ricesRoot + "/${name}/rice.nix") && bodyProblem name != null
-      ) songNames;
+      ) discoveredNames;
       leaking = builtins.filter (
         name: builtins.pathExists (ricesRoot + "/${name}/hyprland.conf") && themeLeaks name != [ ]
-      ) songNames;
+      ) discoveredNames;
 
       # ── A rice module sets its values under lib.mkDefault ─────────────────────
       # CONTRACTS.md §5, "The body". A rice is a default for its slots and its
@@ -271,7 +271,7 @@ let
         config = { };
         options = { };
         modulesPath = "";
-        song = songLib;
+        rice = riceLib;
         inherit borrow;
       };
       tagged = v: builtins.isAttrs v && builtins.hasAttr "_type" v;
@@ -298,7 +298,7 @@ let
         else
           module;
       unwrapOverride = v: if tagged v && v._type == "override" then unwrapOverride v.content else v;
-      # A song's picture is its own `wallpaper/<song>-desktop.<ext>` (CONTRACTS.md §4):
+      # A rice's picture is its own `wallpaper/<rice>-desktop.<ext>` (CONTRACTS.md §4):
       # the seed publishes the declared path, and `rice stage` finds the same
       # file by that name, so a declared picture under any other name would
       # show after a rebuild and vanish on a stage.
@@ -320,13 +320,13 @@ let
           [ ]
         else
           [
-            "song ${name}'s ${half}.module sets aoide.theme.wallpaper to ${path}; the picture must be wallpaper/${name}-desktop.<ext> (CONTRACTS.md §4)"
+            "rice ${name}'s ${half}.module sets aoide.theme.wallpaper to ${path}; the picture must be wallpaper/${name}-desktop.<ext> (CONTRACTS.md §4)"
           ];
       moduleProblems =
         name: half: module:
         let
           raw = rawOf module;
-          where = "song ${name}'s ${half}.module";
+          where = "rice ${name}'s ${half}.module";
           extraKeys =
             if raw ? config then
               lib.subtractLists [ "config" ] (builtins.attrNames raw)
@@ -375,7 +375,7 @@ let
             ]
         else
           [ ]
-      ) songNames;
+      ) discoveredNames;
     in
     assertCheck "rice-shape"
       (
@@ -390,7 +390,7 @@ let
         if strayNixFiles != [ ] then
           "stray .nix outside rice.nix/_widgets/: ${builtins.toString strayNixFiles}"
         else if escapingNixFiles != [ ] then
-          "a song's `.nix` TEXT carries a `../` path literal (CONTRACTS.md §5): ${builtins.toString escapingNixFiles}"
+          "a rice's `.nix` TEXT carries a `../` path literal (CONTRACTS.md §5): ${builtins.toString escapingNixFiles}"
         else if badBodies != [ ] then
           "rice.nix is not a body (system/home halves, CONTRACTS.md §5) in: ${builtins.toString badBodies}: ${bodyProblem (builtins.head badBodies)}"
         else if leaking != [ ] then
@@ -540,7 +540,7 @@ let
         #   - docs/Aoide-Wiki/references/  dated handoffs, audit reports and
         #                                  design notes — history, same reason
         #   - docs/Aoide-Wiki/concepts/desktop/Feature-Set.md
-        #                                  the AoideOS roadmap: its spans name
+        #                                  the Strillix roadmap: its spans name
         #                                  commands that do not exist yet and
         #                                  every one is labelled "planned …
         #                                  not in `aoide schema --json`", so
@@ -595,9 +595,9 @@ let
   # rename) fails the build naming the offending line instead of walking
   # past it unseen.
   #
-  # Two assertions. First, the closure must not contain `aoide-song`,
+  # Two assertions. First, the closure must not contain `strillix-rice`,
   # `aoide-screen`, or `strillix` — a directory denylist would pass this
-  # while core silently grew an `aoide-song` dependency and inherited its
+  # while core silently grew an `strillix-rice` dependency and inherited its
   # nix-eval transitively; deriving the closure is what catches that.
   # Second, no closure crate's `src/` shells out to nix: a quoted `"nix"` /
   # `"nix-<word>"` literal, or a quoted string naming `nixos-rebuild` or
@@ -628,7 +628,7 @@ let
         # Full-line TOML comments (first non-whitespace char '#') stripped
         # before any aoide-* scanning below: both the workspace manifest and
         # every crate manifest carry long prose comments naming
-        # aoide-song/aoide-screen/strillix that are not dependency edges.
+        # strillix-rice/aoide-screen/strillix that are not dependency edges.
         sub strip_comment_lines {
             my ($text) = @_;
             return join "\n", grep { !/^\s*#/ } split /\n/, $text, -1;
@@ -718,7 +718,7 @@ let
         }
 
         # ── Assertion 1: the P-A5 boundary ──────────────────────────────────
-        my @forbidden = grep { $visited{$_} } ("song", "screen", "strillix");
+        my @forbidden = grep { $visited{$_} } ("rice", "screen", "strillix");
         if (@forbidden) {
             die "aoide check nix-independence FAILED: core closure reaches "
               . join(", ", map { "aoide-$_ (" . closure_path($_) . ")" } @forbidden)
@@ -818,7 +818,7 @@ let
   # `stagePatch` (the `$STRILLIX_ROOT/stage/theme.json` seed) must apply the identical
   # override rule (CONTRACTS.md §1). Proved here against a FIXED fixture —
   # never a real host's `aoide.theme` or a committed rices file, so this
-  # check never depends on which songs or hosts are in the tree. One case (a
+  # check never depends on which rices or hosts are in the tree. One case (a
   # single overridden anchor recolours a matching palette slot) plus the
   # no-override identity `stagePatch` promises callers. `venueDelta` (the
   # `$STRILLIX_ROOT/declared/venue.json` the runtime stage overlays) is proved on the
@@ -937,12 +937,12 @@ let
   # §9's claim, as a build: `share/strillix/nix/manifest.nix` (shipped by
   # `pkgs/strillix-rices`) is the runtime's generator, and a plain
   # `nix-instantiate --eval --strict --json --expr` on it — the exact argv
-  # `aoide-song::widgets` runs, with `NIX_PATH=` empty, no flake, no network, no
+  # `strillix-rice::widgets` runs, with `NIX_PATH=` empty, no flake, no network, no
   # checkout — must answer what the flake's own `ricesManifest` answers.
   #
   # Check 11 (`generator-offline`): over the repo's committed rices.
   # Check 12 (`generator-relocatable`): over a COPY of it in `$TMPDIR`, outside
-  # the repo — §7.4's constraints 1 and 5 (a song folder is self-contained and
+  # the repo — §7.4's constraints 1 and 5 (a rice folder is self-contained and
   # holds no repo-absolute path), which is what lets a machine evaluate its OWN
   # rices.
   #
@@ -1038,14 +1038,14 @@ let
   # ── Check 13: every bar embeds the shared rice-mode control ────────────────
   # The rice-mode control is the slot `ricemode`: a bar embeds it as
   # `WidgetSlot { slot: "ricemode" }`, and the slot resolves through the
-  # baseline chain to the song's own body or sonata's. A bar body without the
+  # baseline chain to the rice's own body or sonata's. A bar body without the
   # literal has no rice-mode control, so a gesture added to the slot never
   # reaches it; a rices without sonata's record has no floor to resolve to.
   #
-  # `manifest` is `ricesLib.manifestAttrs`, which names each song's bar by
-  # its owner: a borrowed bar is read once, under its owner, and a song with no
+  # `manifest` is `ricesLib.manifestAttrs`, which names each rice's bar by
+  # its owner: a borrowed bar is read once, under its owner, and a rice with no
   # `bar` entry (nocturne) renders sonata's, which sonata's own entry covers. Only the committed rices is read, so a
-  # song that exists only in the runtime rices is judged when `rice declare`
+  # rice that exists only in the runtime rices is judged when `rice declare`
   # copies it into the checkout.
   barRicemode =
     { ricesRoot, manifest }:

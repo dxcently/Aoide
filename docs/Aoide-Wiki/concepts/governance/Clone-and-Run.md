@@ -14,8 +14,8 @@ Aoide is a framework you clone and run. The upstream repo ships the shape-making
 
 - **Shared history with upstream**: `aoide update` is a real `git merge`, not a package upgrade. Improvements flow in; your personal commits never conflict with upstream additions because growth is additive.
 - **Reproducibility**: every default and generated rice is committed and versioned. A rebuild from the clone reproduces the entire riced system on any box. Runtime state (`/stage/`, `state/`, `run/qml/`, the audit log) lives under `$AOIDE_ROOT` (default `~/.aoide`), separate from the clone, and holds ephemera only.
-- **Your dendrites and songs are ordinary local commits**: `modules/dendrites/` growth is additive by construction, and `rices/` is your writable domain. Committed songs are versioned score — every host that pulls the clone can perform any of them. One line in `hosts/<host>/default.nix` (`aoide.rice = "<name>";`) selects which song a host performs. See [[Song-Vocabulary#Replay — any song, any host]].
-- **A remote fork is optional**: add your own remote only to back up your instance, sync songs across your machines, or open contributions upstream. The instance itself needs nothing but the clone.
+- **Your dendrites and rices are ordinary local commits**: `modules/dendrites/` growth is additive by construction, and `rices/` is your writable domain. Committed rices are versioned score — every host that pulls the clone can perform any of them. One line in `hosts/<host>/default.nix` (`aoide.rice = "<name>";`) selects which rice a host performs. See [[Rice-Vocabulary#Replay — any rice, any host]].
+- **A remote fork is optional**: add your own remote only to back up your instance, sync rices across your machines, or open contributions upstream. The instance itself needs nothing but the clone.
 - **Module import stays possible** but secondary; the clone is the primary deployment model.
 
 ## Install in Two Steps
@@ -46,13 +46,13 @@ installed either way.
 `aoide onboard` is idempotent. The core half:
 
 1. Register the clone as a graph project ([[Session-Graph]]).
-2. Link `~/song` → `<checkout>/song`, never clobbering an existing file or symlink.
-3. Seed `rices/preferences.md` when absent ([[Song-Anatomy]]).
+2. Link `~/rice` → `<checkout>/rice`, never clobbering an existing file or symlink.
+3. Seed `rices/preferences.md` when absent ([[Rice-Anatomy]]).
 4. Ask which agent harnesses to wire — interactively, or via `--harness a,b` / `--yes` non-interactively — and run `hooks install` for each chosen harness ([[Agent-Hooking]]).
 
 If the `strillix` binary resolves, `onboard` then delegates the nix half to `strx onboard`:
 
-1. Generate `./aoide.nix` (or `--out <path>`): every `aoide.*` module option — 161 today, derived live from the modules through the flake's `aoideOptions` output, never a hand-list — with its default commented out and a one-line description, plus an appendix listing the env knobs (`AOIDE_CONDUCT_AUTOGATE`, `AOIDE_TERMINAL`, `AOIDE_CORE_BIN`/`AOIDE_RICE_BIN`, `AOIDE_DISCOVERY_ADVERTISE`) as comments.
+1. Generate `./aoide.nix` (or `--out <path>`): every `aoide.*` module option — 161 today, derived live from the modules through the flake's `aoideOptions` output, never a hand-list — with its default commented out and a one-line description, plus an appendix listing the env knobs (`AOIDE_CONDUCT_AUTOGATE`, `AOIDE_TERMINAL`, `AOIDE_CORE_BIN`/`STRILLIX_BIN`, `AOIDE_DISCOVERY_ADVERTISE`) as comments.
 2. Print the `imports = [ ./aoide.nix ];` line for the user's own flake. Onboard never edits the flake; adding the import is the user's one manual step.
 
 Re-running `strx onboard` warns and backs the old file up to `<out>.bak`; a file it did not generate is refused, never overwritten.

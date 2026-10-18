@@ -30,7 +30,7 @@
 
 1. **Port** the standalone Node note engine's resolve/validate/emit pipeline
    from its ~616-line Node CLI into **native Rust inside `crates/strillix-rice`** — no
-   new crate (song's charter already *is* the ricing/design engine). Style
+   new crate (rice's charter already *is* the ricing/design engine). Style
    Dictionary is replaceable by a ~30-line native alias resolver; the Node
    dependency disappears from the core.
 2. **Generalize** the emitters behind one `Emitter` trait + registry:
@@ -56,7 +56,7 @@ compat-gated rename of the runtime stage file.
 ### 1.1 Where the function lives — extend `crates/strillix-rice`, no new crate
 
 `crates/strillix-rice`'s charter (PACKAGE-LAYOUT.md per-crate table): *"The ricing /
-design engine: the note engine, apply songs, mint palettes, write the stage,
+design engine: the note engine, apply rices, mint palettes, write the stage,
 the Pantheon design language… **Rices portably**."* The note engine **is**
 that charter — before the merge it was merely *delegated out* to a standalone
 Node sibling. Folding it in is completing the crate, not growing a new one.
@@ -64,15 +64,15 @@ Node sibling. Folding it in is completing the crate, not growing a new one.
 Decision: **add the engine as a module tree inside `crates/strillix-rice`**, not a new
 `crates/theme`. Rationale (YAGNI, "the design that deletes more"):
 
-- The engine is ~500 lines of pure Rust — squarely song's concern, not an
+- The engine is ~500 lines of pure Rust — squarely rice's concern, not an
   independent boundary. A new crate buys a `Cargo.toml`, a workspace member, a
   `pkg-`/dependency edge, and a second "where does theming live?" answer, for
-  no reuse (nothing but song consumes it).
+  no reuse (nothing but rice consumes it).
 - PACKAGE-LAYOUT's own naming verdict: plain/aoide-vocabulary names, voice only
   where the crate is aoide's own; it explicitly *rejected* proliferating small
-  crates. song already owns `notes`/`live`/`mint`/`cover`; `theme` joins them.
+  crates. rice already owns `notes`/`live`/`mint`/`wallpaper`; `theme` joins them.
 - The one boundary that DOES matter — pure computation vs. host side-effects —
-  already exists inside song (`live::geometry_keywords` pure vs
+  already exists inside rice (`live::geometry_keywords` pure vs
   `live::apply_live` effectful, kept split "so a future `management` crate could
   lift just the host-effect half out later"). The new engine honors the same
   split (§1.3).
@@ -135,7 +135,7 @@ pub fn registry() -> &'static [&'static dyn Emitter] {
 ```
 
 Adding a backend = **one new `emit/<name>.rs` + one line in `registry()`** — the
-same additive discipline as pkgs walker / dendrites / song widgets. The `file`
+same additive discipline as pkgs walker / dendrites / rice widgets. The `file`
 backend (substitute `{{palette.bg}}`-style placeholders in a caller-supplied
 template) is implemented now as the generalization proof; it is the "arbitrary
 config-file emitter" and is pure (no host effect, low risk).
@@ -166,7 +166,7 @@ additive follow-ons, not merge scope.**
 | Node engine piece | Native Rust home | Notes |
 |---|---|---|
 | `schema.js` `validate()` + HEX/PALETTE/BASE16/COMPONENT_FALLBACK | `theme/schema.rs` | Pure predicate over `serde_json::Value`. Direct port. Keep the exact error strings so goldens/messages match. |
-| `resolve.js` `dereference()` (Style Dictionary `exportPlatform`) | `theme/resolve.rs` `deref()` | **Style Dictionary is only used to resolve `{group.key}` aliases.** v0 is closed + single-level; a native pass (lookup `{a.b}` → tree[a][b], cycle-guarded) replaces it. Shipped songs use **zero** aliases (verified: `default`/`sonata` are concrete hex); only the test fixture `valid.json` exercises refs. |
+| `resolve.js` `dereference()` (Style Dictionary `exportPlatform`) | `theme/resolve.rs` `deref()` | **Style Dictionary is only used to resolve `{group.key}` aliases.** v0 is closed + single-level; a native pass (lookup `{a.b}` → tree[a][b], cycle-guarded) replaces it. Shipped rices use **zero** aliases (verified: `default`/`sonata` are concrete hex); only the test fixture `valid.json` exercises refs. |
 | `resolve.js` component null→palette fallback | `theme/resolve.rs` | Already duplicated in Nix facets (stylix/quickshell) — the Rust copy is the third implementation of the same rule; keep them identical. |
 | `emitters.js` `emitStage`/`emitHyprctl`/`emitOsc` | `theme/emit/{stage,hyprctl,osc}.rs` | Direct port. OSC/hyprctl are byte-order-sensitive → byte-parity goldens. |
 | `cli.js` (arg parsing, atomic write, exit codes) | `commands/theme.rs` + existing `shellbridge::atomic_write` | The CLI shell is replaced by aoide's `Invocation`/`Outcome` + registry. `atomicWriteJson` already exists natively (`aoide_storage::fs::atomic_write`). |
@@ -188,16 +188,16 @@ directive: *there is no engine capability that cannot become native Rust.*
 > *design tokens*, and a token stands for a single value — but the merge
 > generalizes it into an engine that dresses *every*
 > surface — terminal, compositor, GTK, the Quickshell stage, any config file —
-> in the one song's identity, and a bare value-name does not clothe a stage. A
+> in the one rice's identity, and a bare value-name does not clothe a stage. A
 > **theme** is exactly that: the single set of house colours a whole retinue
 > wears in unison, so that a servant, a ship, and a herald are read at a
 > glance as one household's. One word for the values *and* the act
 > of stamping them (a theme is both the colours and the wearing of them) —
 > naming the new reach: the
-> venue's every instrument now performs the song's theme. It is plain,
+> venue's every instrument now performs the rice's theme. It is plain,
 > grep-clean (no hit anywhere in-tree, no collision with the live `mneme`/
 > `melete` servers), and reads right at every site: `aoide.theme.palette`, a
-> song's `theme.json`, `aoide theme emit hyprctl`.
+> rice's `theme.json`, `aoide theme emit hyprctl`.
 
 Greek alternative on record for §7: **`kosmos`** (κόσμος — "adornment + order",
 the root of *cosmetic*): more on-Pantheon, but abstract and grander than the
@@ -215,10 +215,10 @@ Paths below are as of the plan (see the header): they name what each step found
 and edited, not the tree's present layout.
 
 **Code — Rust (`pkgs/aoide/crates/`)**
-- `song/src/notes.rs` — drop the binary-locate env var/PATH lookup + `run_lint` shell-out (becomes native call).
-- `song/src/commands/rice.rs` — `rice lint` summary + delegate; `handle_rice_preview` stage-file constant; test strings/fixtures.
-- `song/src/mint.rs` — renders the option tier under its new `aoide.theme.<tier>` path; scaffolds `theme.json`; comment text.
-- `song/src/commands/theme.rs` — **new** command group.
+- `rice/src/notes.rs` — drop the binary-locate env var/PATH lookup + `run_lint` shell-out (becomes native call).
+- `rice/src/commands/rice.rs` — `rice lint` summary + delegate; `handle_rice_preview` stage-file constant; test strings/fixtures.
+- `rice/src/mint.rs` — renders the option tier under its new `aoide.theme.<tier>` path; scaffolds `theme.json`; comment text.
+- `rice/src/commands/theme.rs` — **new** command group.
 - `storage/src/fs.rs` — `rices_notes()` → `…/theme.json`; test paths (`fs.rs:105,373,379`).
 - `storage/src/design.rs:98` — `sources: vec!["stage/theme.json"]`.
 - `conductor/src/app.rs:288,295,362,382` — stage reader path → `theme.json` (dual-read, §2.3).
@@ -230,7 +230,7 @@ and edited, not the tree's present layout.
 
 **Code — Nix**
 - `modules/nucleus/options.nix` — the option namespace renamed `options.aoide.theme` (+ `mkRenamedOptionModule` alias from the old namespace, §2.3).
-- `modules/facets/quickshell/default.nix` — `t = config.aoide.theme`; `activeSongNotes`/`seedStageScript` (rices note file renamed `theme.json`, stage dual-write); `AOIDE_WALLPAPER`/wallpaper reads (`config.aoide.theme.wallpaper`).
+- `modules/facets/quickshell/default.nix` — `t = config.aoide.theme`; `activeRiceNotes`/`seedStageScript` (rices note file renamed `theme.json`, stage dual-write); `AOIDE_WALLPAPER`/wallpaper reads (`config.aoide.theme.wallpaper`).
 - `modules/facets/stylix/default.nix` — `t = config.aoide.theme`.
 - `modules/facets/compositor/default.nix` — `t = config.aoide.theme`; comments referencing the engine.
 - `modules/nucleus/packages.nix` — **remove** the standalone Node package (Phase 2).
@@ -248,11 +248,11 @@ and edited, not the tree's present layout.
 - The state singleton — `notePath` (legacy stage path → `stage/theme.json`, dual-read §2.3). Optional file rename → `ThemeState.qml` (updates ~12 QML importers: `shell.qml`, `AoideBar.qml`, `NotificationCard.qml`, `GrimoireLedger.qml`, `MoodFaces.qml`, `WorkspaceRow.qml`, `UsageGadget.qml`, `ConductorPreview.qml`, `TerminalsPreview.qml`, `StagingEngine.qml`, `slots.md`). **Recommendation: rename the singleton file too** (an old-named state singleton in a theme world is exactly the drift khoa is removing) — but this is the widest-blast edit; see §7 for the "how far does the QML rename go" decision.
 
 **Contracts / docs / wiki**
-- `CONTRACTS.md` §1 (note schema — option namespace now `aoide.theme`), §4 (stage file now `stage/theme.json`), §5 (song shape — "a song sets ONLY `aoide.theme`").
+- `CONTRACTS.md` §1 (note schema — option namespace now `aoide.theme`), §4 (stage file now `stage/theme.json`), §5 (rice shape — "a rice sets ONLY `aoide.theme`").
 - `AGENTS.md` house-rule #5 ("Facets read only `aoide.theme`").
 - `README.md` (the note-engine section retitled theme; the pkgs tree line; the facet-read lines; the CLI table).
-- `docs/architecture/PACKAGE-LAYOUT.md` (song charter mentions the engine), `docs/BUILD.md`, `docs/architecture/aoide-report.html`.
-- Wiki: the engine's entity page becomes `theme.md`, and ~28 pages that mention the engine (Codebase, Self-Ricing, Song-Anatomy, Song-Vocabulary, Ricing-Protocol, Lexicon, SCHEMA, Full-Architecture, Snowflake-Anatomy, Widget-Bridge-Contract, Stylix, Quickshell, Gadget-Dock, Feature-Set, Widget-Maker, AOIDE-DEV §7, etc.). Delegated to the librarian per AOIDE-DEV §6.
+- `docs/architecture/PACKAGE-LAYOUT.md` (rice charter mentions the engine), `docs/BUILD.md`, `docs/architecture/aoide-report.html`.
+- Wiki: the engine's entity page becomes `theme.md`, and ~28 pages that mention the engine (Codebase, Self-Ricing, Rice-Anatomy, Rice-Vocabulary, Ricing-Protocol, Lexicon, SCHEMA, Full-Architecture, Snowflake-Anatomy, Widget-Bridge-Contract, Stylix, Quickshell, Gadget-Dock, Feature-Set, Widget-Maker, AOIDE-DEV §7, etc.). Delegated to the librarian per AOIDE-DEV §6.
 
 ### 2.3 Live-contract compat path — dual-write + fallback-read, then drop
 
@@ -296,7 +296,7 @@ reader find a valid, non-torn file.** No regression window.
 
 **Recommendation: land the whole theme merge (Phases 1–4) before the
 separate subdir-flake work item (topology (b), AOIDE-DEV.md §7 "Separate Aoide
-from AoideOS").**
+from Strillix").**
 
 Why merge-first (not after, not interleaved):
 
@@ -417,7 +417,7 @@ package remains present but aoide stops calling it.
   `theme::emit::hyprctl` for the keyword batch instead of the inline
   `live::geometry_keywords`? — **no**, keep `live::geometry_keywords` as-is;
   only `rice lint` changes engine), `crates/strillix-rice/src/commands/theme.rs` (new:
-  `theme emit <target> [<song>|<path>]`, `theme resolve …`, `theme lint …`),
+  `theme emit <target> [<rice>|<path>]`, `theme resolve …`, `theme lint …`),
   `crates/strillix-rice/src/commands/mod.rs` (register the group).
 - Do NOT touch: the stage filename (stays until Phase 3), any
   option-namespace Nix, any rices file.
@@ -460,7 +460,7 @@ precondition, §3).
 
 ### PHASE 3 — The engine takes the name theme
 
-Phase 3 steps **serialize** (they share the song + storage crates and the
+Phase 3 steps **serialize** (they share the rice + storage crates and the
 quickshell facet; a half-applied rename breaks eval/build). Only Step 3.4
 (docs) is **[PARALLEL-SAFE]** — it owns only docs/wiki, no code.
 
@@ -484,13 +484,13 @@ mint renderer (ATOMIC — keeps `toplevel` eval green).** [SERIAL]
 - Owns: `git mv` the `default` and `sonata` rices note files to
   `theme.json`;
   `crates/storage/src/fs.rs` (`rices_notes` → `…/theme.json`; test paths);
-  `modules/facets/quickshell/default.nix` (`activeSongNotes` + `seedStageScript`
+  `modules/facets/quickshell/default.nix` (`activeRiceNotes` + `seedStageScript`
   source path → `theme.json`); `crates/strillix-rice/src/commands/rice.rs`
   (`handle_rice_mint` scaffolds `theme.json`; `mint` tests + fixtures).
 - Accept: `cargo test --workspace` (fs + mint tests green);
   `nix build .#nixosConfigurations.yomi-strix…toplevel --no-link` green (facet
-  reads the renamed active-song file); the seed script sources
-  `rices/<song>/theme.json`.
+  reads the renamed active-rice file); the seed script sources
+  `rices/<rice>/theme.json`.
 
 **Step 3.3 — live stage-file rename with dual-read/dual-write compat (ATOMIC).**
 [SERIAL] — the desktop-safety step (§2.3).
@@ -542,7 +542,7 @@ GATED on khoa confirming the switched desktop is stable across a reboot]
   `mkRenamedOptionModule` alias).
 - Accept: `cargo test --workspace`; `nix build …toplevel --no-link`;
   `qs -p shell.qml` loads; `rg` for the old engine name over `pkgs/aoide/`,
-  `modules/`, `song/`, `lib/` returns nothing.
+  `modules/`, `rice/`, `lib/` returns nothing.
 
 ---
 
@@ -556,7 +556,7 @@ Check, per step:
 | **Correctness** | Named acceptance commands actually run and pass on the reviewer's checkout — not just claimed. Goldens are byte-identical where the step says byte-identical, semantic-equal where it says semantic. |
 | **Contract fidelity** | `aoide schema --json` diff is *exactly* the intended entries for this step and nothing incidental (Phase 1.5/3). `stage/theme.json` shape matches CONTRACTS §4 (schemaVersion + palette + bar/notif/window fully resolved, no `null`). No schema *version* bump (shape is unchanged; the rename is a namespace edit — §6). |
 | **Scope discipline** | Only the step's listed files changed (`git diff --stat` matches). No `git add -A`; explicit pathspecs. No file another agent owns was touched. |
-| **House rules** | Paint lanes read only the namespaces root `AGENTS.md` house rule 5 enumerates (no cross-module read); no `song/` runtime dir committed at eval (`checks.rice-runtime-untracked` still green); `checks.rice-shape` still green (rices entries are `rice.nix` + `theme.json`, no stray `.nix`); no AI co-author trailer. |
+| **House rules** | Paint lanes read only the namespaces root `AGENTS.md` house rule 5 enumerates (no cross-module read); no `rice/` runtime dir committed at eval (`checks.rice-runtime-untracked` still green); `checks.rice-shape` still green (rices entries are `rice.nix` + `theme.json`, no stray `.nix`); no AI co-author trailer. |
 | **Live safety** (Phases 3–4) | The dual-read/dual-write invariant of §2.3 is intact at the step boundary: at no committed state can a running old reader or a fresh new reader fail to find a valid stage file. Phase 4 only lands after explicit live-stable sign-off. |
 | **Port faithfulness** (Phase 1) | The native validator's error strings and the emit outputs match the Node engine on the shared fixtures. The alias resolver handles the `{group.key}` fixture and rejects a cycle. |
 | **Tests present** | New logic carries `#[test]`s / goldens; a step that ports a Node `test/run.js` case has the Rust equivalent. `cargo test --workspace` is green, not just the crate's own. |
@@ -577,8 +577,8 @@ Check, per step:
   alias covers any out-of-tree/stale setter during transition; `nixfmt --check`
   and a full toplevel eval gate the step.
 - **Rices content migration.** Renaming the rices note files is a
-  contract-surface edit; a missed reader (facet `activeSongNotes`, `fs.rs`,
-  the seed script) silently breaks the active song's fan-out. *Mitigation:*
+  contract-surface edit; a missed reader (facet `activeRiceNotes`, `fs.rs`,
+  the seed script) silently breaks the active rice's fan-out. *Mitigation:*
   Step 3.2 bundles the file `git mv` with every resolver in one atomic step;
   `checks.rice-shape` + the seed activation exercise the path on switch.
 - **Byte-drift in the port.** OSC/hyprctl output is order- and byte-sensitive;
@@ -586,9 +586,9 @@ Check, per step:
   *Mitigation:* byte-parity goldens captured from the Node engine *before* it is
   deleted (Step 1.0), asserted in 1.3.
 - **Style-Dictionary semantics.** The native deref must match SD on multi-key or
-  chained aliases *if any song ever uses them*. Today none do (only the fixture
+  chained aliases *if any rice ever uses them*. Today none do (only the fixture
   does, single-level). *Mitigation:* the resolver is cycle-guarded and
-  golden-checked against the ref-using fixture; if a future song needs chained
+  golden-checked against the ref-using fixture; if a future rice needs chained
   aliases, that is an additive resolver enhancement, not a v0 blocker (flag it).
 - **QML state-singleton file rename blast radius.** Renaming the singleton file
   touches ~12 importers; doing it inside the desktop-critical Step 3.3 widens

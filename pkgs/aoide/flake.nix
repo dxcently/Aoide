@@ -10,7 +10,7 @@
 #
 # Deliberately nixpkgs-only — there is no NixOS below `cli` (PACKAGE-LAYOUT),
 # and the nixpkgs input follows the root's, so the core always builds against
-# the same revision the AoideOS flake locks. The build itself is default.nix
+# the same revision the Strillix flake locks. The build itself is default.nix
 # (rustPlatform + vendored cargo deps, doCheck runs the cargo tests), so
 # `checks.default` IS the package build.
 {
@@ -26,7 +26,7 @@
 
   # ── Outputs ────────────────────────────────────────────────────────────────
   # Plain (non-flake-parts) style, matching the root flake. One system,
-  # mirroring the root's `systems` list — the core builds where AoideOS does.
+  # mirroring the root's `systems` list — the core builds where Strillix does.
   outputs =
     { self, nixpkgs, ... }:
     let
@@ -100,7 +100,7 @@
       # The COMPLETE dev surface for this workspace — every tool development
       # in `crates/` actually uses, so that when this directory graduates to
       # its own repo (the header's one-line input swap) the shell needs
-      # nothing from the AoideOS flake. Inventory derived from the code, not
+      # nothing from the Strillix flake. Inventory derived from the code, not
       # aspiration: `grep -r 'Command::new' crates/` enumerates the runtime
       # shell-outs; the toolchain and jq are the build/probe loop.
       #
@@ -112,7 +112,7 @@
       #   - loginctl / systemctl — systemd host tools; shipping them in a
       #     shell on a non-systemd host would only fake the probe
       #     (`watch --popup`'s LockedHint check degrades honestly instead).
-      #   - nix — strillix's song eval shells out to it, but any machine entering
+      #   - nix — strillix's rice eval shells out to it, but any machine entering
       #     this shell has nix by construction.
       #   - sh / coreutils / kill — stdenv givens.
       devShells = forAllSystems (

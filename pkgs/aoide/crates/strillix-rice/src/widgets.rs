@@ -1,42 +1,42 @@
-//! Per-song widget QML sync — the runtime-tree half of `rice stage`
-//! (concepts/song/Self-Ricing.md "Staging vs Declarative Mode"). `rice
-//! stage` already hot-reloads a song's palette/notes via
-//! `song/stage/theme.json`; this module carries a song's widget QML
-//! BODIES (`rices/<song>/widgets/*.qml`) into the live runtime tree
-//! (`run/qml/songs/<song>/`) too, so Quickshell's own file-watcher picks up
+//! Per-rice widget QML sync — the runtime-tree half of `rice stage`
+//! (concepts/rice/Self-Ricing.md "Staging vs Declarative Mode"). `rice
+//! stage` already hot-reloads a rice's palette/notes via
+//! `rice/stage/theme.json`; this module carries a rice's widget QML
+//! BODIES (`rices/<rice>/widgets/*.qml`) into the live runtime tree
+//! (`run/qml/rices/<rice>/`) too, so Quickshell's own file-watcher picks up
 //! an edit to an EXISTING widget file live, no rebuild needed. `manifest.json`
 //! is a hot-reloaded `FileView` on the QML side (`StagingEngine.qml`), not
 //! read once at startup — a brand-new slot still needs THIS module's own
 //! manifest regeneration (below) to appear in it, but no service restart.
 //!
 //! **The generator is SHIPPED, and it runs offline.** `manifest.json` and
-//! `registry.json` are not derived by scanning a song's own `widgets/`
+//! `registry.json` are not derived by scanning a rice's own `widgets/`
 //! directory: a scan cannot answer "who owns this slot" once a composition
-//! borrows another song's body — only `composeSong` (`lib/song.nix`) resolves
+//! borrows another rice's body — only `composeRice` (`lib/rice.nix`) resolves
 //! ownership, and it runs in the nix evaluator, nowhere else. So both files are
-//! regenerated WHOLE, for every song this machine's rices holds, by one
+//! regenerated WHOLE, for every rice this machine's rices holds, by one
 //! plain `nix-instantiate --eval --strict --json` over `share/strillix/nix/
 //! manifest.nix` — a file SHIPPED by `pkgs/strillix-rices`, a thin entry over
-//! copies of `lib/rices.nix`/`lib/song.nix`, pointed at this machine's own
+//! copies of `lib/rices.nix`/`lib/rice.nix`, pointed at this machine's own
 //! `$AOIDE_ROOT/rices`. No flake, no network, no checkout, no
 //! `--impure`: `flake_root()` is not read here at all, and the flake's
 //! `#ricesManifest` output is a build-time convenience, never a runtime
 //! dependency. [`plan_stage`] is that shell-out and §7.5's gate in one
 //! decision, invoked once from the manifest path
-//! ([`sync_song_widgets`]) and once from the registry path
-//! ([`sync_song_registry`]) — see each function's own doc.
+//! ([`sync_rice_widgets`]) and once from the registry path
+//! ([`sync_rice_registry`]) — see each function's own doc.
 //!
 //! This also fixes a real, silent hazard the old per-entry writer left
-//! behind: it preserved every OTHER song's entry verbatim on each write, so
+//! behind: it preserved every OTHER rice's entry verbatim on each write, so
 //! a manifest.json written by nix (owner-map shape) that this module then
-//! patched would leave every UNTOUCHED song's entry in owner-map shape but
-//! silently rewrite the STAGED song's own entry back to the old bare-list
+//! patched would leave every UNTOUCHED rice's entry in owner-map shape but
+//! silently rewrite the STAGED rice's own entry back to the old bare-list
 //! shape — a shape `StagingEngine.qml`'s `has()` cannot look up, so every
-//! widget for that one song would render nothing, no error anywhere.
-//! Whole-file regeneration can't reproduce that failure mode: every song's
+//! widget for that one rice would render nothing, no error anywhere.
+//! Whole-file regeneration can't reproduce that failure mode: every rice's
 //! entry, staged or not, comes from one eval of one rices.
 //!
-//! Mirrors the nix build's own per-song widget carry (the strillix lane's
+//! Mirrors the nix build's own per-rice widget carry (the strillix lane's
 //! `quickshellConfig` derivation) for the BODY copy: the WHOLE `widgets/` tree
 //! is copied unfiltered (helper components, asset subdirs, `.gitkeep`,
 //! everything), while the manifest only ever lists top-level lowercase-kebab
@@ -49,11 +49,11 @@
 //!      baked `manifest.json`/`registry.json` are the answer and `nix` is never
 //!      invoked. "No differing copy" compares CONTENT over what the SEED ships;
 //!      the machine's own runtime dirs (`history/`, `drafts/` —
-//!      [`MACHINE_RUNTIME_DIRS`]) are not differences in the song, so taking a
+//!      [`MACHINE_RUNTIME_DIRS`]) are not differences in the rice, so taking a
 //!      snapshot does not disable staging on a host with no nix.
 //!   2. **Otherwise, on a host with `nix-instantiate`** — the shipped generator
 //!      ([`eval_generator`]) over this machine's rices, whose answer WINS
-//!      over the baked baseline for any song both carry: a machine owns its
+//!      over the baked baseline for any rice both carry: a machine owns its
 //!      rices, so the machine copy is what gets staged.
 //!   3. **Otherwise** — refused with [`refusal_no_nix`] or
 //!      [`refusal_rebuild_needed`], and nothing is staged.
@@ -61,9 +61,9 @@
 //! One decision and one evaluation per stage: the callers (`rice stage`,
 //! `rice mode stage`, `rice back`, `reload`) hand the same [`StageRices`] to
 //! both syncs rather than asking twice. The widget BODY carry follows the same
-//! ownership the manifest records — the staged song AND every LENDER its entry
+//! ownership the manifest records — the staged rice AND every LENDER its entry
 //! names ([`widget_owners`]), because a borrowed slot resolves to
-//! `songs/<owner>/<file>`.
+//! `rices/<owner>/<file>`.
 
 use std::path::Path;
 
@@ -72,12 +72,12 @@ use std::path::Path;
 pub struct WidgetSyncOk {
     /// `run/qml`-rooted files actually (re)written, absolute paths.
     pub changed: Vec<String>,
-    /// This song's LOCAL slot names, sorted — a scan of the widgets/ dir
+    /// This rice's LOCAL slot names, sorted — a scan of the widgets/ dir
     /// just copied (never the just-regenerated manifest.json): informational
     /// only, for the `Outcome`'s own `data.slots`/message, independent of
-    /// what nix's committed-tree eval says this song owns. A song being
+    /// what nix's committed-tree eval says this rice owns. A rice being
     /// staged from an uncommitted/relocated rices (tests; a brand-new
-    /// song not yet `git add`ed) can carry local widget files nix's eval of
+    /// rice not yet `git add`ed) can carry local widget files nix's eval of
     /// the real committed tree has never seen — this field still reports
     /// them; `manifest.json` itself does not until nix does.
     pub slots: Vec<String>,
@@ -111,7 +111,7 @@ pub struct RegistrySyncOk {
     /// entries (`registry.json`'s own path), same shape as
     /// [`WidgetSyncOk::changed`].
     pub changed: Vec<String>,
-    /// This song's freshly-regenerated registry entry (`{}` when the
+    /// This rice's freshly-regenerated registry entry (`{}` when the
     /// committed tree declares nothing for it), straight from
     /// [`plan_stage`]'s output — never the pre-regeneration file.
     pub widgets: serde_json::Value,
@@ -156,16 +156,16 @@ pub(crate) const RICES_EVAL_FIXTURE_VAR: &str = "STRILLIX_RICES_EVAL_FIXTURE";
 ///   1. **Built in, with no differing machine copy** — the SHIPPED
 ///      `manifest.json`/`registry.json` are the whole answer
 ///      ([`baseline_rices`]), and `nix` is never invoked: the templates are
-///      the build that put this song on the machine, so a host with no nix can
+///      the build that put this rice on the machine, so a host with no nix can
 ///      stage what it already carries.
-///   2. **Any other stageable song** — one plain
+///   2. **Any other stageable rice** — one plain
 ///      `nix-instantiate --eval --strict --json` over the SHIPPED generator
 ///      (`share/strillix/nix/manifest.nix`) pointed at the MACHINE's rices
 ///      (`$AOIDE_ROOT/rices`). A FILE eval: no flake, no network, no
 ///      checkout, no `--impure`, and no argv naming `$AOIDE_FLAKE_ROOT` or a
 ///      `#<flake output>`. The generated manifest WINS over the shipped
-///      baseline for any song both carry — a machine owns its rices, so the
-///      machine copy is what gets staged — and the song's own needs are
+///      baseline for any rice both carry — a machine owns its rices, so the
+///      machine copy is what gets staged — and the rice's own needs are
 ///      checked against what this system installed BEFORE anything is written.
 ///   3. **Refused** — and the caller stages nothing at all: no theme, no
 ///      widget body, no manifest. Two taught refusals
@@ -193,10 +193,10 @@ pub fn plan_stage(name: &str) -> Result<StageRices, WidgetSyncErr> {
         return parse_rices_eval(&bytes, &path);
     }
 
-    let Some(templates) = aoide_storage::fs::song_templates_dir() else {
+    let Some(templates) = aoide_storage::fs::rice_templates_dir() else {
         return Err(WidgetSyncErr {
             error: format!(
-                "no shipped song templates dir found: $STRILLIX_TEMPLATES is unset (or not \
+                "no shipped rice templates dir found: $STRILLIX_TEMPLATES is unset (or not \
                  absolute) and no `share/strillix/rices` sits beside this binary, so there is \
                  nothing to stage `{name}` from"
             ),
@@ -205,7 +205,7 @@ pub fn plan_stage(name: &str) -> Result<StageRices, WidgetSyncErr> {
     };
 
     let builtin = read_builtin(&templates)?;
-    let built_in = builtin.songs.iter().any(|song| song == name);
+    let built_in = builtin.rices.iter().any(|rice| rice == name);
     let machine_dir = aoide_storage::fs::rice_dir(name);
     let machine = machine_dir.is_dir();
 
@@ -214,7 +214,7 @@ pub fn plan_stage(name: &str) -> Result<StageRices, WidgetSyncErr> {
     if !built_in && !machine {
         return Err(WidgetSyncErr {
             error: format!(
-                "no song `{name}`: it is not built into this system and {} does not exist",
+                "no rice `{name}`: it is not built into this system and {} does not exist",
                 machine_dir.display()
             ),
             target: machine_dir.to_string_lossy().into_owned(),
@@ -223,8 +223,8 @@ pub fn plan_stage(name: &str) -> Result<StageRices, WidgetSyncErr> {
 
     // Case 1: built in, and the machine has no DIFFERING copy — absent counts,
     // and so does byte-identical (a machine copy is seeded FROM the shipped
-    // folder, so an untouched seeded song is the same song, and refusing to
-    // see that would push every nix-less host's built-in songs down a road it
+    // folder, so an untouched seeded rice is the same rice, and refusing to
+    // see that would push every nix-less host's built-in rices down a road it
     // cannot travel).
     if built_in && !machine_copy_differs(name, &templates) {
         return baseline_rices(name, &templates);
@@ -245,9 +245,9 @@ pub fn plan_stage(name: &str) -> Result<StageRices, WidgetSyncErr> {
         });
     }
 
-    // The shipped baseline carries the BUILT-IN songs' entries (`manifest.json`
+    // The shipped baseline carries the BUILT-IN rices' entries (`manifest.json`
     // baked over exactly the shipped set); this system's own generated answer
-    // overwrites it for every song the machine's rices holds. A song in
+    // overwrites it for every rice the machine's rices holds. A rice in
     // neither is simply absent — the prune is automatic, never an immortal
     // stale key.
     let mut manifest = read_baked(&templates, "manifest.json")?;
@@ -255,15 +255,15 @@ pub fn plan_stage(name: &str) -> Result<StageRices, WidgetSyncErr> {
     if let (Some(manifest_obj), Some(gen_obj)) =
         (manifest.as_object_mut(), generated.manifest.as_object())
     {
-        for (song, entry) in gen_obj {
-            manifest_obj.insert(song.clone(), entry.clone());
+        for (rice, entry) in gen_obj {
+            manifest_obj.insert(rice.clone(), entry.clone());
         }
     }
     if let (Some(registry_obj), Some(gen_obj)) =
         (registry.as_object_mut(), generated.registry.as_object())
     {
-        for (song, entry) in gen_obj {
-            registry_obj.insert(song.clone(), entry.clone());
+        for (rice, entry) in gen_obj {
+            registry_obj.insert(rice.clone(), entry.clone());
         }
     }
     Ok(StageRices { manifest, registry })
@@ -272,8 +272,8 @@ pub fn plan_stage(name: &str) -> Result<StageRices, WidgetSyncErr> {
 /// One `nix-instantiate --eval --strict --json` over the SHIPPED generator,
 /// pointed at the machine's rices — §7.5 case 2.
 ///
-/// `--strict` because a shelf's `composeSong` guards `throw`: without forcing
-/// the whole tree an unevaluated song would serialize as garbage instead of
+/// `--strict` because a shelf's `composeRice` guards `throw`: without forcing
+/// the whole tree an unevaluated rice would serialize as garbage instead of
 /// failing. The generator path and the rices argument both come from
 /// [`aoide_storage::fs`] — the templates dir this binary resolves, and
 /// `$AOIDE_ROOT/rices` — so nothing here can name a checkout path.
@@ -362,7 +362,7 @@ fn eval_generator(name: &str, templates: &Path) -> Result<Generated, WidgetSyncE
         })
         .ok_or_else(|| WidgetSyncErr {
             error: "the shipped rices generator's output carries no `packages` entry for this \
-                    song — the templates package predates it; rebuild this system"
+                    rice — the templates package predates it; rebuild this system"
                 .to_string(),
             target: target.clone(),
         })?;
@@ -376,7 +376,7 @@ fn eval_generator(name: &str, templates: &Path) -> Result<Generated, WidgetSyncE
 }
 
 /// [`eval_generator`]'s parsed answer: the two files plus the package names the
-/// staged song needs (its borrow-closure included — `nix/manifest.nix`).
+/// staged rice needs (its borrow-closure included — `nix/manifest.nix`).
 struct Generated {
     manifest: serde_json::Value,
     registry: serde_json::Value,
@@ -408,7 +408,7 @@ fn nix_string(s: &str) -> String {
 fn refusal_no_nix(name: &str) -> String {
     format!(
         "{name} is not built into this system and this host has no nix; \
-         add it to habit.song.available and rebuild"
+         add it to habit.rice.available and rebuild"
     )
 }
 
@@ -418,7 +418,7 @@ fn refusal_no_nix(name: &str) -> String {
 fn refusal_rebuild_needed(name: &str, missing: &[String]) -> String {
     format!(
         "rebuild needed: {name} needs {} (not in this system); \
-         add \"{name}\" to habit.song.available in hosts/<host> and rebuild",
+         add \"{name}\" to habit.rice.available in hosts/<host> and rebuild",
         missing.join(", ")
     )
 }
@@ -431,28 +431,28 @@ fn refusal_rebuild_needed(name: &str, missing: &[String]) -> String {
 ///   1. **Baseline**: the baked manifest/registry, computed at templates-build
 ///      time by the SAME `lib/rices.nix` generator the machine path
 ///      evaluates (`pkgs/strillix-rices`). Authoritative for every shipped,
-///      read-only song.
+///      read-only rice.
 ///   2. **Overlay**: [`overlay_surviving_entries`] copies every entry from
-///      the EXISTING on-disk `run_qml/songs/{manifest,registry}.json` whose
-///      song still has a directory in the host rices on top of the
-///      baseline. Without it, staging a built-in song after having staged a
-///      MACHINE song would silently drop the machine song's entry (it is in
-///      neither the frozen baseline nor the built-in song's own scan) —
+///      the EXISTING on-disk `run_qml/rices/{manifest,registry}.json` whose
+///      rice still has a directory in the host rices on top of the
+///      baseline. Without it, staging a built-in rice after having staged a
+///      MACHINE rice would silently drop the machine rice's entry (it is in
+///      neither the frozen baseline nor the built-in rice's own scan) —
 ///      `StagingEngine.qml` would then resolve its widgets against a different
-///      song's slot, no error anywhere. A song whose rices directory was
+///      rice's slot, no error anywhere. A rice whose rices directory was
 ///      since removed is NOT overlaid — its entry is pruned rather than kept
 ///      immortal.
 ///   3. **Patch**: `name`'s own entry, from a fresh, nix-free scan of its
 ///      ACTUAL rices directory ([`scan_own_entry`]) — always wins over both
-///      the baseline and the overlay, so a local edit to a seeded song is
-///      picked up. Skipped for a song with no rices directory (nothing to
+///      the baseline and the overlay, so a local edit to a seeded rice is
+///      picked up. Skipped for a rice with no rices directory (nothing to
 ///      scan, and an empty patch would delete the baked entry) and for one
 ///      with a `_widgets/` shelf (the scan is the shelf-less shape only —
 ///      `rice compose` never writes a shelf — and the baked entry already has
-///      its borrowed slots resolved by `composeSong`).
+///      its borrowed slots resolved by `composeRice`).
 ///
 /// Net effect: the SHIPPED rices's entries, with this machine's own
-/// previously-staged songs preserved and the staged song self-healed.
+/// previously-staged rices preserved and the staged rice self-healed.
 fn baseline_rices(name: &str, templates: &Path) -> Result<StageRices, WidgetSyncErr> {
     let run_qml = aoide_storage::fs::run_qml_dir();
     let manifest_path = templates.join("manifest.json");
@@ -461,7 +461,7 @@ fn baseline_rices(name: &str, templates: &Path) -> Result<StageRices, WidgetSync
         return Err(WidgetSyncErr {
             error: format!(
                 "the shipped templates dir at {} has no baked manifest.json/registry.json — \
-                 every stage of a built-in song reads them; set $STRILLIX_TEMPLATES to a \
+                 every stage of a built-in rice reads them; set $STRILLIX_TEMPLATES to a \
                  directory shipping both",
                 templates.display()
             ),
@@ -470,10 +470,10 @@ fn baseline_rices(name: &str, templates: &Path) -> Result<StageRices, WidgetSync
     }
 
     // A `_widgets/` shelf (borrowed/composed widget ownership) resolves in
-    // `composeSong`, in the nix evaluator — and for a built-in song that is
+    // `composeRice`, in the nix evaluator — and for a built-in rice that is
     // exactly what the BAKED baseline already carries. The layer-3 scan below
     // can only express the shelf-less shape (`rice compose` never writes a
-    // shelf), so a shelf song takes the baseline and the overlay as they are:
+    // shelf), so a shelf rice takes the baseline and the overlay as they are:
     // patching it with a scan would DROP every borrowed slot it has.
     let shelf_dir = aoide_storage::fs::rice_dir(name).join("_widgets");
 
@@ -505,23 +505,23 @@ fn baseline_rices(name: &str, templates: &Path) -> Result<StageRices, WidgetSync
     if !manifest.is_object() || !registry.is_object() {
         return Err(WidgetSyncErr {
             error: "shipped templates manifest.json/registry.json must both be JSON objects \
-                    keyed by song name — refusing to write a malformed manifest.json/\
+                    keyed by rice name — refusing to write a malformed manifest.json/\
                     registry.json"
                 .to_string(),
             target: templates.to_string_lossy().into_owned(),
         });
     }
 
-    // Layer 2: overlay the EXISTING on-disk entries for every song that
+    // Layer 2: overlay the EXISTING on-disk entries for every rice that
     // still has a directory in the host rices — see this function's own
-    // doc for why (composed songs live outside the frozen baseline).
-    overlay_surviving_entries(&mut manifest, &run_qml.join("songs").join("manifest.json"));
-    overlay_surviving_entries(&mut registry, &run_qml.join("songs").join("registry.json"));
+    // doc for why (composed rices live outside the frozen baseline).
+    overlay_surviving_entries(&mut manifest, &run_qml.join("rices").join("manifest.json"));
+    overlay_surviving_entries(&mut registry, &run_qml.join("rices").join("registry.json"));
 
     // Layer 3: patch — `name`'s own entry always wins over both the
     // baseline and the overlay — but only when there IS a rices directory
-    // to scan. A shipped song re-pinned from the declared twin
-    // (`song/declared/theme.json`, by `rice mode declarative` — the one door
+    // to scan. A shipped rice re-pinned from the declared twin
+    // (`rice/declared/theme.json`, by `rice mode declarative` — the one door
     // that still reads it) on a host whose runtime rices never seeded it
     // has nothing local to scan, and its baked baseline entry is the truth;
     // an empty patch here deleted sonata from osaka's manifest and blanked
@@ -529,7 +529,7 @@ fn baseline_rices(name: &str, templates: &Path) -> Result<StageRices, WidgetSync
     if aoide_storage::fs::rice_dir(name).is_dir() && !shelf_dir.is_dir() {
         let (own_manifest, own_registry) = scan_own_entry(name)?;
         let manifest_obj = manifest.as_object_mut().expect("checked is_object above");
-        // Only songs with at least one slot appear in manifest.json (the same
+        // Only rices with at least one slot appear in manifest.json (the same
         // asymmetry `lib/rices.nix`'s own comment documents) — an empty
         // scan removes any stale entry for `name` rather than writing `{}`.
         match own_manifest.as_object() {
@@ -541,7 +541,7 @@ fn baseline_rices(name: &str, templates: &Path) -> Result<StageRices, WidgetSync
             }
         }
         let registry_obj = registry.as_object_mut().expect("checked is_object above");
-        // registry.json keeps EVERY committed song, `{}` when it declares
+        // registry.json keeps EVERY committed rice, `{}` when it declares
         // nothing — always inserted, never conditionally removed.
         registry_obj.insert(name.to_string(), own_registry);
     }
@@ -551,9 +551,9 @@ fn baseline_rices(name: &str, templates: &Path) -> Result<StageRices, WidgetSync
 
 /// Layer 2 of [`baseline_rices`]'s merge: copy every entry
 /// from the EXISTING on-disk file at `existing_path` into `target` (already
-/// validated as a JSON object by the caller) — but ONLY for a song that
+/// validated as a JSON object by the caller) — but ONLY for a rice that
 /// still has a directory under [`aoide_storage::fs::rice_dir`] in the
-/// host rices. A song whose directory was since removed is silently
+/// host rices. A rice whose directory was since removed is silently
 /// skipped, which is the prune: its entry has nowhere to survive from (not
 /// in the frozen baseline, not in the on-disk overlay), so it simply isn't
 /// present in the merged result — never an immortal stale key.
@@ -577,20 +577,20 @@ fn overlay_surviving_entries(target: &mut serde_json::Value, existing_path: &Pat
     let target_obj = target
         .as_object_mut()
         .expect("baseline_rices already validated `target` is an object");
-    for (song, entry) in existing_obj {
-        if aoide_storage::fs::rice_dir(song).is_dir() {
-            target_obj.insert(song.clone(), entry.clone());
+    for (rice, entry) in existing_obj {
+        if aoide_storage::fs::rice_dir(rice).is_dir() {
+            target_obj.insert(rice.clone(), entry.clone());
         }
     }
 }
 
 /// `name`'s own manifest/registry entry, computed directly from its
 /// committed rices directory with no nix involved — the same "no
-/// `_widgets/` shelf" formula `lib/rices.nix`'s `songMeta` uses per song
-/// (owner is always the song itself, `file` is always `<slot>.qml`; the
+/// `_widgets/` shelf" formula `lib/rices.nix`'s `riceMeta` uses per rice
+/// (owner is always the rice itself, `file` is always `<slot>.qml`; the
 /// registry falls back to `theme.json`'s `.widgets // {}`). `rice compose`
 /// never writes a `_widgets/` shelf, so this is the ONLY shape a freshly
-/// composed song can ever have — [`baseline_rices`] checks for
+/// composed rice can ever have — [`baseline_rices`] checks for
 /// a shelf and refuses before ever calling this.
 fn scan_own_entry(name: &str) -> Result<(serde_json::Value, serde_json::Value), WidgetSyncErr> {
     let strillix_dir = aoide_storage::fs::rice_dir(name);
@@ -632,20 +632,20 @@ fn scan_own_entry(name: &str) -> Result<(serde_json::Value, serde_json::Value), 
 }
 
 /// [`plan_stage`]'s answer: the whole rices's manifest and registry, keyed
-/// by song name, already merged for this stage. Opaque to callers — they hand
-/// the same value to [`sync_song_widgets`] and [`sync_song_registry`] so one
+/// by rice name, already merged for this stage. Opaque to callers — they hand
+/// the same value to [`sync_rice_widgets`] and [`sync_rice_registry`] so one
 /// `rice stage` evaluates the rices once, and write what the gate approved.
 pub struct StageRices {
     manifest: serde_json::Value,
     registry: serde_json::Value,
 }
 
-/// The `builtin.json` `pkgs/strillix-rices` bakes beside the song folders:
-/// `{ declared, songs, packages }`, the host's built-in set as strillix recorded
+/// The `builtin.json` `pkgs/strillix-rices` bakes beside the rice folders:
+/// `{ declared, rices, packages }`, the host's built-in set as strillix recorded
 /// it (`modules/dendrites/strillix`'s override). Read for §7.5's two questions —
-/// is this song built in, and does it need a package this system lacks.
+/// is this rice built in, and does it need a package this system lacks.
 pub(crate) struct BuiltIn {
-    pub(crate) songs: Vec<String>,
+    pub(crate) rices: Vec<String>,
     packages: Vec<String>,
 }
 
@@ -653,14 +653,14 @@ pub(crate) struct BuiltIn {
 /// means nothing is built in, and that is the truthful reading rather than a
 /// hole: the only templates instance without one is the flake's own
 /// `packages.strillix-rices` (the whole rices, no selection), and a host
-/// running that installed no song's packages. Every stage then falls to case 2
+/// running that installed no rice's packages. Every stage then falls to case 2
 /// with an empty `packages` baseline, which refuses anything that declares a
 /// need. A PRESENT but unparseable file is a broken package and says so.
 pub(crate) fn read_builtin(templates: &Path) -> Result<BuiltIn, WidgetSyncErr> {
     let path = templates.join("builtin.json");
     let Ok(raw) = std::fs::read_to_string(&path) else {
         return Ok(BuiltIn {
-            songs: Vec::new(),
+            rices: Vec::new(),
             packages: Vec::new(),
         });
     };
@@ -681,7 +681,7 @@ pub(crate) fn read_builtin(templates: &Path) -> Result<BuiltIn, WidgetSyncErr> {
             .unwrap_or_default()
     };
     Ok(BuiltIn {
-        songs: strings("songs"),
+        rices: strings("rices"),
         packages: strings("packages"),
     })
 }
@@ -701,43 +701,43 @@ fn read_baked(templates: &Path, file: &str) -> Result<serde_json::Value, WidgetS
     })?;
     if !parsed.is_object() {
         return Err(WidgetSyncErr {
-            error: format!("the shipped {file} must be a JSON object keyed by song name"),
+            error: format!("the shipped {file} must be a JSON object keyed by rice name"),
             target: path.to_string_lossy().into_owned(),
         });
     }
     Ok(parsed)
 }
 
-/// The TOP-LEVEL directory names of a MACHINE's song folder that the seed
+/// The TOP-LEVEL directory names of a MACHINE's rice folder that the seed
 /// NEVER ships — its runtime scratch, each named where it is written:
 ///
 ///   `history/`     the take store (`aoide-storage::history` — `rice history`,
 ///                `rice back`'s drift snapshot, `wallpaper set`'s archive)
 ///   `drafts/`    `aoide-storage::fs::drafts_dir` — `rice draft save`
 ///
-/// Names, matched at the song folder's root only: `widgets/history/` is a song's
-/// own widget directory, and a difference there is a difference in the song.
+/// Names, matched at the rice folder's root only: `widgets/history/` is a rice's
+/// own widget directory, and a difference there is a difference in the rice.
 ///
 /// `elements/` is deliberately NOT here, although `rice element seed` writes
-/// into it: that directory is SONG-AUTHORED — `elements::seed_song` READS
-/// `<song>/elements/*/element.json` from the machine's song folder as its
-/// input — so a song that ships one has content there and a difference is a
+/// into it: that directory is RICE-AUTHORED — `elements::seed_rice` READS
+/// `<rice>/elements/*/element.json` from the machine's rice folder as its
+/// input — so a rice that ships one has content there and a difference is a
 /// real difference. Only a name the seed never ships AND that changes not one
 /// staged byte belongs in this list.
 ///
 /// Two consumers, each for its own reason:
 ///
 ///   - [`machine_copy_differs`] ignores these: a snapshot is not a difference
-///     in the SONG. Comparing them would let `rice history` — an ordinary,
-///     reversible operation — turn a built-in song into a "differing" machine
-///     copy, and on a host with no nix that makes the song unstageable while
+///     in the RICE. Comparing them would let `rice history` — an ordinary,
+///     reversible operation — turn a built-in rice into a "differing" machine
+///     copy, and on a host with no nix that makes the rice unstageable while
 ///     reporting `is not built into this system`, which is false on its face.
-///   - `strillix rice declare` leaves them behind: the checkout carries the song,
+///   - `strillix rice declare` leaves them behind: the checkout carries the rice,
 ///     not the machine's undo history and scratch.
 ///
 /// The seed ships none of them, so every name here is a machine's own scratch
 /// rather than content; a third runtime writer belongs in this list, and a
-/// song that ever SHIPS one of these names needs this list revisited.
+/// rice that ever SHIPS one of these names needs this list revisited.
 pub const MACHINE_RUNTIME_DIRS: &[&str] = &["history", "drafts"];
 
 /// §7.5 case 1's "no differing machine copy": the machine's folder for `name`
@@ -746,7 +746,7 @@ pub const MACHINE_RUNTIME_DIRS: &[&str] = &["history", "drafts"];
 ///
 /// CONTENT only, never permissions: the shipped copy comes out of the nix store
 /// (0444/0555) while a machine copy was `cp -r`ed into `$AOIDE_ROOT`
-/// (0644/0755), so a mode comparison would call every seeded song "differing"
+/// (0644/0755), so a mode comparison would call every seeded rice "differing"
 /// and push a host with no nix down the generator path it cannot take. A
 /// missing shipped folder counts as differing — there is nothing to be equal
 /// to.
@@ -762,7 +762,7 @@ fn machine_copy_differs(name: &str, templates: &Path) -> bool {
 /// bytes — `skip` names excepted at THIS level on both sides, never below it
 /// (callers pass [`MACHINE_RUNTIME_DIRS`], whose names are top-level only).
 /// Directories are compared by what they hold, not by their mtimes, and
-/// symlinks are followed (a song folder holds none).
+/// symlinks are followed (a rice folder holds none).
 pub(crate) fn trees_equal(a: &Path, b: &Path, skip: &[&str]) -> bool {
     let (Ok(a_entries), Ok(b_entries)) = (std::fs::read_dir(a), std::fs::read_dir(b)) else {
         return false;
@@ -830,23 +830,23 @@ fn parse_rices_eval(bytes: &[u8], target: &str) -> Result<StageRices, WidgetSync
     Ok(StageRices { manifest, registry })
 }
 
-/// Capture `<song>/rices/<name>/widgets/` as `{ "<relative path>":
+/// Capture `<rice>/rices/<name>/widgets/` as `{ "<relative path>":
 /// "<utf-8 content>" }` — the take store's own widget-body payload (`strillix
 /// reload` design, settled 2026-08-31: "Takes gain WIDGET BODIES in both
 /// modes", closing the gap that widget QML was never snapshotted). Reads
-/// the RICES tree, the same source [`sync_song_widgets`] itself copies
+/// the RICES tree, the same source [`sync_rice_widgets`] itself copies
 /// from — not the deployed `run/qml` copy — because widget bodies are
-/// song-scoped git substrate (this module's own header), the same source of
+/// rice-scoped git substrate (this module's own header), the same source of
 /// truth a take is meant to remember. An absent `widgets/` dir captures as
-/// `{}` (no widgets), the same clean-skip [`sync_song_widgets`] uses for a
+/// `{}` (no widgets), the same clean-skip [`sync_rice_widgets`] uses for a
 /// missing local tree. Unfiltered, recursive, matching
 /// [`copy_tree_atomic`]'s own walk (helper components, asset subdirs,
 /// `.gitkeep`, everything) — a take is a full-content snapshot, not a
 /// filtered one. A non-UTF-8 file is a hard error: QML source is always
 /// text, so an unreadable file here means something is already wrong, not
 /// something to silently skip.
-pub fn snapshot_widget_bodies(song: &str) -> Result<serde_json::Value, WidgetSyncErr> {
-    let src = aoide_storage::fs::rice_dir(song).join("widgets");
+pub fn snapshot_widget_bodies(rice: &str) -> Result<serde_json::Value, WidgetSyncErr> {
+    let src = aoide_storage::fs::rice_dir(rice).join("widgets");
     let mut map = serde_json::Map::new();
     if src.is_dir() {
         capture_tree(&src, &src, &mut map)?;
@@ -898,16 +898,16 @@ fn capture_tree(
     Ok(())
 }
 
-/// The songs whose `widgets/` this stage must carry into `run/qml/songs/`:
+/// The rices whose `widgets/` this stage must carry into `run/qml/rices/`:
 /// `name`, plus every owner its manifest entry names.
 ///
-/// A borrowed slot's BODY lives in its owner's `widgets/` (`lib/song.nix`'s
-/// `composeSong`; CONTRACTS.md §5) and `StagingEngine.qml` resolves a slot to
-/// `songs/<owner>/<file>` — so carrying only the staged song's own folder
+/// A borrowed slot's BODY lives in its owner's `widgets/` (`lib/rice.nix`'s
+/// `composeRice`; CONTRACTS.md §5) and `StagingEngine.qml` resolves a slot to
+/// `rices/<owner>/<file>` — so carrying only the staged rice's own folder
 /// leaves a borrower's lender absent from `run/qml` and the borrowed slot
 /// renders NOTHING, with no error anywhere. The set is read off the entry
 /// [`plan_stage`] already resolved (the generator's own answer for a
-/// machine-authored composition, the baked baseline's for a built-in song)
+/// machine-authored composition, the baked baseline's for a built-in rice)
 /// rather than recomputed here: one source of ownership, in the place that
 /// resolved it.
 fn widget_owners(rices: &StageRices, name: &str) -> Vec<String> {
@@ -924,8 +924,8 @@ fn widget_owners(rices: &StageRices, name: &str) -> Vec<String> {
     owners
 }
 
-/// Sync `<song>/rices/<name>/widgets/` into `run/qml/songs/<name>/` and
-/// regenerate `manifest.json` WHOLE (every song this machine's rices
+/// Sync `<rice>/rices/<name>/widgets/` into `run/qml/rices/<name>/` and
+/// regenerate `manifest.json` WHOLE (every rice this machine's rices
 /// holds, from the one [`plan_stage`] answer) — the live-desktop half of
 /// `rice stage`.
 ///
@@ -933,20 +933,20 @@ fn widget_owners(rices: &StageRices, name: &str) -> Vec<String> {
 /// is deployed at all (no `nixos-rebuild switch` yet) — there is nowhere to
 /// write. Unlike the pre-C4 version, a MISSING `widgets/` dir for `name`
 /// does NOT skip the manifest regeneration: the manifest is a whole-rices
-/// artifact, not a per-song one, so it stays current (and self-heals any
-/// other song's stale/malformed entry) on every `rice stage` call once a
-/// runtime tree exists, regardless of whether the ACTIVE song has bodies to
+/// artifact, not a per-rice one, so it stays current (and self-heals any
+/// other rice's stale/malformed entry) on every `rice stage` call once a
+/// runtime tree exists, regardless of whether the ACTIVE rice has bodies to
 /// carry.
 ///
-/// Pre-existing scope limit, now WIDENED (S9 review, M4): the staged song's
+/// Pre-existing scope limit, now WIDENED (S9 review, M4): the staged rice's
 /// own bodies are carried, AND so are its LENDERS' — every owner its manifest
 /// entry names ([`widget_owners`]), because a borrowed slot resolves to
-/// `songs/<owner>/<file>` and would otherwise render nothing, silently. A
+/// `rices/<owner>/<file>` and would otherwise render nothing, silently. A
 /// lender with no `widgets/` in the rices is an error naming it, not a
 /// skip. Still out of scope: a lender whose bodies were EDITED without
 /// staging the lender (`rice stage <borrower>` carries the lender's bodies as
 /// they are on disk, which is the same freshness every other body copy has).
-pub fn sync_song_widgets(
+pub fn sync_rice_widgets(
     name: &str,
     rices: &StageRices,
 ) -> Result<WidgetSyncOk, WidgetSyncErr> {
@@ -963,15 +963,15 @@ pub fn sync_song_widgets(
     let src = aoide_storage::fs::rice_dir(name).join("widgets");
     let mut changed: Vec<String> = Vec::new();
     let local_slots = if src.is_dir() {
-        let dst = run_qml.join("songs").join(name);
+        let dst = run_qml.join("rices").join(name);
         copy_tree_atomic(&src, &dst, &[], &mut changed)?;
         scan_slot_names(&src)?
     } else {
         Vec::new()
     };
 
-    // The runtime half of the borrow closure: every LENDER the staged song's
-    // entry names must have its bodies under `run/qml/songs/<owner>/` too, or
+    // The runtime half of the borrow closure: every LENDER the staged rice's
+    // entry names must have its bodies under `run/qml/rices/<owner>/` too, or
     // the borrowed slot resolves to nothing (see [`widget_owners`]).
     let mut lenders: Vec<String> = Vec::new();
     for owner in widget_owners(rices, name) {
@@ -990,7 +990,7 @@ pub fn sync_song_widgets(
                 target: lender_src.to_string_lossy().into_owned(),
             });
         }
-        copy_tree_atomic(&lender_src, &run_qml.join("songs").join(&owner), &[], &mut changed)?;
+        copy_tree_atomic(&lender_src, &run_qml.join("rices").join(&owner), &[], &mut changed)?;
         lenders.push(owner);
     }
 
@@ -1002,10 +1002,10 @@ pub fn sync_song_widgets(
     let note = if !bodies_changed {
         "widget bodies already current".to_string()
     } else if lenders.is_empty() {
-        format!("synced {body_file_count} widget file(s) into run/qml/songs/{name}")
+        format!("synced {body_file_count} widget file(s) into run/qml/rices/{name}")
     } else {
         format!(
-            "synced {body_file_count} widget file(s) into run/qml/songs/{name} (borrowed bodies \
+            "synced {body_file_count} widget file(s) into run/qml/rices/{name} (borrowed bodies \
              carried from {})",
             lenders.join(", ")
         )
@@ -1021,7 +1021,7 @@ pub fn sync_song_widgets(
 /// (not written, not counted in `changed`): Quickshell would otherwise
 /// reload/reinstantiate every widget on every palette-only `rice stage` call,
 /// causing visible flicker/lost widget state. Public because `strillix rice
-/// declare` copies a song folder through it, skipping [`MACHINE_RUNTIME_DIRS`].
+/// declare` copies a rice folder through it, skipping [`MACHINE_RUNTIME_DIRS`].
 pub fn copy_tree_atomic(
     src: &Path,
     dst: &Path,
@@ -1115,14 +1115,14 @@ fn scan_slot_names(src: &Path) -> Result<Vec<String>, WidgetSyncErr> {
     Ok(slots)
 }
 
-/// Regenerate `run_qml/songs/manifest.json` WHOLE from the rices
-/// [`plan_stage`] resolved — every song this machine's rices holds, its
+/// Regenerate `run_qml/rices/manifest.json` WHOLE from the rices
+/// [`plan_stage`] resolved — every rice this machine's rices holds, its
 /// owner-map entry written outright, replacing the file. On
 /// a checkout host the eval is total: a stale or malformed entry for ANY
-/// song, not just the one being staged, self-heals on every call. On a
+/// rice, not just the one being staged, self-heals on every call. On a
 /// repo-less host [`baseline_rices`]'s three-layer merge
-/// self-heals the STAGED song's own entry on every call and preserves every
-/// other still-live song's entry from the file this write is about to
+/// self-heals the STAGED rice's own entry on every call and preserves every
+/// other still-live rice's entry from the file this write is about to
 /// replace (see that function's own doc).
 fn regenerate_manifest(
     rices: &StageRices,
@@ -1130,7 +1130,7 @@ fn regenerate_manifest(
     changed: &mut Vec<String>,
 ) -> Result<(), WidgetSyncErr> {
     let eval = rices;
-    let manifest_path = run_qml.join("songs").join("manifest.json");
+    let manifest_path = run_qml.join("rices").join("manifest.json");
     let body = serde_json::to_string_pretty(&eval.manifest).unwrap_or_default() + "\n";
     let existing = std::fs::read_to_string(&manifest_path).ok();
     if existing.as_deref() != Some(body.as_str()) {
@@ -1143,18 +1143,18 @@ fn regenerate_manifest(
     Ok(())
 }
 
-/// Regenerate `run/qml/songs/registry.json` WHOLE from the rices
+/// Regenerate `run/qml/rices/registry.json` WHOLE from the rices
 /// [`plan_stage`] resolved — the second writer of the one generator's answer
 /// (see the module doc's "one decision and one evaluation"). Same posture as [`regenerate_manifest`]: a
-/// checkout host's eval is total (every committed song's registry entry
+/// checkout host's eval is total (every committed rice's registry entry
 /// comes from THIS eval, every time); a repo-less host's merge self-heals
-/// the staged song and preserves every other still-live song's entry from
+/// the staged rice and preserves every other still-live rice's entry from
 /// the file this write is about to replace.
 ///
 /// Clean-skips (`Ok`, empty `changed`) when no `run/qml` runtime tree is
-/// deployed at all — mirrors [`sync_song_widgets`]'s own not-yet-switched
+/// deployed at all — mirrors [`sync_rice_widgets`]'s own not-yet-switched
 /// early return (`registry.json` lives under the same tree).
-pub fn sync_song_registry(
+pub fn sync_rice_registry(
     name: &str,
     rices: &StageRices,
 ) -> Result<RegistrySyncOk, WidgetSyncErr> {
@@ -1168,7 +1168,7 @@ pub fn sync_song_registry(
     }
 
     let eval = rices;
-    let registry_path = run_qml.join("songs").join("registry.json");
+    let registry_path = run_qml.join("rices").join("registry.json");
     let body = serde_json::to_string_pretty(&eval.registry).unwrap_or_default() + "\n";
     let existing = std::fs::read_to_string(&registry_path).ok();
     let differs = existing.as_deref() != Some(body.as_str());
@@ -1206,7 +1206,7 @@ mod tests {
         let _g = env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
         let root = unique_tmp("widgets-machine-copy");
-        std::env::set_var("AOIDE_STAGE_DIR", root.join("song").join("stage"));
+        std::env::set_var("AOIDE_STAGE_DIR", root.join("rice").join("stage"));
         let templates = root.join("templates");
         let machine = aoide_storage::fs::rice_dir("dusk");
         for dir in [templates.join("dusk"), machine.clone()] {
@@ -1219,13 +1219,13 @@ mod tests {
         write(&machine.join("drafts").join("neon").join("theme.json"), "{}");
         assert!(
             !machine_copy_differs("dusk", &templates),
-            "a take and a draft at the song's top level are not a difference in the song"
+            "a take and a draft at the rice's top level are not a difference in the rice"
         );
 
         write(&machine.join("widgets").join("history").join("Bar.qml"), "// edited\n");
         assert!(
             machine_copy_differs("dusk", &templates),
-            "widgets/history/ is the song's own widget directory, so an edit there is a difference"
+            "widgets/history/ is the rice's own widget directory, so an edit there is a difference"
         );
 
         let _ = std::fs::remove_dir_all(&root);

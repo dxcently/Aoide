@@ -62,7 +62,7 @@
 //!
 //! **A dialog-child lifecycle failure must NEVER be silent (this commit,
 //! live-incident fix).** The deployed popup watcher unit had
-//! `AOIDE_RICE_BIN` set, chose the `strillix` dialog for a real parked ask, and
+//! `STRILLIX_BIN` set, chose the `strillix` dialog for a real parked ask, and
 //! `strillix`'s own `quickshell` spawn ENOENT'd (`quickshell` wasn't on the
 //! unit's own `PATH` — fixed nix-side, `modules/dendrites/aoide-secrets.nix`). On
 //! screen: nothing. In the journal: nothing after the `parked` line — the

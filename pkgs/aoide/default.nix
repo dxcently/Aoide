@@ -69,15 +69,15 @@ rustPlatform.buildRustPackage {
 
   # ...but `buildAndTestSubdir` also SCOPES the check phase to that one crate,
   # so without this the sandbox tested `aoide-cli` alone — about 30 of the
-  # tree's 330 tests — while every crate beneath it (storage, song, protocol,
+  # tree's 330 tests — while every crate beneath it (storage, rice, protocol,
   # conduct, upkeep) was compiled but never exercised. A green `nix build`
   # meant far less than it looked like. `--workspace` restores the obvious
   # reading: the package build runs the whole suite.
   cargoTestFlags = [ "--workspace" ];
 
   # ...and these five tests are SKIPPED BY NAME in the sandbox, because this
-  # package's source tree is `pkgs/aoide` alone: the outer AoideOS repo's
-  # top-level `song/` (whose committed `rices/sonata/widgets/*.qml` they
+  # package's source tree is `pkgs/aoide` alone: the outer Strillix repo's
+  # top-level `rice/` (whose committed `rices/sonata/widgets/*.qml` they
   # parse) is deliberately NOT part of the self-flaked core (its own
   # `flake.nix` header, "Topology (b)"), so the fixtures have nothing to read
   # here — in the sandbox they would fail on a path that is empty by design.
@@ -141,7 +141,7 @@ rustPlatform.buildRustPackage {
   # three still install to $out at this point; P-A8's `postFixup` below is
   # what relocates `strillix` alone into `$strillix`.
   # `paint = false` scopes the build to the core crate alone — no strillix, no
-  # song/screen weight — for the static variant.
+  # rice/screen weight — for the static variant.
   cargoBuildFlags =
     if paint then
       [ "--workspace" ]

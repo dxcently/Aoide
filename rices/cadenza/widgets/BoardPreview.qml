@@ -3,8 +3,8 @@
 // precedent). The live path never loads this file.
 //
 //   AOIDE_FLAKE_ROOT=<worktree> strillix preview \
-//       <worktree>/song/songbook/cadenza/widgets/BoardPreview.qml --song cadenza \
-//       --fixture <worktree>/song/songbook/cadenza/design/fixtures/board
+//       <worktree>/rices/cadenza/widgets/BoardPreview.qml --rice cadenza \
+//       --fixture <worktree>/rices/cadenza/design/fixtures/board
 //
 // It loads BoardBody by URL, flips the per-seam switches the live board keeps
 // off (`hasBoardFeed`, `hasMailRead`, `hasBoardPost`, `hasJackUsage` — on
@@ -23,7 +23,7 @@
 // root is built — `--fixture` places only the four stage files.
 //
 // The fixture directory: `$CADENZA_BOARD_FIXTURE`, else the checkout's
-// `song/songbook/cadenza/design/fixtures/board` under `$AOIDE_FLAKE_ROOT`.
+// `rices/cadenza/design/fixtures/board` under `$AOIDE_FLAKE_ROOT`.
 // The tab: clicking works as live. For scripted shots the harness also
 // watches `<preview root>/board-tab` (one line: `overview`, `sys`, `notif`,
 // `project:<name>`) — a file inside the isolated root, read by this harness

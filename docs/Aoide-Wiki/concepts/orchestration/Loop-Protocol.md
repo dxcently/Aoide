@@ -62,7 +62,7 @@ force `spawn` regardless of how short the work looks:
   running on,
 - the brief needs mid-flight steering,
 - the user needs to observe the role directly — a `spawn` session
-  carries a log, a graph node, and a herald; an internal subagent carries
+  carries a log, a graph node, and a notifications; an internal subagent carries
   none of those outward.
 
 Model-tiering — routing a role to a particular model, planner on one,

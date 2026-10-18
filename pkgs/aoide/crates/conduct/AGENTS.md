@@ -773,10 +773,10 @@ in the message.
   on it — and never pre-check that a draft exists: `rice mode draft` creates
   one, so an `enter` is enter-or-create and a pre-check would only race it;
   a `drop` of a missing draft or of the draft in force is the CLI's refusal. The
-  unlock is a BARE `rice mode stage` (house rule 10), never a declared song. `drafts_song` and
-  the plan agree on ONE song per mode: declarative lists `stagingSong` because
+  unlock is a BARE `rice mode stage` (house rule 10), never a declared rice. `drafts_rice` and
+  the plan agree on ONE rice per mode: declarative lists `stagingRice` because
   an unlock lands there, and refuses `save` and `drop` because the stage there
-  is the declared song — change one and the other moves with it. `ricemenu` is a
+  is the declared rice — change one and the other moves with it. `ricemenu` is a
   READ: it answers on its own connection with both children under the one
   `RICE_MENU_TIMEOUT` budget (below the client's 5 s reply timeout), the
   `rice list` data passes through verbatim with `host` and `hostConfig` beside
@@ -784,13 +784,13 @@ in the message.
   CLI's declare uses, never respelled here), a child that did not answer is a
   refusal and never an empty list, and a failed `rice list` starts no second
   child. `ricemode` takes `stage` + one argv-token `name` or a bare
-  `declarative` (the CLI resolves the declared twin — never an env song here).
-  `ricedeclare` takes one song-shaped `name` (`song_name`) and nothing else:
-  which song a host may declare, and the host file it rewrites, are the CLI's
+  `declarative` (the CLI resolves the declared twin — never an env rice here).
+  `ricedeclare` takes one rice-shaped `name` (`rice_name`) and nothing else:
+  which rice a host may declare, and the host file it rewrites, are the CLI's
   (`strx rice declare --host`), never checked here. No audit line of the other
-  three verbs carries a draft or a song name; `ricedeclare`'s names the song
+  three verbs carries a draft or a rice name; `ricedeclare`'s names the rice
   it declared (`rice_declare_audit`: `ok changed`, `ok unchanged`, `failed`),
-  which is why its parse holds the name to the song shape.
+  which is why its parse holds the name to the rice shape.
 
 - **`session bind` assigns continuity, never authority.** Keep the operation
   daemon-owned and local-only; no missing-daemon fallback. It does not load

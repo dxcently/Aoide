@@ -676,7 +676,7 @@ fn draw_projects(f: &mut Frame, area: Rect, app: &App) {
 pub(crate) fn status_env_block(app: &App) -> Vec<Line<'static>> {
     // Two roots since command-defrag S1 (2026-08-27): conducting state
     // (`sessions.json`/`hooks.json`/`projects.json`/`graph.json`) lives under
-    // `state/stage/`; rice/paint state (`theme.json`) stays `song/stage/`.
+    // `state/stage/`; rice/paint state (`theme.json`) stays `rice/stage/`.
     // They coincide under an `$AOIDE_STAGE_DIR` override (every test fixture
     // here), and diverge only on the default production layout.
     let stage = aoide_storage::fs::conducting_stage_dir();

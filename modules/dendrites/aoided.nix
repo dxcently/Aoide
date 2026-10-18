@@ -1,4 +1,4 @@
-# modules/dendrites/aoided.nix — the AoideOS deltas for the aoided unit.
+# modules/dendrites/aoided.nix — the Strillix deltas for the aoided unit.
 #
 # Deselecting this dendrite does not remove the aoided daemon: `aoided.service`,
 # its tmpfiles rules and the core session variables come from the core module
@@ -6,7 +6,7 @@
 # set. This dendrite sets it, and so does every other catalogue member of
 # `nucleus`; the core's own switch is never written by hand.
 #
-# What this dendrite carries is the AoideOS deployment on top of that unit:
+# What this dendrite carries is the Strillix deployment on top of that unit:
 # the a2a, mcp and mail-adapter doors, the pair-watch popup, the usage poller
 # and its timer, the discovery firewall carve (UDP 8711) and
 # `STRILLIX_TEMPLATES`.
@@ -21,7 +21,7 @@
 # graphical session up sets it, so this file reads no lane's option (root
 # AGENTS.md house rule 5). Below that, the doors (mcp, a2a, pair-watch), the
 # discovery-advertisement firewall carve, and the usage widget poller — core
-# *binaries* in a still-AoideOS *deployment* (migration brief §2.6 item 4).
+# *binaries* in a still-Strillix *deployment* (migration brief §2.6 item 4).
 #
 # The doors' settings (`aoide.mcp`, `aoide.a2a`, `aoide.mail.adapter`,
 # `aoide.usage`) are declared below, beside the units that read them, so they
@@ -243,7 +243,7 @@ in
   config = {
     aoide.enable = true;
 
-    # ── AoideOS-only session variable ────────────────────────────────────────
+    # ── Strillix-only session variable ────────────────────────────────────────
     # `STRILLIX_TEMPLATES` (L-C3, task #107) is paint data (the shipped
     # rices), not core state like `AOIDE_ROOT`/`AOIDE_FLAKE_ROOT`
     # (`pkgs/aoide/module/aoided.nix`'s own contract) — gated on
@@ -253,7 +253,7 @@ in
     # var, so exporting it unconditionally only drags the
     # `pkgs.strillix-rices` closure onto every interactive shell for no
     # reason). An operator's own `strillix rice compose` still needs it — the
-    # sibling-of-binary fallback tier (`fs::song_templates_dir`'s own doc)
+    # sibling-of-binary fallback tier (`fs::rice_templates_dir`'s own doc)
     # can't resolve across `strillix`'s separate `strillix` output, so this env
     # export is the ONLY way an interactive shell agrees with `strillix` on
     # where the templates are.
@@ -274,7 +274,7 @@ in
     # Why here and not in the portable core module: the templates path is
     # `pkgs.strillix-rices` (paint), which core neither knows nor may name. Why
     # only this unit, `aoide-quickshell` and `aoide-rice-reload`:
-    # `fs::song_templates_dir` is read on the staging path (`rice stage|compose|
+    # `fs::rice_templates_dir` is read on the staging path (`rice stage|compose|
     # preview|mode`, `take`, `onboard`), and those are what a shell born of
     # `aoide-quickshell` runs and what `aoide-rice-reload` re-stages with at
     # login and after a switch — shellbridge already spells it for the one
@@ -429,7 +429,7 @@ in
     # `Type = simple` + `Restart = on-failure`, explicit `zenity`/`quickshell`
     # `path` entries, journal both streams, NoNewPrivileges), including that
     # unit's own `strillix`-preferred-with-zenity-fallback shape: `strillix pair ask`
-    # (`pair_watch::resolve_strillix_bin`) when `AOIDE_RICE_BIN` resolves it, else
+    # (`pair_watch::resolve_strillix_bin`) when `STRILLIX_BIN` resolves it, else
     # `zenity --entry`. No ordering against `aoide-a2a` (the process that
     # actually emits onto this feed) — `pair_watch::wait_for_follower` already
     # retries until the events feed appears rather than exiting 1, so this
@@ -469,7 +469,7 @@ in
           # unconditionally: it is the fallback the whole unit's reachability
           # rests on, and the only dialog a host without strillix ever gets.
           #
-          # `quickshell` rides the SAME condition as `AOIDE_RICE_BIN` below,
+          # `quickshell` rides the SAME condition as `STRILLIX_BIN` below,
           # and for the same one reason: `strillix pair ask` spawns quickshell by
           # bare name, so the unit that can spawn strillix must carry it — and the
           # unit can only spawn strillix when `aoide.strillix.enable` put the binary
@@ -499,13 +499,13 @@ in
               "AOIDE_USER=${config.aoide.user}"
             ]
             # `pair_watch::resolve_strillix_bin` resolves `strillix` via
-            # `AOIDE_RICE_BIN` (tier 1, trusted unconditionally) or a sibling
+            # `STRILLIX_BIN` (tier 1, trusted unconditionally) or a sibling
             # of `current_exe()` (tier 2) — `strillix` ships from `pkgs.aoide.strillix`,
             # a SEPARATE output from the `aoide` binary this unit execs, so
             # sibling resolution would silently fail here without this. Only
             # set when `aoide.strillix.enable` is actually on — mirrors
             # `aoide-secrets-watch`'s own identical guard.
-            ++ lib.optional config.aoide.strillix.enable "AOIDE_RICE_BIN=${pkgs.aoide.strillix}/bin/strillix";
+            ++ lib.optional config.aoide.strillix.enable "STRILLIX_BIN=${pkgs.aoide.strillix}/bin/strillix";
 
             NoNewPrivileges = true;
             StandardOutput = "journal";

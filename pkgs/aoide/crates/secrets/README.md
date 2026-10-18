@@ -828,7 +828,7 @@ would mean a NEW `aoide-secrets` → `aoide-conduct` dependency edge, which
 this phase's brief ruled out (`pkgs/aoide/crates/AGENTS.md`'s "no
 cross-crate copying" — the fix for a missing seam is widening what's
 already `pub`, not duplicating logic in, and reaching an unrelated crate is
-worse than either); it would also be a step backward across the aoide/AoideOS
+worse than either); it would also be a step backward across the aoide/Strillix
 boundary from the root `AGENTS.md` (house rule 7's "delete every `.qml`"
 test): the shellbridge socket only exists while a desktop session's bridge
 daemon is running, but this broker is meant to run headless, as a system
@@ -1757,7 +1757,7 @@ same "blocks forever" reason the broker service above holds. Its `path`
 carries `zenity` (a systemd user unit's default `PATH` does not reliably
 carry `environment.systemPackages` entries, the same lesson `shellbridge.nix`
 already learned for `hyprctl`/`curl`), and, only when `aoide.strillix.enable` is
-on, `AOIDE_RICE_BIN` points at `pkgs.aoide.strillix`'s own `strillix` — `strillix` ships
+on, `STRILLIX_BIN` points at `pkgs.aoide.strillix`'s own `strillix` — `strillix` ships
 from a SEPARATE output than the `aoide` binary this unit execs (P-A8 of the
 binary-split workstream), so `watch::resolve_strillix_bin`'s sibling-of-
 `current_exe()` tier would otherwise never find it. No explicit ordering

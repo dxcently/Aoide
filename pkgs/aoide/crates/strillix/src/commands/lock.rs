@@ -1,20 +1,20 @@
 //! `strillix lock` — the one way to lock the screen, from a key bind, the power
 //! menu or a terminal.
 //!
-//! - A staged song that dresses the `lockscreen` slot (its own entry in
-//!   `run/qml/songs/manifest.json`, no baseline fallback) is locked by the
+//! - A staged rice that dresses the `lockscreen` slot (its own entry in
+//!   `run/qml/rices/manifest.json`, no baseline fallback) is locked by the
 //!   running shell, when the shell's PAM service (`/etc/pam.d/aoide-lock`)
 //!   exists: `quickshell -p <run/qml/shell.qml> ipc call lock lock` reaches
 //!   `LockHost.qml`, which starts its PAM conversation, holds the Wayland
-//!   session lock and paints the song's face, and answers `false` when the
+//!   session lock and paints the rice's face, and answers `false` when the
 //!   conversation cannot start. The call counts only once the shell answers
 //!   `ipc call lock secure` with `true` — the compositor has confirmed the
 //!   lock — inside [`SHELL_ANSWER`]. A missing PAM service, and a shell that
 //!   is not running, refuses, does not answer, or never confirms, falls
 //!   through to hyprlock, so the command never reports a lock it did not get
 //!   and never leaves a lock nothing can open.
-//! - Every other song, and that fall-through, runs `hyprlock`, dressed by
-//!   `song/declared/hyprlock.conf` and `song/stage/hyprlock.conf` through the
+//! - Every other rice, and that fall-through, runs `hyprlock`, dressed by
+//!   `rice/declared/hyprlock.conf` and `rice/stage/hyprlock.conf` through the
 //!   host's hyprlock config. hyprlock is spawned in its own process group and
 //!   left running; a hyprlock that exits inside [`HYPRLOCK_SETTLE`] (another
 //!   lock holds the session, no config) is a failure, never a lock — unless
@@ -42,7 +42,7 @@ use std::path::Path;
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
-/// The slot a song dresses to have the shell lock the screen.
+/// The slot a rice dresses to have the shell lock the screen.
 pub const FACE_SLOT: &str = "lockscreen";
 
 /// How long the shell has to take the lock and the compositor to confirm it.
@@ -61,7 +61,7 @@ const HYPRLOCK_SETTLE: Duration = Duration::from_millis(500);
 pub fn register(r: &mut Registry) {
     r.insert(cmd!(
         path: ["lock"],
-        summary: "Lock the screen. A staged song that dresses the `lockscreen` slot is locked by the running shell (its own face, confirmed by the compositor within 5 s) when the shell's PAM service /etc/pam.d/aoide-lock exists; every other song, a missing PAM service, and a shell that does not answer, runs hyprlock dressed by song/{declared,stage}/hyprlock.conf, and a LockedHint still `yes` from a shell lock is cleared once hyprlock holds the screen.",
+        summary: "Lock the screen. A staged rice that dresses the `lockscreen` slot is locked by the running shell (its own face, confirmed by the compositor within 5 s) when the shell's PAM service /etc/pam.d/aoide-lock exists; every other rice, a missing PAM service, and a shell that does not answer, runs hyprlock dressed by rice/{declared,stage}/hyprlock.conf, and a LockedHint still `yes` from a shell lock is cleared once hyprlock holds the screen.",
         args: [],
         flags: [flag!(
             "hyprlock",
@@ -72,7 +72,7 @@ pub fn register(r: &mut Registry) {
         implemented: true,
         handler: handle_lock,
         examples: ["lock", "lock --json", "lock --hyprlock --json"],
-        brief: "Lock the screen in the staged song's face.",
+        brief: "Lock the screen in the staged rice's face.",
         doors: &[Door::Cli],
     ));
     r.insert(cmd!(
@@ -95,17 +95,17 @@ fn handle_lock(inv: &Invocation) -> Outcome {
 
 fn lock_with(shell_pam: &Path, hyprlock_only: bool) -> Outcome {
     let cmd = "lock";
-    let song = active_song();
-    let face = song.as_deref().filter(|s| !hyprlock_only && dresses_face(&manifest_path(), s));
+    let rice = active_rice();
+    let face = rice.as_deref().filter(|s| !hyprlock_only && dresses_face(&manifest_path(), s));
     let mut shell_refused = None;
-    if let Some(song) = face {
+    if let Some(rice) = face {
         let tried = if shell_pam.is_file() {
             shell_lock(SHELL_ANSWER)
         } else {
             Err(format!("the shell's PAM service {} is missing", shell_pam.display()))
         };
         match tried {
-            Ok(()) => return shell_locked(cmd, song),
+            Ok(()) => return shell_locked(cmd, rice),
             Err(why) => shell_refused = Some(why),
         }
     }
@@ -118,7 +118,7 @@ fn lock_with(shell_pam: &Path, hyprlock_only: bool) -> Outcome {
             Outcome::ok(cmd, message).with_data(json!({
                 "locker": "hyprlock",
                 "pid": pid,
-                "song": song,
+                "rice": rice,
                 "shellRefused": shell_refused,
                 "hintCleared": clear_stale_hint(),
             }))
@@ -126,9 +126,9 @@ fn lock_with(shell_pam: &Path, hyprlock_only: bool) -> Outcome {
         Err(detail) => {
             // A shell that was asked may have confirmed after its budget:
             // hyprlock then finds the session locked and leaves at once.
-            if let (Some(song), true) = (face, shell_refused.is_some() && shell_pam.is_file()) {
+            if let (Some(rice), true) = (face, shell_refused.is_some() && shell_pam.is_file()) {
                 if qs_call(&["secure"], Instant::now() + SHELL_ANSWER).is_ok_and(|s| s == "true") {
-                    return shell_locked(cmd, song);
+                    return shell_locked(cmd, rice);
                 }
             }
             Outcome::refuse(
@@ -144,8 +144,8 @@ fn lock_with(shell_pam: &Path, hyprlock_only: bool) -> Outcome {
     }
 }
 
-fn shell_locked(cmd: &str, song: &str) -> Outcome {
-    Outcome::ok(cmd, format!("locked by the shell in `{song}`'s face")).with_data(json!({ "locker": "shell", "song": song }))
+fn shell_locked(cmd: &str, rice: &str) -> Outcome {
+    Outcome::ok(cmd, format!("locked by the shell in `{rice}`'s face")).with_data(json!({ "locker": "shell", "rice": rice }))
 }
 
 fn handle_hint(inv: &Invocation) -> Outcome {
@@ -226,25 +226,25 @@ fn hint_failed(cmd: &str, detail: String) -> Outcome {
         .with_detail(detail)
 }
 
-/// The staged song: `stage/theme.json`'s `song`, the name the shell itself
-/// paints (`ThemeState.songName`).
-fn active_song() -> Option<String> {
+/// The staged rice: `stage/theme.json`'s `rice`, the name the shell itself
+/// paints (`ThemeState.riceName`).
+fn active_rice() -> Option<String> {
     let raw = std::fs::read_to_string(aoide_storage::fs::stage_dir().join("theme.json")).ok()?;
     let doc: Value = serde_json::from_str(&raw).ok()?;
-    doc.get("song")?.as_str().filter(|s| !s.is_empty()).map(str::to_string)
+    doc.get("rice")?.as_str().filter(|s| !s.is_empty()).map(str::to_string)
 }
 
 fn manifest_path() -> std::path::PathBuf {
-    aoide_storage::fs::run_qml_dir().join("songs").join("manifest.json")
+    aoide_storage::fs::run_qml_dir().join("rices").join("manifest.json")
 }
 
-/// Does `song`'s OWN manifest entry carry the face slot? The baseline song is
-/// never consulted: a song that ships no face locks with hyprlock.
-fn dresses_face(manifest: &Path, song: &str) -> bool {
+/// Does `rice`'s OWN manifest entry carry the face slot? The baseline rice is
+/// never consulted: a rice that ships no face locks with hyprlock.
+fn dresses_face(manifest: &Path, rice: &str) -> bool {
     std::fs::read_to_string(manifest)
         .ok()
         .and_then(|raw| serde_json::from_str::<Value>(&raw).ok())
-        .is_some_and(|doc| doc.get(song).and_then(|s| s.get(FACE_SLOT)).is_some_and(Value::is_object))
+        .is_some_and(|doc| doc.get(rice).and_then(|s| s.get(FACE_SLOT)).is_some_and(Value::is_object))
 }
 
 /// Ask the running shell to lock, then wait for the compositor's word.
@@ -448,9 +448,9 @@ esac
                 std::fs::write(&p, body).unwrap();
                 std::fs::set_permissions(&p, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
             }
-            let stage = root.join("aoide/song/stage");
+            let stage = root.join("aoide/rice/stage");
             std::fs::create_dir_all(&stage).unwrap();
-            std::fs::create_dir_all(root.join("aoide/run/qml/songs")).unwrap();
+            std::fs::create_dir_all(root.join("aoide/run/qml/rices")).unwrap();
             std::fs::create_dir_all(root.join("pam")).unwrap();
             std::fs::write(root.join("pam/aoide-lock"), b"").unwrap();
             std::env::set_var("PATH", &bin);
@@ -459,9 +459,9 @@ esac
             Rig { root, _env: env }
         }
 
-        fn stage(&self, song: &str, manifest: &str) {
-            std::fs::write(self.root.join("aoide/song/stage/theme.json"), format!(r#"{{"song":"{song}"}}"#)).unwrap();
-            std::fs::write(self.root.join("aoide/run/qml/songs/manifest.json"), manifest).unwrap();
+        fn stage(&self, rice: &str, manifest: &str) {
+            std::fs::write(self.root.join("aoide/rice/stage/theme.json"), format!(r#"{{"rice":"{rice}"}}"#)).unwrap();
+            std::fs::write(self.root.join("aoide/run/qml/rices/manifest.json"), manifest).unwrap();
         }
 
         fn lock(&self) -> Outcome {
@@ -493,7 +493,7 @@ esac
     }
 
     #[test]
-    fn a_song_with_a_face_is_locked_by_the_shell_once_the_compositor_confirms() {
+    fn a_rice_with_a_face_is_locked_by_the_shell_once_the_compositor_confirms() {
         let _g = env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let rig = Rig::new("lock-shell");
         rig.stage("barcarolle", FACE);
@@ -509,7 +509,7 @@ esac
     }
 
     #[test]
-    fn a_song_without_a_face_runs_hyprlock_and_never_asks_the_shell() {
+    fn a_rice_without_a_face_runs_hyprlock_and_never_asks_the_shell() {
         let _g = env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let rig = Rig::new("lock-noface");
         // sonata dresses no lockscreen; the baseline is never borrowed.

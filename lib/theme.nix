@@ -1,12 +1,12 @@
 # lib/theme.nix — the venue resolver (CONTRACTS.md §1, override and geometry tiers).
 #
-# `aoide.theme.override.*` is a HOST-set, never song-set tier. Two registers,
+# `aoide.theme.override.*` is a HOST-set, never rice-set tier. Two registers,
 # two passes, fixed order:
 #
 #   1. Anchor pass (`anchorResolve`, Phase 1, unchanged) — the five optional
 #      palette-anchor hexes (`override.{bg,fg,accent,urgent,hot}`). A
 #      RECOLOUR, not a re-key: for each overridden anchor, every theme
-#      colour equal to the song's AUTHORED value for that anchor — palette,
+#      colour equal to the rice's AUTHORED value for that anchor — palette,
 #      base16, component tiers — is rewritten to the override value, computed
 #      in one simultaneous pass against the authored values (so two overrides
 #      can never chain through each other).
@@ -17,14 +17,14 @@
 #      anchor recolour — the more specific instruction wins.
 #
 # Both passes are read-side, not a config-side mkForce: the option system
-# keeps storing the song's authored values inert, so there is no
+# keeps storing the rice's authored values inert, so there is no
 # option-system recursion. Both fan-outs (the baked Stylix scheme and the
 # $STRILLIX_ROOT/stage/theme.json seed) apply the identical rule through this one
 # file, so they cannot disagree. `resolve` keeps ONE signature across both
 # phases — Phase 1's consumers (the stylix and compositor paint lanes) change
 # zero lines.
 #
-# The runtime stage re-derives the declared song from the runtime rices, not
+# The runtime stage re-derives the declared rice from the runtime rices, not
 # from this file's output, so the venue reaches it as DATA: `venueDelta` is
 # `stagePatch` minus the document — the slots the recolour changes and the
 # geometry the host sets, nothing else — published beside the declared twin as
@@ -32,8 +32,8 @@
 # only overlays what it is handed.
 #
 # Geometry is the venue's third register and the one that is not a recolour:
-# `aoide.theme.geometry` is set by the song AND by the host (a host-wide
-# `blurEnabled = false`, a song-conditional `terminalOpacity`), and the baked
+# `aoide.theme.geometry` is set by the rice AND by the host (a host-wide
+# `blurEnabled = false`, a rice-conditional `terminalOpacity`), and the baked
 # `hyprland.conf` and kitty fragment already carry the host's value. `stagePatch`
 # lays the option's non-null geometry over the document's own, so the twin
 # equals the bake.
@@ -95,7 +95,7 @@ rec {
       namedB16 = named "base16";
     in
     assert lib.assertMsg (base.base16 != null || namedB16 == { })
-      "aoide.theme.override.base16.${lib.concatStringsSep "/" (lib.attrNames namedB16)}: the performed song carries no base16 scheme (aoide.theme.base16 is null) to patch a named slot into.";
+      "aoide.theme.override.base16.${lib.concatStringsSep "/" (lib.attrNames namedB16)}: the performed rice carries no base16 scheme (aoide.theme.base16 is null) to patch a named slot into.";
     base
     // {
       base16 = if base.base16 == null then null else base.base16 // namedB16;
@@ -151,7 +151,7 @@ rec {
         };
     in
     assert lib.assertMsg ((doc.base16 or null) != null || !(slots ? base16))
-      "aoide.theme.override.base16.${lib.concatStringsSep "/" (lib.attrNames slots.base16)}: the active song's theme.json carries no base16 scheme to patch a named slot into.";
+      "aoide.theme.override.base16.${lib.concatStringsSep "/" (lib.attrNames slots.base16)}: the active rice's theme.json carries no base16 scheme to patch a named slot into.";
     doc
     // patch "palette" (
       lib.optionalAttrs ((doc.palette.hot or null) == null && (o.hot or null) != null) {

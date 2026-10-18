@@ -59,7 +59,7 @@ fn read_one_line(reader: &mut impl BufRead) -> Value {
 /// net `aoide-server`'s `env_lock()` carries, re-derived here because this
 /// binary starts a REAL daemon whose `HandEditWatcher`/boot-resume paths
 /// eagerly resolve `conducting_stage_dir()`, and (post-S1) that first
-/// resolution MIGRATES the operator's real `~/Aoide/song/stage` when no
+/// resolution MIGRATES the operator's real `~/Aoide/rice/stage` when no
 /// override is set (the exact production-state mutation
 /// `conduct/src/lib.rs`'s own floor was built after being burned by).
 fn floor_stage_env() {

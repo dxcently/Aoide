@@ -5,14 +5,14 @@ updated: 2026-08-27
 tags: [aoide, cli, content, hooks, notification]
 ---
 
-# Content, Herald & Hooks Commands
+# Content, Notifications & Hooks Commands
 
 Three surfaces in one page: the `content` command group (the [[Content-Pipeline]]
-admission/index flow), `herald push` (dunst's `script` hook feeding the
-notification ledger the Quickshell herald draws), and `hooks install` (wiring
+admission/index flow), `notifications push` (dunst's `script` hook feeding the
+notification ledger the Quickshell notifications draws), and `hooks install` (wiring
 an agent harness's settings file into the [[Agent-Hooking]] door). Handlers and
-registrations live in `pkgs/aoide/crates/conduct/src/commands/{herald,hooks}.rs`,
-`pkgs/aoide/crates/conduct/src/herald.rs`, and (content stubs)
+registrations live in `pkgs/aoide/crates/conduct/src/commands/{notifications,hooks}.rs`,
+`pkgs/aoide/crates/conduct/src/notifications.rs`, and (content stubs)
 `pkgs/aoide/crates/cli/src/commands/stubs.rs`.
 
 Every command takes `--json`. Without it the CLI prints the human `message`
@@ -77,10 +77,10 @@ aoide content query <query> [--limit <n>] [--json]
 - **Notes:** **stub**, exit 64. Contract surface: queries the content index;
   `--limit` caps the result count. Not gated.
 
-### strx herald push
+### strx notifications push
 
 ```
-strx herald push [--json]
+strx notifications push [--json]
 ```
 
 Machine-facing only: dunst runs it per notification as its `script` hook
@@ -97,18 +97,18 @@ To *send* a notification use `notify-send`.
   args are ignored. There is no `DUNST_ACTIONS`; sender text is carried
   verbatim as data, never parsed or interpreted.
 - **Writes:** none directly. Sends one newline-delimited JSON line
-  `{"cmd":"heraldpush","notification":{…}}` over the shellbridge unix socket
+  `{"cmd":"notificationspush","notification":{…}}` over the shellbridge unix socket
   `$XDG_RUNTIME_DIR/aoide/shellbridge.sock`
   (`pkgs/aoide/crates/conduct/src/shellbridge.rs::send_line`). The bridge
   daemon — the single writer, serialising concurrent pushes through its accept
-  loop — folds the record into the ledger `state/stage/herald.json` (resolves
-  to `$AOIDE_ROOT/state/stage/herald.json`, default
-  `~/.aoide/state/stage/herald.json`; `$AOIDE_STAGE_DIR` absolute override),
+  loop — folds the record into the ledger `state/stage/notifications.json` (resolves
+  to `$AOIDE_ROOT/state/stage/notifications.json`, default
+  `~/.aoide/state/stage/notifications.json`; `$AOIDE_STAGE_DIR` absolute override),
   written atomically by the daemon (`edit_ledger`). Ledger rules
-  (`pkgs/aoide/crates/conduct/src/herald.rs::apply_push`): a non-empty
+  (`pkgs/aoide/crates/conduct/src/notifications.rs::apply_push`): a non-empty
   `stackTag` replaces the entry holding the same tag, a repeated `id` replaces
   too, everything else appends newest-last, oldest fall off the front at
-  `LEDGER_CAP = 20`. The QML herald reads `herald.json`; `session permit`
+  `LEDGER_CAP = 20`. The QML notifications reads `notifications.json`; `session permit`
   publishes permission summonses (`kind: "summons"`) into the same ledger.
 - **Output:** pushed → `"pushed `<id>`"`, data `{pushed: true, id, urgency,
   progress}`. Empty record (no summary and no body) → ok

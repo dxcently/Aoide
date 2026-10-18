@@ -276,7 +276,7 @@ pub enum SessionRegionError {
 ///
 /// **Two signals live on a `SessionRecord`, and they are NOT
 /// interchangeable** (verified live against this rig's real
-/// `song/stage/sessions.json`, 2026-08-16 — see the executor's report for
+/// `rice/stage/sessions.json`, 2026-08-16 — see the executor's report for
 /// the full evidence trail):
 ///
 ///   * `windowAddress` — resolved by `graph::window`'s pid-ancestry walk (or
@@ -821,7 +821,7 @@ fn format_scale(scale: f64) -> String {
 /// THE PIXEL-ACQUISITION BOUNDARY (khoa, 2026-08-16). Everything above this
 /// function in the call chain decides WHAT to capture; this decides HOW.
 /// Today: one `grim` shell-out. Judged the ordinary way (unlike
-/// `song::ipc`'s quirky void-IPC case) — grim prints its error to stderr and
+/// `rice::ipc`'s quirky void-IPC case) — grim prints its error to stderr and
 /// exits nonzero on failure, exit 0 means the file is written; no
 /// output-vs-exit-code mismatch to guard against (confirmed live — see the
 /// executor's report). NOT unit-tested itself (spawns a real process); the
@@ -1051,7 +1051,7 @@ pub fn shot(inv: &Invocation) -> Outcome {
         RegionSource::Pick => match pick_region() {
             Ok(Some(r)) => (r, CaptureTarget::default()),
             // A human pressing Esc is not a command failure — mirrors
-            // `song::ipc`'s own precedent (`NotRunning` folds into a normal
+            // `rice::ipc`'s own precedent (`NotRunning` folds into a normal
             // Ok outcome, "never propagate as a hard error"). `changed`
             // stays empty (nothing was captured), so an agent reads "no
             // error, nothing happened" rather than a failure to handle

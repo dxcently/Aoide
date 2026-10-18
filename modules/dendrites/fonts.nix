@@ -16,7 +16,7 @@
 #       * material-icons / font-awesome / fira-code-symbols carry UI glyphs.
 #       * libertine (Linux Libertine/Biolinum) is the desktop's primary face
 #         — stylix points monospace at "Linux Libertine Mono O", sans at "Linux
-#         Biolinum O", serif at "Linux Libertine O" BY DEFAULT (a song's
+#         Biolinum O", serif at "Linux Libertine O" BY DEFAULT (a rice's
 #         `aoide.theme.fonts.monospace` is monospace's source when it sets
 #         one); lekton/tinos are glyph-complete nerd alternates.
 #

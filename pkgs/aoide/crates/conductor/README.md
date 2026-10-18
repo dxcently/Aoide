@@ -368,7 +368,7 @@ use that dispatch seam. Pure views read state without performing actions.
 Projects, sessions and hooks come from the conducting stage (`state/stage`).
 Past sessions come from `state/session-ledger.jsonl`. Mail uses the existing
 mail base; Activity uses the existing audit path. The rice stage
-(`song/stage`) supplies palette notes only and is not the conducting store.
+(`rice/stage`) supplies palette notes only and is not the conducting store.
 
 `assets/logo.txt` bundles the plain text art from
 `modules/dendrites/fastfetch/ascii-fetch`. Its inclusion adds no runtime Nix,

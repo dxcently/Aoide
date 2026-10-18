@@ -141,10 +141,10 @@ which dendrites it targets. What an unmatched host never spends is the work —
 `overlay`, `system` and `home` are functions, and nothing calls them. Keep
 imports, fetches and package computation inside those functions.
 
-## Pending: songs and palettes
+## Pending: rices and palettes
 
-Songs get their template when a host can SELECT one: a song template's whole
+Rices get their template when a host can SELECT one: a rice template's whole
 point is the selection line that makes it reachable, and that line arrives with
-song selection. Until then the real examples are the committed songs in
+rice selection. Until then the real examples are the committed rices in
 `rices/<name>/rice.nix`, described in
 `../docs/architecture/NIX-COMPOSITION.md` § Strillix and rices.

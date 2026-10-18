@@ -52,8 +52,8 @@ exact full tree):
 
 const TAIL: &str = "\
 House rules — the repo's root `AGENTS.md`, with rules 1, 5 and 7 in full:
-  1. A rice agent writes `rices/<song>/` and nothing else. You commit
-     to that folder and to no other path. Everything outside `song/` —
+  1. A rice agent writes `rices/<rice>/` and nothing else. You commit
+     to that folder and to no other path. Everything outside `rice/` —
      `modules/`, `pkgs/`, `lib/`, `hosts/`, `users/`, `tests/`, `docs/` —
      changes only on a lane the User ordered, with that lane's scope named. A
      new `modules/dendrites/` lane is additive: one file plus its one catalogue
@@ -65,15 +65,15 @@ House rules — the repo's root `AGENTS.md`, with rules 1, 5 and 7 in full:
      identity. A paint dendrite — `compositor` and its providers, `greeter`,
      `stylix`, `quickshell`, `strillix`, `wallpaper` and its providers, and every
      component slot's provider — reads only `aoide.theme` (the dress: palette
-     · base16 · component tiers · geometry · fonts · cover),
-     `aoide.layout` (the structure: which widget/surface TYPES a song
+     · base16 · component tiers · geometry · fonts · wallpaper),
+     `aoide.layout` (the structure: which widget/surface TYPES a rice
      brings into existence), `aoide.surfaces` (the render-surface ownership
      registry: a dendrite declares the surfaces it owns; `stylix` reads it to
      skip derivation for them), the core scalars every lane stands on
      (`aoide.enable`, `aoide.root`, `aoide.checkout`, `aoide.hostConfig`,
-     `aoide.user`), the song selection (`aoide.song`, and the derived
-     `aoide.rices.builtIn` — what this host BUILT IN, from its own song
-     selection — and `aoide.rices.greeter`, the declared song's greeter
+     `aoide.user`), the rice selection (`aoide.rice`, and the derived
+     `aoide.rices.builtIn` — what this host BUILT IN, from its own rice
+     selection — and `aoide.rices.greeter`, the declared rice's greeter
      face), `aoide.components` (the component slots — bar, launcher,
      powermenu, notifications, wallpaper, dock, calendar, switcher, lock,
      greeter — and the provider that fills each), and its own
@@ -82,7 +82,7 @@ House rules — the repo's root `AGENTS.md`, with rules 1, 5 and 7 in full:
      rice sets, and Home Manager's `wayland.windowManager.hyprland` state
      (`enable`, `finalPackage`, `configType`, `importantPrefixes`,
      `sourceFirst`). A rice body (CONTRACTS §5) is the one other selector of
-     paint: the body of the performed song selects the ten component providers
+     paint: the body of the performed rice selects the ten component providers
      and the `strillix` renderer, and the providers say WHO fills each slot while
      `aoide.layout` says WHAT the paint is. Nothing else is selected by a
      body. The list is enumerated and closed, never \"any `aoide.*`\"; a new
@@ -98,13 +98,13 @@ House rules — the repo's root `AGENTS.md`, with rules 1, 5 and 7 in full:
      cannot change the value; `aoide.sessionTarget` is the same seam declared
      in the core module (`pkgs/aoide/module/options.nix`) and set by the lane
      that paints a session. This is a documented convention backed by code
-     review; the selection tests prove unselected dendrites and songs are
+     review; the selection tests prove unselected dendrites and rices are
      never read, and no automated coupling check exists yet.
   6. Every operation flows through `aoided`.
   7. Everything is a plugin. A capability enters as ONE file (or one
      directory, when it needs more than one file) at a conventional path, and
      is named exactly once: by a line in the catalogue (`modules/default.nix`),
-     or found by a directory's one typed scan (`rices/<song>/rice.nix`).
+     or found by a directory's one typed scan (`rices/<rice>/rice.nix`).
      It declares what it needs by *name*, and is removable without a trace:
      delete the file and its catalogue line, and nothing else knows it existed.
      Never by reaching into another module, never by an edit outside its own

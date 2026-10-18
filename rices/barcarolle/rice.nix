@@ -1,10 +1,10 @@
-# rices/barcarolle/rice.nix — Windows 7 Aero, rebuilt as an AoideOS rice.
+# rices/barcarolle/rice.nix — Windows 7 Aero, rebuilt as an Strillix rice.
 #
 # Glass superbar at the bottom: deep teal glass, white text, cyan glow.
 # Workspace buttons as Hyprland workspaces, RICE cell, clock, and an orb.
 #
-# HOST-AGNOSTIC DISCIPLINE (CONTRACTS.md §5): a song sets ONLY aoide.theme.
-# All theme values are literal nix expressions (no song/ runtime reads).
+# HOST-AGNOSTIC DISCIPLINE (CONTRACTS.md §5): a rice sets ONLY aoide.theme.
+# All theme values are literal nix expressions (no rice/ runtime reads).
 {
   system = {
     providers = {
@@ -95,10 +95,10 @@
           package = pkgs.noto-fonts-cjk-sans;
         };
 
-        # ── Cover art ───────────────────────────────────────────────────────────
+        # ── Wallpaper art ───────────────────────────────────────────────────────────
         # The desktop picture (wallpaper/barcarolle-desktop.jpg). Stylix bakes it,
-        # the seed publishes it as the declared cover, and a staged rice finds
-        # the same file in the song's own cover/ folder (CONTRACTS.md §4).
+        # the seed publishes it as the declared wallpaper, and a staged rice finds
+        # the same file in the rice's own wallpaper/ folder (CONTRACTS.md §4).
         aoide.theme.wallpaper = ./wallpaper/barcarolle-desktop.jpg;
       };
     };

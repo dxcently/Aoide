@@ -23,9 +23,9 @@
 //       "seed": 7 }        // 0/absent: seeded from the clock (each run differs)
 //
 //   AOIDE_FLAKE_ROOT=<worktree> strillix preview \
-//       <worktree>/song/songbook/cadenza/widgets/WallpaperPreview.qml \
-//       --song cadenza \
-//       --fixture <worktree>/song/songbook/cadenza/design/fixtures/board \
+//       <worktree>/rices/cadenza/widgets/WallpaperPreview.qml \
+//       --rice cadenza \
+//       --fixture <worktree>/rices/cadenza/design/fixtures/board \
 //       --root $XDG_RUNTIME_DIR/cadenza-wall
 import QtQuick
 import Quickshell

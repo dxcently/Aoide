@@ -1,10 +1,10 @@
 # modules/dendrites/strillix/default.nix — the strillix catalogue entry: the RICE
-# RENDERER (README.md). It writes the song's Hyprland rice to the state link
+# RENDERER (README.md). It writes the rice's Hyprland rice to the state link
 # the compositor sources, and nothing else. The strillix runtime is NOT here: it
 # comes only through the component providers, each importing `runtime.nix` and
 # `runtime-home.nix` by path (AGENTS.md).
 #
-# Render order (AGENTS.md): the song's `hyprland.conf` FIRST, then
+# Render order (AGENTS.md): the rice's `hyprland.conf` FIRST, then
 # `toHyprconf settings` LAST. The state link `~/.local/state/strillix/rice.conf`
 # points at the declared twin `<root>/$STRILLIX_ROOT/declared/rice.conf` (this file's own
 # output); a stage may repoint it at a staged file without Nix.

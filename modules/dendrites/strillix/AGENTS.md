@@ -26,9 +26,9 @@ file covers only the strillix lane.
   (`config.aoide.root`, the built-in set, the derivations in its `let`), and
   `runtime-home.nix` imports through `osConfig`. Home Manager's `pkgs` is the
   system's (habit sets `useGlobalPkgs`), so the lane's overlays reach it.
-- **`runtime.nix` reads songs through the registry, never through `rices`
-  alone.** The hook hands it `ricesDirs` (name to song directory); the
-  lane's rices library and every per-song path come from that map, so a
+- **`runtime.nix` reads rices through the registry, never through `rices`
+  alone.** The hook hands it `ricesDirs` (name to rice directory); the
+  lane's rices library and every per-rice path come from that map, so a
   merged rices (a derivation) is never read at evaluation. Absent, the
   lane discovers `rices` itself.
 - **`runtime.nix` sets `aoide.strillix.enable` and `aoide.quickshell.config`,** and
@@ -43,12 +43,12 @@ file covers only the strillix lane.
   `finalPackage`, `configType`, `importantPrefixes`, `sourceFirst`), and
   `osConfig.aoide.root`. It never sets `aoide.strillix.enable`: that fact means
   "the strillix runtime is present", and only `runtime.nix` can say so.
-- **Render order is fixed: the song's `hyprland.conf` first, the Nix settings
-  last.** A setting in `rice.hyprland.settings` therefore overrides the song's
+- **Render order is fixed: the rice's `hyprland.conf` first, the Nix settings
+  last.** A setting in `rice.hyprland.settings` therefore overrides the rice's
   own line for the same key, and a host's `rice.hyprland.host` is sourced after
   both. Swapping the order silently changes which value wins.
 - **The state link is relinked only when it is absent or names the twin.** A
-  staged link is another writer's current song and must survive a rebuild
+  staged link is another writer's current rice and must survive a rebuild
   (house rule 10), so the activation never overwrites one. Only the stage
   writers (`rice stage` and its siblings, in `commands/rice.rs`) retarget a
   link that is not the twin.
@@ -82,4 +82,4 @@ A change to what the runtime pair imports, sets or publishes, or to which
 slot a provider here fills and what it owns, updates this file, `README.md`,
 and CONTRACTS.md §0/§2/§4 where they name it. A change to the renderer's render
 order, its state link, or its declared twin updates CONTRACTS.md §4 (the three
-rice files) and the storage and song READMEs that write them.
+rice files) and the storage and rice READMEs that write them.

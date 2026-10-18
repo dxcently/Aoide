@@ -102,7 +102,7 @@ pub enum BridgeCommand {
     /// spelling is [`component_command`].
     Component { slot: String, verb: String, arg: Option<String> },
     /// `{ "cmd": "ricemode", "action": "stage|declarative", "name": "…" }` — a
-    /// row of the bar's RICE menu: switch the stage to the named runtime song,
+    /// row of the bar's RICE menu: switch the stage to the named runtime rice,
     /// or lock back to declarative. Fire-and-forget like [`Self::RiceDraft`]:
     /// the outcome is a toast, never a reply. The closed set and its field
     /// rules are [`RiceModeAction`]'s. See [`dispatch_rice_mode`].
@@ -128,14 +128,14 @@ pub enum BridgeCommand {
     SessionAction { session_id: String, action: String, fields: Value },
     /// `{ "cmd": "projectaction", "action": "create|edit|removehost", "name":
     /// "…", "paths": […], "hosts": […] }` — zero-session project creation,
-    /// editing, or host-removal from the song-side project picker (P-14 M1
+    /// editing, or host-removal from the rice-side project picker (P-14 M1
     /// §2d). Unlike [`Self::SessionAction`] this carries no session id
     /// anywhere: the reply's identity key is `"name"`. `fields` is the
     /// ENTIRE parsed wire object — `paths`/`hosts` sit at the top level, not
     /// nested under a `fields` key, matching the wire shape exactly.
     ProjectAction { name: String, action: String, fields: Value },
     /// `{ "cmd": "notificationspush", "notification": { … } }` — file one notification
-    /// into `stage/notifications.json`. Sent by `aoide notifications push` (dunst's `script`
+    /// into `stage/notifications.json`. Sent by `strx notifications push` (dunst's `script`
     /// hook) and by `graph permit` for a summons; NOT by QML, which only reads
     /// the ledger. The daemon is the single writer, which is the whole point:
     /// dunst runs its scripts asynchronously, so two notifications arriving
@@ -195,10 +195,10 @@ pub enum BridgeCommand {
     /// parked on a reply.
     WorkspaceAction { workspace: Option<i64>, binding: WorkspaceBinding },
     /// `{ "cmd": "ricemenu" }` — the RICE menu's READ: the runtime rices
-    /// and the mode, plus the drafts of the song the current mode is working
+    /// and the mode, plus the drafts of the rice the current mode is working
     /// on, answered on this connection like [`Self::SessionTrace`]. No
     /// payload: the daemon runs `strillix rice list --json` and, when the mode
-    /// names a song ([`drafts_song`]), `strillix rice draft list <song> --json`,
+    /// names a rice ([`drafts_rice`]), `strillix rice draft list <rice> --json`,
     /// both under one [`RICE_MENU_TIMEOUT`] budget. Nothing is written. See
     /// [`dispatch_rice_menu`].
     RiceMenu,
@@ -209,13 +209,13 @@ pub enum BridgeCommand {
     /// rules are [`RiceDraftAction`]'s; the plan, in `rice` argv, is
     /// [`rice_draft_plan`]. See [`dispatch_rice_draft`].
     RiceDraft { action: RiceDraftAction },
-    /// `{ "cmd": "ricedeclare", "name": "<song>" }` — the menu's Declare row:
-    /// make `name` the song this host performs on its next rebuild. Answered
+    /// `{ "cmd": "ricedeclare", "name": "<rice>" }` — the menu's Declare row:
+    /// make `name` the rice this host performs on its next rebuild. Answered
     /// on this connection like [`Self::RiceMenu`], because the outcome is a
-    /// balloon the surface paints, never a toast. `name` must be a song name
-    /// ([`song_name`]: lowercase letters, digits, hyphens, no leading hyphen),
+    /// balloon the surface paints, never a toast. `name` must be a rice name
+    /// ([`rice_name`]: lowercase letters, digits, hyphens, no leading hyphen),
     /// so it is one argv token and safe to name in the audit line; every rule
-    /// about WHICH song may be declared is the CLI's. See
+    /// about WHICH rice may be declared is the CLI's. See
     /// [`dispatch_rice_declare`].
     RiceDeclare { name: String },
 }
@@ -225,9 +225,9 @@ pub enum BridgeCommand {
 /// carrying one is refused at the wire (`parse_command` → `None`, no reply).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RiceModeAction {
-    /// Stage this runtime song. Whether it exists is the CLI's call.
+    /// Stage this runtime rice. Whether it exists is the CLI's call.
     Stage { name: String },
-    /// Lock back to the declared song; the CLI resolves which that is.
+    /// Lock back to the declared rice; the CLI resolves which that is.
     Declarative,
 }
 
@@ -266,12 +266,12 @@ pub enum RiceDraftAction {
     /// here: `rice mode draft` forks the current stage into a valid name that
     /// is not there yet, so an enter is enter-or-create.
     Enter { name: String },
-    /// Mint the next free draft name from the staged song, then enter it.
+    /// Mint the next free draft name from the staged rice, then enter it.
     New,
-    /// Snapshot the stage as a draft of the staged song. Never changes mode,
+    /// Snapshot the stage as a draft of the staged rice. Never changes mode,
     /// and is refused while declarative is locked ([`rice_draft_plan`]).
     Save,
-    /// Delete this saved draft of the staged song. The name rules are
+    /// Delete this saved draft of the staged rice. The name rules are
     /// `Enter`'s; whether the draft exists, and the refusal of the draft in
     /// force, are the CLI's (`rice draft drop`). Never changes mode, and is
     /// refused while declarative is locked, like `Save`.
@@ -420,7 +420,7 @@ impl PowerAction {
     }
 
     /// The program + args this action spawns. `lock` asks the compositor to
-    /// run `strillix lock` (the one lock entry: the shell's lock host for a song
+    /// run `strillix lock` (the one lock entry: the shell's lock host for a rice
     /// with a face, else hyprlock) rather than spawning it here: this unit
     /// runs with NoNewPrivileges, which a child inherits, and hyprlock's PAM
     /// check needs the setuid `unix_chkpwd`, so a locker spawned here refuses
@@ -535,7 +535,7 @@ pub fn parse_command(line: &str) -> Option<BridgeCommand> {
         "ricedraft" => RiceDraftAction::from_wire(&v).map(|action| BridgeCommand::RiceDraft { action }),
         "ricedeclare" => {
             let name = v.get("name")?.as_str()?;
-            song_name(name).then(|| BridgeCommand::RiceDeclare { name: name.to_string() })
+            rice_name(name).then(|| BridgeCommand::RiceDeclare { name: name.to_string() })
         }
         "refreshusage" => Some(BridgeCommand::RefreshUsage),
         "rechecksessions" => Some(BridgeCommand::RecheckSessions),
@@ -694,7 +694,7 @@ fn dispatch_rice_mode(action: &RiceModeAction) -> Result<String, String> {
 
 /// Fire a detached `notify-send -- "Aoide" <message>` — the same reaper-thread
 /// idiom as [`dispatch_power`]'s spawned child, so a slow or hung
-/// `notify-send` can never block a connection. The message can echo a song
+/// `notify-send` can never block a connection. The message can echo a rice
 /// folder name: `--` keeps a leading `-` from reading as an option and
 /// [`aoide_protocol::dialog::escape_markup`] keeps markup inert. A spawn failure is logged and
 /// nothing more: the action this toast reports already ran, and a dead or
@@ -722,12 +722,12 @@ fn notify(message: &str) {
 /// `enter` and `new` route the stage into a draft, which `rice mode draft`
 /// refuses while declarative is locked, so from `Declarative` they unlock
 /// first — with a BARE `rice mode stage`, which restores the remembered
-/// `stagingSong` (house rule 10), never the declared song. `save` and `drop`
+/// `stagingRice` (house rule 10), never the declared rice. `save` and `drop`
 /// never change the mode, and both are refused while declarative is locked:
-/// the stage there is the DECLARED song (the lock re-pins it), `rice draft
-/// save`/`drop` act on the song `stage/theme.json` names, and the listing
-/// ([`drafts_song`]) names `stagingSong` — a save would land under, and a drop
-/// would delete from, a song the picker never shows. Unlocking first to make
+/// the stage there is the DECLARED rice (the lock re-pins it), `rice draft
+/// save`/`drop` act on the rice `stage/theme.json` names, and the listing
+/// ([`drafts_rice`]) names `stagingRice` — a save would land under, and a drop
+/// would delete from, a rice the picker never shows. Unlocking first to make
 /// them land would change the mode as a side effect of a save or a delete.
 /// The unlock is one click away, so the refusal costs one click. `new` plans only the save: the draft's name is minted by the CLI and
 /// is not known until that step has answered, so [`dispatch_rice_draft`]
@@ -828,10 +828,10 @@ fn dispatch_rice_declare(name: &str) -> Value {
     rice_declare_reply(ok, message, data)
 }
 
-/// The song-name shape (`strillix_rice::compose::valid_song_name`, restated
-/// because conduct does not depend on the song crate): a lowercase letter or
+/// The rice-name shape (`strillix_rice::compose::valid_rice_name`, restated
+/// because conduct does not depend on the rice crate): a lowercase letter or
 /// digit, then lowercase letters, digits and hyphens.
-fn song_name(s: &str) -> bool {
+fn rice_name(s: &str) -> bool {
     let mut chars = s.chars();
     matches!(chars.next(), Some(c) if c.is_ascii_lowercase() || c.is_ascii_digit())
         && chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
@@ -839,7 +839,7 @@ fn song_name(s: &str) -> bool {
 
 /// Pure: the audit event and outcome a `ricedeclare` answer is logged as, in
 /// [`audit_bridge_action`]'s `<noun> action <action>: <outcome>` vocabulary
-/// with the song as the action: `ok changed` / `ok unchanged` (the host
+/// with the rice as the action: `ok changed` / `ok unchanged` (the host
 /// already declared it) or `failed`.
 fn rice_declare_audit(answer: &Value) -> (&'static str, &'static str) {
     if answer.get("ok").and_then(Value::as_bool) != Some(true) {
@@ -876,19 +876,19 @@ fn rice_declare_reply(ok: bool, message: String, data: Option<Value>) -> Value {
     json!({ "ok": false, "reason": reason, "message": message })
 }
 
-/// Pure decision: which song's drafts the menu lists, from the marker. The
+/// Pure decision: which rice's drafts the menu lists, from the marker. The
 /// menu's `enter` and `new` from `Declarative` unlock through a bare `rice
-/// mode stage`, which lands on the remembered `stagingSong` — so that is the
-/// song a declarative listing must name, ahead of `song` (the declared one the
+/// mode stage`, which lands on the remembered `stagingRice` — so that is the
+/// rice a declarative listing must name, ahead of `rice` (the declared one the
 /// lock overwrote). Its `save` and `drop` are refused there
 /// ([`rice_draft_plan`]), so no action ever writes under, or deletes from, a
-/// song this listing does not name. Every other
-/// mode is already working on `song`; `stagingSong` is only the fallback for a
+/// rice this listing does not name. Every other
+/// mode is already working on `rice`; `stagingRice` is only the fallback for a
 /// marker that lacks it.
-fn drafts_song(m: &ModeMarker) -> Option<String> {
+fn drafts_rice(m: &ModeMarker) -> Option<String> {
     match m.mode {
-        RiceMode::Declarative => m.staging_song.clone().or_else(|| m.song.clone()),
-        RiceMode::Staging | RiceMode::Draft => m.song.clone().or_else(|| m.staging_song.clone()),
+        RiceMode::Declarative => m.staging_rice.clone().or_else(|| m.rice.clone()),
+        RiceMode::Staging | RiceMode::Draft => m.rice.clone().or_else(|| m.staging_rice.clone()),
     }
 }
 
@@ -919,14 +919,14 @@ fn run_rice_json(argv: &[&str], timeout: std::time::Duration) -> Result<Value, V
 }
 
 /// Dispatch ONE read-only menu query: `strillix rice list --json` under
-/// [`RICE_MENU_TIMEOUT`], its `data` (`mode`, `song`, `draft`, `stagingSong`,
-/// `declared`, `songs`) passed through verbatim with this machine's `host`
+/// [`RICE_MENU_TIMEOUT`], its `data` (`mode`, `rice`, `draft`, `stagingRice`,
+/// `declared`, `rices`) passed through verbatim with this machine's `host`
 /// name beside it (the name the Declare row's alert speaks) and `hostConfig`,
 /// the file `strillix rice declare --host` would rewrite
 /// ([`aoide_storage::fs::host_config`], null when none resolves), then — when
-/// [`drafts_song`] names a song for the marker — `strillix rice draft list <song>
-/// --json` with the budget the first child left, projected to `draftsSong`
-/// and `drafts: [{name, savedAt, current}]`. No song means `drafts: []` and
+/// [`drafts_rice`] names a rice for the marker — `strillix rice draft list <rice>
+/// --json` with the budget the first child left, projected to `draftsRice`
+/// and `drafts: [{name, savedAt, current}]`. No rice means `drafts: []` and
 /// no second child; a failed list starts none either. A failed, unreadable
 /// or out-of-budget child is a refusal ([`rice_menu_refusal`]), never an empty
 /// answer — the menu must tell "nothing there" from "nobody answered".
@@ -938,14 +938,14 @@ fn dispatch_rice_menu() -> Value {
         Err(refusal) => return refusal,
     };
     let marker = load_mode_marker();
-    let song = drafts_song(&marker);
+    let rice = drafts_rice(&marker);
     let mut drafts: Vec<Value> = Vec::new();
-    if let Some(song) = &song {
+    if let Some(rice) = &rice {
         let left = deadline.saturating_duration_since(std::time::Instant::now());
         if left.is_zero() {
             return rice_menu_refusal("no-answer", "the menu's time budget ran out before the drafts were listed");
         }
-        let data = match run_rice_json(&["rice", "draft", "list", song.as_str()], left) {
+        let data = match run_rice_json(&["rice", "draft", "list", rice.as_str()], left) {
             Ok(data) => data,
             Err(refusal) => return refusal,
         };
@@ -963,7 +963,7 @@ fn dispatch_rice_menu() -> Value {
     answer.insert("ok".to_string(), Value::Bool(true));
     answer.insert("host".to_string(), json!(aoide_storage::display::os_hostname()));
     answer.insert("hostConfig".to_string(), json!(aoide_storage::fs::host_config()));
-    answer.insert("draftsSong".to_string(), json!(song));
+    answer.insert("draftsRice".to_string(), json!(rice));
     answer.insert("drafts".to_string(), Value::Array(drafts));
     Value::Object(answer)
 }
@@ -971,7 +971,7 @@ fn dispatch_rice_menu() -> Value {
 /// Pure decision: did one finished `aoide usage --json` actually refresh the
 /// state file? Judged on the CLI's own JSON envelope `status`, NOT the exit
 /// code alone — the same "success is the real output, not the exit status"
-/// rule `song/src/ipc.rs`'s `classify_call` is built on. `aoide usage` prints
+/// rule `rice/src/ipc.rs`'s `classify_call` is built on. `aoide usage` prints
 /// `{"status":"ok",…,"message":"…"}` and exits 0 on a real `state/usage.json`
 /// write, and an error envelope (or a non-zero exit) when the atomic write
 /// itself fails.
@@ -1627,7 +1627,7 @@ impl<'a> ActionSubject<'a> {
 /// every returned vector is either a literal from this function or a value
 /// that passed [`safe_action_value`]/[`safe_action_path`] below.
 ///
-/// The field shapes are the song-side session menu's own, exactly — they are
+/// The field shapes are the rice-side session menu's own, exactly — they are
 /// not the shapes an API designer would pick in isolation, and the bridge
 /// matching the UI is the whole point of this slice. Do not "normalize"
 /// them.
@@ -2395,7 +2395,7 @@ fn dispatch_notifications_verdict(id: String, verdict: String) {
 
 /// Send one newline-delimited JSON line to the running shellbridge.
 ///
-/// The client half of this module: `aoide notifications push` and `graph permit` reach
+/// The client half of this module: `strx notifications push` and `graph permit` reach
 /// the daemon through here rather than writing `stage/notifications.json` themselves,
 /// so the daemon stays the single writer.
 pub fn send_line(line: &str) -> std::io::Result<()> {
@@ -2414,7 +2414,7 @@ pub fn send_line(line: &str) -> std::io::Result<()> {
 /// token's user SID on native Windows (`graph::identity::own_user`, ONE seam
 /// for both sides of the comparison). shellbridge always runs as the
 /// operator's own user, the SAME user every legitimate connector already runs
-/// as (the QML notifications/bar widgets, `aoide notifications push` off dunst's script
+/// as (the QML notifications/bar widgets, `strx notifications push` off dunst's script
 /// hook, `session permit` raising its own summons — every one of them
 /// same-user, none of them a DIFFERENT one). An unidentified peer — no
 /// peer-credential mechanism, a failed read, or a peer whose pid was reused
@@ -2644,7 +2644,7 @@ fn handle_conn(stream: UnixStream) {
             }
             // Fire-and-forget: the outcome is a toast, never a reply. The audit
             // line names the action and its outcome and nothing else — never a
-            // song, which the toast alone carries.
+            // rice, which the toast alone carries.
             Some(BridgeCommand::RiceMode { action }) => {
                 let (event, outcome) = match dispatch_rice_mode(&action) {
                     Ok(message) => {
@@ -2662,7 +2662,7 @@ fn handle_conn(stream: UnixStream) {
             // reply, and the steps run inline for the same reason (a mode
             // change never takes this process down). The audit line names the
             // action and its outcome and nothing else — never a draft or a
-            // song, which the toast alone carries.
+            // rice, which the toast alone carries.
             Some(BridgeCommand::RiceDraft { action }) => {
                 let (event, outcome) = match dispatch_rice_draft(&action) {
                     Ok(message) => {
@@ -2682,8 +2682,8 @@ fn handle_conn(stream: UnixStream) {
             }
             // The Declare row: answered on this connection and run on its OWN
             // thread like the menu's read, because the surface paints the
-            // answer. A gesture, so every outcome is audited, naming the song
-            // (a validated song name) and whether the host file changed.
+            // answer. A gesture, so every outcome is audited, naming the rice
+            // (a validated rice name) and whether the host file changed.
             Some(BridgeCommand::RiceDeclare { name }) => {
                 let Some(mut reply) = reply.take() else {
                     let _ = daemon::audit(
@@ -3693,16 +3693,16 @@ exit 1
         let save = sv(&["rice", "draft", "save"]);
         let go = sv(&["rice", "mode", "draft", "draft-2"]);
 
-        // Declarative: `enter` and `new` unlock FIRST, bare — never a song.
+        // Declarative: `enter` and `new` unlock FIRST, bare — never a rice.
         assert_eq!(rice_draft_plan(RiceMode::Declarative, &enter), Ok(vec![unlock.clone(), go.clone()]));
         assert_eq!(rice_draft_plan(RiceMode::Declarative, &RiceDraftAction::New), Ok(vec![unlock, save.clone()]));
-        // `save` there would nest under the DECLARED song, which the listing
+        // `save` there would nest under the DECLARED rice, which the listing
         // (the staged one) never shows: a taught refusal, nothing planned.
         assert_eq!(
             rice_draft_plan(RiceMode::Declarative, &RiceDraftAction::Save),
             Err("declarative mode is locked — unlock first, then save the draft")
         );
-        // `drop` there would delete from the DECLARED song's drafts: the same
+        // `drop` there would delete from the DECLARED rice's drafts: the same
         // refusal, and no unlock as a side effect of a delete.
         assert_eq!(
             rice_draft_plan(RiceMode::Declarative, &drop),
@@ -3719,25 +3719,25 @@ exit 1
     }
 
     #[test]
-    fn drafts_song_names_the_song_the_mode_will_work_on() {
-        let marker = |mode, song: Option<&str>, staging: Option<&str>| ModeMarker {
+    fn drafts_rice_names_the_rice_the_mode_will_work_on() {
+        let marker = |mode, rice: Option<&str>, staging: Option<&str>| ModeMarker {
             mode,
-            song: song.map(str::to_string),
-            staging_song: staging.map(str::to_string),
+            rice: rice.map(str::to_string),
+            staging_rice: staging.map(str::to_string),
             ..ModeMarker::default()
         };
-        // Declarative: the lock overwrote `song` with the declared one; the
-        // unlock lands on `stagingSong`, so that is what the picker lists.
+        // Declarative: the lock overwrote `rice` with the declared one; the
+        // unlock lands on `stagingRice`, so that is what the picker lists.
         let declarative = marker(RiceMode::Declarative, Some("sonata"), Some("cadenza"));
-        assert_eq!(drafts_song(&declarative).as_deref(), Some("cadenza"));
-        assert_eq!(drafts_song(&marker(RiceMode::Declarative, Some("sonata"), None)).as_deref(), Some("sonata"));
-        // Staging and Draft already work on `song`.
+        assert_eq!(drafts_rice(&declarative).as_deref(), Some("cadenza"));
+        assert_eq!(drafts_rice(&marker(RiceMode::Declarative, Some("sonata"), None)).as_deref(), Some("sonata"));
+        // Staging and Draft already work on `rice`.
         for mode in [RiceMode::Staging, RiceMode::Draft] {
-            assert_eq!(drafts_song(&marker(mode, Some("sonata"), Some("cadenza"))).as_deref(), Some("sonata"));
-            assert_eq!(drafts_song(&marker(mode, None, Some("cadenza"))).as_deref(), Some("cadenza"));
-            assert_eq!(drafts_song(&marker(mode, None, None)), None);
+            assert_eq!(drafts_rice(&marker(mode, Some("sonata"), Some("cadenza"))).as_deref(), Some("sonata"));
+            assert_eq!(drafts_rice(&marker(mode, None, Some("cadenza"))).as_deref(), Some("cadenza"));
+            assert_eq!(drafts_rice(&marker(mode, None, None)), None);
         }
-        assert_eq!(drafts_song(&marker(RiceMode::Declarative, None, None)), None);
+        assert_eq!(drafts_rice(&marker(RiceMode::Declarative, None, None)), None);
     }
 
     /// A `#!/bin/sh` stand-in for `strillix`, a stage dir holding a marker for
@@ -3745,7 +3745,7 @@ exit 1
     /// given beside itself, and answers the verbs the menu plans with
     /// the envelopes the CLI prints: `list` echoes a fixed rices, `draft save` mints `draft-3`, `draft list`
     /// lists two drafts, anything else succeeds. A `refuse-draft`,
-    /// `refuse-drop`, `refuse-list` or `refuse-songs` file beside it turns that verb into a refusal. NO notify
+    /// `refuse-drop`, `refuse-list` or `refuse-rices` file beside it turns that verb into a refusal. NO notify
     /// is ever reached — the tests drive the sequencer, not `handle_conn`.
     ///
     /// GATED on Unix with its reason (its callers are gated with it): a
@@ -3763,10 +3763,10 @@ here="$(dirname "$0")"
 echo "$*" >> "$here/argv.log"
 case "$2 $3" in
 "list --json")
-  if [ -f "$here/refuse-songs" ]; then
+  if [ -f "$here/refuse-rices" ]; then
     printf '{"status":"error","message":"rices unreadable","data":{"reason":"x"}}\n'; exit 1
   fi
-  printf '{"status":"ok","message":"2 song(s)","data":{"mode":"declarative","song":"sonata","draft":null,"stagingSong":"cadenza","declared":"sonata","songs":[{"name":"cadenza","ok":true},{"name":"sonata","ok":true}]}}\n' ;;
+  printf '{"status":"ok","message":"2 rice(s)","data":{"mode":"declarative","rice":"sonata","draft":null,"stagingRice":"cadenza","declared":"sonata","rices":[{"name":"cadenza","ok":true},{"name":"sonata","ok":true}]}}\n' ;;
 "draft save")
   printf '{"status":"ok","message":"saved","data":{"name":"draft-3"}}\n' ;;
 "draft drop")
@@ -3776,9 +3776,9 @@ case "$2 $3" in
   printf '{"status":"ok","message":"dropped %s","data":{}}\n' "$4" ;;
 "draft list")
   if [ -f "$here/refuse-list" ]; then
-    printf '{"status":"error","message":"no song staged","data":{"reason":"x"}}\n'; exit 1
+    printf '{"status":"error","message":"no rice staged","data":{"reason":"x"}}\n'; exit 1
   fi
-  printf '{"status":"ok","message":"2 draft(s)","data":{"drafts":[{"song":"%s","name":"draft-1","savedAt":"2026-01-01T00:00:00Z","current":false},{"song":"%s","name":"draft-2","savedAt":null,"current":true}],"scope":"%s"}}\n' "$4" "$4" "$4" ;;
+  printf '{"status":"ok","message":"2 draft(s)","data":{"drafts":[{"rice":"%s","name":"draft-1","savedAt":"2026-01-01T00:00:00Z","current":false},{"rice":"%s","name":"draft-2","savedAt":null,"current":true}],"scope":"%s"}}\n' "$4" "$4" "$4" ;;
 "declare "*)
   if [ -f "$here/refuse-declare" ]; then
     printf '{"status":"error","message":"`%s` is not in the rices box builds from","data":{"reason":"not-built-in","refusal":{"kind":"refused","what":"`%s` is not in the rices box builds from","why":"this build carries sonata","fix":{"set":"x"}}}}\n' "$3" "$3"; exit 1
@@ -3786,7 +3786,7 @@ case "$2 $3" in
   printf '{"status":"ok","message":"declared `%s`; takes effect on the next rebuild.","data":{"name":"%s","host":"box","hostConfig":"/h/default.nix","previous":"sonata","changed":true,"stagedDiffers":true}}\n' "$3" "$3" ;;
 "mode draft")
   if [ -f "$here/refuse-draft" ]; then
-    printf '{"status":"error","message":"no song is currently staged","data":{"reason":"no-resolvable-song"}}\n'; exit 1
+    printf '{"status":"error","message":"no rice is currently staged","data":{"reason":"no-resolvable-rice"}}\n'; exit 1
   fi
   printf '{"status":"ok","message":"routed %s","data":{}}\n' "$4" ;;
 *)
@@ -3797,8 +3797,8 @@ esac
         .unwrap();
         std::fs::set_permissions(&stub, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
         std::fs::write(root.join("mode.json"), marker).unwrap();
-        let env = aoide_test_support::EnvSaver::capture(&["AOIDE_RICE_BIN", "AOIDE_STAGE_DIR", "AOIDE_HOST_CONFIG"]);
-        std::env::set_var("AOIDE_RICE_BIN", &stub);
+        let env = aoide_test_support::EnvSaver::capture(&["STRILLIX_BIN", "AOIDE_STAGE_DIR", "AOIDE_HOST_CONFIG"]);
+        std::env::set_var("STRILLIX_BIN", &stub);
         std::env::set_var("AOIDE_STAGE_DIR", &root);
         (env, root)
     }
@@ -3819,7 +3819,7 @@ esac
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let (_env, root) = stub_rice_bin(
             "shellbridge-draft-new",
-            r#"{"mode":"declarative","song":"sonata","stagingSong":"cadenza"}"#,
+            r#"{"mode":"declarative","rice":"sonata","stagingRice":"cadenza"}"#,
         );
         assert_eq!(dispatch_rice_draft(&RiceDraftAction::New), Ok("routed draft-3".to_string()));
         assert_eq!(
@@ -3834,7 +3834,7 @@ esac
     #[test]
     fn an_enter_from_draft_is_one_step_and_a_save_from_declarative_is_refused_unrun() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let (_env, root) = stub_rice_bin("shellbridge-draft-one", r#"{"mode":"draft","song":"sonata","draft":"draft-1"}"#);
+        let (_env, root) = stub_rice_bin("shellbridge-draft-one", r#"{"mode":"draft","rice":"sonata","draft":"draft-1"}"#);
         let enter = RiceDraftAction::Enter { name: "draft-2".to_string() };
         assert_eq!(dispatch_rice_draft(&enter), Ok("routed draft-2".to_string()));
         assert_eq!(stub_argv_log(&root), ["rice mode draft draft-2 --json"]);
@@ -3859,7 +3859,7 @@ esac
     #[test]
     fn a_drop_is_one_step_its_refusal_is_the_clis_and_declarative_refuses_it_unrun() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let (_env, root) = stub_rice_bin("shellbridge-draft-drop", r#"{"mode":"draft","song":"sonata","draft":"draft-2"}"#);
+        let (_env, root) = stub_rice_bin("shellbridge-draft-drop", r#"{"mode":"draft","rice":"sonata","draft":"draft-2"}"#);
         let drop1 = RiceDraftAction::Drop { name: "draft-1".to_string() };
         assert_eq!(dispatch_rice_draft(&drop1), Ok("dropped draft-1".to_string()));
         assert_eq!(stub_argv_log(&root), ["rice draft drop draft-1 --json"]);
@@ -3875,7 +3875,7 @@ esac
         );
         assert_eq!(stub_argv_log(&root), ["rice draft drop draft-2 --json"]);
 
-        std::fs::write(root.join("mode.json"), r#"{"mode":"declarative","rice":"sonata","stagingSong":"cadenza"}"#).unwrap();
+        std::fs::write(root.join("mode.json"), r#"{"mode":"declarative","rice":"sonata","stagingRice":"cadenza"}"#).unwrap();
         std::fs::remove_file(root.join("argv.log")).unwrap();
         assert_eq!(
             dispatch_rice_draft(&drop1),
@@ -3892,29 +3892,29 @@ esac
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let (_env, root) = stub_rice_bin(
             "shellbridge-draft-partial",
-            r#"{"mode":"declarative","song":"sonata"}"#,
+            r#"{"mode":"declarative","rice":"sonata"}"#,
         );
         std::fs::write(root.join("refuse-draft"), "").unwrap();
         let enter = RiceDraftAction::Enter { name: "nope".to_string() };
         // The unlock ran and the entering step refused: the mode is now
         // unlocked, and the answer says so rather than reading as a clean no.
-        assert_eq!(dispatch_rice_draft(&enter), Err(("no song is currently staged".to_string(), true)));
+        assert_eq!(dispatch_rice_draft(&enter), Err(("no rice is currently staged".to_string(), true)));
         assert_eq!(stub_argv_log(&root), ["rice mode stage --json", "rice mode draft nope --json"]);
 
         // Already unlocked: the same refusal is the FIRST step, nothing ran.
         std::fs::write(root.join("mode.json"), r#"{"mode":"staging","rice":"sonata"}"#).unwrap();
-        assert_eq!(dispatch_rice_draft(&enter), Err(("no song is currently staged".to_string(), false)));
+        assert_eq!(dispatch_rice_draft(&enter), Err(("no rice is currently staged".to_string(), false)));
         let _ = std::fs::remove_dir_all(&root);
     }
 
     /// GATED on Unix with its reason (see [`stub_rice_bin`]).
     #[cfg(unix)]
     #[test]
-    fn dispatch_rice_menu_merges_the_rices_with_the_modes_song_drafts() {
+    fn dispatch_rice_menu_merges_the_rices_with_the_modes_rice_drafts() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let (_env, root) = stub_rice_bin(
             "shellbridge-menu-list",
-            r#"{"mode":"declarative","song":"sonata","stagingSong":"cadenza"}"#,
+            r#"{"mode":"declarative","rice":"sonata","stagingRice":"cadenza"}"#,
         );
         std::env::set_var("AOIDE_HOST_CONFIG", "/home/u/dxflake/hosts/box/default.nix");
         assert_eq!(
@@ -3922,14 +3922,14 @@ esac
             json!({
                 "ok": true,
                 "mode": "declarative",
-                "song": "sonata",
+                "rice": "sonata",
                 "draft": null,
-                "stagingSong": "cadenza",
+                "stagingRice": "cadenza",
                 "declared": "sonata",
-                "songs": [{ "name": "cadenza", "ok": true }, { "name": "sonata", "ok": true }],
+                "rices": [{ "name": "cadenza", "ok": true }, { "name": "sonata", "ok": true }],
                 "host": aoide_storage::display::os_hostname(),
                 "hostConfig": "/home/u/dxflake/hosts/box/default.nix",
-                "draftsSong": "cadenza",
+                "draftsRice": "cadenza",
                 "drafts": [
                     { "name": "draft-1", "savedAt": "2026-01-01T00:00:00Z", "current": false },
                     { "name": "draft-2", "savedAt": null, "current": true },
@@ -3943,7 +3943,7 @@ esac
         std::fs::write(root.join("refuse-list"), "").unwrap();
         assert_eq!(
             dispatch_rice_menu(),
-            json!({ "ok": false, "reason": "cli-failed", "message": "no song staged" })
+            json!({ "ok": false, "reason": "cli-failed", "message": "no rice staged" })
         );
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -3970,7 +3970,7 @@ esac
     }
 
     #[test]
-    fn a_declare_is_audited_by_song_and_whether_it_changed() {
+    fn a_declare_is_audited_by_rice_and_whether_it_changed() {
         assert_eq!(rice_declare_audit(&json!({ "ok": true, "changed": true })), ("ricedeclare", "ok changed"));
         assert_eq!(rice_declare_audit(&json!({ "ok": true, "changed": false })), ("ricedeclare", "ok unchanged"));
         assert_eq!(rice_declare_audit(&json!({ "ok": false, "reason": "not-built-in" })), ("ricedeclare-failed", "failed"));
@@ -3982,7 +3982,7 @@ esac
     #[test]
     fn dispatch_rice_declare_runs_the_host_declare_and_answers_both_outcomes() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let (_env, root) = stub_rice_bin("shellbridge-declare", r#"{"mode":"staging","song":"barcarolle"}"#);
+        let (_env, root) = stub_rice_bin("shellbridge-declare", r#"{"mode":"staging","rice":"barcarolle"}"#);
         assert_eq!(
             dispatch_rice_declare("barcarolle"),
             json!({
@@ -4021,8 +4021,8 @@ esac
     #[test]
     fn a_failed_rice_list_is_a_refusal_and_starts_no_second_child() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let (_env, root) = stub_rice_bin("shellbridge-menu-nolist", r#"{"mode":"staging","song":"sonata"}"#);
-        std::fs::write(root.join("refuse-songs"), "").unwrap();
+        let (_env, root) = stub_rice_bin("shellbridge-menu-nolist", r#"{"mode":"staging","rice":"sonata"}"#);
+        std::fs::write(root.join("refuse-rices"), "").unwrap();
         assert_eq!(
             dispatch_rice_menu(),
             json!({ "ok": false, "reason": "cli-failed", "message": "rices unreadable" })
@@ -4034,24 +4034,24 @@ esac
     /// GATED on Unix with its reason (see [`stub_rice_bin`]).
     #[cfg(unix)]
     #[test]
-    fn dispatch_rice_menu_with_no_song_answers_no_drafts_after_one_child() {
+    fn dispatch_rice_menu_with_no_rice_answers_no_drafts_after_one_child() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let (_env, root) = stub_rice_bin("shellbridge-menu-none", r#"{"mode":"staging"}"#);
         let reply = dispatch_rice_menu();
         assert_eq!(reply["ok"], true, "{reply}");
-        assert_eq!(reply["draftsSong"], Value::Null);
+        assert_eq!(reply["draftsRice"], Value::Null);
         assert_eq!(reply["drafts"], json!([]));
-        assert_eq!(reply["songs"].as_array().map(Vec::len), Some(2));
-        assert_eq!(stub_argv_log(&root), ["rice list --json"], "no song means no drafts child");
+        assert_eq!(reply["rices"].as_array().map(Vec::len), Some(2));
+        assert_eq!(stub_argv_log(&root), ["rice list --json"], "no rice means no drafts child");
         let _ = std::fs::remove_dir_all(&root);
     }
 
     /// GATED on Unix with its reason (see [`stub_rice_bin`]).
     #[cfg(unix)]
     #[test]
-    fn dispatch_rice_mode_names_the_song_to_stage_and_none_for_declarative() {
+    fn dispatch_rice_mode_names_the_rice_to_stage_and_none_for_declarative() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let (_env, root) = stub_rice_bin("shellbridge-mode", r#"{"mode":"staging","song":"sonata"}"#);
+        let (_env, root) = stub_rice_bin("shellbridge-mode", r#"{"mode":"staging","rice":"sonata"}"#);
         assert_eq!(
             dispatch_rice_mode(&RiceModeAction::Stage { name: "fugue".to_string() }),
             Ok("staged".to_string())
@@ -4100,7 +4100,7 @@ esac
     }
 
     /// The menu over a REAL socket: `ricemenu` is answered with one line
-    /// on its own connection and the audit log never learns a song or draft
+    /// on its own connection and the audit log never learns a rice or draft
     /// name; a `ricedraft` line the gate refuses changes nothing and gets NO
     /// reply — it is fire-and-forget, so nothing is parked on one — beyond
     /// the `unparseable` byte count. (No valid `ricedraft` is sent: it would
@@ -4146,8 +4146,8 @@ esac
         BufReader::new(client).read_line(&mut answer).unwrap();
         let reply: Value = serde_json::from_str(answer.trim()).expect("one JSON reply line");
         assert_eq!(reply["ok"], true, "{reply}");
-        assert_eq!(reply["draftsSong"], "quietsong");
-        assert_eq!(reply["songs"].as_array().map(Vec::len), Some(2), "{reply}");
+        assert_eq!(reply["draftsRice"], "quietsong");
+        assert_eq!(reply["rices"].as_array().map(Vec::len), Some(2), "{reply}");
         assert_eq!(reply["drafts"].as_array().map(Vec::len), Some(2), "{reply}");
 
         let log = root.join("log");

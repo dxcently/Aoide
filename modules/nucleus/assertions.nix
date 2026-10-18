@@ -19,20 +19,20 @@
 }:
 {
   assertions = [
-    # A built-in song is a QML tree painted by the strillix runtime, and strillix
-    # is the runtime's flag: a song whose body brings no runtime would leave the
-    # host with a config nothing paints. A performed song's body selects its
+    # A built-in rice is a QML tree painted by the strillix runtime, and strillix
+    # is the runtime's flag: a rice whose body brings no runtime would leave the
+    # host with a config nothing paints. A performed rice's body selects its
     # providers, so this holds by construction; the check catches a host that
-    # overrides the providers away. `builtIn` covers the available songs too,
-    # because a staged song is only ever painted by the same runtime.
+    # overrides the providers away. `builtIn` covers the available rices too,
+    # because a staged rice is only ever painted by the same runtime.
     {
       assertion =
         (config.aoide.rice == null && config.aoide.rices.builtIn == [ ]) || config.aoide.strillix.enable;
       message =
         if config.aoide.rice != null then
-          "aoide.rice = \"${config.aoide.rice}\" needs the strillix runtime: pick a strillix component provider on this host (or name no song)"
+          "aoide.rice = \"${config.aoide.rice}\" needs the strillix runtime: pick a strillix component provider on this host (or name no rice)"
         else
-          "built-in song(s) ${lib.concatStringsSep ", " config.aoide.rices.builtIn} need the strillix runtime: pick a strillix component provider on this host (or name no song)";
+          "built-in rice(s) ${lib.concatStringsSep ", " config.aoide.rices.builtIn} need the strillix runtime: pick a strillix component provider on this host (or name no rice)";
     }
 
     # The three paint facts are set only by their owners (options.nix's mkFact).

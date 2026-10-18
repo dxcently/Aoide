@@ -200,7 +200,7 @@
   `root` defaults through), because the renderer's Nix activation
   hardcodes that path and the two halves must name one file. A test that
   exercises it sets `HOME` under the temp dir (`EnvSaver` captures it); the
-  song crate's writer skips a test build whose `HOME` is not isolated, so an
+  rice crate's writer skips a test build whose `HOME` is not isolated, so an
   unisolated test cannot repoint the operator's link. The one way to retarget a
   link here is `fs::atomic_symlink` (a temp link renamed over it), never
   remove-then-link: a reader must see the old target or the new one.
@@ -313,7 +313,7 @@
   exactly the one that leaves a string behind in a crate nobody thought to
   grep, and the package built from the same directory (`pkgs/strillix-shell`) is
   the other half that has to keep agreeing with it.
-- **`fs::song_templates_dir` returns `Option`, never a default (L-C3,
+- **`fs::rice_templates_dir` returns `Option`, never a default (L-C3,
   strillix-carrier lane, task #107) — don't "helpfully" fall back to a
   hardcoded path when both tiers miss.** Unlike `root`/`flake_root` (always
   resolvable — a runtime path or a checkout path always HAS a default,
@@ -392,8 +392,8 @@
   create the cross-crate edge the split exists to avoid.
 - **`takes`' functions take `draft: Option<&str>`, not `&str`** (`strillix
   reload` design, settled 2026-08-31): `None` resolves the take root to
-  `rices/<song>/history/` (staging mode, no draft to nest under); `Some`
-  resolves it to `rices/<song>/drafts/<draft>/history/`, the original
+  `rices/<rice>/history/` (staging mode, no draft to nest under); `Some`
+  resolves it to `rices/<rice>/drafts/<draft>/history/`, the original
   shape. `history_dir` is the one function that branches on it; every other
   function in the module derives its path through `history_dir`/`history_path`/
   `head_path`/`marks_path` and just forwards the `Option` — don't

@@ -9,13 +9,13 @@
 //! Phase 3b (conduct extraction).
 //!
 //! **Runtime root (L-C2, strillix-carrier lane, task #107):** every path below
-//! `song/stage/`, `state/`, `run/qml/`, and `rices/` composed under
+//! `rice/stage/`, `state/`, `run/qml/`, and `rices/` composed under
 //! it hangs off ONE root, [`root`] — `$AOIDE_ROOT` (absolute-path-wins),
 //! default `<home>/.aoide`, nix-free. `~/Aoide` is no longer the runtime
 //! root on any host; it demotes to purely the dev git checkout, reached
 //! through the separate [`flake_root`] seam (`$AOIDE_FLAKE_ROOT`, default
 //! `<home>/Aoide`). [`migrate_root_once`] moves a pre-L-C2 host's
-//! `~/Aoide/{song/stage,state,log}` trees into the new root's equivalents —
+//! `~/Aoide/{rice/stage,state,log}` trees into the new root's equivalents —
 //! one-shot and idempotent, but deliberately NOT wired into [`root`]'s own
 //! resolution (see that function's doc for why): the three real binaries'
 //! `main()` call it explicitly, once, at process start.
@@ -181,7 +181,7 @@ fn default_root() -> std::path::PathBuf {
 /// stage, the declared twin, the machine's rices, the wallpaper library)
 /// hangs off it; aoide's own state never does. [`stage_dir`] derives from
 /// it, so an `$AOIDE_STAGE_DIR` override still relocates the whole rice tree
-/// with the stage, exactly as it did under `$AOIDE_ROOT/song`.
+/// with the stage, exactly as it did under `$STRILLIX_ROOT`.
 pub fn strillix_root() -> std::path::PathBuf {
     if let Ok(dir) = std::env::var("STRILLIX_ROOT") {
         let p = std::path::PathBuf::from(&dir);
@@ -506,14 +506,14 @@ pub fn copy_dir_recursive(src: &std::path::Path, dst: &std::path::Path) -> std::
     Ok(())
 }
 
-/// The live-state stage directory: `$AOIDE_ROOT/song/stage/` (default
-/// `~/.aoide/song/stage/`).
+/// The live-state stage directory: `$STRILLIX_ROOT/stage/` (default
+/// `~/.aoide/rice/stage/`).
 ///
 /// **Contract seam (CONTRACTS.md §4):** the systemd unit
 /// (`modules/nucleus/shellbridge.nix`) sets `AOIDE_STAGE_DIR` on the
 /// service — that env var wins when set to an absolute path, so the daemon
 /// and the CLI door always agree on where the stage tree lives. The
-/// fallback below derives `$AOIDE_ROOT/song/stage` from [`root`], so on the
+/// fallback below derives `$STRILLIX_ROOT/stage` from [`root`], so on the
 /// default layout the two paths coincide; the override only matters when
 /// the unit relocates the stage (or a test/smoke run points elsewhere). A
 /// relative or empty value is ignored (we never resolve a runtime path
@@ -531,9 +531,9 @@ pub fn stage_dir() -> std::path::PathBuf {
 /// The account/usage runtime state directory: `$AOIDE_ROOT/state/` (default
 /// `~/.aoide/state/`).
 ///
-/// A gitignored root-runtime dir (CONTRACTS.md §2), sibling to `song/stage/`
-/// but explicitly NOT song-scoped — account/global runtime like
-/// `state/usage.json` lives here, never under `song/`. Resolution mirrors
+/// A gitignored root-runtime dir (CONTRACTS.md §2), sibling to `rice/stage/`
+/// but explicitly NOT rice-scoped — account/global runtime like
+/// `state/usage.json` lives here, never under `rice/`. Resolution mirrors
 /// [`stage_dir`]: prefer `$AOIDE_STATE_DIR` when set to an **absolute** path,
 /// else derive `$AOIDE_ROOT/state` from [`root`]. A relative or empty
 /// override is ignored — same discipline as the stage dir, so a runtime
@@ -555,7 +555,7 @@ pub fn state_dir() -> std::path::PathBuf {
 /// (`conduct/README.md`), mirrored by `server/src/daemon.rs::stage_roster`). Split from
 /// [`stage_dir`] (2026-08-27, command-defrag lane S1): those six files are
 /// core orchestration state the `aoide`/`aoided` binaries alone read and
-/// write, never rice/paint — `song/` is strillix's tree
+/// write, never rice/paint — `rice/` is strillix's tree
 /// (`docs/architecture/PACKAGE-LAYOUT.md`'s "Two binaries"), so conducting
 /// state has no business living under it. `stage_dir` itself is UNCHANGED
 /// and keeps meaning exactly what it always has — the rice/paint stage tree
@@ -567,7 +567,7 @@ pub fn state_dir() -> std::path::PathBuf {
 /// unit's env already set this to select the conducting stage tree; keeping
 /// it authoritative here means every one of them needs zero changes), else
 /// this falls back to [`state_dir`]`/stage` rather than [`stage_dir`]'s own
-/// `song/stage` fallback. On a box that has never set `$AOIDE_STAGE_DIR` this
+/// `rice/stage` fallback. On a box that has never set `$AOIDE_STAGE_DIR` this
 /// is the only path that changes; a test/unit override continues to name one
 /// directory for both trees, exactly as before the split.
 pub fn conducting_stage_dir() -> std::path::PathBuf {
@@ -692,7 +692,7 @@ fn migrate_conducting_stage(new_dir: &std::path::Path) {
 ///
 /// Under [`state_dir`], not [`stage_dir`]: a capture is a DURABLE artifact a
 /// caller asked for and keeps around (like `state/usage.json`,
-/// `state/nodes.json`) — never song-scoped, never reset by a `rice
+/// `state/nodes.json`) — never rice-scoped, never reset by a `rice
 /// mode`/stage-reseed the way live rehearsal state is. One-line rationale:
 /// lean state, not stage — captures persist, stage doesn't.
 pub fn captures_dir() -> std::path::PathBuf {
@@ -705,7 +705,7 @@ pub fn captures_dir() -> std::path::PathBuf {
 ///
 /// Under [`state_dir`], not [`stage_dir`] — same reasoning as
 /// [`captures_dir`]: a session's transcript is a durable artifact that
-/// outlives one invocation, never song-scoped, never reset by a `rice
+/// outlives one invocation, never rice-scoped, never reset by a `rice
 /// mode`/stage-reseed the way live rehearsal state is.
 pub fn session_logs_dir() -> std::path::PathBuf {
     state_dir().join("sessions")
@@ -717,7 +717,7 @@ pub fn session_logs_dir() -> std::path::PathBuf {
 /// Under [`state_dir`], not [`stage_dir`] — same reasoning as
 /// [`captures_dir`]: a saved cursor position is durable operator-convenience
 /// state that outlives one invocation (the entire point of `save` in one
-/// process and `restore` in a later one), never song-scoped, never reset by
+/// process and `restore` in a later one), never rice-scoped, never reset by
 /// a rice-mode/stage reseed. A single flat file, not a directory like
 /// captures — there is only ever one "current" saved position, never a
 /// history of them.
@@ -725,15 +725,15 @@ pub fn pointer_state_file() -> std::path::PathBuf {
     state_dir().join("pointer-pos.json")
 }
 
-/// The song tree root (`$AOIDE_ROOT/song/`, default `~/.aoide/song/`) — the
+/// The rice tree root (`$STRILLIX_ROOT/`, default `~/.aoide/rice/`) — the
 /// parent of the stage dir.
 ///
-/// The stage tree is `<song>/stage`; committed songs live under
-/// `<song>/rices/<name>/` and cover art in the shared library
-/// `<song>/wallpapers/` (CONTRACTS.md §1, §4). Deriving this from
-/// [`stage_dir`] rather than recomputing keeps the whole song tree coherent
+/// The stage tree is `<rice>/stage`; committed rices live under
+/// `<rice>/rices/<name>/` and wallpaper art in the shared library
+/// `<rice>/wallpapers/` (CONTRACTS.md §1, §4). Deriving this from
+/// [`stage_dir`] rather than recomputing keeps the whole rice tree coherent
 /// under an `AOIDE_STAGE_DIR` override: a test points that at `<tmp>/stage` and
-/// the rices resolves under `<tmp>/` alongside it. Every `rice`/`song`
+/// the rices resolves under `<tmp>/` alongside it. Every `rice`/`rice`
 /// reader routes here.
 pub fn strillix_dir() -> std::path::PathBuf {
     let stage = stage_dir();
@@ -745,11 +745,11 @@ pub fn strillix_dir() -> std::path::PathBuf {
 
 /// The live-deployed QML tree the desktop shell reads from:
 /// `$AOIDE_ROOT/run/qml/` (default `~/.aoide/run/qml/`) — a sibling of the
-/// song tree ([`strillix_dir`]), NOT under `stage/`.
+/// rice tree ([`strillix_dir`]), NOT under `stage/`.
 ///
 /// Mirrors [`strillix_dir`]'s own derivation exactly: `strillix_dir` takes
-/// [`stage_dir`]'s parent to reach the song tree root; this takes
-/// `strillix_dir`'s parent (the runtime root that `song/`, `state/`, and `run/`
+/// [`stage_dir`]'s parent to reach the rice tree root; this takes
+/// `strillix_dir`'s parent (the runtime root that `rice/`, `state/`, and `run/`
 /// all sit under) and joins `run/qml`. So an `$AOIDE_STAGE_DIR` override
 /// still relocates this seam — it rides the same env var, one level further
 /// up — without a separate `$AOIDE_RUN_DIR`.
@@ -793,9 +793,9 @@ fn run_base() -> std::path::PathBuf {
 ///
 /// Deliberately NOT derived from [`stage_dir`]/[`root`] the way every other
 /// path in this file is: those are relocatable per-test so a scratch tmp
-/// dir can stand in for the RUNTIME trees (`song/stage`, `run/qml`) without
+/// dir can stand in for the RUNTIME trees (`rice/stage`, `run/qml`) without
 /// a real flake anywhere in sight. The committed rices `nix eval` reads
-/// (`rices/`, `lib/song.nix`, `flake.nix`) is not a runtime tree —
+/// (`rices/`, `lib/rice.nix`, `flake.nix`) is not a runtime tree —
 /// it is the one git checkout on disk, so relocating it per-test would mean
 /// fabricating a working flake (with its own `flake.lock`) in every test
 /// that touches `rice stage`, for no reason. `$AOIDE_FLAKE_ROOT`
@@ -813,7 +813,7 @@ pub fn flake_root() -> std::path::PathBuf {
 }
 
 /// The host's own config file — the NixOS module holding this machine's
-/// `habit.song.declared` line, which `strillix rice declare <song> --host`
+/// `habit.rice.declared` line, which `strillix rice declare <rice> --host`
 /// rewrites. `$AOIDE_HOST_CONFIG` (the core option `aoide.hostConfig`,
 /// exported beside `$AOIDE_FLAKE_ROOT` on the same units and login shells) when
 /// it is absolute; otherwise the option's own default spelled in code,
@@ -843,7 +843,7 @@ pub fn host_config() -> Option<std::path::PathBuf> {
 /// Named ONCE, here. Every site that CONSTRUCTS the shell path joins the const
 /// onto [`flake_root`] (`strillix`'s `commands::preview` stages the tree into
 /// an isolated preview root; `strillix-rice`'s `compose` interpolates the const
-/// into the scaffold doc that points a new song's author at `qml/slots.md`) —
+/// into the scaffold doc that points a new rice's author at `qml/slots.md`) —
 /// prose and doc comments, and that scaffold text, may name the literal
 /// `"pkgs/strillix-shell"`, which nothing resolves. A second checkout-relative
 /// tree earns its own const beside this one rather than a literal at the call
@@ -851,15 +851,15 @@ pub fn host_config() -> Option<std::path::PathBuf> {
 /// string behind in a crate nobody thought to grep.
 pub const STRILLIX_SHELL_SRC: &str = "pkgs/strillix-shell";
 
-/// Pure tier logic for [`song_templates_dir`] — the same two-tier shape
+/// Pure tier logic for [`rice_templates_dir`] — the same two-tier shape
 /// `aoide_protocol::bin`'s sibling-binary resolver uses (env override, then
 /// a sibling of `current_exe()`'s directory gated on its OWN existence
 /// check), applied to a directory instead of an executable, so the tier
 /// decision is testable without a real `current_exe()`/filesystem probe.
 /// `exe_dir` is `current_exe()`'s parent (`None` if that call failed);
 /// `sibling_is_dir` stands in for the real `Path::is_dir()` check
-/// [`song_templates_dir`] performs.
-fn resolve_song_templates_dir(
+/// [`rice_templates_dir`] performs.
+fn resolve_rice_templates_dir(
     env_value: Option<&str>,
     exe_dir: Option<&std::path::Path>,
     sibling_is_dir: bool,
@@ -879,9 +879,9 @@ fn resolve_song_templates_dir(
 }
 
 /// The shipped SCORE TEMPLATES dir (L-C3, strillix-carrier lane, task #107):
-/// `<templates>/<song>/theme.json` is what `rice compose --from <song>`
+/// `<templates>/<rice>/theme.json` is what `rice compose --from <rice>`
 /// (`strillix-rice`'s `commands::rice`) falls back to reading when
-/// [`rice_dir`] has nothing yet for that song — the ordinary case on a
+/// [`rice_dir`] has nothing yet for that rice — the ordinary case on a
 /// repo-less host, which has no `$AOIDE_FLAKE_ROOT` checkout to have
 /// composed FROM in the first place. `<templates>` also carries prebaked
 /// `manifest.json`/`registry.json` (`strillix-rice::widgets`'s own fallback,
@@ -909,7 +909,7 @@ fn resolve_song_templates_dir(
 /// `None` when neither resolves — this function has no opinion on error
 /// text (same as every other pure resolver here); the caller turns that
 /// into a taught error naming both locations it checked.
-pub fn song_templates_dir() -> Option<std::path::PathBuf> {
+pub fn rice_templates_dir() -> Option<std::path::PathBuf> {
     let env_value = std::env::var("STRILLIX_TEMPLATES").ok();
     let exe_dir = std::env::current_exe()
         .ok()
@@ -918,7 +918,7 @@ pub fn song_templates_dir() -> Option<std::path::PathBuf> {
         .as_deref()
         .map(|dir| dir.join("..").join("share").join("strillix").join("rices"))
         .is_some_and(|p| p.is_dir());
-    resolve_song_templates_dir(env_value.as_deref(), exe_dir.as_deref(), sibling_is_dir)
+    resolve_rice_templates_dir(env_value.as_deref(), exe_dir.as_deref(), sibling_is_dir)
 }
 
 /// `$STRILLIX_TEMPLATES`'s parent — the shipped `share/strillix` dir. Beside
@@ -927,20 +927,20 @@ pub fn song_templates_dir() -> Option<std::path::PathBuf> {
 /// rices generator, evaluated by `strillix-rice::widgets`) and
 /// `aoide-options.json` (`strillix onboard`'s option set). Named ONCE here, for
 /// the same reason [`STRILLIX_SHELL_SRC`] is: two crates derive it from
-/// [`song_templates_dir`], and a second derivation of the same parent is a
+/// [`rice_templates_dir`], and a second derivation of the same parent is a
 /// rename waiting to leave one of them behind.
 ///
-/// `None` exactly when [`song_templates_dir`] is `None` — there is no
+/// `None` exactly when [`rice_templates_dir`] is `None` — there is no
 /// templates dir to sit beside.
 pub fn strillix_share_dir() -> Option<std::path::PathBuf> {
-    song_templates_dir().and_then(|templates| {
+    rice_templates_dir().and_then(|templates| {
         templates
             .parent()
             .map(std::path::Path::to_path_buf)
     })
 }
 
-/// The committed-song directory: `<song>/rices/<name>/`.
+/// The committed-rice directory: `<rice>/rices/<name>/`.
 ///
 /// Shares [`strillix_dir`]'s `AOIDE_STAGE_DIR`-relative resolution, so a test that
 /// points the stage dir at a tmp dir gets an isolated rices root alongside
@@ -949,7 +949,7 @@ pub fn rice_dir(name: &str) -> std::path::PathBuf {
     strillix_dir().join("rices").join(name)
 }
 
-/// The machine's rices ROOT: `<strillix>/rices/`, the directory a song is
+/// The machine's rices ROOT: `<strillix>/rices/`, the directory a rice is
 /// looked up BY NAME in ([`rice_dir`]) and the argument the offline
 /// generator is pointed at (§9). A sibling of [`rice_dir`] rather than a
 /// second path spelled at the call site, for the same one-seam reason.
@@ -957,41 +957,41 @@ pub fn rices_root() -> std::path::PathBuf {
     strillix_dir().join("rices")
 }
 
-/// The committed-song notes file: `<song>/rices/<name>/theme.json`.
+/// The committed-rice notes file: `<rice>/rices/<name>/theme.json`.
 pub fn rice_notes(name: &str) -> std::path::PathBuf {
     rice_dir(name).join("theme.json")
 }
 
-/// The DECLARED song's notes — the declared twin, `<song>/declared/theme.json`
+/// The DECLARED rice's notes — the declared twin, `<rice>/declared/theme.json`
 /// (CONTRACTS.md §4).
 ///
-/// Same content as the active song's committed `theme.json` with the venue's
+/// Same content as the active rice's committed `theme.json` with the venue's
 /// `aoide.theme.override` applied (a plain file, never a symlink), published
-/// by the strillix lane's activation seed — the file's own `"song"` field
-/// says WHICH song that was. Read for the declarative re-pin
+/// by the strillix lane's activation seed — the file's own `"rice"` field
+/// says WHICH rice that was. Read for the declarative re-pin
 /// (`rice mode declarative`), which restores declared truth, and by
-/// `declared_song()` to learn WHICH song is declared; staging derives from the
+/// `declared_rice()` to learn WHICH rice is declared; staging derives from the
 /// runtime rices instead ([`declared_venue`]). Absent on a host that never
 /// activated the lane (or before its first activation); readers then fall back
-/// to the committed rices for that song. Shares [`strillix_dir`]'s
-/// `AOIDE_STAGE_DIR`-relative resolution like every other song-tree path.
+/// to the committed rices for that rice. Shares [`strillix_dir`]'s
+/// `AOIDE_STAGE_DIR`-relative resolution like every other rice-tree path.
 pub fn declared_notes() -> std::path::PathBuf {
     strillix_dir().join("declared").join("theme.json")
 }
 
-/// What `strillix rice refresh` last wrote into the machine's copy of built-in song
-/// `name` — `<song>/declared/rices/<name>.json`, `{schemaVersion, song,
+/// What `strillix rice refresh` last wrote into the machine's copy of built-in rice
+/// `name` — `<rice>/declared/rices/<name>.json`, `{schemaVersion, rice,
 /// source, files: {relpath: sha256}}`. Beside [`declared_notes`] and outside
-/// the song folder on purpose: the folder-equality gate, `rice declare`,
+/// the rice folder on purpose: the folder-equality gate, `rice declare`,
 /// `rice list`, `rice history` and the widget sync never see it.
 pub fn rice_record(name: &str) -> std::path::PathBuf {
     strillix_dir().join("declared").join("rices").join(format!("{name}.json"))
 }
 
-/// The venue's recolour of the declared song — `<song>/declared/venue.json`
+/// The venue's recolour of the declared rice — `<rice>/declared/venue.json`
 /// (CONTRACTS.md §4): the slots `aoide.theme.override` changes, tier by tier,
 /// published by the strillix lane's activation seed (`{}` when the host sets no
-/// override). Staging the declared song overlays it on the runtime rices's
+/// override). Staging the declared rice overlays it on the runtime rices's
 /// copy. Absent on a host that never activated the lane; readers then overlay
 /// nothing.
 pub fn declared_venue() -> std::path::PathBuf {
@@ -1022,8 +1022,8 @@ pub fn declared_rice_conf() -> std::path::PathBuf {
 }
 
 /// The staging-owned empty rice, `<stage>/empty-hyprland.conf`: the target a
-/// stage links to when its song ships no `hyprland.conf`, so the link never
-/// keeps the previous song's binds.
+/// stage links to when its rice ships no `hyprland.conf`, so the link never
+/// keeps the previous rice's binds.
 pub fn empty_rice_conf() -> std::path::PathBuf {
     stage_dir().join("empty-hyprland.conf")
 }
@@ -1053,23 +1053,23 @@ pub fn atomic_symlink(target: &std::path::Path, link: &std::path::Path) -> std::
     }
 }
 
-/// A committed song's drafts root: `<song>/rices/<name>/drafts/` —
+/// A committed rice's drafts root: `<rice>/rices/<name>/drafts/` —
 /// durable scratch for `rice draft save`, gitignored and outside `stage/` (a
 /// draft is NOT the live stage, and NOT committed truth; that distinction is
-/// the entire point of the feature). Nested under the song it varies, not a
+/// the entire point of the feature). Nested under the rice it varies, not a
 /// flat top-level dir: a draft is fundamentally a variation of an ALREADY
-/// COMPOSED song, so it belongs inside that song's own directory, not a
+/// COMPOSED rice, so it belongs inside that rice's own directory, not a
 /// separate global namespace. Shares [`rice_dir`]'s
 /// `AOIDE_STAGE_DIR`-relative resolution.
-pub fn song_drafts_dir(song: &str) -> std::path::PathBuf {
-    rice_dir(song).join("drafts")
+pub fn rice_drafts_dir(rice: &str) -> std::path::PathBuf {
+    rice_dir(rice).join("drafts")
 }
 
-/// One named draft's directory: `<song>/rices/<name>/drafts/<draft>/` —
+/// One named draft's directory: `<rice>/rices/<name>/drafts/<draft>/` —
 /// holds a snapshot of `stage/theme.json` (always) and `stage/wallpaper.json`
 /// (when the stage had one) at the moment `rice draft save <draft>` was run.
-pub fn draft_dir(song: &str, draft: &str) -> std::path::PathBuf {
-    song_drafts_dir(song).join(draft)
+pub fn draft_dir(rice: &str, draft: &str) -> std::path::PathBuf {
+    rice_drafts_dir(rice).join(draft)
 }
 
 /// Atomic write-temp-then-rename into a file within a directory —
@@ -1080,7 +1080,7 @@ pub fn draft_dir(song: &str, draft: &str) -> std::path::PathBuf {
 /// POSIX `rename()` replaces whatever directory entry sits at its
 /// destination — it does NOT dereference a symlink there and write through
 /// it. Without this, the very first write after something pointed `path` at
-/// a symlink (rice draft mode's `stage/theme.json` → `rices/<song>/
+/// a symlink (rice draft mode's `stage/theme.json` → `rices/<rice>/
 /// drafts/<name>/theme.json` routing) would silently REPLACE the symlink
 /// with a plain file, breaking the routing after one write. Resolving the
 /// link ourselves (`symlink_metadata` to detect it without following,
@@ -1321,7 +1321,7 @@ pub fn detach(command: &mut std::process::Command) {
 /// call: Unix's `symlink(2)` is kind-agnostic, while native Windows has two
 /// calls and asks the creator which one it is, so a directory gets
 /// `symlink_dir` there, never `symlink_file`. One implementation, two callers
-/// (`conduct`'s `hooks install` skill links, `cli`'s `onboard` song link) —
+/// (`conduct`'s `hooks install` skill links, `cli`'s `onboard` rice link) —
 /// never a second copy.
 ///
 /// A refused creation surfaces its own error to the caller: native Windows
@@ -2503,11 +2503,11 @@ mod tests {
     }
 
     #[test]
-    fn song_tree_resolves_under_the_stage_override() {
+    fn rice_tree_resolves_under_the_stage_override() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved = std::env::var("AOIDE_STAGE_DIR").ok();
 
-        // Point the stage at `<tmp>/stage`; the song tree is its parent, so
+        // Point the stage at `<tmp>/stage`; the rice tree is its parent, so
         // the rices resolves as a sibling of `stage/`.
         std::env::set_var("AOIDE_STAGE_DIR", scratch("strillix-rice-test/stage"));
         assert_eq!(strillix_dir(), std::path::PathBuf::from(scratch("strillix-rice-test")));
@@ -2516,8 +2516,8 @@ mod tests {
             std::path::PathBuf::from(scratch("strillix-rice-test/rices/moonlight/theme.json"))
         );
 
-        // With `AOIDE_STAGE_DIR` absent, the song tree composes off
-        // `$AOIDE_ROOT/song` (`RootEnvGuard` keeps this off `root()`'s real
+        // With `AOIDE_STAGE_DIR` absent, the rice tree composes off
+        // `$STRILLIX_ROOT` (`RootEnvGuard` keeps this off `root()`'s real
         // fallback — see its doc).
         let _root = RootEnvGuard::set(std::path::Path::new(&scratch("strillix-rice-test-root")));
         std::env::remove_var("AOIDE_STAGE_DIR");
@@ -2534,16 +2534,16 @@ mod tests {
     }
 
     #[test]
-    fn song_drafts_dir_and_draft_dir_nest_under_the_songs_own_rices_entry() {
-        // Mirrors `song_tree_resolves_under_the_stage_override`: a draft nests
-        // under ITS song's rices dir, not a flat top-level `drafts/` —
-        // a draft is a variation of an already-composed song.
+    fn rice_drafts_dir_and_draft_dir_nest_under_the_rices_own_rices_entry() {
+        // Mirrors `rice_tree_resolves_under_the_stage_override`: a draft nests
+        // under ITS rice's rices dir, not a flat top-level `drafts/` —
+        // a draft is a variation of an already-composed rice.
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved = std::env::var("AOIDE_STAGE_DIR").ok();
 
         std::env::set_var("AOIDE_STAGE_DIR", scratch("aoide-drafts-test/stage"));
         assert_eq!(
-            song_drafts_dir("sonata"),
+            rice_drafts_dir("sonata"),
             std::path::PathBuf::from(scratch("aoide-drafts-test/rices/sonata/drafts"))
         );
         assert_eq!(
@@ -2551,14 +2551,14 @@ mod tests {
             std::path::PathBuf::from(scratch("aoide-drafts-test/rices/sonata/drafts/neon-night"))
         );
 
-        // With `AOIDE_STAGE_DIR` absent: `$AOIDE_ROOT/song/stage` →
+        // With `AOIDE_STAGE_DIR` absent: `$STRILLIX_ROOT/stage` →
         // rice_dir("x") = `$AOIDE_ROOT/rices/x` →
-        // song_drafts_dir("x") = `$AOIDE_ROOT/rices/x/drafts`
+        // rice_drafts_dir("x") = `$AOIDE_ROOT/rices/x/drafts`
         // (`RootEnvGuard` keeps this off `root()`'s real fallback).
         let _root = RootEnvGuard::set(std::path::Path::new(&scratch("aoide-drafts-test-root")));
         std::env::remove_var("AOIDE_STAGE_DIR");
         assert_eq!(
-            song_drafts_dir("x"),
+            rice_drafts_dir("x"),
             std::path::PathBuf::from(scratch("aoide-drafts-test-root/rices/x/drafts"))
         );
         assert_eq!(
@@ -2573,23 +2573,23 @@ mod tests {
     }
 
     #[test]
-    fn run_qml_dir_resolves_as_a_sibling_of_song_under_the_stage_override() {
-        // Mirrors `song_tree_resolves_under_the_stage_override` above: the
+    fn run_qml_dir_resolves_as_a_sibling_of_rice_under_the_stage_override() {
+        // Mirrors `rice_tree_resolves_under_the_stage_override` above: the
         // override's tmp root plays the role of the runtime root, its
-        // child the role of `song/`, so `run/qml` lands as THAT root's sibling
+        // child the role of `rice/`, so `run/qml` lands as THAT root's sibling
         // `run/qml`, one level up from where `strillix_dir()` resolves.
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved = std::env::var("AOIDE_STAGE_DIR").ok();
 
-        std::env::set_var("AOIDE_STAGE_DIR", scratch("aoide-run-qml-test/song/stage"));
+        std::env::set_var("AOIDE_STAGE_DIR", scratch("aoide-run-qml-test/rice/stage"));
         assert_eq!(
             run_qml_dir(),
             std::path::PathBuf::from(scratch("aoide-run-qml-test/run/qml")),
             "under the stage override, run/ sits beside the stage's own parent"
         );
 
-        // With `AOIDE_STAGE_DIR` absent: `$AOIDE_ROOT/song/stage` →
-        // strillix_dir() = `$AOIDE_ROOT/song` → run_qml_dir() =
+        // With `AOIDE_STAGE_DIR` absent: `$STRILLIX_ROOT/stage` →
+        // strillix_dir() = `$STRILLIX_ROOT` → run_qml_dir() =
         // `$AOIDE_ROOT/run/qml` (`RootEnvGuard` keeps this off `root()`'s
         // real fallback).
         let _root = RootEnvGuard::set(std::path::Path::new(&scratch("aoide-run-qml-test-root")));
@@ -2604,20 +2604,20 @@ mod tests {
 
     #[test]
     fn run_elements_dir_resolves_as_a_sibling_of_run_qml_under_the_stage_override() {
-        // Mirrors `run_qml_dir_resolves_as_a_sibling_of_song_under_the_stage_override`
+        // Mirrors `run_qml_dir_resolves_as_a_sibling_of_rice_under_the_stage_override`
         // exactly — same runtime root, `run/elements` instead of `run/qml`.
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved = std::env::var("AOIDE_STAGE_DIR").ok();
 
-        std::env::set_var("AOIDE_STAGE_DIR", scratch("aoide-run-elements-test/song/stage"));
+        std::env::set_var("AOIDE_STAGE_DIR", scratch("aoide-run-elements-test/rice/stage"));
         assert_eq!(
             run_elements_dir(),
             std::path::PathBuf::from(scratch("aoide-run-elements-test/run/elements")),
             "under the stage override, run/ sits beside the stage's own parent"
         );
 
-        // With `AOIDE_STAGE_DIR` absent: `$AOIDE_ROOT/song/stage` →
-        // strillix_dir() = `$AOIDE_ROOT/song` → run_elements_dir() =
+        // With `AOIDE_STAGE_DIR` absent: `$STRILLIX_ROOT/stage` →
+        // strillix_dir() = `$STRILLIX_ROOT` → run_elements_dir() =
         // `$AOIDE_ROOT/run/elements` (`RootEnvGuard` keeps this off `root()`'s
         // real fallback).
         let _root = RootEnvGuard::set(std::path::Path::new(&scratch("aoide-run-elements-test-root")));
@@ -2643,7 +2643,7 @@ mod tests {
         let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
         let saved_flake = std::env::var("AOIDE_FLAKE_ROOT").ok();
 
-        std::env::set_var("AOIDE_STAGE_DIR", scratch("aoide-flake-root-test/song/stage"));
+        std::env::set_var("AOIDE_STAGE_DIR", scratch("aoide-flake-root-test/rice/stage"));
         std::env::remove_var("AOIDE_FLAKE_ROOT");
         assert!(
             !flake_root().starts_with(scratch("aoide-flake-root-test")),
@@ -2703,10 +2703,10 @@ mod tests {
         }
     }
 
-    // ── `song_templates_dir` (L-C3, strillix-carrier lane, task #107) ──────────
+    // ── `rice_templates_dir` (L-C3, strillix-carrier lane, task #107) ──────────
 
     #[test]
-    fn song_templates_tiers_resolve_in_order() {
+    fn rice_templates_tiers_resolve_in_order() {
         // Pure tier logic — no real env/filesystem, mirroring
         // `aoide_protocol::bin::tiers_resolve_in_order`'s table shape for
         // the same two-tier resolver applied to a directory.
@@ -2757,13 +2757,13 @@ mod tests {
         ];
 
         for (label, env_value, exe_dir, sibling_is_dir, expect) in cases {
-            let got = resolve_song_templates_dir(*env_value, exe_dir.map(std::path::Path::new), *sibling_is_dir);
+            let got = resolve_rice_templates_dir(*env_value, exe_dir.map(std::path::Path::new), *sibling_is_dir);
             assert_eq!(got, expect.map(std::path::PathBuf::from), "{label}");
         }
     }
 
     #[test]
-    fn song_templates_dir_honors_an_absolute_env_override() {
+    fn rice_templates_dir_honors_an_absolute_env_override() {
         // The impure public wrapper: an absolute `$STRILLIX_TEMPLATES`
         // wins outright regardless of whatever `current_exe()`'s own
         // sibling resolves to in this test binary (which never has a real
@@ -2773,7 +2773,7 @@ mod tests {
 
         std::env::set_var("STRILLIX_TEMPLATES", scratch("strillix-rice-templates-test"));
         assert_eq!(
-            song_templates_dir(),
+            rice_templates_dir(),
             Some(std::path::PathBuf::from(scratch("strillix-rice-templates-test")))
         );
 
@@ -2781,12 +2781,12 @@ mod tests {
         // override in this file — falls through to the sibling tier, which
         // resolves to `None` for this test binary.
         std::env::set_var("STRILLIX_TEMPLATES", "");
-        assert_eq!(song_templates_dir(), None);
+        assert_eq!(rice_templates_dir(), None);
         std::env::set_var("STRILLIX_TEMPLATES", "relative/templates");
-        assert_eq!(song_templates_dir(), None);
+        assert_eq!(rice_templates_dir(), None);
 
         std::env::remove_var("STRILLIX_TEMPLATES");
-        assert_eq!(song_templates_dir(), None);
+        assert_eq!(rice_templates_dir(), None);
 
         match saved {
             Some(v) => std::env::set_var("STRILLIX_TEMPLATES", v),
@@ -3057,7 +3057,7 @@ mod tests {
     #[test]
     fn atomic_write_resolves_a_relative_symlink_target() {
         // The exact shape `rice mode draft` creates: stage/theme.json (a
-        // relative symlink) → ../../rices/<song>/drafts/<name>/theme.json.
+        // relative symlink) → ../../rices/<rice>/drafts/<name>/theme.json.
         let dir = std::env::temp_dir().join(format!("aoide-atomic-symlink-rel-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let sub = dir.join("drafts").join("neon-night");
@@ -3967,7 +3967,7 @@ mod tests {
         std::env::set_var("AOIDE_ROOT", home.join(".aoide"));
         std::env::set_var("STRILLIX_ROOT", home.join(".aoide"));
 
-        let old_dir = stage_dir(); // `<home>/.aoide/song/stage` via the pinned `AOIDE_ROOT`
+        let old_dir = stage_dir(); // `<home>/.aoide/rice/stage` via the pinned `AOIDE_ROOT`
         let new_dir = state_dir().join("stage");
         std::fs::create_dir_all(&old_dir).unwrap();
         for name in CORE_STAGE_FILE_NAMES {

@@ -118,7 +118,7 @@
   `EXE_SUFFIX` (`aoide.exe`/`strillix.exe`) with the bare name behind it, never
   `PATHEXT`, so an `aoide.cmd` beside the build cannot shadow it (and is not a
   sibling at all when it is the only file there); and an
-  `AOIDE_CORE_BIN`/`AOIDE_RICE_BIN` override still reaches `resolve`
+  `AOIDE_CORE_BIN`/`STRILLIX_BIN` override still reaches `resolve`
   trimmed and comes back untouched. Windows tests compare the two surfaces'
   paths by `std::fs::canonicalize` identity, never by string equality —
   `resolve_executable_on_path` returns the spelling it ASKED for while

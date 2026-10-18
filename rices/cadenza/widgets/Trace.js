@@ -1,5 +1,5 @@
 // Trace.js — cadenza's one pulse engine: the travelling light (intent §2
-// "Motion", §3.2 the bar's lamps, §3.9 the cover's board).
+// "Motion", §3.2 the bar's lamps, §3.9 the wallpaper's board).
 //
 // Pure JS on purpose (`.pragma library`, no QML, no clock, no Math.random):
 // every function here is a total function of its arguments, so the engine is
@@ -8,7 +8,7 @@
 // keeps its own `node design/...`-free purity too.
 //
 // WHY THIS FILE EXISTS. The bar grew its own polyline walker inside one
-// lamp's inline `segs`/`at` bindings (bar.qml), and the cover needs the same
+// lamp's inline `segs`/`at` bindings (bar.qml), and the wallpaper needs the same
 // walk for every pulse on every track. Two copies of "where is the light now"
 // is the thing to avoid, so the walker lives here once and the bar's lamp
 // reads it too — see `at`, which is a verbatim port (same operation order,
@@ -135,7 +135,7 @@ function index(board, tol) {
 }
 
 // ── the feed: what the machine is actually doing ────────────────────────────
-// sessions.json / hooks.json, parsed once here so both the bar and the cover
+// sessions.json / hooks.json, parsed once here so both the bar and the wallpaper
 // read the same shape (the bar keeps its own FileViews — this is the parse).
 function sessions(text) {
     try {

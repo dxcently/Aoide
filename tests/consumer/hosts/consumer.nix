@@ -1,16 +1,16 @@
 # tests/consumer/hosts/consumer.nix — the fixture's host module.
 #
-# A consumer's host answers the same interface AoideOS's do, because it is
-# the same constructor: aggregations it selects, songs it performs and builds
-# in, people, then its own platform settings. `habit.rice.declared` is the song it
-# PERFORMS; `habit.rice.available` holds the other song it builds in — which borrows
+# A consumer's host answers the same interface Strillix's do, because it is
+# the same constructor: aggregations it selects, rices it performs and builds
+# in, people, then its own platform settings. `habit.rice.declared` is the rice it
+# PERFORMS; `habit.rice.available` holds the other rice it builds in — which borrows
 # the performer's widgets, so the borrow closure is exercised on a consumer's own
 # rices rather than on Aoide's.
 _: {
   habit.aggregation.nucleus.enable = true;
   habit.aggregation.desktop.enable = true;
 
-  # The songs bring the greeter, and the greeter needs a session to log into:
+  # The rices bring the greeter, and the greeter needs a session to log into:
   # this fixture names the compositor that is that session.
   habit.dendrites.compositor = {
     enable = true;

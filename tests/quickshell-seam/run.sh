@@ -12,7 +12,7 @@
 # `test-quickshell-only` — quickshell selected, `aoide.quickshell.config` = the
 # fixture directory, no strillix: the host's own shell runs (one `aoide-quickshell`
 # unit, on that directory), and nothing strillix would have brought is there (no
-# rice binary, no `songs/`, no shellbridge unit, no healthcheck, no rice-reload
+# rice binary, no `rices/`, no shellbridge unit, no healthcheck, no rice-reload
 # unit, no deploy activation).
 # `test-quickshell-bare` — the same selection with no config: package installed,
 # no service, no session anchor claimed.
@@ -21,11 +21,11 @@
 # lands once (one shell unit, one shellbridge unit, no doubled environment, one
 # declaration of its home half), both components are recorded, and both facts
 # the runtime sets are true.
-# `test-song-without-strillix` — a song and no performer: MUST fail, with the
+# `test-rice-without-strillix` — a rice and no performer: MUST fail, with the
 # platform assertion's own message.
 # `yomi-strix` — the positive control, from the same ref: the two absence
 # checks above are only worth anything against a host that HAS the things,
-# among them the `aoide-rice-reload` unit that brings a staged song back after a
+# among them the `aoide-rice-reload` unit that brings a staged rice back after a
 # login or a switch, and the switch's one try-restart that runs it before the shell.
 #
 # A fixture that fails to evaluate is a failing test, not a skipped one; the
@@ -83,7 +83,7 @@ else
   check "only: no strillix fact"                    "false" "$(o .strillix)"
   check "only: no rice binary installed"        "0" \
     "$(o '[.packages[] | select(test("-strillix$"))] | length')"
-  check "only: no song"                         "null" "$(o .song)"
+  check "only: no rice"                         "null" "$(o .rice)"
   check "only: config holds only shell.qml"     "shell.qml" \
     "$(o '.configEntries | join(",")')"
   check "only: no shellbridge unit"             "0" \
@@ -111,7 +111,7 @@ else
   check "bare: no shell unit at all"            "0" \
     "$(b '[.userServices[] | select(test("quickshell"))] | length')"
   check "bare: no service recorded"             "null" "$(b .service)"
-  # No `songs/` check here: with `config` null there is no directory to read, so
+  # No `rices/` check here: with `config` null there is no directory to read, so
   # the reading would be false by construction. The `only` case above carries
   # it — there the directory exists and holds exactly its entry point.
   check "bare: config stays null"               "null" "$(b .config)"
@@ -137,17 +137,17 @@ else
   check "two: the quickshell fact is set"       "true" "$(t .quickshell)"
 fi
 
-# ── test-song-without-strillix: the eval that must fail ──────────────────────────
-if evalf songWithoutStrillix "$tmp/song.err" >/dev/null; then
-  printf '%-46s FAIL (evaluated cleanly)\n' "song without the strillix runtime is refused"
+# ── test-rice-without-strillix: the eval that must fail ──────────────────────────
+if evalf riceWithoutStrillix "$tmp/rice.err" >/dev/null; then
+  printf '%-46s FAIL (evaluated cleanly)\n' "rice without the strillix runtime is refused"
   fail=$((fail+1))
-elif grep -qF -- 'needs the strillix runtime' "$tmp/song.err"; then
-  printf '%-46s PASS  (%s)\n' "song without the strillix runtime is refused" \
-    "$(tr -d '\n' < "$tmp/song.err" | grep -o -m1 -- 'aoide.rice = "sonata" needs the strillix runtime: pick [^"]*')"
+elif grep -qF -- 'needs the strillix runtime' "$tmp/rice.err"; then
+  printf '%-46s PASS  (%s)\n' "rice without the strillix runtime is refused" \
+    "$(tr -d '\n' < "$tmp/rice.err" | grep -o -m1 -- 'aoide.rice = "sonata" needs the strillix runtime: pick [^"]*')"
   pass=$((pass+1))
 else
-  printf '%-46s FAIL (wrong error)\n' "song without the strillix runtime is refused"
-  grep -v '^ *$' "$tmp/song.err" | tail -8 | sed 's/^/    | /'
+  printf '%-46s FAIL (wrong error)\n' "rice without the strillix runtime is refused"
+  grep -v '^ *$' "$tmp/rice.err" | tail -8 | sed 's/^/    | /'
   fail=$((fail+1))
 fi
 
@@ -166,7 +166,7 @@ else
   check "control: yomi HAS the rice binary"     "1" \
     "$(y '[.packages[] | select(test("-strillix$"))] | length')"
   # The staging path's session-sourced variable, declared on every unit a
-  # staged song can descend from — and all three naming ONE directory, so a
+  # staged rice can descend from — and all three naming ONE directory, so a
   # unit cannot go stale on its own (found at the S9 yomi switch: an inherited
   # login-environment value survived a switch until the operator relogged).
   check "control: aoided declares the templates" "1" "$(y '.templates.aoided | length')"
@@ -176,8 +176,8 @@ else
   check "control: every unit names one directory" "true" "$(y '.templatesAgree')"
   check "control: it is the shipped rices"   "true" \
     "$(y '.templates.aoided[0] | endswith("-strillix-rices-templates/share/strillix/rices")')"
-  # The unit that brings a staged or drafted song back after a login or a
-  # switch: ordered before the shell (its first frame is the staged song), run in
+  # The unit that brings a staged or drafted rice back after a login or a
+  # switch: ordered before the shell (its first frame is the staged rice), run in
   # the user manager once the session is up, one shot that stays active even when
   # `strillix reload` refuses or is cut off (the `-`), bounded by `timeout` because a
   # oneshot has no start timeout of its own, carrying the runtime root and the

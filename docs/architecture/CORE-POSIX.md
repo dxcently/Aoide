@@ -374,12 +374,12 @@ not a code defect; it is recorded rather than papered over.
   `commands::preview_tools::tests::session_menu_qml_top_level_children_match_the_real_checkout`
   and
   `commands::preview_tools::tests::file_matched_node_children_resolve_positionally_against_the_real_session_menu_children`
-  compare hardcoded line numbers against the LIVE song (`flake_root()` is
+  compare hardcoded line numbers against the LIVE rice (`flake_root()` is
   `~/.aoide`'s `Aoide` checkout): they expect the top-level children at lines
   67/134/165/179/186/187 and the file on disk has them at
   138/205/236/250/257/258 — with that file byte-identical to this worktree's own
   copy and unchanged since before this slice began. No `strillix` file is in this
-  slice's diff; those expectations belong to the lane that owns the song.
+  slice's diff; those expectations belong to the lane that owns the rice.
 - **Refusal convention**: where a capability is host-specific, the shape is
   the named refusal — `cfg(target_os)` on the existing body plus a non-host arm
   that keeps today's fail-closed semantics — never a fabricated uid/pid, never

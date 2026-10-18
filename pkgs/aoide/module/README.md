@@ -13,7 +13,7 @@ package build from the same one-line input.
   overlay line of their own.
 - `options.nix` — THE core `aoide.*` option contract: `enable`, `root`,
   `checkout`, `auditLog`, `terminal`, `user`, `sessionTarget`. Every
-  AoideOS-side unit (`modules/nucleus/{aoided,secrets,config}.nix`,
+  Strillix-side unit (`modules/nucleus/{aoided,secrets,config}.nix`,
   `modules/dendrites/strillix/shellbridge.nix`) reads these options; this file only
   declares them.
 - `aoided.nix` — the `aoided` systemd user service itself: the tmpfiles
@@ -30,7 +30,7 @@ package build from the same one-line input.
   `modules/dendrites/aoided.nix` carries the
   strillix-gated `STRILLIX_TEMPLATES` variable plus every door
   (mcp/a2a/pair-watch), the discovery firewall carve, and the usage
-  poller — all still AoideOS-side deployment.
+  poller — all still Strillix-side deployment.
 
 ## How a consumer imports it
 

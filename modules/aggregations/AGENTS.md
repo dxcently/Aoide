@@ -22,7 +22,7 @@ Two bodies MAY name the same member: membership merges (`mkDefault`), and two
 groups choosing different providers for one member collide on
 `dendrites.<member>.provider` — an error naming the member, never import order
 picking a winner. What a body may not do is reach for another group's story:
-`desktop` and `aoideos` are deliberately disjoint (the session's platform vs the
+`desktop` and `strillix` are deliberately disjoint (the session's platform vs the
 thing that paints it), and the host writes how they compose.
 
 ## `nucleus` is a group, not a slot

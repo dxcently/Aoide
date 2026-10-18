@@ -2,7 +2,7 @@
 
 The shell lane: the Quickshell package and the one `aoide-quickshell` user
 service, started on whatever directory `aoide.quickshell.config` names. It
-renders no QML, deploys nothing and knows no song — bring your own QML, or let
+renders no QML, deploys nothing and knows no rice — bring your own QML, or let
 a lane (`strillix`) name its deployed tree.
 
 ```

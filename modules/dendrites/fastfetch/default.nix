@@ -2,7 +2,7 @@
 #
 # A DIRECTORY dendrite because it carries an asset (./ascii-fetch, the logo:
 # Aoide's lyre in compact form — three strings, curved arms, a soundbox, the
-# A·O·I·D·E ground and a "the song" tag). Redrawn small (13×7) so the info
+# A·O·I·D·E ground and a "the rice" tag). Redrawn small (13×7) so the info
 # column sits flush beside it and never wraps in a tiled/narrow terminal.
 # The catalogue names this directory, so its default.nix registers exactly like
 # a flat dendrite (CONTRACTS.md §2).

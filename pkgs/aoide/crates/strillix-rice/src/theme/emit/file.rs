@@ -3,7 +3,7 @@
 //!
 //! Substitutes `{{group.key}}` placeholders (e.g. `{{palette.bg}}`,
 //! `{{window.border}}`) in a caller-supplied template string with the fully
-//! resolved note set — the "apply the song's theme to ANY config file"
+//! resolved note set — the "apply the rice's theme to ANY config file"
 //! primitive. Pure: no host side-effect; writing the rendered text into some
 //! live config is the caller's effectful half (the deferred `management`
 //! seam, per the emit/apply split in `emit/mod.rs`).

@@ -88,7 +88,7 @@ pub const POLARITY_DEFAULT: &str = "light";
 /// The v0 schema version, carried into every resolved/emitted document.
 pub const SCHEMA_VERSION: &str = "0";
 
-/// The widgets-tier per-entry field set (CONTRACTS.md §5 "Per-song flavor
+/// The widgets-tier per-entry field set (CONTRACTS.md §5 "Per-rice flavor
 /// widgets"; `modules/nucleus/options.nix`'s `widgetType` submodule — this
 /// validator is that option's authoritative Rust-side twin, same
 /// permissive-nix/authoritative-Rust split as the rest of this file). Each
@@ -938,7 +938,7 @@ mod tests {
             check(&format!("polarity {ok} is accepted: {:?}", r.errors), r.ok);
         }
         // Absent entirely — the common case (no committed notes file carries
-        // one; the songs declare the field in `rice.nix`).
+        // one; the rices declare the field in `rice.nix`).
         check("an absent polarity is accepted", validate(&load("valid.json")).ok);
         for bad in [
             serde_json::json!("Light"),

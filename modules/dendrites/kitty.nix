@@ -13,7 +13,7 @@
 #     here.
 #   - Staged colours (house rule 10: staging hot-loads, never waits on a
 #     rebuild): kitty.conf includes `<strillix.root>/stage/terminal-colors.conf`
-#     AFTER Stylix's baked colour include, so a new window opens in the song
+#     AFTER Stylix's baked colour include, so a new window opens in the rice
 #     `rice stage` last staged, and opens a per-instance control socket
 #     (`listen_on`, `allow_remote_control socket-only`) over which `rice stage`
 #     has the windows already open reload their config, this file included.
@@ -122,17 +122,17 @@
               # the compositor does the frosting instead. The kitty window class is
               # additionally pinned in the compositor's Aero window rules.
               #
-              # Brightness (the User): keep the CREAM cell colour (song base00), just
+              # Brightness (the User): keep the CREAM cell colour (rice base00), just
               # make the terminal read brighter — a high background_opacity (0.86)
               # so the bright cream dominates over the warm painting behind it
               # instead of the wallpaper muddying it dim; hyprglass then glosses
               # the surface on top (compositor manage_window_blur). The cream +
               # dark-ink look is unchanged; only the surface got brighter.
               #
-              # This is the host's bake: what a song with no
+              # This is the host's bake: what a rice with no
               # `geometry.terminalOpacity` opinion shows. Nothing in cargo
               # copies it; kitty falls through to it when neither include
-              # below carries a line. A song's own value arrives through those
+              # below carries a line. A rice's own value arrives through those
               # includes, and open windows follow by reloading the config over
               # the control socket, which moves the opacity only because
               # dynamic_background_opacity is on.
@@ -146,7 +146,7 @@
               # Staged colours reach OPEN windows over kitty's control socket:
               # `rice stage` runs `kitty @ --to unix:<sock> load-config` (no
               # path: kitty re-reads this file and every include) against every
-              # socket this line opens (aoide-song's live.rs finds them by the
+              # socket this line opens (strillix-rice's live.rs finds them by the
               # `kitty-<pid>` name in the runtime dir — a directory listing, no
               # process-table walk).
               # socket-only: remote control is accepted on this socket and
@@ -168,17 +168,17 @@
               "ctrl+shift+U" = "none"; # for vim's page up
             };
           })
-          # The song's terminal look, for every NEW window — two includes,
+          # The rice's terminal look, for every NEW window — two includes,
           # in this order:
           #
           #   1. `$STRILLIX_ROOT/declared/terminal-opacity.conf` — one
           #      `background_opacity` line the strillix lane's activation seed
-          #      publishes from the song's own `geometry.terminalOpacity`
+          #      publishes from the rice's own `geometry.terminalOpacity`
           #      (CONTRACTS.md §4): the declared truth, so a host that has
           #      never staged anything still opens its terminal at the
-          #      song's opacity instead of the baked default.
+          #      rice's opacity instead of the baked default.
           #   2. `$STRILLIX_ROOT/stage/terminal-colors.conf` — the colours `rice stage`
-          #      writes, and a `background_opacity` only for a song with an
+          #      writes, and a `background_opacity` only for a rice with an
           #      opinion. SECOND, because kitty takes the LAST value for a
           #      repeated key: a live stage stays authoritative, and a stage
           #      without an opacity line falls through to the declared

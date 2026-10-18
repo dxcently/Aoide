@@ -11,19 +11,19 @@ The **gadget dock** (`agentWidgets`) is the desktop's at-a-glance conductor
 surface: a left-edge panel holding Aoide's orchestration/system gadgets,
 summoned on demand and distinct from the terminal/TUI DAG views.
 
-*Implementation: `pkgs/strillix-shell/qml/SongGadgets.qml` over the song's own
+*Implementation: `pkgs/strillix-shell/qml/RiceGadgets.qml` over the rice's own
 `widgets/dock.qml` and gadget bodies — see [[Quickshell]] and [[Codebase]].
 Appearance is not specified
-here: the dock re-skins with the active song, and rice design memory lives in
+here: the dock re-skins with the active rice, and rice design memory lives in
 the rices ([[Self-Ricing]]), not on this page.*
 
-**Status: the song's own bodies paint.** The dock and its gadgets are
-per-song widget bodies — `rices/sonata/widgets/{dock,conductor,
+**Status: the rice's own bodies paint.** The dock and its gadgets are
+per-rice widget bodies — `rices/sonata/widgets/{dock,conductor,
 terminals,meters,power,usage,wallpaper,wallpaper-picker}.qml` plus the shared
-frame ([[Song-Anatomy]]) — resolved by slot NAME through the staging engine,
+frame ([[Rice-Anatomy]]) — resolved by slot NAME through the staging engine,
 with sonata as the fallback. The lane's `pkgs/strillix-shell/qml/` carries the
-mechanism (`SongGadgets.qml`, `GadgetFrame.qml`, `WidgetSlot.qml`), not a
-second copy of a body: a change to what renders lands in a song's file.
+mechanism (`RiceGadgets.qml`, `GadgetFrame.qml`, `WidgetSlot.qml`), not a
+second copy of a body: a change to what renders lands in a rice's file.
 
 ## What the dock holds
 
@@ -83,14 +83,14 @@ renderers; the dock's Conductor gadget gives the desktop its at-a-glance
 agent-tree view instead of a literal graph diagram ([[Session-Graph]]).
 
 These six — Conductor, Terminals, Meters, Power, the opt-in Usage stele, and
-the herald-center notification slot — are the dock's **baseline**, not a
-closed set: a song MAY register a further gadget by declaring
+the notifications-center notification slot — are the dock's **baseline**, not a
+closed set: a rice MAY register a further gadget by declaring
 `kind = "dock"` in `aoide.layout.widgets.<slot>` (`CONTRACTS.md` §5),
 which mounts it as an `Item` into the same gadget column via
-`SongGadgets.qml`, ordered against any other declared `dock` entries by its
+`RiceGadgets.qml`, ordered against any other declared `dock` entries by its
 `order` field. The bar's own calendar popout is a separate case — not a dock
-gadget at all; its body is resolved per-song by the staging engine
-([[Widget-Maker#The staging engine — a song overrides desktop chrome]]) and
+gadget at all; its body is resolved per-rice by the staging engine
+([[Widget-Maker#The staging engine — a rice overrides desktop chrome]]) and
 never hosted in this column.
 
 ## Posture — a left-edge panel
@@ -123,7 +123,7 @@ from the height of the gadget column it stacks
 - [[Conductor-Channel]]
 - [[Session-Graph]]
 - [[Widget-Maker]]
-- [[Song-Anatomy]]
+- [[Rice-Anatomy]]
 - [[shellbridge]]
 - [[Codebase]]
 - [[Widget-Bridge-Contract]]

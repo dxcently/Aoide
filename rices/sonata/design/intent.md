@@ -1,6 +1,6 @@
 # sonata — Design Intent
 
-**Song:** sonata (committed rice; the shipped standard — the key every unauthored slot falls back to. yomi-strix performs `cadenza`.)
+**Rice:** sonata (committed rice; the shipped standard — the key every unauthored slot falls back to. yomi-strix performs `cadenza`.)
 **Palette:** a Greek marble key — pale warm-marble ground, plum-charcoal ink,
 deep Attic-gold chrome accent, terracotta urgent, a true laurel leaf-green
 one-hot blaze; aegean blue steps back to a preview/information role
@@ -8,19 +8,19 @@ one-hot blaze; aegean blue steps back to a preview/information role
 glyph sets, type tiers, the opacity ladder, rule idioms, state treatments, the
 state-glyph contract shared verbatim with `theme.rs`, and the role→hue palette
 below. A deliberate divergence from the Pantheon wireframe grammar the retired
-`default` song once drew (kept as historical reference at
+`default` rice once drew (kept as historical reference at
 `docs/Aoide-Wiki/references/pantheon/pantheon-grammar.md`)
-**Cover:** none — the wallpaper note is `null`, so the stylix lane bakes a
+**Wallpaper:** none — the wallpaper note is `null`, so the stylix lane bakes a
 deterministic **bright-marble field** from `palette.bg` (`#f2ebde`) — the
-same null-wallpaper-to-solid mechanism the stylix lane applies to any song
-with no cover note. Colours fit the theme, not a
+same null-wallpaper-to-solid mechanism the stylix lane applies to any rice
+with no wallpaper note. Colours fit the theme, not a
 photo; the wallpaper switcher handles photos live (see the Iteration Log)
 
 ---
 
 ## The design shelf — where to look
 
-Per-song design memory lives here, not in the wiki. Four files, in reading
+Per-rice design memory lives here, not in the wiki. Four files, in reading
 order for someone about to draw something:
 
 | file | answers |
@@ -36,7 +36,7 @@ shared per-widget blueprint anywhere.
 
 ---
 
-## Why this song exists
+## Why this rice exists
 
 sonata is the rices's shipped standard — the light key, and the fallback
 every unauthored slot resolves to. Any host in the
@@ -45,7 +45,7 @@ fleet performs it with one line — `aoide.rice = "sonata";` — and the whole
 
 ## Host-agnostic by construction
 
-This song sets ONLY `aoide.theme`. It names no host, enables no lane or
+This rice sets ONLY `aoide.theme`. It names no host, enables no lane or
 dendrite, touches no hardware or service, and keys its own polarity —
 `aoide.theme.polarity = "light"`, declared beside the palette in `rice.nix`
 (CONTRACTS.md §1). The venue
@@ -56,7 +56,7 @@ enabled lane/dendrite set (CONTRACTS.md §5).
 ## The key — the Greek register, region by region
 
 The palette is authored as a self-standing **Greek register**, not read from a
-cover image: a temple in daylight. It is a marble ground under dark ink, with
+wallpaper image: a temple in daylight. It is a marble ground under dark ink, with
 chrome drawn from a temple's own materials — aegean sea-blue, terracotta clay,
 Attic gold, laurel green, bronze verdigris, Tyrian purple, deep bronze.
 
@@ -65,7 +65,7 @@ opacity, not colour": kitty renders at `background_opacity` 0.86 and the bar
 sheet at ~0.30 opacity **over** this ground — `base00` stays in the pale
 marble-glass family, a warm sunlit stone.
 
-The polarity is **light**, the song's own declaration (`aoide.theme.polarity`
+The polarity is **light**, the rice's own declaration (`aoide.theme.polarity`
 in `rice.nix`, mirrored in `theme.json`): `base00` is the lightest
 value and `base05`–`base07` are the dark inks.
 
@@ -110,7 +110,7 @@ blue-teal that recedes without vanishing into the ground.
 
 `bar` and `notif` are all-null (palette everywhere) — the key does the work,
 no hidden overrides to undo before a transposition. Only `window` carries the
-song-owned border notes above.
+rice-owned border notes above.
 
 ## Contrast (light polarity, computed — not eyeballed)
 
@@ -240,18 +240,18 @@ not yet ended) names that terminal, "Kill terminal <name>"; anything else reads
 
 ## Iteration Log
 
-- 2026-07-26: initial commit as the replay fixture; palette-only, no cover.
-- 2026-07-29: re-keyed from `/covers/sonata.webp` (the dusk pianist). The
+- 2026-07-26: initial commit as the replay fixture; palette-only, no wallpaper.
+- 2026-07-29: re-keyed from `/wallpapers/sonata.webp` (the dusk pianist). The
   earlier indigo-nocturne intent and the interim warm-parchment (Alma-Tadema
   *Unconscious Rivals*) key are both retired; the light key now reads from the
-  cover it actually ships with, region by region, contrast computed above.
-- 2026-07-29: cover swapped to `/covers/yuki-sonata.png` — the same
+  wallpaper it actually ships with, region by region, contrast computed above.
+- 2026-07-29: wallpaper swapped to `/wallpapers/yuki-sonata.png` — the same
   artwork as `sonata.webp` (identical scene and dimensions, PNG master), so
   the region-keyed palette carries over unchanged.
 - 2026-07-29: bar sheet and popout glass lowered 0.62/0.60 → 0.45/0.45
   (khoa: a more transparent strip; the hyprglass blur carries legibility).
   Current surface elements recorded above; rice design memory now lives
-  per-song (this file). [2026-08-14: the house grammar this once pointed at
+  per-rice (this file). [2026-08-14: the house grammar this once pointed at
   (the default rice's `design/pantheon.md`) is retired along with `default`
   itself — historical reference now at
   `docs/Aoide-Wiki/references/pantheon/pantheon-grammar.md`.]
@@ -265,10 +265,10 @@ not yet ended) names that terminal, "Kill terminal <name>"; anything else reads
   16 base16 slots re-derived region-by-region above, contrast recomputed and
   clearing every bar. Sonata also gains its OWN house grammar,
   `design/greek-grammar.md` — a typographic-Greek design language (columns,
-  meanders, pediments; text-and-symbols only) diverging from the default song's
-  Pantheon wireframe grammar, the blueprint for the widget reskin. The cover
-  still points at `yuki-sonata.png` (covers/ is out of this re-key's scope); a
-  Greek cover is a follow-up. The musical state-glyph contract (`♪ 𝄐 𝄽 𝄂 ·`,
+  meanders, pediments; text-and-symbols only) diverging from the default rice's
+  Pantheon wireframe grammar, the blueprint for the widget reskin. The wallpaper
+  still points at `yuki-sonata.png` (wallpapers/ is out of this re-key's scope); a
+  Greek wallpaper is a follow-up. The musical state-glyph contract (`♪ 𝄐 𝄽 𝄂 ·`,
   from `pkgs/aoide/src/conductor/theme.rs`) is untouched — the Greek forms frame it,
   never replace it. [2026-08-14: greek-grammar.md's motif vocabulary (columns,
   meander, entablature/pediment/stylobate) and its §4 widget-by-widget
@@ -292,14 +292,14 @@ not yet ended) names that terminal, "Kill terminal <name>"; anything else reads
   olive `#6b8b33` (only 41° off the new gold; leaf-green is 71° off). **Aegean
   `base0D` keeps its value and `holoBlue` role but its JOB narrows to
   preview/information** (workspace preview ring, links) — no longer active-state
-  chrome. **Cover retired: `wallpaper` → null**, so the stylix lane bakes a
+  chrome. **Wallpaper retired: `wallpaper` → null**, so the stylix lane bakes a
   deterministic bright-marble solid from `palette.bg` `#f2ebde` (the default
-  song's mechanism); the `covers/yuki-sonata.png` reference is dropped (khoa:
+  rice's mechanism); the `wallpapers/yuki-sonata.png` reference is dropped (khoa:
   colours fit the theme, not a photo; the wallpaper switcher handles photos
   live). Facet-tuning memory recorded above: bar sheet glass 0.45 → 0.30, bar
   popouts → 0.72, unfocused kitty 0.90 → 0.80 (these live in the compositor and
   quickshell lanes — another lane's domain — noted here only as design memory,
-  not edited by this song).
+  not edited by this rice).
 - 2026-07-30: **bar opaque + window borders swapped** (khoa: theme consistency
   pass). `AoideBar.qml`'s manuscript-strip sheet is no longer glass: fill is now
   `paletteBg` at alpha 1.0 (was 0.30) and the Aero-style white gloss gradient
@@ -315,9 +315,9 @@ not yet ended) names that terminal, "Kill terminal <name>"; anything else reads
   `theme.json` and `rice.nix` (kept in sync). The compositor lane
   (`modules/dendrites/compositor/hyprland/default.nix`) already derives
   `col.active_border`/`col.inactive_border` from `aoide.theme.window.border`/
-  `.borderInactive` (falling back to `palette.accent`/`palette.bg` when a song
+  `.borderInactive` (falling back to `palette.accent`/`palette.bg` when a rice
   leaves them null) — no compositor-side change was needed, the pipeline just
-  picked up the new song-owned notes.
+  picked up the new rice-owned notes.
 - 2026-08-15: **`design/` retconned around the belonging problem.** Three
   separate design passes over ONE bar popout were rejected on sight the same
   day (an invented votive-tablet metaphor with a 30-line defence; a stripped
@@ -367,7 +367,7 @@ not yet ended) names that terminal, "Kill terminal <name>"; anything else reads
   Independent review passed dynamic creation/recreation, the six live states,
   and 23 visibility/exposure cases. The staged dock shows both books and the
   square frame; consecutive compositor captures show the lifted page moving.
-  Runtime widget sources were older committed copies than the rendered song,
+  Runtime widget sources were older committed copies than the rendered rice,
   so they were backed up and reconciled to the live baseline before staging.
   Only Conductor and Terminals changed in the rendered tree; the registry,
   theme, wallpaper and other widget bodies were preserved. The first reload's

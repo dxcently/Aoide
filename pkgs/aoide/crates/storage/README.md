@@ -116,7 +116,7 @@ by decision — no embedded database yet
 
 - `records`/`fs`/`stage` — the stage-file record shapes and atomic
   read/write I/O every stage consumer (this crate's own `commands`, `conduct`,
-  `song`, `conductor`) goes through instead of touching JSON on disk directly.
+  `rice`, `conductor`) goes through instead of touching JSON on disk directly.
   Every runtime tree `fs` resolves hangs off ONE root, `fs::root` —
   `$AOIDE_ROOT` (absolute-path-wins), default `<home>/.aoide`, nix-free
   (L-C2, strillix-carrier lane, task #107) — EXCEPT `fs::flake_root`, which
@@ -134,7 +134,7 @@ by decision — no embedded database yet
   `aoide-conduct`'s `notifications::notifications_path`/`graph::pending_path`). Both honor
   `$AOIDE_STAGE_DIR` (absolute-path-wins) as one combined override, same as
   before the split; `conducting_stage_dir`'s own no-override fallback is
-  `state_dir().join("stage")` instead of `stage_dir`'s `song/stage`.
+  `state_dir().join("stage")` instead of `stage_dir`'s `rice/stage`.
 
   The rice's three files (CONTRACTS.md §4) are resolved here too:
   `rice_conf_link` (`<home>/.local/state/strillix/rice.conf`, `<home>` = `aoide_home()`; the one path outside
@@ -176,7 +176,7 @@ by decision — no embedded database yet
   six core files off their pre-split `/stage/` location, never
   clobbering a fresher `state/stage/` file and never touching a rice file.
   `fs::migrate_root_once` is the SIBLING one-shot migration for the L-C2
-  root move itself (a pre-L-C2 host's `~/Aoide/{song/stage,state,log}` into
+  root move itself (a pre-L-C2 host's `~/Aoide/{rice/stage,state,log}` into
   the new root's equivalents) — deliberately NOT wired into `fs::root`'s own
   resolution the way `migrate_conducting_stage` is wired into
   `conducting_stage_dir`'s: `root`/`stage_dir`/`state_dir` are reached by
@@ -191,15 +191,15 @@ by decision — no embedded database yet
   reasoning. `fs::repo_root` is GONE (its one caller, `aoide-upkeep`'s
   `soundcheck`, now reads `fs::flake_root` directly — a runtime root is not
   a repo, so deriving a checkout path from stage-dir parentage stopped
-  making sense the moment the two could diverge). `fs::song_templates_dir`
+  making sense the moment the two could diverge). `fs::rice_templates_dir`
   (L-C3, same lane) is a THIRD, sibling path seam alongside `root`/
   `flake_root`: the shipped SCORE TEMPLATES dir a repo-less host's `rice
-  compose --from <song>` and `strillix-rice::widgets`'s registry/manifest
+  compose --from <rice>` and `strillix-rice::widgets`'s registry/manifest
   regeneration both fall back to when `rice_dir` has
   nothing. `fs::strillix_share_dir` is its PARENT — the shipped `share/strillix`
   dir, where the offline generator (`nix/manifest.nix`) and
   `aoide-options.json` (`strx onboard`) sit — and `fs::rices_root` is the
-  machine's `<song>/rices/`, the argument that generator is pointed at.
+  machine's `<rice>/rices/`, the argument that generator is pointed at.
   `fs::host_config` is the host's own config file (`$AOIDE_HOST_CONFIG`, the
   nix option `aoide.hostConfig`, default `<flake_root>/hosts/<hostname>/
   default.nix`), the one `strx rice declare --host` rewrites.
@@ -708,12 +708,12 @@ by decision — no embedded database yet
   (storage) / `commands` (client) split this crate already holds for node
   transport.
 - `takes` — the take store behind `rice back`/`rice history`, hanging off
-  `rices/<song>/history/` when staged directly or
-  `rices/<song>/drafts/<name>/history/` when routed into a draft
+  `rices/<rice>/history/` when staged directly or
+  `rices/<rice>/drafts/<name>/history/` when routed into a draft
   (`strx reload` design, settled 2026-08-31 — the staging-mode take/back
   reach; every function takes `draft: Option<&str>`, `None` selecting the
-  song-scoped root). `HistoryRecord` also carries `widgets: Value` — the
-  song's widget QML bodies at mint time.
+  rice-scoped root). `HistoryRecord` also carries `widgets: Value` — the
+  rice's widget QML bodies at mint time.
 - `petname`/`display` — the adjective-noun petname mint and its
   render-time-only display grammar.
 - `addr` — the pure address resolver (messaging/presence plan, P-C1),
@@ -1088,7 +1088,7 @@ everything that persists state sits above it.
 
 ## How it composes
 
-`client`, `conduct`, `server`, `song`, `conductor`, and both app crates
+`client`, `conduct`, `server`, `rice`, `conductor`, and both app crates
 depend on it for durable state. **Charter smudge**: `takes` and `mode` live
 here rather than in a paint-adjacent crate — zero dependency weight, and
 `mode` is read by `shellbridge`, which itself stays core-crate-resident in

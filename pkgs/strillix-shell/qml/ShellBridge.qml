@@ -210,8 +210,8 @@ QtObject {
     // minting and every refusal.
     //
     //   bridge.riceMenu(cb)                   // what the menu lists
-    //   bridge.riceMode("stage", "nocturne")  // stage that runtime song
-    //   bridge.riceMode("declarative")        // lock back to the declared song
+    //   bridge.riceMode("stage", "nocturne")  // stage that runtime rice
+    //   bridge.riceMode("declarative")        // lock back to the declared rice
     //   bridge.riceDraft("enter", "draft-2")  // route the stage into a draft
     //   bridge.riceDraft("new")               // mint the next draft-<n>, enter it
     //   bridge.riceDraft("save")              // snapshot the stage as a draft
@@ -221,10 +221,10 @@ QtObject {
     // `riceMenu` answers like traceSession: `cb` EXACTLY ONCE, on its own
     // throwaway socket, no replay, the daemon's children bounded
     // together under replyTimeoutMs. The answer is
-    // { ok: true, mode, song, draft, stagingSong, declared, songs: [{ name, ok,
-    // reason? }], draftsSong, drafts: [{ name, savedAt, current }] } — `song`,
-    // `draft`, `stagingSong`, `declared` and `draftsSong` null when unset, and
-    // `drafts` empty when no song is named — or { ok: false, reason, message }
+    // { ok: true, mode, rice, draft, stagingRice, declared, rices: [{ name, ok,
+    // reason? }], draftsRice, drafts: [{ name, savedAt, current }] } — `rice`,
+    // `draft`, `stagingRice`, `declared` and `draftsRice` null when unset, and
+    // `drafts` empty when no rice is named — or { ok: false, reason, message }
     // with `reason` cli-failed / no-answer / no-client / no-reply (no-reply:
     // nothing answered within replyTimeoutMs, which every answered verb can
     // return). A socket error or an unreadable line answers { ok: false,
@@ -237,7 +237,7 @@ QtObject {
     // reply, and the outcome is a toast the daemon fires (a command sent while
     // the daemon is down is dropped, so no toast fires). `riceMode` sends a
     // name only for "stage" with a non-empty string, so the daemon drops the
-    // line instead of staging a song called "undefined". `riceDraft` `enter`
+    // line instead of staging a rice called "undefined". `riceDraft` `enter`
     // and `new` from the locked declarative mode unlock it first, so a caller
     // re-reads riceMenu to see what happened; `save` and `drop` are refused
     // there (toast: unlock first). `enter` is enter-or-create: the CLI forks the
@@ -249,14 +249,14 @@ QtObject {
     // Declare row to speak, and `hostConfig`, the file the declare rewrites
     // (null when none resolves), for a late answer to name. `riceDeclare` answers like riceMenu, `cb` EXACTLY
     // ONCE: the daemon runs `strillix rice declare <name> --host`, which rewrites the
-    // host config's `habit.song.declared` line and never rebuilds. The answer
+    // host config's `habit.rice.declared` line and never rebuilds. The answer
     // is { ok: true, message, name, host, changed, stagedDiffers } — `changed`
     // false when the host already declares it, `stagedDiffers` true when the
     // staged copy holds edits the rebuild will not carry, null when unknown —
     // or { ok: false, reason, message } with the CLI's refusal (not-built-in,
     // staged-draft, host-line-count, …), no-client, or no-reply — the declare
     // outlived replyTimeoutMs and may still land, so a surface says to check
-    // the host file, never "not declared". A name that is not a song name is
+    // the host file, never "not declared". A name that is not a rice name is
     // never sent, and the callback answers that itself.
     function riceMenu(callback) {
         _ask({ cmd: "ricemenu" }, callback,
@@ -273,7 +273,7 @@ QtObject {
     function riceDeclare(name, callback) {
         if (typeof name !== "string" || !/^[a-z0-9][a-z0-9-]*$/.test(name)) {
             if (callback)
-                callback({ ok: false, reason: "invalid-name", message: "no song to declare" })
+                callback({ ok: false, reason: "invalid-name", message: "no rice to declare" })
             return
         }
         _ask({ cmd: "ricedeclare", name: name }, callback,

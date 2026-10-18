@@ -5,7 +5,7 @@
 # in the repository — cliphist's DEFAULT db path (~/.cache/cliphist/db),
 # persistent across reboots. The lane is the watcher: it records text and
 # image MIME data via cliphist and installs cliphist and wl-clipboard.
-# Display is the Grimoire launcher's (the song's `launcher` slot), which reads
+# Display is the Grimoire launcher's (the rice's `launcher` slot), which reads
 # the clipboard backend (pkgs/strillix-shell/qml/AoideClipboard.qml) and renders
 # entries as a dedicated chapter — no separate picker surface. That backend
 # copies and previews by calling the system's `cliphist` and `wl-copy` from

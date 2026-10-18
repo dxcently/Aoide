@@ -1,6 +1,6 @@
-# tests/lock-greeter/rices/aubade/rice.nix — a fixture song for tests/vm-lock-greeter.nix: a palette and nothing else (the face).
+# tests/lock-greeter/rices/aubade/rice.nix — a fixture rice for tests/vm-lock-greeter.nix: a palette and nothing else (the face).
 #
-# A body (CONTRACTS.md §5): read only when this song is selected.
+# A body (CONTRACTS.md §5): read only when this rice is selected.
 {
   system = {
     providers = {

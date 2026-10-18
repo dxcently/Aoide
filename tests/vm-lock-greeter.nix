@@ -2,16 +2,16 @@
 # screen lock, end to end, on a graphical VM.
 #
 # Two machines, each assembled through the real constructor (habit's
-# `composition.mkNixosModules`, as lib/aoideos.nix does) over the fixture
+# `composition.mkNixosModules`, as lib/strillix.nix does) over the fixture
 # rices in `tests/lock-greeter/rices/`, with the compositor and its hyprland
-# behaviour lane selected by the host. Each song's body brings the paint (the
+# behaviour lane selected by the host. Each rice's body brings the paint (the
 # greeter, lock, powermenu and the rest of the ten strillix providers, and the strillix
 # renderer), so the host names none of them:
 #
 #   face   declares `aubade`, which ships `widgets/greeter.qml`,
 #          `widgets/lockscreen.qml`, an uppercase helper type its greeter
 #          face uses (`AubadeCard.qml`), an `icons/` that face loads and a
-#          `cover/` whose logon picture is the greeter's background:
+#          `wallpaper/` whose logon picture is the greeter's background:
 #          greetd + the Quickshell greeter at boot, and `strillix lock` locks
 #          through the shell's LockHost.
 #   plain  declares `plainsong`, which ships no face: ly at boot, and
@@ -22,7 +22,7 @@
 # `face` carries a second account, so its greeter has a choice to make and a
 # user to switch away from.
 #
-# The song hook is lib/rices.nix's, over the fixture rices instead of the
+# The rice hook is lib/rices.nix's, over the fixture rices instead of the
 # committed one (the same one call tests/consumer makes for its own rices).
 #
 # Screenshots land in the driver's output directory (`$out` under
@@ -43,7 +43,7 @@ let
     stock = inputs.nixpkgs.legacyPackages.${system};
   };
 
-  aoideos = import ../lib/aoideos.nix {
+  strillix = import ../lib/strillix.nix {
     inherit inputs lib system;
     username = "khoa";
   };
@@ -53,14 +53,14 @@ let
     inherit lib ricesRoot;
   };
 
-  # The song hook over the fixture rices (lib/rices.nix). The three songs
+  # The rice hook over the fixture rices (lib/rices.nix). The three rices
   # bring their own paint: each body selects the ten strillix providers and the
   # strillix renderer, so the host names none of them.
   hook = rices.hook {
     registry = import ../modules;
   };
 
-  hostFor = song: {
+  hostFor = rice: {
     _file = toString ./vm-lock-greeter.nix;
 
     habit.dendrites.compositor = {
@@ -74,7 +74,7 @@ let
     habit.dendrites.aoide-packages.enable = true;
     habit.dendrites.aoided.enable = true;
 
-    habit.rice.declared = song;
+    habit.rice.declared = rice;
 
     habit.users.khoa = {
       definition = ./vm-boot-user.nix;
@@ -83,12 +83,12 @@ let
   };
 
   resolve =
-    song:
+    rice:
     composition.mkNixosModules {
-      hostName = "vm-${song}";
+      hostName = "vm-${rice}";
       inherit (hook) registry selectionModules extraModulesFor;
-      host = hostFor song;
-      extraModules = [ aoideos.nucleusModule ];
+      host = hostFor rice;
+      extraModules = [ strillix.nucleusModule ];
       homeManagerModule = inputs.home-manager.nixosModules.home-manager;
       overlays = [ overlay ];
       specialArgs = {
@@ -225,7 +225,7 @@ pkgs.testers.runNixOSTest {
     # Swap the aubade lock face for a fixture, restart the shell, lock.
     def lock_with_face(m, fixture):
         m.succeed(
-            "f=/home/khoa/.aoide/run/qml/songs/aubade/lockscreen.qml; "
+            "f=/home/khoa/.aoide/run/qml/rices/aubade/lockscreen.qml; "
             f"chmod u+w $(dirname $f); rm -f $f; cp {fixture} $f; chown khoa $f"
         )
         as_khoa(m, "systemctl --user restart aoide-quickshell.service")
@@ -246,7 +246,7 @@ pkgs.testers.runNixOSTest {
         # face still standing here reported ready.
         face.sleep(8)
         face.screenshot("01-greeter")
-        # The song's icons/ rode into the greeter tree, at the path a face
+        # The rice's icons/ rode into the greeter tree, at the path a face
         # reads under AOIDE_ROOT.
         said = greeter_log(face)
         assert "[fixture] greeter icon loaded" in said, said
@@ -255,12 +255,12 @@ pkgs.testers.runNixOSTest {
         assert "is not a type" not in said, said
         assert "[fixture] greeter face ready" in said, said
         assert "the face did not report ready" not in said, said
-        # The song's cover/ folder rode into the greeter tree, and the logon
+        # The rice's wallpaper/ folder rode into the greeter tree, and the logon
         # picture it names is the background stage/wallpaper.json points the face at.
         tree = face.succeed("ps -u greeter -o args= | grep -o '/nix/store/[^ ]*-aoide-greeter-tree' | head -n1").strip()
-        cover = json.loads(face.succeed(f"cat {tree}/stage/wallpaper.json"))
-        assert cover == {"path": f"{tree}/rices/aubade/wallpaper/aubade-logon.png", "song": "aubade"}, cover
-        face.succeed(f"test -s {cover['path']}")
+        wallpaper = json.loads(face.succeed(f"cat {tree}/stage/wallpaper.json"))
+        assert wallpaper == {"path": f"{tree}/rices/aubade/wallpaper/aubade-logon.png", "rice": "aubade"}, wallpaper
+        face.succeed(f"test -s {wallpaper['path']}")
 
     with subtest("face: the greeter refuses a wrong password, and switch user starts over"):
         face.send_chars("bram\n")

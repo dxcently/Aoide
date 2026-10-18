@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # The consumer fixture, evaluated: a stranger's flake whose ONLY contact with
-# AoideOS is the root flake's exported surface.
+# Strillix is the root flake's exported surface.
 #
 #   ./tests/consumer/run.sh                 # this checkout's working tree
 #   ./tests/consumer/run.sh git+file:///abs/dir?rev=<sha>   # a frozen commit
@@ -15,10 +15,10 @@
 #      inputs (so a commit ref really freezes the tree under test, the same
 #      discipline tests/quickshell-seam uses), and the resulting hosts are read.
 #      `consumer` performs from its OWN rices: it hands over the nucleus module (the option
-#      contract) and selects its own `nucleus` group (the services), strillix, the shell and stylix; it performs one song and builds in a second
-#      that BORROWS the first's widgets; and the song machinery a real host gets
+#      contract) and selects its own `nucleus` group (the services), strillix, the shell and stylix; it performs one rice and builds in a second
+#      that BORROWS the first's widgets; and the rice machinery a real host gets
 #      (deployed config, seeded stage, seeded machine rices, templates on the
-#      units) is there. `aoide-songs` performs Aoide's own `sonata` through the
+#      units) is there. `aoide-rices` performs Aoide's own `sonata` through the
 #      `ricesRoot` export, and its strillix lane is handed that same directory.
 set -uo pipefail
 cd "$(dirname "$0")" || exit 1
@@ -96,7 +96,7 @@ expr="
     cfg = out.nixosConfigurations.consumer.config;
     home = cfg.home-manager.users.\${cfg.aoide.user};
     envOf = units: unit: let u = units.\${unit} or { }; in u.serviceConfig.Environment or u.Service.Environment or [ ];
-    aoideSongs = out.nixosConfigurations.aoide-songs.config;
+    aoideRices = out.nixosConfigurations.aoide-rices.config;
     # ── The front door (CONTRACTS.md §2, PACKAGE-LAYOUT) ──────────────────────
     # The stubbed host mixes value slots: the consumer's own bar and Aoide's dock
     # part. Its shell is read from the home it is built into, and its components
@@ -117,7 +117,7 @@ expr="
     };
     consumerComponents = builtins.mapAttrs (_: c: c.provider) consumerCfg.aoide.components;
     # The parts are the ten strillix providers, each a file that exists; the rices
-    # are the committed songs with a rice.nix.
+    # are the committed rices with a rice.nix.
     parts = {
       names = builtins.attrNames flake.parts;
       allFiles = builtins.all builtins.pathExists (builtins.attrValues flake.parts);
@@ -137,31 +137,31 @@ expr="
     };
     # Aoide's rices and the consumer's own, merged BEFORE anything reads them:
     # one call answers the directory and the registry over it.
-    mergedSongs = flake.lib.rices.merge {
+    mergedRices = flake.lib.rices.merge {
       lib = flake.inputs.nixpkgs.lib;
       pkgs = flake.inputs.nixpkgs.legacyPackages.x86_64-linux;
       books = [
         flake.ricesRoot
-        ./songs-merge
+        ./rices-merge
       ];
     };
     mergedCfg = out.nixosConfigurations.merged.config;
   in {
-    aoideSongs = {
-      drv = aoideSongs.system.build.toplevel.drvPath;
-      rice = aoideSongs.aoide.rice;
-      builtIn = aoideSongs.aoide.rices.builtIn;
-      bg = aoideSongs.aoide.theme.palette.bg;
-      ricesIsExport = toString out.nixosConfigurations.aoide-songs._module.args.ricesRoot == toString flake.ricesRoot;
+    aoideRices = {
+      drv = aoideRices.system.build.toplevel.drvPath;
+      rice = aoideRices.aoide.rice;
+      builtIn = aoideRices.aoide.rices.builtIn;
+      bg = aoideRices.aoide.theme.palette.bg;
+      ricesIsExport = toString out.nixosConfigurations.aoide-rices._module.args.ricesRoot == toString flake.ricesRoot;
     };
     merged = {
       drv = mergedCfg.system.build.toplevel.drvPath;
       rice = mergedCfg.aoide.rice;
       builtIn = mergedCfg.aoide.rices.builtIn;
       bg = mergedCfg.aoide.theme.palette.bg;
-      borrowed = mergedSongs.songMeta.encore.manifest == mergedSongs.songMeta.sonata.manifest && mergedSongs.songMeta.encore.manifest != { };
-      names = mergedSongs.songNames;
-      ricesIsMerged = toString out.nixosConfigurations.merged._module.args.ricesRoot == toString mergedSongs.dir;
+      borrowed = mergedRices.riceMeta.encore.manifest == mergedRices.riceMeta.sonata.manifest && mergedRices.riceMeta.encore.manifest != { };
+      names = mergedRices.discoveredNames;
+      ricesIsMerged = toString out.nixosConfigurations.merged._module.args.ricesRoot == toString mergedRices.dir;
     };
     drv = out.nixosConfigurations.consumer.config.system.build.toplevel.drvPath;
     rice = cfg.aoide.rice;
@@ -197,14 +197,14 @@ printf '%-52s PASS\n' "the consumer host evaluates"; pass=$((pass+1))
 o() { printf '%s' "$out" | jq -r "$1"; }
 cfg=$(o .config)
 
-check "performs the declared song"            "solo" "$(o .rice)"
+check "performs the declared rice"            "solo" "$(o .rice)"
 check "builds in declared + available"        "duet solo" "$(o '.builtIn | join(" ")')"
-check "the available song's theme is inert"  "#14161c" "$(o .bg)"
+check "the available rice's theme is inert"  "#14161c" "$(o .bg)"
 check "the strillix lane is on"                   "true" "$(o .strillix)"
 check "the stylix lane is on"                 "true" "$(o .stylix)"
 check "the shell lane is on"                  "true" "$(o .quickshell)"
 check "the shell runs the deployed config"    "/home/fixture/.aoide/run/qml" "$(o .config)"
-check "the song's seed activation is there"   "1" \
+check "the rice's seed activation is there"   "1" \
   "$(o '[.activation[] | select(test("^aoideSeedRices$"))] | length')"
 check "the shell's unit is there"             "1" \
   "$(o '[.hmServices[] | select(test("^aoide-quickshell$"))] | length')"
@@ -226,22 +226,22 @@ check "front: parts name the ten components"         \
   "bar,calendar,dock,greeter,launcher,lock,notifications,powermenu,switcher,wallpaper" \
   "$(o '.front.parts.names | join(",")')"
 check "front: every part is a file"                  "true" "$(o .front.parts.allFiles)"
-check "front: rices name the committed rice songs"   "true" \
+check "front: rices name the committed rice rices"   "true" \
   "$(o '.front.rices | index("sonata") != null')"
 check "front: a rice merged into its own hook clashes" "false" "$(o .front.collision.merged)"
 check "front: the same hook with no rice merged holds" "true" "$(o .front.collision.bare)"
 
 # ── 3. The merged rices ──────────────────────────────────────────────────
 # One call gives the directory and the registry over it; a host performs a
-# consumer song that borrows an Aoide song across the two books.
+# consumer rice that borrows an Aoide rice across the two books.
 check "merged: performs the consumer's encore"       "encore" "$(o .merged.rice)"
-check "merged: builds in the Aoide song it borrows"  "encore sonata" "$(o '.merged.builtIn | join(" ")')"
+check "merged: builds in the Aoide rice it borrows"  "encore sonata" "$(o '.merged.builtIn | join(" ")')"
 check "merged: encore wears its own theme"          "#1a1424" "$(o .merged.bg)"
 check "merged: encore's widgets are sonata's"        "true" "$(o .merged.borrowed)"
-check "merged: the registry names both books' songs" "true" \
+check "merged: the registry names both books' rices" "true" \
   "$(o '.merged.names | (index("sonata") != null) and (index("encore") != null) and (index("barcarolle") != null)')"
 
-# A name two books define is refused, and the refusal names the song and both
+# A name two books define is refused, and the refusal names the rice and both
 # books. Run on its own: a throw cannot be read out of the JSON above.
 clash_expr="
   let
@@ -250,7 +250,7 @@ clash_expr="
     (flake.lib.rices.merge {
       lib = flake.inputs.nixpkgs.lib;
       pkgs = flake.inputs.nixpkgs.legacyPackages.x86_64-linux;
-      books = [ flake.ricesRoot ./songs-clash ];
+      books = [ flake.ricesRoot ./rices-clash ];
     }).dir
 "
 if clash_out=$(nix eval --impure --raw --expr "$clash_expr" 2>"$tmp/clash.err"); then
@@ -259,23 +259,23 @@ else
   clash_rc=$?
 fi
 clash_msg=$(cat "$tmp/clash.err")
-check "merged: a song two books define is refused"   "1" "$([ "$clash_rc" -ne 0 ] && echo 1 || echo 0)"
-check "merged: the refusal names the song"           "true" \
+check "merged: a rice two books define is refused"   "1" "$([ "$clash_rc" -ne 0 ] && echo 1 || echo 0)"
+check "merged: the refusal names the rice"           "true" \
   "$(printf '%s' "$clash_msg" | grep -q "'sonata' is in" && echo true || echo false)"
 check "merged: the refusal names Aoide's book"        "true" \
   "$(printf '%s' "$clash_msg" | grep -q 'rices' && echo true || echo false)"
 check "merged: the refusal names the consumer's book" "true" \
-  "$(printf '%s' "$clash_msg" | grep -q 'songs-clash' && echo true || echo false)"
+  "$(printf '%s' "$clash_msg" | grep -q 'rices-clash' && echo true || echo false)"
 
 printf '%-52s %s\n' "consumer toplevel drvPath" "$(o .drv)"
 
-check "aoide-songs performs Aoide's sonata"           "sonata" "$(o .aoideSongs.rice)"
-check "…and builds in sonata alone"                 "sonata" "$(o '.aoideSongs.builtIn | join(" ")')"
-check "…and wears sonata's theme"                  "#f2ebde" "$(o .aoideSongs.bg)"
-check "…its strillix lane reads the exported rices"  "true" "$(o .aoideSongs.ricesIsExport)"
+check "aoide-rices performs Aoide's sonata"           "sonata" "$(o .aoideRices.rice)"
+check "…and builds in sonata alone"                 "sonata" "$(o '.aoideRices.builtIn | join(" ")')"
+check "…and wears sonata's theme"                  "#f2ebde" "$(o .aoideRices.bg)"
+check "…its strillix lane reads the exported rices"  "true" "$(o .aoideRices.ricesIsExport)"
 check "merged: its strillix lane reads the merged directory" "true" "$(o .merged.ricesIsMerged)"
 
-printf '%-52s %s\n' "aoide-songs toplevel drvPath" "$(o .aoideSongs.drv)"
+printf '%-52s %s\n' "aoide-rices toplevel drvPath" "$(o .aoideRices.drv)"
 printf '%-52s %s\n' "merged toplevel drvPath" "$(o .merged.drv)"
 
 printf '%s\n' "--------------------------------------------------------------------"

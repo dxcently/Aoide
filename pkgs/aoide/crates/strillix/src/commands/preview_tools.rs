@@ -88,7 +88,7 @@
 //! **Cross-file first, unconditionally** (`ComponentMap`,
 //! `build_component_map`): before any of the above, every runtime node's
 //! own `type` is checked against every `*.qml` file named in
-//! `preview.json`'s own `watch` list (the song's `widgets/` directory plus
+//! `preview.json`'s own `watch` list (the rice's `widgets/` directory plus
 //! the previewed widget's own file) — a match (`"file"`) switches the
 //! static context to THAT file's own root node (`source` points at its own
 //! `file:line`) and its runtime children are matched against that file's
@@ -476,8 +476,8 @@ fn build_shot_sidecar_base(
         control.get("widget").cloned().unwrap_or(Value::Null),
     );
     m.insert(
-        "song".to_string(),
-        control.get("song").cloned().unwrap_or(Value::Null),
+        "rice".to_string(),
+        control.get("rice").cloned().unwrap_or(Value::Null),
     );
     m.insert(
         "widgetWidth".to_string(),
@@ -888,10 +888,10 @@ struct ComponentFile {
 type ComponentMap = std::collections::HashMap<String, ComponentFile>;
 
 /// Every `*.qml` file this preview's `watch` list names (`preview.json`'s
-/// own `watch` field — the current song's `widgets/` directory plus the
+/// own `watch` field — the current rice's `widgets/` directory plus the
 /// previewed widget's own file, `commands::preview::compute_watch_list`),
 /// parsed once and keyed by file stem, PLUS the widget's own file (in case
-/// it lives somewhere `watch` doesn't cover, e.g. a foreign song or an
+/// it lives somewhere `watch` doesn't cover, e.g. a foreign rice or an
 /// out-of-rices path), PLUS every inline `component Name: Type { ... }`
 /// declaration any of those files contain, keyed by `Name` (review
 /// follow-up part A) — same `ComponentFile` shape either way (an inline
@@ -2092,7 +2092,7 @@ mod tests {
         std::fs::create_dir_all(root).unwrap();
         std::fs::write(
             root.join("preview.json"),
-            r#"{"widget":"songs/sonata/conductor.qml","song":"sonata"}"#,
+            r#"{"widget":"rices/sonata/conductor.qml","rice":"sonata"}"#,
         )
         .unwrap();
     }
@@ -3250,14 +3250,14 @@ exit 0
     /// (found from this crate's own manifest dir — never from the operator's
     /// environment, and never `~/.aoide/Aoide`, which is how these numbers
     /// went stale unnoticed), and an unreadable file PANICS: a skip would let
-    /// the fixture rot into a no-op the day the song moves.
+    /// the fixture rot into a no-op the day the rice moves.
     fn read_session_menu_qml() -> String {
         let path =
             aoide_storage::fs::flake_root().join("rices/sonata/widgets/SessionMenu.qml");
         std::fs::read_to_string(&path).unwrap_or_else(|e| {
             panic!(
                 "the committed SessionMenu.qml fixture is unreadable at {} ({e}) — this test reads \
-                 THIS checkout's song (pinned via $AOIDE_FLAKE_ROOT), and an unreadable file is a \
+                 THIS checkout's rice (pinned via $AOIDE_FLAKE_ROOT), and an unreadable file is a \
                  failure, not a skip",
                 path.display()
             )
@@ -3266,7 +3266,7 @@ exit 0
 
     /// `$AOIDE_FLAKE_ROOT` pinned at this checkout for the whole test, restored
     /// on drop — held as a binding (`let _pin = pin_checkout();`) by every test
-    /// that reads a committed song.
+    /// that reads a committed rice.
     struct PinnedCheckout(#[allow(dead_code)] aoide_test_support::EnvSaver);
 
     fn pin_checkout() -> PinnedCheckout {
@@ -3410,17 +3410,17 @@ exit 0
     /// (which sibling tests repoint under a lock this helper does not take),
     /// and LOUD: an unreadable fixture PANICS. It used to `eprintln!` and
     /// return `None`, so the three tests below silently became no-ops in any
-    /// tree without the outer repo's `song/` — which is exactly how their
+    /// tree without the outer repo's `rice/` — which is exactly how their
     /// expectations went stale. In the nix sandbox this whole group is
     /// skipped BY NAME in `pkgs/aoide/default.nix`'s `checkFlags`, because
-    /// that source tree has no `song/` by design.
+    /// that source tree has no `rice/` by design.
     fn read_conductor_qml() -> (PathBuf, String) {
         let path = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../../../rices/sonata/widgets/conductor.qml");
         let text = std::fs::read_to_string(&path).unwrap_or_else(|e| {
             panic!(
                 "the committed conductor.qml fixture is unreadable at {} ({e}) — this test reads \
-                 the OUTER repo's song, and an unreadable file is a failure, not a skip",
+                 the OUTER repo's rice, and an unreadable file is a failure, not a skip",
                 path.display()
             )
         });
@@ -3529,7 +3529,7 @@ exit 0
     /// WAS open, the enclosing `Repeater` itself, and the delegate's real
     /// children (`rowsBay`, `rowsCol`, ...) silently became the
     /// `Repeater`'s own children one level too shallow. Skips (never
-    /// fails) when this checkout doesn't have the song present.
+    /// fails) when this checkout doesn't have the rice present.
     #[test]
     fn conductor_qmls_repeater_delegate_is_a_real_child_never_the_repeaters_own_id() {
         let (_, text) = read_conductor_qml();

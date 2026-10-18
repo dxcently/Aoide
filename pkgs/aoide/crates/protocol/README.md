@@ -300,7 +300,7 @@ other crate in this workspace sits above.
 ## What it consumes
 
 Nothing aoide-specific. This is the one crate every other crate in the
-workspace (`storage`, `client`, `conduct`, `screen`, `server`, `song`,
+workspace (`storage`, `client`, `conduct`, `screen`, `server`, `rice`,
 `conductor`, `upkeep`, and both app crates) depends on, directly or
 transitively.
 

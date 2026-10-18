@@ -10,28 +10,28 @@
 #
 # `$out/share/strillix/` holds three things, one per consumer:
 #
-#   rices/          the song folders this system ships (every discovered one
+#   rices/          the rice folders this system ships (every discovered one
 #                      by default; a host's built-in set when the strillix lane
 #                      overrides it) PLUS `manifest.json`/`registry.json`/
 #                      `builtin.json` baked via `lib/rices.nix` — the SAME
 #                      generator the strillix lane's `quickshellConfig` derivation
 #                      and the `ricesManifest` flake output both call, so
 #                      this dir's baked files can never drift from what the
-#                      same songs evaluate to anywhere else.
+#                      same rices evaluate to anywhere else.
 #   nix/               the OFFLINE generator and its dependencies
-#                      (`manifest.nix` + copies of `lib/{rices,song}.nix` +
+#                      (`manifest.nix` + copies of `lib/{rices,rice}.nix` +
 #                      the locked nixpkgs `lib/`) — what a machine with no
 #                      Aoide checkout evaluates to regenerate the two files
 #                      over its OWN rices. See `nix/manifest.nix`.
 #   aoide-options.json `lib/options.nix`'s output, so `strillix onboard` derives the
 #                      `aoide.*` option set without a checkout and without nix.
 #
-# Consumed at runtime by `aoide_storage::fs::song_templates_dir` /
+# Consumed at runtime by `aoide_storage::fs::rice_templates_dir` /
 # `STRILLIX_TEMPLATES` (rices/) and by its parent (nix/,
-# aoide-options.json) — `strillix rice compose --from <song>`,
-# `aoide-song::widgets`'s registry/manifest regeneration, and `strillix onboard`
+# aoide-options.json) — `strillix rice compose --from <rice>`,
+# `strillix-rice::widgets`'s registry/manifest regeneration, and `strillix onboard`
 # all read it on a repo-less host (no `$AOIDE_FLAKE_ROOT` checkout there). ONLY
-# `aoide-song`/`strillix` read this var, and
+# `strillix-rice`/`strillix` read this var, and
 # only `strillix` links them — so it is wired onto exactly the units
 # whose PROCESS actually execs `strillix`, not every unit that happens to carry
 # `AOIDE_ROOT`/`AOIDE_FLAKE_ROOT` (review finding, task #107: paint data on a
@@ -47,9 +47,9 @@
 # by side).
 #
 # ── Two knobs, and they are what "built in" means ─────────────────────────
-# `songs` and `builtin` default to the WHOLE committed rices and to no
+# `rices` and `builtin` default to the WHOLE committed rices and to no
 # selection at all, which is what the flake's own `packages.strillix-rices`
-# wants. The strillix lane overrides both, per host, with the songs that host
+# wants. The strillix lane overrides both, per host, with the rices that host
 # builds in (`lib/rices.nix`'s `builtIn`): a `_server` that performs nothing
 # ships an empty templates dir, and yomi ships sonata's folder and no other.
 # This package is where "built in" stops being an attribute of the host and
@@ -65,9 +65,9 @@
   # reach it — it is derived from the flake's `inputs` — so it arrives by name
   # from the build context that has them (`lib/pkgs.nix`'s `extra`).
   aoideOptions,
-  # The songs to ship, by name; `null` = every discovered song.
-  songs ? null,
-  # The host's selection as strillix records it: `{ declared, songs, packages }`.
+  # The rices to ship, by name; `null` = every discovered rice.
+  rices ? null,
+  # The host's selection as strillix records it: `{ declared, rices, packages }`.
   # `null` = none, and no `builtin.json` is written.
   builtin ? null,
   # The rices those names live in. A consumer's host may perform from its
@@ -75,15 +75,15 @@
   # Aoide's own (the strillix lane passes the host's `_module.args.rices`; the
   # flake's own `packages` output keeps its default).
   ricesRoot ? ../../rices,
-  # name -> song directory, when the caller has already discovered them (the
+  # name -> rice directory, when the caller has already discovered them (the
   # merged rices's registry); null = discover `rices`. Reading `rices`
   # itself at eval would make a merged rices (a derivation) import-from-derivation.
-  songDirs ? null,
+  riceDirs ? null,
 }:
 let
   ricesData = import ../../lib/rices.nix {
     inherit lib ricesRoot;
-    discovered = songDirs;
+    discovered = riceDirs;
   };
 
   # ── The offline generator (§9) ──────────────────────────────────────────
@@ -91,12 +91,12 @@ let
   # Aoide checkout can regenerate manifest.json/registry.json over its OWN
   # rices with a plain `nix-instantiate --eval` on a FILE — no flake, no
   # network, no checkout, no `--impure`. `nix/manifest.nix` is the entry
-  # (`aoide-song::widgets` names it); the two `.nix` beside it are COPIES of
-  # `lib/rices.nix` and `lib/song.nix`, and `lib/` is the locked nixpkgs
+  # (`strillix-rice::widgets` names it); the two `.nix` beside it are COPIES of
+  # `lib/rices.nix` and `lib/rice.nix`, and `lib/` is the locked nixpkgs
   # `lib/`. Copies, not a second implementation: one generator, shipped.
   #
   # The whole `lib/` rather than a subset of the functions used today (Q-3):
-  # the generator calls 15 of them and a song's `_widgets/` shelf is handed
+  # the generator calls 15 of them and a rice's `_widgets/` shelf is handed
   # `lib` too (`hasSuffix` today), so a shim's boundary would be silent —
   # a future shelf calling one more function would fail only at RUNTIME, on
   # the machine, and never in this build. 2.4 MB is the price of that being
@@ -109,34 +109,34 @@ let
 
   aoideOptionsJson = builtins.toFile "aoide-options.json" (builtins.toJSON aoideOptions);
 
-  # Baked manifest/registry are over the songs this instance SHIPS, not over
-  # every song the repo happens to hold — a host that does not build a song in
-  # has no `<song>/widgets/` in its deployed tree for a slot record to resolve
+  # Baked manifest/registry are over the rices this instance SHIPS, not over
+  # every rice the repo happens to hold — a host that does not build a rice in
+  # has no `<rice>/widgets/` in its deployed tree for a slot record to resolve
   # against.
   keep =
-    attrs: if songs == null then attrs else lib.filterAttrs (name: _: builtins.elem name songs) attrs;
+    attrs: if rices == null then attrs else lib.filterAttrs (name: _: builtins.elem name rices) attrs;
 
-  shipped = if songs == null then ricesData.songNames else songs;
+  shipped = if rices == null then ricesData.discoveredNames else rices;
 
   # ── What this derivation actually reads ─────────────────────────────────────
-  # Each shipped song enters as ITS OWN store path (`builtins.path` copies the
+  # Each shipped rice enters as ITS OWN store path (`builtins.path` copies the
   # folder), never as a subdirectory of the whole `rices` tree. That is
-  # not tidiness: a path literal naming the rices DIRECTORY makes every song's
+  # not tidiness: a path literal naming the rices DIRECTORY makes every rice's
   # content part of this derivation — and the templates path is a string in a
   # host's session variables and activation, so a host's whole toplevel drvPath
-  # moved whenever any song changed. A host that builds one song in reads that
-  # one song's folder, and a song it does not build in cannot move its system.
+  # moved whenever any rice changed. A host that builds one rice in reads that
+  # one rice's folder, and a rice it does not build in cannot move its system.
   #
   # The manifest/registry below are the same story from the other side: they are
   # `builtins.toFile` over the SHIPPED set, so they do not carry the others
-  # either. The unoverridden package (`songs = null`) is every discovered song,
+  # either. The unoverridden package (`rices = null`) is every discovered rice,
   # each with its own folder path — so the flake's own `packages` output still
   # ships the whole rices.
-  songDir =
+  riceDir =
     name:
     builtins.path {
-      path = ricesData.songs.${name};
-      name = "strillix-song-${name}";
+      path = ricesData.riceDirs.${name};
+      name = "strillix-rice-${name}";
     };
 
   files = {
@@ -156,7 +156,7 @@ runCommand "strillix-rices-templates" { nativeBuildInputs = [ jq ]; } ''
   mkdir -p "$out_dir"
 
   ${lib.concatMapStrings (name: ''
-    cp -r ${songDir name} "$out_dir/${name}"
+    cp -r ${riceDir name} "$out_dir/${name}"
   '') shipped}
 
   jq . ${files.manifest} > "$out_dir/manifest.json"
@@ -169,7 +169,7 @@ runCommand "strillix-rices-templates" { nativeBuildInputs = [ jq ]; } ''
   mkdir -p "$out/share/strillix/nix"
   cp ${./nix/manifest.nix} "$out/share/strillix/nix/manifest.nix"
   cp ${../../lib/rices.nix} "$out/share/strillix/nix/rices.nix"
-  cp ${../../lib/song.nix} "$out/share/strillix/nix/song.nix"
+  cp ${../../lib/rice.nix} "$out/share/strillix/nix/rice.nix"
   cp -r ${nixpkgsLib} "$out/share/strillix/nix/lib"
   jq . ${aoideOptionsJson} > "$out/share/strillix/aoide-options.json"
 ''

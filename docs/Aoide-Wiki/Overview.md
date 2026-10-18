@@ -6,11 +6,11 @@ updated: 2026-08-29
 
 # Aoide — Overview
 
-**Aoide** tracks and conducts terminal and agent sessions. Sessions collaborate across agents and across hosts, with the human in the loop — and become the parts you build larger systems out of. Every terminal is a conductable, tracked session by default ([[Conductor-Channel]]), reachable through the bridges and APIs between terminal, shell, system, and OS — no MCP required, runnable anywhere there is a shell. **AoideOS** is the distribution built on that core: this repo's NixOS flake, which additionally ships the [[Quickshell]] widget surfaces (bar, dock, gadgets, conductor views) and the song/theme ricer ([[Self-Ricing]]). AoideOS is the OS harness for your harness. A capability that works with only a shell is Aoide; one that needs desktop, Quickshell, or rice is AoideOS. This wiki documents AoideOS end to end, the flake being the core's concrete running instance.
+**Aoide** tracks and conducts terminal and agent sessions. Sessions collaborate across agents and across hosts, with the human in the loop — and become the parts you build larger systems out of. Every terminal is a conductable, tracked session by default ([[Conductor-Channel]]), reachable through the bridges and APIs between terminal, shell, system, and OS — no MCP required, runnable anywhere there is a shell. **Strillix** is the distribution built on that core: this repo's NixOS flake, which additionally ships the [[Quickshell]] widget surfaces (bar, dock, gadgets, conductor views) and the rice/theme ricer ([[Self-Ricing]]). Strillix is the OS harness for your harness. A capability that works with only a shell is Aoide; one that needs desktop, Quickshell, or rice is Strillix. This wiki documents Strillix end to end, the flake being the core's concrete running instance.
 
-AoideOS pairs a Hyprland compositor with a Quickshell shell, an orchestrator daemon, a content pipeline, and a self-ricing engine. Upstream ships the shape-making machinery (rice engine, contracts, walker, management tools) but never the shapes; your clone is your instance ([[Clone-and-Run]]). The frozen/performed naming thesis lives in [[Lexicon]].
+Strillix pairs a Hyprland compositor with a Quickshell shell, an orchestrator daemon, a content pipeline, and a self-ricing engine. Upstream ships the shape-making machinery (rice engine, contracts, walker, management tools) but never the shapes; your clone is your instance ([[Clone-and-Run]]). The frozen/performed naming thesis lives in [[Lexicon]].
 
-AoideOS is also a specialized widget maker: it integrates and launches the independently-owned [[Melete]] coding harness and [[Mneme]] knowledge server, and new integrations are written by that agent as declarative nix + QML + adapter rather than selected from a plugin registry. See [[Widget-Maker]] and [[Feature-Set]].
+Strillix is also a specialized widget maker: it integrates and launches the independently-owned [[Melete]] coding harness and [[Mneme]] knowledge server, and new integrations are written by that agent as declarative nix + QML + adapter rather than selected from a plugin registry. See [[Widget-Maker]] and [[Feature-Set]].
 
 **Status:** yomi-strix runs the Aoide flake at HEAD. See [[Full-Architecture]] for subsystem status and [[Codebase]] for the host profile.
 
@@ -29,7 +29,7 @@ AoideOS is also a specialized widget maker: it integrates and launches the indep
 - [[Snowflake-Anatomy]] — the flake's structural layers (nucleus, dendrites, aggregations, overrides) and how the catalogue registers modules
 - [[Clone-and-Run]] — the install model: clone upstream to `~/Aoide`, run `aoide onboard`; shared history enables clean upstream merges
 - [[Self-Ricing]] — the agent generates, lints, previews, and adopts rices; rices write-back is the "self" in self-ricing
-- [[Song-Vocabulary]] — the performed-half naming map: key, melody, component tier, instruments, design, rices, cover, chimes, stage, rehearsal, recording
+- [[Rice-Vocabulary]] — the performed-half naming map: key, melody, component tier, instruments, design, rices, wallpaper, chimes, stage, rehearsal, recording
 - [[Agent-Interface]] — the CLI-first capability surface: `aoide <cmd>`, MCP as a generated façade, guide tiers, agent-first ergonomics
 - [[A2A-Door]] — aoide's third door: bidirectional Agent2Agent (JSON-RPC/HTTP) interop, a discoverable server and a client driving external agents, from one command registry
 - [[Secrets-Broker]] — the credential door: a socket-only broker under its own uid, TOTP-gated resolves that park for operator approval, an age-encrypted default backend
@@ -42,8 +42,8 @@ AoideOS is also a specialized widget maker: it integrates and launches the indep
 
 ## Entities
 
-- [[aoide-cli]] — the `aoide` CLI trunk and the `aoided` daemon binary; `schema --json` is the single source of truth behind the MCP façade. Paint commands (`rice`, `cover`, `theme`, `screen`, …) are `strillix`'s
-- [[strillix]] — the AoideOS paint binary: its own 48-command schema, its own registry and golden snapshot, the one binary allowed to depend on nix
+- [[aoide-cli]] — the `aoide` CLI trunk and the `aoided` daemon binary; `schema --json` is the single source of truth behind the MCP façade. Paint commands (`rice`, `wallpaper`, `theme`, `screen`, …) are `strillix`'s
+- [[strillix]] — the Strillix paint binary: its own 48-command schema, its own registry and golden snapshot, the one binary allowed to depend on nix
 - [[theme]] — the design-token layer and its engine: the immutable seam between nix structure and runtime rendering, native in `crates/strillix-rice/src/theme/` as `strx theme emit|resolve|lint`
 - [[aoided]] — the orchestrator daemon: neutral event stream, policy, lint, audit log, gated rebuild pipeline
 - [[shellbridge]] — the daemon-to-desktop bridge: atomic JSON state files out, unix-socket commands in, Hyprland IPC consumed
@@ -51,7 +51,7 @@ AoideOS is also a specialized widget maker: it integrates and launches the indep
 - [[Hyprland]] — the Wayland compositor; Aoide's only multiplexer, driven live via hyprctl
 - [[Stylix]] — base16 whole-system theming; the baked fan-out from `rice.nix` to every nix-manageable target
 - [[dxflake]] — the dendritic auto-discovery flake; Aoide's prior art and adoption target for the nucleus + dendrite walker
-- [[Melete]] — the integrated coding harness: autonomous coding runs, shell, GitHub, fleet, scheduling; the engine behind AoideOS's widget-making
+- [[Melete]] — the integrated coding harness: autonomous coding runs, shell, GitHub, fleet, scheduling; the engine behind Strillix's widget-making
 - [[Mneme]] — the integrated knowledge server: the vault's MCP API behind the content pipeline and the wiki protocol
 
 ## Sources

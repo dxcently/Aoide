@@ -7,15 +7,15 @@ import Quickshell.Wayland
 // Floats a ~360x300 overlay surface carrying a stub gold-marble palette; the
 // widget reads the machine's real /proc/stat + /proc/meminfo live.
 //
-// The meters body is per-song score (song/songbook/<song>/widgets/), NOT a
+// The meters body is per-rice score (rices/<rice>/widgets/), NOT a
 // shared-tree component, so this harness loads it by URL — the
 // CalendarPreview precedent. Quickshell's virtual qs:@ filesystem black-holes
 // relative paths that escape the config root, so from a repo checkout point
-// METERS_WIDGET at the songbook file (QS_STAGE precedent — previews honour
+// METERS_WIDGET at the rices file (QS_STAGE precedent — previews honour
 // env seams):
-//   METERS_WIDGET=file://$PWD/song/songbook/sonata/widgets/meters.qml \
+//   METERS_WIDGET=file://$PWD/rices/sonata/widgets/meters.qml \
 //     qs -p pkgs/strillix-shell/qml/MetersPreview.qml
-// In the deployed tree ($out/qml/, where songs/ sits beside this file) the
+// In the deployed tree ($out/qml/, where rices/ sits beside this file) the
 // default relative source resolves with no env needed.
 //
 // meters.qml declares `theme` AND `bridge` as `required property` (the
@@ -68,7 +68,7 @@ ShellRoot {
             anchors.left: parent.left
             Component.onCompleted: {
                 var src = Quickshell.env("METERS_WIDGET")
-                if (!src || src === "") src = "songs/sonata/meters.qml"
+                if (!src || src === "") src = "rices/sonata/meters.qml"
                 setSource(src, { "theme": win.stubTheme, "bridge": win.stubBridge })
             }
         }

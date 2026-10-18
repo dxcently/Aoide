@@ -2,7 +2,7 @@
 
 Cross-crate rules only. A crate's own `AGENTS.md` holds what's local to it;
 this file holds what would otherwise be repeated in all eleven. Points up to
-the root `AGENTS.md` for the core-vs-strillix/AoideOS boundary and the house
+the root `AGENTS.md` for the core-vs-strillix/Strillix boundary and the house
 rules that govern the whole repo.
 
 ## Registry order is load-bearing

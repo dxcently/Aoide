@@ -1,6 +1,6 @@
 # Selective Nix composition
 
-This is the architecture for dxflake and AoideOS. It specifies the configuration
+This is the architecture for dxflake and Strillix. It specifies the configuration
 interface and the implementation plan. Both implement the interface below:
 `lib/composition.nix` of habit (`github:dxcently/habit`, pinned at the release
 tag `v0.4.0` and consumed here as `inputs.habit`) is the constructor, their hosts
@@ -11,9 +11,9 @@ template suites test it.
 
 dxflake is the first live consumer of portable Aoide and Strillix exports. Finish the
 current fixes and reach a coherent checkpoint, prove consumption on dxflake,
-then migrate AoideOS away from its walkers. Additive upstream package/module
+then migrate Strillix away from its walkers. Additive upstream package/module
 exports can precede that migration. Osaka and Sakaki use dxflake; Yomi uses
-AoideOS. System activation remains user-controlled.
+Strillix. System activation remains user-controlled.
 
 Aoide core remains usable without Nix, Strillix, Mneme, or Melete. This design is a
 deployment and composition interface, not a new dependency of the core binary.
@@ -34,7 +34,7 @@ deployment and composition interface, not a new dependency of the core binary.
 | Registry | `modules/default.nix`: plain data, the catalogue plus the discovered aggregations and override records. Not a module, and it declares no options |
 | Catalogue | The named capability paths in the registry, one line per dendrite |
 | Nucleus | Only the minimal common foundation for the selected platform |
-| Song | A rice composition: palette, widgets/assets, layout, and supported configuration/dependency references |
+| Rice | A rice composition: palette, widgets/assets, layout, and supported configuration/dependency references |
 
 Use **aggregation** — singular, one namespace for both scopes: `habit.aggregation.<name>.enable`
 on a host and `habit.users.<u>.aggregation.<name>.enable` on a person. Not `aggregations`,
@@ -78,7 +78,7 @@ modules/
     cloudflared.nix
     aoide.nix                  public upstream integration
     strillix.nix
-song/                         mirrors ~/.aoide/song/ byte for byte
+rice/                         mirrors ~/.aoide/rice/ byte for byte
   rices/
     palettes/                 optional shared palettes, arbitrary filenames
     sonata/
@@ -86,9 +86,9 @@ song/                         mirrors ~/.aoide/song/ byte for byte
       palette.nix
       widgets/
       design/
-  covers/                     shared cover art, beside the rices, any rice wears any cover
+  wallpapers/                     shared wallpaper art, beside the rices, any rice wears any wallpaper
   stage/                      runtime only, gitignored: what strillix renders and programs watch
-  declared/                   runtime only: the activation seed's twin of the declared song
+  declared/                   runtime only: the activation seed's twin of the declared rice
 pkgs/                         custom package definitions only
 ```
 
@@ -126,9 +126,9 @@ A dendrite that needs another's program reaches it by name on PATH, never by
 path into its directory; a host that does not select the provider gets an
 inert key.
 
-The same composition shape applies to AoideOS when it migrates. Public Strillix
+The same composition shape applies to Strillix when it migrates. Public Strillix
 runtime QML/bridges belong to its package; consumer-owned widget source belongs
-with the rices. A consumer does not recreate AoideOS's private module tree.
+with the rices. A consumer does not recreate Strillix's private module tree.
 A large home half may be extracted to a `home.nix` within its dendrite and
 assigned to `habit.home`.
 
@@ -192,7 +192,7 @@ consumed here as `inputs.habit` and re-exported by the flake as
 reaching into this tree for a file. It knows no vocabulary of its
 own: a consumer's `habit` keys ride in through two hooks, both identity by default.
 `selectionModules` are extra modules for the selection passes, which is how a
-field the constructor has never heard of — a song selection is the first — is
+field the constructor has never heard of — a rice selection is the first — is
 declared once, as modules of the `habit` submodule, and read by the gate step. `extraModulesFor` is a function of the
 resolved selection returning platform modules, which is how a gate-pass answer
 becomes an import without a gate-pass body import. That selection is the whole
@@ -594,7 +594,7 @@ name. Theme's palette contract does not require Stylix; Stylix is an optional
 selected integration.
 
 ```text
-shared palette + song widgets + composition + dependency references
+shared palette + rice widgets + composition + dependency references
                               |
                  selected available Nix-built bundles
                               |
@@ -603,33 +603,33 @@ shared palette + song widgets + composition + dependency references
              Strillix runtime and supported reload backends
 ```
 
-Songs live under `rices/<name>/`, and `/covers/` sits beside the
+Rices live under `rices/<name>/`, and `/wallpapers/` sits beside the
 rices, not inside a rice: an image is not a look, and any rice may wear any
-cover. The repository's `song/` mirrors the runtime `~/.aoide/song/` in the
+wallpaper. The repository's `rice/` mirrors the runtime `~/.aoide/rice/` in the
 committed half, and two of its runtime subdirectories exist only there,
 gitignored: `/stage/`, where strillix renders what programs watch and
 hot-reload, and `/declared/`, the strillix dendrite's activation seed of
-the declared song's notes with the venue override applied (which `rice mode
+the declared rice's notes with the venue override applied (which `rice mode
 declarative` re-pins from) and the venue's slots and the host's geometry as `venue.json` (which staging
-lays over the runtime copy of that song) — CONTRACTS.md §4. The wallpaper
+lays over the runtime copy of that rice) — CONTRACTS.md §4. The wallpaper
 manager is independent of individual rices. Each user has independent state.
 Strillix ships reusable QML components and named bridges (including optional Aoide
 integration); consumers customize widgets in their rices without copying the
 entire runtime. Importing Strillix's public module supplies capabilities without
-installing every upstream song.
+installing every upstream rice.
 
 Several compatible bundles may be installed for immediate staging. Returning
 to declared restores the declared bundle without deleting draft source.
 Declaring promotes authored source to a rices entry, not generated runtime
 files. Host selection of that default is NOT a separate source change any more:
-a host names the songs it builds in in its own module (`habit.rice.declared` /
-`habit.rice.available`). The song hook registers each `rice.nix` as an
-aggregation, habit imports only the DECLARED song's body (it brings the paint:
+a host names the rices it builds in in its own module (`habit.rice.declared` /
+`habit.rice.available`). The rice hook registers each `rice.nix` as an
+aggregation, habit imports only the DECLARED rice's body (it brings the paint:
 the ten component providers and the renderer), and
 `declared ∪ available` — the built-in set, published as
 `aoide.rices.builtIn` — decides the widgets copied into the deployed tree,
 the packages installed, the folders `pkgs/strillix-rices` ships for that host,
-and the `builtin.json` the runtime compares a staged song's needs against.
+and the `builtin.json` the runtime compares a staged rice's needs against.
 `~/.aoide/rices` belongs to the MACHINE: it is seeded from that baseline
 where a folder is absent, the repo's later changes reach only the files the
 machine never edited (`strx rice refresh`, `CONTRACTS.md` §5; root `AGENTS.md`
@@ -655,7 +655,7 @@ implementation proof, not just this Nix layout.
 | Capability-wide fix | One record under `modules/overrides/`. Discovery finds it; it applies to the hosts that selected a target |
 | Host exception | Host selection or ordinary platform setting |
 | New shared user | Shared user definition and intended attachments |
-| New rice | Song source and relevant available/default selection |
+| New rice | Rice source and relevant available/default selection |
 | External version pin | Input/lock and affected provider/package selection |
 
 ## Build plan and acceptance gates
@@ -666,8 +666,8 @@ implementation proof, not just this Nix layout.
 | 2. Vertical consumer slice | One local app dendrite, notification providers, one shared user; public Aoide/Strillix consumption | Host overrides group provider; system-only and HM variants evaluate; no private upstream paths |
 | 2b. Override records | Capability-scoped records: discovery, matching, overlay and deferred module application | Targeted and omitted host filters; unmatched throwing overlay and module uncalled; duplicate targets apply once; record schema typos fail on every host |
 | 3. dxflake reconciliation | Move existing configuration without losing membership; restore agreed enable interface and shared users | Before/after package/service/user inventory; Osaka and Sakaki builds; existing pin failures resolved explicitly |
-| 4. Live portability | User-admitted deployments and cross-host operation | Aoide tracking/conduct/mail and Strillix selected-song/runtime behavior on dxflake, with failures recorded |
-| 5. AoideOS migration | Replace walkers, move source paths and docs together | Yomi build and user-admitted runtime proof; no accidental all-song/all-module loading |
+| 4. Live portability | User-admitted deployments and cross-host operation | Aoide tracking/conduct/mail and Strillix selected-rice/runtime behavior on dxflake, with failures recorded |
+| 5. Strillix migration | Replace walkers, move source paths and docs together | Yomi build and user-admitted runtime proof; no accidental all-rice/all-module loading |
 | 6. Additional consumers | Standalone HM, Darwin where supported, package-only installation | Independent evaluation/build checks and honest platform support matrix |
 
 Recorded on dxflake. All four hosts — chiyo, osaka, sakaki and yomi-strix —
@@ -687,7 +687,7 @@ where no record exists: all four hosts stay byte-identical with it in place.
 This is evaluation evidence, not runtime activation proof; phases 4 and 5 still
 owe that. Phase 2's "no private upstream paths" clause is
 also still open: the public exports exist, but dxflake's pin still reaches into
-the Aoide input's own tree for modules and songs until it migrates onto them, and
+the Aoide input's own tree for modules and rices until it migrates onto them, and
 names that seam in its
 `flake.nix`.
 
@@ -698,7 +698,7 @@ external dependency isolation. Do not infer runtime proof from evaluation.
 The constructor's executable schema — user account fields, diagnostics, and
 public output names — is settled by dxflake's implementation and the suites
 above, and the example syntax in this document is the syntax they exercise.
-AoideOS migration work is audited against this target, not accepted merely
+Strillix migration work is audited against this target, not accepted merely
 because it removed walkers.
 
 ## Related documents

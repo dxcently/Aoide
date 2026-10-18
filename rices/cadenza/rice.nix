@@ -1,4 +1,4 @@
-# rices/cadenza/rice.nix — the "cadenza" song (the phosphor key).
+# rices/cadenza/rice.nix — the "cadenza" rice (the phosphor key).
 #
 # A hacker console: a green-phosphor CRT running a termui dashboard. Near-black
 # green-cast ground, a phosphor-green ramp for text, bright phosphor for titles
@@ -8,8 +8,8 @@
 # The drawing grammar (panes, instruments, the switchboard, motion, the glow budget)
 # is design/intent.md; the per-surface coverage is design/coverage.md.
 #
-# HOST-AGNOSTIC DISCIPLINE (CONTRACTS.md §5): a song sets ONLY aoide.theme
-# and aoide.layout. All values are literal nix (no song/ runtime reads).
+# HOST-AGNOSTIC DISCIPLINE (CONTRACTS.md §5): a rice sets ONLY aoide.theme
+# and aoide.layout. All values are literal nix (no rice/ runtime reads).
 # The key is DARK: it declares `aoide.theme.polarity = "dark"` beside its
 # palette, so the stylix lane bakes this phosphor ramp as a dark register
 # instead of the lane's own light default. Baked only — GTK/Qt take it at
@@ -123,7 +123,7 @@
           package = pkgs.nerd-fonts.shure-tech-mono;
         };
 
-        # ── Cover-art note ───────────────────────────────────────────────────────
+        # ── Wallpaper-art note ───────────────────────────────────────────────────────
         # null → the stylix lane bakes a solid field from palette.bg: the tube.
         aoide.theme.wallpaper = null;
       };

@@ -1,11 +1,11 @@
 // LockHost.qml — the shell's session lock: the session-lock host anchor
 // (slots.md, "Three anchor kinds").
 //
-// One `WlSessionLock` and one `PamContext` for the whole shell; the song only
+// One `WlSessionLock` and one `PamContext` for the whole shell; the rice only
 // paints. Per screen the lock creates a `WlSessionLockSurface`, and inside it
-// the active song's own `widgets/lockscreen.qml` face, resolved through the
-// staging engine like a `SurfaceSlot` but with NO baseline fallback: a song
-// that ships no face is a hyprlock song (`strillix lock` decides that by the same
+// the active rice's own `widgets/lockscreen.qml` face, resolved through the
+// staging engine like a `SurfaceSlot` but with NO baseline fallback: a rice
+// that ships no face is a hyprlock rice (`strillix lock` decides that by the same
 // manifest entry and never asks this host to lock).
 //
 // Entry: `strillix lock` (pkgs/aoide/crates/strillix/src/commands/lock.rs) calls
@@ -49,7 +49,7 @@
 //
 // THE FLOOR: every surface carries this file's own plain password field
 // under the face. It shows whenever the face is not there — no face in the
-// active song, a face that fails to compile, one that cannot be created (a
+// active rice, a face that fails to compile, one that cannot be created (a
 // missing required property), or one that has not set `auth.ready` within
 // `faceReadyMs` of its creation (a face whose own start-up threw, and so may
 // paint without a field): that face is destroyed. So a locked screen is never
@@ -88,7 +88,7 @@ Scope {
     readonly property string faceSlot: "lockscreen"
     readonly property int faceReadyMs: 3000
     readonly property string faceSource:
-        stagingEngine.has(theme.songName, faceSlot) ? stagingEngine.source(theme.songName, faceSlot) : ""
+        stagingEngine.has(theme.riceName, faceSlot) ? stagingEngine.source(theme.riceName, faceSlot) : ""
 
     // What a face reads and calls — plain values, never the PamContext.
     readonly property QtObject auth: QtObject {

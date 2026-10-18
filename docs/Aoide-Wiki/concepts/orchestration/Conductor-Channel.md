@@ -229,7 +229,7 @@ through.
   held entry takes `a` then `y`, from the entry's whole text.
 - **Approval doors.** Only a door that can approve may approve a gated
   send. The local CLI (`aoide`) and aoided's own dispatch (the conductor,
-  the herald, and any same-uid client of the aoided socket) can. The MCP
+  the notifications, and any same-uid client of the aoided socket) can. The MCP
   door (`aoide mcp serve --stdio`, and strillix's) and the A2A door
   (`aoide a2a serve`, loopback included) cannot: `--yes` is never read
   there and `session pending approve` is refused with a taught line. The

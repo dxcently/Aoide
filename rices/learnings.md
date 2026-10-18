@@ -1,13 +1,13 @@
 # Rices Learnings
 
-Cross-cutting observations that apply across songs, not any one song's
+Cross-cutting observations that apply across rices, not any one rice's
 `design/` folder. The agent reads this before every ricing iteration and
 appends after declare/reject decisions (the write-back that is the "self" in
 Self-Ricing). Sparse today — this is the first entry.
 
 ## `default` (retired 2026-08-14) — the Windows-7/Aero aesthetic
 
-The shipped standard song was originally named `default`, not `sonata`.
+The shipped standard rice was originally named `default`, not `sonata`.
 Retired outright when `sonata` became the shipped baseline; its files are
 git-recoverable (last present at `rices/default/`), not preserved
 in the tree.
@@ -17,7 +17,7 @@ What it recorded, distilled from its `design/intent.md` Iteration Log:
 - **Palette:** Catppuccin Mocha (base16) — chosen for wide ecosystem
   support (Stylix consumes it natively), legible bg/fg contrast, and being
   well-represented in agent training corpora (so an agent composing a new
-  song `--from default` could reason about transpositions by name).
+  rice `--from default` could reason about transpositions by name).
 - **Component tier:** left fully null — every surface fell back to the
   palette, a deliberately clean baseline to compose from.
 - **Aesthetic:** a Windows-7-sidebar homage — the gadget dock's right-edge
@@ -37,17 +37,17 @@ in git; `git log --follow -- rices/default/` finds it.
 
 ## `cadenza` staged live (2026-09-26)
 
-- **`rice stage <song>` reads the RUNTIME rices**
-  (`$AOIDE_ROOT/rices/<song>/widgets`), not the checkout. A song
+- **`rice stage <rice>` reads the RUNTIME rices**
+  (`$AOIDE_ROOT/rices/<rice>/widgets`), not the checkout. A rice
   written straight into a checkout stages its stale compose scaffold until
   the runtime copy is refreshed from the committed tree. The slot owner map
   (`manifest.json`) comes from `nix eval` of `AOIDE_FLAKE_ROOT`, so it only
   sees committed files.
-- **`rice stage <song>` does not survive a `RICE` toggle.** The bar's RICE
+- **`rice stage <rice>` does not survive a `RICE` toggle.** The bar's RICE
   cell runs `rice mode declarative` then `rice mode stage`, and the latter
-  re-stages the song recorded in `stage/mode.json`, which `rice stage`
-  left on the previous song. Pin with `rice mode stage <song>` instead.
-- **Staging swaps every slot a song provides at once.** "One surface at a
+  re-stages the rice recorded in `stage/mode.json`, which `rice stage`
+  left on the previous rice. Pin with `rice mode stage <rice>` instead.
+- **Staging swaps every slot a rice provides at once.** "One surface at a
   time" is a checking order, not a staging order.
 - **The preview canvas cannot catch edge clipping.** A pane whose title is
   cut into its top rule at y=0 loses the glyph tops at the window edge; the
@@ -61,7 +61,7 @@ in git; `git log --follow -- rices/default/` finds it.
   switchboard stays bare live until an agent spawns a windowed session on
   another workspace or core publishes `ties`; prove the derivation with
   edges added in the preview root, and say so.
-- **A wallpaper is a cover until song wallpaper slots are hosted.**
+- **A wallpaper is a wallpaper until rice wallpaper slots are hosted.**
   Generate it with a helper in the preview (fixed seed, exact viewport
   size), commit the PNG, and `strx wallpaper set` the runtime rices's copy.
 - **An inner glow lit from the resting rule colour is invisible.** At
@@ -70,8 +70,8 @@ in git; `git log --follow -- rices/default/` finds it.
 - **Staging reaps preview canvases.** `rice mode stage` kills stray
   quickshell processes, so an open preview canvas goes with them. Don't
   restage while anyone is shooting in a canvas.
-- **`run/qml/songs/<song>/` keeps deleted helpers.** The stage sync copies
-  and overwrites but never removes, so a helper deleted from the song stays
+- **`run/qml/rices/<rice>/` keeps deleted helpers.** The stage sync copies
+  and overwrites but never removes, so a helper deleted from the rice stays
   in the generated copy. It's harmless while nothing imports it; don't read
   it as proof the file is still in use.
 - **Raw OSC writes race the program on the pty.** Pushing colours by
@@ -82,7 +82,7 @@ in git; `git log --follow -- rices/default/` finds it.
   toggle; firing it to "open" the board closed the one the user already had
   open. Read the state (or ask) first.
 
-## Song widget costs: Canvas threads and the notifications clock (2026-10-07)
+## Rice widget costs: Canvas threads and the notifications clock (2026-10-07)
 
 - **Heavy Canvas work never runs on the GUI thread.** A Context2D
   `shadowBlur` of 34 costs 3.9 s per paint at 330x200 and 12 s at the dock's
@@ -119,7 +119,7 @@ in git; `git log --follow -- rices/default/` finds it.
   nullptr parameter` warning; it is Qt's own and harmless.
 - **A transient toast's clock anchors to its own arrival.** `now + timeoutMs`
   at first sight replays the stored ledger as fresh toasts on every QML
-  reload, which is every song switch that writes bodies. The deadline is
+  reload, which is every rice switch that writes bodies. The deadline is
   `Date.parse(receivedAt) + timeoutMs` (first sight only when it does not
   parse), and a record already past it lapses inside `ingest`, because the
   500 ms sweep starts only after something shows. Sonata, fugue (quodlibet
@@ -135,15 +135,15 @@ in git; `git log --follow -- rices/default/` finds it.
   a `FloatingWindow` in a scratch copy and the clock logic runs
   unchanged. The software backend says nothing about the GPU path, so
   `Canvas.Threaded` on the live shell stays unmeasured until a live pass.
-- **A built-in song's runtime copy is read-only.** `~/.aoide/rices/
+- **A built-in rice's runtime copy is read-only.** `~/.aoide/rices/
   sonata` is seeded from the nix store at 0444/0555. `chmod u+w` the one file
   and write it in place (a temp-and-rename needs the directory); `strx rice
-  declare` then carried it into the checkout like any other song.
+  declare` then carried it into the checkout like any other rice.
 - **`strx rice declare` copies; it does not delete.** A file renamed in the
   runtime tree arrives under its new name, and the old name stays in the
   checkout until it is removed there (`WallpaperPcbWorker.mjs` to `.js`).
 
-## Song widget costs, second pass: the paint in flight (2026-10-07)
+## Rice widget costs, second pass: the paint in flight (2026-10-07)
 
 - **Correction:** the debounce entry above says the settled burst's last glow
   was done 8.6 s in; its commit measured 8.7 s.

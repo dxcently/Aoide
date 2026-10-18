@@ -1,7 +1,7 @@
 // The fixture greeter face: an account field while none is chosen, then one
 // password field for the chosen account; Escape goes back to choosing
 // (switch user). The host's message and a failure count, all through `auth`.
-// An icon from the song's own icons/, by the path a face uses in the session,
+// An icon from the rice's own icons/, by the path a face uses in the session,
 // and a helper type (AubadeCard) from its own folder.
 import QtQuick
 import Quickshell

@@ -1,4 +1,4 @@
-// calendar.qml — this song's "calendar" surface: the calendar body on a layer
+// calendar.qml — this rice's "calendar" surface: the calendar body on a layer
 // surface of its own, summoned by the bar's clock through the bridge
 // (`strillix component calendar toggle <screen>`).
 //

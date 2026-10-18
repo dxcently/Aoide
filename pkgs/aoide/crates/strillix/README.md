@@ -15,12 +15,12 @@ are core `aoide` identity, root `AGENTS.md`).
 - `bin/strillix` — the binary entry point.
 - `dispatch`/`registry` — strillix's own argv parsing, dispatch, and golden
   command-path snapshot, independent of core's.
-- `commands::LAYOUT` — how `strillix` lists itself (Start here · Songs &
+- `commands::LAYOUT` — how `strillix` lists itself (Start here · Rices &
   themes · Widgets & icons · Desktop apps · Clipboard · Screen control (screen, lock) ·
   Dialogs & notices · Agent interfaces · System), adopted by `all()` through
   `Registry::arrange`; bare `strillix`, `--help`, group pages and `guide` read it.
 - `guide` — `strx guide`.
-- `commands` — strillix's `commands::all()`, pulling in `song`, `screen`, and
+- `commands` — strillix's `commands::all()`, pulling in `rice`, `screen`, and
   `conduct`'s `shellbridge`/`notifications` registration lines (the files stay in
   `conduct`; only the registry lines are strillix's), plus strillix's own root-
   coupled `onboard` (below).
@@ -67,7 +67,7 @@ are core `aoide` identity, root `AGENTS.md`).
   instead) — never a copy of either template. Writes the generated QML to
   a scratch temp path and spawns
   `quickshell -p <path>` as a genuinely standalone process
-  (`song::commands::reload`'s own IPC-reload beat only ever sends IPC into
+  (`rice::commands::reload`'s own IPC-reload beat only ever sends IPC into
   an ALREADY-running instance, by contrast); `PR_SET_PDEATHSIG`
   (`libc::prctl`) keeps a killed dialog from ever orphaning its own window
   (`AGENTS.md`'s own invariant has the full ownership-chain reasoning);
@@ -131,12 +131,12 @@ are core `aoide` identity, root `AGENTS.md`).
   surface's only remaining job became showing the approver's reply code
   back, which is what `pair show` now is.
 - `commands::stubs` — `rice declare`'s handler (and the `rice transpose`
-  stub): `rice declare <name>` copies the composed song into the checkout,
-  once `strillix_rice::checkout_gate` finds git clean under that song folder and
+  stub): `rice declare <name>` copies the composed rice into the checkout,
+  once `strillix_rice::checkout_gate` finds git clean under that rice folder and
   the staged `rice.nix` is a v1 body (a refusal names the folder, or the file
   with `reason: old-rice-shape`); `rice declare <name> --host` (CLI door only)
   hands the name to `strillix_rice::host_declare`, which rewrites the host
-  config's declared-song line for the next rebuild and warns, never refuses,
+  config's declared-rice line for the next rebuild and warns, never refuses,
   when the folder is dirty.
 - `commands::preview` (P1, then a same-lane follow-up) — **`strx preview
   [<widget>]`** builds an ISOLATED preview root (default
@@ -152,13 +152,13 @@ are core `aoide` identity, root `AGENTS.md`).
   never symlinks into the checkout: one copy per shell `*.qml`, the shell's
   resolved `icons/` tree (the canvas toolbar's Iconoir glyphs, `strx icon
   resolve` output already in the checkout), one copied
-  tree per non-`_`-prefixed song's `widgets/` dir (`stage_qml_copies`/
-  `stage_song_copies`, a stale symlink from an older root replaced), and
+  tree per non-`_`-prefixed rice's `widgets/` dir (`stage_qml_copies`/
+  `stage_rice_copies`, a stale symlink from an older root replaced), and
   `manifest.json`/`registry.json` copied from the live deployed tree when
   present else `{}`. `preview.json`'s `stage` map (`compute_stage_map`)
   pairs each `watch` entry with its copy so the canvas can refresh the
   copies before a reload; `resolve_widget_abs` maps a `widget` field to the
-  CHECKOUT file it names (`songs/<s>/<rest>` → `rices/<s>/widgets/
+  CHECKOUT file it names (`rices/<s>/<rest>` → `rices/<s>/widgets/
   <rest>`), never to the copy. `resolve_root` refuses a `..` component and
   any `--root` at, under, or symlink-resolving into the live daemon's dir
   (`live_daemon_dir`: `$XDG_RUNTIME_DIR/aoide`, or storage's own
@@ -172,8 +172,8 @@ are core `aoide` identity, root `AGENTS.md`).
   while it stays up. Every OTHER lane-read stage file
   the isolated root needs merely to exist gets written too:
   `/stage/mode.json` (`ThemeState.qml`'s own convention — `mode`,
-  `song`, `stagingSong`, `since`) is REWRITTEN on every build and on
-  `preview set --song`, always naming the current song; `/stage/
+  `rice`, `stagingRice`, `since`) is REWRITTEN on every build and on
+  `preview set --rice`, always naming the current rice; `/stage/
   wallpaper.json`, `/stage/grimoire.json` (`GrimoireLedger`'s
   `launches: {}`, an object keyed by app id, never an array), and
   `state/usage.json` are seeded once, only if absent, and never clobbered
@@ -181,12 +181,12 @@ are core `aoide` identity, root `AGENTS.md`).
   forms, all resolved through the same
   `strillix_rice::theme::resolve::resolve`/`to_json_string` engine
   `strx theme resolve` itself uses: `live` (the resolved live stage twin,
-  read-only), a bare song name (that song's own rices theme.json), a
+  read-only), a bare rice name (that rice's own rices theme.json), a
   path to a theme file, or a path to a base16 scheme (JSON or the flat
   `key: value` line shape — no yaml crate in this workspace) synthesized
   into a palette per CONTRACTS.md §1's base16 column reversed; default is
-  the preview's own `--song`. `preview.json` carries `themeSource` (the
-  spec as given, the one name for it) and `themes` (every rices song
+  the preview's own `--rice`. `preview.json` carries `themeSource` (the
+  spec as given, the one name for it) and `themes` (every rices rice
   with a theme.json of its own, sorted) — never a bare `theme` key: the
   P2 canvas treats `theme` as a legacy alias of `themeSource` and
   deletes it on every save of its own, so both the builder and `preview
@@ -198,7 +198,7 @@ are core `aoide` identity, root `AGENTS.md`).
   `strillix` on PATH, since a deployed `strillix` there may predate `preview set`
   entirely and would fail every rail action silently; a control doc from
   before this field existed leaves the canvas falling back to PATH. It also
-  carries `watch` (every `*.qml` under the current song's
+  carries `watch` (every `*.qml` under the current rice's
   own `widgets/` plus the previewed widget's own file when it lives
   elsewhere — the set the P2 canvas hot-reloads against). The child's env
   is rewritten (`AOIDE_ROOT`/`STRILLIX_ROOT`/`AOIDE_STATE_DIR` repointed at the
@@ -217,19 +217,19 @@ are core `aoide` identity, root `AGENTS.md`).
   usage error naming the allowed set) and merged: existing keys survive,
   only the given ones are overwritten, so a relaunch (or a live edit while
   the P2 canvas hot-reloads off the same file via `FileView`) preserves
-  whatever the human last set; `--widget`/`--song` also recompute `watch`.
+  whatever the human last set; `--widget`/`--rice` also recompute `watch`.
   Never touches the live desktop on its own — launching the canvas is the
   one side effect, and `--no-launch` skips even that, leaving a plain
   filesystem build a test or a CI check can run with no quickshell
   installed at all. **`strx preview declare [--slot <name>]`** is the
   canvas's own counterpart of `rice declare` (`commands/stubs.rs`,
   `Self-Ricing.md`'s stage-vs-commit split): it copies the previewed
-  widget body (refusing a `widget` outside `run/qml/songs/` — never a
+  widget body (refusing a `widget` outside `run/qml/rices/` — never a
   lane symlink) and, unless `themeSource` is exactly the preview's own
-  song (its palette is already checkout truth), the resolved palette
+  rice (its palette is already checkout truth), the resolved palette
   tiers (`palette`/`base16`/`bar`/`notif`/`window` only — every other
   authored key in the checkout's `theme.json` survives untouched, and
-  `song` is never written there) into `rices/<song>/`. Byte-diffed
+  `rice` is never written there) into `rices/<rice>/`. Byte-diffed
   so a repeat with nothing new is a true no-op; it never runs `git`,
   touches the live stage, `~/.aoide`, or `run/qml` — the commit and
   rebuild stay the user's own gate (house rule 2), same as `rice declare`.
@@ -270,7 +270,7 @@ are core `aoide` identity, root `AGENTS.md`).
   with the suffix LITERALLY APPENDED, never an extension swap — `--out
   widget.png` sidecars at `widget.png.json`, never `widget.json`. Every
   kind writes its own `<out>.json` sidecar —
-  `{what, out, root, widget, song, widgetWidth, widgetHeight, scale?,
+  `{what, out, root, widget, rice, widgetWidth, widgetHeight, scale?,
   element?, elementRect?, source?, capture?, notes}` (`capture` is the
   screen/canvas kinds' folded-in `aoide-screen` sidecar, above); for
   widget/element the canvas's own `<out>.meta.json` is `{widgetRect,
@@ -307,7 +307,7 @@ are core `aoide` identity, root `AGENTS.md`).
   dependency in this workspace).
   Before any of that, at every node, a runtime node's own `type` is
   checked against a `ComponentMap` built from every `*.qml` file named in
-  `preview.json`'s `watch` list (the song's `widgets/` directory plus the
+  `preview.json`'s `watch` list (the rice's `widgets/` directory plus the
   previewed widget's own file, each parsed once): each file registers
   itself keyed by basename, AND every inline `component Name: Type {
   ... }` declaration found while parsing any of those files registers
@@ -424,14 +424,14 @@ are core `aoide` identity, root `AGENTS.md`).
   place.
 - `commands::lock` — `lock` and `lock hint [yes|no]`, the one lock entry
   (`SUPER+ESCAPE`, shellbridge's power-menu `lock`, the `lock` alias). A
-  staged song whose OWN manifest entry carries `lockscreen` is locked by the
+  staged rice whose OWN manifest entry carries `lockscreen` is locked by the
   running shell when `/etc/pam.d/aoide-lock` exists:
   `quickshell -p run/qml/shell.qml ipc call lock lock` (the shell answers
   `false` when its PAM conversation cannot start, and then never locks),
   then `ipc call lock secure` until it answers `true` (the compositor
   confirmed the lock) inside 5 s. The budget is 5 s, not 2 s, because each
   `quickshell ipc` client takes about 1.2 s to start on a slow machine (the
-  graphical VM test) and a lock is two of them at least. A song with no
+  graphical VM test) and a lock is two of them at least. A rice with no
   face, a missing PAM service, and a shell that is down, refuses, has no
   lock host, hangs or never confirms, runs `hyprlock` in its own process
   group; a hyprlock that exits within 500 ms is a failure (`hyprlock-failed`,
@@ -462,10 +462,10 @@ shellbridge/notifications/take/element/secrets ask/pair ask/pair show/preview/
 preview set/preview declare/preview shot/preview tree/preview notes/icon/
 apps/clipboard/lock/lock hint — everything that paints, or that only a desktop needs.
 `element seed` (L-E1,
-docs/architecture/ELEMENTS.md) renders a song's committed
+docs/architecture/ELEMENTS.md) renders a rice's committed
 `elements/*/element.json` (non-QML rice targets — waybar, dunst, anything
 with a config file) into `run/elements/`. Never depends on
 `aoide-client`/`aoide-conductor` — no A2A client, no TUI; those stay
-core-only. May depend on Nix (`song::widgets`'s `nix-instantiate` over the
+core-only. May depend on Nix (`rice::widgets`'s `nix-instantiate` over the
 shipped generator) — the
 one binary allowed to (root `AGENTS.md`, "core is nix-independent").

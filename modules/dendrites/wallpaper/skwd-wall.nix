@@ -4,7 +4,7 @@
 # It installs the engine's three packages, runs one `skwd-walld` user unit of its
 # own, and keeps the engine's own config to what Aoide owns: theming off, its
 # library inside `aoide.root`, one post-processing hook. WHO PAINTS is the host's
-# choice, so no song is consulted — the seam is the fact
+# choice, so no rice is consulted — the seam is the fact
 # `aoide.wallpaper.provider = "skwd-wall"` (CONTRACTS.md §0), which this file SETS
 # `mkDefault` and guards on.
 #
@@ -74,7 +74,7 @@ let
   # The keys the engine's own config catalog names, and only those: the
   # whole-fan-out theming switch off, the bundled renderer over `awww`, this
   # layer (the shell's own), the library and cache inside this lane's state
-  # dir, no restore-on-startup (a restore would repaint over a song staged
+  # dir, no restore-on-startup (a restore would repaint over a rice staged
   # with the shell's own layer — `ExecStartPost` re-applies instead), and the
   # one hook, replaced rather than appended.
   engineConfig = pkgs.writeShellScript "aoide-skwd-wall-config" ''
@@ -144,7 +144,7 @@ in
           #
           # `ExecStartPost` re-asserts the staged state on every start: the
           # provider's own restore is off, so after a daemon restart (or a first
-          # start) nothing would repaint until the next pick — `strillix cover
+          # start) nothing would repaint until the next pick — `strillix wallpaper
           # sync` is what puts the staged pick back in front of the user. It
           # runs `strillix` off this unit's PATH, and it waits out the daemon's own
           # socket (this hook can win that race).

@@ -1,4 +1,4 @@
-# The declared picture is the song's own wallpaper/<song>-desktop.<ext>, the name
+# The declared picture is the rice's own wallpaper/<rice>-desktop.<ext>, the name
 # the seed and `rice stage` share.
 {
   system = {

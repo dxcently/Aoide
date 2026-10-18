@@ -37,7 +37,7 @@ aoide-server = { workspace = true }
 # family) moved out of core's dependency list at P-A5 of the binary-split
 # workstream — the graphical bundle they back now lives ONLY in `crates/strillix`
 # (docs/architecture/PACKAGE-LAYOUT.md, CONTRACTS.md §3). Core is
-# nix-independent; song/screen carry strillix's nix-eval and heavy
+# nix-independent; rice/screen carry strillix's nix-eval and heavy
 # wayland-client/wayland-protocols-wlr/image deps, which must never reach
 # this crate's dependency tree again (the P-A5 `cargo tree -p aoide-cli`
 # gate).

@@ -11,15 +11,15 @@ import Quickshell.Wayland
 // stage dir can be pointed at to exercise empty/multi-project states:
 //   QS_STAGE=/tmp/stage-fixture qs -p …/ConductorPreview.qml
 //
-// The conductor body is per-song score (song/songbook/<song>/widgets/), NOT
+// The conductor body is per-rice score (rices/<rice>/widgets/), NOT
 // a shared-tree component, so this harness loads it by URL — the
 // CalendarPreview precedent. Quickshell's virtual qs:@ filesystem
 // black-holes relative paths that escape the config root, so from a repo
-// checkout point CONDUCTOR_WIDGET at the songbook file (QS_STAGE
+// checkout point CONDUCTOR_WIDGET at the rices file (QS_STAGE
 // precedent — previews honour env seams):
-//   CONDUCTOR_WIDGET=file://$PWD/song/songbook/sonata/widgets/conductor.qml \
+//   CONDUCTOR_WIDGET=file://$PWD/rices/sonata/widgets/conductor.qml \
 //     qs -p pkgs/strillix-shell/qml/ConductorPreview.qml
-// In the deployed tree ($out/qml/, where songs/ sits beside this file) the
+// In the deployed tree ($out/qml/, where rices/ sits beside this file) the
 // default relative source resolves with no env needed.
 //
 // conductor.qml declares `theme` AND `bridge` as `required property`
@@ -59,7 +59,7 @@ ShellRoot {
             anchors.left: parent.left
             Component.onCompleted: {
                 var src = Quickshell.env("CONDUCTOR_WIDGET")
-                if (!src || src === "") src = "songs/sonata/conductor.qml"
+                if (!src || src === "") src = "rices/sonata/conductor.qml"
                 setSource(src, { "theme": theme, "bridge": bridge, "shared": sharedStub })
             }
         }

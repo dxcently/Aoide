@@ -914,7 +914,7 @@ pub use aoide_protocol::wire::gen_message_id;
 // (`aoide-server::a2a::graph_summary`) and caches the result; `build_graph`
 // (`aoide-conduct`) folds a fresh cache in as a `node:<name>` root node. The
 // registry lives in `state/nodes.json` (`aoide_storage::node_store`) —
-// external registry-style state, not song-scoped rehearsal state.
+// external registry-style state, not rice-scoped rehearsal state.
 
 /// `node add <name> <url>` — verify the node by fetching its
 /// AgentCard first, then register `name` → `url`. A duplicate `name` is
@@ -933,7 +933,7 @@ fn handle_node_add(inv: &Invocation) -> Outcome {
     // `name` is joined straight into `state/node-cache/<name>.json`
     // (`node_store::node_cache_path`) — reject a traversal shape here,
     // before it's ever registered, same guard `rice compose` applies to a
-    // song name.
+    // rice name.
     if !aoide_storage::node_store::valid_node_name(&name) {
         return teach::bad_nickname(inv, cmd, "node nickname", teach::Slot::Arg(0), &name);
     }

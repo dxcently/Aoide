@@ -1,6 +1,6 @@
 # desktop — a graphical session's platform, and nothing that paints it.
 #
-# The session's own surfaces are the `aoideos` aggregation, which is why a host
+# The session's own surfaces are the `strillix` aggregation, which is why a host
 # can take this one and answer the shell question differently (`quickshell`
 # selected with its own `aoide.quickshell.config`, or not at all). What is here
 # is what a graphical session needs regardless of who draws it: sound, the

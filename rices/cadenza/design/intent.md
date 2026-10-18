@@ -1,6 +1,6 @@
 # cadenza — Design Intent
 
-**Song:** cadenza (composed from `sonata`, then drawn from nothing — no
+**Rice:** cadenza (composed from `sonata`, then drawn from nothing — no
 sonata widget body or gadget slot is reused; cadenza draws its own)
 **Register:** a hacker console on a green-phosphor CRT, wired like a
 telephone switchboard. Box-drawn termui panes with the title cut into the
@@ -11,9 +11,9 @@ lit by lamps.
 titles, braille/dot charts, sparklines, a gauge) and `refs/ref-crt.jpg` (the
 light: green phosphor on near-black, a faint bloom, nothing else).
 **Polarity:** dark. Needs a theme field the lane does not read yet (§5).
-**Cover:** a static circuit board on the CRT black (§3.9): dim copper-green
+**Wallpaper:** a static circuit board on the CRT black (§3.9): dim copper-green
 tracks, pads and vias, generated from the palette. Staged live with
-`strx cover set`; the wallpaper note stays `null` until the cover is
+`strx wallpaper set`; the wallpaper note stays `null` until the wallpaper is
 declared for the rebuild.
 **Glass:** none. No compositor blur, no hyprglass (§5).
 
@@ -43,9 +43,9 @@ At rest nothing moves.
 | **jack** | a workspace, drawn `[3]` on the switchboard | paint only; the data noun is core's *workspace* (an integer) |
 | **tie** | a real edge between two workspaces, kind `project` or `spawned` | core's noun (`graph.json` `ties`); the paint draws it as a tie line |
 | **trunk** | the bar's bottom rule; every tie line drops from it | paint only |
-| **pad** | the outline a jack's number sits in; on the cover, a copper ring | paint only |
+| **pad** | the outline a jack's number sits in; on the wallpaper, a copper ring | paint only |
 | **lamp** | the lit dash that runs a line when its activity advances | paint only; core publishes `activeAt` (until then, `hooks.json` `updatedAt`) |
-| **track** | a copper line on the circuit-board cover | paint only |
+| **track** | a copper line on the circuit-board wallpaper | paint only |
 | **board** | the dock: the per-project message board | core's noun (`aoide project board`) |
 | **pane** | one termui box | paint only |
 
@@ -61,7 +61,7 @@ Conductor Channel).
   fallback). No proportional text anywhere.
 - One face for the terminal: **ShureTechMono Nerd Font Mono**, set as
   `aoide.theme.fonts.monospace` — squared-off, single-weight, a console
-  rather than the desktop's humanist serif. A pane is the song's cell, the
+  rather than the desktop's humanist serif. A pane is the rice's cell, the
   terminal is where an agent lands; both are fixed-pitch machine faces.
   Coverage checked against the installed face: box drawing and rules
   (U+2500, U+2502, U+250C, U+2510) and block/shade (U+2588, U+2591). This
@@ -83,7 +83,7 @@ Conductor Channel).
   fractional scale. Box-drawing glyphs are used INSIDE panes (tree limbs
   `├─ └─`, separators) where the cell grid is guaranteed.
 - A **borderless block** (termui's magenta one) holds a single message that
-  is not a pane — a herald toast, one board item.
+  is not a pane — a notifications toast, one board item.
 - Panes are opaque `base00` at 0.94. Black glass, not frost.
 - **Inner glow:** the phosphor green (`title`) blooms inward from all four
   edges and fades softly to nothing, visible ~28px in — the phosphor lit
@@ -94,7 +94,7 @@ Conductor Channel).
   once by one `Canvas` in the kit's Pane, behind the content: painted on a
   size or palette change only, never per frame. Focus and reveal move the
   canvas's opacity and never repaint it. No shader, no live blur, nothing
-  redrawn at rest. It is the only soft fall-off in the song.
+  redrawn at rest. It is the only soft fall-off in the rice.
 
 ### Instruments (termui's widgets, re-drawn)
 | instrument | glyphs | used by |
@@ -112,7 +112,7 @@ the grid. Never an image, never an icon theme, never a tinted picture.
 - A glyph stands in for a word label, and only where a label is needed to
   say what a value is. A value that reads on its own stays bare: the
   clock, the `$` figure, the tray, and every list row (launcher, clip,
-  ledger, herald, board).
+  ledger, notifications, board).
 - It takes the colour of the value it labels. It never introduces a colour
   job of its own.
 - The glyphed bar cells: agents `󰚩 3/13`, notifications
@@ -167,7 +167,7 @@ a window border, not text, and stays darker.
 ### Motion
 - At rest nothing in the UI animates. No blinking cursor unless a field has
   focus. No scanline roll, no flicker, no idle shimmer. The one surface that
-  is never fully still is the cover: the board keeps a floor of light with
+  is never fully still is the wallpaper: the board keeps a floor of light with
   nothing running (§3.9 — a tube that reads dead is the one thing this key
   does not do).
 - **Lamp:** when a jack's or a tie's activity advances between two reads
@@ -176,8 +176,8 @@ a window border, not text, and stays darker.
   trunk into the jack) in 600ms linear, then the line goes dark. One
   `NumberAnimation` on one `Rectangle`; at most one lamp in flight per line,
   later advances coalesce into it. The walker under that dash is `Trace.at`
-  (`widgets/Trace.js`) — the same one the cover's pulses run on.
-- **Board light:** the cover's own motion — slow scans of light that arrive
+  (`widgets/Trace.js`) — the same one the wallpaper's pulses run on.
+- **Board light:** the wallpaper's own motion — slow scans of light that arrive
   at a pad, bounce back or die, and pads that breathe in their agent's state
   colour. One engine, three looks, all of it data: §3.9.
 - **Reveal:** a pane draws its rule clockwise in 160ms then fills (the CRT
@@ -253,14 +253,14 @@ One 28px line in the tmux/termui idiom, left to right:
   cadenza's own body; every bar embeds the slot). Any click (left, right or
   middle) opens the menu, marked by the `󰅀` after the word; the cell itself
   never switches. The menu is a kit Pane titled RICE (its stat the live
-  song) with three sections: the runtime songs (the staged one lit, the
+  rice) with three sections: the runtime rices (the staged one lit, the
   last-staged one hollow while locked, an unreadable one dim and dead), the
-  `[declarative]` row, and `drafts · <song>` listing the staged song's saved
+  `[declarative]` row, and `drafts · <rice>` listing the staged rice's saved
   drafts (the current one lit), `[+ new draft]`, and, in staging only,
   `[save as draft]`. A row sends one switch and the cell reads a dim `󰏘 …`
   (padded to the word, so nothing moves) at once; clicks do nothing until
   the mode (`/stage/mode.json` `mode`, through `theme.riceMode`), the
-  draft or the song actually changes, or 10s pass. A switch reloads the
+  draft or the rice actually changes, or 10s pass. A switch reloads the
   shell; one that changed nothing in 10s simply returns the cell to its word
   and says no more. The Pane has no inner glow, takes no keyboard, and closes
   on a row, a click on the cell, or 600ms after the pointer leaves both.
@@ -279,7 +279,7 @@ One 28px line in the tmux/termui idiom, left to right:
   one-digit number (the bar's text height across), stretched to a pill of
   the same height for two digits. It is drawn for every jack whether or
   not it is tied, so the row reads as a line of pads on a board. Pads are
-  the one rounded shape in the song; every pane and block keeps radius 0.
+  the one rounded shape in the rice; every pane and block keeps radius 0.
   An occupied jack's pad is `ink` with the number `ink`; an empty
   jack's pad and number are `dim`; the active jack's pad is filled `title`
   with the number in `ground`; a jack with an awaiting/blocked session has
@@ -426,9 +426,9 @@ own board; it mounts none of sonata's gadget slots.
     a tree limb (`├─` `└─`), six lines: no place line, no cwd, no gauge,
     a two-line box, its `#NN.k` and time up on the title line.
   - The **summons lane** is the one line that comes and goes: it exists
-    only while `herald.json` holds a permission summons for that session,
+    only while `notifications.json` holds a permission summons for that session,
     with `[approve] [deny]` answering through the NOTIF tab's own
-    `heraldverdict` (click only).
+    `notificationsverdict` (click only).
   - Groups follow `projects.json`; sessions outside every project fall in
     a dim **unanchored** group, and with no project registered there is no
     group rule at all.
@@ -467,9 +467,9 @@ own board; it mounts none of sonata's gadget slots.
   keeps counting in orange past it (no reset date, no dollars — Ollama
   publishes neither). `ok: false` draws one dim `ollama: <error>` line; no
   `ollama` key draws nothing.
-- **NOTIF** — the herald: toasts and summonses as borderless blocks, quoted
+- **NOTIF** — the notifications: toasts and summonses as borderless blocks, quoted
   plain text, `[y] approve [n] deny` on a summons (the existing
-  `heraldverdict` / `heralddismiss` commands, nothing else).
+  `notificationsverdict` / `notificationsdismiss` commands, nothing else).
 - **Opening** is sonata's dock's: `toggle()` from `SUPER+G`, and the bar's
   cells open it on a named tab.
 - **Closing**, any of: the `[x]` cut into the BOARD rule beside the stat
@@ -492,16 +492,16 @@ source exists; turning the part back on is that one line, and the fixture
 harness (`BoardPreview.qml`) flips them to show the full board.
 | part | real today | hidden until (switch) |
 |---|---|---|
-| OVERVIEW agent + terminal cards | `sessions.json`, `hooks.json`, `herald.json` summonses, `graph.json` `spawned` edges | — |
+| OVERVIEW agent + terminal cards | `sessions.json`, `hooks.json`, `notifications.json` summonses, `graph.json` `spawned` edges | — |
 | OVERVIEW projects | `projects.json` (bindings column `—`) | S1 fills the bindings |
 | OVERVIEW mail | — | S9/S10 (`hasMailRead`) |
-| project tabs: agent + terminal cards | `projects.json`, `sessions.json`, `hooks.json`, `herald.json`, `graph.json` | — |
+| project tabs: agent + terminal cards | `projects.json`, `sessions.json`, `hooks.json`, `notifications.json`, `graph.json` | — |
 | project feed | — | S8/S10 (`hasBoardFeed`) |
 | composer | — | S11 agents, S12 project (`hasBoardPost`); drawn disabled until `boardpost` exists |
 | SYS machine CPU/mem | `/proc/stat`, `/proc/meminfo` | — |
 | SYS account usage | `state/usage.json` (its `ollama` block only when opted in) | — |
 | SYS per-jack CPU/mem/tokens/cost | — | S5/S6 (`hasJackUsage`) |
-| NOTIF | `stage/herald.json` | — |
+| NOTIF | `stage/notifications.json` | — |
 
 ### 3.4 The jack insight pane
 Dropped from a hovered jack: `JACK 2 · aoide`, then tokens and cost for the
@@ -530,16 +530,16 @@ A centred pane like a shell prompt: `┌─ SHUTDOWN ─┐` with `[l] lock
 [s] suspend [r] reboot [p] poweroff [o] logout`, keyboard-first (the letter
 fires); the chosen row goes amber; a destructive row asks `y/N` inline.
 
-### 3.7 Herald toast (`herald`)
-A borderless block top-right under the bar: `herald ▸ <app>` dim, then the
+### 3.7 Notifications toast (`notifications`)
+A borderless block top-right under the bar: `notifications ▸ <app>` dim, then the
 quoted body; a summons carries `[y] approve [n] deny`. Its clock counts from
-each record's `receivedAt`, so a herald fixture's toasts carry `timeoutMs: 0`:
+each record's `receivedAt`, so a notifications fixture's toasts carry `timeoutMs: 0`:
 their fixed dates are long past and a toast with a timeout lapses at ingest.
 
 ### 3.8 Calendar (`calendar`)
 A `cal`-style month grid in a pane from the clock cell, today in accent.
 
-### 3.9 Cover — the circuit board (`cover/`)
+### 3.9 Wallpaper — the circuit board (`wallpaper/`)
 The wallpaper is a still image of a circuit board under the tube.
 - Tracks run orthogonally with 45° bends, in `base02` (the darkest
   phosphor that still reads), 2–3px wide. Pads and vias are hollow rings
@@ -550,11 +550,11 @@ The wallpaper is a still image of a circuit board under the tube.
 - It is generated, not drawn: `widgets/CoverPcb.qml` (an uppercase helper,
   never a slot) renders it from the theme with a fixed seed, and the
   preview canvas shoots it at each monitor's size into
-  `cover/pcb-<w>x<h>.png`. Regenerating after a palette change is one shot.
-- Live: `strx cover set <abs path>` (a hot swap). Declaring it into
+  `wallpaper/pcb-<w>x<h>.png`. Regenerating after a palette change is one shot.
+- Live: `strx wallpaper set <abs path>` (a hot swap). Declaring it into
   `aoide.theme.wallpaper` for the rebuild is the User's to admit.
 
-**The live board — `widgets/wallpaper.qml`.** The cover is the song's
+**The live board — `widgets/wallpaper.qml`.** The wallpaper is the rice's
 `wallpaper` slot body (the lane anchors it inside the per-screen Background
 surface, `slots.md`), so the board is drawn, not just photographed: the
 copper by `CoverPcb`, and over it the light. The still PNG stays what it is —
@@ -591,7 +591,7 @@ shell has no such slot.
 - **Colour.** working = `title`, awaiting = `urgent`, idle = `dim`. Amber
   (`hot`) is deliberately unused here: §2 gives it to the ONE live element,
   and the board carries many lights by design.
-- The cover's light obeys §2's glow budget and its rule that text never
+- The wallpaper's light obeys §2's glow budget and its rule that text never
   animates: nothing here is text, nothing here is a window.
 
 ## 4. Preview fixtures
@@ -605,7 +605,7 @@ reads a fixture path.
 
 ## 5. Hazards and open questions
 
-- **Polarity (settled).** The key's register is the song's own:
+- **Polarity (settled).** The key's register is the rice's own:
   `aoide.theme.polarity = "dark"` is declared beside the palette
   (`rice.nix` and `theme.json`), validated by `rice lint` (exactly
   `"light"`/`"dark"`; CONTRACTS.md §1), and read by the stylix dendrite as
@@ -614,18 +614,18 @@ reads a fixture path.
   no emitter carries it and staging applies nothing for it, so a polarity
   change lands on the user-gated rebuild, never on a stage.
 - **Glass (settled).** The compositor lane loads hyprglass and its
-  `blur on` layer rules, and the SONG decides whether the glass is on:
+  `blur on` layer rules, and the RICE decides whether the glass is on:
   `plugin:hyprglass`'s two enable keys (`enabled`, `layers.enabled`) and
   Hyprland's own `decoration:blur:enabled` all come from
   `geometry.blurEnabled`, baked into `hyprland.conf` and applied live by the
   same value as keywords — so this key's `blurEnabled = false` reads glassless
-  whether the desktop booted into it or staged it, and a song with no opinion
+  whether the desktop booted into it or staged it, and a rice with no opinion
   keeps the lane's baked default (both on). The plugin stays LOADED either way
-  (live never unloads it); what the lane still fixes for every song is its own
+  (live never unloads it); what the lane still fixes for every rice is its own
   set — the `light` preset override's glass opacity and the `aoide-*`
-  namespace list — which no song gates.
+  namespace list — which no rice gates.
 - **Bar height** 28px vs sonata's 36; the lane reads it back, so it is the
-  song's call.
+  rice's call.
 - **Unbuilt seams** — every "bridge not wired" above names its slice.
 
 ## Iteration Log
@@ -650,16 +650,16 @@ reads a fixture path.
 - 2026-09-26 — khoa: the ties were missing live (core's `ties` field is
   unbuilt), so the bar derives them from published edges + windows until
   core does (§3.2); a patch panel of agents with lamps on activity at the
-  bar's right end (§3.2a); a circuit-board cover (§3.9); and an inner
+  bar's right end (§3.2a); a circuit-board wallpaper (§3.9); and an inner
   border glow on every pane after a reference shot (`refs/ref-inner-glow.png`).
 - 2026-09-26 — khoa: the agent dots after the clock confused; the agent
-  map moves to a live cover once core anchors a wallpaper slot (§3.9), and
+  map moves to a live wallpaper once core anchors a wallpaper slot (§3.9), and
   leaves the bar now. CPU and spend leave the bar for the board's SYS tab.
   Every jack becomes a pad with its number inside, tied or not (§3.2).
   Sound and bluetooth share one cell and one pane, with a bluetooth power
   toggle and per-device connect (§3.1).
 - 2026-09-26 — khoa: the jack pads are round (a circle, a pill for two
-  digits), like a board's pads; the only rounded shape in the song.
+  digits), like a board's pads; the only rounded shape in the rice.
 - 2026-09-26 — khoa: a jack's pad breathes slowly while a session on it
   works (per state, not per tool call), and a conductor send runs a lamp
   from the sender's jack to the receiver's, on a transient wire when no
@@ -692,7 +692,7 @@ reads a fixture path.
   `sessions.json`, bursts from `hooks.json`, one hash-picked node per
   session), the bar's lamp walks the same code, and
   `design/trace.test.js` runs it under `node` (§2 Motion, §3.9).
-- 2026-09-28 — khoa: the key's register is the SONG's, and the glass follows
+- 2026-09-28 — khoa: the key's register is the RICE's, and the glass follows
   it. `aoide.theme.polarity = "dark"` is declared beside the palette (nucleus
   option, CONTRACTS §1, `rice lint`, read by the stylix dendrite) and mirrored
   in `theme.json`; baked only, so flipping it is a rebuild, not a stage. The

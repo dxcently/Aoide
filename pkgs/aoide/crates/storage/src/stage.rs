@@ -11,7 +11,7 @@
 //! their re-export back to `pub(in crate::graph)` so the original visibility
 //! contract at the root crate boundary is unchanged.
 //!
-//! **`state/stage/`, not `song/stage/` (command-defrag lane S1,
+//! **`state/stage/`, not `rice/stage/` (command-defrag lane S1,
 //! 2026-08-27).** These four files are core orchestration state — CONTRACTS.md
 //! §4 — so they resolve through [`crate::fs::conducting_stage_dir`], not
 //! [`crate::fs::stage_dir`] (which still means the rice/paint stage tree).

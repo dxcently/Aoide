@@ -5,7 +5,7 @@
 // Math.random — see each header), so the bytes that ship are the bytes this
 // runs. Quickshell cannot be exercised from a checkout without a compositor, so
 // the maths is proved here and the LOOK is proved on the canvas
-// (`strillix preview wallpaper`, cover/README.md).
+// (`strillix preview wallpaper`, wallpaper/README.md).
 //
 // What it holds:
 //   1. `at` — the walker the bar's lamp now reads — is identical to the inline

@@ -9,7 +9,7 @@ pi-coding-agent, OpenAI Codex + ChatGPT), local model-serving tooling
 tailscale, audio), and **the paint lanes** — what makes a machine paint at all:
 `compositor` (with its `hyprland` provider), `stylix`, `quickshell`
 (the shell runtime: the package and the one `aoide-quickshell` service), `strillix`
-(the Quickshell surface, its shellbridge, and the song-gated deploy half) and
+(the Quickshell surface, its shellbridge, and the rice-gated deploy half) and
 the ten component slots — `bar`, `launcher`, `powermenu`, `notifications`,
 `wallpaper`, `dock`, `calendar`, `switcher`, `lock`, `greeter` — each a
 provider set whose `strillix` provider is that Quickshell component on the
@@ -56,10 +56,10 @@ The shell runtime is two lanes, split by what each one knows:
 
 ```
 quickshell/       the PACKAGE, and the one `aoide-quickshell` user service.
-                  Knows no song, deploys nothing: it starts a shell on the
+                  Knows no rice, deploys nothing: it starts a shell on the
                   directory `aoide.quickshell.config` names and stops there.
 strillix/             the SURFACE. Builds the QML tree from `pkgs/strillix-shell` plus
-                  the built-in songs' `widgets/`, deploys it, seeds the stage,
+                  the built-in rices' `widgets/`, deploys it, seeds the stage,
                   restarts the rice, watches it (healthcheck), owns shellbridge
                   and the `aoide.surfaces` registry.
 ```
@@ -71,7 +71,7 @@ it by importing the shell lane's two plain halves by path, and names nothing
 else of it; the shell lane never names `strillix`, and keeps running the day a
 different lane (or a host) supplies the directory instead.
 
-**The two allowed shapes of Quickshell without strillix** — no song, no QML tree,
+**The two allowed shapes of Quickshell without strillix** — no rice, no QML tree,
 no rice binary:
 
 | Shape | How | What runs |
@@ -80,13 +80,13 @@ no rice binary:
 | bare | nothing sets it (`null`, the default) | the package only: no service, no session claim |
 
 The service is gated on the config, never on `aoide.rice` — a shell that paints
-a host's own config has no song and starts exactly the same way. What is
-song-gated is `strillix`'s half: deploy, seed, restart.
+a host's own config has no rice and starts exactly the same way. What is
+rice-gated is `strillix`'s half: deploy, seed, restart.
 
 ## The wallpaper capability (`wallpaper/`) and the seam with `strillix`
 
-Who paints a song's wallpaper is a HOST choice, the way the compositor is — a
-provider registry, not a song's field:
+Who paints a rice's wallpaper is a HOST choice, the way the compositor is — a
+provider registry, not a rice's field:
 
 ```
 wallpaper/
@@ -110,8 +110,8 @@ They never name each other either. The bridge is the CLI both sides already
 have: `strx wallpaper sync` (CONTRACTS.md §4) makes the external provider agree with
 the stage files — the staged pick while one applies, the step-aside image when
 none does — and it is what the engine's lane runs after every daemon start and
-what every pick write runs. Because "applies" is decided per STAGED SONG, a
-song switch steps the engine aside with no extra call: the pick simply stops
+what every pick write runs. Because "applies" is decided per STAGED RICE, a
+rice switch steps the engine aside with no extra call: the pick simply stops
 applying, and the shell's board is back.
 
 Nothing here is declared in `aoide.surfaces`: `wallpaper.owner` stays
@@ -129,7 +129,7 @@ like the rest: selecting one switches it on, and each of the six sets
 `aoide.enable` (the core switch). The option tree they act on is the
 contract in `modules/nucleus`; an option a member reads is declared in that member.
 
-- `aoided.nix` — carries only the AoideOS deltas for the `aoided` unit
+- `aoided.nix` — carries only the Strillix deltas for the `aoided` unit
   (`pkgs/aoide/module/aoided.nix` owns the unit itself, its tmpfiles rules, and
   the core session variables): the strillix-gated `STRILLIX_TEMPLATES` session
   variable, and nothing else paint-shaped. `aoide.sessionTarget` is set by the
@@ -154,7 +154,7 @@ contract in `modules/nucleus`; an option a member reads is declared in that memb
   the same way the secrets watcher prefers `strx secrets ask`.
 - `melete-adapter.nix` — the concrete thin-adapter exemplar on the `aoided`
   event stream. It orders itself against `aoided.service`, which the core module
-  defines on `aoide.enable` alone (the `aoided` dendrite adds only the AoideOS
+  defines on `aoide.enable` alone (the `aoided` dendrite adds only the Strillix
   deltas to it), so it evaluates with or without the `aoided` dendrite.
 - `aoide-secrets.nix` — the secrets broker's deployment: its own system user
   `aoide-secrets` + groups `aoide-secrets`/`aoide-secrets-access`, and a SYSTEM
@@ -201,7 +201,7 @@ it selects them by name from its own aggregation.
   select-with-one-line convention.
 - A dendrite that draws (e.g. `dunst.nix`'s notification popups) hands off
   to a render surface via a bridge (a CLI command, a stage file) rather
-  than drawing itself — `dunst.nix` pipes through `aoide notifications push` into
+  than drawing itself — `dunst.nix` pipes through `strx notifications push` into
   `state/stage/notifications.json`, which the Quickshell notifications widget reads.
 
 ## What it consumes

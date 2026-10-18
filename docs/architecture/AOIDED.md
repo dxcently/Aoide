@@ -165,7 +165,7 @@ lossless record reaches for the audit log, never this feed.
 
 A tick-driven stat sweep over the broker-owned file roster — the stage files
 (`state/stage/sessions.json`, `hooks.json`, `projects.json`, `graph.json`,
-`pending.json`, `herald.json`; paths from `aoide_storage::stage`,
+`pending.json`, `notifications.json`; paths from `aoide_storage::stage`,
 `storage/src/stage.rs:17-29`). The daemon records `(mtime, len)` after each
 of its own writes; a tick that finds a file changed with no daemon write in
 between emits `{"class":"audit","kind":"hand-edit","payload":{"file":"sessions.json"}}`

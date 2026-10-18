@@ -5,7 +5,7 @@
 // it into an existing layout. That doesn't work for a slot whose root IS a
 // `PanelWindow` — its own Overlay layer surface, own WlrLayershell namespace,
 // own keyboard focus, own GlobalShortcut. SurfaceSlot is a non-visual
-// `QtObject` sibling instead: same `resolveSong` → `Qt.createComponent` →
+// `QtObject` sibling instead: same `resolveRice` → `Qt.createComponent` →
 // `Component.createObject(parent, initialProperties)` mechanism WidgetSlot
 // already uses (same rationale — QML resolves `required property` at OBJECT
 // CREATION, so a declarative `Loader` is too late for required props), but
@@ -54,14 +54,14 @@ QtObject {
     property Component fallback: null
 
     // Same baseline-fallback resolution WidgetSlot uses (CONTRACTS.md §5):
-    // the active song if it authored `slot`, else sonata, else the lane-side
+    // the active rice if it authored `slot`, else sonata, else the lane-side
     // `fallback` Component when the host gives one, else nothing. Most
     // window-owning slots give none (sonata IS their floor); `switcher` gives
-    // the plain AoideSwitcher, because no song ships one.
-    readonly property string resolvedSong: stagingEngine.resolveSong(theme.songName, slot)
-    readonly property bool songProvides: resolvedSong !== ""
+    // the plain AoideSwitcher, because no rice ships one.
+    readonly property string resolvedRice: stagingEngine.resolveRice(theme.riceName, slot)
+    readonly property bool riceProvides: resolvedRice !== ""
     readonly property string resolvedSource:
-        songProvides ? stagingEngine.source(resolvedSong, slot) : ""
+        riceProvides ? stagingEngine.source(resolvedRice, slot) : ""
 
     // Whatever got created — a top-level Window (PanelWindow), never an
     // Item, so typed `var` rather than `Item`. null until the first
@@ -73,7 +73,7 @@ QtObject {
     // every single reload, in this order (traced live, one full reload):
     //   extraProps → onCompleted → resolvedSource → manifestChanged
     // The first two land while `stagingEngine.manifest` is still `{}`, so
-    // they only log "no song provides slot". The third builds the surface.
+    // they only log "no rice provides slot". The third builds the surface.
     // The FOURTH — the belt-and-suspenders manifest watch below — then found
     // `item` already SET and unconditionally tore it down and built a second,
     // identical one. Every reload therefore constructed and destroyed a whole
@@ -84,7 +84,7 @@ QtObject {
     // id inside the loaded widget's own context and re-evaluates every
     // binding that captured it — `launcher.qml` alone has 65 `root.theme.*`
     // bindings, so one spare destroy = a ~66-79-line burst of
-    // "TypeError: Cannot read property 'theme' of null" (@songs/sonata/
+    // "TypeError: Cannot read property 'theme' of null" (@rices/sonata/
     // launcher.qml, 1984 of them in six hours). `powermenu.qml` is the same
     // shape and stays quiet only because it is fully static — no Repeater or
     // ListView delegates to re-evaluate on the way down.
@@ -92,7 +92,7 @@ QtObject {
     // So the fix is not a null guard in the widget: it is not rebuilding what
     // did not change. A trigger whose source AND extras match what `item` was
     // already built from now returns without touching it. A GENUINE change
-    // (live `aoide rice preview <song>`, a new extra) still rebuilds — the
+    // (live `aoide rice preview <rice>`, a new extra) still rebuilds — the
     // manifest watch keeps doing the job it was added for.
     property string _builtSource: ""
     property var _builtExtras: ({})
@@ -108,13 +108,13 @@ QtObject {
     }
 
     // Explicit re-trigger on the manifest's own load, not just a transitive
-    // dependency through resolvedSong/resolvedSource. QtObject has no
+    // dependency through resolvedRice/resolvedSource. QtObject has no
     // default child property (same reason manifestFile above is a named
     // property, not a bare child — StagingEngine.qml's own precedent), so
     // this is declared the same way. Belt-and-suspenders: confirmed live
     // that Component.onCompleted fires with stagingEngine.manifest still
     // `{}` (the FileView's async reload hasn't landed yet), and the
-    // resolvedSong/resolvedSource chain's transitive reactivity to that
+    // resolvedRice/resolvedSource chain's transitive reactivity to that
     // later change was NOT reliably re-triggering _rebuild() for this
     // (QtObject-rooted, no visual tree) component the way it does for
     // WidgetSlot's Item-rooted one — rather than chase why, force the
@@ -137,13 +137,13 @@ QtObject {
         }
         root._builtSource = root.resolvedSource
         root._builtExtras = root.extraProps
-        if (root.songProvides) {
+        if (root.riceProvides) {
             var comp = Qt.createComponent(root.resolvedSource)
             root._create(comp)
         } else if (root.fallback) {
             root._create(root.fallback)
         } else {
-            console.warn("[aoide/surfaceslot] no song (active or baseline) provides slot", root.slot)
+            console.warn("[aoide/surfaceslot] no rice (active or baseline) provides slot", root.slot)
         }
     }
 

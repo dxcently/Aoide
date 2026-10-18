@@ -188,7 +188,7 @@ function lineNotifications(n, byId) {
                  text: summonsCmd(n.body), sid: str(n.sessionId) }
     }
     if (str(n.app) === "notify-send")
-        return { t: t, kind: "song", glyph: "song", orb: "", nick: str(n.summary), color: "#1b7f8f", tool: "",
+        return { t: t, kind: "rice", glyph: "rice", orb: "", nick: str(n.summary), color: "#1b7f8f", tool: "",
                  text: str(n.body).replace(/\x60/g, ""), sid: "" }
     return { t: t, kind: "notifications", glyph: "notifications", orb: "", nick: str(n.summary), color: nickColor(str(n.app).toLowerCase()),
              tool: "", text: str(n.body), sid: "" }

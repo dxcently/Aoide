@@ -42,7 +42,7 @@ PanelWindow {
         kaomoji: { cw: 264, ch: 20, cols: 1 },
         search: { cw: 66, ch: 60, cols: 4 },
         sub: { cw: 66, ch: 60, cols: 4 },
-        songs: { cw: 88, ch: 60, cols: 3 },
+        rices: { cw: 88, ch: 60, cols: 3 },
         trash: { cw: 265, ch: 18, cols: 1 },
         keys: { cw: 265, ch: 18, cols: 1 }
     })
@@ -52,7 +52,7 @@ PanelWindow {
         { kind: "folder", key: "emoji", name: "Emoji", icon: root.g3Dir + "finder-folder-emoji.svg" + root.bust },
         { kind: "folder", key: "kaomoji", name: "Kaomoji", icon: root.g3Dir + "finder-folder-kaomoji.svg" + root.bust },
         { kind: "folder", key: "pics", name: "Desktop Pictures", icon: root.g3Dir + "finder-folder-pictures.svg" + root.bust },
-        { kind: "folder", key: "songs", name: "Songs", icon: root.g3Dir + "finder-folder-songs.svg" + root.bust }
+        { kind: "folder", key: "rices", name: "Rices", icon: root.g3Dir + "finder-folder-rices.svg" + root.bust }
     ]
     readonly property var subs: ({ emoji: root.folderItems(Emoji.folders), kaomoji: root.folderItems(Kaomoji.folders) })
     function folderItems(list) {
@@ -231,14 +231,14 @@ PanelWindow {
     property int bandAt: 0
     property int deskAt: 0
     property bool keyMenu: false
-    readonly property var titles: ["♪", "File", "Edit", "View", "Special", "Help", "Song"]
+    readonly property var titles: ["♪", "File", "Edit", "View", "Special", "Help", "Rice"]
 
     readonly property bool searching: root.view === "top" && root.query.trim() !== ""
     readonly property bool frontOpen: root.view !== "top" || root.searching
     readonly property bool inSub: root.sub !== ""
     readonly property bool canUp: root.inSub || root.searching
     readonly property bool showFolders: !!root.subs[root.view] && !root.inSub && root.query.trim() === ""
-    readonly property var parentItems: root.view === "songs" ? root.songItems : (root.subs[root.view] || [])
+    readonly property var parentItems: root.view === "rices" ? root.riceItems : (root.subs[root.view] || [])
     readonly property bool clipBig: root.view === "clip" && !!frontWin.unzoom
     readonly property var geom: root.geoms[root.searching ? "search" : root.showFolders ? "sub" : root.clipBig ? "clipBig" : root.view]
     onClipBigChanged: Qt.callLater(function () { root.reveal(frontGrid, frontGrid.currentIndex) })
@@ -260,8 +260,8 @@ PanelWindow {
         if (root.view === "clip" && root.clipboard.loading) return "Reading clipboard…"
         if (root.view === "clip" && root.clipErr !== "") return root.clipErr
         if (root.view === "pics" && root.picErr !== "") return root.picErr
-        if (root.view === "songs" && !Rice.ready(root.answer)) return ""
-        if (root.view === "songs" && root.pending) return "…"
+        if (root.view === "rices" && !Rice.ready(root.answer)) return ""
+        if (root.view === "rices" && root.pending) return "…"
         var n = root.items.length
         if (root.view === "keys") return root.bindsState === "ok" ? root.fmt(n) + (n === 1 ? " shortcut" : " shortcuts") : ""
         if (root.view === "trash") return root.trashState === "ok" ? root.fmt(n) + (n === 1 ? " item" : " items") : ""
@@ -278,7 +278,7 @@ PanelWindow {
             return root.trashState === "ok" ? "The Trash is empty" : (root.trashState === "unknown" ? "" : "Trash is unavailable")
         }
         if (root.view === "pics" && root.query.trim() === "") return "No pictures found"
-        if (root.view === "songs" && root.query.trim() === "" && !Rice.ready(root.answer)) return Rice.waiting(root.answer).label
+        if (root.view === "rices" && root.query.trim() === "" && !Rice.ready(root.answer)) return Rice.waiting(root.answer).label
         if (root.view === "clip" && root.query.trim() === "")
             return root.clipboard.loading ? "" : (root.clipboard.loadError ? "Clipboard history unavailable" : "No clippings yet")
         return "No items match “" + root.query.trim() + "”"
@@ -289,8 +289,8 @@ PanelWindow {
         if (root.searching) return "Find “" + root.query.trim() + "”"
         if (root.view === "trash") return "Trash"
         if (root.view === "keys") return "Keyboard Shortcuts"
-        if (root.view === "songs" && root.sub === "drafts")
-            return "Drafts" + (Rice.ready(root.answer) && root.answer.draftsSong ? " · " + root.answer.draftsSong : "")
+        if (root.view === "rices" && root.sub === "drafts")
+            return "Drafts" + (Rice.ready(root.answer) && root.answer.draftsRice ? " · " + root.answer.draftsRice : "")
         if (root.curSub) return root.curSub.name
         return root.curFolder ? root.curFolder.name : ""
     }
@@ -306,13 +306,13 @@ PanelWindow {
         emoji: root.g3Dir + "finder-menu-folder-emoji.svg" + root.bust,
         kaomoji: root.g3Dir + "finder-menu-folder-kaomoji.svg" + root.bust,
         pics: root.g3Dir + "finder-menu-folder-pictures.svg" + root.bust,
-        songs: root.g3Dir + "finder-menu-folder-songs.svg" + root.bust,
+        rices: root.g3Dir + "finder-menu-folder-rices.svg" + root.bust,
         trash: root.g3Dir + "finder-trash.svg" + root.bust
     })
     readonly property real memUsed: root.memTotalKb > 0 ? (root.memTotalKb - root.memAvailKb) / root.memTotalKb : 0
     readonly property string memText: root.fmt(Math.round((root.memTotalKb - root.memAvailKb) / 1024)) + " MB used of "
         + root.fmt(Math.round(root.memTotalKb / 1024)) + " MB"
-    readonly property bool sortable: root.frontOpen && root.view !== "top" && root.view !== "songs" && root.query.trim() === ""
+    readonly property bool sortable: root.frontOpen && root.view !== "top" && root.view !== "rices" && root.query.trim() === ""
     readonly property bool dated: root.view === "clip" || root.view === "trash"
     readonly property var sortDefault: ({ apps: "name", clip: "date", trash: "name", emoji: "kind", kaomoji: "kind", keys: "kind", pics: "kind" })
     readonly property string sortBy: root.sortMemo[root.view + "/" + root.sub] || root.sortDefault[root.view] || "name"
@@ -435,8 +435,8 @@ PanelWindow {
         if (view === "apps") return root.appItems(q)
         if (view === "clip") return root.clipItems(q)
         if (view === "pics") return root.picItems(q)
-        if (view === "songs") {
-            var rice = sub === "drafts" ? root.draftItems : root.songItems
+        if (view === "rices") {
+            var rice = sub === "drafts" ? root.draftItems : root.riceItems
             return q ? root.rank(q, rice, function (it) { return it.name }) : rice
         }
         if (q === "" && sub === "") return root.subs[view]
@@ -595,12 +595,12 @@ PanelWindow {
         root.view = key
         if (key === "clip") root.clipboard.refresh()
         if (key === "trash") root.refreshTrash()
-        if (key === "songs") root.askRice()
+        if (key === "rices") root.askRice()
     }
     function openSub(key) {
         findField.text = ""
         root.sub = key
-        if (root.view === "songs") root.askRice()
+        if (root.view === "rices") root.askRice()
     }
     function goTop() {
         var at = root.keyIndex(root.folders, root.view)
@@ -773,7 +773,7 @@ PanelWindow {
         root.barTitle = title
         root.keyFocus = "bar"
     }
-    function titleLive(label) { return label !== "Song" || songTitle.live }
+    function titleLive(label) { return label !== "Rice" || riceTitle.live }
     // the next live, non-separator row of a drop from `from` in `dir`, wrapping; -1 when there is none
     function liveRow(d, from, dir) {
         var n = d.rows.length
@@ -828,14 +828,14 @@ PanelWindow {
         return true
     }
 
-    // ── cover for the little desktop ──
+    // ── wallpaper for the little desktop ──
     property string wallpaperPath: Quickshell.env("AOIDE_WALLPAPER") || ""
     property bool wallpaperPick: false
     property bool wallpaperTile: false
     property bool wallpaperStill: false
     property string wallpaperPosition: "auto"
     readonly property real screenW: root.screen ? root.screen.width : 1920
-    // strillix refuses a cover pick while the declared song is locked in
+    // strillix refuses a wallpaper pick while the declared rice is locked in
     readonly property bool wallpaperLocked: root.riceMode === "declarative"
     readonly property bool canRemove: root.wallpaperPick && !root.wallpaperLocked && !root.aboutOpen
     readonly property bool canPosition: root.wallpaperStill && !root.wallpaperLocked && !root.aboutOpen
@@ -862,7 +862,7 @@ PanelWindow {
             var baked = Quickshell.env("AOIDE_WALLPAPER") || ""
             try {
                 var d = JSON.parse(text())
-                var mine = !!d && (!d.song || d.song === root.theme.songName)
+                var mine = !!d && (!d.rice || d.rice === root.theme.riceName)
                 root.wallpaperPath = mine && d.path ? "" + d.path : baked
                 root.wallpaperPick = mine && d.pick === true && (!!d.path || !!d.weId)
                 root.wallpaperTile = mine && !!d.path && d.pick === true && d.tile === true
@@ -878,7 +878,7 @@ PanelWindow {
     // the folder the Pictures list reads, in the default file manager; the list's folder watch picks up what lands there
     function addPictures() {
         root.menuOpen = ""
-        if (root.canAddPics) Quickshell.execDetached(["xdg-open", root.coversDir])
+        if (root.canAddPics) Quickshell.execDetached(["xdg-open", root.wallpapersDir])
     }
     // a library picture to the system Trash (gio, recoverable, no confirm); the pick in force is cleared first, and the trash
     // runs only once strillix has cleared it. A failure shows in the Pictures window's header (picErr), as clipErr does for clippings.
@@ -899,7 +899,7 @@ PanelWindow {
         if (!root.canTrashPic) return
         var it = root.selItem, name = it.path.slice(it.path.lastIndexOf("/") + 1)
         root.picErr = ""
-        if (name === "" || it.path !== root.coversDir + "/" + name) { root.picErr = "Couldn\u2019t move " + name + " to the Trash"; return }
+        if (name === "" || it.path !== root.wallpapersDir + "/" + name) { root.picErr = "Couldn\u2019t move " + name + " to the Trash"; return }
         var trash = ["gio", "trash", it.path]
         var inForce = root.wallpaperPick && it.path === root.wallpaperPath
         picOp.name = name
@@ -946,18 +946,18 @@ PanelWindow {
         if (keyed) posDrop.hot = Math.max(0, root.positions.map(function (q) { return q[0] }).indexOf(root.wallpaperPosition))
     }
 
-    // ── rice: songs as folders and the right-edge song menu; Rice.js says what every row means ──
+    // ── rice: rices as folders and the right-edge rice menu; Rice.js says what every row means ──
     readonly property string riceMode: root.theme.riceMode || "declarative"
-    readonly property string riceKey: [root.riceMode, root.theme.songName, (root.theme.modeRaw && root.theme.modeRaw.draft) || ""].join("|")
+    readonly property string riceKey: [root.riceMode, root.theme.riceName, (root.theme.modeRaw && root.theme.modeRaw.draft) || ""].join("|")
     property var answer: null
     property int asked: 0
     property bool pending: false
     readonly property bool canMenu: !!root.bridge && typeof root.bridge.riceMenu === "function"
     onRiceKeyChanged: {
         root.pending = false
-        if (root.shown && (root.view === "songs" || root.menuOpen === "Song")) root.askRice()
+        if (root.shown && (root.view === "rices" || root.menuOpen === "Rice")) root.askRice()
     }
-    onMenuOpenChanged: if (root.menuOpen === "Song") root.askRice()
+    onMenuOpenChanged: if (root.menuOpen === "Rice") root.askRice()
     Timer { interval: 10000; running: root.pending; onTriggered: root.pending = false }
     function askRice() {
         var ask = ++root.asked
@@ -970,8 +970,8 @@ PanelWindow {
         // a save changes no theme key, so read the drafts again once the daemon has had time to write one
         if (row.kind === "save" && row.live) afterSave.restart()
     }
-    Timer { id: afterSave; interval: 1500; onTriggered: if (root.shown && root.view === "songs") root.askRice() }
-    readonly property var songItems: {
+    Timer { id: afterSave; interval: 1500; onTriggered: if (root.shown && root.view === "rices") root.askRice() }
+    readonly property var riceItems: {
         if (!Rice.ready(root.answer)) return []
         return Rice.switchRows(root.answer, root.riceMode).map(function (r) {
             return { kind: "rice", name: r.label, row: r, icon: root.g3Dir + (r.kind === "declarative" ? "finder-declarative.svg" : "finder-folder.svg") + root.bust }
@@ -980,7 +980,7 @@ PanelWindow {
     readonly property var draftItems: !Rice.ready(root.answer) ? [] : Rice.draftRows(root.answer).concat([Rice.newDraft()]).map(function (r) {
         return { kind: "rice", name: r.label, row: r, icon: root.g3Dir + (r.kind === "new" ? "finder-new-draft.svg" : "finder-doc.svg") + root.bust }
     })
-    readonly property var songRows: {
+    readonly property var riceRows: {
         var out = []
         Rice.switchRows(root.answer, root.riceMode).forEach(function (r) {
             if (r.kind === "declarative" && out.length > 0) out.push({ sep: true })
@@ -996,8 +996,8 @@ PanelWindow {
         onCountChanged: root.dataTick++
     }
     Pics { id: ownPics; folder: "file://" + root.strillixRoot + "/rices/barcarolle/wallpaper" }
-    readonly property string coversDir: root.strillixRoot + "/wallpapers"
-    Pics { id: libPics; folder: "file://" + root.coversDir }
+    readonly property string wallpapersDir: root.strillixRoot + "/wallpapers"
+    Pics { id: libPics; folder: "file://" + root.wallpapersDir }
 
     property string hostName: ""
     readonly property string diskName: root.hostName || "Computer"
@@ -1239,10 +1239,10 @@ PanelWindow {
     function dropOf(label) {
         return label === "♪" ? appleDrop : label === "File" ? fileDrop : label === "Edit" ? editDrop
             : label === "View" ? viewDrop : label === "Special" ? specialDrop : label === "Help" ? helpDrop
-            : label === "Song" ? songDrop : label === "Position" ? posDrop : label === "Context" ? ctxDrop : null
+            : label === "Rice" ? riceDrop : label === "Position" ? posDrop : label === "Context" ? ctxDrop : null
     }
     function titleAt(x, y) {
-        var ts = [appleTitle, fileTitle, editTitle, viewTitle, specialTitle, helpTitle, songTitle]
+        var ts = [appleTitle, fileTitle, editTitle, viewTitle, specialTitle, helpTitle, riceTitle]
         for (var i = 0; i < ts.length; i++) {
             var q = ts[i].mapToItem(mac, 0, 0)
             if (ts[i].live && x >= q.x && x < q.x + ts[i].width && y >= q.y && y < q.y + ts[i].height) return ts[i].label
@@ -2505,11 +2505,11 @@ PanelWindow {
                             MenuTitle { id: helpTitle; label: "Help" }
                         }
                         MenuTitle {
-                            id: songTitle
+                            id: riceTitle
                             anchors.right: parent.right; anchors.rightMargin: 16
-                            label: "Song"
-                            icon: root.g3Dir + "finder-song.svg" + root.bust
-                            caption: root.pending ? "…" : root.theme.songName
+                            label: "Rice"
+                            icon: root.g3Dir + "finder-rice.svg" + root.bust
+                            caption: root.pending ? "…" : root.theme.riceName
                             maxText: parent.width - 16 - (findBox.x + findBox.width + 6) - 26
                             live: !root.pending
                         }
@@ -2710,12 +2710,12 @@ PanelWindow {
                         ]
                     }
                     Drop {
-                        id: songDrop
-                        visible: root.menuOpen === "Song"
-                        x: songTitle.x + songTitle.width - songDrop.width; y: 18; z: 41
-                        width: Math.min(songTitle.x + songTitle.width - 4, Math.max(176, 26 + Math.ceil(songFit.implicitWidth)))
-                        rows: root.songRows
-                        T { id: songFit; visible: false; font.family: root.fSys; font.pixelSize: 12; text: root.songRows.map(function (r) { return r.sep ? "" : r.label }).join("\n") }
+                        id: riceDrop
+                        visible: root.menuOpen === "Rice"
+                        x: riceTitle.x + riceTitle.width - riceDrop.width; y: 18; z: 41
+                        width: Math.min(riceTitle.x + riceTitle.width - 4, Math.max(176, 26 + Math.ceil(riceFit.implicitWidth)))
+                        rows: root.riceRows
+                        T { id: riceFit; visible: false; font.family: root.fSys; font.pixelSize: 12; text: root.riceRows.map(function (r) { return r.sep ? "" : r.label }).join("\n") }
                     }
                     Drop {
                         id: posDrop

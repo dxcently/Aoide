@@ -204,8 +204,8 @@ should follow).
   new ones until Ctrl-C (CLI-only), `--json` passes the raw lines through
   unchanged. `<id>` resolves like `send --to` — id, tail4, or petname.
 - **`session permit`** — publish a permission SUMMONS card to
-  `state/stage/herald.json` for a session blocked on a tool/permission prompt;
-  the desktop herald surface renders it with approve/deny buttons whose click
+  `state/stage/notifications.json` for a session blocked on a tool/permission prompt;
+  the desktop notifications surface renders it with approve/deny buttons whose click
   types the verdict back through the session's socket. The hook door raises
   it automatically the moment a session goes `awaiting`.
 - **`session grant undying on|off`** — mark or unmark a session DURABLE in
@@ -535,7 +535,7 @@ Everything after the matched prompt is, by the end anchor, nothing.
 
 Downstream it is an ordinary `awaiting` session: the conductor graph, the dock
 peek and the notification path that fire on `awaiting` fire here too, and a
-spawner hears it as the third ping-back source (above). The herald's summons
+spawner hears it as the third ping-back source (above). The notifications's summons
 card is not raised, because that card types a profile's keystrokes into the
 asking session and a program with no profile has none to type.
 

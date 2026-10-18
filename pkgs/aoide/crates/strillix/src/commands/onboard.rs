@@ -89,7 +89,7 @@ fn handle_onboard(inv: &Invocation) -> Outcome {
 /// distinguish a real Aoide checkout from an arbitrary directory. See the
 /// The `aoide.*` option doc set, read from the SHIPPED
 /// `share/strillix/aoide-options.json` — `pkgs/strillix-rices` builds it from
-/// `lib/options.nix` at nix-build time, and it sits beside the song templates
+/// `lib/options.nix` at nix-build time, and it sits beside the rice templates
 /// [`aoide_storage::fs::strillix_share_dir`] resolves. The FILE is the eval, so
 /// `strillix onboard` needs neither a checkout nor `nix` on PATH: it works from any
 /// cwd, on a machine that has never seen the Aoide source.
@@ -275,7 +275,7 @@ const ENV_KNOBS: &[(&str, &str)] = &[
         "Windowed-conduct terminal invocation template, e.g. \"kitty -e {cmd}\" (crates/conduct/src/graph/spawn.rs).",
     ),
     (
-        "AOIDE_CORE_BIN / AOIDE_RICE_BIN",
+        "AOIDE_CORE_BIN / STRILLIX_BIN",
         "Override the sibling-binary resolver for aoide/strillix cross-exec (crates/protocol/src/bin.rs).",
     ),
     (
@@ -338,7 +338,7 @@ mod tests {
     // ── read_aoide_options: the shipped option set, no nix, no checkout ──
 
     #[test]
-    fn read_aoide_options_reads_the_shipped_file_beside_the_song_templates() {
+    fn read_aoide_options_reads_the_shipped_file_beside_the_rice_templates() {
         let _g = env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["STRILLIX_TEMPLATES", "PATH"]);
         let root = unique_tmp("strillix-onboard-shipped-options");

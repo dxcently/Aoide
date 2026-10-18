@@ -5,10 +5,10 @@
 //! All emitters consume the SAME fully-resolved note set from
 //! `crate::theme::resolve`, so the live targets can never disagree. A new
 //! backend is ONE `emit/<name>.rs` + one line in [`registry`] — the same
-//! additive discipline as pkgs walker / dendrites / song widgets.
+//! additive discipline as pkgs walker / dendrites / rice widgets.
 //!
 //! Pure emit vs. host apply stays split (the seam PACKAGE-LAYOUT.md already
-//! draws inside song): these emitters only PRODUCE bytes;
+//! draws inside rice): these emitters only PRODUCE bytes;
 //! `live::apply_live` / `shellbridge::atomic_write` are the effectful half
 //! that consumes them. `gtk`/`gsettings` host-mutating apply belongs to the
 //! deferred `management` seam, not this registry.
@@ -71,8 +71,8 @@ pub enum EmitOutput {
 #[derive(Debug, Default, Clone, Copy)]
 pub struct EmitOpts<'a> {
     pub template: Option<&'a str>,
-    /// The song's lock picture, absolute: what `hyprlock` dresses the lock
-    /// with. None means the song ships none and dresses nothing.
+    /// The rice's lock picture, absolute: what `hyprlock` dresses the lock
+    /// with. None means the rice ships none and dresses nothing.
     pub image: Option<&'a Path>,
 }
 

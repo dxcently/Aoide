@@ -1,6 +1,6 @@
-# tests/selection/rices-borrow/lender/rice.nix — a song body for the borrow cases.
+# tests/selection/rices-borrow/lender/rice.nix — a rice body for the borrow cases.
 #
-# Minimal on purpose: the borrow cases are about OWNERSHIP, not about what a song paints.
+# Minimal on purpose: the borrow cases are about OWNERSHIP, not about what a rice paints.
 {
   system.module = _: {
     aoide.theme.palette.bg = "#000000";

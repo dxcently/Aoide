@@ -142,7 +142,7 @@ fn emit_hyprlock_is_the_native_golden_and_nothing_without_a_picture() {
         match backend.emit(&resolved(fix), &EmitOpts::default()).unwrap() {
             EmitOutput::Text(s) => assert!(
                 s.lines().all(|l| l.starts_with('#')),
-                "{fix}: a song with no picture dresses nothing: {s}"
+                "{fix}: a rice with no picture dresses nothing: {s}"
             ),
             other => panic!("{fix}: hyprlock emitted {other:?}, expected Text"),
         }

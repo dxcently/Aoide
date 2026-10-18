@@ -22,22 +22,22 @@ let
 
   composition = inputs.habit.lib.composition { inherit lib; };
 
-  # The nucleus module as the ref itself builds it (`lib/aoideos.nix`) — the same
+  # The nucleus module as the ref itself builds it (`lib/strillix.nix`) — the same
   # value the flake exports as `nixosModules.nucleus`, and the ONE module that
   # defines `_module.args.aoideInputs`. Read out of the ref rather than
   # reconstructed here, so the fixtures cannot drift from what a host really
   # gets; `specialArgs` therefore carries no `inputs` at all.
-  aoideos = import (src + "/lib/aoideos.nix") {
+  strillix = import (src + "/lib/strillix.nix") {
     inherit inputs lib system;
     username = "khoa";
   };
 
-  # The module argument a real host's song hook hands in (`lib/aoideos.nix`'s
+  # The module argument a real host's rice hook hands in (`lib/strillix.nix`'s
   # `mkHost`), for the fixture whose lanes read one: the strillix runtime reads
-  # the rices it paints from. No song is selected, so the song facts keep
+  # the rices it paints from. No rice is selected, so the rice facts keep
   # their defaults and no `rice.nix` is imported.
-  songArgs = {
-    extraModulesFor = _: [ { _module.args.ricesRoot = aoideos.ricesRoot; } ];
+  riceArgs = {
+    extraModulesFor = _: [ { _module.args.ricesRoot = strillix.ricesRoot; } ];
   };
 
   hostWith =
@@ -57,7 +57,7 @@ let
         # module; this harness supplies it here rather than inventing one in the
         # fixtures.
         extraModules = [
-          aoideos.nucleusModule
+          strillix.nucleusModule
           { nixpkgs.hostPlatform = system; }
         ];
         knownHosts = [ name ];
@@ -79,7 +79,7 @@ let
   # check that reads only the first would pass on a host that has the bridge.
   #
   # `templates` is the units' OWN `STRILLIX_TEMPLATES` (the staging path's
-  # one session-sourced variable — `fs::song_templates_dir`): declared on the
+  # one session-sourced variable — `fs::rice_templates_dir`): declared on the
   # unit, not inherited from the systemd user manager's login environment, so a
   # unit restarted after a switch stages from THIS build's rices. The two
   # module systems spell it differently — NixOS user units put it under
@@ -106,7 +106,7 @@ let
     in
     {
       config = cfg.aoide.quickshell.config;
-      song = cfg.aoide.rice;
+      rice = cfg.aoide.rice;
       strillix = cfg.aoide.strillix.enable;
       sessionTarget = cfg.aoide.sessionTarget;
       packages = map (p: baseNameOf p.outPath) cfg.environment.systemPackages;
@@ -128,7 +128,7 @@ let
         else
           null;
       # What is actually IN the directory the shell runs — the entry point and
-      # nothing else is the claim, so a `songs/` or `widgets/` tree landing
+      # nothing else is the claim, so a `rices/` or `widgets/` tree landing
       # there (what strillix deploys) would flip this. Null when no directory was
       # named: the bare shape has nothing to read.
       configEntries =
@@ -148,7 +148,7 @@ in
   # doubled — and that both components were recorded.
   twoComponents =
     let
-      two = hostWith songArgs "test-two-components";
+      two = hostWith riceArgs "test-two-components";
       cfg = two.config;
       opts = two.options;
       home = cfg.home-manager.users.${cfg.aoide.user};
@@ -173,7 +173,7 @@ in
   # rebuild does, and `system.build.toplevel` is where nixpkgs runs the
   # platform's assertions (`lib/asserts.nix`'s `checkAssertWarn`), so this
   # attribute is the failure a user would meet, not a probe for one.
-  songWithoutStrillix = (host "test-song-without-strillix").config.system.build.toplevel.drvPath;
+  riceWithoutStrillix = (host "test-rice-without-strillix").config.system.build.toplevel.drvPath;
 
   # The positive control for the absence checks: yomi runs strillix, so it HAS the
   # shellbridge unit, the rice binary and the templates declaration the two
@@ -185,7 +185,7 @@ in
       home = cfg.home-manager.users.${cfg.aoide.user};
       # Every unit that stages, or whose spawned children can: the daemon that
       # spawns sessions, the shell whose QML execs `strillix`, the bridge that
-      # stages in-process, and the reload that re-stages the last staged song at
+      # stages in-process, and the reload that re-stages the last staged rice at
       # login. One entry per unit, so a check can name the one that went missing.
       templates = {
         aoided = templatesOf (unitEnv cfg.systemd.user.services "aoided");
@@ -193,7 +193,7 @@ in
         quickshell = templatesOf (unitEnv (home.systemd.user.services or { }) "aoide-quickshell");
         riceReload = templatesOf (unitEnv (home.systemd.user.services or { }) "aoide-rice-reload");
       };
-      # The unit that brings the staged or drafted song back after a login or a
+      # The unit that brings the staged or drafted rice back after a login or a
       # switch, as the lane declares it — null when it is absent, so a check
       # reads a missing unit as a failed comparison, not an evaluation error.
       riceReload =

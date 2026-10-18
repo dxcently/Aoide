@@ -23,18 +23,18 @@ name. That rule is §1.
 
 ## 1. Sharing: by URL, never by type name
 
-**The gap.** Quickshell loads a song's files through its `qs:@/qs/` scheme.
+**The gap.** Quickshell loads a rice's files through its `qs:@/qs/` scheme.
 Qt resolves a same-directory type such as `Pane { }` implicitly only for
 local directories. For a remote scheme like `qs:` it needs a `qmldir` that
 names the type. Without one it fails with `Pane is not a type` (unless the
 type happens to be in the component cache already). The nix build writes
 that qmldir for every uppercase helper
-(`modules/dendrites/strillix/default.nix`, the "qmldir: register this song's
+(`modules/dendrites/strillix/default.nix`, the "qmldir: register this rice's
 helper types" block). Two other paths into a running shell do **not** write
 one:
 
 - `strx preview` (`pkgs/aoide/crates/strillix/src/commands/preview.rs`)
-- `rice stage` hot-sync (`sync_song_widgets`,
+- `rice stage` hot-sync (`sync_rice_widgets`,
   `pkgs/aoide/crates/strillix-rice/src/widgets.rs`)
 
 Cadenza goes live through hot-sync, so a name-resolved helper would break
@@ -50,18 +50,18 @@ twice.
 2. Each helper is instantiated by URL through a Loader:
    `setSource(kit.helper("Pane"), { …initial props… })`. `helper()` calls
    `Qt.resolvedUrl` inside Kit.js, so it resolves beside Kit.js
-   (`qs:@/qs/songs/cadenza/Pane.qml`) wherever the song is mounted.
+   (`qs:@/qs/rices/cadenza/Pane.qml`) wherever the rice is mounted.
 3. A helper that needs another helper uses the same call (Pane loads
    GlowText by URL).
 
 **The proof** (preview root `$XDG_RUNTIME_DIR/cadenza-foundation`, with no
-qmldir anywhere in the song or in the root; `find … -name qmldir` is empty):
+qmldir anywhere in the rice or in the root; `find … -name qmldir` is empty):
 
 - A compile check of every widget file under `qs:` gives `ok` for all nine
   (BarChart, Block, BrailleChart, Gauge, GlowText, Pane, Sparkline,
   Specimen, StateLamp).
 - The canvas loads `Specimen.qml`, which instantiates every helper by URL:
-  `[aoide/widgetpreview] loaded qs:@/qs/songs/cadenza/Specimen.qml`, and the
+  `[aoide/widgetpreview] loaded qs:@/qs/rices/cadenza/Specimen.qml`, and the
   shot is in `design/shots/`.
 - Live bindings survive the Loader: a `Qt.binding` passed in `setSource`'s
   initial properties keeps tracking (a pane stat bound to a counter went
@@ -195,7 +195,7 @@ the clock, `$`, the tray, `⏻` and every list row stay bare text.
 |---|---|---|---|
 | `agents` | U+F06A9 | nf-md-robot | AGT (opens OVERVIEW) |
 | `cpu` | U+F035B | nf-md-memory | CPU (opens SYS) |
-| `notif` | U+F009A | nf-md-bell | the herald count (opens NOTIF) |
+| `notif` | U+F009A | nf-md-bell | the notifications count (opens NOTIF) |
 | `vol` / `volMuted` | U+F057E / U+F0581 | nf-md-volume_high / volume_off | volume |
 | `bt` / `btOff` | U+F00AF / U+F00B2 | nf-md-bluetooth / bluetooth_off | Bluetooth (icon only) |
 | `wired` / `wifi` / `netNone` | U+F0200 / U+F05A9 / U+F05AA | nf-md-ethernet / wifi / wifi_off | network (icon only) |
@@ -305,7 +305,7 @@ Block has no rules and no glow.
 `label`, `stamp` (right-aligned time), `tone` (the label colour, default
 `dim`), `selected` (fill `select` instead of `raised`), `cols` (32),
 `content: Component`, *out* `contentItem`. There are no rules; the fill is at
-`paneAlpha`. Used for one herald toast or one board item.
+`paneAlpha`. Used for one notifications toast or one board item.
 
 ### GlowText
 `text`, `color` (`ink`), `bold`, `glow` (`off` / `outline` / `bloom`),
@@ -348,21 +348,21 @@ kit.lampColor(status)`.
 
 `strx preview --fixture <set>` copies exactly four files from
 `design/fixtures/<set>/` into the preview root's `state/stage/`:
-`sessions.json`, `projects.json`, `hooks.json` and `herald.json`
+`sessions.json`, `projects.json`, `hooks.json` and `notifications.json`
 (`FIXTURE_FILES` in `preview.rs`). A missing file gets an empty default.
 Nothing else in the set is placed.
 
 | set | placed by `--fixture` | shipped but NOT placed |
 |---|---|---|
-| `switchboard` | 12 sessions (one sub-agent), 3 projects, hooks, herald (a summons plus 2 toasts with untrusted text) | `graph.json`: live-shaped nodes and edges; 6 workspaces (1 2 3 5 7 9), bindings 2/3→aoide 7→melete 9→mneme, 4 ties (an aoide project clique 2-3-5 and a spawn 2→7) |
-| `board` | the same four stage files | `board.json`: §D shape, project aoide, **200 items** (chatter turn/awaiting/joined/left/pingback, mail letter/receipt, herald summons, untrusted text included). `now.json`: §C `by:"workspace"`, 6 rows with null tokens, null cost, `costPartial`, 60-sample series, an unattributed block |
+| `switchboard` | 12 sessions (one sub-agent), 3 projects, hooks, notifications (a summons plus 2 toasts with untrusted text) | `graph.json`: live-shaped nodes and edges; 6 workspaces (1 2 3 5 7 9), bindings 2/3→aoide 7→melete 9→mneme, 4 ties (an aoide project clique 2-3-5 and a spawn 2→7) |
+| `board` | the same four stage files | `board.json`: §D shape, project aoide, **200 items** (chatter turn/awaiting/joined/left/pingback, mail letter/receipt, notifications summons, untrusted text included). `now.json`: §C `by:"workspace"`, 6 rows with null tokens, null cost, `costPartial`, 60-sample series, an unattributed block |
 
 `graph.json` and `state/usage/now.json` have no fixture path, so a widget
 that reads them sees whatever the root holds, which is nothing. The root
 also carries an empty-stub `state/usage.json` that does not come from the
 fixture. **Do not teach a widget a fixture path.** The unplaced files are
 the reference shapes that wave 2 builds against. Placing them is a preview
-feature request, not a song change.
+feature request, not a rice change.
 
 ## 5. Notes and corrections
 

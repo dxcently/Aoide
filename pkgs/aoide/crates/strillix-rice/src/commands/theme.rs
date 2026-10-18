@@ -27,12 +27,12 @@ pub fn register(r: &mut Registry) {
         summary: "Emit the fully-resolved theme set through a backend: stage JSON, hyprctl keyword lines, terminal OSC sequences, a file template ({{group.key}}), kitty colours, or the lock screen's hyprlock dress.",
         args: [
             arg!("target", "string", true, "Emitter backend: stage, hyprctl, osc, file, kitty, or hyprlock."),
-            arg!("name", "string", false, "Song name or path to a theme file; defaults to the staged theme."),
+            arg!("name", "string", false, "Rice name or path to a theme file; defaults to the staged theme."),
         ],
         flags: [
             flag!("out", "string", "Write the emitted bytes to PATH atomically instead of stdout."),
             flag!("template", "string", "Template for the file backend ({{palette.bg}}-style placeholders)."),
-            flag!("song-dir", "string", "hyprlock target: the absolute song folder whose lockscreen.<ext> the lock screen draws; without one the song dresses nothing."),
+            flag!("rice-dir", "string", "hyprlock target: the absolute rice folder whose lockscreen.<ext> the lock screen draws; without one the rice dresses nothing."),
         ],
         gated: false,
         implemented: true,
@@ -41,7 +41,7 @@ pub fn register(r: &mut Registry) {
     r.insert(cmd!(
         path: ["theme", "resolve"],
         summary: "Resolve a theme file to the flat, fully-resolved set (aliases deref'd, component fallbacks applied) and print it.",
-        args: [arg!("name", "string", false, "Song name or path to a theme file; defaults to the staged theme.")],
+        args: [arg!("name", "string", false, "Rice name or path to a theme file; defaults to the staged theme.")],
         flags: [],
         gated: false,
         implemented: true,
@@ -51,7 +51,7 @@ pub fn register(r: &mut Registry) {
     r.insert(cmd!(
         path: ["theme", "lint"],
         summary: "Validate a theme file against the closed v0 schema.",
-        args: [arg!("name", "string", false, "Song name or path to a theme file; defaults to the staged theme.")],
+        args: [arg!("name", "string", false, "Rice name or path to a theme file; defaults to the staged theme.")],
         flags: [],
         gated: false,
         implemented: true,
@@ -69,8 +69,8 @@ pub fn register(r: &mut Registry) {
 /// * **no arg** — the staged notes (`<stage>/theme.json`) if present, else
 ///   a usage error (exit 2),
 /// * **an arg that names an existing file** — taken as a literal path,
-/// * **otherwise the arg is a committed-song NAME** →
-///   `<song>/rices/<name>/theme.json`.
+/// * **otherwise the arg is a committed-rice NAME** →
+///   `<rice>/rices/<name>/theme.json`.
 ///
 /// `skip` offsets past the command's own leading positionals (`theme emit`
 /// takes `<target>` first, so its theme name lives at args[1]).
@@ -222,17 +222,17 @@ fn handle_theme_resolve(inv: &Invocation) -> Outcome {
 }
 
 /// `theme emit <target> [<name>|<path>] [--out PATH] [--template STR]
-/// [--song-dir DIR]` — run the resolved set through one backend and print (or
+/// [--rice-dir DIR]` — run the resolved set through one backend and print (or
 /// atomically write) its bytes. `--out` generalizes the Node `emit stage
-/// --out` contract to every target; `--song-dir` is the `hyprlock` target's
-/// song folder, searched for the lock picture the song ships.
+/// --out` contract to every target; `--rice-dir` is the `hyprlock` target's
+/// rice folder, searched for the lock picture the rice ships.
 fn handle_theme_emit(inv: &Invocation) -> Outcome {
     let target = match inv.args.first() {
         Some(t) => t.clone(),
         None => {
             return Outcome::usage(
                 "theme.emit",
-                "usage: aoide theme emit <target> [<name>|<path>] [--out PATH] [--template STR] [--song-dir DIR] [--json]",
+                "usage: aoide theme emit <target> [<name>|<path>] [--out PATH] [--template STR] [--rice-dir DIR] [--json]",
             )
             .with_data(json!({ "reason": "missing-target" }));
         }
@@ -271,7 +271,7 @@ fn handle_theme_emit(inv: &Invocation) -> Outcome {
     let template = inv.flags.get("template").map(|s| s.as_str());
     let image = inv
         .flags
-        .get("song-dir")
+        .get("rice-dir")
         .and_then(|dir| crate::wallpaper::lockscreen_image(Path::new(dir)));
     let opts = EmitOpts { template, image: image.as_deref() };
     let output = match backend.emit(&resolved, &opts) {
@@ -332,7 +332,7 @@ mod tests {
     fn emit_hyprlock(strillix_dir: Option<&Path>) -> Outcome {
         let mut i = inv(&["theme", "emit"], &["hyprlock", FIXTURE]);
         if let Some(dir) = strillix_dir {
-            i.flags.insert("song-dir".into(), dir.to_string_lossy().into_owned());
+            i.flags.insert("rice-dir".into(), dir.to_string_lossy().into_owned());
         }
         handle_theme_emit(&i)
     }
@@ -342,37 +342,37 @@ mod tests {
     }
 
     #[test]
-    fn hyprlock_draws_the_song_folders_lock_picture_and_nothing_without_one() {
-        let song = unique_tmp("theme-emit-hyprlock");
-        let out = emit_hyprlock(Some(&song));
+    fn hyprlock_draws_the_rice_folders_lock_picture_and_nothing_without_one() {
+        let rice = unique_tmp("theme-emit-hyprlock");
+        let out = emit_hyprlock(Some(&rice));
         assert_eq!(out.status, Status::Ok, "{:?}", out.data);
         assert_eq!(stdout(&out), crate::theme::emit::hyprlock::NO_DRESS, "no picture, no dress");
         assert_eq!(stdout(&emit_hyprlock(None)), crate::theme::emit::hyprlock::NO_DRESS);
 
-        std::fs::write(song.join("lockscreen.png"), b"").unwrap();
-        let out = emit_hyprlock(Some(&song));
+        std::fs::write(rice.join("lockscreen.png"), b"").unwrap();
+        let out = emit_hyprlock(Some(&rice));
         assert_eq!(out.status, Status::Ok, "{:?}", out.data);
-        let want = format!("$aoide_lock_image = {}", song.join("lockscreen.png").display());
+        let want = format!("$aoide_lock_image = {}", rice.join("lockscreen.png").display());
         let text = stdout(&out);
         assert!(text.lines().any(|l| l == want), "{text}");
         assert_eq!(text.lines().filter(|l| l.starts_with("$aoide_lock_")).count(), 10, "{text}");
-        let _ = std::fs::remove_dir_all(&song);
+        let _ = std::fs::remove_dir_all(&rice);
     }
 
     #[test]
     fn hyprlock_writes_the_same_bytes_through_out() {
-        let song = unique_tmp("theme-emit-hyprlock-out");
-        std::fs::write(song.join("lockscreen.webp"), b"").unwrap();
-        let dst = song.join("out").join("hyprlock.conf");
+        let rice = unique_tmp("theme-emit-hyprlock-out");
+        std::fs::write(rice.join("lockscreen.webp"), b"").unwrap();
+        let dst = rice.join("out").join("hyprlock.conf");
         let mut i = inv(&["theme", "emit"], &["hyprlock", FIXTURE]);
-        i.flags.insert("song-dir".into(), song.to_string_lossy().into_owned());
+        i.flags.insert("rice-dir".into(), rice.to_string_lossy().into_owned());
         i.flags.insert("out".into(), dst.to_string_lossy().into_owned());
         let out = handle_theme_emit(&i);
         assert_eq!(out.status, Status::Ok, "{:?}", out.data);
         assert_eq!(
             std::fs::read_to_string(&dst).unwrap(),
-            stdout(&emit_hyprlock(Some(&song)))
+            stdout(&emit_hyprlock(Some(&rice)))
         );
-        let _ = std::fs::remove_dir_all(&song);
+        let _ = std::fs::remove_dir_all(&rice);
     }
 }

@@ -368,7 +368,7 @@ pub fn strip_one_trailing_newline(mut s: String) -> String {
 }
 
 /// Text for a freedesktop notification, inert: `&`, `<` and `>` escaped so a
-/// daemon rendering the body's HTML subset draws a node or song name like
+/// daemon rendering the body's HTML subset draws a node or rice name like
 /// `<b>x</b>` as itself, never as markup. The one escaper every `notify-send`
 /// caller uses; the caller still puts `--` before the positionals so a
 /// leading `-` is never read as an option.

@@ -22,7 +22,7 @@
 #
 # Naming rule: a package name must NOT shadow an existing nixpkgs attribute.
 # Because these packages are also injected via a nixpkgs overlay
-# (lib/aoideos.nix, tests/vm-boot.nix), a name that collides with a stock attribute
+# (lib/strillix.nix, tests/vm-boot.nix), a name that collides with a stock attribute
 # would silently mask it. The `overlay` collision guard `throw`s a legible
 # error when a discovered name already exists in `prev` (the overlay is the
 # only path with the previous attrset in scope; the flake `packages` output has
@@ -41,7 +41,7 @@
 #
 # Intentional overrides — `intentionalOverrides`: a second overlay in
 # `nixpkgs.overlays` MAY deliberately replace what this walker supplies —
-# Aoide's strillix lane replaces `strillix-rices` with the songs a host builds in.
+# Aoide's strillix lane replaces `strillix-rices` with the rices a host builds in.
 # Listing a name here is what lets the walker STEP ASIDE for it; an overlay
 # that replaces a walker name WITHOUT listing it is a loud evaluation error
 # naming the package and this rule, because a silent replacement is how one
@@ -91,7 +91,7 @@ let
   # so stepping aside is the ONLY way a lane's replacement can stand — and it
   # happens only for a name listed here.
   intentionalOverrides = [
-    "strillix-rices" # the strillix lane replaces the whole rices with the songs THIS host builds in.
+    "strillix-rices" # the strillix lane replaces the whole rices with the rices THIS host builds in.
   ];
 
   # Directory entries under ../pkgs that are packages: type == "directory",
@@ -158,7 +158,7 @@ in
   # DEFAULT per discovered package, so it steps aside rather than overwriting
   # one, and a replacement nobody listed is an evaluation error naming the
   # package and the rule. That is what keeps a lane's replacement work — the
-  # strillix lane replaces `strillix-rices` with the songs a host builds in, and two
+  # strillix lane replaces `strillix-rices` with the rices a host builds in, and two
   # overlays writing one attribute is otherwise a race whose winner depends on
   # the order `nixpkgs.overlays` happened to compose, not on either of them.
   overlay =

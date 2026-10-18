@@ -1,7 +1,7 @@
 // vigil.qml — nocturne's "vigil" slot: the ONE declared kind = "dock" widget
-// this throwaway demo song authors (CONTRACTS.md §5's declared widget-type
+// this throwaway demo rice authors (CONTRACTS.md §5's declared widget-type
 // registry — Phase 12's live proof that a `kind = "dock"` entry actually
-// mounts). Hosted by SongGadgets.qml's data-driven Repeater of WidgetSlots
+// mounts). Hosted by RiceGadgets.qml's data-driven Repeater of WidgetSlots
 // (not a fixed AoidePanel.qml anchor), mounted last in the gadget column,
 // after the six shipped gadgets and notifications-center.
 //

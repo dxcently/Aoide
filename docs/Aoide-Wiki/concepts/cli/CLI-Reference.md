@@ -20,8 +20,7 @@ start at [[aoide-cli]] and the group pages linked below.
   A stub returns a structured `not-implemented` envelope, never a crash.
 - **Help screens:** bare `aoide`/`strillix`, `--help` and `help` print the overview
   (tagline, one line per head under its topic section, `(N commands)` for a
-  group) on stdout at exit `0`; `aoide <group>`, `aoide help <group>` and
-  `<group> --help` list that group the same way. A mistake in the invocation
+  group) on stdout at exit `0`; `aoide <group>` and `aoide <group> --help` list that group the same way. A mistake in the invocation
   exits `2` on stderr in the `[usage] … why: … fix: …` shape. Lines wrap to
   `COLUMNS` (else the tty width, else 80) with the text hanging under its own
   column. Color is the ANSI 16 base colors, on only for a tty and off for
@@ -62,8 +61,8 @@ start at [[aoide-cli]] and the group pages linked below.
 
 - [[Rice-and-Theme|Rice-and-Theme]] — the self-ricing loop:
   `rice lint/list/stage/compose/refresh/declare/transpose`, the `rice draft` / `rice mode` /
-  `rice take` groups, `rice back`, `cover set`, and the `theme` engine commands.
-  Stage files: `/stage/{theme,cover,mode}.json`, the declared twin
+  `rice history` groups, `rice back`, `wallpaper set`, and the `theme` engine commands.
+  Stage files: `/stage/{theme,wallpaper,mode}.json`, the declared twin
   `/declared/theme.json` and the venue's `/declared/venue.json` (the slots it recolours and the
   geometry the host sets);
   rices and drafts trees.
@@ -78,7 +77,7 @@ start at [[aoide-cli]] and the group pages linked below.
   manifest), `conduct`, and `mail`/`mail read`/`mail poll` (the receive half
   of `send`).
   Stage files: `state/stage/{sessions,hooks,projects,graph,pending,
-  herald}.json`; the mail store at `state/mail/` (one `boxes/<name>.log` per
+  notifications}.json`; the mail store at `state/mail/` (one `boxes/<name>.log` per
   mailbox, `receipts.log`); control sockets at
   `$XDG_RUNTIME_DIR/aoide/session-<id>.sock`.
 - [[Screen-Commands|Screen-Commands]] — computer use: `screen info/
@@ -94,8 +93,8 @@ start at [[aoide-cli]] and the group pages linked below.
   `state/stage/{projects,sessions,hooks}.json`, `/stage/theme.json`,
   the audit log.
 - [[Content-and-Hooks|Content-and-Hooks]] — the content
-  pipeline commands (all stubs today), `herald push` (shellbridge socket →
-  `state/stage/herald.json`), and `hooks install` (harness settings merge,
+  pipeline commands (all stubs today), `notifications push` (shellbridge socket →
+  `state/stage/notifications.json`), and `hooks install` (harness settings merge,
   `--capture` tee to `state/<agent>-hooks.jsonl`).
 - [[Meta-and-Upkeep|Meta-and-Upkeep]] — `guide`, `schema`,
   `make`/`update` (stubs), `onboard` (the first-boot flow, core and strillix
@@ -113,8 +112,8 @@ start at [[aoide-cli]] and the group pages linked below.
   `clipboard delete/clear`, one cliphist history entry or all of them, with
   the launcher's cached thumbnails.
 - `strx lock` — the one lock entry (`SUPER+ESCAPE`, the power menu, the `lock`
-  alias): the running shell's `LockHost` in the staged song's face when that
-  song dresses the `lockscreen` slot and the shell's PAM service
+  alias): the running shell's `LockHost` in the staged rice's face when that
+  rice dresses the `lockscreen` slot and the shell's PAM service
   (`/etc/pam.d/aoide-lock`) exists, confirmed by the compositor within 5 s,
   else hyprlock, which clears a `LockedHint` a dead shell lock left at `yes`;
   `--hyprlock` skips the shell (the lock host's hand-over when its PAM

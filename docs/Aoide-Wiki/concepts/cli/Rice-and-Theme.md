@@ -2,36 +2,36 @@
 type: concept
 created: 2026-08-19
 updated: 2026-10-12
-tags: [aoide, cli, rice, theme, song]
+tags: [aoide, cli, rice, theme, rice]
 ---
 
 # Rice & Theme Commands — the Self-Ricing Command Surface
 
-The `rice`, `cover`, and `theme` command groups are part of `strillix`, the AoideOS
+The `rice`, `wallpaper`, and `theme` command groups are part of `strillix`, the Strillix
 paint binary ([[Overview]]), and drive the [[Self-Ricing]] loop:
-scaffold a song ([[Song-Anatomy]]), hot-load it live, iterate inside a routed
+scaffold a rice ([[Rice-Anatomy]]), hot-load it live, iterate inside a routed
 draft with take history, and validate/resolve/emit its notes through the
 native [[theme]] engine. Handlers live in
-`pkgs/aoide/crates/strillix-rice/src/commands/{rice,draft,mode,cover,theme,take}.rs`;
+`pkgs/aoide/crates/strillix-rice/src/commands/{rice,draft,mode,wallpaper,theme,take}.rs`;
 `rice declare`'s handler and the `rice transpose` stub registration live in
 `pkgs/aoide/crates/strillix/src/commands/stubs.rs`.
 
 Path resolution (all in `pkgs/aoide/crates/storage/src/fs.rs`): one runtime
 root carries every runtime tree — `$AOIDE_ROOT` when set to an absolute
 path (relative/empty ignored), default `~/.aoide` — with `/stage/`,
-`rices/<name>/` (and `rices/<song>/drafts/`),
-`/covers/`, `state/`, and `run/qml/` all hanging off it. `~/Aoide` is
+`rices/<name>/` (and `rices/<rice>/drafts/`),
+`/wallpapers/`, `state/`, and `run/qml/` all hanging off it. `~/Aoide` is
 purely the dev git checkout, reached through the separate `$AOIDE_FLAKE_ROOT`
 seam (absolute, default `~/Aoide`); the nix options `aoide.root`/
 `aoide.checkout` export the two envs. `$AOIDE_STAGE_DIR` (absolute) wins
-above `$AOIDE_ROOT` for the stage dir; `song/` derives as the stage dir's
-parent, so the whole song tree rides that one override, and `run/qml/`
+above `$AOIDE_ROOT` for the stage dir; `rice/` derives as the stage dir's
+parent, so the whole rice tree rides that one override, and `run/qml/`
 resolves one level further up (the stage dir's parent's parent —
 `$AOIDE_ROOT/run/qml/` on the default layout, relocated by an
 `$AOIDE_STAGE_DIR` override too). `$AOIDE_STATE_DIR` (absolute) likewise
 overrides `state/`. All three binaries call `fs::migrate_root_once()` at
 process start: on first run it moves a pre-existing
-`~/Aoide/{song/stage,state,log}` tree into the current root, each piece
+`~/Aoide/{rice/stage,state,log}` tree into the current root, each piece
 gated on its own override being unset. All file
 writes in this group route through `aoide_storage::fs::atomic_write`
 (temp `<stem>.tmp.<pid>` then rename, symlink-transparent — a write to a
@@ -44,7 +44,7 @@ line; with it, an envelope `{status, command, message, gated, changed?, data?}`
 (`pkgs/aoide/crates/protocol/src/output.rs`). Exit codes: 0 ok, 1 error,
 2 usage, 64 not-implemented. Exception: the three `theme` commands print the
 engine's raw bytes (carried in `data.stdout`) instead of the message in text
-mode — see `theme lint` below. Names (`<name>`, `<song>`, draft names)
+mode — see `theme lint` below. Names (`<name>`, `<rice>`, draft names)
 everywhere must match `^[a-z0-9][a-z0-9-]*$`.
 
 ### strx rice lint
@@ -76,41 +76,41 @@ strx rice stage [<name>] [--json]
   `<name>` (must parse as JSON; full schema validation is `rice lint`'s job)
   — the runtime `rices/<name>/theme.json`, with the venue's
   `/declared/venue.json` (the slots it recolours and the geometry the
-  host sets) laid over it when `<name>` is the declared song
-  (the twin `/declared/theme.json`'s own `"song"` field names it;
+  host sets) laid over it when `<name>` is the declared rice
+  (the twin `/declared/theme.json`'s own `"rice"` field names it;
   CONTRACTS.md §4). A `venue.json` that cannot be parsed refuses before
   anything is written. No `<name>`:
-  re-resolves the current song from the staged theme's own `"song"` field
+  re-resolves the current rice from the staged theme's own `"rice"` field
   (`/stage/theme.json`).
   Env: `$HYPRLAND_INSTANCE_SIGNATURE` (guards the compositor apply),
   `$AOIDE_SESSION_ID` (stamped on an auto-take), `$AOIDE_STAGE_DIR`.
 - **Writes:** `/stage/theme.json` (atomic, symlink-transparent — in
-  Draft mode the write lands in the routed draft file; the `"song"` field is
-  injected into the staged copy); `/stage/cover.json` — the song's own
-  derivable cover (`/covers/<name>.{webp,png,jpg,jpeg}`) as
-  `{"path": …, "song": "<name>"}`, the file REMOVED when the song derives
-  none. A pick already stamped for this same song is left byte-identical
+  Draft mode the write lands in the routed draft file; the `"rice"` field is
+  injected into the staged copy); `/stage/wallpaper.json` — the rice's own
+  derivable wallpaper (`/wallpapers/<name>.{webp,png,jpg,jpeg}`) as
+  `{"path": …, "rice": "<name>"}`, the file REMOVED when the rice derives
+  none. A pick already stamped for this same rice is left byte-identical
   (CONTRACTS.md §4); widget QML bodies synced from
-  `rices/<name>/widgets/*.qml` into `run/qml/songs/<name>/`;
-  `run/qml/songs/registry.json` rewritten for the song from the theme's
+  `rices/<name>/widgets/*.qml` into `run/qml/rices/<name>/`;
+  `run/qml/rices/registry.json` rewritten for the rice from the theme's
   `.widgets` key. In Staging mode with an explicit `<name>`, also updates
-  `/stage/mode.json`'s `song` and `stagingSong` (in Draft mode the marker is
+  `/stage/mode.json`'s `rice` and `stagingRice` (in Draft mode the marker is
   deliberately untouched). In Draft mode, auto-mints a take (cause `"stage"`): writes
-  `rices/<song>/drafts/<draft>/takes/NNNN.json` and
+  `rices/<rice>/drafts/<draft>/takes/NNNN.json` and
   `takes/head.json` — non-fatal on failure (`take: null, takeError` in data).
 - **Pipes to / output:** best-effort `hyprctl reload config-only` (the host's
-  bake back under the song), then `hyprctl --batch "keyword …; …"` with
+  bake back under the rice), then `hyprctl --batch "keyword …; …"` with
   geometry + border keywords (`general:gaps_out`, `general:gaps_in`,
   `general:border_size`, `general:col.active_border`,
   `general:col.inactive_border`, `decoration:rounding`,
-  `decoration:blur:enabled|size|passes`, plus the hyprglass pair when the song
+  `decoration:blur:enabled|size|passes`, plus the hyprglass pair when the rice
   has a `blurEnabled` opinion) — a field with no opinion shows the host's
   bake, skipped silently off Hyprland, never fatal
   (`pkgs/aoide/crates/strillix-rice/src/live.rs`). If the widget-body sync changed
   anything, spawns `quickshell -p <run_qml_dir>/shell.qml ipc call shell
   reload` (best-effort; success judged on empty stdout, not the exit code —
-  `pkgs/aoide/crates/strillix-rice/src/ipc.rs`). Data keys: `{name, theme, cover,
-  coverStage, wallpaper, hyprctl, terminal, widgets, slots, registry, reload,
+  `pkgs/aoide/crates/strillix-rice/src/ipc.rs`). Data keys: `{name, theme, wallpaper,
+  wallpaperStage, wallpaper, hyprctl, terminal, widgets, slots, registry, reload,
   seam}`.
 - **Notes:** refuses with `reason: "declarative-mode-locked"` (exit 1) while
   `rice mode declarative` is locked. Always stages plain declared content —
@@ -120,7 +120,7 @@ strx rice stage [<name>] [--json]
 ### strx rice compose
 
 ```
-strx rice compose <name> [--from <song>] [--force] [--json]
+strx rice compose <name> [--from <rice>] [--force] [--json]
 ```
 
 - **Reads:** `--from`'s notes (`--from` default `"sonata"`; must exist and
@@ -146,8 +146,8 @@ strx rice compose <name> [--from <song>] [--force] [--json]
 - **Output:** data `{name, from, nextSteps: [...]}`.
 - **Notes:** errors (exit 1) on invalid name (`invalid-name`), invalid
   `--from` (`invalid-from`), `--from == <name>` (`from-equals-name`), target
-  exists without `--force` (`already-exists`), missing `--from` song
-  (`from-song-not-found` — not found in the host rices NOR the templates
+  exists without `--force` (`already-exists`), missing `--from` rice
+  (`from-rice-not-found` — not found in the host rices NOR the templates
   dir; the message names both locations it checked, and says so when no
   templates dir resolved at all). Writes stay inside `rices/<name>/`
   (house rule 1). Nothing live is touched; go live with `rice mode stage
@@ -155,11 +155,11 @@ strx rice compose <name> [--from <song>] [--force] [--json]
   (`strillix-rice::widgets::eval_rices`) never shells to `nix` on a
   repo-less host (no `flake.nix` at `$AOIDE_FLAKE_ROOT`): it merges the
   baked templates baseline, overlays the existing on-disk file's entries for
-  songs still present in the host rices (gone dirs pruned), and patches
-  the currently-staged song's own freshly-scanned entry in last — a scan
-  that only ever produces the compose shape, no `_widgets/` shelf. A song
+  rices still present in the host rices (gone dirs pruned), and patches
+  the currently-staged rice's own freshly-scanned entry in last — a scan
+  that only ever produces the compose shape, no `_widgets/` shelf. A rice
   with a `_widgets/` shelf still needs a real checkout: resolving a shelf
-  takes `composeSong` in the nix evaluator, which the templates fallback
+  takes `composeRice` in the nix evaluator, which the templates fallback
   cannot run. `$STRILLIX_TEMPLATES` is wired only onto strillix-execing units
   (`modules/dendrites/strillix/shellbridge.nix`'s shellbridge service,
   `modules/dendrites/quickshell/system.nix`'s `aoide-quickshell` and
@@ -173,15 +173,15 @@ strx rice compose <name> [--from <song>] [--force] [--json]
 strx rice list [--json]
 ```
 
-- **Reads:** the directories under `rices/` whose name is a valid song
+- **Reads:** the directories under `rices/` whose name is a valid rice
   name and which hold a `theme.json`; each one's notes are parsed. Also reads
   `/stage/mode.json` and the declared twin `/declared/theme.json`.
-- **Output:** `"N song(s)"`; data `{mode, song, draft, stagingSong, declared,
-  songs: [{name, ok, reason?}]}`, `songs` sorted by name. `mode` is the rice
-  mode; `song` and `draft` are the live pair, `stagingSong` the last-staged
-  song, `declared` the declared one (each null when absent). `ok` is false with
+- **Output:** `"N rice(s)"`; data `{mode, rice, draft, stagingRice, declared,
+  rices: [{name, ok, reason?}]}`, `rices` sorted by name. `mode` is the rice
+  mode; `rice` and `draft` are the live pair, `stagingRice` the last-staged
+  rice, `declared` the declared one (each null when absent). `ok` is false with
   `reason` `unreadable` or `invalid-json` when the notes do not parse.
-- **Notes:** read-only. The song-stage gate (the §7.5 rices evaluation) is
+- **Notes:** read-only. The rice-stage gate (the §7.5 rices evaluation) is
   not run, so `ok` means the notes parse and `strx rice mode stage <name>`
   decides the rest. An absent rices is `ok` with an empty list.
 
@@ -192,31 +192,31 @@ strx rice draft save [<name>] [--json]
 ```
 
 - **Reads:** `/stage/theme.json` (required — must parse and carry a
-  `"song"` field; reads transparently through a Draft-mode symlink), and
-  `/stage/cover.json` if present.
-- **Writes:** `rices/<song>/drafts/<name>/theme.json` (atomic copy
+  `"rice"` field; reads transparently through a Draft-mode symlink), and
+  `/stage/wallpaper.json` if present.
+- **Writes:** `rices/<rice>/drafts/<name>/theme.json` (atomic copy
   of the current stage) and, if the stage has one,
-  `…/drafts/<name>/cover.json`; removes a stale draft `cover.json` when the
+  `…/drafts/<name>/wallpaper.json`; removes a stale draft `wallpaper.json` when the
   stage no longer has one (the draft mirrors the stage exactly at save time).
-- **Output:** data `{name, song, theme, cover}`.
+- **Output:** data `{name, rice, theme, wallpaper}`.
 - **Notes:** upserts; works in any mode — never gated by the declarative
   lock, never touches `mode.json`. With no `<name>` the command mints the
-  lowest free `draft-<n>` among the staged song's `drafts/` entries and
+  lowest free `draft-<n>` among the staged rice's `drafts/` entries and
   returns it as `name`; this is the only place a draft name is minted.
-  Errors: `no-staged-theme`, `invalid-json`, `no-resolvable-song`,
+  Errors: `no-staged-theme`, `invalid-json`, `no-resolvable-rice`,
   `invalid-name` (exit 1).
 
 ### strx rice draft list
 
 ```
-strx rice draft list [<song>] [--json]
+strx rice draft list [<rice>] [--json]
 ```
 
-- **Reads:** with `<song>`, `rices/<song>/drafts/*/`; without, walks
-  every song under `rices/`. Only directories containing a
+- **Reads:** with `<rice>`, `rices/<rice>/drafts/*/`; without, walks
+  every rice under `rices/`. Only directories containing a
   `theme.json` count (others silently skipped). Also reads
   `/stage/mode.json` to flag the currently-routed draft.
-- **Output:** `"N draft(s)"`; data `{drafts: [{song, name, savedAt,
+- **Output:** `"N draft(s)"`; data `{drafts: [{rice, name, savedAt,
   current}], scope}` — `savedAt` is the draft `theme.json`'s mtime as
   ISO-8601 UTC; `current` is true iff `mode.json` is in Draft mode routed to
   that draft.
@@ -229,10 +229,10 @@ strx rice draft list [<song>] [--json]
 strx rice draft drop <name> [--json]
 ```
 
-- **Reads:** `/stage/theme.json`'s `"song"` field (to resolve which
-  song's `drafts/` to act under) and `/stage/mode.json`.
-- **Writes:** deletes `rices/<song>/drafts/<name>/` recursively.
-- **Output:** `"dropped draft `<name>` for `<song>`"`; data `{name, song}`.
+- **Reads:** `/stage/theme.json`'s `"rice"` field (to resolve which
+  rice's `drafts/` to act under) and `/stage/mode.json`.
+- **Writes:** deletes `rices/<rice>/drafts/<name>/` recursively.
+- **Output:** `"dropped draft `<name>` for `<rice>`"`; data `{name, rice}`.
 - **Notes:** NOT idempotent — a missing draft is an error
   (`draft-not-found`, exit 1). Refuses with `draft-is-live` when it is the
   draft `rice mode draft` currently routes the stage into; switch modes
@@ -245,12 +245,12 @@ strx rice mode status [--json]
 ```
 
 - **Reads:** `/stage/mode.json` only.
-- **Output:** `"rice mode: <staging|declarative|draft>"`; data `{mode, song,
+- **Output:** `"rice mode: <staging|declarative|draft>"`; data `{mode, rice,
   draft, since}`. An absent or corrupt marker reports the `declarative`
-  default (`song`/`draft`/`since` null) — never an error.
+  default (`rice`/`draft`/`since` null) — never an error.
 - **Notes:** read-only. Marker shape (`pkgs/aoide/crates/storage/src/mode.rs`):
-  `{mode, song?, draft?, stagingSong?, since}`; `draft` is non-null iff
-  `mode == "draft"`. `stagingSong` is the durable "what was I staging" memory
+  `{mode, rice?, draft?, stagingRice?, since}`; `draft` is non-null iff
+  `mode == "draft"`. `stagingRice` is the durable "what was I staging" memory
   a bare `rice mode stage` falls back to.
 
 ### strx rice mode stage
@@ -259,21 +259,21 @@ strx rice mode status [--json]
 strx rice mode stage [<name>] [--json]
 ```
 
-- **Reads:** `/stage/mode.json`; for a bare call, resolves the song from
-  the marker's `stagingSong` first, then `/stage/theme.json`'s `"song"`
+- **Reads:** `/stage/mode.json`; for a bare call, resolves the rice from
+  the marker's `stagingRice` first, then `/stage/theme.json`'s `"rice"`
   field.
-- **Writes:** when a song resolves, seeds and plans its stage first; only
-  once the song is accepted does it tear down any Draft-mode routing symlink
-  at `/stage/theme.json`, then write everything `rice stage` writes (stage theme/cover, widget sync, registry sync, live
+- **Writes:** when a rice resolves, seeds and plans its stage first; only
+  once the rice is accepted does it tear down any Draft-mode routing symlink
+  at `/stage/theme.json`, then write everything `rice stage` writes (stage theme/wallpaper, widget sync, registry sync, live
   `hyprctl`/Quickshell IPC); finally `/stage/mode.json`
-  (`mode: "staging"`, `song`, `stagingSong`, `since`).
+  (`mode: "staging"`, `rice`, `stagingRice`, `since`).
 - **Output:** the data of the `rice stage` it ran (`hyprctl`, `terminal`,
   `widgets`, `registry`, `reload`, … — a best-effort failure shows there),
-  plus `{mode: "staging", song, seeded}`; with no song to stage, only those
+  plus `{mode: "staging", rice, seeded}`; with no rice to stage, only those
   three.
 - **Notes:** unlocks staging writers AND hot-loads immediately — never a
-  bare flag-flip except on a genuinely fresh box with no resolvable song.
-  This is also how you leave Draft mode. A failed stage (unknown song) does
+  bare flag-flip except on a genuinely fresh box with no resolvable rice.
+  This is also how you leave Draft mode. A failed stage (unknown rice) does
   not flip the marker and leaves the draft routed.
 
 ### strx rice mode declarative
@@ -283,29 +283,29 @@ strx rice mode declarative [<name>] [--json]
 ```
 
 - **Reads:** `/stage/mode.json`; with no `<name>`, resolves the declared
-  song off `/declared/theme.json`'s `"song"` field, falling back to
-  `/stage/theme.json`'s own `"song"` field only when no such twin exists
+  rice off `/declared/theme.json`'s `"rice"` field, falling back to
+  `/stage/theme.json`'s own `"rice"` field only when no such twin exists
   (CONTRACTS.md §4).
-- **Writes:** when a song resolves, plans the re-pin first and tears down
+- **Writes:** when a rice resolves, plans the re-pin first and tears down
   any Draft-mode routing symlink only once it is accepted (a refusal leaves
   the draft routed); then re-pins `/stage/theme.json` (plus widget/registry sync,
-  same as `rice stage`) from that song's COMMITTED
-  `rices/<name>/theme.json` — or, for the song the declared twin
+  same as `rice stage`) from that rice's COMMITTED
+  `rices/<name>/theme.json` — or, for the rice the declared twin
   names, from the twin, venue recolour included; then writes
   `/stage/mode.json`
-  (`mode: "declarative"`, `draft` cleared; `stagingSong` carried forward
-  unchanged). `/stage/cover.json` is NOT touched — a lock is not a song
-  switch, so a pick stamped for another song is hidden read-side rather than
+  (`mode: "declarative"`, `draft` cleared; `stagingRice` carried forward
+  unchanged). `/stage/wallpaper.json` is NOT touched — a lock is not a rice
+  switch, so a pick stamped for another rice is hidden read-side rather than
   dropped (CONTRACTS.md §4).
 - **Output:** the data of the re-pin it ran (`hyprctl`, `terminal`,
-  `widgets`, `registry`, `reload`, …), plus `{mode: "declarative", song}`;
-  with no song to re-pin, only those two.
-- **Notes:** locks staging — afterwards `rice stage` and `cover set` refuse
-  with `declarative-mode-locked`, with ONE exemption: `cover set --from-skwd`
+  `widgets`, `registry`, `reload`, …), plus `{mode: "declarative", rice}`;
+  with no rice to re-pin, only those two.
+- **Notes:** locks staging — afterwards `rice stage` and `wallpaper set` refuse
+  with `declarative-mode-locked`, with ONE exemption: `wallpaper set --from-skwd`
   records what an external wallpaper provider is already showing (see that
-  command's entry). A lock keeps the staged cover: a wallpaper
-  pick survives locking and unlocking, and is only hidden while its song is
-  not the staged one. The no-name form re-pins the declared song
+  command's entry). A lock keeps the staged wallpaper: a wallpaper
+  pick survives locking and unlocking, and is only hidden while its rice is
+  not the staged one. The no-name form re-pins the declared rice
   from its own notes rather than freezing the stage: unsaved live edits are
   discarded
   (`rice draft save` first to keep them). A failed re-pin does not flip the
@@ -319,101 +319,101 @@ strx rice mode draft <name> [--json]
 ```
 
 - **Reads:** `/stage/mode.json` (guard + marker carry-over);
-  `/stage/theme.json`'s `"song"` field to resolve `<song>`.
-- **Writes:** if `rices/<song>/drafts/<name>/theme.json` doesn't
+  `/stage/theme.json`'s `"rice"` field to resolve `<rice>`.
+- **Writes:** if `rices/<rice>/drafts/<name>/theme.json` doesn't
   exist yet, forks it from the current stage (the same write `rice draft
-  save` performs, incl. `cover.json` mirror). Then removes whatever sits at
+  save` performs, incl. `wallpaper.json` mirror). Then removes whatever sits at
   `/stage/theme.json` and creates it as a SYMLINK to
-  `rices/<song>/drafts/<name>/theme.json`. Finally writes
-  `/stage/mode.json` (`mode: "draft"`, `song`, `draft`, `since`). Last, a
+  `rices/<rice>/drafts/<name>/theme.json`. Finally writes
+  `/stage/mode.json` (`mode: "draft"`, `rice`, `draft`, `since`). Last, a
   baseline take of the draft as entered (cause `enter`, the take and head files
   join `changed`), unless it equals the head: re-entering an unchanged draft
   mints nothing, and a failed mint never fails the command.
-- **Output:** data `{mode: "draft", song, draft, take}`; `take` is the minted
+- **Output:** data `{mode: "draft", rice, draft, take}`; `take` is the minted
   take number, `null` when none was minted (`takeError` says why when the mint
   failed).
 - **Notes:** refuses while declarative-locked (`declarative-mode-locked`) and
-  when no song is staged (`no-resolvable-song`). From here on every write to
+  when no rice is staged (`no-resolvable-rice`). From here on every write to
   the stage file — `rice stage`, a hand-edit — lands directly in the draft
   via `atomic_write`'s symlink transparency; no save step. Only
-  `theme.json` is routed — `cover set`/`stage/cover.json` are not. Drafts
+  `theme.json` is routed — `wallpaper set`/`stage/wallpaper.json` are not. Drafts
   sit under the runtime root, outside the git checkout entirely;
   `rice declare` never carries one into the checkout, `.gitignore`
   (`rices/*/drafts/`) keeps a hand-copied one untracked, and the
-  `rice-runtime-untracked` check fails the tree if a runtime dir under `song/`
+  `rice-runtime-untracked` check fails the tree if a runtime dir under `rice/`
   is ever committed.
 
-### strx cover set
+### strx wallpaper set
 
 ```
-strx cover set <path|name|we:<id>> [--position auto|tile|fill] [--json]
-strx cover set --clear [--json]
-strx cover set --from-skwd --kind <static|video|we> <path|id> [--json]
+strx wallpaper set <path|name|we:<id>> [--position auto|tile|fill] [--json]
+strx wallpaper set --clear [--json]
+strx wallpaper set --from-skwd --kind <static|video|we> <path|id> [--json]
 ```
 
 - **Reads:** `/stage/mode.json` (entrypoint guard); stats the resolved
-  cover file (absolute `<path>` literal; a bare name resolves against
-  `/covers/`; a `we:<id>` token is a Wallpaper Engine scene and names no
-  file at all); `/stage/theme.json`'s own `"song"` field — the song
-  the pick is stamped for, and the song `--clear` derives a default for; with
+  wallpaper file (absolute `<path>` literal; a bare name resolves against
+  `/wallpapers/`; a `we:<id>` token is a Wallpaper Engine scene and names no
+  file at all); `/stage/theme.json`'s own `"rice"` field — the rice
+  the pick is stamped for, and the rice `--clear` derives a default for; with
   `--from-skwd`, `/stage/wallpaper-provider` — the host's provider, which
   decides whether a provider's report is Aoide's business at all. In
-  Draft mode, also reads the staged theme/cover for the auto-take.
-- **Writes:** `/stage/cover.json` — atomic, pretty
-  `{"path": "<abs>", "kind": "static|video", "pick": true, "song": "<staged song>"}`
+  Draft mode, also reads the staged theme/wallpaper for the auto-take.
+- **Writes:** `/stage/wallpaper.json` — atomic, pretty
+  `{"path": "<abs>", "kind": "static|video", "pick": true, "rice": "<staged rice>"}`
   (or `{"kind": "we", "weId": "<id>", …}` for a scene) + trailing newline, the
-  `song` field omitted only when nothing is staged (CONTRACTS.md §4). A still
+  `rice` field omitted only when nothing is staged (CONTRACTS.md §4). A still
   also carries `"tile": true` when it tiles — `--position tile`, or no
   `--position` (or `auto`) and a file name that carries `_tile`, in any case —
   and `"position"` only when `--position tile` or `fill` forced it; the
   wallpaper layer then repeats it at 1:1 instead of cropping it to fill. NOT
   symlink-routed in Draft mode (only `theme.json` is). `--clear` reverses it:
-  the staged song gets its own default back — its derivable cover, else
-  `cover.json` removed (the baked/palette fallback, plus the song's own live
+  the staged rice gets its own default back — its derivable wallpaper, else
+  `wallpaper.json` removed (the baked/palette fallback, plus the rice's own live
   board). `--from-skwd` records an external provider's own report instead, and
   writes nothing at all when that provider is not the host's, when the identity
   is the step-aside image, or when the staged pick already names it. In Draft
-  mode auto-mints a take (cause `"cover-set"`): `takes/NNNN.json` +
+  mode auto-mints a take (cause `"wallpaper-set"`): `takes/NNNN.json` +
   `takes/head.json` under the routed draft, non-fatal on failure.
-- **Output:** data `{cover, coverJson, kind, position, tile, pick, song,
+- **Output:** data `{wallpaper, wallpaperJson, kind, position, tile, pick, rice,
   wallpaper, seam}` (+ `take` when in Draft mode), `position` being the word
   in force (`auto` when none was given); with `--clear`, `{cleared, droppedPick,
-  cover, coverJson, coverStage, wallpaper}`; with `--from-skwd`, `{recorded,
-  kind, identity, provider, song, …}` and `recorded: false` with `ignored` or
+  wallpaper, wallpaperJson, wallpaperStage, wallpaper}`; with `--from-skwd`, `{recorded,
+  kind, identity, provider, rice, …}` and `recorded: false` with `ignored` or
   `unchanged` for the no-op shapes. The Quickshell wallpaper surface
-  (`AoideWallpaper.qml`) FileView-watches `stage/cover.json` and hot-swaps live
-  — no IPC call — and both the song's live `wallpaper` board and the layer's
+  (`AoideWallpaper.qml`) FileView-watches `stage/wallpaper.json` and hot-swaps live
+  — no IPC call — and both the rice's live `wallpaper` board and the layer's
   own image stand down while a pick applies.
 - **Notes:** refuses while declarative-locked (`declarative-mode-locked`) —
   except `--from-skwd`, which is EXEMPT: it records what an external wallpaper
   provider is already showing, so the stage file describes the screen rather
   than drifting from it (CONTRACTS.md §4). A plain set and `--clear` stay
   refused.
-  A path naming no existing file is `cover-not-found`, exit 1 — never stages
+  A path naming no existing file is `wallpaper-not-found`, exit 1 — never stages
   a wallpaper that can't render. `--clear` with a `<path>` is
   `clear-takes-no-path`, exit 2 — the two spellings mean opposite things.
   `--position` lays out a still only: with a video or a `we:<id>` scene it is
   `position-not-a-still`, exit 2, and beside `--clear` or `--from-skwd` the
   registry refuses it before anything runs.
-  A cover applies only while its `song` matches the staged song; one naming
-  another song is ignored, which is why a pick survives re-staging its own
-  song (a bare `strx rice stage`, the bar's RICE control, a declarative re-seed, a
+  A wallpaper applies only while its `rice` matches the staged rice; one naming
+  another rice is ignored, which is why a pick survives re-staging its own
+  rice (a bare `strx rice stage`, the bar's RICE control, a declarative re-seed, a
   rebuild) and never shows over a different one. Nothing is committed; the
   baked `AOIDE_WALLPAPER` remains the boot/rebuild fallback. When the host's
   wallpaper provider is not the shell's own layer (a page of its own:
   [[skwd-wall]]), the pick is the provider's to draw — this layer paints nothing
   while one applies — and every write here reconciles the provider with the stage
-  file through `strx cover sync`.
+  file through `strx wallpaper sync`.
 
-### strx cover sync
+### strx wallpaper sync
 
 ```
-strx cover sync [--json]
+strx wallpaper sync [--json]
 ```
 
 - **Reads:** `/stage/wallpaper-provider` (the host's provider — absent means
-  the shell's own layer), `/stage/cover.json` and
-  `/stage/theme.json` (does a pick apply to the staged song right now?),
+  the shell's own layer), `/stage/wallpaper.json` and
+  `/stage/theme.json` (does a pick apply to the staged rice right now?),
   `$AOIDE_SKWD_WALL_STANDIN` (the step-aside image's store path).
 - **Writes:** nothing. It runs `skwd-helm` — `apply <path|we:<id>> -o '*'` for
   an applicable pick, `clear` (falling back to the step-aside image) when none
@@ -426,7 +426,7 @@ strx cover sync [--json]
   restarted, or for a hand-edited stage file. It is the ONE door that WAITS: a
   provider that has not answered yet (exit 3, or `skwd-helm` not on `PATH`) is
   retried for up to ~5 s before the outcome is reported. Every other writer —
-  `cover set`, `cover set --clear`, `rice stage`, `rice back` — makes a single
+  `wallpaper set`, `wallpaper set --clear`, `rice stage`, `rice back` — makes a single
   attempt, so no interactive command stalls behind a provider that is down. The
   unit's `ExecStartPost` runs this command, which is why the wait lives here:
   that hook races the daemon's own socket, and a restarted provider re-asserts
@@ -509,32 +509,32 @@ strx theme lint [<name>|<path>] [--json]
 strx rice refresh [<name>] [--check] [--json]
 ```
 
-- **Reads:** the shipped rices (`fs::song_templates_dir`: `$STRILLIX_TEMPLATES`,
+- **Reads:** the shipped rices (`fs::rice_templates_dir`: `$STRILLIX_TEMPLATES`,
   else `share/strillix/rices` beside the binary) — `builtin.json` when no `<name>`
-  is given, and each song's tree — the machine copy
-  `rices/<name>/`, and the song's record
+  is given, and each rice's tree — the machine copy
+  `rices/<name>/`, and the rice's record
   `/declared/rices/<name>.json`.
 - **Writes:** per file, the three-way rule of `CONTRACTS.md` §5 over shipped,
   machine and recorded hash: a file the machine never edited is replaced, added
   or (when gone upstream) deleted; an edited or unrecorded file is kept; a file
   the machine deleted is not re-added. A machine folder that does not exist is
   seeded whole. Owner-write is restored on any entry lacking it. The record is
-  rewritten last, atomically, under the stage lock. Nothing under the song's
+  rewritten last, atomically, under the stage lock. Nothing under the rice's
   top-level `takes/` or `drafts/`, no machine-only file and no symlink is
   touched. `--check` writes nothing.
-- **Output:** `"refreshed N song(s)"` (`"checked N song(s)"` with `--check`) and
-  one line per song, `<song>: N replaced, M added, K deleted, J kept, I in
+- **Output:** `"refreshed N rice(s)"` (`"checked N rice(s)"` with `--check`) and
+  one line per rice, `<rice>: N replaced, M added, K deleted, J kept, I in
   sync`, then a line per file not in sync with its state (`stale`, `new`,
   `gone`, `edited`, `unrecorded`, `machine-deleted`) and action; data
-  `{check, songs: [{song, skipped, seeded, modesFixed, files: [{path, state,
+  `{check, rices: [{rice, skipped, seeded, modesFixed, files: [{path, state,
   action}]}], errors}`, plus the changed-file list on the envelope's `changed`
   field.
-- **Notes:** not gated. `<name>` must be a song the shipped rices carries,
-  else a refusal (`rice.refresh`, `Kind::Refused`); a song whose machine folder
+- **Notes:** not gated. `<name>` must be a rice the shipped rices carries,
+  else a refusal (`rice.refresh`, `Kind::Refused`); a rice whose machine folder
   is a symlink is skipped and said so; a symlink in the shipped copy is an
   error. With no record yet, every differing file is `unrecorded` and kept;
   moving the machine's folder aside lets refresh seed it afresh. The stage-time
-  seed runs the same function. Exit 1 if any song errored.
+  seed runs the same function. Exit 1 if any rice errored.
 
 ### strx rice declare
 
@@ -542,20 +542,20 @@ strx rice refresh [<name>] [--check] [--json]
 strx rice declare <name> [--json]
 ```
 
-- **Reads:** the composed song `$AOIDE_ROOT/rices/<name>/`
+- **Reads:** the composed rice `$AOIDE_ROOT/rices/<name>/`
   (`fs::rices_dir`) less its top-level `takes/` and `drafts/`,
   recursively, byte by byte; and the checkout at
   `aoide_storage::fs::flake_root()` (`$AOIDE_FLAKE_ROOT` absolute override,
   default `~/Aoide`), which must exist as a directory.
-- **Writes:** copies the song tree into the checkout's
+- **Writes:** copies the rice tree into the checkout's
   `rices/<name>/` (`pkgs/aoide/crates/strillix/src/commands/stubs.rs`
   `handle_rice_declare` — `implemented: true`, `gated: true`) through
   `strillix_rice::widgets::copy_tree_atomic`, the one tree copy `rice stage`'s
-  widget sync uses too. The checkout carries the song, not the machine's
+  widget sync uses too. The checkout carries the rice, not the machine's
   undo history and scratch, so `MACHINE_RUNTIME_DIRS` (`takes/`, `drafts/`)
-  stay behind: matched by name at the song folder's top level only, whatever
+  stay behind: matched by name at the rice folder's top level only, whatever
   the entry's file type, so a symlinked `takes` is skipped rather than
-  followed, while `widgets/takes/` and `elements/` are the song's own and
+  followed, while `widgets/takes/` and `elements/` are the rice's own and
   arrive. Byte-diff copy: a destination file whose bytes already match the
   source is left untouched, so a repeat declare with nothing new is a
   no-op. Nothing beyond the copy — no `git add`, no rebuild proposal, no
@@ -568,7 +568,7 @@ strx rice declare <name> [--json]
 - **Notes:** `<name>` is validated against `^[a-z0-9][a-z0-9-]*$` BEFORE
   either path is built — a traversal-shaped name is refused by construction.
   Errors: usage exit 2 on missing `<name>` (`missing-name`); exit 1 on
-  `invalid-name`, `no-composed-song` (nothing at the source — the message
+  `invalid-name`, `no-composed-rice` (nothing at the source — the message
   says to run `strx rice compose <name>` first), `no-checkout` (no checkout
   at `$AOIDE_FLAKE_ROOT`), `copy-failed` (the message names the path that
   failed). Refused `old-rice-shape` when the staged `rice.nix` is still the old
@@ -584,7 +584,7 @@ strx rice declare <name> --host [--json]
 - **Reads:** the host config at `aoide_storage::fs::host_config()`
   (`$AOIDE_HOST_CONFIG` absolute override — the nix option `aoide.hostConfig`
   — default `<flake_root>/hosts/<hostname>/default.nix`), symlinks resolved;
-  the shipped templates' `builtin.json` (`fs::song_templates_dir()`); the mode
+  the shipped templates' `builtin.json` (`fs::rice_templates_dir()`); the mode
   marker; and, for the staged-edits note, the machine copy
   `$AOIDE_ROOT/rices/<name>/` against `<templates>/<name>/`.
 - **Writes:** only the string between the quotes of the host file's one
@@ -592,9 +592,9 @@ strx rice declare <name> --host [--json]
   directory created with the file's mode and renamed over it, the directory
   synced after
   (`pkgs/aoide/crates/strillix-rice/src/host_declare.rs`). No git, no rebuild.
-- **Output:** `"declared `<name>` as <host>'s song in <file> (was `<v>`);
+- **Output:** `"declared `<name>` as <host>'s rice in <file> (was `<v>`);
   takes effect on the next rebuild."`, or `"`<name>` is already <host>'s
-  declared song in <file>."` when nothing changes; either adds the
+  declared rice in <file>."` when nothing changes; either adds the
   staged-edits sentence when `stagedDiffers` is true. Data `{name, host,
   hostConfig, previous, changed, stagedDiffers}` (`stagedDiffers` null when
   the shipped copy cannot be read); `changed` on the envelope names the file.
@@ -603,14 +603,14 @@ strx rice declare <name> --host [--json]
   indentation and blanks around `=`/`;`, nothing after the `;` — and only on
   a line that starts outside a `/* … */` comment and a `''…''`/`"…"` string.
   The match is line-based, not a Nix parse, and cannot see an override set
-  elsewhere (an `mkForce` in another module); when a host composes its song
+  elsewhere (an `mkForce` in another module); when a host composes its rice
   from more than this line, check the rebuild. Refusals
   (`data.reason`): `invalid-name` (usage, exit 2); `staged-draft` (the stage
   holds a draft of `<name>`, or `<name>` is that draft); `no-host-config`;
   `host-config-unreadable`; `host-line-count` (zero or several lines, with
-  `hostConfig` and `count`); `not-built-in` (with `builtIn`, the songs this
-  build carries; a song staged only from the machine's rices does not exist
-  for the rebuild; without shipped templates the build's song list is
+  `hostConfig` and `count`); `not-built-in` (with `builtIn`, the rices this
+  build carries; a rice staged only from the machine's rices does not exist
+  for the rebuild; without shipped templates the build's rice list is
   unknown); `no-rice-nix` (built in only as a lender, with no `rice.nix` of
   its own in the templates); `builtin-unreadable`; `host-config-changed` (the
   file's size, mtime or inode moved between the read and the last re-stat
@@ -627,23 +627,23 @@ strx rice transpose <rice> <palette> [--json]
 - **Notes:** STUB — `implemented: false` (not gated): `dispatch()`
   short-circuits before any handler, returning the not-implemented envelope
   and exit 64 — strillix's only remaining stub. Contract per the schema summary:
-  replay song `<rice>` in another key (palette) from the song's
+  replay rice `<rice>` in another key (palette) from the rice's
   `rices/<rice>/palette/` directory. That palette directory layout is
   asserted only by the schema summary — unverified elsewhere in source.
 
-### strx rice take
+### strx rice history
 
 ```
-strx rice take [--json]
+strx rice history [--json]
 ```
 
 - **Reads:** `/stage/mode.json` (must be Draft mode — `resolve_draft`),
   the routed draft's current `/stage/theme.json` (required) and
-  `/stage/cover.json` (optional). Env: `$AOIDE_SESSION_ID` (recorded as
+  `/stage/wallpaper.json` (optional). Env: `$AOIDE_SESSION_ID` (recorded as
   `sessionId` when set).
-- **Writes:** `rices/<song>/drafts/<draft>/takes/NNNN.json` (a
+- **Writes:** `rices/<rice>/drafts/<draft>/takes/NNNN.json` (a
   write-once `TakeRecord`: `{take, parent?, at, sessionId?, cause, theme,
-  cover?}` — 4-digit zero-padded filename, monotone counter, never
+  wallpaper?}` — 4-digit zero-padded filename, monotone counter, never
   renumbered) and updates `takes/head.json` (`{"head": N}`). One
   `with_stage_lock` around the whole read-allocate-write.
 - **Output:** `"take NNNN minted — from take MMMM"` (or "the draft's first
@@ -652,39 +652,39 @@ strx rice take [--json]
   `reason: "not-in-draft-mode"`. A bare mint of whatever is staged, hanging
   off the current head; no selection, no comparison, no revert. The same
   snapshot core fires automatically (non-fatally) on every successful
-  Draft-mode `rice stage` (cause `"stage"`) and `cover set`
-  (cause `"cover-set"`).
+  Draft-mode `rice stage` (cause `"stage"`) and `wallpaper set`
+  (cause `"wallpaper-set"`).
 
-### strx rice take list
+### strx rice history list
 
 ```
-strx rice take list [--json]
+strx rice history list [--json]
 ```
 
 - **Reads:** the routed draft's whole `takes/` directory (`NNNN.json`
   records, `head.json`, `marks.json`) plus `/stage/mode.json`.
-- **Output:** human text is an ASCII tree: `"N take(s) for <song>/<draft> —
+- **Output:** human text is an ASCII tree: `"N take(s) for <rice>/<draft> —
   head → MMMM"` then depth-first rows `NNNN  <ISO at>  <cause> [marks] [←
   head]`, drawing `├─`/`└─` only at actual forks; takes unreachable from a
   root (dangling parent or a parent cycle) render as top-level `detached`
-  entries. `--json` data: `{song, draft, head, takes: [{take, parent, mark,
+  entries. `--json` data: `{rice, draft, head, takes: [{take, parent, mark,
   at, sessionId, cause}]}` (`mark` is a comma-joined string of letters or
   null).
 - **Notes:** read-only, no lock. Draft mode only (`not-in-draft-mode`). An
   empty store is `ok` with an empty `takes` array. There is exactly one view
   (whole tree); no `--all` flag exists.
 
-### strx rice take mark
+### strx rice history mark
 
 ```
-strx rice take mark <letter> [--take N] [--json]
+strx rice history mark <letter> [--take N] [--json]
 ```
 
 - **Reads:** `/stage/mode.json` (Draft-mode gate), the target take file
   (existence check), `takes/marks.json` (tolerates missing/corrupt as empty),
   and `takes/head.json` when `--take` is omitted (defaults to the head).
 - **Writes:** exactly one atomic rewrite of
-  `rices/<song>/drafts/<draft>/takes/marks.json`
+  `rices/<rice>/drafts/<draft>/takes/marks.json`
   (`{"<letter>": <take>}` map) — take records are never touched. Under one
   `with_stage_lock`.
 - **Output:** `"mark X stamped on take NNNN"` or `"mark X moved from take
@@ -696,10 +696,10 @@ strx rice take mark <letter> [--take N] [--json]
   false`). No head/takes at all → `take-not-found`, exit 1. No prompting,
   ever — flags/`--json` only.
 
-### strx rice take diff
+### strx rice history diff
 
 ```
-strx rice take diff [--take N | --mark <letter>] [--json]
+strx rice history diff [--take N | --mark <letter>] [--json]
 ```
 
 - **Reads:** `/stage/mode.json` (Draft-mode gate), the base take's record
@@ -717,10 +717,10 @@ strx rice take diff [--take N | --mark <letter>] [--json]
   `--mark <letter>` override (`take-not-found` / `mark-not-found`, exit 1).
   Malformed flags are usage errors (exit 2) checked before the draft gate.
 
-### strx rice take prune
+### strx rice history prune
 
 ```
-strx rice take prune [--older-than <N>d|<N>h] [--keep <N>] [--all-but-marks] [--force] [--json]
+strx rice history prune [--older-than <N>d|<N>h] [--keep <N>] [--all-but-marks] [--force] [--json]
 ```
 
 - **Reads:** the routed draft's `takes/` store (records, `head.json`,
@@ -730,7 +730,7 @@ strx rice take prune [--older-than <N>d|<N>h] [--keep <N>] [--all-but-marks] [--
   pruned take's parent, so ancestry keeps resolving); rewrites
   `takes/marks.json` dropping letters that named pruned takes. One
   `with_stage_lock` around the whole splice-persist-delete pass.
-- **Output:** flag-driven success → `"pruned K take(s) for <song>/<draft>:
+- **Output:** flag-driven success → `"pruned K take(s) for <rice>/<draft>:
   …"`; data `{pruned, reparented: [{take, from, to}], droppedMarks,
   protectedByMark, skippedNowProtected}`. Bare off-tty → `ok` DRY RUN,
   nothing written: data `{dryRun: true, candidates, protectedByMark,
@@ -763,9 +763,9 @@ strx rice back [--take N | --mark <letter>] [--json]
   `"drift"`: `takes/NNNN.json` + `head.json`) so un-taken edits survive;
   atomic-writes the target take's theme into `/stage/theme.json`
   (symlink-transparent → lands in the draft file); restores or removes
-  `/stage/cover.json` to match the take (stage only — the draft dir's
-  archived `cover.json` is never written); re-syncs
-  `run/qml/songs/registry.json` from the reverted theme's `.widgets` key;
+  `/stage/wallpaper.json` to match the take (stage only — the draft dir's
+  archived `wallpaper.json` is never written); re-syncs
+  `run/qml/rices/registry.json` from the reverted theme's `.widgets` key;
   finally moves `takes/head.json` to the target.
 - **Pipes to / output:** best-effort `hyprctl --batch` geometry/border apply
   from the reverted theme (same `live::apply_live` as `rice stage`). No
@@ -784,8 +784,8 @@ strx rice back [--take N | --mark <letter>] [--json]
 ## Related
 
 - [[Self-Ricing]]
-- [[Song-Anatomy]]
-- [[Song-Vocabulary]]
+- [[Rice-Anatomy]]
+- [[Rice-Vocabulary]]
 - [[Ricing-Protocol]]
 - [[theme]]
 - [[Rebuild-Gate]]

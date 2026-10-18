@@ -9,7 +9,7 @@ tags: [aoide, theme, theming, base16]
 
 `theme` is Aoide's **design-token layer**: one name for both the values and
 the act of stamping them. The same word names the native engine that
-validates, resolves, and emits the tokens. A song authors `aoide.theme.*`;
+validates, resolves, and emits the tokens. A rice authors `aoide.theme.*`;
 the paint lanes read `aoide.theme` and nothing else; the runtime seam is
 `stage/theme.json`. Naming rationale lives in [[Lexicon]].
 
@@ -41,12 +41,12 @@ Stylix (plus fonts, cursor, wallpaper) and Stylix themes every nix-manageable
 target — GTK/Qt, terminal, editors, browser, boot. The engine keeps only the
 live side.
 
-The `wallpaper` note is the song's own DEFAULT cover, and the layer that draws
+The `wallpaper` note is the rice's own DEFAULT wallpaper, and the layer that draws
 it is the `wallpaper` capability's business rather than this engine's: a host
 chooses a PROVIDER (`quickshell`, the shell's own layer, by default; an external
 engine's provider otherwise), and the choice reaches the runtime as the word in
 `/stage/wallpaper-provider`. The engine's own part is the pick in
-`stage/cover.json` (CONTRACTS.md §4) — the user's choice, which carries the song
+`stage/wallpaper.json` (CONTRACTS.md §4) — the user's choice, which carries the rice
 it was made for and is painted by whichever provider the host named; an external
 one paints it and the shell's layer stands down, the shell's own layer paints it
 otherwise. The engine never derives the provider a second way: the stage word is
@@ -54,27 +54,27 @@ the answer.
 
 Because both fan-outs derive from the same theme values, staged state and
 adopted state cannot diverge. This is the "zero drift" guarantee. Beyond
-`rice stage`/`cover set` writing `stage/theme.json` live (while `rice mode
+`rice stage`/`wallpaper set` writing `stage/theme.json` live (while `rice mode
 staging` allows it — see [[Self-Ricing#Staging vs Declarative Mode]]), the strillix
-lane's `home.activation.aoideSeedStage` reasserts it from the active song's
-committed `rices/<song>/theme.json` on every activation (see
+lane's `home.activation.aoideSeedStage` reasserts it from the active rice's
+committed `rices/<rice>/theme.json` on every activation (see
 [[Codebase#Runtime contracts (socket + stage files)]]), through
 `lib/theme.nix`'s `stagePatch` — the same `aoide.theme.override` venue
 recolour the Stylix/compositor fan-outs apply through `resolve`, with the
 host's `aoide.theme.geometry` laid over the document's — so a
 freshly booted host carries a correctly recoloured stage twin even before
 `rice stage` ever runs. That seed is declared truth: when `stage/mode.json`
-names a staged or drafted song, `strx reload` — run by the lane's
+names a staged or drafted rice, `strx reload` — run by the lane's
 `aoide-rice-reload` unit at every login and after every switch — re-stages it
 over the seed. The same script also publishes the DECLARED twin,
 `/declared/theme.json` (CONTRACTS.md §4) — those same bytes under their
-own name, its `"song"` field naming the song the venue declared — and the
+own name, its `"rice"` field naming the rice the venue declared — and the
 venue's own part as data, `/declared/venue.json`: `lib/theme.nix`'s
 `venueDelta`, the slots and geometry fields `stagePatch` changes in the
 committed document, `{}` with neither (`checks.theme-fanout` guards it beside the other two). The
 runtime writers (`rice stage`, `rice mode stage`, `reload`'s staging arm)
-derive every song from the runtime rices, where a song is edited; for the
-declared song — the twin's `"song"` field is the whole scope — they lay
+derive every rice from the runtime rices, where a rice is edited; for the
+declared rice — the twin's `"rice"` field is the whole scope — they lay
 `venue.json` over it, so the venue wins on the slots it recolours and the
 geometry it sets, and an edit
 shows everywhere else, while the recolour law stays in nix. `rice mode
@@ -103,7 +103,7 @@ The palette tier is closed.
 compositor's shape values: `gapsOut`, `gapsIn`, `borderSize`, `rounding`,
 `blurEnabled`, `blurSize`, `blurPasses`, plus `terminalOpacity` — the one field
 whose fallback owner is the kitty dendrite rather than the compositor. Every
-field is `nullOr`, so a song that sets none of them yields the same
+field is `nullOr`, so a rice that sets none of them yields the same
 `hyprland.conf` as one that omits the block entirely. The compositor lane
 (`modules/dendrites/compositor/hyprland/default.nix`)
 reads the tier directly and falls back field-by-field to its own opinionated
@@ -122,18 +122,18 @@ config-only`, which puts the host's baked config back, then builds one
 `hyprctl --batch` `keyword` list over it, in a fixed order (gaps → border size
 → border colours → rounding → blur, then a second batch for the hyprglass
 pair), emitting a keyword only for a field that actually resolves — an unset
-geometry field sends no keyword, so a song with no opinion shows the host's
-bake, whatever the previous song or an out-of-band tweak left (the bake takes
+geometry field sends no keyword, so a rice with no opinion shows the host's
+bake, whatever the previous rice or an out-of-band tweak left (the bake takes
 the same two hyprglass keys from the same `blurEnabled`, so a booted desktop
 and a staged one agree). `terminalOpacity`, not a Hyprland keyword at all, rides
 `/stage/terminal-colors.conf` as a `background_opacity` line written only
-for a song that has a value (§4). With none, kitty falls through to
+for a rice that has a value (§4). With none, kitty falls through to
 `/declared/terminal-opacity.conf` — the activation seed writes the
-DECLARED song's own line there, host settings included, and deletes the file
+DECLARED rice's own line there, host settings included, and deletes the file
 when the field is null — and then to kitty.conf's own `background_opacity`,
 the host's bake (0.86 on the kitty dendrite). The dendrite includes the
 declared fragment first and the stage file last, so a host that has never
-staged anything opens its terminal at the song's opacity and a live stage
+staged anything opens its terminal at the rice's opacity and a live stage
 with an opinion overrides it. Open windows follow by `kitty @ --to
 unix:<sock> load-config` per `kitty-<pid>` socket: kitty re-reads kitty.conf
 and its includes, so an open window ends where a new one opens, and its font
@@ -141,39 +141,39 @@ zoom resets. The `hyprctl` call is a no-op off
 Hyprland (guarded on `HYPRLAND_INSTANCE_SIGNATURE`) and never fails the
 staging outcome. The reload is the reset: it re-reads the baked
 `hyprland.conf` from disk, discarding whatever else the compositor was
-carrying live, so a staged song is the host's bake plus what the song says.
+carrying live, so a staged rice is the host's bake plus what the rice says.
 
 ## The font tier
 
-`aoide.theme.fonts` (`modules/nucleus/options.nix`) carries the face a song
+`aoide.theme.fonts` (`modules/nucleus/options.nix`) carries the face a rice
 wears, keyed by [[Stylix]] font role: `fonts.monospace = { package, name } |
-null` — the terminal, where agents live, and the one role a song uses today.
+null` — the terminal, where agents live, and the one role a rice uses today.
 The role's shape is Stylix's own, so the lane passes the value through
 untranslated; `package` is a literal nix value, the `wallpaper` note's
 precedent. The remaining roles (`sansSerif`, `serif`, `emoji`, `sizes`) stay
 the lane's, and `null` means "the lane's own face" — Linux Libertine Mono O —
-so a song that sets no face bakes the theme it baked before.
+so a rice that sets no face bakes the theme it baked before.
 
-This tier is BAKED ONLY, the cover note's posture rather than geometry's: it
+This tier is BAKED ONLY, the wallpaper note's posture rather than geometry's: it
 has no `stage/theme.json` twin and no engine schema entry, because nothing at
 runtime reads a face and a terminal cannot be re-faced mid-session — and no
 `rice lint` rule makes that so. The theme schema closes `palette`, `base16`,
 each component group and each widget record, but it never walks a document's
-top-level keys, so a stray `fonts` key in a song's `theme.json` passes lint
+top-level keys, so a stray `fonts` key in a rice's `theme.json` passes lint
 and rides the activation seed into the stage file unread; the tier lives in
 `rice.nix` alone by convention. A face change lands on the user-gated rebuild,
-and staging another song does not re-face the terminal. A live face would be a
+and staging another rice does not re-face the terminal. A live face would be a
 new emitter (OSC 50 against the terminal), not a change to this tier.
 
 `cadenza` sets it to a CRT console face — its terminal is the key's own
-voice, not the desktop's default serif. Widget faces are the song's own
-business (`rices/<song>/widgets/Kit.js`) and do not move with this
+voice, not the desktop's default serif. Widget faces are the rice's own
+business (`rices/<rice>/widgets/Kit.js`) and do not move with this
 tier.
 
 ## Polarity — the register, beside the palette
 
 `aoide.theme.polarity` (`modules/nucleus/options.nix`) is one scalar beside
-`palette`: `"light"` or `"dark"` (option default `"light"`, so a song that says
+`palette`: `"light"` or `"dark"` (option default `"light"`, so a rice that says
 nothing keeps the ground it always had). A palette brings its polarity — the
 register its base16 ramp reads as — and the stylix lane hands it straight to
 `stylix.polarity`, which themes every Stylix-managed target from it
@@ -188,7 +188,7 @@ It is BAKED, not staged. No emitter carries it: `theme resolve` and every
 without it (the `theme_goldens` polarity fixture pins that), and `rice stage` applies
 nothing for it, because GTK/Qt and every Stylix target read the register when
 their theme is built. A polarity change lands on the user-gated rebuild, like a
-face change. A song nevertheless declares it in both halves —
+face change. A rice nevertheless declares it in both halves —
 `aoide.theme.polarity` in `rice.nix` (the option the lane reads) and the same
 value in its `theme.json` beside `palette`, which the activation seed carries
 into `stage/theme.json` as data nothing reads today.
@@ -222,7 +222,7 @@ split: the emitters only produce bytes; `live::apply_live` /
 The engine's surface is the `strx theme` command group, native inside the
 CLI's `Invocation`/`Outcome` shell:
 
-- **`strx theme lint [<song>|<path>]`** — validate a theme file
+- **`strx theme lint [<rice>|<path>]`** — validate a theme file
   against the authoritative v0 schema. The nix option type in
   `modules/nucleus/options.nix` is a permissive gate; *this* is the real
   validator. It enforces the closed palette tier
@@ -235,13 +235,13 @@ CLI's `Invocation`/`Outcome` shell:
   "no opinion" — and `geometry.terminalOpacity` (a plain number in [0, 1] or
   null). `strx rice
   lint` runs this engine natively — no binary locate, no shell-out.
-- **`strx theme resolve [<song>|<path>]`** — print the fully-resolved,
+- **`strx theme resolve [<rice>|<path>]`** — print the fully-resolved,
   flattened theme set.
-- **`strx theme emit <target> [<song>|<path>]`** — run one of the six
+- **`strx theme emit <target> [<rice>|<path>]`** — run one of the six
   emitters (`stage` · `hyprctl` · `osc` · `file` · `kitty` · `hyprlock`);
   `--out PATH` writes atomically, `--template` supplies the file backend's
-  template, `--song-dir DIR` the folder the hyprlock backend searches for the
-  song's lock picture.
+  template, `--rice-dir DIR` the folder the hyprlock backend searches for the
+  rice's lock picture.
 
 No argument defaults to the staged theme. Exit codes align with the CLI
 convention: `0` ok · `2` usage · `1` error. [[Rice-and-Theme]] carries each
@@ -272,10 +272,10 @@ the live targets can never disagree:
    base16 tier gets the scheme the stylix lane synthesises from its palette,
    so every slot is written either way (CONTRACTS.md §4).
 6. **`hyprlock`** → `/stage/hyprlock.conf`, the lock screen's dress as
-   hyprlang variables. Only a song that ships a `lockscreen.<ext>` writes any:
+   hyprlang variables. Only a rice that ships a `lockscreen.<ext>` writes any:
    ten variables, its picture and ground (`palette.bg`), the password field's
    colours (`window.border`, `notif.bg`, `notif.fg`, `palette.accent`,
-   `notif.urgent`) and the field's and the account name's positions. A song
+   `notif.urgent`) and the field's and the account name's positions. A rice
    with none writes comments alone and the venue's own look stands. A file of
    variables can never add a widget or an `onclick`, which is what keeps the
    lock from failing open (CONTRACTS.md §4).
@@ -300,13 +300,13 @@ shape is unchanged; the update playbook records the namespace/file rename.
 The [[Quickshell]] lane declares the surfaces it owns; [[Stylix]] disables
 derivation for those surfaces from that declaration. The flake's `checks`
 assert that no surface has two owners. They fail eval if any module reads
-`song/` runtime paths at build time — `stage/` can never become load-bearing
+`rice/` runtime paths at build time — `stage/` can never become load-bearing
 for the nix build.
 
 ## Related
 
 - [[Self-Ricing]]
-- [[Song-Vocabulary]]
+- [[Rice-Vocabulary]]
 - [[Snowflake-Anatomy]]
 - [[aoide-cli]]
 - [[Quickshell]]
