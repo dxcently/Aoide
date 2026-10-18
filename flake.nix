@@ -258,8 +258,8 @@
 
       # The base package overlay: every `pkgs/<name>` this tree discovers plus
       # `aoide`, the self-flaked core — the same set the `packages` output names
-      # (R8: `strillix` is deliberately NOT here, nixpkgs owns that name; the rice
-      # binary is the `aoide` derivation's `strillix` output).
+      # (R8: the paint binary is deliberately NOT here; it is the
+      # `aoide` derivation's `strillix` output).
       overlays.default =
         final: prev:
         (pkgsWalk.overlay { stock = nixpkgs.legacyPackages.${prev.stdenv.hostPlatform.system}; }) final prev
