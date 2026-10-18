@@ -236,10 +236,13 @@ let
     }
 
     # ── Terminal corners ──────────────────────────────────────────────────────
-    # Edged everywhere (the User): hard square corners on the terminal too — the
-    # global decoration rounding is already 0, so this pins kitty to match
-    # (the earlier `rounding 3` softened only the terminal; now nothing rounds).
-    windowrule = rounding 0, match:class kitty
+    # The terminal's corners follow the song, like every other window's: rounded
+    # under a song that asks for rounding, square under one that does not. The
+    # rule stays explicit — rather than letting the global carry the terminal —
+    # because kitty is the one class that has wanted a radius of its own (a
+    # `rounding 3` that softened only the terminal, before the radius-0 house
+    # style made the pin indistinguishable from the global).
+    windowrule = rounding ${toString rounding}, match:class kitty
   '';
 
   # NOTE: keybinds, input devices, tiling layout, misc, and BEHAVIOURAL window
