@@ -4950,3 +4950,10 @@ Pages touched: pkgs/aoide/crates/strillix, pkgs/aoide/crates/storage/src/fs.rs,
 pkgs/aoide/default.nix, pkgs/aoide/flake.nix, flake.nix, lib/checks.nix,
 modules/dendrites/strillix, modules/nucleus/options.nix, modules/default.nix,
 CONTRACTS.md, AGENTS.md, docs/Aoide-Wiki/ingest/log.md
+
+Rename review fixes: the runtime migration moves `takes/` to `history/` (it
+mapped `history` to itself before), moves `declared/livery.json` to
+`declared/theme.json`, and treats an empty new root as absent so activation
+can pre-create one without stranding state. A populated new root is narrated
+and the old tree stays. `aoideMigrateRoots` runs `strillix --help` before the
+seeds and before `strillixRice`, so the migration lands first on every rebuild.
