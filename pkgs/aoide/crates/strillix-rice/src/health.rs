@@ -7,7 +7,7 @@
 //! reattaches even once the real output returns — the process stays
 //! `active` (no crash, no exit), so systemd has nothing to restart on.
 //! Confirmed live 2026-08-28 and twice more 2026-08-29: the desktop (bar/
-//! dock/wallpaper/herald) goes bare for hours until someone notices and runs
+//! dock/wallpaper/notifications) goes bare for hours until someone notices and runs
 //! `systemctl --user restart aoide-quickshell.service` by hand. A rebuild-
 //! time mitigation already exists (`home.activation.aoideRestartRice`), but
 //! it only fires on a nix switch, not live mid-session — this closes that
@@ -714,7 +714,7 @@ fn restart_service() {
 /// [`ladder_at_cap`]) — by then the pattern is clearly not a one-off blip.
 /// Best-effort, not this healthcheck's fallback: dunst's `skip_display`
 /// (`modules/dendrites/dunst.nix`) means it never draws, only forwards to
-/// the herald ledger inside the very shell this reports on, so the toast
+/// the notifications ledger inside the very shell this reports on, so the toast
 /// only becomes visible once the shell recovers — the restart the caller
 /// already fired is what actually does the work.
 fn notify_still_flapping() {
@@ -857,7 +857,7 @@ mod tests {
                     "0": [{"namespace": "aoide-wallpaper"}],
                     "1": [],
                     "2": [{"namespace": "aoide-bar"}, {"namespace": "aoide-dock"}],
-                    "3": [{"namespace": "aoide-herald"}]
+                    "3": [{"namespace": "aoide-notifications"}]
                 }
             },
             "HDMI-A-1": {

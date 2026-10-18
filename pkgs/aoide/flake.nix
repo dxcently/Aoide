@@ -141,7 +141,7 @@
               qrencode # secrets enroll — otpauth QR render
               age # secrets age backend — without it the crate's age-gated tests self-skip
               zenity # secrets watch --popup — the code-entry dialog
-              libnotify # notify-send, herald's local fallback
+              libnotify # notify-send, notifications' local fallback
               # Paint-side probes (crates/screen — wayland-session tools,
               # inert off-desktop but standalone and version-insensitive):
               grim # screen shot

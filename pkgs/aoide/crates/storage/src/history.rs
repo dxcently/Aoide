@@ -1,8 +1,8 @@
 //! The take store: `rices/<song>/drafts/<draft>/history/` when routed into
 //! a draft, `rices/<song>/history/` when staged directly with no draft
 //! (`strillix reload` design, settled 2026-08-31 — history/back's staging-mode
-//! reach; see [`takes_dir`]) — full-content snapshots of the routed scope's
-//! theme/cover/widget bodies, minted on every rehearsal write, forming a
+//! reach; see [`history_dir`]) — full-content snapshots of the routed scope's
+//! theme/wallpaper/widget bodies, minted on every rehearsal write, forming a
 //! TREE (not a line) so `rice back --mark <letter>` can revert to any mark
 //! and keep editing without destroying what came after it
 //! (`references/fleshing-out-aoide-ricing.md` §5.2, phase A; the
@@ -19,15 +19,15 @@
 //!
 //! **Marks live OUTSIDE the take record**, in a `history/marks.json` map
 //! (`{"A": 9}`) — overruling this feature's own plan, which first tried a
-//! `mark` field on `TakeRecord` (advisor verdict, fork 4). A field would
+//! `mark` field on `HistoryRecord` (advisor verdict, fork 4). A field would
 //! make moving a letter a TWO-file rewrite (clear the old take's field,
 //! stamp the new one); a crash between those two writes either duplicates
 //! the letter (both takes claim it) or loses it (neither does), and no
 //! atomic fix exists for two sequential file writes. The map makes a move
 //! ONE `atomic_write` of one file. The second win: take records stay
-//! write-once from the moment `save_take` first writes them — nothing ever
+//! write-once from the moment `save_history` first writes them — nothing ever
 //! opens a take file to mutate it — which keeps drift comparison (a
-//! parse-and-compare against a take's `theme`/`cover`) and any future
+//! parse-and-compare against a take's `theme`/`wallpaper`) and any future
 //! content-hashing trivially safe, because "the file on disk" and "the take
 //! as minted" are never allowed to diverge.
 //!
@@ -59,9 +59,9 @@ use std::path::PathBuf;
 /// staging mode has no draft directory to nest under, so its takes hang off
 /// the song itself. `None` is NOT "no draft yet" in some third sense; it IS
 /// the staging-mode scope, resolved by [`crate::commands`-level callers]
-/// (`strillix-rice`'s `commands/take.rs::resolve_scope`) straight off
+/// (`strillix-rice`'s `commands/history.rs::resolve_scope`) straight off
 /// `mode.json`'s own `mode`/`draft` fields.
-pub fn takes_dir(song: &str, draft: Option<&str>) -> PathBuf {
+pub fn history_dir(song: &str, draft: Option<&str>) -> PathBuf {
     match draft {
         Some(d) => draft_dir(song, d).join("history"),
         None => rice_dir(song).join("history"),
@@ -69,11 +69,11 @@ pub fn takes_dir(song: &str, draft: Option<&str>) -> PathBuf {
 }
 
 /// One take's record file: `history/NNNN.json`, 4-digit zero-padded. The pad
-/// is cosmetic only — [`list_takes`]/[`next_take_number`] sort by the
+/// is cosmetic only — [`list_history`]/[`next_history_number`] sort by the
 /// PARSED `take` field, never the filename, so a 5th-digit take (`10000`)
 /// still orders correctly once the store outgrows the pad width.
-pub fn take_path(song: &str, draft: Option<&str>, n: u32) -> PathBuf {
-    takes_dir(song, draft).join(format!("{n:04}.json"))
+pub fn history_path(song: &str, draft: Option<&str>, n: u32) -> PathBuf {
+    history_dir(song, draft).join(format!("{n:04}.json"))
 }
 
 /// The per-scope head cursor: `history/head.json` — where the NEXT take will
@@ -83,26 +83,26 @@ pub fn take_path(song: &str, draft: Option<&str>, n: u32) -> PathBuf {
 /// Draft and back; a marker field would be torn down on every such
 /// transition and lose the cursor.
 pub fn head_path(song: &str, draft: Option<&str>) -> PathBuf {
-    takes_dir(song, draft).join("head.json")
+    history_dir(song, draft).join("head.json")
 }
 
 /// The mark map: `history/marks.json`, a flat `{"<letter>": <take>}` object —
-/// see the module doc for why marks live here and not on `TakeRecord`.
+/// see the module doc for why marks live here and not on `HistoryRecord`.
 pub fn marks_path(song: &str, draft: Option<&str>) -> PathBuf {
-    takes_dir(song, draft).join("marks.json")
+    history_dir(song, draft).join("marks.json")
 }
 
 /// One take: a full-content snapshot of the routed draft's `theme.json`
-/// (and `cover.json`, when the stage had one) at the moment it was minted,
+/// (and `wallpaper.json`, when the stage had one) at the moment it was minted,
 /// plus the tree edge (`parent`) and provenance (`at`/`session_id`/`cause`).
-/// Write-once once [`save_take`] has landed it — see the module doc.
+/// Write-once once [`save_history`] has landed it — see the module doc.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
-pub struct TakeRecord {
+pub struct HistoryRecord {
     pub take: u32,
     /// `None` only for a draft's very first take. Ancestry is derived by
     /// walking this back to `None` ([`ancestry`]) — never indexed, never a
     /// stored children list (a child list is one scan of the same
-    /// directory [`list_takes`] already reads).
+    /// directory [`list_history`] already reads).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent: Option<u32>,
     /// ISO-8601 UTC (`crate::time::now_iso_utc`), stamped once at mint time.
@@ -113,21 +113,21 @@ pub struct TakeRecord {
     /// (`crate::records::SessionRecord`).
     #[serde(rename = "sessionId", default, skip_serializing_if = "Option::is_none")]
     pub session_id: Option<String>,
-    /// What minted this take: `"stage"`, `"cover-set"`, `"explicit"`,
+    /// What minted this take: `"stage"`, `"wallpaper-set"`, `"explicit"`,
     /// `"drift"` — the take-store's own event vocabulary, distinct from an
     /// `Outcome` reason string (this crate has no `Outcome`).
     #[serde(default)]
     pub cause: String,
     #[serde(default)]
     pub theme: Value,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub cover: Option<Value>,
+    #[serde(default, alias = "cover", skip_serializing_if = "Option::is_none")]
+    pub wallpaper: Option<Value>,
     /// `{ "<rices-relative widgets/ path>": "<utf-8 file content>" }` —
     /// the song's widget QML bodies at mint time (`strillix reload` design,
     /// settled 2026-08-31: "Takes gain WIDGET BODIES in both modes", closing
     /// the gap that widget QML was never snapshotted). Song-scoped, not
     /// draft-scoped, matching the fact that widget bodies themselves are
-    /// song-scoped (a draft forks the dress — theme+cover — never the
+    /// song-scoped (a draft forks the dress — theme+wallpaper — never the
     /// widgets). `#[serde(default)]` reads an old take file predating this
     /// field as `{}` (via [`default_widgets`]), the same "no widgets" shape
     /// a fresh capture of a widget-less song produces — so an old take never
@@ -150,45 +150,45 @@ struct HeadFile {
 }
 
 /// Read one take by number. `None` on a missing file, invalid JSON, or a
-/// path that fails to parse as a `TakeRecord` — the same tolerate-missing
+/// path that fails to parse as a `HistoryRecord` — the same tolerate-missing
 /// discipline `node_store::load_nodes` / `mode::load_mode_marker` use for
 /// any other stage-adjacent file: an absent take is "not there", never an
 /// error this deep in the store.
-pub fn load_take(song: &str, draft: Option<&str>, n: u32) -> Option<TakeRecord> {
-    let raw = std::fs::read_to_string(take_path(song, draft, n)).ok()?;
+pub fn load_history(song: &str, draft: Option<&str>, n: u32) -> Option<HistoryRecord> {
+    let raw = std::fs::read_to_string(history_path(song, draft, n)).ok()?;
     serde_json::from_str(&raw).ok()
 }
 
 /// Atomic-write one take record to its `NNNN.json`. Takes are write-once in
 /// practice (nothing ever calls this twice for the same `record.take`), but
 /// nothing here enforces that — the caller allocating the number via
-/// [`next_take_number`] under its own lock is what makes it true.
-pub fn save_take(song: &str, draft: Option<&str>, record: &TakeRecord) -> Result<(), String> {
+/// [`next_history_number`] under its own lock is what makes it true.
+pub fn save_history(song: &str, draft: Option<&str>, record: &HistoryRecord) -> Result<(), String> {
     let body = serde_json::to_string_pretty(record)
         .map_err(|e| format!("serialize take {}: {e}", record.take))?
         + "\n";
-    let path = take_path(song, draft, record.take);
+    let path = history_path(song, draft, record.take);
     atomic_write(&path, &body).map_err(|e| format!("{}: {e}", path.display()))
 }
 
 /// Every take on disk, sorted by the PARSED `take` number — never by
 /// filename. Filename-lexicographic order breaks the instant a store
 /// crosses five digits (`"10000.json"` sorts before `"0002.json"` as a
-/// string), which would silently reorder `rice take list`'s tree and hand
-/// `next_take_number` the wrong maximum.
+/// string), which would silently reorder `rice history list`'s tree and hand
+/// `next_history_number` the wrong maximum.
 ///
 /// A directory entry whose stem isn't all-digits (`head.json`, `marks.json`,
 /// a stray `NNNN.tmp.<pid>` atomic-write leftover — its stem is
 /// `"NNNN.tmp"`, which fails the digit test) is silently skipped, as is any
-/// `NNNN.json` that fails to parse as a `TakeRecord` — a half-written or
+/// `NNNN.json` that fails to parse as a `HistoryRecord` — a half-written or
 /// hand-corrupted take is dropped from the listing rather than wedging
 /// every reader of the store.
-pub fn list_takes(song: &str, draft: Option<&str>) -> Vec<TakeRecord> {
-    let dir = takes_dir(song, draft);
+pub fn list_history(song: &str, draft: Option<&str>) -> Vec<HistoryRecord> {
+    let dir = history_dir(song, draft);
     let Ok(read) = std::fs::read_dir(&dir) else {
         return Vec::new();
     };
-    let mut out: Vec<TakeRecord> = read
+    let mut out: Vec<HistoryRecord> = read
         .flatten()
         .filter_map(|entry| {
             let path = entry.path();
@@ -197,7 +197,7 @@ pub fn list_takes(song: &str, draft: Option<&str>) -> Vec<TakeRecord> {
                 return None;
             }
             let raw = std::fs::read_to_string(&path).ok()?;
-            serde_json::from_str::<TakeRecord>(&raw).ok()
+            serde_json::from_str::<HistoryRecord>(&raw).ok()
         })
         .collect();
     out.sort_by_key(|t| t.take);
@@ -209,8 +209,8 @@ pub fn list_takes(song: &str, draft: Option<&str>) -> Vec<TakeRecord> {
 /// `0001` and `0004` (takes `0002`/`0003` pruned away) yields `5`, never
 /// "the first free gap"; a take number is a mint timestamp, not a slot to
 /// reuse.
-pub fn next_take_number(song: &str, draft: Option<&str>) -> u32 {
-    list_takes(song, draft)
+pub fn next_history_number(song: &str, draft: Option<&str>) -> u32 {
+    list_history(song, draft)
         .iter()
         .map(|t| t.take)
         .max()
@@ -228,7 +228,7 @@ pub fn next_take_number(song: &str, draft: Option<&str>) -> u32 {
 /// cases fall back the same way, by construction, rather than the caller
 /// having to special-case "file present but pointing at nothing".
 pub fn load_head(song: &str, draft: Option<&str>) -> Option<u32> {
-    let takes = list_takes(song, draft);
+    let takes = list_history(song, draft);
     let claimed = std::fs::read_to_string(head_path(song, draft))
         .ok()
         .and_then(|raw| serde_json::from_str::<HeadFile>(&raw).ok())
@@ -252,7 +252,7 @@ pub fn save_head(song: &str, draft: Option<&str>, n: u32) -> Result<(), String> 
 /// "absent means nothing registered yet" discipline every other stage-
 /// adjacent registry in this crate uses. Callers that need marks to only
 /// ever name a take that still exists (A6/A7/A5's read paths) filter this
-/// against [`list_takes`] themselves; pruning is the only writer that
+/// against [`list_history`] themselves; pruning is the only writer that
 /// removes a stale entry ([`save_marks`] after a prune's own rewrite).
 pub fn load_marks(song: &str, draft: Option<&str>) -> BTreeMap<String, u32> {
     std::fs::read_to_string(marks_path(song, draft))
@@ -283,7 +283,7 @@ pub fn save_marks(song: &str, draft: Option<&str>, marks: &BTreeMap<String, u32>
 /// instant it revisits a take number, and is additionally capped at
 /// `takes.len() + 1` steps as a belt-and-suspenders bound — a store with
 /// `k` records can never have a genuine acyclic chain longer than `k`.
-pub fn ancestry(takes: &[TakeRecord], n: u32) -> Vec<u32> {
+pub fn ancestry(takes: &[HistoryRecord], n: u32) -> Vec<u32> {
     let cap = takes.len() + 1;
     let mut out = Vec::new();
     let mut current = Some(n);
@@ -300,7 +300,7 @@ pub fn ancestry(takes: &[TakeRecord], n: u32) -> Vec<u32> {
 /// Every take whose `parent` is `n`, ascending. Derived by one scan, never
 /// stored — the plan's whole argument for why a parent pointer is enough
 /// and a children index would be redundant machinery.
-pub fn children(takes: &[TakeRecord], n: u32) -> Vec<u32> {
+pub fn children(takes: &[HistoryRecord], n: u32) -> Vec<u32> {
     let mut out: Vec<u32> = takes
         .iter()
         .filter(|t| t.parent == Some(n))
@@ -314,10 +314,10 @@ pub fn children(takes: &[TakeRecord], n: u32) -> Vec<u32> {
 /// direct children onto `removed`'s own parent, so pruning a take never
 /// orphans or breaks the ancestry of anything that survives it — ancestry
 /// degrades to "further back", never to broken. Pure and IO-free so the
-/// caller (A9's `rice take prune`) gets this already unit-tested and can
+/// caller (A9's `rice history prune`) gets this already unit-tested and can
 /// drive the actual file deletion off its return value without re-deriving
 /// the splice itself.
-pub fn reparent(takes: &[TakeRecord], removed: u32) -> Vec<TakeRecord> {
+pub fn reparent(takes: &[HistoryRecord], removed: u32) -> Vec<HistoryRecord> {
     let removed_parent = takes.iter().find(|t| t.take == removed).and_then(|t| t.parent);
     takes
         .iter()
@@ -344,7 +344,7 @@ mod tests {
 
     /// Point `AOIDE_STAGE_DIR` at a fresh `<tmp>/stage` and return
     /// `(song, draft)` args every helper below threads straight into
-    /// `takes_dir`/`take_path`/etc. — the song tree resolves as `<tmp>`,
+    /// `history_dir`/`history_path`/etc. — the song tree resolves as `<tmp>`,
     /// the stage's sibling, exactly like `fs.rs`'s own precedent tests.
     fn routed(tag: &str) -> (String, String) {
         let root = unique_tmp(tag);
@@ -354,15 +354,15 @@ mod tests {
         ("sonata".to_string(), "neon-night".to_string())
     }
 
-    fn rec(take: u32, parent: Option<u32>) -> TakeRecord {
-        TakeRecord {
+    fn rec(take: u32, parent: Option<u32>) -> HistoryRecord {
+        HistoryRecord {
             take,
             parent,
             at: "2026-08-18T00:00:00Z".to_string(),
             session_id: None,
             cause: "stage".to_string(),
             theme: serde_json::json!({ "schemaVersion": "0" }),
-            cover: None,
+            wallpaper: None,
             widgets: default_widgets(),
         }
     }
@@ -377,23 +377,23 @@ mod tests {
 
         let mut record = rec(9, Some(1));
         record.session_id = Some("sess-abc".to_string());
-        record.cover = Some(serde_json::json!({ "path": "x.png" }));
-        save_take(&song, Some(&draft), &record).unwrap();
+        record.wallpaper = Some(serde_json::json!({ "path": "x.png" }));
+        save_history(&song, Some(&draft), &record).unwrap();
 
-        let back = load_take(&song, Some(&draft), 9).unwrap();
+        let back = load_history(&song, Some(&draft), 9).unwrap();
         assert_eq!(back, record);
         assert_eq!(back.parent, Some(1), "the parent pointer survives the round trip");
 
         // A take with no parent omits the field entirely rather than writing
         // a literal `null` — matches ModeMarker's additive discipline.
-        let raw = std::fs::read_to_string(take_path(&song, Some(&draft), 9)).unwrap();
+        let raw = std::fs::read_to_string(history_path(&song, Some(&draft), 9)).unwrap();
         let v: Value = serde_json::from_str(&raw).unwrap();
         assert_eq!(v["parent"], 1);
         assert_eq!(v["sessionId"], "sess-abc");
 
         let root_take = rec(1, None);
-        save_take(&song, Some(&draft), &root_take).unwrap();
-        let raw_root = std::fs::read_to_string(take_path(&song, Some(&draft), 1)).unwrap();
+        save_history(&song, Some(&draft), &root_take).unwrap();
+        let raw_root = std::fs::read_to_string(history_path(&song, Some(&draft), 1)).unwrap();
         let v_root: Value = serde_json::from_str(&raw_root).unwrap();
         assert!(v_root.get("parent").is_none(), "no parent is omitted, not null");
     }
@@ -404,21 +404,21 @@ mod tests {
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
         let (song, draft) = routed("takes-missing");
 
-        assert!(load_take(&song, Some(&draft), 1).is_none());
+        assert!(load_history(&song, Some(&draft), 1).is_none());
 
-        std::fs::create_dir_all(takes_dir(&song, Some(&draft))).unwrap();
-        std::fs::write(take_path(&song, Some(&draft), 2), "not json").unwrap();
-        assert!(load_take(&song, Some(&draft), 2).is_none());
+        std::fs::create_dir_all(history_dir(&song, Some(&draft))).unwrap();
+        std::fs::write(history_path(&song, Some(&draft), 2), "not json").unwrap();
+        assert!(load_history(&song, Some(&draft), 2).is_none());
     }
 
-    // ── next_take_number: gap-tolerant, numeric, never filename order ──────
+    // ── next_history_number: gap-tolerant, numeric, never filename order ──────
 
     #[test]
     fn next_take_number_is_one_for_an_empty_store() {
         let _g = env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
         let (song, draft) = routed("takes-next-empty");
-        assert_eq!(next_take_number(&song, Some(&draft)), 1);
+        assert_eq!(next_history_number(&song, Some(&draft)), 1);
     }
 
     #[test]
@@ -426,11 +426,11 @@ mod tests {
         let _g = env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
         let (song, draft) = routed("takes-next-gap");
-        save_take(&song, Some(&draft), &rec(1, None)).unwrap();
-        save_take(&song, Some(&draft), &rec(4, Some(1))).unwrap();
+        save_history(&song, Some(&draft), &rec(1, None)).unwrap();
+        save_history(&song, Some(&draft), &rec(4, Some(1))).unwrap();
         // Takes 2/3 are absent (pruned, or never minted) — the next number is
         // one past the HIGHEST surviving take, not the first empty slot (2).
-        assert_eq!(next_take_number(&song, Some(&draft)), 5);
+        assert_eq!(next_history_number(&song, Some(&draft)), 5);
     }
 
     #[test]
@@ -439,14 +439,14 @@ mod tests {
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
         let (song, draft) = routed("takes-numeric-sort");
         // "10000.json" < "0002.json" as strings — a lexicographic sort would
-        // put 10000 first and hand next_take_number the wrong maximum.
-        save_take(&song, Some(&draft), &rec(2, None)).unwrap();
-        save_take(&song, Some(&draft), &rec(10000, Some(2))).unwrap();
-        save_take(&song, Some(&draft), &rec(9, Some(2))).unwrap();
+        // put 10000 first and hand next_history_number the wrong maximum.
+        save_history(&song, Some(&draft), &rec(2, None)).unwrap();
+        save_history(&song, Some(&draft), &rec(10000, Some(2))).unwrap();
+        save_history(&song, Some(&draft), &rec(9, Some(2))).unwrap();
 
-        let numbers: Vec<u32> = list_takes(&song, Some(&draft)).iter().map(|t| t.take).collect();
+        let numbers: Vec<u32> = list_history(&song, Some(&draft)).iter().map(|t| t.take).collect();
         assert_eq!(numbers, vec![2, 9, 10000], "sorted numerically, not lexically");
-        assert_eq!(next_take_number(&song, Some(&draft)), 10001);
+        assert_eq!(next_history_number(&song, Some(&draft)), 10001);
     }
 
     #[test]
@@ -454,12 +454,12 @@ mod tests {
         let _g = env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
         let (song, draft) = routed("takes-list-skip");
-        save_take(&song, Some(&draft), &rec(1, None)).unwrap();
+        save_history(&song, Some(&draft), &rec(1, None)).unwrap();
         save_head(&song, Some(&draft), 1).unwrap();
         save_marks(&song, Some(&draft), &BTreeMap::from([("A".to_string(), 1u32)])).unwrap();
-        std::fs::write(take_path(&song, Some(&draft), 2), "garbage, not a take").unwrap();
+        std::fs::write(history_path(&song, Some(&draft), 2), "garbage, not a take").unwrap();
 
-        let numbers: Vec<u32> = list_takes(&song, Some(&draft)).iter().map(|t| t.take).collect();
+        let numbers: Vec<u32> = list_history(&song, Some(&draft)).iter().map(|t| t.take).collect();
         assert_eq!(numbers, vec![1], "head.json/marks.json/a corrupt NNNN.json are all skipped");
     }
 
@@ -472,8 +472,8 @@ mod tests {
         let (song, draft) = routed("takes-head-absent-empty");
         assert_eq!(load_head(&song, Some(&draft)), None, "nothing minted yet");
 
-        save_take(&song, Some(&draft), &rec(1, None)).unwrap();
-        save_take(&song, Some(&draft), &rec(2, Some(1))).unwrap();
+        save_history(&song, Some(&draft), &rec(1, None)).unwrap();
+        save_history(&song, Some(&draft), &rec(2, Some(1))).unwrap();
         // No head.json was ever written — falls back to the highest take.
         assert_eq!(load_head(&song, Some(&draft)), Some(2));
     }
@@ -483,9 +483,9 @@ mod tests {
         let _g = env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
         let (song, draft) = routed("takes-head-stale");
-        save_take(&song, Some(&draft), &rec(1, None)).unwrap();
-        save_take(&song, Some(&draft), &rec(2, Some(1))).unwrap();
-        save_take(&song, Some(&draft), &rec(5, Some(2))).unwrap();
+        save_history(&song, Some(&draft), &rec(1, None)).unwrap();
+        save_history(&song, Some(&draft), &rec(2, Some(1))).unwrap();
+        save_history(&song, Some(&draft), &rec(5, Some(2))).unwrap();
         // A crash mid-prune (or a hand edit) leaves head.json naming a take
         // that no longer exists — this must not wedge the store.
         save_head(&song, Some(&draft), 999).unwrap();
@@ -498,8 +498,8 @@ mod tests {
         let _g = env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
         let (song, draft) = routed("takes-head-valid");
-        save_take(&song, Some(&draft), &rec(1, None)).unwrap();
-        save_take(&song, Some(&draft), &rec(2, Some(1))).unwrap();
+        save_history(&song, Some(&draft), &rec(1, None)).unwrap();
+        save_history(&song, Some(&draft), &rec(2, Some(1))).unwrap();
         save_head(&song, Some(&draft), 1).unwrap();
         assert_eq!(load_head(&song, Some(&draft)), Some(1), "an existing claimed head is honored, not maxed");
     }
@@ -534,7 +534,7 @@ mod tests {
         let (song, draft) = routed("takes-marks-missing");
         assert!(load_marks(&song, Some(&draft)).is_empty());
 
-        std::fs::create_dir_all(takes_dir(&song, Some(&draft))).unwrap();
+        std::fs::create_dir_all(history_dir(&song, Some(&draft))).unwrap();
         std::fs::write(marks_path(&song, Some(&draft)), "not json").unwrap();
         assert!(load_marks(&song, Some(&draft)).is_empty());
     }

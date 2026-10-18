@@ -7,7 +7,7 @@
 //! never shifts (rice → draft → mode → cover → theme, keeping the whole
 //! `rice` family contiguous).
 
-pub mod cover;
+pub mod wallpaper;
 pub mod draft;
 pub mod elements;
 pub mod theme;
@@ -16,7 +16,7 @@ pub mod quickshell;
 pub mod refresh;
 pub mod reload;
 pub mod rice;
-pub mod take;
+pub mod history;
 
 #[cfg(test)]
 pub(crate) mod test_support;

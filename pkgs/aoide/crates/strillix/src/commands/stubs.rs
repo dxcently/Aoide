@@ -24,7 +24,7 @@ fn unimplemented(_inv: &Invocation) -> Outcome {
     unreachable!("dispatch() never calls the handler of a not-implemented command")
 }
 
-/// `rice declare` / `rice transpose` — sit after `cover set`/`theme` in the
+/// `rice declare` / `rice transpose` — sit after `wallpaper set`/`theme` in the
 /// historical order (same relative position core's `commands/mod.rs::all()`
 /// gives them).
 pub fn register_rice_late(r: &mut Registry) {

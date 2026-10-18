@@ -13,7 +13,7 @@ const HEAD: &str = "\
 Strillix — the graphical/rice binary (strx guide · tier-0 onboarding)
 
 Identity: `strillix` is AoideOS's PAINTED SURFACE — the self-ricing loop
-(entry: `strx rice compose <name>`), screen capture/pointer/OCR, the herald
+(entry: `strx rice compose <name>`), screen capture/pointer/OCR, the notifications
 notification ledger, shellbridge, the Quickshell reload, and the screen
 lock (`strx lock`). Conducting,
 the session graph, A2A, nodes, and the daemon are core `aoide` identity —

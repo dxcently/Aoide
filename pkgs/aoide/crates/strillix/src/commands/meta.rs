@@ -11,7 +11,7 @@ use aoide_protocol::Door;
 pub fn register(r: &mut Registry) {
     r.insert(cmd!(
         path: ["guide"],
-        summary: "Print strillix's tier-0 onboarding (the rice/screen/herald bundle map).",
+        summary: "Print strillix's tier-0 onboarding (the rice/screen/notifications bundle map).",
         args: [],
         flags: [],
         gated: false,

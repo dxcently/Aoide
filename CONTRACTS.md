@@ -1107,7 +1107,7 @@ count.
   (`reason: "no-mesh-declared"`). `--json`'s `data.report` shape:
   `{"mesh", "rows": [{"node", "outcome", …}], "sameOperatorNote"?}`.
 - `strx schema --json` — the AoideOS-surface contract: onboard/rice/draft/
-  mode/cover/theme/quickshell/reload/screen/shellbridge/component/herald/take/
+  mode/wallpaper/theme/quickshell/reload/screen/shellbridge/component/notifications/take/
   element, the painted surface. `crates/strillix/src/registry.rs`'s golden test
   pins the authoritative command-path set; `strx schema --json` is the live
   enumeration — `mcp.serve` must itself be a registered path for
@@ -1265,13 +1265,13 @@ applied to the stage tree itself):
 
 - **`/stage/`** — rice/paint staging. `theme.json`, `mode.json`, the
   draft-routing symlink target, `grimoire.json`, `apps.json`. Emitted by the
-  notes package, `strx rice`/`cover`/`draft`, `strx apps publish`
+  notes package, `strx rice`/`wallpaper`/`draft`, `strx apps publish`
   (`apps.json`; the `aoide-apps` user unit that keeps it current is planned) and QML itself
   (`grimoire.json`); read by Quickshell. This is strillix's tree.
 - **`state/stage/`** — CONDUCTING state: `sessions.json`, `hooks.json`,
-  `projects.json`, `graph.json`, `pending.json`, `herald.json`. Written by
+  `projects.json`, `graph.json`, `pending.json`, `notifications.json`. Written by
   shellbridge and the `aoide`/`aoided` binaries (`aoide graph`, `aoide
-  herald`); read by the conductor TUI and by Quickshell. This is core's
+  notifications`); read by the conductor TUI and by Quickshell. This is core's
   tree — the `aoide`/`aoided` binaries alone read and write it, never
   `strillix`, and QML READS it (display only, CONTRACTS.md §0's corollary) but
   never writes it.
@@ -1403,7 +1403,7 @@ fallback, it moves each of the six conducting files found at the sibling
 — `rename` when possible (same filesystem), copy-then-remove-source
 otherwise — skipping any file already present at the new path (a fresher
 `state/stage/` file is never clobbered) and never touching a rice file
-(`theme.json`, `mode.json`, `grimoire.json`, `cover.json`) even when it
+(`theme.json`, `mode.json`, `grimoire.json`, `wallpaper.json`) even when it
 sits in the same old directory. Guarded to run at most once per process;
 idempotent across repeated boots (`aoide-storage`'s
 `migrate_conducting_stage`, `fs.rs`). (2) L-C2: moves a pre-L-C2 host's
@@ -1793,7 +1793,7 @@ transition window, so a running desktop never read a missing stage file. The
 mirror + fallback were dropped in Phase 4 of the theme merge —
 `stage/theme.json` is the sole stage note file.
 
-Beyond `strx rice stage <name>`/`cover set`/other emitters writing this
+Beyond `strx rice stage <name>`/`wallpaper set`/other emitters writing this
 live, it is also **seeded from the active song's committed notes, with the
 venue's `aoide.theme.override` applied and the host's geometry laid over the
 song's own, on every activation**
@@ -1881,13 +1881,13 @@ song with no window and no geometry block still clears the previous song's. `ter
 `/stage/terminal-colors.conf` only when the song has an opinion, and the
 host's bake shows otherwise. Readers must tolerate both forms.
 
-### `/stage/cover.json` — **v0**
+### `/stage/wallpaper.json` — **v0**
 
 The live wallpaper: the image path, the song it was staged for, whether the
 user picked it, and whether a picked still tiles.
 
 ```json
-{ "path": "/home/u/.aoide/$STRILLIX_ROOT/covers/dusk.png", "song": "dusk", "pick": true }
+{ "path": "/home/u/.aoide/$STRILLIX_ROOT/wallpapers/dusk.png", "song": "dusk", "pick": true }
 ```
 
 `path` is what the wallpaper layer renders; absent or empty, the layer falls
@@ -1901,7 +1901,7 @@ writer hot-swaps the wallpaper live, with no IPC call. Writes are atomic
 
 **`song` — additive in v0 — is the song staged when the file was written, and
 every writer stamps it.** **`pick` — also additive in v0 — is `true` only for
-the USER's own choice** (`strx cover set`); absent, the file is the song's own
+the USER's own choice** (`strx wallpaper set`); absent, the file is the song's own
 default. **`kind` — additive in v0 — is WHAT the pick is: `"static"`,
 `"video"`, or `"we"`** (a Wallpaper Engine scene), spelled as the engine spells
 them. Absent reads as `"static"`, which is every file written before the field
@@ -1919,10 +1919,10 @@ the marker alone, with neither, is nothing (`staged_is_pick`).
 screen.** `tile: true` repeats the picture at 1:1, one image pixel to one
 screen pixel, instead of cropping it to fill; absent is no tile, which is every
 file written before the fields existed. `position` is `"tile"` or `"fill"` only
-when `strx cover set --position` forced one; automatic (no `--position`, or
+when `strx wallpaper set --position` forced one; automatic (no `--position`, or
 `--position auto`) writes none. A still tiles when its position is `tile`, or
 when it is automatic and its file name — the last path component, lowercased —
-contains `_tile`; a video and a scene carry neither field (`cover::pick_tiles`
+contains `_tile`; a video and a scene carry neither field (`wallpaper::pick_tiles`
 is the one rule). Readers take `tile` under the same rule as `path`: only while
 a pick applies (its `song` matches the staged song and `pick` is `true`), and
 only for the pick's own `path`, never for a fallback. The pattern is anchored
@@ -1931,7 +1931,7 @@ alignment): the shell's layer (`AoideWallpaper.qml`) paints it at 1:1, and a
 preview of the desktop paints it shrunk the way it shrinks the screen it stands
 for, anchored the same way. A reader that shows FILES rather than the pick (a
 picture browser's thumbnails) may mirror the name rule for display. Only
-`cover set` decides the fields; a take, a draft and a kept pick carry them
+`wallpaper set` decides the fields; a take, a draft and a kept pick carry them
 verbatim. An external provider lays its picks out itself and reads neither
 field.
 
@@ -1946,11 +1946,11 @@ what carries a pick across a rebuild — the activation seed rewrites
 song's own cover as the default (below) unless a pick already stands in the file,
 for any song. A seed leaves a pick byte-identical, so a pick for the declared song
 still applies and one for a different song is hidden, not destroyed; while a
-foreign pick stands the declared picture is not published, and `strx cover set
+foreign pick stands the declared picture is not published, and `strx wallpaper set
 --clear` (which drops that pick) brings it back. When `stage/mode.json` names a staged or drafted song,
 `strx reload` puts it back after the seed and the pick applies again: staging
 stages it again, and `stage_for_song` keeps a pick stamped for that same song;
-a draft is re-routed, and the `cover.json` nobody touched names the song that
+a draft is re-routed, and the `wallpaper.json` nobody touched names the song that
 is staged once more.
 
 `pick: true` additionally stops the wallpaper layer instantiating the song's
@@ -1962,29 +1962,29 @@ baseline floor: that slot draws for a song that authors its own
 
 Writers, and the exact shape each leaves:
 
-| Writer | Effect on `stage/cover.json` |
+| Writer | Effect on `stage/wallpaper.json` |
 | --- | --- |
-| `strx rice stage <song>` | the song's derivable cover — its own desktop picture `rices/<song>/cover/<song>-desktop.{webp,png,jpg,jpeg}` (first match in that order), else the shared `/covers/<song>.{webp,png,jpg,jpeg}` — as `{"path": …, "song": …}`; with no derivable cover the file is REMOVED — a cover staged for another song must never stand over this one. A pick already stamped for THIS song is left untouched (reported as `coverStage: "pick-kept"`); `rice-shape` refuses a declared `aoide.theme.wallpaper` not named `cover/<song>-desktop.<ext>` |
-| `strx cover set <path\|name> [--position auto\|tile\|fill]` | `{"path": …, "kind": …, "pick": true, "song": …}` for the song staged at write time — the `song` field omitted only when nothing is staged, which writes the legacy shape — plus, for a still, `"position"` when `--position tile` or `fill` forced it and `"tile": true` when it tiles. `--position` with a video or a `we:<id>` token is a usage refusal (`position-not-a-still`, exit 2) that writes nothing, and the registry refuses it beside `--clear` or `--from-skwd` |
-| `strx cover set we:<id>` | `{"kind": "we", "weId": …, "pick": true, "song": …}` — a scene, whose identity is the workshop id and which has no `path` at all. `we:` with an empty id is not a scene token (the argument is then resolved as a file, and fails like any other missing file) |
-| `strx cover set --from-skwd --kind <static\|video\|we> <path\|id>` | the provider's own report, RECORDED: the shape above with `kind` as the provider named it, and no `position` or `tile` (the provider lays the picture out itself). Applies NOTHING back, and is a no-op with no write (exit 0, `recorded: false`) when the host's provider is not `skwd-wall` (the word in `/stage/wallpaper-provider` below), when the identity is this host's step-aside image (`AOIDE_SKWD_WALL_STANDIN`), or when the staged pick already names that same `(kind, identity)` for that song. The ONLY writer exempt from the `declarative` lock: a provider's picker is not a stage writer, and refusing the record would leave this file describing something the screen is not showing |
-| `strx cover set --clear` | the staged song's own default, exactly as a re-stage of it writes it (its derivable cover, or the file removed). Never keeps a pick; the envelope's `droppedPick` and `coverStage` come from the marker read before the write |
+| `strx rice stage <song>` | the song's derivable cover — its own desktop picture `rices/<song>/wallpaper/<song>-desktop.{webp,png,jpg,jpeg}` (first match in that order), else the shared `/wallpapers/<song>.{webp,png,jpg,jpeg}` — as `{"path": …, "song": …}`; with no derivable cover the file is REMOVED — a cover staged for another song must never stand over this one. A pick already stamped for THIS song is left untouched (reported as `wallpaperStage: "pick-kept"`); `rice-shape` refuses a declared `aoide.theme.wallpaper` not named `wallpaper/<song>-desktop.<ext>` |
+| `strx wallpaper set <path\|name> [--position auto\|tile\|fill]` | `{"path": …, "kind": …, "pick": true, "song": …}` for the song staged at write time — the `song` field omitted only when nothing is staged, which writes the legacy shape — plus, for a still, `"position"` when `--position tile` or `fill` forced it and `"tile": true` when it tiles. `--position` with a video or a `we:<id>` token is a usage refusal (`position-not-a-still`, exit 2) that writes nothing, and the registry refuses it beside `--clear` or `--from-skwd` |
+| `strx wallpaper set we:<id>` | `{"kind": "we", "weId": …, "pick": true, "song": …}` — a scene, whose identity is the workshop id and which has no `path` at all. `we:` with an empty id is not a scene token (the argument is then resolved as a file, and fails like any other missing file) |
+| `strx wallpaper set --from-skwd --kind <static\|video\|we> <path\|id>` | the provider's own report, RECORDED: the shape above with `kind` as the provider named it, and no `position` or `tile` (the provider lays the picture out itself). Applies NOTHING back, and is a no-op with no write (exit 0, `recorded: false`) when the host's provider is not `skwd-wall` (the word in `/stage/wallpaper-provider` below), when the identity is this host's step-aside image (`AOIDE_SKWD_WALL_STANDIN`), or when the staged pick already names that same `(kind, identity)` for that song. The ONLY writer exempt from the `declarative` lock: a provider's picker is not a stage writer, and refusing the record would leave this file describing something the screen is not showing |
+| `strx wallpaper set --clear` | the staged song's own default, exactly as a re-stage of it writes it (its derivable cover, or the file removed). Never keeps a pick; the envelope's `droppedPick` and `wallpaperStage` come from the marker read before the write |
 | `strx rice mode declarative` | NOTHING — a lock is not a song switch. Its re-pin writes `theme.json` alone, and a pick stamped for another song is hidden by the read-side rule rather than dropped |
 | `strx rice back <take>` | the target take's cover value VERBATIM — a take minted while a pick stood restores it as a pick, `song`, `position` and `tile` and all; a take with no cover removes whatever stands |
-| `strx rice draft save <name>` | a verbatim copy into `rices/<song>/drafts/<name>/cover.json` (§4's drafts entry; never a routing target) |
-| the strillix lane's `home.activation.aoideSeedStage` | when the declared song sets `aoide.theme.wallpaper`, `{"path": <that store path>, "song": <declared>}` — the declared song's own picture as the default — unless `cover.json` already holds a pick for any song, which is left byte-identical (`lib/cover-seed.sh`, proved by `tests/cover-seed/run.sh`). With no `aoide.theme.wallpaper` it writes NOTHING; the read-side rule above is what keeps a pick off another song |
-| the greeter tree build (`modules/dendrites/greeter.nix`) | inside the tree only, `{"path": <tree>/rices/<owner>/cover/<owner>-logon.{webp,png,jpg,jpeg}, "song": <declared>}` when the face's song ships a logon picture (`cover/<owner>-logon.<ext>`, first match in that order). The greeter's `LockPreview` draws it as the logon background; the tree's `cover/` folder rides along whole |
+| `strx rice draft save <name>` | a verbatim copy into `rices/<song>/drafts/<name>/wallpaper.json` (§4's drafts entry; never a routing target) |
+| the strillix lane's `home.activation.aoideSeedStage` | when the declared song sets `aoide.theme.wallpaper`, `{"path": <that store path>, "song": <declared>}` — the declared song's own picture as the default — unless `wallpaper.json` already holds a pick for any song, which is left byte-identical (`lib/wallpaper-seed.sh`, proved by `tests/wallpaper-seed/run.sh`). With no `aoide.theme.wallpaper` it writes NOTHING; the read-side rule above is what keeps a pick off another song |
+| the greeter tree build (`modules/dendrites/greeter.nix`) | inside the tree only, `{"path": <tree>/rices/<owner>/wallpaper/<owner>-logon.{webp,png,jpg,jpeg}, "song": <declared>}` when the face's song ships a logon picture (`wallpaper/<owner>-logon.<ext>`, first match in that order). The greeter's `LockPreview` draws it as the logon background; the tree's `cover/` folder rides along whole |
 
 `stage_for_song` — the one implementation of the stage half, shared by
 `rice stage` and the mode re-pins — keeps a standing pick iff
 `pick.song == <song being staged>`, and otherwise writes that song's own
 default through `stage_song_default` (its derivable cover, else no file).
-`rice mode declarative` passes `stage_cover: false` and skips it whole: a lock
+`rice mode declarative` passes `stage_wallpaper: false` and skips it whole: a lock
 keeps the cover file exactly as it stands, and a pick it hides read-side comes
 back when its own song is staged again. The lock's own entrypoint refusal
-(`commands/cover.rs`) exempts `--from-skwd` — the record door writes what an
+(`commands/wallpaper.rs`) exempts `--from-skwd` — the record door writes what an
 external provider is ALREADY showing, so the file describes the screen instead
-of drifting from it; a plain `cover set` and `--clear` are refused there as
+of drifting from it; a plain `wallpaper set` and `--clear` are refused there as
 they always were.
 
 ### `/stage/wallpaper-provider` — **v0**
@@ -2003,7 +2003,7 @@ derives it a second way — the file IS the answer — so choosing a different
 provider (a rebuild) moves the CLI and the QML together, and neither can be
 right while the other is stale.
 
-**`strx cover sync`** is the bridge, and the only write Aoide makes to an
+**`strx wallpaper sync`** is the bridge, and the only write Aoide makes to an
 external provider: the provider is given the staged pick while one applies
 (`skwd-helm apply <path|we:<id>> -o '*'` — always every output, since a
 per-output apply is the one shape the provider's own no-op guard does not
@@ -2011,11 +2011,11 @@ cover), and is told to show nothing when none does — its own `clear` verb wher
 the release has one, the transparent step-aside image otherwise. That is what
 makes a song switch step
 aside with no extra call: the pick stops applying, so the provider stops showing
-it. The shell's own layer is given nothing — it watches `stage/cover.json`
+it. The shell's own layer is given nothing — it watches `stage/wallpaper.json`
 itself. A pick RECORDED while the lock was on is re-applied by the next sync
-exactly like one the user made: the lock governs who WRITES `stage/cover.json`,
-never what a provider paints. It runs after every write that changes what should show: `cover set`
-(plain), `cover set --clear`, `rice stage` (and therefore `rice mode
+exactly like one the user made: the lock governs who WRITES `stage/wallpaper.json`,
+never what a provider paints. It runs after every write that changes what should show: `wallpaper set`
+(plain), `wallpaper set --clear`, `rice stage` (and therefore `rice mode
 stage`/`declarative`, which route through it) and `rice back`; never from
 `--from-skwd`, which only records. It is best-effort and never fatal, the same
 tier as the staged geometry's `hyprctl` call — and it is what the external
@@ -2138,7 +2138,7 @@ from, never consulted.
 
 It is not song content. It lives beside the declared twins, outside
 `rices/<song>/`, so the song folder stays exactly the song: the §7.5
-folder-equality gate, `rice declare`, `rice list`, `rice take` and the widget
+folder-equality gate, `rice declare`, `rice list`, `rice history` and the widget
 sync never see it, and it is never declared into the checkout nor taken. Sole
 writer: `strx rice refresh`, including the stage-time seed, which runs the same
 function (`pkgs/aoide/crates/strillix-rice/src/commands/refresh.rs`); written last and
@@ -2176,16 +2176,16 @@ mode-toggle extension (`RiceMode`: `Staging | Declarative | Draft`). Absent
 means `declarative` — the safe default, since nothing has ever unlocked
 staging writes; never an error.
 
-- **`staging`** — hot-load unlocked: `rice stage`/`cover set` write live, as
+- **`staging`** — hot-load unlocked: `rice stage`/`wallpaper set` write live, as
   plain real files.
 - **`declarative`** — nix/home-manager is the only writer; staging writers
-  refuse. One exemption, and it is not a drift: `cover set --from-skwd`
+  refuse. One exemption, and it is not a drift: `wallpaper set --from-skwd`
   records what an external wallpaper provider is already showing
-  (CONTRACTS.md §4's cover.json entry), because the file must describe the
+  (CONTRACTS.md §4's wallpaper.json entry), because the file must describe the
   screen.
 - **`draft`** — `stage/theme.json` is a SYMLINK routed into
   `rices/<song>/drafts/<name>/theme.json` via `rice mode draft
-  <name>`. `rice stage`/`cover set` still write normally — neither is
+  <name>`. `rice stage`/`wallpaper set` still write normally — neither is
   symlink-aware; the routing is transparent (see below).
 
 ```json
@@ -2249,8 +2249,8 @@ draft is fundamentally a variation of an ALREADY COMPOSED song.
 ```
 rices/sonata/drafts/neon-night/
 ├── theme.json   a real file — the draft's own content
-└── cover.json    snapshot of stage/cover.json, ONLY if the stage had one
-                   at fork/save time (cover.json is NEVER symlinked/routed —
+└── wallpaper.json    snapshot of stage/wallpaper.json, ONLY if the stage had one
+                   at fork/save time (wallpaper.json is NEVER symlinked/routed —
                    only theme.json is)
 ```
 
@@ -2279,7 +2279,7 @@ whatever's currently live (reading transparently through a routing symlink
 if one is active) into a new-or-updated draft snapshot without switching
 modes — upserting (re-saving an existing name overwrites its `theme.json`
 and, if the current stage no longer carries a cover, removes a stale
-`cover.json`). A name omitted at save is minted as the lowest free
+`wallpaper.json`). A name omitted at save is minted as the lowest free
 `draft-<n>` among the staged song's `drafts/` entries and returned as
 `data.name`. `rice draft drop <name>` deletes a draft outright; a missing
 name is an error, not idempotent-silent, and dropping the CURRENTLY-ROUTED
@@ -3403,7 +3403,7 @@ Three rules hold, each on the doors named:
    reports under an id of its own. So a hook whose payload `session_id` names a
    protected live wrap is ignored whole, whatever its event, before any arm
    runs, and answers `no-op (live-sealed-wrap)`. That covers a phase, a
-   permission prompt (which would otherwise raise the herald's approve/deny
+   permission prompt (which would otherwise raise the notifications' approve/deny
    card, carrying the payload's text, for the wrap), a tool start or end, a
    sub-agent event, a session end and an event the profile does not map. None
    of them writes a phase, `contextCeiling`, `harnessSessionId`, a window, a
@@ -3610,8 +3610,8 @@ internally, never rendered into the live graph.
 
 **The remaining two sockets get a peercred floor (LANE IDENTITY P-ID3).**
 Phase 0 mapped every legitimate connector to each: shellbridge's socket
-serves the QML herald/bar widgets clicking a summons verdict or a
-focus/power/rice-mode/usage-refresh/recheck action, `aoide herald push`
+serves the QML notifications/bar widgets clicking a summons verdict or a
+focus/power/rice-mode/usage-refresh/recheck action, `aoide notifications push`
 (dunst's own script hook), and `session permit` raising its own summons —
 every one of them the OPERATOR's own uid, none of them the daemon's;
 `aoided`'s dispatch socket serves the CLI's own `daemon_dispatch` proxy (a
@@ -3630,7 +3630,7 @@ unidentified peer (`cross_uid_gate`, restated identically in both files,
 pure and unit-tested without a real different-uid connection). **This is a
 CROSS-uid floor, not a same-uid guarantee** — under OQ1-A every legitimate
 connector named above already runs as the SAME uid a prompt-injected agent
-would, so a same-uid process forging `{"cmd":"heraldverdict",...}` on
+would, so a same-uid process forging `{"cmd":"notificationsverdict",...}` on
 shellbridge's socket, or a raw `{"op":"dispatch","path":["send"],...}` on
 `aoided`'s, is refused by neither floor. This is the identical OQ1-A
 residual the per-session control socket already carries (P-ID2's own "what
@@ -4225,21 +4225,21 @@ than that stays in preorder in the deepest nested list as `{ "sessionId",
 of levels and loses no row; the text render likewise draws 32 levels of
 indentation, then `…`.
 
-### `state/stage/herald.json` — **v0**
+### `state/stage/notifications.json` — **v0**
 
-The notification ledger the Quickshell herald draws from. dunst owns
+The notification ledger the Quickshell notifications draws from. dunst owns
 `org.freedesktop.Notifications` but draws NOTHING (`skip_display` on every
-rule); it hands each notification to `strx herald push` through its `script`
+rule); it hands each notification to `strx notifications push` through its `script`
 hook, which forwards it over the shellbridge socket. **The shellbridge daemon
 is the single writer** — dunst runs its scripts asynchronously, so two
 notifications arriving together would otherwise race a read-modify-write and
 one would be lost. QML only ever READS this file; a click sends a socket
-command (`heraldverdict` / `heralddismiss`) and never writes.
+command (`notificationsverdict` / `notificationsdismiss`) and never writes.
 
 Newest LAST. A non-empty `stackTag` replaces the entry holding the same tag
 rather than appending, and the ledger is capped at 20 (matching the dunstrc's
 `history_length`). `progress` is `-1` for "no value"; `timeoutMs` is `0` for
-"never expires" — the QML herald owns the dismiss clock, because a
+"never expires" — the QML notifications owns the dismiss clock, because a
 notification dunst never displays is never expired by dunst either.
 
 `kind` is `toast` or `summons`. A summons is an agent blocked on a permission
@@ -4273,7 +4273,7 @@ door            reached by                              approves?   a send throu
 Cli             `aoide` at a terminal, a local agent    yes         --yes, global switch, parent and
                 with a shell                                        sibling rules, pending approve
 Daemon          aoided's own dispatch: the conductor,   yes         the same routes as Cli
-                the herald (shellbridge verdict), and
+                the notifications (shellbridge verdict), and
                 any same-uid client of the aoided socket
 Mcp             `aoide mcp serve --stdio`, and          no          the parent and sibling rules,
                 `strx mcp serve --stdio`                            when the server runs under a
@@ -5543,7 +5543,7 @@ records above) — a closed historical shape reflects exactly what the
 record looked like the instant it exited, not a growing set of optional
 fields a future reader has to guess the absence of. A malformed or
 unparseable line is skipped on read rather than failing the whole file (the
-same read tolerance `pending.json`/`herald.json` already extend to a
+same read tolerance `pending.json`/`notifications.json` already extend to a
 corrupt entry). `origin` (P-P3, decision 7 above) is the one exception to
 "always `null` unless resurrection-related" — it is `"node:<name>"` for a
 session a paired node's A2A spawn created, projected verbatim off the live
@@ -7228,7 +7228,7 @@ the slot name), with one required field, `kind`:
   split intact), `blur` (bool, default true).
 - **`kind = "dock"`** — mounts as an `Item` into the dock surface's existing
   gadget column, alongside the shipped Conductor/Terminals/Meters/Power/
-  Usage gadgets and `herald-center`. Extra field: `order` (nullOr int) — the
+  Usage gadgets and `notifications-center`. Extra field: `order` (nullOr int) — the
   only sort key among multiple declared `dock` entries, because the
   registry is serialized through `serde_json::Value`/`BTreeMap` (no
   `preserve_order` feature enabled), so a song's declared widget keys do
@@ -7290,7 +7290,7 @@ gets no wider surface than any other slot body):
   slot like `powermenu` uses), one per declared entry, plus one
   `GlobalShortcut` per entry that names a non-null `shortcut`.
 - **`SongGadgets.qml`** — visual host for `kind = "dock"` entries. A
-  `Repeater` of `WidgetSlot`s (the same anchor `herald-center` uses),
+  `Repeater` of `WidgetSlot`s (the same anchor `notifications-center` uses),
   mounted as the last children of the dock surface's gadget column, sorted by
   `order`.
 

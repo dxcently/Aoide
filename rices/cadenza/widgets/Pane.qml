@@ -43,7 +43,7 @@
 // Context2D's shadowBlur costs seconds per paint at a pane's size (about 4 s
 // at 330x200, 12 s at the dock's 562x1043 frame), so the canvas is
 // `Canvas.Threaded` and its paint stays off the GUI thread. It runs on the one
-// render thread the engine shares between every Threaded canvas (CoverPcb's
+// render thread the engine shares between every Threaded canvas (WallpaperPcb's
 // too), serially and without coalescing repeated requests: a glow lands
 // seconds after its pane, and every Threaded canvas waits behind the glows
 // queued before it. So a canvas keeps ONE paint in flight. A change of size or

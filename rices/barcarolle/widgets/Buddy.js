@@ -179,7 +179,7 @@ function lineState(s, phase, at, byId) {
              color: nickColor(displayAgent(s, byId)), tool: "",
              text: phase === "done" ? "is done" : (say !== "" ? "stopped · “" + say + "”" : "stopped"), sid: str(s.sessionId) }
 }
-function lineHerald(n, byId) {
+function lineNotifications(n, byId) {
     var t = ms(n.receivedAt) || Date.now()
     if (str(n.kind) === "summons") {
         var s = byId[str(n.sessionId)]
@@ -190,10 +190,10 @@ function lineHerald(n, byId) {
     if (str(n.app) === "notify-send")
         return { t: t, kind: "song", glyph: "song", orb: "", nick: str(n.summary), color: "#1b7f8f", tool: "",
                  text: str(n.body).replace(/\x60/g, ""), sid: "" }
-    return { t: t, kind: "herald", glyph: "herald", orb: "", nick: str(n.summary), color: nickColor(str(n.app).toLowerCase()),
+    return { t: t, kind: "notifications", glyph: "notifications", orb: "", nick: str(n.summary), color: nickColor(str(n.app).toLowerCase()),
              tool: "", text: str(n.body), sid: "" }
 }
-function heraldKey(n) { return str(n.id) + "|" + str(n.receivedAt) }
+function notificationsKey(n) { return str(n.id) + "|" + str(n.receivedAt) }
 
 function joins(seen, sessions, byId) {
     var lines = [], next = {}, k, i
@@ -215,12 +215,12 @@ function phases(seen, hooks, byId) {
     }
     return { lines: lines, seen: next }
 }
-function heralds(seen, notes, byId) {
+function notifications(seen, notes, byId) {
     var lines = [], next = {}, k, i
     for (k in seen) next[k] = true
     for (i = 0; i < notes.length; i++) {
-        var key = heraldKey(notes[i])
-        if (!next[key]) lines.push(lineHerald(notes[i], byId))
+        var key = notificationsKey(notes[i])
+        if (!next[key]) lines.push(lineNotifications(notes[i], byId))
         next[key] = true
     }
     return { lines: lines, seen: next }

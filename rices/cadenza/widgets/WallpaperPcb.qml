@@ -1,7 +1,7 @@
-// CoverPcb.qml — the cover: a routed circuit board on the CRT black
+// WallpaperPcb.qml — the cover: a routed circuit board on the CRT black
 // (intent §3.9). An uppercase helper, never a slot: nothing loads it live.
 // The preview canvas shoots it at each monitor's size into
-// `cover/pcb-<w>x<h>.png` (cover/README.md), and `strillix cover set` stages the
+// `wallpaper/pcb-<w>x<h>.png` (wallpaper/README.md), and `strillix wallpaper set` stages the
 // PNG. Regenerating after a palette change is one shot.
 //
 // What it draws, generated (not drawn) from a fixed seed:
@@ -22,7 +22,7 @@
 // It repaints only when its size has settled, a board lands, or the theme
 // changes.
 //
-// The generator (CoverPcbWorker.js) is about three seconds of JS per output,
+// The generator (WallpaperPcbWorker.js) is about three seconds of JS per output,
 // so it runs in a WorkerScript, never on the GUI thread. The canvas strokes
 // the board `Canvas.Threaded` (on the GUI thread that is another ~100 ms), on
 // the one render thread the engine shares between every Threaded canvas, behind
@@ -77,7 +77,7 @@ Item {
 
     WorkerScript {
         id: worker
-        source: "CoverPcbWorker.js"
+        source: "WallpaperPcbWorker.js"
         onMessage: function (m) {
             if (m.key !== root.wantKey) return
             root.board = m.board

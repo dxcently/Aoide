@@ -58,7 +58,7 @@
 // widget-slot expansion, CONTRACTS.md §5) rather than direct shell-gadget
 // instantiations — each resolves this same song's own widgets/<slot>.qml (or
 // sonata's own baseline) through the shared song-slot mechanism the
-// herald-center anchor already used. WidgetSlot forwards `theme` + `bridge`
+// notifications-center anchor already used. WidgetSlot forwards `theme` + `bridge`
 // to every loaded widget unconditionally (the universal widget contract,
 // slots.md); Conductor/Terminals additionally receive `shared` as a slot
 // extra (`extraProps: ({ shared: root.shared })`), the one thing not every
@@ -274,8 +274,8 @@ PanelWindow {
     readonly property int striationW: 26     // the outer fore-edge (page striations)
     readonly property int scrollGutter: 12   // the slim scrollbar's lane
     readonly property int bandPad: 6         // gap either side of the content column
-    readonly property int coverInset: 8      // marble pad inside the keyline
-    readonly property int bookW: coverInset * 2 + spineW + bandPad
+    readonly property int wallpaperInset: 8      // marble pad inside the keyline
+    readonly property int bookW: wallpaperInset * 2 + spineW + bandPad
                                  + innerW + scrollGutter + bandPad + striationW
     // The width of the fore-edge sliver the alert-peek shows.
     readonly property int sliverW: striationW + 8
@@ -358,7 +358,7 @@ PanelWindow {
             Item {
                 id: inner
                 anchors.fill: parent
-                anchors.margins: root.coverInset
+                anchors.margins: root.wallpaperInset
 
                 // ── SPINE: the carved inner edge (goes to the screen edge when
                 // out; slides off when shut). Twin gold rules + binding stations. ─
@@ -549,7 +549,7 @@ PanelWindow {
                         spacing: 16
 
                         // ORDER: Conductor → Usage → Terminals → Meters → Power →
-                        // Herald (the notification center sits at the BOTTOM).
+                        // Notifications (the notification center sits at the BOTTOM).
                         // Every gadget takes root.gadgetW so the column is flush —
                         // one shared left edge, no 340-vs-360 stagger. Each is a
                         // WidgetSlot anchor (see the header note above) rather than
@@ -640,13 +640,13 @@ PanelWindow {
                             stagingEngine: root.stagingEngine
                         }
 
-                        // Herald — the notification CENTER, the dock's BOTTOM
+                        // Notifications — the notification CENTER, the dock's BOTTOM
                         // gadget (song slot; dunst owns the popups themselves
                         // since 2026-08-16). Content-height passthrough from the
                         // loaded song widget (WidgetSlot sizes to its item);
                         // width pinned here so the column stays flush.
                         WidgetSlot {
-                            slot: "herald-center"
+                            slot: "notifications-center"
                             width: root.gadgetW
                             theme: root.theme
                             bridge: root.bridge

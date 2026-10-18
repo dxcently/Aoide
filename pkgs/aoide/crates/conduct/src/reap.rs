@@ -1313,24 +1313,24 @@ pub fn reap_and_announce(inv: &Invocation) -> Outcome {
 ///
 /// Returns whether the notifier was handed the toast at all (the spawn
 /// succeeded) — never whether the daemon drew it, which is dunst's business
-/// and the herald's after that.
+/// and the notifications' after that.
 fn announce_reap(message: &str) -> bool {
     match std::process::Command::new("notify-send")
         // No `--icon`: dunst stacks the icon slot on TOP of the stele at up to
         // 48px, and a picture is not what a one-line sweep report needs. The
         // sweep's mark is a GLYPH in the summary instead — 𓌳 (U+13333, the
         // Egyptian sickle), which costs no layout slot at all and reads as
-        // this command and no other in the herald ledger. U+13333 and not its
+        // this command and no other in the notifications ledger. U+13333 and not its
         // neighbour U+13334: the two are the same sign, and 13334 is the
         // variant drawn as a bare blade — 13333 is the one that keeps the
         // upright shaft, and a scythe with no handle is a knife. The shaft
-        // survives down to 18px, well under the herald title's size.
+        // survives down to 18px, well under the notifications title's size.
         // Covered by the rig's
         // own font set: `noto-fonts` (modules/dendrites/fonts.nix) ships
         // NotoSansEgyptianHieroglyphs, so pango's and Qt's fontconfig
         // fallback both resolve it rather than drawing tofu.
         //
-        // The word leads and the sickle follows: the herald card already
+        // The word leads and the sickle follows: the notifications card already
         // carries `aoide` in its own header row, so the summary owes no app
         // name — it says what happened, and the glyph closes the line.
         .args(["--app-name=aoide", "--", "reaped 𓌳"])

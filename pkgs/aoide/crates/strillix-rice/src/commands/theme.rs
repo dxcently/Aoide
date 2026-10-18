@@ -272,7 +272,7 @@ fn handle_theme_emit(inv: &Invocation) -> Outcome {
     let image = inv
         .flags
         .get("song-dir")
-        .and_then(|dir| crate::cover::lockscreen_image(Path::new(dir)));
+        .and_then(|dir| crate::wallpaper::lockscreen_image(Path::new(dir)));
     let opts = EmitOpts { template, image: image.as_deref() };
     let output = match backend.emit(&resolved, &opts) {
         Ok(o) => o,

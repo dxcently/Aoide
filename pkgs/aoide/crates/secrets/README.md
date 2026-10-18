@@ -816,13 +816,13 @@ ahead of that evidence.
 
 **Mechanism chosen, and the one this phase did NOT take.** `conduct/src/
 graph/permit.rs` (a DIFFERENT crate, `aoide-conduct`) publishes its own
-desktop summons through `crate::herald::publish` → `crate::shellbridge::
+desktop summons through `crate::notifications::publish` → `crate::shellbridge::
 send_line` — a unix-socket call into the shellbridge daemon that owns
-`/stage/herald.json`, the file the Quickshell herald widget actually
+`/stage/notifications.json`, the file the Quickshell notifications widget actually
 draws from. That seam was the first one this phase checked, and it is NOT
 reachable from here: `aoide-secrets`'s own `Cargo.toml` depends on nothing
 but `aoide-protocol`/`libc`/`serde`/`serde_json` — no `aoide-storage`, no
-`aoide-conduct` — and `herald`/`shellbridge` both live in `aoide-conduct`
+`aoide-conduct` — and `notifications`/`shellbridge` both live in `aoide-conduct`
 (a "charter smudge" its own `AGENTS.md` names explicitly). Reaching them
 would mean a NEW `aoide-secrets` → `aoide-conduct` dependency edge, which
 this phase's brief ruled out (`pkgs/aoide/crates/AGENTS.md`'s "no
@@ -837,7 +837,7 @@ service, with no desktop present at all (`socket::socket_path`'s own
 aoide/shellbridge.sock`).
 
 No adapter on the `aoide-conduct`/`strillix` side currently tails the mirrored
-aoide log (`~/Aoide/log`) and republishes anything from it into `herald`
+aoide log (`~/Aoide/log`) and republishes anything from it into `notifications`
 either — `aoide-client`'s adapter skeleton (`crates/client/src/adapter.rs`)
 subscribes to `EventClass::{Audit,Gate,Rice,Content,Notification}` but has
 no `Secret` case at all, and no other crate in this workspace tails that

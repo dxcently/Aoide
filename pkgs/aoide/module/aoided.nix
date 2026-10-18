@@ -36,7 +36,7 @@ lib.mkIf config.aoide.enable {
   # never committed, never imported by any module (checks.rice-runtime-untracked):
   # `$STRILLIX_ROOT/stage/` is rice/paint staging (theme.json, mode.json — strillix's
   # tree); `state/stage/` is CONDUCTING state (sessions.json/hooks.json/
-  # projects.json/graph.json/pending.json/herald.json — command-defrag S1,
+  # projects.json/graph.json/pending.json/notifications.json — command-defrag S1,
   # 2026-08-27). `state/stage/` nests under the already-0700 `state/` dir, so
   # its own 0755 grants nothing beyond the owner the parent doesn't already
   # gate — matching `$STRILLIX_ROOT/stage/`'s own mode rather than inventing a second

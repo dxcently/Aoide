@@ -36,7 +36,7 @@
 // the cell, and 600ms after the pointer is over neither the cell nor the
 // popup. No text input, so no keyboard and no focus grab: the CLI mints a new
 // draft's name. Its Pane has no inner glow: the canvas queues a multi-second
-// paint on the render thread every Threaded canvas shares (CoverPcb's too), and
+// paint on the render thread every Threaded canvas shares (WallpaperPcb's too), and
 // a menu that is rebuilt on every open would queue one each time. Every
 // string that came over the bridge is painted PlainText.
 //

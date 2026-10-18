@@ -1,5 +1,5 @@
 //! `stage/mode.json` — whether the rice system is in STAGING mode (hot-load
-//! unlocked: `rice stage`/`cover set` write live), DECLARATIVE mode (nix/
+//! unlocked: `rice stage`/`wallpaper set` write live), DECLARATIVE mode (nix/
 //! home-manager is the only writer; staging writers refuse), or DRAFT mode
 //! (`stage/theme.json` is a symlink routed into a saved
 //! `rices/<song>/drafts/<name>/theme.json` — every writer that ever

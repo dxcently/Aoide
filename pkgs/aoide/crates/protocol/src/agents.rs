@@ -104,7 +104,7 @@ pub enum SettingsFormat {
 }
 
 /// The keystrokes that answer a harness's INTERACTIVE permission prompt, for
-/// the one consumer that needs them: the herald's permission summons
+/// the one consumer that needs them: the notifications' permission summons
 /// (`aoide graph permit`), which types the human's verdict back into the
 /// conducted session's pty.
 ///
@@ -185,7 +185,7 @@ pub struct AgentProfile {
     /// Tool names that dispatch a sub-agent (spawn/manage a child node).
     pub subagent_tools: &'static [&'static str],
     /// How to answer this harness's interactive permission prompt from the
-    /// herald summons, or `None` when its prompt shape has not been verified
+    /// notifications summons, or `None` when its prompt shape has not been verified
     /// on a live screen — in which case `graph permit` refuses to raise a
     /// summons at all rather than typing a guess into someone's session.
     pub permission_keys: Option<PermissionKeys>,

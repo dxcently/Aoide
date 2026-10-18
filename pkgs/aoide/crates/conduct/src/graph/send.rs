@@ -234,7 +234,7 @@ pub struct PendingFile {
 /// writes, and as of P-D3 (`docs/architecture/AOIDED.md`'s "L1" section)
 /// so does `aoide-server`'s #69 hand-edit watcher, which folds
 /// `pending.json` into the same watched-file roster as `sessions.json`/
-/// `hooks.json`/`projects.json`/`graph.json`/`herald.json` — reached via
+/// `hooks.json`/`projects.json`/`graph.json`/`notifications.json` — reached via
 /// `aoide_conduct::graph::pending_path()` rather than a second
 /// `conducting_stage_dir().join("pending.json")` literal elsewhere (this
 /// crate's own "no cross-crate copying" convention, widen-don't-fork).
@@ -2669,7 +2669,7 @@ fn hook_for_profile_gated(
             // `awaiting` reached THIS arm means an unconditional blocker — a
             // permission prompt (claude's `notification_type: permission_prompt`,
             // kimi's PermissionRequest); the ambiguous idle ping takes
-            // PhaseIfRunning instead and never summons. Raise the herald's
+            // PhaseIfRunning instead and never summons. Raise the notifications'
             // approve/deny card, detached, after the phase is on disk so the
             // card's own still-awaiting guard reads the state it was raised for.
             // Best-effort throughout: a notification problem never fails a hook.
@@ -5199,7 +5199,7 @@ mod tests {
 
     /// The local CLI's `send --yes` still approves and delivers (the local
     /// case is unchanged by this lane). The Daemon arm is the other local
-    /// door, which the conductor and herald reach through aoided.
+    /// door, which the conductor and notifications reach through aoided.
     #[test]
     fn the_local_cli_send_yes_still_approves_and_delivers() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
@@ -9360,7 +9360,7 @@ mod tests {
     }
 
     /// A permission prompt reported under a protected wrap's own id is ignored
-    /// whole: the phase is not written, which also keeps the herald summons from
+    /// whole: the phase is not written, which also keeps the notifications summons from
     /// being raised (it is spawned from that arm, after the phase). The refusal
     /// is audited on the door the hook arrived on.
     #[test]
@@ -9456,7 +9456,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// The herald's approve/deny card is raised by a detached `aoide session
+    /// The notifications' approve/deny card is raised by a detached `aoide session
     /// permit` that the phase arm spawns, which no in-process test can see (under
     /// libtest `spawn_summons` re-enters nothing). So this runs the REAL hook
     /// binary against a fake shellbridge: a conductable record that is not
@@ -9467,10 +9467,10 @@ mod tests {
         use std::io::Write as _;
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let (_env, _root_env, root) = forged_hook_world("forged-summons");
-        let _runtime_env = EnvVars::save(&["XDG_RUNTIME_DIR", "AOIDE_HERALD_PERMIT"]);
+        let _runtime_env = EnvVars::save(&["XDG_RUNTIME_DIR", "AOIDE_NOTIFICATIONS_PERMIT"]);
         let runtime = unique_stage("forged-summons-run");
         std::env::set_var("XDG_RUNTIME_DIR", &runtime);
-        std::env::remove_var("AOIDE_HERALD_PERMIT");
+        std::env::remove_var("AOIDE_NOTIFICATIONS_PERMIT");
         std::fs::create_dir_all(runtime.join("aoide")).unwrap();
         let bridge = UnixListener::bind(runtime.join("aoide").join("shellbridge.sock")).unwrap();
         bridge.set_nonblocking(true).unwrap();
@@ -9497,7 +9497,7 @@ mod tests {
         run_hook("unsealed");
         let mut card = accept_one(&bridge, "the unsealed conductable record gets its summons card");
         let line = String::from_utf8(read_delivery(&mut card, "the card is one line")).unwrap();
-        assert!(line.contains("heraldpush") && line.contains("permit-unsealed"), "control: {line}");
+        assert!(line.contains("notificationspush") && line.contains("permit-unsealed"), "control: {line}");
 
         run_hook("wrap");
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);

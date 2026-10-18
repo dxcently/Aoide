@@ -12,7 +12,7 @@
 // feed's) and feeds the SAME properties the live source will — `boards` (the
 // §D answer of `aoide project board`, S8–S10) and `usageNow` (§C now.json,
 // S5/S6). The
-// stage files (sessions/projects/hooks/herald) come in through `--fixture`
+// stage files (sessions/projects/hooks/notifications) come in through `--fixture`
 // as usual; BoardBody itself never reads a fixture path.
 //
 // The cards (agents, subagents, summonses, terminals) have their own set,

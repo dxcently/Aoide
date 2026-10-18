@@ -4,8 +4,8 @@
 #
 # dunst owns notification DELIVERY — the bus name, history, stacking and the
 # pause levels — but it draws NOTHING (`skip_display` on every rule;
-# modules/dendrites/dunst.nix). Quickshell owns the SURFACE: the `herald` popup
-# slot and the dock's `herald-center` ledger, both drawn from stage/herald.json.
+# modules/dendrites/dunst.nix). Quickshell owns the SURFACE: the `notifications` popup
+# slot and the dock's `notifications-center` ledger, both drawn from stage/notifications.json.
 # Stylix's stand-down keys on "not stylix", so its dunst/mako targets stay
 # disabled either way — which is still what we want, since a Stylix-generated
 # dunstrc would fight the dendrite's.

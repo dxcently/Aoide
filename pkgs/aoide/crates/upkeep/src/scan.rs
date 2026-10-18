@@ -105,7 +105,7 @@ pub(crate) fn run_git(root: &Path, args: &[&str]) -> Option<String> {
 /// Scoped to the root only — the User's own example was "agent creates
 /// folder or file outside of where it's supposed to". Untracked-and-
 /// unignored is NORMAL everywhere else in the tree (an agent mid-edit on
-/// `pkgs/aoide/crates/storage/src/takes.rs` is doing its job, not making a
+/// `pkgs/aoide/crates/storage/src/history.rs` is doing its job, not making a
 /// mess), so a line carrying a `/` after the collapse above is still nested
 /// work and stays out of scope by design.
 pub fn unrecognized_root_entries(root: &Path) -> Vec<Finding> {

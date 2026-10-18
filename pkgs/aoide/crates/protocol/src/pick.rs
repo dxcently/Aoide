@@ -8,8 +8,8 @@
 //! live here in `aoide-protocol` because every domain crate (`song`, and
 //! whichever comes after it) already depends on this crate, and a per-domain
 //! copy would duplicate the exact same read/parse/reprompt loop for no
-//! reason. `rice back`'s bare-tty branch (`crates/strillix-rice/src/commands/take.rs`,
-//! phase A8) is the first caller; `rice take prune`'s multi-select (phase
+//! reason. `rice back`'s bare-tty branch (`crates/strillix-rice/src/commands/history.rs`,
+//! phase A8) is the first caller; `rice history prune`'s multi-select (phase
 //! A9, §7.1) is [`choose_many`]'s own in-plan consumer — built now, not
 //! speculatively, because that consumer already exists in the plan.
 //!
@@ -290,11 +290,11 @@ fn choose_tty(prompt: &str, rows: &[String], default: Option<usize>) -> Option<u
     }
 }
 
-/// Open a multi-select picker on the real terminal — `rice take prune`'s
+/// Open a multi-select picker on the real terminal — `rice history prune`'s
 /// picker (phase A9, §7.1) and onboard's harness picker (ONBOARD.md
 /// decision 7) are the in-plan consumers this exists for. Same shape as
 /// [`choose`]; `default` is a SET of preselected rows (widened at the
-/// onboard phase — `rice take prune` passes `&[]`, onboard preselects every
+/// onboard phase — `rice history prune` passes `&[]`, onboard preselects every
 /// harness found on `PATH`). See [`choose_many_reading`] for the non-tty
 /// list-parsing and abort rules, [`choose_many_tty`] for the tty backend
 /// (ONBOARD.md decision 9).

@@ -8,7 +8,7 @@
 # `aoide.wallpaper.provider = "skwd-wall"` (CONTRACTS.md §0), which this file SETS
 # `mkDefault` and guards on.
 #
-# `AOIDE_SKWD_WALL_STANDIN` is the step-aside image — `strillix cover sync`'s
+# `AOIDE_SKWD_WALL_STANDIN` is the step-aside image — `strillix wallpaper sync`'s
 # fallback when the installed release has no `clear` verb — exported to this unit
 # (its `ExecStartPost` and the hook it spawns) and to the session, so one
 # variable is the whole switch point.
@@ -52,7 +52,7 @@ let
   # back to the engine, which is what makes the round trip terminate. The
   # daemon single-quotes each substituted value itself, so the placeholders
   # are spelled bare (quotes here would become part of the path).
-  postProcess = "strillix cover set --from-skwd --kind %type% %path%";
+  postProcess = "strillix wallpaper set --from-skwd --kind %type% %path%";
 
   # Where a pick the engine cannot paint leaves the shell's own layer:
   # applying a fully transparent 1x1 still paints nothing, so the wallpaper
@@ -122,7 +122,7 @@ in
       ];
 
       # The step-aside image, in the session environment too: a terminal
-      # `strillix cover sync` is the repair path when a pick is dropped by hand.
+      # `strillix wallpaper sync` is the repair path when a pick is dropped by hand.
       environment.sessionVariables.AOIDE_SKWD_WALL_STANDIN = "${standinPng}";
 
       habit.home =
@@ -165,7 +165,7 @@ in
             };
             Service = {
               ExecStart = "${skwd.skwd-deck}/bin/skwd-walld";
-              ExecStartPost = "${pkgs.aoide.strillix}/bin/strillix cover sync";
+              ExecStartPost = "${pkgs.aoide.strillix}/bin/strillix wallpaper sync";
               Environment = [
                 "SKWD_WALL_V2_CONFIG=${configDir}"
                 "SKWD_WALL_V2_CACHE=${cacheDir}"

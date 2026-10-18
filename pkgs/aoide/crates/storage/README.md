@@ -131,7 +131,7 @@ by decision — no embedded database yet
   rice/paint (`theme.json`/`mode.json`, strillix's tree) — and
   `conducting_stage_dir` — new, `$AOIDE_ROOT/state/stage/`, core
   orchestration state (`stage`'s own four path helpers, plus
-  `aoide-conduct`'s `herald::herald_path`/`graph::pending_path`). Both honor
+  `aoide-conduct`'s `notifications::notifications_path`/`graph::pending_path`). Both honor
   `$AOIDE_STAGE_DIR` (absolute-path-wins) as one combined override, same as
   before the split; `conducting_stage_dir`'s own no-override fallback is
   `state_dir().join("stage")` instead of `stage_dir`'s `song/stage`.
@@ -707,12 +707,12 @@ by decision — no embedded database yet
   itself lives in `aoide-client::tunnel` (P-S3), the same `node_store`
   (storage) / `commands` (client) split this crate already holds for node
   transport.
-- `takes` — the take store behind `rice back`/`rice take`, hanging off
+- `takes` — the take store behind `rice back`/`rice history`, hanging off
   `rices/<song>/history/` when staged directly or
   `rices/<song>/drafts/<name>/history/` when routed into a draft
   (`strx reload` design, settled 2026-08-31 — the staging-mode take/back
   reach; every function takes `draft: Option<&str>`, `None` selecting the
-  song-scoped root). `TakeRecord` also carries `widgets: Value` — the
+  song-scoped root). `HistoryRecord` also carries `widgets: Value` — the
   song's widget QML bodies at mint time.
 - `petname`/`display` — the adjective-noun petname mint and its
   render-time-only display grammar.

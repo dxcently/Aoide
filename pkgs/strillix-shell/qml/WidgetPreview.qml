@@ -528,7 +528,7 @@ ShellRoot {
     }
     // The four conducting files a fixture set must carry, one probe each.
     property Instantiator stageProbes: Instantiator {
-        model: ["sessions", "projects", "hooks", "herald"]
+        model: ["sessions", "projects", "hooks", "notifications"]
         delegate: FileView {
             id: stageProbe
             required property string modelData
@@ -798,7 +798,7 @@ ShellRoot {
             canvas.log("createObject NULL " + canvas.widgetUrlText)
             return
         }
-        // A window-rooted slot (dock/powermenu/launcher/herald/switcher) MAPS A REAL
+        // A window-rooted slot (dock/powermenu/launcher/notifications/switcher) MAPS A REAL
         // wlr-layer-shell surface on the live compositor the moment it is
         // created, and the handle cannot be held in `widgetItem` (QObject* to
         // QQuickItem*), so nothing could ever take it down again. Destroyed

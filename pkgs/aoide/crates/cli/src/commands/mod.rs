@@ -114,8 +114,8 @@ const LAYOUT: Layout = Layout {
 /// `aoide-client`).
 ///
 /// P-A5 (binary-split workstream) removed the register lines for the
-/// graphical bundle — rice/draft/mode/cover/theme/rice-late-stubs/
-/// shellbridge/quickshell/screen/herald/take — from this list; those
+/// graphical bundle — rice/draft/mode/wallpaper/theme/rice-late-stubs/
+/// shellbridge/quickshell/screen/notifications/take — from this list; those
 /// command paths now live ONLY in `crates/strillix/src/commands/mod.rs::all()`
 /// (docs/architecture/PACKAGE-LAYOUT.md, CONTRACTS.md §3). P-PV2 (the
 /// User's locked spec) collapsed `node invite`/`node pair request` into

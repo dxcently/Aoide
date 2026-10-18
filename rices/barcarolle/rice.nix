@@ -96,10 +96,10 @@
         };
 
         # ── Cover art ───────────────────────────────────────────────────────────
-        # The desktop picture (cover/barcarolle-desktop.jpg). Stylix bakes it,
+        # The desktop picture (wallpaper/barcarolle-desktop.jpg). Stylix bakes it,
         # the seed publishes it as the declared cover, and a staged rice finds
         # the same file in the song's own cover/ folder (CONTRACTS.md §4).
-        aoide.theme.wallpaper = ./cover/barcarolle-desktop.jpg;
+        aoide.theme.wallpaper = ./wallpaper/barcarolle-desktop.jpg;
       };
     };
   };

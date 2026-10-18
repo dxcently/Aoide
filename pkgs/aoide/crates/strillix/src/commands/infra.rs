@@ -6,7 +6,7 @@
 //! `mcp serve --stdio`'s real execution stays special-cased in `lib.rs`
 //! (unchanged pattern); this registration is what lets that invocation parse
 //! at all. This is the one command strillix registers outside the plan's named
-//! rice/draft/mode/cover/theme/shellbridge/quickshell/screen/herald/take
+//! rice/draft/mode/wallpaper/theme/shellbridge/quickshell/screen/notifications/take
 //! groups — see the crate's module doc for the count.
 
 use crate::dispatch::Invocation;

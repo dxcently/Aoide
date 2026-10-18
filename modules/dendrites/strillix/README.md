@@ -109,7 +109,7 @@ stay the runtime's own. `runtime.nix` publishes the filled slots as
   `home.activation.aoideSeedRices` runs `strx rice refresh` over them: a
   file the machine never edited takes the repo's change, a built-in song absent
   from the machine is added whole, a file the machine edited (or that has no
-  record) is kept and reported, and `takes/`, `drafts/` and symlinks are never
+  record) is kept and reported, and `history/`, `drafts/` and symlinks are never
   touched. What it wrote is recorded in
   `$STRILLIX_ROOT/declared/rices/<song>.json`, outside the song folder.
   `strx rice refresh [--check]` is the CLI twin; a dry-run activation runs

@@ -83,7 +83,7 @@ covers only what's specific to dendrites.
 - **A surface takes its size from its CONTENT; content never sizes itself
   from the SCREEN.** A layer anchors only the edges it genuinely occupies
   and lets `implicitWidth`/`implicitHeight` follow what it draws (the
-  herald anchors bottom+right and sizes off its own card stack; the bar
+  notifications anchors bottom+right and sizes off its own card stack; the bar
   anchors top+left+right at a fixed height). A full-screen overlay is
   legitimate for a modal (launcher, powermenu), but its CONTENT is then
   naturally sized and centred — never anchored to the layer's own edges,

@@ -1,4 +1,4 @@
-// CoverPcbWorker.js — CoverPcb's board generator, run by its WorkerScript so
+// WallpaperPcbWorker.js — WallpaperPcb's board generator, run by its WorkerScript so
 // the three seconds it takes per output never block the GUI thread.
 //
 //     in   { key, w, h, seed }

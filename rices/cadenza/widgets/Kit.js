@@ -131,7 +131,7 @@ var glyph = {
     // board cells
     agents:   cp(0xF06A9),   // nf-md-robot          AGT
     cpu:      cp(0xF035B),   // nf-md-memory         CPU
-    notif:    cp(0xF009A),   // nf-md-bell           herald count
+    notif:    cp(0xF009A),   // nf-md-bell           notifications count
     // status cells
     vol:      cp(0xF057E),   // nf-md-volume_high
     volMuted: cp(0xF0581),   // nf-md-volume_off

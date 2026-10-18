@@ -28,11 +28,11 @@ song/
 │   ├── learnings.md              (planned) cross-cutting observations
 │   ├── preferences.md            (planned) accumulated from adopt/reject decisions
 │   └── update-playbook.md        (planned) schema-migration playbook
-├── covers/                     shared wallpaper library — any song's rice.nix points here by literal path
-│                                  (../../covers/<file>), not a per-song assets/ dir
+├── wallpapers/                     shared wallpaper library — any song's rice.nix points here by literal path
+│                                  (../../wallpapers/<file>), not a per-song assets/ dir
 ├── stage/                      LIVE runtime state — gitignored, atomic write-temp-then-rename only
 │   ├── theme.json                fully-resolved theme (no nulls) — hot-reloaded by ThemeState.qml
-│   ├── cover.json                 live wallpaper seed { "path": ... } — read by AoideWallpaper.qml
+│   ├── wallpaper.json                 live wallpaper seed { "path": ... } — read by AoideWallpaper.qml
 │   └── sessions.json / hooks.json / projects.json / graph.json   session-graph state (shellbridge, aoide graph)
 └── auditions/                  (planned) the propose gate for generated-but-unadopted rices — gitignored
 ```
@@ -63,7 +63,7 @@ every widget reads palette roles off ThemeState
    (paletteBg / paletteFg / paletteAccent / paletteHot / base16 role map)
 
 
-covers/<name>                              stage/cover.json
+wallpapers/<name>                              stage/wallpaper.json
    the shared wallpaper library     ──►     { "path": "/abs/path" }
    rice.nix's wallpaper note          seeded from the song's baked wallpaper;
    points here by literal path        shellbridge/quickshell re-seeds it
@@ -72,8 +72,8 @@ covers/<name>                              stage/cover.json
         └──────────────┬──────────────────────┘
                         ▼
               qml/AoideWallpaper.qml
-   FileView on cover.json; falls back to the BAKED song wallpaper
-   (immutable store path via AOIDE_WALLPAPER) if cover.json is absent/garbage
+   FileView on wallpaper.json; falls back to the BAKED song wallpaper
+   (immutable store path via AOIDE_WALLPAPER) if wallpaper.json is absent/garbage
 ```
 
 The `rice-runtime-untracked` flake check fails the tree if a `song/` runtime

@@ -5,12 +5,12 @@
 //! `~/Aoide/state/edits.jsonl` ([`edits_path`]).
 //!
 //! **R1 scope only.** This module is pure fs + serde, exactly the boundary
-//! `takes.rs` already draws for its own store: no git (that is R2 — this
+//! `history.rs` already draws for its own store: no git (that is R2 — this
 //! module never shells out, never hashes file content, never touches a
 //! repo), no CLI (`Outcome`/`Invocation` belong to R4/R5), no domain
 //! validation (a `project` string here is whatever the caller already
 //! resolved via `graph project list` — validating that it names a real,
-//! registered project is one layer up, same posture `takes.rs` leaves
+//! registered project is one layer up, same posture `history.rs` leaves
 //! song/draft-name checks to `compose::valid_song_name`).
 //!
 //! **One file for every project, not one per project** (plan §2.2): this
@@ -24,7 +24,7 @@
 //! caller already produced via [`read_all`], so the later commands (`graph
 //! project edits`, `graph project back`, R4/R5) are unit-testable on a
 //! literal `Vec<EditLine>` without ever touching a filesystem — the same
-//! shape `takes::reparent`/`takes::ancestry` already establish for the
+//! shape `history::reparent`/`history::ancestry` already establish for the
 //! sibling store.
 
 use serde::{Deserialize, Serialize};
@@ -57,7 +57,7 @@ pub fn edits_path() -> PathBuf {
 /// - `pre` / `post` carry `path` (project-root-relative) and `tool`
 ///   (`"Edit"`, `"Write"`, …). `sha` is the file's git blob hash at that
 ///   moment; on a `pre` line it is OMITTED — never written as a literal
-///   JSON `null` (`TakeRecord.parent`'s own precedent: "no parent is
+///   JSON `null` (`HistoryRecord.parent`'s own precedent: "no parent is
 ///   omitted, not null") — when the file did not exist yet. That omission
 ///   is exactly what answers "was this file MADE through aoide", the ask's
 ///   own third clause, and [`by_path`] reads it as such. A `pre` line alone
@@ -156,7 +156,7 @@ pub fn append(line: &EditLine) -> io::Result<()> {
 /// "absent means nothing yet" posture every other stage-adjacent store in
 /// this crate takes), and a line that fails to parse as [`EditLine`] is
 /// silently skipped rather than wedging every reader of the journal on one
-/// bad line — the tolerate-corruption discipline `takes::list_takes`
+/// bad line — the tolerate-corruption discipline `history::list_history`
 /// already sets for its own store. A single small `O_APPEND` write cannot
 /// itself land torn (see [`append`]'s doc), but a hand-edited or
 /// truncated file is a realistic source of one bad line among many good
@@ -512,7 +512,7 @@ pub fn movers_since(
 // ── Tests ─────────────────────────────────────────────────────────────────
 //
 // Every env-touching test takes the crate-wide `env_lock` AND an
-// `EnvSaver`, exactly `takes.rs`'s own convention — `AOIDE_STATE_DIR` is
+// `EnvSaver`, exactly `history.rs`'s own convention — `AOIDE_STATE_DIR` is
 // process-global, same hazard as that module's `AOIDE_STAGE_DIR`.
 
 #[cfg(test)]
@@ -521,7 +521,7 @@ mod tests {
     use aoide_test_support::{env_lock, unique_tmp, EnvSaver};
 
     /// Point `AOIDE_STATE_DIR` at a fresh scratch dir so `edits_path()`
-    /// resolves under it — mirrors `takes.rs::tests::routed`'s shape, one
+    /// resolves under it — mirrors `history.rs::tests::routed`'s shape, one
     /// env var lower in the stack ([`edits_path`] hangs off `state_dir()`,
     /// not `stage_dir()`).
     fn routed(tag: &str) {

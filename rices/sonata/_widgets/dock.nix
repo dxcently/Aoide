@@ -6,7 +6,7 @@
 # `dependsOn`: dock.qml embeds one `WidgetSlot` per stele in its gadget
 # column, in stack order — conductor, terminals, usage (the ACTIVE one, under
 # Terminals; the commented-out one under Conductor was removed 2026-08-12 and
-# is dead code), meters, power, herald-center.
+# is dead code), meters, power, notifications-center.
 _: {
   file = "dock.qml";
 
@@ -16,6 +16,6 @@ _: {
     "usage"
     "meters"
     "power"
-    "herald-center"
+    "notifications-center"
   ];
 }

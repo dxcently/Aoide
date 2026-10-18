@@ -1,12 +1,12 @@
 // AoideWallpaper.qml — wallpaper layer.
 //
 // Quickshell-native wallpaper rendering — replaces swww/swaybg.
-// Reads the active cover path from stage/cover.json (shellbridge emits this
+// Reads the active cover path from stage/wallpaper.json (shellbridge emits this
 // when a rice adopts or previews a new cover; any writer staging the file
 // hot-swaps the wallpaper live via FileView's watcher). Colors from theme
 // (solid palette fallback when no cover is staged or the image fails).
 //
-// stage/cover.json contract (CONTRACTS.md §4): the staged cover — `path` for a
+// stage/wallpaper.json contract (CONTRACTS.md §4): the staged cover — `path` for a
 // still or a video, `weId` for a scene — with `pick: true` when it is the
 // user's own choice and `song` naming the song it was staged for. A cover
 // naming another song is ignored. A pick with `tile: true` repeats its image
@@ -35,7 +35,7 @@ Item {
     // The BAKED song wallpaper — the strillix lane exports its immutable
     // store path as AOIDE_WALLPAPER, so the song's wallpaper is RELIABLY set on
     // every rebuild/boot (this was the "background gone after rebuild" bug: the
-    // live stage/cover.json is runtime state nothing re-seeds from the song).
+    // live stage/wallpaper.json is runtime state nothing re-seeds from the song).
     readonly property string bakedWallpaper: Quickshell.env("AOIDE_WALLPAPER") || ""
 
     // The live staged cover (rice preview/adopt or a manual write). A cover
@@ -68,16 +68,16 @@ Item {
     readonly property string wallpaperPath:
         root.stagedCoverApplies && root.stagedCoverPath.length > 0 ? root.stagedCoverPath : root.bakedWallpaper
 
-    readonly property string coverJsonPath:
-        (Quickshell.env("STRILLIX_ROOT") || (Quickshell.env("HOME") + "/.strillix")) + "/stage/cover.json"
+    readonly property string wallpaperJsonPath:
+        (Quickshell.env("STRILLIX_ROOT") || (Quickshell.env("HOME") + "/.strillix")) + "/stage/wallpaper.json"
 
     FileView {
-        id: coverFile
-        path: root.coverJsonPath
+        id: wallpaperFile
+        path: root.wallpaperJsonPath
         watchChanges: true
         onTextChanged: {
             try {
-                var d = JSON.parse(coverFile.text())
+                var d = JSON.parse(wallpaperFile.text())
                 root.stagedCoverPath = (d && d.path) ? ("" + d.path) : ""
                 root.stagedCoverSong = (d && d.song) ? ("" + d.song) : ""
                 root.stagedCoverWeId = (d && d.weId) ? ("" + d.weId) : ""
@@ -91,8 +91,8 @@ Item {
                 root.stagedCoverTile = false
             }
         }
-        onFileChanged: coverFile.reload()
-        Component.onCompleted: coverFile.reload()
+        onFileChanged: wallpaperFile.reload()
+        Component.onCompleted: wallpaperFile.reload()
     }
 
     // ── Background: cover image or palette fallback ────────────────────────

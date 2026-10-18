@@ -1,9 +1,9 @@
-// herald.qml — sonata's "herald" slot: the notification POPUP. Hosted by
+// notifications.qml — sonata's "notifications" slot: the notification POPUP. Hosted by
 // `SurfaceSlot` (shell.qml), so this root is a `PanelWindow` that owns its
 // own layer surface, the way powermenu.qml does — hidden until the ledger
 // file carries something to cry.
 //
-// HERALD — the herald is the voice that interrupts the performance: a
+// NOTIFICATIONS — the notifications is the voice that interrupts the performance: a
 // messenger walks on mid-scene and reads out what happened offstage. Each
 // notification is one small SELF-FRAMED STELE in the pantheon family the
 // bar's popouts wear (opaque marble body, 2px ink border, 1px inset
@@ -36,22 +36,22 @@
 //     holoBlue (the information hue), with the mono figure beside it.
 //
 // ── Data ───────────────────────────────────────────────────────────────────
-// Read-only: state/stage/herald.json via FileView (the sessions.json watch
+// Read-only: state/stage/notifications.json via FileView (the sessions.json watch
 // pattern, bar.qml). Newest is LAST in the array; capped at 20 daemon-side.
 // Sender text is UNTRUSTED DATA — every Text rendering it is PlainText, so
 // a body carrying `<b>` displays literally.
 //
 // THE POPUP OWNS THE DISMISS CLOCK. Each record carries `timeoutMs`
 // (0 = never — critical and every summons). Expiry is LOCAL: a lapsed card
-// leaves this popup but stays in the file for the dock's herald-center
+// leaves this popup but stays in the file for the dock's notifications-center
 // ledger; nothing daemon-side ever expires a record. Deadlines are pinned
 // per arrival (id + receivedAt) at first sight, so a file rewrite (another
 // arrival) never restarts a card's clock.
 //
 // Write-side, socket only (ShellBridge, the powermenu idiom — QML never
 // touches the file):
-//   · click a toast            → { cmd: "heralddismiss", id: <record id> }
-//   · approve / deny a summons → { cmd: "heraldverdict", id: <sessionId>,
+//   · click a toast            → { cmd: "notificationsdismiss", id: <record id> }
+//   · approve / deny a summons → { cmd: "notificationsverdict", id: <sessionId>,
 //                                  verdict: "approve" | "deny" }
 //     (the daemon auto-dismisses the card on a verdict — no double send)
 
@@ -93,27 +93,27 @@ PanelWindow {
     readonly property int maxCards: 5    // older unexpired cards wait in the ledger
 
     // ── The ledger file — read-only, watched (bar.qml's sessions.json idiom) ─
-    // herald.json is a CONDUCTING file (CONTRACTS.md §4) — state/stage/,
+    // notifications.json is a CONDUCTING file (CONTRACTS.md §4) — state/stage/,
     // not song/stage/.
-    readonly property string heraldPath:
-        (Quickshell.env("AOIDE_ROOT") || (Quickshell.env("HOME") + "/.aoide")) + "/state/stage/herald.json"
+    readonly property string notificationsPath:
+        (Quickshell.env("AOIDE_ROOT") || (Quickshell.env("HOME") + "/.aoide")) + "/state/stage/notifications.json"
     property var records: []
     FileView {
-        id: heraldFile
-        path: root.heraldPath
+        id: notificationsFile
+        path: root.notificationsPath
         watchChanges: true
-        onFileChanged: heraldFile.reload()
+        onFileChanged: notificationsFile.reload()
         onTextChanged: {
             try {
-                var d = JSON.parse(heraldFile.text())
+                var d = JSON.parse(notificationsFile.text())
                 root.ingest((d && d.notifications) ? d.notifications : [])
             } catch (e) { /* absent/garbage → hold what we have */ }
         }
-        Component.onCompleted: heraldFile.reload()
+        Component.onCompleted: notificationsFile.reload()
     }
 
     // ── The dismiss clock — deadlines pinned per ARRIVAL at FIRST sight ────
-    // A rewrite of herald.json (any new arrival) recreates every delegate;
+    // A rewrite of notifications.json (any new arrival) recreates every delegate;
     // a Timer living in the delegate would restart each card's clock on
     // every neighbour's arrival. So the clock lives here: one map id →
     // epoch-ms deadline (0 = never), one 500ms sweep while cards show.
@@ -127,8 +127,8 @@ PanelWindow {
     // Keyed by id AND `receivedAt`, not id alone: dunst's `stack_duplicates`
     // (modules/dendrites/dunst.nix) reuses ONE notification id for a repeated
     // identical summary+body — e.g. two back-to-back "nothing to reap" reap
-    // pings carry the same DUNST_ID. `aoide herald push` still stamps a FRESH
-    // `receivedAt` on every call (its own wall clock, `herald.rs`), so the
+    // pings carry the same DUNST_ID. `aoide notifications push` still stamps a FRESH
+    // `receivedAt` on every call (its own wall clock, `notifications.rs`), so the
     // record in the file genuinely changed even though its id didn't. Without
     // the receivedAt check, `lapsed[id]` latched TRUE the first time that id's
     // card expired would carry forward onto every later push reusing that id
@@ -185,7 +185,7 @@ PanelWindow {
     // Unlapsed, capped, and ordered for a BOTTOM-anchored stack: the ledger
     // arrives oldest→newest, so the walk runs backwards to SELECT the newest
     // `maxCards`, then reverses so the newest sits LAST — i.e. at the bottom
-    // of the column, hard against the corner the herald cries from. (A Column
+    // of the column, hard against the corner the notifications cries from. (A Column
     // has no vertical layout direction to flip; the order is the only lever.)
     readonly property var visibleRecords: {
         var e = root.epoch
@@ -201,12 +201,12 @@ PanelWindow {
     }
 
     function dismiss(id) {
-        root.bridge.sendCommand({ cmd: "heralddismiss", id: "" + id })
+        root.bridge.sendCommand({ cmd: "notificationsdismiss", id: "" + id })
     }
     // Wave a card off the SCREEN without answering it — the summons' version
     // of a dismiss. It only marks the id lapsed (the same lever the timeout
     // clock pulls), so the ledger row survives: the agent is still blocked
-    // and the dock's herald-center must still show the pending verdict.
+    // and the dock's notifications-center must still show the pending verdict.
     function wave(id) {
         var lp = root.lapsed
         lp["" + id] = true
@@ -214,7 +214,7 @@ PanelWindow {
         root.epoch++
     }
     function verdict(sessionId, word) {
-        root.bridge.sendCommand({ cmd: "heraldverdict",
+        root.bridge.sendCommand({ cmd: "notificationsverdict",
                                   id: "" + sessionId, verdict: word })
     }
 
@@ -243,7 +243,7 @@ PanelWindow {
     }
 
     // ── Layer-shell surface — BOTTOM-right (khoa, 2026-08-17) ──────────────
-    // The corner the herald cries from. Nothing is anchored to the top any
+    // The corner the notifications cries from. Nothing is anchored to the top any
     // more, so the bar's reserve is irrelevant here; the stack below grows
     // UPWARD out of this corner.
     anchors { bottom: true; right: true }
@@ -254,7 +254,7 @@ PanelWindow {
     implicitWidth: root.cardW + root.shadowR + 1
     implicitHeight: Math.max(1, stack.implicitHeight)
     WlrLayershell.layer: WlrLayer.Overlay
-    WlrLayershell.namespace: "aoide-herald"
+    WlrLayershell.namespace: "aoide-notifications"
 
     // ── The stack — newest card nearest the corner, growing upward ─────────
     // Bottom-anchored, so the LAST child sits at the corner and the column

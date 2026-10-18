@@ -26,7 +26,7 @@
 //                           toplevels, lamps from hooks.json `updatedAt`
 //   state/usage/now.json    `by:"workspace"` rows → the jack insight pane —
 //                           core-seams §C; absent today → "no usage data"
-//   state/stage/herald.json the NOTIF cell count
+//   state/stage/notifications.json the NOTIF cell count
 //   state/stage/projects.json  the registered names → the jack pane's PROJECT chips
 //   /proc/meminfo, /proc/net/route   mem total (insight gauge), NET kind
 //                           (kernel files, sonata meters/bar precedent)
@@ -183,7 +183,7 @@ Item {
     property var hookPhase: ({})
     property var graphDoc: null
     property var nowDoc: null
-    property var heraldRows: []
+    property var notificationsRows: []
 
     function parseJson(fv) {
         try { return JSON.parse(fv.text()) } catch (e) { return null }
@@ -240,16 +240,16 @@ Item {
         Qt.callLater(function () { root.derivedActivity(fire) })
     }
     FileView {
-        id: heraldFile
-        path: root.aoideRoot + "/state/stage/herald.json"
+        id: notificationsFile
+        path: root.aoideRoot + "/state/stage/notifications.json"
         watchChanges: true
         printErrors: false
         onFileChanged: reload()
         onTextChanged: {
-            var d = root.parseJson(heraldFile)
-            if (d) root.heraldRows = Array.isArray(d.notifications) ? d.notifications : []
+            var d = root.parseJson(notificationsFile)
+            if (d) root.notificationsRows = Array.isArray(d.notifications) ? d.notifications : []
         }
-        onLoadFailed: root.heraldRows = []
+        onLoadFailed: root.notificationsRows = []
     }
     // projects.json: the registered names, in the file's order — the jack
     // pane's PROJECT chips (the binding itself is graph.json's, never this)
@@ -351,10 +351,10 @@ Item {
         }
         return { total: t, working: w, awaiting: a }
     }
-    readonly property var heraldStats: {
-        var n = root.heraldRows.length, summons = false
+    readonly property var notificationsStats: {
+        var n = root.notificationsRows.length, summons = false
         for (var i = 0; i < n; i++)
-            if (root.heraldRows[i] && root.heraldRows[i].kind === "summons") summons = true
+            if (root.notificationsRows[i] && root.notificationsRows[i].kind === "summons") summons = true
         return { count: n, summons: summons }
     }
 
@@ -1220,7 +1220,7 @@ Item {
         root.rescanBt()
         root.rescanNet()
         root.recountTray()
-        for (var f of [sessionsFile, hooksFile, heraldFile, projectsFile, graphFile, nowFile]) f.reload()
+        for (var f of [sessionsFile, hooksFile, notificationsFile, projectsFile, graphFile, nowFile]) f.reload()
     }
 
     // ── formatting ──────────────────────────────────────────────────────────
@@ -1785,9 +1785,9 @@ Item {
         Cell {
             kit: root.kit
             glyph: root.kit.glyph.notif
-            value: "" + root.heraldStats.count
-            valueColor: root.heraldStats.summons ? root.kit.urgent
-                        : (root.heraldStats.count > 0 ? root.kit.number : root.kit.dim)
+            value: "" + root.notificationsStats.count
+            valueColor: root.notificationsStats.summons ? root.kit.urgent
+                        : (root.notificationsStats.count > 0 ? root.kit.number : root.kit.dim)
             onActivated: root.openBoard("notif")
         }
         Sep { kit: root.kit }

@@ -201,7 +201,7 @@ ShellRoot {
     // to inject the row at all.
     //
     // Every instance draws the SAME cover — AoideWallpaper resolves one path
-    // (AOIDE_WALLPAPER, or stage/cover.json when staged), and the cover note is
+    // (AOIDE_WALLPAPER, or stage/wallpaper.json when staged), and the cover note is
     // a single value on the song. Per-output DIFFERENT covers would need a
     // per-screen cover map in the theme schema; deliberately not invented here.
     Variants {
@@ -296,7 +296,7 @@ ShellRoot {
     // LEFT edge, vertically centred. Sonata's own `widgets/dock.qml` owns the
     // whole surface — its own PanelWindow, WlrLayershell namespace and
     // keyboard focus — the same `SurfaceSlot` contract powermenu/launcher/
-    // herald already carry (slots.md); it replaced the lane's own
+    // notifications already carry (slots.md); it replaced the lane's own
     // `AoidePanel.qml`, retired once this slot anchor landed. The toggle
     // keybind stays a lane contract on purpose (so a song's dock body can
     // never forget to bind it): `aoide:dock` (SUPER+G) is a Hyprland global
@@ -344,7 +344,7 @@ ShellRoot {
     // ── Overlay surfaces — each owns its own PanelWindow internally, wired
     // to theme/bridge only. Hidden/dormant until summoned/triggered, and
     // each behind its component's gate (`launcher`, `powermenu`, `wallpaper`
-    // for the picker, `switcher`, `notifications` for herald).
+    // for the picker, `switcher`, `notifications` for notifications).
     //   - launcher (SurfaceSlot) : SUPER+Space launcher (bridge-toggled),
     //                              song/songbook/sonata/widgets/launcher.qml
     //   - powermenu (SurfaceSlot): the powermenu (bar clef 𝄞 → powermenu.toggle()),
@@ -353,15 +353,15 @@ ShellRoot {
     //                              else the plain cover picker (global-shortcut)
     //   - switcher (SurfaceSlot) : aoide:switcher window switcher, the song's
     //                              widgets/switcher.qml or the plain AoideSwitcher
-    //   - herald (SurfaceSlot)   : the notification popup,
-    //                              song/songbook/sonata/widgets/herald.qml
+    //   - notifications (SurfaceSlot)   : the notification popup,
+    //                              song/songbook/sonata/widgets/notifications.qml
     // (No AoideNotifications anymore — dunst owns org.freedesktop.Notifications
-    // as the DAEMON, but draws nothing. It feeds `aoide herald push`, the
-    // shellbridge files each notification into state/stage/herald.json, and
-    // the `herald` slot below draws the popup — with the images and progress bars
+    // as the DAEMON, but draws nothing. It feeds `aoide notifications push`, the
+    // shellbridge files each notification into state/stage/notifications.json, and
+    // the `notifications` slot below draws the popup — with the images and progress bars
     // inside the frame, and real hit-tested approve/deny buttons on a
     // permission summons, none of which dunst could draw itself. The dock's
-    // `herald-center` slot reads the same file as a ledger.)
+    // `notifications-center` slot reads the same file as a ledger.)
     AoideClipboard { id: clipboard }
     // The Grimoire's usage ledger — stays in the lane (a data seam, not
     // chrome, CONTRACTS.md §4), injected into the launcher slot as an extra.
@@ -394,9 +394,9 @@ ShellRoot {
             extraProps: ({ clipboard: clipboard, ledger: ledger })
         }
     }
-    // herald: the notification popup (see the overlay-surfaces note above),
+    // notifications: the notification popup (see the overlay-surfaces note above),
     // the `notifications` component — the slot's PanelWindow watches
-    // state/stage/herald.json and stays dormant while the ledger is empty.
+    // state/stage/notifications.json and stays dormant while the ledger is empty.
     // The calendar: a window-owning surface, asked for by the bar's clock
     // through the bridge. Its body anchors under the clock and publishes its
     // open state on `shared`.
@@ -430,7 +430,7 @@ ShellRoot {
         active: shellRoot.has("notifications")
 
         SurfaceSlot {
-            slot: "herald"
+            slot: "notifications"
             theme: shellRoot.themeRef
             bridge: shellRoot.bridgeRef
             stagingEngine: shellRoot.stagingRef

@@ -86,7 +86,7 @@ Item {
     //     live verification before trusting them, ANY non-ASCII glyph does,
     //     on this stack. Plain "||" sidesteps the whole fallback chain.)
     //   staging     → ♪ stage — the measure is OPEN, a note under the pen:
-    //     hot-load unlocked, rice stage/cover set write the live desktop.
+    //     hot-load unlocked, rice stage/wallpaper set write the live desktop.
     //     Gold — the bar's open/active register (open toggles, the active
     //     workspace) AND the state tier's own working→gold partnering
     //     (grammar §2): the engine is literally in its working state.

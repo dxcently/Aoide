@@ -20,7 +20,7 @@
 //! (healthcheck only — the placeholder-screen watchdog), reload (the one
 //! mode-aware iteration command, `strillix reload` design settled 2026-08-31 —
 //! absorbed `quickshell reload` outright, registered right after
-//! `quickshell` where that path used to sit), screen, herald, take, element
+//! `quickshell` where that path used to sit), screen, notifications, take, element
 //! (L-E1, docs/architecture/ELEMENTS.md: `element seed`, the render
 //! pipeline's shell-reachable bridge), secrets (P3: `secrets ask`, the
 //! rice-shaped TOTP code-entry popup), pair (`pair ask` + `pair show`, the
@@ -77,9 +77,9 @@ const LAYOUT: Layout = Layout {
         (
             "Songs & themes",
             &[
-                ("rice", "Compose, stage, declare and take snapshots of a song"),
+                ("rice", "Compose, stage, declare and keep history snapshots of a rice"),
                 ("theme", "Resolve, lint and emit a theme"),
-                ("cover", "Set and sync the live wallpaper"),
+                ("wallpaper", "Set and sync the live wallpaper"),
                 ("reload", ""),
                 ("element", ""),
             ],
@@ -105,7 +105,7 @@ const LAYOUT: Layout = Layout {
             &[
                 ("secrets", ""),
                 ("pair", "Quickshell dialogs for a pairing request and its reply code"),
-                ("herald", ""),
+                ("notifications", ""),
             ],
         ),
         ("Agent interfaces", &[("mcp", ""), ("schema", "")]),
@@ -123,15 +123,15 @@ pub fn all() -> Registry {
     strillix_rice::commands::refresh::register(&mut r); // rice refresh — a built-in song takes the repo's changes to files the machine never edited
     strillix_rice::commands::draft::register(&mut r); // rice draft save/list/drop
     strillix_rice::commands::mode::register(&mut r); // rice mode status/stage/declarative/draft
-    strillix_rice::commands::cover::register(&mut r); // cover set
+    strillix_rice::commands::wallpaper::register(&mut r); // wallpaper set
     strillix_rice::commands::theme::register(&mut r); // theme emit, resolve, lint
     stubs::register_rice_late(&mut r); // rice declare, transpose
     aoide_conduct::commands::shellbridge::register(&mut r); // shellbridge (own module since P-A2)
     strillix_rice::commands::quickshell::register(&mut r); // quickshell healthcheck — placeholder-screen watchdog
     strillix_rice::commands::reload::register(&mut r); // reload — the one mode-aware iteration command (absorbed quickshell reload)
     aoide_screen::commands::register(&mut r); // screen info, shot, point *, ocr, diff, send (own crate since P-A1)
-    aoide_conduct::commands::herald::register(&mut r); // herald push — dunst's script hook into the notification ledger
-    strillix_rice::commands::take::register(&mut r); // rice take/take.*, rice back — explicit take-store snapshot
+    aoide_conduct::commands::notifications::register(&mut r); // notifications push — dunst's script hook into the notification ledger
+    strillix_rice::commands::history::register(&mut r); // rice history/take.*, rice back — explicit take-store snapshot
     strillix_rice::commands::elements::register(&mut r); // element seed — full render into run/elements/ (L-E1)
     secrets::register(&mut r); // secrets ask — the rice-shaped TOTP code-entry popup (P3)
     pair::register(&mut r); // pair ask + pair show — the pairing-ceremony's own two dialog shapes

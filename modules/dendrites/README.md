@@ -107,7 +107,7 @@ exactly one answer exists on a host; `strillix` publishes that one word as
 Absent means the shell's own layer.
 
 They never name each other either. The bridge is the CLI both sides already
-have: `strx cover sync` (CONTRACTS.md §4) makes the external provider agree with
+have: `strx wallpaper sync` (CONTRACTS.md §4) makes the external provider agree with
 the stage files — the staged pick while one applies, the step-aside image when
 none does — and it is what the engine's lane runs after every daemon start and
 what every pick write runs. Because "applies" is decided per STAGED SONG, a
@@ -201,8 +201,8 @@ it selects them by name from its own aggregation.
   select-with-one-line convention.
 - A dendrite that draws (e.g. `dunst.nix`'s notification popups) hands off
   to a render surface via a bridge (a CLI command, a stage file) rather
-  than drawing itself — `dunst.nix` pipes through `aoide herald push` into
-  `state/stage/herald.json`, which the Quickshell herald widget reads.
+  than drawing itself — `dunst.nix` pipes through `aoide notifications push` into
+  `state/stage/notifications.json`, which the Quickshell notifications widget reads.
 
 ## What it consumes
 

@@ -19,7 +19,7 @@ collaborate across agents and across hosts, with the human in the loop —
 and become the parts you build larger systems out of. Any agent with a
 shell is fully capable, no MCP required, and every terminal is a
 conductable, tracked session by default. Painting is a separate binary's
-job: `strillix` owns the rice loop, screen, herald, and Quickshell surfaces —
+job: `strillix` owns the rice loop, screen, notifications, and Quickshell surfaces —
 `strillix guide` orients there. A capability reachable with only a shell is
 Aoide; one that draws is strillix.
 

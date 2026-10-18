@@ -1,4 +1,4 @@
-//! `session permit` — the herald's permission SUMMONS: publish one persistent,
+//! `session permit` — the notifications' permission SUMMONS: publish one persistent,
 //! visually distinct card for an agent session blocked on a permission prompt,
 //! and type the human's answer back into the session when it arrives.
 //!
@@ -9,10 +9,10 @@
 //!        `notification_type: permission_prompt`; kimi: `PermissionRequest`)
 //!     -> `session hook` maps it to the unconditional `awaiting` phase
 //!        and, from that arm only, spawns THIS command detached
-//!     -> the summons is PUBLISHED into the herald ledger
-//!        (`stage/herald.json`, through the shellbridge) and this command returns
-//!     -> the QML herald draws it with two real buttons and the human clicks
-//!        one; the click rides back as `{"cmd":"heraldverdict", …}`
+//!     -> the summons is PUBLISHED into the notifications ledger
+//!        (`stage/notifications.json`, through the shellbridge) and this command returns
+//!     -> the QML notifications draws it with two real buttons and the human clicks
+//!        one; the click rides back as `{"cmd":"notificationsverdict", …}`
 //!     -> the daemon calls [`answer_summons`], which types the verdict through
 //!        [`crate::graph::session_send`] — the ONE gated injection door,
 //!        called in-process, every outcome audited.
@@ -65,7 +65,7 @@ use aoide_protocol::Invocation;
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 
-/// The notification category a summons carries. The QML herald reads `kind`
+/// The notification category a summons carries. The QML notifications reads `kind`
 /// rather than this string, but the category stays on the record: it is what a
 /// dunst rule would filter on if the summons ever needs its own daemon-side
 /// treatment again, and it names the card honestly in `dunstctl history`.
@@ -172,7 +172,7 @@ pub(in crate::graph) fn answerable(conductable: Option<bool>, socket: Option<&st
     conductable == Some(true) && socket.map(|s| !s.is_empty()).unwrap_or(false)
 }
 
-/// The opt-out for the automatic summons: `AOIDE_HERALD_PERMIT` in
+/// The opt-out for the automatic summons: `AOIDE_NOTIFICATIONS_PERMIT` in
 /// {0,false,no,off} silences it box-wide. Automatic desktop side effects get
 /// an off switch; the command itself stays callable by hand either way.
 pub(in crate::graph) fn summons_enabled(env_value: Option<&str>) -> bool {
@@ -199,7 +199,7 @@ pub fn profile_for_agent(agent: &str) -> &'static AgentProfile {
 ///
 /// `stackTag` is one per session: a second prompt in the same session REPLACES
 /// the standing card instead of piling a second one up (the ledger's
-/// replace-by-tag rule, `herald::apply_push`). The id is derived from the same
+/// replace-by-tag rule, `notifications::apply_push`). The id is derived from the same
 /// tag so a verdict can address the card by name, and `timeoutMs = 0` because a
 /// summons never expires on its own — somebody is blocked behind it.
 /// The ledger id of the card standing for one session's summons.
@@ -218,20 +218,20 @@ pub(in crate::graph) fn summons_record(
     summary: &str,
     body: &str,
     received_at: String,
-) -> crate::herald::Notification {
-    crate::herald::Notification {
+) -> crate::notifications::Notification {
+    crate::notifications::Notification {
         id: summons_card_id(id),
         app: agent.to_string(),
         summary: summary.to_string(),
         body: body.to_string(),
         icon: String::new(),
         urgency: "critical".to_string(),
-        progress: crate::herald::NO_PROGRESS,
+        progress: crate::notifications::NO_PROGRESS,
         category: SUMMONS_CATEGORY.to_string(),
         stack_tag: format!("aoide-permit-{id}"),
         timeout_ms: 0,
         received_at,
-        kind: crate::herald::KIND_SUMMONS.to_string(),
+        kind: crate::notifications::KIND_SUMMONS.to_string(),
         session_id: id.to_string(),
     }
 }
@@ -275,7 +275,7 @@ fn type_verdict(inv: &Invocation, id: &str, key: &str) -> Outcome {
 
 /// Type one explicit verdict into a waiting session — the answering half of the
 /// summons, called by the shellbridge when the human clicks approve or deny in
-/// the QML herald.
+/// the QML notifications.
 ///
 /// `id` is the SESSION id (the card's `sessionId`), not the card id. Guard 2
 /// lives here: only a session whose canonical state is still `awaiting` is
@@ -384,7 +384,7 @@ fn audit_refusal(inv: &Invocation, id: &str, message: &str) {
 /// permission summons for a conducted session.
 ///
 /// Returns as soon as the card is filed. The human's answer arrives later,
-/// through the QML herald's buttons and [`answer_summons`] — so unlike the old
+/// through the QML notifications' buttons and [`answer_summons`] — so unlike the old
 /// dunstify path, nothing here blocks for as long as the card stands. Refused
 /// unless the door can approve and the session is awaiting (module header,
 /// guards 2 and 3).
@@ -467,7 +467,7 @@ pub fn session_permit(inv: &Invocation) -> Outcome {
         &body,
         aoide_storage::time::now_iso_utc(),
     );
-    if let Err(e) = crate::herald::publish(&record) {
+    if let Err(e) = crate::notifications::publish(&record) {
         return Outcome::error(
             cmd,
             format!("could not reach the shellbridge to raise the summons: {e}"),
@@ -495,7 +495,7 @@ pub fn session_permit(inv: &Invocation) -> Outcome {
 /// the one thing it can know for free: that there is an `aoide` on PATH to
 /// re-enter.
 pub(in crate::graph) fn spawn_summons(id: &str, what: Option<&str>) {
-    if !summons_enabled(std::env::var("AOIDE_HERALD_PERMIT").ok().as_deref()) {
+    if !summons_enabled(std::env::var("AOIDE_NOTIFICATIONS_PERMIT").ok().as_deref()) {
         return;
     }
     let Ok(exe) = std::env::current_exe() else {
@@ -546,7 +546,7 @@ mod tests {
     }
 
     #[test]
-    fn the_summons_card_carries_what_the_herald_needs_to_draw_it() {
+    fn the_summons_card_carries_what_the_notifications_needs_to_draw_it() {
         let card = summons_record(
             "claude",
             "sess-1",
@@ -554,11 +554,11 @@ mod tests {
             "rm -rf build/ — reaper ghosts",
             "2026-08-17T12:00:00Z".into(),
         );
-        assert_eq!(card.kind, crate::herald::KIND_SUMMONS, "drawn with buttons");
+        assert_eq!(card.kind, crate::notifications::KIND_SUMMONS, "drawn with buttons");
         assert_eq!(card.session_id, "sess-1", "the verdict knows where to go");
         assert_eq!(card.timeout_ms, 0, "somebody is blocked behind it");
         assert_eq!(card.category, SUMMONS_CATEGORY);
-        assert_eq!(card.progress, crate::herald::NO_PROGRESS);
+        assert_eq!(card.progress, crate::notifications::NO_PROGRESS);
         // The card is filed under the id the bridge later takes it down by.
         // A mismatch here does not fail loudly — it leaves an ANSWERED summons
         // standing on screen forever, so the mapping is pinned.
@@ -737,7 +737,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&stage);
     }
 
-    /// The card's only route to the herald is the shellbridge socket, so a test
+    /// The card's only route to the notifications is the shellbridge socket, so a test
     /// reads a card off that socket: a connection arriving there is a card
     /// filed, and no connection is a card never raised.
     #[cfg(unix)]
@@ -809,7 +809,7 @@ mod tests {
     /// shellbridge socket sees no connection.
     #[cfg(unix)]
     #[test]
-    fn an_mcp_door_is_refused_a_summons_and_no_card_reaches_the_herald() {
+    fn an_mcp_door_is_refused_a_summons_and_no_card_reaches_the_notifications() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let bridge = Shellbridge::with_session("permit-mcp-door", "awaiting");
 
@@ -853,8 +853,8 @@ mod tests {
         assert_eq!(out.status, Status::Ok, "msg: {}", out.message);
         assert_eq!(out.data.as_ref().unwrap()["raised"], true);
         let card = bridge.card().expect("the card reaches the shellbridge");
-        assert_eq!(card["cmd"], "heraldpush");
+        assert_eq!(card["cmd"], "notificationspush");
         assert_eq!(card["notification"]["sessionId"], "s1");
-        assert_eq!(card["notification"]["kind"], crate::herald::KIND_SUMMONS);
+        assert_eq!(card["notification"]["kind"], crate::notifications::KIND_SUMMONS);
     }
 }

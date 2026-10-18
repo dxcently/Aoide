@@ -63,7 +63,7 @@ in git; `git log --follow -- rices/default/` finds it.
   edges added in the preview root, and say so.
 - **A wallpaper is a cover until song wallpaper slots are hosted.**
   Generate it with a helper in the preview (fixed seed, exact viewport
-  size), commit the PNG, and `strx cover set` the runtime rices's copy.
+  size), commit the PNG, and `strx wallpaper set` the runtime rices's copy.
 - **An inner glow lit from the resting rule colour is invisible.** At
   0.10 alpha of `dim` on CRT black the edge rose by ~6/255. Light the glow
   from `title` and let alpha, not colour, carry rest vs focus.
@@ -82,13 +82,13 @@ in git; `git log --follow -- rices/default/` finds it.
   toggle; firing it to "open" the board closed the one the user already had
   open. Read the state (or ask) first.
 
-## Song widget costs: Canvas threads and the herald clock (2026-10-07)
+## Song widget costs: Canvas threads and the notifications clock (2026-10-07)
 
 - **Heavy Canvas work never runs on the GUI thread.** A Context2D
   `shadowBlur` of 34 costs 3.9 s per paint at 330x200 and 12 s at the dock's
   562x1043 frame (12 ms with no blur), and a default Canvas paints on the GUI
   thread. Cadenza's Pane glows froze the whole shell for tens of seconds per
-  scene build: the bar clock, the herald sweep, queued shortcuts and the
+  scene build: the bar clock, the notifications sweep, queued shortcuts and the
   `rice stage` reload IPC all waited. `renderStrategy: Canvas.Threaded` gives
   byte-identical pixels; the paint moves to the engine's render thread, so the
   result lands late.
@@ -100,16 +100,16 @@ in git; `git log --follow -- rices/default/` finds it.
   engine paints on the same thread, one paint at a time, and repeated
   `requestPaint()` calls are not coalesced: ten height changes of one 330x200
   glow queued eleven 4 s paints (the last done 46 s in), and every other
-  Threaded canvas, CoverPcb's included, waited behind them. A resize also
+  Threaded canvas, WallpaperPcb's included, waited behind them. A resize also
   repaints a canvas by itself, so the debounce is a single-shot `settle`
   Timer plus `if (settle.running) return` in `onPaint`: the same burst costs
   two paints (the last done 8.6 s in), and the skipped paints leave the last
-  texture on screen, stretched. CoverPcb takes the same debounce on its worker
+  texture on screen, stretched. WallpaperPcb takes the same debounce on its worker
   request: three size changes 200 ms apart queued three boards, and the last
   landed 6.7 s after the final size; one request now lands 3.3 s after it.
 - **Seconds of JS belong in a WorkerScript, and so does the canvas that
-  strokes the result.** CoverPcb generated its board in `onPaint`: 3.3 s per
-  output. It now answers from `CoverPcbWorker.js` with an identical board;
+  strokes the result.** WallpaperPcb generated its board in `onPaint`: 3.3 s per
+  output. It now answers from `WallpaperPcbWorker.js` with an identical board;
   stroking the board is another ~110-150 ms, so that canvas is Threaded too.
   Measuring only the generator (17 ms) hides that second cost. The worker is
   `.js`, not `.mjs`: a WorkerScript runs an `.mjs` as a strict ES module,
@@ -141,7 +141,7 @@ in git; `git log --follow -- rices/default/` finds it.
   declare` then carried it into the checkout like any other song.
 - **`strx rice declare` copies; it does not delete.** A file renamed in the
   runtime tree arrives under its new name, and the old name stays in the
-  checkout until it is removed there (`CoverPcbWorker.mjs` to `.js`).
+  checkout until it is removed there (`WallpaperPcbWorker.mjs` to `.js`).
 
 ## Song widget costs, second pass: the paint in flight (2026-10-07)
 
@@ -157,7 +157,7 @@ in git; `git log --follow -- rices/default/` finds it.
   draw four times. A skipped `onPaint` emits no `painted`, so the flag is
   never cleared by one. Offscreen, software backend.
 - **A paint that does not draw leaves the last texture, stretched; a paint
-  that draws a stale model draws it at its old coordinates.** CoverPcb's
+  that draws a stale model draws it at its old coordinates.** WallpaperPcb's
   `settle` repainted the old board on the resized canvas, cropped with a bare
   margin, for the ~3 s the new board took. It now paints only when it posted
   no request or has no board; while a request is out the canvas keeps its

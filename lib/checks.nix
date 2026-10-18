@@ -165,7 +165,7 @@ let
   #     (`moduleProblemList`, below);
   #   - no stray `.nix` joins the module merge, and no `.nix` names a path out of
   #     its own folder (`strayNixFiles`, `escapingNixFiles`).
-  #   - a declared `aoide.theme.wallpaper` is the song's own `cover/<song>-desktop.<ext>`,
+  #   - a declared `aoide.theme.wallpaper` is the song's own `wallpaper/<song>-desktop.<ext>`,
   #     the one name the activation seed and `rice stage` both resolve.
   #
   # The body, the hyprland.conf and the rice modules are the reads here that look
@@ -298,7 +298,7 @@ let
         else
           module;
       unwrapOverride = v: if tagged v && v._type == "override" then unwrapOverride v.content else v;
-      # A song's picture is its own `cover/<song>-desktop.<ext>` (CONTRACTS.md §4):
+      # A song's picture is its own `wallpaper/<song>-desktop.<ext>` (CONTRACTS.md §4):
       # the seed publishes the declared path, and `rice stage` finds the same
       # file by that name, so a declared picture under any other name would
       # show after a rebuild and vanish on a stage.
@@ -314,13 +314,13 @@ let
         if path == null then
           [ ]
         else if
-          baseNameOf (dirOf path) == "cover"
+          baseNameOf (dirOf path) == "wallpaper"
           && builtins.match "${name}-desktop\\.(webp|png|jpg|jpeg)" (baseNameOf path) != null
         then
           [ ]
         else
           [
-            "song ${name}'s ${half}.module sets aoide.theme.wallpaper to ${path}; the picture must be cover/${name}-desktop.<ext> (CONTRACTS.md §4)"
+            "song ${name}'s ${half}.module sets aoide.theme.wallpaper to ${path}; the picture must be wallpaper/${name}-desktop.<ext> (CONTRACTS.md §4)"
           ];
       moduleProblems =
         name: half: module:

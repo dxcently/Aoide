@@ -20,8 +20,8 @@
 #     writes the same), that
 #     song's `icons/` (when it has one) at `rices/<owner>/icons` —
 #     the `$AOIDE_ROOT`-relative path a face loads its icons from in the
-#     session too — its `cover/` folder at `rices/<owner>/cover`,
-#     with `stage/cover.json` naming the logon picture
+#     session too — its `cover/` folder at `rices/<owner>/wallpaper`,
+#     with `stage/wallpaper.json` naming the logon picture
 #     (`<owner>-logon.<ext>`) as the face's background when it ships one,
 #     the dress as `stage/theme.json`, and
 #     `session.json`: the display manager's
@@ -126,17 +126,17 @@ let
     fi
     # The face's cover folder, whole, at the same `rices/<owner>/` path
     # the session reads it from. Its logon picture (`<owner>-logon.<ext>`), when
-    # it ships one, is the background the logon face draws: `stage/cover.json`
+    # it ships one, is the background the logon face draws: `stage/wallpaper.json`
     # names it in the one shape every surface reads a cover by, stamped with the
     # declared song the way the seed stamps its default.
-    if [ -d "$song/cover" ]; then
+    if [ -d "$song/wallpaper" ]; then
       mkdir -p "$out/rices/${face.owner}"
-      cp -r "$song/cover" "$out/rices/${face.owner}/cover"
+      cp -r "$song/wallpaper" "$out/rices/${face.owner}/wallpaper"
       for ext in webp png jpg jpeg; do
-        logon="$out/rices/${face.owner}/cover/${face.owner}-logon.$ext"
+        logon="$out/rices/${face.owner}/wallpaper/${face.owner}-logon.$ext"
         if [ -f "$logon" ]; then
           jq -n --arg p "$logon" --arg s ${lib.escapeShellArg config.aoide.rice} '{path: $p, song: $s}' \
-            > "$out/stage/cover.json"
+            > "$out/stage/wallpaper.json"
           break
         fi
       done

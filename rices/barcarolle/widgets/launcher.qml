@@ -318,7 +318,7 @@ PanelWindow {
     readonly property string sortBy: root.sortMemo[root.view + "/" + root.sub] || root.sortDefault[root.view] || "name"
     readonly property var selItem: root.items[root.grid.currentIndex]
     readonly property bool canOpen: !root.aboutOpen && !!root.selItem && ["folder", "app", "clip", "emoji", "kaomoji", "pic", "rice"].indexOf(root.selItem.kind) >= 0
-        && !(root.selItem.kind === "pic" && root.coverLocked) && !(root.selItem.kind === "rice" && (!root.selItem.row.live || root.pending))
+        && !(root.selItem.kind === "pic" && root.wallpaperLocked) && !(root.selItem.kind === "rice" && (!root.selItem.row.live || root.pending))
     readonly property bool canCopy: !root.aboutOpen && (findField.selectedText !== "" || (!!root.selItem && ["emoji", "kaomoji", "clip"].indexOf(root.selItem.kind) >= 0))
     readonly property bool canPaste: !root.aboutOpen && (findField.selectedText !== "" || root.newestText() !== undefined)
 
@@ -663,7 +663,7 @@ PanelWindow {
             Quickshell.execDetached(["wl-copy", "--", it.glyph])
             root.hide()
         } else if (it.kind === "pic") {
-            if (!root.coverLocked) Quickshell.execDetached(["strillix", "cover", "set", it.path])
+            if (!root.wallpaperLocked) Quickshell.execDetached(["strillix", "wallpaper", "set", it.path])
         } else if (it.kind === "rice") root.riceAct(it.row)
     }
     function pressed(e) {
@@ -829,18 +829,18 @@ PanelWindow {
     }
 
     // ── cover for the little desktop ──
-    property string coverPath: Quickshell.env("AOIDE_WALLPAPER") || ""
-    property bool coverPick: false
-    property bool coverTile: false
-    property bool coverStill: false
-    property string coverPosition: "auto"
+    property string wallpaperPath: Quickshell.env("AOIDE_WALLPAPER") || ""
+    property bool wallpaperPick: false
+    property bool wallpaperTile: false
+    property bool wallpaperStill: false
+    property string wallpaperPosition: "auto"
     readonly property real screenW: root.screen ? root.screen.width : 1920
     // strillix refuses a cover pick while the declared song is locked in
-    readonly property bool coverLocked: root.riceMode === "declarative"
-    readonly property bool canRemove: root.coverPick && !root.coverLocked && !root.aboutOpen
-    readonly property bool canPosition: root.coverStill && !root.coverLocked && !root.aboutOpen
-    readonly property bool canAddPics: root.view === "pics" && !root.aboutOpen && !root.coverLocked
-    readonly property bool canTrashPic: root.view === "pics" && !root.aboutOpen && !root.coverLocked && !picOp.running
+    readonly property bool wallpaperLocked: root.riceMode === "declarative"
+    readonly property bool canRemove: root.wallpaperPick && !root.wallpaperLocked && !root.aboutOpen
+    readonly property bool canPosition: root.wallpaperStill && !root.wallpaperLocked && !root.aboutOpen
+    readonly property bool canAddPics: root.view === "pics" && !root.aboutOpen && !root.wallpaperLocked
+    readonly property bool canTrashPic: root.view === "pics" && !root.aboutOpen && !root.wallpaperLocked && !picOp.running
         && !!root.selItem && root.selItem.kind === "pic" && !root.selItem.own
     readonly property var positions: [["auto", "Automatic"], ["tile", "Tile on Screen"], ["fill", "Fill Screen"]]
     readonly property real posBoxW: 6 + Math.ceil(posFit.implicitWidth) + 6 + 17
@@ -853,7 +853,7 @@ PanelWindow {
         if (root.keyFocus === "band" && root.band[root.bandAt] === undefined) root.keyFocus = "grid"
     }
     FileView {
-        path: root.strillixRoot + "/stage/cover.json"
+        path: root.strillixRoot + "/stage/wallpaper.json"
         watchChanges: true
         blockLoading: false
         printErrors: false
@@ -863,17 +863,17 @@ PanelWindow {
             try {
                 var d = JSON.parse(text())
                 var mine = !!d && (!d.song || d.song === root.theme.songName)
-                root.coverPath = mine && d.path ? "" + d.path : baked
-                root.coverPick = mine && d.pick === true && (!!d.path || !!d.weId)
-                root.coverTile = mine && !!d.path && d.pick === true && d.tile === true
-                root.coverStill = root.coverPick && !!d.path && (d.kind || "static") === "static"
-                root.coverPosition = mine && d.position ? "" + d.position : "auto"
-            } catch (e) { root.coverPath = baked; root.coverPick = false; root.coverTile = false; root.coverStill = false; root.coverPosition = "auto" }
+                root.wallpaperPath = mine && d.path ? "" + d.path : baked
+                root.wallpaperPick = mine && d.pick === true && (!!d.path || !!d.weId)
+                root.wallpaperTile = mine && !!d.path && d.pick === true && d.tile === true
+                root.wallpaperStill = root.wallpaperPick && !!d.path && (d.kind || "static") === "static"
+                root.wallpaperPosition = mine && d.position ? "" + d.position : "auto"
+            } catch (e) { root.wallpaperPath = baked; root.wallpaperPick = false; root.wallpaperTile = false; root.wallpaperStill = false; root.wallpaperPosition = "auto" }
         }
-        onLoadFailed: { root.coverPath = Quickshell.env("AOIDE_WALLPAPER") || ""; root.coverPick = false; root.coverTile = false; root.coverStill = false; root.coverPosition = "auto" }
+        onLoadFailed: { root.wallpaperPath = Quickshell.env("AOIDE_WALLPAPER") || ""; root.wallpaperPick = false; root.wallpaperTile = false; root.wallpaperStill = false; root.wallpaperPosition = "auto" }
     }
     function removePicture() {
-        if (root.canRemove) Quickshell.execDetached(["strillix", "cover", "set", "--clear"])
+        if (root.canRemove) Quickshell.execDetached(["strillix", "wallpaper", "set", "--clear"])
     }
     // the folder the Pictures list reads, in the default file manager; the list's folder watch picks up what lands there
     function addPictures() {
@@ -901,12 +901,12 @@ PanelWindow {
         root.picErr = ""
         if (name === "" || it.path !== root.coversDir + "/" + name) { root.picErr = "Couldn\u2019t move " + name + " to the Trash"; return }
         var trash = ["gio", "trash", it.path]
-        var inForce = root.coverPick && it.path === root.coverPath
+        var inForce = root.wallpaperPick && it.path === root.wallpaperPath
         picOp.name = name
         picOp.cleared = false
         picOp.began = false
         picOp.next = inForce ? trash : null
-        picOp.command = inForce ? ["strillix", "cover", "set", "--clear"] : trash
+        picOp.command = inForce ? ["strillix", "wallpaper", "set", "--clear"] : trash
         picOp.running = true
     }
     function picOpDone(code) {
@@ -932,8 +932,8 @@ PanelWindow {
         return Math.min(root.picAt, root.items.length - 1)
     }
     function setPosition(word) {
-        if (root.canPosition && word !== root.coverPosition)
-            Quickshell.execDetached(["strillix", "cover", "set", root.coverPath, "--position", word])
+        if (root.canPosition && word !== root.wallpaperPosition)
+            Quickshell.execDetached(["strillix", "wallpaper", "set", root.wallpaperPath, "--position", word])
     }
     function openPosition(keyed) {
         if (!root.canPosition) return
@@ -943,7 +943,7 @@ PanelWindow {
         root.bandAt = root.band.indexOf("position")
         root.keyMenu = keyed
         root.menuOpen = "Position"
-        if (keyed) posDrop.hot = Math.max(0, root.positions.map(function (q) { return q[0] }).indexOf(root.coverPosition))
+        if (keyed) posDrop.hot = Math.max(0, root.positions.map(function (q) { return q[0] }).indexOf(root.wallpaperPosition))
     }
 
     // ── rice: songs as folders and the right-edge song menu; Rice.js says what every row means ──
@@ -995,8 +995,8 @@ PanelWindow {
         showDirs: false
         onCountChanged: root.dataTick++
     }
-    Pics { id: ownPics; folder: "file://" + root.strillixRoot + "/rices/barcarolle/cover" }
-    readonly property string coversDir: root.strillixRoot + "/covers"
+    Pics { id: ownPics; folder: "file://" + root.strillixRoot + "/rices/barcarolle/wallpaper" }
+    readonly property string coversDir: root.strillixRoot + "/wallpapers"
     Pics { id: libPics; folder: "file://" + root.coversDir }
 
     property string hostName: ""
@@ -1937,7 +1937,7 @@ PanelWindow {
         readonly property bool bigRow: kind === "clip" && root.clipBig
         readonly property bool big: cell.bigRow && modelData.clip.kind === "image"
         readonly property string mark: kind === "rice" ? modelData.row.mark : ""
-        readonly property bool dead: (kind === "rice" && !modelData.row.live) || (cell.pic && root.coverLocked)
+        readonly property bool dead: (kind === "rice" && !modelData.row.live) || (cell.pic && root.wallpaperLocked)
         readonly property var fold: (cell.glyphOnly || cell.row) ? ({ text: "", lines: 0, cut: false })
             : cell.kaoLabel ? ({ text: cell.modelData.glyph, lines: 1, cut: false }) : root.clamp2(cell.modelData.name, cell.width - 8)
         readonly property bool truncated: cell.kaoLabel ? lbl.truncated : cell.fold.cut
@@ -2046,7 +2046,7 @@ PanelWindow {
                 Loader {
                     x: 1; y: 1; width: 64; height: 48
                     active: cell.pic
-                    Component.onCompleted: setSource(Kit.helper("CoverArt"), {
+                    Component.onCompleted: setSource(Kit.helper("WallpaperArt"), {
                         source: Qt.binding(function () { return cell.pic ? cell.modelData.url : "" }),
                         tile: Qt.binding(function () { return cell.pic && cell.modelData.tile }),
                         screenWidth: Qt.binding(function () { return root.screenW }),
@@ -2054,7 +2054,7 @@ PanelWindow {
                     })
                 }
                 Rectangle {
-                    visible: cell.pic && cell.modelData.path === root.coverPath
+                    visible: cell.pic && cell.modelData.path === root.wallpaperPath
                     x: 56; y: 40; width: 12; height: 12
                     color: "#ffffff"
                     border.width: 1
@@ -2221,17 +2221,17 @@ PanelWindow {
 
                     Image {
                         anchors.fill: parent
-                        visible: root.coverPath === ""
+                        visible: root.wallpaperPath === ""
                         source: root.g3Dir + "finder-dither.svg" + root.bust
                         fillMode: Image.Tile
                         sourceSize: Qt.size(2, 2)
                     }
                     Loader {
                         anchors.fill: parent
-                        visible: root.coverPath !== ""
-                        Component.onCompleted: setSource(Kit.helper("CoverArt"), {
-                            source: Qt.binding(function () { return root.coverPath !== "" ? "file://" + root.coverPath : "" }),
-                            tile: Qt.binding(function () { return root.coverTile }),
+                        visible: root.wallpaperPath !== ""
+                        Component.onCompleted: setSource(Kit.helper("WallpaperArt"), {
+                            source: Qt.binding(function () { return root.wallpaperPath !== "" ? "file://" + root.wallpaperPath : "" }),
+                            tile: Qt.binding(function () { return root.wallpaperTile }),
                             screenWidth: Qt.binding(function () { return root.screenW }),
                             cropWidth: 836
                         })
@@ -2369,7 +2369,7 @@ PanelWindow {
                                 T {
                                     x: 6
                                     anchors.verticalCenter: parent.verticalCenter
-                                    text: (root.positions.filter(function (q) { return q[0] === root.coverPosition })[0] || root.positions[0])[1]
+                                    text: (root.positions.filter(function (q) { return q[0] === root.wallpaperPosition })[0] || root.positions[0])[1]
                                     color: root.canPosition ? "#000000" : "#8a8a8a"
                                     font.family: root.fSys
                                     font.pixelSize: 12
@@ -2723,7 +2723,7 @@ PanelWindow {
                         z: 41
                         width: root.posBoxW
                         rows: root.positions.map(function (q) {
-                            return { label: q[1], check: root.coverPosition === q[0], live: true, act: function () { root.setPosition(q[0]) } }
+                            return { label: q[1], check: root.wallpaperPosition === q[0], live: true, act: function () { root.setPosition(q[0]) } }
                         })
                     }
                     Drop {
@@ -2741,7 +2741,7 @@ PanelWindow {
                         ] : [
                             { label: "Open", live: root.canOpen, act: root.openSel },
                             { sep: true },
-                            { label: "Remove Picture", live: root.canRemove && !!root.selItem && root.selItem.path === root.coverPath, act: root.removePicture },
+                            { label: "Remove Picture", live: root.canRemove && !!root.selItem && root.selItem.path === root.wallpaperPath, act: root.removePicture },
                             { label: "Move to Trash", live: root.canTrashPic, act: root.trashPicture }
                         ]
                         T { id: ctxFit; visible: false; font.family: root.fSys; font.pixelSize: 12; text: ctxDrop.rows.map(function (r) { return r.sep ? "" : r.label }).join("\n") }

@@ -246,6 +246,7 @@ pub fn migrate_root_once() -> std::io::Result<()> {
     }
     migrate_rice_tree(&new_root.join("song"))?;
     migrate_theme_files(&strillix_dir());
+    migrate_wallpaper_files(&strillix_dir())?;
 
     migrate_node_state_names()
 }
@@ -263,6 +264,23 @@ fn migrate_theme_files(strillix: &std::path::Path) {
             migrate_file(&draft.path().join("livery.json"), &draft.path().join("theme.json"));
         }
     }
+}
+
+/// The wallpaper names (step 5 of the rename): `stage/cover.json` becomes
+/// `stage/wallpaper.json`, `covers/` becomes `wallpapers/`, and every rice's
+/// `cover/` becomes `wallpaper/`, with each draft's `cover.json` following its
+/// stage file. No-clobber and idempotent like [`migrate_theme_files`].
+fn migrate_wallpaper_files(strillix: &std::path::Path) -> std::io::Result<()> {
+    migrate_file(&stage_dir().join("cover.json"), &stage_dir().join("wallpaper.json"));
+    migrate_dir(&strillix.join("covers"), &strillix.join("wallpapers"))?;
+    for rice in std::fs::read_dir(strillix.join("rices")).into_iter().flatten().flatten() {
+        let dir = rice.path();
+        migrate_dir(&dir.join("cover"), &dir.join("wallpaper"))?;
+        for draft in std::fs::read_dir(dir.join("drafts")).into_iter().flatten().flatten() {
+            migrate_file(&draft.path().join("cover.json"), &draft.path().join("wallpaper.json"));
+        }
+    }
+    Ok(())
 }
 
 /// The rice tree's move out of aoide's root (`$AOIDE_ROOT/song/` into
@@ -291,7 +309,7 @@ fn migrate_rice_tree(old_song: &std::path::Path) -> std::io::Result<()> {
         migrate_dir(&old_song.join("stage"), &stage_dir())?;
     }
     migrate_dir(&old_song.join("declared"), &target.join("declared"))?;
-    migrate_dir(&old_song.join("covers"), &target.join("covers"))?;
+    migrate_dir(&old_song.join("covers"), &target.join("wallpapers"))?;
     migrate_dir(&old_song.join("songbook"), &target.join("rices"))?;
     for rice in std::fs::read_dir(target.join("rices")).into_iter().flatten().flatten() {
         let dir = rice.path();
@@ -532,7 +550,7 @@ pub fn state_dir() -> std::path::PathBuf {
 
 /// The CONDUCTING stage directory: `$AOIDE_ROOT/state/stage/` (default
 /// `~/.aoide/state/stage/`) — sessions.json,
-/// hooks.json, projects.json, graph.json, pending.json, herald.json (the
+/// hooks.json, projects.json, graph.json, pending.json, notifications.json (the
 /// broker-owned roster this tree calls the "L4 dual-writer surface"
 /// (`conduct/README.md`), mirrored by `server/src/daemon.rs::stage_roster`). Split from
 /// [`stage_dir`] (2026-08-27, command-defrag lane S1): those six files are
@@ -573,7 +591,7 @@ const CONDUCTING_STAGE_FILES: &[&str] = &[
     "projects.json",
     "graph.json",
     "pending.json",
-    "herald.json",
+    "notifications.json",
 ];
 
 static MIGRATE_CONDUCTING_STAGE_ONCE: std::sync::Once = std::sync::Once::new();
@@ -608,6 +626,10 @@ static MIGRATE_CONDUCTING_STAGE_ONCE: std::sync::Once = std::sync::Once::new();
 /// process-local locks already document.
 fn migrate_conducting_stage(new_dir: &std::path::Path) {
     let old_dir = stage_dir();
+    // The ledger was `herald.json` before the notifications rename: a legacy file
+    // in either stage becomes `notifications.json` in the new one, no-clobber.
+    migrate_file(&new_dir.join("herald.json"), &new_dir.join("notifications.json"));
+    migrate_file(&old_dir.join("herald.json"), &new_dir.join("notifications.json"));
     if old_dir == new_dir || !old_dir.exists() {
         return;
     }
@@ -708,7 +730,7 @@ pub fn pointer_state_file() -> std::path::PathBuf {
 ///
 /// The stage tree is `<song>/stage`; committed songs live under
 /// `<song>/rices/<name>/` and cover art in the shared library
-/// `<song>/covers/` (CONTRACTS.md §1, §4). Deriving this from
+/// `<song>/wallpapers/` (CONTRACTS.md §1, §4). Deriving this from
 /// [`stage_dir`] rather than recomputing keeps the whole song tree coherent
 /// under an `AOIDE_STAGE_DIR` override: a test points that at `<tmp>/stage` and
 /// the rices resolves under `<tmp>/` alongside it. Every `rice`/`song`
@@ -961,7 +983,7 @@ pub fn declared_notes() -> std::path::PathBuf {
 /// `name` — `<song>/declared/rices/<name>.json`, `{schemaVersion, song,
 /// source, files: {relpath: sha256}}`. Beside [`declared_notes`] and outside
 /// the song folder on purpose: the folder-equality gate, `rice declare`,
-/// `rice list`, `rice take` and the widget sync never see it.
+/// `rice list`, `rice history` and the widget sync never see it.
 pub fn rice_record(name: &str) -> std::path::PathBuf {
     strillix_dir().join("declared").join("rices").join(format!("{name}.json"))
 }
@@ -1044,7 +1066,7 @@ pub fn song_drafts_dir(song: &str) -> std::path::PathBuf {
 }
 
 /// One named draft's directory: `<song>/rices/<name>/drafts/<draft>/` —
-/// holds a snapshot of `stage/theme.json` (always) and `stage/cover.json`
+/// holds a snapshot of `stage/theme.json` (always) and `stage/wallpaper.json`
 /// (when the stage had one) at the moment `rice draft save <draft>` was run.
 pub fn draft_dir(song: &str, draft: &str) -> std::path::PathBuf {
     song_drafts_dir(song).join(draft)
@@ -1862,7 +1884,7 @@ fn owner_only_state(state: &std::path::Path, _homes: &[std::path::PathBuf]) -> s
 ///
 /// **Still locks `stage_dir()`'s own lock file, even for [`conducting_stage_dir`]
 /// callers (command-defrag S1).** `sessions.json`/`hooks.json`/`projects.json`/
-/// `graph.json`/`pending.json`/`herald.json` moved to `state/stage/`, but every
+/// `graph.json`/`pending.json`/`notifications.json` moved to `state/stage/`, but every
 /// mutator of them still calls this exact function unchanged — the SAME
 /// precedent `state/mail/base.jsonl`'s writer sets for a `state/` file today
 /// (its own [`try_stage_lock`], the fail-closed sibling defined just below,
@@ -3858,7 +3880,7 @@ mod tests {
     // ── `conducting_stage_dir` / the command-defrag S1 migration ───────────
 
     const CORE_STAGE_FILE_NAMES: &[&str] =
-        &["sessions.json", "hooks.json", "projects.json", "graph.json", "pending.json", "herald.json"];
+        &["sessions.json", "hooks.json", "projects.json", "graph.json", "pending.json", "notifications.json"];
 
     /// Save/restore the five env vars every migration test pins, so a test
     /// that panics mid-body still leaves the crate's env in whatever shape
@@ -4710,7 +4732,7 @@ mod tests {
             "the staged mode.json must carry the rice key, not the song key"
         );
         assert_eq!(std::fs::read_to_string(strillix.join("declared").join("rice.conf")).unwrap(), "moonlight");
-        assert_eq!(std::fs::read_to_string(strillix.join("covers").join("cover.png")).unwrap(), "art");
+        assert_eq!(std::fs::read_to_string(strillix.join("wallpapers").join("cover.png")).unwrap(), "art");
         let new_rice = strillix.join("rices").join("moonlight");
         assert_eq!(std::fs::read_to_string(new_rice.join("history").join("v1").join("bar.qml")).unwrap(), "old");
         assert_eq!(
@@ -4761,6 +4783,101 @@ mod tests {
         assert_eq!(std::fs::read_to_string(kept.join("theme.json")).unwrap(), "newer", "a theme.json in place is never clobbered");
         assert_eq!(std::fs::read_to_string(kept.join("livery.json")).unwrap(), "stale", "the file beside it is left, not moved over it");
 
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    /// Step 5's wallpaper names move once. A fresh box has nothing to move; an
+    /// old box's cover names become the wallpaper names; a second run is a
+    /// no-op; a file already at the new name is never clobbered.
+    #[test]
+    fn migrate_root_once_moves_the_wallpaper_names_once() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = MigrationEnvGuard::capture_and_clear();
+        let home = std::env::temp_dir().join(format!("aoide-migrate-wallpaper-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        std::env::set_var("HOME", &home);
+        let strillix = home.join(".strillix");
+
+        migrate_root_once().unwrap();
+        assert!(!strillix.join("wallpapers").exists(), "a fresh box makes no wallpapers tree");
+
+        std::fs::create_dir_all(strillix.join("stage")).unwrap();
+        std::fs::write(strillix.join("stage").join("cover.json"), "stage-pick").unwrap();
+        std::fs::create_dir_all(strillix.join("covers")).unwrap();
+        std::fs::write(strillix.join("covers").join("dusk.png"), "library").unwrap();
+        let rice = strillix.join("rices").join("moonlight");
+        std::fs::create_dir_all(rice.join("cover")).unwrap();
+        std::fs::write(rice.join("cover").join("moonlight-desktop.png"), "desk").unwrap();
+        std::fs::create_dir_all(rice.join("drafts").join("d1")).unwrap();
+        std::fs::write(rice.join("drafts").join("d1").join("cover.json"), "draft-pick").unwrap();
+
+        migrate_root_once().unwrap();
+        migrate_root_once().unwrap();
+
+        assert_eq!(std::fs::read_to_string(strillix.join("stage").join("wallpaper.json")).unwrap(), "stage-pick");
+        assert!(!strillix.join("stage").join("cover.json").exists(), "the old stage pick must have moved");
+        assert_eq!(std::fs::read_to_string(strillix.join("wallpapers").join("dusk.png")).unwrap(), "library");
+        assert!(!strillix.join("covers").exists(), "the old library must have moved");
+        assert_eq!(std::fs::read_to_string(rice.join("wallpaper").join("moonlight-desktop.png")).unwrap(), "desk");
+        assert!(!rice.join("cover").exists(), "the old rice folder must have moved");
+        assert_eq!(
+            std::fs::read_to_string(rice.join("drafts").join("d1").join("wallpaper.json")).unwrap(),
+            "draft-pick"
+        );
+
+        std::fs::write(strillix.join("stage").join("cover.json"), "stale").unwrap();
+        migrate_root_once().unwrap();
+        assert_eq!(std::fs::read_to_string(strillix.join("stage").join("wallpaper.json")).unwrap(), "stage-pick");
+        assert_eq!(std::fs::read_to_string(strillix.join("stage").join("cover.json")).unwrap(), "stale");
+
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    /// A wallpaper tree whose parent refuses the rename keeps its old name, and
+    /// the migration still returns Ok: the library is never lost to a failed move.
+    #[cfg(unix)]
+    #[test]
+    fn migrate_wallpaper_files_keeps_the_old_library_when_its_parent_is_read_only() {
+        use std::os::unix::fs::PermissionsExt;
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = MigrationEnvGuard::capture_and_clear();
+        let home = std::env::temp_dir().join(format!("aoide-migrate-wallpaper-readonly-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        std::env::set_var("HOME", &home);
+        let strillix = home.join(".strillix");
+        std::fs::create_dir_all(strillix.join("covers")).unwrap();
+        std::fs::write(strillix.join("covers").join("dusk.png"), "library").unwrap();
+        std::fs::set_permissions(&strillix, std::fs::Permissions::from_mode(0o500)).unwrap();
+
+        let result = migrate_wallpaper_files(&strillix);
+
+        std::fs::set_permissions(&strillix, std::fs::Permissions::from_mode(0o700)).unwrap();
+        assert!(result.is_ok());
+        assert_eq!(std::fs::read_to_string(strillix.join("covers").join("dusk.png")).unwrap(), "library");
+        assert!(!strillix.join("wallpapers").exists());
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    /// The herald ledger's rename: a legacy `herald.json` in the new stage, or in
+    /// the pre-split stage, arrives as `notifications.json`, once, no-clobber.
+    #[test]
+    fn migrate_conducting_stage_renames_the_legacy_herald_ledger() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = MigrationEnvGuard::capture_and_clear();
+        let home = std::env::temp_dir().join(format!("aoide-migrate-herald-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        std::env::set_var("HOME", &home);
+        let new_dir = home.join("state").join("stage");
+        std::fs::create_dir_all(&new_dir).unwrap();
+        std::fs::write(new_dir.join("herald.json"), "ledger").unwrap();
+        std::fs::create_dir_all(home.join(".strillix").join("stage")).unwrap();
+        std::fs::write(home.join(".strillix").join("stage").join("herald.json"), "older").unwrap();
+
+        migrate_conducting_stage(&new_dir);
+
+        assert_eq!(std::fs::read_to_string(new_dir.join("notifications.json")).unwrap(), "ledger");
+        assert!(!new_dir.join("herald.json").exists(), "the in-stage legacy ledger must have moved");
+        assert!(home.join(".strillix").join("stage").join("herald.json").exists(), "the older legacy ledger waits, never clobbers");
         let _ = std::fs::remove_dir_all(&home);
     }
 

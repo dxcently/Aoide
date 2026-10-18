@@ -26,7 +26,7 @@
 // A main card is 9 lines, a subagent's 6 — fixed, so streaming data never
 // shifts the silhouette. The one line that comes and goes on its own is the
 // SUMMONS lane: it exists only while a permission summons for that session
-// stands in herald.json (sonata's rule: the ledger, not `awaiting`, proves a
+// stands in notifications.json (sonata's rule: the ledger, not `awaiting`, proves a
 // verdict can be delivered). The selected card also grows its action line.
 //
 //   ● rook-lantern · Bash: cargo test          working   [2]  1h02m     tty
@@ -43,8 +43,8 @@
 // ── Actions (the bridge only) ─────────────────────────────────────────────
 //   click a card        bridge.focusSession — a subagent focuses its parent's
 //                       window (sonata's courier rule)
-//   [approve] / [deny]  {cmd:"heraldverdict", id:<sessionId>, verdict} — the
-//                       NOTIF tab's and the herald's own wire line; click only
+//   [approve] / [deny]  {cmd:"notificationsverdict", id:<sessionId>, verdict} — the
+//                       NOTIF tab's and the notifications' own wire line; click only
 //   right-click / j k   select; the selected card's action line carries
 //                       sonata SessionMenu's sessionAction project / undying /
 //                       kill (kill confirms y/N, refused for subagents)
@@ -532,7 +532,7 @@ Item {
                 font: root.kit.font; textFormat: Text.PlainText
             }
 
-            // ── 7 · SUMMONS: only while one stands in herald.json ─────────
+            // ── 7 · SUMMONS: only while one stands in notifications.json ─────────
             Item {
                 visible: !!card.summons
                 x: card.textX; y: root.kit.lines(card.bodyLines - (card.child ? 0 : 1))
@@ -550,13 +550,13 @@ Item {
                     Text {
                         text: "approve"; color: root.kit.match; font: root.kit.font; textFormat: Text.PlainText
                         MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor
-                                    onClicked: root.board.heraldVerdict(card.s.sessionId, "approve") }
+                                    onClicked: root.board.notificationsVerdict(card.s.sessionId, "approve") }
                     }
                     Text { text: "] ["; color: root.kit.dim; font: root.kit.font; textFormat: Text.PlainText }
                     Text {
                         text: "deny"; color: root.kit.urgent; font: root.kit.font; textFormat: Text.PlainText
                         MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor
-                                    onClicked: root.board.heraldVerdict(card.s.sessionId, "deny") }
+                                    onClicked: root.board.notificationsVerdict(card.s.sessionId, "deny") }
                     }
                     Text { text: "]"; color: root.kit.dim; font: root.kit.font; textFormat: Text.PlainText }
                 }

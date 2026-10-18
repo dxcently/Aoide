@@ -71,7 +71,7 @@ aoide-upkeep = { path = "crates/upkeep" }
 # image dependencies (see those entries above for the technical rationale).
 aoide-screen = { path = "crates/screen" }
 # `strillix` — the graphical/rice binary (P-A4 of the binary-split workstream):
-# its own composition root over the rice/screen/shellbridge/herald bundle,
+# its own composition root over the rice/screen/shellbridge/notifications bundle,
 # assembled from the SAME domain crates `aoide-cli` already depends on
 # (`strillix-rice`, `aoide-conduct`, `aoide-screen`) — nothing here is a copy.
 strillix = { path = "crates/strillix" }

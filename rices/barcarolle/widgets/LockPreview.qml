@@ -142,10 +142,10 @@ Item {
         NumberAnimation { target: root; property: "shakeX"; to: 0; duration: 55; easing.type: Easing.OutQuad }
     }
 
-    property string coverPath: Quickshell.env("AOIDE_WALLPAPER") || ""
-    property bool coverTile: false
+    property string wallpaperPath: Quickshell.env("AOIDE_WALLPAPER") || ""
+    property bool wallpaperTile: false
     FileView {
-        path: root.strillixRoot + "/stage/cover.json"
+        path: root.strillixRoot + "/stage/wallpaper.json"
         watchChanges: true
         blockLoading: false
         printErrors: false
@@ -155,11 +155,11 @@ Item {
             try {
                 var d = JSON.parse(text())
                 var applies = !!d && !!d.path && (!d.song || d.song === (root.theme ? root.theme.songName : ""))
-                root.coverPath = applies ? "" + d.path : baked
-                root.coverTile = applies && d.pick === true && d.tile === true
-            } catch (e) { root.coverPath = baked; root.coverTile = false }
+                root.wallpaperPath = applies ? "" + d.path : baked
+                root.wallpaperTile = applies && d.pick === true && d.tile === true
+            } catch (e) { root.wallpaperPath = baked; root.wallpaperTile = false }
         }
-        onLoadFailed: { root.coverPath = Quickshell.env("AOIDE_WALLPAPER") || ""; root.coverTile = false }
+        onLoadFailed: { root.wallpaperPath = Quickshell.env("AOIDE_WALLPAPER") || ""; root.wallpaperTile = false }
     }
 
     // The account picture in its Aero frame: a white halo at rest, the bar's
@@ -365,10 +365,10 @@ Item {
         }
         Loader {
             anchors.fill: parent
-            visible: root.coverPath !== ""
-            Component.onCompleted: setSource(Kit.helper("CoverArt"), {
-                source: Qt.binding(function () { return root.coverPath !== "" ? "file://" + root.coverPath : "" }),
-                tile: Qt.binding(function () { return root.coverTile }),
+            visible: root.wallpaperPath !== ""
+            Component.onCompleted: setSource(Kit.helper("WallpaperArt"), {
+                source: Qt.binding(function () { return root.wallpaperPath !== "" ? "file://" + root.wallpaperPath : "" }),
+                tile: Qt.binding(function () { return root.wallpaperTile }),
                 screenWidth: Qt.binding(function () { return root.width })
             })
             layer.enabled: true

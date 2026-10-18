@@ -3,7 +3,7 @@ name = "strillix"
 version.workspace = true
 edition = "2021"
 license = "MIT"
-description = "Aoide's graphical/rice binary: the self-ricing loop, screen capture/pointer/OCR, the herald ledger, the shellbridge stage bridge, and the Quickshell IPC trigger — split out of the `aoide` core binary (P-A4 of the binary-split workstream, docs/architecture/PACKAGE-LAYOUT.md)."
+description = "Aoide's graphical/rice binary: the self-ricing loop, screen capture/pointer/OCR, the notifications ledger, the shellbridge stage bridge, and the Quickshell IPC trigger — split out of the `aoide` core binary (P-A4 of the binary-split workstream, docs/architecture/PACKAGE-LAYOUT.md)."
 
 # The second app crate (P-A4): its own composition root, same shape as
 # `aoide-cli` — assembles its own Registry from the domain crates its bundle
@@ -32,9 +32,9 @@ aoide-protocol = { workspace = true }
 # copy step (L-C2, task #107) — both reach `fs::` directly rather than
 # through `strillix-rice`'s own re-derived paths.
 aoide-storage = { workspace = true }
-# rice/draft/mode/cover/theme/quickshell/take — the whole `rice` family.
+# rice/draft/mode/wallpaper/theme/quickshell/take — the whole `rice` family.
 strillix-rice = { workspace = true }
-# shellbridge, herald — registration only (the socket-loop/ledger
+# shellbridge, notifications — registration only (the socket-loop/ledger
 # implementations stay in `aoide-conduct`; see those modules' own doc
 # comments, P-A2).
 aoide-conduct = { workspace = true }

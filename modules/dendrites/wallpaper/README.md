@@ -48,9 +48,9 @@ each declares `aoide.surfaces.wallpaper` and writes its own
   exported as `AOIDE_SKWD_WALL_STANDIN`, is the step-aside: the `clear` verb
   this release does not have is stood in for by applying an image that paints
   nothing, and the shell's own layer shows through it.
-- **The bridge is `strx cover sync`** (CONTRACTS.md §4), not a link between
+- **The bridge is `strx wallpaper sync`** (CONTRACTS.md §4), not a link between
   files: whichever provider is active, the CLI reconciles the provider with
-  `/stage/cover.json` — the staged pick while one applies to the staged
+  `/stage/wallpaper.json` — the staged pick while one applies to the staged
   song, nothing (the step-aside image) otherwise. The engine lane calls it from
   its unit's `ExecStartPost`, and every pick write calls it; it is the door that
   waits for a provider still coming up (~5 s), where the pick writes each make a

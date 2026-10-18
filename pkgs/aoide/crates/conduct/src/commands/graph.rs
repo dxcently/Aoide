@@ -313,7 +313,7 @@ pub fn register(r: &mut Registry) {
     ));
     r.insert(cmd!(
         path: ["session", "permit"],
-        summary: "Publish the herald's permission SUMMONS for a session blocked on a permission prompt. The card is filed into the herald ledger (stage/herald.json) and this command RETURNS — the Quickshell herald draws it with real approve/deny buttons, and the click routes back through the shellbridge to type the verdict in. The hook door raises it automatically when a session goes `awaiting`. Only ever raised for a conductable session whose harness has verified prompt keys, and only while that session is awaiting. A door that cannot approve (MCP, the network door) is refused and files no card. The verdict is only typed while the session is still awaiting.",
+        summary: "Publish the notifications' permission SUMMONS for a session blocked on a permission prompt. The card is filed into the notifications ledger (stage/notifications.json) and this command RETURNS — the Quickshell notifications draws it with real approve/deny buttons, and the click routes back through the shellbridge to type the verdict in. The hook door raises it automatically when a session goes `awaiting`. Only ever raised for a conductable session whose harness has verified prompt keys, and only while that session is awaiting. A door that cannot approve (MCP, the network door) is refused and files no card. The verdict is only typed while the session is still awaiting.",
         args: [],
         flags: [
             flag!("id", "string", "Target session id (required); its socket is resolved from sessions.json."),

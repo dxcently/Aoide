@@ -31,7 +31,7 @@ PanelWindow {
     property int tick: 0
 
     FileView {
-        path: root.stageDir + "herald.json"
+        path: root.stageDir + "notifications.json"
         watchChanges: true
         blockLoading: false
         printErrors: false
@@ -91,10 +91,10 @@ PanelWindow {
     }
     function dismiss(r) {
         if (Notice.isSummons(r)) root.wave(r)
-        else root.bridge.sendCommand({ cmd: "heralddismiss", id: "" + r.id })
+        else root.bridge.sendCommand({ cmd: "notificationsdismiss", id: "" + r.id })
     }
     function verdict(r, word) {
-        root.bridge.sendCommand({ cmd: "heraldverdict", id: "" + r.sessionId, verdict: word })
+        root.bridge.sendCommand({ cmd: "notificationsverdict", id: "" + r.sessionId, verdict: word })
     }
 
     readonly property bool yielded: {
@@ -135,7 +135,7 @@ PanelWindow {
     visible: root.head !== null && !root.yielded
     mask: Region { item: hit }
     WlrLayershell.layer: WlrLayer.Overlay
-    WlrLayershell.namespace: "aoide-herald"
+    WlrLayershell.namespace: "aoide-notifications"
 
     onHeadKeyChanged: if (root.headKey !== "") fade.restart()
 

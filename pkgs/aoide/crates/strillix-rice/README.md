@@ -38,13 +38,13 @@ a config file). Paint-side — ships in `strillix`, not core.
   config through `live::reload_config`, and no rice file otherwise.
 - `compose` — the pure `rice compose` scaffolding engine: the song body
   (`rice.nix`, CONTRACTS §5 v1) and the `hyprland.conf` header it starts from.
-- `cover` — cover-art derivation + resolution, and `stage/cover.json`'s
+- `cover` — cover-art derivation + resolution, and `stage/wallpaper.json`'s
   writers, which stamp the staged song into every file they write
   (`stage_for_song`, `stage_song_default`, `stage_pick`, `staged_song`;
-  CONTRACTS.md §4's cover.json entry). The rule that a cover applies only
+  CONTRACTS.md §4's wallpaper.json entry). The rule that a cover applies only
   while its `song` matches the staged song is read-side — one rule, in
   `AoideWallpaper.qml`. `pick_tiles` decides whether a still pick tiles
-  (`cover set --position`, else a `_tile` file name); `stage_pick` writes the
+  (`wallpaper set --position`, else a `_tile` file name); `stage_pick` writes the
   answer as `tile`/`position`, and the reader paints `tile` under that same
   read-side rule.
 - `wallpaper_provider` — the wallpaper provider's bridge: `provider()` (the
@@ -53,7 +53,7 @@ a config file). Paint-side — ships in `strillix`, not core.
   `applying_pick()` (a pick that applies to the staged song, `(kind, identity)`),
   `action()` (the whole decision, pure: `Apply` / `StandAside` / `Nothing`) and
   `sync()` (best-effort, never fatal, inert under this crate's own test build
-  like `live::apply_live`). `strx cover sync` runs it, and every write that
+  like `live::apply_live`). `strx wallpaper sync` runs it, and every write that
   changes what should show calls it; `step_aside` tries the engine's `clear`
   verb first and falls back to the transparent step-aside image
   (`AOIDE_SKWD_WALL_STANDIN`), so swapping the two is one function.
@@ -137,8 +137,8 @@ a config file). Paint-side — ships in `strillix`, not core.
   `commands::refresh::staged_differs` (the machine copy's theme and widgets
   hashed against the shipped copy's). CONTRACTS.md, "Declaring a song from
   the machine", is the contract.
-- `commands` — this crate's CLI commands: `rice *`, `theme *`, `cover set`,
-  `cover sync`, `element seed`, `rice take`/`take.*`/`rice back`,
+- `commands` — this crate's CLI commands: `rice *`, `theme *`, `wallpaper set`,
+  `wallpaper sync`, `element seed`, `rice history`/`take.*`/`rice back`,
   `quickshell healthcheck`,
   and `reload` (`strx reload` design, settled 2026-08-31 — the one
   mode-aware iteration command; absorbed `quickshell reload` outright).

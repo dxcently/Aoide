@@ -50,10 +50,10 @@ Item {
     property int awaitingCount: 0
     property int workingCount: 0
 
-    property string coverPath: Quickshell.env("AOIDE_WALLPAPER") || ""
-    property bool coverTile: false
+    property string wallpaperPath: Quickshell.env("AOIDE_WALLPAPER") || ""
+    property bool wallpaperTile: false
     FileView {
-        path: (Quickshell.env("STRILLIX_ROOT") || (Quickshell.env("HOME") + "/.strillix")) + "/stage/cover.json"
+        path: (Quickshell.env("STRILLIX_ROOT") || (Quickshell.env("HOME") + "/.strillix")) + "/stage/wallpaper.json"
         watchChanges: true
         blockLoading: false
         printErrors: false
@@ -63,11 +63,11 @@ Item {
             try {
                 var d = JSON.parse(text())
                 var applies = !!(d && d.path && (!d.song || d.song === root.theme.songName))
-                root.coverPath = applies ? "" + d.path : baked
-                root.coverTile = applies && d.pick === true && d.tile === true
-            } catch (e) { root.coverPath = baked; root.coverTile = false }
+                root.wallpaperPath = applies ? "" + d.path : baked
+                root.wallpaperTile = applies && d.pick === true && d.tile === true
+            } catch (e) { root.wallpaperPath = baked; root.wallpaperTile = false }
         }
-        onLoadFailed: { root.coverPath = Quickshell.env("AOIDE_WALLPAPER") || ""; root.coverTile = false }
+        onLoadFailed: { root.wallpaperPath = Quickshell.env("AOIDE_WALLPAPER") || ""; root.wallpaperTile = false }
     }
     FileView {
         id: stage
@@ -78,17 +78,17 @@ Item {
         onLoaded: root.parseStage()
         onFileChanged: reload()
     }
-    property int heraldCount: 0
+    property int notificationsCount: 0
     FileView {
-        path: (Quickshell.env("AOIDE_ROOT") || (Quickshell.env("HOME") + "/.aoide")) + "/state/stage/herald.json"
+        path: (Quickshell.env("AOIDE_ROOT") || (Quickshell.env("HOME") + "/.aoide")) + "/state/stage/notifications.json"
         watchChanges: true
         blockLoading: false
         printErrors: false
         onFileChanged: reload()
         onLoaded: {
-            try { root.heraldCount = (JSON.parse(text()).notifications || []).length } catch (e) {}
+            try { root.notificationsCount = (JSON.parse(text()).notifications || []).length } catch (e) {}
         }
-        onLoadFailed: root.heraldCount = 0
+        onLoadFailed: root.notificationsCount = 0
     }
 
     function bare(addr) { return ("" + (addr || "")).toLowerCase().replace(/^0x/, "") }
@@ -1595,9 +1595,9 @@ Item {
                         clip: true
                         Loader {
                             anchors.fill: parent
-                            Component.onCompleted: setSource(Kit.helper("CoverArt"), {
-                                source: Qt.binding(function () { return root.coverPath.length > 0 ? "file://" + root.coverPath : "" }),
-                                tile: Qt.binding(function () { return root.coverTile }),
+                            Component.onCompleted: setSource(Kit.helper("WallpaperArt"), {
+                                source: Qt.binding(function () { return root.wallpaperPath.length > 0 ? "file://" + root.wallpaperPath : "" }),
+                                tile: Qt.binding(function () { return root.wallpaperTile }),
                                 screenWidth: Qt.binding(function () { return peek.scr ? peek.scr.width : 1920 }),
                                 cropWidth: 480
                             })
@@ -1776,7 +1776,7 @@ Item {
             onClicked: root.toggleFlyout("action")
             Icon { x: 4; y: 12; width: 16; height: 16; src: root.trayDir + "tray-flag.svg" }
             Dot {
-                visible: root.heraldCount > 0
+                visible: root.notificationsCount > 0
                 x: 14; y: 22; d: 9
                 tone: root.kit.urgent
             }
@@ -1939,7 +1939,7 @@ Item {
         Flyout {
             name: "action"
             cell: flag
-            gate: !!root.stagingEngine && root.stagingEngine.resolveSong(root.theme.songName, "herald-center") !== ""
+            gate: !!root.stagingEngine && root.stagingEngine.resolveSong(root.theme.songName, "notifications-center") !== ""
             implicitWidth: acRim.width
             implicitHeight: acRim.height + 6
             Rim {
@@ -1953,7 +1953,7 @@ Item {
                     theme: root.theme
                     bridge: root.bridge
                     stagingEngine: root.stagingEngine
-                    slot: "herald-center"
+                    slot: "notifications-center"
                 }
             }
         }

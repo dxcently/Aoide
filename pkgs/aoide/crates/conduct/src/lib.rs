@@ -20,7 +20,7 @@
 
 pub mod commands;
 pub mod graph;
-pub mod herald;
+pub mod notifications;
 pub mod mail_bridge;
 pub mod reap;
 pub mod shellbridge;

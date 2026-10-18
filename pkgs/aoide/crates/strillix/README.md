@@ -6,7 +6,7 @@ The paint app crate — the second composition root over the same
 domain-crate handler code `aoide-cli` assembles (P-A4). In Cordis terms
 (CONTRACTS.md §0): a BUNDLE, same as `cli` — its own ordered
 `commands::all()` profile over an independent `Registry`. Owns the
-self-ricing loop, `screen`, `herald`, `shellbridge`, and `quickshell`;
+self-ricing loop, `screen`, `notifications`, `shellbridge`, and `quickshell`;
 deliberately never conducting, the graph, A2A, nodes, or the daemon (those
 are core `aoide` identity, root `AGENTS.md`).
 
@@ -21,7 +21,7 @@ are core `aoide` identity, root `AGENTS.md`).
   `Registry::arrange`; bare `strillix`, `--help`, group pages and `guide` read it.
 - `guide` — `strx guide`.
 - `commands` — strillix's `commands::all()`, pulling in `song`, `screen`, and
-  `conduct`'s `shellbridge`/`herald` registration lines (the files stay in
+  `conduct`'s `shellbridge`/`notifications` registration lines (the files stay in
   `conduct`; only the registry lines are strillix's), plus strillix's own root-
   coupled `onboard` (below).
 - `commands::onboard` — `strx onboard` (P-I3, docs/architecture/ONBOARD.md):
@@ -146,7 +146,7 @@ are core `aoide` identity, root `AGENTS.md`).
   spawns a standalone `quickshell -p <root>/run/qml/WidgetPreview.qml`
   (P2's own file, not yet landed) against it: its own
   `/stage/theme.json`, its own
-  `state/stage/{sessions,projects,hooks,herald}.json` seeded from a named
+  `state/stage/{sessions,projects,hooks,notifications}.json` seeded from a named
   fixture set or a directory (falling back to empty-but-valid defaults
   while no fixture set has landed yet), and its own `run/qml/` — COPIES,
   never symlinks into the checkout: one copy per shell `*.qml`, the shell's
@@ -174,7 +174,7 @@ are core `aoide` identity, root `AGENTS.md`).
   `/stage/mode.json` (`ThemeState.qml`'s own convention — `mode`,
   `song`, `stagingSong`, `since`) is REWRITTEN on every build and on
   `preview set --song`, always naming the current song; `/stage/
-  cover.json`, `/stage/grimoire.json` (`GrimoireLedger`'s
+  wallpaper.json`, `/stage/grimoire.json` (`GrimoireLedger`'s
   `launches: {}`, an object keyed by app id, never an array), and
   `state/usage.json` are seeded once, only if absent, and never clobbered
   by a later rebuild. `--theme <spec>` accepts FOUR
@@ -452,13 +452,13 @@ are core `aoide` identity, root `AGENTS.md`).
 ## What it consumes
 
 `aoide-protocol`, `strillix-rice`, `aoide-conduct` (for the `shellbridge`/
-`herald` registry lines), `aoide-screen`, `aoide-server` (for `mcp
+`notifications` registry lines), `aoide-screen`, `aoide-server` (for `mcp
 serve --stdio`'s door loop).
 
 ## How it composes
 
-Command paths: onboard/rice/draft/mode/cover/theme/quickshell/screen/
-shellbridge/herald/take/element/secrets ask/pair ask/pair show/preview/
+Command paths: onboard/rice/draft/mode/wallpaper/theme/quickshell/screen/
+shellbridge/notifications/take/element/secrets ask/pair ask/pair show/preview/
 preview set/preview declare/preview shot/preview tree/preview notes/icon/
 apps/clipboard/lock/lock hint — everything that paints, or that only a desktop needs.
 `element seed` (L-E1,

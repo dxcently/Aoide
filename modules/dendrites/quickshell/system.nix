@@ -170,14 +170,14 @@ in
               # comes from $STRILLIX_ROOT/stage/theme.json, never from Qt.
               "QT_QPA_PLATFORMTHEME="
               # Runtime root for every stage/state file the QML reads
-              # (theme/cover/grimoire/sessions/usage) — the QML falls back to
+              # (theme/wallpaper/grimoire/sessions/usage) — the QML falls back to
               # ~/.aoide when unset, but a configured aoide.root must win.
               "AOIDE_ROOT=${config.aoide.root}"
               "STRILLIX_ROOT=${config.aoide.strillix.root}"
             ]
             # Export the song's baked wallpaper (immutable store path) so
             # AoideWallpaper always has the right cover on boot/rebuild — the live
-            # stage/cover.json overrides it, but nothing re-seeded it from the
+            # stage/wallpaper.json overrides it, but nothing re-seeded it from the
             # song before, so a rebuild lost the background. Null → no env.
             ++ lib.optionals (config.aoide.theme.wallpaper != null) [
               "AOIDE_WALLPAPER=${config.aoide.theme.wallpaper}"
@@ -189,13 +189,13 @@ in
             # `STRILLIX_TEMPLATES` keeps pointing at the PREVIOUS build's
             # rices until the operator relogs. This unit spawns `strillix` —
             # the QML it starts execs it (`strillix preview set` from the
-            # widget-maker canvas, `strillix cover set` from the wallpaper
+            # widget-maker canvas, `strillix wallpaper set` from the wallpaper
             # picker) — and any strillix whose STAGING path runs under this
             # process tree resolves the shipped templates from this
             # environment: `strillix rice stage`/`strillix reload` gated on
             # `song/src/widgets.rs`'s `plan_stage`, and `rice compose --from`'s
             # template fallback plus the first-stage seed in
-            # `song/src/commands/rice.rs`. (`cover set` never reads them.)
+            # `song/src/commands/rice.rs`. (`wallpaper set` never reads them.)
             # Declared here, a restart is enough. Gated on the
             # strillix dendrite for the same reason the nucleus delta is: a
             # shell with no `strillix` installed has no reader for it.

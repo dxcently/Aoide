@@ -24,17 +24,17 @@
 // call once SurfaceSlot hands back `.item`.
 //
 // Quickshell-native wallpaper picker over the shared cover library
-// song/covers/. A summoned overlay: hidden by default, it drops onto the
+// song/wallpapers/. A summoned overlay: hidden by default, it drops onto the
 // OVERLAY layer with an EXCLUSIVE keyboard grab, shows a GridView of cover
 // thumbnails, and on pick switches the LIVE wallpaper. Escape / a scrim
 // click / a pick dismisses it.
 //
 // ── The write seam ──────────────────────────────────────────────────────────
 // QML has no file-write primitive and the shellbridge socket only speaks
-// `focuswindow`, so switching the wallpaper cannot write stage/cover.json from
+// `focuswindow`, so switching the wallpaper cannot write stage/wallpaper.json from
 // here. Instead a pick shells out through the ONE CLI command built for this —
-// `strillix cover set <path>` (Quickshell.execDetached, the same exec idiom
-// ConductorGadget uses) — which atomic-writes stage/cover.json as a pick
+// `strillix wallpaper set <path>` (Quickshell.execDetached, the same exec idiom
+// ConductorGadget uses) — which atomic-writes stage/wallpaper.json as a pick
 // (CONTRACTS.md §4). `cover` left
 // core's registry at P-A5 of the binary-split workstream and lives only in
 // `strillix` now (bare name resolves via PATH: modules/dendrites/aoide-packages.nix puts
@@ -97,8 +97,8 @@ PanelWindow {
                                             : WlrKeyboardFocus.None
 
     // ── Cover enumeration ───────────────────────────────────────────────────
-    readonly property string coversDir: (Quickshell.env("STRILLIX_ROOT") || (Quickshell.env("HOME") + "/.strillix")) + "/covers"
-    readonly property var coverExts: ["webp", "png", "jpg", "jpeg"]
+    readonly property string coversDir: (Quickshell.env("STRILLIX_ROOT") || (Quickshell.env("HOME") + "/.strillix")) + "/wallpapers"
+    readonly property var wallpaperExts: ["webp", "png", "jpg", "jpeg"]
     property var covers: []           // [{ name, path }]
     property int selIndex: 0
 
@@ -109,9 +109,9 @@ PanelWindow {
         id: lister
         command: ["ls", "-1", root.coversDir]
         stdout: StdioCollector {
-            id: coverOut
+            id: wallpaperOut
             onStreamFinished: {
-                var lines = ("" + coverOut.text).split("\n")
+                var lines = ("" + wallpaperOut.text).split("\n")
                 var out = []
                 for (var i = 0; i < lines.length; i++) {
                     var name = ("" + lines[i]).trim()
@@ -119,7 +119,7 @@ PanelWindow {
                     var dot = name.lastIndexOf(".")
                     if (dot < 0) continue
                     var ext = name.substring(dot + 1).toLowerCase()
-                    if (root.coverExts.indexOf(ext) === -1) continue
+                    if (root.wallpaperExts.indexOf(ext) === -1) continue
                     out.push({ "name": name, "path": root.coversDir + "/" + name })
                 }
                 out.sort(function (a, b) {
@@ -149,7 +149,7 @@ PanelWindow {
         if (root.selIndex < 0 || root.selIndex >= root.covers.length) return
         var c = root.covers[root.selIndex]
         if (c && c.path)
-            Quickshell.execDetached(["strillix", "cover", "set", c.path])
+            Quickshell.execDetached(["strillix", "wallpaper", "set", c.path])
         root.hide()
     }
     function applyAt(index) {
@@ -235,7 +235,7 @@ PanelWindow {
                 Text {
                     anchors.centerIn: parent
                     visible: root.covers.length === 0
-                    text: "no covers in song/covers/ ♪(´ε｀ )"
+                    text: "no covers in song/wallpapers/ ♪(´ε｀ )"
                     color: root.theme.paletteFg
                     opacity: 0.5
                     font.family: "monospace"

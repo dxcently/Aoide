@@ -4,7 +4,7 @@
 // over a hall of collapsible per-project FOLDERS, each folder a numbered
 // movement whose cards are main-agent plaques with their subagent plaques hung
 // beneath. Self-contained: this file owns its data read (state/stage/
-// sessions.json + projects.json + hooks.json + herald.json, QS_STAGE
+// sessions.json + projects.json + hooks.json + notifications.json, QS_STAGE
 // honoured), its model
 // build, and its card UI. Nothing here is shared with TerminalsGadget — that temple keeps its
 // own, untouched pattern.
@@ -132,7 +132,7 @@ Item {
             onTriggered: temple.nowMs = Date.now() }
 
     // ── Stage files (QS_STAGE override — the preview-harness seam) ──────────
-    // CONDUCTING files (sessions/projects/hooks/herald) live under
+    // CONDUCTING files (sessions/projects/hooks/notifications) live under
     // state/stage/, not song/stage/ (CONTRACTS.md §4, command-defrag S2) —
     // this temple never reads a rice file.
     readonly property string stageDir: {
@@ -173,8 +173,8 @@ Item {
         onLoaded: temple.parseHooks()
         onFileChanged: reload()
     }
-    // ── The SUMMONS channel — the herald ledger, read for permission cards ──
-    // state/stage/herald.json is the herald's own file (`aoide herald` / `session
+    // ── The SUMMONS channel — the notifications ledger, read for permission cards ──
+    // state/stage/notifications.json is the notifications' own file (`aoide notifications` / `session
     // permit` write it through the shellbridge). The roster reads ONLY its
     // `kind: "summons"` records, and only to learn which session is blocked on
     // a permission prompt the human can actually answer.
@@ -187,15 +187,15 @@ Item {
     // moment the verdict lands (the daemon dismisses the card after answering),
     // so the chips take themselves down with no local latch.
     FileView {
-        id: heraldFile
-        path: temple.stageDir + "/herald.json"
+        id: notificationsFile
+        path: temple.stageDir + "/notifications.json"
         watchChanges: true
         blockLoading: false
         printErrors: false
-        onLoaded: temple.parseHerald()
+        onLoaded: temple.parseNotifications()
         onFileChanged: reload()
     }
-    Component.onCompleted: { parseSessions(); parseProjects(); parseHooks(); parseHerald() }
+    Component.onCompleted: { parseSessions(); parseProjects(); parseHooks(); parseNotifications() }
 
     function parseSessions() {
         try {
@@ -240,10 +240,10 @@ Item {
     // to the session, so that is the key; the ledger's own record id
     // (`permit-<session>`) is the daemon's business and never leaves it.
     property var summonsById: ({})
-    function parseHerald() {
+    function parseNotifications() {
         var byId = {}
         try {
-            var t = heraldFile.text()
+            var t = notificationsFile.text()
             var o = (t && t.trim().length > 0) ? JSON.parse(t) : null
             var arr = (o && o.notifications) ? o.notifications : []
             for (var i = 0; i < arr.length; i++) {
@@ -255,14 +255,14 @@ Item {
         temple.summonsById = byId
     }
 
-    // The ONE outbound door for a verdict — the same wire line the herald's own
-    // chips send ({ cmd: "heraldverdict", id: <sessionId>, verdict: … }), so
+    // The ONE outbound door for a verdict — the same wire line the notifications' own
+    // chips send ({ cmd: "notificationsverdict", id: <sessionId>, verdict: … }), so
     // both surfaces answer through one daemon path, with one audit trail and
     // one still-awaiting guard. The closed verdict vocabulary is enforced
     // daemon-side; nothing else is ever sent from here.
     function verdict(sessionId, word) {
         if (!temple.bridge || !sessionId) return
-        temple.bridge.sendCommand({ cmd: "heraldverdict",
+        temple.bridge.sendCommand({ cmd: "notificationsverdict",
                                     id: "" + sessionId, verdict: word })
     }
 
@@ -1107,10 +1107,10 @@ Item {
     // right corner when held.
     //
     // 4½ · SUMMONS — a 20px lane that EXISTS only while a permission summons
-    // for this session stands in the herald ledger: the ask (the summons
+    // for this session stands in the notifications ledger: the ask (the summons
     // summary) left, approve / deny chips right. The one place the card's
     // silhouette moves, and it moves for the one thing that is blocking a
-    // human. Same wire line and same daemon guards as the herald's card.
+    // human. Same wire line and same daemon guards as the notifications' card.
     //
     // 5 · PULSE — ctx (this session's OWN context window, NUMBERS ONLY —
     // no percentage text, no bar glyph; ctxColor severity rides the colour
@@ -1736,13 +1736,13 @@ Item {
 
             // ── 4½ · SUMMONS — the permission gate, answered in place ────────
             // Present ONLY while a summons for this session stands in the
-            // herald ledger; the card grows by this one 20px lane and shrinks
+            // notifications ledger; the card grows by this one 20px lane and shrinks
             // back the moment a verdict lands. It sits directly under the
             // thinking lane on purpose: that lane is what the agent is asking,
             // this is the answer — ctx/up/cwd below stay ambient tallies.
             //
             // Same two chips, same wire line, same daemon guards as the
-            // herald's own card (herald.qml / herald-center.qml) — this is a
+            // notifications' own card (notifications.qml / notifications-center.qml) — this is a
             // SECOND door onto one mechanism, not a second mechanism. The
             // label is the summons summary ("Bash · permission"), which is
             // hook-payload DATA: PlainText, carried, never interpreted.

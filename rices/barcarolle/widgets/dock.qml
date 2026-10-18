@@ -60,7 +60,7 @@ PanelWindow {
     property bool primed: false
     property var seenJoin: ({})
     property var seenPhase: ({})
-    property var seenHerald: ({})
+    property var seenNotifications: ({})
     property int ledgerSeen: 0
     property real now: Date.now()
     property bool spinning: false
@@ -168,7 +168,7 @@ PanelWindow {
         root.logStick = logView.atYEnd
         root.feed = Buddy.merge(root.feed, lines)
     }
-    // bits: 1 sessions, 2 hooks, 4 herald, 8 ledger. The feed primes once all four have loaded or failed.
+    // bits: 1 sessions, 2 hooks, 4 notifications, 8 ledger. The feed primes once all four have loaded or failed.
     function mark(bit) {
         root.rebuild()
         if (!root.primed) {
@@ -179,7 +179,7 @@ PanelWindow {
         var by = root.model.byId, r
         if (bit === 1) { r = Buddy.joins(root.seenJoin, root.sessions, by); root.seenJoin = r.seen; root.feedIn(r.lines) }
         if (bit === 2) { r = Buddy.phases(root.seenPhase, root.hooks, by); root.seenPhase = r.seen; root.feedIn(r.lines) }
-        if (bit === 4) { r = Buddy.heralds(root.seenHerald, root.notes, by); root.seenHerald = r.seen; root.feedIn(r.lines) }
+        if (bit === 4) { r = Buddy.notifications(root.seenNotifications, root.notes, by); root.seenNotifications = r.seen; root.feedIn(r.lines) }
         if (bit === 8) {
             root.feedIn(Buddy.leaves(root.ledger, Math.min(root.ledgerSeen, root.ledger.length), Date.now()))
             root.ledgerSeen = root.ledger.length
@@ -187,10 +187,10 @@ PanelWindow {
     }
     function prime() {
         var by = root.model.byId, now = Date.now()
-        var p = Buddy.phases({}, root.hooks, by), h = Buddy.heralds({}, root.notes, by)
+        var p = Buddy.phases({}, root.hooks, by), h = Buddy.notifications({}, root.notes, by)
         root.seenJoin = Buddy.joins({}, root.sessions, by).seen
         root.seenPhase = p.seen
-        root.seenHerald = h.seen
+        root.seenNotifications = h.seen
         root.ledgerSeen = root.ledger.length
         root.primed = true
         root.feedIn(h.lines.concat(Buddy.leaves(root.ledger, 0, now),
@@ -222,7 +222,7 @@ PanelWindow {
         for (var x in root.answered) a[x] = root.answered[x]
         a[row.sid] = row.knock.cmd
         root.answered = a
-        root.bridge.sendCommand({ cmd: "heraldverdict", id: row.sid, verdict: word })
+        root.bridge.sendCommand({ cmd: "notificationsverdict", id: row.sid, verdict: word })
         root.rebuild()
     }
     function focusRow(id) {
@@ -279,11 +279,11 @@ PanelWindow {
         onLoadFailed: { root.hooks = []; root.hookAt = ({}); root.mark(2) }
     }
     FileView {
-        id: heraldFile
-        path: root.stageDir + "herald.json"
+        id: notificationsFile
+        path: root.stageDir + "notifications.json"
         watchChanges: true; blockLoading: false; printErrors: false
         onFileChanged: reload()
-        onLoaded: { root.notes = root.listOf(heraldFile, "notifications"); root.mark(4) }
+        onLoaded: { root.notes = root.listOf(notificationsFile, "notifications"); root.mark(4) }
         onLoadFailed: { root.notes = []; root.mark(4) }
     }
     FileView {
@@ -851,7 +851,7 @@ PanelWindow {
             }
             Text {
                 anchors.right: parent.right; anchors.rightMargin: 8; height: 20; verticalAlignment: Text.AlignVCenter
-                text: "joins · leaves · states · herald"; font.family: root.fUi; font.pixelSize: 10; color: Kit.dark(0.55)
+                text: "joins · leaves · states · notifications"; font.family: root.fUi; font.pixelSize: 10; color: Kit.dark(0.55)
             }
         }
 

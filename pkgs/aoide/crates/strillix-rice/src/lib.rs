@@ -14,7 +14,7 @@
 pub mod checkout_gate;
 pub mod commands;
 pub mod compose;
-pub mod cover;
+pub mod wallpaper;
 pub mod elements;
 pub mod health;
 pub mod host_declare;
@@ -27,7 +27,7 @@ pub mod widgets;
 
 // Every env-touching test in this crate now shares ONE lock —
 // `aoide_test_support::env_lock()` (a dev-dependency) — instead of this
-// crate-local mutex. Two locks meant `cover.rs`/`live.rs` tests weren't
+// crate-local mutex. Two locks meant `wallpaper.rs`/`live.rs` tests weren't
 // serialised against `commands/rice.rs`/`commands/mode.rs`/`commands/draft.rs`
 // tests that touch the SAME process-global env vars (`AOIDE_STAGE_DIR`,
 // `HYPRLAND_INSTANCE_SIGNATURE`), racing them under the default multithreaded

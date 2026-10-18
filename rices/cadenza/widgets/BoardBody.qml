@@ -14,7 +14,7 @@
 // A HELPER (uppercase — never a slot).
 //
 // ── What it reads (every path is a documented contract) ──────────────────
-//   state/stage/sessions.json · hooks.json · projects.json · herald.json
+//   state/stage/sessions.json · hooks.json · projects.json · notifications.json
 //   state/stage/graph.json        `workspaces[].project` — the S1 binding;
 //                                 `edges[]` kind `spawned` — a subagent's
 //                                 parent when its record names none
@@ -45,10 +45,10 @@
 //   bridge.focusSession(id)                 a row / rail click
 //   bridge.sessionAction(id, a, fields, cb) project · undying · kill, as
 //                                           sonata's SessionMenu sends them
-//   bridge.sendCommand({cmd:"heraldverdict", id, verdict})   a summons
-//   bridge.sendCommand({cmd:"heralddismiss", id})            a toast / "*"
+//   bridge.sendCommand({cmd:"notificationsverdict", id, verdict})   a summons
+//   bridge.sendCommand({cmd:"notificationsdismiss", id})            a toast / "*"
 //   bridge.refreshUsage()                   SYS account [r]
-// Every board/herald/session text is Text.PlainText and never pre-fills
+// Every board/notifications/session text is Text.PlainText and never pre-fills
 // the composer (house rule 4).
 import QtQuick
 import Quickshell
@@ -111,7 +111,7 @@ Item {
     property var sessions: []
     property var hooks: []
     property var projects: []
-    property var heraldRecs: []
+    property var notificationsRecs: []
     property var graphWorkspaces: []
     property var graphEdges: []
     property var account: null
@@ -150,12 +150,12 @@ Item {
         onLoadFailed: board.projects = []
     }
     FileView {
-        id: heraldFile
-        path: board.stageDir + "/herald.json"
+        id: notificationsFile
+        path: board.stageDir + "/notifications.json"
         watchChanges: true; blockLoading: false; printErrors: false
         onFileChanged: reload()
-        onLoaded: { var o = board._json(heraldFile); board.heraldRecs = (o && o.notifications) ? o.notifications : [] }
-        onLoadFailed: board.heraldRecs = []
+        onLoaded: { var o = board._json(notificationsFile); board.notificationsRecs = (o && o.notifications) ? o.notifications : [] }
+        onLoadFailed: board.notificationsRecs = []
     }
     FileView {
         id: graphFile
@@ -364,7 +364,7 @@ Item {
     //   ttys    [{ s, project }] — one per window (windowAddress), the live
     //            agent in it winning over a done one, over the hosting shell
     //   hookBy  sessionId → { phase, updatedAt }   (the hook phase wins)
-    //   summonsBy sessionId → the standing herald summons record
+    //   summonsBy sessionId → the standing notifications summons record
     // A subagent hangs under its nearest NON-subagent live ancestor: the
     // parent is `parentSessionId`, else the graph.json `spawned` edge that
     // points at it; a courier whose chain reaches no live main is a top card.
@@ -384,7 +384,7 @@ Item {
                 hookBy[hk.sessionId] = { phase: ("" + (hk.phase || "")).toLowerCase(), updatedAt: hk.updatedAt || "" }
         }
         var summonsBy = {}
-        var hr = board.heraldRecs || []
+        var hr = board.notificationsRecs || []
         for (i = 0; i < hr.length; i++)
             if (hr[i] && hr[i].kind === "summons" && hr[i].sessionId) summonsBy[hr[i].sessionId] = hr[i]
         var spawnedBy = {}
@@ -489,10 +489,10 @@ Item {
     // the one amber lamp: the traced session, when the host names one
     readonly property string hotId: (board.shared && board.shared.tracedSessionId) ? ("" + board.shared.tracedSessionId) : ""
 
-    // herald: summonses first (each waits on you), then newest first — the
-    // ledger's own order is newest LAST (CONTRACTS §4 herald.json)
-    readonly property var heraldRows: {
-        var sum = [], rest = [], r = board.heraldRecs || []
+    // notifications: summonses first (each waits on you), then newest first — the
+    // ledger's own order is newest LAST (CONTRACTS §4 notifications.json)
+    readonly property var notificationsRows: {
+        var sum = [], rest = [], r = board.notificationsRecs || []
         for (var i = r.length - 1; i >= 0; i--) {
             if (!r[i] || r[i].id === undefined) continue
             if (r[i].kind === "summons") sum.push(r[i]); else rest.push(r[i])
@@ -501,7 +501,7 @@ Item {
     }
     readonly property int summonsCount: {
         var n = 0
-        for (var i = 0; i < board.heraldRows.length; i++) if (board.heraldRows[i].kind === "summons") n++
+        for (var i = 0; i < board.notificationsRows.length; i++) if (board.notificationsRows[i].kind === "summons") n++
         return n
     }
 
@@ -563,11 +563,11 @@ Item {
         var id = (board.kindOf(s) === "subagent" && s.parentSessionId) ? s.parentSessionId : s.sessionId
         if (id) board.bridge.focusSession(id)
     }
-    function heraldVerdict(sessionId, word) {
-        if (board.bridge) board.bridge.sendCommand({ cmd: "heraldverdict", id: "" + sessionId, verdict: word })
+    function notificationsVerdict(sessionId, word) {
+        if (board.bridge) board.bridge.sendCommand({ cmd: "notificationsverdict", id: "" + sessionId, verdict: word })
     }
-    function heraldDismiss(id) {
-        if (board.bridge) board.bridge.sendCommand({ cmd: "heralddismiss", id: "" + id })
+    function notificationsDismiss(id) {
+        if (board.bridge) board.bridge.sendCommand({ cmd: "notificationsdismiss", id: "" + id })
     }
 
     // ══ KEYS ══════════════════════════════════════════════════════════════

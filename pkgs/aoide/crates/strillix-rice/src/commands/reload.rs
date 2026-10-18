@@ -14,7 +14,7 @@
 //!   the committed rices, syncs widget bodies + the widget-type registry
 //!   into `run/qml`, best-effort hyprctl); 2. snapshot the now-synced stage
 //!   + widget bodies as a take, deduped against the head
-//!   (`commands/take.rs`'s `snapshot_if_identical_to_head`, hanging off
+//!   (`commands/history.rs`'s `snapshot_if_identical_to_head`, hanging off
 //!   `rices/<song>/history/`); 3. shell reload.
 //! - **draft** — the same shape, but [`sync_draft_in_place`] stands in for
 //!   `handle_rice_stage`: `stage/theme.json` is ALREADY the draft's own
@@ -156,18 +156,18 @@ fn reload_staging_or_draft(inv: &Invocation, marker: mode::ModeMarker) -> Outcom
     }
 
     // Beat "snapshot": the now-synced stage + widget bodies, deduped against
-    // the head — `commands/take.rs`'s own dedupe core (the User's own
+    // the head — `commands/history.rs`'s own dedupe core (the User's own
     // settled rule, 2026-08-31), reused verbatim rather than reimplemented
     // here.
-    let take_data = match super::take::snapshot_if_identical_to_head("reload", "reload") {
+    let take_data = match super::history::snapshot_if_identical_to_head("reload", "reload") {
         Ok(Some(record)) => {
             changed.push(
-                aoide_storage::takes::take_path(&song, draft, record.take)
+                aoide_storage::history::history_path(&song, draft, record.take)
                     .to_string_lossy()
                     .into_owned(),
             );
             changed.push(
-                aoide_storage::takes::head_path(&song, draft)
+                aoide_storage::history::head_path(&song, draft)
                     .to_string_lossy()
                     .into_owned(),
             );
@@ -301,7 +301,7 @@ fn sync_draft_in_place(song: &str) -> Outcome {
 
     // The lock screen is written after the gate, unlike the terminal call
     // above, which predates it.
-    let lock_image = crate::cover::lockscreen_image(&aoide_storage::fs::rice_dir(song));
+    let lock_image = crate::wallpaper::lockscreen_image(&aoide_storage::fs::rice_dir(song));
     let (lock_changed, lock_data) = super::rice::stage_lockscreen(
         crate::live::lockscreen_fragment(&parsed, lock_image.as_deref()),
         lock_image.as_deref(),
@@ -429,7 +429,7 @@ mod tests {
 
         handle_reload(&reload_inv());
         assert!(
-            !aoide_storage::takes::takes_dir("sonata", None).is_dir(),
+            !aoide_storage::history::history_dir("sonata", None).is_dir(),
             "declarative reload must never create a history/ directory"
         );
         let _ = std::fs::remove_dir_all(&root);
@@ -468,7 +468,7 @@ mod tests {
         assert_eq!(out.data.as_ref().unwrap()["take"]["deduped"], false);
         assert_eq!(out.data.as_ref().unwrap()["take"]["take"], 1);
 
-        let record = aoide_storage::takes::load_take("sonata", None, 1)
+        let record = aoide_storage::history::load_history("sonata", None, 1)
             .expect("take 1 lives under rices/sonata/history/, not a draft");
         assert_eq!(record.cause, "reload");
         assert!(
@@ -514,7 +514,7 @@ mod tests {
         assert_eq!(second.status, Status::Ok, "{:?}", second.data);
         assert_eq!(second.data.as_ref().unwrap()["take"]["deduped"], true, "{:?}", second.data);
         assert_eq!(
-            aoide_storage::takes::list_takes("sonata", None).len(),
+            aoide_storage::history::list_history("sonata", None).len(),
             1,
             "an unchanged second reload must not mint a second take"
         );
@@ -532,7 +532,7 @@ mod tests {
         let third = handle_reload(&reload_inv());
         assert_eq!(third.status, Status::Ok, "{:?}", third.data);
         assert_eq!(third.data.as_ref().unwrap()["take"]["deduped"], false, "{:?}", third.data);
-        assert_eq!(aoide_storage::takes::list_takes("sonata", None).len(), 2);
+        assert_eq!(aoide_storage::history::list_history("sonata", None).len(), 2);
 
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -595,7 +595,7 @@ mod tests {
             "a link that was already right is not a swap: mode.json is not rewritten"
         );
 
-        let record = aoide_storage::takes::load_take("sonata", Some("neon-night"), 1)
+        let record = aoide_storage::history::load_history("sonata", Some("neon-night"), 1)
             .expect("the take lives under the draft");
         assert_eq!(
             record.theme,
@@ -603,7 +603,7 @@ mod tests {
             "the captured take is the DRAFT's content, not the rices's"
         );
         assert!(
-            aoide_storage::takes::list_takes("sonata", None).is_empty(),
+            aoide_storage::history::list_history("sonata", None).is_empty(),
             "and NOT under the song's own staging-mode history/ root"
         );
 

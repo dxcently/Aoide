@@ -7,7 +7,7 @@
 //! file: S = the shipped templates copy, M = the machine copy, R = the hash this
 //! command last wrote, kept in `aoide_storage::fs::rice_record(song)` —
 //! outside the song folder, so the §7.5 folder-equality gate, `rice declare`,
-//! `rice list`, `rice take` and the widget sync never see it.
+//! `rice list`, `rice history` and the widget sync never see it.
 //!
 //! ```text
 //! S present, M = S                  in-sync         record S

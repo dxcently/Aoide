@@ -890,7 +890,7 @@ in
           when the `strillix` dendrite's runtime (`dendrites/strillix/runtime.nix`) is
           imported, which sets it. Set only from that dendrite's directory;
           read it, never set it. Every unit that execs `strillix`
-          (shellbridge, the dunst herald feed) gates on this fact too, so a host
+          (shellbridge, the dunst notifications feed) gates on this fact too, so a host
           without the dendrite never has a unit pointed at a missing binary.
         '';
       };

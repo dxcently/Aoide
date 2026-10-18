@@ -54,7 +54,7 @@
   warning on a missing file:** `/stage/mode.json`
   (`ThemeState.qml`'s convention) is REWRITTEN on every build and on
   `preview set --song` — it always names the CURRENT song, never stale;
-  `/stage/cover.json`, `/stage/grimoire.json` (`GrimoireLedger`'s
+  `/stage/wallpaper.json`, `/stage/grimoire.json` (`GrimoireLedger`'s
   `launches` is an OBJECT keyed by app id, never an array — matches the
   live file's own shape), and `state/usage.json` are written ONCE, only
   when absent, and a rebuild must never clobber one a canvas or a test has
@@ -225,7 +225,7 @@
   run. The env-knob appendix (`ENV_KNOBS` in `commands/onboard.rs`) is the
   ONE allowed hand-list, because env vars aren't module options and so
   can't be derived the same way — keep it small.
-- **`shellbridge`/`herald` registration only, never the files.** The command
+- **`shellbridge`/`notifications` registration only, never the files.** The command
   registration lines for these live in strillix's `commands`; the implementation
   files stay in `aoide-conduct` (see that crate's charter-smudge note) —
   don't duplicate or move them here.
@@ -393,7 +393,7 @@
 ## Extension points
 
 - **A new paint command** adds a `cmd!`/`register` entry in the owning domain
-  crate (`song`, `screen`, or `conduct` for shellbridge/herald), wired into
+  crate (`song`, `screen`, or `conduct` for shellbridge/notifications), wired into
   strillix's `commands::all()`.
 - **A new special-cased command** extends the `special` closure passed to
   `aoide_protocol::door::run` in `run_strillix`.

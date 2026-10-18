@@ -1,19 +1,19 @@
-//! `aoide herald` — the notification ledger the Quickshell herald draws from.
+//! `aoide notifications` — the notification ledger the Quickshell notifications draws from.
 //!
 //! dunst owns `org.freedesktop.Notifications` and draws NOTHING (every rule in
 //! `modules/dendrites/dunst.nix` sets `skip_display`). Each notification is
-//! handed to `aoide herald push` through dunst's `script` hook, which reads the
+//! handed to `aoide notifications push` through dunst's `script` hook, which reads the
 //! `DUNST_*` environment and sends the record over the shellbridge socket. The
 //! bridge daemon — the single writer, as it already is for `sessions.json` —
-//! folds it into `state/stage/herald.json`, and the QML herald reads that file
+//! folds it into `state/stage/notifications.json`, and the QML notifications reads that file
 //! and draws the real widget.
 //!
-//!   notification → dunst (daemon only) → `aoide herald push` → bridge socket
-//!                → state/stage/herald.json → Quickshell
+//!   notification → dunst (daemon only) → `aoide notifications push` → bridge socket
+//!                → state/stage/notifications.json → Quickshell
 //!
 //! ── Why the socket hop, and not a direct write ────────────────────────────
 //! dunst runs its script asynchronously, so two notifications arriving together
-//! are two `aoide herald push` processes. Both would read-modify-write the same
+//! are two `aoide notifications push` processes. Both would read-modify-write the same
 //! ledger, and the loser's entry would vanish — a silently dropped
 //! notification, which is the one failure a notification system must not have.
 //! The bridge's accept loop serialises them for free.
@@ -41,8 +41,8 @@ use aoide_protocol::Invocation;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
-/// Schema version of `herald.json` — bumped only on a breaking shape change.
-pub const HERALD_SCHEMA: &str = "0";
+/// Schema version of `notifications.json` — bumped only on a breaking shape change.
+pub const NOTIFICATIONS_SCHEMA: &str = "0";
 
 /// How many notifications the ledger keeps. Matches the dunstrc's
 /// `history_length`, so the dock ledger and `dunstctl history` agree on depth.
@@ -52,7 +52,7 @@ pub const LEDGER_CAP: usize = 20;
 /// through unchanged so the QML side has one number to test.
 pub const NO_PROGRESS: i64 = -1;
 
-/// One notification, as the QML herald reads it.
+/// One notification, as the QML notifications reads it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Notification {
@@ -73,7 +73,7 @@ pub struct Notification {
     pub category: String,
     #[serde(default)]
     pub stack_tag: String,
-    /// Milliseconds; `0` means never expire. The QML herald owns the dismiss
+    /// Milliseconds; `0` means never expire. The QML notifications owns the dismiss
     /// clock — a notification dunst never displays is never displayed, so dunst
     /// does not expire it either.
     pub timeout_ms: i64,
@@ -95,17 +95,17 @@ pub const KIND_SUMMONS: &str = "summons";
 /// The ledger file: newest LAST, so the QML side reads it like a transcript.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct HeraldFile {
+pub struct NotificationsFile {
     #[serde(default)]
     pub schema_version: String,
     #[serde(default)]
     pub notifications: Vec<Notification>,
 }
 
-/// `state/stage/herald.json` (command-defrag S1, 2026-08-27) -- core
+/// `state/stage/notifications.json` (command-defrag S1, 2026-08-27) -- core
 /// conducting state, moved off `song/stage/` (strillix's tree).
-pub fn herald_path() -> std::path::PathBuf {
-    aoide_storage::fs::conducting_stage_dir().join("herald.json")
+pub fn notifications_path() -> std::path::PathBuf {
+    aoide_storage::fs::conducting_stage_dir().join("notifications.json")
 }
 
 /// Fold one notification into the ledger. Pure, so the replace/append/cap rules
@@ -174,7 +174,7 @@ where
         id: {
             let id = g("DUNST_ID");
             if id.trim().is_empty() {
-                format!("herald-{received_at}")
+                format!("notifications-{received_at}")
             } else {
                 id.trim().to_string()
             }
@@ -200,15 +200,15 @@ where
     }
 }
 
-/// `aoide herald push` — dunst's `script` hook. Reads the `DUNST_*`
+/// `aoide notifications push` — dunst's `script` hook. Reads the `DUNST_*`
 /// environment, builds the record, and hands it to the bridge.
 ///
 /// dunst appends its own five positional arguments (appname summary body icon
 /// urgency) to every script it runs; they are ignored here in favour of the
 /// environment, which carries strictly more (progress, category, stack tag,
 /// timeout) and needs no positional parsing.
-pub fn herald_push(_inv: &Invocation) -> Outcome {
-    let cmd = "herald.push";
+pub fn notifications_push(_inv: &Invocation) -> Outcome {
+    let cmd = "notifications.push";
     let notif = from_dunst_env(
         |k| std::env::var(k).ok(),
         aoide_storage::time::now_iso_utc(),
@@ -234,7 +234,7 @@ pub fn herald_push(_inv: &Invocation) -> Outcome {
 /// Send one record to the bridge for filing. The wire shape is the same
 /// newline-delimited JSON the QML widgets already speak.
 pub fn publish(notif: &Notification) -> std::io::Result<()> {
-    let line = json!({ "cmd": "heraldpush", "notification": notif });
+    let line = json!({ "cmd": "notificationspush", "notification": notif });
     crate::shellbridge::send_line(&line.to_string())
 }
 

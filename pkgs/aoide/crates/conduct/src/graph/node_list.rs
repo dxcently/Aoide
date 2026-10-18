@@ -63,7 +63,7 @@
 //! document (node-scoped session `id`s, `title`/`model`/`kind`/`parent`
 //! enrichment, `liveSessions`/`cachedSessions` tallies) atomically to
 //! [`mesh_path`] — the same `state/stage/` roster `graph::pending_path`/
-//! `herald::herald_path` already write to, so a widget `FileView`s it
+//! `notifications::notifications_path` already write to, so a widget `FileView`s it
 //! exactly like `aoide usage`'s `state/usage.json`. Bare `node list` (no
 //! `--mesh`) is untouched: same sweep, same [`row_json`] shape, no file
 //! written.
@@ -277,7 +277,7 @@ fn row_json(r: &Row) -> Value {
 }
 
 /// `state/stage/mesh.json` (P-14 M2) — core conducting state, the same
-/// `conducting_stage_dir()` roster `graph::pending_path`/`herald::herald_path`
+/// `conducting_stage_dir()` roster `graph::pending_path`/`notifications::notifications_path`
 /// resolve through. `pub`, matching those two: a future non-`--mesh` reader
 /// (a widget-side test, another module) reaches this path rather than a
 /// second `conducting_stage_dir().join("mesh.json")` literal.

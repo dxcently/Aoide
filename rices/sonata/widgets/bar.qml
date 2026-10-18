@@ -2739,7 +2739,7 @@ component WorkspaceRow: Item {
     //                 launcher/tray row idiom, no invented layout.
     //   · SIGNATURE — clay (theme.base09). Murex went to the colonnade
     //                 (2026-08-16), verdigris to the tray, rust to the
-    //                 herald; clay held two steles at once until the
+    //                 notifications; clay held two steles at once until the
     //                 colonnade moved off it, so the sharing precedent is
     //                 clay's own (calendar keeps it too). Aegean was the
     //                 poetic pick (δίκτυον, the fisherman's net) and is

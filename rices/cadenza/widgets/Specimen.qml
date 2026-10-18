@@ -99,11 +99,11 @@ Item {
             spacing: Math.round(root.kit.cellH / 2)
             Use {
                 kit: root.kit; helper: "Block"
-                props: ({ cols: 38, label: "herald ▸ firefox", stamp: "14:02", content: toastBody })
+                props: ({ cols: 38, label: "notifications ▸ firefox", stamp: "14:02", content: toastBody })
             }
             Use {
                 kit: root.kit; helper: "Block"
-                props: ({ cols: 38, label: "herald ▸ claude · SUMMONS", tone: root.kit.urgent,
+                props: ({ cols: 38, label: "notifications ▸ claude · SUMMONS", tone: root.kit.urgent,
                           stamp: "14:03", content: summonsBody })
             }
             Use {

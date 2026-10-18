@@ -711,8 +711,8 @@ fn read_baked(templates: &Path, file: &str) -> Result<serde_json::Value, WidgetS
 /// The TOP-LEVEL directory names of a MACHINE's song folder that the seed
 /// NEVER ships — its runtime scratch, each named where it is written:
 ///
-///   `history/`     the take store (`aoide-storage::takes` — `rice take`,
-///                `rice back`'s drift snapshot, `cover set`'s archive)
+///   `history/`     the take store (`aoide-storage::history` — `rice history`,
+///                `rice back`'s drift snapshot, `wallpaper set`'s archive)
 ///   `drafts/`    `aoide-storage::fs::drafts_dir` — `rice draft save`
 ///
 /// Names, matched at the song folder's root only: `widgets/history/` is a song's
@@ -728,7 +728,7 @@ fn read_baked(templates: &Path, file: &str) -> Result<serde_json::Value, WidgetS
 /// Two consumers, each for its own reason:
 ///
 ///   - [`machine_copy_differs`] ignores these: a snapshot is not a difference
-///     in the SONG. Comparing them would let `rice take` — an ordinary,
+///     in the SONG. Comparing them would let `rice history` — an ordinary,
 ///     reversible operation — turn a built-in song into a "differing" machine
 ///     copy, and on a host with no nix that makes the song unstageable while
 ///     reporting `is not built into this system`, which is false on its face.

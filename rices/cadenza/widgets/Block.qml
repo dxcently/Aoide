@@ -1,7 +1,7 @@
 // Block.qml — the borderless block (termui's magenta one): a single message
-// that is not a pane — one herald toast, one board item.
+// that is not a pane — one notifications toast, one board item.
 //
-//     herald ▸ firefox                    14:02
+//     notifications ▸ firefox                    14:02
 //     "Download finished: report.pdf"
 //
 // A HELPER (uppercase — never a slot), instantiated by URL

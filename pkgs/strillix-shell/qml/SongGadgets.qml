@@ -29,7 +29,7 @@
 // `Object.keys()` iteration order.
 //
 // Delegate: the real `WidgetSlot.qml` component directly (the same one
-// `herald-center` uses in dock.qml) — resolve/load logic is not
+// `notifications-center` uses in dock.qml) — resolve/load logic is not
 // reimplemented here. Fixed injected-prop contract (CONTRACTS.md §5
 // containment): `theme` + `bridge` only, nothing else. Dock gadgets take
 // that fixed contract by choice, not the wider `theme+bridge+shared` the

@@ -28,7 +28,7 @@ Item {
     implicitHeight: 26 + plate.height
 
     FileView {
-        path: root.stageDir + "herald.json"
+        path: root.stageDir + "notifications.json"
         watchChanges: true
         blockLoading: false
         printErrors: false
@@ -48,8 +48,8 @@ Item {
         onTriggered: root.now = new Date()
     }
 
-    function dismiss(id) { root.bridge.sendCommand({ cmd: "heralddismiss", id: "" + id }) }
-    function verdict(r, word) { root.bridge.sendCommand({ cmd: "heraldverdict", id: "" + r.sessionId, verdict: word }) }
+    function dismiss(id) { root.bridge.sendCommand({ cmd: "notificationsdismiss", id: "" + id }) }
+    function verdict(r, word) { root.bridge.sendCommand({ cmd: "notificationsverdict", id: "" + r.sessionId, verdict: word }) }
 
     component Glyph: Item {
         id: gl

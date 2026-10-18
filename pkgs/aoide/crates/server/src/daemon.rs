@@ -324,7 +324,7 @@ pub fn events_path(socket_path: &Path) -> PathBuf {
 
 /// The #69 hand-edit watcher's watched-file roster (`docs/architecture/
 /// AOIDED.md`'s "The first producer" section): the six broker-owned stage
-/// files. `pending.json`/`herald.json` come from `aoide-conduct` (this
+/// files. `pending.json`/`notifications.json` come from `aoide-conduct` (this
 /// crate already depends on it — `daemon.rs`'s own module doc), the other
 /// four from `aoide-storage`; every path is reached through its owning
 /// crate's own accessor rather than a second `stage_dir().join(...)`
@@ -336,7 +336,7 @@ fn stage_roster() -> Vec<PathBuf> {
         aoide_storage::stage::projects_path(),
         aoide_storage::stage::graph_path(),
         aoide_conduct::graph::pending_path(),
-        aoide_conduct::herald::herald_path(),
+        aoide_conduct::notifications::notifications_path(),
     ]
 }
 
@@ -554,7 +554,7 @@ fn internal_invocation(path: &[&str]) -> Invocation {
 /// why re-deriving from CURRENT content is the whole fold (no separate
 /// daemon-held roster exists to conflict with). A no-op (returns `None`,
 /// touches nothing) when neither file changed, so a hand-edit to
-/// `pending.json`/`herald.json`/`projects.json` alone never triggers a
+/// `pending.json`/`notifications.json`/`projects.json` alone never triggers a
 /// spurious `graph.json` rewrite. Returns `graph.json`'s path on the
 /// reconcile branch so the caller can fold it into the watcher's own
 /// baseline (`HandEditWatcher::note_own_write`) and not re-report this very
@@ -2318,7 +2318,7 @@ mod tests {
     fn reconcile_graph_projection_is_a_noop_when_neither_sessions_nor_hooks_changed() {
         let (_guard, stage, saved) = isolated_stage();
 
-        let out = reconcile_graph_projection(&["pending.json".to_string(), "herald.json".to_string()]);
+        let out = reconcile_graph_projection(&["pending.json".to_string(), "notifications.json".to_string()]);
         assert!(out.is_none(), "an unrelated changed file must not trigger a reconcile");
         assert!(!aoide_storage::stage::graph_path().exists(), "graph.json must not have been created");
 

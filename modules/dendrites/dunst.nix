@@ -13,10 +13,10 @@
 # dunst owns org.freedesktop.Notifications — the bus name, the spec, history,
 # stacking, pause levels, and the rule engine. It does NOT draw. Every rule
 # below sets `skip_display`, and a `script` hands the notification to
-# `aoide herald push`, which packs it over the shellbridge socket into
-# state/stage/herald.json (CONDUCTING, CONTRACTS.md §4), where the Quickshell
-# herald reads it and draws the real widget (song slot `herald` for the
-# popup, `herald-center` for the dock ledger).
+# `aoide notifications push`, which packs it over the shellbridge socket into
+# state/stage/notifications.json (CONDUCTING, CONTRACTS.md §4), where the Quickshell
+# notifications reads it and draws the real widget (song slot `notifications` for the
+# popup, `notifications-center` for the dock ledger).
 #
 # Why: the previous dunstrc carried the entire card as Pango markup in `format`
 # strings. That ceiling was structural, not cosmetic —
@@ -30,7 +30,7 @@
 #   - the layout was load-bearing on generated `default_icon` plates that were
 #     not always in the store; when one failed to resolve the column collapsed
 #     and every measured run in that rule ended ~43px short. The daemon's own
-#     journal carried the proof ("Failed to load icon from path: …herald-plate-
+#     journal carried the proof ("Failed to load icon from path: …notifications-plate-
 #     normal.png"). Cell arithmetic in markup is fragile by construction.
 # QML has hit testing, layout, and the theme. So the face moved there and the
 # markup is gone — not tuned, gone.
@@ -50,12 +50,12 @@
 # aoide side rather than papered over here:
 #   - DUNST_URGENCY is UPPERCASE (LOW/NORMAL/CRITICAL); the push command lowers it.
 #   - there is no DUNST_ACTIONS. A third-party sender's action labels never
-#     reach us, so the herald offers no buttons for them. This costs nothing for
+#     reach us, so the notifications offers no buttons for them. This costs nothing for
 #     the case that matters: an aoide permission summons is published to the
 #     stage file by `aoide session permit` itself, which knows its own verdicts.
 # And one consequence worth stating plainly: a notification that is never
 # displayed is never "displayed", so it does not expire — dunst drops it
-# straight into history. TIMEOUT rides in the record and the QML herald owns
+# straight into history. TIMEOUT rides in the record and the QML notifications owns
 # the dismiss clock. That is why no timeout is configured here.
 #
 # Select it with one line in hosts/yomi-strix/default.nix:
@@ -64,7 +64,7 @@
 # hosts/ knows dendrites; dendrites never know hosts.
 #
 # ── P-A8: also gated on aoide.strillix.enable ──────────────────────────────────
-# The herald-feed rule below hands every notification to `strillix herald push`
+# The notifications-feed rule below hands every notification to `strillix notifications push`
 # (pkgs.aoide.strillix — a SEPARATE, droppable output as of P-A8's multi-output
 # split); that push is this whole module's reason to exist, so a config that
 # leaves dunst on but turns strillix off would otherwise script an exec against a
@@ -99,14 +99,14 @@
       settings = {
         global = {
           # Nothing here is a dress — dunst never draws. These are the daemon
-          # behaviours the herald reads through, and nothing else.
+          # behaviours the notifications reads through, and nothing else.
 
           # Sender text is DATA. Never parsed as markup, on either side of the
-          # seam: dunst hands it to the script verbatim, and the QML herald
+          # seam: dunst hands it to the script verbatim, and the QML notifications
           # renders it as plain text. Untrusted text is never re-interpreted.
           markup = "no";
 
-          # Duplicate stacking is the daemon's job and stays on; the herald
+          # Duplicate stacking is the daemon's job and stays on; the notifications
           # ledger reads one entry per stack.
           stack_duplicates = true;
           hide_duplicate_count = false;
@@ -134,7 +134,7 @@
         # script still runs for a notification dunst would otherwise consider
         # suppressed.
         #
-        # The script is `aoide herald push`, which reads the DUNST_* environment
+        # The script is `aoide notifications push`, which reads the DUNST_* environment
         # and writes the record over $AOIDE_BRIDGE_SOCKET. It is a real command and
         # not a shell wrapper on purpose: notification bodies are arbitrary
         # sender text, and hand-rolled shell JSON escaping is a bug farm.
@@ -146,18 +146,18 @@
         # PATH, and the HM user unit's PATH is not ours to rely on. The command
         # reads the DUNST_* environment, so the positional arguments dunst adds
         # are ignored.
-        herald-feed = {
+        notifications-feed = {
           summary = ".*";
           skip_display = true;
           always_run_script = true;
-          # `herald` left core's registry at P-A5 of the binary-split
+          # `notifications` left core's registry at P-A5 of the binary-split
           # workstream — it now lives only in `strillix` (crates/strillix/src/
           # registry.rs). Both binaries ship from the same `pkgs.aoide`
           # derivation (P-A7), but as of P-A8 `strillix` lives in that
           # derivation's separate `strillix` output (`pkgs.aoide.strillix`) — named
           # explicitly here, same reasoning as shellbridge.nix's ExecStart.
-          script = "${pkgs.writeShellScript "aoide-herald-push" ''
-            exec ${pkgs.aoide.strillix}/bin/strillix herald push
+          script = "${pkgs.writeShellScript "aoide-notifications-push" ''
+            exec ${pkgs.aoide.strillix}/bin/strillix notifications push
           ''}";
         };
       };

@@ -55,7 +55,7 @@
 //! `Outcome` already come from there), and `choose_many` already supports
 //! everything this picker needs — pre-checked defaults (`default: &[usize]`,
 //! widened for exactly this shape of caller, ONBOARD.md decision 7) and a
-//! clean `None` on Esc/EOF. `song::commands::take`'s `prune_picker` is the
+//! clean `None` on Esc/EOF. `song::commands::history`'s `prune_picker` is the
 //! existing in-tree caller this mirrors; there was no missing primitive to
 //! add.
 //!

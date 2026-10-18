@@ -15,9 +15,9 @@
 //! 2026-08-27).** These four files are core orchestration state — CONTRACTS.md
 //! §4 — so they resolve through [`crate::fs::conducting_stage_dir`], not
 //! [`crate::fs::stage_dir`] (which still means the rice/paint stage tree).
-//! `pending.json`/`herald.json`, the other two files in the same broker-owned
+//! `pending.json`/`notifications.json`, the other two files in the same broker-owned
 //! roster, live in `aoide-conduct` instead (`graph::pending_path`,
-//! `herald::herald_path`) and made the identical switch.
+//! `notifications::notifications_path`) and made the identical switch.
 
 use crate::fs::{atomic_write, conducting_stage_dir};
 use serde::Serialize;

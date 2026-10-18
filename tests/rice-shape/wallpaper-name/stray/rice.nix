@@ -4,7 +4,7 @@
   system = {
     module = { lib, ... }: {
       config = lib.mkDefault {
-        aoide.theme.wallpaper = ./cover/dusk.jpg;
+        aoide.theme.wallpaper = ./wallpaper/dusk.jpg;
       };
     };
   };

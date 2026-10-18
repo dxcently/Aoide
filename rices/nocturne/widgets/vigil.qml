@@ -3,9 +3,9 @@
 // registry — Phase 12's live proof that a `kind = "dock"` entry actually
 // mounts). Hosted by SongGadgets.qml's data-driven Repeater of WidgetSlots
 // (not a fixed AoidePanel.qml anchor), mounted last in the gadget column,
-// after the six shipped gadgets and herald-center.
+// after the six shipped gadgets and notifications-center.
 //
-// Shape mirrors sonata's widgets/herald-center.qml (Item root, self-sizing
+// Shape mirrors sonata's widgets/notifications-center.qml (Item root, self-sizing
 // via width/implicitHeight, only theme+bridge injected — no extraProps),
 // the same fixed slot contract every widget in the wired catalog follows.
 //

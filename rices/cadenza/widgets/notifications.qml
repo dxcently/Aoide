@@ -1,13 +1,13 @@
-// herald.qml — cadenza's "herald" slot: the THIN window shell of the toast.
+// notifications.qml — cadenza's "notifications" slot: the THIN window shell of the toast.
 //
 // Hosted by `SurfaceSlot` (pkgs/strillix-shell/qml/slots.md): the root
 // is a `PanelWindow` owning its layer surface. Everything drawn — the ledger
 // read, the dismiss clock, the blocks, the two commands — lives in
-// `HeraldBody.qml`, loaded BY URL (design/kit.md §1); the preview canvas
+// `NotificationsBody.qml`, loaded BY URL (design/kit.md §1); the preview canvas
 // refuses a PanelWindow root, so the body is what gets previewed.
 //
-// Contract (the one sonata's herald keeps):
-//   · namespace `aoide-herald`, layer Overlay, no exclusive zone.
+// Contract (the one sonata's notifications keeps):
+//   · namespace `aoide-notifications`, layer Overlay, no exclusive zone.
 //   · Anchored top-right (intent §3.7): the bar's exclusive zone pushes the
 //     surface under it; the body supplies the margins in cells.
 //   · Mapped only while the body has something to show; sized to the stack.
@@ -35,13 +35,13 @@ PanelWindow {
     implicitWidth: Math.max(1, body.item ? body.item.implicitWidth : 1)
     implicitHeight: Math.max(1, body.item ? body.item.implicitHeight : 1)
     WlrLayershell.layer: WlrLayer.Overlay
-    WlrLayershell.namespace: "aoide-herald"
+    WlrLayershell.namespace: "aoide-notifications"
     WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
 
     Loader {
         id: body
         anchors.fill: parent
-        Component.onCompleted: setSource(Kit.helper("HeraldBody"), {
+        Component.onCompleted: setSource(Kit.helper("NotificationsBody"), {
             theme: Qt.binding(() => root.theme),
             bridge: Qt.binding(() => root.bridge) })
     }

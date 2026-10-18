@@ -941,7 +941,7 @@ stripping one, and a held spawn shows as its whole command.
   `sync_codex_app_threads`; `reap.rs::profile_for` already dispatches an
   eidolon-enrolled record to `EIDOLON_PROFILE` for free, off `rec.agent`
   alone, the same generic path every other harness takes.
-- `shellbridge`, `herald` — files only; their CLI commands (registry lines)
+- `shellbridge`, `notifications` — files only; their CLI commands (registry lines)
   moved to `strillix` at P-A2, but both stay resident here (see charter smudge
   below). The socket answers five commands with a reply. Two of them run
   through the same sequencer over either subject they name by: a SESSION
@@ -1463,10 +1463,10 @@ stripping one, and a held spawn shows as its whole command.
   precedent (`shellbridge::cross_uid_gate`/`daemon::cross_uid_gate`, pure
   and unit-tested without a real different-uid connection). **This is a
   CROSS-uid floor only** — under OQ1-A every legitimate connector on both
-  sockets (the QML herald/bar widgets, `aoide herald push`, `session
+  sockets (the QML notifications/bar widgets, `aoide notifications push`, `session
   permit`'s own raise, the CLI's `daemon_dispatch` proxy) already shares
   the operator's own uid, so a same-uid attacker synthesizing a
-  `heraldverdict` on shellbridge's verdict door is an OQ1-A-inherent
+  `notificationsverdict` on shellbridge's verdict door is an OQ1-A-inherent
   residual this floor does not close — stated honestly in `CONTRACTS.md`
   rather than oversold here, the same posture P-ID2's own per-session
   socket residual holds. Two attribution leaks close alongside the floor:
@@ -1613,7 +1613,7 @@ stripping one, and a held spawn shows as its whole command.
   `session:` prefix) — absent stays absent, nothing defaulted, inferred,
   or cross-host-resolved; `effectiveProject` stays absent on every remote
   row, unchanged. `node_list.rs::mesh_path` (beside `graph::pending_path`/
-  `herald::herald_path`) is where the result is atomically staged —
+  `notifications::notifications_path`) is where the result is atomically staged —
   `state/stage/mesh.json`, one file for a dock or Sonata widget to
   `FileView` (the Mesh section wiring is a later phase; nothing reads it
   yet), the same `aoide usage` → `state/usage.json` precedent; bare
@@ -1704,9 +1704,9 @@ this crate carries specifically so `aoide-server` never has to; see
 ## How it composes
 
 `screen`, `server`, `conductor`, `cli`, and `strillix` all depend on it.
-**Charter smudge**: `shellbridge.rs`/`herald.rs` stay as FILES here even
+**Charter smudge**: `shellbridge.rs`/`notifications.rs` stay as FILES here even
 though their CLI commands moved to `strillix` — `permit.rs` publishes summons
-through `herald`, and `conductor/ui.rs` reads the socket path `shellbridge`
+through `notifications`, and `conductor/ui.rs` reads the socket path `shellbridge`
 owns, so both are entangled with core
 (`docs/architecture/PACKAGE-LAYOUT.md`, "Charter exceptions").
 

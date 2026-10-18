@@ -274,12 +274,12 @@ let
     printf '%s\n' ${lib.escapeShellArg config.aoide.wallpaper.provider} > "$provider"
     mv -f "$provider" "${config.aoide.strillix.root}/stage/wallpaper-provider"
     # The declared song's own cover, as the default (CONTRACTS.md §4): the
-    # picture `aoide.theme.wallpaper` names, published as `stage/cover.json`
+    # picture `aoide.theme.wallpaper` names, published as `stage/wallpaper.json`
     # the way `rice stage` writes a default. A standing pick is left standing
-    # (lib/cover-seed.sh). A song with no picture leaves the file alone: the
+    # (lib/wallpaper-seed.sh). A song with no picture leaves the file alone: the
     # layer ignores a cover that names another song.
     ${lib.optionalString (config.aoide.theme.wallpaper != null) ''
-      ${pkgs.bash}/bin/bash ${../../../lib/cover-seed.sh} ${pkgs.jq}/bin/jq \
+      ${pkgs.bash}/bin/bash ${../../../lib/wallpaper-seed.sh} ${pkgs.jq}/bin/jq \
         "${config.aoide.strillix.root}" "${config.aoide.rice}" "${config.aoide.theme.wallpaper}"
     ''}
     # The declared song's terminal opacity, as a one-line kitty fragment
@@ -605,7 +605,7 @@ in
     #     built-in song absent from the machine is added whole;
     #   - a file the machine edited, or one with no record, is kept and
     #     reported, never overwritten;
-    #   - `takes/` and `drafts/` and any symlink at a song's path are never
+    #   - `history/` and `drafts/` and any symlink at a song's path are never
     #     touched.
     #
     # What refresh wrote is recorded in
@@ -681,7 +681,7 @@ in
             # `seedStageScript` (above) does the actual write. It RENAMES over
             # `stage/theme.json` and never writes through it, so a drafted song's
             # own file is untouched while its routing link is replaced.
-            # `$STRILLIX_ROOT/stage/cover.json` is never touched (CONTRACTS.md §4). The seed
+            # `$STRILLIX_ROOT/stage/wallpaper.json` is never touched (CONTRACTS.md §4). The seed
             # is declared truth, written the same way whatever the mode: the staged
             # or drafted song `stage/mode.json` names is brought back afterwards by
             # `aoide-rice-reload` (below).

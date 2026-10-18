@@ -1,11 +1,11 @@
 // wallpaper.qml — cadenza's `wallpaper` slot: the BOARD, live (intent §3.9).
 //
-// The cover is the song's circuit board (CoverPcb.qml generates it, one fixed
+// The cover is the song's circuit board (WallpaperPcb.qml generates it, one fixed
 // seed, and the static PNG under this widget is the same board). This body
 // adds the one thing a still cannot have: LIGHT MOVING ON THE COPPER.
 //
 // ── What it draws ───────────────────────────────────────────────────────────
-//   · the copper — CoverPcb, instantiated by URL and left to paint itself
+//   · the copper — WallpaperPcb, instantiated by URL and left to paint itself
 //     (its own Canvas, rasterised once). This file never re-draws a track.
 //   · the light — ONE delegate per pulse (`component Light` below), each one a
 //     head, a handful of tail rectangles and its node ring. No Canvas: a
@@ -32,8 +32,8 @@
 // ONE live element, and there are many pulses by design.
 //
 // ── Cost, stated plainly ────────────────────────────────────────────────────
-// The copper is rasterised once (`Canvas.Image`, CoverPcb's own target), and
-// its board is generated in CoverPcb's WorkerScript (seconds of JS per output,
+// The copper is rasterised once (`Canvas.Image`, WallpaperPcb's own target), and
+// its board is generated in WallpaperPcb's WorkerScript (seconds of JS per output,
 // never on the GUI thread), so the light starts when the board arrives. The
 // light costs one small binding pass per frame per pulse (~0.003 ms of engine
 // work for the whole board, measured) and damages only the rectangles it
@@ -69,7 +69,7 @@ Item {
         Quickshell.env("AOIDE_ROOT") || (Quickshell.env("HOME") + "/.aoide")
 
     // ════════════════════════════════════════════════════════════════════════
-    // THE COPPER — CoverPcb, by URL, with the song's own loading idiom
+    // THE COPPER — WallpaperPcb, by URL, with the song's own loading idiom
     // ════════════════════════════════════════════════════════════════════════
     // `setSource` with initial properties (bar.qml's `Use` and BarPreview's own
     // loader do exactly this for helpers that declare `required property var
@@ -79,7 +79,7 @@ Item {
         id: cover
         anchors.fill: parent
         z: 1
-        Component.onCompleted: setSource(root.kit.helper("CoverPcb"), {
+        Component.onCompleted: setSource(root.kit.helper("WallpaperPcb"), {
             theme: root.theme,
             bridge: root.bridge
         })
@@ -198,7 +198,7 @@ Item {
     // One pulse aimed at a ring, or the idle roam when there is nothing to aim
     // at. Both go through Trace.spawn — the variation is all in the arguments.
     // The roam falls back to no pulse at all when the board has no wired track
-    // yet (the board arrives from CoverPcb's worker, seconds after the first
+    // yet (the board arrives from WallpaperPcb's worker, seconds after the first
     // paint).
     function spawnAt(ring, state, urgent) {
         var r = root.rngState

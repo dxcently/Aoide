@@ -109,16 +109,16 @@
   dependency down into `theme`/`live` without re-deriving why that
   boundary existed.
 - **A cover carries its song — don't add a rule that reads "the previous
-  song".** Every writer of `stage/cover.json` stamps the staged song into it
-  (`cover::stage_pick`/`stage_default`), and the ONE rule is read-side: a
+  song".** Every writer of `stage/wallpaper.json` stamps the staged song into it
+  (`wallpaper::stage_pick`/`stage_default`), and the ONE rule is read-side: a
   cover applies while its `song` equals the song staged now, and is ignored
-  otherwise (`AoideWallpaper.qml`; CONTRACTS.md §4). `cover::stage_for_song`
+  otherwise (`AoideWallpaper.qml`; CONTRACTS.md §4). `wallpaper::stage_for_song`
   keeps a standing pick iff `pick.song == <song being staged>` and otherwise
   writes that song's own default, so `rice stage`, the `rice mode` re-pins,
-  `cover set --clear` and the lane's activation seed never need to know what
-  was staged a moment ago — the seed touches `cover.json` not at all.
-- **`cover::pick_tiles` is the one tile rule, and `stage_pick` is its one
-  writer.** `tile` and `position` are decided for a still by `cover set`
+  `wallpaper set --clear` and the lane's activation seed never need to know what
+  was staged a moment ago — the seed touches `wallpaper.json` not at all.
+- **`wallpaper::pick_tiles` is the one tile rule, and `stage_pick` is its one
+  writer.** `tile` and `position` are decided for a still by `wallpaper set`
   alone: the record door (`--from-skwd`) and the song defaults never carry
   them, and every copy (a take, a draft, a kept pick) carries them verbatim
   without recomputing. Nothing reading the PICK re-derives the `_tile` name
@@ -132,12 +132,12 @@
   staged song and the step-aside image otherwise, every other provider gets
   nothing — and `sync()` is the ONE function that runs a provider, best-effort and
   inert under this crate's test build. Call it from every write that changes
-  what should show (`cover set`, `--clear`, `rice stage`, `rice back`) and NEVER
+  what should show (`wallpaper set`, `--clear`, `rice stage`, `rice back`) and NEVER
   from `--from-skwd`: that door only RECORDS, because the engine's own
   post-processing hook re-enters it and the engine cannot tell an Aoide apply
   from the user's own pick (an unbounded loop, measured).
 - **Staging/draft/declarative-mode gating lives in `commands`, not here.**
-  `rice stage`/`cover set` refuse outside an unlocked mode — that gate is a
+  `rice stage`/`wallpaper set` refuse outside an unlocked mode — that gate is a
   `commands` concern layered over these pure/near-pure engine modules. The
   record door (`--from-skwd`) is the one exemption: it writes down what an
   external provider is already showing.
@@ -208,7 +208,7 @@
   `stage/hyprlock.conf` and is called wherever `stage_terminal_colors` is**
   (`handle_rice_stage`, `rice back`, `strx reload`'s `sync_draft_in_place`,
   after the §7.5 gate there). Only a song that ships `lockscreen.<ext>`
-  (`cover::lockscreen_image`) dresses the lock: the `hyprlock` emitter writes
+  (`wallpaper::lockscreen_image`) dresses the lock: the `hyprlock` emitter writes
   all ten variables with it and comments alone without it, and a song with no
   picture still rewrites the file, which is what clears an earlier staged
   song's dress. A dressed file is complete, so a staged song's picture never
@@ -322,7 +322,7 @@
   (`widgets::MACHINE_RUNTIME_DIRS`) and machine-side symlinks are never
   touched; a symlink in the shipped copy is an error; a symlinked song
   folder is skipped. The record lives OUTSIDE the song folder so the §7.5
-  `trees_equal` gate, `rice declare`, `rice list`, `rice take` and the
+  `trees_equal` gate, `rice declare`, `rice list`, `rice history` and the
   widget sync never see it; it is written last and atomically, under
   `with_stage_lock`. `seed_rices_from_templates` goes through
   `refresh_song` so a stage-time seed records too. Changing the rule, the
@@ -339,10 +339,10 @@
 - **`aoide_storage::takes`' functions take `draft: Option<&str>`, not
   `&str` — `None` means staging-mode (`rices/<song>/history/`), `Some`
   means a routed draft (`rices/<song>/drafts/<name>/history/`).**
-  `commands/take.rs::resolve_scope` is the one place that resolves which
+  `commands/history.rs::resolve_scope` is the one place that resolves which
   scope applies, off `mode.json` — every take/back/prune command in that
   file threads its `Option<&str>` straight through rather than re-deriving
-  it. `TakeRecord` also carries `widgets: Value` (the song's widget bodies
+  it. `HistoryRecord` also carries `widgets: Value` (the song's widget bodies
   at mint time, `widgets.rs::snapshot_widget_bodies`) — captured on every
   take in both scopes, but never restored by `rice back` (see the
   `handle_rice_stage` bullet above: widget bodies stay git's substrate,

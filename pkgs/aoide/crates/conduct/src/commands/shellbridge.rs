@@ -3,7 +3,7 @@
 //! Split out of `aoide-server`'s `commands::register_infra` (P-A2 of the
 //! binary-split workstream, docs/architecture/PACKAGE-LAYOUT.md): `daemon`
 //! stays a core command, but `shellbridge` belongs with the graphical binary
-//! (`strillix`) alongside `rice`/`screen`/`herald`/`quickshell` — this module is
+//! (`strillix`) alongside `rice`/`screen`/`notifications`/`quickshell` — this module is
 //! what P-A4 points `strillix` at. The socket-loop implementation
 //! (`crate::shellbridge::run`) does NOT move; only this registration does.
 //! The root package's `commands::all()` still calls this directly after

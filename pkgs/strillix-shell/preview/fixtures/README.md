@@ -8,7 +8,7 @@ never talks to `aoided`, so these four files ARE the world the previewed
 widget sees.
 
 Song-blind, like the rest of this shell source: a fixture describes
-session/project/hook/herald *shapes*, never a song's taste.
+session/project/hook/notifications *shapes*, never a song's taste.
 
 ## The four files
 
@@ -21,7 +21,7 @@ hand-invented):
 | `sessions.json` | `{schemaVersion, sessions: […]}` | conductor, terminals, SessionMenu |
 | `projects.json` | `{schemaVersion, projects: […]}` | conductor (project grouping) |
 | `hooks.json` | `{schemaVersion, hooks: […]}` | conductor (hook rows) |
-| `herald.json` | `{schemaVersion, notifications: […]}` | herald surface |
+| `notifications.json` | `{schemaVersion, notifications: […]}` | notifications surface |
 
 Every id, pid, socket path and hostname in here is FAKE — session ids are
 `f1000000-0000-4000-8000-…`, pids start at 999001 — so a fixture can never
@@ -35,7 +35,7 @@ on one reaches the canvas's stub bridge, not a process.
 | `empty` | zero sessions, one project, no hooks, no notifications — the honest empty state every widget must render without collapsing |
 | `one` | a single working claude agent (`single-ember`) — the minimum row, and what one-of-everything layout looks like |
 | `many` | 17 sessions across two projects: agents, subagents, app records, plain shells, idle/working/awaiting, nested children (`sub:`/`a2a:`/`win:` kinds) — the density case |
-| `long-text` | 6 sessions built to break layout: a 132-char title, a 40-char model, a 30-char petname, a 120-char cwd, a multi-line `say`, rows with `title`/`say`/`tool`/`model` missing, Greek/Japanese/emoji — plus a `summons` herald record and 3 hook rows |
+| `long-text` | 6 sessions built to break layout: a 132-char title, a 40-char model, a 30-char petname, a 120-char cwd, a multi-line `say`, rows with `title`/`say`/`tool`/`model` missing, Greek/Japanese/emoji — plus a `summons` notifications record and 3 hook rows |
 
 `many` is the designer's own set, adopted verbatim from the widget-design
 lane, and two things in it depart from the rules above: its `hooks.json` is a
@@ -50,7 +50,7 @@ follows the rules.
 ```sh
 mkdir pkgs/strillix-shell/preview/fixtures/<name>
 cd    pkgs/strillix-shell/preview/fixtures/<name>
-for f in sessions projects hooks herald; do
+for f in sessions projects hooks notifications; do
   jq '<your edit>' ~/.aoide/state/stage/$f.json > $f.json
 done
 ```

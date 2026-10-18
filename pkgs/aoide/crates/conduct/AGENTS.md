@@ -802,9 +802,9 @@ in the message.
   wayland/image/quickshell dependency — that's exactly what P-A1 moved OUT
   (to `screen`) to keep this crate headless-safe. `cargo tree -p
   aoide-conduct` staying free of those deps is a standing gate.
-- **`shellbridge.rs`/`herald.rs` are a named, deliberate charter smudge.**
+- **`shellbridge.rs`/`notifications.rs` are a named, deliberate charter smudge.**
   Their CLI commands live in `strillix`; the files stay here because `permit.rs`
-  (this crate) publishes through `herald`, and `conductor/ui.rs` reads the
+  (this crate) publishes through `notifications`, and `conductor/ui.rs` reads the
   socket path `shellbridge` owns. Don't move the files to chase the commands —
   see `docs/architecture/PACKAGE-LAYOUT.md`'s "Charter exceptions" for the
   full reasoning before touching either.
@@ -2001,7 +2001,7 @@ in the message.
     portable path for shell and non-shell alike. The non-shell wrap writes
     through the same `do_session_refresh` (change-only, one stage lock), with
     no shell snapshot.
-  - **The herald's summons card is not raised for it.** `permit::
+  - **The notifications' summons card is not raised for it.** `permit::
     spawn_summons` is the hook door's and types a profile's approve/deny
     keystrokes; a program with no profile has none. The conductor, the dock
     and the A2A `input-required` fold read `state: awaiting` and need nothing
@@ -2565,7 +2565,7 @@ in the message.
 - **`mesh_path()` (`node_list.rs`) names ONE file, `state/stage/mesh.json`,
   and only `--mesh` may write it.** It resolves through
   `aoide_storage::fs::conducting_stage_dir()`, the same root
-  `graph::pending_path`/`herald::herald_path` resolve through — don't hang
+  `graph::pending_path`/`notifications::notifications_path` resolve through — don't hang
   a second path helper or a raw `state/stage/mesh.json` literal anywhere
   else. `mesh_document`'s write is a single `aoide_storage::stage::
   write_stage` call (atomic write-temp-then-rename), and it is the ONLY

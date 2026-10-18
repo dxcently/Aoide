@@ -3,7 +3,7 @@
 //! routing + `rice mode draft`, the User 2026-08-14).
 //!
 //! A draft is a saved snapshot living at
-//! `rices/<song>/drafts/<name>/theme.json` (+ `cover.json` when the
+//! `rices/<song>/drafts/<name>/theme.json` (+ `wallpaper.json` when the
 //! stage had one) — nested under the song it varies, not a flat top-level
 //! dir: a draft is fundamentally a variation of an ALREADY COMPOSED song, so
 //! it belongs inside that song's own directory, not a separate global
@@ -16,7 +16,7 @@
 //! **Reaching a draft is `rice mode draft <name>`'s job now**
 //! (`commands/mode.rs::handle_mode_draft`), not this module's — it points
 //! `stage/theme.json` at a SYMLINK into the draft's own file, so every
-//! future writer (`rice stage`, `cover set`, a hand-edit, Quickshell's own
+//! future writer (`rice stage`, `wallpaper set`, a hand-edit, Quickshell's own
 //! FileView reload) transparently lands in the draft with zero
 //! draft-awareness anywhere, because [`aoide_storage::fs::atomic_write`] is
 //! symlink-transparent. This module owns only the drafts THEMSELVES:
@@ -65,7 +65,7 @@ use aoide_protocol::Door;
 pub fn register(r: &mut Registry) {
     r.insert(cmd!(
         path: ["rice", "draft", "save"],
-        summary: "Fork the current stage (stage/theme.json, required; stage/cover.json if present) into rices/<song>/drafts/<name>/ — <song> is the currently staged song. With no <name>, mints the lowest free `draft-<n>` for it. Upserts; independent of mode (never switches modes).",
+        summary: "Fork the current stage (stage/theme.json, required; stage/wallpaper.json if present) into rices/<song>/drafts/<name>/ — <song> is the currently staged song. With no <name>, mints the lowest free `draft-<n>` for it. Upserts; independent of mode (never switches modes).",
         args: [arg!("name", "string", false, "Draft name; omit it to mint the lowest free `draft-<n>` for the staged song.")],
         flags: [],
         gated: false,
@@ -206,7 +206,7 @@ fn mint_draft_name(song: &str) -> String {
 /// `stage/theme.json` into `rices/<song>/drafts/<name>/theme.json`
 /// (reading it fresh — transparently through a `Draft`-mode symlink if one
 /// is currently routed there, same as any other reader), mirroring
-/// `stage/cover.json` in if present, or removing a stale draft cover if the
+/// `stage/wallpaper.json` in if present, or removing a stale draft cover if the
 /// current stage no longer has one (a draft always mirrors the stage
 /// exactly at save/fork time, never a merge of old + new).
 ///
@@ -253,34 +253,34 @@ pub(crate) fn fork_stage_into(song: &str, name: &str) -> Outcome {
     }
     let mut changed: Vec<String> = vec![theme_dst.to_string_lossy().into_owned()];
 
-    let cover_src = stage.join("cover.json");
-    let cover_dst = dir.join("cover.json");
-    let cover_path = if cover_src.is_file() {
-        match std::fs::read_to_string(&cover_src) {
-            Ok(cover_raw) => {
-                if let Err(e) = shellbridge::atomic_write(&cover_dst, &cover_raw) {
+    let wallpaper_src = stage.join("wallpaper.json");
+    let wallpaper_dst = dir.join("wallpaper.json");
+    let wallpaper_path = if wallpaper_src.is_file() {
+        match std::fs::read_to_string(&wallpaper_src) {
+            Ok(wallpaper_raw) => {
+                if let Err(e) = shellbridge::atomic_write(&wallpaper_dst, &wallpaper_raw) {
                     return Outcome::error(
                         "rice.draft.save",
-                        format!("failed to write {}: {e}", cover_dst.display()),
+                        format!("failed to write {}: {e}", wallpaper_dst.display()),
                     )
                     .changed(changed)
-                    .with_data(json!({ "reason": "write-failed", "target": cover_dst.to_string_lossy() }));
+                    .with_data(json!({ "reason": "write-failed", "target": wallpaper_dst.to_string_lossy() }));
                 }
-                changed.push(cover_dst.to_string_lossy().into_owned());
-                Some(cover_dst.to_string_lossy().into_owned())
+                changed.push(wallpaper_dst.to_string_lossy().into_owned());
+                Some(wallpaper_dst.to_string_lossy().into_owned())
             }
             Err(e) => {
                 return Outcome::error(
                     "rice.draft.save",
-                    format!("failed to read staged cover.json: {e}"),
+                    format!("failed to read staged wallpaper.json: {e}"),
                 )
                 .changed(changed)
-                .with_data(json!({ "reason": "cover-read-failed" }));
+                .with_data(json!({ "reason": "wallpaper-read-failed" }));
             }
         }
     } else {
-        if cover_dst.exists() {
-            let _ = std::fs::remove_file(&cover_dst);
+        if wallpaper_dst.exists() {
+            let _ = std::fs::remove_file(&wallpaper_dst);
         }
         None
     };
@@ -298,7 +298,7 @@ pub(crate) fn fork_stage_into(song: &str, name: &str) -> Outcome {
         "name": name,
         "song": song,
         "theme": theme_dst.to_string_lossy(),
-        "cover": cover_path,
+        "wallpaperPick": wallpaper_path,
     }))
 }
 
@@ -476,7 +476,7 @@ mod tests {
         let stage = root.join("stage");
         std::fs::create_dir_all(&stage).unwrap();
         stage_with_song(&stage, "sonata");
-        std::fs::write(stage.join("cover.json"), r#"{"path":"x.png"}"#).unwrap();
+        std::fs::write(stage.join("wallpaper.json"), r#"{"path":"x.png"}"#).unwrap();
         crate::commands::test_support::ensure_default_rices_fixture();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
 
@@ -486,7 +486,7 @@ mod tests {
         let staged = std::fs::read_to_string(stage.join("theme.json")).unwrap();
         assert_eq!(std::fs::read_to_string(dir.join("theme.json")).unwrap(), staged);
         assert_eq!(
-            std::fs::read_to_string(dir.join("cover.json")).unwrap(),
+            std::fs::read_to_string(dir.join("wallpaper.json")).unwrap(),
             r#"{"path":"x.png"}"#
         );
         assert!(out
@@ -496,11 +496,11 @@ mod tests {
         assert!(out
             .changed
             .iter()
-            .any(|c| c.ends_with("rices/sonata/drafts/neon-night/cover.json")));
+            .any(|c| c.ends_with("rices/sonata/drafts/neon-night/wallpaper.json")));
         let data = out.data.unwrap();
         assert_eq!(data["name"], "neon-night");
         assert_eq!(data["song"], "sonata");
-        assert!(data["cover"].as_str().unwrap().ends_with("cover.json"));
+        assert!(data["wallpaperPick"].as_str().unwrap().ends_with("wallpaper.json"));
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -562,26 +562,26 @@ mod tests {
     }
 
     #[test]
-    fn save_clears_a_stale_cover_when_the_current_stage_has_none() {
+    fn save_clears_a_stale_wallpaper_when_the_current_stage_has_none() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
         let root = unique_tmp("draft-save-stale-cover");
         let stage = root.join("stage");
         std::fs::create_dir_all(&stage).unwrap();
         stage_with_song(&stage, "sonata");
-        std::fs::write(stage.join("cover.json"), r#"{"path":"x.png"}"#).unwrap();
+        std::fs::write(stage.join("wallpaper.json"), r#"{"path":"x.png"}"#).unwrap();
         crate::commands::test_support::ensure_default_rices_fixture();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
 
         handle_draft_save(&inv(&["rice", "draft", "save"], &["neon-night"]));
         let dir = root.join("rices").join("sonata").join("drafts").join("neon-night");
-        assert!(dir.join("cover.json").is_file());
+        assert!(dir.join("wallpaper.json").is_file());
 
-        std::fs::remove_file(stage.join("cover.json")).unwrap();
+        std::fs::remove_file(stage.join("wallpaper.json")).unwrap();
         let out = handle_draft_save(&inv(&["rice", "draft", "save"], &["neon-night"]));
         assert_eq!(out.status, Status::Ok, "{:?}", out.data);
-        assert!(!dir.join("cover.json").exists(), "stale cover removed on re-save");
-        assert!(out.data.unwrap()["cover"].is_null());
+        assert!(!dir.join("wallpaper.json").exists(), "stale cover removed on re-save");
+        assert!(out.data.unwrap()["wallpaperPick"].is_null());
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -753,7 +753,7 @@ mod tests {
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
         let half = root.join("rices").join("sonata").join("drafts").join("draft-1");
         std::fs::create_dir_all(&half).unwrap();
-        std::fs::write(half.join("cover.json"), "{}").unwrap();
+        std::fs::write(half.join("wallpaper.json"), "{}").unwrap();
 
         let out = handle_draft_save(&inv(&["rice", "draft", "save"], &[]));
         assert_eq!(out.data.unwrap()["name"], "draft-2");

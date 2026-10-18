@@ -1300,14 +1300,14 @@ fn write_mode_json(root: &Path, song: &str) -> Result<(), String> {
 
 /// Every OTHER lane-read stage file a preview root needs merely to EXIST
 /// so its QML doesn't start with a parse warning on a missing file:
-/// `stage/cover.json` (`ThemeState.qml`/`AoideWallpaper.qml:32`),
+/// `stage/wallpaper.json` (`ThemeState.qml`/`AoideWallpaper.qml:32`),
 /// `stage/grimoire.json` (`GrimoireLedger`), and `state/usage.json`.
 /// Seeded once, on the initial build, and never overwritten again by this
 /// command -- unlike `mode.json` these aren't part of what a preview
 /// iterates on, just present so nothing errors.
 fn seed_static_stage_files(root: &Path) -> Result<(), String> {
     seed_if_absent(
-        &root.join("stage").join("cover.json"),
+        &root.join("stage").join("wallpaper.json"),
         &json!({ "path": "" }),
     )?;
     // `schemaVersion` is a STRING "0" on every real stage file this
@@ -1348,7 +1348,7 @@ const FIXTURE_FILES: &[(&str, &str)] = &[
     ("sessions.json", r#"{"schemaVersion":"0","sessions":[]}"#),
     ("projects.json", r#"{"schemaVersion":"0","projects":[]}"#),
     ("hooks.json", "{}"),
-    ("herald.json", "{}"),
+    ("notifications.json", "{}"),
 ];
 
 #[derive(Debug)]
@@ -2177,7 +2177,7 @@ mod tests {
         assert_eq!(hooks, json!({}));
 
         // the four other lane-read stage files exist -- ThemeState.qml
-        // (mode.json/cover.json), AoideWallpaper.qml (cover.json),
+        // (mode.json/wallpaper.json), AoideWallpaper.qml (wallpaper.json),
         // GrimoireLedger (grimoire.json), and state/usage.json -- so none
         // of those components starts with a parse warning.
         let mode: Value = serde_json::from_str(
@@ -2188,7 +2188,7 @@ mod tests {
         assert_eq!(mode["song"], "sonata");
         assert_eq!(mode["stagingSong"], "sonata");
         assert!(mode["since"].as_str().is_some_and(|s| !s.is_empty()));
-        assert!(stage_song_dir.join("cover.json").is_file());
+        assert!(stage_song_dir.join("wallpaper.json").is_file());
         assert!(stage_song_dir.join("grimoire.json").is_file());
         assert!(root.join("state").join("usage.json").is_file());
 
@@ -2248,7 +2248,7 @@ mod tests {
     #[test]
     fn seed_if_absent_never_clobbers_a_file_mutated_after_the_first_seed() {
         let base = scratch("seed_if_absent_idempotent");
-        let path = base.join("stage").join("cover.json");
+        let path = base.join("stage").join("wallpaper.json");
         seed_if_absent(&path, &json!({ "path": "" })).unwrap();
         // the canvas (or a user) mutates the seeded file in place...
         std::fs::write(&path, r#"{"path":"mutated.png"}"#).unwrap();
@@ -3028,7 +3028,7 @@ mod tests {
         let checkout_theme = checkout.join("rices/sonata/theme.json");
         std::fs::write(
             &checkout_theme,
-            r##"{"schemaVersion":"0","song":"stale","widgets":{"conductor":{"kind":"surface"}},"cover":"cover.png","palette":{"bg":"#111111","fg":"#eeeeee","accent":"#ff00ff","urgent":"#ff0000"}}"##,
+            r##"{"schemaVersion":"0","song":"stale","widgets":{"conductor":{"kind":"surface"}},"wallpaperPick":"cover.png","palette":{"bg":"#111111","fg":"#eeeeee","accent":"#ff00ff","urgent":"#ff0000"}}"##,
         )
         .unwrap();
 
@@ -3060,7 +3060,7 @@ mod tests {
             merged["widgets"]["conductor"]["kind"], "surface",
             "foreign keys survive the merge"
         );
-        assert_eq!(merged["cover"], "cover.png");
+        assert_eq!(merged["wallpaperPick"], "cover.png");
     }
 
     #[test]

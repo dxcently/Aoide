@@ -79,7 +79,7 @@ terminal's rights to its remote callers.
   each as a `class:"secret",source:"secrets-mirror"` record on the
   daemon's own feed. `HandEditWatcher` stat-sweeps a fixed six-file roster
   (`daemon::stage_roster`: `sessions.json`/`hooks.json`/`projects.json`/
-  `graph.json` from `aoide-storage`, `pending.json`/`herald.json` from
+  `graph.json` from `aoide-storage`, `pending.json`/`notifications.json` from
   `aoide-conduct`) each tick and fires a `class:"audit",kind:"hand-edit"`
   event for any file whose `(mtime, len)` no longer matches its baseline
   (the #69 hand-edit watcher) — detection and narration only, this daemon

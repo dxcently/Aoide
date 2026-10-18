@@ -97,7 +97,7 @@ Item {
     }
     function glyphOf(it) {
         if (it.source === "mail") return it.kind === "receipt" ? "→" : "»"
-        if (it.source === "herald") return "!"
+        if (it.source === "notifications") return "!"
         switch (it.kind) {
         case "turn": return "●"
         case "awaiting": return "◐"
@@ -108,7 +108,7 @@ Item {
         return "·"
     }
     function glyphColor(it) {
-        if (it.source === "herald" || it.kind === "awaiting") return kit.urgent
+        if (it.source === "notifications" || it.kind === "awaiting") return kit.urgent
         if (it.source === "mail") return kit.human
         if (it.kind === "turn") return kit.mid
         if (it.kind === "pingback") return kit.path
@@ -121,12 +121,12 @@ Item {
             var s = it.session ? board.model.byId[it.session] : null
             return (s ? (s.petname || s.agent) + ": " : "") + (it.text || "")
         }
-        if (it.source === "herald") return (it.summary || "") + (it.body ? " · " + it.body : "")
+        if (it.source === "notifications") return (it.summary || "") + (it.body ? " · " + it.body : "")
         return it.text || ""
     }
     function textColor(it) {
         if (it.source === "mail") return kit.human       // a person's words
-        if (it.source === "herald") return kit.urgent
+        if (it.source === "notifications") return kit.urgent
         if (it.kind === "joined" || it.kind === "left") return kit.dim
         return kit.ink
     }

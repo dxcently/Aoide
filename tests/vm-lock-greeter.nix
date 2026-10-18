@@ -256,10 +256,10 @@ pkgs.testers.runNixOSTest {
         assert "[fixture] greeter face ready" in said, said
         assert "the face did not report ready" not in said, said
         # The song's cover/ folder rode into the greeter tree, and the logon
-        # picture it names is the background stage/cover.json points the face at.
+        # picture it names is the background stage/wallpaper.json points the face at.
         tree = face.succeed("ps -u greeter -o args= | grep -o '/nix/store/[^ ]*-aoide-greeter-tree' | head -n1").strip()
-        cover = json.loads(face.succeed(f"cat {tree}/stage/cover.json"))
-        assert cover == {"path": f"{tree}/rices/aubade/cover/aubade-logon.png", "song": "aubade"}, cover
+        cover = json.loads(face.succeed(f"cat {tree}/stage/wallpaper.json"))
+        assert cover == {"path": f"{tree}/rices/aubade/wallpaper/aubade-logon.png", "song": "aubade"}, cover
         face.succeed(f"test -s {cover['path']}")
 
     with subtest("face: the greeter refuses a wrong password, and switch user starts over"):

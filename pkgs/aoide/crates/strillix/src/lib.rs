@@ -1,7 +1,7 @@
 //! Strillix — the graphical/rice binary. A second composition root over the
 //! same domain-crate handler code `aoide-cli` assembles (P-A4 of the
 //! binary-split workstream, docs/architecture/PACKAGE-LAYOUT.md): the
-//! self-ricing loop, screen, herald, shellbridge, and quickshell — never
+//! self-ricing loop, screen, notifications, shellbridge, and quickshell — never
 //! conducting, the graph, A2A, nodes, or the daemon (core `aoide` identity).
 //! One binary (`strillix`), one schema, same "three doors, one schema" contract
 //! (concepts/Agent-Interface) — the MCP door reuses these exact command

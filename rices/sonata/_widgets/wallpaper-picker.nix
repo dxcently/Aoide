@@ -7,7 +7,7 @@
 #
 # No `packages`: it runs `Process { command: ["ls", "-1", coversDir] }`
 # (coreutils — not a thing a venue can fail to stock, so not worth declaring)
-# and `Quickshell.execDetached(["aoide", "cover", "set", path])` (the
+# and `Quickshell.execDetached(["aoide", "wallpaper", "set", path])` (the
 # project's own CLI, always present, not a swappable external tool).
 #
 # `helpers`: instantiates `GadgetFrame { ... }`.

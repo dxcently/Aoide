@@ -348,7 +348,7 @@ pub const LOCKSCREEN_FILE: &str = "hyprlock.conf";
 
 /// Render the staged lock-screen dress one notes document implies, through the
 /// theme engine's `hyprlock` emitter. `image` is the song's own lock picture
-/// ([`crate::cover::lockscreen_image`]): without one the song dresses nothing
+/// ([`crate::wallpaper::lockscreen_image`]): without one the song dresses nothing
 /// and the notes are not even read, so a song that ships no picture always
 /// clears what an earlier staged song left. `Err` carries the reason the
 /// notes did not resolve or the emitter refused; the caller leaves the

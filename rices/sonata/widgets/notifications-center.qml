@@ -1,8 +1,8 @@
-// herald-center.qml — sonata's "herald-center" slot: the notification
-// LEDGER, the herald's standing record in the dock (WidgetSlot host,
+// notifications-center.qml — sonata's "notifications-center" slot: the notification
+// LEDGER, the notifications' standing record in the dock (WidgetSlot host,
 // AoidePanel.qml — root is an Item that sizes itself off its content).
 //
-// The popup (herald.qml) is the herald CRYING the news; this is the roll he
+// The popup (notifications.qml) is the notifications CRYING the news; this is the roll he
 // cried it FROM: one self-framed stele in the pantheon family (opaque
 // marble, 2px ink border, 1px inset signature keyline, cast shadow, radius
 // 0, colour only from theme.*), carrying every record still on the books as
@@ -22,17 +22,17 @@
 //     fleuron (breathing, the bar's urgent-pulse idiom) for critical, the
 //     gold fleuron for a summons. Icons sit INSIDE the row as a 16px mark;
 //     progress is the hairline aegean gauge INSIDE the row band. Clicking a
-//     toast row dismisses it ({ cmd: "heralddismiss" }); a summons row
+//     toast row dismisses it ({ cmd: "notificationsdismiss" }); a summons row
 //     carries its own hit-tested approve / deny chips instead and cannot be
 //     waved away.
 //   · Sender text is UNTRUSTED DATA — every Text rendering it is
 //     PlainText; `<b>` displays literally.
 //
-// Read side: state/stage/herald.json via FileView (bar.qml's sessions.json
+// Read side: state/stage/notifications.json via FileView (bar.qml's sessions.json
 // watch). Newest LAST in the array, capped at 20 daemon-side. This surface
 // never expires anything — the popup owns the dismiss clock; the ledger
 // only drops a record when a human dismisses it (row click, or the
-// [ notifs ]/[ clear ] tag → heralddismiss "*") or answers it (heraldverdict,
+// [ notifs ]/[ clear ] tag → notificationsdismiss "*") or answers it (notificationsverdict,
 // auto-dismisses daemon-side).
 
 import QtQuick
@@ -70,23 +70,23 @@ Item {
     implicitHeight: stele.height + 5     // +5 clears the cast shadow's overhang
 
     // ── The ledger file — read-only, watched ───────────────────────────────
-    // herald.json is a CONDUCTING file (CONTRACTS.md §4) — state/stage/,
+    // notifications.json is a CONDUCTING file (CONTRACTS.md §4) — state/stage/,
     // not song/stage/.
-    readonly property string heraldPath:
-        (Quickshell.env("AOIDE_ROOT") || (Quickshell.env("HOME") + "/.aoide")) + "/state/stage/herald.json"
+    readonly property string notificationsPath:
+        (Quickshell.env("AOIDE_ROOT") || (Quickshell.env("HOME") + "/.aoide")) + "/state/stage/notifications.json"
     property var records: []
     FileView {
-        id: heraldFile
-        path: root.heraldPath
+        id: notificationsFile
+        path: root.notificationsPath
         watchChanges: true
-        onFileChanged: heraldFile.reload()
+        onFileChanged: notificationsFile.reload()
         onTextChanged: {
             try {
-                var d = JSON.parse(heraldFile.text())
+                var d = JSON.parse(notificationsFile.text())
                 root.records = (d && d.notifications) ? d.notifications : []
             } catch (e) { /* absent/garbage → hold */ }
         }
-        Component.onCompleted: heraldFile.reload()
+        Component.onCompleted: notificationsFile.reload()
     }
     // newest first for the roll
     readonly property var rows: {
@@ -98,10 +98,10 @@ Item {
     }
 
     function dismiss(id) {
-        root.bridge.sendCommand({ cmd: "heralddismiss", id: "" + id })
+        root.bridge.sendCommand({ cmd: "notificationsdismiss", id: "" + id })
     }
     function verdict(sessionId, word) {
-        root.bridge.sendCommand({ cmd: "heraldverdict",
+        root.bridge.sendCommand({ cmd: "notificationsverdict",
                                   id: "" + sessionId, verdict: word })
     }
 
@@ -182,7 +182,7 @@ Item {
                 Text {
                     anchors.left: crown.right; anchors.leftMargin: 8
                     anchors.verticalCenter: parent.verticalCenter
-                    text: "HERALD"
+                    text: "NOTIFICATIONS"
                     font.family: root.faceSerif; font.pixelSize: 15
                     font.weight: Font.DemiBold; font.letterSpacing: 4
                     color: root.ink
@@ -285,7 +285,7 @@ Item {
                 width: parent.width
                 spacing: 0
 
-                // empty state — the herald rests
+                // empty state — the notifications rests
                 Item {
                     width: parent.width; height: 34
                     visible: root.rows.length === 0
@@ -370,7 +370,7 @@ Item {
                                 border.color: root.withA(root.ink, 0.35)
                                 // fit on the mount, never upscale, decode
                                 // bounded — the popup plate's rules at row
-                                // scale (see herald.qml's plate note)
+                                // scale (see notifications.qml's plate note)
                                 Image {
                                     anchors.centerIn: parent
                                     source: row.iconPath.length > 0

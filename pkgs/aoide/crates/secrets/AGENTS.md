@@ -636,14 +636,14 @@
   window, or a "same secret+consumer within N seconds" collapse ahead of
   real spam evidence from a live deployment — the same "wait for the field
   to complain" discipline P-V4d/e/f/g were each born from.
-- **`aoide-secrets` depends on nothing that could reach the desktop herald
+- **`aoide-secrets` depends on nothing that could reach the desktop notifications
   (P-N3, and stays that way).** `conduct/src/graph/permit.rs`'s summons
-  publishes through `crate::herald::publish`/`crate::shellbridge::send_line`
+  publishes through `crate::notifications::publish`/`crate::shellbridge::send_line`
   — both live in `aoide-conduct`, a DIFFERENT crate this crate's own
   `Cargo.toml` does not and must not depend on (`aoide-secrets` depends on
   `aoide-protocol`/`libc`/`serde`/`serde_json` only). Don't add an
   `aoide-conduct` (or `aoide-storage`, or `aoide-client`) dependency to
-  reach `herald` "since permit.rs already has the seam" — that crate's own
+  reach `notifications` "since permit.rs already has the seam" — that crate's own
   shellbridge socket only exists while a desktop session's bridge daemon is
   running, and this broker is meant to run headless as a system service
   with no desktop present at all. A future popup phase reads this crate's
@@ -1164,7 +1164,7 @@
   fires a name-only line for five events (`released`/`parked`/`completed`/
   `dismissed`/`expired`) into the SAME two destinations every `audit_*`
   function already writes to — see `README.md`'s "Broker notifications" for
-  the exact shapes and the mechanism reasoning (the `herald`-publish seam
+  the exact shapes and the mechanism reasoning (the `notifications`-publish seam
   `conduct/src/graph/permit.rs` uses was checked FIRST and ruled out: it
   lives in `aoide-conduct`, a dependency this crate must not gain — invariant
   above). No adapter tails either destination yet, so this phase is
@@ -1181,7 +1181,7 @@
   note above ("never a new edge pointing the other way"): `watch` adds NO
   new dependency edge — it lives inside `aoide-secrets` itself and reaches
   `client::pending`/`approve`/`dismiss` the same way `commands.rs` already
-  does, never a socket into `aoide-conduct`/`herald`. See `README.md`'s
+  does, never a socket into `aoide-conduct`/`notifications`. See `README.md`'s
   "Watching events" section for the full mechanism. **Correction, tracker
   #71 Part 2: the graphical popup ALSO landed IN THIS
   crate**, not as an `aoide-conduct`/`strillix`-side subscriber of `secrets

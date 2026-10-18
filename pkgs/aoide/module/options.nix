@@ -45,7 +45,7 @@ in
       description = ''
         The RICE runtime root (`$STRILLIX_ROOT`): the stage (`stage/`, the
         live twin the paint reads), `declared/` (the declared twin), `rices/`
-        (the machine's own rices) and `covers/`. Exported as
+        (the machine's own rices) and `wallpapers/`. Exported as
         `STRILLIX_ROOT` on every unit that runs a `strillix` binary, and into
         `aoide.user`'s login shells beside `AOIDE_ROOT`. Core code default,
         matching this option's default exactly: `~/.strillix`.

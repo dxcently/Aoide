@@ -1,24 +1,24 @@
 #!/usr/bin/env bash
-# The activation seed's cover rule (lib/cover-seed.sh), against a private root.
-# Each case seeds one cover.json and checks what the file says afterwards.
+# The activation seed's cover rule (lib/wallpaper-seed.sh), against a private root.
+# Each case seeds one wallpaper.json and checks what the file says afterwards.
 #
-#   ./tests/cover-seed/run.sh
+#   ./tests/wallpaper-seed/run.sh
 set -uo pipefail
 cd "$(dirname "$0")" || exit 1
-seed=$(cd ../.. && pwd)/lib/cover-seed.sh
+seed=$(cd ../.. && pwd)/lib/wallpaper-seed.sh
 jq=${JQ:-jq}
-work=$(mktemp -d "${TMPDIR:-/tmp}/cover-seed.XXXXXX")
+work=$(mktemp -d "${TMPDIR:-/tmp}/wallpaper-seed.XXXXXX")
 trap 'rm -rf "$work"' EXIT
 wall=/nix/store/fixture-barcarolle-desktop.jpg
 fail=0
 
-# case <name> <cover.json body or "-" for absent>
+# case <name> <wallpaper.json body or "-" for absent>
 seedcase() {
   local name=$1 body=$2 root=$work/$1
   mkdir -p "$root/stage"
-  [[ $body != - ]] && printf '%s\n' "$body" > "$root/stage/cover.json"
+  [[ $body != - ]] && printf '%s\n' "$body" > "$root/stage/wallpaper.json"
   bash "$seed" "$jq" "$root" barcarolle "$wall" || { echo "FAIL  $name: seed exited"; fail=1; return; }
-  cat "$root/stage/cover.json"
+  cat "$root/stage/wallpaper.json"
 }
 
 expect_default() {

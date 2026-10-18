@@ -12,7 +12,7 @@
 //! call site changes.
 //!
 //! `takes` (Self-Ricing Phase A) is a new addition, not a moved one: the
-//! per-draft take store backing `rice back`/`rice take` — see its module
+//! per-draft take store backing `rice back`/`rice history` — see its module
 //! doc for the tree-of-takes model.
 //!
 //! `petname` and `display` (petnames plan, P1) are likewise new: the
@@ -162,7 +162,7 @@ pub mod seal;
 pub mod sealed_id;
 pub mod session;
 pub mod stage;
-pub mod takes;
+pub mod history;
 pub mod time;
 pub mod tunnel;
 pub mod undying;

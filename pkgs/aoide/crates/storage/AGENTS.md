@@ -394,8 +394,8 @@
   reload` design, settled 2026-08-31): `None` resolves the take root to
   `rices/<song>/history/` (staging mode, no draft to nest under); `Some`
   resolves it to `rices/<song>/drafts/<draft>/history/`, the original
-  shape. `takes_dir` is the one function that branches on it; every other
-  function in the module derives its path through `takes_dir`/`take_path`/
+  shape. `history_dir` is the one function that branches on it; every other
+  function in the module derives its path through `history_dir`/`history_path`/
   `head_path`/`marks_path` and just forwards the `Option` — don't
   reintroduce a `&str`-only overload "for convenience", it would fork the
   root-resolution logic in two places.

@@ -9,7 +9,7 @@
 #                 lib.mkDefault; a rice that wraps its values, and keeps
 #                 rice.hyprland beside them, passes.
 #
-#   wallpaper-name/  a declared picture under cover/<song>-desktop.<ext> passes;
+#   wallpaper-name/  a declared picture under wallpaper/<song>-desktop.<ext> passes;
 #                    any other name fails (the seed and `rice stage` must agree).
 #
 #   ./tests/rice-shape/run.sh
@@ -49,7 +49,7 @@ if [[ $out == *"song extra's home.module writes wayland.windowManager.hyprland.e
 out=$(check module-leak wrapped)
 if [[ $out == *"ok"* && $out != *FAILED* ]]; then echo "ok    wrapped: mkDefault values and rice.hyprland pass"; else echo "FAIL  wrapped: $out"; fail=1; fi
 out=$(check wallpaper-name named)
-if [[ $out == *"ok"* && $out != *FAILED* ]]; then echo "ok    named: cover/<song>-desktop picture passes"; else echo "FAIL  named: $out"; fail=1; fi
+if [[ $out == *"ok"* && $out != *FAILED* ]]; then echo "ok    named: wallpaper/<song>-desktop picture passes"; else echo "FAIL  named: $out"; fail=1; fi
 out=$(check wallpaper-name stray)
-if [[ $out == *"sets aoide.theme.wallpaper to"*"dusk.jpg"*"cover/stray-desktop"* ]]; then echo "ok    stray: other-named picture refused"; else echo "FAIL  stray: $out"; fail=1; fi
+if [[ $out == *"sets aoide.theme.wallpaper to"*"dusk.jpg"*"wallpaper/stray-desktop"* ]]; then echo "ok    stray: other-named picture refused"; else echo "FAIL  stray: $out"; fail=1; fi
 exit $fail
