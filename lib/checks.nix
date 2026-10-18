@@ -161,6 +161,8 @@ let
   #     (`moduleProblemList`, below);
   #   - no stray `.nix` joins the module merge, and no `.nix` names a path out of
   #     its own folder (`strayNixFiles`, `escapingNixFiles`).
+  #   - a declared `aoide.livery.wallpaper` is the song's own `cover/<song>-desktop.<ext>`,
+  #     the one name the activation seed and `rice stage` both resolve.
   #
   # The body, the hyprland.conf and the rice modules are the reads here that look
   # inside a file. A module is CALLED, and its values are walked for their
@@ -285,14 +287,41 @@ let
               inherit path prio;
             }
           ];
+      rawOf =
+        module:
+        if builtins.isFunction module then
+          module (lib.intersectAttrs (builtins.functionArgs module) moduleOffer)
+        else
+          module;
+      unwrapOverride = v: if tagged v && v._type == "override" then unwrapOverride v.content else v;
+      # A song's picture is its own `cover/<song>-desktop.<ext>` (CONTRACTS.md §4):
+      # the seed publishes the declared path, and `rice stage` finds the same
+      # file by that name, so a declared picture under any other name would
+      # show after a rebuild and vanish on a stage.
+      wallpaperProblems =
+        name: half: module:
+        let
+          raw = rawOf module;
+          picked = unwrapOverride (
+            lib.attrByPath [ "aoide" "livery" "wallpaper" ] null (unwrapOverride (raw.config or raw))
+          );
+          path = if picked == null then null else toString picked;
+        in
+        if path == null then
+          [ ]
+        else if
+          baseNameOf (dirOf path) == "cover"
+          && builtins.match "${name}-desktop\\.(webp|png|jpg|jpeg)" (baseNameOf path) != null
+        then
+          [ ]
+        else
+          [
+            "song ${name}'s ${half}.module sets aoide.livery.wallpaper to ${path}; the picture must be cover/${name}-desktop.<ext> (CONTRACTS.md §4)"
+          ];
       moduleProblems =
         name: half: module:
         let
-          raw =
-            if builtins.isFunction module then
-              module (lib.intersectAttrs (builtins.functionArgs module) moduleOffer)
-            else
-              module;
+          raw = rawOf module;
           where = "song ${name}'s ${half}.module";
           extraKeys =
             if raw ? config then
@@ -333,7 +362,7 @@ let
             (
               half:
               lib.optionals (body ? ${half} && body.${half} ? module) (
-                moduleProblems name half body.${half}.module
+                moduleProblems name half body.${half}.module ++ wallpaperProblems name half body.${half}.module
               )
             )
             [
