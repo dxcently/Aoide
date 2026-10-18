@@ -82,7 +82,7 @@ else
     "$(o .sessionTarget)"
   check "only: no strillix fact"                    "false" "$(o .strillix)"
   check "only: no rice binary installed"        "0" \
-    "$(o '[.packages[] | select(test("-rice$"))] | length')"
+    "$(o '[.packages[] | select(test("-strillix$"))] | length')"
   check "only: no song"                         "null" "$(o .song)"
   check "only: config holds only shell.qml"     "shell.qml" \
     "$(o '.configEntries | join(",")')"
@@ -164,7 +164,7 @@ else
   check "control: yomi HAS the shellbridge unit" "1" \
     "$(y '[.systemdUserServices[] | select(test("shellbridge"))] | length')"
   check "control: yomi HAS the rice binary"     "1" \
-    "$(y '[.packages[] | select(test("-rice$"))] | length')"
+    "$(y '[.packages[] | select(test("-strillix$"))] | length')"
   # The staging path's session-sourced variable, declared on every unit a
   # staged song can descend from — and all three naming ONE directory, so a
   # unit cannot go stale on its own (found at the S9 yomi switch: an inherited
