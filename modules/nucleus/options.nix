@@ -50,7 +50,7 @@ let
         loc: defs:
         let
           # The owner is the file the catalogue names for `name`, or any file
-          # under it when the entry is a directory (`lyra = ./dendrites/lyra;`):
+          # under it when the entry is a directory (`strillix = ./dendrites/strillix;`):
           # a lane may import the owner's files by path, and the fact it sets
           # is still written from the owner's directory.
           fromOwnerOrDecl =
@@ -342,7 +342,7 @@ let
         type = types.str;
         example = "quickshell";
         description = ''
-          The single module that renders this surface. The lyra lane
+          The single module that renders this surface. The strillix lane
           populates this registry; Stylix reads it and disables its own
           derivation for owned surfaces. `checks.surface-ownership` asserts
           every declared surface names exactly one owner.
@@ -758,7 +758,7 @@ in
       default = { };
       example = literalExpression ''{ bar.owner = "quickshell"; notifications.owner = "quickshell"; }'';
       description = ''
-        Render-surface ownership registry. The lyra lane declares the
+        Render-surface ownership registry. The strillix lane declares the
         surfaces it owns; Stylix reads this and disables derivation for them.
         `checks.surface-ownership` fails eval if a surface has no owner.
       '';
@@ -778,7 +778,7 @@ in
               default = { };
               description = ''
                 The commands, as argv lists, this provider answers a bridge
-                action with, by action name. Empty for a `vibeos` provider,
+                action with, by action name. Empty for a `strillix` provider,
                 whose component the shell reaches itself.
               '';
             };
@@ -786,14 +786,14 @@ in
         }
       );
       default = { };
-      example = literalExpression ''{ bar.provider = "vibeos"; launcher = { provider = "rofi"; actions.open = [ "rofi" "-show" "drun" ]; }; }'';
+      example = literalExpression ''{ bar.provider = "strillix"; launcher = { provider = "rofi"; actions.open = [ "rofi" "-show" "drun" ]; }; }'';
       description = ''
         The component slots (`bar`, `launcher`, `powermenu`, `notifications`,
         `wallpaper`, `dock`, `calendar`, `switcher`, `lock`, `greeter`, and
         any a consumer adds) this host filled, keyed by slot. Each slot's
         chosen provider writes its own entry, so the set is exactly what the
         selection picked. A contract option rather than the runtime's: a
-        consumer's own provider writes it with no vibeos runtime present. The
+        consumer's own provider writes it with no strillix runtime present. The
         runtime publishes it as `components.json` (CONTRACTS.md §4).
       '';
     };
@@ -806,7 +806,7 @@ in
     # module is in the host (selected, or imported by path by a lane that brings
     # it), and a file in that dendrite's directory sets it to plain `true`;
     # `mkFact` refuses any other write that takes effect. Each defaults to `false`: a host with no
-    # paint lane is headless. `aoide.lyra.enable` below, declared beside the
+    # paint lane is headless. `aoide.strillix.enable` below, declared beside the
     # package it installs, is the third fact in this family.
     quickshell = {
       enable = mkOption {
@@ -817,7 +817,7 @@ in
           when the `quickshell` dendrite's system half is imported
           (`dendrites/quickshell/system.nix`, the package and the
           `aoide-quickshell` service), which sets it: by selecting the
-          dendrite, or by a lane that brings the shell (`lyra`). Set only from
+          dendrite, or by a lane that brings the shell (`strillix`). Set only from
           that dendrite's directory; read it, never set it. A host whose shell is
           painted by something else leaves the dendrite unselected and this
           false, while still having a graphical session.
@@ -871,25 +871,25 @@ in
 
         Set `mkDefault` by the provider file the host chose, so the answer is
         the selection's own; a host may override it to stand a provider's
-        config down without deselecting it. The runtime reads it — lyra hands
+        config down without deselecting it. The runtime reads it — strillix hands
         it to the CLI and the QML as `song/stage/wallpaper-provider`
         (CONTRACTS.md §4), and anything else that must know who paints reads
         the same file.
       '';
     };
 
-    # ── Lyra paint binary (P-A8 of the binary-split workstream) ────────────
-    lyra = {
+    # ── Strillix paint binary (P-A8 of the binary-split workstream) ────────────
+    strillix = {
       enable = mkOption {
-        type = mkFact "lyra";
+        type = mkFact "strillix";
         default = false;
         description = ''
-          A fact: the `lyra` paint/rice binary is installed — `pkgs.aoide.rice`,
-          the separate output P-A8 split off the combined aoide/aoided/lyra
+          A fact: the `strillix` paint/rice binary is installed — `pkgs.aoide.strillix`,
+          the separate output P-A8 split off the combined aoide/aoided/strillix
           derivation so a headless closure never has to carry it. True exactly
-          when the `lyra` dendrite's runtime (`dendrites/lyra/runtime.nix`) is
+          when the `strillix` dendrite's runtime (`dendrites/strillix/runtime.nix`) is
           imported, which sets it. Set only from that dendrite's directory;
-          read it, never set it. Every unit that execs `lyra`
+          read it, never set it. Every unit that execs `strillix`
           (shellbridge, the dunst herald feed) gates on this fact too, so a host
           without the dendrite never has a unit pointed at a missing binary.
         '';

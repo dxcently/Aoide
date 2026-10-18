@@ -67,7 +67,7 @@
 //! `aoide-bar` would restart a healthy desktop every fifteen minutes
 //! forever. So it is DECLARED by the active song
 //! (`aoide.arrangement.surfaces`) and published to
-//! `run/qml/songs/surfaces.json` by the lyra lane's build
+//! `run/qml/songs/surfaces.json` by the strillix lane's build
 //! (CONTRACTS.md §5). When that file is present this checks the declared
 //! namespaces against what is actually mapped, per monitor where the
 //! declaration says per-monitor; when it is absent, unreadable, or names no
@@ -302,7 +302,7 @@ pub(crate) fn parse_expectation(v: &Value) -> Option<BTreeMap<String, bool>> {
 /// no surface, so the old total count decides, exactly as before the
 /// declaration existed (CONTRACTS.md §5, `aoide.arrangement.surfaces`).
 ///
-/// The empty case is not hypothetical. The lyra lane publishes the
+/// The empty case is not hypothetical. The strillix lane publishes the
 /// file unconditionally, so every host whose song declares nothing carries a
 /// published `{"surfaces": {}}`. Handing that to [`surfaces_fall_short`] would
 /// be a check with nothing to fail — a blank desktop read as healthy — on
@@ -913,7 +913,7 @@ mod tests {
 
     // ── The declared-expectation predicate ────────────────────────────────
     //
-    // The published shape, verbatim from the lyra lane's own output
+    // The published shape, verbatim from the strillix lane's own output
     // (`surfacesJsonFile`, CONTRACTS.md §5): one object, NOT keyed by song,
     // whose keys are the
     // already-RESOLVED layer-shell namespaces. That resolution is why nothing
@@ -996,7 +996,7 @@ mod tests {
 
     // ── the component intersection ────────────────────────────────────────
     fn components(slots: &[&str]) -> Value {
-        Value::Object(slots.iter().map(|s| (s.to_string(), json!({ "provider": "vibeos", "actions": {} }))).collect())
+        Value::Object(slots.iter().map(|s| (s.to_string(), json!({ "provider": "strillix", "actions": {} }))).collect())
     }
 
     #[test]

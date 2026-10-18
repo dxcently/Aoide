@@ -119,7 +119,7 @@ pub fn register(r: &mut Registry) {
 }
 
 /// `pub(crate)`, not private: `commands/reload.rs` reuses this SAME mapping
-/// to report which arm `lyra reload`'s dispatch took, rather than growing a
+/// to report which arm `strillix reload`'s dispatch took, rather than growing a
 /// second `RiceMode -> &str` match elsewhere.
 pub(crate) fn mode_word(m: RiceMode) -> &'static str {
     match m {
@@ -146,7 +146,7 @@ fn handle_mode_status(_inv: &Invocation) -> Outcome {
 /// Read the song `stage/livery.json` is CURRENTLY carrying, straight off its
 /// own `"song"` field — the same field both `rice stage` (below) and the nix
 /// activation's `home.activation.aoideSeedStage` reseed script
-/// (the lyra lane's activation) write on every stage, every activation.
+/// (the strillix lane's activation) write on every stage, every activation.
 /// This is how "the current rice" is knowable at all: the Rust
 /// side has no nix evaluation access, so the stage file's own breadcrumb is
 /// the only source of truth for "what is this host actually performing right
@@ -444,7 +444,7 @@ fn handle_mode_declarative(inv: &Invocation) -> Outcome {
 /// Point `stage/livery.json` at `draft_livery`, removing whatever sits there
 /// first (a real declared file, or a link routed to a different draft) —
 /// [`teardown_draft_symlink`]'s inverse. [`handle_mode_draft`] routes with it,
-/// and `lyra reload`'s draft arm re-routes with it after an activation seed
+/// and `strillix reload`'s draft arm re-routes with it after an activation seed
 /// renamed a declared file over the link. The error is the outcome message,
 /// naming the step that failed.
 pub(crate) fn route_stage_to_draft(draft_livery: &std::path::Path) -> Result<(), String> {

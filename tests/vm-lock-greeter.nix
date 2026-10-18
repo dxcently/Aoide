@@ -5,17 +5,17 @@
 # `composition.mkNixosModules`, as lib/aoideos.nix does) over the fixture
 # songbook in `tests/lock-greeter/songbook/`, with the compositor and its hyprland
 # behaviour lane selected by the host. Each song's body brings the paint (the
-# greeter, lock, powermenu and the rest of the ten vibeos providers, and the lyra
+# greeter, lock, powermenu and the rest of the ten strillix providers, and the strillix
 # renderer), so the host names none of them:
 #
 #   face   declares `aubade`, which ships `widgets/greeter.qml`,
 #          `widgets/lockscreen.qml`, an uppercase helper type its greeter
 #          face uses (`AubadeCard.qml`), an `icons/` that face loads and a
 #          `cover/` whose logon picture is the greeter's background:
-#          greetd + the Quickshell greeter at boot, and `lyra lock` locks
+#          greetd + the Quickshell greeter at boot, and `strillix lock` locks
 #          through the shell's LockHost.
 #   plain  declares `plainsong`, which ships no face: ly at boot, and
-#          `lyra lock` runs hyprlock.
+#          `strillix lock` runs hyprlock.
 #   night  declares `nocturne`, whose greeter face throws at start and never
 #          reports ready: the greeter host's floor takes the login.
 #
@@ -55,8 +55,8 @@ let
   };
 
   # The song hook over the fixture songbook (lib/songbook.nix). The three songs
-  # bring their own paint: each body selects the ten vibeos providers and the
-  # lyra renderer, so the host names none of them.
+  # bring their own paint: each body selects the ten strillix providers and the
+  # strillix renderer, so the host names none of them.
   hook = songbook.hook {
     registry = import ../modules;
   };
@@ -177,8 +177,8 @@ pkgs.testers.runNixOSTest {
     def pam_failures(m, service):
         return int(m.succeed(f"journalctl -b --no-pager | grep -c 'pam_unix({service}:auth): authentication failure' || true").strip())
 
-    def lyra_lock(m):
-        out = as_khoa(m, "lyra lock --json")
+    def strillix_lock(m):
+        out = as_khoa(m, "strillix lock --json")
         return json.loads(out)
 
     # The shell's own word on its lock: the compositor has confirmed it.
@@ -231,8 +231,8 @@ pkgs.testers.runNixOSTest {
         )
         as_khoa(m, "systemctl --user restart aoide-quickshell.service")
         wait_shell(m)
-        o = lyra_lock(m)
-        assert o["data"]["locker"] == "shell", f"lyra lock used {o}"
+        o = strillix_lock(m)
+        assert o["data"]["locker"] == "shell", f"strillix lock used {o}"
         wait_hint(m, "yes")
 
     start_all()
@@ -303,10 +303,10 @@ pkgs.testers.runNixOSTest {
         face.succeed("journalctl -b --no-pager | grep -q 'aubade powermenu: bridge is set'")
         face.fail("journalctl -b --no-pager | grep -Eq 'was given no bridge|aubade powermenu: bridge is missing'")
 
-    # ══ face: lyra lock through the shell ═════════════════════════════════
-    with subtest("face: lyra lock locks through the shell and sets LockedHint"):
-        o = lyra_lock(face)
-        assert o["data"]["locker"] == "shell", f"lyra lock used {o}"
+    # ══ face: strillix lock through the shell ═════════════════════════════════
+    with subtest("face: strillix lock locks through the shell and sets LockedHint"):
+        o = strillix_lock(face)
+        assert o["data"]["locker"] == "shell", f"strillix lock used {o}"
         wait_hint(face, "yes")
         # The secrets/pairing popup watchers' locked check, read the way they
         # read it: from outside every session, through the Display session.
@@ -336,7 +336,7 @@ pkgs.testers.runNixOSTest {
         face.sleep(2)
         face.screenshot("06-unlocked")
 
-    with subtest("face: SUPER+ESCAPE locks through lyra lock"):
+    with subtest("face: SUPER+ESCAPE locks through strillix lock"):
         face.send_key("meta_l-esc")
         wait_hint(face, "yes")
         face.sleep(2)
@@ -344,8 +344,8 @@ pkgs.testers.runNixOSTest {
         wait_hint(face, "no")
 
     with subtest("face: a crashed shell leaves the session locked, and the restarted shell takes it back"):
-        o = lyra_lock(face)
-        assert o["data"]["locker"] == "shell", f"lyra lock used {o}"
+        o = strillix_lock(face)
+        assert o["data"]["locker"] == "shell", f"strillix lock used {o}"
         wait_hint(face, "yes")
         pid = as_khoa(face, "systemctl --user show -p MainPID --value aoide-quickshell.service").strip()
         face.succeed(f"kill -KILL {pid}")
@@ -354,7 +354,7 @@ pkgs.testers.runNixOSTest {
         assert locked_hint(face) == "yes", "the hint dropped with the shell"
         assert hypr_locked(face), "the compositor let the session go with the shell"
         # Restart=always brings the shell back; it reads LockedHint=yes at
-        # start and locks on its own — no `lyra lock` here.
+        # start and locks on its own — no `strillix lock` here.
         wait_shell(face, secure="true")
         assert hypr_locked(face)
         face.succeed("journalctl -b --no-pager | grep -q 'LockedHint is still yes; taking the lock back'")
@@ -392,8 +392,8 @@ pkgs.testers.runNixOSTest {
         said = as_khoa(face, "quickshell -p $HOME/.aoide/run/qml/shell.qml ipc call lock lock").strip()
         assert said == "false", f"the shell answered {said!r} with no PAM service"
         assert not hypr_locked(face), "the shell locked with no way to unlock"
-        o = lyra_lock(face)
-        assert o["data"]["locker"] == "hyprlock", f"lyra lock used {o}"
+        o = strillix_lock(face)
+        assert o["data"]["locker"] == "hyprlock", f"strillix lock used {o}"
         assert "PAM service" in o["data"]["shellRefused"], f"{o}"
         face.wait_until_succeeds(hyprlock_running, timeout=10)
         wait_hypr_locked(face, True)
@@ -404,7 +404,7 @@ pkgs.testers.runNixOSTest {
         wait_hypr_locked(face, False)
 
     with subtest("face: the start-up re-lock with no PAM service hands the lock to hyprlock"):
-        as_khoa(face, "lyra lock hint yes")
+        as_khoa(face, "strillix lock hint yes")
         wait_hint(face, "yes")
         as_khoa(face, "systemctl --user restart aoide-quickshell.service")
         face.wait_until_succeeds(hyprlock_running, timeout=60)
@@ -428,8 +428,8 @@ pkgs.testers.runNixOSTest {
             "printf 'auth required /nonexistent/pam_aoide_missing.so\naccount required pam_unix.so\n' > /etc/pam.d/aoide-lock"
         )
         watch_locked(face)
-        o = lyra_lock(face)
-        assert o["data"]["locker"] == "shell", f"lyra lock used {o}"
+        o = strillix_lock(face)
+        assert o["data"]["locker"] == "shell", f"strillix lock used {o}"
         face.wait_until_succeeds("journalctl -b --no-pager | grep -q 'PAM failed while locked'", timeout=30)
         face.wait_until_succeeds("journalctl -b --no-pager | grep -q 'hyprlock holds the lock; letting go'", timeout=30)
         # The host quits so the unit restarts a shell that can lock again.
@@ -448,8 +448,8 @@ pkgs.testers.runNixOSTest {
 
     with subtest("face: after a hand-over the shell locks again, and a conversation that cannot restart is handed over"):
         floors = int(face.succeed("journalctl -b --no-pager | grep -c 'the floor takes over' || true").strip())
-        o = lyra_lock(face)
-        assert o["data"]["locker"] == "shell", f"lyra lock used {o}"
+        o = strillix_lock(face)
+        assert o["data"]["locker"] == "shell", f"strillix lock used {o}"
         wait_hint(face, "yes")
         assert lock_secure(face) == "true"
         watch_locked(face)
@@ -478,7 +478,7 @@ pkgs.testers.runNixOSTest {
         plain.sleep(5)
         plain.screenshot("10-ly")
 
-    with subtest("plain: lyra lock runs hyprlock"):
+    with subtest("plain: strillix lock runs hyprlock"):
         plain.send_chars("khoa")
         plain.send_key("tab")
         plain.send_chars("test\n")
@@ -487,10 +487,10 @@ pkgs.testers.runNixOSTest {
         plain.sleep(5)
         # A hint a dead shell lock left at yes: hyprlock taking the screen
         # clears it, since hyprlock is seen by its process, never the hint.
-        as_khoa(plain, "lyra lock hint yes")
+        as_khoa(plain, "strillix lock hint yes")
         wait_hint(plain, "yes")
-        o = lyra_lock(plain)
-        assert o["data"]["locker"] == "hyprlock", f"lyra lock used {o}"
+        o = strillix_lock(plain)
+        assert o["data"]["locker"] == "hyprlock", f"strillix lock used {o}"
         assert o["data"]["hintCleared"] is True, f"the stale hint stood: {o}"
         assert locked_hint(plain) == "no"
         # hyprlock leaves at once when the compositor refuses its lock, so

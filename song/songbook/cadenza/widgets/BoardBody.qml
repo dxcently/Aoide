@@ -2,7 +2,7 @@
 // the board draws lives here and in the four Board* views it loads (and the
 // BoardCards list OVERVIEW and the project tabs load inside them); dock.qml
 // is only the thin PanelWindow shell around it (the canvas refuses window
-// roots, so this Item is what `lyra preview` shows).
+// roots, so this Item is what `strillix preview` shows).
 //
 //   ┌─ BOARD ─────────────────────────────────────── 12 live [x] ┐
 //   │ OVERVIEW │ aoide │ melete │ mneme │ SYS │ NOTIF !1          │

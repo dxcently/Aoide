@@ -13,7 +13,7 @@ context across clients, including clients that do not run Melete.
 |---|---|
 | **CURRENT — source verified** | Behavior found in the named source snapshots; not a claim about deployment. |
 | **UPSTREAM PR — reviewed, unmerged** | Code present in the pinned PR revision; separate from the local baseline and a deployed service. |
-| **REQUIRED — constraint** | Melete independence, shell access, the Aoide core/Lyra boundary, and shared persona memory/history under Aoide must hold for the integration. |
+| **REQUIRED — constraint** | Melete independence, shell access, the Aoide core/Strillix boundary, and shared persona memory/history under Aoide must hold for the integration. |
 | **PROPOSED — awaiting decision** | The concrete design being put forward for discussion; not approved or implemented by this document. |
 | **OPEN — decision needed** | A choice the proposal does not settle. Diagrams do not silently settle it. |
 
@@ -22,7 +22,7 @@ usable through Mneme and Aoide with Melete absent. Melete is an optional client
 with an existing persona implementation, not a required daemon, library,
 identity issuer, or source of runtime state for another harness. Mneme's MCP
 entry points remain available. Aoide's integration must also be reachable from
-a shell without a configured MCP connector or a Lyra desktop.
+a shell without a configured MCP connector or a Strillix desktop.
 
 **Shared persona continuity under Aoide is a requirement.** Sessions bound to the same persona under Aoide share that persona's memories and history through Mneme across harnesses, including Claude and Codex. Individual session and provider conversation identities remain distinguishable so history retains its origin. Sharing is established by the persona binding, not merely by matching display names or roles. The stable binding mechanism, history representation, retrieval into each turn, and retention remain open. This requirement does not imply automatic sharing by clients outside Aoide or access to another persona's records. It is a decided behavior requirement, not a claim that the integration exists.
 
@@ -34,7 +34,7 @@ a shell without a configured MCP connector or a Lyra desktop.
 | Accumulated persona memory | Melete persists it under its own home directory and loads it into its chat turns. | Mneme serves and owns the shared memory; Melete becomes a client of that shared memory, as Codex and Claude would be. | How to migrate existing files and maintain client compatibility. Mneme provides the shared memories and history for same-persona Aoide sessions; the binding and history representation remain open. |
 | Session integration | Aoide tracks supported harness events and conducts sessions; it does not hydrate Mneme context. | An Aoide adapter binds sessions to permitted context, exposes retrieval and handoffs, and connects notifications to subscribed sessions. | Identity binding, grants, context selection, and harness-specific turn delivery. |
 | Storage and replication | Mneme serves files; external sync or Git moves them. | A separate managed-store extension adds transactional revisions and snapshot/change replication. | Whether and when to adopt the database extension, which vaults migrate, and the editor contract. It is not required for the initial shared-context integration. |
-| Lyra surfaces | Existing widgets display Aoide session state. | Widgets can display persona bindings, handoff availability, and context freshness obtained from an Aoide bridge. | Which fields and interactions belong in the widgets. Memory access remains available without them. |
+| Strillix surfaces | Existing widgets display Aoide session state. | Widgets can display persona bindings, handoff availability, and context freshness obtained from an Aoide bridge. | Which fields and interactions belong in the widgets. Memory access remains available without them. |
 
 The proposed authority rule is **one authoritative record, many clients and
 replicas**. It applies to records placed under Mneme's management. It does not
@@ -186,7 +186,7 @@ flowchart TB
         Aoide -->|"authorized context API requests"| Mneme
         Mneme -.->|"proposed adapter: change references, not note bodies"| Aoide
         Aoide -->|"bindings, notices, and gated turn delivery"| Sessions["Harness sessions: assemble and consume context"]
-        Lyra["Lyra — optional widgets"] -->|"read state / invoke bridge actions"| Aoide
+        Strillix["Strillix — optional widgets"] -->|"read state / invoke bridge actions"| Aoide
         Mneme -.->|"OPEN: adopt separately"| Extension["Managed database, editor adapter, and replicas"]
     end
 ```
@@ -507,7 +507,7 @@ neither a stored memory nor a deposited letter creates that turn by itself.
 
 In the proposed integration, Mneme serves knowledge independently. Aoide supplies its shell-accessible
 coordination and context bridge. Codex, Claude, Melete, and other clients consume
-those interfaces; none requires Melete to run. Lyra can render session bindings,
+those interfaces; none requires Melete to run. Strillix can render session bindings,
 handoff availability, and context freshness from a named bridge. Retrieval,
 memory writes, identity binding, and wake-up policy remain usable without QML.
 Codex prompt, response, and subagent tracking still depend on its Aoide harness
@@ -556,12 +556,12 @@ Existing source admission policy in Aoide applies when connecting new content.
 
 | Proposed work | What it requires | What it does not require | Evidence that it works |
 |---|---|---|---|
-| Shared persona context and memory | Implement the required same-persona memory/history sharing under Aoide; decide stable bindings, history representation, and migration; implement grants and the client/Aoide adapter contract; account for existing persona notes and memory. PR #49 offers explicit vault-aware retrieval primitives if adopted/deployed, but not the grants or shared-memory service. | Melete running, a database migration, replicas, or Lyra. | With Melete absent, two clients load authorized persona context and exchange a handoff. Shared/separate memory behavior matches the chosen bindings across sessions; persona metadata cannot widen tool grants. |
+| Shared persona context and memory | Implement the required same-persona memory/history sharing under Aoide; decide stable bindings, history representation, and migration; implement grants and the client/Aoide adapter contract; account for existing persona notes and memory. PR #49 offers explicit vault-aware retrieval primitives if adopted/deployed, but not the grants or shared-memory service. | Melete running, a database migration, replicas, or Strillix. | With Melete absent, two clients load authorized persona context and exchange a handoff. Shared/separate memory behavior matches the chosen bindings across sessions; persona metadata cannot widen tool grants. |
 | Managed authority extension | A separate storage decision (not settled by PR #49), stable record IDs, transactional revisions, journal, import/export, and an editor adapter for a pilot vault. | Replica deployment or Aoide remote mail. | Stale edits cannot silently overwrite newer ones; a committed change survives a crash with its journal entry; text, links, and Canvas survive import/export. |
 | Replica extension | Managed authority's authorized snapshot/change protocol and a reachable Mneme endpoint. | Aoide change notices or an agent turn. | Reconnection converges, including renames and deletions; repeated changes do not duplicate content; unauthorized collections are absent. |
 | Aoide handoff/change notices | A reference-producing client or adapter and usable mail transport; remote use also requires compatible paired nodes. | A replica or database for an explicit handoff letter. Automatic crash-recoverable publication of every managed change does require the journal contract. | A delivered letter references retrievable authorized context. With journal-based notices, missed or duplicate notices do not affect replica convergence. |
-| Idle-agent context delivery | A subscription, permitted prompt-ready turn delivery, a working conduct/native harness channel, and a retrieval entry point. | Melete, Lyra, or a local replica. | A waiting agent receives a turn opportunity and retrieves the handoff; mail delivery and context consumption are reported separately. |
-| Lyra presentation | A shell-accessible bridge exposing the chosen session and context state. | Ownership of memory or a QML-only API. | The widget displays bridge state; the same capability remains accessible after removing the widget. |
+| Idle-agent context delivery | A subscription, permitted prompt-ready turn delivery, a working conduct/native harness channel, and a retrieval entry point. | Melete, Strillix, or a local replica. | A waiting agent receives a turn opportunity and retrieves the handoff; mail delivery and context consumption are reported separately. |
+| Strillix presentation | A shell-accessible bridge exposing the chosen session and context state. | Ownership of memory or a QML-only API. | The widget displays bridge state; the same capability remains accessible after removing the widget. |
 
 The five original architecture questions mailed by Claude concern widget source
 ownership, reload results, socket checks, review protocol, and runtime-directory

@@ -15,8 +15,8 @@
 //! borrows another song's body — only `composeSong` (`lib/song.nix`) resolves
 //! ownership, and it runs in the nix evaluator, nowhere else. So both files are
 //! regenerated WHOLE, for every song this machine's songbook holds, by one
-//! plain `nix-instantiate --eval --strict --json` over `share/lyra/nix/
-//! manifest.nix` — a file SHIPPED by `pkgs/lyra-songbook`, a thin entry over
+//! plain `nix-instantiate --eval --strict --json` over `share/strillix/nix/
+//! manifest.nix` — a file SHIPPED by `pkgs/strillix-rices`, a thin entry over
 //! copies of `lib/songbook.nix`/`lib/song.nix`, pointed at this machine's own
 //! `$AOIDE_ROOT/song/songbook`. No flake, no network, no checkout, no
 //! `--impure`: `flake_root()` is not read here at all, and the flake's
@@ -36,7 +36,7 @@
 //! Whole-file regeneration can't reproduce that failure mode: every song's
 //! entry, staged or not, comes from one eval of one songbook.
 //!
-//! Mirrors the nix build's own per-song widget carry (the lyra lane's
+//! Mirrors the nix build's own per-song widget carry (the strillix lane's
 //! `quickshellConfig` derivation) for the BODY copy: the WHOLE `widgets/` tree
 //! is copied unfiltered (helper components, asset subdirs, `.gitkeep`,
 //! everything), while the manifest only ever lists top-level lowercase-kebab
@@ -160,7 +160,7 @@ pub(crate) const SONGBOOK_EVAL_FIXTURE_VAR: &str = "AOIDE_SONGBOOK_EVAL_FIXTURE"
 ///      stage what it already carries.
 ///   2. **Any other stageable song** — one plain
 ///      `nix-instantiate --eval --strict --json` over the SHIPPED generator
-///      (`share/lyra/nix/manifest.nix`) pointed at the MACHINE's songbook
+///      (`share/strillix/nix/manifest.nix`) pointed at the MACHINE's songbook
 ///      (`$AOIDE_ROOT/song/songbook`). A FILE eval: no flake, no network, no
 ///      checkout, no `--impure`, and no argv naming `$AOIDE_FLAKE_ROOT` or a
 ///      `#<flake output>`. The generated manifest WINS over the shipped
@@ -197,7 +197,7 @@ pub fn plan_stage(name: &str) -> Result<StageSongbook, WidgetSyncErr> {
         return Err(WidgetSyncErr {
             error: format!(
                 "no shipped song templates dir found: $AOIDE_SONG_TEMPLATES is unset (or not \
-                 absolute) and no `share/lyra/songbook` sits beside this binary, so there is \
+                 absolute) and no `share/strillix/songbook` sits beside this binary, so there is \
                  nothing to stage `{name}` from"
             ),
             target: "AOIDE_SONG_TEMPLATES".to_string(),
@@ -430,7 +430,7 @@ fn refusal_rebuild_needed(name: &str, missing: &[String]) -> String {
 ///
 ///   1. **Baseline**: the baked manifest/registry, computed at templates-build
 ///      time by the SAME `lib/songbook.nix` generator the machine path
-///      evaluates (`pkgs/lyra-songbook`). Authoritative for every shipped,
+///      evaluates (`pkgs/strillix-rices`). Authoritative for every shipped,
 ///      read-only song.
 ///   2. **Overlay**: [`overlay_surviving_entries`] copies every entry from
 ///      the EXISTING on-disk `run_qml/songs/{manifest,registry}.json` whose
@@ -640,19 +640,19 @@ pub struct StageSongbook {
     registry: serde_json::Value,
 }
 
-/// The `builtin.json` `pkgs/lyra-songbook` bakes beside the song folders:
-/// `{ declared, songs, packages }`, the host's built-in set as lyra recorded
-/// it (`modules/dendrites/lyra`'s override). Read for §7.5's two questions —
+/// The `builtin.json` `pkgs/strillix-rices` bakes beside the song folders:
+/// `{ declared, songs, packages }`, the host's built-in set as strillix recorded
+/// it (`modules/dendrites/strillix`'s override). Read for §7.5's two questions —
 /// is this song built in, and does it need a package this system lacks.
 pub(crate) struct BuiltIn {
     pub(crate) songs: Vec<String>,
     packages: Vec<String>,
 }
 
-/// `share/lyra/songbook/builtin.json`, read from `templates`. A MISSING file
+/// `share/strillix/songbook/builtin.json`, read from `templates`. A MISSING file
 /// means nothing is built in, and that is the truthful reading rather than a
 /// hole: the only templates instance without one is the flake's own
-/// `packages.lyra-songbook` (the whole songbook, no selection), and a host
+/// `packages.strillix-rices` (the whole songbook, no selection), and a host
 /// running that installed no song's packages. Every stage then falls to case 2
 /// with an empty `packages` baseline, which refuses anything that declares a
 /// need. A PRESENT but unparseable file is a broken package and says so.
@@ -732,7 +732,7 @@ fn read_baked(templates: &Path, file: &str) -> Result<serde_json::Value, WidgetS
 ///     reversible operation — turn a built-in song into a "differing" machine
 ///     copy, and on a host with no nix that makes the song unstageable while
 ///     reporting `is not built into this system`, which is false on its face.
-///   - `lyra rice declare` leaves them behind: the checkout carries the song,
+///   - `strillix rice declare` leaves them behind: the checkout carries the song,
 ///     not the machine's undo history and scratch.
 ///
 /// The seed ships none of them, so every name here is a machine's own scratch
@@ -831,7 +831,7 @@ fn parse_songbook_eval(bytes: &[u8], target: &str) -> Result<StageSongbook, Widg
 }
 
 /// Capture `<song>/songbook/<name>/widgets/` as `{ "<relative path>":
-/// "<utf-8 content>" }` — the take store's own widget-body payload (`lyra
+/// "<utf-8 content>" }` — the take store's own widget-body payload (`strillix
 /// reload` design, settled 2026-08-31: "Takes gain WIDGET BODIES in both
 /// modes", closing the gap that widget QML was never snapshotted). Reads
 /// the SONGBOOK tree, the same source [`sync_song_widgets`] itself copies
@@ -1020,7 +1020,7 @@ pub fn sync_song_widgets(
 /// A destination file whose bytes already match the source is left untouched
 /// (not written, not counted in `changed`): Quickshell would otherwise
 /// reload/reinstantiate every widget on every palette-only `rice stage` call,
-/// causing visible flicker/lost widget state. Public because `lyra rice
+/// causing visible flicker/lost widget state. Public because `strillix rice
 /// declare` copies a song folder through it, skipping [`MACHINE_RUNTIME_DIRS`].
 pub fn copy_tree_atomic(
     src: &Path,
@@ -1070,7 +1070,7 @@ pub fn copy_tree_atomic(
 }
 
 /// `name`'s top-level slot files in `src` — informational only (see
-/// [`WidgetSyncOk::slots`]'s doc), same rule the lyra lane's manifest
+/// [`WidgetSyncOk::slots`]'s doc), same rule the strillix lane's manifest
 /// generation uses: a FILE (not a dir), not `.gitkeep`, ending `.qml`, first
 /// byte
 /// ascii-lowercase or an ascii digit.

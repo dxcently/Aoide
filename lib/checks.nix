@@ -5,7 +5,7 @@
 # discovery specifically):
 #
 #   1. surface-ownership — no render surface may have two owners. The
-#      lyra lane declares `aoide.surfaces.<name>.owner`; the stylix lane reads
+#      strillix lane declares `aoide.surfaces.<name>.owner`; the stylix lane reads
 #      the same registry and disables derivation for owned surfaces. Two
 #      modules claiming the same surface is a build-time error.
 #
@@ -33,7 +33,7 @@
 #      discovery rule; a fourth shape is a half-created package that vanishes
 #      from `packages`/`pkg-<name>` silently today.
 #
-#   6. phantom-commands — every backticked `aoide …` / `lyra …` invocation
+#   6. phantom-commands — every backticked `aoide …` / `strillix …` invocation
 #      taught by the agent docs (root AGENTS.md + docs/agent/*.md) resolves
 #      against the right binary's `schema --json`, built from this checked-out
 #      source. A doc teaching a command the registry no longer carries turns
@@ -47,7 +47,7 @@
 #      walk of `[dependencies]`/`[build-dependencies]` starting at
 #      `crates/cli` (never `[dev-dependencies]` — test-support never ships),
 #      then asserts the closure never reaches `aoide-song`/`aoide-screen`/
-#      `aoide-lyra` and that no closure crate's `src/` shells out to nix.
+#      `strillix` and that no closure crate's `src/` shells out to nix.
 #
 #   8. portability — the static artifact (`packages.aoide-static`, Phase C)
 #      is genuinely free of nix, not merely built with the right cargo flags:
@@ -434,7 +434,7 @@ let
   # still taught in hand-written prose; both binaries' guide texts are
   # registry-derived, so they cannot drift and are not re-checked here. Every
   # backticked invocation spelling those docs teach
-  # (`aoide send …`, `lyra rice compose <name>`, …) must resolve against
+  # (`aoide send …`, `strx rice compose <name>`, …) must resolve against
   # the matching binary's `schema --json`, built from this checked-out source:
   # the spelled words must be a registered command path, or a prefix of one
   # (`aoide send` validly teaches the `send` leaf; `aoide secrets`
@@ -442,15 +442,15 @@ let
   # the build naming the file, line, and spelling.
   #
   # Extraction is precision-over-recall: only inline code spans STARTING with
-  # `aoide `/`lyra ` followed by a lowercase word count as teachings (a span
+  # `aoide `/`strx ` followed by a lowercase word count as teachings (a span
   # may wrap across a line break); the path walk stops at the first non-path
   # token (`<args>`, `[flags]`, `--flags`, `--`, ellipses), and both fenced
   # delimiter lines and comment lines inside fences are blanked before pairing
   # (a fence's own backticks are not span edges — left in, they shifted every
   # span after them and hid real teachings). `src` is the flake's own store
   # copy, so like Check 4 this scopes to the COMMITTED tree; `aoidePkg` is
-  # the self-flaked core package — `aoide` from its default output, `lyra`
-  # from its `rice` output.
+  # the self-flaked core package — `aoide` from its default output, `strillix`
+  # from its `strillix` output.
   phantomCommands =
     src: aoidePkg:
     let
@@ -492,7 +492,7 @@ let
           $span =~ s/\s+/ /g;
           # Only spans starting with the binary name and a lowercase command
           # word are invocation teachings; `aoide <cmd>` and prose are not.
-          next unless $span =~ /^(aoide|lyra) [a-z]/;
+          next unless $span =~ /^(aoide|strx) [a-z]/;
           my ($bin, @toks) = split ' ', $span;
           my @words;
           for my $t (@toks) {
@@ -521,8 +521,8 @@ let
         # binary — the same source of truth `schema --json` contracts.
         ${aoidePkg}/bin/aoide schema --json \
           | jq -r '.commands[].path | join(" ")' > "$TMPDIR/aoide-paths"
-        ${aoidePkg.rice}/bin/lyra schema --json \
-          | jq -r '.commands[].path | join(" ")' > "$TMPDIR/lyra-paths"
+        ${aoidePkg.strillix}/bin/strillix schema --json \
+          | jq -r '.commands[].path | join(" ")' > "$TMPDIR/strillix-paths"
 
         cd ${src}
         # The doc set: the agent docs (root AGENTS.md + docs/agent/*.md) plus
@@ -561,6 +561,7 @@ let
 
         status=0
         while IFS="$(printf '\t')" read -r file line bin words; do
+          [ "$bin" = strx ] && bin=strillix
           # Valid iff the spelled words are a registered path or a prefix of
           # one (word-boundary; the path lists are [a-z- ] so regex-safe).
           if ! grep -Eq "^$words( |$)" "$TMPDIR/$bin-paths"; then
@@ -576,7 +577,7 @@ let
       '';
   # ── Check 7: core is nix-independent ────────────────────────────────────
   # AGENTS.md's own claim — core is cargo-buildable, no nix shell-outs, no
-  # NixOS assumption; only `lyra` (and the deployment modules) may depend on
+  # NixOS assumption; only `strillix` (and the deployment modules) may depend on
   # nix (P-A5 of the binary-split workstream; cli/Cargo.toml:36-43 documents
   # the boundary this check makes real). The closure is DERIVED, never
   # hardcoded: `pkgs/aoide/Cargo.toml`'s `[workspace.dependencies]` gives an
@@ -591,7 +592,7 @@ let
   # past it unseen.
   #
   # Two assertions. First, the closure must not contain `aoide-song`,
-  # `aoide-screen`, or `aoide-lyra` — a directory denylist would pass this
+  # `aoide-screen`, or `strillix` — a directory denylist would pass this
   # while core silently grew an `aoide-song` dependency and inherited its
   # nix-eval transitively; deriving the closure is what catches that.
   # Second, no closure crate's `src/` shells out to nix: a quoted `"nix"` /
@@ -623,7 +624,7 @@ let
         # Full-line TOML comments (first non-whitespace char '#') stripped
         # before any aoide-* scanning below: both the workspace manifest and
         # every crate manifest carry long prose comments naming
-        # aoide-song/aoide-screen/aoide-lyra that are not dependency edges.
+        # aoide-song/aoide-screen/strillix that are not dependency edges.
         sub strip_comment_lines {
             my ($text) = @_;
             return join "\n", grep { !/^\s*#/ } split /\n/, $text, -1;
@@ -713,7 +714,7 @@ let
         }
 
         # ── Assertion 1: the P-A5 boundary ──────────────────────────────────
-        my @forbidden = grep { $visited{$_} } ("song", "screen", "lyra");
+        my @forbidden = grep { $visited{$_} } ("song", "screen", "strillix");
         if (@forbidden) {
             die "aoide check nix-independence FAILED: core closure reaches "
               . join(", ", map { "aoide-$_ (" . closure_path($_) . ")" } @forbidden)
@@ -930,8 +931,8 @@ let
       )
       "stagePatch and resolve disagree on the override recolour, stagePatch is not the identity with no override set, venueDelta is not exactly the recoloured slots, or a host-set geometry field is not laid over the document (created when absent, merged when present, no delta when equal)";
   # ── Checks 11 and 12: the shipped songbook generator is offline ───────────
-  # §9's claim, as a build: `share/lyra/nix/manifest.nix` (shipped by
-  # `pkgs/lyra-songbook`) is the runtime's generator, and a plain
+  # §9's claim, as a build: `share/strillix/nix/manifest.nix` (shipped by
+  # `pkgs/strillix-rices`) is the runtime's generator, and a plain
   # `nix-instantiate --eval --strict --json --expr` on it — the exact argv
   # `aoide-song::widgets` runs, with `NIX_PATH=` empty, no flake, no network, no
   # checkout — must answer what the flake's own `songbookManifest` answers.
@@ -946,17 +947,17 @@ let
   # registryAttrs; }` — the same value the `songbookManifest` flake output
   # exposes, so the comparison is against the flake, never a hand-kept golden.
   generatorCommands =
-    { lyraSongbook, songbookArg }:
+    { strillixRices, songbookArg }:
     ''
       export XDG_CACHE_HOME="$TMPDIR/cache" HOME="$TMPDIR"
       nix-instantiate --eval --strict --json --expr \
-        "import ${lyraSongbook}/share/lyra/nix/manifest.nix { songbook = \"${songbookArg}\"; }" \
+        "import ${strillixRices}/share/strillix/nix/manifest.nix { songbook = \"${songbookArg}\"; }" \
         | jq -c 'del(.packages)'
     '';
 
   generatorOffline =
     {
-      lyraSongbook,
+      strillixRices,
       songbook,
       expected,
     }:
@@ -972,7 +973,7 @@ let
       ''
         got=$(${
           generatorCommands {
-            inherit lyraSongbook;
+            inherit strillixRices;
             songbookArg = "${songbook}";
           }
         })
@@ -987,7 +988,7 @@ let
 
   generatorRelocatable =
     {
-      lyraSongbook,
+      strillixRices,
       songbook,
       expected,
     }:
@@ -1012,13 +1013,13 @@ let
         cp -r "$songbookCopy"/. "$TMPDIR/relocated"/
         in_repo=$(${
           generatorCommands {
-            inherit lyraSongbook;
+            inherit strillixRices;
             songbookArg = "${songbook}";
           }
         })
         relocated=$(${
           generatorCommands {
-            inherit lyraSongbook;
+            inherit strillixRices;
             songbookArg = "$TMPDIR/relocated";
           }
         })

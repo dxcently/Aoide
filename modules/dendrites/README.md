@@ -8,12 +8,12 @@ pi-coding-agent, OpenAI Codex + ChatGPT), local model-serving tooling
 (inference: Ollama + llama.cpp), system services (dunst, networkmanager,
 tailscale, audio), and **the paint lanes** — what makes a machine paint at all:
 `compositor` (with its `hyprland` provider), `stylix`, `quickshell`
-(the shell runtime: the package and the one `aoide-quickshell` service), `lyra`
+(the shell runtime: the package and the one `aoide-quickshell` service), `strillix`
 (the Quickshell surface, its shellbridge, and the song-gated deploy half) and
 the ten component slots — `bar`, `launcher`, `powermenu`, `notifications`,
 `wallpaper`, `dock`, `calendar`, `switcher`, `lock`, `greeter` — each a
-provider set whose `vibeos` provider is that Quickshell component on the
-runtime's bridges (`lyra/README.md`; `wallpaper` also has the external engine,
+provider set whose `strillix` provider is that Quickshell component on the
+runtime's bridges (`strillix/README.md`; `wallpaper` also has the external engine,
 and `greeter` runs without the runtime). A paint lane
 reads only what root `AGENTS.md` house rule 5 lists; its
 config reads only the FACTS the nucleus contract declares, and a lane that is one sets its own fact `true`, so a consumer can ask "is there a shell here?" without reading the lane that made one.
@@ -38,19 +38,19 @@ dendrite carries its OWN dependencies in its body: `stylix` imports the
 Stylix NixOS module only when it is present, so no other file has to know the
 dendrite exists. A condition does not cover a home half's `imports` or
 `options` (habit refuses one that does): `neovim.nix` states its `imports` in an
-unconditional `habit.home`, and `lyra/runtime.nix` writes its home half as
+unconditional `habit.home`, and `strillix/runtime.nix` writes its home half as
 `config`.
 
 A capability more than one lane brings is a plain pair imported by path
 (CONTRACTS.md §2): `quickshell/system.nix` and `quickshell/home.nix` carry no
 `habit` key, the catalogue entry is the wrapper
 `{ imports = [ ./system.nix ]; habit.home.imports = [ ./home.nix ]; }`, and
-`lyra`'s runtime writes the same two imports, so a host with both lanes gets
-one shell. The vibeos runtime is the same kind of pair
-(`lyra/{runtime,runtime-home}.nix`), imported by every `vibeos` component
+`strillix`'s runtime writes the same two imports, so a host with both lanes gets
+one shell. The strillix runtime is the same kind of pair
+(`strillix/{runtime,runtime-home}.nix`), imported by every `strillix` component
 provider, so two components on one host share one runtime.
 
-## The shell lane (`quickshell/`) and the seam with `lyra`
+## The shell lane (`quickshell/`) and the seam with `strillix`
 
 The shell runtime is two lanes, split by what each one knows:
 
@@ -58,20 +58,20 @@ The shell runtime is two lanes, split by what each one knows:
 quickshell/       the PACKAGE, and the one `aoide-quickshell` user service.
                   Knows no song, deploys nothing: it starts a shell on the
                   directory `aoide.quickshell.config` names and stops there.
-lyra/             the SURFACE. Builds the QML tree from `pkgs/lyra-shell` plus
+strillix/             the SURFACE. Builds the QML tree from `pkgs/strillix-shell` plus
                   the built-in songs' `widgets/`, deploys it, seeds the stage,
                   restarts the rice, watches it (healthcheck), owns shellbridge
                   and the `aoide.surfaces` registry.
 ```
 
-They meet on one fact. `lyra` sets `aoide.quickshell.config` to its deployed
+They meet on one fact. `strillix` sets `aoide.quickshell.config` to its deployed
 runtime root (`$AOIDE_ROOT/run/qml`); the shell lane reads that fact, owns
-`aoide.quickshell.enable` and starts the service. `lyra` brings the shell with
+`aoide.quickshell.enable` and starts the service. `strillix` brings the shell with
 it by importing the shell lane's two plain halves by path, and names nothing
-else of it; the shell lane never names `lyra`, and keeps running the day a
+else of it; the shell lane never names `strillix`, and keeps running the day a
 different lane (or a host) supplies the directory instead.
 
-**The two allowed shapes of Quickshell without lyra** — no song, no QML tree,
+**The two allowed shapes of Quickshell without strillix** — no song, no QML tree,
 no rice binary:
 
 | Shape | How | What runs |
@@ -81,19 +81,19 @@ no rice binary:
 
 The service is gated on the config, never on `aoide.song` — a shell that paints
 a host's own config has no song and starts exactly the same way. What is
-song-gated is `lyra`'s half: deploy, seed, restart.
+song-gated is `strillix`'s half: deploy, seed, restart.
 
-## The wallpaper capability (`wallpaper/`) and the seam with `lyra`
+## The wallpaper capability (`wallpaper/`) and the seam with `strillix`
 
 Who paints a song's wallpaper is a HOST choice, the way the compositor is — a
 provider registry, not a song's field:
 
 ```
 wallpaper/
-├── default.nix     { providers.vibeos    = ./vibeos.nix;
+├── default.nix     { providers.strillix    = ./strillix.nix;
 │                     providers.skwd-wall = ./skwd-wall.nix; }   ← the registry
-├── vibeos.nix      the shell's own layer: the default. It configures NOTHING —
-│                   the layer is the vibeos runtime's — it NAMES the
+├── strillix.nix      the shell's own layer: the default. It configures NOTHING —
+│                   the layer is the strillix runtime's — it NAMES the
 │                   arrangement, with the fact value `"quickshell"`.
 └── skwd-wall.nix   the external engine: its three packages, the `skwd-walld`
                     user service, and the config merge that keeps the engine's
@@ -101,13 +101,13 @@ wallpaper/
 ```
 
 Both providers set the fact `aoide.wallpaper.provider` to their own name, so
-exactly one answer exists on a host; `lyra` publishes that one word as
+exactly one answer exists on a host; `strillix` publishes that one word as
 `song/stage/wallpaper-provider`, and both readers — the CLI
 (`aoide-song`'s `wallpaper_provider`) and `LiveryState.qml` — read the same file.
 Absent means the shell's own layer.
 
 They never name each other either. The bridge is the CLI both sides already
-have: `lyra cover sync` (CONTRACTS.md §4) makes the external provider agree with
+have: `strx cover sync` (CONTRACTS.md §4) makes the external provider agree with
 the stage files — the staged pick while one applies, the step-aside image when
 none does — and it is what the engine's lane runs after every daemon start and
 what every pick write runs. Because "applies" is decided per STAGED SONG, a
@@ -131,7 +131,7 @@ contract in `modules/nucleus`; an option a member reads is declared in that memb
 
 - `aoided.nix` — carries only the AoideOS deltas for the `aoided` unit
   (`pkgs/aoide/module/aoided.nix` owns the unit itself, its tmpfiles rules, and
-  the core session variables): the lyra-gated `AOIDE_SONG_TEMPLATES` session
+  the core session variables): the strillix-gated `AOIDE_SONG_TEMPLATES` session
   variable, and nothing else paint-shaped. `aoide.sessionTarget` is set by the
   lane that brings a graphical session up (the `quickshell` lane, which names the
   session when it has a shell config to run), so this file reads no lane's
@@ -149,9 +149,9 @@ contract in `modules/nucleus`; an option a member reads is declared in that memb
   graphical session and a dialog binary, and that fact says only that Aoide
   paints a shell here — a host painted by something else has the session, takes
   the zenity path, and would otherwise be locked out for an unrelated reason.
-  `quickshell` on the unit's `path` follows `aoide.lyra.enable`, and the popup
-  prefers `lyra pair ask` / `lyra pair confirm` over their zenity equivalents,
-  the same way the secrets watcher prefers `lyra secrets ask`.
+  `quickshell` on the unit's `path` follows `aoide.strillix.enable`, and the popup
+  prefers `strx pair ask` / `strx pair confirm` over their zenity equivalents,
+  the same way the secrets watcher prefers `strx secrets ask`.
 - `melete-adapter.nix` — the concrete thin-adapter exemplar on the `aoided`
   event stream. It orders itself against `aoided.service`, which the core module
   defines on `aoide.enable` alone (the `aoided` dendrite adds only the AoideOS
@@ -179,7 +179,7 @@ contract in `modules/nucleus`; an option a member reads is declared in that memb
   set), and the CLI's own write refuses with a taught error naming this option.
 - `aoide-nix.nix` — flake-native nix settings (Aoide IS a flake; every rebuild/
   check/`aoide update` runs through the flake CLI).
-- `aoide-packages.nix` — puts the `aoide`/`lyra` binaries on the system `PATH`
+- `aoide-packages.nix` — puts the `aoide`/`strillix` binaries on the system `PATH`
   (systemd units ExecStart absolute store paths instead).
 
 A consumer that takes `nixosModules.nucleus` gets the contract and none of these;
@@ -227,7 +227,7 @@ aggregation's `members` once the constructor assembles the host. Dendrites
 know nothing about hosts; hosts know dendrites. A tool graduates from a shared
 file (e.g. `devtools.nix`) into its own dendrite the moment a host needs to
 select it independently. The paint lanes with more than one file carry their own
-directories and charters (`compositor/README.md`, `lyra/README.md`,
+directories and charters (`compositor/README.md`, `strillix/README.md`,
 `quickshell/README.md`, `wallpaper/README.md`); the one-file lanes —
-`greeter.nix` (the `greeter` slot's `vibeos` provider), `stylix.nix` — are
+`greeter.nix` (the `greeter` slot's `strillix` provider), `stylix.nix` — are
 charted here, above.

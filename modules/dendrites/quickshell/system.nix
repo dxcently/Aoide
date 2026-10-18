@@ -17,11 +17,11 @@
 #   - SET here: `aoide.quickshell.enable` — "a shell surface exists on this
 #     host", a read-only fact true exactly when this file is imported.
 #   - READ here: `aoide.quickshell.config : nullOr str` — the directory the
-#     shell runs — which the `lyra` lane sets to its deployed runtime root
+#     shell runs — which the `strillix` lane sets to its deployed runtime root
 #     (`$AOIDE_ROOT/run/qml`) and a host may set to any config directory of its
-#     own. lyra sets it, this lane reads it; neither names the other's option.
+#     own. strillix sets it, this lane reads it; neither names the other's option.
 #
-# The two allowed shapes of quickshell WITHOUT lyra:
+# The two allowed shapes of quickshell WITHOUT strillix:
 #   * own config — a host that brings its own directory sets
 #     `aoide.quickshell.config = "/home/<u>/.config/quickshell"` (or a store
 #     path) in the host module; this service runs from it.
@@ -52,7 +52,7 @@ let
   # the entry point inside whatever directory was named. Spelled out rather
   # than left to quickshell's own directory walk for one reason: the unit's
   # ExecStart and its ConditionPathExists must stay the same two strings
-  # they were while this service lived in `lyra/` (see the unit's comments).
+  # they were while this service lived in `strillix/` (see the unit's comments).
   shellEntry = "${configDir}/shell.qml";
 in
 {
@@ -81,7 +81,7 @@ in
     # sakaki). Not `mkDefault`: exactly one answer is right on this host, and
     # a second one is a conflict worth failing on.
     #
-    # A graphical session exists whether or not lyra paints it, which is why
+    # A graphical session exists whether or not strillix paints it, which is why
     # this rides the CONFIG fact and not a song: a host running its own
     # quickshell config is a painting host too. The bare shape names no
     # config and so anchors nothing — package only, no session claim.
@@ -121,7 +121,7 @@ in
     # Gated on the CONFIG, never on `aoide.song`: a shell that paints a
     # host's own config has no song and starts exactly the same way. The
     # song-gated half (deploy the tree, seed the stage, restart the rice)
-    # is the `lyra` lane's, which is also the lane that sets this config.
+    # is the `strillix` lane's, which is also the lane that sets this config.
     aoide.quickshell.home =
       { lib, ... }:
       lib.optionalAttrs (configDir != null) {
@@ -186,20 +186,20 @@ in
             # aoided.nix): a user unit inherits the manager's environment as
             # of the session's login, so an inherited
             # `AOIDE_SONG_TEMPLATES` keeps pointing at the PREVIOUS build's
-            # songbook until the operator relogs. This unit spawns `lyra` —
-            # the QML it starts execs it (`lyra preview set` from the
-            # widget-maker canvas, `lyra cover set` from the wallpaper
-            # picker) — and any lyra whose STAGING path runs under this
+            # songbook until the operator relogs. This unit spawns `strillix` —
+            # the QML it starts execs it (`strillix preview set` from the
+            # widget-maker canvas, `strillix cover set` from the wallpaper
+            # picker) — and any strillix whose STAGING path runs under this
             # process tree resolves the shipped templates from this
-            # environment: `lyra rice stage`/`lyra reload` gated on
+            # environment: `strillix rice stage`/`strillix reload` gated on
             # `song/src/widgets.rs`'s `plan_stage`, and `rice compose --from`'s
             # template fallback plus the first-stage seed in
             # `song/src/commands/rice.rs`. (`cover set` never reads them.)
             # Declared here, a restart is enough. Gated on the
-            # lyra dendrite for the same reason the nucleus delta is: a
-            # shell with no `lyra` installed has no reader for it.
-            ++ lib.optionals config.aoide.lyra.enable [
-              "AOIDE_SONG_TEMPLATES=${pkgs.lyra-songbook}/share/lyra/songbook"
+            # strillix dendrite for the same reason the nucleus delta is: a
+            # shell with no `strillix` installed has no reader for it.
+            ++ lib.optionals config.aoide.strillix.enable [
+              "AOIDE_SONG_TEMPLATES=${pkgs.strillix-rices}/share/strillix/songbook"
             ];
             Restart = "always";
             RestartSec = 3;

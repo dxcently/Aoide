@@ -13,7 +13,7 @@ light: green phosphor on near-black, a faint bloom, nothing else).
 **Polarity:** dark. Needs a livery field the lane does not read yet (§5).
 **Cover:** a static circuit board on the CRT black (§3.9): dim copper-green
 tracks, pads and vias, generated from the palette. Staged live with
-`lyra cover set`; the wallpaper note stays `null` until the cover is
+`strx cover set`; the wallpaper note stays `null` until the cover is
 declared for the rebuild.
 **Glass:** none. No compositor blur, no hyprglass (§5).
 
@@ -551,7 +551,7 @@ The wallpaper is a still image of a circuit board under the tube.
   never a slot) renders it from the livery with a fixed seed, and the
   preview canvas shoots it at each monitor's size into
   `cover/pcb-<w>x<h>.png`. Regenerating after a palette change is one shot.
-- Live: `lyra cover set <abs path>` (a hot swap). Declaring it into
+- Live: `strx cover set <abs path>` (a hot swap). Declaring it into
   `aoide.livery.wallpaper` for the rebuild is the User's to admit.
 
 **The live board — `widgets/wallpaper.qml`.** The cover is the song's
@@ -597,7 +597,7 @@ shell has no such slot.
 ## 4. Preview fixtures
 
 Unbuilt feeds are drawn with fixtures in the preview canvas ONLY
-(`design/fixtures/<set>/`, passed as `lyra preview --fixture <dir>`), shaped
+(`design/fixtures/<set>/`, passed as `strx preview --fixture <dir>`), shaped
 exactly after the core-seams proposal: `graph.json` with `workspaces` +
 `ties` + `activeAt`, `state/usage/now.json`, and a board answer. The live
 widget keeps its honest empty state until each slice lands; no adapter

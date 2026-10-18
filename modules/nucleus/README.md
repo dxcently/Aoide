@@ -21,7 +21,7 @@ aggregation is the part any host can.
   CONTRACTS.md (livery schema v0). The door and secrets settings are not declared
   here: each lives in the member dendrite that reads it. And it declares the ENABLE FACTS — the seam
   between this layer and the paint lanes (CONTRACTS.md §0):
-  `aoide.quickshell.enable` (a shell surface exists here), `aoide.lyra.enable`
+  `aoide.quickshell.enable` (a shell surface exists here), `aoide.strillix.enable`
   (the paint/rice binary is installed), `aoide.stylix.enable`, each a fact defaulting `false`,
   plus `aoide.quickshell.config : nullOr str` — the directory a shell runs
   (`null` is the bare case: package installed, no shell service) — and
@@ -30,7 +30,7 @@ aggregation is the part any host can.
   registry paints a song's wallpaper here. Beside the facts it declares
   `aoide.components` — `attrsOf { provider : str; actions : attrsOf (listOf
   str) }`, keyed by component slot — which each slot's chosen provider writes
-  for itself; it is a contract option rather than the vibeos runtime's because
+  for itself; it is a contract option rather than the strillix runtime's because
   a consumer's own provider writes it on a host with no runtime. The dendrite that owns a fact sets it
   `true`. A host write that takes effect fails eval (`options.nix`'s `mkFact`:
   a plain or `mkForce` write, or any write with no owner selected); a
@@ -48,7 +48,7 @@ aggregation is the part any host can.
   constructor's gate pass (habit's composition), for the failures only an
   evaluated module graph can see. It reads the identity scalar `aoide.song`
   and the lane facts and declares nothing, so it adds no option, no unit and
-  no package. Today: a song named with no `lyra` lane to paint it fails the
+  no package. Today: a song named with no `strillix` lane to paint it fails the
   host's own evaluation with the taught fix, and forcing the three facts fails
   a host write that takes effect, whether or not a lane reads that fact.
 
@@ -63,7 +63,7 @@ members (`modules/dendrites/README.md`, "The core-service dendrites"):
 | `aoided`         | `modules/dendrites/aoided.nix`          | the AoideOS deltas on the core `aoided.service` (which `aoide.enable` alone provides): the a2a/mcp/mail doors, the pair-watch popup, the usage poller and timer, the discovery firewall carve, `AOIDE_SONG_TEMPLATES` |
 | `melete-adapter` | `modules/dendrites/melete-adapter.nix`  | the thin adapter on the `aoided` event stream          |
 | `aoide-nix`      | `modules/dendrites/aoide-nix.nix`       | flake-native nix settings                              |
-| `aoide-packages` | `modules/dendrites/aoide-packages.nix`  | the `aoide`/`lyra` binaries on the system `PATH`       |
+| `aoide-packages` | `modules/dendrites/aoide-packages.nix`  | the `aoide`/`strillix` binaries on the system `PATH`       |
 
 `aoide-secrets` (the secrets broker and its popup watcher) and `aoide-config`
 (renders `aoide.config.settings` and points `AOIDE_CONFIG` at it) are catalogue
@@ -84,7 +84,7 @@ existence reaches the contract.
 Every dendrite reads its own options and stock ones; a paint dendrite reads
 `aoide.livery`/`aoide.arrangement`/`aoide.surfaces` from here and nothing else of
 the contract's internals. The contract reads back only options a lane SETS — an
-enable fact it declared itself (`aoide.quickshell.enable`, `aoide.lyra.enable`,
+enable fact it declared itself (`aoide.quickshell.enable`, `aoide.strillix.enable`,
 …) or the core seam `aoide.sessionTarget` (`pkgs/aoide/module/options.nix`). In
 both directions the subject is an option declared outside the lane: the contract
 never reads a lane's own option, and no lane reads another lane.

@@ -25,14 +25,14 @@ sudo <toplevel>/bin/switch-to-configuration switch
 # desktop-only reloads — no switch needed
 hyprctl reload                                     # compositor rules
 systemctl --user restart aoide-quickshell.service  # bar / dock / gadgets
-lyra rice stage <song>                             # livery hot-reload
-qs -p pkgs/lyra-shell/qml/shell.qml               # QML parse check
+strx rice stage <song>                             # livery hot-reload
+qs -p pkgs/strillix-shell/qml/shell.qml               # QML parse check
 
-# show — capture through lyra, never bare grim
-lyra screen shot                                   # full layout + JSON sidecar
-lyra screen shot --region "0,0 1080x36"            # one rect
-lyra screen shot --session <id>                    # a conducted session's window
-lyra screen info                                   # monitors, clients, layer surfaces
+# show — capture through strillix, never bare grim
+strx screen shot                                   # full layout + JSON sidecar
+strx screen shot --region "0,0 1080x36"            # one rect
+strx screen shot --session <id>                    # a conducted session's window
+strx screen info                                   # monitors, clients, layer surfaces
 ```
 
 - **The switch is the User's gate.** Propose and prepare the build; they
@@ -42,12 +42,12 @@ lyra screen info                                   # monitors, clients, layer su
   compositor rule → `hyprctl reload`; anything nix-baked (Stylix, base16,
   terminal config) → needs a rebuild. Staged livery values hot-reload.
 - **Staging can be locked.** `rice stage` refuses while the rice mode
-  reports `declarative`. Unlock with `lyra rice mode stage [<song>]`, lock
-  back with `lyra rice mode declarative [<song>]`.
+  reports `declarative`. Unlock with `strx rice mode stage [<song>]`, lock
+  back with `strx rice mode declarative [<song>]`.
 - **Never hand-edit** `song/stage/livery.json` or the draft targets it
   symlinks to — that bypasses the lock check and the draft routing.
 - **Never declare a visual change done without looking at it.** Capture it,
-  read it back, judge it yourself, then show the User. `lyra screen shot` is
+  read it back, judge it yourself, then show the User. `strx screen shot` is
   the capture path, not bare `grim`: it writes a JSON sidecar beside every
   image — origin, scale, and the whole desktop at that instant (cursor, every
   client and layer surface) — so a coordinate read off the image inverts back

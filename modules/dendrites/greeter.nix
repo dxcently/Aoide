@@ -1,11 +1,11 @@
-# modules/dendrites/greeter.nix — the `greeter` slot's vibeos provider: the
+# modules/dendrites/greeter.nix — the `greeter` slot's strillix provider: the
 # display-manager greeter.
 #
-# It is the one vibeos provider that does not bring the vibeos runtime. Every
+# It is the one strillix provider that does not bring the strillix runtime. Every
 # other provider imports the runtime pair; this one runs in greetd before any
 # user session, as the greeter user under cage in its own process, on a store
 # tree of its own, so it cannot share the logged-in user's runtime import
-# (`lyra/README.md`).
+# (`strillix/README.md`).
 #
 # The login prompt, in one of two shapes chosen at build time by the DECLARED
 # song (`aoide.songbook.greeter`, the fact the selection hook derives):
@@ -14,9 +14,9 @@
 #     greeter. greetd runs `cage` as its greeter user, and in it Quickshell on
 #     a store tree this file builds: the lane's `GreeterHost.qml` as the
 #     tree's `shell.qml`, `LiveryState`/`StagingEngine` beside it, the face's
-#     song folder from the shipped songbook (`pkgs.lyra-songbook`) with a
+#     song folder from the shipped songbook (`pkgs.strillix-rices`) with a
 #     `qmldir` naming its uppercase helpers as types (the face loads by a
-#     `qs:` URL, where a sibling file is no type otherwise — lyra's tree
+#     `qs:` URL, where a sibling file is no type otherwise — strillix's tree
 #     writes the same), that
 #     song's `icons/` (when it has one) at `song/songbook/<owner>/icons` —
 #     the `$AOIDE_ROOT`-relative path a face loads its icons from in the
@@ -111,9 +111,9 @@ let
   tree = pkgs.runCommand "aoide-greeter-tree" { nativeBuildInputs = [ pkgs.jq ]; } ''
     q=$out/run/qml
     mkdir -p "$q/songs/${face.owner}" "$out/song/stage"
-    cp ${pkgs.lyra-shell}/share/lyra/qml/LiveryState.qml ${pkgs.lyra-shell}/share/lyra/qml/StagingEngine.qml "$q/"
-    cp ${pkgs.lyra-shell}/share/lyra/qml/GreeterHost.qml "$q/shell.qml"
-    song=${pkgs.lyra-songbook}/share/lyra/songbook/${face.owner}
+    cp ${pkgs.strillix-shell}/share/strillix/qml/LiveryState.qml ${pkgs.strillix-shell}/share/strillix/qml/StagingEngine.qml "$q/"
+    cp ${pkgs.strillix-shell}/share/strillix/qml/GreeterHost.qml "$q/shell.qml"
+    song=${pkgs.strillix-rices}/share/strillix/songbook/${face.owner}
     cp -r "$song/widgets/." "$q/songs/${face.owner}/"
     for h in "$song/widgets/"[A-Z]*.qml; do
       [ -e "$h" ] || continue
@@ -171,7 +171,7 @@ in
 {
   config = lib.mkMerge [
     {
-      aoide.components.greeter.provider = "vibeos";
+      aoide.components.greeter.provider = "strillix";
       aoide.surfaces.greeter.owner = "quickshell";
     }
 

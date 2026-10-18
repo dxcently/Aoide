@@ -609,7 +609,7 @@ impl Registry {
     }
 
     /// Build the full `schema --json` document from this registry.
-    /// `bin_name` names the invoking binary (`"aoide"`/`"lyra"`) — it drives
+    /// `bin_name` names the invoking binary (`"aoide"`/`"strillix"`) — it drives
     /// `external`'s own `PATH` probe (`crate::bin::discover_external`), the
     /// same parameter every usage/did-you-mean string in `door.rs` already
     /// takes.

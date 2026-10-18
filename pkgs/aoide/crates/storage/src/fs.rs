@@ -8,7 +8,7 @@
 //! `parse_command`, `run`) stays in root `shellbridge.rs` — it moves in
 //! Phase 3b (conduct extraction).
 //!
-//! **Runtime root (L-C2, lyra-carrier lane, task #107):** every path below
+//! **Runtime root (L-C2, strillix-carrier lane, task #107):** every path below
 //! `song/stage/`, `state/`, `run/qml/`, and `song/songbook/` composed under
 //! it hangs off ONE root, [`root`] — `$AOIDE_ROOT` (absolute-path-wins),
 //! default `<home>/.aoide`, nix-free. `~/Aoide` is no longer the runtime
@@ -185,7 +185,7 @@ fn default_root() -> std::path::PathBuf {
 /// nothing reads that path once `AOIDE_ROOT` is set elsewhere). `pub`: the
 /// three real binaries call this ONCE, early in their own `main()` —
 /// `crates/cli/src/bin/aoide.rs`, `crates/cli/src/bin/aoided.rs`,
-/// `crates/lyra/src/bin/lyra.rs` — never from a library getter (see
+/// `crates/strillix/src/bin/strillix.rs` — never from a library getter (see
 /// [`root`]'s own doc for the incident that settled this). Safe to call
 /// more than once (each piece is a plain exists-and-absent check, same
 /// idempotency [`migrate_dir`]/[`migrate_file`] already give
@@ -208,11 +208,14 @@ fn default_root() -> std::path::PathBuf {
 /// `Err` on EVERY run while a `state/` that exists cannot be locked owner-only,
 /// whether this run moved it ([`migrate_dir`]) or an earlier one did. It is
 /// locked first, before any move, so the run that moves a tree and the runs
-/// after it refuse the same way. `aoide`, `aoided` and `lyra` exit on it rather
+/// after it refuse the same way. `aoide`, `aoided` and `strillix` exit on it rather
 /// than read a tree they could not make private. A move that fails stays
 /// narrated, with the old tree in place.
 pub fn migrate_root_once() -> std::io::Result<()> {
     lock_state_if_present()?;
+    if let Some(home) = std::env::var_os("HOME") {
+        migrate_strillix_state(std::path::Path::new(&home))?;
+    }
     let old_root = aoide_protocol::aoide_home().join("Aoide");
     let new_root = root();
     if old_root == new_root {
@@ -266,6 +269,15 @@ fn migrate_node_state_names() -> std::io::Result<()> {
         &state.join("node-pairing-outbound.json"),
     );
     Ok(())
+}
+
+/// The paint binary's state link moved from `~/.local/state/lyra` to
+/// `~/.local/state/strillix` (Hyprland sources `rice.conf` from there, so the
+/// move must land before the first rebuild rewrites the link). Same no-clobber
+/// move as [`migrate_dir`]; `home` is the caller's `$HOME`.
+pub fn migrate_strillix_state(home: &std::path::Path) -> std::io::Result<()> {
+    let state = home.join(".local").join("state");
+    migrate_dir(&state.join("lyra"), &state.join("strillix"))
 }
 
 /// Move `old` → `new` wholesale: a no-op unless `old` exists AND `new` is
@@ -422,7 +434,7 @@ pub fn state_dir() -> std::path::PathBuf {
 /// (`conduct/README.md`), mirrored by `server/src/daemon.rs::stage_roster`). Split from
 /// [`stage_dir`] (2026-08-27, command-defrag lane S1): those six files are
 /// core orchestration state the `aoide`/`aoided` binaries alone read and
-/// write, never rice/paint — `song/` is lyra's tree
+/// write, never rice/paint — `song/` is strillix's tree
 /// (`docs/architecture/PACKAGE-LAYOUT.md`'s "Two binaries"), so conducting
 /// state has no business living under it. `stage_dir` itself is UNCHANGED
 /// and keeps meaning exactly what it always has — the rice/paint stage tree
@@ -669,7 +681,7 @@ pub fn flake_root() -> std::path::PathBuf {
 }
 
 /// The host's own config file — the NixOS module holding this machine's
-/// `habit.song.declared` line, which `lyra rice declare <song> --host`
+/// `habit.song.declared` line, which `strillix rice declare <song> --host`
 /// rewrites. `$AOIDE_HOST_CONFIG` (the core option `aoide.hostConfig`,
 /// exported beside `$AOIDE_FLAKE_ROOT` on the same units and login shells) when
 /// it is absolute; otherwise the option's own default spelled in code,
@@ -690,22 +702,22 @@ pub fn host_config() -> Option<std::path::PathBuf> {
     Some(flake_root().join("hosts").join(host).join("default.nix"))
 }
 
-/// The lyra shell SOURCE, as a path relative to [`flake_root`]: the QML tree,
+/// The strillix shell SOURCE, as a path relative to [`flake_root`]: the QML tree,
 /// the resolved icons and the preview fixture sets a checkout carries — the
-/// same directory `pkgs/lyra-shell` builds its `share/lyra/{qml,icons,
+/// same directory `pkgs/strillix-shell` builds its `share/strillix/{qml,icons,
 /// preview}` from, so the path a checkout is READ from and the path the
 /// package is BUILT from cannot drift apart.
 ///
 /// Named ONCE, here. Every site that CONSTRUCTS the shell path joins the const
-/// onto [`flake_root`] (`aoide-lyra`'s `commands::preview` stages the tree into
+/// onto [`flake_root`] (`strillix`'s `commands::preview` stages the tree into
 /// an isolated preview root; `aoide-song`'s `compose` interpolates the const
 /// into the scaffold doc that points a new song's author at `qml/slots.md`) —
 /// prose and doc comments, and that scaffold text, may name the literal
-/// `"pkgs/lyra-shell"`, which nothing resolves. A second checkout-relative
+/// `"pkgs/strillix-shell"`, which nothing resolves. A second checkout-relative
 /// tree earns its own const beside this one rather than a literal at the call
 /// site — the rename this exists to survive is exactly the one that leaves a
 /// string behind in a crate nobody thought to grep.
-pub const LYRA_SHELL_SRC: &str = "pkgs/lyra-shell";
+pub const STRILLIX_SHELL_SRC: &str = "pkgs/strillix-shell";
 
 /// Pure tier logic for [`song_templates_dir`] — the same two-tier shape
 /// `aoide_protocol::bin`'s sibling-binary resolver uses (env override, then
@@ -728,13 +740,13 @@ fn resolve_song_templates_dir(
     }
     let dir = exe_dir?;
     if sibling_is_dir {
-        Some(dir.join("..").join("share").join("lyra").join("songbook"))
+        Some(dir.join("..").join("share").join("strillix").join("songbook"))
     } else {
         None
     }
 }
 
-/// The shipped SCORE TEMPLATES dir (L-C3, lyra-carrier lane, task #107):
+/// The shipped SCORE TEMPLATES dir (L-C3, strillix-carrier lane, task #107):
 /// `<templates>/<song>/livery.json` is what `rice compose --from <song>`
 /// (`aoide-song`'s `commands::rice`) falls back to reading when
 /// [`songbook_dir`] has nothing yet for that song — the ordinary case on a
@@ -754,11 +766,11 @@ fn resolve_song_templates_dir(
 ///      (`modules/nucleus/{aoided,shellbridge,secrets,melete-adapter}.nix`)
 ///      — a store-path boundary sibling resolution cannot cross.
 ///   2. the sibling of `current_exe()`'s directory,
-///      `<exe_dir>/../share/lyra/songbook` — ONLY if that directory
+///      `<exe_dir>/../share/strillix/songbook` — ONLY if that directory
 ///      actually exists (mirrors `aoide_protocol::bin`'s own tier-2 rule:
 ///      handing back a path that isn't there only moves the failure
 ///      downstream for no benefit). What a non-nix tarball install
-///      (`bin/lyra` + `share/lyra/songbook/` sitting beside it) uses; on a
+///      (`bin/strillix` + `share/strillix/songbook/` sitting beside it) uses; on a
 ///      NixOS host this tier is never actually reached, since tier 1 is
 ///      always set there.
 ///
@@ -772,23 +784,23 @@ pub fn song_templates_dir() -> Option<std::path::PathBuf> {
         .and_then(|p| p.parent().map(std::path::Path::to_path_buf));
     let sibling_is_dir = exe_dir
         .as_deref()
-        .map(|dir| dir.join("..").join("share").join("lyra").join("songbook"))
+        .map(|dir| dir.join("..").join("share").join("strillix").join("songbook"))
         .is_some_and(|p| p.is_dir());
     resolve_song_templates_dir(env_value.as_deref(), exe_dir.as_deref(), sibling_is_dir)
 }
 
-/// `$AOIDE_SONG_TEMPLATES`'s parent — the shipped `share/lyra` dir. Beside
+/// `$AOIDE_SONG_TEMPLATES`'s parent — the shipped `share/strillix` dir. Beside
 /// the templates sit the two build-time payloads a repo-less machine reads to
 /// do its own work without a checkout: `nix/manifest.nix` (§9's offline
 /// songbook generator, evaluated by `aoide-song::widgets`) and
-/// `aoide-options.json` (`lyra onboard`'s option set). Named ONCE here, for
-/// the same reason [`LYRA_SHELL_SRC`] is: two crates derive it from
+/// `aoide-options.json` (`strillix onboard`'s option set). Named ONCE here, for
+/// the same reason [`STRILLIX_SHELL_SRC`] is: two crates derive it from
 /// [`song_templates_dir`], and a second derivation of the same parent is a
 /// rename waiting to leave one of them behind.
 ///
 /// `None` exactly when [`song_templates_dir`] is `None` — there is no
 /// templates dir to sit beside.
-pub fn lyra_share_dir() -> Option<std::path::PathBuf> {
+pub fn strillix_share_dir() -> Option<std::path::PathBuf> {
     song_templates_dir().and_then(|templates| {
         templates
             .parent()
@@ -823,7 +835,7 @@ pub fn songbook_notes(name: &str) -> std::path::PathBuf {
 ///
 /// Same content as the active song's committed `livery.json` with the venue's
 /// `aoide.livery.override` applied (a plain file, never a symlink), published
-/// by the lyra lane's activation seed — the file's own `"song"` field
+/// by the strillix lane's activation seed — the file's own `"song"` field
 /// says WHICH song that was. Read for the declarative re-pin
 /// (`rice mode declarative`), which restores declared truth, and by
 /// `declared_song()` to learn WHICH song is declared; staging derives from the
@@ -835,7 +847,7 @@ pub fn declared_notes() -> std::path::PathBuf {
     song_dir().join("declared").join("livery.json")
 }
 
-/// What `lyra rice refresh` last wrote into the machine's copy of built-in song
+/// What `strillix rice refresh` last wrote into the machine's copy of built-in song
 /// `name` — `<song>/declared/songbook/<name>.json`, `{schemaVersion, song,
 /// source, files: {relpath: sha256}}`. Beside [`declared_notes`] and outside
 /// the song folder on purpose: the folder-equality gate, `rice declare`,
@@ -846,7 +858,7 @@ pub fn songbook_record(name: &str) -> std::path::PathBuf {
 
 /// The venue's recolour of the declared song — `<song>/declared/venue.json`
 /// (CONTRACTS.md §4): the slots `aoide.livery.override` changes, tier by tier,
-/// published by the lyra lane's activation seed (`{}` when the host sets no
+/// published by the strillix lane's activation seed (`{}` when the host sets no
 /// override). Staging the declared song overlays it on the runtime songbook's
 /// copy. Absent on a host that never activated the lane; readers then overlay
 /// nothing.
@@ -855,7 +867,7 @@ pub fn declared_venue() -> std::path::PathBuf {
 }
 
 /// The state link the compositor sources for the rice:
-/// `$HOME/.local/state/lyra/rice.conf` (CONTRACTS.md §4). The one writer
+/// `$HOME/.local/state/strillix/rice.conf` (CONTRACTS.md §4). The one writer
 /// outside `$AOIDE_ROOT` in this module: `$HOME`, not `$XDG_STATE_HOME`,
 /// because the renderer's Nix activation hardcodes that path, so the two
 /// halves name one file. Its target is the declared twin
@@ -867,7 +879,7 @@ pub fn rice_conf_link() -> std::path::PathBuf {
         .unwrap_or_else(aoide_protocol::aoide_home)
         .join(".local")
         .join("state")
-        .join("lyra")
+        .join("strillix")
         .join("rice.conf")
 }
 
@@ -2551,7 +2563,7 @@ mod tests {
         }
     }
 
-    // ── `song_templates_dir` (L-C3, lyra-carrier lane, task #107) ──────────
+    // ── `song_templates_dir` (L-C3, strillix-carrier lane, task #107) ──────────
 
     #[test]
     fn song_templates_tiers_resolve_in_order() {
@@ -2564,7 +2576,7 @@ mod tests {
         // instead — the assertion would then be measuring the wrong tier.
         let env_dir = scratch("opt/custom/songbook");
         let exe_dir = scratch("usr/bin");
-        let sibling = format!("{exe_dir}/../share/lyra/songbook");
+        let sibling = format!("{exe_dir}/../share/strillix/songbook");
         let cases: &[(&str, Option<&str>, Option<&str>, bool, Option<&str>)] = &[
             (
                 "env wins even when a sibling dir exists",
@@ -2615,7 +2627,7 @@ mod tests {
         // The impure public wrapper: an absolute `$AOIDE_SONG_TEMPLATES`
         // wins outright regardless of whatever `current_exe()`'s own
         // sibling resolves to in this test binary (which never has a real
-        // `share/lyra/songbook` beside it).
+        // `share/strillix/songbook` beside it).
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved = std::env::var("AOIDE_SONG_TEMPLATES").ok();
 
@@ -4700,7 +4712,7 @@ mod tests {
 
         assert_eq!(
             rice_conf_link(),
-            std::path::PathBuf::from(&home).join(".local/state/lyra/rice.conf"),
+            std::path::PathBuf::from(&home).join(".local/state/strillix/rice.conf"),
         );
         assert_eq!(
             declared_rice_conf(),
@@ -4745,5 +4757,86 @@ mod tests {
             .collect();
         assert!(leftovers.is_empty(), "temp links left behind: {leftovers:?}");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+/// The paint state link's one-shot move, on a private `$HOME` only: the real
+/// `~/.local/state` is never named here. Every temp `$HOME` is judged by
+/// `ensure_write_dir` against the aoide state dir, which these paths never sit
+/// under, so no test in this module locks anything it does not own.
+#[cfg(all(test, unix))]
+mod strillix_state_tests {
+    use super::migrate_strillix_state;
+    use std::os::unix::fs::{symlink, PermissionsExt};
+    use std::path::{Path, PathBuf};
+
+    fn private_home(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("strillix-state-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// The old paint state: a `rice.conf` link into a declared file, as the
+    /// lyra-era Hyprland `source` line expects it.
+    fn old_state(home: &Path) -> PathBuf {
+        let target = home.join("declared-rice.conf");
+        let lyra = home.join(".local/state/lyra");
+        std::fs::create_dir_all(&lyra).unwrap();
+        std::fs::write(&target, "source\n").unwrap();
+        symlink(&target, lyra.join("rice.conf")).unwrap();
+        target
+    }
+
+    #[test]
+    fn a_fresh_box_creates_no_state_tree() {
+        let home = private_home("fresh");
+        migrate_strillix_state(&home).unwrap();
+        assert!(!home.join(".local/state/lyra").exists());
+        assert!(!home.join(".local/state/strillix").exists());
+    }
+
+    #[test]
+    fn an_old_box_moves_its_link_once_and_a_second_run_is_a_no_op() {
+        let home = private_home("moves");
+        let target = old_state(&home);
+        migrate_strillix_state(&home).unwrap();
+        let new = home.join(".local/state/strillix/rice.conf");
+        assert!(!home.join(".local/state/lyra").exists());
+        assert_eq!(std::fs::read_link(&new).unwrap(), target);
+        migrate_strillix_state(&home).unwrap();
+        assert_eq!(std::fs::read_link(&new).unwrap(), target);
+    }
+
+    #[test]
+    fn a_tree_already_at_the_new_name_is_never_clobbered() {
+        let home = private_home("noclobber");
+        old_state(&home);
+        let new = home.join(".local/state/strillix");
+        std::fs::create_dir_all(&new).unwrap();
+        std::fs::write(new.join("keep"), "new\n").unwrap();
+        migrate_strillix_state(&home).unwrap();
+        assert_eq!(std::fs::read_to_string(new.join("keep")).unwrap(), "new\n");
+        assert!(home.join(".local/state/lyra/rice.conf").exists());
+    }
+
+    #[test]
+    fn a_refused_move_keeps_the_old_tree_and_does_not_fail_the_boot() {
+        let home = private_home("refused");
+        old_state(&home);
+        let state = home.join(".local/state");
+        std::fs::set_permissions(&state, std::fs::Permissions::from_mode(0o500)).unwrap();
+        let probe = state.join("probe");
+        let writable = std::fs::File::create(&probe).is_ok();
+        let _ = std::fs::remove_file(&probe);
+        let result = migrate_strillix_state(&home);
+        std::fs::set_permissions(&state, std::fs::Permissions::from_mode(0o700)).unwrap();
+        if writable {
+            // Root writes through a 0500 directory, so the refusal cannot be staged.
+            return;
+        }
+        result.unwrap();
+        assert!(home.join(".local/state/lyra/rice.conf").exists());
+        assert!(!home.join(".local/state/strillix").exists());
     }
 }

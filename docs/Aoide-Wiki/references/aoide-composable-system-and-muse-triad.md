@@ -1,4 +1,4 @@
-# AoideOS composition, Lyra, and the muse triad
+# AoideOS composition, Strillix, and the muse triad
 
 This is the consolidated architecture and implementation plan. It distinguishes agreed requirements, verified source behavior, and proposed contracts. It does not declare the migration implemented or authorize a rebuild. The detailed [question register](mneme-aoide-open-questions.md) and [Mneme proposal](mneme-shared-memory-and-aoide.md) remain companion documents; their unresolved questions are not silently closed here.
 
@@ -7,17 +7,17 @@ The authoritative Nix composition target and build sequence are in
 the first live portability consumer; AoideOS migrates its walkers after that
 proof. Minimal additive upstream exports may precede the migration. That page
 governs provider selection, aggregations, shared users, selective lanes, and
-constructor implementation. This page supplies broader Lyra and muse-triad
+constructor implementation. This page supplies broader Strillix and muse-triad
 context, not a competing Nix migration specification.
 
 ## Agreed direction
 
-- Aoide core is a shell-accessible, headless orchestration engine. Nix and Lyra are optional.
-- Lyra owns rice composition and desktop rendering. APIs and state remain reachable through bridges without QML.
+- Aoide core is a shell-accessible, headless orchestration engine. Nix and Strillix are optional.
+- Strillix owns rice composition and desktop rendering. APIs and state remain reachable through bridges without QML.
 - Explicit aggregates and ordinary Nix lane registries replace global module-tree discovery. Unselected dendrites stay outside a host's module graph. Reading a selected registry or hashing the repository source is distinct from importing every implementation.
 - A dendrite keeps its supported lanes together. Small implementations can live inside default.nix; substantial implementations can be extracted. Unsupported lanes need no empty files.
 - Shared aggregates hold feature membership and mkDefault values one layer below hosts. Hosts show selected roles and exceptions. The proposed expanded inventory is derived, not manually maintained.
-- System accounts and user configurations are separate. HM is optional for server deployment. Each graphical user has independent Lyra state.
+- System accounts and user configurations are separate. HM is optional for server deployment. Each graphical user has independent Strillix state.
 - Rice definitions and composition are pure Nix; QML/assets remain implementation source. Runtime JSON is generated output, not a separately maintained authority.
 - Rice parts are replaceable independently, with their dependencies resolved. A rice covers the desktop configuration within its supported backend scope, not only paint/widgets.
 - Nix prepares the selected available rice bundles. Each user session has a declared default and can stage another available bundle without creating a draft or changing that default.
@@ -33,10 +33,10 @@ The wallpaper override rule remains a proposed mechanism: follow the active song
 | Component | Owns | Depends on | Does not require |
 |---|---|---|---|
 | Aoide / aoided | Session and project coordination, conduct, mail, policy and audit at its API boundary | Shell/process adapters; transport for remote coordination | Nix, desktop, Melete, Mneme for basic conduct |
-| Nix deployment | Selected packages, service identities, configuration, secret-file references, activation | Platform evaluator and selected modules | A running Lyra shell |
-| Lyra | Installed rice compositions, staging, widget and wallpaper controls | Relevant bridges; graphical backend for rendering | Melete or Mneme for ordinary desktop use |
-| Mneme | Vault access and semantic retrieval today; shared persona memory/history by requirement | Authorized storage and configured embedding model when embeddings are used | Melete, Lyra |
-| Melete | Accepted jobs, scheduler, worker lifecycle, app host and gateway | Runtime dependencies and configured endpoints | Lyra; Aoide for its independent operation |
+| Nix deployment | Selected packages, service identities, configuration, secret-file references, activation | Platform evaluator and selected modules | A running Strillix shell |
+| Strillix | Installed rice compositions, staging, widget and wallpaper controls | Relevant bridges; graphical backend for rendering | Melete or Mneme for ordinary desktop use |
+| Mneme | Vault access and semantic retrieval today; shared persona memory/history by requirement | Authorized storage and configured embedding model when embeddings are used | Melete, Strillix |
+| Melete | Accepted jobs, scheduler, worker lifecycle, app host and gateway | Runtime dependencies and configured endpoints | Strillix; Aoide for its independent operation |
 | Git/source checkout | Canonical code and reviewed project documents | Repository tooling | Vector index |
 
 Aoide does not replace Melete's scheduler. Nix declares the Melete service; systemd supervises the daemon. Melete supervises its own jobs and hosted apps. Aoide dispatches and controls those jobs through Melete's lifecycle interface. Admission and execution audits remain distinct but correlated.
@@ -54,9 +54,9 @@ sources under `users/`. NixOS without HM, standalone HM, supported Darwin lanes,
 and package-only consumers have explicit boundaries. Aoide core remains
 independent of this deployment structure.
 
-## Lyra composition, staging, and complete configuration activation
+## Strillix composition, staging, and complete configuration activation
 
-Nix owns the authored composition. Lyra activates built configurations through supported backends. The system is declarative at the source boundary, not implemented exclusively in the Nix language: QML renders, bridges operate capabilities, and the runtime applies transitions.
+Nix owns the authored composition. Strillix activates built configurations through supported backends. The system is declarative at the source boundary, not implemented exclusively in the Nix language: QML renders, bridges operate capabilities, and the runtime applies transitions.
 
 | Object | Meaning and authority |
 |---|---|
@@ -80,7 +80,7 @@ Host + user select aggregates, available songs and default
                   Available built bundles
                  Sonata · Cadenza · Nocturne
                            ↓
-                  Lyra activation coordinator
+                  Strillix activation coordinator
                  ├─ declared: configured default
                  ├─ stage: temporary available selection
                  └─ draft preview: built candidate
@@ -96,7 +96,7 @@ Borrowed parts retain source identity until explicitly customized. A local custo
 
 The current shared QML source lives in modules/facets/quickshell/qml; its Nix facet builds/deploys that source together with song widget bodies into run/qml. Facet refers to the deployment/render integration, not a separate collection of runtime adapters hidden outside that QML source. Generated run/qml is not the proposed editing authority.
 
-Dependency compatibility and activation support are separate checks. Required packages/services may already exist while a changed setting still requires a process restart. Each backend needs a supported configuration schema, scope, apply/reload/restart behavior, removed-setting handling, and failure/recovery behavior. Cross-process activation is not assumed atomic. Settings delegated to Lyra have one writer: HM/Nix installs that integration instead of independently overwriting the same leaves. Host-owned settings and system-service policy remain outside a rice's delegated scope.
+Dependency compatibility and activation support are separate checks. Required packages/services may already exist while a changed setting still requires a process restart. Each backend needs a supported configuration schema, scope, apply/reload/restart behavior, removed-setting handling, and failure/recovery behavior. Cross-process activation is not assumed atomic. Settings delegated to Strillix have one writer: HM/Nix installs that integration instead of independently overwriting the same leaves. Host-owned settings and system-service policy remain outside a rice's delegated scope.
 
 | Transition | Activation boundary |
 |---|---|
@@ -114,7 +114,7 @@ The wallpaper manager is independent of selected rice and picker widgets. songbo
 Verified current gaps, not claims of implemented target behavior:
 
 - Quickshell already watches staged livery and hotloads bound colors. Full dependency-checked configuration switching is additional work.
-- Quickshell and lyra-songbook package all songs; checkout staging can regenerate whole-songbook metadata. Selected installation must apply consistently to every path.
+- Quickshell and strillix-rices package all songs; checkout staging can regenerate whole-songbook metadata. Selected installation must apply consistently to every path.
 - composeSong returns package metadata, but installation hardcodes packages. Sibling validation and implicit Sonata fallback disagree.
 - Missing slots can fall back instead of staying absent. Fixed shell slots and dynamic surfaces have different instantiation paths.
 - Runtime registries are generated separately from host arrangement overrides; borrowing-composition staging misses modified borrowed owners.
@@ -137,7 +137,7 @@ Mutual contributions:
 | Melete → Aoide | Durable run IDs, scheduled/chained execution, app hosting, status/artifacts/completion events |
 | Mneme → both | Authorized knowledge, persona definitions, shared memory/history, semantic retrieval |
 | Either agent/job → Mneme | Attributed results and memory updates through the agreed write contract |
-| Bridges → Lyra | Job/project/history/index status for optional views |
+| Bridges → Strillix | Job/project/history/index status for optional views |
 
 Aoide already offers Melete status, generic tool calls, and a graph snapshot. Its event adapter is a skeleton. The snapshot is not yet a merged project/task model. Integration needs distinct project, persona, Aoide session, and Melete run identifiers; stable event/dispatch IDs; reconnect and duplicate handling; and clear steering/cancellation ownership. Basic Aoide tasks and Mneme access continue without Melete.
 
@@ -187,7 +187,7 @@ Labels below are planning workstreams; P-M5 remains the existing mail phase iden
 | T1: Melete orchestration adapter | Dispatch/run correlation, event ingestion, retries, steering/cancellation boundary | Verified Melete endpoint; lifecycle contract | Duplicate request creates one intended run; reconnect restores status; Aoide does not compete with scheduler |
 | T2: declarative Melete apps | Selected app sources, adoption/update/removal, state preservation, routes | N2 and Melete app lifecycle contract | Source update preserves app state; restart restores membership; removal semantics verified |
 | C1: code context pilot | Anchored extraction, hybrid retrieval, invalidation, annotations vs patches | Project identity and Mneme access/index policy | Known queries find expected symbols; edits/renames/deletions handled; stale anchors cannot silently edit wrong code |
-| V1: Lyra observability | Project/run/history/index/mail views through bridges | Corresponding headless APIs above | Every displayed operation works without QML; widgets report evidence and freshness |
+| V1: Strillix observability | Project/run/history/index/mail views through bridges | Corresponding headless APIs above | Every displayed operation works without QML; widgets report evidence and freshness |
 
 ~~~text
 O0 ──> O1 (P-M5 + fetched receipts)
@@ -209,12 +209,12 @@ O1 is needed for unattended agent-to-agent continuation, not for manually superv
 
 The main orchestrator owns decomposition, mail, ownership tracking, acceptance evidence, and integration. ARCHITECT resolves a bounded phase; EXECUTE receives a concrete brief; a separate REVIEW instance derives findings from source/diff. Every brief names owned paths, prerequisites, acceptance tests, and what it got wrong. Existing unrelated packaging changes remain outside these phases. No bulk migration is assigned from this document alone.
 
-Claude's initial assignment is read-only readiness and review of mail/control lifecycle decisions. The Nix/Lyra and Melete/Mneme architecture can be inspected independently. Implementation starts from a settled vertical slice, not from every workstream at once. Cargo use is serialized and tests are scoped to touched crates. Rebuilds remain user-admitted. Filed mail, prompt submission, fetching, and acting/completion are separate observable states.
+Claude's initial assignment is read-only readiness and review of mail/control lifecycle decisions. The Nix/Strillix and Melete/Mneme architecture can be inspected independently. Implementation starts from a settled vertical slice, not from every workstream at once. Cargo use is serialized and tests are scoped to touched crates. Rebuilds remain user-admitted. Filed mail, prompt submission, fetching, and acting/completion are separate observable states.
 
 ## Source anchors
 
 - [Current assembly and global walk](../../../lib/mkHost.nix), [module conventions](../../../modules/AGENTS.md).
-- [Current declare copy](../../../pkgs/aoide/crates/lyra/src/commands/stubs.rs), [mode-aware reload](../../../pkgs/aoide/crates/song/src/commands/reload.rs).
+- [Current declare copy](../../../pkgs/aoide/crates/strillix/src/commands/stubs.rs), [mode-aware reload](../../../pkgs/aoide/crates/song/src/commands/reload.rs).
 - [Widget composition](../../../lib/song.nix), [songbook generation](../../../lib/songbook.nix), [Quickshell deployment](../../../modules/facets/quickshell/default.nix).
 - [Current Melete deployment](../../../modules/dendrites/melete.nix), [launcher package](../../../pkgs/melete/default.nix), [Melete client](../../../pkgs/aoide/crates/client/src/mcp_client.rs), [adapter skeleton](../../../pkgs/aoide/crates/client/src/adapter.rs).
 - [Mail design](../../architecture/MAIL.md), [orchestration protocol](../protocol/dev/ORCHESTRATION.md).

@@ -12,7 +12,7 @@
 # The record's discovery is the registry, so the hook, borrow resolution and
 # `builtIn` never read `dir` (no import-from-derivation); only the paint lane's
 # songbook package consumes `dir`'s contents. A consumer hands `dir` to the song
-# hook (`songbook = …`) and to the lyra lane's per-host songbook, and reads
+# hook (`songbook = …`) and to the strillix lane's per-host songbook, and reads
 # `songNames` / `songs` / `rices` off the same record.
 #
 # Merge happens BEFORE borrow resolution: every song is visible in one registry

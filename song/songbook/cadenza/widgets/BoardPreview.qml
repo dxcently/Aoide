@@ -2,7 +2,7 @@
 // filled from `design/fixtures/board/` (sonata's AudioColonnadePreview
 // precedent). The live path never loads this file.
 //
-//   AOIDE_FLAKE_ROOT=<worktree> lyra preview \
+//   AOIDE_FLAKE_ROOT=<worktree> strillix preview \
 //       <worktree>/song/songbook/cadenza/widgets/BoardPreview.qml --song cadenza \
 //       --fixture <worktree>/song/songbook/cadenza/design/fixtures/board
 //

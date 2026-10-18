@@ -14,7 +14,7 @@ Companions: `making-a-widget.md` (what makes a widget belong),
 
 ## 1. From file to screen
 
-The full mechanism is `pkgs/lyra-shell/qml/slots.md` and
+The full mechanism is `pkgs/strillix-shell/qml/slots.md` and
 `CONTRACTS.md §5`; this only orients an author.
 
 ```
@@ -71,7 +71,7 @@ In practice, inside a `widgets/*.qml`:
 - **A new API lands as a bridge FIRST and the QML picks it up second.** Never
   the reverse; never only in QML.
 
-This is also the lane/song line: `pkgs/lyra-shell/qml/` keeps agnostic
+This is also the lane/song line: `pkgs/strillix-shell/qml/` keeps agnostic
 bridges and APIs, the song keeps everything that paints.
 
 ---
@@ -107,7 +107,7 @@ structurally incapable of reaching nix options through this surface —
 
 ### What `livery.*` actually exposes
 
-From `pkgs/lyra-shell/qml/LiveryState.qml`:
+From `pkgs/strillix-shell/qml/LiveryState.qml`:
 
 - **colour roles** — `paletteBg/Fg/Accent/Urgent/Hot`, `wireCyan`, `holoBlue`,
   `violet`, `glitchPink`, `base09`, `base0F`; `accentSpread` and

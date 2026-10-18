@@ -34,7 +34,7 @@ management seam"). This lane completes that seam.
 2. **Runtime mirrors `run/qml`.** The elements lane renders the declared
    song's element configs into `$AOIDE_ROOT/run/elements/<element>/`;
    units and exec-onces point THERE — never store symlinks in
-   `~/.config`. `lyra rice stage` overwrites the staged configs and
+   `~/.config`. `strx rice stage` overwrites the staged configs and
    RESTARTS the element; a rebuild re-seeds (stage-beats-declared
    rank, the existing convention). ONE uniform contract per element:
    a config dir + a restart (unit restart, or kill+exec for exec-once
@@ -59,7 +59,7 @@ management seam"). This lane completes that seam.
    store copy of the song dir) — never config text transcribed
    through an LLM's context. Agents drive capture: the AGENT decides
    which elements exist, which files matter, how each starts; the
-   helper command `lyra rice capture` does only the mechanical freeze.
+   helper command `strx rice capture` does only the mechanical freeze.
    Captured configs start with hardcoded colors BY DESIGN; a later
    mint/tokenize pass (designed here, NOT built in this lane)
    rewrites colors into `{{palette.*}}` placeholders, promoting the
@@ -72,9 +72,9 @@ management seam"). This lane completes that seam.
    host files — chiyo already proves the shape. Zero-ceremony folder
    creation (compose/capture auto-create); NO onboard command;
    foreign-flake wiring guidance goes into `aoide guide` and docs.
-   Aoide-with-lyra ships nix on non-NixOS hosts (standalone
+   Aoide-with-strillix ships nix on non-NixOS hosts (standalone
    home-manager), so the Stylix/declarative tier exists everywhere
-   lyra runs; core stays nix-FREE (hard constraint).
+   strillix runs; core stays nix-FREE (hard constraint).
 
 ## The element contract
 
@@ -101,7 +101,7 @@ no import-list edit anywhere, and is removable without trace by
 deleting that directory. The `_`-prefix shelving convention applies
 (`elements/_waybar/` is skipped everywhere a `_widgets/` slot would
 be). The delete-every-qml test passes: with every paint lane gone,
-`lyra element seed` and `lyra rice stage` still drive
+`strx element seed` and `strx rice stage` still drive
 `run/elements/` from a bare shell.
 
 ## The descriptor
@@ -171,9 +171,9 @@ $AOIDE_ROOT/run/elements/            (sibling of run/qml — storage
 Two writers, one rank rule — the same stage-beats-declared convention
 `run/qml` and the stage twin already hold. Between rebuilds, `rice
 stage` overwrites freely; a rebuild reasserts the declared song's
-store truth, exactly as the lyra lane's `rsync -a --delete`
+store truth, exactly as the strillix lane's `rsync -a --delete`
 reasserts `run/qml`, and a staged song is then restored from the
-runtime songbook by `lyra reload` (the lyra lane's
+runtime songbook by `strx reload` (the strillix lane's
 `aoide-rice-reload` unit), as it restores the rest of the stage.
 
 ## Flows
@@ -181,7 +181,7 @@ runtime songbook by `lyra reload` (the lyra lane's
 **Stage — the edit loop (this lane's design center):**
 
 ```
-lyra rice stage <song>
+strx rice stage <song>
   ├─ livery.json → song/stage/livery.json          (existing, atomic)
   ├─ hyprctl keyword batch                          (existing, live tier)
   ├─ widget QML → run/qml + IPC reload              (existing)
@@ -202,19 +202,19 @@ nixos-rebuild / home-manager switch          (user-gated, house rule 2)
     ├─ aoide.arrangement.elements.<e> = { surfaces, via }   (the TYPE set)
     ├─ aoide.surfaces.<s>.owner = "<e>"                     (claims)
     └─ units / exec-once lines generated, ExecStart → run/elements/<e>/
-  activation: lyra element seed <song>
+  activation: strx element seed <song>
     renders the STORE copy of the song's elements against the
     declared livery → run/elements/   (re-seeds; then EVERY element
     unit is try-restarted unconditionally — the house ruling that
     activation always brings the rice elements back up, same as the
-    lyra lane's aoideRestartRice hook; changed-unit-only
+    strillix lane's aoideRestartRice hook; changed-unit-only
     restarts leave a wedged element invisible to every rebuild)
 ```
 
 **Capture — the mechanical freeze:**
 
 ```
-lyra rice capture <song> <element> --config <path>...
+strx rice capture <song> <element> --config <path>...
                   [--unit <u> | --exec <cmd>] [--surface <s>]...
   ├─ auto-creates song/songbook/<song>/elements/<element>/   (zero ceremony;
   │    the song dir itself auto-creates too, compose-style)
@@ -253,7 +253,7 @@ set from "owner is not stylix" (`surfaceToStylixTargets` +
 `presentDisables`, dendrites/stylix). Two small moves complete the
 picture, and the whitelist does not grow:
 
-- The lyra lane's nine owner declarations become
+- The strillix lane's nine owner declarations become
   `lib.mkDefault "quickshell"`, so an element's normal-priority claim
   wins without an override dance; `checks.surface-ownership` still
   sees exactly one owner per surface, and two elements claiming the
@@ -277,7 +277,7 @@ the same commit as the seams they describe.
   validation, `{run}` substitution, the render pipeline (verbatim
   copy + `emit::file::render` for templated files), and
   `run_elements_dir()` in `storage/src/fs.rs` beside
-  `run_qml_dir()`. Plumbing command `lyra element seed <song>` (golden
+  `run_qml_dir()`. Plumbing command `strx element seed <song>` (golden
   +1) doing a full render into `run/elements/` from the songbook —
   the shell-reachable bridge the elements lane will call. CONTRACTS §5
   "Elements" subsection in the same commit. Tests: descriptor
@@ -301,24 +301,24 @@ the same commit as the seams they describe.
   arrangement namespace, declared in nucleus options.nix) and the
   `aoide.surfaces` claims; generate `aoide-element-<name>.service`
   units and compositor exec-once lines pointing at
-  `run/elements/`; activation hook runs `lyra element seed` against
+  `run/elements/`; activation hook runs `strx element seed` against
   the declared song (store-referenced files, decision 4). Gate: a
   host with no `elements/` dirs evals byte-identical to today
   (drv-identity check — pass the worktree as a path literal); a
   fixture song with a waybar element produces the unit, the claims,
   and the seeded tree.
-- **L-E4 — surface stand-down (nix, S).** Lyra-lane owners →
+- **L-E4 — surface stand-down (nix, S).** Strillix-lane owners →
   `mkDefault`; bar render gated on ownership;
   `checks.surface-ownership` untouched and passing. Gate: fixture
   with waybar claiming `bar` — Stylix disables the mapped targets,
   quickshell keeps its other eight surfaces; fixture without
   elements — drv-identical to today.
-- **L-E5 — `lyra rice capture` (cargo, M).** The freeze command (golden
+- **L-E5 — `strx rice capture` (cargo, M).** The freeze command (golden
   +1): copy-with-symlink-resolve, scaffold, `--unit`/`--exec`/
   `--surface` flags, auto-create of the song and element dirs,
   idempotent re-capture (same files → same bytes, manifest merged
   not duplicated). Files: `song/src/commands/capture.rs` +
-  registration in lyra's registry. Tests: byte-for-byte through a
+  registration in strillix's registry. Tests: byte-for-byte through a
   symlink, scaffold shape vectors, name validation, re-capture
   idempotence.
 - **L-E6 — the waybar venue proof (nix + live, M).** Capture
@@ -331,7 +331,7 @@ the same commit as the seams they describe.
   `~/.config`; Stylix's bar-adjacent targets are down. Learnings
   append to `song/songbook/learnings.md`.
 - **L-E7 — drop-in guidance (docs + S cargo touch).** Foreign-flake
-  wiring guidance into `aoide guide` (lyra's guide.rs) and the wiki
+  wiring guidance into `aoide guide` (strillix's guide.rs) and the wiki
   (`concepts/song/` page for elements; the KIMI librarian owns wiki
   prose — this phase supplies the facts): flake-input import, host
   `aoide.*` settings, standalone home-manager on non-NixOS, where
@@ -368,7 +368,7 @@ the built system.
   cargo owns the full semantics. Held narrow: nix reads only the
   three fields it generates from, treats the descriptor as data, and
   every content decision (render, validate, refuse) stays in the one
-  cargo parser that `lyra element seed` runs at activation — a bad
+  cargo parser that `strx element seed` runs at activation — a bad
   descriptor fails the seed with the cargo error, not a nix guess.
 - **Unit restart double-fire on switch.** Home-manager's own
   restart-on-change and the seed's freshly written configs can both
@@ -391,5 +391,5 @@ the built system.
 - No `~/.config` management, ever — not even a symlink. The config
   dir contract is `run/elements/` or nothing.
 - Core (`aoide`/`aoided`) stays nix-free and element-free: every
-  crate change in this lane lands in the song/storage/lyra side of
+  crate change in this lane lands in the song/storage/strillix side of
   the two-binary split.

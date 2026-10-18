@@ -19,7 +19,7 @@
 }:
 {
   assertions = [
-    # A built-in song is a QML tree painted by the vibeos runtime, and lyra
+    # A built-in song is a QML tree painted by the strillix runtime, and strillix
     # is the runtime's flag: a song whose body brings no runtime would leave the
     # host with a config nothing paints. A performed song's body selects its
     # providers, so this holds by construction; the check catches a host that
@@ -27,12 +27,12 @@
     # because a staged song is only ever painted by the same runtime.
     {
       assertion =
-        (config.aoide.song == null && config.aoide.songbook.builtIn == [ ]) || config.aoide.lyra.enable;
+        (config.aoide.song == null && config.aoide.songbook.builtIn == [ ]) || config.aoide.strillix.enable;
       message =
         if config.aoide.song != null then
-          "aoide.song = \"${config.aoide.song}\" needs the vibeos runtime: pick a vibeos component provider on this host (or name no song)"
+          "aoide.song = \"${config.aoide.song}\" needs the strillix runtime: pick a strillix component provider on this host (or name no song)"
         else
-          "built-in song(s) ${lib.concatStringsSep ", " config.aoide.songbook.builtIn} need the vibeos runtime: pick a vibeos component provider on this host (or name no song)";
+          "built-in song(s) ${lib.concatStringsSep ", " config.aoide.songbook.builtIn} need the strillix runtime: pick a strillix component provider on this host (or name no song)";
     }
 
     # The three paint facts are set only by their owners (options.nix's mkFact).
@@ -41,10 +41,10 @@
     {
       assertion = lib.all lib.isBool [
         config.aoide.quickshell.enable
-        config.aoide.lyra.enable
+        config.aoide.strillix.enable
         config.aoide.stylix.enable
       ];
-      message = "aoide.{quickshell,lyra,stylix}.enable are read-only facts, set by their dendrite alone: remove the host's write";
+      message = "aoide.{quickshell,strillix,stylix}.enable are read-only facts, set by their dendrite alone: remove the host's write";
     }
   ];
 }

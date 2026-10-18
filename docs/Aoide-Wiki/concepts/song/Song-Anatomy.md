@@ -25,9 +25,9 @@ checkout's `song/songbook/preferences.md` when absent). The checkout's
 #1, `AGENTS.md`): the agent commits *there* and, for score, nowhere else. The
 runtime half hangs off `$AOIDE_ROOT` (absolute-path-wins, default `~/.aoide`):
 the stage the desktop reads (`$AOIDE_ROOT/song/stage/`), the composed host
-songbook `lyra rice compose` writes (`$AOIDE_ROOT/song/songbook/<name>/`),
+songbook `strx rice compose` writes (`$AOIDE_ROOT/song/songbook/<name>/`),
 saved drafts (`$AOIDE_ROOT/song/songbook/<song>/drafts/`), plus `run/qml/`,
-`state/`, and `log`. `lyra rice declare <name>` is the seam between the two
+`state/`, and `log`. `strx rice declare <name>` is the seam between the two
 roots: it copies a composed song from the runtime songbook into the checkout's
 `song/songbook/<name>/`, less its top-level `takes/` and `drafts/` (the
 machine's undo history and scratch, which stay behind) — no `git add`, no rebuild; the user gates those.
@@ -37,9 +37,9 @@ machine's undo history and scratch, which stay behind) — no `git add`, no rebu
 | Subfolder | Role | Tree | Written by |
 |---|---|---|---|
 | `songbook/` (checkout) | per-song homes + cross-cutting design memory | committed score | song agent |
-| `song/stage/` | live preview state — the seam the desktop reads | runtime (`$AOIDE_ROOT`) | [[livery]] · `lyra rice` · QML |
-| `song/songbook/<name>/` | the composed host songbook | runtime (`$AOIDE_ROOT`) | `lyra rice compose` |
-| `song/songbook/<song>/drafts/` | saved drafts | runtime (`$AOIDE_ROOT`) | `lyra rice draft save` |
+| `song/stage/` | live preview state — the seam the desktop reads | runtime (`$AOIDE_ROOT`) | [[livery]] · `strx rice` · QML |
+| `song/songbook/<name>/` | the composed host songbook | runtime (`$AOIDE_ROOT`) | `strx rice compose` |
+| `song/songbook/<song>/drafts/` | saved drafts | runtime (`$AOIDE_ROOT`) | `strx rice draft save` |
 
 Everything in the checkout's `song/` is versioned score; the runtime surface
 sits outside it under `$AOIDE_ROOT`, created on demand.
@@ -49,10 +49,10 @@ sits outside it under `$AOIDE_ROOT`, created on demand.
 > evolving; a host performs it by naming it (`aoide.song = "sonata";`).
 > Every other song is clone-owned, and upstream never touches it. See [[Self-Ricing#The Shipped Baseline Is Guarded, Not
 > Frozen]] for the full guarantee.
-> `pkgs/lyra-songbook` bakes the committed `song/songbook/` tree into
-> `share/lyra/songbook` as read-only templates (with prebaked
+> `pkgs/strillix-rices` bakes the committed `song/songbook/` tree into
+> `share/strillix/songbook` as read-only templates (with prebaked
 > `manifest.json`/`registry.json`), so a repo-less host — no checkout on disk
-> at all — can still `lyra rice compose --from <song>` a shipped song.
+> at all — can still `strx rice compose --from <song>` a shipped song.
 
 ## Committed score — the versioned half
 
@@ -72,7 +72,7 @@ holds:
 
 | Subfolder/file | Holds |
 |---|---|
-| `rice.nix` | a body (`system`: the ten vibeos providers and a `module` setting `aoide.livery.*` (palette + base16 + component tiers + geometry + fonts + wallpaper) and `aoide.arrangement.*`; `home`: the `lyra` renderer and `hyprland.conf`). **No** host options, no host capabilities — so one score replays at any venue (`CONTRACTS.md §5`, [[Song-Vocabulary#Replay — any song, any host]]). The wallpaper note points at a file in the shared `song/covers/` library (`../../covers/<file>`), not a per-song `assets/` dir. |
+| `rice.nix` | a body (`system`: the ten strillix providers and a `module` setting `aoide.livery.*` (palette + base16 + component tiers + geometry + fonts + wallpaper) and `aoide.arrangement.*`; `home`: the `strillix` renderer and `hyprland.conf`). **No** host options, no host capabilities — so one score replays at any venue (`CONTRACTS.md §5`, [[Song-Vocabulary#Replay — any song, any host]]). The wallpaper note points at a file in the shared `song/covers/` library (`../../covers/<file>`), not a per-song `assets/` dir. |
 | `livery.json` | the song's resolved livery values — the [[livery]] schema: `palette`, `polarity`, `base16`, `bar`/`notif`/`window`, `geometry`. The baked-only tiers (`wallpaper`, `fonts`) live in `rice.nix` alone and have no twin here — a convention, not a gate: the schema never walks a document's top-level keys, so a stray copy would pass `rice lint` and ride the activation seed into the stage file unread. |
 | `palette/` | this song's transpose keys — the palette variants `rice transpose <song> <key>` swaps among |
 | `sounds/` | notification + system sounds (the chimes dimension) |
@@ -83,13 +83,13 @@ holds:
 
 **The song's `widgets/` is what paints.** Each surface resolves its body by slot
 NAME through the staging engine, falling back to sonata
-(`pkgs/lyra-shell/qml/slots.md` is the slot catalogue), so sonata carries the
+(`pkgs/strillix-shell/qml/slots.md` is the slot catalogue), so sonata carries the
 bodies its slots name — bar, calendar, conductor, dock, herald, herald-center,
 launcher, meters, powermenu, power, terminals, usage, wallpaper,
 wallpaper-picker, plus the frame/popout helpers they share
 ([[Gadget-Dock#What the dock holds]]). A content or sizing edit
 ([[Widget-Maker#Sizing — content decides, never the screen]]) lands in the
-song's own `widgets/` file: the lane's `pkgs/lyra-shell/qml/` carries the
+song's own `widgets/` file: the lane's `pkgs/strillix-shell/qml/` carries the
 song-blind skeleton, the slot/host mechanism, and the preview harness — never
 a second copy of a body.
 
@@ -125,11 +125,11 @@ the runtime root (`$AOIDE_ROOT`, default `~/.aoide`):
 
 | File | Holds | Written by | Tree |
 |---|---|---|---|
-| `livery.json` | the fully-resolved livery values (colours concrete, no `null`) | [[livery]] `emit stage` / `lyra rice stage`, the lyra lane's activation seed (`home.activation.aoideSeedStage`), `lyra reload` | `song/stage/` |
-| `cover.json` | the live wallpaper: `{"path": …}` (the song's own DEFAULT) plus `"pick": true` when it is the user's own choice, `"kind": "static"/"video"/"we"` naming what the pick is (a scene carries `"weId"` instead of a path), and, for a picked still, `"tile": true` when it repeats at 1:1 and `"position": "tile"/"fill"` when `cover set --position` forced one | `lyra rice stage` (the song's derivable cover), `lyra cover set`/`cover set --clear`/`cover set --from-skwd`, `lyra rice back` | `song/stage/` |
-| `wallpaper-provider` | one word: the name of the SETTER that paints a song's wallpaper here — `quickshell` (the shell's own layer) or a provider of the `wallpaper` capability; absent means `quickshell` | the lyra lane's `home.activation.aoideSeedStage` (it publishes the fact `aoide.wallpaper.provider`) | `song/stage/` |
-| `livery.json` | the DECLARED song's notes, venue `aoide.livery.override` and the host's geometry applied, `"song"` naming it — the read-only twin `rice mode declarative` re-pins that song from ([[livery]]) | the lyra lane's `home.activation.aoideSeedStage` | `song/declared/` |
-| `venue.json` | the slots the venue's `aoide.livery.override` recolours and the geometry the host sets in the declared song, per tier (`{}` with neither) — what staging lays over the runtime copy of that song ([[livery]]) | the lyra lane's `home.activation.aoideSeedStage` | `song/declared/` |
+| `livery.json` | the fully-resolved livery values (colours concrete, no `null`) | [[livery]] `emit stage` / `strx rice stage`, the strillix lane's activation seed (`home.activation.aoideSeedStage`), `strx reload` | `song/stage/` |
+| `cover.json` | the live wallpaper: `{"path": …}` (the song's own DEFAULT) plus `"pick": true` when it is the user's own choice, `"kind": "static"/"video"/"we"` naming what the pick is (a scene carries `"weId"` instead of a path), and, for a picked still, `"tile": true` when it repeats at 1:1 and `"position": "tile"/"fill"` when `cover set --position` forced one | `strx rice stage` (the song's derivable cover), `strx cover set`/`cover set --clear`/`cover set --from-skwd`, `strx rice back` | `song/stage/` |
+| `wallpaper-provider` | one word: the name of the SETTER that paints a song's wallpaper here — `quickshell` (the shell's own layer) or a provider of the `wallpaper` capability; absent means `quickshell` | the strillix lane's `home.activation.aoideSeedStage` (it publishes the fact `aoide.wallpaper.provider`) | `song/stage/` |
+| `livery.json` | the DECLARED song's notes, venue `aoide.livery.override` and the host's geometry applied, `"song"` naming it — the read-only twin `rice mode declarative` re-pins that song from ([[livery]]) | the strillix lane's `home.activation.aoideSeedStage` | `song/declared/` |
+| `venue.json` | the slots the venue's `aoide.livery.override` recolours and the geometry the host sets in the declared song, per tier (`{}` with neither) — what staging lays over the runtime copy of that song ([[livery]]) | the strillix lane's `home.activation.aoideSeedStage` | `song/declared/` |
 | `sessions.json` | the agent-session roster (`sessionId, agent, windowAddress, workspace, cwd, state, startedAt`, optional `parentSessionId`) | [[shellbridge]] + `aoide session` | `state/stage/` |
 | `hooks.json` | live Claude Code hook phases | shellbridge + `aoide session` | `state/stage/` |
 | `projects.json` | the project-anchor registry | `aoide project` | `state/stage/` |
@@ -168,7 +168,7 @@ $AOIDE_FLAKE_ROOT/song/  (dev git checkout — committed score, default ~/Aoide/
 $AOIDE_ROOT/             (runtime root, default ~/.aoide — created on demand)
 ├── song/
 │   ├── stage/           live preview state — livery.json · cover.json · mode.json · grimoire.json
-│   ├── declared/        the declared twin, the venue's slots and geometry, the declared terminal opacity — livery.json · venue.json · terminal-opacity.conf, written by the activation seed; songbook/<song>.json, each built-in song's refresh record, written by `lyra rice refresh`
+│   ├── declared/        the declared twin, the venue's slots and geometry, the declared terminal opacity — livery.json · venue.json · terminal-opacity.conf, written by the activation seed; songbook/<song>.json, each built-in song's refresh record, written by `strx rice refresh`
 │   └── songbook/        composed host songbook (rice compose) · <song>/drafts/ (rice draft save)
 ├── state/               conducting state — state/stage/ holds sessions/hooks/projects/graph
 ├── run/qml/             live-deployed QML tree the desktop shell reads

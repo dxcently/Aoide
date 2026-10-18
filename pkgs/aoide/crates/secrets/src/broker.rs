@@ -1764,7 +1764,7 @@ const EVENTS_MAX_BYTES: u64 = 1024 * 1024;
 /// no world access, never left to the process umask, since the deployed
 /// unit's `Group=aoide-secrets-access` makes group-read exactly the
 /// socket's own audience. **Native Windows writes this mode's feed
-/// OWNER-ONLY**: there is no group reader on that host (no `lyra`/desktop
+/// OWNER-ONLY**: there is no group reader on that host (no `strillix`/desktop
 /// surface) and no gid to name, so the mode is advisory there and the policy
 /// attached is a protected owner-only DACL — the same user and nobody else,
 /// which is stricter than what is asked for here, never weaker

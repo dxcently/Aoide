@@ -8,7 +8,7 @@
 #     the selection fields (`habit.song.*`) and the platform modules and facts
 #     the selection means. `discover` names the songs; `builtIn` and `greeter`
 #     are the facts a selection carries.
-#   - `pkgs/lyra-songbook`'s generator (`nix/manifest.nix`), which imports a COPY
+#   - `pkgs/strillix-rices`'s generator (`nix/manifest.nix`), which imports a COPY
 #     of this file at BUILD time to emit `manifest.json`/`registry.json` into the
 #     deployed QML tree — over the host's BUILT-IN songs only.
 #   - The `songbookManifest` flake output (flake.nix) wraps this so
@@ -120,7 +120,7 @@ let
   # nocturne today) — synthesize straight from the scan: owner is always the
   # song itself, `file` is always "<slot>.qml"; the registry falls back to
   # `livery.json`'s `.widgets // {}`, unjudged. See
-  # `modules/dendrites/lyra/runtime.nix`'s original comment (git history,
+  # `modules/dendrites/strillix/runtime.nix`'s original comment (git history,
   # W3a/W3b) for the full reasoning; this file keeps only what the
   # computation itself needs.
   #

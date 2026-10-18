@@ -3573,10 +3573,10 @@ thread enrols only on positive ownership evidence"),
 
 Task 4 phase (a) slice 2 (`p-lyra-migration-a-brief.md` §2.2-2.4), on
 slice 1's `overlays.default`. `pkgs/aoide/flake.nix` gains
-`packages.<sys>.lyra = aoide.rice`, and the root flake re-exports it so
+`packages.<sys>.lyra = aoide.strillix`, and the root flake re-exports it so
 `.#lyra` resolves — a consumer names `lyra` instead of writing the
-`aoide^out,rice` selector. Proof: `.#packages.x86_64-linux.lyra.outPath`
-and `.#packages.x86_64-linux.aoide.rice.outPath` are byte-identical;
+`aoide^out,strillix` selector. Proof: `.#packages.x86_64-linux.lyra.outPath`
+and `.#packages.x86_64-linux.aoide.strillix.outPath` are byte-identical;
 `nix build .#lyra` installs `bin/lyra`; `nix flake check --no-build` on
 the core flake passes; the fmt and nix-lint checks pass; the yomi-strix
 toplevel still evaluates. Flag: the standalone
@@ -4931,3 +4931,22 @@ deposit. The `with_lock` doc that said the lock never nests is corrected.
 Pages touched: pkgs/aoide/crates/storage/src/mail.rs,
 pkgs/aoide/crates/conduct/src/reap.rs, pkgs/aoide/crates/conduct/README.md,
 docs/architecture/MAIL.md, docs/Aoide-Wiki/ingest/log.md
+
+## [2026-10-18] change | the paint binary is `strillix`, shorthand `strx`
+
+The paint binary `lyra` is renamed `strillix` (crate `pkgs/aoide/crates/strillix`,
+package `strillix`, lib `strillix`); `strx` is a symlink to it in the same
+package and the one shorthand the docs teach. The paint shell and rice packages
+move to `pkgs/strillix-shell` and `pkgs/strillix-rices`, the dendrite to
+`modules/dendrites/strillix`, the `vibeos` component provider to `strillix`, and
+the fact to `aoide.strillix.enable`. Env `LYRA_SHELL_SRC` is `STRILLIX_SHELL_SRC`.
+The split output is `pkgs.aoide.strillix`.
+
+Runtime migration: `migrate_root_once` moves `~/.local/state/lyra` to
+`~/.local/state/strillix` once, no-clobber, on the first run of the new binary.
+Hyprland's `source` line and the nix activation read the new path.
+
+Pages touched: pkgs/aoide/crates/strillix, pkgs/aoide/crates/storage/src/fs.rs,
+pkgs/aoide/default.nix, pkgs/aoide/flake.nix, flake.nix, lib/checks.nix,
+modules/dendrites/strillix, modules/nucleus/options.nix, modules/default.nix,
+CONTRACTS.md, AGENTS.md, docs/Aoide-Wiki/ingest/log.md

@@ -33,7 +33,7 @@ let
   };
 
   # The module argument a real host's song hook hands in (`lib/aoideos.nix`'s
-  # `mkHost`), for the fixture whose lanes read one: the vibeos runtime reads
+  # `mkHost`), for the fixture whose lanes read one: the strillix runtime reads
   # the songbook it paints from. No song is selected, so the song facts keep
   # their defaults and no `rice.nix` is imported.
   songArgs = {
@@ -70,12 +70,12 @@ let
 
   # What the seam is, in readings: which directory the shell runs, whether ONE
   # `aoide-quickshell` unit exists and what it says, and which of the things a
-  # lyra host would have brought are absent. Named explicitly rather than
+  # strillix host would have brought are absent. Named explicitly rather than
   # counted, so a green run says what it checked.
   #
   # `systemServices` is the SYSTEM-level namespace and `systemdUserServices` is
   # the NixOS-level USER one — two different namespaces, and shellbridge is
-  # declared in the second (`modules/dendrites/lyra/shellbridge.nix`), so a
+  # declared in the second (`modules/dendrites/strillix/shellbridge.nix`), so a
   # check that reads only the first would pass on a host that has the bridge.
   #
   # `templates` is the units' OWN `AOIDE_SONG_TEMPLATES` (the staging path's
@@ -109,7 +109,7 @@ let
     {
       config = cfg.aoide.quickshell.config;
       song = cfg.aoide.song;
-      lyra = cfg.aoide.lyra.enable;
+      strillix = cfg.aoide.strillix.enable;
       sessionTarget = cfg.aoide.sessionTarget;
       packages = map (p: baseNameOf p.outPath) cfg.environment.systemPackages;
       userServices = builtins.attrNames userUnits;
@@ -131,7 +131,7 @@ let
           null;
       # What is actually IN the directory the shell runs — the entry point and
       # nothing else is the claim, so a `songs/` or `widgets/` tree landing
-      # there (what lyra deploys) would flip this. Null when no directory was
+      # there (what strillix deploys) would flip this. Null when no directory was
       # named: the bare shape has nothing to read.
       configEntries =
         if cfg.aoide.quickshell.config != null then
@@ -144,9 +144,9 @@ in
   only = read "test-quickshell-only";
   bare = read "test-quickshell-bare";
 
-  # Two component slots, each bringing the vibeos runtime by path: what is read
+  # Two component slots, each bringing the strillix runtime by path: what is read
   # is that the runtime landed ONCE — one shell unit, one bridge, one home half
-  # (`aoide.lyra.home` declared by one file), an environment no second copy
+  # (`aoide.strillix.home` declared by one file), an environment no second copy
   # doubled — and that both components were recorded.
   twoComponents =
     let
@@ -165,9 +165,9 @@ in
         lib.filter (lib.hasInfix "shellbridge") (builtins.attrNames cfg.systemd.user.services)
       );
       envDuplicates = builtins.length env - builtins.length (lib.unique env);
-      homeDeclarations = builtins.length opts.aoide.lyra.home.declarations;
+      homeDeclarations = builtins.length opts.aoide.strillix.home.declarations;
       components = builtins.attrNames cfg.aoide.components;
-      lyra = cfg.aoide.lyra.enable;
+      strillix = cfg.aoide.strillix.enable;
       quickshell = cfg.aoide.quickshell.enable;
     };
 
@@ -175,18 +175,18 @@ in
   # rebuild does, and `system.build.toplevel` is where nixpkgs runs the
   # platform's assertions (`lib/asserts.nix`'s `checkAssertWarn`), so this
   # attribute is the failure a user would meet, not a probe for one.
-  songWithoutLyra = (host "test-song-without-lyra").config.system.build.toplevel.drvPath;
+  songWithoutStrillix = (host "test-song-without-strillix").config.system.build.toplevel.drvPath;
 
-  # The positive control for the absence checks: yomi runs lyra, so it HAS the
+  # The positive control for the absence checks: yomi runs strillix, so it HAS the
   # shellbridge unit, the rice binary and the templates declaration the two
-  # lyra-less fixtures must not have. Read off the ref's own
+  # strillix-less fixtures must not have. Read off the ref's own
   # `nixosConfigurations`, so it is the real host and not a fourth fixture.
   yomi =
     let
       cfg = flake.nixosConfigurations.yomi-strix.config;
       home = cfg.home-manager.users.${cfg.aoide.user};
       # Every unit that stages, or whose spawned children can: the daemon that
-      # spawns sessions, the shell whose QML execs `lyra`, the bridge that
+      # spawns sessions, the shell whose QML execs `strillix`, the bridge that
       # stages in-process, and the reload that re-stages the last staged song at
       # login. One entry per unit, so a check can name the one that went missing.
       templates = {

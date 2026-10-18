@@ -1,21 +1,21 @@
 # modules/dendrites/wallpaper
 
 The wallpaper component slot: one provider registry, and the two providers
-that answer it today — the shell's own layer (`vibeos`), and the external
+that answer it today — the shell's own layer (`strillix`), and the external
 engine.
 
 ```
 modules/dendrites/wallpaper/
-├── default.nix      { providers.vibeos    = ./vibeos.nix;
+├── default.nix      { providers.strillix    = ./strillix.nix;
 │                      providers.skwd-wall = ./skwd-wall.nix; }   ← the registry
-├── vibeos.nix       the shell's own layer (the default)
+├── strillix.nix       the shell's own layer (the default)
 └── skwd-wall.nix    the external `skwd-wall` engine
 ```
 
-Both providers bring the vibeos runtime by path (`../lyra/README.md`): the
+Both providers bring the strillix runtime by path (`../strillix/README.md`): the
 shell's picker and its `aoide-wallpaper` layer stay mapped under either, so
 each declares `aoide.surfaces.wallpaper` and writes its own
-`aoide.components.wallpaper` entry (`vibeos` or `skwd-wall`).
+`aoide.components.wallpaper` entry (`strillix` or `skwd-wall`).
 
 ## Named seams (what it exposes)
 
@@ -28,14 +28,14 @@ each declares `aoide.surfaces.wallpaper` and writes its own
 - **The fact `aoide.wallpaper.provider`** (`modules/nucleus/options.nix`) is the
   name of the provider that answers here: each provider sets it to its own name
   `mkDefault`, so a host may stand a provider's config down by overriding it
-  without deselecting it. `lyra` publishes it to the runtime as
+  without deselecting it. `strillix` publishes it to the runtime as
   `song/stage/wallpaper-provider`; the CLI and the QML read that one word, and
   absent means `quickshell`. The provider KEY and the fact's VALUE differ for
-  the shell's own layer: the slot's provider is `vibeos`, like every other
+  the shell's own layer: the slot's provider is `strillix`, like every other
   slot's, and the fact it writes stays `"quickshell"`, the word the runtime,
   the CLI, the QML and the stage file already speak.
-- **`vibeos.nix` — the shell's own layer.** Configures nothing: the
-  `aoide-wallpaper` layer is the vibeos runtime's, and this provider is the
+- **`strillix.nix` — the shell's own layer.** Configures nothing: the
+  `aoide-wallpaper` layer is the strillix runtime's, and this provider is the
   NAME of that arrangement. Its fact value is also the option's default, so a
   host with no provider selected at all behaves exactly as it always did.
 - **`skwd-wall.nix` — the external engine.** The picker, the control daemon and
@@ -48,7 +48,7 @@ each declares `aoide.surfaces.wallpaper` and writes its own
   exported as `AOIDE_SKWD_WALL_STANDIN`, is the step-aside: the `clear` verb
   this release does not have is stood in for by applying an image that paints
   nothing, and the shell's own layer shows through it.
-- **The bridge is `lyra cover sync`** (CONTRACTS.md §4), not a link between
+- **The bridge is `strx cover sync`** (CONTRACTS.md §4), not a link between
   files: whichever provider is active, the CLI reconciles the provider with
   `song/stage/cover.json` — the staged pick while one applies to the staged
   song, nothing (the step-aside image) otherwise. The engine lane calls it from

@@ -676,5 +676,5 @@ Sits above `conduct` (reads/writes session state via `do_inject`/`do_spawn`/
 `tasks/get`) and `storage`. **The registry-parameter seam**: `mcp::serve_stdio`
 and `a2a::serve` take the assembled `Registry` and dispatcher as parameters
 rather than reaching for a crate-global singleton — that singleton doesn't
-exist until the app crate (`cli`/`lyra`) assembles it, and `server → cli`
+exist until the app crate (`cli`/`strillix`) assembles it, and `server → cli`
 would invert the dependency direction the whole split exists to forbid.

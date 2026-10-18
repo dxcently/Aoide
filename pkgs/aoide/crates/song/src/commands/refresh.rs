@@ -132,7 +132,7 @@ fn handle_rice_refresh(inv: &Invocation) -> Outcome {
             "rice.refresh",
             Kind::Refused,
             "no shipped songbook to refresh from",
-            "AOIDE_SONG_TEMPLATES is unset and no share/lyra/songbook sits beside the binary",
+            "AOIDE_SONG_TEMPLATES is unset and no share/strillix/songbook sits beside the binary",
             Fix::Set("AOIDE_SONG_TEMPLATES".into()),
         );
     };
@@ -144,7 +144,7 @@ fn handle_rice_refresh(inv: &Invocation) -> Outcome {
                     Kind::Refused,
                     format!("`{name}` is not shipped in {}", templates.display()),
                     "refresh only brings in a song the shipped songbook carries",
-                    Fix::Run("lyra rice refresh --check".into()),
+                    Fix::Run("strillix rice refresh --check".into()),
                 );
             }
             vec![name.clone()]

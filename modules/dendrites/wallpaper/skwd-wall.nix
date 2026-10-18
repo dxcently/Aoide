@@ -8,7 +8,7 @@
 # `aoide.wallpaper.provider = "skwd-wall"` (CONTRACTS.md §0), which this file SETS
 # `mkDefault` and guards on.
 #
-# `AOIDE_SKWD_WALL_STANDIN` is the step-aside image — `lyra cover sync`'s
+# `AOIDE_SKWD_WALL_STANDIN` is the step-aside image — `strillix cover sync`'s
 # fallback when the installed release has no `clear` verb — exported to this unit
 # (its `ExecStartPost` and the hook it spawns) and to the session, so one
 # variable is the whole switch point.
@@ -52,7 +52,7 @@ let
   # back to the engine, which is what makes the round trip terminate. The
   # daemon single-quotes each substituted value itself, so the placeholders
   # are spelled bare (quotes here would become part of the path).
-  postProcess = "lyra cover set --from-skwd --kind %type% %path%";
+  postProcess = "strillix cover set --from-skwd --kind %type% %path%";
 
   # Where a pick the engine cannot paint leaves the shell's own layer:
   # applying a fully transparent 1x1 still paints nothing, so the wallpaper
@@ -98,12 +98,12 @@ let
 in
 {
   # The shell's picker and its `aoide-wallpaper` layer stay: this provider
-  # brings the vibeos runtime by path, as the `vibeos` one does.
-  imports = [ ../lyra/runtime.nix ];
+  # brings the strillix runtime by path, as the `strillix` one does.
+  imports = [ ../strillix/runtime.nix ];
 
   config = lib.mkMerge [
     {
-      habit.home.imports = [ ../lyra/runtime-home.nix ];
+      habit.home.imports = [ ../strillix/runtime-home.nix ];
       aoide.components.wallpaper.provider = "skwd-wall";
       aoide.surfaces.wallpaper.owner = "quickshell";
       aoide.wallpaper.provider = lib.mkDefault "skwd-wall";
@@ -122,7 +122,7 @@ in
       ];
 
       # The step-aside image, in the session environment too: a terminal
-      # `lyra cover sync` is the repair path when a pick is dropped by hand.
+      # `strillix cover sync` is the repair path when a pick is dropped by hand.
       environment.sessionVariables.AOIDE_SKWD_WALL_STANDIN = "${standinPng}";
 
       habit.home =
@@ -144,9 +144,9 @@ in
           #
           # `ExecStartPost` re-asserts the staged state on every start: the
           # provider's own restore is off, so after a daemon restart (or a first
-          # start) nothing would repaint until the next pick — `lyra cover
+          # start) nothing would repaint until the next pick — `strillix cover
           # sync` is what puts the staged pick back in front of the user. It
-          # runs `lyra` off this unit's PATH, and it waits out the daemon's own
+          # runs `strillix` off this unit's PATH, and it waits out the daemon's own
           # socket (this hook can win that race).
           #
           # `ConditionPathExists` guards the merged config: without it a unit
@@ -165,17 +165,17 @@ in
             };
             Service = {
               ExecStart = "${skwd.skwd-deck}/bin/skwd-walld";
-              ExecStartPost = "${pkgs.aoide.rice}/bin/lyra cover sync";
+              ExecStartPost = "${pkgs.aoide.strillix}/bin/strillix cover sync";
               Environment = [
                 "SKWD_WALL_V2_CONFIG=${configDir}"
                 "SKWD_WALL_V2_CACHE=${cacheDir}"
                 "AOIDE_ROOT=${config.aoide.root}"
                 "AOIDE_SKWD_WALL_STANDIN=${standinPng}"
                 # PATH replaces the manager's: every bare name the daemon execs
-                # (`sh`/`setsid`, `ffmpeg`, `file`, `lyra`, the renderer).
+                # (`sh`/`setsid`, `ffmpeg`, `file`, `strillix`, the renderer).
                 "PATH=${
                   lib.makeBinPath [
-                    pkgs.aoide.rice
+                    pkgs.aoide.strillix
                     skwd.skwd-deck
                     skwd.skwd-paper
                     pkgs.bash

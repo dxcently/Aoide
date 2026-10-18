@@ -3,7 +3,7 @@
 // `SurfaceSlot`, not `WidgetSlot` — this root is a `PanelWindow`, not an
 // `Item`; it owns its own layer, namespace, keyboard focus, and
 // GlobalShortcut, which travels with the slot (see
-// pkgs/lyra-shell/qml/slots.md). Extras: `clipboard` (the
+// pkgs/strillix-shell/qml/slots.md). Extras: `clipboard` (the
 // AoideClipboard instance, unchanged) and `ledger` (GrimoireLedger — stays
 // in the shell, injected here, see below).
 //

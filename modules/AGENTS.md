@@ -32,7 +32,7 @@ constructor imports the files of what a host selected, and only those.
 Selecting a dendrite is what switches it on. No dendrite declares an
 `aoide.<name>.enable` of its own, and every body is unconditional. The six
 catalogue dendrites that set the core switch (`aoide.enable`) do it in their
-bodies, so no host writes it. The paint facts (`aoide.{quickshell,lyra,stylix}.enable`)
+bodies, so no host writes it. The paint facts (`aoide.{quickshell,strillix,stylix}.enable`)
 are set only by their owning dendrite (see `options.nix`'s header). The option
 contract in `modules/nucleus/*` has no `mkIf` guard by design. A host opts in with one line in
 `hosts/<host>/default.nix`, and deselects a member with

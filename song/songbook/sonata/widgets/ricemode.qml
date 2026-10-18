@@ -3,7 +3,7 @@
 // the floor for every song that does not dress the slot itself.
 //
 // WidgetSlot-hosted Item with no extras beyond the universal `livery`/`bridge`
-// (pkgs/lyra-shell/qml/slots.md). It reports its own footprint and reaches the
+// (pkgs/strillix-shell/qml/slots.md). It reports its own footprint and reaches the
 // engine only through `bridge`: it starts no process and imports no compositor
 // module.
 //

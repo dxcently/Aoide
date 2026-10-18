@@ -2,7 +2,7 @@
 // its states on one canvas (sonata's AudioColonnadePreview precedent). The
 // live path never loads this file.
 //
-//   AOIDE_FLAKE_ROOT=<worktree> lyra preview \
+//   AOIDE_FLAKE_ROOT=<worktree> strillix preview \
 //       <worktree>/song/songbook/cadenza/widgets/LauncherPreview.qml --song cadenza
 //
 // The canvas hands every widget `clipboard: null, ledger: null` (both extras
@@ -18,7 +18,7 @@
 // It shows ONE cell (below) at a time: a LauncherBody loaded BY URL, pinned
 // to a mode and query through its own `reset(mode, query)` API. The cell is
 // picked by `<preview root>/launcher-cell` (e.g. `echo clip > $ROOT/
-// launcher-cell`), then `lyra preview shot --what widget`. Do not press
+// launcher-cell`), then `strillix preview shot --what widget`. Do not press
 // Return on an apps cell in the canvas: it launches for real, as live.
 import QtQuick
 import Quickshell

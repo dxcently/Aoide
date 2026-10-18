@@ -152,7 +152,7 @@ pub fn apply_live(keywords: &[String]) -> &'static str {
         return "skipped (HYPRLAND_INSTANCE_SIGNATURE unset)";
     }
     // `cfg!(test)` is evaluated when THIS CRATE is compiled, so it protects
-    // this crate's own unit tests and nothing else: a `lyra`/CLI integration
+    // this crate's own unit tests and nothing else: a `strillix`/CLI integration
     // test, or any other crate linking this library, still reaches the
     // compositor when the operator's `HYPRLAND_INSTANCE_SIGNATURE` is set —
     // and every call would reload the live config and set its keywords.
@@ -182,7 +182,7 @@ fn on_hyprland() -> bool {
 
 /// `hyprctl reload config-only`, alone: the compositor re-reads the rice link it
 /// sources. A retargeted link's new target is not guaranteed to be followed by
-/// Hyprland's own file watcher, so the declarative arm of `lyra reload`
+/// Hyprland's own file watcher, so the declarative arm of `strillix reload`
 /// (`commands/reload.rs`) asks for it. Guarded and inert exactly as
 /// [`apply_live`] is, and reports the same way.
 pub fn reload_config() -> &'static str {

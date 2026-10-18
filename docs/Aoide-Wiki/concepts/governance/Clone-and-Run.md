@@ -35,10 +35,10 @@ installs.
 
 With `aoide` on `PATH`, the two lines above are the whole thing. `onboard` is
 a CLI-door command and runs from inside a checkout: it performs the core half
-itself, delegates the nix half to `lyra onboard` when the `lyra` binary
+itself, delegates the nix half to `strx onboard` when the `strillix` binary
 resolves, and finishes by printing the four-tier agent guide
-([[Agent-Interface]]). On a box with no nix and no `lyra` it says so and stops
-— *"lyra: not found ... core setup is complete"* — and the core half is
+([[Agent-Interface]]). On a box with no nix and no `strillix` it says so and stops
+— *"strillix: not found ... core setup is complete"* — and the core half is
 installed either way.
 
 ## First-Boot Onboarding Flow
@@ -50,12 +50,12 @@ installed either way.
 3. Seed `song/songbook/preferences.md` when absent ([[Song-Anatomy]]).
 4. Ask which agent harnesses to wire — interactively, or via `--harness a,b` / `--yes` non-interactively — and run `hooks install` for each chosen harness ([[Agent-Hooking]]).
 
-If the `lyra` binary resolves, `onboard` then delegates the nix half to `lyra onboard`:
+If the `strillix` binary resolves, `onboard` then delegates the nix half to `strx onboard`:
 
 1. Generate `./aoide.nix` (or `--out <path>`): every `aoide.*` module option — 161 today, derived live from the modules through the flake's `aoideOptions` output, never a hand-list — with its default commented out and a one-line description, plus an appendix listing the env knobs (`AOIDE_CONDUCT_AUTOGATE`, `AOIDE_TERMINAL`, `AOIDE_CORE_BIN`/`AOIDE_RICE_BIN`, `AOIDE_DISCOVERY_ADVERTISE`) as comments.
 2. Print the `imports = [ ./aoide.nix ];` line for the user's own flake. Onboard never edits the flake; adding the import is the user's one manual step.
 
-Re-running `lyra onboard` warns and backs the old file up to `<out>.bak`; a file it did not generate is refused, never overwritten.
+Re-running `strx onboard` warns and backs the old file up to `<out>.bak`; a file it did not generate is refused, never overwritten.
 
 **Done-state check**: bar shows agent session + connection state; a notification round-trips agent → center; `aoide schema --json` validates.
 

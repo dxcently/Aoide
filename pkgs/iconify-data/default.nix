@@ -5,7 +5,7 @@
 # each collection's npm tarball — the same shape `pkgs/kimi-code/default.nix`
 # already uses for a plain public download, no auth, no self-flaked input.
 # `nix build` of THIS derivation is the only place in the whole `icon`
-# workstream that ever touches the network (root AGENTS.md: `lyra icon
+# workstream that ever touches the network (root AGENTS.md: `strillix icon
 # resolve` itself reads only this derivation's `$out`, never a URL).
 #
 # Two collections, pinned exactly as `design/p-icon-brief.md` §B verified them
@@ -17,7 +17,7 @@
 # Neither tarball carries a LICENSE file (only `info.json`'s
 # `license{title,spdx,url}`), so the two upstream texts are vendored
 # separately in the shell source that actually ships selected icons
-# (`pkgs/lyra-shell/icons/LICENSE-{iconoir,ph}`) and copied into this
+# (`pkgs/strillix-shell/icons/LICENSE-{iconoir,ph}`) and copied into this
 # derivation's `$out` from there, rather than fetched a second time.
 #
 # `lib/pkgs.nix`'s walker auto-discovers any `pkgs/<name>/default.nix` with no
@@ -38,8 +38,8 @@ let
     url = "https://registry.npmjs.org/@iconify-json/ph/-/ph-1.2.2.tgz";
     hash = "sha256-46WCoEfZgp/H6IQsZg2AZeWY0baLtYy2jnWh8eWmFMw=";
   };
-  licenseIconoir = ../lyra-shell/icons/LICENSE-iconoir;
-  licensePh = ../lyra-shell/icons/LICENSE-ph;
+  licenseIconoir = ../strillix-shell/icons/LICENSE-iconoir;
+  licensePh = ../strillix-shell/icons/LICENSE-ph;
 in
 stdenvNoCC.mkDerivation {
   pname = "iconify-data";
@@ -50,7 +50,7 @@ stdenvNoCC.mkDerivation {
   dontBuild = true;
 
   # Each npm tarball unpacks to one `package/` directory carrying
-  # `icons.json` (the IconifyJSON body+alias data `lyra icon` reads),
+  # `icons.json` (the IconifyJSON body+alias data `strillix icon` reads),
   # `info.json` (IconifyInfo: name/version/author/license/total), and
   # `metadata.json` (category -> name list, iconoir only carries this one —
   # `ph` also ships it, but neither is required by the resolver, which
@@ -72,7 +72,7 @@ stdenvNoCC.mkDerivation {
   '';
 
   meta = {
-    description = "Pinned Iconify icon collections (Iconoir + Phosphor) for `lyra icon` — data only, no code";
+    description = "Pinned Iconify icon collections (Iconoir + Phosphor) for `strillix icon` — data only, no code";
     homepage = "https://iconify.design";
     license = lib.licenses.mit;
     platforms = lib.platforms.all;

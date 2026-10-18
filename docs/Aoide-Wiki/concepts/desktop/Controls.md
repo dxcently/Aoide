@@ -44,12 +44,12 @@ modifier.
 | Keybind | Action |
 |---|---|
 | `SUPER + SPACE` | Toggle the launcher — a Hyprland global shortcut (`global, aoide:launcher`) reaching the QML surface directly; no CLI command. |
-| `SUPER + W` | Open the wallpaper picker (`global, aoide:wallpaper`): the launcher's own Desktop Pictures when the song's launcher has one (`openPictures()`), else the plain cover picker; picking a cover shells `lyra cover set <path>`. |
+| `SUPER + W` | Open the wallpaper picker (`global, aoide:wallpaper`): the launcher's own Desktop Pictures when the song's launcher has one (`openPictures()`), else the plain cover picker; picking a cover shells `strx cover set <path>`. |
 | `SUPER + G` | Toggle the gadget dock (`global, aoide:dock`) — see [[Gadget-Dock]]. |
 | `SUPER + C` | Toggle clipboard history — opens the launcher on its clipboard chapter (`global, aoide:clipboard`). |
-| `SUPER + ESCAPE` | Lock the screen — `exec, lyra lock`: the shell's lock host in the staged song's face when the song dresses `lockscreen`, else hyprlock. |
-| `SUPER SHIFT + P` | Bound to `lyra rice preview` in `modules/dendrites/hyprland.nix` — a retired command, so the keybind is a no-op until repointed to `rice stage` (report only, not repointed). |
-| `SUPER SHIFT + A` | Bound to `lyra rice adopt` in `modules/dendrites/hyprland.nix` — a retired command, so the keybind is a no-op until repointed to `rice declare` (a stub — `implemented: false`; report only, not repointed). |
+| `SUPER + ESCAPE` | Lock the screen — `exec, strx lock`: the shell's lock host in the staged song's face when the song dresses `lockscreen`, else hyprlock. |
+| `SUPER SHIFT + P` | Bound to `strx rice preview` in `modules/dendrites/hyprland.nix` — a retired command, so the keybind is a no-op until repointed to `rice stage` (report only, not repointed). |
+| `SUPER SHIFT + A` | Bound to `strx rice adopt` in `modules/dendrites/hyprland.nix` — a retired command, so the keybind is a no-op until repointed to `rice declare` (a stub — `implemented: false`; report only, not repointed). |
 | `SUPER + RETURN` | Open a terminal (kitty). |
 | `SUPER + Q` | Close the active window. |
 | `SUPER + V` / `SUPER + F` | Toggle floating / fullscreen. |
@@ -94,7 +94,7 @@ slot name; see [[Song-Anatomy]]):
 | `..` | `cd ..` |
 | `reboot` / `shutdown` / `poweroff` | `systemctl reboot` / `poweroff` / `poweroff` |
 | `sleep` / `hibernate` | `systemctl suspend` / `hibernate` |
-| `lock` | `lyra lock` |
+| `lock` | `strx lock` |
 
 ## Related
 

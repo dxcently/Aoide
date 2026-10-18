@@ -16,7 +16,7 @@
 //! `aoide_storage::commands`, … — Phase 9 restructure,
 //! docs/architecture/PACKAGE-LAYOUT.md), assembled here by
 //! `commands/mod.rs::all()`. (`aoide_song::commands`/`aoide_screen::commands`
-//! are the same pattern one door over — they assemble into `lyra`'s
+//! are the same pattern one door over — they assemble into `strillix`'s
 //! registry, not this crate's, since P-A5.)
 //!
 //! `Invocation` moved to `aoide-protocol` (Phase 2 restructure,
@@ -171,7 +171,7 @@ mod tests {
     #[test]
     fn not_implemented_command_carries_the_stub_envelope_and_gate() {
         // `rice declare` (the gated+not-implemented example this test used to
-        // exercise) moved to lyra at P-A5. `content approve` is core's own
+        // exercise) moved to strillix at P-A5. `content approve` is core's own
         // gated + not-implemented stub — same shape, still here.
         let out = dispatch(&inv(&["content", "approve"], &["/tmp/dusk"]));
         assert_eq!(out.status, Status::NotImplemented);

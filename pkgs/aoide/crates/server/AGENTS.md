@@ -62,8 +62,8 @@ a2a spawn probe needs `/bin/sh` + `printf`'s byte-exact output.
   split is built to keep.
 - **Never reach for a crate-global registry.** `mcp::serve_stdio` and
   `a2a::serve` take `Registry`/dispatcher as PARAMETERS because the
-  assembled registry only exists in an app crate (`cli`/`lyra`). Adding a
-  `server → cli` (or `→ lyra`) dependency to shortcut this is exactly the
+  assembled registry only exists in an app crate (`cli`/`strillix`). Adding a
+  `server → cli` (or `→ strillix`) dependency to shortcut this is exactly the
   inversion Phase 4c's DI seam exists to prevent.
 - **Untrusted input stops here.** Every door-facing parse/validate boundary
   in this crate is the last line before dispatch; don't push validation

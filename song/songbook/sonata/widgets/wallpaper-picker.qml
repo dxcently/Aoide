@@ -33,13 +33,13 @@
 // QML has no file-write primitive and the shellbridge socket only speaks
 // `focuswindow`, so switching the wallpaper cannot write stage/cover.json from
 // here. Instead a pick shells out through the ONE CLI command built for this —
-// `lyra cover set <path>` (Quickshell.execDetached, the same exec idiom
+// `strillix cover set <path>` (Quickshell.execDetached, the same exec idiom
 // ConductorGadget uses) — which atomic-writes stage/cover.json as a pick
 // (CONTRACTS.md §4). `cover` left
 // core's registry at P-A5 of the binary-split workstream and lives only in
-// `lyra` now (bare name resolves via PATH: modules/dendrites/aoide-packages.nix puts
-// lyra's own droppable output, pkgs.aoide.rice, on systemPackages whenever
-// aoide.lyra.enable is on — P-A8 — which defaults to true here since this
+// `strillix` now (bare name resolves via PATH: modules/dendrites/aoide-packages.nix puts
+// strillix's own droppable output, pkgs.aoide.strillix, on systemPackages whenever
+// aoide.strillix.enable is on — P-A8 — which defaults to true here since this
 // widget only exists under the quickshell shell).
 // AoideWallpaper.qml FileView-watches that file and hot-swaps the live
 // wallpaper, and a pick suppresses the active song's own board. No new socket,
@@ -149,7 +149,7 @@ PanelWindow {
         if (root.selIndex < 0 || root.selIndex >= root.covers.length) return
         var c = root.covers[root.selIndex]
         if (c && c.path)
-            Quickshell.execDetached(["lyra", "cover", "set", c.path])
+            Quickshell.execDetached(["strillix", "cover", "set", c.path])
         root.hide()
     }
     function applyAt(index) {

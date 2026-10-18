@@ -42,7 +42,7 @@
         let
           pkgs = nixpkgs.legacyPackages.${system};
           aoide = pkgs.callPackage ./default.nix { };
-          # aoide-static — the core pair (`aoide`/`aoided`, no `lyra`) linked
+          # aoide-static — the core pair (`aoide`/`aoided`, no `strillix`) linked
           # against musl with `+crt-static`, for a host with no nix store: a
           # link-and-run proof, not a second copy of the test suite (see
           # default.nix's `doCheck` comment). `pkgsStatic` retargets the
@@ -56,9 +56,9 @@
           default = aoide;
           inherit aoide aoide-static;
           # The paint binary under its own name. Same derivation, the `rice`
-          # output default.nix:138 moves it into — a consumer names `lyra`
-          # instead of writing the `aoide^out,rice` output selector.
-          lyra = aoide.rice;
+          # output default.nix:138 moves it into — a consumer names `strillix`
+          # instead of writing the `aoide^out,strillix` output selector.
+          strillix = aoide.strillix;
         }
       );
 
@@ -112,7 +112,7 @@
       #   - loginctl / systemctl — systemd host tools; shipping them in a
       #     shell on a non-systemd host would only fake the probe
       #     (`watch --popup`'s LockedHint check degrades honestly instead).
-      #   - nix — lyra's song eval shells out to it, but any machine entering
+      #   - nix — strillix's song eval shells out to it, but any machine entering
       #     this shell has nix by construction.
       #   - sh / coreutils / kill — stdenv givens.
       devShells = forAllSystems (

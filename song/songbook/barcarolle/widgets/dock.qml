@@ -94,7 +94,7 @@ PanelWindow {
         for (var i = 0; i < s.length; i++) if (s[i].name === n) return s[i]
         return null
     }
-    // The bridge names a screen by its name (`lyra component dock toggle <name>`);
+    // The bridge names a screen by its name (`strillix component dock toggle <name>`);
     // a bare call lands on the focused one.
     function screenNamed(name) {
         var s = Quickshell.screens

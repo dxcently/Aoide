@@ -13,12 +13,12 @@ to fit another size. Shoot that size instead.
 export AOIDE_FLAKE_ROOT=<checkout>
 R=$XDG_RUNTIME_DIR/cadenza-cover
 W=$AOIDE_FLAKE_ROOT/song/songbook/cadenza/widgets/CoverPcb.qml
-lyra preview "$W" --song cadenza --livery cadenza --root "$R" --no-launch
+strx preview "$W" --song cadenza --livery cadenza --root "$R" --no-launch
 # set "autoReload": false in $R/preview.json, then:
-setsid -f lyra preview "$W" --song cadenza --livery cadenza --root "$R"
-lyra preview set --root "$R" --viewport 1080x1920 --width 1080 --height 1920 --anchor tl --margin 0
+setsid -f strx preview "$W" --song cadenza --livery cadenza --root "$R"
+strx preview set --root "$R" --viewport 1080x1920 --width 1080 --height 1920 --anchor tl --margin 0
 sleep 10   # a worker generates the board (~3 s a size), and a shot before it lands is bare ground
-lyra preview shot --root "$R" --what widget --out /tmp/pcb.png
+strx preview shot --root "$R" --what widget --out /tmp/pcb.png
 magick /tmp/pcb.png +dither -colors 16 PNG8:cover/pcb-1080x1920.png   # a few AA shades, ~55 KB
 magick identify cover/pcb-1080x1920.png                                # must read 1080x1920
 ```
@@ -27,22 +27,22 @@ The canvas warns that CoverPcb has no `clipboard`, `dock`, `ledger`,
 `powermenu`, `shared`, `stagePath` or `stagingEngine` property. The canvas
 passes the same props to every widget, so these warnings are expected.
 
-Stage live with `lyra cover set <abs path>`. Declaring the cover into
+Stage live with `strx cover set <abs path>`. Declaring the cover into
 `aoide.livery.wallpaper` for the rebuild is the User's call.
 
 ## The live board — `widgets/wallpaper.qml`
 
 The PNG is the still shot. The board itself is also drawn LIVE: the lane
 anchors a song-owned `wallpaper` slot inside the per-screen Background
-surface (`pkgs/lyra-shell/qml/slots.md`), and `widgets/wallpaper.qml` fills
+surface (`pkgs/strillix-shell/qml/slots.md`), and `widgets/wallpaper.qml` fills
 it — `CoverPcb` for the copper, one transparent Canvas over it for the light
 (`widgets/Trace.js` is the engine; intent §3.9 is the grammar). This widget is
 what a live shell draws; the PNG above is what draws where no such slot
-exists, and what `lyra cover set` stages.
+exists, and what `strx cover set` stages.
 
 The slot has NO baseline floor (`slots.md`): the board draws only for the song
 that authors it, and only while that song's own cover is what is staged. A
-`lyra cover set` pick is what shows, full stop — the shell destroys the board
+`strx cover set` pick is what shows, full stop — the shell destroys the board
 rather than hiding it, so no repaint runs under the chosen image (a cover also
 carries the song it was staged for, and one naming another song is ignored,
 CONTRACTS.md §4).
@@ -57,10 +57,10 @@ is needed):
 ```sh
 export AOIDE_FLAKE_ROOT=<checkout>
 R=$XDG_RUNTIME_DIR/cadenza-wall
-lyra preview "$AOIDE_FLAKE_ROOT/song/songbook/cadenza/widgets/WallpaperPreview.qml" \
+strx preview "$AOIDE_FLAKE_ROOT/song/songbook/cadenza/widgets/WallpaperPreview.qml" \
     --song cadenza --fixture "$AOIDE_FLAKE_ROOT/song/songbook/cadenza/design/fixtures/board" --root "$R"
-lyra preview set --root "$R" --viewport 1920x1080 --width 1920 --height 1080 --anchor tl --margin 0
-lyra preview shot --root "$R" --what widget --out /tmp/board.png
+strx preview set --root "$R" --viewport 1920x1080 --width 1920 --height 1080 --anchor tl --margin 0
+strx preview shot --root "$R" --what widget --out /tmp/board.png
 ```
 
 Knobs (rate/interval/pulseCap/idleFloor/seed) come from

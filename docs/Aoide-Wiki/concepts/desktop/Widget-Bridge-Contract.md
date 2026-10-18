@@ -271,8 +271,8 @@ for Quickshell: render surfaces only]]) applied to the roster widgets:
    `undying`/`project`/`kill`/`createproject`/`editproject` calls), the bar's
    `workspaceaction` bind and unbind, the read-only `sessiontrace` query
    above, the cross-component `component` call (`slot`, `verb`, an optional
-   `arg`: the bridge runs `lyra component`, which asks the provider that fills
-   the slot — the vibeos shell or its declared argv), and the RICE menu's four verbs — the read `ricemenu`, the switch
+   `arg`: the bridge runs `strx component`, which asks the provider that fills
+   the slot — the strillix shell or its declared argv), and the RICE menu's four verbs — the read `ricemenu`, the switch
    `ricemode` (`stage <name>`/`declarative`), the gesture `ricedraft`
    (`enter`/`new`/`save`/`drop`) and the answered `ricedeclare <song>` (the
    host performs it on the next rebuild) — nothing else leaves QML. A new

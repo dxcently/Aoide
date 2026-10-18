@@ -2,7 +2,7 @@
 //! ONE resolution, because eight call sites used to spell it themselves
 //! (`tunnel::record_path`, `attest::daemon_socket_path`, `aoide-conduct`'s
 //! conductor-control, channel and shellbridge sockets, `client::pair_watch`'s
-//! marker dir, `server::daemon`'s socket path, and lyra's preview). One of
+//! marker dir, `server::daemon`'s socket path, and strillix's preview). One of
 //! them already disagreed: a bare `unwrap_or_else("/run/user/1000")` with no
 //! non-empty filter turned an EMPTY `XDG_RUNTIME_DIR` into a relative
 //! `aoide/…` path.

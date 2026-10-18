@@ -14,7 +14,7 @@ package build from the same one-line input.
 - `options.nix` — THE core `aoide.*` option contract: `enable`, `root`,
   `checkout`, `auditLog`, `terminal`, `user`, `sessionTarget`. Every
   AoideOS-side unit (`modules/nucleus/{aoided,secrets,config}.nix`,
-  `modules/dendrites/lyra/shellbridge.nix`) reads these options; this file only
+  `modules/dendrites/strillix/shellbridge.nix`) reads these options; this file only
   declares them.
 - `aoided.nix` — the `aoided` systemd user service itself: the tmpfiles
   rules for the runtime tree and the core session variables
@@ -28,7 +28,7 @@ package build from the same one-line input.
   a desktop that dies takes the paint down and leaves the daemon, its audit
   log, its gate and its doors running.
   `modules/dendrites/aoided.nix` carries the
-  lyra-gated `AOIDE_SONG_TEMPLATES` variable plus every door
+  strillix-gated `AOIDE_SONG_TEMPLATES` variable plus every door
   (mcp/a2a/pair-watch), the discovery firewall carve, and the usage
   poller — all still AoideOS-side deployment.
 

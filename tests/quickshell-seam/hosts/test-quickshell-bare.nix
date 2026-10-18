@@ -1,9 +1,9 @@
-# tests/quickshell-seam/hosts/test-quickshell-bare.nix — the second lyra-less
+# tests/quickshell-seam/hosts/test-quickshell-bare.nix — the second strillix-less
 # shape: a bare AoideOS shell.
 #
 # Same selection as `test-quickshell-only`, minus the config: the package is
 # installed and no service runs, no graphical-session anchor is claimed, and
-# nothing in the evaluation is owed to lyra.
+# nothing in the evaluation is owed to strillix.
 _: {
   # The services the nucleus aggregation carries, by name: the daemon's units
   # and the `aoide` binaries are what the absences below are read against.

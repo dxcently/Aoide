@@ -2,29 +2,29 @@
 type: concept
 created: 2026-10-07
 updated: 2026-10-07
-tags: [aoide, cli, lyra, desktop, quickshell]
+tags: [aoide, cli, strillix, desktop, quickshell]
 ---
 
-# Apps Commands — the `lyra apps` Command Surface
+# Apps Commands — the `strx apps` Command Surface
 
 The `apps` command group lists the installed desktop apps with their icons
 already resolved to files, and keeps `song/stage/apps.json` current for the
-shell's launcher. It is a `lyra` group ([[lyra]]): desktop entries and icon
+shell's launcher. It is a `strillix` group ([[strillix]]): desktop entries and icon
 themes exist to paint a graphical session, and a resolved icon path is a
 paint input, so the capability sits with the paint binary. Delete every
-`.qml` and `lyra apps list --json` still answers from a terminal
+`.qml` and `strx apps list --json` still answers from a terminal
 ([[Widget-Bridge-Contract]]).
 
-Handlers live in `pkgs/aoide/crates/lyra/src/commands/apps.rs`. They read
-through `pkgs/aoide/crates/lyra/src/xdg/`, the workspace's one freedesktop
+Handlers live in `pkgs/aoide/crates/strillix/src/commands/apps.rs`. They read
+through `pkgs/aoide/crates/strillix/src/xdg/`, the workspace's one freedesktop
 key-file reader: `entry.rs` (`.desktop` files and the listing filter),
 `icon_theme.rs` (themes and icon lookup), `keyfile.rs` (the shared grammar).
-`lyra launch` (planned, phase L5b) will read the same module; no second
+`strx launch` (planned, phase L5b) will read the same module; no second
 parser exists. The document
 shape, the listing filter and the icon rules are CONTRACTS.md §4,
 "`song/stage/apps.json`".
 
-`lyra icon` is unrelated: it serves pinned Iconify glyphs
+`strx icon` is unrelated: it serves pinned Iconify glyphs
 ([[Widget-Preview]]), not the icons of installed apps.
 
 ## Shared facts
@@ -44,12 +44,12 @@ and scale 1.
 Every text field an entry carries (`name`, `genericName`, `comment`,
 `keywords`, `startupWMClass`, action names) is untrusted data from a file
 anyone can install. `Exec`, `Path` and `TryExec` are never emitted: launching
-is by id, through the planned `lyra launch` (phase L5b).
+is by id, through the planned `strx launch` (phase L5b).
 
-## lyra apps list
+## strx apps list
 
 ```
-lyra apps list [--json]
+strx apps list [--json]
 ```
 
 - **Reads:** the desktop entries and icon themes on the data dirs. Never reads
@@ -60,14 +60,14 @@ lyra apps list [--json]
   carries the `apps.json` document as `data`, built fresh.
 
 ```
-lyra apps list
-lyra apps list --json
+strx apps list
+strx apps list --json
 ```
 
-## lyra apps show
+## strx apps show
 
 ```
-lyra apps show <id> [--json]
+strx apps show <id> [--json]
 ```
 
 - **Reads:** the same inputs, resolving one id.
@@ -76,7 +76,7 @@ lyra apps show <id> [--json]
   the filter that dropped it: `not-application`, `no-name`, `no-exec`,
   `no-display`, `only-show-in`, `not-show-in`, `try-exec`). An unlisted entry
   still shows; it is the one way to see why a launcher omits an app.
-- **Refusals** (exit 1, `Fix: lyra apps list`):
+- **Refusals** (exit 1, `Fix: strx apps list`):
   - an unknown id, with up to three closest ids;
   - a `Hidden=true` entry — `the entry is marked Hidden, which deletes it`;
   - a winning file that is unreadable, not UTF-8, over 1 MiB, or has no
@@ -84,13 +84,13 @@ lyra apps show <id> [--json]
 - A missing `<id>` is refused by the declaration at exit 2.
 
 ```
-lyra apps show org.gnome.Nautilus
+strx apps show org.gnome.Nautilus
 ```
 
-## lyra apps publish
+## strx apps publish
 
 ```
-lyra apps publish [--run] [--json]
+strx apps publish [--run] [--json]
 ```
 
 - **Writes:** `song/stage/apps.json` (`aoide_storage::fs::stage_dir()`, default
@@ -116,15 +116,15 @@ lyra apps publish [--run] [--json]
   exit 2.
 
 ```
-lyra apps publish
-lyra apps publish --run
+strx apps publish
+strx apps publish --run
 ```
 
 ## The aoide-apps unit (planned)
 
 `aoide-apps` will be a user unit in
-`modules/dendrites/lyra/shellbridge.nix`: `ExecStart` is
-`lyra apps publish --run`, `Type=simple`, wanted by, ordered
+`modules/dendrites/strillix/shellbridge.nix`: `ExecStart` is
+`strx apps publish --run`, `Type=simple`, wanted by, ordered
 after and part of `graphical-session.target`, `Restart=on-failure`
 (`RestartSec=3s`), with `AOIDE_USER` and `AOIDE_ROOT` in its environment and
 `NoNewPrivileges`. The user manager hands it `XDG_DATA_DIRS`,
@@ -134,5 +134,5 @@ relative `TryExec` is never looked up.
 ## Related
 
 - [[CLI-Reference]]
-- [[lyra]]
+- [[strillix]]
 - [[Widget-Bridge-Contract]]

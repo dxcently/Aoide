@@ -240,7 +240,7 @@ pub struct PendingFile {
 /// crate's own "no cross-crate copying" convention, widen-don't-fork).
 ///
 /// `state/stage/pending.json` (command-defrag S1, 2026-08-27) — core
-/// conducting state, moved off `song/stage/` (lyra's tree).
+/// conducting state, moved off `song/stage/` (strillix's tree).
 pub fn pending_path() -> PathBuf {
     conducting_stage_dir().join("pending.json")
 }

@@ -663,7 +663,7 @@ PanelWindow {
             Quickshell.execDetached(["wl-copy", "--", it.glyph])
             root.hide()
         } else if (it.kind === "pic") {
-            if (!root.coverLocked) Quickshell.execDetached(["lyra", "cover", "set", it.path])
+            if (!root.coverLocked) Quickshell.execDetached(["strillix", "cover", "set", it.path])
         } else if (it.kind === "rice") root.riceAct(it.row)
     }
     function pressed(e) {
@@ -835,7 +835,7 @@ PanelWindow {
     property bool coverStill: false
     property string coverPosition: "auto"
     readonly property real screenW: root.screen ? root.screen.width : 1920
-    // lyra refuses a cover pick while the declared song is locked in
+    // strillix refuses a cover pick while the declared song is locked in
     readonly property bool coverLocked: root.riceMode === "declarative"
     readonly property bool canRemove: root.coverPick && !root.coverLocked && !root.aboutOpen
     readonly property bool canPosition: root.coverStill && !root.coverLocked && !root.aboutOpen
@@ -873,7 +873,7 @@ PanelWindow {
         onLoadFailed: { root.coverPath = Quickshell.env("AOIDE_WALLPAPER") || ""; root.coverPick = false; root.coverTile = false; root.coverStill = false; root.coverPosition = "auto" }
     }
     function removePicture() {
-        if (root.canRemove) Quickshell.execDetached(["lyra", "cover", "set", "--clear"])
+        if (root.canRemove) Quickshell.execDetached(["strillix", "cover", "set", "--clear"])
     }
     // the folder the Pictures list reads, in the default file manager; the list's folder watch picks up what lands there
     function addPictures() {
@@ -881,7 +881,7 @@ PanelWindow {
         if (root.canAddPics) Quickshell.execDetached(["xdg-open", root.coversDir])
     }
     // a library picture to the system Trash (gio, recoverable, no confirm); the pick in force is cleared first, and the trash
-    // runs only once lyra has cleared it. A failure shows in the Pictures window's header (picErr), as clipErr does for clippings.
+    // runs only once strillix has cleared it. A failure shows in the Pictures window's header (picErr), as clipErr does for clippings.
     property string picErr: ""
     Process {
         id: picOp
@@ -906,7 +906,7 @@ PanelWindow {
         picOp.cleared = false
         picOp.began = false
         picOp.next = inForce ? trash : null
-        picOp.command = inForce ? ["lyra", "cover", "set", "--clear"] : trash
+        picOp.command = inForce ? ["strillix", "cover", "set", "--clear"] : trash
         picOp.running = true
     }
     function picOpDone(code) {
@@ -933,7 +933,7 @@ PanelWindow {
     }
     function setPosition(word) {
         if (root.canPosition && word !== root.coverPosition)
-            Quickshell.execDetached(["lyra", "cover", "set", root.coverPath, "--position", word])
+            Quickshell.execDetached(["strillix", "cover", "set", root.coverPath, "--position", word])
     }
     function openPosition(keyed) {
         if (!root.canPosition) return
@@ -1293,7 +1293,7 @@ PanelWindow {
         if (root.viewIt && root.clipboard.copyById(root.viewIt.clip.id)) root.hide()
     }
 
-    // ── removing clippings: lyra clipboard delete/clear through the clipboard extra, which reloads the list when lyra exits ──
+    // ── removing clippings: strillix clipboard delete/clear through the clipboard extra, which reloads the list when strillix exits ──
     readonly property bool canEditClip: typeof root.clipboard.deleteById === "function"
     readonly property int clipCount: (root.clipboard.parsedEntries || []).length
     readonly property bool canTrashClip: root.canEditClip && !root.aboutOpen && root.view === "clip" && !root.clipboard.loading

@@ -23,8 +23,8 @@ the bar a live reflection of the agent's execution phase.
 
 ## Implementation
 
-shellbridge runs as the `shellbridge` systemd user service via `lyra
-shellbridge --run` (the `lyra` binary's sub-command; `modules/nucleus/
+shellbridge runs as the `shellbridge` systemd user service via `strillix
+shellbridge --run` (the `strillix` binary's sub-command; `modules/nucleus/
 shellbridge.nix`'s `ExecStart`), not the core `aoide` binary. Its socket
 path is a hard contract, never computed independently:
 `$XDG_RUNTIME_DIR/aoide/shellbridge.sock` (the unit's `RuntimeDirectory=aoide`
@@ -35,7 +35,7 @@ roster — `{ sessionId, agent, windowAddress, cwd, state, startedAt }`,
 backing the [[Terminal-Commander]] session-jump) and `state/stage/hooks.json`
 (live Claude Code hook phases — `{ sessionId, phase, updatedAt }`) — both
 CONDUCTING state (`CONTRACTS.md §4`), written into the conducting tree even
-though the `shellbridge` command itself ships in `lyra`. The
+though the `shellbridge` command itself ships in `strillix`. The
 atomic writer (write-temp-then-rename) seeds both files with their v0
 shapes and keeps them current as sessions come and go.
 
@@ -78,17 +78,17 @@ flight, stopped the moment nothing is looked at — a snapshot while viewed, nev
 a token stream). Refusals are audited; a successful poll is not.
 
 **The RICE menu** is three verbs over the runtime songbook and the song's
-saved rice drafts, all re-execs of the sibling `lyra` (`rice` lives there) and
+saved rice drafts, all re-execs of the sibling `strillix` (`rice` lives there) and
 none holding a rice rule of its own — the CLI owns the name regexes, the
 minting and every refusal, and conduct never depends on the song crate. Any
 click on the bar's RICE cell opens the one menu; nothing switches until a row
 is chosen.
 
-`{cmd:"ricemenu"}` is the socket's other READ. It runs `lyra rice list --json`
+`{cmd:"ricemenu"}` is the socket's other READ. It runs `strx rice list --json`
 and passes its `data` through (`mode`, `song`, `draft`, `stagingSong`,
 `declared`, `songs`), then names the drafts' song through the mode marker —
 `stagingSong` first while declarative is locked (the song an unlock lands on),
-`song` first in every other mode — and runs `lyra rice draft list <song>
+`song` first in every other mode — and runs `strx rice draft list <song>
 --json` with the budget left of one 4 s wall clock, below the QML client's own
 5 s. The answer is one line, the list's data plus `draftsSong` and
 `drafts:[{name, savedAt, current}]`; with no song to name it is `drafts:[]` and
@@ -145,7 +145,7 @@ and no reply.
 `{cmd:"ricedeclare", name}` is the Declare row, and it is ANSWERED, on its own
 connection and thread like `ricemenu`, because the surface shows the outcome in
 a balloon rather than a toast. `name` must be one argv token; a line without
-one is dropped with no reply. The bridge runs `lyra rice declare <name> --host
+one is dropped with no reply. The bridge runs `strx rice declare <name> --host
 --json`, which rewrites the one `habit.song.declared` line in the host config
 (`aoide.hostConfig`) and never commits or rebuilds, so the change takes effect
 on the next rebuild. Every rule about which song may be declared is the CLI's:
@@ -168,7 +168,7 @@ window→session event listener reads Hyprland's request socket and needs no
 PATH. A systemd user unit's default PATH is
 minimal (coreutils/findutils/grep/sed/systemd) and excludes the compositor,
 so a unit-level `path = [ pkgs.hyprland ]` on both the `shellbridge` and
-`aoide-graph-reap` services (`modules/dendrites/lyra/shellbridge.nix`) puts
+`aoide-graph-reap` services (`modules/dendrites/strillix/shellbridge.nix`) puts
 `hyprctl` on PATH explicitly. It is a *unit* option, a sibling of
 `serviceConfig`, not a `serviceConfig` key — nesting it there emits an inert
 raw `path=` line and PATH stays broken. Without it, every widget click
@@ -233,7 +233,7 @@ disabled precisely because no prune command exists on the socket yet — QML nev
 invents IPC. Growing the command set (prune next) is an open thread, as is
 stamping `parentSessionId` at spawn time.
 
-**Authoritative window capture.** Alongside the socket accept loop, `lyra
+**Authoritative window capture.** Alongside the socket accept loop, `strillix
 shellbridge --run` spawns a background thread that reads Hyprland's`socket2` event stream (`$XDG_RUNTIME_DIR/hypr/
 $HYPRLAND_INSTANCE_SIGNATURE/.socket2.sock`). On each window lifecycle
 event it keeps `sessions.json` authoritative: an `openwindow` (re-checked on

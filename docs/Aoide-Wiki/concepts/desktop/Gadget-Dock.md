@@ -11,7 +11,7 @@ The **gadget dock** (`agentWidgets`) is the desktop's at-a-glance conductor
 surface: a left-edge panel holding Aoide's orchestration/system gadgets,
 summoned on demand and distinct from the terminal/TUI DAG views.
 
-*Implementation: `pkgs/lyra-shell/qml/SongGadgets.qml` over the song's own
+*Implementation: `pkgs/strillix-shell/qml/SongGadgets.qml` over the song's own
 `widgets/dock.qml` and gadget bodies — see [[Quickshell]] and [[Codebase]].
 Appearance is not specified
 here: the dock re-skins with the active song, and rice design memory lives in
@@ -21,7 +21,7 @@ the songbook ([[Self-Ricing]]), not on this page.*
 per-song widget bodies — `song/songbook/sonata/widgets/{dock,conductor,
 terminals,meters,power,usage,wallpaper,wallpaper-picker}.qml` plus the shared
 frame ([[Song-Anatomy]]) — resolved by slot NAME through the staging engine,
-with sonata as the fallback. The lane's `pkgs/lyra-shell/qml/` carries the
+with sonata as the fallback. The lane's `pkgs/strillix-shell/qml/` carries the
 mechanism (`SongGadgets.qml`, `GadgetFrame.qml`, `WidgetSlot.qml`), not a
 second copy of a body: a change to what renders lands in a song's file.
 

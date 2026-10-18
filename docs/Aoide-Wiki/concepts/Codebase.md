@@ -26,7 +26,7 @@ Outputs, all tolerant of empty layers so eval stays robust:
   `lib/aoideos.nix` over habit's composition (`inputs.habit`), from the host's own record.
 - `packages` — **auto-discovered** by `lib/pkgs.nix` from `pkgs/<name>/default.nix`
   (`callPackage`, `_`-shelving); currently `{aoide, chatgpt-linux, eidolon,
-  hyprglass, iconify-data, kimi-code, lyra-shell, lyra-songbook, melete,
+  hyprglass, iconify-data, kimi-code, strillix-shell, strillix-rices, melete,
   mneme}` plus `default` (= aoide), `aoide` being a self-flaked path input.
   Adding a package is one folder —
   this file never changes.
@@ -36,7 +36,7 @@ Outputs, all tolerant of empty layers so eval stays robust:
   closes over Aoide's own inputs), the base package overlay, the constructor
   files (`lib.composition`, `lib.livery`, `lib.songbook`, `lib.catalogue`),
   Aoide's own songbook directory for a host that performs Aoide's songs, and the
-  derived `aoide.*` option list `lyra onboard` reads.
+  derived `aoide.*` option list `strx onboard` reads.
 - `checks` — the contractual coupling discipline from `lib/checks.nix`
   (`surface-ownership`, `song-runtime-untracked`, `song-shape`, `fmt`,
   `discovery`, `phantom-commands`, `nix-independence`, `portability`,
@@ -75,8 +75,8 @@ overlays, and the `pkg-<name>` checks — so a package self-registers everywhere
 from a single new folder. Its `overlay` form guards each name against
 accidentally masking a nixpkgs attribute; a deliberate shadow is listed in
 `intentionalShadows`, and the walker yields a name it supplies only to the
-overlays listed in `intentionalOverrides` (the lyra lane replacing
-`lyra-songbook` with a host's built-in songs is the one case today); a
+overlays listed in `intentionalOverrides` (the strillix lane replacing
+`strillix-rices` with a host's built-in songs is the one case today); a
 non-standard build arg goes through a documented
 `//` escape hatch (kept in this file to preserve the single source).
 
@@ -89,7 +89,7 @@ Aoide's own flake inputs once, in `nucleusModule` (the same value exported as
 `nixosModules.nucleus` and passed as `_module.args.aoideInputs`), appends the
 **discovered-packages overlay** from `lib/pkgs.nix` — the *same* source the
 flake's `packages` output and the `pkg-<name>` checks read, so paint lanes
-reference `pkgs.aoide` / `pkgs.lyra-shell` … without drift — and wires the two
+reference `pkgs.aoide` / `pkgs.strillix-shell` … without drift — and wires the two
 song hooks (`selectionModules` puts `habit.song.declared`/`habit.song.available` on the host
 module; `extraModulesFor` turns the selection into the built-in songs'
 `rice.nix` files and the `aoide.song`/`aoide.songbook.builtIn` facts). Each
@@ -98,18 +98,18 @@ other, so a host performs the one song it declares and builds in the ones it
 lists (see [[Song-Vocabulary#Replay — any song, any host]]).
 
 **`lib/songbook.nix`** is the songbook generator and its discovery (the one
-generator two callers share: the lyra lane's build-time `manifest.json`/
+generator two callers share: the strillix lane's build-time `manifest.json`/
 `registry.json` derivation, and the `songbookManifest` flake output
 [[Self-Ricing|`rice stage`]] shells out to via `nix eval --json` for its
-hot-sync half). The same generator also feeds `pkgs/lyra-songbook`, which
+hot-sync half). The same generator also feeds `pkgs/strillix-rices`, which
 bakes the built-in songs plus a prebaked
-`manifest.json`/`registry.json`/`builtin.json` into `share/lyra/songbook` — the shipped
+`manifest.json`/`registry.json`/`builtin.json` into `share/strillix/songbook` — the shipped
 templates a repo-less host's registry/manifest regen reads nix-free
 (`CONTRACTS.md` §4). **`lib/livery.nix`** resolves `aoide.livery.override.*`, the
 host-set venue-recolour tier (`CONTRACTS.md` §1). **`lib/song.nix`** builds
 each song's widget records from its `_widgets/<slot>.nix` functions — the nix
 analogue of `WidgetSlot.qml` — and `lib/options.nix` is the `aoideOptions`
-walk `lyra onboard` reads.
+walk `strx onboard` reads.
 
 **`lib/checks.nix`** rides as flake `checks` — the contractual coupling
 discipline, written to throw legibly at eval time on a violation:
@@ -149,7 +149,7 @@ linger active with the `aoided` user unit finishing
 seeded at `schemaVersion` 0; and a `project add → graph` round-trip landing
 `graph.json` (every stage mutation restages it automatically, so there is no
 separate emit step to round-trip through). The test node trims the stylix,
-quickshell and lyra lanes and names no song
+quickshell and strillix lanes and names no song
 (headless closure cost; the compositor stays for the greeter). The script runs in
 about 16 s of wall clock: `nix build .#checks.x86_64-linux.vm-boot -L`. It
 also confirmed in-VM that the unit's `AOIDE_STAGE_DIR` and the binary's
@@ -234,8 +234,8 @@ switched on by selecting their dendrite (each sets `aoide.enable`):
 | Unit | From | Notes |
 |---|---|---|
 | `aoided` | core module `pkgs/aoide/module/aoided.nix` | runs `${pkgs.aoide}/bin/aoided`; env `AOIDE_AUDIT_LOG`, `AOIDE_USER` |
-| `shellbridge` | `dendrites/lyra/shellbridge.nix` | runs `lyra shellbridge --run`; `RuntimeDirectory=aoide` for the socket |
-| `aoide-graph-reap` | `dendrites/lyra/shellbridge.nix` | timer, ~12s interval; the liveness reaper sweeping sessions a killed terminal could never mark `done` |
+| `shellbridge` | `dendrites/strillix/shellbridge.nix` | runs `strx shellbridge --run`; `RuntimeDirectory=aoide` for the socket |
+| `aoide-graph-reap` | `dendrites/strillix/shellbridge.nix` | timer, ~12s interval; the liveness reaper sweeping sessions a killed terminal could never mark `done` |
 | `aoide-melete-adapter` | `dendrites/melete-adapter.nix` | runs `aoide adapter melete --run`; `AOIDE_ADAPTER_SUBSCRIBE` allow-list |
 | `aoide-mcp` | `dendrites/aoided.nix` | **gated on `aoide.mcp.enable`**; `bindsTo` aoided |
 | `aoide-a2a` | `dendrites/aoided.nix` | **gated on `aoide.a2a.enable`**; the [[A2A-Door]] serve unit |
@@ -277,11 +277,11 @@ Live-side state, all under the runtime root (`$AOIDE_ROOT`, default
   [[Self-Ricing#Staging vs Declarative Mode]] — and reseeded from the active
   song's committed
   `song/songbook/<song>/livery.json` on every activation by
-  `home.activation.aoideSeedStage` in `modules/dendrites/lyra/runtime.nix`
+  `home.activation.aoideSeedStage` in `modules/dendrites/strillix/runtime.nix`
   — a write-temp-then-rename script that injects the same `"song"` field
   `rice stage` writes, so a host that boots without ever staging still
   carries a correct live stage twin from the baked default; when `mode.json`
-  names a staged or drafted song, `lyra reload`, run by the lane's
+  names a staged or drafted song, `strx reload`, run by the lane's
   `aoide-rice-reload` unit at every login and after every switch, re-stages it
   over that seed), `mode.json`
   (the staging/declarative mode marker — absent reads as `declarative`), and
@@ -358,7 +358,7 @@ nix build .#checks.x86_64-linux.vm-lock-greeter -L     # graphical login + lock 
 --workspace`: `aoide-conduct`/`aoide-server` bind real sockets and a
 workspace-wide run deadlocks on this machine. Each crate carries its own
 `registry.rs` golden test pinning its exact command-path set (`aoide-cli`:
-80 paths; `aoide-lyra`: 48), plus schema validity, exit-code, and MCP
+80 paths; `strillix`: 48), plus schema validity, exit-code, and MCP
 tool-list-parity tests; the conduct crate's graph domain
 (`crates/conduct/src/graph/{model,doc,common,commands,window,session_store,
 conduct,send}.rs`) carries handlers for all 20 commands the bare `graph`
@@ -380,7 +380,7 @@ two-binary split.
 
 **Real code paths:** the whole flake/walker/option/checks layer; both packages
 build; `aoide guide`, `aoide schema --json`, `mcp serve --stdio`, and the audit
-log; `aoide onboard`/`lyra onboard` (the clone-onboarding lane,
+log; `aoide onboard`/`strx onboard` (the clone-onboarding lane,
 [[Clone-and-Run]]); `rice lint` (native [[livery]] lint); the daemon skeleton (audit
 append, user gate, default-deny event bus); shellbridge (atomic writer, seeded
 stage files, and a live socket accept loop — `focuswindow`); the melete-adapter skeleton (env-driven
@@ -400,7 +400,7 @@ tests across the crate (above). The QML tree's non-stub surfaces: the
 `PowerVitalsGadget.qml`), `AoideLauncher.qml` (the launcher), and
 `AoideNotifications.qml` (the notification daemon — per-card body from the
 song's `widgets/notifications.qml`) —
-across the lyra lane's nine `owner = "quickshell"` surfaces (bar, notifications,
+across the strillix lane's nine `owner = "quickshell"` surfaces (bar, notifications,
 launcher, osd, lockscreen, greeter, wallpaper, agentWidgets, sessionGraph; see
 [[Full-Architecture]]). `sessionGraph` is declared but has no QML body today
 — the DAG renders via bare `aoide graph`/`aoide conductor`, not a desktop

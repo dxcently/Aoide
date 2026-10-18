@@ -18,11 +18,11 @@ in
       default = "/home/${config.aoide.user}/.aoide";
       defaultText = literalExpression ''"/home/''${config.aoide.user}/.aoide"'';
       description = ''
-        The AOIDE RUNTIME root (L-C2, lyra-carrier lane, task #107) —
+        The AOIDE RUNTIME root (L-C2, strillix-carrier lane, task #107) —
         `song/stage/`, `state/` (conducting state + account/usage state),
         `run/qml/` (the live-deployed QML tree), and the composed
         `songbook/` all hang off this one directory. Exported as
-        `AOIDE_ROOT` on every unit that runs an `aoide`/`aoided`/`lyra`
+        `AOIDE_ROOT` on every unit that runs an `aoide`/`aoided`/`strillix`
         binary, and into `aoide.user`'s own login shells (never another
         account's, root's included). Core code default, matching
         this option's own default exactly (unset == set-to-default): `~/.aoide`,
@@ -32,7 +32,7 @@ in
         runtime root on any host — it is purely the dev git checkout. A
         pre-L-C2 host's old `~/Aoide/{song/stage,state,log}` trees migrate
         into this root's equivalents one-shot, at the first real
-        `aoide`/`aoided`/`lyra` invocation after the switch (see
+        `aoide`/`aoided`/`strillix` invocation after the switch (see
         `aoide_storage::fs::migrate_root_once`'s own doc for the exact
         mechanism).
       '';
@@ -61,7 +61,7 @@ in
       defaultText = literalExpression ''"''${config.aoide.checkout}/hosts/''${config.networking.hostName}/default.nix"'';
       description = ''
         This machine's host config file — the module holding its one
-        `habit.song.declared = "<song>";` line, which `lyra rice declare
+        `habit.song.declared = "<song>";` line, which `strillix rice declare
         <song> --host` rewrites so the next rebuild performs that song.
         Exported as `AOIDE_HOST_CONFIG` on the same units, and in
         `aoide.user`'s own login shells, as `aoide.checkout` is. A consumer

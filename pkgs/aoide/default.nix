@@ -1,4 +1,4 @@
-# pkgs/aoide/default.nix — the `aoide` CLI + `aoided` daemon + `lyra` (Rust).
+# pkgs/aoide/default.nix — the `aoide` CLI + `aoided` daemon + `strillix` (Rust).
 #
 # Built by Agent B (Wave 1). Replaces the Wave-0 placeholder in place; the
 # `callPackage` signature is kept stable so flake.nix never changes.
@@ -10,15 +10,15 @@
 #     `aoide guide`.
 #   * Also installs `aoided` (the daemon skeleton: policy / lint / gated
 #     rebuild / single audit log).
-#   * Also installs `lyra` (P-A7 of the binary-split workstream) — the
-#     graphical/rice binary from `crates/lyra`, sharing this one derivation
+#   * Also installs `strillix` (P-A7 of the binary-split workstream) — the
+#     graphical/rice binary from `crates/strillix`, sharing this one derivation
 #     rather than a second package (see the `cargoBuildFlags` comment below).
-#     As of P-A8, `lyra` ships in this derivation's separate `rice` output
-#     (`pkgs.aoide.rice`) — droppable from a headless closure that only ever
+#     As of P-A8, `strillix` ships in this derivation's separate `strillix` output
+#     (`pkgs.aoide.strillix`) — droppable from a headless closure that only ever
 #     references `pkgs.aoide` (the `out` output: `aoide` + `aoided`).
 #   * cargo deps vendored via `cargoLock.lockFile` so the build is pure/offline.
 #   * `paint ? true` — false builds ONLY the core `aoide`/`aoided` pair
-#     (`-p aoide-cli`, no `rice` output, no test phase) for the static-musl
+#     (`-p aoide-cli`, no `strillix` output, no test phase) for the static-musl
 #     variant (`aoide-static`, pkgs/aoide/flake.nix). Nothing about the
 #     dynamic default changes: every caller that omits the arg gets exactly
 #     today's three-binary, tested build.
@@ -49,14 +49,14 @@ rustPlatform.buildRustPackage {
       path: type: !(type == "directory" && baseNameOf path == "module" && dirOf path == toString ./.);
   };
 
-  # P-A8 of the binary-split workstream: `lyra` moves off $out into its own
-  # `rice` output, so a config that never enables the paint half (headless
+  # P-A8 of the binary-split workstream: `strillix` moves off $out into its own
+  # `strillix` output, so a config that never enables the paint half (headless
   # boxes — sakaki and any future doors-only host) can install `pkgs.aoide`
-  # (aoide + aoided only) without `pkgs.aoide.rice` ever entering its closure.
+  # (aoide + aoided only) without `pkgs.aoide.strillix` ever entering its closure.
   # `out` stays first so plain `pkgs.aoide`/`${pkgs.aoide}` keeps resolving to
   # the core pair, unchanged for every existing caller. `paint = false` drops
-  # `rice` — there is no `lyra` to give it an output.
-  outputs = [ "out" ] ++ lib.optionals paint [ "rice" ];
+  # `rice` — there is no `strillix` to give it an output.
+  outputs = [ "out" ] ++ lib.optionals paint [ "strillix" ];
 
   cargoLock.lockFile = ./Cargo.lock;
 
@@ -82,7 +82,7 @@ rustPlatform.buildRustPackage {
   # `flake.nix` header, "Topology (b)"), so the fixtures have nothing to read
   # here — in the sandbox they would fail on a path that is empty by design.
   # They run where the checkout exists: the outer repo's own
-  # `nix develop -c cargo test -p aoide-lyra`, which is part of every phase-5
+  # `nix develop -c cargo test -p strillix`, which is part of every phase-5
   # slice's gate.
   #
   # A NAME LIST, not a runtime skip: the helpers panic on an unreadable
@@ -128,19 +128,19 @@ rustPlatform.buildRustPackage {
   # document is dropped.
 
   # P-A7 of the binary-split workstream: this one derivation now ships THREE
-  # binaries (aoide, aoided, lyra — `lyra` lives in the separate `crates/lyra`
+  # binaries (aoide, aoided, strillix — `strillix` lives in the separate `crates/strillix`
   # app crate, docs/architecture/PACKAGE-LAYOUT.md). `buildAndTestSubdir`'s
   # `pushd` only changes cargo's cwd; `--workspace` on the build (mirroring
   # the test flag above) still builds every workspace member from there,
   # because cargo resolves the workspace root upward from the virtual
   # manifest regardless of cwd. `cargoBuildHook` forces `CARGO_TARGET_DIR` to
-  # the repo root before the `pushd`, so `lyra`'s binary lands in the exact
+  # the repo root before the `pushd`, so `strillix`'s binary lands in the exact
   # same `target/<triple>/release/` directory nixpkgs' `cargoInstallHook`
   # already sweeps for executables — no `postInstall` copy needed (rung (a)
   # of the plan's ladder, first form; verified live via `ls result/bin`). All
   # three still install to $out at this point; P-A8's `postFixup` below is
-  # what relocates `lyra` alone into `$rice`.
-  # `paint = false` scopes the build to the core crate alone — no lyra, no
+  # what relocates `strillix` alone into `$strillix`.
+  # `paint = false` scopes the build to the core crate alone — no strillix, no
   # song/screen weight — for the static variant.
   cargoBuildFlags =
     if paint then
@@ -159,7 +159,7 @@ rustPlatform.buildRustPackage {
   # matters: turn `doCheck` on with `cargoTestFlags` scoped to core crates.
   doCheck = paint;
 
-  # P-A8: relocate `lyra` into the `rice` output. `cargoInstallHook` (like
+  # P-A8: relocate `strillix` into the `strillix` output. `cargoInstallHook` (like
   # every nixpkgs install hook) installs to $out regardless of the declared
   # `outputs` list, so all three binaries land in $out/bin first; this runs
   # in `postFixup` (the documented moveToOutput call site — nixpkgs manual
@@ -169,9 +169,10 @@ rustPlatform.buildRustPackage {
   # `multiple-outputs.sh` setup hook baked into stdenv — no extra input
   # needed. No `dev`/`doc` split declared here, so there is no
   # dev-output-interference hazard to work around. `paint = false` never
-  # built a `lyra` binary, so there is nothing to move.
+  # built a `strillix` binary, so there is nothing to move.
   postFixup = lib.optionalString paint ''
-    moveToOutput bin/lyra "$rice"
+    moveToOutput bin/strillix "$strillix"
+    ln -s strillix "$strillix/bin/strx"
   '';
 
   # `aoide-storage::git` shells out to `git` (the project-revert plan's git

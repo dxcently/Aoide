@@ -30,12 +30,12 @@ covers only what's specific to the contract.
   settings are not declared here: each lives in the member that reads it
   (`aoided`: the doors; `aoide-secrets`: `members`; `aoide-config`: `settings`).
 - **The contract reads FACTS, never a lane's option.** The enable facts
-  (`aoide.{quickshell,lyra,stylix}.enable`, set only by their owner, each defaulting `false`,
+  (`aoide.{quickshell,strillix,stylix}.enable`, set only by their owner, each defaulting `false`,
   `aoide.quickshell.config`, defaulting `null`, and `aoide.wallpaper.provider` —
   the active provider's own name, defaulting `"quickshell"`) are declared here;
   the dendrite that owns one sets it `true`, and no host writes it. The owner is
   the file Aoide's own catalogue names for it (`options.nix`'s `mkFact`), so a
-  consumer that maps `quickshell`, `stylix` or `lyra` to a file of its own is
+  consumer that maps `quickshell`, `stylix` or `strillix` to a file of its own is
   refused until that lookup takes the consumer's catalogue. A member dendrite or an assertion that needs to know "is there a
   shell / a session here" reads the fact — never `aoide.<name>.enable`, never a
   lane's own option. `aoide.sessionTarget` is the same rule from the other

@@ -223,7 +223,7 @@ fn position_refusal(arg: &str, what: &str) -> Outcome {
         Kind::Usage,
         format!("`--position` lays out a still, and `{arg}` is {what}"),
         "only a still picture is tiled or cropped to fill; a video or a scene is laid out by what plays it",
-        Fix::Run(format!("lyra cover set {arg}")),
+        Fix::Run(format!("strillix cover set {arg}")),
     )
     .with_fields(json!({ "reason": "position-not-a-still" }))
 }
@@ -346,7 +346,7 @@ fn handle_cover_from_skwd(inv: &Invocation) -> Outcome {
             "recorded": true,
             "provider": provider,
             "song": song,
-            "seam": "the provider's postProcessing hook reports what it applied; nothing is applied back (see `lyra cover sync`)",
+            "seam": "the provider's postProcessing hook reports what it applied; nothing is applied back (see `strillix cover sync`)",
         })),
         Err(e) => Outcome::error("cover.set", format!("failed to stage cover.json: {e}"))
             .with_data(json!({
@@ -965,7 +965,7 @@ mod tests {
     }
 
     /// `rice stage`'s livery for the staged song, plus — when `provider` is
-    /// given — the provider name the `lyra` lane publishes beside it. Absent
+    /// given — the provider name the `strillix` lane publishes beside it. Absent
     /// means the shell's own layer, which is what a host with no provider
     /// selected reports.
     fn stage_livery(stage: &std::path::Path, provider: Option<&str>) {
@@ -1095,7 +1095,7 @@ mod tests {
             assert_eq!(out.render(false).1, aoide_protocol::output::exit::USAGE);
             let data = out.data.unwrap();
             assert_eq!(data["reason"], "position-not-a-still", "{arg}");
-            assert_eq!(data["refusal"]["fix"]["run"], format!("lyra cover set {arg}"), "{data}");
+            assert_eq!(data["refusal"]["fix"]["run"], format!("strillix cover set {arg}"), "{data}");
             assert!(!stage.join("cover.json").exists(), "{arg}: nothing staged");
         }
 
@@ -1133,17 +1133,17 @@ mod tests {
             (vec![path], vec![("from-skwd", "true"), ("kind", "static"), ("position", "tile")]),
             (vec![path], vec![("position", "center")]),
         ] {
-            let out = set.invoke("lyra", &set_inv(&args, &flags));
+            let out = set.invoke("strillix", &set_inv(&args, &flags));
             assert_eq!(out.status, Status::Usage, "{flags:?}: {:?}", out.data);
             assert!(!stage.join("cover.json").exists(), "{flags:?}: nothing staged");
         }
 
-        // The argv the Desktop Pictures popup runs: `lyra cover set <path> --position <word>`.
+        // The argv the Desktop Pictures popup runs: `strillix cover set <path> --position <word>`.
         let argv: Vec<String> = ["cover", "set", path, "--position", "tile"].iter().map(|w| w.to_string()).collect();
-        let (parsed, _) = aoide_protocol::door::parse(&argv, aoide_protocol::Door::Cli, "lyra", &r)
+        let (parsed, _) = aoide_protocol::door::parse(&argv, aoide_protocol::Door::Cli, "strillix", &r)
             .unwrap_or_else(|o| panic!("{}", o.message));
         assert_eq!((parsed.args.as_slice(), parsed.flags.get("position").map(String::as_str)), ([path.to_string()].as_slice(), Some("tile")));
-        let ok = set.invoke("lyra", &parsed);
+        let ok = set.invoke("strillix", &parsed);
         assert_eq!(ok.status, Status::Ok, "{:?}", ok.data);
         assert_eq!(ok.data.unwrap()["tile"], true);
         let _ = std::fs::remove_dir_all(&root);

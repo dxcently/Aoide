@@ -1,4 +1,4 @@
-//! `lyra rice declare <song> --host` — make `<song>` the one this host
+//! `strillix rice declare <song> --host` — make `<song>` the one this host
 //! performs on its next rebuild, by rewriting the host config's
 //! `habit.song.declared = "<name>";` line (CONTRACTS.md §3, the rice commands).
 //!
@@ -89,7 +89,7 @@ fn declare_racing(
             "invalid-name",
             format!("`{name}` is not a song name"),
             "a song name is lowercase letters, digits and hyphens, with no leading hyphen".into(),
-            Fix::Run("lyra rice list".into()),
+            Fix::Run("strillix rice list".into()),
         );
     }
 
@@ -103,7 +103,7 @@ fn declare_racing(
             "staged-draft",
             format!("the stage holds draft `{draft}`, not the song `{name}`"),
             "only a song can be declared, and a draft lives in the machine's songbook alone".into(),
-            Fix::Run("lyra rice mode stage".into()),
+            Fix::Run("strillix rice mode stage".into()),
         );
     }
 
@@ -235,7 +235,7 @@ fn declare_racing(
                 "host-config-changed",
                 format!("`{}` was edited while declaring", file.display()),
                 "the file moved between the read and the write, and that edit is kept, not overwritten; try again".into(),
-                Fix::Run(format!("lyra rice declare {name} --host")),
+                Fix::Run(format!("strillix rice declare {name} --host")),
             )
             .with_fields(json!({ "hostConfig": file.to_string_lossy() }));
         }

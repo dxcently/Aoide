@@ -55,7 +55,7 @@ the answer.
 Because both fan-outs derive from the same livery values, staged state and
 adopted state cannot diverge. This is the "zero drift" guarantee. Beyond
 `rice stage`/`cover set` writing `stage/livery.json` live (while `rice mode
-staging` allows it — see [[Self-Ricing#Staging vs Declarative Mode]]), the lyra
+staging` allows it — see [[Self-Ricing#Staging vs Declarative Mode]]), the strillix
 lane's `home.activation.aoideSeedStage` reasserts it from the active song's
 committed `song/songbook/<song>/livery.json` on every activation (see
 [[Codebase#Runtime contracts (socket + stage files)]]), through
@@ -64,7 +64,7 @@ recolour the Stylix/compositor fan-outs apply through `resolve`, with the
 host's `aoide.livery.geometry` laid over the document's — so a
 freshly booted host carries a correctly recoloured stage twin even before
 `rice stage` ever runs. That seed is declared truth: when `stage/mode.json`
-names a staged or drafted song, `lyra reload` — run by the lane's
+names a staged or drafted song, `strx reload` — run by the lane's
 `aoide-rice-reload` unit at every login and after every switch — re-stages it
 over the seed. The same script also publishes the DECLARED twin,
 `song/declared/livery.json` (CONTRACTS.md §4) — those same bytes under their
@@ -117,7 +117,7 @@ tier is outside the engine's schema and reaches Hyprland through
 `live::geometry_keywords`, which types each field itself.
 
 Staging applies geometry and the window-border colours to the running
-compositor directly: `lyra rice stage` first runs `hyprctl reload
+compositor directly: `strx rice stage` first runs `hyprctl reload
 config-only`, which puts the host's baked config back, then builds one
 `hyprctl --batch` `keyword` list over it, in a fixed order (gaps → border size
 → border colours → rounding → blur, then a second batch for the hyprglass
@@ -219,10 +219,10 @@ split: the emitters only produce bytes; `live::apply_live` /
 
 ## Commands
 
-The engine's surface is the `lyra livery` command group, native inside the
+The engine's surface is the `strx livery` command group, native inside the
 CLI's `Invocation`/`Outcome` shell:
 
-- **`lyra livery lint [<song>|<path>]`** — validate a livery file
+- **`strx livery lint [<song>|<path>]`** — validate a livery file
   against the authoritative v0 schema. The nix option type in
   `modules/nucleus/options.nix` is a permissive gate; *this* is the real
   validator. It enforces the closed palette tier
@@ -233,11 +233,11 @@ CLI's `Invocation`/`Outcome` shell:
   colour tiers it validates the two top-level fields that are not groups:
   `polarity` — exactly `"light"` or `"dark"` when present, `null`/absent for
   "no opinion" — and `geometry.terminalOpacity` (a plain number in [0, 1] or
-  null). `lyra rice
+  null). `strx rice
   lint` runs this engine natively — no binary locate, no shell-out.
-- **`lyra livery resolve [<song>|<path>]`** — print the fully-resolved,
+- **`strx livery resolve [<song>|<path>]`** — print the fully-resolved,
   flattened livery set.
-- **`lyra livery emit <target> [<song>|<path>]`** — run one of the six
+- **`strx livery emit <target> [<song>|<path>]`** — run one of the six
   emitters (`stage` · `hyprctl` · `osc` · `file` · `kitty` · `hyprlock`);
   `--out PATH` writes atomically, `--template` supplies the file backend's
   template, `--song-dir DIR` the folder the hyprlock backend searches for the
@@ -246,7 +246,7 @@ CLI's `Invocation`/`Outcome` shell:
 No argument defaults to the staged livery. Exit codes align with the CLI
 convention: `0` ok · `2` usage · `1` error. [[Rice-and-Livery]] carries each
 command's full I/O — reads, writes, output shape. The three commands ship inside
-[[lyra]], the paint binary that hosts every command this page's engine
+[[strillix]], the paint binary that hosts every command this page's engine
 backs.
 
 ## The emitters

@@ -5,7 +5,7 @@ This register gathers the approved interoperability direction, Claude's eight ma
 ## Decided requirements
 
 - Under Aoide, sessions bound to the same persona share memories and history through Mneme across harnesses, including Claude and Codex.
-- Melete is optional. Core access works through a shell without Lyra.
+- Melete is optional. Core access works through a shell without Strillix.
 - Fetching a letter produces a distinct fetched receipt. It does not assert understanding, action, or completion. Receipt reads do not recursively generate receipts.
 - Enduring identity uses an opaque key independent of session/display names, hosts, and harnesses; the upstream persona-reference convention remains open.
 - Initial context contains the handoff package, persona, canonical memory, vault entry points, selected references, and destination capabilities. Revisions are checked at turn boundaries; older history is explicitly retrievable.
@@ -28,7 +28,7 @@ This register gathers the approved interoperability direction, Claude's eight ma
 | M7 | How are portable persona/capability requirements represented and destination availability checked? | Agent-agnostic context is retained; live tools and authorization must be revalidated. |
 | M8 | How are session bindings and collection grants authenticated? | A selected vault, mailbox name, or persona string alone does not confer read/write access or tool permissions. |
 | M9 | How do indexed sources retain canonical references and writer ownership? | Source files and reviewed project docs remain authoritative; indexing does not move writable authority. |
-| M10 | Which persona, history, handoff, and freshness fields appear in Lyra widgets? | The shell bridge must expose the chosen state; widgets display it without owning the memory service. |
+| M10 | Which persona, history, handoff, and freshness fields appear in Strillix widgets? | The shell bridge must expose the chosen state; widgets display it without owning the memory service. |
 
 ## Storage and replication implementation
 
@@ -49,7 +49,7 @@ This register gathers the approved interoperability direction, Claude's eight ma
 | A2 | What result should a failed shell reload return? | Staging/draft could report status ok alongside an IPC reload failure. No running shell is a distinct headless case. |
 | A3 | Where should send validate that its control socket exists? | A stored nonempty socket path can outlive the actual socket. The fork concerns checks at I/O boundaries versus shared validation code. |
 | A4 | Where does the review rule for stale derived state belong? | Cursor and socket defects recur when stored observations are treated as current facts. A brief template and the shared CRAFT protocol have different reach. |
-| A5 | Who owns the core runtime directory and its lifetime? | A Lyra shellbridge restart was observed deleting the directory containing core sockets. Preservation and separating ownership address different parts of the problem; module changes and rebuilding remain user-gated. |
+| A5 | Who owns the core runtime directory and its lifetime? | A Strillix shellbridge restart was observed deleting the directory containing core sockets. Preservation and separating ownership address different parts of the problem; module changes and rebuilding remain user-gated. |
 | A6 | Where is remote text made safe for terminal rendering? | Letter fields, peer names, and remote outbox outcomes reach different render paths. The location of normalization determines coverage. |
 | A7 | Must reader hardening precede remotely reachable mail? | Remote deposits widened who could supply terminal-rendered text while the specification scheduled rendering hardening later. The question concerns release dependency and any interim behavior. |
 | A8 | How does the audit receive a handler's logical outcome? | A refused deposit encoded in a successful RPC result could produce generic ok and bespoke invalid records for the same request. Transport success and logical acceptance need distinguishable reporting. |

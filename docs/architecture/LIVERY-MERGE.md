@@ -9,7 +9,7 @@
 > records what each step edited, so a path below names where a file was at that
 > time, not where it is now — the tree has moved on (`modules/facets/**` became
 > paint lanes under `modules/dendrites/`, the QML skeleton lives in
-> `pkgs/lyra-shell/`).
+> `pkgs/strillix-shell/`).
 >
 > **Status: ALL PHASES LANDED — Phase 4 committed and switched
 > (2026-08-13).**

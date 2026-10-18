@@ -1,6 +1,6 @@
 // calendar.qml — sonata's "calendar" surface: the papyrus stele on its own
 // layer surface, summoned by the bar's clock through the bridge
-// (`lyra component calendar toggle <screen>`).
+// (`strillix component calendar toggle <screen>`).
 //
 // The clock measures its own corner into shared.calendarAnchor before it asks,
 // and this window pins under it (SteleLayerPopout). The stele is

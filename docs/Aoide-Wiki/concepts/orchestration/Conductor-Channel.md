@@ -39,7 +39,7 @@ channel's shape: one PTY, one control socket, one gated door per session.
   into the agent. That gap is why registration alone (the observe-only
   doors) was never enough to steer anything.
 - **shellbridge's socket is a separate, narrower channel**
-  (`lyra shellbridge --run`): a `{cmd:"focuswindow",address}` line drives
+  (`strx shellbridge --run`): a `{cmd:"focuswindow",address}` line drives
   `hyprctl dispatch focuswindow`, so the dock/roster row-click jumps end to
   end through the daemon socket — window-jump only, not injection. Conduct's
   per-session PTY sockets are the standalone injection path. See
@@ -230,7 +230,7 @@ through.
 - **Approval doors.** Only a door that can approve may approve a gated
   send. The local CLI (`aoide`) and aoided's own dispatch (the conductor,
   the herald, and any same-uid client of the aoided socket) can. The MCP
-  door (`aoide mcp serve --stdio`, and lyra's) and the A2A door
+  door (`aoide mcp serve --stdio`, and strillix's) and the A2A door
   (`aoide a2a serve`, loopback included) cannot: `--yes` is never read
   there and `session pending approve` is refused with a taught line. The
   A2A door parks every send. The MCP door is attested like the CLI, by the

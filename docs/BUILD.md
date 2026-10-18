@@ -34,7 +34,7 @@ layer's own `default.nix` for a contract file:
   carries (the daemon's units, the nix settings, the binaries, the command line)
   is a dendrite too, a member of the `nucleus` aggregation.
 - a paint lane is a dendrite like any other (`compositor`, `greeter`, `stylix`,
-  `lyra`) — see **Authoring a paint lane** below.
+  `strillix`) — see **Authoring a paint lane** below.
 
 **Shelving opt-out:** a `_`-prefixed file or directory is never catalogued and
 never listed in a `default.nix`. Prefix a work-in-progress file (`_wip.nix`) or
@@ -81,7 +81,7 @@ no fact.
 | `aoide.user`                   | str (default `"khoa"`)       | owner of the `~/Aoide` clone |
 | `aoide.root`                   | str (default `"~/.aoide"`)   | the RUNTIME root — `song/stage/`, `song/declared/`, `state/`, `run/qml/`, composed `songbook/`; exported as `AOIDE_ROOT` (to `aoide.user`'s login shells). Core code default, nix-independent (L-C2, task #107) |
 | `aoide.checkout`               | str (default `"~/Aoide"`)    | the dev git checkout — `rice declare`'s commit-in target, `soundcheck`'s scan root, the songbook `nix eval` registry regen; exported as `AOIDE_FLAKE_ROOT` (to `aoide.user`'s login shells) |
-| `aoide.hostConfig`             | str (default `"<checkout>/hosts/<hostName>/default.nix"`) | the host's own config file, whose one `habit.song.declared` line `lyra rice declare <song> --host` rewrites; exported as `AOIDE_HOST_CONFIG` (to `aoide.user`'s login shells) |
+| `aoide.hostConfig`             | str (default `"<checkout>/hosts/<hostName>/default.nix"`) | the host's own config file, whose one `habit.song.declared` line `strx rice declare <song> --host` rewrites; exported as `AOIDE_HOST_CONFIG` (to `aoide.user`'s login shells) |
 | `aoide.livery.palette.{bg,fg,accent,urgent}` | hex        | v0 palette (base16) |
 | `aoide.livery.bar.{bg,fg,accent}` | nullOr hex                | component override; null → palette |
 | `aoide.livery.notif.{bg,fg,urgent}` | nullOr hex              | component override; null → palette |
@@ -91,22 +91,22 @@ no fact.
 | `aoide.auditLog`               | str (default `$AOIDE_ROOT/log`, i.e. `~/.aoide/log`) | single audit log |
 
 `AOIDE_SONG_TEMPLATES` (L-C3, task #107) is not its own `aoide.*` option — it
-is wired directly, as `${pkgs.lyra-songbook}/share/lyra/songbook`, but NOT
+is wired directly, as `${pkgs.strillix-rices}/share/strillix/songbook`, but NOT
 onto the same broad unit list `AOIDE_ROOT`/`AOIDE_FLAKE_ROOT` ride: only the
-staging paths read it and only `lyra` links them, so it rides the units that
-exec or spawn `lyra` —
-`modules/dendrites/lyra/shellbridge.nix`'s main `shellbridge` service,
+staging paths read it and only `strillix` links them, so it rides the units that
+exec or spawn `strillix` —
+`modules/dendrites/strillix/shellbridge.nix`'s main `shellbridge` service,
 `modules/dendrites/quickshell/system.nix`'s `aoide-quickshell` unit (the QML it
-starts execs `lyra`), `modules/dendrites/lyra/runtime.nix`'s
-`aoide-rice-reload` unit (it runs `lyra reload`) — and
+starts execs `strillix`), `modules/dendrites/strillix/runtime.nix`'s
+`aoide-rice-reload` unit (it runs `strx reload`) — and
 `modules/dendrites/aoided.nix`'s `environment.sessionVariables` plus its own unit `Environment`, all gated on
-`aoide.lyra.enable`, never the core-only units that exec plain
-`aoide` (a headless core carries no `pkgs.lyra-songbook` closure). Each unit
+`aoide.strillix.enable`, never the core-only units that exec plain
+`aoide` (a headless core carries no `pkgs.strillix-rices` closure). Each unit
 spells it in its OWN `Environment=` as well as inheriting the login copy:
 a session variable is a LOGIN fact, so a unit that started before a switch
 would otherwise keep the previous build's songbook until the operator relogs.
 That
-package (`pkgs/lyra-songbook/default.nix`) bakes the built-in
+package (`pkgs/strillix-rices/default.nix`) bakes the built-in
 `song/songbook/` tree plus `manifest.json`/`registry.json` (via
 `lib/songbook.nix`) at build time, so a repo-less host's `rice compose --from
 <song>` and its registry/manifest regeneration both have something to fall
@@ -147,7 +147,7 @@ else. If it owns a surface it declares that in `aoide.surfaces`. Apply component
 fallbacks yourself.
 
 ```nix
-# modules/dendrites/lyra/runtime.nix — a paint lane is a plain module: it
+# modules/dendrites/strillix/runtime.nix — a paint lane is a plain module: it
 # declares, sets the fact on selection, and renders the rest.
 { config, lib, ... }:
 let
@@ -157,7 +157,7 @@ let
 in
 {
   config = {
-    aoide.lyra.enable = true;
+    aoide.strillix.enable = true;
     # Declare surface ownership — the stylix lane reads this and stands
     # down for `bar`.
     aoide.surfaces.bar.owner = "quickshell";
@@ -197,16 +197,16 @@ and imports only the one the host performs.
 {
   system = {
     providers = {
-      bar = "vibeos";
-      launcher = "vibeos";
-      powermenu = "vibeos";
-      notifications = "vibeos";
-      wallpaper = "vibeos";
-      dock = "vibeos";
-      calendar = "vibeos";
-      switcher = "vibeos";
-      lock = "vibeos";
-      greeter = "vibeos";
+      bar = "strillix";
+      launcher = "strillix";
+      powermenu = "strillix";
+      notifications = "strillix";
+      wallpaper = "strillix";
+      dock = "strillix";
+      calendar = "strillix";
+      switcher = "strillix";
+      lock = "strillix";
+      greeter = "strillix";
     };
     module = { lib, ... }: {
       # every value the module sets is a default: lib.mkDefault, once for all
@@ -217,7 +217,7 @@ and imports only the one the host performs.
     };
   };
   home = {
-    members = [ "lyra" ];
+    members = [ "strillix" ];
     module = { rice.hyprland.conf = ./hyprland.conf; };
   };
 }
@@ -232,7 +232,7 @@ standard (`song/songbook/sonata/rice.nix`).
 
 **Host-agnostic rules (CONTRACTS.md §5):** a song's `system.module` sets ONLY
 `aoide.livery` and `aoide.arrangement`, and its body selects only the paint: the
-ten component providers and the `lyra` renderer. It NEVER selects host
+ten component providers and the `strillix` renderer. It NEVER selects host
 capabilities (monitors, hardware, services, people). Note values are literal
 nix; a song never reads `song/` runtime paths. The `song/songbook/**` tree is
 versioned score (not a runtime dir), so reading it does not violate
@@ -279,8 +279,8 @@ tree inside `crates/song`:
   one `Emitter` trait + registry; a new backend is one file + one registry
   line. The stage backend writes `song/stage/livery.json` (Quickshell; atomic
   write — see `CONTRACTS.md §4`).
-- Commands: `lyra livery lint|resolve|emit <target>` (the original standalone
-  CLI's surface, native); `lyra rice lint` calls `livery::lint` directly — no
+- Commands: `strx livery lint|resolve|emit <target>` (the original standalone
+  CLI's surface, native); `strx rice lint` calls `livery::lint` directly — no
   binary locate, no PATH shell-out.
 
 Build against **note schema v0** (`CONTRACTS.md §1`): palette is
@@ -299,7 +299,7 @@ Provide:
   (façade generated from the schema). Policy, lint, and the single audit log
   (`aoide.auditLog`) live in `aoided`; the rebuild is user-gated.
 - `default.nix`'s `paint ? true` argument: `false` builds only the core pair
-  (`-p aoide-cli`, no `rice` output, no test phase). `pkgs/aoide/flake.nix`
+  (`-p aoide-cli`, no `strillix` output, no test phase). `pkgs/aoide/flake.nix`
   uses it for `aoide-static` — a musl/`+crt-static` build for a host with no
   nix store, exposed as `packages.<system>.aoide-static`, never as
   `packages.default`.
@@ -361,7 +361,7 @@ See `tests/README.md` for why Rust's own tests do NOT live here.
   `rice.nix`/`_widgets/`, no `../` path literal in a song's `.nix` text, every
   song carrying `rice.nix` and `livery.json`
   (host-agnostic song discipline; CONTRACTS.md §5).
-- `phantom-commands` — every backticked `aoide …`/`lyra …` spelling in
+- `phantom-commands` — every backticked `aoide …`/`strillix …` spelling in
   `AGENTS.md`, `docs/agent/*.md`, `docs/INSTALL.md` and the wiki
   (`docs/Aoide-Wiki/**/*.md`, minus the ingest ledger, the `references/`
   history, the `Feature-Set.md` roadmap and the `Controls.md` dead-keybind
@@ -370,7 +370,7 @@ See `tests/README.md` for why Rust's own tests do NOT live here.
   may teach a command the registry no longer carries).
 - `nix-independence` — the core crate closure, derived from
   `pkgs/aoide/Cargo.toml` and walked from `crates/cli`, never reaches
-  `aoide-song`/`aoide-screen`/`aoide-lyra` and never shells out to nix
+  `aoide-song`/`aoide-screen`/`strillix` and never shells out to nix
   (AGENTS.md's "core is nix-independent" claim, CONTRACTS.md §"Core is
   nix-independent").
 - `vm-boot` — headless NixOS boot of the whole stack (`tests/vm-boot.nix`).
@@ -386,7 +386,7 @@ See `tests/README.md` for why Rust's own tests do NOT live here.
   assignment house style, every other lint is a hard failure naming file,
   line, and lint code.
 - `pkg-<name>` — one auto-generated check per discovered package builds it
-  (currently `pkg-aoide`, `pkg-melete`, `pkg-mneme`, `pkg-lyra-songbook`).
+  (currently `pkg-aoide`, `pkg-melete`, `pkg-mneme`, `pkg-strillix-rices`).
   Generated by `lib/pkgs.nix`, so a new `pkgs/<name>/` gains its check with
   no edit here.
 

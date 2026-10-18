@@ -1,7 +1,7 @@
 //! CLI arg-parsing — resolves argv into an [`Invocation`] against the schema.
 //!
 //! The parser itself moved to `aoide_protocol::door` (Phase 3 restructure,
-//! docs/architecture/PACKAGE-LAYOUT.md) so a second binary (lyra, P-A4) can
+//! docs/architecture/PACKAGE-LAYOUT.md) so a second binary (strillix, P-A4) can
 //! reuse it against its own registry without duplicating the parser; this
 //! module is a thin delegation that supplies the crate-global registry so
 //! every existing `crate::cli::*` caller is untouched.
@@ -46,7 +46,7 @@ mod tests {
 
     #[test]
     fn short_dash_h_is_also_help() {
-        // `rice lint` moved to lyra at P-A5 — core no longer parses it;
+        // `rice lint` moved to strillix at P-A5 — core no longer parses it;
         // `content approve` is a stub that stayed in core and still exists
         // for this same assertion (arg-parsing/usage don't care whether a
         // command is implemented).
@@ -230,16 +230,16 @@ mod tests {
     }
 
     // No CLI-internal aliases (khoa, 2026-08-14): each command has exactly one
-    // spelling. The rice family lives in lyra, so `aoide rice …` says so and
+    // spelling. The rice family lives in strillix, so `aoide rice …` says so and
     // names the command to run there; a retired spelling is never resolved.
     #[test]
-    fn rice_is_a_lyra_command_and_aoide_says_where_to_run_it() {
+    fn rice_is_a_strillix_command_and_aoide_says_where_to_run_it() {
         for retired in ["new", "preview"] {
             let err = parse(&argv(&["rice", retired, "dusk"]), Door::Cli).unwrap_err();
             assert_eq!(err.status, Status::Usage);
             let text = err.render(false).0;
-            assert!(text.contains("`rice` is a lyra command, not an aoide one"), "{text}");
-            assert!(text.contains(&format!("fix: lyra rice {retired} dusk")), "{text}");
+            assert!(text.contains("`rice` is a strillix command, not an aoide one"), "{text}");
+            assert!(text.contains(&format!("fix: strillix rice {retired} dusk")), "{text}");
         }
     }
 

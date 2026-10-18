@@ -15,11 +15,11 @@
 #      inputs (so a commit ref really freezes the tree under test, the same
 #      discipline tests/quickshell-seam uses), and the resulting hosts are read.
 #      `consumer` performs from its OWN songbook: it hands over the nucleus module (the option
-#      contract) and selects its own `nucleus` group (the services), lyra, the shell and stylix; it performs one song and builds in a second
+#      contract) and selects its own `nucleus` group (the services), strillix, the shell and stylix; it performs one song and builds in a second
 #      that BORROWS the first's widgets; and the song machinery a real host gets
 #      (deployed config, seeded stage, seeded machine songbook, templates on the
 #      units) is there. `aoide-songs` performs Aoide's own `sonata` through the
-#      `songbookRoot` export, and its lyra lane is handed that same directory.
+#      `songbookRoot` export, and its strillix lane is handed that same directory.
 set -uo pipefail
 cd "$(dirname "$0")" || exit 1
 root=$(cd ../.. && pwd)
@@ -116,7 +116,7 @@ expr="
       aggregations = out.inventory.stubbed.aggregation;
     };
     consumerComponents = builtins.mapAttrs (_: c: c.provider) consumerCfg.aoide.components;
-    # The parts are the ten vibeos providers, each a file that exists; the rices
+    # The parts are the ten strillix providers, each a file that exists; the rices
     # are the committed songs with a rice.nix.
     parts = {
       names = builtins.attrNames flake.parts;
@@ -167,7 +167,7 @@ expr="
     song = cfg.aoide.song;
     builtIn = cfg.aoide.songbook.builtIn;
     bg = cfg.aoide.livery.palette.bg;
-    lyra = cfg.aoide.lyra.enable;
+    strillix = cfg.aoide.strillix.enable;
     stylix = cfg.aoide.stylix.enable;
     quickshell = cfg.aoide.quickshell.enable;
     config = cfg.aoide.quickshell.config;
@@ -200,7 +200,7 @@ cfg=$(o .config)
 check "performs the declared song"            "solo" "$(o .song)"
 check "builds in declared + available"        "duet solo" "$(o '.builtIn | join(" ")')"
 check "the available song's livery is inert"  "#14161c" "$(o .bg)"
-check "the lyra lane is on"                   "true" "$(o .lyra)"
+check "the strillix lane is on"                   "true" "$(o .strillix)"
 check "the stylix lane is on"                 "true" "$(o .stylix)"
 check "the shell lane is on"                  "true" "$(o .quickshell)"
 check "the shell runs the deployed config"    "/home/fixture/.aoide/run/qml" "$(o .config)"
@@ -212,15 +212,15 @@ check "the bridge's unit is there"            "1" \
   "$(o '[.systemdUserServices[] | select(test("^shellbridge$"))] | length')"
 check "the units carry the templates"         "2" "$(o '.templates | length')"
 check "…and both name one directory"          "true" \
-  "$(o '(.templates | unique | length) == 1 and (.templates[0] | endswith("-lyra-songbook-templates/share/lyra/songbook"))')"
+  "$(o '(.templates | unique | length) == 1 and (.templates[0] | endswith("-strillix-rices-templates/share/strillix/songbook"))')"
 
-check "front: the stubbed host fills bar and dock"  '{"bar":"stub","dock":"vibeos"}' \
+check "front: the stubbed host fills bar and dock"  '{"bar":"stub","dock":"strillix"}' \
   "$(o '.front.stubbed.components | tojson')"
 check "front: its shell is one unit"                 "1" "$(o .front.stubbed.shellUnits)"
 check "front: its bridge is one unit"                "1" "$(o .front.stubbed.bridgeUnits)"
 check "front: the stubbed host selects its aggregation" "nucleus,stubbed" \
   "$(o '.front.stubbed.aggregations | join(",")')"
-check "front: the consumer fills ten slots, all vibeos" "10 vibeos" \
+check "front: the consumer fills ten slots, all strillix" "10 strillix" \
   "$(o '"\(.front.consumerComponents | length) \(.front.consumerComponents | [.[]] | unique | join(","))"')"
 check "front: parts name the ten components"         \
   "bar,calendar,dock,greeter,launcher,lock,notifications,powermenu,switcher,wallpaper" \
@@ -272,8 +272,8 @@ printf '%-52s %s\n' "consumer toplevel drvPath" "$(o .drv)"
 check "aoide-songs performs Aoide's sonata"           "sonata" "$(o .aoideSongs.song)"
 check "…and builds in sonata alone"                 "sonata" "$(o '.aoideSongs.builtIn | join(" ")')"
 check "…and wears sonata's livery"                  "#f2ebde" "$(o .aoideSongs.bg)"
-check "…its lyra lane reads the exported songbook"  "true" "$(o .aoideSongs.songbookIsExport)"
-check "merged: its lyra lane reads the merged directory" "true" "$(o .merged.songbookIsMerged)"
+check "…its strillix lane reads the exported songbook"  "true" "$(o .aoideSongs.songbookIsExport)"
+check "merged: its strillix lane reads the merged directory" "true" "$(o .merged.songbookIsMerged)"
 
 printf '%-52s %s\n' "aoide-songs toplevel drvPath" "$(o .aoideSongs.drv)"
 printf '%-52s %s\n' "merged toplevel drvPath" "$(o .merged.drv)"

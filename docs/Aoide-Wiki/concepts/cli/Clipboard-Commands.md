@@ -2,21 +2,21 @@
 type: concept
 created: 2026-10-15
 updated: 2026-10-15
-tags: [aoide, cli, lyra, desktop, clipboard]
+tags: [aoide, cli, strillix, desktop, clipboard]
 ---
 
-# Clipboard Commands — the `lyra clipboard` Command Surface
+# Clipboard Commands — the `strx clipboard` Command Surface
 
 The `clipboard` command group removes entries from the clipboard history:
-one by id, or all of them. It is a `lyra` group ([[lyra]]): the history is
+one by id, or all of them. It is a `strillix` group ([[strillix]]): the history is
 cliphist's record of a Wayland session's clipboard, and the thumbnails it
 also removes are the launcher's paint cache. The launcher's clipboard backend
-(`pkgs/lyra-shell/qml/AoideClipboard.qml`) runs these commands; it never runs
+(`pkgs/strillix-shell/qml/AoideClipboard.qml`) runs these commands; it never runs
 `cliphist delete` or `cliphist wipe` itself. Delete every `.qml` and
-`lyra clipboard clear` still empties the history from a terminal
+`strx clipboard clear` still empties the history from a terminal
 ([[Widget-Bridge-Contract]]).
 
-Handlers live in `pkgs/aoide/crates/lyra/src/commands/clipboard.rs`.
+Handlers live in `pkgs/aoide/crates/strillix/src/commands/clipboard.rs`.
 
 ## Shared facts
 
@@ -44,10 +44,10 @@ Every refusal carries a stable `data.reason` beside the taught
 | `cliphist-failed` | failed | 1 | cliphist exited non-zero; its stderr is `data.detail` |
 | `preview-remove-failed` | failed | 1 | the history changed but a thumbnail could not be removed |
 
-## lyra clipboard delete
+## strx clipboard delete
 
 ```
-lyra clipboard delete <id> [--json]
+strx clipboard delete <id> [--json]
 ```
 
 - **Reads:** `cliphist list`, for its ids.
@@ -58,14 +58,14 @@ lyra clipboard delete <id> [--json]
   `{"id": "<id>", "previewRemoved": <bool>}`, the id in canonical form.
 
 ```
-lyra clipboard delete 42
-lyra clipboard delete 42 --json
+strx clipboard delete 42
+strx clipboard delete 42 --json
 ```
 
-## lyra clipboard clear
+## strx clipboard clear
 
 ```
-lyra clipboard clear [--json]
+strx clipboard clear [--json]
 ```
 
 - **Writes:** runs `cliphist wipe`, then removes the whole `previews`
@@ -76,20 +76,20 @@ lyra clipboard clear [--json]
   held.
 
 ```
-lyra clipboard clear
-lyra clipboard clear --json
+strx clipboard clear
+strx clipboard clear --json
 ```
 
 ## The QML side
 
 `AoideClipboard` (the launcher slot's `clipboard` extra) exposes
 `deleteById(id)`, which returns `false` without running anything for a
-non-numeric id, and `clear()`. Each runs `lyra clipboard … --json`, puts
-lyra's message in `actionError` when it fails (`""` otherwise), and then
+non-numeric id, and `clear()`. Each runs `strx clipboard … --json`, puts
+strillix's message in `actionError` when it fails (`""` otherwise), and then
 calls `refresh()`.
 
 ## Related
 
 - [[CLI-Reference]]
-- [[lyra]]
+- [[strillix]]
 - [[Widget-Bridge-Contract]]

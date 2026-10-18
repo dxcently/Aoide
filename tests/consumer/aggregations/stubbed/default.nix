@@ -3,7 +3,7 @@
 #
 # The slot names are the consumer's own catalogue entries (flake.nix's `slots`),
 # so this group picks a provider by name from a set the consumer wrote, and
-# the vibeos one is Aoide's part. Nothing here reads a path into Aoide.
+# the strillix one is Aoide's part. Nothing here reads a path into Aoide.
 {
   description = "The consumer's bar (its own provider) beside Aoide's dock.";
 
@@ -15,7 +15,7 @@
 
     providers = {
       bar = "stub";
-      dock = "vibeos";
+      dock = "strillix";
     };
   };
 }

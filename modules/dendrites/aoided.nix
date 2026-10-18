@@ -13,7 +13,7 @@
 #
 # `pkgs/aoide/module/aoided.nix` owns the tmpfiles rules, the core session
 # variables, and the `aoided.service` unit itself (portable, nixpkgs-only).
-# This file carries only what is paint-dependent: the lyra-gated
+# This file carries only what is paint-dependent: the strillix-gated
 # `AOIDE_SONG_TEMPLATES` — as a session variable for interactive shells AND on
 # the unit's own `Environment`, so a process aoided spawns resolves this
 # build's templates rather than whatever the login session was handed. `aoide.sessionTarget` — the seam
@@ -172,8 +172,8 @@ in
         description = ''
           Enable the `aoide-pair-watch.service` graphical-session user unit
           (`aoide pair watch --popup`) — a typed-code entry dialog per
-          actionable pairing request, `lyra pair ask` when it resolves
-          (the same six-boxes-plus-dash surface `lyra secrets ask` renders),
+          actionable pairing request, `strillix pair ask` when it resolves
+          (the same six-boxes-plus-dash surface `strillix secrets ask` renders),
           `zenity --entry` otherwise. Off by default, same house policy as
           the MCP façade/A2A door/usage poller/secrets broker: the unit is
           graphical-session-gated exactly like `aoide-secrets-watch`
@@ -247,18 +247,18 @@ in
     # `AOIDE_SONG_TEMPLATES` (L-C3, task #107) is paint data (the shipped
     # songbook), not core state like `AOIDE_ROOT`/`AOIDE_FLAKE_ROOT`
     # (`pkgs/aoide/module/aoided.nix`'s own contract) — gated on
-    # `aoide.lyra.enable`, the option that actually controls whether the
-    # `lyra` binary is installed on this host at all (review finding: a
-    # headless-core box that never installs `lyra` has no reader for this
+    # `aoide.strillix.enable`, the option that actually controls whether the
+    # `strillix` binary is installed on this host at all (review finding: a
+    # headless-core box that never installs `strillix` has no reader for this
     # var, so exporting it unconditionally only drags the
-    # `pkgs.lyra-songbook` closure onto every interactive shell for no
-    # reason). An operator's own `lyra rice compose` still needs it — the
+    # `pkgs.strillix-rices` closure onto every interactive shell for no
+    # reason). An operator's own `strillix rice compose` still needs it — the
     # sibling-of-binary fallback tier (`fs::song_templates_dir`'s own doc)
-    # can't resolve across `lyra`'s separate `rice` output, so this env
-    # export is the ONLY way an interactive shell agrees with `lyra` on
+    # can't resolve across `strillix`'s separate `strillix` output, so this env
+    # export is the ONLY way an interactive shell agrees with `strillix` on
     # where the templates are.
-    environment.sessionVariables = lib.optionalAttrs config.aoide.lyra.enable {
-      AOIDE_SONG_TEMPLATES = "${pkgs.lyra-songbook}/share/lyra/songbook";
+    environment.sessionVariables = lib.optionalAttrs config.aoide.strillix.enable {
+      AOIDE_SONG_TEMPLATES = "${pkgs.strillix-rices}/share/strillix/songbook";
     };
 
     # ── The same variable on the unit itself ─────────────────────────────────
@@ -267,26 +267,26 @@ in
     # that started before a `nixos-rebuild switch` keeps the PREVIOUS build's
     # templates until they relog (found at the S9 yomi switch). Any process
     # aoided spawns — a conducted session, an agent, a terminal — inherits the
-    # unit's environment, so a `lyra rice stage` run from one of them resolved
+    # unit's environment, so a `strillix rice stage` run from one of them resolved
     # the old songbook with nothing saying so. Declared here, a unit restart is
-    # enough, and the value always names THIS build's `pkgs.lyra-songbook`.
+    # enough, and the value always names THIS build's `pkgs.strillix-rices`.
     #
     # Why here and not in the portable core module: the templates path is
-    # `pkgs.lyra-songbook` (paint), which core neither knows nor may name. Why
+    # `pkgs.strillix-rices` (paint), which core neither knows nor may name. Why
     # only this unit, `aoide-quickshell` and `aoide-rice-reload`:
     # `fs::song_templates_dir` is read on the staging path (`rice stage|compose|
     # preview|mode`, `take`, `onboard`), and those are what a shell born of
     # `aoide-quickshell` runs and what `aoide-rice-reload` re-stages with at
     # login and after a switch — shellbridge already spells it for the one
     # process that stages in-process, and a door that spawns a fixed dialog
-    # (`lyra pair ask`, `lyra secrets ask`) never reaches the staging path at
+    # (`strillix pair ask`, `strillix secrets ask`) never reaches the staging path at
     # all. The rest of what the staging path reads
     # from session variables was audited with it: `AOIDE_ROOT` and
     # `AOIDE_FLAKE_ROOT` are spelled by every unit that can reach it,
     # `AOIDE_STAGE_DIR` is deliberately unset anywhere (the default layout
     # resolves under `AOIDE_ROOT`), and `XDG_RUNTIME_DIR` is the manager's own.
     systemd.user.services.aoided.serviceConfig.Environment =
-      lib.optional config.aoide.lyra.enable "AOIDE_SONG_TEMPLATES=${pkgs.lyra-songbook}/share/lyra/songbook";
+      lib.optional config.aoide.strillix.enable "AOIDE_SONG_TEMPLATES=${pkgs.strillix-rices}/share/strillix/songbook";
 
     # ── MCP façade (opt-in, off by default per house policy) ────────────────
     # When aoide.mcp.enable is true, also start the per-session MCP server stub.
@@ -417,7 +417,7 @@ in
     };
 
     # ── Pairing events watcher (P-P5; popup upgraded to a typed-code entry
-    # dialog + lyra/zenity feature-detection, and gated behind its own opt-in
+    # dialog + strillix/zenity feature-detection, and gated behind its own opt-in
     # flag, at P-PV3 task #132) ────────────────────────────────────────────────
     # Surfaces the pairing ceremony's own events feed (`aoide pair watch
     # --popup`, CONTRACTS.md §6's "Pairing events feed" subsection) as a
@@ -425,8 +425,8 @@ in
     # `secrets.nix`'s own `aoide-secrets-watch` holds (graphical-session.target,
     # `Type = simple` + `Restart = on-failure`, explicit `zenity`/`quickshell`
     # `path` entries, journal both streams, NoNewPrivileges), including that
-    # unit's own `lyra`-preferred-with-zenity-fallback shape: `lyra pair ask`
-    # (`pair_watch::resolve_lyra_bin`) when `AOIDE_RICE_BIN` resolves it, else
+    # unit's own `strillix`-preferred-with-zenity-fallback shape: `strillix pair ask`
+    # (`pair_watch::resolve_strillix_bin`) when `AOIDE_RICE_BIN` resolves it, else
     # `zenity --entry`. No ordering against `aoide-a2a` (the process that
     # actually emits onto this feed) — `pair_watch::wait_for_follower` already
     # retries until the events feed appears rather than exiting 1, so this
@@ -446,7 +446,7 @@ in
     # one painting lane happened to pick. A host whose desktop is painted by
     # something else — osaka, running core Aoide beside dxflake's own Hyprland
     # and Stylix — has the session but no such anchor, gets zenity from the
-    # `path` below, and `pair_watch` itself only refuses when NEITHER `lyra`
+    # `path` below, and `pair_watch` itself only refuses when NEITHER `strillix`
     # nor `zenity` resolves. Gating on the session target would have made the
     # popup structurally unreachable there for a reason that has nothing to do
     # with pairing.
@@ -464,13 +464,13 @@ in
           # binary NAME, never a hardcoded path) — the same PATH gap
           # `aoide-secrets-watch` documents in `secrets.nix`. It rides
           # unconditionally: it is the fallback the whole unit's reachability
-          # rests on, and the only dialog a host without lyra ever gets.
+          # rests on, and the only dialog a host without strillix ever gets.
           #
           # `quickshell` rides the SAME condition as `AOIDE_RICE_BIN` below,
-          # and for the same one reason: `lyra pair ask` spawns quickshell by
-          # bare name, so the unit that can spawn lyra must carry it — and the
-          # unit can only spawn lyra when `aoide.lyra.enable` put the binary
-          # there. A host without lyra takes the zenity path and has no use
+          # and for the same one reason: `strillix pair ask` spawns quickshell by
+          # bare name, so the unit that can spawn strillix must carry it — and the
+          # unit can only spawn strillix when `aoide.strillix.enable` put the binary
+          # there. A host without strillix takes the zenity path and has no use
           # for quickshell in its closure.
           # `libnotify` provides `notify-send`, resolved the SAME bare-name way
           # for the reply-code toast (`pair_watch::notify_reply_code`).
@@ -479,7 +479,7 @@ in
             pkgs.libnotify
           ]
           ++
-            lib.optional config.aoide.lyra.enable
+            lib.optional config.aoide.strillix.enable
               aoideInputs.quickshell.packages.${pkgs.stdenv.hostPlatform.system}.default;
 
           serviceConfig = {
@@ -494,14 +494,14 @@ in
               "AOIDE_FLAKE_ROOT=${config.aoide.checkout}"
               "AOIDE_USER=${config.aoide.user}"
             ]
-            # `pair_watch::resolve_lyra_bin` resolves `lyra` via
+            # `pair_watch::resolve_strillix_bin` resolves `strillix` via
             # `AOIDE_RICE_BIN` (tier 1, trusted unconditionally) or a sibling
-            # of `current_exe()` (tier 2) — `lyra` ships from `pkgs.aoide.rice`,
+            # of `current_exe()` (tier 2) — `strillix` ships from `pkgs.aoide.strillix`,
             # a SEPARATE output from the `aoide` binary this unit execs, so
             # sibling resolution would silently fail here without this. Only
-            # set when `aoide.lyra.enable` is actually on — mirrors
+            # set when `aoide.strillix.enable` is actually on — mirrors
             # `aoide-secrets-watch`'s own identical guard.
-            ++ lib.optional config.aoide.lyra.enable "AOIDE_RICE_BIN=${pkgs.aoide.rice}/bin/lyra";
+            ++ lib.optional config.aoide.strillix.enable "AOIDE_RICE_BIN=${pkgs.aoide.strillix}/bin/strillix";
 
             NoNewPrivileges = true;
             StandardOutput = "journal";

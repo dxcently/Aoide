@@ -2,7 +2,7 @@
 type: concept
 created: 2026-07-26
 updated: 2026-08-29
-tags: [aoide, architecture, desktop, lyra, pipeline]
+tags: [aoide, architecture, desktop, strillix, pipeline]
 source: "[[references/AOIDE-HANDOFF]]"
 ---
 
@@ -75,7 +75,7 @@ of the data flow, labeled `aoide` throughout for readability. Ownership
 (`CONTRACTS.md` §3, [[Package-Layout]]): the AGENT INTERFACE/`aoided`/CONTENT
 PIPELINE/NIX EVAL boxes are `aoide`'s (81 commands: conducting/orchestration
 is aoide's identity); the RICE ENGINE, LIVERY, Quickshell, and shellbridge
-boxes below them are `lyra`'s (48 commands, its own schema and dispatch,
+boxes below them are `strillix`'s (48 commands, its own schema and dispatch,
 routed through the desktop, not through `aoided`'s CLI trunk).
 
 ```
@@ -134,7 +134,7 @@ the implemented/stubbed ladder.
 
 | Subsystem            | Inputs                                         | Outputs                                             | Status                                     |
 | -------------------- | ---------------------------------------------- | --------------------------------------------------- | ------------------------------------------ |
-| [[Agent-Interface]]  | agent commands; `aoide`/`lyra schema --json`   | dispatched operations; structured `--json` results  | implemented (aoide 74 real/7 exit 64; lyra 47 real/1 exit 64) |
+| [[Agent-Interface]]  | agent commands; `aoide`/`strx schema --json`   | dispatched operations; structured `--json` results  | implemented (aoide 74 real/7 exit 64; strillix 47 real/1 exit 64) |
 | [[aoided]]           | CLI+MCP operations; desktop events             | audit log (`$AOIDE_ROOT/log`); default-deny event bus   | implemented (skeleton)                     |
 | [[Self-Ricing]]      | prompt/wallpaper; `songbook/`; shipped standard | `song/songbook/<song>/`; songbook append; stage    | mostly real (`transpose` exit 64) |
 | [[Content-Pipeline]] | folders + manifests; Mneme API                 | in-place index; quarantine on lint fail             | stubbed (all commands exit 64)                |
@@ -179,7 +179,7 @@ The baked side is carried by three paint dendrites, all real:
   sessionGraph); QML rsyncs from the store into
   `$AOIDE_ROOT/run/qml/` (default `~/.aoide/run/qml/`) via home-manager
   activation (source stays
-  `pkgs/lyra-shell/qml/`; no `qml/` at the repo root);
+  `pkgs/strillix-shell/qml/`; no `qml/` at the repo root);
   `LiveryState.qml` watches the stage file for the live fan-out. Eight of
   the nine carry a live QML body: `AoideBar.qml` is the bar (its own popouts
   also carry the calendar and now-playing gadgets); `AoideLauncher.qml` is
@@ -217,7 +217,7 @@ with `declarative-mode-locked` while `rice mode declarative` is locked (the
 default) — see [[Self-Ricing#Staging vs Declarative Mode]].
 
 ```
-  lyra rice compose <name> [--from <song>]
+  strx rice compose <name> [--from <song>]
         │   scaffolds a new song, reading song/songbook/ (cross-cutting +
         │   the song's own design/) FIRST
         ▼
@@ -235,7 +235,7 @@ default) — see [[Self-Ricing#Staging vs Declarative Mode]].
         │   lands DIRECTLY in the draft file; no save step. Not committed —
         │   durable scratch; switch with another `rice mode draft <name>`.
         ▼
-  lyra rice declare <name>   ◄─── User gates this step
+  strx rice declare <name>   ◄─── User gates this step
         │
         ▼
   commit to song/songbook/<song>/   ──►  gated rebuild   ──►  RECORDING
@@ -308,7 +308,7 @@ temporal composability|same thesis]] as the walker and the widget slots. See
 
 This is shipped code, now two binaries, per-binary schema
 (`docs/architecture/PACKAGE-LAYOUT.md`, "Two binaries"; `CONTRACTS.md` §3) —
-conducting orchestration is `aoide`'s identity, painting is `lyra`'s:
+conducting orchestration is `aoide`'s identity, painting is `strillix`'s:
 
 - **`aoide`/`aoided`** ([[aoide-cli]], [[aoided]]) — the orchestration core.
   `aoide schema --json` is its machine-readable source of truth; the stdio
@@ -356,17 +356,17 @@ conducting orchestration is `aoide`'s identity, painting is `lyra`'s:
   `~/song` to the checkout's `song/` (never clobbering an existing file or
   symlink), seeds `song/songbook/preferences.md` when absent, wires the
   agent harnesses (an interactive pick over `hooks install`, or `--harness
-  a,b`/`--yes` non-interactive), then delegates the nix half to `lyra
-  onboard` when the lyra binary resolves and prints the guide. Interactive
+  a,b`/`--yes` non-interactive), then delegates the nix half to `strillix
+  onboard` when the strillix binary resolves and prints the guide. Interactive
   prompts CLI-wide (picker, y/N confirms, hidden input) ride `inquire`
   behind seams in `crates/protocol/src/pick.rs`; piped/non-tty behavior is
   unchanged. Stubs (7, exit 64):
   the 5-command `content` group (`register`/`propose`/`ingest`/`query`/
   `approve`), `make`, `update`. Core is nix-independent: cargo
   build, zero nix shell-outs.
-- **`lyra`** — the AoideOS paint binary. `lyra schema --json` holds the other
+- **`strillix`** — the AoideOS paint binary. `strx schema --json` holds the other
   **48 commands**: the same `guide`/`schema`/`mcp serve` trio as their
-  `aoide` spellings, over lyra's own registry; the 18-command `rice` group
+  `aoide` spellings, over strillix's own registry; the 18-command `rice` group
   (`lint`, `stage`, `compose`, the 3-command `rice draft` group, the
   4-command `rice mode` group, the 5-command `rice take` rehearsal-snapshot
   group, `rice back`, `declare`; `transpose` is the 1 stub), `cover set`,
@@ -389,7 +389,7 @@ conducting orchestration is `aoide`'s identity, painting is `lyra`'s:
   popup dialogs, sharing `secrets ask`'s six-box QML component), and the
   14-command `screen` group
   (capture, OCR, and synthesized-pointer control — [[Screen-Control]]). Only
-  `lyra` may shell out to nix.
+  `strillix` may shell out to nix.
 
 There is no `rice gen` — cut outright (2026-08-14), not left as a stub in
 either binary. Exit codes are contractual, identical in both binaries: 0 ok,
@@ -411,7 +411,7 @@ Live state lands in two stage trees under the runtime root (`$AOIDE_ROOT`,
 default `~/.aoide`), split by owner: `song/stage/*.json`
 (livery, mode, cover — rice/paint staging) and `state/stage/*.json`
 (sessions, hooks, projects, graph, herald, pending — the [[Session-Graph]]
-DAG layer's own conducting files). Beside them, the lyra lane's
+DAG layer's own conducting files). Beside them, the strillix lane's
 activation seed publishes `song/declared/livery.json`, the venue's read-only
 statement of the declared song, and `song/declared/venue.json`, the slots the
 venue recolours and the geometry the host sets (CONTRACTS §4). `lib/aoideos.nix`'s constructor
@@ -461,7 +461,7 @@ for the layer anatomy, [[Codebase]] for file-level detail):
 │   │                fonts, hyprland, obsidian, melete, mneme, firefox, screenshot,
 │   │                vision, audio, claude-code, clipboard, dunst, kimi-code,
 │   │                networkmanager, pi-coding-agent — plus the paint lanes
-│   │                quickshell · compositor · stylix · greeter · lyra) ← additive
+│   │                quickshell · compositor · stylix · greeter · strillix) ← additive
 │   ├── aggregations/  named groups a host takes in one line (base · desktop · agents · aoideos)
 │   └── overrides/   capability-scoped fixes (no records yet)
 ├── hosts/           one record per machine (yomi-strix is the real one; `_`-prefixed
@@ -469,7 +469,7 @@ for the layer anatomy, [[Codebase]] for file-level detail):
 │                    aoide.song selector, and a real
 │                    hardware profile, switched live and running as the daily desktop
 ├── pkgs/            aoide/ (Rust workspace, two binaries — aoide/aoided core +
-│                    lyra paint), lyra-shell/ (the QML skeleton), lyra-songbook/
+│                    strillix paint), strillix-shell/ (the QML skeleton), strillix-rices/
 │                    (the shipped templates), see [[Package-Layout]]
 ├── song/            songbook/<song>/ (per song: rice.nix · livery.json ·
 │                    palette/ · sounds/ · icons/ · widgets/ · design/) ·
@@ -510,7 +510,7 @@ headless boot of the assembled stack) fail eval on violation.
 - [[Package-Layout]]
 - [[Snowflake-Anatomy]]
 - [[Desktop-Architecture]]
-- [[lyra]]
+- [[strillix]]
 - [[livery]]
 - [[Self-Ricing]]
 - [[Content-Pipeline]]

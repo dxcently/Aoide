@@ -41,7 +41,7 @@ key is the one thing that decides which of the two is in front of the other.
 
 ## The two directions
 
-- **Aoide → engine.** `lyra cover sync` (CONTRACTS.md §4) is the only write:
+- **Aoide → engine.** `strx cover sync` (CONTRACTS.md §4) is the only write:
   the staged pick is applied (`skwd-helm apply <path|we:<id>> -o '*'`) while one
   applies to the staged song, and steps aside otherwise: the provider's own
   `clear` verb where the installed release has one, and a 1x1 fully transparent
@@ -55,7 +55,7 @@ key is the one thing that decides which of the two is in front of the other.
   the shell's own layer's to paint, so the engine lays out a picture named
   `*_tile*` or set with `--position tile` the way it lays out every other.
 - **Engine → Aoide.** The daemon's `postProcessing` hook runs exactly one
-  command, `lyra cover set --from-skwd --kind %type% %path%`, which RECORDS what
+  command, `strx cover set --from-skwd --kind %type% %path%`, which RECORDS what
   the engine now shows and applies nothing back — that asymmetry is what makes
   the round trip terminate (the engine is source-blind: it cannot tell an Aoide
   apply from the user's own pick, so a hook that re-applied would loop

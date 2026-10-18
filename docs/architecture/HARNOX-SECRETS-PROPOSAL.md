@@ -27,7 +27,7 @@ Approved credential use in trusted code
           |
 External service OR explicitly authorized process delivery
 
-Lyra: approval UI and name-only events
+Strillix: approval UI and name-only events
 Mneme: optional references to policy/docs; no credentials in memory or embeddings
 Melete: another Harnox consumer, not Aoide's required intermediary
 ```

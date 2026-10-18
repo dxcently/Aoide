@@ -38,13 +38,13 @@ AoideOS is also a specialized widget maker: it integrates and launches the indep
 - [[Governance]] — the rebuild gate (polkit pattern), the single audit log, and mutation policy by radial distance from the nucleus
 - [[Rebuild-Gate]] — how agents rebuild: the default propose-then-human-`switch` path and the opt-in `aoide.rebuild` passwordless-narrow polkit capability
 - [[Wiki-Protocol]] — the Mneme/Melete-owned protocol giving each project a standalone wiki in a shared shape; this wiki is the self-managed exception
-- [[Package-Layout]] — `pkgs/aoide` as pi-style single-charter crates and the two-binary split: `aoide`/`aoided` core vs `lyra` paint
+- [[Package-Layout]] — `pkgs/aoide` as pi-style single-charter crates and the two-binary split: `aoide`/`aoided` core vs `strillix` paint
 
 ## Entities
 
-- [[aoide-cli]] — the `aoide` CLI trunk and the `aoided` daemon binary; `schema --json` is the single source of truth behind the MCP façade. Paint commands (`rice`, `cover`, `livery`, `screen`, …) are `lyra`'s
-- [[lyra]] — the AoideOS paint binary: its own 48-command schema, its own registry and golden snapshot, the one binary allowed to depend on nix
-- [[livery]] — the design-token layer and its engine: the immutable seam between nix structure and runtime rendering, native in `crates/song/src/livery/` as `lyra livery emit|resolve|lint`
+- [[aoide-cli]] — the `aoide` CLI trunk and the `aoided` daemon binary; `schema --json` is the single source of truth behind the MCP façade. Paint commands (`rice`, `cover`, `livery`, `screen`, …) are `strillix`'s
+- [[strillix]] — the AoideOS paint binary: its own 48-command schema, its own registry and golden snapshot, the one binary allowed to depend on nix
+- [[livery]] — the design-token layer and its engine: the immutable seam between nix structure and runtime rendering, native in `crates/song/src/livery/` as `strx livery emit|resolve|lint`
 - [[aoided]] — the orchestrator daemon: neutral event stream, policy, lint, audit log, gated rebuild pipeline
 - [[shellbridge]] — the daemon-to-desktop bridge: atomic JSON state files out, unix-socket commands in, Hyprland IPC consumed
 - [[Quickshell]] — the QML shell runtime: nine surfaces declared, five with a live QML body

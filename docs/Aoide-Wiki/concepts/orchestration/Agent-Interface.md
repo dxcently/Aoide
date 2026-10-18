@@ -90,11 +90,11 @@ order:
 | Tier | Surface | Scope |
 |---|---|---|
 | 0 | `aoide guide` + repo root `AGENTS.md` + `docs/agent/` | Onboarding: the core-vs-paint boundary, the house rules, the read order. Read before acting; the house rules are non-negotiable. |
-| 1 | the CLI — `aoide <cmd>` / `lyra <cmd>` | Full capability. `aoide` is the complete orchestration surface, `lyra` the complete painted surface (AoideOS); the registry behind `schema --json` enumerates every command of each. Both carry the same house rules. |
+| 1 | the CLI — `aoide <cmd>` / `strx <cmd>` | Full capability. `aoide` is the complete orchestration surface, `strillix` the complete painted surface (AoideOS); the registry behind `schema --json` enumerates every command of each. Both carry the same house rules. |
 | 2 | stdio MCP | Per-session, agent-spawned, optional — `aoide mcp serve --stdio`. Off by default. Attested by the conducted session it runs under; the harness's own MCP permission prompt is the user's approval for one connection, and aoide keeps no activation state. |
 | 3 | network MCP | User-enabled only, never agent-enabled: the dedicated Aoide connector (below). Has no sealed ancestor, so every send and spawn through it parks. |
 
-`aoide schema --json` / `lyra schema --json` is the machine-readable
+`aoide schema --json` / `strx schema --json` is the machine-readable
 backstop at any tier; the MCP tool list generates from it. Tier 0's
 checkout half is `docs/agent/README.md` (the read-order router) and
 `docs/agent/session.md` (the mechanical session checklist); the house

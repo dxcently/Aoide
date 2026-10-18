@@ -203,10 +203,10 @@ optional target:
   operator's own invocation.
   `--popup` swaps the narration for a dialog — the SAME shape on BOTH
   directions, never a bare yes/no and never an Approve/Reject: a
-  six-boxes-plus-dash typed-code entry surface, `lyra pair ask` (sharing
-  `lyra secrets ask`'s own quickshell surface via `dialog_qml`) when
-  `lyra` resolves, `zenity --entry` otherwise, falling back to zenity on
-  a `lyra` failure for that one attempt (refused up front only when
+  six-boxes-plus-dash typed-code entry surface, `strx pair ask` (sharing
+  `strx secrets ask`'s own quickshell surface via `dialog_qml`) when
+  `strillix` resolves, `zenity --entry` otherwise, falling back to zenity on
+  a `strillix` failure for that one attempt (refused up front only when
   NEITHER binary resolves; `--popup`+`--json` is a usage error). Either
   direction collects the typed code through the identical gate the CLI's
   own `--code`/tty prompt use — the same SAS comparison and three-try
@@ -219,7 +219,7 @@ optional target:
   request resolves elsewhere, a live blocking `aoide pair` claims the
   same id, or Ctrl-C interrupts the watcher. After a popup-driven INBOUND
   commit succeeds, the approver's own reply code gets a SECOND, separate
-  dialog — `lyra pair show` (`zenity --info --no-markup` otherwise): the
+  dialog — `strx pair show` (`zenity --info --no-markup` otherwise): the
   code shown large with a Copy control and a Done control, no reject
   control at all, since the commit it belongs to already succeeded and
   there is nothing left to approve. A `notify-send` toast carries the
@@ -233,8 +233,8 @@ optional target:
   those OFF by default. Deliberately NOT gated on the shell fact
   (`aoide.quickshell.enable`), which says only that Aoide paints a shell here:
   a host painted by something else has the session and takes the zenity path.
-  What follows `aoide.lyra.enable` is the unit's `quickshell` entry on `path`
-  (and `AOIDE_RICE_BIN`), since a host without lyra has no use for either. A
+  What follows `aoide.strillix.enable` is the unit's `quickshell` entry on `path`
+  (and `AOIDE_RICE_BIN`), since a host without strillix has no use for either. A
   host with a2a on does
   not get the popup unless it also opts in.
 - **`--allow read,spawn`** stamps the grant this commit makes — first
@@ -372,7 +372,7 @@ Real: the three wire methods (`aoide/pairRequest`/`aoide/pairReveal`/
 (`aoide pair [<name|url|id>]`, `pair reject`/`pair watch`),
 the SAS derivation with its pinned vectors, the typed-code gate with its
 persisted tries and auto-deny, the events feed, the popup (typed-code
-entry via `lyra
+entry via `strillix
 pair ask` or zenity `--entry`, opt-in behind `aoide.a2a.pairingPopup`), and
 `aoide mesh pair`'s converge over the same ceremony all run.
 

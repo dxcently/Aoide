@@ -1,6 +1,6 @@
 //! Registry-walk assertions: each takes ONE binary's registry and checks
 //! every command against what the registry declares about it. `aoide-cli` and
-//! `aoide-lyra` each call all of them from a test, so the two binaries are
+//! `strillix` each call all of them from a test, so the two binaries are
 //! held to the same rules and a command added tomorrow is covered the day it
 //! is registered. Each walk asserts what a command DECLARES; one that declares
 //! nothing passes, so a rule tightens exactly as commands migrate onto it.

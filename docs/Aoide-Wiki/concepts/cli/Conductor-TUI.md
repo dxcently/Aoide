@@ -65,7 +65,7 @@ aoide conductor [--json]
   `interactive: true, door: "non-cli"`.
 - **Notes:** not gated. Distinct from `aoide conduct`, which wraps one
   process into the conductor channel rather than raising this UI. Core,
-  never `lyra` — the crate carries no wayland/image/song dependency.
+  never `strillix` — the crate carries no wayland/image/song dependency.
 
 ## The page
 

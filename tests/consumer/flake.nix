@@ -45,7 +45,7 @@
       composition = aoide.lib.composition { inherit lib; };
 
       # The consumer's own slots. `bar`, `dock` and `lock` are named HERE, each
-      # with a provider of the consumer's own beside Aoide's vibeos part
+      # with a provider of the consumer's own beside Aoide's strillix part
       # (`aoide.parts`, the front door's bare provider paths). Aoide's catalogue
       # is taken for every other name, and NOT for these three: the same slot
       # name from two catalogues is a collision the registry refuses, not a
@@ -54,15 +54,15 @@
       slots = {
         bar.providers = {
           stub = ./stub-bar.nix;
-          vibeos = aoide.parts.bar;
+          strillix = aoide.parts.bar;
         };
         dock.providers = {
           stub = ./stub-dock.nix;
-          vibeos = aoide.parts.dock;
+          strillix = aoide.parts.dock;
         };
         lock.providers = {
           stub = ./stub-lock.nix;
-          vibeos = aoide.parts.lock;
+          strillix = aoide.parts.lock;
         };
       };
 
@@ -92,7 +92,7 @@
 
       # The same host over a songbook RECORD: one already built, such as the
       # merge of several books (`aoide.lib.songbookMerge`), whose `dir` is the
-      # directory the hook and the lyra lane read.
+      # directory the hook and the strillix lane read.
       mkHostOver =
         name: songs:
         let

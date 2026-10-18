@@ -9,19 +9,19 @@
 # nothing names a provider file but this line — one place each.
 #
 # WHO PAINTS A SONG'S WALLPAPER is a host's choice, the way its compositor is.
-# `vibeos` is the default: the shell's own `aoide-wallpaper` layer draws the
+# `strillix` is the default: the shell's own `aoide-wallpaper` layer draws the
 # song's default AND the user's picks. `skwd-wall` hands picks to the external
 # engine of that name, which paints them on its own surface while the shell's
-# layer stays mapped and paints nothing. Both bring the vibeos runtime by path
+# layer stays mapped and paints nothing. Both bring the strillix runtime by path
 # (the shell's picker and layer stay), both write `aoide.components.wallpaper`,
 # and both name themselves in the fact `aoide.wallpaper.provider`, which the
-# runtime reads (CONTRACTS.md §4) — `vibeos` by the value `"quickshell"`.
+# runtime reads (CONTRACTS.md §4) — `strillix` by the value `"quickshell"`.
 #
 # Adding an alternative is one file plus one line here; removing it is
 # deleting both, with no other edit anywhere in the tree.
 {
   providers = {
-    vibeos = ./vibeos.nix;
+    strillix = ./strillix.nix;
     skwd-wall = ./skwd-wall.nix;
   };
 }

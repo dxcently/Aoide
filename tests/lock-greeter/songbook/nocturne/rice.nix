@@ -4,16 +4,16 @@
 {
   system = {
     providers = {
-      bar = "vibeos";
-      launcher = "vibeos";
-      powermenu = "vibeos";
-      notifications = "vibeos";
-      wallpaper = "vibeos";
-      dock = "vibeos";
-      calendar = "vibeos";
-      switcher = "vibeos";
-      lock = "vibeos";
-      greeter = "vibeos";
+      bar = "strillix";
+      launcher = "strillix";
+      powermenu = "strillix";
+      notifications = "strillix";
+      wallpaper = "strillix";
+      dock = "strillix";
+      calendar = "strillix";
+      switcher = "strillix";
+      lock = "strillix";
+      greeter = "strillix";
     };
     module = _: {
       aoide.livery.palette = {
@@ -25,7 +25,7 @@
     };
   };
   home = {
-    members = [ "lyra" ];
+    members = [ "strillix" ];
     module = {
       rice.hyprland.conf = ./hyprland.conf;
     };

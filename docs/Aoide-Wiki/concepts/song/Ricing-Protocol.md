@@ -71,8 +71,8 @@ a stray literal) rather than creation (the sixteen slots themselves).
 
 Whenever a rice or song changes, vision-check it before calling it done — a
 compile-clean rebuild is not the same as a rice that reads correctly.
-`lyra reload` is how a change reaches the live desktop to check at all: edit
-→ `lyra reload` → look, the one mode-aware command that snapshots the
+`strx reload` is how a change reaches the live desktop to check at all: edit
+→ `strx reload` → look, the one mode-aware command that snapshots the
 current rice, syncs it live, and reloads Quickshell regardless of whether
 the rice is staged or drafted ([[Self-Ricing#The Rice Loop]] has the full
 loop). Two things to look at, side by side, on the live desktop:

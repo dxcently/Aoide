@@ -836,7 +836,7 @@ service, with no desktop present at all (`socket::socket_path`'s own
 `/run/aoide-secrets/secrets.sock`, entirely independent of `$XDG_RUNTIME_DIR/
 aoide/shellbridge.sock`).
 
-No adapter on the `aoide-conduct`/`lyra` side currently tails the mirrored
+No adapter on the `aoide-conduct`/`strillix` side currently tails the mirrored
 aoide log (`~/Aoide/log`) and republishes anything from it into `herald`
 either — `aoide-client`'s adapter skeleton (`crates/client/src/adapter.rs`)
 subscribes to `EventClass::{Audit,Gate,Rice,Content,Notification}` but has
@@ -901,7 +901,7 @@ broker-owned events feed (P-G4; the mirrored `~/Aoide/log` through P-N3),
 the same way `secrets pending` already polls the in-memory `ParkRegistry` —
 a `parked` line is the exact trigger `secrets pending`'s own poll would
 eventually see, just pushed instead of pulled, and delivered in about a
-second instead of up to 30. A future GRAPHICAL popup (a `lyra`/desktop
+second instead of up to 30. A future GRAPHICAL popup (a `strillix`/desktop
 consumer, tracker #71 Part 2) reads `secrets watch --json`'s stdout stream
 directly rather than re-deriving this tail itself — this emission plus
 `watch`'s own tail/reconcile loop are the substrate, the same relationship
@@ -927,7 +927,7 @@ for what was already `pub` here, a bare `use` for what stayed
 crate-private, matching each item's OLD visibility exactly rather than
 widening anything. `aoide-client`'s own P-P5 pairing-confirm popup is the
 SECOND consumer that forced the move; `spawn_zenity_entry`/
-`spawn_lyra_entry`/`run_zenity_entry`/`run_lyra_entry`/`run_ask_dialog`/
+`spawn_strillix_entry`/`run_zenity_entry`/`run_strillix_entry`/`run_ask_dialog`/
 `zenity_error_dialog`/`popup_loop` stay here exactly as before — they know
 which secrets-specific binary and argv to spawn, which the generic
 run-loop never needed to.
@@ -1016,7 +1016,7 @@ secrets watch | tee` and a systemd unit both behave. `--json` emits one
 JSON object per line, flushed per line — the seam any other consumer (a
 script, a future desktop adapter) subscribes to instead of re-tailing the
 log itself. (Tracker #71 Part 2's own popup phase landed IN THIS crate,
-not as a separate `lyra`-side subscriber of this stream — see "Popup mode"
+not as a separate `strillix`-side subscriber of this stream — see "Popup mode"
 below.)
 
 ```
@@ -1084,17 +1084,17 @@ complete an ask. The entry is VISIBLE, digits and all — a TOTP code is a
 30-second secret the operator is about to read off an authenticator, not a
 password worth hiding.
 
-**Two dialog binaries, one output contract (P3).** `watch::resolve_lyra_bin`
-checks whether `lyra` resolves to a real executable (`aoide-protocol`'s own
+**Two dialog binaries, one output contract (P3).** `watch::resolve_strillix_bin`
+checks whether `strillix` resolves to a real executable (`aoide-protocol`'s own
 sibling-binary resolver, `rice_bin`, plus a `PATH` probe on its bare-name
-fallback — the SAME check `aoide onboard`'s own "is lyra enabled" test
-already runs); when it does, each parked ask opens `lyra secrets ask
+fallback — the SAME check `aoide onboard`'s own "is strillix enabled" test
+already runs); when it does, each parked ask opens `strx secrets ask
 --secret <name> --consumer <who> --seconds <n>` — a small quickshell window
 with six individually-boxed digit inputs (`XXX-XXX`), autofocus, auto-advance,
-and paste-to-fill (`crates/lyra`'s own docs) — instead of a `zenity --entry`
-dialog. **Presence of `lyra` IS the choice** (the plugin philosophy, root
+and paste-to-fill (`crates/strillix`'s own docs) — instead of a `zenity --entry`
+dialog. **Presence of `strillix` IS the choice** (the plugin philosophy, root
 `AGENTS.md` house rule 7) — no flag exists to pick between them, and there is
-nothing to configure: `lyra` absent falls back to `zenity` exactly as this
+nothing to configure: `strillix` absent falls back to `zenity` exactly as this
 mode has always worked. Both binaries obey the IDENTICAL output contract —
 code on stdout + exit 0 = approved; the literal string `Dismiss ask` on
 stdout + exit 1 = dismissed; anything else non-zero = cancelled — so
@@ -1105,7 +1105,7 @@ need to know which one answered.
 $ aoide secrets watch --popup
 watching secret events — ^C to leave (parked asks stay parked)
   19:06:02  parked      db-prod → claude   ask 3f2a-3   times out in 5m00s
-[with lyra resolved: `lyra secrets ask --secret db-prod --consumer claude --seconds 287`
+[with strillix resolved: `strx secrets ask --secret db-prod --consumer claude --seconds 287`
  opens six boxed digit inputs, grouped XXX-XXX, submitting once all six are filled;
  without it: a zenity --entry dialog opens, "code for `db-prod` ← claude · 287s left",
  with an extra "Dismiss ask" button beside OK/Cancel — both show the digits as typed]
@@ -1115,7 +1115,7 @@ watching secret events — ^C to leave (parked asks stay parked)
   `client::approve` — never argv.** Neither binary's own argv (`Command::
   new`'s `args`) carries anything but identifiers and prompt TEXT (secret
   name, consumer, remaining seconds) — never a code, never a value. Grep the
-  spawn calls yourself (`watch::spawn_zenity_entry`/`watch::spawn_lyra_entry`)
+  spawn calls yourself (`watch::spawn_zenity_entry`/`watch::spawn_strillix_entry`)
   if in doubt.
 - **`--text` is UNTRUSTED display data (`reason`/`origin.comm` in
   particular) and zenity renders `--text` as Pango markup by default, even
@@ -1125,39 +1125,39 @@ watching secret events — ^C to leave (parked asks stay parked)
   `reason` or an origin `comm` (self-asserted/process-controlled text, this
   file's own honesty notes above) containing real markup, or a bare `&`,
   renders as literal text instead of formatting or a parse warning.
-- **The dialog window can never be left orphaned when `lyra secrets ask`
+- **The dialog window can never be left orphaned when `strx secrets ask`
   itself is killed** — `watch.rs`'s own near-expiry/resolved-elsewhere kill
-  (`run_zenity_entry`/`run_lyra_entry`'s `child.kill()`) only ever reaches
-  the `lyra` PROCESS this crate spawned; the quickshell GRANDCHILD `lyra`
+  (`run_zenity_entry`/`run_strillix_entry`'s `child.kill()`) only ever reaches
+  the `strillix` PROCESS this crate spawned; the quickshell GRANDCHILD `strillix`
   spawns is invisible to this crate (no pid, no handle), and `SIGKILL` is
-  untrappable, so `lyra`'s own best-effort cleanup of that grandchild never
-  runs in that case. `lyra`'s `spawn_quickshell` closes the gap on its own
+  untrappable, so `strillix`'s own best-effort cleanup of that grandchild never
+  runs in that case. `strillix`'s `spawn_quickshell` closes the gap on its own
   side by arming `PR_SET_PDEATHSIG` on the quickshell child before it execs
-  — the kernel kills it the instant `lyra` dies, no cooperation needed from
-  either process at that moment. See `crates/lyra/AGENTS.md`'s own note for
+  — the kernel kills it the instant `strillix` dies, no cooperation needed from
+  either process at that moment. See `crates/strillix/AGENTS.md`'s own note for
   the full mechanism; this crate's `AGENTS.md` has the matching half.
-- **A `lyra` infrastructure failure narrates and falls back to zenity —
+- **A `strillix` infrastructure failure narrates and falls back to zenity —
   never a silent parked ask (live-incident fix, this commit).** The
-  deployed popup watcher unit chose the `lyra` dialog for a real ask,
-  `lyra`'s own `quickshell` spawn ENOENT'd, and the ask sat parked with
+  deployed popup watcher unit chose the `strillix` dialog for a real ask,
+  `strillix`'s own `quickshell` spawn ENOENT'd, and the ask sat parked with
   nothing on screen and nothing in the journal until it timed out.
-  `watch::spawn_lyra_entry` now inherits `lyra`'s own stderr straight
-  through to this process's own (`lyra secrets ask`'s failures land in the
-  journal directly); `lyra secrets ask` reserves exit `3`
-  (`aoide_lyra::commands::secrets::EXIT_INFRA_FAILURE`) for "the dialog
+  `watch::spawn_strillix_entry` now inherits `strillix`'s own stderr straight
+  through to this process's own (`strx secrets ask`'s failures land in the
+  journal directly); `strx secrets ask` reserves exit `3`
+  (`strillix::commands::secrets::EXIT_INFRA_FAILURE`) for "the dialog
   infrastructure itself broke," never colliding with zenity's own cancel
   code (`1`); and `watch::run_ask_dialog` retries the SAME ask through
-  zenity immediately on either a `lyra` spawn error or an exit-3 — the
+  zenity immediately on either a `strillix` spawn error or an exit-3 — the
   plugin philosophy's fancy-surface-degrades-to-the-plain-one rule, not a
-  reason to leave the ask undialoged. A genuine user cancel (`lyra` exiting
+  reason to leave the ask undialoged. A genuine user cancel (`strillix` exiting
   1 with no marker line) is UNCHANGED — narrated as `[i]`gnore, same as
   always, never retried. See `watch.rs`'s own module doc for the full
   mechanism (all three parts: narration, the reserved exit code, the
   fallback).
 - **Wrong code**: on the zenity path, a brief `zenity --error` shows, then
-  the SAME ask's entry dialog re-opens; on the lyra path there is no separate
+  the SAME ask's entry dialog re-opens; on the strillix path there is no separate
   error surface (P3's scope is the entry dialog only) — the ask simply stays
-  parked and the next poll reopens `lyra secrets ask` fresh. Either way the
+  parked and the next poll reopens `strx secrets ask` fresh. Either way the
   ask stays parked, the replay ledger unburned, same as the tty path's own
   wrong-code retry.
 - **Cancel/close the dialog = IGNORE** (same session-only semantics as the
@@ -1174,7 +1174,7 @@ watching secret events — ^C to leave (parked asks stay parked)
   `/proc` scan for a named locker PROCESS, `AOIDE_SECRETS_LOCKER` (default
   `hyprlock` — the design doc verified hyprlock 0.9.6 sets no `LockedHint`,
   so this half is load-bearing for hyprlock, not a redundant fallback). The
-  shell's own lock (`LockHost.qml`, `lyra lock`) sets the hint itself. While locked, the
+  shell's own lock (`LockHost.qml`, `strx lock`) sets the hint itself. While locked, the
   loop holds the dialog and re-polls once a second; once unlocked it opens
   the dialog — but ONLY if the near-expiry rule below still allows it.
 - **Near-expiry, two coherent thresholds, one policy (task #76 item 1,
@@ -1242,14 +1242,14 @@ watching secret events — ^C to leave (parked asks stay parked)
   ever drives a dialog. A tight automation loop firing many `released`
   events therefore narrates a scrolling terminal, never a toast storm of
   dialogs.
-- **Both `lyra` and `zenity` are runtime shell-outs declared BY NAME — zero
+- **Both `strillix` and `zenity` are runtime shell-outs declared BY NAME — zero
   new Cargo dependencies** (the plugin philosophy, root `AGENTS.md` house
   rule 7; the same feature-detection shape `enroll::render_qr` already uses
   for `qrencode`). `run`'s own startup gate refuses to even ENTER `--popup`
   only when NEITHER resolves: a taught error naming both fixes (install
-  `lyra` or `zenity`, or drop `--popup` and run plain `secrets watch`),
+  `strillix` or `zenity`, or drop `--popup` and run plain `secrets watch`),
   clean exit 1 — checked once, before the tail thread or the socket
-  reconcile ever starts. `lyra` resolved alone is sufficient; `zenity`
+  reconcile ever starts. `strillix` resolved alone is sufficient; `zenity`
   missing in that case is simply never consulted.
 - **`--popup` works over a non-tty stdin** (dialogs replace prompts, so
   there's nothing for stdin to drive) — **`--popup`+`--json` is a usage
@@ -1258,8 +1258,8 @@ watching secret events — ^C to leave (parked asks stay parked)
   can't both drive it.
 - **Both dialog spawn paths take the binary name as a parameter**
   (`watch::ZENITY_CMD`/`"zenity"` in production for one, `watch::
-  resolve_lyra_bin`'s own result for the other) rather than hardcoding
-  `Command::new("zenity")`/`Command::new("lyra")` — this is what lets this
+  resolve_strillix_bin`'s own result for the other) rather than hardcoding
+  `Command::new("zenity")`/`Command::new("strillix")` — this is what lets this
   crate's own tests stand in a fake shim script (a tempdir executable that
   echoes a fixed code, or a fixed exit code) for EITHER binary WITHOUT
   mutating `PATH` (unlike `enroll::render_qr`'s older PATH-shim test, which
@@ -1756,10 +1756,10 @@ display for a dialog); `Type = "simple"` + `Restart = "on-failure"` for the
 same "blocks forever" reason the broker service above holds. Its `path`
 carries `zenity` (a systemd user unit's default `PATH` does not reliably
 carry `environment.systemPackages` entries, the same lesson `shellbridge.nix`
-already learned for `hyprctl`/`curl`), and, only when `aoide.lyra.enable` is
-on, `AOIDE_RICE_BIN` points at `pkgs.aoide.rice`'s own `lyra` — `lyra` ships
+already learned for `hyprctl`/`curl`), and, only when `aoide.strillix.enable` is
+on, `AOIDE_RICE_BIN` points at `pkgs.aoide.strillix`'s own `strillix` — `strillix` ships
 from a SEPARATE output than the `aoide` binary this unit execs (P-A8 of the
-binary-split workstream), so `watch::resolve_lyra_bin`'s sibling-of-
+binary-split workstream), so `watch::resolve_strillix_bin`'s sibling-of-
 `current_exe()` tier would otherwise never find it. No explicit ordering
 against the SYSTEM `aoide-secrets-serve.service` exists or is needed: `watch::
 wait_for_follower` already waits out a not-yet-created events feed rather

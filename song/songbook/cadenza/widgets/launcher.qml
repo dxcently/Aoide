@@ -1,6 +1,6 @@
 // launcher.qml — cadenza's "launcher" slot: the THIN window shell.
 //
-// Hosted by `SurfaceSlot` (pkgs/lyra-shell/qml/slots.md): the root
+// Hosted by `SurfaceSlot` (pkgs/strillix-shell/qml/slots.md): the root
 // is a `PanelWindow` owning its layer, namespace, keyboard focus and global
 // shortcuts. Everything drawn lives in `LauncherBody.qml`, loaded BY URL
 // (design/kit.md §1) — the preview canvas refuses a PanelWindow root, so the

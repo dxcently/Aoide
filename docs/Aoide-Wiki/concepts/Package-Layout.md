@@ -9,9 +9,9 @@ tags: [aoide, architecture, rust, cli, crate, blueprint]
 
 **Status: both splits are complete.** `pkgs/aoide` is a virtual Cargo
 workspace of **13 crates** — `protocol`, `storage`, `conduct`, `client`,
-`server`, `song`, `conductor`, `cli`, `test-support`, `upkeep`, `lyra`,
+`server`, `song`, `conductor`, `cli`, `test-support`, `upkeep`, `strillix`,
 `screen`, `secrets` — assembled into **two binaries**: `aoide`/`aoided`
-(core) and `lyra` (paint). This is the
+(core) and `strillix` (paint). This is the
 [pi](https://github.com/earendil-works/pi)-style split; grounded in the
 repo's `docs/architecture/PACKAGE-LAYOUT.md`, which this page mirrors in the
 wiki's own voice and trims for length — read it for the full phase-by-phase
@@ -32,7 +32,7 @@ The split also carries a distribution goal: **Aoide-the-core ships as its
 own package, runnable on any Linux distribution through Nix** (the package
 manager, not the OS) — NixOS is one target (AoideOS), never a requirement.
 Core (`aoide`/`aoided`) has no dependency on this repo's NixOS modules; only
-`lyra` may shell out to nix (`song::widgets`'s `nix eval` call for the
+`strillix` may shell out to nix (`song::widgets`'s `nix eval` call for the
 songbook manifest).
 
 ## The pi → aoide mapping
@@ -47,7 +47,7 @@ songbook manifest).
 | `storage`/`sqlite-node` | **`storage`** | durable session data + memory persistence; file-first today |
 | `evals` (vitest-eval harness) | **`evals`** (unbuilt) | see Status below |
 | `tui` (terminal UI library) | **`conductor`** | the session DAG view + roster CLI/TUI |
-| `coding-agent` (the concrete app) | **`cli`** / **`lyra`** | the two app crates that assemble every domain crate into the shipped binaries |
+| `coding-agent` (the concrete app) | **`cli`** / **`strillix`** | the two app crates that assemble every domain crate into the shipped binaries |
 | *(none)* | **`conduct`** | aoide-unique: the PTY multiplexer + session DAG + hook plumbing that makes every terminal a tracked, conductable session |
 | *(none)* | **`song`** | aoide-unique: the ricing/design engine (notes → livery, songs, stage) |
 | *(none)* | **`screen`** | aoide-unique: read-only desktop view + pointer synthesis for agents |
@@ -59,7 +59,7 @@ songbook manifest).
 | crate | charter | app | commands it registers |
 |---|---|---|---|
 | **protocol** | The contract: registry, schema doc, `Outcome` envelope + exit codes, `Door`, audit event classes, A2A-JSON-RPC/MCP wire types, the `cmd!`/`arg!`/`flag!` registration macros. Every door depends on it; it depends on nothing aoide-specific. | both | none (library) |
-| **conduct** | The session core: PTY-backed `conduct` wrap, the session DAG, hook ingestion, liveness reaping. Also owns the `shellbridge`/`herald` implementation files (a deliberate charter exception — both are entangled with core internals even though their CLI commands register into `lyra`). | both | aoide: `conduct`, `graph.*` (20), `hooks.install`, `session` (bare — the roster; the retired `who`'s pipeline); lyra: `shellbridge`, `herald.push` |
+| **conduct** | The session core: PTY-backed `conduct` wrap, the session DAG, hook ingestion, liveness reaping. Also owns the `shellbridge`/`herald` implementation files (a deliberate charter exception — both are entangled with core internals even though their CLI commands register into `strillix`). | both | aoide: `conduct`, `graph.*` (20), `hooks.install`, `session` (bare — the roster; the retired `who`'s pipeline); strillix: `shellbridge`, `herald.push` |
 | **server** | `aoided` and the door serve-loops: MCP-over-stdio, A2A JSON-RPC/HTTP/SSE, listeners, sessions, snapshots, the audit sink. Untrusted input stops here. | aoide | `daemon`, `a2a.serve` |
 | **client** | Outbound: the A2A client registry + send, the melete adapter, transports that drive external agents and speak to `aoided`. | aoide | `adapter.melete`, `context`, `pair`/`pair.reject`/`pair.watch` (3), `node.*` (9), `mesh.*` (8), `melete.*` (3), `mail.*` (11 — `mail ring` registers from `conduct`, `mail serve` from `server`) |
 | **storage** | Durable session data + memory persistence: session store, transcript index, stage/state files, the mailbase store, migrations. File-first (seed → build; a real embedded store is the open question below). | aoide | `usage`, `identity`, `config` + `config.set` (4) |
@@ -67,19 +67,19 @@ songbook manifest).
 | **conductor** | The session-DAG TUI (ratatui: app/ui/graphview/theme). Depends on `{protocol, conduct, storage}` via a dependency-injection seam (`App` takes a `DispatchFn`), never on `server`. | aoide | `conductor` |
 | **upkeep** | Mechanical integrity, the working-tree half: `soundcheck` polices gitignored/uncommitted state (`result`, `state/`, stray root files) that `nix flake check` structurally cannot see. Report-only, forever — never moves, deletes, formats, or repairs. | aoide | `soundcheck` |
 | **cli** | The app shell: `aoide`/`aoided` bins, arg parse, the single dispatcher, registry assembly (`commands::all()`), guide/onboarding, and the three root-coupled groups (`meta`, `stubs`, `mcp serve`) that read the fully-assembled registry. Depends on every core domain crate; nothing depends on it. | aoide | `guide`, `schema`, `mcp.serve`, `content.*` (5, stub), `make`/`update` (stub), `onboard` |
-| **song** | The ricing/design engine: the native livery engine (schema · resolve · emit), rice/draft/mode/cover/take, the Pantheon design language. Rices portably — no Stylix/NixOS-module dependency in the crate itself. | lyra | `rice.*` (3), `rice.draft.*` (3), `rice.mode.*` (4), `cover.set`, `livery.*` (3), `rice.declare`, `rice.transpose` (stub), `quickshell.*` (2), `rice.take.*` (6), `element.seed` |
-| **screen** | A read-only view onto the desktop for agents plus pointer synthesis: `info`/`shot`/`ocr`/`diff`/`send`, `point` (native `zwlr_virtual_pointer_v1` synthesis, 9 subverbs). Carved out (P-A1) specifically to isolate wayland/image dependency weight off core. | lyra | `screen.*` (14) |
+| **song** | The ricing/design engine: the native livery engine (schema · resolve · emit), rice/draft/mode/cover/take, the Pantheon design language. Rices portably — no Stylix/NixOS-module dependency in the crate itself. | strillix | `rice.*` (3), `rice.draft.*` (3), `rice.mode.*` (4), `cover.set`, `livery.*` (3), `rice.declare`, `rice.transpose` (stub), `quickshell.*` (2), `rice.take.*` (6), `element.seed` |
+| **screen** | A read-only view onto the desktop for agents plus pointer synthesis: `info`/`shot`/`ocr`/`diff`/`send`, `point` (native `zwlr_virtual_pointer_v1` synthesis, 9 subverbs). Carved out (P-A1) specifically to isolate wayland/image dependency weight off core. | strillix | `screen.*` (14) |
 | **test-support** | Shared test rig only — scratch dirs, `EnvSaver`, fixture payloads, the single `env_lock`. A dev-dependency, never a production edge. | both (dev-only) | none |
-| **lyra** | The second app shell: arg parse, dispatcher, registry assembly for the paint bundle. The one binary allowed to shell out to nix. Never registers `a2a serve`, `conductor`, or any core-only group. | lyra | `guide`, `schema`, `mcp.serve`, `onboard`, `secrets.ask`, `pair.ask`, `pair.show` |
+| **strillix** | The second app shell: arg parse, dispatcher, registry assembly for the paint bundle. The one binary allowed to shell out to nix. Never registers `a2a serve`, `conductor`, or any core-only group. | strillix | `guide`, `schema`, `mcp.serve`, `onboard`, `secrets.ask`, `pair.ask`, `pair.show` |
 
-Command totals: **aoide 81** (74 real, 7 stub), **lyra 48** (47 real, 1 stub)
+Command totals: **aoide 81** (74 real, 7 stub), **strillix 48** (47 real, 1 stub)
 — see [[Full-Architecture]] for the full per-group breakdown.
 
-## Two binaries — `aoide`/`aoided` (core) and `lyra` (paint)
+## Two binaries — `aoide`/`aoided` (core) and `strillix` (paint)
 
 Core keeps `aoide`/`aoided` over `protocol` · `storage` · `client` ·
-`conduct` · `server` · `conductor` · `upkeep` · `cli`. `lyra` (crate
-`aoide-lyra`) owns the rice/draft/mode/cover/livery/quickshell/screen/
+`conduct` · `server` · `conductor` · `upkeep` · `cli`. `strillix` (crate
+`strillix`) owns the rice/draft/mode/cover/livery/quickshell/screen/
 shellbridge/herald command surface — everything that paints, or that only a
 desktop needs.
 
@@ -89,10 +89,10 @@ desktop needs.
 - **`conductor` stays core.** It is the messaging/orchestration surface a
   headless box needs most, not a painting tool: pure Rust (ratatui), no
   system-closure weight, and conducting orchestration is Aoide's core
-  identity. It ships in `aoide`/`aoided`, never `lyra`.
+  identity. It ships in `aoide`/`aoided`, never `strillix`.
 - **Charter exceptions, named as the smudges they are.** `shellbridge.rs`
   and `herald.rs` stay as files in `conduct` — only their registry lines (the
-  CLI commands) move to `lyra` — because both are entangled with core:
+  CLI commands) move to `strillix` — because both are entangled with core:
   `session permit` publishes summons through `herald`, and the conductor TUI
   reads the socket path `shellbridge` owns. `storage::takes` and
   `storage::mode` stay in `storage` for the same reason: zero dependency
@@ -128,7 +128,7 @@ desktop needs.
 - **`evals`** — an eval harness: golden snapshots (existing), agent-behavior
   evals for the steward, door-contract evals, ricing/design evals.
   **Status: specified, not built, downstream of `steward`.** Today's only
-  "eval" is the golden command-path snapshot test in `cli`/`lyra`'s
+  "eval" is the golden command-path snapshot test in `cli`/`strillix`'s
   `registry.rs`; door-contract evals already exist correctly, in-crate, in
   `protocol`/`server`/`client` tests; ricing/design evals are undesigned —
   design quality is a human vision-check today.

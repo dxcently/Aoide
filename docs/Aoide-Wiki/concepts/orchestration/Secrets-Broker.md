@@ -206,8 +206,8 @@ screen is unlocked, checked by ORing `loginctl`'s `LockedHint` with a
 `/proc` scan for a named locker process (`AOIDE_SECRETS_LOCKER`, default
 `hyprlock`). The hint is read on `$XDG_SESSION_ID`, else on the user's
 display session, because the watcher is a user unit outside every session.
-The shell's lock host sets it (`lyra lock hint`); the process scan exists
-because hyprlock sets no `LockedHint` at all, and `lyra lock` clears a
+The shell's lock host sets it (`strx lock hint`); the process scan exists
+because hyprlock sets no `LockedHint` at all, and `strx lock` clears a
 shell's stale `yes` once hyprlock holds the screen. A failing `zenity` spawn backs off from 1 second up to
 a 60-second ceiling globally across every ask, rather than retrying on
 every poll tick forever. `released`/`completed`/`dismissed`/`expired` never

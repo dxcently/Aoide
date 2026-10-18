@@ -1,7 +1,7 @@
 // CoverPcb.qml — the cover: a routed circuit board on the CRT black
 // (intent §3.9). An uppercase helper, never a slot: nothing loads it live.
 // The preview canvas shoots it at each monitor's size into
-// `cover/pcb-<w>x<h>.png` (cover/README.md), and `lyra cover set` stages the
+// `cover/pcb-<w>x<h>.png` (cover/README.md), and `strillix cover set` stages the
 // PNG. Regenerating after a palette change is one shot.
 //
 // What it draws, generated (not drawn) from a fixed seed:

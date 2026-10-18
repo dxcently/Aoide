@@ -9,8 +9,8 @@
 # lib/aoideos.nix does) over the host module below — plus the aoide package, greeter
 # wiring, the aoided user service, and the graph commands, without real hardware
 # or external network access. shellbridge is NOT exercised: its module gates on
-# the lyra enable fact (it exists to feed the painted shell), and this VM does
-# not select the lyra lane at all — see the trims below.
+# the strillix enable fact (it exists to feed the painted shell), and this VM does
+# not select the strillix lane at all — see the trims below.
 #
 # Wired in flake.nix as:
 #   checks.<system>.vm-boot = import ./tests/vm-boot.nix { inherit pkgs inputs lib; };
@@ -21,15 +21,15 @@
 #     theme-target set; the closure is expensive and adds no value for a boot
 #     test. Its dendrite is simply not selected, so the fact stays false.
 #
-#   quickshell and lyra NOT SELECTED
+#   quickshell and strillix NOT SELECTED
 #     Reason: Quickshell sources an upstream flake input with a significant
 #     NixOS Wayland closure; its autostart (`quickshell -c shell.qml`) cannot
 #     render on the virtual GPU.  The compositor lane IS selected because it
 #     wires programs.hyprland, and the greeter lane because the test asserts the
-#     ly unit.  Not selecting lyra also means shellbridge.service does not
-#     exist: shellbridge.nix gates on the lyra fact, so the test neither starts
-#     nor asserts it. With lyra unselected the VM also names NO song: a song
-#     with no lyra lane to paint it is refused by the platform
+#     ly unit.  Not selecting strillix also means shellbridge.service does not
+#     exist: shellbridge.nix gates on the strillix fact, so the test neither starts
+#     nor asserts it. With strillix unselected the VM also names NO song: a song
+#     with no strillix lane to paint it is refused by the platform
 #     (`modules/nucleus/assertions.nix`), and the palette the greeter reads is
 #     then nucleus's own default — still palette-shaped and non-stock, which is
 #     all the ly assertion below claims.
@@ -109,7 +109,7 @@ let
     };
     habit.dendrites.greeter = {
       enable = true;
-      provider = "vibeos";
+      provider = "strillix";
     };
 
     # The nucleus aggregation's core services, named one by one: the aggregation's
@@ -178,14 +178,14 @@ pkgs.testers.runNixOSTest {
             # Selecting the `compositor` and `greeter` lanes is what turns them
             # on; a line here would be a second answer to the same question.
             #
-            # Quickshell/lyra/stylix are not SELECTED (heavy closure, and
+            # Quickshell/strillix/stylix are not SELECTED (heavy closure, and
             # quickshell cannot render on the virtual GPU), so nothing has to
             # switch them off: their facts default false in nucleus and their
-            # lanes are never imported. With lyra off, shellbridge.service does
+            # lanes are never imported. With strillix off, shellbridge.service does
             # not exist at all, so the test neither starts nor asserts it.
             #
-            # No song: the song half of the stack is lyra's (deploy, stage seed,
-            # restart), and a song named with no lyra lane is refused by the
+            # No song: the song half of the stack is strillix's (deploy, stage seed,
+            # restart), and a song named with no strillix lane is refused by the
             # platform (`modules/nucleus/assertions.nix`). The livery the greeter
             # reads is then nucleus's own default palette — still palette-shaped
             # and non-stock, which is all the ly assertion below claims.
@@ -296,7 +296,7 @@ pkgs.testers.runNixOSTest {
 
     # ── 4. User service: aoided ──────────────────────────────────────────────
     # shellbridge.service does not exist in this VM at all: shellbridge.nix
-    # gates the whole module on the lyra enable fact (it exists to feed the
+    # gates the whole module on the strillix enable fact (it exists to feed the
     # painted shell), and this VM leaves that fact off — so only aoided is
     # started and asserted here, and the stage files shellbridge would seed are
     # not expected either.

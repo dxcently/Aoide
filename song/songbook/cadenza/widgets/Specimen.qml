@@ -2,7 +2,7 @@
 //
 // A HELPER (uppercase — never a slot): it exists for the preview canvas only.
 //
-//   AOIDE_FLAKE_ROOT=<worktree> lyra preview \
+//   AOIDE_FLAKE_ROOT=<worktree> strillix preview \
 //       <worktree>/song/songbook/cadenza/widgets/Specimen.qml --song cadenza
 //
 // It is also the live PROOF of the sharing mechanism (design/kit.md §1): the

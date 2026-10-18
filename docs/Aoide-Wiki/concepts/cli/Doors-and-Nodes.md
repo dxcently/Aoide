@@ -8,8 +8,8 @@ tags: [aoide, cli, mcp, a2a, node, daemon]
 # Doors & Federation Commands — MCP, A2A, Nodes, Daemon
 
 This group covers the doors onto the one command schema and the federation
-surface: the stdio [[Agent-Interface|MCP]] façade (`mcp serve` — `lyra mcp
-serve` is the same façade over lyra's own 48-path registry), the [[aoided]]
+surface: the stdio [[Agent-Interface|MCP]] façade (`mcp serve` — `strx mcp
+serve` is the same façade over strillix's own 48-path registry), the [[aoided]]
 policy skeleton (`daemon`, `events tail`, `adapter melete`), the desktop
 state bridge (`shellbridge`), the interactive session UI (`conductor`,
 detailed at [[Conductor-TUI]]), live presence (bare `session` — the roster,
@@ -121,10 +121,10 @@ aoide daemon [--audit-log <path>] [--json]
   prints the status JSON to stdout) is the same code path a systemd unit
   launches. See [[Governance]].
 
-### lyra shellbridge
+### strx shellbridge
 
 ```
-lyra shellbridge [--run] [--json]
+strx shellbridge [--run] [--json]
 ```
 
 - **Reads:** env `$XDG_RUNTIME_DIR` (socket parent; falls back to
@@ -141,7 +141,7 @@ lyra shellbridge [--run] [--json]
   appends audit records (door `daemon`) to the default audit log for every
   dispatched command. All six of these are the CONDUCTING stage files
   (`CONTRACTS.md §4`) — shellbridge writes them into `state/stage/` even
-  though the `shellbridge` command itself ships in `lyra`; rice staging
+  though the `shellbridge` command itself ships in `strillix`; rice staging
   (`mode.json`, `livery.json`, `grimoire.json`, `cover.json`) stays under
   `song/stage/`, untouched by this split.
 - **Output:** blocks forever serving the socket (systemd unit is
@@ -150,29 +150,29 @@ lyra shellbridge [--run] [--json]
   (`pkgs/aoide/crates/conduct/src/shellbridge.rs`): `focuswindow` /
   `focussession` (Hyprland jump via `crate::graph`), `power`
   (`lock|logout|suspend|hibernate|reboot|shutdown` → `hyprctl dispatch exec
-  "lyra lock"` (the compositor runs the locker, so it never inherits this
+  "strx lock"` (the compositor runs the locker, so it never inherits this
   unit's NoNewPrivileges), `hyprctl dispatch exit`, or `systemctl suspend|hibernate|reboot|poweroff`,
   detached with a reaper thread), `ricemode` (the RICE menu's switch, a closed
-  `stage <name>|declarative` whitelist: re-execs `lyra rice mode stage <name>` /
-  a bare `lyra rice mode declarative` with `--json`, waits, then fires a
+  `stage <name>|declarative` whitelist: re-execs `strx rice mode stage <name>` /
+  a bare `strx rice mode declarative` with `--json`, waits, then fires a
   detached `notify-send "Aoide" <message>` on success and failure; the audit
   line is `ricemode action <action>: <ok|failed>`, never a song), `ricedraft` (the draft picker's gesture, a
   closed `enter|new|save|drop` whitelist, fire-and-forget like `ricemode`:
-  re-execs `lyra rice mode draft <name>` / `lyra rice draft save` / `lyra rice
+  re-execs `strx rice mode draft <name>` / `strx rice draft save` / `strx rice
   draft drop <name>` with `--json` — from declarative, `enter` and `new` first
-  run a bare `lyra rice mode stage` and `save` and `drop` are refused (unlock
+  run a bare `strx rice mode stage` and `save` and `drop` are refused (unlock
   first) — and toasts the CLI's message,
   `partial: `-prefixed when an earlier step had already succeeded; `enter` is
   enter-or-create, because the CLI forks the stage into a name that is not
   there yet; the audit line is `ricedraft action <action>: <ok|partial|
-  failed>`, never a name), `ricemenu` (the menu's READ: re-execs `lyra rice
-  list --json`, then `lyra rice draft list <song> --json` when the mode names a
+  failed>`, never a name), `ricemenu` (the menu's READ: re-execs `strx rice
+  list --json`, then `strx rice draft list <song> --json` when the mode names a
   song, under one 4 s budget, and answers one line, the list's `{mode, song,
   draft, stagingSong, declared, songs}` plus `{draftsSong, drafts: [{name,
   savedAt, current}]}` and this machine's `host` and `hostConfig` (the file
   the declare rewrites), or `{ok:false, reason, message}`; it takes no fields, so
   it has no gate to fail), `ricedeclare` (the menu's Declare row, ANSWERED on
-  its connection: `name` is a song name, it re-execs `lyra rice declare
+  its connection: `name` is a song name, it re-execs `strx rice declare
   <name> --host --json` — which rewrites the host config's declared-song line
   and never rebuilds — and answers `{ok:true, message, name, host, changed,
   stagedDiffers}` or `{ok:false, reason, message}`; the audit line is
@@ -229,14 +229,14 @@ lyra shellbridge [--run] [--json]
   workspaceaction paragraph has the shapes).
 - **Notes:** not gated. The `--run` flag is registered in the schema but the
   handler (`conduct/src/commands/shellbridge.rs::handle_shellbridge`) never
-  consults it — bare `lyra shellbridge` runs the blocking loop either way. The
+  consults it — bare `strx shellbridge` runs the blocking loop either way. The
   accept loop reads `SO_PEERCRED` on every connection and refuses one whose
   peer uid differs from the process's own euid — a cross-uid floor,
   fail-closed like the secrets broker's admin gate (identity lane P-ID3);
   a same-uid caller passes, so the floor is no defense against the
   operator's own uid. Each accepted connection is served on its own thread,
   so one client idling between commands never blocks another's. Client half:
-  `shellbridge::send_line` is how `lyra herald push` and `session permit` reach
+  `shellbridge::send_line` is how `strx herald push` and `session permit` reach
   the daemon, which stays the single ledger writer. See [[shellbridge]].
 
 ### aoide adapter melete
@@ -639,7 +639,7 @@ outright at task #135 P3', hard cutover, no aliases.
   `watch` blocks until Ctrl-C, narrating each recognized line; `--json`
   emits one event object per line instead, and `--popup` (opt-in, off by
   default — `aoide.a2a.pairingPopup`) raises a dialog — the SAME shape in
-  BOTH directions, `lyra pair ask` when `lyra` resolves, `zenity
+  BOTH directions, `strx pair ask` when `strillix` resolves, `zenity
   --entry` otherwise (refused up front only when neither resolves;
   `--popup`+`--json` is a usage error). Either direction COLLECTS a typed
   code through the SAME gate the CLI's own `--code`/tty prompt use, and
@@ -647,7 +647,7 @@ outright at task #135 P3', hard cutover, no aliases.
   inbound against the requester's own code, outbound against the
   approver's second, different reply code. After an inbound commit
   succeeds, the approver's own reply code gets a separate display
-  dialog, `lyra pair show` (large, a Copy control, a Done control, no
+  dialog, `strx pair show` (large, a Copy control, a Done control, no
   reject — the commit it belongs to already happened). On a non-CLI door
   `watch` returns a "run it from a terminal" outcome, the `events tail`
   posture.

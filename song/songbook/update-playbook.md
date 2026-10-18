@@ -6,8 +6,8 @@ song — its livery, plus the slots the staging engine resolves for it.
 ## Song bodies (v0 to v1: `rice.nix` as a body)
 
 A song's `rice.nix` is an attrset, the body the constructor reads as data:
-`system` (the paint: the ten `vibeos` providers and the `module` of livery and
-arrangement) and `home` (the `lyra` renderer and `rice.hyprland.conf`). This is
+`system` (the paint: the ten `strillix` providers and the `module` of livery and
+arrangement) and `home` (the `strillix` renderer and `rice.hyprland.conf`). This is
 the migration of a v0 song (`CONTRACTS.md` §5, "Enforcement"), and the step list
 for a new song is the same:
 
@@ -16,8 +16,8 @@ for a new song is the same:
 2. Put the palette, polarity, window and geometry in `system.module`, under
    `aoide.livery`, all inside one `config = lib.mkDefault { … };`. Nothing else
    in the `module` but `aoide.livery` and `aoide.arrangement`.
-3. Keep the ten providers in `system.providers` as `"vibeos"` (or a provider a
-   consumer adds). Keep `home.members = [ "lyra" ]`.
+3. Keep the ten providers in `system.providers` as `"strillix"` (or a provider a
+   consumer adds). Keep `home.members = [ "strillix" ]`.
 4. Write `hyprland.conf` beside it: the binds, unbinds, layout and animations.
    An empty file (a header only) is valid. The gaps, rounding, borders, blur
    and colours are the livery's: `checks.song-shape` refuses them in this file.
@@ -38,13 +38,13 @@ A song's `rice.nix` is handed two things by ARGUMENT and never by a path
 A shelf's `_widgets/default.nix` is `{ lib, song, borrow, ... }:`, and takes
 only the arguments it uses. A `../` path literal in any `.nix` under a song
 folder breaks every machine whose songbook is not this checkout — which is what
-`pkgs/lyra-songbook`, `aoideSeedSongbook` and the offline generator assume — and
+`pkgs/strillix-rices`, `aoideSeedSongbook` and the offline generator assume — and
 `checks.song-shape` scans for it.
 
 ## Per-song flavor widgets (`widgets/<slot>.qml`)
 
 **Which slots are live is not listed here.**
-`pkgs/lyra-shell/qml/slots.md` is the catalog and the only place
+`pkgs/strillix-shell/qml/slots.md` is the catalog and the only place
 that tracks it — which names have a host anchor wired, which anchor kind
 each uses, and what extras each one is passed. A slot list copied into this
 file goes stale the moment an anchor is added or retired, which is exactly
@@ -83,7 +83,7 @@ songbook whose sonata has no `ricemode`. It reads the committed songbook, so a
 song that exists only in the runtime songbook is checked when `rice declare`
 brings it into the checkout.
 
-**Build carry-over:** on the next `nixos-rebuild`, the lyra lane's
+**Build carry-over:** on the next `nixos-rebuild`, the strillix lane's
 derivation copies the new file to `$out/qml/songs/<name>/<slot>.qml` and adds
 `<name>` → `[…, "<slot>"]` to the generated `songs/manifest.json` — every
 committed song's slot files are carried at once, not just the active one.

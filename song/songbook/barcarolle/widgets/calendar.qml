@@ -1,6 +1,6 @@
 // calendar.qml — this song's "calendar" surface: the calendar body on a layer
 // surface of its own, summoned by the bar's clock through the bridge
-// (`lyra component calendar toggle <screen>`).
+// (`strillix component calendar toggle <screen>`).
 //
 // The clock measures its cell into shared.calendarAnchor (screen coordinates)
 // before it asks, and this window pins under it. The body is CalendarBody.qml.

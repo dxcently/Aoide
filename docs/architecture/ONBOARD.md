@@ -1,4 +1,4 @@
-# ONBOARD — first boot as an install script, core/lyra split intact
+# ONBOARD — first boot as an install script, core/strillix split intact
 
 The design authority for the onboarding lane (implements the `onboard`
 stub; absorbs two open flags: the installed binary cannot link the
@@ -12,7 +12,7 @@ brief conflict, this document wins.
 
 `aoide onboard` is a stub that promises "register the clone, seed
 songbook, print the guide" — and a fresh box needs more than that: the
-harness hooks wired, and, on a NixOS box that runs lyra, the module
+harness hooks wired, and, on a NixOS box that runs strillix, the module
 options discovered and configured. Today that knowledge lives across
 `hooks install`, the wiki, and the modules' option declarations; a new
 user assembles it by hand. Separately, every interactive prompt in the
@@ -30,14 +30,14 @@ and fallback behavior.
    read top to bottom: every configurable option with its default and a
    one-line comment. Reading the file IS the teaching. More install
    concerns join later; the file is where new knobs appear.
-3. **"lyra enabled" = `protocol::bin::rice_bin()` resolves** (env →
+3. **"strillix enabled" = `protocol::bin::rice_bin()` resolves** (env →
    sibling → PATH), then a wiring-state check. Three outcomes: skip
-   (no lyra — one line, nothing nix-shaped is ever spoken), configure,
+   (no strillix — one line, nothing nix-shaped is ever spoken), configure,
    already-configured.
 4. **Core delegates the nix half.** `aoide onboard` runs the shell-only
    half itself and, when `rice_bin()` resolves, delegates to
-   `lyra onboard` — a registered lyra command (golden 42→43), never a
-   hidden subcommand. Nix knowledge stays lyra-side; core remains
+   `strx onboard` — a registered strillix command (golden 42→43), never a
+   hidden subcommand. Nix knowledge stays strillix-side; core remains
    cargo-buildable on any Linux (the hard constraint).
 5. **The vars file is a generated nix module, `aoide.nix`.** Every
    `aoide.*` option the modules declare, DERIVED from the declarations
@@ -78,12 +78,12 @@ aoide onboard                        (Door::Cli only, from a checkout)
   |         PATH presence; --harness <name> (repeatable) + --yes for
   |         non-interactive runs
   |
-  |- 2. lyra probe: rice_bin() resolves?
+  |- 2. strillix probe: rice_bin() resolves?
   |     |- no  -> one line, skip the nix half entirely
   |     `- yes -> wiring-state check -> skip / configure / already-configured
-  |              `- delegate: exec `lyra onboard` (registered, 42->43)
+  |              `- delegate: exec `strx onboard` (registered, 42->43)
   |
-  |- 3. lyra half: generate aoide.nix (decision 5), emit to --out
+  |- 3. strillix half: generate aoide.nix (decision 5), emit to --out
   |     (default ./aoide.nix), print the imports line; re-run warns
   |     and backs up to aoide.nix.bak
   |
@@ -118,7 +118,7 @@ a CLI-door concern only.
 The derivation mechanism keeps nix knowledge in nix: the flake grows
 an options output (nixosOptionsDoc-style JSON over an `evalModules` of
 `modules/{nucleus,dendrites,aggregations}`, filtered to the `aoide.*` namespace), and
-`lyra onboard` shells to `nix` to realize it, then formats the JSON
+`strx onboard` shells to `nix` to realize it, then formats the JSON
 into the commented `aoide.nix`. A new option appears in the file
 because it exists in a module — no hand-list to drift. If
 `evalModules` fights option declarations that reach into `pkgs`/
@@ -141,8 +141,8 @@ in the same commit as the change they witness.
   guide; `--harness`/`--yes`/`--out` flags; from-a-checkout refusal;
   the `hooks.install` summary update (schema-visible, deliberate).
   Golden 80 holds, stub count 8→7. Gate: non-interactive run green in
-  a scratch HOME; lyra-less box output contains no nix spelling.
-- **P-I3 (M) `lyra onboard` + generator.** The registered command
+  a scratch HOME; strillix-less box output contains no nix spelling.
+- **P-I3 (M) `strx onboard` + generator.** The registered command
   (golden 42→43), the flake options output, the aoide.nix formatter,
   re-run warn+backup. Gate: generated file evaluates (`nix eval` a
   host importing it), every `aoide.*` option present, re-run produces

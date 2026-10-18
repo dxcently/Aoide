@@ -41,7 +41,7 @@ correspondence").
   placeholders), `onboard` (`aoide onboard`, P-I2 — the first-boot flow:
   registers the clone, seeds the songbook, wires harness hooks by calling
   the already-registered `hooks.install` handler directly off the registry,
-  probes for `lyra` and delegates the nix half to `lyra onboard` as a child
+  probes for `strillix` and delegates the nix half to `strx onboard` as a child
   process when it resolves, prints the closing guide, then prints this
   machine's **node line** — `aoide_storage::charter::node_line`, the one
   public key plus binding an operator pastes into a charter, and the last
@@ -120,5 +120,5 @@ addressed, signed, append-only mailbase), the secrets broker, this
 instance's own `identity` (P-P1 of the
 pairing workstream, `docs/architecture/PAIRING.md`)).
 Never depends on
-`aoide-song`/`aoide-screen` — painting is `lyra`'s bundle, assembled the
+`aoide-song`/`aoide-screen` — painting is `strillix`'s bundle, assembled the
 same way against the same domain crates' `commands` modules.

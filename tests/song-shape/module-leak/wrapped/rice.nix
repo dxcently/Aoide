@@ -2,7 +2,7 @@
 # reference inside a list is never forced, so the stub package set is enough.
 {
   system = {
-    providers.greeter = "vibeos";
+    providers.greeter = "strillix";
     module = { lib, pkgs, ... }: {
       config = lib.mkDefault {
         aoide.livery.polarity = "dark";

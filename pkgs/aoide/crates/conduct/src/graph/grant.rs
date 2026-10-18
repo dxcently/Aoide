@@ -741,7 +741,7 @@ mod tests {
             node("yomi"),
             vec![
                 node_session("p1", "working", "/home/x/Aoide/pkgs/aoide", "claude"),
-                node_session("p2", "working", "/home/x/Aoide/pkgs/lyra", "codex"),
+                node_session("p2", "working", "/home/x/Aoide/pkgs/strillix", "codex"),
             ],
         )];
         let manifest = Manifest { version: 0, sessions: vec![spec("yomi", "pkgs/aoide", "claude")] };
@@ -752,7 +752,7 @@ mod tests {
 
         // s1 (index 0) and p1 (index 2, the first node row -- "pkgs/aoide"
         // matches the manifest spec) are undying; s2 (1) and p2 (3,
-        // "pkgs/lyra", no matching spec) are not.
+        // "pkgs/strillix", no matching spec) are not.
         assert_eq!(default, vec![0, 2]);
         assert!(matches!(&rows[0].target, RowTarget::Local { session_id } if session_id == "s1"));
         assert!(matches!(&rows[2].target, RowTarget::Node { cwd, .. } if cwd.ends_with("pkgs/aoide")));

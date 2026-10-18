@@ -12,7 +12,7 @@
 //!
 //! `shellbridge` moved out at P-A2 of the binary-split workstream
 //! (docs/architecture/PACKAGE-LAYOUT.md): it belongs with the graphical
-//! binary (`lyra`), not core, so its registration now lives in
+//! binary (`strillix`), not core, so its registration now lives in
 //! `aoide_conduct::commands::shellbridge` — `commands::all()` calls it
 //! directly after [`register_infra`] so the assembled order is unchanged.
 //!

@@ -9,7 +9,7 @@
 //! between the implemented groups — `commands/mod.rs::all()` calls each at
 //! the point that reproduces that order exactly. `rice declare`/`rice
 //! transpose` used to be a fifth `register_*` here; that stub pair moved to
-//! `crates/lyra/src/commands/stubs.rs` at P-A5 along with the rest of the
+//! `crates/strillix/src/commands/stubs.rs` at P-A5 along with the rest of the
 //! rice family — core no longer registers any `rice.*` path.
 
 use crate::dispatch::Invocation;

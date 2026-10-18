@@ -9,7 +9,7 @@
 //! (the same `cfg!(test)` gate `live::apply_live` carries, for the same reason:
 //! a test that reached a real provider would repaint the operator's desktop).
 //!
-//! The host's choice is the fact `aoide.wallpaper.provider`, which the `lyra`
+//! The host's choice is the fact `aoide.wallpaper.provider`, which the `strillix`
 //! lane publishes as `song/stage/wallpaper-provider` — one name, in the runtime
 //! root, so the CLI, the QML and this module read the same word. Absent (a host
 //! that never activated the lane) means the shell's own layer.
@@ -17,7 +17,7 @@
 //! TWO DOORS, one wait between them. `sync()` makes ONE attempt and is what
 //! every interactive writer calls — a `cover set` must not stall for five
 //! seconds because a daemon is down. `sync_waiting()` holds the reachable wait
-//! and is what `lyra cover sync` calls, because that is the door a unit's
+//! and is what `strillix cover sync` calls, because that is the door a unit's
 //! `ExecStartPost` runs while the daemon is still binding its socket: there, a
 //! refusal is a race worth waiting out on every output.
 
@@ -33,7 +33,7 @@ pub const PROVIDER_SKWD_WALL: &str = "skwd-wall";
 /// otherwise.
 pub const PROVIDER_QUICKSHELL: &str = "quickshell";
 
-/// The file the `lyra` lane publishes the active provider's name in, inside the
+/// The file the `strillix` lane publishes the active provider's name in, inside the
 /// stage dir.
 pub const PROVIDER_FILE: &str = "wallpaper-provider";
 

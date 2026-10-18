@@ -29,7 +29,7 @@
 //! safety tick re-derives the actionable set from scratch on the same
 //! cadence `aoide_secrets::watch::Queue::reconcile` already holds.
 //!
-//! `--popup` is REFUSED up front when NEITHER `lyra` nor `zenity` resolves,
+//! `--popup` is REFUSED up front when NEITHER `strillix` nor `zenity` resolves,
 //! the same "refuse before ever entering popup mode" gate `aoide_secrets::
 //! watch::run` already holds for its own two dialog binaries. `--popup`+
 //! `--json` together is refused one layer up, by `handle_node_pair_watch`
@@ -42,21 +42,21 @@
 //! **The popup arm (F6, upgraded first by P-PV3/task #132, then made
 //! genuinely mutual by R1): ONE dialog SHAPE, both directions — never a
 //! bare yes/no, and never a surface that shows the value it is about to
-//! validate.** [`resolve_lyra_bin`] feature-detects `lyra` the SAME
-//! three-tier way `aoide_secrets::watch::resolve_lyra_bin` does (env
+//! validate.** [`resolve_strillix_bin`] feature-detects `strillix` the SAME
+//! three-tier way `aoide_secrets::watch::resolve_strillix_bin` does (env
 //! override, `current_exe()` sibling, bare-name-on-`PATH` — duplicated
 //! here rather than imported, since neither crate may depend on the other
-//! or on `aoide-cli`); when it resolves, the dialog spawns a `lyra pair`
+//! or on `aoide-cli`); when it resolves, the dialog spawns a `strillix pair`
 //! subcommand instead of a `zenity` invocation, falling back to zenity on
-//! a `lyra` `SpawnError`/`DialogFailure` for that one attempt
+//! a `strillix` `SpawnError`/`DialogFailure` for that one attempt
 //! (`aoide_secrets::watch::run_ask_dialog`'s own fallback shape, reused
 //! unchanged: the plugin philosophy's whole point, root `AGENTS.md` house
 //! rule 7, is that the fancy surface degrades to the plain one, never that
 //! a fancy-surface failure strands the request).
 //!
 //! **Both directions run [`run_ask_dialog`] — a TYPED-CODE entry surface,
-//! never a display.** [`run_ask_dialog`] spawns `lyra pair ask` (the SAME
-//! six-boxes-plus-dash surface `lyra secrets ask` renders) or
+//! never a display.** [`run_ask_dialog`] spawns `strillix pair ask` (the SAME
+//! six-boxes-plus-dash surface `strillix secrets ask` renders) or
 //! `zenity --entry`, differing only in [`dialog_context`]'s own wording:
 //! INBOUND (approver) reads "pairing request from `<name>` ... id <id>"
 //! and types the code shown on the REQUESTER's screen; OUTBOUND
@@ -89,7 +89,7 @@
 //! genuinely DIFFERENT surface (the approver's own screen, relayed
 //! out-of-band), precisely the condition the argument itself named as the
 //! one where typed entry has real meaning. `run_confirm_dialog`,
-//! `spawn_zenity_confirm`, `spawn_lyra_confirm`, and `dialog_code` (whose
+//! `spawn_zenity_confirm`, `spawn_strillix_confirm`, and `dialog_code` (whose
 //! only job was showing the plain code on the outbound confirm) are GONE
 //! — don't reintroduce a bare-confirm outbound surface without
 //! re-deriving why this reversal doesn't apply to whatever prompted it.
@@ -103,7 +103,7 @@
 //! rule holds unconditionally now, not only on the inbound leg; (3) argv
 //! carries identifiers and display text only, never a value used to
 //! VALIDATE anything on the dialog's own side — [`spawn_zenity_entry`]/
-//! [`spawn_lyra_entry`] never receive an expected code to compare against
+//! [`spawn_strillix_entry`] never receive an expected code to compare against
 //! on EITHER leg; both render whatever the operator typed back to the
 //! caller for THIS process to compare; (4) nothing is ever executed on
 //! this instance's behalf by a dialog's own output — no `sh -c`, no shell
@@ -111,22 +111,22 @@
 //! display text, protected from Pango corruption by `--no-markup` on the
 //! zenity path (`aoide_secrets::watch::spawn_zenity_entry`'s own doc has
 //! the live-verified reasoning) and from breaking a QML string literal by
-//! `dialog_qml::qml_escape` on the lyra path
-//! (`crates/lyra/src/commands/dialog_qml.rs`'s own doc).
+//! `dialog_qml::qml_escape` on the strillix path
+//! (`crates/strillix/src/commands/dialog_qml.rs`'s own doc).
 //!
 //! **After a popup-driven INBOUND commit succeeds, the approver's own reply
 //! code gets a stay-open display dialog of its own (R2, the mutual-code
 //! redesign's popup phase).** [`popup_tick`]'s `Approve` arm reads
 //! `replySas` straight off [`commit_approval`]'s outcome data
 //! (`approve_inbound`'s own Ok text already carries it, `crate::commands`'
-//! own doc) and hands it to [`run_show_dialog`] — `lyra pair show` when
-//! [`resolve_lyra_bin`] finds one, `zenity --info --no-markup` otherwise —
+//! own doc) and hands it to [`run_show_dialog`] — `strillix pair show` when
+//! [`resolve_strillix_bin`] finds one, `zenity --info --no-markup` otherwise —
 //! shown large with a Copy control and a Done control, no reject control at
 //! all: the approver's own commit already happened, so there is nothing
 //! left here to approve or reject, only to relay out-of-band and dismiss.
 //! The SAME commit also fires [`notify_reply_code`] — a `notify-send`
 //! toast carrying the same reply code, spawned FIRST and independently of
-//! the dialog, so a popup-infra failure (`lyra`/`zenity` both missing)
+//! the dialog, so a popup-infra failure (`strillix`/`zenity` both missing)
 //! still leaves the code somewhere durable beside the terminal's own
 //! `println!`. Never spawned for an outbound commit — that leg's own
 //! ceremony is already complete the moment its reply code validates, with
@@ -229,7 +229,7 @@ const OUTBOUND_POLL_INTERVAL: Duration = Duration::from_secs(60);
 pub(crate) const ZENITY_CMD: &str = "zenity";
 
 /// The `--extra-button`/dismiss-control label EVERY dialog this module
-/// spawns carries — [`spawn_zenity_entry`] and `lyra pair ask` alike, on
+/// spawns carries — [`spawn_zenity_entry`] and `strillix pair ask` alike, on
 /// BOTH directions now (the mutual-code redesign, R1) — and
 /// [`run_entry_dialog`] compares stdout against (F6) — deliberately its
 /// OWN string, never
@@ -429,17 +429,17 @@ pub fn actionable(p: &Pending) -> bool {
 
 // ── the popup arm (F6, upgraded P-PV3) ───────────────────────────────────
 
-/// Feature-detect a real `lyra` executable the SAME three-tier way
-/// `aoide_secrets::watch::resolve_lyra_bin` does — `aoide_protocol::
+/// Feature-detect a real `strillix` executable the SAME three-tier way
+/// `aoide_secrets::watch::resolve_strillix_bin` does — `aoide_protocol::
 /// bin::rice_bin`'s env/sibling tiers are already trusted (both return a
 /// path containing `/`, or the env override verbatim); only its bare-name
-/// fallback (`"lyra"`, left for `Command::spawn` to resolve at exec time)
+/// fallback (`"strillix"`, left for `Command::spawn` to resolve at exec time)
 /// needs a `PATH` probe of our own before this crate treats it as
 /// "resolved." Repeated here rather than imported: this crate cannot
 /// depend on `aoide-secrets`, and the three-line wrapper carries no
 /// "no cross-crate copying" weight the way a moved TYPE or FUNCTION would
 /// (`ZENITY_CMD`'s own doc states the identical rationale for its literal).
-fn resolve_lyra_bin() -> Option<String> {
+fn resolve_strillix_bin() -> Option<String> {
     let bin = aoide_protocol::bin::rice_bin();
     let resolved = bin.contains('/') || aoide_protocol::bin::on_path(&bin);
     resolved.then_some(bin)
@@ -461,16 +461,16 @@ fn spawn_zenity_entry(zenity_cmd: &str, title: &str, text: &str) -> std::io::Res
         .spawn()
 }
 
-/// `lyra pair ask`'s own argv (INBOUND only) — `--id`/`--name`/`--context`,
+/// `strillix pair ask`'s own argv (INBOUND only) — `--id`/`--name`/`--context`,
 /// never a code (that command carries no `--code` flag at all — the
 /// approver's whole gate is typing a value that arrives from elsewhere).
-/// `lyra_cmd` is a path/name parameter, matching [`spawn_zenity_entry`]'s
+/// `strillix_cmd` is a path/name parameter, matching [`spawn_zenity_entry`]'s
 /// own shape.
-fn spawn_lyra_entry(lyra_cmd: &str, id: &str, name: &str, context: &str) -> std::io::Result<Child> {
-    let mut cmd = Command::new(lyra_cmd);
+fn spawn_strillix_entry(strillix_cmd: &str, id: &str, name: &str, context: &str) -> std::io::Result<Child> {
+    let mut cmd = Command::new(strillix_cmd);
     cmd.args(["pair", "ask", "--id", id, "--name", name, "--context", context]);
     // `stderr(Stdio::inherit())` — same live-incident fix
-    // `aoide_secrets::watch::spawn_lyra_entry`'s own doc gives: `lyra pair
+    // `aoide_secrets::watch::spawn_strillix_entry`'s own doc gives: `strillix pair
     // ask`'s own failure `eprintln!`s land directly in this process's
     // stderr, which the deployed unit routes to the journal.
     cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::inherit()).spawn()
@@ -480,27 +480,27 @@ fn run_zenity_entry(zenity_cmd: &str, title: &str, text: &str, should_cancel: im
     run_entry_dialog(|| spawn_zenity_entry(zenity_cmd, title, text), REJECT_LABEL, should_cancel)
 }
 
-fn run_lyra_entry(lyra_cmd: &str, id: &str, name: &str, context: &str, should_cancel: impl FnMut() -> bool) -> DialogResult {
-    run_entry_dialog(|| spawn_lyra_entry(lyra_cmd, id, name, context), REJECT_LABEL, should_cancel)
+fn run_strillix_entry(strillix_cmd: &str, id: &str, name: &str, context: &str, should_cancel: impl FnMut() -> bool) -> DialogResult {
+    run_entry_dialog(|| spawn_strillix_entry(strillix_cmd, id, name, context), REJECT_LABEL, should_cancel)
 }
 
-/// The dialog CHOICE for EITHER direction now — `lyra pair ask` when
-/// [`resolve_lyra_bin`] found one, falling back to `zenity --entry` for the
-/// SAME attempt on a `lyra` `SpawnError`/`DialogFailure`
+/// The dialog CHOICE for EITHER direction now — `strillix pair ask` when
+/// [`resolve_strillix_bin`] found one, falling back to `zenity --entry` for the
+/// SAME attempt on a `strillix` `SpawnError`/`DialogFailure`
 /// (`aoide_secrets::watch::run_ask_dialog`'s own fallback shape, reused
 /// unchanged — module doc's popup-arm section). `context` doubles as
 /// zenity's own `--text` — neither direction has a second, code-carrying
 /// line to append: this is an ENTRY dialog, never a display (structural
 /// rule 2, module doc) — the OUTBOUND leg's own reply code, once it
 /// exists, gets its own separate display dialog, [`run_show_dialog`].
-fn run_ask_dialog(lyra_cmd: Option<&str>, zenity_cmd: &str, id: &str, name: &str, title: &str, context: &str, mut should_cancel: impl FnMut() -> bool) -> DialogResult {
-    let Some(lyra) = lyra_cmd else {
+fn run_ask_dialog(strillix_cmd: Option<&str>, zenity_cmd: &str, id: &str, name: &str, title: &str, context: &str, mut should_cancel: impl FnMut() -> bool) -> DialogResult {
+    let Some(strillix) = strillix_cmd else {
         return run_zenity_entry(zenity_cmd, title, context, should_cancel);
     };
-    let result = run_lyra_entry(lyra, id, name, context, &mut should_cancel);
+    let result = run_strillix_entry(strillix, id, name, context, &mut should_cancel);
     match &result {
         DialogResult::SpawnError(e) | DialogResult::DialogFailure(e) => {
-            eprintln!("aoide pair watch --popup: lyra pair ask failed for request {id}: {e} \u{2014} falling back to zenity for this request");
+            eprintln!("aoide pair watch --popup: strillix pair ask failed for request {id}: {e} \u{2014} falling back to zenity for this request");
             if zenity_available(zenity_cmd) {
                 run_zenity_entry(zenity_cmd, title, context, should_cancel)
             } else {
@@ -552,7 +552,7 @@ fn show_context(p: &Pending) -> String {
 /// has none to give it — module doc's popup-arm section states this
 /// fallback gap plainly rather than papering over it with a fake control),
 /// the code appended to `--text` since zenity has no separate "large code"
-/// element the way the lyra dialog's own QML does.
+/// element the way the strillix dialog's own QML does.
 fn spawn_zenity_show(zenity_cmd: &str, title: &str, context: &str, code: &str) -> std::io::Result<Child> {
     Command::new(zenity_cmd)
         .args(["--info", "--no-markup", "--title", title, "--text", &format!("{context}\n\n{code}")])
@@ -562,15 +562,15 @@ fn spawn_zenity_show(zenity_cmd: &str, title: &str, context: &str, code: &str) -
         .spawn()
 }
 
-/// `lyra pair show`'s own argv — `--id`/`--name`/`--context`/`--code`, the
+/// `strillix pair show`'s own argv — `--id`/`--name`/`--context`/`--code`, the
 /// last carrying THIS instance's own locally-derived reply SAS
 /// (`commit_approval`'s Ok outcome data, `replySas`) for the dialog to
-/// render large and plain with a Copy control (`crates/lyra/src/commands/
+/// render large and plain with a Copy control (`crates/strillix/src/commands/
 /// pair.rs`'s own module doc has the full rundown).
-fn spawn_lyra_show(lyra_cmd: &str, id: &str, name: &str, context: &str, code: &str) -> std::io::Result<Child> {
-    let mut cmd = Command::new(lyra_cmd);
+fn spawn_strillix_show(strillix_cmd: &str, id: &str, name: &str, context: &str, code: &str) -> std::io::Result<Child> {
+    let mut cmd = Command::new(strillix_cmd);
     cmd.args(["pair", "show", "--id", id, "--name", name, "--context", context, "--code", code]);
-    // Same live-incident fix `spawn_lyra_entry`'s own doc gives: `lyra pair
+    // Same live-incident fix `spawn_strillix_entry`'s own doc gives: `strillix pair
     // show`'s own failure `eprintln!`s land directly in this process's
     // stderr, which the deployed unit routes to the journal.
     cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::inherit()).spawn()
@@ -586,20 +586,20 @@ fn run_zenity_show(zenity_cmd: &str, title: &str, context: &str, code: &str, sho
     run_entry_dialog(|| spawn_zenity_show(zenity_cmd, title, context, code), REJECT_LABEL, should_cancel)
 }
 
-fn run_lyra_show(lyra_cmd: &str, id: &str, name: &str, context: &str, code: &str, should_cancel: impl FnMut() -> bool) -> DialogResult {
-    run_entry_dialog(|| spawn_lyra_show(lyra_cmd, id, name, context, code), REJECT_LABEL, should_cancel)
+fn run_strillix_show(strillix_cmd: &str, id: &str, name: &str, context: &str, code: &str, should_cancel: impl FnMut() -> bool) -> DialogResult {
+    run_entry_dialog(|| spawn_strillix_show(strillix_cmd, id, name, context, code), REJECT_LABEL, should_cancel)
 }
 
-/// The display-dialog CHOICE — `lyra pair show` when [`resolve_lyra_bin`]
+/// The display-dialog CHOICE — `strillix pair show` when [`resolve_strillix_bin`]
 /// found one, falling back to `zenity --info --no-markup` for the SAME
-/// attempt on a `lyra` `SpawnError`/`DialogFailure`, the identical
+/// attempt on a `strillix` `SpawnError`/`DialogFailure`, the identical
 /// fallback shape [`run_ask_dialog`] already holds for the entry dialog.
 /// `should_cancel` is Ctrl-C ONLY (`popup_tick`'s own call site) — this
 /// dialog fires strictly after the commit it belongs to already succeeded,
 /// so there is no "resolved elsewhere" or marker race left to guard
 /// against, unlike the entry dialog's own three-reason `should_cancel`.
 fn run_show_dialog(
-    lyra_cmd: Option<&str>,
+    strillix_cmd: Option<&str>,
     zenity_cmd: &str,
     id: &str,
     name: &str,
@@ -608,13 +608,13 @@ fn run_show_dialog(
     code: &str,
     mut should_cancel: impl FnMut() -> bool,
 ) -> DialogResult {
-    let Some(lyra) = lyra_cmd else {
+    let Some(strillix) = strillix_cmd else {
         return run_zenity_show(zenity_cmd, title, context, code, should_cancel);
     };
-    let result = run_lyra_show(lyra, id, name, context, code, &mut should_cancel);
+    let result = run_strillix_show(strillix, id, name, context, code, &mut should_cancel);
     match &result {
         DialogResult::SpawnError(e) | DialogResult::DialogFailure(e) => {
-            eprintln!("aoide pair watch --popup: lyra pair show failed for request {id}: {e} \u{2014} falling back to zenity for this request");
+            eprintln!("aoide pair watch --popup: strillix pair show failed for request {id}: {e} \u{2014} falling back to zenity for this request");
             if zenity_available(zenity_cmd) {
                 run_zenity_show(zenity_cmd, title, context, code, should_cancel)
             } else {
@@ -636,10 +636,10 @@ fn run_show_dialog(
 /// the code already reached the operator via [`popup_tick`]'s own
 /// `println!` of [`commit_approval`]'s outcome message and
 /// [`notify_reply_code`]'s own toast moments earlier.
-fn show_reply_code(lyra_cmd: Option<&str>, p: &Pending, code: &str, json_mode: bool) {
+fn show_reply_code(strillix_cmd: Option<&str>, p: &Pending, code: &str, json_mode: bool) {
     let title = dialog_title(p);
     let context = show_context(p);
-    let result = run_show_dialog(lyra_cmd, ZENITY_CMD, &p.id, &p.name, &title, &context, code, || INTERRUPTED.load(Ordering::SeqCst));
+    let result = run_show_dialog(strillix_cmd, ZENITY_CMD, &p.id, &p.name, &title, &context, code, || INTERRUPTED.load(Ordering::SeqCst));
     if let DialogResult::SpawnError(e) | DialogResult::DialogFailure(e) = &result {
         if !json_mode {
             eprintln!("  aoide pair watch --popup: could not show the reply code dialog for {} \u{2014} it already printed above: {e}", p.id);
@@ -664,7 +664,7 @@ fn reply_notification_text(name: &str, code: &str) -> (String, String) {
 
 /// Toast the reply code through the stock freedesktop client, detached —
 /// fired BEFORE and independently of [`show_reply_code`]'s own popup (the
-/// User's ask): a popup-infra failure (`lyra`/`zenity` both missing, or a
+/// User's ask): a popup-infra failure (`strillix`/`zenity` both missing, or a
 /// headless session) must still land the code somewhere durable beside the
 /// terminal's own `println!`, and the toast is orthogonal machinery the
 /// popup path never depends on either way. Same idiom
@@ -718,7 +718,7 @@ enum PopupDecision {
     /// only: added to the caller's own `ignored` set, never touches
     /// storage.
     Ignore,
-    /// The dialog could not run at all (both `lyra` and its zenity
+    /// The dialog could not run at all (both `strillix` and its zenity
     /// fallback failed), or a genuine infra-failure exit landed. Back off
     /// the retry cadence; NEVER `Ignore` — a broken dialog binary must not
     /// silently stop offering a request just because it failed to show
@@ -1054,7 +1054,7 @@ impl Drop for PairActiveMarker {
 /// deliberately NOT here — this function must never make a network call on
 /// [`POLL_INTERVAL`]'s own 200ms cadence; [`run`]'s own loop calls it
 /// separately, on [`OUTBOUND_POLL_INTERVAL`].
-fn popup_tick(ignored: &mut HashSet<String>, spawn_backoff: &mut Duration, spawn_failing: &mut bool, json_mode: bool, lyra_cmd: Option<&str>) {
+fn popup_tick(ignored: &mut HashSet<String>, spawn_backoff: &mut Duration, spawn_failing: &mut bool, json_mode: bool, strillix_cmd: Option<&str>) {
     let now_epoch = aoide_storage::time::parse_iso_utc(&aoide_storage::time::now_iso_utc()).unwrap_or(0);
     let pending = reconcile(now_epoch);
     ignored.retain(|id| pending.iter().any(|p| &p.id == id));
@@ -1081,7 +1081,7 @@ fn popup_tick(ignored: &mut HashSet<String>, spawn_backoff: &mut Duration, spawn
     // practice, but the check runs regardless so this never silently
     // drifts if that ever changes.
     let cancel_id = id.clone();
-    let result = run_ask_dialog(lyra_cmd, ZENITY_CMD, &id, &p.name, &title, &context, move || {
+    let result = run_ask_dialog(strillix_cmd, ZENITY_CMD, &id, &p.name, &title, &context, move || {
         let still_actionable = {
             let now_epoch = aoide_storage::time::parse_iso_utc(&aoide_storage::time::now_iso_utc()).unwrap_or(0);
             reconcile(now_epoch).iter().any(|q| q.id == cancel_id && actionable(q))
@@ -1118,12 +1118,12 @@ fn popup_tick(ignored: &mut HashSet<String>, spawn_backoff: &mut Duration, spawn
                 // already complete the moment its reply code validates
                 // (module doc's "reply-code display dialog" section). The
                 // toast fires FIRST and independently of the dialog — a
-                // popup-infra failure (`lyra`/`zenity` both missing) must
+                // popup-infra failure (`strillix`/`zenity` both missing) must
                 // still land the code somewhere durable beside stdout.
                 if p.direction == "inbound" && outcome.status == aoide_protocol::output::Status::Ok {
                     if let Some(reply_sas) = outcome.data.as_ref().and_then(|d| d.get("replySas")).and_then(Value::as_str) {
                         notify_reply_code(&p.name, reply_sas, json_mode);
-                        show_reply_code(lyra_cmd, &p, reply_sas, json_mode);
+                        show_reply_code(strillix_cmd, &p, reply_sas, json_mode);
                     }
                 }
             } else if !json_mode {
@@ -1216,7 +1216,7 @@ fn wait_for_follower(events_path: &Path, poll_interval: Duration) -> Result<Foll
 /// machine-parseable-only contract `aoide_secrets::watch`'s own `--json`
 /// mode holds.
 ///
-/// **`popup_mode` (`--popup`) is refused up front when NEITHER `lyra` nor
+/// **`popup_mode` (`--popup`) is refused up front when NEITHER `strillix` nor
 /// `zenity` resolves** (module doc's popup-arm section, the SAME gate
 /// `aoide_secrets::watch::run` holds). Past that guard, EVERY poll tick
 /// runs [`popup_tick`] instead of the plain narrate-only reconcile below —
@@ -1224,10 +1224,10 @@ fn wait_for_follower(events_path: &Path, poll_interval: Duration) -> Result<Foll
 /// narration, so the two are mutually exclusive within one invocation,
 /// never layered.
 pub fn run(events_path: &Path, json_mode: bool, popup_mode: bool) -> i32 {
-    let lyra_cmd = resolve_lyra_bin();
-    if popup_mode && lyra_cmd.is_none() && !zenity_available(ZENITY_CMD) {
+    let strillix_cmd = resolve_strillix_bin();
+    if popup_mode && strillix_cmd.is_none() && !zenity_available(ZENITY_CMD) {
         eprintln!(
-            "aoide pair watch --popup: neither `lyra` nor `zenity` was found \u{2014} install \
+            "aoide pair watch --popup: neither `strillix` nor `zenity` was found \u{2014} install \
              one of them, or run `aoide pair watch` (without --popup) instead"
         );
         return 1;
@@ -1289,7 +1289,7 @@ pub fn run(events_path: &Path, json_mode: bool, popup_mode: bool) -> i32 {
                 let now_epoch = aoide_storage::time::parse_iso_utc(&aoide_storage::time::now_iso_utc()).unwrap_or(0);
                 poll_pending_outbound(now_epoch, &mut outbound_poll_backoff, json_mode);
             }
-            popup_tick(&mut ignored, &mut spawn_backoff, &mut spawn_failing, json_mode, lyra_cmd.as_deref());
+            popup_tick(&mut ignored, &mut spawn_backoff, &mut spawn_failing, json_mode, strillix_cmd.as_deref());
         } else if last_reconcile.elapsed() >= RECONCILE_INTERVAL {
             last_reconcile = Instant::now();
             let now_epoch = aoide_storage::time::parse_iso_utc(&aoide_storage::time::now_iso_utc()).unwrap_or(0);
@@ -2017,7 +2017,7 @@ mod tests {
     /// the precedent), shell builtins only (`echo`/`exit` — never an
     /// external `sleep`).
     // cfg(unix): the fixture is a `#!/bin/sh` script standing in for `zenity`/
-    // `lyra` by PATH-invocation — native Windows has no shebang, and a program
+    // `strillix` by PATH-invocation — native Windows has no shebang, and a program
     // it could run at that path would have to be a compiled binary these tests
     // cannot build at run time. The runner's contract (a child's stdout and exit
     // code decide the result, and a dialog that never exits is still killed and
@@ -2046,7 +2046,7 @@ mod tests {
         }
     }
 
-    // cfg(unix): `#!/bin/sh` fake `zenity`/`lyra` (see `write_shim`'s note).
+    // cfg(unix): `#!/bin/sh` fake `zenity`/`strillix` (see `write_shim`'s note).
     #[cfg(unix)]
     #[test]
     fn run_zenity_entry_exit_zero_is_approved_with_the_typed_code() {
@@ -2057,7 +2057,7 @@ mod tests {
         remove_shim(&shim);
     }
 
-    // cfg(unix): `#!/bin/sh` fake `zenity`/`lyra` (see `write_shim`'s note).
+    // cfg(unix): `#!/bin/sh` fake `zenity`/`strillix` (see `write_shim`'s note).
     #[cfg(unix)]
     #[test]
     fn run_zenity_entry_reject_label_on_stdout_is_dismissed() {
@@ -2068,7 +2068,7 @@ mod tests {
         remove_shim(&shim);
     }
 
-    // cfg(unix): `#!/bin/sh` fake `zenity`/`lyra` (see `write_shim`'s note).
+    // cfg(unix): `#!/bin/sh` fake `zenity`/`strillix` (see `write_shim`'s note).
     #[cfg(unix)]
     #[test]
     fn run_zenity_entry_bare_cancel_is_cancelled_not_dismissed() {
@@ -2097,36 +2097,36 @@ mod tests {
         }
     }
 
-    // ── run_ask_dialog: the lyra/zenity choice + fallback ─────────────────
+    // ── run_ask_dialog: the strillix/zenity choice + fallback ─────────────────
 
-    // cfg(unix): `#!/bin/sh` fake `zenity`/`lyra` (see `write_shim`'s note).
+    // cfg(unix): `#!/bin/sh` fake `zenity`/`strillix` (see `write_shim`'s note).
     #[cfg(unix)]
     #[test]
-    fn run_ask_dialog_prefers_lyra_when_a_bin_resolves() {
+    fn run_ask_dialog_prefers_strillix_when_a_bin_resolves() {
         let _guard = shim_lock();
-        let lyra_shim = write_shim("lyra-ok", "#!/bin/sh\necho 111-222\nexit 0\n");
+        let strillix_shim = write_shim("strillix-ok", "#!/bin/sh\necho 111-222\nexit 0\n");
         let zenity_shim = write_shim("zenity-unused", "#!/bin/sh\necho 999-999\nexit 0\n");
-        let result = run_ask_dialog(Some(lyra_shim.to_str().unwrap()), zenity_shim.to_str().unwrap(), "id1", "box-a", "t", "ctx", || false);
-        assert_eq!(result_code(&result), Some("111-222".to_string()), "lyra's own answer must win when it resolves");
-        remove_shim(&lyra_shim);
+        let result = run_ask_dialog(Some(strillix_shim.to_str().unwrap()), zenity_shim.to_str().unwrap(), "id1", "box-a", "t", "ctx", || false);
+        assert_eq!(result_code(&result), Some("111-222".to_string()), "strillix's own answer must win when it resolves");
+        remove_shim(&strillix_shim);
         remove_shim(&zenity_shim);
     }
 
-    // cfg(unix): `#!/bin/sh` fake `zenity`/`lyra` (see `write_shim`'s note).
+    // cfg(unix): `#!/bin/sh` fake `zenity`/`strillix` (see `write_shim`'s note).
     #[cfg(unix)]
     #[test]
-    fn run_ask_dialog_falls_back_to_zenity_on_a_lyra_spawn_error() {
+    fn run_ask_dialog_falls_back_to_zenity_on_a_strillix_spawn_error() {
         let _guard = shim_lock();
         let zenity_shim = write_shim("zenity-fallback", "#!/bin/sh\necho 333-444\nexit 0\n");
-        let result = run_ask_dialog(Some("/no/such/aoide-pair-lyra-shim-never-exists"), zenity_shim.to_str().unwrap(), "id1", "box-a", "t", "ctx", || false);
-        assert_eq!(result_code(&result), Some("333-444".to_string()), "a lyra spawn failure must fall back to zenity for the SAME attempt");
+        let result = run_ask_dialog(Some("/no/such/aoide-pair-strillix-shim-never-exists"), zenity_shim.to_str().unwrap(), "id1", "box-a", "t", "ctx", || false);
+        assert_eq!(result_code(&result), Some("333-444".to_string()), "a strillix spawn failure must fall back to zenity for the SAME attempt");
         remove_shim(&zenity_shim);
     }
 
-    // cfg(unix): `#!/bin/sh` fake `zenity`/`lyra` (see `write_shim`'s note).
+    // cfg(unix): `#!/bin/sh` fake `zenity`/`strillix` (see `write_shim`'s note).
     #[cfg(unix)]
     #[test]
-    fn run_ask_dialog_with_no_lyra_bin_goes_straight_to_zenity() {
+    fn run_ask_dialog_with_no_strillix_bin_goes_straight_to_zenity() {
         let _guard = shim_lock();
         let zenity_shim = write_shim("zenity-only", "#!/bin/sh\necho 555-666\nexit 0\n");
         let result = run_ask_dialog(None, zenity_shim.to_str().unwrap(), "id1", "box-a", "t", "ctx", || false);
@@ -2218,27 +2218,27 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    // cfg(unix): `#!/bin/sh` fake `zenity`/`lyra` (see `write_shim`'s note).
+    // cfg(unix): `#!/bin/sh` fake `zenity`/`strillix` (see `write_shim`'s note).
     #[cfg(unix)]
     #[test]
-    fn run_show_dialog_prefers_lyra_when_a_bin_resolves() {
+    fn run_show_dialog_prefers_strillix_when_a_bin_resolves() {
         let _guard = shim_lock();
-        let lyra_shim = write_shim("show-lyra-ok", "#!/bin/sh\nexit 0\n");
+        let strillix_shim = write_shim("show-strillix-ok", "#!/bin/sh\nexit 0\n");
         let zenity_shim = write_shim("show-zenity-unused", "#!/bin/sh\nexit 1\n");
-        let result = run_show_dialog(Some(lyra_shim.to_str().unwrap()), zenity_shim.to_str().unwrap(), "id1", "box-b", "t", "ctx", "111-222", || false);
-        assert!(matches!(result, DialogResult::Approved(_)), "lyra's own exit must win when it resolves: {result:?}");
-        remove_shim(&lyra_shim);
+        let result = run_show_dialog(Some(strillix_shim.to_str().unwrap()), zenity_shim.to_str().unwrap(), "id1", "box-b", "t", "ctx", "111-222", || false);
+        assert!(matches!(result, DialogResult::Approved(_)), "strillix's own exit must win when it resolves: {result:?}");
+        remove_shim(&strillix_shim);
         remove_shim(&zenity_shim);
     }
 
-    // cfg(unix): `#!/bin/sh` fake `zenity`/`lyra` (see `write_shim`'s note).
+    // cfg(unix): `#!/bin/sh` fake `zenity`/`strillix` (see `write_shim`'s note).
     #[cfg(unix)]
     #[test]
-    fn run_show_dialog_falls_back_to_zenity_on_a_lyra_spawn_error() {
+    fn run_show_dialog_falls_back_to_zenity_on_a_strillix_spawn_error() {
         let _guard = shim_lock();
         let zenity_shim = write_shim("show-zenity-fallback", "#!/bin/sh\nexit 0\n");
         let result = run_show_dialog(
-            Some("/no/such/aoide-pair-show-lyra-shim-never-exists"),
+            Some("/no/such/aoide-pair-show-strillix-shim-never-exists"),
             zenity_shim.to_str().unwrap(),
             "id1",
             "box-b",
@@ -2247,14 +2247,14 @@ mod tests {
             "111-222",
             || false,
         );
-        assert!(matches!(result, DialogResult::Approved(_)), "a lyra spawn failure must fall back to zenity for the SAME attempt: {result:?}");
+        assert!(matches!(result, DialogResult::Approved(_)), "a strillix spawn failure must fall back to zenity for the SAME attempt: {result:?}");
         remove_shim(&zenity_shim);
     }
 
-    // cfg(unix): `#!/bin/sh` fake `zenity`/`lyra` (see `write_shim`'s note).
+    // cfg(unix): `#!/bin/sh` fake `zenity`/`strillix` (see `write_shim`'s note).
     #[cfg(unix)]
     #[test]
-    fn run_show_dialog_with_no_lyra_bin_goes_straight_to_zenity() {
+    fn run_show_dialog_with_no_strillix_bin_goes_straight_to_zenity() {
         let _guard = shim_lock();
         let zenity_shim = write_shim("show-zenity-only", "#!/bin/sh\nexit 0\n");
         let result = run_show_dialog(None, zenity_shim.to_str().unwrap(), "id1", "box-b", "t", "ctx", "111-222", || false);
@@ -2262,7 +2262,7 @@ mod tests {
         remove_shim(&zenity_shim);
     }
 
-    // cfg(unix): `#!/bin/sh` fake `zenity`/`lyra` (see `write_shim`'s note).
+    // cfg(unix): `#!/bin/sh` fake `zenity`/`strillix` (see `write_shim`'s note).
     #[cfg(unix)]
     #[test]
     fn run_show_dialog_cancels_on_interrupt_with_no_deadline_involved() {
@@ -2274,10 +2274,10 @@ mod tests {
         // Busy-loop via the `:` builtin, never an external `sleep` (this
         // file's own `write_shim` doc: the nix build sandbox provides no
         // interpreter but `/bin/sh` and none of its own external commands).
-        let lyra_shim = write_shim("show-hangs", "#!/bin/sh\nwhile :; do :; done\n");
-        let result = run_show_dialog(Some(lyra_shim.to_str().unwrap()), ZENITY_CMD, "id1", "box-b", "t", "ctx", "111-222", || true);
+        let strillix_shim = write_shim("show-hangs", "#!/bin/sh\nwhile :; do :; done\n");
+        let result = run_show_dialog(Some(strillix_shim.to_str().unwrap()), ZENITY_CMD, "id1", "box-b", "t", "ctx", "111-222", || true);
         assert!(matches!(result, DialogResult::CancelledExternally), "expected CancelledExternally, got {result:?}");
-        remove_shim(&lyra_shim);
+        remove_shim(&strillix_shim);
     }
 
     // ── commit_approval: same nodes.json the CLI's `--yes` path writes ────

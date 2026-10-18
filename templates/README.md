@@ -147,4 +147,4 @@ Songs get their template when a host can SELECT one: a song template's whole
 point is the selection line that makes it reachable, and that line arrives with
 song selection. Until then the real examples are the committed songs in
 `song/songbook/<name>/rice.nix`, described in
-`../docs/architecture/NIX-COMPOSITION.md` § Lyra and songbook.
+`../docs/architecture/NIX-COMPOSITION.md` § Strillix and songbook.

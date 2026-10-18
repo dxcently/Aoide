@@ -62,7 +62,7 @@
     # Register Obsidian as the handler for obsidian:// URIs so aoided can
     # deep-link into a vault note from a structured notification-action.
     # xdg.mime.defaultApplications is the NixOS system-level MIME registry;
-    # for per-user overrides the lyra lane or home-manager can extend.
+    # for per-user overrides the strillix lane or home-manager can extend.
     xdg.mime.defaultApplications = {
       "x-scheme-handler/obsidian" = "obsidian.desktop";
     };

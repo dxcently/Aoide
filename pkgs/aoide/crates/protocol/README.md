@@ -106,7 +106,7 @@ other crate in this workspace sits above.
   then spawns `argv[1..]` verbatim, `Stdio::inherit()` throughout,
   returning the child's own exit code unchanged. The door boundary here is
   structural, not a guard: `run` is called from exactly the two CLI entry
-  points (`aoide-cli`'s `run_cli`, lyra's `run_lyra`), so this is reachable
+  points (`aoide-cli`'s `run_cli`, strillix's `run_strillix`), so this is reachable
   from `Door::Cli` only — no `Door` check is added, because `dispatch` (the
   one door-agnostic dispatch point MCP/A2A/the aoided socket call directly)
   has no PATH-probing logic of its own and must never gain any.
@@ -131,7 +131,7 @@ other crate in this workspace sits above.
   tightening) and identifies a file by its native 128-bit id — and there
   `create_mode` is ADVISORY on native Windows and the policy attached is
   always a protected owner-only DACL: there is no group reader there (no
-  lyra/desktop surface) and no gid to name, so the group-shared broker feed
+  strillix/desktop surface) and no gid to name, so the group-shared broker feed
   (`aoide-secrets`' `0o640`) is delivered STRICTER than it asks — that same
   user, nobody else — rather than refused.
   `path_identity` is crate-visible and returns one opaque, comparable
@@ -178,7 +178,7 @@ other crate in this workspace sits above.
   spawn-poll-parse loop behind it), the screen-lock probes a popup gate
   consults first (`locked_state`, `is_locked`, `probe_loginctl_locked`,
   `probe_locker_running`, `locker_process_name`) and the session they and
-  `lyra lock hint` name (`lock_session_id`: `$XDG_SESSION_ID`, else the
+  `strx lock hint` name (`lock_session_id`: `$XDG_SESSION_ID`, else the
   user's logind display session, since every popup watcher and the shell's
   lock host are user units outside any session), the spawn-retry backoff
   (`next_spawn_backoff` + its floor/ceiling) and its interruptible sleep
@@ -254,7 +254,7 @@ other crate in this workspace sits above.
   sibling-of-`current_exe` → bare `PATH` name), plus `on_path` (P-I2,
   ONBOARD.md decision 3): the proactive `PATH` probe the resolver's own
   bare-name tier deliberately leaves for `Command::spawn` to resolve at
-  exec time — the caller onboard's own lyra probe needs, checked BEFORE
+  exec time — the caller onboard's own strillix probe needs, checked BEFORE
   spawning rather than caught as an `ENOENT` after. `resolve_executable_on_
   path` (task #138) is the SPAWNABLE sibling of `on_path`: it additionally
   checks the executable bit and returns the resolved absolute path rather
@@ -264,7 +264,7 @@ other crate in this workspace sits above.
   every `<bin_name>-<name>` executable, sorted by name — the one PATH-scan
   `door::run`'s external-command probe and `registry::Schema`'s additive
   `external` key (CONTRACTS.md §3) both build on. On Windows the sibling is
-  `aoide.exe`/`lyra.exe` (`EXE_SUFFIX`, deliberately NOT `PATHEXT`, so an
+  `aoide.exe`/`strillix.exe` (`EXE_SUFFIX`, deliberately NOT `PATHEXT`, so an
   `aoide.cmd` beside the build never shadows it) and the executable-bit
   question becomes the shell's own: a candidate name is tried as given, else
   with each `PATHEXT` entry in that variable's order, restricted to the
@@ -308,5 +308,5 @@ transitively.
 
 It is the boundary that makes "one schema, N doors" structural: a door
 (CLI, MCP, A2A) is just a caller of `door::run` against a `Registry` this
-crate defines the shape of. Neither app crate (`cli`, `lyra`) nor any
+crate defines the shape of. Neither app crate (`cli`, `strillix`) nor any
 domain crate re-derives dispatch, audit, or wire framing independently.

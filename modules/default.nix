@@ -26,16 +26,16 @@
     aoided = ./dendrites/aoided.nix;
     audio = ./dendrites/audio.nix;
     # The component slots: a provider set written inline, one per component a
-    # desktop is made of. `vibeos` is the Quickshell component on aoide's
-    # bridges (`dendrites/lyra/README.md`); a consumer adds its own provider
+    # desktop is made of. `strillix` is the Quickshell component on aoide's
+    # bridges (`dendrites/strillix/README.md`); a consumer adds its own provider
     # beside it. `greeter` and `wallpaper` below are slots too.
     bar = {
-      providers.vibeos = ./dendrites/lyra/bar.nix;
+      providers.strillix = ./dendrites/strillix/bar.nix;
     };
     bash = ./dendrites/bash.nix;
     btop = ./dendrites/btop.nix;
     calendar = {
-      providers.vibeos = ./dendrites/lyra/calendar.nix;
+      providers.strillix = ./dendrites/strillix/calendar.nix;
     };
     claude-code = ./dendrites/claude-code.nix;
     cli = ./dendrites/cli.nix;
@@ -47,7 +47,7 @@
     compositor = ./dendrites/compositor;
     devtools = ./dendrites/devtools.nix;
     dock = {
-      providers.vibeos = ./dendrites/lyra/dock.nix;
+      providers.strillix = ./dendrites/strillix/dock.nix;
     };
     dunst = ./dendrites/dunst.nix;
     eidolon = ./dendrites/eidolon.nix;
@@ -56,21 +56,21 @@
     fonts = ./dendrites/fonts.nix;
     git = ./dendrites/git.nix;
     greeter = {
-      providers.vibeos = ./dendrites/greeter.nix;
+      providers.strillix = ./dendrites/greeter.nix;
     };
     hyprland = ./dendrites/compositor/hyprland/behaviour.nix;
     inference = ./dendrites/inference.nix;
     kimi-code = ./dendrites/kimi-code.nix;
     kitty = ./dendrites/kitty.nix;
     launcher = {
-      providers.vibeos = ./dendrites/lyra/launcher.nix;
+      providers.strillix = ./dendrites/strillix/launcher.nix;
     };
     lock = {
-      providers.vibeos = ./dendrites/lyra/lock.nix;
+      providers.strillix = ./dendrites/strillix/lock.nix;
     };
     # The rice renderer: writes the song's rice to the state link. The runtime
-    # comes only through the component providers above (`dendrites/lyra/README.md`).
-    lyra = ./dendrites/lyra;
+    # comes only through the component providers above (`dendrites/strillix/README.md`).
+    strillix = ./dendrites/strillix;
     mcfly = ./dendrites/mcfly.nix;
     melete = ./dendrites/melete.nix;
     melete-adapter = ./dendrites/melete-adapter.nix;
@@ -79,13 +79,13 @@
     networkmanager = ./dendrites/networkmanager.nix;
     nh = ./dendrites/nh.nix;
     notifications = {
-      providers.vibeos = ./dendrites/lyra/notifications.nix;
+      providers.strillix = ./dendrites/strillix/notifications.nix;
     };
     obsidian = ./dendrites/obsidian.nix;
     openai = ./dendrites/openai.nix;
     pi-coding-agent = ./dendrites/pi-coding-agent.nix;
     powermenu = {
-      providers.vibeos = ./dendrites/lyra/powermenu.nix;
+      providers.strillix = ./dendrites/strillix/powermenu.nix;
     };
     qbittorrent = ./dendrites/qbittorrent.nix;
     quickshell = ./dendrites/quickshell;
@@ -93,7 +93,7 @@
     starship = ./dendrites/starship.nix;
     stylix = ./dendrites/stylix.nix;
     switcher = {
-      providers.vibeos = ./dendrites/lyra/switcher.nix;
+      providers.strillix = ./dendrites/strillix/switcher.nix;
     };
     tailscale = ./dendrites/tailscale.nix;
     vision = ./dendrites/vision.nix;

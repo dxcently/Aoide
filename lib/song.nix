@@ -4,7 +4,7 @@
 # `song/songbook/<song>/_widgets/<slot>.nix`. A sibling `default.nix` roll-up
 # binds the owner and the slot name to each function; the song's `rice.nix`
 # composes the result. This file is the song-blind mechanism both halves call —
-# the nix analogue of `pkgs/lyra-shell/qml/WidgetSlot.qml`, which
+# the nix analogue of `pkgs/strillix-shell/qml/WidgetSlot.qml`, which
 # hosts a widget without knowing which song wrote it.
 #
 # Two exports:
@@ -16,7 +16,7 @@
 # WHY A PLAIN FUNCTION AND NOT A MODULE FRAGMENT. A fragment is only reachable
 # through the merged config, and only the performed song's body is imported
 # into it. The quickshell derivation walks EVERY song in the
-# songbook (see modules/dendrites/lyra/runtime.nix's songs loop and its note
+# songbook (see modules/dendrites/strillix/runtime.nix's songs loop and its note
 # on why the registry cannot come from `config`), so a fragment-based record
 # would be invisible for every song the host is not currently performing —
 # nine songs out of ten, silently. A plain function is importable by the
@@ -201,7 +201,7 @@ let
         # NOT named `instruments`. In this tree an instrument is what the VENUE
         # sounds — `docs/Aoide-Wiki/concepts/song/Song-Vocabulary.md:57` defines
         # a venue's instruments as "which dendrites are enabled", and
-        # :49 lists widgets themselves among the lyra lane's instruments.
+        # :49 lists widgets themselves among the strillix lane's instruments.
         # A song-side field by that name would also read as the song choosing
         # them, which `CONTRACTS.md:807` forbids outright. This field is the
         # narrower, song-owned thing: the packages providing the executables a

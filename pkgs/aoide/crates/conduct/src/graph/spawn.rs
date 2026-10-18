@@ -41,7 +41,7 @@
 //! ([`build_terminal_argv`]) is pure string manipulation, no shell involved;
 //! see that function's own doc for the placeholder-substitution rules. No
 //! nix anywhere in this path — a terminal emulator is a shell concern, never
-//! `lyra`'s.
+//! `strillix`'s.
 
 use super::conduct::{conduct_socket_path, default_label, program_is_a_shell, unix_ts, wrapped_harness};
 use aoide_protocol::agents::agent_profile;
@@ -1143,7 +1143,7 @@ pub(in crate::graph) fn launch_session(inv: &Invocation, spawner: Option<&str>) 
         // Instead of detaching a headless `conduct --headless` child, exec a
         // real terminal (from `$AOIDE_TERMINAL`) that runs the SAME
         // conducted command — a terminal emulator is a shell concern, no
-        // nix, no `lyra`.
+        // nix, no `strillix`.
         let argv = match resolve_windowed_argv(&exe, &conduct_args) {
             Ok(a) => a,
             Err(outcome) => return outcome,

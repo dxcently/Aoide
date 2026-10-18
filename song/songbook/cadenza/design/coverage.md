@@ -1,7 +1,7 @@
 # cadenza — coverage checklist
 
 Every surface a song can dress today, every bridged capability sonata
-answers on it, and cadenza's answer. Built from `pkgs/lyra-shell/qml/slots.md` (the wired anchors), `shell.qml`, and a read of sonata's
+answers on it, and cadenza's answer. Built from `pkgs/strillix-shell/qml/slots.md` (the wired anchors), `shell.qml`, and a read of sonata's
 widget bodies for what each one reaches. Status: `design` → `preview` →
 `live` → `committed`.
 
@@ -27,12 +27,12 @@ widget bodies for what each one reaches. Status: `design` → `preview` →
 
 | slot | why no cadenza body now |
 |---|---|
-| `wallpaper` | **answered** — cadenza's `widgets/wallpaper.qml` is the board drawn live (the lane anchors the slot inside the per-screen Background surface, `slots.md`): copper from `CoverPcb`, the light over it (intent §3.9). The still PNG (`cover/pcb-<w>x<h>.png`, staged with `lyra cover set`) stays as what draws when no widget is there. |
+| `wallpaper` | **answered** — cadenza's `widgets/wallpaper.qml` is the board drawn live (the lane anchors the slot inside the per-screen Background surface, `slots.md`): copper from `CoverPcb`, the light over it (intent §3.9). The still PNG (`cover/pcb-<w>x<h>.png`, staged with `strx cover set`) stays as what draws when no widget is there. |
 | `wallpaper-picker` | no `SurfaceSlot` wired; the shell's `AoideWallpaperPicker` (SUPER+W) draws. Revisit when anchored. |
 
 ## Shell-owned, not dressable by a song today
 
-Lockscreen, OSD, greeter, the `lyra secrets ask` / `lyra pair ask|show`
+Lockscreen, OSD, greeter, the `strx secrets ask` / `strx pair ask|show`
 dialogs, the `*Preview` rigs. They read `livery.*`, so cadenza's key
 recolours them; their shapes are out of the song's reach.
 

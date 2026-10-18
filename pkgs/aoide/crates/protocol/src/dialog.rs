@@ -22,7 +22,7 @@
 //! (a bare `use` shim, preserving the exact same restricted visibility).
 //! The one rename is [`DialogResult`] itself (`ZenityResult` in the old
 //! crate) — this substrate now backs more than one dialog binary
-//! (`aoide-secrets`' `zenity`/`lyra` entry dialogs AND P-P5's own pairing
+//! (`aoide-secrets`' `zenity`/`strillix` entry dialogs AND P-P5's own pairing
 //! confirm dialog), so the type name drops the single-binary implication;
 //! the shim re-exports it under the old name at the old path.
 //! [`escape_markup`] is the one item that is not an extraction: it never
@@ -237,15 +237,15 @@ pub const DISMISS_LABEL: &str = "Dismiss ask";
 
 /// The exit code that means "the dialog infrastructure itself failed" —
 /// NEVER a user action, never collapsed into [`DialogResult::Cancelled`].
-/// Mirrors `aoide_lyra::commands::secrets::EXIT_INFRA_FAILURE` byte for
+/// Mirrors `strillix::commands::secrets::EXIT_INFRA_FAILURE` byte for
 /// byte; there is no shared Rust type to enforce that agreement (no crate
-/// in this workspace may depend on `aoide-lyra` — root `AGENTS.md`'s
+/// in this workspace may depend on `strillix` — root `AGENTS.md`'s
 /// core/paint boundary), so both constants carry this SAME comment
 /// pointing at the other file. A dialog's OWN real exit codes are
 /// `0`/`1`/a `--timeout`-only range, none of which collide with this one
 /// in practice, so checking for it unconditionally in [`run_entry_dialog`]
 /// — regardless of which binary answered — is safe.
-pub const LYRA_INFRA_FAILURE_EXIT: i32 = 3;
+pub const STRILLIX_INFRA_FAILURE_EXIT: i32 = 3;
 
 /// Outcome of one code-entry dialog round trip — never a bare `Result`,
 /// since "the user closed it," "a wrong code," "spawning it failed," and
@@ -273,9 +273,9 @@ pub enum DialogResult {
     /// `io::Error` from `Command::spawn`/`Child::try_wait`).
     SpawnError(String),
     /// The dialog process spawned and ran, but exited signaling
-    /// [`LYRA_INFRA_FAILURE_EXIT`] — a genuine infrastructure failure,
+    /// [`STRILLIX_INFRA_FAILURE_EXIT`] — a genuine infrastructure failure,
     /// never a user action. The `String` names the exit status only (a
-    /// `lyra`-shaped caller inherits that child's stderr straight through
+    /// `strillix`-shaped caller inherits that child's stderr straight through
     /// to its own, so the actual failure detail already reached the
     /// journal directly and does not need to be re-captured here).
     DialogFailure(String),
@@ -295,7 +295,7 @@ pub enum DialogResult {
 /// dialog binary sharing this loop must share its output CONTRACT (exit
 /// 0 = typed value on stdout, exit 1 + `dismiss_label` on stdout =
 /// dismissed, exit 1 + anything else on stdout (including empty) =
-/// cancelled, [`LYRA_INFRA_FAILURE_EXIT`] = infrastructure failure).
+/// cancelled, [`STRILLIX_INFRA_FAILURE_EXIT`] = infrastructure failure).
 ///
 /// `dismiss_label` is a PARAMETER, not [`DISMISS_LABEL`] read internally —
 /// two different ceremonies share this loop with two different extra-
@@ -325,7 +325,7 @@ pub fn run_entry_dialog(
                     DialogResult::Approved(out)
                 } else if out == dismiss_label {
                     DialogResult::Dismissed
-                } else if status.code() == Some(LYRA_INFRA_FAILURE_EXIT) {
+                } else if status.code() == Some(STRILLIX_INFRA_FAILURE_EXIT) {
                     // Checked BEFORE falling through to `Cancelled` — the
                     // ONE branch point this whole distinction exists for
                     // ([`DialogResult::DialogFailure`]'s own doc).

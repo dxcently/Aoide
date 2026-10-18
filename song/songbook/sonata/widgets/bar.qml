@@ -175,7 +175,7 @@ import Quickshell.Networking
 // in P2; they resolve same-dir.
 // Deployed-tree relative path: this file lands at $out/qml/songs/sonata/
 // bar.qml, so two levels up ($out/qml/songs/ → $out/qml/) is the shell's
-// own qml/ root (the lyra lane's build walk, modules/dendrites/lyra/default.nix, fixes
+// own qml/ root (the strillix lane's build walk, modules/dendrites/strillix/default.nix, fixes
 // that depth by construction — see its own comment on the songs/ copy).
 import "../.."
 

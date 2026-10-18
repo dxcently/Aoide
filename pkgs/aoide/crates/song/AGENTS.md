@@ -2,9 +2,9 @@
 
 ## Invariants
 
-- **This crate is lyra-only and stays nix-independent itself.** `widgets.rs`
+- **This crate is strillix-only and stays nix-independent itself.** `widgets.rs`
   is the one place the workspace spawns `nix-instantiate` — it's here because
-  `song` is `lyra`'s domain, but nothing else in this crate may shell out to
+  `song` is `strillix`'s domain, but nothing else in this crate may shell out to
   Nix; the ricing engine must apply a song on generic Linux too (root
   `AGENTS.md`, "Nix-independence").
 - **`widgets::plan_stage` is the gate, and it runs BEFORE the first write.**
@@ -32,7 +32,7 @@
   templates, and nothing wider — the machine's songbook is not the build's. A new refusal keeps a `reason` in
   `data` beside the taught refusal, because the shellbridge's `ricedeclare`
   and the bar's balloon read it. The `--host` flag stays CLI-door-only
-  (lyra's registration) unless the user opens it.
+  (strillix's registration) unless the user opens it.
 - **§7.5's three cases, in order, and case 1 must stay nix-free.** Built in
   with no DIFFERING machine copy (absent counts, and so does a match over what
   the seed SHIPS — `MACHINE_RUNTIME_DIRS`, the machine's own top-level
@@ -46,7 +46,7 @@
   `copy_tree_atomic`'s `skip` matches the root's entries by name only (before
   the file-type branch, so a symlinked or file-typed `takes` is skipped too)
   and passes `&[]` down; a song's own `widgets/takes/` is content, never
-  scratch. `lyra rice declare` is the second consumer: the checkout carries
+  scratch. `strx rice declare` is the second consumer: the checkout carries
   the song, not the machine's undo history and scratch, so it copies through
   `copy_tree_atomic` with the list and keeps no tree copy of its own. The copy
   runs only after `checkout_gate::check_folder` finds git clean under that
@@ -125,7 +125,7 @@
   rule; it takes `tile` as written (CONTRACTS.md §4).
 - **Who PAINTS a pick is the HOST's choice — a provider, never a song's
   field.** The fact is `aoide.wallpaper.provider` (nucleus), read at runtime by
-  `wallpaper_provider::provider()` off the one word the `lyra` lane publishes at
+  `wallpaper_provider::provider()` off the one word the `strillix` lane publishes at
   `song/stage/wallpaper-provider`; absent means the shell's own layer, which is
   the default and needs no call. `wallpaper_provider::action()` is the whole
   decision — an external provider shows the staged pick while one applies to the
@@ -152,7 +152,7 @@
   — calling `handle_rice_stage` there would silently overwrite the draft
   with plain committed truth, destroying the edits draft mode exists to
   hold. `commands/reload.rs`'s own `sync_draft_in_place` is the guard this
-  bit live once (`lyra reload` design, settled 2026-08-31) — a Draft-mode
+  bit live once (`strx reload` design, settled 2026-08-31) — a Draft-mode
   caller needing the widget-sync/hyprctl-apply tail reuses THAT, or the bare
   `crate::live`/`crate::widgets` primitives directly, never
   `handle_rice_stage`.
@@ -177,7 +177,7 @@
   `stage/terminal-colors.conf`, and every path that rewrites the staged
   livery calls it.** Today: `handle_rice_stage` (so `rice stage`, `rice mode
   stage` and `rice mode declarative`'s re-pin), `rice back`'s restore and
-  `lyra reload`'s `sync_draft_in_place`. A new path that writes
+  `strx reload`'s `sync_draft_in_place`. A new path that writes
   `stage/livery.json` calls it too, off the same notes, or the terminals
   keep the previous song. It adds no mode gate of its own and is never
   fatal. Open windows are reached ONLY through kitty's control socket
@@ -206,7 +206,7 @@
   same predicate the hot path uses to find an opinion.
 - **`commands::rice::stage_lockscreen` is the ONE writer of
   `stage/hyprlock.conf` and is called wherever `stage_terminal_colors` is**
-  (`handle_rice_stage`, `rice back`, `lyra reload`'s `sync_draft_in_place`,
+  (`handle_rice_stage`, `rice back`, `strx reload`'s `sync_draft_in_place`,
   after the §7.5 gate there). Only a song that ships `lockscreen.<ext>`
   (`cover::lockscreen_image`) dresses the lock: the `hyprlock` emitter writes
   all ten variables with it and comments alone without it, and a song with no
@@ -232,8 +232,8 @@
   field into a scaffolded `rice.nix` (`aoide.livery.polarity`), defaulting to
   `schema::POLARITY_DEFAULT` when the source notes carry none.
 - **`compose::render_rice_nix` emits a song body (CONTRACTS §5, v1).** The
-  scaffold is an attrset with a `system` half (the ten `vibeos` providers,
-  `VIBEOS_SLOTS`, and a `module` of livery) and a `home` half (`lyra`, and
+  scaffold is an attrset with a `system` half (the ten `strillix` providers,
+  `VIBEOS_SLOTS`, and a `module` of livery) and a `home` half (`strillix`, and
   `rice.hyprland.conf = ./hyprland.conf`). `rice compose` writes the
   `hyprland.conf` of `--from` when it ships one, else `render_hyprland_conf`'s
   header with no keys. Any change to the body shape is a §5 change: the test
@@ -245,7 +245,7 @@
   out-of-band `hyprctl keyword` set. Do not name a baked value in this crate
   (a constant is right on one host and wrong on another): only the compositor
   knows its host's. Every caller gets the reset — `rice stage`,
-  `rice mode stage`/`declarative`, `rice back`, `lyra reload`'s draft sync. A
+  `rice mode stage`/`declarative`, `rice back`, `strx reload`'s draft sync. A
   song with no `blurEnabled` opinion therefore sends no `decoration:blur:*`
   and no hyprglass keyword. The two hyprglass keywords, when sent, are
   partitioned out (`live::partition_keywords`) as their OWN second `hyprctl
@@ -258,14 +258,14 @@
   tests never run `hyprctl` and never reload the live shell** (`cfg!(test)`
   in `live::apply_live`, after the `HYPRLAND_INSTANCE_SIGNATURE` check, and
   at the head of `ipc::quickshell_ipc_reload`): `cfg!` is evaluated when
-  *this crate* is compiled, so a `lyra`/CLI integration test, or anything
+  *this crate* is compiled, so a `strillix`/CLI integration test, or anything
   else linking this library, still reaches the compositor and the shell —
   and with a config reload in every stage, such a handler test run from a
   Hyprland terminal would reset the operator's live compositor and flip its
   glass and borders, and a shell reload rebuilds the whole running scene.
 - **`song/declared/livery.json` (the declared twin) and
   `song/declared/venue.json` (the venue's slots and geometry), CONTRACTS.md §4,
-  are READ-ONLY for this crate — only the nix side writes them.** The lyra
+  are READ-ONLY for this crate — only the nix side writes them.** The strillix
   lane's activation seed (`home.activation.aoideSeedStage`) publishes them: the
   twin is the declared song's committed notes with the venue's
   `aoide.livery.override` applied and the host's geometry laid over the song's
@@ -301,7 +301,7 @@
   ever READS the songbook. Don't move the seed inside `handle_rice_stage`
   itself — that would also fire it from `rice mode declarative <name>`'s
   re-pin, turning a lock command into a write-adjacent one for no reason.
-  `lyra reload`'s staging arm doesn't need it either: it only ever runs
+  `strx reload`'s staging arm doesn't need it either: it only ever runs
   once `mode.json`'s `song` field is set, which only happens after one of
   the two seed-checking entry points already resolved that song
   successfully — reload calling `handle_rice_stage` directly is therefore
@@ -358,7 +358,7 @@
   not a session), different predicate (a live `hyprctl layers` reading
   compared against the song's DECLARED surface set, then a journal
   placeholder-screen line to decide whether a restart is the known cure, not
-  a pid/window-address probe), different crate (`lyra`-only, vs `conduct`'s
+  a pid/window-address probe), different crate (`strillix`-only, vs `conduct`'s
   core-only `reap`). Don't fold this into `reap` or generalize `reap` to
   cover it — the two mechanisms check unrelated things on unrelated
   subjects, and merging them would only muddy both.
@@ -429,7 +429,7 @@
 ## Extension points
 
 - **A new `rice`/`livery`/`cover`/`element` command** adds a `cmd!`/
-  `register` entry in `commands/`, wired into `lyra`'s `commands::all()`
+  `register` entry in `commands/`, wired into `strillix`'s `commands::all()`
   only.
 - **A new emitter target** (stage/hyprctl/osc/file/kitty exist today) extends
   `livery::emit`, keeping the schema-validate → resolve → emit pipeline

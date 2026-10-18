@@ -7,14 +7,14 @@ tags: [aoide, cli, rice, livery, song]
 
 # Rice & Livery Commands — the Self-Ricing Command Surface
 
-The `rice`, `cover`, and `livery` command groups are part of `lyra`, the AoideOS
+The `rice`, `cover`, and `livery` command groups are part of `strillix`, the AoideOS
 paint binary ([[Overview]]), and drive the [[Self-Ricing]] loop:
 scaffold a song ([[Song-Anatomy]]), hot-load it live, iterate inside a routed
 draft with take history, and validate/resolve/emit its notes through the
 native [[livery]] engine. Handlers live in
 `pkgs/aoide/crates/song/src/commands/{rice,draft,mode,cover,livery,take}.rs`;
 `rice declare`'s handler and the `rice transpose` stub registration live in
-`pkgs/aoide/crates/lyra/src/commands/stubs.rs`.
+`pkgs/aoide/crates/strillix/src/commands/stubs.rs`.
 
 Path resolution (all in `pkgs/aoide/crates/storage/src/fs.rs`): one runtime
 root carries every runtime tree — `$AOIDE_ROOT` when set to an absolute
@@ -47,10 +47,10 @@ engine's raw bytes (carried in `data.stdout`) instead of the message in text
 mode — see `livery lint` below. Names (`<name>`, `<song>`, draft names)
 everywhere must match `^[a-z0-9][a-z0-9-]*$`.
 
-### lyra rice lint
+### strx rice lint
 
 ```
-lyra rice lint [<name>|<path>] [--json]
+strx rice lint [<name>|<path>] [--json]
 ```
 
 - **Reads:** the target livery file — `<path>` literally if it exists as a
@@ -66,10 +66,10 @@ lyra rice lint [<name>|<path>] [--json]
 - **Notes:** read-only; not gated. Schema failures are `status: "error"`,
   exit 1 — never an `ok` with errors embedded.
 
-### lyra rice stage
+### strx rice stage
 
 ```
-lyra rice stage [<name>] [--json]
+strx rice stage [<name>] [--json]
 ```
 
 - **Reads:** `song/stage/mode.json` (entrypoint guard), then the notes for
@@ -117,10 +117,10 @@ lyra rice stage [<name>] [--json]
   never auto-loads a draft. Nothing is committed. Re-staging identical
   content still writes (and still mints an auto-take in Draft mode).
 
-### lyra rice compose
+### strx rice compose
 
 ```
-lyra rice compose <name> [--from <song>] [--force] [--json]
+strx rice compose <name> [--from <song>] [--force] [--json]
 ```
 
 - **Reads:** `--from`'s notes (`--from` default `"sonata"`; must exist and
@@ -128,18 +128,18 @@ lyra rice compose <name> [--from <song>] [--force] [--json]
   (`pkgs/aoide/crates/song/src/commands/rice.rs`): the host songbook's
   `song/songbook/<from>/livery.json` under the runtime root FIRST, else
   `<templates>/<from>/livery.json` in the shipped score templates —
-  `pkgs/lyra-songbook`, a verbatim copy of the committed `song/songbook/`
+  `pkgs/strillix-rices`, a verbatim copy of the committed `song/songbook/`
   tree plus prebaked `manifest.json`/`registry.json` baked by
   `lib/songbook.nix` (the same generator the checkout-host `nix eval` path
-  calls) into `share/lyra/songbook`. The templates dir itself resolves two
+  calls) into `share/strillix/songbook`. The templates dir itself resolves two
   tiers, absolute-path-wins: `$AOIDE_SONG_TEMPLATES`, else a sibling of the
-  binary's own directory (`<exe_dir>/../share/lyra/songbook`), gated on that
+  binary's own directory (`<exe_dir>/../share/strillix/songbook`), gated on that
   directory existing.
 - **Writes:** exactly four files under the runtime root's
   `song/songbook/<name>/` (never the templates dir — compose TO always
   lands in the host songbook), all atomic:
   `rice.nix` (a body copying `--from`'s palette/window/geometry into
-  `aoide.livery.*`, with the ten vibeos providers and the `lyra` renderer),
+  `aoide.livery.*`, with the ten strillix providers and the `strillix` renderer),
   `hyprland.conf` (`--from`'s when it ships one, else a header with no keys),
   `livery.json` (verbatim mirror of `--from`'s), `design/intent.md`
   (honest-empty template), `widgets/.gitkeep`.
@@ -160,17 +160,17 @@ lyra rice compose <name> [--from <song>] [--force] [--json]
   that only ever produces the compose shape, no `_widgets/` shelf. A song
   with a `_widgets/` shelf still needs a real checkout: resolving a shelf
   takes `composeSong` in the nix evaluator, which the templates fallback
-  cannot run. `$AOIDE_SONG_TEMPLATES` is wired only onto lyra-execing units
-  (`modules/dendrites/lyra/shellbridge.nix`'s shellbridge service,
+  cannot run. `$AOIDE_SONG_TEMPLATES` is wired only onto strillix-execing units
+  (`modules/dendrites/strillix/shellbridge.nix`'s shellbridge service,
   `modules/dendrites/quickshell/system.nix`'s `aoide-quickshell` and
-  `modules/dendrites/lyra/runtime.nix`'s `aoide-rice-reload`) plus
+  `modules/dendrites/strillix/runtime.nix`'s `aoide-rice-reload`) plus
   `modules/dendrites/aoided.nix`'s `environment.sessionVariables` (gated on
-  `aoide.lyra.enable`) — core-only units don't carry it.
+  `aoide.strillix.enable`) — core-only units don't carry it.
 
-### lyra rice list
+### strx rice list
 
 ```
-lyra rice list [--json]
+strx rice list [--json]
 ```
 
 - **Reads:** the directories under `song/songbook/` whose name is a valid song
@@ -182,13 +182,13 @@ lyra rice list [--json]
   song, `declared` the declared one (each null when absent). `ok` is false with
   `reason` `unreadable` or `invalid-json` when the notes do not parse.
 - **Notes:** read-only. The song-stage gate (the §7.5 songbook evaluation) is
-  not run, so `ok` means the notes parse and `lyra rice mode stage <name>`
+  not run, so `ok` means the notes parse and `strx rice mode stage <name>`
   decides the rest. An absent songbook is `ok` with an empty list.
 
-### lyra rice draft save
+### strx rice draft save
 
 ```
-lyra rice draft save [<name>] [--json]
+strx rice draft save [<name>] [--json]
 ```
 
 - **Reads:** `song/stage/livery.json` (required — must parse and carry a
@@ -206,10 +206,10 @@ lyra rice draft save [<name>] [--json]
   Errors: `no-staged-livery`, `invalid-json`, `no-resolvable-song`,
   `invalid-name` (exit 1).
 
-### lyra rice draft list
+### strx rice draft list
 
 ```
-lyra rice draft list [<song>] [--json]
+strx rice draft list [<song>] [--json]
 ```
 
 - **Reads:** with `<song>`, `song/songbook/<song>/drafts/*/`; without, walks
@@ -223,10 +223,10 @@ lyra rice draft list [<song>] [--json]
 - **Notes:** read-only. An empty scope is `ok` with an empty list, never an
   error.
 
-### lyra rice draft drop
+### strx rice draft drop
 
 ```
-lyra rice draft drop <name> [--json]
+strx rice draft drop <name> [--json]
 ```
 
 - **Reads:** `song/stage/livery.json`'s `"song"` field (to resolve which
@@ -238,10 +238,10 @@ lyra rice draft drop <name> [--json]
   draft `rice mode draft` currently routes the stage into; switch modes
   first.
 
-### lyra rice mode status
+### strx rice mode status
 
 ```
-lyra rice mode status [--json]
+strx rice mode status [--json]
 ```
 
 - **Reads:** `song/stage/mode.json` only.
@@ -253,10 +253,10 @@ lyra rice mode status [--json]
   `mode == "draft"`. `stagingSong` is the durable "what was I staging" memory
   a bare `rice mode stage` falls back to.
 
-### lyra rice mode stage
+### strx rice mode stage
 
 ```
-lyra rice mode stage [<name>] [--json]
+strx rice mode stage [<name>] [--json]
 ```
 
 - **Reads:** `song/stage/mode.json`; for a bare call, resolves the song from
@@ -276,10 +276,10 @@ lyra rice mode stage [<name>] [--json]
   This is also how you leave Draft mode. A failed stage (unknown song) does
   not flip the marker and leaves the draft routed.
 
-### lyra rice mode declarative
+### strx rice mode declarative
 
 ```
-lyra rice mode declarative [<name>] [--json]
+strx rice mode declarative [<name>] [--json]
 ```
 
 - **Reads:** `song/stage/mode.json`; with no `<name>`, resolves the declared
@@ -312,10 +312,10 @@ lyra rice mode declarative [<name>] [--json]
   marker. Locking while already locked with nothing resolvable is a no-op
   `ok`.
 
-### lyra rice mode draft
+### strx rice mode draft
 
 ```
-lyra rice mode draft <name> [--json]
+strx rice mode draft <name> [--json]
 ```
 
 - **Reads:** `song/stage/mode.json` (guard + marker carry-over);
@@ -343,12 +343,12 @@ lyra rice mode draft <name> [--json]
   `song-runtime-untracked` check fails the tree if a runtime dir under `song/`
   is ever committed.
 
-### lyra cover set
+### strx cover set
 
 ```
-lyra cover set <path|name|we:<id>> [--position auto|tile|fill] [--json]
-lyra cover set --clear [--json]
-lyra cover set --from-skwd --kind <static|video|we> <path|id> [--json]
+strx cover set <path|name|we:<id>> [--position auto|tile|fill] [--json]
+strx cover set --clear [--json]
+strx cover set --from-skwd --kind <static|video|we> <path|id> [--json]
 ```
 
 - **Reads:** `song/stage/mode.json` (entrypoint guard); stats the resolved
@@ -397,18 +397,18 @@ lyra cover set --from-skwd --kind <static|video|we> <path|id> [--json]
   registry refuses it before anything runs.
   A cover applies only while its `song` matches the staged song; one naming
   another song is ignored, which is why a pick survives re-staging its own
-  song (a bare `lyra rice stage`, the bar's RICE control, a declarative re-seed, a
+  song (a bare `strx rice stage`, the bar's RICE control, a declarative re-seed, a
   rebuild) and never shows over a different one. Nothing is committed; the
   baked `AOIDE_WALLPAPER` remains the boot/rebuild fallback. When the host's
   wallpaper provider is not the shell's own layer (a page of its own:
   [[skwd-wall]]), the pick is the provider's to draw — this layer paints nothing
   while one applies — and every write here reconciles the provider with the stage
-  file through `lyra cover sync`.
+  file through `strx cover sync`.
 
-### lyra cover sync
+### strx cover sync
 
 ```
-lyra cover sync [--json]
+strx cover sync [--json]
 ```
 
 - **Reads:** `song/stage/wallpaper-provider` (the host's provider — absent means
@@ -432,10 +432,10 @@ lyra cover sync [--json]
   that hook races the daemon's own socket, and a restarted provider re-asserts
   the staged state without a rebuild.
 
-### lyra livery emit
+### strx livery emit
 
 ```
-lyra livery emit <target> [<name>|<path>] [--out PATH] [--template STR] [--json]
+strx livery emit <target> [<name>|<path>] [--out PATH] [--template STR] [--json]
 ```
 
 - **Reads:** the livery file (`<path>` literal if it exists, else
@@ -445,8 +445,8 @@ lyra livery emit <target> [<name>|<path>] [--out PATH] [--template STR] [--json]
 - **Writes:** with `--out PATH`, the emitted bytes are atomic-written to PATH
   instead of printed.
 - **Output:** TEXT MODE PRINTS RAW BYTES (from `data.stdout`), not the
-  message line — lyra special-cases the `livery` group
-  (`pkgs/aoide/crates/lyra/src/lib.rs`). Per target
+  message line — strillix special-cases the `livery` group
+  (`pkgs/aoide/crates/strillix/src/lib.rs`). Per target
   (`pkgs/aoide/crates/song/src/livery/emit/`):
   - `stage` — pretty stage JSON: `{schemaVersion, palette, bar, notif,
     window, base16?}`, component fallbacks applied, never null.
@@ -469,10 +469,10 @@ lyra livery emit <target> [<name>|<path>] [--out PATH] [--template STR] [--json]
   `rice stage`'s `live::apply_live`). osc/hyprctl outputs are golden-tested
   byte-identical against the Node-engine fixtures.
 
-### lyra livery resolve
+### strx livery resolve
 
 ```
-lyra livery resolve [<name>|<path>] [--json]
+strx livery resolve [<name>|<path>] [--json]
 ```
 
 - **Reads:** the livery file (same resolution rule as `livery emit`).
@@ -485,10 +485,10 @@ lyra livery resolve [<name>|<path>] [--json]
 - **Notes:** read-only. Byte-identical to the Node engine's
   `JSON.stringify(resolved, null, 2)`.
 
-### lyra livery lint
+### strx livery lint
 
 ```
-lyra livery lint [<name>|<path>] [--json]
+strx livery lint [<name>|<path>] [--json]
 ```
 
 - **Reads:** the livery file (same resolution rule).
@@ -503,14 +503,14 @@ lyra livery lint [<name>|<path>] [--json]
   engine but renders the standard Outcome message instead of the raw
   envelope.
 
-### lyra rice refresh
+### strx rice refresh
 
 ```
-lyra rice refresh [<name>] [--check] [--json]
+strx rice refresh [<name>] [--check] [--json]
 ```
 
 - **Reads:** the shipped songbook (`fs::song_templates_dir`: `$AOIDE_SONG_TEMPLATES`,
-  else `share/lyra/songbook` beside the binary) — `builtin.json` when no `<name>`
+  else `share/strillix/songbook` beside the binary) — `builtin.json` when no `<name>`
   is given, and each song's tree — the machine copy
   `song/songbook/<name>/`, and the song's record
   `song/declared/songbook/<name>.json`.
@@ -536,10 +536,10 @@ lyra rice refresh [<name>] [--check] [--json]
   moving the machine's folder aside lets refresh seed it afresh. The stage-time
   seed runs the same function. Exit 1 if any song errored.
 
-### lyra rice declare
+### strx rice declare
 
 ```
-lyra rice declare <name> [--json]
+strx rice declare <name> [--json]
 ```
 
 - **Reads:** the composed song `$AOIDE_ROOT/song/songbook/<name>/`
@@ -548,7 +548,7 @@ lyra rice declare <name> [--json]
   `aoide_storage::fs::flake_root()` (`$AOIDE_FLAKE_ROOT` absolute override,
   default `~/Aoide`), which must exist as a directory.
 - **Writes:** copies the song tree into the checkout's
-  `song/songbook/<name>/` (`pkgs/aoide/crates/lyra/src/commands/stubs.rs`
+  `song/songbook/<name>/` (`pkgs/aoide/crates/strillix/src/commands/stubs.rs`
   `handle_rice_declare` — `implemented: true`, `gated: true`) through
   `aoide_song::widgets::copy_tree_atomic`, the one tree copy `rice stage`'s
   widget sync uses too. The checkout carries the song, not the machine's
@@ -569,16 +569,16 @@ lyra rice declare <name> [--json]
   either path is built — a traversal-shaped name is refused by construction.
   Errors: usage exit 2 on missing `<name>` (`missing-name`); exit 1 on
   `invalid-name`, `no-composed-song` (nothing at the source — the message
-  says to run `lyra rice compose <name>` first), `no-checkout` (no checkout
+  says to run `strx rice compose <name>` first), `no-checkout` (no checkout
   at `$AOIDE_FLAKE_ROOT`), `copy-failed` (the message names the path that
   failed). Refused `old-song-shape` when the staged `rice.nix` is still the old
   function-module shape: the message names the file and says to run
-  `lyra rice refresh <name>`, and nothing is copied (CONTRACTS.md §5).
+  `strx rice refresh <name>`, and nothing is copied (CONTRACTS.md §5).
 
-### lyra rice declare --host
+### strx rice declare --host
 
 ```
-lyra rice declare <name> --host [--json]
+strx rice declare <name> --host [--json]
 ```
 
 - **Reads:** the host config at `aoide_storage::fs::host_config()`
@@ -618,23 +618,23 @@ lyra rice declare <name> --host [--json]
   an edit landing in the microseconds between that re-stat and the rename is
   not caught); `write-failed`.
 
-### lyra rice transpose
+### strx rice transpose
 
 ```
-lyra rice transpose <rice> <palette> [--json]
+strx rice transpose <rice> <palette> [--json]
 ```
 
 - **Notes:** STUB — `implemented: false` (not gated): `dispatch()`
   short-circuits before any handler, returning the not-implemented envelope
-  and exit 64 — lyra's only remaining stub. Contract per the schema summary:
+  and exit 64 — strillix's only remaining stub. Contract per the schema summary:
   replay song `<rice>` in another key (palette) from the song's
   `song/songbook/<rice>/palette/` directory. That palette directory layout is
   asserted only by the schema summary — unverified elsewhere in source.
 
-### lyra rice take
+### strx rice take
 
 ```
-lyra rice take [--json]
+strx rice take [--json]
 ```
 
 - **Reads:** `song/stage/mode.json` (must be Draft mode — `resolve_draft`),
@@ -655,10 +655,10 @@ lyra rice take [--json]
   Draft-mode `rice stage` (cause `"stage"`) and `cover set`
   (cause `"cover-set"`).
 
-### lyra rice take list
+### strx rice take list
 
 ```
-lyra rice take list [--json]
+strx rice take list [--json]
 ```
 
 - **Reads:** the routed draft's whole `takes/` directory (`NNNN.json`
@@ -674,10 +674,10 @@ lyra rice take list [--json]
   empty store is `ok` with an empty `takes` array. There is exactly one view
   (whole tree); no `--all` flag exists.
 
-### lyra rice take mark
+### strx rice take mark
 
 ```
-lyra rice take mark <letter> [--take N] [--json]
+strx rice take mark <letter> [--take N] [--json]
 ```
 
 - **Reads:** `song/stage/mode.json` (Draft-mode gate), the target take file
@@ -696,10 +696,10 @@ lyra rice take mark <letter> [--take N] [--json]
   false`). No head/takes at all → `take-not-found`, exit 1. No prompting,
   ever — flags/`--json` only.
 
-### lyra rice take diff
+### strx rice take diff
 
 ```
-lyra rice take diff [--take N | --mark <letter>] [--json]
+strx rice take diff [--take N | --mark <letter>] [--json]
 ```
 
 - **Reads:** `song/stage/mode.json` (Draft-mode gate), the base take's record
@@ -717,10 +717,10 @@ lyra rice take diff [--take N | --mark <letter>] [--json]
   `--mark <letter>` override (`take-not-found` / `mark-not-found`, exit 1).
   Malformed flags are usage errors (exit 2) checked before the draft gate.
 
-### lyra rice take prune
+### strx rice take prune
 
 ```
-lyra rice take prune [--older-than <N>d|<N>h] [--keep <N>] [--all-but-marks] [--force] [--json]
+strx rice take prune [--older-than <N>d|<N>h] [--keep <N>] [--all-but-marks] [--force] [--json]
 ```
 
 - **Reads:** the routed draft's `takes/` store (records, `head.json`,
@@ -747,10 +747,10 @@ lyra rice take prune [--older-than <N>d|<N>h] [--keep <N>] [--all-but-marks] [--
   (`inquire::MultiSelect` renders the tty path); choosing rows IS the
   confirm (no y/n prompt), aborting is usage exit 2 (`no-selection`).
 
-### lyra rice back
+### strx rice back
 
 ```
-lyra rice back [--take N | --mark <letter>] [--json]
+strx rice back [--take N | --mark <letter>] [--json]
 ```
 
 - **Reads:** `song/stage/mode.json` (Draft-mode gate), the target take

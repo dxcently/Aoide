@@ -29,16 +29,16 @@ local directories. For a remote scheme like `qs:` it needs a `qmldir` that
 names the type. Without one it fails with `Pane is not a type` (unless the
 type happens to be in the component cache already). The nix build writes
 that qmldir for every uppercase helper
-(`modules/dendrites/lyra/default.nix`, the "qmldir: register this song's
+(`modules/dendrites/strillix/default.nix`, the "qmldir: register this song's
 helper types" block). Two other paths into a running shell do **not** write
 one:
 
-- `lyra preview` (`pkgs/aoide/crates/lyra/src/commands/preview.rs`)
+- `strx preview` (`pkgs/aoide/crates/strillix/src/commands/preview.rs`)
 - `rice stage` hot-sync (`sync_song_widgets`,
   `pkgs/aoide/crates/song/src/widgets.rs`)
 
 Cadenza goes live through hot-sync, so a name-resolved helper would break
-there. This is a lyra bug and is routed separately. The kit does not work
+there. This is a strillix bug and is routed separately. The kit does not work
 around it in core, and it ships **no** `qmldir` in `widgets/`. The build
 appends to the qmldir with `>>`, so a shipped qmldir would get every line
 twice.
@@ -116,7 +116,7 @@ Rules that bit during the build:
   `kit.lampGlyph(s)`/`kit.lampColor(s)` rather than a Loader per row. It is
   one Text per cell, with no per-row component fetch.
 - `Kit.js` is **not** on the preview canvas's watch list (it watches `*.qml`)
-  and is copied only at build. After editing it, rerun `lyra preview …
+  and is copied only at build. After editing it, rerun `strx preview …
   --no-launch` and restart the canvas.
 
 ## 2. Kit.js
@@ -346,7 +346,7 @@ kit.lampColor(status)`.
 
 ## 4. Fixtures and what they cannot place
 
-`lyra preview --fixture <set>` copies exactly four files from
+`strx preview --fixture <set>` copies exactly four files from
 `design/fixtures/<set>/` into the preview root's `state/stage/`:
 `sessions.json`, `projects.json`, `hooks.json` and `herald.json`
 (`FIXTURE_FILES` in `preview.rs`). A missing file gets an empty default.

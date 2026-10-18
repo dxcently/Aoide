@@ -11,7 +11,7 @@ The `screen` command group covers the desktop see-and-act surface: query the
 compositor (`screen info`), capture pixels (`screen shot`), recover text from
 a capture (`screen ocr`), act by name or pixel (`screen point *`), verify an
 act mechanically (`screen diff`), and hand a capture to another agent
-(`screen send`). It is a `lyra` command group. Registrations live in
+(`screen send`). It is a `strillix` command group. Registrations live in
 `pkgs/aoide/crates/screen/src/commands.rs`; handlers and domain logic
 in `pkgs/aoide/crates/screen/src/{hypr,capture,point,synth,ocr,diff,text,send}.rs`.
 See [[Screen-Control]] for the usage narrative; the sidecar field contract,
@@ -62,10 +62,10 @@ vocabulary (`pointer-*`, `sidecar-*`, `from-shot-*`, `text-*`, `diff-*`,
 `capture-*`, `ocr-*`, `hyprctl-*`, plus misc codes); `screen send` is the
 exception and tags its own envelope instead.
 
-### lyra screen info
+### strx screen info
 
 ```
-lyra screen info [--json]
+strx screen info [--json]
 ```
 
 - **Reads:** five `hyprctl -j` spawns — `monitors`, `cursorpos`,
@@ -79,10 +79,10 @@ lyra screen info [--json]
 - **Notes:** read-only; writes nothing, touches no synthesis boundary. Any
   hyprctl failure → exit 1, `hyprctl-unavailable`/`hyprctl-failed`.
 
-### lyra screen shot
+### strx screen shot
 
 ```
-lyra screen shot [--output <name> | --region "X,Y WxH" | --pick | --window <addr> | --session <id>]
+strx screen shot [--output <name> | --region "X,Y WxH" | --pick | --window <addr> | --session <id>]
   [--format png|jpeg] [--quality 0-100] [--scale F | --fit WxH] [--cursor]
   [--out <path>] [--comment "text"] [--json]
 ```
@@ -119,10 +119,10 @@ lyra screen shot [--output <name> | --region "X,Y WxH" | --pick | --window <addr
   as pixel change to `screen diff`. Not idempotent by design — every call is a
   new file.
 
-### lyra screen point move
+### strx screen point move
 
 ```
-lyra screen point move <x> <y> [--from-shot <capture>] [--json]
+strx screen point move <x> <y> [--from-shot <capture>] [--json]
 ```
 
 - **Reads:** `hyprctl cursorpos` before and after the move. `--from-shot`
@@ -139,10 +139,10 @@ lyra screen point move <x> <y> [--from-shot <capture>] [--json]
   invalid sidecar scale → `from-shot-bad-scale`; converted point off-layout →
   `from-shot-out-of-bounds`. Writes nothing.
 
-### lyra screen point click
+### strx screen point click
 
 ```
-lyra screen point click [<button>] [<x> <y>] [--count 1-10] [--from-shot <capture>] [--json]
+strx screen point click [<button>] [<x> <y>] [--count 1-10] [--from-shot <capture>] [--json]
 ```
 
 - **Reads:** `hyprctl cursorpos` (only when the guard `x y` is given).
@@ -157,10 +157,10 @@ lyra screen point click [<button>] [<x> <y>] [--count 1-10] [--from-shot <captur
   requires both coordinates; `--from-shot` without a guard is a usage error
   (exit 2). Button must be `left|right|middle` (default left).
 
-### lyra screen point drag
+### strx screen point drag
 
 ```
-lyra screen point drag <x1> <y1> <x2> <y2> [--button left|right|middle] [--steps 1-200] [--from-shot <capture>] [--json]
+strx screen point drag <x1> <y1> <x2> <y2> [--button left|right|middle] [--steps 1-200] [--from-shot <capture>] [--json]
 ```
 
 - **Reads:** `hyprctl -j monitors` (both endpoints must be on the layout,
@@ -178,10 +178,10 @@ lyra screen point drag <x1> <y1> <x2> <y2> [--button left|right|middle] [--steps
 - **Notes:** endpoint off-layout → exit 1, `pointer-out-of-bounds` with
   `wanted`/`bounds`. Writes nothing.
 
-### lyra screen point hover
+### strx screen point hover
 
 ```
-lyra screen point hover <x> <y> [--settle-ms 1-10000] [--from-shot <capture>] [--json]
+strx screen point hover <x> <y> [--settle-ms 1-10000] [--from-shot <capture>] [--json]
 ```
 
 - **Reads:** `hyprctl` desktop snapshot (clients + layers) before the move;
@@ -197,10 +197,10 @@ lyra screen point hover <x> <y> [--settle-ms 1-10000] [--from-shot <capture>] [-
   refuses (exit 1, `pointer-drift`).
 - **Notes:** writes nothing.
 
-### lyra screen point scroll
+### strx screen point scroll
 
 ```
-lyra screen point scroll <dy> [<dx>] [--json]
+strx screen point scroll <dy> [<dx>] [--json]
 ```
 
 - **Reads:** nothing (no cursor read, no sidecar).
@@ -212,10 +212,10 @@ lyra screen point scroll <dy> [<dx>] [--json]
 - **Notes:** both axes clamp to ±100 notches per call; a clamp is announced
   in the message and the `clampedD*`/`requestedD*` data keys. Writes nothing.
 
-### lyra screen point idle
+### strx screen point idle
 
 ```
-lyra screen point idle [<samples>] [<timeout>] [--json]
+strx screen point idle [<samples>] [<timeout>] [--json]
 ```
 
 - **Reads:** polls `hyprctl cursorpos` every 250 ms until `<samples>`
@@ -226,10 +226,10 @@ lyra screen point idle [<samples>] [<timeout>] [--json]
 - **Notes:** read-only; never touches the synthesis boundary. A genuine
   "nobody is touching the mouse" gate — hand tremor breaks the streak.
 
-### lyra screen point save
+### strx screen point save
 
 ```
-lyra screen point save [--json]
+strx screen point save [--json]
 ```
 
 - **Reads:** `hyprctl cursorpos`.
@@ -239,10 +239,10 @@ lyra screen point save [--json]
 - **Output:** ok → `"saved <x>,<y> to <path>"`; data `{x, y, path}`;
   `changed` lists the file. Write failure → exit 1, `pointer-save-failed`.
 
-### lyra screen point restore
+### strx screen point restore
 
 ```
-lyra screen point restore [--json]
+strx screen point restore [--json]
 ```
 
 - **Reads:** `state/pointer-pos.json`; `hyprctl cursorpos` after the warp.
@@ -253,10 +253,10 @@ lyra screen point restore [--json]
 - **Notes:** missing file → exit 1, `pointer-nothing-saved`; unparseable file
   → exit 1, `pointer-state-corrupt`. Writes nothing.
 
-### lyra screen point text
+### strx screen point text
 
 ```
-lyra screen point text <text> --from-shot <capture> [--nth N] [--button left|right|middle] [--dry-run] [--json]
+strx screen point text <text> --from-shot <capture> [--nth N] [--button left|right|middle] [--dry-run] [--json]
 ```
 
 - **Reads:** the `--from-shot` capture's sidecar `<capture>.json` — its
@@ -280,10 +280,10 @@ lyra screen point text <text> --from-shot <capture> [--nth N] [--button left|rig
   ordered top-left-first). OCR words carry tesseract's punctuation verbatim —
   `"Save:"` won't match a search for `"Save"`.
 
-### lyra screen ocr
+### strx screen ocr
 
 ```
-lyra screen ocr <capture> [--json]
+strx screen ocr <capture> [--json]
 ```
 
 - **Reads:** the capture image and its sidecar `<capture>.json` (required —
@@ -306,10 +306,10 @@ lyra screen ocr <capture> [--json]
   write failure → `sidecar-write-failed` (exit 1; the OCR itself succeeded).
   Re-running is idempotent in effect (same transform, same sidecar field).
 
-### lyra screen diff
+### strx screen diff
 
 ```
-lyra screen diff <before-capture> [--settle-ms 0-60000] [--threshold 0-255] [--out <path>] [--json]
+strx screen diff <before-capture> [--settle-ms 0-60000] [--threshold 0-255] [--out <path>] [--json]
 ```
 
 - **Reads:** the before-capture image and its sidecar `<before>.json` —
@@ -338,10 +338,10 @@ lyra screen diff <before-capture> [--settle-ms 0-60000] [--threshold 0-255] [--o
   changed mid-flight) → `diff-size-mismatch`; `--out` ending in `.json` is a
   usage error.
 
-### lyra screen send
+### strx screen send
 
 ```
-lyra screen send <capture> --session <id> [--comment "text"] [--yes] [--json]
+strx screen send <capture> --session <id> [--comment "text"] [--yes] [--json]
 ```
 
 - **Reads:** the capture (must exist; canonicalized to an absolute path so a

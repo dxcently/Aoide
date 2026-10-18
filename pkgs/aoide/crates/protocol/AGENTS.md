@@ -61,7 +61,7 @@
   serializes byte-identical. A stub is never checked (it answers 64). The
   taught-error shape (`Outcome::refuse`, `Fix`, `io_cause`) is defined in
   `pkgs/aoide/crates/AGENTS.md`; `suggest` holds the only edit-distance
-  matcher. `door::{AOIDE_ONLY,LYRA_ONLY,SHARED}_HEADS` is a static copy of
+  matcher. `door::{AOIDE_ONLY,STRILLIX_ONLY,SHARED}_HEADS` is a static copy of
   the two registries' heads — update it with them.
 - **Listings, color and width live in `help` and `style` and nowhere else.**
   A formatter says what text IS (`style.name(..)`, `style.why(..)`), never an
@@ -99,7 +99,7 @@
   head) must keep reading RAW argv, before flags are split into a
   `BTreeMap` — an external command's argv must reach it byte-for-byte.
   `crates/cli/src/dispatch.rs`'s `an_unregistered_path_on_a_non_cli_door_is_
-  still_unknown_command` test (mirrored in `aoide-lyra`) is the tripwire
+  still_unknown_command` test (mirrored in `strillix`) is the tripwire
   that catches a future violation of this.
 - **`bin`'s platform rule has one home: `command_suffixes`**, read by the
   pure `candidate_names`/`strip_spawnable_suffix`/`strip_command_prefix` —
@@ -115,7 +115,7 @@
   surface exposes the LOGICAL name, suffix (and, on Windows, case) folded
   away; `on_path` keeps its weaker `is_file` predicate on the same
   candidates. The sibling tier is the one deliberate exception: it asks for
-  `EXE_SUFFIX` (`aoide.exe`/`lyra.exe`) with the bare name behind it, never
+  `EXE_SUFFIX` (`aoide.exe`/`strillix.exe`) with the bare name behind it, never
   `PATHEXT`, so an `aoide.cmd` beside the build cannot shadow it (and is not a
   sibling at all when it is the only file there); and an
   `AOIDE_CORE_BIN`/`AOIDE_RICE_BIN` override still reaches `resolve`
@@ -196,7 +196,7 @@
   widen an item's visibility just because moving it needs an import
   statement to exist. Don't add a SECOND string constant for a dismiss
   label a new dialog ceremony wants ("Reject request", P-P5's own pairing
-  confirm dialog) — `DISMISS_LABEL` is `aoide-secrets`' own zenity/lyra
+  confirm dialog) — `DISMISS_LABEL` is `aoide-secrets`' own zenity/strillix
   dialogs' label specifically; a new ceremony with its own wording defines
   its own constant beside its own caller, the same way `feed`'s record
   shape stays the caller's contract, never this module's. **`run_entry_dialog`

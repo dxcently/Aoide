@@ -1,12 +1,12 @@
 # aoide-screen
 
-`aoide screen`/`lyra screen` — a read-only view onto the desktop for agents,
+`aoide screen`/`strx screen` — a read-only view onto the desktop for agents,
 plus pointer synthesis: `screen info` (monitors/cursor/workspace/clients via
 `hyprctl -j`), `screen shot` (grim/slurp capture + JSON sidecar), `screen
 point` (native `zwlr_virtual_pointer_v1` pointer synthesis), `screen ocr`
 (tesseract text extraction), `screen diff` (pixel/inventory
 act-verification), `screen point text` (click by OCR'd word, not by pixel).
-Paint-side — ships in `lyra`, not core.
+Paint-side — ships in `strillix`, not core.
 
 ## Named seams (what it exposes)
 
@@ -28,7 +28,7 @@ including `normalize_addr`). Carries this workspace's only heavy deps:
 
 ## How it composes
 
-Only `lyra` depends on it — `screen` is graphical-binary surface, extracted
+Only `strillix` depends on it — `screen` is graphical-binary surface, extracted
 out of `conduct` at P-A1 specifically so core stays headless-safe.
 **Charter smudge**: it reaches back into `aoide_conduct::graph` for
 session/graph symbols rather than duplicating them, because the

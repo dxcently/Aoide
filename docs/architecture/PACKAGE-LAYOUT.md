@@ -145,11 +145,11 @@ pkgs/aoide/
       src/ bin/{aoide,aoided} · cli(parse) · dispatch · guide
            · commands/ (ONLY the root-coupled groups: meta, stubs, mcp serve)
       tests/ conductor_integration (+ fixtures)
-    screen/                     # read-only desktop view + pointer synthesis — lyra-only
+    screen/                     # read-only desktop view + pointer synthesis — strillix-only
       src/ hypr · capture · point/synth · ocr/text · diff · commands
-    lyra/                       # the paint app: lyra bin, second composition
+    strillix/                       # the paint app: strillix bin, second composition
                                 # root over the rice/screen/quickshell bundle
-      src/ bin/lyra · dispatch/registry(own golden) · guide
+      src/ bin/strillix · dispatch/registry(own golden) · guide
            · commands/ (song*, screen*, shellbridge/herald regs, onboard)
 ```
 
@@ -171,8 +171,8 @@ pkgs/aoide/
 | **evals** | Eval harness: golden snapshots (existing), agent-behavior evals for the steward, door-contract evals, ricing/design evals. | golden-snapshot tests | elevate — DEFER (Phase 8) |
 | **conductor** | The CLI/TUI surface: session DAG view, roster, and the steward's control panel — plus its one CLI command (`conductor`). | `crates/conductor/` (app·ui·graphview·theme), `commands/infra.rs`(conductor command) | landed (Phase 6a+6b); commands landed (Phase 9) |
 | **cli** | The app that wires everything into `aoide` + `aoided`: arg parse, the single dispatcher, registry assembly (`commands/mod.rs::all()`), guide/onboarding, and the three root-coupled groups (`meta`, `stubs`, `mcp serve`) that read the assembled registry. The DAG sink: depends on everything, nothing depends on it. Its lib keeps the name `aoide` so no caller changes. | `crates/cli/` (bin/*, cli.rs, dispatch.rs, registry.rs, commands/{mod,meta,stubs,infra}.rs, guide.rs, lib.rs) | landed as `crates/cli` (Phase 9 — supersedes the Phase 6 "stays the root package" finding, see the Phase 9 status note) |
-| **screen** | Read-only desktop view for agents plus pointer synthesis: `screen info` (hyprctl monitors/cursor/workspace/clients), `screen shot` (grim/slurp + JSON sidecar), `screen point` (native `zwlr_virtual_pointer_v1` synthesis, no `wlrctl`), `screen ocr` (tesseract), `screen diff` (pixel/inventory act-verification), `screen point text` (click by OCR'd word) — plus its CLI commands. Carries the workspace's only heavy deps (`wayland-client`, `wayland-protocols-wlr`, `image`); `lyra`-only, core never depends on it. | `conduct`'s former screen/pointer modules | landed (P-A1) |
-| **lyra** | The paint app crate: bin `lyra`, package `aoide-lyra` — the second composition root over the same domain-crate handler code `cli` assembles, its own independent `Registry`/dispatcher/golden command-path snapshot. Owns the self-ricing loop, `screen`, `herald`, `shellbridge`, and `quickshell`; deliberately never conducting, the graph, A2A, nodes, or the daemon — those stay core identity in `cli`. The one binary allowed to be nix-dependent. | *(new)* | landed (Workstream A, P-A0–A8) |
+| **screen** | Read-only desktop view for agents plus pointer synthesis: `screen info` (hyprctl monitors/cursor/workspace/clients), `screen shot` (grim/slurp + JSON sidecar), `screen point` (native `zwlr_virtual_pointer_v1` synthesis, no `wlrctl`), `screen ocr` (tesseract), `screen diff` (pixel/inventory act-verification), `screen point text` (click by OCR'd word) — plus its CLI commands. Carries the workspace's only heavy deps (`wayland-client`, `wayland-protocols-wlr`, `image`); `strillix`-only, core never depends on it. | `conduct`'s former screen/pointer modules | landed (P-A1) |
+| **strillix** | The paint app crate: bin `strillix`, package `strillix` — the second composition root over the same domain-crate handler code `cli` assembles, its own independent `Registry`/dispatcher/golden command-path snapshot. Owns the self-ricing loop, `screen`, `herald`, `shellbridge`, and `quickshell`; deliberately never conducting, the graph, A2A, nodes, or the daemon — those stay core identity in `cli`. The one binary allowed to be nix-dependent. | *(new)* | landed (Workstream A, P-A0–A8) |
 
 ## The steward (`steward`) — detail
 
@@ -331,7 +331,7 @@ this is structure, not features.
   snapshot unchanged, full `cargo test --workspace` green. (No Phase 7/8
   code; Phase 9 numbers after them to keep their DEFER notes stable.)
 
-## Two binaries — `aoide`/`aoided` (core) and `lyra` (paint) — LANDED (Workstream A, P-A0-A8)
+## Two binaries — `aoide`/`aoided` (core) and `strillix` (paint) — LANDED (Workstream A, P-A0-A8)
 
 The mapping above is the crate split; this is a narrower, later question it
 doesn't answer on its own — how many *binaries* the crates assemble into.
@@ -341,7 +341,7 @@ reasoning is fixed before code follows it (Workstream A, phase P-A0 of
 
 Core keeps `aoide`/`aoided` over `protocol` · `storage` · `client` ·
 `conduct` · `server` · `secrets` · `conductor` · `upkeep` · `cli`. A second binary —
-**`lyra`** (crate `aoide-lyra`, `crates/lyra`) — owns the
+**`strillix`** (crate `strillix`, `crates/strillix`) — owns the
 rice/draft/mode/cover/livery/quickshell/screen/shellbridge/herald command
 surface: everything that paints, or that only a desktop needs.
 
@@ -356,10 +356,10 @@ surface: everything that paints, or that only a desktop needs.
   headless box needs most, not a painting tool: pure Rust (ratatui), no
   system-closure weight, and conducting orchestration is Aoide's core
   identity — see "What Aoide is" above ("she conducts every agent on
-  it"). It ships in `aoide`/`aoided`, never `lyra`.
+  it"). It ships in `aoide`/`aoided`, never `strillix`.
 - **Charter exceptions (deliberate — recorded here as the smudge they
   are).** `shellbridge.rs` and `herald.rs` stay as FILES in `conduct` —
-  only their REGISTRY lines (the CLI commands) move to `lyra` — because both
+  only their REGISTRY lines (the CLI commands) move to `strillix` — because both
   are entangled with core: `permit.rs:413` publishes summons through
   `herald`, and `conductor/ui.rs:508` reads the socket path `shellbridge`
   owns. `storage::takes` and `storage::mode` stay in `storage` for the
@@ -373,7 +373,7 @@ surface: everything that paints, or that only a desktop needs.
   host-ops commands to exist before there is anything to extract. The
   two-binary split neither touches it nor resolves it.
 - **Cordis correspondence.** In Cordis's terms (CONTRACTS.md §0): a crate
-  is a package/plugin; an app crate — `cli` (core) and `lyra` (paint),
+  is a package/plugin; an app crate — `cli` (core) and `strillix` (paint),
   since this split — is a dsh-style BUNDLE, the ordered composition
   performed at boot; the assembled `Registry` is the plugin tree. An app
   crate's
@@ -384,7 +384,7 @@ surface: everything that paints, or that only a desktop needs.
   paper CONTRACTS §0 already cites.
 - **Nix-independence.** Core (`aoide`/`aoided`) builds with `cargo` and
   runs on any Linux: no nix shell-outs, no NixOS assumption. `song`'s
-  `widgets.rs` `nix eval` call lives in `lyra` now — only `lyra` may be
+  `widgets.rs` `nix eval` call lives in `strillix` now — only `strillix` may be
   nix-dependent. This is the load-bearing half of "What Aoide is" above,
   made structural rather than aspirational.
 - **A third artifact, not a third binary — `aoide-static`.** Core has no C
@@ -401,37 +401,37 @@ surface: everything that paints, or that only a desktop needs.
   interpreter and no reference to a nix store. Reachable as
   `packages.<system>.aoide-static` and the `pkg-aoide-static` check, never
   as `packages.default` — NixOS hosts keep the dynamic multi-output build
-  `aoide.lyra.enable` depends on.
-- **The shell SOURCE is a package, not a crate — `pkgs/lyra-shell`.** The QML
+  `aoide.strillix.enable` depends on.
+- **The shell SOURCE is a package, not a crate — `pkgs/strillix-shell`.** The QML
   tree, the resolved icons and the preview fixture sets a shell is generated
-  from live in the ROOT repo (`pkgs/lyra-shell/{qml,icons,preview}`) and ship
-  verbatim as `${pkgs.lyra-shell}/share/lyra/{qml,icons,preview}`. Plain
+  from live in the ROOT repo (`pkgs/strillix-shell/{qml,icons,preview}`) and ship
+  verbatim as `${pkgs.strillix-shell}/share/strillix/{qml,icons,preview}`. Plain
   source: it runs nothing and names no config, so it is not a shell — the
   directory a shell runs is `aoide.quickshell.config`, and what fills it is a
   song's business. Core cannot read it (this flake is rooted at `pkgs/aoide`
-  and never walks the root repo), and `lyra` reads the CHECKOUT's copy rather
+  and never walks the root repo), and `strillix` reads the CHECKOUT's copy rather
   than the store path, naming it once as
-  `aoide_storage::fs::LYRA_SHELL_SRC`. Published by the root flake as
-  `packages.<system>.lyra-shell` and consumed as `pkgs.lyra-shell` through
+  `aoide_storage::fs::STRILLIX_SHELL_SRC`. Published by the root flake as
+  `packages.<system>.strillix-shell` and consumed as `pkgs.strillix-shell` through
   the same `lib/pkgs.nix` overlay as every other root package. **Never
-  `lyra`:** that attribute is an unrelated nixpkgs package, and in THIS
-  document `packages.<system>.lyra` is core's rice output — one name, one
+  `strillix`:** that attribute is an unrelated nixpkgs package, and in THIS
+  document `packages.<system>.strillix` is core's rice output — one name, one
   meaning, per flake.
 
-- **The shipped songbook is a package — `pkgs/lyra-songbook`.** The score a
-  machine with no checkout falls back to: `share/lyra/songbook/` holding the song
+- **The shipped songbook is a package — `pkgs/strillix-rices`.** The score a
+  machine with no checkout falls back to: `share/strillix/songbook/` holding the song
   folders this instance ships plus baked `manifest.json`/`registry.json` and —
   for a host that selected songs — `builtin.json`; beside it
-  `share/lyra/nix/` (the OFFLINE generator: `manifest.nix`, copies of
+  `share/strillix/nix/` (the OFFLINE generator: `manifest.nix`, copies of
   `lib/songbook.nix`/`lib/song.nix`, and the locked nixpkgs `lib/`) and
-  `share/lyra/aoide-options.json` (`lib/options.nix`'s output, read by
-  `lyra onboard`). `aoide_storage::fs::song_templates_dir` finds the songbook
-  through `AOIDE_SONG_TEMPLATES` or the exe-sibling path, and `fs::lyra_share_dir`
-  is that path's parent; only `aoide-song`/`aoide-lyra` read either. THREE
+  `share/strillix/aoide-options.json` (`lib/options.nix`'s output, read by
+  `strx onboard`). `aoide_storage::fs::song_templates_dir` finds the songbook
+  through `AOIDE_SONG_TEMPLATES` or the exe-sibling path, and `fs::strillix_share_dir`
+  is that path's parent; only `aoide-song`/`strillix` read either. THREE
   arguments: `songs` (which folders ship) and `builtin` (the selection, written to
   `builtin.json`), both defaulted for this flake's own
-  `packages.<system>.lyra-songbook` (every discovered song) and both overridden
-  per host by the `lyra` dendrite, plus `aoideOptions` (the option doc list, which
+  `packages.<system>.strillix-rices` (every discovered song) and both overridden
+  per host by the `strillix` dendrite, plus `aoideOptions` (the option doc list, which
   `callPackage` cannot derive — each build context names it through
   `lib/pkgs.nix`'s `extra`). **What it copies is a host contract,**
   not tidiness: each shipped song enters the derivation as its OWN store path
@@ -452,9 +452,9 @@ pkgs/aoide/flake.nix
 │   ├── default        = aoide
 │   ├── aoide            multi-output derivation
 │   │     .out  -> bin/aoide, bin/aoided
-│   │     .rice -> bin/lyra
+│   │     .rice -> bin/strillix
 │   ├── aoide-static     musl core pair
-│   └── lyra             = aoide.rice
+│   └── strillix             = aoide.strillix
 ├── apps.<sys>.{aoide,aoided}
 ├── overlays.default      final: _prev: { aoide = …; }
 ├── nixosModules.default  core option contract + `aoided.service` + overlay
@@ -469,7 +469,7 @@ The stability contract — what a consumer may rely on staying true:
   names are the contract; the count is not.
 - `packages.<sys>.aoide-static` is the core pair only: no `rice`
   output, no test phase.
-- `packages.<sys>.lyra` is the `rice` output of `packages.<sys>.aoide`
+- `packages.<sys>.strillix` is the `strillix` output of `packages.<sys>.aoide`
   — same derivation, never a second build.
 - `overlays.default` sets exactly one attribute, `aoide`, to the same
   derivation `packages.<sys>.aoide` names. One build, never two.
@@ -519,9 +519,9 @@ assumption:
 - the door/secrets/usage/pair-watch units — still AoideOS-side.
 - `songbookManifest` / `aoideOptions` from the core flake — both need
   `song/` and `modules/`, which this flake never walks.
-- a `lyra` flake, or any Quickshell/rice export — `lyra` is paint, per
+- a `strillix` flake, or any Quickshell/rice export — `strillix` is paint, per
   root `AGENTS.md`; the shell's own source package is the ROOT flake's
-  `packages.<system>.lyra-shell`, never anything exported here.
+  `packages.<system>.strillix-shell`, never anything exported here.
 - `lib/walk.nix` did NOT stay: the songbook's discovery is
   `lib/songbook.nix`'s typed `discover` now — the same file that validates a
   host's song selection and generates the manifest — so there is nothing left
@@ -560,7 +560,7 @@ flake.nix
 ├── songbookRoot              Aoide's own songbook DIRECTORY (`song/songbook`),
 │                             the value `lib/aoideos.nix` builds this flake's
 │                             hosts from — a PATH, not a function
-├── parts.<component>         the `vibeos` PROVIDER module of each component slot
+├── parts.<component>         the `strillix` PROVIDER module of each component slot
 │                             (bar, launcher, powermenu, notifications, wallpaper,
 │                             dock, calendar, switcher, lock, greeter), a bare
 │                             PATH; a consumer's own slot names one beside its own
@@ -568,7 +568,7 @@ flake.nix
 │                             file, the aggregation body the song hook registers
 ├── inventory / nixosConfigurations   (a consumer builds its own; see below)
 └── overlays.default          every `pkgs/<name>` this tree discovers plus
-                              `aoide` (never `lyra`: nixpkgs owns that name)
+                              `aoide` (never `strillix`: nixpkgs owns that name)
 ```
 
 What a consumer's flake writes, in the shapes the outputs are:
@@ -578,11 +578,11 @@ What a consumer's flake writes, in the shapes the outputs are:
 | `inputs.aoide + "/modules/default.nix"` | `nixosModules.nucleus` + `nixosModules.<name>` per catalogue entry; `lib.catalogue` for bulk use | S10 |
 | five `song/songbook/*/rice.nix` | `lib.songbook.hook { registry }`, whose `registry` / `selectionModules` / `extraModulesFor` go to `lib.composition`, over `songbookRoot` when the host performs Aoide's songs. There is no shim for the removed `selectionModule`, `check` and `songModules` exports: a consumer takes the hook | S8 (exported S10) |
 | an `import` of `lib/pkgs.nix` for the overlay | `overlays.default` | S10 |
-| `inputs.aoide.packages.<sys>.default` | `packages.<sys>.aoide` (and `.lyra`, `.lyra-shell`, `.lyra-songbook`) | exists / S3 |
+| `inputs.aoide.packages.<sys>.default` | `packages.<sys>.aoide` (and `.strillix`, `.strillix-shell`, `.strillix-rices`) | exists / S3 |
 | `import … "/lib/livery.nix"` `.resolve` | `lib.livery.resolve` | S10 |
 | `inputs.aoide = inputs.aoide.inputs.aoide` | none: `nixosModules.nucleus` closes over Aoide's own inputs | S10 |
 | a private copy of the composition library | `lib.composition` (habit's, re-exported) | S1 (exported S10) |
-| six `aoide.facets.*` reads | the facts `aoide.{quickshell,lyra,stylix,compositor,greeter}.enable` | S2/S5 |
+| six `aoide.facets.*` reads | the facts `aoide.{quickshell,strillix,stylix,compositor,greeter}.enable` | S2/S5 |
 
 The stability contract:
 
@@ -595,7 +595,7 @@ The stability contract:
 - `songbookRoot` is a PATH, the same value this flake's own hosts are built
   from, a top-level output beside `songbookManifest`. `lib.songbook`'s own
   default is not a substitute: a consumer needs the directory itself to hand the
-  lyra dendrite.
+  strillix dendrite.
 - `overlays.default` is the base package set. A dendrite's replacement of a name the
   walker also supplies stands only for a name listed in `lib/pkgs.nix`'s
   `intentionalOverrides`; any other replacement is an evaluation error naming
@@ -641,7 +641,7 @@ Aoide's part and names it beside its own:
 ```nix
 slots.bar.providers = {
   mine = ./mine-bar.nix;             # the consumer's provider
-  vibeos = aoide.parts.bar;          # Aoide's, a bare path
+  strillix = aoide.parts.bar;          # Aoide's, a bare path
 };
 registry.catalogue = removeAttrs aoide.lib.catalogue [ "bar" ] // slots;
 ```
@@ -650,7 +650,7 @@ registry.catalogue = removeAttrs aoide.lib.catalogue [ "bar" ] // slots;
   for every other name. The same slot name from two catalogues is a collision,
   so the consumer removes the names it names itself.
 - **A part is not standalone.** `aoide.parts.<component>` is one provider file
-  and nothing else: it brings the vibeos runtime by path, and it reads the
+  and nothing else: it brings the strillix runtime by path, and it reads the
   constructor's own facts. A host that selects one passes `nixosModules.nucleus`
   in its `extraModules`, applies `overlays.default`, and gets the hook's
   `_module.args` (`song`, `borrow`, `songbook`) from `lib.songbook.hook`'s
@@ -676,7 +676,7 @@ as `songbookRoot`, or one in the CONSUMER's tree. `lib.songbook` takes the
 directory (`songbook ? …`); the consumer passes the same value, once, into the
 song hook it calls (`lib.songbook.hook`, which sets `_module.args.songbook`
 beside `song` and `borrow`); and the dendrite that paints the built-in songs and
-`pkgs/lyra-songbook` take it as an argument instead of naming a path in this
+`pkgs/strillix-rices` take it as an argument instead of naming a path in this
 repo. A host that performs Aoide's `sonata` therefore writes
 `songbook = aoide.songbookRoot` in both places and `habit.song.declared = "sonata"` in
 its module — never `inputs.aoide + "/song/songbook/…"`. A host says what it
@@ -701,7 +701,7 @@ copies through different input values do not deduplicate.
 `modules/`), the aggregations and override records (a registry's groupings and
 fixes are the consumer's own data), this repo's `hosts/` and `users/` (machines
 and people are a machine's business, and `tests/consumer/` writes its own), and
-anything Quickshell-shaped (paint ships as `packages.<sys>.lyra-*`).
+anything Quickshell-shaped (paint ships as `packages.<sys>.strillix-*`).
 
 ## Open questions (each tagged with when it must be settled)
 

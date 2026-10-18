@@ -46,7 +46,7 @@ Chosen because Nix's own logo is a snowflake, because crystals grow by local acc
 
 Radial distance from the nucleus encodes the mutation policy ([[Governance]]): the closer to the center, the more it belongs to upstream; the farther out, the more it is yours.
 
-A **paint lane** is a dendrite that renders — `quickshell`, `stylix`, `compositor`, `greeter`, `lyra`. It is a branch like any other, and the only nix that renders appearance; each reads only the namespaces root `AGENTS.md` house rule 5 enumerates.
+A **paint lane** is a dendrite that renders — `quickshell`, `stylix`, `compositor`, `greeter`, `strillix`. It is a branch like any other, and the only nix that renders appearance; each reads only the namespaces root `AGENTS.md` house rule 5 enumerates.
 
 ## The performed family — song vocabulary
 

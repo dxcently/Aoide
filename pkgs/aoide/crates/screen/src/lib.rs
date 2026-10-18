@@ -44,7 +44,7 @@
 //! charter. The split (Workstream A, binary-split plan) pulls it out into
 //! its own leaf crate instead: `screen` carries this workspace's only heavy
 //! deps (wayland-client/wayland-protocols-wlr/image) and belongs to the
-//! future graphical binary (`lyra`), while `conduct`'s session/graph core
+//! future graphical binary (`strillix`), while `conduct`'s session/graph core
 //! stays in the headless-safe core binary. `screen` still reaches back into
 //! `aoide_conduct::graph` for seven session-graph symbols (`SessionRecord`,
 //! `SessionsFile`, `load_stage`, `write_stage`, `sessions_path`,

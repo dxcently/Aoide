@@ -1,9 +1,9 @@
 # modules/dendrites/aoide-packages.nix — the aoide CLI on every PATH.
 #
-# The control plane's binaries (`aoide`, `aoided`, `lyra` — one derivation as
+# The control plane's binaries (`aoide`, `aoided`, `strillix` — one derivation as
 # of P-A7 of the binary-split workstream) are injected into pkgs by mkHost's
 # overlay; this module puts them on the SYSTEM profile so the Hyprland
-# keybinds (`aoide shell …`, `lyra rice …`), agent sessions, and the user at a
+# keybinds (`aoide shell …`, `strillix rice …`), agent sessions, and the user at a
 # terminal can all invoke them by name. The systemd units don't need this
 # (they ExecStart absolute store paths) — the interactive session does.
 #
@@ -26,10 +26,10 @@
       # nucleus had carried it, and the "essentials only" port cut it).
       pkgs.git
     ]
-    # P-A8 of the binary-split workstream: `pkgs.aoide.rice` (the `lyra`
+    # P-A8 of the binary-split workstream: `pkgs.aoide.strillix` (the `strillix`
     # paint binary alone) is a SEPARATE output from `pkgs.aoide` (P-A8's
-    # multi-output split) — installed only when `aoide.lyra.enable` is on,
-    # so a headless closure that never sets it never pulls `lyra` in.
-    ++ lib.optional config.aoide.lyra.enable pkgs.aoide.rice;
+    # multi-output split) — installed only when `aoide.strillix.enable` is on,
+    # so a headless closure that never sets it never pulls `strillix` in.
+    ++ lib.optional config.aoide.strillix.enable pkgs.aoide.strillix;
   };
 }

@@ -8,7 +8,7 @@
 //! (reading `--from`'s notes, writing the scaffolded files) and calls
 //! through to this module for the actual rendering.
 
-use aoide_storage::fs::LYRA_SHELL_SRC;
+use aoide_storage::fs::STRILLIX_SHELL_SRC;
 use serde_json::Value;
 
 use crate::livery::schema::{POLARITY_DEFAULT, POLARITY_VALUES};
@@ -68,7 +68,7 @@ pub const GEOMETRY_KEYS: &[&str] = &[
 /// The window (border-colour) component tier's fixed key set.
 pub const WINDOW_KEYS: &[&str] = &["border", "borderInactive"];
 
-/// The ten component slots a song's body selects, each filled by its `vibeos`
+/// The ten component slots a song's body selects, each filled by its `strillix`
 /// provider (CONTRACTS.md §5). A scaffolded song names all ten, as every
 /// committed one does: a song that paints a desktop paints all of it.
 pub const VIBEOS_SLOTS: &[&str] = &[
@@ -85,9 +85,9 @@ pub const VIBEOS_SLOTS: &[&str] = &[
 ];
 
 /// Render one `rice.nix` for `rice compose`: a song body (CONTRACTS.md §5,
-/// song shape v1) — the `system` half selects the ten `vibeos` providers and
+/// song shape v1) — the `system` half selects the ten `strillix` providers and
 /// sets the livery copied from `notes` (palette, polarity, window, geometry),
-/// the `home` half selects the `lyra` renderer and names this song's
+/// the `home` half selects the `strillix` renderer and names this song's
 /// `hyprland.conf`. `from` is named in each block's comment, so a reader
 /// tells an inherited value from a null fill template.
 pub fn render_rice_nix(name: &str, from: &str, notes: &Value) -> String {
@@ -141,7 +141,7 @@ pub fn render_rice_nix(name: &str, from: &str, notes: &Value) -> String {
 
     let providers: String = VIBEOS_SLOTS
         .iter()
-        .map(|slot| format!("      {slot} = \"vibeos\";\n"))
+        .map(|slot| format!("      {slot} = \"strillix\";\n"))
         .collect();
 
     let mut s = String::new();
@@ -180,7 +180,7 @@ pub fn render_rice_nix(name: &str, from: &str, notes: &Value) -> String {
     s.push_str("    };\n");
     s.push_str("  };\n");
     s.push_str("  home = {\n");
-    s.push_str("    members = [ \"lyra\" ];\n");
+    s.push_str("    members = [ \"strillix\" ];\n");
     s.push_str("    module = { rice.hyprland.conf = ./hyprland.conf; };\n");
     s.push_str("  };\n");
     s.push_str("}\n");
@@ -225,7 +225,7 @@ pub fn render_intent_md(name: &str, from: &str) -> String {
          ## How to fill this rice\n\
          \n\
          - Slot catalog (which slots a host wires today, what each expects): \
-           `{LYRA_SHELL_SRC}/qml/slots.md`\n\
+           `{STRILLIX_SHELL_SRC}/qml/slots.md`\n\
          - Per-song widget contract: `CONTRACTS.md` §5, \"Per-song flavor widgets\"\n\
          - Songbook playbook: `song/songbook/update-playbook.md`\n\
          - Drop a `widgets/<slot>.qml` here to dress a slot — any file under `widgets/` \

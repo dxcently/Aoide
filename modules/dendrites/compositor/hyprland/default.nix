@@ -313,7 +313,7 @@ in
         # Bake the livery fragment into hyprland.conf. mkBefore (order 500) so
         # livery defaults land first; the hyprland behaviour lane's block
         # and the screenshot dendrite's binds follow at the default order
-        # (1000). The lyra renderer appends its one `source` line at mkAfter
+        # (1000). The strillix renderer appends its one `source` line at mkAfter
         # (1500), so the rice reads last. One `lines` option, several writers.
         extraConfig = lib.mkBefore hyprNoteConfig;
       };
@@ -327,7 +327,7 @@ in
       # choice consistent with this compositor stack. Defined as an explicit
       # user service (journald-logged, Restart=on-failure) rather than relying
       # on the packaged unit landing on the systemd search path — same idiom as
-      # the lyra lane's shell service.
+      # the strillix lane's shell service.
       systemd.user.services.hyprpolkitagent = {
         Unit = {
           Description = "Hyprland Polkit authentication agent (GUI privilege prompts)";

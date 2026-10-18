@@ -13,7 +13,7 @@ routes; it holds no rule bodies. Read in this order:
    `schema --json`, stage files.
 5. `docs/Aoide-Wiki/ingest/index.md` — the wiki's table of contents; every
    concept and entity in long form.
-6. `aoide guide` / `lyra guide` — the same orientation printed by the binary
+6. `aoide guide` / `strx guide` — the same orientation printed by the binary
    at runtime, for a session with no checkout in view.
-7. `aoide schema --json` / `lyra schema --json` — the machine-readable
+7. `aoide schema --json` / `strx schema --json` — the machine-readable
    command surface; the ground truth for what each binary can do.

@@ -247,7 +247,7 @@ Fields per entry: status · owner · depends on · evidence · next.
   Phase (a) design (scratchpad `p-lyra-migration-a-brief.md`, Opus, 850
   lines, read-only) decided the export surface, all from
   `pkgs/aoide/flake.nix`: `packages.{default,aoide,aoide-static}` unchanged;
-  NEW `packages.lyra` (= `aoide.rice`, retires the `aoide^out,rice` selector),
+  NEW `packages.lyra` (= `aoide.strillix`, retires the `aoide^out,strillix` selector),
   NEW `overlays.default` (one attribute, one build), NEW `nixosModules.default`
   (core `aoide.*` options + aoided unit/tmpfiles/session vars, applies the
   overlay itself) backed by a new plugin dir `pkgs/aoide/module/` with explicit

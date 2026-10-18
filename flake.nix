@@ -104,13 +104,13 @@
       # the host + vm overlays (lib/aoideos.nix, tests/vm-boot.nix).
       #
       # `extra` is the walker's special-args escape hatch (lib/pkgs.nix's
-      # header): `lyra-songbook` ships the `aoide.*` option doc list, which
+      # header): `strillix-rices` ships the `aoide.*` option doc list, which
       # `callPackage` cannot fill — it is derived from this flake's `inputs` —
       # so it is named here, once, in the context that has them.
       pkgsWalk = import ./lib/pkgs.nix {
         inherit lib;
         extra = {
-          lyra-songbook = {
+          strillix-rices = {
             inherit (self) aoideOptions;
           };
         };
@@ -155,17 +155,17 @@
           # `aoide`, never as `default` — see pkgs/aoide/default.nix's
           # `paint` argument and flake.nix's `aoide-static` package.
           aoide-static = inputs.aoide.packages.${system}.aoide-static;
-          lyra = inputs.aoide.packages.${system}.lyra;
+          strillix = inputs.aoide.packages.${system}.strillix;
         in
         discovered
         // {
-          inherit aoide aoide-static lyra;
+          inherit aoide aoide-static strillix;
           default = aoide;
         }
       );
 
       # ── Songbook manifest/registry (C4/W3) ──────────────────────────────────
-      # The SAME generator `modules/dendrites/lyra/runtime.nix`'s
+      # The SAME generator `modules/dendrites/strillix/runtime.nix`'s
       # `quickshellConfig` derivation uses at build time
       # (`lib/songbook.nix`), exposed as a lean flake output so
       # `pkgs/aoide/crates/song/src/widgets.rs` can shell out to `nix eval
@@ -189,13 +189,13 @@
 
       # ── aoide.* option derivation (P-I3, onboarding lane) ───────────────────
       # Every `aoide.*` option declared across modules/{nucleus,dendrites},
-      # narrowed to {name, description, default} for `lyra
+      # narrowed to {name, description, default} for `strillix
       # onboard`'s `aoide.nix` generator (docs/architecture/ONBOARD.md "The
       # vars-file generator"; lib/options.nix does the evalModules walk).
       # Deliberately NOT per-system like `packages`/`checks` below —
       # `songbookManifest` above sets the precedent (system-independent where
       # nothing system-specific is needed) and this repo targets
-      # `x86_64-linux` only (`systems` above), so lyra shells a single static
+      # `x86_64-linux` only (`systems` above), so strillix shells a single static
       # flake ref (`nix eval --json <checkout>#aoideOptions`) with no system
       # attrpath to get right.
       aoideOptions = import ./lib/options.nix {
@@ -258,8 +258,8 @@
 
       # The base package overlay: every `pkgs/<name>` this tree discovers plus
       # `aoide`, the self-flaked core — the same set the `packages` output names
-      # (R8: `lyra` is deliberately NOT here, nixpkgs owns that name; the rice
-      # binary is the `aoide` derivation's `rice` output).
+      # (R8: `strillix` is deliberately NOT here, nixpkgs owns that name; the rice
+      # binary is the `aoide` derivation's `strillix` output).
       overlays.default =
         final: prev:
         (pkgsWalk.overlay { stock = nixpkgs.legacyPackages.${prev.stdenv.hostPlatform.system}; }) final prev
@@ -274,11 +274,11 @@
 
       # ── The front door: parts and rices (CONTRACTS.md §2, §5) ───────────────
       # `parts.<component>` is the PROVIDER module of a component slot's
-      # `vibeos` provider, as a bare path: the file that answers the slot, never
+      # `strillix` provider, as a bare path: the file that answers the slot, never
       # the catalogue's slot value (`{ providers = …; }`), which habit would
       # pass to the provider check and then fail on as an unknown option. A
       # consumer names its own slot's provider with it, beside its own:
-      #   bar = { providers = { <own> = ./own-bar.nix; vibeos = aoide.parts.bar; }; };
+      #   bar = { providers = { <own> = ./own-bar.nix; strillix = aoide.parts.bar; }; };
       # Read out of the catalogue, never named a second time: a module file is
       # named once (AGENTS.md house rule 7), and the catalogue is where that is.
       parts =
@@ -303,7 +303,7 @@
               entry = registry.catalogue.${name};
               set = if builtins.isAttrs entry then entry else import entry;
             in
-            set.providers.vibeos
+            set.providers.strillix
           );
 
       # Every committed song with a `rice.nix`, name → that file: the aggregation
@@ -386,12 +386,12 @@
           # and lib/checks.nix's Check 5.
           discovery = checks.discovery pkgsWalk.strayEntries;
           # No phantom commands in the docs — every backticked
-          # `aoide …`/`lyra …` spelling in AGENTS.md + docs/agent/*.md,
+          # `aoide …`/`strillix …` spelling in AGENTS.md + docs/agent/*.md,
           # INSTALL.md and the wiki resolves against the binaries built from
           # this source (see lib/checks.nix's Check 6).
           phantom-commands = checks.phantomCommands self inputs.aoide.packages.${system}.default;
           # Core's crate closure (derived from pkgs/aoide/Cargo.toml, walked
-          # from crates/cli) never reaches aoide-song/aoide-screen/aoide-lyra
+          # from crates/cli) never reaches aoide-song/aoide-screen/strillix
           # and never shells out to nix — AGENTS.md's nix-independence claim
           # made a real gate (see lib/checks.nix's Check 7).
           nix-independence = checks.nixIndependence self;
@@ -399,7 +399,7 @@
           # evaluates it, reproduces `#songbookManifest` over the committed
           # songbook — offline, no flake, no checkout.
           generator-offline = checks.generatorOffline {
-            lyraSongbook = (pkgsWalk.discover pkgs).lyra-songbook;
+            strillixRices = (pkgsWalk.discover pkgs).strillix-rices;
             songbook = ./song/songbook;
             expected = builtins.toJSON {
               manifest = songbookLib.manifestAttrs;
@@ -410,7 +410,7 @@
           # the repo — §7.4's "a song is a self-contained folder" and "no
           # repo-absolute paths", which is what a machine's own songbook needs.
           generator-relocatable = checks.generatorRelocatable {
-            lyraSongbook = (pkgsWalk.discover pkgs).lyra-songbook;
+            strillixRices = (pkgsWalk.discover pkgs).strillix-rices;
             songbook = ./song/songbook;
             expected = builtins.toJSON {
               manifest = songbookLib.manifestAttrs;

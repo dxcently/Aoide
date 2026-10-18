@@ -50,9 +50,9 @@ aoide guide [--json]
   `Registry` instance it emits. Message `"printed the four-tier
   onboarding"`; `--json` data `{text: <full guide>}`.
 - **Notes:** read-only; not gated. See [[Agent-Interface]] for the tier model
-  the guide describes. `lyra guide` is the paint-side mirror — the same
-  shape from its own `pkgs/aoide/crates/lyra/src/guide.rs` against lyra's
-  own registry, scoped to lyra's side of the boundary.
+  the guide describes. `strx guide` is the paint-side mirror — the same
+  shape from its own `pkgs/aoide/crates/strillix/src/guide.rs` against strillix's
+  own registry, scoped to strillix's side of the boundary.
 
 ### aoide schema
 
@@ -71,9 +71,9 @@ aoide schema [--json]
   `examples` where declared).
 - **Notes:** read-only; not gated. This document is the machine-readable
   backstop every tier generates from — the MCP tool list derives from it
-  ([[Agent-Interface]]). `lyra schema` mirrors it for the paint side: its own
+  ([[Agent-Interface]]). `strx schema` mirrors it for the paint side: its own
   registry, its own golden snapshot (48 command paths, evolving independently
-  of core's 80 — see [[lyra]]).
+  of core's 80 — see [[strillix]]).
 
 ### aoide make
 
@@ -113,7 +113,7 @@ aoide onboard [--harness <a,b,...>] [--yes] [--out <path>] [--json]
   `.claude/skills/aoide/SKILL.md` (`hooks::skill_source()`'s walk-up);
   outside a checkout the run fails exit 1, `reason: "no-checkout"`. PATH
   probes for each known harness (`claude`, `kimi`, `pi` via
-  `aoide_protocol::agents`) and for the lyra binary (`rice_bin()`:
+  `aoide_protocol::agents`) and for the strillix binary (`rice_bin()`:
   `$AOIDE_RICE_BIN`, a sibling binary, then PATH).
 - **Writes:** registers the clone by dispatching the already-registered
   `project add aoide <checkout>` handler (stage-file effects per
@@ -126,23 +126,23 @@ aoide onboard [--harness <a,b,...>] [--yes] [--out <path>] [--json]
   per [[Content-and-Hooks]]).
 - **Pipes to / output:** progress lines per phase; the closing output is the
   full `aoide guide` text rendered from the same assembled registry. Message
-  `"onboard: clone registered, N harness(es) wired -- <lyra note>"`;
-  `--json` data `{root, harnesses, hooks: [{agent, ok, message}], lyra}`.
+  `"onboard: clone registered, N harness(es) wired -- <strillix note>"`;
+  `--json` data `{root, harnesses, hooks: [{agent, ok, message}], strillix}`.
 - **Notes:** not gated; `implemented: true`, registered in
   `pkgs/aoide/crates/cli/src/commands/onboard.rs`. CLI door only — any other
   door is a usage error (exit 2). Harness selection: `--harness` wires
   exactly the comma-separated list (an unknown name is a usage error); given
   neither flag, a tty gets the interactive multi-select preselected by the
   PATH probe, while `--yes` or a non-tty run wires every harness found on
-  PATH. When lyra resolves, the nix half is delegated to a child `lyra
+  PATH. When strillix resolves, the nix half is delegated to a child `strillix
   onboard` with inherited stdio (`--out` and `--yes` forward; `--harness`
   does not) — a spawn failure or nonzero exit degrades to a note, not an
   onboard failure. See [[Clone-and-Run]].
 
-### lyra onboard
+### strx onboard
 
 ```
-lyra onboard [--out <path>] [--yes] [--json]
+strx onboard [--out <path>] [--yes] [--json]
 ```
 
 - **Reads:** the checkout root, found by walking up from the cwd for a
@@ -159,14 +159,14 @@ lyra onboard [--out <path>] [--yes] [--json]
   (an interactive confirm unless `--yes`); a file it did not generate is
   refused, never overwritten.
 - **Pipes to / output:** prints the teaching line `imports = [ ./aoide.nix
-  ];` — the user's flake is never edited. Message `"lyra onboard: wrote
+  ];` — the user's flake is never edited. Message `"strx onboard: wrote
   <out> (N options) -- imports = [ ... ];"` (`regenerated` on a rerun);
   `--json` data `{out, optionCount, backedUp, importsLine}`.
 - **Notes:** not gated; `implemented: true`, registered in
-  `pkgs/aoide/crates/lyra/src/commands/onboard.rs`. CLI door only, from a
+  `pkgs/aoide/crates/strillix/src/commands/onboard.rs`. CLI door only, from a
   checkout — the derivation needs the repo's `modules/` and `flake.nix`. In
   the normal flow this runs as `aoide onboard`'s delegate child, but it
-  stands alone. See [[lyra]].
+  stands alone. See [[strillix]].
 
 ### aoide usage
 
@@ -208,10 +208,10 @@ aoide usage [--json]
   (`reason: "state-write-failed"`). The usage widget ([[Gadget-Dock]]) reads
   the written file and must tolerate `live.ok == false`.
 
-### lyra reload
+### strx reload
 
 ```
-lyra reload [--json]
+strx reload [--json]
 ```
 
 - **Reads:** `stage/mode.json` (the authority; absent reads as
@@ -219,7 +219,7 @@ lyra reload [--json]
   (`pkgs/aoide/crates/song/src/commands/reload.rs`).
   - `declarative` — the shell reload only; nothing is unlocked, so nothing is
     synced or snapshotted.
-  - `staging` — `lyra rice stage <song>`'s own body for the marker's `song`:
+  - `staging` — `strx rice stage <song>`'s own body for the marker's `song`:
     re-derives `stage/livery.json`, the cover and the terminal colours, applies
     the hyprctl keywords, and syncs the song's widget bodies, `manifest.json`
     and the widget-type registry into `run/qml/songs/`.
@@ -230,7 +230,7 @@ lyra reload [--json]
     is not the symlink to the marked draft's `livery.json` — the activation
     seed renames its declared file over the link on every login and switch,
     and leaves the draft file alone — it is re-routed (the same
-    remove-and-symlink `lyra rice mode draft` uses), and after the sync the
+    remove-and-symlink `strx rice mode draft` uses), and after the sync the
     SAME marker is saved again, so `stage/mode.json` is written last and the
     shell's livery watch re-arms. A draft whose `livery.json` is gone is
     refused before anything is written.
@@ -238,7 +238,7 @@ lyra reload [--json]
   sync, a take of the now-synced stage and widget bodies, deduped against the
   head (`songbook/<song>/takes/`, or `songbook/<song>/drafts/<name>/takes/`
   in a draft), so an unchanged reload mints nothing and every iteration is
-  reversible with `lyra rice back`. The sync runs before the snapshot: its
+  reversible with `strx rice back`. The sync runs before the snapshot: its
   write is a pure function of the song, so the snapshot settles into a stable
   value and dedupes. `changed` lists the stage files, terminal colours, widget
   bodies, manifest, registry and take written, and in a draft re-route the
@@ -267,19 +267,19 @@ lyra reload [--json]
   an unreadable stage file, a song this system cannot stage) ends the
   command with exit 1 before any snapshot or shell reload. The vanished-draft
   refusal is a taught one: it names the draft and the missing path, and its
-  fix is `lyra rice mode stage`, which leaves draft mode. `lyra reload` is
+  fix is `strx rice mode stage`, which leaves draft mode. `strx reload` is
   also what brings a staged or drafted song back after a login or a switch:
-  the activation lays the declared song over the runtime tree, and the lyra
+  the activation lays the declared song over the runtime tree, and the strillix
   lane runs this command from its `aoide-rice-reload` unit. It is the reload
   lane for dynamically-loaded widget QML (`Qt.createComponent`) and
   lane-owned QML that Quickshell's own file watcher never tracks
   ([[Quickshell]]). It absorbed the old `quickshell reload`; the group keeps
   only `quickshell healthcheck`.
 
-### lyra quickshell healthcheck
+### strx quickshell healthcheck
 
 ```
-lyra quickshell healthcheck [--json]
+strx quickshell healthcheck [--json]
 ```
 
 - **Reads:** `systemctl --user show aoide-quickshell.service

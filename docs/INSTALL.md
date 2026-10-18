@@ -4,16 +4,16 @@ There are two installs and one boundary between them (root `AGENTS.md`,
 `docs/architecture/PACKAGE-LAYOUT.md`): **Aoide** is the core — `aoide` and
 `aoided`, sessions and the DAG, conduct, the doors — and installs with cargo on
 any Linux, no nix. **AoideOS** is the distribution built on that core, and its
-paint half (`lyra`, the bar, the dock, the rice loop) ships only through the
+paint half (`strillix`, the bar, the dock, the rice loop) ships only through the
 nix flake.
 
 | you want | binaries | how it installs |
 |---|---|---|
 | Aoide (core) | `aoide`, `aoided` | `cargo install` from a checkout — **this page** |
-| AoideOS (the desktop) | the same, plus `lyra` | the flake: `README.md` § 4, [Clone and Run](Aoide-Wiki/concepts/governance/Clone-and-Run.md) |
+| AoideOS (the desktop) | the same, plus `strillix` | the flake: `README.md` § 4, [Clone and Run](Aoide-Wiki/concepts/governance/Clone-and-Run.md) |
 
-Nothing here installs `lyra`, and nothing here needs nix, a NixOS host, or a
-graphical session. `lyra` is a separate crate with the paint dependency weight
+Nothing here installs `strillix`, and nothing here needs nix, a NixOS host, or a
+graphical session. `strillix` is a separate crate with the paint dependency weight
 (wayland, image decoding, a nix eval) and the flake is its only path.
 
 ---
@@ -69,7 +69,7 @@ cargo install --path pkgs/aoide/crates/cli --bins --locked
   workspace root, no `[package]`), so `--path pkgs/aoide` fails with
   `error: found a virtual manifest ... instead of a package manifest`.
 - **`--bins` installs that crate's two binaries**: `aoide` and `aoided`. There
-  is no third: `lyra` lives in `crates/lyra` and is not installed by this.
+  is no third: `strillix` lives in `crates/strillix` and is not installed by this.
 - **`--locked`** pins the build to the workspace's committed
   `pkgs/aoide/Cargo.lock`.
 - The install is a release build — about a minute on a 4-job laptop — and lands
@@ -92,8 +92,8 @@ to wire and run `hooks install` for each chosen harness.
 
 - `--harness claude,eidolon` wires exactly that list; `--yes` takes every
   harness found on `PATH` and skips every prompt.
-- When the `lyra` binary resolves it delegates the nix half to `lyra onboard`;
-  on a core-only box it says so and stops — *"lyra: not found ... skipping the
+- When the `strillix` binary resolves it delegates the nix half to `strx onboard`;
+  on a core-only box it says so and stops — *"strillix: not found ... skipping the
   desktop half; core setup is complete"*. That line is success, not a failure.
 - Run it in a directory you own: a session registered from a Windows path under
   WSL lands `(unanchored)` on the graph (see § 6).

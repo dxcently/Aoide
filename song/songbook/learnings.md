@@ -63,7 +63,7 @@ in git; `git log --follow -- song/songbook/default/` finds it.
   edges added in the preview root, and say so.
 - **A wallpaper is a cover until song wallpaper slots are hosted.**
   Generate it with a helper in the preview (fixed seed, exact viewport
-  size), commit the PNG, and `lyra cover set` the runtime songbook's copy.
+  size), commit the PNG, and `strx cover set` the runtime songbook's copy.
 - **An inner glow lit from the resting rule colour is invisible.** At
   0.10 alpha of `dim` on CRT black the edge rose by ~6/255. Light the glow
   from `title` and let alpha, not colour, carry rest vs focus.
@@ -137,9 +137,9 @@ in git; `git log --follow -- song/songbook/default/` finds it.
   `Canvas.Threaded` on the live shell stays unmeasured until a live pass.
 - **A built-in song's runtime copy is read-only.** `~/.aoide/song/songbook/
   sonata` is seeded from the nix store at 0444/0555. `chmod u+w` the one file
-  and write it in place (a temp-and-rename needs the directory); `lyra rice
+  and write it in place (a temp-and-rename needs the directory); `strx rice
   declare` then carried it into the checkout like any other song.
-- **`lyra rice declare` copies; it does not delete.** A file renamed in the
+- **`strx rice declare` copies; it does not delete.** A file renamed in the
   runtime tree arrives under its new name, and the old name stays in the
   checkout until it is removed there (`CoverPcbWorker.mjs` to `.js`).
 

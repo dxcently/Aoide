@@ -17,7 +17,7 @@
 //! running instance by itself (confirmed live: it looks for a "default"
 //! config directory and fails otherwise) — the instance here was launched
 //! with `-p <run_qml_dir>/shell.qml` (the `quickshell` lane's service,
-//! `modules/dendrites/quickshell/system.nix`; lyra — the lane that deploys the tree —
+//! `modules/dendrites/quickshell/system.nix`; strillix — the lane that deploys the tree —
 //! names that directory as `aoide.quickshell.config`),
 //! so the same `-p` has to prefix the `ipc call` invocation to target it.
 //!
@@ -103,7 +103,7 @@ impl ReloadStatus {
 /// This crate's own test build is always that no-op, before the service is
 /// even asked: `cfg!` is evaluated when *this crate* is compiled, so a
 /// handler test run from a desktop session never reloads the operator's live
-/// shell, while a `lyra`/CLI integration test linking this library still can.
+/// shell, while a `strillix`/CLI integration test linking this library still can.
 pub fn quickshell_ipc_reload() -> ReloadStatus {
     if cfg!(test) || quickshell_service_main_pid().is_none() {
         return ReloadStatus::NotRunning;

@@ -10,16 +10,16 @@ source: "[[references/AOIDE-HANDOFF]]"
 
 Aoide ships the rice engine as a builtin. The engine provides the loop, the schema, and the staging mechanism. Everything else — the songs, the preferences, the accumulated taste — it learns by doing.
 
-**Status today:** the loop below is real end to end, `rice declare` included. `rice lint` (runs the native [[livery]] engine), `rice stage`, `rice compose`, `lyra reload` (the one mode-aware iteration command — absorbed `quickshell reload` outright), the `rice draft` group (`save`/`list`/`drop`), and the `rice mode` group (`status`/`stage`/`declarative`/`draft`) are all implemented. `rice stage` stages `stage/livery.json`, [[Quickshell]] hot-reloads it live via `FileView`, geometry, window-border colours and the hyprglass switch apply to the running compositor over `hyprctl` in the same step, and the terminals follow: `stage/terminal-colors.conf` for every new kitty window, and a `kitty @ load-config` per instance for the open ones — while `rice mode declarative` is locked (below), `rice stage` refuses instead of writing. Beyond a live `rice stage`, the activation seed reseeds `stage/livery.json` from the active song's committed notes with the venue's `aoide.livery.override` and the host's geometry applied and publishes the same bytes at `song/declared/livery.json`, the declared twin that `rice mode declarative` re-pins from, beside `song/declared/venue.json`, the slots the venue recolours and the geometry the host sets, as data ([[Codebase#Runtime contracts (socket + stage files)]]) — so a host that boots without ever staging still carries the correct stage twin, and a later re-stage of the declared song reads the runtime songbook, where the song is edited, with the venue laid over it: the venue wins on the slots it recolours and the geometry it sets, and an edit shows everywhere else. The seed is declared truth and nothing more: the lyra lane's `aoide-rice-reload` unit then runs `lyra reload` at every login (before the shell starts) and on every switch, which brings back whatever `stage/mode.json` names — the last staged song, or the routed draft. `rice declare` is implemented — gated, it copies the runtime song tree, less its top-level `takes/` and `drafts/` (the machine's undo history and scratch, which stay behind), into the checkout's `song/songbook/<name>/` (byte-diff, a repeat with nothing new is a no-op; no `git add`, no rebuild — the user runs those herself). `rice transpose` remains the one declared-but-not-implemented stub (exit `64`) — narrate it as planned, not as a working pipeline. There is no `rice gen`; `rice compose` is the real, working scaffolding entry point.
+**Status today:** the loop below is real end to end, `rice declare` included. `rice lint` (runs the native [[livery]] engine), `rice stage`, `rice compose`, `strx reload` (the one mode-aware iteration command — absorbed `quickshell reload` outright), the `rice draft` group (`save`/`list`/`drop`), and the `rice mode` group (`status`/`stage`/`declarative`/`draft`) are all implemented. `rice stage` stages `stage/livery.json`, [[Quickshell]] hot-reloads it live via `FileView`, geometry, window-border colours and the hyprglass switch apply to the running compositor over `hyprctl` in the same step, and the terminals follow: `stage/terminal-colors.conf` for every new kitty window, and a `kitty @ load-config` per instance for the open ones — while `rice mode declarative` is locked (below), `rice stage` refuses instead of writing. Beyond a live `rice stage`, the activation seed reseeds `stage/livery.json` from the active song's committed notes with the venue's `aoide.livery.override` and the host's geometry applied and publishes the same bytes at `song/declared/livery.json`, the declared twin that `rice mode declarative` re-pins from, beside `song/declared/venue.json`, the slots the venue recolours and the geometry the host sets, as data ([[Codebase#Runtime contracts (socket + stage files)]]) — so a host that boots without ever staging still carries the correct stage twin, and a later re-stage of the declared song reads the runtime songbook, where the song is edited, with the venue laid over it: the venue wins on the slots it recolours and the geometry it sets, and an edit shows everywhere else. The seed is declared truth and nothing more: the strillix lane's `aoide-rice-reload` unit then runs `strx reload` at every login (before the shell starts) and on every switch, which brings back whatever `stage/mode.json` names — the last staged song, or the routed draft. `rice declare` is implemented — gated, it copies the runtime song tree, less its top-level `takes/` and `drafts/` (the machine's undo history and scratch, which stay behind), into the checkout's `song/songbook/<name>/` (byte-diff, a repeat with nothing new is a no-op; no `git add`, no rebuild — the user runs those herself). `rice transpose` remains the one declared-but-not-implemented stub (exit `64`) — narrate it as planned, not as a working pipeline. There is no `rice gen`; `rice compose` is the real, working scaffolding entry point.
 
 ## The Rice Loop
 
 ```
-lyra rice compose <name> [--from <song>]   (real — scaffolds a new song, below)
+strx rice compose <name> [--from <song>]   (real — scaffolds a new song, below)
     ↓  copies palette/window/geometry from --from (default "sonata")
-lyra rice mode stage <name>                (real — unlocks staging, stages declared content)
+strx rice mode stage <name>                (real — unlocks staging, stages declared content)
     ↓  edit the song's files (hand or agent)
-lyra reload                                 (real — THE iteration command: reads
+strx reload                                 (real — THE iteration command: reads
     ↓                                          stage/mode.json and reloads accordingly;
     ↓                                          staging snapshots the current rice —
     ↓                                          deduped against the head take, so an
@@ -28,21 +28,21 @@ lyra reload                                 (real — THE iteration command: rea
     ↓                                          call; loop this with edits freely)
 rice lint                                    (real — livery schema validation)
     ↓  fail → reject + songbook note
-lyra rice mode draft <draft-name>           (real — ROUTES stage/livery.json into a saved
+strx rice mode draft <draft-name>           (real — ROUTES stage/livery.json into a saved
     ↓                                          draft via a symlink; forks it from the
     ↓                                          current stage if new, and takes a baseline
     ↓                                          take of it; see Drafts below)
-    ⋯ iterate freely: edit → `lyra reload` → look, no separate save step; every
+    ⋯ iterate freely: edit → `strx reload` → look, no separate save step; every
        reload snapshots the routed draft too (undo for free via `rice back`, back to
        the entry baseline at the least); switch
        to a different saved iteration any time with another `rice mode draft <name>` ⋯
-lyra rice mode declarative                  (real — tears the routing down, re-pins
+strx rice mode declarative                  (real — tears the routing down, re-pins
     ↓                                          the declared truth; the draft itself
     ↓                                          stays saved on disk)
-lyra rice declare <name>                    (real — copies the song, less its
+strx rice declare <name>                    (real — copies the song, less its
     ↓                                          takes/ and drafts/, into the
     ↓                                          checkout's song/songbook/<name>/)
-lyra rice declare <name> --host             (real — rewrites the host config's one
+strx rice declare <name> --host             (real — rewrites the host config's one
     ↓                                          habit.song.declared line to <name>;
     ↓                                          the RICE menu's Declare row runs it)
     ↓  gated rebuild (the user runs it herself)
@@ -73,7 +73,7 @@ songbook at `song/songbook/`, and `rice declare` is the seam that copies a
 composed song from the runtime root into it, less its top-level `takes/` and
 `drafts/`, which stay behind.
 
-`lyra rice compose <name> [--from <song>] [--force] [--json]` scaffolds a new song directly into the runtime songbook — the starting point of the rice loop above:
+`strx rice compose <name> [--from <song>] [--force] [--json]` scaffolds a new song directly into the runtime songbook — the starting point of the rice loop above:
 `song/songbook/<name>/rice.nix` (a body, which habit imports only when its song is performed, CONTRACTS §5; its `system.module` copies the `palette`/`window`/`geometry` tiers from
 `--from`, defaulting to `sonata` — the only `.nix` file the scaffold
 writes, satisfying the song-shape check), a `livery.json` mirror of the
@@ -88,8 +88,8 @@ would.
 The `--from` song resolves from the host songbook first, else from the
 shipped score templates at `<templates>/<from>/livery.json`, where
 templates is `$AOIDE_SONG_TEMPLATES` (absolute) else
-`<exe_dir>/../share/lyra/songbook` when that directory exists.
-`pkgs/lyra-songbook` bakes the committed `song/songbook/` tree plus
+`<exe_dir>/../share/strillix/songbook` when that directory exists.
+`pkgs/strillix-rices` bakes the committed `song/songbook/` tree plus
 prebaked `manifest.json`/`registry.json`/`builtin.json` into that share dir,
 and beside it the OFFLINE generator (`nix/manifest.nix` + copies of
 `lib/songbook.nix`/`lib/song.nix` + the locked nixpkgs `lib/`) and
@@ -100,7 +100,7 @@ flake, no network, no checkout. A song with a `_widgets/` shelf needs that
 generator, not a checkout: `composeSong` runs inside it.
 
 The same templates dir also seeds the runtime songbook itself: the first
-`lyra rice stage <name>` / `lyra rice mode stage <name>` for a song that is
+`strx rice stage <name>` / `strx rice mode stage <name>` for a song that is
 SHIPPED but was never composed on this host — `songbook/<name>/` missing
 outright, not just missing a file — copies that song's whole template tree
 in before staging proceeds, once, never touching a songbook dir that
@@ -109,7 +109,7 @@ fresh host's very first `rice mode stage sonata` somewhere to read from and
 write back to, without requiring `rice compose` first.
 
 After the seed, the repo's changes to a built-in song reach the machine through
-`lyra rice refresh [<name>]`: a file the machine never edited takes the repo's
+`strx rice refresh [<name>]`: a file the machine never edited takes the repo's
 version, an edited or unrecorded file is kept and reported, a file the machine
 deleted is not re-added, and `takes/`, `drafts/` and machine-only files are
 never touched. `--check` reports each file's state and writes nothing. The rule,
@@ -135,7 +135,7 @@ draft-scoped, because nothing routes them through the `stage/livery.json`
 symlink the way palette/cover values are routed. Practically: editing a
 widget file while routed into ANY draft of that song mutates what EVERY
 draft of that song renders, not just the one currently live — there is no
-per-draft widget fork to isolate the edit into. `lyra reload`'s take (below)
+per-draft widget fork to isolate the edit into. `strx reload`'s take (below)
 still captures widget bodies alongside livery+cover on every mint, in every
 mode; it is the take store, not the draft mechanism, that remembers them.
 
@@ -238,12 +238,12 @@ today — `quickshell`, the shell's own `aoide-wallpaper` layer, which draws the
 song's own default and the user's picks, and `skwd-wall`, an external provider
 that draws picks on its own surface. A host picks one with
 `habit.dendrites.wallpaper.provider`, and the chosen provider file names
-itself in the fact `aoide.wallpaper.provider`; `lyra` publishes that one word to
+itself in the fact `aoide.wallpaper.provider`; `strillix` publishes that one word to
 the runtime as `song/stage/wallpaper-provider`, which both the CLI
 (`wallpaper_provider::provider`) and `LiveryState.qml` read — absent means the
 shell's own layer. The song is not consulted: a pick is the same
 `stage/cover.json` either way, and the shell's layer simply paints nothing
-while an external provider has one on screen. `lyra cover sync` is the bridge —
+while an external provider has one on screen. `strx cover sync` is the bridge —
 the staged pick applied while one applies, the step-aside image when none does —
 and every pick write calls it.
 
@@ -285,7 +285,7 @@ reboot or a switch) restores that song, never the declared one.
 A switch and a reboot restore it the same way. The activation lays the
 declared song over the runtime tree — the rsync into `run/qml` and the seed
 into both stage twins — and never reads the mode. Then `aoide-rice-reload`, a
-user unit of the lyra lane, runs `lyra reload` in the user manager, before the
+user unit of the strillix lane, runs `strx reload` in the user manager, before the
 shell: it re-stages the song `stage/mode.json` names (palette, cover, widget
 bodies, slot map, registry, compositor keywords, terminal colours), or
 re-routes and re-syncs the routed draft. At login the session starts the unit;
@@ -294,7 +294,7 @@ first frame after either is the staged song; in `declarative` the reload only
 reloads the shell, the seed already being what shows.
 
 The checkout is reached by exactly two staging-adjacent steps: `rice
-declare`'s commit-in from the runtime songbook, and `lyra preview declare`'s
+declare`'s commit-in from the runtime songbook, and `strx preview declare`'s
 from a preview root. Nothing else touches it.
 
 `rice stage` doesn't only hot-load the palette/notes tier any more —
@@ -310,7 +310,7 @@ else in this section — locked under `declarative`, allowed under
 brand-new widget file is the one thing this doesn't cover: `manifest.json`
 is only read at Quickshell startup, so a new slot still needs a
 `systemctl --user restart aoide-quickshell.service` to be discovered.
-`lyra reload`'s final beat, in every mode, is an unconditional Quickshell
+`strx reload`'s final beat, in every mode, is an unconditional Quickshell
 IPC reload (rebuilds the whole scene fresh from `shell.qml` — the absorbed
 `quickshell reload` mechanism, byte-for-byte in the `declarative` arm);
 whether that also re-reads `manifest.json` and closes this gap is still
@@ -342,7 +342,7 @@ a new one opens, and each window's font zoom resets. Never a raw OSC write into 
 interleaves with whatever the program there is printing and gets eaten. `rice
 mode declarative` rewrites the file from the declared twin through the same
 re-pin, so leaving staging restores the declared colours the same live way;
-`rice back` and `lyra reload`'s draft sync write it too. The lock screen
+`rice back` and `strx reload`'s draft sync write it too. The lock screen
 follows through the same writers: a song that ships a `lockscreen.<ext>` at its
 folder root dresses hyprlock with that picture and colours from tiers it
 already authors, as hyprlang variables in `$AOIDE_ROOT/song/stage/hyprlock.conf`
@@ -370,12 +370,12 @@ live desktop's polarity. A song's committed `livery.json` does carry it beside
 document may hold a `polarity` value as data for a future live reader; nothing
 reads it today.
 
-`lyra rice mode status` reports the current mode plus, in `staging`/
+`strx rice mode status` reports the current mode plus, in `staging`/
 `draft`, which song (and, in `draft`, which draft) it is pointed at and
-since when. `lyra rice mode stage [<name>]` unlocks staging AND leaves
+since when. `strx rice mode stage [<name>]` unlocks staging AND leaves
 `draft` mode if currently in it (tearing the routing symlink down first);
 given a name, it also stages that song's declared content immediately,
-combining unlock-and-stage into one call. `lyra rice mode declarative
+combining unlock-and-stage into one call. `strx rice mode declarative
 [<name>]` locks staging (also leaving `draft` mode the same way) — with a
 name, or with none: it re-pins `stage/livery.json` to the resolved song's
 declared notes FIRST (with no name, the DECLARED song — the song

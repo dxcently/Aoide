@@ -152,7 +152,7 @@ pub fn register(r: &mut Registry) {
 /// command starts with: takes live inside `songbook/<song>/takes/` when
 /// staged directly, `songbook/<song>/drafts/<draft>/takes/` when routed into
 /// a draft ([`aoide_storage::takes::takes_dir`]) — the staging-mode reach
-/// `lyra reload`'s design (settled 2026-08-31) extends `rice take`/`rice
+/// `strillix reload`'s design (settled 2026-08-31) extends `rice take`/`rice
 /// back` to, so nothing about them is resolvable outside `Staging`/`Draft`
 /// at all; `Declarative` has nothing unlocked to snapshot. `mode.json`'s
 /// `draft` field is `Some` **iff** `mode == Draft` (`aoide_storage::mode`'s
@@ -177,7 +177,7 @@ pub(crate) fn resolve_scope(cmd: &str) -> Result<(String, Option<String>), Outco
 
 /// Render a `(song, draft)` scope for a message: `<song>/<draft>` when
 /// routed into a draft, bare `<song>` when staged directly (the staging-mode
-/// take/back reach, `lyra reload` design, settled 2026-08-31) — the single
+/// take/back reach, `strillix reload` design, settled 2026-08-31) — the single
 /// formatting rule every take/back/prune message in this file uses instead
 /// of interpolating `draft` (an `Option<&str>`, with no `Display` of its
 /// own) directly.
@@ -189,7 +189,7 @@ fn scope_label(song: &str, draft: Option<&str>) -> String {
 }
 
 /// One comparison payload for [`diff_livery`] — folds livery+cover+widgets
-/// into a single `Value` so `lyra reload`'s dedupe-against-head
+/// into a single `Value` so `strillix reload`'s dedupe-against-head
 /// ([`snapshot_if_identical_to_head_unlocked`]) is ONE `diff_livery` call
 /// over the whole captured content, never three separate comparisons (the
 /// User's own framing, 2026-08-31: "reuses take diff's own key-wise
@@ -324,12 +324,12 @@ pub(crate) fn snapshot_if_drifted_unlocked(cmd: &str, cause: &str) -> Result<Opt
     snapshot_unlocked(cmd, cause).map(Some)
 }
 
-/// The dedupe core (staging/draft dispatch beat 1, `lyra reload` design
-/// settled by the User 2026-08-31), shared by `lyra reload` and the draft
+/// The dedupe core (staging/draft dispatch beat 1, `strillix reload` design
+/// settled by the User 2026-08-31), shared by `strillix reload` and the draft
 /// entry baseline (`rice mode draft`): mints a take of the
 /// currently staged livery+cover+widget bodies UNLESS it would be key-wise
 /// IDENTICAL to the current head — the "dedupe against head" rule the User
-/// settled alongside the command itself, so an agent hammering `lyra reload`
+/// settled alongside the command itself, so an agent hammering `strillix reload`
 /// with no intervening edit leaves one take, not one per call.
 ///
 /// Reuses [`diff_livery`] ([`take_content_value`]'s single merged payload,
@@ -363,7 +363,7 @@ pub(crate) fn snapshot_if_identical_to_head_unlocked(cmd: &str, cause: &str) -> 
 
 /// The dedupe core's locked entrypoint: exactly ONE `with_stage_lock` around
 /// [`snapshot_if_identical_to_head_unlocked`]'s whole read-compare-write —
-/// same shape as [`snapshot`], reused because neither `lyra reload` nor
+/// same shape as [`snapshot`], reused because neither `strillix reload` nor
 /// `rice mode draft` is itself already inside a locked mutator.
 pub(crate) fn snapshot_if_identical_to_head(cmd: &str, cause: &str) -> Result<Option<TakeRecord>, Outcome> {
     shellbridge::with_stage_lock(|| snapshot_if_identical_to_head_unlocked(cmd, cause))
@@ -375,7 +375,7 @@ pub(crate) fn snapshot_if_identical_to_head(cmd: &str, cause: &str) -> Result<Op
 /// under) and `data.take` is the bare take number, `null` when the dedupe core
 /// minted nothing. A failed mint is never fatal — it reads `data.take` null
 /// and `data.takeError`, because the write it records already landed.
-/// (`lyra reload` keeps its own `{take, deduped}` object.)
+/// (`strillix reload` keeps its own `{take, deduped}` object.)
 pub(crate) fn attach_take(out: &mut Outcome, marker: &mode::ModeMarker, minted: Result<Option<TakeRecord>, Outcome>) {
     let take = match minted {
         Ok(Some(record)) => {
@@ -1465,7 +1465,7 @@ fn back_unlocked(cmd: &str, take_flag: Option<u32>, mark_flag: Option<String>) -
     // never follows the link, so this answers "is `stage/livery.json` ITSELF
     // a symlink" without caring whether its target exists.
     //
-    // Staging-mode revert (`draft.is_none()`, the staging-mode reach `lyra
+    // Staging-mode revert (`draft.is_none()`, the staging-mode reach `strillix
     // reload`'s design extends `rice back` to) has no symlink to check at
     // all — `stage/livery.json` is a plain file there, exactly like `rice
     // stage`'s own write, so this whole rail is Draft-only.
@@ -1954,7 +1954,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// The staging-mode take/back reach itself (`lyra reload` design,
+    /// The staging-mode take/back reach itself (`strillix reload` design,
     /// settled 2026-08-31): `Staging` mode is NOT refused — `rice take`
     /// mints straight onto `songbook/<song>/takes/`, sibling to `drafts/`,
     /// never nested under one that doesn't exist in this mode.

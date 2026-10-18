@@ -1,8 +1,8 @@
 # Contained desktop preview
 
-Status: exploration and implementation candidate, not a completed Lyra feature.
+Status: exploration and implementation candidate, not a completed Strillix feature.
 
-Lyra's preview direction includes whole rice desktops in a contained graphical
+Strillix's preview direction includes whole rice desktops in a contained graphical
 surface, alongside individual widget previews. A terminal command may launch
 that surface; a launcher is distinct from a terminal rendering the desktop.
 
@@ -32,7 +32,7 @@ nested instance needs care.
 ## Candidate flow
 
 ```text
-Lyra CLI / preview panel
+Strillix CLI / preview panel
           |
 selected built rice + isolated preview state
           |

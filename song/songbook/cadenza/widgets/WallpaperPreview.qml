@@ -4,12 +4,12 @@
 // A HELPER (uppercase — never a slot; BarPreview.qml's precedent). The board
 // fills the whole surface, so the canvas needs something with a viewport of
 // its own: this item declares `implicitWidth/Height` (1920×1080 by default,
-// the canvas' `lyra preview set --viewport` overrides the shoot), and loads
+// the canvas' `strillix preview set --viewport` overrides the shoot), and loads
 // `wallpaper.qml` BY URL, handing it the canvas' livery/bridge plus the knobs
 // below.
 //
 // The FEED is real, not faked: `AOIDE_ROOT` points at the preview root, and
-// `lyra preview --fixture <dir>` stages that directory into
+// `strillix preview --fixture <dir>` stages that directory into
 // `<root>/state/stage/` — so `--fixture …/design/fixtures/board` gives the
 // board the fixture agents (working · awaiting · idle) and the fixture hook
 // stamps, and the pulses answer exactly as they would live. Nothing here reads
@@ -22,7 +22,7 @@
 //       "idleFloor": 2,    // light with NOTHING running
 //       "seed": 7 }        // 0/absent: seeded from the clock (each run differs)
 //
-//   AOIDE_FLAKE_ROOT=<worktree> lyra preview \
+//   AOIDE_FLAKE_ROOT=<worktree> strillix preview \
 //       <worktree>/song/songbook/cadenza/widgets/WallpaperPreview.qml \
 //       --song cadenza \
 //       --fixture <worktree>/song/songbook/cadenza/design/fixtures/board \

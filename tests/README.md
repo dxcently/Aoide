@@ -13,8 +13,8 @@ what those checks actually test.
   built by the real constructor over the fixture songbook in
   `lock-greeter/songbook/`: `aubade` ships a `greeter.qml`, a `lockscreen.qml`
   and a `powermenu.qml` that reports its bridge (greetd with the Quickshell
-  greeter over two accounts, `lyra lock` through the shell's LockHost),
-  `plainsong` ships none (ly, and `lyra lock` runs hyprlock), and
+  greeter over two accounts, `strx lock` through the shell's LockHost),
+  `plainsong` ships none (ly, and `strx lock` runs hyprlock), and
   `nocturne`'s greeter face throws at start (the greeter's floor logs in).
   It types passwords at the greeter (a refusal, a retry, switch user) and
   the lock, checks the compositor's own lock state (`hyprctl locked`) and
@@ -60,17 +60,17 @@ what those checks actually test.
   keeps `templates/` from drifting away from the constructor.
 - `quickshell-seam/` — `tests/quickshell-seam/run.sh` evaluates three fixture
   hosts through the real constructor (habit's composition) with the real
-  catalogue and nucleus, and checks the quickshell/lyra seam: a host with its
+  catalogue and nucleus, and checks the quickshell/strillix seam: a host with its
   own `quickshell.config` runs the `aoide-quickshell` service on that directory
-  and owes lyra nothing (no rice binary, no `songs/`, no shellbridge, no
+  and owes strillix nothing (no rice binary, no `songs/`, no shellbridge, no
   healthcheck); a host with no config gets the package and no service; and a
-  song with no `lyra` lane fails its own evaluation with the taught message.
+  song with no `strillix` lane fails its own evaluation with the taught message.
   `fixtures.nix` holds the readings, `hosts/` the three host modules. The ref
   IS the tree under test — fixtures, host modules, catalogue and nucleus are
   all read out of it, so a commit ref tests that commit and `path:` (the
   default: THIS checkout, uncommitted work included) tests what is on disk.
   Its positive control is `yomi-strix` from the same ref: a real host that HAS
-  the shellbridge unit and the rice binary the lyra-less fixtures must not
+  the shellbridge unit and the rice binary the strillix-less fixtures must not
   have, so an absence check that could never fail is not one.
 - `distrobox.md` — manual container-based portability suite; not a gate.
 - `consumer/` — `tests/consumer/run.sh`, the export-surface fixture: a
@@ -83,7 +83,7 @@ what those checks actually test.
   fixture's own songbook: the nucleus contract and its own `nucleus` group, the shell, the theme, one performed song plus
   one built in that BORROWS the performer's widgets, the deployed config, the
   seeded songbook, and the templates on the units. `aoide-songs` performs
-  Aoide's own `sonata` through the `songbookRoot` export, and its lyra lane is
+  Aoide's own `sonata` through the `songbookRoot` export, and its strillix lane is
   handed that same directory. The contract it exercises is PACKAGE-LAYOUT's
   "The root flake — AoideOS's export surface".
   The value-slot proof: the consumer's own `bar`, `dock` and `lock` slots each

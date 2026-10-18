@@ -11,7 +11,7 @@
 //! a raw-stdout tool, a long-running server launch, anything that needs to
 //! bypass the `Outcome` envelope entirely. Those are per-binary — the core
 //! `aoide` binary launches `mcp serve --stdio`/`a2a serve`/`conductor`,
-//! lyra (P-A4) launches its own smaller set and never touches `a2a serve` or
+//! strillix (P-A4) launches its own smaller set and never touches `a2a serve` or
 //! `conductor` — so `run` takes a `special` hook: a closure given the parsed
 //! [`Invocation`] and the `--json` flag, run AFTER a successful parse and
 //! BEFORE the generic dispatch. `Some(code)` short-circuits with that exit
@@ -51,8 +51,8 @@
 //! group) never probes `aoide-graph` — it lands in `parse`'s own
 //! `unknown_command_outcome` with `did_you_mean` intact, same as before this
 //! existed. The trust boundary is structural, not a guard: `run` is called
-//! from exactly the two CLI entry points (`aoide-cli`'s `run_cli`, lyra's
-//! `run_lyra`), so an external command is reachable from `Door::Cli` only —
+//! from exactly the two CLI entry points (`aoide-cli`'s `run_cli`, strillix's
+//! `run_strillix`), so an external command is reachable from `Door::Cli` only —
 //! no `Door` check is added here, because there is nothing else to check.
 //! MCP/A2A/the aoided socket reach `dispatch()` directly, never `run`, and
 //! `dispatch()` has no PATH-probing logic of its own (`crates/cli/src/
@@ -107,10 +107,10 @@ fn known_paths(registry: &Registry) -> Vec<Vec<String>> {
 
 /// Parse argv (excluding the program name) into an [`Invocation`].
 ///
-/// `bin_name` is the invoking binary's name (`"aoide"` for core, `"lyra"`
+/// `bin_name` is the invoking binary's name (`"aoide"` for core, `"strillix"`
 /// for the graphical binary, P-A5 of the binary-split workstream) — every
 /// usage/help/did-you-mean string below names it instead of a hardcoded
-/// `"aoide"`, so lyra's own usage errors say `lyra`, not `aoide`.
+/// `"aoide"`, so strillix's own usage errors say `strillix`, not `aoide`.
 ///
 /// Returns `Err(Outcome)` for a usage error (`--help`, unknown command) so the
 /// caller can render it as JSON or text uniformly.
@@ -303,8 +303,8 @@ fn command_for<'a>(path: &[String], registry: &'a Registry) -> Option<&'a Comman
     registry.get(path)
 }
 
-/// Heads only `aoide` registers, heads only `lyra` registers, and heads both
-/// do (`cli`'s and `lyra`'s registry tests pin all three against the real
+/// Heads only `aoide` registers, heads only `strillix` registers, and heads both
+/// do (`cli`'s and `strillix`'s registry tests pin all three against the real
 /// registries). A typed head the running binary lacks but the other owns
 /// gets a "run it there" refusal instead of a did-you-mean.
 pub const AOIDE_ONLY_HEADS: &[&str] = &[
@@ -312,7 +312,7 @@ pub const AOIDE_ONLY_HEADS: &[&str] = &[
     "hooks", "identity", "mail", "make", "melete", "mesh", "node", "project", "resurrect", "send", "session",
     "soundcheck", "spawn", "update", "usage", "workspace",
 ];
-pub const LYRA_ONLY_HEADS: &[&str] = &[
+pub const STRILLIX_ONLY_HEADS: &[&str] = &[
     "apps", "clipboard", "component", "cover", "element", "herald", "icon", "livery", "lock", "preview", "quickshell", "reload",
     "rice", "screen", "shellbridge",
 ];
@@ -324,8 +324,8 @@ fn other_binary(head: &str, bin_name: &str, registry: &Registry) -> Option<&'sta
         return None;
     }
     match bin_name {
-        "aoide" if LYRA_ONLY_HEADS.contains(&head) => Some("lyra"),
-        "lyra" if AOIDE_ONLY_HEADS.contains(&head) => Some("aoide"),
+        "aoide" if STRILLIX_ONLY_HEADS.contains(&head) => Some("strillix"),
+        "strillix" if AOIDE_ONLY_HEADS.contains(&head) => Some("aoide"),
         _ => None,
     }
 }
@@ -1000,7 +1000,7 @@ mod tests {
     /// `commands::all()` — protocol cannot depend on the domain crates that
     /// register the real command tree, so these tests exercise the parser's
     /// own logic (greedy match, flags, `--help`) against a minimal tree
-    /// rather than the golden 87/41 paths (those are covered by the cli/lyra
+    /// rather than the golden 87/41 paths (those are covered by the cli/strillix
     /// crates' own tests, which call through to this same code).
     fn test_registry() -> Registry {
         let mut r = Registry::new();
@@ -1412,7 +1412,7 @@ mod tests {
         assert!(err.message.contains("did you mean:\n  aoide graph view"));
     }
 
-    /// `bin_name` is not cosmetic: a second binary (lyra, P-A5) must see its
+    /// `bin_name` is not cosmetic: a second binary (strillix, P-A5) must see its
     /// own name in every usage/help/did-you-mean string, never `aoide`'s.
     #[test]
     fn bin_name_names_the_invoking_binary_everywhere() {
@@ -1425,20 +1425,20 @@ mod tests {
 
         let reg = test_registry();
 
-        let root = parse(&argv(&[]), Door::Cli, "lyra", &reg).unwrap_err();
-        assert!(root.message.contains("usage: lyra <command>"), "{}", root.message);
+        let root = parse(&argv(&[]), Door::Cli, "strillix", &reg).unwrap_err();
+        assert!(root.message.contains("usage: strillix <command>"), "{}", root.message);
         assert!(!root.message.contains("aoide"), "{}", root.message);
 
-        let sub = parse(&argv(&["graph", "view", "--help"]), Door::Cli, "lyra", &reg).unwrap_err();
-        assert!(sub.message.contains("usage: lyra graph view"), "{}", sub.message);
+        let sub = parse(&argv(&["graph", "view", "--help"]), Door::Cli, "strillix", &reg).unwrap_err();
+        assert!(sub.message.contains("usage: strillix graph view"), "{}", sub.message);
 
-        let unknown = parse(&argv(&["graph", "vie"]), Door::Cli, "lyra", &reg).unwrap_err();
+        let unknown = parse(&argv(&["graph", "vie"]), Door::Cli, "strillix", &reg).unwrap_err();
         assert!(
-            unknown.message.contains("did you mean:\n  lyra graph view"),
+            unknown.message.contains("did you mean:\n  strillix graph view"),
             "{}",
             unknown.message
         );
-        assert!(unknown.message.contains("run 'lyra --help'"), "{}", unknown.message);
+        assert!(unknown.message.contains("run 'strillix --help'"), "{}", unknown.message);
 
         restore_path(dir, saved);
     }
@@ -1756,11 +1756,11 @@ mod tests {
         assert_eq!(err.status, Status::Usage);
         assert_eq!(err.command, "rice", "typed arguments never leak into the command id");
         let text = err.render(false).0;
-        assert!(text.contains("`rice` is a lyra command, not an aoide one"), "{text}");
-        assert!(text.contains("fix: lyra rice stage dusk"), "{text}");
+        assert!(text.contains("`rice` is a strillix command, not an aoide one"), "{text}");
+        assert!(text.contains("fix: strillix rice stage dusk"), "{text}");
 
-        let back = parse(&argv(&["spawn", "x"]), Door::Cli, "lyra", &reg).unwrap_err();
-        assert!(back.render(false).0.contains("`spawn` is an aoide command, not a lyra one"), "{}", back.message);
+        let back = parse(&argv(&["spawn", "x"]), Door::Cli, "strillix", &reg).unwrap_err();
+        assert!(back.render(false).0.contains("`spawn` is an aoide command, not a strillix one"), "{}", back.message);
     }
 
     #[test]

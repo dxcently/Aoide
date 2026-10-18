@@ -1,7 +1,7 @@
 # A value outside lib.mkDefault: a rice's default would outrank the host's.
 {
   system = {
-    providers.greeter = "vibeos";
+    providers.greeter = "strillix";
     module = { lib, ... }: {
       aoide.livery.polarity = "dark";
     };

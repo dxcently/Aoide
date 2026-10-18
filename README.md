@@ -28,13 +28,13 @@ The repo is a **snowflake**: a capability enters by one file plus one line — a
 ├── modules/
 │   ├── nucleus/       the option contract and the platform's assertions
 │   ├── dendrites/     opt-in lanes — one tree, shipped + personal branches,
-│   │                  the paint lanes among them (lyra, quickshell, compositor,
+│   │                  the paint lanes among them (strillix, quickshell, compositor,
 │   │                  stylix, greeter)
 │   ├── aggregations/  named groups a host takes in one line (nucleus, desktop, …)
 │   └── overrides/     capability-scoped fixes
 ├── hosts/             one record per machine (`_`-prefixed = template to copy)
 ├── pkgs/              aoide (Rust, its own flake, consumed as a path input),
-│                      lyra-shell (the QML skeleton), lyra-songbook (templates)
+│                      strillix-shell (the QML skeleton), strillix-rices (templates)
 ├── lib/               aoideos.nix (constructor) + composition + checks + discovery
 ├── song/              the performed half (songbook, covers)
 └── flake.nix          inputs + outputs (never edited to add a module)
@@ -45,7 +45,7 @@ A catalogue at the centre and radial distance from it governing who may change w
 | Layer | Owner | What it holds |
 |---|---|---|
 | `modules/nucleus/` | upstream | The option contract and assertions every host carries. The daemon and the rest of the floor are dendrites in the `nucleus` aggregation; the secrets broker is one a host selects by name. |
-| `modules/dendrites/` | shipped + you | Opt-in lanes, one flat tree; new personal lanes are additive files — the paint lanes (lyra, quickshell, compositor, stylix, greeter) read only the namespaces root `AGENTS.md` house rule 5 enumerates. |
+| `modules/dendrites/` | shipped + you | Opt-in lanes, one flat tree; new personal lanes are additive files — the paint lanes (strillix, quickshell, compositor, stylix, greeter) read only the namespaces root `AGENTS.md` house rule 5 enumerates. |
 | `song/songbook/<song>/` | you (agent-written) | The performed half: a committed song — rice.nix, livery.json, palettes, widgets, design notes. Everything outside `song/` changes only on a lane the User ordered. |
 
 Deeper reads:
@@ -70,7 +70,7 @@ Every terminal runs its login shell under `aoide conduct` by default, so it regi
 
 ### Pairing — how conducting reaches another host
 
-Two instances become nodes through a mutual, two-code ceremony, named here by seat: the requester runs `aoide pair <target>`, raising a request; the approver runs `aoide pair <id>`, typing the code read off the requester's screen, and its own node record commits — its screen then shows a second, different reply code; the requester's still-running `aoide pair` types that reply code, and its own record commits last. Both legs are typed, never a bare yes/no, gated identically whether driven from a plain terminal or `aoide pair watch --popup`'s Quickshell dialogs (`lyra pair ask` to type, `lyra pair show` to display). What it buys: a verified node record carrying an `allows` set (`read`, `spawn`), a cross-host `node list` roster with `node pull`/`node spawn` reaching into it, and — for a node whose own door binds loopback-only — a reach-back over an ssh `via` hop, never a routable bind. → [Pairing Ceremony](docs/Aoide-Wiki/concepts/orchestration/Pairing-Ceremony.md), [Doors & Nodes](docs/Aoide-Wiki/concepts/cli/Doors-and-Nodes.md).
+Two instances become nodes through a mutual, two-code ceremony, named here by seat: the requester runs `aoide pair <target>`, raising a request; the approver runs `aoide pair <id>`, typing the code read off the requester's screen, and its own node record commits — its screen then shows a second, different reply code; the requester's still-running `aoide pair` types that reply code, and its own record commits last. Both legs are typed, never a bare yes/no, gated identically whether driven from a plain terminal or `aoide pair watch --popup`'s Quickshell dialogs (`strx pair ask` to type, `strx pair show` to display). What it buys: a verified node record carrying an `allows` set (`read`, `spawn`), a cross-host `node list` roster with `node pull`/`node spawn` reaching into it, and — for a node whose own door binds loopback-only — a reach-back over an ssh `via` hop, never a routable bind. → [Pairing Ceremony](docs/Aoide-Wiki/concepts/orchestration/Pairing-Ceremony.md), [Doors & Nodes](docs/Aoide-Wiki/concepts/cli/Doors-and-Nodes.md).
 
 ### Widget-maker
 
@@ -109,7 +109,7 @@ An independently-owned vault API serving a folder of notes over MCP — read, wr
 Two installs, one boundary between them (the two-binary split, [Package Layout](docs/architecture/PACKAGE-LAYOUT.md)):
 
 - **Aoide (the core)** — `aoide` and `aoided`, sessions and conduct, the doors — needs no nix at all: `cargo install` from a checkout on any Linux, [docs/INSTALL.md](docs/INSTALL.md).
-- **AoideOS (this distribution)** — the same core plus `lyra`, the paint half — is a flake you clone and run, below.
+- **AoideOS (this distribution)** — the same core plus `strillix`, the paint half — is a flake you clone and run, below.
 
 ### AoideOS — clone and run (Nix flakes)
 
@@ -134,7 +134,7 @@ cd ~/Aoide
 sudo nixos-rebuild switch --flake .#<host>
 ```
 
-From then on the flake ships its own rebuild aliases (`adbuild`/`adtest`/`adrebuild`/…) for the everyday loop — see [Controls](docs/Aoide-Wiki/concepts/desktop/Controls.md). `aoide onboard` does steps 2–3's setup in one shot (register the clone, seed `song/`, wire the harness hooks, delegate the nix half to `lyra onboard` when `lyra` resolves) and is idempotent; it needs the `aoide` binary on `PATH` first, which is [docs/INSTALL.md](docs/INSTALL.md) § 1–3. Full onboarding narrative, done-state checks, and self-update: [Clone and Run](docs/Aoide-Wiki/concepts/governance/Clone-and-Run.md).
+From then on the flake ships its own rebuild aliases (`adbuild`/`adtest`/`adrebuild`/…) for the everyday loop — see [Controls](docs/Aoide-Wiki/concepts/desktop/Controls.md). `aoide onboard` does steps 2–3's setup in one shot (register the clone, seed `song/`, wire the harness hooks, delegate the nix half to `strx onboard` when `strillix` resolves) and is idempotent; it needs the `aoide` binary on `PATH` first, which is [docs/INSTALL.md](docs/INSTALL.md) § 1–3. Full onboarding narrative, done-state checks, and self-update: [Clone and Run](docs/Aoide-Wiki/concepts/governance/Clone-and-Run.md).
 
 ---
 

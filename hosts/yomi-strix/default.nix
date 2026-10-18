@@ -32,7 +32,7 @@
 
   # ── Who paints a wallpaper pick ────────────────────────────────────────────
   # The compositor line's twin: the performed song ships the shell's own layer
-  # (`vibeos`) as the setter, and this host names the external engine instead.
+  # (`strillix`) as the setter, and this host names the external engine instead.
   # A plain write here outranks the song's default. The engine's lane is what
   # makes that real (packages, daemon, config), and the runtime reads the
   # resulting fact to decide whose picks the stage file records.
@@ -48,7 +48,7 @@
   # flyouts, the iMac G3 launcher, white-plate balloons, over a teal Frutiger
   # Aero wallpaper. Declaring is what bakes the half a stage cannot: Stylix
   # theming, the compositor's geometry and window borders, the assembled
-  # widgets, and the boot default; `lyra reload` is what keeps the staged half
+  # widgets, and the boot default; `strillix reload` is what keeps the staged half
   # live between switches. The other committed rices are reached from the
   # machine's own songbook (`aoide rice stage <n>`), which this host's songbook
   # already holds — that is the point of the split.

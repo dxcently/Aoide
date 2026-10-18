@@ -23,7 +23,7 @@ MCP directly.
 
 ## Implementation
 
-The QML skeleton is shipped in `pkgs/lyra-shell/qml/`. `shell.qml`
+The QML skeleton is shipped in `pkgs/strillix-shell/qml/`. `shell.qml`
 (a `ShellRoot`) instantiates four shared singletons — **`LiveryState`**
 (watches `stage/livery.json` via a `FileView`, re-binding every surface's
 colours in one pass on an atomic replace, the hot-reload), **`ShellBridge`**
@@ -58,7 +58,7 @@ launcher slot as extras; `AoideWallpaperPicker` answers `aoide:wallpaper`
 one and opening its own plain cover picker otherwise.
 
 The repo root carries no `qml/` directory — widget source lives in
-`pkgs/lyra-shell/qml/` and each active song's `widgets/`, and the lyra lane's
+`pkgs/strillix-shell/qml/` and each active song's `widgets/`, and the strillix lane's
 `home.activation.aoideDeployQml` rsyncs the built config tree
 (`rsync -a --delete --chmod=u+w`) into `$AOIDE_ROOT/run/qml/` (default
 `~/.aoide/run/qml/` — the runtime root, outside the git checkout), which
@@ -68,7 +68,7 @@ deploy target, never a source, and every activation's rsync reasserts the
 store's build over it, so a hand edit under `$AOIDE_ROOT/run/qml/` is lost at
 the next switch. A song is edited in the runtime songbook
 (`$AOIDE_ROOT/song/songbook/<song>`), and a STAGED song is restored from
-there: after the switch the lyra lane's `aoide-rice-reload` unit runs `lyra
+there: after the switch the strillix lane's `aoide-rice-reload` unit runs `strillix
 reload`, which syncs its widget bodies back into `run/qml/songs/<song>/`.
 `hyprland.conf` is owned by
 home-manager's `wayland.windowManager.hyprland`: the compositor lane
@@ -94,7 +94,7 @@ found via live debugging.
 (`target: "shell"`, one exposed `function reload(): void { Quickshell.reload(false) }`),
 instantiated in `shell.qml` alongside `livery`/`bridge`/`stagingEngine`/`shared`
 — no properties of its own, wired purely for the side effect. `quickshell ipc
-call shell reload` invokes it from outside the process; `lyra reload`
+call shell reload` invokes it from outside the process; `strx reload`
 (`crates/song/src/commands/reload.rs`, `crates/song/src/ipc.rs`) shells out to
 exactly that call, no-oping to a reported (never fatal) `not-running` status
 when `aoide-quickshell.service` isn't up.
@@ -113,7 +113,7 @@ open/closed, calendar selection, any in-memory session data) exactly like a
 restart does — it's just faster, and skips cycling the systemd unit and
 re-registering windows with the compositor.
 
-`lyra rice stage` (`crates/song/src/commands/rice.rs`) auto-triggers this
+`strx rice stage` (`crates/song/src/commands/rice.rs`) auto-triggers this
 after `sync_song_widgets` reports actually-changed widget files — the
 palette/notes tier is already covered by `LiveryState`'s own watch, so a
 re-stage with no widget-body changes never reloads. Whether this also closes
@@ -151,8 +151,8 @@ frame label.
 
 ## The registry — nine declared, five with a live body
 
-The lyra lane declares nine `owner = "quickshell"` surfaces
-(`modules/dendrites/lyra/runtime.nix`: bar, notifications, launcher, osd,
+The strillix lane declares nine `owner = "quickshell"` surfaces
+(`modules/dendrites/strillix/runtime.nix`: bar, notifications, launcher, osd,
 lockscreen, greeter, wallpaper, agentWidgets, sessionGraph). Five have a
 live QML body today: **bar** (song `bar.qml` via `WidgetSlot`),
 **notifications** (dunst as daemon, the `herald`/`herald-center` popup and
@@ -174,10 +174,10 @@ The rest are registry-only or painted only by a song that ships the face:
 - **`lockscreen`**, **`greeter`** — painted only by a song that ships the face
   (`widgets/lockscreen.qml`, `widgets/greeter.qml`). The lock is the shell's
   `LockHost.qml` (one session lock and one PAM conversation, the face inside,
-  a plain password field under it), entered by `lyra lock`; a song without a
+  a plain password field under it), entered by `strx lock`; a song without a
   face locks with hyprlock. The greeter is the declared song's face in greetd
   + cage + Quickshell (`GreeterHost.qml`, greetd's IPC for the login); a
-  declared song without one logs in through ly. `pkgs/lyra-shell/qml/slots.md`
+  declared song without one logs in through ly. `pkgs/strillix-shell/qml/slots.md`
   holds both contracts.
 - **`sessionGraph`** — declared but has no QML body: the standalone DAG
   overlay this surface once named is no longer part of the QML tree.
@@ -263,8 +263,8 @@ bound to `Quickshell.screens` or to the focused monitor re-homes by itself
 when the screen list comes back, and only an unbound singleton stays lost.
 
 **`aoide-quickshell-healthcheck.timer`**
-(`modules/dendrites/lyra/runtime.nix`, gated on `aoide.lyra.enable`) is
-the live watchdog: a oneshot `systemd.user.service` running `lyra quickshell
+(`modules/dendrites/strillix/runtime.nix`, gated on `aoide.strillix.enable`) is
+the live watchdog: a oneshot `systemd.user.service` running `strx quickshell
 healthcheck` (`pkgs/aoide/crates/song/src/health.rs`, [[Meta-and-Upkeep]])
 20s after the session comes up and every 15s thereafter.
 **`home.activation.aoideVerifyRice`** runs the same check again, 5s after
@@ -333,8 +333,8 @@ the sole live painter (Stylix's `hyprpaper` is force-disabled via the
 `aoide.surfaces.wallpaper` owner registry; no `swww`/`swaybg`/`mpvpaper`
 elsewhere). So a shell crash takes the wallpaper *and* the bar/dock/gadgets with
 it in one stroke — they are one process, not four. The wallpaper's own
-source-of-truth is the live-watched `stage/cover.json` (written by `lyra rice
-stage` when the song's cover derives or, for a direct hot-swap, `lyra cover set
+source-of-truth is the live-watched `stage/cover.json` (written by `strx rice
+stage` when the song's cover derives or, for a direct hot-swap, `strx cover set
 <path-or-name>`; it carries the song it was staged for, so a cover for another
 song is ignored, and its `"pick": true` marks the user's own choice, which the
 shell refuses to draw the song's live board over, and its `"tile": true` repeats

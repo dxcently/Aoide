@@ -67,7 +67,7 @@ picks the option that can be deleted.
 ## The corollary for Quickshell: render surfaces only
 
 **Quickshell paints; it never *is* the capability.** Every QML file in
-`pkgs/lyra-shell/qml/` and `song/songbook/*/widgets/` is a render
+`pkgs/strillix-shell/qml/` and `song/songbook/*/widgets/` is a render
 surface that picks up an agnostic bridge or API by name. State, policy, IPC,
 and system access live behind a bridge — a CLI command, a stage file
 (`CONTRACTS.md` §4), an IPC socket — reachable **with only a shell, no

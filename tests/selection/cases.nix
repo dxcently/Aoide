@@ -271,8 +271,9 @@ rec {
   walkerOverlay = (import ../../lib/pkgs.nix { inherit lib; }).overlay;
 
   walkerYieldsListedOverride =
-    ((walkerOverlay { stock = { }; }) { } { lyra-songbook = "the lane's songbook"; }).lyra-songbook;
+    ((walkerOverlay { stock = { }; }) { } { strillix-rices = "the lane's songbook"; }).strillix-rices;
 
   walkerRefusesUnlistedOverride =
-    ((walkerOverlay { stock = { }; }) { } { lyra-shell = "another overlay's shell"; }).lyra-shell;
+    ((walkerOverlay { stock = { }; }) { } { strillix-shell = "another overlay's shell"; })
+    .strillix-shell;
 }

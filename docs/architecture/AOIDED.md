@@ -434,7 +434,7 @@ command.
 - No template set → taught error naming the env var and one example. No
   display (`$WAYLAND_DISPLAY`/`$DISPLAY` both absent) → taught error
   ("headless host — use `spawn` without `--windowed`"). No nix
-  anywhere; `lyra` never enters this path — a terminal emulator is a shell
+  anywhere; `strillix` never enters this path — a terminal emulator is a shell
   concern, not paint.
 - The child is `aoide conduct -- <agent cmd>` exactly as the headless path
   builds it, so registration, control socket, and the parent-autogate lane
@@ -670,7 +670,7 @@ Things this design must never do — each is a review-blocking violation:
    shims; a second Follower implementation anywhere is a defect.
 10. **Registry order is append-only; golden snapshots update in the same
     commit** as any command-set change.
-11. **`lyra` never enters the summoning path**; `--windowed` is core, the
+11. **`strillix` never enters the summoning path**; `--windowed` is core, the
     terminal template is env/config, no nix shell-out anywhere in core.
 12. **Untrusted text stays data.** Forwarded notification/app-title text on
     the bus is an opaque payload field; nothing parses it as a command

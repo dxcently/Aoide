@@ -1,7 +1,7 @@
 # modules/dendrites/dunst.nix — the dunst notification daemon.
 #
 # Dendrite shape (CONTRACTS.md §2):
-#   - no enable flag: selection is the switch; its body also needs the lyra fact
+#   - no enable flag: selection is the switch; its body also needs the strillix fact
 #   - carries its own dependencies: the dunst package (dunstctl rides along for
 #     history and the pause levels), libnotify for the stock `notify-send`
 #     client other aoide code already calls, and the daemon unit itself via
@@ -63,14 +63,14 @@
 #
 # hosts/ knows dendrites; dendrites never know hosts.
 #
-# ── P-A8: also gated on aoide.lyra.enable ──────────────────────────────────
-# The herald-feed rule below hands every notification to `lyra herald push`
-# (pkgs.aoide.rice — a SEPARATE, droppable output as of P-A8's multi-output
+# ── P-A8: also gated on aoide.strillix.enable ──────────────────────────────────
+# The herald-feed rule below hands every notification to `strillix herald push`
+# (pkgs.aoide.strillix — a SEPARATE, droppable output as of P-A8's multi-output
 # split); that push is this whole module's reason to exist, so a config that
-# leaves dunst on but turns lyra off would otherwise script an exec against a
+# leaves dunst on but turns strillix off would otherwise script an exec against a
 # binary no longer in the closure. Unlike shellbridge (gated on the shell
-# and lyra enable facts), dunst carries no shell dependency of its own — it
-# is gated here directly on the lyra flag instead.
+# and strillix enable facts), dunst carries no shell dependency of its own — it
+# is gated here directly on the strillix flag instead.
 
 {
   config,
@@ -81,7 +81,7 @@
 
 {
 
-  config = lib.mkIf config.aoide.lyra.enable {
+  config = lib.mkIf config.aoide.strillix.enable {
     # libnotify rides along for `notify-send`: the stock client the freedesktop
     # world (and aoide's own shellbridge mode-toggle path) reaches for. dunstify
     # alone left it missing on the box.
@@ -151,13 +151,13 @@
           skip_display = true;
           always_run_script = true;
           # `herald` left core's registry at P-A5 of the binary-split
-          # workstream — it now lives only in `lyra` (crates/lyra/src/
+          # workstream — it now lives only in `strillix` (crates/strillix/src/
           # registry.rs). Both binaries ship from the same `pkgs.aoide`
-          # derivation (P-A7), but as of P-A8 `lyra` lives in that
-          # derivation's separate `rice` output (`pkgs.aoide.rice`) — named
+          # derivation (P-A7), but as of P-A8 `strillix` lives in that
+          # derivation's separate `strillix` output (`pkgs.aoide.strillix`) — named
           # explicitly here, same reasoning as shellbridge.nix's ExecStart.
           script = "${pkgs.writeShellScript "aoide-herald-push" ''
-            exec ${pkgs.aoide.rice}/bin/lyra herald push
+            exec ${pkgs.aoide.strillix}/bin/strillix herald push
           ''}";
         };
       };

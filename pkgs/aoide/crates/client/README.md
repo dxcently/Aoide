@@ -880,8 +880,8 @@ never the inbound/serve half (that's `aoide-server`).
   retry-until-exists shape, a 30s reconcile safety tick). **`--popup`
   (F6, upgraded P-PV3/task #132: TWO dialog shapes, one per pairing
   direction, never a single bare yes/no)** refuses up front when NEITHER
-  `lyra` nor `zenity` resolves (`resolve_lyra_bin`, the SAME three-tier
-  check `aoide_secrets::watch::resolve_lyra_bin` runs, repeated here since
+  `strillix` nor `zenity` resolves (`resolve_strillix_bin`, the SAME three-tier
+  check `aoide_secrets::watch::resolve_strillix_bin` runs, repeated here since
   neither crate may depend on the other); past that, `popup_tick` replaces
   the plain narrate-only reconcile with: pick the next `Pending` that
   `eligible_for_dialog` admits — `actionable`, un-ignored, and no LIVE
@@ -900,10 +900,10 @@ never the inbound/serve half (that's `aoide-server`).
   dialog shape on BOTH directions now (the mutual-code redesign, R1 —
   this reverses P-PV3's own outbound CONFIRM dialog; `pair_watch`'s
   module doc has the theater-argument reasoning for why that reversal
-  doesn't repeat P-PV3's original mistake): `run_ask_dialog`** — `lyra
-  pair ask` (the SAME six-box entry surface `lyra secrets ask` renders)
-  when `resolve_lyra_bin` found one, falling back to `zenity --entry` on a
-  `lyra` `SpawnError`/`DialogFailure` for that one attempt
+  doesn't repeat P-PV3's original mistake): `run_ask_dialog`** — `strillix
+  pair ask` (the SAME six-box entry surface `strx secrets ask` renders)
+  when `resolve_strillix_bin` found one, falling back to `zenity --entry` on a
+  `strillix` `SpawnError`/`DialogFailure` for that one attempt
   (`aoide_secrets::watch::run_ask_dialog`'s own fallback shape, reused
   unchanged), `--no-markup` load-bearing on the zenity path for the same
   Pango-corruption reasoning `aoide_secrets::watch::spawn_zenity_entry`
@@ -927,7 +927,7 @@ never the inbound/serve half (that's `aoide-server`).
   ways, in order: `notify_reply_code` fires a best-effort desktop
   notification (`notify-send` as bare argv — the untrusted node name
   rides as an argument, never a shell string — skipped under `--json`),
-  `show_reply_code` raises the stay-open display dialog (`lyra pair
+  `show_reply_code` raises the stay-open display dialog (`strx pair
   show`: code large, Copy + Done, no reject; `zenity --info` fallback),
   and `popup_tick` prints the same code on its outcome line. The
   operator relays that code to the requester, who types it into their

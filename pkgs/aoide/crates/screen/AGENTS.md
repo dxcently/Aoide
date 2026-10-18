@@ -2,7 +2,7 @@
 
 ## Invariants
 
-- **This crate is lyra-only.** Only `lyra` may register its commands; core
+- **This crate is strillix-only.** Only `strillix` may register its commands; core
   `cli` must never depend on `aoide-screen` — that's the whole point of the
   P-A1 extraction (isolating the wayland/image dep weight off core).
 - **Reach into `aoide_conduct::graph`, never duplicate it.** The 7
@@ -20,7 +20,7 @@
 ## Extension points
 
 - **A new `screen` command** adds a `cmd!`/`register` entry in `commands.rs`,
-  wired into `lyra`'s `commands::all()` only.
+  wired into `strillix`'s `commands::all()` only.
 - **A new coordinate-space source** (beyond `--from-shot`) extends `point`'s
   existing transform seam rather than adding a parallel one.
 

@@ -1,7 +1,7 @@
 # tests/consumer/hosts/stubbed.nix — a host that mixes value slots: the
 # consumer's `bar` provider and Aoide's `dock` part, and no song.
 #
-# Without a song the runtime is the bare vibeos one (the seam's two-component
+# Without a song the runtime is the bare strillix one (the seam's two-component
 # host): one shell unit, the record of exactly the two slots this host filled,
 # and no greeter, launcher or lock. The consumer's `stub-bar` brings no runtime,
 # so the dock part is the only thing that does.

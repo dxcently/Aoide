@@ -1,4 +1,4 @@
-//! The no-archive gate for `lyra rice declare <song>` (CONTRACTS.md §5, "The
+//! The no-archive gate for `strillix rice declare <song>` (CONTRACTS.md §5, "The
 //! songbook is versioned score"): the copy writes over `song/songbook/<song>/`
 //! in the checkout, so it runs only when git can show nothing uncommitted in
 //! that folder. Git history is the archive; a copy over an uncommitted edit is

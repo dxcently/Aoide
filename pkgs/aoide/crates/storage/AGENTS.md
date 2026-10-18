@@ -190,13 +190,13 @@
   (`song/stage/`); `fs::conducting_stage_dir` is core orchestration state
   (`state/stage/`). A new stage-file accessor for something the
   `aoide`/`aoided` binaries alone read or write goes through
-  `conducting_stage_dir`; a new one for something only `lyra`/QML writes
+  `conducting_stage_dir`; a new one for something only `strillix`/QML writes
   goes through `stage_dir`. Don't "simplify" by routing a core file through
   `stage_dir` for convenience — that is exactly the coupling the split
-  exists to remove (root `AGENTS.md`'s core-vs-lyra boundary, applied to the
+  exists to remove (root `AGENTS.md`'s core-vs-strillix boundary, applied to the
   stage tree itself).
 - **`fs::rice_conf_link` is the first writer outside `$AOIDE_ROOT`.** It names
-  `$HOME/.local/state/lyra/rice.conf`, because the renderer's Nix activation
+  `$HOME/.local/state/strillix/rice.conf`, because the renderer's Nix activation
   hardcodes that path and the two halves must name one file. A test that
   exercises it sets `HOME` under the temp dir (`EnvSaver` captures it); the
   song crate's writer skips a test build whose `HOME` is not isolated, so an
@@ -273,7 +273,7 @@
   call is not a write, the same change-only discipline every other mutator
   here holds.
 - **`fs::migrate_root_once` is `pub` and deliberately NOT wired into any
-  path getter (L-C2, lyra-carrier lane, task #107) — don't "fix" this by
+  path getter (L-C2, strillix-carrier lane, task #107) — don't "fix" this by
   hanging it off `fs::root`'s no-override fallback the way
   `migrate_conducting_stage` hangs off `conducting_stage_dir`'s.** `root`/
   `stage_dir`/`state_dir` are reached by `with_stage_lock`, the SHARED lock
@@ -290,7 +290,7 @@
   ITS migration is safe to hang off its own resolution while `root`'s is
   not. The three real binaries call `migrate_root_once()` once, explicitly,
   at the top of their own `main()` instead (`crates/cli/src/bin/{aoide,
-  aoided}.rs`, `crates/lyra/src/bin/lyra.rs`) — a test may call it directly
+  aoided}.rs`, `crates/strillix/src/bin/strillix.rs`) — a test may call it directly
   too (it is a plain idempotent function, no `Once`/env-isolation dance
   needed, unlike `migrate_conducting_stage`'s own test suite). A move that
   fails is narrated and leaves the old tree in place. Its one `Err` is a
@@ -300,9 +300,9 @@
   they could not make private. A `state/` that is absent is not created
   there, and one whose parent is not a directory counts as absent, so the
   narrated failure stays the failure.
-- **A checkout-relative source path is named ONCE, here — `fs::LYRA_SHELL_SRC`
-  (`"pkgs/lyra-shell"`) is the pattern, not an exception.** The lyra shell's
-  QML/icons/preview tree is read by `aoide-lyra`'s `commands::preview` (which
+- **A checkout-relative source path is named ONCE, here — `fs::STRILLIX_SHELL_SRC`
+  (`"pkgs/strillix-shell"`) is the pattern, not an exception.** The strillix shell's
+  QML/icons/preview tree is read by `strillix`'s `commands::preview` (which
   stages it into an isolated preview root) and named in the scaffold doc
   `aoide-song`'s `commands::rice` writes. Every site that CONSTRUCTS the path
   joins the const onto `flake_root`; a prose or doc-comment spelling of the
@@ -310,10 +310,10 @@
   scaffold text) resolves nothing and is not a second source. A second such
   tree earns its own const beside this one: the rename this survives is
   exactly the one that leaves a string behind in a crate nobody thought to
-  grep, and the package built from the same directory (`pkgs/lyra-shell`) is
+  grep, and the package built from the same directory (`pkgs/strillix-shell`) is
   the other half that has to keep agreeing with it.
 - **`fs::song_templates_dir` returns `Option`, never a default (L-C3,
-  lyra-carrier lane, task #107) — don't "helpfully" fall back to a
+  strillix-carrier lane, task #107) — don't "helpfully" fall back to a
   hardcoded path when both tiers miss.** Unlike `root`/`flake_root` (always
   resolvable — a runtime path or a checkout path always HAS a default,
   even if nothing lives there yet), a templates dir with no baked
@@ -389,7 +389,7 @@
   `docs/architecture/PACKAGE-LAYOUT.md`'s "Charter exceptions" note — `mode`
   is read by `shellbridge` (which stays in `conduct`), so moving it would
   create the cross-crate edge the split exists to avoid.
-- **`takes`' functions take `draft: Option<&str>`, not `&str`** (`lyra
+- **`takes`' functions take `draft: Option<&str>`, not `&str`** (`strillix
   reload` design, settled 2026-08-31): `None` resolves the take root to
   `songbook/<song>/takes/` (staging mode, no draft to nest under); `Some`
   resolves it to `songbook/<song>/drafts/<draft>/takes/`, the original
@@ -584,11 +584,11 @@
   creator whose directory lies under `state/` goes through
   `fs::ensure_write_dir`, which locks `state/` before it creates anything.
   Accepted gap: a raw creator outside this crate can make a fresh `state/`
-  wide until the next storage write or the next `aoide`, `aoided` or `lyra`
+  wide until the next storage write or the next `aoide`, `aoided` or `strillix`
   start. Two are known.
   `aoide-conduct`'s `graph/spawn.rs` makes `state/sessions/` with
   `create_dir_all`, and in that spawn path the very next call,
-  `create_new_private`, locks it. `aoide-lyra`'s preview fixture
+  `create_new_private`, locks it. `strillix`'s preview fixture
   (`commands/preview.rs`'s `stage_fixture`) makes `<root>/state/stage` with
   `create_dir_all`; its default root is a preview runtime dir, not
   `state_dir()`, so only an explicit `--root` at the live root reaches

@@ -34,7 +34,7 @@ lib.mkIf config.aoide.enable {
   # ── Runtime directories ──────────────────────────────────────────────────
   # Two atomic JSON state trees (CONTRACTS.md §4), both created at runtime,
   # never committed, never imported by any module (checks.song-runtime-untracked):
-  # `song/stage/` is rice/paint staging (livery.json, mode.json — lyra's
+  # `song/stage/` is rice/paint staging (livery.json, mode.json — strillix's
   # tree); `state/stage/` is CONDUCTING state (sessions.json/hooks.json/
   # projects.json/graph.json/pending.json/herald.json — command-defrag S1,
   # 2026-08-27). `state/stage/` nests under the already-0700 `state/` dir, so

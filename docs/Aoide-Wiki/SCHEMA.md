@@ -65,7 +65,7 @@ snapshot: 2026-08-25
 
 ### Tags
 
-a2a · agent · aliases · aoide · architecture · auto-discovery · base16 · blueprint · bridge · cli · coding-agent · compositor · computer-use · conductor · content · crate · daemon · dag · declarative · deployment · design · desktop · dxflake · editor · extensibility · features · flake · gadget · git · glyph · governance · graph · harness · hooks · hyprland · integration · ipc · keybinds · knowledge · livery · lyra · mcp · melete · meta · mneme · naming · nix · node · notification · onboarding · orchestration · orchestrator · paint · pantheon · pipeline · plugin · pointer · policy · protocol · pty · qml · quickshell · rebuild · reference · rice · rust · schema · screen · secrets · security · session · shell · song · stylix · terminal · theming · totp · tui · ui · upkeep · vault · vision · wayland · widget · wiki
+a2a · agent · aliases · aoide · architecture · auto-discovery · base16 · blueprint · bridge · cli · coding-agent · compositor · computer-use · conductor · content · crate · daemon · dag · declarative · deployment · design · desktop · dxflake · editor · extensibility · features · flake · gadget · git · glyph · governance · graph · harness · hooks · hyprland · integration · ipc · keybinds · knowledge · livery · strillix · mcp · melete · meta · mneme · naming · nix · node · notification · onboarding · orchestration · orchestrator · paint · pantheon · pipeline · plugin · pointer · policy · protocol · pty · qml · quickshell · rebuild · reference · rice · rust · schema · screen · secrets · security · session · shell · song · stylix · terminal · theming · totp · tui · ui · upkeep · vault · vision · wayland · widget · wiki
 
 ### Notes
 
@@ -124,7 +124,7 @@ entities/aoide-cli.md
 entities/aoided.md
 entities/dxflake.md
 entities/livery.md
-entities/lyra.md
+entities/strillix.md
 entities/shellbridge.md
 ingest/index.md
 ingest/log.md

@@ -1,5 +1,5 @@
 # lib/options.nix — the aoide.* option-derivation output (P-I3, onboarding
-# lane, docs/architecture/ONBOARD.md "The vars-file generator"). Feeds `lyra
+# lane, docs/architecture/ONBOARD.md "The vars-file generator"). Feeds `strillix
 # onboard`'s `aoide.nix` generator: `nix eval --json <checkout>#aoideOptions`
 # returns every VISIBLE, non-internal `aoide.*` option declared across
 # modules/nucleus (the contract) and the dendrites the registry catalogues,

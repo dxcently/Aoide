@@ -103,7 +103,7 @@ pub struct HeraldFile {
 }
 
 /// `state/stage/herald.json` (command-defrag S1, 2026-08-27) -- core
-/// conducting state, moved off `song/stage/` (lyra's tree).
+/// conducting state, moved off `song/stage/` (strillix's tree).
 pub fn herald_path() -> std::path::PathBuf {
     aoide_storage::fs::conducting_stage_dir().join("herald.json")
 }

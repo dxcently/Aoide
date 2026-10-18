@@ -9,9 +9,9 @@
 //! `hooks install` performs needs the repo (the package never ships the
 //! skill dir). Registers the clone, seeds the songbook, asks which
 //! harnesses to wire and runs the already-registered `hooks install` for
-//! each, probes for `lyra` and delegates the nix half to `lyra onboard` as a
+//! each, probes for `strillix` and delegates the nix half to `strillix onboard` as a
 //! child process when it resolves (core never speaks nix itself — root
-//! `AGENTS.md`'s core/lyra split), then prints the same `aoide guide` output
+//! `AGENTS.md`'s core/strillix split), then prints the same `aoide guide` output
 //! the stub's schema summary always promised.
 //!
 //! Root-coupled like `meta`/`stubs`/`infra` (this crate's own README/
@@ -39,12 +39,12 @@ const PROJECT_FAILED_PREFIX: &str = "project registration failed: ";
 pub fn register(r: &mut Registry) {
     r.insert(cmd!(
         path: ["onboard"],
-        summary: "First-boot flow: register the clone, seed songbook, wire harness hooks, delegate the nix half to `lyra onboard` when lyra is available, print the guide.",
+        summary: "First-boot flow: register the clone, seed songbook, wire harness hooks, delegate the nix half to `strillix onboard` when strillix is available, print the guide.",
         args: [],
         flags: [
             flag!("harness", "string", "Comma-separated harnesses to wire (claude,kimi,pi,eidolon); given at all, skips the interactive ask and wires exactly this list (default: ask on a tty, else every harness found on PATH)."),
-            flag!("yes", "bool", "Skip every interactive prompt end to end, including the lyra delegate step: use --harness if given, else every harness found on PATH."),
-            flag!("out", "string", "Forwarded to `lyra onboard` as its own --out (default: lyra's own default, ./aoide.nix); omitted unless given here."),
+            flag!("yes", "bool", "Skip every interactive prompt end to end, including the strillix delegate step: use --harness if given, else every harness found on PATH."),
+            flag!("out", "string", "Forwarded to `strillix onboard` as its own --out (default: strillix's own default, ./aoide.nix); omitted unless given here."),
         ],
         gated: false,
         implemented: true,
@@ -109,9 +109,9 @@ fn handle_onboard(inv: &Invocation) -> Outcome {
         }
     }
 
-    say("onboard: probing for lyra...");
-    let lyra_note = probe_and_delegate_lyra(inv);
-    say(&format!("  {lyra_note}"));
+    say("onboard: probing for strillix...");
+    let strillix_note = probe_and_delegate_strillix(inv);
+    say(&format!("  {strillix_note}"));
 
     if !quiet {
         println!("{}", crate::guide::render(crate::dispatch::registry()));
@@ -128,10 +128,10 @@ fn handle_onboard(inv: &Invocation) -> Outcome {
     }
 
     let message = if project_registered {
-        format!("onboard: clone registered, {} harness(es) wired -- {lyra_note}", harnesses.len())
+        format!("onboard: clone registered, {} harness(es) wired -- {strillix_note}", harnesses.len())
     } else {
         format!(
-            "onboard: project registration failed (see notes above), {} harness(es) wired -- {lyra_note}",
+            "onboard: project registration failed (see notes above), {} harness(es) wired -- {strillix_note}",
             harnesses.len()
         )
     };
@@ -139,7 +139,7 @@ fn handle_onboard(inv: &Invocation) -> Outcome {
         "root": root.display().to_string(),
         "harnesses": harnesses,
         "hooks": hook_reports,
-        "lyra": lyra_note,
+        "strillix": strillix_note,
         "projectRegistered": project_registered,
     });
     if project_registered {
@@ -322,34 +322,34 @@ fn run_hooks_install(agent: &str, door: Door) -> Outcome {
     }
 }
 
-/// ONBOARD.md decision 3: "lyra enabled" = `rice_bin()` resolves. The env
+/// ONBOARD.md decision 3: "strillix enabled" = `rice_bin()` resolves. The env
 /// tier is trusted unconditionally (`rice_bin`'s own contract) and the
 /// sibling tier is only ever RETURNED after `rice_bin` already ran its own
 /// `exists()` check -- both show up as a path containing `/`. Only the bare
-/// name (`"lyra"`, tier 3, deliberately left by `rice_bin` for
+/// name (`"strillix"`, tier 3, deliberately left by `rice_bin` for
 /// `Command::spawn` to resolve at exec time) needs a PATH probe of our own.
-fn lyra_bin_if_resolved() -> Option<String> {
+fn strillix_bin_if_resolved() -> Option<String> {
     let bin = aoide_protocol::bin::rice_bin();
     let resolved = bin.contains('/') || aoide_protocol::bin::on_path(&bin);
     resolved.then_some(bin)
 }
 
-/// Steps 2-3 of the flow (ONBOARD.md): probe for lyra, and when it
-/// resolves, delegate the whole nix half to `lyra onboard` as a child
+/// Steps 2-3 of the flow (ONBOARD.md): probe for strillix, and when it
+/// resolves, delegate the whole nix half to `strillix onboard` as a child
 /// process with inherited stdio so its own prompts/output reach this same
 /// terminal directly (`--harness` is deliberately NOT forwarded -- harness
-/// wiring is core's own job, decision 7, and lyra's half has no use for it).
+/// wiring is core's own job, decision 7, and strillix's half has no use for it).
 /// A spawn failure (e.g. `ENOENT`) OR a nonzero exit both fall to the same
 /// tolerant note rather than a hard onboard failure -- either could mean the
-/// resolved lyra binary predates this aoide and genuinely lacks `onboard`,
-/// OR a real failure inside `lyra onboard` itself; the note names the exit
+/// resolved strillix binary predates this aoide and genuinely lacks `onboard`,
+/// OR a real failure inside `strillix onboard` itself; the note names the exit
 /// code (or spawn error) and states plainly that the desktop half was
-/// skipped, without guessing which case it was. If lyra isn't found at all,
+/// skipped, without guessing which case it was. If strillix isn't found at all,
 /// the returned line names no nix-shaped detail whatsoever (ONBOARD.md
 /// decision 3's "nothing nix-shaped is ever spoken").
-fn probe_and_delegate_lyra(inv: &Invocation) -> String {
-    let Some(bin) = lyra_bin_if_resolved() else {
-        return "lyra: not found (no AOIDE_RICE_BIN, no sibling binary, not on PATH) -- skipping the desktop half; core setup is complete".to_string();
+fn probe_and_delegate_strillix(inv: &Invocation) -> String {
+    let Some(bin) = strillix_bin_if_resolved() else {
+        return "strillix: not found (no AOIDE_RICE_BIN, no sibling binary, not on PATH) -- skipping the desktop half; core setup is complete".to_string();
     };
 
     let mut cmd = Command::new(&bin);
@@ -363,13 +363,13 @@ fn probe_and_delegate_lyra(inv: &Invocation) -> String {
     cmd.stdin(Stdio::inherit()).stdout(Stdio::inherit()).stderr(Stdio::inherit());
 
     match cmd.status() {
-        Ok(status) if status.success() => format!("lyra onboard: done ({bin})"),
+        Ok(status) if status.success() => format!("strillix onboard: done ({bin})"),
         Ok(status) => format!(
-            "lyra onboard failed (exited {}) -- the resolved lyra binary may be older than this aoide and lack the `onboard` subcommand, or the command itself failed; skipping the desktop half",
+            "strillix onboard failed (exited {}) -- the resolved strillix binary may be older than this aoide and lack the `onboard` subcommand, or the command itself failed; skipping the desktop half",
             status.code().map(|c| c.to_string()).unwrap_or_else(|| "via signal".to_string())
         ),
         Err(e) => format!(
-            "lyra onboard could not be run ({e}) -- the resolved lyra binary may be older than this aoide and lack the `onboard` subcommand, or spawning it failed; skipping the desktop half"
+            "strillix onboard could not be run ({e}) -- the resolved strillix binary may be older than this aoide and lack the `onboard` subcommand, or spawning it failed; skipping the desktop half"
         ),
     }
 }

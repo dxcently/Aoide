@@ -32,7 +32,7 @@ extractors.
 Aoide's session core: the PTY multiplexer (`aoide conduct`), the session DAG
 (bare `aoide graph`), Claude-Code hook plumbing, and liveness reaping. Makes
 every terminal a tracked, conductable session (root `AGENTS.md`, "Conducting
-— aoide's headline"). Core, never `lyra` — headless-safe by construction.
+— aoide's headline"). Core, never `strillix` — headless-safe by construction.
 
 The conducted session's terminal is `graph/pty.rs`: **one seam with an arm per
 host** — `openpty`/`TIOCSCTTY`/`poll`/`termios` on Unix, `CreatePseudoConsole`
@@ -942,7 +942,7 @@ stripping one, and a held spawn shows as its whole command.
   eidolon-enrolled record to `EIDOLON_PROFILE` for free, off `rec.agent`
   alone, the same generic path every other harness takes.
 - `shellbridge`, `herald` — files only; their CLI commands (registry lines)
-  moved to `lyra` at P-A2, but both stay resident here (see charter smudge
+  moved to `strillix` at P-A2, but both stay resident here (see charter smudge
   below). The socket answers five commands with a reply. Two of them run
   through the same sequencer over either subject they name by: a SESSION
   id (`sessionaction`) or a PROJECT name (`projectaction`, zero-session — no
@@ -997,7 +997,7 @@ stripping one, and a held spawn shows as its whole command.
   `verb` is an ASCII letter then ASCII letters or digits (`openTab` is
   camelCase), and `arg`, when present, is 1 to 64 of `[A-Za-z0-9._-]` and never
   starts with `-`; a name outside those charsets is dropped. The bridge spells
-  one line, `lyra component <slot> <verb> [arg]`, and runs it through
+  one line, `strx component <slot> <verb> [arg]`, and runs it through
   `hyprctl dispatch exec`, as `power lock` does: a provider's action never
   inherits this unit's NoNewPrivileges. The audit line is `component <slot>
   <verb>: spawned` or the spawn error.
@@ -1080,7 +1080,7 @@ stripping one, and a held spawn shows as its whole command.
 - **The RICE menu's four verbs over the bridge (`shellbridge.rs::RiceMenu`,
   `RiceMode`, `RiceDraft`, `RiceDeclare`).** Any click on the bar's RICE cell opens the one
   menu; nothing switches until a row is chosen. All four re-exec the sibling
-  `lyra` (`daemon::bin::rice_bin()`): `rice` lives there and conduct never
+  `strillix` (`daemon::bin::rice_bin()`): `rice` lives there and conduct never
   depends on the song crate, so the name regexes, the minting and every refusal
   stay the CLI's.
   `{"cmd":"ricemenu"}` is the second READ, answered on its own connection and
@@ -1109,7 +1109,7 @@ stripping one, and a held spawn shows as its whole command.
   `notify`. The set is closed (`RiceDraftAction::from_wire`: `enter` and `drop`
   take a `name` that is one argv token, `new` and `save` refuse one, so a mistaken caller is dropped rather
   than read as success), planned by the pure `rice_draft_plan` and run step by
-  step by `dispatch_rice_draft`, each step `lyra rice … --json`, unbounded,
+  step by `dispatch_rice_draft`, each step `strx rice … --json`, unbounded,
   stopping at the first failure — `partial` when an earlier step had
   succeeded, which nothing rolls back. From declarative, `enter` and `new` first
   run a BARE `rice mode stage` (house rule 10: it restores `stagingSong`,
@@ -1128,7 +1128,7 @@ stripping one, and a held spawn shows as its whole command.
   `{"cmd":"ricedeclare","name":"<song>"}` is the Declare row, ANSWERED on its
   own connection and thread like `ricemenu` because the surface paints the
   outcome as a balloon: `name` is a song name (lowercase letters, digits,
-  hyphens; anything else is dropped with no reply), and `dispatch_rice_declare` runs `lyra rice declare <name>
+  hyphens; anything else is dropped with no reply), and `dispatch_rice_declare` runs `strx rice declare <name>
   --host --json`, unbounded like every mutation, which rewrites the host
   config's `habit.song.declared` line and never rebuilds. `rice_declare_reply`
   answers `{ok:true, message, name, host, changed, stagedDiffers}` or
@@ -1703,9 +1703,9 @@ this crate carries specifically so `aoide-server` never has to; see
 
 ## How it composes
 
-`screen`, `server`, `conductor`, `cli`, and `lyra` all depend on it.
+`screen`, `server`, `conductor`, `cli`, and `strillix` all depend on it.
 **Charter smudge**: `shellbridge.rs`/`herald.rs` stay as FILES here even
-though their CLI commands moved to `lyra` — `permit.rs` publishes summons
+though their CLI commands moved to `strillix` — `permit.rs` publishes summons
 through `herald`, and `conductor/ui.rs` reads the socket path `shellbridge`
 owns, so both are entangled with core
 (`docs/architecture/PACKAGE-LAYOUT.md`, "Charter exceptions").

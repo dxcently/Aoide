@@ -186,7 +186,7 @@ even when A's door accepts no routable connection at all.
   split and never a bare yes/no on either. Either direction collects the
   typed code the same way the CLI tty prompt and the scripted `--code`
   path do, through the identical gate — a six-boxes-plus-dash entry
-  surface, `lyra pair ask` when `lyra` resolves, `zenity --entry`
+  surface, `strx pair ask` when `strillix` resolves, `zenity --entry`
   otherwise — and never shows the code, same as the tty prompt: inbound
   against `derive_sas`, outbound against its own second, different reply
   code (`derive_reply_sas`) rather than the code this instance already
@@ -208,14 +208,14 @@ even when A's door accepts no routable connection at all.
   accepted cost: while a dialog sits open, the
   watcher's own feed narration and outbound poll both pause. **After a
   popup-driven INBOUND commit succeeds, the approver's own reply code gets
-  a SECOND, separate dialog** — `lyra pair show` (`zenity --info
+  a SECOND, separate dialog** — `strx pair show` (`zenity --info
   --no-markup` otherwise), the code shown large with a Copy control and a
   Done control, no reject control at all: it fires only after the commit
   it belongs to already succeeded, so there is nothing left to approve or
   reject, only to relay out-of-band and dismiss. The same commit also
   fires a `notify-send` toast carrying the same code, first and
   independently of the dialog — a persistent glance-backup that still
-  lands the code when `lyra`/`zenity` are both missing. The watcher polls
+  lands the code when `strillix`/`zenity` are both missing. The watcher polls
   outbound entries still `awaiting-approval` on its OWN 60s timer (through
   the same poll-once seam the blocking command uses), which is what lets a
   detached (`--wait 0`) request's entry dialog ever fire; the 200ms popup
@@ -462,7 +462,7 @@ the full count-site checklist (git show 9c2d05c).
   folded into bare `aoide pair watch` at task #135 P3') that tails the
   feed and re-derives the actionable set from `aoide-storage::pairing`
   directly (golden +1); `--popup` ships zenity `--question` only at this
-  phase — no `lyra` fallback yet, a QML dialog named as a deferral, built
+  phase — no `strillix` fallback yet, a QML dialog named as a deferral, built
   out at P-PV3 below. Legacy-escape documentation pass lands as CONTRACTS
   §6's own "Legacy escapes" subsection.
 - **P-P6 — discovery + invite (M).** The LAN advertisement
@@ -517,12 +517,12 @@ the full count-site checklist (git show 9c2d05c).
   `node pair watch --popup`'s INBOUND (approver) dialog stops being a bare
   Approve/Reject: it collects the typed code through the SAME
   six-boxes-plus-dash surface the secrets TOTP dialog already has
-  (`lyra pair ask`, sharing that command's own QML component via the new
+  (`strx pair ask`, sharing that command's own QML component via the new
   `dialog_qml` module, `zenity --entry` as the fallback) and runs it
   through the identical `CodeGate::Code` gate the CLI already holds — no
   new no-prompt gate variant (`InboundGate::DialogConfirmed` is retired)
   — and never shows the code in the dialog. The OUTBOUND (requester)
-  dialog originally kept a plain confirm shape (`lyra pair confirm`/
+  dialog originally kept a plain confirm shape (`strx pair confirm`/
   `zenity --question`): this instance's own locally-derived code shown
   large, a single Approve/Reject committing unconditionally — a
   design-review round within this SAME task had already caught an

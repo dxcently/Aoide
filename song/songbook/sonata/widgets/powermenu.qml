@@ -3,7 +3,7 @@
 // `SurfaceSlot`, not `WidgetSlot` — this root is a `PanelWindow`, not an
 // `Item`, so it owns its own layer, namespace, keyboard focus, and
 // GlobalShortcut; that contract travels with the slot (see
-// pkgs/lyra-shell/qml/slots.md). Moved as one inseparable unit —
+// pkgs/strillix-shell/qml/slots.md). Moved as one inseparable unit —
 // the deal animation, the layer-shell setup, the GlobalShortcut all still
 // belong together in this one file.
 //

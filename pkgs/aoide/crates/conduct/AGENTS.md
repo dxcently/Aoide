@@ -40,7 +40,7 @@ run reports **933** (both measured, the runs named in `CORE-POSIX.md`); the
 43-test gap is the crate's host-gated set — **58** tests need a POSIX fixture and
 **15** are Windows-only — each gate naming its own reason in place. The gates are the fixture
 groups rather than a number to be trusted: a `#!/bin/sh` script or shim and its
-mode (the curl transport, the `zenity`/`lyra` dialogs, `sh`-based conduct
+mode (the curl transport, the `zenity`/`strillix` dialogs, `sh`-based conduct
 children), `fork`/`SO_PEERCRED`/`setsid` facts, `/proc` reads, `socat`-style
 doors, and the SIGTERM-survivor pair — each naming its own reason in place. The
 fifteen Windows-only ones are the seam's seven (`ready_of_wait`'s table, a
@@ -201,7 +201,7 @@ in the message.
   An attested MCP spawn whose argv `wrapped_harness` does not recognise as a
   registered harness, or whose harness is named by a path (`/tmp/x/claude`,
   `./claude`, `env /tmp/x/claude`; `mcp_launch_is_bare`), is held whole the same
-  way, shown as its full escaped argv (a shell, `aoide`/`lyra`, `env sh`, an
+  way, shown as its full escaped argv (a shell, `aoide`/`strillix`, `env sh`, an
   interpreter, any unknown program). Only a bare harness name launches.
   It is never refused outright and never launched by the MCP call; only
   `pending approve` from a human door launches it. The accepted residual: a
@@ -752,7 +752,7 @@ in the message.
   above only), and `handle_conn` still ANSWERS a line naming that verb which
   fails its gate (`bad-request`) — silence is not an answer. `run_bin_bounded`
   (`run_core_bounded` is its core-binary wrapper; the menu's read calls it
-  with `lyra`) is the only way this module runs a READ's child: a wall-clock
+  with `strillix`) is the only way this module runs a READ's child: a wall-clock
   deadline with kill + `wait` (no zombie, no live child past the bound), pipes
   drained by SLOT-COUNTED reader threads that are NEVER joined (`ReaderSlot`; a
   descendant that inherited a pipe must cost a slot, never the deadline), and a
@@ -769,7 +769,7 @@ in the message.
   action)` (pure; the unlock step and the Declarative-`save`/`drop` refusals
   live there and nowhere else) → `dispatch_rice_draft` (the sequencer; `new`'s entering
   step takes the `data.name` the save step answered). Never validate the
-  draft-name regex here — `aoide-song` is lyra-only and conduct must not depend
+  draft-name regex here — `aoide-song` is strillix-only and conduct must not depend
   on it — and never pre-check that a draft exists: `rice mode draft` creates
   one, so an `enter` is enter-or-create and a pre-check would only race it;
   a `drop` of a missing draft or of the draft in force is the CLI's refusal. The
@@ -787,7 +787,7 @@ in the message.
   `declarative` (the CLI resolves the declared twin — never an env song here).
   `ricedeclare` takes one song-shaped `name` (`song_name`) and nothing else:
   which song a host may declare, and the host file it rewrites, are the CLI's
-  (`lyra rice declare --host`), never checked here. No audit line of the other
+  (`strx rice declare --host`), never checked here. No audit line of the other
   three verbs carries a draft or a song name; `ricedeclare`'s names the song
   it declared (`rice_declare_audit`: `ok changed`, `ok unchanged`, `failed`),
   which is why its parse holds the name to the song shape.
@@ -798,12 +798,12 @@ in the message.
   reader keys. A binding is immutable within a session; same-key calls are
   no-ops. Project the explicit binding into the graph and exit ledger.
 
-- **This crate is core, never lyra.** Nothing here may gain a
+- **This crate is core, never strillix.** Nothing here may gain a
   wayland/image/quickshell dependency — that's exactly what P-A1 moved OUT
   (to `screen`) to keep this crate headless-safe. `cargo tree -p
   aoide-conduct` staying free of those deps is a standing gate.
 - **`shellbridge.rs`/`herald.rs` are a named, deliberate charter smudge.**
-  Their CLI commands live in `lyra`; the files stay here because `permit.rs`
+  Their CLI commands live in `strillix`; the files stay here because `permit.rs`
   (this crate) publishes through `herald`, and `conductor/ui.rs` reads the
   socket path `shellbridge` owns. Don't move the files to chase the commands —
   see `docs/architecture/PACKAGE-LAYOUT.md`'s "Charter exceptions" for the
@@ -2910,7 +2910,7 @@ in the message.
   and the `audit_resurrect` call that reports it.
 - **A new `graph`/`conduct`/`hooks` command** adds a `cmd!`/`register` entry in
   `commands/`, wired into `cli`'s `commands::all()` (this crate's commands are
-  core, never `lyra`'s).
+  core, never `strillix`'s).
 - **A new per-session socket convention** (the channel socket,
   `channel_socket_path`, P-M5c-2, is the first one beside
   `conduct_socket_path`) stays a pure path function in `graph/conduct.rs`
@@ -2967,7 +2967,7 @@ in the message.
   `sessionaction`/`projectaction`/`workspaceaction` whitelists and reply
   shapes, the `sessiontrace`/`ricemenu` reads, the `ricedeclare` answer — or to the fire-and-forget
   `ricemode`/`ricedraft` sets updates `ShellBridge.qml`'s protocol comment
-  (`pkgs/lyra-shell/qml/ShellBridge.qml`, which names the verbs it answers) and
+  (`pkgs/strillix-shell/qml/ShellBridge.qml`, which names the verbs it answers) and
   `concepts/cli/Doors-and-Nodes.md`'s socket-command list, in the same commit.
 - **`graph.json`'s compositor block (`doc::workspace_block`) is ONE seam.**
   `build_graph` publishes it and `aoide workspace list --json` prints it from

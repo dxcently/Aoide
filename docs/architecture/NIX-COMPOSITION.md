@@ -9,13 +9,13 @@ template suites test it.
 
 ## Scope and rollout
 
-dxflake is the first live consumer of portable Aoide and Lyra exports. Finish the
+dxflake is the first live consumer of portable Aoide and Strillix exports. Finish the
 current fixes and reach a coherent checkpoint, prove consumption on dxflake,
 then migrate AoideOS away from its walkers. Additive upstream package/module
 exports can precede that migration. Osaka and Sakaki use dxflake; Yomi uses
 AoideOS. System activation remains user-controlled.
 
-Aoide core remains usable without Nix, Lyra, Mneme, or Melete. This design is a
+Aoide core remains usable without Nix, Strillix, Mneme, or Melete. This design is a
 deployment and composition interface, not a new dependency of the core binary.
 
 ## Vocabulary and boundaries
@@ -77,7 +77,7 @@ modules/
     kimi-cli.nix
     cloudflared.nix
     aoide.nix                  public upstream integration
-    lyra.nix
+    strillix.nix
 song/                         mirrors ~/.aoide/song/ byte for byte
   songbook/
     palettes/                 optional shared palettes, arbitrary filenames
@@ -87,7 +87,7 @@ song/                         mirrors ~/.aoide/song/ byte for byte
       widgets/
       design/
   covers/                     shared cover art, beside the rices, any rice wears any cover
-  stage/                      runtime only, gitignored: what lyra renders and programs watch
+  stage/                      runtime only, gitignored: what strillix renders and programs watch
   declared/                   runtime only: the activation seed's twin of the declared song
 pkgs/                         custom package definitions only
 ```
@@ -126,7 +126,7 @@ A dendrite that needs another's program reaches it by name on PATH, never by
 path into its directory; a host that does not select the provider gets an
 inert key.
 
-The same composition shape applies to AoideOS when it migrates. Public Lyra
+The same composition shape applies to AoideOS when it migrates. Public Strillix
 runtime QML/bridges belong to its package; consumer-owned widget source belongs
 with the songbook. A consumer does not recreate AoideOS's private module tree.
 A large home half may be extracted to a `home.nix` within its dendrite and
@@ -229,7 +229,7 @@ per capability:
     kimi-cli = ./dendrites/kimi-cli.nix;
     cloudflared = ./dendrites/cloudflared.nix;
     aoide = ./dendrites/aoide.nix;
-    lyra = ./dendrites/lyra.nix;
+    strillix = ./dendrites/strillix.nix;
   };
 
   # Names and paths only; no body is imported here.
@@ -314,7 +314,7 @@ preferences that belong with them, and imports nothing:
     # Single-implementation members: catalogue names, nothing else.
     members = [
       "hyprland-packages"
-      "lyra"
+      "strillix"
     ];
 
     # Provider-bearing members. The key is the catalogue name; the value is the
@@ -586,7 +586,7 @@ inputs can still fail during lock/fetch operations. Separate flake roots are
 needed only when independent lock failure domains are required. Darwin package
 and runtime support must be proved separately from a darwin host evaluating.
 
-## Lyra and songbook
+## Strillix and songbook
 
 Rice authoring is pure Nix plus owned QML/assets. Runtime JSON is generated.
 `palette.nix` is a conventional local name; shared palette files may have any
@@ -600,22 +600,22 @@ shared palette + song widgets + composition + dependency references
                               |
           declared default / temporary stage / editable draft
                               |
-             Lyra runtime and supported reload backends
+             Strillix runtime and supported reload backends
 ```
 
 Songs live under `song/songbook/<name>/`, and `song/covers/` sits beside the
 songbook, not inside a rice: an image is not a look, and any rice may wear any
 cover. The repository's `song/` mirrors the runtime `~/.aoide/song/` in the
 committed half, and two of its runtime subdirectories exist only there,
-gitignored: `song/stage/`, where lyra renders what programs watch and
-hot-reload, and `song/declared/`, the lyra dendrite's activation seed of
+gitignored: `song/stage/`, where strillix renders what programs watch and
+hot-reload, and `song/declared/`, the strillix dendrite's activation seed of
 the declared song's notes with the venue override applied (which `rice mode
 declarative` re-pins from) and the venue's slots and the host's geometry as `venue.json` (which staging
 lays over the runtime copy of that song) — CONTRACTS.md §4. The wallpaper
 manager is independent of individual rices. Each user has independent state.
-Lyra ships reusable QML components and named bridges (including optional Aoide
+Strillix ships reusable QML components and named bridges (including optional Aoide
 integration); consumers customize widgets in their songbook without copying the
-entire runtime. Importing Lyra's public module supplies capabilities without
+entire runtime. Importing Strillix's public module supplies capabilities without
 installing every upstream song.
 
 Several compatible bundles may be installed for immediate staging. Returning
@@ -628,11 +628,11 @@ aggregation, habit imports only the DECLARED song's body (it brings the paint:
 the ten component providers and the renderer), and
 `declared ∪ available` — the built-in set, published as
 `aoide.songbook.builtIn` — decides the widgets copied into the deployed tree,
-the packages installed, the folders `pkgs/lyra-songbook` ships for that host,
+the packages installed, the folders `pkgs/strillix-rices` ships for that host,
 and the `builtin.json` the runtime compares a staged song's needs against.
 `~/.aoide/song/songbook` belongs to the MACHINE: it is seeded from that baseline
 where a folder is absent, the repo's later changes reach only the files the
-machine never edited (`lyra rice refresh`, `CONTRACTS.md` §5; root `AGENTS.md`
+machine never edited (`strx rice refresh`, `CONTRACTS.md` §5; root `AGENTS.md`
 rule 10), and the machine's copy wins for staging.
 
 Bound QML colors may hotload. Hyprland configuration switching uses an explicit
@@ -663,10 +663,10 @@ implementation proof, not just this Nix layout.
 | Phase | Work | Required evidence |
 |---|---|---|
 | 1. Selection prototype | Catalogue, enable/provider options, aggregation bodies, deferred halves, constructor | Disabled throwing implementation is never evaluated; unknown/missing provider and a wrong-platform module have clear errors |
-| 2. Vertical consumer slice | One local app dendrite, notification providers, one shared user; public Aoide/Lyra consumption | Host overrides group provider; system-only and HM variants evaluate; no private upstream paths |
+| 2. Vertical consumer slice | One local app dendrite, notification providers, one shared user; public Aoide/Strillix consumption | Host overrides group provider; system-only and HM variants evaluate; no private upstream paths |
 | 2b. Override records | Capability-scoped records: discovery, matching, overlay and deferred module application | Targeted and omitted host filters; unmatched throwing overlay and module uncalled; duplicate targets apply once; record schema typos fail on every host |
 | 3. dxflake reconciliation | Move existing configuration without losing membership; restore agreed enable interface and shared users | Before/after package/service/user inventory; Osaka and Sakaki builds; existing pin failures resolved explicitly |
-| 4. Live portability | User-admitted deployments and cross-host operation | Aoide tracking/conduct/mail and Lyra selected-song/runtime behavior on dxflake, with failures recorded |
+| 4. Live portability | User-admitted deployments and cross-host operation | Aoide tracking/conduct/mail and Strillix selected-song/runtime behavior on dxflake, with failures recorded |
 | 5. AoideOS migration | Replace walkers, move source paths and docs together | Yomi build and user-admitted runtime proof; no accidental all-song/all-module loading |
 | 6. Additional consumers | Standalone HM, Darwin where supported, package-only installation | Independent evaluation/build checks and honest platform support matrix |
 
@@ -703,9 +703,9 @@ because it removed walkers.
 
 ## Related documents
 
-- [Composition, Lyra, and muse triad](../Aoide-Wiki/references/aoide-composable-system-and-muse-triad.md): broader runtime and integration context.
+- [Composition, Strillix, and muse triad](../Aoide-Wiki/references/aoide-composable-system-and-muse-triad.md): broader runtime and integration context.
 - [Task register](TASK-REGISTER.md): execution history and evidence; not a substitute for this design.
-- [Package layout](PACKAGE-LAYOUT.md): Aoide/Lyra binary boundary.
+- [Package layout](PACKAGE-LAYOUT.md): Aoide/Strillix binary boundary.
 - dxflake `templates/`: one copyable example per authoring role — dendrite, provider, provider registry, aggregation, host, user, nucleus module, package — with `templates/README.md` mapping role to destination. `tests/templates/run.sh` builds a tree out of them, so they cannot drift from the constructor.
 
 Mneme/Melete integration decisions remain in their dedicated proposals. Neither

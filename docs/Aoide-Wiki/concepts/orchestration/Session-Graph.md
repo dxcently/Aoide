@@ -125,7 +125,7 @@ document instead. A sample render:
 Every stage mutation restages the same resolved document atomically to
 `state/stage/graph.json` — the identical write-temp-then-rename pattern as the
 livery emitter (which stages to `song/stage/` instead — the two trees are
-split by owner, core vs. lyra) — via `restage_graph`, so [[Quickshell]]
+split by owner, core vs. strillix) — via `restage_graph`, so [[Quickshell]]
 hot-reloads it without a separate emit step. `session prune` is the manual
 resync when a hand-edit to one of the stage files needs to be reconciled
 back into `graph.json`.
@@ -138,7 +138,7 @@ instead — a beamed tree of agent/sub-agent sessions, not a literal node/edge
 diagram (field contract: [[Widget-Bridge-Contract]]).
 
 The `aoide.surfaces.sessionGraph` owner-registry entry
-(`modules/dendrites/lyra/runtime.nix`) is still declared, but no QML file
+(`modules/dendrites/strillix/runtime.nix`) is still declared, but no QML file
 backs it — the standalone overlay (`AoideSessionGraph.qml` + `GraphRow.qml`)
 and the shared `GraphModel.qml` it and the dock's DAG gadget instantiated
 are absent from the QML tree (open thread: whether the registry entry
@@ -855,7 +855,7 @@ after the Lane R cutover, alongside the bare render).
 The dock's `SUPER+G` toggle and the launcher's `SUPER+SPACE` both resolve
 in-process (Hyprland global shortcuts the QML registers itself) rather than
 through a `shell` CLI command — no such group exists in either binary's
-registry; `SUPER+ESCAPE` (lock) execs `lyra lock`.
+registry; `SUPER+ESCAPE` (lock) execs `strx lock`.
 
 ## Related
 

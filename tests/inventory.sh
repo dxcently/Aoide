@@ -19,7 +19,7 @@
 # activates anything: every measure is one `nix eval`, capped at 580s, so this
 # says what the host's configuration EVALUATES to. A gate going green here is
 # necessary, never sufficient — the runtime half is the user's admitted
-# `nixos-rebuild` switch and the `lyra quickshell healthcheck` / `aoide doctor`
+# `nixos-rebuild` switch and the `strillix quickshell healthcheck` / `aoide doctor`
 # checks (TASK-REGISTER §4). Reading `drvPath`s proves the derivation graph
 # did not move; it does not prove the built system behaves.
 #
@@ -111,7 +111,7 @@ list 'G4 normal users (name: [extraGroups])' "$users"
 toplevel=$(nixeval --raw "$CFG.system.build.toplevel.drvPath")
 scalar 'G5 system.build.toplevel.drvPath' "$toplevel"
 
-# G6 — every aoide.* option `lyra onboard` can generate (count + names).
+# G6 — every aoide.* option `strillix onboard` can generate (count + names).
 aoide_options=$(nixeval --raw "$FLAKE#aoideOptions" --apply 'os: builtins.concatStringsSep "\n" (builtins.sort builtins.lessThan (map (o: o.name) os))')
 list 'G6 aoideOptions' "$aoide_options"
 

@@ -277,10 +277,10 @@ pub(crate) fn handle_rice_stage_entry(inv: &Invocation) -> Outcome {
     // function's own doc comment above); it cannot have changed underneath
     // us. Draft-only ON PURPOSE, not because anything would refuse otherwise:
     // `take::resolve_scope` now ALSO resolves in `Staging` mode (the
-    // staging-mode take/back reach, `lyra reload` design, settled
+    // staging-mode take/back reach, `strillix reload` design, settled
     // 2026-08-31), so this gate is the one thing standing between a bare
     // `rice stage <name>` and minting a take on every single staging-mode
-    // call — `lyra reload` is the deliberate, deduped staging-mode snapshot
+    // call — `strillix reload` is the deliberate, deduped staging-mode snapshot
     // point instead (`commands/reload.rs`); this hook stays Draft-only so
     // the two never double-mint.
     //
@@ -417,7 +417,7 @@ fn venue_refusal(cause: Cause) -> Outcome {
         Kind::Failed,
         "the declared song's venue overlay cannot be applied",
         format!("{}; a rebuild republishes it", cause.why),
-        Fix::Run("lyra rice mode declarative".to_string()),
+        Fix::Run("strillix rice mode declarative".to_string()),
     )
     .with_detail(cause.detail)
 }
@@ -781,7 +781,7 @@ pub(crate) fn apply_rice_stage(plan: StagePlan) -> Outcome {
 /// The one terminal writer every stage path shares — `handle_rice_stage`
 /// (so `rice stage`, `rice mode stage` and `rice mode declarative`'s
 /// re-pin, which is how leaving staging restores the DECLARED twin's
-/// colours the same live way), `rice back`'s take restore and `lyra
+/// colours the same live way), `rice back`'s take restore and `strillix
 /// reload`'s draft sync — so it rides whatever mode gate its caller
 /// already passed and adds none of its own. Best-effort: a failed write or
 /// an unresolvable notes document is reported, never fatal, because
@@ -816,7 +816,7 @@ pub(crate) fn stage_terminal_colors(conf: Option<&str>) -> (Vec<String>, Value) 
     (vec![path.to_string_lossy().into_owned()], data)
 }
 
-/// Point the rice state link (`~/.local/state/lyra/rice.conf`,
+/// Point the rice state link (`~/.local/state/strillix/rice.conf`,
 /// [`shellbridge::rice_conf_link`]) at `target`, the file [`rice_target_for`]
 /// chose. The renderer's Nix side sources that link from Hyprland, so this is
 /// the one writer that makes a staged song's binds and layout take effect.
@@ -829,7 +829,7 @@ pub(crate) fn stage_terminal_colors(conf: Option<&str>) -> (Vec<String>, Value) 
 ///
 /// A test build writes only a link under the system temp dir: a test that does
 /// not isolate `HOME` is skipped here rather than repointing the operator's
-/// own `~/.local/state/lyra/rice.conf` (the same guard `apply_live` keeps).
+/// own `~/.local/state/strillix/rice.conf` (the same guard `apply_live` keeps).
 pub(crate) fn stage_rice_conf(target: &std::path::Path) -> (Vec<String>, Value) {
     let link = shellbridge::rice_conf_link();
     #[cfg(test)]
@@ -918,7 +918,7 @@ pub(crate) fn stage_lockscreen(
 }
 
 /// Resolve `--from <song>`'s source `livery.json` for `rice compose`
-/// (L-C3, lyra-carrier lane, task #107): the host songbook
+/// (L-C3, strillix-carrier lane, task #107): the host songbook
 /// (`songbook_dir(from)`) first — same precedence every other `--from`
 /// consumer here already holds — else the shipped/env templates dir
 /// (`<templates>/<from>/livery.json`,
@@ -947,7 +947,7 @@ fn resolve_from_notes_path(from: &str) -> Result<PathBuf, String> {
         }
         None => Err(format!(
             "--from song `{from}` not found: checked the songbook at {} — no shipped templates \
-             dir either ($AOIDE_SONG_TEMPLATES is unset, and no `share/lyra/songbook` sits \
+             dir either ($AOIDE_SONG_TEMPLATES is unset, and no `share/strillix/songbook` sits \
              beside this binary)",
             songbook_notes.display(),
         )),
@@ -965,7 +965,7 @@ fn resolve_from_notes_path(from: &str) -> Result<PathBuf, String> {
 /// (the sync proper, which only ever READS the songbook) — never from
 /// inside `handle_rice_stage` itself, so `rice mode declarative <name>`'s
 /// own re-pin (also routed through `handle_rice_stage`) stays a pure lock
-/// with no seeding side effect, and `lyra reload`'s staging arm (which
+/// with no seeding side effect, and `strillix reload`'s staging arm (which
 /// calls `handle_rice_stage` directly too, `commands/reload.rs`) needs
 /// nothing extra: it only ever runs once `mode.json`'s `song` field is
 /// set, which only happens after one of the two seed-checking entry points
@@ -1024,8 +1024,8 @@ pub(crate) fn seed_songbook_from_templates(name: &str) -> Result<Option<PathBuf>
 /// song's notes.
 ///
 /// Writes ONLY inside `song/songbook/<name>/` (house rule 1): `rice.nix` (a
-/// body — the `system` half's ten vibeos providers and the livery, the `home`
-/// half's `lyra` renderer; the sole `.nix` file, satisfying `checks.song-shape`),
+/// body — the `system` half's ten strillix providers and the livery, the `home`
+/// half's `strillix` renderer; the sole `.nix` file, satisfying `checks.song-shape`),
 /// `hyprland.conf` (`--from`'s when it ships one, else a header with no keys),
 /// `livery.json` (a mirror of `--from`'s, INCLUDING any geometry block, so
 /// `aoide rice stage <name>` renders + live-applies immediately),
@@ -1826,7 +1826,7 @@ mod tests {
             refusal["why"].as_str().unwrap().contains("venue.json"),
             "the refusal names the file: {refusal}"
         );
-        assert_eq!(refusal["fix"], json!({ "run": "lyra rice mode declarative" }));
+        assert_eq!(refusal["fix"], json!({ "run": "strillix rice mode declarative" }));
         assert_eq!(
             std::fs::read_to_string(stage.join("livery.json")).unwrap(),
             before,
@@ -2574,12 +2574,12 @@ mod tests {
         // song and checks that every OTHER real song's registry entry comes
         // out correct: nocturne's `vigil` (dock, with `order`), and
         // barcarolle's empty entry (a song that declares no widget types).
-        // Run with `AOIDE_SONG_TEMPLATES=<lyra-songbook>/share/lyra/songbook`:
+        // Run with `AOIDE_SONG_TEMPLATES=<strillix-rices>/share/strillix/songbook`:
         // the shipped songbook is both the templates and the machine's own
         // songbook (symlinked in below), so the generator evaluates the real
         // committed folders and no fixture stands in for it.
         let templates = aoide_storage::fs::song_templates_dir()
-            .expect("run with AOIDE_SONG_TEMPLATES=<lyra-songbook>/share/lyra/songbook");
+            .expect("run with AOIDE_SONG_TEMPLATES=<strillix-rices>/share/strillix/songbook");
         let _g = aoide_test_support::env_lock()
             .lock()
             .unwrap_or_else(|e| e.into_inner());
@@ -2848,7 +2848,7 @@ mod tests {
         assert_eq!(out.status, Status::Error, "{:?}", out.data);
         assert!(
             out.message.contains("AOIDE_SONG_TEMPLATES")
-                && out.message.contains("share/lyra/songbook"),
+                && out.message.contains("share/strillix/songbook"),
             "taught error naming both places checked, not a panic: {}",
             out.message
         );
@@ -3794,7 +3794,7 @@ mod tests {
     #[test]
     fn compose_missing_from_song_is_error() {
         // Neither location has it (L-C3, task #107): no songbook entry, and
-        // `AOIDE_SONG_TEMPLATES` unset with no real `share/lyra/songbook`
+        // `AOIDE_SONG_TEMPLATES` unset with no real `share/strillix/songbook`
         // beside the test binary — `song_templates_dir()` resolves to
         // `None`. Taught error naming both, never a panic.
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
@@ -3907,8 +3907,8 @@ mod tests {
         assert!(!target.join("hypr").exists());
 
         let rice_nix = std::fs::read_to_string(target.join("rice.nix")).unwrap();
-        assert!(rice_nix.contains("bar = \"vibeos\";"), "the system half selects the paint: {rice_nix}");
-        assert!(rice_nix.contains("members = [ \"lyra\" ];"), "the home half selects the renderer");
+        assert!(rice_nix.contains("bar = \"strillix\";"), "the system half selects the paint: {rice_nix}");
+        assert!(rice_nix.contains("members = [ \"strillix\" ];"), "the home half selects the renderer");
         assert!(!rice_nix.contains("config.aoide.song"), "a body is never self-gated: {rice_nix}");
         let hypr = std::fs::read_to_string(target.join("hyprland.conf")).unwrap();
         assert!(hypr.contains("No keys yet"), "no --from hyprland.conf: the header is written: {hypr}");
@@ -4008,7 +4008,7 @@ mod tests {
 
 #[cfg(test)]
 mod rice_link_tests {
-    //! The rice state link (`~/.local/state/lyra/rice.conf`): what a stage
+    //! The rice state link (`~/.local/state/strillix/rice.conf`): what a stage
     //! points it at, that a refused stage writes nothing, and that the writer
     //! runs and repoints idempotently. Each test isolates `HOME` and
     //! `AOIDE_ROOT` under the temp dir; a test that did not would hit the

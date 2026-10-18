@@ -1,9 +1,9 @@
-# tests/quickshell-seam/hosts/test-quickshell-only.nix — the first lyra-less
+# tests/quickshell-seam/hosts/test-quickshell-only.nix — the first strillix-less
 # shape: a host that brings its OWN quickshell config.
 #
 # It selects the `quickshell` dendrite and nothing else from the paint set, and
 # it names no song — so the shell it runs is the fixture directory's, started by
-# the quickshell lane, with no lyra anywhere in the evaluation (no rice binary,
+# the quickshell lane, with no strillix anywhere in the evaluation (no rice binary,
 # no `songs/`, no shellbridge unit, no healthcheck).
 _: {
   # The services the nucleus aggregation carries, by name: the daemon's units

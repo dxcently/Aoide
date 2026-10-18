@@ -92,7 +92,7 @@ pub enum BridgeCommand {
     /// `{ "cmd": "power", "action": "lock|logout|suspend|hibernate|reboot|shutdown" }`
     /// — a system action from the Exodos powermenu (AoideExodos.qml). QML never
     /// shells out; this command is the gate through which the six endings reach
-    /// lyra lock / hyprctl / systemctl.
+    /// strillix lock / hyprctl / systemctl.
     Power { action: PowerAction },
     /// `{ "cmd": "component", "slot": "…", "verb": "…", "arg": "…"? }` — a
     /// cross-component call (ShellBridge.qml's `component`): the component that
@@ -197,8 +197,8 @@ pub enum BridgeCommand {
     /// `{ "cmd": "ricemenu" }` — the RICE menu's READ: the runtime songbook
     /// and the mode, plus the drafts of the song the current mode is working
     /// on, answered on this connection like [`Self::SessionTrace`]. No
-    /// payload: the daemon runs `lyra rice list --json` and, when the mode
-    /// names a song ([`drafts_song`]), `lyra rice draft list <song> --json`,
+    /// payload: the daemon runs `strillix rice list --json` and, when the mode
+    /// names a song ([`drafts_song`]), `strillix rice draft list <song> --json`,
     /// both under one [`RICE_MENU_TIMEOUT`] budget. Nothing is written. See
     /// [`dispatch_rice_menu`].
     RiceMenu,
@@ -261,7 +261,7 @@ impl RiceModeAction {
 pub enum RiceDraftAction {
     /// Route the stage into this draft. The name is one argv token and no
     /// more: whether it is a valid draft name is the CLI's call —
-    /// `aoide-song` is lyra-only and conduct never depends on it, so the
+    /// `aoide-song` is strillix-only and conduct never depends on it, so the
     /// regex lives in one place. Whether the draft EXISTS is nobody's check
     /// here: `rice mode draft` forks the current stage into a valid name that
     /// is not there yet, so an enter is enter-or-create.
@@ -420,7 +420,7 @@ impl PowerAction {
     }
 
     /// The program + args this action spawns. `lock` asks the compositor to
-    /// run `lyra lock` (the one lock entry: the shell's lock host for a song
+    /// run `strillix lock` (the one lock entry: the shell's lock host for a song
     /// with a face, else hyprlock) rather than spawning it here: this unit
     /// runs with NoNewPrivileges, which a child inherits, and hyprlock's PAM
     /// check needs the setuid `unix_chkpwd`, so a locker spawned here refuses
@@ -428,7 +428,7 @@ impl PowerAction {
     /// commands.
     fn command(self) -> (&'static str, &'static [&'static str]) {
         match self {
-            Self::Lock => ("hyprctl", &["dispatch", "exec", "lyra lock"]),
+            Self::Lock => ("hyprctl", &["dispatch", "exec", "strillix lock"]),
             Self::Logout => ("hyprctl", &["dispatch", "exit"]),
             Self::Suspend => ("systemctl", &["suspend"]),
             Self::Hibernate => ("systemctl", &["hibernate"]),
@@ -660,13 +660,13 @@ fn component_arg(s: &str) -> bool {
         && s.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
 }
 
-/// The program and argv that run `lyra component <slot> <verb> [arg]`. It goes
+/// The program and argv that run `strillix component <slot> <verb> [arg]`. It goes
 /// through the compositor (`hyprctl dispatch exec`), as `PowerAction::Lock`
 /// does, and never as this unit's child: NoNewPrivileges is inherited, and a
 /// provider's action may reach a setuid helper. The charsets above make the one
 /// spelled line safe for the compositor's shell.
 fn component_command(slot: &str, verb: &str, arg: Option<&str>) -> (&'static str, Vec<String>) {
-    let mut line = format!("lyra component {slot} {verb}");
+    let mut line = format!("strillix component {slot} {verb}");
     if let Some(arg) = arg {
         line.push(' ');
         line.push_str(arg);
@@ -674,9 +674,9 @@ fn component_command(slot: &str, verb: &str, arg: Option<&str>) -> (&'static str
     ("hyprctl", vec!["dispatch".to_string(), "exec".to_string(), line])
 }
 
-/// Dispatch ONE `ricemode` action: `lyra rice mode stage <name>` or a bare
-/// `lyra rice mode declarative` (the CLI resolves the declared twin), waited
-/// for through [`run_rice_step`]. The sibling `lyra` is the callee because
+/// Dispatch ONE `ricemode` action: `strillix rice mode stage <name>` or a bare
+/// `strillix rice mode declarative` (the CLI resolves the declared twin), waited
+/// for through [`run_rice_step`]. The sibling `strillix` is the callee because
 /// `rice` lives there, not in this running binary. NOT inside
 /// `with_stage_lock`: holding it across a blocking child wait is a deadlock
 /// waiting to happen. UNBOUNDED like every mutation here. `Ok` is the CLI's
@@ -717,7 +717,7 @@ fn notify(message: &str) {
 
 // ── the RICE menu (`ricemenu`, `ricedraft`, `ricedeclare`) ─────────────────
 
-/// Pure plan: the `lyra` argv, in order and without `--json`, that one
+/// Pure plan: the `strillix` argv, in order and without `--json`, that one
 /// `ricedraft` action takes in this mode, or the taught refusal that ends it.
 /// `enter` and `new` route the stage into a draft, which `rice mode draft`
 /// refuses while declarative is locked, so from `Declarative` they unlock
@@ -753,7 +753,7 @@ fn rice_draft_plan(mode: RiceMode, action: &RiceDraftAction) -> Result<Vec<Vec<S
     Ok(plan)
 }
 
-/// Run ONE planned step: `lyra <argv> --json`, waited for — the sibling `lyra` ([`daemon::bin::rice_bin`]) because `rice`
+/// Run ONE planned step: `strillix <argv> --json`, waited for — the sibling `strillix` ([`daemon::bin::rice_bin`]) because `rice`
 /// lives there and not in this running binary — and read through
 /// [`outcome_triple`], the one reader of a `--json` envelope. NOT inside
 /// `with_stage_lock` (a blocking child wait under it is a deadlock waiting to
@@ -776,7 +776,7 @@ fn run_rice_step(argv: &[String]) -> (bool, String, Option<Value>) {
         Err(e) => (
             false,
             format!(
-                "spawning `lyra {} {}`: {e}",
+                "spawning `strillix {} {}`: {e}",
                 argv.first().map(String::as_str).unwrap_or(""),
                 argv.get(1).map(String::as_str).unwrap_or("")
             ),
@@ -819,7 +819,7 @@ fn dispatch_rice_draft(action: &RiceDraftAction) -> Result<String, (String, bool
     Ok(said)
 }
 
-/// Run ONE `ricedeclare`: `lyra rice declare <name> --host --json`, waited
+/// Run ONE `ricedeclare`: `strillix rice declare <name> --host --json`, waited
 /// for like every mutation here (one per human gesture), and read into the
 /// reply [`rice_declare_reply`] shapes.
 fn dispatch_rice_declare(name: &str) -> Value {
@@ -899,7 +899,7 @@ fn rice_menu_refusal(reason: &str, message: &str) -> Value {
     json!({ "ok": false, "reason": reason, "message": message })
 }
 
-/// Run ONE bounded `lyra <argv> --json` and return its envelope's `data`, or
+/// Run ONE bounded `strillix <argv> --json` and return its envelope's `data`, or
 /// the refusal the menu answers with. `argv` carries no `--json`.
 fn run_rice_json(argv: &[&str], timeout: std::time::Duration) -> Result<Value, Value> {
     let mut args: Vec<String> = argv.iter().map(|w| w.to_string()).collect();
@@ -910,21 +910,21 @@ fn run_rice_json(argv: &[&str], timeout: std::time::Duration) -> Result<Value, V
         Err(message) => return Err(rice_menu_refusal("no-answer", &message)),
     };
     let Some((ok, message, data)) = outcome_envelope(&stdout).or_else(|| outcome_envelope(&stderr)) else {
-        return Err(rice_menu_refusal("no-answer", &format!("`lyra {label}` printed no parseable answer")));
+        return Err(rice_menu_refusal("no-answer", &format!("`strillix {label}` printed no parseable answer")));
     };
     if !ok {
         return Err(rice_menu_refusal("cli-failed", &message));
     }
-    data.ok_or_else(|| rice_menu_refusal("no-answer", &format!("`lyra {label}` answered with no data")))
+    data.ok_or_else(|| rice_menu_refusal("no-answer", &format!("`strillix {label}` answered with no data")))
 }
 
-/// Dispatch ONE read-only menu query: `lyra rice list --json` under
+/// Dispatch ONE read-only menu query: `strillix rice list --json` under
 /// [`RICE_MENU_TIMEOUT`], its `data` (`mode`, `song`, `draft`, `stagingSong`,
 /// `declared`, `songs`) passed through verbatim with this machine's `host`
 /// name beside it (the name the Declare row's alert speaks) and `hostConfig`,
-/// the file `lyra rice declare --host` would rewrite
+/// the file `strillix rice declare --host` would rewrite
 /// ([`aoide_storage::fs::host_config`], null when none resolves), then — when
-/// [`drafts_song`] names a song for the marker — `lyra rice draft list <song>
+/// [`drafts_song`] names a song for the marker — `strillix rice draft list <song>
 /// --json` with the budget the first child left, projected to `draftsSong`
 /// and `drafts: [{name, savedAt, current}]`. No song means `drafts: []` and
 /// no second child; a failed list starts none either. A failed, unreadable
@@ -934,7 +934,7 @@ fn dispatch_rice_menu() -> Value {
     let deadline = std::time::Instant::now() + RICE_MENU_TIMEOUT;
     let mut answer = match run_rice_json(&["rice", "list"], RICE_MENU_TIMEOUT) {
         Ok(Value::Object(map)) => map,
-        Ok(_) => return rice_menu_refusal("no-answer", "`lyra rice list` answered with no object"),
+        Ok(_) => return rice_menu_refusal("no-answer", "`strillix rice list` answered with no object"),
         Err(refusal) => return refusal,
     };
     let marker = load_mode_marker();
@@ -950,7 +950,7 @@ fn dispatch_rice_menu() -> Value {
             Err(refusal) => return refusal,
         };
         let Some(listed) = data.get("drafts").and_then(Value::as_array) else {
-            return rice_menu_refusal("no-answer", "`lyra rice draft list` answered with no `drafts`");
+            return rice_menu_refusal("no-answer", "`strillix rice draft list` answered with no `drafts`");
         };
         drafts = listed
             .iter()
@@ -3114,11 +3114,11 @@ mod tests {
     fn a_component_call_is_spelled_as_one_line_through_the_compositor() {
         assert_eq!(
             component_command("powermenu", "show", Some("lock")),
-            ("hyprctl", vec!["dispatch".into(), "exec".into(), "lyra component powermenu show lock".into()])
+            ("hyprctl", vec!["dispatch".into(), "exec".into(), "strillix component powermenu show lock".into()])
         );
         assert_eq!(
             component_command("dock", "toggle", None),
-            ("hyprctl", vec!["dispatch".into(), "exec".into(), "lyra component dock toggle".into()])
+            ("hyprctl", vec!["dispatch".into(), "exec".into(), "strillix component dock toggle".into()])
         );
     }
 
@@ -3126,7 +3126,7 @@ mod tests {
     fn lock_is_started_by_the_compositor_never_as_this_units_child() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let (prog, args) = PowerAction::Lock.command();
-        assert_eq!((prog, args), ("hyprctl", &["dispatch", "exec", "lyra lock"][..]));
+        assert_eq!((prog, args), ("hyprctl", &["dispatch", "exec", "strillix lock"][..]));
     }
 
     #[test]
@@ -3740,7 +3740,7 @@ exit 1
         assert_eq!(drafts_song(&marker(RiceMode::Declarative, None, None)), None);
     }
 
-    /// A `#!/bin/sh` stand-in for `lyra`, a stage dir holding a marker for
+    /// A `#!/bin/sh` stand-in for `strillix`, a stage dir holding a marker for
     /// `mode`, and the env that points both at them. It logs every argv it is
     /// given beside itself, and answers the verbs the menu plans with
     /// the envelopes the CLI prints: `list` echoes a fixed songbook, `draft save` mints `draft-3`, `draft list`
@@ -3755,7 +3755,7 @@ exit 1
     fn stub_rice_bin(tag: &str, marker: &str) -> (aoide_test_support::EnvSaver, PathBuf) {
         let root = aoide_test_support::unique_tmp(tag);
         std::fs::create_dir_all(&root).unwrap();
-        let stub = root.join("stub-lyra");
+        let stub = root.join("stub-strillix");
         std::fs::write(
             &stub,
             r#"#!/bin/sh
@@ -4011,8 +4011,8 @@ esac
     #[test]
     fn a_declare_with_no_envelope_is_a_cli_failure() {
         assert_eq!(
-            rice_declare_reply(false, "spawning `lyra rice declare`: not found".to_string(), None),
-            json!({ "ok": false, "reason": "cli-failed", "message": "spawning `lyra rice declare`: not found" })
+            rice_declare_reply(false, "spawning `strillix rice declare`: not found".to_string(), None),
+            json!({ "ok": false, "reason": "cli-failed", "message": "spawning `strillix rice declare`: not found" })
         );
     }
 

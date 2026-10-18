@@ -168,7 +168,7 @@ impl Door {
     /// (aoided's own dispatch) keep every approval route: `--yes`, the box-wide
     /// autogate environment, the parent and sibling rules, `session pending
     /// approve`. `A2a` (the network door) cannot, and a send through it parks
-    /// as pending whatever it asks for. `Mcp` (stdio, and lyra's) cannot
+    /// as pending whatever it asks for. `Mcp` (stdio, and strillix's) cannot
     /// approve either: it has no `--yes`, no autogate switch, no `session
     /// pending approve`, `session permit` or `mail ring`. What it can do is be
     /// attested like the CLI: a send whose MCP server runs under a sealed

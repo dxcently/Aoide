@@ -4,9 +4,9 @@ created: 2026-08-17
 tags: [aoide, agent, cli, screen, pointer, vision, computer-use]
 ---
 
-# Screen Control — the `lyra screen` family
+# Screen Control — the `strx screen` family
 
-`lyra screen` is AoideOS's computer-use surface: an agent's whole loop for
+`strx screen` is AoideOS's computer-use surface: an agent's whole loop for
 looking at the desktop, grounding a target on it, acting on it, and
 verifying the act landed — fourteen commands
 (`info`/`shot`/`ocr`/`diff`/`send`, plus nine `screen point <command>`s) behind
@@ -66,7 +66,7 @@ full reason-code vocabulary this page's examples draw from).
 
 ## Mapping from the Anthropic computer-use vocabulary
 
-| computer-use action | lyra command(s) |
+| computer-use action | strillix command(s) |
 | --- | --- |
 | `screenshot` | `screen shot --fit 1280x800` |
 | `left_click(x, y)` | `screen point move x y` then `screen point click left x y` (the second call's `x y` re-verifies the pointer is still exactly there before pressing) |
@@ -152,7 +152,7 @@ result object is written into the AFTER-capture's own sidecar `diff` field.
   every held code and flushes with `WouldBlock` retry before it ever tears
   down the connection. A flush that ultimately fails surfaces as
   `pointer-failed`. See `CONTRACTS.md` §8.
-- **Recovering a stuck button.** Run one full `lyra screen point click
+- **Recovering a stuck button.** Run one full `strx screen point click
   <button>` for the code that is held. It must be the SAME code — clicking
   a different button leaves the stuck one stuck — and the client sees only
   the release, because the compositor tracks button state per code and

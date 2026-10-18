@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The quickshell/lyra seam, evaluated: four hosts, and what each one owes.
+# The quickshell/strillix seam, evaluated: four hosts, and what each one owes.
 #
 #   ./tests/quickshell-seam/run.sh                 # this checkout's working tree
 #   ./tests/quickshell-seam/run.sh path:/abs/dir      # some other checkout
@@ -10,18 +10,18 @@
 # of it, so a commit ref tests that commit. Every eval below carries the ref.
 #
 # `test-quickshell-only` — quickshell selected, `aoide.quickshell.config` = the
-# fixture directory, no lyra: the host's own shell runs (one `aoide-quickshell`
-# unit, on that directory), and nothing lyra would have brought is there (no
+# fixture directory, no strillix: the host's own shell runs (one `aoide-quickshell`
+# unit, on that directory), and nothing strillix would have brought is there (no
 # rice binary, no `songs/`, no shellbridge unit, no healthcheck, no rice-reload
 # unit, no deploy activation).
 # `test-quickshell-bare` — the same selection with no config: package installed,
 # no service, no session anchor claimed.
-# `test-two-components` — the `bar` and `dock` slots filled by their vibeos
-# providers, no lyra and no quickshell dendrite: the runtime both import by path
+# `test-two-components` — the `bar` and `dock` slots filled by their strillix
+# providers, no strillix and no quickshell dendrite: the runtime both import by path
 # lands once (one shell unit, one shellbridge unit, no doubled environment, one
 # declaration of its home half), both components are recorded, and both facts
 # the runtime sets are true.
-# `test-song-without-lyra` — a song and no performer: MUST fail, with the
+# `test-song-without-strillix` — a song and no performer: MUST fail, with the
 # platform assertion's own message.
 # `yomi-strix` — the positive control, from the same ref: the two absence
 # checks above are only worth anything against a host that HAS the things,
@@ -80,7 +80,7 @@ else
     "$(o .service.condition)"
   check "only: graphical session anchored"      "graphical-session.target" \
     "$(o .sessionTarget)"
-  check "only: no lyra fact"                    "false" "$(o .lyra)"
+  check "only: no strillix fact"                    "false" "$(o .strillix)"
   check "only: no rice binary installed"        "0" \
     "$(o '[.packages[] | select(test("-rice$"))] | length')"
   check "only: no song"                         "null" "$(o .song)"
@@ -94,7 +94,7 @@ else
     "$(o '[.userServices[], .systemdUserServices[], .systemServices[] | select(test("rice-reload"))] | length')"
   check "only: no lane activation"              "0" \
     "$(o '[.activation[] | select(test("^aoide"))] | length')"
-  # No lyra, no reader: the units that would carry the staging path's own
+  # No strillix, no reader: the units that would carry the staging path's own
   # templates variable must not carry it (paired with the control below).
   check "only: no templates var on any unit"    "[]" "$(o '.templates')"
 fi
@@ -116,7 +116,7 @@ else
   # it — there the directory exists and holds exactly its entry point.
   check "bare: config stays null"               "null" "$(b .config)"
   check "bare: no graphical session claimed"    "default.target" "$(b .sessionTarget)"
-  check "bare: no lyra fact"                    "false" "$(b .lyra)"
+  check "bare: no strillix fact"                    "false" "$(b .strillix)"
   check "bare: no shellbridge unit"             "0" \
     "$(b '[.systemdUserServices[] | select(test("shellbridge"))] | length')"
 fi
@@ -133,20 +133,20 @@ else
   check "two: no duplicate shell environment"   "0" "$(t .envDuplicates)"
   check "two: the home half is declared once"   "1" "$(t .homeDeclarations)"
   check "two: both components recorded"         "bar,dock" "$(t '.components | join(",")')"
-  check "two: the lyra fact is set"             "true" "$(t .lyra)"
+  check "two: the strillix fact is set"             "true" "$(t .strillix)"
   check "two: the quickshell fact is set"       "true" "$(t .quickshell)"
 fi
 
-# ── test-song-without-lyra: the eval that must fail ──────────────────────────
-if evalf songWithoutLyra "$tmp/song.err" >/dev/null; then
-  printf '%-46s FAIL (evaluated cleanly)\n' "song without the vibeos runtime is refused"
+# ── test-song-without-strillix: the eval that must fail ──────────────────────────
+if evalf songWithoutStrillix "$tmp/song.err" >/dev/null; then
+  printf '%-46s FAIL (evaluated cleanly)\n' "song without the strillix runtime is refused"
   fail=$((fail+1))
-elif grep -qF -- 'needs the vibeos runtime' "$tmp/song.err"; then
-  printf '%-46s PASS  (%s)\n' "song without the vibeos runtime is refused" \
-    "$(tr -d '\n' < "$tmp/song.err" | grep -o -m1 -- 'aoide.song = "sonata" needs the vibeos runtime: pick [^"]*')"
+elif grep -qF -- 'needs the strillix runtime' "$tmp/song.err"; then
+  printf '%-46s PASS  (%s)\n' "song without the strillix runtime is refused" \
+    "$(tr -d '\n' < "$tmp/song.err" | grep -o -m1 -- 'aoide.song = "sonata" needs the strillix runtime: pick [^"]*')"
   pass=$((pass+1))
 else
-  printf '%-46s FAIL (wrong error)\n' "song without the vibeos runtime is refused"
+  printf '%-46s FAIL (wrong error)\n' "song without the strillix runtime is refused"
   grep -v '^ *$' "$tmp/song.err" | tail -8 | sed 's/^/    | /'
   fail=$((fail+1))
 fi
@@ -175,11 +175,11 @@ else
   check "control: the rice reload declares it"  "1" "$(y '.templates.riceReload | length')"
   check "control: every unit names one directory" "true" "$(y '.templatesAgree')"
   check "control: it is the shipped songbook"   "true" \
-    "$(y '.templates.aoided[0] | endswith("-lyra-songbook-templates/share/lyra/songbook")')"
+    "$(y '.templates.aoided[0] | endswith("-strillix-rices-templates/share/strillix/songbook")')"
   # The unit that brings a staged or drafted song back after a login or a
   # switch: ordered before the shell (its first frame is the staged song), run in
   # the user manager once the session is up, one shot that stays active even when
-  # `lyra reload` refuses or is cut off (the `-`), bounded by `timeout` because a
+  # `strillix reload` refuses or is cut off (the `-`), bounded by `timeout` because a
   # oneshot has no start timeout of its own, carrying the runtime root and the
   # templates but no PATH (the manager's own reaches the tools).
   check "control: the rice reload is before the shell" "1" \
@@ -193,9 +193,9 @@ else
   check "control: the rice reload is one shot"  "oneshot" "$(y '.riceReload.Service.Type')"
   check "control: the rice reload stays active" "true" "$(y '.riceReload.Service.RemainAfterExit')"
   check "control: a refused reload is not a failure" "true" \
-    "$(y '.riceReload.Service.ExecStart | if type == "array" then .[0] else . end | startswith("-") and endswith("/bin/lyra reload")')"
+    "$(y '.riceReload.Service.ExecStart | if type == "array" then .[0] else . end | startswith("-") and endswith("/bin/strillix reload")')"
   check "control: the rice reload is bounded"   "true" \
-    "$(y '.riceReload.Service.ExecStart | if type == "array" then .[0] else . end | test("^-[^ ]+/bin/timeout [0-9]+ [^ ]+/bin/lyra reload$")')"
+    "$(y '.riceReload.Service.ExecStart | if type == "array" then .[0] else . end | test("^-[^ ]+/bin/timeout [0-9]+ [^ ]+/bin/strillix reload$")')"
   check "control: the rice reload has root, templates" "2" \
     "$(y '[(.riceReload.Service.Environment // [])[] | select(startswith("AOIDE_ROOT=") or startswith("AOIDE_SONG_TEMPLATES="))] | length')"
   check "control: the rice reload names no PATH" "0" \

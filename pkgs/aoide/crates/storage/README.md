@@ -119,16 +119,16 @@ by decision — no embedded database yet
   `song`, `conductor`) goes through instead of touching JSON on disk directly.
   Every runtime tree `fs` resolves hangs off ONE root, `fs::root` —
   `$AOIDE_ROOT` (absolute-path-wins), default `<home>/.aoide`, nix-free
-  (L-C2, lyra-carrier lane, task #107) — EXCEPT `fs::flake_root`, which
+  (L-C2, strillix-carrier lane, task #107) — EXCEPT `fs::flake_root`, which
   stays pinned to the dev git checkout (`$AOIDE_FLAKE_ROOT`, default
   `<home>/Aoide`) since that is not a runtime tree. Beside it sits
-  `fs::LYRA_SHELL_SRC` — the ONE checkout-relative source path named from
-  outside this crate (the lyra shell's `qml`/`icons`/`preview` tree, and the
-  same directory `pkgs/lyra-shell` is built from, so what a checkout is read
+  `fs::STRILLIX_SHELL_SRC` — the ONE checkout-relative source path named from
+  outside this crate (the strillix shell's `qml`/`icons`/`preview` tree, and the
+  same directory `pkgs/strillix-shell` is built from, so what a checkout is read
   from and what the package ships cannot drift apart). `fs` resolves TWO stage
   roots off that one root, not one (command-defrag lane S1, 2026-08-27,
   CONTRACTS.md §4): `stage_dir` — unchanged, `$AOIDE_ROOT/song/stage/`,
-  rice/paint (`livery.json`/`mode.json`, lyra's tree) — and
+  rice/paint (`livery.json`/`mode.json`, strillix's tree) — and
   `conducting_stage_dir` — new, `$AOIDE_ROOT/state/stage/`, core
   orchestration state (`stage`'s own four path helpers, plus
   `aoide-conduct`'s `herald::herald_path`/`graph::pending_path`). Both honor
@@ -137,7 +137,7 @@ by decision — no embedded database yet
   `state_dir().join("stage")` instead of `stage_dir`'s `song/stage`.
 
   The rice's three files (CONTRACTS.md §4) are resolved here too:
-  `rice_conf_link` (`$HOME/.local/state/lyra/rice.conf`, the one path outside
+  `rice_conf_link` (`$HOME/.local/state/strillix/rice.conf`, the one path outside
   `$AOIDE_ROOT`), `declared_rice_conf` (`root()`'s `song/declared/rice.conf`)
   and `empty_rice_conf` (`stage_dir()`'s `empty-hyprland.conf`).
   `atomic_symlink` is the retarget: a temp link renamed over the link.
@@ -186,7 +186,7 @@ by decision — no embedded database yet
   ordinary `state_dir()`-only test capable of silently migrating the
   operator's real `$HOME` (a live incident during this lane's own
   development). `migrate_root_once` is `pub` and idempotent instead — the
-  three real binaries (`aoide`, `aoided`, `lyra`) call it once, explicitly,
+  three real binaries (`aoide`, `aoided`, `strillix`) call it once, explicitly,
   at the top of their own `main()`; see `fs::root`'s own doc for the full
   reasoning. `fs::repo_root` is GONE (its one caller, `aoide-upkeep`'s
   `soundcheck`, now reads `fs::flake_root` directly — a runtime root is not
@@ -196,16 +196,16 @@ by decision — no embedded database yet
   `flake_root`: the shipped SCORE TEMPLATES dir a repo-less host's `rice
   compose --from <song>` and `aoide-song::widgets`'s registry/manifest
   regeneration both fall back to when `songbook_dir` has
-  nothing. `fs::lyra_share_dir` is its PARENT — the shipped `share/lyra`
+  nothing. `fs::strillix_share_dir` is its PARENT — the shipped `share/strillix`
   dir, where the offline generator (`nix/manifest.nix`) and
-  `aoide-options.json` (`lyra onboard`) sit — and `fs::songbook_root` is the
+  `aoide-options.json` (`strx onboard`) sit — and `fs::songbook_root` is the
   machine's `<song>/songbook/`, the argument that generator is pointed at.
   `fs::host_config` is the host's own config file (`$AOIDE_HOST_CONFIG`, the
   nix option `aoide.hostConfig`, default `<flake_root>/hosts/<hostname>/
-  default.nix`), the one `lyra rice declare --host` rewrites.
+  default.nix`), the one `strx rice declare --host` rewrites.
   Two tiers — `$AOIDE_SONG_TEMPLATES` (absolute-wins, same
   discipline as every override above), else a sibling of `current_exe()`'s
-  directory (`<exe_dir>/../share/lyra/songbook`, gated on that directory
+  directory (`<exe_dir>/../share/strillix/songbook`, gated on that directory
   actually existing) — the same shape `aoide_protocol::bin`'s sibling-binary
   resolver uses, applied to a directory instead of an executable. Returns
   `None` (never a default that might not exist) when neither resolves; the
@@ -213,7 +213,7 @@ by decision — no embedded database yet
 - `runtime_dir::socket_dir` — the per-user runtime directory every aoide
   socket lives in, and the ONE authority for it (`tunnel`, `attest::
   daemon_socket_path`, conduct's conductor-control/channel/shellbridge
-  sockets, `client::pair_watch`, `server::daemon`, lyra's preview all call
+  sockets, `client::pair_watch`, `server::daemon`, strillix's preview all call
   it). `$XDG_RUNTIME_DIR` (non-empty) wins on BOTH hosts, else
   `/run/user/<this process's euid>` on Unix and `%LOCALAPPDATA%\aoide` on
   native Windows — where the host provides neither the directory nor an
@@ -710,7 +710,7 @@ by decision — no embedded database yet
 - `takes` — the take store behind `rice back`/`rice take`, hanging off
   `songbook/<song>/takes/` when staged directly or
   `songbook/<song>/drafts/<name>/takes/` when routed into a draft
-  (`lyra reload` design, settled 2026-08-31 — the staging-mode take/back
+  (`strx reload` design, settled 2026-08-31 — the staging-mode take/back
   reach; every function takes `draft: Option<&str>`, `None` selecting the
   song-scoped root). `TakeRecord` also carries `widgets: Value` — the
   song's widget QML bodies at mint time.

@@ -49,7 +49,7 @@ would prove nothing.
   invert the DAG.
 - **Nix-independent.** No nix shell-outs, no NixOS assumption, anywhere in
   this crate or what it depends on (root `AGENTS.md`, "core is
-  nix-independent"). Only `lyra` may be nix-dependent.
+  nix-independent"). Only `strillix` may be nix-dependent.
 - **The audit copy of an outcome is not the outcome.** `dispatch` writes one
   line per dispatch for both doors, and its message is deliberately NOT
   always `Outcome.message`: the pairing ceremony's text carries a
@@ -69,7 +69,7 @@ would prove nothing.
   run.** `migrate_root_once` errs only when a `state/` that exists cannot be
   locked owner-only, whether this run moved it or an earlier one did;
   `aoide` and `aoided` print it and exit 1 rather than read that tree
-  (`tests/migrate_root.rs` runs `aoide` twice against one). `lyra` exits the
+  (`tests/migrate_root.rs` runs `aoide` twice against one). `strillix` exits the
   same way.
 - **SIGPIPE stays ignored in BOTH binaries.** Writes to a child's stdin
   (`secrets` backends, `curl`, `qrencode`) must return their error, not kill
@@ -94,4 +94,4 @@ would prove nothing.
   special-cased command changes.
 - The golden snapshot in `registry.rs` when the command-path set changes.
 - `docs/architecture/PACKAGE-LAYOUT.md`/`CONTRACTS.md §3` when the
-  core/lyra split itself shifts.
+  core/strillix split itself shifts.

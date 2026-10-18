@@ -19,7 +19,7 @@ carries a meaningful exit code. The CLI, the MCP façade, and the
 
 Everything that paints — rice/draft/mode/cover/livery/quickshell/screen/
 shellbridge/herald/take, the whole AoideOS surface — ships in a second
-binary, [[lyra]]. Conducting orchestration is aoide's identity; lyra paints
+binary, [[strillix]]. Conducting orchestration is aoide's identity; strillix paints
 (`docs/architecture/PACKAGE-LAYOUT.md` "Two binaries"; `CONTRACTS.md` §3).
 See [[Rice-and-Livery|Rice-and-Livery]] and
 [[Screen-Commands|Screen-Commands]] for that surface's per-command
@@ -28,7 +28,7 @@ detail.
 *The crate root lives at `pkgs/aoide/crates/cli/`; it packages via
 `rustPlatform.buildRustPackage` with `meta.mainProgram = "aoide"` and vendored
 deps (`cargoLock.lockFile`) so the build is offline. Core is nix-independent:
-cargo-buildable on any Linux, zero nix shell-outs — only `lyra` may shell out
+cargo-buildable on any Linux, zero nix shell-outs — only `strillix` may shell out
 to nix.*
 
 ## The command tree — a self-registering registry
@@ -47,7 +47,7 @@ entries through its own `commands::register(&mut Registry)` function;
 `enroll`/`put`/`set-totp`/`automate`/`expose`/`allow-remote-origin`/`migrate`/`pending`/`approve`/
 `dismiss`/`watch`). P-A5 of the binary-split workstream moved 11 painted
 groups (rice/draft/mode/cover/livery/shellbridge/quickshell/screen/herald/
-take — 39 command paths) into `crates/lyra/src/commands/mod.rs::all()`.
+take — 39 command paths) into `crates/strillix/src/commands/mod.rs::all()`.
 
 `dispatch()` looks up one process-wide `Registry` (built once via
 `OnceLock`), appends to the audit log, and applies the gate — the same path
@@ -68,7 +68,7 @@ retry`, `mail route`, `mail export`, `mail poll`, `mail serve`, `mail ring` —
 the `melete` group (`status`/`graph`/`call`),
 and the `node` group's `hub`/`allow`/`spawn`,
 `discover`/`advertise`/`list`, and the pairing ceremony — `pair <target>`
-with `pair reject`/`pair watch` beside it ([[Pairing-Ceremony]]). `lyra schema --json`
+with `pair reject`/`pair watch` beside it ([[Pairing-Ceremony]]). `strx schema --json`
 carries the painted surface — see above.
 The per-command dev reference — signature, files read, files written,
 where output pipes to — lives at [[CLI-Reference]]; the table below sums
@@ -80,7 +80,7 @@ the groups it documents.
 | `content register/propose/ingest/query` | 4 | stub |
 | `content approve` | 1 | stub, gated |
 | `make` ([[Widget-Maker]] entry) | 1 | stub |
-| `onboard` | 1 | real — the clone-onboarding lane, delegates the nix half to `lyra onboard` ([[Clone-and-Run]]) |
+| `onboard` | 1 | real — the clone-onboarding lane, delegates the nix half to `strx onboard` ([[Clone-and-Run]]) |
 | `update` | 1 | stub, gated |
 | `mcp serve`, `daemon` | 2 | real |
 | `graph`, `graph link` | 2 | real — the read/analysis lens the `graph` prefix kept |
@@ -135,26 +135,26 @@ a distinct idempotency key so capture entries coexist with the plain ones
 links `~/song` to `<checkout>/song` (never clobbering an existing file or
 symlink), and seeds `song/songbook/preferences.md` when absent; then it
 asks which agent harnesses to wire (`--harness a,b`, or `--yes` for
-non-interactive) and runs `hooks install` for each. When the `lyra` binary
-resolves it delegates the nix half to `lyra onboard`, and finally prints
+non-interactive) and runs `hooks install` for each. When the `strillix` binary
+resolves it delegates the nix half to `strx onboard`, and finally prints
 the guide. See [[Clone-and-Run]].
 
 A stub returns a structured `Outcome` with status `not-implemented` (exit
 `64`), never a crash — arg-parsing, the schema entry, the audit-log append,
 and the gate flag are all real code paths; only the live-system action is
 deferred. Exactly two commands carry `gated: true` in `aoide` (`content
-approve`, `update`); `lyra rice declare <name>` runs gated too but is real
+approve`, `update`); `strx rice declare <name>` runs gated too but is real
 code — it byte-diff-copies the runtime song tree, less its
 top-level `takes/` and `drafts/` (the machine's undo history and scratch),
 from `$AOIDE_ROOT/song/songbook/<name>/` into the checkout's
 `song/songbook/<name>/` (no `git add`, no rebuild), leaving `rice
-transpose` as lyra's one remaining stub. Both doors surface the user
+transpose` as strillix's one remaining stub. Both doors surface the user
 rebuild gate uniformly, and nothing here admits a rebuild
 ([[Rebuild-Gate]], [[Governance]]).
 
 `cover set`/`rice compose`/`rice mode`/`rice draft`/`rice declare`/`rice
 transpose`/`rice take`/`rice back` and the `livery`/`screen`/`herald`/
-`shellbridge`/`quickshell` groups all moved to `lyra` at P-A5 — see
+`shellbridge`/`quickshell` groups all moved to `strillix` at P-A5 — see
 [[Rice-and-Livery|Rice-and-Livery]] and
 [[Screen-Commands|Screen-Commands]] for their per-command
 reference, and [[Self-Ricing]] for the self-ricing loop's walkthrough.
@@ -275,7 +275,7 @@ through the same `dispatch()` the CLI and MCP doors use.
 
 ### Open schema gap
 
-The compositor keybind `SUPER+ESCAPE` (lock) runs `lyra lock`, a real leaf.
+The compositor keybind `SUPER+ESCAPE` (lock) runs `strx lock`, a real leaf.
 `SUPER+G` (dock
 toggle) is not a CLI command either: like the launcher's `SUPER+SPACE` and the
 wallpaper picker's `SUPER+W`, it triggers an in-process Hyprland global
@@ -302,8 +302,8 @@ shortcut the panel itself registers (`aoide:dock`), not a CLI command (see
   dependency-free JSON-RPC 2.0 server over newline-delimited stdio: each
   command becomes one tool named by its dotted path (`session.hook`),
   args/flags become the `inputSchema`, and `tools/call` dispatches back
-  into the same handlers the CLI uses. `lyra mcp serve --stdio` is the same
-  façade over lyra's own registry.
+  into the same handlers the CLI uses. `strx mcp serve --stdio` is the same
+  façade over strillix's own registry.
 - **`stageNotesVersion`** pins the `song/stage/livery.json` format alongside
   the command tree so an agent reads one version for the whole contract.
 - **Single audit log, every door.** Every dispatch — CLI, MCP, or A2A —
@@ -334,7 +334,7 @@ default applies. Starting it without nix: `docs/INSTALL.md` § 6.
 - [[Terminal-Commander]]
 - [[Gadget-Dock]]
 - [[livery]]
-- [[lyra]]
+- [[strillix]]
 - [[aoided]]
 - [[shellbridge]]
 - [[Codebase]]

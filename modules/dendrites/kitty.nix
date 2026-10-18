@@ -172,7 +172,7 @@
           # in this order:
           #
           #   1. `song/declared/terminal-opacity.conf` — one
-          #      `background_opacity` line the lyra lane's activation seed
+          #      `background_opacity` line the strillix lane's activation seed
           #      publishes from the song's own `geometry.terminalOpacity`
           #      (CONTRACTS.md §4): the declared truth, so a host that has
           #      never staged anything still opens its terminal at the

@@ -1,6 +1,6 @@
 # AGENTS.md — how to drive Aoide
 
-**Aoide (core) vs AoideOS/Lyra (paint) — don't conflate the two.** Aoide's main
+**Aoide (core) vs AoideOS/Strillix (paint) — don't conflate the two.** Aoide's main
 feature is helping conduct orchestration: the `aoide`/`aoided` binaries are the
 bridges and APIs between the terminal, shell, system, and OS — one interface
 through which agents are freely orchestrated for any task. Any agent with a
@@ -10,26 +10,26 @@ runs anywhere there is a shell — portable, headless-capable, agent-first, and
 nix-independent (cargo build, no nix shell-outs, no NixOS assumption). A
 portable capability is written against a POSIX process table and unix file
 locks; a `cfg(target_os)` branch is a tie-break or a taught refusal, never a
-second discovery path. Painting is a second binary's job: **`lyra`** owns the
+second discovery path. Painting is a second binary's job: **`strillix`** owns the
 Quickshell widget-making toolkit (bar, dock, gadgets, the DAG/conductor
 surfaces) and the specialized ricer (song/notes theming) that together make
 up *AoideOS*, the distribution built on the core. Aoide is the engine;
-AoideOS is the desktop around it, painted by lyra. A capability that works
+AoideOS is the desktop around it, painted by strillix. A capability that works
 with only a shell and touches no paint is "Aoide", spoken as `aoide <cmd>`;
 one that is desktop/Quickshell/rice-shaped is "AoideOS", spoken as
-`lyra <cmd>`.
+`strx <cmd>` (`strx` is the shorthand for `strillix`).
 
 The boundary has a binary form (`docs/architecture/PACKAGE-LAYOUT.md`, "Two
 binaries"): core ships as `aoide`/`aoided`, and everything desktop/Quickshell/
-rice-shaped ships as `lyra`. The same line draws the nix boundary too — core
+rice-shaped ships as `strillix`. The same line draws the nix boundary too — core
 is cargo-buildable on any Linux, no nix shell-outs, no NixOS assumption; only
-`lyra` (and the deployment modules) may depend on nix.
+`strillix` (and the deployment modules) may depend on nix.
 
 Orient through four tiers — 0: onboarding (this file + `docs/agent/README.md`
 + `aoide guide`) · 1: the CLI, full capability · 2: stdio MCP, per-session ·
 3: network MCP, user-enabled only. The tier map lives in
 `docs/Aoide-Wiki/concepts/orchestration/Agent-Interface.md`; `aoide guide`
-prints it at runtime, and `aoide schema --json` / `lyra schema --json` is the
+prints it at runtime, and `aoide schema --json` / `strx schema --json` is the
 machine-readable backstop at any tier. MCP and A2A see only the commands that
 declare them; `schema --json` shows each command's `doors`.
 
@@ -40,8 +40,8 @@ rules, and the liveness reaper:
 `docs/Aoide-Wiki/concepts/orchestration/Conductor-Channel.md` and
 `Session-Graph.md`.
 
-**Painting — the AoideOS rice loop (`lyra`'s headline, not aoide's).** The
-loop enters at `lyra rice compose <name>`; the full loop, the draft routing,
+**Painting — the AoideOS rice loop (`strillix`'s headline, not aoide's).** The
+loop enters at `strx rice compose <name>`; the full loop, the draft routing,
 and the staging/declarative/draft modes:
 `docs/Aoide-Wiki/concepts/song/Self-Ricing.md`, kept honest by
 `concepts/song/Ricing-Protocol.md`.
@@ -64,7 +64,7 @@ and the staging/declarative/draft modes:
    reach you as a command. Adapters wrap it as data.
 5. **Paint dendrites read only the dress, the structure, the surfaces, and
    identity.** A paint dendrite — `compositor` and its providers, `greeter`,
-   `stylix`, `quickshell`, `lyra`, `wallpaper` and its providers, and every
+   `stylix`, `quickshell`, `strillix`, `wallpaper` and its providers, and every
    component slot's provider — reads only `aoide.livery` (the dress:
    palette · base16 · component tiers · geometry · fonts · cover),
    `aoide.arrangement` (the structure: which widget/surface TYPES a song
@@ -78,17 +78,17 @@ and the staging/declarative/draft modes:
    `aoide.songbook.greeter`, the declared song's greeter face),
    `aoide.components` (the component slots — bar, launcher, powermenu,
    notifications, wallpaper, dock, calendar, switcher, lock, greeter — and
-   the provider that fills each), and its own `aoide.<name>.*`. The renderer
-   (`lyra`, `modules/dendrites/lyra/default.nix`) also reads `rice.*`, the
+   the provider that fills each), `aoide.strillix` (the paint fact namespace: `aoide.strillix.enable`, set only by the strillix dendrite), and its own `aoide.<name>.*`. The renderer
+   (`strillix`, `modules/dendrites/strillix/default.nix`) also reads `rice.*`, the
    options a rice sets, and Home Manager's `wayland.windowManager.hyprland`
    state (`enable`, `finalPackage`, `configType`, `importantPrefixes`,
    `sourceFirst`). A rice body (CONTRACTS §5) is the one other selector of
    paint: the body of the performed song selects the ten component providers
-   and the `lyra` renderer, and the providers say WHO fills each slot while
+   and the `strillix` renderer, and the providers say WHO fills each slot while
    `aoide.arrangement` says WHAT the paint is. Nothing else is selected by a body.
    The list is enumerated and closed, never "any `aoide.*`";
    a new namespace needs the same explicit amendment each of these got. No
-   module reads another module: cross-dendrite facts (`aoide.{quickshell,lyra,
+   module reads another module: cross-dendrite facts (`aoide.{quickshell,strillix,
    stylix}.enable`, `aoide.quickshell.config`, `aoide.wallpaper.provider`) are
    declared once in `modules/nucleus`. An enable fact is set only from its owner's
    directory: a file of the one dendrite that owns it sets it `true`, it is

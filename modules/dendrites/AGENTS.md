@@ -13,7 +13,7 @@ covers only what's specific to dendrites.
   The constructor splits the two when it wraps the module.
 - **A paint dendrite reads and sets FACTS, not options of its own.** Paint
   lanes read each other only through the facts `modules/nucleus/options.nix`
-  declares. `quickshell`, `stylix` and `lyra` each set their fact
+  declares. `quickshell`, `stylix` and `strillix` each set their fact
   `true`, from a file in their own directory (`mkFact` accepts any file under a
   directory entry); a `wallpaper` provider sets `aoide.wallpaper.provider` to its own name
   (`mkDefault`), and every component slot's provider writes its own
@@ -30,13 +30,13 @@ covers only what's specific to dendrites.
   reads those before any condition is forced, and refuses a condition over a
   `habit.home` that carries either. Put a home half's `imports` in a
   `habit.home` of its own beside the one that sets the rest (`neovim.nix`), or write them
-  as `config` (`lyra/runtime.nix`).
+  as `config` (`strillix/runtime.nix`).
 - **A half another lane brings is imported by PATH, and has no `habit` key.**
   habit reads `habit.home` only on a selected module's top level, and applies a
   catalogue entry under its catalogue key, not its path: a catalogue file
   imported again by path is applied twice, and a file a module imports that
   writes `habit.home` fails. So a shared capability is a plain system/home
-  pair (`quickshell/{system,home}.nix`, `lyra/{runtime,runtime-home}.nix`),
+  pair (`quickshell/{system,home}.nix`, `strillix/{runtime,runtime-home}.nix`),
   never a catalogue entry itself, never an inline value or a let-bound
   attrset (two copies declare their options twice). The home half goes in as
   `habit.home.imports = [ ./home.nix ]`, never `habit.home = ./home.nix`
@@ -53,7 +53,7 @@ covers only what's specific to dendrites.
   corollary: Quickshell paints, it is never the capability) — it does not
   embed its own rendering.
 - **The paint test decides QML placement, not convenience.** A file stays in
-  `pkgs/lyra-shell/qml/` only if it's song-blind, song-plural, and a
+  `pkgs/strillix-shell/qml/` only if it's song-blind, song-plural, and a
   bridge/mechanism (CONTRACTS.md §0, "The paint test"). A shared visual
   component that fails any leg belongs in a song's `widgets/` instead — a paint
   lane is not a component library.
@@ -68,7 +68,7 @@ covers only what's specific to dendrites.
   `song/stage/livery.json` — `checks.livery-fanout` is the gate. The seed
   RENAMES that file over the stage entry and never writes through it, so a
   drafted song's own file is untouched, and it is declared truth on every
-  activation: the stage twin stays that until the session's `lyra reload`
+  activation: the stage twin stays that until the session's `strx reload`
   (the lane's `aoide-rice-reload` unit) puts back the staged or drafted song
   `stage/mode.json` names. Nix never reads the mode, so the seed stays one
   unconditional write. The one run
@@ -77,7 +77,7 @@ covers only what's specific to dendrites.
   `song/declared/venue.json` — `venueDelta`, the slots the same `stagePatch`
   rule recolours and the geometry the host sets, `{}` with neither — which
   staging lays over the runtime copy of the declared song, and
-  `checks.livery-fanout` guards it. The `lyra` lane is the ONLY writer of
+  `checks.livery-fanout` guards it. The `strillix` lane is the ONLY writer of
   both: `rice stage` and the other runtime writers read them and must never
   write them, since only the nix evaluator can compute the override tier.
 - **A surface takes its size from its CONTENT; content never sizes itself
@@ -139,7 +139,7 @@ them in addition to the ones above.
   through to `allow_any` and is refused for want of interactive auth. A
   privileged action reached that way needs an explicit
   `security.polkit.extraConfig` rule keyed on `config.aoide.user`, declared in
-  the same file as the unit (`lyra/shellbridge.nix` and its power actions).
+  the same file as the unit (`strillix/shellbridge.nix` and its power actions).
   `pkcheck --action-id <id> --process <pid>` is the check: exit 0 is authorized,
   exit 2 is the refusal.
 - **A new always-on service** is a dendrite plus its catalogue line and one

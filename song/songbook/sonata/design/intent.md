@@ -427,4 +427,4 @@ not yet ended) names that terminal, "Kill terminal <name>"; anything else reads
   its ships come from the strip's own settle rule. A first pass widened the lane
   to 105px for a 96px strip; the owner rejected it as taking too much space and
   the compact badge replaced it outright. Verified visually in the isolated
-  `lyra preview` canvas at 360 and 260 against the codex, pi and claude rows.
+  `strx preview` canvas at 360 and 260 against the codex, pi and claude rows.

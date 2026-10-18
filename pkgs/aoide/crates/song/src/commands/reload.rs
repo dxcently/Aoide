@@ -1,5 +1,5 @@
-//! `lyra reload` — the one mode-aware iteration command of the agent rice
-//! loop (design settled by the User, 2026-08-31: edit → `lyra reload` →
+//! `strillix reload` — the one mode-aware iteration command of the agent rice
+//! loop (design settled by the User, 2026-08-31: edit → `strillix reload` →
 //! look, no separate save, no separate sync, no tree-direction trap). Reads
 //! `stage/mode.json` (the authority) and dispatches:
 //!
@@ -40,9 +40,9 @@
 //!   `mode.json` change, never on a swapped entry. A draft whose file is gone
 //!   is refused by name and nothing is written.
 //!
-//! `lyra reload` is also what brings a staged or drafted song back after a
+//! `strillix reload` is also what brings a staged or drafted song back after a
 //! login or a switch: the activation lays declared state over the runtime
-//! tree, and the lyra lane runs this command from its `aoide-rice-reload` unit
+//! tree, and the strillix lane runs this command from its `aoide-rice-reload` unit
 //! to put back whatever `stage/mode.json` names.
 //!
 //! **Sync runs BEFORE snapshot in both arms** — not the order the beats are
@@ -182,7 +182,7 @@ fn reload_staging_or_draft(inv: &Invocation, marker: mode::ModeMarker) -> Outcom
     // already fires its OWN IPC reload internally, but only when widget
     // bodies changed (its bandwidth-saving optimization for its OTHER
     // callers, `rice stage <name>` run standalone — `commands/rice.rs`'s own
-    // doc). `lyra reload` means "show me the current state now", so this
+    // doc). `strillix reload` means "show me the current state now", so this
     // beat always runs regardless of what that internal call already
     // attempted — a second IPC reload is a harmless no-op, never a
     // correctness problem (`quickshell_ipc_reload` is idempotent by
@@ -222,7 +222,7 @@ fn route_to_marked_draft(song: &str, draft: &str) -> Result<bool, Outcome> {
             Kind::Refused,
             format!("draft `{draft}` of `{song}` is gone"),
             format!("stage/mode.json routes to {}, which does not exist", want.display()),
-            Fix::Run("lyra rice mode stage".to_string()),
+            Fix::Run("strillix rice mode stage".to_string()),
         ));
     }
     let link = aoide_storage::fs::stage_dir().join("livery.json");
@@ -682,7 +682,7 @@ mod tests {
         assert_eq!(refusal["kind"], "refused");
         assert!(refusal["what"].as_str().unwrap().contains("`neon-night` of `sonata`"), "{refusal}");
         assert!(refusal["why"].as_str().unwrap().contains(&draft_livery.display().to_string()), "{refusal}");
-        assert_eq!(refusal["fix"]["run"], "lyra rice mode stage");
+        assert_eq!(refusal["fix"]["run"], "strillix rice mode stage");
         assert_eq!(std::fs::read_to_string(&stage_livery).unwrap(), DECLARED_NOTES);
         assert!(
             !std::fs::symlink_metadata(&stage_livery).unwrap().file_type().is_symlink(),

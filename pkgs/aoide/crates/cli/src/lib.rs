@@ -33,7 +33,7 @@ use daemon::Door;
 ///
 /// `argv` excludes the program name. The parse/dispatch/render skeleton lives
 /// in `aoide_protocol::door::run` (Phase 3 restructure,
-/// docs/architecture/PACKAGE-LAYOUT.md) so a second binary (lyra, P-A4) can
+/// docs/architecture/PACKAGE-LAYOUT.md) so a second binary (strillix, P-A4) can
 /// drive the same loop against its own registry without duplicating it; this
 /// crate supplies its own special-cased commands via the `special` hook —
 /// `mcp serve --stdio`, `a2a serve`, and `secrets serve` start servers,
@@ -58,7 +58,7 @@ use daemon::Door;
 /// to the interactive terminal loop, `guide`/`schema` bypass the generic
 /// `Outcome` envelope — everything else routes through the single dispatcher
 /// (so the audit log + gate apply uniformly). `livery` was an earlier special
-/// case; it moved to lyra with the rest of the graphical bundle at P-A5 —
+/// case; it moved to strillix with the rest of the graphical bundle at P-A5 —
 /// core no longer parses `livery.*` at all. `secrets put` (Workstream
 /// SECRETS P-V4c) is deliberately NOT special-cased here — its wire reply
 /// carries no value, so it runs as an ordinary registered handler

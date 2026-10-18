@@ -37,11 +37,11 @@
 #   500  mkBefore  the compositor look — livery values first
 #   1000 (default) THIS FILE           — behaviour
 #   1000 (default) screenshot dendrite — its own SUPER+S binds
-#   1500 mkAfter   the lyra renderer   — one `source` line, last
+#   1500 mkAfter   the strillix renderer   — one `source` line, last
 # Plain (unordered) is deliberate: the livery block must land first so these
-# behaviour keys are never overwritten by it. The lyra renderer's line sources
-# the rice (`~/.local/state/lyra/rice.conf`) after everything else, so a song's
-# binds and layout override the defaults above (lyra/AGENTS.md).
+# behaviour keys are never overwritten by it. The strillix renderer's line sources
+# the rice (`~/.local/state/strillix/rice.conf`) after everything else, so a song's
+# binds and layout override the defaults above (strillix/AGENTS.md).
 #
 # Enabling this without the compositor is harmless: home-manager only writes
 # hyprland.conf when its own hyprland module is enabled, so the text below is
@@ -172,7 +172,7 @@ in
         # allow_session_lock_restore: a lock client that dies leaves the
         # session LOCKED (Hyprland paints its own lock-dead screen and takes
         # no input to the desktop); this only lets the next client re-take
-        # the lock, which is how `lyra lock` recovers a crashed shell lock.
+        # the lock, which is how `strillix lock` recovers a crashed shell lock.
         misc {
             force_default_wallpaper = -1
             disable_hyprland_logo = true
@@ -212,7 +212,7 @@ in
         # global-shortcuts-v1 seam as the launcher. A press opens the launcher
         # body's own Desktop Pictures (`openPictures()`) when the song's
         # launcher has one, else the plain cover grid over song/covers/; a pick
-        # shells `lyra cover set <path>`, which hot-swaps the live wallpaper.
+        # shells `strillix cover set <path>`, which hot-swaps the live wallpaper.
         # No CLI toggle command, no inbound socket.
         bind = SUPER, W, global, aoide:wallpaper
 
@@ -220,11 +220,11 @@ in
         # else the plain AoideSwitcher) is registered by shell.qml but not bound
         # here: the venue binds its combo.
 
-        # Lock screen: `lyra lock`, the one lock entry (the staged song's face
+        # Lock screen: `strillix lock`, the one lock entry (the staged song's face
         # through the shell's LockHost, else hyprlock). The shellbridge
         # powermenu's PowerAction::Lock and the `lock` alias run the same
         # command. Bare name, as the rice binds below.
-        bind = SUPER, ESCAPE, exec, lyra lock
+        bind = SUPER, ESCAPE, exec, strillix lock
 
         # Panel dock (Hyprland global shortcut → the center-left panel's
         # GlobalShortcut toggle). SUPER+G opens/closes the center-left book-edge
@@ -236,13 +236,13 @@ in
         bind = SUPER, G, global, aoide:dock
 
         # Rice preview / adopt shortcuts. `rice` left core's registry at P-A5
-        # of the binary-split workstream — it lives only in `lyra` now
+        # of the binary-split workstream — it lives only in `strillix` now
         # (bare name resolves via PATH: modules/dendrites/aoide-packages.nix puts
-        # `pkgs.aoide.rice` — lyra's own droppable output, P-A8 — on
-        # systemPackages whenever `aoide.lyra.enable` is on, which defaults
-        # to the lyra fact).
-        bind = SUPER SHIFT, P, exec, lyra rice preview
-        bind = SUPER SHIFT, A, exec, lyra rice adopt
+        # `pkgs.aoide.strillix` — strillix's own droppable output, P-A8 — on
+        # systemPackages whenever `aoide.strillix.enable` is on, which defaults
+        # to the strillix fact).
+        bind = SUPER SHIFT, P, exec, strillix rice preview
+        bind = SUPER SHIFT, A, exec, strillix rice adopt
 
         # ── Window management (ported from dxflake hyprland dendrite) ────────
         # Normalized to SUPER, matching the Aoide binds above. dxflake exec

@@ -1,6 +1,6 @@
 //! The take store: `songbook/<song>/drafts/<draft>/takes/` when routed into
 //! a draft, `songbook/<song>/takes/` when staged directly with no draft
-//! (`lyra reload` design, settled 2026-08-31 — takes/back's staging-mode
+//! (`strillix reload` design, settled 2026-08-31 — takes/back's staging-mode
 //! reach; see [`takes_dir`]) — full-content snapshots of the routed scope's
 //! livery/cover/widget bodies, minted on every rehearsal write, forming a
 //! TREE (not a line) so `rice back --mark <letter>` can revert to any mark
@@ -52,7 +52,7 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 /// A take store's root, either of two places depending on `draft`
-/// (`lyra reload` design, settled 2026-08-31 — the staging-mode take/back
+/// (`strillix reload` design, settled 2026-08-31 — the staging-mode take/back
 /// reach): `songbook/<song>/drafts/<draft>/takes/`, nested under the draft
 /// it snapshots, when routed into one; `songbook/<song>/takes/`, a sibling
 /// of `drafts/`, when the song is staged directly with no draft routed —
@@ -123,7 +123,7 @@ pub struct TakeRecord {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cover: Option<Value>,
     /// `{ "<songbook-relative widgets/ path>": "<utf-8 file content>" }` —
-    /// the song's widget QML bodies at mint time (`lyra reload` design,
+    /// the song's widget QML bodies at mint time (`strillix reload` design,
     /// settled 2026-08-31: "Takes gain WIDGET BODIES in both modes", closing
     /// the gap that widget QML was never snapshotted). Song-scoped, not
     /// draft-scoped, matching the fact that widget bodies themselves are

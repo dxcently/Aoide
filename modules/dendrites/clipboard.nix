@@ -6,10 +6,10 @@
 # persistent across reboots. The lane is the watcher: it records text and
 # image MIME data via cliphist and installs cliphist and wl-clipboard.
 # Display is the Grimoire launcher's (the song's `launcher` slot), which reads
-# the clipboard backend (pkgs/lyra-shell/qml/AoideClipboard.qml) and renders
+# the clipboard backend (pkgs/strillix-shell/qml/AoideClipboard.qml) and renders
 # entries as a dedicated chapter — no separate picker surface. That backend
 # copies and previews by calling the system's `cliphist` and `wl-copy` from
-# PATH itself, and deletes or clears history through `lyra clipboard`, which
+# PATH itself, and deletes or clears history through `strillix clipboard`, which
 # runs the same `cliphist` — so it works the same on a host that runs its own
 # watcher and never selects this lane.
 
@@ -25,7 +25,7 @@ let
   # recommends separate type-specific watchers.  Text+image offers from the
   # same copy may create two separate cliphist entries; this is cliphist's
   # expected behaviour (it deduplicates by content hash, not source offer).
-  clipboardWatch = pkgs.writeShellScriptBin "lyra-clipboard-watch" ''
+  clipboardWatch = pkgs.writeShellScriptBin "strillix-clipboard-watch" ''
     set -o pipefail
 
     cleanup() {
@@ -67,7 +67,7 @@ in
         # A typeless `wl-paste --watch` misses image offers when the source
         # also advertises text.  Text+image copies may create two cliphist
         # entries; this is expected cliphist behaviour.
-        ExecStart = "${clipboardWatch}/bin/lyra-clipboard-watch";
+        ExecStart = "${clipboardWatch}/bin/strillix-clipboard-watch";
         Restart = "on-failure";
         RestartSec = "3s";
         # The DB and previews live under ~/.cache — the watcher sandbox

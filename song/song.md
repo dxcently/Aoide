@@ -14,7 +14,7 @@ song/
 │   │                              (sonata, the shipped baseline, is upstream-owned + evolving, like
 │   │                              nucleus/dendrites; every OTHER song is clone-owned, never adopted-over)
 │   ├── <name>/                  one song per folder, e.g. sonata (found by one typed scan, built in only when a host selects it)
-│   │   ├── rice.nix                the song's body: system (ten vibeos providers + livery) and home (lyra, hyprland.conf)
+│   │   ├── rice.nix                the song's body: system (ten strillix providers + livery) and home (strillix, hyprland.conf)
 │   │   ├── hyprland.conf           the song's binds, unbinds, layout and animations (no livery keys)
 │   │   ├── livery.json             this song's resolved livery values
 │   │   ├── palette/                (planned) transpose keys — variants `rice transpose` swaps among
@@ -55,7 +55,7 @@ stage/livery.json   ◄── also: `aoide rice preview` stages this ephemerally
         │                                                  atomic writes only)
         │  FileView watches the file; onFileChanged → reload()
         ▼
-qml/LiveryState.qml    (singleton — shipped by pkgs/lyra-shell/qml/)
+qml/LiveryState.qml    (singleton — shipped by pkgs/strillix-shell/qml/)
    hot-reload: every widget's binding updates in one pass, no QML restart
         │
         ▼

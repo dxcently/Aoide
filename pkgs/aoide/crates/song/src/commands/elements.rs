@@ -27,7 +27,7 @@ fn handle_element_seed(inv: &Invocation) -> Outcome {
     let song = match inv.args.first() {
         Some(n) => n.clone(),
         None => {
-            return Outcome::usage("element.seed", "usage: lyra element seed <song> [--json]")
+            return Outcome::usage("element.seed", "usage: strillix element seed <song> [--json]")
                 .with_data(json!({ "reason": "missing-song" }));
         }
     };

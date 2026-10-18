@@ -41,7 +41,7 @@
 #
 # Intentional overrides — `intentionalOverrides`: a second overlay in
 # `nixpkgs.overlays` MAY deliberately replace what this walker supplies —
-# Aoide's lyra lane replaces `lyra-songbook` with the songs a host builds in.
+# Aoide's strillix lane replaces `strillix-rices` with the songs a host builds in.
 # Listing a name here is what lets the walker STEP ASIDE for it; an overlay
 # that replaces a walker name WITHOUT listing it is a loud evaluation error
 # naming the package and this rule, because a silent replacement is how one
@@ -50,7 +50,7 @@
 #
 # Special-args escape hatch: `callPackage` auto-fills standard nixpkgs args. A
 # package needing an arg `callPackage` cannot reach (a value the FLAKE computes,
-# like `lyra-songbook`'s `aoideOptions`) declares it by name, and the caller
+# like `strillix-rices`'s `aoideOptions`) declares it by name, and the caller
 # hands it in as `extra.<package>` at construction — one place per build
 # context, next to the `pkgs` that context calls through, never a special case
 # inside the mapper below:
@@ -91,7 +91,7 @@ let
   # so stepping aside is the ONLY way a lane's replacement can stand — and it
   # happens only for a name listed here.
   intentionalOverrides = [
-    "lyra-songbook" # the lyra lane replaces the whole songbook with the songs THIS host builds in.
+    "strillix-rices" # the strillix lane replaces the whole songbook with the songs THIS host builds in.
   ];
 
   # Directory entries under ../pkgs that are packages: type == "directory",
@@ -158,7 +158,7 @@ in
   # DEFAULT per discovered package, so it steps aside rather than overwriting
   # one, and a replacement nobody listed is an evaluation error naming the
   # package and the rule. That is what keeps a lane's replacement work — the
-  # lyra lane replaces `lyra-songbook` with the songs a host builds in, and two
+  # strillix lane replaces `strillix-rices` with the songs a host builds in, and two
   # overlays writing one attribute is otherwise a race whose winner depends on
   # the order `nixpkgs.overlays` happened to compose, not on either of them.
   overlay =

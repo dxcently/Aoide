@@ -24,7 +24,7 @@ the checkout's `song/`), runtime state under `$AOIDE_ROOT/song/` (default
 | key | palette | `songbook/<song>/palette/` |
 | melody | semantic tier — survives transposition | (tier within livery) |
 | component tier | bar / notif / window overrides | (tier within livery) |
-| instruments | paint lanes — quickshell, compositor, stylix, greeter, lyra | `modules/dendrites/` (in the nix tree) |
+| instruments | paint lanes — quickshell, compositor, stylix, greeter, strillix | `modules/dendrites/` (in the nix tree) |
 | song | rice | `songbook/<song>/` |
 | design | per-song design wiki | `songbook/<song>/design/` |
 | songbook | per-song homes + cross-cutting memory | `songbook/` |

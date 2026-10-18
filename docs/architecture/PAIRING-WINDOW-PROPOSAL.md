@@ -63,7 +63,7 @@ The implementation plan includes a concrete deletion inventory: old item, replac
 
 1. Inventory current CLI/UI/wire state and write a threat-model and protocol decision with compatibility behavior. Do not silently downgrade old peers to a weaker ceremony.
 2. Implement daemon-owned enrollment lifecycle, deadlines, close semantics, atomic code consumption/rotation, and headless CLI using the reviewed protocol.
-3. Add temporary discovery and one persistent Lyra panel over the same API. Reuse current visual conventions; avoid an independent UI policy engine.
+3. Add temporary discovery and one persistent Strillix panel over the same API. Reuse current visual conventions; avoid an independent UI policy engine.
 4. Verify two real hosts: single device, timed batch, wrong code, expired code, replay, parallel enrollment, network loss, restart, close races, prior grants and normal reconnection. Visually review the panel and verify CLI-only operation.
 5. Update PAIRING.md, Pairing-Ceremony.md, command schema, contracts and owning-directory docs alongside implementation; then build and release with explicit provenance.
 

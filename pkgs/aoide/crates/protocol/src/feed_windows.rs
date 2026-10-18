@@ -11,7 +11,7 @@
 //!
 //! **The caller's `create_mode` is ADVISORY here, and the policy attached is
 //! ALWAYS a protected owner-only DACL.** There is no group reader on native
-//! Windows (no `lyra`/desktop surface) and no gid to name, so the group-shared
+//! Windows (no `strillix`/desktop surface) and no gid to name, so the group-shared
 //! `0o640` (`aoide-secrets`' broker feed) is not unavailable — it is delivered
 //! STRICTER than it asked: that same user, and nobody else. A world-readable
 //! mode is written owner-only for the same reason. On this host no mode can

@@ -14,7 +14,7 @@ confined to, and carries one or more of `overlay`, `system`, `home`:
 
 ```nix
 {
-  dendrites = [ "lyra" ];       # required: the capabilities this fix is about
+  dendrites = [ "strillix" ];       # required: the capabilities this fix is about
   hosts = [ "yomi-strix" ];     # optional: confine it; absent = every host
   overlay = _final: _prev: { … };   # at least one carrier is required
 }

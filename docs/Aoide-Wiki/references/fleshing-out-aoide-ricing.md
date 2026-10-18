@@ -135,7 +135,7 @@ aoide <cmd> runs
      │    · a pending send addressed to it
      │    · it's marked awaiting and something answered
      │        │
-     │       yes ──► "♪ cue: rehearsal neon-night @ check — `lyra rice score`"
+     │       yes ──► "♪ cue: rehearsal neon-night @ check — `strx rice score`"
      │
      └─ anything else — unregistered, idle, no engagement ──► silence
 ```
@@ -209,7 +209,7 @@ stays the informal human path. The name fits the existing lexicon:
 rehearse = staged/live, record = declared/baked.
 
 ```
-lyra rice rehearse begin <song> [--draft <name>]   — enters mode draft
+strx rice rehearse begin <song> [--draft <name>]   — enters mode draft
         │
         ▼
   ┌── plan ──── edit ──── check ──── review ──── mark ──┐
@@ -223,9 +223,9 @@ lyra rice rehearse begin <song> [--draft <name>]   — enters mode draft
   └────────────────────── iterate ◄─────────────────────┘
         │
         ▼
-lyra rice rehearse end [--distill]   — draft survives; journal → design log
+strx rice rehearse end [--distill]   — draft survives; journal → design log
         ▼
-lyra rice declare                    — unchanged: User-gated; a stub today
+strx rice declare                    — unchanged: User-gated; a stub today
                                        (exit 64), so the loop's last
                                        mechanical step is the draft and the
                                        commit stays the User's by hand
@@ -239,7 +239,7 @@ At any moment, any agent, through any door:
 { "rehearsal": { "song": "sonata", "draft": "neon-night", "step": "check",
                  "take": 21, "parent": 9, "from": "A",
                  "marks": { "A": 9, "B": 14 } },
-  "instruction": "Vision-check the live desktop: `lyra screen shot`, verify
+  "instruction": "Vision-check the live desktop: `strx screen shot`, verify
                   polarity agreement + widget/bar livery match.",
   "allowed": ["rice take", "rice score advance", "screen shot"],
   "gate": { "advance-to": "review", "requires": null } }
@@ -268,7 +268,7 @@ check during an active rehearsal is phase C, still design.
   cover + meta: timestamp, session id, cause). Captured at the two write
   entrypoints (`rice stage`, `cover set`) directly; hand-edits caught by a
   content-hash check on every hook-door `PostToolUse` during an active
-  rehearsal AND ambiently on any `lyra rice` command — a hookless agent's
+  rehearsal AND ambiently on any `strx rice` command — a hookless agent's
   edits get taken the next time it touches the CLI. Explicit `rice take`
   for paranoia. Leaning toward hashing cover.json alongside livery on every
   check (one extra file read; not finalized).
@@ -310,17 +310,17 @@ check during an active rehearsal is phase C, still design.
   <letter>` is the phase-A command; the score's `mark` step calls it.
 
 ```
-lyra rice back                bare, on a tty: the picker (§7), the
+strx rice back                bare, on a tty: the picker (§7), the
                                 head's parent pre-selected as row 1 — one
                                 Enter is the one-step undo. Non-tty: a
                                 usage error naming `--take`/`--mark`,
                                 never reads stdin.
-lyra rice back --take 9       that take exactly; head := 9
-lyra rice back --mark A       resolve A via takes/marks.json; head :=
+strx rice back --take 9       that take exactly; head := 9
+strx rice back --mark A       resolve A via takes/marks.json; head :=
                                 that take
-lyra rice take list           the whole tree: numbers, parents, marks,
+strx rice take list           the whole tree: numbers, parents, marks,
                                 head
-lyra rice take diff           change since the nearest mark on the
+strx rice take diff           change since the nearest mark on the
                                 head's ancestry (reviewer's view)
 ```
 
@@ -355,7 +355,7 @@ During an active rehearsal the hook door also appends to
 ```
 
 The journal answers *which agent action produced take 17* — what makes
-`rice back` meaningful rather than blind. Surfaces: `lyra rice watch`
+`rice back` meaningful rather than blind. Surfaces: `strx rice watch`
 (live tail), the conductor pane and a dock Rehearsal gadget (both consume
 the O3 output pane, built once), and `rehearse end --distill` — the
 songbook discipline made mechanical: journal + take timeline summarized
@@ -444,7 +444,7 @@ is no human CLI and no agent CLI; there is one command with two entrances
 the `aoide nix` lane is design):
 
 ```
-                       lyra rice back
+                       strx rice back
                               │
         ┌─────────────────────┴─────────────────────┐
    flags / --json                            bare, on a tty

@@ -2,14 +2,14 @@
 
 Cross-crate rules only. A crate's own `AGENTS.md` holds what's local to it;
 this file holds what would otherwise be repeated in all eleven. Points up to
-the root `AGENTS.md` for the core-vs-lyra/AoideOS boundary and the house
+the root `AGENTS.md` for the core-vs-strillix/AoideOS boundary and the house
 rules that govern the whole repo.
 
 ## Registry order is load-bearing
 
 `schema --json`, the MCP tool list, and the A2A `AgentCard` all derive from
 the single `Registry` each app crate assembles
-(`cli/src/commands/mod.rs::all()`, `lyra/src/commands/mod.rs::all()`) — see
+(`cli/src/commands/mod.rs::all()`, `strillix/src/commands/mod.rs::all()`) — see
 `aoide-protocol::registry`'s module doc. The assembly order reproduces the
 historical table byte-for-byte; **never reorder an existing `register()`
 call**, only append. A command's home is its domain crate's own `commands`
@@ -20,7 +20,7 @@ enumerates that domain's commands.
 
 Both app crates pin their exact command-path set in a golden snapshot test
 (`cli/src/registry.rs::command_paths_match_the_golden_snapshot`,
-`lyra/src/registry.rs`, same name). Adding, removing, or renaming a command
+`strillix/src/registry.rs`, same name). Adding, removing, or renaming a command
 updates the matching golden list in the SAME commit as the `register()`
 change — a red golden test is never "expected," it's the signal a
 `commands::all()` edit forgot its snapshot. These golden lists are the SOLE
@@ -140,7 +140,7 @@ each app crate's `mcp_open_paths_match_the_golden_snapshot` pins that set.
 ## Listing layout
 
 Each app crate declares how its binary lists its commands once, as a `Layout`
-const beside `all()` (`cli/src/commands/mod.rs`, `lyra/src/commands/mod.rs`):
+const beside `all()` (`cli/src/commands/mod.rs`, `strillix/src/commands/mod.rs`):
 a tagline, then topic sections of heads, each multi-command head with a
 one-line blurb (or a bare command whose `brief` says it). It is what the
 overview, a group page, the unknown-command lists, did-you-mean ties,
@@ -154,7 +154,7 @@ listings_fit_and_hang}` hold both binaries to it.
 - **A new domain crate**: add it to `pkgs/aoide/Cargo.toml`'s `[workspace]
   members`, give it a `commands` module with `register(&mut Registry)`, wire
   that into the owning app crate's `commands::all()` (core → `cli`, paint →
-  `lyra`), and add its golden README/AGENTS pair here.
+  `strillix`), and add its golden README/AGENTS pair here.
 - **A new command on an existing crate**: add a `cmd!`/`arg!`/`flag!` entry
   (`aoide-protocol::registry`) inside that crate's own `commands` module;
   the two app crates never need an edit for a command that isn't moving
@@ -163,8 +163,8 @@ listings_fit_and_hang}` hold both binaries to it.
   that is the first of a NEW head also adds that head to its binary's `Layout`
   (a section, and a blurb when the head has several commands) in the same
   commit; a `brief` keeps its list line from being cut mid-sentence.
-- **A head moving between `aoide` and `lyra`** updates
-  `door::{AOIDE_ONLY,LYRA_ONLY,SHARED}_HEADS` in the same commit; each app
+- **A head moving between `aoide` and `strillix`** updates
+  `door::{AOIDE_ONLY,STRILLIX_ONLY,SHARED}_HEADS` in the same commit; each app
   crate's `cross_binary_heads_match_the_registry` test pins its half.
 
 ## What needs a docs update in the same commit

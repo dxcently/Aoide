@@ -7,9 +7,9 @@ tags: [aoide, cli, reference, schema]
 
 # CLI Reference — aoide Command I/O Index
 
-Dev-facing reference for the `aoide` and `lyra` command surfaces: for every command, what
+Dev-facing reference for the `aoide` and `strillix` command surfaces: for every command, what
 it reads, what files it writes, and where its output pipes to. Grounded in the
-Rust source (`pkgs/aoide/crates/`), `aoide schema --json`, and `lyra schema
+Rust source (`pkgs/aoide/crates/`), `aoide schema --json`, and `strx schema
 --json` — the pages state
 the system at HEAD, not the design intent. For the concepts behind the commands,
 start at [[aoide-cli]] and the group pages linked below.
@@ -18,7 +18,7 @@ start at [[aoide-cli]] and the group pages linked below.
 
 - **Exit codes:** `0` ok · `1` error · `2` usage · `64` not-implemented.
   A stub returns a structured `not-implemented` envelope, never a crash.
-- **Help screens:** bare `aoide`/`lyra`, `--help` and `help` print the overview
+- **Help screens:** bare `aoide`/`strillix`, `--help` and `help` print the overview
   (tagline, one line per head under its topic section, `(N commands)` for a
   group) on stdout at exit `0`; `aoide <group>`, `aoide help <group>` and
   `<group> --help` list that group the same way. A mistake in the invocation
@@ -27,7 +27,7 @@ start at [[aoide-cli]] and the group pages linked below.
   column. Color is the ANSI 16 base colors, on only for a tty and off for
   `NO_COLOR`, `TERM=dumb` and `--json`; `--color=auto|always|never` is global.
   The section order is declared once per binary (`commands::LAYOUT` in
-  `pkgs/aoide/crates/cli` and `lyra`) and ships in `schema --json` as
+  `pkgs/aoide/crates/cli` and `strillix`) and ships in `schema --json` as
   `sections`.
 - **`--json` everywhere:** every command takes and emits a structured JSON
   envelope; without it, a human line goes to stdout.
@@ -52,9 +52,9 @@ start at [[aoide-cli]] and the group pages linked below.
   git checkout, reached via `$AOIDE_FLAKE_ROOT`, not a runtime path.
   Stage/state writes are atomic temp-then-rename.
 - **Two registries, one convention:** `aoide schema --json` holds 81
-  command paths (74 real, 7 stubs), `lyra schema --json` holds 48 (47 real,
+  command paths (74 real, 7 stubs), `strx schema --json` holds 48 (47 real,
   1 stub) — every group page prefixes
-  each heading `aoide `/`lyra ` so the binary a command belongs to is never
+  each heading `aoide `/`strillix ` so the binary a command belongs to is never
   ambiguous.
 - `secrets exec`'s parking is detailed in [[Secrets-Commands]].
 
@@ -98,7 +98,7 @@ start at [[aoide-cli]] and the group pages linked below.
   `state/stage/herald.json`), and `hooks install` (harness settings merge,
   `--capture` tee to `state/<agent>-hooks.jsonl`).
 - [[Meta-and-Upkeep|Meta-and-Upkeep]] — `guide`, `schema`,
-  `make`/`update` (stubs), `onboard` (the first-boot flow, core and lyra
+  `make`/`update` (stubs), `onboard` (the first-boot flow, core and strillix
   halves), `usage` (→ `state/usage.json`),
   `quickshell reload`/`healthcheck` (the live placeholder-screen watchdog),
   `soundcheck` (report-only sweep).
@@ -106,26 +106,26 @@ start at [[aoide-cli]] and the group pages linked below.
   commands across direct-home admin, over-the-socket operator, and the daemon
   itself. State: `/run/aoide-secrets/{secrets.sock,events.jsonl}`, the
   secrets home.
-- [[Apps-Commands|Apps-Commands]] — the `lyra apps` group: `apps list/show/
+- [[Apps-Commands|Apps-Commands]] — the `strx apps` group: `apps list/show/
   publish`, the installed desktop apps with icons resolved to files. State:
   `song/stage/apps.json`.
-- [[Clipboard-Commands|Clipboard-Commands]] — the `lyra clipboard` group:
+- [[Clipboard-Commands|Clipboard-Commands]] — the `strx clipboard` group:
   `clipboard delete/clear`, one cliphist history entry or all of them, with
   the launcher's cached thumbnails.
-- `lyra lock` — the one lock entry (`SUPER+ESCAPE`, the power menu, the `lock`
+- `strx lock` — the one lock entry (`SUPER+ESCAPE`, the power menu, the `lock`
   alias): the running shell's `LockHost` in the staged song's face when that
   song dresses the `lockscreen` slot and the shell's PAM service
   (`/etc/pam.d/aoide-lock`) exists, confirmed by the compositor within 5 s,
   else hyprlock, which clears a `LockedHint` a dead shell lock left at `yes`;
   `--hyprlock` skips the shell (the lock host's hand-over when its PAM
   conversation fails while it holds the lock).
-  `lyra lock hint yes|no` sets logind's `LockedHint`, which the lock host
-  calls on lock and unlock; bare `lyra lock hint` reads it, which the lock
+  `strx lock hint yes|no` sets logind's `LockedHint`, which the lock host
+  calls on lock and unlock; bare `strx lock hint` reads it, which the lock
   host does at start to take back a lock its crashed predecessor held.
 
 ## Related
 
 - [[aoide-cli]]
-- [[lyra]]
+- [[strillix]]
 - [[Agent-Interface]]
 - [[aoided]]

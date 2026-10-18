@@ -372,7 +372,7 @@ mail base; Activity uses the existing audit path. The rice stage
 
 `assets/logo.txt` bundles the plain text art from
 `modules/dendrites/fastfetch/ascii-fetch`. Its inclusion adds no runtime Nix,
-Fastfetch or Qt dependency. Conductor belongs to the core binary, not Lyra.
+Fastfetch or Qt dependency. Conductor belongs to the core binary, not Strillix.
 
 ## Mail review boundary
 
