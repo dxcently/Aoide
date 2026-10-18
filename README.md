@@ -36,7 +36,7 @@ The repo is a **snowflake**: a capability enters by one file plus one line — a
 ├── pkgs/              aoide (Rust, its own flake, consumed as a path input),
 │                      strillix-shell (the QML skeleton), strillix-rices (templates)
 ├── lib/               aoideos.nix (constructor) + composition + checks + discovery
-├── song/              the performed half (songbook, covers)
+├── song/              the performed half (rices, covers)
 └── flake.nix          inputs + outputs (never edited to add a module)
 ```
 
@@ -46,7 +46,7 @@ A catalogue at the centre and radial distance from it governing who may change w
 |---|---|---|
 | `modules/nucleus/` | upstream | The option contract and assertions every host carries. The daemon and the rest of the floor are dendrites in the `nucleus` aggregation; the secrets broker is one a host selects by name. |
 | `modules/dendrites/` | shipped + you | Opt-in lanes, one flat tree; new personal lanes are additive files — the paint lanes (strillix, quickshell, compositor, stylix, greeter) read only the namespaces root `AGENTS.md` house rule 5 enumerates. |
-| `song/songbook/<song>/` | you (agent-written) | The performed half: a committed song — rice.nix, livery.json, palettes, widgets, design notes. Everything outside `song/` changes only on a lane the User ordered. |
+| `rices/<song>/` | you (agent-written) | The performed half: a committed song — rice.nix, livery.json, palettes, widgets, design notes. Everything outside `song/` changes only on a lane the User ordered. |
 
 Deeper reads:
 
@@ -62,7 +62,7 @@ Deeper reads:
 
 ### Self-ricing
 
-The headline feature. An agent generates, lints, stages (hot-loads live, nothing committed), and adopts a **rice** — a song the system performs, drawn from a wallpaper or a prompt. Committed songs live in `song/songbook/<name>/`; any host performs any committed song by naming it (`aoide.song = "moonlight";`). Staging vs declarative mode lets an agent hot-iterate on a rice live without ever touching the committed, home-manager-declared state until an explicit `adopt`. → [Self-Ricing](docs/Aoide-Wiki/concepts/song/Self-Ricing.md), [Ricing Protocol](docs/Aoide-Wiki/concepts/song/Ricing-Protocol.md).
+The headline feature. An agent generates, lints, stages (hot-loads live, nothing committed), and adopts a **rice** — a song the system performs, drawn from a wallpaper or a prompt. Committed songs live in `rices/<name>/`; any host performs any committed song by naming it (`aoide.rice = "moonlight";`). Staging vs declarative mode lets an agent hot-iterate on a rice live without ever touching the committed, home-manager-declared state until an explicit `adopt`. → [Self-Ricing](docs/Aoide-Wiki/concepts/song/Self-Ricing.md), [Ricing Protocol](docs/Aoide-Wiki/concepts/song/Ricing-Protocol.md).
 
 ### Conducting — every terminal is a tracked session
 
@@ -127,7 +127,7 @@ cd ~/Aoide
 #    _laptop, _server; _mac is the forward-looking darwin one, pending the
 #    darwin seam) or copy hosts/yomi-strix/, the living reference. The
 #    host module selects aggregations, lone dendrites and its song
-#    (`habit.song.declared`), then carries the machine's own platform settings.
+#    (`habit.rice.declared`), then carries the machine's own platform settings.
 #    A committed hardware.nix is imported guardedly if present.
 
 # 3. Build + switch

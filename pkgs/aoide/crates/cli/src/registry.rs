@@ -499,6 +499,7 @@ mod tests {
         std::fs::create_dir_all(root.join("home")).unwrap();
         let _env = aoide_test_support::EnvSaver::capture(&[
             "AOIDE_ROOT",
+            "STRILLIX_ROOT",
             "AOIDE_AUDIT_LOG",
             "AOIDE_STAGE_DIR",
             "AOIDE_SECRETS_HOME",
@@ -507,6 +508,7 @@ mod tests {
             "AOIDE_SESSION_ID",
         ]);
         std::env::set_var("AOIDE_ROOT", &root);
+        std::env::set_var("STRILLIX_ROOT", &root);
         std::env::set_var("AOIDE_AUDIT_LOG", root.join("log"));
         std::env::set_var("AOIDE_STAGE_DIR", root.join("stage"));
         std::env::set_var("AOIDE_SECRETS_HOME", root.join("secrets"));

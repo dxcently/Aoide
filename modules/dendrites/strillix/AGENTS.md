@@ -26,11 +26,11 @@ file covers only the strillix lane.
   (`config.aoide.root`, the built-in set, the derivations in its `let`), and
   `runtime-home.nix` imports through `osConfig`. Home Manager's `pkgs` is the
   system's (habit sets `useGlobalPkgs`), so the lane's overlays reach it.
-- **`runtime.nix` reads songs through the registry, never through `songbook`
-  alone.** The hook hands it `songbookDirs` (name to song directory); the
-  lane's songbook library and every per-song path come from that map, so a
-  merged songbook (a derivation) is never read at evaluation. Absent, the
-  lane discovers `songbook` itself.
+- **`runtime.nix` reads songs through the registry, never through `rices`
+  alone.** The hook hands it `ricesDirs` (name to song directory); the
+  lane's rices library and every per-song path come from that map, so a
+  merged rices (a derivation) is never read at evaluation. Absent, the
+  lane discovers `rices` itself.
 - **`runtime.nix` sets `aoide.strillix.enable` and `aoide.quickshell.config`,** and
   brings the shell by importing `../quickshell/system.nix`; `runtime-home.nix`
   imports `../quickshell/home.nix` beside `aoide.strillix.home`. `mkFact` accepts

@@ -124,7 +124,7 @@ document instead. A sample render:
 
 Every stage mutation restages the same resolved document atomically to
 `state/stage/graph.json` — the identical write-temp-then-rename pattern as the
-livery emitter (which stages to `song/stage/` instead — the two trees are
+livery emitter (which stages to `/stage/` instead — the two trees are
 split by owner, core vs. strillix) — via `restage_graph`, so [[Quickshell]]
 hot-reloads it without a separate emit step. `session prune` is the manual
 resync when a hand-edit to one of the stage files needs to be reconciled
@@ -838,7 +838,7 @@ not built.
 ## Open seams
 
 `state/stage/` (the conducting tree this page's commands read and write) and
-`song/stage/` (rice/paint staging) resolve through two separate functions —
+`/stage/` (rice/paint staging) resolve through two separate functions —
 `conducting_stage_dir()` and `stage_dir()` — that share the same
 `$AOIDE_STAGE_DIR` absolute-path override so a relocated stage tree relocates
 as a unit, and otherwise fall back to two different default directories

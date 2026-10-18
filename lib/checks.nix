@@ -9,15 +9,15 @@
 #      the same registry and disables derivation for owned surfaces. Two
 #      modules claiming the same surface is a build-time error.
 #
-#   2. song-runtime-untracked — a song's RUNTIME dirs (`song/stage/`,
-#      `song/auditions/`, `song/declared/`) must not exist in the source tree at
+#   2. rice-runtime-untracked — a song's RUNTIME dirs (`$STRILLIX_ROOT/stage/`,
+#      `song/auditions/`, `$STRILLIX_ROOT/declared/`) must not exist in the source tree at
 #      all. This replaces `no-song-read`, which scanned module PATHS for those
 #      names and was vacuously true — a module never reads through its own path.
 #      What actually keeps runtime state out of evaluation is that pure flake
 #      eval reads only TRACKED files and `.gitignore` covers those three; this
 #      check is what fails if one is ever committed or left behind.
 #
-#   3. song-shape — a committed song under song/songbook/<name>/ carries its
+#   3. rice-shape — a committed song under rices/<name>/ carries its
 #      body (`rice.nix`), its `livery.json` and its `hyprland.conf`, the body
 #      is the aggregation shape, the `hyprland.conf` keeps the livery's keys
 #      out, and a rice's module values sit under lib.mkDefault. No `.nix`
@@ -62,7 +62,7 @@
 #      which exempts the flat-option-assignment house style; every other
 #      lint is a hard failure naming file, line, and lint code.
 #
-#   10. livery-fanout — the two fan-outs (baked Stylix, `song/stage/
+#   10. livery-fanout — the two fan-outs (baked Stylix, `$STRILLIX_ROOT/stage/
 #       livery.json` seed) resolve an `aoide.livery.override` identically.
 #       Proves the general law against a fixed in-file fixture (never a real
 #       host or committed song): `lib/livery.nix`'s `stagePatch`'s palette
@@ -72,13 +72,13 @@
 #       host-set geometry field is laid over the document's own — created when
 #       the document has none, shown in `venueDelta` only where it differs.
 #
-#   11, 12. generator-offline, generator-relocatable — the shipped songbook
-#       generator reproduces `songbookManifest` offline, and from a relocated
-#       copy of the songbook (their own comment, below).
+#   11, 12. generator-offline, generator-relocatable — the shipped rices
+#       generator reproduces `ricesManifest` offline, and from a relocated
+#       copy of the rices (their own comment, below).
 #
 #   13. bar-ricemode — every bar body embeds the shared rice-mode control:
 #       the literal `slot: "ricemode"` is in the body of every distinct bar the
-#       songbook's manifest names (a borrowed bar is checked once, under its
+#       rices's manifest names (a borrowed bar is checked once, under its
 #       owner; a song with no bar of its own renders sonata's), and sonata
 #       carries the `ricemode` record every bar's slot falls back to.
 #
@@ -88,7 +88,7 @@
 # held) or the eval fails with a readable message (assertion broken). 10 is
 # the same eval-time-assert shape against a fixed fixture instead of a
 # registry — always real, never trivially-empty. 13 is that shape over the
-# committed songbook, one `readFile` per bar body. 4, 6, 7, 8, and 9 are real
+# committed rices, one `readFile` per bar body. 4, 6, 7, 8, and 9 are real
 # `runCommand`s — each has to actually run a binary, so it can only fail at
 # build time, not eval time.
 { lib, pkgs }:
@@ -121,15 +121,17 @@ let
       badOwner == [ ]
     ) "surfaces with no owner: ${builtins.toString badOwner}";
 
-  # ── Check 2: song RUNTIME state stays out of the source tree ───────────────
-  # `song/stage/`, `song/auditions/` and `song/declared/` are live state —
-  # what was last staged, what was auditioned, what was declared — and `.gitignore`
-  # covers all three. Pure flake eval reads only TRACKED files, so an untracked
+  # ── Check 2: rice RUNTIME state stays out of the source tree ──────────────
+  # `stage/`, `auditions/` and `declared/` are live state — what was last staged,
+  # what was auditioned, what was declared. They live under `$STRILLIX_ROOT` at
+  # run time, never in the checkout, and `.gitignore` covers all three. The
+  # legacy `song/` spelling of the same dirs is named too, so a checkout that
+  # still carries the pre-rename tree fails here. Pure flake eval reads only TRACKED files, so an untracked
   # runtime dir cannot reach a build; this check is what catches one that was
   # committed anyway, or left behind in a store copy that was taken from a dirty
   # tree. (The old `no-song-read` scanned module PATHS for those names and could
   # never fire: a module never reads through its own path.)
-  songRuntimeUntracked =
+  riceRuntimeUntracked =
     src:
     let
       runtimeDirs = [
@@ -137,14 +139,16 @@ let
         "auditions"
         "declared"
       ];
-      present = builtins.filter (d: builtins.pathExists (src + "/song/${d}")) runtimeDirs;
+      present = builtins.filter (
+        d: builtins.pathExists (src + "/${d}") || builtins.pathExists (src + "/song/${d}")
+      ) runtimeDirs;
     in
-    assertCheck "song-runtime-untracked" (
+    assertCheck "rice-runtime-untracked" (
       present == [ ]
-    ) "song/ holds gitignored runtime state in the source tree: ${builtins.toString present}";
+    ) "the source tree holds gitignored rice runtime state: ${builtins.toString present}";
 
   # ── Check 3: song shape (CONTRACTS.md §5, song shape v1) ───────────────────
-  # A committed song under song/songbook/<name>/ is a folder of notes and one
+  # A committed song under rices/<name>/ is a folder of notes and one
   # body. Four things are checked, each because a failure is silent elsewhere:
   #
   #   - `rice.nix` is an attrset of `system` and/or `home` halves, and a half
@@ -167,9 +171,9 @@ let
   # The body, the hyprland.conf and the rice modules are the reads here that look
   # inside a file. A module is CALLED, and its values are walked for their
   # priority only: attrset shape and `_type` tags are forced, a leaf value is not.
-  songShape =
+  riceShape =
     {
-      songbook,
+      ricesRoot,
       songNames,
       strayNixFiles,
       escapingNixFiles,
@@ -190,7 +194,7 @@ let
       bodyProblem =
         name:
         let
-          body = import (songbook + "/${name}/rice.nix");
+          body = import (ricesRoot + "/${name}/rice.nix");
           halves = lib.filter (h: body ? ${h}) [
             "system"
             "home"
@@ -232,21 +236,21 @@ let
       liveryLeaks =
         name:
         let
-          file = songbook + "/${name}/hyprland.conf";
+          file = ricesRoot + "/${name}/hyprland.conf";
         in
         lib.filter liveryLine (lib.splitString "\n" (builtins.readFile file));
 
       incomplete = builtins.filter (
         name:
-        !(builtins.pathExists (songbook + "/${name}/rice.nix"))
-        || !(builtins.pathExists (songbook + "/${name}/livery.json"))
-        || !(builtins.pathExists (songbook + "/${name}/hyprland.conf"))
+        !(builtins.pathExists (ricesRoot + "/${name}/rice.nix"))
+        || !(builtins.pathExists (ricesRoot + "/${name}/livery.json"))
+        || !(builtins.pathExists (ricesRoot + "/${name}/hyprland.conf"))
       ) songNames;
       badBodies = builtins.filter (
-        name: builtins.pathExists (songbook + "/${name}/rice.nix") && bodyProblem name != null
+        name: builtins.pathExists (ricesRoot + "/${name}/rice.nix") && bodyProblem name != null
       ) songNames;
       leaking = builtins.filter (
-        name: builtins.pathExists (songbook + "/${name}/hyprland.conf") && liveryLeaks name != [ ]
+        name: builtins.pathExists (ricesRoot + "/${name}/hyprland.conf") && liveryLeaks name != [ ]
       ) songNames;
 
       # ── A rice module sets its values under lib.mkDefault ─────────────────────
@@ -354,9 +358,9 @@ let
           [ ];
       moduleProblemList = lib.concatMap (
         name:
-        if !(builtins.elem name badBodies) && builtins.pathExists (songbook + "/${name}/rice.nix") then
+        if !(builtins.elem name badBodies) && builtins.pathExists (ricesRoot + "/${name}/rice.nix") then
           let
-            body = import (songbook + "/${name}/rice.nix");
+            body = import (ricesRoot + "/${name}/rice.nix");
           in
           lib.concatMap
             (
@@ -373,7 +377,7 @@ let
           [ ]
       ) songNames;
     in
-    assertCheck "song-shape"
+    assertCheck "rice-shape"
       (
         strayNixFiles == [ ]
         && incomplete == [ ]
@@ -382,7 +386,7 @@ let
         && leaking == [ ]
         && moduleProblemList == [ ]
       )
-      "songbook shape is wrong — ${
+      "rices shape is wrong — ${
         if strayNixFiles != [ ] then
           "stray .nix outside rice.nix/_widgets/: ${builtins.toString strayNixFiles}"
         else if escapingNixFiles != [ ] then
@@ -811,13 +815,13 @@ let
 
   # ── Check 10: the two fan-outs agree under a venue override ────────────────
   # `lib/livery.nix`'s `resolve` (the baked Stylix/compositor fan-out) and
-  # `stagePatch` (the `song/stage/livery.json` seed) must apply the identical
+  # `stagePatch` (the `$STRILLIX_ROOT/stage/livery.json` seed) must apply the identical
   # override rule (CONTRACTS.md §1). Proved here against a FIXED fixture —
-  # never a real host's `aoide.livery` or a committed songbook file, so this
+  # never a real host's `aoide.livery` or a committed rices file, so this
   # check never depends on which songs or hosts are in the tree. One case (a
   # single overridden anchor recolours a matching palette slot) plus the
   # no-override identity `stagePatch` promises callers. `venueDelta` (the
-  # `song/declared/venue.json` the runtime stage overlays) is proved on the
+  # `$STRILLIX_ROOT/declared/venue.json` the runtime stage overlays) is proved on the
   # same fixture: the one recoloured slot and nothing else, `{ }` without an
   # override. Geometry is the third case: a value the host sets, laid over the
   # document whether or not it holds the tier, and in `venueDelta` only where
@@ -930,35 +934,35 @@ let
         && geoEqual
       )
       "stagePatch and resolve disagree on the override recolour, stagePatch is not the identity with no override set, venueDelta is not exactly the recoloured slots, or a host-set geometry field is not laid over the document (created when absent, merged when present, no delta when equal)";
-  # ── Checks 11 and 12: the shipped songbook generator is offline ───────────
+  # ── Checks 11 and 12: the shipped rices generator is offline ───────────
   # §9's claim, as a build: `share/strillix/nix/manifest.nix` (shipped by
   # `pkgs/strillix-rices`) is the runtime's generator, and a plain
   # `nix-instantiate --eval --strict --json --expr` on it — the exact argv
   # `aoide-song::widgets` runs, with `NIX_PATH=` empty, no flake, no network, no
-  # checkout — must answer what the flake's own `songbookManifest` answers.
+  # checkout — must answer what the flake's own `ricesManifest` answers.
   #
-  # Check 11 (`generator-offline`): over the repo's committed songbook.
+  # Check 11 (`generator-offline`): over the repo's committed rices.
   # Check 12 (`generator-relocatable`): over a COPY of it in `$TMPDIR`, outside
   # the repo — §7.4's constraints 1 and 5 (a song folder is self-contained and
   # holds no repo-absolute path), which is what lets a machine evaluate its OWN
-  # songbook.
+  # rices.
   #
-  # `expected` is `builtins.toJSON { inherit (songbookLib) manifestAttrs
-  # registryAttrs; }` — the same value the `songbookManifest` flake output
+  # `expected` is `builtins.toJSON { inherit (ricesLib) manifestAttrs
+  # registryAttrs; }` — the same value the `ricesManifest` flake output
   # exposes, so the comparison is against the flake, never a hand-kept golden.
   generatorCommands =
-    { strillixRices, songbookArg }:
+    { strillixRices, ricesArg }:
     ''
       export XDG_CACHE_HOME="$TMPDIR/cache" HOME="$TMPDIR"
       nix-instantiate --eval --strict --json --expr \
-        "import ${strillixRices}/share/strillix/nix/manifest.nix { songbook = \"${songbookArg}\"; }" \
+        "import ${strillixRices}/share/strillix/nix/manifest.nix { ricesRoot = \"${ricesArg}\"; }" \
         | jq -c 'del(.packages)'
     '';
 
   generatorOffline =
     {
       strillixRices,
-      songbook,
+      ricesRoot,
       expected,
     }:
     pkgs.runCommand "aoide-check-generator-offline"
@@ -968,18 +972,18 @@ let
           pkgs.jq
           pkgs.diffutils
         ];
-        expectedJson = pkgs.writeText "aoide-songbook-manifest.json" expected;
+        expectedJson = pkgs.writeText "aoide-rices-manifest.json" expected;
       }
       ''
         got=$(${
           generatorCommands {
             inherit strillixRices;
-            songbookArg = "${songbook}";
+            ricesArg = "${ricesRoot}";
           }
         })
         want=$(cat "$expectedJson")
         if [ "$got" != "$want" ]; then
-          echo "the shipped generator's answer over ${songbook} is not #songbookManifest:" >&2
+          echo "the shipped generator's answer over ${ricesRoot} is not #ricesManifest:" >&2
           diff <(printf '%s' "$want" | jq -S .) <(printf '%s' "$got" | jq -S .) >&2 || true
           exit 1
         fi
@@ -989,7 +993,7 @@ let
   generatorRelocatable =
     {
       strillixRices,
-      songbook,
+      ricesRoot,
       expected,
     }:
     pkgs.runCommand "aoide-check-generator-relocatable"
@@ -999,33 +1003,33 @@ let
           pkgs.jq
           pkgs.diffutils
         ];
-        songbookCopy = builtins.path {
-          path = songbook;
-          name = "aoide-songbook-copy";
+        ricesCopy = builtins.path {
+          path = ricesRoot;
+          name = "aoide-rices-copy";
         };
-        expectedJson = pkgs.writeText "aoide-songbook-manifest.json" expected;
+        expectedJson = pkgs.writeText "aoide-rices-manifest.json" expected;
       }
       ''
         export XDG_CACHE_HOME="$TMPDIR/cache" HOME="$TMPDIR"
         # A copy that shares no directory with any checkout — the shape a
-        # machine's own `$AOIDE_ROOT/song/songbook` has.
+        # machine's own `$AOIDE_ROOT/rices` has.
         mkdir -p "$TMPDIR/relocated"
-        cp -r "$songbookCopy"/. "$TMPDIR/relocated"/
+        cp -r "$ricesCopy"/. "$TMPDIR/relocated"/
         in_repo=$(${
           generatorCommands {
             inherit strillixRices;
-            songbookArg = "${songbook}";
+            ricesArg = "${ricesRoot}";
           }
         })
         relocated=$(${
           generatorCommands {
             inherit strillixRices;
-            songbookArg = "$TMPDIR/relocated";
+            ricesArg = "$TMPDIR/relocated";
           }
         })
         want=$(cat "$expectedJson")
         if [ "$in_repo" != "$want" ] || [ "$relocated" != "$want" ]; then
-          echo "the shipped generator answers differently for a relocated songbook:" >&2
+          echo "the shipped generator answers differently for a relocated rices:" >&2
           diff <(printf '%s' "$want" | jq -S .) <(printf '%s' "$relocated" | jq -S .) >&2 || true
           exit 1
         fi
@@ -1037,15 +1041,15 @@ let
   # `WidgetSlot { slot: "ricemode" }`, and the slot resolves through the
   # baseline chain to the song's own body or sonata's. A bar body without the
   # literal has no rice-mode control, so a gesture added to the slot never
-  # reaches it; a songbook without sonata's record has no floor to resolve to.
+  # reaches it; a rices without sonata's record has no floor to resolve to.
   #
-  # `manifest` is `songbookLib.manifestAttrs`, which names each song's bar by
+  # `manifest` is `ricesLib.manifestAttrs`, which names each song's bar by
   # its owner: a borrowed bar is read once, under its owner, and a song with no
-  # `bar` entry (nocturne) renders sonata's, which sonata's own entry covers. Only the committed songbook is read, so a
-  # song that exists only in the runtime songbook is judged when `rice declare`
+  # `bar` entry (nocturne) renders sonata's, which sonata's own entry covers. Only the committed rices is read, so a
+  # song that exists only in the runtime rices is judged when `rice declare`
   # copies it into the checkout.
   barRicemode =
-    { songbook, manifest }:
+    { ricesRoot, manifest }:
     let
       bars = lib.unique (
         lib.concatMap (m: lib.optional (m ? bar) "${m.bar.owner}/widgets/${m.bar.file}") (
@@ -1055,7 +1059,7 @@ let
       # `builtins.split`, not `lib.hasInfix`: that one is a `builtins.match` over
       # `.*needle.*`, which overflows the stack on a body the size of cadenza's bar.
       embeds = text: builtins.length (builtins.split ''slot: "ricemode"'' text) > 1;
-      omitting = builtins.filter (rel: !(embeds (builtins.readFile (songbook + "/${rel}")))) bars;
+      omitting = builtins.filter (rel: !(embeds (builtins.readFile (ricesRoot + "/${rel}")))) bars;
       noFloor = !((manifest.sonata or { }) ? ricemode);
     in
     assertCheck "bar-ricemode" (omitting == [ ] && !noFloor) (
@@ -1071,8 +1075,8 @@ in
   inherit
     assertCheck
     surfaceOwnership
-    songRuntimeUntracked
-    songShape
+    riceRuntimeUntracked
+    riceShape
     barRicemode
     fmt
     discovery

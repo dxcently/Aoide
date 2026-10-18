@@ -44,7 +44,7 @@ strx screen info                                   # monitors, clients, layer su
 - **Staging can be locked.** `rice stage` refuses while the rice mode
   reports `declarative`. Unlock with `strx rice mode stage [<song>]`, lock
   back with `strx rice mode declarative [<song>]`.
-- **Never hand-edit** `song/stage/livery.json` or the draft targets it
+- **Never hand-edit** `/stage/livery.json` or the draft targets it
   symlinks to — that bypasses the lock check and the draft routing.
 - **Never declare a visual change done without looking at it.** Capture it,
   read it back, judge it yourself, then show the User. `strx screen shot` is

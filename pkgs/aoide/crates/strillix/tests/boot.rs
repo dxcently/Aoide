@@ -26,6 +26,7 @@ fn strillix(home: &Path, argv0: &str, args: &[&str]) -> Output {
         .env_remove("AOIDE_USER")
         .env_remove("AOIDE_STATE_DIR")
         .env("AOIDE_ROOT", home.join("aoide"))
+        .env("STRILLIX_ROOT", home.join("aoide"))
         .env("AOIDE_STAGE_DIR", home.join("stage"))
         .env("AOIDE_AUDIT_LOG", home.join("log"))
         .env("XDG_RUNTIME_DIR", home.join("run"))

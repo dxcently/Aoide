@@ -260,11 +260,11 @@ gate isn't met.
 **Status: LANDED** — `rice take`, `rice take mark|list|diff|prune`,
 `rice back`, the auto-take at both write entrypoints, and the bare-tty
 picker are real commands at HEAD (`crates/storage/src/takes.rs`,
-`crates/song/src/commands/take.rs`; phase A, §10). The hook-door drift
+`crates/strillix-rice/src/commands/take.rs`; phase A, §10). The hook-door drift
 check during an active rehearsal is phase C, still design.
 
 - **Takes** — automatic, append-only, cheap: every write to the routed
-  draft snapshots `songbook/<song>/drafts/<name>/takes/NNNN.json` (livery +
+  draft snapshots `rices/<song>/drafts/<name>/takes/NNNN.json` (livery +
   cover + meta: timestamp, session id, cause). Captured at the two write
   entrypoints (`rice stage`, `cover set`) directly; hand-edits caught by a
   content-hash check on every hook-door `PostToolUse` during an active
@@ -330,7 +330,7 @@ the existing symlink via `atomic_write`. Every file a revert touches
 **a revert performs no explicit Quickshell IPC reload of its own** — the
 existing watch mechanism is the whole apply path, nothing new to wire.
 **Scope line:** takes cover the stage-routed files (livery, cover). Widget
-QML bodies are committed songbook files — git is their revert mechanism,
+QML bodies are committed rices files — git is their revert mechanism,
 and the `edit` step's instruction says so. No parallel VCS.
 
 **The promise, precisely — a revert restores the live stage exactly, not
@@ -358,7 +358,7 @@ The journal answers *which agent action produced take 17* — what makes
 `rice back` meaningful rather than blind. Surfaces: `strx rice watch`
 (live tail), the conductor pane and a dock Rehearsal gadget (both consume
 the O3 output pane, built once), and `rehearse end --distill` — the
-songbook discipline made mechanical: journal + take timeline summarized
+rices discipline made mechanical: journal + take timeline summarized
 into the song's `design/intent.md` iteration log, so self-ricing's
 write-back stops depending on agent virtue.
 
@@ -475,7 +475,7 @@ can never hang.
 
 | bare command on a tty | picker rows | on select |
 |---|---|---|
-| `rice back` | the whole take **tree** (§5.2) rendered flat and numbered for selection, head arrowed, marks bracketed — row 1 is the head's parent, pre-selected — plus a **second lane**, widget commits (recent git commits touching the song's widget bodies) | a take writes through the routing (same as `--take N`); a commit does `git checkout <rev> -- songbook/<song>/…` — working-tree restore, HEAD never moves |
+| `rice back` | the whole take **tree** (§5.2) rendered flat and numbered for selection, head arrowed, marks bracketed — row 1 is the head's parent, pre-selected — plus a **second lane**, widget commits (recent git commits touching the song's widget bodies) | a take writes through the routing (same as `--take N`); a commit does `git checkout <rev> -- rices/<song>/…` — working-tree restore, HEAD never moves |
 | `rice take diff` | takes/marks to diff against | the diff, no write |
 | `aoide nix back` | journaled `{generation · rev · subject · age · dirty?}` | `git checkout <rev>` of the config repo; then **offers** the matching generation rollback as a second, separately-confirmed step |
 
@@ -702,7 +702,7 @@ exclusion list.** Takes (§5.2) cover the stage-routed draft files
 (`stage/livery.json`, `stage/cover.json`, and their draft-mode copies); this
 journal covers tracked files inside a registered project's working tree. In
 this repo both exist at once and mostly don't overlap — except that a
-songbook widget's QML body, which §5.2's scope line already assigns to git
+rices widget's QML body, which §5.2's scope line already assigns to git
 as its revert mechanism, is now covered by this journal the moment a session
 edits it through an edit tool: **not a collision, the §7 widget-commit seam
 finally arriving by another door.** Where the substrates do genuinely

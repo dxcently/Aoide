@@ -1,7 +1,7 @@
 # modules/dendrites/strillix/lock.nix — the `lock` slot's strillix provider: the
 # Quickshell lock (LockHost.qml) on the strillix runtime, which it brings by path
 # (README.md), with the hyprlock fallback a song without a `lockscreen` face
-# locks with. The declared lock dress (`song/declared/hyprlock.conf`) is
+# locks with. The declared lock dress (`$STRILLIX_ROOT/declared/hyprlock.conf`) is
 # staging data and is seeded by the runtime, not here.
 { config, pkgs, ... }:
 {
@@ -50,8 +50,8 @@
     $aoide_lock_name_y = -200%
     $aoide_lock_name_font = 0x00000000
 
-    source = ${config.aoide.root}/song/declared/hyprlock.conf
-    source = ${config.aoide.root}/song/stage/hyprlock.conf
+    source = ${config.aoide.strillix.root}/declared/hyprlock.conf
+    source = ${config.aoide.strillix.root}/stage/hyprlock.conf
 
     background {
         color = $aoide_lock_color

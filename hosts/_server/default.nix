@@ -1,7 +1,7 @@
 # hosts/_server/default.nix — TEMPLATE: a headless box. Shelved: see _desktop.
 #
 # The same interface answered differently: the floor and nothing else, no
-# graphical session, and therefore no songs — `songbook` rides `aoideos`, and a
+# graphical session, and therefore no songs — `rices` rides `aoideos`, and a
 # host that selects no `aoideos` imports no committed song at all. A headless
 # machine has no terminal to open, so `kitty` is the one floor member it drops;
 # `enable = false` outranks the aggregation's membership.

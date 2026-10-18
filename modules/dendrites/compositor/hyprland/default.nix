@@ -31,7 +31,7 @@
 # rule 5). Here that is `aoide.livery` (palette + component tiers) and
 # `aoide.arrangement` (declared widget/surface types).
 #   - Component-tier fallback applied locally.
-#   - NEVER reads song/ runtime paths (structurally: checks.song-runtime-untracked).
+#   - NEVER reads song/ runtime paths (structurally: checks.rice-runtime-untracked).
 {
   config,
   lib,
@@ -50,7 +50,7 @@ let
   # song-agnostic, so border colour is ALWAYS a note read, never a literal.
   # This IS the substitution seam — window.border/window.borderInactive (or
   # their palette.accent/palette.bg fallback) are set per-song in that song's
-  # rice.nix (e.g. song/songbook/sonata/rice.nix), which maps its own base16
+  # rice.nix (e.g. rices/sonata/rice.nix), which maps its own base16
   # roles onto the component tier. A song owns that assignment; this file only
   # reads it, so changing a rendered border colour is always a song-side edit.
   windowBorder = if t.window.border != null then t.window.border else t.palette.accent;

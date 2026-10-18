@@ -8,22 +8,22 @@
 # (`strillix/README.md`).
 #
 # The login prompt, in one of two shapes chosen at build time by the DECLARED
-# song (`aoide.songbook.greeter`, the fact the selection hook derives):
+# song (`aoide.rices.greeter`, the fact the selection hook derives):
 #
 #   * The declared song ships `widgets/greeter.qml` → greetd with a Quickshell
 #     greeter. greetd runs `cage` as its greeter user, and in it Quickshell on
 #     a store tree this file builds: the lane's `GreeterHost.qml` as the
 #     tree's `shell.qml`, `LiveryState`/`StagingEngine` beside it, the face's
-#     song folder from the shipped songbook (`pkgs.strillix-rices`) with a
+#     song folder from the shipped rices (`pkgs.strillix-rices`) with a
 #     `qmldir` naming its uppercase helpers as types (the face loads by a
 #     `qs:` URL, where a sibling file is no type otherwise — strillix's tree
 #     writes the same), that
-#     song's `icons/` (when it has one) at `song/songbook/<owner>/icons` —
+#     song's `icons/` (when it has one) at `rices/<owner>/icons` —
 #     the `$AOIDE_ROOT`-relative path a face loads its icons from in the
-#     session too — its `cover/` folder at `song/songbook/<owner>/cover`,
-#     with `song/stage/cover.json` naming the logon picture
+#     session too — its `cover/` folder at `rices/<owner>/cover`,
+#     with `stage/cover.json` naming the logon picture
 #     (`<owner>-logon.<ext>`) as the face's background when it ships one,
-#     the dress as `song/stage/livery.json`, and
+#     the dress as `stage/livery.json`, and
 #     `session.json`: the display manager's
 #     session wrapper (`services.displayManager.sessionData.wrapper`, the
 #     one ly runs — it sources the profile and evaluates the Exec line with
@@ -33,7 +33,7 @@
 #     the hyprland provider names it) — evaluation fails otherwise, never a
 #     guess. cage takes its keyboard layout from the host's
 #     `services.xserver.xkb`, so a password types as it will in the session.
-#     `AOIDE_ROOT` points at the tree,
+#     `AOIDE_ROOT` and `STRILLIX_ROOT` point at the tree,
 #     so nothing reads /home and a staged song never reaches the login screen.
 #     Authentication is greetd's: the host creates a session for the chosen
 #     account, answers its prompts with what the face hands `respond()`, and
@@ -52,7 +52,7 @@
 #
 # Filling the slot is the switch: a host that does not select it boots to the
 # tty it lands on. Reads the dress (`aoide.livery`), the song selection
-# (`aoide.song`, `aoide.songbook.greeter`), the session the display manager
+# (`aoide.rice`, `aoide.rices.greeter`), the session the display manager
 # registers (`services.displayManager.sessionData`, which ly reads too) and
 # the host's keyboard (`services.xserver.xkb`) — root AGENTS.md house rule 5.
 {
@@ -72,7 +72,7 @@ let
   lyPlain = hex: "0x00${lib.removePrefix "#" hex}";
   lyBold = hex: "0x01${lib.removePrefix "#" hex}";
 
-  face = config.aoide.songbook.greeter;
+  face = config.aoide.rices.greeter;
 
   quickshellPkg = aoideInputs.quickshell.packages.${pkgs.stdenv.hostPlatform.system}.default;
 
@@ -83,14 +83,14 @@ let
     builtins.toJSON (
       lib.filterAttrsRecursive (_: v: v != null) (removeAttrs t [ "override" ])
       // {
-        song = config.aoide.song;
+        song = config.aoide.rice;
       }
     )
   );
 
   manifest = pkgs.writeText "aoide-greeter-manifest.json" (
     builtins.toJSON {
-      ${config.aoide.song} = {
+      ${config.aoide.rice} = {
         greeter = face;
       };
     }
@@ -110,10 +110,10 @@ let
 
   tree = pkgs.runCommand "aoide-greeter-tree" { nativeBuildInputs = [ pkgs.jq ]; } ''
     q=$out/run/qml
-    mkdir -p "$q/songs/${face.owner}" "$out/song/stage"
+    mkdir -p "$q/songs/${face.owner}" "$out/stage"
     cp ${pkgs.strillix-shell}/share/strillix/qml/LiveryState.qml ${pkgs.strillix-shell}/share/strillix/qml/StagingEngine.qml "$q/"
     cp ${pkgs.strillix-shell}/share/strillix/qml/GreeterHost.qml "$q/shell.qml"
-    song=${pkgs.strillix-rices}/share/strillix/songbook/${face.owner}
+    song=${pkgs.strillix-rices}/share/strillix/rices/${face.owner}
     cp -r "$song/widgets/." "$q/songs/${face.owner}/"
     for h in "$song/widgets/"[A-Z]*.qml; do
       [ -e "$h" ] || continue
@@ -121,29 +121,29 @@ let
       printf '%s 1.0 %s.qml\n' "$t" "$t" >> "$q/songs/${face.owner}/qmldir"
     done
     if [ -d "$song/icons" ]; then
-      mkdir -p "$out/song/songbook/${face.owner}"
-      cp -r "$song/icons" "$out/song/songbook/${face.owner}/icons"
+      mkdir -p "$out/rices/${face.owner}"
+      cp -r "$song/icons" "$out/rices/${face.owner}/icons"
     fi
-    # The face's cover folder, whole, at the same `song/songbook/<owner>/` path
+    # The face's cover folder, whole, at the same `rices/<owner>/` path
     # the session reads it from. Its logon picture (`<owner>-logon.<ext>`), when
     # it ships one, is the background the logon face draws: `stage/cover.json`
     # names it in the one shape every surface reads a cover by, stamped with the
     # declared song the way the seed stamps its default.
     if [ -d "$song/cover" ]; then
-      mkdir -p "$out/song/songbook/${face.owner}"
-      cp -r "$song/cover" "$out/song/songbook/${face.owner}/cover"
+      mkdir -p "$out/rices/${face.owner}"
+      cp -r "$song/cover" "$out/rices/${face.owner}/cover"
       for ext in webp png jpg jpeg; do
-        logon="$out/song/songbook/${face.owner}/cover/${face.owner}-logon.$ext"
+        logon="$out/rices/${face.owner}/cover/${face.owner}-logon.$ext"
         if [ -f "$logon" ]; then
-          jq -n --arg p "$logon" --arg s ${lib.escapeShellArg config.aoide.song} '{path: $p, song: $s}' \
-            > "$out/song/stage/cover.json"
+          jq -n --arg p "$logon" --arg s ${lib.escapeShellArg config.aoide.rice} '{path: $p, song: $s}' \
+            > "$out/stage/cover.json"
           break
         fi
       done
     fi
     cp ${manifest} "$q/songs/manifest.json"
     echo '{}' > "$q/songs/registry.json"
-    cp ${dress} "$out/song/stage/livery.json"
+    cp ${dress} "$out/stage/livery.json"
 
     pick=${sessions}/share/wayland-sessions/${defaultSession}.desktop
     test -f "$pick" || { echo "the default session ${defaultSession} is no registered Wayland session" >&2; exit 1; }
@@ -157,6 +157,7 @@ let
   # runtime dir: the greeter account has no home to write.
   greeterShell = pkgs.writeShellScript "aoide-greeter" ''
     export AOIDE_ROOT=${tree}
+    export STRILLIX_ROOT=${tree}
     export XKB_DEFAULT_LAYOUT=${lib.escapeShellArg xkb.layout}
     export XKB_DEFAULT_VARIANT=${lib.escapeShellArg xkb.variant}
     export XKB_DEFAULT_OPTIONS=${lib.escapeShellArg xkb.options}

@@ -95,7 +95,7 @@ The design surfaces **both** agent schedules and system timers in one place.
   (delayed), `schedule_recurring` (fixed cadence), job chaining (`after` + `on`),
   one-shot `schedule_rune_script`.
 - System timers: systemd timers surfaced read-only alongside.
-- Widget: a Quickshell agenda/timers widget reads a `song/stage/*.json`
+- Widget: a Quickshell agenda/timers widget reads a `/stage/*.json`
   state file and shows pending one-shots, recurring cadences, chained jobs
   ("waiting on `<id>`"), and system timers — live, themed by livery.
 - Governance: scheduled *coding* runs still route their result through the
@@ -145,14 +145,14 @@ One spine, so a new integration is always the same shape:
 ```
  external surface           dendrite / adapter       system spine             user-facing
  (Telegram, tailnet,   ──►  melete-adapter,     ──►  aoided event stream  ──► Quickshell widget
-  Cloudflare, vault,        notify-bridge,           (default-deny)           (reads song/stage/*.json)
+  Cloudflare, vault,        notify-bridge,           (default-deny)           (reads $STRILLIX_ROOT/stage/*.json)
   systemd timers)           fleet-adapter, …         policy · gate · audit    CLI: aoide <cmd>
 ```
 
 - In: external events enter as *data* through an adapter; [[aoided]] applies
   default-deny-per-class before anything reaches an agent.
 - Out: state is written atomically to `state/stage/` (conducting) or
-  `song/stage/` (rice) by [[shellbridge]]; widgets read it; nothing in QML
+  `/stage/` (rice) by [[shellbridge]]; widgets read it; nothing in QML
   speaks an agent protocol.
 - Control: every capability is one `aoide <cmd>` (+ generated MCP façade);
   every mutation and exposure passes the [[Governance|gate]] and lands in the

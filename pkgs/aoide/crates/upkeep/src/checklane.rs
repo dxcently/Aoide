@@ -638,6 +638,7 @@ mod tests {
     fn e2e_fixture(state_prefix: &str, tree_prefix: &str, verify_command: &str) -> (PathBuf, PathBuf) {
         let state_root = aoide_test_support::unique_tmp(state_prefix);
         std::env::set_var("AOIDE_ROOT", &state_root);
+        std::env::set_var("STRILLIX_ROOT", &state_root);
         std::env::remove_var("AOIDE_CONFIG");
         aoide_storage::config::set("upkeep.verifyCommand", verify_command).unwrap();
 
@@ -659,7 +660,7 @@ mod tests {
     #[test]
     fn the_delivery_sequence_speaks_once_at_the_next_prompt_and_never_again() {
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _env = aoide_test_support::EnvSaver::capture(&["AOIDE_ROOT", "AOIDE_CONFIG"]);
+        let _env = aoide_test_support::EnvSaver::capture(&["AOIDE_ROOT", "STRILLIX_ROOT", "AOIDE_CONFIG"]);
         let (state_root, tree) = e2e_fixture("checklane-delivery-state", "checklane-delivery-tree", "exit 0");
         let session_id = "checklane-delivery-session";
 
@@ -705,7 +706,7 @@ mod tests {
     #[test]
     fn a_mid_turn_session_start_never_launders_this_turns_own_regression() {
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _env = aoide_test_support::EnvSaver::capture(&["AOIDE_ROOT", "AOIDE_CONFIG"]);
+        let _env = aoide_test_support::EnvSaver::capture(&["AOIDE_ROOT", "STRILLIX_ROOT", "AOIDE_CONFIG"]);
         let (state_root, tree) =
             e2e_fixture("checklane-compaction-state", "checklane-compaction-tree", "exit 0");
         let session_id = "checklane-compaction-session";
@@ -742,9 +743,10 @@ mod tests {
     #[test]
     fn on_session_start_and_on_prompt_submit_are_both_none_when_the_lane_is_disabled() {
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _env = aoide_test_support::EnvSaver::capture(&["AOIDE_ROOT", "AOIDE_CONFIG"]);
+        let _env = aoide_test_support::EnvSaver::capture(&["AOIDE_ROOT", "STRILLIX_ROOT", "AOIDE_CONFIG"]);
         let state_root = aoide_test_support::unique_tmp("checklane-disabled-state");
         std::env::set_var("AOIDE_ROOT", &state_root);
+        std::env::set_var("STRILLIX_ROOT", &state_root);
         std::env::remove_var("AOIDE_CONFIG");
         // No `config set` at all — the default is the empty string, lane off.
 
@@ -778,9 +780,10 @@ mod tests {
     #[test]
     fn load_lane_refuses_a_phase_1_shaped_file_rather_than_reading_it_as_a_clean_baseline() {
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _env = aoide_test_support::EnvSaver::capture(&["AOIDE_ROOT"]);
+        let _env = aoide_test_support::EnvSaver::capture(&["AOIDE_ROOT", "STRILLIX_ROOT"]);
         let state_root = aoide_test_support::unique_tmp("checklane-old-shape-state");
         std::env::set_var("AOIDE_ROOT", &state_root);
+        std::env::set_var("STRILLIX_ROOT", &state_root);
 
         let session_id = "checklane-old-shape-session";
         let path = lane_path(session_id);

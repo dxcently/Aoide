@@ -119,20 +119,20 @@ pub fn all() -> Registry {
     meta::register(&mut r); // guide, schema
     onboard::register(&mut r); // onboard (P-I3: the nix half of the onboarding flow, root-coupled like meta)
     infra::register_mcp(&mut r); // mcp serve (root-coupled: reads this assembled registry)
-    aoide_song::commands::rice::register(&mut r); // rice lint, list, stage, compose
-    aoide_song::commands::refresh::register(&mut r); // rice refresh — a built-in song takes the repo's changes to files the machine never edited
-    aoide_song::commands::draft::register(&mut r); // rice draft save/list/drop
-    aoide_song::commands::mode::register(&mut r); // rice mode status/stage/declarative/draft
-    aoide_song::commands::cover::register(&mut r); // cover set
-    aoide_song::commands::livery::register(&mut r); // livery emit, resolve, lint
+    strillix_rice::commands::rice::register(&mut r); // rice lint, list, stage, compose
+    strillix_rice::commands::refresh::register(&mut r); // rice refresh — a built-in song takes the repo's changes to files the machine never edited
+    strillix_rice::commands::draft::register(&mut r); // rice draft save/list/drop
+    strillix_rice::commands::mode::register(&mut r); // rice mode status/stage/declarative/draft
+    strillix_rice::commands::cover::register(&mut r); // cover set
+    strillix_rice::commands::livery::register(&mut r); // livery emit, resolve, lint
     stubs::register_rice_late(&mut r); // rice declare, transpose
     aoide_conduct::commands::shellbridge::register(&mut r); // shellbridge (own module since P-A2)
-    aoide_song::commands::quickshell::register(&mut r); // quickshell healthcheck — placeholder-screen watchdog
-    aoide_song::commands::reload::register(&mut r); // reload — the one mode-aware iteration command (absorbed quickshell reload)
+    strillix_rice::commands::quickshell::register(&mut r); // quickshell healthcheck — placeholder-screen watchdog
+    strillix_rice::commands::reload::register(&mut r); // reload — the one mode-aware iteration command (absorbed quickshell reload)
     aoide_screen::commands::register(&mut r); // screen info, shot, point *, ocr, diff, send (own crate since P-A1)
     aoide_conduct::commands::herald::register(&mut r); // herald push — dunst's script hook into the notification ledger
-    aoide_song::commands::take::register(&mut r); // rice take/take.*, rice back — explicit take-store snapshot
-    aoide_song::commands::elements::register(&mut r); // element seed — full render into run/elements/ (L-E1)
+    strillix_rice::commands::take::register(&mut r); // rice take/take.*, rice back — explicit take-store snapshot
+    strillix_rice::commands::elements::register(&mut r); // element seed — full render into run/elements/ (L-E1)
     secrets::register(&mut r); // secrets ask — the rice-shaped TOTP code-entry popup (P3)
     pair::register(&mut r); // pair ask + pair show — the pairing-ceremony's own two dialog shapes
     preview::register(&mut r); // preview + preview.set + preview.declare — an isolated quickshell canvas for one widget (P1, then a same-lane follow-up added declare)

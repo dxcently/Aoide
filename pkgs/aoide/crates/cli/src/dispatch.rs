@@ -15,7 +15,7 @@
 //! its DOMAIN crate's `commands` module (`aoide_conduct::commands`,
 //! `aoide_storage::commands`, … — Phase 9 restructure,
 //! docs/architecture/PACKAGE-LAYOUT.md), assembled here by
-//! `commands/mod.rs::all()`. (`aoide_song::commands`/`aoide_screen::commands`
+//! `commands/mod.rs::all()`. (`strillix_rice::commands`/`aoide_screen::commands`
 //! are the same pattern one door over — they assemble into `strillix`'s
 //! registry, not this crate's, since P-A5.)
 //!

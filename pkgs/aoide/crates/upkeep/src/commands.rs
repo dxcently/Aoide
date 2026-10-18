@@ -11,7 +11,7 @@
 //! **Envelope** (`--json`, riding `Outcome.data`): `{ "findings": [...],
 //! "summary": { <class>: n } }`. `findings` present with at least one
 //! `error`-severity entry → `Outcome::error` at exit 1 (the `rice lint`
-//! precedent, `crates/song/src/commands/rice.rs`'s `handle_rice_lint`), so
+//! precedent, `crates/strillix-rice/src/commands/rice.rs`'s `handle_rice_lint`), so
 //! `aoide soundcheck && git commit` works as a gate. `info`-severity
 //! findings (today: `clutter` alone) never fail the run on their own — a
 //! `result` symlink must not break an agent's `&&` chain.

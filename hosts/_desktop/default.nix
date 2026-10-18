@@ -21,10 +21,10 @@
 
   # The song this host performs, and what it additionally builds in. `sonata` is
   # the shipped standard, the guaranteed-present baseline. Any committed rice is
-  # reachable from the machine's own songbook without a rebuild
+  # reachable from the machine's own rices without a rebuild
   # (`aoide rice stage <n>`) — `declared` is only what is painted at boot.
-  habit.song.declared = "sonata";
-  habit.song.available = [ ];
+  habit.rice.declared = "sonata";
+  habit.rice.available = [ ];
 
   habit.users.khoa = {
     definition = ../../users/khoa.nix;

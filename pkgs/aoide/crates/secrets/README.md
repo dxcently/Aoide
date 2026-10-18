@@ -818,7 +818,7 @@ ahead of that evidence.
 graph/permit.rs` (a DIFFERENT crate, `aoide-conduct`) publishes its own
 desktop summons through `crate::herald::publish` → `crate::shellbridge::
 send_line` — a unix-socket call into the shellbridge daemon that owns
-`song/stage/herald.json`, the file the Quickshell herald widget actually
+`/stage/herald.json`, the file the Quickshell herald widget actually
 draws from. That seam was the first one this phase checked, and it is NOT
 reachable from here: `aoide-secrets`'s own `Cargo.toml` depends on nothing
 but `aoide-protocol`/`libc`/`serde`/`serde_json` — no `aoide-storage`, no

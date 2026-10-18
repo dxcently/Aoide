@@ -15,17 +15,17 @@
 # (the registry it declares its own surfaces in), `aoide.arrangement`, the
 # core scalars (`aoide.enable`, `aoide.root`, `aoide.checkout`,
 # `aoide.hostConfig`, `aoide.user`),
-# the song selection (`aoide.song`) and the derived fact
-# `aoide.songbook.builtIn` (the songs this host builds in — what this lane's
+# the song selection (`aoide.rice`) and the derived fact
+# `aoide.rices.builtIn` (the songs this host builds in — what this lane's
 # deployed manifest, widget copy, installed packages, shipped templates and seed
 # are built FROM) and its own fact.
 #   - Component-tier fallback (null → palette) applied locally, never pushed
 #     back into the option system.
-#   - NEVER reads song/ runtime paths at build time (checks.song-shape and
-#     checks.song-runtime-untracked are the structural half).
+#   - NEVER reads song/ runtime paths at build time (checks.rice-shape and
+#     checks.rice-runtime-untracked are the structural half).
 #
 # Communication discipline (entities/Quickshell):
-#   - QML reads state files from song/stage/ at runtime (hot-reload).
+#   - QML reads state files from $STRILLIX_ROOT/stage/ at runtime (hot-reload).
 #   - QML issues commands via the shellbridge unix socket (shellbridge.nix
 #     beside this file).
 #   - QML never speaks MCP or any agent protocol.
@@ -34,7 +34,7 @@
   lib,
   pkgs,
   aoideInputs,
-  songbook,
+  ricesRoot,
   ...
 }:
 let
@@ -42,28 +42,28 @@ let
   # Committed songs live here (CONTRACTS.md §5) — versioned score, read at
   # build time (nothing here reads a song/ RUNTIME dir; the check that used
   # to assert that scanned module PATHS and is gone — what replaced it is
-  # `checks.song-shape`'s `strayNixFiles` and `checks.song-runtime-untracked`).
+  # `checks.rice-shape`'s `strayNixFiles` and `checks.rice-runtime-untracked`).
   #
   # Handed in as a module argument by the same hook that sets
-  # `aoide.songbook.builtIn` (lib/aoideos.nix, and every consumer's copy of
-  # that wiring): a consumer's songbook may be its own tree's or Aoide's
-  # exported `songbookRoot`, so this lane must not name a path inside
+  # `aoide.rices.builtIn` (lib/aoideos.nix, and every consumer's copy of
+  # that wiring): a consumer's rices may be its own tree's or Aoide's
+  # exported `ricesRoot`, so this lane must not name a path inside
   # Aoide's.
 
   # ── What this host BUILDS IN ────────────────────────────────────────────
-  # `habit.song.declared ∪ habit.song.available` in its module, derived by the
-  # constructor's hook into the fact `aoide.songbook.builtIn`. Everything below
+  # `habit.rice.declared ∪ habit.rice.available` in its module, derived by the
+  # constructor's hook into the fact `aoide.rices.builtIn`. Everything below
   # the deployed manifest and registry, the widget bodies, the installed
-  # packages, the shipped templates and the machine-songbook seed all run over
+  # packages, the shipped templates and the machine-rices seed all run over
   # these names, never over every committed song.
   #
   # A song that is NOT built in is still stageable from the machine's own
-  # songbook (`aoide rice stage <n>`) — the runtime keeps a wider manifest
+  # rices (`aoide rice stage <n>`) — the runtime keeps a wider manifest
   # than this deployed tree carries, which is exactly the seam
   # `builtin.json`'s `packages` exists to check (§7.5).
-  songbookLib = import ../../../lib/songbook.nix {
-    inherit lib songbook;
-    discovered = config._module.args.songbookDirs;
+  ricesLib = import ../../../lib/rices.nix {
+    inherit lib ricesRoot;
+    discovered = config._module.args.riceDirs;
   };
 
   # The `aoide.*` option doc list the shipped `aoide-options.json` carries
@@ -78,13 +78,13 @@ let
     pkgs = aoideInputs.nixpkgs.legacyPackages.${pkgs.stdenv.hostPlatform.system};
   };
 
-  builtIn = config.aoide.songbook.builtIn;
+  builtIn = config.aoide.rices.builtIn;
 
-  refreshCmd = "${pkgs.coreutils}/bin/env AOIDE_ROOT=${config.aoide.root} AOIDE_SONG_TEMPLATES=${pkgs.strillix-rices}/share/strillix/songbook ${pkgs.aoide.strillix}/bin/strillix rice refresh";
+  refreshCmd = "${pkgs.coreutils}/bin/env AOIDE_ROOT=${config.aoide.root} STRILLIX_ROOT=${config.aoide.strillix.root} STRILLIX_TEMPLATES=${pkgs.strillix-rices}/share/strillix/rices ${pkgs.aoide.strillix}/bin/strillix rice refresh";
 
   # ── The songs this derivation reads, as their OWN store paths ────────────
   # The same contract `pkgs/strillix-rices` keeps, for the same reason: a path
-  # literal that names the songbook DIRECTORY makes every song in the repo
+  # literal that names the rices DIRECTORY makes every song in the repo
   # part of this derivation, and this derivation's path rides the deploy
   # activation — so editing a song this host does not even build in moved its
   # whole toplevel drvPath. `builtins.path` copies the folder, so the input
@@ -93,7 +93,7 @@ let
   songDirOf =
     name:
     builtins.path {
-      path = songbookLib.songs.${name};
+      path = ricesLib.songs.${name};
       name = "strillix-song-${name}";
     };
 
@@ -103,13 +103,13 @@ let
   onlyBuiltIn = lib.filterAttrs (name: _: builtins.elem name builtIn);
 
   # ── Active song's committed livery — also a legitimate build-time read ─────
-  # `song/songbook/<name>/livery.json` is versioned score
-  # (checks.song-runtime-untracked only names song/{stage,auditions,declared}/,
-  # never song/songbook/), so
+  # `rices/<name>/livery.json` is versioned score
+  # (checks.rice-runtime-untracked only names song/{stage,auditions,declared}/,
+  # never rices/), so
   # naming the ACTIVE song's livery file here is allowed for the same reason
-  # `songbook` above is. Path concatenation (not string-interpolating the
-  # whole `songbook` dir) so only this one file gets copied into the store.
-  activeSongLivery = songbookLib.songs.${config.aoide.song} + "/livery.json";
+  # `rices` above is. Path concatenation (not string-interpolating the
+  # whole `rices` dir) so only this one file gets copied into the store.
+  activeSongLivery = ricesLib.songs.${config.aoide.rice} + "/livery.json";
 
   livery = import ../../../lib/livery.nix { inherit lib; };
 
@@ -131,23 +131,23 @@ let
   # The venue as DATA — only the slots it recolours and the geometry it
   # sets differently in the committed livery, `{}` when the host sets
   # neither (`lib/livery.nix`'s `venueDelta`). Published beside the declared
-  # twin as `song/declared/venue.json`: the runtime stage reads the declared
-  # song from the runtime songbook and overlays this, so the recolour law
+  # twin as `$STRILLIX_ROOT/declared/venue.json`: the runtime stage reads the declared
+  # song from the runtime rices and overlays this, so the recolour law
   # stays in nix alone.
   venueFile = pkgs.writeText "aoide-declared-venue.json" (
     builtins.toJSON (livery.venueDelta config.aoide.livery committedLivery)
   );
 
   # The declared song's lock-screen dress (CONTRACTS.md §4,
-  # `song/declared/hyprlock.conf`), rendered at build time by the strillix binary
+  # `$STRILLIX_ROOT/declared/hyprlock.conf`), rendered at build time by the strillix binary
   # from the venue-recoloured notes above: the same bytes a stage of this
   # song writes, with no second copy of the colour mapping to go stale. The
-  # picture is the shipped songbook's store copy; a song with no
+  # picture is the shipped rices's store copy; a song with no
   # `lockscreen.<ext>` renders comments only.
   declaredLockscreen = pkgs.runCommand "aoide-declared-hyprlock.conf" { } ''
     export HOME=$TMPDIR AOIDE_ROOT=$TMPDIR/root
     ${pkgs.aoide.strillix}/bin/strillix livery emit hyprlock ${stageLivery} \
-      --song-dir ${pkgs.strillix-rices}/share/strillix/songbook/${config.aoide.song} \
+      --song-dir ${pkgs.strillix-rices}/share/strillix/rices/${config.aoide.rice} \
       --out "$TMPDIR/hyprlock.conf"
     cp "$TMPDIR/hyprlock.conf" "$out"
   '';
@@ -155,14 +155,14 @@ let
   # The active song's terminal opacity (`aoide.livery.geometry.terminalOpacity`,
   # CONTRACTS.md §1): `null` is "no opinion" and leaves the kitty dendrite's
   # baked value standing. The seed below publishes it as the one-line
-  # `song/declared/terminal-opacity.conf`, which kitty includes BEFORE the
+  # `$STRILLIX_ROOT/declared/terminal-opacity.conf`, which kitty includes BEFORE the
   # staged colours — so a host that has never staged a song still opens its
   # terminal at the song's opacity. This lane carries the read because it is
   # the lane that already reads the dress (root AGENTS.md rule 5); the kitty
   # lane names only the file's path under `aoide.root`.
   opacity = config.aoide.livery.geometry.terminalOpacity;
 
-  # ── Songbook manifest + registry, typed (W3a/W3b), generated once (C4) ──
+  # ── Rices manifest + registry, typed (W3a/W3b), generated once (C4) ──
   # `manifest.json`/`registry.json` source from eval-time nix: a `_widgets/`
   # shelf when present (sonata today) is authoritative and runs through
   # `composeSong`; a shelf-less song (barcarolle, cadenza, nocturne today)
@@ -176,8 +176,8 @@ let
   # landed a commit later than `manifest.json`'s) lives in `git log` on this
   # file up to W3b and in `lib/song.nix`'s header — not restated here.
   #
-  # C4/W3: the computation itself now lives in `lib/songbook.nix`, shared
-  # verbatim with the `songbookManifest` flake output that
+  # C4/W3: the computation itself now lives in `lib/rices.nix`, shared
+  # verbatim with the `ricesManifest` flake output that
   # `pkgs/aoide/crates/song/src/widgets.rs` shells out to at runtime (`nix
   # eval --json`) to regenerate `manifest.json`/`registry.json` WHOLE — the
   # hot-sync half of `rice stage`. One generator, two callers: this
@@ -185,8 +185,8 @@ let
   # run the same function. See that file for the shelf/scan split and the
   # shelf-covers-scan guards; see its own comment for why the manifest/
   # registry emptiness asymmetry (below) is deliberate.
-  manifestAttrs = onlyBuiltIn songbookLib.manifestAttrs;
-  registryAttrs = onlyBuiltIn songbookLib.registryAttrs;
+  manifestAttrs = onlyBuiltIn ricesLib.manifestAttrs;
+  registryAttrs = onlyBuiltIn ricesLib.registryAttrs;
 
   manifestJsonFile = pkgs.writeText "aoide-quickshell-manifest.json" (builtins.toJSON manifestAttrs);
   registryJsonFile = pkgs.writeText "aoide-quickshell-registry.json" (builtins.toJSON registryAttrs);
@@ -195,7 +195,7 @@ let
   # The ACTIVE song's expected-paint declaration, published so a health
   # consumer can assert what SHOULD be mapped instead of only counting what
   # is (`strillix quickshell healthcheck`). Deliberately NOT keyed by song, unlike
-  # the two files above: those describe the whole songbook because
+  # the two files above: those describe the whole rices because
   # `rice preview` can switch songs at runtime, while an expectation is about
   # what the ACTIVE song should have mapped right now — and
   # `config.aoide.arrangement.surfaces` already IS that (only the performed
@@ -209,7 +209,7 @@ let
   # (CONTRACTS.md §5).
   surfacesJsonFile = pkgs.writeText "aoide-quickshell-surfaces.json" (
     builtins.toJSON {
-      song = config.aoide.song;
+      song = config.aoide.rice;
       surfaces = lib.mapAttrs' (
         slot: entry: lib.nameValuePair "aoide-${slot}" entry
       ) config.aoide.arrangement.surfaces;
@@ -229,15 +229,15 @@ let
   # ── Seed script for `home.activation.aoideSeedStage` (below) ───────────────
   # Lays down the DECLARED song on every activation: the ACTIVE song's
   # committed livery, with the venue applied (`stageLivery`, above),
-  # into the live stage twin (`song/stage/livery.json`, CONTRACTS.md §4) AND
-  # its declared twin (`song/declared/livery.json`), injecting the same
+  # into the live stage twin (`$STRILLIX_ROOT/stage/livery.json`, CONTRACTS.md §4) AND
+  # its declared twin (`$STRILLIX_ROOT/declared/livery.json`), injecting the same
   # `"song"` field `strillix rice stage` injects (jq's `. + {song: …}`; `-S` sorts
   # keys to match serde_json::Value's BTreeMap ordering). The declared twin is
   # what `rice mode declarative` re-pins the declared song from — that song's
   # notes with the venue's recolour and geometry already applied. The staging
   # writers (`rice stage`, `rice mode stage`, `strillix reload`) derive the
-  # declared song from the runtime songbook instead, with the venue's slots
-  # and geometry (`song/declared/venue.json`, `venueFile` above) laid over
+  # declared song from the runtime rices instead, with the venue's slots
+  # and geometry (`$STRILLIX_ROOT/declared/venue.json`, `venueFile` above) laid over
   # it, so an edit to the song shows and the venue still stands.
   # The seed is declared truth and nothing else: when `stage/mode.json` names
   # a staged or drafted song, `aoide-rice-reload` (below) puts that one back
@@ -252,27 +252,27 @@ let
   # sequence.
   seedStageScript = pkgs.writeShellScript "aoide-seed-stage" ''
     set -euo pipefail
-    mkdir -p "${config.aoide.root}/song/stage" "${config.aoide.root}/song/declared"
-    tmp=$(mktemp "${config.aoide.root}/song/stage/.livery.json.XXXXXX")
-    ${pkgs.jq}/bin/jq -S '. + {song: $song}' --arg song "${config.aoide.song}" \
+    mkdir -p "${config.aoide.strillix.root}/stage" "${config.aoide.strillix.root}/declared"
+    tmp=$(mktemp "${config.aoide.strillix.root}/stage/.livery.json.XXXXXX")
+    ${pkgs.jq}/bin/jq -S '. + {song: $song}' --arg song "${config.aoide.rice}" \
       "${stageLivery}" > "$tmp"
     # The declared twin is the SAME bytes, published in its own directory
     # (CONTRACTS.md §4) — copied into a temp there rather than renamed across
     # directories, so the rename below can never cross a filesystem.
-    declared=$(mktemp "${config.aoide.root}/song/declared/.livery.json.XXXXXX")
+    declared=$(mktemp "${config.aoide.strillix.root}/declared/.livery.json.XXXXXX")
     cp "$tmp" "$declared"
-    mv -f "$tmp" "${config.aoide.root}/song/stage/livery.json"
-    mv -f "$declared" "${config.aoide.root}/song/declared/livery.json"
-    venue=$(mktemp "${config.aoide.root}/song/declared/.venue.json.XXXXXX")
+    mv -f "$tmp" "${config.aoide.strillix.root}/stage/livery.json"
+    mv -f "$declared" "${config.aoide.strillix.root}/declared/livery.json"
+    venue=$(mktemp "${config.aoide.strillix.root}/declared/.venue.json.XXXXXX")
     cp "${venueFile}" "$venue"
-    mv -f "$venue" "${config.aoide.root}/song/declared/venue.json"
+    mv -f "$venue" "${config.aoide.strillix.root}/declared/venue.json"
     # The active wallpaper setter's name — ONE word the CLI and the QML both
     # read (CONTRACTS.md §4), published here because this is the seed that
     # hands the runtime its facts and because choosing a provider is a
     # rebuild: the file follows the switch.
-    provider=$(mktemp "${config.aoide.root}/song/stage/.wallpaper-provider.XXXXXX")
+    provider=$(mktemp "${config.aoide.strillix.root}/stage/.wallpaper-provider.XXXXXX")
     printf '%s\n' ${lib.escapeShellArg config.aoide.wallpaper.provider} > "$provider"
-    mv -f "$provider" "${config.aoide.root}/song/stage/wallpaper-provider"
+    mv -f "$provider" "${config.aoide.strillix.root}/stage/wallpaper-provider"
     # The declared song's own cover, as the default (CONTRACTS.md §4): the
     # picture `aoide.livery.wallpaper` names, published as `stage/cover.json`
     # the way `rice stage` writes a default. A standing pick is left standing
@@ -280,7 +280,7 @@ let
     # layer ignores a cover that names another song.
     ${lib.optionalString (config.aoide.livery.wallpaper != null) ''
       ${pkgs.bash}/bin/bash ${../../../lib/cover-seed.sh} ${pkgs.jq}/bin/jq \
-        "${config.aoide.root}" "${config.aoide.song}" "${config.aoide.livery.wallpaper}"
+        "${config.aoide.strillix.root}" "${config.aoide.rice}" "${config.aoide.livery.wallpaper}"
     ''}
     # The declared song's terminal opacity, as a one-line kitty fragment
     # (CONTRACTS.md §4). The kitty dendrite includes this BEFORE the staged
@@ -292,21 +292,21 @@ let
     # through to the baked value, and a stale 0.7 from a previous song must
     # not outlive it.
     ${lib.optionalString (opacity == null) ''
-      rm -f "${config.aoide.root}/song/declared/terminal-opacity.conf"
+      rm -f "${config.aoide.strillix.root}/declared/terminal-opacity.conf"
     ''}
     ${lib.optionalString (opacity != null) ''
-      otmp=$(mktemp "${config.aoide.root}/song/declared/.terminal-opacity.conf.XXXXXX")
+      otmp=$(mktemp "${config.aoide.strillix.root}/declared/.terminal-opacity.conf.XXXXXX")
       printf 'background_opacity %s\n' "$(printf '%g' ${toString opacity})" > "$otmp"
-      mv -f "$otmp" "${config.aoide.root}/song/declared/terminal-opacity.conf"
+      mv -f "$otmp" "${config.aoide.strillix.root}/declared/terminal-opacity.conf"
     ''}
     # The declared song's lock-screen dress (CONTRACTS.md §4), rendered at
     # build time. The lock sources it BEFORE the staged one, so a host that
     # never staged anything locks in the declared song. It is always
     # written, comments only for a song with no lock picture, so no earlier
     # song's dress can outlive a switch.
-    ltmp=$(mktemp "${config.aoide.root}/song/declared/.hyprlock.conf.XXXXXX")
+    ltmp=$(mktemp "${config.aoide.strillix.root}/declared/.hyprlock.conf.XXXXXX")
     cp ${declaredLockscreen} "$ltmp"
-    mv -f "$ltmp" "${config.aoide.root}/song/declared/hyprlock.conf"
+    mv -f "$ltmp" "${config.aoide.strillix.root}/declared/hyprlock.conf"
   '';
 
   # ── QML root — the full skeleton config installed into run/qml/ ────────────
@@ -315,14 +315,14 @@ let
   # never the repo's checked-in tree) so the live copy can never be confused
   # with source (pkgs/strillix-shell/qml/) or collide with it — this is
   # what CONTRACTS.md §2 and the deploy-path fix this comment accompanies are
-  # about. At runtime Quickshell hot-reloads from song/stage/livery.json via
+  # about. At runtime Quickshell hot-reloads from $STRILLIX_ROOT/stage/livery.json via
   # a FileView; the build only installs the structural QML, not the note
   # values themselves.
   #
   # ── Per-song flavor widgets (CONTRACTS.md §5) ───────────────────────────
   # Beyond the shared, song-blind QML tree above, this also carries per-song
-  # widget QML from song/songbook/<song>/widgets/ — versioned score, not
-  # runtime — for the songs this host BUILT IN (`aoide.songbook.builtIn`, from
+  # widget QML from rices/<song>/widgets/ — versioned score, not
+  # runtime — for the songs this host BUILT IN (`aoide.rices.builtIn`, from
   # its record), so a live `aoide rice preview <name>` can hot-swap a
   # widget's BODY (not just its colours) with no rebuild. A song built in as
   # `available` but not declared is carried here too: that is what "can stage
@@ -395,7 +395,7 @@ let
     # independently resolvable as a slot itself (nix already decided the
     # slot list, above — this loop no longer re-derives it).
     # Each song's folder is a nix-built store path (`songDirOf`), handed to
-    # the shell as `<name>:<dir>`; nothing here interpolates the songbook
+    # the shell as `<name>:<dir>`; nothing here interpolates the rices
     # directory, so this derivation reads the built-in songs and no others.
     for entry in ${lib.concatStringsSep " " (map (name: "\"${name}:${songDirOf name}\"") builtIn)}; do
       name="''${entry%%:*}"
@@ -416,7 +416,7 @@ let
         # This is not hypothetical: it is exactly what broke sonata's bar when
         # the helper components moved out of the shell's own qml/ directory
         # (which IS the shell's implicit import scope, and is why nobody had
-        # to declare them before) and into the songbook. The failure is loud
+        # to declare them before) and into the rices. The failure is loud
         # in the log but silent on screen — the slot renders nothing.
         #
         # Uppercase-first only: lowercase-kebab files are SLOTS, resolved by
@@ -462,13 +462,13 @@ in
   config = {
     aoide.strillix.enable = true;
 
-    # name -> song directory, the songbook's registry. The song hook sets it
-    # (lib/songbook.nix's `songbookDirs`) so a merged songbook's songs come from
-    # the input books; a host that wires only `songbook` gets the directory's
+    # name -> song directory, the rices's registry. The song hook sets it
+    # (lib/rices.nix's `riceDirs`) so a merged rices's songs come from
+    # the input books; a host that wires only `rices` gets the directory's
     # own discovery, at the lower priority the hook's value overrides.
-    _module.args.songbookDirs =
+    _module.args.riceDirs =
       lib.mkDefault
-        (import ../../../lib/songbook.nix { inherit lib songbook; }).songs;
+        (import ../../../lib/rices.nix { inherit lib ricesRoot; }).songs;
 
     # ── What this lane brings into existence ────────────────────────────────
     # One thing, and it is a FACT rather than this lane's own option: the
@@ -485,19 +485,19 @@ in
     aoide.quickshell.config = qmlDir;
 
     # ── The templates this host ships ───────────────────────────────────────
-    # `pkgs.strillix-rices` is the baseline `AOIDE_SONG_TEMPLATES`: what
+    # `pkgs.strillix-rices` is the baseline `STRILLIX_TEMPLATES`: what
     # `strillix rice compose` and the repo-less manifest regeneration fall back
-    # to. Its default is the WHOLE committed songbook (the flake's own
+    # to. Its default is the WHOLE committed rices (the flake's own
     # `packages` output); a host overrides it with what it actually built
     # in, so a `_server` ships an empty templates dir and yomi ships
     # sonata's folder and no other. `builtin.json` records the selection
     # itself — `{ declared, songs, packages }` — which is what runtime
     # staging checks a non-built-in song's needs against before refusing to
-    # stage it (the machine owns its songbook; the baseline is the fallback).
+    # stage it (the machine owns its rices; the baseline is the fallback).
     #
     # An overlay rather than a reference, because the templates dir is read
     # by units that resolve `pkgs.strillix-rices` themselves (`aoided`'s
-    # session variables, shellbridge's `AOIDE_SONG_TEMPLATES`) — house rule
+    # session variables, shellbridge's `STRILLIX_TEMPLATES`) — house rule
     # 5: neither of those names this lane.
     nixpkgs.overlays = [
       (_final: prev: {
@@ -514,12 +514,12 @@ in
         strillix-rices = prev.callPackage ../../../pkgs/strillix-rices {
           songs = builtIn;
           builtin = {
-            declared = config.aoide.song;
+            declared = config.aoide.rice;
             songs = builtIn;
-            packages = songbookLib.packagesFor builtIn;
+            packages = ricesLib.packagesFor builtIn;
           };
-          inherit aoideOptions songbook;
-          songDirs = songbookLib.songs;
+          inherit aoideOptions ricesRoot;
+          songDirs = ricesLib.songs;
         };
       })
     ];
@@ -565,7 +565,7 @@ in
       # reads each `_widgets/` record's `packages` (lib/song.nix); until this
       # slice nothing installed them. A shelf-less song declares none —
       # there is no record to declare them in.
-      ++ map (name: pkgs.${name}) (songbookLib.packagesFor builtIn)
+      ++ map (name: pkgs.${name}) (ricesLib.packagesFor builtIn)
     );
 
     # ── Deploy QML config tree into run/qml/ (rsync, not a symlink tree) ────
@@ -587,15 +587,15 @@ in
     # switch always reasserts the store over it, rather than refusing to
     # proceed. run/qml is a deploy target, never a source: a hand edit
     # there is lost at the next switch. A song is edited in the runtime
-    # songbook (`$AOIDE_ROOT/song/songbook/<song>`, house rule 10), and a
+    # rices (`$AOIDE_ROOT/rices/<song>`, house rule 10), and a
     # STAGED song lives there, not here — `aoide-rice-reload` (below)
     # re-syncs its widget bodies into run/qml once the switch is done.
     # NOTE: this is a home-manager submodule FUNCTION (`{ lib, ... }:`), not a bare
     # attrset — so `lib` here is home-manager's EXTENDED lib (carrying `lib.hm.dag`),
     # not the outer NixOS-module lib (which lacks `hm`). `config`/`pkgs`/`quickshellConfig`
     # still resolve lexically to the outer module scope, unshadowed by the pattern.
-    # ── The machine's own songbook first (house rule 10) ─────────────────────
-    # The machine OWNS `~/.aoide/song/songbook` (CONTRACTS.md §5): its
+    # ── The machine's own rices first (house rule 10) ─────────────────────
+    # The machine OWNS `~/.aoide/rices` (CONTRACTS.md §5): its
     # built-in songs plus whatever it made itself, never a link to or a sync
     # of the repo. Activation runs `strillix rice refresh` over the built-in set,
     # which applies one three-way rule per file (shipped copy, machine copy,
@@ -609,8 +609,8 @@ in
     #     touched.
     #
     # What refresh wrote is recorded in
-    # `$AOIDE_ROOT/song/declared/songbook/<song>.json`, outside the song
-    # folder so nothing that reads the songbook sees it. The command is the
+    # `$AOIDE_ROOT/$STRILLIX_ROOT/declared/rices/<song>.json`, outside the song
+    # folder so nothing that reads the rices sees it. The command is the
     # CLI twin of this step: `strillix rice refresh [--check]` does by hand what
     # activation does, and `--check` writes nothing and reports each file's
     # state. A dry-run activation runs exactly that `--check`. A failure
@@ -637,8 +637,8 @@ in
         # make.
         config = lib.mkMerge [
           (lib.optionalAttrs (builtIn != [ ]) {
-            home.activation.aoideSeedSongbook = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
-              run ${pkgs.coreutils}/bin/mkdir -p "${config.aoide.root}/song/songbook"
+            home.activation.aoideSeedRices = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+              run ${pkgs.coreutils}/bin/mkdir -p "${config.aoide.strillix.root}/rices"
               if [[ -v DRY_RUN ]]; then
                 ${refreshCmd} --check
               else
@@ -650,12 +650,12 @@ in
           # ── No song, nothing to paint ──────────────────────────────────────
           # Every entry below reaches for the ACTIVE song (activeSongLivery,
           # seedStageScript's jq --arg, or a shell entry deployed FROM the song's
-          # QML) — with `aoide.song` null there is no active song to bake, so this
-          # whole block is `lib.optionalAttrs`-gated on `config.aoide.song != null`
+          # QML) — with `aoide.rice` null there is no active song to bake, so this
+          # whole block is `lib.optionalAttrs`-gated on `config.aoide.rice != null`
           # rather than `lib.mkIf`: optionalAttrs never forces its `attrs` argument
           # when the condition is false (plain nix laziness, no module-system
           # merging involved at this attrset-literal level), so a null-song host's
-          # eval never touches `${config.aoide.song}` here — no deployed QML, no
+          # eval never touches `${config.aoide.rice}` here — no deployed QML, no
           # seeded stage, no restart of the rice; not an empty surface, simply
           # absent. A host that names a song gets exactly today's behaviour.
           #
@@ -664,7 +664,7 @@ in
           # deployed — or on a directory the host brought itself, song or no song.
           # A null-song host with no such directory still runs no shell (that lane's
           # own bare case).
-          (lib.optionalAttrs (config.aoide.song != null) {
+          (lib.optionalAttrs (config.aoide.rice != null) {
             home.activation.aoideDeployQml = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
               run mkdir -p "${config.aoide.root}/run"
               run ${pkgs.rsync}/bin/rsync -a --delete --chmod=u+w \
@@ -672,16 +672,16 @@ in
             '';
 
             # ── Seed the live stage twin from the active song ──────────────────────
-            # `song/stage/livery.json` is what LiveryState.qml hot-reloads
+            # `$STRILLIX_ROOT/stage/livery.json` is what LiveryState.qml hot-reloads
             # (CONTRACTS.md §4). A host that never ran `strillix rice stage <name>` would
             # otherwise carry a stale/absent stage twin even though the
             # compositor/Stylix/QML tree were all built from the active song. This
-            # writes the declared song into both twins — `song/stage/livery.json`
-            # and `song/declared/livery.json` — on every activation:
+            # writes the declared song into both twins — `$STRILLIX_ROOT/stage/livery.json`
+            # and `$STRILLIX_ROOT/declared/livery.json` — on every activation:
             # `seedStageScript` (above) does the actual write. It RENAMES over
             # `stage/livery.json` and never writes through it, so a drafted song's
             # own file is untouched while its routing link is replaced.
-            # `song/stage/cover.json` is never touched (CONTRACTS.md §4). The seed
+            # `$STRILLIX_ROOT/stage/cover.json` is never touched (CONTRACTS.md §4). The seed
             # is declared truth, written the same way whatever the mode: the staged
             # or drafted song `stage/mode.json` names is brought back afterwards by
             # `aoide-rice-reload` (below).
@@ -703,7 +703,7 @@ in
             # stopped, `aoide-rice-reload` (Before the shell, below) writes the staged
             # or drafted song over the declared seed, and only then does the shell
             # start. Ordered after the three writes (the QML rsync, the stage seed and
-            # the songbook seed, which the reload reads), so the reload lands over the
+            # the rices seed, which the reload reads), so the reload lands over the
             # fresh seed and the restarted shell reads the new tree, never the old
             # one; after `reloadSystemd`, so a unit this switch introduces is loaded;
             # and after `onFilesChange`, where home-manager's `hyprctl reload
@@ -725,7 +725,7 @@ in
               lib.hm.dag.entryAfter
                 [
                   "aoideDeployQml"
-                  "aoideSeedSongbook"
+                  "aoideSeedRices"
                   "aoideSeedStage"
                   "onFilesChange"
                   "reloadSystemd"
@@ -821,6 +821,7 @@ in
                   # aoide-quickshell's own Environment above — health.rs's restart
                   # backoff marker lives under $AOIDE_ROOT/state.
                   "AOIDE_ROOT=${config.aoide.root}"
+                  "STRILLIX_ROOT=${config.aoide.strillix.root}"
                 ];
 
                 NoNewPrivileges = true;
@@ -894,10 +895,11 @@ in
                 ExecStart = "-${pkgs.coreutils}/bin/timeout 60 ${pkgs.aoide.strillix}/bin/strillix reload";
                 Environment = [
                   "AOIDE_ROOT=${config.aoide.root}"
+                  "STRILLIX_ROOT=${config.aoide.strillix.root}"
                   # Same declaration as aoide-quickshell's own: the staging path's one
                   # session-sourced variable, spelled on the unit so a reload after a
-                  # switch stages from THIS build's songbook.
-                  "AOIDE_SONG_TEMPLATES=${pkgs.strillix-rices}/share/strillix/songbook"
+                  # switch stages from THIS build's rices.
+                  "STRILLIX_TEMPLATES=${pkgs.strillix-rices}/share/strillix/rices"
                 ];
               };
               Install.WantedBy = [ "graphical-session.target" ];

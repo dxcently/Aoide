@@ -1130,7 +1130,7 @@ stripping one, and a held spawn shows as its whole command.
   outcome as a balloon: `name` is a song name (lowercase letters, digits,
   hyphens; anything else is dropped with no reply), and `dispatch_rice_declare` runs `strx rice declare <name>
   --host --json`, unbounded like every mutation, which rewrites the host
-  config's `habit.song.declared` line and never rebuilds. `rice_declare_reply`
+  config's `habit.rice.declared` line and never rebuilds. `rice_declare_reply`
   answers `{ok:true, message, name, host, changed, stagedDiffers}` or
   `{ok:false, reason, message}`, the message carrying the refusal's what and
   why, `reason` the CLI's own (`not-built-in`, `staged-draft`,

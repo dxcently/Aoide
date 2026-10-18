@@ -79,7 +79,7 @@ modules/
     aoide.nix                  public upstream integration
     strillix.nix
 song/                         mirrors ~/.aoide/song/ byte for byte
-  songbook/
+  rices/
     palettes/                 optional shared palettes, arbitrary filenames
     sonata/
       default.nix
@@ -128,7 +128,7 @@ inert key.
 
 The same composition shape applies to AoideOS when it migrates. Public Strillix
 runtime QML/bridges belong to its package; consumer-owned widget source belongs
-with the songbook. A consumer does not recreate AoideOS's private module tree.
+with the rices. A consumer does not recreate AoideOS's private module tree.
 A large home half may be extracted to a `home.nix` within its dendrite and
 assigned to `habit.home`.
 
@@ -586,7 +586,7 @@ inputs can still fail during lock/fetch operations. Separate flake roots are
 needed only when independent lock failure domains are required. Darwin package
 and runtime support must be proved separately from a darwin host evaluating.
 
-## Strillix and songbook
+## Strillix and rices
 
 Rice authoring is pure Nix plus owned QML/assets. Runtime JSON is generated.
 `palette.nix` is a conventional local name; shared palette files may have any
@@ -603,34 +603,34 @@ shared palette + song widgets + composition + dependency references
              Strillix runtime and supported reload backends
 ```
 
-Songs live under `song/songbook/<name>/`, and `song/covers/` sits beside the
-songbook, not inside a rice: an image is not a look, and any rice may wear any
+Songs live under `rices/<name>/`, and `/covers/` sits beside the
+rices, not inside a rice: an image is not a look, and any rice may wear any
 cover. The repository's `song/` mirrors the runtime `~/.aoide/song/` in the
 committed half, and two of its runtime subdirectories exist only there,
-gitignored: `song/stage/`, where strillix renders what programs watch and
-hot-reload, and `song/declared/`, the strillix dendrite's activation seed of
+gitignored: `/stage/`, where strillix renders what programs watch and
+hot-reload, and `/declared/`, the strillix dendrite's activation seed of
 the declared song's notes with the venue override applied (which `rice mode
 declarative` re-pins from) and the venue's slots and the host's geometry as `venue.json` (which staging
 lays over the runtime copy of that song) — CONTRACTS.md §4. The wallpaper
 manager is independent of individual rices. Each user has independent state.
 Strillix ships reusable QML components and named bridges (including optional Aoide
-integration); consumers customize widgets in their songbook without copying the
+integration); consumers customize widgets in their rices without copying the
 entire runtime. Importing Strillix's public module supplies capabilities without
 installing every upstream song.
 
 Several compatible bundles may be installed for immediate staging. Returning
 to declared restores the declared bundle without deleting draft source.
-Declaring promotes authored source to a songbook entry, not generated runtime
+Declaring promotes authored source to a rices entry, not generated runtime
 files. Host selection of that default is NOT a separate source change any more:
-a host names the songs it builds in in its own module (`habit.song.declared` /
-`habit.song.available`). The song hook registers each `rice.nix` as an
+a host names the songs it builds in in its own module (`habit.rice.declared` /
+`habit.rice.available`). The song hook registers each `rice.nix` as an
 aggregation, habit imports only the DECLARED song's body (it brings the paint:
 the ten component providers and the renderer), and
 `declared ∪ available` — the built-in set, published as
-`aoide.songbook.builtIn` — decides the widgets copied into the deployed tree,
+`aoide.rices.builtIn` — decides the widgets copied into the deployed tree,
 the packages installed, the folders `pkgs/strillix-rices` ships for that host,
 and the `builtin.json` the runtime compares a staged song's needs against.
-`~/.aoide/song/songbook` belongs to the MACHINE: it is seeded from that baseline
+`~/.aoide/rices` belongs to the MACHINE: it is seeded from that baseline
 where a folder is absent, the repo's later changes reach only the files the
 machine never edited (`strx rice refresh`, `CONTRACTS.md` §5; root `AGENTS.md`
 rule 10), and the machine's copy wins for staging.

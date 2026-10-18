@@ -3,12 +3,12 @@
 # The twin of the constructor's selection pass: habit's composition reads a
 # host's `habit.*` keys before any module graph exists, and this file checks
 # the graph that graph produced. Both exist because neither can see the other's
-# failure — a hand-set `aoide.song` with no lane to paint it gets past the
+# failure — a hand-set `aoide.rice` with no lane to paint it gets past the
 # selection (which says nothing about a hand-set option) and lands here, where the platform
 # knows.
 #
 # It reads only what the contract is allowed to read (root AGENTS.md house rule 5):
-# the identity scalar `aoide.song` and the lane facts
+# the identity scalar `aoide.rice` and the lane facts
 # `modules/nucleus/options.nix` declares. It declares nothing itself, so it
 # adds no option, no unit and no package — a host that trips nothing evaluates
 # exactly as it did before this file existed.
@@ -27,12 +27,12 @@
     # because a staged song is only ever painted by the same runtime.
     {
       assertion =
-        (config.aoide.song == null && config.aoide.songbook.builtIn == [ ]) || config.aoide.strillix.enable;
+        (config.aoide.rice == null && config.aoide.rices.builtIn == [ ]) || config.aoide.strillix.enable;
       message =
-        if config.aoide.song != null then
-          "aoide.song = \"${config.aoide.song}\" needs the strillix runtime: pick a strillix component provider on this host (or name no song)"
+        if config.aoide.rice != null then
+          "aoide.rice = \"${config.aoide.rice}\" needs the strillix runtime: pick a strillix component provider on this host (or name no song)"
         else
-          "built-in song(s) ${lib.concatStringsSep ", " config.aoide.songbook.builtIn} need the strillix runtime: pick a strillix component provider on this host (or name no song)";
+          "built-in song(s) ${lib.concatStringsSep ", " config.aoide.rices.builtIn} need the strillix runtime: pick a strillix component provider on this host (or name no song)";
     }
 
     # The three paint facts are set only by their owners (options.nix's mkFact).

@@ -8,7 +8,7 @@
 //! below behaves identically; only how the boundary is crossed changed.
 //!
 //! ── Why real motion, not a warp (measured; see `tools/pointer.sh`'s own
-//! header + `song/songbook/sonata/design/hazards.md` §6) ──────────────────
+//! header + `rices/sonata/design/hazards.md` §6) ──────────────────
 //! `hyprctl dispatch movecursor` WARPS the cursor: it does not generate a
 //! `wl_pointer.motion` event inside a surface the pointer is already in, so
 //! hover states never change and no agent could ever verify one. The five

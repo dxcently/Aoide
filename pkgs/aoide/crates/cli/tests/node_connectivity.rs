@@ -951,6 +951,7 @@ fn no_default_path_writes_a_key_the_deployed_binary_refuses() {
     let root = unique_root("rollback-config");
     let _stage = setup_env(&root);
     std::env::set_var("AOIDE_ROOT", &root);
+    std::env::set_var("STRILLIX_ROOT", &root);
     std::env::remove_var("AOIDE_CONFIG");
 
     // 1. A legacy registry, whose load MIGRATES `allows` into `grants` and

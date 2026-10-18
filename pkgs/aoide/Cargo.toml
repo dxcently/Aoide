@@ -3,7 +3,7 @@
 # lives at `crates/cli`, single-charter crates under `crates/*`.
 [workspace]
 resolver = "2"
-members = ["crates/protocol", "crates/storage", "crates/conduct", "crates/client", "crates/server", "crates/song", "crates/conductor", "crates/test-support", "crates/cli", "crates/upkeep", "crates/screen", "crates/strillix", "crates/secrets"]
+members = ["crates/protocol", "crates/storage", "crates/conduct", "crates/client", "crates/server", "crates/strillix-rice", "crates/conductor", "crates/test-support", "crates/cli", "crates/upkeep", "crates/screen", "crates/strillix", "crates/secrets"]
 
 # The one release-version source for the whole workspace (User-directed:
 # prebeta is 0.0.X, the patch bumps by one at the end of each completed
@@ -58,7 +58,7 @@ aoide-storage = { path = "crates/storage" }
 aoide-conduct = { path = "crates/conduct" }
 aoide-client = { path = "crates/client" }
 aoide-server = { path = "crates/server" }
-aoide-song = { path = "crates/song" }
+strillix-rice = { path = "crates/strillix-rice" }
 aoide-conductor = { path = "crates/conductor" }
 aoide-test-support = { path = "crates/test-support" }
 # `aoide soundcheck` — the mechanical-integrity command's WORKING-tree half
@@ -73,7 +73,7 @@ aoide-screen = { path = "crates/screen" }
 # `strillix` — the graphical/rice binary (P-A4 of the binary-split workstream):
 # its own composition root over the rice/screen/shellbridge/herald bundle,
 # assembled from the SAME domain crates `aoide-cli` already depends on
-# (`aoide-song`, `aoide-conduct`, `aoide-screen`) — nothing here is a copy.
+# (`strillix-rice`, `aoide-conduct`, `aoide-screen`) — nothing here is a copy.
 strillix = { path = "crates/strillix" }
 # `ed25519-dalek`/`getrandom` — the pairing workstream's instance identity
 # (P-P1, `docs/architecture/PAIRING.md`'s "Identity" section, consumer

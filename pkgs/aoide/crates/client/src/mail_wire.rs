@@ -3196,8 +3196,10 @@ mod tests {
     fn box_keypair(root: &std::path::Path) -> aoide_storage::identity::Keypair {
         let own_root = std::env::var("AOIDE_ROOT").unwrap();
         std::env::set_var("AOIDE_ROOT", root);
+        std::env::set_var("STRILLIX_ROOT", root);
         let kp = aoide_storage::identity::load_or_mint().unwrap().0;
-        std::env::set_var("AOIDE_ROOT", own_root);
+        std::env::set_var("AOIDE_ROOT", &own_root);
+        std::env::set_var("STRILLIX_ROOT", &own_root);
         kp
     }
 
@@ -3206,11 +3208,13 @@ mod tests {
         let own_name = std::env::var("AOIDE_A2A_NODE_NAME").ok();
         std::fs::create_dir_all(root).unwrap();
         std::env::set_var("AOIDE_ROOT", root);
+        std::env::set_var("STRILLIX_ROOT", root);
         std::env::set_var("AOIDE_A2A_NODE_NAME", name);
         let line = aoide_storage::charter::node_line().unwrap();
         let key = aoide_storage::identity::load_or_mint().unwrap().0.info().pubkey_hex;
         let binding = serde_json::to_value(aoide_storage::seal::publish_binding().unwrap()).unwrap();
-        std::env::set_var("AOIDE_ROOT", own_root);
+        std::env::set_var("AOIDE_ROOT", &own_root);
+        std::env::set_var("STRILLIX_ROOT", &own_root);
         match own_name {
             Some(name) => std::env::set_var("AOIDE_A2A_NODE_NAME", name),
             None => std::env::remove_var("AOIDE_A2A_NODE_NAME"),
@@ -3407,11 +3411,12 @@ mod tests {
         // paired into `away` was silently skipped while `mail send` delivered
         // to it — bare `mail poll` was dead for exactly those peers.
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = aoide_test_support::EnvSaver::capture(&["AOIDE_STATE_DIR", "AOIDE_ROOT"]);
+        let _s = aoide_test_support::EnvSaver::capture(&["AOIDE_STATE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         let dir = aoide_test_support::unique_tmp("poll-away-only");
         std::fs::create_dir_all(&dir).unwrap();
         std::env::set_var("AOIDE_STATE_DIR", &dir);
         std::env::set_var("AOIDE_ROOT", &dir);
+        std::env::set_var("STRILLIX_ROOT", &dir);
 
         let mut nodes = aoide_storage::node_store::load_nodes();
         aoide_storage::node_store::upsert_paired_node(
@@ -3552,9 +3557,11 @@ mod tests {
         let relay_root = dir.join("relay-box");
         std::fs::create_dir_all(&relay_root).unwrap();
         std::env::set_var("AOIDE_ROOT", &relay_root);
+        std::env::set_var("STRILLIX_ROOT", &relay_root);
         std::env::set_var("AOIDE_A2A_NODE_NAME", "relay");
         let relay_line = aoide_storage::charter::node_line().unwrap();
         std::env::set_var("AOIDE_ROOT", &own_root);
+        std::env::set_var("STRILLIX_ROOT", &own_root);
         std::env::set_var("AOIDE_A2A_NODE_NAME", "opbox");
 
         let (kp, _) = aoide_storage::identity::load_or_mint().unwrap();

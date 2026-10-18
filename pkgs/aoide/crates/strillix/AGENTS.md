@@ -23,12 +23,12 @@
   reuse the live root for a quick test" — that is the exact live-state
   corruption this command exists to make impossible.
 - **`commands::preview`'s `--livery <spec>` has exactly FOUR forms, all
-  routed through the SAME `aoide_song::livery::resolve::resolve` +
+  routed through the SAME `strillix_rice::livery::resolve::resolve` +
   `to_json_string` engine call `strx livery resolve` itself uses (never a
   hand-rolled shortcut for any one form):** `live` (the resolved LIVE stage
   twin, `aoide_storage::fs::stage_dir().join("livery.json")` — read only,
   never written); a bare song name (that song's own
-  `song/songbook/<name>/livery.json` — independent of the preview's own
+  `rices/<name>/livery.json` — independent of the preview's own
   `--song`); a path to a livery file; or a path to a base16 scheme (JSON
   `{"base00": …, …}` or the flat `key: value` line shape — detected by
   `base00` present and `palette` absent, synthesized into a palette by
@@ -51,10 +51,10 @@
   older or different binary must not trust PATH for its own rail.
 - **`commands::preview`'s root seeds four OTHER lane-read stage files a
   song's own widgets/livery never touch, so nothing starts with a parse
-  warning on a missing file:** `song/stage/mode.json`
+  warning on a missing file:** `/stage/mode.json`
   (`LiveryState.qml`'s convention) is REWRITTEN on every build and on
   `preview set --song` — it always names the CURRENT song, never stale;
-  `song/stage/cover.json`, `song/stage/grimoire.json` (`GrimoireLedger`'s
+  `/stage/cover.json`, `/stage/grimoire.json` (`GrimoireLedger`'s
   `launches` is an OBJECT keyed by app id, never an array — matches the
   live file's own shape), and `state/usage.json` are written ONCE, only
   when absent, and a rebuild must never clobber one a canvas or a test has
@@ -62,24 +62,24 @@
 - **`commands::preview declare` copies checkout-ward, never the reverse.**
   It is the canvas's own `rice declare` counterpart (same "stage vs.
   commit" split, `Self-Ricing.md`): the previewed widget body and/or
-  resolved palette become `song/songbook/<song>/` truth, byte-diffed so a
+  resolved palette become `rices/<song>/` truth, byte-diffed so a
   repeat with nothing new is a true no-op, and it NEVER runs `git`, touches
   the live stage, `~/.aoide`, or `run/qml` — commit and rebuild stay the
   user's own gate (house rule 2). A `widget` field outside `run/qml/songs/`
   (a lane symlink) is refused with a usage error, never silently declared
   — and the `starts_with("songs/")` check alone is a STRING match, not a
   boundary: a `..` component is rejected outright, and the canonicalized
-  source is additionally required to land inside a real songbook
+  source is additionally required to land inside a real rices
   `widgets/` dir, since a `..`-laden field can otherwise satisfy the
   prefix check while resolving straight out to a lane file. `--slot` is
   validated against the
   same shape as a song name (`valid_song_name`) before it is ever joined
   into a path — an unvalidated slot is exactly the same class of escape.
-- **`rice declare --host` is CLI-door-only and lives in `aoide-song`.** The
+- **`rice declare --host` is CLI-door-only and lives in `strillix-rice`.** The
   flag's `doors: &[Door::Cli]` is the registration's own (it changes what the
   next rebuild performs, so MCP and the daemon socket do not reach it; the
   shellbridge re-execs the CLI); `the_host_flag_is_cli_only` pins it. The
-  handler only routes `--host` to `aoide_song::host_declare::declare_on_host`
+  handler only routes `--host` to `strillix_rice::host_declare::declare_on_host`
   and keeps the copy mode byte-identical; no host-file logic belongs here.
 - **`commands::all()`'s order is byte-stable**, same discipline as `cli`'s —
   append, never reorder (see `pkgs/aoide/crates/AGENTS.md`).
@@ -89,7 +89,7 @@
   left by an older root). The checkout is edited in the checkout; the
   root's copies are refreshed by the canvas from `preview.json`'s `stage`
   map before every reload and by a `--no-launch` rebuild — one entry per
-  watched file that HAS a copy: a songbook widget mapped under
+  watched file that HAS a copy: a rices widget mapped under
   `songs/<s>/<rest>`, a shell qml file mapped flat to its own
   `run/qml/<f>`; a watched file with no copy (a nested path under the
   shell's qml dir, a foreign path) gets none, since the canvas rewrites
@@ -413,7 +413,7 @@
   `data.reason` code or the thumbnail path changes.
 - `pkgs/strillix-shell/qml/LockHost.qml`'s header and `slots.md` when `strillix
   lock`'s IPC (`lock`/`secure`) or `lock hint` changes.
-- `CONTRACTS.md` §4 (`song/stage/apps.json`) and
+- `CONTRACTS.md` §4 (`/stage/apps.json`) and
   `docs/Aoide-Wiki/concepts/cli/Apps-Commands.md` when the `apps.json`
   document, the listing filter or the icon rules change.
 - `commands::dialog_qml`'s own module doc, plus every caller's doc

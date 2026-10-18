@@ -51,6 +51,7 @@ impl Rig {
             .args(args)
             .env("NO_COLOR", "1")
             .env("AOIDE_ROOT", &self.root)
+            .env("STRILLIX_ROOT", &self.root)
             .env("AOIDE_STAGE_DIR", self.root.join("stage"))
             .env("AOIDE_STATE_DIR", self.root.join("state"))
             .env("AOIDE_AUDIT_LOG", self.root.join("log"))

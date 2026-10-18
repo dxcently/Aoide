@@ -8,7 +8,7 @@ tags: [aoide, cli, strillix, desktop, quickshell]
 # Apps Commands — the `strx apps` Command Surface
 
 The `apps` command group lists the installed desktop apps with their icons
-already resolved to files, and keeps `song/stage/apps.json` current for the
+already resolved to files, and keeps `/stage/apps.json` current for the
 shell's launcher. It is a `strillix` group ([[strillix]]): desktop entries and icon
 themes exist to paint a graphical session, and a resolved icon path is a
 paint input, so the capability sits with the paint binary. Delete every
@@ -22,7 +22,7 @@ key-file reader: `entry.rs` (`.desktop` files and the listing filter),
 `strx launch` (planned, phase L5b) will read the same module; no second
 parser exists. The document
 shape, the listing filter and the icon rules are CONTRACTS.md §4,
-"`song/stage/apps.json`".
+"`/stage/apps.json`".
 
 `strx icon` is unrelated: it serves pinned Iconify glyphs
 ([[Widget-Preview]]), not the icons of installed apps.
@@ -93,8 +93,8 @@ strx apps show org.gnome.Nautilus
 strx apps publish [--run] [--json]
 ```
 
-- **Writes:** `song/stage/apps.json` (`aoide_storage::fs::stage_dir()`, default
-  `~/.aoide/song/stage/apps.json`), atomically, and only when the new document
+- **Writes:** `/stage/apps.json` (`aoide_storage::fs::stage_dir()`, default
+  `~/.aoide/$STRILLIX_ROOT/stage/apps.json`), atomically, and only when the new document
   minus `at` differs from the file on disk minus `at`. There is no stage lock;
   the file has one writer and is replaced whole.
 - **Output:** `{path, written, entries, theme}`. A second run with nothing

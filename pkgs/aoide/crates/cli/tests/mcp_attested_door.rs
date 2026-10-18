@@ -49,6 +49,7 @@ impl Server {
             .env_remove("AOIDE_SESSION_ID")
             .env_remove("AOIDE_CONDUCT_AUTOGATE")
             .env("AOIDE_ROOT", world.dir.join("root"))
+            .env("STRILLIX_ROOT", world.dir.join("root"))
             .env("AOIDE_STAGE_DIR", world.dir.join("stage"))
             .env("AOIDE_STATE_DIR", world.dir.join("state"))
             .env("XDG_RUNTIME_DIR", world.dir.join("run"))

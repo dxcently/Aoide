@@ -29,7 +29,7 @@ each declares `aoide.surfaces.wallpaper` and writes its own
   name of the provider that answers here: each provider sets it to its own name
   `mkDefault`, so a host may stand a provider's config down by overriding it
   without deselecting it. `strillix` publishes it to the runtime as
-  `song/stage/wallpaper-provider`; the CLI and the QML read that one word, and
+  `/stage/wallpaper-provider`; the CLI and the QML read that one word, and
   absent means `quickshell`. The provider KEY and the fact's VALUE differ for
   the shell's own layer: the slot's provider is `strillix`, like every other
   slot's, and the fact it writes stays `"quickshell"`, the word the runtime,
@@ -50,7 +50,7 @@ each declares `aoide.surfaces.wallpaper` and writes its own
   nothing, and the shell's own layer shows through it.
 - **The bridge is `strx cover sync`** (CONTRACTS.md §4), not a link between
   files: whichever provider is active, the CLI reconciles the provider with
-  `song/stage/cover.json` — the staged pick while one applies to the staged
+  `/stage/cover.json` — the staged pick while one applies to the staged
   song, nothing (the step-aside image) otherwise. The engine lane calls it from
   its unit's `ExecStartPost`, and every pick write calls it; it is the door that
   waits for a provider still coming up (~5 s), where the pick writes each make a

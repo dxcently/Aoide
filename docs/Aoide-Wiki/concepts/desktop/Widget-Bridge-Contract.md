@@ -17,7 +17,7 @@ IPC. This page is the contract both sides are built to.
 ## The bridges (who writes the truth)
 
 - **[[shellbridge]]** — the daemon. Atomic JSON stage files out (`state/stage/`
-  for conducting state, `song/stage/` for rice staging), a unix socket in, and
+  for conducting state, `/stage/` for rice staging), a unix socket in, and
   the Hyprland `socket2` window listener that keeps each session's
   `windowAddress`/`workspace` authoritative.
 - **The hook door** (`aoide session hook`) — a short-lived process per

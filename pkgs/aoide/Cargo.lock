@@ -231,17 +231,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "aoide-song"
-version = "0.0.26"
-dependencies = [
- "aoide-protocol",
- "aoide-storage",
- "aoide-test-support",
- "serde",
- "serde_json",
-]
-
-[[package]]
 name = "aoide-storage"
 version = "0.0.26"
 dependencies = [
@@ -2549,11 +2538,22 @@ dependencies = [
  "aoide-protocol",
  "aoide-screen",
  "aoide-server",
- "aoide-song",
  "aoide-storage",
  "aoide-test-support",
  "image",
  "libc",
+ "serde_json",
+ "strillix-rice",
+]
+
+[[package]]
+name = "strillix-rice"
+version = "0.0.26"
+dependencies = [
+ "aoide-protocol",
+ "aoide-storage",
+ "aoide-test-support",
+ "serde",
  "serde_json",
 ]
 

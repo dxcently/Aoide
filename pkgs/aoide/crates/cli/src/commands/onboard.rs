@@ -7,7 +7,7 @@
 //! carries for its own foreground-follow shape. From a checkout only
 //! (decision 10): the clone IS what gets registered, and the skill link
 //! `hooks install` performs needs the repo (the package never ships the
-//! skill dir). Registers the clone, seeds the songbook, asks which
+//! skill dir). Registers the clone, seeds the rices, asks which
 //! harnesses to wire and runs the already-registered `hooks install` for
 //! each, probes for `strillix` and delegates the nix half to `strillix onboard` as a
 //! child process when it resolves (core never speaks nix itself — root
@@ -39,7 +39,7 @@ const PROJECT_FAILED_PREFIX: &str = "project registration failed: ";
 pub fn register(r: &mut Registry) {
     r.insert(cmd!(
         path: ["onboard"],
-        summary: "First-boot flow: register the clone, seed songbook, wire harness hooks, delegate the nix half to `strillix onboard` when strillix is available, print the guide.",
+        summary: "First-boot flow: register the clone, seed rices, wire harness hooks, delegate the nix half to `strillix onboard` when strillix is available, print the guide.",
         args: [],
         flags: [
             flag!("harness", "string", "Comma-separated harnesses to wire (claude,kimi,pi,eidolon); given at all, skips the interactive ask and wires exactly this list (default: ask on a tty, else every harness found on PATH)."),
@@ -81,8 +81,8 @@ fn handle_onboard(inv: &Invocation) -> Outcome {
     }
     changed.extend(clone_changed);
 
-    say("onboard: seeding the songbook...");
-    let (seeded, seed_note) = seed_songbook(&root);
+    say("onboard: seeding the rices...");
+    let (seeded, seed_note) = seed_rices(&root);
     say(&format!("  {seed_note}"));
     if seeded {
         changed.push(seed_note.clone());
@@ -235,19 +235,19 @@ fn register_clone(root: &Path) -> (Vec<String>, Vec<String>) {
     (changed, notes)
 }
 
-/// "seed songbook" (ONBOARD.md's stub-summary contract, decision 1):
-/// `song/songbook/` travels committed with the clone itself
+/// "seed rices" (ONBOARD.md's stub-summary contract, decision 1):
+/// `rices/` travels committed with the clone itself
 /// (`learnings.md`/`update-playbook.md` are already there on any fresh
 /// checkout) — the one root file Song-Anatomy.md documents as part of the
-/// songbook's cross-cutting trio that a fresh clone still lacks is
+/// rices's cross-cutting trio that a fresh clone still lacks is
 /// `preferences.md`. Idempotent: only ever created, never overwritten.
-fn seed_songbook(root: &Path) -> (bool, String) {
-    let path = root.join("song/songbook/preferences.md");
+fn seed_rices(root: &Path) -> (bool, String) {
+    let path = root.join("rices/preferences.md");
     if path.exists() {
         return (false, format!("{} already present", path.display()));
     }
     let body = "\
-# Songbook Preferences
+# Rices Preferences
 
 Cross-cutting preferences that apply across songs, not any one song's
 `design/` folder -- the sibling of `learnings.md`. Sparse today; the agent
@@ -542,21 +542,21 @@ mod tests {
         let _ = std::fs::remove_dir_all(&home);
     }
 
-    // ── seed_songbook: create-once, never overwrite ──────────────────────
+    // ── seed_rices: create-once, never overwrite ──────────────────────
 
     #[test]
-    fn seed_songbook_creates_preferences_once_then_leaves_it_untouched() {
+    fn seed_rices_creates_preferences_once_then_leaves_it_untouched() {
         let root = unique_tmp("onboard-seed");
-        std::fs::create_dir_all(root.join("song/songbook")).unwrap();
-        let path = root.join("song/songbook/preferences.md");
+        std::fs::create_dir_all(root.join("rices")).unwrap();
+        let path = root.join("rices/preferences.md");
 
-        let (seeded, note) = seed_songbook(&root);
+        let (seeded, note) = seed_rices(&root);
         assert!(seeded);
         assert!(note.contains("seeded"), "note: {note}");
         let first = std::fs::read_to_string(&path).unwrap();
-        assert!(first.contains("Songbook Preferences"));
+        assert!(first.contains("Rices Preferences"));
 
-        let (seeded2, note2) = seed_songbook(&root);
+        let (seeded2, note2) = seed_rices(&root);
         assert!(!seeded2);
         assert!(note2.contains("already present"), "note2: {note2}");
         assert_eq!(std::fs::read_to_string(&path).unwrap(), first, "a second run must never overwrite");

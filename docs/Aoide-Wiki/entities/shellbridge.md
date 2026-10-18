@@ -29,7 +29,7 @@ shellbridge.nix`'s `ExecStart`), not the core `aoide` binary. Its socket
 path is a hard contract, never computed independently:
 `$XDG_RUNTIME_DIR/aoide/shellbridge.sock` (the unit's `RuntimeDirectory=aoide`
 creates the directory). It publishes two atomically-written stage files
-besides `livery.json` (which stays under `song/stage/`, rice staging):
+besides `livery.json` (which stays under `/stage/`, rice staging):
 `state/stage/sessions.json` (the agent session
 roster — `{ sessionId, agent, windowAddress, cwd, state, startedAt }`,
 backing the [[Terminal-Commander]] session-jump) and `state/stage/hooks.json`
@@ -77,7 +77,7 @@ The conductor card and its Details page are its only callers
 flight, stopped the moment nothing is looked at — a snapshot while viewed, never
 a token stream). Refusals are audited; a successful poll is not.
 
-**The RICE menu** is three verbs over the runtime songbook and the song's
+**The RICE menu** is three verbs over the runtime rices and the song's
 saved rice drafts, all re-execs of the sibling `strillix` (`rice` lives there) and
 none holding a rice rule of its own — the CLI owns the name regexes, the
 minting and every refusal, and conduct never depends on the song crate. Any
@@ -146,7 +146,7 @@ and no reply.
 connection and thread like `ricemenu`, because the surface shows the outcome in
 a balloon rather than a toast. `name` must be one argv token; a line without
 one is dropped with no reply. The bridge runs `strx rice declare <name> --host
---json`, which rewrites the one `habit.song.declared` line in the host config
+--json`, which rewrites the one `habit.rice.declared` line in the host config
 (`aoide.hostConfig`) and never commits or rebuilds, so the change takes effect
 on the next rebuild. Every rule about which song may be declared is the CLI's:
 a song the build does not carry, a staged draft, or a host file without exactly
@@ -216,7 +216,7 @@ The env-var seam is a documented contract ("Stage-dir resolution",
 absolute path (empty or relative values are ignored so runtime paths never
 resolve against an arbitrary cwd), else falling back to
 `$AOIDE_ROOT/state/stage`; the rice tree resolves the same way through the
-separate `stage_dir()`, falling back to `$AOIDE_ROOT/song/stage` instead —
+separate `stage_dir()`, falling back to `$STRILLIX_ROOT/stage` instead —
 the same override relocates both trees at once, a relocated tree with no
 override does not. `$AOIDE_ROOT` itself defaults to `~/.aoide`
 (absolute-path-wins, empty or relative ignored), so on the default layout

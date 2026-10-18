@@ -2,7 +2,7 @@
 # desktop stack.
 #
 # Lives in tests/, not lib/: lib/ holds build/eval machinery (checks.nix,
-# aoideos.nix, pkgs.nix, songbook.nix); this is test content. See tests/README.md.
+# aoideos.nix, pkgs.nix, rices.nix); this is test content. See tests/README.md.
 #
 # Exercises the module tree through the SAME assembly a real host gets — the
 # constructor (habit's `composition.mkNixosModules`, as

@@ -33,17 +33,17 @@ lib.mkIf config.aoide.enable {
 
   # ── Runtime directories ──────────────────────────────────────────────────
   # Two atomic JSON state trees (CONTRACTS.md §4), both created at runtime,
-  # never committed, never imported by any module (checks.song-runtime-untracked):
-  # `song/stage/` is rice/paint staging (livery.json, mode.json — strillix's
+  # never committed, never imported by any module (checks.rice-runtime-untracked):
+  # `$STRILLIX_ROOT/stage/` is rice/paint staging (livery.json, mode.json — strillix's
   # tree); `state/stage/` is CONDUCTING state (sessions.json/hooks.json/
   # projects.json/graph.json/pending.json/herald.json — command-defrag S1,
   # 2026-08-27). `state/stage/` nests under the already-0700 `state/` dir, so
   # its own 0755 grants nothing beyond the owner the parent doesn't already
-  # gate — matching `song/stage/`'s own mode rather than inventing a second
+  # gate — matching `$STRILLIX_ROOT/stage/`'s own mode rather than inventing a second
   # convention for the same class of data.
   systemd.user.tmpfiles.rules = [
     "d ${config.aoide.root}/log        0700 - - -"
-    "d ${config.aoide.root}/song/stage 0755 - - -"
+    "d ${config.aoide.strillix.root}/stage 0755 - - -"
     "d ${config.aoide.root}/state      0700 - - -"
     "d ${config.aoide.root}/state/stage 0755 - - -"
   ];
@@ -67,6 +67,7 @@ lib.mkIf config.aoide.enable {
   environment.extraInit = ''
     if [ "$(id -un)" = ${lib.escapeShellArg config.aoide.user} ]; then
       export AOIDE_ROOT=${lib.escapeShellArg config.aoide.root}
+      export STRILLIX_ROOT=${lib.escapeShellArg config.aoide.strillix.root}
       export AOIDE_FLAKE_ROOT=${lib.escapeShellArg config.aoide.checkout}
       export AOIDE_HOST_CONFIG=${lib.escapeShellArg config.aoide.hostConfig}
     fi
@@ -161,6 +162,7 @@ lib.mkIf config.aoide.enable {
         "AOIDE_AUDIT_LOG=${config.aoide.auditLog}"
         "AOIDE_USER=${config.aoide.user}"
         "AOIDE_ROOT=${config.aoide.root}"
+        "STRILLIX_ROOT=${config.aoide.strillix.root}"
         "AOIDE_FLAKE_ROOT=${config.aoide.checkout}"
         "AOIDE_HOST_CONFIG=${config.aoide.hostConfig}"
       ]

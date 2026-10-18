@@ -66,8 +66,8 @@ Quickshell reads as its entry point (`quickshell -p
 $AOIDE_ROOT/run/qml/shell.qml`). The deployed tree is self-healing: it is a
 deploy target, never a source, and every activation's rsync reasserts the
 store's build over it, so a hand edit under `$AOIDE_ROOT/run/qml/` is lost at
-the next switch. A song is edited in the runtime songbook
-(`$AOIDE_ROOT/song/songbook/<song>`), and a STAGED song is restored from
+the next switch. A song is edited in the runtime rices
+(`$AOIDE_ROOT/rices/<song>`), and a STAGED song is restored from
 there: after the switch the strillix lane's `aoide-rice-reload` unit runs `strillix
 reload`, which syncs its widget bodies back into `run/qml/songs/<song>/`.
 `hyprland.conf` is owned by
@@ -95,7 +95,7 @@ found via live debugging.
 instantiated in `shell.qml` alongside `livery`/`bridge`/`stagingEngine`/`shared`
 — no properties of its own, wired purely for the side effect. `quickshell ipc
 call shell reload` invokes it from outside the process; `strx reload`
-(`crates/song/src/commands/reload.rs`, `crates/song/src/ipc.rs`) shells out to
+(`crates/strillix-rice/src/commands/reload.rs`, `crates/strillix-rice/src/ipc.rs`) shells out to
 exactly that call, no-oping to a reported (never fatal) `not-running` status
 when `aoide-quickshell.service` isn't up.
 
@@ -113,7 +113,7 @@ open/closed, calendar selection, any in-memory session data) exactly like a
 restart does — it's just faster, and skips cycling the systemd unit and
 re-registering windows with the compositor.
 
-`strx rice stage` (`crates/song/src/commands/rice.rs`) auto-triggers this
+`strx rice stage` (`crates/strillix-rice/src/commands/rice.rs`) auto-triggers this
 after `sync_song_widgets` reports actually-changed widget files — the
 palette/notes tier is already covered by `LiveryState`'s own watch, so a
 re-stage with no widget-body changes never reloads. Whether this also closes
@@ -128,7 +128,7 @@ pause levels — but draws nothing (`skip_display` on every rule,
 `modules/dendrites/dunst.nix`). Quickshell owns the surface: the `herald`
 popup slot and the dock's `herald-center` ledger, both drawn from
 `stage/herald.json`. The per-card body
-(`song/songbook/sonata/widgets/herald.qml`, the shipped baseline every song
+(`rices/sonata/widgets/herald.qml`, the shipped baseline every song
 falls back to) reads the `Notification` payload into three differentiated
 tiers, top to bottom: the **program title** (a box-drawing frame), the
 notification's own **title** (bold serif), and the **context** (dimmer,
@@ -186,7 +186,7 @@ The rest are registry-only or painted only by a song that ships the face:
 
 ## Launcher
 
-`song/songbook/sonata/widgets/launcher.qml` is a working, keyboard-driven
+`rices/sonata/widgets/launcher.qml` is a working, keyboard-driven
 app launcher (the rofi replacement), loaded through the `launcher`
 `SurfaceSlot`. It is a summoned `PanelWindow` on `WlrLayer.Overlay`
 (namespace `aoide-launcher`) that takes an exclusive keyboard grab only
@@ -265,7 +265,7 @@ when the screen list comes back, and only an unbound singleton stays lost.
 **`aoide-quickshell-healthcheck.timer`**
 (`modules/dendrites/strillix/runtime.nix`, gated on `aoide.strillix.enable`) is
 the live watchdog: a oneshot `systemd.user.service` running `strx quickshell
-healthcheck` (`pkgs/aoide/crates/song/src/health.rs`, [[Meta-and-Upkeep]])
+healthcheck` (`pkgs/aoide/crates/strillix-rice/src/health.rs`, [[Meta-and-Upkeep]])
 20s after the session comes up and every 15s thereafter.
 **`home.activation.aoideVerifyRice`** runs the same check again, 5s after
 every rebuild's `aoideRestartRice` bounce, so a `switch` reports which of

@@ -259,6 +259,7 @@ impl Root {
             .env("HOME", &self.dir)
             .env("XDG_RUNTIME_DIR", self.dir.join("run"))
             .env("AOIDE_ROOT", &self.dir)
+            .env("STRILLIX_ROOT", &self.dir)
             .env("AOIDE_A2A_NODE_NAME", self.name)
             .env("AOIDE_AUDIT_LOG", self.dir.join("log"))
             .env("AOIDE_DAEMON_SOCKET", self.dir.join("run/aoided.sock"))
@@ -379,8 +380,9 @@ fn record(name: &str, url: &str, pubkey: &str, grant_in: Option<&str>) -> node_s
 /// no box runs in this process.
 fn in_root<T>(root: &Path, f: impl FnOnce() -> T) -> T {
     let _lock = common::env_lock();
-    let _env = EnvSaver::capture(&["AOIDE_ROOT", "AOIDE_STATE_DIR", "AOIDE_STAGE_DIR"]);
+    let _env = EnvSaver::capture(&["AOIDE_ROOT", "STRILLIX_ROOT", "AOIDE_STATE_DIR", "AOIDE_STAGE_DIR"]);
     std::env::set_var("AOIDE_ROOT", root);
+    std::env::set_var("STRILLIX_ROOT", root);
     std::env::remove_var("AOIDE_STATE_DIR");
     std::env::remove_var("AOIDE_STAGE_DIR");
     f()

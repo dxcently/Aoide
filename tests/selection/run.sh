@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Runs every case that is Aoide's own and checks it against its expectation:
-# the songbook, the packages walker, and Aoide's real registry composed through
+# the rices, the packages walker, and Aoide's real registry composed through
 # habit. Composition itself is habit's and is tested there. A negative case must
 # fail AND say something useful: the runner greps the real stderr, so a vague
 # error is a failing test, not a passing one.
@@ -25,11 +25,11 @@ realRegistryDendritesImport         ok      true
 realRegistryInventory               ok      "agents,aoideos,desktop,nucleus"
 songDiscovery                       ok      "alpha landmine noshelf"
 songLandmineUnread                  ok      "1:true"
-songLandmineFires                   throws  songbook landmine: an unselected song's rice.nix was imported
-songUnknownName                     throws  'nope' is not in the songbook; discovered: alpha, landmine, noshelf
-songAvailableUnknown                throws  'nope2' is not in the songbook; discovered: alpha, landmine, noshelf
-songNoRice                          throws  song noshelf has no rice.nix
-songStrayEnabled                    throws  song aggregation lender is enabled, but habit.song.declared = "borrower"
+songLandmineFires                   throws  rices landmine: an unselected rice's rice.nix was imported
+songUnknownName                     throws  'nope' is not in the rices; discovered: alpha, landmine, noshelf
+songAvailableUnknown                throws  'nope2' is not in the rices; discovered: alpha, landmine, noshelf
+songNoRice                          throws  rice noshelf has no rice.nix
+songStrayEnabled                    throws  rice aggregation lender is enabled, but habit.rice.declared = "borrower"
 songNameClash                       throws  share a name with an aggregation
 songDeclaredBuilds                  ok      1
 songEscapeClean                     ok      ""
@@ -39,7 +39,7 @@ songBorrowOwnersResolve             ok      "all-resolve"
 barRicemodeOmitted                  throws  bar-ricemode FAILED: bar bodies without `slot: "ricemode"`: mute/widgets/bar.qml
 barRicemodeEmbedded                 ok      "built aoide-check-bar-ricemode"
 barRicemodeNoFloor                  throws  bar-ricemode FAILED: sonata has no `ricemode` slot
-walkerYieldsListedOverride          ok      "the lane's songbook"
+walkerYieldsListedOverride          ok      "the lane's rices"
 walkerRefusesUnlistedOverride       throws  listed in intentionalOverrides
 EOF
 )

@@ -1105,7 +1105,7 @@ pub fn clear_hub(nodes: &mut [Node], name: &str) -> Result<HubChange, String> {
 }
 
 /// A valid node nickname: `^[a-z0-9][a-z0-9-]*$` — the same shape as
-/// `aoide_song::compose::valid_song_name` (this crate sits below `song` in
+/// `strillix_rice::compose::valid_song_name` (this crate sits below `song` in
 /// the dependency graph, so it defines its own copy rather than depending
 /// upward). A node's nickname is joined directly into
 /// [`node_cache_path`]'s `state/node-cache/<name>.json` — this one check
@@ -1910,6 +1910,7 @@ mod tests {
         let saved_cfg = std::env::var(crate::config::ENV_CONFIG).ok();
         let root = aoide_test_support::unique_tmp("nodes-bad-config");
         std::env::set_var("AOIDE_ROOT", &root);
+        std::env::set_var("STRILLIX_ROOT", &root);
         std::env::remove_var(crate::config::ENV_CONFIG);
         let cfg_dir = root.join("state").parent().unwrap().to_path_buf();
         let _ = std::fs::create_dir_all(&cfg_dir);
@@ -2270,6 +2271,7 @@ mod tests {
         let saved_cfg = std::env::var(crate::config::ENV_CONFIG).ok();
         let root = aoide_test_support::unique_tmp("nodes-corrupt");
         std::env::set_var("AOIDE_ROOT", &root);
+        std::env::set_var("STRILLIX_ROOT", &root);
         std::env::remove_var(crate::config::ENV_CONFIG);
         let _ = std::fs::create_dir_all(crate::fs::state_dir());
         let _ = std::fs::create_dir_all(node_cache_dir());

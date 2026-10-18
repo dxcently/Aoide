@@ -3,7 +3,7 @@
 Cross-module rules only. A directory's own `AGENTS.md` holds what's local to
 it; this file holds what would otherwise be repeated in each of the four. Points
 up to the root `AGENTS.md` for house rule 5 (the closed paint-read whitelist),
-house rule 1 (a rice agent writes only `song/songbook/<song>/`; `modules/`
+house rule 1 (a rice agent writes only `rices/<song>/`; `modules/`
 changes only on a lane the User ordered, whose scope is named, or additively as
 a new dendrite plus its catalogue line) and house rule 7 (everything is
 a plugin).
@@ -41,7 +41,7 @@ contract in `modules/nucleus/*` has no `mkIf` guard by design. A host opts in wi
 ## Flat option assignment
 
 Write host and module options one per line — `aoide.enable = true;`,
-`aoide.song = "sonata";` — never gathered into `aoide = { … }`. The two are
+`aoide.rice = "sonata";` — never gathered into `aoide = { … }`. The two are
 identical to nix; the flat form greps and diffs cleanly, and enabling a
 capability stays one copyable line. `statix.toml` disables `repeated_keys`
 for this reason, so the linter does not fight the style.

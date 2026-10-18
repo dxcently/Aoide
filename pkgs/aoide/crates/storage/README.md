@@ -127,7 +127,7 @@ by decision — no embedded database yet
   same directory `pkgs/strillix-shell` is built from, so what a checkout is read
   from and what the package ships cannot drift apart). `fs` resolves TWO stage
   roots off that one root, not one (command-defrag lane S1, 2026-08-27,
-  CONTRACTS.md §4): `stage_dir` — unchanged, `$AOIDE_ROOT/song/stage/`,
+  CONTRACTS.md §4): `stage_dir` — unchanged, `$STRILLIX_ROOT/stage/`,
   rice/paint (`livery.json`/`mode.json`, strillix's tree) — and
   `conducting_stage_dir` — new, `$AOIDE_ROOT/state/stage/`, core
   orchestration state (`stage`'s own four path helpers, plus
@@ -138,7 +138,7 @@ by decision — no embedded database yet
 
   The rice's three files (CONTRACTS.md §4) are resolved here too:
   `rice_conf_link` (`$HOME/.local/state/strillix/rice.conf`, the one path outside
-  `$AOIDE_ROOT`), `declared_rice_conf` (`root()`'s `song/declared/rice.conf`)
+  `$AOIDE_ROOT`), `declared_rice_conf` (`root()`'s `/declared/rice.conf`)
   and `empty_rice_conf` (`stage_dir()`'s `empty-hyprland.conf`).
   `atomic_symlink` is the retarget: a temp link renamed over the link.
 
@@ -173,7 +173,7 @@ by decision — no embedded database yet
   CONTRACTS.md §4.
   `conducting_stage_dir`'s first no-override resolution in a process also
   drives `fs::migrate_conducting_stage`: a one-shot, idempotent move of the
-  six core files off their pre-split `song/stage/` location, never
+  six core files off their pre-split `/stage/` location, never
   clobbering a fresher `state/stage/` file and never touching a rice file.
   `fs::migrate_root_once` is the SIBLING one-shot migration for the L-C2
   root move itself (a pre-L-C2 host's `~/Aoide/{song/stage,state,log}` into
@@ -194,18 +194,18 @@ by decision — no embedded database yet
   making sense the moment the two could diverge). `fs::song_templates_dir`
   (L-C3, same lane) is a THIRD, sibling path seam alongside `root`/
   `flake_root`: the shipped SCORE TEMPLATES dir a repo-less host's `rice
-  compose --from <song>` and `aoide-song::widgets`'s registry/manifest
-  regeneration both fall back to when `songbook_dir` has
+  compose --from <song>` and `strillix-rice::widgets`'s registry/manifest
+  regeneration both fall back to when `rice_dir` has
   nothing. `fs::strillix_share_dir` is its PARENT — the shipped `share/strillix`
   dir, where the offline generator (`nix/manifest.nix`) and
-  `aoide-options.json` (`strx onboard`) sit — and `fs::songbook_root` is the
-  machine's `<song>/songbook/`, the argument that generator is pointed at.
+  `aoide-options.json` (`strx onboard`) sit — and `fs::rices_root` is the
+  machine's `<song>/rices/`, the argument that generator is pointed at.
   `fs::host_config` is the host's own config file (`$AOIDE_HOST_CONFIG`, the
   nix option `aoide.hostConfig`, default `<flake_root>/hosts/<hostname>/
   default.nix`), the one `strx rice declare --host` rewrites.
-  Two tiers — `$AOIDE_SONG_TEMPLATES` (absolute-wins, same
+  Two tiers — `$STRILLIX_TEMPLATES` (absolute-wins, same
   discipline as every override above), else a sibling of `current_exe()`'s
-  directory (`<exe_dir>/../share/strillix/songbook`, gated on that directory
+  directory (`<exe_dir>/../share/strillix/rices`, gated on that directory
   actually existing) — the same shape `aoide_protocol::bin`'s sibling-binary
   resolver uses, applied to a directory instead of an executable. Returns
   `None` (never a default that might not exist) when neither resolves; the
@@ -708,8 +708,8 @@ by decision — no embedded database yet
   (storage) / `commands` (client) split this crate already holds for node
   transport.
 - `takes` — the take store behind `rice back`/`rice take`, hanging off
-  `songbook/<song>/takes/` when staged directly or
-  `songbook/<song>/drafts/<name>/takes/` when routed into a draft
+  `rices/<song>/history/` when staged directly or
+  `rices/<song>/drafts/<name>/history/` when routed into a draft
   (`strx reload` design, settled 2026-08-31 — the staging-mode take/back
   reach; every function takes `draft: Option<&str>`, `None` selecting the
   song-scoped root). `TakeRecord` also carries `widgets: Value` — the

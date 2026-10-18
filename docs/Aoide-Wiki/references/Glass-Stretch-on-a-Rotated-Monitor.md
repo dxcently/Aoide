@@ -89,7 +89,7 @@ and the last one shipped as a patch and a commit body that had to be retracted.
 **QML geometry.** The monitor rotation also exposed real geometry bugs in the
 bar, dock and powermenu (fixed separately in `9a62055`), which made client-side
 sizing the obvious suspect. Two executors edited
-`song/songbook/sonata/widgets/dock.qml` and observed no change, because the
+`rices/sonata/widgets/dock.qml` and observed no change, because the
 facet's `AoidePanel.qml` was the file painting the dock. The property tree and
 the pixels disagreed — the signature of a compositor-side fault.
 

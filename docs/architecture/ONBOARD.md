@@ -11,7 +11,7 @@ brief conflict, this document wins.
 ## The problem
 
 `aoide onboard` is a stub that promises "register the clone, seed
-songbook, print the guide" — and a fresh box needs more than that: the
+rices, print the guide" — and a fresh box needs more than that: the
 harness hooks wired, and, on a NixOS box that runs strillix, the module
 options discovered and configured. Today that knowledge lives across
 `hooks install`, the wiki, and the modules' option declarations; a new
@@ -24,7 +24,7 @@ and fallback behavior.
 
 1. **`onboard` becomes the first-boot install-script flow.** The stub's
    summary is honored as written: register the clone, seed the
-   songbook, print the guide — plus harness wiring and the nix half
+   rices, print the guide — plus harness wiring and the nix half
    below. Golden count holds at 80; `implemented` flips (stubs 8→7).
 2. **It generates AND teaches.** The nix half emits one file a user can
    read top to bottom: every configurable option with its default and a
@@ -73,7 +73,7 @@ and fallback behavior.
 aoide onboard                        (Door::Cli only, from a checkout)
   |
   |- 1. shell half (core, no nix knowledge)
-  |     register the clone . seed songbook . hooks install
+  |     register the clone . seed rices . hooks install
   |     ASK: which harnesses?   <- inquire MultiSelect, preselected by
   |         PATH presence; --harness <name> (repeatable) + --yes for
   |         non-interactive runs

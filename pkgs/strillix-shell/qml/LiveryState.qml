@@ -35,7 +35,7 @@ QtObject {
     // ~/.aoide — L-C2; the nix build never depends on this path —
     // checks.song-runtime-untracked enforces that).
     readonly property string liveryPath:
-        (Quickshell.env("AOIDE_ROOT") || (Quickshell.env("HOME") + "/.aoide")) + "/song/stage/livery.json"
+        (Quickshell.env("STRILLIX_ROOT") || (Quickshell.env("HOME") + "/.strillix")) + "/stage/livery.json"
 
     // ── Parsed livery object ─────────────────────────────────────────────────
     property var raw: ({
@@ -277,7 +277,7 @@ QtObject {
     // file reads as the safe, non-mutating mode rather than a false
     // "staging".
     readonly property string modePath:
-        (Quickshell.env("AOIDE_ROOT") || (Quickshell.env("HOME") + "/.aoide")) + "/song/stage/mode.json"
+        (Quickshell.env("STRILLIX_ROOT") || (Quickshell.env("HOME") + "/.strillix")) + "/stage/mode.json"
     property var modeRaw: ({ "mode": "declarative" })
     readonly property string riceMode: modeRaw.mode ? modeRaw.mode : "declarative"
 
@@ -304,7 +304,7 @@ QtObject {
     // Absent/unreadable — a host that never activated the lane — reads as the
     // shell's own layer.
     readonly property string providerPath:
-        (Quickshell.env("AOIDE_ROOT") || (Quickshell.env("HOME") + "/.aoide")) + "/song/stage/wallpaper-provider"
+        (Quickshell.env("STRILLIX_ROOT") || (Quickshell.env("HOME") + "/.strillix")) + "/stage/wallpaper-provider"
     property string providerRaw: "quickshell"
     readonly property string wallpaperProvider:
         providerRaw.trim().length > 0 ? providerRaw.trim() : "quickshell"

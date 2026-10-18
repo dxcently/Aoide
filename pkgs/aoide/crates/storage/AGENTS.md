@@ -187,7 +187,7 @@
   accessor here rather than `serde_json::from_str`-ing a raw path elsewhere.
 - **Two stage roots, not one — pick the right one, don't blur them
   (command-defrag S1, 2026-08-27).** `fs::stage_dir` is rice/paint
-  (`song/stage/`); `fs::conducting_stage_dir` is core orchestration state
+  (`/stage/`); `fs::conducting_stage_dir` is core orchestration state
   (`state/stage/`). A new stage-file accessor for something the
   `aoide`/`aoided` binaries alone read or write goes through
   `conducting_stage_dir`; a new one for something only `strillix`/QML writes
@@ -203,7 +203,7 @@
   unisolated test cannot repoint the operator's link. The one way to retarget a
   link here is `fs::atomic_symlink` (a temp link renamed over it), never
   remove-then-link: a reader must see the old target or the new one.
-- **`fs::declared_rice_conf` is off `root()`, not `song_dir()`.** The renderer
+- **`fs::declared_rice_conf` is off `root()`, not `strillix_dir()`.** The renderer
   writes under `aoide.root` and never sees `$AOIDE_STAGE_DIR`, so the twin
   must not follow that override. `fs::empty_rice_conf` is under `stage_dir()`.
 - **`fs::migrate_conducting_stage` is a ONE-SHOT, Once-guarded move, not a
@@ -211,7 +211,7 @@
   `conducting_stage_dir`'s no-override fallback branch (an `$AOIDE_STAGE_DIR`
   override names the same directory for old and new, so there is nothing to
   move and that branch never calls it). It moves a file only when it exists
-  at the OLD `song/stage/` path and is ABSENT at the new one — never
+  at the OLD `/stage/` path and is ABSENT at the new one — never
   clobbers a fresher `state/stage/` file, never touches a rice file. Don't
   turn this into a periodic or unconditional re-sync; a second boot with
   both a old-path leftover and a populated new path should leave the new
@@ -304,7 +304,7 @@
   (`"pkgs/strillix-shell"`) is the pattern, not an exception.** The strillix shell's
   QML/icons/preview tree is read by `strillix`'s `commands::preview` (which
   stages it into an isolated preview root) and named in the scaffold doc
-  `aoide-song`'s `commands::rice` writes. Every site that CONSTRUCTS the path
+  `strillix-rice`'s `commands::rice` writes. Every site that CONSTRUCTS the path
   joins the const onto `flake_root`; a prose or doc-comment spelling of the
   literal (the const's own value, the CLI's `--fixture` help, `compose`'s
   scaffold text) resolves nothing and is not a second source. A second such
@@ -318,7 +318,7 @@
   resolvable — a runtime path or a checkout path always HAS a default,
   even if nothing lives there yet), a templates dir with no baked
   `manifest.json`/`registry.json` is not useful to hand back silently; the
-  caller (`aoide-song`'s `commands::rice`/`widgets`) is the one that knows
+  caller (`strillix-rice`'s `commands::rice`/`widgets`) is the one that knows
   how to phrase the taught error naming both locations it checked. Don't
   add a `$HOME`-derived third tier here "for consistency" — the two tiers
   mirror `aoide_protocol::bin`'s sibling-binary resolver on purpose, and
@@ -391,8 +391,8 @@
   create the cross-crate edge the split exists to avoid.
 - **`takes`' functions take `draft: Option<&str>`, not `&str`** (`strillix
   reload` design, settled 2026-08-31): `None` resolves the take root to
-  `songbook/<song>/takes/` (staging mode, no draft to nest under); `Some`
-  resolves it to `songbook/<song>/drafts/<draft>/takes/`, the original
+  `rices/<song>/history/` (staging mode, no draft to nest under); `Some`
+  resolves it to `rices/<song>/drafts/<draft>/history/`, the original
   shape. `takes_dir` is the one function that branches on it; every other
   function in the module derives its path through `takes_dir`/`take_path`/
   `head_path`/`marks_path` and just forwards the `Option` — don't

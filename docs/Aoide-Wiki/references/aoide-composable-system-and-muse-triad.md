@@ -21,8 +21,8 @@ context, not a competing Nix migration specification.
 - Rice definitions and composition are pure Nix; QML/assets remain implementation source. Runtime JSON is generated output, not a separately maintained authority.
 - Rice parts are replaceable independently, with their dependencies resolved. A rice covers the desktop configuration within its supported backend scope, not only paint/widgets.
 - Nix prepares the selected available rice bundles. Each user session has a declared default and can stage another available bundle without creating a draft or changing that default.
-- Drafts are isolated editable candidates in the same Nix/QML source format as songbook entries. Preview activates a built candidate; declare promotes its source, not runtime output.
-- songbook/covers is a shared library. Songs may name preferred covers or collections. The wallpaper manager is shared across rice selections, with separate per-user state.
+- Drafts are isolated editable candidates in the same Nix/QML source format as rices entries. Preview activates a built candidate; declare promotes its source, not runtime output.
+- rices/covers is a shared library. Songs may name preferred covers or collections. The wallpaper manager is shared across rice selections, with separate per-user state.
 - Same-persona sessions under Aoide share memories and history through Mneme across harnesses. Melete is optional; agents can access Mneme directly.
 - Fetching mail produces a fetched receipt, distinct from filing/delivery and action/completion. Reading a receipt must not create another receipt.
 
@@ -60,11 +60,11 @@ Nix owns the authored composition. Strillix activates built configurations throu
 
 | Object | Meaning and authority |
 |---|---|
-| Songbook entry | Declared Nix/QML/assets source, with explicit dependency references |
+| Rices entry | Declared Nix/QML/assets source, with explicit dependency references |
 | Available bundle set | Selected configurations built/installed by Nix for this user/session |
 | Declared selection | Configured default, with a retained built bundle for return |
 | Stage mode | Temporary activation of an available rice; no draft or source change required |
-| Draft | Isolated editable candidate in the same source format as a songbook entry |
+| Draft | Isolated editable candidate in the same source format as a rices entry |
 | Active bundle | Generated configuration currently being applied; output rather than authoring authority |
 | Runtime state | Selection markers and backend state; distinct from song source and application data |
 
@@ -88,7 +88,7 @@ Host + user select aggregates, available songs and default
                   Supported backend transitions
 ~~~
 
-Several rices can be available; one resolved composition is active per graphical session in this scope. Switching compatible prebuilt bundles needs no fresh Nix evaluation. Stage mode selects a bundle rather than copying editable source. Opening an experiment creates/opens a draft; its Nix composition and owned QML can be edited, evaluated/built, and previewed. Declaring promotes candidate source into the songbook; selecting it as the host/user default and activating system changes are distinct actions.
+Several rices can be available; one resolved composition is active per graphical session in this scope. Switching compatible prebuilt bundles needs no fresh Nix evaluation. Stage mode selects a bundle rather than copying editable source. Opening an experiment creates/opens a draft; its Nix composition and owned QML can be edited, evaluated/built, and previewed. Declaring promotes candidate source into the rices; selecting it as the host/user default and activating system changes are distinct actions.
 
 Returning to declared reactivates the retained declared bundle and reapplies its managed settings. It does not reset Git, delete a draft, or touch mail, sessions, application data, or service databases. Discard is a separate operation. The exact rule for refreshing the retained declared bundle after source/default changes, and whether staged selection survives login/reboot, must be specified before implementation.
 
@@ -109,12 +109,12 @@ Dependency compatibility and activation support are separate checks. Required pa
 
 Pure Nix can emit the complete bundle and required deployment data. It does not make every application setting hot-reloadable. Prebuilt bundles can run without Nix; editing/evaluating Nix-defined candidates requires an authoring/build environment.
 
-The wallpaper manager is independent of selected rice and picker widgets. songbook/covers holds shared images; each user has independent state. The proposed rule follows a song's preferred cover/collection unless the user selected an explicit override. Whether cover selection derives palette remains open. Removing the picker does not terminate the manager.
+The wallpaper manager is independent of selected rice and picker widgets. rices/covers holds shared images; each user has independent state. The proposed rule follows a song's preferred cover/collection unless the user selected an explicit override. Whether cover selection derives palette remains open. Removing the picker does not terminate the manager.
 
 Verified current gaps, not claims of implemented target behavior:
 
 - Quickshell already watches staged livery and hotloads bound colors. Full dependency-checked configuration switching is additional work.
-- Quickshell and strillix-rices package all songs; checkout staging can regenerate whole-songbook metadata. Selected installation must apply consistently to every path.
+- Quickshell and strillix-rices package all songs; checkout staging can regenerate whole-rices metadata. Selected installation must apply consistently to every path.
 - composeSong returns package metadata, but installation hardcodes packages. Sibling validation and implicit Sonata fallback disagree.
 - Missing slots can fall back instead of staying absent. Fixed shell slots and dynamic surfaces have different instantiation paths.
 - Runtime registries are generated separately from host arrangement overrides; borrowing-composition staging misses modified borrowed owners.
@@ -214,8 +214,8 @@ Claude's initial assignment is read-only readiness and review of mail/control li
 ## Source anchors
 
 - [Current assembly and global walk](../../../lib/mkHost.nix), [module conventions](../../../modules/AGENTS.md).
-- [Current declare copy](../../../pkgs/aoide/crates/strillix/src/commands/stubs.rs), [mode-aware reload](../../../pkgs/aoide/crates/song/src/commands/reload.rs).
-- [Widget composition](../../../lib/song.nix), [songbook generation](../../../lib/songbook.nix), [Quickshell deployment](../../../modules/facets/quickshell/default.nix).
+- [Current declare copy](../../../pkgs/aoide/crates/strillix/src/commands/stubs.rs), [mode-aware reload](../../../pkgs/aoide/crates/strillix-rice/src/commands/reload.rs).
+- [Widget composition](../../../lib/song.nix), [rices generation](../../../lib/rices.nix), [Quickshell deployment](../../../modules/facets/quickshell/default.nix).
 - [Current Melete deployment](../../../modules/dendrites/melete.nix), [launcher package](../../../pkgs/melete/default.nix), [Melete client](../../../pkgs/aoide/crates/client/src/mcp_client.rs), [adapter skeleton](../../../pkgs/aoide/crates/client/src/adapter.rs).
 - [Mail design](../../architecture/MAIL.md), [orchestration protocol](../protocol/dev/ORCHESTRATION.md).
 - Local source: Melete 7619d40, src/main.rs (daemon), src/config.rs (apps and managed updates), src/app_registry.rs (source/state), src/mcp_server.rs (jobs).

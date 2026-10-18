@@ -211,7 +211,7 @@ in
         # GlobalShortcut). Registers `aoide:wallpaper` in-process, same
         # global-shortcuts-v1 seam as the launcher. A press opens the launcher
         # body's own Desktop Pictures (`openPictures()`) when the song's
-        # launcher has one, else the plain cover grid over song/covers/; a pick
+        # launcher has one, else the plain cover grid over $STRILLIX_ROOT/covers/; a pick
         # shells `strillix cover set <path>`, which hot-swaps the live wallpaper.
         # No CLI toggle command, no inbound socket.
         bind = SUPER, W, global, aoide:wallpaper

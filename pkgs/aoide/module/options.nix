@@ -19,14 +19,14 @@ in
       defaultText = literalExpression ''"/home/''${config.aoide.user}/.aoide"'';
       description = ''
         The AOIDE RUNTIME root (L-C2, strillix-carrier lane, task #107) —
-        `song/stage/`, `state/` (conducting state + account/usage state),
-        `run/qml/` (the live-deployed QML tree), and the composed
-        `songbook/` all hang off this one directory. Exported as
-        `AOIDE_ROOT` on every unit that runs an `aoide`/`aoided`/`strillix`
-        binary, and into `aoide.user`'s own login shells (never another
-        account's, root's included). Core code default, matching
-        this option's own default exactly (unset == set-to-default): `~/.aoide`,
-        no nix required.
+        `state/` (conducting state + account/usage state), `run/` (the
+        live-deployed QML and element trees), `log` and the sessions all hang
+        off this one directory. Rice state does not: it lives under
+        `aoide.strillix.root`. Exported as `AOIDE_ROOT` on every unit that runs
+        an `aoide`/`aoided`/`strillix` binary, and into `aoide.user`'s own login
+        shells (never another account's, root's included). Core code default,
+        matching this option's own default exactly (unset == set-to-default):
+        `~/.aoide`, no nix required.
 
         `~/Aoide` (this option's sibling, `aoide.checkout`) is NOT the
         runtime root on any host — it is purely the dev git checkout. A
@@ -38,13 +38,27 @@ in
       '';
     };
 
+    strillix.root = mkOption {
+      type = types.str;
+      default = "/home/${config.aoide.user}/.strillix";
+      defaultText = literalExpression ''"/home/''${config.aoide.user}/.strillix"'';
+      description = ''
+        The RICE runtime root (`$STRILLIX_ROOT`): the stage (`stage/`, the
+        live twin the paint reads), `declared/` (the declared twin), `rices/`
+        (the machine's own rices) and `covers/`. Exported as
+        `STRILLIX_ROOT` on every unit that runs a `strillix` binary, and into
+        `aoide.user`'s login shells beside `AOIDE_ROOT`. Core code default,
+        matching this option's default exactly: `~/.strillix`.
+      '';
+    };
+
     checkout = mkOption {
       type = types.str;
       default = "/home/${config.aoide.user}/Aoide";
       defaultText = literalExpression ''"/home/''${config.aoide.user}/Aoide"'';
       description = ''
         The dev git checkout — the seam `rice declare`'s commit-in step,
-        `aoide soundcheck`'s scan root, and the committed songbook's `nix
+        `aoide soundcheck`'s scan root, and the committed rices's `nix
         eval` registry regen all read the checkout through. Exported as
         `AOIDE_FLAKE_ROOT` on the same units, and in `aoide.user`'s own login
         shells, as `aoide.root` is.
@@ -61,7 +75,7 @@ in
       defaultText = literalExpression ''"''${config.aoide.checkout}/hosts/''${config.networking.hostName}/default.nix"'';
       description = ''
         This machine's host config file — the module holding its one
-        `habit.song.declared = "<song>";` line, which `strillix rice declare
+        `habit.rice.declared = "<song>";` line, which `strillix rice declare
         <song> --host` rewrites so the next rebuild performs that song.
         Exported as `AOIDE_HOST_CONFIG` on the same units, and in
         `aoide.user`'s own login shells, as `aoide.checkout` is. A consumer

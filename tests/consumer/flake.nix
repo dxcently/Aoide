@@ -3,8 +3,8 @@
 # The point of this file is what it does NOT contain: no path concatenated onto
 # Aoide's source tree anywhere, and no threading of Aoide's own inputs.
 # Everything AoideOS offers a stranger arrives through the root flake's exports
-# — `nixosModules.nucleus`, `lib.{composition,livery,songbook,catalogue}`,
-# `songbookRoot` and `overlays.default` — and the flake inputs Aoide's own modules need (quickshell, stylix, nvf, hyprland,
+# — `nixosModules.nucleus`, `lib.{composition,livery,rices,catalogue}`,
+# `ricesRoot` and `overlays.default` — and the flake inputs Aoide's own modules need (quickshell, stylix, nvf, hyprland,
 # the core itself) are closed over by `nixosModules.nucleus`, which is why this
 # file declares only nixpkgs, home-manager and aoide. It does not declare
 # `stylix` on purpose: selecting the `stylix` dendrite imports stylix's module from
@@ -41,7 +41,7 @@
 
       # The exported library values are each their file's own function, still
       # unapplied: a consumer applies them with ITS lib (the constructor runs on
-      # the consumer's lib, not on Aoide's) and the songbook a host performs from.
+      # the consumer's lib, not on Aoide's) and the rices a host performs from.
       composition = aoide.lib.composition { inherit lib; };
 
       # The consumer's own slots. `bar`, `dock` and `lock` are named HERE, each
@@ -77,21 +77,21 @@
         overrides = { };
       };
 
-      # One songbook per host: the consumer's own (`./songs`), or Aoide's
-      # through the `songbookRoot` export. The song hook is one call: it answers
-      # the registry, the selection and the platform modules for the songbook it
+      # One rices per host: the consumer's own (`./songs`), or Aoide's
+      # through the `ricesRoot` export. The song hook is one call: it answers
+      # the registry, the selection and the platform modules for the rices it
       # is handed.
       mkHost =
-        name: songbookDir:
+        name: ricesDir:
         mkHostOver name (
-          aoide.lib.songbook {
+          aoide.lib.rices {
             inherit lib;
-            songbook = songbookDir;
+            ricesRoot = ricesDir;
           }
         );
 
-      # The same host over a songbook RECORD: one already built, such as the
-      # merge of several books (`aoide.lib.songbookMerge`), whose `dir` is the
+      # The same host over a rices RECORD: one already built, such as the
+      # merge of several books (`aoide.lib.rices.merge`), whose `dir` is the
       # directory the hook and the strillix lane read.
       mkHostOver =
         name: songs:
@@ -117,16 +117,16 @@
       # fixture names the parts through).
       hosts = {
         consumer = mkHost "consumer" ./songs;
-        aoide-songs = mkHost "aoide-songs" aoide.songbookRoot;
+        aoide-songs = mkHost "aoide-songs" aoide.ricesRoot;
         stubbed = mkHost "stubbed" ./songs;
-        # Aoide's songbook and the consumer's own, merged into one directory
+        # Aoide's rices and the consumer's own, merged into one directory
         # before anything reads it: `encore` (the consumer's) borrows `sonata`
         # (Aoide's) across the two.
         merged = mkHostOver "merged" (
-          aoide.lib.songbookMerge {
+          aoide.lib.rices.merge {
             inherit lib pkgs;
             books = [
-              aoide.songbookRoot
+              aoide.ricesRoot
               ./songs-merge
             ];
           }

@@ -17,7 +17,7 @@
 #     its own derivation) for any surface the shell lane already owns (overlap
 #     resolution). Tolerates the registry being empty.
 #   * Never reads a `song/` runtime path at build time — a `song/` tree has no
-#     runtime dirs at all (`checks.song-runtime-untracked`).
+#     runtime dirs at all (`checks.rice-runtime-untracked`).
 #   * It carries its OWN dependency: the Stylix NixOS module, imported by the
 #     nucleus module when the `stylix` input is present (below).
 #

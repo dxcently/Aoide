@@ -11,7 +11,7 @@
 #     completes and emits a vault-write event, shellbridge can post a
 #     notification-action back through the bar widget.
 #   - Writes a static shellbridge subscription fragment to
-#     ~/Aoide/song/stage/obsidian-sub.json at service start, so shellbridge
+#     ~/Aoide/$STRILLIX_ROOT/stage/obsidian-sub.json at service start, so shellbridge
 #     knows which window class to watch for session jumps to vault windows.
 #
 # To select it on yomi-strix, add to hosts/yomi-strix/default.nix:
@@ -47,7 +47,7 @@
         # so running it exited 2 on EVERY activation → a degraded home-manager
         # session → `nh` reporting the whole switch as failed (exit 4). This
         # oneshot is a no-op success until the real registration lands: replace
-        # `true` with the fragment-write to song/stage/obsidian-sub.json (the
+        # `true` with the fragment-write to $STRILLIX_ROOT/stage/obsidian-sub.json (the
         # behavior the header comment describes) or a real
         # `aoide bridge register-window-class` command.
         ExecStart = "${pkgs.coreutils}/bin/true";

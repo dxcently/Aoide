@@ -3,7 +3,7 @@
 #
 # Two machines, each assembled through the real constructor (habit's
 # `composition.mkNixosModules`, as lib/aoideos.nix does) over the fixture
-# songbook in `tests/lock-greeter/songbook/`, with the compositor and its hyprland
+# rices in `tests/lock-greeter/rices/`, with the compositor and its hyprland
 # behaviour lane selected by the host. Each song's body brings the paint (the
 # greeter, lock, powermenu and the rest of the ten strillix providers, and the strillix
 # renderer), so the host names none of them:
@@ -22,8 +22,8 @@
 # `face` carries a second account, so its greeter has a choice to make and a
 # user to switch away from.
 #
-# The song hook is lib/songbook.nix's, over the fixture songbook instead of the
-# committed one (the same one call tests/consumer makes for its own songbook).
+# The song hook is lib/rices.nix's, over the fixture rices instead of the
+# committed one (the same one call tests/consumer makes for its own rices).
 #
 # Screenshots land in the driver's output directory (`$out` under
 # `nix build`, `-o` when the driver runs on its own).
@@ -48,16 +48,15 @@ let
     username = "khoa";
   };
 
-  songbookRoot = ./lock-greeter/songbook;
-  songbook = import ../lib/songbook.nix {
-    inherit lib;
-    songbook = songbookRoot;
+  ricesRoot = ./lock-greeter/rices;
+  rices = import ../lib/rices.nix {
+    inherit lib ricesRoot;
   };
 
-  # The song hook over the fixture songbook (lib/songbook.nix). The three songs
+  # The song hook over the fixture rices (lib/rices.nix). The three songs
   # bring their own paint: each body selects the ten strillix providers and the
   # strillix renderer, so the host names none of them.
-  hook = songbook.hook {
+  hook = rices.hook {
     registry = import ../modules;
   };
 
@@ -75,7 +74,7 @@ let
     habit.dendrites.aoide-packages.enable = true;
     habit.dendrites.aoided.enable = true;
 
-    habit.song.declared = song;
+    habit.rice.declared = song;
 
     habit.users.khoa = {
       definition = ./vm-boot-user.nix;
@@ -259,8 +258,8 @@ pkgs.testers.runNixOSTest {
         # The song's cover/ folder rode into the greeter tree, and the logon
         # picture it names is the background stage/cover.json points the face at.
         tree = face.succeed("ps -u greeter -o args= | grep -o '/nix/store/[^ ]*-aoide-greeter-tree' | head -n1").strip()
-        cover = json.loads(face.succeed(f"cat {tree}/song/stage/cover.json"))
-        assert cover == {"path": f"{tree}/song/songbook/aubade/cover/aubade-logon.png", "song": "aubade"}, cover
+        cover = json.loads(face.succeed(f"cat {tree}/stage/cover.json"))
+        assert cover == {"path": f"{tree}/rices/aubade/cover/aubade-logon.png", "song": "aubade"}, cover
         face.succeed(f"test -s {cover['path']}")
 
     with subtest("face: the greeter refuses a wrong password, and switch user starts over"):

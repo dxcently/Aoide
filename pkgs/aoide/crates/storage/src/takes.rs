@@ -1,6 +1,6 @@
-//! The take store: `songbook/<song>/drafts/<draft>/takes/` when routed into
-//! a draft, `songbook/<song>/takes/` when staged directly with no draft
-//! (`strillix reload` design, settled 2026-08-31 — takes/back's staging-mode
+//! The take store: `rices/<song>/drafts/<draft>/history/` when routed into
+//! a draft, `rices/<song>/history/` when staged directly with no draft
+//! (`strillix reload` design, settled 2026-08-31 — history/back's staging-mode
 //! reach; see [`takes_dir`]) — full-content snapshots of the routed scope's
 //! livery/cover/widget bodies, minted on every rehearsal write, forming a
 //! TREE (not a line) so `rice back --mark <letter>` can revert to any mark
@@ -11,13 +11,13 @@
 //! **The model, in one sentence:** a take carries `parent: Option<u32>`
 //! (`None` only for the very first take of a scope); the number is a single
 //! monotone counter, NEVER renumbered and NEVER per-branch; a per-scope
-//! `takes/head.json` cursor names where the NEXT take will hang. Reverting
+//! `history/head.json` cursor names where the NEXT take will hang. Reverting
 //! moves the cursor; the next snapshot parents off wherever it points.
 //! Branching needs no name, no registry, no command — two takes sharing a
 //! parent simply IS a branch, discovered by scanning the directory this
 //! module already reads, never indexed.
 //!
-//! **Marks live OUTSIDE the take record**, in a `takes/marks.json` map
+//! **Marks live OUTSIDE the take record**, in a `history/marks.json` map
 //! (`{"A": 9}`) — overruling this feature's own plan, which first tried a
 //! `mark` field on `TakeRecord` (advisor verdict, fork 4). A field would
 //! make moving a letter a TWO-file rewrite (clear the old take's field,
@@ -45,7 +45,7 @@
 //! draft name checks are `crate::compose::valid_song_name`'s job, one layer
 //! up, exactly like every other `draft_dir` consumer).
 
-use crate::fs::{atomic_write, draft_dir, songbook_dir};
+use crate::fs::{atomic_write, draft_dir, rice_dir};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::BTreeMap;
@@ -53,22 +53,22 @@ use std::path::PathBuf;
 
 /// A take store's root, either of two places depending on `draft`
 /// (`strillix reload` design, settled 2026-08-31 — the staging-mode take/back
-/// reach): `songbook/<song>/drafts/<draft>/takes/`, nested under the draft
-/// it snapshots, when routed into one; `songbook/<song>/takes/`, a sibling
+/// reach): `rices/<song>/drafts/<draft>/history/`, nested under the draft
+/// it snapshots, when routed into one; `rices/<song>/history/`, a sibling
 /// of `drafts/`, when the song is staged directly with no draft routed —
 /// staging mode has no draft directory to nest under, so its takes hang off
 /// the song itself. `None` is NOT "no draft yet" in some third sense; it IS
 /// the staging-mode scope, resolved by [`crate::commands`-level callers]
-/// (`aoide-song`'s `commands/take.rs::resolve_scope`) straight off
+/// (`strillix-rice`'s `commands/take.rs::resolve_scope`) straight off
 /// `mode.json`'s own `mode`/`draft` fields.
 pub fn takes_dir(song: &str, draft: Option<&str>) -> PathBuf {
     match draft {
-        Some(d) => draft_dir(song, d).join("takes"),
-        None => songbook_dir(song).join("takes"),
+        Some(d) => draft_dir(song, d).join("history"),
+        None => rice_dir(song).join("history"),
     }
 }
 
-/// One take's record file: `takes/NNNN.json`, 4-digit zero-padded. The pad
+/// One take's record file: `history/NNNN.json`, 4-digit zero-padded. The pad
 /// is cosmetic only — [`list_takes`]/[`next_take_number`] sort by the
 /// PARSED `take` field, never the filename, so a 5th-digit take (`10000`)
 /// still orders correctly once the store outgrows the pad width.
@@ -76,7 +76,7 @@ pub fn take_path(song: &str, draft: Option<&str>, n: u32) -> PathBuf {
     takes_dir(song, draft).join(format!("{n:04}.json"))
 }
 
-/// The per-scope head cursor: `takes/head.json` — where the NEXT take will
+/// The per-scope head cursor: `history/head.json` — where the NEXT take will
 /// hang. Per-scope (song when staged, draft when drafted), not a field on
 /// the global `mode.json` marker (advisor verdict, fork 3): the cursor is
 /// state that must survive a mode round-trip through Staging/Declarative/
@@ -86,7 +86,7 @@ pub fn head_path(song: &str, draft: Option<&str>) -> PathBuf {
     takes_dir(song, draft).join("head.json")
 }
 
-/// The mark map: `takes/marks.json`, a flat `{"<letter>": <take>}` object —
+/// The mark map: `history/marks.json`, a flat `{"<letter>": <take>}` object —
 /// see the module doc for why marks live here and not on `TakeRecord`.
 pub fn marks_path(song: &str, draft: Option<&str>) -> PathBuf {
     takes_dir(song, draft).join("marks.json")
@@ -122,7 +122,7 @@ pub struct TakeRecord {
     pub livery: Value,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cover: Option<Value>,
-    /// `{ "<songbook-relative widgets/ path>": "<utf-8 file content>" }` —
+    /// `{ "<rices-relative widgets/ path>": "<utf-8 file content>" }` —
     /// the song's widget QML bodies at mint time (`strillix reload` design,
     /// settled 2026-08-31: "Takes gain WIDGET BODIES in both modes", closing
     /// the gap that widget QML was never snapshotted). Song-scoped, not

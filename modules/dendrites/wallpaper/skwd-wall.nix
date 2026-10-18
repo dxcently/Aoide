@@ -170,6 +170,7 @@ in
                 "SKWD_WALL_V2_CONFIG=${configDir}"
                 "SKWD_WALL_V2_CACHE=${cacheDir}"
                 "AOIDE_ROOT=${config.aoide.root}"
+                "STRILLIX_ROOT=${config.aoide.strillix.root}"
                 "AOIDE_SKWD_WALL_STANDIN=${standinPng}"
                 # PATH replaces the manager's: every bare name the daemon execs
                 # (`sh`/`setsid`, `ffmpeg`, `file`, `strillix`, the renderer).

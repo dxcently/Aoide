@@ -33,7 +33,7 @@ own package, runnable on any Linux distribution through Nix** (the package
 manager, not the OS) — NixOS is one target (AoideOS), never a requirement.
 Core (`aoide`/`aoided`) has no dependency on this repo's NixOS modules; only
 `strillix` may shell out to nix (`song::widgets`'s `nix eval` call for the
-songbook manifest).
+rices manifest).
 
 ## The pi → aoide mapping
 
@@ -114,7 +114,7 @@ desktop needs.
   it has explicitly refused to own ("any agent with a shell is fully
   capable" is the core thesis); `tools`/`skills` need `management`'s
   host-ops commands, which don't exist. The design-decision corpus `canon`
-  would formalize (`song/songbook/*/design/*.md`, this wiki's design pages)
+  would formalize (`rices/*/design/*.md`, this wiki's design pages)
   is prose today, not structured records — nothing to wrap a crate around
   yet.
 - **`management`** — the privileged hands: rebuild/switch, `rice mint`, hypr

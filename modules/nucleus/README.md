@@ -46,7 +46,7 @@ aggregation is the part any host can.
 
 - `assertions.nix` — the platform's invariant surface: the twin of the
   constructor's gate pass (habit's composition), for the failures only an
-  evaluated module graph can see. It reads the identity scalar `aoide.song`
+  evaluated module graph can see. It reads the identity scalar `aoide.rice`
   and the lane facts and declares nothing, so it adds no option, no unit and
   no package. Today: a song named with no `strillix` lane to paint it fails the
   host's own evaluation with the taught fix, and forcing the three facts fails
@@ -60,7 +60,7 @@ members (`modules/dendrites/README.md`, "The core-service dendrites"):
 
 | catalogue name   | file                                    | what it is                                             |
 |------------------|-----------------------------------------|--------------------------------------------------------|
-| `aoided`         | `modules/dendrites/aoided.nix`          | the AoideOS deltas on the core `aoided.service` (which `aoide.enable` alone provides): the a2a/mcp/mail doors, the pair-watch popup, the usage poller and timer, the discovery firewall carve, `AOIDE_SONG_TEMPLATES` |
+| `aoided`         | `modules/dendrites/aoided.nix`          | the AoideOS deltas on the core `aoided.service` (which `aoide.enable` alone provides): the a2a/mcp/mail doors, the pair-watch popup, the usage poller and timer, the discovery firewall carve, `STRILLIX_TEMPLATES` |
 | `melete-adapter` | `modules/dendrites/melete-adapter.nix`  | the thin adapter on the `aoided` event stream          |
 | `aoide-nix`      | `modules/dendrites/aoide-nix.nix`       | flake-native nix settings                              |
 | `aoide-packages` | `modules/dendrites/aoide-packages.nix`  | the `aoide`/`strillix` binaries on the system `PATH`       |

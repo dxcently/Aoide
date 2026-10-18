@@ -54,9 +54,9 @@ also defines an order-sensitive list option (`environment.systemPackages`, a
 `systemd.*` ordering list) interleaves with the tree's contributions at its own
 position in the host's module list.
 
-`song/songbook/` is not a fourth layer here and carries no `default.nix` of
-its own — a committed song is found by `lib/songbook.nix`'s own typed scan
-(`song/songbook/<song>/rice.nix`), the one exception house rule 1 already
+`rices/` is not a fourth layer here and carries no `default.nix` of
+its own — a committed song is found by `lib/rices.nix`'s own typed scan
+(`rices/<song>/rice.nix`), the one exception house rule 1 already
 draws around `song/`.
 
 ## What it consumes

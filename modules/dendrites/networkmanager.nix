@@ -4,7 +4,7 @@
 # dependency. Ships pkgs.networkmanagerapplet — which provides BOTH
 # nm-connection-editor (the GUI network editor) and nm-applet (the tray
 # indicator, a StatusNotifierItem client). The Quickshell shell now hosts a
-# real SNI tray (song/songbook/sonata/widgets/bar.qml's fermata-toggle
+# real SNI tray (rices/sonata/widgets/bar.qml's fermata-toggle
 # BarPopout, Quickshell.Services.SystemTray) — nm-applet has somewhere to
 # dock, so it autostarts as a systemd user service (same graphical-session
 # shape clipboard.nix's watcher uses) rather than sitting unused.

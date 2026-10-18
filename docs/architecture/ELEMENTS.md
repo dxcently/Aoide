@@ -96,7 +96,7 @@ restarted. That is the whole contract, and it is uniform:
   (the same discipline `rice stage` already holds for hyprctl).
 
 Everything-is-a-plugin holds by construction: an element enters by a
-directory existing at `song/songbook/<song>/elements/<name>/`, needs
+directory existing at `rices/<song>/elements/<name>/`, needs
 no import-list edit anywhere, and is removable without trace by
 deleting that directory. The `_`-prefix shelving convention applies
 (`elements/_waybar/` is skipped everywhere a `_widgets/` slot would
@@ -106,7 +106,7 @@ be). The delete-every-qml test passes: with every paint lane gone,
 
 ## The descriptor
 
-One file per element: `song/songbook/<song>/elements/<element>/element.json`.
+One file per element: `rices/<song>/elements/<element>/element.json`.
 
 ```json
 {
@@ -173,7 +173,7 @@ Two writers, one rank rule — the same stage-beats-declared convention
 stage` overwrites freely; a rebuild reasserts the declared song's
 store truth, exactly as the strillix lane's `rsync -a --delete`
 reasserts `run/qml`, and a staged song is then restored from the
-runtime songbook by `strx reload` (the strillix lane's
+runtime rices by `strx reload` (the strillix lane's
 `aoide-rice-reload` unit), as it restores the rest of the stage.
 
 ## Flows
@@ -182,10 +182,10 @@ runtime songbook by `strx reload` (the strillix lane's
 
 ```
 strx rice stage <song>
-  ├─ livery.json → song/stage/livery.json          (existing, atomic)
+  ├─ livery.json → $STRILLIX_ROOT/stage/livery.json          (existing, atomic)
   ├─ hyprctl keyword batch                          (existing, live tier)
   ├─ widget QML → run/qml + IPC reload              (existing)
-  └─ NEW: for each songbook/<song>/elements/<e>/element.json
+  └─ NEW: for each rices/<song>/elements/<e>/element.json
        ├─ verbatim files copied, template files rendered
        │    against the STAGED livery → run/elements/<e>/
        │    (atomic per file; a render error fails that element,
@@ -216,7 +216,7 @@ nixos-rebuild / home-manager switch          (user-gated, house rule 2)
 ```
 strx rice capture <song> <element> --config <path>...
                   [--unit <u> | --exec <cmd>] [--surface <s>]...
-  ├─ auto-creates song/songbook/<song>/elements/<element>/   (zero ceremony;
+  ├─ auto-creates rices/<song>/elements/<element>/   (zero ceremony;
   │    the song dir itself auto-creates too, compose-style)
   ├─ copies each --config byte-for-byte, RESOLVING symlinks first
   │    (a ~/.config store symlink freezes as the real bytes it
@@ -278,7 +278,7 @@ the same commit as the seams they describe.
   copy + `emit::file::render` for templated files), and
   `run_elements_dir()` in `storage/src/fs.rs` beside
   `run_qml_dir()`. Plumbing command `strx element seed <song>` (golden
-  +1) doing a full render into `run/elements/` from the songbook —
+  +1) doing a full render into `run/elements/` from the rices —
   the shell-reachable bridge the elements lane will call. CONTRACTS §5
   "Elements" subsection in the same commit. Tests: descriptor
   parse/refuse vectors, byte-identity for verbatim files, template
@@ -329,7 +329,7 @@ the same commit as the seams they describe.
   gates: `rice stage` restyles the running waybar without a rebuild;
   a switch re-seeds `run/elements/` and the unit points nowhere near
   `~/.config`; Stylix's bar-adjacent targets are down. Learnings
-  append to `song/songbook/learnings.md`.
+  append to `rices/learnings.md`.
 - **L-E7 — drop-in guidance (docs + S cargo touch).** Foreign-flake
   wiring guidance into `aoide guide` (strillix's guide.rs) and the wiki
   (`concepts/song/` page for elements; the KIMI librarian owns wiki

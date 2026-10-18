@@ -30,9 +30,9 @@ off the runtime root `$AOIDE_ROOT` (absolute-path-wins, default `~/.aoide`).
 `state/` is `$AOIDE_STATE_DIR` when set to an absolute path, else
 `$AOIDE_ROOT/state/`; the conducting stage tree `state/stage/` is
 `$AOIDE_STAGE_DIR` when absolute, else `$AOIDE_ROOT/state/stage/`
-(`conducting_stage_dir`) — distinct from the rice stage tree `song/stage/`,
+(`conducting_stage_dir`) — distinct from the rice stage tree `/stage/`,
 which shares the same `$AOIDE_STAGE_DIR` override but otherwise falls back
-to `$AOIDE_ROOT/song/stage/` (`stage_dir`). `~/Aoide` is the dev git
+to `$STRILLIX_ROOT/stage/` (`stage_dir`). `~/Aoide` is the dev git
 checkout, reached via `$AOIDE_FLAKE_ROOT`, not a runtime path. The audit log
 (`pkgs/aoide/crates/protocol/src/audit.rs::default_audit_log`) is
 `$AOIDE_AUDIT_LOG`, else `$AOIDE_ROOT/log` (when `$AOIDE_ROOT` is absolute),
@@ -128,8 +128,8 @@ strx shellbridge [--run] [--json]
 ```
 
 - **Reads:** env `$XDG_RUNTIME_DIR` (socket parent; falls back to
-  `/run/user/1000`), `song/stage/mode.json` (the menu's
-  current mode — rice staging, so it stays under `song/stage/`). Newline-delimited JSON commands on its socket
+  `/run/user/1000`), `/stage/mode.json` (the menu's
+  current mode — rice staging, so it stays under `/stage/`). Newline-delimited JSON commands on its socket
   (below).
 - **Writes:** seeds `state/stage/sessions.json` and `state/stage/hooks.json`
   with their empty v0 registry shapes, atomic and only when absent or corrupt
@@ -143,7 +143,7 @@ strx shellbridge [--run] [--json]
   (`CONTRACTS.md §4`) — shellbridge writes them into `state/stage/` even
   though the `shellbridge` command itself ships in `strillix`; rice staging
   (`mode.json`, `livery.json`, `grimoire.json`, `cover.json`) stays under
-  `song/stage/`, untouched by this split.
+  `/stage/`, untouched by this split.
 - **Output:** blocks forever serving the socket (systemd unit is
   `Type=simple`); returns an error document only on bind failure
   (`state: "error"`, data `{socket, stageDir, wrote}`). Socket commands

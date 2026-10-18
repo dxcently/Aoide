@@ -1,6 +1,6 @@
 # tests/consumer/songs/duet/rice.nix — the song built in but NOT performed.
 #
-# `habit.song.available = [ "duet" ]` builds it in (its widgets land in the deployed
+# `habit.rice.available = [ "duet" ]` builds it in (its widgets land in the deployed
 # tree and its folder in the shipped templates), but a body is read only for a
 # DECLARED song: its `system` half is never imported here, so its livery cannot
 # dress a desktop it is not painting. An available song that quietly applied its

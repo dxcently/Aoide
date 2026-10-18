@@ -1,7 +1,7 @@
 # tests/quickshell-seam/hosts/test-song-without-strillix.nix — a song with no
 # performer.
 #
-# `aoide.song` is a FACT: it says "perform this rice". A host that says so and
+# `aoide.rice` is a FACT: it says "perform this rice". A host that says so and
 # takes no strillix runtime has nothing to build the QML from, deploy it, seed the
 # stage or restart — the failure is silent everywhere else (the body that would
 # have brought the runtime is never imported for a hand-set fact, and no other
@@ -22,7 +22,7 @@ _: {
   };
 
   aoide.enable = true;
-  aoide.song = "sonata";
+  aoide.rice = "sonata";
   aoide.quickshell.config = toString ../fixture;
 
   networking.hostName = "test-song-without-strillix";

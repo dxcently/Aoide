@@ -151,12 +151,14 @@ fn a_sealed_letter_and_its_ack_round_trip_through_the_mail_adapter() {
     // ── The relay's own identity, minted FIRST: the sender's record for it
     // carries this key, and the relay signs the ack with it. ────────────────
     std::env::set_var("AOIDE_ROOT", &relay_root);
+    std::env::set_var("STRILLIX_ROOT", &relay_root);
     let (relay_key, _) = aoide_storage::identity::load_or_mint().unwrap();
     let relay_pubkey = relay_key.info().pubkey_hex;
     drop(relay_key);
 
     // ── The sender's own identity, minted in its own root. ─────────────────
     std::env::set_var("AOIDE_ROOT", &sender_root);
+    std::env::set_var("STRILLIX_ROOT", &sender_root);
     let (sender_key, _) = aoide_storage::identity::load_or_mint().unwrap();
     let sender_pubkey = sender_key.info().pubkey_hex;
     drop(sender_key);
@@ -169,16 +171,20 @@ fn a_sealed_letter_and_its_ack_round_trip_through_the_mail_adapter() {
     // best-effort ack drain from succeeding, so the ack stays spooled and
     // pollable (the `poll` node's only inbound path). ───────────────────────
     std::env::set_var("AOIDE_ROOT", &relay_root);
+    std::env::set_var("STRILLIX_ROOT", &relay_root);
     aoide_storage::node_store::save_nodes(&[verified_record(&peer_name, "http://127.0.0.1:1/", &sender_pubkey)])
         .unwrap();
 
     std::env::set_var("AOIDE_ROOT", &sender_root);
+
+    std::env::set_var("STRILLIX_ROOT", &sender_root);
     aoide_storage::node_store::save_nodes(&[verified_record(RELAY_NODE_NAME, &relay_url, &relay_pubkey)]).unwrap();
 
     // ── Raise the RELAY: a real `aoide mail serve` child with its own root. ─
     let mut child = std::process::Command::new(aoide_test_support::built_aoide_bin())
         .args(["mail", "serve", "--port", &port.to_string()])
         .env("AOIDE_ROOT", &relay_root)
+        .env("STRILLIX_ROOT", &relay_root)
         .env("AOIDE_AUDIT_LOG", relay_root.join("log"))
         .env("AOIDE_A2A_NODE_NAME", RELAY_NODE_NAME)
         .env("XDG_RUNTIME_DIR", &runtime)

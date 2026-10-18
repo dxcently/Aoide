@@ -45,7 +45,7 @@ as `Song/` — crystal outside, song within; onboard links `~/Song` →
                ▼
 ┌──────────────────────────────────────────────┐
 │ Song/ — the performed half, in the fork      │
-│ repertoire/ keys/ covers/ chimes/ songbook/  │
+│ repertoire/ keys/ covers/ chimes/ rices/  │
 │ runtime, gitignored: stage/ backstage/ …     │
 └──────────────────────────────────────────────┘
    ~/Melete  ~/Mneme  ~/Magi — peers, never owned
@@ -133,7 +133,7 @@ Intended repo layout
 │   └── <host>/          Y  picks branches, one line each · host pkgs
 └── Song/                Y  the performed half, whole
     ├── repertoire/<song>/  rice.nix · tokens.json · liner/ · assets/
-    ├── songbook/           learnings · preferences · playbook
+    ├── rices/           learnings · preferences · playbook
     ├── keys/ covers/ chimes/   palettes · wallpapers · sounds
     └── stage/ backstage/ auditions/ catalog/ index/ log/
                             runtime, gitignored
@@ -222,10 +222,10 @@ Commands: `aoide rice gen <prompt|wallpaper>` · `rice lint` · `rice preview`
 ```
 ┌─ generate ───────────────────────────────┐
 │ agent: aoide rice gen <prompt|wallpaper> │
-│ reads songbook/ first, always            │
+│ reads rices/ first, always            │
 └───────────────┬──────────────────────────┘
                 ▼ tokens, token schema
-┌─ lint ────────┴──────┐ fail → reject + songbook note
+┌─ lint ────────┴──────┐ fail → reject + rices note
 └───────────────┬──────┘
                 ▼
 ┌─ preview · ephemeral ────────────────────┐
@@ -242,7 +242,7 @@ Commands: `aoide rice gen <prompt|wallpaper>` · `rice lint` · `rice preview`
 ```
 
 `Song/` carries the performed half whole (tree in §2): versioned —
-repertoire/ songbook/ keys/ covers/ chimes/ — plus gitignored runtime:
+repertoire/ rices/ keys/ covers/ chimes/ — plus gitignored runtime:
 stage/ backstage/ auditions/ catalog/ index/ log/. Per-song contract:
 
 ```
@@ -256,12 +256,12 @@ Song/repertoire/<song>/
 
 - `Song/` is the agent's writable domain — it commits there and to nothing
   else; adopt is a commit plus the gated rebuild, nothing more.
-- Per-song design knowledge lives in that song's liner/; `songbook/` stays
+- Per-song design knowledge lives in that song's liner/; `rices/` stays
   cross-cutting: `learnings.md`, `preferences.md` (accumulated from
   adopt/reject decisions), `update-playbook.md` (schema migrations).
 - Default seeding: unless told otherwise, `rice gen` starts from the shipped
   default rice + wallpaper — the baseline is always defined, never guessed.
-- Songbook discipline: the agent reads songbook/ and the relevant liner/
+- Rices discipline: the agent reads rices/ and the relevant liner/
   before every gen and appends after every adopt or reject — the write-back
   is the "self" in self-ricing; without it this is just a theme generator.
 - Dogfood: `Song/repertoire/*/liner/` are ordinary content-pipeline folders,
@@ -280,7 +280,7 @@ Song/repertoire/<song>/
 The song map — literal inside Song/ (repo root keeps snowflake names, code
 functional verbs): palette = key (keys/) · semantic tier = melody, survives
 transposition · component tier = arrangement · facets = instruments · rice =
-song (repertoire/) · design wiki = liner/ · memory = songbook/ · wallpaper =
+song (repertoire/) · design wiki = liner/ · memory = rices/ · wallpaper =
 cover (covers/) · sounds = chimes/ · live state = stage/ · plumbing =
 backstage/ · propose gate = auditions/ · shipped default = the standard ·
 preview = rehearsal · adopt = recording.
@@ -362,7 +362,7 @@ from one forked repo.
      gitignored), installs the shipped default rice + wallpaper as the
      active baseline, links `~/Song` → `~/Aoide/Song`, sets the upstream
      remote for `aoide update`,
-   - seeds songbook/ with starter files and the update playbook,
+   - seeds rices/ with starter files and the update playbook,
    - writes AGENTS.md to the well-known path and prints the tier guide,
    - detects claude CLI; offers the stdio MCP registration line and the spawn
      wrapper install; other agents get the shell instructions,
@@ -385,7 +385,7 @@ What this handoff exists for. On-box, User + Claude:
    validator into `rice lint`.
 4. Co-design the first real rice: gen → preview loop live on yomi-strix
    hardware, iterate tokens with User, adopt as the box's rice.
-5. Seed songbook/preferences.md and the first song's liner/ from that
+5. Seed rices/preferences.md and the first song's liner/ from that
    session's decisions — the first real write-back.
 6. Verify claude CLI integration end to end: wrapper spawn, hook states in
    the bar widget, click-to-jump.

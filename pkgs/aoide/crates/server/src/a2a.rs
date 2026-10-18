@@ -14805,6 +14805,7 @@ mod tests {
         let root = aoide_test_support::short_tmp("a2a-pairrequest-mesh");
         std::env::set_var("AOIDE_STATE_DIR", &root);
         std::env::set_var("AOIDE_ROOT", &root);
+        std::env::set_var("STRILLIX_ROOT", &root);
 
         let pubkey = "a".repeat(64);
         let commit = aoide_storage::pairing::derive_commit(&pubkey, &"c".repeat(32));
@@ -15161,6 +15162,7 @@ mod tests {
         let dir = root.join(who);
         std::fs::create_dir_all(&dir).unwrap();
         std::env::set_var("AOIDE_ROOT", &dir);
+        std::env::set_var("STRILLIX_ROOT", &dir);
         std::env::set_var("AOIDE_STATE_DIR", dir.join("state"));
         std::env::set_var("AOIDE_STAGE_DIR", dir.join("stage"));
         std::env::remove_var("AOIDE_CONFIG");
@@ -15910,6 +15912,7 @@ mod tests {
         let root = mail_deposit_root("hub-parked");
         act_as(&root, "here");
         std::env::set_var("AOIDE_ROOT", &root);
+        std::env::set_var("STRILLIX_ROOT", &root);
         let far_key = hop_fixture();
         let container = hop_container(&far_key);
 
@@ -16053,6 +16056,7 @@ mod tests {
         act_as(&root, "here");
         // The fixture writes this box's config.toml, which lives under the root.
         std::env::set_var("AOIDE_ROOT", &root);
+        std::env::set_var("STRILLIX_ROOT", &root);
         let far_key = hop_fixture();
         let container = hop_container(&far_key);
 
@@ -16096,6 +16100,7 @@ mod tests {
         act_as(&root, "here");
         // The fixture writes this box's config.toml, which lives under the root.
         std::env::set_var("AOIDE_ROOT", &root);
+        std::env::set_var("STRILLIX_ROOT", &root);
         let far_key = hop_fixture();
         let container = hop_container(&far_key);
 
@@ -16128,6 +16133,7 @@ mod tests {
         act_as(&root, "here");
         // The fixture writes this box's config.toml, which lives under the root.
         std::env::set_var("AOIDE_ROOT", &root);
+        std::env::set_var("STRILLIX_ROOT", &root);
         let far_key = hop_fixture();
         let (kp, _) = aoide_storage::identity::load_or_mint().unwrap();
         let container = hop_container(&far_key);
@@ -16167,6 +16173,7 @@ mod tests {
         act_as(&root, "here");
         // The fixture writes this box's config.toml, which lives under the root.
         std::env::set_var("AOIDE_ROOT", &root);
+        std::env::set_var("STRILLIX_ROOT", &root);
         let far_key = hop_fixture();
         let mut container = hop_container(&far_key);
         // One unsigned byte: entry 1's own zone, which the origin signed.
@@ -16733,6 +16740,7 @@ mod tests {
         let saved_config = std::env::var("AOIDE_CONFIG").ok();
         let root = aoide_test_support::short_tmp("a2a-cfg-failclosed");
         std::env::set_var("AOIDE_ROOT", &root);
+        std::env::set_var("STRILLIX_ROOT", &root);
         std::env::set_var("AOIDE_STATE_DIR", root.join("state"));
         std::env::remove_var("AOIDE_CONFIG");
 
@@ -16802,6 +16810,7 @@ mod tests {
         let saved_config = std::env::var("AOIDE_CONFIG").ok();
         let root = aoide_test_support::short_tmp("a2a-cfg-refusal");
         std::env::set_var("AOIDE_ROOT", &root);
+        std::env::set_var("STRILLIX_ROOT", &root);
         std::env::set_var("AOIDE_STATE_DIR", root.join("state"));
         std::env::remove_var("AOIDE_CONFIG");
 
@@ -18854,6 +18863,7 @@ mod tests {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _env = aoide_test_support::EnvSaver::capture(&[
             "AOIDE_ROOT",
+            "STRILLIX_ROOT",
             "AOIDE_STATE_DIR",
             "AOIDE_STAGE_DIR",
             "AOIDE_CONFIG",
@@ -18901,6 +18911,7 @@ mod tests {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _env = aoide_test_support::EnvSaver::capture(&[
             "AOIDE_ROOT",
+            "STRILLIX_ROOT",
             "AOIDE_STATE_DIR",
             "AOIDE_STAGE_DIR",
             "AOIDE_CONFIG",

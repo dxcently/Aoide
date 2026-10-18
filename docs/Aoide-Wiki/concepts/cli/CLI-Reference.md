@@ -43,12 +43,12 @@ start at [[aoide-cli]] and the group pages linked below.
   absent — the connection PARKS until a separate `secrets approve`/
   `dismiss` call or a timeout, rather than carrying `gated: true`
   ([[Secrets-Broker]]).
-- **Runtime root:** the `state/`, `song/stage/`, and `run/qml/` paths below
+- **Runtime root:** the `state/`, `/stage/`, and `run/qml/` paths below
   hang off one root — `$AOIDE_ROOT` when set to an absolute path, default
   `<home>/.aoide` (`aoide_storage::fs::root`). Per-tree absolute overrides:
   `state/` via `$AOIDE_STATE_DIR`; the two stage trees share
   `$AOIDE_STAGE_DIR` and otherwise fall back separately — `state/stage/`
-  (conducting state) and `song/stage/` (rice staging). `~/Aoide` is the dev
+  (conducting state) and `/stage/` (rice staging). `~/Aoide` is the dev
   git checkout, reached via `$AOIDE_FLAKE_ROOT`, not a runtime path.
   Stage/state writes are atomic temp-then-rename.
 - **Two registries, one convention:** `aoide schema --json` holds 81
@@ -63,10 +63,10 @@ start at [[aoide-cli]] and the group pages linked below.
 - [[Rice-and-Livery|Rice-and-Livery]] — the self-ricing loop:
   `rice lint/list/stage/compose/refresh/declare/transpose`, the `rice draft` / `rice mode` /
   `rice take` groups, `rice back`, `cover set`, and the `livery` engine commands.
-  Stage files: `song/stage/{livery,cover,mode}.json`, the declared twin
-  `song/declared/livery.json` and the venue's `song/declared/venue.json` (the slots it recolours and the
+  Stage files: `/stage/{livery,cover,mode}.json`, the declared twin
+  `/declared/livery.json` and the venue's `/declared/venue.json` (the slots it recolours and the
   geometry the host sets);
-  songbook and drafts trees.
+  rices and drafts trees.
 - [[Graph-and-Conduct|Graph-and-Conduct]] — the session DAG: bare
   `graph`/`graph link` (the read/analysis lens), `project add/list/remove`,
   `workspace set/clear/list/root` (the compositor workspace ↔ project binding;
@@ -91,7 +91,7 @@ start at [[aoide-cli]] and the group pages linked below.
   `state/nodes.json`, `state/node-cache/<name>.json`.
 - [[Conductor-TUI|Conductor-TUI]] — the `aoide conductor` interactive
   terminal frontend: seven panels, keys, what each dispatches. State:
-  `state/stage/{projects,sessions,hooks}.json`, `song/stage/livery.json`,
+  `state/stage/{projects,sessions,hooks}.json`, `/stage/livery.json`,
   the audit log.
 - [[Content-and-Hooks|Content-and-Hooks]] — the content
   pipeline commands (all stubs today), `herald push` (shellbridge socket →
@@ -108,7 +108,7 @@ start at [[aoide-cli]] and the group pages linked below.
   secrets home.
 - [[Apps-Commands|Apps-Commands]] — the `strx apps` group: `apps list/show/
   publish`, the installed desktop apps with icons resolved to files. State:
-  `song/stage/apps.json`.
+  `/stage/apps.json`.
 - [[Clipboard-Commands|Clipboard-Commands]] — the `strx clipboard` group:
   `clipboard delete/clear`, one cliphist history entry or all of them, with
   the launcher's cached thumbnails.

@@ -1,5 +1,5 @@
-# tests/consumer/hosts/merged.nix — a host whose songbook is Aoide's merged with
-# the consumer's own (`aoide.lib.songbookMerge`). It performs the consumer's
+# tests/consumer/hosts/merged.nix — a host whose rices is Aoide's merged with
+# the consumer's own (`aoide.lib.ricesMerge`). It performs the consumer's
 # `encore`, which borrows Aoide's `sonata` across the two books, and builds in
 # nothing else.
 _: {
@@ -11,7 +11,7 @@ _: {
     provider = "hyprland";
   };
 
-  habit.song.declared = "encore";
+  habit.rice.declared = "encore";
 
   habit.users.fixture = {
     definition = ../user.nix;

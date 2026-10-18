@@ -39,8 +39,8 @@
   habit.dendrites.wallpaper.provider = "skwd-wall";
 
   # ── Songs ──────────────────────────────────────────────────────────────────
-  # `habit.song.declared` is the song this host PERFORMS: it becomes the fact
-  # `aoide.song` and selects that song's body. `available` is what it builds in
+  # `habit.rice.declared` is the song this host PERFORMS: it becomes the fact
+  # `aoide.rice` and selects that song's body. `available` is what it builds in
   # to STAGE without a rebuild but does not perform.
   #
   # yomi performs barcarolle: Windows 7 Aero rebuilt on the AoideOS slots — a
@@ -50,10 +50,10 @@
   # theming, the compositor's geometry and window borders, the assembled
   # widgets, and the boot default; `strillix reload` is what keeps the staged half
   # live between switches. The other committed rices are reached from the
-  # machine's own songbook (`aoide rice stage <n>`), which this host's songbook
+  # machine's own rices (`aoide rice stage <n>`), which this host's rices
   # already holds — that is the point of the split.
-  habit.song.declared = "barcarolle";
-  habit.song.available = [ ];
+  habit.rice.declared = "barcarolle";
+  habit.rice.available = [ ];
 
   # ── People ─────────────────────────────────────────────────────────────────
   # The definition is shared between machines and attached, never copied.
@@ -95,8 +95,8 @@
 
   # ── Aoide ──────────────────────────────────────────────────────────────
   # The `nucleus` dendrites select the core (`aoide.enable`) and the doors
-  # below exist because those dendrites are selected; `aoide.song` is DERIVED
-  # from `habit.song.declared` by the constructor's hook. None of them is a
+  # below exist because those dendrites are selected; `aoide.rice` is DERIVED
+  # from `habit.rice.declared` by the constructor's hook. None of them is a
   # line here.
   aoide.user = "khoa";
 

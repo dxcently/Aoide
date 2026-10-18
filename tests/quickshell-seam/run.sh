@@ -143,7 +143,7 @@ if evalf songWithoutStrillix "$tmp/song.err" >/dev/null; then
   fail=$((fail+1))
 elif grep -qF -- 'needs the strillix runtime' "$tmp/song.err"; then
   printf '%-46s PASS  (%s)\n' "song without the strillix runtime is refused" \
-    "$(tr -d '\n' < "$tmp/song.err" | grep -o -m1 -- 'aoide.song = "sonata" needs the strillix runtime: pick [^"]*')"
+    "$(tr -d '\n' < "$tmp/song.err" | grep -o -m1 -- 'aoide.rice = "sonata" needs the strillix runtime: pick [^"]*')"
   pass=$((pass+1))
 else
   printf '%-46s FAIL (wrong error)\n' "song without the strillix runtime is refused"
@@ -174,8 +174,8 @@ else
   check "control: the shell declares it"        "1" "$(y '.templates.quickshell | length')"
   check "control: the rice reload declares it"  "1" "$(y '.templates.riceReload | length')"
   check "control: every unit names one directory" "true" "$(y '.templatesAgree')"
-  check "control: it is the shipped songbook"   "true" \
-    "$(y '.templates.aoided[0] | endswith("-strillix-rices-templates/share/strillix/songbook")')"
+  check "control: it is the shipped rices"   "true" \
+    "$(y '.templates.aoided[0] | endswith("-strillix-rices-templates/share/strillix/rices")')"
   # The unit that brings a staged or drafted song back after a login or a
   # switch: ordered before the shell (its first frame is the staged song), run in
   # the user manager once the session is up, one shot that stays active even when
@@ -196,8 +196,8 @@ else
     "$(y '.riceReload.Service.ExecStart | if type == "array" then .[0] else . end | startswith("-") and endswith("/bin/strillix reload")')"
   check "control: the rice reload is bounded"   "true" \
     "$(y '.riceReload.Service.ExecStart | if type == "array" then .[0] else . end | test("^-[^ ]+/bin/timeout [0-9]+ [^ ]+/bin/strillix reload$")')"
-  check "control: the rice reload has root, templates" "2" \
-    "$(y '[(.riceReload.Service.Environment // [])[] | select(startswith("AOIDE_ROOT=") or startswith("AOIDE_SONG_TEMPLATES="))] | length')"
+  check "control: the rice reload has both roots, templates" "3" \
+    "$(y '[(.riceReload.Service.Environment // [])[] | select(startswith("AOIDE_ROOT=") or startswith("STRILLIX_ROOT=") or startswith("STRILLIX_TEMPLATES="))] | length')"
   check "control: the rice reload names no PATH" "0" \
     "$(y '[(.riceReload.Service.Environment // [])[] | select(startswith("PATH="))] | length')"
   # The switch's half: after home-manager has linked its files and reloaded the

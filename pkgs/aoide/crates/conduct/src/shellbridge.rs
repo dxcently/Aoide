@@ -194,7 +194,7 @@ pub enum BridgeCommand {
     /// ANSWERED (`reason: "no-compositor"`), never dropped — the click is
     /// parked on a reply.
     WorkspaceAction { workspace: Option<i64>, binding: WorkspaceBinding },
-    /// `{ "cmd": "ricemenu" }` — the RICE menu's READ: the runtime songbook
+    /// `{ "cmd": "ricemenu" }` — the RICE menu's READ: the runtime rices
     /// and the mode, plus the drafts of the song the current mode is working
     /// on, answered on this connection like [`Self::SessionTrace`]. No
     /// payload: the daemon runs `strillix rice list --json` and, when the mode
@@ -261,7 +261,7 @@ impl RiceModeAction {
 pub enum RiceDraftAction {
     /// Route the stage into this draft. The name is one argv token and no
     /// more: whether it is a valid draft name is the CLI's call —
-    /// `aoide-song` is strillix-only and conduct never depends on it, so the
+    /// `strillix-rice` is strillix-only and conduct never depends on it, so the
     /// regex lives in one place. Whether the draft EXISTS is nobody's check
     /// here: `rice mode draft` forks the current stage into a valid name that
     /// is not there yet, so an enter is enter-or-create.
@@ -828,7 +828,7 @@ fn dispatch_rice_declare(name: &str) -> Value {
     rice_declare_reply(ok, message, data)
 }
 
-/// The song-name shape (`aoide_song::compose::valid_song_name`, restated
+/// The song-name shape (`strillix_rice::compose::valid_song_name`, restated
 /// because conduct does not depend on the song crate): a lowercase letter or
 /// digit, then lowercase letters, digits and hyphens.
 fn song_name(s: &str) -> bool {
@@ -3743,7 +3743,7 @@ exit 1
     /// A `#!/bin/sh` stand-in for `strillix`, a stage dir holding a marker for
     /// `mode`, and the env that points both at them. It logs every argv it is
     /// given beside itself, and answers the verbs the menu plans with
-    /// the envelopes the CLI prints: `list` echoes a fixed songbook, `draft save` mints `draft-3`, `draft list`
+    /// the envelopes the CLI prints: `list` echoes a fixed rices, `draft save` mints `draft-3`, `draft list`
     /// lists two drafts, anything else succeeds. A `refuse-draft`,
     /// `refuse-drop`, `refuse-list` or `refuse-songs` file beside it turns that verb into a refusal. NO notify
     /// is ever reached — the tests drive the sequencer, not `handle_conn`.
@@ -3764,7 +3764,7 @@ echo "$*" >> "$here/argv.log"
 case "$2 $3" in
 "list --json")
   if [ -f "$here/refuse-songs" ]; then
-    printf '{"status":"error","message":"songbook unreadable","data":{"reason":"x"}}\n'; exit 1
+    printf '{"status":"error","message":"rices unreadable","data":{"reason":"x"}}\n'; exit 1
   fi
   printf '{"status":"ok","message":"2 song(s)","data":{"mode":"declarative","song":"sonata","draft":null,"stagingSong":"cadenza","declared":"sonata","songs":[{"name":"cadenza","ok":true},{"name":"sonata","ok":true}]}}\n' ;;
 "draft save")
@@ -3781,7 +3781,7 @@ case "$2 $3" in
   printf '{"status":"ok","message":"2 draft(s)","data":{"drafts":[{"song":"%s","name":"draft-1","savedAt":"2026-01-01T00:00:00Z","current":false},{"song":"%s","name":"draft-2","savedAt":null,"current":true}],"scope":"%s"}}\n' "$4" "$4" "$4" ;;
 "declare "*)
   if [ -f "$here/refuse-declare" ]; then
-    printf '{"status":"error","message":"`%s` is not in the songbook box builds from","data":{"reason":"not-built-in","refusal":{"kind":"refused","what":"`%s` is not in the songbook box builds from","why":"this build carries sonata","fix":{"set":"x"}}}}\n' "$3" "$3"; exit 1
+    printf '{"status":"error","message":"`%s` is not in the rices box builds from","data":{"reason":"not-built-in","refusal":{"kind":"refused","what":"`%s` is not in the rices box builds from","why":"this build carries sonata","fix":{"set":"x"}}}}\n' "$3" "$3"; exit 1
   fi
   printf '{"status":"ok","message":"declared `%s`; takes effect on the next rebuild.","data":{"name":"%s","host":"box","hostConfig":"/h/default.nix","previous":"sonata","changed":true,"stagedDiffers":true}}\n' "$3" "$3" ;;
 "mode draft")
@@ -3839,7 +3839,7 @@ esac
         assert_eq!(dispatch_rice_draft(&enter), Ok("routed draft-2".to_string()));
         assert_eq!(stub_argv_log(&root), ["rice mode draft draft-2 --json"]);
 
-        std::fs::write(root.join("mode.json"), r#"{"mode":"declarative","song":"sonata"}"#).unwrap();
+        std::fs::write(root.join("mode.json"), r#"{"mode":"declarative","rice":"sonata"}"#).unwrap();
         std::fs::remove_file(root.join("argv.log")).unwrap();
         // The refusal is the first thing that happens: not partial, no child.
         assert_eq!(
@@ -3848,7 +3848,7 @@ esac
         );
         assert!(stub_argv_log(&root).is_empty(), "a refused save starts no child");
 
-        std::fs::write(root.join("mode.json"), r#"{"mode":"staging","song":"sonata"}"#).unwrap();
+        std::fs::write(root.join("mode.json"), r#"{"mode":"staging","rice":"sonata"}"#).unwrap();
         assert_eq!(dispatch_rice_draft(&RiceDraftAction::Save), Ok("saved".to_string()));
         assert_eq!(stub_argv_log(&root), ["rice draft save --json"]);
         let _ = std::fs::remove_dir_all(&root);
@@ -3875,7 +3875,7 @@ esac
         );
         assert_eq!(stub_argv_log(&root), ["rice draft drop draft-2 --json"]);
 
-        std::fs::write(root.join("mode.json"), r#"{"mode":"declarative","song":"sonata","stagingSong":"cadenza"}"#).unwrap();
+        std::fs::write(root.join("mode.json"), r#"{"mode":"declarative","rice":"sonata","stagingSong":"cadenza"}"#).unwrap();
         std::fs::remove_file(root.join("argv.log")).unwrap();
         assert_eq!(
             dispatch_rice_draft(&drop1),
@@ -3902,7 +3902,7 @@ esac
         assert_eq!(stub_argv_log(&root), ["rice mode stage --json", "rice mode draft nope --json"]);
 
         // Already unlocked: the same refusal is the FIRST step, nothing ran.
-        std::fs::write(root.join("mode.json"), r#"{"mode":"staging","song":"sonata"}"#).unwrap();
+        std::fs::write(root.join("mode.json"), r#"{"mode":"staging","rice":"sonata"}"#).unwrap();
         assert_eq!(dispatch_rice_draft(&enter), Err(("no song is currently staged".to_string(), false)));
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -3910,7 +3910,7 @@ esac
     /// GATED on Unix with its reason (see [`stub_rice_bin`]).
     #[cfg(unix)]
     #[test]
-    fn dispatch_rice_menu_merges_the_songbook_with_the_modes_song_drafts() {
+    fn dispatch_rice_menu_merges_the_rices_with_the_modes_song_drafts() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let (_env, root) = stub_rice_bin(
             "shellbridge-menu-list",
@@ -4002,7 +4002,7 @@ esac
             json!({
                 "ok": false,
                 "reason": "not-built-in",
-                "message": "`fugue` is not in the songbook box builds from: this build carries sonata",
+                "message": "`fugue` is not in the rices box builds from: this build carries sonata",
             })
         );
         let _ = std::fs::remove_dir_all(&root);
@@ -4025,7 +4025,7 @@ esac
         std::fs::write(root.join("refuse-songs"), "").unwrap();
         assert_eq!(
             dispatch_rice_menu(),
-            json!({ "ok": false, "reason": "cli-failed", "message": "songbook unreadable" })
+            json!({ "ok": false, "reason": "cli-failed", "message": "rices unreadable" })
         );
         assert_eq!(stub_argv_log(&root), ["rice list --json"]);
         let _ = std::fs::remove_dir_all(&root);
@@ -4113,10 +4113,11 @@ esac
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let (_stub_env, root) = stub_rice_bin(
             "shellbridge-menu-sock",
-            r#"{"mode":"staging","song":"quietsong"}"#,
+            r#"{"mode":"staging","rice":"quietsong"}"#,
         );
-        let _env = aoide_test_support::EnvSaver::capture(&["AOIDE_ROOT", "AOIDE_AUDIT_LOG", "AOIDE_STATE_DIR", "XDG_RUNTIME_DIR"]);
+        let _env = aoide_test_support::EnvSaver::capture(&["AOIDE_ROOT", "STRILLIX_ROOT", "AOIDE_AUDIT_LOG", "AOIDE_STATE_DIR", "XDG_RUNTIME_DIR"]);
         std::env::set_var("AOIDE_ROOT", &root);
+        std::env::set_var("STRILLIX_ROOT", &root);
         std::env::set_var("AOIDE_AUDIT_LOG", root.join("log"));
         std::env::set_var("AOIDE_STATE_DIR", &root);
         std::env::set_var("XDG_RUNTIME_DIR", &root);
@@ -5145,6 +5146,7 @@ printf '{"status":"ok","command":"workspace","message":"argv: %s","data":{"works
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _env = aoide_test_support::EnvSaver::capture(&[
             "AOIDE_ROOT",
+            "STRILLIX_ROOT",
             "AOIDE_AUDIT_LOG",
             "AOIDE_STATE_DIR",
             "AOIDE_STAGE_DIR",
@@ -5153,6 +5155,7 @@ printf '{"status":"ok","command":"workspace","message":"argv: %s","data":{"works
         ]);
         let root = aoide_test_support::unique_tmp("shellbridge-ws-refused");
         std::env::set_var("AOIDE_ROOT", &root);
+        std::env::set_var("STRILLIX_ROOT", &root);
         std::env::set_var("AOIDE_AUDIT_LOG", root.join("log"));
         std::env::set_var("AOIDE_STATE_DIR", &root);
         std::env::set_var("AOIDE_STAGE_DIR", &root);
@@ -5229,6 +5232,7 @@ printf '{"status":"ok","command":"workspace","message":"argv: %s","data":{"works
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _env = aoide_test_support::EnvSaver::capture(&[
             "AOIDE_ROOT",
+            "STRILLIX_ROOT",
             "AOIDE_AUDIT_LOG",
             "AOIDE_STATE_DIR",
             "AOIDE_STAGE_DIR",
@@ -5236,6 +5240,7 @@ printf '{"status":"ok","command":"workspace","message":"argv: %s","data":{"works
         ]);
         let root = aoide_test_support::unique_tmp("shellbridge-idle-client");
         std::env::set_var("AOIDE_ROOT", &root);
+        std::env::set_var("STRILLIX_ROOT", &root);
         std::env::set_var("AOIDE_AUDIT_LOG", root.join("log"));
         std::env::set_var("AOIDE_STATE_DIR", &root);
         std::env::set_var("AOIDE_STAGE_DIR", &root);
@@ -5292,6 +5297,7 @@ printf '{"status":"ok","command":"workspace","message":"argv: %s","data":{"works
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _env = aoide_test_support::EnvSaver::capture(&[
             "AOIDE_ROOT",
+            "STRILLIX_ROOT",
             "AOIDE_AUDIT_LOG",
             "AOIDE_STATE_DIR",
             "AOIDE_STAGE_DIR",
@@ -5299,6 +5305,7 @@ printf '{"status":"ok","command":"workspace","message":"argv: %s","data":{"works
         ]);
         let root = aoide_test_support::unique_tmp("shellbridge-herald-race");
         std::env::set_var("AOIDE_ROOT", &root);
+        std::env::set_var("STRILLIX_ROOT", &root);
         std::env::set_var("AOIDE_AUDIT_LOG", root.join("log"));
         std::env::set_var("AOIDE_STATE_DIR", &root);
         std::env::set_var("AOIDE_STAGE_DIR", &root);

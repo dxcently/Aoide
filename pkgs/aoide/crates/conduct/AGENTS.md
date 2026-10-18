@@ -769,7 +769,7 @@ in the message.
   action)` (pure; the unlock step and the Declarative-`save`/`drop` refusals
   live there and nowhere else) → `dispatch_rice_draft` (the sequencer; `new`'s entering
   step takes the `data.name` the save step answered). Never validate the
-  draft-name regex here — `aoide-song` is strillix-only and conduct must not depend
+  draft-name regex here — `strillix-rice` is strillix-only and conduct must not depend
   on it — and never pre-check that a draft exists: `rice mode draft` creates
   one, so an `enter` is enter-or-create and a pre-check would only race it;
   a `drop` of a missing draft or of the draft in force is the CLI's refusal. The

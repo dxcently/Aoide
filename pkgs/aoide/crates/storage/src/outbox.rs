@@ -2078,6 +2078,7 @@ mod sealed_spool_tests {
     fn env(dir: &std::path::Path) {
         std::env::set_var("AOIDE_STATE_DIR", dir);
         std::env::set_var("AOIDE_ROOT", dir);
+        std::env::set_var("STRILLIX_ROOT", dir);
     }
 
     /// A sealed entry for a real container: this node sealed to itself, so
@@ -2115,7 +2116,7 @@ mod sealed_spool_tests {
     #[test]
     fn a_sealed_spool_file_holds_no_subject_body_or_mailbox_name() {
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STATE_DIR", "AOIDE_ROOT"]);
+        let _s = EnvSaver::capture(&["AOIDE_STATE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         env(&aoide_test_support::unique_tmp("outbox-sealed-redaction"));
 
         let body = "CANARY-BODY-PLUGH-1234567890";
@@ -2145,7 +2146,7 @@ mod sealed_spool_tests {
     #[test]
     fn every_reader_of_a_redacted_entry_still_works_from_the_container_alone() {
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STATE_DIR", "AOIDE_ROOT"]);
+        let _s = EnvSaver::capture(&["AOIDE_STATE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         env(&aoide_test_support::unique_tmp("outbox-sealed-readers"));
 
         let entry = sealed_entry("CANARY-BODY-READERS-0001");
@@ -2208,7 +2209,7 @@ mod sealed_spool_tests {
     #[test]
     fn an_unauthenticated_attempt_is_neither_reached_nor_answered() {
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STATE_DIR", "AOIDE_ROOT"]);
+        let _s = EnvSaver::capture(&["AOIDE_STATE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         env(&aoide_test_support::unique_tmp("outbox-unauthenticated"));
 
         let envelope = crate::mail::mint_outbound_letter("alice", "elsewhere", "bob", "hi").unwrap();
@@ -2230,7 +2231,7 @@ mod sealed_spool_tests {
     #[test]
     fn a_deferred_entry_waits_its_backoff_and_counts_as_answered() {
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STATE_DIR", "AOIDE_ROOT"]);
+        let _s = EnvSaver::capture(&["AOIDE_STATE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         let dir = aoide_test_support::unique_tmp("outbox-deferral-window");
         env(&dir);
         let at = |tries: u32, last: &str| {

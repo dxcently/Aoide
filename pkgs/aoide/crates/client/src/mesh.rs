@@ -1602,9 +1602,10 @@ mod tests {
     /// removed after `f` returns.
     fn with_config_root<T>(tag: &str, f: impl FnOnce(&std::path::Path) -> T) -> T {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _saver = aoide_test_support::EnvSaver::capture(&["AOIDE_ROOT", "AOIDE_STATE_DIR", "AOIDE_CONFIG"]);
+        let _saver = aoide_test_support::EnvSaver::capture(&["AOIDE_ROOT", "STRILLIX_ROOT", "AOIDE_STATE_DIR", "AOIDE_CONFIG"]);
         let dir = aoide_test_support::unique_tmp(&format!("mesh-{tag}"));
         std::env::set_var("AOIDE_ROOT", &dir);
+        std::env::set_var("STRILLIX_ROOT", &dir);
         std::env::set_var("AOIDE_STATE_DIR", &dir);
         std::env::remove_var("AOIDE_CONFIG");
         let out = f(&dir);

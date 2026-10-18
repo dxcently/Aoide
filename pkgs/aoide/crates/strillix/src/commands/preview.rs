@@ -44,15 +44,15 @@ use aoide_protocol::Door;
 pub fn register(r: &mut Registry) {
     r.insert(cmd!(
         path: ["preview"],
-        summary: "Build an isolated preview root (song stage, fixture state, run/qml copies of the checkout's QML) and launch the standalone quickshell canvas against it -- never the live daemon or its socket dir. <widget> is a bare slot (uses --song), `<song>/<slot>`, or an absolute path under a songbook's own widgets/.",
-        args: [arg!("widget", "string", false, "Initial widget to preview: a bare slot name, `<song>/<slot>`, or an absolute songbook widgets/ path.")],
+        summary: "Build an isolated preview root (song stage, fixture state, run/qml copies of the checkout's QML) and launch the standalone quickshell canvas against it -- never the live daemon or its socket dir. <widget> is a bare slot (uses --song), `<song>/<slot>`, or an absolute path under a rices's own widgets/.",
+        args: [arg!("widget", "string", false, "Initial widget to preview: a bare slot name, `<song>/<slot>`, or an absolute rices widgets/ path.")],
         flags: [
             flag!("song", "string", "Song whose default livery/widgets seed the preview (default \"sonata\")."),
             flag!("fixture", "string", "Fixture set name under pkgs/strillix-shell/preview/fixtures/, or a directory path (default \"many\")."),
             flag!(
                 "livery",
                 "string",
-                "Palette source, resolved through the livery engine: `live` (the resolved live stage twin, read-only), a song name (that song's own songbook livery.json), a path to a livery file, or a path to a base16 scheme (JSON or flat key:value lines). Default: the preview's own --song."
+                "Palette source, resolved through the livery engine: `live` (the resolved live stage twin, read-only), a song name (that song's own rices livery.json), a path to a livery file, or a path to a base16 scheme (JSON or flat key:value lines). Default: the preview's own --song."
             ),
             flag!("root", "string", "Preview root directory (default $XDG_RUNTIME_DIR/aoide-preview)."),
             flag!("no-launch", "bool", "Build the root and print it; never spawn quickshell.")
@@ -92,11 +92,11 @@ pub fn register(r: &mut Registry) {
     ));
     r.insert(cmd!(
         path: ["preview", "declare"],
-        summary: "Copy the previewed widget body and/or palette from a preview root into the checkout's song/songbook/<song> -- the canvas's counterpart of `rice declare`. Byte-identical -> no-op; git commit and rebuild stay the user's own.",
+        summary: "Copy the previewed widget body and/or palette from a preview root into the checkout's rices/<song> -- the canvas's counterpart of `rice declare`. Byte-identical -> no-op; git commit and rebuild stay the user's own.",
         args: [],
         flags: [
             flag!("root", "string", "Preview root directory (default $XDG_RUNTIME_DIR/aoide-preview)."),
-            flag!("slot", "string", "Widget slot name under song/songbook/<song>/widgets/ (default: the previewed widget file's own basename).")
+            flag!("slot", "string", "Widget slot name under rices/<song>/widgets/ (default: the previewed widget file's own basename).")
         ],
         gated: true,
         implemented: true,
@@ -185,7 +185,7 @@ fn handle_preview(inv: &Invocation) -> Outcome {
                 .map(String::from)
         })
         .unwrap_or_else(|| "sonata".to_string());
-    if !aoide_song::compose::valid_song_name(&song) {
+    if !strillix_rice::compose::valid_song_name(&song) {
         return Outcome::usage(
             cmd,
             format!("`--song {song}` is not a valid song name: must match `^[a-z0-9][a-z0-9-]*$`"),
@@ -408,7 +408,7 @@ fn handle_preview_set(inv: &Invocation) -> Outcome {
     let mut changed: Vec<String> = Vec::new();
 
     if let Some(song) = inv.flags.get("song") {
-        if !aoide_song::compose::valid_song_name(song) {
+        if !strillix_rice::compose::valid_song_name(song) {
             return Outcome::usage(
                 cmd,
                 format!(
@@ -611,7 +611,7 @@ fn handle_preview_set(inv: &Invocation) -> Outcome {
 /// half of the stage-vs-commit split"): the previewed body/palette become
 /// checkout truth. `git commit`/rebuild stay the user's own — this command
 /// never touches git, the live stage, `~/.aoide`, or `run/qml`, only the
-/// checkout's `song/songbook/<song>/`.
+/// checkout's `rices/<song>/`.
 fn handle_preview_declare(inv: &Invocation) -> Outcome {
     let cmd = "preview.declare";
     let root = match resolve_root(inv.flags.get("root").map(String::as_str)) {
@@ -656,7 +656,7 @@ fn handle_preview_declare(inv: &Invocation) -> Outcome {
     // `/` or `..` in it -- validate before it's ever joined into a path
     // (the checkout's `widgets_dir`/`checkout_livery_path` below both key
     // off it directly).
-    if !aoide_song::compose::valid_song_name(&song) {
+    if !strillix_rice::compose::valid_song_name(&song) {
         return Outcome::usage(
             cmd,
             format!(
@@ -681,16 +681,16 @@ fn handle_preview_declare(inv: &Invocation) -> Outcome {
     let mut changed: Vec<String> = Vec::new();
 
     // ── widget body ─────────────────────────────────────
-    // Never declare a lane file or an out-of-songbook path -- only a
-    // widget under `run/qml/songs/` (mirrors a real songbook's own
+    // Never declare a lane file or an out-of-rices path -- only a
+    // widget under `run/qml/songs/` (mirrors a real rices's own
     // `<song>/widgets/`) is something `preview declare` has any business
     // copying back into the checkout. The prefix check alone is a STRING
     // match and nothing more: a `..`-laden field
     // (`songs/demo/../../../../pkgs/strillix-shell/qml/ShellBridge`)
     // satisfies it while resolving to a lane file entirely outside any
-    // songbook -- so a `..` component is refused outright, and (the
+    // rices -- so a `..` component is refused outright, and (the
     // structural check underneath the string one) the field's resolved
-    // CHECKOUT file is required to land inside the real checkout songbook.
+    // CHECKOUT file is required to land inside the real checkout rices.
     if has_parent_dir_component(&widget_field) || !widget_field.starts_with("songs/") {
         return Outcome::usage(
             cmd,
@@ -699,9 +699,9 @@ fn handle_preview_declare(inv: &Invocation) -> Outcome {
             ),
         );
     }
-    let songbook_real = match checkout.join("song").join("songbook").canonicalize() {
+    let rices_real = match checkout.join("rices").canonicalize() {
         Ok(p) => p,
-        Err(e) => return Outcome::error(cmd, format!("resolving the checkout songbook: {e}")),
+        Err(e) => return Outcome::error(cmd, format!("resolving the checkout rices: {e}")),
     };
     let source = match resolve_widget_abs(&checkout, &widget_field) {
         Some(p) => p,
@@ -712,21 +712,21 @@ fn handle_preview_declare(inv: &Invocation) -> Outcome {
             )
         }
     };
-    let source_is_in_a_songbook_widgets_dir =
-        source.strip_prefix(&songbook_real).is_ok_and(|rel| {
+    let source_is_in_a_rices_widgets_dir =
+        source.strip_prefix(&rices_real).is_ok_and(|rel| {
             let comps: Vec<_> = rel.components().collect();
             comps.len() >= 3 && comps[1].as_os_str() == "widgets"
         });
-    if !source_is_in_a_songbook_widgets_dir {
+    if !source_is_in_a_rices_widgets_dir {
         return Outcome::usage(
             cmd,
-            format!("`widget` (`{widget_field}`) resolves to {} which is outside any songbook's widgets/ directory", source.display()),
+            format!("`widget` (`{widget_field}`) resolves to {} which is outside any rices's widgets/ directory", source.display()),
         );
     }
 
     let slot = match inv.flags.get("slot") {
         Some(s) => {
-            if !aoide_song::compose::valid_song_name(s) {
+            if !strillix_rice::compose::valid_song_name(s) {
                 return Outcome::usage(
                     cmd,
                     format!(
@@ -751,8 +751,7 @@ fn handle_preview_declare(inv: &Invocation) -> Outcome {
     };
 
     let widgets_dir = checkout
-        .join("song")
-        .join("songbook")
+        .join("rices")
         .join(&song)
         .join("widgets");
     let target = widgets_dir.join(format!("{slot}.qml"));
@@ -760,7 +759,7 @@ fn handle_preview_declare(inv: &Invocation) -> Outcome {
     let body_status = if target.canonicalize().ok().as_deref() == Some(source.as_path()) {
         // "already" -- the checkout file already IS the previewed body
         // (the previewed widget resolved straight through to its own
-        // songbook slot; there is nothing to copy).
+        // rices slot; there is nothing to copy).
         "already"
     } else {
         let src_bytes = match std::fs::read(&source) {
@@ -804,8 +803,7 @@ fn handle_preview_declare(inv: &Invocation) -> Outcome {
         };
 
         let checkout_livery_path = checkout
-            .join("song")
-            .join("songbook")
+            .join("rices")
             .join(&song)
             .join("livery.json");
         let original_raw = std::fs::read_to_string(&checkout_livery_path).ok();
@@ -867,7 +865,7 @@ fn handle_preview_declare(inv: &Invocation) -> Outcome {
         format!(
             "{} file(s) declared into {} -- commit and rebuild are yours",
             changed.len(),
-            checkout.join("song").join("songbook").join(&song).display()
+            checkout.join("rices").join(&song).display()
         )
     };
 
@@ -1057,8 +1055,8 @@ enum LiveryStageError {
 ///   - `"live"` — the resolved LIVE stage twin (`aoide_storage::fs::
 ///     stage_dir().join("livery.json")`, host overrides included) — read
 ///     only, never written by this command.
-///   - a bare valid song name that has a songbook dir — that song's own
-///     `song/songbook/<name>/livery.json`.
+///   - a bare valid song name that has a rices dir — that song's own
+///     `rices/<name>/livery.json`.
 ///   - anything else — a literal path, either to a livery file or to a
 ///     base16 scheme file (JSON or the flat line shape); [`parse_livery_or_base16`]
 ///     tells the two apart.
@@ -1066,12 +1064,11 @@ fn load_livery_container(spec: &str, checkout: &Path) -> Result<Value, LiverySta
     let src: PathBuf = if spec == "live" {
         aoide_storage::fs::stage_dir().join("livery.json")
     } else if !spec.contains('/')
-        && aoide_song::compose::valid_song_name(spec)
-        && checkout.join("song").join("songbook").join(spec).is_dir()
+        && strillix_rice::compose::valid_song_name(spec)
+        && checkout.join("rices").join(spec).is_dir()
     {
         checkout
-            .join("song")
-            .join("songbook")
+            .join("rices")
             .join(spec)
             .join("livery.json")
     } else {
@@ -1121,7 +1118,7 @@ fn parse_livery_or_base16(raw: &str, src: &Path) -> Result<Value, LiveryStageErr
 /// object, normalizing each hex value on the way in.
 fn base16_scheme_from_json(obj: &Map<String, Value>) -> std::collections::BTreeMap<String, String> {
     let mut out = std::collections::BTreeMap::new();
-    for key in aoide_song::livery::schema::BASE16_KEYS {
+    for key in strillix_rice::livery::schema::BASE16_KEYS {
         if let Some(v) = obj.get(key).and_then(Value::as_str) {
             out.insert(key.to_string(), normalize_hex(v));
         }
@@ -1147,7 +1144,7 @@ fn parse_flat_base16_lines(text: &str) -> std::collections::BTreeMap<String, Str
             continue;
         };
         let key = key.trim();
-        if !aoide_song::livery::schema::BASE16_KEYS.contains(&key) {
+        if !strillix_rice::livery::schema::BASE16_KEYS.contains(&key) {
             continue;
         }
         let mut value = value.trim();
@@ -1184,7 +1181,7 @@ fn normalize_hex(s: &str) -> String {
 fn livery_from_base16(
     scheme: &std::collections::BTreeMap<String, String>,
 ) -> Result<Value, Vec<String>> {
-    let missing: Vec<String> = aoide_song::livery::schema::BASE16_KEYS
+    let missing: Vec<String> = strillix_rice::livery::schema::BASE16_KEYS
         .iter()
         .filter(|k| !scheme.contains_key(**k))
         .map(|k| k.to_string())
@@ -1193,7 +1190,7 @@ fn livery_from_base16(
         return Err(missing);
     }
     let get = |k: &str| scheme.get(k).cloned().unwrap_or_default();
-    let base16: Map<String, Value> = aoide_song::livery::schema::BASE16_KEYS
+    let base16: Map<String, Value> = strillix_rice::livery::schema::BASE16_KEYS
         .iter()
         .map(|k| (k.to_string(), json!(get(k))))
         .collect();
@@ -1213,15 +1210,15 @@ fn livery_from_base16(
     }))
 }
 
-/// Every songbook dir under the checkout with a `livery.json` of its own,
+/// Every rices dir under the checkout with a `livery.json` of its own,
 /// sorted, `_`-prefixed (shelved) dirs skipped — `preview.json`'s
 /// `"liveries"` list, so a future picker UI (or a human reading the
 /// control file) can see every `<song>` form `--livery` will accept
-/// without having to `ls` the songbook by hand.
+/// without having to `ls` the rices by hand.
 fn list_liveries(checkout: &Path) -> Vec<String> {
-    let songbook = checkout.join("song").join("songbook");
+    let rices = checkout.join("rices");
     let mut out = Vec::new();
-    let Ok(entries) = std::fs::read_dir(&songbook) else {
+    let Ok(entries) = std::fs::read_dir(&rices) else {
         return out;
     };
     for entry in entries.flatten() {
@@ -1239,7 +1236,7 @@ fn list_liveries(checkout: &Path) -> Vec<String> {
 
 /// Stage `spec` (any of the four `--livery` forms) into `dst`, through the
 /// SAME engine every live emit uses: [`load_livery_container`] resolves the
-/// form to a raw container, `aoide_song::livery::resolve::resolve` +
+/// form to a raw container, `strillix_rice::livery::resolve::resolve` +
 /// `to_json_string` fully resolve it (fallbacks applied — the document
 /// `strillix livery resolve` itself prints; `LiveryState` on the QML side never
 /// sees a null), the string is reparsed, given `"song": <song>`, pretty-
@@ -1253,9 +1250,9 @@ fn stage_livery(
     dst: &Path,
 ) -> Result<(), LiveryStageError> {
     let container = load_livery_container(spec, checkout)?;
-    let resolved = aoide_song::livery::resolve::resolve(&container)
+    let resolved = strillix_rice::livery::resolve::resolve(&container)
         .map_err(|e| LiveryStageError::Error(format!("resolving livery `{spec}`: {e}")))?;
-    let staged = aoide_song::livery::resolve::to_json_string(&resolved);
+    let staged = strillix_rice::livery::resolve::to_json_string(&resolved);
     let mut obj = match serde_json::from_str::<Value>(&staged) {
         Ok(Value::Object(obj)) => obj,
         _ => {
@@ -1513,7 +1510,7 @@ fn stage_qml_copies(checkout: &Path, run_qml_dir: &Path) -> Result<(), String> {
     Ok(())
 }
 
-/// One copied tree per song dir under `CHECKOUT/song/songbook/` that has a
+/// One copied tree per song dir under `CHECKOUT/rices/` that has a
 /// `widgets/` dir, `_`-prefixed (shelved) dirs skipped — `ROOT/run/qml/
 /// songs/<song>/` mirrors that song's OWN `widgets/` dir, so `import
 /// "../.."`-shaped relative imports inside a widget resolve exactly as
@@ -1521,12 +1518,12 @@ fn stage_qml_copies(checkout: &Path, run_qml_dir: &Path) -> Result<(), String> {
 fn stage_song_copies(checkout: &Path, run_qml_songs: &Path) -> Result<(), String> {
     std::fs::create_dir_all(run_qml_songs)
         .map_err(|e| format!("creating {}: {e}", run_qml_songs.display()))?;
-    let songbook = checkout.join("song").join("songbook");
-    let Ok(entries) = std::fs::read_dir(&songbook) else {
+    let rices = checkout.join("rices");
+    let Ok(entries) = std::fs::read_dir(&rices) else {
         return Ok(());
     };
     for entry in entries {
-        let entry = entry.map_err(|e| format!("reading {}: {e}", songbook.display()))?;
+        let entry = entry.map_err(|e| format!("reading {}: {e}", rices.display()))?;
         let path = entry.path();
         if !path.is_dir() {
             continue;
@@ -1544,7 +1541,7 @@ fn stage_song_copies(checkout: &Path, run_qml_songs: &Path) -> Result<(), String
 }
 
 /// `src -> dst` for every `watch` entry that has a copy under `ROOT/run/
-/// qml/`: a songbook widget file (`CHECKOUT/song/songbook/<s>/widgets/<rest>`
+/// qml/`: a rices widget file (`CHECKOUT/rices/<s>/widgets/<rest>`
 /// -> `ROOT/run/qml/songs/<s>/<rest>`) or a shell file
 /// (`CHECKOUT/<STRILLIX_SHELL_SRC>/qml/<f>` -> `ROOT/run/qml/<f>`, the flat
 /// one-copy-per-`*.qml` [`stage_qml_copies`] writes — a watch entry nested
@@ -1552,7 +1549,7 @@ fn stage_song_copies(checkout: &Path, run_qml_songs: &Path) -> Result<(), String
 /// rewrites each `dst` from its `src` before a reload; a watched file with no
 /// copy (a foreign path the canvas loads verbatim) has no entry.
 fn compute_stage_map(checkout: &Path, root: &Path, watch: &[String]) -> Map<String, Value> {
-    let songbook = checkout.join("song").join("songbook");
+    let rices = checkout.join("rices");
     let shell_qml = checkout.join(STRILLIX_SHELL_SRC).join("qml");
     let run_qml = root.join("run").join("qml");
     let comps_of = |rel: &Path| -> Vec<String> {
@@ -1563,7 +1560,7 @@ fn compute_stage_map(checkout: &Path, root: &Path, watch: &[String]) -> Map<Stri
     let mut out = Map::new();
     for src in watch {
         let p = Path::new(src);
-        if let Ok(rel) = p.strip_prefix(&songbook) {
+        if let Ok(rel) = p.strip_prefix(&rices) {
             let comps = comps_of(rel);
             if comps.len() >= 3 && comps[1] == "widgets" {
                 let dst = run_qml
@@ -1618,7 +1615,7 @@ fn has_parent_dir_component(s: &str) -> bool {
         .any(|c| matches!(c, std::path::Component::ParentDir))
 }
 
-/// Pure: an absolute path under `CHECKOUT/song/songbook/<s>/widgets/<file>`
+/// Pure: an absolute path under `CHECKOUT/rices/<s>/widgets/<file>`
 /// rewrites to `songs/<s>/<file>` (so it resolves inside the isolated
 /// root's own run/qml copies); any other absolute path is kept verbatim (the
 /// canvas reports the load error live — this never checks existence);
@@ -1627,8 +1624,8 @@ fn has_parent_dir_component(s: &str) -> bool {
 fn map_widget(widget: &str, song: &str, checkout: &Path) -> String {
     let p = Path::new(widget);
     if p.is_absolute() {
-        let songbook = checkout.join("song").join("songbook");
-        if let Ok(rel) = p.strip_prefix(&songbook) {
+        let rices = checkout.join("rices");
+        if let Ok(rel) = p.strip_prefix(&rices) {
             let comps: Vec<String> = rel
                 .components()
                 .map(|c| c.as_os_str().to_string_lossy().into_owned())
@@ -1657,9 +1654,9 @@ fn map_widget(widget: &str, song: &str, checkout: &Path) -> String {
 
 /// Resolve a `preview.json` `widget` field to the CHECKOUT file it names
 /// (the file the designer edits -- never the root's own copy of it):
-/// absolute already (an out-of-songbook path `map_widget` passed through
+/// absolute already (an out-of-rices path `map_widget` passed through
 /// verbatim) is canonicalized directly; `songs/<s>/<rest>` maps to
-/// `CHECKOUT/song/songbook/<s>/widgets/<rest>`; any other relative
+/// `CHECKOUT/rices/<s>/widgets/<rest>`; any other relative
 /// spelling is a shell file, `CHECKOUT/pkgs/strillix-shell/qml/
 /// <rest>`. A `..` component is refused (`None`), as is a missing file --
 /// best-effort metadata for [`compute_watch_list`], never worth failing
@@ -1674,8 +1671,7 @@ pub(crate) fn resolve_widget_abs(checkout: &Path, widget_field: &str) -> Option<
     } else if let Some(rest) = widget_field.strip_prefix("songs/") {
         let (song, file) = rest.split_once('/')?;
         checkout
-            .join("song")
-            .join("songbook")
+            .join("rices")
             .join(song)
             .join("widgets")
             .join(file)
@@ -1690,15 +1686,14 @@ pub(crate) fn resolve_widget_abs(checkout: &Path, widget_field: &str) -> Option<
 
 /// The P2 canvas's hot-reload watch set (task: live reload + `preview
 /// declare`): every `*.qml` under the CURRENT song's own
-/// `checkout/song/songbook/<song>/widgets/` (sorted), plus the previewed
+/// `checkout/rices/<song>/widgets/` (sorted), plus the previewed
 /// widget's own resolved file when it lives somewhere else -- a foreign
 /// song's widget, or a lane path passed in verbatim. Pure over an
 /// already-resolved absolute widget path so it needs no env, no preview
 /// root, and no live filesystem beyond the two directories it's handed.
 fn compute_watch_list(checkout: &Path, song: &str, widget_abs: Option<&Path>) -> Vec<String> {
     let widgets_dir = checkout
-        .join("song")
-        .join("songbook")
+        .join("rices")
         .join(song)
         .join("widgets");
     let mut out: Vec<String> = Vec::new();
@@ -1886,7 +1881,7 @@ fn spawn_quickshell(qml_path: &Path, root: &Path) -> std::io::Result<Child> {
 /// failure (no `hyprctl`, not on Hyprland, the window never appearing, a
 /// monitor query that fails) is swallowed silently — `aoide_screen` is not
 /// a strillix dependency (root `AGENTS.md`'s core/paint boundary), so this
-/// shells `hyprctl` directly, the same pattern `aoide_song::live::
+/// shells `hyprctl` directly, the same pattern `strillix_rice::live::
 /// apply_live` already uses for its own best-effort geometry keywords.
 fn best_effort_float(canvas_pid: u32) {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
@@ -2051,27 +2046,27 @@ mod tests {
         std::fs::create_dir_all(&icons).unwrap();
         std::fs::write(icons.join("drag-hand-gesture.svg"), "<svg/>\n").unwrap();
 
-        let songbook = dir.join("song/songbook");
-        let sonata_widgets = songbook.join("sonata/widgets");
+        let rices = dir.join("rices");
+        let sonata_widgets = rices.join("sonata/widgets");
         std::fs::create_dir_all(&sonata_widgets).unwrap();
         std::fs::write(sonata_widgets.join("conductor.qml"), "// conductor\n").unwrap();
         std::fs::write(
-            songbook.join("sonata/livery.json"),
+            rices.join("sonata/livery.json"),
             r##"{"palette": {"bg": "#111111", "fg": "#eeeeee", "accent": "#ff00ff", "urgent": "#ff0000"}}"##,
         )
         .unwrap();
 
-        let etude_widgets = songbook.join("etude/widgets");
+        let etude_widgets = rices.join("etude/widgets");
         std::fs::create_dir_all(&etude_widgets).unwrap();
         std::fs::write(etude_widgets.join("dock.qml"), "// dock\n").unwrap();
         std::fs::write(
-            songbook.join("etude/livery.json"),
+            rices.join("etude/livery.json"),
             r##"{"palette": {"bg": "#222222", "fg": "#dddddd", "accent": "#00ffff", "urgent": "#ffaa00"}}"##,
         )
         .unwrap();
 
         // shelved: has a widgets/ dir too, but must never be linked.
-        let shelved_widgets = songbook.join("_shelved/widgets");
+        let shelved_widgets = rices.join("_shelved/widgets");
         std::fs::create_dir_all(&shelved_widgets).unwrap();
         std::fs::write(shelved_widgets.join("x.qml"), "// x\n").unwrap();
     }
@@ -2315,7 +2310,7 @@ mod tests {
     /// A full, valid base16 scheme with distinct values in every slot, so a
     /// missing-slot assertion can reliably name the ONE it drops.
     fn full_base16_pairs() -> Vec<(&'static str, &'static str)> {
-        aoide_song::livery::schema::BASE16_KEYS
+        strillix_rice::livery::schema::BASE16_KEYS
             .iter()
             .enumerate()
             .map(|(i, k)| (*k, BASE16_HEX[i]))
@@ -2338,6 +2333,7 @@ mod tests {
         let checkout = base.join("checkout");
         fake_checkout(&checkout);
         std::env::set_var("AOIDE_ROOT", base.join("live-root"));
+        std::env::set_var("STRILLIX_ROOT", base.join("live-root"));
         let live_stage = aoide_storage::fs::stage_dir();
         std::fs::create_dir_all(&live_stage).unwrap();
         std::fs::write(
@@ -2360,14 +2356,14 @@ mod tests {
     }
 
     #[test]
-    fn spec_song_name_reads_that_songs_own_songbook_livery() {
+    fn spec_song_name_reads_that_songs_own_rices_livery() {
         let base = scratch("livery_song");
         let checkout = base.join("checkout");
         fake_checkout(&checkout);
         let dst = base.join("out-livery.json");
 
         // spec is "etude" while the preview's own --song is "sonata" --
-        // the two are independent: --livery names ANY songbook song.
+        // the two are independent: --livery names ANY rices song.
         stage_livery("etude", "sonata", &checkout, &dst).unwrap();
         let v: Value = serde_json::from_str(&std::fs::read_to_string(&dst).unwrap()).unwrap();
         assert_eq!(
@@ -2499,7 +2495,7 @@ mod tests {
         let checkout = base.join("checkout");
         fake_checkout(&checkout);
         // a third song with no livery.json of its own -- must not appear.
-        std::fs::create_dir_all(checkout.join("song/songbook/no-livery/widgets")).unwrap();
+        std::fs::create_dir_all(checkout.join("rices/no-livery/widgets")).unwrap();
 
         let got = list_liveries(&checkout);
         assert_eq!(got, vec!["etude".to_string(), "sonata".to_string()]);
@@ -2690,7 +2686,7 @@ mod tests {
         let checkout = base.join("checkout");
         fake_checkout(&checkout);
 
-        let abs = checkout.join("song/songbook/sonata/widgets/conductor.qml");
+        let abs = checkout.join("rices/sonata/widgets/conductor.qml");
         assert_eq!(
             map_widget(&abs.to_string_lossy(), "sonata", &checkout),
             "songs/sonata/conductor.qml"
@@ -2807,14 +2803,14 @@ mod tests {
 
         // sonata's own widgets/ has exactly one qml file (conductor.qml).
         let sonata_conductor = checkout
-            .join("song/songbook/sonata/widgets/conductor.qml")
+            .join("rices/sonata/widgets/conductor.qml")
             .to_string_lossy()
             .into_owned();
         let only_song = compute_watch_list(&checkout, "sonata", None);
         assert_eq!(only_song, vec![sonata_conductor.clone()]);
 
         // a foreign widget (etude's dock.qml) is appended, staying sorted.
-        let foreign = checkout.join("song/songbook/etude/widgets/dock.qml");
+        let foreign = checkout.join("rices/etude/widgets/dock.qml");
         let mut expected = vec![
             sonata_conductor.clone(),
             foreign.to_string_lossy().into_owned(),
@@ -2827,7 +2823,7 @@ mod tests {
 
         // the widget's own file, when it's ALREADY inside the song's own
         // widgets/, is never duplicated.
-        let own = checkout.join("song/songbook/sonata/widgets/conductor.qml");
+        let own = checkout.join("rices/sonata/widgets/conductor.qml");
         assert_eq!(
             compute_watch_list(&checkout, "sonata", Some(&own)),
             vec![sonata_conductor]
@@ -2891,11 +2887,11 @@ mod tests {
         let root = base.join("root");
 
         // "songs/etude/dock.qml" resolves to the CHECKOUT's own
-        // `song/songbook/etude/widgets/dock.qml` -- never to anything under
+        // `rices/etude/widgets/dock.qml` -- never to anything under
         // `root` -- and the containment check requires exactly that file
-        // to live inside a real songbook `widgets/` dir. The stale link
+        // to live inside a real rices `widgets/` dir. The stale link
         // planted under `root` below must be ignored, not followed.
-        let etude_dock = checkout.join("song/songbook/etude/widgets/dock.qml");
+        let etude_dock = checkout.join("rices/etude/widgets/dock.qml");
         std::fs::write(&etude_dock, "// foreign dock body\n").unwrap();
         let link_dir = root.join("run/qml/songs/etude");
         std::fs::create_dir_all(&link_dir).unwrap();
@@ -2917,7 +2913,7 @@ mod tests {
         );
         let data = outcome.data.unwrap();
         assert_eq!(data["body"], "declared");
-        let target = checkout.join("song/songbook/sonata/widgets/dock.qml");
+        let target = checkout.join("rices/sonata/widgets/dock.qml");
         assert_eq!(
             std::fs::read_to_string(&target).unwrap(),
             "// foreign dock body\n"
@@ -2938,7 +2934,7 @@ mod tests {
         let link_dir = root.join("run/qml/songs/sonata");
         std::fs::create_dir_all(&link_dir).unwrap();
         std::os::unix::fs::symlink(
-            checkout.join("song/songbook/sonata/widgets/conductor.qml"),
+            checkout.join("rices/sonata/widgets/conductor.qml"),
             link_dir.join("conductor.qml"),
         )
         .unwrap();
@@ -2972,14 +2968,14 @@ mod tests {
         // the foreign source and the EXISTING target already hold identical
         // bytes at genuinely different paths (not the same file via symlink) --
         // the source itself must still be a real symlink into the checkout
-        // songbook per the containment check (BLOCKER 1 fix-up).
-        let etude_dock = checkout.join("song/songbook/etude/widgets/dock.qml");
+        // rices per the containment check (BLOCKER 1 fix-up).
+        let etude_dock = checkout.join("rices/etude/widgets/dock.qml");
         std::fs::write(&etude_dock, "// same body\n").unwrap();
         let link_dir = root.join("run/qml/songs/etude");
         std::fs::create_dir_all(&link_dir).unwrap();
         std::os::unix::fs::symlink(&etude_dock, link_dir.join("dock.qml")).unwrap();
 
-        let target_dir = checkout.join("song/songbook/sonata/widgets");
+        let target_dir = checkout.join("rices/sonata/widgets");
         std::fs::create_dir_all(&target_dir).unwrap();
         std::fs::write(target_dir.join("dock.qml"), "// same body\n").unwrap();
 
@@ -3014,7 +3010,7 @@ mod tests {
         let link_dir = root.join("run/qml/songs/sonata");
         std::fs::create_dir_all(&link_dir).unwrap();
         std::os::unix::fs::symlink(
-            checkout.join("song/songbook/sonata/widgets/conductor.qml"),
+            checkout.join("rices/sonata/widgets/conductor.qml"),
             link_dir.join("conductor.qml"),
         )
         .unwrap();
@@ -3027,7 +3023,7 @@ mod tests {
         )
         .unwrap();
 
-        let checkout_livery = checkout.join("song/songbook/sonata/livery.json");
+        let checkout_livery = checkout.join("rices/sonata/livery.json");
         std::fs::write(
             &checkout_livery,
             r##"{"schemaVersion":"0","song":"stale","widgets":{"conductor":{"kind":"surface"}},"cover":"cover.png","palette":{"bg":"#111111","fg":"#eeeeee","accent":"#ff00ff","urgent":"#ff0000"}}"##,
@@ -3075,7 +3071,7 @@ mod tests {
         let link_dir = root.join("run/qml/songs/sonata");
         std::fs::create_dir_all(&link_dir).unwrap();
         std::os::unix::fs::symlink(
-            checkout.join("song/songbook/sonata/widgets/conductor.qml"),
+            checkout.join("rices/sonata/widgets/conductor.qml"),
             link_dir.join("conductor.qml"),
         )
         .unwrap();
@@ -3107,7 +3103,7 @@ mod tests {
         // `..`-laden persisted `widget` field satisfies it while
         // canonicalizing, through a REAL `run/qml/songs/<song>` directory
         // symlink (what an older, symlinking root left behind), straight out
-        // to a lane file entirely outside any songbook. Reproduces the
+        // to a lane file entirely outside any rices. Reproduces the
         // coordinator's own review shape (`demo/../../../../pkgs/strillix-shell/
         // qml/ShellBridge`; "sonata" stands in for "demo" here).
         let base = scratch("declare_traversal_via_symlink");
@@ -3118,7 +3114,7 @@ mod tests {
         let songs_dir = root.join("run/qml/songs");
         std::fs::create_dir_all(&songs_dir).unwrap();
         std::os::unix::fs::symlink(
-            checkout.join("song/songbook/sonata/widgets"),
+            checkout.join("rices/sonata/widgets"),
             songs_dir.join("sonata"),
         )
         .unwrap();
@@ -3134,9 +3130,9 @@ mod tests {
         assert_eq!(outcome.status, aoide_protocol::output::Status::Usage);
         assert!(
             !checkout
-                .join("song/songbook/sonata/widgets/ShellBridge.qml")
+                .join("rices/sonata/widgets/ShellBridge.qml")
                 .exists(),
-            "must never copy a lane file into the songbook"
+            "must never copy a lane file into the rices"
         );
     }
 
@@ -3153,7 +3149,7 @@ mod tests {
         let link_dir = root.join("run/qml/songs/sonata");
         std::fs::create_dir_all(&link_dir).unwrap();
         std::os::unix::fs::symlink(
-            checkout.join("song/songbook/sonata/widgets/conductor.qml"),
+            checkout.join("rices/sonata/widgets/conductor.qml"),
             link_dir.join("conductor.qml"),
         )
         .unwrap();
@@ -3172,7 +3168,7 @@ mod tests {
         assert_eq!(outcome.status, aoide_protocol::output::Status::Usage);
         assert!(
             !checkout.join("pwned").exists(),
-            "must never escape the songbook widgets/ dir"
+            "must never escape the rices widgets/ dir"
         );
     }
 
@@ -3191,7 +3187,7 @@ mod tests {
         )
         .unwrap();
         std::os::unix::fs::symlink(
-            checkout.join("song/songbook/sonata/widgets"),
+            checkout.join("rices/sonata/widgets"),
             run_qml_dir.join("songs/sonata"),
         )
         .unwrap();
@@ -3206,7 +3202,7 @@ mod tests {
             ),
             (
                 run_qml_dir.join("songs/sonata/conductor.qml"),
-                checkout.join("song/songbook/sonata/widgets/conductor.qml"),
+                checkout.join("rices/sonata/widgets/conductor.qml"),
             ),
         ] {
             assert!(
@@ -3237,8 +3233,8 @@ mod tests {
         let checkout = Path::new("/c");
         let root = Path::new("/r");
         let watch = vec![
-            "/c/song/songbook/sonata/widgets/conductor.qml".to_string(),
-            "/c/song/songbook/etude/widgets/parts/Knob.qml".to_string(),
+            "/c/rices/sonata/widgets/conductor.qml".to_string(),
+            "/c/rices/etude/widgets/parts/Knob.qml".to_string(),
             format!("/c/{STRILLIX_SHELL_SRC}/qml/ShellBridge.qml"),
             "/elsewhere/foreign.qml".to_string(),
         ];
@@ -3246,41 +3242,41 @@ mod tests {
         assert_eq!(
             Value::Object(map),
             json!({
-                "/c/song/songbook/sonata/widgets/conductor.qml": "/r/run/qml/songs/sonata/conductor.qml",
-                "/c/song/songbook/etude/widgets/parts/Knob.qml": "/r/run/qml/songs/etude/parts/Knob.qml",
+                "/c/rices/sonata/widgets/conductor.qml": "/r/run/qml/songs/sonata/conductor.qml",
+                "/c/rices/etude/widgets/parts/Knob.qml": "/r/run/qml/songs/etude/parts/Knob.qml",
                 "/c/pkgs/strillix-shell/qml/ShellBridge.qml": "/r/run/qml/ShellBridge.qml",
             })
         );
     }
 
     /// The shell arm's `src` set is the shell's qml dir's OWN direct children
-    /// — nothing else may enter, and the songbook arm keeps claiming every
-    /// songbook path (a songbook path that contains the shell prefix still
-    /// belongs to the songbook arm; `stage_song_copies` mirrors it under
+    /// — nothing else may enter, and the rices arm keeps claiming every
+    /// rices path (a rices path that contains the shell prefix still
+    /// belongs to the rices arm; `stage_song_copies` mirrors it under
     /// `songs/`, which is where its own `import "../.."` expects to be).
     #[test]
-    fn compute_stage_map_songbook_arm_is_unaffected_by_the_shell_arm() {
+    fn compute_stage_map_rices_arm_is_unaffected_by_the_shell_arm() {
         let checkout = Path::new("/c");
         let root = Path::new("/r");
-        let songbook_widget = "/c/song/songbook/sonata/widgets/conductor.qml";
-        let songbook_lookalike =
-            format!("/c/song/songbook/sonata/widgets/{STRILLIX_SHELL_SRC}/qml/ShellBridge.qml");
+        let rice_widget = "/c/rices/sonata/widgets/conductor.qml";
+        let rices_lookalike =
+            format!("/c/rices/sonata/widgets/{STRILLIX_SHELL_SRC}/qml/ShellBridge.qml");
         let nested_shell = format!("/c/{STRILLIX_SHELL_SRC}/qml/songs/etude/widgets/Knob.qml");
         let not_qml = format!("/c/{STRILLIX_SHELL_SRC}/qml/slots.md");
         let watch = vec![
-            songbook_widget.to_string(),
-            songbook_lookalike.clone(),
+            rice_widget.to_string(),
+            rices_lookalike.clone(),
             nested_shell.clone(),
             not_qml.clone(),
         ];
         let map = compute_stage_map(checkout, root, &watch);
         assert_eq!(map.len(), 2);
         assert_eq!(
-            map.get(songbook_widget),
+            map.get(rice_widget),
             Some(&json!("/r/run/qml/songs/sonata/conductor.qml"))
         );
         assert_eq!(
-            map.get(&songbook_lookalike),
+            map.get(&rices_lookalike),
             Some(&json!(
                 "/r/run/qml/songs/sonata/pkgs/strillix-shell/qml/ShellBridge.qml"
             ))
@@ -3297,7 +3293,7 @@ mod tests {
         let real = checkout.canonicalize().unwrap();
         assert_eq!(
             resolve_widget_abs(&checkout, "songs/sonata/conductor.qml"),
-            Some(real.join("song/songbook/sonata/widgets/conductor.qml"))
+            Some(real.join("rices/sonata/widgets/conductor.qml"))
         );
         assert_eq!(
             resolve_widget_abs(&checkout, "ShellBridge.qml"),

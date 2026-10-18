@@ -1,7 +1,7 @@
 # lib/song.nix — the widget-record builder.
 #
 # A song declares each of its widgets as ONE nix function, at
-# `song/songbook/<song>/_widgets/<slot>.nix`. A sibling `default.nix` roll-up
+# `rices/<song>/_widgets/<slot>.nix`. A sibling `default.nix` roll-up
 # binds the owner and the slot name to each function; the song's `rice.nix`
 # composes the result. This file is the song-blind mechanism both halves call —
 # the nix analogue of `pkgs/strillix-shell/qml/WidgetSlot.qml`, which
@@ -16,15 +16,15 @@
 # WHY A PLAIN FUNCTION AND NOT A MODULE FRAGMENT. A fragment is only reachable
 # through the merged config, and only the performed song's body is imported
 # into it. The quickshell derivation walks EVERY song in the
-# songbook (see modules/dendrites/strillix/runtime.nix's songs loop and its note
+# rices (see modules/dendrites/strillix/runtime.nix's songs loop and its note
 # on why the registry cannot come from `config`), so a fragment-based record
 # would be invisible for every song the host is not currently performing —
 # nine songs out of ten, silently. A plain function is importable by the
 # derivation regardless of which song is active.
 #
-# `_widgets/` is deliberately underscore-prefixed: `lib/songbook.nix`'s scan drops any
+# `_widgets/` is deliberately underscore-prefixed: `lib/rices.nix`'s scan drops any
 # path containing `/_`, so the shelf never joins the module merge and
-# `checks.song-shape` — which filters walk's output — never sees it. The shelf
+# `checks.rice-shape` — which filters walk's output — never sees it. The shelf
 # is score, not a module.
 #
 # WHY EVERY GUARD LIVES IN `composeSong` AND NOT IN `mkWidget`. A composition

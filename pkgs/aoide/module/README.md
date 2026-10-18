@@ -28,7 +28,7 @@ package build from the same one-line input.
   a desktop that dies takes the paint down and leaves the daemon, its audit
   log, its gate and its doors running.
   `modules/dendrites/aoided.nix` carries the
-  strillix-gated `AOIDE_SONG_TEMPLATES` variable plus every door
+  strillix-gated `STRILLIX_TEMPLATES` variable plus every door
   (mcp/a2a/pair-watch), the discovery firewall carve, and the usage
   poller — all still AoideOS-side deployment.
 

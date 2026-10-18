@@ -2458,6 +2458,7 @@ mod binding_carriage_tests {
     fn env(dir: &std::path::Path) {
         std::env::set_var("AOIDE_STATE_DIR", dir);
         std::env::set_var("AOIDE_ROOT", dir);
+        std::env::set_var("STRILLIX_ROOT", dir);
     }
 
     fn keypair() -> crate::identity::Keypair {
@@ -2499,7 +2500,7 @@ mod binding_carriage_tests {
     #[test]
     fn a_request_with_no_binding_parks_and_pairs_exactly_as_before() {
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STATE_DIR", "AOIDE_ROOT"]);
+        let _s = EnvSaver::capture(&["AOIDE_STATE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         env(&aoide_test_support::unique_tmp("pairing-no-binding"));
 
         let id = park("box-a");
@@ -2527,7 +2528,7 @@ mod binding_carriage_tests {
     #[test]
     fn an_older_binding_arriving_over_the_ceremony_never_walks_the_record_back() {
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STATE_DIR", "AOIDE_ROOT"]);
+        let _s = EnvSaver::capture(&["AOIDE_STATE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         env(&aoide_test_support::unique_tmp("pairing-no-downgrade"));
 
         let id = park("box-a");
@@ -2561,7 +2562,7 @@ mod binding_carriage_tests {
     #[test]
     fn an_outbound_release_never_walks_its_record_back_either() {
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STATE_DIR", "AOIDE_ROOT"]);
+        let _s = EnvSaver::capture(&["AOIDE_STATE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         env(&aoide_test_support::unique_tmp("pairing-outbound-no-downgrade"));
 
         let now_epoch = crate::time::parse_iso_utc(&crate::time::now_iso_utc()).unwrap();

@@ -1,4 +1,4 @@
-# Executable cases for what is Aoide's own: the songbook (lib/songbook.nix), the
+# Executable cases for what is Aoide's own: the rices (lib/rices.nix), the
 # packages walker (lib/pkgs.nix), and Aoide's real registry composed through
 # habit. Composition itself is habit's and tested there. Each attribute is one
 # case, evaluated on its own by tests/selection/run.sh; negative cases are
@@ -68,8 +68,8 @@ rec {
     in
     builtins.concatStringsSep "," inv.aggregation;
 
-  # ── Songs: discovery and selection (lib/songbook.nix's hook) ──────────────
-  # The hook over the fixture songbook, composed through habit exactly as
+  # ── Songs: discovery and selection (lib/rices.nix's hook) ──────────────
+  # The hook over the fixture rices, composed through habit exactly as
   # `lib/aoideos.nix` composes the real one: a song is an aggregation whose body
   # habit reads only when it is selected. Discovery names songs and nothing else;
   # a selection decides which bodies are imported; an illegal one fails naming
@@ -78,20 +78,20 @@ rec {
   # second answer, so each case runs the real checks, not a copy of them.
   hookOver =
     dir:
-    (import ../../lib/songbook.nix {
+    (import ../../lib/rices.nix {
       inherit lib;
-      songbook = dir;
+      ricesRoot = dir;
     }).hook
       {
         inherit registry;
       };
 
-  songbook = import ../../lib/songbook.nix {
+  rices = import ../../lib/rices.nix {
     inherit lib;
-    songbook = ./songbook;
+    ricesRoot = ./rices;
   };
 
-  songDiscovery = builtins.concatStringsSep " " songbook.songNames;
+  songDiscovery = builtins.concatStringsSep " " rices.songNames;
 
   # Selects `habit` over a hook's registry and returns the resolved selection.
   selectedOver =
@@ -107,12 +107,12 @@ rec {
   # body, and the landmine's file is not read.
   songLandmineUnread =
     let
-      h = hookOver ./songbook;
+      h = hookOver ./rices;
       sel = selectedOver h {
-        song.declared = "alpha";
+        rice.declared = "alpha";
       };
     in
-    "${builtins.toString (builtins.length (h.extraModulesFor sel))}:${lib.boolToString (builtins.elem "landmine" songbook.songNames)}";
+    "${builtins.toString (builtins.length (h.extraModulesFor sel))}:${lib.boolToString (builtins.elem "landmine" rices.songNames)}";
 
   # …and the SAME file throws the moment it is selected. Paired with the case
   # above, this is "an unselected song's file is never read" made executable
@@ -120,69 +120,69 @@ rec {
   # claim, for songs.
   songLandmineFires =
     let
-      h = hookOver ./songbook;
+      h = hookOver ./rices;
     in
-    builtins.length (h.extraModulesFor (selectedOver h { song.declared = "landmine"; }));
+    builtins.length (h.extraModulesFor (selectedOver h { rice.declared = "landmine"; }));
 
   songUnknownName =
     let
-      h = hookOver ./songbook;
+      h = hookOver ./rices;
     in
-    builtins.length (h.extraModulesFor (selectedOver h { song.declared = "nope"; }));
+    builtins.length (h.extraModulesFor (selectedOver h { rice.declared = "nope"; }));
 
   songAvailableUnknown =
     let
-      h = hookOver ./songbook;
+      h = hookOver ./rices;
     in
-    builtins.length (h.extraModulesFor (selectedOver h { song.available = [ "nope2" ]; }));
+    builtins.length (h.extraModulesFor (selectedOver h { rice.available = [ "nope2" ]; }));
 
   # A discovered folder with no `rice.nix` can never be selected: the manifest is
   # right to see a song being written, a host is not allowed to perform one.
   songNoRice =
     let
-      h = hookOver ./songbook;
+      h = hookOver ./rices;
     in
-    builtins.length (h.extraModulesFor (selectedOver h { song.declared = "noshelf"; }));
+    builtins.length (h.extraModulesFor (selectedOver h { rice.declared = "noshelf"; }));
 
   # A second song's aggregation enabled by hand is refused by name, not merged.
   songStrayEnabled =
     let
-      h = hookOver ./songbook-borrow;
+      h = hookOver ./rices-borrow;
     in
     builtins.length (
       h.extraModulesFor (
         selectedOver h {
-          song.declared = "borrower";
+          rice.declared = "borrower";
           aggregation.lender.enable = true;
         }
       )
     );
 
   # A song folder named like an aggregation is refused when the hook is read.
-  songNameClash = builtins.attrNames (hookOver ./songbook-clash).registry.aggregations;
+  songNameClash = builtins.attrNames (hookOver ./rices-clash).registry.aggregations;
 
   # The positive reading: a declared song with its home builds the one module
   # the hook owns (the `_module.args` and the facts), and no other.
   songDeclaredBuilds =
     let
-      h = hookOver ./songbook;
+      h = hookOver ./rices;
       sel = selectedOver h {
-        song.declared = "alpha";
+        rice.declared = "alpha";
       };
     in
     builtins.length (h.extraModulesFor sel);
 
   # ── A song names nothing outside its folder (CONTRACTS.md §5) ──────────────
-  # Paired: the fixture songbook the cases above use has no escaping `.nix`, and
-  # the escaper fixture's `../` is named by the same scan `checks.song-shape`
-  # runs over the real songbook.
-  songbookEscape = import ../../lib/songbook.nix {
+  # Paired: the fixture rices the cases above use has no escaping `.nix`, and
+  # the escaper fixture's `../` is named by the same scan `checks.rice-shape`
+  # runs over the real rices.
+  ricesEscape = import ../../lib/rices.nix {
     inherit lib;
-    songbook = ./songbook-escape;
+    ricesRoot = ./rices-escape;
   };
 
-  songEscapeClean = builtins.concatStringsSep "," songbook.escapingNixFiles;
-  songEscapeFound = builtins.concatStringsSep "," songbookEscape.escapingNixFiles;
+  songEscapeClean = builtins.concatStringsSep "," rices.escapingNixFiles;
+  songEscapeFound = builtins.concatStringsSep "," ricesEscape.escapingNixFiles;
 
   # ── A borrow joins the built-in set (CONTRACTS.md §5) ──────────────────────
   # `borrower` dresses every slot with `lender`'s body, so a host performing
@@ -190,13 +190,13 @@ rec {
   # deployed `songs/lender/slotA.qml` would not exist and the slot would render
   # nothing. Two readings: the set itself, and the property it exists for — every
   # owner a built-in song's manifest names is itself in the set.
-  songbookBorrow = import ../../lib/songbook.nix {
+  ricesBorrow = import ../../lib/rices.nix {
     inherit lib;
-    songbook = ./songbook-borrow;
+    ricesRoot = ./rices-borrow;
   };
 
   songBorrowClosure = builtins.concatStringsSep " " (
-    songbookBorrow.builtIn {
+    ricesBorrow.builtIn {
       declared = "borrower";
       available = [ ];
     }
@@ -204,15 +204,15 @@ rec {
 
   songBorrowOwnersResolve =
     let
-      built = songbookBorrow.builtIn {
+      built = ricesBorrow.builtIn {
         declared = "borrower";
         available = [ ];
       };
       owners = lib.unique (
         lib.concatMap (
           name:
-          map (slot: songbookBorrow.songMeta.${name}.manifest.${slot}.owner) (
-            lib.attrNames songbookBorrow.songMeta.${name}.manifest
+          map (slot: ricesBorrow.songMeta.${name}.manifest.${slot}.owner) (
+            lib.attrNames ricesBorrow.songMeta.${name}.manifest
           )
         ) built
       );
@@ -224,10 +224,10 @@ rec {
       "unresolvable: ${builtins.concatStringsSep "," unresolvable}";
 
   # ── Every bar embeds the shared rice-mode control (lib/checks.nix) ─────────
-  # `songbook-ricemode/` holds sonata (a bar that embeds the `ricemode` slot,
+  # `rices-ricemode/` holds sonata (a bar that embeds the `ricemode` slot,
   # and the floor record) and `mute` (a bar that does not). Paired so the check
   # cannot pass by never firing: it names the mute bar, it holds once that song
-  # is out of the manifest, and it names a songbook with no floor. Only the
+  # is out of the manifest, and it names a rices with no floor. Only the
   # throwing branch needs no `pkgs`; the passing one gets a stand-in builder.
   checks = import ../../lib/checks.nix {
     inherit lib;
@@ -237,15 +237,15 @@ rec {
   };
 
   ricemodeManifest =
-    (import ../../lib/songbook.nix {
+    (import ../../lib/rices.nix {
       inherit lib;
-      songbook = ./songbook-ricemode;
+      ricesRoot = ./rices-ricemode;
     }).manifestAttrs;
 
   barRicemodeOf =
     manifest:
     checks.barRicemode {
-      songbook = ./songbook-ricemode;
+      ricesRoot = ./rices-ricemode;
       inherit manifest;
     };
 
@@ -271,7 +271,7 @@ rec {
   walkerOverlay = (import ../../lib/pkgs.nix { inherit lib; }).overlay;
 
   walkerYieldsListedOverride =
-    ((walkerOverlay { stock = { }; }) { } { strillix-rices = "the lane's songbook"; }).strillix-rices;
+    ((walkerOverlay { stock = { }; }) { } { strillix-rices = "the lane's rices"; }).strillix-rices;
 
   walkerRefusesUnlistedOverride =
     ((walkerOverlay { stock = { }; }) { } { strillix-shell = "another overlay's shell"; })

@@ -30,15 +30,15 @@ Outputs, all tolerant of empty layers so eval stays robust:
   mneme}` plus `default` (= aoide), `aoide` being a self-flaked path input.
   Adding a package is one folder —
   this file never changes.
-- `nixosModules` / `overlays.default` / `lib` / `songbookRoot` / `aoideOptions`
+- `nixosModules` / `overlays.default` / `lib` / `ricesRoot` / `aoideOptions`
   — the export surface a consuming flake builds against: one
   `nixosModules.<name>` per catalogue entry plus `nucleus` (the module that
   closes over Aoide's own inputs), the base package overlay, the constructor
-  files (`lib.composition`, `lib.livery`, `lib.songbook`, `lib.catalogue`),
-  Aoide's own songbook directory for a host that performs Aoide's songs, and the
+  files (`lib.composition`, `lib.livery`, `lib.rices`, `lib.catalogue`),
+  Aoide's own rices directory for a host that performs Aoide's songs, and the
   derived `aoide.*` option list `strx onboard` reads.
 - `checks` — the contractual coupling discipline from `lib/checks.nix`
-  (`surface-ownership`, `song-runtime-untracked`, `song-shape`, `fmt`,
+  (`surface-ownership`, `rice-runtime-untracked`, `rice-shape`, `fmt`,
   `discovery`, `phantom-commands`, `nix-independence`, `portability`,
   `nix-lint`, `livery-fanout`, `generator-offline`, `generator-relocatable`),
   one auto-generated `pkg-<name>` per discovered package, plus the `vm-boot`
@@ -90,20 +90,20 @@ Aoide's own flake inputs once, in `nucleusModule` (the same value exported as
 **discovered-packages overlay** from `lib/pkgs.nix` — the *same* source the
 flake's `packages` output and the `pkg-<name>` checks read, so paint lanes
 reference `pkgs.aoide` / `pkgs.strillix-shell` … without drift — and wires the two
-song hooks (`selectionModules` puts `habit.song.declared`/`habit.song.available` on the host
+song hooks (`selectionModules` puts `habit.rice.declared`/`habit.rice.available` on the host
 module; `extraModulesFor` turns the selection into the built-in songs'
-`rice.nix` files and the `aoide.song`/`aoide.songbook.builtIn` facts). Each
+`rice.nix` files and the `aoide.rice`/`aoide.rices.builtIn` facts). Each
 song's `rice.nix` is a body: habit imports the performed song's body and no
 other, so a host performs the one song it declares and builds in the ones it
 lists (see [[Song-Vocabulary#Replay — any song, any host]]).
 
-**`lib/songbook.nix`** is the songbook generator and its discovery (the one
+**`lib/rices.nix`** is the rices generator and its discovery (the one
 generator two callers share: the strillix lane's build-time `manifest.json`/
-`registry.json` derivation, and the `songbookManifest` flake output
+`registry.json` derivation, and the `ricesManifest` flake output
 [[Self-Ricing|`rice stage`]] shells out to via `nix eval --json` for its
 hot-sync half). The same generator also feeds `pkgs/strillix-rices`, which
 bakes the built-in songs plus a prebaked
-`manifest.json`/`registry.json`/`builtin.json` into `share/strillix/songbook` — the shipped
+`manifest.json`/`registry.json`/`builtin.json` into `share/strillix/rices` — the shipped
 templates a repo-less host's registry/manifest regen reads nix-free
 (`CONTRACTS.md` §4). **`lib/livery.nix`** resolves `aoide.livery.override.*`, the
 host-set venue-recolour tier (`CONTRACTS.md` §1). **`lib/song.nix`** builds
@@ -116,12 +116,12 @@ discipline, written to throw legibly at eval time on a violation:
 
 - **`surface-ownership`** — every declared `aoide.surfaces.<name>` names a
   non-empty owner (a paint lane asserting it is the sole owner of a render surface).
-- **`song-runtime-untracked`** — no `song/` runtime dir (`stage/`,
+- **`rice-runtime-untracked`** — no `song/` runtime dir (`stage/`,
   `auditions/`, `declared/`) exists in the source tree at all, so the nix build
   can never come to depend on ephemeral runtime state. `stage/` stays non-load-
   bearing structurally. This boundary is about runtime dirs only; committed
-  `song/songbook/**` is versioned score and is legitimately read at eval.
-- **`song-shape`** — the assertions on the committed songbook: each `rice.nix`
+  `rices/**` is versioned score and is legitimately read at eval.
+- **`rice-shape`** — the assertions on the committed rices: each `rice.nix`
   is a body of the aggregation shape, every song carries `rice.nix`,
   `livery.json` and `hyprland.conf`, `hyprland.conf` holds no livery-owned key,
   no stray `.nix` sits outside a song's `rice.nix`/`_widgets/`, and no `../` path
@@ -171,18 +171,18 @@ no behaviour, so an empty config evaluates. The surface:
 - `aoide.enable` (master switch), `aoide.user` (default `"khoa"`, owner of the
   `~/Aoide` clone).
 - `aoide.root` (default `~/.aoide`, exported as `AOIDE_ROOT`) — the runtime
-  root: `song/stage/`, `song/declared/`, `state/` (+ `state/stage/`),
+  root: `/stage/`, `/declared/`, `state/` (+ `state/stage/`),
   `run/qml/`, the composed
-  host `song/songbook/`, the audit log. `aoide.checkout` (default `~/Aoide`,
+  host `rices/`, the audit log. `aoide.checkout` (default `~/Aoide`,
   exported as `AOIDE_FLAKE_ROOT`) — the dev git checkout: `soundcheck`'s scan
-  root, `rice declare`'s commit-in target, the songbook `nix eval` registry
+  root, `rice declare`'s commit-in target, the rices `nix eval` registry
   regen. `aoide.hostConfig` (default `<checkout>/hosts/<hostName>/default.nix`,
   exported as `AOIDE_HOST_CONFIG`) — the host file whose one
-  `habit.song.declared` line `rice declare --host` rewrites.
-- `aoide.song` (`nullOr str`, default `null`) — which song this host performs.
+  `habit.rice.declared` line `rice declare --host` rewrites.
+- `aoide.rice` (`nullOr str`, default `null`) — which song this host performs.
   Null performs no song: the paint lanes read the null and deploy nothing (no
   QML tree, no shell service). Set once in `hosts/<host>/default.nix` (and
-  `habit.song.available` with it, for what the host keeps built in); the
+  `habit.rice.available` with it, for what the host keeps built in); the
   performed song's body is the only one imported. See [[Song-Vocabulary#Replay — any song, any host]].
 - `aoide.livery` — the v0 livery schema: closed `palette.{bg,fg,accent,urgent}`
   (base16, permissive hex type) + optional component tiers `bar.*` / `notif.*` /
@@ -271,12 +271,12 @@ Live-side state, all under the runtime root (`$AOIDE_ROOT`, default
   channel from QML; adapters and widgets bind exactly this path, never compute
   it.
 - **Stage files** split by owner into two trees (command-defrag lane S1):
-  `song/stage/` holds rice/paint staging — `livery.json` (resolved livery
+  `/stage/` holds rice/paint staging — `livery.json` (resolved livery
   colours, written by [[livery]]'s `rice stage`/`cover set`/other emitters at
   rehearsal — both refuse under `rice mode declarative`, see
   [[Self-Ricing#Staging vs Declarative Mode]] — and reseeded from the active
   song's committed
-  `song/songbook/<song>/livery.json` on every activation by
+  `rices/<song>/livery.json` on every activation by
   `home.activation.aoideSeedStage` in `modules/dendrites/strillix/runtime.nix`
   — a write-temp-then-rename script that injects the same `"song"` field
   `rice stage` writes, so a host that boots without ever staging still
@@ -286,14 +286,14 @@ Live-side state, all under the runtime root (`$AOIDE_ROOT`, default
   over that seed), `mode.json`
   (the staging/declarative mode marker — absent reads as `declarative`), and
   `grimoire.json` (QML-only writer). That same seed also publishes the
-  DECLARED twin at `song/declared/livery.json` — the declared song's
+  DECLARED twin at `/declared/livery.json` — the declared song's
   committed notes with the venue recolour applied, one `jq` run to two
   destinations (`CONTRACTS.md §4`). It exists because the live stage is
   rewritten by the runtime writers and so cannot itself state what the venue
   declared: `rice mode declarative` re-pins from it, and its `"song"` field
   names the declared song. The staging writers derive every song from the
-  runtime songbook and, for the declared one, lay the seed's
-  `song/declared/venue.json` (the slots the venue recolours and the geometry the host
+  runtime rices and, for the declared one, lay the seed's
+  `/declared/venue.json` (the slots the venue recolours and the geometry the host
   sets, `{}` with neither) over it. `state/stage/` holds
   CONDUCTING
   state — `sessions.json` (agent session roster, written by
@@ -307,11 +307,11 @@ Live-side state, all under the runtime root (`$AOIDE_ROOT`, default
   `send`/the A2A door write when their gate doesn't clear immediate
   delivery, resolved by `session pending list/approve/deny`). `cover.json`
   (the wallpaper note, written by `cover set`) is rice staging and stays
-  under `song/stage/`. Each has a v0 shape in `CONTRACTS.md §4`; writes are
+  under `/stage/`. Each has a v0 shape in `CONTRACTS.md §4`; writes are
   atomic (write-temp-then-rename), and the graph rewriters round-trip unknown
   fields so concurrent writers never lose data.
 - **Stage-dir resolution** (`CONTRACTS.md §4`): two functions, one per tree —
-  `stage_dir()` for `song/stage/` and `conducting_stage_dir()` for
+  `stage_dir()` for `/stage/` and `conducting_stage_dir()` for
   `state/stage/`. Both resolve `$AOIDE_STAGE_DIR` when set to an absolute
   path (the unit sets it; empty/relative ignored) first, so an override
   relocates both trees as a unit; with no override each falls back to its
@@ -323,7 +323,7 @@ Live-side state, all under the runtime root (`$AOIDE_ROOT`, default
   `~/Aoide/{song/stage,state,log}` into the root, each piece gated on its
   own override being unset. The first no-override resolution
   of `conducting_stage_dir()` runs a one-shot migration moving any of the
-  six conducting files still sitting at the old `song/stage/` location into
+  six conducting files still sitting at the old `/stage/` location into
   `state/stage/`, never clobbering a fresher file already there and never
   touching a rice file.
 
@@ -418,7 +418,7 @@ half of the compositor: keybinds, input devices, tiling layout, misc, and
 behavioural window rules, split out so a re-rice cannot disturb them (the
 compositor lane keeps the livery-derived look and the session plumbing). The `nvf` flake input threads to home-manager via
 `extraSpecialArgs`; the cover-art token (`aoide.livery.wallpaper` → the shared
-`song/covers/`) backs the shipped wallpapers; Lekton Nerd Font Mono is the stylix
+`/covers/`) backs the shipped wallpapers; Lekton Nerd Font Mono is the stylix
 face. `neovim`'s own `vim.extraPackages` (nvf) also carries `pkgs.rustc`/
 `pkgs.cargo`, scoped to nvim's wrapped PATH only — its built-in rust-analyzer
 `root_dir` detection shells out to `rustc` directly and needs it, while the rest
@@ -434,7 +434,7 @@ commands — `rice declare/transpose`, the five-command `content` pipeline, `mak
 `update`. Their arg-parsing, schema, gate flag, and audit trail are
 real; only the live-system action is deferred. (`rice stage`/`rice compose`/
 the `rice draft` group are **real** — `rice stage` stages
-`song/stage/livery.json` for Quickshell hot-reload, applies geometry,
+`/stage/livery.json` for Quickshell hot-reload, applies geometry,
 borders and the hyprglass switch over `hyprctl`, recolours kitty through
 `stage/terminal-colors.conf` and kitty's control socket, and dresses the lock
 screen of a song that ships a lock picture through `stage/hyprlock.conf`. There is

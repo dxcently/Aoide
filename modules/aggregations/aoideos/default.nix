@@ -2,10 +2,10 @@
 # it paints on. The paint and the songs are NOT members.
 #
 # The paint is the SONG's. Each committed `rice.nix` is an aggregation body
-# (`lib/songbook.nix`'s hook): its `system` half names the ten strillix component
+# (`lib/rices.nix`'s hook): its `system` half names the ten strillix component
 # providers the Quickshell desktop is made of (bar to greeter) and its `home`
 # half names the `strillix` renderer that writes its Hyprland rice. A host performs
-# one song (`habit.song.declared`), and that song's body brings the paint, so a
+# one song (`habit.rice.declared`), and that song's body brings the paint, so a
 # host that wants a desktop names a song, not a list of components here.
 #
 # What this group keeps is what is true of any desktop whatever it performs: the

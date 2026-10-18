@@ -29,7 +29,7 @@
 ## 0. TL;DR
 
 1. **Port** the standalone Node note engine's resolve/validate/emit pipeline
-   from its ~616-line Node CLI into **native Rust inside `crates/song`** — no
+   from its ~616-line Node CLI into **native Rust inside `crates/strillix-rice`** — no
    new crate (song's charter already *is* the ricing/design engine). Style
    Dictionary is replaceable by a ~30-line native alias resolver; the Node
    dependency disappears from the core.
@@ -38,7 +38,7 @@
    as the generalization proof, `gtk`/`gsettings` registered-but-deferred (host
    side-effects belong with the guarded live-apply seam, not the pure engine).
 3. **Rename** the engine to **livery** across code, the option
-   namespace, songbook data files, the live stage-file contract (with
+   namespace, rices data files, the live stage-file contract (with
    a dual-read/dual-write compat window so the running desktop never tears),
    and all docs/wiki.
 4. **Sequence:** the merge lands **first**; the separate "subdir flake" work
@@ -53,15 +53,15 @@ compat-gated rename of the runtime stage file.
 
 ## 1. Target architecture
 
-### 1.1 Where the function lives — extend `crates/song`, no new crate
+### 1.1 Where the function lives — extend `crates/strillix-rice`, no new crate
 
-`crates/song`'s charter (PACKAGE-LAYOUT.md per-crate table): *"The ricing /
+`crates/strillix-rice`'s charter (PACKAGE-LAYOUT.md per-crate table): *"The ricing /
 design engine: the note engine, apply songs, mint palettes, write the stage,
 the Pantheon design language… **Rices portably**."* The note engine **is**
 that charter — before the merge it was merely *delegated out* to a standalone
 Node sibling. Folding it in is completing the crate, not growing a new one.
 
-Decision: **add the engine as a module tree inside `crates/song`**, not a new
+Decision: **add the engine as a module tree inside `crates/strillix-rice`**, not a new
 `crates/livery`. Rationale (YAGNI, "the design that deletes more"):
 
 - The engine is ~500 lines of pure Rust — squarely song's concern, not an
@@ -80,7 +80,7 @@ Decision: **add the engine as a module tree inside `crates/song`**, not a new
 Target module tree (names internal; the public token is `livery`, §2):
 
 ```
-crates/song/src/
+crates/strillix-rice/src/
   lib.rs                     # add `pub mod livery;`
   livery/
     mod.rs                   # Resolved, EmitOutput, Emitter trait, registry(), lint(), resolve()
@@ -105,7 +105,7 @@ One trait, one registry, one worked example of adding a backend. This is the
 "apply a theme to ANY settings system" requirement made structural.
 
 ```rust
-// crates/song/src/livery/emit/mod.rs
+// crates/strillix-rice/src/livery/emit/mod.rs
 pub struct Resolved {                 // the flat, fully-resolved note set (resolve.rs output)
     pub schema_version: String,
     pub palette: Map<String, String>, // concrete hex, fallbacks applied
@@ -170,7 +170,7 @@ additive follow-ons, not merge scope.**
 | `resolve.js` component null→palette fallback | `livery/resolve.rs` | Already duplicated in Nix facets (stylix/quickshell) — the Rust copy is the third implementation of the same rule; keep them identical. |
 | `emitters.js` `emitStage`/`emitHyprctl`/`emitOsc` | `livery/emit/{stage,hyprctl,osc}.rs` | Direct port. OSC/hyprctl are byte-order-sensitive → byte-parity goldens. |
 | `cli.js` (arg parsing, atomic write, exit codes) | `commands/livery.rs` + existing `shellbridge::atomic_write` | The CLI shell is replaced by aoide's `Invocation`/`Outcome` + registry. `atomicWriteJson` already exists natively (`aoide_storage::fs::atomic_write`). |
-| `test/run.js` + fixtures | `crates/song/tests/goldens/` + `#[cfg(test)]` | Fixtures copied to `crates/song/tests/fixtures/`; assertions become Rust `#[test]`s + byte-parity goldens. |
+| `test/run.js` + fixtures | `crates/strillix-rice/tests/goldens/` + `#[cfg(test)]` | Fixtures copied to `crates/strillix-rice/tests/fixtures/`; assertions become Rust `#[test]`s + byte-parity goldens. |
 | `default.nix`, `package.json`, `package-lock.json`, `node_modules` | **deleted** | The Node toolchain leaves the core. |
 
 **Nothing in the standalone Node package fails to port.** The only external dependency
@@ -219,7 +219,7 @@ and edited, not the tree's present layout.
 - `song/src/commands/rice.rs` — `rice lint` summary + delegate; `handle_rice_preview` stage-file constant; test strings/fixtures.
 - `song/src/mint.rs` — renders the option tier under its new `aoide.livery.<tier>` path; scaffolds `livery.json`; comment text.
 - `song/src/commands/livery.rs` — **new** command group.
-- `storage/src/fs.rs` — `songbook_notes()` → `…/livery.json`; test paths (`fs.rs:105,373,379`).
+- `storage/src/fs.rs` — `rices_notes()` → `…/livery.json`; test paths (`fs.rs:105,373,379`).
 - `storage/src/design.rs:98` — `sources: vec!["stage/livery.json"]`.
 - `conductor/src/app.rs:288,295,362,382` — stage reader path → `livery.json` (dual-read, §2.3).
 - `conductor/src/theme.rs:11` — comment.
@@ -230,7 +230,7 @@ and edited, not the tree's present layout.
 
 **Code — Nix**
 - `modules/nucleus/options.nix` — the option namespace renamed `options.aoide.livery` (+ `mkRenamedOptionModule` alias from the old namespace, §2.3).
-- `modules/facets/quickshell/default.nix` — `t = config.aoide.livery`; `activeSongNotes`/`seedStageScript` (songbook note file renamed `livery.json`, stage dual-write); `AOIDE_WALLPAPER`/wallpaper reads (`config.aoide.livery.wallpaper`).
+- `modules/facets/quickshell/default.nix` — `t = config.aoide.livery`; `activeSongNotes`/`seedStageScript` (rices note file renamed `livery.json`, stage dual-write); `AOIDE_WALLPAPER`/wallpaper reads (`config.aoide.livery.wallpaper`).
 - `modules/facets/stylix/default.nix` — `t = config.aoide.livery`.
 - `modules/facets/compositor/default.nix` — `t = config.aoide.livery`; comments referencing the engine.
 - `modules/nucleus/packages.nix` — **remove** the standalone Node package (Phase 2).
@@ -238,11 +238,11 @@ and edited, not the tree's present layout.
 - `lib/vmTest.nix` — **remove** the `which`-check for the old binary; comment (Phase 2).
 - `hosts/yomi-strix/default.nix` — grep hit; verify whether it sets the old option namespace (rename if so) or only references.
 
-**Data / songbook**
-- `song/songbook/default/livery.json` — renamed from the old engine-named JSON.
-- `song/songbook/sonata/livery.json` — same rename.
-- `song/songbook/default/rice.nix`, `song/songbook/sonata/rice.nix` — setters repointed to `aoide.livery.*`.
-- `song/songbook/update-playbook.md` — add migration note (§6).
+**Data / rices**
+- `rices/default/livery.json` — renamed from the old engine-named JSON.
+- `rices/sonata/livery.json` — same rename.
+- `rices/default/rice.nix`, `rices/sonata/rice.nix` — setters repointed to `aoide.livery.*`.
+- `rices/update-playbook.md` — add migration note (§6).
 
 **Live contract — QML (`modules/facets/quickshell/qml/`)**
 - The state singleton — `notePath` (legacy stage path → `stage/livery.json`, dual-read §2.3). Optional file rename → `LiveryState.qml` (updates ~12 QML importers: `shell.qml`, `AoideBar.qml`, `NotificationCard.qml`, `GrimoireLedger.qml`, `MoodFaces.qml`, `WorkspaceRow.qml`, `UsageGadget.qml`, `ConductorPreview.qml`, `TerminalsPreview.qml`, `StagingEngine.qml`, `slots.md`). **Recommendation: rename the singleton file too** (an old-named state singleton in a livery world is exactly the drift khoa is removing) — but this is the widest-blast edit; see §7 for the "how far does the QML rename go" decision.
@@ -281,7 +281,7 @@ new reader starts before any new write). The solid path:
 - **Nix option namespace** needs no runtime compat (everything rebuilds
   atomically), but add a `mkRenamedOptionModule` alias from the old
   engine-named namespace to `aoide.livery` in `modules/nucleus/options.nix`
-  so an out-of-tree host set (or a stale `song/songbook/*/rice.nix`
+  so an out-of-tree host set (or a stale `rices/*/rice.nix`
   mid-migration) still evaluates during the transition. Drop the alias in
   Phase 4.
 - **Phase 4** (gated on khoa confirming the switched desktop is stable): remove
@@ -322,7 +322,7 @@ Why merge-first (not after, not interleaved):
 ```
 MERGE (this plan)                                          then   SUBDIR FLAKE (separate item)
 ─────────────────────────────────────────────────────────       ────────────────────────────
-Phase 1  native engine in crates/song (still old-named            Phase 5  pkgs/aoide/flake.nix;
+Phase 1  native engine in crates/strillix-rice (still old-named            Phase 5  pkgs/aoide/flake.nix;
          on the wire; live system untouched)                               root consumes as path
 Phase 2  cut the Node package from the walker + all its                  input (topology b).
          refs; drop the Node toolchain                                   Precondition MET by
@@ -361,8 +361,8 @@ still reads notes shaped by the old option namespace; the standalone Node
 package remains present but aoide stops calling it.
 
 **Step 1.0 — capture goldens from the current Node engine.** [SERIAL, first]
-- Owns (new): `pkgs/aoide/crates/song/tests/fixtures/*.json` (copied from
-  the Node package's `test/fixtures/`), `pkgs/aoide/crates/song/tests/goldens/`.
+- Owns (new): `pkgs/aoide/crates/strillix-rice/tests/fixtures/*.json` (copied from
+  the Node package's `test/fixtures/`), `pkgs/aoide/crates/strillix-rice/tests/goldens/`.
 - Do: build the Node package to `/tmp/node-engine`; for each fixture × target,
   save its `resolve <fix>` and `emit {stage,hyprctl,osc} <fix>` output
   to `tests/goldens/<fixture>.<target>.golden`.
@@ -370,59 +370,59 @@ package remains present but aoide stops calling it.
   fixtures (valid, valid-hot, valid-base16).
 
 **Step 1.1 — `livery/schema.rs` (validator).** [SERIAL]
-- Owns: `crates/song/src/livery/mod.rs` (skeleton + `pub mod schema;`),
-  `crates/song/src/livery/schema.rs`, `crates/song/src/lib.rs` (add `pub mod
+- Owns: `crates/strillix-rice/src/livery/mod.rs` (skeleton + `pub mod schema;`),
+  `crates/strillix-rice/src/livery/schema.rs`, `crates/strillix-rice/src/lib.rs` (add `pub mod
   livery;`).
 - Do: port `schema.js::validate` + `HEX`/`PALETTE_KEYS`/`PALETTE_OPTIONAL_KEYS`/
   `BASE16_KEYS`/`COMPONENT_FALLBACK`; preserve exact error strings.
-- Accept: `cargo test -p aoide-song schema` — unit tests mirroring
+- Accept: `cargo test -p strillix-rice schema` — unit tests mirroring
   the Node package's `test/run.js` cases 1–9 (hot accept/reject, base16
   accept/missing/hex/unknown, closed-palette) all pass.
 
 **Step 1.2 — `livery/resolve.rs` (native deref + fallback).** [SERIAL]
-- Owns: `crates/song/src/livery/resolve.rs`, `livery/mod.rs` (`Resolved` struct).
+- Owns: `crates/strillix-rice/src/livery/resolve.rs`, `livery/mod.rs` (`Resolved` struct).
 - Do: single-level `{group.key}` alias resolver (cycle-guarded), then component
   null/empty→palette fallback per `COMPONENT_FALLBACK`; `withHash`/`stripHash`
   helpers. Output the flat `Resolved`.
-- Accept: `cargo test -p aoide-song resolve`; golden parity:
+- Accept: `cargo test -p strillix-rice resolve`; golden parity:
   `diff <(cargo run -p aoide-cli -- livery resolve tests/fixtures/valid.json)
   tests/goldens/valid.resolve.golden` — **byte-identical** (verifies the native
   deref matches Style Dictionary on the ref-using fixture).
 
 **Step 1.3 — `livery/emit/` (registry + stage/hyprctl/osc).** [SERIAL]
-- Owns: `crates/song/src/livery/emit/{mod,stage,hyprctl,osc}.rs`.
+- Owns: `crates/strillix-rice/src/livery/emit/{mod,stage,hyprctl,osc}.rs`.
 - Do: `Emitter` trait + `registry()`; port `emitStage`/`emitHyprctl`/`emitOsc`.
   Stage output shape must match CONTRACTS §4 exactly (schemaVersion, palette,
   bar, notif, window, optional base16).
-- Accept: `cargo test -p aoide-song emit`; byte-parity goldens for `emit osc`
+- Accept: `cargo test -p strillix-rice emit`; byte-parity goldens for `emit osc`
   and `emit hyprctl` (order-sensitive → byte-identical); for `emit stage` assert
   **semantic JSON equality** (parse + compare — serde's key order legitimately
   differs from `JSON.stringify`; QML reads by key, so shape-equality is the
   contract, byte-identity is not).
 
 **Step 1.4 — file-template backend (generalization proof).** [SERIAL]
-- Owns: `crates/song/src/livery/emit/file.rs`, `emit/mod.rs` (register it).
+- Owns: `crates/strillix-rice/src/livery/emit/file.rs`, `emit/mod.rs` (register it).
 - Do: pure template renderer — substitute `{{palette.bg}}`/`{{window.border}}`
   etc. placeholders in a caller-supplied template string; unknown placeholder →
   structured error.
-- Accept: `cargo test -p aoide-song emit::file` — a template round-trips a
+- Accept: `cargo test -p strillix-rice emit::file` — a template round-trips a
   known set of substitutions; an unknown placeholder errors, not panics.
 
 **Step 1.5 — wire CLI: `rice lint` native + `livery` command group.** [SERIAL]
-- Owns: `crates/song/src/notes.rs` (shrink to a thin `livery::lint` wrapper;
+- Owns: `crates/strillix-rice/src/notes.rs` (shrink to a thin `livery::lint` wrapper;
   drop the binary-locate env var/PATH lookup — but keep a `run_lint` shape its
-  two callers expect), `crates/song/src/commands/rice.rs` (`handle_rice_lint` →
+  two callers expect), `crates/strillix-rice/src/commands/rice.rs` (`handle_rice_lint` →
   native; `rice lint` summary drops the old engine name; `handle_rice_preview`
   uses
   `livery::emit::hyprctl` for the keyword batch instead of the inline
   `live::geometry_keywords`? — **no**, keep `live::geometry_keywords` as-is;
-  only `rice lint` changes engine), `crates/song/src/commands/livery.rs` (new:
+  only `rice lint` changes engine), `crates/strillix-rice/src/commands/livery.rs` (new:
   `livery emit <target> [<song>|<path>]`, `livery resolve …`, `livery lint …`),
-  `crates/song/src/commands/mod.rs` (register the group).
+  `crates/strillix-rice/src/commands/mod.rs` (register the group).
 - Do NOT touch: the stage filename (stays until Phase 3), any
-  option-namespace Nix, any songbook file.
+  option-namespace Nix, any rices file.
 - Accept: `cargo test --workspace` green; `cargo run -p aoide-cli -- rice lint
-  <songbook note file>` validates natively (no binary env var,
+  <rices note file>` validates natively (no binary env var,
   no PATH lookup); `aoide schema --json` diff is **reviewed** and contains
   ONLY: the three new `livery.*` command entries + the `rice.lint` summary edit
   (`registry.rs` golden snapshot updated to match, in this step).
@@ -445,7 +445,7 @@ removed next phase.
   `lib/vmTest.nix` (drop the binary `which`-check + its comment);
   `flake.nix` (fix the deleted package's mention in the checks comment);
   `flake.nix` `devShells` (drop `nodejs` — no other Node consumer remains);
-  `crates/song/src/notes.rs` (remove any now-dead binary-locate residue).
+  `crates/strillix-rice/src/notes.rs` (remove any now-dead binary-locate residue).
 - Accept: `nix flake check` no longer lists the deleted package's check;
   `nix build .#nixosConfigurations.yomi-strix…toplevel --no-link` green;
   `nix build .#checks.x86_64-linux.vm-boot` green (KVM host) — boots without
@@ -464,37 +464,37 @@ Phase 3 steps **serialize** (they share the song + storage crates and the
 quickshell facet; a half-applied rename breaks eval/build). Only Step 3.4
 (docs) is **[PARALLEL-SAFE]** — it owns only docs/wiki, no code.
 
-**Step 3.1 — Nix option namespace + all readers + songbook `rice.nix` +
+**Step 3.1 — Nix option namespace + all readers + rices `rice.nix` +
 mint renderer (ATOMIC — keeps `toplevel` eval green).** [SERIAL]
 - Owns: `modules/nucleus/options.nix` (namespace renamed `aoide.livery`; add a
   `mkRenamedOptionModule` alias from the old namespace);
   `modules/facets/quickshell/default.nix`,
   `modules/facets/stylix/default.nix`, `modules/facets/compositor/default.nix`
-  (`t = config.aoide.livery`; comments); `song/songbook/default/rice.nix`,
-  `song/songbook/sonata/rice.nix` (setters repointed to `aoide.livery.*`);
-  `crates/song/src/mint.rs` (renders `aoide.livery.<tier>`; comment text);
+  (`t = config.aoide.livery`; comments); `rices/default/rice.nix`,
+  `rices/sonata/rice.nix` (setters repointed to `aoide.livery.*`);
+  `crates/strillix-rice/src/mint.rs` (renders `aoide.livery.<tier>`; comment text);
   `hosts/yomi-strix/default.nix` (rename iff it sets the old namespace).
 - Accept: `nix build .#nixosConfigurations.yomi-strix…toplevel --no-link` green;
-  `nixfmt --check` on every changed `.nix`; `cargo test -p aoide-song mint`
+  `nixfmt --check` on every changed `.nix`; `cargo test -p strillix-rice mint`
   (mint renders `aoide.livery`); a note file set via the `mkRenamedOptionModule`
   alias still evaluates (transition safety).
 
-**Step 3.2 — songbook data files + the code that resolves them (ATOMIC).**
+**Step 3.2 — rices data files + the code that resolves them (ATOMIC).**
 [SERIAL]
-- Owns: `git mv` the `default` and `sonata` songbook note files to
+- Owns: `git mv` the `default` and `sonata` rices note files to
   `livery.json`;
-  `crates/storage/src/fs.rs` (`songbook_notes` → `…/livery.json`; test paths);
+  `crates/storage/src/fs.rs` (`rices_notes` → `…/livery.json`; test paths);
   `modules/facets/quickshell/default.nix` (`activeSongNotes` + `seedStageScript`
-  source path → `livery.json`); `crates/song/src/commands/rice.rs`
+  source path → `livery.json`); `crates/strillix-rice/src/commands/rice.rs`
   (`handle_rice_mint` scaffolds `livery.json`; `mint` tests + fixtures).
 - Accept: `cargo test --workspace` (fs + mint tests green);
   `nix build .#nixosConfigurations.yomi-strix…toplevel --no-link` green (facet
   reads the renamed active-song file); the seed script sources
-  `songbook/<song>/livery.json`.
+  `rices/<song>/livery.json`.
 
 **Step 3.3 — live stage-file rename with dual-read/dual-write compat (ATOMIC).**
 [SERIAL] — the desktop-safety step (§2.3).
-- Owns: **writers** — `crates/song/src/commands/rice.rs` (`handle_rice_preview`
+- Owns: **writers** — `crates/strillix-rice/src/commands/rice.rs` (`handle_rice_preview`
   writes `stage/livery.json` + mirrors the legacy stage path),
   `modules/facets/quickshell/default.nix` (`seedStageScript` writes both);
   **readers** — the QML state singleton (`notePath`
@@ -518,7 +518,7 @@ mint renderer (ATOMIC — keeps `toplevel` eval green).** [SERIAL]
 land after 3.3 so it describes the shipped state]
 - Owns: `CONTRACTS.md` (§1/§4/§5), `AGENTS.md` (#5), `README.md`,
   `docs/architecture/PACKAGE-LAYOUT.md`, `docs/BUILD.md`,
-  `docs/architecture/aoide-report.html`, `song/songbook/update-playbook.md`
+  `docs/architecture/aoide-report.html`, `rices/update-playbook.md`
   (migration note), and the wiki (the engine's entity page → `livery.md` +
   ~28 pages) — the wiki delegated to the librarian (AOIDE-DEV §6).
 - Accept: `rg` for the old engine name across `CONTRACTS.md` `AGENTS.md`
@@ -535,7 +535,7 @@ conductor smoke, and khoa's live vision-check all green. The desktop runs on
 
 **Step 4.1 — remove dual-write + fallback-read + option alias.** [SERIAL,
 GATED on khoa confirming the switched desktop is stable across a reboot]
-- Owns: `crates/song/src/commands/rice.rs` (drop the legacy-mirror
+- Owns: `crates/strillix-rice/src/commands/rice.rs` (drop the legacy-mirror
   write), `modules/facets/quickshell/default.nix` (seed writes only
   `livery.json`), the QML state singleton + `crates/conductor/src/app.rs`
   (drop the legacy fallback), `modules/nucleus/options.nix` (drop the
@@ -556,7 +556,7 @@ Check, per step:
 | **Correctness** | Named acceptance commands actually run and pass on the reviewer's checkout — not just claimed. Goldens are byte-identical where the step says byte-identical, semantic-equal where it says semantic. |
 | **Contract fidelity** | `aoide schema --json` diff is *exactly* the intended entries for this step and nothing incidental (Phase 1.5/3). `stage/livery.json` shape matches CONTRACTS §4 (schemaVersion + palette + bar/notif/window fully resolved, no `null`). No schema *version* bump (shape is unchanged; the rename is a namespace edit — §6). |
 | **Scope discipline** | Only the step's listed files changed (`git diff --stat` matches). No `git add -A`; explicit pathspecs. No file another agent owns was touched. |
-| **House rules** | Paint lanes read only the namespaces root `AGENTS.md` house rule 5 enumerates (no cross-module read); no `song/` runtime dir committed at eval (`checks.song-runtime-untracked` still green); `checks.song-shape` still green (songbook entries are `rice.nix` + `livery.json`, no stray `.nix`); no AI co-author trailer. |
+| **House rules** | Paint lanes read only the namespaces root `AGENTS.md` house rule 5 enumerates (no cross-module read); no `song/` runtime dir committed at eval (`checks.rice-runtime-untracked` still green); `checks.rice-shape` still green (rices entries are `rice.nix` + `livery.json`, no stray `.nix`); no AI co-author trailer. |
 | **Live safety** (Phases 3–4) | The dual-read/dual-write invariant of §2.3 is intact at the step boundary: at no committed state can a running old reader or a fresh new reader fail to find a valid stage file. Phase 4 only lands after explicit live-stable sign-off. |
 | **Port faithfulness** (Phase 1) | The native validator's error strings and the emit outputs match the Node engine on the shared fixtures. The alias resolver handles the `{group.key}` fixture and rejects a cycle. |
 | **Tests present** | New logic carries `#[test]`s / goldens; a step that ports a Node `test/run.js` case has the Rust equivalent. `cargo test --workspace` is green, not just the crate's own. |
@@ -571,16 +571,16 @@ Check, per step:
   file. The riskiest single step (3.3) carries a mandatory khoa live
   vision-check before it is called done.
 - **NixOS option rename breaks the host config.** The option namespace is set
-  by both songbook `rice.nix` and read by three facets; a half-rename fails
+  by both rices `rice.nix` and read by three facets; a half-rename fails
   `toplevel` eval and blocks the gated switch. *Mitigation:* Step 3.1 is atomic
   (option + every reader + every setter in one step) + a `mkRenamedOptionModule`
   alias covers any out-of-tree/stale setter during transition; `nixfmt --check`
   and a full toplevel eval gate the step.
-- **Songbook content migration.** Renaming the songbook note files is a
+- **Rices content migration.** Renaming the rices note files is a
   contract-surface edit; a missed reader (facet `activeSongNotes`, `fs.rs`,
   the seed script) silently breaks the active song's fan-out. *Mitigation:*
   Step 3.2 bundles the file `git mv` with every resolver in one atomic step;
-  `checks.song-shape` + the seed activation exercise the path on switch.
+  `checks.rice-shape` + the seed activation exercise the path on switch.
 - **Byte-drift in the port.** OSC/hyprctl output is order- and byte-sensitive;
   a subtly different emit desyncs terminal/compositor from the baked side.
   *Mitigation:* byte-parity goldens captured from the Node engine *before* it is
@@ -620,7 +620,7 @@ Check, per step:
    namespace and the stage filename but **not the schema shape**
    (palette/component/base16/geometry tiers are byte-identical in structure).
    *Recommendation:* keep `v0`, record the rename in
-   `song/songbook/update-playbook.md` and update CONTRACTS §1/§4/§5 prose in
+   `rices/update-playbook.md` and update CONTRACTS §1/§4/§5 prose in
    place — no `v0→v1` bump (that's reserved for the semantic/component
    design-system work). Confirm you don't want a formal version bump.
 4. **`gtk`/`gsettings` scope.** The plan ships four *pure* backends (stage,

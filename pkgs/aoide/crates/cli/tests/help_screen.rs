@@ -19,6 +19,7 @@ fn aoide(tag: &str, env: &[(&str, &str)], args: &[&str]) -> Out {
         .env_remove("NO_COLOR")
         .env_remove("COLUMNS")
         .env("AOIDE_ROOT", &root)
+        .env("STRILLIX_ROOT", &root)
         .env("AOIDE_STAGE_DIR", root.join("stage"))
         .env("AOIDE_STATE_DIR", root.join("state"))
         .env("AOIDE_AUDIT_LOG", root.join("log"))

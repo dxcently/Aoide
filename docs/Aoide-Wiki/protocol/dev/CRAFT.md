@@ -38,7 +38,7 @@ land directly.
 - **Pathspec commits only** — `git commit -- <paths>`. Other sessions hold
   the same index; never stage the whole tree, never reset it.
 - **Never commit** a harness's own settings file, `node_modules`, or
-  `song/stage/*` / `state/stage/*` (live desktop state, not a commit
+  `/stage/*` / `state/stage/*` (live desktop state, not a commit
   target).
 - **No AI co-author trailer.** Push as the repo's configured author.
 - **Push at milestones** — lane or phase completion, or on request. Commit

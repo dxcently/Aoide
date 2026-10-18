@@ -855,10 +855,11 @@ mod tests {
     #[test]
     fn config_set_answers_config_strands_grants_when_it_would_strand_them() {
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_ROOT", "AOIDE_CONFIG"]);
+        let _s = EnvSaver::capture(&["AOIDE_ROOT", "STRILLIX_ROOT", "AOIDE_CONFIG"]);
         let root = unique_tmp("config-strands-cli");
         std::fs::create_dir_all(&root).unwrap();
         std::env::set_var("AOIDE_ROOT", &root);
+        std::env::set_var("STRILLIX_ROOT", &root);
         std::env::remove_var("AOIDE_CONFIG");
         std::fs::create_dir_all(crate::fs::state_dir()).unwrap();
 

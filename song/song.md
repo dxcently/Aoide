@@ -1,6 +1,6 @@
 # `song/` — orientation
 
-The performed half's home on disk: committed *score* (`songbook/`) plus
+The performed half's home on disk: committed *score* (`rices/`) plus
 gitignored *live state* (`stage/`, `auditions/`). See the wiki's
 Song-Anatomy for the authoritative role map and Self-Ricing for the rice
 loop (`gen → lint → preview → adopt`) this tree exists to serve. This file
@@ -10,7 +10,7 @@ is a repo-local map, not a replacement for either.
 
 ```
 song/
-├── songbook/                   committed score — per-song homes + cross-cutting design memory
+├── rices/                   committed score — per-song homes + cross-cutting design memory
 │   │                              (sonata, the shipped baseline, is upstream-owned + evolving, like
 │   │                              nucleus/dendrites; every OTHER song is clone-owned, never adopted-over)
 │   ├── <name>/                  one song per folder, e.g. sonata (found by one typed scan, built in only when a host selects it)
@@ -38,15 +38,15 @@ song/
 ```
 
 Root is closed: every per-song asset, key, sound, icon, widget body lands
-inside that song's `songbook/<name>/` — never a new top-level `song/` dir
+inside that song's `rices/<name>/` — never a new top-level `song/` dir
 (the Song Map, wiki `Song-Vocabulary`).
 
 ## Performance path — how a song reaches the screen
 
 ```
-songbook/<song>/rice.nix
+rices/<song>/rice.nix
    a body: system.module sets ONLY aoide.livery.{palette,base16,bar,notif,window,wallpaper}
-   selected by habit.song.declared = "<song>" (no guard: only the performed body is read)
+   selected by habit.rice.declared = "<song>" (no guard: only the performed body is read)
         │
         │  nix build / rebuild bakes the guarded song's livery
         ▼
@@ -76,22 +76,22 @@ covers/<name>                              stage/cover.json
    (immutable store path via AOIDE_WALLPAPER) if cover.json is absent/garbage
 ```
 
-The `song-runtime-untracked` flake check fails the tree if a `song/` runtime
+The `rice-runtime-untracked` flake check fails the tree if a `song/` runtime
 dir is committed, so runtime state can never become load-bearing for the build.
 
 ## Creation vs. application
 
 | | writes | reads |
 |---|---|---|
-| **Creation** (`compose` → `mode stage` → `lint` → `draft save` → `declare`) | `auditions/` (propose), then `songbook/<song>/` on declare | `songbook/` + that song's `design/` — always, before iterating |
-| **Application** (performing an adopted song) | nothing — pure selection | `songbook/<song>/rice.nix` fanned into `stage/livery.json` at build/preview time |
+| **Creation** (`compose` → `mode stage` → `lint` → `draft save` → `declare`) | `auditions/` (propose), then `rices/<song>/` on declare | `rices/` + that song's `design/` — always, before iterating |
+| **Application** (performing an adopted song) | nothing — pure selection | `rices/<song>/rice.nix` fanned into `stage/livery.json` at build/preview time |
 
 The swap is one line, host-agnostic (no other edit needed — a song sets
 only `aoide.livery`, no host options, no lane toggles):
 
 ```nix
 # hosts/<host>/default.nix
-aoide.song = "sonata";
+aoide.rice = "sonata";
 ```
 
 This re-fans the whole `aoide.livery` tree for that host. **Replay** =
@@ -104,11 +104,11 @@ new key (`rice transpose <song> <key>`, planned — swaps among that song's
 - **House grammar** (cross-cutting, formerly instantiated by every song):
   retired along with the `default` song that owned it — kept as historical
   reference at `docs/Aoide-Wiki/references/pantheon/pantheon-grammar.md`,
-  outside the songbook entirely. `sonata` (the shipped baseline now) draws
-  its own grammar instead: `songbook/sonata/design/greek-grammar.md`.
+  outside the rices entirely. `sonata` (the shipped baseline now) draws
+  its own grammar instead: `rices/sonata/design/greek-grammar.md`.
 - **Per-song current state** (this song's key, contrast, surface-element
-  values, iteration log): `songbook/<name>/design/intent.md`, e.g.
-  `songbook/sonata/design/intent.md`.
+  values, iteration log): `rices/<name>/design/intent.md`, e.g.
+  `rices/sonata/design/intent.md`.
 
 Design folders are ordinary content-pipeline folders, pre-approved as
 system-owned — Aoide ingests its own design notes so past rice reasoning

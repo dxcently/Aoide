@@ -77,7 +77,7 @@ rustPlatform.buildRustPackage {
 
   # ...and these five tests are SKIPPED BY NAME in the sandbox, because this
   # package's source tree is `pkgs/aoide` alone: the outer AoideOS repo's
-  # top-level `song/` (whose committed `songbook/sonata/widgets/*.qml` they
+  # top-level `song/` (whose committed `rices/sonata/widgets/*.qml` they
   # parse) is deliberately NOT part of the self-flaked core (its own
   # `flake.nix` header, "Topology (b)"), so the fixtures have nothing to read
   # here — in the sandbox they would fail on a path that is empty by design.

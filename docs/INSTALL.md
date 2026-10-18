@@ -87,7 +87,7 @@ cd ~/Aoide && aoide onboard            # ~/.cargo/bin/aoide
 
 It is idempotent, and the core half is four acts: register the clone as a graph
 project, link `~/song` → `<checkout>/song` (never clobbering an existing file),
-seed `song/songbook/preferences.md` when absent, then ask which agent harnesses
+seed `rices/preferences.md` when absent, then ask which agent harnesses
 to wire and run `hooks install` for each chosen harness.
 
 - `--harness claude,eidolon` wires exactly that list; `--yes` takes every

@@ -987,6 +987,7 @@ mod tests {
     /// identity and produces THIS machine's line.
     fn machine(dir: &Path, name: &str) {
         std::env::set_var("AOIDE_ROOT", dir);
+        std::env::set_var("STRILLIX_ROOT", dir);
         std::env::set_var("AOIDE_STATE_DIR", dir);
         std::env::remove_var("AOIDE_CONFIG");
         std::env::set_var("AOIDE_A2A_NODE_NAME", name);
@@ -996,6 +997,7 @@ mod tests {
         let guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saver = EnvSaver::capture(&[
             "AOIDE_ROOT",
+            "STRILLIX_ROOT",
             "AOIDE_STATE_DIR",
             "AOIDE_CONFIG",
             "AOIDE_A2A_NODE_NAME",

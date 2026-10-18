@@ -14,8 +14,8 @@ the paint lanes read `aoide.livery` and nothing else; the runtime seam is
 `stage/livery.json`. Naming rationale lives in [[Lexicon]].
 
 The livery merge (LIVERY-MERGE.md) ported the standalone Node engine into
-native Rust inside `crates/song/src/livery/`, taking the name **livery**
-across the option namespace, songbook data files, and the live stage
+native Rust inside `crates/strillix-rice/src/livery/`, taking the name **livery**
+across the option namespace, rices data files, and the live stage
 contract in one pass (the previous option namespace kept evaluating via a
 `mkRenamedOptionModule` alias until Phase 4 closed the transition window).
 
@@ -45,7 +45,7 @@ The `wallpaper` note is the song's own DEFAULT cover, and the layer that draws
 it is the `wallpaper` capability's business rather than this engine's: a host
 chooses a PROVIDER (`quickshell`, the shell's own layer, by default; an external
 engine's provider otherwise), and the choice reaches the runtime as the word in
-`song/stage/wallpaper-provider`. The engine's own part is the pick in
+`/stage/wallpaper-provider`. The engine's own part is the pick in
 `stage/cover.json` (CONTRACTS.md §4) — the user's choice, which carries the song
 it was made for and is painted by whichever provider the host named; an external
 one paints it and the shell's layer stands down, the shell's own layer paints it
@@ -57,7 +57,7 @@ adopted state cannot diverge. This is the "zero drift" guarantee. Beyond
 `rice stage`/`cover set` writing `stage/livery.json` live (while `rice mode
 staging` allows it — see [[Self-Ricing#Staging vs Declarative Mode]]), the strillix
 lane's `home.activation.aoideSeedStage` reasserts it from the active song's
-committed `song/songbook/<song>/livery.json` on every activation (see
+committed `rices/<song>/livery.json` on every activation (see
 [[Codebase#Runtime contracts (socket + stage files)]]), through
 `lib/livery.nix`'s `stagePatch` — the same `aoide.livery.override` venue
 recolour the Stylix/compositor fan-outs apply through `resolve`, with the
@@ -67,13 +67,13 @@ freshly booted host carries a correctly recoloured stage twin even before
 names a staged or drafted song, `strx reload` — run by the lane's
 `aoide-rice-reload` unit at every login and after every switch — re-stages it
 over the seed. The same script also publishes the DECLARED twin,
-`song/declared/livery.json` (CONTRACTS.md §4) — those same bytes under their
+`/declared/livery.json` (CONTRACTS.md §4) — those same bytes under their
 own name, its `"song"` field naming the song the venue declared — and the
-venue's own part as data, `song/declared/venue.json`: `lib/livery.nix`'s
+venue's own part as data, `/declared/venue.json`: `lib/livery.nix`'s
 `venueDelta`, the slots and geometry fields `stagePatch` changes in the
 committed document, `{}` with neither (`checks.livery-fanout` guards it beside the other two). The
 runtime writers (`rice stage`, `rice mode stage`, `reload`'s staging arm)
-derive every song from the runtime songbook, where a song is edited; for the
+derive every song from the runtime rices, where a song is edited; for the
 declared song — the twin's `"song"` field is the whole scope — they lay
 `venue.json` over it, so the venue wins on the slots it recolours and the
 geometry it sets, and an edit
@@ -126,9 +126,9 @@ geometry field sends no keyword, so a song with no opinion shows the host's
 bake, whatever the previous song or an out-of-band tweak left (the bake takes
 the same two hyprglass keys from the same `blurEnabled`, so a booted desktop
 and a staged one agree). `terminalOpacity`, not a Hyprland keyword at all, rides
-`song/stage/terminal-colors.conf` as a `background_opacity` line written only
+`/stage/terminal-colors.conf` as a `background_opacity` line written only
 for a song that has a value (§4). With none, kitty falls through to
-`song/declared/terminal-opacity.conf` — the activation seed writes the
+`/declared/terminal-opacity.conf` — the activation seed writes the
 DECLARED song's own line there, host settings included, and deletes the file
 when the field is null — and then to kitty.conf's own `background_opacity`,
 the host's bake (0.86 on the kitty dendrite). The dendrite includes the
@@ -167,7 +167,7 @@ new emitter (OSC 50 against the terminal), not a change to this tier.
 
 `cadenza` sets it to a CRT console face — its terminal is the key's own
 voice, not the desktop's default serif. Widget faces are the song's own
-business (`song/songbook/<song>/widgets/Kit.js`) and do not move with this
+business (`rices/<song>/widgets/Kit.js`) and do not move with this
 tier.
 
 ## Polarity — the register, beside the palette
@@ -197,7 +197,7 @@ into `stage/livery.json` as data nothing reads today.
 
 The engine began as a standalone Node package wrapping
 Style Dictionary. The livery merge ported
-it into `crates/song/src/livery/` as native Rust and deleted the package —
+it into `crates/strillix-rice/src/livery/` as native Rust and deleted the package —
 no new crate, no Node toolchain. What moved, in place:
 
 - `schema.rs` — the authoritative v0 schema validator (ported from
@@ -254,7 +254,7 @@ backs.
 All six consume the *same* fully-resolved livery set (from `resolve.rs`), so
 the live targets can never disagree:
 
-1. **`stage`** → `song/stage/livery.json` for [[Quickshell]]. With `--out PATH` it
+1. **`stage`** → `/stage/livery.json` for [[Quickshell]]. With `--out PATH` it
    writes atomically (write to a temp file in the same dir, then rename over the
    target) so a Quickshell hot-reload never reads a torn file (the `CONTRACTS.md`
    §4 discipline). Component fallbacks are already applied, so the stage file
@@ -267,11 +267,11 @@ the live targets can never disagree:
 4. **`file`** → a caller-supplied template rendered through
    `{{group.key}}` placeholders (e.g. `{{palette.bg}}`, `{{window.border}}`);
    an unknown placeholder is a structured error, never a panic.
-5. **`kitty`** → `song/stage/terminal-colors.conf`, kitty's own colour syntax:
+5. **`kitty`** → `/stage/terminal-colors.conf`, kitty's own colour syntax:
    the tinted-kitty base16 template Stylix bakes, key for key. A note with no
    base16 tier gets the scheme the stylix lane synthesises from its palette,
    so every slot is written either way (CONTRACTS.md §4).
-6. **`hyprlock`** → `song/stage/hyprlock.conf`, the lock screen's dress as
+6. **`hyprlock`** → `/stage/hyprlock.conf`, the lock screen's dress as
    hyprlang variables. Only a song that ships a `lockscreen.<ext>` writes any:
    ten variables, its picture and ground (`palette.bg`), the password field's
    colours (`window.border`, `notif.bg`, `notif.fg`, `palette.accent`,
@@ -291,7 +291,7 @@ hyprctl`, `emit osc`) against a v0 fixture in the crate tests.
 
 The provisional v0 stands until the design-system v1 lands: palette (`bg`,
 `fg`, `accent`, `urgent`) plus component overrides (`bar.*`, `notif.*`,
-`window.*`). The update playbook migrates songbook modules from v0 to v1 when
+`window.*`). The update playbook migrates rices modules from v0 to v1 when
 v1 supersedes. The rename to `livery` carried **no version bump** — the
 shape is unchanged; the update playbook records the namespace/file rename.
 

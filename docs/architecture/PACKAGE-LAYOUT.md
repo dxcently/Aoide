@@ -279,7 +279,7 @@ this is structure, not features.
   own — "any agent with a shell is fully capable" is the core thesis, and
   aoide wraps no LLM API; `tools`/`skills` need `management`'s host-ops commands,
   which don't exist (see above). The one real raw material — a rich
-  design-decision corpus already on disk (`song/songbook/*/design/*.md`, the
+  design-decision corpus already on disk (`rices/*/design/*.md`, the
   wiki design-language pages) that `canon` would formalize — isn't worth a
   crate yet, because the docs are prose, not structured/checkable records; a
   `canon show` command today would just be `cat` with a registry entry wrapped
@@ -418,16 +418,16 @@ surface: everything that paints, or that only a desktop needs.
   document `packages.<system>.strillix` is core's rice output — one name, one
   meaning, per flake.
 
-- **The shipped songbook is a package — `pkgs/strillix-rices`.** The score a
-  machine with no checkout falls back to: `share/strillix/songbook/` holding the song
+- **The shipped rices is a package — `pkgs/strillix-rices`.** The score a
+  machine with no checkout falls back to: `share/strillix/rices/` holding the song
   folders this instance ships plus baked `manifest.json`/`registry.json` and —
   for a host that selected songs — `builtin.json`; beside it
   `share/strillix/nix/` (the OFFLINE generator: `manifest.nix`, copies of
-  `lib/songbook.nix`/`lib/song.nix`, and the locked nixpkgs `lib/`) and
+  `lib/rices.nix`/`lib/song.nix`, and the locked nixpkgs `lib/`) and
   `share/strillix/aoide-options.json` (`lib/options.nix`'s output, read by
-  `strx onboard`). `aoide_storage::fs::song_templates_dir` finds the songbook
-  through `AOIDE_SONG_TEMPLATES` or the exe-sibling path, and `fs::strillix_share_dir`
-  is that path's parent; only `aoide-song`/`strillix` read either. THREE
+  `strx onboard`). `aoide_storage::fs::song_templates_dir` finds the rices
+  through `STRILLIX_TEMPLATES` or the exe-sibling path, and `fs::strillix_share_dir`
+  is that path's parent; only `strillix-rice`/`strillix` read either. THREE
   arguments: `songs` (which folders ship) and `builtin` (the selection, written to
   `builtin.json`), both defaulted for this flake's own
   `packages.<system>.strillix-rices` (every discovered song) and both overridden
@@ -438,7 +438,7 @@ surface: everything that paints, or that only a desktop needs.
   and the baked manifest/registry are over the shipped set only, because this
   package's path is a STRING in a host's session variables and activation — so
   anything that rehashes it moves that host's toplevel drvPath. While the build
-  read the songbook DIRECTORY, every song in the repo could move a host that
+  read the rices DIRECTORY, every song in the repo could move a host that
   builds one song in.
 
 ## Flake outputs — the export surface
@@ -517,13 +517,13 @@ assumption:
 - an `aoide.package` option — nothing overrides the package, and
   `overlays.default` already answers that.
 - the door/secrets/usage/pair-watch units — still AoideOS-side.
-- `songbookManifest` / `aoideOptions` from the core flake — both need
+- `ricesManifest` / `aoideOptions` from the core flake — both need
   `song/` and `modules/`, which this flake never walks.
 - a `strillix` flake, or any Quickshell/rice export — `strillix` is paint, per
   root `AGENTS.md`; the shell's own source package is the ROOT flake's
   `packages.<system>.strillix-shell`, never anything exported here.
-- `lib/walk.nix` did NOT stay: the songbook's discovery is
-  `lib/songbook.nix`'s typed `discover` now — the same file that validates a
+- `lib/walk.nix` did NOT stay: the rices's discovery is
+  `lib/rices.nix`'s typed `discover` now — the same file that validates a
   host's song selection and generates the manifest — so there is nothing left
   for a second walker to do.
 
@@ -534,7 +534,7 @@ consumed ONLY through these outputs — never through a path into this tree, whi
 is the reach-in the table below retires. `tests/consumer/` is the fixture that
 proves it: a stranger's flake handing over the nucleus module (the option contract), selecting the aoide services from its own `nucleus` aggregation, the shell, the songs and
 the theme, whose only inputs besides nixpkgs are home-manager and Aoide, with one
-host performing from its own songbook and one performing Aoide's `sonata`.
+host performing from its own rices and one performing Aoide's `sonata`.
 
 ```
 flake.nix
@@ -550,14 +550,14 @@ flake.nix
 │                             which is exactly what a catalogue value is
 ├── lib.composition           the constructor, a function of `{ lib }`
 ├── lib.livery                the venue-recolour resolver, a function of `{ lib }`
-├── lib.songbook              discovery, selection and the songs' module list,
-│                             a function of `{ lib, songbook ? … }`
-├── lib.songbookMerge         several songbook DIRECTORIES as one, a function of
+├── lib.rices              discovery, selection and the songs' module list,
+│                             a function of `{ lib, rices ? … }`
+├── lib.rices.merge         several rices DIRECTORIES as one, a function of
 │                             `{ lib, pkgs, books }`: the `registry`, the merged
-│                             `dir` and the `lib.songbook` record, from one call
+│                             `dir` and the `lib.rices` record, from one call
 ├── lib.catalogue             the whole catalogue as DATA — the bulk form of
 │                             `nixosModules.<name>`
-├── songbookRoot              Aoide's own songbook DIRECTORY (`song/songbook`),
+├── ricesRoot              Aoide's own rices DIRECTORY (`rices`),
 │                             the value `lib/aoideos.nix` builds this flake's
 │                             hosts from — a PATH, not a function
 ├── parts.<component>         the `strillix` PROVIDER module of each component slot
@@ -576,7 +576,7 @@ What a consumer's flake writes, in the shapes the outputs are:
 | consumer's reach-in (before) | replacement export | produced by |
 |---|---|---|
 | `inputs.aoide + "/modules/default.nix"` | `nixosModules.nucleus` + `nixosModules.<name>` per catalogue entry; `lib.catalogue` for bulk use | S10 |
-| five `song/songbook/*/rice.nix` | `lib.songbook.hook { registry }`, whose `registry` / `selectionModules` / `extraModulesFor` go to `lib.composition`, over `songbookRoot` when the host performs Aoide's songs. There is no shim for the removed `selectionModule`, `check` and `songModules` exports: a consumer takes the hook | S8 (exported S10) |
+| five `rices/*/rice.nix` | `lib.rices.hook { registry }`, whose `registry` / `selectionModules` / `extraModulesFor` go to `lib.composition`, over `ricesRoot` when the host performs Aoide's songs. There is no shim for the removed `selectionModule`, `check` and `songModules` exports: a consumer takes the hook | S8 (exported S10) |
 | an `import` of `lib/pkgs.nix` for the overlay | `overlays.default` | S10 |
 | `inputs.aoide.packages.<sys>.default` | `packages.<sys>.aoide` (and `.strillix`, `.strillix-shell`, `.strillix-rices`) | exists / S3 |
 | `import … "/lib/livery.nix"` `.resolve` | `lib.livery.resolve` | S10 |
@@ -590,10 +590,10 @@ The stability contract:
   is a PATH a consumer's own `registry.catalogue` takes unchanged, because a
   catalogue's values ARE paths (habit's composition imports them).
 - `lib.*` are their files' own functions, still UNAPPLIED: a consumer applies
-  them with ITS lib (and the songbook its host performs from), so selection runs
+  them with ITS lib (and the rices its host performs from), so selection runs
   on the consumer's evaluation and not on this flake's.
-- `songbookRoot` is a PATH, the same value this flake's own hosts are built
-  from, a top-level output beside `songbookManifest`. `lib.songbook`'s own
+- `ricesRoot` is a PATH, the same value this flake's own hosts are built
+  from, a top-level output beside `ricesManifest`. `lib.rices`'s own
   default is not a substitute: a consumer needs the directory itself to hand the
   strillix dendrite.
 - `overlays.default` is the base package set. A dendrite's replacement of a name the
@@ -653,12 +653,12 @@ registry.catalogue = removeAttrs aoide.lib.catalogue [ "bar" ] // slots;
   and nothing else: it brings the strillix runtime by path, and it reads the
   constructor's own facts. A host that selects one passes `nixosModules.nucleus`
   in its `extraModules`, applies `overlays.default`, and gets the hook's
-  `_module.args` (`song`, `borrow`, `songbook`) from `lib.songbook.hook`'s
+  `_module.args` (`song`, `borrow`, `rices`) from `lib.rices.hook`'s
   `extraModulesFor`.
 - **Value slots need habit >= 0.4.0.** A provider set written inline in a
   catalogue entry is what habit's value-slot support reads.
 - **A rice is registered by the hook, not merged.** `aoide.rices` names each
-  committed song's aggregation body. The hook over the SAME songbook already
+  committed song's aggregation body. The hook over the SAME rices already
   registers those bodies under their names. Merging `aoide.rices` into the
   registry a second time is a name collision, and the hook refuses it.
 - **Which part answered.** habit's inventory names a value slot's source as the
@@ -671,24 +671,24 @@ read.
 
 ### Songs, from a consumer's side
 
-A consumer performs from one songbook DIRECTORY per host: Aoide's own, exported
-as `songbookRoot`, or one in the CONSUMER's tree. `lib.songbook` takes the
-directory (`songbook ? …`); the consumer passes the same value, once, into the
-song hook it calls (`lib.songbook.hook`, which sets `_module.args.songbook`
+A consumer performs from one rices DIRECTORY per host: Aoide's own, exported
+as `ricesRoot`, or one in the CONSUMER's tree. `lib.rices` takes the
+directory (`rices ? …`); the consumer passes the same value, once, into the
+song hook it calls (`lib.rices.hook`, which sets `_module.args.rices`
 beside `song` and `borrow`); and the dendrite that paints the built-in songs and
 `pkgs/strillix-rices` take it as an argument instead of naming a path in this
 repo. A host that performs Aoide's `sonata` therefore writes
-`songbook = aoide.songbookRoot` in both places and `habit.song.declared = "sonata"` in
-its module — never `inputs.aoide + "/song/songbook/…"`. A host says what it
-performs (`habit.song.declared`) and what it merely builds in (`habit.song.available`), with
-the borrow closure and the machine-owned songbook unchanged from §5.
+`rices = aoide.ricesRoot` in both places and `habit.rice.declared = "sonata"` in
+its module — never `inputs.aoide + "/rices/…"`. A host says what it
+performs (`habit.rice.declared`) and what it merely builds in (`habit.rice.available`), with
+the borrow closure and the machine-owned rices unchanged from §5.
 
 Discovery, selection and `borrow` all read that one directory. A host whose
-songs come from both Aoide's songbook and the consumer's takes them through
-`lib.songbookMerge { inherit lib pkgs; books = [ aoide.songbookRoot ./songs ]; }`:
+songs come from both Aoide's rices and the consumer's takes them through
+`lib.rices.merge { inherit lib pkgs; books = [ aoide.ricesRoot ./songs ]; }`:
 the call returns the registry (song name to its directory in the book that
 defines it), the merged directory (`dir`, one copy of the registry built in one
-derivation) and the songbook record, all together. The record discovers through
+derivation) and the rices record, all together. The record discovers through
 the registry, so a `borrow` resolves across the books and nothing at evaluation
 reads the derivation (no import-from-derivation). A song name two books define is
 refused, naming the song and both books.

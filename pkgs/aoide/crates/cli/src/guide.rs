@@ -52,7 +52,7 @@ exact full tree):
 
 const TAIL: &str = "\
 House rules — the repo's root `AGENTS.md`, with rules 1, 5 and 7 in full:
-  1. A rice agent writes `song/songbook/<song>/` and nothing else. You commit
+  1. A rice agent writes `rices/<song>/` and nothing else. You commit
      to that folder and to no other path. Everything outside `song/` —
      `modules/`, `pkgs/`, `lib/`, `hosts/`, `users/`, `tests/`, `docs/` —
      changes only on a lane the User ordered, with that lane's scope named. A
@@ -72,8 +72,8 @@ House rules — the repo's root `AGENTS.md`, with rules 1, 5 and 7 in full:
      skip derivation for them), the core scalars every lane stands on
      (`aoide.enable`, `aoide.root`, `aoide.checkout`, `aoide.hostConfig`,
      `aoide.user`), the song selection (`aoide.song`, and the derived
-     `aoide.songbook.builtIn` — what this host BUILT IN, from its own song
-     selection — and `aoide.songbook.greeter`, the declared song's greeter
+     `aoide.rices.builtIn` — what this host BUILT IN, from its own song
+     selection — and `aoide.rices.greeter`, the declared song's greeter
      face), `aoide.components` (the component slots — bar, launcher,
      powermenu, notifications, wallpaper, dock, calendar, switcher, lock,
      greeter — and the provider that fills each), and its own
@@ -104,7 +104,7 @@ House rules — the repo's root `AGENTS.md`, with rules 1, 5 and 7 in full:
   7. Everything is a plugin. A capability enters as ONE file (or one
      directory, when it needs more than one file) at a conventional path, and
      is named exactly once: by a line in the catalogue (`modules/default.nix`),
-     or found by a directory's one typed scan (`song/songbook/<song>/rice.nix`).
+     or found by a directory's one typed scan (`rices/<song>/rice.nix`).
      It declares what it needs by *name*, and is removable without a trace:
      delete the file and its catalogue line, and nothing else knows it existed.
      Never by reaching into another module, never by an edit outside its own

@@ -133,7 +133,7 @@ a distinct idempotency key so capture entries coexist with the plain ones
 **`onboard`** (`cli/src/commands/onboard.rs`) is the clone-onboarding lane
 — CLI-only, run from a checkout. It registers the clone as a graph project,
 links `~/song` to `<checkout>/song` (never clobbering an existing file or
-symlink), and seeds `song/songbook/preferences.md` when absent; then it
+symlink), and seeds `rices/preferences.md` when absent; then it
 asks which agent harnesses to wire (`--harness a,b`, or `--yes` for
 non-interactive) and runs `hooks install` for each. When the `strillix` binary
 resolves it delegates the nix half to `strx onboard`, and finally prints
@@ -146,8 +146,8 @@ deferred. Exactly two commands carry `gated: true` in `aoide` (`content
 approve`, `update`); `strx rice declare <name>` runs gated too but is real
 code — it byte-diff-copies the runtime song tree, less its
 top-level `takes/` and `drafts/` (the machine's undo history and scratch),
-from `$AOIDE_ROOT/song/songbook/<name>/` into the checkout's
-`song/songbook/<name>/` (no `git add`, no rebuild), leaving `rice
+from `$AOIDE_ROOT/rices/<name>/` into the checkout's
+`rices/<name>/` (no `git add`, no rebuild), leaving `rice
 transpose` as strillix's one remaining stub. Both doors surface the user
 rebuild gate uniformly, and nothing here admits a rebuild
 ([[Rebuild-Gate]], [[Governance]]).
@@ -304,7 +304,7 @@ shortcut the panel itself registers (`aoide:dock`), not a CLI command (see
   args/flags become the `inputSchema`, and `tools/call` dispatches back
   into the same handlers the CLI uses. `strx mcp serve --stdio` is the same
   façade over strillix's own registry.
-- **`stageNotesVersion`** pins the `song/stage/livery.json` format alongside
+- **`stageNotesVersion`** pins the `/stage/livery.json` format alongside
   the command tree so an agent reads one version for the whole contract.
 - **Single audit log, every door.** Every dispatch — CLI, MCP, or A2A —
   appends a JSON-lines record to the one audit log (`aoide.auditLog`),

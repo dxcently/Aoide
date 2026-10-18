@@ -118,7 +118,7 @@ in
     # config the rebuild path already satisfies it, so nothing about this
     # unit needs to change to grow that second producer.
     #
-    # Gated on the CONFIG, never on `aoide.song`: a shell that paints a
+    # Gated on the CONFIG, never on `aoide.rice`: a shell that paints a
     # host's own config has no song and starts exactly the same way. The
     # song-gated half (deploy the tree, seed the stage, restart the rice)
     # is the `strillix` lane's, which is also the lane that sets this config.
@@ -167,12 +167,13 @@ in
               # desktops, 2026-09-03). shell.qml's `UseQApplication` pragma is
               # what instantiates a QStyle at all, so this unit is exposed
               # where a QGuiApplication one is not. Nothing is lost: the livery
-              # comes from song/stage/livery.json, never from Qt.
+              # comes from $STRILLIX_ROOT/stage/livery.json, never from Qt.
               "QT_QPA_PLATFORMTHEME="
               # Runtime root for every stage/state file the QML reads
               # (livery/cover/grimoire/sessions/usage) — the QML falls back to
               # ~/.aoide when unset, but a configured aoide.root must win.
               "AOIDE_ROOT=${config.aoide.root}"
+              "STRILLIX_ROOT=${config.aoide.strillix.root}"
             ]
             # Export the song's baked wallpaper (immutable store path) so
             # AoideWallpaper always has the right cover on boot/rebuild — the live
@@ -185,8 +186,8 @@ in
             # the LOGIN environment (`environment.sessionVariables`, nucleus/
             # aoided.nix): a user unit inherits the manager's environment as
             # of the session's login, so an inherited
-            # `AOIDE_SONG_TEMPLATES` keeps pointing at the PREVIOUS build's
-            # songbook until the operator relogs. This unit spawns `strillix` —
+            # `STRILLIX_TEMPLATES` keeps pointing at the PREVIOUS build's
+            # rices until the operator relogs. This unit spawns `strillix` —
             # the QML it starts execs it (`strillix preview set` from the
             # widget-maker canvas, `strillix cover set` from the wallpaper
             # picker) — and any strillix whose STAGING path runs under this
@@ -199,7 +200,7 @@ in
             # strillix dendrite for the same reason the nucleus delta is: a
             # shell with no `strillix` installed has no reader for it.
             ++ lib.optionals config.aoide.strillix.enable [
-              "AOIDE_SONG_TEMPLATES=${pkgs.strillix-rices}/share/strillix/songbook"
+              "STRILLIX_TEMPLATES=${pkgs.strillix-rices}/share/strillix/rices"
             ];
             Restart = "always";
             RestartSec = 3;

@@ -91,7 +91,7 @@ let
   # so stepping aside is the ONLY way a lane's replacement can stand — and it
   # happens only for a name listed here.
   intentionalOverrides = [
-    "strillix-rices" # the strillix lane replaces the whole songbook with the songs THIS host builds in.
+    "strillix-rices" # the strillix lane replaces the whole rices with the songs THIS host builds in.
   ];
 
   # Directory entries under ../pkgs that are packages: type == "directory",

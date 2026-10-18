@@ -9,8 +9,8 @@
 
   habit.dendrites.claude-code.enable = true;
 
-  habit.song.declared = "sonata";
-  habit.song.available = [ ];
+  habit.rice.declared = "sonata";
+  habit.rice.available = [ ];
 
   habit.users.khoa = {
     definition = ../../users/khoa.nix;

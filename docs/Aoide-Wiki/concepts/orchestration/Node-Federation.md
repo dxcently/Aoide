@@ -47,7 +47,7 @@ HTTP.
 The set of other aoide instances this one has registered, written atomically
 via `aoide_storage::node_store`. Lives in the gitignored root-runtime
 `state/` dir — **not** either stage tree (`state/stage/` conducting state or
-`song/stage/` rice staging): a node roster is account/global
+`/stage/` rice staging): a node roster is account/global
 external-registry state, not stage-scoped rehearsal state. Additive/
 tolerate-missing: an absent file just means "no nodes registered," never
 an error.

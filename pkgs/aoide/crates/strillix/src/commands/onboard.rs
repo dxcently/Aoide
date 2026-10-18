@@ -95,7 +95,7 @@ fn handle_onboard(inv: &Invocation) -> Outcome {
 /// cwd, on a machine that has never seen the Aoide source.
 fn read_aoide_options() -> Result<Vec<OptionEntry>, String> {
     let share = aoide_storage::fs::strillix_share_dir()
-        .ok_or_else(|| "no shipped strillix data dir: $AOIDE_SONG_TEMPLATES names none (or is not absolute) and no `share/strillix/songbook` sits beside this binary".to_string())?;
+        .ok_or_else(|| "no shipped strillix data dir: $STRILLIX_TEMPLATES names none (or is not absolute) and no `share/strillix/rices` sits beside this binary".to_string())?;
     let path = share.join("aoide-options.json");
     let bytes = std::fs::read(&path)
         .map_err(|e| format!("cannot read the shipped option set at {} ({e})", path.display()))?;
@@ -340,10 +340,10 @@ mod tests {
     #[test]
     fn read_aoide_options_reads_the_shipped_file_beside_the_song_templates() {
         let _g = env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_SONG_TEMPLATES", "PATH"]);
+        let _s = EnvSaver::capture(&["STRILLIX_TEMPLATES", "PATH"]);
         let root = unique_tmp("strillix-onboard-shipped-options");
         let share = root.join("share").join("strillix");
-        std::fs::create_dir_all(share.join("songbook")).unwrap();
+        std::fs::create_dir_all(share.join("rices")).unwrap();
         std::fs::write(
             share.join("aoide-options.json"),
             r#"[{"name":"aoide.livery.base16.base00","description":"base00"},
@@ -355,7 +355,7 @@ mod tests {
         let empty = root.join("empty-bin");
         std::fs::create_dir_all(&empty).unwrap();
         std::env::set_var("PATH", &empty);
-        std::env::set_var("AOIDE_SONG_TEMPLATES", share.join("songbook"));
+        std::env::set_var("STRILLIX_TEMPLATES", share.join("rices"));
 
         let options = read_aoide_options().expect("the shipped option set reads with no nix");
         assert_eq!(options.len(), 2);
@@ -379,12 +379,12 @@ mod tests {
     #[test]
     fn read_aoide_options_teaches_when_no_shipped_data_dir_resolves() {
         let _g = env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_SONG_TEMPLATES"]);
-        std::env::remove_var("AOIDE_SONG_TEMPLATES");
+        let _s = EnvSaver::capture(&["STRILLIX_TEMPLATES"]);
+        std::env::remove_var("STRILLIX_TEMPLATES");
 
         let err = read_aoide_options().expect_err("no shipped dir, no options");
-        assert!(err.contains("AOIDE_SONG_TEMPLATES"), "{err}");
-        assert!(err.contains("share/strillix/songbook"), "{err}");
+        assert!(err.contains("STRILLIX_TEMPLATES"), "{err}");
+        assert!(err.contains("share/strillix/rices"), "{err}");
     }
 
     // ── parse_options: the eval payload shape ────────────────────────────
@@ -630,10 +630,10 @@ mod tests {
     }
 
     // ── The generated file against a REAL module eval -- #[ignore]'d: needs
-    // `nix`/network, per crates/song/src/widgets.rs's identical precedent. Run
+    // `nix`/network, per crates/strillix-rice/src/widgets.rs's identical precedent. Run
     // by hand via the discipline's own `nix develop -c cargo test` (which has
     // `nix` on PATH); the package's sandboxed checkPhase has neither. Point
-    // $AOIDE_SONG_TEMPLATES at a built `strillix-rices`'s `share/strillix/songbook`
+    // $STRILLIX_TEMPLATES at a built `strillix-rices`'s `share/strillix/rices`
     // (or run from a checkout where the exe-sibling resolves) so
     // `read_aoide_options` finds the shipped set. ──
 
@@ -658,14 +658,14 @@ mod tests {
     #[test]
     #[ignore = "shells to a real `nix eval`; same sandbox constraint as the eval tests above"]
     fn generated_file_imports_cleanly_into_a_real_module_eval() {
-        // The shipped option set comes from `$AOIDE_SONG_TEMPLATES`'s parent
+        // The shipped option set comes from `$STRILLIX_TEMPLATES`'s parent
         // (or the exe sibling). Read it under the lock and RESTORE it, so a
         // hand-run of this probe cannot leak an env rewrite into the rest of
         // the suite — the same discipline every other env-touching test here
-        // holds. Run it by hand with `AOIDE_SONG_TEMPLATES` pointed at a built
-        // `strillix-rices`'s `share/strillix/songbook`.
+        // holds. Run it by hand with `STRILLIX_TEMPLATES` pointed at a built
+        // `strillix-rices`'s `share/strillix/rices`.
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_SONG_TEMPLATES", "AOIDE_FLAKE_ROOT"]);
+        let _s = EnvSaver::capture(&["STRILLIX_TEMPLATES", "AOIDE_FLAKE_ROOT"]);
         let checkout = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .ancestors()
             .nth(4)

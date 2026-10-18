@@ -77,11 +77,11 @@ no fact.
 | Option                         | Type                         | Notes |
 | ------------------------------ | ---------------------------- | ----- |
 | `aoide.enable`                 | bool                         | core switch: set `true` by each nucleus member, not written by hand |
-| `aoide.song`                   | nullOr str (default `null`)  | the song this host performs; names a `song/songbook/<name>/`. Null — no song named — means a paint lane deploys nothing: no QML tree, no seeded stage, no rice restart |
+| `aoide.rice`                   | nullOr str (default `null`)  | the song this host performs; names a `rices/<name>/`. Null — no song named — means a paint lane deploys nothing: no QML tree, no seeded stage, no rice restart |
 | `aoide.user`                   | str (default `"khoa"`)       | owner of the `~/Aoide` clone |
-| `aoide.root`                   | str (default `"~/.aoide"`)   | the RUNTIME root — `song/stage/`, `song/declared/`, `state/`, `run/qml/`, composed `songbook/`; exported as `AOIDE_ROOT` (to `aoide.user`'s login shells). Core code default, nix-independent (L-C2, task #107) |
-| `aoide.checkout`               | str (default `"~/Aoide"`)    | the dev git checkout — `rice declare`'s commit-in target, `soundcheck`'s scan root, the songbook `nix eval` registry regen; exported as `AOIDE_FLAKE_ROOT` (to `aoide.user`'s login shells) |
-| `aoide.hostConfig`             | str (default `"<checkout>/hosts/<hostName>/default.nix"`) | the host's own config file, whose one `habit.song.declared` line `strx rice declare <song> --host` rewrites; exported as `AOIDE_HOST_CONFIG` (to `aoide.user`'s login shells) |
+| `aoide.root`                   | str (default `"~/.aoide"`)   | the RUNTIME root — `/stage/`, `/declared/`, `state/`, `run/qml/`, composed `rices/`; exported as `AOIDE_ROOT` (to `aoide.user`'s login shells). Core code default, nix-independent (L-C2, task #107) |
+| `aoide.checkout`               | str (default `"~/Aoide"`)    | the dev git checkout — `rice declare`'s commit-in target, `soundcheck`'s scan root, the rices `nix eval` registry regen; exported as `AOIDE_FLAKE_ROOT` (to `aoide.user`'s login shells) |
+| `aoide.hostConfig`             | str (default `"<checkout>/hosts/<hostName>/default.nix"`) | the host's own config file, whose one `habit.rice.declared` line `strx rice declare <song> --host` rewrites; exported as `AOIDE_HOST_CONFIG` (to `aoide.user`'s login shells) |
 | `aoide.livery.palette.{bg,fg,accent,urgent}` | hex        | v0 palette (base16) |
 | `aoide.livery.bar.{bg,fg,accent}` | nullOr hex                | component override; null → palette |
 | `aoide.livery.notif.{bg,fg,urgent}` | nullOr hex              | component override; null → palette |
@@ -90,8 +90,8 @@ no fact.
 | `aoide.mcp.enable`             | bool (default false)         | MCP façade toggle |
 | `aoide.auditLog`               | str (default `$AOIDE_ROOT/log`, i.e. `~/.aoide/log`) | single audit log |
 
-`AOIDE_SONG_TEMPLATES` (L-C3, task #107) is not its own `aoide.*` option — it
-is wired directly, as `${pkgs.strillix-rices}/share/strillix/songbook`, but NOT
+`STRILLIX_TEMPLATES` (L-C3, task #107) is not its own `aoide.*` option — it
+is wired directly, as `${pkgs.strillix-rices}/share/strillix/rices`, but NOT
 onto the same broad unit list `AOIDE_ROOT`/`AOIDE_FLAKE_ROOT` ride: only the
 staging paths read it and only `strillix` links them, so it rides the units that
 exec or spawn `strillix` —
@@ -104,11 +104,11 @@ starts execs `strillix`), `modules/dendrites/strillix/runtime.nix`'s
 `aoide` (a headless core carries no `pkgs.strillix-rices` closure). Each unit
 spells it in its OWN `Environment=` as well as inheriting the login copy:
 a session variable is a LOGIN fact, so a unit that started before a switch
-would otherwise keep the previous build's songbook until the operator relogs.
+would otherwise keep the previous build's rices until the operator relogs.
 That
 package (`pkgs/strillix-rices/default.nix`) bakes the built-in
-`song/songbook/` tree plus `manifest.json`/`registry.json` (via
-`lib/songbook.nix`) at build time, so a repo-less host's `rice compose --from
+`rices/` tree plus `manifest.json`/`registry.json` (via
+`lib/rices.nix`) at build time, so a repo-less host's `rice compose --from
 <song>` and its registry/manifest regeneration both have something to fall
 back to with no `nix eval` shell-out. See `CONTRACTS.md`'s path-model section
 for the full resolution ladder.
@@ -171,7 +171,7 @@ owner; the stylix lane must read `config.aoide.surfaces` and disable its own
 derivation for any surface already owned (overlap resolution,
 `concepts/Notes`).
 
-**Never read `song/` runtime paths at build time.** The `song-runtime-untracked`
+**Never read `song/` runtime paths at build time.** The `rice-runtime-untracked`
 check fails if a `song/` runtime dir (`stage/`, `auditions/`, `declared/`) is
 committed into the source tree at all. `stage/` is live
 state, never load-bearing for the nix build.
@@ -185,15 +185,15 @@ by naming it — the score adapts to that host's specifics and its enabled
 dendrite set. **The venue (host) decides its instruments; the song
 carries only the notes.**
 
-Drop a folder under `song/songbook/<name>/` and select it in the host module
-(`habit.song.declared`, or `habit.song.available` to keep it built in to stage):
-one typed scan finds `song/songbook/<name>/rice.nix`, and the song hook
-(`lib/songbook.nix`'s `hook`) registers it as an aggregation, so there is no
+Drop a folder under `rices/<name>/` and select it in the host module
+(`habit.rice.declared`, or `habit.rice.available` to keep it built in to stage):
+one typed scan finds `rices/<name>/rice.nix`, and the song hook
+(`lib/rices.nix`'s `hook`) registers it as an aggregation, so there is no
 import list to edit. The song's `rice.nix` is a BODY: habit reads it as data,
 and imports only the one the host performs.
 
 ```nix
-# song/songbook/moonlight/rice.nix
+# rices/moonlight/rice.nix
 {
   system = {
     providers = {
@@ -224,19 +224,19 @@ and imports only the one the host performs.
 ```
 
 Naming it performs it on one line in `hosts/<host>/default.nix`:
-`habit.song.declared = "moonlight";`. Naming no song performs no song: a host
+`habit.rice.declared = "moonlight";`. Naming no song performs no song: a host
 with no song named gets no deployed QML and no shell service, not an empty
-surface, and no song's body is imported (`aoide.song` is null). Name a song
-explicitly to get a desktop, `habit.song.declared = "sonata";` for the shipped
-standard (`song/songbook/sonata/rice.nix`).
+surface, and no song's body is imported (`aoide.rice` is null). Name a song
+explicitly to get a desktop, `habit.rice.declared = "sonata";` for the shipped
+standard (`rices/sonata/rice.nix`).
 
 **Host-agnostic rules (CONTRACTS.md §5):** a song's `system.module` sets ONLY
 `aoide.livery` and `aoide.arrangement`, and its body selects only the paint: the
 ten component providers and the `strillix` renderer. It NEVER selects host
 capabilities (monitors, hardware, services, people). Note values are literal
-nix; a song never reads `song/` runtime paths. The `song/songbook/**` tree is
+nix; a song never reads `song/` runtime paths. The `rices/**` tree is
 versioned score (not a runtime dir), so reading it does not violate
-`checks.song-runtime-untracked`. `checks.song-shape` asserts the body's shape,
+`checks.rice-runtime-untracked`. `checks.rice-shape` asserts the body's shape,
 that each song carries `rice.nix`, `livery.json` and `hyprland.conf`, that
 `hyprland.conf` holds no livery-owned key, that no stray `.nix` sits outside a
 song's `rice.nix`/`_widgets/`, and that no `../` path literal appears in a
@@ -246,7 +246,7 @@ song's `.nix` text.
 
 ## Package handoffs — exactly what each agent drops in
 
-`pkgs/` is walked, exactly like `song/songbook/` still is (`modules/` no
+`pkgs/` is walked, exactly like `rices/` still is (`modules/` no
 longer is). Drop
 `pkgs/<name>/default.nix` (a `callPackage`-able derivation, standard nixpkgs
 args) and `lib/pkgs.nix` self-registers it into the flake `packages` output, the
@@ -255,7 +255,7 @@ package is one file; it never touches `flake.nix` or `lib/`** (it did not
 before — the four packages used to be hand-listed in `flake.nix` and
 duplicated in both `lib/` overlays).
 
-`_`-prefix a package dir to shelve it (the same convention `song/songbook/`'s
+`_`-prefix a package dir to shelve it (the same convention `rices/`'s
 walk still uses); a name must
 not shadow a nixpkgs attribute (the overlay guard `throw`s on an accidental
 clash — a deliberate shadow is an `intentionalShadows` exemption in
@@ -265,11 +265,11 @@ documented `//` escape hatch. See `CONTRACTS.md §2`.
 The current packages replace their `default.nix` **in place** — keep the
 file path and the `callPackage` signature; the walker never needs the file list.
 
-### Agent A — the livery engine (native, `crates/song/src/livery/`)
+### Agent A — the livery engine (native, `crates/strillix-rice/src/livery/`)
 
 The standalone Node note engine was folded into the song crate by the livery
 merge (LIVERY-MERGE.md); it is now native Rust, one module
-tree inside `crates/song`:
+tree inside `crates/strillix-rice`:
 
 - `livery/schema.rs` — the authoritative v0 validator (the `rice lint` schema;
   ported from `schema.js` with the exact error strings preserved).
@@ -277,7 +277,7 @@ tree inside `crates/song`:
   (cycle-guarded) + the component null → palette fallback.
 - `livery/emit/{stage,hyprctl,osc,file}.rs` — the four pure emitters behind
   one `Emitter` trait + registry; a new backend is one file + one registry
-  line. The stage backend writes `song/stage/livery.json` (Quickshell; atomic
+  line. The stage backend writes `/stage/livery.json` (Quickshell; atomic
   write — see `CONTRACTS.md §4`).
 - Commands: `strx livery lint|resolve|emit <target>` (the original standalone
   CLI's surface, native); `strx rice lint` calls `livery::lint` directly — no
@@ -320,18 +320,18 @@ The Terminal-Commander roster, upgraded from a flat list to a DAG: registered
 cwd — longest path-prefix wins, so nested projects anchor correctly), and
 sessions nest under the session that spawned them (`parentSessionId`,
 CONTRACTS.md §4). Sessions matching no project group under a synthetic
-`(unanchored)` root. All state lives in `song/stage/` (gitignored runtime;
+`(unanchored)` root. All state lives in `/stage/` (gitignored runtime;
 atomic writes only); missing stage files read as empty registries.
 
 | Command                            | Does |
 | ---------------------------------- | ---- |
 | `aoide graph [--focus <id>]`       | Unicode tree render (`◆` projects, `●` sessions, `▶` marks the focused node); `--json` emits the graph document |
-| `aoide project add <name> [<path>…]` | register a project, or ADD one or more anchor roots to an existing one, in `song/stage/projects.json` (idempotent per root); with no `<path>` at all the project is registered NAME-ONLY — no folder, nothing it anchors by cwd — and a folder is added later with `project add <name> <root>`, so a session anchors to it by cwd prefix once it has one; `--new` refuses an existing name instead of adding to it |
+| `aoide project add <name> [<path>…]` | register a project, or ADD one or more anchor roots to an existing one, in `/stage/projects.json` (idempotent per root); with no `<path>` at all the project is registered NAME-ONLY — no folder, nothing it anchors by cwd — and a folder is added later with `project add <name> <root>`, so a session anchors to it by cwd prefix once it has one; `--new` refuses an existing name instead of adding to it |
 | `aoide project edit <name> <path>…` | REPLACE a project's whole root list outright (first path becomes its primary root); the name stays immutable and `autoResume` is untouched |
 | `aoide project remove <name> [<path>]` | unregister one root (promoting the next into the primary root), or the whole project with no `<path>` (ok + no-op if absent) |
 | `aoide project list`               | list the registered anchor roots, with every root |
 | `aoide graph link <child> <parent>`| set the spawned-by edge on the child session (rejects self-links and cycles; a not-yet-registered parent is recorded with a warning) |
-| `aoide session prune`              | drop `done` sessions + their hook records (orphaned children keep running with their `parentSessionId` cleared); the blessed manual resync — restages `song/stage/graph.json` for Quickshell hot-reload the same as every other mutating graph command |
+| `aoide session prune`              | drop `done` sessions + their hook records (orphaned children keep running with their `parentSessionId` cleared); the blessed manual resync — restages `/stage/graph.json` for Quickshell hot-reload the same as every other mutating graph command |
 
 Session live state is the latest hook phase from `hooks.json` when present
 (falling back to the roster `state`). Like every command, the group takes and
@@ -344,7 +344,7 @@ session records) are contract §4.
 ## Non-cargo tests (`tests/`)
 
 `lib/` holds build/eval machinery (`checks.nix`, `aoideos.nix`,
-`pkgs.nix`, `songbook.nix`); `tests/` holds what those checks actually test — the headless VM
+`pkgs.nix`, `rices.nix`); `tests/` holds what those checks actually test — the headless VM
 boot (`vm-boot.nix`) and the static-artifact portability assertions
 (`portability.nix`), plus the manual container suite (`distrobox.md`).
 See `tests/README.md` for why Rust's own tests do NOT live here.
@@ -354,10 +354,10 @@ See `tests/README.md` for why Rust's own tests do NOT live here.
 `lib/checks.nix` rides as flake `checks`:
 
 - `surface-ownership` — every `aoide.surfaces.<name>` names a non-empty owner.
-- `song-runtime-untracked` — no `song/` **runtime** dir (`stage/`, `auditions/`,
-  `declared/`) exists in the source tree at all (`song/songbook/**` is versioned
+- `rice-runtime-untracked` — no `song/` **runtime** dir (`stage/`, `auditions/`,
+  `declared/`) exists in the source tree at all (`rices/**` is versioned
   score, legitimately read at eval).
-- `song-shape` — the songbook's shape: no stray `.nix` outside a song's
+- `rice-shape` — the rices's shape: no stray `.nix` outside a song's
   `rice.nix`/`_widgets/`, no `../` path literal in a song's `.nix` text, every
   song carrying `rice.nix` and `livery.json`
   (host-agnostic song discipline; CONTRACTS.md §5).
@@ -370,7 +370,7 @@ See `tests/README.md` for why Rust's own tests do NOT live here.
   may teach a command the registry no longer carries).
 - `nix-independence` — the core crate closure, derived from
   `pkgs/aoide/Cargo.toml` and walked from `crates/cli`, never reaches
-  `aoide-song`/`aoide-screen`/`strillix` and never shells out to nix
+  `strillix-rice`/`aoide-screen`/`strillix` and never shells out to nix
   (AGENTS.md's "core is nix-independent" claim, CONTRACTS.md §"Core is
   nix-independent").
 - `vm-boot` — headless NixOS boot of the whole stack (`tests/vm-boot.nix`).

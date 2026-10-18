@@ -6,7 +6,7 @@
 #
 # Render order (AGENTS.md): the song's `hyprland.conf` FIRST, then
 # `toHyprconf settings` LAST. The state link `~/.local/state/strillix/rice.conf`
-# points at the declared twin `<root>/song/declared/rice.conf` (this file's own
+# points at the declared twin `<root>/$STRILLIX_ROOT/declared/rice.conf` (this file's own
 # output); a stage may repoint it at a staged file without Nix.
 {
   habit.home =
@@ -21,7 +21,7 @@
       cfg = config.rice.hyprland;
       jsonFormat = pkgs.formats.json { };
       hypr = config.wayland.windowManager.hyprland;
-      twin = "${osConfig.aoide.root}/song/declared/rice.conf";
+      twin = "${osConfig.aoide.strillix.root}/declared/rice.conf";
       importantPrefixes = lib.unique (
         hypr.importantPrefixes ++ lib.optional hypr.sourceFirst "source" ++ [ "unbind" ]
       );

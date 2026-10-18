@@ -37,10 +37,10 @@ modules/dendrites/compositor/
   keeps the name `hyprland` for this file while the look is reached through
   `compositor`.
 - **`modules/dendrites/greeter.nix` — the greeter.** When the declared song
-  ships `widgets/greeter.qml` (`aoide.songbook.greeter`), greetd running
+  ships `widgets/greeter.qml` (`aoide.rices.greeter`), greetd running
   `cage` + Quickshell as its greeter user on a store tree (the lane's
   `GreeterHost.qml`, the face and the song's `icons/` from the shipped
-  songbook, the dress, and the
+  rices, the dress, and the
   display manager's session wrapper with the default session's Exec — the
   default session must be named, evaluation fails otherwise; cage types in
   the host's `services.xserver.xkb` layout); otherwise `ly` on tty1 with the livery's colours, plus the

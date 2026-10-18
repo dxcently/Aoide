@@ -143,7 +143,7 @@ let
       terminalOpacity = mkOption {
         type = types.nullOr (types.numbers.between 0 1);
         default = null;
-        description = "Terminal (kitty) background opacity, 0–1. Live-side only, in two files: the activation seed writes it into `song/declared/terminal-opacity.conf` (deleted when null), and `rice stage` writes it into the staged terminal file (only for a song with an opinion) and has open kitty windows reload their config. The staged file is included second, so an opinionated stage wins; null is no opinion and the host's bake in kitty.conf shows, with no Aoide constant behind it.";
+        description = "Terminal (kitty) background opacity, 0–1. Live-side only, in two files: the activation seed writes it into `$STRILLIX_ROOT/declared/terminal-opacity.conf` (deleted when null), and `rice stage` writes it into the staged terminal file (only for a song with an opinion) and has open kitty windows reload their config. The staged file is included second, so an opinionated stage wins; null is no opinion and the host's bake in kitty.conf shows, with no Aoide constant behind it.";
       };
     };
   };
@@ -231,7 +231,7 @@ let
   # "Override tier"): an overridden anchor rewrites EVERY livery colour equal
   # to the song's authored value for that anchor — palette, base16, component
   # tiers — in one simultaneous pass, in BOTH fan-outs (baked Stylix scheme
-  # and the song/stage/livery.json seed). A recolour, never a re-key: slots
+  # and the $STRILLIX_ROOT/stage/livery.json seed). A recolour, never a re-key: slots
   # not carrying an overridden anchor's value stay the song's. Same
   # nullOr-hex-per-field shape as the component tier above (mkComponent).
   #
@@ -359,7 +359,7 @@ let
   # convention, not enforced at this layer — same permissive-here,
   # `rice lint`-is-authoritative posture as `hexColor` above). The song's own
   # QML body for a declared slot still lives at
-  # `song/songbook/<name>/widgets/<slot>.qml` same as any other slot — this
+  # `rices/<name>/widgets/<slot>.qml` same as any other slot — this
   # option only declares that the slot IS a widget-type registration, not
   # just inert score.
   widgetType = types.submodule {
@@ -470,19 +470,19 @@ in
     # The song (rice) this host performs. A song is host-agnostic: ANY host in
     # the fleet replays any committed song by naming it here — one line, no
     # other edits. The shipped standard is song "sonata"; committed songs live
-    # under song/songbook/<name>/ as bodies that the selected song alone brings
+    # under rices/<name>/ as bodies that the selected song alone brings
     # in (the same selection discipline as a dendrite — see CONTRACTS.md §5).
     #
     # The VENUE (host) decides its instruments (dendrites, hardware);
     # the SONG carries only the livery (palette + component tiers). A song must
     # never set host options or enable dendrites.
-    song = mkOption {
+    rice = mkOption {
       type = types.nullOr types.str;
       default = null;
       example = "sonata";
       description = ''
         The song (rice) this host performs. Set to a committed song name
-        (a folder under song/songbook/<name>/) to replay it on this host;
+        (a folder under rices/<name>/) to replay it on this host;
         the livery fan-out swaps with zero other edits. Null (the default)
         means no song is named: a paint lane reads this null and deploys
         nothing — no QML tree, no seeded stage, no rice restart — rather than
@@ -491,14 +491,14 @@ in
         a host that brings its own config directory still runs a shell on it
         (`aoide.quickshell.config`), song or no song. A host wanting the
         desktop names its song explicitly, e.g.
-        `aoide.song = "sonata";` for the shipped standard.
+        `aoide.rice = "sonata";` for the shipped standard.
       '';
     };
 
-    # The songs this host BUILDS IN — the host's `habit.song.declared ∪
-    # habit.song.available`, derived and set by the constructor's hook
-    # (`lib/aoideos.nix`, over `lib/songbook.nix`'s `builtIn`). A FACT about the
-    # selection, exactly as `aoide.song` is, and never hand-set: the lane that
+    # The songs this host BUILDS IN — the host's `habit.rice.declared ∪
+    # habit.rice.available`, derived and set by the constructor's hook
+    # (`lib/aoideos.nix`, over `lib/rices.nix`'s `builtIn`). A FACT about the
+    # selection, exactly as `aoide.rice` is, and never hand-set: the lane that
     # builds a song's widgets, installs its packages and seeds its folder reads
     # it instead of asking the host, which it cannot see.
     #
@@ -507,14 +507,14 @@ in
     # nothing reads it and it stays the empty default. A lane that reads it is
     # reading a fact about the host, not another module (root AGENTS.md house
     # rule 5 names it in the closed list for that reason).
-    songbook.builtIn = mkOption {
+    rices.builtIn = mkOption {
       type = types.listOf types.str;
       default = [ ];
       example = [ "sonata" ];
       description = ''
         The songs built into this system: the `rice.nix` files imported, the
         widgets copied into the deployed shell tree, the packages installed and
-        the folders the machine songbook is seeded with. Derived from the host
+        the folders the machine rices is seeded with. Derived from the host
         record's song selection — and CLOSED UNDER BORROWS (CONTRACTS.md §5): a
         song whose records borrow another song's slots builds the lender in too,
         because the borrower's slots resolve to `songs/<owner>/<file>` on disk.
@@ -524,10 +524,10 @@ in
 
     # The declared song's greeter face — a fact about the selection, derived
     # and set by the same hook as `builtIn` (`lib/aoideos.nix`, over
-    # `lib/songbook.nix`'s `greeter`) and never hand-set. The greeter lane
+    # `lib/rices.nix`'s `greeter`) and never hand-set. The greeter lane
     # reads it to choose between a song-painted Quickshell greeter and ly,
-    # and to find the face's files in the shipped songbook.
-    songbook.greeter = mkOption {
+    # and to find the face's files in the shipped rices.
+    rices.greeter = mkOption {
       type = types.nullOr (types.attrsOf types.str);
       default = null;
       example = {
@@ -581,7 +581,7 @@ in
               build time, so flipping it is a user-gated rebuild, not a stage.
               It is still carried in a song's `livery.json` beside `palette`
               and validated by `rice lint` (exactly "light"|"dark", or absent
-              for "no opinion"), and it reaches `song/stage/livery.json` through
+              for "no opinion"), and it reaches `$STRILLIX_ROOT/stage/livery.json` through
               the activation seed like every other top-level key — where nothing
               reads it today.
             '';
@@ -657,7 +657,7 @@ in
             description = ''
               Venue recolour tier (CONTRACTS.md §1, "Override tier"). Set by
               the HOST (never by a song) to repaint the performed song's
-              anchors without editing the songbook. Consumers apply it
+              anchors without editing the rices. Consumers apply it
               through lib/livery.nix's `resolve` — the option system stores
               it inert, same posture as the component-tier nulls.
             '';
@@ -693,7 +693,7 @@ in
               `dock` mounts as an Item into AoidePanel's existing gadget
               column. Keyed by slot name (the attribute name IS the slot
               name). The song's own QML body for a declared slot still lives at
-              `song/songbook/<name>/widgets/<slot>.qml` same as any other slot
+              `rices/<name>/widgets/<slot>.qml` same as any other slot
               (CONTRACTS.md §5) — this option only declares that the slot IS a
               widget-type registration, not just inert score.
 
@@ -872,7 +872,7 @@ in
         Set `mkDefault` by the provider file the host chose, so the answer is
         the selection's own; a host may override it to stand a provider's
         config down without deselecting it. The runtime reads it — strillix hands
-        it to the CLI and the QML as `song/stage/wallpaper-provider`
+        it to the CLI and the QML as `$STRILLIX_ROOT/stage/wallpaper-provider`
         (CONTRACTS.md §4), and anything else that must know who paints reads
         the same file.
       '';

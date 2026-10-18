@@ -1,20 +1,20 @@
 # Pantheon Grammar — the retired `default` song's design language
 
 **Status (2026-08-14): historical reference, not a live grammar.** This
-page was `song/songbook/default/design/pantheon.md` — the design memory of
+page was `rices/default/design/pantheon.md` — the design memory of
 the `default` song, which owned the house grammar back when `default` was
 the shipped standard. `default` has since been retired outright (renamed to
 `sonata`, which draws its own, deliberately divergent grammar — see
-`song/songbook/sonata/design/greek-grammar.md`). Nothing in the live tree
+`rices/sonata/design/greek-grammar.md`). Nothing in the live tree
 instantiates this grammar anymore; it is kept here, relocated out of
-`song/songbook/` (which no longer has a `default/` to hold it), as source
+`rices/` (which no longer has a `default/` to hold it), as source
 material for whoever picks up the wireframe-depth idiom again. The full
 `default` song history — `rice.nix`, `livery.json`, iteration log — is
 git-recoverable, not deleted.
 
 **Original scope** (as authored): cross-cutting visual language every song
 instantiated in its own key. A song's *current* instantiation was recorded
-in that song's `design/intent.md` (sonata: `song/songbook/sonata/design/
+in that song's `design/intent.md` (sonata: `rices/sonata/design/
 intent.md`).
 **Source stills:** `docs/Aoide-Wiki/references/pantheon/*.png` — outlined
 volumes drawn with lines, 3D read from stacked offset outline copies,

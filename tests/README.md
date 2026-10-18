@@ -3,15 +3,15 @@
 Test content that isn't cargo's: whole-system and whole-artifact checks that
 need Nix — a build, or an evaluation of the whole configuration — to even
 exist. `lib/` holds build/eval machinery
-(`checks.nix`, `aoideos.nix`, `pkgs.nix`, `songbook.nix`);
+(`checks.nix`, `aoideos.nix`, `pkgs.nix`, `rices.nix`);
 this directory holds
 what those checks actually test.
 
 - `vm-boot.nix` — headless NixOS boot test, wired as `checks.<system>.vm-boot`.
 - `vm-lock-greeter.nix` — graphical NixOS test of the login screen and the
   screen lock, wired as `checks.<system>.vm-lock-greeter`. Three machines
-  built by the real constructor over the fixture songbook in
-  `lock-greeter/songbook/`: `aubade` ships a `greeter.qml`, a `lockscreen.qml`
+  built by the real constructor over the fixture rices in
+  `lock-greeter/rices/`: `aubade` ships a `greeter.qml`, a `lockscreen.qml`
   and a `powermenu.qml` that reports its bridge (greetd with the Quickshell
   greeter over two accounts, `strx lock` through the shell's LockHost),
   `plainsong` ships none (ly, and `strx lock` runs hyprlock), and
@@ -35,7 +35,7 @@ what those checks actually test.
   home-manager's own user services and the tmpfiles rules in declared order),
   home-manager activation entries with the `home.file`/`xdg.configFile` targets
   they seed, normal users and their groups, the toplevel drvPath, the
-  `aoideOptions` names, and the `songbookManifest` sha256, as plain diffable
+  `aoideOptions` names, and the `ricesManifest` sha256, as plain diffable
   text. Evaluation evidence only — it builds and activates nothing. Every
   phase-5 slice runs it at its parent commit and at HEAD and puts both columns
   in the commit body; a slice that predicts a drvPath delta names it, because
@@ -45,8 +45,8 @@ what those checks actually test.
   its own, and a negative case has to fail with a message the runner greps for,
   so a vague error is a failing test rather than a passing one. Composition
   itself is habit's and is tested in habit; three cases only show Aoide's real
-  registry still composes through it. The rest are the songbook's
-  (`lib/songbook.nix`) over the fixture songbooks beside it, one of which
+  registry still composes through it. The rest are the rices's
+  (`lib/rices.nix`) over the fixture rices beside it, one of which
   `throw`s on import, which is how "an unselected song stays unread" is proved
   instead of asserted, and the packages walker's overlay (`lib/pkgs.nix`): a
   name in `intentionalOverrides` yields to the overlay that replaced it, and any
@@ -75,15 +75,15 @@ what those checks actually test.
 - `distrobox.md` — manual container-based portability suite; not a gate.
 - `consumer/` — `tests/consumer/run.sh`, the export-surface fixture: a
   stranger's flake (`flake.nix`, its own host modules, user, aggregation, songs
-  and songbook) that reaches AoideOS ONLY through the root flake's public
+  and rices) that reaches AoideOS ONLY through the root flake's public
   outputs. The runner greps the fixture for any path into Aoide's tree (and
   proves that grep can fire), then applies the fixture's `outputs` to the ref
   under test's own inputs — so a commit ref really freezes the tree the consumer
   is built against — and reads the resulting hosts. `consumer` performs from the
-  fixture's own songbook: the nucleus contract and its own `nucleus` group, the shell, the theme, one performed song plus
+  fixture's own rices: the nucleus contract and its own `nucleus` group, the shell, the theme, one performed song plus
   one built in that BORROWS the performer's widgets, the deployed config, the
-  seeded songbook, and the templates on the units. `aoide-songs` performs
-  Aoide's own `sonata` through the `songbookRoot` export, and its strillix lane is
+  seeded rices, and the templates on the units. `aoide-songs` performs
+  Aoide's own `sonata` through the `ricesRoot` export, and its strillix lane is
   handed that same directory. The contract it exercises is PACKAGE-LAYOUT's
   "The root flake — AoideOS's export surface".
   The value-slot proof: the consumer's own `bar`, `dock` and `lock` slots each

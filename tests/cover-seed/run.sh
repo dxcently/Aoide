@@ -15,10 +15,10 @@ fail=0
 # case <name> <cover.json body or "-" for absent>
 seedcase() {
   local name=$1 body=$2 root=$work/$1
-  mkdir -p "$root/song/stage"
-  [[ $body != - ]] && printf '%s\n' "$body" > "$root/song/stage/cover.json"
+  mkdir -p "$root/stage"
+  [[ $body != - ]] && printf '%s\n' "$body" > "$root/stage/cover.json"
   bash "$seed" "$jq" "$root" barcarolle "$wall" || { echo "FAIL  $name: seed exited"; fail=1; return; }
-  cat "$root/song/stage/cover.json"
+  cat "$root/stage/cover.json"
 }
 
 expect_default() {

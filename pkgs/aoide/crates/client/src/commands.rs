@@ -6797,6 +6797,7 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         std::env::set_var("AOIDE_STATE_DIR", &dir);
         std::env::set_var("AOIDE_ROOT", &dir);
+        std::env::set_var("STRILLIX_ROOT", &dir);
         std::env::remove_var("AOIDE_CONFIG");
         let out = f();
         let _ = std::fs::remove_dir_all(&dir);
@@ -7142,8 +7143,9 @@ mod tests {
                 std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
             ));
             std::fs::create_dir_all(&dir).unwrap();
-            let vars: [&'static str; 6] = [
+            let vars: [&'static str; 7] = [
                 "AOIDE_ROOT",
+                "STRILLIX_ROOT",
                 "AOIDE_STATE_DIR",
                 "AOIDE_STAGE_DIR",
                 "AOIDE_DAEMON_SOCKET",
@@ -7152,6 +7154,7 @@ mod tests {
             ];
             let saved = vars.iter().map(|v| (*v, std::env::var(v).ok())).collect();
             std::env::set_var("AOIDE_ROOT", &dir);
+            std::env::set_var("STRILLIX_ROOT", &dir);
             std::env::set_var("AOIDE_STATE_DIR", dir.join("state"));
             std::env::set_var("AOIDE_STAGE_DIR", dir.join("stage"));
             std::env::set_var("AOIDE_DAEMON_SOCKET", dir.join("no-daemon.sock"));

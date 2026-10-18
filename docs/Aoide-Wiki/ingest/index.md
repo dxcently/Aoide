@@ -20,7 +20,7 @@ updated: 2026-09-27
 - [[Lexicon]] — the whole vocabulary: the three Muses, the frozen/performed split, the machinery words, and why each word family was chosen
 - [[Snowflake-Anatomy]] — the flake's structural layers (nucleus / dendrites / aggregations / overrides) and how the catalogue registers modules
 - [[Clone-and-Run]] — installing Aoide: the `aoide`/`aoided` binaries by cargo (no nix), then clone + `aoide onboard`; the shared-history model for upstream updates and optional contributions
-- [[Self-Ricing]] — the rice lifecycle (compose → stage → lint → draft → declare), the songbook write-back, and the three-way `rice mode` gate
+- [[Self-Ricing]] — the rice lifecycle (compose → stage → lint → draft → declare), the rices write-back, and the three-way `rice mode` gate
 - [[Song-Vocabulary]] — what each song term maps to in the performed half, and how replay makes a committed song host-agnostic
 - [[Song-Anatomy]] — what every `song/` subfolder is for, committed score vs gitignored runtime, who writes each, and the six stage files
 - [[Agent-Interface]] — the `aoide` command surface, MCP as a generated façade, the guide tiers, and per-command ergonomics

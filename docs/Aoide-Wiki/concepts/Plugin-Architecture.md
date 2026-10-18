@@ -18,11 +18,11 @@ by being added to a list.
 - **Discovery by existing, not by import list.** `modules/default.nix`'s
   catalogue names each dendrite once — a new file plus its one line is the
   whole registration, no import list to hand-edit — while `modules/aggregations/`,
-  `modules/overrides/`, `pkgs/*` and `song/songbook/*/rice.nix` are found by
+  `modules/overrides/`, `pkgs/*` and `rices/*/rice.nix` are found by
   their directories' own shallow scans ([[Codebase#The catalogue, the
   constructor (`lib/`)]], [[Snowflake-Anatomy]]).
 - **Self-gating, not switched from outside.** Each discovered module gates
-  itself on its own `enable`/`aoide.song`, rather than a parent module
+  itself on its own `enable`/`aoide.rice`, rather than a parent module
   turning it on.
 - **Resolution by name, not by import.** A widget resolves through
   `StagingEngine.resolveSong(song, slot)` — by slot *name*, falling back to
@@ -67,7 +67,7 @@ picks the option that can be deleted.
 ## The corollary for Quickshell: render surfaces only
 
 **Quickshell paints; it never *is* the capability.** Every QML file in
-`pkgs/strillix-shell/qml/` and `song/songbook/*/widgets/` is a render
+`pkgs/strillix-shell/qml/` and `rices/*/widgets/` is a render
 surface that picks up an agnostic bridge or API by name. State, policy, IPC,
 and system access live behind a bridge — a CLI command, a stage file
 (`CONTRACTS.md` §4), an IPC socket — reachable **with only a shell, no

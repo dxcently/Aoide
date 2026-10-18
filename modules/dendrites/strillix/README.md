@@ -39,7 +39,7 @@ Render order, fixed (AGENTS.md):
 rice-hyprland.conf  =  song hyprland.conf   (rice.hyprland.conf, binds and layout)
                     +  toHyprconf settings  (rice.hyprland.settings, Nix, LAST)
 
-~/.local/state/strillix/rice.conf   ->  <root>/song/declared/rice.conf  (the declared twin)
+~/.local/state/strillix/rice.conf   ->  <root>/$STRILLIX_ROOT/declared/rice.conf  (the declared twin)
                                     ->  the rendered file above       (the build's rice)
 ```
 
@@ -93,7 +93,7 @@ stay the runtime's own. `runtime.nix` publishes the filled slots as
 - **`runtime.nix` — the paint lane.** Renders the Aoide shell surface with
   Quickshell, builds the config from `pkgs/strillix-shell`'s QML
   plus the widget bodies of the songs this host BUILT IN
-  (`aoide.songbook.builtIn`, from its own record), and deploys it to
+  (`aoide.rices.builtIn`, from its own record), and deploys it to
   `$AOIDE_ROOT/run/qml` (`home.activation.aoideDeployQml` — an rsync, not a
   symlink tree: a deploy target the runtime writes into, never a source, so a
   switch reasserts the store over it). It declares
@@ -106,16 +106,16 @@ stay the runtime's own. `runtime.nix` publishes the filled slots as
   means at the byte level: the deployed `manifest.json`/`registry.json` cover
   the built-in songs only, `pkgs.strillix-rices` is overridden to ship just those
   folders plus `builtin.json` (`{ declared, songs, packages }`), and
-  `home.activation.aoideSeedSongbook` runs `strx rice refresh` over them: a
+  `home.activation.aoideSeedRices` runs `strx rice refresh` over them: a
   file the machine never edited takes the repo's change, a built-in song absent
   from the machine is added whole, a file the machine edited (or that has no
   record) is kept and reported, and `takes/`, `drafts/` and symlinks are never
   touched. What it wrote is recorded in
-  `$AOIDE_ROOT/song/declared/songbook/<song>.json`, outside the song folder.
+  `$STRILLIX_ROOT/declared/rices/<song>.json`, outside the song folder.
   `strx rice refresh [--check]` is the CLI twin; a dry-run activation runs
-  `--check`. The songbook is the one place a song is edited, so the copy is
+  `--check`. The rices is the one place a song is edited, so the copy is
   writable by its owner. That set is CLOSED UNDER BORROWS
-  (`lib/songbook.nix`'s `builtIn`): a
+  (`lib/rices.nix`'s `builtIn`): a
   selected song's records name their slot bodies by `owner`, so the lenders ship
   and seed beside it, which is what makes every manifest record resolve to a
   directory that exists on the host. Selecting the lane is the switch; it sets
@@ -151,8 +151,8 @@ stay the runtime's own. `runtime.nix` publishes the filled slots as
   cut off. At login the session starts it; on a switch
   `aoideRestartRice` restarts it together with the shell in ONE `try-restart`,
   after home-manager's file and systemd steps and after the QML deploy and both
-  seeds (`aoideDeployQml`, `aoideSeedStage`, `aoideSeedSongbook` — the reload
-  reads the runtime songbook), which is what puts the reload between the seed
+  seeds (`aoideDeployQml`, `aoideSeedStage`, `aoideSeedRices` — the reload
+  reads the runtime rices), which is what puts the reload between the seed
   and the shell's restart.
 
 ## The seam with `quickshell`
@@ -181,7 +181,7 @@ the package and nothing else. Neither shape builds a QML tree, installs the
 rice binary, runs shellbridge, the healthcheck or the rice reload: those are
 this lane's, and this lane is what a song needs.
 
-That is also why the song is gated here and not in the shell lane: `aoide.song`
+That is also why the song is gated here and not in the shell lane: `aoide.rice`
 with no `strillix` is a host that says "perform this rice" with nothing to perform
 it, and the platform asserts on exactly that (`modules/nucleus/assertions.nix`).
 The service itself no longer cares — it starts on a config directory, song or
@@ -198,41 +198,41 @@ surface registry it declares into (`aoide.surfaces`), the component slots it
 publishes (`aoide.components`), the core scalars
 (`aoide.enable`, `aoide.root`, `aoide.checkout`, `aoide.hostConfig`,
 `aoide.user`), the song
-selection (`aoide.song`), the derived fact
-`aoide.songbook.builtIn` — the songs this host builds in, which is what the
+selection (`aoide.rice`), the derived fact
+`aoide.rices.builtIn` — the songs this host builds in, which is what the
 deployed tree, the installed packages, the shipped templates and the seed are
 built from — and its own fact: root `AGENTS.md` house rule 5. Component-tier
 fallback (null → palette) is applied locally and
 never pushed back into the option system. It never reads a `song/` RUNTIME path
-at build time (the structural half is `checks.song-runtime-untracked`); committed
-songbook score is not a runtime path.
+at build time (the structural half is `checks.rice-runtime-untracked`); committed
+rices score is not a runtime path.
 
 `checks.livery-fanout` guards the activation seed: the stage twin is the active
 song's committed livery with the venue's `aoide.livery.override` applied and the
 host's geometry laid over the song's own, through `lib/livery.nix`'s
 `stagePatch`, and the same jq run publishes the declared twin
-(`song/declared/livery.json`) — this lane is its only writer. The same script
-publishes the venue's part as data, `song/declared/venue.json`
+(`/declared/livery.json`) — this lane is its only writer. The same script
+publishes the venue's part as data, `/declared/venue.json`
 (`lib/livery.nix`'s `venueDelta`: only the slots the venue recolours and the
 geometry it sets, `{}` with neither), which the runtime stage lays over the
-runtime songbook's copy of the declared song; `checks.livery-fanout` guards
+runtime rices's copy of the declared song; `checks.livery-fanout` guards
 `venueDelta` beside `stagePatch`. The same script publishes one more declared
-artefact, `song/declared/terminal-opacity.conf`
+artefact, `/declared/terminal-opacity.conf`
 (one `background_opacity` line from the song's `geometry.terminalOpacity`,
 deleted when that is null): the kitty dendrite includes it BEFORE the staged
 colours, so a host that has never staged a song still opens its terminal at the
 song's opacity. That read is why THIS lane carries it — a paint dendrite reads
 the dress; the kitty lane names only the path. The seed publishes
-`song/declared/hyprlock.conf` the same way: the declared song's lock-screen
+`/declared/hyprlock.conf` the same way: the declared song's lock-screen
 dress, rendered at build time by the strillix binary (`strx livery emit hyprlock`)
 from the same venue-recoloured notes and the song's own `lockscreen.<ext>`,
 comments only when it ships none. hyprlock's config (`lock.nix`, above) sources it before
-`song/stage/hyprlock.conf`, so a host that has never staged a song locks in the
+`/stage/hyprlock.conf`, so a host that has never staged a song locks in the
 declared one.
 
 ## How it composes
 
-Naming no song performs no song: `aoide.song` defaults to null, no song's body
+Naming no song performs no song: `aoide.rice` defaults to null, no song's body
 is imported, and this lane's deploy/seed/restart half is gated on the performed
 song — so a host that names nothing
 gets no QML tree and nothing deployed, rather than an empty surface. The shell

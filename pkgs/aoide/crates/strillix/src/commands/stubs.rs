@@ -30,7 +30,7 @@ fn unimplemented(_inv: &Invocation) -> Outcome {
 pub fn register_rice_late(r: &mut Registry) {
     r.insert(cmd!(
         path: ["rice", "declare"],
-        summary: "Copy a composed song from $AOIDE_ROOT/song/songbook/<name> into the checkout's song/songbook/<name>, so it can be committed, less the machine's top-level takes/ and drafts/. Refuses while git shows uncommitted changes in that folder, when the checkout is not a git repository (git history is the archive), or when the staged rice.nix is the old function-module shape (`strillix rice refresh <name>`). With --host, instead rewrite the one `habit.song.declared = \"…\";` line in this host's config (aoide.hostConfig) to <name>, a song this host's build carries; it takes effect on the next rebuild, and warns when the checkout's song folder is dirty. The gated rebuild itself is the user's own git commit + nix switch, never this command.",
+        summary: "Copy a composed song from $AOIDE_ROOT/rices/<name> into the checkout's rices/<name>, so it can be committed, less the machine's top-level history/ and drafts/. Refuses while git shows uncommitted changes in that folder, when the checkout is not a git repository (git history is the archive), or when the staged rice.nix is the old function-module shape (`strillix rice refresh <name>`). With --host, instead rewrite the one `habit.song.declared = \"…\";` line in this host's config (aoide.hostConfig) to <name>, a song this host's build carries; it takes effect on the next rebuild, and warns when the checkout's song folder is dirty. The gated rebuild itself is the user's own git commit + nix switch, never this command.",
         args: [arg!("name", "string", true, "Rice/song name to declare.")],
         flags: [flag!("host", "bool", "Rewrite this host's declared-song line to <name> instead of copying the song into the checkout. CLI-only: it changes what the next rebuild performs.", doors: &[Door::Cli])],
         gated: true,
@@ -41,7 +41,7 @@ pub fn register_rice_late(r: &mut Registry) {
     ));
     r.insert(cmd!(
         path: ["rice", "transpose"],
-        summary: "Replay a song in another key (palette) from the song's songbook/<song>/palette/.",
+        summary: "Replay a song in another key (palette) from the song's rices/<song>/palette/.",
         args: [
             arg!("rice", "string", true, "Source song name."),
             arg!("palette", "string", true, "Key/palette name to transpose into."),
@@ -55,12 +55,12 @@ pub fn register_rice_late(r: &mut Registry) {
 
 /// `rice declare <name>` — the copy half of the stage-vs-commit split (house
 /// rule 2: the user gates the rebuild, never this command). Copies the
-/// composed song `$AOIDE_ROOT/song/songbook/<name>/` into the checkout's
-/// `song/songbook/<name>/` (`aoide_storage::fs::flake_root()`,
+/// composed song `$AOIDE_ROOT/rices/<name>/` into the checkout's
+/// `rices/<name>/` (`aoide_storage::fs::flake_root()`,
 /// `$AOIDE_FLAKE_ROOT` override, default `<home>/Aoide`) — composing lives
 /// in the runtime root, committing lives in the checkout git tracks, and
-/// this is the seam between them. The machine's own top-level `takes/` and
-/// `drafts/` (`aoide_song::widgets::MACHINE_RUNTIME_DIRS`) stay behind: the
+/// this is the seam between them. The machine's own top-level `history/` and
+/// `drafts/` (`strillix_rice::widgets::MACHINE_RUNTIME_DIRS`) stay behind: the
 /// checkout carries the song, not the machine's undo history and scratch.
 /// Nothing beyond the copy: no `git add`, no rebuild proposal, no `nix eval`
 /// — those stay the user's own git/rebuild-gate steps. Overwrites only files
@@ -68,9 +68,9 @@ pub fn register_rice_late(r: &mut Registry) {
 /// file), so a repeat declare with nothing new is a true no-op.
 ///
 /// The copy refuses while git shows uncommitted work in the folder, and names
-/// it (`aoide_song::checkout_gate`), and refuses a staged `rice.nix` that is
+/// it (`strillix_rice::checkout_gate`), and refuses a staged `rice.nix` that is
 /// still the old function-module shape (`old-song-shape`). `--host` is the other declare step,
-/// `aoide_song::host_declare`: it points the host's `habit.song.declared` line
+/// `strillix_rice::host_declare`: it points the host's `habit.song.declared` line
 /// at `<name>` instead of copying any song, never refuses for git, and warns
 /// when the folder is dirty. It too stops short of git and the rebuild.
 fn handle_rice_declare(inv: &Invocation) -> Outcome {
@@ -83,17 +83,17 @@ fn handle_rice_declare(inv: &Invocation) -> Outcome {
     };
 
     if inv.flag_present("host") {
-        return aoide_song::host_declare::declare_on_host(&name);
+        return strillix_rice::host_declare::declare_on_host(&name);
     }
 
-    // `name` is joined unsanitized into both `songbook_dir` (the runtime
-    // root) and the checkout's `song/songbook/` below — without this check a
+    // `name` is joined unsanitized into both `rice_dir` (the runtime
+    // root) and the checkout's `rices/` below — without this check a
     // `..`-shaped name escapes both roots (arbitrary read from `src`,
     // arbitrary write to `dst`). Same validator `rice compose`/`rice mode`
-    // already gate on (`aoide_song::compose::valid_song_name`,
+    // already gate on (`strillix_rice::compose::valid_song_name`,
     // `^[a-z0-9][a-z0-9-]*$` — rejects `..`/`/` by construction), checked
     // BEFORE either path is built, not after.
-    if !aoide_song::compose::valid_song_name(&name) {
+    if !strillix_rice::compose::valid_song_name(&name) {
         return Outcome::error(
             "rice.declare",
             format!(
@@ -104,7 +104,7 @@ fn handle_rice_declare(inv: &Invocation) -> Outcome {
         .with_data(json!({ "reason": "invalid-name", "name": name }));
     }
 
-    let src = aoide_storage::fs::songbook_dir(&name);
+    let src = aoide_storage::fs::rice_dir(&name);
     if !src.is_dir() {
         return Outcome::error(
             "rice.declare",
@@ -122,7 +122,7 @@ fn handle_rice_declare(inv: &Invocation) -> Outcome {
             "rice.declare",
             format!(
                 "no Aoide checkout at {} ($AOIDE_FLAKE_ROOT override, default `<home>/Aoide`) — \
-                 `rice declare` commits into the checkout's `song/songbook/`, so a checkout must exist first",
+                 `rice declare` commits into the checkout's `rices/`, so a checkout must exist first",
                 checkout.display()
             ),
         )
@@ -131,8 +131,8 @@ fn handle_rice_declare(inv: &Invocation) -> Outcome {
 
     // The no-archive gate: the copy below overwrites the folder's bytes, so
     // git must show nothing uncommitted there first (checkout_gate's header).
-    let folder = format!("song/songbook/{name}");
-    if let Err(blocked) = aoide_song::checkout_gate::check_folder(&checkout, &folder) {
+    let folder = format!("rices/{name}");
+    if let Err(blocked) = strillix_rice::checkout_gate::check_folder(&checkout, &folder) {
         return blocked.into_outcome("rice.declare", &checkout, &folder);
     }
 
@@ -140,7 +140,7 @@ fn handle_rice_declare(inv: &Invocation) -> Outcome {
     // an old function-module `rice.nix` copied into the checkout breaks the build
     // (CONTRACTS.md §5). A file that cannot be read is left to the copy's own error.
     let rice = src.join("rice.nix");
-    if std::fs::read_to_string(&rice).is_ok_and(|text| aoide_song::checkout_gate::is_old_song_shape(&text)) {
+    if std::fs::read_to_string(&rice).is_ok_and(|text| strillix_rice::checkout_gate::is_old_song_shape(&text)) {
         return Outcome::refuse(
             "rice.declare",
             Kind::Refused,
@@ -154,12 +154,12 @@ fn handle_rice_declare(inv: &Invocation) -> Outcome {
         .with_fields(json!({ "reason": "old-song-shape", "name": name, "file": rice.to_string_lossy() }));
     }
 
-    let dst = checkout.join("song").join("songbook").join(&name);
+    let dst = checkout.join("rices").join(&name);
     let mut changed = Vec::new();
-    if let Err(e) = aoide_song::widgets::copy_tree_atomic(
+    if let Err(e) = strillix_rice::widgets::copy_tree_atomic(
         &src,
         &dst,
-        aoide_song::widgets::MACHINE_RUNTIME_DIRS,
+        strillix_rice::widgets::MACHINE_RUNTIME_DIRS,
         &mut changed,
     ) {
         return Outcome::error(
@@ -201,12 +201,12 @@ mod tests {
     }
 
     /// `--host` takes the other road: the host file is rewritten and the
-    /// checkout's songbook is never touched (the engine's own cases live in
-    /// `aoide_song::host_declare`).
+    /// checkout's rices is never touched (the engine's own cases live in
+    /// `strillix_rice::host_declare`).
     #[test]
     fn host_flag_rewrites_the_host_line_and_copies_nothing() {
         let _g = env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_FLAKE_ROOT", "AOIDE_HOST_CONFIG", "AOIDE_SONG_TEMPLATES"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_FLAKE_ROOT", "AOIDE_HOST_CONFIG", "STRILLIX_TEMPLATES"]);
         let root = unique_tmp("declare-host");
         std::env::set_var("AOIDE_STAGE_DIR", root.join("song").join("stage"));
         let checkout = root.join("checkout");
@@ -218,7 +218,7 @@ mod tests {
         std::fs::create_dir_all(templates.join("dusk")).unwrap();
         std::fs::write(templates.join("dusk").join("rice.nix"), "{ ... }: { }\n").unwrap();
         std::fs::write(templates.join("builtin.json"), r#"{"declared":"sonata","songs":["sonata","dusk"],"packages":[]}"#).unwrap();
-        std::env::set_var("AOIDE_SONG_TEMPLATES", &templates);
+        std::env::set_var("STRILLIX_TEMPLATES", &templates);
 
         let mut i = inv(&["dusk"]);
         i.flags.insert("host".into(), "true".into());
@@ -235,12 +235,12 @@ mod tests {
     #[test]
     fn host_flag_warns_about_a_dirty_song_folder_and_still_declares() {
         let _g = env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_FLAKE_ROOT", "AOIDE_HOST_CONFIG", "AOIDE_SONG_TEMPLATES"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_FLAKE_ROOT", "AOIDE_HOST_CONFIG", "STRILLIX_TEMPLATES"]);
         let root = unique_tmp("declare-host-warn");
         std::env::set_var("AOIDE_STAGE_DIR", root.join("song").join("stage"));
         let checkout = root.join("checkout");
         std::env::set_var("AOIDE_FLAKE_ROOT", &checkout);
-        let folder = checkout.join("song").join("songbook").join("dusk");
+        let folder = checkout.join("rices").join("dusk");
         std::fs::create_dir_all(&folder).unwrap();
         std::fs::write(folder.join("livery.json"), "{}").unwrap();
         aoide_test_support::git_in(&checkout, &["init", "-q"]);
@@ -255,7 +255,7 @@ mod tests {
         std::fs::create_dir_all(templates.join("dusk")).unwrap();
         std::fs::write(templates.join("dusk").join("rice.nix"), "{ ... }: { }\n").unwrap();
         std::fs::write(templates.join("builtin.json"), r#"{"declared":"sonata","songs":["sonata","dusk"],"packages":[]}"#).unwrap();
-        std::env::set_var("AOIDE_SONG_TEMPLATES", &templates);
+        std::env::set_var("STRILLIX_TEMPLATES", &templates);
 
         let mut i = inv(&["dusk"]);
         i.flags.insert("host".into(), "true".into());
@@ -263,8 +263,8 @@ mod tests {
         assert_eq!(out.status, crate::output::Status::Ok, "{out:?}");
         assert_eq!(std::fs::read_to_string(&host).unwrap(), "{\n  habit.song.declared = \"dusk\";\n}\n");
         let data = out.data.expect("the declare carries data");
-        assert!(data["warning"].as_str().unwrap().contains("song/songbook/dusk"));
-        assert_eq!(data["uncommitted"][0], " M song/songbook/dusk/livery.json");
+        assert!(data["warning"].as_str().unwrap().contains("rices/dusk"));
+        assert_eq!(data["uncommitted"][0], " M rices/dusk/livery.json");
 
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -277,13 +277,13 @@ mod tests {
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_FLAKE_ROOT"]);
         let stage_root = unique_tmp("declare-dirty");
         std::env::set_var("AOIDE_STAGE_DIR", stage_root.join("song").join("stage"));
-        let songbook = stage_root.join("song").join("songbook").join("dusk");
-        std::fs::create_dir_all(&songbook).unwrap();
-        std::fs::write(songbook.join("livery.json"), "{\"runtime\":true}").unwrap();
+        let rices = stage_root.join("song").join("rices").join("dusk");
+        std::fs::create_dir_all(&rices).unwrap();
+        std::fs::write(rices.join("livery.json"), "{\"runtime\":true}").unwrap();
 
         let checkout = unique_tmp("declare-dirty-checkout");
         std::env::set_var("AOIDE_FLAKE_ROOT", &checkout);
-        let folder = checkout.join("song").join("songbook").join("dusk");
+        let folder = checkout.join("rices").join("dusk");
         std::fs::create_dir_all(&folder).unwrap();
         std::fs::write(folder.join("livery.json"), "{\"committed\":true}").unwrap();
         aoide_test_support::git_in(&checkout, &["init", "-q"]);
@@ -295,7 +295,7 @@ mod tests {
         assert_eq!(out.status, crate::output::Status::Error, "{out:?}");
         let data = out.data.expect("a refusal carries data");
         assert_eq!(data["reason"], "dirty-folder");
-        assert!(out.message.contains("song/songbook/dusk"), "{}", out.message);
+        assert!(out.message.contains("rices/dusk"), "{}", out.message);
         assert_eq!(std::fs::read_to_string(folder.join("livery.json")).unwrap(), "{\"hand-edit\":true}");
 
         let _ = std::fs::remove_dir_all(&stage_root);
@@ -318,7 +318,7 @@ mod tests {
     }
 
     /// A traversal-shaped name must be refused BEFORE it ever reaches
-    /// `songbook_dir`/the checkout join — same pattern
+    /// `rice_dir`/the checkout join — same pattern
     /// `song/src/commands/mode.rs`'s
     /// `current_staged_song_rejects_a_hand_edited_path_traversal_song_field`
     /// pins for the sibling stage-file case. No env override needed: the
@@ -351,9 +351,9 @@ mod tests {
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_FLAKE_ROOT"]);
         let stage_root = unique_tmp("declare-nocheckout");
         std::env::set_var("AOIDE_STAGE_DIR", stage_root.join("song").join("stage"));
-        let songbook = stage_root.join("song").join("songbook").join("dusk");
-        std::fs::create_dir_all(&songbook).unwrap();
-        std::fs::write(songbook.join("livery.json"), "{}").unwrap();
+        let rices = stage_root.join("song").join("rices").join("dusk");
+        std::fs::create_dir_all(&rices).unwrap();
+        std::fs::write(rices.join("livery.json"), "{}").unwrap();
         let missing_checkout = unique_tmp("declare-nocheckout-missing");
         std::fs::remove_dir_all(&missing_checkout).unwrap(); // unique_tmp creates it; this test wants it ABSENT
         std::env::set_var("AOIDE_FLAKE_ROOT", &missing_checkout);
@@ -373,10 +373,10 @@ mod tests {
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_FLAKE_ROOT"]);
         let stage_root = unique_tmp("declare-old-shape");
         std::env::set_var("AOIDE_STAGE_DIR", stage_root.join("song").join("stage"));
-        let songbook = stage_root.join("song").join("songbook").join("dusk");
-        std::fs::create_dir_all(&songbook).unwrap();
-        std::fs::write(songbook.join("livery.json"), "{}").unwrap();
-        std::fs::write(songbook.join("rice.nix"), "{ lib, config, ... }:\n{ config = { }; }\n").unwrap();
+        let rices = stage_root.join("song").join("rices").join("dusk");
+        std::fs::create_dir_all(&rices).unwrap();
+        std::fs::write(rices.join("livery.json"), "{}").unwrap();
+        std::fs::write(rices.join("rice.nix"), "{ lib, config, ... }:\n{ config = { }; }\n").unwrap();
 
         let checkout = unique_tmp("declare-old-shape-checkout");
         aoide_test_support::git_in(&checkout, &["init", "-q"]);
@@ -389,7 +389,7 @@ mod tests {
         assert_eq!(data["reason"], "old-song-shape");
         assert_eq!(data["refusal"]["fix"]["run"], "strillix rice refresh dusk");
         assert!(out.message.contains("rice.nix"), "{}", out.message);
-        assert!(!checkout.join("song").join("songbook").join("dusk").exists(), "nothing is copied");
+        assert!(!checkout.join("rices").join("dusk").exists(), "nothing is copied");
 
         let _ = std::fs::remove_dir_all(&stage_root);
         let _ = std::fs::remove_dir_all(&checkout);
@@ -402,10 +402,10 @@ mod tests {
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_FLAKE_ROOT"]);
         let stage_root = unique_tmp("declare-v1-body");
         std::env::set_var("AOIDE_STAGE_DIR", stage_root.join("song").join("stage"));
-        let songbook = stage_root.join("song").join("songbook").join("dusk");
-        std::fs::create_dir_all(&songbook).unwrap();
-        std::fs::write(songbook.join("livery.json"), "{}").unwrap();
-        std::fs::write(songbook.join("rice.nix"), "{\n  description = \"dusk\";\n  home = { members = [ \"strillix\" ]; };\n}\n").unwrap();
+        let rices = stage_root.join("song").join("rices").join("dusk");
+        std::fs::create_dir_all(&rices).unwrap();
+        std::fs::write(rices.join("livery.json"), "{}").unwrap();
+        std::fs::write(rices.join("rice.nix"), "{\n  description = \"dusk\";\n  home = { members = [ \"strillix\" ]; };\n}\n").unwrap();
 
         let checkout = unique_tmp("declare-v1-body-checkout");
         aoide_test_support::git_in(&checkout, &["init", "-q"]);
@@ -413,7 +413,7 @@ mod tests {
 
         let out = handle_rice_declare(&inv(&["dusk"]));
         assert_eq!(out.status, crate::output::Status::Ok, "{out:?}");
-        assert!(checkout.join("song").join("songbook").join("dusk").join("rice.nix").exists());
+        assert!(checkout.join("rices").join("dusk").join("rice.nix").exists());
 
         let _ = std::fs::remove_dir_all(&stage_root);
         let _ = std::fs::remove_dir_all(&checkout);
@@ -425,10 +425,10 @@ mod tests {
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_FLAKE_ROOT"]);
         let stage_root = unique_tmp("declare-copy");
         std::env::set_var("AOIDE_STAGE_DIR", stage_root.join("song").join("stage"));
-        let songbook = stage_root.join("song").join("songbook").join("dusk");
-        std::fs::create_dir_all(songbook.join("widgets")).unwrap();
-        std::fs::write(songbook.join("livery.json"), "{\"a\":1}").unwrap();
-        std::fs::write(songbook.join("widgets").join(".gitkeep"), "").unwrap();
+        let rices = stage_root.join("song").join("rices").join("dusk");
+        std::fs::create_dir_all(rices.join("widgets")).unwrap();
+        std::fs::write(rices.join("livery.json"), "{\"a\":1}").unwrap();
+        std::fs::write(rices.join("widgets").join(".gitkeep"), "").unwrap();
 
         let checkout = unique_tmp("declare-copy-checkout");
         aoide_test_support::git_in(&checkout, &["init", "-q"]);
@@ -437,7 +437,7 @@ mod tests {
         let out = handle_rice_declare(&inv(&["dusk"]));
         assert_eq!(out.status, crate::output::Status::Ok, "{out:?}");
         assert!(out.gated, "rice.declare stays gated metadata");
-        let dst = checkout.join("song").join("songbook").join("dusk");
+        let dst = checkout.join("rices").join("dusk");
         assert_eq!(std::fs::read_to_string(dst.join("livery.json")).unwrap(), "{\"a\":1}");
         assert!(dst.join("widgets").join(".gitkeep").exists());
         assert_eq!(out.changed.len(), 2);
@@ -460,16 +460,16 @@ mod tests {
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_FLAKE_ROOT"]);
         let stage_root = unique_tmp("declare-scratch");
         std::env::set_var("AOIDE_STAGE_DIR", stage_root.join("song").join("stage"));
-        let songbook = stage_root.join("song").join("songbook").join("dusk");
-        std::fs::create_dir_all(songbook.join("takes")).unwrap();
-        std::fs::create_dir_all(songbook.join("drafts").join("neon")).unwrap();
-        std::fs::create_dir_all(songbook.join("widgets").join("takes")).unwrap();
-        std::fs::create_dir_all(songbook.join("elements").join("x")).unwrap();
-        std::fs::write(songbook.join("livery.json"), "{}").unwrap();
-        std::fs::write(songbook.join("takes").join("head.json"), "{}").unwrap();
-        std::fs::write(songbook.join("drafts").join("neon").join("livery.json"), "{}").unwrap();
-        std::fs::write(songbook.join("widgets").join("takes").join("Bar.qml"), "").unwrap();
-        std::fs::write(songbook.join("elements").join("x").join("element.json"), "{}").unwrap();
+        let rices = stage_root.join("song").join("rices").join("dusk");
+        std::fs::create_dir_all(rices.join("history")).unwrap();
+        std::fs::create_dir_all(rices.join("drafts").join("neon")).unwrap();
+        std::fs::create_dir_all(rices.join("widgets").join("history")).unwrap();
+        std::fs::create_dir_all(rices.join("elements").join("x")).unwrap();
+        std::fs::write(rices.join("livery.json"), "{}").unwrap();
+        std::fs::write(rices.join("history").join("head.json"), "{}").unwrap();
+        std::fs::write(rices.join("drafts").join("neon").join("livery.json"), "{}").unwrap();
+        std::fs::write(rices.join("widgets").join("history").join("Bar.qml"), "").unwrap();
+        std::fs::write(rices.join("elements").join("x").join("element.json"), "{}").unwrap();
 
         let checkout = unique_tmp("declare-scratch-checkout");
         aoide_test_support::git_in(&checkout, &["init", "-q"]);
@@ -477,12 +477,12 @@ mod tests {
 
         let out = handle_rice_declare(&inv(&["dusk"]));
         assert_eq!(out.status, crate::output::Status::Ok, "{out:?}");
-        let dst = checkout.join("song").join("songbook").join("dusk");
+        let dst = checkout.join("rices").join("dusk");
         assert!(dst.join("livery.json").exists());
-        assert!(!dst.join("takes").exists(), "takes/ is the machine's undo history");
+        assert!(!dst.join("history").exists(), "history/ is the machine's undo history");
         assert!(!dst.join("drafts").exists(), "drafts/ is the machine's scratch");
         assert!(
-            dst.join("widgets").join("takes").join("Bar.qml").exists(),
+            dst.join("widgets").join("history").join("Bar.qml").exists(),
             "only the song folder's top-level scratch names are skipped"
         );
         assert!(
@@ -500,13 +500,13 @@ mod tests {
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_FLAKE_ROOT"]);
         let stage_root = unique_tmp("declare-takes-link");
         std::env::set_var("AOIDE_STAGE_DIR", stage_root.join("song").join("stage"));
-        let songbook = stage_root.join("song").join("songbook").join("dusk");
+        let rices = stage_root.join("song").join("rices").join("dusk");
         let elsewhere = stage_root.join("elsewhere");
-        std::fs::create_dir_all(&songbook).unwrap();
+        std::fs::create_dir_all(&rices).unwrap();
         std::fs::create_dir_all(&elsewhere).unwrap();
-        std::fs::write(songbook.join("livery.json"), "{}").unwrap();
+        std::fs::write(rices.join("livery.json"), "{}").unwrap();
         std::fs::write(elsewhere.join("head.json"), "{}").unwrap();
-        std::os::unix::fs::symlink(&elsewhere, songbook.join("takes")).unwrap();
+        std::os::unix::fs::symlink(&elsewhere, rices.join("history")).unwrap();
 
         let checkout = unique_tmp("declare-takes-link-checkout");
         aoide_test_support::git_in(&checkout, &["init", "-q"]);
@@ -514,10 +514,10 @@ mod tests {
 
         let out = handle_rice_declare(&inv(&["dusk"]));
         assert_eq!(out.status, crate::output::Status::Ok, "{out:?}");
-        let dst = checkout.join("song").join("songbook").join("dusk");
+        let dst = checkout.join("rices").join("dusk");
         assert!(dst.join("livery.json").exists());
         assert!(
-            std::fs::symlink_metadata(dst.join("takes")).is_err(),
+            std::fs::symlink_metadata(dst.join("history")).is_err(),
             "a takes symlink is skipped by name, never followed or copied"
         );
 

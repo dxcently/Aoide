@@ -6826,6 +6826,7 @@ mod tests {
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
         let config_root = unique_stage("check-lane-wiring-config");
         std::env::set_var("AOIDE_ROOT", &config_root);
+        std::env::set_var("STRILLIX_ROOT", &config_root);
         // An always-failing command, spelled in BOTH hosts' shell language:
         // `sh -c "exit 1"` and `cmd /C "exit 1"` are the same verdict, where
         // the literal `false` is a POSIX program native Windows does not have
@@ -6893,6 +6894,7 @@ mod tests {
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
         let config_root = unique_stage("check-lane-delivery-config");
         std::env::set_var("AOIDE_ROOT", &config_root);
+        std::env::set_var("STRILLIX_ROOT", &config_root);
         // A GREEN baseline, spelled in BOTH hosts' shell language: the POSIX
         // `true` builtin does not exist as a program on native Windows, where
         // `cmd /C true` exits 1 — which reads as an already-RED verify command
@@ -6978,6 +6980,7 @@ mod tests {
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
         let config_root = unique_stage("check-lane-midturn-config");
         std::env::set_var("AOIDE_ROOT", &config_root);
+        std::env::set_var("STRILLIX_ROOT", &config_root);
         // An always-failing command, spelled in BOTH hosts' shell language:
         // `sh -c "exit 1"` and `cmd /C "exit 1"` are the same verdict, where
         // the literal `false` is a POSIX program native Windows does not have

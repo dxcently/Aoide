@@ -10,7 +10,7 @@ and the layered `AGENTS.md` files; this list only sequences them.
    `aoide spawn` for a detached launch). Never work as an untracked
    process.
 2. **Write inside the domain.** Rice and theming work commits to
-   `song/songbook/<song>/` and nothing else (house rule 1). Code work stays
+   `rices/<song>/` and nothing else (house rule 1). Code work stays
    inside the directory whose `AGENTS.md` you have read — each layer's file
    states the invariants that bind you there.
 3. **Test per crate.** `cargo test -p <crate>` for each crate touched —

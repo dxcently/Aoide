@@ -25,7 +25,7 @@ at the Aoide flake at `/home/khoa/Aoide`. They wrap [nh](https://github.com/vipe
 | `adtest` | `nh os test` | Build + activate **without** touching the boot default (reverts on reboot). |
 | `adbuild` | `nh os build` | Build only — no activation, no privilege needed. |
 | `adrollback` | `nh os rollback` | Roll back to the previous generation. |
-| `adcheck` | `nix flake check` | Run the flake's `checks` (coupling, song-shape, packages, VM boot). |
+| `adcheck` | `nix flake check` | Run the flake's `checks` (coupling, rice-shape, packages, VM boot). |
 | `adgens` | `nh os info` | List system generations. |
 | `adclean` | `nh clean all` | Garbage-collect old generations + store paths. |
 
@@ -70,7 +70,7 @@ modifier.
 
 ### Bar cell interactions
 
-`song/songbook/sonata/widgets/bar.qml` (the bar is the song's body, resolved by
+`rices/sonata/widgets/bar.qml` (the bar is the song's body, resolved by
 slot name; see [[Song-Anatomy]]):
 
 | Cell | Interaction |

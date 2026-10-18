@@ -34,10 +34,10 @@ let
 
   # The module argument a real host's song hook hands in (`lib/aoideos.nix`'s
   # `mkHost`), for the fixture whose lanes read one: the strillix runtime reads
-  # the songbook it paints from. No song is selected, so the song facts keep
+  # the rices it paints from. No song is selected, so the song facts keep
   # their defaults and no `rice.nix` is imported.
   songArgs = {
-    extraModulesFor = _: [ { _module.args.songbook = aoideos.songbookRoot; } ];
+    extraModulesFor = _: [ { _module.args.ricesRoot = aoideos.ricesRoot; } ];
   };
 
   hostWith =
@@ -78,10 +78,10 @@ let
   # declared in the second (`modules/dendrites/strillix/shellbridge.nix`), so a
   # check that reads only the first would pass on a host that has the bridge.
   #
-  # `templates` is the units' OWN `AOIDE_SONG_TEMPLATES` (the staging path's
+  # `templates` is the units' OWN `STRILLIX_TEMPLATES` (the staging path's
   # one session-sourced variable — `fs::song_templates_dir`): declared on the
   # unit, not inherited from the systemd user manager's login environment, so a
-  # unit restarted after a switch stages from THIS build's songbook. The two
+  # unit restarted after a switch stages from THIS build's rices. The two
   # module systems spell it differently — NixOS user units put it under
   # `serviceConfig.Environment`, home-manager units under `Service.Environment`
   # — so both are read here rather than assumed.
@@ -94,8 +94,8 @@ let
 
   templatesOf =
     env:
-    map (lib.removePrefix "AOIDE_SONG_TEMPLATES=") (
-      lib.filter (lib.hasPrefix "AOIDE_SONG_TEMPLATES=") env
+    map (lib.removePrefix "STRILLIX_TEMPLATES=") (
+      lib.filter (lib.hasPrefix "STRILLIX_TEMPLATES=") env
     );
 
   read =
@@ -108,7 +108,7 @@ let
     in
     {
       config = cfg.aoide.quickshell.config;
-      song = cfg.aoide.song;
+      song = cfg.aoide.rice;
       strillix = cfg.aoide.strillix.enable;
       sessionTarget = cfg.aoide.sessionTarget;
       packages = map (p: baseNameOf p.outPath) cfg.environment.systemPackages;

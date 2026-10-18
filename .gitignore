@@ -1,15 +1,15 @@
-# Runtime / ephemera — never versioned (see Song-Vocabulary in the wiki).
-# Performed-half live state:
-song/stage/
-song/auditions/
+# Runtime / ephemera — never versioned (rice state lives under $STRILLIX_ROOT).
+# Performed-half live state (the rice stage and its auditions) is not in the checkout:
+/stage/
+/auditions/
 # Declared-half live state (published by the quickshell activation seed):
-song/declared/
-# Per-song scratch drafts (song/songbook/<song>/drafts/) — nested under the
-# song they vary, never committed/declared truth (that's the whole point).
-song/songbook/*/drafts/
-# Per-song undo history (song/songbook/<song>/takes/) — the machine's own, and
+/declared/
+# Per-rice scratch drafts (rices/<rice>/drafts/) — nested under the rice they
+# vary, never committed/declared truth (that's the whole point).
+rices/*/drafts/
+# Per-rice undo history (rices/<rice>/history/) — the machine's own, and
 # `strillix rice declare` never copies it, so a hand-copied one stays untracked.
-song/songbook/*/takes/
+rices/*/history/
 
 # pi-subagents' runtime artifacts (parent-orchestrator runs):
 .pi-subagents/

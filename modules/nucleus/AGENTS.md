@@ -48,7 +48,7 @@ covers only what's specific to the contract.
   the member fails eval; `aoideOptions` lists it whether or not any host selects
   the member, since it evaluates the whole catalogue.
 - **Changes here land by ordered lane, not by rice edit** (root `AGENTS.md`
-  house rule 1 — a rice agent writes only `song/songbook/<song>/`; everything
+  house rule 1 — a rice agent writes only `rices/<song>/`; everything
   outside `song/`, this directory included, changes only on a lane the User
   ordered, with that lane's scope named). A rice agent proposing a contract
   change writes the diff and gets it reviewed/merged the normal way, same as

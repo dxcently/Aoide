@@ -892,7 +892,7 @@ type ComponentMap = std::collections::HashMap<String, ComponentFile>;
 /// previewed widget's own file, `commands::preview::compute_watch_list`),
 /// parsed once and keyed by file stem, PLUS the widget's own file (in case
 /// it lives somewhere `watch` doesn't cover, e.g. a foreign song or an
-/// out-of-songbook path), PLUS every inline `component Name: Type { ... }`
+/// out-of-rices path), PLUS every inline `component Name: Type { ... }`
 /// declaration any of those files contain, keyed by `Name` (review
 /// follow-up part A) — same `ComponentFile` shape either way (an inline
 /// component's `roots` is a single synthetic entry: its own base type,
@@ -3242,7 +3242,7 @@ exit 0
     }
 
     /// The real fixture behind the `join_level`/`parse_static_qml` fixes
-    /// above: a live run against `song/songbook/sonata/widgets/
+    /// above: a live run against `rices/sonata/widgets/
     /// SessionMenu.qml` found every child below a `"file"` match reading
     /// "none" (1054 none vs 34 resolved).
     ///
@@ -3253,7 +3253,7 @@ exit 0
     /// the fixture rot into a no-op the day the song moves.
     fn read_session_menu_qml() -> String {
         let path =
-            aoide_storage::fs::flake_root().join("song/songbook/sonata/widgets/SessionMenu.qml");
+            aoide_storage::fs::flake_root().join("rices/sonata/widgets/SessionMenu.qml");
         std::fs::read_to_string(&path).unwrap_or_else(|e| {
             panic!(
                 "the committed SessionMenu.qml fixture is unreadable at {} ({e}) — this test reads \
@@ -3317,7 +3317,7 @@ exit 0
         let _pin = pin_checkout();
         let text = read_session_menu_qml();
         let path =
-            aoide_storage::fs::flake_root().join("song/songbook/sonata/widgets/SessionMenu.qml");
+            aoide_storage::fs::flake_root().join("rices/sonata/widgets/SessionMenu.qml");
         let mut components = ComponentMap::new();
         components.insert(
             "SessionMenu".to_string(),
@@ -3416,7 +3416,7 @@ exit 0
     /// that source tree has no `song/` by design.
     fn read_conductor_qml() -> (PathBuf, String) {
         let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../../../song/songbook/sonata/widgets/conductor.qml");
+            .join("../../../../rices/sonata/widgets/conductor.qml");
         let text = std::fs::read_to_string(&path).unwrap_or_else(|e| {
             panic!(
                 "the committed conductor.qml fixture is unreadable at {} ({e}) — this test reads \

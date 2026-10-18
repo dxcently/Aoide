@@ -79,7 +79,7 @@ no rice binary:
 | own config | the host sets `aoide.quickshell.config` to its own config directory (a store path or a host path) | the package, plus `aoide-quickshell` on that directory, plus the graphical-session anchor `aoided` needs |
 | bare | nothing sets it (`null`, the default) | the package only: no service, no session claim |
 
-The service is gated on the config, never on `aoide.song` — a shell that paints
+The service is gated on the config, never on `aoide.rice` — a shell that paints
 a host's own config has no song and starts exactly the same way. What is
 song-gated is `strillix`'s half: deploy, seed, restart.
 
@@ -102,8 +102,8 @@ wallpaper/
 
 Both providers set the fact `aoide.wallpaper.provider` to their own name, so
 exactly one answer exists on a host; `strillix` publishes that one word as
-`song/stage/wallpaper-provider`, and both readers — the CLI
-(`aoide-song`'s `wallpaper_provider`) and `LiveryState.qml` — read the same file.
+`/stage/wallpaper-provider`, and both readers — the CLI
+(`strillix-rice`'s `wallpaper_provider`) and `LiveryState.qml` — read the same file.
 Absent means the shell's own layer.
 
 They never name each other either. The bridge is the CLI both sides already
@@ -131,7 +131,7 @@ contract in `modules/nucleus`; an option a member reads is declared in that memb
 
 - `aoided.nix` — carries only the AoideOS deltas for the `aoided` unit
   (`pkgs/aoide/module/aoided.nix` owns the unit itself, its tmpfiles rules, and
-  the core session variables): the strillix-gated `AOIDE_SONG_TEMPLATES` session
+  the core session variables): the strillix-gated `STRILLIX_TEMPLATES` session
   variable, and nothing else paint-shaped. `aoide.sessionTarget` is set by the
   lane that brings a graphical session up (the `quickshell` lane, which names the
   session when it has a shell config to run), so this file reads no lane's

@@ -977,6 +977,7 @@ const EVO: &str = "evo";
 /// not one of the five-edge boxes.
 fn fx_enter(root: &std::path::Path, name: &str) {
     std::env::set_var("AOIDE_ROOT", root);
+    std::env::set_var("STRILLIX_ROOT", root);
     std::env::set_var("AOIDE_STATE_DIR", root);
     std::env::set_var("AOIDE_STAGE_DIR", root);
     std::env::set_var("AOIDE_A2A_NODE_NAME", name);
@@ -992,6 +993,7 @@ fn two_mesh_door(
 ) -> (aoide_test_support::EnvSaver, std::path::PathBuf, u16) {
     let guard = aoide_test_support::EnvSaver::capture(&[
         "AOIDE_ROOT",
+        "STRILLIX_ROOT",
         "AOIDE_STATE_DIR",
         "AOIDE_STAGE_DIR",
         "AOIDE_A2A_NODE_NAME",

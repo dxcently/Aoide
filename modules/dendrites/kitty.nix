@@ -12,7 +12,7 @@
 #     as dxflake left them to its stylix layer — so no colours are hard-coded
 #     here.
 #   - Staged colours (house rule 10: staging hot-loads, never waits on a
-#     rebuild): kitty.conf includes `<aoide.root>/song/stage/terminal-colors.conf`
+#     rebuild): kitty.conf includes `<strillix.root>/stage/terminal-colors.conf`
 #     AFTER Stylix's baked colour include, so a new window opens in the song
 #     `rice stage` last staged, and opens a per-instance control socket
 #     (`listen_on`, `allow_remote_control socket-only`) over which `rice stage`
@@ -171,13 +171,13 @@
           # The song's terminal look, for every NEW window — two includes,
           # in this order:
           #
-          #   1. `song/declared/terminal-opacity.conf` — one
+          #   1. `$STRILLIX_ROOT/declared/terminal-opacity.conf` — one
           #      `background_opacity` line the strillix lane's activation seed
           #      publishes from the song's own `geometry.terminalOpacity`
           #      (CONTRACTS.md §4): the declared truth, so a host that has
           #      never staged anything still opens its terminal at the
           #      song's opacity instead of the baked default.
-          #   2. `song/stage/terminal-colors.conf` — the colours `rice stage`
+          #   2. `$STRILLIX_ROOT/stage/terminal-colors.conf` — the colours `rice stage`
           #      writes, and a `background_opacity` only for a song with an
           #      opinion. SECOND, because kitty takes the LAST value for a
           #      repeated key: a live stage stays authoritative, and a stage
@@ -192,8 +192,8 @@
           # — it names two paths under `aoide.root` and nothing else.
           {
             extraConfig = lib.mkAfter ''
-              include ${config.aoide.root}/song/declared/terminal-opacity.conf
-              include ${config.aoide.root}/song/stage/terminal-colors.conf
+              include ${config.aoide.strillix.root}/declared/terminal-opacity.conf
+              include ${config.aoide.strillix.root}/stage/terminal-colors.conf
             '';
           }
         ];

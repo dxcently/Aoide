@@ -20,12 +20,12 @@ check whenever a rice or song changes.
 
 > **Scope.** This page is protocol: how a rice is made and kept honest — the
 > creation/application split and the mandatory vision-check. Per-song design
-> memory (a palette's rationale, the iteration log) lives in the songbook, not
-> here: cross-cutting memory in `song/songbook/` (see
-> [[Self-Ricing#Songbook Discipline — the "Self" in Self-Ricing]]), per-song
-> notes in `song/songbook/<name>/design/`. The worked examples below (the
-> `sonata` derivation) illustrate the protocol; the songbook is the record —
-> `song/songbook/sonata/design/intent.md` states the shipped key in full.
+> memory (a palette's rationale, the iteration log) lives in the rices, not
+> here: cross-cutting memory in `rices/` (see
+> [[Self-Ricing#Rices Discipline — the "Self" in Self-Ricing]]), per-song
+> notes in `rices/<name>/design/`. The worked examples below (the
+> `sonata` derivation) illustrate the protocol; the rices is the record —
+> `rices/sonata/design/intent.md` states the shipped key in full.
 
 ## 1. Two separated concerns: creating a base16, and applying it
 
@@ -37,9 +37,9 @@ job ends up hard-coding colours in six different files that drift apart.
 - **Creation** happens once, in the song's `rice.nix`, as `aoide.livery.base16`
   — sixteen literal hex slots (base00–base0F) plus the small `palette`
   convenience block (bg/fg/accent/urgent/hot). The **`sonata`** song
-  (`song/songbook/sonata/rice.nix`) is the worked example — the LIGHT dusk
+  (`rices/sonata/rice.nix`) is the worked example — the LIGHT dusk
   key currently performed on yomi-strix: every slot is keyed by eye from the
-  wallpaper (`song/covers/yuki-sonata.png` — a pianist at a grand piano on
+  wallpaper (`/covers/yuki-sonata.png` — a pianist at a grand piano on
   mirror-still water at dusk) with a comment naming which region of the image it
   reads from. The pale peach-cream **sunlit cloudbank** → `base00`; the
   **piano's near-black**, read as a plum ink → `base05`/`fg`; the **dusk
@@ -48,7 +48,7 @@ job ends up hard-coding colours in six different files that drift apart.
   piano-stool cushion** → `base08`/`urgent`; and the **ember horizon**, the
   **cloud-gold** highlight, the **cool-sky cyan-teal**, the **plum-mauve** cloud
   and the **warm rust** of the deep shadow fill the rest of the ramp. The cover
-  lives in the shared `song/covers/` library any song references by literal
+  lives in the shared `/covers/` library any song references by literal
   path. **Status:** there is no automated derivation of a base16 key from a
   wallpaper — no `rice gen` was ever built (cut outright, not left as a
   stub — see [[aoide-cli]]). Creation is a human/agent reading the source
@@ -122,7 +122,7 @@ lane reading another module, a surface with two owners); it cannot catch
 - [[Stylix]] — the application half: one base16 scheme, baked fan-out.
 - [[livery]] — the livery seam creation writes into and application reads from.
 - [[Song-Vocabulary]] — key/song/cover vocabulary this protocol operates on.
-- [[Song-Anatomy]] — where the songbook and per-song design memory live under
+- [[Song-Anatomy]] — where the rices and per-song design memory live under
   `song/`.
-- [[Self-Ricing]] — the songbook write-back loop, and the drafts mechanism
+- [[Self-Ricing]] — the rices write-back loop, and the drafts mechanism
   for iterating on a key before it's declared.

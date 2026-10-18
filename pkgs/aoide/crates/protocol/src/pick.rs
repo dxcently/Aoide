@@ -8,7 +8,7 @@
 //! live here in `aoide-protocol` because every domain crate (`song`, and
 //! whichever comes after it) already depends on this crate, and a per-domain
 //! copy would duplicate the exact same read/parse/reprompt loop for no
-//! reason. `rice back`'s bare-tty branch (`crates/song/src/commands/take.rs`,
+//! reason. `rice back`'s bare-tty branch (`crates/strillix-rice/src/commands/take.rs`,
 //! phase A8) is the first caller; `rice take prune`'s multi-select (phase
 //! A9, §7.1) is [`choose_many`]'s own in-plan consumer — built now, not
 //! speculatively, because that consumer already exists in the plan.

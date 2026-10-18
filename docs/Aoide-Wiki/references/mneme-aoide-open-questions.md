@@ -45,7 +45,7 @@ This register gathers the approved interoperability direction, Claude's eight ma
 
 | ID | Question | Existing decision context |
 |---|---|---|
-| A1 | Which widget tree is authoritative for reload and deployment? | Claude reported deployment copying repository widgets into run/qml while reload copied an independently seeded runtime songbook, allowing reload to restore older widgets. |
+| A1 | Which widget tree is authoritative for reload and deployment? | Claude reported deployment copying repository widgets into run/qml while reload copied an independently seeded runtime rices, allowing reload to restore older widgets. |
 | A2 | What result should a failed shell reload return? | Staging/draft could report status ok alongside an IPC reload failure. No running shell is a distinct headless case. |
 | A3 | Where should send validate that its control socket exists? | A stored nonempty socket path can outlive the actual socket. The fork concerns checks at I/O boundaries versus shared validation code. |
 | A4 | Where does the review rule for stale derived state belong? | Cursor and socket defects recur when stored observations are treated as current facts. A brief template and the shared CRAFT protocol have different reach. |

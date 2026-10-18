@@ -8,7 +8,7 @@ The paint binary `strillix` answers to the shorthand `strx`: one binary, the sam
 surface and output under either name (`strx` is a symlink in the same package).
 
 Each contract carries a version. Bumping a version is a breaking change and must
-land with a migration note in `song/songbook/update-playbook.md`.
+land with a migration note in `rices/update-playbook.md`.
 
 ---
 
@@ -25,8 +25,8 @@ catalogue — is the only place a module file is named.
 
 The repo already runs this way and did before it had a name for it. A dendrite
 is one file (or one directory) plus **one catalogue line**, and no second list
-follows it. `lib/pkgs.nix` discovers `pkgs/*`, and `lib/songbook.nix`'s
-`discover` finds `song/songbook/<song>/` — each a directory's one typed scan
+follows it. `lib/pkgs.nix` discovers `pkgs/*`, and `lib/rices.nix`'s
+`discover` finds `rices/<song>/` — each a directory's one typed scan
 (§2, §5) — the same way. `lib/walk.nix` is gone: a host imports what it
 selected, and the check that catches a stray `.nix` in a song folder reads the
 directory itself. `modules/nucleus/default.nix` names its own files in
@@ -88,7 +88,7 @@ shell's own layer:
 | `aoide.quickshell.config` (`nullOr str`, `null`) | the directory a shell runs; `null` is the bare case — package installed, no shell service | whoever supplies one: a lane, or the host |
 | `aoide.strillix.enable` | the strillix runtime is present: the paint/rice binary is installed (`pkgs.aoide.strillix`) and the shell is wired | `dendrites/strillix/runtime.nix`, which every `strillix` component provider imports by path, and which sets it `true` (the renderer `dendrites/strillix/default.nix` does not) |
 | `aoide.stylix.enable` | the theme is baked at build time, painted by nix | its dendrite, `dendrites/stylix.nix`, which sets it `true` |
-| `aoide.songbook.greeter` (`nullOr (attrsOf str)`, `null`) | the declared song's `greeter` slot record `{ owner, file }`; non-null switches the greeter lane from ly to greetd + the song's Quickshell face | the selection hook (`lib/aoideos.nix`, over `lib/songbook.nix`'s `greeter`), beside `aoide.songbook.builtIn`; never a host |
+| `aoide.rices.greeter` (`nullOr (attrsOf str)`, `null`) | the declared song's `greeter` slot record `{ owner, file }`; non-null switches the greeter lane from ly to greetd + the song's Quickshell face | the selection hook (`lib/aoideos.nix`, over `lib/rices.nix`'s `greeter`), beside `aoide.rices.builtIn`; never a host |
 | `aoide.wallpaper.provider` (`str`, `"quickshell"`) | WHICH provider paints a song's wallpaper here — the one fact that names an alternative rather than a capability | the chosen provider of the `wallpaper` registry (`dendrites/wallpaper/*`): `strillix` writes `"quickshell"` (the shell's own layer), `skwd-wall` writes `"skwd-wall"` |
 | `aoide.components` (`attrsOf { provider; actions }`, `{ }`) | which component slots this host filled (`bar`, `launcher`, `powermenu`, `notifications`, `wallpaper`, `dock`, `calendar`, `switcher`, `lock`, `greeter`, or a consumer's own) and by which provider | each slot's chosen provider, its own entry only; published as `run/qml/components.json` (§4) |
 
@@ -118,7 +118,7 @@ which lane did.
 ### The corollary for Quickshell: render surfaces only
 
 **Quickshell paints; it never *is* the capability.** Every QML file in
-`modules/dendrites/strillix/` and `song/songbook/*/widgets/` is a render surface
+`modules/dendrites/strillix/` and `rices/*/widgets/` is a render surface
 that picks up an agnostic bridge or API by name. State, policy, IPC and system
 access live behind a bridge (a CLI command, a stage file in §4, an IPC socket) that
 is reachable **with only a shell**.
@@ -155,7 +155,7 @@ an uppercase name, not `pkgs/strillix-shell/qml/`.
 >    (c) be the process entry point that wires (a) into (b)? "It draws something
 >    reusable" is not a fourth category.
 >
-> Any NO → it belongs in `song/songbook/<song>/widgets/`.
+> Any NO → it belongs in `rices/<song>/widgets/`.
 >
 > **Tie-breaker**, when an agent honestly cannot call question 2: *would a
 > reviewer file this file's diff under "design change"?* If yes, it is song. A
@@ -231,7 +231,7 @@ stylix lane actually reads, through the option) and the same value in its
 and what `rice compose` copies for a scaffolded song. GTK/Qt and Stylix read
 the option at build time, so flipping it lands on the user-gated rebuild (§2):
 `rice stage` does not apply it and `strx rice stage` makes no call for it. The
-committed `livery.json` reaches `song/stage/livery.json` through the activation
+committed `livery.json` reaches `/stage/livery.json` through the activation
 seed like every other top-level key (§4), so a staged document may carry a
 `polarity` field — data nothing reads today, kept for a future live reader, and
 never a claim that staging applied it.
@@ -253,7 +253,7 @@ apply the fallback, not the option system.
 | `window.borderInactive` | `palette.bg`      |
 
 Hex format: `#?[0-9a-fA-F]{6}` (leading `#` optional). The livery engine
-(native Rust, `crates/song/src/livery/`) owns the authoritative `rice lint`
+(native Rust, `crates/strillix-rice/src/livery/`) owns the authoritative `rice lint`
 validator; the option type is a permissive gate only.
 
 ### Geometry tier (v0 optional overrides — `geometry.*`)
@@ -261,14 +261,14 @@ validator; the option type is a permissive gate only.
 Additive-optional (same status as the base16 tier): every field is `nullOr`,
 defaulting to `null`. A notes file with no `geometry` block behaves exactly
 as before — the compositor lane applies the fallback, not the option
-system. Rides `song/stage/livery.json` for live application: `strx rice
+system. Rides `/stage/livery.json` for live application: `strx rice
 stage` live-applies this tier (plus `window.border`/`borderInactive`) via
 best-effort, guarded `hyprctl` calls (a config reload, then keywords) — see
 §4's staged-geometry paragraph — in addition to baking the value at build time into
 `hyprland.conf`. The option set is the song's AND the host's: a host may set
 any field (a host-wide `blurEnabled = false`, a `terminalOpacity` for one
 song), and the value the option resolves to is what the baked files carry and
-what the declared twin and `song/declared/venue.json` (§4) publish, so a
+what the declared twin and `/declared/venue.json` (§4) publish, so a
 re-stage of the declared song reproduces the bake.
 
 | Key                  | Type          | Fallback | Hyprland keyword       |
@@ -311,13 +311,13 @@ kitty.conf; there is no Aoide constant and nothing in cargo copies it. TWO
 files carry a song's value, and kitty reads them in order — the DECLARED
 fragment first, the STAGE second:
 
-- `song/declared/terminal-opacity.conf` (§4) is one
+- `/declared/terminal-opacity.conf` (§4) is one
   `background_opacity <n>` line the activation seed writes from the declared
   song's effective value (the host's geometry included), and DELETES when
   there is none. It is what a host that has never staged anything opens its
   terminal at — without it, a fresh declarative boot would keep the bake
   while the glass beside it already followed the song.
-- `song/stage/terminal-colors.conf` (§4) is the staged song's colours plus,
+- `/stage/terminal-colors.conf` (§4) is the staged song's colours plus,
   only for a song with an opinion, its own `background_opacity` line, written
   by `rice stage`; every open kitty then reloads its own config
   (`kitty @ load-config`).
@@ -360,7 +360,7 @@ silently fall back. The remaining roles (`sansSerif`, `serif`, `emoji`, and
 `stage/livery.json` twin and no engine schema entry, because nothing at runtime
 reads a face and a terminal cannot be re-faced mid-session. The tier lives in
 `rice.nix` alone: a song does not mirror it into `livery.json`, since the
-activation seed copies that document into `song/stage/livery.json` verbatim
+activation seed copies that document into `/stage/livery.json` verbatim
 (§4) and nothing on the live side would read the copy. "No lint rule" is a
 CONVENTION, not an enforced one: the livery schema closes `palette`, `base16`,
 each component group and each widget record, but it never walks a document's
@@ -379,7 +379,7 @@ Semantics — the **recolour rule**: each set anchor rewrites every livery
 colour equal to the song's AUTHORED value for that anchor (palette, base16
 slots, component-tier literals), computed in one simultaneous pass against the
 authored values, in BOTH fan-outs — the baked Stylix scheme and the
-`song/stage/livery.json` activation seed. A recolour, never a re-key: slots
+`/stage/livery.json` activation seed. A recolour, never a re-key: slots
 not carrying an overridden anchor's value stay the song's (the ramp is the
 song's voice; wanting a different ramp is wanting a different song). `hot`
 overridden while the song left it `null` sets `palette.hot` directly.
@@ -389,10 +389,10 @@ against the committed document — same two passes, same order, same
 precedence, so the fan-outs cannot disagree. Read-side only: the option
 system keeps storing the song's authored values inert; no config-side
 `mkForce`, so no option-system recursion. The RUNTIME writers of
-`song/stage/livery.json` (`strx rice stage`, `rice mode stage`, `reload`'s
-staging arm — §4) derive every song from the runtime songbook, the place a
+`/stage/livery.json` (`strx rice stage`, `rice mode stage`, `reload`'s
+staging arm — §4) derive every song from the runtime rices, the place a
 song is edited. For the DECLARED song they then lay the venue's slots over it
-(`song/declared/venue.json`, §4 — `lib/livery.nix`'s `venueDelta`, the venue's
+(`/declared/venue.json`, §4 — `lib/livery.nix`'s `venueDelta`, the venue's
 part of the declared song: the slots it recolours and the geometry it sets),
 so the venue wins on those fields and an edit to the song shows everywhere
 else, while the rule itself stays in nix and Rust overlays only the data it
@@ -400,7 +400,7 @@ is handed. Staging
 any OTHER song applies no venue: the rule is the VENUE recolouring the song it
 declares. `rice mode declarative` is the one writer that restores declared
 truth instead: its re-pin reads the declared twin
-(`song/declared/livery.json`, §4), recolour included, and an edit to the
+(`/declared/livery.json`, §4), recolour included, and an edit to the
 runtime song stays out of it.
 
 | Key                | Type          | Default | Recolours       |
@@ -417,7 +417,7 @@ recolour pass — and a named key wins over the recolour on its own slot;
 naming a `base16` slot when the performed song carries no base16 scheme is an
 eval error.
 
-**Migration to v1:** the update playbook migrates `song/songbook/*/rice.nix`
+**Migration to v1:** the update playbook migrates `rices/*/rice.nix`
 and `livery.json` from v0 to v1 when the design-system workstream lands v1.
 
 ---
@@ -501,7 +501,7 @@ Rules:
   and names its own slot's providers beside them. It never takes Aoide's
   catalogue wholesale for a slot name it defines itself, because one name from
   two catalogues is a collision. A part needs the nucleus module, the overlay
-  and the song hook's `song`/`borrow`/`songbook` arguments, and value slots need
+  and the song hook's `song`/`borrow`/`rices` arguments, and value slots need
   habit >= 0.4.0 (PACKAGE-LAYOUT's "Parts and rices, from a consumer's side").
   Additive: no version bump.
 
@@ -518,9 +518,9 @@ restated here, so the two cannot drift.
 The repo root is **closed**: new content lands **inside the existing tree at
 its designated place** — never a new root entry:
 
-- covers (wallpapers) → `song/songbook/<song>/assets/`
-- chimes (sounds) → `song/songbook/<song>/sounds/`
-- per-song assets → `song/songbook/<song>/`
+- covers (wallpapers) → `rices/<song>/assets/`
+- chimes (sounds) → `rices/<song>/sounds/`
+- per-song assets → `rices/<song>/`
 - module assets → next to their module, as a directory dendrite or provider dir
 
 Content paths are looked up in the Song Map (`concepts/Song-Vocabulary` in the
@@ -592,7 +592,7 @@ untracked both).
 
 ### Package shape (`pkgs/` is walked too)
 
-`pkgs/` self-registers by the same walk `song/songbook/` still uses
+`pkgs/` self-registers by the same walk `rices/` still uses
 (`modules/` self-registers through the catalogue instead — one line per
 dendrite — and
 `modules/nucleus/`, the option contract, through its own `default.nix`). Drop
@@ -638,7 +638,7 @@ Top-level shape (stable keys):
   "commands": [
     {
       "path": ["rice", "compose"],
-      "summary": "Scaffold a new song under song/songbook/<name>/ by copying --from's notes.",
+      "summary": "Scaffold a new song under rices/<name>/ by copying --from's notes.",
       "args": [
         { "name": "name", "type": "string", "required": true }
       ],
@@ -1002,7 +1002,7 @@ count.
   the same constraint (plain unix socket + shell-outs, no nix eval). Held
   by the `nix-independence` flake check (`lib/checks.nix`), which derives
   core's crate closure from `pkgs/aoide/Cargo.toml` and asserts it never
-  reaches `aoide-song`/`aoide-screen`/`strillix` and never shells out to
+  reaches `strillix-rice`/`aoide-screen`/`strillix` and never shells out to
   nix. `config`/`config set`, appended newest, task #135 P-C — the portable
   runtime config file (`$AOIDE_ROOT/config.toml`, `aoide_storage::config`),
   the direct consequence of that same portability constraint: a CORE
@@ -1123,7 +1123,7 @@ count.
   (hard cutover, no alias: `quickshell` now registers only `healthcheck`,
   the placeholder-screen watchdog), reading `stage/mode.json` to dispatch
   shell-reload-only (declarative) or snapshot-then-sync-then-reload
-  (staging/draft, the take hanging off `songbook/<song>/takes/` when staged
+  (staging/draft, the take hanging off `rices/<song>/takes/` when staged
   or the routed draft's own `takes/` when drafted, deduped against the head
   take so an unchanged reload mints nothing). `element seed` (L-E1,
   docs/architecture/ELEMENTS.md) renders a song's committed
@@ -1259,11 +1259,11 @@ own shell, so it can steer its own child; that residual is accepted.
 
 Two live-side (rehearsal) state trees, both gitignored runtime, never
 committed, never load-bearing for the nix build (enforced by
-`checks.song-runtime-untracked`), split by who owns them (command-defrag lane,
+`checks.rice-runtime-untracked`), split by who owns them (command-defrag lane,
 2026-08-27 — root `AGENTS.md`'s "Aoide (core) vs AoideOS/Strillix" boundary
 applied to the stage tree itself):
 
-- **`song/stage/`** — rice/paint staging. `livery.json`, `mode.json`, the
+- **`/stage/`** — rice/paint staging. `livery.json`, `mode.json`, the
   draft-routing symlink target, `grimoire.json`, `apps.json`. Emitted by the
   notes package, `strx rice`/`cover`/`draft`, `strx apps publish`
   (`apps.json`; the `aoide-apps` user unit that keeps it current is planned) and QML itself
@@ -1302,44 +1302,44 @@ The boundary is against other users. A process running as the same user reads
 and writes all of `state/` whatever its mode, and nothing here stops it.
 
 **The runtime root (L-C2, strillix-carrier lane, task #107).** Every runtime
-tree below — `song/stage/`, `state/` (and `state/stage/`), `run/qml/`,
-the composed `songbook/` — hangs off ONE root: `$AOIDE_ROOT` when set to an
+tree below — `/stage/`, `state/` (and `state/stage/`), `run/qml/`,
+the composed `rices/` — hangs off ONE root: `$AOIDE_ROOT` when set to an
 **absolute** path, else `<home>/.aoide` derived from `$AOIDE_USER`/`$HOME`.
 Nix-free — core code carries this default with no NixOS assumption.
 `~/Aoide` is no longer a runtime root on any host; it is purely the dev git
 checkout, reached through the separate `$AOIDE_FLAKE_ROOT` seam (default
 `<home>/Aoide` — §1's `flake_root()`, unchanged by this lane) that
-`soundcheck`, `rice declare`'s commit-in step, and the songbook `nix eval`
+`soundcheck`, `rice declare`'s commit-in step, and the rices `nix eval`
 registry regen all read the checkout through.
 
 **The shipped score templates (L-C3, same lane).** A repo-less host — no
 `$AOIDE_FLAKE_ROOT` checkout on disk at all — has nothing to compose FROM
-and no `flake.nix` for the songbook `nix eval` regen above to evaluate
-against. `$AOIDE_SONG_TEMPLATES` names a THIRD dir for exactly that case:
+and no `flake.nix` for the rices `nix eval` regen above to evaluate
+against. `$STRILLIX_TEMPLATES` names a THIRD dir for exactly that case:
 `<templates>/<song>/livery.json` is what `rice compose --from <song>`
-(`aoide-song`'s `commands::rice`) falls back to reading once
-`songbook_dir(from)` comes up empty; `<templates>/manifest.json` and
-`<templates>/registry.json` are what `aoide-song::widgets`'s registry/
+(`strillix-rice`'s `commands::rice`) falls back to reading once
+`rices_dir(from)` comes up empty; `<templates>/manifest.json` and
+`<templates>/registry.json` are what `strillix-rice::widgets`'s registry/
 manifest regeneration falls back to reading once `flake_root()` has no
 `flake.nix` to shell `nix eval` against — both nix-free, never a `nix`
 invocation. A third consumer (task #41): the first `rice stage <name>`/
-`rice mode stage <name>` for a song the RUNTIME `songbook_dir(name)` lacks
+`rice mode stage <name>` for a song the RUNTIME `rices_dir(name)` lacks
 entirely — never composed on this host, only shipped — copies
 `<templates>/<name>/`'s whole tree in via
-`commands::rice::seed_songbook_from_templates`, once, before
-`handle_rice_stage` (the sync) ever reads the songbook. That seed goes through
+`commands::rice::seed_rices_from_templates`, once, before
+`handle_rice_stage` (the sync) ever reads the rices. That seed goes through
 `commands::refresh::refresh_song`, the function `strx rice refresh` runs, so it
-writes the song's record (`song/declared/songbook/<song>.json`, below) too; a
-songbook dir with anything in it already, even partially, is left untouched by
+writes the song's record (`/declared/rices/<song>.json`, below) too; a
+rices dir with anything in it already, even partially, is left untouched by
 the seed, so a second stage of an already-seeded song is a no-op by the same
 check. Two tiers,
 absolute-path-wins like every override above:
-`$AOIDE_SONG_TEMPLATES` itself, else a sibling of `current_exe()`'s
-directory (`<exe_dir>/../share/strillix/songbook`, gated on that directory
+`$STRILLIX_TEMPLATES` itself, else a sibling of `current_exe()`'s
+directory (`<exe_dir>/../share/strillix/rices`, gated on that directory
 actually existing — `aoide_protocol::bin`'s sibling-binary resolver shape,
 applied to a directory). On a NixOS host the env tier always wins, but only
-where it can be READ: `AOIDE_SONG_TEMPLATES` is paint data (only
-`aoide-song` reads it, only `strillix` links `aoide-song`), so it is wired ONLY
+where it can be READ: `STRILLIX_TEMPLATES` is paint data (only
+`strillix-rice` reads it, only `strillix` links `strillix-rice`), so it is wired ONLY
 onto units whose process execs or spawns `strillix` —
 `modules/dendrites/strillix/shellbridge.nix`'s
 main `shellbridge` service, `modules/dendrites/quickshell/system.nix`'s
@@ -1349,7 +1349,7 @@ reload`) — plus
 `modules/dendrites/aoided.nix`'s
 `environment.sessionVariables` (an operator's own interactive `strx rice
 compose`) and that unit's own `Environment=` (so a restart after a switch
-picks up the new songbook instead of the login session's copy), itself gated on
+picks up the new rices instead of the login session's copy), itself gated on
 `aoide.strillix.enable` so a host that never installs
 `strillix` never carries the var into its shells either. It does NOT ride the
 core-only units (`aoided` itself, `aoide-mcp`/`aoide-a2a`/`aoide-usage`/
@@ -1357,8 +1357,8 @@ core-only units (`aoided` itself, `aoide-mcp`/`aoide-a2a`/`aoide-usage`/
 adapter) the way `$AOIDE_ROOT`/`$AOIDE_FLAKE_ROOT` do — those exec plain
 `aoide`, never `strillix`, so carrying `pkgs.strillix-rices`'s closure onto them
 would drag paint data onto a headless core for nothing. `pkgs/strillix-rices`
-bakes a verbatim copy of the committed `song/songbook/` tree plus
-`manifest.json`/`registry.json` (via `lib/songbook.nix`, the SAME generator
+bakes a verbatim copy of the committed `rices/` tree plus
+`manifest.json`/`registry.json` (via `lib/rices.nix`, the SAME generator
 the checkout-host `nix eval` path and the strillix lane's own build-time
 carry both call) at nix build time. The sibling-of-binary tier exists for a
 future non-nix tarball install instead. Neither tier resolving is a taught
@@ -1370,10 +1370,10 @@ evaluator, which the templates fallback cannot run.
 The registry/manifest regeneration is a THREE-layer merge, not a bare
 baked-baseline-plus-current-song write: the baked file is the baseline,
 then the EXISTING on-disk file's entries for every song that still has a
-directory in the host songbook are overlaid on top of it (a song whose
+directory in the host rices are overlaid on top of it (a song whose
 directory is gone is pruned, never kept immortal), then the
 currently-staged song's own freshly-scanned entry is patched in last,
-winning over both — only when that song HAS a host-songbook directory to
+winning over both — only when that song HAS a host-rices directory to
 scan; a shipped song re-pinned from the declared twin before any seed keeps
 its baked entry, since an empty patch would delete it. Without the overlay layer, composing and staging a
 second song on a repo-less host would silently drop the first song's
@@ -1381,8 +1381,8 @@ entry — it lives in neither the frozen baseline (a runtime composition) nor
 the second song's own scan.
 
 **Stage-dir resolution (the CLI ↔ unit seam), one function per tree.**
-`song/stage/`: precedence `$AOIDE_STAGE_DIR` when set to an **absolute**
-path → else `$AOIDE_ROOT/song/stage`. `state/stage/`: same
+`/stage/`: precedence `$AOIDE_STAGE_DIR` when set to an **absolute**
+path → else `$STRILLIX_ROOT/stage`. `state/stage/`: same
 `$AOIDE_STAGE_DIR` absolute-path precedence (the one env var the systemd
 unit and every test already set continues to win for BOTH trees at once — a
 relocated stage tree relocates as a unit, and stays authoritative ABOVE
@@ -1399,7 +1399,7 @@ the split.
 **The one-shot migrations — two, composing.** (1) S1 (command-defrag lane):
 the first time a process resolves `state/stage/` under the no-override
 fallback, it moves each of the six conducting files found at the sibling
-`song/stage/` location (wherever that currently resolves) into the new one
+`/stage/` location (wherever that currently resolves) into the new one
 — `rename` when possible (same filesystem), copy-then-remove-source
 otherwise — skipping any file already present at the new path (a fresher
 `state/stage/` file is never clobbered) and never touching a rice file
@@ -1688,7 +1688,7 @@ Upgrading every node is the remedy the fleet's own rollout takes.
   passes judgment on. Empty (the default) disables the lane outright. **On a
   nix host, this MUST name the fast checks only** (the example above:
   `fmt`/`nix-lint`, joined by `lib/checks.nix`'s own `discovery`/
-  `song-shape`/`song-runtime-untracked`/`surface-ownership` — the check lane's
+  `rice-shape`/`rice-runtime-untracked`/`surface-ownership` — the check lane's
   fast-lane budget), never bare `nix flake check` — the lane runs
   SYNCHRONOUSLY inside the hook, so an unscoped invocation also evaluates the
   slow attributes (vm-boot, `pkg-*`, portability), which routinely run for
@@ -1782,7 +1782,7 @@ deliberately outside `SCHEMA` — its keys are operator-chosen, not a
 `&'static` table entry — so it is parsed and checked on every load without
 ever becoming reachable through `config set`.
 
-### `song/stage/livery.json` — **v0**
+### `/stage/livery.json` — **v0**
 
 The resolved, flattened note values for Quickshell (QML reads this; hot-reload
 at rehearsal). Derived from the same `aoide.livery` as the baked `rice.nix`
@@ -1805,14 +1805,14 @@ boot. The seed is declared truth, written whatever the mode: when
 `aoide-rice-reload` user unit, run Before the shell at login and restarted with
 it on every switch) re-stages it over the seed. The same script publishes the
 declared twin below, which `rice mode declarative` re-pins from, and the
-venue (`song/declared/venue.json`, below: the slots it recolours and the
+venue (`/declared/venue.json`, below: the slots it recolours and the
 geometry it sets), which the staging writers lay over the declared song's
 runtime copy — so their next re-stage reproduces the venue's recolour and
 geometry rather than reverting the stage twin to the song's own.
 
 **Additive in v0:** this path MAY be a SYMLINK rather than a plain file —
 `rice mode draft <name>` (§4's `stage/mode.json` entry) routes it into a
-saved `song/songbook/<song>/drafts/<name>/livery.json`. A one-shot read
+saved `rices/<song>/drafts/<name>/livery.json`. A one-shot read
 follows a symlink transparently; a WATCH does not — it stays on the inode it
 loaded and sees no event after the entry is swapped (leaving or rerouting a
 draft). So any command that SWAPS the file or symlink at `stage/livery.json`
@@ -1878,16 +1878,16 @@ block, or a missing/null field within it, sends no keyword for that field:
 the `hyprctl reload config-only` that precedes the batch (§1) has put the
 host's baked value there. The reload runs even when no keyword resolves, so a
 song with no window and no geometry block still clears the previous song's. `terminalOpacity` is not a keyword at all — it rides
-`song/stage/terminal-colors.conf` only when the song has an opinion, and the
+`/stage/terminal-colors.conf` only when the song has an opinion, and the
 host's bake shows otherwise. Readers must tolerate both forms.
 
-### `song/stage/cover.json` — **v0**
+### `/stage/cover.json` — **v0**
 
 The live wallpaper: the image path, the song it was staged for, whether the
 user picked it, and whether a picked still tiles.
 
 ```json
-{ "path": "/home/u/.aoide/song/covers/dusk.png", "song": "dusk", "pick": true }
+{ "path": "/home/u/.aoide/$STRILLIX_ROOT/covers/dusk.png", "song": "dusk", "pick": true }
 ```
 
 `path` is what the wallpaper layer renders; absent or empty, the layer falls
@@ -1964,16 +1964,16 @@ Writers, and the exact shape each leaves:
 
 | Writer | Effect on `stage/cover.json` |
 | --- | --- |
-| `strx rice stage <song>` | the song's derivable cover — its own desktop picture `song/songbook/<song>/cover/<song>-desktop.{webp,png,jpg,jpeg}` (first match in that order), else the shared `song/covers/<song>.{webp,png,jpg,jpeg}` — as `{"path": …, "song": …}`; with no derivable cover the file is REMOVED — a cover staged for another song must never stand over this one. A pick already stamped for THIS song is left untouched (reported as `coverStage: "pick-kept"`); `song-shape` refuses a declared `aoide.livery.wallpaper` not named `cover/<song>-desktop.<ext>` |
+| `strx rice stage <song>` | the song's derivable cover — its own desktop picture `rices/<song>/cover/<song>-desktop.{webp,png,jpg,jpeg}` (first match in that order), else the shared `/covers/<song>.{webp,png,jpg,jpeg}` — as `{"path": …, "song": …}`; with no derivable cover the file is REMOVED — a cover staged for another song must never stand over this one. A pick already stamped for THIS song is left untouched (reported as `coverStage: "pick-kept"`); `rice-shape` refuses a declared `aoide.livery.wallpaper` not named `cover/<song>-desktop.<ext>` |
 | `strx cover set <path\|name> [--position auto\|tile\|fill]` | `{"path": …, "kind": …, "pick": true, "song": …}` for the song staged at write time — the `song` field omitted only when nothing is staged, which writes the legacy shape — plus, for a still, `"position"` when `--position tile` or `fill` forced it and `"tile": true` when it tiles. `--position` with a video or a `we:<id>` token is a usage refusal (`position-not-a-still`, exit 2) that writes nothing, and the registry refuses it beside `--clear` or `--from-skwd` |
 | `strx cover set we:<id>` | `{"kind": "we", "weId": …, "pick": true, "song": …}` — a scene, whose identity is the workshop id and which has no `path` at all. `we:` with an empty id is not a scene token (the argument is then resolved as a file, and fails like any other missing file) |
-| `strx cover set --from-skwd --kind <static\|video\|we> <path\|id>` | the provider's own report, RECORDED: the shape above with `kind` as the provider named it, and no `position` or `tile` (the provider lays the picture out itself). Applies NOTHING back, and is a no-op with no write (exit 0, `recorded: false`) when the host's provider is not `skwd-wall` (the word in `song/stage/wallpaper-provider` below), when the identity is this host's step-aside image (`AOIDE_SKWD_WALL_STANDIN`), or when the staged pick already names that same `(kind, identity)` for that song. The ONLY writer exempt from the `declarative` lock: a provider's picker is not a stage writer, and refusing the record would leave this file describing something the screen is not showing |
+| `strx cover set --from-skwd --kind <static\|video\|we> <path\|id>` | the provider's own report, RECORDED: the shape above with `kind` as the provider named it, and no `position` or `tile` (the provider lays the picture out itself). Applies NOTHING back, and is a no-op with no write (exit 0, `recorded: false`) when the host's provider is not `skwd-wall` (the word in `/stage/wallpaper-provider` below), when the identity is this host's step-aside image (`AOIDE_SKWD_WALL_STANDIN`), or when the staged pick already names that same `(kind, identity)` for that song. The ONLY writer exempt from the `declarative` lock: a provider's picker is not a stage writer, and refusing the record would leave this file describing something the screen is not showing |
 | `strx cover set --clear` | the staged song's own default, exactly as a re-stage of it writes it (its derivable cover, or the file removed). Never keeps a pick; the envelope's `droppedPick` and `coverStage` come from the marker read before the write |
 | `strx rice mode declarative` | NOTHING — a lock is not a song switch. Its re-pin writes `livery.json` alone, and a pick stamped for another song is hidden by the read-side rule rather than dropped |
 | `strx rice back <take>` | the target take's cover value VERBATIM — a take minted while a pick stood restores it as a pick, `song`, `position` and `tile` and all; a take with no cover removes whatever stands |
-| `strx rice draft save <name>` | a verbatim copy into `song/songbook/<song>/drafts/<name>/cover.json` (§4's drafts entry; never a routing target) |
+| `strx rice draft save <name>` | a verbatim copy into `rices/<song>/drafts/<name>/cover.json` (§4's drafts entry; never a routing target) |
 | the strillix lane's `home.activation.aoideSeedStage` | when the declared song sets `aoide.livery.wallpaper`, `{"path": <that store path>, "song": <declared>}` — the declared song's own picture as the default — unless `cover.json` already holds a pick for any song, which is left byte-identical (`lib/cover-seed.sh`, proved by `tests/cover-seed/run.sh`). With no `aoide.livery.wallpaper` it writes NOTHING; the read-side rule above is what keeps a pick off another song |
-| the greeter tree build (`modules/dendrites/greeter.nix`) | inside the tree only, `{"path": <tree>/song/songbook/<owner>/cover/<owner>-logon.{webp,png,jpg,jpeg}, "song": <declared>}` when the face's song ships a logon picture (`cover/<owner>-logon.<ext>`, first match in that order). The greeter's `LockPreview` draws it as the logon background; the tree's `cover/` folder rides along whole |
+| the greeter tree build (`modules/dendrites/greeter.nix`) | inside the tree only, `{"path": <tree>/rices/<owner>/cover/<owner>-logon.{webp,png,jpg,jpeg}, "song": <declared>}` when the face's song ships a logon picture (`cover/<owner>-logon.<ext>`, first match in that order). The greeter's `LockPreview` draws it as the logon background; the tree's `cover/` folder rides along whole |
 
 `stage_for_song` — the one implementation of the stage half, shared by
 `rice stage` and the mode re-pins — keeps a standing pick iff
@@ -1987,7 +1987,7 @@ external provider is ALREADY showing, so the file describes the screen instead
 of drifting from it; a plain `cover set` and `--clear` are refused there as
 they always were.
 
-### `song/stage/wallpaper-provider` — **v0**
+### `/stage/wallpaper-provider` — **v0**
 
 One word: the name of the provider that paints a song's wallpaper on this host.
 It is the fact `aoide.wallpaper.provider` (nucleus, §0's enable-facts table)
@@ -1998,7 +1998,7 @@ staged livery that seed already publishes. `quickshell` — the shell's own
 `wallpaper` registry (`dendrites/wallpaper/`) that paints picks itself.
 
 Two readers take it, and it is one question asked twice: `LiveryState.qml`
-(`wallpaperProvider`) and `aoide-song`'s `wallpaper_provider::provider()`. Neither
+(`wallpaperProvider`) and `strillix-rice`'s `wallpaper_provider::provider()`. Neither
 derives it a second way — the file IS the answer — so choosing a different
 provider (a rebuild) moves the CLI and the QML together, and neither can be
 right while the other is stale.
@@ -2047,7 +2047,7 @@ A rebuild is the only writer.
 Three readers. `shell.qml` reads it once at load and instantiates a component
 anchor only when its slot is a key; an absent or unreadable file is the empty
 set, so nothing is instantiated (`pkgs/strillix-shell/qml/slots.md`, "The
-component gate"). The healthcheck (`crates/song/src/health.rs`) intersects
+component gate"). The healthcheck (`crates/strillix-rice/src/health.rs`) intersects
 the surfaces `run/qml/songs/surfaces.json` declares (§5) with its keys, so a
 declared surface whose component the host did not select is never reported
 lost; there an absent or non-object file intersects nothing. `strx component
@@ -2058,14 +2058,14 @@ IPC target (`ipc call component act <slot> <verb> <arg>`, answering `true` or
 the arg appended and no shell; an absent slot or an undeclared verb is a taught
 refusal, exit 1.
 
-### `song/declared/livery.json` — **v0**
+### `/declared/livery.json` — **v0**
 
 The DECLARED song's notes: the active song's committed `livery.json` with the
 venue's `aoide.livery.override` applied and the host's resolved geometry (the
 non-null fields of `aoide.livery.geometry`) laid over the song's own
 (`lib/livery.nix`'s `stagePatch`, §1's override and geometry tiers), its
 top-level `song` field set to that song's name, keys sorted (`jq -S`, matching `serde_json::Value`'s BTreeMap ordering). Written by
-the SAME activation seed that writes `song/stage/livery.json` above
+the SAME activation seed that writes `/stage/livery.json` above
 (`home.activation.aoideSeedStage`, `modules/dendrites/strillix/runtime.nix`) —
 one `jq` run, two destinations. In `staging` and `draft` mode the session's
 `strx reload` (the `aoide-rice-reload` unit) then re-stages the stage twin
@@ -2076,14 +2076,14 @@ Why it exists: `stage/livery.json` is the LIVE stage, rewritten by runtime
 writers, so it cannot itself say what the venue declared. This file is the
 venue's read-only statement of that: declarative mode is declared truth, so
 `rice mode declarative`'s re-pin restores the declared song from it, venue
-recolour and geometry included, whatever the runtime songbook now holds. It also names WHICH
+recolour and geometry included, whatever the runtime rices now holds. It also names WHICH
 song is declared, in its own `"song"` field. The staging writers do not read it
-for notes: they derive from the runtime songbook, where a song is edited, and
-lay `song/declared/venue.json` (below) over the declared song. A plain file,
+for notes: they derive from the runtime rices, where a song is edited, and
+lay `/declared/venue.json` (below) over the declared song. A plain file,
 never a symlink (nothing routes it — the draft routing above applies to
 `stage/livery.json` alone). **Absent** means the lane has never activated on
 this host; the re-pin then falls back to the runtime
-`song/songbook/<name>/livery.json` unchanged, which is the ordinary behaviour
+`rices/<name>/livery.json` unchanged, which is the ordinary behaviour
 on a host with no venue override anyway.
 
 Readers: `rice mode declarative`'s re-pin, for the declared song ONLY — the
@@ -2095,7 +2095,7 @@ declarative`'s no-`<name>` form resolves its song off it (falling back to
 staging writers ask it whether the venue applies to the song they stage.
 Nothing in the Rust crates writes it — `handle_rice_stage` only reads.
 
-### `song/declared/venue.json` — **v0**
+### `/declared/venue.json` — **v0**
 
 The venue's part of the DECLARED song, as data: a JSON object keyed by livery
 tier (`palette`, `base16`, `bar`, `notif`, `window`, `geometry`). A colour
@@ -2107,7 +2107,7 @@ active song's committed `livery.json`; `geometry`'s is the fields the host's
 document — so a slot or field the venue leaves alone is not in it, and the file
 is `{}` when the host sets neither. Written by the SAME activation seed as the
 twin above (`home.activation.aoideSeedStage`,
-`modules/dendrites/strillix/runtime.nix`): a temp file made in `song/declared/` and
+`modules/dendrites/strillix/runtime.nix`): a temp file made in `/declared/` and
 renamed over the target, so a reader never sees a torn file. The rules stay in
 nix (§1's override and geometry tiers, guarded by `checks.livery-fanout`); no
 Rust crate computes it or writes this file.
@@ -2126,7 +2126,7 @@ lane stages the runtime song as it is. A file that cannot be read or parsed is
 a taught refusal (`rice.stage`, `Kind::Failed`, fix `strx rice mode
 declarative`), raised before anything is written; a rebuild republishes it.
 
-### `song/declared/songbook/<song>.json` — **v0**
+### `/declared/rices/<song>.json` — **v0**
 
 The record of what `strx rice refresh` last wrote into a built-in song's machine
 copy: `{"schemaVersion":"0","song":"<song>","source":"<templates>/<song>",
@@ -2137,16 +2137,16 @@ from one it did. `source` is informational: where the shipped copy was read
 from, never consulted.
 
 It is not song content. It lives beside the declared twins, outside
-`song/songbook/<song>/`, so the song folder stays exactly the song: the §7.5
+`rices/<song>/`, so the song folder stays exactly the song: the §7.5
 folder-equality gate, `rice declare`, `rice list`, `rice take` and the widget
 sync never see it, and it is never declared into the checkout nor taken. Sole
 writer: `strx rice refresh`, including the stage-time seed, which runs the same
-function (`pkgs/aoide/crates/song/src/commands/refresh.rs`); written last and
+function (`pkgs/aoide/crates/strillix-rice/src/commands/refresh.rs`); written last and
 atomically, under the stage lock. Sole reader: `rice refresh`. **Absent** is
 "nothing recorded": every file that differs from the shipped one is
 `unrecorded` and kept.
 
-### `song/declared/terminal-opacity.conf` — **v0**
+### `/declared/terminal-opacity.conf` — **v0**
 
 One line, `background_opacity <n>` (`n` in [0, 1]), in kitty's own config
 syntax — the DECLARED song's terminal opacity, and nothing else.
@@ -2162,14 +2162,14 @@ Rust crate writes it.
 
 Reader: the kitty dendrite's `mkAfter` block
 (`modules/dendrites/kitty.nix`), which includes it BEFORE
-`song/stage/terminal-colors.conf` (§4) so a live stage — whose file carries an
+`/stage/terminal-colors.conf` (§4) so a live stage — whose file carries an
 opacity line when its song has an opinion — wins (kitty takes the last value a repeated key sets). That
 ordering is the whole contract: the declared file covers a host that has never
 staged anything, and a stage overrides it the moment one runs. Absent (no
 activation yet, or a song with no opinion) means the baked opacity stands;
 kitty logs a missing include and continues.
 
-### `song/stage/mode.json` — **v0**
+### `/stage/mode.json` — **v0**
 
 Which of THREE modes the rice system is in — concepts/Self-Ricing's
 mode-toggle extension (`RiceMode`: `Staging | Declarative | Draft`). Absent
@@ -2184,7 +2184,7 @@ staging writes; never an error.
   (CONTRACTS.md §4's cover.json entry), because the file must describe the
   screen.
 - **`draft`** — `stage/livery.json` is a SYMLINK routed into
-  `song/songbook/<song>/drafts/<name>/livery.json` via `rice mode draft
+  `rices/<song>/drafts/<name>/livery.json` via `rice mode draft
   <name>`. `rice stage`/`cover set` still write normally — neither is
   symlink-aware; the routing is transparent (see below).
 
@@ -2200,7 +2200,7 @@ staging writes; never an error.
 
 Every command that changes the type or target of `stage/livery.json` writes
 this file LAST, because a watching reader re-arms on it (§4's
-`song/stage/livery.json` entry).
+`/stage/livery.json` entry).
 
 `song`/`draft`/`stagingSong`/`since` are optional (omitted, not `null`, when
 absent — the `SessionRecord`/`Node` Option convention). `song` names the
@@ -2223,14 +2223,14 @@ place, `declarative` reloads the shell only. It never changes the mode. In
 `draft` it first re-routes `stage/livery.json` to the marked draft when the
 activation seed renamed a declared file over the link, then saves the SAME
 marker again after its sync, so this file is written LAST — the rule of §4's
-`song/stage/livery.json` entry, which is what re-arms the shell's livery
+`/stage/livery.json` entry, which is what re-arms the shell's livery
 watch. A draft whose `livery.json` is gone is refused by name, writing
 nothing.
 
 **Additive in v0 (khoa, 2026-08-17):** `stagingSong` remembers the last song
 staged in `Staging` mode, by `rice mode stage <name>` or `rice stage <name>` — distinct from `song`, which `rice mode
 declarative` legitimately overwrites to name the song it re-pinned to (the
-declared song `song/declared/livery.json` names, else the currently staged
+declared song `/declared/livery.json` names, else the currently staged
 one). Locking declarative must never touch or clear `stagingSong`, so a
 later bare `rice mode stage` (no name — what a draft row sends to unlock) can still
 resolve back to what was being staged, instead of losing that memory the
@@ -2238,7 +2238,7 @@ moment a declarative round-trip overwrites `song`. Absent when never set (a
 fresh `mode.json`, or one written before this field existed); readers fall
 back to resolving off `stage/livery.json`'s own `"song"` field in that case.
 
-### `song/songbook/<song>/drafts/<name>/` — **v0**
+### `rices/<song>/drafts/<name>/` — **v0**
 
 A saved rice-draft: a scratch snapshot for iterating on more than one live
 variant of a song without declaring any of them (concepts/Self-Ricing's
@@ -2247,7 +2247,7 @@ resolved off the CURRENT stage, never a free-floating namespace, because a
 draft is fundamentally a variation of an ALREADY COMPOSED song.
 
 ```
-song/songbook/sonata/drafts/neon-night/
+rices/sonata/drafts/neon-night/
 ├── livery.json   a real file — the draft's own content
 └── cover.json    snapshot of stage/cover.json, ONLY if the stage had one
                    at fork/save time (cover.json is NEVER symlinked/routed —
@@ -2256,13 +2256,13 @@ song/songbook/sonata/drafts/neon-night/
 
 No metadata file: the draft name is the directory name, the base song is
 the directory it's nested under, and saved-at is `livery.json`'s mtime.
-Gitignored (`song/songbook/*/drafts/`, same category as `song/stage/`):
+Gitignored (`rices/*/drafts/`, same category as `/stage/`):
 `rice declare` never carries a draft into the checkout, and pure flake eval
 reads only TRACKED files, so a draft copied there by hand never reaches
-evaluation, and a `.nix` committed there would be a stray the `song-shape`
+evaluation, and a `.nix` committed there would be a stray the `rice-shape`
 check names. A draft is durable scratch,
 **never committed or declared truth**; that distinction from
-`song/songbook/<name>/`'s own committed files is the entire point.
+`rices/<name>/`'s own committed files is the entire point.
 
 **Reached by ROUTING, not copying.** `rice mode draft <name>` (§4's
 `stage/mode.json` entry) points `stage/livery.json` at a SYMLINK into the
@@ -2287,20 +2287,20 @@ draft is refused (`draft-is-live`) rather than silently also tearing down
 the routing and falling back to `staging` — switch modes first
 (`rice mode stage`/`rice mode declarative`), then drop it.
 
-### `song/stage/terminal-colors.conf` — **v0**
+### `/stage/terminal-colors.conf` — **v0**
 
 The staged song's terminal look in kitty's own config syntax: one
 `<key> #rrggbb` line per colour, then at most one `background_opacity <n>`
 line (`n` in [0, 1], present only when the song has an opinion), `#` comment lines, nothing else. The kitty dendrite
 (`modules/dendrites/kitty.nix`) `include`s it after Stylix's baked colour
-include AND after `song/declared/terminal-opacity.conf` (§4, the declared
+include AND after `/declared/terminal-opacity.conf` (§4, the declared
 song's own opacity line), so every NEW kitty opens in the staged song while a
 host that has never staged anything still opens at the song's declared
 opacity; kitty skips a missing
 include with a log line, and the baked colours and
 opacity stand.
 
-Writer: `aoide-song`'s `commands::rice::stage_terminal_colors`, the one
+Writer: `strillix-rice`'s `commands::rice::stage_terminal_colors`, the one
 writer every stage path shares — `rice stage`, `rice mode stage`, `rice mode
 declarative`'s re-pin (which renders it from the declared twin when that is
 the song re-pinned, so leaving staging restores the declared colours), `rice
@@ -2328,7 +2328,7 @@ zoom resets to the configured size on each reload. Best-effort, bounded per
 call, never fatal; the outcome envelope's `terminal` object reports
 `{status, message, instances, windows, failed, file}`.
 
-### `song/stage/hyprlock.conf` — **v0**
+### `/stage/hyprlock.conf` — **v0**
 
 The staged song's lock-screen dress in hyprlang variables, nothing else: `#`
 comment lines and, only when the song ships a lock picture (§5), exactly ten
@@ -2339,7 +2339,7 @@ venue's own look has it.
 | Variable | Value | Source |
 | --- | --- | --- |
 | `$aoide_lock_color` | `rgb(rrggbb)` | `palette.bg`, the ground behind the picture |
-| `$aoide_lock_image` | absolute path | the song's `lockscreen.<ext>` (§5) in the RUNTIME songbook, `$AOIDE_ROOT/song/songbook/<song>/` |
+| `$aoide_lock_image` | absolute path | the song's `lockscreen.<ext>` (§5) in the RUNTIME rices, `$AOIDE_ROOT/rices/<song>/` |
 | `$aoide_lock_field_y` | `-26%` | `livery::emit::hyprlock::FIELD_Y`: the password field's centre, percent of output height below the middle |
 | `$aoide_lock_field_outer` | `rgb(rrggbb)` | `window.border` |
 | `$aoide_lock_field_inner` | `rgb(rrggbb)` | `notif.bg` |
@@ -2357,7 +2357,7 @@ non-hex colour, or a picture path that is relative or carries a control
 character, `#`, `$`, `{`, `}` or `\`, is an emitter error and nothing is
 written.
 
-Writer: `aoide-song`'s `commands::rice::stage_lockscreen`, the one writer,
+Writer: `strillix-rice`'s `commands::rice::stage_lockscreen`, the one writer,
 called from every site that calls `stage_terminal_colors` (above): `rice
 stage`, `rice mode stage`, `rice mode declarative`'s re-pin (rendered from the
 declared twin when that is the song re-pinned), `rice back` and `strillix
@@ -2366,7 +2366,7 @@ through `atomic_write`, and is never fatal: the outcome envelope's
 `lockScreen` object is `{status: "written", file, image}`,
 `{status: "skipped", message}` (the notes did not resolve or the emitter
 refused; the previous file stays) or `{status: "write-failed", message}`. The
-picture's path comes from the runtime songbook alone, never the checkout or a
+picture's path comes from the runtime rices alone, never the checkout or a
 nix eval (root `AGENTS.md` rule 10). A song with no picture rewrites the file
 to the comment lines, which clears what an earlier staged song left. `strillix
 livery emit hyprlock <song> [--song-dir DIR]` renders the same content, the
@@ -2379,7 +2379,7 @@ Reader: hyprlock's own config — the strillix lane ships it as
 `/etc/xdg/hypr/hyprlock.conf`, the system-wide file hyprlock reads when the
 user has no `~/.config/hypr/hyprlock.conf`, and a host that writes its own
 takes on the same obligations. It defines the ten variables with its own look
-as their values, `source`s `song/declared/hyprlock.conf` (below) and then this
+as their values, `source`s `/declared/hyprlock.conf` (below) and then this
 file, and only then writes its widgets, which name the variables. hyprlang
 substitutes the LAST definition for every line parsed after it, so a dressed
 file overrides the defaults and an undressed one leaves them, and the staged
@@ -2409,12 +2409,12 @@ bump.
 
 A song with no picture writes no variables, so it cannot undo a dress an
 earlier file set: the stage file clears what an earlier STAGED song left, but
-it does not mask the dress `song/declared/hyprlock.conf` carries.
+it does not mask the dress `/declared/hyprlock.conf` carries.
 
-### `song/declared/hyprlock.conf` — **v0**
+### `/declared/hyprlock.conf` — **v0**
 
 The DECLARED song's lock-screen dress, in the format of
-`song/stage/hyprlock.conf` above: `#` comment lines and, when the song ships a
+`/stage/hyprlock.conf` above: `#` comment lines and, when the song ships a
 lock picture (§5), the ten variables.
 
 Writer: `home.activation.aoideSeedStage`'s seed script
@@ -2427,14 +2427,14 @@ shell is, and the colour mapping lives in the emitter alone, never in a nix
 twin that could go stale. The picture is the build's store copy of the song's
 `lockscreen.<ext>`: a fixed path for as long as that activation lives. The seed
 only copies the store file into place (write-temp-then-rename), so Rust never
-writes `song/declared/`.
+writes `/declared/`.
 
 Always present on a host that declares a song: comments only when the song
 ships no picture, so no earlier song's dress outlives a switch. Read-only for
 everyone else.
 
 Reader: hyprlock's config (above), which sources it BEFORE
-`song/stage/hyprlock.conf`. That ordering is the whole contract: the declared
+`/stage/hyprlock.conf`. That ordering is the whole contract: the declared
 file dresses the lock of a host that has never staged anything, and a stage
 overrides it the moment one runs. A missing file is a logged config error and
 the lane's defaults stand.
@@ -2451,7 +2451,7 @@ the behaviour). It is a SYMLINK, and only its target changes:
   link survives a rebuild (house rule 10).
 - Retargeted by `rice stage` and `rice mode stage`, and by `strx reload` in
   staging or draft, to the song's own runtime `hyprland.conf`, or to
-  `song/stage/empty-hyprland.conf` when that song ships none. `rice mode
+  `/stage/empty-hyprland.conf` when that song ships none. `rice mode
   declarative` retargets to the declared twin instead, and `strx reload` in
   declarative mode retargets nothing. Never removed first: the retarget is a
   temp symlink renamed over the link, so Hyprland reads the old target or the
@@ -2463,7 +2463,7 @@ reload arms (`strx reload` in either mode) ask for that reload explicitly,
 because a retargeted link's new target is not guaranteed to be followed by
 Hyprland's own file watcher.
 
-### `song/declared/rice.conf` — **v0** (the declared twin of the rice)
+### `/declared/rice.conf` — **v0** (the declared twin of the rice)
 
 The DECLARED song's rice as the renderer builds it, in that order: the song's
 `hyprland.conf` first (binds, unbinds, layout, animations only), then the
@@ -2481,7 +2481,7 @@ so `rice stage <declared>` differs from the build whenever a rice sets
 settings: the build's rice is the declared twin, the stage's is the file alone.
 A rice that wants its Nix settings in a stage must put them in `hyprland.conf`.
 
-### `song/stage/empty-hyprland.conf` — **v0** (the empty rice)
+### `/stage/empty-hyprland.conf` — **v0** (the empty rice)
 
 Zero bytes, owned by the staging engine. A stage links the state link to it when
 the song has no `hyprland.conf`, so a song with no binds never keeps the previous
@@ -4934,7 +4934,7 @@ invocation.
 }
 ```
 
-### `song/stage/grimoire.json` — **v0**
+### `/stage/grimoire.json` — **v0**
 
 The Grimoire launcher's own usage ledger (`GrimoireLedger.qml`), separate
 from every other stage file in this section: it is QML-created, not staged
@@ -4965,7 +4965,7 @@ chapter/search is about to render.
 }
 ```
 
-### `song/stage/apps.json` — **v0**
+### `/stage/apps.json` — **v0**
 
 The installed desktop apps with their icons already resolved to files, as the
 shell's launcher lists them. A surface paints this file instead of parsing
@@ -5624,7 +5624,7 @@ entry.
 `load_undying`, it renames a pre-existing `state/carry.json` onto
 `state/undying.json` when the new path is absent — the same atomic,
 narrated-on-failure, never-clobbers discipline this file's own "one-shot
-migration" note (above, `song/stage/`/`state/stage/`) established for the S1
+migration" note (above, `/stage/`/`state/stage/`) established for the S1
 split, applied to a single small file: a plain `rename` (both paths share
 `state_dir`, so this is always same-filesystem), skipped when a fresher
 `undying.json` already exists (a process that already migrated is never
@@ -6862,15 +6862,15 @@ and the choice of who plays each part.**
 
 A host names its songs in its own module, under two `habit.song` keys. The
 constructor reads them in the gate pass, before any module graph exists, and
-`lib/songbook.nix`'s `hook` answers habit's three song hooks from them. The
-flake exports that file as `lib.songbook`, a function of `{ lib, songbook }`, and
-a consumer takes its hook: `(lib.songbook { inherit lib; songbook = dir; }).hook
+`lib/rices.nix`'s `hook` answers habit's three song hooks from them. The
+flake exports that file as `lib.rices`, a function of `{ lib, rices }`, and
+a consumer takes its hook: `(lib.rices { inherit lib; rices = dir; }).hook
 { registry }`. The earlier exports `selectionModule`, `check` and `songModules`
 are gone with no compatibility shim.
 
 A host whose songs come from SEVERAL directories — Aoide's and its own — takes
-them as one: `lib.songbookMerge { inherit lib pkgs; books = [ aoide.songbookRoot
-./songs ]; }` returns `{ registry, dir }` and `lib.songbook`'s record over the
+them as one: `lib.rices.merge { inherit lib pkgs; books = [ aoide.ricesRoot
+./songs ]; }` returns `{ registry, dir }` and `lib.rices`'s record over the
 merge. `registry` maps each song name to its directory inside the book that
 defines it; `dir` is the merged directory as a store path, built from that same
 registry. One call answers both, so the record's songs, the registry they resolve
@@ -6882,20 +6882,20 @@ throws, naming the song and every book that defines it
 The record discovers through the registry, so the song hook, borrow resolution
 and the built-in set read the input books and never the merged derivation: a
 merged host evaluates under `allow-import-from-derivation = false`. Only the strillix
-lane's paint songbook consumes `dir`'s contents, and it takes the registry too.
+lane's paint rices consumes `dir`'s contents, and it takes the registry too.
 
 ```
-hosts/<host>/default.nix                      lib/songbook.nix  hook { registry }
+hosts/<host>/default.nix                      lib/rices.nix  hook { registry }
 ─────────────────────────────                 ───────────────────────────────────
-habit.song.declared = "sonata";   ──┬──────►  aggregations.<song> = song/songbook/<song>/rice.nix
-habit.song.available = [ ];       ──┼──────►  built-in set (declared ∪ available, closed under borrows)
+habit.rice.declared = "sonata";   ──┬──────►  aggregations.<song> = rices/<song>/rice.nix
+habit.rice.available = [ ];       ──┼──────►  built-in set (declared ∪ available, closed under borrows)
                                   ──┴──────►  habit.aggregation.<declared>.enable   (host only)
-                                  ──────────►  extraModulesFor: checks, then song/borrow/songbook,
-                                               aoide.song, aoide.songbook.{builtIn,greeter}
+                                  ──────────►  extraModulesFor: checks, then song/borrow/rices,
+                                               aoide.rice, aoide.rices.{builtIn,greeter}
 ```
 
 - **`declared`** is the song this host PERFORMS. It becomes the platform fact
-  `aoide.song` and selects that song's body as an aggregation on the host: the
+  `aoide.rice` and selects that song's body as an aggregation on the host: the
   `system` half, and the `home` half for every Home Manager user with
   `home.enable = true` (habit v0.5.0: a host-selected group's home half reaches
   each such user, as if it had selected the group). On a host with more than one
@@ -6906,7 +6906,7 @@ habit.song.available = [ ];       ──┼──────►  built-in set (
 - **`available`** is what the host builds in but does not perform: staged live
   without a rebuild, livery not active. Its folder ships (widgets, templates,
   packages, `builtin.json`), its body is never read.
-- **`song/songbook/<song>/`** is a song only if it holds a `rice.nix`. A folder
+- **`rices/<song>/`** is a song only if it holds a `rice.nix`. A folder
   without one is discovered (the manifest is right to see a song being
   written) and can never be selected.
 
@@ -6915,12 +6915,12 @@ it was given:
 
 | Check | Refusal |
 |---|---|
-| an unknown name in `declared` or `available` | `'<n>' is not in the songbook; discovered: …` |
+| an unknown name in `declared` or `available` | `'<n>' is not in the rices; discovered: …` |
 | a selected song with no `rice.nix` | `song <n> has no rice.nix` |
-| a second song's aggregation enabled by hand (exclusivity) | `song aggregation <n> is enabled, but habit.song.declared = …` |
+| a second song's aggregation enabled by hand (exclusivity) | `song aggregation <n> is enabled, but habit.rice.declared = …` |
 | a song folder named like an aggregation (name collision) | `… share a name with an aggregation` |
 
-A host that names no song performs none: `aoide.song` is null, no body is
+A host that names no song performs none: `aoide.rice` is null, no body is
 imported, no paint lane is selected by a song, and the rice renderer comes
 only with a song (or with a strillix provider, which brings the runtime). The
 platform asserts that a built-in song is painted by the strillix runtime
@@ -6932,11 +6932,11 @@ member can opt into by name.
 
 ### The body
 
-`song/songbook/<name>/rice.nix` is an ATTRSET, never a function: habit reads it
+`rices/<name>/rice.nix` is an ATTRSET, never a function: habit reads it
 as data and imports only what it selects. Its shape:
 
 ```nix
-# song/songbook/<name>/rice.nix
+# rices/<name>/rice.nix
 {
   system = {
     providers = {                 # WHO fills each component slot (habit's provider sets)
@@ -7001,40 +7001,40 @@ as data and imports only what it selects. Its shape:
   providers choose the implementation of each slot. The two never overlap.
 - `hyprland.conf` is the song's own hyprlang file (binds, unbinds, layout and
   animations only). It is the `home` half's `rice.hyprland.conf`, carried into
-  stages as-is (§4, `song/declared/rice.conf`).
+  stages as-is (§4, `/declared/rice.conf`).
 - `rice.hyprland.settings` (a Nix attrset of the same keys) is an optional
   BUILD-only half: rendered LAST into the declared rice, never staged.
 
-### The songbook is versioned score, not runtime
+### The rices is versioned score, not runtime
 
-`checks.song-runtime-untracked` (§4) fails if a `song/` **runtime** dir
+`checks.rice-runtime-untracked` (§4) fails if a `song/` **runtime** dir
 (`stage/` · `auditions/` · `declared/`) exists in the source tree at eval. It
-deliberately does **not** list `song/songbook/`: committed songs there are
-versioned score, legitimately read at eval. Reading the songbook never trips
+deliberately does **not** list `rices/`: committed songs there are
+versioned score, legitimately read at eval. Reading the rices never trips
 the check.
 
 **No archive.** Git history is the archive, so nothing copies over an
 uncommitted song. `strx rice declare <song>` (the copy into the checkout's
-`song/songbook/<song>/`) refuses while `git status --porcelain` shows anything
+`rices/<song>/`) refuses while `git status --porcelain` shows anything
 under that folder, tracked edits and untracked files alike, and names the
 folder. It also refuses when `git` is not on `PATH` or the checkout is not a
 git repository, each with a taught reason. `strx rice declare <song> --host`
 never refuses for git: it declares, and adds a `warning` field and an
 `uncommitted` list when the folder is dirty, since the rebuild builds the
-committed songbook.
+committed rices.
 
 **Old shape, no copy.** The copy also refuses when the staged `rice.nix` is
 not a v1 body: a body is a plain attrset, so its first code character is `{`
 and that brace closes the file. A `{ lib, config, … }:` function header (the
-old shape, which `checks.song-shape` rejects as "not an attrset") is refused
-with `reason: old-song-shape`, naming the file. The fix is
+old shape, which `checks.rice-shape` rejects as "not an attrset") is refused
+with `reason: old-rice-shape`, naming the file. The fix is
 `strx rice refresh <song>`, which brings the repo's `rice.nix` in when the
 machine never edited it; otherwise the file is rewritten as a body. `--host`
 does not read the body.
 
 ### Enforcement
 
-`checks.song-shape` asserts six things about every discovered song:
+`checks.rice-shape` asserts six things about every discovered song:
 
 - it carries its body (`rice.nix`), its `livery.json` and its `hyprland.conf`
   (which may be empty);
@@ -7054,33 +7054,33 @@ does not read the body.
 
 The **full** "only sets `aoide.livery`" invariant is a documented convention:
 the priority half above is checked, the option set is not. Per-module
-option-diffing is disproportionate, so `tests/song-shape/run.sh` (fixtures that
+option-diffing is disproportionate, so `tests/rice-shape/run.sh` (fixtures that
 fail without the check) and `tests/selection` back the rest.
 
 `checks.bar-ricemode` asserts the bar's half of the rice-mode control (see
 "Per-song flavor widgets"): the literal `slot: "ricemode"` is in the body of
-every distinct bar the songbook manifest names — a borrowed bar once, under its
+every distinct bar the rices manifest names — a borrowed bar once, under its
 owner; a song with no bar of its own renders sonata's — and sonata carries the
 `ricemode` record every bar's slot falls back to. It reads only the committed
-songbook, so a song that exists only in the runtime songbook is judged when
+rices, so a song that exists only in the runtime rices is judged when
 `rice declare` copies it into the checkout. That the bodies keep the gestures is
 a documented convention backed by code review.
 
-**Migration to v1:** `song/songbook/update-playbook.md` ("Song bodies (v0 to
+**Migration to v1:** `rices/update-playbook.md` ("Song bodies (v0 to
 v1)") is the step list: rewrite each `rice.nix` as a body, add its
 `hyprland.conf`, and drop the self-gate.
 
 ### The lock picture
 
 A song MAY ship one file, `lockscreen.{webp,png,jpg,jpeg}` at the root of its
-folder: `song/songbook/<name>/lockscreen.<ext>`, the first extension in that
+folder: `rices/<name>/lockscreen.<ext>`, the first extension in that
 order that exists. It is the song's whole lock-screen opinion: no tier, no
 field, nothing in `rice.nix`. Only a song that ships it dresses the lock
 screen, with the picture and colours from tiers it already authors
-(`song/stage/hyprlock.conf`, §4); a song that ships none leaves the lock as the
+(`/stage/hyprlock.conf`, §4); a song that ships none leaves the lock as the
 venue has it, and deleting the file takes the opinion away with no trace. The
 name is the render surface's, `aoide.surfaces.lockscreen`. The declared song's
-dress is rendered at build time (`song/declared/hyprlock.conf`, §4). The
+dress is rendered at build time (`/declared/hyprlock.conf`, §4). The
 picture dresses hyprlock only: a song that also ships a `widgets/lockscreen.qml`
 face is locked by the shell's session-lock host instead (`strx lock`;
 `pkgs/strillix-shell/qml/slots.md`), and hyprlock wears the picture only when the
@@ -7097,7 +7097,7 @@ there the field overlaps the tile's lower edge.
 Beyond `aoide.livery` notes, a song MAY also carry its own QML for a fixed
 set of "flavor" surfaces — committed files, not nix options:
 
-- **Convention:** `song/songbook/<name>/widgets/<slot>.qml`. ANY `.qml` file
+- **Convention:** `rices/<name>/widgets/<slot>.qml`. ANY `.qml` file
   a song drops under its `widgets/` dir becomes a slot named for its
   basename — not a fixed enum. A song omits files for slots it doesn't
   dress. Authoring a slot file alone does not put it on screen: nothing
@@ -7127,7 +7127,7 @@ set of "flavor" surfaces — committed files, not nix options:
   `WidgetSlot` re-resolves. **Additive (2026-08-15) — widget bodies ride the
   same call:** `rice stage` also syncs the song's whole
   `widgets/` tree into `run/qml/songs/<name>/` (`crate::widgets` in
-  `crates/song/`, byte-compared so an unchanged file is never rewritten —
+  `crates/strillix-rice/`, byte-compared so an unchanged file is never rewritten —
   avoids flicker/reload of every widget on a palette-only stage) and
   regenerates that song's `run/qml/songs/manifest.json` entry, so an edit
   to an EXISTING widget file reaches Quickshell's own file-watcher live too.
@@ -7141,7 +7141,7 @@ set of "flavor" surfaces — committed files, not nix options:
 - **Fixed injected-prop contract:** a loaded widget receives `livery`
   (`LiveryState`) and `bridge` (`ShellBridge`) always, plus whatever
   slot-specific extras the anchor declares (e.g. the bar slot's `shared`)
-  — **never** nix `config.*`. This does not loosen the song-shape rule above:
+  — **never** nix `config.*`. This does not loosen the rice-shape rule above:
   a song's body still sets **ONLY** `aoide.livery` and `aoide.arrangement` in
   its `module` — widgets are
   committed QML files carried by the build, not nix options, and a widget is
@@ -7152,18 +7152,18 @@ set of "flavor" surfaces — committed files, not nix options:
   `widgets/ricemode.qml` is dressed by sonata's, which is the floor. A song MAY
   author its own body to put the control in its own grammar; every body keeps
   the same bridge calls (`riceMenu`, `riceMode`, `riceDraft`) and the same
-  gesture: any click opens the one menu — the runtime songbook's songs, one
+  gesture: any click opens the one menu — the runtime rices's songs, one
   back-to-declarative row, then the draft rows (a body may leave the drafts
   out when its song offers them on another surface of its own, as barcarolle's
   Start menu does) — and nothing switches until a row is chosen. A borrowed bar brings its lender's body with
   it (a song that borrows `ricemode` and `bar` from another song wears both with it).
-- **Playbook:** `song/songbook/update-playbook.md`.
+- **Playbook:** `rices/update-playbook.md`.
 
 **Additive (2026-08-14) — baseline-fallback resolution:**
 `StagingEngine.resolveSong(song, slot)` resolves a slot through a floor, not
 just the one song: the active song's own file if it authored the slot, else
 **sonata**'s (the shipped standard song — the baseline every song can fall
-back to, a fixed constant independent of `aoide.song`'s own default, which
+back to, a fixed constant independent of `aoide.rice`'s own default, which
 is null), else `""` (the anchor's own lane-side
 `fallback` Component, when it has one, or nothing). `WidgetSlot.resolvedSource`
 keys off the RESOLVED song, not a bool, so a live song-switch between two
@@ -7239,12 +7239,12 @@ The two kinds' extra fields are mutually exclusive — a `namespace`/`layer`/
 `shortcut`/`blur` on a `dock` entry, or an `order` on a `surface` entry, is
 rejected. Nix option types can't easily express "field X only valid when
 kind==Y", so this is enforced natively, not at the nix layer: `rice lint`
-(`pkgs/aoide/crates/song/src/livery/schema.rs`) is the authoritative,
+(`pkgs/aoide/crates/strillix-rice/src/livery/schema.rs`) is the authoritative,
 closed/strict validator — every field the wrong kind carries is a named
 rejection, every unknown key inside an entry is rejected, same closed-set
 discipline as the palette/base16/component tiers above. The song's own QML
 body for a declared slot still lives at
-`song/songbook/<name>/widgets/<slot>.qml`, same convention as any other
+`rices/<name>/widgets/<slot>.qml`, same convention as any other
 slot — declaring a slot's TYPE and authoring its body remain two separate
 acts.
 
@@ -7271,7 +7271,7 @@ none). The strillix lane's build
 `{ "<song>": { "<slot>": {…declaration…} } }` — every committed song gets an
 entry, `{}` when absent, never an error, never a skipped song. `rice
 stage` hot-syncs one song's entry live, no rebuild
-(`sync_song_registry`, `pkgs/aoide/crates/song/src/widgets.rs`), mirroring
+(`sync_song_registry`, `pkgs/aoide/crates/strillix-rice/src/widgets.rs`), mirroring
 `sync_song_widgets`'s existing `manifest.json` hot-sync. The compositor
 look (`modules/dendrites/compositor/hyprland/default.nix`) reads `aoide.arrangement.widgets`
 (the nix option, active song only) to generate one layerrule pair per
@@ -7304,7 +7304,7 @@ two primitives. A declared slot with no actual `widgets/<slot>.qml` body
 (`[aoide/surfaceslot]` / `[aoide/songgadgets]`) instead of throwing —
 declaring a TYPE with no body is inert, not an error.
 
-`song/songbook/nocturne/` is the worked, real example: its body declares one
+`rices/nocturne/` is the worked, real example: its body declares one
 `kind = "dock"` entry (`vigil`), proving the whole pipeline —
 nix option → build-time `registry.json` walk → `rice lint` → `rice
 stage` hot-sync → `SongGadgets.qml` render — end to end. No committed song
@@ -7338,7 +7338,7 @@ song's statement, not a hardcoded list.
 `$out/qml/songs/surfaces.json`, deployed with the rest of the tree to
 `run/qml/songs/surfaces.json`. It is deliberately NOT keyed by song, unlike
 `manifest.json`/`registry.json` beside it: those describe the whole
-songbook because `rice preview` can switch songs at runtime, whereas an
+rices because `rice preview` can switch songs at runtime, whereas an
 expectation is about what the **active song** should have mapped right now —
 and the option it comes from already is that, since the active song is the
 one body the host selected. So one object, whose keys are the
@@ -7353,12 +7353,12 @@ directly against the compositor's layer list and derives nothing of its own:
                 "aoide-dock": { "perMonitor": false } } }
 ```
 
-`song` is `config.aoide.song`. The file is published on every host, so a
+`song` is `config.aoide.rice`. The file is published on every host, so a
 song that declares none ships an empty `surfaces` object — emitted rather
 than omitted, and read exactly as an absent file (below).
 
 **Readers:** `strx quickshell healthcheck`
-(`pkgs/aoide/crates/song/src/health.rs`). With the file present it asserts
+(`pkgs/aoide/crates/strillix-rice/src/health.rs`). With the file present it asserts
 every declared namespace against `hyprctl layers -j` — on every enabled
 output for a `perMonitor` entry, at least once otherwise — and a shortfall
 is the bad state the journal gate then classifies. A total count of painted
@@ -7386,11 +7386,11 @@ anything with a config file — the same EDIT/SAVE/DRAFT loop the QML
 widgets above already get. The design authority is
 `docs/architecture/ELEMENTS.md` (task #121); this subsection pins the
 descriptor's on-disk contract and `run/elements/`'s runtime shape.
-`crates/song/src/elements.rs` is the one parser/render pipeline every
+`crates/strillix-rice/src/elements.rs` is the one parser/render pipeline every
 consumer (`element seed`, and later `rice stage`/the elements lane) calls
 through — never a second implementation.
 
-**The descriptor:** one `song/songbook/<song>/elements/<element>/element.json`
+**The descriptor:** one `rices/<song>/elements/<element>/element.json`
 per element, v0:
 
 ```json
@@ -9898,7 +9898,7 @@ are out of scope for v0. They are not designed or assumed here.
 The node registry: OTHER aoide instances this one has registered by URL (`aoide
 node add <name> <url>`). It lives in the gitignored root-runtime `state/` dir
 (§2, state-dir resolution as in §4's `state/usage.json` entry), **not**
-`song/stage/`: a node roster is account-global external-registry state, not
+`/stage/`: a node roster is account-global external-registry state, not
 song-scoped rehearsal state. Writes are atomic (`aoide_storage::node_store`). An
 absent file means no nodes are registered, never an error. Readers tolerate
 fields they do not know; a rewrite does not keep them.

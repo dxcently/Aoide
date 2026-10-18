@@ -13,8 +13,8 @@ Aoide is a framework you clone and run. The upstream repo ships the shape-making
 ## Why Shared History
 
 - **Shared history with upstream**: `aoide update` is a real `git merge`, not a package upgrade. Improvements flow in; your personal commits never conflict with upstream additions because growth is additive.
-- **Reproducibility**: every default and generated rice is committed and versioned. A rebuild from the clone reproduces the entire riced system on any box. Runtime state (`song/stage/`, `state/`, `run/qml/`, the audit log) lives under `$AOIDE_ROOT` (default `~/.aoide`), separate from the clone, and holds ephemera only.
-- **Your dendrites and songs are ordinary local commits**: `modules/dendrites/` growth is additive by construction, and `song/songbook/` is your writable domain. Committed songs are versioned score — every host that pulls the clone can perform any of them. One line in `hosts/<host>/default.nix` (`aoide.song = "<name>";`) selects which song a host performs. See [[Song-Vocabulary#Replay — any song, any host]].
+- **Reproducibility**: every default and generated rice is committed and versioned. A rebuild from the clone reproduces the entire riced system on any box. Runtime state (`/stage/`, `state/`, `run/qml/`, the audit log) lives under `$AOIDE_ROOT` (default `~/.aoide`), separate from the clone, and holds ephemera only.
+- **Your dendrites and songs are ordinary local commits**: `modules/dendrites/` growth is additive by construction, and `rices/` is your writable domain. Committed songs are versioned score — every host that pulls the clone can perform any of them. One line in `hosts/<host>/default.nix` (`aoide.rice = "<name>";`) selects which song a host performs. See [[Song-Vocabulary#Replay — any song, any host]].
 - **A remote fork is optional**: add your own remote only to back up your instance, sync songs across your machines, or open contributions upstream. The instance itself needs nothing but the clone.
 - **Module import stays possible** but secondary; the clone is the primary deployment model.
 
@@ -26,7 +26,7 @@ cd ~/Aoide && aoide onboard
 ```
 
 Those two lines install the **distribution** — the clone, the host line, the
-songbook. They do not install `aoide` itself: the binary comes from the
+rices. They do not install `aoide` itself: the binary comes from the
 checkout with cargo, no nix, and that step has one page of its own,
 `docs/INSTALL.md` (prerequisites, the clone, `cargo install --path
 pkgs/aoide/crates/cli --bins --locked`, first boot, the smoke test, starting
@@ -47,7 +47,7 @@ installed either way.
 
 1. Register the clone as a graph project ([[Session-Graph]]).
 2. Link `~/song` → `<checkout>/song`, never clobbering an existing file or symlink.
-3. Seed `song/songbook/preferences.md` when absent ([[Song-Anatomy]]).
+3. Seed `rices/preferences.md` when absent ([[Song-Anatomy]]).
 4. Ask which agent harnesses to wire — interactively, or via `--harness a,b` / `--yes` non-interactively — and run `hooks install` for each chosen harness ([[Agent-Hooking]]).
 
 If the `strillix` binary resolves, `onboard` then delegates the nix half to `strx onboard`:

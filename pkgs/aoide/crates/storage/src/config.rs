@@ -1124,6 +1124,7 @@ mod tests {
         let saved_root = std::env::var("AOIDE_ROOT").ok();
         let saved_config = std::env::var(ENV_CONFIG).ok();
         std::env::set_var("AOIDE_ROOT", &dir);
+        std::env::set_var("STRILLIX_ROOT", &dir);
         std::env::remove_var(ENV_CONFIG);
         f(&dir);
         match saved_root {

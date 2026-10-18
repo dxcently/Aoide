@@ -58,7 +58,7 @@ Full map: [[Song-Vocabulary]]. A **rice is a song**: a thing the system *perform
 | melody | semantic tier | component tier | bar / notif / window overrides |
 | instruments | the paint lanes that sound it | venue | the host performing it |
 | cover | wallpaper | chimes | notification/system sounds |
-| liner | per-song design notes | songbook | cross-cutting design memory |
+| liner | per-song design notes | rices | cross-cutting design memory |
 | rehearsal | live preview (stage) | recording | adopted, committed, rebuilt |
 | repertoire | committed songs, collectively | the standard | the shipped standard song (`sonata`) |
 | replay | same song, new venue | transpose | same song, new key |
@@ -70,7 +70,7 @@ Terms naming the connective tissue rather than either half:
 
 - **conductor** — the ensemble's tool: `aoide conductor`, the TUI that watches running agent terminals and cues between them, Hyprland as the multiplexer. The conductor-class covers every surface with that duty: the Terminal Commander widget, the DAG gadget, the conductor itself. See [[Terminal-Commander]], [[Session-Graph]].
 - **door** — an entry point into the one dispatch layer: `cli`, `mcp`, `daemon`, `a2a` (the TUI rides the cli door). The `a2a` door is bidirectional — aoide serves the protocol and speaks it as a client ([[A2A-Door]]). Every operation enters through a door and exits into the one audit log.
-- **livery** — the design tokens AND the engine that dresses every surface in them ([[livery]], `crates/song/src/livery/`): one name for the whole token layer, resolved/validated/emitted by livery (`stage/livery.json`, hyprctl, OSC).
+- **livery** — the design tokens AND the engine that dresses every surface in them ([[livery]], `crates/strillix-rice/src/livery/`): one name for the whole token layer, resolved/validated/emitted by livery (`stage/livery.json`, hyprctl, OSC).
 - **gate** — the rebuild gate ([[Rebuild-Gate]]): agents propose, the human admits. The single point where the performed half is allowed to re-freeze the crystal.
 - **wiki / vault** — Mneme's memory surfaces: this wiki for design context, the vault for content.
 
@@ -88,7 +88,7 @@ One loop, in the vocabulary:
 2. **The walker freezes.** The nix layer picks up what was written by accretion; the score now contains it.
 3. **Rehearsal sounds it.** Before any rebuild, the live side performs the livery from `stage/livery.json` — quickshell surfaces and hyprctl repaint in place, the frozen side untouched.
 4. **The gate records it.** On human admission, the rehearsed state bakes through the stylix lane and the compositor, committed to the clone. Rehearsal and recording derive from the same livery, so they cannot disagree.
-5. **Mneme remembers.** The liner and songbook take the design decisions, the wiki takes the architecture; the next practice session starts from memory.
+5. **Mneme remembers.** The liner and rices take the design decisions, the wiki takes the architecture; the next practice session starts from memory.
 6. **Aoide sings.** The desktop is the sum of frozen score and live performance, and the loop starts again.
 
 <!-- narrative -->

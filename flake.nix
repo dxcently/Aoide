@@ -94,10 +94,10 @@
       # host never forces the others.
       hosts = lib.genAttrs hostNames aoideos.mkHost;
 
-      # The songbook's own discovery — the same file a host's song selection is
-      # validated against, so the `song-shape` check and the selection can never
+      # The rices's own discovery — the same file a host's song selection is
+      # validated against, so the `rice-shape` check and the selection can never
       # disagree about what a song is.
-      songbookLib = import ./lib/songbook.nix { inherit lib; };
+      ricesLib = import ./lib/rices.nix { inherit lib; };
 
       # The packages walker — auto-discovers pkgs/<name>/default.nix. One source
       # feeds the `packages` output, the auto-generated `pkg-<name>` checks, and
@@ -164,23 +164,23 @@
         }
       );
 
-      # ── Songbook manifest/registry (C4/W3) ──────────────────────────────────
+      # ── Rices manifest/registry (C4/W3) ──────────────────────────────────
       # The SAME generator `modules/dendrites/strillix/runtime.nix`'s
       # `quickshellConfig` derivation uses at build time
-      # (`lib/songbook.nix`), exposed as a lean flake output so
+      # (`lib/rices.nix`), exposed as a lean flake output so
       # `pkgs/aoide/crates/song/src/widgets.rs` can shell out to `nix eval
-      # --json .#songbookManifest` at RUNTIME and regenerate
+      # --json .#ricesManifest` at RUNTIME and regenerate
       # `manifest.json`/`registry.json` whole — the hot-sync half of `rice
       # stage`, no rebuild. Deliberately system-independent (`nixpkgs.lib` is
       # itself system-independent — no `legacyPackages.${system}` needed) and
       # deliberately NOT `self.nixosConfigurations.*` or anything under it:
       # evaluating this attribute must never force a host's full module
-      # system (`config.aoide.*`), only `lib` + `song/songbook/` +
+      # system (`config.aoide.*`), only `lib` + `rices/` +
       # `lib/song.nix` (nix is lazy — the songs loop above is a SEPARATE
       # thunk this output shares no dependency with beyond `lib`).
-      songbookManifest =
+      ricesManifest =
         let
-          sb = import ./lib/songbook.nix { inherit lib; };
+          sb = import ./lib/rices.nix { inherit lib; };
         in
         {
           manifest = sb.manifestAttrs;
@@ -193,7 +193,7 @@
       # onboard`'s `aoide.nix` generator (docs/architecture/ONBOARD.md "The
       # vars-file generator"; lib/options.nix does the evalModules walk).
       # Deliberately NOT per-system like `packages`/`checks` below —
-      # `songbookManifest` above sets the precedent (system-independent where
+      # `ricesManifest` above sets the precedent (system-independent where
       # nothing system-specific is needed) and this repo targets
       # `x86_64-linux` only (`systems` above), so strillix shells a single static
       # flake ref (`nix eval --json <checkout>#aoideOptions`) with no system
@@ -225,10 +225,12 @@
       lib = {
         composition = inputs.habit.lib.composition;
         livery = import ./lib/livery.nix;
-        songbook = import ./lib/songbook.nix;
-        # Several songbook directories as one (lib/songbook-merge.nix): the
-        # merged `dir`, and the songbook record over it, from one call.
-        songbookMerge = import ./lib/songbook-merge.nix;
+        # The rice record: called as a function (`lib.rices { inherit lib; … }`),
+        # with `.merge` (lib/rices-merge.nix) for several rices directories as one.
+        rices = {
+          __functor = _: import ./lib/rices.nix;
+          merge = import ./lib/rices-merge.nix;
+        };
         inherit (registry) catalogue;
       };
 
@@ -267,10 +269,10 @@
           aoide = inputs.aoide.packages.${prev.stdenv.hostPlatform.system}.default;
         };
 
-      # Aoide's songbook directory, for a consumer whose hosts perform Aoide's
-      # songs: what it hands `lib.songbook` and its songs hook's
-      # `_module.args.songbook`.
-      inherit (aoideos) songbookRoot;
+      # Aoide's rices directory, for a consumer whose hosts perform Aoide's
+      # songs: what it hands `lib.rices` and its songs hook's
+      # `_module.args.rices`.
+      inherit (aoideos) ricesRoot;
 
       # ── The front door: parts and rices (CONTRACTS.md §2, §5) ───────────────
       # `parts.<component>` is the PROVIDER module of a component slot's
@@ -307,10 +309,10 @@
           );
 
       # Every committed song with a `rice.nix`, name → that file: the aggregation
-      # body the song hook registers for it (`lib/songbook.nix`'s `rices`, the
+      # body the song hook registers for it (`lib/rices.nix`'s `rices`, the
       # one discovery). A consumer performs one of them through its own hook over
-      # `songbookRoot`; the parts above are the components those bodies pick.
-      inherit (songbookLib) rices;
+      # `ricesRoot`; the parts above are the components those bodies pick.
+      inherit (ricesLib) rices;
 
       # ── Checks ─────────────────────────────────────────────────────────────
       # The contractual coupling discipline (lib/checks.nix). They pass
@@ -349,25 +351,25 @@
           # A song's runtime dirs are gitignored state; this fails if one was
           # committed anyway (it replaced `no-song-read`, which scanned module
           # paths for those names and could not fire).
-          song-runtime-untracked = checks.songRuntimeUntracked self;
+          rice-runtime-untracked = checks.riceRuntimeUntracked self;
           # Every discovered song carries rice.nix + livery.json and holds no
-          # other `.nix` (`lib/songbook.nix`'s strayNixFiles, builtins.readDir —
+          # other `.nix` (`lib/rices.nix`'s strayNixFiles, builtins.readDir —
           # the walker is gone). What a host builds in is the host's selection,
           # not this check's business.
-          song-shape = checks.songShape {
-            inherit (songbookLib)
+          rice-shape = checks.riceShape {
+            inherit (ricesLib)
               songNames
               strayNixFiles
               escapingNixFiles
               borrow
               ;
-            songbook = ./song/songbook;
+            ricesRoot = ./rices;
           };
           # Every bar body embeds the shared `ricemode` slot and sonata carries
           # the floor it resolves to (lib/checks.nix's Check 13).
           bar-ricemode = checks.barRicemode {
-            songbook = ./song/songbook;
-            manifest = songbookLib.manifestAttrs;
+            ricesRoot = ./rices;
+            manifest = ricesLib.manifestAttrs;
           };
           # The two livery fan-outs (baked Stylix, stage seed) agree under an
           # `aoide.livery.override` — proved against a fixed fixture inside
@@ -396,25 +398,25 @@
           # made a real gate (see lib/checks.nix's Check 7).
           nix-independence = checks.nixIndependence self;
           # §9(b): the SHIPPED generator, evaluated exactly as the runtime
-          # evaluates it, reproduces `#songbookManifest` over the committed
-          # songbook — offline, no flake, no checkout.
+          # evaluates it, reproduces `#ricesManifest` over the committed
+          # rices — offline, no flake, no checkout.
           generator-offline = checks.generatorOffline {
             strillixRices = (pkgsWalk.discover pkgs).strillix-rices;
-            songbook = ./song/songbook;
+            ricesRoot = ./rices;
             expected = builtins.toJSON {
-              manifest = songbookLib.manifestAttrs;
-              registry = songbookLib.registryAttrs;
+              manifest = ricesLib.manifestAttrs;
+              registry = ricesLib.registryAttrs;
             };
           };
-          # §9(e): and it answers the same over a COPY of that songbook outside
+          # §9(e): and it answers the same over a COPY of that rices outside
           # the repo — §7.4's "a song is a self-contained folder" and "no
-          # repo-absolute paths", which is what a machine's own songbook needs.
+          # repo-absolute paths", which is what a machine's own rices needs.
           generator-relocatable = checks.generatorRelocatable {
             strillixRices = (pkgsWalk.discover pkgs).strillix-rices;
-            songbook = ./song/songbook;
+            ricesRoot = ./rices;
             expected = builtins.toJSON {
-              manifest = songbookLib.manifestAttrs;
-              registry = songbookLib.registryAttrs;
+              manifest = ricesLib.manifestAttrs;
+              registry = ricesLib.registryAttrs;
             };
           };
           # VM boot test — boots the Aoide desktop config headless and asserts

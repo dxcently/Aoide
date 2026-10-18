@@ -58,23 +58,23 @@ covers only what's specific to dendrites.
   component that fails any leg belongs in a song's `widgets/` instead — a paint
   lane is not a component library.
 - **Nothing in a paint lane reads a `song/` RUNTIME path at build time** —
-  `checks.song-shape` and `checks.song-runtime-untracked` enforce this
+  `checks.rice-shape` and `checks.rice-runtime-untracked` enforce this
   structurally, not just by convention.
-  Committed songbook score (`song/songbook/**`) is not a runtime path.
+  Committed rices score (`rices/**`) is not a runtime path.
 - **The activation seed goes through `lib/livery.nix`, never the raw committed
   file.** `stageLivery` patches the active song's committed `livery.json` with
   `stagePatch` (the same `aoide.livery.override` rule `resolve` applies for
   stylix/the compositor) before it is jq-stamped with `song` and written to
-  `song/stage/livery.json` — `checks.livery-fanout` is the gate. The seed
+  `/stage/livery.json` — `checks.livery-fanout` is the gate. The seed
   RENAMES that file over the stage entry and never writes through it, so a
   drafted song's own file is untouched, and it is declared truth on every
   activation: the stage twin stays that until the session's `strx reload`
   (the lane's `aoide-rice-reload` unit) puts back the staged or drafted song
   `stage/mode.json` names. Nix never reads the mode, so the seed stays one
   unconditional write. The one run
-  writes the same bytes to `song/declared/livery.json` too (CONTRACTS.md §4):
+  writes the same bytes to `/declared/livery.json` too (CONTRACTS.md §4):
   the declared twin that `rice mode declarative` re-pins from. It also publishes
-  `song/declared/venue.json` — `venueDelta`, the slots the same `stagePatch`
+  `/declared/venue.json` — `venueDelta`, the slots the same `stagePatch`
   rule recolours and the geometry the host sets, `{}` with neither — which
   staging lays over the runtime copy of the declared song, and
   `checks.livery-fanout` guards it. The `strillix` lane is the ONLY writer of
@@ -120,7 +120,7 @@ them in addition to the ones above.
 - **A member reads the contract, never another member.** `aoided` and
   `melete-adapter` order against `aoided.service`, a unit the core module
   defines on `aoide.enable` alone (the `aoided` dendrite adds only the AoideOS
-  deltas: doors, popup, usage poller, firewall carve, `AOIDE_SONG_TEMPLATES`);
+  deltas: doors, popup, usage poller, firewall carve, `STRILLIX_TEMPLATES`);
   none reads another member's option or config, so a host may deselect any one
   of them and still evaluate (checked by deselecting each in turn on
   `hosts/yomi-strix`). An option a member reads is declared in that member

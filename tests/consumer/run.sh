@@ -14,12 +14,12 @@
 #   2. The evaluation. `flake.nix`'s `outputs` is applied to the REF's own
 #      inputs (so a commit ref really freezes the tree under test, the same
 #      discipline tests/quickshell-seam uses), and the resulting hosts are read.
-#      `consumer` performs from its OWN songbook: it hands over the nucleus module (the option
+#      `consumer` performs from its OWN rices: it hands over the nucleus module (the option
 #      contract) and selects its own `nucleus` group (the services), strillix, the shell and stylix; it performs one song and builds in a second
 #      that BORROWS the first's widgets; and the song machinery a real host gets
-#      (deployed config, seeded stage, seeded machine songbook, templates on the
+#      (deployed config, seeded stage, seeded machine rices, templates on the
 #      units) is there. `aoide-songs` performs Aoide's own `sonata` through the
-#      `songbookRoot` export, and its strillix lane is handed that same directory.
+#      `ricesRoot` export, and its strillix lane is handed that same directory.
 set -uo pipefail
 cd "$(dirname "$0")" || exit 1
 root=$(cd ../.. && pwd)
@@ -75,7 +75,7 @@ control "the reach-in grep can match: bare input" \
 control "the reach-in grep can match: .outPath" \
   'x = aoide.outPath + "/modules/default.nix";'
 control "the reach-in grep can match: a chained attr" \
-  'x = aoide.inputs.aoide.outPath + "/song/songbook";'
+  'x = aoide.inputs.aoide.outPath + "/rices";'
 control "the reach-in grep can match: input threading" \
   'x = aoide.inputs.nixpkgs.legacyPackages.${system};'
 control "the reach-in grep can match: getFlake" \
@@ -123,25 +123,25 @@ expr="
       allFiles = builtins.all builtins.pathExists (builtins.attrValues flake.parts);
     };
     rices = builtins.attrNames flake.rices;
-    # Merging Aoide's rices into a registry the hook over the SAME songbook
+    # Merging Aoide's rices into a registry the hook over the SAME rices
     # already registers is a name collision the hook refuses. The hook is handed
     # a registry that holds the rices, and a bare registry is the control.
     hookOver = registry:
-      (flake.lib.songbook {
+      (flake.lib.rices {
         lib = flake.inputs.nixpkgs.lib;
-        songbook = flake.songbookRoot;
+        ricesRoot = flake.ricesRoot;
       }).hook { inherit registry; };
     collision = {
       merged = (builtins.tryEval (hookOver { aggregations = flake.rices; }).registry).success;
       bare = (builtins.tryEval (hookOver { aggregations = { }; }).registry).success;
     };
-    # Aoide's songbook and the consumer's own, merged BEFORE anything reads them:
+    # Aoide's rices and the consumer's own, merged BEFORE anything reads them:
     # one call answers the directory and the registry over it.
-    mergedSongs = flake.lib.songbookMerge {
+    mergedSongs = flake.lib.rices.merge {
       lib = flake.inputs.nixpkgs.lib;
       pkgs = flake.inputs.nixpkgs.legacyPackages.x86_64-linux;
       books = [
-        flake.songbookRoot
+        flake.ricesRoot
         ./songs-merge
       ];
     };
@@ -149,23 +149,23 @@ expr="
   in {
     aoideSongs = {
       drv = aoideSongs.system.build.toplevel.drvPath;
-      song = aoideSongs.aoide.song;
-      builtIn = aoideSongs.aoide.songbook.builtIn;
+      rice = aoideSongs.aoide.rice;
+      builtIn = aoideSongs.aoide.rices.builtIn;
       bg = aoideSongs.aoide.livery.palette.bg;
-      songbookIsExport = toString out.nixosConfigurations.aoide-songs._module.args.songbook == toString flake.songbookRoot;
+      ricesIsExport = toString out.nixosConfigurations.aoide-songs._module.args.ricesRoot == toString flake.ricesRoot;
     };
     merged = {
       drv = mergedCfg.system.build.toplevel.drvPath;
-      song = mergedCfg.aoide.song;
-      builtIn = mergedCfg.aoide.songbook.builtIn;
+      rice = mergedCfg.aoide.rice;
+      builtIn = mergedCfg.aoide.rices.builtIn;
       bg = mergedCfg.aoide.livery.palette.bg;
       borrowed = mergedSongs.songMeta.encore.manifest == mergedSongs.songMeta.sonata.manifest && mergedSongs.songMeta.encore.manifest != { };
       names = mergedSongs.songNames;
-      songbookIsMerged = toString out.nixosConfigurations.merged._module.args.songbook == toString mergedSongs.dir;
+      ricesIsMerged = toString out.nixosConfigurations.merged._module.args.ricesRoot == toString mergedSongs.dir;
     };
     drv = out.nixosConfigurations.consumer.config.system.build.toplevel.drvPath;
-    song = cfg.aoide.song;
-    builtIn = cfg.aoide.songbook.builtIn;
+    rice = cfg.aoide.rice;
+    builtIn = cfg.aoide.rices.builtIn;
     bg = cfg.aoide.livery.palette.bg;
     strillix = cfg.aoide.strillix.enable;
     stylix = cfg.aoide.stylix.enable;
@@ -174,8 +174,8 @@ expr="
     activation = builtins.attrNames (home.home.activation or { });
     hmServices = builtins.attrNames (home.systemd.user.services or { });
     systemdUserServices = builtins.attrNames cfg.systemd.user.services;
-    templates = map (e: builtins.replaceStrings [ \"AOIDE_SONG_TEMPLATES=\" ] [ \"\" ] e) (
-      builtins.filter (e: builtins.match \"AOIDE_SONG_TEMPLATES=.*\" e != null)
+    templates = map (e: builtins.replaceStrings [ \"STRILLIX_TEMPLATES=\" ] [ \"\" ] e) (
+      builtins.filter (e: builtins.match \"STRILLIX_TEMPLATES=.*\" e != null)
         (envOf cfg.systemd.user.services \"aoided\" ++ envOf cfg.systemd.user.services \"shellbridge\")
     );
     front = {
@@ -197,7 +197,7 @@ printf '%-52s PASS\n' "the consumer host evaluates"; pass=$((pass+1))
 o() { printf '%s' "$out" | jq -r "$1"; }
 cfg=$(o .config)
 
-check "performs the declared song"            "solo" "$(o .song)"
+check "performs the declared song"            "solo" "$(o .rice)"
 check "builds in declared + available"        "duet solo" "$(o '.builtIn | join(" ")')"
 check "the available song's livery is inert"  "#14161c" "$(o .bg)"
 check "the strillix lane is on"                   "true" "$(o .strillix)"
@@ -205,14 +205,14 @@ check "the stylix lane is on"                 "true" "$(o .stylix)"
 check "the shell lane is on"                  "true" "$(o .quickshell)"
 check "the shell runs the deployed config"    "/home/fixture/.aoide/run/qml" "$(o .config)"
 check "the song's seed activation is there"   "1" \
-  "$(o '[.activation[] | select(test("^aoideSeedSongbook$"))] | length')"
+  "$(o '[.activation[] | select(test("^aoideSeedRices$"))] | length')"
 check "the shell's unit is there"             "1" \
   "$(o '[.hmServices[] | select(test("^aoide-quickshell$"))] | length')"
 check "the bridge's unit is there"            "1" \
   "$(o '[.systemdUserServices[] | select(test("^shellbridge$"))] | length')"
 check "the units carry the templates"         "2" "$(o '.templates | length')"
 check "…and both name one directory"          "true" \
-  "$(o '(.templates | unique | length) == 1 and (.templates[0] | endswith("-strillix-rices-templates/share/strillix/songbook"))')"
+  "$(o '(.templates | unique | length) == 1 and (.templates[0] | endswith("-strillix-rices-templates/share/strillix/rices"))')"
 
 check "front: the stubbed host fills bar and dock"  '{"bar":"stub","dock":"strillix"}' \
   "$(o '.front.stubbed.components | tojson')"
@@ -231,10 +231,10 @@ check "front: rices name the committed rice songs"   "true" \
 check "front: a rice merged into its own hook clashes" "false" "$(o .front.collision.merged)"
 check "front: the same hook with no rice merged holds" "true" "$(o .front.collision.bare)"
 
-# ── 3. The merged songbook ──────────────────────────────────────────────────
+# ── 3. The merged rices ──────────────────────────────────────────────────
 # One call gives the directory and the registry over it; a host performs a
 # consumer song that borrows an Aoide song across the two books.
-check "merged: performs the consumer's encore"       "encore" "$(o .merged.song)"
+check "merged: performs the consumer's encore"       "encore" "$(o .merged.rice)"
 check "merged: builds in the Aoide song it borrows"  "encore sonata" "$(o '.merged.builtIn | join(" ")')"
 check "merged: encore wears its own livery"          "#1a1424" "$(o .merged.bg)"
 check "merged: encore's widgets are sonata's"        "true" "$(o .merged.borrowed)"
@@ -247,10 +247,10 @@ clash_expr="
   let
     flake = builtins.getFlake \"$ref\";
   in
-    (flake.lib.songbookMerge {
+    (flake.lib.rices.merge {
       lib = flake.inputs.nixpkgs.lib;
       pkgs = flake.inputs.nixpkgs.legacyPackages.x86_64-linux;
-      books = [ flake.songbookRoot ./songs-clash ];
+      books = [ flake.ricesRoot ./songs-clash ];
     }).dir
 "
 if clash_out=$(nix eval --impure --raw --expr "$clash_expr" 2>"$tmp/clash.err"); then
@@ -263,17 +263,17 @@ check "merged: a song two books define is refused"   "1" "$([ "$clash_rc" -ne 0 
 check "merged: the refusal names the song"           "true" \
   "$(printf '%s' "$clash_msg" | grep -q "'sonata' is in" && echo true || echo false)"
 check "merged: the refusal names Aoide's book"        "true" \
-  "$(printf '%s' "$clash_msg" | grep -q 'song/songbook' && echo true || echo false)"
+  "$(printf '%s' "$clash_msg" | grep -q 'rices' && echo true || echo false)"
 check "merged: the refusal names the consumer's book" "true" \
   "$(printf '%s' "$clash_msg" | grep -q 'songs-clash' && echo true || echo false)"
 
 printf '%-52s %s\n' "consumer toplevel drvPath" "$(o .drv)"
 
-check "aoide-songs performs Aoide's sonata"           "sonata" "$(o .aoideSongs.song)"
+check "aoide-songs performs Aoide's sonata"           "sonata" "$(o .aoideSongs.rice)"
 check "…and builds in sonata alone"                 "sonata" "$(o '.aoideSongs.builtIn | join(" ")')"
 check "…and wears sonata's livery"                  "#f2ebde" "$(o .aoideSongs.bg)"
-check "…its strillix lane reads the exported songbook"  "true" "$(o .aoideSongs.songbookIsExport)"
-check "merged: its strillix lane reads the merged directory" "true" "$(o .merged.songbookIsMerged)"
+check "…its strillix lane reads the exported rices"  "true" "$(o .aoideSongs.ricesIsExport)"
+check "merged: its strillix lane reads the merged directory" "true" "$(o .merged.ricesIsMerged)"
 
 printf '%-52s %s\n' "aoide-songs toplevel drvPath" "$(o .aoideSongs.drv)"
 printf '%-52s %s\n' "merged toplevel drvPath" "$(o .merged.drv)"

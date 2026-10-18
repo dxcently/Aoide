@@ -1,10 +1,10 @@
 # tests/consumer/hosts/aoide-songs.nix — a consumer host that performs one of
 # Aoide's OWN songs.
 #
-# The same record shape as `consumer.nix`; what differs is the songbook the
-# flake hands its constructor: Aoide's, through the `songbookRoot` export, never
+# The same record shape as `consumer.nix`; what differs is the rices the
+# flake hands its constructor: Aoide's, through the `ricesRoot` export, never
 # a path built into Aoide's tree. `sonata` borrows its own `_widgets/` shelf, so
-# the borrow door is exercised over Aoide's songbook too.
+# the borrow door is exercised over Aoide's rices too.
 _: {
   habit.aggregation.nucleus.enable = true;
   habit.aggregation.desktop.enable = true;
@@ -16,7 +16,7 @@ _: {
     provider = "hyprland";
   };
 
-  habit.song.declared = "sonata";
+  habit.rice.declared = "sonata";
 
   habit.users.fixture = {
     definition = ../user.nix;

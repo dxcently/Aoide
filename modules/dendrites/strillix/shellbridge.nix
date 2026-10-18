@@ -11,7 +11,7 @@
 # Design constraints (hard architectural rules, not suggestions):
 #   - No MCP in QML, ever. All agent↔shell traffic routes through this socket.
 #   - QML is a display layer: it reads the stage trees (CONTRACTS.md §4 —
-#     song/stage/ for rice/paint, state/stage/ for CONDUCTING state) and
+#     $STRILLIX_ROOT/stage/ for rice/paint, state/stage/ for CONDUCTING state) and
 #     issues socket commands; it never speaks an agent protocol.
 #   - Writes to either stage tree are atomic (write-temp-then-rename) so a
 #     Quickshell hot-reload never reads a torn file (CONTRACTS.md §4).
@@ -66,10 +66,10 @@ in
 lib.mkIf (config.aoide.enable && config.aoide.strillix.enable) {
 
   # ── Runtime directories ──────────────────────────────────────────────────
-  # song/stage/ is shared with aoided.nix's tmpfiles rules; systemd-tmpfiles
+  # $STRILLIX_ROOT/stage/ is shared with aoided.nix's tmpfiles rules; systemd-tmpfiles
   # deduplicates identical rules so declaring it here as well is safe.
   systemd.user.tmpfiles.rules = [
-    "d ${config.aoide.root}/song/stage 0755 - - -"
+    "d ${config.aoide.strillix.root}/stage 0755 - - -"
   ];
 
   # ── shellbridge systemd user service ─────────────────────────────────────
@@ -108,7 +108,7 @@ lib.mkIf (config.aoide.enable && config.aoide.strillix.enable) {
     #                process_table`).
     #   quickshell — `quickshell ipc call shell reload` when a daemon-routed
     #                `rice mode stage` syncs changed widget bodies.
-    #   nix        — `nix eval <checkout>#songbookManifest`: the widget-body
+    #   nix        — `nix eval <checkout>#ricesManifest`: the widget-body
     #                sync `rice mode stage` runs before it can hot-load. The
     #                bar's mode cell is the only caller that reaches this
     #                without a login shell, so its absence broke the toggle
@@ -149,7 +149,7 @@ lib.mkIf (config.aoide.enable && config.aoide.strillix.enable) {
         "AOIDE_BRIDGE_SOCKET=%t/aoide/shellbridge.sock"
         # No AOIDE_STAGE_DIR override (command-defrag lane S2): the two
         # stage trees (CONTRACTS.md §4) now live at different roots —
-        # song/stage/ for rice/paint, state/stage/ for CONDUCTING state —
+        # $STRILLIX_ROOT/stage/ for rice/paint, state/stage/ for CONDUCTING state —
         # and AOIDE_ROOT below is enough to resolve both correctly on the
         # default layout. Setting AOIDE_STAGE_DIR here would pin BOTH trees
         # back onto one directory, undoing the split for this unit alone.
@@ -157,17 +157,18 @@ lib.mkIf (config.aoide.enable && config.aoide.strillix.enable) {
         # HYPRLAND_INSTANCE_SIGNATURE is set by the compositor at session start.
         "AOIDE_USER=${config.aoide.user}"
         "AOIDE_ROOT=${config.aoide.root}"
+        "STRILLIX_ROOT=${config.aoide.strillix.root}"
         "AOIDE_FLAKE_ROOT=${config.aoide.checkout}"
         # The host file the RICE menu's Declare row rewrites
         # (`ricedeclare` → `strillix rice declare <song> --host`).
         "AOIDE_HOST_CONFIG=${config.aoide.hostConfig}"
         # This unit execs `strillix shellbridge --run` (below) — the ONE unit in
-        # this file whose process actually reads `AOIDE_SONG_TEMPLATES`
+        # this file whose process actually reads `STRILLIX_TEMPLATES`
         # (`aoide-song::widgets`, `strillix`-only). `aoide-graph-reap` further
         # down execs plain `aoide`, never touches paint data, and does not
         # carry this var — review finding, task #107: paint data belongs on
         # the unit that paints, not every unit this file happens to declare.
-        "AOIDE_SONG_TEMPLATES=${pkgs.strillix-rices}/share/strillix/songbook"
+        "STRILLIX_TEMPLATES=${pkgs.strillix-rices}/share/strillix/rices"
       ]
       ++ [
         # The process running this unit IS strillix now, so shellbridge's core_bin()
@@ -283,6 +284,7 @@ lib.mkIf (config.aoide.enable && config.aoide.strillix.enable) {
       Environment = [
         "AOIDE_USER=${config.aoide.user}"
         "AOIDE_ROOT=${config.aoide.root}"
+        "STRILLIX_ROOT=${config.aoide.strillix.root}"
         "AOIDE_FLAKE_ROOT=${config.aoide.checkout}"
       ];
 
@@ -312,12 +314,12 @@ lib.mkIf (config.aoide.enable && config.aoide.strillix.enable) {
   # These are the stable v0 stage paths (CONTRACTS.md §4), split by tree.
   # Lanes and the Quickshell widget must read exactly these paths; never
   # compute them independently. Note: these are RUNTIME paths — they are
-  # NEVER imported by any nix module (checks.song-runtime-untracked enforces this).
+  # NEVER imported by any nix module (checks.rice-runtime-untracked enforces this).
   #
   # Documented here as comments (not as options) because they are live-side
   # constants, not build-time configuration:
   #
-  #   song/stage/livery.json     — resolved note colours (written by the native livery engine)
+  #   $STRILLIX_ROOT/stage/livery.json     — resolved note colours (written by the native livery engine)
   #   state/stage/sessions.json — agent session roster (written by shellbridge)
   #   state/stage/hooks.json    — live Claude Code hook states (written by shellbridge)
   #

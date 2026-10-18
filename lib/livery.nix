@@ -19,16 +19,16 @@
 # Both passes are read-side, not a config-side mkForce: the option system
 # keeps storing the song's authored values inert, so there is no
 # option-system recursion. Both fan-outs (the baked Stylix scheme and the
-# song/stage/livery.json seed) apply the identical rule through this one
+# $STRILLIX_ROOT/stage/livery.json seed) apply the identical rule through this one
 # file, so they cannot disagree. `resolve` keeps ONE signature across both
 # phases — Phase 1's consumers (the stylix and compositor paint lanes) change
 # zero lines.
 #
-# The runtime stage re-derives the declared song from the runtime songbook, not
+# The runtime stage re-derives the declared song from the runtime rices, not
 # from this file's output, so the venue reaches it as DATA: `venueDelta` is
 # `stagePatch` minus the document — the slots the recolour changes and the
 # geometry the host sets, nothing else — published beside the declared twin as
-# `song/declared/venue.json`. The law stays here, in nix alone; the runtime
+# `$STRILLIX_ROOT/declared/venue.json`. The law stays here, in nix alone; the runtime
 # only overlays what it is handed.
 #
 # Geometry is the venue's third register and the one that is not a recolour:

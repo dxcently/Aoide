@@ -69,7 +69,7 @@ Item {
         root.stagedCoverApplies && root.stagedCoverPath.length > 0 ? root.stagedCoverPath : root.bakedWallpaper
 
     readonly property string coverJsonPath:
-        (Quickshell.env("AOIDE_ROOT") || (Quickshell.env("HOME") + "/.aoide")) + "/song/stage/cover.json"
+        (Quickshell.env("STRILLIX_ROOT") || (Quickshell.env("HOME") + "/.strillix")) + "/stage/cover.json"
 
     FileView {
         id: coverFile

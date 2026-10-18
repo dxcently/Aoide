@@ -16,8 +16,8 @@ lane.
   set in `system.nix` and imported by `home.nix` through `osConfig`. A change
   to the unit is a change to that value.
 - **No song and no strillix.** The service is gated on `aoide.quickshell.config`,
-  never on `aoide.song`; the one strillix read is the `aoide.strillix.enable` fact
-  that puts `AOIDE_SONG_TEMPLATES` on the unit.
+  never on `aoide.rice`; the one strillix read is the `aoide.strillix.enable` fact
+  that puts `STRILLIX_TEMPLATES` on the unit.
 
 ## Docs in the same commit
 

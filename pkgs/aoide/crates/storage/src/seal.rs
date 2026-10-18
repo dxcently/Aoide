@@ -2166,6 +2166,7 @@ mod tests {
     fn env(dir: &std::path::Path) {
         std::env::set_var("AOIDE_STATE_DIR", dir);
         std::env::set_var("AOIDE_ROOT", dir);
+        std::env::set_var("STRILLIX_ROOT", dir);
     }
 
     fn scratch(name: &str) -> std::path::PathBuf {
@@ -2271,7 +2272,7 @@ mod tests {
     #[test]
     fn the_age_key_is_minted_next_to_the_identity_key_and_reloads() {
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STATE_DIR", "AOIDE_ROOT"]);
+        let _s = EnvSaver::capture(&["AOIDE_STATE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         env(&scratch("seal-age-key"));
 
         let (first, minted) = load_or_mint_age_identity().unwrap();
@@ -2306,7 +2307,7 @@ mod tests {
     #[test]
     fn a_binding_verifies_only_under_the_key_it_names() {
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STATE_DIR", "AOIDE_ROOT"]);
+        let _s = EnvSaver::capture(&["AOIDE_STATE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         env(&scratch("seal-binding-verify"));
 
         let b = binding_for_self(1);
@@ -2334,7 +2335,7 @@ mod tests {
     #[test]
     fn publishing_is_idempotent_and_rotation_retires_the_old_key() {
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STATE_DIR", "AOIDE_ROOT"]);
+        let _s = EnvSaver::capture(&["AOIDE_STATE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         env(&scratch("seal-rotation"));
 
         let first = publish_binding().unwrap();
@@ -2361,7 +2362,7 @@ mod tests {
     #[test]
     fn a_container_for_this_boxs_own_age_key_is_addressed_here_under_any_name() {
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STATE_DIR", "AOIDE_ROOT"]);
+        let _s = EnvSaver::capture(&["AOIDE_STATE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         env(&scratch("seal-addressed-here"));
 
         let binding = publish_binding().unwrap();
@@ -2388,7 +2389,7 @@ mod tests {
     #[test]
     fn a_retired_key_stops_opening_after_its_window_and_is_swept() {
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STATE_DIR", "AOIDE_ROOT"]);
+        let _s = EnvSaver::capture(&["AOIDE_STATE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         env(&scratch("seal-retired-sweep"));
 
         let first = publish_binding().unwrap();
@@ -2414,7 +2415,7 @@ mod tests {
     #[test]
     fn a_replayed_superseded_binding_cannot_become_current() {
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STATE_DIR", "AOIDE_ROOT"]);
+        let _s = EnvSaver::capture(&["AOIDE_STATE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         env(&scratch("seal-stale-binding"));
 
         // A peer record for a node, with that node's key.
@@ -2615,6 +2616,7 @@ mod container_tests {
     fn env(dir: &std::path::Path) {
         std::env::set_var("AOIDE_STATE_DIR", dir);
         std::env::set_var("AOIDE_ROOT", dir);
+        std::env::set_var("STRILLIX_ROOT", dir);
     }
 
     /// This node published as a peer of itself, plus a sealed letter to
@@ -2673,7 +2675,7 @@ mod container_tests {
     #[test]
     fn a_sealed_letter_round_trips_and_files_byte_identical_to_the_local_filing() {
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STATE_DIR", "AOIDE_ROOT"]);
+        let _s = EnvSaver::capture(&["AOIDE_STATE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         env(&aoide_test_support::unique_tmp("seal-round-trip"));
 
         let (container, envelope) = sealed_letter();
@@ -2709,7 +2711,7 @@ mod container_tests {
     #[test]
     fn a_letter_to_a_peer_trusted_only_outside_the_home_mesh_is_minted_and_deposited_there() {
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STATE_DIR", "AOIDE_ROOT"]);
+        let _s = EnvSaver::capture(&["AOIDE_STATE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         let dir = aoide_test_support::unique_tmp("mesh-away-deposit");
         std::fs::create_dir_all(&dir).unwrap();
         env(&dir);
@@ -2760,7 +2762,7 @@ mod container_tests {
     #[test]
     fn a_pre_charter_container_deposits_in_the_home_mesh_and_a_flipped_hop_mesh_is_inert() {
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STATE_DIR", "AOIDE_ROOT"]);
+        let _s = EnvSaver::capture(&["AOIDE_STATE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         let dir = aoide_test_support::unique_tmp("pre-charter-deposit");
         std::fs::create_dir_all(&dir).unwrap();
         env(&dir);
@@ -2809,7 +2811,7 @@ mod container_tests {
     #[test]
     fn a_filed_container_is_a_gated_duplicate_that_never_opens_again() {
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STATE_DIR", "AOIDE_ROOT"]);
+        let _s = EnvSaver::capture(&["AOIDE_STATE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         env(&aoide_test_support::unique_tmp("seal-duplicate"));
 
         let (container, envelope) = sealed_letter();
@@ -2837,7 +2839,7 @@ mod container_tests {
     #[test]
     fn a_refusal_past_the_gate_answers_the_same_refusal_on_a_retry() {
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STATE_DIR", "AOIDE_ROOT"]);
+        let _s = EnvSaver::capture(&["AOIDE_STATE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         env(&aoide_test_support::unique_tmp("seal-refusal-retries"));
 
         // An inner `ctx` that disagrees with the outer one: decided after the
@@ -2868,7 +2870,7 @@ mod container_tests {
     #[test]
     fn a_crash_between_the_container_record_and_the_filing_re_accepts() {
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STATE_DIR", "AOIDE_ROOT"]);
+        let _s = EnvSaver::capture(&["AOIDE_STATE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         env(&aoide_test_support::unique_tmp("seal-crash-reaccept"));
 
         let (container, envelope) = sealed_letter();
@@ -2914,7 +2916,7 @@ mod container_tests {
     #[test]
     fn a_collision_on_msgid_with_different_immutable_bytes_is_refused() {
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STATE_DIR", "AOIDE_ROOT"]);
+        let _s = EnvSaver::capture(&["AOIDE_STATE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         env(&aoide_test_support::unique_tmp("seal-collision"));
 
         let (container, _) = sealed_letter();
@@ -2938,7 +2940,7 @@ mod container_tests {
     #[test]
     fn a_tampered_field_is_refused_and_never_opened() {
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STATE_DIR", "AOIDE_ROOT"]);
+        let _s = EnvSaver::capture(&["AOIDE_STATE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         env(&aoide_test_support::unique_tmp("seal-tamper"));
 
         let (container, _) = sealed_letter();
@@ -2969,7 +2971,7 @@ mod container_tests {
     #[test]
     fn a_container_for_another_recipient_fails_to_open() {
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STATE_DIR", "AOIDE_ROOT"]);
+        let _s = EnvSaver::capture(&["AOIDE_STATE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         env(&aoide_test_support::unique_tmp("seal-wrong-recipient"));
 
         let (container, _) = sealed_letter();
@@ -2990,7 +2992,7 @@ mod container_tests {
     #[test]
     fn a_reshaped_ctx_is_refused_before_the_open() {
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STATE_DIR", "AOIDE_ROOT"]);
+        let _s = EnvSaver::capture(&["AOIDE_STATE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         env(&aoide_test_support::unique_tmp("seal-purpose-mismatch"));
 
         let (container, _) = sealed_letter();
@@ -3020,7 +3022,7 @@ mod container_tests {
     #[test]
     fn an_unverified_origin_is_refused_before_anything_is_opened() {
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STATE_DIR", "AOIDE_ROOT"]);
+        let _s = EnvSaver::capture(&["AOIDE_STATE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         env(&aoide_test_support::unique_tmp("seal-unverified-origin"));
 
         let (container, _) = sealed_letter();
@@ -3032,7 +3034,7 @@ mod container_tests {
     #[test]
     fn a_broken_chain_is_refused_and_the_origin_cannot_be_erased() {
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STATE_DIR", "AOIDE_ROOT"]);
+        let _s = EnvSaver::capture(&["AOIDE_STATE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         env(&aoide_test_support::unique_tmp("seal-chain"));
 
         let (container, _) = sealed_letter();
@@ -3089,7 +3091,7 @@ mod container_tests {
     #[test]
     fn an_inner_ctx_that_disagrees_with_the_outer_is_refused() {
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STATE_DIR", "AOIDE_ROOT"]);
+        let _s = EnvSaver::capture(&["AOIDE_STATE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         env(&aoide_test_support::unique_tmp("seal-context-mismatch"));
 
         let (container, envelope) = sealed_letter();
@@ -3118,7 +3120,7 @@ mod container_tests {
     #[test]
     fn the_outbox_and_the_wire_hold_no_letter_bytes() {
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STATE_DIR", "AOIDE_ROOT"]);
+        let _s = EnvSaver::capture(&["AOIDE_STATE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         env(&aoide_test_support::unique_tmp("seal-no-plaintext"));
 
         let (container, envelope) = sealed_letter();
@@ -3145,7 +3147,7 @@ mod container_tests {
     #[test]
     fn a_resend_resends_the_stored_container_byte_identical() {
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STATE_DIR", "AOIDE_ROOT"]);
+        let _s = EnvSaver::capture(&["AOIDE_STATE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         env(&aoide_test_support::unique_tmp("seal-identical-resend"));
 
         let (container, envelope) = sealed_letter();
@@ -3163,7 +3165,7 @@ mod container_tests {
     #[test]
     fn a_retired_recipient_reports_key_retired_once_its_window_closes() {
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STATE_DIR", "AOIDE_ROOT"]);
+        let _s = EnvSaver::capture(&["AOIDE_STATE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         env(&aoide_test_support::unique_tmp("seal-key-retired"));
 
         // A letter sealed to generation 1, then rotated away from.
@@ -3222,6 +3224,7 @@ mod review_fix_tests {
     fn env(dir: &std::path::Path) {
         std::env::set_var("AOIDE_STATE_DIR", dir);
         std::env::set_var("AOIDE_ROOT", dir);
+        std::env::set_var("STRILLIX_ROOT", dir);
     }
 
     /// M2: the high-water mark is per IDENTITY KEY, so a re-pair with a fresh
@@ -3230,7 +3233,7 @@ mod review_fix_tests {
     #[test]
     fn a_repair_with_a_fresh_identity_key_is_learned_over_a_stored_binding() {
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STATE_DIR", "AOIDE_ROOT"]);
+        let _s = EnvSaver::capture(&["AOIDE_STATE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         env(&aoide_test_support::unique_tmp("seal-rekey"));
 
         // A peer record, and a generation-5 binding signed by its key.
@@ -3290,7 +3293,7 @@ mod review_fix_tests {
     #[test]
     fn a_node_with_no_key_on_file_accepts_no_binding() {
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STATE_DIR", "AOIDE_ROOT"]);
+        let _s = EnvSaver::capture(&["AOIDE_STATE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         env(&aoide_test_support::unique_tmp("seal-unpinned"));
 
         let kp = identity::mint_ephemeral().unwrap();
@@ -3318,7 +3321,7 @@ mod review_fix_tests {
     #[test]
     fn a_two_entry_chain_walks_and_an_interior_truncation_is_refused() {
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STATE_DIR", "AOIDE_ROOT"]);
+        let _s = EnvSaver::capture(&["AOIDE_STATE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         env(&aoide_test_support::unique_tmp("seal-two-hop"));
 
         let me = crate::display::local_node_name();
@@ -3431,7 +3434,7 @@ mod review_fix_tests {
     #[test]
     fn a_crossing_signed_by_a_node_that_is_not_the_gate_is_the_wall() {
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STATE_DIR", "AOIDE_ROOT"]);
+        let _s = EnvSaver::capture(&["AOIDE_STATE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         let dir = aoide_test_support::unique_tmp("seal-not-the-gate");
         std::fs::create_dir_all(&dir).unwrap();
         env(&dir);
@@ -3512,7 +3515,7 @@ mod review_fix_tests {
     #[test]
     fn a_one_sided_gate_in_a_pair_mesh_refuses_the_set_before_any_walk() {
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STATE_DIR", "AOIDE_ROOT"]);
+        let _s = EnvSaver::capture(&["AOIDE_STATE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         let dir = aoide_test_support::unique_tmp("seal-one-sided-gate");
         std::fs::create_dir_all(&dir).unwrap();
         env(&dir);
@@ -3540,7 +3543,7 @@ mod review_fix_tests {
     #[test]
     fn a_gate_crossing_the_declarations_allow_walks() {
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STATE_DIR", "AOIDE_ROOT"]);
+        let _s = EnvSaver::capture(&["AOIDE_STATE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         let dir = aoide_test_support::unique_tmp("seal-gate-walks");
         std::fs::create_dir_all(&dir).unwrap();
         env(&dir);
@@ -3607,7 +3610,7 @@ mod review_fix_tests {
     #[test]
     fn a_charter_shaped_mesh_with_no_charter_in_force_does_not_read_its_paired_record() {
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STATE_DIR", "AOIDE_ROOT"]);
+        let _s = EnvSaver::capture(&["AOIDE_STATE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         let dir = aoide_test_support::unique_tmp("seal-no-charter-in-force");
         std::fs::create_dir_all(&dir).unwrap();
         env(&dir);
@@ -3659,7 +3662,7 @@ mod review_fix_tests {
     #[test]
     fn a_deposit_from_a_peer_granted_in_a_grant_only_mesh_verifies() {
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STATE_DIR", "AOIDE_ROOT"]);
+        let _s = EnvSaver::capture(&["AOIDE_STATE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         let dir = aoide_test_support::unique_tmp("seal-grant-only-mesh");
         std::fs::create_dir_all(&dir).unwrap();
         env(&dir);
@@ -3708,7 +3711,7 @@ mod review_fix_tests {
     #[test]
     fn an_unreadable_declaration_refuses_a_sealed_deposit_with_its_own_word() {
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STATE_DIR", "AOIDE_ROOT"]);
+        let _s = EnvSaver::capture(&["AOIDE_STATE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         let dir = aoide_test_support::unique_tmp("seal-config-unreadable");
         std::fs::create_dir_all(&dir).unwrap();
         env(&dir);
@@ -3734,7 +3737,7 @@ mod review_fix_tests {
     #[test]
     fn already_filed_mail_survives_the_loss_of_the_age_key() {
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STATE_DIR", "AOIDE_ROOT"]);
+        let _s = EnvSaver::capture(&["AOIDE_STATE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         env(&aoide_test_support::unique_tmp("seal-filed-survives"));
 
         let me = crate::display::local_node_name();

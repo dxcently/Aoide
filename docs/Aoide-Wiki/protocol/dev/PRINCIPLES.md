@@ -24,7 +24,7 @@ added to a list.**
 
 The repo already runs this way: the catalogue names every dendrite, and
 `modules/aggregations/*`, `modules/overrides/*`, `pkgs/*` and
-`song/songbook/*/rice.nix` are found by their own directories' shallow scans.
+`rices/*/rice.nix` are found by their own directories' shallow scans.
 **Adding a capability is a new file plus its one line, never an edit to an import
 list.**
 

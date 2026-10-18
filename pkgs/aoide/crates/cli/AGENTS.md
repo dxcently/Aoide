@@ -34,7 +34,7 @@ would prove nothing.
 
 ## Invariants
 
-- **This is core. It never depends on `aoide-song`/`aoide-screen`.** Adding
+- **This is core. It never depends on `strillix-rice`/`aoide-screen`.** Adding
   either dependency here reintroduces the graphical surface P-A5 removed
   (golden 87 → 48) — a headless box must be able to build/run this crate
   with no wayland/image/nix weight anywhere in its tree.

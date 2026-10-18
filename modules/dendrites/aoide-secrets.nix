@@ -326,6 +326,7 @@
             # keeps working if that default ever changes.
             "AOIDE_SECRETS_SOCKET=/run/aoide-secrets/secrets.sock"
             "AOIDE_ROOT=${config.aoide.root}"
+            "STRILLIX_ROOT=${config.aoide.strillix.root}"
             "AOIDE_FLAKE_ROOT=${config.aoide.checkout}"
           ]
           # `watch::resolve_strillix_bin` resolves `strillix` via `AOIDE_RICE_BIN` (tier

@@ -2,7 +2,7 @@
 //! unlocked: `rice stage`/`cover set` write live), DECLARATIVE mode (nix/
 //! home-manager is the only writer; staging writers refuse), or DRAFT mode
 //! (`stage/livery.json` is a symlink routed into a saved
-//! `songbook/<song>/drafts/<name>/livery.json` — every writer that ever
+//! `rices/<song>/drafts/<name>/livery.json` — every writer that ever
 //! touches the stage lands directly in the draft file, transparently, via
 //! [`crate::fs::atomic_write`]'s symlink-resolving rename) — Self-Ricing's
 //! mode-toggle extension (khoa, 2026-08-14; draft mode, khoa, 2026-08-14).
@@ -14,7 +14,7 @@
 //!
 //! `Draft` is a distinct THIRD mode, not a flag riding on top of `Staging` —
 //! routing, not guessing: entering it (`rice mode draft <name>`,
-//! `crates/song/src/commands/mode.rs`) is the only way to reach a saved
+//! `crates/strillix-rice/src/commands/mode.rs`) is the only way to reach a saved
 //! draft at all. `rice stage`/`rice mode stage` never auto-prefer or
 //! auto-detect a draft; they always mean plain declared content, and are
 //! simply unaware that the file they write might currently be routed
@@ -47,7 +47,7 @@ impl Default for RiceMode {
 pub struct ModeMarker {
     #[serde(default)]
     pub mode: RiceMode,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, rename = "rice", skip_serializing_if = "Option::is_none")]
     pub song: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub draft: Option<String>,
@@ -149,7 +149,7 @@ mod tests {
         let raw = std::fs::read_to_string(mode_marker_path()).unwrap();
         let v: Value = serde_json::from_str(&raw).unwrap();
         assert_eq!(v["mode"], "staging");
-        assert_eq!(v["song"], "moonlight");
+        assert_eq!(v["rice"], "moonlight");
         assert!(v.get("draft").is_none(), "draft omitted when None");
         assert!(v.get("stagingSong").is_none(), "stagingSong omitted when None");
 

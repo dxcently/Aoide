@@ -944,7 +944,7 @@ mod tests {
         // This test asserts `state_dir()`'s $HOME fallback, so both overrides
         // that outrank $HOME (the crate lock's own AOIDE_STATE_DIR floor
         // included) are cleared for its duration.
-        let _env = EnvSaver::capture(&["KIMI_CODE_HOME", "HOME", "AOIDE_ROOT", "AOIDE_STATE_DIR"]);
+        let _env = EnvSaver::capture(&["KIMI_CODE_HOME", "HOME", "AOIDE_ROOT", "STRILLIX_ROOT", "AOIDE_STATE_DIR"]);
         std::env::remove_var("AOIDE_ROOT");
         std::env::remove_var("AOIDE_STATE_DIR");
         let root = unique_tmp("hooks-kimi-cap");
@@ -1185,7 +1185,7 @@ mod tests {
         // `aoide_storage::fs::state_dir()` — proving it tracks a CONFIGURED
         // `AOIDE_ROOT` (a scratch path here), not the retired `~/Aoide`.
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _env = EnvSaver::capture(&["KIMI_CODE_HOME", "HOME", "AOIDE_ROOT", "AOIDE_STATE_DIR"]);
+        let _env = EnvSaver::capture(&["KIMI_CODE_HOME", "HOME", "AOIDE_ROOT", "STRILLIX_ROOT", "AOIDE_STATE_DIR"]);
         std::env::remove_var("AOIDE_STATE_DIR");
         let root = unique_tmp("hooks-kimi-cap-root");
         let home = root.join("home");
@@ -1193,6 +1193,7 @@ mod tests {
         std::env::set_var("KIMI_CODE_HOME", home.join("kimi"));
         std::env::set_var("HOME", &home);
         std::env::set_var("AOIDE_ROOT", &aoide_root);
+        std::env::set_var("STRILLIX_ROOT", &aoide_root);
         // A `state/` a raw creator left wide: the capture dir is made through
         // `ensure_write_dir`, which locks it first.
         #[cfg(unix)]
@@ -1226,7 +1227,7 @@ mod tests {
     fn capture_install_refuses_a_state_it_cannot_lock_and_writes_nothing() {
         use std::os::unix::fs::PermissionsExt;
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _env = EnvSaver::capture(&["KIMI_CODE_HOME", "HOME", "AOIDE_ROOT", "AOIDE_STATE_DIR"]);
+        let _env = EnvSaver::capture(&["KIMI_CODE_HOME", "HOME", "AOIDE_ROOT", "STRILLIX_ROOT", "AOIDE_STATE_DIR"]);
         std::env::remove_var("AOIDE_STATE_DIR");
         let root = unique_tmp("hooks-kimi-cap-refused");
         let aoide_root = root.join("configured-root");
@@ -1238,6 +1239,7 @@ mod tests {
         std::env::set_var("KIMI_CODE_HOME", root.join("kimi"));
         std::env::set_var("HOME", root.join("home"));
         std::env::set_var("AOIDE_ROOT", &aoide_root);
+        std::env::set_var("STRILLIX_ROOT", &aoide_root);
 
         let out = hooks_install(&install_inv("kimi", true));
 

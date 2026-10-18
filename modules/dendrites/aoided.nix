@@ -9,12 +9,12 @@
 # What this dendrite carries is the AoideOS deployment on top of that unit:
 # the a2a, mcp and mail-adapter doors, the pair-watch popup, the usage poller
 # and its timer, the discovery firewall carve (UDP 8711) and
-# `AOIDE_SONG_TEMPLATES`.
+# `STRILLIX_TEMPLATES`.
 #
 # `pkgs/aoide/module/aoided.nix` owns the tmpfiles rules, the core session
 # variables, and the `aoided.service` unit itself (portable, nixpkgs-only).
 # This file carries only what is paint-dependent: the strillix-gated
-# `AOIDE_SONG_TEMPLATES` — as a session variable for interactive shells AND on
+# `STRILLIX_TEMPLATES` — as a session variable for interactive shells AND on
 # the unit's own `Environment`, so a process aoided spawns resolves this
 # build's templates rather than whatever the login session was handed. `aoide.sessionTarget` — the seam
 # the core unit anchors through — is NOT set here: the lane that brings a
@@ -244,8 +244,8 @@ in
     aoide.enable = true;
 
     # ── AoideOS-only session variable ────────────────────────────────────────
-    # `AOIDE_SONG_TEMPLATES` (L-C3, task #107) is paint data (the shipped
-    # songbook), not core state like `AOIDE_ROOT`/`AOIDE_FLAKE_ROOT`
+    # `STRILLIX_TEMPLATES` (L-C3, task #107) is paint data (the shipped
+    # rices), not core state like `AOIDE_ROOT`/`AOIDE_FLAKE_ROOT`
     # (`pkgs/aoide/module/aoided.nix`'s own contract) — gated on
     # `aoide.strillix.enable`, the option that actually controls whether the
     # `strillix` binary is installed on this host at all (review finding: a
@@ -258,7 +258,7 @@ in
     # export is the ONLY way an interactive shell agrees with `strillix` on
     # where the templates are.
     environment.sessionVariables = lib.optionalAttrs config.aoide.strillix.enable {
-      AOIDE_SONG_TEMPLATES = "${pkgs.strillix-rices}/share/strillix/songbook";
+      STRILLIX_TEMPLATES = "${pkgs.strillix-rices}/share/strillix/rices";
     };
 
     # ── The same variable on the unit itself ─────────────────────────────────
@@ -268,7 +268,7 @@ in
     # templates until they relog (found at the S9 yomi switch). Any process
     # aoided spawns — a conducted session, an agent, a terminal — inherits the
     # unit's environment, so a `strillix rice stage` run from one of them resolved
-    # the old songbook with nothing saying so. Declared here, a unit restart is
+    # the old rices with nothing saying so. Declared here, a unit restart is
     # enough, and the value always names THIS build's `pkgs.strillix-rices`.
     #
     # Why here and not in the portable core module: the templates path is
@@ -286,7 +286,7 @@ in
     # `AOIDE_STAGE_DIR` is deliberately unset anywhere (the default layout
     # resolves under `AOIDE_ROOT`), and `XDG_RUNTIME_DIR` is the manager's own.
     systemd.user.services.aoided.serviceConfig.Environment =
-      lib.optional config.aoide.strillix.enable "AOIDE_SONG_TEMPLATES=${pkgs.strillix-rices}/share/strillix/songbook";
+      lib.optional config.aoide.strillix.enable "STRILLIX_TEMPLATES=${pkgs.strillix-rices}/share/strillix/rices";
 
     # ── MCP façade (opt-in, off by default per house policy) ────────────────
     # When aoide.mcp.enable is true, also start the per-session MCP server stub.
@@ -308,6 +308,7 @@ in
           "AOIDE_AUDIT_LOG=${config.aoide.auditLog}"
           "AOIDE_USER=${config.aoide.user}"
           "AOIDE_ROOT=${config.aoide.root}"
+          "STRILLIX_ROOT=${config.aoide.strillix.root}"
           "AOIDE_FLAKE_ROOT=${config.aoide.checkout}"
         ];
         NoNewPrivileges = true;
@@ -369,6 +370,7 @@ in
           "AOIDE_AUDIT_LOG=${config.aoide.auditLog}"
           "AOIDE_USER=${config.aoide.user}"
           "AOIDE_ROOT=${config.aoide.root}"
+          "STRILLIX_ROOT=${config.aoide.strillix.root}"
           "AOIDE_FLAKE_ROOT=${config.aoide.checkout}"
         ];
         NoNewPrivileges = true;
@@ -408,6 +410,7 @@ in
           "AOIDE_AUDIT_LOG=${config.aoide.auditLog}"
           "AOIDE_USER=${config.aoide.user}"
           "AOIDE_ROOT=${config.aoide.root}"
+          "STRILLIX_ROOT=${config.aoide.strillix.root}"
           "AOIDE_FLAKE_ROOT=${config.aoide.checkout}"
         ];
         NoNewPrivileges = true;
@@ -491,6 +494,7 @@ in
 
             Environment = [
               "AOIDE_ROOT=${config.aoide.root}"
+              "STRILLIX_ROOT=${config.aoide.strillix.root}"
               "AOIDE_FLAKE_ROOT=${config.aoide.checkout}"
               "AOIDE_USER=${config.aoide.user}"
             ]
@@ -558,6 +562,7 @@ in
         ExecStart = "${pkgs.aoide}/bin/aoide usage";
         Environment = [
           "AOIDE_ROOT=${config.aoide.root}"
+          "STRILLIX_ROOT=${config.aoide.strillix.root}"
           "AOIDE_FLAKE_ROOT=${config.aoide.checkout}"
           "AOIDE_USER=${config.aoide.user}"
         ];

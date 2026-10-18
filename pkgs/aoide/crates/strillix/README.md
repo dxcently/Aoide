@@ -132,10 +132,10 @@ are core `aoide` identity, root `AGENTS.md`).
   back, which is what `pair show` now is.
 - `commands::stubs` — `rice declare`'s handler (and the `rice transpose`
   stub): `rice declare <name>` copies the composed song into the checkout,
-  once `aoide_song::checkout_gate` finds git clean under that song folder and
+  once `strillix_rice::checkout_gate` finds git clean under that song folder and
   the staged `rice.nix` is a v1 body (a refusal names the folder, or the file
-  with `reason: old-song-shape`); `rice declare <name> --host` (CLI door only)
-  hands the name to `aoide_song::host_declare`, which rewrites the host
+  with `reason: old-rice-shape`); `rice declare <name> --host` (CLI door only)
+  hands the name to `strillix_rice::host_declare`, which rewrites the host
   config's declared-song line for the next rebuild and warns, never refuses,
   when the folder is dirty.
 - `commands::preview` (P1, then a same-lane follow-up) — **`strx preview
@@ -145,7 +145,7 @@ are core `aoide` identity, root `AGENTS.md`).
   descendant of it — the live reaper and socket globs look there) and
   spawns a standalone `quickshell -p <root>/run/qml/WidgetPreview.qml`
   (P2's own file, not yet landed) against it: its own
-  `song/stage/livery.json`, its own
+  `/stage/livery.json`, its own
   `state/stage/{sessions,projects,hooks,herald}.json` seeded from a named
   fixture set or a directory (falling back to empty-but-valid defaults
   while no fixture set has landed yet), and its own `run/qml/` — COPIES,
@@ -158,7 +158,7 @@ are core `aoide` identity, root `AGENTS.md`).
   present else `{}`. `preview.json`'s `stage` map (`compute_stage_map`)
   pairs each `watch` entry with its copy so the canvas can refresh the
   copies before a reload; `resolve_widget_abs` maps a `widget` field to the
-  CHECKOUT file it names (`songs/<s>/<rest>` → `song/songbook/<s>/widgets/
+  CHECKOUT file it names (`songs/<s>/<rest>` → `rices/<s>/widgets/
   <rest>`), never to the copy. `resolve_root` refuses a `..` component and
   any `--root` at, under, or symlink-resolving into the live daemon's dir
   (`live_daemon_dir`: `$XDG_RUNTIME_DIR/aoide`, or storage's own
@@ -171,22 +171,22 @@ are core `aoide` identity, root `AGENTS.md`).
   `--no-launch` re-stages the copies and merges into the control file
   while it stays up. Every OTHER lane-read stage file
   the isolated root needs merely to exist gets written too:
-  `song/stage/mode.json` (`LiveryState.qml`'s own convention — `mode`,
+  `/stage/mode.json` (`LiveryState.qml`'s own convention — `mode`,
   `song`, `stagingSong`, `since`) is REWRITTEN on every build and on
-  `preview set --song`, always naming the current song; `song/stage/
-  cover.json`, `song/stage/grimoire.json` (`GrimoireLedger`'s
+  `preview set --song`, always naming the current song; `/stage/
+  cover.json`, `/stage/grimoire.json` (`GrimoireLedger`'s
   `launches: {}`, an object keyed by app id, never an array), and
   `state/usage.json` are seeded once, only if absent, and never clobbered
   by a later rebuild. `--livery <spec>` accepts FOUR
   forms, all resolved through the same
-  `aoide_song::livery::resolve::resolve`/`to_json_string` engine
+  `strillix_rice::livery::resolve::resolve`/`to_json_string` engine
   `strx livery resolve` itself uses: `live` (the resolved live stage twin,
-  read-only), a bare song name (that song's own songbook livery.json), a
+  read-only), a bare song name (that song's own rices livery.json), a
   path to a livery file, or a path to a base16 scheme (JSON or the flat
   `key: value` line shape — no yaml crate in this workspace) synthesized
   into a palette per CONTRACTS.md §1's base16 column reversed; default is
   the preview's own `--song`. `preview.json` carries `liverySource` (the
-  spec as given, the one name for it) and `liveries` (every songbook song
+  spec as given, the one name for it) and `liveries` (every rices song
   with a livery.json of its own, sorted) — never a bare `livery` key: the
   P2 canvas treats `livery` as a legacy alias of `liverySource` and
   deletes it on every save of its own, so both the builder and `preview
@@ -229,7 +229,7 @@ are core `aoide` identity, root `AGENTS.md`).
   song (its palette is already checkout truth), the resolved palette
   tiers (`palette`/`base16`/`bar`/`notif`/`window` only — every other
   authored key in the checkout's `livery.json` survives untouched, and
-  `song` is never written there) into `song/songbook/<song>/`. Byte-diffed
+  `song` is never written there) into `rices/<song>/`. Byte-diffed
   so a repeat with nothing new is a true no-op; it never runs `git`,
   touches the live stage, `~/.aoide`, or `run/qml` — the commit and
   rebuild stay the user's own gate (house rule 2), same as `rice declare`.
@@ -400,7 +400,7 @@ are core `aoide` identity, root `AGENTS.md`).
   planned `strx launch`) read through it; neither carries a parser of its own.
 - `commands::apps` — `apps list`/`apps show`/`apps publish [--run]`: the
   installed desktop apps with their icons resolved to files, and
-  `song/stage/apps.json` (CONTRACTS.md §4), which `apps publish --run` keeps
+  `/stage/apps.json` (CONTRACTS.md §4), which `apps publish --run` keeps
   current (the `aoide-apps` user unit that runs it is planned). `list` and `show` build fresh and
   never read the file; `publish` replaces it atomically, and only when the
   document minus `at` changed. docs/Aoide-Wiki/concepts/cli/Apps-Commands.md
@@ -451,7 +451,7 @@ are core `aoide` identity, root `AGENTS.md`).
 
 ## What it consumes
 
-`aoide-protocol`, `aoide-song`, `aoide-conduct` (for the `shellbridge`/
+`aoide-protocol`, `strillix-rice`, `aoide-conduct` (for the `shellbridge`/
 `herald` registry lines), `aoide-screen`, `aoide-server` (for `mcp
 serve --stdio`'s door loop).
 

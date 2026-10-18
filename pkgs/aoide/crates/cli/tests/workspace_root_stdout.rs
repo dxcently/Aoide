@@ -44,6 +44,7 @@ impl Demo {
         let out = Command::new(env!("CARGO_BIN_EXE_aoide"))
             .args(args)
             .env("AOIDE_ROOT", &self.root)
+            .env("STRILLIX_ROOT", &self.root)
             .env("AOIDE_STAGE_DIR", &self.stage)
             .env("AOIDE_STATE_DIR", self.root.join("state"))
             .env("AOIDE_AUDIT_LOG", self.root.join("log"))

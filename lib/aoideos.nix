@@ -20,11 +20,11 @@
 # platform import list is assembled from the result. Nothing below imports a
 # dendrite file, and a capability the host did not select is never read.
 #
-# The songs are one hook. `lib/songbook.nix`'s `hook` answers habit's three
+# The songs are one hook. `lib/rices.nix`'s `hook` answers habit's three
 # song hooks: each committed `rice.nix` is an aggregation body (the registry
-# half), `habit.song.*` is the selection (the selection-module half), and the
+# half), `habit.rice.*` is the selection (the selection-module half), and the
 # checks plus the facts the paint lanes read are the platform half. Habit names
-# no song; this is the only site that wires the hook; `lib/songbook.nix` is the
+# no song; this is the only site that wires the hook; `lib/rices.nix` is the
 # only site that says what it means.
 {
   inputs,
@@ -35,27 +35,26 @@
 let
   composition = inputs.habit.lib.composition { inherit lib; };
 
-  # The committed songbook this flake's hosts' songs live in. Named ONCE here,
-  # as the caller's answer to `lib/songbook.nix`'s own default (`songbook ?
-  # ../song/songbook` — the same directory): the selection validates a host
+  # The committed rices this flake's hosts' songs live in. Named ONCE here,
+  # as the caller's answer to `lib/rices.nix`'s own default (`rices ?
+  # ../rices` — the same directory): the selection validates a host
   # against it, the hook below hands the same value to the lane that paints the
-  # built-in songs, and the flake exports this same value as `songbookRoot`, so
+  # built-in songs, and the flake exports this same value as `ricesRoot`, so
   # a consumer performing Aoide's songs hands it to that same argument, where a
-  # consumer with its own songbook hands its own directory. `lib/songbook.nix` itself is deliberately NOT touched for this:
-  # it is COPIED into `pkgs/strillix-rices` (`share/strillix/nix/songbook.nix`, the
+  # consumer with its own rices hands its own directory. `lib/rices.nix` itself is deliberately NOT touched for this:
+  # it is COPIED into `pkgs/strillix-rices` (`share/strillix/nix/rices.nix`, the
   # shipped generator), so a single added line there moves every host's
   # templates path — and every session variable and unit `Environment` that
   # interpolates it.
-  songbookRoot = ../song/songbook;
-  songbook = import ./songbook.nix {
-    inherit lib;
-    songbook = songbookRoot;
+  ricesRoot = ../rices;
+  rices = import ./rices.nix {
+    inherit lib ricesRoot;
   };
 
   # The song hook, over the registry this flake's hosts share: each committed
   # song is an aggregation, the declared one is selected on the host, and its
   # checks run in the constructor's gate pass.
-  hook = songbook.hook {
+  hook = rices.hook {
     registry = import ../modules;
   };
 
@@ -134,7 +133,7 @@ let
     };
 in
 {
-  inherit hostNames songbookRoot;
+  inherit hostNames ricesRoot;
 
   # The nucleus module as a consumer takes it — the same module value
   # `nixosModules.nucleus` exports (see the let-block above).

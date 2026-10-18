@@ -28,8 +28,8 @@ AoideOS is also a specialized widget maker: it integrates and launches the indep
 - [[Lexicon]] — the whole vocabulary in one place: the three Muses, the frozen/performed split, why each word family was chosen
 - [[Snowflake-Anatomy]] — the flake's structural layers (nucleus, dendrites, aggregations, overrides) and how the catalogue registers modules
 - [[Clone-and-Run]] — the install model: clone upstream to `~/Aoide`, run `aoide onboard`; shared history enables clean upstream merges
-- [[Self-Ricing]] — the agent generates, lints, previews, and adopts rices; songbook write-back is the "self" in self-ricing
-- [[Song-Vocabulary]] — the performed-half naming map: key, melody, component tier, instruments, design, songbook, cover, chimes, stage, rehearsal, recording
+- [[Self-Ricing]] — the agent generates, lints, previews, and adopts rices; rices write-back is the "self" in self-ricing
+- [[Song-Vocabulary]] — the performed-half naming map: key, melody, component tier, instruments, design, rices, cover, chimes, stage, rehearsal, recording
 - [[Agent-Interface]] — the CLI-first capability surface: `aoide <cmd>`, MCP as a generated façade, guide tiers, agent-first ergonomics
 - [[A2A-Door]] — aoide's third door: bidirectional Agent2Agent (JSON-RPC/HTTP) interop, a discoverable server and a client driving external agents, from one command registry
 - [[Secrets-Broker]] — the credential door: a socket-only broker under its own uid, TOTP-gated resolves that park for operator approval, an age-encrypted default backend
@@ -44,7 +44,7 @@ AoideOS is also a specialized widget maker: it integrates and launches the indep
 
 - [[aoide-cli]] — the `aoide` CLI trunk and the `aoided` daemon binary; `schema --json` is the single source of truth behind the MCP façade. Paint commands (`rice`, `cover`, `livery`, `screen`, …) are `strillix`'s
 - [[strillix]] — the AoideOS paint binary: its own 48-command schema, its own registry and golden snapshot, the one binary allowed to depend on nix
-- [[livery]] — the design-token layer and its engine: the immutable seam between nix structure and runtime rendering, native in `crates/song/src/livery/` as `strx livery emit|resolve|lint`
+- [[livery]] — the design-token layer and its engine: the immutable seam between nix structure and runtime rendering, native in `crates/strillix-rice/src/livery/` as `strx livery emit|resolve|lint`
 - [[aoided]] — the orchestrator daemon: neutral event stream, policy, lint, audit log, gated rebuild pipeline
 - [[shellbridge]] — the daemon-to-desktop bridge: atomic JSON state files out, unix-socket commands in, Hyprland IPC consumed
 - [[Quickshell]] — the QML shell runtime: nine surfaces declared, five with a live QML body

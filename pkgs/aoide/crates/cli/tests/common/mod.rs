@@ -115,6 +115,7 @@ pub fn raise_door(root: &std::path::Path, name: &str, port: u16) -> Door {
     let child = std::process::Command::new(aoide_test_support::built_aoide_bin())
         .args(["a2a", "serve", "--bind", "127.0.0.1", "--port", &port.to_string()])
         .env("AOIDE_ROOT", root)
+        .env("STRILLIX_ROOT", root)
         .env("AOIDE_STATE_DIR", root)
         .env("AOIDE_STAGE_DIR", root)
         .env("AOIDE_AUDIT_LOG", root.join("log"))
@@ -271,6 +272,7 @@ impl Drop for Fixture {
 /// Point every root at `box` and name it: the switch each box is read under.
 fn enter(box_root: &Path, name: &str) {
     std::env::set_var("AOIDE_ROOT", box_root);
+    std::env::set_var("STRILLIX_ROOT", box_root);
     std::env::set_var("AOIDE_STATE_DIR", box_root);
     std::env::set_var("AOIDE_STAGE_DIR", box_root);
     std::env::set_var("AOIDE_A2A_NODE_NAME", name);
@@ -530,6 +532,7 @@ pub fn tls_front(port: u16, target: u16) -> TlsFront {
 pub fn fixture(tag: &str) -> (EnvSaver, Fixture) {
     let guard = EnvSaver::capture(&[
         "AOIDE_ROOT",
+        "STRILLIX_ROOT",
         "AOIDE_STATE_DIR",
         "AOIDE_STAGE_DIR",
         "AOIDE_A2A_NODE_NAME",

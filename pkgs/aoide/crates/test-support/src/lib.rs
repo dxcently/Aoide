@@ -395,9 +395,10 @@ impl Drop for EnvSaver {
 /// directory: the caller still removes it at the end of the test, the same
 /// way every `unique_tmp` caller already does.
 pub fn isolated_mail_root(tag: &str) -> (EnvSaver, PathBuf) {
-    let env = EnvSaver::capture(&["AOIDE_ROOT", "AOIDE_STATE_DIR", "AOIDE_STAGE_DIR", "AOIDE_DAEMON_SOCKET"]);
+    let env = EnvSaver::capture(&["AOIDE_ROOT", "STRILLIX_ROOT", "AOIDE_STATE_DIR", "AOIDE_STAGE_DIR", "AOIDE_DAEMON_SOCKET"]);
     let root = unique_tmp(tag);
     std::env::set_var("AOIDE_ROOT", &root);
+    std::env::set_var("STRILLIX_ROOT", &root);
     std::env::remove_var("AOIDE_STATE_DIR");
     std::env::remove_var("AOIDE_STAGE_DIR");
     std::env::set_var("AOIDE_DAEMON_SOCKET", root.join("no-daemon.sock"));

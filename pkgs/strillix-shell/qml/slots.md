@@ -51,7 +51,7 @@ Every slot below is hosted by one of three anchors:
   as `shell.qml` and runs it as greetd's greeter in cage, where greetd's IPC
   authenticates and launches the session. That tree is the face's
   `AOIDE_ROOT`, and it carries the song's `icons/` at the same
-  `song/songbook/<owner>/icons` a face reads in the session, so a face
+  `rices/<owner>/icons` a face reads in the session, so a face
   loads its icons by one path in both places. Its song folder carries a
   `qmldir` naming the song's uppercase helpers as types, as strillix's tree
   does, so a face uses the same helper types in both places too.
@@ -67,7 +67,7 @@ Both anchor kinds resolve through the SAME baseline-fallback chain
 (`StagingEngine.resolveSong`, CONTRACTS.md §5): the active song's own file if
 it authored the slot, else **sonata's** (the shipped standard song — the
 baseline every song falls back to, a fixed constant independent of
-`aoide.song`'s own default, which is null), else the anchor's own lane-side
+`aoide.rice`'s own default, which is null), else the anchor's own lane-side
 `fallback` Component, else nothing. Most `SurfaceSlot` slots give no
 `fallback`: sonata's file IS their floor, since a window-owning slot moves as
 one whole unit. `switcher` is the one that gives one — the plain
@@ -85,7 +85,7 @@ also destroys the board — not merely hides it — while a `cover set` pick
 applies (CONTRACTS.md §4's cover.json entry).
 
 **What a pick is painted BY is the host's choice**, and it decides whether this
-anchored layer draws at all: `song/stage/wallpaper-provider` names the provider
+anchored layer draws at all: `/stage/wallpaper-provider` names the provider
 (the fact `aoide.wallpaper.provider`), and while it is `skwd-wall` AND a pick
 applies to the staged song, the anchor paints
 NOTHING — no cover image, no board, and no palette rectangle — because the
@@ -96,7 +96,7 @@ for the shell to draw.
 
 ## The universal widget contract
 
-Any `song/songbook/<name>/widgets/<slot>.qml` file that a song drops is
+Any `rices/<name>/widgets/<slot>.qml` file that a song drops is
 carried by the build (`modules/dendrites/strillix/runtime.nix`) and becomes
 resolvable by name — the build imposes no fixed slot enum. But **being
 carried is not being rendered**: nothing shows on screen until a host
@@ -197,9 +197,9 @@ declared surface only when its component is selected.
 | `launcher` | `SurfaceSlot` | `shell.qml` (lane) — `SurfaceSlot { slot: "launcher" }`, behind the `launcher` component; `AoideWallpaperPicker`'s `aoide:wallpaper` shortcut asks the bridge for `openPictures` when the launcher reports that verb (`launcherHasPictures`), else the plain cover picker opens | `clipboard` (the `AoideClipboard` instance), `ledger` (`GrimoireLedger` — stays in the lane, a data seam not chrome) | none — sonata's `widgets/launcher.qml` is the floor |
 | `switcher` | `SurfaceSlot` | `shell.qml` (lane) — `SurfaceSlot { slot: "switcher" }`, behind the `switcher` component; the lane's one `aoide:switcher` `GlobalShortcut` calls `.item.toggle()` (the venue binds the combo; a body registers no shortcut of its own) | none | the lane-side `fallback` `AoideSwitcher.qml`: the plain window switcher (Hyprland clients, icon + title, the focused workspace first; ←/→/Tab/Shift+Tab move, Enter or the modifier's release focuses through `bridge.focusWindow`, Esc cancels). A song dresses it by shipping `widgets/switcher.qml`, whose `PanelWindow` exposes `toggle()` |
 | `bar` | `WidgetSlot` | `shell.qml` (lane) — the bar's `PanelWindow` content, `WidgetSlot { slot: "bar" }`, behind the `bar` component | `shared` (session-state QtObject: the calendar's anchor, the dock's state), `stagingEngine` (so the bar's embedded ricemode `WidgetSlot` can resolve) | none — sonata's `widgets/bar.qml` is the floor |
-| `ricemode` | `WidgetSlot` | every bar body — `WidgetSlot { slot: "ricemode" }` in the bar's right stave, enforced by `checks.bar-ricemode`; the shared rice-mode control (any click opens the one menu: the runtime songbook's songs, back to declarative, then the draft rows, which a song's body may leave to another surface of its own, as barcarolle's Start menu does; nothing switches until a row is chosen) | none | none — sonata's `widgets/ricemode.qml` IS the baseline floor; a song may dress it with its own body (cadenza does) |
+| `ricemode` | `WidgetSlot` | every bar body — `WidgetSlot { slot: "ricemode" }` in the bar's right stave, enforced by `checks.bar-ricemode`; the shared rice-mode control (any click opens the one menu: the runtime rices's songs, back to declarative, then the draft rows, which a song's body may leave to another surface of its own, as barcarolle's Start menu does; nothing switches until a row is chosen) | none | none — sonata's `widgets/ricemode.qml` IS the baseline floor; a song may dress it with its own body (cadenza does) |
 | `lockscreen` | session-lock host | `LockHost.qml` (lane), anchored in `shell.qml` behind the `lock` component; `strx lock` locks through it (`ipc call lock lock`) when the staged song's own manifest entry has this slot, else runs hyprlock | `livery`, `bridge` (null: no shellbridge, so no power or other bridge action, behind a locked screen), `auth`: `message`, `messageIsError`, `responseRequired`, `responseVisible`, `busy`, `failures` (wrong answers this lock), `userName` (the passwd name), `respond(text)`, signal `unlocked()`; the face sets `ready` to `true` once up, within 3 s | the host's floor password field (also for a face not ready in time): no baseline song is ever borrowed, so a song without a face is a hyprlock song |
-| `greeter` | greeter host | `GreeterHost.qml` (lane), the `shell.qml` of the greeter lane's store tree (`modules/dendrites/greeter.nix`), chosen at build time when the DECLARED song ships this slot (`aoide.songbook.greeter`); a song that ships none logs in through ly | `livery`, `bridge` (null: no shellbridge before login), `auth`: `message`, `messageIsError`, `responseRequired`, `responseVisible`, `busy`, `failures`, `users` (`[{ name, realName }]`, passwd uid ≥ 1000 with a login shell), `selectedUser`, `selectUser(name)` (`""` goes back to choosing), `respond(text)`; the face sets `ready` to `true` once up, within 3 s | the host's floor user + password fields (also for a face not ready in time) |
+| `greeter` | greeter host | `GreeterHost.qml` (lane), the `shell.qml` of the greeter lane's store tree (`modules/dendrites/greeter.nix`), chosen at build time when the DECLARED song ships this slot (`aoide.rices.greeter`); a song that ships none logs in through ly | `livery`, `bridge` (null: no shellbridge before login), `auth`: `message`, `messageIsError`, `responseRequired`, `responseVisible`, `busy`, `failures`, `users` (`[{ name, realName }]`, passwd uid ≥ 1000 with a login shell), `selectedUser`, `selectUser(name)` (`""` goes back to choosing), `respond(text)`; the face sets `ready` to `true` once up, within 3 s | the host's floor user + password fields (also for a face not ready in time) |
 | `wallpaper` | `WidgetSlot` | `AoideWallpaper.qml` (lane) — inside the per-screen Background layer surface (behind the `wallpaper` component), over the staged cover image | none | none — this slot has NO baseline floor: the anchor gates on `stagingEngine.has(<active song>, "wallpaper")`, so an unauthored `wallpaper` slot renders NOTHING and the cover image stands (sonata ships no body here, so its twin can never be resolved in as a floor); cadenza's `widgets/wallpaper.qml` is the live board, and the anchor DESTROYS it (not hides it) while a `cover set` pick applies — and, when the host's provider is `skwd-wall`, paints nothing at all (no image, no board, no palette rectangle) while a pick applies, since that provider has the pick on screen |
 
 ### Window-owning slot namespaces (`SurfaceSlot` contract)
@@ -272,7 +272,7 @@ vs song QML**, and only applies to a file that already passed §0.
 >    (c) be the process entry point that wires (a) into (b)? "It draws something
 >    reusable" is not a fourth category.
 >
-> Any NO → it belongs in `song/songbook/<song>/widgets/`.
+> Any NO → it belongs in `rices/<song>/widgets/`.
 >
 > **Tie-breaker**, when an agent honestly cannot call question 2: *would a
 > reviewer file this file's diff under "design change"?* If yes, it is song. A
@@ -308,8 +308,8 @@ of `aoide.livery`) is the registration. It is twin-written into that song's
 `livery.json` under a flat top-level `.widgets` key — the same twin-write
 pattern every other song field uses — and validated strictly by `rice lint`
 (closed, kind-conditional field rejection;
-`pkgs/aoide/crates/song/src/livery/schema.rs`). The slot's QML body still
-lives at the normal `song/songbook/<name>/widgets/<slot>.qml` path, same
+`pkgs/aoide/crates/strillix-rice/src/livery/schema.rs`). The slot's QML body still
+lives at the normal `rices/<name>/widgets/<slot>.qml` path, same
 convention as every slot in the table above — registering a slot's TYPE and
 authoring its body are two separate acts, same as the anchored catalog.
 

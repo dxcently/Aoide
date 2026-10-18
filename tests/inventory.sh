@@ -12,7 +12,7 @@
 # this flake — `.` (cwd is the checkout), `.#`, `path:/abs/dir`, or
 # `git+file:///abs/dir?rev=<full-sha>` for a frozen commit. The host measures
 # read `<flakeref>#nixosConfigurations.<host>.config`; G6/G7 read the
-# flake-level `aoideOptions`/`songbookManifest` through the same ref (they are
+# flake-level `aoideOptions`/`ricesManifest` through the same ref (they are
 # host-independent by construction — no per-host variant exists).
 #
 # EVALUATION EVIDENCE, NOT ACTIVATION PROOF. Nothing here builds, switches, or
@@ -115,6 +115,6 @@ scalar 'G5 system.build.toplevel.drvPath' "$toplevel"
 aoide_options=$(nixeval --raw "$FLAKE#aoideOptions" --apply 'os: builtins.concatStringsSep "\n" (builtins.sort builtins.lessThan (map (o: o.name) os))')
 list 'G6 aoideOptions' "$aoide_options"
 
-# G7 — the songbook manifest/registry, hashed as `nix eval --json` emits it.
-manifest_sha=$(nixeval --json "$FLAKE#songbookManifest" | sha256sum | cut -d' ' -f1)
-scalar 'G7 songbookManifest sha256 (nix eval --json | sha256sum)' "$manifest_sha"
+# G7 — the rices manifest/registry, hashed as `nix eval --json` emits it.
+manifest_sha=$(nixeval --json "$FLAKE#ricesManifest" | sha256sum | cut -d' ' -f1)
+scalar 'G7 ricesManifest sha256 (nix eval --json | sha256sum)' "$manifest_sha"

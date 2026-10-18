@@ -68,4 +68,4 @@ lands on the user-gated rebuild ([[Self-Ricing|the rice loop]]).
 - [[Codebase]]
 - [[livery]]
 - [[Ricing-Protocol|Ricing Protocol]]
-- [[Song-Anatomy]] — the songbook where the house grammar and per-song design memory live
+- [[Song-Anatomy]] — the rices where the house grammar and per-song design memory live

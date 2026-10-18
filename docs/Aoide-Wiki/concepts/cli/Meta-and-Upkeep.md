@@ -16,9 +16,9 @@ runs the first-boot install flow. Handlers live in
 `pkgs/aoide/crates/cli/src/commands/stubs.rs` (the stubs),
 `pkgs/aoide/crates/cli/src/commands/onboard.rs` (`onboard`),
 `pkgs/aoide/crates/storage/src/commands.rs` (`usage`),
-`pkgs/aoide/crates/song/src/commands/reload.rs` (`reload`),
-`pkgs/aoide/crates/song/src/commands/quickshell.rs` (`quickshell
-healthcheck`, over `pkgs/aoide/crates/song/src/health.rs`), and
+`pkgs/aoide/crates/strillix-rice/src/commands/reload.rs` (`reload`),
+`pkgs/aoide/crates/strillix-rice/src/commands/quickshell.rs` (`quickshell
+healthcheck`, over `pkgs/aoide/crates/strillix-rice/src/health.rs`), and
 `pkgs/aoide/crates/upkeep/src/{commands,scan}.rs` (`soundcheck`).
 
 Every command takes `--json`. Without it the CLI prints the human `message`
@@ -120,7 +120,7 @@ aoide onboard [--harness <a,b,...>] [--yes] [--out <path>] [--json]
   [[Graph-and-Conduct]]); links `~/song` → `<checkout>/song` when nothing is
   there (a correct existing link is a no-op; a wrong-target symlink or a
   non-symlink is left alone with a note, never clobbered); seeds
-  `song/songbook/preferences.md` when absent (created once, never
+  `rices/preferences.md` when absent (created once, never
   overwritten). For each chosen harness, runs the registered
   `hooks install <agent>` handler (harness settings merge and skill symlink
   per [[Content-and-Hooks]]).
@@ -216,7 +216,7 @@ strx reload [--json]
 
 - **Reads:** `stage/mode.json` (the authority; absent reads as
   `declarative`) and dispatches on its `mode`
-  (`pkgs/aoide/crates/song/src/commands/reload.rs`).
+  (`pkgs/aoide/crates/strillix-rice/src/commands/reload.rs`).
   - `declarative` — the shell reload only; nothing is unlocked, so nothing is
     synced or snapshotted.
   - `staging` — `strx rice stage <song>`'s own body for the marker's `song`:
@@ -236,7 +236,7 @@ strx reload [--json]
     refused before anything is written.
 - **Writes:** nothing in `declarative`. In `staging` and `draft`, after the
   sync, a take of the now-synced stage and widget bodies, deduped against the
-  head (`songbook/<song>/takes/`, or `songbook/<song>/drafts/<name>/takes/`
+  head (`rices/<song>/takes/`, or `rices/<song>/drafts/<name>/takes/`
   in a draft), so an unchanged reload mints nothing and every iteration is
   reversible with `strx rice back`. The sync runs before the snapshot: its
   write is a pure function of the song, so the snapshot settles into a stable
@@ -251,7 +251,7 @@ strx reload [--json]
   (`AoideIpc.qml`), which tears down and rebuilds the whole scene from
   `shell.qml`, no systemd restart (the probe is `systemctl --user show
   aoide-quickshell.service --property=MainPID --value`,
-  `pkgs/aoide/crates/song/src/ipc.rs`). Success is judged on OUTPUT, not the
+  `pkgs/aoide/crates/strillix-rice/src/ipc.rs`). Success is judged on OUTPUT, not the
   exit code: `ipc call` exits 0 even for an unknown target/function
   (printing `Not ready to accept queries yet.`), and `reload()` is a void
   function, so a landed call prints nothing — empty stdout at exit 0 is the
@@ -291,7 +291,7 @@ strx quickshell healthcheck [--json]
   <timestamp>`) for Qt's placeholder-screen line; `hyprctl -j layers` for the
   live surface count. A restart-history marker at
   `state/quickshell-healthcheck-restarts` under the state dir
-  (`pkgs/aoide/crates/song/src/health.rs`).
+  (`pkgs/aoide/crates/strillix-rice/src/health.rs`).
 - **Writes:** the marker file (restart timestamps plus an optional
   `notified:<epoch>` sentinel), and — on a confirmed, ladder-permitted
   lockup — restarts `aoide-quickshell.service` via `systemctl --user
