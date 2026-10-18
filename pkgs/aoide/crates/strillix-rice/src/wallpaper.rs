@@ -465,6 +465,27 @@ mod tests {
 
     // ── The stage seam: a pick vs a rice default (CONTRACTS.md §4) ───────────
 
+    /// Every write to `stage/wallpaper.json` carries the stage format version.
+    #[test]
+    fn every_staged_wallpaper_write_is_stamped_with_its_version() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
+        let root = unique_tmp("wallpaper-stamp");
+        let stage = root.join("stage");
+        std::fs::create_dir_all(&stage).unwrap();
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+
+        stage_pick(Path::new("/tmp/user-choice.png"), Some("dusk"), None).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(staged_wallpaper_json()).unwrap()).unwrap();
+        assert_eq!(v["schemaVersion"], STAGE_WALLPAPER_VERSION);
+        assert_eq!(v["pick"], true, "the stamp rides beside the shape it already had");
+
+        stage_default(Path::new("/tmp/rice-default.png"), "dusk").unwrap();
+        let v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(staged_wallpaper_json()).unwrap()).unwrap();
+        assert_eq!(v["schemaVersion"], STAGE_WALLPAPER_VERSION);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     /// A pick is marked; the rice's own default is NOT. This is the whole
     /// discriminator AoideWallpaper.qml's board gate rides.
     #[test]
