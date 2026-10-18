@@ -145,7 +145,7 @@ and the gate flag are all real code paths; only the live-system action is
 deferred. Exactly two commands carry `gated: true` in `aoide` (`content
 approve`, `update`); `strx rice declare <name>` runs gated too but is real
 code — it byte-diff-copies the runtime rice tree, less its
-top-level `takes/` and `drafts/` (the machine's undo history and scratch),
+top-level `history/` and `drafts/` (the machine's undo history and scratch),
 from `$AOIDE_ROOT/rices/<name>/` into the checkout's
 `rices/<name>/` (no `git add`, no rebuild), leaving `rice
 transpose` as strillix's one remaining stub. Both doors surface the user

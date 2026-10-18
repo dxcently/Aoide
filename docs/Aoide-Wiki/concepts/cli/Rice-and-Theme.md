@@ -96,8 +96,8 @@ strx rice stage [<name>] [--json]
   `.widgets` key. In Staging mode with an explicit `<name>`, also updates
   `/stage/mode.json`'s `rice` and `stagingRice` (in Draft mode the marker is
   deliberately untouched). In Draft mode, auto-mints a take (cause `"stage"`): writes
-  `rices/<rice>/drafts/<draft>/takes/NNNN.json` and
-  `takes/head.json` — non-fatal on failure (`take: null, takeError` in data).
+  `rices/<rice>/drafts/<draft>/history/NNNN.json` and
+  `history/head.json` — non-fatal on failure (`take: null, takeError` in data).
 - **Pipes to / output:** best-effort `hyprctl reload config-only` (the host's
   bake back under the rice), then `hyprctl --batch "keyword …; …"` with
   geometry + border keywords (`general:gaps_out`, `general:gaps_in`,
@@ -373,8 +373,8 @@ strx wallpaper set --from-skwd --kind <static|video|we> <path|id> [--json]
   board). `--from-skwd` records an external provider's own report instead, and
   writes nothing at all when that provider is not the host's, when the identity
   is the step-aside image, or when the staged pick already names it. In Draft
-  mode auto-mints a take (cause `"wallpaper-set"`): `takes/NNNN.json` +
-  `takes/head.json` under the routed draft, non-fatal on failure.
+  mode auto-mints a take (cause `"wallpaper-set"`): `history/NNNN.json` +
+  `history/head.json` under the routed draft, non-fatal on failure.
 - **Output:** data `{wallpaper, wallpaperJson, kind, position, tile, pick, rice,
   wallpaper, seam}` (+ `take` when in Draft mode), `position` being the word
   in force (`auto` when none was given); with `--clear`, `{cleared, droppedPick,
@@ -520,7 +520,7 @@ strx rice refresh [<name>] [--check] [--json]
   the machine deleted is not re-added. A machine folder that does not exist is
   seeded whole. Owner-write is restored on any entry lacking it. The record is
   rewritten last, atomically, under the stage lock. Nothing under the rice's
-  top-level `takes/` or `drafts/`, no machine-only file and no symlink is
+  top-level `history/` or `drafts/`, no machine-only file and no symlink is
   touched. `--check` writes nothing.
 - **Output:** `"refreshed N rice(s)"` (`"checked N rice(s)"` with `--check`) and
   one line per rice, `<rice>: N replaced, M added, K deleted, J kept, I in
@@ -543,7 +543,7 @@ strx rice declare <name> [--json]
 ```
 
 - **Reads:** the composed rice `$AOIDE_ROOT/rices/<name>/`
-  (`fs::rices_dir`) less its top-level `takes/` and `drafts/`,
+  (`fs::rices_dir`) less its top-level `history/` and `drafts/`,
   recursively, byte by byte; and the checkout at
   `aoide_storage::fs::flake_root()` (`$AOIDE_FLAKE_ROOT` absolute override,
   default `~/Aoide`), which must exist as a directory.
@@ -552,10 +552,10 @@ strx rice declare <name> [--json]
   `handle_rice_declare` — `implemented: true`, `gated: true`) through
   `strillix_rice::widgets::copy_tree_atomic`, the one tree copy `rice stage`'s
   widget sync uses too. The checkout carries the rice, not the machine's
-  undo history and scratch, so `MACHINE_RUNTIME_DIRS` (`takes/`, `drafts/`)
+  undo history and scratch, so `MACHINE_RUNTIME_DIRS` (`history/`, `drafts/`)
   stay behind: matched by name at the rice folder's top level only, whatever
   the entry's file type, so a symlinked `takes` is skipped rather than
-  followed, while `widgets/takes/` and `elements/` are the rice's own and
+  followed, while `widgets/history/` and `elements/` are the rice's own and
   arrive. Byte-diff copy: a destination file whose bytes already match the
   source is left untouched, so a repeat declare with nothing new is a
   no-op. Nothing beyond the copy — no `git add`, no rebuild proposal, no
@@ -641,10 +641,10 @@ strx rice history [--json]
   the routed draft's current `/stage/theme.json` (required) and
   `/stage/wallpaper.json` (optional). Env: `$AOIDE_SESSION_ID` (recorded as
   `sessionId` when set).
-- **Writes:** `rices/<rice>/drafts/<draft>/takes/NNNN.json` (a
+- **Writes:** `rices/<rice>/drafts/<draft>/history/NNNN.json` (a
   write-once `TakeRecord`: `{take, parent?, at, sessionId?, cause, theme,
   wallpaper?}` — 4-digit zero-padded filename, monotone counter, never
-  renumbered) and updates `takes/head.json` (`{"head": N}`). One
+  renumbered) and updates `history/head.json` (`{"head": N}`). One
   `with_stage_lock` around the whole read-allocate-write.
 - **Output:** `"take NNNN minted — from take MMMM"` (or "the draft's first
   take"); data `{take, parent, at, cause: "explicit", sessionId}`.
@@ -661,7 +661,7 @@ strx rice history [--json]
 strx rice history list [--json]
 ```
 
-- **Reads:** the routed draft's whole `takes/` directory (`NNNN.json`
+- **Reads:** the routed draft's whole `history/` directory (`NNNN.json`
   records, `head.json`, `marks.json`) plus `/stage/mode.json`.
 - **Output:** human text is an ASCII tree: `"N take(s) for <rice>/<draft> —
   head → MMMM"` then depth-first rows `NNNN  <ISO at>  <cause> [marks] [←
@@ -681,10 +681,10 @@ strx rice history mark <letter> [--take N] [--json]
 ```
 
 - **Reads:** `/stage/mode.json` (Draft-mode gate), the target take file
-  (existence check), `takes/marks.json` (tolerates missing/corrupt as empty),
-  and `takes/head.json` when `--take` is omitted (defaults to the head).
+  (existence check), `history/marks.json` (tolerates missing/corrupt as empty),
+  and `history/head.json` when `--take` is omitted (defaults to the head).
 - **Writes:** exactly one atomic rewrite of
-  `rices/<rice>/drafts/<draft>/takes/marks.json`
+  `rices/<rice>/drafts/<draft>/history/marks.json`
   (`{"<letter>": <take>}` map) — take records are never touched. Under one
   `with_stage_lock`.
 - **Output:** `"mark X stamped on take NNNN"` or `"mark X moved from take
@@ -703,7 +703,7 @@ strx rice history diff [--take N | --mark <letter>] [--json]
 ```
 
 - **Reads:** `/stage/mode.json` (Draft-mode gate), the base take's record
-  from `takes/`, `takes/marks.json` + `takes/head.json` (for base resolution),
+  from `history/`, `history/marks.json` + `history/head.json` (for base resolution),
   and the routed draft's CURRENT staged `/stage/theme.json`.
 - **Output:** `"no change since take NNNN"` or `"diff since take NNNN (K
   key(s) changed):"` followed by `+ path: new` / `- path: old` / `~ path: old
@@ -723,12 +723,12 @@ strx rice history diff [--take N | --mark <letter>] [--json]
 strx rice history prune [--older-than <N>d|<N>h] [--keep <N>] [--all-but-marks] [--force] [--json]
 ```
 
-- **Reads:** the routed draft's `takes/` store (records, `head.json`,
+- **Reads:** the routed draft's `history/` store (records, `head.json`,
   `marks.json`) and `/stage/mode.json`.
-- **Writes:** deletes each pruned `takes/NNNN.json`; rewrites (atomic) any
+- **Writes:** deletes each pruned `history/NNNN.json`; rewrites (atomic) any
   surviving take whose `parent` the splice changed (children re-parent to the
   pruned take's parent, so ancestry keeps resolving); rewrites
-  `takes/marks.json` dropping letters that named pruned takes. One
+  `history/marks.json` dropping letters that named pruned takes. One
   `with_stage_lock` around the whole splice-persist-delete pass.
 - **Output:** flag-driven success → `"pruned K take(s) for <rice>/<draft>:
   …"`; data `{pruned, reparented: [{take, from, to}], droppedMarks,
@@ -754,19 +754,19 @@ strx rice back [--take N | --mark <letter>] [--json]
 ```
 
 - **Reads:** `/stage/mode.json` (Draft-mode gate), the target take
-  record, `takes/marks.json` (for `--mark`; a letter naming a pruned/absent
+  record, `history/marks.json` (for `--mark`; a letter naming a pruned/absent
   take reads as `mark-not-found`), the current staged content (drift check),
   and — for the write-back — verifies `/stage/theme.json` IS a symlink
   (refuses `routing-broken` rather than silently writing a plain stage file).
 - **Writes (one `with_stage_lock` around everything):** if the staged
   content differs from the head take, first mints a drift take (cause
-  `"drift"`: `takes/NNNN.json` + `head.json`) so un-taken edits survive;
+  `"drift"`: `history/NNNN.json` + `head.json`) so un-taken edits survive;
   atomic-writes the target take's theme into `/stage/theme.json`
   (symlink-transparent → lands in the draft file); restores or removes
   `/stage/wallpaper.json` to match the take (stage only — the draft dir's
   archived `wallpaper.json` is never written); re-syncs
   `run/qml/rices/registry.json` from the reverted theme's `.widgets` key;
-  finally moves `takes/head.json` to the target.
+  finally moves `history/head.json` to the target.
 - **Pipes to / output:** best-effort `hyprctl --batch` geometry/border apply
   from the reverted theme (same `live::apply_live` as `rice stage`). No
   Quickshell IPC reload — every file written here is FileView-watched; the

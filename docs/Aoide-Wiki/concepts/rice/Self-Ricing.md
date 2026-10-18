@@ -10,7 +10,7 @@ source: "[[references/AOIDE-HANDOFF]]"
 
 Aoide ships the rice engine as a builtin. The engine provides the loop, the schema, and the staging mechanism. Everything else — the rices, the preferences, the accumulated taste — it learns by doing.
 
-**Status today:** the loop below is real end to end, `rice declare` included. `rice lint` (runs the native [[theme]] engine), `rice stage`, `rice compose`, `strx reload` (the one mode-aware iteration command — absorbed `quickshell reload` outright), the `rice draft` group (`save`/`list`/`drop`), and the `rice mode` group (`status`/`stage`/`declarative`/`draft`) are all implemented. `rice stage` stages `stage/theme.json`, [[Quickshell]] hot-reloads it live via `FileView`, geometry, window-border colours and the hyprglass switch apply to the running compositor over `hyprctl` in the same step, and the terminals follow: `stage/terminal-colors.conf` for every new kitty window, and a `kitty @ load-config` per instance for the open ones — while `rice mode declarative` is locked (below), `rice stage` refuses instead of writing. Beyond a live `rice stage`, the activation seed reseeds `stage/theme.json` from the active rice's committed notes with the venue's `aoide.theme.override` and the host's geometry applied and publishes the same bytes at `/declared/theme.json`, the declared twin that `rice mode declarative` re-pins from, beside `/declared/venue.json`, the slots the venue recolours and the geometry the host sets, as data ([[Codebase#Runtime contracts (socket + stage files)]]) — so a host that boots without ever staging still carries the correct stage twin, and a later re-stage of the declared rice reads the runtime rices, where the rice is edited, with the venue laid over it: the venue wins on the slots it recolours and the geometry it sets, and an edit shows everywhere else. The seed is declared truth and nothing more: the strillix lane's `aoide-rice-reload` unit then runs `strx reload` at every login (before the shell starts) and on every switch, which brings back whatever `stage/mode.json` names — the last staged rice, or the routed draft. `rice declare` is implemented — gated, it copies the runtime rice tree, less its top-level `takes/` and `drafts/` (the machine's undo history and scratch, which stay behind), into the checkout's `rices/<name>/` (byte-diff, a repeat with nothing new is a no-op; no `git add`, no rebuild — the user runs those herself). `rice transpose` remains the one declared-but-not-implemented stub (exit `64`) — narrate it as planned, not as a working pipeline. There is no `rice gen`; `rice compose` is the real, working scaffolding entry point.
+**Status today:** the loop below is real end to end, `rice declare` included. `rice lint` (runs the native [[theme]] engine), `rice stage`, `rice compose`, `strx reload` (the one mode-aware iteration command — absorbed `quickshell reload` outright), the `rice draft` group (`save`/`list`/`drop`), and the `rice mode` group (`status`/`stage`/`declarative`/`draft`) are all implemented. `rice stage` stages `stage/theme.json`, [[Quickshell]] hot-reloads it live via `FileView`, geometry, window-border colours and the hyprglass switch apply to the running compositor over `hyprctl` in the same step, and the terminals follow: `stage/terminal-colors.conf` for every new kitty window, and a `kitty @ load-config` per instance for the open ones — while `rice mode declarative` is locked (below), `rice stage` refuses instead of writing. Beyond a live `rice stage`, the activation seed reseeds `stage/theme.json` from the active rice's committed notes with the venue's `aoide.theme.override` and the host's geometry applied and publishes the same bytes at `/declared/theme.json`, the declared twin that `rice mode declarative` re-pins from, beside `/declared/venue.json`, the slots the venue recolours and the geometry the host sets, as data ([[Codebase#Runtime contracts (socket + stage files)]]) — so a host that boots without ever staging still carries the correct stage twin, and a later re-stage of the declared rice reads the runtime rices, where the rice is edited, with the venue laid over it: the venue wins on the slots it recolours and the geometry it sets, and an edit shows everywhere else. The seed is declared truth and nothing more: the strillix lane's `aoide-rice-reload` unit then runs `strx reload` at every login (before the shell starts) and on every switch, which brings back whatever `stage/mode.json` names — the last staged rice, or the routed draft. `rice declare` is implemented — gated, it copies the runtime rice tree, less its top-level `history/` and `drafts/` (the machine's undo history and scratch, which stay behind), into the checkout's `rices/<name>/` (byte-diff, a repeat with nothing new is a no-op; no `git add`, no rebuild — the user runs those herself). `rice transpose` remains the one declared-but-not-implemented stub (exit `64`) — narrate it as planned, not as a working pipeline. There is no `rice gen`; `rice compose` is the real, working scaffolding entry point.
 
 ## The Rice Loop
 
@@ -40,7 +40,7 @@ strx rice mode declarative                  (real — tears the routing down, re
     ↓                                          the declared truth; the draft itself
     ↓                                          stays saved on disk)
 strx rice declare <name>                    (real — copies the rice, less its
-    ↓                                          takes/ and drafts/, into the
+    ↓                                          history/ and drafts/, into the
     ↓                                          checkout's rices/<name>/)
 strx rice declare <name> --host             (real — rewrites the host config's one
     ↓                                          habit.rice.declared line to <name>;
@@ -70,7 +70,7 @@ the binaries move any pre-existing trees into it via
 `fs::migrate_root_once()`). The git checkout is a separate thing, reached
 through `$AOIDE_FLAKE_ROOT` (default `~/Aoide`): it holds the COMMITTED
 rices at `rices/`, and `rice declare` is the seam that copies a
-composed rice from the runtime root into it, less its top-level `takes/` and
+composed rice from the runtime root into it, less its top-level `history/` and
 `drafts/`, which stay behind.
 
 `strx rice compose <name> [--from <rice>] [--force] [--json]` scaffolds a new rice directly into the runtime rices — the starting point of the rice loop above:
@@ -111,7 +111,7 @@ write back to, without requiring `rice compose` first.
 After the seed, the repo's changes to a built-in rice reach the machine through
 `strx rice refresh [<name>]`: a file the machine never edited takes the repo's
 version, an edited or unrecorded file is kept and reported, a file the machine
-deleted is not re-added, and `takes/`, `drafts/` and machine-only files are
+deleted is not re-added, and `history/`, `drafts/` and machine-only files are
 never touched. `--check` reports each file's state and writes nothing. The rule,
 the record it reads (`/declared/rices/<rice>.json`) and the first-run
 behaviour are in `CONTRACTS.md` §5, "The rices belongs to the machine".
@@ -451,7 +451,7 @@ The discipline is already in use: the retired `default` rice's declared aestheti
 
 ## Declare, Select, Replay
 
-**Declare** copies the runtime rice tree, less its top-level `takes/` and
+**Declare** copies the runtime rice tree, less its top-level `history/` and
 `drafts/` (the machine's undo history and scratch, which stay behind), into
 the checkout's `rices/<rice>/` as durable, versioned, fleet-available
 score — a gated byte-diff copy (a repeat with nothing new is a no-op), with
@@ -494,7 +494,7 @@ rices/<rice>/
 
 Wallpapers themselves live in the shared `/wallpapers/` library, not per-rice — any rice's `rice.nix` references a file there by literal path.
 
-`rice/` is the agent's writable domain. The agent commits there and nowhere else. Declare = copy the runtime rice tree into the checkout, less its top-level `takes/` and `drafts/` (the machine's undo history and scratch, which stay behind), then the user's own commit + gated rebuild.
+`rice/` is the agent's writable domain. The agent commits there and nowhere else. Declare = copy the runtime rice tree into the checkout, less its top-level `history/` and `drafts/` (the machine's undo history and scratch, which stay behind), then the user's own commit + gated rebuild.
 
 ## Related
 

@@ -236,7 +236,7 @@ strx reload [--json]
     refused before anything is written.
 - **Writes:** nothing in `declarative`. In `staging` and `draft`, after the
   sync, a take of the now-synced stage and widget bodies, deduped against the
-  head (`rices/<rice>/takes/`, or `rices/<rice>/drafts/<name>/takes/`
+  head (`rices/<rice>/history/`, or `rices/<rice>/drafts/<name>/history/`
   in a draft), so an unchanged reload mints nothing and every iteration is
   reversible with `strx rice back`. The sync runs before the snapshot: its
   write is a pure function of the rice, so the snapshot settles into a stable

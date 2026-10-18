@@ -1123,8 +1123,8 @@ count.
   (hard cutover, no alias: `quickshell` now registers only `healthcheck`,
   the placeholder-screen watchdog), reading `stage/mode.json` to dispatch
   shell-reload-only (declarative) or snapshot-then-sync-then-reload
-  (staging/draft, the take hanging off `rices/<rice>/takes/` when staged
-  or the routed draft's own `takes/` when drafted, deduped against the head
+  (staging/draft, the take hanging off `rices/<rice>/history/` when staged
+  or the routed draft's own `history/` when drafted, deduped against the head
   take so an unchanged reload mints nothing). `element seed` (L-E1,
   docs/architecture/ELEMENTS.md) renders a rice's committed
   `elements/*/element.json` — non-QML rice targets (waybar, dunst, anything

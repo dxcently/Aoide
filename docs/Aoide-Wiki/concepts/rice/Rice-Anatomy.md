@@ -29,7 +29,7 @@ rices `strx rice compose` writes (`$AOIDE_ROOT/rices/<name>/`),
 saved drafts (`$AOIDE_ROOT/rices/<rice>/drafts/`), plus `run/qml/`,
 `state/`, and `log`. `strx rice declare <name>` is the seam between the two
 roots: it copies a composed rice from the runtime rices into the checkout's
-`rices/<name>/`, less its top-level `takes/` and `drafts/` (the
+`rices/<name>/`, less its top-level `history/` and `drafts/` (the
 machine's undo history and scratch, which stay behind) — no `git add`, no rebuild; the user gates those.
 
 ## The subfolders
