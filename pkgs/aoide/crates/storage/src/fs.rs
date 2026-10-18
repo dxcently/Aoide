@@ -251,12 +251,13 @@ pub fn migrate_root_once() -> std::io::Result<()> {
     migrate_node_state_names()
 }
 
-/// The pre-theme `livery.json` becomes `theme.json` in the stage and in every
-/// rice and draft under `<strillix>/rices`. Runs after the rice tree moved, so
+/// `livery.json` becomes `theme.json` in the stage, in the declared twin, and in
+/// every rice and draft under `<strillix>/rices`. Runs after the rice tree moved, so
 /// it reads the tree in its final place. No-clobber and idempotent, like every
 /// other piece here: a file already at its new name is left alone.
 fn migrate_theme_files(strillix: &std::path::Path) {
     migrate_file(&stage_dir().join("livery.json"), &stage_dir().join("theme.json"));
+    migrate_file(&strillix.join("declared").join("livery.json"), &strillix.join("declared").join("theme.json"));
     for rice in std::fs::read_dir(strillix.join("rices")).into_iter().flatten().flatten() {
         let dir = rice.path();
         migrate_file(&dir.join("livery.json"), &dir.join("theme.json"));
@@ -286,7 +287,7 @@ fn migrate_wallpaper_files(strillix: &std::path::Path) -> std::io::Result<()> {
 /// The rice tree's move out of aoide's root (`$AOIDE_ROOT/song/` into
 /// `$STRILLIX_ROOT`, or `<stage>/..` under an `$AOIDE_STAGE_DIR` override):
 /// `song/stage` becomes the stage, `song/declared` and `song/covers` keep
-/// their names, `song/songbook` becomes `rices`, and every rice's `history/`
+/// their names, `song/songbook` becomes `rices`, and every rice's `takes/`
 /// becomes `history/` (its own drafts' included). `mode.json`'s `song` key
 /// becomes `rice`. `old_song` is the pre-rename tree; the target is
 /// [`strillix_dir`], the rice tree root every reader derives from. A tree
@@ -313,9 +314,9 @@ fn migrate_rice_tree(old_song: &std::path::Path) -> std::io::Result<()> {
     migrate_dir(&old_song.join("songbook"), &target.join("rices"))?;
     for rice in std::fs::read_dir(target.join("rices")).into_iter().flatten().flatten() {
         let dir = rice.path();
-        migrate_dir(&dir.join("history"), &dir.join("history"))?;
+        migrate_dir(&dir.join("takes"), &dir.join("history"))?;
         for draft in std::fs::read_dir(dir.join("drafts")).into_iter().flatten().flatten() {
-            migrate_dir(&draft.path().join("history"), &draft.path().join("history"))?;
+            migrate_dir(&draft.path().join("takes"), &draft.path().join("history"))?;
         }
     }
     migrate_mode_song_key(&stage_dir())
@@ -392,18 +393,18 @@ fn migrate_node_state_names() -> std::io::Result<()> {
     Ok(())
 }
 
-/// The paint binary's state link moved from `~/.local/state/lyra` to
-/// `~/.local/state/strillix` (Hyprland sources `rice.conf` from there, so the
-/// move must land before the first rebuild rewrites the link). Same no-clobber
+/// `~/.local/state/lyra` becomes `~/.local/state/strillix`. Hyprland sources
+/// `rice.conf` from there, so the move must land before the first rebuild
+/// rewrites the link. Same no-clobber
 /// move as [`migrate_dir`]; `home` is the caller's `$HOME`.
 pub fn migrate_strillix_state(home: &std::path::Path) -> std::io::Result<()> {
     let state = home.join(".local").join("state");
     migrate_dir(&state.join("lyra"), &state.join("strillix"))
 }
 
-/// Move `old` → `new` wholesale: a no-op unless `old` exists AND `new` is
-/// absent (never clobbers a tree that already migrated, or one seeded fresh
-/// at the new root). `rename` first (same filesystem, the common case); a
+/// Move `old` → `new` wholesale: a no-op unless `old` exists. An empty `new`
+/// is a root something created before migration ran and is replaced; a `new`
+/// that holds data is never clobbered — the move is narrated and `old` stays. `rename` first (same filesystem, the common case); a
 /// cross-filesystem rename falls back to a recursive copy, removed from the
 /// source only once the copy fully lands — a crash mid-copy leaves `old`
 /// intact rather than a half-moved tree with `new` looking "done." A move
@@ -413,7 +414,15 @@ pub fn migrate_strillix_state(home: &std::path::Path) -> std::io::Result<()> {
 /// cannot be locked is the one `Err`: the tree is now wide where every reader
 /// looks.
 fn migrate_dir(old: &std::path::Path, new: &std::path::Path) -> std::io::Result<()> {
-    if !old.exists() || new.exists() {
+    if !old.exists() {
+        return Ok(());
+    }
+    if new.exists() && std::fs::remove_dir(new).is_err() {
+        eprintln!(
+            "aoide: {} stays where it is: {} already holds data",
+            old.display(),
+            new.display()
+        );
         return Ok(());
     }
     let Some(parent) = new.parent() else { return Ok(()) };
@@ -4718,10 +4727,11 @@ mod tests {
         std::fs::create_dir_all(old_song.join("covers")).unwrap();
         std::fs::write(old_song.join("covers").join("cover.png"), "art").unwrap();
         let old_rice = old_song.join("songbook").join("moonlight");
-        std::fs::create_dir_all(old_rice.join("history").join("v1")).unwrap();
-        std::fs::write(old_rice.join("history").join("v1").join("bar.qml"), "old").unwrap();
-        std::fs::create_dir_all(old_rice.join("drafts").join("d1").join("history")).unwrap();
-        std::fs::write(old_rice.join("drafts").join("d1").join("history").join("x"), "draft").unwrap();
+        std::fs::create_dir_all(old_rice.join("takes").join("v1")).unwrap();
+        std::fs::write(old_rice.join("takes").join("v1").join("bar.qml"), "old").unwrap();
+        std::fs::write(old_rice.join("takes").join("head.json"), "{}").unwrap();
+        std::fs::create_dir_all(old_rice.join("drafts").join("d1").join("takes")).unwrap();
+        std::fs::write(old_rice.join("drafts").join("d1").join("takes").join("x"), "draft").unwrap();
 
         migrate_root_once().unwrap();
 
@@ -4735,6 +4745,8 @@ mod tests {
         assert_eq!(std::fs::read_to_string(strillix.join("wallpapers").join("cover.png")).unwrap(), "art");
         let new_rice = strillix.join("rices").join("moonlight");
         assert_eq!(std::fs::read_to_string(new_rice.join("history").join("v1").join("bar.qml")).unwrap(), "old");
+        assert_eq!(std::fs::read_to_string(new_rice.join("history").join("head.json")).unwrap(), "{}");
+        assert!(!new_rice.join("takes").exists(), "the rice's takes/ must have moved to history/");
         assert_eq!(
             std::fs::read_to_string(new_rice.join("drafts").join("d1").join("history").join("x")).unwrap(),
             "draft"
@@ -4858,7 +4870,75 @@ mod tests {
         let _ = std::fs::remove_dir_all(&home);
     }
 
-    /// The herald ledger's rename: a legacy `herald.json` in the new stage, or in
+    /// The activation seed may create the new root before any binary runs. An
+    /// empty target is replaced by the move, so the old tree still lands.
+    #[test]
+    fn migrate_root_once_moves_into_an_empty_pre_created_root() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = MigrationEnvGuard::capture_and_clear();
+        let home = std::env::temp_dir().join(format!("aoide-migrate-empty-target-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        std::env::set_var("HOME", &home);
+
+        let old_stage = home.join(".aoide").join("song").join("stage");
+        std::fs::create_dir_all(&old_stage).unwrap();
+        std::fs::write(old_stage.join("mode.json"), r#"{"song":"moonlight"}"#).unwrap();
+        std::fs::create_dir_all(home.join(".strillix").join("stage")).unwrap();
+        std::fs::create_dir_all(home.join(".strillix").join("declared")).unwrap();
+
+        migrate_root_once().unwrap();
+
+        assert!(home.join(".strillix").join("stage").join("mode.json").exists(), "the staged pointer must reach the new root");
+        assert!(!old_stage.exists(), "the old stage must have moved");
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    /// A populated new root is never clobbered: the old tree stays put, and
+    /// nothing in it is lost.
+    #[test]
+    fn migrate_root_once_keeps_the_old_tree_when_the_new_root_holds_data() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = MigrationEnvGuard::capture_and_clear();
+        let home = std::env::temp_dir().join(format!("aoide-migrate-populated-target-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        std::env::set_var("HOME", &home);
+
+        let old_stage = home.join(".aoide").join("song").join("stage");
+        std::fs::create_dir_all(&old_stage).unwrap();
+        std::fs::write(old_stage.join("mode.json"), r#"{"song":"moonlight"}"#).unwrap();
+        let new_stage = home.join(".strillix").join("stage");
+        std::fs::create_dir_all(&new_stage).unwrap();
+        std::fs::write(new_stage.join("theme.json"), "fresh").unwrap();
+
+        migrate_root_once().unwrap();
+
+        assert_eq!(std::fs::read_to_string(old_stage.join("mode.json")).unwrap(), r#"{"song":"moonlight"}"#);
+        assert_eq!(std::fs::read_to_string(new_stage.join("theme.json")).unwrap(), "fresh");
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    /// The declared twin's `livery.json` arrives as `theme.json`, once.
+    #[test]
+    fn migrate_root_once_renames_the_declared_livery_twin() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = MigrationEnvGuard::capture_and_clear();
+        let home = std::env::temp_dir().join(format!("aoide-migrate-declared-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        std::env::set_var("HOME", &home);
+
+        let declared = home.join(".aoide").join("song").join("declared");
+        std::fs::create_dir_all(&declared).unwrap();
+        std::fs::write(declared.join("livery.json"), "{}").unwrap();
+
+        migrate_root_once().unwrap();
+
+        let new_declared = home.join(".strillix").join("declared");
+        assert_eq!(std::fs::read_to_string(new_declared.join("theme.json")).unwrap(), "{}");
+        assert!(!new_declared.join("livery.json").exists(), "the old declared livery.json must have moved");
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    /// A legacy `herald.json` in the new stage, or in
     /// the pre-split stage, arrives as `notifications.json`, once, no-clobber.
     #[test]
     fn migrate_conducting_stage_renames_the_legacy_herald_ledger() {
@@ -5238,7 +5318,7 @@ mod strillix_state_tests {
     }
 
     /// The old paint state: a `rice.conf` link into a declared file, as the
-    /// lyra-era Hyprland `source` line expects it.
+    /// Hyprland `source` line expects it.
     fn old_state(home: &Path) -> PathBuf {
         let target = home.join("declared-rice.conf");
         let lyra = home.join(".local/state/lyra");
