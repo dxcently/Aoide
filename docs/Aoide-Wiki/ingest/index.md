@@ -22,7 +22,7 @@ updated: 2026-09-27
 - [[Clone-and-Run]] — installing Aoide: the `aoide`/`aoided` binaries by cargo (no nix), then clone + `aoide onboard`; the shared-history model for upstream updates and optional contributions
 - [[Self-Ricing]] — the rice lifecycle (compose → stage → lint → draft → declare), the rices write-back, and the three-way `rice mode` gate
 - [[Song-Vocabulary]] — what each song term maps to in the performed half, and how replay makes a committed song host-agnostic
-- [[Song-Anatomy]] — what every `song/` subfolder is for, committed score vs gitignored runtime, who writes each, and the six stage files
+- [[Rice-Anatomy]] — what every `rices/` folder and `stage/` file under `$STRILLIX_ROOT` is for, committed score vs gitignored runtime, who writes each, and the stage files
 - [[Agent-Interface]] — the `aoide` command surface, MCP as a generated façade, the guide tiers, and per-command ergonomics
 - [[A2A-Door]] — the bidirectional Agent2Agent door: `a2a serve` agent, the `node` group as the outbound client, concept mapping, rebuild-time admission, pairing-gated spawn with signed requests
 - [[Node-Federation]] — folding another instance's session graph in as a subtree: `state/nodes.json`, the node-cache TTL, the `node` CLI group; direct dial by default
@@ -43,12 +43,12 @@ updated: 2026-09-27
 - [[Conductor-TUI]] — the `aoide conductor` interactive terminal frontend: seven panels, keys, what each dispatches
 - [[Secrets-Commands]] — the `aoide secrets` credential door's 17 commands: direct-home admin, over-the-socket operator, and the daemon itself
 - [[Controls]] — the day-to-day surface: rebuild aliases, compositor keybinds, the bar's click/scroll/hover interactions, shell aliases
-- [[Screen-Control]] — `strx screen`, AoideOS's computer-use surface: look, ground, act, verify — fourteen commands behind one CLI group
+- [[Screen-Control]] — `strx screen`, Strillix's computer-use surface: look, ground, act, verify — fourteen commands behind one CLI group
 
 ## Entities
 
 - [[aoide-cli]] — the `aoide` binary: the self-registering command registry behind `dispatch()`/`schema --json`/MCP, exit codes 0/1/2/64, and the `aoided` daemon
-- [[strillix]] — the AoideOS paint binary: its own registry, its own 48-command schema, the nix boundary core never crosses
+- [[strillix]] — the Strillix paint binary: its own registry, its own 48-command schema, the nix boundary core never crosses
 - [[theme]] — the theme schema and tiers, the two-fan-out (stage/theme.json + Stylix), the native `strx theme` engine and its four emitters
 - [[aoided]] — the orchestrator daemon: event stream, policy, lint, audit log, gated rebuild; per-agent adapters; the notification-text security boundary
 - [[shellbridge]] — daemon↔desktop: JSON state files out, socket commands in, Hyprland IPC; the stage files and the `AOIDE_STAGE_DIR` seam

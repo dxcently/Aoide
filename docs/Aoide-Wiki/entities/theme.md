@@ -292,8 +292,8 @@ hyprctl`, `emit osc`) against a v0 fixture in the crate tests.
 The provisional v0 stands until the design-system v1 lands: palette (`bg`,
 `fg`, `accent`, `urgent`) plus component overrides (`bar.*`, `notif.*`,
 `window.*`). The update playbook migrates rices modules from v0 to v1 when
-v1 supersedes. The rename to `theme` carried **no version bump** — the
-shape is unchanged; the update playbook records the namespace/file rename.
+v1 supersedes. The namespace and file name are `theme`; the shape is v1
+unchanged.
 
 ## Stylix overlap resolution
 

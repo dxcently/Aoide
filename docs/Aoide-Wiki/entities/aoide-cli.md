@@ -285,8 +285,8 @@ shortcut the panel itself registers (`aoide:dock`), not a CLI command (see
 ## Contract-level conventions
 
 - **One spelling per command, no internal aliases.** Every command has
-  exactly one name; a retired spelling (e.g. the pre-rename `rice preview`/
-  `rice mint`) becomes a plain unknown command, resolved the same as a typo.
+  exactly one name; a retired spelling (e.g. `rice preview`/`rice mint`)
+  becomes a plain unknown command, resolved the same as a typo.
   The parser carries no alias table.
 - **`--json` everywhere.** A hand-rolled parser (no clap, to keep the
   offline cargo lock tiny) reads argv against the schema, so the parser and

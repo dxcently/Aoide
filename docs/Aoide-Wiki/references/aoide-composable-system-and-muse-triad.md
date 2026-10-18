@@ -1,10 +1,10 @@
-# AoideOS composition, Strillix, and the muse triad
+# Strillix composition, and the muse triad
 
 This is the consolidated architecture and implementation plan. It distinguishes agreed requirements, verified source behavior, and proposed contracts. It does not declare the migration implemented or authorize a rebuild. The detailed [question register](mneme-aoide-open-questions.md) and [Mneme proposal](mneme-shared-memory-and-aoide.md) remain companion documents; their unresolved questions are not silently closed here.
 
 The authoritative Nix composition target and build sequence are in
 [Selective Nix composition](../../architecture/NIX-COMPOSITION.md). dxflake is
-the first live portability consumer; AoideOS migrates its walkers after that
+the first live portability consumer; Strillix migrates its walkers after that
 proof. Minimal additive upstream exports may precede the migration. That page
 governs provider selection, aggregations, shared users, selective lanes, and
 constructor implementation. This page supplies broader Strillix and muse-triad
@@ -118,10 +118,10 @@ Verified current gaps, not claims of implemented target behavior:
 - composeSong returns package metadata, but installation hardcodes packages. Sibling validation and implicit Sonata fallback disagree.
 - Missing slots can fall back instead of staying absent. Fixed shell slots and dynamic surfaces have different instantiation paths.
 - Runtime registries are generated separately from host layout overrides; borrowing-composition staging misses modified borrowed owners.
-- Current drafts isolate theme/cover but share widget bodies. Declare recursively copies the runtime song tree, less its top-level `takes/` and `drafts/`, without promoting active draft values into Nix or removing obsolete destination files.
+- Current drafts isolate theme/wallpaper but share widget bodies. Declare recursively copies the runtime rice tree, less its top-level `history/` and `drafts/`, without promoting active draft values into Nix or removing obsolete destination files.
 - Existing per-user deployment, source authority, reload outcome reporting, and core runtime-directory lifetime need explicit correction.
 
-## Melete on an AoideOS server
+## Melete on a Strillix server
 
 Yes: a headless server aggregate can deploy Aoide, Melete, and optionally Mneme without the desktop. Nix configuration can describe the daemon package, service account, working/state directories, nonsecret TOML, environment/secret-file references, endpoint policy, dependencies, source selections, and Cloudflared/Caddy routing.
 

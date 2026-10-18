@@ -264,7 +264,7 @@ picker are real commands at HEAD (`crates/storage/src/takes.rs`,
 check during an active rehearsal is phase C, still design.
 
 - **Takes** — automatic, append-only, cheap: every write to the routed
-  draft snapshots `rices/<song>/drafts/<name>/takes/NNNN.json` (theme +
+  draft snapshots `rices/<rice>/drafts/<name>/history/NNNN.json` (theme +
   cover + meta: timestamp, session id, cause). Captured at the two write
   entrypoints (`rice stage`, `cover set`) directly; hand-edits caught by a
   content-hash check on every hook-door `PostToolUse` during an active
@@ -279,9 +279,9 @@ check during an active rehearsal is phase C, still design.
   `parent` back to `null`; nothing is indexed.
 
   ```
-  takes/NNNN.json    one snapshot, carries parent: <NNNN>|null
-  takes/head.json    per-draft cursor — where the next take hangs
-  takes/marks.json   {"A": 9, "B": 14} — one atomic write per (re)stamp
+  history/NNNN.json    one snapshot, carries parent: <NNNN>|null
+  history/head.json    per-draft cursor — where the next take hangs
+  history/marks.json   {"A": 9, "B": 14} — one atomic write per (re)stamp
   ```
 
 - **Branching is implicit.** Revert to a mark, write, and the new take
@@ -305,7 +305,7 @@ check during an active rehearsal is phase C, still design.
   branch, exactly like rehearsal marks in a score: the `mark` step stamps
   the current take with a letter, meaning *reviewed-and-passed*. A letter
   already in use **moves** to the new take rather than erroring —
-  re-marking is a normal correction. Marks live in `takes/marks.json`, not
+  re-marking is a normal correction. Marks live in `history/marks.json`, not
   on the take record — the record stays write-once. `rice take mark
   <letter>` is the phase-A command; the score's `mark` step calls it.
 
@@ -316,7 +316,7 @@ strx rice back                bare, on a tty: the picker (§7), the
                                 usage error naming `--take`/`--mark`,
                                 never reads stdin.
 strx rice back --take 9       that take exactly; head := 9
-strx rice back --mark A       resolve A via takes/marks.json; head :=
+strx rice back --mark A       resolve A via history/marks.json; head :=
                                 that take
 strx rice take list           the whole tree: numbers, parents, marks,
                                 head
@@ -475,8 +475,8 @@ can never hang.
 
 | bare command on a tty | picker rows | on select |
 |---|---|---|
-| `rice back` | the whole take **tree** (§5.2) rendered flat and numbered for selection, head arrowed, marks bracketed — row 1 is the head's parent, pre-selected — plus a **second lane**, widget commits (recent git commits touching the song's widget bodies) | a take writes through the routing (same as `--take N`); a commit does `git checkout <rev> -- rices/<song>/…` — working-tree restore, HEAD never moves |
-| `rice take diff` | takes/marks to diff against | the diff, no write |
+| `rice back` | the whole take **tree** (§5.2) rendered flat and numbered for selection, head arrowed, marks bracketed — row 1 is the head's parent, pre-selected — plus a **second lane**, widget commits (recent git commits touching the song's widget bodies) | a take writes through the routing (same as `--take N`); a commit does `git checkout <rev> -- rices/<rice>/…` — working-tree restore, HEAD never moves |
+| `rice take diff` | history/marks to diff against | the diff, no write |
 | `aoide nix back` | journaled `{generation · rev · subject · age · dirty?}` | `git checkout <rev>` of the config repo; then **offers** the matching generation rollback as a second, separately-confirmed step |
 
 Two teeth in that table:
@@ -506,7 +506,7 @@ house meaning of the word.
 
 | command | wraps | protected by default |
 |---|---|---|
-| `rice take prune [--older-than 14d] [--keep 20] [--all-but-marks]` (LANDED, A9) | aoide's own `takes/` dir — its only native storage | **marked** takes (reviewed-good states); `--force` to take one out |
+| `rice take prune [--older-than 14d] [--keep 20] [--all-but-marks]` (LANDED, A9) | aoide's own `history/` dir — its only native storage | **marked** takes (reviewed-good states); `--force` to take one out |
 | `aoide nix prune [--generations 42,43] [--older-than 30d] [--keep 5]` | `nix-env -p /nix/var/nix/profiles/system --delete-generations …`, then optionally `nix store gc` | current + booted generation (nix refuses these anyway — a free rail); any generation the journal flags `keep` |
 | `aoide session prune` | EXISTS — done session records | — |
 
@@ -892,8 +892,8 @@ is #5. Observation (O0–O3) still lands before the rehearsal machinery (B–F)
     reads the amended design.
   - **A1** — the take store (`aoide-storage`): `TakeRecord` gains
     `parent`; the flat monotone counter (ordered by parsed number, never
-    filename); `takes/head.json` (falls back to the highest existing take
-    when stale or missing); `takes/marks.json`; ancestry/children/reparent
+    filename); `history/head.json` (falls back to the highest existing take
+    when stale or missing); `history/marks.json`; ancestry/children/reparent
     as pure functions.
   - **A2** — `rice take`: the snapshot core, exposed as unlocked cores
     plus thin `with_stage_lock`-wrapped entrypoints (one lock per
@@ -902,7 +902,7 @@ is #5. Observation (O0–O3) still lands before the rehearsal machinery (B–F)
     `cover set`) — a snapshot failure is non-fatal, reported in `data`,
     never turns a successful live write into an error.
   - **A4** — `rice take mark <letter>`: one atomic write of
-    `takes/marks.json`; re-marking moves the letter and says so.
+    `history/marks.json`; re-marking moves the letter and says so.
   - **A5** — `rice back` (agent entrance) — the step that lands the ask:
     drift-snapshot-first inside one lock, revert-through-routing, no
     Quickshell IPC reload (every file it writes is already
@@ -1027,10 +1027,10 @@ Decided in-session, one line each:
 - **No merge, no rebase, no cherry-pick — permanently.** Two lines from a
   mark stay two lines; combining them is editing the theme by hand. The
   explicit line against the git-clone slope.
-- Marks live in `takes/marks.json` (a `{"A": take}` map), not a field on
+- Marks live in `history/marks.json` (a `{"A": take}` map), not a field on
   the take record — one atomic write per (re)stamp, and the take record
   stays write-once.
-- The head cursor is per-draft `takes/head.json` — survives draft switches
+- The head cursor is per-draft `history/head.json` — survives draft switches
   and mode round-trips; falls back to the highest existing take when
   stale or absent.
 - Bare `rice back` on a tty opens the picker, head's parent pre-selected

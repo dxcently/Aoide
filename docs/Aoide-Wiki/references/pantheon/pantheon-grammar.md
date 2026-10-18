@@ -229,7 +229,7 @@ behind every layer):
   entirely the song's say: no compositor rule fades it.
 - The exact alpha values are facet constants tuned against the performed
   key and recorded in that song's `design/intent.md` (the vision-check in
-  the [Ricing Protocol](../../concepts/song/Ricing-Protocol.md)
+  the [Ricing Protocol](../../concepts/rice/Ricing-Protocol.md)
   is what keeps them honest).
 
 ---

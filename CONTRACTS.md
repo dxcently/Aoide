@@ -1787,11 +1787,7 @@ ever becoming reachable through `config set`.
 The resolved, flattened note values for Quickshell (QML reads this; hot-reload
 at rehearsal). Derived from the same `aoide.theme` as the baked `rice.nix`
 fan-out, so staged and adopted state cannot diverge. `stage/theme.json` is
-the canonical name (the stage file was renamed by the theme merge);
-writers mirrored to the legacy name and readers fell back during the
-transition window, so a running desktop never read a missing stage file. The
-mirror + fallback were dropped in Phase 4 of the theme merge —
-`stage/theme.json` is the sole stage note file.
+the sole stage note file.
 
 Beyond `strx rice stage <name>`/`wallpaper set`/other emitters writing this
 live, it is also **seeded from the active rice's committed notes, with the

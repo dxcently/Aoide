@@ -45,7 +45,7 @@ as `Song/` — crystal outside, song within; onboard links `~/Song` →
                ▼
 ┌──────────────────────────────────────────────┐
 │ Song/ — the performed half, in the fork      │
-│ repertoire/ keys/ covers/ chimes/ rices/  │
+│ repertoire/ keys/ wallpapers/ chimes/ rices/ │
 │ runtime, gitignored: stage/ backstage/ …     │
 └──────────────────────────────────────────────┘
    ~/Melete  ~/Mneme  ~/Magi — peers, never owned
@@ -134,7 +134,7 @@ Intended repo layout
 └── Song/                Y  the performed half, whole
     ├── repertoire/<song>/  rice.nix · tokens.json · liner/ · assets/
     ├── rices/           learnings · preferences · playbook
-    ├── keys/ covers/ chimes/   palettes · wallpapers · sounds
+    ├── keys/ wallpapers/ chimes/   palettes · wallpapers · sounds
     └── stage/ backstage/ auditions/ catalog/ index/ log/
                             runtime, gitignored
 ```
@@ -242,7 +242,7 @@ Commands: `aoide rice gen <prompt|wallpaper>` · `rice lint` · `rice preview`
 ```
 
 `Song/` carries the performed half whole (tree in §2): versioned —
-repertoire/ rices/ keys/ covers/ chimes/ — plus gitignored runtime:
+repertoire/ rices/ keys/ wallpapers/ chimes/ — plus gitignored runtime:
 stage/ backstage/ auditions/ catalog/ index/ log/. Per-song contract:
 
 ```
@@ -281,7 +281,7 @@ The song map — literal inside Song/ (repo root keeps snowflake names, code
 functional verbs): palette = key (keys/) · semantic tier = melody, survives
 transposition · component tier = layout · facets = instruments · rice =
 song (repertoire/) · design wiki = liner/ · memory = rices/ · wallpaper =
-cover (covers/) · sounds = chimes/ · live state = stage/ · plumbing =
+wallpaper (wallpapers/) · sounds = chimes/ · live state = stage/ · plumbing =
 backstage/ · propose gate = auditions/ · shipped default = the standard ·
 preview = rehearsal · adopt = recording.
 
