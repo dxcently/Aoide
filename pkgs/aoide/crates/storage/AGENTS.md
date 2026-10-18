@@ -196,7 +196,8 @@
   exists to remove (root `AGENTS.md`'s core-vs-strillix boundary, applied to the
   stage tree itself).
 - **`fs::rice_conf_link` is the first writer outside `$AOIDE_ROOT`.** It names
-  `$HOME/.local/state/strillix/rice.conf`, because the renderer's Nix activation
+  `<home>/.local/state/strillix/rice.conf` (`<home>` = `aoide_home()`, the home
+  `root` defaults through), because the renderer's Nix activation
   hardcodes that path and the two halves must name one file. A test that
   exercises it sets `HOME` under the temp dir (`EnvSaver` captures it); the
   song crate's writer skips a test build whose `HOME` is not isolated, so an

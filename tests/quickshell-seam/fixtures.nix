@@ -94,9 +94,7 @@ let
 
   templatesOf =
     env:
-    map (lib.removePrefix "STRILLIX_TEMPLATES=") (
-      lib.filter (lib.hasPrefix "STRILLIX_TEMPLATES=") env
-    );
+    map (lib.removePrefix "STRILLIX_TEMPLATES=") (lib.filter (lib.hasPrefix "STRILLIX_TEMPLATES=") env);
 
   read =
     name:

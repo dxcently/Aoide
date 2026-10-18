@@ -230,9 +230,7 @@ pub fn strillix_root() -> std::path::PathBuf {
 /// narrated, with the old tree in place.
 pub fn migrate_root_once() -> std::io::Result<()> {
     lock_state_if_present()?;
-    if let Some(home) = std::env::var_os("HOME") {
-        migrate_strillix_state(std::path::Path::new(&home))?;
-    }
+    migrate_strillix_state(&aoide_protocol::aoide_home())?;
     let old_root = aoide_protocol::aoide_home().join("Aoide");
     let new_root = root();
     if old_root != new_root {
@@ -264,6 +262,15 @@ fn migrate_rice_tree(old_song: &std::path::Path) -> std::io::Result<()> {
     if old_song == target {
         return Ok(());
     }
+    if !rice_move_allowed(old_song, &target) {
+        if old_song.exists() {
+            eprintln!(
+                "aoide: {} stays where it is: $AOIDE_ROOT and $STRILLIX_ROOT resolve under different homes; set both or neither",
+                old_song.display()
+            );
+        }
+        return Ok(());
+    }
     if std::env::var("AOIDE_STAGE_DIR").is_err() {
         migrate_dir(&old_song.join("stage"), &stage_dir())?;
     }
@@ -278,6 +285,21 @@ fn migrate_rice_tree(old_song: &std::path::Path) -> std::io::Result<()> {
         }
     }
     migrate_mode_song_key(&stage_dir())
+}
+
+/// Whether the rice tree may move from aoide's root into the rice root: both
+/// roots were named by absolute env overrides, or both resolve under the one
+/// [`aoide_protocol::aoide_home`] (the single home source [`root`] and
+/// [`strillix_root`] both default through). A mismatch — an `$AOIDE_ROOT`
+/// outside the home that `$STRILLIX_ROOT` defaults into — would carry a rice
+/// tree across homes, so it stays put.
+fn rice_move_allowed(old_song: &std::path::Path, target: &std::path::Path) -> bool {
+    let explicit = |var: &str| std::env::var(var).is_ok_and(|v| std::path::Path::new(&v).is_absolute());
+    if explicit("AOIDE_ROOT") && explicit("STRILLIX_ROOT") {
+        return true;
+    }
+    let home = aoide_protocol::aoide_home();
+    old_song.starts_with(&home) && target.starts_with(&home)
 }
 
 /// Rewrites a staged `mode.json`'s `song` key to `rice` (the same value, the
@@ -939,16 +961,14 @@ pub fn declared_venue() -> std::path::PathBuf {
 }
 
 /// The state link the compositor sources for the rice:
-/// `$HOME/.local/state/strillix/rice.conf` (CONTRACTS.md §4). The one writer
-/// outside `$AOIDE_ROOT` in this module: `$HOME`, not `$XDG_STATE_HOME`,
-/// because the renderer's Nix activation hardcodes that path, so the two
-/// halves name one file. Its target is the declared twin
-/// ([`declared_rice_conf`]) or a staged `hyprland.conf` (`rice stage`).
+/// `<home>/.local/state/strillix/rice.conf` (CONTRACTS.md §4), `<home>` being
+/// [`aoide_protocol::aoide_home`], the one home source [`root`] and
+/// [`strillix_root`] default through. Not `$XDG_STATE_HOME`: the renderer's
+/// Nix activation hardcodes that path, so the two halves name one file. Its
+/// target is the declared twin ([`declared_rice_conf`]) or a staged
+/// `hyprland.conf` (`rice stage`).
 pub fn rice_conf_link() -> std::path::PathBuf {
-    std::env::var_os("HOME")
-        .map(std::path::PathBuf::from)
-        .filter(|home| home.is_absolute())
-        .unwrap_or_else(aoide_protocol::aoide_home)
+    aoide_protocol::aoide_home()
         .join(".local")
         .join("state")
         .join("strillix")
@@ -4581,6 +4601,67 @@ mod tests {
         );
 
         let _ = std::fs::remove_dir_all(&home);
+    }
+
+    /// Both rice roots default through the one home source the aoide root
+    /// does: a faked `$HOME` with neither override set puts both under it.
+    #[test]
+    fn strillix_root_defaults_under_the_same_home_as_root() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = MigrationEnvGuard::capture_and_clear();
+        let home = std::env::temp_dir().join(format!("aoide-strillix-default-home-{}", std::process::id()));
+        std::env::set_var("HOME", &home);
+
+        assert_eq!(root(), home.join(".aoide"));
+        assert_eq!(strillix_root(), home.join(".strillix"));
+        assert_eq!(strillix_dir(), home.join(".strillix"));
+    }
+
+    /// An `$AOIDE_ROOT` outside the home `$STRILLIX_ROOT` defaults into is a
+    /// cross-home move: the rice tree stays where it is, and nothing lands
+    /// under the default home.
+    #[test]
+    fn migrate_root_once_refuses_a_rice_tree_whose_roots_name_different_homes() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = MigrationEnvGuard::capture_and_clear();
+        let base = std::env::temp_dir().join(format!("aoide-migrate-mismatch-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let home = base.join("home");
+        let other = base.join("other");
+        std::env::set_var("HOME", &home);
+        std::env::set_var("AOIDE_ROOT", other.join(".aoide"));
+
+        let old_declared = other.join(".aoide").join("song").join("declared");
+        std::fs::create_dir_all(&old_declared).unwrap();
+        std::fs::write(old_declared.join("rice.conf"), "sonata").unwrap();
+
+        migrate_root_once().expect("a refused move is narrated, not an error");
+        assert_eq!(std::fs::read_to_string(old_declared.join("rice.conf")).unwrap(), "sonata");
+        assert!(!home.join(".strillix").join("declared").exists(), "nothing may land under the default home");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// Both roots named by absolute env overrides is an explicit choice, so the
+    /// tree moves across the two, and a second run changes nothing.
+    #[test]
+    fn migrate_root_once_moves_the_rice_tree_when_both_roots_are_named() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = MigrationEnvGuard::capture_and_clear();
+        let base = std::env::temp_dir().join(format!("aoide-migrate-named-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::env::set_var("HOME", base.join("home"));
+        std::env::set_var("AOIDE_ROOT", base.join("aoide"));
+        std::env::set_var("STRILLIX_ROOT", base.join("strillix"));
+
+        let old_declared = base.join("aoide").join("song").join("declared");
+        std::fs::create_dir_all(&old_declared).unwrap();
+        std::fs::write(old_declared.join("rice.conf"), "sonata").unwrap();
+
+        migrate_root_once().unwrap();
+        migrate_root_once().unwrap();
+        assert_eq!(std::fs::read_to_string(base.join("strillix").join("declared").join("rice.conf")).unwrap(), "sonata");
+        assert!(!old_declared.exists(), "the old rice tree must have moved");
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     #[test]

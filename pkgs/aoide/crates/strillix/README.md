@@ -201,9 +201,9 @@ are core `aoide` identity, root `AGENTS.md`).
   carries `watch` (every `*.qml` under the current song's
   own `widgets/` plus the previewed widget's own file when it lives
   elsewhere — the set the P2 canvas hot-reloads against). The child's env
-  is rewritten (`AOIDE_ROOT`/`AOIDE_STATE_DIR`/`AOIDE_STAGE_DIR` repointed
-  at the isolated root, `AOIDE_DAEMON_SOCKET` at a path that never exists
-  so no lane QML can reach the real `aoided` even bypassing a stub
+  is rewritten (`AOIDE_ROOT`/`STRILLIX_ROOT`/`AOIDE_STATE_DIR` repointed at the
+  isolated root, `AOIDE_STAGE_DIR` removed, `AOIDE_DAEMON_SOCKET` at a path
+  that never exists, so no lane QML can reach the real `aoided` even bypassing a stub
   bridge, and every widget-slot env override — `QS_STAGE`,
   `CONDUCTOR_WIDGET`, etc. — stripped) and `PR_SET_PDEATHSIG`-armed
   exactly like `commands::dialog_qml::spawn_quickshell`'s own discipline,

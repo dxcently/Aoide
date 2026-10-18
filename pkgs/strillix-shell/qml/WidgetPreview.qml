@@ -32,7 +32,7 @@
 //
 // ── Isolation: one env var, no socket ──────────────────────────────────────
 // Every read a widget performs is already rooted at $AOIDE_ROOT — LiveryState
-// (song/stage/livery.json), conductor.qml (state/stage/ via its own stageDir),
+// (stage/livery.json), conductor.qml (state/stage/ via its own stageDir),
 // terminals.qml (`stagePath`), SessionMenu (AOIDE_STATE_DIR), StagingEngine
 // (run/qml/songs/manifest.json) — so pointing AOIDE_ROOT at a fixture root
 // isolates every read with nothing else to configure. `QS_STAGE` must be
@@ -130,7 +130,7 @@ ShellRoot {
     property var fixtures: []
     // `liverySource` is the SPEC last applied, not a resolved file: `live`, a
     // song name, a livery.json path, or a base16 scheme file. `strillix preview
-    // set --livery <spec>` resolves every form into ROOT/song/stage/livery.json
+    // set --livery <spec>` resolves every form into ROOT/stage/livery.json
     // and LiveryState hot-reloads it, so a palette swap needs no reload here.
     property string liverySource: ""
     property var liveries: []
@@ -203,8 +203,8 @@ ShellRoot {
     // like every other control value, so a canvas run can pin either guard.
     property string traceStub: ""
 
-    // The stub bridge — every method the songbook widgets call today, each
-    // only logging. Confirmed against `grep -rn 'bridge\.' song/songbook/*/
+    // The stub bridge — every method the rices widgets call today, each
+    // only logging. Confirmed against `grep -rn 'bridge\.' rices/*/
     // widgets/`: sendCommand, focusSession, recheckSessions, riceMode,
     // refreshUsage, sessionAction. `focusWindow` and the menu's `riceMenu`,
     // `riceDraft` and `riceDeclare` are on ShellBridge but no committed widget
@@ -250,7 +250,7 @@ ShellRoot {
         // The menu's read — same signature and callback contract as
         // ShellBridge.riceMenu, answered ASYNCHRONOUSLY (Qt.callLater, for
         // the same reason sessionAction is) so the menu's pending state
-        // renders. The mode is the canvas livery's own and the songbook is the
+        // renders. The mode is the canvas livery's own and the rice set is the
         // canvas song alone; the control file's `drafts` key replaces the one
         // canned draft, so a canvas run can pin an empty list or a long one,
         // and its `hostConfig` key the canned host file a late balloon names.
@@ -297,7 +297,7 @@ ShellRoot {
                     callback({ ok: false, stub: true, reason: "no-reply", message: "no reply from shellbridge" })
                 else if (how === "refused")
                     callback({ ok: false, stub: true, reason: "not-built-in",
-                               message: "`" + name + "` is not in the songbook preview builds from: this build carries " + canvas.songName })
+                               message: "`" + name + "` is not in the rices preview builds from: this build carries " + canvas.songName })
                 else
                     callback({ ok: true, stub: true, name: "" + name, host: "preview", changed: true,
                                stagedDiffers: how === "differs",
@@ -518,7 +518,7 @@ ShellRoot {
     // only to say so in the error pane.
     property FileView liveryProbe: FileView {
         id: liveryProbe
-        path: canvas.aoideRoot + "/song/stage/livery.json"
+        path: canvas.aoideRoot + "/stage/livery.json"
         watchChanges: true
         printErrors: false
         onFileChanged: liveryProbe.reload()
@@ -700,7 +700,7 @@ ShellRoot {
     property Item widgetItem: null
     property string widgetUrlText: ""
 
-    // A path under a checkout's `song/songbook/<s>/widgets/<file>` is rewritten
+    // A path under a checkout's `rices/<s>/widgets/<file>` is rewritten
     // to `songs/<s>/<file>` so it loads from INSIDE the config root, where the
     // lane types (MoodFaces, ScrollRail, …) its `import "../.."` needs
     // actually sit. Loading the same file as a bare `file://` URL puts it
@@ -713,7 +713,7 @@ ShellRoot {
         var p = ("" + canvas.widgetPath).trim()
         if (p.charAt(0) === "/") return p
         var m = /^songs\/([^\/]+)\/(.+)$/.exec(p)
-        var tail = m ? "/song/songbook/" + m[1] + "/widgets/" + m[2] : "/pkgs/strillix-shell/qml/" + p
+        var tail = m ? "/rices/" + m[1] + "/widgets/" + m[2] : "/pkgs/strillix-shell/qml/" + p
         for (var k in canvas.stageMap) if (k.length > tail.length && k.slice(-tail.length) === tail) return k
         return ""
     }
@@ -729,7 +729,7 @@ ShellRoot {
         if (p.length === 0) return ""
         if (p.indexOf("://") > 0) return p
         if (p.charAt(0) !== "/") return Qt.resolvedUrl(p)
-        var m = /\/song\/songbook\/([^\/]+)\/widgets\/(.+)$/.exec(p)
+        var m = /\/rices\/([^\/]+)\/widgets\/(.+)$/.exec(p)
         if (m) return Qt.resolvedUrl("songs/" + m[1] + "/" + m[2])
         return "file://" + p
     }
@@ -1995,7 +1995,7 @@ ShellRoot {
                     // A palette spec is a FILE RESOLUTION (song livery, live
                     // stage, a base16 scheme), so it goes the same way the
                     // fixture does: one `strillix preview set --livery <spec>`, and
-                    // LiveryState's own watch on ROOT/song/stage/livery.json
+                    // LiveryState's own watch on ROOT/stage/livery.json
                     // recolours the widget AND this rail in place. No reload,
                     // and no palette parsing in QML.
                     RailLabel { text: "palette  (strillix preview set --livery)" }

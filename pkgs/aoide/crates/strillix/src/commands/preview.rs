@@ -1,16 +1,16 @@
 //! `strillix preview` / `strillix preview set` — a throwaway, ISOLATED canvas for
 //! iterating on a widget's QML without touching the live desktop at all.
-//! `strillix preview [<widget>]` assembles a standalone ROOT (its own song
+//! `strillix preview [<widget>]` assembles a standalone ROOT (its own rice
 //! stage, its own fixture state, its own `run/qml/` COPIES of the checkout's
 //! QML — never symlinks into it, so a write through the root stays in it) under
 //! `$XDG_RUNTIME_DIR/aoide-preview` (never under `$XDG_RUNTIME_DIR/aoide/`
 //! — that is the LIVE daemon's socket dir, `aoided.sock`/`session-*.sock`,
 //! and the live reaper's own socket globs look there) and spawns a
 //! genuinely separate `quickshell -p <root>/run/qml/WidgetPreview.qml`
-//! against it, with `AOIDE_ROOT`/`AOIDE_STATE_DIR`/`AOIDE_STAGE_DIR`/
-//! `AOIDE_DAEMON_SOCKET` all repointed at that root on the CHILD's env
-//! only — `AOIDE_DAEMON_SOCKET` at a path that never exists, so no lane
-//! QML can reach the real `aoided` even if a stub bridge were bypassed.
+//! against it, with `AOIDE_ROOT`/`STRILLIX_ROOT`/`AOIDE_STATE_DIR`/
+//! `AOIDE_DAEMON_SOCKET` repointed at that root on the CHILD's env (and
+//! `AOIDE_STAGE_DIR` stripped): the socket at a path that never exists, so no
+//! lane QML can reach the real `aoided` even if a stub bridge were bypassed.
 //! `strillix preview set` edits that root's `preview.json` control document
 //! (widget, viewport, anchor, zoom, fixture, livery — the schema below)
 //! without a canvas needing to be running; the canvas (P2, another QML
@@ -44,7 +44,7 @@ use aoide_protocol::Door;
 pub fn register(r: &mut Registry) {
     r.insert(cmd!(
         path: ["preview"],
-        summary: "Build an isolated preview root (song stage, fixture state, run/qml copies of the checkout's QML) and launch the standalone quickshell canvas against it -- never the live daemon or its socket dir. <widget> is a bare slot (uses --song), `<song>/<slot>`, or an absolute path under a rices's own widgets/.",
+        summary: "Build an isolated preview root (rice stage, fixture state, run/qml copies of the checkout's QML) and launch the standalone quickshell canvas against it -- never the live daemon or its socket dir. <widget> is a bare slot (uses --song), `<song>/<slot>`, or an absolute path under a rices's own widgets/.",
         args: [arg!("widget", "string", false, "Initial widget to preview: a bare slot name, `<song>/<slot>`, or an absolute rices widgets/ path.")],
         flags: [
             flag!("song", "string", "Song whose default livery/widgets seed the preview (default \"sonata\")."),
@@ -130,7 +130,10 @@ const VIEWPORT_PRESETS: &[(&str, u32, u32)] = &[
 /// Env vars a lane's QML might already carry (a live `strillix` session's own
 /// widget-slot overrides) that must never leak into the isolated canvas —
 /// the preview always renders the canvas's OWN `preview.json` choices, not
-/// whatever the shell happened to export.
+/// whatever the shell happened to export. `AOIDE_STAGE_DIR` is stripped too:
+/// it overrides BOTH the rice stage and the conducting stage, so a live value
+/// would split the canvas's `root/stage` from the stage its binaries read.
+/// Both derive from the root instead (`STRILLIX_ROOT`, `AOIDE_STATE_DIR`).
 const ENV_REMOVE: &[&str] = &[
     "QS_STAGE",
     "CONDUCTOR_WIDGET",
@@ -139,6 +142,7 @@ const ENV_REMOVE: &[&str] = &[
     "POWER_WIDGET",
     "METERS_WIDGET",
     "CAL_WIDGET",
+    "AOIDE_STAGE_DIR",
 ];
 
 // ─────────────────────────── handlers ───────────────────────────
@@ -219,7 +223,7 @@ fn handle_preview(inv: &Invocation) -> Outcome {
         .unwrap_or_else(|| song.clone());
 
     // ── build the root ──────────────────────────────────────────
-    let stage_song_dir = root.join("song").join("stage");
+    let stage_song_dir = root.join("stage");
     if let Err(e) = std::fs::create_dir_all(&stage_song_dir) {
         return Outcome::error(cmd, format!("creating {}: {e}", stage_song_dir.display()));
     }
@@ -314,7 +318,7 @@ fn handle_preview(inv: &Invocation) -> Outcome {
         doc.insert("strillix".to_string(), json!(exe.to_string_lossy()));
     }
     // `livery` (the staged file path) is a dead key: the canvas already
-    // knows that path as `$AOIDE_ROOT/song/stage/livery.json` and treats
+    // knows that path as `$STRILLIX_ROOT/stage/livery.json` and treats
     // `livery` as a legacy alias of `liverySource`, deleting it on every
     // save -- writing it back here would just ping-pong against the
     // canvas. `liverySource` (the spec as given) is the one name.
@@ -578,7 +582,7 @@ fn handle_preview_set(inv: &Invocation) -> Outcome {
             .and_then(Value::as_str)
             .unwrap_or("sonata")
             .to_string();
-        let dst = root.join("song").join("stage").join("livery.json");
+        let dst = root.join("stage").join("livery.json");
         if let Err(e) = stage_livery(livery_spec, &song, &checkout, &dst) {
             return match e {
                 LiveryStageError::Usage(m) => Outcome::usage(cmd, m),
@@ -788,7 +792,7 @@ fn handle_preview_declare(inv: &Invocation) -> Outcome {
     let palette_status = if livery_source == song {
         "own"
     } else {
-        let stage_livery_path = root.join("song").join("stage").join("livery.json");
+        let stage_livery_path = root.join("stage").join("livery.json");
         let raw = match std::fs::read_to_string(&stage_livery_path) {
             Ok(s) => s,
             Err(e) => {
@@ -1271,14 +1275,14 @@ fn stage_livery(
 
 // ─────────────────────────── other lane stage files ───────────────────────────
 
-/// `ROOT/song/stage/mode.json` -- the lane QML's own rice-mode read
+/// `ROOT/stage/mode.json` -- the lane QML's own rice-mode read
 /// (`LiveryState.qml`'s `modeFile`, and its callers all expect this file
 /// to exist). Rewritten UNCONDITIONALLY on every `strillix preview` build and
 /// on `preview set --song`: the canvas's mode is always "staging" of the
 /// PREVIEWED song, never whatever the live root's own `rice mode` last
 /// set -- there is no live mode to reflect inside an isolated preview.
 fn write_mode_json(root: &Path, song: &str) -> Result<(), String> {
-    let path = root.join("song").join("stage").join("mode.json");
+    let path = root.join("stage").join("mode.json");
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)
             .map_err(|e| format!("creating {}: {e}", parent.display()))?;
@@ -1296,14 +1300,14 @@ fn write_mode_json(root: &Path, song: &str) -> Result<(), String> {
 
 /// Every OTHER lane-read stage file a preview root needs merely to EXIST
 /// so its QML doesn't start with a parse warning on a missing file:
-/// `song/stage/cover.json` (`LiveryState.qml`/`AoideWallpaper.qml:32`),
-/// `song/stage/grimoire.json` (`GrimoireLedger`), and `state/usage.json`.
+/// `stage/cover.json` (`LiveryState.qml`/`AoideWallpaper.qml:32`),
+/// `stage/grimoire.json` (`GrimoireLedger`), and `state/usage.json`.
 /// Seeded once, on the initial build, and never overwritten again by this
 /// command -- unlike `mode.json` these aren't part of what a preview
 /// iterates on, just present so nothing errors.
 fn seed_static_stage_files(root: &Path) -> Result<(), String> {
     seed_if_absent(
-        &root.join("song").join("stage").join("cover.json"),
+        &root.join("stage").join("cover.json"),
         &json!({ "path": "" }),
     )?;
     // `schemaVersion` is a STRING "0" on every real stage file this
@@ -1314,7 +1318,7 @@ fn seed_static_stage_files(root: &Path) -> Result<(), String> {
     // `launches` is an OBJECT keyed by app id on both the live file and
     // `GrimoireLedger.qml:113`, never an array.
     seed_if_absent(
-        &root.join("song").join("stage").join("grimoire.json"),
+        &root.join("stage").join("grimoire.json"),
         &json!({ "schemaVersion": SCHEMA_VERSION, "launches": {} }),
     )?;
     seed_if_absent(
@@ -1807,15 +1811,12 @@ fn child_env(root: &Path) -> (Vec<(String, String)>, &'static [&'static str]) {
             root.to_string_lossy().into_owned(),
         ),
         (
-            "AOIDE_STATE_DIR".to_string(),
-            root.join("state").to_string_lossy().into_owned(),
+            "STRILLIX_ROOT".to_string(),
+            root.to_string_lossy().into_owned(),
         ),
         (
-            "AOIDE_STAGE_DIR".to_string(),
-            root.join("state")
-                .join("stage")
-                .to_string_lossy()
-                .into_owned(),
+            "AOIDE_STATE_DIR".to_string(),
+            root.join("state").to_string_lossy().into_owned(),
         ),
         (
             "AOIDE_DAEMON_SOCKET".to_string(),
@@ -2102,7 +2103,7 @@ mod tests {
         fake_checkout(&checkout);
         std::env::set_var("AOIDE_STAGE_DIR", base.join("unrelated-live-stage"));
 
-        let stage_song_dir = root.join("song").join("stage");
+        let stage_song_dir = root.join("stage");
         std::fs::create_dir_all(&stage_song_dir).unwrap();
         stage_livery(
             "sonata",
@@ -2629,7 +2630,7 @@ mod tests {
         std::fs::create_dir_all(&xdg).unwrap();
         let root = base.join("aoide-preview-w2");
         write_seed_control(&root, json!({"liverySource": "sonata"}));
-        std::fs::create_dir_all(root.join("song").join("stage")).unwrap();
+        std::fs::create_dir_all(root.join("stage")).unwrap();
 
         let outcome = with_flake_root(&checkout, || {
             let saved_xdg = std::env::var_os("XDG_RUNTIME_DIR");
@@ -2769,6 +2770,7 @@ mod tests {
             "POWER_WIDGET",
             "METERS_WIDGET",
             "CAL_WIDGET",
+            "AOIDE_STAGE_DIR",
         ] {
             assert!(removed.contains(&key));
         }
@@ -3015,7 +3017,7 @@ mod tests {
         )
         .unwrap();
 
-        let stage_dir = root.join("song/stage");
+        let stage_dir = root.join("stage");
         std::fs::create_dir_all(&stage_dir).unwrap();
         std::fs::write(
             stage_dir.join("livery.json"),
@@ -3081,7 +3083,7 @@ mod tests {
             json!({"widget": "songs/sonata/conductor.qml", "song": "sonata", "liverySource": "sonata"}),
         );
 
-        // no root/song/stage/livery.json at all -- if the palette step tried
+        // no root/stage/livery.json at all -- if the palette step tried
         // to read it, this would error; "own" must skip it entirely.
         let outcome = with_flake_root(&checkout, || {
             handle_preview_declare(&inv_declare(&[("root", root.to_str().unwrap())]))

@@ -137,7 +137,7 @@ by decision — no embedded database yet
   `state_dir().join("stage")` instead of `stage_dir`'s `song/stage`.
 
   The rice's three files (CONTRACTS.md §4) are resolved here too:
-  `rice_conf_link` (`$HOME/.local/state/strillix/rice.conf`, the one path outside
+  `rice_conf_link` (`<home>/.local/state/strillix/rice.conf`, `<home>` = `aoide_home()`; the one path outside
   `$AOIDE_ROOT`), `declared_rice_conf` (`root()`'s `/declared/rice.conf`)
   and `empty_rice_conf` (`stage_dir()`'s `empty-hyprland.conf`).
   `atomic_symlink` is the retarget: a temp link renamed over the link.

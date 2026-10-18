@@ -17,8 +17,8 @@
   look there; a preview root nested inside it would be swept as a dead
   session or mistaken for a live one. The same posture holds for the
   spawned canvas's own env: `AOIDE_DAEMON_SOCKET` is set to a path that
-  deliberately never exists, and `AOIDE_ROOT`/`AOIDE_STATE_DIR`/
-  `AOIDE_STAGE_DIR` are repointed at the isolated root on the CHILD only —
+  deliberately never exists, and `AOIDE_ROOT`/`STRILLIX_ROOT`/`AOIDE_STATE_DIR` are repointed at the isolated
+  root, and `AOIDE_STAGE_DIR` is stripped, on the CHILD only —
   never the invoking `strillix` process's own env. Don't relax either to "just
   reuse the live root for a quick test" — that is the exact live-state
   corruption this command exists to make impossible.
