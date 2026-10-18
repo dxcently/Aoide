@@ -689,7 +689,9 @@ songs come from both Aoide's songbook and the consumer's takes them through
 the books are copied into ONE directory before anything reads them, so a
 `borrow` resolves across them, and the call returns that directory (`dir`) and the
 songbook record over it together. A song name two books define is refused,
-naming the song and both books.
+naming the song and both books. The merged directory is a derivation, so the
+hook reads it at evaluation (import-from-derivation); a plain `songbookRoot` is a
+source path and never is.
 
 **Stylix.** A consumer must NOT import the stylix module itself once it selects
 the `stylix` dendrite: the dendrite's module comes from Aoide's own inputs, and two

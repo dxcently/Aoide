@@ -161,6 +161,7 @@ expr="
       bg = mergedCfg.aoide.livery.palette.bg;
       borrowed = mergedSongs.songMeta.encore.manifest == mergedSongs.songMeta.sonata.manifest && mergedSongs.songMeta.encore.manifest != { };
       names = mergedSongs.songNames;
+      songbookIsMerged = toString out.nixosConfigurations.merged._module.args.songbook == toString mergedSongs.dir;
     };
     drv = out.nixosConfigurations.consumer.config.system.build.toplevel.drvPath;
     song = cfg.aoide.song;
@@ -272,6 +273,7 @@ check "aoide-songs performs Aoide's sonata"           "sonata" "$(o .aoideSongs.
 check "…and builds in sonata alone"                 "sonata" "$(o '.aoideSongs.builtIn | join(" ")')"
 check "…and wears sonata's livery"                  "#f2ebde" "$(o .aoideSongs.bg)"
 check "…its lyra lane reads the exported songbook"  "true" "$(o .aoideSongs.songbookIsExport)"
+check "merged: its lyra lane reads the merged directory" "true" "$(o .merged.songbookIsMerged)"
 
 printf '%-52s %s\n' "aoide-songs toplevel drvPath" "$(o .aoideSongs.drv)"
 printf '%-52s %s\n' "merged toplevel drvPath" "$(o .merged.drv)"

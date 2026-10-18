@@ -17,6 +17,10 @@
 # names the song and every book that defines it, the same posture habit's
 # `mergeRegistries` takes for a name two registries share.
 #
+# Cost: `dir` is a derivation output, so the hook's directory reads force that
+# build during evaluation (import-from-derivation). Nix allows it by default; a
+# host under `allow-import-from-derivation = false` cannot take a merge.
+#
 # Discovery is the one `lib/songbook.nix` uses: an immediate child directory,
 # `_`-prefixed entries shelved. A book's loose files (`learnings.md`, a
 # `.gitkeep`) are not songs and are not copied.
