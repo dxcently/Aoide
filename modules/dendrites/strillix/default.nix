@@ -96,17 +96,19 @@
         };
 
         home.activation = lib.mkIf hypr.enable {
-          strillixRice = lib.hm.dag.entryBetween [ "onFilesChange" ] [ "linkGeneration" "aoideMigrateRoots" ] ''
-            rice="$HOME/.local/state/strillix/rice.conf"
-            twin="${twin}"
-            oldTwin=$(readlink "$twin" 2>/dev/null || true)
-            run mkdir -p "$HOME/.local/state/strillix" "$(dirname "$twin")"
-            run ln -sfn ${cfg.file} "$twin"
-            if [[ ! -e "$rice" && ! -L "$rice" ]] || [[ $(readlink "$rice" 2>/dev/null || true) == "$twin" ]]; then
-              run ln -sfn "$twin" "$rice"
-              ${lib.optionalString (hypr.finalPackage != null) reloadRice}
-            fi
-          '';
+          strillixRice =
+            lib.hm.dag.entryBetween [ "onFilesChange" ] [ "linkGeneration" "aoideMigrateRoots" ]
+              ''
+                rice="$HOME/.local/state/strillix/rice.conf"
+                twin="${twin}"
+                oldTwin=$(readlink "$twin" 2>/dev/null || true)
+                run mkdir -p "$HOME/.local/state/strillix" "$(dirname "$twin")"
+                run ln -sfn ${cfg.file} "$twin"
+                if [[ ! -e "$rice" && ! -L "$rice" ]] || [[ $(readlink "$rice" 2>/dev/null || true) == "$twin" ]]; then
+                  run ln -sfn "$twin" "$rice"
+                  ${lib.optionalString (hypr.finalPackage != null) reloadRice}
+                fi
+              '';
         };
       };
     };

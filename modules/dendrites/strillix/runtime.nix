@@ -698,9 +698,11 @@ in
             # is declared truth, written the same way whatever the mode: the staged
             # or drafted rice `stage/mode.json` names is brought back afterwards by
             # `aoide-rice-reload` (below).
-            home.activation.aoideSeedStage = lib.hm.dag.entryBetween [ "reloadSystemd" ] [ "writeBoundary" "aoideMigrateRoots" ] ''
-              run ${seedStageScript}
-            '';
+            home.activation.aoideSeedStage =
+              lib.hm.dag.entryBetween [ "reloadSystemd" ] [ "writeBoundary" "aoideMigrateRoots" ]
+                ''
+                  run ${seedStageScript}
+                '';
 
             # ── Reassert the paint on EVERY activation ─────────────────────────────
             # A rebuild only restarts units whose definitions changed, so a
