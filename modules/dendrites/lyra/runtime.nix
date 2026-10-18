@@ -272,18 +272,12 @@ let
     mv -f "$provider" "${config.aoide.root}/song/stage/wallpaper-provider"
     # The declared song's own cover, as the default (CONTRACTS.md §4): the
     # picture `aoide.livery.wallpaper` names, published as `stage/cover.json`
-    # the way `rice stage` writes a default. A pick the user made for THIS song
-    # is left standing; any other cover is replaced, exactly as a stage of the
-    # declared song would replace it. A song with no picture leaves the file
-    # alone: the layer ignores a cover that names another song.
+    # the way `rice stage` writes a default. A standing pick is left standing
+    # (lib/cover-seed.sh). A song with no picture leaves the file alone: the
+    # layer ignores a cover that names another song.
     ${lib.optionalString (config.aoide.livery.wallpaper != null) ''
-      if ! ${pkgs.jq}/bin/jq -e --arg s "${config.aoide.song}" \
-          '.pick == true and .song == $s' "${config.aoide.root}/song/stage/cover.json" >/dev/null 2>&1; then
-        ctmp=$(mktemp "${config.aoide.root}/song/stage/.cover.json.XXXXXX")
-        ${pkgs.jq}/bin/jq -n --arg p "${config.aoide.livery.wallpaper}" --arg s "${config.aoide.song}" \
-          '{path: $p, song: $s}' > "$ctmp"
-        mv -f "$ctmp" "${config.aoide.root}/song/stage/cover.json"
-      fi
+      ${pkgs.bash}/bin/bash ${../../../lib/cover-seed.sh} ${pkgs.jq}/bin/jq \
+        "${config.aoide.root}" "${config.aoide.song}" "${config.aoide.livery.wallpaper}"
     ''}
     # The declared song's terminal opacity, as a one-line kitty fragment
     # (CONTRACTS.md §4). The kitty dendrite includes this BEFORE the staged
