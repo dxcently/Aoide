@@ -6867,18 +6867,19 @@ are gone with no compatibility shim.
 
 A host whose songs come from SEVERAL directories — Aoide's and its own — takes
 them as one: `lib.songbookMerge { inherit lib pkgs; books = [ aoide.songbookRoot
-./songs ]; }` returns `lib.songbook`'s record over the merged directory, plus
-`dir`, the merged directory as a store path. One call answers both, so the
-directory the hook, the built-in set and the lyra lane read and the registry
-over it cannot disagree. Merge runs before borrow resolution: a song may borrow
-a slot from a song in another book. A song name that two books define throws,
-naming the song and every book that defines it
+./songs ]; }` returns `{ registry, dir }` and `lib.songbook`'s record over the
+merge. `registry` maps each song name to its directory inside the book that
+defines it; `dir` is the merged directory as a store path, built from that same
+registry. One call answers both, so the record's songs, the registry they resolve
+through and `dir` cannot disagree. Merge runs before borrow resolution: a song may
+borrow a slot from a song in another book. A song name that two books define
+throws, naming the song and every book that defines it
 (`'<n>' is in <book> and <book>`); rename one, or drop it from a book.
 
-The merged directory is a derivation output, not a source path, so the song hook
-reads it during evaluation: a host that takes a merge is import-from-derivation.
-Nix's default allows that. Under `allow-import-from-derivation = false` the
-merged host does not evaluate; a plain `aoide.songbookRoot` host never needs it.
+The record discovers through the registry, so the song hook, borrow resolution
+and the built-in set read the input books and never the merged derivation: a
+merged host evaluates under `allow-import-from-derivation = false`. Only the lyra
+lane's paint songbook consumes `dir`'s contents, and it takes the registry too.
 
 ```
 hosts/<host>/default.nix                      lib/songbook.nix  hook { registry }

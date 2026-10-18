@@ -32,6 +32,11 @@
   # Defaults to the repo's own committed songbook — override only for a test
   # fixture that stands up its own miniature songbook + `lib/song.nix` pair.
   songbook ? ../song/songbook,
+  # name -> directory, when the songs are already discovered: the merge's
+  # registry (lib/songbook-merge.nix), whose entries point INTO the input books,
+  # so nothing here reads `songbook` (a merged directory is a derivation output,
+  # and reading it at eval is import-from-derivation). Null = discover `songbook`.
+  discovered ? null,
 }:
 let
   songLib = import ./song.nix { inherit lib; };
@@ -47,15 +52,15 @@ let
       lib.filterAttrs (name: type: type == "directory" && !lib.hasPrefix "_" name) (builtins.readDir dir)
     );
 
-  songs = discover songbook;
+  songs = if discovered != null then discovered else discover songbook;
   songNames = builtins.attrNames songs;
 
   # ── The rices: a song with a `rice.nix` is an aggregation body ──────────────
   # The same one discovery as `songs`, named once here so the hook below and
   # the flake's `rices` export read the same map. A song without a `rice.nix` is
   # a folder of widgets only (built in, never performed).
-  riceNames = lib.filter (name: builtins.pathExists (songbook + "/${name}/rice.nix")) songNames;
-  rices = lib.genAttrs riceNames (name: songbook + "/${name}/rice.nix");
+  riceNames = lib.filter (name: builtins.pathExists (songs.${name} + "/rice.nix")) songNames;
+  rices = lib.genAttrs riceNames (name: songs.${name} + "/rice.nix");
 
   # ── The two arguments every song is handed ──────────────────────────────────
   # §7.4 constraint 1: a song is a SELF-CONTAINED folder. Where a `rice.nix` or a
@@ -138,7 +143,7 @@ let
     map (
       name:
       let
-        songDir = songbook + "/${name}";
+        songDir = songs.${name};
         widgetsDir = songDir + "/widgets";
         shelfDir = songDir + "/_widgets";
         hasShelf = builtins.pathExists shelfDir;
@@ -198,7 +203,7 @@ let
               let
                 e = composed.manifest.${slot};
               in
-              !builtins.pathExists (songbook + "/${e.owner}/widgets/${e.file}")
+              !builtins.pathExists (songs.${e.owner} + "/widgets/${e.file}")
             ) shelfSlots;
           in
           lib.throwIf (unknownOwner != [ ])
@@ -299,7 +304,11 @@ let
   # the knobs the walk above already has.
   escapingNixFiles = lib.concatMap (
     name:
-    lib.filter (rel: lib.hasInfix "../" (builtins.readFile (songbook + "/${rel}"))) (walkNix {
+    let
+      # `rel` is `<name>/<path inside the song>`: read it where the song lives.
+      fileOf = rel: songs.${name} + lib.removePrefix name rel;
+    in
+    lib.filter (rel: lib.hasInfix "../" (builtins.readFile (fileOf rel))) (walkNix {
       prefix = name;
       dir = songs.${name};
     })
@@ -419,6 +428,7 @@ let
                 inherit borrow;
                 song = songLib;
                 songbook = songbookDir;
+                songbookDirs = songs;
               };
               aoide.song = sel.song.declared;
               aoide.songbook.builtIn = builtIn sel.song;

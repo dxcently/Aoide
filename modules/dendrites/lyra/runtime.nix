@@ -35,6 +35,10 @@
   pkgs,
   aoideInputs,
   songbook,
+  # name -> song directory, from the same hook (lib/songbook.nix's `songbookDirs`):
+  # the merged songbook's registry, so the eval-time reads below never touch the
+  # merged `songbook` directory. Absent, the lane discovers `songbook` itself.
+  songbookDirs ? null,
   ...
 }:
 let
@@ -61,7 +65,10 @@ let
   # songbook (`aoide rice stage <n>`) — the runtime keeps a wider manifest
   # than this deployed tree carries, which is exactly the seam
   # `builtin.json`'s `packages` exists to check (§7.5).
-  songbookLib = import ../../../lib/songbook.nix { inherit lib songbook; };
+  songbookLib = import ../../../lib/songbook.nix {
+    inherit lib songbook;
+    discovered = songbookDirs;
+  };
 
   # The `aoide.*` option doc list the shipped `aoide-options.json` carries
   # (`lib/options.nix`) — `lyra onboard`'s offline source, and the reason
@@ -90,7 +97,7 @@ let
   songDirOf =
     name:
     builtins.path {
-      path = songbook + "/${name}";
+      path = songbookLib.songs.${name};
       name = "lyra-song-${name}";
     };
 
@@ -106,7 +113,7 @@ let
   # naming the ACTIVE song's livery file here is allowed for the same reason
   # `songbook` above is. Path concatenation (not string-interpolating the
   # whole `songbook` dir) so only this one file gets copied into the store.
-  activeSongLivery = songbook + "/${config.aoide.song}/livery.json";
+  activeSongLivery = songbookLib.songs.${config.aoide.song} + "/livery.json";
 
   livery = import ../../../lib/livery.nix { inherit lib; };
 
@@ -508,6 +515,7 @@ in
             packages = songbookLib.packagesFor builtIn;
           };
           inherit aoideOptions songbook;
+          songDirs = songbookLib.songs;
         };
       })
     ];

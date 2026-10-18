@@ -75,9 +75,16 @@
   # Aoide's own (the lyra lane passes the host's `_module.args.songbook`; the
   # flake's own `packages` output keeps its default).
   songbook ? ../../song/songbook,
+  # name -> song directory, when the caller has already discovered them (the
+  # merged songbook's registry); null = discover `songbook`. Reading `songbook`
+  # itself at eval would make a merged songbook (a derivation) import-from-derivation.
+  songDirs ? null,
 }:
 let
-  songbookData = import ../../lib/songbook.nix { inherit lib songbook; };
+  songbookData = import ../../lib/songbook.nix {
+    inherit lib songbook;
+    discovered = songDirs;
+  };
 
   # ── The offline generator (§9) ──────────────────────────────────────────
   # `share/lyra/nix/` is the songbook generator, shipped so a machine with no
@@ -128,7 +135,7 @@ let
   songDir =
     name:
     builtins.path {
-      path = songbook + "/${name}";
+      path = songbookData.songs.${name};
       name = "lyra-song-${name}";
     };
 

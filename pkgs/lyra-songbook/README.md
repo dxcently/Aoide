@@ -16,12 +16,14 @@ Three payloads under `$out/share/lyra/`, one per consumer:
 Only `aoide-song`/`aoide-lyra` read any of it, and only `lyra` links them, so
 the package is wired onto the units whose process actually execs `lyra`.
 
-## Two knobs
+## Knobs
 
 | argument | default | what it does |
 |---|---|---|
 | `songs` | `null` | `null` ships every discovered song; a list ships those folders |
 | `builtin` | `null` | `{ declared, songs, packages }`, written to `builtin.json`; `null` writes none |
+| `songbook` | `../../song/songbook` | the directory those names live in |
+| `songDirs` | `null` | name to song directory, when already discovered (a merged songbook's registry); `null` discovers `songbook`. Reading `songbook` itself at eval would make a merged songbook import-from-derivation |
 
 The flake's own `packages.lyra-songbook` uses the defaults. The `lyra` lane
 overrides both per host (`lib/songbook.nix`'s `builtIn`), which is what makes the

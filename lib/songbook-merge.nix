@@ -2,24 +2,26 @@
 #
 #   aoide.lib.songbookMerge { inherit lib pkgs; books = [ aoide.songbookRoot ./songs ]; }
 #
-# Returns `lib/songbook.nix`'s record over the merged directory, plus `dir`: the
-# merged directory itself, as a store path string. Both come from this one call,
-# so the directory a host performs from, the songs discovery names and the
-# registry they resolve through are the same value and cannot disagree. A
-# consumer hands `dir` to the song hook (`songbook = …`) and to the lyra lane's
-# per-host songbook, and reads `songNames` / `songs` / `rices` off the same
-# record.
+# Returns `{ registry, dir }` and the `lib/songbook.nix` record over the merge:
 #
-# Merge happens BEFORE borrow resolution: every song is copied into one
-# directory first, so a song may borrow a slot from a song that came from
-# another book (a consumer's song borrowing Aoide's sonata across books is the
-# case this exists for: tests/consumer's `encore`). A song name that two books define is a refusal, not a choice: the throw
-# names the song and every book that defines it, the same posture habit's
-# `mergeRegistries` takes for a name two registries share.
+#   registry  song name -> that song's directory INSIDE the book that defines it
+#             (a pure readDir over the input directories, no derivation built).
+#   dir       the merged directory, as a store path string: one copy of every
+#             registry entry, built from the same registry in one call.
 #
-# Cost: `dir` is a derivation output, so the hook's directory reads force that
-# build during evaluation (import-from-derivation). Nix allows it by default; a
-# host under `allow-import-from-derivation = false` cannot take a merge.
+# The record's discovery is the registry, so the hook, borrow resolution and
+# `builtIn` never read `dir` (no import-from-derivation); only the paint lane's
+# songbook package consumes `dir`'s contents. A consumer hands `dir` to the song
+# hook (`songbook = …`) and to the lyra lane's per-host songbook, and reads
+# `songNames` / `songs` / `rices` off the same record.
+#
+# Merge happens BEFORE borrow resolution: every song is visible in one registry
+# first, so a song may borrow a slot from a song that came from another book (a
+# consumer's song borrowing Aoide's sonata across books is the case this exists
+# for: tests/consumer's `encore`). A song name that two books define is a
+# refusal, not a choice: the throw names the song and every book that defines
+# it, the same posture habit's `mergeRegistries` takes for a name two registries
+# share.
 #
 # Discovery is the one `lib/songbook.nix` uses: an immediate child directory,
 # `_`-prefixed entries shelved. A book's loose files (`learnings.md`, a
@@ -30,7 +32,7 @@
   # `pkgs` builds it (the same nixpkgs the host evaluates against).
   pkgs,
   # Ordered: a name defined by no book is absent, one defined by exactly one is
-  # copied from that book. Each entry is a directory in the songbook layout.
+  # taken from that book. Each entry is a directory in the songbook layout.
   books,
 }:
 let
@@ -50,22 +52,28 @@ let
   booksDefining = name: map (b: b.book) (lib.filter (b: builtins.elem name b.names) perBook);
   clashing = lib.filter (name: builtins.length (booksDefining name) > 1) allNames;
 
-  copies = lib.concatMap (
-    b:
-    map (name: {
-      inherit name;
-      inherit (b) book;
-    }) b.names
-  ) perBook;
-
-  merged = pkgs.runCommand "aoide-songbook-merged" { } (
-    ''
-      mkdir -p $out
-    ''
-    + lib.concatMapStrings (c: ''
-      cp -r --no-preserve=mode ${c.book + "/${c.name}"} $out/${c.name}
-    '') copies
+  registry = lib.listToAttrs (
+    lib.concatMap (
+      b:
+      map (name: {
+        inherit name;
+        value = b.book + "/${name}";
+      }) b.names
+    ) perBook
   );
+
+  dir = "${
+    pkgs.runCommand "aoide-songbook-merged" { } (
+      ''
+        mkdir -p $out
+      ''
+      + lib.concatStringsSep "" (
+        lib.mapAttrsToList (name: path: ''
+          cp -r --no-preserve=mode ${path} $out/${name}
+        '') registry
+      )
+    )
+  }";
 in
 lib.throwIf (clashing != [ ])
   (
@@ -78,8 +86,12 @@ lib.throwIf (clashing != [ ])
     + "; rename one, or drop it from a book"
   )
   (
-    let
-      dir = "${merged}";
-    in
-    (songbookOf dir) // { inherit dir; }
+    {
+      inherit registry dir;
+    }
+    // (import ./songbook.nix {
+      inherit lib;
+      songbook = dir;
+      discovered = registry;
+    })
   )

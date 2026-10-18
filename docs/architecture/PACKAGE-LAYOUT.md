@@ -553,8 +553,8 @@ flake.nix
 ├── lib.songbook              discovery, selection and the songs' module list,
 │                             a function of `{ lib, songbook ? … }`
 ├── lib.songbookMerge         several songbook DIRECTORIES as one, a function of
-│                             `{ lib, pkgs, books }`: the merged `dir` and the
-│                             `lib.songbook` record over it, from one call
+│                             `{ lib, pkgs, books }`: the `registry`, the merged
+│                             `dir` and the `lib.songbook` record, from one call
 ├── lib.catalogue             the whole catalogue as DATA — the bulk form of
 │                             `nixosModules.<name>`
 ├── songbookRoot              Aoide's own songbook DIRECTORY (`song/songbook`),
@@ -686,12 +686,12 @@ the borrow closure and the machine-owned songbook unchanged from §5.
 Discovery, selection and `borrow` all read that one directory. A host whose
 songs come from both Aoide's songbook and the consumer's takes them through
 `lib.songbookMerge { inherit lib pkgs; books = [ aoide.songbookRoot ./songs ]; }`:
-the books are copied into ONE directory before anything reads them, so a
-`borrow` resolves across them, and the call returns that directory (`dir`) and the
-songbook record over it together. A song name two books define is refused,
-naming the song and both books. The merged directory is a derivation, so the
-hook reads it at evaluation (import-from-derivation); a plain `songbookRoot` is a
-source path and never is.
+the call returns the registry (song name to its directory in the book that
+defines it), the merged directory (`dir`, one copy of the registry built in one
+derivation) and the songbook record, all together. The record discovers through
+the registry, so a `borrow` resolves across the books and nothing at evaluation
+reads the derivation (no import-from-derivation). A song name two books define is
+refused, naming the song and both books.
 
 **Stylix.** A consumer must NOT import the stylix module itself once it selects
 the `stylix` dendrite: the dendrite's module comes from Aoide's own inputs, and two
