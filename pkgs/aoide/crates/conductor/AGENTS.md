@@ -93,7 +93,7 @@
   Colour comes from a `Role`, not from the glyph. Measure labels with
   `board::cells`, never `len()`.
 - Only the keyboard-focused pane gets a bright selection; other selected
-  regions use subdued livery shading. Controls use ASCII markers and plain
+  regions use subdued theme shading. Controls use ASCII markers and plain
   field labels, without editing badges or double borders.
 - Project removal snapshots its target and requires an exact-name confirmation;
   initial keys, empty input and Escape never unregister a project.
@@ -102,7 +102,7 @@
   path; never route them to a stale live focus or project mutation. Project
   resurrection retains the backend's undying semantics. Do not advertise
   unsupported Rename or Kill actions.
-- Semantic colors read exact RGB Base16 tokens from rice-stage livery;
+- Semantic colors read exact RGB Base16 tokens from rice-stage theme;
   ANSI colors are fallbacks for absent tokens, not a competing theme.
 - History is separate from live state. Ledger entries never enter
   `App::merged()` or the live graph. Opening one only selects historical

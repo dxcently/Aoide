@@ -28,7 +28,7 @@
 //! microseconds between the re-stat and the rename; it does not close it. No
 //! git, no rebuild (house rule 2): the answer says it takes effect on the next
 //! rebuild, and `stagedDiffers` says when the machine copy of the song carries
-//! livery or widget edits the build's copy lacks, since the rebuild builds the
+//! theme or widget edits the build's copy lacks, since the rebuild builds the
 //! rices version.
 
 use crate::checkout_gate;
@@ -417,7 +417,7 @@ mod tests {
 
     /// A scratch runtime root, a host file holding `host_text`, and shipped
     /// templates whose `builtin.json` builds `built_in`, each song shipped with
-    /// a `livery.json` and one widget.
+    /// a `theme.json` and one widget.
     fn rig(tag: &str, host_text: &str, built_in: &[&str]) -> Rig {
         let env = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         let root = unique_tmp(tag);
@@ -430,7 +430,7 @@ mod tests {
         for song in built_in {
             let dir = templates.join(song).join("widgets");
             std::fs::create_dir_all(&dir).unwrap();
-            std::fs::write(templates.join(song).join("livery.json"), format!("{{\"song\":\"{song}\"}}")).unwrap();
+            std::fs::write(templates.join(song).join("theme.json"), format!("{{\"song\":\"{song}\"}}")).unwrap();
             std::fs::write(dir.join("bar.qml"), "Item {}\n").unwrap();
             std::fs::write(templates.join(song).join("rice.nix"), "{ ... }: { }\n").unwrap();
         }

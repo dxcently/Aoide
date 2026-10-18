@@ -25,7 +25,7 @@ sudo <toplevel>/bin/switch-to-configuration switch
 # desktop-only reloads — no switch needed
 hyprctl reload                                     # compositor rules
 systemctl --user restart aoide-quickshell.service  # bar / dock / gadgets
-strx rice stage <song>                             # livery hot-reload
+strx rice stage <song>                             # theme hot-reload
 qs -p pkgs/strillix-shell/qml/shell.qml               # QML parse check
 
 # show — capture through strillix, never bare grim
@@ -40,11 +40,11 @@ strx screen info                                   # monitors, clients, layer su
   gate exists once, then move on.
 - **Smallest reload that proves the change.** QML → restart quickshell;
   compositor rule → `hyprctl reload`; anything nix-baked (Stylix, base16,
-  terminal config) → needs a rebuild. Staged livery values hot-reload.
+  terminal config) → needs a rebuild. Staged theme values hot-reload.
 - **Staging can be locked.** `rice stage` refuses while the rice mode
   reports `declarative`. Unlock with `strx rice mode stage [<song>]`, lock
   back with `strx rice mode declarative [<song>]`.
-- **Never hand-edit** `/stage/livery.json` or the draft targets it
+- **Never hand-edit** `/stage/theme.json` or the draft targets it
   symlinks to — that bypasses the lock check and the draft routing.
 - **Never declare a visual change done without looking at it.** Capture it,
   read it back, judge it yourself, then show the User. `strx screen shot` is

@@ -186,7 +186,7 @@ pkgs.testers.runNixOSTest {
             #
             # No song: the song half of the stack is strillix's (deploy, stage seed,
             # restart), and a song named with no strillix lane is refused by the
-            # platform (`modules/nucleus/assertions.nix`). The livery the greeter
+            # platform (`modules/nucleus/assertions.nix`). The theme the greeter
             # reads is then nucleus's own default palette — still palette-shaped
             # and non-stock, which is all the ly assertion below claims.
             aoide.enable = true;
@@ -260,13 +260,13 @@ pkgs.testers.runNixOSTest {
     # asserting active/activating, so a respawn loop does not fail the test.
     machine.succeed("systemctl is-enabled display-manager.service")
 
-    # The rice half. The greeter's colours are a livery read (the greeter lane,
+    # The rice half. The greeter's colours are a theme read (the greeter lane,
     # `lyPlain`/`lyBold`), so assert the generated config carries palette-shaped
     # values AND that they are not ly's stock ones. Shape plus "not stock"
     # rather than a specific hex: pinning the song's palette here would turn
     # every re-rice into a test edit.
     ly_cfg = machine.succeed("cat /etc/ly/config.ini")
-    livery_keys = (
+    theme_keys = (
         ("bg", "00"),
         ("fg", "00"),
         ("border_fg", "00"),
@@ -274,10 +274,10 @@ pkgs.testers.runNixOSTest {
         ("colormix_col1", "00"),
         ("colormix_col2", "00"),
     )
-    for key, style in livery_keys:
+    for key, style in theme_keys:
         assert re.search(
             rf"^{key}=0x{style}[0-9a-fA-F]{{6}}$", ly_cfg, re.M
-        ), f"ly config missing a livery-shaped {key}:\n{ly_cfg}"
+        ), f"ly config missing a theme-shaped {key}:\n{ly_cfg}"
     for stock in (
         "bg=0x00000000",
         "fg=0x00FFFFFF",

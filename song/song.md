@@ -14,9 +14,9 @@ song/
 │   │                              (sonata, the shipped baseline, is upstream-owned + evolving, like
 │   │                              nucleus/dendrites; every OTHER song is clone-owned, never adopted-over)
 │   ├── <name>/                  one song per folder, e.g. sonata (found by one typed scan, built in only when a host selects it)
-│   │   ├── rice.nix                the song's body: system (ten strillix providers + livery) and home (strillix, hyprland.conf)
-│   │   ├── hyprland.conf           the song's binds, unbinds, layout and animations (no livery keys)
-│   │   ├── livery.json             this song's resolved livery values
+│   │   ├── rice.nix                the song's body: system (ten strillix providers + theme) and home (strillix, hyprland.conf)
+│   │   ├── hyprland.conf           the song's binds, unbinds, layout and animations (no theme keys)
+│   │   ├── theme.json             this song's resolved theme values
 │   │   ├── palette/                (planned) transpose keys — variants `rice transpose` swaps among
 │   │   ├── sounds/                 (planned) notification + system sounds (chimes dimension)
 │   │   ├── icons/                  (planned) per-song icon overrides
@@ -31,7 +31,7 @@ song/
 ├── covers/                     shared wallpaper library — any song's rice.nix points here by literal path
 │                                  (../../covers/<file>), not a per-song assets/ dir
 ├── stage/                      LIVE runtime state — gitignored, atomic write-temp-then-rename only
-│   ├── livery.json                fully-resolved livery (no nulls) — hot-reloaded by LiveryState.qml
+│   ├── theme.json                fully-resolved theme (no nulls) — hot-reloaded by ThemeState.qml
 │   ├── cover.json                 live wallpaper seed { "path": ... } — read by AoideWallpaper.qml
 │   └── sessions.json / hooks.json / projects.json / graph.json   session-graph state (shellbridge, aoide graph)
 └── auditions/                  (planned) the propose gate for generated-but-unadopted rices — gitignored
@@ -45,21 +45,21 @@ inside that song's `rices/<name>/` — never a new top-level `song/` dir
 
 ```
 rices/<song>/rice.nix
-   a body: system.module sets ONLY aoide.livery.{palette,base16,bar,notif,window,wallpaper}
+   a body: system.module sets ONLY aoide.theme.{palette,base16,bar,notif,window,wallpaper}
    selected by habit.rice.declared = "<song>" (no guard: only the performed body is read)
         │
-        │  nix build / rebuild bakes the guarded song's livery
+        │  nix build / rebuild bakes the guarded song's theme
         ▼
-stage/livery.json   ◄── also: `aoide rice preview` stages this ephemerally
+stage/theme.json   ◄── also: `aoide rice preview` stages this ephemerally
    fully resolved — colours concrete, no null            (CONTRACTS.md §4:
         │                                                  atomic writes only)
         │  FileView watches the file; onFileChanged → reload()
         ▼
-qml/LiveryState.qml    (singleton — shipped by pkgs/strillix-shell/qml/)
+qml/ThemeState.qml    (singleton — shipped by pkgs/strillix-shell/qml/)
    hot-reload: every widget's binding updates in one pass, no QML restart
         │
         ▼
-every widget reads palette roles off LiveryState
+every widget reads palette roles off ThemeState
    (paletteBg / paletteFg / paletteAccent / paletteHot / base16 role map)
 
 
@@ -84,17 +84,17 @@ dir is committed, so runtime state can never become load-bearing for the build.
 | | writes | reads |
 |---|---|---|
 | **Creation** (`compose` → `mode stage` → `lint` → `draft save` → `declare`) | `auditions/` (propose), then `rices/<song>/` on declare | `rices/` + that song's `design/` — always, before iterating |
-| **Application** (performing an adopted song) | nothing — pure selection | `rices/<song>/rice.nix` fanned into `stage/livery.json` at build/preview time |
+| **Application** (performing an adopted song) | nothing — pure selection | `rices/<song>/rice.nix` fanned into `stage/theme.json` at build/preview time |
 
 The swap is one line, host-agnostic (no other edit needed — a song sets
-only `aoide.livery`, no host options, no lane toggles):
+only `aoide.theme`, no host options, no lane toggles):
 
 ```nix
 # hosts/<host>/default.nix
 aoide.rice = "sonata";
 ```
 
-This re-fans the whole `aoide.livery` tree for that host. **Replay** =
+This re-fans the whole `aoide.theme` tree for that host. **Replay** =
 same score, new host (this line, elsewhere). **Transpose** = same host,
 new key (`rice transpose <song> <key>`, planned — swaps among that song's
 `palette/` variants).
@@ -116,5 +116,5 @@ is queryable like any other content.
 
 ## Related (wiki)
 
-Song-Anatomy · Self-Ricing · Song-Vocabulary · livery · Snowflake-Anatomy
+Song-Anatomy · Self-Ricing · Song-Vocabulary · theme · Snowflake-Anatomy
 · Ricing-Protocol

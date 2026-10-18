@@ -9,7 +9,7 @@ import "Power.js" as Power
 PanelWindow {
     id: root
 
-    required property var livery
+    required property var theme
     required property var bridge
 
     readonly property var actions: Power.actions

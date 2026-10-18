@@ -11,7 +11,7 @@ import "Buddy.js" as Buddy
 PanelWindow {
     id: root
 
-    required property var livery
+    required property var theme
     required property var bridge
     property var shared: null
     property var stagingEngine: null
@@ -38,7 +38,7 @@ PanelWindow {
     readonly property string home: Quickshell.env("HOME") || ""
     readonly property string fUi: Qt.fontFamilies().indexOf("Tahoma") >= 0 ? "Tahoma" : Kit.family
     readonly property string fMono: Qt.fontFamilies().indexOf("Andale Mono") >= 0 ? "Andale Mono" : "Noto Sans Mono"
-    readonly property var k: Kit.make(root.livery)
+    readonly property var k: Kit.make(root.theme)
     readonly property bool canVerdict: !!root.bridge && typeof root.bridge.sendCommand === "function"
     readonly property color wash30: Qt.rgba(232 / 255, 207 / 255, 106 / 255, 0.30)
     readonly property color edgeGold: Qt.rgba(176 / 255, 140 / 255, 20 / 255, 0.55)
@@ -132,7 +132,7 @@ PanelWindow {
 
     // ── data ─────────────────────────────────────────────────────────────
     function b16(n, fb) {
-        var b = root.livery && root.livery.raw && root.livery.raw.base16
+        var b = root.theme && root.theme.raw && root.theme.raw.base16
         return b && b[n] ? b[n] : fb
     }
     function listOf(fv, key) {
@@ -346,7 +346,7 @@ PanelWindow {
         Rectangle {
             anchors.fill: parent; radius: 6
             color: orb.st === "working" ? root.k.working : orb.st === "awaiting" ? root.k.awaiting
-                 : orb.st === "idle" ? root.b16("base04", "#8db0ba") : orb.st === "done" ? root.livery.holoBlue : "#ffffff"
+                 : orb.st === "idle" ? root.b16("base04", "#8db0ba") : orb.st === "done" ? root.theme.holoBlue : "#ffffff"
         }
         Rectangle {
             visible: orb.st === "working"; x: 1; y: 1; width: 10; height: 5; topLeftRadius: 5; topRightRadius: 5
@@ -693,7 +693,7 @@ PanelWindow {
                                 color: Kit.dark(0.16); border.width: 1; border.color: Kit.dark(0.28)
                                 Rectangle {
                                     width: Math.round(42 * row.r.pct / 100); height: 6; radius: 3
-                                    color: row.r.tone === "hot" ? root.livery.paletteUrgent : row.r.tone === "warn" ? root.k.awaiting : root.k.working
+                                    color: row.r.tone === "hot" ? root.theme.paletteUrgent : row.r.tone === "warn" ? root.k.awaiting : root.k.working
                                     Rectangle {
                                         width: parent.width; height: 4; radius: 2
                                         gradient: Gradient { GradientStop { position: 0; color: Kit.white(0.65) } GradientStop { position: 1; color: Kit.white(0) } }
@@ -738,13 +738,13 @@ PanelWindow {
                             x: parent.width - 7 - width; y: 4; spacing: 6
                             Pill {
                                 visible: !!row.r.knock && row.r.knock.mode !== "terminal"
-                                label: "Approve"; color: root.livery.paletteHot
+                                label: "Approve"; color: root.theme.paletteHot
                                 live: !!row.r.knock && row.r.knock.mode === "verdict"
                                 onClicked: root.verdict(row.r, "approve")
                             }
                             Pill {
                                 visible: !!row.r.knock && row.r.knock.mode !== "terminal"
-                                label: "Deny"; color: root.livery.notifUrgent
+                                label: "Deny"; color: root.theme.notifUrgent
                                 live: !!row.r.knock && row.r.knock.mode === "verdict"
                                 onClicked: root.verdict(row.r, "deny")
                             }

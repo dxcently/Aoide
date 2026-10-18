@@ -220,19 +220,19 @@ strx reload [--json]
   - `declarative` — the shell reload only; nothing is unlocked, so nothing is
     synced or snapshotted.
   - `staging` — `strx rice stage <song>`'s own body for the marker's `song`:
-    re-derives `stage/livery.json`, the cover and the terminal colours, applies
+    re-derives `stage/theme.json`, the cover and the terminal colours, applies
     the hyprctl keywords, and syncs the song's widget bodies, `manifest.json`
     and the widget-type registry into `run/qml/songs/`.
-  - `draft` — the same, except that `stage/livery.json` is the draft's own
+  - `draft` — the same, except that `stage/theme.json` is the draft's own
     content through its routing symlink and is never re-derived; the sync
     applies hyprctl and the terminal colours off the staged content and syncs
-    the widget side. First the routing is checked: when `stage/livery.json`
-    is not the symlink to the marked draft's `livery.json` — the activation
+    the widget side. First the routing is checked: when `stage/theme.json`
+    is not the symlink to the marked draft's `theme.json` — the activation
     seed renames its declared file over the link on every login and switch,
     and leaves the draft file alone — it is re-routed (the same
     remove-and-symlink `strx rice mode draft` uses), and after the sync the
     SAME marker is saved again, so `stage/mode.json` is written last and the
-    shell's livery watch re-arms. A draft whose `livery.json` is gone is
+    shell's theme watch re-arms. A draft whose `theme.json` is gone is
     refused before anything is written.
 - **Writes:** nothing in `declarative`. In `staging` and `draft`, after the
   sync, a take of the now-synced stage and widget bodies, deduped against the

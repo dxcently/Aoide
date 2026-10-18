@@ -36,7 +36,7 @@
 // shows up. (Quickshell 0.3 ships no folder-model primitive; a Process is the
 // house idiom for a one-shot side read.)
 //
-// Colors ONLY from livery roles (paletteBg/paletteFg/paletteAccent);
+// Colors ONLY from theme roles (paletteBg/paletteFg/paletteAccent);
 // radius:0 throughout. Deliberately plain: a flat pane, a thumbnail grid,
 // and a one-pixel selection border. No decorative styling.
 
@@ -50,7 +50,7 @@ PanelWindow {
     id: root
 
     // ── Note dependency (injected by shell.qml) ────────────────────────────
-    required property var livery
+    required property var theme
     // The bridge: `component("launcher", "openPictures")` runs the launcher's own picker.
     property var bridge: null
     // Whether the launcher slot's body answers openPictures() (shell.qml's fact).
@@ -157,9 +157,9 @@ PanelWindow {
         onClicked: root.hide()
         Rectangle {
             anchors.fill: parent
-            color: Qt.rgba(Qt.color(root.livery.paletteFg).r,
-                           Qt.color(root.livery.paletteFg).g,
-                           Qt.color(root.livery.paletteFg).b, 0.28)
+            color: Qt.rgba(Qt.color(root.theme.paletteFg).r,
+                           Qt.color(root.theme.paletteFg).g,
+                           Qt.color(root.theme.paletteFg).b, 0.28)
         }
     }
 
@@ -170,8 +170,8 @@ PanelWindow {
         width: 620
         height: 404
         radius: 0
-        color: root.livery.paletteBg
-        border.color: root.livery.paletteFg
+        color: root.theme.paletteBg
+        border.color: root.theme.paletteFg
         border.width: 1
 
         MouseArea { anchors.fill: parent; onClicked: {} }   // swallow pane clicks
@@ -227,7 +227,7 @@ PanelWindow {
                     anchors.centerIn: parent
                     visible: root.covers.length === 0
                     text: "no covers in song/covers/"
-                    color: root.livery.paletteFg
+                    color: root.theme.paletteFg
                     opacity: 0.5
                     font.family: "monospace"
                     font.pixelSize: 13
@@ -248,7 +248,7 @@ PanelWindow {
                         anchors.margins: grid.gutter / 2
                         radius: 0
                         color: "transparent"
-                        border.color: cell.isSel ? root.livery.paletteAccent
+                        border.color: cell.isSel ? root.theme.paletteAccent
                                                  : "transparent"
                         border.width: 1
 
@@ -270,11 +270,11 @@ PanelWindow {
                         Rectangle {
                             anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
                             height: 18
-                            color: root.livery.paletteBg
+                            color: root.theme.paletteBg
                             Text {
                                 anchors { left: parent.left; leftMargin: 6; right: parent.right; rightMargin: 6; verticalCenter: parent.verticalCenter }
                                 text: (cell.modelData && cell.modelData.name) ? cell.modelData.name : ""
-                                color: root.livery.paletteFg
+                                color: root.theme.paletteFg
                                 font.family: "monospace"
                                 font.pixelSize: 11
                                 elide: Text.ElideRight

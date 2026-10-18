@@ -725,7 +725,7 @@ fn notify(message: &str) {
 /// `stagingSong` (house rule 10), never the declared song. `save` and `drop`
 /// never change the mode, and both are refused while declarative is locked:
 /// the stage there is the DECLARED song (the lock re-pins it), `rice draft
-/// save`/`drop` act on the song `stage/livery.json` names, and the listing
+/// save`/`drop` act on the song `stage/theme.json` names, and the listing
 /// ([`drafts_song`]) names `stagingSong` — a save would land under, and a drop
 /// would delete from, a song the picker never shows. Unlocking first to make
 /// them land would change the mode as a side effect of a save or a delete.

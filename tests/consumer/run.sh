@@ -151,14 +151,14 @@ expr="
       drv = aoideSongs.system.build.toplevel.drvPath;
       rice = aoideSongs.aoide.rice;
       builtIn = aoideSongs.aoide.rices.builtIn;
-      bg = aoideSongs.aoide.livery.palette.bg;
+      bg = aoideSongs.aoide.theme.palette.bg;
       ricesIsExport = toString out.nixosConfigurations.aoide-songs._module.args.ricesRoot == toString flake.ricesRoot;
     };
     merged = {
       drv = mergedCfg.system.build.toplevel.drvPath;
       rice = mergedCfg.aoide.rice;
       builtIn = mergedCfg.aoide.rices.builtIn;
-      bg = mergedCfg.aoide.livery.palette.bg;
+      bg = mergedCfg.aoide.theme.palette.bg;
       borrowed = mergedSongs.songMeta.encore.manifest == mergedSongs.songMeta.sonata.manifest && mergedSongs.songMeta.encore.manifest != { };
       names = mergedSongs.songNames;
       ricesIsMerged = toString out.nixosConfigurations.merged._module.args.ricesRoot == toString mergedSongs.dir;
@@ -166,7 +166,7 @@ expr="
     drv = out.nixosConfigurations.consumer.config.system.build.toplevel.drvPath;
     rice = cfg.aoide.rice;
     builtIn = cfg.aoide.rices.builtIn;
-    bg = cfg.aoide.livery.palette.bg;
+    bg = cfg.aoide.theme.palette.bg;
     strillix = cfg.aoide.strillix.enable;
     stylix = cfg.aoide.stylix.enable;
     quickshell = cfg.aoide.quickshell.enable;
@@ -199,7 +199,7 @@ cfg=$(o .config)
 
 check "performs the declared song"            "solo" "$(o .rice)"
 check "builds in declared + available"        "duet solo" "$(o '.builtIn | join(" ")')"
-check "the available song's livery is inert"  "#14161c" "$(o .bg)"
+check "the available song's theme is inert"  "#14161c" "$(o .bg)"
 check "the strillix lane is on"                   "true" "$(o .strillix)"
 check "the stylix lane is on"                 "true" "$(o .stylix)"
 check "the shell lane is on"                  "true" "$(o .quickshell)"
@@ -236,7 +236,7 @@ check "front: the same hook with no rice merged holds" "true" "$(o .front.collis
 # consumer song that borrows an Aoide song across the two books.
 check "merged: performs the consumer's encore"       "encore" "$(o .merged.rice)"
 check "merged: builds in the Aoide song it borrows"  "encore sonata" "$(o '.merged.builtIn | join(" ")')"
-check "merged: encore wears its own livery"          "#1a1424" "$(o .merged.bg)"
+check "merged: encore wears its own theme"          "#1a1424" "$(o .merged.bg)"
 check "merged: encore's widgets are sonata's"        "true" "$(o .merged.borrowed)"
 check "merged: the registry names both books' songs" "true" \
   "$(o '.merged.names | (index("sonata") != null) and (index("encore") != null) and (index("barcarolle") != null)')"
@@ -271,7 +271,7 @@ printf '%-52s %s\n' "consumer toplevel drvPath" "$(o .drv)"
 
 check "aoide-songs performs Aoide's sonata"           "sonata" "$(o .aoideSongs.rice)"
 check "…and builds in sonata alone"                 "sonata" "$(o '.aoideSongs.builtIn | join(" ")')"
-check "…and wears sonata's livery"                  "#f2ebde" "$(o .aoideSongs.bg)"
+check "…and wears sonata's theme"                  "#f2ebde" "$(o .aoideSongs.bg)"
 check "…its strillix lane reads the exported rices"  "true" "$(o .aoideSongs.ricesIsExport)"
 check "merged: its strillix lane reads the merged directory" "true" "$(o .merged.ricesIsMerged)"
 

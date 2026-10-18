@@ -52,7 +52,7 @@
 // shows up. (Quickshell 0.3 ships no folder-model primitive; a Process is the
 // house idiom for a one-shot side read.)
 //
-// Colors ONLY from livery roles (paletteBg/paletteFg/paletteAccent/wireCyan);
+// Colors ONLY from theme roles (paletteBg/paletteFg/paletteAccent/wireCyan);
 // radius:0 throughout. Greek grammar styling is a LATER pass — this is the
 // functional, palette-correct build.
 
@@ -66,7 +66,7 @@ PanelWindow {
 
     // ── Note + bridge dependencies (injected as SurfaceSlot extras by the
     // host, Phase 6) ─────────────────────────────────────────────────────────
-    required property var livery
+    required property var theme
     required property var bridge
 
     // ── Visibility gate (mirrors launcher.qml) ──────────────────────────────
@@ -168,9 +168,9 @@ PanelWindow {
         onClicked: root.hide()
         Rectangle {
             anchors.fill: parent
-            color: Qt.rgba(Qt.color(root.livery.paletteFg).r,
-                           Qt.color(root.livery.paletteFg).g,
-                           Qt.color(root.livery.paletteFg).b, 0.28)
+            color: Qt.rgba(Qt.color(root.theme.paletteFg).r,
+                           Qt.color(root.theme.paletteFg).g,
+                           Qt.color(root.theme.paletteFg).b, 0.28)
         }
     }
 
@@ -179,7 +179,7 @@ PanelWindow {
         id: pane
         anchors.centerIn: parent
         width: 620
-        livery: root.livery
+        theme: root.theme
         title: "wallpaper.summon"
         glassOpacity: 0.9
 
@@ -236,7 +236,7 @@ PanelWindow {
                     anchors.centerIn: parent
                     visible: root.covers.length === 0
                     text: "no covers in song/covers/ ♪(´ε｀ )"
-                    color: root.livery.paletteFg
+                    color: root.theme.paletteFg
                     opacity: 0.5
                     font.family: "monospace"
                     font.pixelSize: 13
@@ -255,11 +255,11 @@ PanelWindow {
                         anchors.fill: parent
                         anchors.margins: grid.gutter / 2
                         radius: 0
-                        color: Qt.rgba(Qt.color(root.livery.paletteBg).r,
-                                       Qt.color(root.livery.paletteBg).g,
-                                       Qt.color(root.livery.paletteBg).b, 0.35)
-                        border.color: cell.isSel ? root.livery.paletteAccent
-                                                 : root.livery.wireCyan
+                        color: Qt.rgba(Qt.color(root.theme.paletteBg).r,
+                                       Qt.color(root.theme.paletteBg).g,
+                                       Qt.color(root.theme.paletteBg).b, 0.35)
+                        border.color: cell.isSel ? root.theme.paletteAccent
+                                                 : root.theme.wireCyan
                         border.width: cell.isSel ? 2 : 1
 
                         Image {
@@ -280,22 +280,22 @@ PanelWindow {
                         Rectangle {
                             anchors.fill: parent
                             visible: cell.isSel
-                            color: Qt.rgba(Qt.color(root.livery.paletteAccent).r,
-                                           Qt.color(root.livery.paletteAccent).g,
-                                           Qt.color(root.livery.paletteAccent).b, 0.14)
+                            color: Qt.rgba(Qt.color(root.theme.paletteAccent).r,
+                                           Qt.color(root.theme.paletteAccent).g,
+                                           Qt.color(root.theme.paletteAccent).b, 0.14)
                         }
 
                         // Filename callout along the bottom.
                         Rectangle {
                             anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
                             height: 18
-                            color: Qt.rgba(Qt.color(root.livery.paletteBg).r,
-                                           Qt.color(root.livery.paletteBg).g,
-                                           Qt.color(root.livery.paletteBg).b, 0.62)
+                            color: Qt.rgba(Qt.color(root.theme.paletteBg).r,
+                                           Qt.color(root.theme.paletteBg).g,
+                                           Qt.color(root.theme.paletteBg).b, 0.62)
                             Text {
                                 anchors { left: parent.left; leftMargin: 6; right: parent.right; rightMargin: 6; verticalCenter: parent.verticalCenter }
                                 text: (cell.modelData && cell.modelData.name) ? cell.modelData.name : ""
-                                color: root.livery.paletteFg
+                                color: root.theme.paletteFg
                                 opacity: cell.isSel ? 1.0 : 0.8
                                 font.family: "monospace"
                                 font.pixelSize: 11

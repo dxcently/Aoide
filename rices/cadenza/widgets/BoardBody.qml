@@ -18,7 +18,7 @@
 //   state/stage/graph.json        `workspaces[].project` — the S1 binding;
 //                                 `edges[]` kind `spawned` — a subagent's
 //                                 parent when its record names none
-//   livery.usagePath              state/usage.json, the account block
+//   theme.usagePath              state/usage.json, the account block
 //   state/undying.json            the undying mark (SessionMenu's read)
 //   state/usage/now.json          §C per-jack numbers — absent until S5/S6
 //   /proc/stat · /proc/meminfo    SYS machine CPU/mem, read by BoardSys
@@ -58,7 +58,7 @@ import "Kit.js" as Kit
 Item {
     id: board
 
-    required property var livery
+    required property var theme
     required property var bridge
     property var shared: null
     property var stagingEngine: null
@@ -78,7 +78,7 @@ Item {
 
     // ── the kit: one per widget ───────────────────────────────────────────
     FontMetrics { id: fm; font: Kit.bodyFont(13) }
-    readonly property var kit: Kit.make(board.livery, fm)
+    readonly property var kit: Kit.make(board.theme, fm)
 
     implicitWidth: kit.cells(72)
     implicitHeight: kit.lines(100)
@@ -171,7 +171,7 @@ Item {
     }
     FileView {
         id: accountFile
-        path: board.livery ? board.livery.usagePath : ""
+        path: board.theme ? board.theme.usagePath : ""
         watchChanges: true; blockLoading: false; printErrors: false
         onFileChanged: reload()
         onLoaded: board.account = board._json(accountFile)

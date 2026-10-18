@@ -150,9 +150,9 @@ mod tests {
             "icon.collections",
             "icon.list",
             "icon.resolve",
-            "livery.emit",
-            "livery.lint",
-            "livery.resolve",
+            "theme.emit",
+            "theme.lint",
+            "theme.resolve",
             "lock",
             "lock.hint",
             "mcp.serve",
@@ -218,7 +218,7 @@ mod tests {
         let mut got: Vec<String> = r.commands().filter(|c| c.opens(aoide_protocol::audit::Door::Mcp)).map(|c| c.dotted()).collect();
         got.sort();
         let mut expected = vec![
-            "guide", "livery.lint", "livery.resolve", "preview.declare", "preview.notes", "preview.set",
+            "guide", "theme.lint", "theme.resolve", "preview.declare", "preview.notes", "preview.set",
             "preview.tree", "reload", "rice.compose", "rice.declare", "rice.draft.list", "rice.lint",
             "rice.list", "rice.mode.status", "rice.stage", "rice.take", "rice.take.diff", "rice.take.list",
             "rice.take.mark", "schema",

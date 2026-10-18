@@ -20,7 +20,7 @@
 // torn file), mirroring the execute()-direct precedent launcher.qml's
 // own header already flags: DesktopEntry.execute() is called straight from
 // QML with no aoided command in between, and this ledger follows the same
-// no-new-command idiom for its own side effect. Parsing follows LiveryState.qml's
+// no-new-command idiom for its own side effect. Parsing follows ThemeState.qml's
 // FileView idiom: a guarded try/catch degrades a missing/garbage file to an
 // empty map rather than throwing.
 //

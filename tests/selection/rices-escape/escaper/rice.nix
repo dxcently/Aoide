@@ -8,6 +8,6 @@
 # text scan — so it never has to resolve, and it deliberately does not.
 {
   system.module = _: {
-    aoide.livery.palette.bg = "#000000";
+    aoide.theme.palette.bg = "#000000";
   };
 }

@@ -41,13 +41,13 @@ shared per-widget blueprint anywhere.
 sonata is the rices's shipped standard — the light key, and the fallback
 every unauthored slot resolves to. Any host in the
 fleet performs it with one line — `aoide.rice = "sonata";` — and the whole
-`aoide.livery` fan-out swaps with zero other edits.
+`aoide.theme` fan-out swaps with zero other edits.
 
 ## Host-agnostic by construction
 
-This song sets ONLY `aoide.livery`. It names no host, enables no lane or
+This song sets ONLY `aoide.theme`. It names no host, enables no lane or
 dendrite, touches no hardware or service, and keys its own polarity —
-`aoide.livery.polarity = "light"`, declared beside the palette in `rice.nix`
+`aoide.theme.polarity = "light"`, declared beside the palette in `rice.nix`
 (CONTRACTS.md §1). The venue
 (host) decides its instruments; sonata carries only the notes. That is exactly
 what lets one score be performed on any host with its own specifics and its own
@@ -65,8 +65,8 @@ opacity, not colour": kitty renders at `background_opacity` 0.86 and the bar
 sheet at ~0.30 opacity **over** this ground — `base00` stays in the pale
 marble-glass family, a warm sunlit stone.
 
-The polarity is **light**, the song's own declaration (`aoide.livery.polarity`
-in `rice.nix`, mirrored in `livery.json`): `base00` is the lightest
+The polarity is **light**, the song's own declaration (`aoide.theme.polarity`
+in `rice.nix`, mirrored in `theme.json`): `base00` is the lightest
 value and `base05`–`base07` are the dark inks.
 
 | Region of the Greek register | Slot(s) | Colour |
@@ -141,7 +141,7 @@ bare running text.
 How the key reads — sonata's instantiation of its house grammar
 (`design/greek-grammar.md`) — recorded against the rig it was drawn on. The
 glass alphas are lane/dendrite constants, not
-livery notes; they are tuned against THIS key and recorded here as its design
+theme notes; they are tuned against THIS key and recorded here as its design
 memory. The colour values below are the re-keyed Greek notes; the drawn shapes
 are each rices widget's (`bar`/`calendar`/`launcher`/`notifications`/
 `powermenu`.qml) own concern now — each documents its own chrome in its own
@@ -312,9 +312,9 @@ not yet ended) names that terminal, "Kill terminal <name>"; anything else reads
   **teal** `#3f867e` (was marble-shade `#e8dfcc`) — the focused window now
   matches the bar's gold chrome, the unfocused window recedes to a cool teal
   instead of near-vanishing into the marble ground. Edited in both
-  `livery.json` and `rice.nix` (kept in sync). The compositor lane
+  `theme.json` and `rice.nix` (kept in sync). The compositor lane
   (`modules/dendrites/compositor/hyprland/default.nix`) already derives
-  `col.active_border`/`col.inactive_border` from `aoide.livery.window.border`/
+  `col.active_border`/`col.inactive_border` from `aoide.theme.window.border`/
   `.borderInactive` (falling back to `palette.accent`/`palette.bg` when a song
   leaves them null) — no compositor-side change was needed, the pipeline just
   picked up the new song-owned notes.
@@ -370,7 +370,7 @@ not yet ended) names that terminal, "Kill terminal <name>"; anything else reads
   Runtime widget sources were older committed copies than the rendered song,
   so they were backed up and reconciled to the live baseline before staging.
   Only Conductor and Terminals changed in the rendered tree; the registry,
-  livery, wallpaper and other widget bodies were preserved. The first reload's
+  theme, wallpaper and other widget bodies were preserved. The first reload's
   internal sync successfully reloaded the shell, but its redundant second IPC
   request raced loading and reported failure inside an overall `ok` outcome.
   A settled repeat succeeded and deduped the take. Learnings: staging needs

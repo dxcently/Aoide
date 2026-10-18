@@ -435,7 +435,7 @@ mod tests {
 
     #[test]
     fn an_error_outcome_prints_its_lists_of_strings_and_an_ok_one_prints_none() {
-        let bad = Outcome::error("rice.lint", "reported problems").with_data(json!({ "errors": ["a is wrong", "b is wrong"], "livery": "/x" }));
+        let bad = Outcome::error("rice.lint", "reported problems").with_data(json!({ "errors": ["a is wrong", "b is wrong"], "theme": "/x" }));
         assert_eq!(bad.render(false).0, "[error] rice.lint: reported problems\n  errors:\n    a is wrong\n    b is wrong");
         let good = Outcome::ok("x", "fine").with_data(json!({ "errors": ["never shown"] }));
         assert_eq!(good.render(false).0, "[ok] x: fine");

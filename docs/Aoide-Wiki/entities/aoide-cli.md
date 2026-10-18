@@ -17,11 +17,11 @@ and `aoided` (daemon), from a pi-style workspace of single-charter crates
 carries a meaningful exit code. The CLI, the MCP façade, and the
 [[A2A-Door]] share the same handlers, so the three doors cannot drift.
 
-Everything that paints — rice/draft/mode/cover/livery/quickshell/screen/
+Everything that paints — rice/draft/mode/cover/theme/quickshell/screen/
 shellbridge/herald/take, the whole AoideOS surface — ships in a second
 binary, [[strillix]]. Conducting orchestration is aoide's identity; strillix paints
 (`docs/architecture/PACKAGE-LAYOUT.md` "Two binaries"; `CONTRACTS.md` §3).
-See [[Rice-and-Livery|Rice-and-Livery]] and
+See [[Rice-and-Theme|Rice-and-Theme]] and
 [[Screen-Commands|Screen-Commands]] for that surface's per-command
 detail.
 
@@ -46,7 +46,7 @@ entries through its own `commands::register(&mut Registry)` function;
 [[Secrets-Broker]] group (`serve`/`exec`/`add`/`rm`/`grant`/`revoke`/
 `enroll`/`put`/`set-totp`/`automate`/`expose`/`allow-remote-origin`/`migrate`/`pending`/`approve`/
 `dismiss`/`watch`). P-A5 of the binary-split workstream moved 11 painted
-groups (rice/draft/mode/cover/livery/shellbridge/quickshell/screen/herald/
+groups (rice/draft/mode/cover/theme/shellbridge/quickshell/screen/herald/
 take — 39 command paths) into `crates/strillix/src/commands/mod.rs::all()`.
 
 `dispatch()` looks up one process-wide `Registry` (built once via
@@ -153,9 +153,9 @@ rebuild gate uniformly, and nothing here admits a rebuild
 ([[Rebuild-Gate]], [[Governance]]).
 
 `cover set`/`rice compose`/`rice mode`/`rice draft`/`rice declare`/`rice
-transpose`/`rice take`/`rice back` and the `livery`/`screen`/`herald`/
+transpose`/`rice take`/`rice back` and the `theme`/`screen`/`herald`/
 `shellbridge`/`quickshell` groups all moved to `strillix` at P-A5 — see
-[[Rice-and-Livery|Rice-and-Livery]] and
+[[Rice-and-Theme|Rice-and-Theme]] and
 [[Screen-Commands|Screen-Commands]] for their per-command
 reference, and [[Self-Ricing]] for the self-ricing loop's walkthrough.
 
@@ -304,7 +304,7 @@ shortcut the panel itself registers (`aoide:dock`), not a CLI command (see
   args/flags become the `inputSchema`, and `tools/call` dispatches back
   into the same handlers the CLI uses. `strx mcp serve --stdio` is the same
   façade over strillix's own registry.
-- **`stageNotesVersion`** pins the `/stage/livery.json` format alongside
+- **`stageNotesVersion`** pins the `/stage/theme.json` format alongside
   the command tree so an agent reads one version for the whole contract.
 - **Single audit log, every door.** Every dispatch — CLI, MCP, or A2A —
   appends a JSON-lines record to the one audit log (`aoide.auditLog`),
@@ -333,7 +333,7 @@ default applies. Starting it without nix: `docs/INSTALL.md` § 6.
 - [[Session-Graph]]
 - [[Terminal-Commander]]
 - [[Gadget-Dock]]
-- [[livery]]
+- [[theme]]
 - [[strillix]]
 - [[aoided]]
 - [[shellbridge]]

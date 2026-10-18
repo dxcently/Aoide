@@ -226,10 +226,10 @@ fn hint_failed(cmd: &str, detail: String) -> Outcome {
         .with_detail(detail)
 }
 
-/// The staged song: `stage/livery.json`'s `song`, the name the shell itself
-/// paints (`LiveryState.songName`).
+/// The staged song: `stage/theme.json`'s `song`, the name the shell itself
+/// paints (`ThemeState.songName`).
 fn active_song() -> Option<String> {
-    let raw = std::fs::read_to_string(aoide_storage::fs::stage_dir().join("livery.json")).ok()?;
+    let raw = std::fs::read_to_string(aoide_storage::fs::stage_dir().join("theme.json")).ok()?;
     let doc: Value = serde_json::from_str(&raw).ok()?;
     doc.get("song")?.as_str().filter(|s| !s.is_empty()).map(str::to_string)
 }
@@ -460,7 +460,7 @@ esac
         }
 
         fn stage(&self, song: &str, manifest: &str) {
-            std::fs::write(self.root.join("aoide/song/stage/livery.json"), format!(r#"{{"song":"{song}"}}"#)).unwrap();
+            std::fs::write(self.root.join("aoide/song/stage/theme.json"), format!(r#"{{"song":"{song}"}}"#)).unwrap();
             std::fs::write(self.root.join("aoide/run/qml/songs/manifest.json"), manifest).unwrap();
         }
 

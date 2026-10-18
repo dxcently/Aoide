@@ -29,7 +29,7 @@ shellbridge.nix`'s `ExecStart`), not the core `aoide` binary. Its socket
 path is a hard contract, never computed independently:
 `$XDG_RUNTIME_DIR/aoide/shellbridge.sock` (the unit's `RuntimeDirectory=aoide`
 creates the directory). It publishes two atomically-written stage files
-besides `livery.json` (which stays under `/stage/`, rice staging):
+besides `theme.json` (which stays under `/stage/`, rice staging):
 `state/stage/sessions.json` (the agent session
 roster — `{ sessionId, agent, windowAddress, cwd, state, startedAt }`,
 backing the [[Terminal-Commander]] session-jump) and `state/stage/hooks.json`

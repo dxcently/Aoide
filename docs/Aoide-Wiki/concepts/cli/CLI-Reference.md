@@ -60,11 +60,11 @@ start at [[aoide-cli]] and the group pages linked below.
 
 ## Group pages
 
-- [[Rice-and-Livery|Rice-and-Livery]] — the self-ricing loop:
+- [[Rice-and-Theme|Rice-and-Theme]] — the self-ricing loop:
   `rice lint/list/stage/compose/refresh/declare/transpose`, the `rice draft` / `rice mode` /
-  `rice take` groups, `rice back`, `cover set`, and the `livery` engine commands.
-  Stage files: `/stage/{livery,cover,mode}.json`, the declared twin
-  `/declared/livery.json` and the venue's `/declared/venue.json` (the slots it recolours and the
+  `rice take` groups, `rice back`, `cover set`, and the `theme` engine commands.
+  Stage files: `/stage/{theme,cover,mode}.json`, the declared twin
+  `/declared/theme.json` and the venue's `/declared/venue.json` (the slots it recolours and the
   geometry the host sets);
   rices and drafts trees.
 - [[Graph-and-Conduct|Graph-and-Conduct]] — the session DAG: bare
@@ -91,7 +91,7 @@ start at [[aoide-cli]] and the group pages linked below.
   `state/nodes.json`, `state/node-cache/<name>.json`.
 - [[Conductor-TUI|Conductor-TUI]] — the `aoide conductor` interactive
   terminal frontend: seven panels, keys, what each dispatches. State:
-  `state/stage/{projects,sessions,hooks}.json`, `/stage/livery.json`,
+  `state/stage/{projects,sessions,hooks}.json`, `/stage/theme.json`,
   the audit log.
 - [[Content-and-Hooks|Content-and-Hooks]] — the content
   pipeline commands (all stubs today), `herald push` (shellbridge socket →

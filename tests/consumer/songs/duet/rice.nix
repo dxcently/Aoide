@@ -2,9 +2,9 @@
 #
 # `habit.rice.available = [ "duet" ]` builds it in (its widgets land in the deployed
 # tree and its folder in the shipped templates), but a body is read only for a
-# DECLARED song: its `system` half is never imported here, so its livery cannot
+# DECLARED song: its `system` half is never imported here, so its theme cannot
 # dress a desktop it is not painting. An available song that quietly applied its
-# livery would be the bug this file's shape disproves.
+# theme would be the bug this file's shape disproves.
 {
   system = {
     providers = {
@@ -20,7 +20,7 @@
       greeter = "strillix";
     };
     module = _: {
-      aoide.livery.palette = {
+      aoide.theme.palette = {
         bg = "#1c1418";
         fg = "#efe6e8";
         accent = "#f88ab4";

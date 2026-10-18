@@ -22,9 +22,9 @@
     module =
       { song, borrow, ... }:
       {
-        aoide.arrangement.widgets = (song.composeSong (borrow "sonata")).arrangement.widgets;
+        aoide.layout.widgets = (song.composeSong (borrow "sonata")).layout.widgets;
 
-        aoide.livery.palette = {
+        aoide.theme.palette = {
           bg = "#1a1424";
           fg = "#ece6f2";
           accent = "#b48cf0";

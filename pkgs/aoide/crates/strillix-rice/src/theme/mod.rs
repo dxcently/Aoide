@@ -1,5 +1,5 @@
-//! `livery` — the native design-token engine, ported into song from the standalone
-//! Node engine (see docs/architecture/LIVERY-MERGE.md).
+//! `theme` — the native design-token engine, ported into song from the standalone
+//! Node engine (see docs/architecture/THEME-MERGE.md).
 //!
 //! The engine is a pure-Rust port of the standalone Node token engine's
 //! `{schema,resolve,emitters,cli}.js`, folded into song's charter ("the
@@ -32,7 +32,7 @@ pub(crate) mod json;
 pub use resolve::{Resolved, resolve, strip_hash, with_hash};
 pub use schema::SCHEMA_VERSION;
 
-/// Validate a raw note container against the v0 schema (the `livery lint`
+/// Validate a raw note container against the v0 schema (the `theme lint`
 /// contract: `{ ok, errors }`).
 pub fn lint(container: &serde_json::Value) -> schema::Validation {
     schema::validate(container)

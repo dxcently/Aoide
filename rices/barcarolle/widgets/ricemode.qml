@@ -8,13 +8,13 @@ import "Rice.js" as Rice
 Item {
     id: root
 
-    required property var livery
+    required property var theme
     required property var bridge
 
-    readonly property string mode: root.livery.riceMode || "declarative"
+    readonly property string mode: root.theme.riceMode || "declarative"
     readonly property bool staging: root.mode !== "declarative"
-    readonly property string draft: (root.livery.modeRaw && root.livery.modeRaw.draft) || ""
-    readonly property string song: root.livery.songName || ""
+    readonly property string draft: (root.theme.modeRaw && root.theme.modeRaw.draft) || ""
+    readonly property string song: root.theme.songName || ""
     readonly property bool canMenu: !!root.bridge && typeof root.bridge.riceMenu === "function"
     readonly property string iconDir: (Quickshell.env("STRILLIX_ROOT") || (Quickshell.env("HOME") + "/.strillix")) + "/rices/barcarolle/icons/tray/"
     readonly property string hint: root.staging
@@ -33,7 +33,7 @@ Item {
 
     readonly property var rows: !root.canMenu
         ? [{ label: "Switching needs a newer shell", mark: "", live: false, kind: "", name: "", here: false }]
-        : root.pending ? [Rice.waiting(null)] : Rice.switchRows(root.answer, root.livery.riceMode)
+        : root.pending ? [Rice.waiting(null)] : Rice.switchRows(root.answer, root.theme.riceMode)
 
     function toggle() {
         if (root.open) { root.open = false; return }

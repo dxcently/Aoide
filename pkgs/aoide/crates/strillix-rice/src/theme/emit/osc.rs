@@ -5,8 +5,8 @@
 //! sequence is `ESC ] <ps> ; <color> BEL`, concatenated raw (no separators).
 //! Byte-order- and byte-sensitive — golden-compared verbatim.
 
-use crate::livery::emit::{EmitError, EmitOpts, EmitOutput, Emitter};
-use crate::livery::resolve::Resolved;
+use crate::theme::emit::{EmitError, EmitOpts, EmitOutput, Emitter};
+use crate::theme::resolve::Resolved;
 
 /// The OSC stream emitter.
 pub struct Osc;
@@ -56,7 +56,7 @@ pub fn emit_osc(r: &Resolved) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::livery::resolve::resolve;
+    use crate::theme::resolve::resolve;
     use serde_json::Value;
 
     fn resolved(fixture: &str) -> Resolved {

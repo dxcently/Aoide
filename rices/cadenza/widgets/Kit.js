@@ -17,9 +17,9 @@
 //
 //     import "Kit.js" as Kit
 //     FontMetrics { id: fm; font: Kit.bodyFont(13) }
-//     readonly property var kit: Kit.make(root.livery, fm)
+//     readonly property var kit: Kit.make(root.theme, fm)
 //
-// The binding re-evaluates when the livery or the metrics change (QML tracks
+// The binding re-evaluates when the theme or the metrics change (QML tracks
 // the property reads made inside make()), so a palette swap recolours live.
 .pragma library
 
@@ -34,28 +34,28 @@ function helper(name) { return Qt.resolvedUrl(name + ".qml") }
 function withA(c, a) { var q = Qt.color(c); return Qt.rgba(q.r, q.g, q.b, a) }
 
 // ══ THE KIT OBJECT ═════════════════════════════════════════════════════════
-// livery: the LiveryState a widget is handed. fm: a FontMetrics on bodyFont.
-function make(livery, fm) {
-    var b = (livery && livery.raw && livery.raw.base16) ? livery.raw.base16 : {}
+// theme: the ThemeState a widget is handed. fm: a FontMetrics on bodyFont.
+function make(theme, fm) {
+    var b = (theme && theme.raw && theme.raw.base16) ? theme.raw.base16 : {}
     function slot(n, fb) { return b[n] ? b[n] : fb }
     var px = fm.font.pixelSize
     var k = {
         // ── colour roles: one job each (intent §2) ─────────────────────────
-        ground: slot("base00", livery.paletteBg),   // CRT black; pane fill at paneAlpha
-        raised: slot("base01", livery.paletteBg),   // borderless-block fill
-        select: slot("base02", livery.paletteBg),   // selected / focused row band
-        dim:    slot("base03", livery.paletteFg),   // axes, labels, rules at rest, timestamps
-        mid:    slot("base04", livery.paletteFg),   // secondary text, idle lamps
-        ink:    livery.paletteFg,                   // body text, idle rules, chart ink (base05)
-        bright: slot("base06", livery.paletteFg),   // bright phosphor text
-        match:  slot("base07", livery.paletteFg),   // white-hot: a search match / selected row text
-        title:  livery.paletteAccent,               // titles, focused rule, active jack (base0B)
-        hot:    livery.paletteHot,                  // amber: the ONE live element (base0A)
-        urgent: livery.paletteUrgent,               // red: blocked, failed, a summons on you (base08)
-        warn:   livery.base09,                      // orange: past a threshold, costPartial
-        number: livery.wireCyan,                    // cyan: counts, tokens, durations (base0C)
-        path:   livery.holoBlue,                    // blue: paths, project names, ws numbers (base0D)
-        human:  livery.violet,                      // magenta: a person's words (base0E)
+        ground: slot("base00", theme.paletteBg),   // CRT black; pane fill at paneAlpha
+        raised: slot("base01", theme.paletteBg),   // borderless-block fill
+        select: slot("base02", theme.paletteBg),   // selected / focused row band
+        dim:    slot("base03", theme.paletteFg),   // axes, labels, rules at rest, timestamps
+        mid:    slot("base04", theme.paletteFg),   // secondary text, idle lamps
+        ink:    theme.paletteFg,                   // body text, idle rules, chart ink (base05)
+        bright: slot("base06", theme.paletteFg),   // bright phosphor text
+        match:  slot("base07", theme.paletteFg),   // white-hot: a search match / selected row text
+        title:  theme.paletteAccent,               // titles, focused rule, active jack (base0B)
+        hot:    theme.paletteHot,                  // amber: the ONE live element (base0A)
+        urgent: theme.paletteUrgent,               // red: blocked, failed, a summons on you (base08)
+        warn:   theme.base09,                      // orange: past a threshold, costPartial
+        number: theme.wireCyan,                    // cyan: counts, tokens, durations (base0C)
+        path:   theme.holoBlue,                    // blue: paths, project names, ws numbers (base0D)
+        human:  theme.violet,                      // magenta: a person's words (base0E)
         paneAlpha: 0.94,
 
         // ── the cell ──────────────────────────────────────────────────────

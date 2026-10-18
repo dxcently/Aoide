@@ -1,7 +1,7 @@
 //! Per-song widget QML sync — the runtime-tree half of `rice stage`
 //! (concepts/song/Self-Ricing.md "Staging vs Declarative Mode"). `rice
 //! stage` already hot-reloads a song's palette/notes via
-//! `song/stage/livery.json`; this module carries a song's widget QML
+//! `song/stage/theme.json`; this module carries a song's widget QML
 //! BODIES (`rices/<song>/widgets/*.qml`) into the live runtime tree
 //! (`run/qml/songs/<song>/`) too, so Quickshell's own file-watcher picks up
 //! an edit to an EXISTING widget file live, no rebuild needed. `manifest.json`
@@ -167,7 +167,7 @@ pub(crate) const RICES_EVAL_FIXTURE_VAR: &str = "STRILLIX_RICES_EVAL_FIXTURE";
 ///      baseline for any song both carry — a machine owns its rices, so the
 ///      machine copy is what gets staged — and the song's own needs are
 ///      checked against what this system installed BEFORE anything is written.
-///   3. **Refused** — and the caller stages nothing at all: no livery, no
+///   3. **Refused** — and the caller stages nothing at all: no theme, no
 ///      widget body, no manifest. Two taught refusals
 ///      ([`refusal_no_nix`], [`refusal_rebuild_needed`]).
 ///
@@ -521,7 +521,7 @@ fn baseline_rices(name: &str, templates: &Path) -> Result<StageRices, WidgetSync
     // Layer 3: patch — `name`'s own entry always wins over both the
     // baseline and the overlay — but only when there IS a rices directory
     // to scan. A shipped song re-pinned from the declared twin
-    // (`song/declared/livery.json`, by `rice mode declarative` — the one door
+    // (`song/declared/theme.json`, by `rice mode declarative` — the one door
     // that still reads it) on a host whose runtime rices never seeded it
     // has nothing local to scan, and its baked baseline entry is the truth;
     // an empty patch here deleted sonata from osaka's manifest and blanked
@@ -588,7 +588,7 @@ fn overlay_surviving_entries(target: &mut serde_json::Value, existing_path: &Pat
 /// committed rices directory with no nix involved — the same "no
 /// `_widgets/` shelf" formula `lib/rices.nix`'s `songMeta` uses per song
 /// (owner is always the song itself, `file` is always `<slot>.qml`; the
-/// registry falls back to `livery.json`'s `.widgets // {}`). `rice compose`
+/// registry falls back to `theme.json`'s `.widgets // {}`). `rice compose`
 /// never writes a `_widgets/` shelf, so this is the ONLY shape a freshly
 /// composed song can ever have — [`baseline_rices`] checks for
 /// a shelf and refuses before ever calling this.
@@ -610,15 +610,15 @@ fn scan_own_entry(name: &str) -> Result<(serde_json::Value, serde_json::Value), 
         serde_json::Value::Object(serde_json::Map::new())
     };
 
-    let livery_path = strillix_dir.join("livery.json");
-    let registry_entry = if livery_path.is_file() {
-        let raw = std::fs::read_to_string(&livery_path).map_err(|e| WidgetSyncErr {
+    let theme_path = strillix_dir.join("theme.json");
+    let registry_entry = if theme_path.is_file() {
+        let raw = std::fs::read_to_string(&theme_path).map_err(|e| WidgetSyncErr {
             error: e.to_string(),
-            target: livery_path.to_string_lossy().into_owned(),
+            target: theme_path.to_string_lossy().into_owned(),
         })?;
         let parsed: serde_json::Value = serde_json::from_str(&raw).map_err(|e| WidgetSyncErr {
-            error: format!("{}'s livery.json is not valid JSON: {e}", strillix_dir.display()),
-            target: livery_path.to_string_lossy().into_owned(),
+            error: format!("{}'s theme.json is not valid JSON: {e}", strillix_dir.display()),
+            target: theme_path.to_string_lossy().into_owned(),
         })?;
         parsed
             .get("widgets")
@@ -1210,13 +1210,13 @@ mod tests {
         let templates = root.join("templates");
         let machine = aoide_storage::fs::rice_dir("dusk");
         for dir in [templates.join("dusk"), machine.clone()] {
-            write(&dir.join("livery.json"), "{}");
+            write(&dir.join("theme.json"), "{}");
             write(&dir.join("widgets").join("history").join("Bar.qml"), "// bar\n");
         }
         assert!(!machine_copy_differs("dusk", &templates));
 
         write(&machine.join("history").join("0001.json"), "{}");
-        write(&machine.join("drafts").join("neon").join("livery.json"), "{}");
+        write(&machine.join("drafts").join("neon").join("theme.json"), "{}");
         assert!(
             !machine_copy_differs("dusk", &templates),
             "a take and a draft at the song's top level are not a difference in the song"

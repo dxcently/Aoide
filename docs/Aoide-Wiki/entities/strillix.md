@@ -30,7 +30,7 @@ conducting orchestration is Aoide's core identity, not a painting tool.
 `strillix` never depends on `aoide-client`/`aoide-conductor` — no A2A client,
 no TUI. `run_strillix` drives `aoide_protocol::door::run` with strillix's own
 registry and dispatcher, and a smaller `special` hook than core's: `mcp
-serve --stdio`, and raw `guide`/`schema`/`livery` output. `a2a serve` and
+serve --stdio`, and raw `guide`/`schema`/`theme` output. `a2a serve` and
 `conductor` are deliberately absent from it.
 
 Two deliberate charter exceptions carry over from core: `shellbridge.rs`
@@ -47,10 +47,10 @@ own golden-snapshot test in `crates/strillix/src/registry.rs`. 47 are real;
 
 | Group | Leaves | Detail |
 |---|---|---|
-| `rice` | 18 | `lint`/`stage`/`compose`/`back`/`declare`/`transpose`(stub); the 3-command `draft` group; the 4-command `mode` group; the 5-command `take` rehearsal-snapshot group — [[Rice-and-Livery]] |
-| `cover set` | 1 | wallpaper staging — [[Rice-and-Livery]] |
-| `livery` | 3 | `lint`/`resolve`/`emit`, the native design-token engine — [[livery]] |
-| `element seed` | 1 | renders a song's committed `elements/*/element.json` into `run/elements/` — verbatim copy for `template:false`, livery-rendered for `template:true`, atomic per file — [[Song-Anatomy]] |
+| `rice` | 18 | `lint`/`stage`/`compose`/`back`/`declare`/`transpose`(stub); the 3-command `draft` group; the 4-command `mode` group; the 5-command `take` rehearsal-snapshot group — [[Rice-and-Theme]] |
+| `cover set` | 1 | wallpaper staging — [[Rice-and-Theme]] |
+| `theme` | 3 | `lint`/`resolve`/`emit`, the native design-token engine — [[theme]] |
+| `element seed` | 1 | renders a song's committed `elements/*/element.json` into `run/elements/` — verbatim copy for `template:false`, theme-rendered for `template:true`, atomic per file — [[Song-Anatomy]] |
 | `shellbridge` | 1 | the desktop state bridge daemon — [[Doors-and-Nodes]] |
 | `quickshell` | 2 | `reload` (the Quickshell IPC hot-reload trigger) and `healthcheck` (the placeholder-screen lockup watchdog) — [[Meta-and-Upkeep]] |
 | `herald push` | 1 | dunst's notification-ledger hook — [[Content-and-Hooks]] |
@@ -70,9 +70,9 @@ Linux, zero nix shell-outs, no NixOS assumption — the boundary the root
 ## Related
 
 - [[aoide-cli]]
-- [[livery]]
+- [[theme]]
 - [[Package-Layout]]
-- [[Rice-and-Livery]]
+- [[Rice-and-Theme]]
 - [[Screen-Commands]]
 - [[Quickshell]]
 - [[shellbridge]]

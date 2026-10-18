@@ -94,7 +94,7 @@ wallpaper/
 │                     providers.skwd-wall = ./skwd-wall.nix; }   ← the registry
 ├── strillix.nix      the shell's own layer: the default. It configures NOTHING —
 │                   the layer is the strillix runtime's — it NAMES the
-│                   arrangement, with the fact value `"quickshell"`.
+│                   layout, with the fact value `"quickshell"`.
 └── skwd-wall.nix   the external engine: its three packages, the `skwd-walld`
                     user service, and the config merge that keeps the engine's
                     own theming off and its library inside `aoide.root`.
@@ -103,7 +103,7 @@ wallpaper/
 Both providers set the fact `aoide.wallpaper.provider` to their own name, so
 exactly one answer exists on a host; `strillix` publishes that one word as
 `/stage/wallpaper-provider`, and both readers — the CLI
-(`strillix-rice`'s `wallpaper_provider`) and `LiveryState.qml` — read the same file.
+(`strillix-rice`'s `wallpaper_provider`) and `ThemeState.qml` — read the same file.
 Absent means the shell's own layer.
 
 They never name each other either. The bridge is the CLI both sides already
@@ -215,8 +215,8 @@ no GPU override. Neither package needs `allowUnfree` (both MIT).
 
 `config.aoide.*` options it declares itself, plus stock NixOS/Home-Manager
 options. A dendrite reads no other module's internals — not even another
-dendrite's. A paint dendrite reads the dress (`aoide.livery`), the structure
-(`aoide.arrangement`), the surface registry (`aoide.surfaces`), the component
+dendrite's. A paint dendrite reads the dress (`aoide.theme`), the structure
+(`aoide.layout`), the surface registry (`aoide.surfaces`), the component
 slots (`aoide.components`), the identity scalars and its own fact; nothing else (root `AGENTS.md` house rule 5).
 
 ## How it composes

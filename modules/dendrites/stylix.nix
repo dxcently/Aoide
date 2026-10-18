@@ -3,13 +3,13 @@
 # Stylix is Aoide's "recording" side (concepts/Notes, entities/Stylix):
 # ONE base16 scheme + fonts/cursor/wallpaper feed Stylix, which themes every
 # nix-manageable target — GTK/Qt, terminal, editors, boot. The live side
-# (stage/livery.json + hyprctl + OSC) is the notes package's job; this lane is
-# the baked half. Both derive from the same `aoide.livery`, so preview and
+# (stage/theme.json + hyprctl + OSC) is the notes package's job; this lane is
+# the baked half. Both derive from the same `aoide.theme`, so preview and
 # adopted state cannot diverge ("zero drift").
 #
 # Contract discipline (CONTRACTS.md §2, docs/BUILD.md):
 #   * A paint dendrite reads only the dress, the structure, the surfaces and
-#     identity (root AGENTS.md house rule 5). Here that is `aoide.livery` +
+#     identity (root AGENTS.md house rule 5). Here that is `aoide.theme` +
 #     `aoide.surfaces`. No other module.
 #   * It applies the component-tier null→palette fallback ITSELF (§1) — the
 #     option system stores null; this lane resolves it.
@@ -48,7 +48,7 @@ let
   # Read-side venue recolour (CONTRACTS.md §1, override tier): resolve rewrites
   # colours equal to an overridden anchor's authored value, in one pass, with
   # no option-system recursion — the option itself stays inert either way.
-  t = (import ../../lib/livery.nix { inherit lib; }).resolve config.aoide.livery;
+  t = (import ../../lib/theme.nix { inherit lib; }).resolve config.aoide.theme;
 
   # The stylix module is imported by the nucleus module (see the header) only when
   # the input is present. Gate on the OPTION being declared — reading `options`
@@ -93,7 +93,7 @@ let
   };
 
   # ── base16 scheme ─────────────────────────────────────────────────────────
-  # Preferred source: the song's full base16 note tier (`aoide.livery.base16`,
+  # Preferred source: the song's full base16 note tier (`aoide.theme.base16`,
   # all 16 slots, base16-standard semantics) — the real scheme, baked verbatim.
   # Fallback: synthesise from the 4-anchor palette (v0 behaviour) so songs
   # that carry no scheme still theme coherently.
@@ -122,14 +122,14 @@ let
   };
 
   # ── the song's face (CONTRACTS.md §1, font tier) ────────────────────────
-  # Additive-optional: the song's `aoide.livery.fonts.monospace` when it
+  # Additive-optional: the song's `aoide.theme.fonts.monospace` when it
   # carries one, else this lane's own default. Read straight off the option,
   # not through `resolve` — the venue recolour is a colour pass, and a face
   # is not a colour. The role shape is Stylix's own ({ package, name }), so
   # the value passes through untouched.
   monospace =
-    if config.aoide.livery.fonts.monospace != null then
-      config.aoide.livery.fonts.monospace
+    if config.aoide.theme.fonts.monospace != null then
+      config.aoide.theme.fonts.monospace
     else
       {
         package = pkgs.libertine;
@@ -145,7 +145,7 @@ let
   '';
 
   # The cover-art note (CONTRACTS.md §1): a song MAY carry a real wallpaper as a
-  # literal nix path (`aoide.livery.wallpaper`), which the option system copies to
+  # literal nix path (`aoide.theme.wallpaper`), which the option system copies to
   # the store — this is note data, not a song/ runtime read. When the note is
   # null this lane bakes the deterministic solid-colour fallback above, so the
   # path stays buildable and drift-free either way.
@@ -249,12 +249,12 @@ in
         # recolour `resolve` applies is a colour pass, and a register is not
         # a colour. mkDefault, unchanged from before the field existed, so
         # a venue or host can still name its own polarity and win.
-        polarity = lib.mkDefault config.aoide.livery.polarity;
+        polarity = lib.mkDefault config.aoide.theme.polarity;
 
         # The ONE base16 scheme — the baked fan-out's single source.
         base16Scheme = scheme;
 
-        # Wallpaper: the song's cover-art note (`aoide.livery.wallpaper`) when it
+        # Wallpaper: the song's cover-art note (`aoide.theme.wallpaper`) when it
         # carries one, else a deterministic solid-colour fallback (from
         # palette.bg). mkDefault keeps it host/rice-overridable. We set this EVEN
         # WHEN quickshell owns the `wallpaper` surface
@@ -270,7 +270,7 @@ in
           size = 40;
         };
 
-        # Fonts: the song's face tier (`aoide.livery.fonts`) when it carries
+        # Fonts: the song's face tier (`aoide.theme.fonts`) when it carries
         # one, else this lane's default. `monospace` is the tier's only
         # role today — the terminal, where agents live. The remaining roles
         # stay Linux Libertine: Aoide's primary face is a humanist serif,

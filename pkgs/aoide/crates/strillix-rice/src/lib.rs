@@ -1,6 +1,6 @@
 //! strillix-rice — Aoide's ricing/design engine.
 //!
-//! `livery` is the native design-token engine: schema validation, `{group.key}`
+//! `theme` is the native design-token engine: schema validation, `{group.key}`
 //! deref + component fallback, and the stage/hyprctl/osc/file/kitty/hyprlock emitters.
 //! `live` computes the Hyprland
 //! geometry/border keyword list a staged notes document implies and
@@ -20,7 +20,7 @@ pub mod health;
 pub mod host_declare;
 pub mod ipc;
 pub mod live;
-pub mod livery;
+pub mod theme;
 pub mod lint;
 pub mod wallpaper_provider;
 pub mod widgets;

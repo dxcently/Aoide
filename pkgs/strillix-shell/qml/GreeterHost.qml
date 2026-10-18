@@ -2,11 +2,11 @@
 // "Three anchor kinds"), and the entry point of the greeter's own shell tree.
 //
 // The greeter lane (modules/dendrites/greeter.nix) builds a store tree with
-// this file as `run/qml/shell.qml`, LiveryState + StagingEngine beside it, the
+// this file as `run/qml/shell.qml`, ThemeState + StagingEngine beside it, the
 // DECLARED song's widgets under `songs/<owner>/` (with a `qmldir` naming its
 // uppercase helpers as types, as strillix's tree does), its `icons/` (when it has
 // one) at `song/songbook/<owner>/icons` — where a face finds them under
-// `AOIDE_ROOT` in the session too — and its dress as `song/stage/livery.json`,
+// `AOIDE_ROOT` in the session too — and its dress as `song/stage/theme.json`,
 // and points `AOIDE_ROOT` at it — nothing here reads /home. greetd runs it as its greeter user inside cage.
 //
 // Authentication is greetd's (`Quickshell.Services.Greetd`): `createSession`,
@@ -18,7 +18,7 @@
 // from a readiness no answer earned. After a cancel the next conversation
 // waits out greetd's reply to it (`settle`).
 //
-// The face — the declared song's `widgets/greeter.qml` — receives `livery`,
+// The face — the declared song's `widgets/greeter.qml` — receives `theme`,
 // `bridge` (null: a greeter has no shellbridge) and one extra, `auth`:
 // `message`, `messageIsError`, `responseRequired`, `responseVisible`, `busy`,
 // `failures` (a failure's message stays up until the next answer, under the
@@ -42,11 +42,11 @@ ShellRoot {
 
     readonly property string aoideRoot: Quickshell.env("AOIDE_ROOT") || ""
 
-    LiveryState { id: livery }
+    ThemeState { id: theme }
     StagingEngine { id: stagingEngine }
 
     readonly property string faceSource:
-        stagingEngine.has(livery.songName, "greeter") ? stagingEngine.source(livery.songName, "greeter") : ""
+        stagingEngine.has(theme.songName, "greeter") ? stagingEngine.source(theme.songName, "greeter") : ""
 
     readonly property int faceReadyMs: 3000
     property var sessionCommand: []
@@ -236,7 +236,7 @@ ShellRoot {
                 return
             }
             auth.ready = false
-            var item = comp.createObject(faceHolder, { "livery": livery, "bridge": null, "auth": auth })
+            var item = comp.createObject(faceHolder, { "theme": theme, "bridge": null, "auth": auth })
             if (!item) {
                 console.warn("[aoide/greeter] the face could not be created; the floor stays")
                 return

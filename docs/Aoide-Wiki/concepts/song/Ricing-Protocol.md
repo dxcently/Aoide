@@ -34,7 +34,7 @@ prompt, a mood) is a *different job* from **application** (fanning that
 scheme out to every surface that reads it). Conflating them is how a rice
 job ends up hard-coding colours in six different files that drift apart.
 
-- **Creation** happens once, in the song's `rice.nix`, as `aoide.livery.base16`
+- **Creation** happens once, in the song's `rice.nix`, as `aoide.theme.base16`
   — sixteen literal hex slots (base00–base0F) plus the small `palette`
   convenience block (bg/fg/accent/urgent/hot). The **`sonata`** song
   (`rices/sonata/rice.nix`) is the worked example — the LIGHT dusk
@@ -56,15 +56,15 @@ job ends up hard-coding colours in six different files that drift apart.
 - **Application** is [[Stylix]]'s job, and only Stylix's: one `base16Scheme`
   feeds every nix-manageable target (terminal, GTK/Qt, icons, cursor,
   editors, browser, boot) automatically. On the Quickshell side, the same
-  same livery values fan out through `stage/livery.json` — one runtime read,
+  same theme values fan out through `stage/theme.json` — one runtime read,
   every QML surface. **No other file hard-codes a colour available from
-  livery.** A dendrite that wants a colour reads
-  `aoide.livery.*`; it never writes its own hex.
+  theme.** A dendrite that wants a colour reads
+  `aoide.theme.*`; it never writes its own hex.
 
 The point of the split: creation is where taste and vision-checking live
 (this section, below); application is mechanical and never needs re-deriving
 per surface. When a rice looks wrong, ask which concern broke — usually it is
-application (a surface reading a livery role it does not own, or hosting
+application (a surface reading a theme role it does not own, or hosting
 a stray literal) rather than creation (the sixteen slots themselves).
 
 ## 2. The mandatory vision-check
@@ -101,14 +101,14 @@ loop). Two things to look at, side by side, on the live desktop:
    notification/OSD cards, workspace highlight) sets `radius: 0`. No surface
    rounds; a stray rounded corner reads as a surface that missed the grammar.
 2. **Widget colours match the bar.** Every gadget, popout, and dock surface
-   pulls from the same `aoide.livery.*` roles the bar uses (the house
+   pulls from the same `aoide.theme.*` roles the bar uses (the house
    grammar's glyph/role palette, recorded historically in the retired
    `default` song's design memory — now `references/pantheon/pantheon-grammar.md`
    — see [[Song-Anatomy]] — `wireCyan`, `holoBlue`, `violet`, `glitchPink`,
    `paletteAccent`/`paletteHot`). A widget that
    *looks* subtly off (a slightly different cream, an accent that reads as a
    different hue) usually means it resolved a fallback instead of the song's
-   actual livery value — the fix is in the livery wiring, not a local hex
+   actual theme value — the fix is in the theme wiring, not a local hex
    tweak.
 
 This is a **vision check**, not a lint rule: it means actually looking at the
@@ -120,7 +120,7 @@ lane reading another module, a surface with two owners); it cannot catch
 ## Related
 
 - [[Stylix]] — the application half: one base16 scheme, baked fan-out.
-- [[livery]] — the livery seam creation writes into and application reads from.
+- [[theme]] — the theme seam creation writes into and application reads from.
 - [[Song-Vocabulary]] — key/song/cover vocabulary this protocol operates on.
 - [[Song-Anatomy]] — where the rices and per-song design memory live under
   `song/`.

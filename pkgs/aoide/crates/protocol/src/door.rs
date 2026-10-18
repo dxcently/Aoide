@@ -313,7 +313,7 @@ pub const AOIDE_ONLY_HEADS: &[&str] = &[
     "soundcheck", "spawn", "update", "usage", "workspace",
 ];
 pub const STRILLIX_ONLY_HEADS: &[&str] = &[
-    "apps", "clipboard", "component", "cover", "element", "herald", "icon", "livery", "lock", "preview", "quickshell", "reload",
+    "apps", "clipboard", "component", "cover", "element", "herald", "icon", "theme", "lock", "preview", "quickshell", "reload",
     "rice", "screen", "shellbridge",
 ];
 pub const SHARED_HEADS: &[&str] = &["guide", "mcp", "onboard", "pair", "schema", "secrets"];

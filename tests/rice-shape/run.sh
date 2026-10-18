@@ -3,7 +3,7 @@
 # the flake's own `rice-shape` check). Each fixture song must pass or fail as
 # named, and a failure must name the song and the rule it broke.
 #
-#   livery-leak/  a hyprland.conf that sets a livery-owned key fails; a clean one passes.
+#   theme-leak/  a hyprland.conf that sets a theme-owned key fails; a clean one passes.
 #   module-leak/  a rice module value outside lib.mkDefault fails, and so does a
 #                 write to any wayland.windowManager.hyprland.* key, even under
 #                 lib.mkDefault; a rice that wraps its values, and keeps
@@ -35,13 +35,13 @@ check() {
 }
 
 fail=0
-out=$(check livery-leak leaky)
-if [[ $out == *"livery-owned key"*"leaky"* ]]; then echo "ok    leaky: blur dotted key refused"; else echo "FAIL  leaky: $out"; fail=1; fi
-out=$(check livery-leak clean)
+out=$(check theme-leak leaky)
+if [[ $out == *"theme-owned key"*"leaky"* ]]; then echo "ok    leaky: blur dotted key refused"; else echo "FAIL  leaky: $out"; fail=1; fi
+out=$(check theme-leak clean)
 if [[ $out == *"ok"* && $out != *FAILED* ]]; then echo "ok    clean: passes"; else echo "FAIL  clean: $out"; fail=1; fi
 
 out=$(check module-leak plain)
-if [[ $out == *"song plain's system.module sets aoide.livery.polarity outside lib.mkDefault"* ]]; then echo "ok    plain: unwrapped value refused"; else echo "FAIL  plain: $out"; fail=1; fi
+if [[ $out == *"song plain's system.module sets aoide.theme.polarity outside lib.mkDefault"* ]]; then echo "ok    plain: unwrapped value refused"; else echo "FAIL  plain: $out"; fail=1; fi
 out=$(check module-leak settings)
 if [[ $out == *"song settings's home.module writes wayland.windowManager.hyprland.settings"* ]]; then echo "ok    settings: base settings write refused"; else echo "FAIL  settings: $out"; fail=1; fi
 out=$(check module-leak extra)
@@ -51,5 +51,5 @@ if [[ $out == *"ok"* && $out != *FAILED* ]]; then echo "ok    wrapped: mkDefault
 out=$(check wallpaper-name named)
 if [[ $out == *"ok"* && $out != *FAILED* ]]; then echo "ok    named: cover/<song>-desktop picture passes"; else echo "FAIL  named: $out"; fail=1; fi
 out=$(check wallpaper-name stray)
-if [[ $out == *"sets aoide.livery.wallpaper to"*"dusk.jpg"*"cover/stray-desktop"* ]]; then echo "ok    stray: other-named picture refused"; else echo "FAIL  stray: $out"; fail=1; fi
+if [[ $out == *"sets aoide.theme.wallpaper to"*"dusk.jpg"*"cover/stray-desktop"* ]]; then echo "ok    stray: other-named picture refused"; else echo "FAIL  stray: $out"; fail=1; fi
 exit $fail

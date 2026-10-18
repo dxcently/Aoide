@@ -43,7 +43,7 @@ import Quickshell.Io
 //                  mark) crowns it, in place of the old segno. A gold 𝄂 closes the
 //                  score.
 //   · TERMINAL   — box-drawing frames the panel; each cap is the dock's shared
-//                  [▓▓░░] shade-glyph gauge (LiveryState.ctxBar), tinted clay
+//                  [▓▓░░] shade-glyph gauge (ThemeState.ctxBar), tinted clay
 //                  and swung to terracotta past 85% (ctxColor) like every other
 //                  meter in the house.
 //
@@ -54,11 +54,11 @@ import Quickshell.Io
 // the day `live.ok` flips true and fiveHour/sevenDay/… arrive, the plan/weekly/
 // credit gauges light up with NO further change. Height is content-driven, so the
 // degraded panel is compact, not a big empty marble box. All colour flows from
-// `livery`; hard corners (radius 0) everywhere.
+// `theme`; hard corners (radius 0) everywhere.
 Item {
     id: gadget
 
-    required property var livery            // palette roles
+    required property var theme            // palette roles
     property string usagePath: (Quickshell.env("AOIDE_ROOT") || (Quickshell.env("HOME") + "/.aoide")) + "/state/usage.json"
 
     // WidgetSlot._songProps() always passes bridge unconditionally (universal
@@ -88,7 +88,7 @@ Item {
     // with urgent (base08 #b0472f terracotta, which ctxColor swings to past 85%).
     // So the Claude re-skin stays palette-driven on base09 — no off-palette coral.
     // (A literal Claude clay ≈ #d97757 is noted for the vision-check, not applied.)
-    readonly property color signature: livery.base09
+    readonly property color signature: theme.base09
 
     readonly property int cells: 14
     readonly property real urgentAt: 85
@@ -239,8 +239,8 @@ Item {
     // succeed. Threshold is 3x the poller's own cadence (aoide.usage.interval,
     // default "300s" — modules/nucleus/options.nix): missing three ticks in a row
     // is plainly "not refreshing", not a single missed beat. Mirrored as a literal
-    // constant rather than read live off the livery file — flag: if that Nix default
-    // ever gets retuned, this drifts with it (a one-line livery file field would fix
+    // constant rather than read live off the theme file — flag: if that Nix default
+    // ever gets retuned, this drifts with it (a one-line theme file field would fix
     // that properly; not worth it for a single dim caveat).
     readonly property real pollCadenceMs: 300 * 1000
     readonly property real staleAfterMs: pollCadenceMs * 3
@@ -311,7 +311,7 @@ Item {
         anchors.leftMargin: 4; anchors.topMargin: 5
         anchors.rightMargin: -4; anchors.bottomMargin: -5
         radius: 0
-        color: gadget.withA(livery.paletteFg, 0.22)
+        color: gadget.withA(theme.paletteFg, 0.22)
     }
 
     // the stele ──────────────────────────────────────────────────────────────────
@@ -319,8 +319,8 @@ Item {
         id: stele
         anchors.fill: parent
         radius: 0
-        color: livery.paletteBg
-        border.color: livery.paletteFg
+        color: theme.paletteBg
+        border.color: theme.paletteFg
         border.width: 2
 
         Rectangle {                                   // inset keyline — CLAY (Claude)
@@ -358,7 +358,7 @@ Item {
                 font.family: gadget.faceSerif
                 font.pixelSize: um.compact ? 12 : 14
                 font.weight: Font.Medium; font.letterSpacing: 2
-                color: livery.paletteFg
+                color: theme.paletteFg
             }
             Text {                                    // util %, tallied in gold / terracotta
                 id: umPct
@@ -366,27 +366,27 @@ Item {
                 anchors.baseline: umName.baseline
                 text: Math.round(um.util) + "%"
                 font.family: gadget.faceMono; font.pixelSize: um.compact ? 12 : 15
-                color: um.urgent ? livery.paletteUrgent : livery.paletteAccent
+                color: um.urgent ? theme.paletteUrgent : theme.paletteAccent
             }
             Text {                                    // reset countdown (small, dim, italic)
                 anchors.left: umName.right; anchors.leftMargin: 8
                 anchors.right: umPct.left; anchors.rightMargin: 6   // bounded — never bleeds under the %
                 anchors.baseline: umName.baseline
-                text: gadget.livery.usageResetIn(um.block ? um.block.resetsAt : "", gadget.nowMs)
+                text: gadget.theme.usageResetIn(um.block ? um.block.resetsAt : "", gadget.nowMs)
                 elide: Text.ElideRight
                 horizontalAlignment: Text.AlignLeft
                 font.family: gadget.faceSerif; font.italic: true
                 font.pixelSize: 10
-                color: gadget.withA(livery.paletteFg, 0.5)
+                color: gadget.withA(theme.paletteFg, 0.5)
             }
             Text {                                    // the shared shade-glyph gauge
                 anchors.left: parent.left; anchors.right: parent.right
                 anchors.bottom: parent.bottom; anchors.bottomMargin: um.compact ? 0 : 2
-                text: gadget.livery.ctxBar(um.util, um.barCells)
+                text: gadget.theme.ctxBar(um.util, um.barCells)
                 font.family: gadget.faceMono; font.pixelSize: um.compact ? 12 : 14
                 fontSizeMode: Text.HorizontalFit
                 horizontalAlignment: Text.AlignLeft
-                color: gadget.livery.ctxColor(um.util, gadget.signature)
+                color: gadget.theme.ctxColor(um.util, gadget.signature)
             }
         }
 
@@ -406,7 +406,7 @@ Item {
 
                 Rectangle {                           // deeper marble band
                     anchors.fill: parent; anchors.bottomMargin: 5
-                    color: gadget.withA(livery.paletteFg, 0.05)
+                    color: gadget.withA(theme.paletteFg, 0.05)
                 }
                 Text {                                // the Claude spark — a rayed
                     id: clef                          // sunburst, crowning the stele
@@ -565,7 +565,7 @@ Item {
                     text: "CLAUDE"
                     font.family: gadget.faceSerif; font.pixelSize: 19
                     font.weight: Font.DemiBold; font.letterSpacing: 4
-                    color: livery.paletteFg
+                    color: theme.paletteFg
                 }
                 Text {                                // the source — swaps to the
                                                         // hover cue or the spin word,
@@ -699,7 +699,7 @@ Item {
                         anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter
                         text: "credits"
                         font.family: gadget.faceSerif; font.pixelSize: 12
-                        font.letterSpacing: 2; color: livery.paletteFg
+                        font.letterSpacing: 2; color: theme.paletteFg
                     }
                     Text {
                         anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
@@ -727,14 +727,14 @@ Item {
                             text: "live usage unavailable"
                             font.family: gadget.faceSerif; font.italic: true
                             font.pixelSize: 12
-                            color: gadget.withA(livery.paletteFg, 0.5)
+                            color: gadget.withA(theme.paletteFg, 0.5)
                         }
                         Text {
                             width: parent.width
                             text: "— " + gadget.liveError + " · enable the live fetch"
                             elide: Text.ElideRight
                             font.family: gadget.faceMono; font.pixelSize: 10
-                            color: gadget.withA(livery.paletteFg, 0.38)
+                            color: gadget.withA(theme.paletteFg, 0.38)
                         }
                     }
                 }
@@ -774,19 +774,19 @@ Item {
                         text: tag
                         font.family: gadget.faceSerif; font.pixelSize: 13
                         font.weight: Font.Medium; font.letterSpacing: 2
-                        color: livery.paletteFg
+                        color: theme.paletteFg
                     }
                     Text {                            // ~$cost, tallied in gold
                         id: lrCost
                         anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
                         text: span ? ("~" + gadget.money(span.costUsd)) : "—"
                         font.family: gadget.faceMono; font.pixelSize: 12
-                        color: livery.paletteAccent
+                        color: theme.paletteAccent
                     }
                     Text {                            // token count, compacted (686M …)
                         anchors.right: lrCost.left; anchors.rightMargin: 10
                         anchors.verticalCenter: parent.verticalCenter
-                        text: span ? (gadget.livery.ctxCompact(span.tokens) + " tok") : ""
+                        text: span ? (gadget.theme.ctxCompact(span.tokens) + " tok") : ""
                         font.family: gadget.faceMono; font.pixelSize: 11
                         color: gadget.withA(gadget.signature, 0.9)
                     }
@@ -801,7 +801,7 @@ Item {
                     elide: Text.ElideRight
                     font.family: gadget.faceSerif; font.italic: true
                     font.pixelSize: 10
-                    color: gadget.withA(livery.paletteFg, 0.45)
+                    color: gadget.withA(theme.paletteFg, 0.45)
                 }
             }
 
@@ -818,7 +818,7 @@ Item {
                                        + (gadget.sevenDay ? " · wk " + Math.round(gadget.utilOf(gadget.sevenDay)) + "%" : ""))
                                     : "local est · this machine") + " ├"
                     font.family: gadget.faceMono; font.pixelSize: 11
-                    color: gadget.withA(livery.paletteFg, 0.8)
+                    color: gadget.withA(theme.paletteFg, 0.8)
                 }
                 Text {
                     id: ffCorner
@@ -834,7 +834,7 @@ Item {
                     anchors.verticalCenterOffset: -1
                     text: "𝄂"
                     font.family: gadget.faceMusic; font.pixelSize: 18
-                    color: livery.paletteAccent
+                    color: theme.paletteAccent
                 }
                 Rectangle {
                     anchors.left: ffL.right; anchors.right: ffBar.left

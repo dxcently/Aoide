@@ -10,7 +10,7 @@ lit by lamps.
 **References:** `refs/ref-termui.png` (the pane grammar: box rules, green
 titles, braille/dot charts, sparklines, a gauge) and `refs/ref-crt.jpg` (the
 light: green phosphor on near-black, a faint bloom, nothing else).
-**Polarity:** dark. Needs a livery field the lane does not read yet (§5).
+**Polarity:** dark. Needs a theme field the lane does not read yet (§5).
 **Cover:** a static circuit board on the CRT black (§3.9): dim copper-green
 tracks, pads and vias, generated from the palette. Staged live with
 `strx cover set`; the wallpaper note stays `null` until the cover is
@@ -60,7 +60,7 @@ Conductor Channel).
   drawing and block elements and braille U+2800–28FF all native, no
   fallback). No proportional text anywhere.
 - One face for the terminal: **ShureTechMono Nerd Font Mono**, set as
-  `aoide.livery.fonts.monospace` — squared-off, single-weight, a console
+  `aoide.theme.fonts.monospace` — squared-off, single-weight, a console
   rather than the desktop's humanist serif. A pane is the song's cell, the
   terminal is where an agent lands; both are fixed-pitch machine faces.
   Coverage checked against the installed face: box drawing and rules
@@ -259,7 +259,7 @@ One 28px line in the tmux/termui idiom, left to right:
   drafts (the current one lit), `[+ new draft]`, and, in staging only,
   `[save as draft]`. A row sends one switch and the cell reads a dim `󰏘 …`
   (padded to the word, so nothing moves) at once; clicks do nothing until
-  the mode (`/stage/mode.json` `mode`, through `livery.riceMode`), the
+  the mode (`/stage/mode.json` `mode`, through `theme.riceMode`), the
   draft or the song actually changes, or 10s pass. A switch reloads the
   shell; one that changed nothing in 10s simply returns the cell to its word
   and says no more. The Pane has no inner glow, takes no keyboard, and closes
@@ -548,11 +548,11 @@ The wallpaper is a still image of a circuit board under the tube.
 - Density falls off toward the screen centre, so windows sit on quiet
   black and the tracks live at the edges and corners.
 - It is generated, not drawn: `widgets/CoverPcb.qml` (an uppercase helper,
-  never a slot) renders it from the livery with a fixed seed, and the
+  never a slot) renders it from the theme with a fixed seed, and the
   preview canvas shoots it at each monitor's size into
   `cover/pcb-<w>x<h>.png`. Regenerating after a palette change is one shot.
 - Live: `strx cover set <abs path>` (a hot swap). Declaring it into
-  `aoide.livery.wallpaper` for the rebuild is the User's to admit.
+  `aoide.theme.wallpaper` for the rebuild is the User's to admit.
 
 **The live board — `widgets/wallpaper.qml`.** The cover is the song's
 `wallpaper` slot body (the lane anchors it inside the per-screen Background
@@ -606,8 +606,8 @@ reads a fixture path.
 ## 5. Hazards and open questions
 
 - **Polarity (settled).** The key's register is the song's own:
-  `aoide.livery.polarity = "dark"` is declared beside the palette
-  (`rice.nix` and `livery.json`), validated by `rice lint` (exactly
+  `aoide.theme.polarity = "dark"` is declared beside the palette
+  (`rice.nix` and `theme.json`), validated by `rice lint` (exactly
   `"light"`/`"dark"`; CONTRACTS.md §1), and read by the stylix dendrite as
   `stylix.polarity`, so every Stylix-managed target reads the phosphor ramp as
   the dark register it is instead of the lane's light default. Baked only —
@@ -631,7 +631,7 @@ reads a fixture path.
 ## Iteration Log
 
 - 2026-09-26 — composed from sonata; design drafted (this file,
-  `coverage.md`, the livery key). Nothing staged.
+  `coverage.md`, the theme key). Nothing staged.
 - 2026-09-26 — khoa: no sonata gadgets (cadenza draws its own); the dock is
   a tabbed board — OVERVIEW first (agents, projects, terminals, mail), a
   tab per project, one SYS tab (CPU + usage), a NOTIF tab; terminal
@@ -678,7 +678,7 @@ reads a fixture path.
   click and swallows further clicks until the mode changes or 10s pass, so
   a double click can no longer send two toggles (§3.1).
 - 2026-09-28 — khoa: the terminal should read hacker-y too, as part of the
-  key. Landed as the livery font tier (`aoide.livery.fonts.monospace`, a v0
+  key. Landed as the theme font tier (`aoide.theme.fonts.monospace`, a v0
   additive tier, nucleus option + CONTRACTS §1 + the stylix lane's source of
   truth), set here to ShureTechMono Nerd Font Mono; panes keep
   JetBrainsMono. Baked only: stylix is the one reader, so the face lands on
@@ -693,9 +693,9 @@ reads a fixture path.
   session), the bar's lamp walks the same code, and
   `design/trace.test.js` runs it under `node` (§2 Motion, §3.9).
 - 2026-09-28 — khoa: the key's register is the SONG's, and the glass follows
-  it. `aoide.livery.polarity = "dark"` is declared beside the palette (nucleus
+  it. `aoide.theme.polarity = "dark"` is declared beside the palette (nucleus
   option, CONTRACTS §1, `rice lint`, read by the stylix dendrite) and mirrored
-  in `livery.json`; baked only, so flipping it is a rebuild, not a stage. The
+  in `theme.json`; baked only, so flipping it is a rebuild, not a stage. The
   terminal reads at `geometry.terminalOpacity` 0.7 (kitty
   `background_opacity`, staged) and the compositor's hyprglass block now takes
   its two enable keys from `geometry.blurEnabled`, so a booted desktop and a

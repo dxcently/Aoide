@@ -1,8 +1,8 @@
 # modules/nucleus/options.nix — THE OPTION CONTRACT.
 #
 # Every other module (dendrites) builds against the options
-# declared here. This is versioned in CONTRACTS.md (livery schema v0). A paint
-# lane reads `aoide.livery`, `aoide.arrangement` and `aoide.surfaces` from here,
+# declared here. This is versioned in CONTRACTS.md (theme schema v0). A paint
+# lane reads `aoide.theme`, `aoide.layout` and `aoide.surfaces` from here,
 # plus the core scalars and the song selection declared beside them — the
 # enumerated, closed set root `AGENTS.md` house rule 5 states in full; no module
 # reads another module. That discipline is a documented convention, backed by
@@ -25,8 +25,8 @@ let
     ;
 
   # A base16 hex colour, with or without leading '#'. Kept permissive so v0
-  # livery files stay easy to author; the livery engine's `rice lint` is the
-  # authoritative validator (the native livery engine, pkgs/aoide).
+  # theme files stay easy to author; the theme engine's `rice lint` is the
+  # authoritative validator (the native theme engine, pkgs/aoide).
   hexColor = types.strMatching "#?[0-9a-fA-F]{6}";
 
   # ── Enable facts: set only from the directory of the dendrite that owns them
@@ -100,7 +100,7 @@ let
   # Additive-optional under the existing v0 schema (same nullOr-with-fallback
   # shape as the component tier above): every field is optional and falls
   # back to the compositor lane's opinionated default when unset
-  # (`terminalOpacity`: the host's bake in kitty.conf, no Aoide constant). A livery
+  # (`terminalOpacity`: the host's bake in kitty.conf, no Aoide constant). A theme
   # file with no `geometry` block behaves exactly as before — the compositor
   # lane applies the fallback, not the option system.
   geometryType = types.submodule {
@@ -155,7 +155,7 @@ let
   # value through, no translation.
   #
   # BAKED ONLY, the `wallpaper` tier's posture rather than geometry's: nothing
-  # at runtime reads a face, so there is no `stage/livery.json` twin and no
+  # at runtime reads a face, so there is no `stage/theme.json` twin and no
   # engine schema — the stylix lane is the only reader, and the change lands on
   # a rebuild. (Geometry rides the stage file because `hyprctl keyword` CAN set
   # it live; a terminal cannot be re-faced mid-session.)
@@ -228,16 +228,16 @@ let
 
   # ── Override tier (venue recolour — HOST-set, never song-set) ─────────────
   # The five palette anchors, each optional. Semantics (CONTRACTS.md §1,
-  # "Override tier"): an overridden anchor rewrites EVERY livery colour equal
+  # "Override tier"): an overridden anchor rewrites EVERY theme colour equal
   # to the song's authored value for that anchor — palette, base16, component
   # tiers — in one simultaneous pass, in BOTH fan-outs (baked Stylix scheme
-  # and the $STRILLIX_ROOT/stage/livery.json seed). A recolour, never a re-key: slots
+  # and the $STRILLIX_ROOT/stage/theme.json seed). A recolour, never a re-key: slots
   # not carrying an overridden anchor's value stay the song's. Same
   # nullOr-hex-per-field shape as the component tier above (mkComponent).
   #
   # Phase 1b (named-key overrides): sibling sub-tiers `base16`/`bar`/`notif`/
   # `window` set ONE slot exactly — no propagation, no value-match
-  # participation (lib/livery.nix's `resolve` applies these as a second,
+  # participation (lib/theme.nix's `resolve` applies these as a second,
   # overlay pass). No name collision with the five anchor fields above
   # (anchors are bg/fg/accent/urgent/hot; the sub-tiers are base16/bar/
   # notif/window). `base16` is its OWN all-optional submodule here, built
@@ -354,7 +354,7 @@ let
   # ── Declared widget-type registry entry (v1) ──────────────────────────────
   # Lets a song register a brand-new widget TYPE via nix, apart from the
   # shipped/anchored slot catalog (CONTRACTS.md §5 "Per-song flavor
-  # widgets"). Keyed by slot name in `arrangement.widgets` below — the attribute
+  # widgets"). Keyed by slot name in `layout.widgets` below — the attribute
   # name IS the slot name, expected shape `[a-z0-9][a-z0-9-]*` (documented
   # convention, not enforced at this layer — same permissive-here,
   # `rice lint`-is-authoritative posture as `hexColor` above). The song's own
@@ -431,9 +431,9 @@ let
     };
   };
 
-  # ── Expected-paint entry (v1 `arrangement.surfaces`) ──────────────────────
+  # ── Expected-paint entry (v1 `layout.surfaces`) ──────────────────────
   # One flag per declared surface. Keyed by slot name in
-  # `arrangement.surfaces` below — the attribute name IS the slot name,
+  # `layout.surfaces` below — the attribute name IS the slot name,
   # resolving to the layer-shell namespace `aoide-<slot>` exactly as
   # `widgetType.namespace` derives one when null. This declares an
   # EXPECTATION and instantiates nothing: no surface is stood up by naming
@@ -474,7 +474,7 @@ in
     # in (the same selection discipline as a dendrite — see CONTRACTS.md §5).
     #
     # The VENUE (host) decides its instruments (dendrites, hardware);
-    # the SONG carries only the livery (palette + component tiers). A song must
+    # the SONG carries only the theme (palette + component tiers). A song must
     # never set host options or enable dendrites.
     rice = mkOption {
       type = types.nullOr types.str;
@@ -483,7 +483,7 @@ in
       description = ''
         The song (rice) this host performs. Set to a committed song name
         (a folder under rices/<name>/) to replay it on this host;
-        the livery fan-out swaps with zero other edits. Null (the default)
+        the theme fan-out swaps with zero other edits. Null (the default)
         means no song is named: a paint lane reads this null and deploys
         nothing — no QML tree, no seeded stage, no rice restart — rather than
         an empty surface, and no song's body is imported. Naming a song is what
@@ -544,16 +544,16 @@ in
       '';
     };
 
-    # ── Livery seam (v0 schema) — the ONLY thing paint lanes read ─────────
-    livery = mkOption {
+    # ── Theme seam (v0 schema) — the ONLY thing paint lanes read ─────────
+    theme = mkOption {
       description = ''
-        The v0 livery schema — the single seam between the frozen nix layer
+        The v0 theme schema — the single seam between the frozen nix layer
         and the live desktop. Paint dendrites consume this and nothing else.
         Aoide's design-token layer: the tokens themselves, named for the one
         set of house colours every surface wears in unison. Values and engine
-        are one thing: the tokens are livery, resolved/validated/emitted by
-        livery. The container remains the W3C design-tokens format. Versioned
-        as "livery schema v0" in CONTRACTS.md.
+        are one thing: the tokens are theme, resolved/validated/emitted by
+        theme. The container remains the W3C design-tokens format. Versioned
+        as "theme schema v0" in CONTRACTS.md.
       '';
       default = { };
       type = types.submodule {
@@ -579,9 +579,9 @@ in
               BAKED ONLY, the font tier's posture: no emitter carries it and
               `rice stage` does not apply it — GTK/Qt and Stylix read it at
               build time, so flipping it is a user-gated rebuild, not a stage.
-              It is still carried in a song's `livery.json` beside `palette`
+              It is still carried in a song's `theme.json` beside `palette`
               and validated by `rice lint` (exactly "light"|"dark", or absent
-              for "no opinion"), and it reaches `$STRILLIX_ROOT/stage/livery.json` through
+              for "no opinion"), and it reaches `$STRILLIX_ROOT/stage/theme.json` through
               the activation seed like every other top-level key — where nothing
               reads it today.
             '';
@@ -594,7 +594,7 @@ in
               semantics). When set, the stylix lane bakes this scheme for
               terminals/editors/GTK instead of synthesising one from the
               4-anchor palette. The palette tier still drives the live
-              (stage/livery.json) side; keep the two in the same key.
+              (stage/theme.json) side; keep the two in the same key.
             '';
           };
           bar = mkOption {
@@ -633,7 +633,7 @@ in
               face bakes exactly the theme it baked before.
 
               BAKED ONLY — like `wallpaper`, and unlike `geometry`: this tier
-              has no `stage/livery.json` twin and no engine schema entry,
+              has no `stage/theme.json` twin and no engine schema entry,
               because a face cannot hot-swap. It lands on the user-gated
               rebuild, and a staged song cannot re-face the terminal without
               one.
@@ -658,7 +658,7 @@ in
               Venue recolour tier (CONTRACTS.md §1, "Override tier"). Set by
               the HOST (never by a song) to repaint the performed song's
               anchors without editing the rices. Consumers apply it
-              through lib/livery.nix's `resolve` — the option system stores
+              through lib/theme.nix's `resolve` — the option system stores
               it inert, same posture as the component-tier nulls.
             '';
           };
@@ -666,17 +666,17 @@ in
       };
     };
 
-    # ── Arrangement seam (v1) — structure, livery's sibling ────────────────
-    arrangement = mkOption {
+    # ── Layout seam (v1) — structure, theme's sibling ────────────────
+    layout = mkOption {
       description = ''
-        The v1 arrangement schema — one of the three namespaces a paint lane may
-        read. Where `aoide.livery` carries the song's DRESS (palette · base16
-        · component tiers · geometry · fonts · cover), arrangement carries its
+        The v1 layout schema — one of the three namespaces a paint lane may
+        read. Where `aoide.theme` carries the song's DRESS (palette · base16
+        · component tiers · geometry · fonts · cover), layout carries its
         STRUCTURE: which widget/surface TYPES the song brings into existence
         (`widgets`) and which painted surfaces it expects to stay mapped
         (`surfaces`). Dress and structure are different questions, so they
         are different option trees; the paint read-whitelist stays an
-        enumerated, closed set — livery, arrangement, and the `aoide.surfaces`
+        enumerated, closed set — theme, layout, and the `aoide.surfaces`
         ownership registry (AGENTS.md house rule 5) — never an open `aoide.*`.
       '';
       default = { };
@@ -697,17 +697,17 @@ in
               (CONTRACTS.md §5) — this option only declares that the slot IS a
               widget-type registration, not just inert score.
 
-              PHYSICAL STORAGE is unchanged by the arrangement rename: a song's
-              declarations live in that song's `livery.json` under a flat
+              PHYSICAL STORAGE is unchanged by the layout rename: a song's
+              declarations live in that song's `theme.json` under a flat
               top-level `.widgets` key, sibling to `.palette`/`.base16`/`.bar`
-              (livery.json's fields are flat-per-concern, never nested under a
-              `"livery"` key). livery.json is the one stage/draft-ROUTED twin
+              (theme.json's fields are flat-per-concern, never nested under a
+              `"theme"` key). theme.json is the one stage/draft-ROUTED twin
               file — `rice mode draft` symlinks it — so splitting a second file
               off would have to duplicate that routing and keep two files
               atomically consistent across the flip. The option-tree split is a
               NIX NAMESPACE decision about what paint lanes may read; it is not a
-              file split. Precedent: livery.json already carries a top-level
-              `song` key with no `aoide.livery.song` option (CONTRACTS.md §4).
+              file split. Precedent: theme.json already carries a top-level
+              `song` key with no `aoide.theme.song` option (CONTRACTS.md §4).
             '';
           };
           surfaces = mkOption {
@@ -735,7 +735,7 @@ in
               would act on a healthy desktop.
 
               This declares an EXPECTATION and instantiates nothing. It is a
-              different question from `arrangement.widgets` above, which
+              different question from `layout.widgets` above, which
               declares and INSTANTIATES per-song flavor widget types: the
               lane-owned surfaces named here are hardcoded in the shell and
               are never widget registrations, so declaring one here must

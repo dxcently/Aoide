@@ -5,7 +5,7 @@ import "Kit.js" as Kit
 Item {
     id: root
 
-    required property var livery
+    required property var theme
     required property var bridge
 
     implicitWidth: 196
@@ -59,6 +59,6 @@ Item {
         Component.onCompleted: setSource(Kit.helper("Dial"), props)
     }
 
-    Use { x: 3; y: 25; props: ({ livery: root.livery, big: true, label: "CPU", value: Qt.binding(function () { return root.cpuPct }) }) }
-    Use { x: 120; y: 7; props: ({ livery: root.livery, label: "RAM", value: Qt.binding(function () { return root.ramPct }) }) }
+    Use { x: 3; y: 25; props: ({ theme: root.theme, big: true, label: "CPU", value: Qt.binding(function () { return root.cpuPct }) }) }
+    Use { x: 120; y: 7; props: ({ theme: root.theme, label: "RAM", value: Qt.binding(function () { return root.ramPct }) }) }
 }

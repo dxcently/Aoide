@@ -8,7 +8,7 @@ throwaway dark palette, not a real design pass
 
 **Throwaway proof-of-concept.** `nocturne` exists solely as Phase 12's
 end-to-end live proof for two things at once: (1) the `kind = "dock"`
-arrangement-registry widget type, live for the first time (Phases 8-10 only
+layout-registry widget type, live for the first time (Phases 8-10 only
 unit-tested/no-op-verified it), and (2) `StagingEngine.resolveSong`'s
 baseline-fallback inheritance — nocturne authors NO `bar.qml` or
 `herald-center.qml` of its own; those slots fall through to sonata's own

@@ -5,11 +5,11 @@
 // The popup (herald.qml) is the herald CRYING the news; this is the roll he
 // cried it FROM: one self-framed stele in the pantheon family (opaque
 // marble, 2px ink border, 1px inset signature keyline, cast shadow, radius
-// 0, colour only from livery.*), carrying every record still on the books as
+// 0, colour only from theme.*), carrying every record still on the books as
 // a compact manuscript row — the colonnade's DeviceRow grammar: margin
 // mark, serif name, mono gloss, hairline rule, hover promotes the rule.
 //
-//   · SIGNATURE — RUST `livery.base0F`, shared with the popup: one family,
+//   · SIGNATURE — RUST `theme.base0F`, shared with the popup: one family,
 //     one hue (the same one-signature-per-family rule the calendar's clay
 //     and the colonnade's murex follow).
 //   · CROWN — ❧ U+2767 pinned to "Linux Libertine O" (Noto Serif has no
@@ -43,7 +43,7 @@ Item {
     id: root
 
     // ── Note + bridge dependencies (injected by WidgetSlot) ────────────────
-    required property var livery
+    required property var theme
     required property var bridge
 
     // ── Type voices (the pantheon family) ──────────────────────────────────
@@ -52,11 +52,11 @@ Item {
     readonly property string faceMusic: "Noto Music"
     readonly property string faceCrown: "Linux Libertine O"   // ❧ lives here ONLY
 
-    readonly property color sig: livery.base0F        // rust — the family signature
-    readonly property color ink: livery.paletteFg
-    readonly property color aegean: livery.holoBlue   // information (progress)
-    readonly property color gold: livery.paletteAccent
-    readonly property color fire: livery.paletteUrgent
+    readonly property color sig: theme.base0F        // rust — the family signature
+    readonly property color ink: theme.paletteFg
+    readonly property color aegean: theme.holoBlue   // information (progress)
+    readonly property color gold: theme.paletteAccent
+    readonly property color fire: theme.paletteUrgent
 
     function withA(cstr, a) {
         var c = Qt.color(cstr)
@@ -145,7 +145,7 @@ Item {
         width: parent.width
         anchors.top: parent.top
         radius: 0
-        color: root.livery.paletteBg
+        color: root.theme.paletteBg
         border.color: root.ink
         border.width: 2
         height: content.implicitHeight + 20
@@ -577,7 +577,7 @@ Item {
                     anchors.verticalCenter: parent.verticalCenter
                     text: "\u{1D102}"
                     font.family: root.faceMusic; font.pixelSize: 15
-                    color: root.livery.paletteAccent
+                    color: root.theme.paletteAccent
                 }
                 Rectangle {
                     anchors.left: ffL.right; anchors.right: ffBar.left

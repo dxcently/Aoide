@@ -10,7 +10,7 @@ source: "[[references/AOIDE-HANDOFF]]"
 
 The naming thesis, engraved in the design: architecture is frozen music. The nix layer is the score — crystalline, immutable (see [[Snowflake-Anatomy]]) — and the running desktop is the performance. A rice is a song the system sings.
 
-Song vocabulary names the performed half. Snowflake vocabulary names the frozen half. livery is where they meet: values frozen into the crystal, sounded at runtime.
+Song vocabulary names the performed half. Snowflake vocabulary names the frozen half. theme is where they meet: values frozen into the crystal, sounded at runtime.
 
 ## The Song Map
 
@@ -22,8 +22,8 @@ the checkout's `song/`), runtime state under `$STRILLIX_ROOT/` (default
 | Music term | Meaning | `song/` path |
 |---|---|---|
 | key | palette | `rices/<song>/palette/` |
-| melody | semantic tier — survives transposition | (tier within livery) |
-| component tier | bar / notif / window overrides | (tier within livery) |
+| melody | semantic tier — survives transposition | (tier within theme) |
+| component tier | bar / notif / window overrides | (tier within theme) |
 | instruments | paint lanes — quickshell, compositor, stylix, greeter, strillix | `modules/dendrites/` (in the nix tree) |
 | song | rice | `rices/<song>/` |
 | design | per-song design wiki | `rices/<song>/design/` |
@@ -32,7 +32,7 @@ the checkout's `song/`), runtime state under `$STRILLIX_ROOT/` (default
 | chimes | notification + system sounds | `rices/<song>/sounds/` |
 | stage | live preview state (runtime) | `$STRILLIX_ROOT/stage/` |
 | the standard | shipped standard song | `rices/sonata/` |
-| rehearsal | preview (`stage/livery.json`, hot-reload) | — |
+| rehearsal | preview (`stage/theme.json`, hot-reload) | — |
 | recording | adopt — durable, committed, rebuilt | — |
 | venue | host — its own specifics and enabled instruments | `hosts/<host>/` |
 | replay | perform an existing song at a new venue | `aoide.rice = "<name>";` in host config |
@@ -54,7 +54,7 @@ A full-orchestration rice addresses all six dimensions:
 | chimes | Notification and system sounds |
 | cover | Wallpaper |
 
-Everything app-side is a [[Stylix]] target — `rice.nix` feeds the scheme once and it fans out to every nix-manageable app. Everything shell-side is a [[Quickshell]] widget — one runtime reading `stage/livery.json` means nearly the full rice hot-reloads at rehearsal.
+Everything app-side is a [[Stylix]] target — `rice.nix` feeds the scheme once and it fans out to every nix-manageable app. Everything shell-side is a [[Quickshell]] widget — one runtime reading `stage/theme.json` means nearly the full rice hot-reloads at rehearsal.
 
 ## Replay — any song, any host
 
@@ -74,7 +74,7 @@ one song activates per host. Committing a song to the clone makes it available t
 select — a host performs it once its record names it, and can stage one it never
 built in when that song's nix and packages are present.
 
-**The separation of concerns (the point of replay):** the song carries only livery — palette, component tiers, and its own covers and chimes. It never sets host options, hardware configuration, or which dendrites are enabled. Those remain host responsibilities. A host lacking an instrument simply does not sound that part; coverage degrades gracefully through the [[Self-Ricing]] coverage tiers. Host-agnosticism is a documented rice-shape convention in `CONTRACTS.md`.
+**The separation of concerns (the point of replay):** the song carries only theme — palette, component tiers, and its own covers and chimes. It never sets host options, hardware configuration, or which dendrites are enabled. Those remain host responsibilities. A host lacking an instrument simply does not sound that part; coverage degrades gracefully through the [[Self-Ricing]] coverage tiers. Host-agnosticism is a documented rice-shape convention in `CONTRACTS.md`.
 
 The `rice-runtime-untracked` check fails the tree if any `song/` runtime dir (`/stage/` · `song/auditions/` · `/declared/`) exists in the source at all — pure flake eval reads only tracked files, and `.gitignore` covers those three, so committing or leaving one behind is what the check catches. `rice declare` never carries a draft (or `takes/`) into the checkout, and a draft copied there by hand lands under a gitignored `rices/*/drafts/` and is never tracked. Committed `rices/**` is versioned score — it is legitimately read at eval and safe for hosts to reference.
 
@@ -83,7 +83,7 @@ The `rice-runtime-untracked` check fails the tree if any `song/` runtime dir (`/
 ## Related
 
 - [[Self-Ricing]]
-- [[livery]]
+- [[theme]]
 - [[Stylix]]
 - [[Snowflake-Anatomy]]
 - [[Clone-and-Run]]

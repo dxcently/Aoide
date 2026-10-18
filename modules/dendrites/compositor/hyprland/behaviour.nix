@@ -13,7 +13,7 @@
 #
 #   LOOK / SHAPE  → default.nix beside this file (the `hyprland` provider of
 #     the `compositor` capability)
-#     Anything derived from `aoide.livery`: border colours, gaps, rounding,
+#     Anything derived from `aoide.theme`: border colours, gaps, rounding,
 #     blur, the aoide-* layerrules, hyprglass, the kitty rounding
 #     rules. Re-riced whenever the song changes. That file also owns the
 #     session plumbing (programs.hyprland, the systemd/Wayland env handoff,
@@ -23,22 +23,22 @@
 #     What you want no matter what the desktop looks like: keybinds, input
 #     devices, tiling layout, misc quality-of-life, and behavioural window
 #     rules (float/workspace-assignment/idle — as opposed to the *appearance*
-#     window rules, which are livery's business and stay in the look).
+#     window rules, which are theme's business and stay in the look).
 #     Swapping songs must never disturb any of it.
 #
-# The look reads `aoide.livery` and is a paint dendrite (CONTRACTS.md §2); this
-# module reads no livery and renders nothing, so its own options stay a
+# The look reads `aoide.theme` and is a paint dendrite (CONTRACTS.md §2); this
+# module reads no theme and renders nothing, so its own options stay a
 # host-facing surface (`aoide.hyprland.*` — monitors, scrollingMonitor) — the
 # same shape these binds had in dxflake before the port.
 #
 # ── Ordering inside hyprland.conf ─────────────────────────────────────────────
 # Several modules contribute to one `extraConfig` (a `lines` option, so they
 # concatenate by merge order, NOT by import order):
-#   500  mkBefore  the compositor look — livery values first
+#   500  mkBefore  the compositor look — theme values first
 #   1000 (default) THIS FILE           — behaviour
 #   1000 (default) screenshot dendrite — its own SUPER+S binds
 #   1500 mkAfter   the strillix renderer   — one `source` line, last
-# Plain (unordered) is deliberate: the livery block must land first so these
+# Plain (unordered) is deliberate: the theme block must land first so these
 # behaviour keys are never overwritten by it. The strillix renderer's line sources
 # the rice (`~/.local/state/strillix/rice.conf`) after everything else, so a song's
 # binds and layout override the defaults above (strillix/AGENTS.md).
@@ -127,7 +127,7 @@ in
         # ── Tiling layout ─────────────────────────────────────────────────────
         # `layout` is behaviour, so it lives here — while the sibling
         # general{} keys the look writes (gaps, border_size, col.*_border) are
-        # livery-derived look. hyprlang merges repeated sections, so both
+        # theme-derived look. hyprlang merges repeated sections, so both
         # blocks coexist; keep the split by KEY, not by section name.
         general {
             layout = dwindle

@@ -5,18 +5,18 @@
 // AoideNotifications' card repeater, …) wants to let the active song replace
 // a piece of chrome with its own QML. It asks the staging engine to resolve
 // `slot` against a baseline-fallback chain (CONTRACTS.md §5): the active
-// song (`livery.songName`) if it authored the slot, else sonata (the shipped
+// song (`theme.songName`) if it authored the slot, else sonata (the shipped
 // baseline every song can fall back to), else the anchor's own lane-side
 // `fallback` Component, else nothing.
 //
 // Fixed injected-prop contract (CONTRACTS.md §5 containment): whatever loads
-// — song override or fallback — receives `livery` always, `bridge` only when
+// — song override or fallback — receives `theme` always, `bridge` only when
 // it actually declares that property, plus each key of `extraProps`
 // (slot-specific extras, e.g. notifications' `notification`). Never nix
 // `config.*` — a song widget is store-copied score, structurally incapable
 // of reaching host/lane options through this surface. Both slots in scope
 // this pass (calendar's proof stubs, per the fixed contract) declare both
-// `livery` and `bridge` as `required` even though bridge goes unused today.
+// `theme` and `bridge` as `required` even though bridge goes unused today.
 //
 // Deliberately NOT a declarative `Loader { source: … }`/`sourceComponent`:
 // QML resolves `required property` at OBJECT CREATION — a Loader only lets
@@ -43,21 +43,21 @@ import QtQuick
 Item {
     id: root
 
-    required property var livery
+    required property var theme
     required property var bridge
     required property var stagingEngine
     required property string slot
     property var extraProps: ({})
     property Component fallback: null
 
-    // Reactive off livery.songName (so live `aoide rice preview <name>` swaps
+    // Reactive off theme.songName (so live `aoide rice preview <name>` swaps
     // the loaded widget with no restart) and off stagingEngine.manifest (so a
     // rebuild's new manifest is picked up). Resolves through the baseline
     // chain (CONTRACTS.md §5): the active song if it authored `slot`, else
     // sonata (the baseline), else "" — an empty resolvedSong means neither
     // the active song nor the baseline provide it, so `_rebuild` falls
     // through to the lane-side `fallback` Component.
-    readonly property string resolvedSong: stagingEngine.resolveSong(livery.songName, slot)
+    readonly property string resolvedSong: stagingEngine.resolveSong(theme.songName, slot)
     readonly property bool songProvides: resolvedSong !== ""
 
     // The resolved widget URL, or "" when no song (active or baseline)
@@ -120,14 +120,14 @@ Item {
     }
 
     function _songProps() {
-        return root._merge({ "livery": root.livery, "bridge": root.bridge })
+        return root._merge({ "theme": root.theme, "bridge": root.bridge })
     }
 
     function _fallbackProps() {
         // bridge deliberately omitted here — the shared fallback isn't
         // contractually required to declare it; guarded post-creation
         // assignment below covers the case where it does.
-        return root._merge({ "livery": root.livery })
+        return root._merge({ "theme": root.theme })
     }
 
     function _merge(base) {

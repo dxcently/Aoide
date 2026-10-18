@@ -2,6 +2,6 @@
 # aggregation. The hook refuses it when the registry is read, naming the clash.
 {
   system.module = _: {
-    aoide.livery.palette.bg = "#000000";
+    aoide.theme.palette.bg = "#000000";
   };
 }

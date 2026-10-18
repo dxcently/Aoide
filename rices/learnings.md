@@ -32,7 +32,7 @@ What it recorded, distilled from its `design/intent.md` Iteration Log:
   historical reference. `sonata` draws its own, deliberately divergent
   grammar instead (`rices/sonata/design/greek-grammar.md`).
 
-Full history — every dated log line, the actual `rice.nix`/`livery.json` — is
+Full history — every dated log line, the actual `rice.nix`/`theme.json` — is
 in git; `git log --follow -- rices/default/` finds it.
 
 ## `cadenza` staged live (2026-09-26)

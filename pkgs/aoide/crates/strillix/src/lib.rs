@@ -23,7 +23,7 @@ use daemon::Door;
 /// `aoide_protocol::door::run` (P-A3) — the same loop `aoide-cli`'s
 /// `run_cli` drives, against strillix's OWN registry/dispatcher and its OWN
 /// smaller `special` hook: `mcp serve --stdio` starts the stdio server,
-/// `guide`/`schema`/`livery` bypass the generic `Outcome` envelope exactly
+/// `guide`/`schema`/`theme` bypass the generic `Outcome` envelope exactly
 /// like core does for the same three. Deliberately absent: `a2a serve` and
 /// `conductor` — those are core identity, never strillix's (plan P-A4: "NO a2a
 /// serve, NO conductor").
@@ -178,11 +178,11 @@ pub fn run_strillix(argv: &[String]) -> i32 {
             });
         }
 
-        // `livery emit` / `livery resolve` / `livery lint` print the
+        // `theme emit` / `theme resolve` / `theme lint` print the
         // engine's raw byte output in text mode, NOT the outcome envelope —
         // same posture as `schema` above. `--json` keeps the structured
         // envelope.
-        if inv.path.len() == 2 && inv.path[0] == "livery" && !json {
+        if inv.path.len() == 2 && inv.path[0] == "theme" && !json {
             let outcome = dispatch::dispatch(inv);
             if outcome.status == output::Status::Ok {
                 if let Some(stdout) = outcome

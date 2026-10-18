@@ -13,7 +13,7 @@ agents — what is running where, and **jump to any of them by click or
 keybind**. Agents spawn terminals faster than a human tracks them; the
 terminal commander is the pane that herds them. It exemplifies the
 [[Widget-Maker]] thesis: a watcher, a widget, and a keybind, declarative and
-themed by [[livery]].
+themed by [[theme]].
 
 herdr (an external agent-terminal-herding tool) is the prior art; Aoide's own
 vocabulary calls this duty conductor-class (see [[Lexicon]]) and ships it as
@@ -140,7 +140,7 @@ so the widget need only *tell the bar which workspace to preview* — no
   `shared.hoveredWorkspace` (a `property int` on shell.qml's shared QtObject,
   the same object that carries `tracedSessionId` for the DAG trace). It threads
   shell → dock → gadget for the *writer* and shell → bar → WorkspaceRow for the
-  *reader* — mirroring how `livery`/`bridge` are passed. Hover and click coexist
+  *reader* — mirroring how `theme`/`bridge` are passed. Hover and click coexist
   (the HoverHandler never steals the click-to-jump `MouseArea`; the dock's
   panel-wide hover union keeps the drawer open through it). On hover-exit the
   value clears to the sentinel `-1`.
@@ -149,7 +149,7 @@ so the widget need only *tell the bar which workspace to preview* — no
   tint on the note), deliberately a *different kind* of mark from the true active
   workspace's warm-accent swell + filled pill. Both can show at once: if the
   hovered terminal is on the active workspace, the ring simply frames the accent
-  pill. All colour comes from [[livery]] (`aoide.livery` roles) — no
+  pill. All colour comes from [[theme]] (`aoide.theme` roles) — no
   hardcoded hex.
 - If a session's window/workspace is not yet resolved (or it is off-screen), its
   `workspace` is `-1` and hovering the row simply highlights nothing — no error.
@@ -174,7 +174,7 @@ Two ways to reach a terminal, both one hop:
 
 It is built the way every integration is ([[Widget-Maker]]): a **dendrite**
 (watcher + shellbridge wiring), a **Quickshell widget** (the roster), and a
-**compositor keybind** — reproducible, livery-themed, and removable by one flag.
+**compositor keybind** — reproducible, theme-themed, and removable by one flag.
 The agent can extend it (add columns, filters, per-agent actions) on request.
 
 ## Related
@@ -188,5 +188,5 @@ The agent can extend it (add columns, filters, per-agent actions) on request.
 - [[Hyprland]]
 - [[Melete]]
 - [[Feature-Set]]
-- [[livery]]
+- [[theme]]
 - [[A2A-Door]]

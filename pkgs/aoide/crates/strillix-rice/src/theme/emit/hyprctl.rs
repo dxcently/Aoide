@@ -8,8 +8,8 @@
 //! golden is byte-compared, so [`shell_quote`] lives here (it IS part of the
 //! emitted bytes, ported from the Node CLI's `shellQuote`).
 
-use crate::livery::emit::{EmitError, EmitOpts, EmitOutput, Emitter};
-use crate::livery::resolve::Resolved;
+use crate::theme::emit::{EmitError, EmitOpts, EmitOutput, Emitter};
+use crate::theme::resolve::Resolved;
 
 /// `emitHyprctl` — the two border-keyword argv lines, in fixed order
 /// (active, then inactive).
@@ -83,7 +83,7 @@ pub fn render_lines(cmds: &[Vec<String>]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::livery::resolve::resolve;
+    use crate::theme::resolve::resolve;
     use serde_json::Value;
 
     fn resolved(fixture: &str) -> Resolved {

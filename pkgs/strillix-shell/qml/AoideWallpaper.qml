@@ -3,7 +3,7 @@
 // Quickshell-native wallpaper rendering — replaces swww/swaybg.
 // Reads the active cover path from stage/cover.json (shellbridge emits this
 // when a rice adopts or previews a new cover; any writer staging the file
-// hot-swaps the wallpaper live via FileView's watcher). Colors from livery
+// hot-swaps the wallpaper live via FileView's watcher). Colors from theme
 // (solid palette fallback when no cover is staged or the image fails).
 //
 // stage/cover.json contract (CONTRACTS.md §4): the staged cover — `path` for a
@@ -23,7 +23,7 @@ import Quickshell.Io
 Item {
     id: root
 
-    required property var livery
+    required property var theme
     // What the song's `wallpaper` slot anchor below needs (slots.md, "Wired
     // slots"): the staging engine resolves the active song's board, and the
     // bridge is what every widget is handed — a board that reads the machine
@@ -47,7 +47,7 @@ Item {
     property bool stagedCoverPick: false
     property bool stagedCoverTile: false
     readonly property bool stagedCoverApplies:
-        root.stagedCoverSong.length === 0 || root.stagedCoverSong === root.livery.songName
+        root.stagedCoverSong.length === 0 || root.stagedCoverSong === root.theme.songName
 
     // A pick APPLIES with an identity to show: a path, or a scene's workshop id
     // (CONTRACTS.md §4). A marker with neither is nothing.
@@ -58,7 +58,7 @@ Item {
     // An EXTERNAL provider paints that pick on its own surface, so this layer
     // paints nothing at all: no image, no board, no palette rectangle.
     readonly property bool externalProviderShowsPick:
-        root.livery.wallpaperProvider === "skwd-wall" && root.pickApplies
+        root.theme.wallpaperProvider === "skwd-wall" && root.pickApplies
 
     // A tile is the pick's own: it lays out the picked path and nothing the
     // layer falls back to.
@@ -98,7 +98,7 @@ Item {
     // ── Background: cover image or palette fallback ────────────────────────
     Rectangle {
         anchors.fill: parent
-        color: livery.paletteBg  // fallback when no image is set
+        color: theme.paletteBg  // fallback when no image is set
         visible: !wallpaperImage.visible && !root.externalProviderShowsPick
     }
 
@@ -122,7 +122,7 @@ Item {
     // pick destroys the board so its timer stops.
     readonly property bool boardActive:
         !root.pickApplies && !root.externalProviderShowsPick
-        && root.stagingEngine.has(root.livery.songName, "wallpaper")
+        && root.stagingEngine.has(root.theme.songName, "wallpaper")
 
     Loader {
         id: songBoard
@@ -137,7 +137,7 @@ Item {
         id: boardComponent
         WidgetSlot {
             anchors.fill: parent
-            livery: root.livery
+            theme: root.theme
             bridge: root.bridge
             stagingEngine: root.stagingEngine
             slot: "wallpaper"

@@ -29,7 +29,7 @@
 #     service runs. No shell, no graphical-session anchor, nothing to fail.
 #
 # Reading discipline (house rule 5): the dress and the core scalars this lane
-# genuinely uses — `aoide.livery.wallpaper` (the shell's baked cover env, so a
+# genuinely uses — `aoide.theme.wallpaper` (the shell's baked cover env, so a
 # wallpapered song survives a rebuild) and `aoide.root` (the runtime root the
 # QML reads its stage files from). Nothing else, and no `song/` path at all:
 # what this lane starts is a directory, not a song.
@@ -166,11 +166,11 @@ in
               # logs nothing past its startup banner (chiyo + osaka, blank
               # desktops, 2026-09-03). shell.qml's `UseQApplication` pragma is
               # what instantiates a QStyle at all, so this unit is exposed
-              # where a QGuiApplication one is not. Nothing is lost: the livery
-              # comes from $STRILLIX_ROOT/stage/livery.json, never from Qt.
+              # where a QGuiApplication one is not. Nothing is lost: the theme
+              # comes from $STRILLIX_ROOT/stage/theme.json, never from Qt.
               "QT_QPA_PLATFORMTHEME="
               # Runtime root for every stage/state file the QML reads
-              # (livery/cover/grimoire/sessions/usage) — the QML falls back to
+              # (theme/cover/grimoire/sessions/usage) — the QML falls back to
               # ~/.aoide when unset, but a configured aoide.root must win.
               "AOIDE_ROOT=${config.aoide.root}"
               "STRILLIX_ROOT=${config.aoide.strillix.root}"
@@ -179,8 +179,8 @@ in
             # AoideWallpaper always has the right cover on boot/rebuild — the live
             # stage/cover.json overrides it, but nothing re-seeded it from the
             # song before, so a rebuild lost the background. Null → no env.
-            ++ lib.optionals (config.aoide.livery.wallpaper != null) [
-              "AOIDE_WALLPAPER=${config.aoide.livery.wallpaper}"
+            ++ lib.optionals (config.aoide.theme.wallpaper != null) [
+              "AOIDE_WALLPAPER=${config.aoide.theme.wallpaper}"
             ]
             # The shipped templates, spelled on the unit rather than left to
             # the LOGIN environment (`environment.sessionVariables`, nucleus/

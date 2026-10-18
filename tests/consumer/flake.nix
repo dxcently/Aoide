@@ -3,7 +3,7 @@
 # The point of this file is what it does NOT contain: no path concatenated onto
 # Aoide's source tree anywhere, and no threading of Aoide's own inputs.
 # Everything AoideOS offers a stranger arrives through the root flake's exports
-# — `nixosModules.nucleus`, `lib.{composition,livery,rices,catalogue}`,
+# — `nixosModules.nucleus`, `lib.{composition,theme,rices,catalogue}`,
 # `ricesRoot` and `overlays.default` — and the flake inputs Aoide's own modules need (quickshell, stylix, nvf, hyprland,
 # the core itself) are closed over by `nixosModules.nucleus`, which is why this
 # file declares only nixpkgs, home-manager and aoide. It does not declare

@@ -279,13 +279,13 @@ Song/repertoire/<song>/
 
 The song map — literal inside Song/ (repo root keeps snowflake names, code
 functional verbs): palette = key (keys/) · semantic tier = melody, survives
-transposition · component tier = arrangement · facets = instruments · rice =
+transposition · component tier = layout · facets = instruments · rice =
 song (repertoire/) · design wiki = liner/ · memory = rices/ · wallpaper =
 cover (covers/) · sounds = chimes/ · live state = stage/ · plumbing =
 backstage/ · propose gate = auditions/ · shipped default = the standard ·
 preview = rehearsal · adopt = recording.
 
-Arrangement — what a rice covers (a full rice orchestrates all of it):
+Layout — what a rice covers (a full rice orchestrates all of it):
 
 ```
 key          palette
@@ -306,7 +306,7 @@ cover        wallpaper
   survive only where stylix doesn't reach or live-reload matters.
 - Everything shell-side is a Quickshell widget — no hyprlock, swww, rofi, or
   swaync; one runtime reading stage/tokens.json means nearly the full
-  arrangement hot-reloads at rehearsal.
+  layout hot-reloads at rehearsal.
 - Coverage tiers: solo (key + cover) · ensemble (core surfaces, the gen
   default) · full orchestration (`rice gen --full`, everything incl.
   greeter, per-app, chimes); `rice lint` reports instrumentation coverage,

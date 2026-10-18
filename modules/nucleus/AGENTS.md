@@ -15,7 +15,7 @@ covers only what's specific to the contract.
   nothing?* An option an unselected module may read: yes, here. Behaviour: no,
   a member.
 - **`options.nix` is the one file every other module builds against.**
-  Widening the read whitelist (`aoide.livery`/`aoide.arrangement`/
+  Widening the read whitelist (`aoide.theme`/`aoide.layout`/
   `aoide.surfaces`) is a decision that touches root `AGENTS.md` house rule 5
   too — don't add a fourth namespace without updating both.
 - **Core options live in the core flake; the contract declares only the paint
@@ -25,7 +25,7 @@ covers only what's specific to the contract.
   that closes over Aoide's own flake inputs, since neither a file here nor an
   `imports` list can read a module argument that `_module.args` supplies. A new
   CORE option (portable, cargo-buildable, no `modules/`/`song/` reach) is added
-  there, never here; a new PAINT option (livery, arrangement, surfaces, an
+  there, never here; a new PAINT option (theme, layout, surfaces, an
   enable fact, a lane toggle) is added here, never there. Door toggles and member
   settings are not declared here: each lives in the member that reads it
   (`aoided`: the doors; `aoide-secrets`: `members`; `aoide-config`: `settings`).
@@ -67,5 +67,5 @@ covers only what's specific to the contract.
 
 - This `README.md` when a new contract file or option namespace is added, or a
   member of the `nucleus` aggregation is added or removed.
-- `CONTRACTS.md` — the livery schema when `options.nix`'s livery contract
+- `CONTRACTS.md` — the theme schema when `options.nix`'s theme contract
   changes shape, §0 when the enable facts or `aoide.quickshell.config` do.

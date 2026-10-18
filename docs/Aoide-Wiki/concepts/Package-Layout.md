@@ -49,7 +49,7 @@ rices manifest).
 | `tui` (terminal UI library) | **`conductor`** | the session DAG view + roster CLI/TUI |
 | `coding-agent` (the concrete app) | **`cli`** / **`strillix`** | the two app crates that assemble every domain crate into the shipped binaries |
 | *(none)* | **`conduct`** | aoide-unique: the PTY multiplexer + session DAG + hook plumbing that makes every terminal a tracked, conductable session |
-| *(none)* | **`song`** | aoide-unique: the ricing/design engine (notes → livery, songs, stage) |
+| *(none)* | **`song`** | aoide-unique: the ricing/design engine (notes → theme, songs, stage) |
 | *(none)* | **`screen`** | aoide-unique: read-only desktop view + pointer synthesis for agents |
 | *(none)* | **`secrets`** | aoide-unique: the socket-only credential broker |
 | *(none)* | **`management`** (unbuilt) | the privileged hands — see Status below |
@@ -67,7 +67,7 @@ rices manifest).
 | **conductor** | The session-DAG TUI (ratatui: app/ui/graphview/theme). Depends on `{protocol, conduct, storage}` via a dependency-injection seam (`App` takes a `DispatchFn`), never on `server`. | aoide | `conductor` |
 | **upkeep** | Mechanical integrity, the working-tree half: `soundcheck` polices gitignored/uncommitted state (`result`, `state/`, stray root files) that `nix flake check` structurally cannot see. Report-only, forever — never moves, deletes, formats, or repairs. | aoide | `soundcheck` |
 | **cli** | The app shell: `aoide`/`aoided` bins, arg parse, the single dispatcher, registry assembly (`commands::all()`), guide/onboarding, and the three root-coupled groups (`meta`, `stubs`, `mcp serve`) that read the fully-assembled registry. Depends on every core domain crate; nothing depends on it. | aoide | `guide`, `schema`, `mcp.serve`, `content.*` (5, stub), `make`/`update` (stub), `onboard` |
-| **song** | The ricing/design engine: the native livery engine (schema · resolve · emit), rice/draft/mode/cover/take, the Pantheon design language. Rices portably — no Stylix/NixOS-module dependency in the crate itself. | strillix | `rice.*` (3), `rice.draft.*` (3), `rice.mode.*` (4), `cover.set`, `livery.*` (3), `rice.declare`, `rice.transpose` (stub), `quickshell.*` (2), `rice.take.*` (6), `element.seed` |
+| **song** | The ricing/design engine: the native theme engine (schema · resolve · emit), rice/draft/mode/cover/take, the Pantheon design language. Rices portably — no Stylix/NixOS-module dependency in the crate itself. | strillix | `rice.*` (3), `rice.draft.*` (3), `rice.mode.*` (4), `cover.set`, `theme.*` (3), `rice.declare`, `rice.transpose` (stub), `quickshell.*` (2), `rice.take.*` (6), `element.seed` |
 | **screen** | A read-only view onto the desktop for agents plus pointer synthesis: `info`/`shot`/`ocr`/`diff`/`send`, `point` (native `zwlr_virtual_pointer_v1` synthesis, 9 subverbs). Carved out (P-A1) specifically to isolate wayland/image dependency weight off core. | strillix | `screen.*` (14) |
 | **test-support** | Shared test rig only — scratch dirs, `EnvSaver`, fixture payloads, the single `env_lock`. A dev-dependency, never a production edge. | both (dev-only) | none |
 | **strillix** | The second app shell: arg parse, dispatcher, registry assembly for the paint bundle. The one binary allowed to shell out to nix. Never registers `a2a serve`, `conductor`, or any core-only group. | strillix | `guide`, `schema`, `mcp.serve`, `onboard`, `secrets.ask`, `pair.ask`, `pair.show` |
@@ -79,7 +79,7 @@ Command totals: **aoide 81** (74 real, 7 stub), **strillix 48** (47 real, 1 stub
 
 Core keeps `aoide`/`aoided` over `protocol` · `storage` · `client` ·
 `conduct` · `server` · `conductor` · `upkeep` · `cli`. `strillix` (crate
-`strillix`) owns the rice/draft/mode/cover/livery/quickshell/screen/
+`strillix`) owns the rice/draft/mode/cover/theme/quickshell/screen/
 shellbridge/herald command surface — everything that paints, or that only a
 desktop needs.
 

@@ -58,13 +58,13 @@
 // widget-slot expansion, CONTRACTS.md §5) rather than direct shell-gadget
 // instantiations — each resolves this same song's own widgets/<slot>.qml (or
 // sonata's own baseline) through the shared song-slot mechanism the
-// herald-center anchor already used. WidgetSlot forwards `livery` + `bridge`
+// herald-center anchor already used. WidgetSlot forwards `theme` + `bridge`
 // to every loaded widget unconditionally (the universal widget contract,
 // slots.md); Conductor/Terminals additionally receive `shared` as a slot
 // extra (`extraProps: ({ shared: root.shared })`), the one thing not every
 // slot gets.
 //
-// All colour flows from `livery` roles; radius 0 everywhere.
+// All colour flows from `theme` roles; radius 0 everywhere.
 
 import QtQuick
 import Quickshell
@@ -86,7 +86,7 @@ PanelWindow {
 
     // ── Note + bridge + shared + stagingEngine dependencies (injected as
     // SurfaceSlot extras by shell.qml's `dockSlot`) ─────────────────────────
-    required property var livery
+    required property var theme
     required property var bridge
     required property var shared
     // the song-slot resolver — every WidgetSlot anchor below needs it to
@@ -336,7 +336,7 @@ PanelWindow {
             anchors.leftMargin: 5; anchors.topMargin: 6
             anchors.rightMargin: -5; anchors.bottomMargin: -6
             radius: 0
-            color: root.withA(root.livery.paletteFg, 0.22)
+            color: root.withA(root.theme.paletteFg, 0.22)
         }
 
         // the marble board (cover) ─────────────────────────────────────────
@@ -344,14 +344,14 @@ PanelWindow {
             id: cover
             anchors.fill: parent
             radius: 0
-            color: root.livery.paletteBg
-            border.color: root.livery.paletteFg
+            color: root.theme.paletteBg
+            border.color: root.theme.paletteFg
             border.width: 2
 
             Rectangle {                          // inset gold keyline
                 anchors.fill: parent; anchors.margins: 4
                 radius: 0; color: "transparent"
-                border.color: root.livery.paletteAccent; border.width: 1
+                border.color: root.theme.paletteAccent; border.width: 1
             }
 
             // the interior, inside the keyline
@@ -367,17 +367,17 @@ PanelWindow {
                     anchors.left: parent.left
                     anchors.top: parent.top; anchors.bottom: parent.bottom
                     width: root.spineW
-                    color: root.withA(root.livery.paletteFg, 0.10)
+                    color: root.withA(root.theme.paletteFg, 0.10)
 
                     Rectangle {
                         anchors.left: parent.left; anchors.leftMargin: 4
                         anchors.top: parent.top; anchors.bottom: parent.bottom
-                        width: 1; color: root.withA(root.livery.paletteAccent, 0.55)
+                        width: 1; color: root.withA(root.theme.paletteAccent, 0.55)
                     }
                     Rectangle {
                         anchors.right: parent.right; anchors.rightMargin: 4
                         anchors.top: parent.top; anchors.bottom: parent.bottom
-                        width: 1; color: root.withA(root.livery.paletteAccent, 0.55)
+                        width: 1; color: root.withA(root.theme.paletteAccent, 0.55)
                     }
                     Column {                      // stitched binding stations
                         anchors.centerIn: parent
@@ -387,7 +387,7 @@ PanelWindow {
                             Text {
                                 text: "◆"
                                 font.family: root.faceMusic; font.pixelSize: 7
-                                color: root.withA(root.livery.paletteAccent, 0.7)
+                                color: root.withA(root.theme.paletteAccent, 0.7)
                             }
                         }
                     }
@@ -410,17 +410,17 @@ PanelWindow {
                         anchors.fill: parent
                         gradient: Gradient {
                             orientation: Gradient.Horizontal
-                            GradientStop { position: 0.00; color: root.withA(root.livery.paletteFg, 0.17) }
-                            GradientStop { position: 0.34; color: root.withA(root.livery.paletteFg, 0.03) }
-                            GradientStop { position: 0.80; color: root.withA(root.livery.paletteFg, 0.08) }
-                            GradientStop { position: 1.00; color: root.withA(root.livery.paletteFg, 0.22) }
+                            GradientStop { position: 0.00; color: root.withA(root.theme.paletteFg, 0.17) }
+                            GradientStop { position: 0.34; color: root.withA(root.theme.paletteFg, 0.03) }
+                            GradientStop { position: 0.80; color: root.withA(root.theme.paletteFg, 0.08) }
+                            GradientStop { position: 1.00; color: root.withA(root.theme.paletteFg, 0.22) }
                         }
                     }
                     Rectangle {                   // the board edge — a hard plum rule
                         anchors.left: parent.left
                         anchors.top: parent.top; anchors.bottom: parent.bottom
                         width: 1
-                        color: root.withA(root.livery.paletteFg, 0.45)
+                        color: root.withA(root.theme.paletteFg, 0.45)
                     }
 
                     // the leaves — one thin VERTICAL rule per ~2px across the band,
@@ -436,8 +436,8 @@ PanelWindow {
                             anchors.bottomMargin: (index % 4 === 0) ? 0 : 2 + ((index * 13) % 6)
                             width: (index % 6 === 0) ? 2 : 1
                             color: (index % 7 === 3)
-                                   ? root.withA(root.livery.paletteAccent, 0.30)   // a gilt leaf
-                                   : root.withA(root.livery.paletteFg,
+                                   ? root.withA(root.theme.paletteAccent, 0.30)   // a gilt leaf
+                                   : root.withA(root.theme.paletteFg,
                                                 0.09 + ((index * 11) % 6) * 0.018)
                         }
                     }
@@ -446,14 +446,14 @@ PanelWindow {
                         anchors.right: parent.right
                         anchors.top: parent.top; anchors.bottom: parent.bottom
                         width: 1
-                        color: root.withA(root.livery.paletteFg, 0.38)
+                        color: root.withA(root.theme.paletteFg, 0.38)
                     }
 
                     Rectangle {                   // a ribbon bookmark spilling from the top
                         anchors.right: parent.right; anchors.rightMargin: 6
                         anchors.top: parent.top
                         width: 3; height: 74
-                        color: root.withA(root.livery.paletteAccent, 0.7)
+                        color: root.withA(root.theme.paletteAccent, 0.7)
                     }
 
                     // A click on the visible sliver opens (and acknowledges) — the
@@ -491,7 +491,7 @@ PanelWindow {
 
                     Rectangle {                   // deeper marble band
                         anchors.fill: parent; anchors.bottomMargin: 4
-                        color: root.withA(root.livery.paletteFg, 0.05)
+                        color: root.withA(root.theme.paletteFg, 0.05)
                     }
                     Row {
                         anchors.left: parent.left; anchors.leftMargin: 2
@@ -503,14 +503,14 @@ PanelWindow {
                             anchors.verticalCenterOffset: -3
                             text: "𝄞"
                             font.family: root.faceMusic; font.pixelSize: 28
-                            color: root.livery.paletteAccent
+                            color: root.theme.paletteAccent
                         }
                         Text {
                             anchors.verticalCenter: parent.verticalCenter
                             text: "AOIDE"
                             font.family: root.faceSerif; font.pixelSize: 16
                             font.weight: Font.DemiBold; font.letterSpacing: 5
-                            color: root.livery.paletteFg
+                            color: root.theme.paletteFg
                         }
                     }
                     Text {                        // a small Greek touch on the right
@@ -519,13 +519,13 @@ PanelWindow {
                         anchors.verticalCenterOffset: -2
                         text: "ᾠδή"
                         font.family: root.faceSerif; font.pixelSize: 12; font.italic: true
-                        color: root.withA(root.livery.paletteAccent, 0.85)
+                        color: root.withA(root.theme.paletteAccent, 0.85)
                     }
                     Rectangle {                   // hairline gold rule under the title
                         anchors.left: parent.left; anchors.right: parent.right
                         anchors.bottom: parent.bottom
                         height: 1
-                        color: root.withA(root.livery.paletteAccent, 0.5)
+                        color: root.withA(root.theme.paletteAccent, 0.5)
                     }
                 }
 
@@ -554,7 +554,7 @@ PanelWindow {
                         // one shared left edge, no 340-vs-360 stagger. Each is a
                         // WidgetSlot anchor (see the header note above) rather than
                         // a direct shell-gadget instantiation; WidgetSlot forwards
-                        // livery + bridge to whatever it loads unconditionally, so
+                        // theme + bridge to whatever it loads unconditionally, so
                         // only the slot-specific `shared` extra needs spelling out
                         // below.
 
@@ -563,7 +563,7 @@ PanelWindow {
                         WidgetSlot {
                             slot: "conductor"
                             width: root.gadgetW; height: 520
-                            livery: root.livery
+                            theme: root.theme
                             bridge: root.bridge
                             stagingEngine: root.stagingEngine
                             extraProps: ({ shared: root.shared })
@@ -587,7 +587,7 @@ PanelWindow {
                         //   WidgetSlot {
                         //       slot: "usage"
                         //       width: root.gadgetW
-                        //       livery: root.livery
+                        //       theme: root.theme
                         //       bridge: root.bridge
                         //       stagingEngine: root.stagingEngine
                         //       visible: implicitHeight > 0
@@ -599,7 +599,7 @@ PanelWindow {
                         WidgetSlot {
                             slot: "terminals"
                             width: root.gadgetW; height: 520
-                            livery: root.livery
+                            theme: root.theme
                             bridge: root.bridge
                             stagingEngine: root.stagingEngine
                             extraProps: ({ shared: root.shared })
@@ -614,7 +614,7 @@ PanelWindow {
                         WidgetSlot {
                             slot: "usage"
                             width: root.gadgetW
-                            livery: root.livery
+                            theme: root.theme
                             bridge: root.bridge
                             stagingEngine: root.stagingEngine
                             visible: implicitHeight > 0
@@ -628,14 +628,14 @@ PanelWindow {
                         WidgetSlot {
                             slot: "meters"
                             width: root.gadgetW; height: 268
-                            livery: root.livery
+                            theme: root.theme
                             bridge: root.bridge
                             stagingEngine: root.stagingEngine
                         }
                         WidgetSlot {
                             slot: "power"
                             width: root.gadgetW; height: 268
-                            livery: root.livery
+                            theme: root.theme
                             bridge: root.bridge
                             stagingEngine: root.stagingEngine
                         }
@@ -648,7 +648,7 @@ PanelWindow {
                         WidgetSlot {
                             slot: "herald-center"
                             width: root.gadgetW
-                            livery: root.livery
+                            theme: root.theme
                             bridge: root.bridge
                             stagingEngine: root.stagingEngine
                         }
@@ -660,7 +660,7 @@ PanelWindow {
                         // `kind: "dock"` entry), so this contributes zero
                         // footprint and zero spacing — a structural no-op.
                         SongGadgets {
-                            livery: root.livery
+                            theme: root.theme
                             bridge: root.bridge
                             stagingEngine: root.stagingEngine
                             gadgetW: root.gadgetW
@@ -679,8 +679,8 @@ PanelWindow {
                     railW: 4
                     minThumb: 28
                     grabPad: 4
-                    trackColor: root.withA(root.livery.paletteFg, 0.12)
-                    thumbColor: root.withA(root.livery.paletteAccent, 0.8)
+                    trackColor: root.withA(root.theme.paletteFg, 0.12)
+                    thumbColor: root.withA(root.theme.paletteAccent, 0.8)
                     anchors.top: flick.top; anchors.bottom: flick.bottom
                     anchors.left: flick.right; anchors.leftMargin: 4
                     // a drag holds the codex out even if the pointer wanders off
@@ -695,7 +695,7 @@ PanelWindow {
                     anchors.bottom: flick.bottom; anchors.bottomMargin: 2
                     text: "▽ more"
                     font.family: root.faceMono; font.pixelSize: 11
-                    color: root.withA(root.livery.paletteAccent, 0.9)
+                    color: root.withA(root.theme.paletteAccent, 0.9)
                     visible: root.bodyShown && flick.visibleArea.heightRatio < 0.999
                     opacity: (flick.visibleArea.yPosition
                               + flick.visibleArea.heightRatio) < 0.995 ? 1 : 0

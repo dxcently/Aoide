@@ -79,9 +79,9 @@ import "Kit.js" as Kit
 
 Item {
     id: root
-    required property var livery
+    required property var theme
     FontMetrics { id: fm; font: Kit.bodyFont(13) }
-    readonly property var kit: Kit.make(root.livery, fm)
+    readonly property var kit: Kit.make(root.theme, fm)
 
     // one nested component, then `Use { helper: "Gauge"; props: {…} }` everywhere
     component Use: Loader {
@@ -129,7 +129,7 @@ Module-level exports (for use before a kit exists):
 | `bodyFont(px)` / `titleFont(px)` | `Qt.font`, regular / bold |
 | `helper(name)` | URL of `name.qml` beside Kit.js |
 | `withA(color, a)` | the colour at alpha `a` |
-| `make(livery, fm)` | **the kit object** (below) |
+| `make(theme, fm)` | **the kit object** (below) |
 | `lamps`, `lampGlyph(state)` | the state→glyph map; an unknown state gives `·` |
 | `gaugeText(frac, width)` | `{ fill, track }`: the `█`+eighth run and the `░` rest |
 | `sparkText(values, width, max)` | right-aligned `▁…█`. `max<=0` auto-scales. A null sample is a space |
@@ -140,10 +140,10 @@ Module-level exports (for use before a kit exists):
 | `glyph` | the icon set (below): named Nerd Font icons for the bar cells |
 | `cp(n)` / `cellLen(s)` | a code point as a JS string (a surrogate pair above U+FFFF) / the cells a string takes (code points, not UTF-16 units) |
 
-### The kit object — `Kit.make(livery, fm)`
+### The kit object — `Kit.make(theme, fm)`
 
-The binding re-evaluates when the livery or the metrics change, so a palette
-swap recolours live. **Colours come only from the livery.** No hex appears
+The binding re-evaluates when the theme or the metrics change, so a palette
+swap recolours live. **Colours come only from the theme.** No hex appears
 anywhere in the kit.
 
 | role | source | job (intent §2) |
@@ -159,12 +159,12 @@ anywhere in the kit.
 | `title` | `paletteAccent` (base0B) | titles, the focused rule, working lamps |
 | `hot` | `paletteHot` (base0A) | amber: the ONE live element |
 | `urgent` | `paletteUrgent` (base08) | red: blocked, failed, awaiting you |
-| `warn` | `livery.base09` | orange: past a threshold, `costPartial` |
+| `warn` | `theme.base09` | orange: past a threshold, `costPartial` |
 | `number` | `wireCyan` (base0C) | counts, tokens, durations |
 | `path` | `holoBlue` (base0D) | paths, project names, ws numbers |
 | `human` | `violet` (base0E) | a person's words |
 
-base00–07 are read from `livery.raw.base16`, because LiveryState has no
+base00–07 are read from `theme.raw.base16`, because ThemeState has no
 per-slot shortcut for them. Each falls back to `paletteBg`/`paletteFg` if
 missing.
 

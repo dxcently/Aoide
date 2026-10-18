@@ -3,6 +3,6 @@
 # Minimal on purpose: the borrow cases are about OWNERSHIP, not about what a song paints.
 {
   system.module = _: {
-    aoide.livery.palette.bg = "#000000";
+    aoide.theme.palette.bg = "#000000";
   };
 }

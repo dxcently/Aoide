@@ -18,7 +18,7 @@ import Quickshell
 //
 // The default source, `songs/sonata/dock.qml`, is sonata's real dock body —
 // an ANCHORED PanelWindow hosting every gadget slot as a `WidgetSlot`. That
-// body declares `livery`, `bridge`, `shared` and `stagingEngine` as REQUIRED
+// body declares `theme`, `bridge`, `shared` and `stagingEngine` as REQUIRED
 // properties, so all four must appear in the `createObject` prop map below
 // or creation returns null; `shared` is the session-state QtObject the real
 // dock is handed by its host, and this harness passes null for it (the
@@ -34,7 +34,7 @@ import Quickshell
 ShellRoot {
     id: harness
 
-    property var stubLivery: QtObject {
+    property var stubTheme: QtObject {
         property string paletteBg:     "#f2ebde"   // pale marble ground
         property string paletteFg:     "#2f2a33"   // dark plum ink
         property string paletteAccent: "#a07414"   // Attic gold
@@ -68,7 +68,7 @@ ShellRoot {
             return
         }
         harness.dock = comp.createObject(null, {
-            "livery": harness.stubLivery,
+            "theme": harness.stubTheme,
             "bridge": harness.stubBridge,
             "shared": null,
             "stagingEngine": harness.stagingEngine

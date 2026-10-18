@@ -82,10 +82,10 @@ no fact.
 | `aoide.root`                   | str (default `"~/.aoide"`)   | the RUNTIME root — `/stage/`, `/declared/`, `state/`, `run/qml/`, composed `rices/`; exported as `AOIDE_ROOT` (to `aoide.user`'s login shells). Core code default, nix-independent (L-C2, task #107) |
 | `aoide.checkout`               | str (default `"~/Aoide"`)    | the dev git checkout — `rice declare`'s commit-in target, `soundcheck`'s scan root, the rices `nix eval` registry regen; exported as `AOIDE_FLAKE_ROOT` (to `aoide.user`'s login shells) |
 | `aoide.hostConfig`             | str (default `"<checkout>/hosts/<hostName>/default.nix"`) | the host's own config file, whose one `habit.rice.declared` line `strx rice declare <song> --host` rewrites; exported as `AOIDE_HOST_CONFIG` (to `aoide.user`'s login shells) |
-| `aoide.livery.palette.{bg,fg,accent,urgent}` | hex        | v0 palette (base16) |
-| `aoide.livery.bar.{bg,fg,accent}` | nullOr hex                | component override; null → palette |
-| `aoide.livery.notif.{bg,fg,urgent}` | nullOr hex              | component override; null → palette |
-| `aoide.livery.window.{border,borderInactive}` | nullOr hex     | component override; null → palette |
+| `aoide.theme.palette.{bg,fg,accent,urgent}` | hex        | v0 palette (base16) |
+| `aoide.theme.bar.{bg,fg,accent}` | nullOr hex                | component override; null → palette |
+| `aoide.theme.notif.{bg,fg,urgent}` | nullOr hex              | component override; null → palette |
+| `aoide.theme.window.{border,borderInactive}` | nullOr hex     | component override; null → palette |
 | `aoide.surfaces.<name>.owner`  | str                          | surface-ownership registry |
 | `aoide.mcp.enable`             | bool (default false)         | MCP façade toggle |
 | `aoide.auditLog`               | str (default `$AOIDE_ROOT/log`, i.e. `~/.aoide/log`) | single audit log |
@@ -140,8 +140,8 @@ hosts.
 
 ## Authoring a paint lane
 
-A paint lane renders appearance: it reads the dress (`aoide.livery`), the
-structure (`aoide.arrangement`), the surface registry (`aoide.surfaces`), the
+A paint lane renders appearance: it reads the dress (`aoide.theme`), the
+structure (`aoide.layout`), the surface registry (`aoide.surfaces`), the
 core scalars and the song selection — root `AGENTS.md` house rule 5, and nothing
 else. If it owns a surface it declares that in `aoide.surfaces`. Apply component
 fallbacks yourself.
@@ -151,7 +151,7 @@ fallbacks yourself.
 # declares, sets the fact on selection, and renders the rest.
 { config, lib, ... }:
 let
-  t = config.aoide.livery;
+  t = config.aoide.theme;
   # component-tier fallback: null → palette (see CONTRACTS.md §1)
   barBg = if t.bar.bg != null then t.bar.bg else t.palette.bg;
 in
@@ -211,7 +211,7 @@ and imports only the one the host performs.
     module = { lib, ... }: {
       # every value the module sets is a default: lib.mkDefault, once for all
       config = lib.mkDefault {
-        aoide.livery.palette = { bg = "#0b1021"; fg = "#c8d3f5"; accent = "#82aaff"; urgent = "#ff757f"; };
+        aoide.theme.palette = { bg = "#0b1021"; fg = "#c8d3f5"; accent = "#82aaff"; urgent = "#ff757f"; };
         # component tier (bar/notif/window) — null falls back to palette
       };
     };
@@ -231,14 +231,14 @@ explicitly to get a desktop, `habit.rice.declared = "sonata";` for the shipped
 standard (`rices/sonata/rice.nix`).
 
 **Host-agnostic rules (CONTRACTS.md §5):** a song's `system.module` sets ONLY
-`aoide.livery` and `aoide.arrangement`, and its body selects only the paint: the
+`aoide.theme` and `aoide.layout`, and its body selects only the paint: the
 ten component providers and the `strillix` renderer. It NEVER selects host
 capabilities (monitors, hardware, services, people). Note values are literal
 nix; a song never reads `song/` runtime paths. The `rices/**` tree is
 versioned score (not a runtime dir), so reading it does not violate
 `checks.rice-runtime-untracked`. `checks.rice-shape` asserts the body's shape,
-that each song carries `rice.nix`, `livery.json` and `hyprland.conf`, that
-`hyprland.conf` holds no livery-owned key, that no stray `.nix` sits outside a
+that each song carries `rice.nix`, `theme.json` and `hyprland.conf`, that
+`hyprland.conf` holds no theme-owned key, that no stray `.nix` sits outside a
 song's `rice.nix`/`_widgets/`, and that no `../` path literal appears in a
 song's `.nix` text.
 
@@ -265,22 +265,22 @@ documented `//` escape hatch. See `CONTRACTS.md §2`.
 The current packages replace their `default.nix` **in place** — keep the
 file path and the `callPackage` signature; the walker never needs the file list.
 
-### Agent A — the livery engine (native, `crates/strillix-rice/src/livery/`)
+### Agent A — the theme engine (native, `crates/strillix-rice/src/theme/`)
 
-The standalone Node note engine was folded into the song crate by the livery
-merge (LIVERY-MERGE.md); it is now native Rust, one module
+The standalone Node note engine was folded into the song crate by the theme
+merge (THEME-MERGE.md); it is now native Rust, one module
 tree inside `crates/strillix-rice`:
 
-- `livery/schema.rs` — the authoritative v0 validator (the `rice lint` schema;
+- `theme/schema.rs` — the authoritative v0 validator (the `rice lint` schema;
   ported from `schema.js` with the exact error strings preserved).
-- `livery/resolve.rs` — the flat resolver: `{group.key}` alias deref
+- `theme/resolve.rs` — the flat resolver: `{group.key}` alias deref
   (cycle-guarded) + the component null → palette fallback.
-- `livery/emit/{stage,hyprctl,osc,file}.rs` — the four pure emitters behind
+- `theme/emit/{stage,hyprctl,osc,file}.rs` — the four pure emitters behind
   one `Emitter` trait + registry; a new backend is one file + one registry
-  line. The stage backend writes `/stage/livery.json` (Quickshell; atomic
+  line. The stage backend writes `/stage/theme.json` (Quickshell; atomic
   write — see `CONTRACTS.md §4`).
-- Commands: `strx livery lint|resolve|emit <target>` (the original standalone
-  CLI's surface, native); `strx rice lint` calls `livery::lint` directly — no
+- Commands: `strx theme lint|resolve|emit <target>` (the original standalone
+  CLI's surface, native); `strx rice lint` calls `theme::lint` directly — no
   binary locate, no PATH shell-out.
 
 Build against **note schema v0** (`CONTRACTS.md §1`): palette is
@@ -359,7 +359,7 @@ See `tests/README.md` for why Rust's own tests do NOT live here.
   score, legitimately read at eval).
 - `rice-shape` — the rices's shape: no stray `.nix` outside a song's
   `rice.nix`/`_widgets/`, no `../` path literal in a song's `.nix` text, every
-  song carrying `rice.nix` and `livery.json`
+  song carrying `rice.nix` and `theme.json`
   (host-agnostic song discipline; CONTRACTS.md §5).
 - `phantom-commands` — every backticked `aoide …`/`strillix …` spelling in
   `AGENTS.md`, `docs/agent/*.md`, `docs/INSTALL.md` and the wiki

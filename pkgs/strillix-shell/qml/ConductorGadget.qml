@@ -54,7 +54,7 @@
 // anchors to EXACTLY one side (never centred) — fixed columns, fixed order.
 // Hover previews the card's workspace + takes the trace; click →
 // bridge.focusSession (a courier focuses its parent's window). One laurel
-// standout (§5): traced card, else first working. All colour from `livery`;
+// standout (§5): traced card, else first working. All colour from `theme`;
 // radius 0 everywhere.
 //
 // ── The hooks channel (any-agent) ──────────────────────────────────────────
@@ -91,7 +91,7 @@ Item {
     id: temple
 
     // ── Integration contract ────────────────────────────────────────────────
-    required property var livery
+    required property var theme
     required property var bridge
     property var shared: null
 
@@ -99,7 +99,7 @@ Item {
     implicitHeight: 520
 
     // Doric order — Attic gold signature
-    readonly property color signature: livery.paletteAccent
+    readonly property color signature: theme.paletteAccent
 
     // type voices — the shared three
     readonly property string faceSerif: "Noto Serif"
@@ -325,12 +325,12 @@ Item {
     }
     function lampColor(st) {
         switch (st) {
-        case "working":  return livery.paletteAccent
-        case "awaiting": return livery.paletteUrgent
-        case "stopped":  return livery.holoBlue
-        case "idle":     return livery.violet
-        case "done":     return livery.wireCyan
-        default:         return livery.paletteFg
+        case "working":  return theme.paletteAccent
+        case "awaiting": return theme.paletteUrgent
+        case "stopped":  return theme.holoBlue
+        case "idle":     return theme.violet
+        case "done":     return theme.wireCyan
+        default:         return theme.paletteFg
         }
     }
 
@@ -511,15 +511,15 @@ Item {
         anchors.leftMargin: 4; anchors.topMargin: 5
         anchors.rightMargin: -4; anchors.bottomMargin: -5
         radius: 0
-        color: temple.withA(livery.paletteFg, 0.22)
+        color: temple.withA(theme.paletteFg, 0.22)
     }
 
     Rectangle {
         id: stele
         anchors.fill: parent
         radius: 0
-        color: livery.paletteBg
-        border.color: livery.paletteFg
+        color: theme.paletteBg
+        border.color: theme.paletteFg
         border.width: 2
 
         Rectangle {                              // inset keyline — Attic gold
@@ -545,7 +545,7 @@ Item {
                     anchors.top: pediment.bottom
                     anchors.left: parent.left; anchors.right: parent.right
                     anchors.bottom: parent.bottom; anchors.bottomMargin: 4
-                    color: temple.withA(livery.paletteFg, 0.05)
+                    color: temple.withA(theme.paletteFg, 0.05)
                 }
 
                 // the pediment — tympanum, raking cornices, acroterion diamond
@@ -609,7 +609,7 @@ Item {
                         text: "CONDUCTOR"
                         font.family: temple.faceSerif; font.pixelSize: 17
                         font.weight: Font.DemiBold; font.letterSpacing: 4
-                        color: livery.paletteFg
+                        color: theme.paletteFg
                     }
                     Text {                       // the source tag IS the recheck
                                                  // button — UsageGadget's hover-
@@ -827,20 +827,20 @@ Item {
                             text: "T A C E T"
                             font.family: temple.faceSerif; font.pixelSize: 14
                             font.letterSpacing: 6
-                            color: temple.withA(livery.paletteFg, 0.45)
+                            color: temple.withA(theme.paletteFg, 0.45)
                         }
                         Text {
                             anchors.horizontalCenter: parent.horizontalCenter
                             text: "ᕕ( ᐛ )ᕗ"
                             font.family: temple.faceMono; font.pixelSize: 15
-                            color: temple.withA(livery.paletteFg, 0.5)
+                            color: temple.withA(theme.paletteFg, 0.5)
                         }
                         Text {
                             anchors.horizontalCenter: parent.horizontalCenter
                             text: "no agents on stage"
                             font.family: temple.faceSerif; font.italic: true
                             font.pixelSize: 10
-                            color: temple.withA(livery.paletteFg, 0.4)
+                            color: temple.withA(theme.paletteFg, 0.4)
                         }
                     }
                 }
@@ -853,10 +853,10 @@ Item {
                         required property var modelData
                         readonly property var g: modelData
                         readonly property color hue:
-                            g.anchored ? temple.livery.noteColor(g.hueIndex)
-                                       : temple.withA(temple.livery.paletteFg, 0.55)
+                            g.anchored ? temple.theme.noteColor(g.hueIndex)
+                                       : temple.withA(temple.theme.paletteFg, 0.55)
                         readonly property bool headed: g.name !== ""
-                        readonly property var roll: temple.livery.ctxRollup(g.items)
+                        readonly property var roll: temple.theme.ctxRollup(g.items)
                         readonly property bool open: temple.isOpen(g)
 
                         width: playbill.width
@@ -901,13 +901,13 @@ Item {
                                 anchors.right: parent.right
                                 anchors.verticalCenter: parent.verticalCenter
                                 text: movement.roll.any
-                                       ? (temple.livery.ctxCompact(movement.roll.sumTok)
+                                       ? (temple.theme.ctxCompact(movement.roll.sumTok)
                                           + " tok")
                                        : "—"
                                 font.family: temple.faceMono; font.pixelSize: 9
                                 color: movement.roll.any
-                                       ? temple.withA(temple.livery.paletteAccent, 0.9)
-                                       : temple.withA(temple.livery.paletteFg, 0.5)
+                                       ? temple.withA(temple.theme.paletteAccent, 0.9)
+                                       : temple.withA(temple.theme.paletteFg, 0.5)
                             }
                             Rectangle {
                                 anchors.left: gName.right; anchors.leftMargin: 8
@@ -986,7 +986,7 @@ Item {
                                                     text: "└"
                                                     font.family: temple.faceMono
                                                     font.pixelSize: 11
-                                                    color: temple.withA(temple.livery.wireCyan, 0.5)
+                                                    color: temple.withA(temple.theme.wireCyan, 0.5)
                                                 }
                                                 SessionCard {
                                                     id: kidCard
@@ -1015,7 +1015,7 @@ Item {
             flick: flick
             railW: 3
             minThumb: 20
-            trackColor: temple.withA(livery.paletteFg, 0.10)
+            trackColor: temple.withA(theme.paletteFg, 0.10)
             thumbColor: temple.withA(temple.signature, 0.75)
             anchors.top: flick.top; anchors.bottom: flick.bottom
             anchors.right: parent.right; anchors.rightMargin: 9
@@ -1041,10 +1041,10 @@ Item {
                                 ? "tacet"
                                 : (temple.totalCount + " voices · "
                                    + temple.workingCount + " working · "
-                                   + temple.livery.ctxCompact(temple.totalTokens)
+                                   + temple.theme.ctxCompact(temple.totalTokens)
                                    + " tok · ϟ" + temple.hookedCount)) + " ├"
                 font.family: temple.faceMono; font.pixelSize: 11
-                color: temple.withA(livery.paletteFg, 0.8)
+                color: temple.withA(theme.paletteFg, 0.8)
             }
             Text {
                 id: ffCorner
@@ -1061,7 +1061,7 @@ Item {
                 anchors.verticalCenterOffset: -1
                 text: "𝄂"
                 font.family: temple.faceMusic; font.pixelSize: 16
-                color: livery.paletteAccent
+                color: theme.paletteAccent
             }
             Rectangle {
                 anchors.left: ffL.right; anchors.right: ffBar.left
@@ -1127,7 +1127,7 @@ Item {
     // jitter as live data streams in; the animated elements ride reserved
     // boxes (lamp 16px, troupe 116px main / 90px sub) so nothing floats.
     // No zone-break spacers, no card-level dividers — one Column rhythm,
-    // one container. radius 0; colour only from temple.livery.* roles.
+    // one container. radius 0; colour only from temple.theme.* roles.
     component SessionCard: Item {
         id: card
 
@@ -1157,7 +1157,7 @@ Item {
         readonly property bool cardResting: !cardWorking && !cardAwaiting
         readonly property bool hasCtx: !!(s && s.contextTokens > 0)
         readonly property real ctxPct: hasCtx
-            ? temple.livery.ctxPercent(s.contextTokens, s.contextCeiling) : 0
+            ? temple.theme.ctxPercent(s.contextTokens, s.contextCeiling) : 0
         readonly property bool laurel:
             temple.emphasizedId !== "" && !!s && s.sessionId === temple.emphasizedId
         readonly property string sKind: temple.kindOf(s)
@@ -1252,12 +1252,12 @@ Item {
             radius: 0
             color: cardMouse.containsMouse
                    ? temple.withA(temple.signature, 0.10)
-                   : (card.laurel ? temple.withA(temple.livery.paletteHot, 0.05)
-                                  : temple.withA(temple.livery.paletteFg, 0.035))
+                   : (card.laurel ? temple.withA(temple.theme.paletteHot, 0.05)
+                                  : temple.withA(temple.theme.paletteFg, 0.035))
             border.width: 1
             border.color: card.cardAwaiting
-                          ? temple.withA(temple.livery.paletteUrgent, 0.75)
-                          : temple.withA(temple.livery.paletteFg, 0.22)
+                          ? temple.withA(temple.theme.paletteUrgent, 0.75)
+                          : temple.withA(temple.theme.paletteFg, 0.22)
         }
         // the project pilaster — laurel when this is the one traced plaque.
         // The crown widens to the pantheon's 3px (Terminals' crown bar is 3);
@@ -1265,7 +1265,7 @@ Item {
         Rectangle {
             x: 0; width: card.laurel ? 3 : 2
             height: parent.height
-            color: card.laurel ? temple.livery.paletteHot
+            color: card.laurel ? temple.theme.paletteHot
                                : temple.withA(card.hue, 0.6)
         }
 
@@ -1296,7 +1296,7 @@ Item {
                     text: card.noBadge
                     font.family: temple.faceMono; font.pixelSize: 10
                     font.weight: Font.DemiBold
-                    color: card.laurel ? temple.livery.paletteHot
+                    color: card.laurel ? temple.theme.paletteHot
                                        : temple.withA(temple.signature, 0.95)
                 }
                 Text {                           // workspace tag — inside the corner
@@ -1309,7 +1309,7 @@ Item {
                     // the bar's own note hue for this workspace — the same
                     // colour grammar the Terminals ground tag already speaks
                     // (noteColor is safe for id <= 0)
-                    color: temple.withA(temple.livery.noteColor(card.hasWs ? card.s.workspace : 0), 0.9)
+                    color: temple.withA(temple.theme.noteColor(card.hasWs ? card.s.workspace : 0), 0.9)
                 }
                 Text {                           // state word — the lamp's caption,
                                                  // same live state + colour source as
@@ -1344,8 +1344,8 @@ Item {
                         font.family: card.sudoHeld ? temple.faceMono : temple.faceMusic
                         font.pixelSize: 12
                         color: card.laurel
-                               ? temple.livery.paletteHot
-                               : temple.withA(card.sudoHeld ? temple.livery.paletteUrgent
+                               ? temple.theme.paletteHot
+                               : temple.withA(card.sudoHeld ? temple.theme.paletteUrgent
                                                             : temple.lampColor(card.cardLiveState),
                                               card.cardResting ? 0.55 : 1.0)
 
@@ -1392,7 +1392,7 @@ Item {
                     // the traced plaque bolds its name, same as the Terminals
                     // emph row already does.
                     font.weight: card.laurel ? Font.Bold : Font.Medium
-                    color: temple.withA(temple.livery.paletteFg, card.child ? 0.85 : 1.0)
+                    color: temple.withA(temple.theme.paletteFg, card.child ? 0.85 : 1.0)
                 }
                 Text {                           // kind tag — WITH the name
                     id: kindTag
@@ -1401,7 +1401,7 @@ Item {
                     anchors.verticalCenter: parent.verticalCenter
                     text: "⟐ sub"
                     font.family: temple.faceMono; font.pixelSize: 9
-                    color: temple.livery.violet
+                    color: temple.theme.violet
                 }
                 Text {                           // the ϟ hook tag — the pi
                                                  // harness wears the π think-
@@ -1611,7 +1611,7 @@ Item {
                         text: card.idCallout !== "" ? card.idCallout : "—"
                         elide: Text.ElideMiddle
                         font.family: temple.faceMono; font.pixelSize: 9
-                        color: temple.withA(temple.livery.paletteFg,
+                        color: temple.withA(temple.theme.paletteFg,
                                             card.idCallout !== "" ? 0.4 : 0.28)
                     }
                 }
@@ -1623,7 +1623,7 @@ Item {
                     text: (card.s && card.s.model) ? card.s.model : "—"
                     elide: Text.ElideMiddle
                     font.family: temple.faceMono; font.pixelSize: 9
-                    color: temple.withA(temple.livery.paletteFg,
+                    color: temple.withA(temple.theme.paletteFg,
                                         (card.s && card.s.model) ? 0.55 : 0.28)
                 }
             }
@@ -1653,7 +1653,7 @@ Item {
                     text: card.promptText !== "" ? card.promptText : "—"
                     elide: Text.ElideRight
                     font.family: temple.faceMono; font.pixelSize: 10
-                    color: temple.withA(temple.livery.paletteFg,
+                    color: temple.withA(temple.theme.paletteFg,
                                         card.promptText !== "" ? 0.62 : 0.28)
                 }
             }
@@ -1686,7 +1686,7 @@ Item {
                     text: card.toolText !== "" ? card.toolText : "—"
                     elide: Text.ElideRight
                     font.family: temple.faceMono; font.pixelSize: 10
-                    color: temple.withA(temple.livery.paletteFg,
+                    color: temple.withA(temple.theme.paletteFg,
                                         card.toolText !== ""
                                         ? (card.cardWorking ? 0.7 : 0.45) : 0.28)
                 }
@@ -1707,7 +1707,7 @@ Item {
                     anchors.right: parent.right
                     text: "sudo"
                     font.family: temple.faceMono; font.pixelSize: 9
-                    color: temple.livery.paletteUrgent
+                    color: temple.theme.paletteUrgent
                 }
                 Text {                           // the thinking — wraps, last-
                     id: thinkT                     // line elide, fixed lane
@@ -1729,8 +1729,8 @@ Item {
                     font.italic: card.thinkSaid || !card.hooked
                     font.pixelSize: 10
                     color: (card.thinkSaid || card.hooked)
-                           ? temple.withA(temple.livery.paletteFg, 0.55)
-                           : temple.withA(temple.livery.paletteFg, 0.25)
+                           ? temple.withA(temple.theme.paletteFg, 0.55)
+                           : temple.withA(temple.theme.paletteFg, 0.25)
                 }
             }
 
@@ -1767,7 +1767,7 @@ Item {
                     textFormat: Text.PlainText
                     elide: Text.ElideRight
                     font.family: temple.faceMono; font.pixelSize: 9
-                    color: temple.livery.paletteUrgent
+                    color: temple.theme.paletteUrgent
                 }
                 Rectangle {                      // approve — the gold verdict
                     id: approveChip
@@ -1801,15 +1801,15 @@ Item {
                     width: 66; height: 16
                     radius: 0
                     color: denyMa.containsMouse
-                           ? temple.withA(temple.livery.paletteUrgent, 0.20) : "transparent"
+                           ? temple.withA(temple.theme.paletteUrgent, 0.20) : "transparent"
                     border.width: 1
-                    border.color: temple.withA(temple.livery.paletteUrgent,
+                    border.color: temple.withA(temple.theme.paletteUrgent,
                                                denyMa.containsMouse ? 0.95 : 0.6)
                     Text {
                         anchors.centerIn: parent
                         text: "deny"
                         font.family: temple.faceMono; font.pixelSize: 9
-                        color: temple.livery.paletteUrgent
+                        color: temple.theme.paletteUrgent
                     }
                     MouseArea {
                         id: denyMa
@@ -1840,7 +1840,7 @@ Item {
                     anchors.verticalCenter: parent.verticalCenter
                     text: "ctx"
                     font.family: temple.faceMono; font.pixelSize: 9
-                    color: temple.withA(temple.livery.paletteFg, 0.35)
+                    color: temple.withA(temple.theme.paletteFg, 0.35)
                 }
                 Text {                           // ctx value — mains only
                     visible: !card.child
@@ -1849,15 +1849,15 @@ Item {
                     anchors.verticalCenter: parent.verticalCenter
                     elide: Text.ElideRight
                     text: card.hasCtx
-                          ? (temple.livery.ctxCompact(card.s.contextTokens)
+                          ? (temple.theme.ctxCompact(card.s.contextTokens)
                              + (card.s.contextCeiling
-                                ? (" / " + temple.livery.ctxCompact(card.s.contextCeiling))
+                                ? (" / " + temple.theme.ctxCompact(card.s.contextCeiling))
                                 : "") + " tok")
                           : "—"
                     font.family: temple.faceMono; font.pixelSize: 10
                     color: card.hasCtx
-                           ? temple.livery.ctxColor(card.ctxPct, temple.signature)
-                           : temple.withA(temple.livery.paletteFg, 0.3)
+                           ? temple.theme.ctxColor(card.ctxPct, temple.signature)
+                           : temple.withA(temple.theme.paletteFg, 0.3)
                 }
                 Text {                           // up label — right corner on
                     id: upLabel                    // mains, left margin on subs
@@ -1868,7 +1868,7 @@ Item {
                     anchors.verticalCenter: parent.verticalCenter
                     text: "up"
                     font.family: temple.faceMono; font.pixelSize: 9
-                    color: temple.withA(temple.livery.paletteFg, 0.35)
+                    color: temple.withA(temple.theme.paletteFg, 0.35)
                 }
                 Text {                           // up value — the clock
                     id: upValue
@@ -1876,12 +1876,12 @@ Item {
                     anchors.leftMargin: card.child ? 6 : 0
                     anchors.right: card.child ? undefined : parent.right
                     anchors.verticalCenter: parent.verticalCenter
-                    text: temple.livery.elapsedSince(
+                    text: temple.theme.elapsedSince(
                               card.s ? card.s.startedAt : "", temple.nowMs)
                     font.family: temple.faceMono
                     font.pixelSize: 10
-                    color: card.laurel ? temple.livery.paletteHot
-                                       : temple.livery.paletteAccent
+                    color: card.laurel ? temple.theme.paletteHot
+                                       : temple.theme.paletteAccent
                 }
             }
 
@@ -1904,7 +1904,7 @@ Item {
                         font.family: temple.faceMono; font.pixelSize: 9
                         // state-tinted at 0.85 — the same face-colour grammar
                         // the Terminals troupe wears (withA(accent, 0.85))
-                        color: card.laurel ? temple.livery.paletteHot
+                        color: card.laurel ? temple.theme.paletteHot
                                            : temple.withA(temple.lampColor(card.cardLiveState), 0.85)
                     }
                 }
@@ -1931,7 +1931,7 @@ Item {
                         font.family: temple.faceMono; font.pixelSize: 10
                         // state-tinted at 0.85 — the same face-colour grammar
                         // the Terminals troupe wears (withA(accent, 0.85))
-                        color: card.laurel ? temple.livery.paletteHot
+                        color: card.laurel ? temple.theme.paletteHot
                                            : temple.withA(temple.lampColor(card.cardLiveState), 0.85)
                     }
                 }
@@ -1945,8 +1945,8 @@ Item {
                     elide: Text.ElideLeft
                     font.family: temple.faceMono; font.pixelSize: 10
                     color: card.s && card.s.cwd
-                           ? temple.withA(temple.livery.holoBlue, 0.85)
-                           : temple.withA(temple.livery.paletteFg, 0.3)
+                           ? temple.withA(temple.theme.holoBlue, 0.85)
+                           : temple.withA(temple.theme.paletteFg, 0.3)
                 }
             }
         }

@@ -240,7 +240,7 @@ At any moment, any agent, through any door:
                  "take": 21, "parent": 9, "from": "A",
                  "marks": { "A": 9, "B": 14 } },
   "instruction": "Vision-check the live desktop: `strx screen shot`, verify
-                  polarity agreement + widget/bar livery match.",
+                  polarity agreement + widget/bar theme match.",
   "allowed": ["rice take", "rice score advance", "screen shot"],
   "gate": { "advance-to": "review", "requires": null } }
 ```
@@ -264,13 +264,13 @@ picker are real commands at HEAD (`crates/storage/src/takes.rs`,
 check during an active rehearsal is phase C, still design.
 
 - **Takes** — automatic, append-only, cheap: every write to the routed
-  draft snapshots `rices/<song>/drafts/<name>/takes/NNNN.json` (livery +
+  draft snapshots `rices/<song>/drafts/<name>/takes/NNNN.json` (theme +
   cover + meta: timestamp, session id, cause). Captured at the two write
   entrypoints (`rice stage`, `cover set`) directly; hand-edits caught by a
   content-hash check on every hook-door `PostToolUse` during an active
   rehearsal AND ambiently on any `strx rice` command — a hookless agent's
   edits get taken the next time it touches the CLI. Explicit `rice take`
-  for paranoia. Leaning toward hashing cover.json alongside livery on every
+  for paranoia. Leaning toward hashing cover.json alongside theme on every
   check (one extra file read; not finalized).
 - **Takes form a tree, not a line.** Each record carries `parent: <NNNN> |
   null`. Numbering is one monotone counter per draft — never renumbered,
@@ -290,7 +290,7 @@ check during an active rehearsal is phase C, still design.
   branch. Takes after the mark are untouched and still selectable; nothing
   on disk is destroyed by reverting past it.
 - **No merge, no rebase, no cherry-pick — ever.** Two lines from a mark
-  stay two lines; a User who wants them combined edits the livery by hand.
+  stay two lines; a User who wants them combined edits the theme by hand.
   The deliberate line against the git-clone slope.
 - **`rice back` takes before it writes.** If the live content differs from
   the head take (an un-taken hand-edit), `rice back` snapshots it first
@@ -324,20 +324,20 @@ strx rice take diff           change since the nearest mark on the
                                 head's ancestry (reviewer's view)
 ```
 
-Revert is trivial because of draft routing: write take N's livery through
+Revert is trivial because of draft routing: write take N's theme through
 the existing symlink via `atomic_write`. Every file a revert touches
-(livery, cover) is already FileView-watched by the Quickshell surfaces, so
+(theme, cover) is already FileView-watched by the Quickshell surfaces, so
 **a revert performs no explicit Quickshell IPC reload of its own** — the
 existing watch mechanism is the whole apply path, nothing new to wire.
-**Scope line:** takes cover the stage-routed files (livery, cover). Widget
+**Scope line:** takes cover the stage-routed files (theme, cover). Widget
 QML bodies are committed rices files — git is their revert mechanism,
 and the `edit` step's instruction says so. No parallel VCS.
 
 **The promise, precisely — a revert restores the live stage exactly, not
-the draft directory byte-for-byte.** The livery write lands in the draft
+the draft directory byte-for-byte.** The theme write lands in the draft
 via routing; the cover is restored to the stage only, the same seam
 `cover set` already writes. `stage/cover.json` is not symlink-routed the
-way `stage/livery.json` is, so the draft directory's own `cover.json` is a
+way `stage/theme.json` is, so the draft directory's own `cover.json` is a
 `draft save`-time archive copy that no write path maintains and no read
 path consumes today — a revert does not touch it and does not claim to.
 What the User sees and what Quickshell renders round-trips exactly; the
@@ -699,7 +699,7 @@ is captured before it is overwritten, so **a revert can itself be reverted.**
 
 **Composition with rice takes: disjoint substrates, on purpose, with no
 exclusion list.** Takes (§5.2) cover the stage-routed draft files
-(`stage/livery.json`, `stage/cover.json`, and their draft-mode copies); this
+(`stage/theme.json`, `stage/cover.json`, and their draft-mode copies); this
 journal covers tracked files inside a registered project's working tree. In
 this repo both exist at once and mostly don't overlap — except that a
 rices widget's QML body, which §5.2's scope line already assigns to git
@@ -709,7 +709,7 @@ finally arriving by another door.** Where the substrates do genuinely
 overlap — an edit-tool write to a routed draft file — both systems record,
 redundantly and harmlessly: each revert path trusts only its own hash
 comparison, never the other system's state. A `rice back` that rewrites a
-livery file reads, to this journal, as an ordinary out-of-view change (the
+theme file reads, to this journal, as an ordinary out-of-view change (the
 second refusal shape, above); a `project back` that rewrites it reads, to
 the takes system, as drift, and gets a drift take on its next touch. No
 coordination command exists between `rice back` and `project back`, and none is
@@ -1025,7 +1025,7 @@ Decided in-session, one line each:
   noun if the User ever wants one — nothing in storage changes either
   way.)
 - **No merge, no rebase, no cherry-pick — permanently.** Two lines from a
-  mark stay two lines; combining them is editing the livery by hand. The
+  mark stay two lines; combining them is editing the theme by hand. The
   explicit line against the git-clone slope.
 - Marks live in `takes/marks.json` (a `{"A": take}` map), not a field on
   the take record — one atomic write per (re)stamp, and the take record
@@ -1041,7 +1041,7 @@ Decided in-session, one line each:
   "revert take" would double every round trip with content that already
   exists at the target number. Phase C journals the revert as an event,
   not a take.
-- A revert restores the **live stage** exactly (livery through routing,
+- A revert restores the **live stage** exactly (theme through routing,
   cover to the stage seam `cover set` already writes) — it does not
   restore the draft directory's own `cover.json`, which nothing maintains
   or reads today. A revert triggers no explicit Quickshell IPC reload:
@@ -1090,7 +1090,7 @@ Open / uncertain:
 - If real agents ignore the cue line, auto-join for known harness
   ancestries is the noted one-line escalation — not built.
 - Whether `stage/cover.json` should eventually get symlink routing like
-  `livery.json` — a pre-existing asymmetry (§5.2), not blocking; takes
+  `theme.json` — a pre-existing asymmetry (§5.2), not blocking; takes
   work correctly either way, and nothing here depends on the answer.
 - The design as a whole awaits the User's explicit LOCK. Landed pieces
   (the take tree, the edit journal, the git seam) are asserted by the CLI

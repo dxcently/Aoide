@@ -45,7 +45,7 @@ aoide conductor [--json]
   every ~15 s while Mesh or Graph is open);
   `node status --json`, `mesh --json`, `pair --json`, `session pending list
   --json`, `config --json`, `secrets pending --json` and `secrets status
-  --json` through the injected dispatcher; `/stage/livery.json`
+  --json` through the injected dispatcher; `/stage/theme.json`
   (palette — rice staging, so it reads the other tree). `$AOIDE_STAGE_DIR` /
   `$AOIDE_AUDIT_LOG` are both honoured, so a tempdir plus the seed fixture is
   a full offline rig:

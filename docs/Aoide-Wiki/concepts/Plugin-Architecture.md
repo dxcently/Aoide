@@ -28,8 +28,8 @@ by being added to a list.
   `StagingEngine.resolveSong(song, slot)` — by slot *name*, falling back to
   sonata — so no host surface ever imports a concrete widget
   ([[Widget-Maker#The staging engine — a song overrides desktop chrome]]).
-- **A closed, named service set.** Paint lanes read `aoide.livery`,
-  `aoide.arrangement` and `aoide.surfaces`, plus the core scalars and the song
+- **A closed, named service set.** Paint lanes read `aoide.theme`,
+  `aoide.layout` and `aoide.surfaces`, plus the core scalars and the song
   selection root `AGENTS.md` house rule 5 enumerates, and nothing else — a closed
   set of named services,
   never another module's internals.
@@ -45,7 +45,7 @@ adopted as a framework — Aoide's own mechanisms above predate the citation.
 
 - **Spatial composability** — a component declares its dependencies by
   service *name* and waits for them, instead of importing an implementation.
-  Aoide's spatial seam: `aoide.livery`/`aoide.arrangement`, slot names, the
+  Aoide's spatial seam: `aoide.theme`/`aoide.layout`, slot names, the
   stage files (`CONTRACTS.md` §4), and the `aoide schema --json` tree both
   doors generate from.
 - **Temporal composability** — a component's effects are *revertible*:

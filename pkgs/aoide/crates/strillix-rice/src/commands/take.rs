@@ -79,7 +79,7 @@ use aoide_protocol::Door;
 pub fn register(r: &mut Registry) {
     r.insert(cmd!(
         path: ["rice", "take"],
-        summary: "Snapshot the routed draft's current livery+cover as a new take, hanging off the current head. Draft mode only — takes live inside the draft.",
+        summary: "Snapshot the routed draft's current theme+cover as a new take, hanging off the current head. Draft mode only — takes live inside the draft.",
         args: [],
         flags: [],
         gated: false,
@@ -109,7 +109,7 @@ pub fn register(r: &mut Registry) {
     ));
     r.insert(cmd!(
         path: ["rice", "take", "diff"],
-        summary: "Key-wise diff between a base take's livery and the routed draft's CURRENT staged livery (added/removed/changed paths, never a text diff — key reordering is not a change). Base defaults to the nearest mark on the head's ancestry (falling back to the head's own parent, or an `ok` 'nothing to diff against' when there is neither); --take N or --mark <letter> override it explicitly.",
+        summary: "Key-wise diff between a base take's theme and the routed draft's CURRENT staged theme (added/removed/changed paths, never a text diff — key reordering is not a change). Base defaults to the nearest mark on the head's ancestry (falling back to the head's own parent, or an `ok` 'nothing to diff against' when there is neither); --take N or --mark <letter> override it explicitly.",
         args: [],
         flags: [
             flag!("take", "int", "Take number to diff against, overriding the default base."),
@@ -188,42 +188,42 @@ fn scope_label(song: &str, draft: Option<&str>) -> String {
     }
 }
 
-/// One comparison payload for [`diff_livery`] — folds livery+cover+widgets
+/// One comparison payload for [`diff_theme`] — folds theme+cover+widgets
 /// into a single `Value` so `strillix reload`'s dedupe-against-head
-/// ([`snapshot_if_identical_to_head_unlocked`]) is ONE `diff_livery` call
+/// ([`snapshot_if_identical_to_head_unlocked`]) is ONE `diff_theme` call
 /// over the whole captured content, never three separate comparisons (the
 /// User's own framing, 2026-08-31: "reuses take diff's own key-wise
 /// machinery, never a text diff, never a second differ").
-fn take_content_value(livery: &Value, cover: &Option<Value>, widgets: &Value) -> Value {
-    json!({ "livery": livery, "cover": cover, "widgets": widgets })
+fn take_content_value(theme: &Value, cover: &Option<Value>, widgets: &Value) -> Value {
+    json!({ "theme": theme, "cover": cover, "widgets": widgets })
 }
 
-/// Read the routed draft's CURRENT `livery.json` (required — an absent or
-/// unparseable stage livery is refused, there is nothing to snapshot) and
+/// Read the routed draft's CURRENT `theme.json` (required — an absent or
+/// unparseable stage theme is refused, there is nothing to snapshot) and
 /// `cover.json` (optional — absent simply means no cover, not an error).
 /// Both are read straight off [`aoide_storage::fs::stage_dir`], not the
-/// draft directory itself: while `Draft` mode is routed, `stage/livery.json`
+/// draft directory itself: while `Draft` mode is routed, `stage/theme.json`
 /// IS the draft's live content (a symlink `aoide_storage::fs::atomic_write`
 /// resolves transparently, and a plain `read_to_string` follows the same
 /// way) — reading the stage is reading the draft, with zero extra
 /// symlink-awareness needed here.
 fn read_staged_content(cmd: &str) -> Result<(Value, Option<Value>), Outcome> {
     let stage = shellbridge::stage_dir();
-    let livery_path = stage.join("livery.json");
-    let raw = std::fs::read_to_string(&livery_path).map_err(|e| {
+    let theme_path = stage.join("theme.json");
+    let raw = std::fs::read_to_string(&theme_path).map_err(|e| {
         Outcome::error(
             cmd,
-            format!("nothing staged to snapshot: cannot read {} ({e})", livery_path.display()),
+            format!("nothing staged to snapshot: cannot read {} ({e})", theme_path.display()),
         )
         .with_data(json!({
-            "reason": "no-staged-livery",
-            "expected": livery_path.to_string_lossy(),
+            "reason": "no-staged-theme",
+            "expected": theme_path.to_string_lossy(),
         }))
     })?;
-    let livery: Value = serde_json::from_str(&raw).map_err(|e| {
-        Outcome::error(cmd, format!("staged livery.json is not valid JSON: {e}")).with_data(json!({
+    let theme: Value = serde_json::from_str(&raw).map_err(|e| {
+        Outcome::error(cmd, format!("staged theme.json is not valid JSON: {e}")).with_data(json!({
             "reason": "invalid-json",
-            "livery": livery_path.to_string_lossy(),
+            "theme": theme_path.to_string_lossy(),
         }))
     })?;
 
@@ -236,7 +236,7 @@ fn read_staged_content(cmd: &str) -> Result<(Value, Option<Value>), Outcome> {
         None
     };
 
-    Ok((livery, cover))
+    Ok((theme, cover))
 }
 
 /// The unlocked snapshot core (see the module doc for why it is unlocked):
@@ -251,7 +251,7 @@ fn read_staged_content(cmd: &str) -> Result<(Value, Option<Value>), Outcome> {
 /// `aoide_storage::takes`' `TakeRecord::cause` doc explains why).
 pub(crate) fn snapshot_unlocked(cmd: &str, cause: &str) -> Result<TakeRecord, Outcome> {
     let (song, draft) = resolve_scope(cmd)?;
-    let (livery, cover) = read_staged_content(cmd)?;
+    let (theme, cover) = read_staged_content(cmd)?;
     let widgets = crate::widgets::snapshot_widget_bodies(&song).map_err(|e| {
         Outcome::error(cmd, format!("failed to snapshot widget bodies: {}", e.error))
             .with_data(json!({ "reason": "widget-snapshot-failed", "target": e.target }))
@@ -264,7 +264,7 @@ pub(crate) fn snapshot_unlocked(cmd: &str, cause: &str) -> Result<TakeRecord, Ou
         at: aoide_storage::time::now_iso_utc(),
         session_id: std::env::var("AOIDE_SESSION_ID").ok(),
         cause: cause.to_string(),
-        livery,
+        theme,
         cover,
         widgets,
     };
@@ -315,8 +315,8 @@ pub(crate) fn snapshot_if_drifted_unlocked(cmd: &str, cause: &str) -> Result<Opt
     let head_take =
         takes::load_head(&song, draft.as_deref()).and_then(|n| takes::load_take(&song, draft.as_deref(), n));
     if let Some(head_take) = &head_take {
-        let (livery, cover) = read_staged_content(cmd)?;
-        if livery == head_take.livery && cover == head_take.cover {
+        let (theme, cover) = read_staged_content(cmd)?;
+        if theme == head_take.theme && cover == head_take.cover {
             return Ok(None);
         }
     }
@@ -327,15 +327,15 @@ pub(crate) fn snapshot_if_drifted_unlocked(cmd: &str, cause: &str) -> Result<Opt
 /// The dedupe core (staging/draft dispatch beat 1, `strillix reload` design
 /// settled by the User 2026-08-31), shared by `strillix reload` and the draft
 /// entry baseline (`rice mode draft`): mints a take of the
-/// currently staged livery+cover+widget bodies UNLESS it would be key-wise
+/// currently staged theme+cover+widget bodies UNLESS it would be key-wise
 /// IDENTICAL to the current head — the "dedupe against head" rule the User
 /// settled alongside the command itself, so an agent hammering `strillix reload`
 /// with no intervening edit leaves one take, not one per call.
 ///
-/// Reuses [`diff_livery`] ([`take_content_value`]'s single merged payload,
+/// Reuses [`diff_theme`] ([`take_content_value`]'s single merged payload,
 /// one call) rather than [`snapshot_if_drifted_unlocked`]'s own `==`
 /// comparison — that core predates widget bodies and only ever compared
-/// livery+cover; this one folds all three fields the way the User's own
+/// theme+cover; this one folds all three fields the way the User's own
 /// framing asks for ("reuses take diff's own key-wise machinery, never a
 /// text diff, never a second differ"). `Ok(None)` is the dedupe no-op — the
 /// caller still runs its sync/reload beats regardless, only the TAKE is
@@ -346,14 +346,14 @@ pub(crate) fn snapshot_if_identical_to_head_unlocked(cmd: &str, cause: &str) -> 
     let head_take =
         takes::load_head(&song, draft.as_deref()).and_then(|n| takes::load_take(&song, draft.as_deref(), n));
     if let Some(head_take) = &head_take {
-        let (livery, cover) = read_staged_content(cmd)?;
+        let (theme, cover) = read_staged_content(cmd)?;
         let widgets = crate::widgets::snapshot_widget_bodies(&song).map_err(|e| {
             Outcome::error(cmd, format!("failed to snapshot widget bodies: {}", e.error))
                 .with_data(json!({ "reason": "widget-snapshot-failed", "target": e.target }))
         })?;
-        let before = take_content_value(&head_take.livery, &head_take.cover, &head_take.widgets);
-        let after = take_content_value(&livery, &cover, &widgets);
-        if diff_livery(&before, &after).is_empty() {
+        let before = take_content_value(&head_take.theme, &head_take.cover, &head_take.widgets);
+        let after = take_content_value(&theme, &cover, &widgets);
+        if diff_theme(&before, &after).is_empty() {
             return Ok(None);
         }
     }
@@ -765,21 +765,21 @@ fn handle_rice_take_mark(inv: &Invocation) -> Outcome {
     }
 }
 
-// ── `rice take diff` — key-wise livery diff (phase A7) ─────────────────────
+// ── `rice take diff` — key-wise theme diff (phase A7) ─────────────────────
 
-/// Pure key-wise diff between two livery documents, walking dotted paths through nested
+/// Pure key-wise diff between two theme documents, walking dotted paths through nested
 /// objects. Returns one entry per path where the two documents differ: `(dotted_path,
 /// old_value, new_value)`, where `None` on either side means the key is absent there — added
 /// when `old` is `None`, removed when `new` is `None`, changed when both are `Some` but differ.
 ///
-/// Deliberately a VALUE walk, never a text differ (advisor verdict, fork 7): liveries are
+/// Deliberately a VALUE walk, never a text differ (advisor verdict, fork 7): themes are
 /// shallow key/value trees, and a text diff of pretty-printed JSON reports key REORDERING as a
 /// change — `serde_json::to_string_pretty` makes no promise about key order surviving a
 /// round-trip, so a text diff would be a false-positive generator for reviewer agents flagging
 /// changes nobody made. Comparing parsed [`Value`]s side by side, keyed by name rather than by
 /// line, is immune to that by construction: two documents with the same keys in different orders
 /// produce an empty diff here, exactly the same "compare values, not bytes" discipline
-/// [`snapshot_if_drifted_unlocked`]'s own `livery == head_take.livery` check already relies on
+/// [`snapshot_if_drifted_unlocked`]'s own `theme == head_take.theme` check already relies on
 /// above in this file.
 ///
 /// An equal value at any level (an `a == b` bailout before the match) recurses no further, which
@@ -788,15 +788,15 @@ fn handle_rice_take_mark(inv: &Invocation) -> Outcome {
 /// path with `.`; anything else (a scalar, an array, or a type change — an object on one side and
 /// something else on the other) is a single leaf entry at its own path, `old`/`new` holding the
 /// two whole values verbatim. Arrays are compared as opaque values, never walked element by
-/// element — nothing in the plan or the shallow-tree livery shape this exists to serve asks for
+/// element — nothing in the plan or the shallow-tree theme shape this exists to serve asks for
 /// array-index diffing.
-pub fn diff_livery(a: &Value, b: &Value) -> Vec<(String, Option<Value>, Option<Value>)> {
+pub fn diff_theme(a: &Value, b: &Value) -> Vec<(String, Option<Value>, Option<Value>)> {
     let mut out = Vec::new();
     diff_at(String::new(), a, b, &mut out);
     out
 }
 
-/// [`diff_livery`]'s own recursive walk. `prefix` is the dotted path built up by every ancestor
+/// [`diff_theme`]'s own recursive walk. `prefix` is the dotted path built up by every ancestor
 /// call so far (empty at the root). Bails out immediately when `a == b` — the check that makes
 /// key reordering a no-op, since `serde_json::Value`'s own `PartialEq` for an object compares
 /// keys and values, never insertion order.
@@ -948,7 +948,7 @@ fn handle_rice_take_diff(inv: &Invocation) -> Outcome {
     };
     let base_record = takes::load_take(&song, draft.as_deref(), base).expect("resolve_base only returns an existing take");
 
-    let diff = diff_livery(&base_record.livery, &staged);
+    let diff = diff_theme(&base_record.theme, &staged);
     let message = if diff.is_empty() {
         format!("no change since take {base:04}")
     } else {
@@ -958,7 +958,7 @@ fn handle_rice_take_diff(inv: &Invocation) -> Outcome {
                 (None, Some(n)) => format!("  + {path}: {}", render_diff_value(n)),
                 (Some(o), None) => format!("  - {path}: {}", render_diff_value(o)),
                 (Some(o), Some(n)) => format!("  ~ {path}: {} -> {}", render_diff_value(o), render_diff_value(n)),
-                (None, None) => unreachable!("diff_livery never emits a (None, None) entry"),
+                (None, None) => unreachable!("diff_theme never emits a (None, None) entry"),
             };
             lines.push(line);
         }
@@ -1409,7 +1409,7 @@ fn handle_rice_take_prune(inv: &Invocation) -> Outcome {
 // ── `rice back` — the revert that lands the branch-from-any-mark ask ───────
 //
 // Everything below is ONE mutator: [`back_unlocked`] does drift-snapshot →
-// livery/cover write-back → compositor apply → registry re-sync → head
+// theme/cover write-back → compositor apply → registry re-sync → head
 // advance as a single `with_stage_lock` body (which nests for the thread that
 // already holds it — `aoide-storage/src/fs.rs`), which is why it
 // calls ONLY the `_unlocked` cores above, never [`snapshot`]/[`mark`]: those
@@ -1459,20 +1459,20 @@ fn back_unlocked(cmd: &str, take_flag: Option<u32>, mark_flag: Option<String>) -
     // mechanism a Draft-mode revert rides on — the write-back below carries
     // zero symlink-awareness of its own, exactly like `rice stage`'s.
     // Without this check, a broken routing symlink would make the write
-    // below land in a plain `stage/livery.json` instead of the draft file:
+    // below land in a plain `stage/theme.json` instead of the draft file:
     // the draft itself untouched, the take store and the live stage
     // silently disagreeing about which draft is "current". `symlink_metadata`
-    // never follows the link, so this answers "is `stage/livery.json` ITSELF
+    // never follows the link, so this answers "is `stage/theme.json` ITSELF
     // a symlink" without caring whether its target exists.
     //
     // Staging-mode revert (`draft.is_none()`, the staging-mode reach `strillix
     // reload`'s design extends `rice back` to) has no symlink to check at
-    // all — `stage/livery.json` is a plain file there, exactly like `rice
+    // all — `stage/theme.json` is a plain file there, exactly like `rice
     // stage`'s own write, so this whole rail is Draft-only.
     let stage = shellbridge::stage_dir();
-    let livery_path = stage.join("livery.json");
+    let theme_path = stage.join("theme.json");
     if let Some(draft_name) = draft.as_deref() {
-        let routed = std::fs::symlink_metadata(&livery_path)
+        let routed = std::fs::symlink_metadata(&theme_path)
             .map(|m| m.file_type().is_symlink())
             .unwrap_or(false);
         if !routed {
@@ -1482,10 +1482,10 @@ fn back_unlocked(cmd: &str, take_flag: Option<u32>, mark_flag: Option<String>) -
                     "draft routing is broken: {} is not a symlink — refusing to revert rather than \
                      silently writing a plain stage file that leaves the draft untouched \
                      (`aoide rice mode draft {draft_name}` re-routes it)",
-                    livery_path.display()
+                    theme_path.display()
                 ),
             )
-            .with_data(json!({ "reason": "routing-broken", "expected": livery_path.to_string_lossy() })));
+            .with_data(json!({ "reason": "routing-broken", "expected": theme_path.to_string_lossy() })));
         }
     }
 
@@ -1521,7 +1521,7 @@ fn back_unlocked(cmd: &str, take_flag: Option<u32>, mark_flag: Option<String>) -
 
     // §7.5's gate, at the HEAD of the back path — above the drift snapshot
     // below, which is itself a write (it mints a take). A refusal here leaves
-    // the desktop exactly where it was: no drift take, no reverted livery, no
+    // the desktop exactly where it was: no drift take, no reverted theme, no
     // geometry re-applied to the compositor, no cover rewrite, no cursor move.
     // The revert itself needs no nix; only the registry sync does — and
     // refusing the whole operation BEFORE its first write is what makes that
@@ -1552,42 +1552,42 @@ fn back_unlocked(cmd: &str, take_flag: Option<u32>, mark_flag: Option<String>) -
     // symlink-transparent, so this lands in the draft file the same way
     // every other stage writer does. No new apply path — this reuses the
     // one that already exists.
-    let livery_body = serde_json::to_string_pretty(&target_record.livery)
+    let theme_body = serde_json::to_string_pretty(&target_record.theme)
         .map_err(|e| {
-            Outcome::error(cmd, format!("failed to serialize take {target:04}'s livery: {e}"))
+            Outcome::error(cmd, format!("failed to serialize take {target:04}'s theme: {e}"))
                 .with_data(json!({ "reason": "write-failed" }))
         })?
         + "\n";
-    shellbridge::atomic_write(&livery_path, &livery_body).map_err(|e| {
-        Outcome::error(cmd, format!("failed to write {}: {e}", livery_path.display()))
-            .with_data(json!({ "reason": "write-failed", "target": livery_path.to_string_lossy() }))
+    shellbridge::atomic_write(&theme_path, &theme_body).map_err(|e| {
+        Outcome::error(cmd, format!("failed to write {}: {e}", theme_path.display()))
+            .with_data(json!({ "reason": "write-failed", "target": theme_path.to_string_lossy() }))
     })?;
-    changed.push(livery_path.to_string_lossy().into_owned());
+    changed.push(theme_path.to_string_lossy().into_owned());
 
     // Best-effort compositor live-apply — the exact sequencing
     // `handle_rice_stage` uses (geometry/border keywords derived from the
-    // SAME livery just written), never fatal: the stage-file write above is
+    // SAME theme just written), never fatal: the stage-file write above is
     // already the source of truth for the hot-reload half.
-    let hyprctl_status = crate::live::apply_live(&crate::live::geometry_keywords(&target_record.livery));
-    // The terminal half off the same restored livery: the colour file every
+    let hyprctl_status = crate::live::apply_live(&crate::live::geometry_keywords(&target_record.theme));
+    // The terminal half off the same restored theme: the colour file every
     // new kitty window includes, pushed to the open ones — same best-effort
     // tier, through the one writer `rice stage` uses.
     let (terminal_changed, terminal) = super::rice::stage_terminal_colors(
-        crate::live::terminal_colors(&target_record.livery).as_deref(),
+        crate::live::terminal_colors(&target_record.theme).as_deref(),
     );
     changed.extend(terminal_changed);
-    // And the lock screen's dress, off the same livery: the song's own picture
+    // And the lock screen's dress, off the same theme: the song's own picture
     // from the runtime rices, or nothing, which clears the dress a later
     // staged song left behind.
     let lock_image = crate::cover::lockscreen_image(&shellbridge::rice_dir(&song));
     let (lock_changed, lock_screen) = super::rice::stage_lockscreen(
-        crate::live::lockscreen_fragment(&target_record.livery, lock_image.as_deref()),
+        crate::live::lockscreen_fragment(&target_record.theme, lock_image.as_deref()),
         lock_image.as_deref(),
     );
     changed.extend(lock_changed);
 
     // Cover restore is narrowed to the STAGE ONLY (advisor verdict D4):
-    // `stage/cover.json` is not symlink-routed the way `livery.json` is
+    // `stage/cover.json` is not symlink-routed the way `theme.json` is
     // (`storage/src/mode.rs`'s `handle_mode_draft` symlinks exactly one
     // file), so this writes the same seam `cover set` writes
     // (`commands/cover.rs::handle_cover_set`), never the draft directory's
@@ -1616,9 +1616,9 @@ fn back_unlocked(cmd: &str, take_flag: Option<u32>, mark_flag: Option<String>) -
     }
 
     // Registry re-sync, no IPC reload (advisor verdict D1). `registry.json`
-    // is derived from the livery's `.widgets` key, so a reverted livery with
+    // is derived from the theme's `.widgets` key, so a reverted theme with
     // a different widget set would leave it stale without this — but every
-    // file this whole function writes (livery, cover, registry) is
+    // file this whole function writes (theme, cover, registry) is
     // FileView-watched by Quickshell exactly like `rice stage`'s own palette
     // tier, so there is nothing for a Quickshell IPC reload to do. The ONE
     // reload lane that exists anywhere in this codebase
@@ -1859,7 +1859,7 @@ mod tests {
             at: "2026-08-18T00:00:00Z".to_string(),
             session_id: None,
             cause: "stage".to_string(),
-            livery: serde_json::json!({}),
+            theme: serde_json::json!({}),
             cover: None,
             widgets: serde_json::json!({}),
         }
@@ -1868,7 +1868,7 @@ mod tests {
     /// Route `AOIDE_STAGE_DIR` at a fresh tmp stage and mark `mode.json` as
     /// `Draft` for `sonata`/`neon-night` — every snapshot-core test needs
     /// this before it can pass [`resolve_draft`]. Callers still write
-    /// `stage/livery.json` themselves (content varies per test) and own
+    /// `stage/theme.json` themselves (content varies per test) and own
     /// `remove_dir_all(&root)` at the end, matching every other command
     /// module's test rig in this crate.
     fn routed_draft(tag: &str) -> (std::path::PathBuf, String, String) {
@@ -1897,7 +1897,7 @@ mod tests {
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID"]);
         std::env::remove_var("AOIDE_SESSION_ID");
         let (root, song, draft) = routed_draft("take-first");
-        std::fs::write(shellbridge::stage_dir().join("livery.json"), VALID_NOTES).unwrap();
+        std::fs::write(shellbridge::stage_dir().join("theme.json"), VALID_NOTES).unwrap();
 
         let record = snapshot("rice.take", "explicit").unwrap();
         assert_eq!(record.take, 1);
@@ -1913,13 +1913,13 @@ mod tests {
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID"]);
         std::env::remove_var("AOIDE_SESSION_ID");
         let (root, song, draft) = routed_draft("take-second");
-        std::fs::write(shellbridge::stage_dir().join("livery.json"), VALID_NOTES).unwrap();
+        std::fs::write(shellbridge::stage_dir().join("theme.json"), VALID_NOTES).unwrap();
 
         let first = snapshot("rice.take", "stage").unwrap();
         assert_eq!(first.take, 1);
 
         std::fs::write(
-            shellbridge::stage_dir().join("livery.json"),
+            shellbridge::stage_dir().join("theme.json"),
             r##"{"schemaVersion":"0","palette":{"bg":"#111111"}}"##,
         )
         .unwrap();
@@ -1975,7 +1975,7 @@ mod tests {
             ..Default::default()
         })
         .unwrap();
-        std::fs::write(stage.join("livery.json"), VALID_NOTES).unwrap();
+        std::fs::write(stage.join("theme.json"), VALID_NOTES).unwrap();
 
         let record = snapshot("rice.take", "explicit").unwrap();
         assert_eq!(record.take, 1);
@@ -2044,7 +2044,7 @@ mod tests {
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID"]);
         std::env::remove_var("AOIDE_SESSION_ID");
         let (root, song, draft) = routed_draft("take-drift");
-        std::fs::write(shellbridge::stage_dir().join("livery.json"), VALID_NOTES).unwrap();
+        std::fs::write(shellbridge::stage_dir().join("theme.json"), VALID_NOTES).unwrap();
 
         let first = snapshot("rice.take", "stage").unwrap();
         assert_eq!(first.take, 1);
@@ -2052,14 +2052,14 @@ mod tests {
         // Re-serialized but VALUE-identical content must not read as drift.
         let reparsed: Value = serde_json::from_str(VALID_NOTES).unwrap();
         let reserialized = serde_json::to_string_pretty(&reparsed).unwrap();
-        std::fs::write(shellbridge::stage_dir().join("livery.json"), reserialized).unwrap();
+        std::fs::write(shellbridge::stage_dir().join("theme.json"), reserialized).unwrap();
         let noop = snapshot_if_drifted_unlocked("rice.take", "drift").unwrap();
         assert!(noop.is_none(), "byte-different, value-identical content is not drift");
         assert_eq!(takes::list_takes(&song, Some(&draft)).len(), 1, "no new take minted");
 
         // A genuine change mints a take, parented off the head it drifted from.
         std::fs::write(
-            shellbridge::stage_dir().join("livery.json"),
+            shellbridge::stage_dir().join("theme.json"),
             r##"{"schemaVersion":"0","palette":{"bg":"#222222"}}"##,
         )
         .unwrap();
@@ -2077,7 +2077,7 @@ mod tests {
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID"]);
         std::env::remove_var("AOIDE_SESSION_ID");
         let (root, _song, _draft) = routed_draft("take-drift-empty");
-        std::fs::write(shellbridge::stage_dir().join("livery.json"), VALID_NOTES).unwrap();
+        std::fs::write(shellbridge::stage_dir().join("theme.json"), VALID_NOTES).unwrap();
 
         // No head exists yet — there is nothing to compare against, so the
         // very first content is always worth capturing.
@@ -2095,7 +2095,7 @@ mod tests {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID"]);
         let (root, _song, _draft) = routed_draft("take-session");
-        std::fs::write(shellbridge::stage_dir().join("livery.json"), VALID_NOTES).unwrap();
+        std::fs::write(shellbridge::stage_dir().join("theme.json"), VALID_NOTES).unwrap();
 
         std::env::remove_var("AOIDE_SESSION_ID");
         let no_session = snapshot("rice.take", "explicit").unwrap();
@@ -2115,7 +2115,7 @@ mod tests {
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID"]);
         std::env::remove_var("AOIDE_SESSION_ID");
         let (root, song, draft) = routed_draft("take-handler-ok");
-        std::fs::write(shellbridge::stage_dir().join("livery.json"), VALID_NOTES).unwrap();
+        std::fs::write(shellbridge::stage_dir().join("theme.json"), VALID_NOTES).unwrap();
 
         let out = handle_rice_take(&inv(&["rice", "take"], &[]));
         assert_eq!(out.status, Status::Ok, "{:?}", out.data);
@@ -2164,7 +2164,7 @@ mod tests {
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID"]);
         std::env::remove_var("AOIDE_SESSION_ID");
         let (root, song, draft) = routed_draft("mark-head-default");
-        std::fs::write(shellbridge::stage_dir().join("livery.json"), VALID_NOTES).unwrap();
+        std::fs::write(shellbridge::stage_dir().join("theme.json"), VALID_NOTES).unwrap();
         let first = snapshot("rice.take", "explicit").unwrap();
         assert_eq!(first.take, 1);
 
@@ -2186,10 +2186,10 @@ mod tests {
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID"]);
         std::env::remove_var("AOIDE_SESSION_ID");
         let (root, song, draft) = routed_draft("mark-take-flag");
-        std::fs::write(shellbridge::stage_dir().join("livery.json"), VALID_NOTES).unwrap();
+        std::fs::write(shellbridge::stage_dir().join("theme.json"), VALID_NOTES).unwrap();
         snapshot("rice.take", "explicit").unwrap(); // take 1
         std::fs::write(
-            shellbridge::stage_dir().join("livery.json"),
+            shellbridge::stage_dir().join("theme.json"),
             r##"{"schemaVersion":"0","palette":{"bg":"#222222"}}"##,
         )
         .unwrap();
@@ -2211,10 +2211,10 @@ mod tests {
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID"]);
         std::env::remove_var("AOIDE_SESSION_ID");
         let (root, song, draft) = routed_draft("mark-move");
-        std::fs::write(shellbridge::stage_dir().join("livery.json"), VALID_NOTES).unwrap();
+        std::fs::write(shellbridge::stage_dir().join("theme.json"), VALID_NOTES).unwrap();
         let first = snapshot("rice.take", "explicit").unwrap();
         std::fs::write(
-            shellbridge::stage_dir().join("livery.json"),
+            shellbridge::stage_dir().join("theme.json"),
             r##"{"schemaVersion":"0","palette":{"bg":"#222222"}}"##,
         )
         .unwrap();
@@ -2260,7 +2260,7 @@ mod tests {
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID"]);
         std::env::remove_var("AOIDE_SESSION_ID");
         let (root, _song, _draft) = routed_draft("mark-invalid");
-        std::fs::write(shellbridge::stage_dir().join("livery.json"), VALID_NOTES).unwrap();
+        std::fs::write(shellbridge::stage_dir().join("theme.json"), VALID_NOTES).unwrap();
         snapshot("rice.take", "explicit").unwrap();
 
         for bad in ["a", "AB", "1", "", "Å"] {
@@ -2303,7 +2303,7 @@ mod tests {
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID"]);
         std::env::remove_var("AOIDE_SESSION_ID");
         let (root, _song, _draft) = routed_draft("mark-take-missing");
-        std::fs::write(shellbridge::stage_dir().join("livery.json"), VALID_NOTES).unwrap();
+        std::fs::write(shellbridge::stage_dir().join("theme.json"), VALID_NOTES).unwrap();
         snapshot("rice.take", "explicit").unwrap(); // only take 1 exists
 
         let out = handle_rice_take_mark(&inv_with_take("A", 99));
@@ -2332,7 +2332,7 @@ mod tests {
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID"]);
         std::env::remove_var("AOIDE_SESSION_ID");
         let (root, _song, _draft) = routed_draft("mark-take-flag-invalid");
-        std::fs::write(shellbridge::stage_dir().join("livery.json"), VALID_NOTES).unwrap();
+        std::fs::write(shellbridge::stage_dir().join("theme.json"), VALID_NOTES).unwrap();
         snapshot("rice.take", "explicit").unwrap();
 
         let out = handle_rice_take_mark(&Invocation {
@@ -2349,8 +2349,8 @@ mod tests {
     // ── `rice back` — the revert that lands the branch-from-any-mark ask ───
     //
     // Unlike `routed_draft` above (a bare Draft-mode marker over a PLAIN
-    // stage/livery.json — fine for the snapshot/mark cores, which never
-    // check routing), every `rice back` test needs stage/livery.json to be a
+    // stage/theme.json — fine for the snapshot/mark cores, which never
+    // check routing), every `rice back` test needs stage/theme.json to be a
     // REAL symlink into the draft file, because `back_unlocked`'s
     // routing-broken rail (D7) checks exactly that before writing anything.
 
@@ -2364,9 +2364,9 @@ mod tests {
         let draft = "neon-night".to_string();
         let draft_dir = shellbridge::draft_dir(&song, &draft);
         std::fs::create_dir_all(&draft_dir).unwrap();
-        let draft_livery = draft_dir.join("livery.json");
-        std::fs::write(&draft_livery, "{}").unwrap();
-        std::os::unix::fs::symlink(&draft_livery, stage.join("livery.json")).unwrap();
+        let draft_theme = draft_dir.join("theme.json");
+        std::fs::write(&draft_theme, "{}").unwrap();
+        std::os::unix::fs::symlink(&draft_theme, stage.join("theme.json")).unwrap();
         save_mode_marker(&ModeMarker {
             mode: RiceMode::Draft,
             song: Some(song.clone()),
@@ -2374,7 +2374,7 @@ mod tests {
             ..Default::default()
         })
         .unwrap();
-        (root, song, draft, draft_livery)
+        (root, song, draft, draft_theme)
     }
 
     /// Writes new content THROUGH the routing symlink — plain `std::fs::write`
@@ -2382,9 +2382,9 @@ mod tests {
     /// this lands in the draft file while leaving the symlink itself intact,
     /// exactly the property every test below relies on to keep re-editing
     /// "the draft" across multiple snapshots.
-    fn write_livery(stage: &std::path::Path, bg: &str) {
+    fn write_theme(stage: &std::path::Path, bg: &str) {
         std::fs::write(
-            stage.join("livery.json"),
+            stage.join("theme.json"),
             format!(r##"{{"schemaVersion":"0","palette":{{"bg":"{bg}"}}}}"##),
         )
         .unwrap();
@@ -2414,20 +2414,20 @@ mod tests {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID"]);
         std::env::remove_var("AOIDE_SESSION_ID");
-        let (root, song, draft, draft_livery) = routed_draft_symlinked("back-branch-acceptance");
+        let (root, song, draft, draft_theme) = routed_draft_symlinked("back-branch-acceptance");
         let stage = shellbridge::stage_dir();
 
-        write_livery(&stage, "#111111");
+        write_theme(&stage, "#111111");
         let take1 = snapshot("rice.take", "stage").unwrap();
         assert_eq!((take1.take, take1.parent), (1, None));
 
-        write_livery(&stage, "#222222");
+        write_theme(&stage, "#222222");
         let take2 = snapshot("rice.take", "stage").unwrap();
         assert_eq!((take2.take, take2.parent), (2, Some(1)));
 
         mark("rice.take.mark", "A", 2).unwrap();
 
-        write_livery(&stage, "#333333");
+        write_theme(&stage, "#333333");
         let take3 = snapshot("rice.take", "stage").unwrap();
         assert_eq!((take3.take, take3.parent), (3, Some(2)));
         assert_eq!(takes::load_head(&song, Some(&draft)), Some(3));
@@ -2447,8 +2447,8 @@ mod tests {
         );
         assert_eq!(takes::load_head(&song, Some(&draft)), Some(2), "head moved to the mark's take");
 
-        let restored: Value = serde_json::from_str(&std::fs::read_to_string(&draft_livery).unwrap()).unwrap();
-        assert_eq!(restored, take2.livery, "the draft file (through the symlink) now holds take 2's content");
+        let restored: Value = serde_json::from_str(&std::fs::read_to_string(&draft_theme).unwrap()).unwrap();
+        assert_eq!(restored, take2.theme, "the draft file (through the symlink) now holds take 2's content");
 
         // Takes 3 is completely untouched — nothing destroyed, nothing
         // renumbered.
@@ -2457,7 +2457,7 @@ mod tests {
 
         // Branch out again: the next write hangs off the REVERTED head (2),
         // not off take 3 — this is where branching actually happens.
-        write_livery(&stage, "#444444");
+        write_theme(&stage, "#444444");
         let take4 = snapshot("rice.take", "stage").unwrap();
         assert_eq!((take4.take, take4.parent), (4, Some(2)), "branches off the reverted head, not off take 3");
 
@@ -2475,12 +2475,12 @@ mod tests {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID"]);
         std::env::remove_var("AOIDE_SESSION_ID");
-        let (root, song, draft, draft_livery) = routed_draft_symlinked("back-by-take");
+        let (root, song, draft, draft_theme) = routed_draft_symlinked("back-by-take");
         let stage = shellbridge::stage_dir();
 
-        write_livery(&stage, "#aaaaaa");
+        write_theme(&stage, "#aaaaaa");
         let take1 = snapshot("rice.take", "stage").unwrap();
-        write_livery(&stage, "#bbbbbb");
+        write_theme(&stage, "#bbbbbb");
         snapshot("rice.take", "stage").unwrap(); // take 2, now head
 
         let out = handle_rice_back(&inv_back(None, Some(1)));
@@ -2490,8 +2490,8 @@ mod tests {
         assert!(data["mark"].is_null(), "a --take selection reports no mark");
         assert_eq!(takes::load_head(&song, Some(&draft)), Some(1));
 
-        let restored: Value = serde_json::from_str(&std::fs::read_to_string(&draft_livery).unwrap()).unwrap();
-        assert_eq!(restored, take1.livery);
+        let restored: Value = serde_json::from_str(&std::fs::read_to_string(&draft_theme).unwrap()).unwrap();
+        assert_eq!(restored, take1.theme);
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -2503,13 +2503,13 @@ mod tests {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID"]);
         std::env::remove_var("AOIDE_SESSION_ID");
-        let (root, song, _draft, _draft_livery) = routed_draft_symlinked("back-lock-dress");
+        let (root, song, _draft, _draft_theme) = routed_draft_symlinked("back-lock-dress");
         let stage = shellbridge::stage_dir();
         let picture = shellbridge::rice_dir(&song).join("lockscreen.png");
         std::fs::write(&picture, b"").unwrap();
         let write_full = |bg: &str| {
             std::fs::write(
-                stage.join("livery.json"),
+                stage.join("theme.json"),
                 format!(
                     r##"{{"schemaVersion":"0","palette":{{"bg":"{bg}","fg":"#eeeeee","accent":"#00ff00","urgent":"#ff0000"}}}}"##
                 ),
@@ -2535,7 +2535,7 @@ mod tests {
         assert_eq!(out.status, Status::Ok, "{:?}", out.data);
         assert_eq!(
             std::fs::read_to_string(stage.join("hyprlock.conf")).unwrap(),
-            crate::livery::emit::hyprlock::NO_DRESS
+            crate::theme::emit::hyprlock::NO_DRESS
         );
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -2550,12 +2550,12 @@ mod tests {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID"]);
         std::env::remove_var("AOIDE_SESSION_ID");
-        let (root, song, draft, _draft_livery) = routed_draft_symlinked("back-take-target-has-mark");
+        let (root, song, draft, _draft_theme) = routed_draft_symlinked("back-take-target-has-mark");
         let stage = shellbridge::stage_dir();
 
-        write_livery(&stage, "#111111");
+        write_theme(&stage, "#111111");
         snapshot("rice.take", "stage").unwrap(); // take 1
-        write_livery(&stage, "#222222");
+        write_theme(&stage, "#222222");
         snapshot("rice.take", "stage").unwrap(); // take 2, head
         mark("rice.take.mark", "A", 1).unwrap(); // take 1 — the REVERT TARGET — carries a mark
 
@@ -2574,15 +2574,15 @@ mod tests {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID"]);
         std::env::remove_var("AOIDE_SESSION_ID");
-        let (root, song, draft, draft_livery) = routed_draft_symlinked("back-drift-preserved");
+        let (root, song, draft, draft_theme) = routed_draft_symlinked("back-drift-preserved");
         let stage = shellbridge::stage_dir();
 
-        write_livery(&stage, "#111111");
+        write_theme(&stage, "#111111");
         snapshot("rice.take", "stage").unwrap(); // take 1, head
 
         // An un-taken hand edit — nothing ever called `rice take`/`rice
         // stage` on this content, so it exists nowhere but the live stage.
-        write_livery(&stage, "#hand-edited");
+        write_theme(&stage, "#hand-edited");
 
         let out = handle_rice_back(&inv_back(None, Some(1)));
         assert_eq!(out.status, Status::Ok, "{:?}", out.data);
@@ -2594,10 +2594,10 @@ mod tests {
         let preserved = takes::load_take(&song, Some(&draft), 2).unwrap();
         assert_eq!(preserved.cause, "drift");
         assert_eq!(preserved.parent, Some(1));
-        assert_eq!(preserved.livery["palette"]["bg"], "#hand-edited");
+        assert_eq!(preserved.theme["palette"]["bg"], "#hand-edited");
 
         // And the revert itself still landed — take 1's content is now live.
-        let restored: Value = serde_json::from_str(&std::fs::read_to_string(&draft_livery).unwrap()).unwrap();
+        let restored: Value = serde_json::from_str(&std::fs::read_to_string(&draft_theme).unwrap()).unwrap();
         assert_eq!(restored["palette"]["bg"], "#111111");
         assert_eq!(takes::load_head(&song, Some(&draft)), Some(1));
         let _ = std::fs::remove_dir_all(&root);
@@ -2608,10 +2608,10 @@ mod tests {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID"]);
         std::env::remove_var("AOIDE_SESSION_ID");
-        let (root, song, draft, _draft_livery) = routed_draft_symlinked("back-no-drift");
+        let (root, song, draft, _draft_theme) = routed_draft_symlinked("back-no-drift");
         let stage = shellbridge::stage_dir();
 
-        write_livery(&stage, "#111111");
+        write_theme(&stage, "#111111");
         snapshot("rice.take", "stage").unwrap(); // take 1, head — stage matches it exactly
 
         let out = handle_rice_back(&inv_back(None, Some(1)));
@@ -2638,12 +2638,12 @@ mod tests {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID"]);
         std::env::remove_var("AOIDE_SESSION_ID");
-        let (root, song, draft, _draft_livery) = routed_draft_symlinked("back-repeat-same-target");
+        let (root, song, draft, _draft_theme) = routed_draft_symlinked("back-repeat-same-target");
         let stage = shellbridge::stage_dir();
 
-        write_livery(&stage, "#111111");
+        write_theme(&stage, "#111111");
         snapshot("rice.take", "stage").unwrap(); // take 1
-        write_livery(&stage, "#222222");
+        write_theme(&stage, "#222222");
         snapshot("rice.take", "stage").unwrap(); // take 2, head
 
         let first = handle_rice_back(&inv_back(None, Some(1)));
@@ -2669,10 +2669,10 @@ mod tests {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID"]);
         std::env::remove_var("AOIDE_SESSION_ID");
-        let (root, _song, _draft, _draft_livery) = routed_draft_symlinked("back-cover-clear");
+        let (root, _song, _draft, _draft_theme) = routed_draft_symlinked("back-cover-clear");
         let stage = shellbridge::stage_dir();
 
-        write_livery(&stage, "#111111");
+        write_theme(&stage, "#111111");
         let take1 = snapshot("rice.take", "stage").unwrap();
         assert!(take1.cover.is_none());
 
@@ -2703,10 +2703,10 @@ mod tests {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID"]);
         std::env::remove_var("AOIDE_SESSION_ID");
-        let (root, _song, _draft, _draft_livery) = routed_draft_symlinked("back-cover-pick");
+        let (root, _song, _draft, _draft_theme) = routed_draft_symlinked("back-cover-pick");
         let stage = shellbridge::stage_dir();
 
-        write_livery(&stage, "#111111");
+        write_theme(&stage, "#111111");
         crate::cover::stage_default(std::path::Path::new("/tmp/song-cover.png"), "sonata")
             .unwrap();
         let take1 = snapshot("rice.take", "stage").unwrap();
@@ -2751,9 +2751,9 @@ mod tests {
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
         let song = "sonata".to_string();
         let draft = "neon-night".to_string();
-        // Draft mode claimed, but stage/livery.json is a PLAIN file, never
+        // Draft mode claimed, but stage/theme.json is a PLAIN file, never
         // routed through `rice mode draft`'s symlink.
-        std::fs::write(stage.join("livery.json"), VALID_NOTES).unwrap();
+        std::fs::write(stage.join("theme.json"), VALID_NOTES).unwrap();
         save_mode_marker(&ModeMarker {
             mode: RiceMode::Draft,
             song: Some(song.clone()),
@@ -2774,7 +2774,7 @@ mod tests {
             at: "2026-08-18T00:00:00Z".to_string(),
             session_id: None,
             cause: "explicit".to_string(),
-            livery: serde_json::json!({ "schemaVersion": "0" }),
+            theme: serde_json::json!({ "schemaVersion": "0" }),
             cover: None,
             widgets: serde_json::json!({}),
         };
@@ -2789,7 +2789,7 @@ mod tests {
         // 2) — NOT moved to the target (1), which is what a bug that let
         // `save_head` run despite the refusal would produce.
         assert_eq!(
-            std::fs::read_to_string(stage.join("livery.json")).unwrap(),
+            std::fs::read_to_string(stage.join("theme.json")).unwrap(),
             VALID_NOTES,
             "a routing-broken refusal writes nothing"
         );
@@ -2809,12 +2809,12 @@ mod tests {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID"]);
         std::env::remove_var("AOIDE_SESSION_ID");
-        let (root, song, draft, _draft_livery) = routed_draft_symlinked("back-both-flags-take-wins");
+        let (root, song, draft, _draft_theme) = routed_draft_symlinked("back-both-flags-take-wins");
         let stage = shellbridge::stage_dir();
 
-        write_livery(&stage, "#111111");
+        write_theme(&stage, "#111111");
         snapshot("rice.take", "stage").unwrap(); // take 1
-        write_livery(&stage, "#222222");
+        write_theme(&stage, "#222222");
         snapshot("rice.take", "stage").unwrap(); // take 2, head
         mark("rice.take.mark", "A", 2).unwrap(); // A names take 2 — the OTHER selection
 
@@ -2832,9 +2832,9 @@ mod tests {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID"]);
         std::env::remove_var("AOIDE_SESSION_ID");
-        let (root, _song, _draft, _draft_livery) = routed_draft_symlinked("back-not-found");
+        let (root, _song, _draft, _draft_theme) = routed_draft_symlinked("back-not-found");
         let stage = shellbridge::stage_dir();
-        write_livery(&stage, "#111111");
+        write_theme(&stage, "#111111");
         snapshot("rice.take", "stage").unwrap(); // only take 1 exists, no marks
 
         let missing_take = handle_rice_back(&inv_back(None, Some(99)));
@@ -2852,7 +2852,7 @@ mod tests {
         // H1: the §7.5 gate runs at the HEAD of the back path — above the
         // drift snapshot, which is itself a write (it mints a take). A refusal
         // must therefore cost the operator NOTHING: no drift take, no reverted
-        // livery, no geometry re-applied to the compositor, no cover rewrite,
+        // theme, no geometry re-applied to the compositor, no cover rewrite,
         // no cursor move. This is the case §9(d) never reached, because it
         // tests `rice stage`.
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
@@ -2891,10 +2891,10 @@ mod tests {
         std::env::set_var("STRILLIX_TEMPLATES", &templates);
         std::env::remove_var(crate::widgets::RICES_EVAL_FIXTURE_VAR);
 
-        std::fs::write(stage.join("livery.json"), VALID_NOTES).unwrap();
+        std::fs::write(stage.join("theme.json"), VALID_NOTES).unwrap();
         let strillix_dir = shellbridge::rice_dir("sonata");
         std::fs::create_dir_all(strillix_dir.join("widgets")).unwrap();
-        std::fs::write(strillix_dir.join("livery.json"), VALID_NOTES).unwrap();
+        std::fs::write(strillix_dir.join("theme.json"), VALID_NOTES).unwrap();
         std::fs::write(strillix_dir.join("widgets").join("bar.qml"), "// bar\n").unwrap();
         // Unlocked staging mode: `rice back` refuses while declarative, and
         // takes only exist while unlocked — a mode refusal would mask the gate.
@@ -2913,7 +2913,7 @@ mod tests {
                 at: "2026-08-18T00:00:00Z".to_string(),
                 session_id: None,
                 cause: "explicit".to_string(),
-                livery: serde_json::json!({ "schemaVersion": "0" }),
+                theme: serde_json::json!({ "schemaVersion": "0" }),
                 cover: None,
                 widgets: serde_json::json!({}),
             },
@@ -2974,9 +2974,9 @@ mod tests {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID"]);
         std::env::remove_var("AOIDE_SESSION_ID");
-        let (root, song, draft, _draft_livery) = routed_draft_symlinked("back-bare-refuses");
+        let (root, song, draft, _draft_theme) = routed_draft_symlinked("back-bare-refuses");
         let stage = shellbridge::stage_dir();
-        write_livery(&stage, "#111111");
+        write_theme(&stage, "#111111");
         snapshot("rice.take", "stage").unwrap();
 
         // Snapshot the WHOLE store's observable state before the call, not
@@ -2985,8 +2985,8 @@ mod tests {
         // regression that (say) wrote marks.json without moving the head.
         let before_take_count = takes::list_takes(&song, Some(&draft)).len();
         let before_marks = takes::load_marks(&song, Some(&draft));
-        let livery_path = stage.join("livery.json");
-        let before_livery = std::fs::read(&livery_path).unwrap();
+        let theme_path = stage.join("theme.json");
+        let before_theme = std::fs::read(&theme_path).unwrap();
         let cover_path = stage.join("cover.json");
         let before_cover = std::fs::read(&cover_path).ok();
 
@@ -3001,7 +3001,7 @@ mod tests {
         assert_eq!(takes::load_head(&song, Some(&draft)), Some(1), "the bare refusal moved nothing");
         assert_eq!(takes::list_takes(&song, Some(&draft)).len(), before_take_count, "no take was minted or removed");
         assert_eq!(takes::load_marks(&song, Some(&draft)), before_marks, "marks.json is untouched");
-        assert_eq!(std::fs::read(&livery_path).unwrap(), before_livery, "the stage livery is byte-identical");
+        assert_eq!(std::fs::read(&theme_path).unwrap(), before_theme, "the stage theme is byte-identical");
         assert_eq!(std::fs::read(&cover_path).ok(), before_cover, "the stage cover is byte-identical (still absent)");
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -3016,9 +3016,9 @@ mod tests {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID"]);
         std::env::remove_var("AOIDE_SESSION_ID");
-        let (root, song, draft, _draft_livery) = routed_draft_symlinked("back-bare-verbatim");
+        let (root, song, draft, _draft_theme) = routed_draft_symlinked("back-bare-verbatim");
         let stage = shellbridge::stage_dir();
-        write_livery(&stage, "#111111");
+        write_theme(&stage, "#111111");
         snapshot("rice.take", "stage").unwrap();
 
         let out = handle_rice_back(&inv_back(None, None));
@@ -3246,11 +3246,11 @@ mod tests {
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID"]);
         std::env::remove_var("AOIDE_SESSION_ID");
         let (root, song, draft) = routed_draft("take-list-json-shape");
-        std::fs::write(shellbridge::stage_dir().join("livery.json"), VALID_NOTES).unwrap();
+        std::fs::write(shellbridge::stage_dir().join("theme.json"), VALID_NOTES).unwrap();
 
         let take1 = snapshot("rice.take", "explicit").unwrap(); // 1, no parent
         std::fs::write(
-            shellbridge::stage_dir().join("livery.json"),
+            shellbridge::stage_dir().join("theme.json"),
             r##"{"schemaVersion":"0","palette":{"bg":"#222222"}}"##,
         )
         .unwrap();
@@ -3292,7 +3292,7 @@ mod tests {
             at: "2026-08-18T00:00:00Z".to_string(),
             session_id: None,
             cause: "explicit".to_string(),
-            livery: serde_json::json!({}),
+            theme: serde_json::json!({}),
             cover: None,
             widgets: serde_json::json!({}),
         };
@@ -3307,10 +3307,10 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    // ── `rice take diff` — key-wise livery diff (phase A7) ──────────────
+    // ── `rice take diff` — key-wise theme diff (phase A7) ──────────────
 
     #[test]
-    fn diff_livery_detects_added_removed_and_changed_keys_at_depth() {
+    fn diff_theme_detects_added_removed_and_changed_keys_at_depth() {
         let a = json!({
             "schemaVersion": "0",
             "palette": { "bg": "#111111", "fg": "#eeeeee" },
@@ -3322,7 +3322,7 @@ mod tests {
             "widgets": { "clock": { "enabled": true }, "battery": { "enabled": false } },
         });
 
-        let diff = diff_livery(&a, &b);
+        let diff = diff_theme(&a, &b);
         let find = |path: &str| diff.iter().find(|(p, _, _)| p == path);
 
         let changed = find("palette.bg").expect("changed key at depth found");
@@ -3343,19 +3343,19 @@ mod tests {
     }
 
     #[test]
-    fn diff_livery_key_reordering_alone_produces_an_empty_diff() {
+    fn diff_theme_key_reordering_alone_produces_an_empty_diff() {
         // Fork 7's whole reason for a key-wise diff over a text diff: the same keys/values in a
         // different insertion order must NOT read as a change.
         let a = json!({ "schemaVersion": "0", "palette": { "bg": "#111111", "fg": "#222222" } });
         let b: Value =
             serde_json::from_str(r##"{"palette":{"fg":"#222222","bg":"#111111"},"schemaVersion":"0"}"##).unwrap();
-        assert!(diff_livery(&a, &b).is_empty(), "reordered keys, identical values: no diff");
+        assert!(diff_theme(&a, &b).is_empty(), "reordered keys, identical values: no diff");
     }
 
     #[test]
-    fn diff_livery_identical_documents_produce_an_empty_diff() {
+    fn diff_theme_identical_documents_produce_an_empty_diff() {
         let a = json!({ "schemaVersion": "0", "palette": { "bg": "#111111" } });
-        assert!(diff_livery(&a, &a.clone()).is_empty());
+        assert!(diff_theme(&a, &a.clone()).is_empty());
     }
 
     fn inv_diff(mark: Option<&str>, take: Option<u32>) -> Invocation {
@@ -3386,15 +3386,15 @@ mod tests {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID"]);
         std::env::remove_var("AOIDE_SESSION_ID");
-        let (root, song, draft, _draft_livery) = routed_draft_symlinked("diff-nearest-ancestral-mark");
+        let (root, song, draft, _draft_theme) = routed_draft_symlinked("diff-nearest-ancestral-mark");
         let stage = shellbridge::stage_dir();
 
         // take 1 — the root.
-        write_livery(&stage, "#111111");
+        write_theme(&stage, "#111111");
         snapshot("rice.take", "stage").unwrap();
 
         // take 2 — mark A here. This IS on the branch the head ends up on.
-        write_livery(&stage, "#222222");
+        write_theme(&stage, "#222222");
         let take2 = snapshot("rice.take", "stage").unwrap();
         assert_eq!(take2.parent, Some(1));
         mark("rice.take.mark", "A", 2).unwrap();
@@ -3404,7 +3404,7 @@ mod tests {
         // mints take 3, not take 4 — reverting alone never mints anything by itself.
         let back1 = handle_rice_back(&inv_back(None, Some(1)));
         assert_eq!(back1.status, Status::Ok, "{:?}", back1.data);
-        write_livery(&stage, "#444444");
+        write_theme(&stage, "#444444");
         let take3 = snapshot("rice.take", "stage").unwrap();
         assert_eq!(take3.parent, Some(1), "take 3 hangs off the root, a sibling of take 2");
         // Mark B here — mint order AND alphabet both put it "highest", but the head below
@@ -3414,7 +3414,7 @@ mod tests {
         // Return to take 2's branch and extend it — this is where the head ends up.
         let back2 = handle_rice_back(&inv_back(None, Some(2)));
         assert_eq!(back2.status, Status::Ok, "{:?}", back2.data);
-        write_livery(&stage, "#333333");
+        write_theme(&stage, "#333333");
         let take4 = snapshot("rice.take", "stage").unwrap();
         assert_eq!(take4.parent, Some(2));
         assert_eq!(takes::load_head(&song, Some(&draft)), Some(4));
@@ -3448,24 +3448,24 @@ mod tests {
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID"]);
         std::env::remove_var("AOIDE_SESSION_ID");
         let (root, _song, _draft) = routed_draft("diff-depth-three-mark");
-        std::fs::write(shellbridge::stage_dir().join("livery.json"), VALID_NOTES).unwrap();
+        std::fs::write(shellbridge::stage_dir().join("theme.json"), VALID_NOTES).unwrap();
         snapshot("rice.take", "stage").unwrap(); // take 1 — the root, marked
         mark("rice.take.mark", "A", 1).unwrap();
 
         std::fs::write(
-            shellbridge::stage_dir().join("livery.json"),
+            shellbridge::stage_dir().join("theme.json"),
             r##"{"schemaVersion":"0","palette":{"bg":"#222222"}}"##,
         )
         .unwrap();
         snapshot("rice.take", "stage").unwrap(); // take 2 — unmarked
         std::fs::write(
-            shellbridge::stage_dir().join("livery.json"),
+            shellbridge::stage_dir().join("theme.json"),
             r##"{"schemaVersion":"0","palette":{"bg":"#333333"}}"##,
         )
         .unwrap();
         snapshot("rice.take", "stage").unwrap(); // take 3 — unmarked
         std::fs::write(
-            shellbridge::stage_dir().join("livery.json"),
+            shellbridge::stage_dir().join("theme.json"),
             r##"{"schemaVersion":"0","palette":{"bg":"#444444"}}"##,
         )
         .unwrap();
@@ -3488,10 +3488,10 @@ mod tests {
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID"]);
         std::env::remove_var("AOIDE_SESSION_ID");
         let (root, _song, _draft) = routed_draft("diff-fallback-parent");
-        std::fs::write(shellbridge::stage_dir().join("livery.json"), VALID_NOTES).unwrap();
+        std::fs::write(shellbridge::stage_dir().join("theme.json"), VALID_NOTES).unwrap();
         snapshot("rice.take", "stage").unwrap(); // take 1
         std::fs::write(
-            shellbridge::stage_dir().join("livery.json"),
+            shellbridge::stage_dir().join("theme.json"),
             r##"{"schemaVersion":"0","palette":{"bg":"#222222"}}"##,
         )
         .unwrap();
@@ -3523,7 +3523,7 @@ mod tests {
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID"]);
         std::env::remove_var("AOIDE_SESSION_ID");
         let (root, _song, _draft) = routed_draft("diff-root-only-unmarked");
-        std::fs::write(shellbridge::stage_dir().join("livery.json"), VALID_NOTES).unwrap();
+        std::fs::write(shellbridge::stage_dir().join("theme.json"), VALID_NOTES).unwrap();
         snapshot("rice.take", "stage").unwrap(); // take 1 — the only take, no parent, no mark
 
         let out = handle_rice_take_diff(&inv_diff(None, None));
@@ -3540,7 +3540,7 @@ mod tests {
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID"]);
         std::env::remove_var("AOIDE_SESSION_ID");
         let (root, _song, _draft) = routed_draft("diff-identical-self-mark");
-        std::fs::write(shellbridge::stage_dir().join("livery.json"), VALID_NOTES).unwrap();
+        std::fs::write(shellbridge::stage_dir().join("theme.json"), VALID_NOTES).unwrap();
         let take1 = snapshot("rice.take", "stage").unwrap();
         mark("rice.take.mark", "A", take1.take).unwrap();
 
@@ -3560,10 +3560,10 @@ mod tests {
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID"]);
         std::env::remove_var("AOIDE_SESSION_ID");
         let (root, _song, _draft) = routed_draft("diff-take-flag");
-        std::fs::write(shellbridge::stage_dir().join("livery.json"), VALID_NOTES).unwrap();
+        std::fs::write(shellbridge::stage_dir().join("theme.json"), VALID_NOTES).unwrap();
         snapshot("rice.take", "stage").unwrap(); // take 1
         std::fs::write(
-            shellbridge::stage_dir().join("livery.json"),
+            shellbridge::stage_dir().join("theme.json"),
             r##"{"schemaVersion":"0","palette":{"bg":"#222222"}}"##,
         )
         .unwrap();
@@ -3581,11 +3581,11 @@ mod tests {
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID"]);
         std::env::remove_var("AOIDE_SESSION_ID");
         let (root, _song, _draft) = routed_draft("diff-mark-flag");
-        std::fs::write(shellbridge::stage_dir().join("livery.json"), VALID_NOTES).unwrap();
+        std::fs::write(shellbridge::stage_dir().join("theme.json"), VALID_NOTES).unwrap();
         snapshot("rice.take", "stage").unwrap(); // take 1
         mark("rice.take.mark", "A", 1).unwrap();
         std::fs::write(
-            shellbridge::stage_dir().join("livery.json"),
+            shellbridge::stage_dir().join("theme.json"),
             r##"{"schemaVersion":"0","palette":{"bg":"#222222"}}"##,
         )
         .unwrap();
@@ -3609,10 +3609,10 @@ mod tests {
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID"]);
         std::env::remove_var("AOIDE_SESSION_ID");
         let (root, song, draft) = routed_draft("diff-mark-dangling");
-        std::fs::write(shellbridge::stage_dir().join("livery.json"), VALID_NOTES).unwrap();
+        std::fs::write(shellbridge::stage_dir().join("theme.json"), VALID_NOTES).unwrap();
         snapshot("rice.take", "stage").unwrap(); // take 1
         std::fs::write(
-            shellbridge::stage_dir().join("livery.json"),
+            shellbridge::stage_dir().join("theme.json"),
             r##"{"schemaVersion":"0","palette":{"bg":"#222222"}}"##,
         )
         .unwrap();
@@ -3638,10 +3638,10 @@ mod tests {
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID"]);
         std::env::remove_var("AOIDE_SESSION_ID");
         let (root, _song, _draft) = routed_draft("diff-both-flags-take-wins");
-        std::fs::write(shellbridge::stage_dir().join("livery.json"), VALID_NOTES).unwrap();
+        std::fs::write(shellbridge::stage_dir().join("theme.json"), VALID_NOTES).unwrap();
         snapshot("rice.take", "stage").unwrap(); // take 1
         std::fs::write(
-            shellbridge::stage_dir().join("livery.json"),
+            shellbridge::stage_dir().join("theme.json"),
             r##"{"schemaVersion":"0","palette":{"bg":"#222222"}}"##,
         )
         .unwrap();
@@ -3660,7 +3660,7 @@ mod tests {
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID"]);
         std::env::remove_var("AOIDE_SESSION_ID");
         let (root, _song, _draft) = routed_draft("diff-not-found");
-        std::fs::write(shellbridge::stage_dir().join("livery.json"), VALID_NOTES).unwrap();
+        std::fs::write(shellbridge::stage_dir().join("theme.json"), VALID_NOTES).unwrap();
         snapshot("rice.take", "stage").unwrap(); // only take 1 exists, no marks
 
         let missing_take = handle_rice_take_diff(&inv_diff(None, Some(99)));
@@ -3717,7 +3717,7 @@ mod tests {
             at: at.to_string(),
             session_id: None,
             cause: "stage".to_string(),
-            livery: serde_json::json!({}),
+            theme: serde_json::json!({}),
             cover: None,
             widgets: serde_json::json!({}),
         };

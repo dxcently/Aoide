@@ -142,7 +142,7 @@ strx shellbridge [--run] [--json]
   dispatched command. All six of these are the CONDUCTING stage files
   (`CONTRACTS.md §4`) — shellbridge writes them into `state/stage/` even
   though the `shellbridge` command itself ships in `strillix`; rice staging
-  (`mode.json`, `livery.json`, `grimoire.json`, `cover.json`) stays under
+  (`mode.json`, `theme.json`, `grimoire.json`, `cover.json`) stays under
   `/stage/`, untouched by this split.
 - **Output:** blocks forever serving the socket (systemd unit is
   `Type=simple`); returns an error document only on bind failure

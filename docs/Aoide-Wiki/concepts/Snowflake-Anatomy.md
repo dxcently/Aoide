@@ -19,7 +19,7 @@ Aoide names its nix layer after snowflake morphology — see [[Lexicon#The froze
 | Named groups a host takes in one line | **aggregations** | `modules/aggregations/` — memberships over catalogue names (`nucleus`, `desktop`, `agents`, `aoideos`); inert data, no options of their own. |
 | A repair that travels with a capability | **overrides** | `modules/overrides/` — capability-scoped fixes, applied to the hosts that selected the capability; empty today. |
 
-**Nucleus is the shared core every host inherits; dendrites are the opt-in branches each host chooses.** The branches that *render* — the paint lanes `quickshell`, `stylix`, `compositor`, `greeter`, `strillix` — are the machinery of ricing: the surfaces that sound a song, embedding no ricing content. Every palette, sound, icon, widget body, and the shipped standard rice (`sonata`) lives in `rices/`; covers (wallpapers) live in the shared `/covers/` library any song references by path (see [[Song-Anatomy]]). There is no separate "rice engine" layer. A song is *selected* by the host module (`habit.rice.declared`; `habit.rice.available` is what the host builds in to stage), *resolved and emitted* by the native livery engine ([[livery]] — lint → resolve → emit → `stage/livery.json`), and *rendered* by the paint lanes. All four module directories live under `modules/` in `~/Aoide`, the same grouping [[dxflake]] adopts. Paint lanes are the only nix that renders appearance, and each reads only the namespaces root `AGENTS.md` house rule 5 enumerates — no module reads another module.
+**Nucleus is the shared core every host inherits; dendrites are the opt-in branches each host chooses.** The branches that *render* — the paint lanes `quickshell`, `stylix`, `compositor`, `greeter`, `strillix` — are the machinery of ricing: the surfaces that sound a song, embedding no ricing content. Every palette, sound, icon, widget body, and the shipped standard rice (`sonata`) lives in `rices/`; covers (wallpapers) live in the shared `/covers/` library any song references by path (see [[Song-Anatomy]]). There is no separate "rice engine" layer. A song is *selected* by the host module (`habit.rice.declared`; `habit.rice.available` is what the host builds in to stage), *resolved and emitted* by the native theme engine ([[theme]] — lint → resolve → emit → `stage/theme.json`), and *rendered* by the paint lanes. All four module directories live under `modules/` in `~/Aoide`, the same grouping [[dxflake]] adopts. Paint lanes are the only nix that renders appearance, and each reads only the namespaces root `AGENTS.md` house rule 5 enumerates — no module reads another module.
 
 ## Mutation Policy
 
@@ -63,6 +63,6 @@ The repo surface is only the subsystem (`modules/`) plus standard flake furnitur
 
 - [[dxflake]]
 - [[Clone-and-Run]]
-- [[livery]]
+- [[theme]]
 - [[Self-Ricing]]
 - [[Codebase]]

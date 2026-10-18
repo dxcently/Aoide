@@ -19,7 +19,7 @@
 // ONCE. A Canvas rasterises them into one image and keeps no scene-graph
 // object per track; Shapes would keep ~1000 live ShapePaths (each its own
 // geometry, re-tessellated on any change) for a picture that never changes.
-// It repaints only when its size has settled, a board lands, or the livery
+// It repaints only when its size has settled, a board lands, or the theme
 // changes.
 //
 // The generator (CoverPcbWorker.js) is about three seconds of JS per output,
@@ -45,14 +45,14 @@ import "Kit.js" as Kit
 Item {
     id: root
 
-    required property var livery
+    required property var theme
     required property var bridge
 
     width: parent ? parent.width : 1920
     height: parent ? parent.height : 1080
 
     FontMetrics { id: fm; font: Kit.bodyFont(13) }
-    readonly property var kit: Kit.make(root.livery, fm)
+    readonly property var kit: Kit.make(root.theme, fm)
 
     // "cadenza" on the board: the one seed every render uses.
     readonly property int seed: 0x00CADE2A

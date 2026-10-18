@@ -7,7 +7,7 @@ import Quickshell
 // Overlay PanelWindow (namespace "aoide-powermenu", so a live compositor with
 // the lane's layerrules gives this preview the same blur + hyprglass the
 // real surface gets). Stub gold-marble palette (hex sanctioned here only —
-// mirrors the livery roles, CalendarPreview-style) and a stub bridge that
+// mirrors the theme roles, CalendarPreview-style) and a stub bridge that
 // logs the power command instead of dispatching it — the preview must never
 // actually suspend the box.
 //
@@ -56,7 +56,7 @@ ShellRoot {
             return
         }
         harness.exodos = comp.createObject(null, {
-            "livery": harness.stubNotes,
+            "theme": harness.stubNotes,
             "bridge": harness.stubBridge
         })
         if (!harness.exodos) {

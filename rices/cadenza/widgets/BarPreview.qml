@@ -38,7 +38,7 @@ import Quickshell.Io
 Item {
     id: harness
 
-    required property var livery
+    required property var theme
     required property var bridge
     property var shared: null
     property var stagingEngine: null
@@ -124,7 +124,7 @@ Item {
         id: barLoader
         width: harness.width
         Component.onCompleted: setSource(Qt.resolvedUrl("bar.qml"), {
-            livery: harness.livery,
+            theme: harness.theme,
             bridge: harness.bridge,
             shared: harness.shared,
             stagingEngine: harness.stagingEngine,

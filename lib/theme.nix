@@ -1,11 +1,11 @@
-# lib/livery.nix — the venue resolver (CONTRACTS.md §1, override and geometry tiers).
+# lib/theme.nix — the venue resolver (CONTRACTS.md §1, override and geometry tiers).
 #
-# `aoide.livery.override.*` is a HOST-set, never song-set tier. Two registers,
+# `aoide.theme.override.*` is a HOST-set, never song-set tier. Two registers,
 # two passes, fixed order:
 #
 #   1. Anchor pass (`anchorResolve`, Phase 1, unchanged) — the five optional
 #      palette-anchor hexes (`override.{bg,fg,accent,urgent,hot}`). A
-#      RECOLOUR, not a re-key: for each overridden anchor, every livery
+#      RECOLOUR, not a re-key: for each overridden anchor, every theme
 #      colour equal to the song's AUTHORED value for that anchor — palette,
 #      base16, component tiers — is rewritten to the override value, computed
 #      in one simultaneous pass against the authored values (so two overrides
@@ -19,7 +19,7 @@
 # Both passes are read-side, not a config-side mkForce: the option system
 # keeps storing the song's authored values inert, so there is no
 # option-system recursion. Both fan-outs (the baked Stylix scheme and the
-# $STRILLIX_ROOT/stage/livery.json seed) apply the identical rule through this one
+# $STRILLIX_ROOT/stage/theme.json seed) apply the identical rule through this one
 # file, so they cannot disagree. `resolve` keeps ONE signature across both
 # phases — Phase 1's consumers (the stylix and compositor paint lanes) change
 # zero lines.
@@ -32,13 +32,13 @@
 # only overlays what it is handed.
 #
 # Geometry is the venue's third register and the one that is not a recolour:
-# `aoide.livery.geometry` is set by the song AND by the host (a host-wide
+# `aoide.theme.geometry` is set by the song AND by the host (a host-wide
 # `blurEnabled = false`, a song-conditional `terminalOpacity`), and the baked
 # `hyprland.conf` and kitty fragment already carry the host's value. `stagePatch`
 # lays the option's non-null geometry over the document's own, so the twin
 # equals the bake.
 #
-# Usage: (import ./lib/livery.nix { inherit lib; }).resolve config.aoide.livery
+# Usage: (import ./lib/theme.nix { inherit lib; }).resolve config.aoide.theme
 { lib }:
 rec {
   norm = c: lib.toLower (lib.removePrefix "#" c);
@@ -46,10 +46,10 @@ rec {
   # authored-anchor-value → override-value, for every set anchor. Computed
   # against AUTHORED palette values only (one simultaneous pass).
   overrideMap =
-    livery:
+    theme:
     let
-      o = livery.override or { };
-      p = livery.palette;
+      o = theme.override or { };
+      p = theme.palette;
       anchors = [
         "bg"
         "fg"
@@ -63,39 +63,39 @@ rec {
 
   # Pass 1 — the anchor recolour (Phase 1, unchanged law).
   anchorResolve =
-    livery:
+    theme:
     let
-      m = overrideMap livery;
+      m = overrideMap theme;
       sub = c: if c == null then null else (m.${norm c} or c);
       subAttrs = lib.mapAttrs (_: sub);
-      o = livery.override or { };
+      o = theme.override or { };
     in
-    livery
+    theme
     // {
       palette =
-        subAttrs livery.palette
-        // lib.optionalAttrs (livery.palette.hot == null && (o.hot or null) != null) {
+        subAttrs theme.palette
+        // lib.optionalAttrs (theme.palette.hot == null && (o.hot or null) != null) {
           inherit (o) hot; # null-hot direct set — no authored value to chase
         };
-      base16 = if livery.base16 == null then null else subAttrs livery.base16;
-      bar = subAttrs livery.bar;
-      notif = subAttrs livery.notif;
-      window = subAttrs livery.window;
+      base16 = if theme.base16 == null then null else subAttrs theme.base16;
+      bar = subAttrs theme.bar;
+      notif = subAttrs theme.notif;
+      window = subAttrs theme.window;
     };
 
   # Pass 2 — the named-key overlay (Phase 1b). Non-null named overrides win
   # their slot, last-write, over whatever the anchor pass produced.
   resolve =
-    livery:
+    theme:
     let
-      base = anchorResolve livery;
-      o = livery.override or { };
+      base = anchorResolve theme;
+      o = theme.override or { };
       named = tier: lib.filterAttrs (_: v: v != null) (o.${tier} or { });
       overlay = tier: authored: authored // named tier;
       namedB16 = named "base16";
     in
     assert lib.assertMsg (base.base16 != null || namedB16 == { })
-      "aoide.livery.override.base16.${lib.concatStringsSep "/" (lib.attrNames namedB16)}: the performed song carries no base16 scheme (aoide.livery.base16 is null) to patch a named slot into.";
+      "aoide.theme.override.base16.${lib.concatStringsSep "/" (lib.attrNames namedB16)}: the performed song carries no base16 scheme (aoide.theme.base16 is null) to patch a named slot into.";
     base
     // {
       base16 = if base.base16 == null then null else base.base16 // namedB16;
@@ -109,9 +109,9 @@ rec {
   # anchor-recolour value-walk, same pass order as `resolve` so the fan-outs
   # agree on precedence. Empty `{}` when no named override is set.
   slotPatch =
-    livery:
+    theme:
     let
-      o = livery.override or { };
+      o = theme.override or { };
       named = tier: lib.filterAttrs (_: v: v != null) (o.${tier} or { });
     in
     lib.filterAttrs (_: v: v != { }) {
@@ -121,7 +121,7 @@ rec {
       window = named "window";
     };
 
-  # Pass 1 + Pass 2 against a committed `livery.json` DOCUMENT rather than the
+  # Pass 1 + Pass 2 against a committed `theme.json` DOCUMENT rather than the
   # option set — the stage fan-out. The document already carries the component
   # fallbacks resolved (CONTRACTS.md §4: the stage file is never null) and its
   # own shape (schemaVersion, an optional widgets block), which the option set
@@ -135,12 +135,12 @@ rec {
   # is skipped (there is nothing to recolour). With no geometry in the option
   # set the result is untouched, so the identity holds.
   stagePatch =
-    livery: doc:
+    theme: doc:
     let
-      m = overrideMap livery;
-      o = livery.override or { };
-      slots = slotPatch livery;
-      geo = lib.filterAttrs (_: v: v != null) (livery.geometry or { });
+      m = overrideMap theme;
+      o = theme.override or { };
+      slots = slotPatch theme;
+      geo = lib.filterAttrs (_: v: v != null) (theme.geometry or { });
       sub = v: if builtins.isString v then (m.${norm v} or v) else v;
       # One tier: the anchor recolour, then the named-key overlay, then the
       # tier's own extra (palette's null-hot direct set).
@@ -151,7 +151,7 @@ rec {
         };
     in
     assert lib.assertMsg ((doc.base16 or null) != null || !(slots ? base16))
-      "aoide.livery.override.base16.${lib.concatStringsSep "/" (lib.attrNames slots.base16)}: the active song's livery.json carries no base16 scheme to patch a named slot into.";
+      "aoide.theme.override.base16.${lib.concatStringsSep "/" (lib.attrNames slots.base16)}: the active song's theme.json carries no base16 scheme to patch a named slot into.";
     doc
     // patch "palette" (
       lib.optionalAttrs ((doc.palette.hot or null) == null && (o.hot or null) != null) {
@@ -166,16 +166,16 @@ rec {
       geometry = (if (doc.geometry or null) == null then { } else doc.geometry) // geo;
     };
 
-  # What the venue changes in a committed `livery.json` DOCUMENT: per tier,
+  # What the venue changes in a committed `theme.json` DOCUMENT: per tier,
   # the attrs `stagePatch` leaves unequal to the document's own (a key the
   # document lacks, or holds null, counts as changed) — the recoloured slots
   # of the five colour tiers and the geometry fields the host sets to another
   # value. A tier with nothing changed is omitted, so `{}` is "no venue" — the
   # identity the runtime overlays without a branch.
   venueDelta =
-    livery: doc:
+    theme: doc:
     let
-      patched = stagePatch livery doc;
+      patched = stagePatch theme doc;
       changed =
         tier:
         let

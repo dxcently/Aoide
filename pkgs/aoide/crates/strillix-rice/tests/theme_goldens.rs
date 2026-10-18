@@ -1,7 +1,7 @@
-//! Golden-parity integration tests for the livery engine (LIVERY-MERGE.md
+//! Golden-parity integration tests for the theme engine (THEME-MERGE.md
 //! Phase 1) — the native Rust pipeline asserted against bytes captured from
 //! the Node engine BEFORE it was cut: `tests/goldens/<fixture>.<target>.golden`
-//! (LIVERY-MERGE Step 1.0).
+//! (THEME-MERGE Step 1.0).
 //!
 //! Parity contract (plan §1.3):
 //! * `resolve`   — byte-identical (`JSON.stringify(…, null, 2)`, insertion
@@ -22,10 +22,10 @@
 //! had — §1's `polarity`, which lint validates and no backend emits — against
 //! `valid`'s goldens (`polarity_is_lint_only_and_moves_no_emitted_byte`).
 
-use strillix_rice::livery::emit::hyprctl::render_lines;
-use strillix_rice::livery::emit::{EmitOpts, EmitOutput, emitter};
-use strillix_rice::livery::resolve::to_json_string;
-use strillix_rice::livery::{lint, resolve};
+use strillix_rice::theme::emit::hyprctl::render_lines;
+use strillix_rice::theme::emit::{EmitOpts, EmitOutput, emitter};
+use strillix_rice::theme::resolve::to_json_string;
+use strillix_rice::theme::{lint, resolve};
 use serde_json::Value;
 use std::path::Path;
 
@@ -50,7 +50,7 @@ fn golden(name: &str) -> String {
 }
 
 /// Resolve + validate, the CLI's exact pipeline order.
-fn resolved(fix: &str) -> strillix_rice::livery::Resolved {
+fn resolved(fix: &str) -> strillix_rice::theme::Resolved {
     let container = fixture(fix);
     assert!(lint(&container).ok, "{fix}: fixture must validate");
     resolve(&container).expect("fixture resolves")
@@ -189,7 +189,7 @@ fn file_backend_errors_on_an_unknown_placeholder() {
 
 #[test]
 fn registry_lists_exactly_the_six_backends_in_order() {
-    let targets: Vec<&str> = strillix_rice::livery::emit::registry()
+    let targets: Vec<&str> = strillix_rice::theme::emit::registry()
         .iter()
         .map(|e| e.target())
         .collect();
@@ -200,7 +200,7 @@ fn registry_lists_exactly_the_six_backends_in_order() {
 }
 
 /// The polarity field (CONTRACTS.md §1) is LINT-ONLY: a notes document may
-/// carry it, `livery lint` validates it (exactly `"light"` or `"dark"`), and
+/// carry it, `theme lint` validates it (exactly `"light"` or `"dark"`), and
 /// NO backend emits it — it is the baked fan-out's register, which the stylix
 /// lane reads off the option, never off a stage file. So a polarity-carrying
 /// document must produce byte-for-byte what the same document without the
@@ -224,7 +224,7 @@ fn polarity_is_lint_only_and_moves_no_emitted_byte() {
     assert_eq!(
         format!("{}\n", to_json_string(&resolved("valid-polarity"))),
         golden("valid.resolve"),
-        "polarity must not reach `livery resolve`"
+        "polarity must not reach `theme resolve`"
     );
 
     for target in ["osc", "hyprctl", "stage", "hyprlock"] {

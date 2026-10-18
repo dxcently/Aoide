@@ -2,7 +2,7 @@
 //! a draft, `rices/<song>/history/` when staged directly with no draft
 //! (`strillix reload` design, settled 2026-08-31 — history/back's staging-mode
 //! reach; see [`takes_dir`]) — full-content snapshots of the routed scope's
-//! livery/cover/widget bodies, minted on every rehearsal write, forming a
+//! theme/cover/widget bodies, minted on every rehearsal write, forming a
 //! TREE (not a line) so `rice back --mark <letter>` can revert to any mark
 //! and keep editing without destroying what came after it
 //! (`references/fleshing-out-aoide-ricing.md` §5.2, phase A; the
@@ -27,7 +27,7 @@
 //! ONE `atomic_write` of one file. The second win: take records stay
 //! write-once from the moment `save_take` first writes them — nothing ever
 //! opens a take file to mutate it — which keeps drift comparison (a
-//! parse-and-compare against a take's `livery`/`cover`) and any future
+//! parse-and-compare against a take's `theme`/`cover`) and any future
 //! content-hashing trivially safe, because "the file on disk" and "the take
 //! as minted" are never allowed to diverge.
 //!
@@ -92,7 +92,7 @@ pub fn marks_path(song: &str, draft: Option<&str>) -> PathBuf {
     takes_dir(song, draft).join("marks.json")
 }
 
-/// One take: a full-content snapshot of the routed draft's `livery.json`
+/// One take: a full-content snapshot of the routed draft's `theme.json`
 /// (and `cover.json`, when the stage had one) at the moment it was minted,
 /// plus the tree edge (`parent`) and provenance (`at`/`session_id`/`cause`).
 /// Write-once once [`save_take`] has landed it — see the module doc.
@@ -119,7 +119,7 @@ pub struct TakeRecord {
     #[serde(default)]
     pub cause: String,
     #[serde(default)]
-    pub livery: Value,
+    pub theme: Value,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cover: Option<Value>,
     /// `{ "<rices-relative widgets/ path>": "<utf-8 file content>" }` —
@@ -127,7 +127,7 @@ pub struct TakeRecord {
     /// settled 2026-08-31: "Takes gain WIDGET BODIES in both modes", closing
     /// the gap that widget QML was never snapshotted). Song-scoped, not
     /// draft-scoped, matching the fact that widget bodies themselves are
-    /// song-scoped (a draft forks the dress — livery+cover — never the
+    /// song-scoped (a draft forks the dress — theme+cover — never the
     /// widgets). `#[serde(default)]` reads an old take file predating this
     /// field as `{}` (via [`default_widgets`]), the same "no widgets" shape
     /// a fresh capture of a widget-less song produces — so an old take never
@@ -361,7 +361,7 @@ mod tests {
             at: "2026-08-18T00:00:00Z".to_string(),
             session_id: None,
             cause: "stage".to_string(),
-            livery: serde_json::json!({ "schemaVersion": "0" }),
+            theme: serde_json::json!({ "schemaVersion": "0" }),
             cover: None,
             widgets: default_widgets(),
         }

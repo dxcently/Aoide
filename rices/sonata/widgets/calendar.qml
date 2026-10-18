@@ -13,7 +13,7 @@ import Quickshell
 SteleLayerPopout {
     id: root
 
-    required property var livery
+    required property var theme
     required property var bridge
     // shell.qml's shared session state: the clock's anchor, and the open state
     // this surface publishes.
@@ -33,5 +33,5 @@ SteleLayerPopout {
         root.shown = !root.shown
     }
 
-    CalendarStele { livery: root.livery; bridge: root.bridge }
+    CalendarStele { theme: root.theme; bridge: root.bridge }
 }

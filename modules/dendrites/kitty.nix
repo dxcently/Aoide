@@ -188,7 +188,7 @@
           # sit outside the `mkForce` on purpose: a forced extraConfig would
           # drop Stylix's include. kitty skips a missing include with one log
           # line, so with neither file present the baked colours and opacity
-          # stand. This lane reads no `aoide.livery` (root AGENTS.md rule 5)
+          # stand. This lane reads no `aoide.theme` (root AGENTS.md rule 5)
           # — it names two paths under `aoide.root` and nothing else.
           {
             extraConfig = lib.mkAfter ''

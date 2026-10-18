@@ -5,7 +5,7 @@
 // fills the whole surface, so the canvas needs something with a viewport of
 // its own: this item declares `implicitWidth/Height` (1920×1080 by default,
 // the canvas' `strillix preview set --viewport` overrides the shoot), and loads
-// `wallpaper.qml` BY URL, handing it the canvas' livery/bridge plus the knobs
+// `wallpaper.qml` BY URL, handing it the canvas' theme/bridge plus the knobs
 // below.
 //
 // The FEED is real, not faked: `AOIDE_ROOT` points at the preview root, and
@@ -34,7 +34,7 @@ import Quickshell.Io
 Item {
     id: harness
 
-    required property var livery
+    required property var theme
     required property var bridge
     // the canvas hands every slot's extras; accepted so none warns, unused.
     property var shared: null
@@ -78,7 +78,7 @@ Item {
         id: boardLoader
         anchors.fill: parent
         Component.onCompleted: setSource(Qt.resolvedUrl("wallpaper.qml"), {
-            livery: harness.livery,
+            theme: harness.theme,
             bridge: harness.bridge
         })
         onLoaded: harness.apply()

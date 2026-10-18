@@ -1,6 +1,6 @@
-//! The livery-engine seam — `rice lint`'s validator.
+//! The theme-engine seam — `rice lint`'s validator.
 //!
-//! A thin wrapper over the native `livery::lint` validator, so `rice lint`
+//! A thin wrapper over the native `theme::lint` validator, so `rice lint`
 //! validates in-process: no binary to locate, no Node on PATH. The
 //! `run_lint` shape (`file` → structured result) is kept so its caller's
 //! call site reads unchanged.
@@ -14,7 +14,7 @@ pub struct LintRun {
     pub errors: Vec<String>,
 }
 
-/// Run the native `livery lint` over the livery file at `path`.
+/// Run the native `theme lint` over the theme file at `path`.
 ///
 /// A read failure or JSON parse failure surfaces as a lint failure carrying
 /// the Node engine's exact message shape (`cannot read {file}: {e}` /
@@ -41,7 +41,7 @@ pub fn run_lint(path: &PathBuf) -> LintRun {
             }
         }
     };
-    let v = crate::livery::lint(&parsed);
+    let v = crate::theme::lint(&parsed);
     LintRun {
         file: path.clone(),
         ok: v.ok,

@@ -262,7 +262,7 @@ fn hash_file(path: &Path) -> Result<String, String> {
         .map_err(|e| format!("cannot read {}: {e}", path.display()))
 }
 
-/// True when the machine copy of `song` carries a `livery.json`, `rice.nix`,
+/// True when the machine copy of `song` carries a `theme.json`, `rice.nix`,
 /// `hyprland.conf` or `widgets/` file whose hash differs from the shipped
 /// copy's, or a file the other side lacks — the edits a declare does not carry,
 /// because a rebuild builds the rices version. A song with no machine copy
@@ -275,7 +275,7 @@ pub(crate) fn staged_differs(song: &str, templates: &Path) -> Result<bool, Strin
     let dressed = |tree: BTreeMap<String, PathBuf>| -> BTreeMap<String, PathBuf> {
         tree.into_iter()
             .filter(|(rel, _)| {
-                matches!(rel.as_str(), "livery.json" | "rice.nix" | "hyprland.conf")
+                matches!(rel.as_str(), "theme.json" | "rice.nix" | "hyprland.conf")
                     || rel.starts_with("widgets/")
             })
             .collect()
@@ -602,9 +602,9 @@ mod tests {
     #[test]
     fn staged_differs_sees_a_hand_edited_hyprland_conf() {
         let fx = Fx::new("staged-differs-hyprland");
-        fx.store("livery.json", "{}");
+        fx.store("theme.json", "{}");
         fx.store("hyprland.conf", "bind = SUPER, Q, killactive,\n");
-        fx.machine("livery.json", "{}");
+        fx.machine("theme.json", "{}");
         fx.machine("hyprland.conf", "bind = SUPER, Q, killactive,\n");
         assert_eq!(staged_differs("sonata", &fx.templates), Ok(false));
         fx.machine("hyprland.conf", "bind = SUPER, Q, exec, true\n");
@@ -619,9 +619,9 @@ mod tests {
         walk(dir, false).unwrap().into_iter().map(|(k, p)| (k, std::fs::read(p).unwrap())).collect()
     }
 
-    /// Frozen store-shaped fixture: bar.qml, widgets/dock.qml, livery.json.
+    /// Frozen store-shaped fixture: bar.qml, widgets/dock.qml, theme.json.
     fn shipped(fx: &Fx) {
-        fx.store("livery.json", "L1");
+        fx.store("theme.json", "L1");
         fx.store("bar.qml", "B1");
         fx.store("widgets/dock.qml", "D1");
     }
@@ -636,7 +636,7 @@ mod tests {
     fn absent_folder_is_seeded_whole_with_a_record_and_writable_modes() {
         let fx = Fx::new("refresh-absent");
         shipped(&fx);
-        for rel in ["livery.json", "bar.qml", "widgets/dock.qml"] {
+        for rel in ["theme.json", "bar.qml", "widgets/dock.qml"] {
             std::fs::set_permissions(fx.templates.join("sonata").join(rel), std::fs::Permissions::from_mode(0o444)).unwrap();
         }
         let out = fx.run(&[], false);
@@ -645,7 +645,7 @@ mod tests {
         let rec = fx.record();
         assert_eq!(rec.len(), 3);
         assert_eq!(rec["bar.qml"], h("B1"));
-        for rel in ["livery.json", "bar.qml", "widgets/dock.qml"] {
+        for rel in ["theme.json", "bar.qml", "widgets/dock.qml"] {
             assert_ne!(mode(&shellbridge::rice_dir("sonata").join(rel)) & 0o200, 0, "{rel}");
         }
         let leftovers: Vec<_> = std::fs::read_dir(shellbridge::rices_root())
@@ -659,7 +659,7 @@ mod tests {
     fn identical_first_run_writes_nothing_but_fills_the_record() {
         let fx = Fx::new("refresh-identical");
         shipped(&fx);
-        for rel in ["livery.json", "bar.qml", "widgets/dock.qml"] {
+        for rel in ["theme.json", "bar.qml", "widgets/dock.qml"] {
             fx.machine(rel, &std::fs::read_to_string(fx.templates.join("sonata").join(rel)).unwrap());
         }
         let out = fx.run(&[], false);
@@ -756,7 +756,7 @@ mod tests {
     fn runtime_dirs_machine_only_files_and_symlinks_are_never_touched() {
         let fx = Fx::new("refresh-untouched");
         seeded(&fx);
-        fx.machine("history/1/livery.json", "T");
+        fx.machine("history/1/theme.json", "T");
         fx.machine("drafts/d.json", "D");
         fx.machine("notes.md", "mine");
         let link = shellbridge::rice_dir("sonata").join("link.qml");
@@ -823,8 +823,8 @@ mod tests {
         seeded(&fx);
         fx.store("bar.qml", "B2");
         fx.store("widgets/clock.qml", "C1");
-        fx.machine("livery.json", "MINE");
-        fx.store("livery.json", "L2");
+        fx.machine("theme.json", "MINE");
+        fx.store("theme.json", "L2");
         let song = shellbridge::rice_dir("sonata");
         let tree = snapshot(&song);
         let record = std::fs::read(shellbridge::rice_record("sonata")).unwrap();
@@ -834,7 +834,7 @@ mod tests {
         assert!(checked.changed.is_empty());
         let applied = fx.run(&[], false);
         assert_eq!(checked.data.as_ref().unwrap()["songs"], applied.data.as_ref().unwrap()["songs"]);
-        assert_eq!(file_state(&checked, "livery.json"), ("edited".into(), "keep".into()));
+        assert_eq!(file_state(&checked, "theme.json"), ("edited".into(), "keep".into()));
     }
 
     #[test]
@@ -851,7 +851,7 @@ mod tests {
     fn no_arg_covers_builtin_json_songs_and_an_unknown_name_is_refused() {
         let fx = Fx::new("refresh-names");
         shipped(&fx);
-        put(&fx.templates.join("other/livery.json"), "O");
+        put(&fx.templates.join("other/theme.json"), "O");
         let out = fx.run(&[], false);
         assert_eq!(out.data.as_ref().unwrap()["songs"].as_array().unwrap().len(), 1);
         assert!(!shellbridge::rice_dir("other").exists(), "not in builtin.json");
@@ -872,7 +872,7 @@ mod tests {
         fx.machine("history/1/x", "scratch");
         fx.store("bar.qml", "B2");
         fx.store("widgets/clock.qml", "C1");
-        std::fs::remove_file(fx.templates.join("sonata/livery.json")).unwrap();
+        std::fs::remove_file(fx.templates.join("sonata/theme.json")).unwrap();
         fx.run(&[], false);
         let store = fx.templates.join("sonata");
         assert!(crate::widgets::trees_equal(
@@ -943,15 +943,15 @@ mod tests {
     fn mode_fixes_never_reach_takes_or_drafts() {
         let fx = Fx::new("refresh-modes-runtime");
         seeded(&fx);
-        fx.machine("history/1/livery.json", "T");
+        fx.machine("history/1/theme.json", "T");
         fx.machine("drafts/d.json", "D");
         let song = shellbridge::rice_dir("sonata");
-        for rel in ["history/1/livery.json", "drafts/d.json"] {
+        for rel in ["history/1/theme.json", "drafts/d.json"] {
             std::fs::set_permissions(song.join(rel), std::fs::Permissions::from_mode(0o444)).unwrap();
         }
         std::fs::set_permissions(song.join("history/1"), std::fs::Permissions::from_mode(0o555)).unwrap();
         fx.run(&[], false);
-        assert_eq!(mode(&song.join("history/1/livery.json")), 0o444);
+        assert_eq!(mode(&song.join("history/1/theme.json")), 0o444);
         assert_eq!(mode(&song.join("drafts/d.json")), 0o444);
         assert_eq!(mode(&song.join("history/1")), 0o555);
         std::fs::set_permissions(song.join("history/1"), std::fs::Permissions::from_mode(0o755)).unwrap();
@@ -975,7 +975,7 @@ mod tests {
     fn an_invalid_builtin_name_is_reported_and_skipped() {
         let fx = Fx::new("refresh-bad-builtin");
         shipped(&fx);
-        put(&fx.root.join("x/livery.json"), "X");
+        put(&fx.root.join("x/theme.json"), "X");
         fx.builtin(&["../x", "sonata"]);
         let out = fx.run(&[], false);
         let songs = out.data.as_ref().unwrap()["songs"].as_array().unwrap().clone();

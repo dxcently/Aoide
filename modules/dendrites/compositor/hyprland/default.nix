@@ -6,16 +6,16 @@
 # config.
 #
 # Wires Hyprland as the NixOS Wayland compositor and applies compositor-side
-# livery live via hyprctl. Livery values (gaps, radius, borders, blur)
+# theme live via hyprctl. Theme values (gaps, radius, borders, blur)
 # are baked into the Hyprland config at build time so they take effect on
-# session start; the livery engine (crates/song) can re-dispatch
+# session start; the theme engine (crates/song) can re-dispatch
 # them live via hyprctl during a rehearsal (preview) pass.
 #
 # Scope: LOOK + session plumbing only. Everything host-invariant — keybinds,
 # input devices, tiling layout, misc, behavioural window rules — lives in
 # behaviour.nix beside this file so a re-rice cannot disturb it. The window
 # rules that remain HERE (kitty rounding) are appearance, hence
-# livery's business; see that file's header for the full split.
+# theme's business; see that file's header for the full split.
 #
 # Selecting the `hyprland` provider is the switch: this file is imported only
 # then, so its body is unconditional. The greeter is its own lane
@@ -28,8 +28,8 @@
 #
 # Reading discipline (CONTRACTS.md §1): a paint dendrite reads the dress, the
 # structure, the surfaces and identity — nothing else (root AGENTS.md house
-# rule 5). Here that is `aoide.livery` (palette + component tiers) and
-# `aoide.arrangement` (declared widget/surface types).
+# rule 5). Here that is `aoide.theme` (palette + component tiers) and
+# `aoide.layout` (declared widget/surface types).
 #   - Component-tier fallback applied locally.
 #   - NEVER reads song/ runtime paths (structurally: checks.rice-runtime-untracked).
 {
@@ -42,8 +42,8 @@ let
   # Read-side venue recolour (CONTRACTS.md §1, override tier): resolve rewrites
   # colours equal to an overridden anchor's authored value, in one pass, with
   # no option-system recursion — the option itself stays inert either way.
-  t = (import ../../../../lib/livery.nix { inherit lib; }).resolve config.aoide.livery;
-  arr = config.aoide.arrangement;
+  t = (import ../../../../lib/theme.nix { inherit lib; }).resolve config.aoide.theme;
+  arr = config.aoide.layout;
 
   # ── Component-tier fallback helpers ────────────────────────────────────────
   # No hex lives here by design (CONTRACTS.md §1/§5): this file is host- and
@@ -59,7 +59,7 @@ let
 
   # ── Derived geometry values ───────────────────────────────────────────────
   # v0 geometry tier (additive-optional, CONTRACTS.md §1): a song MAY set
-  # aoide.livery.geometry.*; every field is nullOr and falls back to the
+  # aoide.theme.geometry.*; every field is nullOr and falls back to the
   # opinionated defaults below when unset (component-tier fallback pattern,
   # same as windowBorder/windowBorderInactive above). No song sets geometry
   # today, so these fallbacks ARE the immutable baseline in practice.
@@ -75,7 +75,7 @@ let
   blurSize = if geo.blurSize != null then geo.blurSize else 8;
 
   # ── Declared widget-type registry → compositor layerrules (v1) ───────────
-  # aoide.arrangement.widgets (nucleus/options.nix, Phase 1) is the registry a
+  # aoide.layout.widgets (nucleus/options.nix, Phase 1) is the registry a
   # song uses to declare a brand-new surface-kind widget TYPE. It is empty
   # for every song until Phase 3/4/6 land (Sonata, the only committed song
   # today, declares nothing) — mapAttrsToList over {} yields [ ], so every
@@ -124,11 +124,11 @@ let
   );
 
   # ── Hyprland config fragment — notes baked in at build time ──────────────
-  # The livery emitter (crates/song) re-runs hyprctl keyword dispatch
+  # The theme emitter (crates/song) re-runs hyprctl keyword dispatch
   # during rehearsal to live-patch these values without a rebuild.
   hyprNoteConfig = ''
     # ── Aoide notes — compositor lane ───────────────────────────────────
-    # Generated from aoide.livery at build time; live-patched by the livery
+    # Generated from aoide.theme at build time; live-patched by the theme
     # emitter during rice preview (hyprctl keyword).
 
     general {
@@ -185,7 +185,7 @@ let
     # the same reason.
     layerrule = blur off, match:namespace aoide-calendar
 
-    # aoide.arrangement.widgets (declared widget-type registry, v1): one
+    # aoide.layout.widgets (declared widget-type registry, v1): one
     # layerrule pair (or a pinned blur-off) per registered slot, same idiom
     # as the aoide-* rules above. Empty today for every song — expands only
     # once a song's rice.nix actually populates .widgets (Phase 3/4/6).
@@ -248,9 +248,9 @@ let
   # NOTE: keybinds, input devices, tiling layout, misc, and BEHAVIOURAL window
   # rules are NOT here — they live in behaviour.nix beside this file, which
   # owns everything that must survive a re-rice untouched. This file keeps
-  # only the livery-derived look above plus the session plumbing below. The
+  # only the theme-derived look above plus the session plumbing below. The
   # appearance rules (kitty rounding, the aoide-* layerrules) stay
-  # here on purpose: they are livery's business, not behaviour.
+  # here on purpose: they are theme's business, not behaviour.
 in
 {
   config = {
@@ -310,8 +310,8 @@ in
           ];
         };
 
-        # Bake the livery fragment into hyprland.conf. mkBefore (order 500) so
-        # livery defaults land first; the hyprland behaviour lane's block
+        # Bake the theme fragment into hyprland.conf. mkBefore (order 500) so
+        # theme defaults land first; the hyprland behaviour lane's block
         # and the screenshot dendrite's binds follow at the default order
         # (1000). The strillix renderer appends its one `source` line at mkAfter
         # (1500), so the rice reads last. One `lines` option, several writers.

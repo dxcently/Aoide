@@ -16,17 +16,17 @@
 // All structural chrome wears the wireCyan (bronze-verdigris) role at ≤ 0.5 alpha
 // — a HARD invariant (grammar §5): on warm marble the verdigris out-reads the
 // laurel one-hot blaze unless the opacity ladder caps it. radius: 0 kept.
-// All colors from livery (zero hardcoded hex).
+// All colors from theme (zero hardcoded hex).
 //
 // Usage (default property → children land in the body):
-//   GadgetFrame { livery: livery; title: "conductor.control"; ConductorGadget { … } }
+//   GadgetFrame { theme: theme; title: "conductor.control"; ConductorGadget { … } }
 
 import QtQuick
 
 Item {
     id: root
 
-    required property var livery
+    required property var theme
     property string title: ""
 
     // ── Greek order-mark (grammar §1) — the pediment-apex label per surface ──
@@ -83,16 +83,16 @@ Item {
     // The dock leaves these at their defaults, so its bays render unchanged. The
     // bar's BarPopout overrides them to the popout palette (opaque glass, ink
     // chrome/label) so the bar's popouts match the sheet-music bar.
-    property color glassColor: livery.paletteBg
-    property color outlineColor: livery.wireCyan     // verdigris structural chrome
-    property color labelColor: livery.paletteFg
+    property color glassColor: theme.paletteBg
+    property color outlineColor: theme.wireCyan     // verdigris structural chrome
+    property color labelColor: theme.paletteFg
 
     // ── Retired depth seam (kept as no-op declarations for API compatibility) ─
     // The flat Greek grammar drops the two hollow vanishing-point outline copies.
     // These properties are no longer drawn, but hosts (BarPopout, DesktopGadgets)
     // still SET some of them, so the declarations remain to keep the public API
     // intact. depthExtent is now 0 — the flat bay needs no offset headroom.
-    property color depthColor: livery.holoBlue       // unused (was back-copy hue)
+    property color depthColor: theme.holoBlue       // unused (was back-copy hue)
     property int depthOff1: 3                        // unused
     property int depthOff2: 6                        // unused
     property real depthOpacity1: 0.35                // unused

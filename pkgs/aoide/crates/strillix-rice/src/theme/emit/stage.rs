@@ -1,4 +1,4 @@
-//! The stage emitter — `song/stage/livery.json` for Quickshell
+//! The stage emitter — `song/stage/theme.json` for Quickshell
 //! (CONTRACTS.md §4). Port of `emitters.js::emitStage`.
 //!
 //! The resolved, flattened values — component fallbacks are already applied
@@ -6,12 +6,12 @@
 //! matches CONTRACTS.md §4 exactly: schemaVersion + palette + bar/notif/window,
 //! with base16 riding through when the note carries it. Serde's JSON map is
 //! BTreeMap-backed, so the emitted `Value`'s key order is alphabetical —
-//! readers (Quickshell `LiveryState.qml`, the conductor) read by key, and
+//! readers (Quickshell `ThemeState.qml`, the conductor) read by key, and
 //! the golden parity contract for stage is SEMANTIC (parse + compare), not
 //! byte-for-byte (that's osc/hyprctl).
 
-use crate::livery::emit::{EmitError, EmitOpts, EmitOutput, Emitter};
-use crate::livery::resolve::Resolved;
+use crate::theme::emit::{EmitError, EmitOpts, EmitOutput, Emitter};
+use crate::theme::resolve::Resolved;
 use serde_json::{Value, json};
 
 /// `emitStage` — the stage document.
@@ -44,7 +44,7 @@ pub fn emit_stage(r: &Resolved) -> Value {
         "window": pairs(&r.window),
     });
     // The base16 tier rides through untouched when present (Quickshell reads
-    // the wireframe accents from it — LiveryState.qml). Omitted when the
+    // the wireframe accents from it — ThemeState.qml). Omitted when the
     // note lacks it.
     if let Some(b16) = &r.base16 {
         out["base16"] = pairs(b16);
@@ -60,7 +60,7 @@ mod tests {
     fn stage_shape_carries_every_tier_fully_resolved() {
         let raw = std::fs::read_to_string("tests/fixtures/valid.json").unwrap();
         let container: Value = serde_json::from_str(&raw).unwrap();
-        let r = crate::livery::resolve::resolve(&container).unwrap();
+        let r = crate::theme::resolve::resolve(&container).unwrap();
         let stage = emit_stage(&r);
         assert_eq!(stage["schemaVersion"], "0");
         assert_eq!(stage["palette"]["bg"], "#1e1e2e");
@@ -76,7 +76,7 @@ mod tests {
     fn stage_includes_base16_when_the_note_carries_it() {
         let raw = std::fs::read_to_string("tests/fixtures/valid-base16.json").unwrap();
         let container: Value = serde_json::from_str(&raw).unwrap();
-        let r = crate::livery::resolve::resolve(&container).unwrap();
+        let r = crate::theme::resolve::resolve(&container).unwrap();
         let stage = emit_stage(&r);
         assert_eq!(stage["base16"]["base00"], "#0a0a0d");
         assert_eq!(stage["base16"]["base0F"], "#9a6b8f");

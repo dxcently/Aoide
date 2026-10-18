@@ -21,7 +21,7 @@ import "Kit.js" as Kit
 PanelWindow {
     id: root
 
-    required property var livery
+    required property var theme
     required property var bridge
 
     anchors { top: true; right: true }
@@ -42,7 +42,7 @@ PanelWindow {
         id: body
         anchors.fill: parent
         Component.onCompleted: setSource(Kit.helper("HeraldBody"), {
-            livery: Qt.binding(() => root.livery),
+            theme: Qt.binding(() => root.theme),
             bridge: Qt.binding(() => root.bridge) })
     }
 }

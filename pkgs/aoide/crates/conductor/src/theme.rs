@@ -8,7 +8,7 @@
 //! roster reads in musical notation (♪ working, 𝄐 awaiting, 𝄁 stopped, 𝄽 idle,
 //! 𝄂 done).
 //!
-//! Colour comes from stage livery palette and Base16 tokens as exact RGB.
+//! Colour comes from stage theme palette and Base16 tokens as exact RGB.
 //! Missing semantic tokens retain ANSI fallbacks; focused tabs use role fills,
 //! while inactive selections keep subdued foreground/background-derived shades.
 
@@ -16,7 +16,7 @@ use crate::app::{is_done, Palette};
 use aoide_conduct::graph::SessionRecord;
 use ratatui::style::{Color, Modifier, Style};
 
-/// Semantic hues use the livery's Base16 slots, with ANSI fallback.
+/// Semantic hues use the theme's Base16 slots, with ANSI fallback.
 #[derive(Debug, Clone, Copy)]
 pub enum Role {
     Project,
@@ -40,7 +40,7 @@ pub enum Role {
 /// Sans Mono, JetBrainsMono and Noto Sans Symbols (measured 2026-09-13); no
 /// SMP music glyphs (they fall back to specks) and no icon-font PUA. `@` is
 /// reserved for addresses (`name@node`). Colour never lives here — the
-/// partner hue is always a [`Role`] slot, so the livery stays in charge.
+/// partner hue is always a [`Role`] slot, so the theme stays in charge.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Mark {
     Home,
@@ -174,7 +174,7 @@ fn rgb(index: u8) -> (u8, u8, u8) {
     let v = |x: u8| if x == 0 { 0 } else { 55 + x * 40 };
     (v(n / 36), v((n / 6) % 6), v(n % 6))
 }
-/// Surface shades derive from the same foreground/background, in either light or dark livery.
+/// Surface shades derive from the same foreground/background, in either light or dark theme.
 pub fn surface(pal: &Palette, amount: u16) -> Style {
     let mut style = Style::default();
     if let Some((r, g, b)) = pal.fg_rgb.or_else(|| pal.fg.map(rgb)) {
@@ -467,7 +467,7 @@ mod tests {
     use serde_json::Map;
 
     #[test]
-    fn semantic_tokens_and_focus_preserve_livery() {
+    fn semantic_tokens_and_focus_preserve_theme() {
         let mut pal = Palette::default();
         pal.base16[13] = Some((31, 62, 93));
         pal.base16[11] = Some((41, 82, 123));
@@ -488,7 +488,7 @@ mod tests {
     #[test]
     fn loader_reads_actual_base16_keys_and_ignores_invalid_tokens() {
         let path = std::env::temp_dir().join(format!(
-            "conductor-livery-{}-{}.json",
+            "conductor-theme-{}-{}.json",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)

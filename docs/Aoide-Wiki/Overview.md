@@ -6,7 +6,7 @@ updated: 2026-08-29
 
 # Aoide — Overview
 
-**Aoide** tracks and conducts terminal and agent sessions. Sessions collaborate across agents and across hosts, with the human in the loop — and become the parts you build larger systems out of. Every terminal is a conductable, tracked session by default ([[Conductor-Channel]]), reachable through the bridges and APIs between terminal, shell, system, and OS — no MCP required, runnable anywhere there is a shell. **AoideOS** is the distribution built on that core: this repo's NixOS flake, which additionally ships the [[Quickshell]] widget surfaces (bar, dock, gadgets, conductor views) and the song/livery ricer ([[Self-Ricing]]). AoideOS is the OS harness for your harness. A capability that works with only a shell is Aoide; one that needs desktop, Quickshell, or rice is AoideOS. This wiki documents AoideOS end to end, the flake being the core's concrete running instance.
+**Aoide** tracks and conducts terminal and agent sessions. Sessions collaborate across agents and across hosts, with the human in the loop — and become the parts you build larger systems out of. Every terminal is a conductable, tracked session by default ([[Conductor-Channel]]), reachable through the bridges and APIs between terminal, shell, system, and OS — no MCP required, runnable anywhere there is a shell. **AoideOS** is the distribution built on that core: this repo's NixOS flake, which additionally ships the [[Quickshell]] widget surfaces (bar, dock, gadgets, conductor views) and the song/theme ricer ([[Self-Ricing]]). AoideOS is the OS harness for your harness. A capability that works with only a shell is Aoide; one that needs desktop, Quickshell, or rice is AoideOS. This wiki documents AoideOS end to end, the flake being the core's concrete running instance.
 
 AoideOS pairs a Hyprland compositor with a Quickshell shell, an orchestrator daemon, a content pipeline, and a self-ricing engine. Upstream ships the shape-making machinery (rice engine, contracts, walker, management tools) but never the shapes; your clone is your instance ([[Clone-and-Run]]). The frozen/performed naming thesis lives in [[Lexicon]].
 
@@ -16,7 +16,7 @@ AoideOS is also a specialized widget maker: it integrates and launches the indep
 
 ## Concepts
 
-- [[Full-Architecture]] — the whole-body map: every subsystem, its inputs/outputs, and where the frozen and performed halves meet at the livery seam
+- [[Full-Architecture]] — the whole-body map: every subsystem, its inputs/outputs, and where the frozen and performed halves meet at the theme seam
 - [[Plugin-Architecture]] — the design philosophy behind every contract: a capability enters by existing at a conventional path and is removable without a trace; Quickshell only paints
 - [[Codebase]] — repo composition: flake outputs, the `lib/` walker + overlay, the option contract, the systemd map, socket/stage contracts, real vs stubbed
 - [[Widget-Maker]] — Aoide as an extensible, declarative widget maker; the coding agent writes new integrations instead of selecting plugins
@@ -42,9 +42,9 @@ AoideOS is also a specialized widget maker: it integrates and launches the indep
 
 ## Entities
 
-- [[aoide-cli]] — the `aoide` CLI trunk and the `aoided` daemon binary; `schema --json` is the single source of truth behind the MCP façade. Paint commands (`rice`, `cover`, `livery`, `screen`, …) are `strillix`'s
+- [[aoide-cli]] — the `aoide` CLI trunk and the `aoided` daemon binary; `schema --json` is the single source of truth behind the MCP façade. Paint commands (`rice`, `cover`, `theme`, `screen`, …) are `strillix`'s
 - [[strillix]] — the AoideOS paint binary: its own 48-command schema, its own registry and golden snapshot, the one binary allowed to depend on nix
-- [[livery]] — the design-token layer and its engine: the immutable seam between nix structure and runtime rendering, native in `crates/strillix-rice/src/livery/` as `strx livery emit|resolve|lint`
+- [[theme]] — the design-token layer and its engine: the immutable seam between nix structure and runtime rendering, native in `crates/strillix-rice/src/theme/` as `strx theme emit|resolve|lint`
 - [[aoided]] — the orchestrator daemon: neutral event stream, policy, lint, audit log, gated rebuild pipeline
 - [[shellbridge]] — the daemon-to-desktop bridge: atomic JSON state files out, unix-socket commands in, Hyprland IPC consumed
 - [[Quickshell]] — the QML shell runtime: nine surfaces declared, five with a live QML body

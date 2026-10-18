@@ -17,7 +17,7 @@
 #       * libertine (Linux Libertine/Biolinum) is the desktop's primary face
 #         — stylix points monospace at "Linux Libertine Mono O", sans at "Linux
 #         Biolinum O", serif at "Linux Libertine O" BY DEFAULT (a song's
-#         `aoide.livery.fonts.monospace` is monospace's source when it sets
+#         `aoide.theme.fonts.monospace` is monospace's source when it sets
 #         one); lekton/tinos are glyph-complete nerd alternates.
 #
 # Unfree note: corefonts is unfree. devtools.nix also sets

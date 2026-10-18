@@ -7,10 +7,10 @@
 // messenger walks on mid-scene and reads out what happened offstage. Each
 // notification is one small SELF-FRAMED STELE in the pantheon family the
 // bar's popouts wear (opaque marble body, 2px ink border, 1px inset
-// signature keyline, cast shadow, radius 0, colour only from livery.*),
+// signature keyline, cast shadow, radius 0, colour only from theme.*),
 // stacked under the bar at the screen's top-right, newest first.
 //
-//   · SIGNATURE — RUST `livery.base0F`. The family register: calendar wears
+//   · SIGNATURE — RUST `theme.base0F`. The family register: calendar wears
 //     clay base09, the colonnade murex base0E, power murex in the dock; rust
 //     is the notification family's own hue (AudioColonnade's signature
 //     grounding names it so), and no bar-popout stele wears it today.
@@ -31,7 +31,7 @@
 //   · IMAGES live INSIDE the frame: a sender icon/image is a bordered
 //     40px plate beside the text band — a mark, never a poster
 //     (PreserveAspectCrop clamps a screenshot to the plate).
-//   · PROGRESS is a livery gauge inside the frame — the hairline track +
+//   · PROGRESS is a theme gauge inside the frame — the hairline track +
 //     rising fill idiom the colonnade's channel rows use, in aegean
 //     holoBlue (the information hue), with the mono figure beside it.
 //
@@ -64,7 +64,7 @@ PanelWindow {
     id: root
 
     // ── Note + bridge dependencies (injected by SurfaceSlot) ───────────────
-    required property var livery
+    required property var theme
     required property var bridge
 
     // ── Type voices (the pantheon family) ──────────────────────────────────
@@ -74,11 +74,11 @@ PanelWindow {
     readonly property string faceCrown: "Linux Libertine O"         // ❧ lives here ONLY
 
     // this family's signature — RUST (base0F); see the header
-    readonly property color sig: livery.base0F
-    readonly property color ink: livery.paletteFg
-    readonly property color aegean: livery.holoBlue      // information (progress)
-    readonly property color gold: livery.paletteAccent   // the summons register
-    readonly property color fire: livery.paletteUrgent   // critical / deny
+    readonly property color sig: theme.base0F
+    readonly property color ink: theme.paletteFg
+    readonly property color aegean: theme.holoBlue      // information (progress)
+    readonly property color gold: theme.paletteAccent   // the summons register
+    readonly property color fire: theme.paletteUrgent   // critical / deny
 
     function withA(cstr, a) {
         var c = Qt.color(cstr)
@@ -311,7 +311,7 @@ PanelWindow {
                     width: root.cardW
                     height: col.implicitHeight + 20
                     radius: 0
-                    color: root.livery.paletteBg
+                    color: root.theme.paletteBg
                     border.color: root.ink
                     border.width: 2
 
@@ -487,7 +487,7 @@ PanelWindow {
                             }
                         }
 
-                        // ── the gauge — progress as a livery meter, aegean
+                        // ── the gauge — progress as a theme meter, aegean
                         // (the information hue), mono figure beside it ──────
                         Item {
                             width: parent.width
@@ -613,7 +613,7 @@ PanelWindow {
                                 anchors.verticalCenter: parent.verticalCenter
                                 text: "\u{1D102}"
                                 font.family: root.faceMusic; font.pixelSize: 14
-                                color: root.livery.paletteAccent
+                                color: root.theme.paletteAccent
                             }
                             Rectangle {
                                 anchors.left: parent.left; anchors.right: closeBar.left

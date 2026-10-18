@@ -2,7 +2,7 @@
 #
 # `kind` is absent → null: `bar` is a shell-anchored slot (shell.qml embeds
 # `WidgetSlot { slot: "bar" }` directly, slots.md's own wired-slot table),
-# never a declared `arrangement.widgets` entry.
+# never a declared `layout.widgets` entry.
 #
 # `packages`: widgets/bar.qml shells out to `pactl` (`Quickshell.execDetached`,
 # the card-profile switch) and `pavucontrol` (the mixer launch). Both are

@@ -2,37 +2,37 @@
 type: entity
 created: 2026-07-26
 updated: 2026-08-25
-tags: [aoide, livery, theming, base16]
+tags: [aoide, theme, theming, base16]
 ---
 
-# livery — the design tokens, and the engine that stamps them
+# theme — the design tokens, and the engine that stamps them
 
-`livery` is Aoide's **design-token layer**: one name for both the values and
+`theme` is Aoide's **design-token layer**: one name for both the values and
 the act of stamping them. The same word names the native engine that
-validates, resolves, and emits the tokens. A song authors `aoide.livery.*`;
-the paint lanes read `aoide.livery` and nothing else; the runtime seam is
-`stage/livery.json`. Naming rationale lives in [[Lexicon]].
+validates, resolves, and emits the tokens. A song authors `aoide.theme.*`;
+the paint lanes read `aoide.theme` and nothing else; the runtime seam is
+`stage/theme.json`. Naming rationale lives in [[Lexicon]].
 
-The livery merge (LIVERY-MERGE.md) ported the standalone Node engine into
-native Rust inside `crates/strillix-rice/src/livery/`, taking the name **livery**
+The theme merge (THEME-MERGE.md) ported the standalone Node engine into
+native Rust inside `crates/strillix-rice/src/theme/`, taking the name **theme**
 across the option namespace, rices data files, and the live stage
 contract in one pass (the previous option namespace kept evaluating via a
 `mkRenamedOptionModule` alias until Phase 4 closed the transition window).
 
 ## The seam between score and performance
 
-livery is where the frozen nix layer and the live desktop meet: values
+theme is where the frozen nix layer and the live desktop meet: values
 frozen into the crystal, sounded at runtime. The container stays W3C
-design-tokens format; livery is Aoide's name for what fills it.
+design-tokens format; theme is Aoide's name for what fills it.
 
-Every paint lane consumes livery and nothing else. No module reads another
+Every paint lane consumes theme and nothing else. No module reads another
 module. The coupling discipline is contractual, not polite.
 
 ## Two fan-outs, one source
 
 ```
-livery (single source)
-    ├── stage/livery.json  →  Quickshell + hyprctl + kitty socket  (rehearsal / live)
+theme (single source)
+    ├── stage/theme.json  →  Quickshell + hyprctl + kitty socket  (rehearsal / live)
     └── rice.nix → Stylix   →  every nix-manageable app             (recording / adopted)
 ```
 
@@ -52,26 +52,26 @@ one paints it and the shell's layer stands down, the shell's own layer paints it
 otherwise. The engine never derives the provider a second way: the stage word is
 the answer.
 
-Because both fan-outs derive from the same livery values, staged state and
+Because both fan-outs derive from the same theme values, staged state and
 adopted state cannot diverge. This is the "zero drift" guarantee. Beyond
-`rice stage`/`cover set` writing `stage/livery.json` live (while `rice mode
+`rice stage`/`cover set` writing `stage/theme.json` live (while `rice mode
 staging` allows it — see [[Self-Ricing#Staging vs Declarative Mode]]), the strillix
 lane's `home.activation.aoideSeedStage` reasserts it from the active song's
-committed `rices/<song>/livery.json` on every activation (see
+committed `rices/<song>/theme.json` on every activation (see
 [[Codebase#Runtime contracts (socket + stage files)]]), through
-`lib/livery.nix`'s `stagePatch` — the same `aoide.livery.override` venue
+`lib/theme.nix`'s `stagePatch` — the same `aoide.theme.override` venue
 recolour the Stylix/compositor fan-outs apply through `resolve`, with the
-host's `aoide.livery.geometry` laid over the document's — so a
+host's `aoide.theme.geometry` laid over the document's — so a
 freshly booted host carries a correctly recoloured stage twin even before
 `rice stage` ever runs. That seed is declared truth: when `stage/mode.json`
 names a staged or drafted song, `strx reload` — run by the lane's
 `aoide-rice-reload` unit at every login and after every switch — re-stages it
 over the seed. The same script also publishes the DECLARED twin,
-`/declared/livery.json` (CONTRACTS.md §4) — those same bytes under their
+`/declared/theme.json` (CONTRACTS.md §4) — those same bytes under their
 own name, its `"song"` field naming the song the venue declared — and the
-venue's own part as data, `/declared/venue.json`: `lib/livery.nix`'s
+venue's own part as data, `/declared/venue.json`: `lib/theme.nix`'s
 `venueDelta`, the slots and geometry fields `stagePatch` changes in the
-committed document, `{}` with neither (`checks.livery-fanout` guards it beside the other two). The
+committed document, `{}` with neither (`checks.theme-fanout` guards it beside the other two). The
 runtime writers (`rice stage`, `rice mode stage`, `reload`'s staging arm)
 derive every song from the runtime rices, where a song is edited; for the
 declared song — the twin's `"song"` field is the whole scope — they lay
@@ -79,9 +79,9 @@ declared song — the twin's `"song"` field is the whole scope — they lay
 geometry it sets, and an edit
 shows everywhere else, while the recolour law stays in nix. `rice mode
 declarative`'s re-pin restores declared truth instead, and reads the twin.
-`stage/livery.json` is canonical; the legacy-mirror write and the fallback
+`stage/theme.json` is canonical; the legacy-mirror write and the fallback
 reads were dropped when Phase 4 closed the transition window
-(LIVERY-MERGE.md).
+(THEME-MERGE.md).
 
 ## Tier structure
 
@@ -90,16 +90,16 @@ reads were dropped when Phase 4 closed the transition window
 | Palette (base16) | Settled | [[Stylix]] consumes natively; no open questions |
 | Semantic tier | Open (v1 design-system work) | Names meanings, survives transposition |
 | Component tier | Open (v1 design-system work) | Maps semantics to specific surfaces |
-| Geometry tier | Settled, nix + CLI only | `aoide.livery.geometry` — see below |
-| Font tier | Settled, nix only | `aoide.livery.fonts` — see below |
-| Polarity | Settled, baked only | `aoide.livery.polarity` (beside palette) — see below |
+| Geometry tier | Settled, nix + CLI only | `aoide.theme.geometry` — see below |
+| Font tier | Settled, nix only | `aoide.theme.fonts` — see below |
+| Polarity | Settled, baked only | `aoide.theme.polarity` (beside palette) — see below |
 
 The open schema question is scoped to the semantic and component tiers only.
 The palette tier is closed.
 
 ## The geometry tier
 
-`aoide.livery.geometry` (`modules/nucleus/options.nix`) carries the
+`aoide.theme.geometry` (`modules/nucleus/options.nix`) carries the
 compositor's shape values: `gapsOut`, `gapsIn`, `borderSize`, `rounding`,
 `blurEnabled`, `blurSize`, `blurPasses`, plus `terminalOpacity` — the one field
 whose fallback owner is the kitty dendrite rather than the compositor. Every
@@ -108,9 +108,9 @@ field is `nullOr`, so a song that sets none of them yields the same
 (`modules/dendrites/compositor/hyprland/default.nix`)
 reads the tier directly and falls back field-by-field to its own opinionated
 defaults (`8`/`6`/`2`/`0`/`true`/`8`/`3`) for anything unset. The tier is
-carried through `stage/livery.json` alongside the palette/component values for
+carried through `stage/theme.json` alongside the palette/component values for
 `aoide`'s own live-apply seam (below); the staged schema version stays `"0"`,
-the same additive-optional posture as the base16 block. `livery lint` checks
+the same additive-optional posture as the base16 block. `theme lint` checks
 exactly one field of it — `terminalOpacity`, which must be a plain number in
 [0, 1] or `null`, since it is written into a kitty config line; the rest of the
 tier is outside the engine's schema and reaches Hyprland through
@@ -145,7 +145,7 @@ carrying live, so a staged song is the host's bake plus what the song says.
 
 ## The font tier
 
-`aoide.livery.fonts` (`modules/nucleus/options.nix`) carries the face a song
+`aoide.theme.fonts` (`modules/nucleus/options.nix`) carries the face a song
 wears, keyed by [[Stylix]] font role: `fonts.monospace = { package, name } |
 null` — the terminal, where agents live, and the one role a song uses today.
 The role's shape is Stylix's own, so the lane passes the value through
@@ -155,11 +155,11 @@ the lane's, and `null` means "the lane's own face" — Linux Libertine Mono O �
 so a song that sets no face bakes the theme it baked before.
 
 This tier is BAKED ONLY, the cover note's posture rather than geometry's: it
-has no `stage/livery.json` twin and no engine schema entry, because nothing at
+has no `stage/theme.json` twin and no engine schema entry, because nothing at
 runtime reads a face and a terminal cannot be re-faced mid-session — and no
-`rice lint` rule makes that so. The livery schema closes `palette`, `base16`,
+`rice lint` rule makes that so. The theme schema closes `palette`, `base16`,
 each component group and each widget record, but it never walks a document's
-top-level keys, so a stray `fonts` key in a song's `livery.json` passes lint
+top-level keys, so a stray `fonts` key in a song's `theme.json` passes lint
 and rides the activation seed into the stage file unread; the tier lives in
 `rice.nix` alone by convention. A face change lands on the user-gated rebuild,
 and staging another song does not re-face the terminal. A live face would be a
@@ -172,32 +172,32 @@ tier.
 
 ## Polarity — the register, beside the palette
 
-`aoide.livery.polarity` (`modules/nucleus/options.nix`) is one scalar beside
+`aoide.theme.polarity` (`modules/nucleus/options.nix`) is one scalar beside
 `palette`: `"light"` or `"dark"` (option default `"light"`, so a song that says
 nothing keeps the ground it always had). A palette brings its polarity — the
 register its base16 ramp reads as — and the stylix lane hands it straight to
 `stylix.polarity`, which themes every Stylix-managed target from it
-([[Stylix]]). It is the one livery field outside the colour tiers that is a
+([[Stylix]]). It is the one theme field outside the colour tiers that is a
 VALIDATED key: a document carrying it must spell one of the two, and `rice
 lint` refuses anything else by name — a misspelling, a number, a `{ $value }`
 note object — where the font tier's fields are a convention the lint does not
 enforce.
 
-It is BAKED, not staged. No emitter carries it: `livery resolve` and every
+It is BAKED, not staged. No emitter carries it: `theme resolve` and every
 `emit stage`/`hyprctl`/`osc`/`file`/`kitty`/`hyprlock` are byte-identical with and
-without it (the `livery_goldens` polarity fixture pins that), and `rice stage` applies
+without it (the `theme_goldens` polarity fixture pins that), and `rice stage` applies
 nothing for it, because GTK/Qt and every Stylix target read the register when
 their theme is built. A polarity change lands on the user-gated rebuild, like a
 face change. A song nevertheless declares it in both halves —
-`aoide.livery.polarity` in `rice.nix` (the option the lane reads) and the same
-value in its `livery.json` beside `palette`, which the activation seed carries
-into `stage/livery.json` as data nothing reads today.
+`aoide.theme.polarity` in `rice.nix` (the option the lane reads) and the same
+value in its `theme.json` beside `palette`, which the activation seed carries
+into `stage/theme.json` as data nothing reads today.
 
 ## Prior art — the Node engine that was folded in
 
 The engine began as a standalone Node package wrapping
-Style Dictionary. The livery merge ported
-it into `crates/strillix-rice/src/livery/` as native Rust and deleted the package —
+Style Dictionary. The theme merge ported
+it into `crates/strillix-rice/src/theme/` as native Rust and deleted the package —
 no new crate, no Node toolchain. What moved, in place:
 
 - `schema.rs` — the authoritative v0 schema validator (ported from
@@ -219,10 +219,10 @@ split: the emitters only produce bytes; `live::apply_live` /
 
 ## Commands
 
-The engine's surface is the `strx livery` command group, native inside the
+The engine's surface is the `strx theme` command group, native inside the
 CLI's `Invocation`/`Outcome` shell:
 
-- **`strx livery lint [<song>|<path>]`** — validate a livery file
+- **`strx theme lint [<song>|<path>]`** — validate a theme file
   against the authoritative v0 schema. The nix option type in
   `modules/nucleus/options.nix` is a permissive gate; *this* is the real
   validator. It enforces the closed palette tier
@@ -235,26 +235,26 @@ CLI's `Invocation`/`Outcome` shell:
   "no opinion" — and `geometry.terminalOpacity` (a plain number in [0, 1] or
   null). `strx rice
   lint` runs this engine natively — no binary locate, no shell-out.
-- **`strx livery resolve [<song>|<path>]`** — print the fully-resolved,
-  flattened livery set.
-- **`strx livery emit <target> [<song>|<path>]`** — run one of the six
+- **`strx theme resolve [<song>|<path>]`** — print the fully-resolved,
+  flattened theme set.
+- **`strx theme emit <target> [<song>|<path>]`** — run one of the six
   emitters (`stage` · `hyprctl` · `osc` · `file` · `kitty` · `hyprlock`);
   `--out PATH` writes atomically, `--template` supplies the file backend's
   template, `--song-dir DIR` the folder the hyprlock backend searches for the
   song's lock picture.
 
-No argument defaults to the staged livery. Exit codes align with the CLI
-convention: `0` ok · `2` usage · `1` error. [[Rice-and-Livery]] carries each
+No argument defaults to the staged theme. Exit codes align with the CLI
+convention: `0` ok · `2` usage · `1` error. [[Rice-and-Theme]] carries each
 command's full I/O — reads, writes, output shape. The three commands ship inside
 [[strillix]], the paint binary that hosts every command this page's engine
 backs.
 
 ## The emitters
 
-All six consume the *same* fully-resolved livery set (from `resolve.rs`), so
+All six consume the *same* fully-resolved theme set (from `resolve.rs`), so
 the live targets can never disagree:
 
-1. **`stage`** → `/stage/livery.json` for [[Quickshell]]. With `--out PATH` it
+1. **`stage`** → `/stage/theme.json` for [[Quickshell]]. With `--out PATH` it
    writes atomically (write to a temp file in the same dir, then rename over the
    target) so a Quickshell hot-reload never reads a torn file (the `CONTRACTS.md`
    §4 discipline). Component fallbacks are already applied, so the stage file
@@ -280,9 +280,9 @@ the live targets can never disagree:
    variables can never add a widget or an `onclick`, which is what keeps the
    lock from failing open (CONTRACTS.md §4).
 
-## The livery schema v0
+## The theme schema v0
 
-The schema (`livery/schema.rs`, `SCHEMA_VERSION = "0"`) sits inside the W3C
+The schema (`theme/schema.rs`, `SCHEMA_VERSION = "0"`) sits inside the W3C
 design-tokens container: palette is base16-closed; the component tier is the
 `bar/notif/window` groups with the fallback map declared in one place
 (`COMPONENT_FALLBACK`) and shared by the resolver and validator. The engine
@@ -292,7 +292,7 @@ hyprctl`, `emit osc`) against a v0 fixture in the crate tests.
 The provisional v0 stands until the design-system v1 lands: palette (`bg`,
 `fg`, `accent`, `urgent`) plus component overrides (`bar.*`, `notif.*`,
 `window.*`). The update playbook migrates rices modules from v0 to v1 when
-v1 supersedes. The rename to `livery` carried **no version bump** — the
+v1 supersedes. The rename to `theme` carried **no version bump** — the
 shape is unchanged; the update playbook records the namespace/file rename.
 
 ## Stylix overlap resolution

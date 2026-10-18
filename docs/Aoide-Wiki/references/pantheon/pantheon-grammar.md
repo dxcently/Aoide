@@ -9,7 +9,7 @@ the shipped standard. `default` has since been retired outright (renamed to
 instantiates this grammar anymore; it is kept here, relocated out of
 `rices/` (which no longer has a `default/` to hold it), as source
 material for whoever picks up the wireframe-depth idiom again. The full
-`default` song history — `rice.nix`, `livery.json`, iteration log — is
+`default` song history — `rice.nix`, `theme.json`, iteration log — is
 git-recoverable, not deleted.
 
 **Original scope** (as authored): cross-cutting visual language every song
@@ -46,7 +46,7 @@ Constants (the tunable seam — all in `GadgetFrame.qml`):
 | `depthOpacity2` | 0.18  | far copy border opacity                  |
 | `depthExtent`   | =off2 | headroom a clipping container must add   |
 
-Border color is always `livery.paletteAccent`; radius matches the panel (4 for
+Border color is always `theme.paletteAccent`; radius matches the panel (4 for
 gadget frames, 6 for the dock container body).
 
 **Where it lives:**
@@ -161,8 +161,8 @@ The Pantheon effect at full strength:
 
 ## 5. The multicolor field, and the bar in the same grammar
 
-- **base16 through the livery seam**: the stage livery carries an optional
-  all-or-nothing `base16` block (livery-validated). LiveryState maps four
+- **base16 through the theme seam**: the stage theme carries an optional
+  all-or-nothing `base16` block (theme-validated). ThemeState maps four
   semantic roles from it — `wireCyan` (base0C, structural outlines/leaders),
   `holoBlue` (base0D, depth-stack back copies + link callouts), `violet`
   (base0E, DAG project volumes), `glitchPink` (base08, urgent/glitch) — each

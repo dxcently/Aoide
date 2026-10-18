@@ -153,7 +153,7 @@ pub(crate) fn tree_snapshot(roots: &[&Path]) -> String {
 /// for `rices_root`'s songs — the SHELF-LESS shape (`rice compose` never
 /// writes a `_widgets/` shelf), which is the shape every fixture rices in
 /// these tests has: manifest from a `widgets/*.qml` scan, registry from the
-/// song's `livery.json` `.widgets // {}`, and an empty package list.
+/// song's `theme.json` `.widgets // {}`, and an empty package list.
 pub(crate) fn generator_payload(rices_root: &Path) -> String {
     let mut manifest = serde_json::Map::new();
     let mut registry = serde_json::Map::new();
@@ -199,7 +199,7 @@ pub(crate) fn generator_payload(rices_root: &Path) -> String {
             }
             manifest.insert(song.clone(), serde_json::Value::Object(entry));
         }
-        let widgets = std::fs::read_to_string(dir.join("livery.json"))
+        let widgets = std::fs::read_to_string(dir.join("theme.json"))
             .ok()
             .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
             .and_then(|parsed| parsed.get("widgets").cloned())

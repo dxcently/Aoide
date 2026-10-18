@@ -85,10 +85,10 @@
 // exception. The moon emoji are absent from all three declared faces (fc-list
 // verified), so bare they fall back to Noto Color Emoji, which is fixed-colour and
 // deaf to `color:`. The text presentation (+U+FE0E) resolves to DejaVu Sans
-// monochrome instead, which recolours in livery.* ink and stays legible at 9 px.
+// monochrome instead, which recolours in theme.* ink and stays legible at 9 px.
 // That monochrome set (aegean, ink-is-shadow polarity) is the documented fallback
 // should colour emoji ever leave the rig. The phase marks are the one glyph family
-// outside the livery.* roles, and the exception is scoped to that family.
+// outside the theme.* roles, and the exception is scoped to that family.
 //
 // EIGHTHS. monthPhases() divides each lunation at k + q/8, for q 0..7: new,
 // waxing crescent, first quarter, waxing gibbous, full, waning gibbous, last
@@ -109,7 +109,7 @@
 // ── Composition ─────────────────────────────────────────────────────────────
 //
 // ORDER COMPOSITE: the volute order (voluta = "rolled", the scroll in stone).
-// SIGNATURE clay `livery.base09` is the RUBRIC, the red-ochre ink of the fasti.
+// SIGNATURE clay `theme.base09` is the RUBRIC, the red-ochre ink of the fasti.
 // base09 is also worn by AudioColonnade and UsageGadget, and that collision is
 // still open for adjudication. CROWN 𝄴, 24 px. KALENDAE at 15 px with loose
 // tracking, answered by a small italic ἡμερολόγιον (the AoidePanel bilingual
@@ -133,7 +133,7 @@
 //
 // A self-framed stele, hosted bare through StelePopout, with no GadgetFrame. Under
 // a GadgetFrame the surface had two captions and two closures, and the glass lost
-// the numerals over dark windows. The injected-prop contract is `livery` and
+// the numerals over dark windows. The injected-prop contract is `theme` and
 // `bridge` (bridge unused). Qt's Window.visible attached never flips under
 // quickshell's proxy windows, so QsWindow.window.visible is the real open and
 // close edge. The popout sits on its own layer surface, in the "aoide-calendar"
@@ -169,15 +169,15 @@ import Quickshell   // QsWindow attached — the open/close edge (see header)
 Item {
     id: root
 
-    required property var livery
+    required property var theme
     required property var bridge
 
     readonly property string faceSerif: "Noto Serif"
     readonly property string faceMono:  "JetBrainsMono Nerd Font"
     readonly property string faceMusic: "Noto Music"
-    readonly property color clay: livery.base09
-    readonly property color ink: livery.paletteFg
-    readonly property color aegean: livery.holoBlue   // the moon's information hue
+    readonly property color clay: theme.base09
+    readonly property color ink: theme.paletteFg
+    readonly property color aegean: theme.holoBlue   // the moon's information hue
 
     function withA(cstr, a) {
         var c = Qt.color(cstr)
@@ -454,7 +454,7 @@ Item {
         width: root.sheetW
         height: root.sheetVisH
         radius: 0
-        color: root.livery.paletteBg
+        color: root.theme.paletteBg
         border.color: root.ink
         border.width: 2
         clip: true
@@ -701,7 +701,7 @@ Item {
                     Text {
                         anchors.verticalCenter: parent.verticalCenter
                         text: "" + root.viewYear
-                        color: root.livery.paletteAccent
+                        color: root.theme.paletteAccent
                         font.family: root.faceSerif
                         font.pixelSize: 14
                         font.bold: true
@@ -854,12 +854,12 @@ Item {
                                             width: 26
                                             height: 17
                                             radius: 0
-                                            color: isToday ? root.livery.paletteHot : "transparent"
+                                            color: isToday ? root.theme.paletteHot : "transparent"
 
                                             Text {
                                                 anchors.centerIn: parent
                                                 text: parent.dayNum
-                                                color: parent.isToday ? root.livery.paletteBg
+                                                color: parent.isToday ? root.theme.paletteBg
                                                        : (parent.isCurrent
                                                            ? (parent.isSunday ? root.withA(root.clay, 0.95) : root.ink)
                                                            : root.withA(root.ink, 0.3))
@@ -944,7 +944,7 @@ Item {
                                         Text {
                                             height: 16
                                             text: root.monthNames[block.m]
-                                            color: block.isViewed ? root.livery.paletteAccent : root.ink
+                                            color: block.isViewed ? root.theme.paletteAccent : root.ink
                                             font.family: root.faceSerif
                                             font.pixelSize: 13
                                             font.bold: true
@@ -1012,12 +1012,12 @@ Item {
                                                             width: 22
                                                             height: 16
                                                             radius: 0
-                                                            color: isToday ? root.livery.paletteHot : "transparent"
+                                                            color: isToday ? root.theme.paletteHot : "transparent"
                                                             // numeral CENTERED: at 22×16 with an 8px moon this is the compact grid's proportion (26×17 / 12 / 9), and centering keeps a corner moon nearer its OWN numeral than the next one's
                                                             Text {
                                                                 anchors.centerIn: parent
                                                                 text: parent.inMonth ? parent.dayN : ""
-                                                                color: parent.isToday ? root.livery.paletteBg
+                                                                color: parent.isToday ? root.theme.paletteBg
                                                                        : (index === 0 ? root.withA(root.clay, 0.8)
                                                                                       : root.withA(root.ink, 0.8))
                                                                 font.family: root.faceSerif
@@ -1112,7 +1112,7 @@ Item {
                     anchors.left: parent.left
                     anchors.bottom: parent.bottom
                     text: root.tallyText()
-                    color: root.livery.paletteAccent
+                    color: root.theme.paletteAccent
                     font.family: root.faceMono
                     font.pixelSize: 11
                     font.bold: true
@@ -1139,7 +1139,7 @@ Item {
                     anchors.verticalCenter: parent.verticalCenter
                     text: "𝄂"
                     font.family: root.faceMusic; font.pixelSize: 16
-                    color: root.livery.paletteAccent
+                    color: root.theme.paletteAccent
                 }
                 Rectangle {
                     anchors.left: parent.left; anchors.right: closeBar.left

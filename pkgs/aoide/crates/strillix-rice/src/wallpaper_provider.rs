@@ -82,7 +82,7 @@ pub fn applying_pick() -> Option<(String, String)> {
 
 /// The song the stage file names.
 fn staged_song() -> Option<String> {
-    let raw = std::fs::read_to_string(aoide_storage::fs::stage_dir().join("livery.json")).ok()?;
+    let raw = std::fs::read_to_string(aoide_storage::fs::stage_dir().join("theme.json")).ok()?;
     let doc: Value = serde_json::from_str(&raw).ok()?;
     doc.get("song")?.as_str().map(str::to_string)
 }
@@ -264,7 +264,7 @@ mod tests {
     }
 
     fn stage_song(stage: &std::path::Path, song: &str) {
-        std::fs::write(stage.join("livery.json"), format!(r#"{{"song":"{song}"}}"#)).unwrap();
+        std::fs::write(stage.join("theme.json"), format!(r#"{{"song":"{song}"}}"#)).unwrap();
     }
 
     /// The whole decision, as a truth table: every provider, with and without a

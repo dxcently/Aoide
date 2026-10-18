@@ -1,4 +1,4 @@
-// StagingEngine.qml — the staging engine: resolves the active song's livery
+// StagingEngine.qml — the staging engine: resolves the active song's theme
 // tokens to per-slot QML.
 //
 // The strillix lane's build (modules/dendrites/strillix/runtime.nix) carries
@@ -12,14 +12,14 @@
 // { "owner": "lender" } } }` is a borrowed `bar`. Because provenance is
 // recorded per-record, resolving a borrow is a direct lookup rather than a
 // fallback-chain walk — and a borrowed body still receives the BORROWING
-// song's livery, since palette arrives as an injected prop (below) and is
+// song's theme, since palette arrives as an injected prop (below) and is
 // never read from disk by the widget. This singleton
 // reads that manifest (hot-reloaded, so a rebuild's new manifest is picked up
 // without restarting Quickshell) and answers the two questions a WidgetSlot
 // needs: does <song> dress <slot> (`has`), and where is its QML (`source`).
 //
 // Fixed injected-prop contract (CONTRACTS.md §5 containment): a loaded song
-// widget receives ONLY `livery` (LiveryState) and `bridge` (ShellBridge) —
+// widget receives ONLY `theme` (ThemeState) and `bridge` (ShellBridge) —
 // plus whatever slot-specific extras the anchor declares (e.g. notifications'
 // `notification`) — never nix `config.*`. A song widget is store-copied
 // score, structurally incapable of reaching host/lane options through this
@@ -28,7 +28,7 @@
 // ── Declared widget-type registry (Phase 4) ─────────────────────────────────
 // A second, independent data source: the same build (Phase 2) and
 // `rice stage`/`preview` hot-sync (Phase 3) also carry each song's
-// `aoide.arrangement.widgets` declarations into a sibling
+// `aoide.layout.widgets` declarations into a sibling
 // songs/registry.json, shaped `{ "<song>": { "<slot>": {…declaration…} } }`
 // — which slots a song registers as widget-TYPE declarations (kind/
 // namespace/layer/shortcut/blur), a rarer, smaller set than manifest.json's
@@ -61,7 +61,7 @@ QtObject {
     property var manifest: ({})
 
     // Declared as a property (not a default-child) because QtObject has no
-    // default property — the LiveryState.liveryFile idiom.
+    // default property — the ThemeState.themeFile idiom.
     property FileView manifestFile: FileView {
         id: manifestFile
         path: root.manifestPath

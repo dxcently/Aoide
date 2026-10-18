@@ -15,16 +15,16 @@
 //! fallback independently for the baked side; both derive from identical
 //! rules so preview and adopted state cannot diverge.
 
-use crate::livery::emit::EmitError;
-use crate::livery::json::{JVal, write_pretty};
-use crate::livery::schema::{COMPONENT_FALLBACK, SCHEMA_VERSION, note_value};
+use crate::theme::emit::EmitError;
+use crate::theme::json::{JVal, write_pretty};
+use crate::theme::schema::{COMPONENT_FALLBACK, SCHEMA_VERSION, note_value};
 use serde_json::Value;
 
 /// The flat, fully-resolved note set (resolve output, emitters' input).
 ///
 /// The palette/base16/component tiers are ORDERED key→value maps
 /// (`Vec<(String, String)>`, not `serde_json::Map`): the Node engine emits
-/// `JSON.stringify(…, null, 2)` in insertion order and `livery resolve` must
+/// `JSON.stringify(…, null, 2)` in insertion order and `theme resolve` must
 /// reproduce those bytes, while this workspace's `serde_json` map is
 /// BTreeMap-backed (alphabetical). Component groups always carry every field
 /// of `COMPONENT_FALLBACK` (fallbacks applied); base16 rides through only
@@ -81,7 +81,7 @@ fn deref_leaf(
         _ => return Ok(None), // null / missing / not-a-leaf
     };
     if let Some(s) = v.as_str() {
-        if crate::livery::schema::is_ref(s) {
+        if crate::theme::schema::is_ref(s) {
             if seen.iter().any(|x| x == s) {
                 return Err(EmitError::new(format!(
                     "resolve: circular reference: {s}"
@@ -281,7 +281,7 @@ fn pairs(m: &[(String, String)]) -> JVal {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::livery::schema;
+    use crate::theme::schema;
 
     fn load(name: &str) -> Value {
         let raw = std::fs::read_to_string(format!("tests/fixtures/{name}")).unwrap();

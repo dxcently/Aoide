@@ -10,7 +10,7 @@
 //!   CLI entrypoints for `rice stage` and `cover set` refuse (their own
 //!   `handle_rice_stage_entry`/`handle_cover_set_entry` guards,
 //!   `commands/rice.rs` and `commands/cover.rs`) — nothing else in this
-//!   codebase writes `stage/livery.json`/`stage/cover.json`, so refusing
+//!   codebase writes `stage/theme.json`/`stage/cover.json`, so refusing
 //!   those two entrypoints is sufficient to guarantee nothing drifts while
 //!   locked; no background reconciler process exists (`aoided` is still a
 //!   one-shot skeleton, `crates/server/src/daemon.rs`) and none is needed
@@ -20,8 +20,8 @@
 //!   something the screen is not (CONTRACTS.md §4).
 //! - **`staging`** — `rice stage`/`cover set` write live, always meaning
 //!   plain declared content.
-//! - **`draft`** — `stage/livery.json` is a SYMLINK into a saved
-//!   `rices/<song>/drafts/<name>/livery.json` ([`handle_mode_draft`]).
+//! - **`draft`** — `stage/theme.json` is a SYMLINK into a saved
+//!   `rices/<song>/drafts/<name>/theme.json` ([`handle_mode_draft`]).
 //!   Every writer of the stage file — `rice stage`, a hand-edit,
 //!   Quickshell's own FileView reload — transparently lands in the draft,
 //!   because [`aoide_storage::fs::atomic_write`] resolves and writes through
@@ -34,7 +34,7 @@
 //! [`super::rice::apply_rice_stage`] directly (guard-free, `pub(crate)`) when a
 //! song name is given — the SAME side effects a bare `rice stage <name>` has —
 //! so `declarative <name>` can
-//! re-pin `stage/livery.json` to that song's declared notes and lock it in
+//! re-pin `stage/theme.json` to that song's declared notes and lock it in
 //! one step, even from the default (unmarked) declarative state, without
 //! tripping its own guard (the marker isn't flipped until AFTER the write
 //! succeeds). `declarative` plans with `repin` set
@@ -42,27 +42,27 @@
 //! switch, so it leaves `stage/cover.json` exactly as it stands.
 //!
 //! `rice mode stage` never leaves a bare flag-flip: with no name it resolves
-//! "the current rice" off the existing `stage/livery.json`'s own `"song"`
+//! "the current rice" off the existing `stage/theme.json`'s own `"song"`
 //! field ([`current_staged_song`]) and stages that, so unlocking staging
 //! always ALSO enables hot loading of whatever is presently active — only a
 //! genuinely fresh box with no stage file yet falls back to a no-op unlock.
 //! [`handle_mode_declarative`]'s own no-arg form resolves differently, and
 //! deliberately: it goes to the DECLARED song
-//! ([`super::rice::declared_song`], off `song/declared/livery.json`) when the
+//! ([`super::rice::declared_song`], off `song/declared/theme.json`) when the
 //! lane has published one, and only then falls back to the same current-song
 //! rule above — "back to declarative" must mean the venue's declared song, not
 //! whichever song happens to be staged.
 //!
 //! **Leaving `Draft` mode:** both [`handle_mode_stage`] and
 //! [`handle_mode_declarative`] call [`teardown_draft_symlink`] — removing
-//! any routing symlink currently at `stage/livery.json` — BEFORE they write
+//! any routing symlink currently at `stage/theme.json` — BEFORE they write
 //! plain declared content, so that write lands in a real file rather than
 //! transparently through into whatever draft the symlink still pointed at.
 //! Neither leaves a dangling symlink behind when transitioning out of
 //! `Draft`. The teardown comes AFTER the template seed and
 //! [`super::rice::plan_rice_stage`], so a song that cannot be staged fails
 //! with the symlink and the `draft` marker exactly as they were. `mode.json`
-//! is written last: a watcher of `stage/livery.json` re-arms on it
+//! is written last: a watcher of `stage/theme.json` re-arms on it
 //! (CONTRACTS.md §4).
 
 use aoide_protocol::Invocation;
@@ -99,8 +99,8 @@ pub fn register(r: &mut Registry) {
     ));
     r.insert(cmd!(
         path: ["rice", "mode", "declarative"],
-        summary: "Lock staging: `rice stage`/`cover set` refuse until unlocked again. Optional <name> re-pins stage/livery.json to that song's declared notes first. Leaves `Draft` mode (tearing down its routing symlink) if currently in it.",
-        args: [arg!("name", "string", false, "Song to pin stage/livery.json to before locking; omit to pin the declared song (the currently staged one on a host with no declared twin).")],
+        summary: "Lock staging: `rice stage`/`cover set` refuse until unlocked again. Optional <name> re-pins stage/theme.json to that song's declared notes first. Leaves `Draft` mode (tearing down its routing symlink) if currently in it.",
+        args: [arg!("name", "string", false, "Song to pin stage/theme.json to before locking; omit to pin the declared song (the currently staged one on a host with no declared twin).")],
         flags: [],
         gated: false,
         implemented: true,
@@ -108,7 +108,7 @@ pub fn register(r: &mut Registry) {
     ));
     r.insert(cmd!(
         path: ["rice", "mode", "draft"],
-        summary: "Route stage/livery.json into rices/<song>/drafts/<name>/livery.json via a symlink — every future write (rice stage, a hand-edit) lands directly in the draft. Forks the draft from the current stage first if it doesn't exist yet, and mints a baseline take of it (unless it equals the head) so the first edit can be undone. Refuses while `rice mode declarative` is locked.",
+        summary: "Route stage/theme.json into rices/<song>/drafts/<name>/theme.json via a symlink — every future write (rice stage, a hand-edit) lands directly in the draft. Forks the draft from the current stage first if it doesn't exist yet, and mints a baseline take of it (unless it equals the head) so the first edit can be undone. Refuses while `rice mode declarative` is locked.",
         args: [arg!("name", "string", true, "Draft name to route the stage into (forked from the current stage if new).")],
         flags: [],
         gated: false,
@@ -143,7 +143,7 @@ fn handle_mode_status(_inv: &Invocation) -> Outcome {
     }))
 }
 
-/// Read the song `stage/livery.json` is CURRENTLY carrying, straight off its
+/// Read the song `stage/theme.json` is CURRENTLY carrying, straight off its
 /// own `"song"` field — the same field both `rice stage` (below) and the nix
 /// activation's `home.activation.aoideSeedStage` reseed script
 /// (the strillix lane's activation) write on every stage, every activation.
@@ -160,7 +160,7 @@ fn handle_mode_status(_inv: &Invocation) -> Outcome {
 /// song to fork a new draft from — no adapter, no second implementation of
 /// "what is the current rice".
 pub(crate) fn current_staged_song() -> Option<String> {
-    let path = shellbridge::stage_dir().join("livery.json");
+    let path = shellbridge::stage_dir().join("theme.json");
     let raw = std::fs::read_to_string(path).ok()?;
     let parsed: Value = serde_json::from_str(&raw).ok()?;
     let song = parsed.get("song")?.as_str()?.to_string();
@@ -174,11 +174,11 @@ pub(crate) fn current_staged_song() -> Option<String> {
     crate::compose::valid_song_name(&song).then_some(song)
 }
 
-/// Remove any `Draft`-mode routing symlink currently at `stage/livery.json`,
+/// Remove any `Draft`-mode routing symlink currently at `stage/theme.json`,
 /// so a caller about to write plain declared content there
 /// ([`super::rice::handle_rice_stage`], via `atomic_write`) creates a REAL
 /// file rather than writing straight through into whatever draft the
-/// symlink still points at. A no-op when `stage/livery.json` is absent or
+/// symlink still points at. A no-op when `stage/theme.json` is absent or
 /// already a plain file.
 ///
 /// [`handle_mode_stage`] and [`handle_mode_declarative`] both call this
@@ -187,9 +187,9 @@ pub(crate) fn current_staged_song() -> Option<String> {
 /// first would blind a bare no-`<name>` call) but BEFORE writing anything —
 /// leaving `Draft` mode must never leave a dangling symlink behind.
 fn teardown_draft_symlink() -> std::io::Result<()> {
-    let stage_livery = shellbridge::stage_dir().join("livery.json");
-    match std::fs::symlink_metadata(&stage_livery) {
-        Ok(meta) if meta.file_type().is_symlink() => std::fs::remove_file(&stage_livery),
+    let stage_theme = shellbridge::stage_dir().join("theme.json");
+    match std::fs::symlink_metadata(&stage_theme) {
+        Ok(meta) if meta.file_type().is_symlink() => std::fs::remove_file(&stage_theme),
         _ => Ok(()),
     }
 }
@@ -197,7 +197,7 @@ fn teardown_draft_symlink() -> std::io::Result<()> {
 /// `rice mode stage [<name>]` — unlock staging writers AND enable hot
 /// loading immediately, never a bare flag-flip. With `<name>`, stages that
 /// song; with no name, resolves "the current rice" off the existing
-/// `stage/livery.json`'s own `"song"` field ([`current_staged_song`]) and
+/// `stage/theme.json`'s own `"song"` field ([`current_staged_song`]) and
 /// stages THAT — so entering staging mode always leaves a live, hot-loadable
 /// rice behind it, not just an unlocked marker with a stale/absent stage
 /// file. Only when no song can be resolved at all (a genuinely fresh box
@@ -326,7 +326,7 @@ fn handle_mode_stage(inv: &Invocation) -> Outcome {
             Some(n) => format!(
                 "staging mode unlocked — re-staged the current rice `{n}` live{seed_note}"
             ),
-            None => "staging mode unlocked — no current rice to stage (no stage/livery.json yet)".to_string(),
+            None => "staging mode unlocked — no current rice to stage (no stage/theme.json yet)".to_string(),
         },
     )
     .changed(changed)
@@ -334,16 +334,16 @@ fn handle_mode_stage(inv: &Invocation) -> Outcome {
 }
 
 /// `rice mode declarative [<name>]` — lock staging writers. With `<name>`,
-/// re-pins `stage/livery.json` to that song's committed notes FIRST (via
+/// re-pins `stage/theme.json` to that song's committed notes FIRST (via
 /// `handle_rice_stage`, guard-free), then writes the marker.
 ///
 /// With NO name, this mirrors [`handle_mode_stage`]'s own no-arg auto-resolve
 /// pattern rather than freezing the stage as-is: it resolves "the declared
 /// song" off the lane's declared twin
-/// (`song/declared/livery.json`, [`super::rice::declared_song`],
+/// (`song/declared/theme.json`, [`super::rice::declared_song`],
 /// CONTRACTS.md §4) — the song the VENUE declares for this host — and only
 /// when that twin is absent (a host that never activated the lane) falls
-/// back to [`current_staged_song`], the song `stage/livery.json` is currently
+/// back to [`current_staged_song`], the song `stage/theme.json` is currently
 /// carrying. It re-pins from the resolved song's notes, then locks — so `rice
 /// mode declarative` with no name discards whatever unsaved live edits sat in
 /// the stage, same as the `<name>` path always has (`rice draft save` first
@@ -441,27 +441,27 @@ fn handle_mode_declarative(inv: &Invocation) -> Outcome {
     .with_data(data)
 }
 
-/// Point `stage/livery.json` at `draft_livery`, removing whatever sits there
+/// Point `stage/theme.json` at `draft_theme`, removing whatever sits there
 /// first (a real declared file, or a link routed to a different draft) —
 /// [`teardown_draft_symlink`]'s inverse. [`handle_mode_draft`] routes with it,
 /// and `strillix reload`'s draft arm re-routes with it after an activation seed
 /// renamed a declared file over the link. The error is the outcome message,
 /// naming the step that failed.
-pub(crate) fn route_stage_to_draft(draft_livery: &std::path::Path) -> Result<(), String> {
-    let stage_livery = shellbridge::stage_dir().join("livery.json");
-    if std::fs::symlink_metadata(&stage_livery).is_ok() {
-        std::fs::remove_file(&stage_livery)
-            .map_err(|e| format!("failed to clear stage/livery.json before routing: {e}"))?;
+pub(crate) fn route_stage_to_draft(draft_theme: &std::path::Path) -> Result<(), String> {
+    let stage_theme = shellbridge::stage_dir().join("theme.json");
+    if std::fs::symlink_metadata(&stage_theme).is_ok() {
+        std::fs::remove_file(&stage_theme)
+            .map_err(|e| format!("failed to clear stage/theme.json before routing: {e}"))?;
     }
-    if let Some(parent) = stage_livery.parent() {
+    if let Some(parent) = stage_theme.parent() {
         std::fs::create_dir_all(parent).map_err(|e| format!("failed to prepare the stage dir: {e}"))?;
     }
-    std::os::unix::fs::symlink(draft_livery, &stage_livery)
-        .map_err(|e| format!("failed to route stage/livery.json to the draft: {e}"))
+    std::os::unix::fs::symlink(draft_theme, &stage_theme)
+        .map_err(|e| format!("failed to route stage/theme.json to the draft: {e}"))
 }
 
-/// `rice mode draft <name>` — enter DRAFT mode: point `stage/livery.json`
-/// at a symlink into `rices/<song>/drafts/<name>/livery.json`, where
+/// `rice mode draft <name>` — enter DRAFT mode: point `stage/theme.json`
+/// at a symlink into `rices/<song>/drafts/<name>/theme.json`, where
 /// `song` is resolved the same way `rice mode stage`'s no-arg form does
 /// ([`current_staged_song`] — no separate `<song>` arg). Forks the draft
 /// from whatever's CURRENTLY in the stage first if it doesn't exist yet,
@@ -469,16 +469,16 @@ pub(crate) fn route_stage_to_draft(draft_livery: &std::path::Path) -> Result<(),
 /// save`'s own handler performs, not a reimplementation) — so entering a
 /// brand-new draft name is also how you create one.
 ///
-/// Every future writer of `stage/livery.json` — `rice stage`, a hand-edit,
+/// Every future writer of `stage/theme.json` — `rice stage`, a hand-edit,
 /// Quickshell's own FileView reload — transparently lands in the draft file
 /// from here on, because [`aoide_storage::fs::atomic_write`] resolves and
 /// writes through a symlink at its destination rather than replacing it.
 /// Zero draft-awareness anywhere else is what makes this simple. (`cover
 /// set`/`stage/cover.json` are NOT part of this routing — only
-/// `livery.json` is symlinked.)
+/// `theme.json` is symlinked.)
 ///
 /// [`route_stage_to_draft`] removes whatever currently sits at
-/// `stage/livery.json` (a real declared file, or an old symlink routed to a
+/// `stage/theme.json` (a real declared file, or an old symlink routed to a
 /// DIFFERENT draft) before creating the new symlink. Refuses with the same
 /// `declarative-mode-locked` shape every other write path uses.
 fn handle_mode_draft(inv: &Invocation) -> Outcome {
@@ -525,8 +525,8 @@ fn handle_mode_draft(inv: &Invocation) -> Outcome {
     };
 
     let mut changed: Vec<String> = Vec::new();
-    let draft_livery = shellbridge::draft_dir(&song, &name).join("livery.json");
-    if !draft_livery.is_file() {
+    let draft_theme = shellbridge::draft_dir(&song, &name).join("theme.json");
+    if !draft_theme.is_file() {
         let mut forked = super::draft::fork_stage_into(&song, &name);
         if forked.status != Status::Ok {
             forked.command = "rice.mode.draft".to_string();
@@ -535,13 +535,13 @@ fn handle_mode_draft(inv: &Invocation) -> Outcome {
         changed.append(&mut forked.changed);
     }
 
-    if let Err(e) = route_stage_to_draft(&draft_livery) {
+    if let Err(e) = route_stage_to_draft(&draft_theme) {
         return Outcome::error("rice.mode.draft", e)
             .changed(changed)
             .with_data(json!({ "reason": "symlink-setup-failed" }));
     }
-    let stage_livery = shellbridge::stage_dir().join("livery.json");
-    changed.push(stage_livery.to_string_lossy().into_owned());
+    let stage_theme = shellbridge::stage_dir().join("theme.json");
+    changed.push(stage_theme.to_string_lossy().into_owned());
 
     let marker = ModeMarker {
         mode: RiceMode::Draft,
@@ -565,7 +565,7 @@ fn handle_mode_draft(inv: &Invocation) -> Outcome {
     // unchanged draft mints nothing; never fatal, the route is already made.
     let mut out = Outcome::ok(
         "rice.mode.draft",
-        format!("draft mode routed — stage/livery.json now points at `{song}`'s draft `{name}`"),
+        format!("draft mode routed — stage/theme.json now points at `{song}`'s draft `{name}`"),
     )
     .changed(changed)
     .with_data(json!({ "mode": "draft", "song": song, "draft": name }));
@@ -584,7 +584,7 @@ mod tests {
     fn current_staged_song_rejects_a_hand_edited_path_traversal_song_field() {
         // `current_staged_song()`'s result is joined straight into
         // `draft_dir(song, name)` by both `draft.rs` and `handle_mode_draft`
-        // below — a stage/livery.json hand-edited (or written by some other
+        // below — a stage/theme.json hand-edited (or written by some other
         // process) with a traversal `"song"` must resolve to nothing at all,
         // same as a missing/absent one, rather than resolving to something
         // a caller then treats as a safe directory component.
@@ -593,7 +593,7 @@ mod tests {
         let stage = unique_tmp("current-staged-song-traversal");
         std::fs::create_dir_all(&stage).unwrap();
         std::fs::write(
-            stage.join("livery.json"),
+            stage.join("theme.json"),
             r##"{"schemaVersion":"0","song":"../../evil","palette":{"bg":"#000"}}"##,
         )
         .unwrap();
@@ -648,7 +648,7 @@ mod tests {
         let song = root.join("rices").join("moonlight");
         std::fs::create_dir_all(&stage).unwrap();
         std::fs::create_dir_all(&song).unwrap();
-        std::fs::write(song.join("livery.json"), VALID_NOTES).unwrap();
+        std::fs::write(song.join("theme.json"), VALID_NOTES).unwrap();
         std::fs::write(song.join("lockscreen.png"), b"").unwrap();
         crate::commands::test_support::ensure_default_rices_fixture();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
@@ -658,9 +658,9 @@ mod tests {
         let marker = load_mode_marker();
         assert_eq!(marker.mode, RiceMode::Staging);
         assert_eq!(marker.song, Some("moonlight".to_string()));
-        assert!(out.changed.iter().any(|c| c.ends_with("stage/livery.json")));
+        assert!(out.changed.iter().any(|c| c.ends_with("stage/theme.json")));
         assert!(out.changed.iter().any(|c| c.ends_with("stage/mode.json")));
-        assert!(stage.join("livery.json").is_file());
+        assert!(stage.join("theme.json").is_file());
         // The song ships a lock picture, so staging it dresses the lock.
         let lock = std::fs::read_to_string(stage.join("hyprlock.conf")).unwrap();
         let picture = song.join("lockscreen.png");
@@ -684,7 +684,7 @@ mod tests {
         let templated_song = templates.join("moonlight");
         std::fs::create_dir_all(&stage).unwrap();
         std::fs::create_dir_all(&templated_song).unwrap();
-        std::fs::write(templated_song.join("livery.json"), VALID_NOTES).unwrap();
+        std::fs::write(templated_song.join("theme.json"), VALID_NOTES).unwrap();
         crate::commands::test_support::ensure_default_rices_fixture();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
         std::env::set_var("STRILLIX_TEMPLATES", &templates);
@@ -702,12 +702,12 @@ mod tests {
         assert_eq!(marker.mode, RiceMode::Staging);
         assert_eq!(marker.song, Some("moonlight".to_string()));
         assert_eq!(
-            std::fs::read_to_string(shellbridge::rice_dir("moonlight").join("livery.json"))
+            std::fs::read_to_string(shellbridge::rice_dir("moonlight").join("theme.json"))
                 .unwrap(),
             VALID_NOTES,
             "the shipped template landed in the runtime rices"
         );
-        assert!(stage.join("livery.json").is_file());
+        assert!(stage.join("theme.json").is_file());
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -720,12 +720,12 @@ mod tests {
         let song = root.join("rices").join("moonlight");
         std::fs::create_dir_all(&stage).unwrap();
         std::fs::create_dir_all(&song).unwrap();
-        std::fs::write(song.join("livery.json"), VALID_NOTES).unwrap();
+        std::fs::write(song.join("theme.json"), VALID_NOTES).unwrap();
         // The stage file ALREADY carries a "song" breadcrumb — written by a
         // prior `rice stage`/`rice mode stage` call or the nix activation's
         // reseed script — even though the caller passes no name this time.
         std::fs::write(
-            stage.join("livery.json"),
+            stage.join("theme.json"),
             r##"{"schemaVersion":"0","song":"moonlight","palette":{"bg":"#000"}}"##,
         )
         .unwrap();
@@ -742,12 +742,12 @@ mod tests {
         let marker = load_mode_marker();
         assert_eq!(marker.mode, RiceMode::Staging);
         assert_eq!(marker.song, Some("moonlight".to_string()));
-        assert!(out.changed.iter().any(|c| c.ends_with("stage/livery.json")));
+        assert!(out.changed.iter().any(|c| c.ends_with("stage/theme.json")));
         assert!(out.changed.iter().any(|c| c.ends_with("stage/mode.json")));
         // The re-stage pulled FRESH content from rices/moonlight (which
         // has an "accent" the seeded stage stub lacked) — proves it actually
         // re-derived, not just reused the breadcrumb as a no-op.
-        let restaged = std::fs::read_to_string(stage.join("livery.json")).unwrap();
+        let restaged = std::fs::read_to_string(stage.join("theme.json")).unwrap();
         assert!(restaged.contains("\"accent\""));
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -782,13 +782,13 @@ mod tests {
         let song = root.join("rices").join("moonlight");
         std::fs::create_dir_all(&stage).unwrap();
         std::fs::create_dir_all(&song).unwrap();
-        std::fs::write(song.join("livery.json"), VALID_NOTES).unwrap();
+        std::fs::write(song.join("theme.json"), VALID_NOTES).unwrap();
         // The stage already carries a "song" breadcrumb but STALE content (no
         // "accent" field, which VALID_NOTES has) — proves the lock actually
         // RE-PINS from the committed rices rather than freezing the stale
         // stage in place.
         std::fs::write(
-            stage.join("livery.json"),
+            stage.join("theme.json"),
             r##"{"schemaVersion":"0","song":"moonlight","palette":{"bg":"#000"}}"##,
         )
         .unwrap();
@@ -806,7 +806,7 @@ mod tests {
         assert_eq!(marker.mode, RiceMode::Declarative);
         assert_eq!(marker.song, Some("moonlight".to_string()));
         assert_eq!(marker.draft, None);
-        let repinned = std::fs::read_to_string(stage.join("livery.json")).unwrap();
+        let repinned = std::fs::read_to_string(stage.join("theme.json")).unwrap();
         assert!(
             repinned.contains("\"accent\""),
             "re-pinned from the committed rices, not frozen as-is: {repinned}"
@@ -826,12 +826,12 @@ mod tests {
         std::fs::create_dir_all(&stage).unwrap();
         std::fs::create_dir_all(root.join("rices").join("sonata")).unwrap();
         std::fs::create_dir_all(&declared).unwrap();
-        std::fs::write(root.join("rices").join("sonata").join("livery.json"), VALID_NOTES)
+        std::fs::write(root.join("rices").join("sonata").join("theme.json"), VALID_NOTES)
             .unwrap();
         crate::commands::test_support::ensure_default_rices_fixture();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
         std::fs::write(
-            declared.join("livery.json"),
+            declared.join("theme.json"),
             r##"{"palette":{"accent":"#ebbcba","bg":"#0b1021","fg":"#c8d3f5","urgent":"#ff757f"},"schemaVersion":"0","song":"sonata"}"##,
         )
         .unwrap();
@@ -847,7 +847,7 @@ mod tests {
     /// The declared twin (CONTRACTS.md §4) outranks the stage file's own
     /// breadcrumb: with a DIFFERENT song currently staged, bare `rice mode
     /// declarative` must land back on the song the VENUE declares — the song
-    /// `song/declared/livery.json` names — not on whatever happens to be
+    /// `song/declared/theme.json` names — not on whatever happens to be
     /// staged. `staging_song` still survives the lock untouched.
     #[test]
     fn declarative_with_no_name_repins_the_declared_song() {
@@ -862,21 +862,21 @@ mod tests {
         std::fs::create_dir_all(&sonata).unwrap();
         std::fs::create_dir_all(&nocturne).unwrap();
         std::fs::create_dir_all(&declared).unwrap();
-        std::fs::write(sonata.join("livery.json"), VALID_NOTES).unwrap();
+        std::fs::write(sonata.join("theme.json"), VALID_NOTES).unwrap();
         std::fs::write(sonata.join("lockscreen.png"), b"").unwrap();
-        std::fs::write(nocturne.join("livery.json"), VALID_NOTES).unwrap();
+        std::fs::write(nocturne.join("theme.json"), VALID_NOTES).unwrap();
         crate::commands::test_support::ensure_default_rices_fixture();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
         // The lane's activation seed published the DECLARED twin for sonata…
         std::fs::write(
-            declared.join("livery.json"),
+            declared.join("theme.json"),
             r##"{"geometry":{"terminalOpacity":0.7},"palette":{"accent":"#ebbcba","bg":"#0b1021","fg":"#c8d3f5","urgent":"#ff757f"},"schemaVersion":"0","song":"sonata"}"##,
         )
         .unwrap();
         // …while the stage is currently performing nocturne, and a prior
         // staging session's own memory says `etude`.
         std::fs::write(
-            stage.join("livery.json"),
+            stage.join("theme.json"),
             r##"{"schemaVersion":"0","song":"nocturne","palette":{"bg":"#000"}}"##,
         )
         .unwrap();
@@ -892,7 +892,7 @@ mod tests {
         let out = handle_mode_declarative(&inv(&["rice", "mode", "declarative"], &[]));
         assert_eq!(out.status, Status::Ok, "{:?}", out.data);
         let repinned: Value =
-            serde_json::from_str(&std::fs::read_to_string(stage.join("livery.json")).unwrap())
+            serde_json::from_str(&std::fs::read_to_string(stage.join("theme.json")).unwrap())
                 .unwrap();
         assert_eq!(
             repinned["song"], "sonata",
@@ -952,7 +952,7 @@ mod tests {
         let marker = load_mode_marker();
         assert_eq!(marker.mode, RiceMode::Declarative);
         assert_eq!(marker.song, None);
-        assert!(!stage.join("livery.json").exists(), "nothing staged out of nowhere");
+        assert!(!stage.join("theme.json").exists(), "nothing staged out of nowhere");
         let _ = std::fs::remove_dir_all(&stage);
     }
 
@@ -965,7 +965,7 @@ mod tests {
         let song = root.join("rices").join("moonlight");
         std::fs::create_dir_all(&stage).unwrap();
         std::fs::create_dir_all(&song).unwrap();
-        std::fs::write(song.join("livery.json"), VALID_NOTES).unwrap();
+        std::fs::write(song.join("theme.json"), VALID_NOTES).unwrap();
         crate::commands::test_support::ensure_default_rices_fixture();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
 
@@ -978,7 +978,7 @@ mod tests {
         let marker = load_mode_marker();
         assert_eq!(marker.mode, RiceMode::Declarative);
         assert_eq!(marker.song, Some("moonlight".to_string()));
-        assert!(stage.join("livery.json").is_file());
+        assert!(stage.join("theme.json").is_file());
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -1002,7 +1002,7 @@ mod tests {
     // ── `staging_song` survives a declarative lock (khoa 2026-08-17) ──────
     //
     // The regression this whole field exists to fix: `current_staged_song()`
-    // reads `stage/livery.json`'s own `"song"` field, which `handle_rice_stage`
+    // reads `stage/theme.json`'s own `"song"` field, which `handle_rice_stage`
     // overwrites on EVERY stage — including the re-pin a declarative lock
     // performs. So staging `etude`, then locking declarative on `sonata`,
     // used to permanently lose the memory that `etude` was ever staged: a
@@ -1022,8 +1022,8 @@ mod tests {
         std::fs::create_dir_all(&stage).unwrap();
         std::fs::create_dir_all(&sonata).unwrap();
         std::fs::create_dir_all(&etude).unwrap();
-        std::fs::write(sonata.join("livery.json"), VALID_NOTES).unwrap();
-        std::fs::write(etude.join("livery.json"), VALID_NOTES).unwrap();
+        std::fs::write(sonata.join("theme.json"), VALID_NOTES).unwrap();
+        std::fs::write(etude.join("theme.json"), VALID_NOTES).unwrap();
         crate::commands::test_support::ensure_default_rices_fixture();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
 
@@ -1049,7 +1049,7 @@ mod tests {
 
         // A bare `rice mode stage` (no name — the CLI default, which the RICE
         // menu never sends) must resolve back to `etude`, NOT `sonata` and NOT whatever
-        // `current_staged_song()`/`stage/livery.json` currently says.
+        // `current_staged_song()`/`stage/theme.json` currently says.
         let out = handle_mode_stage(&inv(&["rice", "mode", "stage"], &[]));
         assert_eq!(out.status, Status::Ok, "{:?}", out.data);
         assert!(
@@ -1067,7 +1067,7 @@ mod tests {
 
     // ── A wallpaper pick across a mode change and a rebuild ──────────────────
 
-    /// `<root>/{stage,rices/<song>/livery.json}` for each named song, with
+    /// `<root>/{stage,rices/<song>/theme.json}` for each named song, with
     /// `AOIDE_STAGE_DIR` pointed at the stage and the rices gate fixtured.
     /// Callers own `remove_dir_all(&root)`.
     fn pick_tmp(tag: &str, songs: &[&str]) -> (PathBuf, PathBuf) {
@@ -1077,7 +1077,7 @@ mod tests {
         for song in songs {
             let dir = root.join("rices").join(song);
             std::fs::create_dir_all(&dir).unwrap();
-            std::fs::write(dir.join("livery.json"), VALID_NOTES).unwrap();
+            std::fs::write(dir.join("theme.json"), VALID_NOTES).unwrap();
         }
         crate::commands::test_support::ensure_default_rices_fixture();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
@@ -1099,11 +1099,11 @@ mod tests {
         let staged_pick = std::fs::read_to_string(stage.join("cover.json")).unwrap();
 
         let mut reseeded: Value = serde_json::from_str(
-            &std::fs::read_to_string(stage.join("livery.json")).unwrap(),
+            &std::fs::read_to_string(stage.join("theme.json")).unwrap(),
         )
         .unwrap();
         reseeded["song"] = json!("sonata");
-        std::fs::write(stage.join("livery.json"), serde_json::to_string(&reseeded).unwrap())
+        std::fs::write(stage.join("theme.json"), serde_json::to_string(&reseeded).unwrap())
             .unwrap();
 
         let out = handle_mode_stage(&inv(&["rice", "mode", "stage"], &[]));
@@ -1143,7 +1143,7 @@ mod tests {
         let drafted = handle_mode_draft(&inv(&["rice", "mode", "draft"], &["neon-night"]));
         assert_eq!(drafted.status, Status::Ok, "{:?}", drafted.data);
         assert_eq!(load_mode_marker().mode, RiceMode::Draft);
-        assert!(std::fs::symlink_metadata(stage.join("livery.json"))
+        assert!(std::fs::symlink_metadata(stage.join("theme.json"))
             .unwrap()
             .file_type()
             .is_symlink());
@@ -1280,12 +1280,12 @@ mod tests {
         let song = root.join("rices").join("moonlight");
         std::fs::create_dir_all(&stage).unwrap();
         std::fs::create_dir_all(&song).unwrap();
-        std::fs::write(song.join("livery.json"), VALID_NOTES).unwrap();
+        std::fs::write(song.join("theme.json"), VALID_NOTES).unwrap();
         // The stage file already carries a "song" breadcrumb, as if seeded by
         // the nix activation reseed script — but no mode.json exists yet, so
         // `staging_song` has never been set.
         std::fs::write(
-            stage.join("livery.json"),
+            stage.join("theme.json"),
             r##"{"schemaVersion":"0","song":"moonlight","palette":{"bg":"#000"}}"##,
         )
         .unwrap();
@@ -1312,7 +1312,7 @@ mod tests {
         let stage = root.join("stage");
         std::fs::create_dir_all(&stage).unwrap();
         let live_notes = r##"{"schemaVersion":"0","song":"sonata","palette":{"bg":"#live"}}"##;
-        std::fs::write(stage.join("livery.json"), live_notes).unwrap();
+        std::fs::write(stage.join("theme.json"), live_notes).unwrap();
         crate::commands::test_support::ensure_default_rices_fixture();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
 
@@ -1326,14 +1326,14 @@ mod tests {
         let out = handle_mode_draft(&inv(&["rice", "mode", "draft"], &["neon-night"]));
         assert_eq!(out.status, Status::Ok, "{:?}", out.data);
 
-        let draft_livery = root.join("rices").join("sonata").join("drafts").join("neon-night").join("livery.json");
-        assert_eq!(std::fs::read_to_string(&draft_livery).unwrap(), live_notes, "forked from the live stage");
+        let draft_theme = root.join("rices").join("sonata").join("drafts").join("neon-night").join("theme.json");
+        assert_eq!(std::fs::read_to_string(&draft_theme).unwrap(), live_notes, "forked from the live stage");
         assert!(
-            std::fs::symlink_metadata(stage.join("livery.json")).unwrap().file_type().is_symlink(),
-            "stage/livery.json is now a symlink"
+            std::fs::symlink_metadata(stage.join("theme.json")).unwrap().file_type().is_symlink(),
+            "stage/theme.json is now a symlink"
         );
-        assert_eq!(std::fs::read_link(stage.join("livery.json")).unwrap(), draft_livery);
-        assert_eq!(std::fs::read_to_string(stage.join("livery.json")).unwrap(), live_notes, "reads through fine");
+        assert_eq!(std::fs::read_link(stage.join("theme.json")).unwrap(), draft_theme);
+        assert_eq!(std::fs::read_to_string(stage.join("theme.json")).unwrap(), live_notes, "reads through fine");
 
         let marker = load_mode_marker();
         assert_eq!(marker.mode, RiceMode::Draft);
@@ -1350,14 +1350,14 @@ mod tests {
         let stage = root.join("stage");
         std::fs::create_dir_all(&stage).unwrap();
         std::fs::write(
-            stage.join("livery.json"),
+            stage.join("theme.json"),
             r##"{"schemaVersion":"0","song":"sonata","palette":{"bg":"#live"}}"##,
         )
         .unwrap();
         let existing_dir = root.join("rices").join("sonata").join("drafts").join("neon-night");
         std::fs::create_dir_all(&existing_dir).unwrap();
         let existing_notes = r##"{"schemaVersion":"0","song":"sonata","palette":{"bg":"#already-saved"}}"##;
-        std::fs::write(existing_dir.join("livery.json"), existing_notes).unwrap();
+        std::fs::write(existing_dir.join("theme.json"), existing_notes).unwrap();
         crate::commands::test_support::ensure_default_rices_fixture();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
 
@@ -1372,8 +1372,8 @@ mod tests {
         assert_eq!(out.status, Status::Ok, "{:?}", out.data);
         // The EXISTING draft content is untouched (not overwritten by the
         // live stage's own content) — routing, not re-forking.
-        assert_eq!(std::fs::read_to_string(&existing_dir.join("livery.json")).unwrap(), existing_notes);
-        assert_eq!(std::fs::read_to_string(stage.join("livery.json")).unwrap(), existing_notes);
+        assert_eq!(std::fs::read_to_string(&existing_dir.join("theme.json")).unwrap(), existing_notes);
+        assert_eq!(std::fs::read_to_string(stage.join("theme.json")).unwrap(), existing_notes);
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -1385,7 +1385,7 @@ mod tests {
         let stage = root.join("stage");
         std::fs::create_dir_all(&stage).unwrap();
         std::fs::write(
-            stage.join("livery.json"),
+            stage.join("theme.json"),
             r##"{"schemaVersion":"0","song":"sonata","palette":{"bg":"#seed"}}"##,
         )
         .unwrap();
@@ -1405,8 +1405,8 @@ mod tests {
         assert_eq!(out.status, Status::Ok, "{:?}", out.data);
         let marker = load_mode_marker();
         assert_eq!(marker.draft, Some("neon-night".to_string()));
-        let neon_livery = root.join("rices").join("sonata").join("drafts").join("neon-night").join("livery.json");
-        assert_eq!(std::fs::read_link(stage.join("livery.json")).unwrap(), neon_livery);
+        let neon_theme = root.join("rices").join("sonata").join("drafts").join("neon-night").join("theme.json");
+        assert_eq!(std::fs::read_link(stage.join("theme.json")).unwrap(), neon_theme);
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -1466,11 +1466,11 @@ mod tests {
         let song = root.join("rices").join("sonata");
         std::fs::create_dir_all(&stage).unwrap();
         std::fs::create_dir_all(&song).unwrap();
-        std::fs::write(song.join("livery.json"), VALID_NOTES).unwrap();
+        std::fs::write(song.join("theme.json"), VALID_NOTES).unwrap();
         // current_staged_song() reads THIS file's own "song" field, not the
         // marker's — handle_mode_draft needs it to resolve what to fork from.
         std::fs::write(
-            stage.join("livery.json"),
+            stage.join("theme.json"),
             r##"{"schemaVersion":"0","song":"sonata","palette":{"bg":"#seed"}}"##,
         )
         .unwrap();
@@ -1479,20 +1479,20 @@ mod tests {
         save_mode_marker(&ModeMarker { mode: RiceMode::Staging, song: Some("sonata".to_string()), ..Default::default() }).unwrap();
 
         handle_mode_draft(&inv(&["rice", "mode", "draft"], &["neon-night"]));
-        assert!(std::fs::symlink_metadata(stage.join("livery.json")).unwrap().file_type().is_symlink());
+        assert!(std::fs::symlink_metadata(stage.join("theme.json")).unwrap().file_type().is_symlink());
 
         let out = handle_mode_stage(&inv(&["rice", "mode", "stage"], &["sonata"]));
         assert_eq!(out.status, Status::Ok, "{:?}", out.data);
         assert!(
-            !std::fs::symlink_metadata(stage.join("livery.json")).unwrap().file_type().is_symlink(),
+            !std::fs::symlink_metadata(stage.join("theme.json")).unwrap().file_type().is_symlink(),
             "the routing symlink must be gone — a real file now"
         );
         let marker = load_mode_marker();
         assert_eq!(marker.mode, RiceMode::Staging);
         assert_eq!(marker.draft, None);
         // The draft file itself is untouched — only the routing is torn down.
-        let draft_livery = root.join("rices").join("sonata").join("drafts").join("neon-night").join("livery.json");
-        assert!(draft_livery.is_file());
+        let draft_theme = root.join("rices").join("sonata").join("drafts").join("neon-night").join("theme.json");
+        assert!(draft_theme.is_file());
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -1505,11 +1505,11 @@ mod tests {
         let song = root.join("rices").join("sonata");
         std::fs::create_dir_all(&stage).unwrap();
         std::fs::create_dir_all(&song).unwrap();
-        std::fs::write(song.join("livery.json"), VALID_NOTES).unwrap();
+        std::fs::write(song.join("theme.json"), VALID_NOTES).unwrap();
         // current_staged_song() reads THIS file's own "song" field, not the
         // marker's — handle_mode_draft needs it to resolve what to fork from.
         std::fs::write(
-            stage.join("livery.json"),
+            stage.join("theme.json"),
             r##"{"schemaVersion":"0","song":"sonata","palette":{"bg":"#seed"}}"##,
         )
         .unwrap();
@@ -1518,19 +1518,19 @@ mod tests {
         save_mode_marker(&ModeMarker { mode: RiceMode::Staging, song: Some("sonata".to_string()), ..Default::default() }).unwrap();
 
         handle_mode_draft(&inv(&["rice", "mode", "draft"], &["neon-night"]));
-        assert!(std::fs::symlink_metadata(stage.join("livery.json")).unwrap().file_type().is_symlink());
+        assert!(std::fs::symlink_metadata(stage.join("theme.json")).unwrap().file_type().is_symlink());
 
         let out = handle_mode_declarative(&inv(&["rice", "mode", "declarative"], &[]));
         assert_eq!(out.status, Status::Ok, "{:?}", out.data);
         assert!(
-            !std::fs::symlink_metadata(stage.join("livery.json")).unwrap().file_type().is_symlink(),
+            !std::fs::symlink_metadata(stage.join("theme.json")).unwrap().file_type().is_symlink(),
             "the routing symlink must be gone — a real file now"
         );
         let marker = load_mode_marker();
         assert_eq!(marker.mode, RiceMode::Declarative);
         assert_eq!(marker.song, Some("sonata".to_string()));
         assert_eq!(marker.draft, None);
-        let staged = std::fs::read_to_string(stage.join("livery.json")).unwrap();
+        let staged = std::fs::read_to_string(stage.join("theme.json")).unwrap();
         assert!(staged.contains("\"accent\""), "re-pinned from the committed rices: {staged}");
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -1543,9 +1543,9 @@ mod tests {
         let song = root.join("rices").join("sonata");
         std::fs::create_dir_all(&stage).unwrap();
         std::fs::create_dir_all(&song).unwrap();
-        std::fs::write(song.join("livery.json"), VALID_NOTES).unwrap();
+        std::fs::write(song.join("theme.json"), VALID_NOTES).unwrap();
         std::fs::write(
-            stage.join("livery.json"),
+            stage.join("theme.json"),
             r##"{"schemaVersion":"0","song":"sonata","palette":{"bg":"#seed"}}"##,
         )
         .unwrap();
@@ -1565,7 +1565,7 @@ mod tests {
 
     fn assert_still_drafted(stage: &std::path::Path) {
         assert!(
-            std::fs::symlink_metadata(stage.join("livery.json")).unwrap().file_type().is_symlink(),
+            std::fs::symlink_metadata(stage.join("theme.json")).unwrap().file_type().is_symlink(),
             "the routing symlink must survive a refused transition"
         );
         let marker = load_mode_marker();
@@ -1616,9 +1616,9 @@ mod tests {
         let take = aoide_storage::takes::load_take("sonata", Some("neon-night"), 1).unwrap();
         assert_eq!(take.parent, None);
         assert_eq!(take.cause, "enter");
-        assert_eq!(take.livery["palette"]["bg"], "#seed");
-        assert_eq!(std::fs::read_to_string(stage.join("livery.json")).unwrap(), std::fs::read_to_string(
-            shellbridge::draft_dir("sonata", "neon-night").join("livery.json")).unwrap());
+        assert_eq!(take.theme["palette"]["bg"], "#seed");
+        assert_eq!(std::fs::read_to_string(stage.join("theme.json")).unwrap(), std::fs::read_to_string(
+            shellbridge::draft_dir("sonata", "neon-night").join("theme.json")).unwrap());
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -1658,11 +1658,11 @@ mod tests {
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID"]);
         std::env::remove_var("AOIDE_SESSION_ID");
         let (root, stage) = drafted_stage("mode-draft-baseline-back");
-        let read = || -> Value { serde_json::from_str(&std::fs::read_to_string(stage.join("livery.json")).unwrap()).unwrap() };
+        let read = || -> Value { serde_json::from_str(&std::fs::read_to_string(stage.join("theme.json")).unwrap()).unwrap() };
         let forked = read();
 
         std::fs::write(
-            stage.join("livery.json"),
+            stage.join("theme.json"),
             r##"{"schemaVersion":"0","song":"sonata","palette":{"bg":"#edited"}}"##,
         )
         .unwrap();

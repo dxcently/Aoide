@@ -106,7 +106,7 @@ Item {
         return dd + "d" + (hh < 10 ? "0" : "") + hh + "h"
     }
     function compact(n) {
-        var lv = board.livery
+        var lv = board.theme
         if (lv && lv.ctxCompact) return lv.ctxCompact(n)
         var v = n || 0
         if (v < 1000) return "" + v
@@ -114,12 +114,12 @@ Item {
         return (v / 1000000).toFixed(1) + "M"
     }
     function ctxPct(s) {
-        var lv = board.livery
+        var lv = board.theme
         if (lv && lv.ctxPercent) return lv.ctxPercent(s.contextTokens, s.contextCeiling)
         var c = s.contextCeiling > 0 ? s.contextCeiling : 200000
         return Math.max(0, Math.min(100, (s.contextTokens || 0) / c * 100))
     }
-    readonly property real ctxUrgentAt: (board.livery && board.livery.ctxUrgentAt) ? board.livery.ctxUrgentAt : 85
+    readonly property real ctxUrgentAt: (board.theme && board.theme.ctxUrgentAt) ? board.theme.ctxUrgentAt : 85
 
     // the live state: the hook phase wins, the roster state is the fallback
     function liveState(s) {

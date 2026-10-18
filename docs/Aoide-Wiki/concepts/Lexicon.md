@@ -27,7 +27,7 @@ The engraved thesis (after Goethe's *"Architektur ist erstarrte Musik"*) splits 
 
 - **The frozen half** — the nix layer. Immutable, evaluated. The **score**: determines everything, performs nothing.
 - **The performed half** — the running desktop. Live, hot-reloadable, ephemeral. The **performance**: what the score sounds like tonight, at this venue.
-- **The seam** — [[livery]]. Livery values are frozen into the crystal at build time *and* sounded live at runtime (`stage/livery.json`, hyprctl, the kitty control socket). Both fan-outs derive from the same `aoide.livery`, so the baked theme and the live preview cannot drift.
+- **The seam** — [[theme]]. Theme values are frozen into the crystal at build time *and* sounded live at runtime (`stage/theme.json`, hyprctl, the kitty control socket). Both fan-outs derive from the same `aoide.theme`, so the baked theme and the live preview cannot drift.
 
 Each half gets its own word family, so a sentence always names which side of the seam it stands on.
 
@@ -70,15 +70,15 @@ Terms naming the connective tissue rather than either half:
 
 - **conductor** — the ensemble's tool: `aoide conductor`, the TUI that watches running agent terminals and cues between them, Hyprland as the multiplexer. The conductor-class covers every surface with that duty: the Terminal Commander widget, the DAG gadget, the conductor itself. See [[Terminal-Commander]], [[Session-Graph]].
 - **door** — an entry point into the one dispatch layer: `cli`, `mcp`, `daemon`, `a2a` (the TUI rides the cli door). The `a2a` door is bidirectional — aoide serves the protocol and speaks it as a client ([[A2A-Door]]). Every operation enters through a door and exits into the one audit log.
-- **livery** — the design tokens AND the engine that dresses every surface in them ([[livery]], `crates/strillix-rice/src/livery/`): one name for the whole token layer, resolved/validated/emitted by livery (`stage/livery.json`, hyprctl, OSC).
+- **theme** — the design tokens AND the engine that dresses every surface in them ([[theme]], `crates/strillix-rice/src/theme/`): one name for the whole token layer, resolved/validated/emitted by theme (`stage/theme.json`, hyprctl, OSC).
 - **gate** — the rebuild gate ([[Rebuild-Gate]]): agents propose, the human admits. The single point where the performed half is allowed to re-freeze the crystal.
 - **wiki / vault** — Mneme's memory surfaces: this wiki for design context, the vault for content.
 
-## Why the seam is a livery
+## Why the seam is a theme
 
-A **livery** is the single set of house colours a whole retinue wears in unison — a servant, a ship, a herald read at a glance as one household's. The industry term for this layer is *design tokens* (W3C design-tokens format, `CONTRACTS.md` §1), but a token names a single value; the engine dresses *every* surface in one song's identity, which a token alone doesn't capture. One word covers both the values and the act of stamping them.
+A **theme** is the single set of house colours a whole retinue wears in unison — a servant, a ship, a herald read at a glance as one household's. The industry term for this layer is *design tokens* (W3C design-tokens format, `CONTRACTS.md` §1), but a token names a single value; the engine dresses *every* surface in one song's identity, which a token alone doesn't capture. One word covers both the values and the act of stamping them.
 
-The seam sits on neither of the two existing axes — the Greek axis (who acts) or the music axis (what is made and performed) — a seam-level name of its own. `aoide.arrangement` sits at the same seam, livery's structural sibling: livery is the song's DRESS (palette · base16 · component tiers · geometry · fonts · cover), arrangement is its STRUCTURE — which widget/surface TYPES a song brings into existence (`modules/nucleus/options.nix`), stored in the same `livery.json` and read under the same closed paint-read whitelist (`AGENTS.md` house rule 5).
+The seam sits on neither of the two existing axes — the Greek axis (who acts) or the music axis (what is made and performed) — a seam-level name of its own. `aoide.layout` sits at the same seam, theme's structural sibling: theme is the song's DRESS (palette · base16 · component tiers · geometry · fonts · cover), layout is its STRUCTURE — which widget/surface TYPES a song brings into existence (`modules/nucleus/options.nix`), stored in the same `theme.json` and read under the same closed paint-read whitelist (`AGENTS.md` house rule 5).
 
 ## How it all flows
 
@@ -86,8 +86,8 @@ One loop, in the vocabulary:
 
 1. **Melete practices.** The agent writes — a new song, a new dendrite branch, a new widget — entering through a door, landing in the audit log.
 2. **The walker freezes.** The nix layer picks up what was written by accretion; the score now contains it.
-3. **Rehearsal sounds it.** Before any rebuild, the live side performs the livery from `stage/livery.json` — quickshell surfaces and hyprctl repaint in place, the frozen side untouched.
-4. **The gate records it.** On human admission, the rehearsed state bakes through the stylix lane and the compositor, committed to the clone. Rehearsal and recording derive from the same livery, so they cannot disagree.
+3. **Rehearsal sounds it.** Before any rebuild, the live side performs the theme from `stage/theme.json` — quickshell surfaces and hyprctl repaint in place, the frozen side untouched.
+4. **The gate records it.** On human admission, the rehearsed state bakes through the stylix lane and the compositor, committed to the clone. Rehearsal and recording derive from the same theme, so they cannot disagree.
 5. **Mneme remembers.** The liner and rices take the design decisions, the wiki takes the architecture; the next practice session starts from memory.
 6. **Aoide sings.** The desktop is the sum of frozen score and live performance, and the loop starts again.
 
@@ -100,6 +100,6 @@ Because agents read this system as much as humans do. A consistent metaphor is c
 
 - [[Song-Vocabulary]] — the performed half, term by term
 - [[Snowflake-Anatomy]] — the frozen half, layer by layer
-- [[livery]] — the seam where they meet
+- [[theme]] — the seam where they meet
 - [[Melete]] · [[Mneme]] — the other two Muses
 - [[Governance]] · [[Rebuild-Gate]] — the gate and the policy

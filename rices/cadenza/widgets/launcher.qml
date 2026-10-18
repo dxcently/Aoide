@@ -25,7 +25,7 @@ import "Kit.js" as Kit
 PanelWindow {
     id: root
 
-    required property var livery
+    required property var theme
     required property var bridge
     property var clipboard: null
     property var ledger: null
@@ -80,7 +80,7 @@ PanelWindow {
         anchors.fill: parent
         focus: true
         Component.onCompleted: setSource(Kit.helper("LauncherBody"), {
-            livery: Qt.binding(() => root.livery),
+            theme: Qt.binding(() => root.theme),
             bridge: Qt.binding(() => root.bridge),
             clipboard: Qt.binding(() => root.clipboard),
             ledger: Qt.binding(() => root.ledger),

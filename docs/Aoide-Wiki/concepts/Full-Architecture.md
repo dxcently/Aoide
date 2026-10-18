@@ -14,7 +14,7 @@ seams, then drill into the linked pages for detail.
 
 The organizing thesis (see [[Song-Vocabulary]]): architecture is frozen music.
 The **frozen half** is the nix layer — the score. The **performed half** is the
-running desktop — the performance. **livery** is the one seam where they meet.
+running desktop — the performance. **theme** is the one seam where they meet.
 
 ## Status — running live on yomi-strix
 
@@ -29,7 +29,7 @@ stays in the systemd-boot menu as the rollback. Every subsystem below is
 marked on one of three rungs:
 
 - **Implemented** — real code paths: the flake/constructor/checks layer, the
-  option contract, the livery plumbing, the CLI trunk + MCP façade, the daemon
+  option contract, the theme plumbing, the CLI trunk + MCP façade, the daemon
   and bridge skeletons, the paint dendrites, song replay, the launcher, the
   gadget dock.
 - **Stubbed** — the mutating CLI commands (`rice declare/transpose`,
@@ -38,7 +38,7 @@ marked on one of three rungs:
   (`rice lint`/`rice stage`/`rice compose`/the `rice draft` group are real —
   see [[Self-Ricing]]. There is no `rice gen`: cut outright, not stubbed —
   see [[aoide-cli]].)
-- **Future** — v1 livery tiers, `rice declare`/`rice transpose` (still
+- **Future** — v1 theme tiers, `rice declare`/`rice transpose` (still
   stubs), the network-exposed Aoide connector.
 
 The repo tracks a git remote (`origin`). File-level detail lives in
@@ -55,13 +55,13 @@ The repo tracks a git remote (`origin`). File-level detail lives in
    │  hosts    rices       │        │  notifications  widgets           │
    └──────────────┬───────────────┘        └───────────────┬──────────────────┘
                   │                                         │
-                  └──────────────►  Livery   ◄──────────────┘
+                  └──────────────►  Theme   ◄──────────────┘
                                    the only seam
                         values frozen into the crystal,
                              sounded at runtime
 ```
 
-Everything below is one of these two halves, or the livery seam, or the agent
+Everything below is one of these two halves, or the theme seam, or the agent
 control plane that drives them.
 
 ## Master map — how the subsystems connect
@@ -74,7 +74,7 @@ trail but exit 64 today.
 of the data flow, labeled `aoide` throughout for readability. Ownership
 (`CONTRACTS.md` §3, [[Package-Layout]]): the AGENT INTERFACE/`aoided`/CONTENT
 PIPELINE/NIX EVAL boxes are `aoide`'s (81 commands: conducting/orchestration
-is aoide's identity); the RICE ENGINE, LIVERY, Quickshell, and shellbridge
+is aoide's identity); the RICE ENGINE, THEME, Quickshell, and shellbridge
 boxes below them are `strillix`'s (48 commands, its own schema and dispatch,
 routed through the desktop, not through `aoided`'s CLI trunk).
 
@@ -97,25 +97,25 @@ routed through the desktop, not through `aoided`'s CLI trunk).
        ▼                       ▼                         ▼
   RICE ENGINE            CONTENT PIPELINE (stub)   NIX EVAL + REBUILD
   [[Self-Ricing]]        [[Content-Pipeline]]      [[Snowflake-Anatomy]]
-   livery·song/        discover→…→query          walker: modules/ +
+   theme·song/        discover→…→query          walker: modules/ +
    (lint/stage real)           │                    rices/
        │                       ▼                         │
        ▼                  index (points in           resolves
   rices/<song>     place, never copies)          │
-  rice.nix + livery.json                                 ▼
+  rice.nix + theme.json                                 ▼
   rices/ (write-back)                          ┌─────────────┐
-       │                                          │  Livery   │  aoide.livery — one source
-       └───────────────────────────────────────► └──────┬──────┘  [[livery]]
+       │                                          │  Theme   │  aoide.theme — one source
+       └───────────────────────────────────────► └──────┬──────┘  [[theme]]
                                     two fan-outs         │
                        ┌─────────────────────────────────┴───────────────┐
                        ▼ (rehearsal / live)                (recording / baked) ▼
-        livery emit {stage · hyprctl · osc}      rice.nix → dendrites + [[Stylix]]
+        theme emit {stage · hyprctl · osc}      rice.nix → dendrites + [[Stylix]]
           │              │            │                               │
           ▼              ▼            ▼                               ▼
-  $STRILLIX_ROOT/stage/livery.json hyprctl    terminal OSC        hyprland.conf · QML colors ·
+  $STRILLIX_ROOT/stage/theme.json hyprctl    terminal OSC        hyprland.conf · QML colors ·
           │              keywords   (color inject)      base16 for every nix app
           ▼
-   Quickshell — LiveryState.qml watches the stage file (hot-reload)
+   Quickshell — ThemeState.qml watches the stage file (hot-reload)
    [[Quickshell]]
       │  ▲
       │  └── reads state/stage/{sessions,hooks,graph}.json (roster + DAG surfaces)
@@ -138,34 +138,34 @@ the implemented/stubbed ladder.
 | [[aoided]]           | CLI+MCP operations; desktop events             | audit log (`$AOIDE_ROOT/log`); default-deny event bus   | implemented (skeleton)                     |
 | [[Self-Ricing]]      | prompt/wallpaper; `rices/`; shipped standard | `rices/<song>/`; rices append; stage    | mostly real (`transpose` exit 64) |
 | [[Content-Pipeline]] | folders + manifests; Mneme API                 | in-place index; quarantine on lint fail             | stubbed (all commands exit 64)                |
-| [[livery]]         | `aoide.livery` (palette + component tiers)   | `/stage/livery.json`; baked dendrites + Stylix   | implemented (v0)                           |
+| [[theme]]         | `aoide.theme` (palette + component tiers)   | `/stage/theme.json`; baked dendrites + Stylix   | implemented (v0)                           |
 | [[shellbridge]]      | unix-socket commands; Hyprland IPC             | atomic JSON in `state/stage/` (conducting) + `/stage/` (rice); `hyprctl` dispatch    | implemented (accept loop live: `focuswindow`) |
-| [[Quickshell]]       | `state/stage/*.json` (sessions/hooks/graph/herald) + `/stage/*.json` (livery/mode)  | widget socket commands; rendered surfaces            | implemented (9 real surfaces)              |
+| [[Quickshell]]       | `state/stage/*.json` (sessions/hooks/graph/herald) + `/stage/*.json` (theme/mode)  | widget socket commands; rendered surfaces            | implemented (9 real surfaces)              |
 | [[Hyprland]]         | baked config + `hyprctl` keywords              | IPC event/state socket                              | implemented                                |
 | [[Stylix]]           | base16 synthesized from the v0 palette         | themed config for every nix app                     | implemented (stands down on owned surfaces) |
 
-## The livery seam in detail — one source, two fan-outs, zero drift
+## The theme seam in detail — one source, two fan-outs, zero drift
 
 Why preview and adopted state can never diverge: both derive from the same
-`aoide.livery` values. The livery schema v0 (palette `bg/fg/accent/urgent` + component
+`aoide.theme` values. The theme schema v0 (palette `bg/fg/accent/urgent` + component
 tiers `bar`/`notif`/`window`, each field `null` → palette, with the fallback
 applied **in the paint dendrites**) rides the external W3C design-tokens container
-format; [[livery]] (native Rust in `crates/strillix-rice/src/livery/`; commands `lint` /
-`resolve` / `emit {stage,hyprctl,osc,file}`) is the engine. See [[livery]].
+format; [[theme]] (native Rust in `crates/strillix-rice/src/theme/`; commands `lint` /
+`resolve` / `emit {stage,hyprctl,osc,file}`) is the engine. See [[theme]].
 
 ```
-                     aoide.livery  (palette → component, v0)
+                     aoide.theme  (palette → component, v0)
                            │  single source of truth
              ┌─────────────┴──────────────┐
              ▼ REHEARSAL (live, uncommitted) ▼ RECORDING (adopted, committed)
-   livery emit                    rice.nix ──► dendrites + Stylix
-   ├─ stage: $STRILLIX_ROOT/stage/livery.json          │   (values baked at nix build)
+   theme emit                    rice.nix ──► dendrites + Stylix
+   ├─ stage: $STRILLIX_ROOT/stage/theme.json          │   (values baked at nix build)
    │         (atomic write; fully resolved)  ▼
    ├─ hyprctl: keyword dispatch         every nix-manageable target
    └─ osc: terminal color inject        GTK/Qt · terminal · editors
              │                          · browser · boot  (needs rebuild)
              ▼
-   Quickshell hot-reload (LiveryState.qml)
+   Quickshell hot-reload (ThemeState.qml)
 ```
 
 Rehearsal is the sketch (hot-reloads, no rebuild); recording is the truth
@@ -180,7 +180,7 @@ The baked side is carried by three paint dendrites, all real:
   `$AOIDE_ROOT/run/qml/` (default `~/.aoide/run/qml/`) via home-manager
   activation (source stays
   `pkgs/strillix-shell/qml/`; no `qml/` at the repo root);
-  `LiveryState.qml` watches the stage file for the live fan-out. Eight of
+  `ThemeState.qml` watches the stage file for the live fan-out. Eight of
   the nine carry a live QML body: `AoideBar.qml` is the bar (its own popouts
   also carry the calendar and now-playing gadgets); `AoideLauncher.qml` is
   the keyboard-driven launcher (`SUPER+SPACE`); `AoideNotifications.qml` is
@@ -190,12 +190,12 @@ The baked side is carried by three paint dendrites, all real:
   holding four core gadgets (Conductor, Terminals, Meters, Power) plus an
   opt-in Usage stele, a left-edge panel that peeks its fore-edge and opens
   fully on hot-edge hover or
-  `SUPER+G`, all livery-themed; osd, lockscreen, greeter, and wallpaper
+  `SUPER+G`, all theme-themed; osd, lockscreen, greeter, and wallpaper
   round out the set. `sessionGraph` remains declared but has no QML body —
   the DAG is rendered via bare `aoide graph`/`aoide conductor`, not a desktop
   overlay ([[Session-Graph]]).
 - **compositor** — [[Hyprland]]; the system layer holds session/portal wiring,
-  the home-manager layer owns `hyprland.conf` with livery baked at build and
+  the home-manager layer owns `hyprland.conf` with theme baked at build and
   live-patched via `hyprctl` during rehearsal. The greeter lane logs in
   through ly, or through greetd with the declared song's Quickshell face.
 - **stylix** — [[Stylix]]; a base16 scheme synthesized from the v0 palette,
@@ -207,10 +207,10 @@ are real flake checks.
 
 ## The rice loop — where the agent writes
 
-The self-ricing lifecycle overlays the map above: it produces livery, stages
+The self-ricing lifecycle overlays the map above: it produces theme, stages
 through the live fan-out, drafts let it iterate without committing, and only
 `declare` commits through the gate. See [[Self-Ricing]]. Today `declare` and
-`transpose` are exit-64 stubs; `rice lint` (native `livery::lint`), `rice
+`transpose` are exit-64 stubs; `rice lint` (native `theme::lint`), `rice
 stage`, `rice compose`, and the `rice draft`/`rice mode` groups are real.
 There is no `rice gen` — cut outright, not stubbed. `rice stage` refuses
 with `declarative-mode-locked` while `rice mode declarative` is locked (the
@@ -221,7 +221,7 @@ default) — see [[Self-Ricing#Staging vs Declarative Mode]].
         │   scaffolds a new song, reading rices/ (cross-cutting +
         │   the song's own design/) FIRST
         ▼
-  rice mode stage <name>   ──►  $STRILLIX_ROOT/stage/livery.json  ──►  Quickshell hot-reload
+  rice mode stage <name>   ──►  $STRILLIX_ROOT/stage/theme.json  ──►  Quickshell hot-reload
         │              (hyprctl/OSC dispatch not yet wired into stage)
         ▼              (REHEARSAL — nothing committed)
   edit the song's files
@@ -229,8 +229,8 @@ default) — see [[Self-Ricing#Staging vs Declarative Mode]].
   rice lint   ──fail──►  reject + rices note
         │ pass
         ▼
-  rice mode draft <draft-name>   ──►  ROUTES $STRILLIX_ROOT/stage/livery.json (symlink) into
-        │   rices/<song>/drafts/<draft-name>/livery.json — forks it from
+  rice mode draft <draft-name>   ──►  ROUTES $STRILLIX_ROOT/stage/theme.json (symlink) into
+        │   rices/<song>/drafts/<draft-name>/theme.json — forks it from
         │   the current stage if new. Every further write (rice stage, a hand-edit)
         │   lands DIRECTLY in the draft file; no save step. Not committed —
         │   durable scratch; switch with another `rice mode draft <name>`.
@@ -259,13 +259,13 @@ other upstream-owned tree (nucleus, dendrites): upstream MAY still update or
 iterate on it. Every OTHER song — anything composed via `rice compose`
 under a different name — is clone-owned; upstream never touches it, an
 absolute guarantee unchanged by `sonata` being both shipped and actively
-iterated. The song carries livery only; the host is the
+iterated. The song carries theme only; the host is the
 venue — its specifics and which instruments (dendrites) are enabled.
 Replay = same song, new venue (one line in `hosts/<host>/default.nix`);
 transpose = new key, same venue. The `rice-shape` check asserts the rices's
 shape: no stray `.nix` outside a song's `rice.nix`/`_widgets/`, no `../`
 path literal in a song's `.nix` text, and every song carrying both `rice.nix`
-and `livery.json`; song shape v0 is `CONTRACTS.md §5`. Full
+and `theme.json`; song shape v0 is `CONTRACTS.md §5`. Full
 replay treatment: [[Song-Vocabulary#Replay — any song, any host]].
 
 Changes outside `song/` land only on a lane the User ordered, its scope named;
@@ -370,7 +370,7 @@ conducting orchestration is `aoide`'s identity, painting is `strillix`'s:
   (`lint`, `stage`, `compose`, the 3-command `rice draft` group, the
   4-command `rice mode` group, the 5-command `rice take` rehearsal-snapshot
   group, `rice back`, `declare`; `transpose` is the 1 stub), `cover set`,
-  the 3-command `livery` group (`lint`/`resolve`/`emit`
+  the 3-command `theme` group (`lint`/`resolve`/`emit`
   — the native design-token engine), `element seed` (renders a song's
   committed `elements/*/element.json` into `run/elements/`), `shellbridge`,
   the 2-command `quickshell` group (`reload` — the Quickshell IPC hot-reload
@@ -409,10 +409,10 @@ and `aoide-usage` (gated on `aoide.usage.enable`) units, and the
 session.
 Live state lands in two stage trees under the runtime root (`$AOIDE_ROOT`,
 default `~/.aoide`), split by owner: `/stage/*.json`
-(livery, mode, cover — rice/paint staging) and `state/stage/*.json`
+(theme, mode, cover — rice/paint staging) and `state/stage/*.json`
 (sessions, hooks, projects, graph, herald, pending — the [[Session-Graph]]
 DAG layer's own conducting files). Beside them, the strillix lane's
-activation seed publishes `/declared/livery.json`, the venue's read-only
+activation seed publishes `/declared/theme.json`, the venue's read-only
 statement of the declared song, and `/declared/venue.json`, the slots the
 venue recolours and the geometry the host sets (CONTRACTS §4). `lib/aoideos.nix`'s constructor
 injects `pkgs.aoide` by overlay from the **same**
@@ -471,7 +471,7 @@ for the layer anatomy, [[Codebase]] for file-level detail):
 ├── pkgs/            aoide/ (Rust workspace, two binaries — aoide/aoided core +
 │                    strillix paint), strillix-shell/ (the QML skeleton), strillix-rices/
 │                    (the shipped templates), see [[Package-Layout]]
-├── song/            rices/<song>/ (per song: rice.nix · livery.json ·
+├── song/            rices/<song>/ (per song: rice.nix · theme.json ·
 │                    palette/ · sounds/ · icons/ · widgets/ · design/) ·
 │                    covers/ — shared wallpaper library ·
 │                    rices/learnings.md · rices/update-playbook.md
@@ -495,7 +495,7 @@ override being unset. `rices/**` in the checkout is
 versioned score, legitimately walked at eval.
 
 `hosts/` knows dendrites; dendrites never know hosts. Paint lanes read only
-`aoide.livery`, `aoide.arrangement` and `aoide.surfaces` plus the core scalars
+`aoide.theme`, `aoide.layout` and `aoide.surfaces` plus the core scalars
 and the song selection root `AGENTS.md` house rule 5 enumerates; no
 module reads another module.
 The coupling discipline is contractual — the flake's checks (`surface-ownership`,
@@ -511,7 +511,7 @@ headless boot of the assembled stack) fail eval on violation.
 - [[Snowflake-Anatomy]]
 - [[Desktop-Architecture]]
 - [[strillix]]
-- [[livery]]
+- [[theme]]
 - [[Self-Ricing]]
 - [[Content-Pipeline]]
 - [[Agent-Interface]]

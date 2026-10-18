@@ -19,7 +19,7 @@ import Quickshell.Wayland
 // In the deployed tree ($out/qml/, where songs/ sits beside this file) the
 // default relative source resolves with no env needed.
 //
-// terminals.qml declares `livery` AND `bridge` as `required property`
+// terminals.qml declares `theme` AND `bridge` as `required property`
 // (matching the lane original); `shared` and `stagePath` are plain
 // (non-required) properties with their own defaults — dock.qml's own anchor
 // still passes `shared` as a slot extra (`extraProps: ({ shared: root.shared
@@ -45,7 +45,7 @@ ShellRoot {
         }
 
         // stub palette — the warm gold-marble light theme (hex only here)
-        property var stubLivery: QtObject {
+        property var stubTheme: QtObject {
             property string paletteBg:     "#f2ebde"   // pale marble ground
             property string paletteFg:     "#2f2a33"   // dark plum ink
             property string paletteAccent: "#a07414"   // Attic gold
@@ -55,7 +55,7 @@ ShellRoot {
             property string holoBlue:      "#345f81"   // aegean
             property string violet:        "#6f4373"   // murex
 
-            // context-meter helpers — the widget calls livery.ctx* (LiveryState
+            // context-meter helpers — the widget calls theme.ctx* (ThemeState
             // owns the real ones); mirrored here so the stub renders the meter
             // instead of throwing. Same math, verbatim.
             function ctxCeiling(ceiling) { return (ceiling && ceiling > 0) ? ceiling : 200000; }
@@ -79,7 +79,7 @@ ShellRoot {
                 return s + "]";
             }
             function ctxColor(pct, accent) { return pct >= 85 ? paletteUrgent : accent; }
-            // per-workspace note hue — mirrors LiveryState.noteColor (the
+            // per-workspace note hue — mirrors ThemeState.noteColor (the
             // accentSpread cycle; the kimi magic/scratch wsTag work calls
             // this). Same fallback shape: out-of-range ids → paletteAccent.
             function noteColor(id) {
@@ -124,7 +124,7 @@ ShellRoot {
                 var src = Quickshell.env("TERMINALS_WIDGET")
                 if (!src || src === "") src = "songs/sonata/terminals.qml"
                 setSource(src, {
-                    "livery": win.stubLivery,
+                    "theme": win.stubTheme,
                     "bridge": win.stubBridge,
                     "shared": win.stubShared,
                     "stagePath": win.stubStagePath

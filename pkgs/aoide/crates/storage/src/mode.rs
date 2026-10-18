@@ -1,8 +1,8 @@
 //! `stage/mode.json` — whether the rice system is in STAGING mode (hot-load
 //! unlocked: `rice stage`/`cover set` write live), DECLARATIVE mode (nix/
 //! home-manager is the only writer; staging writers refuse), or DRAFT mode
-//! (`stage/livery.json` is a symlink routed into a saved
-//! `rices/<song>/drafts/<name>/livery.json` — every writer that ever
+//! (`stage/theme.json` is a symlink routed into a saved
+//! `rices/<song>/drafts/<name>/theme.json` — every writer that ever
 //! touches the stage lands directly in the draft file, transparently, via
 //! [`crate::fs::atomic_write`]'s symlink-resolving rename) — Self-Ricing's
 //! mode-toggle extension (khoa, 2026-08-14; draft mode, khoa, 2026-08-14).
@@ -57,7 +57,7 @@ pub struct ModeMarker {
     /// field: it is the only durable memory of "what was I staging" that
     /// survives a declarative round-trip, so a bare `rice mode stage` (no
     /// explicit name — the CLI default, never the RICE menu, which names its song) can resolve back to it
-    /// instead of re-reading `stage/livery.json`'s own `"song"` field (which
+    /// instead of re-reading `stage/theme.json`'s own `"song"` field (which
     /// `Declarative` just overwrote to something else). Absent on a fresh
     /// marker or one written before this field existed — callers fall back
     /// to `current_staged_song()` in that cold-start case.

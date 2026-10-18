@@ -33,7 +33,7 @@ aoide-storage = { workspace = true }
 aoide-conduct = { workspace = true }
 aoide-client = { workspace = true }
 aoide-server = { workspace = true }
-# `strillix-rice`/`aoide-screen` (the rice/livery engine and the screen command
+# `strillix-rice`/`aoide-screen` (the rice/theme engine and the screen command
 # family) moved out of core's dependency list at P-A5 of the binary-split
 # workstream — the graphical bundle they back now lives ONLY in `crates/strillix`
 # (docs/architecture/PACKAGE-LAYOUT.md, CONTRACTS.md §3). Core is

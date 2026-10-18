@@ -6,7 +6,7 @@ import "Kit.js" as Kit
 Item {
     id: root
 
-    required property var livery
+    required property var theme
     required property var bridge
 
     readonly property var rig: (Quickshell.env("AOIDE_RIG_BATTERY") || "").split(":")
@@ -49,7 +49,7 @@ Item {
         }
     }
 
-    Use { x: 17; y: 3; props: ({ livery: root.livery, inverted: true, label: "BATT", value: Qt.binding(function () { return root.pct }) }) }
+    Use { x: 17; y: 3; props: ({ theme: root.theme, inverted: true, label: "BATT", value: Qt.binding(function () { return root.pct }) }) }
     Cap { x: 100; y: 24; width: 88; label: root.phase }
     Cap { visible: root.span !== ""; x: 100; y: 41; width: 88; label: root.span }
 }

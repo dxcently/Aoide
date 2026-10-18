@@ -16,12 +16,12 @@ import "Power.js" as Power
 Item {
     id: root
 
-    required property var livery
+    required property var theme
     required property var bridge
     property var shared: null
     property var stagingEngine: null
 
-    readonly property var kit: Kit.make(root.livery)
+    readonly property var kit: Kit.make(root.theme)
 
     implicitHeight: 0
     width: parent ? parent.width : implicitWidth
@@ -62,7 +62,7 @@ Item {
             var baked = Quickshell.env("AOIDE_WALLPAPER") || ""
             try {
                 var d = JSON.parse(text())
-                var applies = !!(d && d.path && (!d.song || d.song === root.livery.songName))
+                var applies = !!(d && d.path && (!d.song || d.song === root.theme.songName))
                 root.coverPath = applies ? "" + d.path : baked
                 root.coverTile = applies && d.pick === true && d.tile === true
             } catch (e) { root.coverPath = baked; root.coverTile = false }
@@ -1268,7 +1268,7 @@ Item {
         function make(c) {
             if (c.status === Component.Error) console.warn("[barcarolle] DesktopGadgets:", c.errorString())
             else if (c.status === Component.Ready)
-                c.createObject(gadgets, { livery: root.livery, bridge: root.bridge, stagingEngine: root.stagingEngine, bar: win })
+                c.createObject(gadgets, { theme: root.theme, bridge: root.bridge, stagingEngine: root.stagingEngine, bar: win })
         }
         Component.onCompleted: {
             var c = Qt.createComponent(Kit.helper("DesktopGadgets"))
@@ -1939,7 +1939,7 @@ Item {
         Flyout {
             name: "action"
             cell: flag
-            gate: !!root.stagingEngine && root.stagingEngine.resolveSong(root.livery.songName, "herald-center") !== ""
+            gate: !!root.stagingEngine && root.stagingEngine.resolveSong(root.theme.songName, "herald-center") !== ""
             implicitWidth: acRim.width
             implicitHeight: acRim.height + 6
             Rim {
@@ -1950,7 +1950,7 @@ Item {
                     id: acBody
                     x: 7
                     y: 7
-                    livery: root.livery
+                    theme: root.theme
                     bridge: root.bridge
                     stagingEngine: root.stagingEngine
                     slot: "herald-center"
@@ -2397,15 +2397,15 @@ Item {
                     property var riceAnswer: null
                     property int riceAsked: 0
                     property bool ricePending: false
-                    readonly property string riceKey: root.livery.riceMode + "/" + root.livery.songName + "/" + ((root.livery.modeRaw && root.livery.modeRaw.draft) || "")
+                    readonly property string riceKey: root.theme.riceMode + "/" + root.theme.songName + "/" + ((root.theme.modeRaw && root.theme.modeRaw.draft) || "")
                     onRiceKeyChanged: sm.ricePending = false
                     Timer { interval: 10000; running: sm.ricePending; onTriggered: sm.ricePending = false }
-                    readonly property var stageRows: sm.ricePending ? [Rice.waiting(null)] : Rice.switchRows(sm.riceAnswer, root.livery.riceMode)
+                    readonly property var stageRows: sm.ricePending ? [Rice.waiting(null)] : Rice.switchRows(sm.riceAnswer, root.theme.riceMode)
                     readonly property var draftRows: sm.ricePending || !Rice.ready(sm.riceAnswer) ? [] : [{
                         head: "drafts" + (sm.riceAnswer.draftsSong ? " · " + sm.riceAnswer.draftsSong : ""),
                         label: "", mark: "", live: false, kind: "", name: "", here: false
-                    }].concat(Rice.draftRows(sm.riceAnswer), [Rice.newDraft(), Rice.saveDraft(root.livery.riceMode),
-                        Rice.declareRow(sm.riceAnswer, root.livery.riceMode, !!root.bridge && typeof root.bridge.riceDeclare === "function")])
+                    }].concat(Rice.draftRows(sm.riceAnswer), [Rice.newDraft(), Rice.saveDraft(root.theme.riceMode),
+                        Rice.declareRow(sm.riceAnswer, root.theme.riceMode, !!root.bridge && typeof root.bridge.riceDeclare === "function")])
                     function stage() {
                         sm.powerOpen = false
                         sm.ctxRow = null
@@ -3216,7 +3216,7 @@ Item {
         }
         WidgetSlot {
             id: riceSlot
-            livery: root.livery
+            theme: root.theme
             bridge: root.bridge
             stagingEngine: root.stagingEngine
             slot: "ricemode"

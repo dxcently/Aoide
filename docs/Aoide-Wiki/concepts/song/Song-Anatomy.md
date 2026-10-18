@@ -37,7 +37,7 @@ machine's undo history and scratch, which stay behind) — no `git add`, no rebu
 | Subfolder | Role | Tree | Written by |
 |---|---|---|---|
 | `rices/` (checkout) | per-song homes + cross-cutting design memory | committed score | song agent |
-| `/stage/` | live preview state — the seam the desktop reads | runtime (`$AOIDE_ROOT`) | [[livery]] · `strx rice` · QML |
+| `/stage/` | live preview state — the seam the desktop reads | runtime (`$AOIDE_ROOT`) | [[theme]] · `strx rice` · QML |
 | `rices/<name>/` | the composed host rices | runtime (`$AOIDE_ROOT`) | `strx rice compose` |
 | `rices/<song>/drafts/` | saved drafts | runtime (`$AOIDE_ROOT`) | `strx rice draft save` |
 
@@ -72,8 +72,8 @@ holds:
 
 | Subfolder/file | Holds |
 |---|---|
-| `rice.nix` | a body (`system`: the ten strillix providers and a `module` setting `aoide.livery.*` (palette + base16 + component tiers + geometry + fonts + wallpaper) and `aoide.arrangement.*`; `home`: the `strillix` renderer and `hyprland.conf`). **No** host options, no host capabilities — so one score replays at any venue (`CONTRACTS.md §5`, [[Song-Vocabulary#Replay — any song, any host]]). The wallpaper note points at a file in the shared `/covers/` library (`../../covers/<file>`), not a per-song `assets/` dir. |
-| `livery.json` | the song's resolved livery values — the [[livery]] schema: `palette`, `polarity`, `base16`, `bar`/`notif`/`window`, `geometry`. The baked-only tiers (`wallpaper`, `fonts`) live in `rice.nix` alone and have no twin here — a convention, not a gate: the schema never walks a document's top-level keys, so a stray copy would pass `rice lint` and ride the activation seed into the stage file unread. |
+| `rice.nix` | a body (`system`: the ten strillix providers and a `module` setting `aoide.theme.*` (palette + base16 + component tiers + geometry + fonts + wallpaper) and `aoide.layout.*`; `home`: the `strillix` renderer and `hyprland.conf`). **No** host options, no host capabilities — so one score replays at any venue (`CONTRACTS.md §5`, [[Song-Vocabulary#Replay — any song, any host]]). The wallpaper note points at a file in the shared `/covers/` library (`../../covers/<file>`), not a per-song `assets/` dir. |
+| `theme.json` | the song's resolved theme values — the [[theme]] schema: `palette`, `polarity`, `base16`, `bar`/`notif`/`window`, `geometry`. The baked-only tiers (`wallpaper`, `fonts`) live in `rice.nix` alone and have no twin here — a convention, not a gate: the schema never walks a document's top-level keys, so a stray copy would pass `rice lint` and ride the activation seed into the stage file unread. |
 | `palette/` | this song's transpose keys — the palette variants `rice transpose <song> <key>` swaps among |
 | `sounds/` | notification + system sounds (the chimes dimension) |
 | `icons/` | per-song icon overrides |
@@ -125,11 +125,11 @@ the runtime root (`$AOIDE_ROOT`, default `~/.aoide`):
 
 | File | Holds | Written by | Tree |
 |---|---|---|---|
-| `livery.json` | the fully-resolved livery values (colours concrete, no `null`) | [[livery]] `emit stage` / `strx rice stage`, the strillix lane's activation seed (`home.activation.aoideSeedStage`), `strx reload` | `/stage/` |
+| `theme.json` | the fully-resolved theme values (colours concrete, no `null`) | [[theme]] `emit stage` / `strx rice stage`, the strillix lane's activation seed (`home.activation.aoideSeedStage`), `strx reload` | `/stage/` |
 | `cover.json` | the live wallpaper: `{"path": …}` (the song's own DEFAULT) plus `"pick": true` when it is the user's own choice, `"kind": "static"/"video"/"we"` naming what the pick is (a scene carries `"weId"` instead of a path), and, for a picked still, `"tile": true` when it repeats at 1:1 and `"position": "tile"/"fill"` when `cover set --position` forced one | `strx rice stage` (the song's derivable cover), `strx cover set`/`cover set --clear`/`cover set --from-skwd`, `strx rice back` | `/stage/` |
 | `wallpaper-provider` | one word: the name of the SETTER that paints a song's wallpaper here — `quickshell` (the shell's own layer) or a provider of the `wallpaper` capability; absent means `quickshell` | the strillix lane's `home.activation.aoideSeedStage` (it publishes the fact `aoide.wallpaper.provider`) | `/stage/` |
-| `livery.json` | the DECLARED song's notes, venue `aoide.livery.override` and the host's geometry applied, `"song"` naming it — the read-only twin `rice mode declarative` re-pins that song from ([[livery]]) | the strillix lane's `home.activation.aoideSeedStage` | `/declared/` |
-| `venue.json` | the slots the venue's `aoide.livery.override` recolours and the geometry the host sets in the declared song, per tier (`{}` with neither) — what staging lays over the runtime copy of that song ([[livery]]) | the strillix lane's `home.activation.aoideSeedStage` | `/declared/` |
+| `theme.json` | the DECLARED song's notes, venue `aoide.theme.override` and the host's geometry applied, `"song"` naming it — the read-only twin `rice mode declarative` re-pins that song from ([[theme]]) | the strillix lane's `home.activation.aoideSeedStage` | `/declared/` |
+| `venue.json` | the slots the venue's `aoide.theme.override` recolours and the geometry the host sets in the declared song, per tier (`{}` with neither) — what staging lays over the runtime copy of that song ([[theme]]) | the strillix lane's `home.activation.aoideSeedStage` | `/declared/` |
 | `sessions.json` | the agent-session roster (`sessionId, agent, windowAddress, workspace, cwd, state, startedAt`, optional `parentSessionId`) | [[shellbridge]] + `aoide session` | `state/stage/` |
 | `hooks.json` | live Claude Code hook phases | shellbridge + `aoide session` | `state/stage/` |
 | `projects.json` | the project-anchor registry | `aoide project` | `state/stage/` |
@@ -159,7 +159,7 @@ never become load-bearing for the build.
 $AOIDE_FLAKE_ROOT/song/  (dev git checkout — committed score, default ~/Aoide/song)
 ├── rices/            committed songs + cross-cutting design memory
 │   ├── sonata/          the shipped standard — upstream-owned, evolving; a LIGHT Greek key with no cover (a marble ground baked from palette.bg)
-│   │   ├── rice.nix · livery.json
+│   │   ├── rice.nix · theme.json
 │   │   ├── palette/ · sounds/ · icons/ · widgets/ · design/
 │   ├── learnings.md · update-playbook.md   ← sparse today
 ├── covers/              shared wallpaper library — yuki-sonata.png
@@ -167,8 +167,8 @@ $AOIDE_FLAKE_ROOT/song/  (dev git checkout — committed score, default ~/Aoide/
 
 $AOIDE_ROOT/             (runtime root, default ~/.aoide — created on demand)
 ├── song/
-│   ├── stage/           live preview state — livery.json · cover.json · mode.json · grimoire.json
-│   ├── declared/        the declared twin, the venue's slots and geometry, the declared terminal opacity — livery.json · venue.json · terminal-opacity.conf, written by the activation seed; rices/<song>.json, each built-in song's refresh record, written by `strx rice refresh`
+│   ├── stage/           live preview state — theme.json · cover.json · mode.json · grimoire.json
+│   ├── declared/        the declared twin, the venue's slots and geometry, the declared terminal opacity — theme.json · venue.json · terminal-opacity.conf, written by the activation seed; rices/<song>.json, each built-in song's refresh record, written by `strx rice refresh`
 │   └── rices/        composed host rices (rice compose) · <song>/drafts/ (rice draft save)
 ├── state/               conducting state — state/stage/ holds sessions/hooks/projects/graph
 ├── run/qml/             live-deployed QML tree the desktop shell reads
@@ -186,7 +186,7 @@ top-level `song/` dir. The lookup is the Song Map
 - [[Song-Vocabulary]] — the vocabulary these roles are named in
 - [[Snowflake-Anatomy]] — the frozen sibling (`modules/`)
 - [[Self-Ricing]] — the rice loop, rices discipline, and coverage tiers
-- [[livery]] — the engine that resolves/lints/emits the stage file, the `aoide.livery` seam `livery.json` carries
+- [[theme]] — the engine that resolves/lints/emits the stage file, the `aoide.theme` seam `theme.json` carries
 - [[shellbridge]] · [[Session-Graph]] — the writers of the runtime stage files
 - [[Ricing-Protocol]] — the ricing protocol this page's per-song design memory
   supports

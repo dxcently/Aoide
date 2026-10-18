@@ -1,7 +1,7 @@
 //! Live-apply helpers — the compositor and terminal halves of `rice stage`.
 //!
 //! `handle_rice_stage` (dispatch.rs) already hot-reloads the palette by
-//! staging `stage/livery.json`; Quickshell's own FileView watches that file
+//! staging `stage/theme.json`; Quickshell's own FileView watches that file
 //! and needs no compositor call. Geometry (gaps/border-size/rounding/blur)
 //! and the border *colours* have no such watcher on the Hyprland side, so
 //! this module turns the staged notes into a single best-effort
@@ -16,7 +16,7 @@
 //! crate: only the compositor knows its host's.
 //!
 //! The terminal half (below the compositor functions) renders the staged
-//! terminal file (every colour slot through the livery engine's `kitty`
+//! terminal file (every colour slot through the theme engine's `kitty`
 //! emitter, plus a `background_opacity` only when the song has an opinion)
 //! and tells every open kitty over its control socket to reload its own
 //! config, which includes that file. The
@@ -27,7 +27,7 @@
 //! hyprlock dress, which nothing pushes: hyprlock reads its config afresh on
 //! every lock. Its writer is `commands::rice::stage_lockscreen`.
 
-use crate::livery::schema;
+use crate::theme::schema;
 use serde_json::Value;
 
 /// Build the `hyprctl keyword …` list for one staged notes document, in the
@@ -325,7 +325,7 @@ pub fn terminal_opacity(notes: &Value) -> Option<f64> {
         .and_then(schema::terminal_opacity_value)
 }
 
-/// Render the staged terminal file one notes document implies: the livery
+/// Render the staged terminal file one notes document implies: the theme
 /// engine's `kitty` emitter (every colour slot), then a `background_opacity`
 /// line from [`terminal_opacity`] only for a song with an opinion. The file
 /// is the last include of kitty.conf, so a line here beats the declared
@@ -333,8 +333,8 @@ pub fn terminal_opacity(notes: &Value) -> Option<f64> {
 /// when the notes don't resolve (a torn or reference-cyclic notes file) — the
 /// caller leaves the previous file in place rather than writing a guess.
 pub fn terminal_colors(notes: &Value) -> Option<String> {
-    let r = crate::livery::resolve(notes).ok()?;
-    let mut out = crate::livery::emit::kitty::emit_kitty(&r);
+    let r = crate::theme::resolve(notes).ok()?;
+    let mut out = crate::theme::emit::kitty::emit_kitty(&r);
     if let Some(o) = terminal_opacity(notes) {
         out.push_str(&format!("background_opacity {o}\n"));
     }
@@ -347,7 +347,7 @@ pub fn terminal_colors(notes: &Value) -> Option<String> {
 pub const LOCKSCREEN_FILE: &str = "hyprlock.conf";
 
 /// Render the staged lock-screen dress one notes document implies, through the
-/// livery engine's `hyprlock` emitter. `image` is the song's own lock picture
+/// theme engine's `hyprlock` emitter. `image` is the song's own lock picture
 /// ([`crate::cover::lockscreen_image`]): without one the song dresses nothing
 /// and the notes are not even read, so a song that ships no picture always
 /// clears what an earlier staged song left. `Err` carries the reason the
@@ -355,10 +355,10 @@ pub const LOCKSCREEN_FILE: &str = "hyprlock.conf";
 /// previous file in place rather than writing a guess.
 pub fn lockscreen_fragment(notes: &Value, image: Option<&std::path::Path>) -> Result<String, String> {
     if image.is_none() {
-        return Ok(crate::livery::emit::hyprlock::NO_DRESS.to_string());
+        return Ok(crate::theme::emit::hyprlock::NO_DRESS.to_string());
     }
-    let r = crate::livery::resolve(notes).map_err(|e| e.to_string())?;
-    crate::livery::emit::hyprlock::emit_hyprlock(&r, image).map_err(|e| e.to_string())
+    let r = crate::theme::resolve(notes).map_err(|e| e.to_string())?;
+    crate::theme::emit::hyprlock::emit_hyprlock(&r, image).map_err(|e| e.to_string())
 }
 
 /// Every kitty control socket under `runtime_dir`: entries named
@@ -852,7 +852,7 @@ mod tests {
 
         // No picture: nothing, whatever the notes are — even notes that
         // cannot resolve clear a previously staged dress.
-        let nothing = crate::livery::emit::hyprlock::NO_DRESS;
+        let nothing = crate::theme::emit::hyprlock::NO_DRESS;
         assert_eq!(lockscreen_fragment(&notes, None).as_deref(), Ok(nothing));
         let torn = json!({ "palette": { "bg": "{palette.bg}" } });
         assert_eq!(lockscreen_fragment(&torn, None).as_deref(), Ok(nothing));

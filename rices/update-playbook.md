@@ -1,35 +1,35 @@
 # Rices update playbook
 
 Referenced by `CONTRACTS.md` §5. Practical steps for authoring/updating a
-song — its livery, plus the slots the staging engine resolves for it.
+song — its theme, plus the slots the staging engine resolves for it.
 
 ## Song bodies (v0 to v1: `rice.nix` as a body)
 
 A song's `rice.nix` is an attrset, the body the constructor reads as data:
-`system` (the paint: the ten `strillix` providers and the `module` of livery and
-arrangement) and `home` (the `strillix` renderer and `rice.hyprland.conf`). This is
+`system` (the paint: the ten `strillix` providers and the `module` of theme and
+layout) and `home` (the `strillix` renderer and `rice.hyprland.conf`). This is
 the migration of a v0 song (`CONTRACTS.md` §5, "Enforcement"), and the step list
 for a new song is the same:
 
 1. Write `rice.nix` as the body in the shape `rices/sonata/rice.nix` has
    (or `pkgs/aoide/crates/strillix-rice` scaffolds with `aoide rice compose`).
 2. Put the palette, polarity, window and geometry in `system.module`, under
-   `aoide.livery`, all inside one `config = lib.mkDefault { … };`. Nothing else
-   in the `module` but `aoide.livery` and `aoide.arrangement`.
+   `aoide.theme`, all inside one `config = lib.mkDefault { … };`. Nothing else
+   in the `module` but `aoide.theme` and `aoide.layout`.
 3. Keep the ten providers in `system.providers` as `"strillix"` (or a provider a
    consumer adds). Keep `home.members = [ "strillix" ]`.
 4. Write `hyprland.conf` beside it: the binds, unbinds, layout and animations.
    An empty file (a header only) is valid. The gaps, rounding, borders, blur
-   and colours are the livery's: `checks.rice-shape` refuses them in this file.
+   and colours are the theme's: `checks.rice-shape` refuses them in this file.
 5. Name the song's module arguments by what they are: `lib` (for `lib.mkDefault`),
    `song` and `borrow`, and `pkgs` only when used. `{ lib, ... }:` is the usual
-   shape for a module that sets only livery.
+   shape for a module that sets only theme.
 6. Remove any self-gate: a body is read only when its song is performed, so
    `config.aoide.rice == "<name>"` has no place in it.
 7. Run `checks.rice-shape` (`nix build .#checks.x86_64-linux.rice-shape`) and
    `tests/selection/run.sh`.
 
-The `livery.json` beside the body is the same values as a hand- or agent-
+The `theme.json` beside the body is the same values as a hand- or agent-
 maintained JSON file, kept in sync with `system.module`, not derived from it.
 
 A song's `rice.nix` is handed two things by ARGUMENT and never by a path
@@ -52,7 +52,7 @@ what happened to the pair this section used to name. Read the catalog, then
 come back here for the steps. To dress a slot:
 
 1. Create `rices/<name>/widgets/<slot>.qml`.
-2. Declare the fixed injected-prop contract: `required property var livery`
+2. Declare the fixed injected-prop contract: `required property var theme`
    and `required property var bridge` (even if `bridge` goes unused — every
    song widget carries both, so the resolver's creation-time property
    assignment always has somewhere to put them). A slot may also receive
@@ -62,10 +62,10 @@ come back here for the steps. To dress a slot:
    host instead of reporting a footprint binds `width`/`height` to `parent`
    directly; `sonata/widgets/bar.qml` documents why the anchor cannot do this
    for you.
-4. Colour **only** from `livery.*` roles (`paletteBg/Fg/Accent/Urgent/Hot`,
+4. Colour **only** from `theme.*` roles (`paletteBg/Fg/Accent/Urgent/Hot`,
    the `base16`-derived accents) — never a hardcoded hex, so the widget stays
    correct if the song's palette changes later.
-5. Nothing else is reachable: a widget sees `livery` + `bridge` (+ declared
+5. Nothing else is reachable: a widget sees `theme` + `bridge` (+ declared
    extras) only, never nix `config.*` (CONTRACTS.md §5 containment).
 
 **Every bar embeds `ricemode`.** The rice-mode control is one slot, and every
@@ -96,8 +96,8 @@ which song is *active* live with:
 aoide rice preview <name>
 ```
 
-This stages `<name>`'s `livery.json` (with `song` injected) into
-`/stage/livery.json`; `LiveryState.qml` hot-reloads it, and every
+This stages `<name>`'s `theme.json` (with `song` injected) into
+`/stage/theme.json`; `ThemeState.qml` hot-reloads it, and every
 `WidgetSlot` re-resolves against the new `songName` — a song's slot bodies
 swap with no restart, exactly like its colours do.
 
@@ -106,22 +106,22 @@ What an unauthored slot falls back to is per-slot, and the catalog's
 song's own file, else sonata's (the shipped baseline), else — `WidgetSlot`
 only — the anchor's lane-side `fallback` Component, else nothing rendered.
 
-## Migration — the livery rename
+## Migration — the theme rename
 
-The livery merge (LIVERY-MERGE.md) renamed the note engine and its whole
+The theme merge (THEME-MERGE.md) renamed the note engine and its whole
 surface. The schema shape is unchanged (still v0 — no version bump), so this
 was a namespace/file rename, not a content migration:
 
-- **Option namespace:** the option namespace moved to `aoide.livery.*`. A
+- **Option namespace:** the option namespace moved to `aoide.theme.*`. A
   `lib.mkRenamedOptionModule` alias in `modules/nucleus/options.nix` kept any
   out-of-tree host or stale rices `rice.nix` that still set the old name
   evaluating during the transition; the alias was dropped when Phase 4 closed
   the window.
-- **Rices data file:** the per-song livery file is now
-  `rices/<song>/livery.json`.
-- **Live stage file:** `/stage/livery.json` is canonical. During the
+- **Rices data file:** the per-song theme file is now
+  `rices/<song>/theme.json`.
+- **Live stage file:** `/stage/theme.json` is canonical. During the
   transition window writers mirrored to a legacy stage name and readers fell
-  back to it when `livery.json` was absent, so a running desktop never read a
+  back to it when `theme.json` was absent, so a running desktop never read a
   missing stage file; the mirror + fallback were dropped when Phase 4 closed
   the transition window.
 

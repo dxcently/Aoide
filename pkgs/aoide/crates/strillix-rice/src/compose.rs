@@ -11,7 +11,7 @@
 use aoide_storage::fs::STRILLIX_SHELL_SRC;
 use serde_json::Value;
 
-use crate::livery::schema::{POLARITY_DEFAULT, POLARITY_VALUES};
+use crate::theme::schema::{POLARITY_DEFAULT, POLARITY_VALUES};
 
 /// A valid `rice compose` song name: `^[a-z0-9][a-z0-9-]*$`. This one check
 /// also rejects path traversal (`..`, `/`) and case/underscore variance by
@@ -86,7 +86,7 @@ pub const STRILLIX_SLOTS: &[&str] = &[
 
 /// Render one `rice.nix` for `rice compose`: a song body (CONTRACTS.md §5,
 /// song shape v1) — the `system` half selects the ten `strillix` providers and
-/// sets the livery copied from `notes` (palette, polarity, window, geometry),
+/// sets the theme copied from `notes` (palette, polarity, window, geometry),
 /// the `home` half selects the `strillix` renderer and names this song's
 /// `hyprland.conf`. `from` is named in each block's comment, so a reader
 /// tells an inherited value from a null fill template.
@@ -151,8 +151,8 @@ pub fn render_rice_nix(name: &str, from: &str, notes: &Value) -> String {
     s.push_str("#\n");
     s.push_str("# A body (CONTRACTS.md §5): habit reads it only when this song is performed\n");
     s.push_str("# or built in. The `system` half selects the paint; the `home` half the renderer.\n");
-    s.push_str("# HOST-AGNOSTIC DISCIPLINE (CONTRACTS.md §5): the song sets ONLY aoide.livery\n");
-    s.push_str("# and aoide.arrangement; its literal values are no reads of song/ or of config.\n");
+    s.push_str("# HOST-AGNOSTIC DISCIPLINE (CONTRACTS.md §5): the song sets ONLY aoide.theme\n");
+    s.push_str("# and aoide.layout; its literal values are no reads of song/ or of config.\n");
     s.push_str("{\n");
     s.push_str("  system = {\n");
     s.push_str("    providers = {\n");
@@ -160,20 +160,20 @@ pub fn render_rice_nix(name: &str, from: &str, notes: &Value) -> String {
     s.push_str("    };\n");
     s.push_str("    module = _: {\n");
 
-    s.push_str("      aoide.livery.palette = {\n");
+    s.push_str("      aoide.theme.palette = {\n");
     s.push_str(&palette_lines);
     s.push_str("      };\n");
 
     s.push_str(&format!("\n      # polarity: light | dark — {polarity_comment}\n"));
-    s.push_str(&format!("      aoide.livery.polarity = \"{polarity}\";\n"));
+    s.push_str(&format!("      aoide.theme.polarity = \"{polarity}\";\n"));
 
     s.push_str(&format!("\n      # {window_comment}\n"));
-    s.push_str("      aoide.livery.window = {\n");
+    s.push_str("      aoide.theme.window = {\n");
     s.push_str(&window_lines);
     s.push_str("      };\n");
 
     s.push_str(&format!("\n      # {geometry_comment}\n"));
-    s.push_str("      aoide.livery.geometry = {\n");
+    s.push_str("      aoide.theme.geometry = {\n");
     s.push_str(&geometry_lines);
     s.push_str("      };\n");
 

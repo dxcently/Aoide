@@ -129,7 +129,7 @@ import "Trace.js" as Trace
 Item {
     id: root
 
-    required property var livery
+    required property var theme
     required property var bridge
     property var shared: null
     property var stagingEngine: null
@@ -140,7 +140,7 @@ Item {
 
     // ── the kit ──────────────────────────────────────────────────────────────
     FontMetrics { id: fm; font: Kit.bodyFont(13) }
-    readonly property var kit: Kit.make(root.livery, fm)
+    readonly property var kit: Kit.make(root.theme, fm)
 
     component Use: Loader {
         required property var kit
@@ -1840,7 +1840,7 @@ Item {
             visible: active
             sourceComponent: Component {
                 WidgetSlot {
-                    livery: root.livery
+                    theme: root.theme
                     bridge: root.bridge
                     stagingEngine: root.stagingEngine
                     slot: "ricemode"

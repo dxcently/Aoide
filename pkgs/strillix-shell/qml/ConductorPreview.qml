@@ -5,8 +5,8 @@ import Quickshell.Wayland
 // Standalone harness to render the sonata conductor temple for a screenshot.
 //   qs -p pkgs/strillix-shell/qml/ConductorPreview.qml
 // Floats a 360x520 overlay surface. Unlike MetersPreview/PowerPreview's stub
-// palette, the roster needs LiveryState's real helpers (ctxPercent/ctxBar/
-// noteColor/elapsedSince), so the harness instantiates the real livery +
+// palette, the roster needs ThemeState's real helpers (ctxPercent/ctxBar/
+// noteColor/elapsedSince), so the harness instantiates the real theme +
 // bridge and a stub `shared`. RosterTemple honours QS_STAGE, so a fixture
 // stage dir can be pointed at to exercise empty/multi-project states:
 //   QS_STAGE=/tmp/stage-fixture qs -p …/ConductorPreview.qml
@@ -22,7 +22,7 @@ import Quickshell.Wayland
 // In the deployed tree ($out/qml/, where songs/ sits beside this file) the
 // default relative source resolves with no env needed.
 //
-// conductor.qml declares `livery` AND `bridge` as `required property`
+// conductor.qml declares `theme` AND `bridge` as `required property`
 // (matching the lane original); `shared` is a plain (non-required)
 // property, defaulting to null — dock.qml's own anchor still passes it as a
 // slot extra (`extraProps: ({ shared: root.shared })`), so this harness
@@ -39,7 +39,7 @@ ShellRoot {
         implicitWidth: 360
         implicitHeight: 520
 
-        LiveryState { id: livery }
+        ThemeState { id: theme }
         ShellBridge { id: bridge }
         QtObject {
             id: sharedStub
@@ -60,7 +60,7 @@ ShellRoot {
             Component.onCompleted: {
                 var src = Quickshell.env("CONDUCTOR_WIDGET")
                 if (!src || src === "") src = "songs/sonata/conductor.qml"
-                setSource(src, { "livery": livery, "bridge": bridge, "shared": sharedStub })
+                setSource(src, { "theme": theme, "bridge": bridge, "shared": sharedStub })
             }
         }
     }

@@ -138,7 +138,7 @@ mod tests {
         git_in(&root, &["init", "-q"]);
         let folder = root.join("rices/dusk");
         std::fs::create_dir_all(folder.join("widgets")).unwrap();
-        std::fs::write(folder.join("livery.json"), "{}").unwrap();
+        std::fs::write(folder.join("theme.json"), "{}").unwrap();
         std::fs::write(folder.join("rice.nix"), "{ }").unwrap();
         git_in(&root, &["add", "-A"]);
         git_in(&root, &["commit", "-qm", "dusk"]);
@@ -156,10 +156,10 @@ mod tests {
     #[test]
     fn an_uncommitted_edit_to_a_tracked_file_is_dirty() {
         let root = repo_with_dusk("gate-tracked");
-        std::fs::write(root.join("rices/dusk/livery.json"), "{\"a\":1}").unwrap();
+        std::fs::write(root.join("rices/dusk/theme.json"), "{\"a\":1}").unwrap();
         match check_folder(&root, "rices/dusk") {
             Err(Blocked::Dirty(lines)) => {
-                assert_eq!(lines, vec![" M rices/dusk/livery.json".to_string()]);
+                assert_eq!(lines, vec![" M rices/dusk/theme.json".to_string()]);
             }
             other => panic!("want Dirty, got {other:?}"),
         }
@@ -184,7 +184,7 @@ mod tests {
         let root = repo_with_dusk("gate-sibling");
         let other = root.join("rices/other");
         std::fs::create_dir_all(&other).unwrap();
-        std::fs::write(other.join("livery.json"), "{}").unwrap();
+        std::fs::write(other.join("theme.json"), "{}").unwrap();
         assert_eq!(check_folder(&root, "rices/dusk"), Ok(()));
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -202,7 +202,7 @@ mod tests {
         let outer = repo_with_dusk("gate-nested");
         let nested = outer.join("nonrepo");
         std::fs::create_dir_all(nested.join("rices/dusk")).unwrap();
-        std::fs::write(nested.join("rices/dusk/livery.json"), "{}").unwrap();
+        std::fs::write(nested.join("rices/dusk/theme.json"), "{}").unwrap();
         git_in(&outer, &["add", "-A"]);
         git_in(&outer, &["commit", "-qm", "nested"]);
         assert_eq!(check_folder(&nested, "rices/dusk"), Err(Blocked::NotARepo));
@@ -231,8 +231,8 @@ mod tests {
     #[test]
     fn a_refusal_names_the_folder_and_its_changes() {
         let root = repo_with_dusk("gate-outcome");
-        std::fs::write(root.join("rices/dusk/livery.json"), "{\"a\":1}").unwrap();
-        let out = Blocked::Dirty(vec![" M rices/dusk/livery.json".into()]).into_outcome(
+        std::fs::write(root.join("rices/dusk/theme.json"), "{\"a\":1}").unwrap();
+        let out = Blocked::Dirty(vec![" M rices/dusk/theme.json".into()]).into_outcome(
             "rice.declare",
             &root,
             "rices/dusk",

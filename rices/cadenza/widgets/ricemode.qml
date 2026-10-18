@@ -23,7 +23,7 @@
 // marked rows only close the menu. In draft mode the drafted song's row is live:
 // it leaves the draft for plain staging.
 // A stage, a declarative, an enter and a new each change what is live, so the
-// word reads a dim `…` and every click is swallowed until livery.riceMode, the
+// word reads a dim `…` and every click is swallowed until theme.riceMode, the
 // draft name or the song changes, or 10s pass: the double click that sent two
 // switches. A `save` changes nothing and holds nothing.
 //
@@ -49,21 +49,21 @@ import "Kit.js" as Kit
 Item {
     id: root
 
-    required property var livery
+    required property var theme
     required property var bridge
 
     readonly property int barH: 28
     readonly property int pickCols: 24
 
     FontMetrics { id: fm; font: Kit.bodyFont(13) }
-    readonly property var kit: Kit.make(root.livery, fm)
+    readonly property var kit: Kit.make(root.theme, fm)
 
     function modeWord(m) { return m === "staging" ? "stg" : (m === "draft" ? "drft" : "decl") }
     function modeColor(m) { return m === "staging" ? root.kit.title : (m === "draft" ? root.kit.path : root.kit.dim) }
 
-    readonly property string mode: root.livery.riceMode || "declarative"
-    readonly property string draft: (root.livery.modeRaw && root.livery.modeRaw.draft) || ""
-    readonly property string song: root.livery.songName
+    readonly property string mode: root.theme.riceMode || "declarative"
+    readonly property string draft: (root.theme.modeRaw && root.theme.modeRaw.draft) || ""
+    readonly property string song: root.theme.songName
     readonly property bool canMenu: !!root.bridge && typeof root.bridge.riceMenu === "function"
 
     property bool pending: false       // a mode change was sent and has not landed

@@ -50,7 +50,7 @@ import "Trace.js" as Trace
 Item {
     id: root
 
-    required property var livery
+    required property var theme
     required property var bridge
 
     // ── preview knobs (WallpaperPreview.qml sets these; the live path never) ─
@@ -63,7 +63,7 @@ Item {
     anchors.fill: parent
 
     FontMetrics { id: fm; font: Kit.bodyFont(13) }
-    readonly property var kit: Kit.make(root.livery, fm)
+    readonly property var kit: Kit.make(root.theme, fm)
 
     readonly property string aoideRoot:
         Quickshell.env("AOIDE_ROOT") || (Quickshell.env("HOME") + "/.aoide")
@@ -73,14 +73,14 @@ Item {
     // ════════════════════════════════════════════════════════════════════════
     // `setSource` with initial properties (bar.qml's `Use` and BarPreview's own
     // loader do exactly this for helpers that declare `required property var
-    // livery`): the props are applied at object creation, which is what a
+    // theme`): the props are applied at object creation, which is what a
     // required property needs. `z: 1` keeps the board under every light item.
     Loader {
         id: cover
         anchors.fill: parent
         z: 1
         Component.onCompleted: setSource(root.kit.helper("CoverPcb"), {
-            livery: root.livery,
+            theme: root.theme,
             bridge: root.bridge
         })
     }

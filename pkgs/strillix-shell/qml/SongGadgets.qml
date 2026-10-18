@@ -1,5 +1,5 @@
 // SongGadgets.qml — visual host for the active song's DECLARED dock-kind
-// widgets (CONTRACTS.md §5's "Per-song flavor widgets"; `aoide.arrangement
+// widgets (CONTRACTS.md §5's "Per-song flavor widgets"; `aoide.layout
 // .widgets`, `modules/nucleus/options.nix` — the `kind = "dock"` v2
 // expansion of the same declared widget-type registry `SongSurfaces.qml`
 // hosts the `kind = "surface"` half of). Same data source
@@ -31,8 +31,8 @@
 // Delegate: the real `WidgetSlot.qml` component directly (the same one
 // `herald-center` uses in dock.qml) — resolve/load logic is not
 // reimplemented here. Fixed injected-prop contract (CONTRACTS.md §5
-// containment): `livery` + `bridge` only, nothing else. Dock gadgets take
-// that fixed contract by choice, not the wider `livery+bridge+shared` the
+// containment): `theme` + `bridge` only, nothing else. Dock gadgets take
+// that fixed contract by choice, not the wider `theme+bridge+shared` the
 // shipped lane gadgets get, so no `extraProps` is passed. Were one passed,
 // `WidgetSlot` assigns each extra onto the live widget in place and
 // rebuilds only when the resolved source changes (its header states the
@@ -53,7 +53,7 @@ import QtQuick
 Repeater {
     id: root
 
-    required property var livery
+    required property var theme
     required property var bridge
     required property var stagingEngine
     property real gadgetW: 360
@@ -64,7 +64,7 @@ Repeater {
     // the Repeater below holds zero delegates: a structural no-op, not an
     // accident of which song happens to be active.
     readonly property var dockEntries: {
-        var decl = root.stagingEngine.declaredWidgets(root.livery.songName)
+        var decl = root.stagingEngine.declaredWidgets(root.theme.songName)
         var keys = Object.keys(decl)
         var out = []
         for (var i = 0; i < keys.length; i++) {
@@ -90,7 +90,7 @@ Repeater {
 
         width: root.gadgetW
         slot: modelData.slot
-        livery: root.livery
+        theme: root.theme
         bridge: root.bridge
         stagingEngine: root.stagingEngine
 

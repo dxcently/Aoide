@@ -46,7 +46,7 @@ import QtQuick
 QtObject {
     id: root
 
-    required property var livery
+    required property var theme
     required property var bridge
     required property var stagingEngine
     required property string slot
@@ -58,7 +58,7 @@ QtObject {
     // `fallback` Component when the host gives one, else nothing. Most
     // window-owning slots give none (sonata IS their floor); `switcher` gives
     // the plain AoideSwitcher, because no song ships one.
-    readonly property string resolvedSong: stagingEngine.resolveSong(livery.songName, slot)
+    readonly property string resolvedSong: stagingEngine.resolveSong(theme.songName, slot)
     readonly property bool songProvides: resolvedSong !== ""
     readonly property string resolvedSource:
         songProvides ? stagingEngine.source(resolvedSong, slot) : ""
@@ -82,9 +82,9 @@ QtObject {
     // That spare destroy is what floods the journal. `item.destroy()` deletes
     // the window while the QML engine is fully live, which nulls the `root`
     // id inside the loaded widget's own context and re-evaluates every
-    // binding that captured it — `launcher.qml` alone has 65 `root.livery.*`
+    // binding that captured it — `launcher.qml` alone has 65 `root.theme.*`
     // bindings, so one spare destroy = a ~66-79-line burst of
-    // "TypeError: Cannot read property 'livery' of null" (@songs/sonata/
+    // "TypeError: Cannot read property 'theme' of null" (@songs/sonata/
     // launcher.qml, 1984 of them in six hours). `powermenu.qml` is the same
     // shape and stays quiet only because it is fully static — no Repeater or
     // ListView delegates to re-evaluate on the way down.
@@ -165,7 +165,7 @@ QtObject {
     }
 
     function _props() {
-        var base = { "livery": root.livery, "bridge": root.bridge }
+        var base = { "theme": root.theme, "bridge": root.bridge }
         var keys = Object.keys(root.extraProps)
         for (var i = 0; i < keys.length; i++) base[keys[i]] = root.extraProps[keys[i]]
         return base

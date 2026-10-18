@@ -6,7 +6,7 @@
 // after the six shipped gadgets and herald-center.
 //
 // Shape mirrors sonata's widgets/herald-center.qml (Item root, self-sizing
-// via width/implicitHeight, only livery+bridge injected — no extraProps),
+// via width/implicitHeight, only theme+bridge injected — no extraProps),
 // the same fixed slot contract every widget in the wired catalog follows.
 //
 // Content is deliberately small and unmistakable: a single dark-palette
@@ -18,7 +18,7 @@ import QtQuick
 Item {
     id: root
 
-    required property var livery
+    required property var theme
     required property var bridge   // unused today — fixed slot contract
 
     width: parent ? parent.width : 360
@@ -29,8 +29,8 @@ Item {
         width: parent.width
         height: label.implicitHeight + 20
         radius: 6
-        color: root.livery.paletteBg
-        border.color: root.livery.paletteAccent
+        color: root.theme.paletteBg
+        border.color: root.theme.paletteAccent
         border.width: 2
 
         Text {
@@ -41,7 +41,7 @@ Item {
             font.pixelSize: 15
             font.weight: Font.Bold
             font.letterSpacing: 3
-            color: root.livery.paletteAccent
+            color: root.theme.paletteAccent
         }
     }
 }

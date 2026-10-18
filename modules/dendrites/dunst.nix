@@ -6,7 +6,7 @@
 #     history and the pause levels), libnotify for the stock `notify-send`
 #     client other aoide code already calls, and the daemon unit itself via
 #     Home Manager's services.dunst module
-#   - reads no other module. Note what is NOT read any more: config.aoide.livery.
+#   - reads no other module. Note what is NOT read any more: config.aoide.theme.
 #     dunst draws nothing now, so it has no dress and needs no design tokens.
 #
 # ── dunst is the daemon; it is not the face ───────────────────────────────
@@ -32,7 +32,7 @@
 #     and every measured run in that rule ended ~43px short. The daemon's own
 #     journal carried the proof ("Failed to load icon from path: …herald-plate-
 #     normal.png"). Cell arithmetic in markup is fragile by construction.
-# QML has hit testing, layout, and the livery. So the face moved there and the
+# QML has hit testing, layout, and the theme. So the face moved there and the
 # markup is gone — not tuned, gone.
 #
 # ── the feed, proven live before it was written down (2026-08-17) ─────────

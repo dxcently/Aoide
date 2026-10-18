@@ -1,12 +1,12 @@
 // SongSurfaces.qml — non-visual host for the active song's DECLARED
 // surface-kind widgets (CONTRACTS.md §5's "Per-song flavor widgets";
-// `aoide.arrangement.widgets`, `modules/nucleus/options.nix` — this is the
+// `aoide.layout.widgets`, `modules/nucleus/options.nix` — this is the
 // QML runtime half, Phase 4, of a feature whose nix option + build-time
 // registry.json walk (Phase 1/2) and `rice stage`/`preview` runtime
 // hot-sync + `rice lint` validation (Phase 3) already landed).
 //
-// For the ACTIVE song (`livery.songName`) and every entry in
-// `stagingEngine.declaredWidgets(livery.songName)` whose `kind === "surface"`,
+// For the ACTIVE song (`theme.songName`) and every entry in
+// `stagingEngine.declaredWidgets(theme.songName)` whose `kind === "surface"`,
 // stands up one real SurfaceSlot — the same non-visual `QtObject` anchor
 // CONTRACTS.md §5 already defines for slots that own their own PanelWindow
 // (powermenu/launcher, shell.qml). Reused directly, not duplicated: same
@@ -28,7 +28,7 @@
 // use for per-monitor/per-workspace non-visual objects.
 //
 // Fixed injected-prop contract (CONTRACTS.md §5 containment): unchanged —
-// SurfaceSlot itself injects only `livery` + `bridge` into the loaded
+// SurfaceSlot itself injects only `theme` + `bridge` into the loaded
 // widget body. Nothing here adds extras.
 //
 // Optional shortcut (options.nix `widgetType.shortcut`, e.g. "aoide:grimoire"):
@@ -50,7 +50,7 @@ import Quickshell.Hyprland
 QtObject {
     id: root
 
-    required property var livery
+    required property var theme
     required property var bridge
     required property var stagingEngine
 
@@ -62,7 +62,7 @@ QtObject {
     // committed song) — the Instantiator below then holds zero delegates: a
     // structural no-op, not an accident of which song happens to be active.
     readonly property var surfaceEntries: {
-        var decl = root.stagingEngine.declaredWidgets(root.livery.songName)
+        var decl = root.stagingEngine.declaredWidgets(root.theme.songName)
         var keys = Object.keys(decl)
         var out = []
         for (var i = 0; i < keys.length; i++) {
@@ -84,7 +84,7 @@ QtObject {
             required property var decl
 
             property SurfaceSlot surfaceSlot: SurfaceSlot {
-                livery: root.livery
+                theme: root.theme
                 bridge: root.bridge
                 stagingEngine: root.stagingEngine
                 slot: entry.slot

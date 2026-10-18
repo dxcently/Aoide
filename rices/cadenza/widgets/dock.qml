@@ -24,7 +24,7 @@
 //
 // ── Mapping ──────────────────────────────────────────────────────────────
 // rice.nix declares the dock a persistently mapped surface
-// (`arrangement.surfaces.dock`), so, like sonata's, the window stays mapped
+// (`layout.surfaces.dock`), so, like sonata's, the window stays mapped
 // and closing is paint: the body's pane runs its close, the input mask drops
 // to nothing (clicks fall through to the windows under it) and the keyboard
 // is released. Right edge, top-to-bottom; `exclusiveZone: 0` keeps it inside
@@ -40,7 +40,7 @@ import "Kit.js" as Kit
 PanelWindow {
     id: root
 
-    required property var livery
+    required property var theme
     required property var bridge
     property var shared: null
     property var stagingEngine: null
@@ -92,7 +92,7 @@ PanelWindow {
         id: body
         anchors.fill: parent
         Component.onCompleted: setSource(Kit.helper("BoardBody"), {
-            livery: Qt.binding(() => root.livery),
+            theme: Qt.binding(() => root.theme),
             bridge: Qt.binding(() => root.bridge),
             shared: Qt.binding(() => root.shared),
             stagingEngine: Qt.binding(() => root.stagingEngine),

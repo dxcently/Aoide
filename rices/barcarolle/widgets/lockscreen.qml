@@ -19,7 +19,7 @@ import "Kit.js" as Kit
 Item {
     id: face
 
-    property var livery
+    property var theme
     property var bridge
     property var auth
 
@@ -101,7 +101,7 @@ Item {
         anchors.fill: parent
         mode: "lock"
         page: face.page
-        livery: face.livery
+        theme: face.theme
         userName: face.auth ? face.auth.userName : ""
         failureText: face.refusal
         prompt: Kit.hostPrompt(face.auth)

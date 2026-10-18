@@ -6,7 +6,7 @@
 //! `draw(frame, area, app)` that composes ratatui widgets. The identity is
 //! preserved wholesale — the double box-drawing frames, the clef-tail end-cap on
 //! each footer seam, the musical state glyphs, the accent tint from
-//! `livery.json` — but expressed as [`ratatui::style::Style`] rather than raw
+//! `theme.json` — but expressed as [`ratatui::style::Style`] rather than raw
 //! SGR. Panels stay pure over `&App`, so a `TestBackend` can render any of them
 //! headless and assert on the buffer (see the tests below).
 //!
@@ -676,7 +676,7 @@ fn draw_projects(f: &mut Frame, area: Rect, app: &App) {
 pub(crate) fn status_env_block(app: &App) -> Vec<Line<'static>> {
     // Two roots since command-defrag S1 (2026-08-27): conducting state
     // (`sessions.json`/`hooks.json`/`projects.json`/`graph.json`) lives under
-    // `state/stage/`; rice/paint state (`livery.json`) stays `song/stage/`.
+    // `state/stage/`; rice/paint state (`theme.json`) stays `song/stage/`.
     // They coincide under an `$AOIDE_STAGE_DIR` override (every test fixture
     // here), and diverge only on the default production layout.
     let stage = aoide_storage::fs::conducting_stage_dir();
@@ -711,8 +711,8 @@ pub(crate) fn status_env_block(app: &App) -> Vec<Line<'static>> {
         graph_node_count(&stage.join("graph.json")),
     ));
     lines.push(file_status(
-        &rice_stage.join("livery.json"),
-        "livery",
+        &rice_stage.join("theme.json"),
+        "theme",
         palette_count(app),
     ));
     lines.push(Line::from(""));

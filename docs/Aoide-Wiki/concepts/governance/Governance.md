@@ -47,7 +47,7 @@ Core interfaces are versioned contracts, not conventions:
 
 | Interface | Stability guarantee |
 |---|---|
-| livery schema | Versioned in `CONTRACTS.md` |
+| theme schema | Versioned in `CONTRACTS.md` |
 | Dendrite shape | Versioned in `CONTRACTS.md` |
 | `aoide schema --json` output | Versioned in `CONTRACTS.md` |
 | Stage file formats | Versioned in `CONTRACTS.md` |
@@ -60,7 +60,7 @@ Provenance governs ownership. Merge-base divergence lint inside `aoide update` d
 
 ## No background self-updaters
 
-Neither Aoide nor Melete run background self-update processes. All updates — framework merges, flake.lock bumps, livery-schema migrations — are proposed by the agent and applied only through the gated rebuild. This is house policy, not a configuration option.
+Neither Aoide nor Melete run background self-update processes. All updates — framework merges, flake.lock bumps, theme-schema migrations — are proposed by the agent and applied only through the gated rebuild. This is house policy, not a configuration option.
 
 ## Related
 

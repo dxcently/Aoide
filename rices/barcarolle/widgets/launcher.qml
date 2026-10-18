@@ -15,7 +15,7 @@ import "Rice.js" as Rice
 PanelWindow {
     id: root
 
-    required property var livery
+    required property var theme
     required property var bridge
     required property var clipboard
     required property var ledger
@@ -862,7 +862,7 @@ PanelWindow {
             var baked = Quickshell.env("AOIDE_WALLPAPER") || ""
             try {
                 var d = JSON.parse(text())
-                var mine = !!d && (!d.song || d.song === root.livery.songName)
+                var mine = !!d && (!d.song || d.song === root.theme.songName)
                 root.coverPath = mine && d.path ? "" + d.path : baked
                 root.coverPick = mine && d.pick === true && (!!d.path || !!d.weId)
                 root.coverTile = mine && !!d.path && d.pick === true && d.tile === true
@@ -947,8 +947,8 @@ PanelWindow {
     }
 
     // ── rice: songs as folders and the right-edge song menu; Rice.js says what every row means ──
-    readonly property string riceMode: root.livery.riceMode || "declarative"
-    readonly property string riceKey: [root.riceMode, root.livery.songName, (root.livery.modeRaw && root.livery.modeRaw.draft) || ""].join("|")
+    readonly property string riceMode: root.theme.riceMode || "declarative"
+    readonly property string riceKey: [root.riceMode, root.theme.songName, (root.theme.modeRaw && root.theme.modeRaw.draft) || ""].join("|")
     property var answer: null
     property int asked: 0
     property bool pending: false
@@ -967,7 +967,7 @@ PanelWindow {
     function riceAct(row) {
         if (root.pending || !root.canMenu) return
         root.pending = Rice.act(root.bridge, row)
-        // a save changes no livery key, so read the drafts again once the daemon has had time to write one
+        // a save changes no theme key, so read the drafts again once the daemon has had time to write one
         if (row.kind === "save" && row.live) afterSave.restart()
     }
     Timer { id: afterSave; interval: 1500; onTriggered: if (root.shown && root.view === "songs") root.askRice() }
@@ -2509,7 +2509,7 @@ PanelWindow {
                             anchors.right: parent.right; anchors.rightMargin: 16
                             label: "Song"
                             icon: root.g3Dir + "finder-song.svg" + root.bust
-                            caption: root.pending ? "…" : root.livery.songName
+                            caption: root.pending ? "…" : root.theme.songName
                             maxText: parent.width - 16 - (findBox.x + findBox.width + 6) - 26
                             live: !root.pending
                         }

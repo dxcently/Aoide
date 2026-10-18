@@ -6,7 +6,7 @@ import "../.."
 PanelWindow {
     id: root
 
-    required property var livery
+    required property var theme
     required property var bridge
     required property var stagingEngine
     required property var bar
@@ -38,21 +38,21 @@ PanelWindow {
         sourceComponent: Column {
             spacing: 6
             WidgetSlot {
-                livery: root.livery
+                theme: root.theme
                 bridge: root.bridge
                 stagingEngine: root.stagingEngine
                 slot: "meters"
                 visible: implicitHeight > 0
             }
             WidgetSlot {
-                livery: root.livery
+                theme: root.theme
                 bridge: root.bridge
                 stagingEngine: root.stagingEngine
                 slot: "usage"
                 visible: implicitHeight > 0
             }
             WidgetSlot {
-                livery: root.livery
+                theme: root.theme
                 bridge: root.bridge
                 stagingEngine: root.stagingEngine
                 slot: "power"

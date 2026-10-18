@@ -8,7 +8,7 @@
   Nix; the ricing engine must apply a song on generic Linux too (root
   `AGENTS.md`, "Nix-independence").
 - **`widgets::plan_stage` is the gate, and it runs BEFORE the first write.**
-  `rice stage`/`rice mode` call it ahead of the livery write and hand its
+  `rice stage`/`rice mode` call it ahead of the theme write and hand its
   answer to both syncs; a refusal stages NOTHING. Don't move it back inside
   `sync_song_widgets`/`sync_song_registry`, and don't add a write path that
   precedes it — the two refusal texts are the contract
@@ -67,11 +67,11 @@
   write is its drift snapshot — `reload`) calls `plan_stage` before writing
   anything, and an in-crate test pins the `back` case (§9(d) only covers
   `stage`). Don't move the gate down into a sync.
-- **A transition that swaps `stage/livery.json`'s type or target plans first and
+- **A transition that swaps `stage/theme.json`'s type or target plans first and
   writes `mode.json` last.** `rice mode stage`/`rice mode declarative` run the
   template seed and `plan_rice_stage` before `teardown_draft_symlink`, so a song
   that cannot be staged leaves the draft routed and the marker `draft`; the
-  shell's livery watch holds an inode and re-arms only on a `mode.json` write
+  shell's theme watch holds an inode and re-arms only on a `mode.json` write
   (CONTRACTS.md §4). A new transition owes the same order.
 - **`baseline_rices` only ever resolves a NO-`_widgets/`-shelf song's own
   entry — it must skip the patch, not guess, when `name` has one.** Borrowed
@@ -104,9 +104,9 @@
   its BAKED entry — layer 3 has nothing to scan there, and an empty patch
   deleted sonata from osaka's manifest and blanked every surface. Directory
   present → scan wins; directory absent → baseline stands.
-- **`livery`/`live` stay dependency-free leaves.** `compose`/`cover` are the
+- **`theme`/`live` stay dependency-free leaves.** `compose`/`cover` are the
   ones allowed to pull in `aoide-storage` (Phase 5b); don't push a storage
-  dependency down into `livery`/`live` without re-deriving why that
+  dependency down into `theme`/`live` without re-deriving why that
   boundary existed.
 - **A cover carries its song — don't add a rule that reads "the previous
   song".** Every writer of `stage/cover.json` stamps the staged song into it
@@ -144,10 +144,10 @@
 - **`commands::rice::handle_rice_stage` is Staging's write path, NEVER
   Draft's — don't call it from a Draft-mode code path.** It reads the
   RUNTIME rices, with `venue.json` laid over the declared song (see the
-  bullet below), and writes the result into `stage/livery.json`. In
+  bullet below), and writes the result into `stage/theme.json`. In
   `Staging` mode that file is a plain file, so this is exactly "re-derive
   declared content" — correct by design. While routed into a `Draft`,
-  `stage/livery.json` is a SYMLINK into the draft's own file
+  `stage/theme.json` is a SYMLINK into the draft's own file
   (`commands/mode.rs`'s own doc), and `atomic_write` is symlink-transparent
   — calling `handle_rice_stage` there would silently overwrite the draft
   with plain committed truth, destroying the edits draft mode exists to
@@ -175,10 +175,10 @@
   target is not guaranteed to be followed by Hyprland's own watcher.
 - **`commands::rice::stage_terminal_colors` is the ONE writer of
   `stage/terminal-colors.conf`, and every path that rewrites the staged
-  livery calls it.** Today: `handle_rice_stage` (so `rice stage`, `rice mode
+  theme calls it.** Today: `handle_rice_stage` (so `rice stage`, `rice mode
   stage` and `rice mode declarative`'s re-pin), `rice back`'s restore and
   `strx reload`'s `sync_draft_in_place`. A new path that writes
-  `stage/livery.json` calls it too, off the same notes, or the terminals
+  `stage/theme.json` calls it too, off the same notes, or the terminals
   keep the previous song. It adds no mode gate of its own and is never
   fatal. Open windows are reached ONLY through kitty's control socket
   (`live::reload_kitty`: `load-config` with NO path, so kitty re-reads its
@@ -194,14 +194,14 @@
   Every colour is hex-linted in the `kitty` emitter before it is written:
   the file is an `include` in kitty.conf, so a value carrying a newline
   would be a config directive. **The file carries every colour slot, base16
-  note or not** (`livery::emit::kitty::synthesised_base16`, the Stylix
+  note or not** (`theme::emit::kitty::synthesised_base16`, the Stylix
   lane's `synthesisedScheme` twin — change both together): a reload reads it
   as config, and a missing slot would show the bake's colour under the
   staged song. **It carries a `background_opacity` line only for a song with
   an opinion** (`live::terminal_opacity`): no opinion writes no line, so
   kitty falls through to the declared fragment and then the host's own
   `background_opacity`, and no cargo constant copies that bake.
-  `geometry.terminalOpacity` is linted in `livery::schema` as a plain
+  `geometry.terminalOpacity` is linted in `theme::schema` as a plain
   number in [0, 1] or null, through `schema::terminal_opacity_value`, the
   same predicate the hot path uses to find an opinion.
 - **`commands::rice::stage_lockscreen` is the ONE writer of
@@ -221,19 +221,19 @@
   CONTRACTS.md §4, not here; the emitter's fail-closed facts name hyprlock
   0.9.6 and hyprlang 0.6.8 and are re-checked on a bump.
 - **`polarity` is a LINTED top-level field and no emitter carries it**
-  (`livery::schema::POLARITY_VALUES`, exactly `"light"`/`"dark"`; absent or
+  (`theme::schema::POLARITY_VALUES`, exactly `"light"`/`"dark"`; absent or
   null is "no opinion"). It is the baked fan-out's register — the stylix lane
-  reads `aoide.livery.polarity` off the option, never off a stage file — so it
+  reads `aoide.theme.polarity` off the option, never off a stage file — so it
   must stay out of `Resolved` and out of every backend's output. The goldens
   pin that as a contract: `tests/fixtures/valid-polarity.json` is `valid.json`
   plus `"polarity": "dark"`, and
   `polarity_is_lint_only_and_moves_no_emitted_byte` asserts every emitter
   produces byte-identical output with and without it. `rice compose` copies the
-  field into a scaffolded `rice.nix` (`aoide.livery.polarity`), defaulting to
+  field into a scaffolded `rice.nix` (`aoide.theme.polarity`), defaulting to
   `schema::POLARITY_DEFAULT` when the source notes carry none.
 - **`compose::render_rice_nix` emits a song body (CONTRACTS §5, v1).** The
   scaffold is an attrset with a `system` half (the ten `strillix` providers,
-  `STRILLIX_SLOTS`, and a `module` of livery) and a `home` half (`strillix`, and
+  `STRILLIX_SLOTS`, and a `module` of theme) and a `home` half (`strillix`, and
   `rice.hyprland.conf = ./hyprland.conf`). `rice compose` writes the
   `hyprland.conf` of `--from` when it ships one, else `render_hyprland_conf`'s
   header with no keys. Any change to the body shape is a §5 change: the test
@@ -263,12 +263,12 @@
   and with a config reload in every stage, such a handler test run from a
   Hyprland terminal would reset the operator's live compositor and flip its
   glass and borders, and a shell reload rebuilds the whole running scene.
-- **`/declared/livery.json` (the declared twin) and
+- **`/declared/theme.json` (the declared twin) and
   `/declared/venue.json` (the venue's slots and geometry), CONTRACTS.md §4,
   are READ-ONLY for this crate — only the nix side writes them.** The strillix
   lane's activation seed (`home.activation.aoideSeedStage`) publishes them: the
   twin is the declared song's committed notes with the venue's
-  `aoide.livery.override` applied and the host's geometry laid over the song's
+  `aoide.theme.override` applied and the host's geometry laid over the song's
   own, `"song"` injected, keys sorted; `venue.json` is `venueDelta`, only the
   slots that override recolours and the geometry the host sets, `{}` with
   neither. `commands::rice::notes_source` reads the twin for the re-pin
@@ -428,11 +428,11 @@
 
 ## Extension points
 
-- **A new `rice`/`livery`/`cover`/`element` command** adds a `cmd!`/
+- **A new `rice`/`theme`/`cover`/`element` command** adds a `cmd!`/
   `register` entry in `commands/`, wired into `strillix`'s `commands::all()`
   only.
 - **A new emitter target** (stage/hyprctl/osc/file/kitty exist today) extends
-  `livery::emit`, keeping the schema-validate → resolve → emit pipeline
+  `theme::emit`, keeping the schema-validate → resolve → emit pipeline
   shape.
 - **A new element-descriptor field** extends `elements::Descriptor`/
   `FileEntry`/`RunSpec` (serde, additive) and `parse_descriptor`'s

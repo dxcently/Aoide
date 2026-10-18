@@ -8,10 +8,10 @@ import "Notice.js" as Notice
 Item {
     id: root
 
-    required property var livery
+    required property var theme
     required property var bridge
 
-    readonly property var kit: Kit.make(root.livery)
+    readonly property var kit: Kit.make(root.theme)
     readonly property string stageDir: (Quickshell.env("AOIDE_ROOT") || (Quickshell.env("HOME") + "/.aoide")) + "/state/stage/"
 
     property var records: []
@@ -206,7 +206,7 @@ Item {
                         Glyph {
                             x: 9
                             y: 9
-                            tone: row.summons ? root.kit.awaiting : row.critical ? root.livery.notifUrgent : row.rec.urgency === "low" ? "#8db0ba" : "#25bbcf"
+                            tone: row.summons ? root.kit.awaiting : row.critical ? root.theme.notifUrgent : row.rec.urgency === "low" ? "#8db0ba" : "#25bbcf"
                             bang: row.summons || row.critical
                         }
 
@@ -308,8 +308,8 @@ Item {
                                 Row {
                                     y: 8
                                     spacing: 8
-                                    Pill { label: "Approve"; tone: root.livery.paletteHot; onClicked: root.verdict(row.rec, "approve") }
-                                    Pill { label: "Deny"; tone: root.livery.notifUrgent; onClicked: root.verdict(row.rec, "deny") }
+                                    Pill { label: "Approve"; tone: root.theme.paletteHot; onClicked: root.verdict(row.rec, "approve") }
+                                    Pill { label: "Deny"; tone: root.theme.notifUrgent; onClicked: root.verdict(row.rec, "deny") }
                                 }
                             }
                         }

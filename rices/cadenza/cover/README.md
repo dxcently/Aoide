@@ -13,9 +13,9 @@ to fit another size. Shoot that size instead.
 export AOIDE_FLAKE_ROOT=<checkout>
 R=$XDG_RUNTIME_DIR/cadenza-cover
 W=$AOIDE_FLAKE_ROOT/rices/cadenza/widgets/CoverPcb.qml
-strx preview "$W" --song cadenza --livery cadenza --root "$R" --no-launch
+strx preview "$W" --song cadenza --theme cadenza --root "$R" --no-launch
 # set "autoReload": false in $R/preview.json, then:
-setsid -f strx preview "$W" --song cadenza --livery cadenza --root "$R"
+setsid -f strx preview "$W" --song cadenza --theme cadenza --root "$R"
 strx preview set --root "$R" --viewport 1080x1920 --width 1080 --height 1920 --anchor tl --margin 0
 sleep 10   # a worker generates the board (~3 s a size), and a shot before it lands is bare ground
 strx preview shot --root "$R" --what widget --out /tmp/pcb.png
@@ -28,7 +28,7 @@ The canvas warns that CoverPcb has no `clipboard`, `dock`, `ledger`,
 passes the same props to every widget, so these warnings are expected.
 
 Stage live with `strx cover set <abs path>`. Declaring the cover into
-`aoide.livery.wallpaper` for the rebuild is the User's call.
+`aoide.theme.wallpaper` for the rebuild is the User's call.
 
 ## The live board — `widgets/wallpaper.qml`
 

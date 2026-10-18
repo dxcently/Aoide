@@ -6,7 +6,7 @@ import Quickshell.Wayland
 //   qs -p pkgs/strillix-shell/qml/CalendarPreview.qml
 // Floats the widget on a transparent overlay surface (matching the real
 // StelePopout host) with the stub gold-marble palette (hex sanctioned here
-// only — mirrors the livery roles, AudioColonnadePreview-style) and a null
+// only — mirrors the theme roles, AudioColonnadePreview-style) and a null
 // bridge (calendar declares it per the slot contract but never uses it). The
 // widget frames itself (a
 // self-framed papyrus stele) — no GadgetFrame wrapper here, matching its
@@ -53,7 +53,7 @@ ShellRoot {
             Component.onCompleted: {
                 var src = Quickshell.env("CAL_WIDGET")
                 if (!src || src === "") src = "songs/sonata/CalendarStele.qml"
-                setSource(src, { "livery": win.stub, "bridge": null })
+                setSource(src, { "theme": win.stub, "bridge": null })
             }
         }
     }

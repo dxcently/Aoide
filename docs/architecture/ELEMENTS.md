@@ -19,10 +19,10 @@ launcher's theme file — is either Stylix-derived (rebuild-gated,
 templated by someone else's derivation) or simply outside the loop.
 A song cannot carry a waybar config; `rice stage` cannot restage one;
 capturing an existing rice from a foreign flake means transcribing
-config text by hand. The `livery emit file` template engine already
+config text by hand. The `theme emit file` template engine already
 renders `{{palette.bg}}` into any text file — pure, proven — but its
 effectful half ("write the rendered text into some live config") was
-explicitly deferred (`song/src/livery/emit/file.rs`, "the deferred
+explicitly deferred (`song/src/theme/emit/file.rs`, "the deferred
 management seam"). This lane completes that seam.
 
 ## Settled decisions
@@ -48,12 +48,12 @@ management seam"). This lane completes that seam.
    byte-for-byte plus ONE small descriptor per element (which files
    land where under `run/elements/`, how the element starts, the
    optional reload/restart overrides). The element set flows through
-   `aoide.arrangement` (the existing "which TYPES a song brings into
+   `aoide.layout` (the existing "which TYPES a song brings into
    existence" namespace) and each element declares `aoide.surfaces`
    ownership — waybar owning `bar` makes the quickshell lane and
    Stylix stand down through the EXISTING
    `surfaceToStylixTargets`/mkForce-false seam. House rule 5's
-   whitelist (livery/arrangement/surfaces) does NOT grow.
+   whitelist (theme/layout/surfaces) does NOT grow.
 4. **Capture is verbatim.** Byte-for-byte, frozen into nix as files
    REFERENCED from nix (home-manager/xdg-style seeding from the
    store copy of the song dir) — never config text transcribed
@@ -135,8 +135,8 @@ same commit that lands the parser):
   to `src`. Both are validated against traversal (no `..`, no
   absolute, no escaping their root). `template` defaults to `false`
   (verbatim byte copy); `true` renders the file through the EXISTING
-  `livery::emit::file::render` grammar (`{{group.key}}`, group ∈
-  palette|base16|bar|notif|window) against the resolved livery. The
+  `theme::emit::file::render` grammar (`{{group.key}}`, group ∈
+  palette|base16|bar|notif|window) against the resolved theme. The
   `template` flag is the mint seam: the future tokenize pass flips
   it and rewrites the bytes, and nothing else in the pipeline
   changes.
@@ -182,12 +182,12 @@ runtime rices by `strx reload` (the strillix lane's
 
 ```
 strx rice stage <song>
-  ├─ livery.json → $STRILLIX_ROOT/stage/livery.json          (existing, atomic)
+  ├─ theme.json → $STRILLIX_ROOT/stage/theme.json          (existing, atomic)
   ├─ hyprctl keyword batch                          (existing, live tier)
   ├─ widget QML → run/qml + IPC reload              (existing)
   └─ NEW: for each rices/<song>/elements/<e>/element.json
        ├─ verbatim files copied, template files rendered
-       │    against the STAGED livery → run/elements/<e>/
+       │    against the STAGED theme → run/elements/<e>/
        │    (atomic per file; a render error fails that element,
        │     leaves its old config in place, reports structured)
        └─ anything changed? → reload if declared, else restart
@@ -199,12 +199,12 @@ strx rice stage <song>
 ```
 nixos-rebuild / home-manager switch          (user-gated, house rule 2)
   eval: the elements lane readDirs the declared song's elements/
-    ├─ aoide.arrangement.elements.<e> = { surfaces, via }   (the TYPE set)
+    ├─ aoide.layout.elements.<e> = { surfaces, via }   (the TYPE set)
     ├─ aoide.surfaces.<s>.owner = "<e>"                     (claims)
     └─ units / exec-once lines generated, ExecStart → run/elements/<e>/
   activation: strx element seed <song>
     renders the STORE copy of the song's elements against the
-    declared livery → run/elements/   (re-seeds; then EVERY element
+    declared theme → run/elements/   (re-seeds; then EVERY element
     unit is try-restarted unconditionally — the house ruling that
     activation always brings the rice elements back up, same as the
     strillix lane's aoideRestartRice hook; changed-unit-only
@@ -297,8 +297,8 @@ the same commit as the seams they describe.
 - **L-E3 — the elements lane (nix, L).** `modules/dendrites/elements/`
   (its plain module, README + AGENTS): readDir the declared song's
   `elements/`, parse descriptors at eval, populate
-  `aoide.arrangement.elements` (new option under the existing
-  arrangement namespace, declared in nucleus options.nix) and the
+  `aoide.layout.elements` (new option under the existing
+  layout namespace, declared in nucleus options.nix) and the
   `aoide.surfaces` claims; generate `aoide-element-<name>.service`
   units and compositor exec-once lines pointing at
   `run/elements/`; activation hook runs `strx element seed` against
@@ -387,7 +387,7 @@ the built system.
   daemon for elements, no niri live seam — one descriptor line
   (`reload`) is the entire tiering mechanism.
 - No fourth paint-readable namespace, no new `aoide.*` whitelist
-  entry — arrangement and surfaces carry everything (house rule 5).
+  entry — layout and surfaces carry everything (house rule 5).
 - No `~/.config` management, ever — not even a symlink. The config
   dir contract is `run/elements/` or nothing.
 - Core (`aoide`/`aoided`) stays nix-free and element-free: every

@@ -16,7 +16,7 @@ are core `aoide` identity, root `AGENTS.md`).
 - `dispatch`/`registry` — strillix's own argv parsing, dispatch, and golden
   command-path snapshot, independent of core's.
 - `commands::LAYOUT` — how `strillix` lists itself (Start here · Songs &
-  liveries · Widgets & icons · Desktop apps · Clipboard · Screen control (screen, lock) ·
+  themes · Widgets & icons · Desktop apps · Clipboard · Screen control (screen, lock) ·
   Dialogs & notices · Agent interfaces · System), adopted by `all()` through
   `Registry::arrange`; bare `strillix`, `--help`, group pages and `guide` read it.
 - `guide` — `strx guide`.
@@ -38,7 +38,7 @@ are core `aoide` identity, root `AGENTS.md`).
   touches the user's flake.
 - `run_strillix` — drives `aoide_protocol::door::run` with strillix's own registry/
   dispatcher and its own smaller `special` hook (`mcp serve --stdio`,
-  `guide`/`schema`/`livery`/`secrets ask`/`pair ask`/`pair show` raw
+  `guide`/`schema`/`theme`/`secrets ask`/`pair ask`/`pair show` raw
   output). Deliberately absent: `a2a serve`, `conductor`.
 - `commands::dialog_qml` (P-PV3, task #132; the confirm surface repurposed
   into the show surface at R2) — the shared quickshell code-entry/show
@@ -145,7 +145,7 @@ are core `aoide` identity, root `AGENTS.md`).
   descendant of it — the live reaper and socket globs look there) and
   spawns a standalone `quickshell -p <root>/run/qml/WidgetPreview.qml`
   (P2's own file, not yet landed) against it: its own
-  `/stage/livery.json`, its own
+  `/stage/theme.json`, its own
   `state/stage/{sessions,projects,hooks,herald}.json` seeded from a named
   fixture set or a directory (falling back to empty-but-valid defaults
   while no fixture set has landed yet), and its own `run/qml/` — COPIES,
@@ -171,24 +171,24 @@ are core `aoide` identity, root `AGENTS.md`).
   `--no-launch` re-stages the copies and merges into the control file
   while it stays up. Every OTHER lane-read stage file
   the isolated root needs merely to exist gets written too:
-  `/stage/mode.json` (`LiveryState.qml`'s own convention — `mode`,
+  `/stage/mode.json` (`ThemeState.qml`'s own convention — `mode`,
   `song`, `stagingSong`, `since`) is REWRITTEN on every build and on
   `preview set --song`, always naming the current song; `/stage/
   cover.json`, `/stage/grimoire.json` (`GrimoireLedger`'s
   `launches: {}`, an object keyed by app id, never an array), and
   `state/usage.json` are seeded once, only if absent, and never clobbered
-  by a later rebuild. `--livery <spec>` accepts FOUR
+  by a later rebuild. `--theme <spec>` accepts FOUR
   forms, all resolved through the same
-  `strillix_rice::livery::resolve::resolve`/`to_json_string` engine
-  `strx livery resolve` itself uses: `live` (the resolved live stage twin,
-  read-only), a bare song name (that song's own rices livery.json), a
-  path to a livery file, or a path to a base16 scheme (JSON or the flat
+  `strillix_rice::theme::resolve::resolve`/`to_json_string` engine
+  `strx theme resolve` itself uses: `live` (the resolved live stage twin,
+  read-only), a bare song name (that song's own rices theme.json), a
+  path to a theme file, or a path to a base16 scheme (JSON or the flat
   `key: value` line shape — no yaml crate in this workspace) synthesized
   into a palette per CONTRACTS.md §1's base16 column reversed; default is
-  the preview's own `--song`. `preview.json` carries `liverySource` (the
-  spec as given, the one name for it) and `liveries` (every rices song
-  with a livery.json of its own, sorted) — never a bare `livery` key: the
-  P2 canvas treats `livery` as a legacy alias of `liverySource` and
+  the preview's own `--song`. `preview.json` carries `themeSource` (the
+  spec as given, the one name for it) and `themes` (every rices song
+  with a theme.json of its own, sorted) — never a bare `theme` key: the
+  P2 canvas treats `theme` as a legacy alias of `themeSource` and
   deletes it on every save of its own, so both the builder and `preview
   set` drop it on every write (migrating away any legacy key an older doc
   still carries) rather than ping-ponging against the canvas. `preview.json`
@@ -212,7 +212,7 @@ are core `aoide` identity, root `AGENTS.md`).
   not quickshell's) refuses a second concurrent `strx preview` against the
   same root. **`strx preview set`** edits that root's `preview.json`
   control document (widget size/aspect, viewport size/preset/aspect,
-  anchor, margin, zoom, background, fixture, livery) without any canvas
+  anchor, margin, zoom, background, fixture, theme) without any canvas
   needing to be running — every given flag is validated (a bad value is a
   usage error naming the allowed set) and merged: existing keys survive,
   only the given ones are overwritten, so a relaunch (or a live edit while
@@ -225,10 +225,10 @@ are core `aoide` identity, root `AGENTS.md`).
   canvas's own counterpart of `rice declare` (`commands/stubs.rs`,
   `Self-Ricing.md`'s stage-vs-commit split): it copies the previewed
   widget body (refusing a `widget` outside `run/qml/songs/` — never a
-  lane symlink) and, unless `liverySource` is exactly the preview's own
+  lane symlink) and, unless `themeSource` is exactly the preview's own
   song (its palette is already checkout truth), the resolved palette
   tiers (`palette`/`base16`/`bar`/`notif`/`window` only — every other
-  authored key in the checkout's `livery.json` survives untouched, and
+  authored key in the checkout's `theme.json` survives untouched, and
   `song` is never written there) into `rices/<song>/`. Byte-diffed
   so a repeat with nothing new is a true no-op; it never runs `git`,
   touches the live stage, `~/.aoide`, or `run/qml` — the commit and
@@ -457,7 +457,7 @@ serve --stdio`'s door loop).
 
 ## How it composes
 
-Command paths: onboard/rice/draft/mode/cover/livery/quickshell/screen/
+Command paths: onboard/rice/draft/mode/cover/theme/quickshell/screen/
 shellbridge/herald/take/element/secrets ask/pair ask/pair show/preview/
 preview set/preview declare/preview shot/preview tree/preview notes/icon/
 apps/clipboard/lock/lock hint — everything that paints, or that only a desktop needs.

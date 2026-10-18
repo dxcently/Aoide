@@ -57,9 +57,9 @@ use daemon::Door;
 /// that SAME events feed — `conductor` hands off
 /// to the interactive terminal loop, `guide`/`schema` bypass the generic
 /// `Outcome` envelope — everything else routes through the single dispatcher
-/// (so the audit log + gate apply uniformly). `livery` was an earlier special
+/// (so the audit log + gate apply uniformly). `theme` was an earlier special
 /// case; it moved to strillix with the rest of the graphical bundle at P-A5 —
-/// core no longer parses `livery.*` at all. `secrets put` (Workstream
+/// core no longer parses `theme.*` at all. `secrets put` (Workstream
 /// SECRETS P-V4c) is deliberately NOT special-cased here — its wire reply
 /// carries no value, so it runs as an ordinary registered handler
 /// (`aoide_secrets::commands::handle_secrets_put`) that reads stdin and

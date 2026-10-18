@@ -11,10 +11,10 @@ import "Notice.js" as Notice
 PanelWindow {
     id: root
 
-    required property var livery
+    required property var theme
     required property var bridge
 
-    readonly property var kit: Kit.make(root.livery)
+    readonly property var kit: Kit.make(root.theme)
     readonly property string stageDir: (Quickshell.env("AOIDE_ROOT") || (Quickshell.env("HOME") + "/.aoide")) + "/state/stage/"
 
     readonly property int cardW: 340
@@ -267,7 +267,7 @@ PanelWindow {
                     Glyph {
                         anchors.verticalCenter: parent.verticalCenter
                         tone: root.summons ? root.kit.awaiting
-                            : root.head && root.head.urgency === "critical" ? root.livery.notifUrgent
+                            : root.head && root.head.urgency === "critical" ? root.theme.notifUrgent
                             : root.head && root.head.urgency === "low" ? "#8db0ba" : "#25bbcf"
                         bang: root.summons || (!!root.head && root.head.urgency === "critical")
                     }
@@ -397,8 +397,8 @@ PanelWindow {
                         x: 24
                         y: 10
                         spacing: 8
-                        Pill { label: "Approve"; tone: root.livery.paletteHot; onClicked: root.verdict(root.head, "approve") }
-                        Pill { label: "Deny"; tone: root.livery.notifUrgent; onClicked: root.verdict(root.head, "deny") }
+                        Pill { label: "Approve"; tone: root.theme.paletteHot; onClicked: root.verdict(root.head, "approve") }
+                        Pill { label: "Deny"; tone: root.theme.notifUrgent; onClicked: root.verdict(root.head, "deny") }
                     }
                 }
             }

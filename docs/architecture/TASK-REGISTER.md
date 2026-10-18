@@ -397,11 +397,11 @@ Fields per entry: status · owner · depends on · evidence · next.
 - Status: IN PROGRESS as the widget-preview stack (User request, root-
   launched Fable session `widget-preview-fable`, seq 310/322/328): new
   `lyra preview [<widget>]` + `lyra preview set …` (lyra crate) building an
-  isolated root under `$XDG_RUNTIME_DIR/aoide-preview/` (resolved livery,
+  isolated root under `$XDG_RUNTIME_DIR/aoide-preview/` (resolved theme,
   fixture stage files, symlinked facet qml + checkout widgets; the child
   env carries no live daemon socket), a `WidgetPreview.qml` canvas in the
   quickshell facet (any widget, width/height per axis, 3×3 anchors,
-  viewport presets and custom, aspect lock, zoom, fixture/livery pickers
+  viewport presets and custom, aspect lock, zoom, fixture/theme pickers
   incl. `live`/song/file/bare base16, reload, error pane), fixtures under
   `modules/facets/quickshell/preview/fixtures/`, `Widget-Preview.md`.
   P1 (`preview/set/declare`, 107 tests, golden 51) and P2 (canvas, four
@@ -477,7 +477,7 @@ Fields per entry: status · owner · depends on · evidence · next.
   golden 57. The combined commit died on a full root filesystem (08:45-08:55Z; nothing committed, log tail repaired). Then two user-facing rail bugs surfaced (owner seq 586/588: rail actions run the DEPLOYED `lyra` from PATH, which has no `preview set`; and the HIGH-2 fix-up refuses the canvas own `--root` because the child env repoints AOIDE_DAEMON_SOCKET under the root). Root seq 590/592: do not ship a dead rail; owner released for ONE corrective set (P7a audited patches + LOW, `lyra` path in preview.json, root validation against the stable real daemon dir with no blanket starts_with, dark icons, P7a-2 styling, real rail-click evidence), then re-review, then the combined commit, pristine build, push. Owner released seq 595. Acceptance additions (root seq
   548, User): lock/unlock state icon; declared/resolved widget
   dependencies (available/missing/unknown + sources — read side a lyra
-  command, shape a CONTRACTS entry); editable isolated livery colour
+  command, shape a CONTRACTS entry); editable isolated theme colour
   state through the existing resolver/control API; whole-canvas arrows;
   native picker at the widget folder; anchor/margin arrows. The owner`s
   follow-up plan (seq 539: explicit camera, pointer-anchored zoom, Space/
@@ -801,7 +801,7 @@ Fields per entry: status · owner · depends on · evidence · next.
   Osaka read against that. Sonata meter/power widths were a runtime-copy
   drift (340 vs the shipped 360), corrected on disk by root; no source
   patch.
-- Osaka → yomi letter 5ba9a44d (minted 21:11Z, palette/livery override
+- Osaka → yomi letter 5ba9a44d (minted 21:11Z, palette/theme override
   topic) NEVER LEFT Osaka (root, seq 273): outbox `tries 0`, link.json
   `lastOutcome: curl failed`, backoff 60. "curl failed" is the exact
   spawn-failure string of the door POST (`storage/src/commands.rs:314`),
@@ -810,7 +810,7 @@ Fields per entry: status · owner · depends on · evidence · next.
   fix on main, deployed by the User. Not received or fetched here.
 - The Osaka worker (silent-grove, `conduct-3796858-1789009882`) now
   coordinates directly with this session on the dxflake Sonata Rose Pine
-  recolor (`livery.override` reaches baked Stylix/Hyprland but not the
+  recolor (`theme.override` reaches baked Stylix/Hyprland but not the
   runtime Quickshell seed, per its letter); it owns the dxflake consumer
   side and its runtime findings; Aoide/Lyra core stays here; authored
   Sonata colours preserved; no duplicate palette implementation before a
@@ -1308,18 +1308,18 @@ project/parent inheritance across local/remote/app/subagents;
   briefed; the brief's `project-<n>` flat name is superseded and needs a
   re-brief before ML1 dispatches.
 
-## 16. Livery stage seed bypasses the resolver (Osaka evidence, seq 395)
+## 16. Theme stage seed bypasses the resolver (Osaka evidence, seq 395)
 
-- Defect: `modules/facets/quickshell/default.nix` seeds `activeSongLivery`
-  from the song alone and never invokes `lib/livery.nix` `resolve` /
+- Defect: `modules/facets/quickshell/default.nix` seeds `activeSongTheme`
+  from the song alone and never invokes `lib/theme.nix` `resolve` /
   `overrideMap` / `slotPatch`, so host overrides and an independently
   selectable palette never reach the stage; the resolver header claims
   both fanouts agree ahead of the implementation. Evidence at the dxflake
   pin 3b168ce: Stylix base00 `191724` against a live stage palette bg
   `f2ebde`. Recorded by osaka/dxflake-codex in dxflake
-  `docs/livery-consumer-handoff.md`.
+  `docs/theme-consumer-handoff.md`.
 - Owner: the upstream stage-seed repair in `modules/facets/quickshell/
-  default.nix` + `lib/livery.nix` is Yomi core (one executor, after the
+  default.nix` + `lib/theme.nix` is Yomi core (one executor, after the
   conduct lanes S-C and M2). Osaka Codex (`osaka/dxflake-codex`) STARTS the
   dxflake architecture and the Lyra consumer implementation now (User,
   seq 407) — bounded phase owners, an isolated branch, and evidence per
@@ -1327,15 +1327,15 @@ project/parent inheritance across local/remote/app/subagents;
   acceptance, not a blocker. Sonata and generic Lyra/core defects stay
   upstream. The runtime palette contract remains the gate before any
   second palette implementation; the User activation gate is unchanged.
-- Status: brief DONE (`p-livery-seed-brief.md`): `overrideMap`/`slotPatch`
-  have no callers; fix = `lib/livery.nix` `stagePatch` applied to the
-  committed livery.json document, the facet seeds from a `writeText` of
-  it, plus one `livery-fanout` flake check; six eval assertions true with
+- Status: brief DONE (`p-theme-seed-brief.md`): `overrideMap`/`slotPatch`
+  have no callers; fix = `lib/theme.nix` `stagePatch` applied to the
+  committed theme.json document, the facet seeds from a `writeText` of
+  it, plus one `theme-fanout` flake check; six eval assertions true with
   dxflake's override attached, no-override case byte-identical for all
   five songs. Defaults taken on the three questions (runtime writers
   `rice stage`/`reload` stay unresolved — follow-up; nix not jq; keep the
   base16 assert). LANDED 2c41661 (staged, not pushed, not deployed):
-  `stagePatch` + `checks.livery-fanout` (built green), proof 1 all true
+  `stagePatch` + `checks.theme-fanout` (built green), proof 1 all true
   (seed palette.bg == Stylix base00 == #191724 with the osaka override),
   no-override case byte-identical to the live stage twin for sonata and
   round-trip identity for all five songs, nixfmt clean; review PASS (two
@@ -1346,10 +1346,10 @@ project/parent inheritance across local/remote/app/subagents;
   remains the User's rebuild gate. Follow-up (own lane): the runtime
   writers `rice stage`/`rice mode`/`reload` need a published override
   source before they can apply the tier. Follow-up:
-  the songbook livery.json twins of `rice.nix` are unchecked.
+  the songbook theme.json twins of `rice.nix` are unchecked.
 - Status: LANDED eaafa6e (pushed): the facet publishes
-  `song/declared/livery.json` (CONTRACTS.md §4) — the declared song's
-  committed notes with `aoide.livery.override` applied in one `jq` run to
+  `song/declared/theme.json` (CONTRACTS.md §4) — the declared song's
+  committed notes with `aoide.theme.override` applied in one `jq` run to
   two destinations; `commands::rice::notes_source` reads it whenever its
   `"song"` field equals the name being staged (the songbook otherwise),
   and `handle_mode_declarative` resolves that same field first, so bare
@@ -1357,7 +1357,7 @@ project/parent inheritance across local/remote/app/subagents;
   currently staged one. `stagingSong` is untouched, so a later bare
   `rice mode stage` still returns to the staged song. Follow-up closed.
   Live activation on osaka/chiyo remains the User's rebuild gate.
-  Remaining: the songbook livery.json twins of `rice.nix` are unchecked
+  Remaining: the songbook theme.json twins of `rice.nix` are unchecked
   (carried).
 
 
@@ -1385,7 +1385,7 @@ project/parent inheritance across local/remote/app/subagents;
   palette/annotations/render/screenshot) remain existing Lyra tools via
   CLI/MCP or explicitly namespaced extensions, never invented standard
   methods. Context passed: selected widget paths, source/diff, preview
-  dimensions/livery/dependencies, annotated screenshot (image only when
+  dimensions/theme/dependencies, annotated screenshot (image only when
   the agent capability allows). Truthful pending/running/completed/
   cancelled tool state; declared-save and rebuild gates unchanged.
   Optional agent connection — manual preview works with no harness; TUI
@@ -1536,7 +1536,7 @@ project/parent inheritance across local/remote/app/subagents;
   ship; the picker exposes collection + searchable names, custom files via
   the existing native picker, and the saved choice and declaration retain
   collection/source/license metadata; pack licenses preserved for the
-  pinned version; monochrome assets take the livery tint, intentional
+  pinned version; monochrome assets take the theme tint, intentional
   multicolor art is preserved; actual Qt rendering verified with Iconoir
   and one other set at small sizes (16/20/24, light/dark). Sonata's
   bespoke art is kept. Editor coverage (seq 424): select/cursor, hand/pan,
@@ -1555,7 +1555,7 @@ project/parent inheritance across local/remote/app/subagents;
   (resolver ports Iconify's build algorithm; selected SVGs + `catalog.json`
   with license/version/mono; pinned data = hashed `fetchurl` at
   `pkgs/iconify-data`, never shipped); tint = MultiEffect alpha mask of a
-  livery-coloured rectangle for mono, plain `Image` for multicolor; 18
+  theme-coloured rectangle for mono, plain `Image` for multicolor; 18
   controls mapped to verified names in both collections. Facet carries
   `IconCatalog.qml` DATA only; `Icon.qml` is a song helper (CONTRACTS §0)
   via designer handoff. I1 DONE in the tree (uncommitted): `icon.rs`
@@ -1589,7 +1589,7 @@ project/parent inheritance across local/remote/app/subagents;
 - Direction (root audit seq 458): the TUI starts on Graph with seven tabs
   and no Home or mail view; Compose is a terminal send, Pending is
   send/A2A approvals, not mail interception. Redesign: vintage message
-  board with readable livery contrast and restrained square borders;
+  board with readable theme contrast and restrained square borders;
   Home (resume projects, live sessions, mesh health, review/failed mail
   counts), Boards (project and direct boards, MAIL.md §Boards, with
   their member mailboxes and nodes and a reply composer), Sessions,
@@ -1743,7 +1743,7 @@ project/parent inheritance across local/remote/app/subagents;
   flake.lock / aoide pin; User = rebuild/activation. Ownership notes filed
   on osaka (seq 24 to the palette worker, seq 25 to dxflake-codex).
 - Pin ownership (root seq 592): Spark unavailable; claude-mail proposed as sole dxflake pin/lock editor (seq 596: only `nix flake lock --update-input aoide` on the branch, only to a pushed Aoide SHA with a build proof, reported before and after; melete-src re-lock stays the User own request); awaiting root confirmation; no lock edit before it.
-- D4 Aoide-side ARCHITECT DONE (`p-dxflake-d4-aoide-brief.md`): three additive outputs `nixosModules.default` / `overlays.default` / `lib.livery`, new `lib/modules.nix` spliced by mkHost at top level (BFS order preserved), delete the `inputs.aoide` read at nucleus/options.nix:352, one `mkBefore` on shellbridge.nix:73 so the yomi-strix toplevel drvPath stays P0; dxflake side P0 on yomi/sakaki, P1 named on chiyo; 5 questions at defaults. A4a executor queued behind the ship. D2/D3/D5 replanning under root 577 dispatched (Opus).
+- D4 Aoide-side ARCHITECT DONE (`p-dxflake-d4-aoide-brief.md`): three additive outputs `nixosModules.default` / `overlays.default` / `lib.theme`, new `lib/modules.nix` spliced by mkHost at top level (BFS order preserved), delete the `inputs.aoide` read at nucleus/options.nix:352, one `mkBefore` on shellbridge.nix:73 so the yomi-strix toplevel drvPath stays P0; dxflake side P0 on yomi/sakaki, P1 named on chiyo; 5 questions at defaults. A4a executor queued behind the ship. D2/D3/D5 replanning under root 577 dispatched (Opus).
 - D2 EXECUTED on the branch (uncommitted, review running): `aggregations.nix`
   deleted, 25 dendrites moved into desktop/hyprland/gaming/server aggregate
   dirs, floor of 10 shared dendrites, hosts import selected dirs + single
@@ -1786,7 +1786,7 @@ project/parent inheritance across local/remote/app/subagents;
   tree, U1-U8 unresolved with defaults sent to root for ruling, slices D1
   aggregates → D2 home lane → D3a/b roles → D4 portable upstream (needs
   three Aoide exports: nixosModules.default closing over its own core,
-  lib.livery.resolve output, overlays.default) → D5 selections → D6
+  lib.theme.resolve output, overlays.default) → D5 selections → D6
   songbook requests). D1 LANDED a0156ea on the branch (pushed; not merged, nothing
   activated): four aggregates, flake.nix one line, README/AGENTS integral.
   Parity P1, not P0: only `environment.systemPackages` order differs
@@ -2952,7 +2952,7 @@ project/parent inheritance across local/remote/app/subagents;
   (`fs::songbook_root`) — no flake, no network, no checkout, and no argv naming
   `$AOIDE_FLAKE_ROOT` or `#songbookManifest` (pinned by a hermetic test that
   records the argv). A refusal stages NOTHING, and the gate runs before the
-  livery write, so `stage/` and `run/qml` are byte-unchanged on a refusal. The
+  theme write, so `stage/` and `run/qml` are byte-unchanged on a refusal. The
   daemon's `ricemode` toggle path (which spawns `lyra rice mode stage`) inherits
   all of it. `$AOIDE_FLAKE_ROOT` survives for `rice declare`'s commit-in step
   only, and `lyra onboard` reads the shipped `share/lyra/aoide-options.json`

@@ -17,7 +17,7 @@
 # See docs/architecture/PACKAGE-LAYOUT.md — "NixOS optional, never required."
 #
 # The shape once that lands — Aoide core only (the paint lanes are Linux:
-# Hyprland); songs still RESOLVE (a rice.nix only sets aoide.livery.*, our own
+# Hyprland); songs still RESOLVE (a rice.nix only sets aoide.theme.*, our own
 # option namespace) but nothing renders them on macOS. NOTE: no
 # `imports = [ ../common ]` here on purpose — common carries NixOS-only
 # options (and defaults the blocked-off dendrites below ON), so until it gets

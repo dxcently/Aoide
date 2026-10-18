@@ -10,7 +10,7 @@
 # Two exports:
 #
 #   mkWidget owner slot widgetFn -> record
-#   composeSong widgets          -> { arrangement, manifest, packages,
+#   composeSong widgets          -> { layout, manifest, packages,
 #                                     dependsOn }
 #
 # WHY A PLAIN FUNCTION AND NOT A MODULE FRAGMENT. A fragment is only reachable
@@ -39,7 +39,7 @@
 let
   # The record's CLOSED key set. A key outside this list is a typo, and the
   # failure it causes is silent: `knid = "surface"` leaves `kind` null, so the
-  # widget quietly vanishes from `arrangement.widgets` and its surface never
+  # widget quietly vanishes from `layout.widgets` and its surface never
   # registers. Rejecting strays also keeps this layer as strict as the option
   # it feeds — `modules/nucleus/options.nix`'s `widgetType` submodule refuses
   # an unknown option today, and after the derivation reads records directly a
@@ -162,7 +162,7 @@ let
         msg = "`kind` must be null, \"surface\" or \"dock\" (got ${show kind})";
       }
       # The five registration fields below are typed here and NOWHERE ELSE.
-      # `arrangementWidgets` hands them to the derivation directly, never
+      # `layoutWidgets` hands them to the derivation directly, never
       # through the module system, so `widgetType`'s own `types.enum` /
       # `types.bool` / `types.nullOr` never get a chance to reject a bad value —
       # `layer = "bottom"` or `blur = "yes"` would otherwise land verbatim in
@@ -272,12 +272,12 @@ in
 
       declared = lib.filterAttrs (_: w: (w.kind or null) != null) widgets;
 
-      # Exactly `aoide.arrangement.widgets.<slot>`'s shape, field for field
+      # Exactly `aoide.layout.widgets.<slot>`'s shape, field for field
       # against `modules/nucleus/options.nix`'s `widgetType` submodule. The
       # defaults are restated here rather than left to the option so the
       # generated value is complete at this layer too — the derivation reads
       # this attrset directly, and it never passes through the module system.
-      arrangementWidgets = lib.mapAttrs (_: w: {
+      layoutWidgets = lib.mapAttrs (_: w: {
         inherit (w) kind;
         namespace = w.namespace or null;
         layer = w.layer or "overlay";
@@ -319,7 +319,7 @@ in
         + " Add the slot to the composition, or drop the dependency from the widget's record."
       )
       {
-        arrangement.widgets = arrangementWidgets;
+        layout.widgets = layoutWidgets;
         inherit
           manifest
           packages

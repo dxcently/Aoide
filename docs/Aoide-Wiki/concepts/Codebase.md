@@ -34,13 +34,13 @@ Outputs, all tolerant of empty layers so eval stays robust:
   — the export surface a consuming flake builds against: one
   `nixosModules.<name>` per catalogue entry plus `nucleus` (the module that
   closes over Aoide's own inputs), the base package overlay, the constructor
-  files (`lib.composition`, `lib.livery`, `lib.rices`, `lib.catalogue`),
+  files (`lib.composition`, `lib.theme`, `lib.rices`, `lib.catalogue`),
   Aoide's own rices directory for a host that performs Aoide's songs, and the
   derived `aoide.*` option list `strx onboard` reads.
 - `checks` — the contractual coupling discipline from `lib/checks.nix`
   (`surface-ownership`, `rice-runtime-untracked`, `rice-shape`, `fmt`,
   `discovery`, `phantom-commands`, `nix-independence`, `portability`,
-  `nix-lint`, `livery-fanout`, `generator-offline`, `generator-relocatable`),
+  `nix-lint`, `theme-fanout`, `generator-offline`, `generator-relocatable`),
   one auto-generated `pkg-<name>` per discovered package, plus the `vm-boot`
   headless boot test (below) and the `vm-lock-greeter` graphical login and
   lock test (`tests/vm-lock-greeter.nix`).
@@ -105,7 +105,7 @@ hot-sync half). The same generator also feeds `pkgs/strillix-rices`, which
 bakes the built-in songs plus a prebaked
 `manifest.json`/`registry.json`/`builtin.json` into `share/strillix/rices` — the shipped
 templates a repo-less host's registry/manifest regen reads nix-free
-(`CONTRACTS.md` §4). **`lib/livery.nix`** resolves `aoide.livery.override.*`, the
+(`CONTRACTS.md` §4). **`lib/theme.nix`** resolves `aoide.theme.override.*`, the
 host-set venue-recolour tier (`CONTRACTS.md` §1). **`lib/song.nix`** builds
 each song's widget records from its `_widgets/<slot>.nix` functions — the nix
 analogue of `WidgetSlot.qml` — and `lib/options.nix` is the `aoideOptions`
@@ -123,7 +123,7 @@ discipline, written to throw legibly at eval time on a violation:
   `rices/**` is versioned score and is legitimately read at eval.
 - **`rice-shape`** — the assertions on the committed rices: each `rice.nix`
   is a body of the aggregation shape, every song carries `rice.nix`,
-  `livery.json` and `hyprland.conf`, `hyprland.conf` holds no livery-owned key,
+  `theme.json` and `hyprland.conf`, `hyprland.conf` holds no theme-owned key,
   no stray `.nix` sits outside a song's `rice.nix`/`_widgets/`, and no `../` path
   literal appears in a song's `.nix` text (the host-agnostic song discipline,
   `CONTRACTS.md §5`).
@@ -164,7 +164,7 @@ itself.
 
 ## The option contract (`modules/nucleus/options.nix`)
 
-The versioned seam every other module builds against (livery schema v0,
+The versioned seam every other module builds against (theme schema v0,
 `CONTRACTS.md §1`). It declares options and eval-clean defaults only — it wires
 no behaviour, so an empty config evaluates. The surface:
 
@@ -184,13 +184,13 @@ no behaviour, so an empty config evaluates. The surface:
   QML tree, no shell service). Set once in `hosts/<host>/default.nix` (and
   `habit.rice.available` with it, for what the host keeps built in); the
   performed song's body is the only one imported. See [[Song-Vocabulary#Replay — any song, any host]].
-- `aoide.livery` — the v0 livery schema: closed `palette.{bg,fg,accent,urgent}`
+- `aoide.theme` — the v0 theme schema: closed `palette.{bg,fg,accent,urgent}`
   (base16, permissive hex type) + optional component tiers `bar.*` / `notif.*` /
   `window.*` (each `nullOr` hex, `null` → palette), the additive-optional tiers
   (`base16`, `geometry.*`, `fonts.monospace`, `wallpaper`), and an `override.*`
-  venue tier (host-set only, [[livery|resolved by `lib/livery.nix`]]).
-- `aoide.arrangement` — the v1 arrangement schema: which widget/surface types
-  a song brings into existence. `aoide.livery`, `aoide.arrangement` and
+  venue tier (host-set only, [[theme|resolved by `lib/theme.nix`]]).
+- `aoide.layout` — the v1 layout schema: which widget/surface types
+  a song brings into existence. `aoide.theme`, `aoide.layout` and
   `aoide.surfaces` are the whole paint-lane read set, with the core scalars and
   the song selection root `AGENTS.md` house rule 5 enumerates — no module reads
   another module's options.
@@ -271,12 +271,12 @@ Live-side state, all under the runtime root (`$AOIDE_ROOT`, default
   channel from QML; adapters and widgets bind exactly this path, never compute
   it.
 - **Stage files** split by owner into two trees (command-defrag lane S1):
-  `/stage/` holds rice/paint staging — `livery.json` (resolved livery
-  colours, written by [[livery]]'s `rice stage`/`cover set`/other emitters at
+  `/stage/` holds rice/paint staging — `theme.json` (resolved theme
+  colours, written by [[theme]]'s `rice stage`/`cover set`/other emitters at
   rehearsal — both refuse under `rice mode declarative`, see
   [[Self-Ricing#Staging vs Declarative Mode]] — and reseeded from the active
   song's committed
-  `rices/<song>/livery.json` on every activation by
+  `rices/<song>/theme.json` on every activation by
   `home.activation.aoideSeedStage` in `modules/dendrites/strillix/runtime.nix`
   — a write-temp-then-rename script that injects the same `"song"` field
   `rice stage` writes, so a host that boots without ever staging still
@@ -286,7 +286,7 @@ Live-side state, all under the runtime root (`$AOIDE_ROOT`, default
   over that seed), `mode.json`
   (the staging/declarative mode marker — absent reads as `declarative`), and
   `grimoire.json` (QML-only writer). That same seed also publishes the
-  DECLARED twin at `/declared/livery.json` — the declared song's
+  DECLARED twin at `/declared/theme.json` — the declared song's
   committed notes with the venue recolour applied, one `jq` run to two
   destinations (`CONTRACTS.md §4`). It exists because the live stage is
   rewritten by the runtime writers and so cannot itself state what the venue
@@ -381,10 +381,10 @@ two-binary split.
 **Real code paths:** the whole flake/walker/option/checks layer; both packages
 build; `aoide guide`, `aoide schema --json`, `mcp serve --stdio`, and the audit
 log; `aoide onboard`/`strx onboard` (the clone-onboarding lane,
-[[Clone-and-Run]]); `rice lint` (native [[livery]] lint); the daemon skeleton (audit
+[[Clone-and-Run]]); `rice lint` (native [[theme]] lint); the daemon skeleton (audit
 append, user gate, default-deny event bus); shellbridge (atomic writer, seeded
 stage files, and a live socket accept loop — `focuswindow`); the melete-adapter skeleton (env-driven
-subscription, metadata-only notification boundary); all four livery emitters; the
+subscription, metadata-only notification boundary); all four theme emitters; the
 QML shell skeleton; the baked Stylix and compositor fan-outs; and the whole
 graph/session/project surface — 20 commands (bare `graph`, `graph link`,
 `project add/remove/list`, `session start/phase/end/hook/grant/permit/
@@ -416,8 +416,8 @@ twenty ported from [[dxflake]]'s prior rig into Aoide shape, the rest grown
 since. `hyprland` is the host-invariant
 half of the compositor: keybinds, input devices, tiling layout, misc, and
 behavioural window rules, split out so a re-rice cannot disturb them (the
-compositor lane keeps the livery-derived look and the session plumbing). The `nvf` flake input threads to home-manager via
-`extraSpecialArgs`; the cover-art token (`aoide.livery.wallpaper` → the shared
+compositor lane keeps the theme-derived look and the session plumbing). The `nvf` flake input threads to home-manager via
+`extraSpecialArgs`; the cover-art token (`aoide.theme.wallpaper` → the shared
 `/covers/`) backs the shipped wallpapers; Lekton Nerd Font Mono is the stylix
 face. `neovim`'s own `vim.extraPackages` (nvf) also carries `pkgs.rustc`/
 `pkgs.cargo`, scoped to nvim's wrapped PATH only — its built-in rust-analyzer
@@ -434,7 +434,7 @@ commands — `rice declare/transpose`, the five-command `content` pipeline, `mak
 `update`. Their arg-parsing, schema, gate flag, and audit trail are
 real; only the live-system action is deferred. (`rice stage`/`rice compose`/
 the `rice draft` group are **real** — `rice stage` stages
-`/stage/livery.json` for Quickshell hot-reload, applies geometry,
+`/stage/theme.json` for Quickshell hot-reload, applies geometry,
 borders and the hyprglass switch over `hyprctl`, recolours kitty through
 `stage/terminal-colors.conf` and kitty's control socket, and dresses the lock
 screen of a song that ships a lock picture through `stage/hyprlock.conf`. There is
@@ -449,7 +449,7 @@ outright rather than left as a stub with no design behind it.)
 - [[Package-Layout]]
 - [[Session-Graph]]
 - [[aoide-cli]]
-- [[livery]]
+- [[theme]]
 - [[aoided]]
 - [[shellbridge]]
 - [[dxflake]]

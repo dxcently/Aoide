@@ -67,7 +67,7 @@
 // (widget-structure.md §8).
 //
 // QtObject has no default property, so the animation is a NAMED property
-// (hazards.md §3) — the LiveryState/SurfaceSlot idiom.
+// (hazards.md §3) — the ThemeState/SurfaceSlot idiom.
 
 import QtQuick
 

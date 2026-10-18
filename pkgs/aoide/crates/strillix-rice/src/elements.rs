@@ -7,11 +7,11 @@
 //! A song carries raw config files byte-for-byte under
 //! `rices/<song>/elements/<element>/`, plus ONE small descriptor
 //! (`element.json`, v0 — [`Descriptor`]) naming which files land where
-//! under `run/elements/<element>/`, verbatim or livery-templated, and how
+//! under `run/elements/<element>/`, verbatim or theme-templated, and how
 //! the element starts. [`seed_tree`]/[`seed_song`] are the render pipeline:
 //! verbatim byte copy for `template: false` files,
-//! `crate::livery::emit::file::render` for `template: true` ones, against
-//! the resolved livery. A render error fails only that element and leaves
+//! `crate::theme::emit::file::render` for `template: true` ones, against
+//! the resolved theme. A render error fails only that element and leaves
 //! its existing `run/elements/<element>/` untouched — every file for one
 //! element is rendered into memory FIRST, and only written once all of them
 //! succeed (`render_files` / `write_files`'s own split).
@@ -21,7 +21,7 @@
 //! activation hook (L-E3) are later phases calling the same [`seed_song`]/
 //! [`seed_tree`] primitives — nothing here is lane- or stage-specific.
 
-use crate::livery::resolve::Resolved;
+use crate::theme::resolve::Resolved;
 use serde::Deserialize;
 use std::fmt;
 use std::path::{Path, PathBuf};
@@ -182,7 +182,7 @@ pub struct RenderedFile {
 }
 
 /// Render every file `descriptor` declares, without writing anything.
-/// Verbatim byte copy for `template: false`; `crate::livery::emit::file::render`
+/// Verbatim byte copy for `template: false`; `crate::theme::emit::file::render`
 /// for `template: true`, against `resolved`. Bails on the FIRST error and
 /// writes nothing — so a caller that only commits the result on `Ok` never
 /// leaves an element's existing `run/elements/<element>/` partially
@@ -209,7 +209,7 @@ pub fn render_files(
                     src_path.display()
                 ))
             })?;
-            crate::livery::emit::file::render(&text, resolved)
+            crate::theme::emit::file::render(&text, resolved)
                 .map_err(|e| ElementsError::new(format!("{}: {e}", src_path.display())))?
                 .into_bytes()
         } else {
@@ -366,7 +366,7 @@ pub fn seed_tree(elements_root: &Path, run_root: &Path, resolved: &Resolved) -> 
 
 /// Full render of `song`'s committed `elements/*/element.json` into
 /// `run/elements/` — the shell-reachable bridge `element seed` calls,
-/// against `song`'s own committed `livery.json` (the "declared" tier,
+/// against `song`'s own committed `theme.json` (the "declared" tier,
 /// docs/architecture/ELEMENTS.md's "Declared" flow — a rebuild's activation
 /// hook re-seeds from the STORE copy the same way).
 pub fn seed_song(song: &str) -> Result<SeedReport, ElementsError> {
@@ -378,15 +378,15 @@ pub fn seed_song(song: &str) -> Result<SeedReport, ElementsError> {
         .map_err(|e| ElementsError::new(format!("cannot read {}: {e}", notes_path.display())))?;
     let notes: serde_json::Value = serde_json::from_str(&raw_notes)
         .map_err(|e| ElementsError::new(format!("invalid JSON in {}: {e}", notes_path.display())))?;
-    let validation = crate::livery::lint(&notes);
+    let validation = crate::theme::lint(&notes);
     if !validation.ok {
         return Err(ElementsError::new(format!(
-            "{}: livery schema validation failed: {}",
+            "{}: theme schema validation failed: {}",
             notes_path.display(),
             validation.errors.join("; ")
         )));
     }
-    let resolved = crate::livery::resolve(&notes)
+    let resolved = crate::theme::resolve(&notes)
         .map_err(|e| ElementsError::new(format!("{}: {e}", notes_path.display())))?;
 
     seed_tree(&elements_root, &run_root, &resolved)
@@ -400,7 +400,7 @@ mod tests {
     fn resolved() -> Resolved {
         let raw = std::fs::read_to_string("tests/fixtures/valid.json").unwrap();
         let container: serde_json::Value = serde_json::from_str(&raw).unwrap();
-        crate::livery::resolve(&container).unwrap()
+        crate::theme::resolve(&container).unwrap()
     }
 
     fn valid_json(element: &str) -> String {
@@ -547,7 +547,7 @@ mod tests {
     }
 
     #[test]
-    fn render_files_renders_a_template_file_against_the_resolved_livery() {
+    fn render_files_renders_a_template_file_against_the_resolved_theme() {
         let dir = aoide_test_support::unique_tmp("elements-template");
         let element_dir = dir.join("elements").join("waybar");
         std::fs::create_dir_all(&element_dir).unwrap();

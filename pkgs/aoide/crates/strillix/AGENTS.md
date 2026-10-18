@@ -22,25 +22,25 @@
   never the invoking `strillix` process's own env. Don't relax either to "just
   reuse the live root for a quick test" — that is the exact live-state
   corruption this command exists to make impossible.
-- **`commands::preview`'s `--livery <spec>` has exactly FOUR forms, all
-  routed through the SAME `strillix_rice::livery::resolve::resolve` +
-  `to_json_string` engine call `strx livery resolve` itself uses (never a
+- **`commands::preview`'s `--theme <spec>` has exactly FOUR forms, all
+  routed through the SAME `strillix_rice::theme::resolve::resolve` +
+  `to_json_string` engine call `strx theme resolve` itself uses (never a
   hand-rolled shortcut for any one form):** `live` (the resolved LIVE stage
-  twin, `aoide_storage::fs::stage_dir().join("livery.json")` — read only,
+  twin, `aoide_storage::fs::stage_dir().join("theme.json")` — read only,
   never written); a bare song name (that song's own
-  `rices/<name>/livery.json` — independent of the preview's own
-  `--song`); a path to a livery file; or a path to a base16 scheme (JSON
+  `rices/<name>/theme.json` — independent of the preview's own
+  `--song`); a path to a theme file; or a path to a base16 scheme (JSON
   `{"base00": …, …}` or the flat `key: value` line shape — detected by
   `base00` present and `palette` absent, synthesized into a palette by
-  `livery_from_base16` per CONTRACTS.md §1's base16 column reversed). A
+  `theme_from_base16` per CONTRACTS.md §1's base16 column reversed). A
   resolve failure is an error that leaves the previous staged file intact —
-  never a partial write. Default (no `--livery`) is the preview's own
+  never a partial write. Default (no `--theme`) is the preview's own
   `--song`.
-- **`preview.json` never carries a bare `livery` key.** The P2 canvas
-  treats it as a legacy alias of `liverySource` and deletes it on every
+- **`preview.json` never carries a bare `theme` key.** The P2 canvas
+  treats it as a legacy alias of `themeSource` and deletes it on every
   save of its own; the builder and `preview set` do the same on every
   write (migrating away any legacy key an older doc still carries), so the
-  two never ping-pong the key back and forth. `liverySource` is the one
+  two never ping-pong the key back and forth. `themeSource` is the one
   name for the spec as given.
 - **`preview.json`'s `strillix` key is the launching binary's own
   `std::env::current_exe()`, written once at root build only.** `preview
@@ -50,9 +50,9 @@
   `preview set` entirely, which is exactly why a canvas launched by an
   older or different binary must not trust PATH for its own rail.
 - **`commands::preview`'s root seeds four OTHER lane-read stage files a
-  song's own widgets/livery never touch, so nothing starts with a parse
+  song's own widgets/theme never touch, so nothing starts with a parse
   warning on a missing file:** `/stage/mode.json`
-  (`LiveryState.qml`'s convention) is REWRITTEN on every build and on
+  (`ThemeState.qml`'s convention) is REWRITTEN on every build and on
   `preview set --song` — it always names the CURRENT song, never stale;
   `/stage/cover.json`, `/stage/grimoire.json` (`GrimoireLedger`'s
   `launches` is an OBJECT keyed by app id, never an array — matches the

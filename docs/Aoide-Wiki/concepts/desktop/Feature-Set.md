@@ -18,7 +18,7 @@ façade]]). Many capabilities below are Melete's, *surfaced* through AoideOS —
 see the "Provided by" column.
 
 Every integration is a dendrite ([[Snowflake-Anatomy]]): opt-in, flag-toggled,
-themed by [[livery]], and — where it touches the outside world —
+themed by [[theme]], and — where it touches the outside world —
 `enable = false` by default and behind the [[Governance|gate]].
 
 This list is what ships. Because its agent ([[Melete]]) is a coding agent,
@@ -97,7 +97,7 @@ The design surfaces **both** agent schedules and system timers in one place.
 - System timers: systemd timers surfaced read-only alongside.
 - Widget: a Quickshell agenda/timers widget reads a `/stage/*.json`
   state file and shows pending one-shots, recurring cadences, chained jobs
-  ("waiting on `<id>`"), and system timers — live, themed by livery.
+  ("waiting on `<id>`"), and system timers — live, themed by theme.
 - Governance: scheduled *coding* runs still route their result through the
   rebuild gate; no background self-updaters ([[Governance]]).
 - Surfaced as a planned `aoide sched …` command (list / create / cancel, not
@@ -176,7 +176,7 @@ more]] on demand. Rows marked *(planned)* have no command yet in `aoide schema
 | System timers view *(planned)* | systemd | agenda widget | on (read-only) | — |
 | Vault knowledge | Mneme | pipeline · `aoide …` | via approve gate | approve gate |
 | Autonomous code tasks | Melete | messaging stream · PR | — | rebuild gate |
-| Self-ricing | livery + paint lanes | `strx rice` (`lint`/`stage`/`compose`/`draft`/`mode`/`take`/`back`/`declare` real; `transpose` exit-64 stub) | on | rebuild gate |
+| Self-ricing | theme + paint lanes | `strx rice` (`lint`/`stage`/`compose`/`draft`/`mode`/`take`/`back`/`declare` real; `transpose` exit-64 stub) | on | rebuild gate |
 | Agent-session terminal commander | shellbridge + aoided watcher | widget · `aoide session` · click/keybind jump | on | — |
 
 ## Related

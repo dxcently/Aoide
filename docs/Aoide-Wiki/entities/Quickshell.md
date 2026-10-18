@@ -12,7 +12,7 @@ The shell and UI runtime for Aoide, written in QML. It renders the bar
 (agent sessions, connection state), the notification popup + ledger, the
 launcher, the desktop dock, and the wallpaper layer.
 
-Quickshell reads `stage/livery.json` at runtime, so nearly the full rice —
+Quickshell reads `stage/theme.json` at runtime, so nearly the full rice —
 colors, typography, geometry, shell widgets — hot-reloads during rehearsal
 (preview) without a rebuild. GTK/Qt targets require app restarts and are
 adopt-only for preview purposes.
@@ -24,8 +24,8 @@ MCP directly.
 ## Implementation
 
 The QML skeleton is shipped in `pkgs/strillix-shell/qml/`. `shell.qml`
-(a `ShellRoot`) instantiates four shared singletons — **`LiveryState`**
-(watches `stage/livery.json` via a `FileView`, re-binding every surface's
+(a `ShellRoot`) instantiates four shared singletons — **`ThemeState`**
+(watches `stage/theme.json` via a `FileView`, re-binding every surface's
 colours in one pass on an atomic replace, the hot-reload), **`ShellBridge`**
 (the unix-socket client, the sole outbound channel from QML —
 `focusSession(address)` → shellbridge → hyprctl, no MCP/HTTP/shell-exec from
@@ -50,7 +50,7 @@ shipped baseline every song falls back to → the anchor's lane-side
 non-visual `QtObject` sibling instead of
 a sized `Item`, since each slot's root IS its own `PanelWindow` rather than
 content parented into an existing layout. `SongSurfaces` hosts one more
-`SurfaceSlot` per surface-kind entry the active song's `aoide.arrangement`
+`SurfaceSlot` per surface-kind entry the active song's `aoide.layout`
 declares (empty for sonata today, so a no-op). `AoideClipboard` and
 `GrimoireLedger` are lane-owned utility singletons injected into the
 launcher slot as extras; `AoideWallpaperPicker` answers `aoide:wallpaper`
@@ -72,14 +72,14 @@ there: after the switch the strillix lane's `aoide-rice-reload` unit runs `stril
 reload`, which syncs its widget bodies back into `run/qml/songs/<song>/`.
 `hyprland.conf` is owned by
 home-manager's `wayland.windowManager.hyprland`: the compositor lane
-writes livery + keybind fragments with `mkBefore`, and the quickshell
+writes theme + keybind fragments with `mkBefore`, and the quickshell
 lane appends its `exec-once` autostart with `mkAfter`, so the two lanes
 compose the one config file without collision.
 
 ### IPC hot-reload — closing the dynamic-load gap
 
-`LiveryState`'s `FileView` watch (above) covers exactly one tier:
-`stage/livery.json`. Quickshell's own built-in file watcher — the thing that
+`ThemeState`'s `FileView` watch (above) covers exactly one tier:
+`stage/theme.json`. Quickshell's own built-in file watcher — the thing that
 would otherwise auto-reload on any QML edit — only tracks files reached
 through a static `import` statement; every song/lane widget loads
 dynamically via `Qt.createComponent(url)` (`WidgetSlot`/`SurfaceSlot`, see
@@ -92,7 +92,7 @@ found via live debugging.
 
 `AoideIpc.qml` closes it: a `Quickshell.Io.IpcHandler` singleton
 (`target: "shell"`, one exposed `function reload(): void { Quickshell.reload(false) }`),
-instantiated in `shell.qml` alongside `livery`/`bridge`/`stagingEngine`/`shared`
+instantiated in `shell.qml` alongside `theme`/`bridge`/`stagingEngine`/`shared`
 — no properties of its own, wired purely for the side effect. `quickshell ipc
 call shell reload` invokes it from outside the process; `strx reload`
 (`crates/strillix-rice/src/commands/reload.rs`, `crates/strillix-rice/src/ipc.rs`) shells out to
@@ -115,7 +115,7 @@ re-registering windows with the compositor.
 
 `strx rice stage` (`crates/strillix-rice/src/commands/rice.rs`) auto-triggers this
 after `sync_song_widgets` reports actually-changed widget files — the
-palette/notes tier is already covered by `LiveryState`'s own watch, so a
+palette/notes tier is already covered by `ThemeState`'s own watch, so a
 re-stage with no widget-body changes never reloads. Whether this also closes
 the *separate* gap of a brand-new widget file needing a restart to be
 discovered at all is unconfirmed — untested against a live instance as of
@@ -195,7 +195,7 @@ from Quickshell's built-in `DesktopEntries`, filters on a prefix-ranked
 case-insensitive substring as you type, navigates with Up/Down + Ctrl+J/K,
 launches on Enter/click, dismisses on Escape / scrim-click. It is a
 Pantheon pane (`GadgetFrame`, cream Aero glass, `♪` prompt, lowercase
-`launcher.summon` callout), colours strictly from `livery`.
+`launcher.summon` callout), colours strictly from `theme`.
 
 Two design decisions worth carrying forward:
 
@@ -275,7 +275,7 @@ desktop.
 
 The check asks two independent signals, in order, and they answer different
 questions. `hyprctl layers -j` is compared against what the active song
-DECLARED should be painted — `aoide.arrangement.surfaces`, published by the
+DECLARED should be painted — `aoide.layout.surfaces`, published by the
 lane's build as `run/qml/songs/surfaces.json` (CONTRACTS.md §5): each
 declared `aoide-<slot>` namespace must be mapped on every enabled output
 when it is `perMonitor`, and at least once otherwise. A declared surface
@@ -357,7 +357,7 @@ the shell — no bar, no dock, no wallpaper. See
 - [[Gadget-Dock]]
 - [[shellbridge]]
 - [[Self-Ricing]]
-- [[livery]]
+- [[theme]]
 - [[Codebase]]
 - [[Hyprland]]
 - [[Widget-Bridge-Contract]]

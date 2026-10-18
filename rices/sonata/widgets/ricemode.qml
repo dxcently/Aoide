@@ -2,14 +2,14 @@
 // song's bar embeds it as `WidgetSlot { slot: "ricemode" }`, and this body is
 // the floor for every song that does not dress the slot itself.
 //
-// WidgetSlot-hosted Item with no extras beyond the universal `livery`/`bridge`
+// WidgetSlot-hosted Item with no extras beyond the universal `theme`/`bridge`
 // (pkgs/strillix-shell/qml/slots.md). It reports its own footprint and reaches the
 // engine only through `bridge`: it starts no process and imports no compositor
 // module.
 //
 // ── The face ────────────────────────────────────────────────────────────────
 // Glyph + word + colour per mode (the vocabulary comment below), read live off
-// livery.riceMode (stage/mode.json). A DRAWN chevron follows the word and marks
+// theme.riceMode (stage/mode.json). A DRAWN chevron follows the word and marks
 // the menu, so it is on screen at rest and not an invisible click that rots
 // (bar.qml's header: a second invisible path to a command is not a shortcut).
 // It is drawn, two 1px rotated rules, because hazards.md §1 holds that any
@@ -34,7 +34,7 @@
 // a dot on the current draft. The marked rows only close the menu. In draft mode
 // the drafted song's row is live: it leaves the draft for plain staging.
 // A stage, a declarative, an enter and a new each change what is live, so the
-// word reads `…` and every click is swallowed until livery.riceMode, the draft
+// word reads `…` and every click is swallowed until theme.riceMode, the draft
 // name or the song changes, or 10s pass: the double click that sent two
 // switches. A `save` changes nothing and holds nothing.
 //
@@ -56,7 +56,7 @@ import Quickshell
 Item {
     id: root
 
-    required property var livery
+    required property var theme
     required property var bridge
 
     implicitWidth: face.implicitWidth
@@ -67,10 +67,10 @@ Item {
         return Qt.rgba(c.r, c.g, c.b, a)
     }
 
-    // ── Rice mode vocabulary (Aoide-native — livery.riceMode) ───────────────
+    // ── Rice mode vocabulary (Aoide-native — theme.riceMode) ───────────────
     // The rice engine's edit-state, one of exactly three strings (storage::
     // mode's RiceMode, lowercase on the wire, hot from stage/mode.json via
-    // LiveryState): is this manuscript under the pen right now?
+    // ThemeState): is this manuscript under the pen right now?
     //   declarative → || decl — the measure is CLOSED. Live writes refused;
     //     what's true is what the last home-manager switch baked. Plain
     //     ASCII double bar reads as "finished and published" without
@@ -96,7 +96,7 @@ Item {
     //     "a copy, not the real thing"), distinct from both resting ink
     //     and live gold. Not urgent: no mode is an alarm.
     // Unknown strings fall through to the declarative row — the same
-    // safe-default reading LiveryState and mode.rs apply to an absent or
+    // safe-default reading ThemeState and mode.rs apply to an absent or
     // corrupt marker.
     function modeGlyph(m) {
         if (m === "staging") return "♪"
@@ -109,15 +109,15 @@ Item {
         return "decl"
     }
     function modeColor(m) {
-        if (m === "staging") return root.livery.paletteAccent
-        if (m === "draft")   return root.livery.holoBlue
-        return root.livery.paletteFg
+        if (m === "staging") return root.theme.paletteAccent
+        if (m === "draft")   return root.theme.holoBlue
+        return root.theme.paletteFg
     }
 
     // ── State ───────────────────────────────────────────────────────────────
-    readonly property string mode: root.livery.riceMode
-    readonly property string draft: (root.livery.modeRaw && root.livery.modeRaw.draft) || ""
-    readonly property string song: root.livery.songName
+    readonly property string mode: root.theme.riceMode
+    readonly property string draft: (root.theme.modeRaw && root.theme.modeRaw.draft) || ""
+    readonly property string song: root.theme.songName
     readonly property bool canMenu: !!root.bridge && typeof root.bridge.riceMenu === "function"
 
     property bool pending: false       // a mode change was sent and has not landed
@@ -232,7 +232,7 @@ Item {
         Rectangle {
             anchors.fill: parent
             visible: row.live && row.hot
-            color: root.livery.barFg
+            color: root.theme.barFg
             opacity: 0.16
         }
         Rectangle {
@@ -253,7 +253,7 @@ Item {
             text: row.label
             textFormat: Text.PlainText
             elide: Text.ElideRight
-            color: root.livery.barFg
+            color: root.theme.barFg
             opacity: row.ink
             font.family: "monospace"
             font.pixelSize: 12
@@ -304,9 +304,9 @@ Item {
                 width: 208
                 height: rows.implicitHeight + 12
                 radius: 0
-                color: root.withA(root.livery.barBg, 0.96)
+                color: root.withA(root.theme.barBg, 0.96)
                 border.width: 1
-                border.color: root.livery.barAccent
+                border.color: root.theme.barAccent
 
                 HoverHandler { id: plateHover }
 

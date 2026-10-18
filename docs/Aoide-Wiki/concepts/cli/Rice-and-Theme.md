@@ -2,17 +2,17 @@
 type: concept
 created: 2026-08-19
 updated: 2026-10-12
-tags: [aoide, cli, rice, livery, song]
+tags: [aoide, cli, rice, theme, song]
 ---
 
-# Rice & Livery Commands — the Self-Ricing Command Surface
+# Rice & Theme Commands — the Self-Ricing Command Surface
 
-The `rice`, `cover`, and `livery` command groups are part of `strillix`, the AoideOS
+The `rice`, `cover`, and `theme` command groups are part of `strillix`, the AoideOS
 paint binary ([[Overview]]), and drive the [[Self-Ricing]] loop:
 scaffold a song ([[Song-Anatomy]]), hot-load it live, iterate inside a routed
 draft with take history, and validate/resolve/emit its notes through the
-native [[livery]] engine. Handlers live in
-`pkgs/aoide/crates/strillix-rice/src/commands/{rice,draft,mode,cover,livery,take}.rs`;
+native [[theme]] engine. Handlers live in
+`pkgs/aoide/crates/strillix-rice/src/commands/{rice,draft,mode,cover,theme,take}.rs`;
 `rice declare`'s handler and the `rice transpose` stub registration live in
 `pkgs/aoide/crates/strillix/src/commands/stubs.rs`.
 
@@ -35,16 +35,16 @@ process start: on first run it moves a pre-existing
 gated on its own override being unset. All file
 writes in this group route through `aoide_storage::fs::atomic_write`
 (temp `<stem>.tmp.<pid>` then rename, symlink-transparent — a write to a
-symlinked `stage/livery.json` lands in the link target). Shared stage
+symlinked `stage/theme.json` lands in the link target). Shared stage
 mutators serialise through a `.stage.lock` `flock` in the stage dir
 (`with_stage_lock`, which nests for the thread that already holds it).
 
 Every command takes `--json`. Without it the CLI prints the human `message`
 line; with it, an envelope `{status, command, message, gated, changed?, data?}`
 (`pkgs/aoide/crates/protocol/src/output.rs`). Exit codes: 0 ok, 1 error,
-2 usage, 64 not-implemented. Exception: the three `livery` commands print the
+2 usage, 64 not-implemented. Exception: the three `theme` commands print the
 engine's raw bytes (carried in `data.stdout`) instead of the message in text
-mode — see `livery lint` below. Names (`<name>`, `<song>`, draft names)
+mode — see `theme lint` below. Names (`<name>`, `<song>`, draft names)
 everywhere must match `^[a-z0-9][a-z0-9-]*$`.
 
 ### strx rice lint
@@ -53,16 +53,16 @@ everywhere must match `^[a-z0-9][a-z0-9-]*$`.
 strx rice lint [<name>|<path>] [--json]
 ```
 
-- **Reads:** the target livery file — `<path>` literally if it exists as a
-  file, else `rices/<name>/livery.json`, else (no arg)
-  `/stage/livery.json`. Validates in-process with the native livery
-  engine (`pkgs/aoide/crates/strillix-rice/src/lint.rs` → `livery::lint`); no external
+- **Reads:** the target theme file — `<path>` literally if it exists as a
+  file, else `rices/<name>/theme.json`, else (no arg)
+  `/stage/theme.json`. Validates in-process with the native theme
+  engine (`pkgs/aoide/crates/strillix-rice/src/lint.rs` → `theme::lint`); no external
   binary.
-- **Output:** ok → `"livery schema validation passed"`, data
-  `{livery, schemaVersion: "0", engine: "livery"}`. Failure → exit 1, data
-  `{livery, errors: [...]}` (a missing/unreadable file or invalid JSON is
-  also a lint failure, exit 1). No staged livery and no arg → usage, exit 2,
-  `reason: "no-staged-livery"`.
+- **Output:** ok → `"theme schema validation passed"`, data
+  `{theme, schemaVersion: "0", engine: "theme"}`. Failure → exit 1, data
+  `{theme, errors: [...]}` (a missing/unreadable file or invalid JSON is
+  also a lint failure, exit 1). No staged theme and no arg → usage, exit 2,
+  `reason: "no-staged-theme"`.
 - **Notes:** read-only; not gated. Schema failures are `status: "error"`,
   exit 1 — never an `ok` with errors embedded.
 
@@ -74,17 +74,17 @@ strx rice stage [<name>] [--json]
 
 - **Reads:** `/stage/mode.json` (entrypoint guard), then the notes for
   `<name>` (must parse as JSON; full schema validation is `rice lint`'s job)
-  — the runtime `rices/<name>/livery.json`, with the venue's
+  — the runtime `rices/<name>/theme.json`, with the venue's
   `/declared/venue.json` (the slots it recolours and the geometry the
   host sets) laid over it when `<name>` is the declared song
-  (the twin `/declared/livery.json`'s own `"song"` field names it;
+  (the twin `/declared/theme.json`'s own `"song"` field names it;
   CONTRACTS.md §4). A `venue.json` that cannot be parsed refuses before
   anything is written. No `<name>`:
-  re-resolves the current song from the staged livery's own `"song"` field
-  (`/stage/livery.json`).
+  re-resolves the current song from the staged theme's own `"song"` field
+  (`/stage/theme.json`).
   Env: `$HYPRLAND_INSTANCE_SIGNATURE` (guards the compositor apply),
   `$AOIDE_SESSION_ID` (stamped on an auto-take), `$AOIDE_STAGE_DIR`.
-- **Writes:** `/stage/livery.json` (atomic, symlink-transparent — in
+- **Writes:** `/stage/theme.json` (atomic, symlink-transparent — in
   Draft mode the write lands in the routed draft file; the `"song"` field is
   injected into the staged copy); `/stage/cover.json` — the song's own
   derivable cover (`/covers/<name>.{webp,png,jpg,jpeg}`) as
@@ -92,7 +92,7 @@ strx rice stage [<name>] [--json]
   none. A pick already stamped for this same song is left byte-identical
   (CONTRACTS.md §4); widget QML bodies synced from
   `rices/<name>/widgets/*.qml` into `run/qml/songs/<name>/`;
-  `run/qml/songs/registry.json` rewritten for the song from the livery's
+  `run/qml/songs/registry.json` rewritten for the song from the theme's
   `.widgets` key. In Staging mode with an explicit `<name>`, also updates
   `/stage/mode.json`'s `song` and `stagingSong` (in Draft mode the marker is
   deliberately untouched). In Draft mode, auto-mints a take (cause `"stage"`): writes
@@ -109,7 +109,7 @@ strx rice stage [<name>] [--json]
   (`pkgs/aoide/crates/strillix-rice/src/live.rs`). If the widget-body sync changed
   anything, spawns `quickshell -p <run_qml_dir>/shell.qml ipc call shell
   reload` (best-effort; success judged on empty stdout, not the exit code —
-  `pkgs/aoide/crates/strillix-rice/src/ipc.rs`). Data keys: `{name, livery, cover,
+  `pkgs/aoide/crates/strillix-rice/src/ipc.rs`). Data keys: `{name, theme, cover,
   coverStage, wallpaper, hyprctl, terminal, widgets, slots, registry, reload,
   seam}`.
 - **Notes:** refuses with `reason: "declarative-mode-locked"` (exit 1) while
@@ -126,8 +126,8 @@ strx rice compose <name> [--from <song>] [--force] [--json]
 - **Reads:** `--from`'s notes (`--from` default `"sonata"`; must exist and
   parse as JSON), resolved two tiers by `resolve_from_notes_path`
   (`pkgs/aoide/crates/strillix-rice/src/commands/rice.rs`): the host rices's
-  `rices/<from>/livery.json` under the runtime root FIRST, else
-  `<templates>/<from>/livery.json` in the shipped score templates —
+  `rices/<from>/theme.json` under the runtime root FIRST, else
+  `<templates>/<from>/theme.json` in the shipped score templates —
   `pkgs/strillix-rices`, a verbatim copy of the committed `rices/`
   tree plus prebaked `manifest.json`/`registry.json` baked by
   `lib/rices.nix` (the same generator the checkout-host `nix eval` path
@@ -139,9 +139,9 @@ strx rice compose <name> [--from <song>] [--force] [--json]
   `rices/<name>/` (never the templates dir — compose TO always
   lands in the host rices), all atomic:
   `rice.nix` (a body copying `--from`'s palette/window/geometry into
-  `aoide.livery.*`, with the ten strillix providers and the `strillix` renderer),
+  `aoide.theme.*`, with the ten strillix providers and the `strillix` renderer),
   `hyprland.conf` (`--from`'s when it ships one, else a header with no keys),
-  `livery.json` (verbatim mirror of `--from`'s), `design/intent.md`
+  `theme.json` (verbatim mirror of `--from`'s), `design/intent.md`
   (honest-empty template), `widgets/.gitkeep`.
 - **Output:** data `{name, from, nextSteps: [...]}`.
 - **Notes:** errors (exit 1) on invalid name (`invalid-name`), invalid
@@ -174,8 +174,8 @@ strx rice list [--json]
 ```
 
 - **Reads:** the directories under `rices/` whose name is a valid song
-  name and which hold a `livery.json`; each one's notes are parsed. Also reads
-  `/stage/mode.json` and the declared twin `/declared/livery.json`.
+  name and which hold a `theme.json`; each one's notes are parsed. Also reads
+  `/stage/mode.json` and the declared twin `/declared/theme.json`.
 - **Output:** `"N song(s)"`; data `{mode, song, draft, stagingSong, declared,
   songs: [{name, ok, reason?}]}`, `songs` sorted by name. `mode` is the rice
   mode; `song` and `draft` are the live pair, `stagingSong` the last-staged
@@ -191,19 +191,19 @@ strx rice list [--json]
 strx rice draft save [<name>] [--json]
 ```
 
-- **Reads:** `/stage/livery.json` (required — must parse and carry a
+- **Reads:** `/stage/theme.json` (required — must parse and carry a
   `"song"` field; reads transparently through a Draft-mode symlink), and
   `/stage/cover.json` if present.
-- **Writes:** `rices/<song>/drafts/<name>/livery.json` (atomic copy
+- **Writes:** `rices/<song>/drafts/<name>/theme.json` (atomic copy
   of the current stage) and, if the stage has one,
   `…/drafts/<name>/cover.json`; removes a stale draft `cover.json` when the
   stage no longer has one (the draft mirrors the stage exactly at save time).
-- **Output:** data `{name, song, livery, cover}`.
+- **Output:** data `{name, song, theme, cover}`.
 - **Notes:** upserts; works in any mode — never gated by the declarative
   lock, never touches `mode.json`. With no `<name>` the command mints the
   lowest free `draft-<n>` among the staged song's `drafts/` entries and
   returns it as `name`; this is the only place a draft name is minted.
-  Errors: `no-staged-livery`, `invalid-json`, `no-resolvable-song`,
+  Errors: `no-staged-theme`, `invalid-json`, `no-resolvable-song`,
   `invalid-name` (exit 1).
 
 ### strx rice draft list
@@ -214,10 +214,10 @@ strx rice draft list [<song>] [--json]
 
 - **Reads:** with `<song>`, `rices/<song>/drafts/*/`; without, walks
   every song under `rices/`. Only directories containing a
-  `livery.json` count (others silently skipped). Also reads
+  `theme.json` count (others silently skipped). Also reads
   `/stage/mode.json` to flag the currently-routed draft.
 - **Output:** `"N draft(s)"`; data `{drafts: [{song, name, savedAt,
-  current}], scope}` — `savedAt` is the draft `livery.json`'s mtime as
+  current}], scope}` — `savedAt` is the draft `theme.json`'s mtime as
   ISO-8601 UTC; `current` is true iff `mode.json` is in Draft mode routed to
   that draft.
 - **Notes:** read-only. An empty scope is `ok` with an empty list, never an
@@ -229,7 +229,7 @@ strx rice draft list [<song>] [--json]
 strx rice draft drop <name> [--json]
 ```
 
-- **Reads:** `/stage/livery.json`'s `"song"` field (to resolve which
+- **Reads:** `/stage/theme.json`'s `"song"` field (to resolve which
   song's `drafts/` to act under) and `/stage/mode.json`.
 - **Writes:** deletes `rices/<song>/drafts/<name>/` recursively.
 - **Output:** `"dropped draft `<name>` for `<song>`"`; data `{name, song}`.
@@ -260,11 +260,11 @@ strx rice mode stage [<name>] [--json]
 ```
 
 - **Reads:** `/stage/mode.json`; for a bare call, resolves the song from
-  the marker's `stagingSong` first, then `/stage/livery.json`'s `"song"`
+  the marker's `stagingSong` first, then `/stage/theme.json`'s `"song"`
   field.
 - **Writes:** when a song resolves, seeds and plans its stage first; only
   once the song is accepted does it tear down any Draft-mode routing symlink
-  at `/stage/livery.json`, then write everything `rice stage` writes (stage livery/cover, widget sync, registry sync, live
+  at `/stage/theme.json`, then write everything `rice stage` writes (stage theme/cover, widget sync, registry sync, live
   `hyprctl`/Quickshell IPC); finally `/stage/mode.json`
   (`mode: "staging"`, `song`, `stagingSong`, `since`).
 - **Output:** the data of the `rice stage` it ran (`hyprctl`, `terminal`,
@@ -283,14 +283,14 @@ strx rice mode declarative [<name>] [--json]
 ```
 
 - **Reads:** `/stage/mode.json`; with no `<name>`, resolves the declared
-  song off `/declared/livery.json`'s `"song"` field, falling back to
-  `/stage/livery.json`'s own `"song"` field only when no such twin exists
+  song off `/declared/theme.json`'s `"song"` field, falling back to
+  `/stage/theme.json`'s own `"song"` field only when no such twin exists
   (CONTRACTS.md §4).
 - **Writes:** when a song resolves, plans the re-pin first and tears down
   any Draft-mode routing symlink only once it is accepted (a refusal leaves
-  the draft routed); then re-pins `/stage/livery.json` (plus widget/registry sync,
+  the draft routed); then re-pins `/stage/theme.json` (plus widget/registry sync,
   same as `rice stage`) from that song's COMMITTED
-  `rices/<name>/livery.json` — or, for the song the declared twin
+  `rices/<name>/theme.json` — or, for the song the declared twin
   names, from the twin, venue recolour included; then writes
   `/stage/mode.json`
   (`mode: "declarative"`, `draft` cleared; `stagingSong` carried forward
@@ -319,12 +319,12 @@ strx rice mode draft <name> [--json]
 ```
 
 - **Reads:** `/stage/mode.json` (guard + marker carry-over);
-  `/stage/livery.json`'s `"song"` field to resolve `<song>`.
-- **Writes:** if `rices/<song>/drafts/<name>/livery.json` doesn't
+  `/stage/theme.json`'s `"song"` field to resolve `<song>`.
+- **Writes:** if `rices/<song>/drafts/<name>/theme.json` doesn't
   exist yet, forks it from the current stage (the same write `rice draft
   save` performs, incl. `cover.json` mirror). Then removes whatever sits at
-  `/stage/livery.json` and creates it as a SYMLINK to
-  `rices/<song>/drafts/<name>/livery.json`. Finally writes
+  `/stage/theme.json` and creates it as a SYMLINK to
+  `rices/<song>/drafts/<name>/theme.json`. Finally writes
   `/stage/mode.json` (`mode: "draft"`, `song`, `draft`, `since`). Last, a
   baseline take of the draft as entered (cause `enter`, the take and head files
   join `changed`), unless it equals the head: re-entering an unchanged draft
@@ -336,7 +336,7 @@ strx rice mode draft <name> [--json]
   when no song is staged (`no-resolvable-song`). From here on every write to
   the stage file — `rice stage`, a hand-edit — lands directly in the draft
   via `atomic_write`'s symlink transparency; no save step. Only
-  `livery.json` is routed — `cover set`/`stage/cover.json` are not. Drafts
+  `theme.json` is routed — `cover set`/`stage/cover.json` are not. Drafts
   sit under the runtime root, outside the git checkout entirely;
   `rice declare` never carries one into the checkout, `.gitignore`
   (`rices/*/drafts/`) keeps a hand-copied one untracked, and the
@@ -354,11 +354,11 @@ strx cover set --from-skwd --kind <static|video|we> <path|id> [--json]
 - **Reads:** `/stage/mode.json` (entrypoint guard); stats the resolved
   cover file (absolute `<path>` literal; a bare name resolves against
   `/covers/`; a `we:<id>` token is a Wallpaper Engine scene and names no
-  file at all); `/stage/livery.json`'s own `"song"` field — the song
+  file at all); `/stage/theme.json`'s own `"song"` field — the song
   the pick is stamped for, and the song `--clear` derives a default for; with
   `--from-skwd`, `/stage/wallpaper-provider` — the host's provider, which
   decides whether a provider's report is Aoide's business at all. In
-  Draft mode, also reads the staged livery/cover for the auto-take.
+  Draft mode, also reads the staged theme/cover for the auto-take.
 - **Writes:** `/stage/cover.json` — atomic, pretty
   `{"path": "<abs>", "kind": "static|video", "pick": true, "song": "<staged song>"}`
   (or `{"kind": "we", "weId": "<id>", …}` for a scene) + trailing newline, the
@@ -367,7 +367,7 @@ strx cover set --from-skwd --kind <static|video|we> <path|id> [--json]
   `--position` (or `auto`) and a file name that carries `_tile`, in any case —
   and `"position"` only when `--position tile` or `fill` forced it; the
   wallpaper layer then repeats it at 1:1 instead of cropping it to fill. NOT
-  symlink-routed in Draft mode (only `livery.json` is). `--clear` reverses it:
+  symlink-routed in Draft mode (only `theme.json` is). `--clear` reverses it:
   the staged song gets its own default back — its derivable cover, else
   `cover.json` removed (the baked/palette fallback, plus the song's own live
   board). `--from-skwd` records an external provider's own report instead, and
@@ -413,7 +413,7 @@ strx cover sync [--json]
 
 - **Reads:** `/stage/wallpaper-provider` (the host's provider — absent means
   the shell's own layer), `/stage/cover.json` and
-  `/stage/livery.json` (does a pick apply to the staged song right now?),
+  `/stage/theme.json` (does a pick apply to the staged song right now?),
   `$AOIDE_SKWD_WALL_STANDIN` (the step-aside image's store path).
 - **Writes:** nothing. It runs `skwd-helm` — `apply <path|we:<id>> -o '*'` for
   an applicable pick, `clear` (falling back to the step-aside image) when none
@@ -432,22 +432,22 @@ strx cover sync [--json]
   that hook races the daemon's own socket, and a restarted provider re-asserts
   the staged state without a rebuild.
 
-### strx livery emit
+### strx theme emit
 
 ```
-strx livery emit <target> [<name>|<path>] [--out PATH] [--template STR] [--json]
+strx theme emit <target> [<name>|<path>] [--out PATH] [--template STR] [--json]
 ```
 
-- **Reads:** the livery file (`<path>` literal if it exists, else
-  `rices/<name>/livery.json`, else `/stage/livery.json` — the
+- **Reads:** the theme file (`<path>` literal if it exists, else
+  `rices/<name>/theme.json`, else `/stage/theme.json` — the
   name/path is args[1], after `<target>`). Validates (closed v0 schema) and
   resolves (aliases deref'd, component fallbacks applied) in-process.
 - **Writes:** with `--out PATH`, the emitted bytes are atomic-written to PATH
   instead of printed.
 - **Output:** TEXT MODE PRINTS RAW BYTES (from `data.stdout`), not the
-  message line — strillix special-cases the `livery` group
+  message line — strillix special-cases the `theme` group
   (`pkgs/aoide/crates/strillix/src/lib.rs`). Per target
-  (`pkgs/aoide/crates/strillix-rice/src/livery/emit/`):
+  (`pkgs/aoide/crates/strillix-rice/src/theme/emit/`):
   - `stage` — pretty stage JSON: `{schemaVersion, palette, bar, notif,
     window, base16?}`, component fallbacks applied, never null.
   - `hyprctl` — two shell-quoted argv lines, one per line:
@@ -469,37 +469,37 @@ strx livery emit <target> [<name>|<path>] [--out PATH] [--template STR] [--json]
   `rice stage`'s `live::apply_live`). osc/hyprctl outputs are golden-tested
   byte-identical against the Node-engine fixtures.
 
-### strx livery resolve
+### strx theme resolve
 
 ```
-strx livery resolve [<name>|<path>] [--json]
+strx theme resolve [<name>|<path>] [--json]
 ```
 
-- **Reads:** the livery file (same resolution rule as `livery emit`).
+- **Reads:** the theme file (same resolution rule as `theme emit`).
 - **Output:** raw bytes in text mode: the resolved JSON — insertion order
   `schemaVersion, palette, [base16], bar, notif, window`, flat
   fully-resolved values (aliases deref'd, cycle-guarded; component
-  null/empty → palette fallback). Data `{livery, stdout}`. Validation
-  failure → exit 1 with `{ok: false, errors, livery, stdout}`; a resolution
+  null/empty → palette fallback). Data `{theme, stdout}`. Validation
+  failure → exit 1 with `{ok: false, errors, theme, stdout}`; a resolution
   error → exit 1, `reason: "resolve-failed"`.
 - **Notes:** read-only. Byte-identical to the Node engine's
   `JSON.stringify(resolved, null, 2)`.
 
-### strx livery lint
+### strx theme lint
 
 ```
-strx livery lint [<name>|<path>] [--json]
+strx theme lint [<name>|<path>] [--json]
 ```
 
-- **Reads:** the livery file (same resolution rule).
+- **Reads:** the theme file (same resolution rule).
 - **Output:** raw compact envelope in text mode: `{"ok":true,
   "schemaVersion":"0"}` or `{"ok":false,"errors":[…]}` (+ newline). Data
-  `{ok, schemaVersion, livery, stdout}` on success; `{ok: false, errors,
-  livery, stdout}` on failure (exit 1). Unreadable file / invalid JSON →
+  `{ok, schemaVersion, theme, stdout}` on success; `{ok: false, errors,
+  theme, stdout}` on failure (exit 1). Unreadable file / invalid JSON →
   exit 1 with the Node engine's message shape (`cannot read <file>: …` /
   `invalid JSON in <file>: …`).
 - **Notes:** read-only; validates against the closed v0 schema
-  (`pkgs/aoide/crates/strillix-rice/src/livery/schema.rs`). `rice lint` wraps the same
+  (`pkgs/aoide/crates/strillix-rice/src/theme/schema.rs`). `rice lint` wraps the same
   engine but renders the standard Outcome message instead of the raw
   envelope.
 
@@ -638,11 +638,11 @@ strx rice take [--json]
 ```
 
 - **Reads:** `/stage/mode.json` (must be Draft mode — `resolve_draft`),
-  the routed draft's current `/stage/livery.json` (required) and
+  the routed draft's current `/stage/theme.json` (required) and
   `/stage/cover.json` (optional). Env: `$AOIDE_SESSION_ID` (recorded as
   `sessionId` when set).
 - **Writes:** `rices/<song>/drafts/<draft>/takes/NNNN.json` (a
-  write-once `TakeRecord`: `{take, parent?, at, sessionId?, cause, livery,
+  write-once `TakeRecord`: `{take, parent?, at, sessionId?, cause, theme,
   cover?}` — 4-digit zero-padded filename, monotone counter, never
   renumbered) and updates `takes/head.json` (`{"head": N}`). One
   `with_stage_lock` around the whole read-allocate-write.
@@ -704,7 +704,7 @@ strx rice take diff [--take N | --mark <letter>] [--json]
 
 - **Reads:** `/stage/mode.json` (Draft-mode gate), the base take's record
   from `takes/`, `takes/marks.json` + `takes/head.json` (for base resolution),
-  and the routed draft's CURRENT staged `/stage/livery.json`.
+  and the routed draft's CURRENT staged `/stage/theme.json`.
 - **Output:** `"no change since take NNNN"` or `"diff since take NNNN (K
   key(s) changed):"` followed by `+ path: new` / `- path: old` / `~ path: old
   -> new` lines (compact single-line JSON values). Data `{base, diff: [{path,
@@ -756,19 +756,19 @@ strx rice back [--take N | --mark <letter>] [--json]
 - **Reads:** `/stage/mode.json` (Draft-mode gate), the target take
   record, `takes/marks.json` (for `--mark`; a letter naming a pruned/absent
   take reads as `mark-not-found`), the current staged content (drift check),
-  and — for the write-back — verifies `/stage/livery.json` IS a symlink
+  and — for the write-back — verifies `/stage/theme.json` IS a symlink
   (refuses `routing-broken` rather than silently writing a plain stage file).
 - **Writes (one `with_stage_lock` around everything):** if the staged
   content differs from the head take, first mints a drift take (cause
   `"drift"`: `takes/NNNN.json` + `head.json`) so un-taken edits survive;
-  atomic-writes the target take's livery into `/stage/livery.json`
+  atomic-writes the target take's theme into `/stage/theme.json`
   (symlink-transparent → lands in the draft file); restores or removes
   `/stage/cover.json` to match the take (stage only — the draft dir's
   archived `cover.json` is never written); re-syncs
-  `run/qml/songs/registry.json` from the reverted livery's `.widgets` key;
+  `run/qml/songs/registry.json` from the reverted theme's `.widgets` key;
   finally moves `takes/head.json` to the target.
 - **Pipes to / output:** best-effort `hyprctl --batch` geometry/border apply
-  from the reverted livery (same `live::apply_live` as `rice stage`). No
+  from the reverted theme (same `live::apply_live` as `rice stage`). No
   Quickshell IPC reload — every file written here is FileView-watched; the
   IPC lane exists only for dynamically-loaded widget bodies, which a revert
   never touches. Data `{from, to, mark, drifted, hyprctl, registry}`.
@@ -787,6 +787,6 @@ strx rice back [--take N | --mark <letter>] [--json]
 - [[Song-Anatomy]]
 - [[Song-Vocabulary]]
 - [[Ricing-Protocol]]
-- [[livery]]
+- [[theme]]
 - [[Rebuild-Gate]]
 - [[aoide-cli]]

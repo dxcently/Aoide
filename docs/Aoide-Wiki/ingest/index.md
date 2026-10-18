@@ -15,7 +15,7 @@ updated: 2026-09-27
 - [[Feature-Set]] — what ships in the box (Melete + Mneme integrated) and the exemplar features: messaging bridge, fleet management, scheduled-jobs widget
 - [[Terminal-Commander]] — the agent-session terminal widget: tracks which window runs which agent, jumps by click or keybind
 - [[Session-Graph]] — the project/session DAG: nodes, anchors, spawned edges, the `aoide graph` commands, the graph.json contracts, and today's render paths
-- [[Gadget-Dock]] — the `AoidePanel.qml` left-edge dock: hot-edge hover, SUPER+G, four core gadgets plus an opt-in Usage stele, livery-only colour
+- [[Gadget-Dock]] — the `AoidePanel.qml` left-edge dock: hot-edge hover, SUPER+G, four core gadgets plus an opt-in Usage stele, theme-only colour
 - [[Widget-Preview]] — `strx preview`: the isolated design canvas for a song widget — any size, anchor, viewport and fixture, a stub bridge, never the live desktop
 - [[Lexicon]] — the whole vocabulary: the three Muses, the frozen/performed split, the machinery words, and why each word family was chosen
 - [[Snowflake-Anatomy]] — the flake's structural layers (nucleus / dendrites / aggregations / overrides) and how the catalogue registers modules
@@ -49,10 +49,10 @@ updated: 2026-09-27
 
 - [[aoide-cli]] — the `aoide` binary: the self-registering command registry behind `dispatch()`/`schema --json`/MCP, exit codes 0/1/2/64, and the `aoided` daemon
 - [[strillix]] — the AoideOS paint binary: its own registry, its own 48-command schema, the nix boundary core never crosses
-- [[livery]] — the livery schema and tiers, the two-fan-out (stage/livery.json + Stylix), the native `strx livery` engine and its four emitters
+- [[theme]] — the theme schema and tiers, the two-fan-out (stage/theme.json + Stylix), the native `strx theme` engine and its four emitters
 - [[aoided]] — the orchestrator daemon: event stream, policy, lint, audit log, gated rebuild; per-agent adapters; the notification-text security boundary
 - [[shellbridge]] — daemon↔desktop: JSON state files out, socket commands in, Hyprland IPC; the stage files and the `AOIDE_STAGE_DIR` seam
-- [[Quickshell]] — the QML shell surfaces (nine declared, five live), livery hot-reload, the `AoidePanel.qml` dock, and the QML deploy path
+- [[Quickshell]] — the QML shell surfaces (nine declared, five live), theme hot-reload, the `AoidePanel.qml` dock, and the QML deploy path
 - [[Hyprland]] — the compositor's role: Aoide's only multiplexer, live hyprctl rendering, shellbridge IPC consumer
 - [[Stylix]] — base16 whole-system theming; surface ownership between Stylix and Quickshell; GTK/Qt preview limitations
 - [[dxflake]] — the dendritic auto-discovery walker (listFilesRecursive, `/_` shelving), flags-only hosts; Aoide's adoption target

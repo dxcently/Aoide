@@ -32,7 +32,7 @@ aoide-protocol = { workspace = true }
 # copy step (L-C2, task #107) — both reach `fs::` directly rather than
 # through `strillix-rice`'s own re-derived paths.
 aoide-storage = { workspace = true }
-# rice/draft/mode/cover/livery/quickshell/take — the whole `rice` family.
+# rice/draft/mode/cover/theme/quickshell/take — the whole `rice` family.
 strillix-rice = { workspace = true }
 # shellbridge, herald — registration only (the socket-loop/ledger
 # implementations stay in `aoide-conduct`; see those modules' own doc

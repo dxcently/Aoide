@@ -26,7 +26,7 @@ modules/dendrites/quickshell/
   `graphical-session.target`, so `aoided` comes up with the session.
 - **`aoide.quickshell.home`** (internal): the home half as a module of the
   system config, so it closes over `aoide.quickshell.config`, `aoide.root`
-  and `aoide.livery.wallpaper`.
+  and `aoide.theme.wallpaper`.
 
 ## How it composes
 

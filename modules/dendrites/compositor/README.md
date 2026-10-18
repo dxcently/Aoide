@@ -24,7 +24,7 @@ modules/dendrites/compositor/
   hyprland` config, `package = null` so the binary is installed once, and
   `hyprland` as the display manager's default session, since the package also
   registers a uwsm session this lane does not enable), applies
-  compositor-side livery (gaps/radius/borders/blur, the `aoide-*` layerrules,
+  compositor-side theme (gaps/radius/borders/blur, the `aoide-*` layerrules,
   hyprglass, kitty rounding) at build time, and exposes the Hyprland IPC
   socket for shellbridge to consume. Selecting it is the switch; it sets no fact.
   The hyprglass block's two enable keys are the song's own
@@ -43,7 +43,7 @@ modules/dendrites/compositor/
   rices, the dress, and the
   display manager's session wrapper with the default session's Exec — the
   default session must be named, evaluation fails otherwise; cage types in
-  the host's `services.xserver.xkb` layout); otherwise `ly` on tty1 with the livery's colours, plus the
+  the host's `services.xserver.xkb` layout); otherwise `ly` on tty1 with the theme's colours, plus the
   `systemd.services.display-manager.wantedBy` line the nixpkgs ly module omits.
   Either way it authenticates before it launches that same Hyprland session.
   It is a separate lane because a host can want the compositor without a
@@ -51,9 +51,9 @@ modules/dendrites/compositor/
 
 ## What it consumes
 
-Exactly the dress (`aoide.livery` — palette and component tiers, plus the
-override tier through `lib/livery.nix`'s `resolve`), the structure
-(`aoide.arrangement` — declared widget/surface types drive the generated
+Exactly the dress (`aoide.theme` — palette and component tiers, plus the
+override tier through `lib/theme.nix`'s `resolve`), the structure
+(`aoide.layout` — declared widget/surface types drive the generated
 layerrules), the identity scalar `aoide.user`, and its own fact. Nothing else,
 from no other module (root `AGENTS.md` house rule 5). The venue recolour is a
 read: `resolve` rewrites colours equal to an overridden anchor's authored value

@@ -6,7 +6,7 @@ import "Kit.js" as Kit
 Item {
     id: root
 
-    required property var livery
+    required property var theme
     required property var bridge
 
     readonly property var qsWin: QsWindow.window

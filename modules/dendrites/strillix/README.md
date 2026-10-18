@@ -193,7 +193,7 @@ fixtures; `pkgs/strillix-rices` ships the built-in songs and their manifests.
 
 ## What it consumes
 
-Only the dress (`aoide.livery`), the structure (`aoide.arrangement`), the
+Only the dress (`aoide.theme`), the structure (`aoide.layout`), the
 surface registry it declares into (`aoide.surfaces`), the component slots it
 publishes (`aoide.components`), the core scalars
 (`aoide.enable`, `aoide.root`, `aoide.checkout`, `aoide.hostConfig`,
@@ -207,15 +207,15 @@ never pushed back into the option system. It never reads a `song/` RUNTIME path
 at build time (the structural half is `checks.rice-runtime-untracked`); committed
 rices score is not a runtime path.
 
-`checks.livery-fanout` guards the activation seed: the stage twin is the active
-song's committed livery with the venue's `aoide.livery.override` applied and the
-host's geometry laid over the song's own, through `lib/livery.nix`'s
+`checks.theme-fanout` guards the activation seed: the stage twin is the active
+song's committed theme with the venue's `aoide.theme.override` applied and the
+host's geometry laid over the song's own, through `lib/theme.nix`'s
 `stagePatch`, and the same jq run publishes the declared twin
-(`/declared/livery.json`) — this lane is its only writer. The same script
+(`/declared/theme.json`) — this lane is its only writer. The same script
 publishes the venue's part as data, `/declared/venue.json`
-(`lib/livery.nix`'s `venueDelta`: only the slots the venue recolours and the
+(`lib/theme.nix`'s `venueDelta`: only the slots the venue recolours and the
 geometry it sets, `{}` with neither), which the runtime stage lays over the
-runtime rices's copy of the declared song; `checks.livery-fanout` guards
+runtime rices's copy of the declared song; `checks.theme-fanout` guards
 `venueDelta` beside `stagePatch`. The same script publishes one more declared
 artefact, `/declared/terminal-opacity.conf`
 (one `background_opacity` line from the song's `geometry.terminalOpacity`,
@@ -224,7 +224,7 @@ colours, so a host that has never staged a song still opens its terminal at the
 song's opacity. That read is why THIS lane carries it — a paint dendrite reads
 the dress; the kitty lane names only the path. The seed publishes
 `/declared/hyprlock.conf` the same way: the declared song's lock-screen
-dress, rendered at build time by the strillix binary (`strx livery emit hyprlock`)
+dress, rendered at build time by the strillix binary (`strx theme emit hyprlock`)
 from the same venue-recoloured notes and the song's own `lockscreen.<ext>`,
 comments only when it ships none. hyprlock's config (`lock.nix`, above) sources it before
 `/stage/hyprlock.conf`, so a host that has never staged a song locks in the

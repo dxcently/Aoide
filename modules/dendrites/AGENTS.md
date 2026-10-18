@@ -61,23 +61,23 @@ covers only what's specific to dendrites.
   `checks.rice-shape` and `checks.rice-runtime-untracked` enforce this
   structurally, not just by convention.
   Committed rices score (`rices/**`) is not a runtime path.
-- **The activation seed goes through `lib/livery.nix`, never the raw committed
-  file.** `stageLivery` patches the active song's committed `livery.json` with
-  `stagePatch` (the same `aoide.livery.override` rule `resolve` applies for
+- **The activation seed goes through `lib/theme.nix`, never the raw committed
+  file.** `stageTheme` patches the active song's committed `theme.json` with
+  `stagePatch` (the same `aoide.theme.override` rule `resolve` applies for
   stylix/the compositor) before it is jq-stamped with `song` and written to
-  `/stage/livery.json` — `checks.livery-fanout` is the gate. The seed
+  `/stage/theme.json` — `checks.theme-fanout` is the gate. The seed
   RENAMES that file over the stage entry and never writes through it, so a
   drafted song's own file is untouched, and it is declared truth on every
   activation: the stage twin stays that until the session's `strx reload`
   (the lane's `aoide-rice-reload` unit) puts back the staged or drafted song
   `stage/mode.json` names. Nix never reads the mode, so the seed stays one
   unconditional write. The one run
-  writes the same bytes to `/declared/livery.json` too (CONTRACTS.md §4):
+  writes the same bytes to `/declared/theme.json` too (CONTRACTS.md §4):
   the declared twin that `rice mode declarative` re-pins from. It also publishes
   `/declared/venue.json` — `venueDelta`, the slots the same `stagePatch`
   rule recolours and the geometry the host sets, `{}` with neither — which
   staging lays over the runtime copy of the declared song, and
-  `checks.livery-fanout` guards it. The `strillix` lane is the ONLY writer of
+  `checks.theme-fanout` guards it. The `strillix` lane is the ONLY writer of
   both: `rice stage` and the other runtime writers read them and must never
   write them, since only the nix evaluator can compute the override tier.
 - **A surface takes its size from its CONTENT; content never sizes itself

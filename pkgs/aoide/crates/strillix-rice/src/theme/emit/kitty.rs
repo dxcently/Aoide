@@ -28,9 +28,9 @@
 //! line — the same "no opinion" treatment `live::geometry_keywords` gives a
 //! non-hex border.
 
-use crate::livery::emit::{EmitError, EmitOpts, EmitOutput, Emitter};
-use crate::livery::resolve::{with_hash, Resolved};
-use crate::livery::schema;
+use crate::theme::emit::{EmitError, EmitOpts, EmitOutput, Emitter};
+use crate::theme::resolve::{with_hash, Resolved};
+use crate::theme::schema;
 
 /// The kitty colour-file emitter.
 pub struct Kitty;
@@ -159,7 +159,7 @@ pub fn emit_kitty(r: &Resolved) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::livery::resolve::resolve;
+    use crate::theme::resolve::resolve;
     use serde_json::{json, Value};
 
     fn resolved(fixture: &str) -> Resolved {

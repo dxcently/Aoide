@@ -15,7 +15,7 @@
 //! like `meta`, appended right after it: a root-level command, registered
 //! before `mcp.serve`, matching core's own relative placement of `onboard`
 //! in `crates/cli/src/commands/mod.rs::all()`), rice, draft,
-//! mode, cover, livery, rice-late stubs (declare/transpose only — NOT
+//! mode, cover, theme, rice-late stubs (declare/transpose only — NOT
 //! content/make/update, which stay core), shellbridge, quickshell
 //! (healthcheck only — the placeholder-screen watchdog), reload (the one
 //! mode-aware iteration command, `strillix reload` design settled 2026-08-31 —
@@ -71,14 +71,14 @@ use crate::registry::{Layout, Registry};
 
 /// How `strillix` lists its commands (see core's `LAYOUT` for the contract).
 const LAYOUT: Layout = Layout {
-    tagline: "paint AoideOS: songs, liveries and the desktop surfaces",
+    tagline: "paint AoideOS: songs, themes and the desktop surfaces",
     sections: &[
         ("Start here", &[("guide", ""), ("onboard", "")]),
         (
-            "Songs & liveries",
+            "Songs & themes",
             &[
                 ("rice", "Compose, stage, declare and take snapshots of a song"),
-                ("livery", "Resolve, lint and emit a livery"),
+                ("theme", "Resolve, lint and emit a theme"),
                 ("cover", "Set and sync the live wallpaper"),
                 ("reload", ""),
                 ("element", ""),
@@ -124,7 +124,7 @@ pub fn all() -> Registry {
     strillix_rice::commands::draft::register(&mut r); // rice draft save/list/drop
     strillix_rice::commands::mode::register(&mut r); // rice mode status/stage/declarative/draft
     strillix_rice::commands::cover::register(&mut r); // cover set
-    strillix_rice::commands::livery::register(&mut r); // livery emit, resolve, lint
+    strillix_rice::commands::theme::register(&mut r); // theme emit, resolve, lint
     stubs::register_rice_late(&mut r); // rice declare, transpose
     aoide_conduct::commands::shellbridge::register(&mut r); // shellbridge (own module since P-A2)
     strillix_rice::commands::quickshell::register(&mut r); // quickshell healthcheck — placeholder-screen watchdog

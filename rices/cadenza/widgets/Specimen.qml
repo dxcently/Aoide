@@ -19,12 +19,12 @@ import "Kit.js" as Kit
 Item {
     id: root
 
-    required property var livery
+    required property var theme
     required property var bridge
 
     // ── the kit: one per widget ───────────────────────────────────────────
     FontMetrics { id: fm; font: Kit.bodyFont(13) }
-    readonly property var kit: Kit.make(root.livery, fm)
+    readonly property var kit: Kit.make(root.theme, fm)
 
     // ── the Use idiom: a helper by URL, `kit` bound live (design/kit.md §1)
     component Use: Loader {

@@ -31,7 +31,7 @@ The receiver accepts only the build trigger, never arbitrary shell text. Attempt
 
 ## Results
 
-The corrected public-package build passed on Osaka, with Nix exit 0. Both built binaries returned their schemas, and the built Strillix validated Sonata livery with no display variables, no checkout at its configured flake root, and no external commands available on PATH.
+The corrected public-package build passed on Osaka, with Nix exit 0. Both built binaries returned their schemas, and the built Strillix validated Sonata theme with no display variables, no checkout at its configured flake root, and no external commands available on PATH.
 
 | Check | Result |
 |---|---|
@@ -40,7 +40,7 @@ The corrected public-package build passed on Osaka, with Nix exit 0. Both built 
 | Host-selected package evaluation | Failed: OpenAI module requires an input absent from dxflake specialArgs |
 | Second session | `osaka-core-exports-971cad89`: registered, trigger delivered, compilation completed; Nix check phase failed |
 | Corrected session | `osaka-core-fixed-971cad89`: registered, trigger delivered, all package checks passed, exit 0 |
-| Strillix standalone smoke | Livery lint passed with isolated state and no external tools on PATH |
+| Strillix standalone smoke | Theme lint passed with isolated state and no external tools on PATH |
 | Native A2A | Signing-header incompatibility |
 | Activation | Not performed |
 

@@ -36,7 +36,7 @@
 // If hyprlock cannot take it either, the host keeps the lock: closed, never
 // open.
 //
-// The face receives the universal `livery`, `bridge` as null — no shellbridge
+// The face receives the universal `theme`, `bridge` as null — no shellbridge
 // behind a locked screen, so no power or other action reaches the bridge from
 // it, the same as the greeter — and one extra, `auth`,
 // whose plain properties mirror the PAM conversation: `message`,
@@ -82,13 +82,13 @@ import Quickshell.Services.Pam
 Scope {
     id: root
 
-    required property var livery
+    required property var theme
     required property var stagingEngine
 
     readonly property string faceSlot: "lockscreen"
     readonly property int faceReadyMs: 3000
     readonly property string faceSource:
-        stagingEngine.has(livery.songName, faceSlot) ? stagingEngine.source(livery.songName, faceSlot) : ""
+        stagingEngine.has(theme.songName, faceSlot) ? stagingEngine.source(theme.songName, faceSlot) : ""
 
     // What a face reads and calls — plain values, never the PamContext.
     readonly property QtObject auth: QtObject {
@@ -347,7 +347,7 @@ Scope {
                     }
                     root.auth.ready = false
                     var item = comp.createObject(faceHolder, {
-                        "livery": root.livery,
+                        "theme": root.theme,
                         "bridge": null,
                         "auth": root.auth
                     })

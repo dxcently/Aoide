@@ -33,7 +33,7 @@
 // standout (the calmest voice — silence is the healthy note), gold ink for the
 // numeric tallies. Sub-hues each earn a job: CPU fill = murex(violet), RAM fill =
 // teal(wireCyan), urgent ≥85% = terracotta(paletteUrgent). Aegean is the temple.
-// All colour flows from `livery` roles; hard corners (radius 0) everywhere.
+// All colour flows from `theme` roles; hard corners (radius 0) everywhere.
 
 import QtQuick
 import Quickshell
@@ -42,7 +42,7 @@ import Quickshell.Io
 Item {
     id: gadget
 
-    required property var livery            // palette roles
+    required property var theme            // palette roles
     required property var bridge           // ShellBridge — WidgetSlot._songProps() always
                                             // passes this; unused today, declared per the
                                             // universal widget contract (slots.md)
@@ -59,7 +59,7 @@ Item {
 
     // this temple's signature accent — TEAL (Doric), where Conductor ran gold
     // and Terminals runs aegean; keeps Meters a distinct building
-    readonly property color signature: livery.wireCyan
+    readonly property color signature: theme.wireCyan
 
     // live readings ──────────────────────────────────────────────────────────────
     property real cpuPct: 0
@@ -180,7 +180,7 @@ Item {
         anchors.leftMargin: 4; anchors.topMargin: 5
         anchors.rightMargin: -4; anchors.bottomMargin: -5
         radius: 0
-        color: gadget.withA(livery.paletteFg, 0.22)
+        color: gadget.withA(theme.paletteFg, 0.22)
     }
 
     // the stele ──────────────────────────────────────────────────────────────────
@@ -188,8 +188,8 @@ Item {
         id: stele
         anchors.fill: parent
         radius: 0
-        color: livery.paletteBg
-        border.color: livery.paletteFg
+        color: theme.paletteBg
+        border.color: theme.paletteFg
         border.width: 2
 
         Rectangle {                                   // inset keyline — AEGEAN (Ionic)
@@ -212,7 +212,7 @@ Item {
 
                 Rectangle {                           // deeper marble band
                     anchors.fill: parent; anchors.bottomMargin: 5
-                    color: gadget.withA(livery.paletteFg, 0.05)
+                    color: gadget.withA(theme.paletteFg, 0.05)
                 }
                 Text {
                     id: clef
@@ -228,7 +228,7 @@ Item {
                     text: "METERS"
                     font.family: gadget.faceSerif; font.pixelSize: 19
                     font.weight: Font.DemiBold; font.letterSpacing: 4
-                    color: livery.paletteFg
+                    color: theme.paletteFg
                 }
                 Text {                                // terminal tag
                     anchors.right: parent.right
@@ -314,7 +314,7 @@ Item {
                     text: "└─┤ cpu " + Math.round(gadget.cpuPct) + "% · ram "
                           + Math.round(gadget.ramPct) + "% ├"
                     font.family: gadget.faceMono; font.pixelSize: 11
-                    color: gadget.withA(livery.paletteFg, 0.8)
+                    color: gadget.withA(theme.paletteFg, 0.8)
                 }
                 Text {
                     id: ffCorner
@@ -330,7 +330,7 @@ Item {
                     anchors.verticalCenterOffset: -1
                     text: "𝄂"
                     font.family: gadget.faceMusic; font.pixelSize: 18
-                    color: livery.paletteAccent
+                    color: theme.paletteAccent
                 }
                 Rectangle {
                     anchors.left: ffL.right; anchors.right: ffBar.left
@@ -360,11 +360,11 @@ Item {
                         id: g
                         property string tag: "CPU"
                         property real pct: 0
-                        property color fillHue: livery.violet
+                        property color fillHue: theme.violet
                         property bool emph: false
                         readonly property bool urgent: pct >= gadget.urgentAt
-                        readonly property color liveHue: urgent ? livery.paletteUrgent
-                                                               : (emph ? livery.paletteHot : fillHue)
+                        readonly property color liveHue: urgent ? theme.paletteUrgent
+                                                               : (emph ? theme.paletteHot : fillHue)
                         width: parent ? parent.width : 0
                         height: 46
 
@@ -372,11 +372,11 @@ Item {
                         Rectangle {
                             anchors.left: parent.left; anchors.top: parent.top
                             anchors.bottom: parent.bottom
-                            width: 3; color: livery.paletteHot; visible: g.emph
+                            width: 3; color: theme.paletteHot; visible: g.emph
                         }
                         Rectangle {
                             anchors.fill: parent
-                            color: g.emph ? gadget.withA(livery.paletteHot, 0.08) : "transparent"
+                            color: g.emph ? gadget.withA(theme.paletteHot, 0.08) : "transparent"
                         }
 
                         // top line: serif label · load word · dynamic marking · %
@@ -391,7 +391,7 @@ Item {
                                 font.family: gadget.faceSerif; font.pixelSize: 15
                                 font.weight: g.emph ? Font.Bold : Font.Medium
                                 font.letterSpacing: 2
-                                color: livery.paletteFg
+                                color: theme.paletteFg
                             }
                             Text {
                                 anchors.baseline: gName.baseline
@@ -415,7 +415,7 @@ Item {
                             anchors.verticalCenter: capRow.verticalCenter
                             text: Math.round(g.pct) + "%"
                             font.family: gadget.faceMono; font.pixelSize: 15
-                            color: g.urgent ? livery.paletteUrgent : livery.paletteAccent
+                            color: g.urgent ? theme.paletteUrgent : theme.paletteAccent
                         }
 
                         // the gauge — ASCII bar ⟦▓▓▓░░░⟧ recast with true fill hue
@@ -451,7 +451,7 @@ Item {
                                     text: gadget.barTrack()
                                     font.family: gadget.faceMono; font.pixelSize: 14
                                     fontSizeMode: Text.HorizontalFit
-                                    color: gadget.withA(livery.paletteFg, 0.22)
+                                    color: gadget.withA(theme.paletteFg, 0.22)
                                 }
                                 Text {                        // fill (▓ cells) in live hue
                                     anchors.fill: parent
@@ -468,12 +468,12 @@ Item {
 
                     Gauge {
                         tag: "CPU"; pct: gadget.cpuPct
-                        fillHue: livery.violet                // murex
+                        fillHue: theme.violet                // murex
                         emph: gadget.emphVoice === 1
                     }
                     Gauge {
                         tag: "RAM"; pct: gadget.ramPct
-                        fillHue: livery.holoBlue              // aegean
+                        fillHue: theme.holoBlue              // aegean
                         emph: gadget.emphVoice === 2
                     }
 
@@ -492,7 +492,7 @@ Item {
                             text: gadget.kaomojiFor(gadget.peakPct)
                             font.pixelSize: 11
                             color: gadget.withA(gadget.peakPct >= gadget.urgentAt
-                                                ? livery.paletteUrgent : gadget.signature, 0.9)
+                                                ? theme.paletteUrgent : gadget.signature, 0.9)
                         }
                         Text {                               // aegean detail — the honest bytes
                             anchors.right: parent.right; anchors.rightMargin: 12

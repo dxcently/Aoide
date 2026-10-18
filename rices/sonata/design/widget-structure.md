@@ -60,7 +60,7 @@ The test, for a file you have never seen:
 
 In practice, inside a `widgets/*.qml`:
 
-- **Read** from `livery`, `bridge`, and whatever `slots.md` lists for your slot.
+- **Read** from `theme`, `bridge`, and whatever `slots.md` lists for your slot.
   Arrange, animate, draw. That is the whole job.
 - **Do not** hold the only copy of a fact. If the widget computes something a
   command should know, the command should compute it and the widget should read it.
@@ -82,7 +82,7 @@ Every widget declares both of these; both anchors inject them
 unconditionally, so omitting one is a load error, not a silent gap:
 
 ```qml
-required property var livery   // LiveryState singleton — the palette + helpers
+required property var theme   // ThemeState singleton — the palette + helpers
 required property var bridge   // ShellBridge — the ONLY outbound path from QML
 ```
 
@@ -105,9 +105,9 @@ in the same file, three lines apart.
 structurally incapable of reaching nix options through this surface —
 `WidgetSlot.qml`, `SurfaceSlot.qml` and `StagingEngine.qml` all restate this.
 
-### What `livery.*` actually exposes
+### What `theme.*` actually exposes
 
-From `pkgs/strillix-shell/qml/LiveryState.qml`:
+From `pkgs/strillix-shell/qml/ThemeState.qml`:
 
 - **colour roles** — `paletteBg/Fg/Accent/Urgent/Hot`, `wireCyan`, `holoBlue`,
   `violet`, `glitchPink`, `base09`, `base0F`; `accentSpread` and
@@ -192,9 +192,9 @@ host adds `+6`/`+8` around it. Skipping the `+5` clips your own shadow.
 
 ## 5. Colour discipline
 
-Every colour reads from `livery.*` or a same-named local alias
-(`readonly property color ink: livery.paletteFg`, `clay: livery.base09`,
-`aegean: livery.holoBlue`, `sig: livery.base0F`). What actually exists outside
+Every colour reads from `theme.*` or a same-named local alias
+(`readonly property color ink: theme.paletteFg`, `clay: theme.base09`,
+`aegean: theme.holoBlue`, `sig: theme.base0F`). What actually exists outside
 that rule today, exhaustively:
 
 **Sanctioned material literals** — light and shadow, not palette. The Aero
@@ -210,19 +210,19 @@ header as "one sanctioned literal").
 - `bar.qml`'s **structural ink is literal `#000000`** — staff lines, barlines,
   playhead, page rail. The manuscript metaphor treats printed staff lines as
   ink-on-paper, not a themed chrome role. Text ink on the strip is still
-  `livery.paletteFg`.
+  `theme.paletteFg`.
 - `calendar.qml`'s **moon-phase glyphs render as real colour emoji**
   (`U+1F311`–`U+1F318`) — "the ONE glyph family wearing fixed color outside
-  the `livery.*` roles", with the `U+FE0E` monochrome fallback recorded as the
+  the `theme.*` roles", with the `U+FE0E` monochrome fallback recorded as the
   rollback path.
 
 **One unlabeled leftover, not a precedent.** `bar.qml`'s battery `BarPopout`
 body draws its two `Text` elements in literal `"#14141a"` (lines 1183, 1191) —
 a survival from the old dark popout palette, covered by no header note. It is
 the only bare hex in ordinary widget chrome anywhere in the five files. Do not
-copy it; a new popout body inks from `livery.*`.
+copy it; a new popout body inks from `theme.*`.
 
-A widget breaking the `livery.*` rule **without** a header note like the two
+A widget breaking the `theme.*` rule **without** a header note like the two
 above is the anomaly worth flagging in review.
 
 ---

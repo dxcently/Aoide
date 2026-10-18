@@ -42,7 +42,7 @@ import "Kit.js" as Kit
 Item {
     id: root
 
-    required property var livery
+    required property var theme
     property var bridge: null          // handed by WidgetSlot; unused — a calendar needs no bridge
 
     // months from today's month; 0 = the current month
@@ -50,7 +50,7 @@ Item {
 
     // ── the kit ──────────────────────────────────────────────────────────
     FontMetrics { id: fm; font: Kit.bodyFont(13) }
-    readonly property var kit: Kit.make(root.livery, fm)
+    readonly property var kit: Kit.make(root.theme, fm)
 
     component Use: Loader {
         required property var kit

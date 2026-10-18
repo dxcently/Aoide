@@ -1,6 +1,6 @@
 # strillix-rice
 
-Aoide's ricing/design engine: the native livery engine (schema validation,
+Aoide's ricing/design engine: the native theme engine (schema validation,
 `{group.key}` deref + component fallback, stage/hyprctl/osc/file/kitty/hyprlock
 emitters), `rice compose`'s scaffolding/rendering, cover-art derivation, the
 Hyprland geometry keyword live-apply, the staged terminal colours, and the
@@ -9,11 +9,11 @@ a config file). Paint-side — ships in `strillix`, not core.
 
 ## Named seams (what it exposes)
 
-- `livery` — the design-token engine: schema, resolve, emit. The schema also
+- `theme` — the design-token engine: schema, resolve, emit. The schema also
   validates top-level fields NO backend carries (CONTRACTS.md §1's `polarity`,
   a baked-only register the stylix lane reads off the option; §5's `widgets`
   block), so a document may legitimately hold more than the resolved set —
-  `tests/livery_goldens.rs`'s polarity fixture is the contract.
+  `tests/theme_goldens.rs`'s polarity fixture is the contract.
 - `live` — computes + (best-effort) applies the Hyprland geometry/border
   keyword list a staged notes document implies, over a `hyprctl reload
   config-only` that puts the host's bake back first (`blurEnabled` also
@@ -62,11 +62,11 @@ a config file). Paint-side — ships in `strillix`, not core.
   `elements/<name>/element.json` (v0 — name shape, directory-name match,
   `files[].src`/`dest` traversal, `run.via` ∈ {unit, exec-once}), then
   renders every declared file into `run/elements/<name>/` — verbatim byte
-  copy for `template: false`, `livery::emit::file::render` for
+  copy for `template: false`, `theme::emit::file::render` for
   `template: true`. `seed_tree` is the pure whole-rices walker (explicit
   paths, no env, `_`-prefix dirs shelved); `seed_song` is the thin wrapper
   resolving `rice_dir`/`run_elements_dir` and the song's own committed
-  livery for it. A render error fails only that one element and leaves its
+  theme for it. A render error fails only that one element and leaves its
   existing config untouched — every file for an element renders into memory
   first, and nothing is written until all of them succeed.
 - `widgets` — the one place a rices is EVALUATED at runtime (strillix-only;
@@ -84,7 +84,7 @@ a config file). Paint-side — ships in `strillix`, not core.
   (`fs::rices_root`). No flake, no network, no checkout: nothing names
   `fs::flake_root` any more. A refusal (not built in and no `nix` on the host;
   or a machine song needing packages `builtin.json.packages` does not carry)
-  stages NOTHING — no livery, no body, no manifest — and the gate runs in the
+  stages NOTHING — no theme, no body, no manifest — and the gate runs in the
   caller before its first write, `rice back` included. The body carry follows
   the manifest's own ownership: the staged song AND every LENDER its entry
   names (`widget_owners`), because a borrowed slot resolves to
@@ -104,7 +104,7 @@ a config file). Paint-side — ships in `strillix`, not core.
   whatever its load state, is `NotRunning`, reported and never restarted. Its bad-state predicate is
   `surfaces_fall_short` against the declaration published to
   `run/qml/songs/surfaces.json` by the strillix lane's build
-  (`CONTRACTS.md §5`, `aoide.arrangement.surfaces`), read through
+  (`CONTRACTS.md §5`, `aoide.layout.surfaces`), read through
   `aoide_storage::fs::run_qml_dir` and folded by `asserted_expectation`: an
   absent, unreadable, or EMPTY declaration (the lane publishes the file on
   every host, so every non-declaring song ships `{"surfaces": {}}`) means no
@@ -134,17 +134,17 @@ a config file). Paint-side — ships in `strillix`, not core.
   `rice.nix`, refusing a draft, an unknown or lending-only song, zero or
   several lines, and a file edited between the read and the rename, and
   reports `stagedDiffers` through
-  `commands::refresh::staged_differs` (the machine copy's livery and widgets
+  `commands::refresh::staged_differs` (the machine copy's theme and widgets
   hashed against the shipped copy's). CONTRACTS.md, "Declaring a song from
   the machine", is the contract.
-- `commands` — this crate's CLI commands: `rice *`, `livery *`, `cover set`,
+- `commands` — this crate's CLI commands: `rice *`, `theme *`, `cover set`,
   `cover sync`, `element seed`, `rice take`/`take.*`/`rice back`,
   `quickshell healthcheck`,
   and `reload` (`strx reload` design, settled 2026-08-31 — the one
   mode-aware iteration command; absorbed `quickshell reload` outright).
   `rice compose --from <song>` resolves its source via
   `commands::rice::resolve_from_notes_path` (L-C3, task #107):
-  `rice_dir(from)` first, else `<templates>/<from>/livery.json`
+  `rice_dir(from)` first, else `<templates>/<from>/theme.json`
   (`fs::song_templates_dir`) — a repo-less host still has something to copy
   from. Compose TO always writes the host rices under the runtime root,
   never the templates dir. `commands::rice::seed_rices_from_templates`
@@ -176,9 +176,9 @@ a config file). Paint-side — ships in `strillix`, not core.
 `flake_root`/`song_templates_dir`/`rice_dir`/`rice_notes`/
 `declared_notes`/`declared_venue`/`run_elements_dir`), plus `aoide-test-support` as a
 dev-dependency.
-`livery`/`live` are otherwise dependency-free leaves.
+`theme`/`live` are otherwise dependency-free leaves.
 
-`declared_notes` (`/declared/livery.json`, CONTRACTS.md §4) is the
+`declared_notes` (`/declared/theme.json`, CONTRACTS.md §4) is the
 DECLARED song's own notes, venue override applied and the host's geometry laid
 over the song's own — published by the strillix lane's activation seed, read-only
 here.

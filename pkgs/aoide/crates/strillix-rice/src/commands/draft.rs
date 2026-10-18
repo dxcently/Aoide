@@ -3,7 +3,7 @@
 //! routing + `rice mode draft`, the User 2026-08-14).
 //!
 //! A draft is a saved snapshot living at
-//! `rices/<song>/drafts/<name>/livery.json` (+ `cover.json` when the
+//! `rices/<song>/drafts/<name>/theme.json` (+ `cover.json` when the
 //! stage had one) — nested under the song it varies, not a flat top-level
 //! dir: a draft is fundamentally a variation of an ALREADY COMPOSED song, so
 //! it belongs inside that song's own directory, not a separate global
@@ -15,7 +15,7 @@
 //!
 //! **Reaching a draft is `rice mode draft <name>`'s job now**
 //! (`commands/mode.rs::handle_mode_draft`), not this module's — it points
-//! `stage/livery.json` at a SYMLINK into the draft's own file, so every
+//! `stage/theme.json` at a SYMLINK into the draft's own file, so every
 //! future writer (`rice stage`, `cover set`, a hand-edit, Quickshell's own
 //! FileView reload) transparently lands in the draft with zero
 //! draft-awareness anywhere, because [`aoide_storage::fs::atomic_write`] is
@@ -65,7 +65,7 @@ use aoide_protocol::Door;
 pub fn register(r: &mut Registry) {
     r.insert(cmd!(
         path: ["rice", "draft", "save"],
-        summary: "Fork the current stage (stage/livery.json, required; stage/cover.json if present) into rices/<song>/drafts/<name>/ — <song> is the currently staged song. With no <name>, mints the lowest free `draft-<n>` for it. Upserts; independent of mode (never switches modes).",
+        summary: "Fork the current stage (stage/theme.json, required; stage/cover.json if present) into rices/<song>/drafts/<name>/ — <song> is the currently staged song. With no <name>, mints the lowest free `draft-<n>` for it. Upserts; independent of mode (never switches modes).",
         args: [arg!("name", "string", false, "Draft name; omit it to mint the lowest free `draft-<n>` for the staged song.")],
         flags: [],
         gated: false,
@@ -96,7 +96,7 @@ pub fn register(r: &mut Registry) {
 
 /// The shared "no song is currently staged, nothing to resolve a draft
 /// directory under" error — [`handle_draft_drop`] has no other reason to
-/// touch `stage/livery.json`, so it resolves the song purely through
+/// touch `stage/theme.json`, so it resolves the song purely through
 /// [`super::mode::current_staged_song`] and reports this single reason on
 /// failure (a fresh box, or a stage file with no `"song"` breadcrumb, are
 /// the only ways to hit it).
@@ -111,7 +111,7 @@ fn no_resolvable_song(cmd: &str) -> Outcome {
 
 /// `rice draft save [<name>]` — fork the current stage into
 /// `rices/<song>/drafts/<name>/`, where `<song>` is whatever
-/// `stage/livery.json`'s own `"song"` field names right now. `stage/livery.json`
+/// `stage/theme.json`'s own `"song"` field names right now. `stage/theme.json`
 /// is required (error if absent/unparseable/song-less — there is nothing to
 /// snapshot, or nowhere to nest it, without one). The song resolves BEFORE the
 /// name because a minted name is the lowest free one of THAT song's drafts.
@@ -128,17 +128,17 @@ fn no_resolvable_song(cmd: &str) -> Outcome {
 /// (`rices/<song>/drafts/`, never `stage/`), so it works in any mode
 /// without changing what's currently active.
 fn handle_draft_save(inv: &Invocation) -> Outcome {
-    let livery_src = shellbridge::stage_dir().join("livery.json");
-    let raw = match std::fs::read_to_string(&livery_src) {
+    let theme_src = shellbridge::stage_dir().join("theme.json");
+    let raw = match std::fs::read_to_string(&theme_src) {
         Ok(s) => s,
         Err(e) => {
             return Outcome::error(
                 "rice.draft.save",
-                format!("nothing staged to save: cannot read {} ({e})", livery_src.display()),
+                format!("nothing staged to save: cannot read {} ({e})", theme_src.display()),
             )
             .with_data(json!({
-                "reason": "no-staged-livery",
-                "expected": livery_src.to_string_lossy(),
+                "reason": "no-staged-theme",
+                "expected": theme_src.to_string_lossy(),
             }));
         }
     };
@@ -147,9 +147,9 @@ fn handle_draft_save(inv: &Invocation) -> Outcome {
         Err(e) => {
             return Outcome::error(
                 "rice.draft.save",
-                format!("staged livery.json is not valid JSON: {e}"),
+                format!("staged theme.json is not valid JSON: {e}"),
             )
-            .with_data(json!({ "reason": "invalid-json", "livery": livery_src.to_string_lossy() }));
+            .with_data(json!({ "reason": "invalid-json", "theme": theme_src.to_string_lossy() }));
         }
     };
     let song = match parsed.get("song").and_then(Value::as_str) {
@@ -157,7 +157,7 @@ fn handle_draft_save(inv: &Invocation) -> Outcome {
         None => {
             return Outcome::error(
                 "rice.draft.save",
-                "staged livery.json carries no `song` field — nothing to nest this draft under \
+                "staged theme.json carries no `song` field — nothing to nest this draft under \
                  (stage a named song first: `aoide rice stage <name>`)",
             )
             .with_data(json!({ "reason": "no-resolvable-song" }));
@@ -181,7 +181,7 @@ fn handle_draft_save(inv: &Invocation) -> Outcome {
 
 /// `draft-<n>` for the lowest positive `n` no entry of `<song>`'s `drafts/`
 /// is already named. Any entry counts as taken, a directory with no
-/// `livery.json` included, so a half-written draft is never overwritten; an
+/// `theme.json` included, so a half-written draft is never overwritten; an
 /// absent `drafts/` is empty. Candidates carry no leading zero, so `draft-01`,
 /// `draft-0` and `draft-x` never collide with one.
 fn mint_draft_name(song: &str) -> String {
@@ -203,7 +203,7 @@ fn mint_draft_name(song: &str) -> String {
 }
 
 /// The reusable core of a draft snapshot: atomic-write the CURRENT
-/// `stage/livery.json` into `rices/<song>/drafts/<name>/livery.json`
+/// `stage/theme.json` into `rices/<song>/drafts/<name>/theme.json`
 /// (reading it fresh — transparently through a `Draft`-mode symlink if one
 /// is currently routed there, same as any other reader), mirroring
 /// `stage/cover.json` in if present, or removing a stale draft cover if the
@@ -220,38 +220,38 @@ fn mint_draft_name(song: &str) -> String {
 /// [`super::mode::current_staged_song`]).
 pub(crate) fn fork_stage_into(song: &str, name: &str) -> Outcome {
     let stage = shellbridge::stage_dir();
-    let livery_src = stage.join("livery.json");
-    let raw = match std::fs::read_to_string(&livery_src) {
+    let theme_src = stage.join("theme.json");
+    let raw = match std::fs::read_to_string(&theme_src) {
         Ok(s) => s,
         Err(e) => {
             return Outcome::error(
                 "rice.draft.save",
-                format!("nothing staged to fork: cannot read {} ({e})", livery_src.display()),
+                format!("nothing staged to fork: cannot read {} ({e})", theme_src.display()),
             )
             .with_data(json!({
-                "reason": "no-staged-livery",
-                "expected": livery_src.to_string_lossy(),
+                "reason": "no-staged-theme",
+                "expected": theme_src.to_string_lossy(),
             }));
         }
     };
     if let Err(e) = serde_json::from_str::<Value>(&raw) {
         return Outcome::error(
             "rice.draft.save",
-            format!("staged livery.json is not valid JSON: {e}"),
+            format!("staged theme.json is not valid JSON: {e}"),
         )
-        .with_data(json!({ "reason": "invalid-json", "livery": livery_src.to_string_lossy() }));
+        .with_data(json!({ "reason": "invalid-json", "theme": theme_src.to_string_lossy() }));
     }
 
     let dir = shellbridge::draft_dir(song, name);
-    let livery_dst = dir.join("livery.json");
-    if let Err(e) = shellbridge::atomic_write(&livery_dst, &raw) {
+    let theme_dst = dir.join("theme.json");
+    if let Err(e) = shellbridge::atomic_write(&theme_dst, &raw) {
         return Outcome::error(
             "rice.draft.save",
-            format!("failed to write {}: {e}", livery_dst.display()),
+            format!("failed to write {}: {e}", theme_dst.display()),
         )
-        .with_data(json!({ "reason": "write-failed", "target": livery_dst.to_string_lossy() }));
+        .with_data(json!({ "reason": "write-failed", "target": theme_dst.to_string_lossy() }));
     }
-    let mut changed: Vec<String> = vec![livery_dst.to_string_lossy().into_owned()];
+    let mut changed: Vec<String> = vec![theme_dst.to_string_lossy().into_owned()];
 
     let cover_src = stage.join("cover.json");
     let cover_dst = dir.join("cover.json");
@@ -297,19 +297,19 @@ pub(crate) fn fork_stage_into(song: &str, name: &str) -> Outcome {
     .with_data(json!({
         "name": name,
         "song": song,
-        "livery": livery_dst.to_string_lossy(),
+        "theme": theme_dst.to_string_lossy(),
         "cover": cover_path,
     }))
 }
 
 /// `rice draft list [<song>]` — enumerate saved drafts. With `<song>`, scans
-/// only `rices/<song>/drafts/*/livery.json`; with no arg, walks every
+/// only `rices/<song>/drafts/*/theme.json`; with no arg, walks every
 /// song under `rices/` and reports drafts from all of them. Each entry
 /// carries its song (structural — the rices dir it was found under),
-/// name, saved-at (the livery.json file's mtime), and whether it is the
+/// name, saved-at (the theme.json file's mtime), and whether it is the
 /// currently-loaded draft — `mode.json`'s `song`+`draft` pair, which is only
 /// ever set together (`draft` is non-null iff `mode == Draft`). A directory
-/// with no `livery.json` is not a draft and is silently skipped. An
+/// with no `theme.json` is not a draft and is silently skipped. An
 /// absent/empty scope is `ok` with an empty list — never an error.
 fn handle_draft_list(inv: &Invocation) -> Outcome {
     let scope = inv.args.first().cloned();
@@ -344,12 +344,12 @@ fn handle_draft_list(inv: &Invocation) -> Outcome {
             if !path.is_dir() {
                 continue;
             }
-            let livery = path.join("livery.json");
-            if !livery.is_file() {
-                continue; // no livery.json — not a draft, silently skipped
+            let theme = path.join("theme.json");
+            if !theme.is_file() {
+                continue; // no theme.json — not a draft, silently skipped
             }
             let name = entry.file_name().to_string_lossy().into_owned();
-            let saved_at = std::fs::metadata(&livery)
+            let saved_at = std::fs::metadata(&theme)
                 .and_then(|m| m.modified())
                 .ok()
                 .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
@@ -381,7 +381,7 @@ fn handle_draft_list(inv: &Invocation) -> Outcome {
 /// certainly a typo the caller should see).
 ///
 /// Refuses (`draft-is-live`) if it's the draft `rice mode draft` currently
-/// has `stage/livery.json` symlinked into — chosen over the alternative
+/// has `stage/theme.json` symlinked into — chosen over the alternative
 /// (drop it AND fall back to plain `Staging`) because a `drop` that also
 /// silently changes your mode and re-pins the stage is the more surprising
 /// behavior; `rice mode stage`/`rice mode declarative` are the explicit,
@@ -412,7 +412,7 @@ fn handle_draft_drop(inv: &Invocation) -> Outcome {
             "rice.draft.drop",
             format!(
                 "cannot drop `{name}` — it's the live draft for `{song}` \
-                 (stage/livery.json is routed to it); switch modes first \
+                 (stage/theme.json is routed to it); switch modes first \
                  (`aoide rice mode stage` or `aoide rice mode declarative`), then drop it"
             ),
         )
@@ -458,7 +458,7 @@ mod tests {
     /// has no `"song"` field) needs this written first.
     fn stage_with_song(stage: &std::path::Path, song: &str) {
         std::fs::write(
-            stage.join("livery.json"),
+            stage.join("theme.json"),
             format!(
                 r##"{{"schemaVersion":"0","song":"{song}","palette":{{"bg":"#0b1021","fg":"#c8d3f5","accent":"#82aaff","urgent":"#ff757f"}}}}"##
             ),
@@ -483,8 +483,8 @@ mod tests {
         let out = handle_draft_save(&inv(&["rice", "draft", "save"], &["neon-night"]));
         assert_eq!(out.status, Status::Ok, "{:?}", out.data);
         let dir = root.join("rices").join("sonata").join("drafts").join("neon-night");
-        let staged = std::fs::read_to_string(stage.join("livery.json")).unwrap();
-        assert_eq!(std::fs::read_to_string(dir.join("livery.json")).unwrap(), staged);
+        let staged = std::fs::read_to_string(stage.join("theme.json")).unwrap();
+        assert_eq!(std::fs::read_to_string(dir.join("theme.json")).unwrap(), staged);
         assert_eq!(
             std::fs::read_to_string(dir.join("cover.json")).unwrap(),
             r#"{"path":"x.png"}"#
@@ -492,7 +492,7 @@ mod tests {
         assert!(out
             .changed
             .iter()
-            .any(|c| c.ends_with("rices/sonata/drafts/neon-night/livery.json")));
+            .any(|c| c.ends_with("rices/sonata/drafts/neon-night/theme.json")));
         assert!(out
             .changed
             .iter()
@@ -505,7 +505,7 @@ mod tests {
     }
 
     #[test]
-    fn save_without_a_staged_livery_errors() {
+    fn save_without_a_staged_theme_errors() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
         let stage = unique_tmp("draft-save-nostage");
@@ -514,18 +514,18 @@ mod tests {
 
         let out = handle_draft_save(&inv(&["rice", "draft", "save"], &["neon-night"]));
         assert_eq!(out.status, Status::Error);
-        assert_eq!(out.data.unwrap()["reason"], "no-staged-livery");
+        assert_eq!(out.data.unwrap()["reason"], "no-staged-theme");
         let _ = std::fs::remove_dir_all(&stage);
     }
 
     #[test]
-    fn save_with_a_songless_staged_livery_errors_no_resolvable_song() {
+    fn save_with_a_songless_staged_theme_errors_no_resolvable_song() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
         let stage = unique_tmp("draft-save-nosong");
         std::fs::create_dir_all(&stage).unwrap();
         // VALID_NOTES parses fine but carries no "song" field.
-        std::fs::write(stage.join("livery.json"), VALID_NOTES).unwrap();
+        std::fs::write(stage.join("theme.json"), VALID_NOTES).unwrap();
         crate::commands::test_support::ensure_default_rices_fixture();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
 
@@ -549,12 +549,12 @@ mod tests {
         handle_draft_save(&inv(&["rice", "draft", "save"], &["neon-night"]));
 
         let updated = r##"{"schemaVersion":"0","song":"sonata","palette":{"bg":"#111111"}}"##;
-        std::fs::write(stage.join("livery.json"), updated).unwrap();
+        std::fs::write(stage.join("theme.json"), updated).unwrap();
         let out = handle_draft_save(&inv(&["rice", "draft", "save"], &["neon-night"]));
         assert_eq!(out.status, Status::Ok, "{:?}", out.data);
         let dir = root.join("rices").join("sonata").join("drafts").join("neon-night");
         assert_eq!(
-            std::fs::read_to_string(dir.join("livery.json")).unwrap(),
+            std::fs::read_to_string(dir.join("theme.json")).unwrap(),
             updated,
             "re-saving overwrites, not appends/merges"
         );
@@ -598,18 +598,18 @@ mod tests {
 
         handle_draft_save(&inv(&["rice", "draft", "save"], &["amber-dusk"]));
         let updated = r##"{"schemaVersion":"0","song":"sonata","palette":{"bg":"#222222"}}"##;
-        std::fs::write(stage.join("livery.json"), updated).unwrap();
+        std::fs::write(stage.join("theme.json"), updated).unwrap();
         handle_draft_save(&inv(&["rice", "draft", "save"], &["neon-night"]));
 
         let drafts = root.join("rices").join("sonata").join("drafts");
         assert!(
-            std::fs::read_to_string(drafts.join("amber-dusk").join("livery.json"))
+            std::fs::read_to_string(drafts.join("amber-dusk").join("theme.json"))
                 .unwrap()
                 .contains("#0b1021"),
             "amber-dusk is untouched by saving neon-night"
         );
         assert_eq!(
-            std::fs::read_to_string(drafts.join("neon-night").join("livery.json")).unwrap(),
+            std::fs::read_to_string(drafts.join("neon-night").join("theme.json")).unwrap(),
             updated
         );
         let _ = std::fs::remove_dir_all(&root);
@@ -635,14 +635,14 @@ mod tests {
             .join("sonata")
             .join("drafts")
             .join("neon-night")
-            .join("livery.json")
+            .join("theme.json")
             .is_file());
         assert!(root
             .join("rices")
             .join("moonlight")
             .join("drafts")
             .join("neon-night")
-            .join("livery.json")
+            .join("theme.json")
             .is_file());
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -650,7 +650,7 @@ mod tests {
     #[test]
     fn save_reads_transparently_through_a_symlinked_stage() {
         // The "preserve a moment as a second draft while still working in a
-        // first one" scenario `rice mode draft` enables: if `stage/livery.json`
+        // first one" scenario `rice mode draft` enables: if `stage/theme.json`
         // is CURRENTLY a symlink (Draft mode routed into some other draft),
         // `rice draft save <new-name>` still reads the live content fine —
         // std::fs::read_to_string follows symlinks transparently, same as
@@ -663,18 +663,18 @@ mod tests {
         let existing_dir = root.join("rices").join("sonata").join("drafts").join("neon-night");
         std::fs::create_dir_all(&existing_dir).unwrap();
         let routed_notes = r##"{"schemaVersion":"0","song":"sonata","palette":{"bg":"#routed"}}"##;
-        std::fs::write(existing_dir.join("livery.json"), routed_notes).unwrap();
-        std::os::unix::fs::symlink(&existing_dir.join("livery.json"), stage.join("livery.json")).unwrap();
+        std::fs::write(existing_dir.join("theme.json"), routed_notes).unwrap();
+        std::os::unix::fs::symlink(&existing_dir.join("theme.json"), stage.join("theme.json")).unwrap();
         crate::commands::test_support::ensure_default_rices_fixture();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
 
         let out = handle_draft_save(&inv(&["rice", "draft", "save"], &["amber-dusk"]));
         assert_eq!(out.status, Status::Ok, "{:?}", out.data);
         let forked = root.join("rices").join("sonata").join("drafts").join("amber-dusk");
-        assert_eq!(std::fs::read_to_string(forked.join("livery.json")).unwrap(), routed_notes);
+        assert_eq!(std::fs::read_to_string(forked.join("theme.json")).unwrap(), routed_notes);
         // The symlink itself, and what it routes to, are both untouched.
-        assert!(std::fs::symlink_metadata(stage.join("livery.json")).unwrap().file_type().is_symlink());
-        assert_eq!(std::fs::read_to_string(existing_dir.join("livery.json")).unwrap(), routed_notes);
+        assert!(std::fs::symlink_metadata(stage.join("theme.json")).unwrap().file_type().is_symlink());
+        assert_eq!(std::fs::read_to_string(existing_dir.join("theme.json")).unwrap(), routed_notes);
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -693,11 +693,11 @@ mod tests {
         assert_eq!(out.status, Status::Ok, "{:?}", out.data);
         assert_eq!(out.data.unwrap()["name"], "draft-1");
         let drafts = root.join("rices").join("sonata").join("drafts");
-        assert!(drafts.join("draft-1").join("livery.json").is_file());
+        assert!(drafts.join("draft-1").join("theme.json").is_file());
 
         let again = handle_draft_save(&inv(&["rice", "draft", "save"], &[]));
         assert_eq!(again.data.unwrap()["name"], "draft-2");
-        assert!(drafts.join("draft-1").join("livery.json").is_file(), "the first mint is never overwritten");
+        assert!(drafts.join("draft-1").join("theme.json").is_file(), "the first mint is never overwritten");
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -742,7 +742,7 @@ mod tests {
     }
 
     #[test]
-    fn minting_counts_a_directory_with_no_livery_as_taken() {
+    fn minting_counts_a_directory_with_no_theme_as_taken() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
         let root = unique_tmp("draft-mint-halfwritten");
@@ -757,7 +757,7 @@ mod tests {
 
         let out = handle_draft_save(&inv(&["rice", "draft", "save"], &[]));
         assert_eq!(out.data.unwrap()["name"], "draft-2");
-        assert!(!half.join("livery.json").exists(), "the half-written draft is left alone");
+        assert!(!half.join("theme.json").exists(), "the half-written draft is left alone");
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -785,7 +785,7 @@ mod tests {
         let root = unique_tmp("draft-mint-nosong");
         let stage = root.join("stage");
         std::fs::create_dir_all(&stage).unwrap();
-        std::fs::write(stage.join("livery.json"), VALID_NOTES).unwrap();
+        std::fs::write(stage.join("theme.json"), VALID_NOTES).unwrap();
         crate::commands::test_support::ensure_default_rices_fixture();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
 

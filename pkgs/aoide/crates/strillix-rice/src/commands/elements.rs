@@ -13,7 +13,7 @@ use serde_json::json;
 pub fn register(r: &mut Registry) {
     r.insert(cmd!(
         path: ["element", "seed"],
-        summary: "Render a song's committed elements/*/element.json into run/elements/ — verbatim byte copy for template:false files, livery-rendered for template:true, atomic per file. A render error fails only that element, leaves its old config in place, and is reported per-element.",
+        summary: "Render a song's committed elements/*/element.json into run/elements/ — verbatim byte copy for template:false files, theme-rendered for template:true, atomic per file. A render error fails only that element, leaves its old config in place, and is reported per-element.",
         args: [arg!("song", "string", true, "Song to seed elements from.")],
         flags: [],
         gated: false,
@@ -105,7 +105,7 @@ mod tests {
             r#"{ "v": 0, "element": "waybar", "files": [{"src":"config.jsonc"}], "run": {"exec":"waybar -c {run}/config.jsonc","via":"unit"} }"#,
         )
         .unwrap();
-        std::fs::write(strillix_dir.join("livery.json"), aoide_test_support::VALID_NOTES).unwrap();
+        std::fs::write(strillix_dir.join("theme.json"), aoide_test_support::VALID_NOTES).unwrap();
 
         let out = handle_element_seed(&aoide_test_support::inv(&["element", "seed"], &["moonlight"]));
         assert_eq!(out.status, aoide_protocol::output::Status::Ok, "{out:?}");

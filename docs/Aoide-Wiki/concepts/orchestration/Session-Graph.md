@@ -124,7 +124,7 @@ document instead. A sample render:
 
 Every stage mutation restages the same resolved document atomically to
 `state/stage/graph.json` — the identical write-temp-then-rename pattern as the
-livery emitter (which stages to `/stage/` instead — the two trees are
+theme emitter (which stages to `/stage/` instead — the two trees are
 split by owner, core vs. strillix) — via `restage_graph`, so [[Quickshell]]
 hot-reloads it without a separate emit step. `session prune` is the manual
 resync when a hand-edit to one of the stage files needs to be reconciled

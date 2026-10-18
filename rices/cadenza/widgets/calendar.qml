@@ -13,7 +13,7 @@ import Quickshell.Wayland
 PanelWindow {
     id: root
 
-    required property var livery
+    required property var theme
     required property var bridge
     property var shared: null
     property bool shown: false
@@ -41,5 +41,5 @@ PanelWindow {
     implicitHeight: body.implicitHeight
     onShownChanged: if (root.shared) root.shared.calendarOpen = root.shown
 
-    CalendarBody { id: body; livery: root.livery; bridge: root.bridge }
+    CalendarBody { id: body; theme: root.theme; bridge: root.bridge }
 }

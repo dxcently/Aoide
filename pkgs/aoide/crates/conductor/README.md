@@ -7,7 +7,7 @@ existing dispatcher and stores, usable without a desktop session.
 ## Working in the conductor
 
 Home opens as a full page with Aoide's logo outside a continuous light
-livery surface containing the central actions and recent projects, including
+theme surface containing the central actions and recent projects, including
 the gaps between them. The whole block — logo, the two groups, the recent
 projects — is laid out for the terminal it is in: a column of at most 62
 cells centred across the body, the block centred down it
@@ -66,12 +66,12 @@ legends): `⌂` home, `✉` mail, `♜` agent, `▣` terminal, `🖧` host, `⚑
 `◆` project, `◇` folder, `∴` graph, `≡` log, `⚙` status, `◌` past session,
 `↻` resurrect, `⊚` model, `◉` cursor. Marks are one cell wide; `@` is reserved
 for addresses; a mark carries no colour of its own, its Role does, so the
-conductor stays themeable through livery alone. Layout measures labels in
-display cells, never bytes. Semantic colors use the livery Base16 tokens as exact RGB: projects
+conductor stays themeable through theme alone. Layout measures labels in
+display cells, never bytes. Semantic colors use the theme Base16 tokens as exact RGB: projects
 use base0D, agents base0E, terminals base0C and mail base09. Focused tabs use
-their role color as a fill; inactive selections retain subdued livery shading.
+their role color as a fill; inactive selections retain subdued theme shading.
 Missing tokens fall back to ANSI colors. A single border encloses the tabs;
-the hint bar and status bar use distinct livery shades without ornaments.
+the hint bar and status bar use distinct theme shades without ornaments.
 Controls use ASCII marks such as `[+]`, `[-]`, `[+ To]` and `[+ Cc]`;
 field labels remain plain, with focus shown by shading and the cursor.
 

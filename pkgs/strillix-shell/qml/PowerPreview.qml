@@ -19,8 +19,8 @@ import Quickshell.Wayland
 // In the deployed tree ($out/qml/, where songs/ sits beside this file) the
 // default relative source resolves with no env needed.
 //
-// power.qml declares `livery` AND `bridge` as `required property` (the
-// lane original only requires `livery`) — a plain `Loader { source: }`
+// power.qml declares `theme` AND `bridge` as `required property` (the
+// lane original only requires `theme`) — a plain `Loader { source: }`
 // cannot satisfy a required property (creation fails, null item, the
 // DockPreview Phase-3 hazard), so this goes through `setSource(url, props)`
 // with BOTH supplied.
@@ -39,7 +39,7 @@ ShellRoot {
             color: "#00000000"
         }
 
-        property var stubLivery: QtObject {
+        property var stubTheme: QtObject {
             property string paletteBg:     "#f2ebde"   // pale marble ground
             property string paletteFg:     "#2f2a33"   // dark plum ink
             property string paletteAccent: "#a07414"   // Attic gold (numeric tallies)
@@ -70,7 +70,7 @@ ShellRoot {
             Component.onCompleted: {
                 var src = Quickshell.env("POWER_WIDGET")
                 if (!src || src === "") src = "songs/sonata/power.qml"
-                setSource(src, { "livery": win.stubLivery, "bridge": win.stubBridge })
+                setSource(src, { "theme": win.stubTheme, "bridge": win.stubBridge })
             }
         }
     }

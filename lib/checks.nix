@@ -18,8 +18,8 @@
 #      check is what fails if one is ever committed or left behind.
 #
 #   3. rice-shape — a committed song under rices/<name>/ carries its
-#      body (`rice.nix`), its `livery.json` and its `hyprland.conf`, the body
-#      is the aggregation shape, the `hyprland.conf` keeps the livery's keys
+#      body (`rice.nix`), its `theme.json` and its `hyprland.conf`, the body
+#      is the aggregation shape, the `hyprland.conf` keeps the theme's keys
 #      out, and a rice's module values sit under lib.mkDefault. No `.nix`
 #      anywhere else: an extra module in a song folder would join the merge
 #      silently and could set arbitrary host options.
@@ -62,10 +62,10 @@
 #      which exempts the flat-option-assignment house style; every other
 #      lint is a hard failure naming file, line, and lint code.
 #
-#   10. livery-fanout — the two fan-outs (baked Stylix, `$STRILLIX_ROOT/stage/
-#       livery.json` seed) resolve an `aoide.livery.override` identically.
+#   10. theme-fanout — the two fan-outs (baked Stylix, `$STRILLIX_ROOT/stage/
+#       theme.json` seed) resolve an `aoide.theme.override` identically.
 #       Proves the general law against a fixed in-file fixture (never a real
-#       host or committed song): `lib/livery.nix`'s `stagePatch`'s palette
+#       host or committed song): `lib/theme.nix`'s `stagePatch`'s palette
 #       output matches `resolve`'s under a one-anchor override,
 #       `stagePatch` is the identity with no override set, `venueDelta`
 #       is exactly the one recoloured slot (`{ }` with no override), and a
@@ -154,18 +154,18 @@ let
   #   - `rice.nix` is an attrset of `system` and/or `home` halves, and a half
   #     takes only `members`, `providers` and `module` (habit's readBody refuses
   #     anything else, but only for a SELECTED song; this runs for every song);
-  #   - `livery.json` and `hyprland.conf` exist. `hyprland.conf` may be empty,
+  #   - `theme.json` and `hyprland.conf` exist. `hyprland.conf` may be empty,
   #     and the staging engine links to a staging-owned empty file when a song
   #     ships none, so a song with no binds never keeps the previous one's;
-  #   - `hyprland.conf` carries no key the LIVERY owns (gaps, rounding, borders,
-  #     blur, colours). The livery renders those into the same rice, so a second
+  #   - `hyprland.conf` carries no key the THEME owns (gaps, rounding, borders,
+  #     blur, colours). The theme renders those into the same rice, so a second
   #     writer would race it: the rice file keeps binds, layout and animations;
   #   - every value a rice module sets, other than `rice.hyprland.*`, is under
   #     lib.mkDefault, and no module writes wayland.windowManager.hyprland.settings
   #     (`moduleProblemList`, below);
   #   - no stray `.nix` joins the module merge, and no `.nix` names a path out of
   #     its own folder (`strayNixFiles`, `escapingNixFiles`).
-  #   - a declared `aoide.livery.wallpaper` is the song's own `cover/<song>-desktop.<ext>`,
+  #   - a declared `aoide.theme.wallpaper` is the song's own `cover/<song>-desktop.<ext>`,
   #     the one name the activation seed and `rice stage` both resolve.
   #
   # The body, the hyprland.conf and the rice modules are the reads here that look
@@ -221,36 +221,36 @@ let
             ) halves
           );
 
-      # Keys the livery owns, as hyprlang writes them: `key = …` beside any
+      # Keys the theme owns, as hyprlang writes them: `key = …` beside any
       # `general:`/`decoration:` prefix or inside a block, and the block heads
       # themselves. A comment line never counts.
-      liveryKey = "(gaps_in|gaps_out|gaps_workspaces|rounding|border_size|col\\.[A-Za-z_0-9]+|blur:[A-Za-z_]+)[[:space:]]*=.*";
-      liveryBlock = "(general|decoration|blur)[[:space:]]*\\{.*";
-      liveryLine =
+      themeKey = "(gaps_in|gaps_out|gaps_workspaces|rounding|border_size|col\\.[A-Za-z_0-9]+|blur:[A-Za-z_]+)[[:space:]]*=.*";
+      themeBlock = "(general|decoration|blur)[[:space:]]*\\{.*";
+      themeLine =
         line:
         builtins.match "[[:space:]]*#.*" line == null
         && (
-          builtins.match "(.*[[:space:]{;:])?${liveryKey}" line != null
-          || builtins.match "(.*[[:space:]{;:])?${liveryBlock}" line != null
+          builtins.match "(.*[[:space:]{;:])?${themeKey}" line != null
+          || builtins.match "(.*[[:space:]{;:])?${themeBlock}" line != null
         );
-      liveryLeaks =
+      themeLeaks =
         name:
         let
           file = ricesRoot + "/${name}/hyprland.conf";
         in
-        lib.filter liveryLine (lib.splitString "\n" (builtins.readFile file));
+        lib.filter themeLine (lib.splitString "\n" (builtins.readFile file));
 
       incomplete = builtins.filter (
         name:
         !(builtins.pathExists (ricesRoot + "/${name}/rice.nix"))
-        || !(builtins.pathExists (ricesRoot + "/${name}/livery.json"))
+        || !(builtins.pathExists (ricesRoot + "/${name}/theme.json"))
         || !(builtins.pathExists (ricesRoot + "/${name}/hyprland.conf"))
       ) songNames;
       badBodies = builtins.filter (
         name: builtins.pathExists (ricesRoot + "/${name}/rice.nix") && bodyProblem name != null
       ) songNames;
       leaking = builtins.filter (
-        name: builtins.pathExists (ricesRoot + "/${name}/hyprland.conf") && liveryLeaks name != [ ]
+        name: builtins.pathExists (ricesRoot + "/${name}/hyprland.conf") && themeLeaks name != [ ]
       ) songNames;
 
       # ── A rice module sets its values under lib.mkDefault ─────────────────────
@@ -260,7 +260,7 @@ let
       # `rice.hyprland.*` (the rice's own options, sourced after the base), is
       # priority 1000, and `wayland.windowManager.hyprland.settings` is refused
       # outright: the rice's hyprland keys go through `rice.hyprland`, where the
-      # livery and the host can see them.
+      # theme and the host can see them.
       #
       # The walk reads each value's shape and its priority from the override
       # wrapper it carries. A list or a string is never forced past its shape, and
@@ -307,7 +307,7 @@ let
         let
           raw = rawOf module;
           picked = unwrapOverride (
-            lib.attrByPath [ "aoide" "livery" "wallpaper" ] null (unwrapOverride (raw.config or raw))
+            lib.attrByPath [ "aoide" "theme" "wallpaper" ] null (unwrapOverride (raw.config or raw))
           );
           path = if picked == null then null else toString picked;
         in
@@ -320,7 +320,7 @@ let
           [ ]
         else
           [
-            "song ${name}'s ${half}.module sets aoide.livery.wallpaper to ${path}; the picture must be cover/${name}-desktop.<ext> (CONTRACTS.md §4)"
+            "song ${name}'s ${half}.module sets aoide.theme.wallpaper to ${path}; the picture must be cover/${name}-desktop.<ext> (CONTRACTS.md §4)"
           ];
       moduleProblems =
         name: half: module:
@@ -394,11 +394,11 @@ let
         else if badBodies != [ ] then
           "rice.nix is not a body (system/home halves, CONTRACTS.md §5) in: ${builtins.toString badBodies}: ${bodyProblem (builtins.head badBodies)}"
         else if leaking != [ ] then
-          "hyprland.conf sets a livery-owned key (gaps, rounding, borders, blur, colours) in: ${builtins.toString leaking}"
+          "hyprland.conf sets a theme-owned key (gaps, rounding, borders, blur, colours) in: ${builtins.toString leaking}"
         else if moduleProblemList != [ ] then
           builtins.head moduleProblemList
         else
-          "no rice.nix, livery.json or hyprland.conf in: ${builtins.toString incomplete}"
+          "no rice.nix, theme.json or hyprland.conf in: ${builtins.toString incomplete}"
       }";
 
   # ── Check 4: nixfmt --check over the committed source ──────────────────────
@@ -814,10 +814,10 @@ let
     '';
 
   # ── Check 10: the two fan-outs agree under a venue override ────────────────
-  # `lib/livery.nix`'s `resolve` (the baked Stylix/compositor fan-out) and
-  # `stagePatch` (the `$STRILLIX_ROOT/stage/livery.json` seed) must apply the identical
+  # `lib/theme.nix`'s `resolve` (the baked Stylix/compositor fan-out) and
+  # `stagePatch` (the `$STRILLIX_ROOT/stage/theme.json` seed) must apply the identical
   # override rule (CONTRACTS.md §1). Proved here against a FIXED fixture —
-  # never a real host's `aoide.livery` or a committed rices file, so this
+  # never a real host's `aoide.theme` or a committed rices file, so this
   # check never depends on which songs or hosts are in the tree. One case (a
   # single overridden anchor recolours a matching palette slot) plus the
   # no-override identity `stagePatch` promises callers. `venueDelta` (the
@@ -826,9 +826,9 @@ let
   # override. Geometry is the third case: a value the host sets, laid over the
   # document whether or not it holds the tier, and in `venueDelta` only where
   # it differs from the document's own.
-  liveryFanout =
+  themeFanout =
     let
-      livery = import ./livery.nix { inherit lib; };
+      theme = import ./theme.nix { inherit lib; };
       fixturePalette = {
         bg = "#111111";
         fg = "#eeeeee";
@@ -836,7 +836,7 @@ let
         urgent = "#333333";
         hot = null;
       };
-      fixtureLivery = {
+      fixtureTheme = {
         palette = fixturePalette;
         base16 = null;
         bar = {
@@ -857,10 +857,10 @@ let
           bg = "#ff0000";
         };
       };
-      fixtureBare = fixtureLivery // {
+      fixtureBare = fixtureTheme // {
         override = { };
       };
-      # A two-key document, mirroring the committed livery.json shape
+      # A two-key document, mirroring the committed theme.json shape
       # (schemaVersion + palette) without reading one.
       fixtureDoc = {
         schemaVersion = "0";
@@ -881,33 +881,33 @@ let
           gapsIn = 4;
         };
       };
-      resolvedPalette = (livery.resolve fixtureLivery).palette;
-      stagedPalette = (livery.stagePatch fixtureLivery fixtureDoc).palette;
-      identity = livery.stagePatch fixtureBare fixtureDoc == fixtureDoc;
+      resolvedPalette = (theme.resolve fixtureTheme).palette;
+      stagedPalette = (theme.stagePatch fixtureTheme fixtureDoc).palette;
+      identity = theme.stagePatch fixtureBare fixtureDoc == fixtureDoc;
       deltaOne =
-        livery.venueDelta fixtureLivery fixtureDoc == {
+        theme.venueDelta fixtureTheme fixtureDoc == {
           palette = {
             bg = "#ff0000";
           };
         };
-      deltaBare = livery.venueDelta fixtureBare fixtureDoc == { };
+      deltaBare = theme.venueDelta fixtureBare fixtureDoc == { };
       geoCreated =
-        (livery.stagePatch fixtureGeo fixtureDoc).geometry or null == {
+        (theme.stagePatch fixtureGeo fixtureDoc).geometry or null == {
           terminalOpacity = 1.0;
         }
         &&
-          livery.venueDelta fixtureGeo fixtureDoc == {
+          theme.venueDelta fixtureGeo fixtureDoc == {
             geometry = {
               terminalOpacity = 1.0;
             };
           };
       geoMerged =
-        (livery.stagePatch fixtureGeo fixtureDocGeo).geometry or null == {
+        (theme.stagePatch fixtureGeo fixtureDocGeo).geometry or null == {
           terminalOpacity = 1.0;
           gapsIn = 4;
         }
         &&
-          livery.venueDelta fixtureGeo fixtureDocGeo == {
+          theme.venueDelta fixtureGeo fixtureDocGeo == {
             geometry = {
               terminalOpacity = 1.0;
             };
@@ -920,10 +920,9 @@ let
             };
           };
         in
-        livery.stagePatch same fixtureDocGeo == fixtureDocGeo
-        && livery.venueDelta same fixtureDocGeo == { };
+        theme.stagePatch same fixtureDocGeo == fixtureDocGeo && theme.venueDelta same fixtureDocGeo == { };
     in
-    assertCheck "livery-fanout"
+    assertCheck "theme-fanout"
       (
         stagedPalette == resolvedPalette
         && identity
@@ -1084,7 +1083,7 @@ in
     nixIndependence
     portability
     nixLint
-    liveryFanout
+    themeFanout
     generatorOffline
     generatorRelocatable
     ;

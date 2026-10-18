@@ -8,7 +8,7 @@
 // this file's `implicitHeight` back and binds the `PanelWindow`'s own
 // `implicitHeight`/`exclusiveZone` to it (see shell.qml), rather than the
 // shell pinning a fixed height. Extras this file needs beyond the universal
-// `livery`/`bridge`: `stagingEngine` (its embedded ricemode `WidgetSlot` resolves
+// `theme`/`bridge`: `stagingEngine` (its embedded ricemode `WidgetSlot` resolves
 // through it), `shared` (session state, optional). The clef and the dock cell
 // ask the bridge for the powermenu and the dock, and the clock opens the
 // calendar the same way.
@@ -54,23 +54,23 @@
 // sized to fit.
 //
 // Colour: the MUSIC SHEET — rendered as a flat, fully OPAQUE strip of
-// manuscript paper, no glass and no gloss. The page fill is livery.paletteBg
+// manuscript paper, no glass and no gloss. The page fill is theme.paletteBg
 // at full alpha (Qt.rgba(paletteBg.r, .g, .b, 1.0)); there is no blur behind
 // it and no gradient sheen on top — the strip reads as solid paper. The
-// structural ink (staff lines, barlines, page rail) follows livery.barFg,
+// structural ink (staff lines, barlines, page rail) follows theme.barFg,
 // not a literal — sonata's own bar.fg (#2f2a33) sits near-black on the
 // marble page, so this reads the same as the old #000000 did here, but a
 // song that borrows this widget carries its own bar foreground with it
 // (a borrowing song whose bar.fg is null falls through to paletteFg, bone-white
 // #e4e6eb — the staff stays legible on graphite instead of vanishing). The
-// TEXT ink is the song's umber (livery.paletteFg #423420) drawn CLEAN — the
+// TEXT ink is the song's umber (theme.paletteFg #423420) drawn CLEAN — the
 // old white legibility outline is dropped, since dark text on the opaque
 // sheet needs no halo (that outline was a relic of the old dark bar and
 // only muddied the type on cream).
-// One restrained STATE accent survives from the song (LiveryState): the ACTIVE
+// One restrained STATE accent survives from the song (ThemeState): the ACTIVE
 // workspace note-head fills with paletteAccent, the BLOCKED ✎ pulse + low battery
 // go glitchPink, and open/hover toggles (volume) flash paletteAccent.
-// Everything at rest follows livery.barFg.
+// Everything at rest follows theme.barFg.
 //
 // khoa, 2026-08-15 — THE AUDIO CELLS SPLIT IN TWO. Hovering an audio cell used
 // to open the whole colonnade; it now opens a small CUE stele (the `AudioCue`
@@ -115,7 +115,7 @@
 //     `anchors.topMargin: -4` reaches past the stele to claim StelePopout's
 //     4px host gap — between the cell's bottom edge and the stele's top edge
 //     lie 4px of popup surface owned by no item, and a pointer that pauses
-//     there outlives any grace. Both livery are recorded on the component
+//     there outlives any grace. Both theme are recorded on the component
 //     itself with what was measured.
 //   · MUTE MOVES INTO THE CUE, AND MIDDLE-CLICK IS WITHDRAWN. Each channel row
 //     is now clickable — out and in toggle mute, bt toggles adapter power
@@ -200,21 +200,21 @@ Item {
     //
     // The melody: workspaces as SOLID NOTE GLYPHS on the staff. Clean-slate
 // redesign in the SONG vein (the entablature colonnade is gone). The bar is
-// one measure of music; the workspaces are the livery written on it. Each
+// one measure of music; the workspaces are the theme written on it. Each
 // live Hyprland workspace is a SOLID (filled) musical note, one distinct
 // glyph per workspace id:
 //     ws 1 → ♩   ws 2 → ♪   ws 3 → ♫   ws 4 → ♬   ws 5 → 𝅘𝅥𝅮   ws 6 → 𝅘𝅥𝅯
 //     (ids past the set repeat the run; magic → 𝅘𝅥𝅱, scratch → 𝄋 ride the ledger)
 // Pitch (staff degree) rises with id. The SELECTED workspace swells, fills
-// with its own hue, and rests on a soft accent highlight-pill. Resting livery
-// each carry their own hue (livery.noteColor cycles the 8-slot base16 accent
+// with its own hue, and rests on a soft accent highlight-pill. Resting theme
+// each carry their own hue (theme.noteColor cycles the 8-slot base16 accent
 // spread); urgent workspaces PULSE in glitchPink, overriding the resting hue.
 // Clicking a note activates its workspace (Hyprland activate(), no shell-out).
-// Colour comes ONLY from the livery singleton, save one sanctioned literal:
+// Colour comes ONLY from the theme singleton, save one sanctioned literal:
 // the white outline on the selected glyph, for separation.
 component WorkspaceRow: Item {
     id: root
-    required property var livery
+    required property var theme
 
     // ── Hover-preview bridge (concepts/Terminal-Commander) ─────────────────
     // shell.qml's shared QtObject. When the gadget-dock terminal roster is
@@ -234,7 +234,7 @@ component WorkspaceRow: Item {
         return -1
     }
 
-    // ── Geometry: solid livery on a five-line staff ─────────────────────────
+    // ── Geometry: solid theme on a five-line staff ─────────────────────────
     readonly property int cellW: 22        // horizontal slot per note
     readonly property int cellGap: 3
     readonly property real halfStep: 1.6   // line→space; a full staff line is 2×
@@ -261,11 +261,11 @@ component WorkspaceRow: Item {
         return name.indexOf("magic") !== -1 || name.indexOf("scratch") !== -1
     }
     // Resting-state hue — each workspace id gets its own distinct base16 accent
-    // (livery.noteColor cycles the 8-hue accent spread by id). Active/urgent/
+    // (theme.noteColor cycles the 8-hue accent spread by id). Active/urgent/
     // preview states still override this in the delegate below.
     function wsColor(ws) {
         var id = ws ? (ws.id || 1) : 1
-        return root.livery.noteColor(id)
+        return root.theme.noteColor(id)
     }
     // Staff degree → vertical offset (up is negative y). Specials ride high on
     // a ledger; regular ids wrap through a 7-degree scale centred on the staff.
@@ -297,11 +297,11 @@ component WorkspaceRow: Item {
     // own colour, just emphasised. Falls back to the accent when nothing's active.
     readonly property color activeColor:
         (root.activeIndex >= 0 && root.wsList[root.activeIndex])
-        ? root.livery.noteColor(root.wsList[root.activeIndex].id)
-        : root.livery.paletteAccent
+        ? root.theme.noteColor(root.wsList[root.activeIndex].id)
+        : root.theme.paletteAccent
 
     // ── The highlight-pill — a soft accent glow that eases under the played
-    // note (the old playhead re-cast). Declared before the livery so it sits
+    // note (the old playhead re-cast). Declared before the theme so it sits
     // behind them, reinforcing which workspace is selected.
     //
     // khoa, 2026-08-16: verticalCenterOffset added — every note glyph is
@@ -342,7 +342,7 @@ component WorkspaceRow: Item {
     // terminal lives on. Deliberately a DIFFERENT KIND of mark from the active
     // pill (hollow cool ring vs solid warm accent fill), so both can show at
     // once — if the previewed ws IS the active one, the ring simply frames the
-    // accent pill and reads sensibly. Border-only, input-inert. Colour: livery.
+    // accent pill and reads sensibly. Border-only, input-inert. Colour: theme.
     // Same pitchOffset-tracking fix as `highlight` above, keyed to the
     // HOVERED workspace instead of the active one.
     Rectangle {
@@ -353,7 +353,7 @@ component WorkspaceRow: Item {
         height: 24
         radius: width / 2      // matches the active circle's curve, one size out
         color: "transparent"
-        border.color: root.livery.paletteAccent
+        border.color: root.theme.paletteAccent
         border.width: 2
         opacity: 0.85
         anchors.verticalCenter: parent.verticalCenter
@@ -409,13 +409,13 @@ component WorkspaceRow: Item {
                     width: 22
                     height: 22
                     radius: width / 2   // same circle as the active/preview marks
-                    color: root.livery.paletteAccent
+                    color: root.theme.paletteAccent
                     opacity: 0.18
                 }
 
                 // The SOLID note glyph, parked at this note's pitch on the staff.
                 // Resting → its own base16 accent hue (root.wsColor, one of 8
-                // distinct colours cycled by workspace id — see LiveryState.
+                // distinct colours cycled by workspace id — see ThemeState.
                 // noteColor); the played note KEEPS its own hue but swells and
                 // rests on a same-hue highlight pill; urgent → glitchPink. A
                 // defining ink outline (paletteFg) rides only the active glyph.
@@ -425,9 +425,9 @@ component WorkspaceRow: Item {
                     y: (cell.height - height) / 2 + root.pitchOffset(cell.modelData)
                     text: root.wsGlyph(cell.modelData)
                     color: cell.isActive ? root.wsColor(cell.modelData)
-                          : (cell.isUrgent ? root.livery.glitchPink
-                                           : (cell.isHovered ? root.livery.paletteAccent
-                                                             : (cell.isPreview ? root.livery.paletteAccent
+                          : (cell.isUrgent ? root.theme.glitchPink
+                                           : (cell.isHovered ? root.theme.paletteAccent
+                                                             : (cell.isPreview ? root.theme.paletteAccent
                                                                                : root.wsColor(cell.modelData))))
                     // Selected note = its OWN hue, swelled + pilled + given a
                     // WHITE outline (khoa) so it reads as highlighted against the
@@ -471,10 +471,10 @@ component WorkspaceRow: Item {
     }
 
     // ── Note + bridge dependencies (injected by WidgetSlot) ────────────────
-    required property var livery
+    required property var theme
     required property var bridge
     // The staging engine (StagingEngine singleton, injected as an extra —
-    // it isn't part of WidgetSlot's universal livery/bridge contract). The
+    // it isn't part of WidgetSlot's universal theme/bridge contract). The
     // embedded ricemode WidgetSlot resolves its song through the same handle.
     required property var stagingEngine
     // The powermenu and the dock are not handed in. The clef and the dock cell
@@ -1257,7 +1257,7 @@ component WorkspaceRow: Item {
         width: 1.5
         height: root.staffSpan + 4
         radius: 0.5
-        color: root.livery.barFg
+        color: root.theme.barFg
         opacity: 0.7
         anchors.verticalCenter: parent.verticalCenter
     }
@@ -1276,9 +1276,9 @@ component WorkspaceRow: Item {
         // Fully opaque paletteBg — no glass, no translucency. The bar reads
         // as a flat solid strip; the black staff ink sits directly on the
         // song's page colour with no blur or gradient behind it.
-        color: Qt.rgba(Qt.color(root.livery.paletteBg).r,
-                       Qt.color(root.livery.paletteBg).g,
-                       Qt.color(root.livery.paletteBg).b, 1.0)
+        color: Qt.rgba(Qt.color(root.theme.paletteBg).r,
+                       Qt.color(root.theme.paletteBg).g,
+                       Qt.color(root.theme.paletteBg).b, 1.0)
         opacity: 1.0
     }
     // The page rail — a DEFINED black edge framing the opaque strip.
@@ -1286,7 +1286,7 @@ component WorkspaceRow: Item {
         anchors.fill: page
         radius: 0
         color: "transparent"
-        border.color: root.livery.barFg
+        border.color: root.theme.barFg
         border.width: 1
         opacity: 0.5
     }
@@ -1303,7 +1303,7 @@ component WorkspaceRow: Item {
             anchors.rightMargin: root.edgePad + 10
             height: 1
             y: root.staffMid + (index - 2) * root.staffGap
-            color: root.livery.barFg
+            color: root.theme.barFg
             opacity: 0.55
         }
     }
@@ -1315,7 +1315,7 @@ component WorkspaceRow: Item {
         anchors.leftMargin: root.edgePad
         anchors.verticalCenter: parent.verticalCenter
         text: "𝄞"
-        color: root.livery.paletteFg
+        color: root.theme.paletteFg
         font.family: "monospace"
         // The treble clef glyph is TALL (big loop + descender tail); at 20px it
         // clipped against the 36px strip's top/bottom. 16px + vertical-fit keeps
@@ -1350,7 +1350,7 @@ component WorkspaceRow: Item {
             text: "✎" + root.sessionCount
             // Black ink at rest; when ANY session is blocked it switches to the
             // urgent role (glitchPink) and pulses — a summons from across the bar.
-            color: root.anyBlocked ? root.livery.glitchPink : root.livery.paletteFg
+            color: root.anyBlocked ? root.theme.glitchPink : root.theme.paletteFg
             font.family: "monospace"
             font.pixelSize: 13
             font.bold: true
@@ -1375,7 +1375,7 @@ component WorkspaceRow: Item {
             id: clockText
             anchors.verticalCenter: parent.verticalCenter
             text: Qt.formatDateTime(root.now, "hh:mm AP  ddd MMM dd")
-            color: root.shared && root.shared.calendarOpen ? root.livery.paletteAccent : root.livery.paletteFg
+            color: root.shared && root.shared.calendarOpen ? root.theme.paletteAccent : root.theme.paletteFg
             font.family: "monospace"
             font.pixelSize: 14
             font.bold: true
@@ -1393,7 +1393,7 @@ component WorkspaceRow: Item {
             id: slashText
             anchors.verticalCenter: parent.verticalCenter
             text: "/"
-            color: root.livery.paletteFg
+            color: root.theme.paletteFg
             font.family: "monospace"
             font.pixelSize: 14
             opacity: 0.55
@@ -1409,7 +1409,7 @@ component WorkspaceRow: Item {
         Text {
             anchors.verticalCenter: parent.verticalCenter
             text: root.winTitle()
-            color: root.livery.paletteAccent
+            color: root.theme.paletteAccent
             font.family: "monospace"
             font.pixelSize: 14
             font.bold: true
@@ -1434,7 +1434,7 @@ component WorkspaceRow: Item {
         WorkspaceRow {
             id: centeredWorkspaces
             anchors.verticalCenter: parent.verticalCenter
-            livery: root.livery
+            theme: root.theme
             shared: root.shared
         }
         Barline {}
@@ -1455,7 +1455,7 @@ component WorkspaceRow: Item {
         // (vol/mic/batt/net) that follow — song-state before instrument-state,
         // mirroring how the ✎N Aoide cell leads the left stave.
         WidgetSlot {
-            livery: root.livery
+            theme: root.theme
             bridge: root.bridge
             stagingEngine: root.stagingEngine
             slot: "ricemode"
@@ -1481,7 +1481,7 @@ component WorkspaceRow: Item {
             anchors.verticalCenter: parent.verticalCenter
             visible: root.volAvail
             text: root.volMuted ? "𝄽 vol" : (root.volIcon(root.volPct) + " " + root.volPct)
-            color: root.livery.paletteAccent
+            color: root.theme.paletteAccent
             opacity: root.audioShown ? 1.0 : 0.8
             font.underline: root.audioShown
             font.family: "monospace"
@@ -1519,7 +1519,7 @@ component WorkspaceRow: Item {
             anchors.verticalCenter: parent.verticalCenter
             visible: root.micAvail
             text: root.micMuted ? "𝄽 mic" : ("● " + root.micPct)
-            color: root.livery.holoBlue
+            color: root.theme.holoBlue
             opacity: root.audioShown ? 1.0 : 0.8
             font.underline: root.audioShown
             font.family: "monospace"
@@ -1550,8 +1550,8 @@ component WorkspaceRow: Item {
             text: root.battFull
                   ? (root.battIcon() + " full")
                   : (root.battIcon() + " " + root.battPct + (root.battCharging ? "+" : ""))
-            color: (root.battCrit || root.battWarn) ? root.livery.glitchPink
-                                                    : root.livery.paletteFg
+            color: (root.battCrit || root.battWarn) ? root.theme.glitchPink
+                                                    : root.theme.paletteFg
             opacity: (root.battWarn && !root.blinkOn) ? 0.3 : 1.0
             Behavior on opacity { NumberAnimation { duration: 400 } }
             font.family: "monospace"
@@ -1575,7 +1575,7 @@ component WorkspaceRow: Item {
             id: netText
             anchors.verticalCenter: parent.verticalCenter
             text: root.netGlyph(root.netKind) + " " + root.netLabel(root.netKind)
-            color: root.netOpen ? root.livery.paletteAccent : root.livery.paletteFg
+            color: root.netOpen ? root.theme.paletteAccent : root.theme.paletteFg
             opacity: root.netOpen ? 1.0 : (root.netKind === "down" ? 0.5 : 1.0)
             font.family: "monospace"
             font.pixelSize: 14
@@ -1609,7 +1609,7 @@ component WorkspaceRow: Item {
             anchors.verticalCenter: parent.verticalCenter
             visible: root.trayCount > 0
             text: root.trayOpen ? "𝄑" : "𝄐"
-            color: root.trayOpen ? root.livery.paletteAccent : root.livery.paletteFg
+            color: root.trayOpen ? root.theme.paletteAccent : root.theme.paletteFg
             font.family: "monospace"
             font.pixelSize: 14
             MouseArea {
@@ -1625,12 +1625,12 @@ component WorkspaceRow: Item {
             spacing: 2
             Rectangle {
                 width: 1.5; height: root.staffSpan + 4; radius: 0.5
-                color: root.livery.barFg; opacity: 0.7
+                color: root.theme.barFg; opacity: 0.7
                 anchors.verticalCenter: parent.verticalCenter
             }
             Rectangle {
                 width: 3; height: root.staffSpan + 4; radius: 0.5
-                color: root.livery.barFg; opacity: 0.9
+                color: root.theme.barFg; opacity: 0.9
                 anchors.verticalCenter: parent.verticalCenter
             }
         }
@@ -1656,7 +1656,7 @@ component WorkspaceRow: Item {
     //               "tooltip" family in this house and this does not invent
     //               one. Width 217 (206 + the margin-mark column added
     //               2026-08-16), three body rows, no porch.
-    //   · SIGNATURE — MUREX `livery.violet` (base0E), DELIBERATELY the same
+    //   · SIGNATURE — MUREX `theme.violet` (base0E), DELIBERATELY the same
     //               signature the colonnade wears: these are the same widget's
     //               two faces (glance and control), and a second hue would read
     //               as a second temple. It moved WITH the colonnade on
@@ -1688,11 +1688,11 @@ component WorkspaceRow: Item {
     // inside another inline component.
     component CueChannel: Item {
         id: channel
-        property var livery
+        property var theme
         property string glyph: ""
         property string glyphFace: "Noto Music"
         property string name: ""
-        property color hue: channel.livery ? channel.livery.paletteFg : "#000000"
+        property color hue: channel.theme ? channel.theme.paletteFg : "#000000"
         property bool live: true          // false → the whole row recedes
         property bool meter: false
         property int pct: 0
@@ -1714,8 +1714,8 @@ component WorkspaceRow: Item {
 
         readonly property real topInCue: channel.y + (channel.parent ? channel.parent.y : 0)
         readonly property bool hot: root.cueHotRow === channel.row && channel.actionable
-        readonly property color ink: channel.livery ? channel.livery.paletteFg : "#000000"
-        readonly property color urgent: channel.livery ? channel.livery.paletteUrgent : "#000000"
+        readonly property color ink: channel.theme ? channel.theme.paletteFg : "#000000"
+        readonly property color urgent: channel.theme ? channel.theme.paletteUrgent : "#000000"
         readonly property real rowAlpha: live ? 1.0 : 0.4
         function withA(cstr, a) {
             var c = Qt.color(cstr)
@@ -1835,13 +1835,13 @@ component WorkspaceRow: Item {
     component AudioCue: Item {
         id: cue
 
-        required property var livery
+        required property var theme
 
         readonly property string faceSerif: "Noto Serif"
         readonly property string faceMono:  "JetBrainsMono Nerd Font"
         readonly property string faceMusic: "Noto Music"
-        readonly property color sig: cue.livery.violet
-        readonly property color ink: cue.livery.paletteFg
+        readonly property color sig: cue.theme.violet
+        readonly property color ink: cue.theme.paletteFg
 
         function withA(cstr, a) {
             var c = Qt.color(cstr)
@@ -1893,7 +1893,7 @@ component WorkspaceRow: Item {
         // MouseArea: it holds the card open, it claims StelePopout's host gap,
         // it decides which channel row is hot, and it dispatches the click. That
         // is not tidiness, it is what the measurements on 2026-08-16 left
-        // standing. Arrangements were built and read off screen through a live
+        // standing. Layouts were built and read off screen through a live
         // state print in this ledger:
         //   1. a filling MouseArea here PLUS a MouseArea per row — the root
         //      took every hover: `cueHotRow` read -1 at every pointer position
@@ -1997,7 +1997,7 @@ component WorkspaceRow: Item {
             width: parent.width
             anchors.top: parent.top
             radius: 0
-            color: cue.livery.paletteBg
+            color: cue.theme.paletteBg
             border.color: cue.ink
             border.width: 2
             height: body.implicitHeight + 20
@@ -2093,12 +2093,12 @@ component WorkspaceRow: Item {
                 // single word covers all three in the ledger below.
                 CueChannel {
                     id: channelOut
-                    livery: cue.livery
+                    theme: cue.theme
                     row: 0
                     glyph: root.volMuted ? "𝄽" : root.volIcon(root.volPct)
                     glyphFace: cue.faceMusic
                     name: "out"
-                    hue: cue.livery.paletteAccent
+                    hue: cue.theme.paletteAccent
                     live: root.volAvail
                     meter: root.volAvail && !root.volMuted
                     pct: root.volPct
@@ -2109,12 +2109,12 @@ component WorkspaceRow: Item {
                 }
                 CueChannel {
                     id: channelIn
-                    livery: cue.livery
+                    theme: cue.theme
                     row: 1
                     glyph: root.micMuted ? "𝄽" : "●"
                     glyphFace: root.micMuted ? cue.faceMusic : cue.faceMono
                     name: "in"
-                    hue: cue.livery.holoBlue
+                    hue: cue.theme.holoBlue
                     live: root.micAvail
                     meter: root.micAvail && !root.micMuted
                     pct: root.micPct
@@ -2126,11 +2126,11 @@ component WorkspaceRow: Item {
                 CueChannel {
                     id: channelBt
                     glyph: ""                       // nf-fa-bluetooth
-                    livery: cue.livery
+                    theme: cue.theme
                     row: 2
                     glyphFace: cue.faceMono
                     name: "bt"
-                    hue: cue.livery.wireCyan
+                    hue: cue.theme.wireCyan
                     // `live` is the UNAVAILABLE treatment (the row recedes to
                     // 0.4, §9), and a powered-DOWN adapter is not unavailable —
                     // it is the one row whose click matters most, since the
@@ -2203,7 +2203,7 @@ component WorkspaceRow: Item {
                         anchors.right: cueFfCorner.left; anchors.rightMargin: 4
                         anchors.verticalCenter: parent.verticalCenter
                         text: "𝄂"; font.family: cue.faceMusic; font.pixelSize: 15
-                        color: cue.livery.paletteAccent
+                        color: cue.theme.paletteAccent
                     }
                     Rectangle {
                         anchors.left: cueFfL.right; anchors.right: cueFfBar.left
@@ -2235,7 +2235,7 @@ component WorkspaceRow: Item {
     StelePopout {
         cell: volText
         shown: root.audioCueShown && (root.volAvail || root.micAvail)
-        AudioCue { livery: root.livery }
+        AudioCue { theme: root.theme }
     }
 
     // Audio control — the three-bay colonnade (MIC · VOL · BT), a self-framed
@@ -2256,7 +2256,7 @@ component WorkspaceRow: Item {
         anchorEdges: Edges.Bottom | Edges.Right
         anchorGravity: Edges.Bottom | Edges.Left
         AudioColonnade {
-            livery: root.livery
+            theme: root.theme
             outPct: root.volPct
             outMuted: root.volMuted
             outAvail: root.volAvail
@@ -2289,7 +2289,7 @@ component WorkspaceRow: Item {
 
     // Battery hover popout — time-remaining + charge bar.
     BarPopout {
-        livery: root.livery
+        theme: root.theme
         cell: battText
         title: "battery.gauge"
         popoutWidth: 180
@@ -2300,7 +2300,7 @@ component WorkspaceRow: Item {
             Text {
                 anchors.horizontalCenter: parent.horizontalCenter
                 text: root.battBar(root.battPct) + " " + root.battPct + "%"
-                color: root.battWarn ? root.livery.paletteUrgent : root.livery.paletteFg
+                color: root.battWarn ? root.theme.paletteUrgent : root.theme.paletteFg
                 font.family: "monospace"
                 font.pixelSize: 14
             }
@@ -2308,7 +2308,7 @@ component WorkspaceRow: Item {
                 anchors.horizontalCenter: parent.horizontalCenter
                 visible: root.battTime().length > 0
                 text: root.battTime()
-                color: root.livery.paletteFg
+                color: root.theme.paletteFg
                 opacity: 0.75
                 font.family: "monospace"
                 font.pixelSize: 11
@@ -2328,7 +2328,7 @@ component WorkspaceRow: Item {
     //                 manuscript-ruled line per held item — the launcher's
     //                 row idiom (hairline rule, margin dot, icon, serif name,
     //                 mono gloss), no invented layout system.
-    //   · SIGNATURE — verdigris (livery.wireCyan): the one role no popout
+    //   · SIGNATURE — verdigris (theme.wireCyan): the one role no popout
     //                 stele wears as its own (rust took notifications, amber
     //                 took audio + calendar). Full strength is legal as a
     //                 signature — the 0.5 alpha cap binds the STRUCTURAL
@@ -2379,8 +2379,8 @@ component WorkspaceRow: Item {
             readonly property string faceMusic: "Noto Music"
 
             // this stele's signature — VERDIGRIS (wireCyan)
-            readonly property color sig: root.livery.wireCyan
-            readonly property color ink: root.livery.paletteFg
+            readonly property color sig: root.theme.wireCyan
+            readonly property color ink: root.theme.paletteFg
 
             function withA(cstr, a) {
                 var c = Qt.color(cstr)
@@ -2409,7 +2409,7 @@ component WorkspaceRow: Item {
                 width: parent.width
                 anchors.top: parent.top
                 radius: 0
-                color: root.livery.paletteBg
+                color: root.theme.paletteBg
                 border.color: tstele.ink
                 border.width: 2
                 height: trayContent.implicitHeight + 20
@@ -2551,7 +2551,7 @@ component WorkspaceRow: Item {
                                     anchors.left: parent.left; anchors.right: parent.right
                                     anchors.bottom: parent.bottom
                                     height: trayRow.hovered ? 2 : 1
-                                    color: trayRow.hovered ? root.livery.paletteHot
+                                    color: trayRow.hovered ? root.theme.paletteHot
                                                            : tstele.withA(tstele.ink, 0.13)
                                     Behavior on color { ColorAnimation { duration: 150 } }
                                 }
@@ -2572,8 +2572,8 @@ component WorkspaceRow: Item {
                                               : trayRow.hovered ? "♪" : "·"
                                         font.family: tstele.faceMusic
                                         font.pixelSize: trayRow.hovered && !trayRow.attn ? 15 : 13
-                                        color: trayRow.attn ? root.livery.paletteUrgent
-                                               : trayRow.hovered ? root.livery.paletteHot
+                                        color: trayRow.attn ? root.theme.paletteUrgent
+                                               : trayRow.hovered ? root.theme.paletteHot
                                                : tstele.withA(tstele.ink, 0.3)
                                         SequentialAnimation on opacity {
                                             running: trayRow.attn
@@ -2595,7 +2595,7 @@ component WorkspaceRow: Item {
                                         id: rowName
                                         anchors.verticalCenter: parent.verticalCenter
                                         text: trayRow.label
-                                        color: trayRow.attn ? root.livery.paletteUrgent
+                                        color: trayRow.attn ? root.theme.paletteUrgent
                                                             : tstele.ink
                                         opacity: trayRow.hovered ? 1.0 : 0.88
                                         font.family: tstele.faceSerif
@@ -2610,7 +2610,7 @@ component WorkspaceRow: Item {
                                         anchors.verticalCenterOffset: 1
                                         visible: trayRow.gloss.length > 0
                                         text: trayRow.gloss
-                                        color: tstele.withA(root.livery.holoBlue, 0.8)
+                                        color: tstele.withA(root.theme.holoBlue, 0.8)
                                         font.family: tstele.faceMono
                                         font.pixelSize: 10
                                         elide: Text.ElideRight
@@ -2707,7 +2707,7 @@ component WorkspaceRow: Item {
                             anchors.right: trayFfCorner.left; anchors.rightMargin: 4
                             anchors.verticalCenter: parent.verticalCenter
                             text: "𝄂"; font.family: tstele.faceMusic; font.pixelSize: 16
-                            color: root.livery.paletteAccent
+                            color: root.theme.paletteAccent
                         }
                         Rectangle {
                             anchors.left: trayFfL.right; anchors.right: trayFfBar.left
@@ -2737,7 +2737,7 @@ component WorkspaceRow: Item {
     //                 (design/making-a-widget.md §1); the body is one
     //                 manuscript-ruled line per heard network — the
     //                 launcher/tray row idiom, no invented layout.
-    //   · SIGNATURE — clay (livery.base09). Murex went to the colonnade
+    //   · SIGNATURE — clay (theme.base09). Murex went to the colonnade
     //                 (2026-08-16), verdigris to the tray, rust to the
     //                 herald; clay held two steles at once until the
     //                 colonnade moved off it, so the sharing precedent is
@@ -2780,8 +2780,8 @@ component WorkspaceRow: Item {
             readonly property string faceMusic: "Noto Music"
 
             // this stele's signature — CLAY (base09)
-            readonly property color sig: root.livery.base09
-            readonly property color ink: root.livery.paletteFg
+            readonly property color sig: root.theme.base09
+            readonly property color ink: root.theme.paletteFg
 
             function withA(cstr, a) {
                 var c = Qt.color(cstr)
@@ -2908,7 +2908,7 @@ component WorkspaceRow: Item {
                 width: parent.width
                 anchors.top: parent.top
                 radius: 0
-                color: root.livery.paletteBg
+                color: root.theme.paletteBg
                 border.color: nstele.ink
                 border.width: 2
                 height: netContent.implicitHeight + 20
@@ -3001,7 +3001,7 @@ component WorkspaceRow: Item {
                             font.family: nstele.faceMono; font.pixelSize: 11
                             font.underline: wsMa.containsMouse
                             color: Networking.wifiEnabled
-                                   ? root.livery.paletteAccent
+                                   ? root.theme.paletteAccent
                                    : nstele.withA(nstele.ink, 0.5)
                             MouseArea {
                                 id: wsMa
@@ -3079,7 +3079,7 @@ component WorkspaceRow: Item {
                                     font.weight: (root.wiredDev && root.wiredDev.connected)
                                                  ? Font.Bold : Font.Medium
                                     color: (root.wiredDev && root.wiredDev.connected)
-                                           ? root.livery.paletteAccent : nstele.ink
+                                           ? root.theme.paletteAccent : nstele.ink
                                     elide: Text.ElideRight
                                 }
                             }
@@ -3093,7 +3093,7 @@ component WorkspaceRow: Item {
                                          : "no link")
                                       : ""
                                 font.family: nstele.faceMono; font.pixelSize: 10
-                                color: nstele.withA(root.livery.holoBlue, 0.8)
+                                color: nstele.withA(root.theme.holoBlue, 0.8)
                             }
                         }
 
@@ -3178,7 +3178,7 @@ component WorkspaceRow: Item {
                                     anchors.left: parent.left; anchors.right: parent.right
                                     anchors.bottom: parent.bottom
                                     height: netRow.hovered ? 2 : 1
-                                    color: netRow.hovered ? root.livery.paletteHot
+                                    color: netRow.hovered ? root.theme.paletteHot
                                                           : nstele.withA(nstele.ink, 0.13)
                                     Behavior on color { ColorAnimation { duration: 150 } }
                                 }
@@ -3200,8 +3200,8 @@ component WorkspaceRow: Item {
                                               : netRow.hovered ? "♪" : "·"
                                         font.family: nstele.faceMusic
                                         font.pixelSize: netRow.hovered && !netRow.busy ? 15 : 13
-                                        color: netRow.busy ? root.livery.paletteUrgent
-                                               : netRow.hovered ? root.livery.paletteHot
+                                        color: netRow.busy ? root.theme.paletteUrgent
+                                               : netRow.hovered ? root.theme.paletteHot
                                                : nstele.withA(nstele.ink, 0.3)
                                         SequentialAnimation on opacity {
                                             running: netRow.busy
@@ -3224,7 +3224,7 @@ component WorkspaceRow: Item {
                                         id: nrName
                                         anchors.verticalCenter: parent.verticalCenter
                                         text: netRow.modelData ? ("" + netRow.modelData.name) : ""
-                                        color: netRow.conn ? root.livery.paletteAccent
+                                        color: netRow.conn ? root.theme.paletteAccent
                                                            : nstele.ink
                                         opacity: netRow.conn ? 1.0
                                                  : (netRow.modelData && netRow.modelData.known)
@@ -3250,7 +3250,7 @@ component WorkspaceRow: Item {
                                         }
                                         font.family: nstele.faceMono
                                         font.pixelSize: 10
-                                        color: nstele.withA(root.livery.holoBlue, 0.8)
+                                        color: nstele.withA(root.theme.holoBlue, 0.8)
                                         elide: Text.ElideRight
                                         width: Math.max(0, parent.width - nrMark.width
                                                         - 24 - nrName.width - 40)
@@ -3344,7 +3344,7 @@ component WorkspaceRow: Item {
                         width: parent.width
                         text: nstele.lastFail
                         font.family: nstele.faceMono; font.pixelSize: 10
-                        color: root.livery.paletteUrgent
+                        color: root.theme.paletteUrgent
                         elide: Text.ElideRight
                     }
 
@@ -3392,7 +3392,7 @@ component WorkspaceRow: Item {
                             anchors.right: netFfCorner.left; anchors.rightMargin: 4
                             anchors.verticalCenter: parent.verticalCenter
                             text: "𝄂"; font.family: nstele.faceMusic; font.pixelSize: 16
-                            color: root.livery.paletteAccent
+                            color: root.theme.paletteAccent
                         }
                         Rectangle {
                             anchors.left: netFfL.right; anchors.right: netFfBar.left

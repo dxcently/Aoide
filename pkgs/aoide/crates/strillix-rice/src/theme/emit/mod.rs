@@ -3,7 +3,7 @@
 //! structural).
 //!
 //! All emitters consume the SAME fully-resolved note set from
-//! `crate::livery::resolve`, so the live targets can never disagree. A new
+//! `crate::theme::resolve`, so the live targets can never disagree. A new
 //! backend is ONE `emit/<name>.rs` + one line in [`registry`] — the same
 //! additive discipline as pkgs walker / dendrites / song widgets.
 //!
@@ -13,13 +13,13 @@
 //! that consumes them. `gtk`/`gsettings` host-mutating apply belongs to the
 //! deferred `management` seam, not this registry.
 
-use crate::livery::emit::file::FileTemplate;
-use crate::livery::emit::hyprctl::Hyprctl;
-use crate::livery::emit::hyprlock::Hyprlock;
-use crate::livery::emit::kitty::Kitty;
-use crate::livery::emit::osc::Osc;
-use crate::livery::emit::stage::Stage;
-use crate::livery::resolve::Resolved;
+use crate::theme::emit::file::FileTemplate;
+use crate::theme::emit::hyprctl::Hyprctl;
+use crate::theme::emit::hyprlock::Hyprlock;
+use crate::theme::emit::kitty::Kitty;
+use crate::theme::emit::osc::Osc;
+use crate::theme::emit::stage::Stage;
+use crate::theme::resolve::Resolved;
 use std::fmt;
 use std::path::Path;
 

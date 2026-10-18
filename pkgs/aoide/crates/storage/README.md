@@ -128,7 +128,7 @@ by decision — no embedded database yet
   from and what the package ships cannot drift apart). `fs` resolves TWO stage
   roots off that one root, not one (command-defrag lane S1, 2026-08-27,
   CONTRACTS.md §4): `stage_dir` — unchanged, `$STRILLIX_ROOT/stage/`,
-  rice/paint (`livery.json`/`mode.json`, strillix's tree) — and
+  rice/paint (`theme.json`/`mode.json`, strillix's tree) — and
   `conducting_stage_dir` — new, `$AOIDE_ROOT/state/stage/`, core
   orchestration state (`stage`'s own four path helpers, plus
   `aoide-conduct`'s `herald::herald_path`/`graph::pending_path`). Both honor

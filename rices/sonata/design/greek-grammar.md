@@ -3,7 +3,7 @@
 **Song:** sonata
 
 The concrete kit an author picks from: faces, glyphs, type tiers, the opacity
-ladder, rule idioms, state treatments, and which `livery.*` role plays which
+ladder, rule idioms, state treatments, and which `theme.*` role plays which
 part. Everything here is in live use in `widgets/*.qml` or the shell's own
 chrome — nothing is aspirational.
 
@@ -63,7 +63,7 @@ needs a live check before you trust it (`hazards.md` §1).
 
 **Box drawing.** `┌ ┐ └ ┘ ─ ┤ ├` for TUI frames; `═ ║ ▔ ▁` for `GadgetFrame`'s
 entablature and stylobate; `▓ ░` for ASCII gauges (`battBar()`,
-`LiveryState.ctxBar()`).
+`ThemeState.ctxBar()`).
 
 **Frieze strings** (powermenu, one per stele, `faceMono` 12px):
 `◆───◆───◆` · `⌐¬ ⌐¬ ⌐¬ ⌐¬` · `╌╌ ╌╌ ╌╌ ╌╌` · `▔▁▔▁▔▁▔` · `┏┛┗┓┏┛┗┓` ·
@@ -82,7 +82,7 @@ wedges; `←  →  ⏎  ⌘` key hints; `✎` the sessions cell.
 
 **Colour glyphs, sanctioned once.** `U+1F311`–`U+1F318` moon phases in
 `calendar.qml` render as real colour emoji — the one family wearing fixed
-colour outside `livery.*`. `🗒` is the launcher's clipboard bookmark tab.
+colour outside `theme.*`. `🗒` is the launcher's clipboard bookmark tab.
 
 *Rotation note:* a rotated `Text`'s layout box does NOT rotate with it, so
 `calendar.qml` rides every rotated guillemet inside a fixed-size wrapper
@@ -171,7 +171,7 @@ today except the launcher's chapter tabs.
 
 Full derivation of the hues in `intent.md`; this is which role plays what.
 
-| role (`livery.*`) | slot | Greek hue | its job |
+| role (`theme.*`) | slot | Greek hue | its job |
 |---|---|---|---|
 | `paletteBg` | base00 | marble ground | every body fill; also the INK for text over the dark scrim |
 | `paletteFg` | base05 | plum-charcoal ink | all text, all borders, all structural rules |
@@ -186,7 +186,7 @@ Full derivation of the hues in `intent.md`; this is which role plays what.
 | `base0F` | base0F | rust | notifications' signature |
 | `noteColor(id)` | base08–base0F | the 8-hue accent spread | one distinct hue per small integer id (bar workspaces) |
 
-Alongside these, `LiveryState` exposes the component tiers
+Alongside these, `ThemeState` exposes the component tiers
 `notifBg/notifFg/notifUrgent`, `barBg/barFg/barAccent` and
 `windowBorder/windowBorderInactive`. In sonata they are all-null in the song,
 so they resolve to the palette values; `notifications.qml` reads the `notif*`

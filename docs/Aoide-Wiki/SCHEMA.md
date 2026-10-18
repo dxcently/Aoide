@@ -65,7 +65,7 @@ snapshot: 2026-08-25
 
 ### Tags
 
-a2a · agent · aliases · aoide · architecture · auto-discovery · base16 · blueprint · bridge · cli · coding-agent · compositor · computer-use · conductor · content · crate · daemon · dag · declarative · deployment · design · desktop · dxflake · editor · extensibility · features · flake · gadget · git · glyph · governance · graph · harness · hooks · hyprland · integration · ipc · keybinds · knowledge · livery · strillix · mcp · melete · meta · mneme · naming · nix · node · notification · onboarding · orchestration · orchestrator · paint · pantheon · pipeline · plugin · pointer · policy · protocol · pty · qml · quickshell · rebuild · reference · rice · rust · schema · screen · secrets · security · session · shell · song · stylix · terminal · theming · totp · tui · ui · upkeep · vault · vision · wayland · widget · wiki
+a2a · agent · aliases · aoide · architecture · auto-discovery · base16 · blueprint · bridge · cli · coding-agent · compositor · computer-use · conductor · content · crate · daemon · dag · declarative · deployment · design · desktop · dxflake · editor · extensibility · features · flake · gadget · git · glyph · governance · graph · harness · hooks · hyprland · integration · ipc · keybinds · knowledge · theme · strillix · mcp · melete · meta · mneme · naming · nix · node · notification · onboarding · orchestration · orchestrator · paint · pantheon · pipeline · plugin · pointer · policy · protocol · pty · qml · quickshell · rebuild · reference · rice · rust · schema · screen · secrets · security · session · shell · song · stylix · terminal · theming · totp · tui · ui · upkeep · vault · vision · wayland · widget · wiki
 
 ### Notes
 
@@ -84,7 +84,7 @@ concepts/cli/Content-and-Hooks.md
 concepts/cli/Doors-and-Nodes.md
 concepts/cli/Graph-and-Conduct.md
 concepts/cli/Meta-and-Upkeep.md
-concepts/cli/Rice-and-Livery.md
+concepts/cli/Rice-and-Theme.md
 concepts/cli/Screen-Commands.md
 concepts/cli/Secrets-Commands.md
 concepts/desktop/Controls.md
@@ -123,7 +123,7 @@ entities/Stylix.md
 entities/aoide-cli.md
 entities/aoided.md
 entities/dxflake.md
-entities/livery.md
+entities/theme.md
 entities/strillix.md
 entities/shellbridge.md
 ingest/index.md

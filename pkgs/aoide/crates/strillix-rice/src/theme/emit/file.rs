@@ -3,7 +3,7 @@
 //!
 //! Substitutes `{{group.key}}` placeholders (e.g. `{{palette.bg}}`,
 //! `{{window.border}}`) in a caller-supplied template string with the fully
-//! resolved note set — the "apply the song's livery to ANY config file"
+//! resolved note set — the "apply the song's theme to ANY config file"
 //! primitive. Pure: no host side-effect; writing the rendered text into some
 //! live config is the caller's effectful half (the deferred `management`
 //! seam, per the emit/apply split in `emit/mod.rs`).
@@ -12,8 +12,8 @@
 //! {palette, base16, bar, notif, window}. A malformed or unknown placeholder
 //! is a structured error — never a silent no-op, never a panic.
 
-use crate::livery::emit::{EmitError, EmitOpts, EmitOutput, Emitter};
-use crate::livery::resolve::Resolved;
+use crate::theme::emit::{EmitError, EmitOpts, EmitOutput, Emitter};
+use crate::theme::resolve::Resolved;
 
 /// The template renderer backend.
 pub struct FileTemplate;
@@ -82,7 +82,7 @@ pub fn render(template: &str, r: &Resolved) -> Result<String, EmitError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::livery::resolve::resolve;
+    use crate::theme::resolve::resolve;
     use serde_json::Value;
 
     fn resolved() -> Resolved {

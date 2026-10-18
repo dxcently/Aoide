@@ -3,8 +3,8 @@
 # Glass superbar at the bottom: deep teal glass, white text, cyan glow.
 # Workspace buttons as Hyprland workspaces, RICE cell, clock, and an orb.
 #
-# HOST-AGNOSTIC DISCIPLINE (CONTRACTS.md §5): a song sets ONLY aoide.livery.
-# All livery values are literal nix expressions (no song/ runtime reads).
+# HOST-AGNOSTIC DISCIPLINE (CONTRACTS.md §5): a song sets ONLY aoide.theme.
+# All theme values are literal nix expressions (no song/ runtime reads).
 {
   system = {
     providers = {
@@ -22,13 +22,13 @@
     module = { pkgs, lib, ... }: {
       config = lib.mkDefault {
         # ── Expected paint ──────────────────────────────────────────────────────
-        aoide.arrangement.surfaces = {
+        aoide.layout.surfaces = {
           bar.perMonitor = true;
           wallpaper.perMonitor = true;
         };
 
         # ── Palette tier ────────────────────────────────────────────────────────
-        aoide.livery.palette = {
+        aoide.theme.palette = {
           bg = "#0c2130"; # deep glass, teal-dark
           fg = "#ffffff"; # white text on glass
           accent = "#77fffc"; # cyan glow, hot-track
@@ -37,10 +37,10 @@
         };
 
         # ── Polarity ────────────────────────────────────────────────────────────
-        aoide.livery.polarity = "dark";
+        aoide.theme.polarity = "dark";
 
         # ── Base16 tier — Aero teal + termui accents ───────────────────────────
-        aoide.livery.base16 = {
+        aoide.theme.base16 = {
           base00 = "#0c2130"; # deep glass (bg)
           base01 = "#1a3d4d"; # pane fill — slightly raised
           base02 = "#2a5a6d"; # selection / focused row
@@ -60,24 +60,24 @@
         };
 
         # ── Component tier ──────────────────────────────────────────────────────
-        aoide.livery.bar = {
+        aoide.theme.bar = {
           bg = "#0c2130"; # deep glass
           fg = "#ffffff"; # white text
           accent = "#77fffc"; # cyan glow
         };
-        aoide.livery.notif = {
+        aoide.theme.notif = {
           bg = "#f5fbfb"; # white plates
           fg = "#0c2130"; # ink on plates
           urgent = "#f47a72";
         };
-        aoide.livery.window = {
+        aoide.theme.window = {
           border = "#2aa3b8"; # colorization: rims, frames
           borderInactive = "#1a4a5a"; # dimmer teal when not focused
         };
 
         # ── Geometry tier ───────────────────────────────────────────────────────
         # Win7 is rounded; barcarolle has user exception to radius-0 house style.
-        aoide.livery.geometry = {
+        aoide.theme.geometry = {
           gapsOut = 8;
           gapsIn = 4;
           borderSize = 1;
@@ -90,7 +90,7 @@
 
         # ── Font tier ───────────────────────────────────────────────────────────
         # Segoe UI unavailable; fall back to Noto Sans (bar uses Noto Sans per intent).
-        aoide.livery.fonts.monospace = {
+        aoide.theme.fonts.monospace = {
           name = "Noto Sans Mono";
           package = pkgs.noto-fonts-cjk-sans;
         };
@@ -99,7 +99,7 @@
         # The desktop picture (cover/barcarolle-desktop.jpg). Stylix bakes it,
         # the seed publishes it as the declared cover, and a staged rice finds
         # the same file in the song's own cover/ folder (CONTRACTS.md §4).
-        aoide.livery.wallpaper = ./cover/barcarolle-desktop.jpg;
+        aoide.theme.wallpaper = ./cover/barcarolle-desktop.jpg;
       };
     };
   };

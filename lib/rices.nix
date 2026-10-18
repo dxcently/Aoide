@@ -119,7 +119,7 @@ let
   # a record naming a file that doesn't exist). No shelf (barcarolle, cadenza,
   # nocturne today) — synthesize straight from the scan: owner is always the
   # song itself, `file` is always "<slot>.qml"; the registry falls back to
-  # `livery.json`'s `.widgets // {}`, unjudged. See
+  # `theme.json`'s `.widgets // {}`, unjudged. See
   # `modules/dendrites/strillix/runtime.nix`'s original comment (git history,
   # W3a/W3b) for the full reasoning; this file keeps only what the
   # computation itself needs.
@@ -147,7 +147,7 @@ let
         widgetsDir = songDir + "/widgets";
         shelfDir = songDir + "/_widgets";
         hasShelf = builtins.pathExists shelfDir;
-        liveryFile = songDir + "/livery.json";
+        themeFile = songDir + "/theme.json";
 
         widgetsEntries = if builtins.pathExists widgetsDir then builtins.readDir widgetsDir else { };
         scanSlots = map (n: lib.removeSuffix ".qml" n) (
@@ -155,8 +155,8 @@ let
         );
 
         scanRegistry =
-          if builtins.pathExists liveryFile then
-            (builtins.fromJSON (builtins.readFile liveryFile)).widgets or { }
+          if builtins.pathExists themeFile then
+            (builtins.fromJSON (builtins.readFile themeFile)).widgets or { }
           else
             { };
       in
@@ -231,7 +231,7 @@ let
                         )
                         {
                           inherit (composed) manifest;
-                          registry = composed.arrangement.widgets;
+                          registry = composed.layout.widgets;
                           inherit (composed) packages;
                         }
                     )
@@ -364,7 +364,7 @@ let
               example = [ "cadenza" ];
               description = ''
                 Songs this host builds in but does not perform: staged without a
-                rebuild, livery not active. Their bodies are never imported; their
+                rebuild, theme not active. Their bodies are never imported; their
                 widgets and templates are shipped. The built-in set is
                 `declared ∪ available`, closed under borrows.
               '';

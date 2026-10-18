@@ -63,7 +63,7 @@ The subsequent rename was reported parity-preserving; recheck its exact
 derivations before treating the current tip as the final rebuild checkpoint.
 No activation or boot verification occurred.
 
-Transience has one Nix palette source. `livery.json` remains generated and checked
+Transience has one Nix palette source. `theme.json` remains generated and checked
 for drift. Stylix consumes the palette. The old Waybar appearance was preserved;
 Rofi and Wlogout obtain their styling through Stylix. Wallpaper remains shared.
 The full Lyra compose/stage/declare loop does **not** support this non-QML rice.
@@ -71,7 +71,7 @@ The full Lyra compose/stage/declare loop does **not** support this non-QML rice.
 The dock is not selected by Transience: Osaka's Aoide Quickshell facet supplies
 it independently. This is an explicit limitation against the user's request to
 include the widget dock; do not describe palette inheritance as a dock dependency.
-Osaka still has hand-written `aoide.livery.override` values, some intentional.
+Osaka still has hand-written `aoide.theme.override` values, some intentional.
 Do not flatten those differences while removing duplication.
 
 Architecture authority: [Nix composition](../../architecture/NIX-COMPOSITION.md).

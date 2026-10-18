@@ -3,7 +3,7 @@
 import QtQuick
 
 Rectangle {
-    property var livery
+    property var theme
     property var bridge
     property var auth
 

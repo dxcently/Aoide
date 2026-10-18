@@ -2,6 +2,6 @@
 # dendrite: discovered by nothing, selectable by nothing.
 {
   system.module = _: {
-    aoide.livery.palette.bg = "#000000";
+    aoide.theme.palette.bg = "#000000";
   };
 }

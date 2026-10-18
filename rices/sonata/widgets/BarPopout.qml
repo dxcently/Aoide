@@ -8,13 +8,13 @@
 //
 // Chrome: the same GadgetFrame ASCII box the dock gadgets wear (╔═[ TITLE ]═╗,
 // glass over compositor blur — the compositor shell's blur_popups layerrule
-// extends the aoide-bar blur to these popups). All colors from livery.
+// extends the aoide-bar blur to these popups). All colors from theme.
 //
 // Usage (children land in the frame body, GadgetFrame-style):
 //   BarPopout {
-//       livery: root.livery; cell: clockText; title: "CALENDAR"
+//       theme: root.theme; cell: clockText; title: "CALENDAR"
 //       shown: root.calShown
-//       CalendarGadget { width: parent.width; livery: root.livery }
+//       CalendarGadget { width: parent.width; theme: root.theme }
 //   }
 
 import QtQuick
@@ -23,7 +23,7 @@ import Quickshell
 PopupWindow {
     id: root
 
-    required property var livery
+    required property var theme
     required property Item cell    // the bar cell this popout hangs under
     property string title: ""
     property int popoutWidth: 288
@@ -74,7 +74,7 @@ PopupWindow {
         width: root.popoutWidth
         height: root.reveal ? Math.round(implicitHeight * root.revealFrac) : implicitHeight
         clip: true
-        livery: root.livery
+        theme: root.theme
         title: root.title
 
         // Glass popout chrome — DECOUPLED from the bar: a CREAM frosted card at
@@ -83,13 +83,13 @@ PopupWindow {
         // frame/dock glass tier at 0.72, so the now-playing / volume / battery /
         // calendar popouts read SOLID over arbitrary windows and carry their
         // dense text. (The dock's panes leave these unset.)
-        glassColor: Qt.rgba(Qt.color(root.livery.paletteBg).r,
-                            Qt.color(root.livery.paletteBg).g,
-                            Qt.color(root.livery.paletteBg).b, 0.72)
+        glassColor: Qt.rgba(Qt.color(root.theme.paletteBg).r,
+                            Qt.color(root.theme.paletteBg).g,
+                            Qt.color(root.theme.paletteBg).b, 0.72)
         glassOpacity: 1.0
-        outlineColor: root.livery.paletteFg
-        depthColor: root.livery.paletteFg
-        labelColor: root.livery.paletteFg
+        outlineColor: root.theme.paletteFg
+        depthColor: root.theme.paletteFg
+        labelColor: root.theme.paletteFg
 
         Item {
             id: slot

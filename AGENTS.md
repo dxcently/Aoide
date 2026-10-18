@@ -65,9 +65,9 @@ and the staging/declarative/draft modes:
 5. **Paint dendrites read only the dress, the structure, the surfaces, and
    identity.** A paint dendrite — `compositor` and its providers, `greeter`,
    `stylix`, `quickshell`, `strillix`, `wallpaper` and its providers, and every
-   component slot's provider — reads only `aoide.livery` (the dress:
+   component slot's provider — reads only `aoide.theme` (the dress:
    palette · base16 · component tiers · geometry · fonts · cover),
-   `aoide.arrangement` (the structure: which widget/surface TYPES a song
+   `aoide.layout` (the structure: which widget/surface TYPES a song
    brings into existence), `aoide.surfaces` (the render-surface ownership
    registry: a dendrite declares the surfaces it owns; `stylix` reads it to
    skip derivation for them), the core scalars every lane stands on
@@ -85,7 +85,7 @@ and the staging/declarative/draft modes:
    `sourceFirst`). A rice body (CONTRACTS §5) is the one other selector of
    paint: the body of the performed song selects the ten component providers
    and the `strillix` renderer, and the providers say WHO fills each slot while
-   `aoide.arrangement` says WHAT the paint is. Nothing else is selected by a body.
+   `aoide.layout` says WHAT the paint is. Nothing else is selected by a body.
    The list is enumerated and closed, never "any `aoide.*`";
    a new namespace needs the same explicit amendment each of these got. No
    module reads another module: cross-dendrite facts (`aoide.{quickshell,strillix,

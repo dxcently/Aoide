@@ -8,14 +8,14 @@
 // behavior difference observed on this rig.
 //
 // Entry point for the Quickshell session. Instantiates the infrastructure
-// (livery, bridge, staging engine, IPC, clipboard, ledger, SongSurfaces)
+// (theme, bridge, staging engine, IPC, clipboard, ledger, SongSurfaces)
 // unconditionally and each component anchor only when its slot is in
-// `components.json` (the component gate below), and wires the shared livery
-// loader (LiveryState) so every widget hot-reloads from song/stage/livery.json
+// `components.json` (the component gate below), and wires the shared theme
+// loader (ThemeState) so every widget hot-reloads from song/stage/theme.json
 // when it changes.
 //
 // Communication discipline (CONTRACTS.md / entities/Quickshell):
-//   - Reads state files from song/stage/ (LiveryState watches livery.json).
+//   - Reads state files from song/stage/ (ThemeState watches theme.json).
 //   - Issues commands to shellbridge via unix socket (ShellBridge singleton).
 //   - Never speaks MCP or any agent protocol.
 //
@@ -36,24 +36,24 @@ ShellRoot {
     id: shellRoot
 
     // A Variants delegate does not resolve this file's ids in its binding
-    // scope — `livery: livery` inside one silently binds to undefined rather
+    // scope — `theme: theme` inside one silently binds to undefined rather
     // than failing loudly, and the first symptom is a TypeError deep inside the
     // delegate's own child (observed live: "Cannot read property 'paletteBg' of
     // undefined" from AoideWallpaper). This handle is the delegate-safe way to
-    // reach the shared LiveryState: it is resolved HERE, in root scope, and
+    // reach the shared ThemeState: it is resolved HERE, in root scope, and
     // read through the root id from inside the delegate.
     //
     // The hazard is broader than that one binding: a delegate child that
     // DECLARES a property under the same name as a root-scope id gets no id at
     // all there. `bridge: bridge` / `stagingEngine: stagingEngine` on a
     // WidgetSlot inside a delegate resolve to the anchor's own not-yet-set
-    // property and settle at undefined — silently, exactly like the livery
+    // property and settle at undefined — silently, exactly like the theme
     // case above, with the loud symptom landing one layer down ("Cannot read
     // property 'songName' of undefined" from WidgetSlot's own resolver). Ids
     // nothing collides with (`shared`, `clipboard`, `ledger`) still
     // resolve. Every root singleton a delegate reaches gets a handle for that
     // reason.
-    readonly property var liveryRef: livery
+    readonly property var themeRef: theme
     readonly property var bridgeRef: bridge
     readonly property var stagingRef: stagingEngine
 
@@ -108,7 +108,7 @@ ShellRoot {
     readonly property bool launcherHasPictures: !!shellRoot.launcherItem && typeof shellRoot.launcherItem.openPictures === "function"
 
     // ── Shared singletons (one instance for the whole session) ─────────────
-    LiveryState { id: livery }
+    ThemeState { id: theme }
     ShellBridge { id: bridge }
     // `strillix reload`'s IPC target (crates/song/src/ipc.rs) — no
     // properties, wired for its side effect (Quickshell.reload) alone.
@@ -133,14 +133,14 @@ ShellRoot {
     StagingEngine { id: stagingEngine }
 
     // ── Shared session state (floating gadgets + DAG trace link) ───────────
-    // A plain QtObject passed by property, exactly like livery/bridge — the
+    // A plain QtObject passed by property, exactly like theme/bridge — the
     // cleanest quickshell idiom for cross-widget state that needs no file
     // watch of its own. Holds: (a) `floatingModel`, the ListModel of gadgets
     // torn off onto DesktopGadgets ({ kind, gx, gy }); and (b) `tracedSessionId`,
     // the hover-trace link — TerminalManagerGadget writes it on row hover,
     // DagGraphGadget highlights the node whose id matches. Session-scoped, no
     // persistence (v1). QtObject has no default property, so the ListModel is a
-    // named property (the LiveryState.liveryFile idiom).
+    // named property (the ThemeState.themeFile idiom).
     QtObject {
         id: shared
 
@@ -203,7 +203,7 @@ ShellRoot {
     // Every instance draws the SAME cover — AoideWallpaper resolves one path
     // (AOIDE_WALLPAPER, or stage/cover.json when staged), and the cover note is
     // a single value on the song. Per-output DIFFERENT covers would need a
-    // per-screen cover map in the livery schema; deliberately not invented here.
+    // per-screen cover map in the theme schema; deliberately not invented here.
     Variants {
         model: shellRoot.has("wallpaper") ? Quickshell.screens : []
 
@@ -225,8 +225,8 @@ ShellRoot {
 
             AoideWallpaper {
                 anchors.fill: parent
-                // Root-qualified on purpose — see shellRoot.liveryRef above.
-                livery: shellRoot.liveryRef
+                // Root-qualified on purpose — see shellRoot.themeRef above.
+                theme: shellRoot.themeRef
                 // The `wallpaper` slot's own needs (slots.md): the active song's
                 // board is resolved through the staging engine, and a board that
                 // reads the machine gets the same bridge every other widget does.
@@ -272,7 +272,7 @@ ShellRoot {
                 // Root-qualified singletons: WidgetSlot declares properties of
                 // these very names, which is what blinds a delegate's bare id
                 // reference — see shellRoot's handle block above.
-                livery: shellRoot.liveryRef
+                theme: shellRoot.themeRef
                 bridge: shellRoot.bridgeRef
                 stagingEngine: shellRoot.stagingRef
                 slot: "bar"
@@ -306,7 +306,7 @@ ShellRoot {
     //
     // Gated like every component anchor: the slot and its shortcut live in one
     // Scope the gate creates only when `dock` is selected. Inside a gate the
-    // root ids `livery`/`bridge`/`stagingEngine` are shadowed by the anchor's
+    // root ids `theme`/`bridge`/`stagingEngine` are shadowed by the anchor's
     // own properties of those names (the delegate hazard above), so the
     // anchor reads the root handles.
     LazyLoader {
@@ -319,10 +319,10 @@ ShellRoot {
             SurfaceSlot {
                 id: dockSlot
                 slot: "dock"
-                livery: shellRoot.liveryRef
+                theme: shellRoot.themeRef
                 bridge: shellRoot.bridgeRef
                 stagingEngine: shellRoot.stagingRef
-                // SurfaceSlot's fixed contract forwards only livery+bridge to the
+                // SurfaceSlot's fixed contract forwards only theme+bridge to the
                 // loaded body; `shared` and `stagingEngine` are threaded as extras
                 // because dock.qml's own embedded WidgetSlot gadgets (conductor,
                 // terminals, …) need both to resolve and render their own column —
@@ -342,7 +342,7 @@ ShellRoot {
     }
 
     // ── Overlay surfaces — each owns its own PanelWindow internally, wired
-    // to livery/bridge only. Hidden/dormant until summoned/triggered, and
+    // to theme/bridge only. Hidden/dormant until summoned/triggered, and
     // each behind its component's gate (`launcher`, `powermenu`, `wallpaper`
     // for the picker, `switcher`, `notifications` for herald).
     //   - launcher (SurfaceSlot) : SUPER+Space launcher (bridge-toggled),
@@ -377,7 +377,7 @@ ShellRoot {
 
         SurfaceSlot {
             slot: "powermenu"
-            livery: shellRoot.liveryRef
+            theme: shellRoot.themeRef
             bridge: shellRoot.bridgeRef
             stagingEngine: shellRoot.stagingRef
         }
@@ -388,7 +388,7 @@ ShellRoot {
 
         SurfaceSlot {
             slot: "launcher"
-            livery: shellRoot.liveryRef
+            theme: shellRoot.themeRef
             bridge: shellRoot.bridgeRef
             stagingEngine: shellRoot.stagingRef
             extraProps: ({ clipboard: clipboard, ledger: ledger })
@@ -410,7 +410,7 @@ ShellRoot {
             SurfaceSlot {
                 id: calendarSlot
                 slot: "calendar"
-                livery: shellRoot.liveryRef
+                theme: shellRoot.themeRef
                 bridge: shellRoot.bridgeRef
                 stagingEngine: shellRoot.stagingRef
                 extraProps: ({ shared: shared })
@@ -431,18 +431,18 @@ ShellRoot {
 
         SurfaceSlot {
             slot: "herald"
-            livery: shellRoot.liveryRef
+            theme: shellRoot.themeRef
             bridge: shellRoot.bridgeRef
             stagingEngine: shellRoot.stagingRef
         }
     }
     // The declared widget-type registry's runtime half (CONTRACTS.md §5;
-    // aoide.arrangement.widgets, registry.json): hosts one SurfaceSlot per
+    // aoide.layout.widgets, registry.json): hosts one SurfaceSlot per
     // surface-kind entry the active song declares. Empty registry (sonata
     // today) → no-op, same as powermenu/launcher above but data-driven
     // instead of a fixed slot name.
     SongSurfaces {
-        livery: livery
+        theme: theme
         bridge: bridge
         stagingEngine: stagingEngine
     }
@@ -453,7 +453,7 @@ ShellRoot {
         active: shellRoot.has("wallpaper")
 
         AoideWallpaperPicker {
-            livery: shellRoot.liveryRef
+            theme: shellRoot.themeRef
             bridge: shellRoot.bridgeRef
             launcherHasPictures: shellRoot.launcherHasPictures
         }
@@ -467,7 +467,7 @@ ShellRoot {
         active: shellRoot.has("lock")
 
         LockHost {
-            livery: shellRoot.liveryRef
+            theme: shellRoot.themeRef
             stagingEngine: shellRoot.stagingRef
         }
     }
@@ -486,7 +486,7 @@ ShellRoot {
             SurfaceSlot {
                 id: switcherSlot
                 slot: "switcher"
-                livery: shellRoot.liveryRef
+                theme: shellRoot.themeRef
                 bridge: shellRoot.bridgeRef
                 stagingEngine: shellRoot.stagingRef
                 fallback: Component { AoideSwitcher {} }

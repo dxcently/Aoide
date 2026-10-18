@@ -74,7 +74,7 @@ Item {
     function _focusField() {
         if (root.inputEnabled && (root.page === "password" || root.page === "failure")) input.forceActiveFocus()
     }
-    property var livery: null
+    property var theme: null
     property string userName: ""
     property string failureText: ""
     property string prompt: "Password"
@@ -154,7 +154,7 @@ Item {
             var baked = Quickshell.env("AOIDE_WALLPAPER") || ""
             try {
                 var d = JSON.parse(text())
-                var applies = !!d && !!d.path && (!d.song || d.song === (root.livery ? root.livery.songName : ""))
+                var applies = !!d && !!d.path && (!d.song || d.song === (root.theme ? root.theme.songName : ""))
                 root.coverPath = applies ? "" + d.path : baked
                 root.coverTile = applies && d.pick === true && d.tile === true
             } catch (e) { root.coverPath = baked; root.coverTile = false }

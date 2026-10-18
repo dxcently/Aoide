@@ -319,7 +319,7 @@ lib.mkIf (config.aoide.enable && config.aoide.strillix.enable) {
   # Documented here as comments (not as options) because they are live-side
   # constants, not build-time configuration:
   #
-  #   $STRILLIX_ROOT/stage/livery.json     — resolved note colours (written by the native livery engine)
+  #   $STRILLIX_ROOT/stage/theme.json     — resolved note colours (written by the native theme engine)
   #   state/stage/sessions.json — agent session roster (written by shellbridge)
   #   state/stage/hooks.json    — live Claude Code hook states (written by shellbridge)
   #

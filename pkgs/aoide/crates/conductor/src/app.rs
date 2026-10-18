@@ -78,7 +78,7 @@ impl Panel {
     }
 }
 
-/// Exact RGB palette and Base16 tokens from stage livery, with ANSI-256
+/// Exact RGB palette and Base16 tokens from stage theme, with ANSI-256
 /// compatibility fields. Missing colors retain terminal fallbacks.
 #[derive(Debug, Clone, Default)]
 pub struct Palette {
@@ -1246,13 +1246,13 @@ impl App {
 
     /// The CONDUCTING stage dir (`sessions.json`/`hooks.json`/`projects.json`/
     /// `graph.json`) — `state/stage/` (command-defrag S1). Distinct from
-    /// [`App::rice_stage`], which stays `song/stage/` for `livery.json`; the
+    /// [`App::rice_stage`], which stays `song/stage/` for `theme.json`; the
     /// two coincide whenever `$AOIDE_STAGE_DIR` is set (every test fixture
     /// here does), and diverge only on the default production layout.
     fn stage() -> PathBuf {
         conducting_stage_dir()
     }
-    /// The rice/paint stage dir (`livery.json`) — unchanged, `song/stage/`.
+    /// The rice/paint stage dir (`theme.json`) — unchanged, `song/stage/`.
     fn rice_stage() -> PathBuf {
         stage_dir()
     }
@@ -5213,13 +5213,13 @@ pub fn sorted_project_names(projects: &[graph::Project]) -> Vec<String> {
     names
 }
 
-// ── livery.json palette → ANSI-256 ─────────────────────────────────────────
+// ── theme.json palette → ANSI-256 ─────────────────────────────────────────
 
-/// The stage notes path — `stage/livery.json`, the canonical stage note file
+/// The stage notes path — `stage/theme.json`, the canonical stage note file
 /// (CONTRACTS.md §4). Both the palette load and the mtime watch go through
 /// this, so the watch tracks the same file the palette loads.
 fn stage_notes_path(dir: &std::path::Path) -> std::path::PathBuf {
-    dir.join("livery.json")
+    dir.join("theme.json")
 }
 
 /// Load exact palette/Base16 RGB and compatibility ANSI-256 indices.
@@ -5707,8 +5707,8 @@ mod tests {
     }
 
     #[test]
-    fn stage_notes_path_is_unconditionally_livery_json() {
-        // Phase 4: no fallback — the function returns dir/livery.json without
+    fn stage_notes_path_is_unconditionally_theme_json() {
+        // Phase 4: no fallback — the function returns dir/theme.json without
         // probing for any other file, even when no note file exists yet.
         let dir = std::env::temp_dir().join(format!(
             "aoide-conductor-stage-notes-{}-{}",
@@ -5719,7 +5719,7 @@ mod tests {
                 .as_nanos()
         ));
         std::fs::create_dir_all(&dir).unwrap();
-        assert_eq!(stage_notes_path(&dir), dir.join("livery.json"));
+        assert_eq!(stage_notes_path(&dir), dir.join("theme.json"));
 
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -5753,7 +5753,7 @@ mod tests {
     use std::sync::Mutex;
 
     /// A unique scratch dir per call (pid + nanos), mirroring
-    /// `stage_notes_path_is_unconditionally_livery_json` above.
+    /// `stage_notes_path_is_unconditionally_theme_json` above.
     fn tmp_dir(tag: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!(
             "aoide-conductor-{tag}-{}-{}",

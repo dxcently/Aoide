@@ -13,7 +13,7 @@
 // Usage (the child is a stele that sets its own width + implicitHeight):
 //   StelePopout {
 //       cell: volText; shown: root.audioShown
-//       AudioColonnade { livery: root.livery; /* … */ }
+//       AudioColonnade { theme: root.theme; /* … */ }
 //   }
 
 import QtQuick

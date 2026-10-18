@@ -590,7 +590,7 @@ and runtime support must be proved separately from a darwin host evaluating.
 
 Rice authoring is pure Nix plus owned QML/assets. Runtime JSON is generated.
 `palette.nix` is a conventional local name; shared palette files may have any
-name. Livery's palette contract does not require Stylix; Stylix is an optional
+name. Theme's palette contract does not require Stylix; Stylix is an optional
 selected integration.
 
 ```text

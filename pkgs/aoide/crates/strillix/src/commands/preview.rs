@@ -12,7 +12,7 @@
 //! `AOIDE_STAGE_DIR` stripped): the socket at a path that never exists, so no
 //! lane QML can reach the real `aoided` even if a stub bridge were bypassed.
 //! `strillix preview set` edits that root's `preview.json` control document
-//! (widget, viewport, anchor, zoom, fixture, livery — the schema below)
+//! (widget, viewport, anchor, zoom, fixture, theme — the schema below)
 //! without a canvas needing to be running; the canvas (P2, another QML
 //! phase not yet landed — `WidgetPreview.qml` does not exist at this
 //! phase) is expected to hot-reload off that same file via `FileView`,
@@ -27,7 +27,7 @@
 //!
 //! **The QML is paint only** (root `AGENTS.md` house rule 7's "delete
 //! every `.qml`" test) — everything this command does (building the root,
-//! staging fixtures/livery, editing `preview.json`) is a plain filesystem
+//! staging fixtures/theme, editing `preview.json`) is a plain filesystem
 //! operation, reachable and fully testable with no quickshell installed;
 //! only the final spawn (skipped entirely by `--no-launch`) needs the
 //! binary on `PATH`.
@@ -47,12 +47,12 @@ pub fn register(r: &mut Registry) {
         summary: "Build an isolated preview root (rice stage, fixture state, run/qml copies of the checkout's QML) and launch the standalone quickshell canvas against it -- never the live daemon or its socket dir. <widget> is a bare slot (uses --song), `<song>/<slot>`, or an absolute path under a rices's own widgets/.",
         args: [arg!("widget", "string", false, "Initial widget to preview: a bare slot name, `<song>/<slot>`, or an absolute rices widgets/ path.")],
         flags: [
-            flag!("song", "string", "Song whose default livery/widgets seed the preview (default \"sonata\")."),
+            flag!("song", "string", "Song whose default theme/widgets seed the preview (default \"sonata\")."),
             flag!("fixture", "string", "Fixture set name under pkgs/strillix-shell/preview/fixtures/, or a directory path (default \"many\")."),
             flag!(
-                "livery",
+                "theme",
                 "string",
-                "Palette source, resolved through the livery engine: `live` (the resolved live stage twin, read-only), a song name (that song's own rices livery.json), a path to a livery file, or a path to a base16 scheme (JSON or flat key:value lines). Default: the preview's own --song."
+                "Palette source, resolved through the theme engine: `live` (the resolved live stage twin, read-only), a song name (that song's own rices theme.json), a path to a theme file, or a path to a base16 scheme (JSON or flat key:value lines). Default: the preview's own --song."
             ),
             flag!("root", "string", "Preview root directory (default $XDG_RUNTIME_DIR/aoide-preview)."),
             flag!("no-launch", "bool", "Build the root and print it; never spawn quickshell.")
@@ -77,12 +77,12 @@ pub fn register(r: &mut Registry) {
             flag!("zoom", "string", "`fit`, or a positive number."),
             flag!("aspect-lock", "string", "on|off -- lock the viewport's aspect ratio."),
             flag!("widget-aspect-lock", "string", "on|off -- lock the widget's own aspect ratio."),
-            flag!("background", "string", "livery|checker"),
+            flag!("background", "string", "theme|checker"),
             flag!("fixture", "string", "Re-stage state/stage from a different fixture set or directory."),
             flag!(
-                "livery",
+                "theme",
                 "string",
-                "Palette source, resolved through the livery engine: `live`, a song name, a livery file path, or a base16 scheme path -- same four forms as `strillix preview --livery`."
+                "Palette source, resolved through the theme engine: `live`, a song name, a theme file path, or a base16 scheme path -- same four forms as `strillix preview --theme`."
             )
         ],
         gated: false,
@@ -209,14 +209,14 @@ fn handle_preview(inv: &Invocation) -> Outcome {
         })
         .unwrap_or_else(|| "many".to_string());
 
-    let livery_spec = inv
+    let theme_spec = inv
         .flags
-        .get("livery")
+        .get("theme")
         .cloned()
         .or_else(|| {
             existing
                 .as_ref()
-                .and_then(|d| d.get("liverySource"))
+                .and_then(|d| d.get("themeSource"))
                 .and_then(Value::as_str)
                 .map(String::from)
         })
@@ -227,11 +227,11 @@ fn handle_preview(inv: &Invocation) -> Outcome {
     if let Err(e) = std::fs::create_dir_all(&stage_song_dir) {
         return Outcome::error(cmd, format!("creating {}: {e}", stage_song_dir.display()));
     }
-    let livery_dst = stage_song_dir.join("livery.json");
-    if let Err(e) = stage_livery(&livery_spec, &song, &checkout, &livery_dst) {
+    let theme_dst = stage_song_dir.join("theme.json");
+    if let Err(e) = stage_theme(&theme_spec, &song, &checkout, &theme_dst) {
         return match e {
-            LiveryStageError::Usage(m) => Outcome::usage(cmd, m),
-            LiveryStageError::Error(m) => Outcome::error(cmd, m),
+            ThemeStageError::Usage(m) => Outcome::usage(cmd, m),
+            ThemeStageError::Error(m) => Outcome::error(cmd, m),
         };
     }
     if let Err(e) = write_mode_json(&root, &song) {
@@ -299,7 +299,7 @@ fn handle_preview(inv: &Invocation) -> Outcome {
     doc.entry("zoom".to_string())
         .or_insert_with(|| json!("fit"));
     doc.entry("background".to_string())
-        .or_insert_with(|| json!("livery"));
+        .or_insert_with(|| json!("theme"));
     doc.insert("fixture".to_string(), json!(fixture_arg));
     doc.insert(
         "fixturesDir".to_string(),
@@ -317,14 +317,14 @@ fn handle_preview(inv: &Invocation) -> Outcome {
     if let Ok(exe) = std::env::current_exe() {
         doc.insert("strillix".to_string(), json!(exe.to_string_lossy()));
     }
-    // `livery` (the staged file path) is a dead key: the canvas already
-    // knows that path as `$STRILLIX_ROOT/stage/livery.json` and treats
-    // `livery` as a legacy alias of `liverySource`, deleting it on every
+    // `theme` (the staged file path) is a dead key: the canvas already
+    // knows that path as `$STRILLIX_ROOT/stage/theme.json` and treats
+    // `theme` as a legacy alias of `themeSource`, deleting it on every
     // save -- writing it back here would just ping-pong against the
-    // canvas. `liverySource` (the spec as given) is the one name.
-    doc.remove("livery");
-    doc.insert("liverySource".to_string(), json!(livery_spec));
-    doc.insert("liveries".to_string(), json!(list_liveries(&checkout)));
+    // canvas. `themeSource` (the spec as given) is the one name.
+    doc.remove("theme");
+    doc.insert("themeSource".to_string(), json!(theme_spec));
+    doc.insert("themes".to_string(), json!(list_themes(&checkout)));
     let widget_field = doc
         .get("widget")
         .and_then(Value::as_str)
@@ -576,30 +576,30 @@ fn handle_preview_set(inv: &Invocation) -> Outcome {
         changed.push("fixture".to_string());
     }
 
-    if let Some(livery_spec) = inv.flags.get("livery") {
+    if let Some(theme_spec) = inv.flags.get("theme") {
         let song = doc
             .get("song")
             .and_then(Value::as_str)
             .unwrap_or("sonata")
             .to_string();
-        let dst = root.join("stage").join("livery.json");
-        if let Err(e) = stage_livery(livery_spec, &song, &checkout, &dst) {
+        let dst = root.join("stage").join("theme.json");
+        if let Err(e) = stage_theme(theme_spec, &song, &checkout, &dst) {
             return match e {
-                LiveryStageError::Usage(m) => Outcome::usage(cmd, m),
-                LiveryStageError::Error(m) => Outcome::error(cmd, m),
+                ThemeStageError::Usage(m) => Outcome::usage(cmd, m),
+                ThemeStageError::Error(m) => Outcome::error(cmd, m),
             };
         }
-        doc.remove("livery"); // legacy alias of `liverySource` -- see the builder's own note
-        doc.insert("liverySource".to_string(), json!(livery_spec));
-        doc.insert("liveries".to_string(), json!(list_liveries(&checkout)));
-        changed.push("liverySource".to_string());
-        changed.push("liveries".to_string());
+        doc.remove("theme"); // legacy alias of `themeSource` -- see the builder's own note
+        doc.insert("themeSource".to_string(), json!(theme_spec));
+        doc.insert("themes".to_string(), json!(list_themes(&checkout)));
+        changed.push("themeSource".to_string());
+        changed.push("themes".to_string());
     }
 
     // A control doc from before this fix-up may still carry the legacy
-    // `livery` key even when `--livery` wasn't given this call -- drop it
+    // `theme` key even when `--theme` wasn't given this call -- drop it
     // on every write, not just when the flag is present.
-    doc.remove("livery");
+    doc.remove("theme");
 
     if let Err(e) = write_control(&control_path, &doc) {
         return Outcome::error(cmd, e);
@@ -658,7 +658,7 @@ fn handle_preview_declare(inv: &Invocation) -> Outcome {
     };
     // A hand-edited or corrupted `preview.json` could carry a `song` with a
     // `/` or `..` in it -- validate before it's ever joined into a path
-    // (the checkout's `widgets_dir`/`checkout_livery_path` below both key
+    // (the checkout's `widgets_dir`/`checkout_theme_path` below both key
     // off it directly).
     if !strillix_rice::compose::valid_song_name(&song) {
         return Outcome::usage(
@@ -785,39 +785,39 @@ fn handle_preview_declare(inv: &Invocation) -> Outcome {
     };
 
     // ── palette ─────────────────────────────────────────
-    let livery_source = doc
-        .get("liverySource")
+    let theme_source = doc
+        .get("themeSource")
         .and_then(Value::as_str)
         .unwrap_or("");
-    let palette_status = if livery_source == song {
+    let palette_status = if theme_source == song {
         "own"
     } else {
-        let stage_livery_path = root.join("stage").join("livery.json");
-        let raw = match std::fs::read_to_string(&stage_livery_path) {
+        let stage_theme_path = root.join("stage").join("theme.json");
+        let raw = match std::fs::read_to_string(&stage_theme_path) {
             Ok(s) => s,
             Err(e) => {
-                return Outcome::error(cmd, format!("reading {}: {e}", stage_livery_path.display()))
+                return Outcome::error(cmd, format!("reading {}: {e}", stage_theme_path.display()))
             }
         };
         let resolved: Value = match serde_json::from_str(&raw) {
             Ok(v) => v,
             Err(e) => {
-                return Outcome::error(cmd, format!("parsing {}: {e}", stage_livery_path.display()))
+                return Outcome::error(cmd, format!("parsing {}: {e}", stage_theme_path.display()))
             }
         };
 
-        let checkout_livery_path = checkout
+        let checkout_theme_path = checkout
             .join("rices")
             .join(&song)
-            .join("livery.json");
-        let original_raw = std::fs::read_to_string(&checkout_livery_path).ok();
+            .join("theme.json");
+        let original_raw = std::fs::read_to_string(&checkout_theme_path).ok();
         let mut checkout_obj: Map<String, Value> = match &original_raw {
             Some(s) => match serde_json::from_str(s) {
                 Ok(Value::Object(m)) => m,
                 _ => {
                     return Outcome::error(
                         cmd,
-                        format!("{}: not a JSON object", checkout_livery_path.display()),
+                        format!("{}: not a JSON object", checkout_theme_path.display()),
                     )
                 }
             },
@@ -845,20 +845,20 @@ fn handle_preview_declare(inv: &Invocation) -> Outcome {
             Err(e) => {
                 return Outcome::error(
                     cmd,
-                    format!("serializing {}: {e}", checkout_livery_path.display()),
+                    format!("serializing {}: {e}", checkout_theme_path.display()),
                 )
             }
         };
         if original_raw.as_deref() == Some(pretty.as_str()) {
             "unchanged"
         } else {
-            if let Err(e) = aoide_storage::fs::atomic_write(&checkout_livery_path, &pretty) {
+            if let Err(e) = aoide_storage::fs::atomic_write(&checkout_theme_path, &pretty) {
                 return Outcome::error(
                     cmd,
-                    format!("writing {}: {e}", checkout_livery_path.display()),
+                    format!("writing {}: {e}", checkout_theme_path.display()),
                 );
             }
-            changed.push(checkout_livery_path.to_string_lossy().into_owned());
+            changed.push(checkout_theme_path.to_string_lossy().into_owned());
             "declared"
         }
     };
@@ -1044,29 +1044,29 @@ fn write_control(path: &Path, doc: &Map<String, Value>) -> Result<(), String> {
         .map_err(|e| format!("writing {}: {e}", path.display()))
 }
 
-// ─────────────────────────── livery staging ───────────────────────────
+// ─────────────────────────── theme staging ───────────────────────────
 
-/// A livery-staging failure, distinguishing a usage error (bad input, worth
+/// A theme-staging failure, distinguishing a usage error (bad input, worth
 /// telling the caller how to fix) from an engine/IO error.
 #[derive(Debug)]
-enum LiveryStageError {
+enum ThemeStageError {
     Usage(String),
     Error(String),
 }
 
-/// Load `--livery <spec>`'s raw container, before it goes through the
+/// Load `--theme <spec>`'s raw container, before it goes through the
 /// engine. Four forms, disambiguated by shape:
 ///   - `"live"` — the resolved LIVE stage twin (`aoide_storage::fs::
-///     stage_dir().join("livery.json")`, host overrides included) — read
+///     stage_dir().join("theme.json")`, host overrides included) — read
 ///     only, never written by this command.
 ///   - a bare valid song name that has a rices dir — that song's own
-///     `rices/<name>/livery.json`.
-///   - anything else — a literal path, either to a livery file or to a
-///     base16 scheme file (JSON or the flat line shape); [`parse_livery_or_base16`]
+///     `rices/<name>/theme.json`.
+///   - anything else — a literal path, either to a theme file or to a
+///     base16 scheme file (JSON or the flat line shape); [`parse_theme_or_base16`]
 ///     tells the two apart.
-fn load_livery_container(spec: &str, checkout: &Path) -> Result<Value, LiveryStageError> {
+fn load_theme_container(spec: &str, checkout: &Path) -> Result<Value, ThemeStageError> {
     let src: PathBuf = if spec == "live" {
-        aoide_storage::fs::stage_dir().join("livery.json")
+        aoide_storage::fs::stage_dir().join("theme.json")
     } else if !spec.contains('/')
         && strillix_rice::compose::valid_song_name(spec)
         && checkout.join("rices").join(spec).is_dir()
@@ -1074,26 +1074,26 @@ fn load_livery_container(spec: &str, checkout: &Path) -> Result<Value, LiverySta
         checkout
             .join("rices")
             .join(spec)
-            .join("livery.json")
+            .join("theme.json")
     } else {
         PathBuf::from(spec)
     };
     let raw = std::fs::read_to_string(&src)
-        .map_err(|e| LiveryStageError::Error(format!("reading {}: {e}", src.display())))?;
-    parse_livery_or_base16(&raw, &src)
+        .map_err(|e| ThemeStageError::Error(format!("reading {}: {e}", src.display())))?;
+    parse_theme_or_base16(&raw, &src)
 }
 
-/// A livery FILE parses as a JSON object carrying `palette`/`base16`/… and
+/// A theme FILE parses as a JSON object carrying `palette`/`base16`/… and
 /// is returned as-is. A base16 SCHEME is detected by `base00` present and
 /// `palette` absent (JSON gallery shape, or the flat `key: value` line
 /// shape this workspace has no yaml crate to parse properly) and gets
-/// synthesized into a livery container by [`livery_from_base16`].
-fn parse_livery_or_base16(raw: &str, src: &Path) -> Result<Value, LiveryStageError> {
+/// synthesized into a theme container by [`theme_from_base16`].
+fn parse_theme_or_base16(raw: &str, src: &Path) -> Result<Value, ThemeStageError> {
     if let Ok(Value::Object(obj)) = serde_json::from_str::<Value>(raw) {
         if obj.contains_key("base00") && !obj.contains_key("palette") {
             let scheme = base16_scheme_from_json(&obj);
-            return livery_from_base16(&scheme).map_err(|missing| {
-                LiveryStageError::Usage(format!(
+            return theme_from_base16(&scheme).map_err(|missing| {
+                ThemeStageError::Usage(format!(
                     "{}: base16 scheme missing slot(s): {}",
                     src.display(),
                     missing.join(", ")
@@ -1104,16 +1104,16 @@ fn parse_livery_or_base16(raw: &str, src: &Path) -> Result<Value, LiveryStageErr
     }
     let scheme = parse_flat_base16_lines(raw);
     if scheme.contains_key("base00") {
-        return livery_from_base16(&scheme).map_err(|missing| {
-            LiveryStageError::Usage(format!(
+        return theme_from_base16(&scheme).map_err(|missing| {
+            ThemeStageError::Usage(format!(
                 "{}: base16 scheme missing slot(s): {}",
                 src.display(),
                 missing.join(", ")
             ))
         });
     }
-    Err(LiveryStageError::Error(format!(
-        "{}: not a livery JSON object or a recognized base16 scheme",
+    Err(ThemeStageError::Error(format!(
+        "{}: not a theme JSON object or a recognized base16 scheme",
         src.display()
     )))
 }
@@ -1122,7 +1122,7 @@ fn parse_livery_or_base16(raw: &str, src: &Path) -> Result<Value, LiveryStageErr
 /// object, normalizing each hex value on the way in.
 fn base16_scheme_from_json(obj: &Map<String, Value>) -> std::collections::BTreeMap<String, String> {
     let mut out = std::collections::BTreeMap::new();
-    for key in strillix_rice::livery::schema::BASE16_KEYS {
+    for key in strillix_rice::theme::schema::BASE16_KEYS {
         if let Some(v) = obj.get(key).and_then(Value::as_str) {
             out.insert(key.to_string(), normalize_hex(v));
         }
@@ -1148,7 +1148,7 @@ fn parse_flat_base16_lines(text: &str) -> std::collections::BTreeMap<String, Str
             continue;
         };
         let key = key.trim();
-        if !strillix_rice::livery::schema::BASE16_KEYS.contains(&key) {
+        if !strillix_rice::theme::schema::BASE16_KEYS.contains(&key) {
             continue;
         }
         let mut value = value.trim();
@@ -1163,14 +1163,14 @@ fn parse_flat_base16_lines(text: &str) -> std::collections::BTreeMap<String, Str
     out
 }
 
-/// Hex normalization: `--livery`'s base16 forms may arrive with or without
+/// Hex normalization: `--theme`'s base16 forms may arrive with or without
 /// a leading `#`, in any case — every value this command stages is
 /// `#rrggbb` lowercase.
 fn normalize_hex(s: &str) -> String {
     format!("#{}", s.trim().trim_start_matches('#').to_lowercase())
 }
 
-/// Synthesize a v0 livery container from a bare base16 scheme. The palette
+/// Synthesize a v0 theme container from a bare base16 scheme. The palette
 /// mapping — `bg=base00, fg=base05, accent=base0D, urgent=base08,
 /// hot=base0B` — is CONTRACTS.md §1's base16 column read in reverse, the
 /// mirror of `modules/dendrites/stylix.nix`'s `synthesisedScheme`
@@ -1182,10 +1182,10 @@ fn normalize_hex(s: &str) -> String {
 /// naming) was picked to keep `hot` visually distinct from `accent`
 /// (`base0D`). `bar`/`notif`/`window` all-null so `resolve` applies the
 /// palette fallback (CONTRACTS.md §1) instead of a synthesized guess.
-fn livery_from_base16(
+fn theme_from_base16(
     scheme: &std::collections::BTreeMap<String, String>,
 ) -> Result<Value, Vec<String>> {
-    let missing: Vec<String> = strillix_rice::livery::schema::BASE16_KEYS
+    let missing: Vec<String> = strillix_rice::theme::schema::BASE16_KEYS
         .iter()
         .filter(|k| !scheme.contains_key(**k))
         .map(|k| k.to_string())
@@ -1194,7 +1194,7 @@ fn livery_from_base16(
         return Err(missing);
     }
     let get = |k: &str| scheme.get(k).cloned().unwrap_or_default();
-    let base16: Map<String, Value> = strillix_rice::livery::schema::BASE16_KEYS
+    let base16: Map<String, Value> = strillix_rice::theme::schema::BASE16_KEYS
         .iter()
         .map(|k| (k.to_string(), json!(get(k))))
         .collect();
@@ -1214,12 +1214,12 @@ fn livery_from_base16(
     }))
 }
 
-/// Every rices dir under the checkout with a `livery.json` of its own,
+/// Every rices dir under the checkout with a `theme.json` of its own,
 /// sorted, `_`-prefixed (shelved) dirs skipped — `preview.json`'s
-/// `"liveries"` list, so a future picker UI (or a human reading the
-/// control file) can see every `<song>` form `--livery` will accept
+/// `"themes"` list, so a future picker UI (or a human reading the
+/// control file) can see every `<song>` form `--theme` will accept
 /// without having to `ls` the rices by hand.
-fn list_liveries(checkout: &Path) -> Vec<String> {
+fn list_themes(checkout: &Path) -> Vec<String> {
     let rices = checkout.join("rices");
     let mut out = Vec::new();
     let Ok(entries) = std::fs::read_dir(&rices) else {
@@ -1230,7 +1230,7 @@ fn list_liveries(checkout: &Path) -> Vec<String> {
         if name.starts_with('_') {
             continue;
         }
-        if entry.path().join("livery.json").is_file() {
+        if entry.path().join("theme.json").is_file() {
             out.push(name);
         }
     }
@@ -1238,45 +1238,45 @@ fn list_liveries(checkout: &Path) -> Vec<String> {
     out
 }
 
-/// Stage `spec` (any of the four `--livery` forms) into `dst`, through the
-/// SAME engine every live emit uses: [`load_livery_container`] resolves the
-/// form to a raw container, `strillix_rice::livery::resolve::resolve` +
+/// Stage `spec` (any of the four `--theme` forms) into `dst`, through the
+/// SAME engine every live emit uses: [`load_theme_container`] resolves the
+/// form to a raw container, `strillix_rice::theme::resolve::resolve` +
 /// `to_json_string` fully resolve it (fallbacks applied — the document
-/// `strillix livery resolve` itself prints; `LiveryState` on the QML side never
+/// `strillix theme resolve` itself prints; `ThemeState` on the QML side never
 /// sees a null), the string is reparsed, given `"song": <song>`, pretty-
 /// printed with a trailing newline, and atomic-written. A resolve failure
-/// returns [`LiveryStageError::Error`] and leaves `dst` untouched — the
+/// returns [`ThemeStageError::Error`] and leaves `dst` untouched — the
 /// caller must not have already deleted or truncated it.
-fn stage_livery(
+fn stage_theme(
     spec: &str,
     song: &str,
     checkout: &Path,
     dst: &Path,
-) -> Result<(), LiveryStageError> {
-    let container = load_livery_container(spec, checkout)?;
-    let resolved = strillix_rice::livery::resolve::resolve(&container)
-        .map_err(|e| LiveryStageError::Error(format!("resolving livery `{spec}`: {e}")))?;
-    let staged = strillix_rice::livery::resolve::to_json_string(&resolved);
+) -> Result<(), ThemeStageError> {
+    let container = load_theme_container(spec, checkout)?;
+    let resolved = strillix_rice::theme::resolve::resolve(&container)
+        .map_err(|e| ThemeStageError::Error(format!("resolving theme `{spec}`: {e}")))?;
+    let staged = strillix_rice::theme::resolve::to_json_string(&resolved);
     let mut obj = match serde_json::from_str::<Value>(&staged) {
         Ok(Value::Object(obj)) => obj,
         _ => {
-            return Err(LiveryStageError::Error(format!(
-                "resolving livery `{spec}`: engine produced non-object output"
+            return Err(ThemeStageError::Error(format!(
+                "resolving theme `{spec}`: engine produced non-object output"
             )))
         }
     };
     obj.insert("song".to_string(), json!(song));
     let pretty = serde_json::to_string_pretty(&Value::Object(obj))
-        .map_err(|e| LiveryStageError::Error(format!("serializing resolved livery: {e}")))?
+        .map_err(|e| ThemeStageError::Error(format!("serializing resolved theme: {e}")))?
         + "\n";
     aoide_storage::fs::atomic_write(dst, &pretty)
-        .map_err(|e| LiveryStageError::Error(format!("writing {}: {e}", dst.display())))
+        .map_err(|e| ThemeStageError::Error(format!("writing {}: {e}", dst.display())))
 }
 
 // ─────────────────────────── other lane stage files ───────────────────────────
 
 /// `ROOT/stage/mode.json` -- the lane QML's own rice-mode read
-/// (`LiveryState.qml`'s `modeFile`, and its callers all expect this file
+/// (`ThemeState.qml`'s `modeFile`, and its callers all expect this file
 /// to exist). Rewritten UNCONDITIONALLY on every `strillix preview` build and
 /// on `preview set --song`: the canvas's mode is always "staging" of the
 /// PREVIEWED song, never whatever the live root's own `rice mode` last
@@ -1300,7 +1300,7 @@ fn write_mode_json(root: &Path, song: &str) -> Result<(), String> {
 
 /// Every OTHER lane-read stage file a preview root needs merely to EXIST
 /// so its QML doesn't start with a parse warning on a missing file:
-/// `stage/cover.json` (`LiveryState.qml`/`AoideWallpaper.qml:32`),
+/// `stage/cover.json` (`ThemeState.qml`/`AoideWallpaper.qml:32`),
 /// `stage/grimoire.json` (`GrimoireLedger`), and `state/usage.json`.
 /// Seeded once, on the initial build, and never overwritten again by this
 /// command -- unlike `mode.json` these aren't part of what a preview
@@ -1767,8 +1767,8 @@ fn parse_anchor(v: &str) -> Result<&str, String> {
 
 fn parse_background(v: &str) -> Result<&str, String> {
     match v {
-        "livery" | "checker" => Ok(v),
-        other => Err(format!("`{other}` is not `livery` or `checker`")),
+        "theme" | "checker" => Ok(v),
+        other => Err(format!("`{other}` is not `theme` or `checker`")),
     }
 }
 
@@ -2041,7 +2041,7 @@ mod tests {
         let qml = dir.join(STRILLIX_SHELL_SRC).join("qml");
         std::fs::create_dir_all(&qml).unwrap();
         std::fs::write(qml.join("ShellBridge.qml"), "// bridge\n").unwrap();
-        std::fs::write(qml.join("LiveryState.qml"), "// livery\n").unwrap();
+        std::fs::write(qml.join("ThemeState.qml"), "// theme\n").unwrap();
         std::fs::write(qml.join("not-qml.txt"), "ignore me\n").unwrap();
         let icons = dir.join(STRILLIX_SHELL_SRC).join("icons").join("iconoir");
         std::fs::create_dir_all(&icons).unwrap();
@@ -2052,7 +2052,7 @@ mod tests {
         std::fs::create_dir_all(&sonata_widgets).unwrap();
         std::fs::write(sonata_widgets.join("conductor.qml"), "// conductor\n").unwrap();
         std::fs::write(
-            rices.join("sonata/livery.json"),
+            rices.join("sonata/theme.json"),
             r##"{"palette": {"bg": "#111111", "fg": "#eeeeee", "accent": "#ff00ff", "urgent": "#ff0000"}}"##,
         )
         .unwrap();
@@ -2061,7 +2061,7 @@ mod tests {
         std::fs::create_dir_all(&etude_widgets).unwrap();
         std::fs::write(etude_widgets.join("dock.qml"), "// dock\n").unwrap();
         std::fs::write(
-            rices.join("etude/livery.json"),
+            rices.join("etude/theme.json"),
             r##"{"palette": {"bg": "#222222", "fg": "#dddddd", "accent": "#00ffff", "urgent": "#ffaa00"}}"##,
         )
         .unwrap();
@@ -2105,11 +2105,11 @@ mod tests {
 
         let stage_song_dir = root.join("stage");
         std::fs::create_dir_all(&stage_song_dir).unwrap();
-        stage_livery(
+        stage_theme(
             "sonata",
             "sonata",
             &checkout,
-            &stage_song_dir.join("livery.json"),
+            &stage_song_dir.join("theme.json"),
         )
         .unwrap();
         write_mode_json(&root, "sonata").unwrap();
@@ -2176,7 +2176,7 @@ mod tests {
         .unwrap();
         assert_eq!(hooks, json!({}));
 
-        // the four other lane-read stage files exist -- LiveryState.qml
+        // the four other lane-read stage files exist -- ThemeState.qml
         // (mode.json/cover.json), AoideWallpaper.qml (cover.json),
         // GrimoireLedger (grimoire.json), and state/usage.json -- so none
         // of those components starts with a parse warning.
@@ -2306,12 +2306,12 @@ mod tests {
         assert!(matches!(source, FixtureSource::Dir(d) if d == dir));
     }
 
-    // ── livery staging: the four --livery forms ──────────────
+    // ── theme staging: the four --theme forms ──────────────
 
     /// A full, valid base16 scheme with distinct values in every slot, so a
     /// missing-slot assertion can reliably name the ONE it drops.
     fn full_base16_pairs() -> Vec<(&'static str, &'static str)> {
-        strillix_rice::livery::schema::BASE16_KEYS
+        strillix_rice::theme::schema::BASE16_KEYS
             .iter()
             .enumerate()
             .map(|(i, k)| (*k, BASE16_HEX[i]))
@@ -2330,7 +2330,7 @@ mod tests {
             .unwrap_or_else(|e| e.into_inner());
         let saved_root = std::env::var_os("AOIDE_ROOT");
 
-        let base = scratch("livery_live");
+        let base = scratch("theme_live");
         let checkout = base.join("checkout");
         fake_checkout(&checkout);
         std::env::set_var("AOIDE_ROOT", base.join("live-root"));
@@ -2338,13 +2338,13 @@ mod tests {
         let live_stage = aoide_storage::fs::stage_dir();
         std::fs::create_dir_all(&live_stage).unwrap();
         std::fs::write(
-            live_stage.join("livery.json"),
+            live_stage.join("theme.json"),
             r##"{"palette": {"bg": "#010101", "fg": "#fefefe", "accent": "#ab00ab", "urgent": "#cd0000"}}"##,
         )
         .unwrap();
 
-        let dst = base.join("out-livery.json");
-        stage_livery("live", "sonata", &checkout, &dst).unwrap();
+        let dst = base.join("out-theme.json");
+        stage_theme("live", "sonata", &checkout, &dst).unwrap();
         let v: Value = serde_json::from_str(&std::fs::read_to_string(&dst).unwrap()).unwrap();
         assert_eq!(v["song"], "sonata");
         assert_eq!(v["palette"]["bg"], "#010101");
@@ -2357,34 +2357,34 @@ mod tests {
     }
 
     #[test]
-    fn spec_song_name_reads_that_songs_own_rices_livery() {
-        let base = scratch("livery_song");
+    fn spec_song_name_reads_that_songs_own_rices_theme() {
+        let base = scratch("theme_song");
         let checkout = base.join("checkout");
         fake_checkout(&checkout);
-        let dst = base.join("out-livery.json");
+        let dst = base.join("out-theme.json");
 
         // spec is "etude" while the preview's own --song is "sonata" --
-        // the two are independent: --livery names ANY rices song.
-        stage_livery("etude", "sonata", &checkout, &dst).unwrap();
+        // the two are independent: --theme names ANY rices song.
+        stage_theme("etude", "sonata", &checkout, &dst).unwrap();
         let v: Value = serde_json::from_str(&std::fs::read_to_string(&dst).unwrap()).unwrap();
         assert_eq!(
             v["song"], "sonata",
-            "the CURRENT preview song is inserted, not the livery's source song"
+            "the CURRENT preview song is inserted, not the theme's source song"
         );
         assert_eq!(v["palette"]["bg"], "#222222");
         assert_eq!(v["palette"]["accent"], "#00ffff");
     }
 
     #[test]
-    fn spec_livery_file_path_resolves_through_the_engine() {
-        let base = scratch("livery_file_path");
+    fn spec_theme_file_path_resolves_through_the_engine() {
+        let base = scratch("theme_file_path");
         let checkout = base.join("checkout");
         fake_checkout(&checkout);
-        let src = base.join("custom-livery.json");
+        let src = base.join("custom-theme.json");
         std::fs::write(&src, r##"{"palette": {"bg": "#000000", "fg": "#ffffff", "accent": "#0000ff", "urgent": "#ff0000"}}"##).unwrap();
-        let dst = base.join("out-livery.json");
+        let dst = base.join("out-theme.json");
 
-        stage_livery(&src.to_string_lossy(), "sonata", &checkout, &dst).unwrap();
+        stage_theme(&src.to_string_lossy(), "sonata", &checkout, &dst).unwrap();
         let body = std::fs::read_to_string(&dst).unwrap();
         assert!(body.ends_with('\n'));
         assert!(!body.ends_with("\n\n"));
@@ -2398,7 +2398,7 @@ mod tests {
 
     #[test]
     fn spec_base16_json_scheme_synthesizes_a_palette_and_resolves() {
-        let base = scratch("livery_base16_json");
+        let base = scratch("theme_base16_json");
         let checkout = base.join("checkout");
         fake_checkout(&checkout);
         let src = base.join("scheme.json");
@@ -2407,9 +2407,9 @@ mod tests {
             .map(|(k, v)| (k.to_string(), json!(format!("#{v}"))))
             .collect();
         std::fs::write(&src, serde_json::to_string(&Value::Object(obj)).unwrap()).unwrap();
-        let dst = base.join("out-livery.json");
+        let dst = base.join("out-theme.json");
 
-        stage_livery(&src.to_string_lossy(), "sonata", &checkout, &dst).unwrap();
+        stage_theme(&src.to_string_lossy(), "sonata", &checkout, &dst).unwrap();
         let v: Value = serde_json::from_str(&std::fs::read_to_string(&dst).unwrap()).unwrap();
         assert_eq!(v["song"], "sonata");
         assert_eq!(v["palette"]["bg"], "#1e1e2e"); // base00
@@ -2422,7 +2422,7 @@ mod tests {
 
     #[test]
     fn spec_base16_flat_yaml_lines_scheme_synthesizes_a_palette() {
-        let base = scratch("livery_base16_yaml");
+        let base = scratch("theme_base16_yaml");
         let checkout = base.join("checkout");
         fake_checkout(&checkout);
         let src = base.join("scheme.yaml");
@@ -2438,9 +2438,9 @@ mod tests {
             }
         }
         std::fs::write(&src, text).unwrap();
-        let dst = base.join("out-livery.json");
+        let dst = base.join("out-theme.json");
 
-        stage_livery(&src.to_string_lossy(), "sonata", &checkout, &dst).unwrap();
+        stage_theme(&src.to_string_lossy(), "sonata", &checkout, &dst).unwrap();
         let v: Value = serde_json::from_str(&std::fs::read_to_string(&dst).unwrap()).unwrap();
         assert_eq!(v["palette"]["bg"], "#1e1e2e");
         assert_eq!(v["palette"]["accent"], "#8888e8");
@@ -2449,7 +2449,7 @@ mod tests {
 
     #[test]
     fn base16_scheme_missing_a_slot_is_a_usage_error_naming_it() {
-        let base = scratch("livery_base16_missing");
+        let base = scratch("theme_base16_missing");
         let checkout = base.join("checkout");
         fake_checkout(&checkout);
         let src = base.join("scheme.json");
@@ -2460,29 +2460,29 @@ mod tests {
             .map(|(k, v)| (k.to_string(), json!(format!("#{v}"))))
             .collect();
         std::fs::write(&src, serde_json::to_string(&Value::Object(obj)).unwrap()).unwrap();
-        let dst = base.join("out-livery.json");
+        let dst = base.join("out-theme.json");
 
-        let err = stage_livery(&src.to_string_lossy(), "sonata", &checkout, &dst).unwrap_err();
+        let err = stage_theme(&src.to_string_lossy(), "sonata", &checkout, &dst).unwrap_err();
         match err {
-            LiveryStageError::Usage(m) => assert!(m.contains("base05"), "{m}"),
+            ThemeStageError::Usage(m) => assert!(m.contains("base05"), "{m}"),
             other => panic!("expected a usage error naming base05, got {other:?}"),
         }
         assert!(!dst.exists());
     }
 
     #[test]
-    fn a_livery_that_fails_to_resolve_errors_and_leaves_the_prior_file_intact() {
-        let base = scratch("livery_resolve_failure");
+    fn a_theme_that_fails_to_resolve_errors_and_leaves_the_prior_file_intact() {
+        let base = scratch("theme_resolve_failure");
         let checkout = base.join("checkout");
         fake_checkout(&checkout);
-        let dst = base.join("out-livery.json");
+        let dst = base.join("out-theme.json");
         std::fs::write(&dst, "PRIOR CONTENT\n").unwrap();
 
-        let src = base.join("broken-livery.json");
+        let src = base.join("broken-theme.json");
         std::fs::write(&src, r##"{"palette": {"bg": "{palette.nope}"}}"##).unwrap();
 
-        let err = stage_livery(&src.to_string_lossy(), "sonata", &checkout, &dst).unwrap_err();
-        assert!(matches!(err, LiveryStageError::Error(_)));
+        let err = stage_theme(&src.to_string_lossy(), "sonata", &checkout, &dst).unwrap_err();
+        assert!(matches!(err, ThemeStageError::Error(_)));
         assert_eq!(
             std::fs::read_to_string(&dst).unwrap(),
             "PRIOR CONTENT\n",
@@ -2491,14 +2491,14 @@ mod tests {
     }
 
     #[test]
-    fn liveries_list_is_sorted_and_skips_shelved_and_livery_less_songs() {
-        let base = scratch("liveries_list");
+    fn themes_list_is_sorted_and_skips_shelved_and_theme_less_songs() {
+        let base = scratch("themes_list");
         let checkout = base.join("checkout");
         fake_checkout(&checkout);
-        // a third song with no livery.json of its own -- must not appear.
-        std::fs::create_dir_all(checkout.join("rices/no-livery/widgets")).unwrap();
+        // a third song with no theme.json of its own -- must not appear.
+        std::fs::create_dir_all(checkout.join("rices/no-theme/widgets")).unwrap();
 
-        let got = list_liveries(&checkout);
+        let got = list_themes(&checkout);
         assert_eq!(got, vec!["etude".to_string(), "sonata".to_string()]);
     }
 
@@ -2533,7 +2533,7 @@ mod tests {
         doc.insert("anchor".to_string(), json!("tl"));
         doc.insert("margin".to_string(), json!(0));
         doc.insert("zoom".to_string(), json!("fit"));
-        doc.insert("background".to_string(), json!("livery"));
+        doc.insert("background".to_string(), json!("theme"));
         if let Value::Object(extra) = extra {
             for (k, v) in extra {
                 doc.insert(k, v);
@@ -2554,7 +2554,7 @@ mod tests {
         assert_eq!(data["anchor"], "br");
         // untouched keys survive.
         assert_eq!(data["zoom"], "fit");
-        assert_eq!(data["background"], "livery");
+        assert_eq!(data["background"], "theme");
         assert_eq!(outcome.changed, vec!["anchor".to_string()]);
     }
 
@@ -2615,7 +2615,7 @@ mod tests {
         // child env this root's own quickshell process runs under
         // (`child_env` -- AOIDE_DAEMON_SOCKET repointed into the root,
         // XDG_RUNTIME_DIR elsewhere) must not make `preview set --root
-        // <root> --livery <song>` refuse itself, which is exactly the
+        // <root> --theme <song>` refuse itself, which is exactly the
         // regression owner 588 found (every rail→CLI action dead from
         // inside any canvas). Live computer-use evidence of a real click is
         // the coordinator's job, not this test's.
@@ -2629,7 +2629,7 @@ mod tests {
         let xdg = base.join("xdg");
         std::fs::create_dir_all(&xdg).unwrap();
         let root = base.join("aoide-preview-w2");
-        write_seed_control(&root, json!({"liverySource": "sonata"}));
+        write_seed_control(&root, json!({"themeSource": "sonata"}));
         std::fs::create_dir_all(root.join("stage")).unwrap();
 
         let outcome = with_flake_root(&checkout, || {
@@ -2639,7 +2639,7 @@ mod tests {
             std::env::set_var("AOIDE_DAEMON_SOCKET", root.join("no-daemon.sock"));
             let outcome = handle_preview_set(&inv(&[
                 ("root", root.to_str().unwrap()),
-                ("livery", "etude"),
+                ("theme", "etude"),
             ]));
             match saved_xdg {
                 Some(v) => std::env::set_var("XDG_RUNTIME_DIR", v),
@@ -2658,7 +2658,7 @@ mod tests {
             outcome.message
         );
         let data = outcome.data.unwrap();
-        assert_eq!(data["liverySource"], "etude");
+        assert_eq!(data["themeSource"], "etude");
     }
 
     #[test]
@@ -2901,7 +2901,7 @@ mod tests {
 
         write_seed_control(
             &root,
-            json!({"widget": "songs/etude/dock.qml", "song": "sonata", "liverySource": "sonata"}),
+            json!({"widget": "songs/etude/dock.qml", "song": "sonata", "themeSource": "sonata"}),
         );
 
         let outcome = with_flake_root(&checkout, || {
@@ -2943,7 +2943,7 @@ mod tests {
 
         write_seed_control(
             &root,
-            json!({"widget": "songs/sonata/conductor.qml", "song": "sonata", "liverySource": "sonata"}),
+            json!({"widget": "songs/sonata/conductor.qml", "song": "sonata", "themeSource": "sonata"}),
         );
 
         let outcome = with_flake_root(&checkout, || {
@@ -2983,7 +2983,7 @@ mod tests {
 
         write_seed_control(
             &root,
-            json!({"widget": "songs/etude/dock.qml", "song": "sonata", "liverySource": "sonata"}),
+            json!({"widget": "songs/etude/dock.qml", "song": "sonata", "themeSource": "sonata"}),
         );
 
         let outcome = with_flake_root(&checkout, || {
@@ -3020,21 +3020,21 @@ mod tests {
         let stage_dir = root.join("stage");
         std::fs::create_dir_all(&stage_dir).unwrap();
         std::fs::write(
-            stage_dir.join("livery.json"),
+            stage_dir.join("theme.json"),
             r##"{"schemaVersion":"0","palette":{"bg":"#010101","fg":"#fefefe","accent":"#ab00ab","urgent":"#cd0000"},"bar":{"bg":"#010101","fg":"#fefefe","accent":"#ab00ab"},"notif":{"bg":"#010101","fg":"#fefefe","urgent":"#cd0000"},"window":{"border":"#ab00ab","borderInactive":"#010101"},"song":"sonata"}"##,
         )
         .unwrap();
 
-        let checkout_livery = checkout.join("rices/sonata/livery.json");
+        let checkout_theme = checkout.join("rices/sonata/theme.json");
         std::fs::write(
-            &checkout_livery,
+            &checkout_theme,
             r##"{"schemaVersion":"0","song":"stale","widgets":{"conductor":{"kind":"surface"}},"cover":"cover.png","palette":{"bg":"#111111","fg":"#eeeeee","accent":"#ff00ff","urgent":"#ff0000"}}"##,
         )
         .unwrap();
 
         write_seed_control(
             &root,
-            json!({"widget": "songs/sonata/conductor.qml", "song": "sonata", "liverySource": "live"}),
+            json!({"widget": "songs/sonata/conductor.qml", "song": "sonata", "themeSource": "live"}),
         );
 
         let outcome = with_flake_root(&checkout, || {
@@ -3050,11 +3050,11 @@ mod tests {
         assert_eq!(data["palette"], "declared");
 
         let merged: Value =
-            serde_json::from_str(&std::fs::read_to_string(&checkout_livery).unwrap()).unwrap();
+            serde_json::from_str(&std::fs::read_to_string(&checkout_theme).unwrap()).unwrap();
         assert_eq!(merged["palette"]["bg"], "#010101");
         assert!(
             merged.get("song").is_none(),
-            "song key must never be written to the checkout livery.json"
+            "song key must never be written to the checkout theme.json"
         );
         assert_eq!(
             merged["widgets"]["conductor"]["kind"], "surface",
@@ -3064,7 +3064,7 @@ mod tests {
     }
 
     #[test]
-    fn declare_skips_palette_when_livery_source_is_the_songs_own() {
+    fn declare_skips_palette_when_theme_source_is_the_songs_own() {
         let base = scratch("declare_palette_own");
         let checkout = base.join("checkout");
         fake_checkout(&checkout);
@@ -3080,10 +3080,10 @@ mod tests {
 
         write_seed_control(
             &root,
-            json!({"widget": "songs/sonata/conductor.qml", "song": "sonata", "liverySource": "sonata"}),
+            json!({"widget": "songs/sonata/conductor.qml", "song": "sonata", "themeSource": "sonata"}),
         );
 
-        // no root/stage/livery.json at all -- if the palette step tried
+        // no root/stage/theme.json at all -- if the palette step tried
         // to read it, this would error; "own" must skip it entirely.
         let outcome = with_flake_root(&checkout, || {
             handle_preview_declare(&inv_declare(&[("root", root.to_str().unwrap())]))
@@ -3158,7 +3158,7 @@ mod tests {
 
         write_seed_control(
             &root,
-            json!({"widget": "songs/sonata/conductor.qml", "song": "sonata", "liverySource": "sonata"}),
+            json!({"widget": "songs/sonata/conductor.qml", "song": "sonata", "themeSource": "sonata"}),
         );
 
         let outcome = with_flake_root(&checkout, || {

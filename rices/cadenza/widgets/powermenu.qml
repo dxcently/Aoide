@@ -23,7 +23,7 @@ import "Kit.js" as Kit
 PanelWindow {
     id: root
 
-    required property var livery
+    required property var theme
     required property var bridge
 
     property bool shown: false
@@ -59,7 +59,7 @@ PanelWindow {
         anchors.fill: parent
         focus: true
         Component.onCompleted: setSource(Kit.helper("PowerBody"), {
-            livery: Qt.binding(() => root.livery),
+            theme: Qt.binding(() => root.theme),
             bridge: Qt.binding(() => root.bridge),
             shown: Qt.binding(() => root.shown) })
     }

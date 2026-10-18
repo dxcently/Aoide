@@ -28,7 +28,7 @@ import "Kit.js" as Kit
 Item {
     id: harness
 
-    required property var livery
+    required property var theme
     required property var bridge
 
     readonly property var cells: [
@@ -113,7 +113,7 @@ Item {
     implicitWidth: body.item ? body.item.implicitWidth : 640
     implicitHeight: body.item ? body.item.implicitHeight : 440
 
-    Rectangle { anchors.fill: parent; color: harness.livery.paletteBg }
+    Rectangle { anchors.fill: parent; color: harness.theme.paletteBg }
 
     // Rebuilt whole on every pick, so each cell starts from a fresh body.
     Loader {
@@ -122,7 +122,7 @@ Item {
         function build() {
             var c = harness.cell
             setSource(Kit.helper("LauncherBody"), {
-                livery: Qt.binding(() => harness.livery),
+                theme: Qt.binding(() => harness.theme),
                 bridge: harness.bridge,
                 clipboard: c.clip ? clipStub : null,
                 ledger: c.emptyLedger ? ledgerEmptyStub : (c.led ? ledgerStub : null) })

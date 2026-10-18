@@ -224,7 +224,7 @@
       # nor should name.
       lib = {
         composition = inputs.habit.lib.composition;
-        livery = import ./lib/livery.nix;
+        theme = import ./lib/theme.nix;
         # The rice record: called as a function (`lib.rices { inherit lib; … }`),
         # with `.merge` (lib/rices-merge.nix) for several rices directories as one.
         rices = {
@@ -352,7 +352,7 @@
           # committed anyway (it replaced `no-song-read`, which scanned module
           # paths for those names and could not fire).
           rice-runtime-untracked = checks.riceRuntimeUntracked self;
-          # Every discovered song carries rice.nix + livery.json and holds no
+          # Every discovered song carries rice.nix + theme.json and holds no
           # other `.nix` (`lib/rices.nix`'s strayNixFiles, builtins.readDir —
           # the walker is gone). What a host builds in is the host's selection,
           # not this check's business.
@@ -371,11 +371,11 @@
             ricesRoot = ./rices;
             manifest = ricesLib.manifestAttrs;
           };
-          # The two livery fan-outs (baked Stylix, stage seed) agree under an
-          # `aoide.livery.override` — proved against a fixed fixture inside
-          # lib/checks.nix, not this host's own config (see lib/livery.nix
+          # The two theme fan-outs (baked Stylix, stage seed) agree under an
+          # `aoide.theme.override` — proved against a fixed fixture inside
+          # lib/checks.nix, not this host's own config (see lib/theme.nix
           # and lib/checks.nix's Check 10).
-          livery-fanout = checks.liveryFanout;
+          theme-fanout = checks.themeFanout;
           # Formatter enforcement — flake.nix:173 declares `formatter = nixfmt`;
           # nothing ran it before this check existed. Scoped to `self`, the
           # git-filtered committed tree (see lib/checks.nix's Check 4).

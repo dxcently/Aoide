@@ -5,7 +5,7 @@ import QtQuick
 
 Rectangle {
     id: face
-    property var livery
+    property var theme
     property var bridge
     property var auth
 

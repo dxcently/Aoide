@@ -38,7 +38,7 @@ const ALLOWED: &[(&str, usize)] = &[
     ("screen/src/send.rs", 1),
     ("screen/src/text.rs", 1),
     ("strillix-rice/src/commands/cover.rs", 3),
-    ("strillix-rice/src/commands/livery.rs", 2),
+    ("strillix-rice/src/commands/theme.rs", 2),
     ("strillix-rice/src/commands/mode.rs", 1),
     ("strillix-rice/src/commands/rice.rs", 3),
     ("strillix-rice/src/commands/take.rs", 2),

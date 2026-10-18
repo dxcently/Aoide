@@ -36,7 +36,7 @@ import "Kit.js" as Kit
 Item {
     id: harness
 
-    required property var livery
+    required property var theme
     required property var bridge
     property var shared: null
     property var stagingEngine: null
@@ -82,7 +82,7 @@ Item {
         id: body
         anchors.fill: parent
         Component.onCompleted: setSource(Kit.helper("BoardBody"), {
-            livery: Qt.binding(() => harness.livery),
+            theme: Qt.binding(() => harness.theme),
             bridge: Qt.binding(() => harness.bridge),
             shared: Qt.binding(() => harness.shared),
             stagingEngine: Qt.binding(() => harness.stagingEngine),

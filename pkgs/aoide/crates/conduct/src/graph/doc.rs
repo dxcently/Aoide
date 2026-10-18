@@ -637,7 +637,7 @@ pub(crate) fn render_as(
 
     // Compact token-count formatting for the `⧉` context tag below: <1000 →
     // raw, ≥1000 → `Nk`, ≥1e6 → `N.NM` — mirrors the dock's own JS formatter
-    // (LiveryState.qml `ctxCompact`) so the ASCII tree and the widget read
+    // (ThemeState.qml `ctxCompact`) so the ASCII tree and the widget read
     // the same count the same way.
     fn compact_tokens(n: u64) -> String {
         if n < 1_000 {

@@ -66,7 +66,7 @@
 //! cannot be hardcoded here: on a host where waybar owns the bar, expecting
 //! `aoide-bar` would restart a healthy desktop every fifteen minutes
 //! forever. So it is DECLARED by the active song
-//! (`aoide.arrangement.surfaces`) and published to
+//! (`aoide.layout.surfaces`) and published to
 //! `run/qml/songs/surfaces.json` by the strillix lane's build
 //! (CONTRACTS.md §5). When that file is present this checks the declared
 //! namespaces against what is actually mapped, per monitor where the
@@ -300,7 +300,7 @@ pub(crate) fn parse_expectation(v: &Value) -> Option<BTreeMap<String, bool>> {
 /// unreadable or malformed one, and a file whose `surfaces` object is EMPTY —
 /// because all three mean the same thing to the watchdog: this song declared
 /// no surface, so the old total count decides, exactly as before the
-/// declaration existed (CONTRACTS.md §5, `aoide.arrangement.surfaces`).
+/// declaration existed (CONTRACTS.md §5, `aoide.layout.surfaces`).
 ///
 /// The empty case is not hypothetical. The strillix lane publishes the
 /// file unconditionally, so every host whose song declares nothing carries a

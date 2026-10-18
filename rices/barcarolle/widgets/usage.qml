@@ -5,7 +5,7 @@ import "Kit.js" as Kit
 Item {
     id: root
 
-    required property var livery
+    required property var theme
     required property var bridge
 
     property var usage: ({})
@@ -25,7 +25,7 @@ Item {
     readonly property bool reading: liveOk && !stale
 
     function util(block) { return liveOk && block && block.utilization !== undefined ? block.utilization : -1 }
-    function resets(block) { return block ? livery.usageResetIn(block.resetsAt, nowMs) : "" }
+    function resets(block) { return block ? theme.usageResetIn(block.resetsAt, nowMs) : "" }
     function money(v) { return v === undefined ? "—" : "$" + Number(v).toFixed(2) }
     function clock(ms) { return Qt.formatTime(new Date(ms), "hh:mm") }
 
@@ -35,7 +35,7 @@ Item {
     implicitHeight: hasLocal ? 112 : 95
 
     FileView {
-        path: root.livery.usagePath
+        path: root.theme.usagePath
         watchChanges: true
         blockLoading: false
         printErrors: false
@@ -75,8 +75,8 @@ Item {
         anchors.fill: parent
         opacity: (root.liveOk && root.stale) || !root.hasData ? 0.55 : 1
 
-        Use { x: 17; y: 3; props: ({ livery: root.livery, label: "5 HR", value: Qt.binding(function () { return root.util(root.live.fiveHour) }) }) }
-        Use { x: 109; y: 3; props: ({ livery: root.livery, label: "WEEK", value: Qt.binding(function () { return root.util(root.live.sevenDay) }) }) }
+        Use { x: 17; y: 3; props: ({ theme: root.theme, label: "5 HR", value: Qt.binding(function () { return root.util(root.live.fiveHour) }) }) }
+        Use { x: 109; y: 3; props: ({ theme: root.theme, label: "WEEK", value: Qt.binding(function () { return root.util(root.live.sevenDay) }) }) }
 
         Cap { visible: root.reading; x: 8; y: 80; width: 88; label: root.resets(root.live.fiveHour) }
         Cap { visible: root.reading; x: 100; y: 80; width: 88; label: root.resets(root.live.sevenDay) }

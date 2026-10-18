@@ -10,7 +10,7 @@ source: "[[references/AOIDE-HANDOFF]]"
 
 Base16-driven whole-system theming; Aoide's "baked fan-out" engine. `rice.nix` feeds a single scheme into Stylix — `base16Scheme`, fonts, cursor, and wallpaper — and Stylix propagates it to every nix-manageable target: terminal, GTK/Qt, icons, cursor, editors, browser, and boot.
 
-Stylix is the recording side of the two-fan-out model. `stage/livery.json` is the rehearsal side. Both derive from the same livery source, so preview and adopted state cannot diverge.
+Stylix is the recording side of the two-fan-out model. `stage/theme.json` is the rehearsal side. Both derive from the same theme source, so preview and adopted state cannot diverge.
 
 Surface ownership is enforced: the Quickshell lane declares which surfaces it owns, and Stylix's options disable derive from that declaration. The flake's `checks` assert that no surface has two owners, catching overlap at eval time rather than at runtime.
 
@@ -40,7 +40,7 @@ surface-adjacent slots) — a provisional derivation.
 synthesis with a real 16-colour derivation.
 
 That said, songs may also supply the full sixteen slots directly as
-`aoide.livery.base16` (bypassing synthesis) — the `sonata` song does,
+`aoide.theme.base16` (bypassing synthesis) — the `sonata` song does,
 keyed by hand from its wallpaper; see
 [[Ricing-Protocol|the Ricing Protocol]].
 
@@ -48,12 +48,12 @@ keyed by hand from its wallpaper; see
 
 `stylix.polarity` (`"light"` or `"dark"`) declares which register the base16
 ramp reads as, and every Stylix-managed target honours it. The song declares it
-as `aoide.livery.polarity` beside its palette (CONTRACTS.md §1; the option
+as `aoide.theme.polarity` beside its palette (CONTRACTS.md §1; the option
 defaults to `"light"`), and this lane hands it to Stylix `mkDefault` — so a
 venue or host that names `stylix.polarity` itself still wins. Naming
-`aoide.livery.polarity` at a venue is a different thing: a song's own
+`aoide.theme.polarity` at a venue is a different thing: a song's own
 definition is a plain one, so a host overriding it needs `mkForce`, exactly as
-for every other song-declared livery field. Because polarity is a
+for every other song-declared theme field. Because polarity is a
 single fan-out switch,
 flipping it is cheap — the discipline that makes it *look* right everywhere
 (terminal, bar, every widget agreeing) is the vision-check in
@@ -66,6 +66,6 @@ lands on the user-gated rebuild ([[Self-Ricing|the rice loop]]).
 - [[Self-Ricing]]
 - [[Quickshell]]
 - [[Codebase]]
-- [[livery]]
+- [[theme]]
 - [[Ricing-Protocol|Ricing Protocol]]
 - [[Song-Anatomy]] — the rices where the house grammar and per-song design memory live

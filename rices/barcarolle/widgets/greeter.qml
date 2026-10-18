@@ -16,7 +16,7 @@ import "Kit.js" as Kit
 Item {
     id: face
 
-    property var livery
+    property var theme
     property var bridge
     property var auth
 
@@ -78,7 +78,7 @@ Item {
         page: face.selected === "" ? "tiles" : face.failed ? "failure" : "password"
         users: face.users
         current: face.current
-        livery: face.livery
+        theme: face.theme
         userName: face.selected
         failureText: "The user name or password is incorrect."
         prompt: Kit.hostPrompt(face.auth)

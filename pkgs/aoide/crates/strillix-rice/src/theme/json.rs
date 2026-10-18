@@ -4,7 +4,7 @@
 //! 2-space-indented. `serde_json`'s `Map` is BTreeMap-backed in this
 //! workspace (no `preserve_order` feature), so its `to_string_pretty` sorts
 //! keys alphabetically — fine for shape contracts, wrong for the
-//! byte-identical `livery resolve` golden. This writer exists ONLY to
+//! byte-identical `theme resolve` golden. This writer exists ONLY to
 //! reproduce the Node byte format: fixed `group.key` insertion order, exact
 //! `": "` separators, JS-compatible string escaping, and a compact mode for
 //! the small `{ok, …}` envelopes the CLI prints.

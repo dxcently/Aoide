@@ -80,8 +80,8 @@ function hostNote(auth) {
     return auth.message
 }
 
-function make(livery) {
-    var b = (livery && livery.raw && livery.raw.base16) ? livery.raw.base16 : {}
+function make(theme) {
+    var b = (theme && theme.raw && theme.raw.base16) ? theme.raw.base16 : {}
     function slot(n, fb) { return b[n] ? b[n] : fb }
     return {
         ink:      "#0c2130",

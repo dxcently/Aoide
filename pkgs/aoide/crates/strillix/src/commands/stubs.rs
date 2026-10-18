@@ -24,7 +24,7 @@ fn unimplemented(_inv: &Invocation) -> Outcome {
     unreachable!("dispatch() never calls the handler of a not-implemented command")
 }
 
-/// `rice declare` / `rice transpose` — sit after `cover set`/`livery` in the
+/// `rice declare` / `rice transpose` — sit after `cover set`/`theme` in the
 /// historical order (same relative position core's `commands/mod.rs::all()`
 /// gives them).
 pub fn register_rice_late(r: &mut Registry) {
@@ -242,11 +242,11 @@ mod tests {
         std::env::set_var("AOIDE_FLAKE_ROOT", &checkout);
         let folder = checkout.join("rices").join("dusk");
         std::fs::create_dir_all(&folder).unwrap();
-        std::fs::write(folder.join("livery.json"), "{}").unwrap();
+        std::fs::write(folder.join("theme.json"), "{}").unwrap();
         aoide_test_support::git_in(&checkout, &["init", "-q"]);
         aoide_test_support::git_in(&checkout, &["add", "-A"]);
         aoide_test_support::git_in(&checkout, &["commit", "-qm", "dusk"]);
-        std::fs::write(folder.join("livery.json"), "{\"a\":1}").unwrap();
+        std::fs::write(folder.join("theme.json"), "{\"a\":1}").unwrap();
 
         let host = root.join("default.nix");
         std::fs::write(&host, "{\n  habit.song.declared = \"sonata\";\n}\n").unwrap();
@@ -264,7 +264,7 @@ mod tests {
         assert_eq!(std::fs::read_to_string(&host).unwrap(), "{\n  habit.song.declared = \"dusk\";\n}\n");
         let data = out.data.expect("the declare carries data");
         assert!(data["warning"].as_str().unwrap().contains("rices/dusk"));
-        assert_eq!(data["uncommitted"][0], " M rices/dusk/livery.json");
+        assert_eq!(data["uncommitted"][0], " M rices/dusk/theme.json");
 
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -279,24 +279,24 @@ mod tests {
         std::env::set_var("AOIDE_STAGE_DIR", stage_root.join("song").join("stage"));
         let rices = stage_root.join("song").join("rices").join("dusk");
         std::fs::create_dir_all(&rices).unwrap();
-        std::fs::write(rices.join("livery.json"), "{\"runtime\":true}").unwrap();
+        std::fs::write(rices.join("theme.json"), "{\"runtime\":true}").unwrap();
 
         let checkout = unique_tmp("declare-dirty-checkout");
         std::env::set_var("AOIDE_FLAKE_ROOT", &checkout);
         let folder = checkout.join("rices").join("dusk");
         std::fs::create_dir_all(&folder).unwrap();
-        std::fs::write(folder.join("livery.json"), "{\"committed\":true}").unwrap();
+        std::fs::write(folder.join("theme.json"), "{\"committed\":true}").unwrap();
         aoide_test_support::git_in(&checkout, &["init", "-q"]);
         aoide_test_support::git_in(&checkout, &["add", "-A"]);
         aoide_test_support::git_in(&checkout, &["commit", "-qm", "dusk"]);
-        std::fs::write(folder.join("livery.json"), "{\"hand-edit\":true}").unwrap();
+        std::fs::write(folder.join("theme.json"), "{\"hand-edit\":true}").unwrap();
 
         let out = handle_rice_declare(&inv(&["dusk"]));
         assert_eq!(out.status, crate::output::Status::Error, "{out:?}");
         let data = out.data.expect("a refusal carries data");
         assert_eq!(data["reason"], "dirty-folder");
         assert!(out.message.contains("rices/dusk"), "{}", out.message);
-        assert_eq!(std::fs::read_to_string(folder.join("livery.json")).unwrap(), "{\"hand-edit\":true}");
+        assert_eq!(std::fs::read_to_string(folder.join("theme.json")).unwrap(), "{\"hand-edit\":true}");
 
         let _ = std::fs::remove_dir_all(&stage_root);
         let _ = std::fs::remove_dir_all(&checkout);
@@ -353,7 +353,7 @@ mod tests {
         std::env::set_var("AOIDE_STAGE_DIR", stage_root.join("song").join("stage"));
         let rices = stage_root.join("song").join("rices").join("dusk");
         std::fs::create_dir_all(&rices).unwrap();
-        std::fs::write(rices.join("livery.json"), "{}").unwrap();
+        std::fs::write(rices.join("theme.json"), "{}").unwrap();
         let missing_checkout = unique_tmp("declare-nocheckout-missing");
         std::fs::remove_dir_all(&missing_checkout).unwrap(); // unique_tmp creates it; this test wants it ABSENT
         std::env::set_var("AOIDE_FLAKE_ROOT", &missing_checkout);
@@ -375,7 +375,7 @@ mod tests {
         std::env::set_var("AOIDE_STAGE_DIR", stage_root.join("song").join("stage"));
         let rices = stage_root.join("song").join("rices").join("dusk");
         std::fs::create_dir_all(&rices).unwrap();
-        std::fs::write(rices.join("livery.json"), "{}").unwrap();
+        std::fs::write(rices.join("theme.json"), "{}").unwrap();
         std::fs::write(rices.join("rice.nix"), "{ lib, config, ... }:\n{ config = { }; }\n").unwrap();
 
         let checkout = unique_tmp("declare-old-shape-checkout");
@@ -404,7 +404,7 @@ mod tests {
         std::env::set_var("AOIDE_STAGE_DIR", stage_root.join("song").join("stage"));
         let rices = stage_root.join("song").join("rices").join("dusk");
         std::fs::create_dir_all(&rices).unwrap();
-        std::fs::write(rices.join("livery.json"), "{}").unwrap();
+        std::fs::write(rices.join("theme.json"), "{}").unwrap();
         std::fs::write(rices.join("rice.nix"), "{\n  description = \"dusk\";\n  home = { members = [ \"strillix\" ]; };\n}\n").unwrap();
 
         let checkout = unique_tmp("declare-v1-body-checkout");
@@ -427,7 +427,7 @@ mod tests {
         std::env::set_var("AOIDE_STAGE_DIR", stage_root.join("song").join("stage"));
         let rices = stage_root.join("song").join("rices").join("dusk");
         std::fs::create_dir_all(rices.join("widgets")).unwrap();
-        std::fs::write(rices.join("livery.json"), "{\"a\":1}").unwrap();
+        std::fs::write(rices.join("theme.json"), "{\"a\":1}").unwrap();
         std::fs::write(rices.join("widgets").join(".gitkeep"), "").unwrap();
 
         let checkout = unique_tmp("declare-copy-checkout");
@@ -438,7 +438,7 @@ mod tests {
         assert_eq!(out.status, crate::output::Status::Ok, "{out:?}");
         assert!(out.gated, "rice.declare stays gated metadata");
         let dst = checkout.join("rices").join("dusk");
-        assert_eq!(std::fs::read_to_string(dst.join("livery.json")).unwrap(), "{\"a\":1}");
+        assert_eq!(std::fs::read_to_string(dst.join("theme.json")).unwrap(), "{\"a\":1}");
         assert!(dst.join("widgets").join(".gitkeep").exists());
         assert_eq!(out.changed.len(), 2);
 
@@ -465,9 +465,9 @@ mod tests {
         std::fs::create_dir_all(rices.join("drafts").join("neon")).unwrap();
         std::fs::create_dir_all(rices.join("widgets").join("history")).unwrap();
         std::fs::create_dir_all(rices.join("elements").join("x")).unwrap();
-        std::fs::write(rices.join("livery.json"), "{}").unwrap();
+        std::fs::write(rices.join("theme.json"), "{}").unwrap();
         std::fs::write(rices.join("history").join("head.json"), "{}").unwrap();
-        std::fs::write(rices.join("drafts").join("neon").join("livery.json"), "{}").unwrap();
+        std::fs::write(rices.join("drafts").join("neon").join("theme.json"), "{}").unwrap();
         std::fs::write(rices.join("widgets").join("history").join("Bar.qml"), "").unwrap();
         std::fs::write(rices.join("elements").join("x").join("element.json"), "{}").unwrap();
 
@@ -478,7 +478,7 @@ mod tests {
         let out = handle_rice_declare(&inv(&["dusk"]));
         assert_eq!(out.status, crate::output::Status::Ok, "{out:?}");
         let dst = checkout.join("rices").join("dusk");
-        assert!(dst.join("livery.json").exists());
+        assert!(dst.join("theme.json").exists());
         assert!(!dst.join("history").exists(), "history/ is the machine's undo history");
         assert!(!dst.join("drafts").exists(), "drafts/ is the machine's scratch");
         assert!(
@@ -504,7 +504,7 @@ mod tests {
         let elsewhere = stage_root.join("elsewhere");
         std::fs::create_dir_all(&rices).unwrap();
         std::fs::create_dir_all(&elsewhere).unwrap();
-        std::fs::write(rices.join("livery.json"), "{}").unwrap();
+        std::fs::write(rices.join("theme.json"), "{}").unwrap();
         std::fs::write(elsewhere.join("head.json"), "{}").unwrap();
         std::os::unix::fs::symlink(&elsewhere, rices.join("history")).unwrap();
 
@@ -515,7 +515,7 @@ mod tests {
         let out = handle_rice_declare(&inv(&["dusk"]));
         assert_eq!(out.status, crate::output::Status::Ok, "{out:?}");
         let dst = checkout.join("rices").join("dusk");
-        assert!(dst.join("livery.json").exists());
+        assert!(dst.join("theme.json").exists());
         assert!(
             std::fs::symlink_metadata(dst.join("history")).is_err(),
             "a takes symlink is skipped by name, never followed or copied"

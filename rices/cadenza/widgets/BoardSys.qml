@@ -19,7 +19,7 @@
 // while `board.hasJackUsage` is false. With it on: `tokens: null` and
 // `costUsd: null` mean UNKNOWN and draw `—`, never 0; `costPartial` draws
 // the figure orange with a `~`. ACCOUNT reads `state/usage.json` (real
-// today) through `livery.usagePath`; `[r]` asks the daemon to re-run the
+// today) through `theme.usagePath`; `[r]` asks the daemon to re-run the
 // poller (`bridge.refreshUsage`) — the file watch picks the answer up. Its
 // opt-in `ollama` block ({ok, monthly.utilization} or {ok:false, error})
 // adds one OLLAMA month gauge (the track clamps at 100%, the figure goes
@@ -400,7 +400,7 @@ Item {
                                   value: (cap.modelData.b.utilization || 0) / 100 })
                     }
                     Text {
-                        text: "  " + root.board.livery.usageResetIn(cap.modelData.b.resetsAt, root.board.nowMs)
+                        text: "  " + root.board.theme.usageResetIn(cap.modelData.b.resetsAt, root.board.nowMs)
                         color: root.kit.dim; font: root.kit.font; textFormat: Text.PlainText
                     }
                 }

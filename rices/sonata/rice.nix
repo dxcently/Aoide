@@ -2,7 +2,7 @@
 #
 # sonata is re-keyed to a GREEK register: a light MARBLE ground, plum/charcoal
 # ink kept dark (its own polarity — declared below beside the palette as
-# `aoide.livery.polarity = "light"`, so the ground is the song's and not the
+# `aoide.theme.polarity = "light"`, so the ground is the song's and not the
 # stylix lane's default), a deep
 # ATTIC-GOLD chrome accent, a TERRACOTTA urgent, and a true LAUREL leaf-green
 # one-hot trace — the single blaze the grammar reserves for the live/traced
@@ -14,8 +14,8 @@
 # (sonata's own grammar, a deliberate divergence from the default song's
 # Pantheon wireframe grammar).
 #
-# HOST-AGNOSTIC DISCIPLINE (CONTRACTS.md §5): a song sets ONLY aoide.livery.
-# All livery values are literal nix expressions (no song/ runtime reads).
+# HOST-AGNOSTIC DISCIPLINE (CONTRACTS.md §5): a song sets ONLY aoide.theme.
+# All theme values are literal nix expressions (no song/ runtime reads).
 {
   system = {
     providers = {
@@ -41,7 +41,7 @@
         # `_widgets/` is the widget-record shelf (lib/song.nix's header) — one
         # plain function per slot, rolled up and bound to owner "sonata" by
         # `_widgets/default.nix`. `composeSong` validates every record and folds
-        # them into `arrangement.widgets` (empty today: all 14 records leave `kind`
+        # them into `layout.widgets` (empty today: all 14 records leave `kind`
         # unset, so none is a declared registry entry — see each file for why).
         # Its OWN shelf, through the name-keyed door any other song would use:
         # `borrow` is the one place a shelf is opened (CONTRACTS.md §5).
@@ -49,28 +49,28 @@
       in
       {
         config = lib.mkDefault {
-          aoide.arrangement.widgets = (song.composeSong widgets).arrangement.widgets;
+          aoide.layout.widgets = (song.composeSong widgets).layout.widgets;
 
           # ── Expected paint — the three surfaces sonata keeps mapped ────────────
           # bar/wallpaper are one mapped layer surface PER enabled output (each is a
           # `Variants` delegate over Quickshell.screens in shell.qml); dock is a
           # single column, wherever it lands. These declare an EXPECTATION and
           # instantiate nothing: all three are shell-owned windows hardcoded in the
-          # shell — never `arrangement.widgets` entries, which would stand up a
+          # shell — never `layout.widgets` entries, which would stand up a
           # second copy of each.
           #
           # Declaration is for PERSISTENTLY mapped surfaces ONLY. Everything else in
           # this shell — launcher, osd, lockscreen, greeter, the `*Preview` surfaces,
           # and any declared flavor widget — is summoned on demand and must NOT be
           # declared, or a consumer would read a CLOSED surface as a lost one.
-          aoide.arrangement.surfaces = {
+          aoide.layout.surfaces = {
             bar.perMonitor = true; # aoide-bar — one bar per output (shell.qml Variants)
             wallpaper.perMonitor = true; # aoide-wallpaper — one per output (same)
             dock.perMonitor = false; # aoide-dock — one column, single
           };
 
           # ── Palette tier (base16 mapping — the Greek marble register) ───────────
-          aoide.livery.palette = {
+          aoide.theme.palette = {
             bg = "#f2ebde"; # pale warm marble ground            (base00)
             fg = "#2f2a33"; # plum-charcoal ink                  (base05)
             accent = "#a07414"; # deep Attic GOLD — the chrome accent (base0A)
@@ -90,7 +90,7 @@
           # `stylix.polarity` so every Stylix-managed target (GTK/Qt, terminal,
           # editors) reads it as one register. Baked only: no emitter carries it and
           # staging does not apply it, so flipping it is a rebuild, not a stage.
-          aoide.livery.polarity = "light";
+          aoide.theme.polarity = "light";
 
           # ── Base16 tier — the Greek marble palette ──────────────────────────────
           # Keyed region-by-region in the Greek key: a warm marble ramp (00–07, from
@@ -98,7 +98,7 @@
           # from a temple's materials — terracotta clay, clay-orange, Attic gold,
           # laurel green, bronze-verdigris, aegean blue, Tyrian/amethyst purple, and
           # a deep bronze. Slots follow the base16 standard.
-          aoide.livery.base16 = {
+          aoide.theme.base16 = {
             base00 = "#f2ebde"; # lightest bg — pale warm marble (sunlit stone)
             base01 = "#e8dfcc"; # lighter bg (status) — marble in soft shade
             base02 = "#dacdb2"; # selection — aged/weathered marble
@@ -120,12 +120,12 @@
           # ── Component tier (v0) ────────────────────────────────────────────────
           # null → fall back to palette; the key does the work (no hidden overrides
           # to undo before a transposition).
-          aoide.livery.bar = {
+          aoide.theme.bar = {
             bg = null;
             fg = null;
             accent = null;
           };
-          aoide.livery.notif = {
+          aoide.theme.notif = {
             bg = null;
             fg = null;
             urgent = null;
@@ -136,7 +136,7 @@
           # to base0C bronze-verdigris, a cool blue-teal that recedes without
           # vanishing into the ground. The window key stays a component-tier note
           # the song owns.
-          aoide.livery.window = {
+          aoide.theme.window = {
             border = "#a07414"; # base0A Attic gold — active (= palette.accent)
             borderInactive = "#3f867e"; # base0C bronze-verdigris — inactive (cool teal)
           };
@@ -149,7 +149,7 @@
           # Greek theme, not a photograph (khoa). The wallpaper switcher handles photos
           # live; the song's DEFAULT ground is a clean bright marble field, which keeps
           # the light-polarity contrast valid under the now-more-transparent bar.
-          aoide.livery.wallpaper = null;
+          aoide.theme.wallpaper = null;
         };
       };
   };

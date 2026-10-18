@@ -46,11 +46,11 @@ A catalogue at the centre and radial distance from it governing who may change w
 |---|---|---|
 | `modules/nucleus/` | upstream | The option contract and assertions every host carries. The daemon and the rest of the floor are dendrites in the `nucleus` aggregation; the secrets broker is one a host selects by name. |
 | `modules/dendrites/` | shipped + you | Opt-in lanes, one flat tree; new personal lanes are additive files — the paint lanes (strillix, quickshell, compositor, stylix, greeter) read only the namespaces root `AGENTS.md` house rule 5 enumerates. |
-| `rices/<song>/` | you (agent-written) | The performed half: a committed song — rice.nix, livery.json, palettes, widgets, design notes. Everything outside `song/` changes only on a lane the User ordered. |
+| `rices/<song>/` | you (agent-written) | The performed half: a committed song — rice.nix, theme.json, palettes, widgets, design notes. Everything outside `song/` changes only on a lane the User ordered. |
 
 Deeper reads:
 
-- [Full Architecture](docs/Aoide-Wiki/concepts/Full-Architecture.md) — the whole-body map: every subsystem, its inputs/outputs, where the frozen and performed halves meet at the livery seam.
+- [Full Architecture](docs/Aoide-Wiki/concepts/Full-Architecture.md) — the whole-body map: every subsystem, its inputs/outputs, where the frozen and performed halves meet at the theme seam.
 - [Codebase](docs/Aoide-Wiki/concepts/Codebase.md) — how the built repo actually works: the flake, the catalogue + constructor + overlay, the option contract, the systemd/service map, socket + stage-file contracts, real vs stubbed.
 - [Desktop Architecture](docs/Aoide-Wiki/concepts/desktop/Desktop-Architecture.md) — how `aoided`, `shellbridge`, Quickshell, and the compositor compose into one agent-ready desktop body.
 - [Package Layout](docs/Aoide-Wiki/concepts/Package-Layout.md) — the `pkgs/aoide` Rust crate split (protocol, storage, conduct, song, cli, …) and its phased migration.

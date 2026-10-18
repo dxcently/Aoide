@@ -544,7 +544,7 @@ mod tests {
         // What `rice stage dusk` leaves: the song, and dusk's own cover as a
         // DEFAULT.
         std::fs::write(
-            stage.join("livery.json"),
+            stage.join("theme.json"),
             r#"{"schemaVersion":"0","song":"dusk"}"#,
         )
         .unwrap();
@@ -582,7 +582,7 @@ mod tests {
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
 
         std::fs::write(
-            stage.join("livery.json"),
+            stage.join("theme.json"),
             r#"{"schemaVersion":"0","song":"moonlight"}"#,
         )
         .unwrap();
@@ -662,7 +662,7 @@ mod tests {
         let root = unique_tmp("cover-from-skwd-draft-noop");
         let stage = root.join("stage");
         std::fs::create_dir_all(&stage).unwrap();
-        std::fs::write(stage.join("livery.json"), VALID_NOTES).unwrap();
+        std::fs::write(stage.join("theme.json"), VALID_NOTES).unwrap();
         std::fs::write(stage.join("wallpaper-provider"), "skwd-wall\n").unwrap();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
         std::env::remove_var("AOIDE_SKWD_WALL_STANDIN");
@@ -729,7 +729,7 @@ mod tests {
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SKWD_WALL_STANDIN"]);
         let root = unique_tmp("cover-clear-from-skwd");
         let stage = root.join("stage");
-        stage_livery(&stage, Some("skwd-wall"));
+        stage_theme(&stage, Some("skwd-wall"));
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
         std::env::remove_var("AOIDE_SKWD_WALL_STANDIN");
 
@@ -765,7 +765,7 @@ mod tests {
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SKWD_WALL_STANDIN"]);
         let root = unique_tmp("cover-from-skwd-token");
         let stage = root.join("stage");
-        stage_livery(&stage, Some("skwd-wall"));
+        stage_theme(&stage, Some("skwd-wall"));
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
         std::env::remove_var("AOIDE_SKWD_WALL_STANDIN");
 
@@ -790,7 +790,7 @@ mod tests {
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SKWD_WALL_STANDIN"]);
         let root = unique_tmp("cover-from-skwd-locked");
         let stage = root.join("stage");
-        stage_livery(&stage, Some("skwd-wall"));
+        stage_theme(&stage, Some("skwd-wall"));
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
         std::env::remove_var("AOIDE_SKWD_WALL_STANDIN");
 
@@ -879,7 +879,7 @@ mod tests {
         let root = unique_tmp("cover-autotake-fires");
         let stage = root.join("stage");
         std::fs::create_dir_all(&stage).unwrap();
-        std::fs::write(stage.join("livery.json"), VALID_NOTES).unwrap();
+        std::fs::write(stage.join("theme.json"), VALID_NOTES).unwrap();
         let img = root.join("elsewhere.png");
         std::fs::write(&img, b"\x89PNG stub").unwrap();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
@@ -919,7 +919,7 @@ mod tests {
         let root = unique_tmp("cover-autotake-repeat");
         let stage = root.join("stage");
         std::fs::create_dir_all(&stage).unwrap();
-        std::fs::write(stage.join("livery.json"), VALID_NOTES).unwrap();
+        std::fs::write(stage.join("theme.json"), VALID_NOTES).unwrap();
         let img = root.join("elsewhere.png");
         std::fs::write(&img, b"\x89PNG stub").unwrap();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
@@ -964,14 +964,14 @@ mod tests {
         i
     }
 
-    /// `rice stage`'s livery for the staged song, plus — when `provider` is
+    /// `rice stage`'s theme for the staged song, plus — when `provider` is
     /// given — the provider name the `strillix` lane publishes beside it. Absent
     /// means the shell's own layer, which is what a host with no provider
     /// selected reports.
-    fn stage_livery(stage: &std::path::Path, provider: Option<&str>) {
+    fn stage_theme(stage: &std::path::Path, provider: Option<&str>) {
         std::fs::create_dir_all(stage).unwrap();
         std::fs::write(
-            stage.join("livery.json"),
+            stage.join("theme.json"),
             r#"{"schemaVersion":"0","song":"cadenza"}"#,
         )
         .unwrap();
@@ -992,7 +992,7 @@ mod tests {
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
         let root = unique_tmp("cover-scene-token");
         let stage = root.join("stage");
-        stage_livery(&stage, None);
+        stage_theme(&stage, None);
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
 
         let out = handle_cover_set(&inv(&["cover", "set"], &["we:123"]));
@@ -1020,7 +1020,7 @@ mod tests {
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
         let root = unique_tmp("cover-video-kind");
         let stage = root.join("stage");
-        stage_livery(&stage, None);
+        stage_theme(&stage, None);
         let clip = root.join("clip.mp4");
         std::fs::write(&clip, b"\x00\x00\x00\x18ftypmp42").unwrap();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
@@ -1045,7 +1045,7 @@ mod tests {
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
         let root = unique_tmp("cover-position-set");
         let stage = root.join("stage");
-        stage_livery(&stage, None);
+        stage_theme(&stage, None);
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
         let plain = root.join("plain.png");
         let brick = root.join("Brick_Tile.png");
@@ -1084,7 +1084,7 @@ mod tests {
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
         let root = unique_tmp("cover-position-refused");
         let stage = root.join("stage");
-        stage_livery(&stage, None);
+        stage_theme(&stage, None);
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
         let clip = root.join("loop_tile.mp4");
         std::fs::write(&clip, b"\x00\x00\x00\x18ftypmp42").unwrap();
@@ -1114,7 +1114,7 @@ mod tests {
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
         let root = unique_tmp("cover-position-declared");
         let stage = root.join("stage");
-        stage_livery(&stage, None);
+        stage_theme(&stage, None);
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
         aoide_storage::mode::save_mode_marker(&aoide_storage::mode::ModeMarker {
             mode: aoide_storage::mode::RiceMode::Staging,
@@ -1157,7 +1157,7 @@ mod tests {
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SKWD_WALL_STANDIN"]);
         let root = unique_tmp("cover-from-skwd");
         let stage = root.join("stage");
-        stage_livery(&stage, Some("skwd-wall"));
+        stage_theme(&stage, Some("skwd-wall"));
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
         std::env::remove_var("AOIDE_SKWD_WALL_STANDIN");
 
@@ -1193,7 +1193,7 @@ mod tests {
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SKWD_WALL_STANDIN"]);
         let root = unique_tmp("cover-from-skwd-shell");
         let stage = root.join("stage");
-        stage_livery(&stage, None);
+        stage_theme(&stage, None);
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
         std::env::remove_var("AOIDE_SKWD_WALL_STANDIN");
 
@@ -1209,7 +1209,7 @@ mod tests {
         assert!(!stage.join("cover.json").exists(), "nothing recorded");
 
         // …and the same with no song staged at all.
-        std::fs::remove_file(stage.join("livery.json")).unwrap();
+        std::fs::remove_file(stage.join("theme.json")).unwrap();
         let out = handle_cover_set(&set_inv(
             &["/tmp/library/a.png"],
             &[("from-skwd", "true"), ("kind", "static")],
@@ -1227,7 +1227,7 @@ mod tests {
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SKWD_WALL_STANDIN"]);
         let root = unique_tmp("cover-from-skwd-standin");
         let stage = root.join("stage");
-        stage_livery(&stage, Some("skwd-wall"));
+        stage_theme(&stage, Some("skwd-wall"));
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
         std::env::set_var("AOIDE_SKWD_WALL_STANDIN", "/nix/store/x-standin.png");
 
@@ -1252,7 +1252,7 @@ mod tests {
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SKWD_WALL_STANDIN"]);
         let root = unique_tmp("cover-from-skwd-noop");
         let stage = root.join("stage");
-        stage_livery(&stage, Some("skwd-wall"));
+        stage_theme(&stage, Some("skwd-wall"));
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
         std::env::remove_var("AOIDE_SKWD_WALL_STANDIN");
 

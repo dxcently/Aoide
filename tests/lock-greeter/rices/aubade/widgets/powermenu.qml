@@ -4,7 +4,7 @@ import QtQuick
 
 QtObject {
     id: body
-    property var livery
+    property var theme
     property var bridge
 
     function toggle() {}

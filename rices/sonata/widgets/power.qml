@@ -41,11 +41,11 @@ import Quickshell.Services.UPower
 // empty state: "AC — no battery" on a desktop, never a faked 100%. Sub-hues each
 // earn a job: charge fill = teal(wireCyan), link + detail = aegean(holoBlue),
 // low/offline = terracotta(paletteUrgent). Murex is the temple. Colour flows
-// from `livery` roles only; hard corners (radius 0) everywhere.
+// from `theme` roles only; hard corners (radius 0) everywhere.
 Item {
     id: gadget
 
-    required property var livery            // palette roles
+    required property var theme            // palette roles
     required property var bridge           // ShellBridge — WidgetSlot._songProps() always
                                             // passes this; unused today, declared per the
                                             // universal widget contract (slots.md)
@@ -60,7 +60,7 @@ Item {
     readonly property string faceMusic: "Noto Music"
 
     // this temple's signature accent — MUREX (Corinthian)
-    readonly property color signature: livery.violet
+    readonly property color signature: theme.violet
 
     readonly property int cells: 14
     readonly property real lowAt: 15
@@ -99,10 +99,10 @@ Item {
         return "discharging";
     }
     function battHue() {
-        if (!battAvail) return livery.holoBlue;      // aegean — steady mains
-        if (battLow) return livery.paletteUrgent;    // terracotta
-        if (battCharging || battFull) return livery.paletteAccent;   // gold
-        return livery.wireCyan;                      // teal — on its own reserves
+        if (!battAvail) return theme.holoBlue;      // aegean — steady mains
+        if (battLow) return theme.paletteUrgent;    // terracotta
+        if (battCharging || battFull) return theme.paletteAccent;   // gold
+        return theme.wireCyan;                      // teal — on its own reserves
     }
     function battTime() {
         if (!battDev || !battAvail) return "";
@@ -148,7 +148,7 @@ Item {
         return n ? "link" : "";
     }
     function netGlyph() { return gadget.netUp ? "𝅗𝅥" : "𝄽"; }   // sustained note vs rest
-    function netHue() { return gadget.netUp ? livery.holoBlue : livery.paletteUrgent; }
+    function netHue() { return gadget.netUp ? theme.holoBlue : theme.paletteUrgent; }
 
     // ── one mood face for the whole box ───────────────────────────────────────
     function kaomojiFor() {
@@ -169,15 +169,15 @@ Item {
         anchors.leftMargin: 4; anchors.topMargin: 5
         anchors.rightMargin: -4; anchors.bottomMargin: -5
         radius: 0
-        color: gadget.withA(livery.paletteFg, 0.22)
+        color: gadget.withA(theme.paletteFg, 0.22)
     }
 
     Rectangle {
         id: stele
         anchors.fill: parent
         radius: 0
-        color: livery.paletteBg
-        border.color: livery.paletteFg
+        color: theme.paletteBg
+        border.color: theme.paletteFg
         border.width: 2
 
         Rectangle {                                   // inset keyline — MUREX (Corinthian)
@@ -200,7 +200,7 @@ Item {
 
                 Rectangle {
                     anchors.fill: parent; anchors.bottomMargin: 5
-                    color: gadget.withA(livery.paletteFg, 0.05)
+                    color: gadget.withA(theme.paletteFg, 0.05)
                 }
                 Text {
                     id: clef
@@ -219,7 +219,7 @@ Item {
                     text: "POWER"
                     font.family: gadget.faceSerif; font.pixelSize: 19
                     font.weight: Font.DemiBold; font.letterSpacing: 4
-                    color: livery.paletteFg
+                    color: theme.paletteFg
                 }
                 Text {
                     anchors.right: parent.right
@@ -307,7 +307,7 @@ Item {
                     text: "└─┤ " + (gadget.battAvail ? gadget.battPct + "% batt" : "AC")
                           + " · " + (gadget.netUp ? gadget.netIface : "offline") + " ├"
                     font.family: gadget.faceMono; font.pixelSize: 11
-                    color: gadget.withA(livery.paletteFg, 0.8)
+                    color: gadget.withA(theme.paletteFg, 0.8)
                 }
                 Text {
                     id: ffCorner
@@ -323,7 +323,7 @@ Item {
                     anchors.verticalCenterOffset: -1
                     text: "𝄂"
                     font.family: gadget.faceMusic; font.pixelSize: 18
-                    color: livery.paletteAccent
+                    color: theme.paletteAccent
                 }
                 Rectangle {
                     anchors.left: ffL.right; anchors.right: ffBar.left
@@ -375,7 +375,7 @@ Item {
                                 text: "BATTERY"
                                 font.family: gadget.faceSerif; font.pixelSize: 15
                                 font.weight: Font.Medium; font.letterSpacing: 2
-                                color: livery.paletteFg
+                                color: theme.paletteFg
                             }
                             Text {
                                 anchors.baseline: battName.baseline
@@ -390,7 +390,7 @@ Item {
                             anchors.verticalCenter: battCap.verticalCenter
                             text: gadget.battAvail ? gadget.battPct + "%" : "AC"
                             font.family: gadget.faceMono; font.pixelSize: 15
-                            color: gadget.battLow ? livery.paletteUrgent : livery.paletteAccent
+                            color: gadget.battLow ? theme.paletteUrgent : theme.paletteAccent
                         }
 
                         // gauge (present) OR honest "no battery" line (absent)
@@ -406,7 +406,7 @@ Item {
                                 text: "AC — no battery present"
                                 font.family: gadget.faceSerif; font.italic: true
                                 font.pixelSize: 12
-                                color: gadget.withA(livery.holoBlue, 0.95)
+                                color: gadget.withA(theme.holoBlue, 0.95)
                             }
 
                             // the charge gauge — ASCII bar recast, teal fill
@@ -438,7 +438,7 @@ Item {
                                     text: gadget.barTrack()
                                     font.family: gadget.faceMono; font.pixelSize: 14
                                     fontSizeMode: Text.HorizontalFit
-                                    color: gadget.withA(livery.paletteFg, 0.22)
+                                    color: gadget.withA(theme.paletteFg, 0.22)
                                 }
                                 Text {                        // fill — teal / gold / terracotta
                                     anchors.fill: parent
@@ -446,9 +446,9 @@ Item {
                                     text: gadget.barFill(gadget.battPct)
                                     font.family: gadget.faceMono; font.pixelSize: 14
                                     fontSizeMode: Text.HorizontalFit
-                                    color: gadget.battLow ? livery.paletteUrgent
+                                    color: gadget.battLow ? theme.paletteUrgent
                                           : (gadget.battCharging || gadget.battFull)
-                                            ? livery.paletteAccent : livery.wireCyan
+                                            ? theme.paletteAccent : theme.wireCyan
                                 }
                             }
                         }
@@ -463,11 +463,11 @@ Item {
                         Rectangle {                          // laurel spine — a live link
                             anchors.left: parent.left; anchors.top: parent.top
                             anchors.bottom: parent.bottom
-                            width: 3; color: livery.paletteHot; visible: netRow.emph
+                            width: 3; color: theme.paletteHot; visible: netRow.emph
                         }
                         Rectangle {
                             anchors.fill: parent
-                            color: netRow.emph ? gadget.withA(livery.paletteHot, 0.08) : "transparent"
+                            color: netRow.emph ? gadget.withA(theme.paletteHot, 0.08) : "transparent"
                         }
 
                         Item {                                // sustained note / rest
@@ -480,7 +480,7 @@ Item {
                                 anchors.verticalCenterOffset: -2
                                 text: gadget.netGlyph()
                                 font.family: gadget.faceMusic; font.pixelSize: 24
-                                color: netRow.emph ? livery.paletteHot : gadget.netHue()
+                                color: netRow.emph ? theme.paletteHot : gadget.netHue()
                             }
                         }
 
@@ -495,14 +495,14 @@ Item {
                                 font.family: gadget.faceSerif; font.pixelSize: 15
                                 font.weight: netRow.emph ? Font.Bold : Font.Medium
                                 font.letterSpacing: 2
-                                color: livery.paletteFg
+                                color: theme.paletteFg
                             }
                             Text {
                                 anchors.baseline: netName.baseline
                                 text: gadget.netUp ? gadget.netKind() : "no route"
                                 font.family: gadget.faceSerif; font.italic: true
                                 font.pixelSize: 11
-                                color: netRow.emph ? livery.paletteHot : gadget.netHue()
+                                color: netRow.emph ? theme.paletteHot : gadget.netHue()
                             }
                         }
                         Text {                                // up / — in gold
@@ -510,7 +510,7 @@ Item {
                             anchors.verticalCenter: netCap.verticalCenter
                             text: gadget.netUp ? "up" : "—"
                             font.family: gadget.faceMono; font.pixelSize: 15
-                            color: gadget.netUp ? livery.paletteAccent : livery.paletteUrgent
+                            color: gadget.netUp ? theme.paletteAccent : theme.paletteUrgent
                         }
 
                         // link line — iface in mono, an aegean established-link bar
@@ -523,15 +523,15 @@ Item {
                                 anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter
                                 text: gadget.netUp ? ("⇅ " + gadget.netIface) : "⌀ link down"
                                 font.family: gadget.faceMono; font.pixelSize: 12
-                                color: gadget.netUp ? gadget.withA(livery.holoBlue, 0.95)
-                                                    : gadget.withA(livery.paletteUrgent, 0.9)
+                                color: gadget.netUp ? gadget.withA(theme.holoBlue, 0.95)
+                                                    : gadget.withA(theme.paletteUrgent, 0.9)
                             }
                             Text {                            // established-link ticks (aegean)
                                 anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
                                 visible: gadget.netUp
                                 text: "▰▰▰▰▰"
                                 font.family: gadget.faceMono; font.pixelSize: 12
-                                color: gadget.withA(livery.holoBlue, 0.85)
+                                color: gadget.withA(theme.holoBlue, 0.85)
                             }
                         }
                     }
@@ -551,14 +551,14 @@ Item {
                             text: gadget.kaomojiFor()
                             font.pixelSize: 11
                             color: gadget.withA(gadget.netUp && !gadget.battLow
-                                                ? livery.holoBlue : livery.paletteUrgent, 0.9)
+                                                ? theme.holoBlue : theme.paletteUrgent, 0.9)
                         }
                         Text {
                             anchors.right: parent.right; anchors.rightMargin: 12
                             anchors.bottom: parent.bottom
                             text: gadget.battAvail ? gadget.battTime() : "mains · steady"
                             font.family: gadget.faceMono; font.pixelSize: 10
-                            color: gadget.withA(livery.holoBlue, 0.95)
+                            color: gadget.withA(theme.holoBlue, 0.95)
                         }
                     }
                 }

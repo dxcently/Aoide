@@ -2,7 +2,7 @@
 
 // The RICE menu's rows, for every surface that offers them (the G3, the Start menu).
 // A surface paints rows and calls act(); it never decides what a row means.
-// `answer` is bridge.riceMenu's reply, `mode` is livery.riceMode.
+// `answer` is bridge.riceMenu's reply, `mode` is theme.riceMode.
 // A row: { label, mark ("✓" in force, "○" where staging returns, ""), live, kind, name, here }.
 
 function ready(answer) { return !!answer && answer.ok === true }
@@ -83,7 +83,7 @@ function declared(reply, host, file) {
     return { ok: true, title: "Declared", text: text }
 }
 
-// runs a row; true when the surface should show "…" until the livery's mode/song/draft changes (or 10 s pass);
+// runs a row; true when the surface should show "…" until the theme's mode/song/draft changes (or 10 s pass);
 // save and drop change none of those, so they never wait; declare asks first, so act never runs it
 function act(bridge, row) {
     if (!row.live || row.here || row.kind === "" || row.kind === "declare") return false

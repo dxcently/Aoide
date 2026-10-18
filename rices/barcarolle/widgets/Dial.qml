@@ -5,15 +5,15 @@ import "Kit.js" as Kit
 Item {
     id: dial
 
-    required property var livery
+    required property var theme
     property bool big: false
     property bool inverted: false
     property real value: -1
     property string label: ""
     property string readout: value < 0 ? "—" : Math.round(value) + "%"
 
-    readonly property var kit: Kit.make(dial.livery)
-    readonly property var b16: (dial.livery && dial.livery.raw && dial.livery.raw.base16) ? dial.livery.raw.base16 : ({})
+    readonly property var kit: Kit.make(dial.theme)
+    readonly property var b16: (dial.theme && dial.theme.raw && dial.theme.raw.base16) ? dial.theme.raw.base16 : ({})
     readonly property color bad: dial.b16.base08 ? dial.b16.base08 : "#f47a72"
 
     readonly property var g: dial.big

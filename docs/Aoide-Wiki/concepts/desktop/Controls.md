@@ -38,7 +38,7 @@ make it stick. The rebuild itself is the **user-gated** step — see
 Keybinds are host-invariant behaviour, so they live in
 `modules/dendrites/compositor/hyprland/behaviour.nix`, not the compositor's
 look (which owns only
-livery-derived appearance — gaps, borders, layerrules). `SUPER` is the
+theme-derived appearance — gaps, borders, layerrules). `SUPER` is the
 modifier.
 
 | Keybind | Action |

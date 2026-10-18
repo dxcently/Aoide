@@ -13,7 +13,7 @@
 #   * The declared song ships `widgets/greeter.qml` → greetd with a Quickshell
 #     greeter. greetd runs `cage` as its greeter user, and in it Quickshell on
 #     a store tree this file builds: the lane's `GreeterHost.qml` as the
-#     tree's `shell.qml`, `LiveryState`/`StagingEngine` beside it, the face's
+#     tree's `shell.qml`, `ThemeState`/`StagingEngine` beside it, the face's
 #     song folder from the shipped rices (`pkgs.strillix-rices`) with a
 #     `qmldir` naming its uppercase helpers as types (the face loads by a
 #     `qs:` URL, where a sibling file is no type otherwise — strillix's tree
@@ -23,7 +23,7 @@
 #     session too — its `cover/` folder at `rices/<owner>/cover`,
 #     with `stage/cover.json` naming the logon picture
 #     (`<owner>-logon.<ext>`) as the face's background when it ships one,
-#     the dress as `stage/livery.json`, and
+#     the dress as `stage/theme.json`, and
 #     `session.json`: the display manager's
 #     session wrapper (`services.displayManager.sessionData.wrapper`, the
 #     one ly runs — it sources the profile and evaluates the Exec line with
@@ -42,7 +42,7 @@
 #     greeter itself, never a desktop, and there is no `initial_session`.
 #   * Otherwise → `ly` on tty1, authenticating through PAM and launching the
 #     same registered session. Every colour — the animation's included — is
-#     an `aoide.livery` read; ly takes colours as 32-bit `0xSSRRGGBB` (a
+#     an `aoide.theme` read; ly takes colours as 32-bit `0xSSRRGGBB` (a
 #     styling byte ahead of the RGB: 00 plain, 01 bold) with `full_color` on
 #     by default, so the palette's own hex goes in unmapped. Box title and key
 #     hints stay at ly's defaults.
@@ -51,7 +51,7 @@
 # registers a real login for it.
 #
 # Filling the slot is the switch: a host that does not select it boots to the
-# tty it lands on. Reads the dress (`aoide.livery`), the song selection
+# tty it lands on. Reads the dress (`aoide.theme`), the song selection
 # (`aoide.rice`, `aoide.rices.greeter`), the session the display manager
 # registers (`services.displayManager.sessionData`, which ly reads too) and
 # the host's keyboard (`services.xserver.xkb`) — root AGENTS.md house rule 5.
@@ -67,7 +67,7 @@ let
   # rewrites colours equal to an overridden anchor's authored value, in one
   # pass, with no option-system recursion — the option itself stays inert
   # either way.
-  t = (import ../../lib/livery.nix { inherit lib; }).resolve config.aoide.livery;
+  t = (import ../../lib/theme.nix { inherit lib; }).resolve config.aoide.theme;
 
   lyPlain = hex: "0x00${lib.removePrefix "#" hex}";
   lyBold = hex: "0x01${lib.removePrefix "#" hex}";
@@ -76,10 +76,10 @@ let
 
   quickshellPkg = aoideInputs.quickshell.packages.${pkgs.stdenv.hostPlatform.system}.default;
 
-  # The dress as the shell reads it: the resolved livery without its override
-  # tier and without null tiers (LiveryState reads a present tier as set),
+  # The dress as the shell reads it: the resolved theme without its override
+  # tier and without null tiers (ThemeState reads a present tier as set),
   # stamped with the declared song so the staging engine resolves its face.
-  dress = pkgs.writeText "aoide-greeter-livery.json" (
+  dress = pkgs.writeText "aoide-greeter-theme.json" (
     builtins.toJSON (
       lib.filterAttrsRecursive (_: v: v != null) (removeAttrs t [ "override" ])
       // {
@@ -111,7 +111,7 @@ let
   tree = pkgs.runCommand "aoide-greeter-tree" { nativeBuildInputs = [ pkgs.jq ]; } ''
     q=$out/run/qml
     mkdir -p "$q/songs/${face.owner}" "$out/stage"
-    cp ${pkgs.strillix-shell}/share/strillix/qml/LiveryState.qml ${pkgs.strillix-shell}/share/strillix/qml/StagingEngine.qml "$q/"
+    cp ${pkgs.strillix-shell}/share/strillix/qml/ThemeState.qml ${pkgs.strillix-shell}/share/strillix/qml/StagingEngine.qml "$q/"
     cp ${pkgs.strillix-shell}/share/strillix/qml/GreeterHost.qml "$q/shell.qml"
     song=${pkgs.strillix-rices}/share/strillix/rices/${face.owner}
     cp -r "$song/widgets/." "$q/songs/${face.owner}/"
@@ -143,7 +143,7 @@ let
     fi
     cp ${manifest} "$q/songs/manifest.json"
     echo '{}' > "$q/songs/registry.json"
-    cp ${dress} "$out/stage/livery.json"
+    cp ${dress} "$out/stage/theme.json"
 
     pick=${sessions}/share/wayland-sessions/${defaultSession}.desktop
     test -f "$pick" || { echo "the default session ${defaultSession} is no registered Wayland session" >&2; exit 1; }

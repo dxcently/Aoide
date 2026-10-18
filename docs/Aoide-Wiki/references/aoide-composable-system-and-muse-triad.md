@@ -100,7 +100,7 @@ Dependency compatibility and activation support are separate checks. Required pa
 
 | Transition | Activation boundary |
 |---|---|
-| Quickshell livery changes | Watched values update QML bindings; hardcoded colors do not follow automatically |
+| Quickshell theme changes | Watched values update QML bindings; hardcoded colors do not follow automatically |
 | Widget body/composition changes | Supported component recreation and surface cleanup |
 | Compositor settings/bindings | Only supported commands or reload operations |
 | Application configuration | Supported runtime update, reload, or restart |
@@ -113,12 +113,12 @@ The wallpaper manager is independent of selected rice and picker widgets. rices/
 
 Verified current gaps, not claims of implemented target behavior:
 
-- Quickshell already watches staged livery and hotloads bound colors. Full dependency-checked configuration switching is additional work.
+- Quickshell already watches staged theme and hotloads bound colors. Full dependency-checked configuration switching is additional work.
 - Quickshell and strillix-rices package all songs; checkout staging can regenerate whole-rices metadata. Selected installation must apply consistently to every path.
 - composeSong returns package metadata, but installation hardcodes packages. Sibling validation and implicit Sonata fallback disagree.
 - Missing slots can fall back instead of staying absent. Fixed shell slots and dynamic surfaces have different instantiation paths.
-- Runtime registries are generated separately from host arrangement overrides; borrowing-composition staging misses modified borrowed owners.
-- Current drafts isolate livery/cover but share widget bodies. Declare recursively copies the runtime song tree, less its top-level `takes/` and `drafts/`, without promoting active draft values into Nix or removing obsolete destination files.
+- Runtime registries are generated separately from host layout overrides; borrowing-composition staging misses modified borrowed owners.
+- Current drafts isolate theme/cover but share widget bodies. Declare recursively copies the runtime song tree, less its top-level `takes/` and `drafts/`, without promoting active draft values into Nix or removing obsolete destination files.
 - Existing per-user deployment, source authority, reload outcome reporting, and core runtime-directory lifetime need explicit correction.
 
 ## Melete on an AoideOS server

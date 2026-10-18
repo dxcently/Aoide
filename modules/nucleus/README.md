@@ -15,10 +15,10 @@ aggregation is the part any host can.
 
 ## Named seams (what it exposes)
 
-- `options.nix` — the paint half of the option contract: `aoide.livery`,
-  `aoide.arrangement`, `aoide.surfaces` — the enumerated, closed set a paint
+- `options.nix` — the paint half of the option contract: `aoide.theme`,
+  `aoide.layout`, `aoide.surfaces` — the enumerated, closed set a paint
   lane is allowed to read (root `AGENTS.md` house rule 5). Versioned in
-  CONTRACTS.md (livery schema v0). The door and secrets settings are not declared
+  CONTRACTS.md (theme schema v0). The door and secrets settings are not declared
   here: each lives in the member dendrite that reads it. And it declares the ENABLE FACTS — the seam
   between this layer and the paint lanes (CONTRACTS.md §0):
   `aoide.quickshell.enable` (a shell surface exists here), `aoide.strillix.enable`
@@ -82,7 +82,7 @@ existence reaches the contract.
 ## How it composes
 
 Every dendrite reads its own options and stock ones; a paint dendrite reads
-`aoide.livery`/`aoide.arrangement`/`aoide.surfaces` from here and nothing else of
+`aoide.theme`/`aoide.layout`/`aoide.surfaces` from here and nothing else of
 the contract's internals. The contract reads back only options a lane SETS — an
 enable fact it declared itself (`aoide.quickshell.enable`, `aoide.strillix.enable`,
 …) or the core seam `aoide.sessionTarget` (`pkgs/aoide/module/options.nix`). In

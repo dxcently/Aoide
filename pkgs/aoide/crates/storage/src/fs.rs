@@ -245,8 +245,24 @@ pub fn migrate_root_once() -> std::io::Result<()> {
         }
     }
     migrate_rice_tree(&new_root.join("song"))?;
+    migrate_theme_files(&strillix_dir());
 
     migrate_node_state_names()
+}
+
+/// The pre-theme `livery.json` becomes `theme.json` in the stage and in every
+/// rice and draft under `<strillix>/rices`. Runs after the rice tree moved, so
+/// it reads the tree in its final place. No-clobber and idempotent, like every
+/// other piece here: a file already at its new name is left alone.
+fn migrate_theme_files(strillix: &std::path::Path) {
+    migrate_file(&stage_dir().join("livery.json"), &stage_dir().join("theme.json"));
+    for rice in std::fs::read_dir(strillix.join("rices")).into_iter().flatten().flatten() {
+        let dir = rice.path();
+        migrate_file(&dir.join("livery.json"), &dir.join("theme.json"));
+        for draft in std::fs::read_dir(dir.join("drafts")).into_iter().flatten().flatten() {
+            migrate_file(&draft.path().join("livery.json"), &draft.path().join("theme.json"));
+        }
+    }
 }
 
 /// The rice tree's move out of aoide's root (`$AOIDE_ROOT/song/` into
@@ -525,7 +541,7 @@ pub fn state_dir() -> std::path::PathBuf {
 /// (`docs/architecture/PACKAGE-LAYOUT.md`'s "Two binaries"), so conducting
 /// state has no business living under it. `stage_dir` itself is UNCHANGED
 /// and keeps meaning exactly what it always has — the rice/paint stage tree
-/// (`livery.json`, `mode.json`, and the draft-routing symlink target) — this
+/// (`theme.json`, `mode.json`, and the draft-routing symlink target) — this
 /// is a NEW, separate root, not a rename.
 ///
 /// **Precedence mirrors [`stage_dir`] exactly, on purpose:** `$AOIDE_STAGE_DIR`
@@ -841,7 +857,7 @@ fn resolve_song_templates_dir(
 }
 
 /// The shipped SCORE TEMPLATES dir (L-C3, strillix-carrier lane, task #107):
-/// `<templates>/<song>/livery.json` is what `rice compose --from <song>`
+/// `<templates>/<song>/theme.json` is what `rice compose --from <song>`
 /// (`strillix-rice`'s `commands::rice`) falls back to reading when
 /// [`rice_dir`] has nothing yet for that song — the ordinary case on a
 /// repo-less host, which has no `$AOIDE_FLAKE_ROOT` checkout to have
@@ -919,16 +935,16 @@ pub fn rices_root() -> std::path::PathBuf {
     strillix_dir().join("rices")
 }
 
-/// The committed-song notes file: `<song>/rices/<name>/livery.json`.
+/// The committed-song notes file: `<song>/rices/<name>/theme.json`.
 pub fn rice_notes(name: &str) -> std::path::PathBuf {
-    rice_dir(name).join("livery.json")
+    rice_dir(name).join("theme.json")
 }
 
-/// The DECLARED song's notes — the declared twin, `<song>/declared/livery.json`
+/// The DECLARED song's notes — the declared twin, `<song>/declared/theme.json`
 /// (CONTRACTS.md §4).
 ///
-/// Same content as the active song's committed `livery.json` with the venue's
-/// `aoide.livery.override` applied (a plain file, never a symlink), published
+/// Same content as the active song's committed `theme.json` with the venue's
+/// `aoide.theme.override` applied (a plain file, never a symlink), published
 /// by the strillix lane's activation seed — the file's own `"song"` field
 /// says WHICH song that was. Read for the declarative re-pin
 /// (`rice mode declarative`), which restores declared truth, and by
@@ -938,7 +954,7 @@ pub fn rice_notes(name: &str) -> std::path::PathBuf {
 /// to the committed rices for that song. Shares [`strillix_dir`]'s
 /// `AOIDE_STAGE_DIR`-relative resolution like every other song-tree path.
 pub fn declared_notes() -> std::path::PathBuf {
-    strillix_dir().join("declared").join("livery.json")
+    strillix_dir().join("declared").join("theme.json")
 }
 
 /// What `strillix rice refresh` last wrote into the machine's copy of built-in song
@@ -951,7 +967,7 @@ pub fn rice_record(name: &str) -> std::path::PathBuf {
 }
 
 /// The venue's recolour of the declared song — `<song>/declared/venue.json`
-/// (CONTRACTS.md §4): the slots `aoide.livery.override` changes, tier by tier,
+/// (CONTRACTS.md §4): the slots `aoide.theme.override` changes, tier by tier,
 /// published by the strillix lane's activation seed (`{}` when the host sets no
 /// override). Staging the declared song overlays it on the runtime rices's
 /// copy. Absent on a host that never activated the lane; readers then overlay
@@ -1028,7 +1044,7 @@ pub fn song_drafts_dir(song: &str) -> std::path::PathBuf {
 }
 
 /// One named draft's directory: `<song>/rices/<name>/drafts/<draft>/` —
-/// holds a snapshot of `stage/livery.json` (always) and `stage/cover.json`
+/// holds a snapshot of `stage/theme.json` (always) and `stage/cover.json`
 /// (when the stage had one) at the moment `rice draft save <draft>` was run.
 pub fn draft_dir(song: &str, draft: &str) -> std::path::PathBuf {
     song_drafts_dir(song).join(draft)
@@ -1042,8 +1058,8 @@ pub fn draft_dir(song: &str, draft: &str) -> std::path::PathBuf {
 /// POSIX `rename()` replaces whatever directory entry sits at its
 /// destination — it does NOT dereference a symlink there and write through
 /// it. Without this, the very first write after something pointed `path` at
-/// a symlink (rice draft mode's `stage/livery.json` → `rices/<song>/
-/// drafts/<name>/livery.json` routing) would silently REPLACE the symlink
+/// a symlink (rice draft mode's `stage/theme.json` → `rices/<song>/
+/// drafts/<name>/theme.json` routing) would silently REPLACE the symlink
 /// with a plain file, breaking the routing after one write. Resolving the
 /// link ourselves (`symlink_metadata` to detect it without following,
 /// `read_link` to read where it points, resolved against `path`'s parent
@@ -2475,7 +2491,7 @@ mod tests {
         assert_eq!(strillix_dir(), std::path::PathBuf::from(scratch("strillix-rice-test")));
         assert_eq!(
             rice_notes("moonlight"),
-            std::path::PathBuf::from(scratch("strillix-rice-test/rices/moonlight/livery.json"))
+            std::path::PathBuf::from(scratch("strillix-rice-test/rices/moonlight/theme.json"))
         );
 
         // With `AOIDE_STAGE_DIR` absent, the song tree composes off
@@ -2486,7 +2502,7 @@ mod tests {
         assert_eq!(strillix_dir(), std::path::PathBuf::from(scratch("strillix-rice-test-root")));
         assert_eq!(
             rice_notes("x"),
-            std::path::PathBuf::from(scratch("strillix-rice-test-root/rices/x/livery.json"))
+            std::path::PathBuf::from(scratch("strillix-rice-test-root/rices/x/theme.json"))
         );
 
         match saved {
@@ -3018,17 +3034,17 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn atomic_write_resolves_a_relative_symlink_target() {
-        // The exact shape `rice mode draft` creates: stage/livery.json (a
-        // relative symlink) → ../../rices/<song>/drafts/<name>/livery.json.
+        // The exact shape `rice mode draft` creates: stage/theme.json (a
+        // relative symlink) → ../../rices/<song>/drafts/<name>/theme.json.
         let dir = std::env::temp_dir().join(format!("aoide-atomic-symlink-rel-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let sub = dir.join("drafts").join("neon-night");
         std::fs::create_dir_all(&sub).unwrap();
         std::fs::create_dir_all(dir.join("stage")).unwrap();
-        let real = sub.join("livery.json");
+        let real = sub.join("theme.json");
         std::fs::write(&real, "seed").unwrap();
-        let link = dir.join("stage").join("livery.json");
-        std::os::unix::fs::symlink("../drafts/neon-night/livery.json", &link).unwrap();
+        let link = dir.join("stage").join("theme.json");
+        std::os::unix::fs::symlink("../drafts/neon-night/theme.json", &link).unwrap();
 
         atomic_write(&link, "routed").unwrap();
         assert!(std::fs::symlink_metadata(&link).unwrap().file_type().is_symlink());
@@ -4270,19 +4286,19 @@ mod tests {
         let new_dir = state_dir().join("stage");
         std::fs::create_dir_all(&old_dir).unwrap();
         std::fs::write(old_dir.join("sessions.json"), "core").unwrap();
-        std::fs::write(old_dir.join("livery.json"), "rice-palette").unwrap();
+        std::fs::write(old_dir.join("theme.json"), "rice-palette").unwrap();
         std::fs::write(old_dir.join("mode.json"), "rice-mode").unwrap();
 
         migrate_conducting_stage(&new_dir);
 
         assert!(!old_dir.join("sessions.json").exists(), "the core file must have moved");
         assert_eq!(
-            std::fs::read_to_string(old_dir.join("livery.json")).unwrap(),
+            std::fs::read_to_string(old_dir.join("theme.json")).unwrap(),
             "rice-palette",
             "rice files are never part of this migration"
         );
         assert_eq!(std::fs::read_to_string(old_dir.join("mode.json")).unwrap(), "rice-mode");
-        assert!(!new_dir.join("livery.json").exists());
+        assert!(!new_dir.join("theme.json").exists());
         assert!(!new_dir.join("mode.json").exists());
 
         let _ = std::fs::remove_dir_all(&home);
@@ -4400,7 +4416,7 @@ mod tests {
 
         let new_root = home.join(".aoide");
         assert_eq!(
-            std::fs::read_to_string(home.join(".strillix").join("stage").join("livery.json")).unwrap(),
+            std::fs::read_to_string(home.join(".strillix").join("stage").join("theme.json")).unwrap(),
             "rice-palette"
         );
         assert_eq!(
@@ -4584,18 +4600,18 @@ mod tests {
 
         let old_stage = home.join("Aoide").join("song").join("stage");
         std::fs::create_dir_all(&old_stage).unwrap();
-        std::fs::write(old_stage.join("livery.json"), "first-boot").unwrap();
+        std::fs::write(old_stage.join("theme.json"), "first-boot").unwrap();
 
         migrate_root_once().unwrap();
         let new_stage = home.join(".strillix").join("stage");
-        assert_eq!(std::fs::read_to_string(new_stage.join("livery.json")).unwrap(), "first-boot");
+        assert_eq!(std::fs::read_to_string(new_stage.join("theme.json")).unwrap(), "first-boot");
         assert!(!old_stage.exists());
 
         // Second call: nothing left at the old path — must run cleanly and
         // change nothing.
         migrate_root_once().unwrap();
         assert_eq!(
-            std::fs::read_to_string(new_stage.join("livery.json")).unwrap(),
+            std::fs::read_to_string(new_stage.join("theme.json")).unwrap(),
             "first-boot",
             "a second migration pass must be a pure no-op"
         );
@@ -4707,6 +4723,71 @@ mod tests {
         let _ = std::fs::remove_dir_all(&home);
     }
 
+    /// The pre-theme `livery.json` arrives as `theme.json` in the stage, in each
+    /// rice and in each draft. A second run changes nothing, and a `theme.json`
+    /// already in place is never overwritten by an old `livery.json` beside it.
+    #[test]
+    fn migrate_root_once_renames_each_livery_file_to_theme_once() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = MigrationEnvGuard::capture_and_clear();
+        let home = std::env::temp_dir().join(format!("aoide-migrate-theme-files-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        std::env::set_var("HOME", &home);
+
+        let old_song = home.join(".aoide").join("song");
+        std::fs::create_dir_all(old_song.join("stage")).unwrap();
+        std::fs::write(old_song.join("stage").join("livery.json"), "stage-palette").unwrap();
+        let old_rice = old_song.join("songbook").join("moonlight");
+        std::fs::create_dir_all(old_rice.join("drafts").join("d1")).unwrap();
+        std::fs::write(old_rice.join("livery.json"), "rice-palette").unwrap();
+        std::fs::write(old_rice.join("drafts").join("d1").join("livery.json"), "draft-palette").unwrap();
+        let strillix = home.join(".strillix");
+
+        migrate_root_once().unwrap();
+        migrate_root_once().unwrap();
+
+        let kept = strillix.join("rices").join("sonata");
+        std::fs::create_dir_all(&kept).unwrap();
+        std::fs::write(kept.join("theme.json"), "newer").unwrap();
+        std::fs::write(kept.join("livery.json"), "stale").unwrap();
+        migrate_theme_files(&strillix);
+
+        let new_rice = strillix.join("rices").join("moonlight");
+        assert_eq!(std::fs::read_to_string(strillix.join("stage").join("theme.json")).unwrap(), "stage-palette");
+        assert_eq!(std::fs::read_to_string(new_rice.join("theme.json")).unwrap(), "rice-palette");
+        assert_eq!(std::fs::read_to_string(new_rice.join("drafts").join("d1").join("theme.json")).unwrap(), "draft-palette");
+        assert!(!new_rice.join("livery.json").exists(), "the old rice file must have moved");
+        assert!(!strillix.join("stage").join("livery.json").exists(), "the old stage file must have moved");
+        assert_eq!(std::fs::read_to_string(kept.join("theme.json")).unwrap(), "newer", "a theme.json in place is never clobbered");
+        assert_eq!(std::fs::read_to_string(kept.join("livery.json")).unwrap(), "stale", "the file beside it is left, not moved over it");
+
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    /// A rice file whose directory refuses the rename keeps its old name and
+    /// the migration carries on, so the old file is never lost.
+    #[cfg(unix)]
+    #[test]
+    fn migrate_theme_files_keeps_the_old_file_when_its_directory_is_read_only() {
+        use std::os::unix::fs::PermissionsExt;
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = MigrationEnvGuard::capture_and_clear();
+        let home = std::env::temp_dir().join(format!("aoide-migrate-theme-readonly-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        std::env::set_var("HOME", &home);
+        let rice = home.join(".strillix").join("rices").join("locked");
+        std::fs::create_dir_all(&rice).unwrap();
+        std::fs::write(rice.join("livery.json"), "palette").unwrap();
+        std::fs::set_permissions(&rice, std::fs::Permissions::from_mode(0o500)).unwrap();
+
+        migrate_theme_files(&home.join(".strillix"));
+
+        std::fs::set_permissions(&rice, std::fs::Permissions::from_mode(0o700)).unwrap();
+        assert_eq!(std::fs::read_to_string(rice.join("livery.json")).unwrap(), "palette", "the old file survives a refused rename");
+        assert!(!rice.join("theme.json").exists());
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
     #[test]
     fn migrate_root_once_never_clobbers_a_newer_rice_at_the_new_path() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
@@ -4750,14 +4831,14 @@ mod tests {
         // place: the newer one wins and is never replaced. The stale tree
         // still walks the chain one step (`~/Aoide` -> `~/.aoide/song`) and
         // parks there, because its last hop would clobber.
-        std::fs::write(old_stage.join("livery.json"), "stale").unwrap();
-        std::fs::write(new_stage.join("livery.json"), "fresh").unwrap();
+        std::fs::write(old_stage.join("theme.json"), "stale").unwrap();
+        std::fs::write(new_stage.join("theme.json"), "fresh").unwrap();
 
         migrate_root_once().unwrap();
 
-        assert_eq!(std::fs::read_to_string(new_stage.join("livery.json")).unwrap(), "fresh");
+        assert_eq!(std::fs::read_to_string(new_stage.join("theme.json")).unwrap(), "fresh");
         assert_eq!(
-            std::fs::read_to_string(home.join(".aoide").join("song").join("stage").join("livery.json")).unwrap(),
+            std::fs::read_to_string(home.join(".aoide").join("song").join("stage").join("theme.json")).unwrap(),
             "stale"
         );
 
@@ -4781,14 +4862,14 @@ mod tests {
         let old_stage = home.join("Aoide").join("song").join("stage");
         let old_state = home.join("Aoide").join("state");
         std::fs::create_dir_all(&old_stage).unwrap();
-        std::fs::write(old_stage.join("livery.json"), "untouched").unwrap();
+        std::fs::write(old_stage.join("theme.json"), "untouched").unwrap();
         std::fs::create_dir_all(&old_state).unwrap();
         std::fs::write(old_state.join("usage.json"), "moves").unwrap();
 
         migrate_root_once().unwrap();
 
         assert_eq!(
-            std::fs::read_to_string(old_stage.join("livery.json")).unwrap(),
+            std::fs::read_to_string(old_stage.join("theme.json")).unwrap(),
             "untouched",
             "AOIDE_STAGE_DIR override must keep the old song/stage tree in place"
         );
@@ -4827,12 +4908,12 @@ mod tests {
 
         let old_stage = home.join("Aoide").join("song").join("stage");
         std::fs::create_dir_all(&old_stage).unwrap();
-        std::fs::write(old_stage.join("livery.json"), "custom-root-bound").unwrap();
+        std::fs::write(old_stage.join("theme.json"), "custom-root-bound").unwrap();
 
         migrate_root_once().unwrap();
 
         assert_eq!(
-            std::fs::read_to_string(custom_root.join("stage").join("livery.json")).unwrap(),
+            std::fs::read_to_string(custom_root.join("stage").join("theme.json")).unwrap(),
             "custom-root-bound",
             "the pre-L-C2 tree walks through the CUSTOM AOIDE_ROOT and lands in the rice root"
         );

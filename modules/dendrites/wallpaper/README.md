@@ -36,7 +36,7 @@ each declares `aoide.surfaces.wallpaper` and writes its own
   the CLI, the QML and the stage file already speak.
 - **`strillix.nix` — the shell's own layer.** Configures nothing: the
   `aoide-wallpaper` layer is the strillix runtime's, and this provider is the
-  NAME of that arrangement. Its fact value is also the option's default, so a
+  NAME of that layout. Its fact value is also the option's default, so a
   host with no provider selected at all behaves exactly as it always did.
 - **`skwd-wall.nix` — the external engine.** The picker, the control daemon and
   the paper renderer from the flake input (`flake.nix`), one `skwd-walld` user

@@ -112,7 +112,7 @@ pub fn parse_scene_token(arg: &str) -> Option<&str> {
 }
 
 /// The stem of a song's own desktop picture, inside its `cover/` folder:
-/// `cover/<name>-desktop.<ext>`. The declared `aoide.livery.wallpaper` names
+/// `cover/<name>-desktop.<ext>`. The declared `aoide.theme.wallpaper` names
 /// the same file at build time, so the seed and a staged rice agree on it.
 pub const DESKTOP_COVER_STEM: &str = "desktop";
 

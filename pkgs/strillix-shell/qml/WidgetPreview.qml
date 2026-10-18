@@ -31,8 +31,8 @@
 // beside this file and tinted from the chrome — no network, no icon font.
 //
 // ── Isolation: one env var, no socket ──────────────────────────────────────
-// Every read a widget performs is already rooted at $AOIDE_ROOT — LiveryState
-// (stage/livery.json), conductor.qml (state/stage/ via its own stageDir),
+// Every read a widget performs is already rooted at $AOIDE_ROOT — ThemeState
+// (stage/theme.json), conductor.qml (state/stage/ via its own stageDir),
 // terminals.qml (`stagePath`), SessionMenu (AOIDE_STATE_DIR), StagingEngine
 // (run/qml/songs/manifest.json) — so pointing AOIDE_ROOT at a fixture root
 // isolates every read with nothing else to configure. `QS_STAGE` must be
@@ -41,7 +41,7 @@
 // ShellBridge and opens no socket. Every action a widget fires lands in the
 // stub bridge below, which only appends to the on-screen log. Nothing here
 // can send, kill, focus or recheck a real session. The ONE process this
-// canvas ever starts is `strillix preview set` (fixture/livery, below) — file
+// canvas ever starts is `strillix preview set` (fixture/theme, below) — file
 // copies into the preview root, which is the shell's job, not QML's.
 //
 // ── Empirical answers this file is built on (Quickshell 0.3.1 / Qt 6.11, probed) ─
@@ -64,7 +64,7 @@
 //  · An INLINE component ("component RailButton: Rectangle { … }") CAN read
 //    the enclosing root's ids and properties — probed, contrary to what the
 //    inline-component scope warning suggests. That is what lets every rail
-//    control read the livery-derived chrome tokens directly instead of having
+//    control read the theme-derived chrome tokens directly instead of having
 //    them re-passed at thirty call sites.
 //  · Quickshell 0.3.1 does NOT reload when a file loaded through
 //    `Qt.createComponent` changes on disk — not by default, and not with
@@ -86,9 +86,9 @@
 //
 // Song-blind (slots.md's paint test): this file names no aesthetic
 // decision of its own. It has no palette — it MIXES one out of whatever
-// LiveryState is holding (see "Chrome, mixed out of the livery" below), so
+// ThemeState is holding (see "Chrome, mixed out of the theme" below), so
 // the instrument panel is dressed by the song being previewed rather than
-// by a taste this file asserts. Reading `livery.paletteFg` is picking up an
+// by a taste this file asserts. Reading `theme.paletteFg` is picking up an
 // API; deciding what a gauge looks like is not, and nothing here does that.
 import QtQuick
 import QtQuick.Effects
@@ -124,16 +124,16 @@ ShellRoot {
     property real camY: 0
     property bool handHeld: false       // Space held (or the hand button): left-drag pans
     property bool camDragging: false
-    property string background: "livery"  // livery | checker
+    property string background: "theme"  // theme | checker
     property string fixture: ""
     property string fixturesDir: ""
     property var fixtures: []
-    // `liverySource` is the SPEC last applied, not a resolved file: `live`, a
-    // song name, a livery.json path, or a base16 scheme file. `strillix preview
-    // set --livery <spec>` resolves every form into ROOT/stage/livery.json
-    // and LiveryState hot-reloads it, so a palette swap needs no reload here.
-    property string liverySource: ""
-    property var liveries: []
+    // `themeSource` is the SPEC last applied, not a resolved file: `live`, a
+    // song name, a theme.json path, or a base16 scheme file. `strillix preview
+    // set --theme <spec>` resolves every form into ROOT/stage/theme.json
+    // and ThemeState hot-reloads it, so a palette swap needs no reload here.
+    property string themeSource: ""
+    property var themes: []
     // Auto-reload: the absolute paths whose edit should rebuild the config
     // (`strillix preview` writes the loaded widget plus its song's widgets dir),
     // and the toggle that gates it.
@@ -186,9 +186,9 @@ ShellRoot {
     }
 
     // ── Injected props ─────────────────────────────────────────────────────
-    // REAL LiveryState and StagingEngine (both read under AOIDE_ROOT, so both
+    // REAL ThemeState and StagingEngine (both read under AOIDE_ROOT, so both
     // land in the preview root); STUB bridge and shared.
-    property LiveryState liveryState: LiveryState {}
+    property ThemeState themeState: ThemeState {}
     property StagingEngine stagingEngineReal: StagingEngine {}
 
     property QtObject sharedStub: QtObject {
@@ -250,7 +250,7 @@ ShellRoot {
         // The menu's read — same signature and callback contract as
         // ShellBridge.riceMenu, answered ASYNCHRONOUSLY (Qt.callLater, for
         // the same reason sessionAction is) so the menu's pending state
-        // renders. The mode is the canvas livery's own and the rice set is the
+        // renders. The mode is the canvas theme's own and the rice set is the
         // canvas song alone; the control file's `drafts` key replaces the one
         // canned draft, so a canvas run can pin an empty list or a long one,
         // and its `hostConfig` key the canned host file a late balloon names.
@@ -259,7 +259,7 @@ ShellRoot {
             if (!callback) return
             Qt.callLater(function () {
                 callback({ ok: true, stub: true,
-                           mode: canvas.liveryState.riceMode,
+                           mode: canvas.themeState.riceMode,
                            song: canvas.songName,
                            draft: null,
                            stagingSong: canvas.songName,
@@ -424,11 +424,11 @@ ShellRoot {
         if (doc.fixture !== undefined) canvas.fixture = "" + doc.fixture
         if (doc.fixturesDir !== undefined) canvas.fixturesDir = "" + doc.fixturesDir
         if (doc.fixtures !== undefined && doc.fixtures instanceof Array) canvas.fixtures = doc.fixtures
-        // `livery` is the v0 spelling; `liverySource` supersedes it (one name
+        // `theme` is the v0 spelling; `themeSource` supersedes it (one name
         // per thing) and is what gets written back.
-        if (doc.liverySource !== undefined) canvas.liverySource = "" + doc.liverySource
-        else if (doc.livery !== undefined) canvas.liverySource = "" + doc.livery
-        if (doc.liveries !== undefined && doc.liveries instanceof Array) canvas.liveries = doc.liveries
+        if (doc.themeSource !== undefined) canvas.themeSource = "" + doc.themeSource
+        else if (doc.theme !== undefined) canvas.themeSource = "" + doc.theme
+        if (doc.themes !== undefined && doc.themes instanceof Array) canvas.themes = doc.themes
         if (doc.watch !== undefined && doc.watch instanceof Array) canvas.watchPaths = doc.watch
         if (doc.stage !== undefined && doc.stage !== null && typeof doc.stage === "object") canvas.stageMap = doc.stage
         if (doc.autoReload !== undefined) canvas.autoReload = !!doc.autoReload
@@ -484,9 +484,9 @@ ShellRoot {
         doc.fixture = canvas.fixture
         doc.fixturesDir = canvas.fixturesDir
         doc.fixtures = canvas.fixtures
-        delete doc.livery
-        doc.liverySource = canvas.liverySource
-        doc.liveries = canvas.liveries
+        delete doc.theme
+        doc.themeSource = canvas.themeSource
+        doc.themes = canvas.themes
         doc.watch = canvas.watchPaths
         doc.stage = canvas.stageMap
         doc.autoReload = canvas.autoReload
@@ -512,19 +512,19 @@ ShellRoot {
     onAutoReloadChanged: canvas.scheduleWrite()
 
     // ── Existence probes ───────────────────────────────────────────────────
-    // LiveryState and the widgets' own FileViews fall back SILENTLY when a
+    // ThemeState and the widgets' own FileViews fall back SILENTLY when a
     // file is missing (a default palette, an empty roster) — indistinguishable
     // on screen from a genuinely empty fixture. These watch the same paths
     // only to say so in the error pane.
-    property FileView liveryProbe: FileView {
-        id: liveryProbe
-        path: canvas.aoideRoot + "/stage/livery.json"
+    property FileView themeProbe: FileView {
+        id: themeProbe
+        path: canvas.aoideRoot + "/stage/theme.json"
         watchChanges: true
         printErrors: false
-        onFileChanged: liveryProbe.reload()
-        onLoaded: canvas.clearFileError("livery.json")
-        onLoadFailed: function (err) { canvas.setFileError("livery.json", liveryProbe.path, err) }
-        Component.onCompleted: liveryProbe.reload()
+        onFileChanged: themeProbe.reload()
+        onLoaded: canvas.clearFileError("theme.json")
+        onLoadFailed: function (err) { canvas.setFileError("theme.json", themeProbe.path, err) }
+        Component.onCompleted: themeProbe.reload()
     }
     // The four conducting files a fixture set must carry, one probe each.
     property Instantiator stageProbes: Instantiator {
@@ -564,7 +564,7 @@ ShellRoot {
     }
 
     // ── The one shell seam ─────────────────────────────────────────────────
-    // Fixture and livery are FILE COPIES into the preview root, which is the
+    // Fixture and theme are FILE COPIES into the preview root, which is the
     // shell's job. `strillix preview set` does the copy AND rewrites preview.json;
     // the control FileView's watch brings the new state back here, so the
     // canvas never writes those two fields itself. Resolved via `strillixBin`
@@ -742,7 +742,7 @@ ShellRoot {
     // system, and this canvas starts exactly one process.
     function widgetProps() {
         return {
-            "livery": canvas.liveryState,
+            "theme": canvas.themeState,
             "bridge": canvas.bridgeStub,
             "shared": canvas.sharedStub,
             "stagingEngine": canvas.stagingEngineReal,
@@ -1291,14 +1291,14 @@ ShellRoot {
         vwField.setText("" + canvas.viewportWidth)
         vhField.setText("" + canvas.viewportHeight)
         zoomField.setText(canvas.zoomSetting === "fit" ? "fit" : ("" + canvas.zoomSetting))
-        liveryField.setText(canvas.liverySource)
+        themeField.setText(canvas.themeSource)
     }
 
-    // ── Chrome, mixed out of the livery ────────────────────────────────────
+    // ── Chrome, mixed out of the theme ────────────────────────────────────
     // The canvas wears the palette it is previewing. Every colour below is a
     // MIX of `paletteBg` and `paletteFg` (or the accent/urgent roles verbatim),
-    // never a fixed hex — so the rail tracks a light livery (sonata) and a dark
-    // one with no branch and no theme table, and a livery whose own
+    // never a fixed hex — so the rail tracks a light theme (sonata) and a dark
+    // one with no branch and no theme table, and a theme whose own
     // contrast is broken is visibly broken in the instrument panel too, with
     // nowhere to hide. The ONLY literals left in this file are the
     // checkerboard's two neutral greys, which exist precisely to be
@@ -1314,38 +1314,38 @@ ShellRoot {
     }
     // Readable ink for a swatch: whichever of the palette's own two poles sits
     // further from it in luminance. Keeps a hex label legible on base00 and on
-    // base07 alike without inventing a colour the livery does not contain.
+    // base07 alike without inventing a colour the theme does not contain.
     function inkOn(c) {
-        var f = canvas.liveryState.paletteFg, b = canvas.liveryState.paletteBg
+        var f = canvas.themeState.paletteFg, b = canvas.themeState.paletteBg
         return (Math.abs(canvas.lum(c) - canvas.lum(f)) >= Math.abs(canvas.lum(c) - canvas.lum(b))) ? f : b
     }
 
-    readonly property color chromeBg: canvas.mix(canvas.liveryState.paletteBg, canvas.liveryState.paletteFg, 0.04)
-    readonly property color chromePanel: canvas.mix(canvas.liveryState.paletteBg, canvas.liveryState.paletteFg, 0.10)
-    readonly property color chromeSunk: canvas.mix(canvas.liveryState.paletteBg, canvas.liveryState.paletteFg, 0.17)
-    readonly property color chromeBtn: canvas.mix(canvas.liveryState.paletteBg, canvas.liveryState.paletteFg, 0.14)
-    readonly property color chromeHover: canvas.mix(canvas.liveryState.paletteBg, canvas.liveryState.paletteFg, 0.22)
-    readonly property color chromeLine: canvas.mix(canvas.liveryState.paletteBg, canvas.liveryState.paletteFg, 0.30)
-    readonly property color chromeText: canvas.liveryState.paletteFg
-    readonly property color chromeDim: canvas.mix(canvas.liveryState.paletteFg, canvas.liveryState.paletteBg, 0.42)
-    readonly property color chromeSel: canvas.liveryState.paletteAccent
-    readonly property color chromeErr: canvas.liveryState.paletteUrgent
+    readonly property color chromeBg: canvas.mix(canvas.themeState.paletteBg, canvas.themeState.paletteFg, 0.04)
+    readonly property color chromePanel: canvas.mix(canvas.themeState.paletteBg, canvas.themeState.paletteFg, 0.10)
+    readonly property color chromeSunk: canvas.mix(canvas.themeState.paletteBg, canvas.themeState.paletteFg, 0.17)
+    readonly property color chromeBtn: canvas.mix(canvas.themeState.paletteBg, canvas.themeState.paletteFg, 0.14)
+    readonly property color chromeHover: canvas.mix(canvas.themeState.paletteBg, canvas.themeState.paletteFg, 0.22)
+    readonly property color chromeLine: canvas.mix(canvas.themeState.paletteBg, canvas.themeState.paletteFg, 0.30)
+    readonly property color chromeText: canvas.themeState.paletteFg
+    readonly property color chromeDim: canvas.mix(canvas.themeState.paletteFg, canvas.themeState.paletteBg, 0.42)
+    readonly property color chromeSel: canvas.themeState.paletteAccent
+    readonly property color chromeErr: canvas.themeState.paletteUrgent
 
     // ── Palette read-out ───────────────────────────────────────────────────
     // The five palette ROLES every widget binds to, and the sixteen base16
-    // slots underneath them. base16 is an OPTIONAL tier in the livery schema
-    // (LiveryState falls back to the accent for every one of them when the
+    // slots underneath them. base16 is an OPTIONAL tier in the theme schema
+    // (ThemeState falls back to the accent for every one of them when the
     // block is absent), so the strip is empty rather than fabricated when a
-    // livery carries no scheme — the rail says so in words.
+    // theme carries no scheme — the rail says so in words.
     readonly property var roleSwatches: [
-        { "name": "bg", "value": canvas.liveryState.paletteBg },
-        { "name": "fg", "value": canvas.liveryState.paletteFg },
-        { "name": "accent", "value": canvas.liveryState.paletteAccent },
-        { "name": "urgent", "value": canvas.liveryState.paletteUrgent },
-        { "name": "hot", "value": canvas.liveryState.paletteHot }
+        { "name": "bg", "value": canvas.themeState.paletteBg },
+        { "name": "fg", "value": canvas.themeState.paletteFg },
+        { "name": "accent", "value": canvas.themeState.paletteAccent },
+        { "name": "urgent", "value": canvas.themeState.paletteUrgent },
+        { "name": "hot", "value": canvas.themeState.paletteHot }
     ]
     readonly property var base16Swatches: {
-        var raw = canvas.liveryState.raw
+        var raw = canvas.themeState.raw
         var b = (raw && raw.base16) ? raw.base16 : null
         if (!b) return []
         var digits = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "A", "B", "C", "D", "E", "F"]
@@ -1545,7 +1545,7 @@ ShellRoot {
     // One annotation drawn on the overlay, in the widget's own coordinates:
     // the rect as stored (highlight/rect), an ellipse, a line, an arrow whose
     // head follows the SIGN of the stored w/h, or a dot for a bare note —
-    // always the livery accent, at 40% once the note is done, numbered so the
+    // always the theme accent, at 40% once the note is done, numbered so the
     // screen and `strillix preview notes` name the same thing. A highlight whose
     // element no longer resolves is not drawn; the rail says "(unresolved)".
     component NoteMark: Item {
@@ -1822,7 +1822,7 @@ ShellRoot {
                     }
                     Text {
                         width: railColumn.width
-                        text: "livery song: " + (canvas.liveryState.songName === "" ? "(none)" : canvas.liveryState.songName)
+                        text: "theme song: " + (canvas.themeState.songName === "" ? "(none)" : canvas.themeState.songName)
                              + " — slots inside the widget resolve off THAT, not this field"
                         color: canvas.chromeDim
                         font.pixelSize: 9
@@ -1964,11 +1964,11 @@ ShellRoot {
                     RailLabel { text: "background" }
                     Row {
                         spacing: 4
-                        RailButton { label: "livery"; active: canvas.background === "livery"; onClicked: canvas.background = "livery" }
+                        RailButton { label: "theme"; active: canvas.background === "theme"; onClicked: canvas.background = "theme" }
                         RailButton { label: "checker"; active: canvas.background === "checker"; onClicked: canvas.background = "checker" }
                     }
 
-                    // 8 ── fixture + livery (the shell seam) ───────────────
+                    // 8 ── fixture + theme (the shell seam) ───────────────
                     RailLabel { text: "fixture  (strillix preview set)" }
                     Flow {
                         width: railColumn.width
@@ -1992,46 +1992,46 @@ ShellRoot {
                         font.family: "monospace"
                     }
                     // 9 ── palette (the same shell seam) ───────────────────
-                    // A palette spec is a FILE RESOLUTION (song livery, live
+                    // A palette spec is a FILE RESOLUTION (song theme, live
                     // stage, a base16 scheme), so it goes the same way the
-                    // fixture does: one `strillix preview set --livery <spec>`, and
-                    // LiveryState's own watch on ROOT/stage/livery.json
+                    // fixture does: one `strillix preview set --theme <spec>`, and
+                    // ThemeState's own watch on ROOT/stage/theme.json
                     // recolours the widget AND this rail in place. No reload,
                     // and no palette parsing in QML.
-                    RailLabel { text: "palette  (strillix preview set --livery)" }
+                    RailLabel { text: "palette  (strillix preview set --theme)" }
                     Flow {
                         width: railColumn.width
                         spacing: 4
                         RailButton {
                             label: "live"
-                            active: canvas.liverySource === "live"
-                            onClicked: canvas.previewSet(["--livery", "live"], "--livery live")
+                            active: canvas.themeSource === "live"
+                            onClicked: canvas.previewSet(["--theme", "live"], "--theme live")
                         }
                         Repeater {
-                            model: canvas.liveries
+                            model: canvas.themes
                             RailButton {
                                 required property string modelData
                                 label: modelData
-                                active: canvas.liverySource === modelData
-                                onClicked: canvas.previewSet(["--livery", modelData], "--livery " + modelData)
+                                active: canvas.themeSource === modelData
+                                onClicked: canvas.previewSet(["--theme", modelData], "--theme " + modelData)
                             }
                         }
                     }
                     RailInput {
-                        id: liveryField
+                        id: themeField
                         width: railColumn.width
-                        value: canvas.liverySource
-                        placeholder: "song name, /abs/livery.json, base16.yaml"
+                        value: canvas.themeSource
+                        placeholder: "song name, /abs/theme.json, base16.yaml"
                         onCommitted: function (text) {
-                            if (text.trim().length > 0) canvas.previewSet(["--livery", text.trim()], "--livery " + text.trim())
+                            if (text.trim().length > 0) canvas.previewSet(["--theme", text.trim()], "--theme " + text.trim())
                         }
                     }
                     Row {
                         spacing: 4
-                        RailButton { label: "Browse…"; onClicked: liveryDialog.open() }
+                        RailButton { label: "Browse…"; onClicked: themeDialog.open() }
                         Text {
                             anchors.verticalCenter: parent.verticalCenter
-                            text: "source: " + (canvas.liverySource === "" ? "(unset)" : canvas.liverySource)
+                            text: "source: " + (canvas.themeSource === "" ? "(unset)" : canvas.themeSource)
                             color: canvas.chromeDim
                             font.pixelSize: 10
                             font.family: "monospace"
@@ -2070,7 +2070,7 @@ ShellRoot {
                     Text {
                         visible: canvas.base16Swatches.length === 0
                         width: railColumn.width
-                        text: "no base16 tier in this livery"
+                        text: "no base16 tier in this theme"
                         color: canvas.chromeDim
                         font.pixelSize: 10
                         font.family: "monospace"
@@ -2276,9 +2276,9 @@ ShellRoot {
                     scale: canvas.effScale
                     // The two greys below are the checkerboard, and the ONLY
                     // colour literals in this file: a transparency backdrop
-                    // that took its colour from the livery would stop being a
+                    // that took its colour from the theme would stop being a
                     // transparency backdrop.
-                    color: canvas.background === "livery" ? canvas.liveryState.paletteBg : "#ffffff"
+                    color: canvas.background === "theme" ? canvas.themeState.paletteBg : "#ffffff"
 
                     // 8px checkerboard, so a transparent widget edge is visible.
                     Canvas {
@@ -2446,7 +2446,7 @@ ShellRoot {
                     // Thin dashed outline around the widget box.
                     Canvas {
                         id: outline
-                        // A livery swap changes the dash colour, and a Canvas
+                        // A theme swap changes the dash colour, and a Canvas
                         // does not repaint on a binding it never reads through
                         // a property — so the colour is held here and watched.
                         property color dash: canvas.chromeSel
@@ -2579,12 +2579,12 @@ ShellRoot {
             }
         }
         FileDialog {
-            id: liveryDialog
-            title: "Pick a livery.json"
-            nameFilters: ["Livery / base16 scheme (*.json *.yaml *.yml)", "All files (*)"]
+            id: themeDialog
+            title: "Pick a theme.json"
+            nameFilters: ["Theme / base16 scheme (*.json *.yaml *.yml)", "All files (*)"]
             onAccepted: {
-                var p = decodeURIComponent(("" + liveryDialog.selectedFile).replace(/^file:\/\//, ""))
-                canvas.previewSet(["--livery", p], "--livery")
+                var p = decodeURIComponent(("" + themeDialog.selectedFile).replace(/^file:\/\//, ""))
+                canvas.previewSet(["--theme", p], "--theme")
             }
         }
     }

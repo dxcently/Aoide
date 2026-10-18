@@ -282,7 +282,7 @@ for Quickshell: render surfaces only]]) applied to the roster widgets:
    never parks on it and re-reads the stage files to see what changed. (The
    acknowledged session, project and workspace actions, and `ricedeclare`, are
    the exception: they answer.)
-5. **Colour only from [[livery]]**; hard corners; the music-glyph state contract
+5. **Colour only from [[theme]]**; hard corners; the music-glyph state contract
    (♪ working · 𝄐 awaiting · 𝄁 stopped · 𝄽 idle · 𝄂 done) is a hard contract.
 6. **Degrade.** An empty/missing stage file is an empty roster; off-Hyprland the
    jump/enumeration simply no-ops.

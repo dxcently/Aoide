@@ -14,7 +14,7 @@
 // while shown steps to the next row: with the modifier still held, a second
 // Super+Tab is a step, as in any alt-tab.
 //
-// Colours only from livery roles; radius 0; deliberately plain.
+// Colours only from theme roles; radius 0; deliberately plain.
 
 import QtQuick
 import Quickshell
@@ -24,7 +24,7 @@ import Quickshell.Hyprland
 PanelWindow {
     id: root
 
-    required property var livery
+    required property var theme
     required property var bridge
 
     property var toplevels: Hyprland.toplevels.values
@@ -100,8 +100,8 @@ PanelWindow {
         width: Math.min(root.width - 80, Math.max(240, list.contentWidth + 24))
         height: 132
         radius: 0
-        color: root.livery.paletteBg
-        border.color: root.livery.paletteFg
+        color: root.theme.paletteBg
+        border.color: root.theme.paletteFg
         border.width: 1
 
         Item {
@@ -130,7 +130,7 @@ PanelWindow {
             anchors.centerIn: parent
             visible: root.rows.length === 0
             text: "no windows"
-            color: root.livery.paletteFg
+            color: root.theme.paletteFg
             opacity: 0.5
             font.family: "monospace"
             font.pixelSize: 13
@@ -155,7 +155,7 @@ PanelWindow {
                 height: list.height
                 radius: 0
                 color: "transparent"
-                border.color: root.sel === cell.index ? root.livery.paletteAccent : "transparent"
+                border.color: root.sel === cell.index ? root.theme.paletteAccent : "transparent"
                 border.width: 1
 
                 readonly property var entry: cell.modelData.cls ? DesktopEntries.heuristicLookup(cell.modelData.cls) : null
@@ -173,7 +173,7 @@ PanelWindow {
                 Text {
                     anchors { left: parent.left; right: parent.right; bottom: parent.bottom; margins: 8 }
                     text: cell.modelData.title
-                    color: root.livery.paletteFg
+                    color: root.theme.paletteFg
                     font.family: "monospace"
                     font.pixelSize: 11
                     elide: Text.ElideRight
