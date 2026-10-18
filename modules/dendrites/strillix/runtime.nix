@@ -636,9 +636,22 @@ in
         # two assignments to this option path, which one module file may not
         # make.
         config = lib.mkMerge [
+          # ── Move the pre-rename roots before anything seeds the new ones ─────
+          # Every seed below creates `$STRILLIX_ROOT/*` or `~/.local/state/strillix`
+          # before any binary starts, and `migrate_dir` only moves into an absent
+          # or empty target. So the migration runs first: `--help` exits before
+          # any command, and the root migration in `main()` is its only effect.
+          # Skipped under a dry run, which must not move anything.
+          {
+            home.activation.aoideMigrateRoots = lib.hm.dag.entryBefore [ "writeBoundary" ] ''
+              if [[ ! -v DRY_RUN ]]; then
+                run ${pkgs.coreutils}/bin/env AOIDE_ROOT=${config.aoide.root} STRILLIX_ROOT=${config.aoide.strillix.root} ${pkgs.aoide.strillix}/bin/strillix --help >/dev/null
+              fi
+            '';
+          }
+
           (lib.optionalAttrs (builtIn != [ ]) {
             home.activation.aoideSeedRices = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
-              run ${pkgs.coreutils}/bin/mkdir -p "${config.aoide.strillix.root}/rices"
               if [[ -v DRY_RUN ]]; then
                 ${refreshCmd} --check
               else
@@ -685,7 +698,7 @@ in
             # is declared truth, written the same way whatever the mode: the staged
             # or drafted rice `stage/mode.json` names is brought back afterwards by
             # `aoide-rice-reload` (below).
-            home.activation.aoideSeedStage = lib.hm.dag.entryBetween [ "reloadSystemd" ] [ "writeBoundary" ] ''
+            home.activation.aoideSeedStage = lib.hm.dag.entryBetween [ "reloadSystemd" ] [ "writeBoundary" "aoideMigrateRoots" ] ''
               run ${seedStageScript}
             '';
 

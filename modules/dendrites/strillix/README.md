@@ -153,7 +153,9 @@ stay the runtime's own. `runtime.nix` publishes the filled slots as
   after home-manager's file and systemd steps and after the QML deploy and both
   seeds (`aoideDeployQml`, `aoideSeedStage`, `aoideSeedRices` — the reload
   reads the runtime rices), which is what puts the reload between the seed
-  and the shell's restart.
+  and the shell's restart. `aoideMigrateRoots` runs before every seed and
+  before `strillixRice`: it runs `strillix --help` once, so the pre-rename
+  roots move into the new ones before any seed creates them (a dry run skips it).
 
 ## The seam with `quickshell`
 

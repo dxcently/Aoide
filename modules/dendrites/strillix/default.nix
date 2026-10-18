@@ -96,7 +96,7 @@
         };
 
         home.activation = lib.mkIf hypr.enable {
-          strillixRice = lib.hm.dag.entryBetween [ "onFilesChange" ] [ "linkGeneration" ] ''
+          strillixRice = lib.hm.dag.entryBetween [ "onFilesChange" ] [ "linkGeneration" "aoideMigrateRoots" ] ''
             rice="$HOME/.local/state/strillix/rice.conf"
             twin="${twin}"
             oldTwin=$(readlink "$twin" 2>/dev/null || true)
