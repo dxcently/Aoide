@@ -42,7 +42,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 /// Schema version of `notifications.json` — bumped only on a breaking shape change.
-pub const NOTIFICATIONS_SCHEMA: &str = "0";
+pub const NOTIFICATIONS_SCHEMA: &str = "1";
 
 /// How many notifications the ledger keeps. Matches the dunstrc's
 /// `history_length`, so the dock ledger and `dunstctl history` agree on depth.

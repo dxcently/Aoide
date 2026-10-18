@@ -352,8 +352,15 @@ pub fn stage_for_rice(rice: &str) -> std::io::Result<WallpaperStage> {
     stage_rice_default(rice).map(WallpaperStage::Wrote)
 }
 
-fn write_wallpaper(value: serde_json::Value) -> std::io::Result<PathBuf> {
+/// `stage/wallpaper.json`'s own format version (CONTRACTS.md §4). Stamped by
+/// [`write_wallpaper`], the one writer, so every shape it carries is versioned.
+pub const STAGE_WALLPAPER_VERSION: &str = "1";
+
+fn write_wallpaper(mut value: serde_json::Value) -> std::io::Result<PathBuf> {
     let dst = staged_wallpaper_json();
+    if let Some(obj) = value.as_object_mut() {
+        obj.insert("schemaVersion".into(), serde_json::json!(STAGE_WALLPAPER_VERSION));
+    }
     let body = serde_json::to_string_pretty(&value).unwrap_or_default() + "\n";
     aoide_storage::fs::atomic_write(&dst, &body)?;
     Ok(dst)

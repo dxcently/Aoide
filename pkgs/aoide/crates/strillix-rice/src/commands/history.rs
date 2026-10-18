@@ -259,6 +259,7 @@ pub(crate) fn snapshot_unlocked(cmd: &str, cause: &str) -> Result<HistoryRecord,
 
     let take = history::next_history_number(&rice, draft.as_deref());
     let record = HistoryRecord {
+        schema_version: String::new(),
         take,
         parent: history::load_head(&rice, draft.as_deref()),
         at: aoide_storage::time::now_iso_utc(),
@@ -1854,6 +1855,7 @@ mod tests {
     /// every other test in this file).
     fn rec(take: u32, parent: Option<u32>) -> HistoryRecord {
         HistoryRecord {
+            schema_version: String::new(),
             take,
             parent,
             at: "2026-08-18T00:00:00Z".to_string(),
@@ -2453,7 +2455,8 @@ mod tests {
         // Takes 3 is completely untouched — nothing destroyed, nothing
         // renumbered.
         let take3_after = history::load_history(&rice, Some(&draft), 3).unwrap();
-        assert_eq!(take3_after, take3);
+        let stamped3 = HistoryRecord { schema_version: history::HISTORY_SCHEMA_VERSION.to_string(), ..take3.clone() };
+        assert_eq!(take3_after, stamped3);
 
         // Branch out again: the next write hangs off the REVERTED head (2),
         // not off take 3 — this is where branching actually happens.
@@ -2769,6 +2772,7 @@ mod tests {
         // refusal secretly still moved the cursor.
         std::fs::create_dir_all(shellbridge::draft_dir(&rice, &draft).join("history")).unwrap();
         let seed = |n: u32, parent: Option<u32>| HistoryRecord {
+            schema_version: String::new(),
             take: n,
             parent,
             at: "2026-08-18T00:00:00Z".to_string(),
@@ -2908,6 +2912,7 @@ mod tests {
             "sonata",
             None,
             &HistoryRecord {
+                schema_version: String::new(),
                 take: 1,
                 parent: None,
                 at: "2026-08-18T00:00:00Z".to_string(),
@@ -3287,6 +3292,7 @@ mod tests {
         let (root, rice, draft) = routed_draft("take-list-json-orphan");
 
         let seed = |n: u32, parent: Option<u32>| HistoryRecord {
+            schema_version: String::new(),
             take: n,
             parent,
             at: "2026-08-18T00:00:00Z".to_string(),
@@ -3712,6 +3718,7 @@ mod tests {
     /// same call.
     fn seed(rice: &str, draft: Option<&str>, take: u32, parent: Option<u32>, at: &str, mark: Option<char>) -> HistoryRecord {
         let record = HistoryRecord {
+            schema_version: String::new(),
             take,
             parent,
             at: at.to_string(),

@@ -85,9 +85,15 @@ pub fn load_mode_marker() -> ModeMarker {
         .unwrap_or_default()
 }
 
+/// `stage/mode.json`'s format version (CONTRACTS.md §4). Stamped on every save;
+/// no reader gates on it (absent or older still loads as the same marker).
+pub const MODE_SCHEMA_VERSION: &str = "1";
+
 /// Atomic-write the marker to `stage/mode.json`.
 pub fn save_mode_marker(marker: &ModeMarker) -> Result<(), String> {
-    let body = serde_json::to_string_pretty(marker)
+    let mut value = serde_json::to_value(marker).map_err(|e| format!("serialize mode.json: {e}"))?;
+    value["schemaVersion"] = serde_json::json!(MODE_SCHEMA_VERSION);
+    let body = serde_json::to_string_pretty(&value)
         .map_err(|e| format!("serialize mode.json: {e}"))?
         + "\n";
     let path = mode_marker_path();
@@ -106,6 +112,27 @@ mod tests {
         assert_eq!(m.rice, None);
         assert_eq!(m.draft, None);
         assert_eq!(m.since, "");
+    }
+
+    #[test]
+    fn a_saved_marker_is_stamped_with_its_format_version() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved = std::env::var("AOIDE_STAGE_DIR").ok();
+        let dir = std::env::temp_dir().join(format!("aoide-mode-stamp-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::env::set_var("AOIDE_STAGE_DIR", &dir);
+        let marker = ModeMarker { mode: RiceMode::Staging, rice: Some("sonata".into()), ..Default::default() };
+        save_mode_marker(&marker).unwrap();
+        let raw = std::fs::read_to_string(mode_marker_path()).unwrap();
+        let v: Value = serde_json::from_str(&raw).unwrap();
+        assert_eq!(v["schemaVersion"], MODE_SCHEMA_VERSION);
+        assert_eq!(v["rice"], "sonata");
+        assert_eq!(load_mode_marker(), marker, "the stamp does not change what loads");
+        match saved {
+            Some(v) => std::env::set_var("AOIDE_STAGE_DIR", v),
+            None => std::env::remove_var("AOIDE_STAGE_DIR"),
+        }
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

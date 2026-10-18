@@ -1782,7 +1782,7 @@ deliberately outside `SCHEMA` — its keys are operator-chosen, not a
 `&'static` table entry — so it is parsed and checked on every load without
 ever becoming reachable through `config set`.
 
-### `/stage/theme.json` — **v0**
+### `/stage/theme.json` — **v1**
 
 The resolved, flattened note values for Quickshell (QML reads this; hot-reload
 at rehearsal). Derived from the same `aoide.theme` as the baked `rice.nix`
@@ -1834,7 +1834,7 @@ declarative` remove the symlink (leaving a plain real file) whenever they run.
 
 ```json
 {
-  "schemaVersion": "0",
+  "schemaVersion": "1",
   "palette": { "bg": "#1e1e2e", "fg": "#cdd6f4", "accent": "#89b4fa", "urgent": "#f38ba8" },
   "bar":    { "bg": "#1e1e2e", "fg": "#cdd6f4", "accent": "#89b4fa" },
   "notif":  { "bg": "#1e1e2e", "fg": "#cdd6f4", "urgent": "#f38ba8" },
@@ -1877,14 +1877,16 @@ rice with no window and no geometry block still clears the previous rice's. `ter
 `/stage/terminal-colors.conf` only when the rice has an opinion, and the
 host's bake shows otherwise. Readers must tolerate both forms.
 
-### `/stage/wallpaper.json` — **v0**
+### `/stage/wallpaper.json` — **v1**
 
 The live wallpaper: the image path, the rice it was staged for, whether the
 user picked it, and whether a picked still tiles.
 
 ```json
-{ "path": "/home/u/.aoide/$STRILLIX_ROOT/wallpapers/dusk.png", "rice": "dusk", "pick": true }
+{ "schemaVersion": "1", "path": "/home/u/.strillix/wallpapers/dusk.png", "rice": "dusk", "pick": true }
 ```
+
+Every write stamps `schemaVersion` (`"1"`); no reader gates on it.
 
 `path` is what the wallpaper layer renders; absent or empty, the layer falls
 back to the baked `AOIDE_WALLPAPER` store path (a rice whose `wallpaper` note
@@ -2165,7 +2167,7 @@ staged anything, and a stage overrides it the moment one runs. Absent (no
 activation yet, or a rice with no opinion) means the baked opacity stands;
 kitty logs a missing include and continues.
 
-### `/stage/mode.json` — **v0**
+### `/stage/mode.json` — **v1**
 
 Which of THREE modes the rice system is in — concepts/Self-Ricing's
 mode-toggle extension (`RiceMode`: `Staging | Declarative | Draft`). Absent
@@ -2186,6 +2188,7 @@ staging writes; never an error.
 
 ```json
 {
+  "schemaVersion": "1",
   "mode": "draft",
   "rice": "sonata",
   "draft": "neon-night",
@@ -2193,6 +2196,9 @@ staging writes; never an error.
   "since": "2026-08-14T00:00:00Z"
 }
 ```
+
+Every save stamps `schemaVersion` (`"1"`). No reader gates on it: a file
+without the stamp loads as the same marker.
 
 Every command that changes the type or target of `stage/theme.json` writes
 this file LAST, because a watching reader re-arms on it (§4's
@@ -2234,7 +2240,7 @@ moment a declarative round-trip overwrites `rice`. Absent when never set (a
 fresh `mode.json`, or one written before this field existed); readers fall
 back to resolving off `stage/theme.json`'s own `"rice"` field in that case.
 
-### `rices/<rice>/drafts/<name>/` — **v0**
+### `rices/<rice>/drafts/<name>/` — **v1**
 
 A saved rice-draft: a scratch snapshot for iterating on more than one live
 variant of a rice without declaring any of them (concepts/Self-Ricing's
@@ -2245,10 +2251,15 @@ draft is fundamentally a variation of an ALREADY COMPOSED rice.
 ```
 rices/sonata/drafts/neon-night/
 ├── theme.json   a real file — the draft's own content
-└── wallpaper.json    snapshot of stage/wallpaper.json, ONLY if the stage had one
-                   at fork/save time (wallpaper.json is NEVER symlinked/routed —
-                   only theme.json is)
+├── wallpaper.json    snapshot of stage/wallpaper.json, ONLY if the stage had one
+│                  at fork/save time (wallpaper.json is NEVER symlinked/routed —
+│                  only theme.json is)
+└── history/     this draft's takes (§4's rices/<rice>/history/NNNN.json)
 ```
+
+The rice tree lives under `$STRILLIX_ROOT/rices/` (`$STRILLIX_ROOT` defaults to
+`~/.strillix`); a rice's own `wallpaper/` picture folder and `history/` take
+store sit beside its `theme.json`.
 
 No metadata file: the draft name is the directory name, the base rice is
 the directory it's nested under, and saved-at is `theme.json`'s mtime.
@@ -2282,6 +2293,24 @@ name is an error, not idempotent-silent, and dropping the CURRENTLY-ROUTED
 draft is refused (`draft-is-live`) rather than silently also tearing down
 the routing and falling back to `staging` — switch modes first
 (`rice mode stage`/`rice mode declarative`), then drop it.
+
+### `rices/<rice>/history/NNNN.json` — **v1**
+
+One take: a full-content snapshot of the routed scope's `theme.json` (and
+`wallpaper.json`, when the stage had one) plus its widget bodies, minted on
+every rehearsal write. The store is `rices/<rice>/history/` for a rice staged
+directly, and `rices/<rice>/drafts/<name>/history/` for a routed draft. `marks.json`
+and `head.json` sit beside the takes.
+
+```json
+{ "schemaVersion": "1", "take": 3, "parent": 2, "at": "2026-10-18T00:00:00Z",
+  "sessionId": "s-1", "cause": "stage", "theme": { }, "wallpaper": { },
+  "widgets": { } }
+```
+
+`schemaVersion` is `"1"` on every save (`aoide_storage::history::HISTORY_SCHEMA_VERSION`).
+A take record without the stamp loads with an empty `schemaVersion`. `parent`
+is absent for a scope's first take.
 
 ### `/stage/terminal-colors.conf` — **v0**
 
@@ -4221,9 +4250,10 @@ than that stays in preorder in the deepest nested list as `{ "sessionId",
 of levels and loses no row; the text render likewise draws 32 levels of
 indentation, then `…`.
 
-### `state/stage/notifications.json` — **v0**
+### `state/stage/notifications.json` — **v1**
 
-The notification ledger the Quickshell notifications draws from. dunst owns
+The notification ledger the Quickshell notifications draws from. Its
+`schemaVersion` is `"1"`. dunst owns
 `org.freedesktop.Notifications` but draws NOTHING (`skip_display` on every
 rule); it hands each notification to `strx notifications push` through its `script`
 hook, which forwards it over the shellbridge socket. **The shellbridge daemon
@@ -10543,8 +10573,11 @@ manufacturing the hazard: a throwaway client pressed a button and called
 
 - A contract version is a single integer, tracked in this file's section
   heading (`— v0`).
-- The theme schema version is also surfaced in `stage/theme.json`
-  (`schemaVersion`) and in `aoide schema --json` (`schemaVersion`).
+- The note schema version (§1) is stamped on every rice's `theme.json`
+  (`schemaVersion`) and in `strx rice lint` output. The stage format version
+  is a separate integer: `stage/theme.json` carries it as `schemaVersion`, and
+  `aoide schema --json` reports it as `stageNotesVersion`. The two move
+  independently.
 - Bumping any version requires: (1) update this file, (2) add a playbook
   migration, (3) update the corresponding `checks` so the new contract is
   asserted.

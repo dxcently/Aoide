@@ -98,6 +98,10 @@ pub fn marks_path(rice: &str, draft: Option<&str>) -> PathBuf {
 /// Write-once once [`save_history`] has landed it — see the module doc.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct HistoryRecord {
+    /// The record's format version ([`HISTORY_SCHEMA_VERSION`]). Stamped by
+    /// [`save_history`]; a take written before the field existed reads as `""`.
+    #[serde(rename = "schemaVersion", default)]
+    pub schema_version: String,
     pub take: u32,
     /// `None` only for a draft's very first take. Ancestry is derived by
     /// walking this back to `None` ([`ancestry`]) — never indexed, never a
@@ -163,8 +167,12 @@ pub fn load_history(rice: &str, draft: Option<&str>, n: u32) -> Option<HistoryRe
 /// practice (nothing ever calls this twice for the same `record.take`), but
 /// nothing here enforces that — the caller allocating the number via
 /// [`next_history_number`] under its own lock is what makes it true.
+/// A take record's format version (CONTRACTS.md §4's `history/NNNN.json`).
+pub const HISTORY_SCHEMA_VERSION: &str = "1";
+
 pub fn save_history(rice: &str, draft: Option<&str>, record: &HistoryRecord) -> Result<(), String> {
-    let body = serde_json::to_string_pretty(record)
+    let stamped = HistoryRecord { schema_version: HISTORY_SCHEMA_VERSION.to_string(), ..record.clone() };
+    let body = serde_json::to_string_pretty(&stamped)
         .map_err(|e| format!("serialize take {}: {e}", record.take))?
         + "\n";
     let path = history_path(rice, draft, record.take);
@@ -356,6 +364,7 @@ mod tests {
 
     fn rec(take: u32, parent: Option<u32>) -> HistoryRecord {
         HistoryRecord {
+            schema_version: String::new(),
             take,
             parent,
             at: "2026-08-18T00:00:00Z".to_string(),
@@ -381,7 +390,8 @@ mod tests {
         save_history(&rice, Some(&draft), &record).unwrap();
 
         let back = load_history(&rice, Some(&draft), 9).unwrap();
-        assert_eq!(back, record);
+        let stamped = HistoryRecord { schema_version: HISTORY_SCHEMA_VERSION.to_string(), ..record.clone() };
+        assert_eq!(back, stamped, "the record comes back as saved, stamped with its version");
         assert_eq!(back.parent, Some(1), "the parent pointer survives the round trip");
 
         // A take with no parent omits the field entirely rather than writing

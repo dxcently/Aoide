@@ -38,7 +38,7 @@ pub const SCHEMA_VERSION: &str = "0";
 /// every place this string was repeated.
 pub const AOIDE_VERSION: &str = env!("CARGO_PKG_VERSION");
 /// Stage-file format version (CONTRACTS.md §4).
-pub const STAGE_NOTES_VERSION: &str = "0";
+pub const STAGE_NOTES_VERSION: &str = "1";
 
 /// A positional argument of a command.
 #[derive(Debug, Clone, Serialize)]

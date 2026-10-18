@@ -37,7 +37,7 @@ fn pairs(m: &[(String, String)]) -> Value {
 
 pub fn emit_stage(r: &Resolved) -> Value {
     let mut out = json!({
-        "schemaVersion": r.schema_version,
+        "schemaVersion": aoide_protocol::registry::STAGE_NOTES_VERSION,
         "palette": pairs(&r.palette),
         "bar": pairs(&r.bar),
         "notif": pairs(&r.notif),
@@ -62,7 +62,7 @@ mod tests {
         let container: Value = serde_json::from_str(&raw).unwrap();
         let r = crate::theme::resolve::resolve(&container).unwrap();
         let stage = emit_stage(&r);
-        assert_eq!(stage["schemaVersion"], "0");
+        assert_eq!(stage["schemaVersion"], "1");
         assert_eq!(stage["palette"]["bg"], "#1e1e2e");
         assert_eq!(stage["bar"]["bg"], "#1e1e2e", "fallback applied, never null");
         assert_eq!(stage["window"]["border"], "#89b4fa");
