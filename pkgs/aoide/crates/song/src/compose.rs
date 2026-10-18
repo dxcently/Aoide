@@ -71,7 +71,7 @@ pub const WINDOW_KEYS: &[&str] = &["border", "borderInactive"];
 /// The ten component slots a song's body selects, each filled by its `strillix`
 /// provider (CONTRACTS.md §5). A scaffolded song names all ten, as every
 /// committed one does: a song that paints a desktop paints all of it.
-pub const VIBEOS_SLOTS: &[&str] = &[
+pub const STRILLIX_SLOTS: &[&str] = &[
     "bar",
     "launcher",
     "powermenu",
@@ -139,7 +139,7 @@ pub fn render_rice_nix(name: &str, from: &str, notes: &Value) -> String {
         )
     };
 
-    let providers: String = VIBEOS_SLOTS
+    let providers: String = STRILLIX_SLOTS
         .iter()
         .map(|slot| format!("      {slot} = \"strillix\";\n"))
         .collect();

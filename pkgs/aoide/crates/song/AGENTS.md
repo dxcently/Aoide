@@ -233,7 +233,7 @@
   `schema::POLARITY_DEFAULT` when the source notes carry none.
 - **`compose::render_rice_nix` emits a song body (CONTRACTS §5, v1).** The
   scaffold is an attrset with a `system` half (the ten `strillix` providers,
-  `VIBEOS_SLOTS`, and a `module` of livery) and a `home` half (`strillix`, and
+  `STRILLIX_SLOTS`, and a `module` of livery) and a `home` half (`strillix`, and
   `rice.hyprland.conf = ./hyprland.conf`). `rice compose` writes the
   `hyprland.conf` of `--from` when it ships one, else `render_hyprland_conf`'s
   header with no keys. Any change to the body shape is a §5 change: the test
