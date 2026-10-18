@@ -62,18 +62,17 @@ let
     ) perBook
   );
 
-  dir = "${
-    pkgs.runCommand "aoide-songbook-merged" { } (
-      ''
-        mkdir -p $out
-      ''
-      + lib.concatStringsSep "" (
-        lib.mapAttrsToList (name: path: ''
-          cp -r --no-preserve=mode ${path} $out/${name}
-        '') registry
-      )
+  merged = pkgs.runCommand "aoide-songbook-merged" { } (
+    ''
+      mkdir -p $out
+    ''
+    + lib.concatStringsSep "" (
+      lib.mapAttrsToList (name: path: ''
+        cp -r --no-preserve=mode ${path} $out/${name}
+      '') registry
     )
-  }";
+  );
+  dir = "${merged}";
 in
 lib.throwIf (clashing != [ ])
   (

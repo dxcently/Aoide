@@ -466,9 +466,9 @@ in
     # (lib/songbook.nix's `songbookDirs`) so a merged songbook's songs come from
     # the input books; a host that wires only `songbook` gets the directory's
     # own discovery, at the lower priority the hook's value overrides.
-    _module.args.songbookDirs = lib.mkDefault (
-      import ../../../lib/songbook.nix { inherit lib songbook; }
-    ).songs;
+    _module.args.songbookDirs =
+      lib.mkDefault
+        (import ../../../lib/songbook.nix { inherit lib songbook; }).songs;
 
     # ── What this lane brings into existence ────────────────────────────────
     # One thing, and it is a FACT rather than this lane's own option: the
