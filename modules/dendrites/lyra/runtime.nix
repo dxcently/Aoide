@@ -35,10 +35,6 @@
   pkgs,
   aoideInputs,
   songbook,
-  # name -> song directory, from the same hook (lib/songbook.nix's `songbookDirs`):
-  # the merged songbook's registry, so the eval-time reads below never touch the
-  # merged `songbook` directory. Absent, the lane discovers `songbook` itself.
-  songbookDirs ? null,
   ...
 }:
 let
@@ -67,7 +63,7 @@ let
   # `builtin.json`'s `packages` exists to check (§7.5).
   songbookLib = import ../../../lib/songbook.nix {
     inherit lib songbook;
-    discovered = songbookDirs;
+    discovered = config._module.args.songbookDirs;
   };
 
   # The `aoide.*` option doc list the shipped `aoide-options.json` carries
@@ -465,6 +461,14 @@ in
   # `aoide.lyra.enable` (declared in modules/nucleus/options.nix) to true.
   config = {
     aoide.lyra.enable = true;
+
+    # name -> song directory, the songbook's registry. The song hook sets it
+    # (lib/songbook.nix's `songbookDirs`) so a merged songbook's songs come from
+    # the input books; a host that wires only `songbook` gets the directory's
+    # own discovery, at the lower priority the hook's value overrides.
+    _module.args.songbookDirs = lib.mkDefault (
+      import ../../../lib/songbook.nix { inherit lib songbook; }
+    ).songs;
 
     # ── What this lane brings into existence ────────────────────────────────
     # One thing, and it is a FACT rather than this lane's own option: the
