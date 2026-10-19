@@ -212,6 +212,11 @@ in
       restartRice = {
         inherit (home.home.activation.aoideRestartRice) after data;
       };
+      # The start-up move's activation: it runs `strillix --help` under
+      # STRILLIX_MIGRATE=1, the only place the rice-tree move is asked for.
+      migrateRoots = {
+        inherit (home.home.activation.aoideMigrateRoots) data;
+      };
       # Every unit must agree on ONE directory: a unit left with a different
       # answer is the drift this reading exists to catch.
       templatesAgree = builtins.length (lib.unique (lib.concatLists (lib.attrValues templates))) == 1;

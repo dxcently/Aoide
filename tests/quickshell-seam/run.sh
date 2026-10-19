@@ -209,6 +209,9 @@ else
     "$(y '[(.restartRice.after // [])[] | select(. == "reloadSystemd")] | length')"
   check "control: one restart runs both units"  "true" \
     "$(y '(.restartRice.data // "") | contains("try-restart aoide-rice-reload.service aoide-quickshell.service")')"
+  # The rice-tree move is opt-in: only this activation sets the flag.
+  check "control: the migrate activation sets the flag" "true" \
+    "$(y '(.migrateRoots.data // "") | contains("STRILLIX_MIGRATE=1 ") and contains("/bin/strillix --help")')"
 fi
 
 printf '%s\n' "-----------------------------------------------------------------"
