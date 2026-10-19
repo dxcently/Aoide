@@ -47,7 +47,7 @@ own golden-snapshot test in `crates/strillix/src/registry.rs`. 47 are real;
 
 | Group | Leaves | Detail |
 |---|---|---|
-| `rice` | 18 | `lint`/`stage`/`compose`/`back`/`declare`/`transpose`(stub); the 3-command `draft` group; the 4-command `mode` group; the 5-command `take` rehearsal-snapshot group — [[Rice-and-Theme]] |
+| `rice` | 18 | `lint`/`stage`/`compose`/`back`/`declare`/`transpose`(stub); the 3-command `draft` group; the 4-command `mode` group; the 5-command `history` snapshot group — [[Rice-and-Theme]] |
 | `wallpaper set` | 1 | wallpaper staging — [[Rice-and-Theme]] |
 | `theme` | 3 | `lint`/`resolve`/`emit`, the native design-token engine — [[theme]] |
 | `element seed` | 1 | renders a rice's committed `elements/*/element.json` into `run/elements/` — verbatim copy for `template:false`, theme-rendered for `template:true`, atomic per file — [[Rice-Anatomy]] |

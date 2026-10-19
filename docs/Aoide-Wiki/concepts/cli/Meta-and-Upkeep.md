@@ -241,7 +241,7 @@ strx reload [--json]
   reversible with `strx rice back`. The sync runs before the snapshot: its
   write is a pure function of the rice, so the snapshot settles into a stable
   value and dedupes. `changed` lists the stage files, terminal colours, widget
-  bodies, manifest, registry and take written, and in a draft re-route the
+  bodies, manifest, registry and history written, and in a draft re-route the
   link and `stage/mode.json`.
 - **Pipes to / output:** the last beat, in every mode: when
   `aoide-quickshell.service` is up, spawns `quickshell -p

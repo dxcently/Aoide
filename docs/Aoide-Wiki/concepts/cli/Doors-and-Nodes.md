@@ -135,7 +135,7 @@ strx shellbridge [--run] [--json]
   with their empty v0 registry shapes, atomic and only when absent or corrupt
   (`seed_if_absent` — a populated roster survives a restart); binds
   `$XDG_RUNTIME_DIR/aoide/shellbridge.sock` (a stale socket file is removed
-  first); maintains `state/stage/notifications.json` (notification ledger, v0,
+  first); maintains `state/stage/notifications.json` (notification ledger, v1,
   capped at 20 cards, atomic read-modify-write serialised by a stage lock —
   not by the accept loop, which is thread-per-connection);
   appends audit records (door `daemon`) to the default audit log for every

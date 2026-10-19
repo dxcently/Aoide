@@ -94,7 +94,7 @@ desktop needs.
   and `notifications.rs` stay as files in `conduct` — only their registry lines (the
   CLI commands) move to `strillix` — because both are entangled with core:
   `session permit` publishes summons through `notifications`, and the conductor TUI
-  reads the socket path `shellbridge` owns. `storage::takes` and
+  reads the socket path `shellbridge` owns. `storage::history` and
   `storage::mode` stay in `storage` for the same reason: zero dependency
   weight, and `mode` is read by `shellbridge`, itself core-crate-resident.
 - **`management` is untouched by this split** — still deferred (see below),
