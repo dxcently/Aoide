@@ -2254,7 +2254,7 @@ rices/sonata/drafts/neon-night/
 ├── wallpaper.json    snapshot of stage/wallpaper.json, ONLY if the stage had one
 │                  at fork/save time (wallpaper.json is NEVER symlinked/routed —
 │                  only theme.json is)
-└── history/     this draft's takes (§4's rices/<rice>/history/NNNN.json)
+└── history/     this draft's history (§4's rices/<rice>/history/NNNN.json)
 ```
 
 The rice tree lives under `$STRILLIX_ROOT/rices/` (`$STRILLIX_ROOT` defaults to
@@ -2300,7 +2300,7 @@ One take: a full-content snapshot of the routed scope's `theme.json` (and
 `wallpaper.json`, when the stage had one) plus its widget bodies, minted on
 every rehearsal write. The store is `rices/<rice>/history/` for a rice staged
 directly, and `rices/<rice>/drafts/<name>/history/` for a routed draft. `marks.json`
-and `head.json` sit beside the takes.
+and `head.json` sit beside the records.
 
 ```json
 { "schemaVersion": "1", "take": 3, "parent": 2, "at": "2026-10-18T00:00:00Z",
