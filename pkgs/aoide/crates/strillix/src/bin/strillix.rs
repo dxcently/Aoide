@@ -19,6 +19,14 @@ fn main() {
     }
 
     let argv: Vec<String> = std::env::args().skip(1).collect();
+    // The rice tree's move is `strx migrate`'s own job, so the start-up hook
+    // stays out of its way (`--check` must report, never move).
+    if argv.first().map(String::as_str) != Some("migrate") {
+        if let Err(e) = aoide_storage::fs::rice_root_at_start() {
+            eprintln!("strillix: {e}");
+            std::process::exit(1);
+        }
+    }
     let code = strillix::run_strillix(&argv);
     std::process::exit(code);
 }

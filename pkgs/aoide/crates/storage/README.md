@@ -188,8 +188,11 @@ by decision — no embedded database yet
   development). `migrate_root_once` is `pub` and idempotent instead — the
   three real binaries (`aoide`, `aoided`, `strillix`) call it once, explicitly,
   at the top of their own `main()`; see `fs::root`'s own doc for the full
-  reasoning. The rice tree (`$AOIDE_ROOT/song/`) moves in the same call,
-  into `$STRILLIX_ROOT`: `songbook-aside` becomes `rices-aside`, and a move
+  reasoning. It moves `state/` and `log` only. The rice tree
+  (`$AOIDE_ROOT/song/`) moves into `$STRILLIX_ROOT` through
+  `fs::migrate_rice_root`, which only the strillix binary calls, and only
+  under `STRILLIX_MIGRATE=1` (`fs::rice_root_at_start`) or `strx migrate`
+  (`fs::rice_status` reads its state without moving): `songbook-aside` becomes `rices-aside`, and a move
   that empties `song/` leaves a regular FILE named `song` in its place,
   which says where the state went. That file is the "already migrated"
   marker, and an old binary that opens `song/stage` fails on it (ENOTDIR)
@@ -713,10 +716,10 @@ by decision — no embedded database yet
   itself lives in `aoide-client::tunnel` (P-S3), the same `node_store`
   (storage) / `commands` (client) split this crate already holds for node
   transport.
-- `takes` — the take store behind `rice back`/`rice history`, hanging off
+- `history` — the entry store behind `rice back`/`rice history`, hanging off
   `rices/<rice>/history/` when staged directly or
   `rices/<rice>/drafts/<name>/history/` when routed into a draft
-  (`strx reload` design, settled 2026-08-31 — the staging-mode take/back
+  (`strx reload` design, settled 2026-08-31 — the staging-mode entry/back
   reach; every function takes `draft: Option<&str>`, `None` selecting the
   rice-scoped root). `HistoryRecord` also carries `widgets: Value` — the
   rice's widget QML bodies at mint time.
@@ -1095,7 +1098,7 @@ everything that persists state sits above it.
 ## How it composes
 
 `client`, `conduct`, `server`, `rice`, `conductor`, and both app crates
-depend on it for durable state. **Charter smudge**: `takes` and `mode` live
+depend on it for durable state. **Charter smudge**: `history` and `mode` live
 here rather than in a paint-adjacent crate — zero dependency weight, and
 `mode` is read by `shellbridge`, which itself stays core-crate-resident in
 `conduct` (see `docs/architecture/PACKAGE-LAYOUT.md`, "Charter exceptions").

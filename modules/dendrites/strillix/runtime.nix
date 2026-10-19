@@ -645,7 +645,7 @@ in
           {
             home.activation.aoideMigrateRoots = lib.hm.dag.entryBefore [ "writeBoundary" ] ''
               if [[ ! -v DRY_RUN ]]; then
-                run ${pkgs.coreutils}/bin/env AOIDE_ROOT=${config.aoide.root} STRILLIX_ROOT=${config.aoide.strillix.root} ${pkgs.aoide.strillix}/bin/strillix --help >/dev/null
+                run ${pkgs.coreutils}/bin/env AOIDE_ROOT=${config.aoide.root} STRILLIX_ROOT=${config.aoide.strillix.root} STRILLIX_MIGRATE=1 ${pkgs.aoide.strillix}/bin/strillix --help >/dev/null
               fi
             '';
           }

@@ -159,10 +159,10 @@ fn reload_staging_or_draft(inv: &Invocation, marker: mode::ModeMarker) -> Outcom
     // the head — `commands/history.rs`'s own dedupe core (the User's own
     // settled rule, 2026-08-31), reused verbatim rather than reimplemented
     // here.
-    let take_data = match super::history::snapshot_if_identical_to_head("reload", "reload") {
+    let entry_data = match super::history::snapshot_if_identical_to_head("reload", "reload") {
         Ok(Some(record)) => {
             changed.push(
-                aoide_storage::history::history_path(&rice, draft, record.take)
+                aoide_storage::history::history_path(&rice, draft, record.entry)
                     .to_string_lossy()
                     .into_owned(),
             );
@@ -171,10 +171,10 @@ fn reload_staging_or_draft(inv: &Invocation, marker: mode::ModeMarker) -> Outcom
                     .to_string_lossy()
                     .into_owned(),
             );
-            json!({ "take": record.take, "deduped": false })
+            json!({ "entry": record.entry, "deduped": false })
         }
-        Ok(None) => json!({ "take": Value::Null, "deduped": true }),
-        Err(err) => json!({ "take": Value::Null, "takeError": err.message }),
+        Ok(None) => json!({ "entry": Value::Null, "deduped": true }),
+        Err(err) => json!({ "entry": Value::Null, "entryError": err.message }),
     };
 
     // Beat "reload": shell reload — unconditional, the same call the
@@ -202,7 +202,7 @@ fn reload_staging_or_draft(inv: &Invocation, marker: mode::ModeMarker) -> Outcom
         "mode": super::mode::mode_word(marker.mode),
         "rice": rice,
         "draft": marker.draft,
-        "take": take_data,
+        "entry": entry_data,
         "sync": synced.data,
         "reload": { "status": status.tag(), "message": status.message() },
     }))
@@ -465,8 +465,8 @@ mod tests {
 
         let out = handle_reload(&reload_inv());
         assert_eq!(out.status, Status::Ok, "{:?}", out.data);
-        assert_eq!(out.data.as_ref().unwrap()["take"]["deduped"], false);
-        assert_eq!(out.data.as_ref().unwrap()["take"]["take"], 1);
+        assert_eq!(out.data.as_ref().unwrap()["entry"]["deduped"], false);
+        assert_eq!(out.data.as_ref().unwrap()["entry"]["entry"], 1);
 
         let record = aoide_storage::history::load_history("sonata", None, 1)
             .expect("take 1 lives under rices/sonata/history/, not a draft");
@@ -508,11 +508,11 @@ mod tests {
 
         let first = handle_reload(&reload_inv());
         assert_eq!(first.status, Status::Ok, "{:?}", first.data);
-        assert_eq!(first.data.as_ref().unwrap()["take"]["take"], 1);
+        assert_eq!(first.data.as_ref().unwrap()["entry"]["entry"], 1);
 
         let second = handle_reload(&reload_inv());
         assert_eq!(second.status, Status::Ok, "{:?}", second.data);
-        assert_eq!(second.data.as_ref().unwrap()["take"]["deduped"], true, "{:?}", second.data);
+        assert_eq!(second.data.as_ref().unwrap()["entry"]["deduped"], true, "{:?}", second.data);
         assert_eq!(
             aoide_storage::history::list_history("sonata", None).len(),
             1,
@@ -531,7 +531,7 @@ mod tests {
         .unwrap();
         let third = handle_reload(&reload_inv());
         assert_eq!(third.status, Status::Ok, "{:?}", third.data);
-        assert_eq!(third.data.as_ref().unwrap()["take"]["deduped"], false, "{:?}", third.data);
+        assert_eq!(third.data.as_ref().unwrap()["entry"]["deduped"], false, "{:?}", third.data);
         assert_eq!(aoide_storage::history::list_history("sonata", None).len(), 2);
 
         let _ = std::fs::remove_dir_all(&root);
@@ -588,7 +588,7 @@ mod tests {
         let marker_inode = std::fs::metadata(mode::mode_marker_path()).unwrap().ino();
         let out = handle_reload(&reload_inv());
         assert_eq!(out.status, Status::Ok, "{:?}", out.data);
-        assert_eq!(out.data.as_ref().unwrap()["take"]["take"], 1);
+        assert_eq!(out.data.as_ref().unwrap()["entry"]["entry"], 1);
         assert_eq!(
             std::fs::metadata(mode::mode_marker_path()).unwrap().ino(),
             marker_inode,

@@ -92,7 +92,7 @@ a config file). Paint-side — ships in `strillix`, not core.
   `snapshot_widget_bodies`
   (`strx reload` design, settled 2026-08-31) captures the same
   `rices/<rice>/widgets/` tree `sync_rice_widgets` copies FROM — never
-  `run/qml`'s deployed copy — as the take store's own widget-body payload;
+  `run/qml`'s deployed copy — as the entry store's own widget-body payload;
   read-only, no restore counterpart (`rice back` still never touches widget
   bodies — they stay git's substrate).
 - `ipc`, `lint` — the rice IPC surface (the Quickshell reload trigger and the
@@ -138,7 +138,7 @@ a config file). Paint-side — ships in `strillix`, not core.
   hashed against the shipped copy's). CONTRACTS.md, "Declaring a rice from
   the machine", is the contract.
 - `commands` — this crate's CLI commands: `rice *`, `theme *`, `wallpaper set`,
-  `wallpaper sync`, `element seed`, `rice history`/`take.*`/`rice back`,
+  `wallpaper sync`, `element seed`, `rice history`/`rice back`,
   `quickshell healthcheck`,
   and `reload` (`strx reload` design, settled 2026-08-31 — the one
   mode-aware iteration command; absorbed `quickshell reload` outright).

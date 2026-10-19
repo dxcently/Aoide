@@ -237,7 +237,7 @@ At any moment, any agent, through any door:
 
 ```json
 { "rehearsal": { "song": "sonata", "draft": "neon-night", "step": "check",
-                 "take": 21, "parent": 9, "from": "A",
+                 "entry": 21, "parent": 9, "from": "A",
                  "marks": { "A": 9, "B": 14 } },
   "instruction": "Vision-check the live desktop: `strx screen shot`, verify
                   polarity agreement + widget/bar theme match.",
@@ -275,7 +275,7 @@ check during an active rehearsal is phase C, still design.
 - **Takes form a tree, not a line.** Each record carries `parent: <NNNN> |
   null`. Numbering is one monotone counter per draft — never renumbered,
   never per-branch; take 21 is take 21 wherever it hangs, so a selector
-  (`--take 21`) stays unambiguous forever. Ancestry is derived by walking
+  (`--entry 21`) stays unambiguous forever. Ancestry is derived by walking
   `parent` back to `null`; nothing is indexed.
 
   ```
@@ -313,9 +313,9 @@ check during an active rehearsal is phase C, still design.
 strx rice back                bare, on a tty: the picker (§7), the
                                 head's parent pre-selected as row 1 — one
                                 Enter is the one-step undo. Non-tty: a
-                                usage error naming `--take`/`--mark`,
+                                usage error naming `--entry`/`--mark`,
                                 never reads stdin.
-strx rice back --take 9       that take exactly; head := 9
+strx rice back --entry 9       that take exactly; head := 9
 strx rice back --mark A       resolve A via history/marks.json; head :=
                                 that take
 strx rice take list           the whole tree: numbers, parents, marks,
@@ -350,7 +350,7 @@ During an active rehearsal the hook door also appends to
 `stage/rehearsal-journal.jsonl`:
 
 ```json
-{ "take": 17, "sessionId": "…", "event": "PostToolUse",
+{ "entry": 17, "sessionId": "…", "event": "PostToolUse",
   "tool": "Edit", "drift": true }
 ```
 
@@ -469,13 +469,13 @@ same spelling. Resolution: **the picker wins on a tty**, because the
 picker's first row *is* the head's parent, pre-selected — the one-step
 undo is a single Enter away, and the picker is still there for anyone who
 wants to choose something else instead. Off a tty, `rice back` never opens
-the picker and never reads stdin: no selector (`--take`/`--mark`) given is
+the picker and never reads stdin: no selector (`--entry`/`--mark`) given is
 a straight usage error naming both flags, so a piped or agent invocation
 can never hang.
 
 | bare command on a tty | picker rows | on select |
 |---|---|---|
-| `rice back` | the whole take **tree** (§5.2) rendered flat and numbered for selection, head arrowed, marks bracketed — row 1 is the head's parent, pre-selected — plus a **second lane**, widget commits (recent git commits touching the song's widget bodies) | a take writes through the routing (same as `--take N`); a commit does `git checkout <rev> -- rices/<rice>/…` — working-tree restore, HEAD never moves |
+| `rice back` | the whole take **tree** (§5.2) rendered flat and numbered for selection, head arrowed, marks bracketed — row 1 is the head's parent, pre-selected — plus a **second lane**, widget commits (recent git commits touching the song's widget bodies) | a take writes through the routing (same as `--entry N`); a commit does `git checkout <rev> -- rices/<rice>/…` — working-tree restore, HEAD never moves |
 | `rice take diff` | history/marks to diff against | the diff, no write |
 | `aoide nix back` | journaled `{generation · rev · subject · age · dirty?}` | `git checkout <rev>` of the config repo; then **offers** the matching generation rollback as a second, separately-confirmed step |
 

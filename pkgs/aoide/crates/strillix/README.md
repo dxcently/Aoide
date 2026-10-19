@@ -457,17 +457,20 @@ serve --stdio`'s door loop).
 
 ## Start-up migration
 
-Every `strillix` run calls `aoide_storage::fs::migrate_root_once` first, so the
-rice tree is moved from `$AOIDE_ROOT/song/` into `$STRILLIX_ROOT` before any
-command reads it. A `song` that is already a marker file (a regular file, not a
-directory) means that move is done; `strillix` then touches nothing. Rice state
-held by both roots is refused: nothing moves, and `strillix` still runs on the
-strillix root.
+Every `strillix` run calls `aoide_storage::fs::migrate_root_once` first (state
+and log only). The rice tree moves from `$AOIDE_ROOT/song/` into
+`$STRILLIX_ROOT` only when asked: `STRILLIX_MIGRATE=1` (the home activation sets
+it on every switch) or `strx migrate`. A plain run with old state prints one
+line naming `strx migrate` and moves nothing. `strx migrate --check` reports
+the rice state (`settled`, `due`, or `both`) and moves nothing; `strx migrate`
+moves it and reports before and after. A `song` that is a marker file (a regular
+file, not a directory) means that move is done. Rice state held by both roots
+is refused: nothing moves, and `strillix` still runs on the strillix root.
 
 ## How it composes
 
 Command paths: onboard/rice/draft/mode/wallpaper/theme/quickshell/screen/
-shellbridge/notifications/take/element/secrets ask/pair ask/pair show/preview/
+shellbridge/notifications/take/element/migrate/secrets ask/pair ask/pair show/preview/
 preview set/preview declare/preview shot/preview tree/preview notes/icon/
 apps/clipboard/lock/lock hint — everything that paints, or that only a desktop needs.
 `element seed` (L-E1,

@@ -1123,9 +1123,9 @@ count.
   (hard cutover, no alias: `quickshell` now registers only `healthcheck`,
   the placeholder-screen watchdog), reading `stage/mode.json` to dispatch
   shell-reload-only (declarative) or snapshot-then-sync-then-reload
-  (staging/draft, the take hanging off `rices/<rice>/history/` when staged
+  (staging/draft, the entry hanging off `rices/<rice>/history/` when staged
   or the routed draft's own `history/` when drafted, deduped against the head
-  take so an unchanged reload mints nothing). `element seed` (L-E1,
+  entry so an unchanged reload mints nothing). `element seed` (L-E1,
   docs/architecture/ELEMENTS.md) renders a rice's committed
   `elements/*/element.json` — non-QML rice targets (waybar, dunst, anything
   with a config file) — into `run/elements/`. Strillix alone may shell out to
@@ -1407,13 +1407,15 @@ otherwise — skipping any file already present at the new path (a fresher
 sits in the same old directory. Guarded to run at most once per process;
 idempotent across repeated boots (`aoide-storage`'s
 `migrate_conducting_stage`, `fs.rs`). (2) L-C2: moves a pre-L-C2 host's
-`~/Aoide/{rice/stage,state,log}` trees wholesale into the new root's
-equivalents — each piece gated independently on its OWN override
-(`$AOIDE_STAGE_DIR`/`$AOIDE_STATE_DIR`/`$AOIDE_AUDIT_LOG`) being unset, so a
-host that already relocated one tree never has a sibling moved out from
-under it. Idempotent, and deliberately NOT wired into any path getter — the
-three real binaries (`aoide`, `aoided`, `strillix`) call it explicitly, once, at
-process start (`fs::migrate_root_once`; see that function's own doc for why
+`~/Aoide/{state,log}` trees wholesale into the new root's equivalents — each
+piece gated independently on its OWN override (`$AOIDE_STATE_DIR`/
+`$AOIDE_AUDIT_LOG`) being unset, so a host that already relocated one tree
+never has a sibling moved out from under it. Its rice half (the pre-L-C2
+`~/Aoide/song/stage` and the rice tree) is the rice move above, not this one.
+Idempotent, and deliberately NOT wired into any path getter — the three real
+binaries (`aoide`, `aoided`, `strillix`) call it explicitly, once, at process
+start (`fs::migrate_root_once`; the rice half, `fs::migrate_rice_root`, runs
+only in `strillix`, and only when asked; see that function's own doc for why
 a path getter is the wrong place to hang a process-wide side effect, the
 kind `with_stage_lock`'s pervasive fan-out makes unsafe there). Composes
 correctly with S1 in either order: whichever migration a given process's
@@ -1929,7 +1931,7 @@ alignment): the shell's layer (`AoideWallpaper.qml`) paints it at 1:1, and a
 preview of the desktop paints it shrunk the way it shrinks the screen it stands
 for, anchored the same way. A reader that shows FILES rather than the pick (a
 picture browser's thumbnails) may mirror the name rule for display. Only
-`wallpaper set` decides the fields; a take, a draft and a kept pick carry them
+`wallpaper set` decides the fields; an entry, a draft and a kept pick carry them
 verbatim. An external provider lays its picks out itself and reads neither
 field.
 
@@ -1968,7 +1970,7 @@ Writers, and the exact shape each leaves:
 | `strx wallpaper set --from-skwd --kind <static\|video\|we> <path\|id>` | the provider's own report, RECORDED: the shape above with `kind` as the provider named it, and no `position` or `tile` (the provider lays the picture out itself). Applies NOTHING back, and is a no-op with no write (exit 0, `recorded: false`) when the host's provider is not `skwd-wall` (the word in `/stage/wallpaper-provider` below), when the identity is this host's step-aside image (`AOIDE_SKWD_WALL_STANDIN`), or when the staged pick already names that same `(kind, identity)` for that rice. The ONLY writer exempt from the `declarative` lock: a provider's picker is not a stage writer, and refusing the record would leave this file describing something the screen is not showing |
 | `strx wallpaper set --clear` | the staged rice's own default, exactly as a re-stage of it writes it (its derivable wallpaper, or the file removed). Never keeps a pick; the envelope's `droppedPick` and `wallpaperStage` come from the marker read before the write |
 | `strx rice mode declarative` | NOTHING — a lock is not a rice switch. Its re-pin writes `theme.json` alone, and a pick stamped for another rice is hidden by the read-side rule rather than dropped |
-| `strx rice back <take>` | the target take's wallpaper value VERBATIM — a take minted while a pick stood restores it as a pick, `rice`, `position` and `tile` and all; a take with no wallpaper removes whatever stands |
+| `strx rice back <entry>` | the target entry's wallpaper value VERBATIM — an entry minted while a pick stood restores it as a pick, `rice`, `position` and `tile` and all; an entry with no wallpaper removes whatever stands |
 | `strx rice draft save <name>` | a verbatim copy into `rices/<rice>/drafts/<name>/wallpaper.json` (§4's drafts entry; never a routing target) |
 | the strillix lane's `home.activation.aoideSeedStage` | when the declared rice sets `aoide.theme.wallpaper`, `{"path": <that store path>, "rice": <declared>}` — the declared rice's own picture as the default — unless `wallpaper.json` already holds a pick for any rice, which is left byte-identical (`lib/wallpaper-seed.sh`, proved by `tests/wallpaper-seed/run.sh`). With no `aoide.theme.wallpaper` it writes NOTHING; the read-side rule above is what keeps a pick off another rice |
 | the greeter tree build (`modules/dendrites/greeter.nix`) | inside the tree only, `{"path": <tree>/rices/<owner>/wallpaper/<owner>-logon.{webp,png,jpg,jpeg}, "rice": <declared>}` when the face's rice ships a logon picture (`wallpaper/<owner>-logon.<ext>`, first match in that order). The greeter's `LockPreview` draws it as the logon background; the tree's `wallpaper/` folder rides along whole |
@@ -2258,7 +2260,7 @@ rices/sonata/drafts/neon-night/
 ```
 
 The rice tree lives under `$STRILLIX_ROOT/rices/` (`$STRILLIX_ROOT` defaults to
-`~/.strillix`); a rice's own `wallpaper/` picture folder and `history/` take
+`~/.strillix`); a rice's own `wallpaper/` picture folder and `history/` entry
 store sit beside its `theme.json`.
 
 **The rice-tree move and its marker.** The pre-rename `$AOIDE_ROOT/song/`
@@ -2272,6 +2274,13 @@ binary that opens `song/stage` fails with ENOTDIR and recreates nothing, and
 a new binary reads the marker as already migrated. A leftover keeps `song/`
 a directory and is narrated. When `song/` and `$STRILLIX_ROOT` both hold rice
 state, nothing moves; both are narrated and the strillix root is the live one.
+
+The move runs only when asked: the strillix binary runs it under `STRILLIX_MIGRATE=1`
+(the home activation sets it on every switch) and `strx migrate` runs it by
+hand. `strx migrate --check` reports the state (`settled`, `due` or `held by
+both roots`) and moves nothing. A plain run with old state prints one line
+naming `strx migrate` and carries on. The core `aoide` and `aoided` binaries
+never run it.
 
 No metadata file: the draft name is the directory name, the base rice is
 the directory it's nested under, and saved-at is `theme.json`'s mtime.
@@ -2308,21 +2317,21 @@ the routing and falling back to `staging` — switch modes first
 
 ### `rices/<rice>/history/NNNN.json` — **v1**
 
-One take: a full-content snapshot of the routed scope's `theme.json` (and
+One entry: a full-content snapshot of the routed scope's `theme.json` (and
 `wallpaper.json`, when the stage had one) plus its widget bodies, minted on
 every rehearsal write. The store is `rices/<rice>/history/` for a rice staged
 directly, and `rices/<rice>/drafts/<name>/history/` for a routed draft. `marks.json`
 and `head.json` sit beside the records.
 
 ```json
-{ "schemaVersion": "1", "take": 3, "parent": 2, "at": "2026-10-18T00:00:00Z",
+{ "schemaVersion": "1", "entry": 3, "parent": 2, "at": "2026-10-18T00:00:00Z",
   "sessionId": "s-1", "cause": "stage", "theme": { }, "wallpaper": { },
   "widgets": { } }
 ```
 
 `schemaVersion` is `"1"` on every save (`aoide_storage::history::HISTORY_SCHEMA_VERSION`).
-A take record without the stamp loads with an empty `schemaVersion`. `parent`
-is absent for a scope's first take.
+An entry record without the stamp loads with an empty `schemaVersion`. `parent`
+is absent for a scope's first entry.
 
 ### `/stage/terminal-colors.conf` — **v0**
 

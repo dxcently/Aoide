@@ -156,6 +156,7 @@ mod tests {
             "lock",
             "lock.hint",
             "mcp.serve",
+            "migrate",
             "onboard",
             "pair.ask",
             "pair.show",

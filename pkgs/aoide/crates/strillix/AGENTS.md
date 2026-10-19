@@ -390,13 +390,16 @@
   A new thing `Resolver` reads belongs in `inputs`. `--run` is CLI-only,
   because over another door it would hold the call open forever.
 
-- **The rice tree's start-up move is `aoideMigrateRoots`' job, and the
-  nix side never writes under `$AOIDE_ROOT/song`.** Every activation seed
+- **The rice tree moves only when asked, and `aoideMigrateRoots` is the
+  activation that asks.** The strillix binary runs `fs::migrate_rice_root`
+  from `rice_root_at_start` only under `STRILLIX_MIGRATE=1` or through
+  `strx migrate`; a plain run moves nothing. `aoideMigrateRoots` sets the flag
+  on `strillix --help` and runs before `writeBoundary`, so the move precedes
+  every seed. The nix side never writes under `$AOIDE_ROOT/song`: every seed
   reads `$STRILLIX_ROOT` (`aoided.nix` and `shellbridge.nix` tmpfiles name
-  `strillix.root/stage` only), and `aoideMigrateRoots` runs before
-  `writeBoundary`, so the move always precedes every seed. A file named
-  `$AOIDE_ROOT/song` is the moved marker (storage's `migrate_rice_tree`):
-  never add a nix or Rust path that creates `song/...` under `$AOIDE_ROOT`.
+  `strillix.root/stage` only). A file named `$AOIDE_ROOT/song` is the moved
+  marker (storage's `migrate_rice_tree`): never add a nix or Rust path that
+  creates `song/...` under `$AOIDE_ROOT`.
 
 ## Extension points
 

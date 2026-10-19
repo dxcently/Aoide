@@ -22,7 +22,7 @@ strx rice mode stage <name>                (real — unlocks staging, stages dec
 strx reload                                 (real — THE iteration command: reads
     ↓                                          stage/mode.json and reloads accordingly;
     ↓                                          staging snapshots the current rice —
-    ↓                                          deduped against the head take, so an
+    ↓                                          deduped against the head entry, so an
     ↓                                          unchanged reload mints nothing — syncs it
     ↓                                          live, and reloads Quickshell, all in one
     ↓                                          call; loop this with edits freely)
@@ -31,7 +31,7 @@ rice lint                                    (real — theme schema validation)
 strx rice mode draft <draft-name>           (real — ROUTES stage/theme.json into a saved
     ↓                                          draft via a symlink; forks it from the
     ↓                                          current stage if new, and takes a baseline
-    ↓                                          take of it; see Drafts below)
+    ↓                                          entry of it; see Drafts below)
     ⋯ iterate freely: edit → `strx reload` → look, no separate save step; every
        reload snapshots the routed draft too (undo for free via `rice back`, back to
        the entry baseline at the least); switch
@@ -135,9 +135,9 @@ draft-scoped, because nothing routes them through the `stage/theme.json`
 symlink the way palette/wallpaper values are routed. Practically: editing a
 widget file while routed into ANY draft of that rice mutates what EVERY
 draft of that rice renders, not just the one currently live — there is no
-per-draft widget fork to isolate the edit into. `strx reload`'s take (below)
+per-draft widget fork to isolate the edit into. `strx reload`'s entry (below)
 still captures widget bodies alongside theme+wallpaper on every mint, in every
-mode; it is the take store, not the draft mechanism, that remembers them.
+mode; it is the entry store, not the draft mechanism, that remembers them.
 
 Outside the git checkout entirely — the runtime root owns
 `rices/*/drafts/`, same as `/stage/` — and runtime state by
@@ -168,7 +168,7 @@ the stage at it.
   `rices/<rice>/drafts/<name>/theme.json` (`<rice>` auto-resolved off
   the current stage, same as `rice mode stage`'s no-arg form). Forks the
   draft from the current stage first if it's a new name. Sets the marker to
-  `{mode: draft, rice, draft: <name>}`, then mints a baseline take of the
+  `{mode: draft, rice, draft: <name>}`, then mints a baseline entry of the
   draft as entered (none when it equals the head). Refuses while `rice mode
   declarative` is locked.
 - **`rice draft save <name>`** — an INDEPENDENT command: explicitly forks

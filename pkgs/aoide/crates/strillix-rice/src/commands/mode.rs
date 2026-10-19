@@ -560,7 +560,7 @@ fn handle_mode_draft(inv: &Invocation) -> Outcome {
     changed.push(mode_marker_path().to_string_lossy().into_owned());
 
     // The baseline: a take of the draft as entered, so the first edit has
-    // something to go back to (`rice back --take 1`). After the marker, which
+    // something to go back to (`rice back --entry 1`). After the marker, which
     // `history::resolve_scope` reads; deduped against the head, so re-entering an
     // unchanged draft mints nothing; never fatal, the route is already made.
     let mut out = Outcome::ok(
@@ -569,7 +569,7 @@ fn handle_mode_draft(inv: &Invocation) -> Outcome {
     )
     .changed(changed)
     .with_data(json!({ "mode": "draft", "rice": rice, "draft": name }));
-    super::history::attach_take(&mut out, &marker, super::history::snapshot_if_identical_to_head("rice.mode.draft", "enter"));
+    super::history::attach_entry(&mut out, &marker, super::history::snapshot_if_identical_to_head("rice.mode.draft", "enter"));
     out
 }
 
@@ -1610,7 +1610,7 @@ mod tests {
 
         let out = handle_mode_draft(&inv(&["rice", "mode", "draft"], &["neon-night"]));
         assert_eq!(out.status, Status::Ok, "{:?}", out.data);
-        assert_eq!(out.data.as_ref().unwrap()["take"], 1);
+        assert_eq!(out.data.as_ref().unwrap()["entry"], 1);
         assert!(out.changed.iter().any(|c| c.ends_with("neon-night/history/0001.json")), "{:?}", out.changed);
 
         let take = aoide_storage::history::load_history("sonata", Some("neon-night"), 1).unwrap();
@@ -1631,7 +1631,7 @@ mod tests {
 
         let out = handle_mode_draft(&inv(&["rice", "mode", "draft"], &["neon-night"]));
         assert_eq!(out.status, Status::Ok, "{:?}", out.data);
-        assert!(out.data.as_ref().unwrap()["take"].is_null());
+        assert!(out.data.as_ref().unwrap()["entry"].is_null());
         assert_eq!(aoide_storage::history::list_history("sonata", Some("neon-night")).len(), 1);
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -1648,7 +1648,7 @@ mod tests {
 
         let out = handle_mode_draft(&inv(&["rice", "mode", "draft"], &["neon-night"]));
         assert_eq!(out.status, Status::Ok, "{:?}", out.data);
-        assert_eq!(out.data.as_ref().unwrap()["take"], 1);
+        assert_eq!(out.data.as_ref().unwrap()["entry"], 1);
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -1667,10 +1667,10 @@ mod tests {
         )
         .unwrap();
         let reloaded = super::super::history::snapshot_if_identical_to_head("reload", "reload").unwrap().unwrap();
-        assert_eq!((reloaded.take, reloaded.parent), (2, Some(1)));
+        assert_eq!((reloaded.entry, reloaded.parent), (2, Some(1)));
 
         let mut back = inv(&["rice", "back"], &[]);
-        back.flags.insert("take".to_string(), "1".to_string());
+        back.flags.insert("entry".to_string(), "1".to_string());
         let out = super::super::history::handle_rice_back(&back);
         assert_eq!(out.status, Status::Ok, "{:?}", out.data);
         assert_eq!(read(), forked);

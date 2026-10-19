@@ -291,7 +291,9 @@
   ITS migration is safe to hang off its own resolution while `root`'s is
   not. The three real binaries call `migrate_root_once()` once, explicitly,
   at the top of their own `main()` instead (`crates/cli/src/bin/{aoide,
-  aoided}.rs`, `crates/strillix/src/bin/strillix.rs`) — a test may call it directly
+  aoided}.rs`, `crates/strillix/src/bin/strillix.rs`); it moves only
+  `state/` and `log` (and the pre-rename `~/.local/state/lyra` link tree),
+  never the rice tree. A test may call it directly
   too (it is a plain idempotent function, no `Once`/env-isolation dance
   needed, unlike `migrate_conducting_stage`'s own test suite). A move that
   fails is narrated and leaves the old tree in place. Its one `Err` is a
@@ -301,6 +303,15 @@
   they could not make private. A `state/` that is absent is not created
   there, and one whose parent is not a directory counts as absent, so the
   narrated failure stays the failure.
+- **The rice move is opt-in: `fs::migrate_rice_root`, reached only through
+  `fs::rice_root_at_start` under `STRILLIX_MIGRATE=1` or `strx migrate`.**
+  `rice_root_at_start` is the strillix binary's start-up hook. Without the
+  flag it moves nothing and writes no marker; when old rice state sits under
+  `$AOIDE_ROOT/song` it prints one line naming `strx migrate`. `rice_status`
+  reads the state from disk without moving (`Settled`, `Due(paths)`,
+  `Both(paths)`), and `strx migrate --check` reports it. Never call
+  `migrate_rice_root` from a library getter or a core binary: a plain start
+  must never move a live rice tree.
 - **The rice tree's move leaves a marker, and two states refuse it
   (`fs::migrate_rice_tree`).** A `$AOIDE_ROOT/song` that is a FILE is the
   marker: the move is done, so nothing moves and nothing is narrated. Do not
@@ -396,13 +407,13 @@
   `fs`.** A relative or empty value is ignored outright and resolution falls
   to `$AOIDE_ROOT/config.toml` — a runtime path is never resolved against an
   arbitrary cwd. Don't add a cwd-relative tier "for convenience".
-- **`takes`/`mode` are a deliberate charter smudge, not an oversight.** Don't
+- **`history`/`mode` are a deliberate charter smudge, not an oversight.** Don't
   "clean them up" into a paint-adjacent crate without re-reading
   `docs/architecture/PACKAGE-LAYOUT.md`'s "Charter exceptions" note — `mode`
   is read by `shellbridge` (which stays in `conduct`), so moving it would
   create the cross-crate edge the split exists to avoid.
-- **`takes`' functions take `draft: Option<&str>`, not `&str`** (`strillix
-  reload` design, settled 2026-08-31): `None` resolves the take root to
+- **`history`' functions take `draft: Option<&str>`, not `&str`** (`strillix
+  reload` design, settled 2026-08-31): `None` resolves the entry root to
   `rices/<rice>/history/` (staging mode, no draft to nest under); `Some`
   resolves it to `rices/<rice>/drafts/<draft>/history/`, the original
   shape. `history_dir` is the one function that branches on it; every other

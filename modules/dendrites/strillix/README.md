@@ -154,8 +154,10 @@ stay the runtime's own. `runtime.nix` publishes the filled slots as
   seeds (`aoideDeployQml`, `aoideSeedStage`, `aoideSeedRices` — the reload
   reads the runtime rices), which is what puts the reload between the seed
   and the shell's restart. `aoideMigrateRoots` runs before every seed and
-  before `strillixRice`: it runs `strillix --help` once, so the pre-rename
-  roots move into the new ones before any seed creates them (a dry run skips it).
+  before `strillixRice`: it runs `strillix --help` once under
+  `STRILLIX_MIGRATE=1`, so the pre-rename roots move into the new ones before any
+  seed creates them (a dry run skips it). Outside that activation the rice move
+  waits for `strx migrate`.
   Once the rice tree has moved, `$AOIDE_ROOT/song` is a marker file, and the
   migration reads it as already done. Nothing here creates `song/` again.
 

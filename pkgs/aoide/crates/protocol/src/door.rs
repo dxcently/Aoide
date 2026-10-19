@@ -314,7 +314,7 @@ pub const AOIDE_ONLY_HEADS: &[&str] = &[
 ];
 pub const STRILLIX_ONLY_HEADS: &[&str] = &[
     "apps", "clipboard", "component", "wallpaper", "element", "notifications", "icon", "theme", "lock", "preview", "quickshell", "reload",
-    "rice", "screen", "shellbridge",
+    "rice", "screen", "shellbridge", "migrate",
 ];
 pub const SHARED_HEADS: &[&str] = &["guide", "mcp", "onboard", "pair", "schema", "secrets"];
 

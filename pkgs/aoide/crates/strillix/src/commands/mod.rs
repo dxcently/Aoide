@@ -60,6 +60,7 @@ pub mod icon;
 pub mod infra;
 pub mod lock;
 pub mod meta;
+pub mod migrate;
 pub mod onboard;
 pub mod pair;
 pub mod preview;
@@ -109,7 +110,7 @@ const LAYOUT: Layout = Layout {
             ],
         ),
         ("Agent interfaces", &[("mcp", ""), ("schema", "")]),
-        ("System", &[("shellbridge", ""), ("quickshell", ""), ("component", "")]),
+        ("System", &[("shellbridge", ""), ("quickshell", ""), ("component", ""), ("migrate", "Move old rice state into the strillix root, or report it with --check")]),
     ],
 };
 
@@ -131,7 +132,7 @@ pub fn all() -> Registry {
     strillix_rice::commands::reload::register(&mut r); // reload — the one mode-aware iteration command (absorbed quickshell reload)
     aoide_screen::commands::register(&mut r); // screen info, shot, point *, ocr, diff, send (own crate since P-A1)
     aoide_conduct::commands::notifications::register(&mut r); // notifications push — dunst's script hook into the notification ledger
-    strillix_rice::commands::history::register(&mut r); // rice history/take.*, rice back — explicit take-store snapshot
+    strillix_rice::commands::history::register(&mut r); // rice history, rice back — explicit entry-store snapshot
     strillix_rice::commands::elements::register(&mut r); // element seed — full render into run/elements/ (L-E1)
     secrets::register(&mut r); // secrets ask — the rice-shaped TOTP code-entry popup (P3)
     pair::register(&mut r); // pair ask + pair show — the pairing-ceremony's own two dialog shapes
@@ -141,6 +142,7 @@ pub fn all() -> Registry {
     apps::register(&mut r); // apps list/show/publish — installed desktop apps with resolved icons, rice/stage/apps.json
     clipboard::register(&mut r); // clipboard delete/clear — remove cliphist history entries and their cached thumbnails
     lock::register(&mut r); // lock + lock.hint — the one lock entry (the shell's LockHost for a rice with a face, else hyprlock) and logind's LockedHint
+    migrate::register(&mut r); // migrate + --check — the rice state's move, run by hand (the start-up hook runs it only under STRILLIX_MIGRATE=1)
     component::register(&mut r); // component — a cross-component call: the slot's provider answers the verb (strillix shell, or its declared argv)
 
     r.arrange(LAYOUT);

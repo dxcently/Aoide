@@ -44,7 +44,7 @@
 - **`MACHINE_RUNTIME_DIRS` names top-level directories, in both consumers.**
   `trees_equal` filters the list at the rice folder's root call only, and
   `copy_tree_atomic`'s `skip` matches the root's entries by name only (before
-  the file-type branch, so a symlinked or file-typed `takes` is skipped too)
+  the file-type branch, so a symlinked or file-typed `history` is skipped too)
   and passes `&[]` down; a rice's own `widgets/history/` is content, never
   scratch. `strx rice declare` is the second consumer: the checkout carries
   the rice, not the machine's undo history and scratch, so it copies through
@@ -120,7 +120,7 @@
 - **`wallpaper::pick_tiles` is the one tile rule, and `stage_pick` is its one
   writer.** `tile` and `position` are decided for a still by `wallpaper set`
   alone: the record door (`--from-skwd`) and the rice defaults never carry
-  them, and every copy (a take, a draft, a kept pick) carries them verbatim
+  them, and every copy (an entry, a draft, a kept pick) carries them verbatim
   without recomputing. Nothing reading the PICK re-derives the `_tile` name
   rule; it takes `tile` as written (CONTRACTS.md §4).
 - **Who PAINTS a pick is the HOST's choice — a provider, never a rice's
@@ -336,7 +336,7 @@
   `valid_rice_name` or are reported skipped. The stage-time seed now refuses
   a shipped copy containing a symlink (the old plain copy carried it over)
   and reports nothing seeded when refresh skipped the folder.
-- **`aoide_storage::takes`' functions take `draft: Option<&str>`, not
+- **`aoide_storage::history`' functions take `draft: Option<&str>`, not
   `&str` — `None` means staging-mode (`rices/<rice>/history/`), `Some`
   means a routed draft (`rices/<rice>/drafts/<name>/history/`).**
   `commands/history.rs::resolve_scope` is the one place that resolves which
@@ -344,7 +344,7 @@
   file threads its `Option<&str>` straight through rather than re-deriving
   it. `HistoryRecord` also carries `widgets: Value` (the rice's widget bodies
   at mint time, `widgets.rs::snapshot_widget_bodies`) — captured on every
-  take in both scopes, but never restored by `rice back` (see the
+  entry in both scopes, but never restored by `rice back` (see the
   `handle_rice_stage` bullet above: widget bodies stay git's substrate,
   deliberately out of the revert path).
 - **`health.rs` is a second liveness mechanism, deliberately — not a

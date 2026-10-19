@@ -1,4 +1,4 @@
-//! The take store: `rices/<rice>/drafts/<draft>/history/` when routed into
+//! The entry store: `rices/<rice>/drafts/<draft>/history/` when routed into
 //! a draft, `rices/<rice>/history/` when staged directly with no draft
 //! (`strillix reload` design, settled 2026-08-31 — history/back's staging-mode
 //! reach; see [`history_dir`]) — full-content snapshots of the routed scope's
@@ -8,33 +8,33 @@
 //! (`references/fleshing-out-aoide-ricing.md` §5.2, phase A; the
 //! branch-from-any-mark ask this store exists to answer).
 //!
-//! **The model, in one sentence:** a take carries `parent: Option<u32>`
-//! (`None` only for the very first take of a scope); the number is a single
+//! **The model, in one sentence:** an entry carries `parent: Option<u32>`
+//! (`None` only for the very first entry of a scope); the number is a single
 //! monotone counter, NEVER renumbered and NEVER per-branch; a per-scope
-//! `history/head.json` cursor names where the NEXT take will hang. Reverting
+//! `history/head.json` cursor names where the NEXT entry will hang. Reverting
 //! moves the cursor; the next snapshot parents off wherever it points.
-//! Branching needs no name, no registry, no command — two takes sharing a
+//! Branching needs no name, no registry, no command — two entries sharing a
 //! parent simply IS a branch, discovered by scanning the directory this
 //! module already reads, never indexed.
 //!
-//! **Marks live OUTSIDE the take record**, in a `history/marks.json` map
+//! **Marks live OUTSIDE the entry record**, in a `history/marks.json` map
 //! (`{"A": 9}`) — overruling this feature's own plan, which first tried a
 //! `mark` field on `HistoryRecord` (advisor verdict, fork 4). A field would
-//! make moving a letter a TWO-file rewrite (clear the old take's field,
+//! make moving a letter a TWO-file rewrite (clear the old entry's field,
 //! stamp the new one); a crash between those two writes either duplicates
-//! the letter (both takes claim it) or loses it (neither does), and no
+//! the letter (both entries claim it) or loses it (neither does), and no
 //! atomic fix exists for two sequential file writes. The map makes a move
-//! ONE `atomic_write` of one file. The second win: take records stay
+//! ONE `atomic_write` of one file. The second win: entry records stay
 //! write-once from the moment `save_history` first writes them — nothing ever
-//! opens a take file to mutate it — which keeps drift comparison (a
-//! parse-and-compare against a take's `theme`/`wallpaper`) and any future
-//! content-hashing trivially safe, because "the file on disk" and "the take
+//! opens an entry file to mutate it — which keeps drift comparison (a
+//! parse-and-compare against an entry's `theme`/`wallpaper`) and any future
+//! content-hashing trivially safe, because "the file on disk" and "the entry
 //! as minted" are never allowed to diverge.
 //!
 //! **Every function here is UNLOCKED.** `crate::fs::with_stage_lock` nests for
 //! the thread that already holds it (`fs.rs`), so this module still never
 //! calls it itself — one acquire belongs around the WHOLE multi-step body a
-//! caller owns (take-number allocation is read max, write max+1; wrapping only
+//! caller owns (entry-number allocation is read max, write max+1; wrapping only
 //! the cores would make each step atomic and the operation not), and a caller
 //! that wraps its own body in one `with_stage_lock` and calls these cores
 //! inside it must find them lock-free rather than nesting a no-op per call.
@@ -51,12 +51,12 @@ use serde_json::Value;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
-/// A take store's root, either of two places depending on `draft`
-/// (`strillix reload` design, settled 2026-08-31 — the staging-mode take/back
+/// An entry store's root, either of two places depending on `draft`
+/// (`strillix reload` design, settled 2026-08-31 — the staging-mode entry/back
 /// reach): `rices/<rice>/drafts/<draft>/history/`, nested under the draft
 /// it snapshots, when routed into one; `rices/<rice>/history/`, a sibling
 /// of `drafts/`, when the rice is staged directly with no draft routed —
-/// staging mode has no draft directory to nest under, so its takes hang off
+/// staging mode has no draft directory to nest under, so its entries hang off
 /// the rice itself. `None` is NOT "no draft yet" in some third sense; it IS
 /// the staging-mode scope, resolved by [`crate::commands`-level callers]
 /// (`strillix-rice`'s `commands/history.rs::resolve_scope`) straight off
@@ -68,15 +68,15 @@ pub fn history_dir(rice: &str, draft: Option<&str>) -> PathBuf {
     }
 }
 
-/// One take's record file: `history/NNNN.json`, 4-digit zero-padded. The pad
+/// One entry's record file: `history/NNNN.json`, 4-digit zero-padded. The pad
 /// is cosmetic only — [`list_history`]/[`next_history_number`] sort by the
-/// PARSED `take` field, never the filename, so a 5th-digit take (`10000`)
+/// PARSED `entry` field, never the filename, so a 5th-digit entry (`10000`)
 /// still orders correctly once the store outgrows the pad width.
 pub fn history_path(rice: &str, draft: Option<&str>, n: u32) -> PathBuf {
     history_dir(rice, draft).join(format!("{n:04}.json"))
 }
 
-/// The per-scope head cursor: `history/head.json` — where the NEXT take will
+/// The per-scope head cursor: `history/head.json` — where the NEXT entry will
 /// hang. Per-scope (rice when staged, draft when drafted), not a field on
 /// the global `mode.json` marker (advisor verdict, fork 3): the cursor is
 /// state that must survive a mode round-trip through Staging/Declarative/
@@ -86,24 +86,25 @@ pub fn head_path(rice: &str, draft: Option<&str>) -> PathBuf {
     history_dir(rice, draft).join("head.json")
 }
 
-/// The mark map: `history/marks.json`, a flat `{"<letter>": <take>}` object —
+/// The mark map: `history/marks.json`, a flat `{"<letter>": <entry>}` object —
 /// see the module doc for why marks live here and not on `HistoryRecord`.
 pub fn marks_path(rice: &str, draft: Option<&str>) -> PathBuf {
     history_dir(rice, draft).join("marks.json")
 }
 
-/// One take: a full-content snapshot of the routed draft's `theme.json`
+/// One entry: a full-content snapshot of the routed draft's `theme.json`
 /// (and `wallpaper.json`, when the stage had one) at the moment it was minted,
 /// plus the tree edge (`parent`) and provenance (`at`/`session_id`/`cause`).
 /// Write-once once [`save_history`] has landed it — see the module doc.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct HistoryRecord {
     /// The record's format version ([`HISTORY_SCHEMA_VERSION`]). Stamped by
-    /// [`save_history`]; a take written before the field existed reads as `""`.
+    /// [`save_history`]; an entry written before the field existed reads as `""`.
     #[serde(rename = "schemaVersion", default)]
     pub schema_version: String,
-    pub take: u32,
-    /// `None` only for a draft's very first take. Ancestry is derived by
+    #[serde(alias = "take")]
+    pub entry: u32,
+    /// `None` only for a draft's very first entry. Ancestry is derived by
     /// walking this back to `None` ([`ancestry`]) — never indexed, never a
     /// stored children list (a child list is one scan of the same
     /// directory [`list_history`] already reads).
@@ -117,8 +118,8 @@ pub struct HistoryRecord {
     /// (`crate::records::SessionRecord`).
     #[serde(rename = "sessionId", default, skip_serializing_if = "Option::is_none")]
     pub session_id: Option<String>,
-    /// What minted this take: `"stage"`, `"wallpaper-set"`, `"explicit"`,
-    /// `"drift"` — the take-store's own event vocabulary, distinct from an
+    /// What minted this entry: `"stage"`, `"wallpaper-set"`, `"explicit"`,
+    /// `"drift"` — the entry-store's own event vocabulary, distinct from an
     /// `Outcome` reason string (this crate has no `Outcome`).
     #[serde(default)]
     pub cause: String,
@@ -128,13 +129,13 @@ pub struct HistoryRecord {
     pub wallpaper: Option<Value>,
     /// `{ "<rices-relative widgets/ path>": "<utf-8 file content>" }` —
     /// the rice's widget QML bodies at mint time (`strillix reload` design,
-    /// settled 2026-08-31: "Takes gain WIDGET BODIES in both modes", closing
+    /// settled 2026-08-31: "Entries gain WIDGET BODIES in both modes", closing
     /// the gap that widget QML was never snapshotted). Rice-scoped, not
     /// draft-scoped, matching the fact that widget bodies themselves are
     /// rice-scoped (a draft forks the dress — theme+wallpaper — never the
-    /// widgets). `#[serde(default)]` reads an old take file predating this
+    /// widgets). `#[serde(default)]` reads an old entry file predating this
     /// field as `{}` (via [`default_widgets`]), the same "no widgets" shape
-    /// a fresh capture of a widget-less rice produces — so an old take never
+    /// a fresh capture of a widget-less rice produces — so an old entry never
     /// spuriously reads as "widgets changed" against a new one.
     #[serde(default = "default_widgets")]
     pub widgets: Value,
@@ -153,33 +154,33 @@ struct HeadFile {
     head: Option<u32>,
 }
 
-/// Read one take by number. `None` on a missing file, invalid JSON, or a
+/// Read one entry by number. `None` on a missing file, invalid JSON, or a
 /// path that fails to parse as a `HistoryRecord` — the same tolerate-missing
 /// discipline `node_store::load_nodes` / `mode::load_mode_marker` use for
-/// any other stage-adjacent file: an absent take is "not there", never an
+/// any other stage-adjacent file: an absent entry is "not there", never an
 /// error this deep in the store.
 pub fn load_history(rice: &str, draft: Option<&str>, n: u32) -> Option<HistoryRecord> {
     let raw = std::fs::read_to_string(history_path(rice, draft, n)).ok()?;
     serde_json::from_str(&raw).ok()
 }
 
-/// Atomic-write one take record to its `NNNN.json`. Takes are write-once in
-/// practice (nothing ever calls this twice for the same `record.take`), but
+/// Atomic-write one entry record to its `NNNN.json`. Entries are write-once in
+/// practice (nothing ever calls this twice for the same `record.entry`), but
 /// nothing here enforces that — the caller allocating the number via
 /// [`next_history_number`] under its own lock is what makes it true.
-/// A take record's format version (CONTRACTS.md §4's `history/NNNN.json`).
+/// An entry record's format version (CONTRACTS.md §4's `history/NNNN.json`).
 pub const HISTORY_SCHEMA_VERSION: &str = "1";
 
 pub fn save_history(rice: &str, draft: Option<&str>, record: &HistoryRecord) -> Result<(), String> {
     let stamped = HistoryRecord { schema_version: HISTORY_SCHEMA_VERSION.to_string(), ..record.clone() };
     let body = serde_json::to_string_pretty(&stamped)
-        .map_err(|e| format!("serialize take {}: {e}", record.take))?
+        .map_err(|e| format!("serialize entry {}: {e}", record.entry))?
         + "\n";
-    let path = history_path(rice, draft, record.take);
+    let path = history_path(rice, draft, record.entry);
     atomic_write(&path, &body).map_err(|e| format!("{}: {e}", path.display()))
 }
 
-/// Every take on disk, sorted by the PARSED `take` number — never by
+/// Every entry on disk, sorted by the PARSED `entry` number — never by
 /// filename. Filename-lexicographic order breaks the instant a store
 /// crosses five digits (`"10000.json"` sorts before `"0002.json"` as a
 /// string), which would silently reorder `rice history list`'s tree and hand
@@ -189,7 +190,7 @@ pub fn save_history(rice: &str, draft: Option<&str>, record: &HistoryRecord) -> 
 /// a stray `NNNN.tmp.<pid>` atomic-write leftover — its stem is
 /// `"NNNN.tmp"`, which fails the digit test) is silently skipped, as is any
 /// `NNNN.json` that fails to parse as a `HistoryRecord` — a half-written or
-/// hand-corrupted take is dropped from the listing rather than wedging
+/// hand-corrupted entry is dropped from the listing rather than wedging
 /// every reader of the store.
 pub fn list_history(rice: &str, draft: Option<&str>) -> Vec<HistoryRecord> {
     let dir = history_dir(rice, draft);
@@ -208,42 +209,42 @@ pub fn list_history(rice: &str, draft: Option<&str>) -> Vec<HistoryRecord> {
             serde_json::from_str::<HistoryRecord>(&raw).ok()
         })
         .collect();
-    out.sort_by_key(|t| t.take);
+    out.sort_by_key(|t| t.entry);
     out
 }
 
-/// The next take number to mint: the highest existing `take` plus one, or
+/// The next entry number to mint: the highest existing `entry` plus one, or
 /// `1` for an empty store. Gap-tolerant by construction — a store holding
-/// `0001` and `0004` (takes `0002`/`0003` pruned away) yields `5`, never
-/// "the first free gap"; a take number is a mint timestamp, not a slot to
+/// `0001` and `0004` (entries `0002`/`0003` pruned away) yields `5`, never
+/// "the first free gap"; an entry number is a mint timestamp, not a slot to
 /// reuse.
 pub fn next_history_number(rice: &str, draft: Option<&str>) -> u32 {
     list_history(rice, draft)
         .iter()
-        .map(|t| t.take)
+        .map(|t| t.entry)
         .max()
         .map(|m| m + 1)
         .unwrap_or(1)
 }
 
-/// The current head: the take the next snapshot will parent off, and the
-/// take a bare revert-undo (§5.2) resolves against. An absent `head.json`
-/// falls back to the highest existing take number, exactly as an absent
-/// take store falls back to `None` — but so does a PRESENT `head.json`
-/// naming a take that no longer exists (a crash between pruning a take and
+/// The current head: the entry the next snapshot will parent off, and the
+/// entry a bare revert-undo (§5.2) resolves against. An absent `head.json`
+/// falls back to the highest existing entry number, exactly as an absent
+/// entry store falls back to `None` — but so does a PRESENT `head.json`
+/// naming an entry that no longer exists (a crash between pruning an entry and
 /// rewriting the head that pointed at it, or a hand edit): a stale head
 /// must never wedge the store on its own (advisor verdict, D3a), so both
 /// cases fall back the same way, by construction, rather than the caller
 /// having to special-case "file present but pointing at nothing".
 pub fn load_head(rice: &str, draft: Option<&str>) -> Option<u32> {
-    let takes = list_history(rice, draft);
+    let entries = list_history(rice, draft);
     let claimed = std::fs::read_to_string(head_path(rice, draft))
         .ok()
         .and_then(|raw| serde_json::from_str::<HeadFile>(&raw).ok())
         .and_then(|h| h.head);
     match claimed {
-        Some(n) if takes.iter().any(|t| t.take == n) => Some(n),
-        _ => takes.iter().map(|t| t.take).max(),
+        Some(n) if entries.iter().any(|t| t.entry == n) => Some(n),
+        _ => entries.iter().map(|t| t.entry).max(),
     }
 }
 
@@ -259,7 +260,7 @@ pub fn save_head(rice: &str, draft: Option<&str>, n: u32) -> Result<(), String> 
 /// Read the mark map, tolerating a missing/corrupt file as empty — the same
 /// "absent means nothing registered yet" discipline every other stage-
 /// adjacent registry in this crate uses. Callers that need marks to only
-/// ever name a take that still exists (A6/A7/A5's read paths) filter this
+/// ever name an entry that still exists (A6/A7/A5's read paths) filter this
 /// against [`list_history`] themselves; pruning is the only writer that
 /// removes a stale entry ([`save_marks`] after a prune's own rewrite).
 pub fn load_marks(rice: &str, draft: Option<&str>) -> BTreeMap<String, u32> {
@@ -271,8 +272,8 @@ pub fn load_marks(rice: &str, draft: Option<&str>) -> BTreeMap<String, u32> {
 
 /// Atomic-write the mark map — ONE write for the whole map, which is the
 /// entire point of storing marks this way: stamping a letter, or moving one
-/// off a take and onto another, is a single `atomic_write` of one file, not
-/// two sequential take-record rewrites that a crash could tear in half.
+/// off an entry and onto another, is a single `atomic_write` of one file, not
+/// two sequential entry-record rewrites that a crash could tear in half.
 pub fn save_marks(rice: &str, draft: Option<&str>, marks: &BTreeMap<String, u32>) -> Result<(), String> {
     let body = serde_json::to_string_pretty(marks)
         .map_err(|e| format!("serialize marks.json: {e}"))?
@@ -282,17 +283,17 @@ pub fn save_marks(rice: &str, draft: Option<&str>, marks: &BTreeMap<String, u32>
 }
 
 /// Walk `parent` from `n` back to the root (`None`), inclusive of `n`
-/// itself. Two different takes' ancestries sharing a tail is exactly what a
+/// itself. Two different entries' ancestries sharing a tail is exactly what a
 /// branch looks like from this function's point of view — it needs no
-/// notion of "branch" to answer "what does this take descend from".
+/// notion of "branch" to answer "what does this entry descend from".
 ///
-/// Cycle-guarded: a hand-edited take file could self-parent (or form a
+/// Cycle-guarded: a hand-edited entry file could self-parent (or form a
 /// longer loop), which would otherwise spin forever. The walk aborts the
-/// instant it revisits a take number, and is additionally capped at
-/// `takes.len() + 1` steps as a belt-and-suspenders bound — a store with
+/// instant it revisits an entry number, and is additionally capped at
+/// `entries.len() + 1` steps as a belt-and-suspenders bound — a store with
 /// `k` records can never have a genuine acyclic chain longer than `k`.
-pub fn ancestry(takes: &[HistoryRecord], n: u32) -> Vec<u32> {
-    let cap = takes.len() + 1;
+pub fn ancestry(entries: &[HistoryRecord], n: u32) -> Vec<u32> {
+    let cap = entries.len() + 1;
     let mut out = Vec::new();
     let mut current = Some(n);
     while let Some(cur) = current {
@@ -300,36 +301,36 @@ pub fn ancestry(takes: &[HistoryRecord], n: u32) -> Vec<u32> {
             break;
         }
         out.push(cur);
-        current = takes.iter().find(|t| t.take == cur).and_then(|t| t.parent);
+        current = entries.iter().find(|t| t.entry == cur).and_then(|t| t.parent);
     }
     out
 }
 
-/// Every take whose `parent` is `n`, ascending. Derived by one scan, never
+/// Every entry whose `parent` is `n`, ascending. Derived by one scan, never
 /// stored — the plan's whole argument for why a parent pointer is enough
 /// and a children index would be redundant machinery.
-pub fn children(takes: &[HistoryRecord], n: u32) -> Vec<u32> {
-    let mut out: Vec<u32> = takes
+pub fn children(entries: &[HistoryRecord], n: u32) -> Vec<u32> {
+    let mut out: Vec<u32> = entries
         .iter()
         .filter(|t| t.parent == Some(n))
-        .map(|t| t.take)
+        .map(|t| t.entry)
         .collect();
     out.sort_unstable();
     out
 }
 
 /// The prune splice (§7.1): drop `removed` from the list and re-parent its
-/// direct children onto `removed`'s own parent, so pruning a take never
+/// direct children onto `removed`'s own parent, so pruning an entry never
 /// orphans or breaks the ancestry of anything that survives it — ancestry
 /// degrades to "further back", never to broken. Pure and IO-free so the
 /// caller (A9's `rice history prune`) gets this already unit-tested and can
 /// drive the actual file deletion off its return value without re-deriving
 /// the splice itself.
-pub fn reparent(takes: &[HistoryRecord], removed: u32) -> Vec<HistoryRecord> {
-    let removed_parent = takes.iter().find(|t| t.take == removed).and_then(|t| t.parent);
-    takes
+pub fn reparent(entries: &[HistoryRecord], removed: u32) -> Vec<HistoryRecord> {
+    let removed_parent = entries.iter().find(|t| t.entry == removed).and_then(|t| t.parent);
+    entries
         .iter()
-        .filter(|t| t.take != removed)
+        .filter(|t| t.entry != removed)
         .cloned()
         .map(|mut t| {
             if t.parent == Some(removed) {
@@ -362,10 +363,10 @@ mod tests {
         ("sonata".to_string(), "neon-night".to_string())
     }
 
-    fn rec(take: u32, parent: Option<u32>) -> HistoryRecord {
+    fn rec(entry: u32, parent: Option<u32>) -> HistoryRecord {
         HistoryRecord {
             schema_version: String::new(),
-            take,
+            entry,
             parent,
             at: "2026-08-18T00:00:00Z".to_string(),
             session_id: None,
@@ -379,10 +380,10 @@ mod tests {
     // ── save/load: a record round-trips through atomic_write, parent intact ──
 
     #[test]
-    fn a_take_record_round_trips_through_atomic_write_with_its_parent_pointer_intact() {
+    fn a_entry_record_round_trips_through_atomic_write_with_its_parent_pointer_intact() {
         let _g = env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
-        let (rice, draft) = routed("takes-roundtrip");
+        let (rice, draft) = routed("entries-roundtrip");
 
         let mut record = rec(9, Some(1));
         record.session_id = Some("sess-abc".to_string());
@@ -394,25 +395,25 @@ mod tests {
         assert_eq!(back, stamped, "the record comes back as saved, stamped with its version");
         assert_eq!(back.parent, Some(1), "the parent pointer survives the round trip");
 
-        // A take with no parent omits the field entirely rather than writing
+        // An entry with no parent omits the field entirely rather than writing
         // a literal `null` — matches ModeMarker's additive discipline.
         let raw = std::fs::read_to_string(history_path(&rice, Some(&draft), 9)).unwrap();
         let v: Value = serde_json::from_str(&raw).unwrap();
         assert_eq!(v["parent"], 1);
         assert_eq!(v["sessionId"], "sess-abc");
 
-        let root_take = rec(1, None);
-        save_history(&rice, Some(&draft), &root_take).unwrap();
+        let root_entry = rec(1, None);
+        save_history(&rice, Some(&draft), &root_entry).unwrap();
         let raw_root = std::fs::read_to_string(history_path(&rice, Some(&draft), 1)).unwrap();
         let v_root: Value = serde_json::from_str(&raw_root).unwrap();
         assert!(v_root.get("parent").is_none(), "no parent is omitted, not null");
     }
 
     #[test]
-    fn load_take_is_none_for_a_missing_or_corrupt_file() {
+    fn load_entry_is_none_for_a_missing_or_corrupt_file() {
         let _g = env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
-        let (rice, draft) = routed("takes-missing");
+        let (rice, draft) = routed("entries-missing");
 
         assert!(load_history(&rice, Some(&draft), 1).is_none());
 
@@ -424,22 +425,22 @@ mod tests {
     // ── next_history_number: gap-tolerant, numeric, never filename order ──────
 
     #[test]
-    fn next_take_number_is_one_for_an_empty_store() {
+    fn next_entry_number_is_one_for_an_empty_store() {
         let _g = env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
-        let (rice, draft) = routed("takes-next-empty");
+        let (rice, draft) = routed("entries-next-empty");
         assert_eq!(next_history_number(&rice, Some(&draft)), 1);
     }
 
     #[test]
-    fn next_take_number_is_gap_tolerant_not_first_free_slot() {
+    fn next_entry_number_is_gap_tolerant_not_first_free_slot() {
         let _g = env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
-        let (rice, draft) = routed("takes-next-gap");
+        let (rice, draft) = routed("entries-next-gap");
         save_history(&rice, Some(&draft), &rec(1, None)).unwrap();
         save_history(&rice, Some(&draft), &rec(4, Some(1))).unwrap();
-        // Takes 2/3 are absent (pruned, or never minted) — the next number is
-        // one past the HIGHEST surviving take, not the first empty slot (2).
+        // Entries 2/3 are absent (pruned, or never minted) — the next number is
+        // one past the HIGHEST surviving entry, not the first empty slot (2).
         assert_eq!(next_history_number(&rice, Some(&draft)), 5);
     }
 
@@ -447,30 +448,49 @@ mod tests {
     fn list_and_next_sort_by_parsed_number_not_filename_lexical_order() {
         let _g = env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
-        let (rice, draft) = routed("takes-numeric-sort");
+        let (rice, draft) = routed("entries-numeric-sort");
         // "10000.json" < "0002.json" as strings — a lexicographic sort would
         // put 10000 first and hand next_history_number the wrong maximum.
         save_history(&rice, Some(&draft), &rec(2, None)).unwrap();
         save_history(&rice, Some(&draft), &rec(10000, Some(2))).unwrap();
         save_history(&rice, Some(&draft), &rec(9, Some(2))).unwrap();
 
-        let numbers: Vec<u32> = list_history(&rice, Some(&draft)).iter().map(|t| t.take).collect();
+        let numbers: Vec<u32> = list_history(&rice, Some(&draft)).iter().map(|t| t.entry).collect();
         assert_eq!(numbers, vec![2, 9, 10000], "sorted numerically, not lexically");
         assert_eq!(next_history_number(&rice, Some(&draft)), 10001);
     }
 
     #[test]
-    fn list_takes_skips_head_marks_and_unparseable_entries() {
+    fn list_entries_skips_head_marks_and_unparseable_entries() {
         let _g = env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
-        let (rice, draft) = routed("takes-list-skip");
+        let (rice, draft) = routed("entries-list-skip");
         save_history(&rice, Some(&draft), &rec(1, None)).unwrap();
         save_head(&rice, Some(&draft), 1).unwrap();
         save_marks(&rice, Some(&draft), &BTreeMap::from([("A".to_string(), 1u32)])).unwrap();
-        std::fs::write(history_path(&rice, Some(&draft), 2), "garbage, not a take").unwrap();
+        std::fs::write(history_path(&rice, Some(&draft), 2), "garbage, not an entry").unwrap();
 
-        let numbers: Vec<u32> = list_history(&rice, Some(&draft)).iter().map(|t| t.take).collect();
+        let numbers: Vec<u32> = list_history(&rice, Some(&draft)).iter().map(|t| t.entry).collect();
         assert_eq!(numbers, vec![1], "head.json/marks.json/a corrupt NNNN.json are all skipped");
+    }
+
+    #[test]
+    fn a_record_on_disk_that_says_take_loads_as_entry_and_saves_as_entry() {
+        let _g = env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
+        let (rice, draft) = routed("entry-alias");
+        let old = r#"{"schemaVersion":"1","take":3,"parent":2,"at":"2026-10-18T00:00:00Z","cause":"stage","theme":{}}"#;
+        std::fs::create_dir_all(history_dir(&rice, Some(&draft))).unwrap();
+        std::fs::write(history_path(&rice, Some(&draft), 3), old).unwrap();
+
+        let loaded = load_history(&rice, Some(&draft), 3).expect("a pre-rename record still loads");
+        assert_eq!((loaded.entry, loaded.parent), (3, Some(2)));
+
+        save_history(&rice, Some(&draft), &loaded).unwrap();
+        let raw = std::fs::read_to_string(history_path(&rice, Some(&draft), 3)).unwrap();
+        let on_disk: Value = serde_json::from_str(&raw).unwrap();
+        assert_eq!(on_disk["entry"], 3);
+        assert!(on_disk.get("take").is_none(), "a rewrite never writes the old key: {on_disk}");
     }
 
     // ── load_head: absent falls back to max; a STALE head does too (D3a) ───
@@ -479,35 +499,35 @@ mod tests {
     fn load_head_is_none_for_an_empty_store_and_falls_back_to_max_when_absent() {
         let _g = env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
-        let (rice, draft) = routed("takes-head-absent-empty");
+        let (rice, draft) = routed("entries-head-absent-empty");
         assert_eq!(load_head(&rice, Some(&draft)), None, "nothing minted yet");
 
         save_history(&rice, Some(&draft), &rec(1, None)).unwrap();
         save_history(&rice, Some(&draft), &rec(2, Some(1))).unwrap();
-        // No head.json was ever written — falls back to the highest take.
+        // No head.json was ever written — falls back to the highest entry.
         assert_eq!(load_head(&rice, Some(&draft)), Some(2));
     }
 
     #[test]
-    fn load_head_falls_back_to_max_when_the_claimed_head_take_no_longer_exists() {
+    fn load_head_falls_back_to_max_when_the_claimed_head_entry_no_longer_exists() {
         let _g = env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
-        let (rice, draft) = routed("takes-head-stale");
+        let (rice, draft) = routed("entries-head-stale");
         save_history(&rice, Some(&draft), &rec(1, None)).unwrap();
         save_history(&rice, Some(&draft), &rec(2, Some(1))).unwrap();
         save_history(&rice, Some(&draft), &rec(5, Some(2))).unwrap();
-        // A crash mid-prune (or a hand edit) leaves head.json naming a take
+        // A crash mid-prune (or a hand edit) leaves head.json naming an entry
         // that no longer exists — this must not wedge the store.
         save_head(&rice, Some(&draft), 999).unwrap();
 
-        assert_eq!(load_head(&rice, Some(&draft)), Some(5), "stale head falls back to the maximum surviving take");
+        assert_eq!(load_head(&rice, Some(&draft)), Some(5), "stale head falls back to the maximum surviving entry");
     }
 
     #[test]
     fn save_head_round_trips_a_valid_claim() {
         let _g = env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
-        let (rice, draft) = routed("takes-head-valid");
+        let (rice, draft) = routed("entries-head-valid");
         save_history(&rice, Some(&draft), &rec(1, None)).unwrap();
         save_history(&rice, Some(&draft), &rec(2, Some(1))).unwrap();
         save_head(&rice, Some(&draft), 1).unwrap();
@@ -520,7 +540,7 @@ mod tests {
     fn marks_round_trip_and_moving_a_letter_is_one_atomic_write_of_the_map() {
         let _g = env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
-        let (rice, draft) = routed("takes-marks-move");
+        let (rice, draft) = routed("entries-marks-move");
 
         let mut marks = BTreeMap::new();
         marks.insert("A".to_string(), 9u32);
@@ -528,12 +548,12 @@ mod tests {
         assert_eq!(load_marks(&rice, Some(&draft)).get("A"), Some(&9));
 
         // "Moving" a letter is: mutate the in-memory map, then ONE save —
-        // never a rewrite of the take files it used to/now names.
+        // never a rewrite of the entry files it used to/now names.
         marks.insert("A".to_string(), 14u32);
         save_marks(&rice, Some(&draft), &marks).unwrap();
 
         let after = load_marks(&rice, Some(&draft));
-        assert_eq!(after.get("A"), Some(&14), "the letter now points at the new take");
+        assert_eq!(after.get("A"), Some(&14), "the letter now points at the new entry");
         assert_eq!(after.len(), 1, "moving overwrote the entry, it did not duplicate it");
     }
 
@@ -541,7 +561,7 @@ mod tests {
     fn load_marks_tolerates_a_missing_or_corrupt_file_as_empty() {
         let _g = env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
-        let (rice, draft) = routed("takes-marks-missing");
+        let (rice, draft) = routed("entries-marks-missing");
         assert!(load_marks(&rice, Some(&draft)).is_empty());
 
         std::fs::create_dir_all(history_dir(&rice, Some(&draft))).unwrap();
@@ -555,22 +575,22 @@ mod tests {
     fn ancestry_walks_both_branches_of_a_fork_back_to_the_same_root() {
         // 1 <- 9 <- 17
         //        \- 21
-        let takes = vec![rec(1, None), rec(9, Some(1)), rec(17, Some(9)), rec(21, Some(9))];
-        assert_eq!(ancestry(&takes, 17), vec![17, 9, 1]);
-        assert_eq!(ancestry(&takes, 21), vec![21, 9, 1]);
+        let entries = vec![rec(1, None), rec(9, Some(1)), rec(17, Some(9)), rec(21, Some(9))];
+        assert_eq!(ancestry(&entries, 17), vec![17, 9, 1]);
+        assert_eq!(ancestry(&entries, 21), vec![21, 9, 1]);
     }
 
     #[test]
     fn ancestry_refuses_to_loop_on_a_self_parented_record() {
-        let takes = vec![rec(1, None), rec(5, Some(5))];
-        assert_eq!(ancestry(&takes, 5), vec![5], "a self-parented record stops after one step");
+        let entries = vec![rec(1, None), rec(5, Some(5))];
+        assert_eq!(ancestry(&entries, 5), vec![5], "a self-parented record stops after one step");
     }
 
     #[test]
     fn ancestry_refuses_to_loop_on_a_longer_cycle() {
-        let takes = vec![rec(2, Some(3)), rec(3, Some(2))];
-        let out = ancestry(&takes, 2);
-        assert!(out.len() <= takes.len() + 1);
+        let entries = vec![rec(2, Some(3)), rec(3, Some(2))];
+        let out = ancestry(&entries, 2);
+        assert!(out.len() <= entries.len() + 1);
         assert_eq!(out, vec![2, 3], "walks once around the cycle then stops");
     }
 
@@ -578,29 +598,29 @@ mod tests {
 
     #[test]
     fn children_finds_both_branches_under_a_shared_parent() {
-        let takes = vec![rec(1, None), rec(9, Some(1)), rec(17, Some(9)), rec(21, Some(9))];
-        assert_eq!(children(&takes, 9), vec![17, 21]);
-        assert_eq!(children(&takes, 21), Vec::<u32>::new(), "a leaf has no children");
+        let entries = vec![rec(1, None), rec(9, Some(1)), rec(17, Some(9)), rec(21, Some(9))];
+        assert_eq!(children(&entries, 9), vec![17, 21]);
+        assert_eq!(children(&entries, 21), Vec::<u32>::new(), "a leaf has no children");
     }
 
     // ── reparent: the prune splice, grandchildren survive ──────────────────
 
     #[test]
-    fn reparent_splices_children_onto_the_pruned_takes_own_parent() {
+    fn reparent_splices_children_onto_the_pruned_entries_own_parent() {
         // 1 <- 9 <- 17 <- 25
         //             \- 26
-        let takes = vec![
+        let entries = vec![
             rec(1, None),
             rec(9, Some(1)),
             rec(17, Some(9)),
             rec(25, Some(17)),
             rec(26, Some(17)),
         ];
-        let spliced = reparent(&takes, 17);
+        let spliced = reparent(&entries, 17);
 
-        assert_eq!(spliced.len(), 4, "the pruned take itself is dropped");
-        assert!(spliced.iter().all(|t| t.take != 17));
-        let find = |n: u32| spliced.iter().find(|t| t.take == n).unwrap().clone();
+        assert_eq!(spliced.len(), 4, "the pruned entry itself is dropped");
+        assert!(spliced.iter().all(|t| t.entry != 17));
+        let find = |n: u32| spliced.iter().find(|t| t.entry == n).unwrap().clone();
         assert_eq!(find(25).parent, Some(9), "grandchild re-parents to 17's own parent");
         assert_eq!(find(26).parent, Some(9));
         assert_eq!(find(9).parent, Some(1), "untouched ancestor is unchanged");
@@ -610,11 +630,11 @@ mod tests {
     }
 
     #[test]
-    fn reparent_on_a_root_take_leaves_its_children_rootless() {
-        let takes = vec![rec(1, None), rec(2, Some(1)), rec(3, Some(1))];
-        let spliced = reparent(&takes, 1);
+    fn reparent_on_a_root_entry_leaves_its_children_rootless() {
+        let entries = vec![rec(1, None), rec(2, Some(1)), rec(3, Some(1))];
+        let spliced = reparent(&entries, 1);
         assert_eq!(spliced.len(), 2);
-        let find = |n: u32| spliced.iter().find(|t| t.take == n).unwrap().clone();
+        let find = |n: u32| spliced.iter().find(|t| t.entry == n).unwrap().clone();
         assert_eq!(find(2).parent, None, "pruning the root leaves its children as new roots");
         assert_eq!(find(3).parent, None);
     }

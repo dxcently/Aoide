@@ -235,7 +235,7 @@ strx reload [--json]
     shell's theme watch re-arms. A draft whose `theme.json` is gone is
     refused before anything is written.
 - **Writes:** nothing in `declarative`. In `staging` and `draft`, after the
-  sync, a take of the now-synced stage and widget bodies, deduped against the
+  sync, an entry of the now-synced stage and widget bodies, deduped against the
   head (`rices/<rice>/history/`, or `rices/<rice>/drafts/<name>/history/`
   in a draft), so an unchanged reload mints nothing and every iteration is
   reversible with `strx rice back`. The sync runs before the snapshot: its
@@ -257,8 +257,8 @@ strx reload [--json]
   function, so a landed call prints nothing — empty stdout at exit 0 is the
   only real success. `--json` data: `declarative` gives `{status: "reloaded"
   | "not-running" | "failed"}`; `staging`/`draft` give `{mode, rice, draft,
-  take, sync, reload}` where `take` is `{take: N, deduped: false}`,
-  `{take: null, deduped: true}` or `{take: null, takeError}`, `sync` is the
+  entry, sync, reload}` where `entry` is `{entry: N, deduped: false}`,
+  `{entry: null, deduped: true}` or `{entry: null, entryError}`, `sync` is the
   sync's own data, and `reload` is `{status, message}`. The human line reads
   "reloaded <rice> (<mode>) — " and then the shell reload's message.
 - **Notes:** not gated. The shell reload is best-effort: `not-running`

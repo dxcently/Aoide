@@ -82,7 +82,7 @@ fn handle_wallpaper_set_entry(inv: &Invocation) -> Outcome {
         && !recorded_nothing
         && mode_marker.mode == aoide_storage::mode::RiceMode::Draft
     {
-        super::history::attach_take(&mut out, &mode_marker, super::history::snapshot("wallpaper.set", "wallpaper-set").map(Some));
+        super::history::attach_entry(&mut out, &mode_marker, super::history::snapshot("wallpaper.set", "wallpaper-set").map(Some));
     }
     out
 }
@@ -682,7 +682,7 @@ mod tests {
         let first = handle_wallpaper_set_entry(&record);
         assert_eq!(first.status, Status::Ok, "{:?}", first.data);
         assert_eq!(first.data.as_ref().unwrap()["recorded"], true);
-        assert_eq!(first.data.as_ref().unwrap()["take"], 1);
+        assert_eq!(first.data.as_ref().unwrap()["entry"], 1);
 
         // The same report again: recorded nothing, so nothing is minted.
         let again = handle_wallpaper_set_entry(&record);
@@ -690,7 +690,7 @@ mod tests {
         let data = again.data.unwrap();
         assert_eq!(data["recorded"], false);
         assert_eq!(data["unchanged"], true);
-        assert!(data.get("take").is_none(), "a no-op mints no take: {data}");
+        assert!(data.get("entry").is_none(), "a no-op mints no take: {data}");
         assert_eq!(
             aoide_storage::history::list_history("moonlight", Some("neon-night")).len(),
             1,
@@ -894,7 +894,7 @@ mod tests {
 
         let out = handle_wallpaper_set_entry(&inv(&["wallpaper", "set"], &[img.to_str().unwrap()]));
         assert_eq!(out.status, Status::Ok, "{:?}", out.data);
-        assert_eq!(out.data.as_ref().unwrap()["take"], 1);
+        assert_eq!(out.data.as_ref().unwrap()["entry"], 1);
         assert!(out.changed.iter().any(|c| c.ends_with("history/0001.json")));
         assert!(out.changed.iter().any(|c| c.ends_with("history/head.json")));
 
@@ -934,12 +934,12 @@ mod tests {
 
         let first = handle_wallpaper_set_entry(&inv(&["wallpaper", "set"], &[img.to_str().unwrap()]));
         assert_eq!(first.status, Status::Ok, "{:?}", first.data);
-        assert_eq!(first.data.unwrap()["take"], 1);
+        assert_eq!(first.data.unwrap()["entry"], 1);
 
         let second = handle_wallpaper_set_entry(&inv(&["wallpaper", "set"], &[img.to_str().unwrap()]));
         assert_eq!(second.status, Status::Ok, "{:?}", second.data);
         assert_eq!(
-            second.data.unwrap()["take"], 2,
+            second.data.unwrap()["entry"], 2,
             "a content-identical wallpaper reset still mints its own take"
         );
         assert!(second.changed.iter().any(|c| c.ends_with("history/0002.json")));

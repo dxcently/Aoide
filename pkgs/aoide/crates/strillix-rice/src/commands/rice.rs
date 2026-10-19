@@ -304,7 +304,7 @@ pub(crate) fn handle_rice_stage_entry(inv: &Invocation) -> Outcome {
     // Non-fatal, same tier as the hyprctl/widget-registry calls inside
     // `handle_rice_stage` itself: a bookkeeping failure must never turn a
     // successful live write into an error, so a failed snapshot is reported
-    // in `data` (`"take": null, "takeError": "…"`) rather than flipping
+    // in `data` (`"entry": null, "entryError": "…"`) rather than flipping
     // `out.status`. The command name passed is `"rice.stage"` (not
     // `"rice.history"`) so a refusal — however unlikely once we're already
     // known to be routed in Draft mode — names the command that actually
@@ -312,7 +312,7 @@ pub(crate) fn handle_rice_stage_entry(inv: &Invocation) -> Outcome {
     if out.status == aoide_protocol::output::Status::Ok
         && mode_marker.mode == aoide_storage::mode::RiceMode::Draft
     {
-        super::history::attach_take(&mut out, &mode_marker, super::history::snapshot("rice.stage", "stage").map(Some));
+        super::history::attach_entry(&mut out, &mode_marker, super::history::snapshot("rice.stage", "stage").map(Some));
     }
 
     if out.status == aoide_protocol::output::Status::Ok
@@ -2157,7 +2157,7 @@ mod tests {
         // A successful write never turns into an error over take bookkeeping,
         // and here the take succeeded too: reported in `data`, and both the
         // take file and the head cursor are in `changed`.
-        assert_eq!(out.data.as_ref().unwrap()["take"], 1);
+        assert_eq!(out.data.as_ref().unwrap()["entry"], 1);
         assert!(out.changed.iter().any(|c| c.ends_with("history/0001.json")));
         assert!(out.changed.iter().any(|c| c.ends_with("history/head.json")));
 
@@ -2184,12 +2184,12 @@ mod tests {
 
         let first = handle_rice_stage_entry(&inv(&["rice", "stage"], &["moonlight"]));
         assert_eq!(first.status, Status::Ok, "{:?}", first.data);
-        assert_eq!(first.data.unwrap()["take"], 1);
+        assert_eq!(first.data.unwrap()["entry"], 1);
 
         let second = handle_rice_stage_entry(&inv(&["rice", "stage"], &["moonlight"]));
         assert_eq!(second.status, Status::Ok, "{:?}", second.data);
         assert_eq!(
-            second.data.unwrap()["take"], 2,
+            second.data.unwrap()["entry"], 2,
             "a content-identical restage still mints its own take"
         );
         assert!(second.changed.iter().any(|c| c.ends_with("history/0002.json")));
