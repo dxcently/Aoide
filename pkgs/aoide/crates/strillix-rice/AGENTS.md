@@ -340,7 +340,7 @@
   `&str` — `None` means staging-mode (`rices/<rice>/history/`), `Some`
   means a routed draft (`rices/<rice>/drafts/<name>/history/`).**
   `commands/history.rs::resolve_scope` is the one place that resolves which
-  scope applies, off `mode.json` — every take/back/prune command in that
+  scope applies, off `mode.json` — every history/back/prune command in that
   file threads its `Option<&str>` straight through rather than re-deriving
   it. `HistoryRecord` also carries `widgets: Value` (the rice's widget bodies
   at mint time, `widgets.rs::snapshot_widget_bodies`) — captured on every

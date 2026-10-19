@@ -20,7 +20,7 @@
 //! (healthcheck only — the placeholder-screen watchdog), reload (the one
 //! mode-aware iteration command, `strillix reload` design settled 2026-08-31 —
 //! absorbed `quickshell reload` outright, registered right after
-//! `quickshell` where that path used to sit), screen, notifications, take, element
+//! `quickshell` where that path used to sit), screen, notifications, history, element
 //! (L-E1, docs/architecture/ELEMENTS.md: `element seed`, the render
 //! pipeline's shell-reachable bridge), secrets (P3: `secrets ask`, the
 //! rice-shaped TOTP code-entry popup), pair (`pair ask` + `pair show`, the

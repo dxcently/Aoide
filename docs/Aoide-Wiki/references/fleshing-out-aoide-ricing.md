@@ -2,7 +2,7 @@
 
 Status: a design handout captured from a chat session (2026-08-18), not
 LOCKED — the User has steered every section at least once, but the final
-"lock" word hasn't been said. Part of it is now code: the take tree and its
+"lock" word hasn't been said. Part of it is now code: the entry tree and its
 commands (§5.2, phase A in §10) and the project-revert groundwork (R0–R2,
 §7.2) are landed in the repo; everything else is design. Nothing here is
 asserted as existing unless marked EXISTS or LANDED. Execution ordering
@@ -215,7 +215,7 @@ strx rice rehearse begin <song> [--draft <name>]   — enters mode draft
   ┌── plan ──── edit ──── check ──── review ──── mark ──┐
   │     │         │          │           │         │     │
   │  intent    stage/     screen      verdict   named    │
-  │  note      draft      shot +      from a    take     │
+  │  note      draft      shot +      from a    entry    │
   │  touched   writes     vision-     DIFFERENT ("A","B" │
   │  (gate)    (auto-     check       session   — real   │
   │            taken)                 (gate)    rehearsal│
@@ -241,72 +241,72 @@ At any moment, any agent, through any door:
                  "marks": { "A": 9, "B": 14 } },
   "instruction": "Vision-check the live desktop: `strx screen shot`, verify
                   polarity agreement + widget/bar theme match.",
-  "allowed": ["rice take", "rice score advance", "screen shot"],
+  "allowed": ["rice history", "rice score advance", "screen shot"],
   "gate": { "advance-to": "review", "requires": null } }
 ```
 
-`from` names the mark only when the head's `parent` carries one — take 21
-here hangs off take 9, which is marked `A`, so the reviewer reads "take 21,
+`from` names the mark only when the head's `parent` carries one — entry 21
+here hangs off entry 9, which is marked `A`, so the reviewer reads "entry 21,
 from mark A" without cross-referencing the marks map by hand; off a bare
-take with no mark on it, `from` is simply absent. Step instructions live in
+entry with no mark on it, `from` is simply absent. Step instructions live in
 the score's step table — one place, versioned with the binary, not
 per-harness prompts. That is what keeps step-by-step understanding
 agent-agnostic: pushed to capable harnesses, identical when pulled by a
 bare CLI agent. `rice score advance` moves the step and refuses when a
 gate isn't met.
 
-### 5.2 Takes and marks — mechanical revert
+### 5.2 Entries and marks — mechanical revert
 
-**Status: LANDED** — `rice take`, `rice take mark|list|diff|prune`,
-`rice back`, the auto-take at both write entrypoints, and the bare-tty
-picker are real commands at HEAD (`crates/storage/src/takes.rs`,
-`crates/strillix-rice/src/commands/take.rs`; phase A, §10). The hook-door drift
+**Status: LANDED** — `rice history`, `rice history mark|list|diff|prune`,
+`rice back`, the auto-entry at both write entrypoints, and the bare-tty
+picker are real commands at HEAD (`crates/storage/src/entries.rs`,
+`crates/strillix-rice/src/commands/history.rs`; phase A, §10). The hook-door drift
 check during an active rehearsal is phase C, still design.
 
-- **Takes** — automatic, append-only, cheap: every write to the routed
+- **Entries** — automatic, append-only, cheap: every write to the routed
   draft snapshots `rices/<rice>/drafts/<name>/history/NNNN.json` (theme +
   cover + meta: timestamp, session id, cause). Captured at the two write
   entrypoints (`rice stage`, `cover set`) directly; hand-edits caught by a
   content-hash check on every hook-door `PostToolUse` during an active
   rehearsal AND ambiently on any `strx rice` command — a hookless agent's
-  edits get taken the next time it touches the CLI. Explicit `rice take`
+  edits get taken the next time it touches the CLI. Explicit `rice history`
   for paranoia. Leaning toward hashing cover.json alongside theme on every
   check (one extra file read; not finalized).
-- **Takes form a tree, not a line.** Each record carries `parent: <NNNN> |
+- **Entries form a tree, not a line.** Each record carries `parent: <NNNN> |
   null`. Numbering is one monotone counter per draft — never renumbered,
-  never per-branch; take 21 is take 21 wherever it hangs, so a selector
+  never per-branch; entry 21 is entry 21 wherever it hangs, so a selector
   (`--entry 21`) stays unambiguous forever. Ancestry is derived by walking
   `parent` back to `null`; nothing is indexed.
 
   ```
   history/NNNN.json    one snapshot, carries parent: <NNNN>|null
-  history/head.json    per-draft cursor — where the next take hangs
+  history/head.json    per-draft cursor — where the next entry hangs
   history/marks.json   {"A": 9, "B": 14} — one atomic write per (re)stamp
   ```
 
-- **Branching is implicit.** Revert to a mark, write, and the new take
-  hangs off the mark's take as its `parent`. There is no branch command, no
-  branch name, no branch registry — two takes sharing a parent *is* the
-  branch. Takes after the mark are untouched and still selectable; nothing
+- **Branching is implicit.** Revert to a mark, write, and the new entry
+  hangs off the mark's entry as its `parent`. There is no branch command, no
+  branch name, no branch registry — two entries sharing a parent *is* the
+  branch. Entries after the mark are untouched and still selectable; nothing
   on disk is destroyed by reverting past it.
 - **No merge, no rebase, no cherry-pick — ever.** Two lines from a mark
   stay two lines; a User who wants them combined edits the theme by hand.
   The deliberate line against the git-clone slope.
 - **`rice back` takes before it writes.** If the live content differs from
-  the head take (an un-taken hand-edit), `rice back` snapshots it first
+  the head entry (an unrecorded hand-edit), `rice back` snapshots it first
   (cause `drift`) before overwriting — the rail that keeps "nothing is
   destroyed" literally true even for work that was never explicitly taken.
-- **Takes exist only in Draft mode.** The takes dir lives inside the
+- **Entries exist only in Draft mode.** The entries dir lives inside the
   draft; a Staging-mode write (`rice stage`, `cover set` are reachable
   there too) is never taken — rehearsal already requires draft mode (§11),
   this makes the write-entrypoint boundary explicit.
 - **Marks** — named rehearsal marks (the music term for lettered jump
   points), unique per **draft** and advancing globally regardless of
   branch, exactly like rehearsal marks in a score: the `mark` step stamps
-  the current take with a letter, meaning *reviewed-and-passed*. A letter
-  already in use **moves** to the new take rather than erroring —
+  the current entry with a letter, meaning *reviewed-and-passed*. A letter
+  already in use **moves** to the new entry rather than erroring —
   re-marking is a normal correction. Marks live in `history/marks.json`, not
-  on the take record — the record stays write-once. `rice take mark
+  on the entry record — the record stays write-once. `rice history mark
   <letter>` is the phase-A command; the score's `mark` step calls it.
 
 ```
@@ -315,21 +315,21 @@ strx rice back                bare, on a tty: the picker (§7), the
                                 Enter is the one-step undo. Non-tty: a
                                 usage error naming `--entry`/`--mark`,
                                 never reads stdin.
-strx rice back --entry 9       that take exactly; head := 9
+strx rice back --entry 9       that entry exactly; head := 9
 strx rice back --mark A       resolve A via history/marks.json; head :=
-                                that take
-strx rice take list           the whole tree: numbers, parents, marks,
+                                that entry
+strx rice history list           the whole tree: numbers, parents, marks,
                                 head
-strx rice take diff           change since the nearest mark on the
+strx rice history diff           change since the nearest mark on the
                                 head's ancestry (reviewer's view)
 ```
 
-Revert is trivial because of draft routing: write take N's theme through
+Revert is trivial because of draft routing: write entry N's theme through
 the existing symlink via `atomic_write`. Every file a revert touches
 (theme, cover) is already FileView-watched by the Quickshell surfaces, so
 **a revert performs no explicit Quickshell IPC reload of its own** — the
 existing watch mechanism is the whole apply path, nothing new to wire.
-**Scope line:** takes cover the stage-routed files (theme, cover). Widget
+**Scope line:** entries cover the stage-routed files (theme, cover). Widget
 QML bodies are committed rices files — git is their revert mechanism,
 and the `edit` step's instruction says so. No parallel VCS.
 
@@ -354,11 +354,11 @@ During an active rehearsal the hook door also appends to
   "tool": "Edit", "drift": true }
 ```
 
-The journal answers *which agent action produced take 17* — what makes
+The journal answers *which agent action produced entry 17* — what makes
 `rice back` meaningful rather than blind. Surfaces: `strx rice watch`
 (live tail), the conductor pane and a dock Rehearsal gadget (both consume
 the O3 output pane, built once), and `rehearse end --distill` — the
-rices discipline made mechanical: journal + take timeline summarized
+rices discipline made mechanical: journal + entry timeline summarized
 into the song's `design/intent.md` iteration log, so self-ricing's
 write-back stops depending on agent virtue.
 
@@ -376,7 +376,7 @@ adds enforcement:
 - The `plan` step gates on an intent-note touch — planning leaves an
   artifact or didn't happen.
 - A reviewer spawned through any door runs `rice score`, sees
-  `step: review` + `rice take diff`, and knows its job with zero briefing.
+  `step: review` + `rice history diff`, and knows its job with zero briefing.
 
 ## 6. Intended siblings — the nix loops (intentions only, not designed)
 
@@ -392,7 +392,7 @@ reverts them:
 
 | engagement | the loop | revert substrate | hard gate |
 |---|---|---|---|
-| rehearsal (§5) | plan → edit → check → review → mark, inside a draft | takes through draft routing | different-session review verdict |
+| rehearsal (§5) | plan → edit → check → review → mark, inside a draft | entries through draft routing | different-session review verdict |
 | nix maintenance | plan → bump (flake inputs) → build → generation diff → review → switch | nix generations + git — **no new snapshot machinery** | the switch stays User-run ([[Rebuild-Gate]]); agents stop at a built, reviewed, un-switched generation |
 | nix development | plan → edit → build/test → live-surface check → review → commit | git | tests pass + different-session review before commit — the test→show→confirm→log discipline made mechanical |
 
@@ -410,7 +410,7 @@ What the intentions buy now, for free:
 - The rehearsal must not bake rice-isms into anything shared: the score's
   step-table shape, the journal line shape, and the review-gate mechanics
   are the parts a nix loop would imitate, so they stay substrate-blind.
-  Takes/marks are rice-only (the nix loops get revert from nix and git)
+  Entries/marks are rice-only (the nix loops get revert from nix and git)
   and stay inside `rice`.
 - **When the second tenant is built** — not before — the shared engagement
   shape gets extracted (one `score`-like resolver, per-engagement step
@@ -426,7 +426,7 @@ feature.
 native nix (numbered generations, `nixos-rebuild switch --rollback`, the
 boot menu). What nix does **not** do is map a generation back to the config
 codebase that produced it — the source is a GC-able build-time dep. The
-maintenance engagement closes that gap the takes-journal way: set
+maintenance engagement closes that gap the entries-journal way: set
 `system.configurationRevision = self.rev` so every generation is stamped
 with its commit, journal `{generation, gitRev, flakeLockHash}` at each
 build/switch step, and the intended revert command (`aoide nix back
@@ -440,7 +440,7 @@ snapshot machinery: git + generations + one journal line.
 
 Every command here serves **both audiences from one implementation**. There
 is no human CLI and no agent CLI; there is one command with two entrances
-(`rice back`, `rice take diff`, and the picker are LANDED — phase A, §10;
+(`rice back`, `rice history diff`, and the picker are LANDED — phase A, §10;
 the `aoide nix` lane is design):
 
 ```
@@ -463,8 +463,8 @@ never prompts, so a piped or agent invocation cannot hang waiting on a
 human.
 
 **`rice back`'s two promises, reconciled.** §5.2 promises bare `rice back`
-means "previous take, one agent-action undo"; this section promises
-bare-on-a-tty means "the picker." Under the take tree these collide at the
+means "previous entry, one agent-action undo"; this section promises
+bare-on-a-tty means "the picker." Under the entry tree these collide at the
 same spelling. Resolution: **the picker wins on a tty**, because the
 picker's first row *is* the head's parent, pre-selected — the one-step
 undo is a single Enter away, and the picker is still there for anyone who
@@ -475,8 +475,8 @@ can never hang.
 
 | bare command on a tty | picker rows | on select |
 |---|---|---|
-| `rice back` | the whole take **tree** (§5.2) rendered flat and numbered for selection, head arrowed, marks bracketed — row 1 is the head's parent, pre-selected — plus a **second lane**, widget commits (recent git commits touching the song's widget bodies) | a take writes through the routing (same as `--entry N`); a commit does `git checkout <rev> -- rices/<rice>/…` — working-tree restore, HEAD never moves |
-| `rice take diff` | history/marks to diff against | the diff, no write |
+| `rice back` | the whole entry **tree** (§5.2) rendered flat and numbered for selection, head arrowed, marks bracketed — row 1 is the head's parent, pre-selected — plus a **second lane**, widget commits (recent git commits touching the song's widget bodies) | a entry writes through the routing (same as `--entry N`); a commit does `git checkout <rev> -- rices/<rice>/…` — working-tree restore, HEAD never moves |
+| `rice history diff` | history/marks to diff against | the diff, no write |
 | `aoide nix back` | journaled `{generation · rev · subject · age · dirty?}` | `git checkout <rev>` of the config repo; then **offers** the matching generation rollback as a second, separately-confirmed step |
 
 Two teeth in that table:
@@ -487,12 +487,12 @@ Two teeth in that table:
   person; an agent scripting flags can check out code but can never reach
   the switch.
 - The widget-commit lane is the "help with rolling back through git"
-  command: takes cover the stage-routed files (§5.2), git covers widget
+  command: entries cover the stage-routed files (§5.2), git covers widget
   bodies, and the one picker shows both lanes so the User never has to
   remember which substrate owns which file.
 
 The discipline generalizes as a CLI-wide convention: any command whose flags
-select one-of-many (a song, a draft, a take, a session id) grows the same
+select one-of-many (a song, a draft, a entry, a session id) grows the same
 bare-on-a-tty picker, applied opportunistically as commands get touched — not
 as a big retrofit pass.
 
@@ -506,24 +506,24 @@ house meaning of the word.
 
 | command | wraps | protected by default |
 |---|---|---|
-| `rice take prune [--older-than 14d] [--keep 20] [--all-but-marks]` (LANDED, A9) | aoide's own `history/` dir — its only native storage | **marked** takes (reviewed-good states); `--force` to take one out |
+| `rice history prune [--older-than 14d] [--keep 20] [--all-but-marks]` (LANDED, A9) | aoide's own `history/` dir — its only native storage | **marked** entries (reviewed-good states); `--force` to take one out |
 | `aoide nix prune [--generations 42,43] [--older-than 30d] [--keep 5]` | `nix-env -p /nix/var/nix/profiles/system --delete-generations …`, then optionally `nix store gc` | current + booted generation (nix refuses these anyway — a free rail); any generation the journal flags `keep` |
 | `aoide session prune` | EXISTS — done session records | — |
 
 Both prune commands are dry-run-shaped: they print what would go and what it
 frees, and the bare-tty mode is a **multi-select** picker (space toggles,
 Enter confirms) because pruning is the one place selecting several at once
-is the normal case. The symmetry worth keeping: **a mark protects a take
-and every take on that take's path back to the root, exactly as `keep`
+is the normal case. The symmetry worth keeping: **a mark protects a entry
+and every entry on that entry's path back to the root, exactly as `keep`
 protects a generation** — one idea, two substrates.
 
-**Protection extends to ancestry.** Under the take tree (§5.2), pruning a
-take whose descendants survive **splices** rather than orphans: the
-surviving children are re-parented to the pruned take's parent, so
-ancestry degrades to "further back," never to broken — `rice take diff`'s
-"nearest mark on the ancestry" still resolves once the take in between is
+**Protection extends to ancestry.** Under the entry tree (§5.2), pruning a
+entry whose descendants survive **splices** rather than orphans: the
+surviving children are re-parented to the pruned entry's parent, so
+ancestry degrades to "further back," never to broken — `rice history diff`'s
+"nearest mark on the ancestry" still resolves once the entry in between is
 gone. A mark's protection is transitive for the same reason: it is not
-enough to protect the marked take alone if a take between it and the root
+enough to protect the marked entry alone if a entry between it and the root
 can still be pruned out from under it. The head and everything on the
 head's ancestry are never eligible for pruning, `--force` included —
 pruning the ground the draft is currently standing on has no reading.
@@ -624,7 +624,7 @@ refuses cleanly, naming `git init`, when there isn't one — **aoide never runs
 `git init` for the User.** Both commands are dual-entrance exactly per §7:
 flags and `--json` are the agent door; bare on a tty is the User's door and
 opens a picker (rows = sessions, newest first) — that picker rides the
-take-tree picker's `aoide_protocol::pick` groundwork (§10's A8, LANDED), and
+entry-tree picker's `aoide_protocol::pick` groundwork (§10's A8, LANDED), and
 still ships after the flag door (R5 before R6).
 
 **Per-session revert is exact only for files nothing has touched since.**
@@ -697,8 +697,8 @@ is captured before it is overwritten, so **a revert can itself be reverted.**
   already has) — content comes back correctly, the link itself is never
   touched either way.
 
-**Composition with rice takes: disjoint substrates, on purpose, with no
-exclusion list.** Takes (§5.2) cover the stage-routed draft files
+**Composition with rice entries: disjoint substrates, on purpose, with no
+exclusion list.** Entries (§5.2) cover the stage-routed draft files
 (`stage/theme.json`, `stage/cover.json`, and their draft-mode copies); this
 journal covers tracked files inside a registered project's working tree. In
 this repo both exist at once and mostly don't overlap — except that a
@@ -711,7 +711,7 @@ redundantly and harmlessly: each revert path trusts only its own hash
 comparison, never the other system's state. A `rice back` that rewrites a
 theme file reads, to this journal, as an ordinary out-of-view change (the
 second refusal shape, above); a `project back` that rewrites it reads, to
-the takes system, as drift, and gets a drift take on its next touch. No
+the entries system, as drift, and gets a drift entry on its next touch. No
 coordination command exists between `rice back` and `project back`, and none is
 needed — the two rails already compose without one.
 
@@ -720,7 +720,7 @@ a whole-project revert, `project back --commit <rev>` — a working-tree `git
 checkout <rev> -- .` with HEAD never moving, answering "revert projects back
 to previous states" in its coarse reading rather than the per-session one.
 It is a handful of lines once the git seam above exists, and it is exactly
-the picker's second lane §7 already promises for the take tree. It is left
+the picker's second lane §7 already promises for the entry tree. It is left
 for later, same register as §6's nix loops: an intended lane, not a designed
 one, because git already does this by hand and the feature aoide uniquely
 supplies is the per-session lane above it.
@@ -884,38 +884,38 @@ is #5. Observation (O0–O3) still lands before the rehearsal machinery (B–F)
 - **O2 — PTY tee** in `conduct`: ring-capped `state/output/<id>.log`,
   tail falls back to it, ANSI-strip on read.
 - **O3 — conductor/dock output pane** rendering the same resolver.
-- **A — takes + `rice back`** (LANDED, all ten steps): the safety floor,
+- **A — entries + `rice back`** (LANDED, all ten steps): the safety floor,
   serialized as ten steps A0–A9 — one cargo-running executor at a time,
   each step reviewed before the next:
-  - **A0** — this handout amended to the take-tree model (this section
+  - **A0** — this handout amended to the entry-tree model (this section
     included). Prose only; lands before any code so every later step
     reads the amended design.
-  - **A1** — the take store (`aoide-storage`): `TakeRecord` gains
+  - **A1** — the entry store (`aoide-storage`): `TakeRecord` gains
     `parent`; the flat monotone counter (ordered by parsed number, never
-    filename); `history/head.json` (falls back to the highest existing take
+    filename); `history/head.json` (falls back to the highest existing entry
     when stale or missing); `history/marks.json`; ancestry/children/reparent
     as pure functions.
-  - **A2** — `rice take`: the snapshot core, exposed as unlocked cores
+  - **A2** — `rice history`: the snapshot core, exposed as unlocked cores
     plus thin `with_stage_lock`-wrapped entrypoints (one lock per
     mutator, never nested), and the explicit command.
-  - **A3** — auto-take at the write entrypoints (`rice stage`,
+  - **A3** — auto-entry at the write entrypoints (`rice stage`,
     `cover set`) — a snapshot failure is non-fatal, reported in `data`,
     never turns a successful live write into an error.
-  - **A4** — `rice take mark <letter>`: one atomic write of
+  - **A4** — `rice history mark <letter>`: one atomic write of
     `history/marks.json`; re-marking moves the letter and says so.
   - **A5** — `rice back` (agent entrance) — the step that lands the ask:
     drift-snapshot-first inside one lock, revert-through-routing, no
     Quickshell IPC reload (every file it writes is already
     FileView-watched), a refusal when the routing symlink itself is
     missing or dangling.
-  - **A6** — `rice take list`: the tree renderer, whole tree by default,
+  - **A6** — `rice history list`: the tree renderer, whole tree by default,
     `--json` as a flat array carrying parent pointers.
-  - **A7** — `rice take diff`: key-wise JSON diff against the nearest
+  - **A7** — `rice history diff`: key-wise JSON diff against the nearest
     mark on the head's ancestry.
   - **A8** — the picker (§7): `aoide_protocol::pick`, the bare-`rice
     back`-on-a-tty branch with the head's parent pre-selected; non-tty
     keeps A5's usage refusal verbatim.
-  - **A9** — `rice take prune` (§7.1): the ancestry splice, marks and the
+  - **A9** — `rice history prune` (§7.1): the ancestry splice, marks and the
     head's ancestry protected by default.
 
   Widget-commit lane of the §7 picker is scoped out of A0–A9 — it is
@@ -925,7 +925,7 @@ is #5. Observation (O0–O3) still lands before the rehearsal machinery (B–F)
   lane builds on that same seam when it lands.
 - **B — the rehearsal state machine**: `rehearse begin/end`, `rice score`
   + step table + `advance`, draft-mode requirement.
-- **C — hook correlation**: auto-take on `PostToolUse` drift, the
+- **C — hook correlation**: auto-entry on `PostToolUse` drift, the
   rehearsal journal, participant binding.
 - **D — the review gate**: `rice review record`, distinct-session
   enforcement, `--solo`.
@@ -939,7 +939,7 @@ is #5. Observation (O0–O3) still lands before the rehearsal machinery (B–F)
 The two cross-cutting additions slot in beside them, both usable long
 before any engagement exists:
 
-- **P — pruning** (§7.1): `rice take prune` LANDED with `A`; `aoide nix
+- **P — pruning** (§7.1): `rice history prune` LANDED with `A`; `aoide nix
   prune` with the nix loop. Multi-select picker ships with each.
 - **S — the sudo door** (§8): the escalation record, the polkit-backed
   helper, the summons on existing surfaces, `Door::Sudo` audit. Its first
@@ -980,11 +980,11 @@ R4 #4, R6 #5):
 
 Decided in-session, one line each:
 
-- Rehearsal **requires** draft mode — takes need a home; routing gives
+- Rehearsal **requires** draft mode — entries need a home; routing gives
   revert free; plain staging stays informal.
 - No new protocol — commands on the existing three doors; ACP dead, AG-UI
   wrong layer; A2A = remote command + status only.
-- Widget bodies revert via git, not takes.
+- Widget bodies revert via git, not entries.
 - Review gate = different-session-id, not different-agent.
 - The cue is pull-only: no SessionStart injection; the ambient line fires
   on business, never on status; `graph join` is suggested by nothing except
@@ -996,7 +996,7 @@ Decided in-session, one line each:
   bare-on-a-tty gets a hand-rolled picker (multi-select where selecting
   several is normal), flags/`--json` bypass it, non-tty never prompts.
 - Pruning is nix entirely (§7.1) — wrap `delete-generations` / `store gc`,
-  never a second store; marks protect takes as `keep` protects
+  never a second store; marks protect entries as `keep` protects
   generations.
 - Privilege goes through the sudo door (§8), never through an agent
   holding a password: declared op ids, nix-admitted allowlist, fresh
@@ -1016,43 +1016,43 @@ Decided in-session, one line each:
   and the shared shape gets extracted only when the second tenant lands.
   `stage/rehearsal.json` keeps an imitable, substrate-blind shape as the
   one line of future-proofing.
-- Takes are a **tree**, not a line (§5.2): one `parent` pointer per take,
+- Entries are a **tree**, not a line (§5.2): one `parent` pointer per entry,
   numbering flat and monotone, never renumbered; ancestry is derived by
   walking `parent`, never indexed.
 - Branching is **implicit** at a revert — no branch noun. A branch is a
-  derived fact (two takes sharing a parent), not an object; the
-  User-facing language is "take 21, from mark A." (`volta` is the reserved
+  derived fact (two entries sharing a parent), not an object; the
+  User-facing language is "entry 21, from mark A." (`volta` is the reserved
   noun if the User ever wants one — nothing in storage changes either
   way.)
 - **No merge, no rebase, no cherry-pick — permanently.** Two lines from a
   mark stay two lines; combining them is editing the theme by hand. The
   explicit line against the git-clone slope.
-- Marks live in `history/marks.json` (a `{"A": take}` map), not a field on
-  the take record — one atomic write per (re)stamp, and the take record
+- Marks live in `history/marks.json` (a `{"A": entry}` map), not a field on
+  the entry record — one atomic write per (re)stamp, and the entry record
   stays write-once.
 - The head cursor is per-draft `history/head.json` — survives draft switches
-  and mode round-trips; falls back to the highest existing take when
+  and mode round-trips; falls back to the highest existing entry when
   stale or absent.
 - Bare `rice back` on a tty opens the picker, head's parent pre-selected
   as row 1 — the one-step undo §5.2 promises is a single Enter. Non-tty
   stays flags-only and never reads stdin.
-- A revert is **not itself a take** — the pre-revert drift snapshot
+- A revert is **not itself a entry** — the pre-revert drift snapshot
   already preserves everything a revert could destroy; recording a
-  "revert take" would double every round trip with content that already
+  "revert entry" would double every round trip with content that already
   exists at the target number. Phase C journals the revert as an event,
-  not a take.
+  not a entry.
 - A revert restores the **live stage** exactly (theme through routing,
   cover to the stage seam `cover set` already writes) — it does not
   restore the draft directory's own `cover.json`, which nothing maintains
   or reads today. A revert triggers no explicit Quickshell IPC reload:
   every file it writes is already FileView-watched.
-- `rice take list` shows the whole tree by default; **`--all` is cut** —
+- `rice history list` shows the whole tree by default; **`--all` is cut** —
   there is no second mode left for it to select.
-- `rice take diff` is a key-wise JSON diff (added/removed/changed paths),
+- `rice history diff` is a key-wise JSON diff (added/removed/changed paths),
   not a text differ over pretty-printed JSON — a reordered key must never
   read as a change.
-- Pruning splices: a pruned take's surviving children re-parent to its
-  parent; a mark protects its take and every take on the path back to the
+- Pruning splices: a pruned entry's surviving children re-parent to its
+  parent; a mark protects its entry and every entry on the path back to the
   root; the head and its ancestry are never prunable, `--force` included.
 - The picker lives in `aoide_protocol::pick` — door behavior, and every
   domain crate already reaches `Door`.
@@ -1065,7 +1065,7 @@ Decided in-session, one line each:
 - No new noun for "one session's edits inside a project" — the journal
   calls them `pre`/`post` lines, prose says *pre-image*. `part` stays the
   reserved musical candidate if the User ever wants one, matching the
-  take-tree's own no-noun-until-asked discipline.
+  entry-tree's own no-noun-until-asked discipline.
 - No `project new` — registration is the only project-level
   provenance the ask describes; a scaffolding command is a different feature.
 - `git merge-file` (a three-way merge on conflict) is rejected as the
@@ -1086,14 +1086,14 @@ Open / uncertain:
 - The other agent's command flesh-out document — not found in the repo at
   capture time; fold in when it surfaces.
 - Kimi transcript flush cadence vs `graph tail --follow` liveness.
-- Whether auto-take hashes cover.json on every check (leaning yes).
+- Whether auto-entry hashes cover.json on every check (leaning yes).
 - If real agents ignore the cue line, auto-join for known harness
   ancestries is the noted one-line escalation — not built.
 - Whether `stage/cover.json` should eventually get symlink routing like
-  `theme.json` — a pre-existing asymmetry (§5.2), not blocking; takes
+  `theme.json` — a pre-existing asymmetry (§5.2), not blocking; entries
   work correctly either way, and nothing here depends on the answer.
 - The design as a whole awaits the User's explicit LOCK. Landed pieces
-  (the take tree, the edit journal, the git seam) are asserted by the CLI
+  (the entry tree, the edit journal, the git seam) are asserted by the CLI
   reference pages on the strength of the code, not of a lock; wiki concept
   pages assert nothing from the unbuilt remainder.
 - Whether a claude `PostToolUse` payload carries `tool_input.file_path` is

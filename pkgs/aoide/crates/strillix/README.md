@@ -470,7 +470,7 @@ is refused: nothing moves, and `strillix` still runs on the strillix root.
 ## How it composes
 
 Command paths: onboard/rice/draft/mode/wallpaper/theme/quickshell/screen/
-shellbridge/notifications/take/element/migrate/secrets ask/pair ask/pair show/preview/
+shellbridge/notifications/history/element/migrate/secrets ask/pair ask/pair show/preview/
 preview set/preview declare/preview shot/preview tree/preview notes/icon/
 apps/clipboard/lock/lock hint — everything that paints, or that only a desktop needs.
 `element seed` (L-E1,

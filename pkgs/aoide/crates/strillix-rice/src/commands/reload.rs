@@ -69,7 +69,7 @@ use aoide_protocol::Door;
 pub fn register(r: &mut Registry) {
     r.insert(cmd!(
         path: ["reload"],
-        summary: "The one mode-aware iteration command: reads the rice mode and reloads accordingly. Declarative reloads only: the compositor's rice (`hyprctl reload config-only`) and the shell, nothing synced (the old `quickshell reload`, absorbed). Staging/draft snapshot the current rice — deduped against the head take, so an unchanged reload mints nothing — sync it (`rice stage`'s own body), then shell-reload. Snapshot-before-reload makes every dress iteration revertible via `rice back` for free (widget bodies are captured in the take but revert via git, their own substrate).",
+        summary: "The one mode-aware iteration command: reads the rice mode and reloads accordingly. Declarative reloads only: the compositor's rice (`hyprctl reload config-only`) and the shell, nothing synced (the old `quickshell reload`, absorbed). Staging/draft snapshot the current rice — deduped against the head entry, so an unchanged reload mints nothing — sync it (`rice stage`'s own body), then shell-reload. Snapshot-before-reload makes every dress iteration revertible via `rice back` for free (widget bodies are captured in the entry but revert via git, their own substrate).",
         args: [],
         flags: [],
         gated: false,

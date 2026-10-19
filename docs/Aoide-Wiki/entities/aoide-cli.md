@@ -18,7 +18,7 @@ carries a meaningful exit code. The CLI, the MCP façade, and the
 [[A2A-Door]] share the same handlers, so the three doors cannot drift.
 
 Everything that paints — rice/draft/mode/wallpaper/theme/quickshell/screen/
-shellbridge/notifications/take, the whole Strillix surface — ships in a second
+shellbridge/notifications/history, the whole Strillix surface — ships in a second
 binary, [[strillix]]. Conducting orchestration is aoide's identity; strillix paints
 (`docs/architecture/PACKAGE-LAYOUT.md` "Two binaries"; `CONTRACTS.md` §3).
 See [[Rice-and-Theme|Rice-and-Theme]] and

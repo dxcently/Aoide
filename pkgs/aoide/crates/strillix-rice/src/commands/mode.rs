@@ -108,7 +108,7 @@ pub fn register(r: &mut Registry) {
     ));
     r.insert(cmd!(
         path: ["rice", "mode", "draft"],
-        summary: "Route stage/theme.json into rices/<rice>/drafts/<name>/theme.json via a symlink — every future write (rice stage, a hand-edit) lands directly in the draft. Forks the draft from the current stage first if it doesn't exist yet, and mints a baseline take of it (unless it equals the head) so the first edit can be undone. Refuses while `rice mode declarative` is locked.",
+        summary: "Route stage/theme.json into rices/<rice>/drafts/<name>/theme.json via a symlink — every future write (rice stage, a hand-edit) lands directly in the draft. Forks the draft from the current stage first if it doesn't exist yet, and mints a baseline entry of it (unless it equals the head) so the first edit can be undone. Refuses while `rice mode declarative` is locked.",
         args: [arg!("name", "string", true, "Draft name to route the stage into (forked from the current stage if new).")],
         flags: [],
         gated: false,

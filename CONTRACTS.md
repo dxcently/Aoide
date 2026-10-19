@@ -1107,7 +1107,7 @@ count.
   (`reason: "no-mesh-declared"`). `--json`'s `data.report` shape:
   `{"mesh", "rows": [{"node", "outcome", …}], "sameOperatorNote"?}`.
 - `strx schema --json` — the Strillix-surface contract: onboard/rice/draft/
-  mode/wallpaper/theme/quickshell/reload/screen/shellbridge/component/notifications/take/
+  mode/wallpaper/theme/quickshell/reload/screen/shellbridge/component/notifications/history/
   element, the painted surface. `crates/strillix/src/registry.rs`'s golden test
   pins the authoritative command-path set; `strx schema --json` is the live
   enumeration — `mcp.serve` must itself be a registered path for
