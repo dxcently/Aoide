@@ -390,6 +390,14 @@
   A new thing `Resolver` reads belongs in `inputs`. `--run` is CLI-only,
   because over another door it would hold the call open forever.
 
+- **The rice tree's start-up move is `aoideMigrateRoots`' job, and the
+  nix side never writes under `$AOIDE_ROOT/song`.** Every activation seed
+  reads `$STRILLIX_ROOT` (`aoided.nix` and `shellbridge.nix` tmpfiles name
+  `strillix.root/stage` only), and `aoideMigrateRoots` runs before
+  `writeBoundary`, so the move always precedes every seed. A file named
+  `$AOIDE_ROOT/song` is the moved marker (storage's `migrate_rice_tree`):
+  never add a nix or Rust path that creates `song/...` under `$AOIDE_ROOT`.
+
 ## Extension points
 
 - **A new paint command** adds a `cmd!`/`register` entry in the owning domain

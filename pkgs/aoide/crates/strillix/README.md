@@ -455,6 +455,15 @@ are core `aoide` identity, root `AGENTS.md`).
 `notifications` registry lines), `aoide-screen`, `aoide-server` (for `mcp
 serve --stdio`'s door loop).
 
+## Start-up migration
+
+Every `strillix` run calls `aoide_storage::fs::migrate_root_once` first, so the
+rice tree is moved from `$AOIDE_ROOT/song/` into `$STRILLIX_ROOT` before any
+command reads it. A `song` that is already a marker file (a regular file, not a
+directory) means that move is done; `strillix` then touches nothing. Rice state
+held by both roots is refused: nothing moves, and `strillix` still runs on the
+strillix root.
+
 ## How it composes
 
 Command paths: onboard/rice/draft/mode/wallpaper/theme/quickshell/screen/

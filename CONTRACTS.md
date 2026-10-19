@@ -2261,6 +2261,18 @@ The rice tree lives under `$STRILLIX_ROOT/rices/` (`$STRILLIX_ROOT` defaults to
 `~/.strillix`); a rice's own `wallpaper/` picture folder and `history/` take
 store sit beside its `theme.json`.
 
+**The rice-tree move and its marker.** The pre-rename `$AOIDE_ROOT/song/`
+tree moves into `$STRILLIX_ROOT` in one no-clobber pass: `stage/` (its
+`mode.json` `song` key becomes `rice`), `declared/`, `covers/` to
+`wallpapers/`, `songbook/` to `rices/`, `songbook-aside/` to `rices-aside/`
+(old names inside it untouched), and every `takes/` to `history/`. A move
+that leaves `$AOIDE_ROOT/song` empty replaces it with a regular FILE of that
+name, whose text names the strillix root. The file is the marker: an old
+binary that opens `song/stage` fails with ENOTDIR and recreates nothing, and
+a new binary reads the marker as already migrated. A leftover keeps `song/`
+a directory and is narrated. When `song/` and `$STRILLIX_ROOT` both hold rice
+state, nothing moves; both are narrated and the strillix root is the live one.
+
 No metadata file: the draft name is the directory name, the base rice is
 the directory it's nested under, and saved-at is `theme.json`'s mtime.
 Gitignored (`rices/*/drafts/`, same category as `/stage/`):

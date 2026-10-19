@@ -287,14 +287,22 @@ fn migrate_wallpaper_files(strillix: &std::path::Path) -> std::io::Result<()> {
 /// The rice tree's move out of aoide's root (`$AOIDE_ROOT/song/` into
 /// `$STRILLIX_ROOT`, or `<stage>/..` under an `$AOIDE_STAGE_DIR` override):
 /// `song/stage` becomes the stage, `song/declared` and `song/covers` keep
-/// their names, `song/songbook` becomes `rices`, and every rice's `takes/`
-/// becomes `history/` (its own drafts' included). `mode.json`'s `song` key
-/// becomes `rice`. `old_song` is the pre-rename tree; the target is
-/// [`strillix_dir`], the rice tree root every reader derives from. A tree
-/// that is already in place, or a missing one, is a no-op.
+/// their names, `song/songbook` becomes `rices`, `song/songbook-aside`
+/// becomes `rices-aside`, and every rice's `takes/` becomes `history/` (its
+/// own drafts' included). `mode.json`'s `song` key becomes `rice`. `old_song`
+/// is the pre-rename tree; the target is [`strillix_dir`], the rice tree root
+/// every reader derives from. A missing tree, or one already in place, is a
+/// no-op.
+///
+/// Two states stop the move before it starts. A `song` that is a FILE is the
+/// marker a finished move leaves behind ([`mark_rice_tree_moved`]): already
+/// migrated, nothing to do. Rice state held by BOTH roots is refused: nothing
+/// moves, both paths are narrated, and the binaries keep running on the
+/// strillix root. A move that leaves `song` empty replaces it with the marker;
+/// one that leaves anything behind keeps `song` and narrates what is left.
 fn migrate_rice_tree(old_song: &std::path::Path) -> std::io::Result<()> {
     let target = strillix_dir();
-    if old_song == target {
+    if old_song == target || old_song.is_file() {
         return Ok(());
     }
     if !rice_move_allowed(old_song, &target) {
@@ -306,12 +314,24 @@ fn migrate_rice_tree(old_song: &std::path::Path) -> std::io::Result<()> {
         }
         return Ok(());
     }
+    if holds_state(old_song) && strillix_holds_rice(&target) {
+        eprintln!(
+            "aoide: rice state is in both {} ({}) and {} ({}); nothing moved. Move one aside by hand: the strillix root is the live one",
+            old_song.display(),
+            held_by(old_song),
+            target.display(),
+            held_by(&target)
+        );
+        return Ok(());
+    }
+    let had_entries = !held_by(old_song).is_empty();
     if std::env::var("AOIDE_STAGE_DIR").is_err() {
         migrate_dir(&old_song.join("stage"), &stage_dir())?;
     }
     migrate_dir(&old_song.join("declared"), &target.join("declared"))?;
     migrate_dir(&old_song.join("covers"), &target.join("wallpapers"))?;
     migrate_dir(&old_song.join("songbook"), &target.join("rices"))?;
+    migrate_dir(&old_song.join("songbook-aside"), &target.join("rices-aside"))?;
     for rice in std::fs::read_dir(target.join("rices")).into_iter().flatten().flatten() {
         let dir = rice.path();
         migrate_dir(&dir.join("takes"), &dir.join("history"))?;
@@ -319,7 +339,72 @@ fn migrate_rice_tree(old_song: &std::path::Path) -> std::io::Result<()> {
             migrate_dir(&draft.path().join("takes"), &draft.path().join("history"))?;
         }
     }
-    migrate_mode_song_key(&stage_dir())
+    migrate_mode_song_key(&stage_dir())?;
+    if had_entries {
+        mark_rice_tree_moved(old_song, &target)?;
+    }
+    Ok(())
+}
+
+/// Whether `dir` holds rice state: any file, symlink or dangling link at any
+/// depth. Empty directories do not count, so the empty roots activation
+/// pre-creates (`$STRILLIX_ROOT/stage`) never trip the refusal.
+fn holds_state(dir: &std::path::Path) -> bool {
+    let Ok(entries) = std::fs::read_dir(dir) else { return false };
+    entries.flatten().any(|entry| {
+        let path = entry.path();
+        match std::fs::symlink_metadata(&path) {
+            Ok(meta) if meta.is_dir() => holds_state(&path),
+            Ok(_) => true,
+            Err(_) => false,
+        }
+    })
+}
+
+/// Whether the strillix root `target` holds rice state: only its rice
+/// folders count, never aoide's own `state/` or `run/` when both roots are
+/// one directory, and never the old `song/` tree that sits inside it.
+fn strillix_holds_rice(target: &std::path::Path) -> bool {
+    ["stage", "declared", "rices", "wallpapers", "rices-aside"]
+        .iter()
+        .any(|folder| holds_state(&target.join(folder)))
+}
+
+/// The top-level names in `dir`, sorted and comma-joined, for a narration.
+/// Empty when `dir` is missing or empty.
+fn held_by(dir: &std::path::Path) -> String {
+    let mut names: Vec<String> = std::fs::read_dir(dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .collect();
+    names.sort();
+    names.join(", ")
+}
+
+/// Replaces an emptied `old_song` directory with a regular file of the same
+/// name that says where the rice state went. An old binary that opens
+/// `song/stage` now fails with ENOTDIR instead of recreating a second live
+/// tree. A `old_song` that still holds anything is kept and narrated: the
+/// marker is only written over an empty directory, never over a leftover.
+fn mark_rice_tree_moved(old_song: &std::path::Path, target: &std::path::Path) -> std::io::Result<()> {
+    if !held_by(old_song).is_empty() {
+        eprintln!(
+            "aoide: {} keeps {} that did not move; no marker is written",
+            old_song.display(),
+            held_by(old_song)
+        );
+        return Ok(());
+    }
+    let marker = format!(
+        "rice state moved to {}; rebuild or restart the old binaries, which fail on this file instead of recreating a second live tree\n",
+        target.display()
+    );
+    if let Err(e) = std::fs::remove_dir(old_song).and_then(|()| atomic_write(old_song, &marker)) {
+        eprintln!("aoide: could not replace {} with the moved-marker ({e})", old_song.display());
+    }
+    Ok(())
 }
 
 /// Whether the rice tree may move from aoide's root into the rice root: both
@@ -4755,6 +4840,125 @@ mod tests {
         assert!(!old_song.join("stage").exists(), "the old song/stage tree must have moved");
 
         let _ = std::fs::remove_dir_all(&home);
+    }
+
+    /// Both roots named, a private home: the tree the rice-tree tests below
+    /// move. Returns the base dir; `aoide` and `strillix` sit under it.
+    fn rice_roots(tag: &str) -> std::path::PathBuf {
+        let base = std::env::temp_dir().join(format!("aoide-rice-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(base.join("home")).unwrap();
+        std::env::set_var("HOME", base.join("home"));
+        std::env::set_var("AOIDE_ROOT", base.join("aoide"));
+        std::env::set_var("STRILLIX_ROOT", base.join("strillix"));
+        base
+    }
+
+    #[test]
+    fn a_fresh_box_creates_no_song_tree_and_no_marker() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = MigrationEnvGuard::capture_and_clear();
+        let base = rice_roots("fresh");
+        migrate_root_once().unwrap();
+        migrate_root_once().unwrap();
+        assert!(!base.join("aoide").join("song").exists(), "a fresh box must not grow a song tree or a marker");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn an_old_box_moves_the_rice_tree_aside_and_marks_song_once() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = MigrationEnvGuard::capture_and_clear();
+        let base = rice_roots("old-only");
+        let song = base.join("aoide").join("song");
+        let strillix = base.join("strillix");
+        std::fs::create_dir_all(song.join("stage")).unwrap();
+        std::fs::write(song.join("stage").join("mode.json"), r#"{"song":"sonata"}"#).unwrap();
+        std::fs::create_dir_all(song.join("declared")).unwrap();
+        std::fs::write(song.join("declared").join("rice.conf"), "sonata").unwrap();
+        std::fs::create_dir_all(song.join("songbook").join("sonata")).unwrap();
+        std::fs::write(song.join("songbook").join("sonata").join("rice.nix"), "{}").unwrap();
+        std::fs::create_dir_all(song.join("songbook-aside").join("cadenza-20261008")).unwrap();
+        std::fs::write(song.join("songbook-aside").join("cadenza-20261008").join("livery.json"), "{}").unwrap();
+        // The new root's empty pre-created stage (activation's tmpfiles) must not refuse the move.
+        std::fs::create_dir_all(strillix.join("stage")).unwrap();
+
+        migrate_root_once().unwrap();
+        let marker = std::fs::read_to_string(&song).expect("song is now a marker file");
+        assert!(marker.contains(&strillix.display().to_string()), "the marker names the strillix root: {marker}");
+        assert_eq!(std::fs::read_to_string(strillix.join("stage").join("mode.json")).unwrap(), serde_json::to_string_pretty(&serde_json::json!({"rice": "sonata"})).unwrap());
+        assert_eq!(std::fs::read_to_string(strillix.join("declared").join("rice.conf")).unwrap(), "sonata");
+        assert!(strillix.join("rices").join("sonata").join("rice.nix").is_file());
+        assert!(
+            strillix.join("rices-aside").join("cadenza-20261008").join("livery.json").is_file(),
+            "the aside moves whole, its old names untouched"
+        );
+
+        // An old binary that still mkdirs song/stage fails loudly on the marker.
+        assert!(std::fs::create_dir_all(song.join("stage")).is_err(), "an old binary must not recreate a second tree");
+
+        migrate_root_once().unwrap();
+        assert_eq!(std::fs::read_to_string(&song).unwrap(), marker, "a second run leaves the marker alone");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn a_marker_already_in_place_is_already_migrated() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = MigrationEnvGuard::capture_and_clear();
+        let base = rice_roots("marked");
+        let song = base.join("aoide").join("song");
+        std::fs::create_dir_all(base.join("aoide")).unwrap();
+        std::fs::write(&song, "rice state moved elsewhere\n").unwrap();
+        let strillix = base.join("strillix");
+        std::fs::create_dir_all(strillix.join("rices").join("sonata")).unwrap();
+        std::fs::write(strillix.join("rices").join("sonata").join("rice.nix"), "live").unwrap();
+
+        migrate_root_once().unwrap();
+        assert_eq!(std::fs::read_to_string(&song).unwrap(), "rice state moved elsewhere\n");
+        assert_eq!(std::fs::read_to_string(strillix.join("rices").join("sonata").join("rice.nix")).unwrap(), "live");
+        assert!(!strillix.join("stage").join("mode.json").exists(), "a marked tree moves nothing");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn rice_state_in_both_roots_moves_nothing_and_is_refused_without_error() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = MigrationEnvGuard::capture_and_clear();
+        let base = rice_roots("both");
+        let song = base.join("aoide").join("song");
+        let strillix = base.join("strillix");
+        std::fs::create_dir_all(song.join("stage")).unwrap();
+        std::fs::write(song.join("stage").join("mode.json"), r#"{"song":"sonata"}"#).unwrap();
+        std::fs::create_dir_all(song.join("songbook").join("sonata")).unwrap();
+        std::fs::write(song.join("songbook").join("sonata").join("rice.nix"), "old").unwrap();
+        std::fs::create_dir_all(strillix.join("stage")).unwrap();
+        std::fs::write(strillix.join("stage").join("theme.json"), "live").unwrap();
+
+        migrate_root_once().unwrap();
+        assert!(song.is_dir(), "the old tree stays a directory, with no marker");
+        assert_eq!(std::fs::read_to_string(song.join("stage").join("mode.json")).unwrap(), r#"{"song":"sonata"}"#);
+        assert_eq!(std::fs::read_to_string(song.join("songbook").join("sonata").join("rice.nix")).unwrap(), "old");
+        assert_eq!(std::fs::read_to_string(strillix.join("stage").join("theme.json")).unwrap(), "live");
+        assert!(!strillix.join("rices").exists(), "no rice moved into the live root");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn an_unknown_leftover_keeps_song_and_writes_no_marker() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = MigrationEnvGuard::capture_and_clear();
+        let base = rice_roots("leftover");
+        let song = base.join("aoide").join("song");
+        std::fs::create_dir_all(song.join("stage")).unwrap();
+        std::fs::write(song.join("stage").join("mode.json"), r#"{"song":"sonata"}"#).unwrap();
+        std::fs::write(song.join("notes.txt"), "not ours").unwrap();
+
+        migrate_root_once().unwrap();
+        assert!(song.is_dir(), "song keeps what did not move, so it stays a directory");
+        assert_eq!(std::fs::read_to_string(song.join("notes.txt")).unwrap(), "not ours");
+        assert!(base.join("strillix").join("stage").join("mode.json").is_file(), "what could move, did");
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     /// The pre-theme `livery.json` arrives as `theme.json` in the stage, in each

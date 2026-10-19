@@ -188,7 +188,13 @@ by decision — no embedded database yet
   development). `migrate_root_once` is `pub` and idempotent instead — the
   three real binaries (`aoide`, `aoided`, `strillix`) call it once, explicitly,
   at the top of their own `main()`; see `fs::root`'s own doc for the full
-  reasoning. `fs::repo_root` is GONE (its one caller, `aoide-upkeep`'s
+  reasoning. The rice tree (`$AOIDE_ROOT/song/`) moves in the same call,
+  into `$STRILLIX_ROOT`: `songbook-aside` becomes `rices-aside`, and a move
+  that empties `song/` leaves a regular FILE named `song` in its place,
+  which says where the state went. That file is the "already migrated"
+  marker, and an old binary that opens `song/stage` fails on it (ENOTDIR)
+  instead of recreating a second live tree. Rice state in both roots is
+  refused, with nothing moved. `fs::repo_root` is GONE (its one caller, `aoide-upkeep`'s
   `soundcheck`, now reads `fs::flake_root` directly — a runtime root is not
   a repo, so deriving a checkout path from stage-dir parentage stopped
   making sense the moment the two could diverge). `fs::rice_templates_dir`

@@ -156,6 +156,8 @@ stay the runtime's own. `runtime.nix` publishes the filled slots as
   and the shell's restart. `aoideMigrateRoots` runs before every seed and
   before `strillixRice`: it runs `strillix --help` once, so the pre-rename
   roots move into the new ones before any seed creates them (a dry run skips it).
+  Once the rice tree has moved, `$AOIDE_ROOT/song` is a marker file, and the
+  migration reads it as already done. Nothing here creates `song/` again.
 
 ## The seam with `quickshell`
 

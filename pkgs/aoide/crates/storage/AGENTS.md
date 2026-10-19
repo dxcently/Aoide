@@ -301,6 +301,17 @@
   they could not make private. A `state/` that is absent is not created
   there, and one whose parent is not a directory counts as absent, so the
   narrated failure stays the failure.
+- **The rice tree's move leaves a marker, and two states refuse it
+  (`fs::migrate_rice_tree`).** A `$AOIDE_ROOT/song` that is a FILE is the
+  marker: the move is done, so nothing moves and nothing is narrated. Do not
+  "tidy" it into a directory or delete it: the file is what makes an old
+  `aoide`/`aoided` binary fail (ENOTDIR on `song/stage`) rather than
+  recreate a second live rice tree. The marker is written only over an
+  empty directory this run emptied; a leftover keeps `song/` as a directory
+  and is narrated. When BOTH `song/` and `$STRILLIX_ROOT` hold rice state
+  (`holds_state`: any file at any depth; empty dirs do not count, so the
+  pre-created `$STRILLIX_ROOT/stage` never trips it), nothing moves and the
+  refusal exits 0, so the binaries keep running on the strillix root.
 - **A checkout-relative source path is named ONCE, here — `fs::STRILLIX_SHELL_SRC`
   (`"pkgs/strillix-shell"`) is the pattern, not an exception.** The strillix shell's
   QML/icons/preview tree is read by `strillix`'s `commands::preview` (which
