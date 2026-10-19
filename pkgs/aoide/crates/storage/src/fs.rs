@@ -192,8 +192,8 @@ pub fn strillix_root() -> std::path::PathBuf {
     aoide_protocol::aoide_home().join(".strillix")
 }
 
-/// One-shot, idempotent move of the pre-L-C2 `~/Aoide/{state,log}` trees into
-/// the CURRENT `$AOIDE_ROOT` resolution, and of the pre-rename `~/.local/state/lyra`
+/// One-shot, idempotent move of the old `~/Aoide/{state,log}` trees into
+/// the CURRENT `$AOIDE_ROOT` resolution, and of the old `~/.local/state/lyra`
 /// link tree (Hyprland sources it, so it moves on every boot, not on request). `pub`: the three real binaries call
 /// this ONCE, early in their own `main()`, never from a library getter (see
 /// [`root`]'s own doc for the incident that settled this). Safe to call more
@@ -230,13 +230,24 @@ pub fn migrate_root_once() -> std::io::Result<()> {
     migrate_node_state_names()
 }
 
-/// The rice runtime's move, the part of the rename no core binary runs: the
-/// pre-L-C2 `~/Aoide/song/stage`, the rice tree
+/// The rice runtime's move, which no core binary runs: the old
+/// `~/Aoide/song/stage`, the rice tree
 /// (`$AOIDE_ROOT/song/*`, see [`migrate_rice_tree`]) into `$STRILLIX_ROOT`,
 /// and the file renames inside it. Runs only when asked: the strillix binary
 /// calls it from [`rice_root_at_start`] when `STRILLIX_MIGRATE=1`, and from
 /// `strx migrate`. Idempotent, like every piece here.
 pub fn migrate_rice_root() -> std::io::Result<()> {
+    let refused = match rice_status() {
+        RiceStatus::Both(paths) => Some(("held by both roots", paths)),
+        RiceStatus::Refused(paths) => Some(("held across homes", paths)),
+        RiceStatus::Settled | RiceStatus::Due(_) => None,
+    };
+    if let Some((why, paths)) = refused {
+        return Err(std::io::Error::other(format!(
+            "rice state is {why} ({}); nothing moved",
+            paths.iter().map(|p| p.display().to_string()).collect::<Vec<_>>().join(", ")
+        )));
+    }
     let old_root = aoide_protocol::aoide_home().join("Aoide");
     let new_root = root();
     if old_root != new_root && std::env::var("AOIDE_STAGE_DIR").is_err() {
@@ -258,11 +269,14 @@ pub enum RiceStatus {
     Due(Vec<std::path::PathBuf>),
     /// Rice state held by the old tree AND the strillix root: nothing moves.
     Both(Vec<std::path::PathBuf>),
+    /// Rice state whose two roots resolve under different homes: nothing moves.
+    Refused(Vec<std::path::PathBuf>),
 }
 
 /// The rice state's status, read from disk and moving nothing. Mirrors what
 /// [`migrate_rice_root`] would do: a `song` that is a file is the marker,
-/// rice state in both roots is [`RiceStatus::Both`].
+/// rice state in both roots is [`RiceStatus::Both`], and rice state the
+/// roots would carry across homes is [`RiceStatus::Refused`].
 pub fn rice_status() -> RiceStatus {
     let home = aoide_protocol::aoide_home();
     let old_root = home.join("Aoide");
@@ -276,8 +290,11 @@ pub fn rice_status() -> RiceStatus {
     if holds_state(&home.join(".local").join("state").join("lyra")) {
         held.push(home.join(".local").join("state").join("lyra"));
     }
-    if old_song != target && !old_song.is_file() && holds_state(&old_song) {
+    if old_song != target && !old_song.is_file() && old_rice_held(&old_song) {
         held.push(old_song.clone());
+        if !rice_move_allowed(&old_song, &target) {
+            return RiceStatus::Refused(held);
+        }
         if strillix_holds_rice(&target) {
             return RiceStatus::Both(held);
         }
@@ -292,7 +309,8 @@ pub fn rice_status() -> RiceStatus {
 /// The rice migration's start-up hook, the strillix binary's only call into
 /// it. `STRILLIX_MIGRATE=1` (the home activation sets it) runs the move.
 /// Without it nothing moves and no marker is written: old state gets ONE
-/// line naming `strx migrate`, and the binary carries on.
+/// line naming `strx migrate`, and the binary carries on. `strillix` itself
+/// refuses every verb that could write until the state settles.
 pub fn rice_root_at_start() -> std::io::Result<()> {
     if std::env::var("STRILLIX_MIGRATE").is_ok_and(|v| v == "1") {
         return migrate_rice_root();
@@ -306,6 +324,10 @@ pub fn rice_root_at_start() -> std::io::Result<()> {
         ),
         RiceStatus::Both(paths) => eprintln!(
             "strillix: rice state is in both {} and the strillix root; run `strx migrate --check`. Nothing moved",
+            names(&paths)
+        ),
+        RiceStatus::Refused(paths) => eprintln!(
+            "strillix: rice state at {} would cross homes; set both $AOIDE_ROOT and $STRILLIX_ROOT or neither. Nothing moved",
             names(&paths)
         ),
     }
@@ -328,7 +350,7 @@ fn migrate_theme_files(strillix: &std::path::Path) {
     }
 }
 
-/// The wallpaper names (step 5 of the rename): `stage/cover.json` becomes
+/// The wallpaper names: `stage/cover.json` becomes
 /// `stage/wallpaper.json`, `covers/` becomes `wallpapers/`, and every rice's
 /// `cover/` becomes `wallpaper/`, with each draft's `cover.json` following its
 /// stage file. No-clobber and idempotent like [`migrate_theme_files`].
@@ -351,7 +373,7 @@ fn migrate_wallpaper_files(strillix: &std::path::Path) -> std::io::Result<()> {
 /// their names, `song/songbook` becomes `rices`, `song/songbook-aside`
 /// becomes `rices-aside`, and every rice's `takes/` becomes `history/` (its
 /// own drafts' included). `mode.json`'s `song` key becomes `rice`. `old_song`
-/// is the pre-rename tree; the target is [`strillix_dir`], the rice tree root
+/// is the old tree; the target is [`strillix_dir`], the rice tree root
 /// every reader derives from. A missing tree, or one already in place, is a
 /// no-op.
 ///
@@ -363,29 +385,9 @@ fn migrate_wallpaper_files(strillix: &std::path::Path) -> std::io::Result<()> {
 /// one that leaves anything behind keeps `song` and narrates what is left.
 fn migrate_rice_tree(old_song: &std::path::Path) -> std::io::Result<()> {
     let target = strillix_dir();
-    if old_song == target || old_song.is_file() {
-        return Ok(());
+    if old_song == target || old_song.is_file() || !old_rice_held(old_song) {
+        return migrate_mode_song_key(&stage_dir());
     }
-    if !rice_move_allowed(old_song, &target) {
-        if old_song.exists() {
-            eprintln!(
-                "aoide: {} stays where it is: $AOIDE_ROOT and $STRILLIX_ROOT resolve under different homes; set both or neither",
-                old_song.display()
-            );
-        }
-        return Ok(());
-    }
-    if holds_state(old_song) && strillix_holds_rice(&target) {
-        eprintln!(
-            "aoide: rice state is in both {} ({}) and {} ({}); nothing moved. Move one aside by hand: the strillix root is the live one",
-            old_song.display(),
-            held_by(old_song),
-            target.display(),
-            held_by(&target)
-        );
-        return Ok(());
-    }
-    let had_entries = !held_by(old_song).is_empty();
     if std::env::var("AOIDE_STAGE_DIR").is_err() {
         migrate_dir(&old_song.join("stage"), &stage_dir())?;
     }
@@ -401,13 +403,21 @@ fn migrate_rice_tree(old_song: &std::path::Path) -> std::io::Result<()> {
         }
     }
     migrate_mode_song_key(&stage_dir())?;
-    if had_entries {
-        mark_rice_tree_moved(old_song, &target)?;
-    }
-    Ok(())
+    mark_rice_tree_moved(old_song, &target)
 }
 
-/// Whether `dir` holds rice state: any file, symlink or dangling link at any
+/// The rice folders the old tree carried. Anything else under `song/`
+/// is not rice state: a stray file there neither blocks a move nor counts as
+/// something one would refuse over.
+const OLD_RICE_FOLDERS: [&str; 5] = ["stage", "declared", "covers", "songbook", "songbook-aside"];
+
+/// Whether the old tree at `old_song` holds rice state (one of
+/// [`OLD_RICE_FOLDERS`] has a file at any depth).
+fn old_rice_held(old_song: &std::path::Path) -> bool {
+    OLD_RICE_FOLDERS.iter().any(|folder| holds_state(&old_song.join(folder)))
+}
+
+/// Whether `dir` holds state: any file, symlink or dangling link at any
 /// depth. Empty directories do not count, so the empty roots activation
 /// pre-creates (`$STRILLIX_ROOT/stage`) never trip the refusal.
 fn holds_state(dir: &std::path::Path) -> bool {
@@ -519,7 +529,7 @@ fn lock_state_if_present() -> std::io::Result<()> {
 /// The peer -> node vocabulary rename (User ruling, 2026-09-07): the four
 /// state files/dirs that carried the old noun rename in place, under
 /// whatever [`state_dir`] resolves to on this host — independent of the
-/// pre-L-C2 root move above, so it runs whether or not that move applies.
+/// old root move above, so it runs whether or not that move applies.
 /// Same no-clobber discipline as [`migrate_dir`]/[`migrate_file`]: a file
 /// already written under its new name is left alone, and the old one is
 /// never deleted out from under a box that hasn't opened the new binary
@@ -574,7 +584,7 @@ fn migrate_dir(old: &std::path::Path, new: &std::path::Path) -> std::io::Result<
     let Some(parent) = new.parent() else { return Ok(()) };
     if let Err(e) = ensure_write_dir(parent) {
         eprintln!(
-            "aoide: cannot create {} ({e}) — {} stays at the pre-L-C2 root",
+            "aoide: cannot create {} ({e}) — {} stays at the old root",
             parent.display(),
             old.display()
         );
@@ -587,7 +597,7 @@ fn migrate_dir(old: &std::path::Path, new: &std::path::Path) -> std::io::Result<
         } else {
             let _ = std::fs::remove_dir_all(&tmp);
             eprintln!(
-                "aoide: could not migrate {} to {} — staying at the pre-L-C2 root",
+                "aoide: could not migrate {} to {} — staying at the old root",
                 old.display(),
                 new.display()
             );
@@ -608,7 +618,7 @@ fn migrate_file(old: &std::path::Path, new: &std::path::Path) {
     let Some(parent) = new.parent() else { return };
     if let Err(e) = ensure_write_dir(parent) {
         eprintln!(
-            "aoide: cannot create {} ({e}) — {} stays at the pre-L-C2 root",
+            "aoide: cannot create {} ({e}) — {} stays at the old root",
             parent.display(),
             old.display()
         );
@@ -621,7 +631,7 @@ fn migrate_file(old: &std::path::Path, new: &std::path::Path) {
         let _ = std::fs::remove_file(old);
     } else {
         eprintln!(
-            "aoide: could not migrate {} to {} — staying at the pre-L-C2 root",
+            "aoide: could not migrate {} to {} — staying at the old root",
             old.display(),
             new.display()
         );
@@ -4835,7 +4845,11 @@ mod tests {
         std::fs::create_dir_all(&old_declared).unwrap();
         std::fs::write(old_declared.join("rice.conf"), "sonata").unwrap();
 
-        migrate_all().expect("a refused move is narrated, not an error");
+        assert!(
+            migrate_all().is_err(),
+            "a refused move is an error, so the verb and the binary exit nonzero"
+        );
+        assert!(matches!(rice_status(), RiceStatus::Refused(_)), "the cross-home tree reads as refused, not due");
         assert_eq!(std::fs::read_to_string(old_declared.join("rice.conf")).unwrap(), "sonata");
         assert!(!home.join(".strillix").join("declared").exists(), "nothing may land under the default home");
         let _ = std::fs::remove_dir_all(&base);
@@ -5010,13 +5024,39 @@ mod tests {
         std::fs::write(song.join("songbook").join("sonata").join("rice.nix"), "old").unwrap();
         std::fs::create_dir_all(strillix.join("stage")).unwrap();
         std::fs::write(strillix.join("stage").join("theme.json"), "live").unwrap();
+        std::fs::write(strillix.join("stage").join("livery.json"), "live-old-name").unwrap();
 
-        migrate_all().unwrap();
+        assert!(migrate_all().is_err(), "a both-roots state is refused as an error");
         assert!(song.is_dir(), "the old tree stays a directory, with no marker");
         assert_eq!(std::fs::read_to_string(song.join("stage").join("mode.json")).unwrap(), r#"{"song":"sonata"}"#);
         assert_eq!(std::fs::read_to_string(song.join("songbook").join("sonata").join("rice.nix")).unwrap(), "old");
         assert_eq!(std::fs::read_to_string(strillix.join("stage").join("theme.json")).unwrap(), "live");
+        assert_eq!(
+            std::fs::read_to_string(strillix.join("stage").join("livery.json")).unwrap(),
+            "live-old-name",
+            "a refused tree renames nothing inside the live root"
+        );
         assert!(!strillix.join("rices").exists(), "no rice moved into the live root");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// The second run after a stray file: the known folders moved on the
+    /// first run, so the second reads the tree as settled and refuses nothing.
+    #[test]
+    fn a_stray_file_does_not_refuse_the_second_run() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = MigrationEnvGuard::capture_and_clear();
+        let base = rice_roots("stray-twice");
+        let song = base.join("aoide").join("song");
+        std::fs::create_dir_all(song.join("stage")).unwrap();
+        std::fs::write(song.join("stage").join("mode.json"), r#"{"song":"sonata"}"#).unwrap();
+        std::fs::write(song.join("mystery.txt"), "not ours").unwrap();
+
+        migrate_all().unwrap();
+        assert_eq!(rice_status(), RiceStatus::Settled, "the stray file is not rice state");
+        migrate_all().unwrap();
+        assert!(song.join("mystery.txt").is_file(), "the stray file stays where it is");
+        assert!(base.join("strillix").join("stage").join("mode.json").is_file());
         let _ = std::fs::remove_dir_all(&base);
     }
 
@@ -5108,7 +5148,7 @@ mod tests {
         std::fs::write(base.join("strillix").join("stage").join("theme.json"), "live").unwrap();
 
         assert!(matches!(rice_status(), RiceStatus::Both(_)));
-        migrate_rice_root().unwrap();
+        assert!(migrate_rice_root().is_err(), "both roots held: refused as an error");
         assert!(song.is_dir(), "both roots held: the old tree is kept");
         let _ = std::fs::remove_dir_all(&base);
     }
@@ -5266,7 +5306,7 @@ mod tests {
         std::fs::create_dir_all(&new_stage).unwrap();
         std::fs::write(new_stage.join("theme.json"), "fresh").unwrap();
 
-        migrate_all().unwrap();
+        assert!(migrate_all().is_err(), "rice state in both roots is refused, not moved");
 
         assert_eq!(std::fs::read_to_string(old_stage.join("mode.json")).unwrap(), r#"{"song":"moonlight"}"#);
         assert_eq!(std::fs::read_to_string(new_stage.join("theme.json")).unwrap(), "fresh");
@@ -5356,8 +5396,8 @@ mod tests {
         std::fs::create_dir_all(&new_rice).unwrap();
         std::fs::write(new_rice.join("marker"), "newer").unwrap();
 
-        migrate_all().unwrap();
-        migrate_all().unwrap();
+        assert!(migrate_all().is_err(), "rice state in both roots is refused on every run");
+        assert!(migrate_all().is_err());
 
         assert_eq!(
             std::fs::read_to_string(new_rice.join("marker")).unwrap(),

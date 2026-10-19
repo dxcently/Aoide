@@ -175,9 +175,9 @@ by decision — no embedded database yet
   drives `fs::migrate_conducting_stage`: a one-shot, idempotent move of the
   six core files off their pre-split `/stage/` location, never
   clobbering a fresher `state/stage/` file and never touching a rice file.
-  `fs::migrate_root_once` is the SIBLING one-shot migration for the L-C2
-  root move itself (a pre-L-C2 host's `~/Aoide/{rice/stage,state,log}` into
-  the new root's equivalents) — deliberately NOT wired into `fs::root`'s own
+  `fs::migrate_root_once` is the one-shot migration for the root layout
+  itself (an old host's `~/Aoide/{state,log}` into the current root) —
+  deliberately NOT wired into `fs::root`'s own
   resolution the way `migrate_conducting_stage` is wired into
   `conducting_stage_dir`'s: `root`/`stage_dir`/`state_dir` are reached by
   `with_stage_lock`, the shared lock primitive nearly every stage-file

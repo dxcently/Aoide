@@ -636,7 +636,7 @@ in
         # two assignments to this option path, which one module file may not
         # make.
         config = lib.mkMerge [
-          # ── Move the pre-rename roots before anything seeds the new ones ─────
+          # ── Move the old rice state before anything seeds the strillix root ───
           # Every seed below creates `$STRILLIX_ROOT/*` or `~/.local/state/strillix`
           # before any binary starts, and `migrate_dir` only moves into an absent
           # or empty target. So the migration runs first: `--help` exits before

@@ -14,7 +14,7 @@ use serde_json::{json, Value};
 pub fn register(r: &mut Registry) {
     r.insert(cmd!(
         path: ["migrate"],
-        summary: "Move the old rice state into the strillix root: the rice tree that sat under $AOIDE_ROOT/song, the old lyra state, and the file renames inside it. A rice state held by both roots is refused and nothing moves. --check reports the state and moves nothing.",
+        summary: "Move the old rice state into the strillix root: the rice tree that sat under $AOIDE_ROOT/song, the ~/.local/state/strillix link tree, and the file renames inside it. Rice state held by both roots, or across homes, is refused: nothing moves and the verb exits nonzero. --check reports the state and moves nothing.",
         args: [],
         flags: [flag!("check", "bool", "Report the rice state and what a run would move; move nothing.")],
         gated: false,
@@ -35,16 +35,20 @@ fn handle_migrate(inv: &Invocation) -> Outcome {
         }
     }
     let after = rice_status();
-    let message = if check {
-        format!("rice state is {} (--check: nothing moved)", label(&before))
-    } else {
-        format!("rice state was {}, is now {}", label(&before), label(&after))
-    };
-    Outcome::ok("migrate", message).with_data(json!({
+    let data = json!({
         "check": check,
         "before": status(&before),
         "after": status(&after),
-    }))
+    });
+    if check {
+        return Outcome::ok("migrate", format!("rice state is {} (--check: nothing moved)", label(&before)))
+            .with_data(data);
+    }
+    let message = format!("rice state was {}, is now {}", label(&before), label(&after));
+    if after != RiceStatus::Settled {
+        return Outcome::error("migrate", message).with_data(data);
+    }
+    Outcome::ok("migrate", message).with_data(data)
 }
 
 fn label(s: &RiceStatus) -> &'static str {
@@ -52,6 +56,7 @@ fn label(s: &RiceStatus) -> &'static str {
         RiceStatus::Settled => "settled",
         RiceStatus::Due(_) => "due",
         RiceStatus::Both(_) => "held by both roots",
+        RiceStatus::Refused(_) => "held across homes",
     }
 }
 
@@ -61,5 +66,6 @@ fn status(s: &RiceStatus) -> Value {
         RiceStatus::Settled => json!({ "state": "settled", "paths": [] }),
         RiceStatus::Due(p) => json!({ "state": "due", "paths": paths(p) }),
         RiceStatus::Both(p) => json!({ "state": "both", "paths": paths(p) }),
+        RiceStatus::Refused(p) => json!({ "state": "refused", "paths": paths(p) }),
     }
 }

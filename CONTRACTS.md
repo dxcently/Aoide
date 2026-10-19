@@ -2263,7 +2263,7 @@ The rice tree lives under `$STRILLIX_ROOT/rices/` (`$STRILLIX_ROOT` defaults to
 `~/.strillix`); a rice's own `wallpaper/` picture folder and `history/` entry
 store sit beside its `theme.json`.
 
-**The rice-tree move and its marker.** The pre-rename `$AOIDE_ROOT/song/`
+**The rice-tree move and its marker.** The old `$AOIDE_ROOT/song/`
 tree moves into `$STRILLIX_ROOT` in one no-clobber pass: `stage/` (its
 `mode.json` `song` key becomes `rice`), `declared/`, `covers/` to
 `wallpapers/`, `songbook/` to `rices/`, `songbook-aside/` to `rices-aside/`
@@ -2273,14 +2273,17 @@ name, whose text names the strillix root. The file is the marker: an old
 binary that opens `song/stage` fails with ENOTDIR and recreates nothing, and
 a new binary reads the marker as already migrated. A leftover keeps `song/`
 a directory and is narrated. When `song/` and `$STRILLIX_ROOT` both hold rice
-state, nothing moves; both are narrated and the strillix root is the live one.
+state, nothing moves and the move is refused. Only the old tree's own folders
+(`stage`, `declared`, `covers`, `songbook`, `songbook-aside`) count as rice
+state; a stray file beside them neither blocks nor moves.
 
 The move runs only when asked: the strillix binary runs it under `STRILLIX_MIGRATE=1`
 (the home activation sets it on every switch) and `strx migrate` runs it by
-hand. `strx migrate --check` reports the state (`settled`, `due` or `held by
-both roots`) and moves nothing. A plain run with old state prints one line
-naming `strx migrate` and carries on. The core `aoide` and `aoided` binaries
-never run it.
+hand. `strx migrate --check` reports the state (`settled`, `due`, `held by
+both roots` or `held across homes`) and moves nothing. Until the state is
+`settled`, `strillix` refuses every verb except `migrate`, help and version,
+so nothing is written into the strillix root beside the old tree. Refusals
+exit nonzero. The core `aoide` and `aoided` binaries never run it.
 
 No metadata file: the draft name is the directory name, the base rice is
 the directory it's nested under, and saved-at is `theme.json`'s mtime.

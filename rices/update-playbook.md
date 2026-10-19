@@ -125,35 +125,25 @@ rename, not a content migration:
   missing stage file; the mirror + fallback were dropped when Phase 4 closed
   the transition window.
 
-## Migration — the strillix layout (stage v1, history v1, drafts v1)
+## The strillix layout (stage v1, history v1, drafts v1)
 
-The rename moved the rice runtime out of aoide's root and renamed what it
-holds. The format versions moved with it: `stage/mode.json`,
+The rice runtime lives under `$STRILLIX_ROOT` (default `~/.strillix`), not
+under aoide's root. Its format versions are `stage/mode.json`,
 `stage/theme.json`, `stage/wallpaper.json`, `state/stage/notifications.json`
-and each `rices/<rice>/history/NNNN.json` are now `schemaVersion` `"1"`, and
-the rice folder layout in `rices/<rice>/drafts/<name>/` is v1 (CONTRACTS.md §4).
-The note schema (§1) and the rice body (§5) stay as they were.
+and each `rices/<rice>/history/NNNN.json`, all `schemaVersion` `"1"`. The
+rice folder layout in `rices/<rice>/drafts/<name>/` is v1 (CONTRACTS.md §4).
+The note schema (§1) and the rice body (§5) are unchanged.
 
-What moved, and where it lands:
+- `$STRILLIX_ROOT/stage` is the live stage; `declared/`, `rices/`,
+  `wallpapers/` and `rices-aside/` sit beside it.
+- A rice keeps `theme.json`, `wallpaper/` and `history/` in its folder, and
+  each draft keeps the same names.
+- `mode.json`'s key for the active rice is `rice`.
 
-- The rice tree leaves `$AOIDE_ROOT/song/` for `$STRILLIX_ROOT/rices/`
-  (`$STRILLIX_ROOT` defaults to `~/.strillix`). `song/stage` becomes
-  `$STRILLIX_ROOT/stage`, `song/declared` stays `declared`, `song/covers`
-  becomes `wallpapers`, and `song/songbook` becomes `rices`.
-- Per file: `livery.json` becomes `theme.json` (stage, declared twin, every
-  rice and draft), `cover.json` becomes `wallpaper.json` (stage, every draft),
-  and `cover/` becomes `wallpaper/` in each rice. `takes/` becomes `history/`
-  in each rice and draft.
-- `mode.json`'s `song` key becomes `rice`.
-- `~/.local/state/lyra` becomes `~/.local/state/strillix`.
-
-The first run of the new binaries migrates all of this, once, in
-`fs::migrate_root_once`. The `aoideMigrateRoots` activation runs
-`strillix --help` before the seeds, so a rebuild on a box that never ran the
-new binaries lands the same way. Each move is no-clobber:
-a file already at its new name is left alone, and a failed move keeps the old
-tree. A file moved from an old tree keeps its old `schemaVersion` until the
-binary next writes it; no reader rejects either version.
+Old rice state moves into this layout on a rebuild (the activation's
+`aoideMigrateRoots`) or by `strx migrate`. Until it settles, `strillix`
+refuses every verb except `migrate`, help and version. The per-file rules
+and refusals are in CONTRACTS.md §4; the change record is in CHANGELOG.md.
 
 ## What this playbook does NOT cover
 

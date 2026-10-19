@@ -292,7 +292,7 @@
   not. The three real binaries call `migrate_root_once()` once, explicitly,
   at the top of their own `main()` instead (`crates/cli/src/bin/{aoide,
   aoided}.rs`, `crates/strillix/src/bin/strillix.rs`); it moves only
-  `state/` and `log` (and the pre-rename `~/.local/state/lyra` link tree),
+  `state/` and `log` (and the old `~/.local/state/lyra` link tree),
   never the rice tree. A test may call it directly
   too (it is a plain idempotent function, no `Once`/env-isolation dance
   needed, unlike `migrate_conducting_stage`'s own test suite). A move that
