@@ -4883,7 +4883,7 @@ pub fn register_mail_names(r: &mut Registry, names: fn(&Invocation) -> Outcome) 
         handler: names,
         examples: ["mail"],
         brief: "List the mailboxes that hold mail you have not read.",
-        doors: &[Door::Cli, Door::Daemon, Door::Mcp],
+        doors: &[Door::Cli, Door::Mcp],
     ));
 }
 
@@ -4903,7 +4903,7 @@ pub fn register_mail_reads(r: &mut Registry, read: fn(&Invocation) -> Outcome, s
         examples: ["mail read --for conductor", "mail read --all-names"],
         brief: "Print unread letters and move the cursor past them.",
         one_of: &[&["for", "all-names"]],
-        doors: &[Door::Cli, Door::Daemon, Door::Mcp],
+        doors: &[Door::Cli, Door::Mcp],
     ));
     r.insert(cmd!(
         path: ["mail", "show"],
@@ -4915,7 +4915,7 @@ pub fn register_mail_reads(r: &mut Registry, read: fn(&Invocation) -> Outcome, s
         handler: show,
         examples: ["mail show <msgid>"],
         brief: "Print one mail entry by its msgid, leaving cursors alone.",
-        doors: &[Door::Cli, Door::Daemon, Door::Mcp],
+        doors: &[Door::Cli, Door::Mcp],
     ));
     r.insert(cmd!(
         path: ["mail", "mark"],
@@ -4927,7 +4927,7 @@ pub fn register_mail_reads(r: &mut Registry, read: fn(&Invocation) -> Outcome, s
         handler: mark,
         examples: ["mail mark --for conductor"],
         brief: "Move a mailbox's cursor to its latest entry, printing nothing.",
-        doors: &[Door::Cli, Door::Daemon, Door::Mcp],
+        doors: &[Door::Cli, Door::Mcp],
     ));
 }
 
@@ -5851,12 +5851,20 @@ pub fn mail_show(inv: &Invocation, scope: &MailScope) -> Outcome {
                 .collect();
             // The `--all-names` teaching is a CLI-only spelling, so a scoped
             // caller is pointed at the listing it may run.
-            let (list_cmd, fix) = if scope.is_some() {
-                ("aoide mail", "aoide mail")
-            } else {
-                ("aoide mail read --all-names --reread", "aoide mail read --all-names --reread")
-            };
-            teach::unknown_name(inv, cmd, "msgid", teach::Slot::Arg(0), msgid, &valid, "latest msgids", list_cmd, Fix::Run(fix.to_string()))
+            if scope.is_some() {
+                return teach::unknown_name(
+                    inv,
+                    cmd,
+                    "msgid",
+                    teach::Slot::Arg(0),
+                    msgid,
+                    &valid,
+                    "latest msgids",
+                    "mail",
+                    Fix::None("list what you can read with the `mail` tool, then pass one of its msgids to `mail.show`"),
+                );
+            }
+            teach::unknown_name(inv, cmd, "msgid", teach::Slot::Arg(0), msgid, &valid, "latest msgids", "aoide mail read --all-names --reread", Fix::Run("aoide mail read --all-names --reread".to_string()))
         }
         Err(e) => teach::store_failed(cmd, "state/mail", &e),
     }
@@ -11591,7 +11599,7 @@ mod tests {
         // seq would pass this test even if the export marked it — there would
         // be nothing left to advance — so the mark starts at zero.
         let cursors = aoide_storage::mail::cursors_path();
-        std::fs::write(&cursors, r#"{"conductor":{"reader-a":{"seq":0}}}"#).unwrap();
+        std::fs::write(&cursors, r#"{"conductor":{"session:reader-a":{"seq":0}}}"#).unwrap();
         let before = std::fs::read(&cursors).unwrap();
         assert_eq!(
             aoide_storage::mail::unread_for("conductor", reader).unwrap().1.len(),

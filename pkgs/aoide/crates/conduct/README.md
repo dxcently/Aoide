@@ -297,6 +297,10 @@ stripping one, and a held spawn shows as its whole command.
   prompt unsubmitted; see `SUBMIT_KEYSTROKE_DELAY`'s doc comment (AGENTS.md
   has the full invariant) for the empirically-pinned delay between the two
   writes. `deliver_local_with` is the one production caller.
+- **`graph::mail_reads`** (`mail`, `mail read`, `mail show`, `mail mark` over
+  MCP; MAIL.md "Reading over MCP") is the MCP clip of the mailbase. It composes
+  `read_scope` with the attested sender, and calls `aoide-client`'s handlers
+  with that scope and reader. Off MCP it is the CLI's own read, unchanged.
 - **`graph::doorbell`** (`ring`, `mail_ring`, `RingReport`; P-M5a-2,
   `docs/architecture/MAIL.md` "Delivery and the doorbell") is the mailbase
   latch's actual ringer: filing an arming letter nudges every armed,

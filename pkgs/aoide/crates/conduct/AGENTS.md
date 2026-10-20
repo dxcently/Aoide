@@ -152,8 +152,16 @@ in the message.
   - The roster (`collect_roster`) and `session find` (`load_index`) keep the
     scoped rows, name no remote parent (an ancestor on another node), and
     carry no mail facts: a mailbox can be shared with a sibling outside the
-    scope, and mail read stays closed until it is scoped by the mailbox
-    registry.
+    scope, so a row's mail facts stay withheld. The mail reads are scoped
+    instead by `graph::mail_reads` (below).
+  - `graph::mail_reads` answers `mail`, `mail read`, `mail show` and `mail
+    mark` for the MCP door only. Off MCP it passes no scope and the env reader,
+    so the CLI is unchanged. On MCP it takes `read_scope` and the attested
+    session as the reader, refuses an unattested caller, and hands the handlers
+    to `aoide-client`, which keeps the read logic. Only this module may register
+    them: `commands/graph.rs` calls `aoide-client`'s `register_mail_names` and
+    `register_mail_reads` with these handlers; no other caller may do so.
+    Session readers key as `session:<id>` in storage, never as a bare id.
   - The graph (`view_as`) keeps the scoped sessions and hooks, and draws only
     the projects a scoped session resolves to, with no path, root or host. It
     folds no mesh node (no url, no far-node cache) and names no remote parent.

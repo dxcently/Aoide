@@ -80,6 +80,16 @@ pub(crate) fn line_with(inv: &Invocation, slot: Slot, with: &str) -> String {
     line(&fixed)
 }
 
+/// The MCP spelling of the invocation with `slot` set to `with`: the tool name
+/// and a JSON argument object, the form an MCP caller sends.
+fn mcp_call(inv: &Invocation, noun: &str, slot: Slot, with: &str) -> String {
+    let key = match slot {
+        Slot::Flag(name) => name.to_string(),
+        Slot::Arg(_) | Slot::ToNode => noun.replace(' ', "-"),
+    };
+    format!("{} {}", inv.path.join("."), json!({ key: with }))
+}
+
 /// A name the world holds nothing under (exit 1): the closest valid name when
 /// one is a typo away, else the names there are, and a fix that runs.
 ///
@@ -112,12 +122,20 @@ pub(crate) fn unknown_name(
         _ => None,
     };
     let near = prefixed.or_else(|| closest(typed, valid.iter().map(String::as_str), 1).first().copied());
+    // Over MCP the fix names the tool and its argument, never a CLI spelling a
+    // caller cannot run.
+    let mcp = inv.door == aoide_protocol::audit::Door::Mcp;
     let (why, fix) = match near.as_ref() {
+        Some(near) if mcp => (
+            format!("did you mean `{near}`? the {held} are {list}"),
+            Fix::Run(mcp_call(inv, noun, slot, near)),
+        ),
         Some(near) => (
             format!("did you mean `{near}`? the {held} are {list}"),
             Fix::Run(line_with(inv, slot, near)),
         ),
         None if valid.is_empty() => (format!("there are no {held} yet"), none_yet),
+        None if mcp => (format!("the {held} are {list}"), Fix::Set(format!("list them with `{list_line}`"))),
         None => (format!("the {held} are {list}"), Fix::Run(list_line.to_string())),
     };
     Outcome::refuse(cmd, Kind::Refused, what, why, fix)

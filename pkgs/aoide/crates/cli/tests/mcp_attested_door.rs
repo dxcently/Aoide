@@ -280,3 +280,96 @@ fn the_real_mcp_server_is_attested_by_its_ancestry_and_still_never_approves() {
     assert_eq!(spawn["from"], "mcp");
     assert_eq!(spawn["spawn"]["args"][0], script.to_string_lossy().as_ref());
 }
+
+/// Files one letter to `to` through the real binary, under the lane's env.
+fn file_letter(world: &World, to: &str, text: &str) {
+    let out = Command::new(AOIDE)
+        .args(["mail", "send", "--to", &format!("self/{to}"), "--", text])
+        .env_remove("AOIDE_SESSION_ID")
+        .env("AOIDE_ROOT", world.dir.join("root"))
+        .env("AOIDE_STAGE_DIR", world.dir.join("stage"))
+        .env("AOIDE_STATE_DIR", world.dir.join("state"))
+        .env("XDG_RUNTIME_DIR", world.dir.join("run"))
+        .env("AOIDE_AUDIT_LOG", world.dir.join("log"))
+        .env("AOIDE_DAEMON_SOCKET", world.dir.join("d.sock"))
+        .output()
+        .expect("file a letter");
+    assert!(out.status.success(), "mail send to {to}: {}", String::from_utf8_lossy(&out.stderr));
+}
+
+/// The mailbase's cursor file, read as JSON: `{name: {reader: {seq, rung}}}`.
+fn cursors(world: &World) -> Value {
+    let raw = std::fs::read_to_string(world.dir.join("state").join("mail").join("cursors.json")).unwrap_or_default();
+    serde_json::from_str(&raw).unwrap_or(json!({}))
+}
+
+/// The attested MCP server reads its own mailbox and its child's, and nothing
+/// of a sibling's: a sibling's refusal is the same words as a mailbox that does
+/// not exist, the reads move only the attested session's marks, and an
+/// unattested server reads nothing. Drives the real registry check and
+/// dispatch with the production resolver.
+#[test]
+fn the_attested_mcp_server_reads_its_subtree_and_nothing_else() {
+    let world = World::new("mail");
+    let (child, _child_listener) = world.target("orch-child", Some("orch"));
+    file_letter(&world, "orch", "for orch itself");
+    file_letter(&world, "orch-child", "for the child");
+    file_letter(&world, "sibling-box", "for the sibling only");
+
+    let mut attested = Server::start(&world, true);
+    let sh_pid = attested.pid();
+    world.write_sessions(vec![world.sealed("orch", sh_pid), child]);
+    attested.rpc("initialize", json!({}));
+
+    // The bare listing shows the subtree's names, never the sibling's.
+    let names = attested.call("mail", json!({}));
+    let names: Vec<&str> = names["data"]["names"].as_array().unwrap().iter().map(|v| v.as_str().unwrap()).collect();
+    assert!(names.contains(&"orch") && names.contains(&"orch-child"), "{names:?}");
+    assert!(!names.contains(&"sibling-box"), "{names:?}");
+
+    // Own box and child box read; the sibling's box is refused with the words
+    // a missing box gets.
+    let own = attested.call("mail.read", json!({ "for": "orch" }));
+    assert_eq!(own["status"], "ok", "{own}");
+    assert!(own["message"].as_str().unwrap().contains("for orch itself"), "{own}");
+    let bare = attested.call("mail.read", json!({}));
+    assert_eq!(bare["status"], "usage", "{bare}");
+    assert!(bare["message"].as_str().unwrap().contains("for"), "a bare read says what to pass: {bare}");
+    assert!(!bare["message"].as_str().unwrap().contains("aoide"), "no CLI spelling over MCP: {bare}");
+    let child_read = attested.call("mail.read", json!({ "for": "orch-child" }));
+    assert!(child_read["message"].as_str().unwrap().contains("for the child"), "{child_read}");
+    let sibling = attested.call("mail.read", json!({ "for": "sibling-box" }));
+    let absent = attested.call("mail.read", json!({ "for": "no-such-box" }));
+    assert_ne!(sibling["status"], "ok", "{sibling}");
+    assert!(!sibling["message"].as_str().unwrap().contains("for the sibling"), "{sibling}");
+    assert_eq!(sibling["message"], absent["message"], "a probe must learn nothing");
+
+    // The reads moved only the attested session's marks: the pseudo-reader of
+    // the caller's own box is untouched, and its own key carries the read.
+    let marks = cursors(&world);
+    assert!(marks["orch"].get("orch").is_none(), "the pseudo-reader's mark moved: {marks}");
+    assert!(marks["orch"].get("session:orch").is_some(), "the attested reader's mark did not move: {marks}");
+    assert!(marks["sibling-box"].get("session:orch").is_none(), "the sibling's box was read: {marks}");
+
+    // An unconducted terminal read still sees the caller's letter afterwards.
+    let cli = Command::new(AOIDE)
+        .args(["mail", "read", "--for", "orch"])
+        .env_remove("AOIDE_SESSION_ID")
+        .env("AOIDE_ROOT", world.dir.join("root"))
+        .env("AOIDE_STAGE_DIR", world.dir.join("stage"))
+        .env("AOIDE_STATE_DIR", world.dir.join("state"))
+        .env("XDG_RUNTIME_DIR", world.dir.join("run"))
+        .env("AOIDE_AUDIT_LOG", world.dir.join("log"))
+        .env("AOIDE_DAEMON_SOCKET", world.dir.join("d.sock"))
+        .output()
+        .expect("an unconducted read");
+    assert!(String::from_utf8_lossy(&cli.stdout).contains("for orch itself"), "{}", String::from_utf8_lossy(&cli.stdout));
+    drop(attested);
+
+    // The control: no sealed ancestor, so no mailbox at all.
+    let mut unattested = Server::start(&world, false);
+    unattested.rpc("initialize", json!({}));
+    let out = unattested.call("mail.read", json!({ "for": "orch-child" }));
+    assert!(out["message"].as_str().unwrap().contains("attested session"), "{out}");
+    assert!(!out["message"].as_str().unwrap().contains("for the child"), "{out}");
+}

@@ -186,6 +186,32 @@ mod tests {
         assert!(!sibling.message.contains("first") && !sibling.message.contains("second"));
     }
 
+    /// `mail mark` refuses a sibling's mailbox with the words it refuses a
+    /// missing one, byte for byte. `mail show` does the same once the typed
+    /// msgid is taken out, since the caller typed a different one each time.
+    #[test]
+    fn mark_and_show_refuse_an_out_of_scope_target_as_an_absent_one() {
+        let _lock = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_guard, _root) = fixture("mail-reads-identical");
+        let sibling = mail_mark_as(&mcp(&["mail", "mark"], &[], &[("for", "sib-id")]));
+        let absent = mail_mark_as(&mcp(&["mail", "mark"], &[], &[("for", "ghost-id")]));
+        assert_eq!(sibling.message, absent.message, "mark leaks");
+        assert_eq!(sibling.status, absent.status);
+
+        let hidden = msgid_in("sib-id", "first");
+        let show_sibling = mail_show_as(&mcp(&["mail", "show"], &[&hidden], &[]));
+        let show_absent = mail_show_as(&mcp(&["mail", "show"], &[&"0".repeat(64)], &[]));
+        assert_eq!(show_sibling.status, show_absent.status);
+        assert_eq!(
+            show_sibling.message.replace(&hidden, "TYPED"),
+            show_absent.message.replace(&"0".repeat(64), "TYPED"),
+            "show leaks"
+        );
+        let teaching = text_of(&show_sibling);
+        assert!(teaching.contains("list them with `mail`"), "the teaching names the MCP tool: {teaching}");
+        assert!(!teaching.contains("aoide"), "no CLI spelling over MCP: {teaching}");
+    }
+
     /// An MCP read moves only the attested reader's mark: another reader of the
     /// same mailbox still sees the letter unread.
     #[test]
