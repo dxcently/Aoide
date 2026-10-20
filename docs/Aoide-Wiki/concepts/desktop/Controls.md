@@ -48,8 +48,8 @@ modifier.
 | `SUPER + G` | Toggle the gadget dock (`global, aoide:dock`) — see [[Gadget-Dock]]. |
 | `SUPER + C` | Toggle clipboard history — opens the launcher on its clipboard chapter (`global, aoide:clipboard`). |
 | `SUPER + ESCAPE` | Lock the screen — `exec, strx lock`: the shell's lock host in the staged rice's face when the rice dresses `lockscreen`, else hyprlock. |
-| `SUPER SHIFT + P` | Bound to `strx rice preview` in `modules/dendrites/hyprland.nix` — a retired command, so the keybind is a no-op until repointed to `rice stage` (report only, not repointed). |
-| `SUPER SHIFT + A` | Bound to `strx rice adopt` in `modules/dendrites/hyprland.nix` — a retired command, so the keybind is a no-op until repointed to `rice declare` (a stub — `implemented: false`; report only, not repointed). |
+| `SUPER SHIFT + P` | Bound to `strx rice preview` in `modules/dendrites/compositor/hyprland/behaviour.nix` — a retired command, so the keybind is a no-op until repointed to `rice stage` (report only, not repointed). |
+| `SUPER SHIFT + A` | Bound to `strx rice adopt` in `modules/dendrites/compositor/hyprland/behaviour.nix` — a retired command, so the keybind is a no-op until repointed to `rice declare` (a stub — `implemented: false`; report only, not repointed). |
 | `SUPER + RETURN` | Open a terminal (kitty). |
 | `SUPER + Q` | Close the active window. |
 | `SUPER + V` / `SUPER + F` | Toggle floating / fullscreen. |

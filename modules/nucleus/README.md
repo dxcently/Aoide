@@ -60,7 +60,7 @@ members (`modules/dendrites/README.md`, "The core-service dendrites"):
 
 | catalogue name   | file                                    | what it is                                             |
 |------------------|-----------------------------------------|--------------------------------------------------------|
-| `aoided`         | `modules/dendrites/aoided.nix`          | the Strillix deltas on the core `aoided.service` (which `aoide.enable` alone provides): the a2a/mcp/mail doors, the pair-watch popup, the usage poller and timer, the discovery firewall carve |
+| `aoided`         | `modules/dendrites/aoided.nix`          | the Aoide deployment on the core `aoided.service` (which `aoide.enable` alone provides): the a2a/mcp/mail doors, the pair-watch popup, the usage poller and timer, the discovery firewall carve |
 | `melete-adapter` | `modules/dendrites/melete-adapter.nix`  | the thin adapter on the `aoided` event stream          |
 | `aoide-nix`      | `modules/dendrites/aoide-nix.nix`       | flake-native nix settings                              |
 | `aoide-packages` | `modules/dendrites/aoide-packages.nix`  | the `aoide` binary and git on the system `PATH`       |

@@ -28,7 +28,7 @@
 // ── Declared widget-type registry (Phase 4) ─────────────────────────────────
 // A second, independent data source: the same build (Phase 2) and
 // `rice stage`/`preview` hot-sync (Phase 3) also carry each rice's
-// `aoide.layout.widgets` declarations into a sibling
+// `strillix.layout.widgets` declarations into a sibling
 // rices/registry.json, shaped `{ "<rice>": { "<slot>": {…declaration…} } }`
 // — which slots a rice registers as widget-TYPE declarations (kind/
 // namespace/layer/shortcut/blur), a rarer, smaller set than manifest.json's
@@ -51,7 +51,7 @@ QtObject {
     // doesn't dress a slot, resolution falls back to this rice before
     // falling back further to the anchor's own lane-side `fallback`
     // Component. Sonata is the shipped, guaranteed-present standard rice —
-    // a fixed constant here, independent of `aoide.rice`'s own default
+    // a fixed constant here, independent of `strillix.rice`'s own default
     // (`modules/nucleus/options.nix`, null) — so it's the correct floor to
     // catch every other rice's gaps.
     readonly property string baselineRice: "sonata"

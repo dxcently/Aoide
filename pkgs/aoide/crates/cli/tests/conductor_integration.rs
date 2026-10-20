@@ -81,10 +81,6 @@ fn app_loads_recomputes_selects_and_dispatches_against_the_tempdir() {
         "latest hook phase (canonical) merged into live state"
     );
 
-    // ── palette: the conductor paints with the terminal's ANSI 16 base, and
-    // never reads the rice's palette (the rice stage holds no conducting state).
-    assert!(app.palette.accent.is_none(), "no rice palette is read");
-
     // ── selection: j moves down over the flattened DAG rows (group headers
     // interleaved with session subtrees), clamped at the last row ──
     app.select_panel(Panel::Session);

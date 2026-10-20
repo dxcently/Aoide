@@ -64,7 +64,7 @@ fn handle_wallpaper_set_entry(inv: &Invocation) -> Outcome {
     {
         return Outcome::error(
             "wallpaper.set",
-            "declarative mode is locked — run `aoide rice mode stage` to unlock hot-loading first",
+            "declarative mode is locked — run `strillix rice mode stage` to unlock hot-loading first",
         )
         .with_data(json!({ "reason": "declarative-mode-locked" }));
     }
@@ -116,7 +116,7 @@ fn handle_wallpaper_set(inv: &Invocation) -> Outcome {
         None => {
             return Outcome::usage(
                 "wallpaper.set",
-                "usage: aoide wallpaper set <path|name|we:<id>> [--json] · aoide wallpaper set --clear [--json]",
+                "usage: strillix wallpaper set <path|name|we:<id>> [--json] · strillix wallpaper set --clear [--json]",
             )
             .with_data(json!({ "reason": "missing-path" }));
         }
@@ -247,7 +247,7 @@ fn position_refusal(arg: &str, what: &str) -> Outcome {
 ///   * the staged pick already names this identity for this rice: Aoide applied
 ///     it, the provider's hook came back, and the second report is already true.
 fn handle_wallpaper_from_skwd(inv: &Invocation) -> Outcome {
-    const USAGE: &str = "usage: aoide wallpaper set --from-skwd --kind <static|video|we> <path|id> [--json]";
+    const USAGE: &str = "usage: strillix wallpaper set --from-skwd --kind <static|video|we> <path|id> [--json]";
     let Some(kind) = inv.flags.get("kind").cloned() else {
         return Outcome::usage("wallpaper.set", USAGE)
             .with_data(json!({ "reason": "missing-kind" }));
@@ -363,7 +363,7 @@ fn handle_wallpaper_clear(inv: &Invocation) -> Outcome {
     if !inv.args.is_empty() {
         return Outcome::usage(
             "wallpaper.set",
-            "usage: aoide wallpaper set <path|name> [--json] · aoide wallpaper set --clear [--json]",
+            "usage: strillix wallpaper set <path|name> [--json] · strillix wallpaper set --clear [--json]",
         )
         .with_data(json!({ "reason": "clear-takes-no-path" }));
     }

@@ -30,7 +30,7 @@ fn unimplemented(_inv: &Invocation) -> Outcome {
 pub fn register_rice_late(r: &mut Registry) {
     r.insert(cmd!(
         path: ["rice", "declare"],
-        summary: "Copy a composed rice from $AOIDE_ROOT/rices/<name> into the checkout's rices/<name>, so it can be committed, less the machine's top-level history/ and drafts/. Refuses while git shows uncommitted changes in that folder, when the checkout is not a git repository (git history is the archive), or when the staged rice.nix is the old function-module shape (`strillix rice refresh <name>`). With --host, instead rewrite the one `habit.rice.declared = \"…\";` line in this host's config (strillix.hostConfig) to <name>, a rice this host's build carries; it takes effect on the next rebuild, and warns when the checkout's rice folder is dirty. The gated rebuild itself is the user's own git commit + nix switch, never this command.",
+        summary: "Copy a composed rice from $STRILLIX_ROOT/rices/<name> into the checkout's rices/<name>, so it can be committed, less the machine's top-level history/ and drafts/. Refuses while git shows uncommitted changes in that folder, when the checkout is not a git repository (git history is the archive), or when the staged rice.nix is the old function-module shape (`strillix rice refresh <name>`). With --host, instead rewrite the one `habit.rice.declared = \"…\";` line in this host's config (strillix.hostConfig) to <name>, a rice this host's build carries; it takes effect on the next rebuild, and warns when the checkout's rice folder is dirty. The gated rebuild itself is the user's own git commit + nix switch, never this command.",
         args: [arg!("name", "string", true, "Rice/rice name to declare.")],
         flags: [flag!("host", "bool", "Rewrite this host's declared-rice line to <name> instead of copying the rice into the checkout. CLI-only: it changes what the next rebuild performs.", doors: &[Door::Cli])],
         gated: true,
@@ -55,7 +55,7 @@ pub fn register_rice_late(r: &mut Registry) {
 
 /// `rice declare <name>` — the copy half of the stage-vs-commit split (house
 /// rule 2: the user gates the rebuild, never this command). Copies the
-/// composed rice `$AOIDE_ROOT/rices/<name>/` into the checkout's
+/// composed rice `$STRILLIX_ROOT/rices/<name>/` into the checkout's
 /// `rices/<name>/` (`aoide_storage::fs::flake_root()`,
 /// `$AOIDE_FLAKE_ROOT` override, default `<home>/Aoide`) — composing lives
 /// in the runtime root, committing lives in the checkout git tracks, and
@@ -77,7 +77,7 @@ fn handle_rice_declare(inv: &Invocation) -> Outcome {
     let name = match inv.args.first() {
         Some(n) => n.clone(),
         None => {
-            return Outcome::usage("rice.declare", "usage: aoide rice declare <name> [--json]")
+            return Outcome::usage("rice.declare", "usage: strillix rice declare <name> [--json]")
                 .with_data(json!({ "reason": "missing-name" }));
         }
     };

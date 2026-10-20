@@ -164,7 +164,7 @@ pub fn draw_actions(f: &mut Frame, area: Rect, app: &App) {
         for (r, _, label) in action_regions(columns[0], Panel::Graph) {
             f.render_widget(
                 Paragraph::new(format!("[{label}]"))
-                    .style(Style::default().fg(theme::role_color(&app.palette, theme::Role::Mail))),
+                    .style(Style::default().fg(theme::role_color(theme::Role::Mail))),
                 r,
             );
         }
@@ -175,7 +175,7 @@ pub fn draw_actions(f: &mut Frame, area: Rect, app: &App) {
                 crate::graphview::view_label(app),
                 crate::graphview::readout(app)
             ))
-            .style(Style::default().fg(theme::role_color(&app.palette, theme::Role::Terminal))),
+            .style(Style::default().fg(theme::role_color(theme::Role::Terminal))),
             columns[1],
         );
         return;
@@ -200,20 +200,20 @@ fn frame(title: &str) -> Block<'_> {
 
 pub fn draw(f: &mut Frame, app: &App) {
     let g = page_geometry(f.area(), app);
-    let base = theme::surface(&app.palette, 0);
+    let base = Style::default();
     f.render_widget(Block::default().style(base), f.area());
     f.render_widget(
-        Block::default().style(theme::surface(&app.palette, 12)),
+        Block::default(),
         g.header,
     );
     f.render_widget(
         Block::default()
             .borders(Borders::ALL)
-            .style(theme::surface(&app.palette, 7)),
+            ,
         g.nav,
     );
     f.render_widget(
-        Block::default().style(theme::surface(&app.palette, 7)),
+        Block::default(),
         g.footer,
     );
     f.render_widget(
@@ -222,9 +222,7 @@ pub fn draw(f: &mut Frame, app: &App) {
     );
     for (r, p, label) in header_regions(g.header, app) {
         f.render_widget(
-            Paragraph::new(label).style(theme::tab_style(
-                &app.palette,
-                panel_role(p),
+            Paragraph::new(label).style(theme::tab_style(panel_role(p),
                 false,
                 false,
             )),
@@ -232,7 +230,7 @@ pub fn draw(f: &mut Frame, app: &App) {
         );
     }
     for (rect, panel, label) in nav_regions(g.nav) {
-        let st = theme::tab_style(&app.palette, panel_role(panel), panel == app.panel, false);
+        let st = theme::tab_style(panel_role(panel), panel == app.panel, false);
         f.render_widget(Paragraph::new(format!(" {} ", label)).style(st), rect);
     }
     if g.tree.width > 0 {
@@ -243,7 +241,7 @@ pub fn draw(f: &mut Frame, app: &App) {
     } else {
         crate::ui::draw_body(f, g.body, app);
     }
-    divider(f, Rect::new(g.footer.x, g.footer.y, g.footer.width, 1), app);
+    divider(f, Rect::new(g.footer.x, g.footer.y, g.footer.width, 1));
     let rows = Layout::vertical([Constraint::Length(1), Constraint::Length(1)]).split(Rect::new(
         g.footer.x,
         g.footer.y + 1,
@@ -257,7 +255,7 @@ pub fn draw(f: &mut Frame, app: &App) {
         rows[0],
     );
     f.render_widget(
-        Block::default().style(theme::surface(&app.palette, 22)),
+        Block::default(),
         rows[1],
     );
     crate::ui::draw_status(f, rows[1], app);
@@ -311,14 +309,14 @@ fn draw_tree(f: &mut Frame, area: Rect, app: &App) {
     };
     f.render_widget(
         frame(title).border_style(if app.sidebar_focused {
-            theme::accent_style(&app.palette).add_modifier(Modifier::BOLD)
+            Style::default().add_modifier(Modifier::BOLD)
         } else {
             Style::default()
         }),
         area,
     );
     f.render_widget(
-        Block::default().style(theme::surface(&app.palette, 5)),
+        Block::default(),
         inner(area),
     );
     let content = inner(area);
@@ -422,10 +420,10 @@ fn draw_tree(f: &mut Frame, area: Rect, app: &App) {
                 if app.sidebar_focused {
                     selected()
                 } else {
-                    theme::surface(&app.palette, 10).fg(theme::role_color(&app.palette, role))
+                    Style::default().fg(theme::role_color(role))
                 }
             } else {
-                Style::default().fg(theme::role_color(&app.palette, role))
+                Style::default().fg(theme::role_color(role))
             }),
             Rect::new(rows_area.x, y, rows_area.width, 1),
         );
@@ -640,9 +638,9 @@ fn abbreviated(text: &str, width: usize) -> String {
         .collect();
     format!("… {tail}")
 }
-fn divider(f: &mut Frame, area: Rect, app: &App) {
+fn divider(f: &mut Frame, area: Rect) {
     f.render_widget(
-        Paragraph::new("─".repeat(area.width as usize)).style(theme::accent_style(&app.palette)),
+        Paragraph::new("─".repeat(area.width as usize)),
         area,
     );
 }
@@ -675,12 +673,12 @@ pub fn draw_home(f: &mut Frame, area: Rect, app: &App) {
     if let Some(logo) = layout.logo {
         f.render_widget(
             Paragraph::new(include_str!("../assets/logo.txt"))
-                .style(theme::accent_style(&app.palette)),
+                ,
             logo,
         );
     }
     f.render_widget(
-        Block::default().style(theme::surface(&app.palette, 4)),
+        Block::default(),
         home_surface(area, app),
     );
     let menu = home_menu(area, app);
@@ -688,16 +686,13 @@ pub fn draw_home(f: &mut Frame, area: Rect, app: &App) {
         f.render_widget(
             frame("")
                 .title(
-                    Line::from(title).style(Style::default().fg(theme::role_color(
-                        &app.palette,
-                        if title.contains("PROJECT") {
+                    Line::from(title).style(Style::default().fg(theme::role_color(if title.contains("PROJECT") {
                             theme::Role::Project
                         } else {
                             theme::Role::Mail
                         },
                     ))),
                 )
-                .style(theme::surface(&app.palette, 4))
                 .border_style(Style::default()),
             r,
         );
@@ -707,15 +702,13 @@ pub fn draw_home(f: &mut Frame, area: Rect, app: &App) {
             Block::default().style(if index == app.home_sel {
                 selected()
             } else {
-                theme::surface(&app.palette, 4)
+                Style::default()
             }),
             r,
         );
         let columns = Layout::horizontal([Constraint::Min(0), Constraint::Length(5)]).split(r);
         f.render_widget(
-            Paragraph::new(label).style(Style::default().fg(theme::role_color(
-                &app.palette,
-                match k {
+            Paragraph::new(label).style(Style::default().fg(theme::role_color(match k {
                     'n' | 'p' => theme::Role::Project,
                     'm' => theme::Role::Mail,
                     'H' => theme::Role::Success,
@@ -725,7 +718,7 @@ pub fn draw_home(f: &mut Frame, area: Rect, app: &App) {
             columns[0],
         );
         f.render_widget(
-            Paragraph::new(format!("[{k}]")).style(theme::accent_style(&app.palette)),
+            Paragraph::new(format!("[{k}]")),
             columns[1],
         );
     }
@@ -733,13 +726,13 @@ pub fn draw_home(f: &mut Frame, area: Rect, app: &App) {
     if start < a.bottom() {
         f.render_widget(
             Paragraph::new("◌ RECENT PROJECTS ────────────────────────────────────────")
-                .style(theme::accent_style(&app.palette)),
+                ,
             Rect::new(a.x, start, a.width, 1),
         );
     }
     for (index, (r, name)) in home_project_regions(area, app).into_iter().enumerate() {
         if r.bottom() < a.bottom() {
-            divider(f, Rect::new(r.x, r.bottom(), r.width, 1), app);
+            divider(f, Rect::new(r.x, r.bottom(), r.width, 1));
         }
         let path = app
             .projects
@@ -753,7 +746,7 @@ pub fn draw_home(f: &mut Frame, area: Rect, app: &App) {
             Paragraph::new(vec![
                 Line::from(label).style(
                     Style::default()
-                        .fg(theme::role_color(&app.palette, theme::Role::Project))
+                        .fg(theme::role_color(theme::Role::Project))
                         .add_modifier(Modifier::BOLD),
                 ),
                 Line::from(format!("  {path}")),
@@ -761,7 +754,7 @@ pub fn draw_home(f: &mut Frame, area: Rect, app: &App) {
             .style(if app.home_sel == index + 5 {
                 selected()
             } else {
-                theme::surface(&app.palette, 4)
+                Style::default()
             }),
             r,
         );
@@ -834,10 +827,10 @@ pub fn draw_mail(f: &mut Frame, area: Rect, app: &App) {
                 if app.mail_room_focus && !app.sidebar_focused {
                     selected()
                 } else {
-                    theme::surface(&app.palette, 10)
+                    Style::default()
                 }
             } else {
-                theme::surface(&app.palette, 5)
+                Style::default()
             }),
             Rect::new(
                 room_rows.x,
@@ -869,10 +862,10 @@ pub fn draw_mail(f: &mut Frame, area: Rect, app: &App) {
                 if !app.mail_room_focus && !app.sidebar_focused {
                     selected()
                 } else {
-                    theme::surface(&app.palette, 10)
+                    Style::default()
                 }
             } else {
-                theme::surface(&app.palette, if i % 2 == 0 { 2 } else { 5 })
+                Style::default()
             }),
             Rect::new(
                 letter_rows.x,
@@ -1635,7 +1628,7 @@ fn draw_mail_draft(f: &mut Frame, app: &App) {
             Paragraph::new(label).style(if d.recipient_field == field {
                 Style::default().add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
             } else {
-                theme::surface(&app.palette, 7)
+                Style::default()
             }),
             rect,
         );
@@ -1649,11 +1642,10 @@ fn draw_mail_draft(f: &mut Frame, app: &App) {
     };
     f.render_widget(
         frame(title)
-            .style(theme::surface(&app.palette, 4))
             .border_style(if app.sidebar_focused {
                 Style::default()
             } else {
-                theme::accent_style(&app.palette)
+                Style::default()
             }),
         g.area,
     );
@@ -1673,7 +1665,7 @@ fn draw_mail_draft(f: &mut Frame, app: &App) {
             .border_style(Style::default());
         let content = block.inner(r);
         f.render_widget(
-            block.style(theme::surface(&app.palette, if active { 7 } else { 3 })),
+            block,
             r,
         );
         let display = if value.is_empty() {
@@ -1756,7 +1748,6 @@ fn draw_mail_draft(f: &mut Frame, app: &App) {
     };
     f.render_widget(
         Paragraph::new(original)
-            .style(theme::surface(&app.palette, 5))
             .wrap(Wrap { trim: false }),
         g.original,
     );
@@ -1766,7 +1757,7 @@ fn draw_mail_draft(f: &mut Frame, app: &App) {
         } else {
             "[> Send ^S]"
         })
-        .style(theme::accent_style(&app.palette).add_modifier(Modifier::BOLD)),
+        .style(Style::default().add_modifier(Modifier::BOLD)),
         g.send,
     );
     f.render_widget(Paragraph::new("[x Cancel Esc]"), g.cancel);
@@ -1816,7 +1807,7 @@ fn draw_target_menu(f: &mut Frame, app: &App) {
     );
     f.render_widget(ratatui::widgets::Clear, a);
     f.render_widget(
-        frame(WRITE_LETTER_TITLE).style(theme::surface(&app.palette, 4)),
+        frame(WRITE_LETTER_TITLE),
         a,
     );
     let offset = index.saturating_sub(inner(a).height.saturating_sub(1) as usize);
@@ -1951,7 +1942,7 @@ fn draw_context_menu(f: &mut Frame, app: &App) {
     );
     f.render_widget(ratatui::widgets::Clear, area);
     f.render_widget(
-        frame(&format!(" {} ", m.title)).style(theme::surface(&app.palette, 5)),
+        frame(&format!(" {} ", m.title)),
         area,
     );
     let inside = inner(area);

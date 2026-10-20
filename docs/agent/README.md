@@ -3,8 +3,8 @@
 You are an agent with a shell, working in an Aoide checkout. This directory
 routes; it holds no rule bodies. Read in this order:
 
-1. `AGENTS.md` (repo root) — the core-vs-paint boundary, the nine house
-   rules, the docs layering. Read before acting.
+1. `AGENTS.md` (repo root) — the Aoide-vs-Strillix boundary, the Options and
+   Bridge sections, the house rules, the docs layering. Read before acting.
 2. `docs/INSTALL.md` — installing the `aoide`/`aoided` binaries (cargo, no
    nix), first boot, and starting the daemon; the one install page.
 3. `docs/agent/session.md` — the mechanical checklist a working session

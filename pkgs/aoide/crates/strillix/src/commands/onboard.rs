@@ -217,8 +217,8 @@ fn read_aoide_options() -> Result<Vec<OptionEntry>, String> {
 /// already-rendered nix SOURCE TEXT (nixpkgs' own doc renderer did the
 /// quoting/escaping; `render_aoide_nix` pastes it verbatim), `None` when the
 /// option has no static default (nixpkgs' doc list omits the `default` key
-/// entirely in that case — the 16 `aoide.theme.base16.*` slots and
-/// `aoide.surfaces.<name>.owner` today).
+/// entirely in that case — the 16 `strillix.theme.base16.*` slots and
+/// `strillix.surfaces.<name>.owner` today).
 #[derive(Debug)]
 struct OptionEntry {
     name: String,
@@ -459,7 +459,7 @@ mod tests {
         std::fs::create_dir_all(share.join("rices")).unwrap();
         std::fs::write(
             share.join("aoide-options.json"),
-            r#"[{"name":"aoide.theme.base16.base00","description":"base00"},
+            r#"[{"name":"strillix.theme.base16.base00","description":"base00"},
                 {"name":"aoide.a2a.port","description":"The A2A HTTP port.","default":"8710"}]"#,
         )
         .unwrap();
@@ -483,7 +483,7 @@ mod tests {
         assert!(rendered.contains("  # aoide.a2a.port = 8710;\n"), "{rendered}");
         assert!(
             rendered
-                .contains("  # aoide.theme.base16.base00 = <no static default -- see description>;\n"),
+                .contains("  # strillix.theme.base16.base00 = <no static default -- see description>;\n"),
             "{rendered}"
         );
         let _ = std::fs::remove_dir_all(&root);
@@ -514,7 +514,7 @@ mod tests {
 
     #[test]
     fn parse_options_treats_a_missing_default_key_as_none() {
-        let json = br#"[{"name":"aoide.theme.base16.base00","description":"base16 base00: default background."}]"#;
+        let json = br#"[{"name":"strillix.theme.base16.base00","description":"base16 base00: default background."}]"#;
         let opts = parse_options(json).unwrap();
         assert_eq!(opts[0].default, None);
     }
@@ -600,9 +600,9 @@ mod tests {
 
     #[test]
     fn render_marks_a_no_static_default_option_explicitly() {
-        let text = render_aoide_nix(&[opt("aoide.theme.base16.base00", "base16 base00: default background.", None)]);
+        let text = render_aoide_nix(&[opt("strillix.theme.base16.base00", "base16 base00: default background.", None)]);
         assert!(
-            text.contains("  # aoide.theme.base16.base00 = <no static default -- see description>;\n"),
+            text.contains("  # strillix.theme.base16.base00 = <no static default -- see description>;\n"),
             "text:\n{text}"
         );
     }
@@ -1020,7 +1020,7 @@ mod tests {
         let text = render_aoide_nix(&[
             opt("aoide.a2a.port", "The A2A HTTP port.", Some("8710")),
             opt("aoide.auditLog", "Path to the single audit log.", Some(r#""/home/${config.aoide.user}/Aoide/log""#)),
-            opt("aoide.theme.base16.base00", "base16 base00: default background.", None),
+            opt("strillix.theme.base16.base00", "base16 base00: default background.", None),
         ]);
         std::fs::write(&path, text).unwrap();
 

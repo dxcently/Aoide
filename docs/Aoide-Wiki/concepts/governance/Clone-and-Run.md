@@ -14,7 +14,7 @@ Aoide is a framework you clone and run. The upstream repo ships the shape-making
 
 - **Shared history with upstream**: `aoide update` is a real `git merge`, not a package upgrade. Improvements flow in; your personal commits never conflict with upstream additions because growth is additive.
 - **Reproducibility**: every default and generated rice is committed and versioned. A rebuild from the clone reproduces the entire riced system on any box. Runtime state (`/stage/`, `state/`, `run/qml/`, the audit log) lives under `$AOIDE_ROOT` (default `~/.aoide`), separate from the clone, and holds ephemera only.
-- **Your dendrites and rices are ordinary local commits**: `modules/dendrites/` growth is additive by construction, and `rices/` is your writable domain. Committed rices are versioned score — every host that pulls the clone can perform any of them. One line in `hosts/<host>/default.nix` (`aoide.rice = "<name>";`) selects which rice a host performs. See [[Rice-Vocabulary#Replay — any rice, any host]].
+- **Your dendrites and rices are ordinary local commits**: `modules/dendrites/` growth is additive by construction, and `rices/` is your writable domain. Committed rices are versioned score — every host that pulls the clone can perform any of them. One line in `hosts/<host>/default.nix` (`strillix.rice = "<name>";`) selects which rice a host performs. See [[Rice-Vocabulary#Replay — any rice, any host]].
 - **A remote fork is optional**: add your own remote only to back up your instance, sync rices across your machines, or open contributions upstream. The instance itself needs nothing but the clone.
 - **Module import stays possible** but secondary; the clone is the primary deployment model.
 

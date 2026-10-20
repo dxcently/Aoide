@@ -5,8 +5,7 @@
 //! panels: ratatui owns the double buffer and the diff now, so every panel is a
 //! `draw(frame, area, app)` that composes ratatui widgets. The identity is
 //! preserved wholesale — the double box-drawing frames, the clef-tail end-cap on
-//! each footer seam, the musical state glyphs, the accent tint from
-//! `theme.json` — but expressed as [`ratatui::style::Style`] rather than raw
+//! each footer seam, the musical state glyphs, the ANSI accent tint — but expressed as [`ratatui::style::Style`] rather than raw
 //! SGR. Panels stay pure over `&App`, so a `TestBackend` can render any of them
 //! headless and assert on the buffer (see the tests below).
 //!
@@ -44,7 +43,7 @@ pub fn draw(f: &mut Frame, app: &App) {
 pub(crate) fn draw_overlays(f: &mut Frame, app: &App) {
     let area = f.area();
     if app.help_open {
-        draw_help(f, area, app);
+        draw_help(f, area);
     }
     if app.tail.is_some() {
         draw_log_tail(f, area, app);
@@ -83,7 +82,6 @@ pub(crate) fn draw_overlays(f: &mut Frame, app: &App) {
         f.render_widget(
             Paragraph::new(body)
                 .wrap(ratatui::widgets::Wrap { trim: false })
-                .style(theme::accent_style(&app.palette))
                 .block(
                     Block::default()
                         .title(" Pairing — read this aloud ")
@@ -107,7 +105,6 @@ pub(crate) fn draw_overlays(f: &mut Frame, app: &App) {
                 f.render_widget(
                     Paragraph::new(format!("Unregister project `{name}`?\nProject files are kept.\n\nType the exact project name: {}▏\n\nEnter confirms matching name; Esc cancels", input.buffer))
                         .wrap(ratatui::widgets::Wrap { trim: false })
-                        .style(theme::accent_style(&app.palette))
                         .block(Block::default().title(" Confirm project removal ").borders(Borders::ALL)),
                     popup,
                 );
@@ -137,7 +134,6 @@ pub(crate) fn draw_overlays(f: &mut Frame, app: &App) {
                         input.display_buffer()
                     ))
                     .wrap(ratatui::widgets::Wrap { trim: false })
-                    .style(theme::accent_style(&app.palette))
                     .block(
                         Block::default()
                             .title(" Pairing code (masked) ")
@@ -167,7 +163,6 @@ pub(crate) fn draw_overlays(f: &mut Frame, app: &App) {
                         input.display_buffer()
                     ))
                     .wrap(ratatui::widgets::Wrap { trim: false })
-                    .style(theme::accent_style(&app.palette))
                     .block(
                         Block::default()
                             .title(" Secrets approval (masked) ")
@@ -189,7 +184,6 @@ pub(crate) fn draw_overlays(f: &mut Frame, app: &App) {
                 f.render_widget(
                     Paragraph::new(format!("Unregister node `{name}`?\nThe pairing/key material recorded here is dropped.\n\nType the exact node name: {}▏\n\nEnter confirms matching name; Esc cancels", input.buffer))
                         .wrap(ratatui::widgets::Wrap { trim: false })
-                        .style(theme::accent_style(&app.palette))
                         .block(Block::default().title(" Confirm node removal ").borders(Borders::ALL)),
                     popup,
                 );
@@ -229,7 +223,7 @@ pub(crate) fn draw_status(f: &mut Frame, area: Rect, app: &App) {
     ])
     .split(area);
     f.render_widget(
-        Paragraph::new(Line::from(left)).style(theme::accent_style(&app.palette)),
+        Paragraph::new(Line::from(left)),
         cols[0],
     );
     f.render_widget(
@@ -260,36 +254,25 @@ fn keymap_hint(panel: Panel) -> &'static str {
     }
 }
 
-/// Single-line pane borders; the focused body receives the accent.
-fn panel_block(title: &str, app: &App) -> Block<'static> {
-    let accent = theme::accent(&app.palette);
-    let mut title_style = Style::default().add_modifier(Modifier::BOLD);
-    if !app.sidebar_focused {
-        if let Some(c) = accent {
-            title_style = title_style.fg(c);
-        }
-    }
-    let mut border_style = Style::default();
-    if !app.sidebar_focused {
-        if let Some(c) = accent {
-            border_style = border_style.fg(c).add_modifier(Modifier::BOLD);
-        }
-    }
+/// Single-line pane borders, the title bold.
+fn panel_block(title: &str) -> Block<'static> {
     Block::new()
         .borders(Borders::ALL)
         .border_type(BorderType::Plain)
-        .border_style(border_style)
-        .title(Span::styled(format!(" {title} "), title_style))
+        .title(Span::styled(
+            format!(" {title} "),
+            Style::default().add_modifier(Modifier::BOLD),
+        ))
 }
 
 /// Ratatui applies this across the complete selected row, including trailing cells.
 fn selection_style(app: &App) -> Style {
     if app.sidebar_focused {
-        return theme::surface(&app.palette, 14).add_modifier(Modifier::BOLD);
+        return Style::default().add_modifier(Modifier::BOLD);
     }
     Style::default()
-        .bg(theme::accent(&app.palette).unwrap_or(Color::Cyan))
-        .fg(theme::opt_color(app.palette.bg).unwrap_or(Color::Black))
+        .bg(Color::Cyan)
+        .fg(Color::Black)
         .add_modifier(Modifier::BOLD)
 }
 
@@ -303,7 +286,7 @@ fn pad_column(text: &str, width: usize) -> String {
 // ── Body dispatch ───────────────────────────────────────────────────────────
 
 pub(crate) fn draw_body(f: &mut Frame, area: Rect, app: &App) {
-    let block = panel_block(app.panel.title(), app);
+    let block = panel_block(app.panel.title());
     let inner = block.inner(area);
     f.render_widget(block, area);
     let (inner, actions) = crate::board::body_content(inner);
@@ -368,8 +351,6 @@ fn draw_sessions(f: &mut Frame, area: Rect, app: &App) {
 }
 
 fn roster_item<'a>(row: &DagRow, app: &App) -> ListItem<'a> {
-    let pal = &app.palette;
-    let accent = theme::accent(pal);
     match row {
         DagRow::Group {
             name,
@@ -393,14 +374,13 @@ fn roster_item<'a>(row: &DagRow, app: &App) -> ListItem<'a> {
             ListItem::new(Line::from(spans))
         }
         DagRow::Session { rec, prefix } => {
-            let st = theme::state_style(&rec.state, pal);
+            let st = theme::state_style(&rec.state);
             let glyph = theme::state_glyph(&rec.state);
             let fresh = app.fresh.contains_key(&rec.session_id);
-            let cue_style = accent.map(|c| Style::default().fg(c)).unwrap_or_default();
             let elapsed = theme::elapsed_str(&rec.started_at);
             let cwd = theme::shorten_cwd(&rec.cwd);
             let mut spans = vec![
-                Span::styled(if fresh { "‣" } else { " " }.to_string(), cue_style),
+                Span::raw(if fresh { "‣" } else { " " }.to_string()),
                 Span::raw(prefix.clone()),
                 Span::styled(format!("{glyph} "), st),
                 Span::styled(
@@ -430,19 +410,13 @@ fn roster_item<'a>(row: &DagRow, app: &App) -> ListItem<'a> {
             // gadget dock uses for a subagent's model text, shown uniformly
             // on agent and subagent rows alike; absent for shells.
             if let Some(model) = rec.model.as_deref().filter(|m| !m.is_empty()) {
-                let ms = accent
-                    .map(|c| Style::default().fg(c).add_modifier(Modifier::DIM))
-                    .unwrap_or_else(theme::dim);
                 spans.push(Span::styled(
                     format!("  {}{model}", theme::mark(theme::Mark::Model)),
-                    ms,
+                    theme::dim(),
                 ));
             }
             for t in theme::session_tags(rec) {
-                let ts = accent
-                    .map(|c| Style::default().fg(c).add_modifier(Modifier::DIM))
-                    .unwrap_or_else(theme::dim);
-                spans.push(Span::styled(format!("  ⟨{t}⟩"), ts));
+                spans.push(Span::styled(format!("  ⟨{t}⟩"), theme::dim()));
             }
             ListItem::new(Line::from(spans))
         }
@@ -450,7 +424,6 @@ fn roster_item<'a>(row: &DagRow, app: &App) -> ListItem<'a> {
 }
 
 fn detail_lines<'a>(rows: &[DagRow], app: &App) -> Vec<Line<'a>> {
-    let pal = &app.palette;
     let sel = app.dag_sel.min(rows.len().saturating_sub(1));
     let rule = Line::from(Span::styled(
         "──── selected ─────────────────────────────────────────",
@@ -458,7 +431,7 @@ fn detail_lines<'a>(rows: &[DagRow], app: &App) -> Vec<Line<'a>> {
     ));
     match rows.get(sel) {
         Some(DagRow::Session { rec, .. }) => {
-            let st = theme::state_style(&rec.state, pal);
+            let st = theme::state_style(&rec.state);
             let merged = app.merged();
             let chain = parent_chain(&rec.session_id, &merged);
             let mut header_spans = vec![
@@ -671,8 +644,7 @@ fn draw_projects(f: &mut Frame, area: Rect, app: &App) {
 
 /// The Status pane's fixed environment block, exactly as it is painted. The
 /// split and the paint both come from THIS function, so the reserved height is
-/// the painted height and no line can be clipped by a second, drifting count
-/// (the palette summary was the one that fell off the old hand-counted split).
+/// the painted height and no line can be clipped by a second, drifting count.
 pub(crate) fn status_env_block(app: &App) -> Vec<Line<'static>> {
     let stage = aoide_storage::fs::conducting_stage_dir();
     let sock = aoide_conduct::shellbridge::socket_path();
@@ -714,7 +686,6 @@ pub(crate) fn status_env_block(app: &App) -> Vec<Line<'static>> {
         app.log.len()
     )));
     lines.push(Line::from(""));
-    lines.push(palette_summary(app));
     lines
 }
 
@@ -799,36 +770,6 @@ fn graph_node_count(path: &std::path::Path) -> usize {
         .unwrap_or(0)
 }
 
-fn palette_count(app: &App) -> usize {
-    let p = &app.palette;
-    [p.bg, p.fg, p.accent, p.urgent]
-        .iter()
-        .filter(|x| x.is_some())
-        .count()
-}
-
-fn palette_summary<'a>(app: &App) -> Line<'a> {
-    let p = &app.palette;
-    if palette_count(app) == 0 {
-        return Line::from(" palette          (none — terminal defaults)").style(theme::dim());
-    }
-    let mut spans = vec![Span::raw(" palette          ")];
-    let swatch = |c: Option<u8>, name: &str| -> Vec<Span<'a>> {
-        match c {
-            Some(idx) => vec![
-                Span::styled("██", Style::default().fg(Color::Indexed(idx))),
-                Span::raw(format!(" {name}  ")),
-            ],
-            None => vec![Span::raw(format!("·· {name}  "))],
-        }
-    };
-    spans.extend(swatch(p.bg, "bg"));
-    spans.extend(swatch(p.fg, "fg"));
-    spans.extend(swatch(p.accent, "accent"));
-    spans.extend(swatch(p.urgent, "urgent"));
-    Line::from(spans)
-}
-
 // ── [5] ROSTER — presence over this box + every registered node ────────────
 //
 // Read-only (messaging/presence plan, P-C4): rows come straight from the
@@ -892,21 +833,20 @@ fn draw_roster(f: &mut Frame, area: Rect, app: &App) {
 
     // A stateful list (P-C5 adds selection to C4's read-only pane) — same
     // shape [`draw_sessions`] uses over the DAG's flattened rows.
-    let pal = &app.palette;
     // While the last probe failed every row is the previous probe's, so the
     // whole list reads muted beneath the fetch line that says so.
     let stale = app.roster_probe_failed().is_some();
-    let items: Vec<ListItem> = rows.iter().map(|r| roster_row_item(r, pal, stale)).collect();
+    let items: Vec<ListItem> = rows.iter().map(|r| roster_row_item(r, stale)).collect();
     let list = List::new(items).highlight_style(selection_style(app));
     let mut state = ListState::default();
     state.select(Some(app.roster_sel.min(rows.len().saturating_sub(1))));
     f.render_stateful_widget(list, parts[3], &mut state);
 }
 
-fn roster_row_item<'a>(row: &crate::app::RosterRow, pal: &crate::app::Palette, stale: bool) -> ListItem<'a> {
-    let item = roster_row_line(row, pal);
+fn roster_row_item<'a>(row: &crate::app::RosterRow, stale: bool) -> ListItem<'a> {
+    let item = roster_row_line(row);
     if stale {
-        let muted = theme::muted(pal);
+        let muted = theme::muted();
         ListItem::new(Line::from(
             item.spans.into_iter().map(|s| Span::styled(s.content, muted)).collect::<Vec<_>>(),
         ))
@@ -915,7 +855,7 @@ fn roster_row_item<'a>(row: &crate::app::RosterRow, pal: &crate::app::Palette, s
     }
 }
 
-fn roster_row_line<'a>(row: &crate::app::RosterRow, pal: &crate::app::Palette) -> Line<'a> {
+fn roster_row_line<'a>(row: &crate::app::RosterRow) -> Line<'a> {
     match row {
         crate::app::RosterRow::NodeHeader {
             name,
@@ -964,11 +904,11 @@ fn roster_row_line<'a>(row: &crate::app::RosterRow, pal: &crate::app::Palette) -
                     Span::raw(format!("  {branch}")),
                     Span::styled(
                         format!("· {}  {} · was {}", s.label, s.presence, s.state),
-                        theme::muted(pal),
+                        theme::muted(),
                     ),
                 ]);
             }
-            let st = theme::state_style(&s.state, pal);
+            let st = theme::state_style(&s.state);
             let sg = theme::state_glyph(&s.state);
             Line::from(vec![
                 Span::raw(format!("  {branch}")),
@@ -1137,7 +1077,7 @@ fn draw_spawn_confirm(f: &mut Frame, area: Rect, app: &App) {
         "resurrect" => "approve this held resurrect?",
         _ => "approve this held spawn?",
     };
-    let block = panel_block(title, app);
+    let block = panel_block(title);
     let inner = block.inner(rect);
     f.render_widget(block, rect);
 
@@ -1201,7 +1141,7 @@ fn draw_log_tail(f: &mut Frame, area: Rect, app: &App) {
     // `crate::logtail`'s module doc): this is a stripped mirror of raw pty
     // bytes, not a terminal — a full-screen TUI in the log reads back as its
     // own redraw chatter.
-    let block = panel_block(&format!("{} — headless log", tail.session_id), app).title(
+    let block = panel_block(&format!("{} — headless log", tail.session_id)).title(
         Line::from(Span::styled(
             " stripped mirror · not a terminal ",
             theme::dim(),
@@ -1237,7 +1177,7 @@ fn draw_log_tail(f: &mut Frame, area: Rect, app: &App) {
 
 // ── Help overlay ────────────────────────────────────────────────────────────
 
-fn draw_help(f: &mut Frame, area: Rect, app: &App) {
+fn draw_help(f: &mut Frame, area: Rect) {
     let help: &[&str] = &[
         "  Tab / Shift-Tab   cycle views · Ctrl-P project tree",
         "  1 Home · 2 Mail · 3 Agents · 4 Terminals · 5 Mesh",
@@ -1271,7 +1211,7 @@ fn draw_help(f: &mut Frame, area: Rect, app: &App) {
     let rect = centered(box_w, box_h, area);
 
     f.render_widget(Clear, rect);
-    let block = panel_block("HELP", app).title(Span::styled(
+    let block = panel_block("HELP").title(Span::styled(
         title,
         Style::default().add_modifier(Modifier::BOLD | Modifier::REVERSED),
     ));
@@ -1690,8 +1630,6 @@ mod tests {
             vec![],
         );
         app.sidebar_focused = false;
-        app.palette.bg = Some(0);
-        app.palette.accent = Some(6);
         let mut terminal = Terminal::new(TestBackend::new(80, 10)).unwrap();
         terminal
             .draw(|f| draw_projects(f, Rect::new(0, 0, 80, 10), &app))
@@ -1699,8 +1637,8 @@ mod tests {
         let buffer = terminal.backend().buffer();
         for y in [1, 2] {
             for x in [0, 40, 79] {
-                assert_eq!(buffer[(x, y)].bg, Color::Indexed(6));
-                assert_eq!(buffer[(x, y)].fg, Color::Indexed(0));
+                assert_eq!(buffer[(x, y)].bg, Color::Cyan);
+                assert_eq!(buffer[(x, y)].fg, Color::Black);
             }
         }
         let cell_column = |row: u16, symbol: &str| {
@@ -1714,22 +1652,18 @@ mod tests {
     }
 
     #[test]
-    fn focused_pane_border_is_single_accent_and_inactive_selection_is_subdued() {
+    fn a_focused_sidebar_drops_the_selection_fill_and_the_pane_border_is_single_line() {
         let mut app = app_with(vec![], vec![]);
         app.sidebar_focused = false;
-        app.palette.bg = Some(15);
-        app.palette.fg = Some(0);
-        app.palette.accent = Some(4);
         let mut terminal = Terminal::new(TestBackend::new(30, 5)).unwrap();
         terminal
-            .draw(|f| f.render_widget(panel_block("Projects", &app), Rect::new(0, 0, 30, 5)))
+            .draw(|f| f.render_widget(panel_block("Projects"), Rect::new(0, 0, 30, 5)))
             .unwrap();
         let buffer = terminal.backend().buffer();
         assert_eq!(buffer[(0, 0)].symbol(), "┌");
-        assert_eq!(buffer[(0, 0)].fg, Color::Indexed(4));
         assert_eq!(buffer[(28, 4)].symbol(), "─");
         app.sidebar_focused = true;
-        assert_ne!(selection_style(&app).bg, Some(Color::Indexed(4)));
+        assert_eq!(selection_style(&app).bg, None);
     }
 
     #[test]
@@ -2108,7 +2042,7 @@ mod tests {
         let buf = term.backend().buffer();
         let out = dump(buf);
         assert!(out.contains("probe failed"), "{out}");
-        let muted = theme::muted(&a.palette).fg.unwrap();
+        let muted = theme::muted().fg.unwrap();
         let row = out.lines().position(|l| l.contains("brave-otter")).unwrap() as u16;
         let col = out.lines().nth(row as usize).unwrap().find("brave-otter").unwrap() as u16;
         assert_eq!(buf[(col, row)].fg, muted, "the live row's label reads muted while the probe is failed");

@@ -22,7 +22,7 @@ rices/<rice>/widgets/<slot>.qml
         │
         ├── nixos-rebuild ──> $out/qml/rices/<rice>/<slot>.qml + manifest.json
         │
-        └── aoide rice stage <rice> ──> ~/Aoide/run/qml/rices/<rice>/<slot>.qml
+        └── strx rice stage <rice> ──> ~/Aoide/run/qml/rices/<rice>/<slot>.qml
                                         (+ auto quickshell reload when a body changed)
         │
    StagingEngine.resolveRice(activeRice, slot)
@@ -43,7 +43,7 @@ Three consequences worth internalising:
   `widgets/whatever.qml` with no anchor wired is inert.
 - A brand-new slot FILE needs `systemctl --user restart
   aoide-quickshell.service` (the manifest is read once, at startup). An edit
-  to an existing file only needs `aoide rice stage`.
+  to an existing file only needs `strx rice stage`.
 
 ### The hard line: a widget is a RENDER SURFACE
 

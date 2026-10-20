@@ -9,8 +9,8 @@ tags: [aoide, theme, theming, base16]
 
 `theme` is Aoide's **design-token layer**: one name for both the values and
 the act of stamping them. The same word names the native engine that
-validates, resolves, and emits the tokens. A rice authors `aoide.theme.*`;
-the paint lanes read `aoide.theme` and nothing else; the runtime seam is
+validates, resolves, and emits the tokens. A rice authors `strillix.theme.*`;
+the paint lanes read `strillix.theme` and nothing else; the runtime seam is
 `stage/theme.json`. Naming rationale lives in [[Lexicon]].
 
 The theme merge (THEME-MERGE.md) ported the standalone Node engine into
@@ -59,9 +59,9 @@ staging` allows it — see [[Self-Ricing#Staging vs Declarative Mode]]), the str
 lane's `home.activation.aoideSeedStage` reasserts it from the active rice's
 committed `rices/<rice>/theme.json` on every activation (see
 [[Codebase#Runtime contracts (socket + stage files)]]), through
-`lib/theme.nix`'s `stagePatch` — the same `aoide.theme.override` venue
+`lib/theme.nix`'s `stagePatch` — the same `strillix.theme.override` venue
 recolour the Stylix/compositor fan-outs apply through `resolve`, with the
-host's `aoide.theme.geometry` laid over the document's — so a
+host's `strillix.theme.geometry` laid over the document's — so a
 freshly booted host carries a correctly recoloured stage twin even before
 `rice stage` ever runs. That seed is declared truth: when `stage/mode.json`
 names a staged or drafted rice, `strx reload` — run by the lane's
@@ -90,16 +90,16 @@ reads were dropped when Phase 4 closed the transition window
 | Palette (base16) | Settled | [[Stylix]] consumes natively; no open questions |
 | Semantic tier | Open (v1 design-system work) | Names meanings, survives transposition |
 | Component tier | Open (v1 design-system work) | Maps semantics to specific surfaces |
-| Geometry tier | Settled, nix + CLI only | `aoide.theme.geometry` — see below |
-| Font tier | Settled, nix only | `aoide.theme.fonts` — see below |
-| Polarity | Settled, baked only | `aoide.theme.polarity` (beside palette) — see below |
+| Geometry tier | Settled, nix + CLI only | `strillix.theme.geometry` — see below |
+| Font tier | Settled, nix only | `strillix.theme.fonts` — see below |
+| Polarity | Settled, baked only | `strillix.theme.polarity` (beside palette) — see below |
 
 The open schema question is scoped to the semantic and component tiers only.
 The palette tier is closed.
 
 ## The geometry tier
 
-`aoide.theme.geometry` (`modules/nucleus/options.nix`) carries the
+`strillix.theme.geometry` (`modules/nucleus/options.nix`) carries the
 compositor's shape values: `gapsOut`, `gapsIn`, `borderSize`, `rounding`,
 `blurEnabled`, `blurSize`, `blurPasses`, plus `terminalOpacity` — the one field
 whose fallback owner is the kitty dendrite rather than the compositor. Every
@@ -145,7 +145,7 @@ carrying live, so a staged rice is the host's bake plus what the rice says.
 
 ## The font tier
 
-`aoide.theme.fonts` (`modules/nucleus/options.nix`) carries the face a rice
+`strillix.theme.fonts` (`modules/nucleus/options.nix`) carries the face a rice
 wears, keyed by [[Stylix]] font role: `fonts.monospace = { package, name } |
 null` — the terminal, where agents live, and the one role a rice uses today.
 The role's shape is Stylix's own, so the lane passes the value through
@@ -172,7 +172,7 @@ tier.
 
 ## Polarity — the register, beside the palette
 
-`aoide.theme.polarity` (`modules/nucleus/options.nix`) is one scalar beside
+`strillix.theme.polarity` (`modules/nucleus/options.nix`) is one scalar beside
 `palette`: `"light"` or `"dark"` (option default `"light"`, so a rice that says
 nothing keeps the ground it always had). A palette brings its polarity — the
 register its base16 ramp reads as — and the stylix lane hands it straight to
@@ -189,7 +189,7 @@ without it (the `theme_goldens` polarity fixture pins that), and `rice stage` ap
 nothing for it, because GTK/Qt and every Stylix target read the register when
 their theme is built. A polarity change lands on the user-gated rebuild, like a
 face change. A rice nevertheless declares it in both halves —
-`aoide.theme.polarity` in `rice.nix` (the option the lane reads) and the same
+`strillix.theme.polarity` in `rice.nix` (the option the lane reads) and the same
 value in its `theme.json` beside `palette`, which the activation seed carries
 into `stage/theme.json` as data nothing reads today.
 

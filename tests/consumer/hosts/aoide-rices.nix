@@ -1,5 +1,5 @@
 # tests/consumer/hosts/aoide-rices.nix — a consumer host that performs one of
-# Aoide's OWN rices.
+# Strillix's OWN rices.
 #
 # The same record shape as `consumer.nix`; what differs is the rices the
 # flake hands its constructor: Aoide's, through the `ricesRoot` export, never

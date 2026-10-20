@@ -51,8 +51,8 @@
 // (𝄞, "the powermenu key") calls `.toggle()` on that handle directly. A
 // Hyprland global shortcut (`aoide:powermenu`) is the second trigger — the
 // launcher's in-process inbound idiom. A click on a stele sends `{ cmd: "power", action: "…" }` through
-// ShellBridge's socket — the Rust shellbridge daemon
-// (pkgs/aoide/crates/conduct/src/shellbridge.rs) parses it and spawns the
+// ShellBridge's socket — the strillix shellbridge process
+// (pkgs/aoide/crates/strillix/src/bridge/power.rs) parses it and spawns the
 // system action (hyprlock / hyprctl dispatch exit / systemctl …). QML never
 // shells out; the bridge is the gate.
 //

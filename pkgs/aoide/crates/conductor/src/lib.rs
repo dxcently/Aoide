@@ -23,7 +23,7 @@
 //!     from ratatui widgets. Given the same state they paint the same buffer, so
 //!     every panel is testable with a `TestBackend` (no tty).
 //!   * [`graphview`] lays out and draws the visual graph; [`theme`] carries the
-//!     palette → `Style`, the glyph vocabulary, and the small pure formatters.
+//!     semantic colour → `Style`, the glyph vocabulary, and the small pure formatters.
 //!
 //! The seven panels: GRAPH (the visual graph), SESSION (the terminal roster),
 //! PROJECTS, LOG, STATUS, ROSTER (presence — this box plus every registered

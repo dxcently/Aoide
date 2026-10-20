@@ -286,26 +286,26 @@ resetting to zero.
 
 ## 6. Verification traps
 
-- **`aoide rice stage` refuses while the rice mode is `declarative`** (the
+- **`strx rice stage` refuses while the rice mode is `declarative`** (the
   default) with `reason: "declarative-mode-locked"`. Run
-  `aoide rice mode stage [<rice>]` first; `aoide rice mode declarative` locks
+  `strx rice mode stage [<rice>]` first; `strx rice mode declarative` locks
   it back.
 - **A re-stage that changes no widget body deliberately skips the Quickshell
   reload** ("no widget bodies changed; nothing to reload"). If you need a
-  reload regardless, run `aoide quickshell reload`.
+  reload regardless, run `strillix quickshell reload`.
 - **A brand-new slot file is not discovered by a reload** — `manifest.json` is
   read once, at startup. Restart `aoide-quickshell.service`.
 - **The CLI command is `quickshell reload`, not `shell reload`** — renamed
   because `shell` collided with `--agent shell`.
 - **Quickshell's file watcher only scans the TOP LEVEL of `run/qml/`, never
   `run/qml/rices/`.** So editing a rice widget can never trigger a reload on
-  its own — `aoide rice stage <rice>`'s IPC call is the *only* thing that
+  its own — `strx rice stage <rice>`'s IPC call is the *only* thing that
   makes the edit render. There is no watcher fallback behind it.
 - **`quickshell ipc call` exits 0 even when the call never reached a
   handler**, printing `Not ready to accept queries yet.` to **stdout** (not
   stderr) for an unknown target or function. Measured 2026-08-15: real call
   → exit 0, silent; unknown fn/target → exit 0, that message; bad `-p` path →
-  exit 255. `aoide quickshell reload` now judges success on *silence*, since
+  exit 255. `strillix quickshell reload` now judges success on *silence*, since
   `reload()` is declared `: void` and a void call that lands prints nothing —
   but if you invoke `quickshell ipc call` by hand, **the exit code will lie to
   you**. Read its output.

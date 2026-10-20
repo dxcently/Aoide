@@ -28,7 +28,7 @@ directory this package is built from — rename the directory and both follow.
 ## What this package is not
 
 - **Not a shell.** `strillix` is the binary; a shell is a directory of QML plus
-  whatever a rice contributes. Which directory runs is `aoide.quickshell.config`
+  whatever a rice contributes. Which directory runs is `strillix.quickshell.config`
   (a nucleus fact), set by the lane that brings a session up.
 - **Not a place to add QML for a host.** A host's own paint lands in its rice;
   a capability that needs to be reachable from a terminal lands as a bridge

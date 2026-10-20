@@ -317,9 +317,9 @@ check "front: the same hook with no rice merged holds" "true" "$(o .front.collis
 
 # ── 3. The merged rices ──────────────────────────────────────────────────
 # One call gives the directory and the registry over it; a host performs a
-# consumer rice that borrows an Aoide rice across the two books.
+# consumer rice that borrows a Strillix rice across the two books.
 check "merged: performs the consumer's encore"       "encore" "$(o .merged.rice)"
-check "merged: builds in the Aoide rice it borrows"  "encore sonata" "$(o '.merged.builtIn | join(" ")')"
+check "merged: builds in the Strillix rice it borrows"  "encore sonata" "$(o '.merged.builtIn | join(" ")')"
 check "merged: encore wears its own theme"          "#1a1424" "$(o .merged.bg)"
 check "merged: encore's widgets are sonata's"        "true" "$(o .merged.borrowed)"
 check "merged: the registry names both books' rices" "true" \

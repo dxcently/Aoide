@@ -10,7 +10,7 @@ source: "[[references/AOIDE-HANDOFF]]"
 
 Aoide ships the rice engine as a builtin. The engine provides the loop, the schema, and the staging mechanism. Everything else — the rices, the preferences, the accumulated taste — it learns by doing.
 
-**Status today:** the loop below is real end to end, `rice declare` included. `rice lint` (runs the native [[theme]] engine), `rice stage`, `rice compose`, `strx reload` (the one mode-aware iteration command — absorbed `quickshell reload` outright), the `rice draft` group (`save`/`list`/`drop`), and the `rice mode` group (`status`/`stage`/`declarative`/`draft`) are all implemented. `rice stage` stages `stage/theme.json`, [[Quickshell]] hot-reloads it live via `FileView`, geometry, window-border colours and the hyprglass switch apply to the running compositor over `hyprctl` in the same step, and the terminals follow: `stage/terminal-colors.conf` for every new kitty window, and a `kitty @ load-config` per instance for the open ones — while `rice mode declarative` is locked (below), `rice stage` refuses instead of writing. Beyond a live `rice stage`, the activation seed reseeds `stage/theme.json` from the active rice's committed notes with the venue's `aoide.theme.override` and the host's geometry applied and publishes the same bytes at `/declared/theme.json`, the declared twin that `rice mode declarative` re-pins from, beside `/declared/venue.json`, the slots the venue recolours and the geometry the host sets, as data ([[Codebase#Runtime contracts (socket + stage files)]]) — so a host that boots without ever staging still carries the correct stage twin, and a later re-stage of the declared rice reads the runtime rices, where the rice is edited, with the venue laid over it: the venue wins on the slots it recolours and the geometry it sets, and an edit shows everywhere else. The seed is declared truth and nothing more: the strillix lane's `aoide-rice-reload` unit then runs `strx reload` at every login (before the shell starts) and on every switch, which brings back whatever `stage/mode.json` names — the last staged rice, or the routed draft. `rice declare` is implemented — gated, it copies the runtime rice tree, less its top-level `history/` and `drafts/` (the machine's undo history and scratch, which stay behind), into the checkout's `rices/<name>/` (byte-diff, a repeat with nothing new is a no-op; no `git add`, no rebuild — the user runs those herself). `rice transpose` remains the one declared-but-not-implemented stub (exit `64`) — narrate it as planned, not as a working pipeline. There is no `rice gen`; `rice compose` is the real, working scaffolding entry point.
+**Status today:** the loop below is real end to end, `rice declare` included. `rice lint` (runs the native [[theme]] engine), `rice stage`, `rice compose`, `strx reload` (the one mode-aware iteration command — absorbed `quickshell reload` outright), the `rice draft` group (`save`/`list`/`drop`), and the `rice mode` group (`status`/`stage`/`declarative`/`draft`) are all implemented. `rice stage` stages `stage/theme.json`, [[Quickshell]] hot-reloads it live via `FileView`, geometry, window-border colours and the hyprglass switch apply to the running compositor over `hyprctl` in the same step, and the terminals follow: `stage/terminal-colors.conf` for every new kitty window, and a `kitty @ load-config` per instance for the open ones — while `rice mode declarative` is locked (below), `rice stage` refuses instead of writing. Beyond a live `rice stage`, the activation seed reseeds `stage/theme.json` from the active rice's committed notes with the venue's `strillix.theme.override` and the host's geometry applied and publishes the same bytes at `/declared/theme.json`, the declared twin that `rice mode declarative` re-pins from, beside `/declared/venue.json`, the slots the venue recolours and the geometry the host sets, as data ([[Codebase#Runtime contracts (socket + stage files)]]) — so a host that boots without ever staging still carries the correct stage twin, and a later re-stage of the declared rice reads the runtime rices, where the rice is edited, with the venue laid over it: the venue wins on the slots it recolours and the geometry it sets, and an edit shows everywhere else. The seed is declared truth and nothing more: the strillix lane's `aoide-rice-reload` unit then runs `strx reload` at every login (before the shell starts) and on every switch, which brings back whatever `stage/mode.json` names — the last staged rice, or the routed draft. `rice declare` is implemented — gated, it copies the runtime rice tree, less its top-level `history/` and `drafts/` (the machine's undo history and scratch, which stay behind), into the checkout's `rices/<name>/` (byte-diff, a repeat with nothing new is a no-op; no `git add`, no rebuild — the user runs those herself). `rice transpose` remains the one declared-but-not-implemented stub (exit `64`) — narrate it as planned, not as a working pipeline. There is no `rice gen`; `rice compose` is the real, working scaffolding entry point.
 
 ## The Rice Loop
 
@@ -59,7 +59,7 @@ staged copy holds theme or widget edits the build's copy lacks
 (`stagedDiffers`): the rebuild builds the rices version, not the live
 edits, so those reach the build through the first step and a commit.
 
-Staging is the sketch — a live compositor call, no rebuild; `aoide.rice` selecting a rice and rebuilding is the truth — it bakes `hyprland.conf` (geometry, borders), themes every nix-manageable app via [[Stylix]], assembles and deploys the rice's widgets, and sets the host's boot default. GTK/Qt surfaces require app restarts and are declare-only, accepted by design.
+Staging is the sketch — a live compositor call, no rebuild; `strillix.rice` selecting a rice and rebuilding is the truth — it bakes `hyprland.conf` (geometry, borders), themes every nix-manageable app via [[Stylix]], assembles and deploys the rice's widgets, and sets the host's boot default. GTK/Qt surfaces require app restarts and are declare-only, accepted by design.
 
 ## Composing a rice
 
@@ -238,7 +238,7 @@ today — `quickshell`, the shell's own `aoide-wallpaper` layer, which draws the
 rice's own default and the user's picks, and `skwd-wall`, an external provider
 that draws picks on its own surface. A host picks one with
 `habit.dendrites.wallpaper.provider`, and the chosen provider file names
-itself in the fact `aoide.wallpaper.provider`; `strillix` publishes that one word to
+itself in the fact `strillix.wallpaper.provider`; `strillix` publishes that one word to
 the runtime as `/stage/wallpaper-provider`, which both the CLI
 (`wallpaper_provider::provider`) and `ThemeState.qml` read — absent means the
 shell's own layer. The rice is not consulted: a pick is the same
@@ -274,7 +274,7 @@ bodies, and the rice's slot-owner map and widget-type registry
 from the git checkout: the manifest/registry sources are the shipped
 templates' baked files (for a rice this system built in) and this machine's
 own rices, evaluated by the SHIPPED generator over
-`$AOIDE_ROOT/rices`. So a rice that exists only in the runtime
+`$STRILLIX_ROOT/rices`. So a rice that exists only in the runtime
 rices stages and hot-loads without a commit, a merge or a rebuild. The
 declarative path may seed staging (the activation seed, the baked
 templates), never gate it. The staged rice is always the LAST one staged:
@@ -299,7 +299,7 @@ from a preview root. Nothing else touches it.
 
 `rice stage` doesn't only hot-load the palette/notes tier any more —
 it also syncs the rice's widget QML **bodies**
-(the composed copy under `$AOIDE_ROOT/rices/<name>/widgets/*.qml`,
+(the composed copy under `$STRILLIX_ROOT/rices/<name>/widgets/*.qml`,
 not the git checkout — an edit reaches the desktop only once it is placed
 there) into the live runtime tree
 (`run/qml/rices/<name>/`, `crate::widgets` in `crates/strillix-rice/`), so an edit to
@@ -359,7 +359,7 @@ live stage runs first has already put the host's glass back, so a no-opinion
 rice staged after cadenza gets its glass back.
 
 **Polarity is the one theme field `rice stage` does not apply.** A rice's
-`aoide.theme.polarity` (`"light"`/`"dark"`, beside its palette) is read by the
+`strillix.theme.polarity` (`"light"`/`"dark"`, beside its palette) is read by the
 stylix lane alone and lands on the [[Self-Ricing#The Rice Loop|gated rebuild]],
 the font tier's posture: GTK/Qt and every Stylix target take the register when
 their theme is built, so no keyword, no file and no emitter call carries it —
@@ -380,7 +380,7 @@ combining unlock-and-stage into one call. `strx rice mode declarative
 name, or with none: it re-pins `stage/theme.json` to the resolved rice's
 declared notes FIRST (with no name, the DECLARED rice — the rice
 `/declared/theme.json` names, the venue's activation-published twin of
-the committed notes with any `aoide.theme.override` already applied; only a
+the committed notes with any `strillix.theme.override` already applied; only a
 host that never activated the lane falls back to the current stage's own
 rice, the auto-resolve `rice mode stage` uses) and only writes the lock
 marker after that write succeeds, so the re-pin can never trip the lock it
@@ -408,7 +408,7 @@ in the codebase routes through that one function.
 
 ## Geometry
 
-A rice may set `aoide.theme.geometry` — gaps, border size, rounding, and
+A rice may set `strillix.theme.geometry` — gaps, border size, rounding, and
 blur, every field optional — alongside its palette and window tiers; see
 [[theme#The geometry tier]] for the field list and the fallback/live-apply
 mechanism. A rice that sets no geometry performs with the host's baked
@@ -418,7 +418,7 @@ lays the rice's own fields over it.
 ## The Shipped Baseline Is Guarded, Not Frozen
 
 `sonata` is the shipped standard, guaranteed present under
-`rices/sonata/`. `aoide.rice` (`nullOr str`) defaults to `null` —
+`rices/sonata/`. `strillix.rice` (`nullOr str`) defaults to `null` —
 naming no rice performs no rice: a host opts into the desktop by naming the
 rice explicitly. A missing baseline is a loud nix eval failure, never a
 silent no-op. `sonata` is upstream-owned and
@@ -456,12 +456,12 @@ The discipline is already in use: the retired `default` rice's declared aestheti
 the checkout's `rices/<rice>/` as durable, versioned, fleet-available
 score — a gated byte-diff copy (a repeat with nothing new is a no-op), with
 no `git add` and no rebuild: the user commits and runs the gated rebuild
-herself. **`aoide.rice`** is the per-host
+herself. **`strillix.rice`** is the per-host
 selector (`nullOr str`, default `null` — naming no rice performs no rice) —
 one line in `hosts/<host>/default.nix`:
 
 ```nix
-aoide.rice = "sonata";
+strillix.rice = "sonata";
 ```
 
 **Replay** is performing a declared rice at a different host: the rice
@@ -472,7 +472,7 @@ A host lacking an instrument does not sound that part.
 **Transpose** vs **replay**: transpose is same venue, new key (new
 palette); replay is same score, new venue (different host). Both are
 one-line operations on a declared rice — the replay declaration
-(`aoide.rice = "<name>";`) is real, `rice transpose` itself is planned.
+(`strillix.rice = "<name>";`) is real, `rice transpose` itself is planned.
 
 ## Keys and Transposition
 

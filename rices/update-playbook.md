@@ -12,10 +12,10 @@ the migration of a v0 rice (`CONTRACTS.md` §5, "Enforcement"), and the step lis
 for a new rice is the same:
 
 1. Write `rice.nix` as the body in the shape `rices/sonata/rice.nix` has
-   (or `pkgs/aoide/crates/strillix-rice` scaffolds with `aoide rice compose`).
+   (or `pkgs/aoide/crates/strillix-rice` scaffolds with `strx rice compose`).
 2. Put the palette, polarity, window and geometry in `system.module`, under
-   `aoide.theme`, all inside one `config = lib.mkDefault { … };`. Nothing else
-   in the `module` but `aoide.theme` and `aoide.layout`.
+   `strillix.theme`, all inside one `config = lib.mkDefault { … };`. Nothing else
+   in the `module` but `strillix.theme` and `strillix.layout`.
 3. Keep the ten providers in `system.providers` as `"strillix"` (or a provider a
    consumer adds). Keep `home.members = [ "strillix" ]`.
 4. Write `hyprland.conf` beside it: the binds, unbinds, layout and animations.
@@ -25,7 +25,7 @@ for a new rice is the same:
    `rice` and `borrow`, and `pkgs` only when used. `{ lib, ... }:` is the usual
    shape for a module that sets only theme.
 6. Remove any self-gate: a body is read only when its rice is performed, so
-   `config.aoide.rice == "<name>"` has no place in it.
+   `config.strillix.rice == "<name>"` has no place in it.
 7. Run `checks.rice-shape` (`nix build .#checks.x86_64-linux.rice-shape`) and
    `tests/selection/run.sh`.
 
@@ -93,7 +93,7 @@ committed rice's slot files are carried at once, not just the active one.
 which rice is *active* live with:
 
 ```
-aoide rice preview <name>
+strx rice stage <name>
 ```
 
 This stages `<name>`'s `theme.json` (with `rice` injected) into
@@ -112,7 +112,7 @@ The theme merge (THEME-MERGE.md) renamed the note engine and its whole
 surface. The note schema is unchanged (v0), so this was a namespace/file
 rename, not a content migration:
 
-- **Option namespace:** the option namespace moved to `aoide.theme.*`. A
+- **Option namespace:** the option namespace moved to `strillix.theme.*`. A
   `lib.mkRenamedOptionModule` alias in `modules/nucleus/options.nix` kept any
   out-of-tree host or stale rices `rice.nix` that still set the old name
   evaluating during the transition; the alias was dropped when Phase 4 closed

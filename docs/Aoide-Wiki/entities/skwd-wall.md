@@ -67,7 +67,7 @@ key is the one thing that decides which of the two is in front of the other.
 The shell's own layer stands down while the engine has a pick on screen: the
 `wallpaper` surface stays mapped and transparent, and `AoideWallpaper.qml`
 paints nothing at all for it. That is the one reason `wallpaper.owner` stays
-`quickshell` in the `aoide.surfaces` registry — the engine's paper surface is
+`quickshell` in the `strillix.surfaces` registry — the engine's paper surface is
 the compositor's business, not an `aoide-<slot>`.
 
 ## What is not verified

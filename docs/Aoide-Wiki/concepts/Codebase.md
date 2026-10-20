@@ -35,8 +35,8 @@ Outputs, all tolerant of empty layers so eval stays robust:
   `nixosModules.<name>` per catalogue entry plus `nucleus` (the module that
   closes over Aoide's own inputs), the base package overlay, the constructor
   files (`lib.composition`, `lib.theme`, `lib.rices`, `lib.catalogue`),
-  Aoide's own rices directory for a host that performs Aoide's rices, and the
-  derived `aoide.*` option list `strx onboard` reads.
+  Strillix's own rices directory for a host that performs Strillix's rices, and the
+  derived option list `strx onboard` reads.
 - `checks` — the contractual coupling discipline from `lib/checks.nix`
   (`surface-ownership`, `rice-runtime-untracked`, `rice-shape`, `fmt`,
   `discovery`, `phantom-commands`, `nix-independence`, `portability`,
@@ -92,7 +92,7 @@ flake's `packages` output and the `pkg-<name>` checks read, so paint lanes
 reference `pkgs.aoide` / `pkgs.strillix-shell` … without drift — and wires the two
 rice hooks (`selectionModules` puts `habit.rice.declared`/`habit.rice.available` on the host
 module; `extraModulesFor` turns the selection into the built-in rices'
-`rice.nix` files and the `aoide.rice`/`aoide.rices.builtIn` facts). Each
+`rice.nix` files and the `strillix.rice`/`strillix.rices.builtIn` facts). Each
 rice's `rice.nix` is a body: habit imports the performed rice's body and no
 other, so a host performs the one rice it declares and builds in the ones it
 lists (see [[Rice-Vocabulary#Replay — any rice, any host]]).
@@ -105,7 +105,7 @@ hot-sync half). The same generator also feeds `pkgs/strillix-rices`, which
 bakes the built-in rices plus a prebaked
 `manifest.json`/`registry.json`/`builtin.json` into `share/strillix/rices` — the shipped
 templates a repo-less host's registry/manifest regen reads nix-free
-(`CONTRACTS.md` §4). **`lib/theme.nix`** resolves `aoide.theme.override.*`, the
+(`CONTRACTS.md` §4). **`lib/theme.nix`** resolves `strillix.theme.override.*`, the
 host-set venue-recolour tier (`CONTRACTS.md` §1). **`lib/rice.nix`** builds
 each rice's widget records from its `_widgets/<slot>.nix` functions — the nix
 analogue of `WidgetSlot.qml` — and `lib/options.nix` is the `aoideOptions`
@@ -114,7 +114,7 @@ walk `strx onboard` reads.
 **`lib/checks.nix`** rides as flake `checks` — the contractual coupling
 discipline, written to throw legibly at eval time on a violation:
 
-- **`surface-ownership`** — every declared `aoide.surfaces.<name>` names a
+- **`surface-ownership`** — every declared `strillix.surfaces.<name>` names a
   non-empty owner (a paint lane asserting it is the sole owner of a render surface).
 - **`rice-runtime-untracked`** — no `rice/` runtime dir (`stage/`,
   `auditions/`, `declared/`) exists in the source tree at all, so the nix build
@@ -176,25 +176,25 @@ no behaviour, so an empty config evaluates. The surface:
   host `rices/`, the audit log. `aoide.checkout` (default `~/Aoide`,
   exported as `AOIDE_FLAKE_ROOT`) — the dev git checkout: `soundcheck`'s scan
   root, `rice declare`'s commit-in target, the rices `nix eval` registry
-  regen. `aoide.hostConfig` (default `<checkout>/hosts/<hostName>/default.nix`,
-  exported as `AOIDE_HOST_CONFIG`) — the host file whose one
+  regen. `strillix.hostConfig` (default `<checkout>/hosts/<hostName>/default.nix`,
+  exported as `STRILLIX_HOST_CONFIG`) — the host file whose one
   `habit.rice.declared` line `rice declare --host` rewrites.
-- `aoide.rice` (`nullOr str`, default `null`) — which rice this host performs.
+- `strillix.rice` (`nullOr str`, default `null`) — which rice this host performs.
   Null performs no rice: the paint lanes read the null and deploy nothing (no
   QML tree, no shell service). Set once in `hosts/<host>/default.nix` (and
   `habit.rice.available` with it, for what the host keeps built in); the
   performed rice's body is the only one imported. See [[Rice-Vocabulary#Replay — any rice, any host]].
-- `aoide.theme` — the v0 theme schema: closed `palette.{bg,fg,accent,urgent}`
+- `strillix.theme` — the v0 theme schema: closed `palette.{bg,fg,accent,urgent}`
   (base16, permissive hex type) + optional component tiers `bar.*` / `notif.*` /
   `window.*` (each `nullOr` hex, `null` → palette), the additive-optional tiers
   (`base16`, `geometry.*`, `fonts.monospace`, `wallpaper`), and an `override.*`
   venue tier (host-set only, [[theme|resolved by `lib/theme.nix`]]).
-- `aoide.layout` — the v1 layout schema: which widget/surface types
-  a rice brings into existence. `aoide.theme`, `aoide.layout` and
-  `aoide.surfaces` are the whole paint-lane read set, with the core scalars and
+- `strillix.layout` — the v1 layout schema: which widget/surface types
+  a rice brings into existence. `strillix.theme`, `strillix.layout` and
+  `strillix.surfaces` are the whole paint-lane read set, with the core scalars and
   the rice selection root `AGENTS.md` house rule 5 enumerates — no module reads
   another module's options.
-- `aoide.surfaces.<name>.owner` — the surface-ownership registry.
+- `strillix.surfaces.<name>.owner` — the surface-ownership registry.
 - `aoide.mcp.enable`, `aoide.a2a.enable`, `aoide.usage.enable` — each off by
   default (house policy); `aoide.auditLog`
   (default `$AOIDE_ROOT/log`, i.e. `~/.aoide/log`).
@@ -234,8 +234,8 @@ switched on by selecting their dendrite (each sets `aoide.enable`):
 | Unit | From | Notes |
 |---|---|---|
 | `aoided` | core module `pkgs/aoide/module/aoided.nix` | runs `${pkgs.aoide}/bin/aoided`; env `AOIDE_AUDIT_LOG`, `AOIDE_USER`; `RuntimeDirectory=aoide` for `aoided.sock` and the core `shellbridge.sock` |
-| `shellbridge` | `dendrites/strillix/shellbridge.nix` (gated on `aoide.strillix.enable`) | runs `strillix shellbridge --run`; `RuntimeDirectory=strillix` for `strillix/bridge.sock` |
-| `aoide-graph-reap` | core module `pkgs/aoide/module/aoided.nix` | timer, ~12s interval; the liveness reaper sweeping sessions a killed terminal could never mark `done` |
+| `shellbridge` | `dendrites/strillix/shellbridge.nix` (gated on `strillix.enable`) | runs `strillix shellbridge --run`; `RuntimeDirectory=strillix` for `strillix/bridge.sock` |
+| `aoide-graph-reap` | core module `pkgs/aoide/module/aoided.nix` | timer, ~12s interval; the liveness reaper sweeping sessions a killed terminal cannot mark `done` |
 | `aoide-melete-adapter` | `dendrites/melete-adapter.nix` | runs `aoide adapter melete --run`; `AOIDE_ADAPTER_SUBSCRIBE` allow-list |
 | `aoide-mcp` | `dendrites/aoided.nix` | **gated on `aoide.mcp.enable`**; `bindsTo` aoided |
 | `aoide-a2a` | `dendrites/aoided.nix` | **gated on `aoide.a2a.enable`**; the [[A2A-Door]] serve unit |
@@ -244,10 +244,10 @@ switched on by selecting their dendrite (each sets `aoide.enable`):
 | `aoide-obsidian-register` | `dendrites/obsidian.nix` | oneshot; registers a window class with shellbridge |
 
 `systemd.user.tmpfiles.rules` create `${config.aoide.root}/log` (0700),
-`${config.aoide.root}/rice/stage` (0755, rice staging),
+`${config.strillix.root}/stage` (0755, rice staging),
 `${config.aoide.root}/state` (0700), and `${config.aoide.root}/state/stage`
 (0755, conducting state) at runtime — with the default root, `~/.aoide/log`,
-`~/.aoide/rice/stage`, `~/.aoide/state`, `~/.aoide/state/stage`;
+`~/.strillix/stage`, `~/.aoide/state`, `~/.aoide/state/stage`;
 systemd-tmpfiles deduplicates the shared rules declared in both
 aoided and shellbridge.
 
@@ -320,7 +320,7 @@ Live-side state, all under the runtime root (`$AOIDE_ROOT`, default
   precedence) — the documented CLI ↔ unit seam,
   pinned by a serialized precedence test. On first run the core binaries run a
   one-shot root migration (`fs::migrate_root_once()`) moving pre-existing
-  `~/Aoide/{rice/stage,state,log}` into the root, each piece gated on its
+  `~/Aoide/{state,log}` into the root, each piece gated on its
   own override being unset. The first no-override resolution
   of `conducting_stage_dir()` runs a one-shot migration moving any of the
   six conducting files still sitting at the old `/stage/` location into
@@ -417,7 +417,7 @@ since. `hyprland` is the host-invariant
 half of the compositor: keybinds, input devices, tiling layout, misc, and
 behavioural window rules, split out so a re-rice cannot disturb them (the
 compositor lane keeps the theme-derived look and the session plumbing). The `nvf` flake input threads to home-manager via
-`extraSpecialArgs`; the wallpaper-art token (`aoide.theme.wallpaper` → the shared
+`extraSpecialArgs`; the wallpaper-art token (`strillix.theme.wallpaper` → the shared
 `/wallpapers/`) backs the shipped wallpapers; Lekton Nerd Font Mono is the stylix
 face. `neovim`'s own `vim.extraPackages` (nvf) also carries `pkgs.rustc`/
 `pkgs.cargo`, scoped to nvim's wrapped PATH only — its built-in rust-analyzer

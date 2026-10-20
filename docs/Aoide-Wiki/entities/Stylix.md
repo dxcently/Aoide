@@ -40,7 +40,7 @@ surface-adjacent slots) — a provisional derivation.
 synthesis with a real 16-colour derivation.
 
 That said, rices may also supply the full sixteen slots directly as
-`aoide.theme.base16` (bypassing synthesis) — the `sonata` rice does,
+`strillix.theme.base16` (bypassing synthesis) — the `sonata` rice does,
 keyed by hand from its wallpaper; see
 [[Ricing-Protocol|the Ricing Protocol]].
 
@@ -48,10 +48,10 @@ keyed by hand from its wallpaper; see
 
 `stylix.polarity` (`"light"` or `"dark"`) declares which register the base16
 ramp reads as, and every Stylix-managed target honours it. The rice declares it
-as `aoide.theme.polarity` beside its palette (CONTRACTS.md §1; the option
+as `strillix.theme.polarity` beside its palette (CONTRACTS.md §1; the option
 defaults to `"light"`), and this lane hands it to Stylix `mkDefault` — so a
 venue or host that names `stylix.polarity` itself still wins. Naming
-`aoide.theme.polarity` at a venue is a different thing: a rice's own
+`strillix.theme.polarity` at a venue is a different thing: a rice's own
 definition is a plain one, so a host overriding it needs `mkForce`, exactly as
 for every other rice-declared theme field. Because polarity is a
 single fan-out switch,

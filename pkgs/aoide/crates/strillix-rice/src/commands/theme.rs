@@ -232,7 +232,7 @@ fn handle_theme_emit(inv: &Invocation) -> Outcome {
         None => {
             return Outcome::usage(
                 "theme.emit",
-                "usage: aoide theme emit <target> [<name>|<path>] [--out PATH] [--template STR] [--rice-dir DIR] [--json]",
+                "usage: strillix theme emit <target> [<name>|<path>] [--out PATH] [--template STR] [--rice-dir DIR] [--json]",
             )
             .with_data(json!({ "reason": "missing-target" }));
         }

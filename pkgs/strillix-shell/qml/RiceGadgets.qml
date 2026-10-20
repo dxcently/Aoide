@@ -1,5 +1,5 @@
 // RiceGadgets.qml — visual host for the active rice's DECLARED dock-kind
-// widgets (CONTRACTS.md §5's "Per-rice flavor widgets"; `aoide.layout
+// widgets (CONTRACTS.md §5's "Per-rice flavor widgets"; `strillix.layout
 // .widgets`, `modules/nucleus/options.nix` — the `kind = "dock"` v2
 // expansion of the same declared widget-type registry `RiceSurfaces.qml`
 // hosts the `kind = "surface"` half of). Same data source

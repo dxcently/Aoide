@@ -92,7 +92,7 @@ QtObject {
     // So the fix is not a null guard in the widget: it is not rebuilding what
     // did not change. A trigger whose source AND extras match what `item` was
     // already built from now returns without touching it. A GENUINE change
-    // (live `aoide rice preview <rice>`, a new extra) still rebuilds — the
+    // (live `strillix rice stage <rice>`, a new extra) still rebuilds — the
     // manifest watch keeps doing the job it was added for.
     property string _builtSource: ""
     property var _builtExtras: ({})

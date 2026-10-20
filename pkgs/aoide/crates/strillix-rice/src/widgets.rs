@@ -18,7 +18,7 @@
 //! plain `nix-instantiate --eval --strict --json` over `share/strillix/nix/
 //! manifest.nix` — a file SHIPPED by `pkgs/strillix-rices`, a thin entry over
 //! copies of `lib/rices.nix`/`lib/rice.nix`, pointed at this machine's own
-//! `$AOIDE_ROOT/rices`. No flake, no network, no checkout, no
+//! `$STRILLIX_ROOT/rices`. No flake, no network, no checkout, no
 //! `--impure`: `flake_root()` is not read here at all, and the flake's
 //! `#ricesManifest` output is a build-time convenience, never a runtime
 //! dependency. [`plan_stage`] is that shell-out and §7.5's gate in one
@@ -161,7 +161,7 @@ pub(crate) const RICES_EVAL_FIXTURE_VAR: &str = "STRILLIX_RICES_EVAL_FIXTURE";
 ///   2. **Any other stageable rice** — one plain
 ///      `nix-instantiate --eval --strict --json` over the SHIPPED generator
 ///      (`share/strillix/nix/manifest.nix`) pointed at the MACHINE's rices
-///      (`$AOIDE_ROOT/rices`). A FILE eval: no flake, no network, no
+///      (`$STRILLIX_ROOT/rices`). A FILE eval: no flake, no network, no
 ///      checkout, no `--impure`, and no argv naming `$AOIDE_FLAKE_ROOT` or a
 ///      `#<flake output>`. The generated manifest WINS over the shipped
 ///      baseline for any rice both carry — a machine owns its rices, so the
@@ -276,7 +276,7 @@ pub fn plan_stage(name: &str) -> Result<StageRices, WidgetSyncErr> {
 /// the whole tree an unevaluated rice would serialize as garbage instead of
 /// failing. The generator path and the rices argument both come from
 /// [`aoide_storage::fs`] — the templates dir this binary resolves, and
-/// `$AOIDE_ROOT/rices` — so nothing here can name a checkout path.
+/// `$STRILLIX_ROOT/rices` — so nothing here can name a checkout path.
 ///
 /// The spawn error IS the no-nix answer: `ErrorKind::NotFound` becomes
 /// [`refusal_no_nix`], every other spawn failure its own message. A non-zero

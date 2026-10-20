@@ -18,7 +18,7 @@
 //! config directory and fails otherwise) — the instance here was launched
 //! with `-p <run_qml_dir>/shell.qml` (the `quickshell` lane's service,
 //! `modules/dendrites/quickshell/system.nix`; strillix — the lane that deploys the tree —
-//! names that directory as `aoide.quickshell.config`),
+//! names that directory as `strillix.quickshell.config`),
 //! so the same `-p` has to prefix the `ipc call` invocation to target it.
 //!
 //! ── Why success is judged on OUTPUT, not the exit code (khoa, 2026-08-15) ──

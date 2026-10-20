@@ -169,7 +169,7 @@ pub(crate) fn resolve_scope(cmd: &str) -> Result<(String, Option<String>), Outco
         _ => Err(Outcome::error(
             cmd,
             "no rice currently staged or drafted — entries only exist while unlocked \
-             (`aoide rice mode stage` or `aoide rice mode draft <name>` first)",
+             (`strillix rice mode stage` or `strillix rice mode draft <name>` first)",
         )
         .with_data(json!({ "reason": "not-staged-or-drafted" }))),
     }
@@ -701,7 +701,7 @@ fn handle_rice_entry_mark(inv: &Invocation) -> Outcome {
         None => {
             return Outcome::usage(
                 "rice.history.mark",
-                "usage: aoide rice history mark <letter A-Z> [--entry N] [--json]",
+                "usage: strillix rice history mark <letter A-Z> [--entry N] [--json]",
             )
             .with_data(json!({ "reason": "missing-mark" }));
         }
@@ -735,7 +735,7 @@ fn handle_rice_entry_mark(inv: &Invocation) -> Outcome {
             None => {
                 return Outcome::error(
                     "rice.history.mark",
-                    "no entries exist yet for this draft — nothing to mark (`aoide rice history` first)",
+                    "no entries exist yet for this draft — nothing to mark (`strillix rice history` first)",
                 )
                 .with_data(json!({ "reason": "entry-not-found" }));
             }
@@ -1482,7 +1482,7 @@ fn back_unlocked(cmd: &str, entry_flag: Option<u32>, mark_flag: Option<String>) 
                 format!(
                     "draft routing is broken: {} is not a symlink — refusing to revert rather than \
                      silently writing a plain stage file that leaves the draft untouched \
-                     (`aoide rice mode draft {draft_name}` re-routes it)",
+                     (`strillix rice mode draft {draft_name}` re-routes it)",
                     theme_path.display()
                 ),
             )
@@ -1717,7 +1717,7 @@ pub(crate) fn handle_rice_back(inv: &Invocation) -> Outcome {
         }
         return Outcome::usage(
             "rice.back",
-            "usage: aoide rice back --entry N | --mark <letter> [--json] \
+            "usage: strillix rice back --entry N | --mark <letter> [--json] \
              (a bare `rice back` opens a numbered picker on a tty; \
              this door is not one, so pass --entry or --mark)",
         )
@@ -3030,7 +3030,7 @@ mod tests {
         assert_eq!(out.status, Status::Usage);
         assert_eq!(
             out.message,
-            "usage: aoide rice back --entry N | --mark <letter> [--json] \
+            "usage: strillix rice back --entry N | --mark <letter> [--json] \
              (a bare `rice back` opens a numbered picker on a tty; \
              this door is not one, so pass --entry or --mark)"
         );

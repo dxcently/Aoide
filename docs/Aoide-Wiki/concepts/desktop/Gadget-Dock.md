@@ -85,7 +85,7 @@ agent-tree view instead of a literal graph diagram ([[Session-Graph]]).
 These six — Conductor, Terminals, Meters, Power, the opt-in Usage stele, and
 the notifications-center notification slot — are the dock's **baseline**, not a
 closed set: a rice MAY register a further gadget by declaring
-`kind = "dock"` in `aoide.layout.widgets.<slot>` (`CONTRACTS.md` §5),
+`kind = "dock"` in `strillix.layout.widgets.<slot>` (`CONTRACTS.md` §5),
 which mounts it as an `Item` into the same gadget column via
 `RiceGadgets.qml`, ordered against any other declared `dock` entries by its
 `order` field. The bar's own calendar popout is a separate case — not a dock

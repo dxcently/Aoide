@@ -50,7 +50,7 @@ shipped baseline every rice falls back to → the anchor's lane-side
 non-visual `QtObject` sibling instead of
 a sized `Item`, since each slot's root IS its own `PanelWindow` rather than
 content parented into an existing layout. `RiceSurfaces` hosts one more
-`SurfaceSlot` per surface-kind entry the active rice's `aoide.layout`
+`SurfaceSlot` per surface-kind entry the active rice's `strillix.layout`
 declares (empty for sonata today, so a no-op). `AoideClipboard` and
 `GrimoireLedger` are lane-owned utility singletons injected into the
 launcher slot as extras; `AoideWallpaperPicker` answers `aoide:wallpaper`
@@ -67,7 +67,7 @@ $AOIDE_ROOT/run/qml/shell.qml`). The deployed tree is self-healing: it is a
 deploy target, never a source, and every activation's rsync reasserts the
 store's build over it, so a hand edit under `$AOIDE_ROOT/run/qml/` is lost at
 the next switch. A rice is edited in the runtime rices
-(`$AOIDE_ROOT/rices/<rice>`), and a STAGED rice is restored from
+(`$STRILLIX_ROOT/rices/<rice>`), and a STAGED rice is restored from
 there: after the switch the strillix lane's `aoide-rice-reload` unit runs `strillix
 reload`, which syncs its widget bodies back into `run/qml/rices/<rice>/`.
 `hyprland.conf` is owned by
@@ -169,7 +169,7 @@ an in-process Hyprland global shortcut the panel itself registers
 The rest are registry-only or painted only by a rice that ships the face:
 
 - **`osd`** — a stand-down declaration against [[Stylix]]
-  (`aoide.surfaces.<name>.owner = "quickshell"` tells Stylix not to theme its
+  (`strillix.surfaces.<name>.owner = "quickshell"` tells Stylix not to theme its
   own equivalent target) with no lane or rice QML implementing the surface.
 - **`lockscreen`**, **`greeter`** — painted only by a rice that ships the face
   (`widgets/lockscreen.qml`, `widgets/greeter.qml`). The lock is the shell's
@@ -263,7 +263,7 @@ bound to `Quickshell.screens` or to the focused monitor re-homes by itself
 when the screen list comes back, and only an unbound singleton stays lost.
 
 **`aoide-quickshell-healthcheck.timer`**
-(`modules/dendrites/strillix/runtime.nix`, gated on `aoide.strillix.enable`) is
+(`modules/dendrites/strillix/runtime.nix`, gated on `strillix.enable`) is
 the live watchdog: a oneshot `systemd.user.service` running `strx quickshell
 healthcheck` (`pkgs/aoide/crates/strillix-rice/src/health.rs`, [[Meta-and-Upkeep]])
 20s after the session comes up and every 15s thereafter.
@@ -275,7 +275,7 @@ desktop.
 
 The check asks two independent signals, in order, and they answer different
 questions. `hyprctl layers -j` is compared against what the active rice
-DECLARED should be painted — `aoide.layout.surfaces`, published by the
+DECLARED should be painted — `strillix.layout.surfaces`, published by the
 lane's build as `run/qml/rices/surfaces.json` (CONTRACTS.md §5): each
 declared `aoide-<slot>` namespace must be mapped on every enabled output
 when it is `perMonitor`, and at least once otherwise. A declared surface
@@ -330,7 +330,7 @@ fix; no QML-side fix is possible for the reason above.
 **The wallpaper engine *is* this shell.** The wallpaper is a
 `wlr-layer-shell` `Background` surface (`AoideWallpaper.qml` inside `shell.qml`),
 the sole live painter (Stylix's `hyprpaper` is force-disabled via the
-`aoide.surfaces.wallpaper` owner registry; no `swww`/`swaybg`/`mpvpaper`
+`strillix.surfaces.wallpaper` owner registry; no `swww`/`swaybg`/`mpvpaper`
 elsewhere). So a shell crash takes the wallpaper *and* the bar/dock/gadgets with
 it in one stroke — they are one process, not four. The wallpaper's own
 source-of-truth is the live-watched `stage/wallpaper.json` (written by `strx rice

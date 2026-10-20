@@ -49,7 +49,7 @@ deployed — no second implementation to drift, and no subset that a rice's
 `packages` is per rice and CLOSED UNDER BORROWS: a rice whose slot borrows
 another rice's body needs that lender's packages too (`lib/rices.nix`'s
 `builtIn`), which is exactly the arithmetic the host's `builtin.json.packages`
-carries — the two sides of `aoide rice stage`'s needs-check.
+carries — the two sides of `strx rice stage`'s needs-check.
 
 ## What a derivation reads — the part that is not tidiness
 
@@ -73,5 +73,5 @@ build in moved that host's system. Now it is true only of the rices it ships.
 - the flake's `packages.strillix-rices`, for a consumer that wants the whole
   rices without a host;
 - `strx rice compose` / `strillix-rice::widgets`'s regeneration,
-  `strx onboard`, and `aoide rice stage`'s needs-check — all of them on a
+  `strx onboard`, and `strx rice stage`'s needs-check — all of them on a
   machine with no checkout and no flake.

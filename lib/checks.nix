@@ -1011,7 +1011,7 @@ let
       ''
         export XDG_CACHE_HOME="$TMPDIR/cache" HOME="$TMPDIR"
         # A copy that shares no directory with any checkout — the shape a
-        # machine's own `$AOIDE_ROOT/rices` has.
+        # machine's own `$STRILLIX_ROOT/rices` has.
         mkdir -p "$TMPDIR/relocated"
         cp -r "$ricesCopy"/. "$TMPDIR/relocated"/
         in_repo=$(${

@@ -12,7 +12,7 @@
 //! Missing semantic tokens retain ANSI fallbacks; focused tabs use role fills,
 //! while inactive selections keep subdued foreground/background-derived shades.
 
-use crate::app::{is_done, Palette};
+use crate::app::is_done;
 use aoide_conduct::graph::SessionRecord;
 use ratatui::style::{Color, Modifier, Style};
 
@@ -80,116 +80,29 @@ pub fn mark(m: Mark) -> &'static str {
     }
 }
 
-pub fn role_color(pal: &Palette, role: Role) -> Color {
-    let (slot, fallback) = match role {
-        Role::Project => (13, Color::Blue),
-        Role::Agent => (14, Color::Magenta),
-        Role::Terminal => (12, Color::Cyan),
-        Role::Mail => (9, Color::Yellow),
-        Role::Host => (15, Color::LightRed),
-        Role::History => (3, Color::DarkGray),
-        Role::Success => (11, Color::Green),
-        Role::Warning => (10, Color::Yellow),
-        Role::Error => (8, Color::Red),
-        Role::Muted => (4, Color::DarkGray),
-    };
-    pal.base16[slot]
-        .map(|(r, g, b)| Color::Rgb(r, g, b))
-        .or_else(|| {
-            if matches!(role, Role::Error) {
-                pal.urgent_rgb
-                    .map(|(r, g, b)| Color::Rgb(r, g, b))
-                    .or_else(|| opt_color(pal.urgent))
-            } else {
-                None
-            }
-        })
-        .unwrap_or(fallback)
+pub fn role_color(role: Role) -> Color {
+    match role {
+        Role::Project => Color::Blue,
+        Role::Agent => Color::Magenta,
+        Role::Terminal => Color::Cyan,
+        Role::Mail => Color::Yellow,
+        Role::Host => Color::LightRed,
+        Role::History => Color::DarkGray,
+        Role::Success => Color::Green,
+        Role::Warning => Color::Yellow,
+        Role::Error => Color::Red,
+        Role::Muted => Color::DarkGray,
+    }
 }
 
 /// Only the keyboard-focused selection receives a bright semantic fill.
-pub fn tab_style(pal: &Palette, role: Role, selected: bool, focused: bool) -> Style {
-    let hue = role_color(pal, role);
+pub fn tab_style(role: Role, selected: bool, focused: bool) -> Style {
+    let hue = role_color(role);
     if selected && focused {
-        let (r, g, b) = match hue {
-            Color::Rgb(r, g, b) => (r, g, b),
-            Color::Indexed(i) => rgb(i),
-            _ => {
-                return Style::default()
-                    .fg(Color::Black)
-                    .bg(hue)
-                    .add_modifier(Modifier::BOLD)
-            }
-        };
-        let luminance = u32::from(r) * 299 + u32::from(g) * 587 + u32::from(b) * 114;
-        let candidates = [pal.bg_rgb.or(pal.base16[0]), pal.fg_rgb.or(pal.base16[5])];
-        let ink = candidates
-            .into_iter()
-            .flatten()
-            .max_by_key(|&(r, g, b)| {
-                luminance.abs_diff(u32::from(r) * 299 + u32::from(g) * 587 + u32::from(b) * 114)
-            })
-            .map(|(r, g, b)| Color::Rgb(r, g, b))
-            .unwrap_or(if luminance >= 128000 {
-                Color::Black
-            } else {
-                Color::White
-            });
-        Style::default()
-            .fg(ink)
-            .bg(hue)
-            .add_modifier(Modifier::BOLD)
+        Style::default().fg(Color::Black).bg(hue).add_modifier(Modifier::BOLD)
     } else {
-        surface(pal, if selected { 12 } else { 4 }).fg(hue)
+        Style::default().fg(hue)
     }
-}
-
-fn rgb(index: u8) -> (u8, u8, u8) {
-    const BASIC: [(u8, u8, u8); 16] = [
-        (0, 0, 0),
-        (128, 0, 0),
-        (0, 128, 0),
-        (128, 128, 0),
-        (0, 0, 128),
-        (128, 0, 128),
-        (0, 128, 128),
-        (192, 192, 192),
-        (128, 128, 128),
-        (255, 0, 0),
-        (0, 255, 0),
-        (255, 255, 0),
-        (0, 0, 255),
-        (255, 0, 255),
-        (0, 255, 255),
-        (255, 255, 255),
-    ];
-    if index < 16 {
-        return BASIC[index as usize];
-    }
-    if index >= 232 {
-        let c = 8 + (index - 232) * 10;
-        return (c, c, c);
-    }
-    let n = index - 16;
-    let v = |x: u8| if x == 0 { 0 } else { 55 + x * 40 };
-    (v(n / 36), v((n / 6) % 6), v(n % 6))
-}
-/// Surface shades derive from the same foreground/background, in either light or dark theme.
-pub fn surface(pal: &Palette, amount: u16) -> Style {
-    let mut style = Style::default();
-    if let Some((r, g, b)) = pal.fg_rgb.or_else(|| pal.fg.map(rgb)) {
-        style = style.fg(Color::Rgb(r, g, b));
-    }
-    if let (Some((a, b, c)), Some((x, y, z))) = (
-        pal.bg_rgb.or_else(|| pal.bg.map(rgb)),
-        pal.fg_rgb.or_else(|| pal.fg.map(rgb)),
-    ) {
-        let mix = |a: u8, b: u8| {
-            ((u16::from(a) * (100 - amount.min(100)) + u16::from(b) * amount.min(100)) / 100) as u8
-        };
-        style = style.bg(Color::Rgb(mix(a, x), mix(b, y), mix(c, z)));
-    }
-    style
 }
 
 /// Clef-tail end-cap ornament — verbatim from `GadgetFrame.qml` / `AoideBar.qml`.
@@ -197,38 +110,16 @@ pub const END_CAP: &str = "ৎ𝄢";
 /// Short stave-run divider — verbatim from `AoideBar.qml` / `PowerGadget.qml`.
 pub const DIVIDER: &str = "𝄂𝄚𝅦𝄚";
 
-/// A palette index → ratatui colour (none → inherit the terminal).
-pub fn opt_color(idx: Option<u8>) -> Option<Color> {
-    idx.map(Color::Indexed)
-}
-
-/// The accent colour: the palette's, or `None` to inherit (the brand header /
-/// frame borders use this and simply stay uncoloured on a paletteless rig).
-pub fn accent(pal: &Palette) -> Option<Color> {
-    pal.accent_rgb
-        .map(|(r, g, b)| Color::Rgb(r, g, b))
-        .or_else(|| opt_color(pal.accent))
-}
-
-/// A `Style` foreground-tinted with the accent when present (else unchanged).
-pub fn accent_style(pal: &Palette) -> Style {
-    match accent(pal) {
-        Some(c) => Style::default().fg(c),
-        None => Style::default(),
-    }
-}
-
 /// Secondary text keeps terminal contrast; terminal DIM can erase light-palette text.
 pub fn dim() -> Style {
     Style::default()
 }
 
-/// Text that is a cache or a stale fact: the palette's muted hue (base03,
-/// dark grey without a palette) as the foreground — the one way this
-/// frontend "dims", since the terminal's DIM attribute can erase text on a
-/// light palette.
-pub fn muted(pal: &Palette) -> Style {
-    Style::default().fg(role_color(pal, Role::Muted))
+/// Text that is a cache or a stale fact: the muted hue as the foreground — the
+/// one way this frontend "dims", since the terminal's DIM attribute can erase
+/// text on a light palette.
+pub fn muted() -> Style {
+    Style::default().fg(role_color(Role::Muted))
 }
 
 // ── Session state → glyph + colour ──────────────────────────────────────────
@@ -289,16 +180,16 @@ pub fn state_glyph(state: &str) -> &'static str {
     }
 }
 
-/// The colour that partners the glyph — green working, the palette's urgent hue
-/// (yellow fallback) for an awaiting/blocked session that needs a human, blue
-/// stopped (warm, just finished), cyan idle, dim done, inherit for the unknown.
-pub fn state_style(state: &str, pal: &Palette) -> Style {
+/// The colour that partners the glyph — green working, yellow for an awaiting
+/// or blocked session that needs a human, blue stopped (warm, just finished),
+/// cyan idle, dim done, inherit for the unknown.
+pub fn state_style(state: &str) -> Style {
     match classify(state) {
-        StateClass::Working => Style::default().fg(role_color(pal, Role::Success)),
-        StateClass::Awaiting => Style::default().fg(role_color(pal, Role::Warning)),
-        StateClass::Stopped => Style::default().fg(role_color(pal, Role::Project)),
-        StateClass::Idle => Style::default().fg(role_color(pal, Role::Terminal)),
-        StateClass::Done => Style::default().fg(role_color(pal, Role::Muted)),
+        StateClass::Working => Style::default().fg(role_color(Role::Success)),
+        StateClass::Awaiting => Style::default().fg(role_color(Role::Warning)),
+        StateClass::Stopped => Style::default().fg(role_color(Role::Project)),
+        StateClass::Idle => Style::default().fg(role_color(Role::Terminal)),
+        StateClass::Done => Style::default().fg(role_color(Role::Muted)),
         StateClass::Unknown => Style::default(),
     }
 }
@@ -466,22 +357,13 @@ mod tests {
     use serde_json::Map;
 
     #[test]
-    fn semantic_tokens_and_focus_preserve_theme() {
-        let mut pal = Palette::default();
-        pal.base16[13] = Some((31, 62, 93));
-        pal.base16[11] = Some((41, 82, 123));
-        pal.bg_rgb = Some((240, 230, 220));
-        pal.fg_rgb = Some((20, 30, 40));
-        assert_eq!(role_color(&pal, Role::Project), Color::Rgb(31, 62, 93));
-        assert_eq!(
-            state_style("working", &pal).fg,
-            Some(Color::Rgb(41, 82, 123))
-        );
-        let active = tab_style(&pal, Role::Project, true, true);
-        assert_eq!(active.bg, Some(Color::Rgb(31, 62, 93)));
-        assert_eq!(active.fg, Some(Color::Rgb(240, 230, 220)));
-        assert_ne!(tab_style(&pal, Role::Project, true, false).bg, active.bg);
-        assert_eq!(role_color(&Palette::default(), Role::Agent), Color::Magenta);
+    fn semantic_hues_are_the_ansi_base_and_focus_fills_the_tab() {
+        assert_eq!(role_color(Role::Agent), Color::Magenta);
+        assert_eq!(state_style("working").fg, Some(Color::Green));
+        let active = tab_style(Role::Project, true, true);
+        assert_eq!(active.bg, Some(Color::Blue));
+        assert_eq!(active.fg, Some(Color::Black));
+        assert_eq!(tab_style(Role::Project, true, false).bg, None);
     }
 
     fn rec_with_tags(tags: serde_json::Value) -> SessionRecord {

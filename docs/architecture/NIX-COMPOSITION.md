@@ -627,7 +627,7 @@ a host names the rices it builds in in its own module (`habit.rice.declared` /
 aggregation, habit imports only the DECLARED rice's body (it brings the paint:
 the ten component providers and the renderer), and
 `declared ∪ available` — the built-in set, published as
-`aoide.rices.builtIn` — decides the widgets copied into the deployed tree,
+`strillix.rices.builtIn` — decides the widgets copied into the deployed tree,
 the packages installed, the folders `pkgs/strillix-rices` ships for that host,
 and the `builtin.json` the runtime compares a staged rice's needs against.
 `~/.aoide/rices` belongs to the MACHINE: it is seeded from that baseline

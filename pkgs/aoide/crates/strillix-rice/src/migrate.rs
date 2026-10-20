@@ -603,7 +603,7 @@ mod tests {
     }
 
     #[test]
-    fn rice_state_in_both_roots_moves_nothing_and_is_refused_without_error() {
+    fn rice_state_in_both_roots_moves_nothing_and_is_refused_as_an_error() {
         let _guard = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _env = MigrationEnvGuard::capture_and_clear();
         let base = rice_roots("both");

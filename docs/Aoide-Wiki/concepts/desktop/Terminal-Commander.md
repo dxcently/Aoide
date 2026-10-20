@@ -149,7 +149,7 @@ so the widget need only *tell the bar which workspace to preview* — no
   tint on the note), deliberately a *different kind* of mark from the true active
   workspace's warm-accent swell + filled pill. Both can show at once: if the
   hovered terminal is on the active workspace, the ring simply frames the accent
-  pill. All colour comes from [[theme]] (`aoide.theme` roles) — no
+  pill. All colour comes from [[theme]] (`strillix.theme` roles) — no
   hardcoded hex.
 - If a session's window/workspace is not yet resolved (or it is off-screen), its
   `workspace` is `-1` and hovering the row simply highlights nothing — no error.

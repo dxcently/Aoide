@@ -146,7 +146,7 @@ pub fn render_rice_nix(name: &str, from: &str, notes: &Value) -> String {
 
     let mut s = String::new();
     s.push_str(&format!(
-        "# rices/{name}/rice.nix — scaffolded via `aoide rice compose` from rice \"{from}\".\n"
+        "# rices/{name}/rice.nix — scaffolded via `strillix rice compose` from rice \"{from}\".\n"
     ));
     s.push_str("#\n");
     s.push_str("# A body (CONTRACTS.md §5): habit reads it only when this rice is performed\n");
@@ -210,7 +210,7 @@ pub fn render_intent_md(name: &str, from: &str) -> String {
          \n\
          ## Palette Rationale\n\
          \n\
-         (not yet written — this rice was scaffolded from `{from}` via `aoide rice compose`, not designed)\n\
+         (not yet written — this rice was scaffolded from `{from}` via `strillix rice compose`, not designed)\n\
          \n\
          ## Component Tier\n\
          \n\

@@ -96,7 +96,7 @@ crates/strillix-rice/src/
                              # `run_lint` becomes a thin call into theme::lint
   live.rs                    # unchanged (already the effectful hyprctl seam)
   commands/rice.rs           # `rice lint` → theme::lint (native); preview uses theme::emit
-  commands/theme.rs         # NEW: `aoide theme emit|resolve|lint` command group
+  commands/theme.rs         # NEW: `strx theme emit|resolve|lint` command group
 ```
 
 ### 1.2 The emitter registry (additive backend design)
@@ -196,8 +196,8 @@ directive: *there is no engine capability that cannot become native Rust.*
 > naming the new reach: the
 > venue's every instrument now performs the rice's theme. It is plain,
 > grep-clean (no hit anywhere in-tree, no collision with the live `mneme`/
-> `melete` servers), and reads right at every site: `aoide.theme.palette`, a
-> rice's `theme.json`, `aoide theme emit hyprctl`.
+> `melete` servers), and reads right at every site: `strillix.theme.palette`, a
+> rice's `theme.json`, `strx theme emit hyprctl`.
 
 Greek alternative on record for §7: **`kosmos`** (κόσμος — "adornment + order",
 the root of *cosmetic*): more on-Pantheon, but abstract and grander than the
@@ -217,14 +217,14 @@ and edited, not the tree's present layout.
 **Code — Rust (`pkgs/aoide/crates/`)**
 - `rice/src/notes.rs` — drop the binary-locate env var/PATH lookup + `run_lint` shell-out (becomes native call).
 - `rice/src/commands/rice.rs` — `rice lint` summary + delegate; `handle_rice_preview` stage-file constant; test strings/fixtures.
-- `rice/src/mint.rs` — renders the option tier under its new `aoide.theme.<tier>` path; scaffolds `theme.json`; comment text.
+- `rice/src/mint.rs` — renders the option tier under its new `strillix.theme.<tier>` path; scaffolds `theme.json`; comment text.
 - `rice/src/commands/theme.rs` — **new** command group.
 - `storage/src/fs.rs` — `rices_notes()` → `…/theme.json`; test paths (`fs.rs:105,373,379`).
 - `storage/src/design.rs:98` — `sources: vec!["stage/theme.json"]`.
 - `conductor/src/app.rs:288,295,362,382` — stage reader path → `theme.json` (dual-read, §2.3).
 - `conductor/src/theme.rs:11` — comment.
 - `conduct/src/graph/manage.rs:321` — comment ("mirrors the `theme emit stage` pattern").
-- `cli/src/guide.rs:106` — house-rule #5 text (`aoide.theme`).
+- `cli/src/guide.rs:106` — house-rule #5 text (`strillix.theme`).
 - `cli/tests/conductor_integration.rs:57,89,92` + `cli/tests/fixtures/seed.sh` — stage fixture filename + assertion text.
 - `cli/src/registry.rs` — golden command-path snapshot (updates when `theme.*` commands land).
 
@@ -241,15 +241,15 @@ and edited, not the tree's present layout.
 **Data / rices**
 - `rices/default/theme.json` — renamed from the old engine-named JSON.
 - `rices/sonata/theme.json` — same rename.
-- `rices/default/rice.nix`, `rices/sonata/rice.nix` — setters repointed to `aoide.theme.*`.
+- `rices/default/rice.nix`, `rices/sonata/rice.nix` — setters repointed to `strillix.theme.*`.
 - `rices/update-playbook.md` — add migration note (§6).
 
 **Live contract — QML (`modules/facets/quickshell/qml/`)**
 - The state singleton — `notePath` (legacy stage path → `stage/theme.json`, dual-read §2.3). Optional file rename → `ThemeState.qml` (updates ~12 QML importers: `shell.qml`, `AoideBar.qml`, `NotificationCard.qml`, `GrimoireLedger.qml`, `MoodFaces.qml`, `WorkspaceRow.qml`, `UsageGadget.qml`, `ConductorPreview.qml`, `TerminalsPreview.qml`, `StagingEngine.qml`, `slots.md`). **Recommendation: rename the singleton file too** (an old-named state singleton in a theme world is exactly the drift khoa is removing) — but this is the widest-blast edit; see §7 for the "how far does the QML rename go" decision.
 
 **Contracts / docs / wiki**
-- `CONTRACTS.md` §1 (note schema — option namespace now `aoide.theme`), §4 (stage file now `stage/theme.json`), §5 (rice shape — "a rice sets ONLY `aoide.theme`").
-- `AGENTS.md` house-rule #5 ("Facets read only `aoide.theme`").
+- `CONTRACTS.md` §1 (note schema — option namespace now `strillix.theme`), §4 (stage file now `stage/theme.json`), §5 (rice shape — "a rice sets ONLY `strillix.theme`").
+- `AGENTS.md` house-rule #5 ("Facets read only `strillix.theme`").
 - `README.md` (the note-engine section retitled theme; the pkgs tree line; the facet-read lines; the CLI table).
 - `docs/architecture/PACKAGE-LAYOUT.md` (rice charter mentions the engine), `docs/BUILD.md`, `docs/architecture/aoide-report.html`.
 - Wiki: the engine's entity page becomes `theme.md`, and ~28 pages that mention the engine (Codebase, Self-Ricing, Rice-Anatomy, Rice-Vocabulary, Ricing-Protocol, Lexicon, SCHEMA, Full-Architecture, Snowflake-Anatomy, Widget-Bridge-Contract, Stylix, Quickshell, Gadget-Dock, Feature-Set, Widget-Maker, AOIDE-DEV §7, etc.). Delegated to the librarian per AOIDE-DEV §6.
@@ -280,7 +280,7 @@ new reader starts before any new write). The solid path:
   restarted) keeps rendering after a new `rice preview`.
 - **Nix option namespace** needs no runtime compat (everything rebuilds
   atomically), but add a `mkRenamedOptionModule` alias from the old
-  engine-named namespace to `aoide.theme` in `modules/nucleus/options.nix`
+  engine-named namespace to `strillix.theme` in `modules/nucleus/options.nix`
   so an out-of-tree host set (or a stale `rices/*/rice.nix`
   mid-migration) still evaluates during the transition. Drop the alias in
   Phase 4.
@@ -429,7 +429,7 @@ package remains present but aoide stops calling it.
 
 **Phase 1 exit gate:** `cargo test --workspace`; `nix build .#pkg-aoide`;
 `nix build .#nixosConfigurations.yomi-strix.config.system.build.toplevel
---no-link`; `aoide rice preview sonata` still stages the legacy stage file
+--no-link`; `strx rice stage sonata` still stages the legacy stage file
 byte-for-byte as before (live desktop hot-reloads identically). The standalone
 Node package untouched and still builds — it is now dead weight,
 removed next phase.
@@ -466,17 +466,17 @@ quickshell facet; a half-applied rename breaks eval/build). Only Step 3.4
 
 **Step 3.1 — Nix option namespace + all readers + rices `rice.nix` +
 mint renderer (ATOMIC — keeps `toplevel` eval green).** [SERIAL]
-- Owns: `modules/nucleus/options.nix` (namespace renamed `aoide.theme`; add a
+- Owns: `modules/nucleus/options.nix` (namespace renamed `strillix.theme`; add a
   `mkRenamedOptionModule` alias from the old namespace);
   `modules/facets/quickshell/default.nix`,
   `modules/facets/stylix/default.nix`, `modules/facets/compositor/default.nix`
   (`t = config.aoide.theme`; comments); `rices/default/rice.nix`,
-  `rices/sonata/rice.nix` (setters repointed to `aoide.theme.*`);
-  `crates/strillix-rice/src/mint.rs` (renders `aoide.theme.<tier>`; comment text);
+  `rices/sonata/rice.nix` (setters repointed to `strillix.theme.*`);
+  `crates/strillix-rice/src/mint.rs` (renders `strillix.theme.<tier>`; comment text);
   `hosts/yomi-strix/default.nix` (rename iff it sets the old namespace).
 - Accept: `nix build .#nixosConfigurations.yomi-strix…toplevel --no-link` green;
   `nixfmt --check` on every changed `.nix`; `cargo test -p strillix-rice mint`
-  (mint renders `aoide.theme`); a note file set via the `mkRenamedOptionModule`
+  (mint renders `strillix.theme`); a note file set via the `mkRenamedOptionModule`
   alias still evaluates (transition safety).
 
 **Step 3.2 — rices data files + the code that resolves them (ATOMIC).**
@@ -508,7 +508,7 @@ mint renderer (ATOMIC — keeps `toplevel` eval green).** [SERIAL]
   follow-up** to keep this desktop-critical step's blast radius small; rename
   only the *path constant* here.
 - Accept: `cargo test --workspace`; `qs -p
-  modules/facets/quickshell/qml/shell.qml` loads clean; `aoide rice preview
+  modules/facets/quickshell/qml/shell.qml` loads clean; `strx rice stage
   sonata` writes BOTH `stage/theme.json` and the legacy mirror, both
   parse; a conductor launched reading only the legacy file still colours (manual
   smoke); **khoa live vision-check** on the switched desktop (Ricing-Protocol,

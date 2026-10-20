@@ -137,7 +137,7 @@ projects/log/status panels) are the DAG's renderers. On the desktop, the
 instead — a beamed tree of agent/sub-agent sessions, not a literal node/edge
 diagram (field contract: [[Widget-Bridge-Contract]]).
 
-The `aoide.surfaces.sessionGraph` owner-registry entry
+The `strillix.surfaces.sessionGraph` owner-registry entry
 (`modules/dendrites/strillix/runtime.nix`) is still declared, but no QML file
 backs it — the standalone overlay (`AoideSessionGraph.qml` + `GraphRow.qml`)
 and the shared `GraphModel.qml` it and the dock's DAG gadget instantiated

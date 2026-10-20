@@ -83,7 +83,7 @@ for the steward especially):**
 | `tui` (terminal UI library) | **`conductor`** | aoide already has its TUI: `conductor/` (app/ui/graphview/theme). It doubles as the control surface for the steward. |
 | `coding-agent` (the concrete app) | **`cli`** | the `aoide`/`aoided` bins + `commands/` that wire every crate into the two shipped binaries. |
 | *(none)* | **`conduct`** | aoide-unique: the PTY multiplexer + session DAG + hook plumbing. The core that makes every terminal a tracked, conductable session. |
-| *(none)* | **`rice`** | aoide-unique: the ricing / design engine (notes → theme, rices, stage, the Pantheon design language). |
+| *(none)* | **`strillix-rice`** | Strillix's: the ricing / design engine (notes → theme, rices, stage, the Pantheon design language). |
 | *(none)* | **`management`** | aoide-unique: the privileged **hands** — rebuild/switch, `rice mint`, hypr control, service/daemon ops, sudo-tracking. |
 
 **Two additions beyond a literal port, both driven by this request:**
@@ -331,13 +331,11 @@ this is structure, not features.
   snapshot unchanged, full `cargo test --workspace` green. (No Phase 7/8
   code; Phase 9 numbers after them to keep their DEFER notes stable.)
 
-## Two binaries — `aoide`/`aoided` (core) and `strillix` (paint) — LANDED (Workstream A, P-A0-A8)
+## Two binaries — `aoide`/`aoided` (core) and `strillix` (the OS's paint)
 
 The mapping above is the crate split; this is a narrower, later question it
 doesn't answer on its own — how many *binaries* the crates assemble into.
-**Decided: two.** Recorded here now, ahead of any crate move, so the
-reasoning is fixed before code follows it (Workstream A, phase P-A0 of
-`functional-singing-boole.md`).
+**Two.** The reasoning is recorded here so that the code keeps to it.
 
 Core keeps `aoide`/`aoided` over `protocol` · `storage` · `client` ·
 `conduct` · `server` · `secrets` · `conductor` · `upkeep` · `cli`. A second binary —
@@ -383,7 +381,7 @@ surface: everything that paints, or that only a desktop needs.
   `github.com/deepseek-ai/deepseek-harness`, the repo behind the Cordis
   paper CONTRACTS §0 already cites.
 - **Nix-independence.** Core (`aoide`/`aoided`) builds with `cargo` and
-  runs on any Linux: no nix shell-outs, no NixOS assumption. `rice`'s
+  runs on any Linux: no nix shell-outs, no NixOS assumption. `strillix-rice`'s
   `widgets.rs` `nix eval` call lives in `strillix` now — only `strillix` may be
   nix-dependent. This is the load-bearing half of "What Aoide is" above,
   made structural rather than aspirational.
@@ -401,13 +399,13 @@ surface: everything that paints, or that only a desktop needs.
   interpreter and no reference to a nix store. Reachable as
   `packages.<system>.aoide-static` and the `pkg-aoide-static` check, never
   as `packages.default` — NixOS hosts keep the dynamic multi-output build
-  `aoide.strillix.enable` depends on.
+  `strillix.enable` depends on.
 - **The shell SOURCE is a package, not a crate — `pkgs/strillix-shell`.** The QML
   tree, the resolved icons and the preview fixture sets a shell is generated
   from live in the ROOT repo (`pkgs/strillix-shell/{qml,icons,preview}`) and ship
   verbatim as `${pkgs.strillix-shell}/share/strillix/{qml,icons,preview}`. Plain
   source: it runs nothing and names no config, so it is not a shell — the
-  directory a shell runs is `aoide.quickshell.config`, and what fills it is a
+  directory a shell runs is `strillix.quickshell.config`, and what fills it is a
   rice's business. Core cannot read it (this flake is rooted at `pkgs/aoide`
   and never walks the root repo), and `strillix` reads the CHECKOUT's copy rather
   than the store path, naming it once as
@@ -657,13 +655,13 @@ registry.catalogue = removeAttrs aoide.lib.catalogue [ "bar" ] // slots;
   `extraModulesFor`.
 - **Value slots need habit >= 0.4.0.** A provider set written inline in a
   catalogue entry is what habit's value-slot support reads.
-- **A rice is registered by the hook, not merged.** `aoide.rices` names each
+- **A rice is registered by the hook, not merged.** `strillix.rices` names each
   committed rice's aggregation body. The hook over the SAME rices already
-  registers those bodies under their names. Merging `aoide.rices` into the
+  registers those bodies under their names. Merging `strillix.rices` into the
   registry a second time is a name collision, and the hook refuses it.
 - **Which part answered.** habit's inventory names a value slot's source as the
   slot itself (`<value 'dock'>`), not the file. The part that answered is read
-  from the record its file writes: `aoide.components.<slot>.provider`.
+  from the record its file writes: `strillix.components.<slot>.provider`.
 
 The proof is `tests/consumer/` (`front` checks in `run.sh`): a host mixes a
 consumer's `bar` with Aoide's `dock`, and two throw-on-read stubs are never

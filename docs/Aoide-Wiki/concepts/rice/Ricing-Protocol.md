@@ -34,7 +34,7 @@ prompt, a mood) is a *different job* from **application** (fanning that
 scheme out to every surface that reads it). Conflating them is how a rice
 job ends up hard-coding colours in six different files that drift apart.
 
-- **Creation** happens once, in the rice's `rice.nix`, as `aoide.theme.base16`
+- **Creation** happens once, in the rice's `rice.nix`, as `strillix.theme.base16`
   — sixteen literal hex slots (base00–base0F) plus the small `palette`
   convenience block (bg/fg/accent/urgent/hot). The **`sonata`** rice
   (`rices/sonata/rice.nix`) is the worked example — the LIGHT dusk
@@ -59,7 +59,7 @@ job ends up hard-coding colours in six different files that drift apart.
   same theme values fan out through `stage/theme.json` — one runtime read,
   every QML surface. **No other file hard-codes a colour available from
   theme.** A dendrite that wants a colour reads
-  `aoide.theme.*`; it never writes its own hex.
+  `strillix.theme.*`; it never writes its own hex.
 
 The point of the split: creation is where taste and vision-checking live
 (this section, below); application is mechanical and never needs re-deriving
@@ -101,7 +101,7 @@ loop). Two things to look at, side by side, on the live desktop:
    notification/OSD cards, workspace highlight) sets `radius: 0`. No surface
    rounds; a stray rounded corner reads as a surface that missed the grammar.
 2. **Widget colours match the bar.** Every gadget, popout, and dock surface
-   pulls from the same `aoide.theme.*` roles the bar uses (the house
+   pulls from the same `strillix.theme.*` roles the bar uses (the house
    grammar's glyph/role palette, recorded historically in the retired
    `default` rice's design memory — now `references/pantheon/pantheon-grammar.md`
    — see [[Rice-Anatomy]] — `wireCyan`, `holoBlue`, `violet`, `glitchPink`,

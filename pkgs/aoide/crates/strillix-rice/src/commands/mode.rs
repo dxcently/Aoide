@@ -485,7 +485,7 @@ fn handle_mode_draft(inv: &Invocation) -> Outcome {
     if existing.mode == RiceMode::Declarative {
         return Outcome::error(
             "rice.mode.draft",
-            "declarative mode is locked — run `aoide rice mode stage` to unlock hot-loading first",
+            "declarative mode is locked — run `strillix rice mode stage` to unlock hot-loading first",
         )
         .with_data(json!({ "reason": "declarative-mode-locked" }));
     }
@@ -495,7 +495,7 @@ fn handle_mode_draft(inv: &Invocation) -> Outcome {
         None => {
             return Outcome::usage(
                 "rice.mode.draft",
-                "usage: aoide rice mode draft <name> [--json]",
+                "usage: strillix rice mode draft <name> [--json]",
             )
             .with_data(json!({ "reason": "missing-name" }));
         }
@@ -517,7 +517,7 @@ fn handle_mode_draft(inv: &Invocation) -> Outcome {
             return Outcome::error(
                 "rice.mode.draft",
                 "no rice is currently staged — nothing to fork a draft from \
-                 (stage a rice first: `aoide rice stage <name>` or `aoide rice mode stage <name>`)",
+                 (stage a rice first: `strillix rice stage <name>` or `strillix rice mode stage <name>`)",
             )
             .with_data(json!({ "reason": "no-resolvable-rice" }));
         }

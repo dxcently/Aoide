@@ -1,7 +1,7 @@
 //! The conductor's core: live state, selection, and the dispatch plumbing.
 //!
 //! [`App`] is pi's "core" — it holds the world (projects/sessions/hooks loaded
-//! from the stage tree, the audit tail, the palette) and the interaction state
+//! from the stage tree and the audit tail) and the interaction state
 //! (which panel, which row, any inline input, the last dispatched
 //! [`Outcome`](aoide_protocol::output::Outcome)). It draws nothing; it hands panels the
 //! data and composes their rendered lines into a [`Frame`].
@@ -76,21 +76,6 @@ impl Panel {
     pub fn index(self) -> usize {
         Panel::ALL.iter().position(|p| *p == self).unwrap_or(0)
     }
-}
-
-/// The colours the conductor paints with. Every slot is optional: an unset slot
-/// takes the terminal's own ANSI 16 base.
-#[derive(Debug, Clone, Default)]
-pub struct Palette {
-    pub base16: [Option<(u8, u8, u8)>; 16],
-    pub urgent_rgb: Option<(u8, u8, u8)>,
-    pub bg_rgb: Option<(u8, u8, u8)>,
-    pub fg_rgb: Option<(u8, u8, u8)>,
-    pub accent_rgb: Option<(u8, u8, u8)>,
-    pub bg: Option<u8>,
-    pub fg: Option<u8>,
-    pub accent: Option<u8>,
-    pub urgent: Option<u8>,
 }
 
 /// One decoded audit-log line (the flat event feed the LOG panel tails).
@@ -980,7 +965,6 @@ pub struct App {
     pub log_sel: usize,
     pub log_scroll: u16,
     pub log_error: Option<String>,
-    pub palette: Palette,
     /// The last dispatched action's outcome — drives the status line.
     pub last_outcome: Option<Outcome>,
     /// Any active inline prompt.
@@ -1146,7 +1130,6 @@ impl App {
             log_sel: 0,
             log_scroll: 0,
             log_error: None,
-            palette: Palette::default(),
             last_outcome: None,
             input: None,
             context_menu: None,
@@ -8109,10 +8092,9 @@ mod tests {
     }
 
     /// The Status pane's environment block is exactly as tall as the geometry
-    /// reserves, and its last line is painted: the palette summary was the line
-    /// a hand-counted split clipped.
+    /// reserves, and the list starts below it.
     #[test]
-    fn status_env_geometry_is_exact_and_the_palette_line_is_painted() {
+    fn status_env_geometry_is_exact() {
         let _g = T1_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let mut app = t1_app();
         app.panel = Panel::Status;
@@ -8130,10 +8112,6 @@ mod tests {
         let mut term = ratatui::Terminal::new(backend).unwrap();
         term.draw(|f| crate::board::draw(f, &app)).unwrap();
         let text = dump_cells(term.backend().buffer());
-        assert!(
-            text.contains("palette"),
-            "the block's last line reaches the screen: {text}"
-        );
         assert!(
             text.contains("── config"),
             "and the list still begins below it: {text}"

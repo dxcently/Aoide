@@ -22,14 +22,14 @@ by being added to a list.
   their directories' own shallow scans ([[Codebase#The catalogue, the
   constructor (`lib/`)]], [[Snowflake-Anatomy]]).
 - **Self-gating, not switched from outside.** Each discovered module gates
-  itself on its own `enable`/`aoide.rice`, rather than a parent module
+  itself on its own `enable`/`strillix.rice`, rather than a parent module
   turning it on.
 - **Resolution by name, not by import.** A widget resolves through
   `StagingEngine.resolveRice(rice, slot)` — by slot *name*, falling back to
   sonata — so no host surface ever imports a concrete widget
   ([[Widget-Maker#The staging engine — a rice overrides desktop chrome]]).
-- **A closed, named service set.** Paint lanes read `aoide.theme`,
-  `aoide.layout` and `aoide.surfaces`, plus the core scalars and the rice
+- **A closed, named service set.** Paint lanes read `strillix.theme`,
+  `strillix.layout` and `strillix.surfaces`, plus the core scalars and the rice
   selection root `AGENTS.md` house rule 5 enumerates, and nothing else — a closed
   set of named services,
   never another module's internals.
@@ -45,7 +45,7 @@ adopted as a framework — Aoide's own mechanisms above predate the citation.
 
 - **Spatial composability** — a component declares its dependencies by
   service *name* and waits for them, instead of importing an implementation.
-  Aoide's spatial seam: `aoide.theme`/`aoide.layout`, slot names, the
+  Aoide's spatial seam: `strillix.theme`/`strillix.layout`, slot names, the
   stage files (`CONTRACTS.md` §4), and the `aoide schema --json` tree both
   doors generate from.
 - **Temporal composability** — a component's effects are *revertible*:

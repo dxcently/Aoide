@@ -508,19 +508,19 @@ looked at a screenshot of it. The loop, all verified on yomi-strix:
 ```bash
 # 0. staging must be unlocked, or `rice stage` refuses with
 #    reason "declarative-mode-locked" (the default mode is declarative)
-aoide rice mode status
-aoide rice mode stage sonata
+strx rice mode status
+strx rice mode stage sonata
 
 # 1. push the edited widget bodies into the live runtime tree.
 #    This syncs rices/<rice>/widgets/*.qml -> run/qml/rices/<rice>/
 #    AND auto-triggers a Quickshell IPC reload *when a widget body changed*
 #    (a no-op re-stage deliberately skips the reload).
-aoide rice stage sonata
+strx rice stage sonata
 
 # 2. force a reload yourself when you need one anyway. The command is
 #    `quickshell reload` (renamed from `shell reload` — `shell` collided
 #    with `--agent shell`). No systemd restart; no-ops if qs isn't running.
-aoide quickshell reload
+strillix quickshell reload
 
 # 3. a BRAND-NEW slot file the manifest has never seen needs a real restart:
 systemctl --user restart aoide-quickshell.service

@@ -9,7 +9,7 @@
 //! (the same `cfg!(test)` gate `live::apply_live` carries, for the same reason:
 //! a test that reached a real provider would repaint the operator's desktop).
 //!
-//! The host's choice is the fact `aoide.wallpaper.provider`, which the `strillix`
+//! The host's choice is the fact `strillix.wallpaper.provider`, which the `strillix`
 //! lane publishes as `rice/stage/wallpaper-provider` — one name, in the runtime
 //! root, so the CLI, the QML and this module read the same word. Absent (a host
 //! that never activated the lane) means the shell's own layer.

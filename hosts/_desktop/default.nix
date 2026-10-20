@@ -22,7 +22,7 @@
   # The rice this host performs, and what it additionally builds in. `sonata` is
   # the shipped standard, the guaranteed-present baseline. Any committed rice is
   # reachable from the machine's own rices without a rebuild
-  # (`aoide rice stage <n>`) — `declared` is only what is painted at boot.
+  # (`strillix rice stage <n>`) — `declared` is only what is painted at boot.
   habit.rice.declared = "sonata";
   habit.rice.available = [ ];
 

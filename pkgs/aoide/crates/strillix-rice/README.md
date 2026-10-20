@@ -104,7 +104,7 @@ a config file). Paint-side — ships in `strillix`, not core.
   whatever its load state, is `NotRunning`, reported and never restarted. Its bad-state predicate is
   `surfaces_fall_short` against the declaration published to
   `run/qml/rices/surfaces.json` by the strillix lane's build
-  (`CONTRACTS.md §5`, `aoide.layout.surfaces`), read through
+  (`CONTRACTS.md §5`, `strillix.layout.surfaces`), read through
   `aoide_storage::fs::run_qml_dir` and folded by `asserted_expectation`: an
   absent, unreadable, or EMPTY declaration (the lane publishes the file on
   every host, so every non-declaring rice ships `{"surfaces": {}}`) means no

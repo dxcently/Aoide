@@ -23,7 +23,7 @@
 // core's registry at P-A5 of the binary-split workstream and lives only in
 // `strillix` now (bare name resolves via PATH: modules/dendrites/aoide-packages.nix puts
 // strillix's own droppable output, pkgs.aoide.strillix, on systemPackages whenever
-// aoide.strillix.enable is on — P-A8 — which defaults to true here since this
+// strillix.enable is on — P-A8 — which defaults to true here since this
 // widget only exists under the strillix lane).
 // AoideWallpaper.qml
 // FileView-watches that file and hot-swaps the live wallpaper. No new socket,

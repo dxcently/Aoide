@@ -49,7 +49,7 @@
 # builds in (`lib/rices.nix`'s `builtIn`): a `_server` that performs nothing
 # ships an empty templates dir, and yomi ships sonata's folder and no other.
 # This package is where "built in" stops being an attribute of the host and
-# becomes bytes on disk — the baseline `aoide rice stage` falls back to, and the
+# becomes bytes on disk — the baseline `strillix rice stage` falls back to, and the
 # source `aoideSeedRices` seeds the machine's rices from.
 {
   lib,

@@ -48,7 +48,7 @@ QtObject {
     })
 
     // ── Rice name ───────────────────────────────────────────────────────────
-    // Additive optional field (`aoide rice preview <name>` injects `rice` into
+    // Additive optional field (`strillix rice stage <name>` injects `rice` into
     // the staged theme — dispatch.rs handle_rice_preview) — drives per-rice
     // flavor-widget resolution (the staging engine: StagingEngine.qml /
     // WidgetSlot.qml). Absent (a
@@ -267,7 +267,7 @@ QtObject {
     }
 
     // ── Rice mode — hot-reloaded from stage/mode.json ──────────────────────
-    // `aoide rice mode {stage,declarative,draft}` (storage::mode, RiceMode)
+    // `strillix rice mode {stage,declarative,draft}` (storage::mode, RiceMode)
     // writes this file on every mode change; the background reconciler
     // touches it too. Same FileView-hot-reload idiom as themePath above, kept
     // as a SEPARATE file/watcher: mode.json is a real file the mode commands

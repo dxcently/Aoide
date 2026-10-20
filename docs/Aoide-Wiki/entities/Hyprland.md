@@ -15,8 +15,8 @@ part of the design. (A narrower PTY layer does exist for agent control —
 `send` injection, not a general terminal multiplexer — see
 [[shellbridge]], [[Agent-Hooking]].) Its lane
 (`modules/dendrites/compositor/hyprland/`)
-renders live appearance via `hyprctl`, reading only `aoide.theme` and
-`aoide.layout` like every other paint lane (house rule 5).
+renders live appearance via `hyprctl`, reading only `strillix.theme` and
+`strillix.layout` like every other paint lane (house rule 5).
 
 shellbridge consumes the Hyprland IPC socket to track windows and dispatch focus commands. The session-jump flow (`hyprctl dispatch focuswindow address:…`) depends on this IPC path.
 

@@ -119,7 +119,7 @@ pub(crate) fn resolve_rice_notes(inv: &Invocation, cmd: &str) -> Result<PathBuf,
                     cmd,
                     format!(
                         "no rice named and no staged notes at {}; \
-                         usage: aoide rice lint [<name>|<path>] [--json]",
+                         usage: strillix rice lint [<name>|<path>] [--json]",
                         staged.display()
                     ),
                 )
@@ -209,7 +209,7 @@ pub(crate) fn handle_rice_stage_entry(inv: &Invocation) -> Outcome {
     if mode_marker.mode == crate::mode::RiceMode::Declarative {
         return Outcome::error(
             "rice.stage",
-            "declarative mode is locked — run `aoide rice mode stage` to unlock hot-loading first",
+            "declarative mode is locked — run `strillix rice mode stage` to unlock hot-loading first",
         )
         .with_data(json!({ "reason": "declarative-mode-locked" }));
     }
@@ -362,7 +362,7 @@ pub(crate) fn declared_rice() -> Option<String> {
 /// [`crate::paths::rice_notes(name)`].
 ///
 /// The twin is the lane's activation seed: the DECLARED rice's committed
-/// notes with the venue's `aoide.theme.override` already applied — declared
+/// notes with the venue's `strillix.theme.override` already applied — declared
 /// truth, which is what a re-pin restores, so an edit made to the runtime rice
 /// stays out of declarative mode. The staging writers do not read it: they
 /// derive from the runtime rices and lay the venue over it
@@ -488,7 +488,7 @@ pub(crate) fn plan_rice_stage(inv: &Invocation, repin: bool) -> Result<StagePlan
     let name = match inv.args.first() {
         Some(n) => n.clone(),
         None => {
-            return Err(Outcome::usage("rice.stage", "usage: aoide rice stage <name> [--json]")
+            return Err(Outcome::usage("rice.stage", "usage: strillix rice stage <name> [--json]")
                 .with_data(json!({ "reason": "missing-name" })));
         }
     };
@@ -1028,7 +1028,7 @@ pub(crate) fn seed_rices_from_templates(name: &str) -> Result<Option<PathBuf>, S
 /// half's `strillix` renderer; the sole `.nix` file, satisfying `checks.rice-shape`),
 /// `hyprland.conf` (`--from`'s when it ships one, else a header with no keys),
 /// `theme.json` (a mirror of `--from`'s, INCLUDING any geometry block, so
-/// `aoide rice stage <name>` renders + live-applies immediately),
+/// `strillix rice stage <name>` renders + live-applies immediately),
 /// `design/intent.md` (honest-empty — no fabricated rationale), and
 /// `widgets/.gitkeep` (no per-rice widgets yet). Geometry lives in the theme
 /// tier; the hyprlang file carries only binds, layout and animations.
@@ -1038,7 +1038,7 @@ fn handle_rice_compose(inv: &Invocation) -> Outcome {
         None => {
             return Outcome::usage(
                 "rice.compose",
-                "usage: aoide rice compose <name> [--from <rice>] [--force] [--json]",
+                "usage: strillix rice compose <name> [--from <rice>] [--force] [--json]",
             )
             .with_data(json!({ "reason": "missing-name" }));
         }
@@ -1175,7 +1175,7 @@ fn handle_rice_compose(inv: &Invocation) -> Outcome {
         "from": from,
         "nextSteps": [
             format!("truth: set habit.rice.declared = \"{name}\" in hosts/<host> and rebuild"),
-            format!("sketch: `aoide rice stage {name}` to hot-load it live, no rebuild"),
+            format!("sketch: `strillix rice stage {name}` to hot-load it live, no rebuild"),
         ],
     }))
 }

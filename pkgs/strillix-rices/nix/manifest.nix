@@ -31,7 +31,7 @@
 #   packages   `<rice>` → the package NAMES that rice needs installed, its
 #              borrow-closure included
 #
-# `packages` is what `aoide rice stage` checks a machine-rices rice against
+# `packages` is what `strillix rice stage` checks a machine-rices rice against
 # `builtin.json.packages` before staging it: a rice whose lender is not built
 # in needs the lender's packages too, so the closure — not the rice's own
 # record alone — is what "this rice's needs" means. Same list, same closure

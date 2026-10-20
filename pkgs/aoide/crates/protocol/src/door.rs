@@ -331,8 +331,8 @@ fn other_binary(head: &str, bin_name: &str, registry: &Registry) -> Option<&'sta
 ///
 /// * The input is exactly a GROUP (`secrets`, `graph project`) — the caller
 ///   asked what is there: its listing, informational (exit 0).
-/// * The head belongs to the other binary (`aoide rice stage`): say so and
-///   give the command to run there.
+/// * The head belongs to the other binary (`spawn` typed at `strillix`): say so, and
+///   give the command to run there when that binary is installed on this host.
 /// * A typo of a command, group or leaf — each typed segment matched against
 ///   the registered paths by edit distance (`nodee lst` → `node list`).
 /// * Neither close nor a group: list what IS valid at the point it went wrong.

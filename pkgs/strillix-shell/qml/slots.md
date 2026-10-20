@@ -67,7 +67,7 @@ Both anchor kinds resolve through the SAME baseline-fallback chain
 (`StagingEngine.resolveRice`, CONTRACTS.md §5): the active rice's own file if
 it authored the slot, else **sonata's** (the shipped standard rice — the
 baseline every rice falls back to, a fixed constant independent of
-`aoide.rice`'s own default, which is null), else the anchor's own lane-side
+`strillix.rice`'s own default, which is null), else the anchor's own lane-side
 `fallback` Component, else nothing. Most `SurfaceSlot` slots give no
 `fallback`: sonata's file IS their floor, since a window-owning slot moves as
 one whole unit. `switcher` is the one that gives one — the plain
@@ -86,7 +86,7 @@ applies (CONTRACTS.md §4's wallpaper.json entry).
 
 **What a pick is painted BY is the host's choice**, and it decides whether this
 anchored layer draws at all: `/stage/wallpaper-provider` names the provider
-(the fact `aoide.wallpaper.provider`), and while it is `skwd-wall` AND a pick
+(the fact `strillix.wallpaper.provider`), and while it is `skwd-wall` AND a pick
 applies to the staged rice, the anchor paints
 NOTHING — no wallpaper image, no board, and no palette rectangle — because the
 external provider has that pick on screen and this surface stays mapped and
@@ -104,7 +104,7 @@ surface embeds a `WidgetSlot` anchor for that exact slot name (see the
 table below). Dropping a file for a slot no anchor names yet is inert —
 carried to disk, never loaded.
 
-`aoide rice stage` now hot-syncs an edited **existing** rice widget file
+`strx rice stage` now hot-syncs an edited **existing** rice widget file
 (and any helper/asset files alongside it) into `run/qml/rices/<rice>/`
 live, no rebuild — Quickshell's own file-watcher picks the edit up. A
 **brand-new** slot file still needs `systemctl --user restart
@@ -199,7 +199,7 @@ declared surface only when its component is selected.
 | `bar` | `WidgetSlot` | `shell.qml` (lane) — the bar's `PanelWindow` content, `WidgetSlot { slot: "bar" }`, behind the `bar` component | `shared` (session-state QtObject: the calendar's anchor, the dock's state), `stagingEngine` (so the bar's embedded ricemode `WidgetSlot` can resolve) | none — sonata's `widgets/bar.qml` is the floor |
 | `ricemode` | `WidgetSlot` | every bar body — `WidgetSlot { slot: "ricemode" }` in the bar's right stave, enforced by `checks.bar-ricemode`; the shared rice-mode control (any click opens the one menu: the runtime rices's rices, back to declarative, then the draft rows, which a rice's body may leave to another surface of its own, as barcarolle's Start menu does; nothing switches until a row is chosen) | none | none — sonata's `widgets/ricemode.qml` IS the baseline floor; a rice may dress it with its own body (cadenza does) |
 | `lockscreen` | session-lock host | `LockHost.qml` (lane), anchored in `shell.qml` behind the `lock` component; `strx lock` locks through it (`ipc call lock lock`) when the staged rice's own manifest entry has this slot, else runs hyprlock | `theme`, `bridge` (null: no shellbridge, so no power or other bridge action, behind a locked screen), `auth`: `message`, `messageIsError`, `responseRequired`, `responseVisible`, `busy`, `failures` (wrong answers this lock), `userName` (the passwd name), `respond(text)`, signal `unlocked()`; the face sets `ready` to `true` once up, within 3 s | the host's floor password field (also for a face not ready in time): no baseline rice is ever borrowed, so a rice without a face is a hyprlock rice |
-| `greeter` | greeter host | `GreeterHost.qml` (lane), the `shell.qml` of the greeter lane's store tree (`modules/dendrites/greeter.nix`), chosen at build time when the DECLARED rice ships this slot (`aoide.rices.greeter`); a rice that ships none logs in through ly | `theme`, `bridge` (null: no shellbridge before login), `auth`: `message`, `messageIsError`, `responseRequired`, `responseVisible`, `busy`, `failures`, `users` (`[{ name, realName }]`, passwd uid ≥ 1000 with a login shell), `selectedUser`, `selectUser(name)` (`""` goes back to choosing), `respond(text)`; the face sets `ready` to `true` once up, within 3 s | the host's floor user + password fields (also for a face not ready in time) |
+| `greeter` | greeter host | `GreeterHost.qml` (lane), the `shell.qml` of the greeter lane's store tree (`modules/dendrites/greeter.nix`), chosen at build time when the DECLARED rice ships this slot (`strillix.rices.greeter`); a rice that ships none logs in through ly | `theme`, `bridge` (null: no shellbridge before login), `auth`: `message`, `messageIsError`, `responseRequired`, `responseVisible`, `busy`, `failures`, `users` (`[{ name, realName }]`, passwd uid ≥ 1000 with a login shell), `selectedUser`, `selectUser(name)` (`""` goes back to choosing), `respond(text)`; the face sets `ready` to `true` once up, within 3 s | the host's floor user + password fields (also for a face not ready in time) |
 | `wallpaper` | `WidgetSlot` | `AoideWallpaper.qml` (lane) — inside the per-screen Background layer surface (behind the `wallpaper` component), over the staged wallpaper image | none | none — this slot has NO baseline floor: the anchor gates on `stagingEngine.has(<active rice>, "wallpaper")`, so an unauthored `wallpaper` slot renders NOTHING and the wallpaper image stands (sonata ships no body here, so its twin can never be resolved in as a floor); cadenza's `widgets/wallpaper.qml` is the live board, and the anchor DESTROYS it (not hides it) while a `wallpaper set` pick applies — and, when the host's provider is `skwd-wall`, paints nothing at all (no image, no board, no palette rectangle) while a pick applies, since that provider has the pick on screen |
 
 ### Window-owning slot namespaces (`SurfaceSlot` contract)
@@ -219,7 +219,7 @@ detail a rice widget is free to rename.
 
 A namespace in this table is a **mapped layer surface** — and a rice declares
 which of those it expects to be persistently mapped, by namespace, in
-`aoide.layout.surfaces` (`CONTRACTS.md` §5, published as
+`strillix.layout.surfaces` (`CONTRACTS.md` §5, published as
 `run/qml/rices/surfaces.json`): `bar`/`wallpaper` per-monitor, `dock` single.
 Surfaces summoned on demand — `powermenu`/`launcher`/`switcher`/`calendar` here, plus the OSD
 and `*Preview` surfaces — are deliberately **not** declared. The lock screen is no
@@ -303,8 +303,8 @@ independent mechanism — a **declared** slot: a rice registers a brand-new
 slot name via nix, apart from the fixed catalog above, instead of merely
 dressing a name the lane already anchored.
 
-`aoide.layout.widgets.<slot>` (`modules/nucleus/options.nix`, sibling
-of `aoide.theme`) is the registration. It is twin-written into that rice's
+`strillix.layout.widgets.<slot>` (`modules/nucleus/options.nix`, sibling
+of `strillix.theme`) is the registration. It is twin-written into that rice's
 `theme.json` under a flat top-level `.widgets` key — the same twin-write
 pattern every other rice field uses — and validated strictly by `rice lint`
 (closed, kind-conditional field rejection;
@@ -348,7 +348,7 @@ dock slot", …)`. Either way: a console warning, nothing rendered — a
 declaration with no body is inert, not an error.
 
 The worked example is a surface declared in a rice's `rice.nix`:
-`aoide.layout.widgets.demo = { kind = "surface"; namespace =
+`strillix.layout.widgets.demo = { kind = "surface"; namespace =
 "aoide-<rice>-demo"; layer = "overlay"; shortcut = "aoide:<rice>-demo"; blur =
 true; }`, with `widgets/demo.qml` its `PanelWindow`-rooted body — proving
 build-walk → `rice lint` → `rice stage`/`preview` hot-sync →

@@ -15,7 +15,7 @@ Rice vocabulary names the performed half. Snowflake vocabulary names the frozen 
 ## The Rice Map
 
 Every term maps to a literal path — committed score under the dev checkout's
-`$AOIDE_FLAKE_ROOT/rice/` (default `~/Aoide/rice`; `strx onboard` links `~/rice` →
+`$AOIDE_FLAKE_ROOT/rices/` (default `~/Aoide/rices`; `strx onboard` links `~/rice` →
 the checkout's `rice/`), runtime state under `$STRILLIX_ROOT/` (default
 `~/.aoide/rice`).
 
@@ -35,7 +35,7 @@ the checkout's `rice/`), runtime state under `$STRILLIX_ROOT/` (default
 | rehearsal | preview (`stage/theme.json`, hot-reload) | — |
 | recording | adopt — durable, committed, rebuilt | — |
 | venue | host — its own specifics and enabled instruments | `hosts/<host>/` |
-| replay | perform an existing rice at a new venue | `aoide.rice = "<name>";` in host config |
+| replay | perform an existing rice at a new venue | `strillix.rice = "<name>";` in host config |
 
 The runtime tree off `$AOIDE_ROOT` (`/stage/`, the composed `rices/`
 with its per-rice `drafts/`, `state/`, `run/qml/`, `log`) holds ephemera only.
@@ -63,7 +63,7 @@ A rice is a score, not a room. The same committed rice can be performed at any v
 Replaying a committed rice on another host is a single declaration in that host's `hosts/<host>/default.nix`:
 
 ```nix
-aoide.rice = "sonata";
+strillix.rice = "sonata";
 ```
 
 Rices are SELECTED, not walked: the host module names what it performs

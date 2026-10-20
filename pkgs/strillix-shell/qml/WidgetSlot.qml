@@ -50,7 +50,7 @@ Item {
     property var extraProps: ({})
     property Component fallback: null
 
-    // Reactive off theme.riceName (so live `aoide rice preview <name>` swaps
+    // Reactive off theme.riceName (so live `strillix rice stage <name>` swaps
     // the loaded widget with no restart) and off stagingEngine.manifest (so a
     // rebuild's new manifest is picked up). Resolves through the baseline
     // chain (CONTRACTS.md §5): the active rice if it authored `slot`, else

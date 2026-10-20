@@ -1,9 +1,9 @@
 # tests/consumer/rices-merge/encore/rice.nix — the consumer's own rice in the
-# merged rices: it borrows Aoide's sonata, whose book is merged in beside it.
+# merged rices: it borrows Strillix's sonata, whose book is merged in beside it.
 #
 # The borrow reaches across books (CONTRACTS.md §5): `borrow "sonata"` resolves
 # in the MERGED directory, where sonata is an ordinary rice. A consumer's
-# performance of an Aoide rice's widgets needs nothing from Aoide's tree but the
+# performance of a Strillix rice's widgets needs nothing from Aoide's tree but the
 # exported `ricesMerge` call that brought them into one directory.
 {
   system = {

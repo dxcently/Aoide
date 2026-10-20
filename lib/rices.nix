@@ -208,25 +208,25 @@ let
           in
           lib.throwIf (unknownOwner != [ ])
             (
-              "aoide rices ${name}: slot(s) ${lib.concatStringsSep ", " unknownOwner}"
+              "strillix rices ${name}: slot(s) ${lib.concatStringsSep ", " unknownOwner}"
               + " name an `owner` rice with no directory in the rices"
             )
             (
               lib.throwIf (missingRecord != [ ])
                 (
-                  "aoide rices ${name}: widgets/ has slot(s) ${lib.concatStringsSep ", " missingRecord}"
+                  "strillix rices ${name}: widgets/ has slot(s) ${lib.concatStringsSep ", " missingRecord}"
                   + " with no _widgets/ record — add the record or delete the stray .qml"
                 )
                 (
                   lib.throwIf (missingFile != [ ])
                     (
-                      "aoide rices ${name}: _widgets/ declares slot(s) ${lib.concatStringsSep ", " missingFile}"
+                      "strillix rices ${name}: _widgets/ declares slot(s) ${lib.concatStringsSep ", " missingFile}"
                       + " with no matching widgets/*.qml — the shelf record points at nothing"
                     )
                     (
                       lib.throwIf (missingOnDisk != [ ])
                         (
-                          "aoide rices ${name}: slot(s) ${lib.concatStringsSep ", " missingOnDisk}"
+                          "strillix rices ${name}: slot(s) ${lib.concatStringsSep ", " missingOnDisk}"
                           + " name a `file` that does not exist under their owner's widgets/"
                         )
                         {

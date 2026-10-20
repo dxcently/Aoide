@@ -13,10 +13,9 @@
 # structure, the surfaces and identity — nothing else (root AGENTS.md house
 # rule 5). Here: `strillix.theme` (palette + component tiers), `strillix.surfaces`
 # (the registry it declares its own surfaces in), `strillix.layout`, the
-# core scalars (`aoide.enable`, `aoide.root`, `aoide.checkout`,
-# `strillix.hostConfig`, `aoide.user`),
-# the rice selection (`strillix.rice`) and the derived fact
-# `strillix.rices.builtIn` (the rices this host builds in — what this lane's
+# core scalars (`aoide.root`, `aoide.checkout`, `aoide.user`),
+# its identity (`strillix.hostConfig`), the rice selection (`strillix.rice`) and
+# the derived fact `strillix.rices.builtIn` (the rices this host builds in — what this lane's
 # deployed manifest, widget copy, installed packages, shipped templates and seed
 # are built FROM) and its own fact.
 #   - Component-tier fallback (null → palette) applied locally, never pushed
@@ -58,7 +57,7 @@ let
   # these names, never over every committed rice.
   #
   # A rice that is NOT built in is still stageable from the machine's own
-  # rices (`aoide rice stage <n>`) — the runtime keeps a wider manifest
+  # rices (`strillix rice stage <n>`) — the runtime keeps a wider manifest
   # than this deployed tree carries, which is exactly the seam
   # `builtin.json`'s `packages` exists to check (§7.5).
   ricesLib = import ../../../lib/rices.nix {
@@ -347,7 +346,7 @@ let
   # Beyond the shared, rice-blind QML tree above, this also carries per-rice
   # widget QML from rices/<rice>/widgets/ — versioned score, not
   # runtime — for the rices this host BUILT IN (`strillix.rices.builtIn`, from
-  # its record), so a live `aoide rice preview <name>` can hot-swap a
+  # its record), so a live `strillix rice stage <name>` can hot-swap a
   # widget's BODY (not just its colours) with no rebuild. A rice built in as
   # `available` but not declared is carried here too: that is what "can stage
   # without a rebuild" means. The
@@ -628,7 +627,7 @@ in
     # switch always reasserts the store over it, rather than refusing to
     # proceed. run/qml is a deploy target, never a source: a hand edit
     # there is lost at the next switch. A rice is edited in the runtime
-    # rices (`$AOIDE_ROOT/rices/<rice>`, house rule 10), and a
+    # rices (`$STRILLIX_ROOT/rices/<rice>`, house rule 10), and a
     # STAGED rice lives there, not here — `aoide-rice-reload` (below)
     # re-syncs its widget bodies into run/qml once the switch is done.
     # NOTE: this is a home-manager submodule FUNCTION (`{ lib, ... }:`), not a bare
@@ -959,7 +958,7 @@ in
             #     leave it failed, and a try-restart skips a failed unit.
             systemd.user.services.aoide-rice-reload = {
               Unit = {
-                Description = "Aoide rice reload: bring the staged or drafted rice back after a login or a switch";
+                Description = "Strillix rice reload: bring the staged or drafted rice back after a login or a switch";
                 After = [ "graphical-session.target" ];
                 PartOf = [ "graphical-session.target" ];
                 Before = [ "aoide-quickshell.service" ];

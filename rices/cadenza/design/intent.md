@@ -60,7 +60,7 @@ Conductor Channel).
   drawing and block elements and braille U+2800–28FF all native, no
   fallback). No proportional text anywhere.
 - One face for the terminal: **ShureTechMono Nerd Font Mono**, set as
-  `aoide.theme.fonts.monospace` — squared-off, single-weight, a console
+  `strillix.theme.fonts.monospace` — squared-off, single-weight, a console
   rather than the desktop's humanist serif. A pane is the rice's cell, the
   terminal is where an agent lands; both are fixed-pitch machine faces.
   Coverage checked against the installed face: box drawing and rules
@@ -552,7 +552,7 @@ The wallpaper is a still image of a circuit board under the tube.
   preview canvas shoots it at each monitor's size into
   `wallpaper/pcb-<w>x<h>.png`. Regenerating after a palette change is one shot.
 - Live: `strx wallpaper set <abs path>` (a hot swap). Declaring it into
-  `aoide.theme.wallpaper` for the rebuild is the User's to admit.
+  `strillix.theme.wallpaper` for the rebuild is the User's to admit.
 
 **The live board — `widgets/wallpaper.qml`.** The wallpaper is the rice's
 `wallpaper` slot body (the lane anchors it inside the per-screen Background
@@ -606,7 +606,7 @@ reads a fixture path.
 ## 5. Hazards and open questions
 
 - **Polarity (settled).** The key's register is the rice's own:
-  `aoide.theme.polarity = "dark"` is declared beside the palette
+  `strillix.theme.polarity = "dark"` is declared beside the palette
   (`rice.nix` and `theme.json`), validated by `rice lint` (exactly
   `"light"`/`"dark"`; CONTRACTS.md §1), and read by the stylix dendrite as
   `stylix.polarity`, so every Stylix-managed target reads the phosphor ramp as
@@ -678,7 +678,7 @@ reads a fixture path.
   click and swallows further clicks until the mode changes or 10s pass, so
   a double click can no longer send two toggles (§3.1).
 - 2026-09-28 — khoa: the terminal should read hacker-y too, as part of the
-  key. Landed as the theme font tier (`aoide.theme.fonts.monospace`, a v0
+  key. Landed as the theme font tier (`strillix.theme.fonts.monospace`, a v0
   additive tier, nucleus option + CONTRACTS §1 + the stylix lane's source of
   truth), set here to ShureTechMono Nerd Font Mono; panes keep
   JetBrainsMono. Baked only: stylix is the one reader, so the face lands on
@@ -693,7 +693,7 @@ reads a fixture path.
   session), the bar's lamp walks the same code, and
   `design/trace.test.js` runs it under `node` (§2 Motion, §3.9).
 - 2026-09-28 — khoa: the key's register is the RICE's, and the glass follows
-  it. `aoide.theme.polarity = "dark"` is declared beside the palette (nucleus
+  it. `strillix.theme.polarity = "dark"` is declared beside the palette (nucleus
   option, CONTRACTS §1, `rice lint`, read by the stylix dendrite) and mirrored
   in `theme.json`; baked only, so flipping it is a rebuild, not a stage. The
   terminal reads at `geometry.terminalOpacity` 0.7 (kitty

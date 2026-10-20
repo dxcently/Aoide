@@ -104,7 +104,7 @@ fn no_resolvable_rice(cmd: &str) -> Outcome {
     Outcome::error(
         cmd,
         "no rice is currently staged — nothing to resolve a draft directory under \
-         (stage a rice first: `aoide rice stage <name>` or `aoide rice mode stage <name>`)",
+         (stage a rice first: `strillix rice stage <name>` or `strillix rice mode stage <name>`)",
     )
     .with_data(json!({ "reason": "no-resolvable-rice" }))
 }
@@ -158,7 +158,7 @@ fn handle_draft_save(inv: &Invocation) -> Outcome {
             return Outcome::error(
                 "rice.draft.save",
                 "staged theme.json carries no `rice` field — nothing to nest this draft under \
-                 (stage a named rice first: `aoide rice stage <name>`)",
+                 (stage a named rice first: `strillix rice stage <name>`)",
             )
             .with_data(json!({ "reason": "no-resolvable-rice" }));
         }
@@ -413,7 +413,7 @@ fn handle_draft_drop(inv: &Invocation) -> Outcome {
             format!(
                 "cannot drop `{name}` — it's the live draft for `{rice}` \
                  (stage/theme.json is routed to it); switch modes first \
-                 (`aoide rice mode stage` or `aoide rice mode declarative`), then drop it"
+                 (`strillix rice mode stage` or `strillix rice mode declarative`), then drop it"
             ),
         )
         .with_data(json!({ "reason": "draft-is-live", "name": name, "rice": rice }));

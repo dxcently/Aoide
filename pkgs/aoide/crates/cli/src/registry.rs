@@ -331,7 +331,7 @@ mod tests {
         // LAN ceremony) — reached 88.
         //
         // **The running total above is the CHAIN's history, not this list's
-        // **The vec below holds 114 paths** (counted, review F7). This line is
+        // **The vec below holds 120 paths** (counted, review F7). This line is
         // the authority for how many; the chain above is the history of how it
         // got there and is never the answer.
         let mut expected: Vec<&str> = vec![

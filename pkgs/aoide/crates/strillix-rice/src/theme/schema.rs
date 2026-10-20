@@ -350,7 +350,7 @@ pub fn validate(container: &Value) -> Validation {
     }
 
     // Widgets tier — optional top-level key, an object keyed by slot name
-    // (CONTRACTS.md §5; `aoide.layout.widgets`, options.nix). Absent
+    // (CONTRACTS.md §5; `strillix.layout.widgets`, options.nix). Absent
     // means "no declared widget types", treated as `{}` — same posture the
     // build-time walk already uses (the strillix lane's
     // `.widgets // {}`). These fields are plain configuration, not W3C

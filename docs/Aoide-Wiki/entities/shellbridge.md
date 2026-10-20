@@ -148,7 +148,7 @@ connection and thread like `ricemenu`, because the surface shows the outcome in
 a balloon rather than a toast. `name` must be one argv token; a line without
 one is dropped with no reply. The bridge runs `strx rice declare <name> --host
 --json`, which rewrites the one `habit.rice.declared` line in the host config
-(`aoide.hostConfig`) and never commits or rebuilds, so the change takes effect
+(`strillix.hostConfig`) and never commits or rebuilds, so the change takes effect
 on the next rebuild. Every rule about which rice may be declared is the CLI's:
 a rice the build does not carry, a staged draft, or a host file without exactly
 one such line is its refusal. The answer is `{ok:true, message, name, host,
@@ -160,7 +160,7 @@ and the audit line names it: `ricedeclare action <rice>: <ok changed|ok
 unchanged|failed>`. The bridge's own timeout answers `reason: "no-reply"`,
 which never means refused: the declare may still land. The `ricemenu` answer carries the machine's `host` name for the row's
 alert to speak, and `hostConfig`, the file the declare rewrites (resolved as
-`AOIDE_HOST_CONFIG`, else `<checkout>/hosts/<host>/default.nix`; null when
+`STRILLIX_HOST_CONFIG` when it is absolute, else `<checkout>/hosts/<host>/default.nix`; null when
 neither resolves), for a late balloon to name.
 
 **`hyprctl` must be on the service PATH, or every click fails silently.**

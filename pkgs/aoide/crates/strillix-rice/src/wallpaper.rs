@@ -112,7 +112,7 @@ pub fn parse_scene_token(arg: &str) -> Option<&str> {
 }
 
 /// The stem of a rice's own desktop picture, inside its `wallpaper/` folder:
-/// `wallpaper/<name>-desktop.<ext>`. The declared `aoide.theme.wallpaper` names
+/// `wallpaper/<name>-desktop.<ext>`. The declared `strillix.theme.wallpaper` names
 /// the same file at build time, so the seed and a staged rice agree on it.
 pub const DESKTOP_WALLPAPER_STEM: &str = "desktop";
 
@@ -139,7 +139,7 @@ pub fn derive_wallpaper(name: &str) -> Option<PathBuf> {
 
 /// The lock picture a rice ships: `lockscreen.<ext>` at the root of its own
 /// folder, the first of [`WALLPAPER_EXTS`] that exists. The name is the render
-/// surface's (`aoide.surfaces.lockscreen`), so a rice declares nothing: the
+/// surface's (`strillix.surfaces.lockscreen`), so a rice declares nothing: the
 /// file is the whole opinion, and deleting it takes the opinion away.
 pub fn lockscreen_image(strillix_root: &Path) -> Option<PathBuf> {
     WALLPAPER_EXTS

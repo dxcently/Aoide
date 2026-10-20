@@ -31,7 +31,7 @@ resolves one level further up (the stage dir's parent's parent —
 `$AOIDE_STAGE_DIR` override too). `$AOIDE_STATE_DIR` (absolute) likewise
 overrides `state/`. Both core binaries call `fs::migrate_root_once()` at
 process start: on first run it moves a pre-existing
-`~/Aoide/{rice/stage,state,log}` tree into the current root, each piece
+`~/Aoide/{state,log}` tree into the current root, each piece
 gated on its own override being unset. All file
 writes in this group route through `aoide_storage::fs::atomic_write`
 (temp `<stem>.tmp.<pid>` then rename, symlink-transparent — a write to a
@@ -139,7 +139,7 @@ strx rice compose <name> [--from <rice>] [--force] [--json]
   `rices/<name>/` (never the templates dir — compose TO always
   lands in the host rices), all atomic:
   `rice.nix` (a body copying `--from`'s palette/window/geometry into
-  `aoide.theme.*`, with the ten strillix providers and the `strillix` renderer),
+  `strillix.theme.*`, with the ten strillix providers and the `strillix` renderer),
   `hyprland.conf` (`--from`'s when it ships one, else a header with no keys),
   `theme.json` (verbatim mirror of `--from`'s), `design/intent.md`
   (honest-empty template), `widgets/.gitkeep`.
@@ -165,7 +165,7 @@ strx rice compose <name> [--from <rice>] [--force] [--json]
   `modules/dendrites/quickshell/system.nix`'s `aoide-quickshell` and
   `modules/dendrites/strillix/runtime.nix`'s `aoide-rice-reload`) plus
   `modules/dendrites/aoided.nix`'s `environment.sessionVariables` (gated on
-  `aoide.strillix.enable`) — core-only units don't carry it.
+  `strillix.enable`) — core-only units don't carry it.
 
 ### strx rice list
 
@@ -542,7 +542,7 @@ strx rice refresh [<name>] [--check] [--json]
 strx rice declare <name> [--json]
 ```
 
-- **Reads:** the composed rice `$AOIDE_ROOT/rices/<name>/`
+- **Reads:** the composed rice `$STRILLIX_ROOT/rices/<name>/`
   (`fs::rices_dir`) less its top-level `history/` and `drafts/`,
   recursively, byte by byte; and the checkout at
   `aoide_storage::fs::flake_root()` (`$AOIDE_FLAKE_ROOT` absolute override,
@@ -581,12 +581,12 @@ strx rice declare <name> [--json]
 strx rice declare <name> --host [--json]
 ```
 
-- **Reads:** the host config at `aoide_storage::fs::host_config()`
-  (`$AOIDE_HOST_CONFIG` absolute override — the nix option `aoide.hostConfig`
+- **Reads:** the host config at `strillix_rice::paths::host_config()`
+  (`$STRILLIX_HOST_CONFIG` absolute override — the nix option `strillix.hostConfig`
   — default `<flake_root>/hosts/<hostname>/default.nix`), symlinks resolved;
   the shipped templates' `builtin.json` (`fs::rice_templates_dir()`); the mode
   marker; and, for the staged-edits note, the machine copy
-  `$AOIDE_ROOT/rices/<name>/` against `<templates>/<name>/`.
+  `$STRILLIX_ROOT/rices/<name>/` against `<templates>/<name>/`.
 - **Writes:** only the string between the quotes of the host file's one
   `habit.rice.declared = "<v>";` line, through a temp file in the same
   directory created with the file's mode and renamed over it, the directory

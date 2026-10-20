@@ -45,12 +45,12 @@ inside that rice's `rices/<name>/` — never a new top-level `rice/` dir
 
 ```
 rices/<rice>/rice.nix
-   a body: system.module sets ONLY aoide.theme.{palette,base16,bar,notif,window,wallpaper}
+   a body: system.module sets ONLY strillix.theme.{palette,base16,bar,notif,window,wallpaper}
    selected by habit.rice.declared = "<rice>" (no guard: only the performed body is read)
         │
         │  nix build / rebuild bakes the guarded rice's theme
         ▼
-stage/theme.json   ◄── also: `aoide rice preview` stages this ephemerally
+stage/theme.json   ◄── also: `strx rice stage` stages this ephemerally
    fully resolved — colours concrete, no null            (CONTRACTS.md §4:
         │                                                  atomic writes only)
         │  FileView watches the file; onFileChanged → reload()
@@ -87,14 +87,14 @@ dir is committed, so runtime state can never become load-bearing for the build.
 | **Application** (performing an adopted rice) | nothing — pure selection | `rices/<rice>/rice.nix` fanned into `stage/theme.json` at build/preview time |
 
 The swap is one line, host-agnostic (no other edit needed — a rice sets
-only `aoide.theme`, no host options, no lane toggles):
+only `strillix.theme`, no host options, no lane toggles):
 
 ```nix
 # hosts/<host>/default.nix
-aoide.rice = "sonata";
+strillix.rice = "sonata";
 ```
 
-This re-fans the whole `aoide.theme` tree for that host. **Replay** =
+This re-fans the whole `strillix.theme` tree for that host. **Replay** =
 same score, new host (this line, elsewhere). **Transpose** = same host,
 new key (`rice transpose <rice> <key>`, planned — swaps among that rice's
 `palette/` variants).

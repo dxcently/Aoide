@@ -48,8 +48,8 @@ management seam"). This lane completes that seam.
    byte-for-byte plus ONE small descriptor per element (which files
    land where under `run/elements/`, how the element starts, the
    optional reload/restart overrides). The element set flows through
-   `aoide.layout` (the existing "which TYPES a rice brings into
-   existence" namespace) and each element declares `aoide.surfaces`
+   `strillix.layout` (the existing "which TYPES a rice brings into
+   existence" namespace) and each element declares `strillix.surfaces`
    ownership — waybar owning `bar` makes the quickshell lane and
    Stylix stand down through the EXISTING
    `surfaceToStylixTargets`/mkForce-false seam. House rule 5's
@@ -141,7 +141,7 @@ same commit that lands the parser):
   it and rewrites the bytes, and nothing else in the pipeline
   changes.
 - `surfaces` — optional list of surface names this element claims
-  (`["bar"]`). The elements lane folds these into `aoide.surfaces`
+  (`["bar"]`). The elements lane folds these into `strillix.surfaces`
   with `owner = "<element>"`; Stylix and Quickshell stand down for
   them (below).
 - `run.exec` — the full command line, with the literal token `{run}`
@@ -199,8 +199,8 @@ strx rice stage <rice>
 ```
 nixos-rebuild / home-manager switch          (user-gated, house rule 2)
   eval: the elements lane readDirs the declared rice's elements/
-    ├─ aoide.layout.elements.<e> = { surfaces, via }   (the TYPE set)
-    ├─ aoide.surfaces.<s>.owner = "<e>"                     (claims)
+    ├─ strillix.layout.elements.<e> = { surfaces, via }   (the TYPE set)
+    ├─ strillix.surfaces.<s>.owner = "<e>"                     (claims)
     └─ units / exec-once lines generated, ExecStart → run/elements/<e>/
   activation: strx element seed <rice>
     renders the STORE copy of the rice's elements against the
@@ -247,7 +247,7 @@ per-file flag is its complete seam.
 
 ## Surface stand-down
 
-`aoide.surfaces` (nucleus options.nix, `attrsOf { owner }`) is
+`strillix.surfaces` (nucleus options.nix, `attrsOf { owner }`) is
 already the one registry; Stylix already derives its target-disable
 set from "owner is not stylix" (`surfaceToStylixTargets` +
 `presentDisables`, dendrites/stylix). Two small moves complete the
@@ -260,7 +260,7 @@ picture, and the whitelist does not grow:
   same surface is the module system's ordinary conflict error —
   correct, loud, at eval.
 - Quickshell's rendering of a surface it lost gates on
-  `aoide.surfaces.<s>.owner == "quickshell"` (the bar first — the
+  `strillix.surfaces.<s>.owner == "quickshell"` (the bar first — the
   waybar case; other surfaces follow the same line as elements claim
   them).
 
@@ -297,9 +297,9 @@ the same commit as the seams they describe.
 - **L-E3 — the elements lane (nix, L).** `modules/dendrites/elements/`
   (its plain module, README + AGENTS): readDir the declared rice's
   `elements/`, parse descriptors at eval, populate
-  `aoide.layout.elements` (new option under the existing
+  `strillix.layout.elements` (new option under the existing
   layout namespace, declared in nucleus options.nix) and the
-  `aoide.surfaces` claims; generate `aoide-element-<name>.service`
+  `strillix.surfaces` claims; generate `aoide-element-<name>.service`
   units and compositor exec-once lines pointing at
   `run/elements/`; activation hook runs `strx element seed` against
   the declared rice (store-referenced files, decision 4). Gate: a

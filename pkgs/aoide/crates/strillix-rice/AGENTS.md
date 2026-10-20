@@ -124,7 +124,7 @@
   without recomputing. Nothing reading the PICK re-derives the `_tile` name
   rule; it takes `tile` as written (CONTRACTS.md §4).
 - **Who PAINTS a pick is the HOST's choice — a provider, never a rice's
-  field.** The fact is `aoide.wallpaper.provider` (nucleus), read at runtime by
+  field.** The fact is `strillix.wallpaper.provider` (nucleus), read at runtime by
   `wallpaper_provider::provider()` off the one word the `strillix` lane publishes at
   `/stage/wallpaper-provider`; absent means the shell's own layer, which is
   the default and needs no call. `wallpaper_provider::action()` is the whole
@@ -223,13 +223,13 @@
 - **`polarity` is a LINTED top-level field and no emitter carries it**
   (`theme::schema::POLARITY_VALUES`, exactly `"light"`/`"dark"`; absent or
   null is "no opinion"). It is the baked fan-out's register — the stylix lane
-  reads `aoide.theme.polarity` off the option, never off a stage file — so it
+  reads `strillix.theme.polarity` off the option, never off a stage file — so it
   must stay out of `Resolved` and out of every backend's output. The goldens
   pin that as a contract: `tests/fixtures/valid-polarity.json` is `valid.json`
   plus `"polarity": "dark"`, and
   `polarity_is_lint_only_and_moves_no_emitted_byte` asserts every emitter
   produces byte-identical output with and without it. `rice compose` copies the
-  field into a scaffolded `rice.nix` (`aoide.theme.polarity`), defaulting to
+  field into a scaffolded `rice.nix` (`strillix.theme.polarity`), defaulting to
   `schema::POLARITY_DEFAULT` when the source notes carry none.
 - **`compose::render_rice_nix` emits a rice body (CONTRACTS §5, v1).** The
   scaffold is an attrset with a `system` half (the ten `strillix` providers,
@@ -268,7 +268,7 @@
   are READ-ONLY for this crate — only the nix side writes them.** The strillix
   lane's activation seed (`home.activation.aoideSeedStage`) publishes them: the
   twin is the declared rice's committed notes with the venue's
-  `aoide.theme.override` applied and the host's geometry laid over the rice's
+  `strillix.theme.override` applied and the host's geometry laid over the rice's
   own, `"rice"` injected, keys sorted; `venue.json` is `venueDelta`, only the
   slots that override recolours and the geometry the host sets, `{}` with
   neither. `commands::rice::notes_source` reads the twin for the re-pin

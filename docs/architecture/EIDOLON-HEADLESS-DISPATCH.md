@@ -26,7 +26,7 @@ Model calls and tool results are counted from the `.eid` journals
 | run | brief | wall | model calls | tool results | ollama retries | exit | journal |
 |---|---|---:|---:|---:|---:|---|---|
 | A | QML: per-screen bar, focus-following dock | 57 min | 97 | 127 | 11 | **124** | `settled: false` — edits landed, no report |
-| B | Nix: `aoide.layout.surfaces` + facet publish | 31 min | 90 | 104 | 11 | 0 | settled, report written |
+| B | Nix: `strillix.layout.surfaces` + facet publish | 31 min | 90 | 104 | 11 | 0 | settled, report written |
 | C | Rust: `surfaces_fall_short` in the watchdog | 19 min | 79 | 86 | 18 | 0 | settled, report written |
 | R1 | Review of A+B+C | 57 min | 110 at kill | 176 | 14 | **124** | `settled: false` — nothing written |
 | R2 | Same review, re-briefed | 11 min | 65 | 101 | 12 | 0 | settled, PASS — checked what the brief said |

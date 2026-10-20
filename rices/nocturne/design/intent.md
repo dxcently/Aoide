@@ -21,7 +21,7 @@ widget-type registry" subsection and `pkgs/strillix-shell/qml/slots.md`'s
 
 ## Palette Rationale
 
-(not yet written — this rice was scaffolded from `sonata` via `aoide rice compose`, not designed)
+(not yet written — this rice was scaffolded from `sonata` via `strx rice compose`, not designed)
 
 ## Component Tier
 

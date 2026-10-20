@@ -50,7 +50,7 @@
   # theming, the compositor's geometry and window borders, the assembled
   # widgets, and the boot default; `strillix reload` is what keeps the staged half
   # live between switches. The other committed rices are reached from the
-  # machine's own rices (`aoide rice stage <n>`), which this host's rices
+  # machine's own rices (`strillix rice stage <n>`), which this host's rices
   # already holds — that is the point of the split.
   habit.rice.declared = "barcarolle";
   habit.rice.available = [ ];

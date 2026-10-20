@@ -54,7 +54,7 @@ the same way:
 
 - **Spatial composability** — a component declares its dependencies by service
   name and waits for them, instead of importing an implementation. Ours:
-  `aoide.theme`/`aoide.layout`, slot names, the stage files in §4, the
+  `strillix.theme`/`strillix.layout`, slot names, the stage files in §4, the
   `aoide schema --json` tree that both doors generate from.
 - **Temporal composability** — a component's effects are *revertible*: removing
   it unwinds everything it installed. Ours: `rice draft save`/`drop`, the
@@ -78,19 +78,19 @@ that nucleus declares once, in `modules/nucleus/options.nix`. Each `enable`
 fact is set only from its owner's directory: `false` unless the owner's module
 is in the host, and a file of that dendrite sets it `true`. The module gets
 there by selecting the dendrite or by a lane importing the owner's files by
-path (`strillix`'s runtime imports `quickshell/system.nix`). `aoide.quickshell.config` defaults `null`, and
-`aoide.wallpaper.provider` names the active alternative by defaulting to the
+path (`strillix`'s runtime imports `quickshell/system.nix`). `strillix.quickshell.config` defaults `null`, and
+`strillix.wallpaper.provider` names the active alternative by defaulting to the
 shell's own layer:
 
 | Fact | What it means | Set by |
 |---|---|---|
-| `aoide.quickshell.enable` | a Quickshell shell surface exists here | its dendrite's system half, `dendrites/quickshell/system.nix` (the package and the `aoide-quickshell` service), which sets it `true` |
-| `aoide.quickshell.config` (`nullOr str`, `null`) | the directory a shell runs; `null` is the bare case — package installed, no shell service | whoever supplies one: a lane, or the host |
-| `aoide.strillix.enable` | the strillix runtime is present: the paint/rice binary is installed (`pkgs.aoide.strillix`) and the shell is wired | `dendrites/strillix/runtime.nix`, which every `strillix` component provider imports by path, and which sets it `true` (the renderer `dendrites/strillix/default.nix` does not) |
-| `aoide.stylix.enable` | the theme is baked at build time, painted by nix | its dendrite, `dendrites/stylix.nix`, which sets it `true` |
-| `aoide.rices.greeter` (`nullOr (attrsOf str)`, `null`) | the declared rice's `greeter` slot record `{ owner, file }`; non-null switches the greeter lane from ly to greetd + the rice's Quickshell face | the selection hook (`lib/strillix.nix`, over `lib/rices.nix`'s `greeter`), beside `aoide.rices.builtIn`; never a host |
-| `aoide.wallpaper.provider` (`str`, `"quickshell"`) | WHICH provider paints a rice's wallpaper here — the one fact that names an alternative rather than a capability | the chosen provider of the `wallpaper` registry (`dendrites/wallpaper/*`): `strillix` writes `"quickshell"` (the shell's own layer), `skwd-wall` writes `"skwd-wall"` |
-| `aoide.components` (`attrsOf { provider; actions }`, `{ }`) | which component slots this host filled (`bar`, `launcher`, `powermenu`, `notifications`, `wallpaper`, `dock`, `calendar`, `switcher`, `lock`, `greeter`, or a consumer's own) and by which provider | each slot's chosen provider, its own entry only; published as `run/qml/components.json` (§4) |
+| `strillix.quickshell.enable` | a Quickshell shell surface exists here | its dendrite's system half, `dendrites/quickshell/system.nix` (the package and the `aoide-quickshell` service), which sets it `true` |
+| `strillix.quickshell.config` (`nullOr str`, `null`) | the directory a shell runs; `null` is the bare case — package installed, no shell service | whoever supplies one: a lane, or the host |
+| `strillix.enable` | the strillix runtime is present: the paint/rice binary is installed (`pkgs.aoide.strillix`) and the shell is wired | `dendrites/strillix/runtime.nix`, which every `strillix` component provider imports by path, and which sets it `true` (the renderer `dendrites/strillix/default.nix` does not) |
+| `strillix.stylix.enable` | the theme is baked at build time, painted by nix | its dendrite, `dendrites/stylix.nix`, which sets it `true` |
+| `strillix.rices.greeter` (`nullOr (attrsOf str)`, `null`) | the declared rice's `greeter` slot record `{ owner, file }`; non-null switches the greeter lane from ly to greetd + the rice's Quickshell face | the selection hook (`lib/strillix.nix`, over `lib/rices.nix`'s `greeter`), beside `strillix.rices.builtIn`; not a host |
+| `strillix.wallpaper.provider` (`str`, `"quickshell"`) | WHICH provider paints a rice's wallpaper here — the one fact that names an alternative rather than a capability | the chosen provider of the `wallpaper` registry (`dendrites/wallpaper/*`): `strillix` writes `"quickshell"` (the shell's own layer), `skwd-wall` writes `"skwd-wall"` |
+| `strillix.components` (`attrsOf { provider; actions }`, `{ }`) | which component slots this host filled (`bar`, `launcher`, `powermenu`, `notifications`, `wallpaper`, `dock`, `calendar`, `switcher`, `lock`, `greeter`, or a consumer's own) and by which provider | each slot's chosen provider, in its own entry; published as `run/qml/components.json` (§4) |
 
 The dendrite that owns a fact sets it `true`. The guard is `mkFact` in
 `modules/nucleus/options.nix`: it reads the winning definitions and refuses any
@@ -186,7 +186,7 @@ the rule.
 ## 1. Note schema — **v0**
 
 The single seam between the frozen nix layer and the live desktop. Facets read
-`aoide.theme` (the dress) and `aoide.layout` (the structure) and
+`strillix.theme` (the dress) and `strillix.layout` (the structure) and
 **nothing else** — an enumerated, closed pair, not an open `aoide.*` (AGENTS.md
 house rule 5). Both are declared in `modules/nucleus/options.nix`.
 
@@ -225,7 +225,7 @@ that), because it is not a colour a surface paints — it is the register the
 baked fan-out derives its colours from.
 
 **Baked only, the font tier's posture** — but carried, not dropped. A rice
-declares it in BOTH halves: `aoide.theme.polarity` in `rice.nix` (what the
+declares it in BOTH halves: `strillix.theme.polarity` in `rice.nix` (what the
 stylix lane actually reads, through the option) and the same value in its
 `theme.json` beside `palette` (§4), which is the notes-document record of it
 and what `rice compose` copies for a scaffolded rice. GTK/Qt and Stylix read
@@ -328,7 +328,7 @@ base16 include): kitty takes the LAST value a repeated key sets, so an
 opinionated stage stays authoritative, a stage without one falls through to
 the declared fragment and then the bake, and the declared truth covers the
 never-staged case. Nothing bakes a rice's own value into `kitty.conf` itself
-(that dendrite reads no `aoide.theme`), so a new kitty takes it from those
+(that dendrite reads no `strillix.theme`), so a new kitty takes it from those
 two includes. `theme lint` rejects anything but a plain number in [0, 1] or
 `null`.
 
@@ -373,7 +373,7 @@ to this tier.
 
 ### Override tier (v0 additive — venue recolour, `override.*`)
 
-`aoide.theme.override.{bg,fg,accent,urgent,hot}` (each `nullOr` hex, default
+`strillix.theme.override.{bg,fg,accent,urgent,hot}` (each `nullOr` hex, default
 `null`) is the one tier of the theme the VENUE authors, never the rice.
 Semantics — the **recolour rule**: each set anchor rewrites every theme
 colour equal to the rice's AUTHORED value for that anchor (palette, base16
@@ -493,7 +493,7 @@ Rules:
   path into a module with no key, and two lanes would apply it twice. The home
   half closes over the system config through an internal `deferredModule`
   option that the system half sets and the home half imports through
-  `osConfig` (`aoide.quickshell.home`, `aoide.strillix.home`).
+  `osConfig` (`strillix.quickshell.home`, `strillix.home`).
 
 - **The front door is provider modules and rice bodies, never a slot.** A
   consumer takes `parts.<component>` (each component slot's `strillix` provider,
@@ -755,8 +755,10 @@ Contract guarantees:
   environment but never `--json`.
 - **Exit codes and the refusal shape.** `2` means the invocation can never be
   valid whatever the world looks like: a missing, unknown or ill-typed
-  argument, flag or value, or a command typed at the wrong binary (`aoide rice
-  …` names `strx rice …`). `1` means a valid invocation the world refused: not
+  argument, flag or value, or a command typed at the wrong binary (`strx spawn …` names `aoide spawn …`
+  when the core program resolves to a file named `aoide` (`AOIDE_CORE_BIN`, else the sibling binary, else
+  `PATH`), and says aoide is not installed when none does; `aoide` has
+  no strillix verbs, so `aoide rice …` is an unknown command). `1` means a valid invocation the world refused: not
   found, unreachable, locked, not paired. `64` is a stub. A refusal is
   `[status] command: what` followed by `why:` and `fix:` lines; `--json`
   carries `data.refusal` (`kind`, `what`, `why`, `fix`, where `fix` is one of
@@ -1350,7 +1352,7 @@ reload`) — plus
 `environment.sessionVariables` (an operator's own interactive `strx rice
 compose`) and that unit's own `Environment=` (so a restart after a switch
 picks up the new rices instead of the login session's copy), itself gated on
-`aoide.strillix.enable` so a host that never installs
+`strillix.enable` so a host that never installs
 `strillix` never carries the var into its shells either. It does NOT ride the
 core-only units (`aoided` itself, `aoide-mcp`/`aoide-a2a`/`aoide-usage`/
 `aoide-pair-watch`, `aoide-graph-reap`, `aoide-secrets-watch`, the melete
@@ -1788,13 +1790,13 @@ ever becoming reachable through `config set`.
 ### `/stage/theme.json` — **v1**
 
 The resolved, flattened note values for Quickshell (QML reads this; hot-reload
-at rehearsal). Derived from the same `aoide.theme` as the baked `rice.nix`
+at rehearsal). Derived from the same `strillix.theme` as the baked `rice.nix`
 fan-out, so staged and adopted state cannot diverge. `stage/theme.json` is
 the sole stage note file.
 
 Beyond `strx rice stage <name>`/`wallpaper set`/other emitters writing this
 live, it is also **seeded from the active rice's committed notes, with the
-venue's `aoide.theme.override` applied and the host's geometry laid over the
+venue's `strillix.theme.override` applied and the host's geometry laid over the
 rice's own, on every activation**
 (`home.activation.aoideSeedStage`, `modules/dendrites/strillix/runtime.nix`,
 via `lib/theme.nix`'s `stagePatch`) — so a host that boots without ever
@@ -1965,7 +1967,7 @@ Writers, and the exact shape each leaves:
 
 | Writer | Effect on `stage/wallpaper.json` |
 | --- | --- |
-| `strx rice stage <rice>` | the rice's derivable wallpaper — its own desktop picture `rices/<rice>/wallpaper/<rice>-desktop.{webp,png,jpg,jpeg}` (first match in that order), else the shared `/wallpapers/<rice>.{webp,png,jpg,jpeg}` — as `{"path": …, "rice": …}`; with no derivable wallpaper the file is REMOVED — a wallpaper staged for another rice must never stand over this one. A pick already stamped for THIS rice is left untouched (reported as `wallpaperStage: "pick-kept"`); `rice-shape` refuses a declared `aoide.theme.wallpaper` not named `wallpaper/<rice>-desktop.<ext>` |
+| `strx rice stage <rice>` | the rice's derivable wallpaper — its own desktop picture `rices/<rice>/wallpaper/<rice>-desktop.{webp,png,jpg,jpeg}` (first match in that order), else the shared `/wallpapers/<rice>.{webp,png,jpg,jpeg}` — as `{"path": …, "rice": …}`; with no derivable wallpaper the file is REMOVED — so a wallpaper staged for another rice does not stand over this one. A pick already stamped for THIS rice is left untouched (reported as `wallpaperStage: "pick-kept"`); `rice-shape` refuses a declared `strillix.theme.wallpaper` not named `wallpaper/<rice>-desktop.<ext>` |
 | `strx wallpaper set <path\|name> [--position auto\|tile\|fill]` | `{"path": …, "kind": …, "pick": true, "rice": …}` for the rice staged at write time — the `rice` field omitted only when nothing is staged, which writes the legacy shape — plus, for a still, `"position"` when `--position tile` or `fill` forced it and `"tile": true` when it tiles. `--position` with a video or a `we:<id>` token is a usage refusal (`position-not-a-still`, exit 2) that writes nothing, and the registry refuses it beside `--clear` or `--from-skwd` |
 | `strx wallpaper set we:<id>` | `{"kind": "we", "weId": …, "pick": true, "rice": …}` — a scene, whose identity is the workshop id and which has no `path` at all. `we:` with an empty id is not a scene token (the argument is then resolved as a file, and fails like any other missing file) |
 | `strx wallpaper set --from-skwd --kind <static\|video\|we> <path\|id>` | the provider's own report, RECORDED: the shape above with `kind` as the provider named it, and no `position` or `tile` (the provider lays the picture out itself). Applies NOTHING back, and is a no-op with no write (exit 0, `recorded: false`) when the host's provider is not `skwd-wall` (the word in `/stage/wallpaper-provider` below), when the identity is this host's step-aside image (`AOIDE_SKWD_WALL_STANDIN`), or when the staged pick already names that same `(kind, identity)` for that rice. The ONLY writer exempt from the `declarative` lock: a provider's picker is not a stage writer, and refusing the record would leave this file describing something the screen is not showing |
@@ -1973,7 +1975,7 @@ Writers, and the exact shape each leaves:
 | `strx rice mode declarative` | NOTHING — a lock is not a rice switch. Its re-pin writes `theme.json` alone, and a pick stamped for another rice is hidden by the read-side rule rather than dropped |
 | `strx rice back <entry>` | the target entry's wallpaper value VERBATIM — an entry minted while a pick stood restores it as a pick, `rice`, `position` and `tile` and all; an entry with no wallpaper removes whatever stands |
 | `strx rice draft save <name>` | a verbatim copy into `rices/<rice>/drafts/<name>/wallpaper.json` (§4's drafts entry; never a routing target) |
-| the strillix lane's `home.activation.aoideSeedStage` | when the declared rice sets `aoide.theme.wallpaper`, `{"path": <that store path>, "rice": <declared>}` — the declared rice's own picture as the default — unless `wallpaper.json` already holds a pick for any rice, which is left byte-identical (`lib/wallpaper-seed.sh`, proved by `tests/wallpaper-seed/run.sh`). With no `aoide.theme.wallpaper` it writes NOTHING; the read-side rule above is what keeps a pick off another rice |
+| the strillix lane's `home.activation.aoideSeedStage` | when the declared rice sets `strillix.theme.wallpaper`, `{"path": <that store path>, "rice": <declared>}` — the declared rice's own picture as the default — unless `wallpaper.json` already holds a pick for any rice, which is left byte-identical (`lib/wallpaper-seed.sh`, proved by `tests/wallpaper-seed/run.sh`). With no `strillix.theme.wallpaper` it writes NOTHING; the read-side rule above is what keeps a pick off another rice |
 | the greeter tree build (`modules/dendrites/greeter.nix`) | inside the tree only, `{"path": <tree>/rices/<owner>/wallpaper/<owner>-logon.{webp,png,jpg,jpeg}, "rice": <declared>}` when the face's rice ships a logon picture (`wallpaper/<owner>-logon.<ext>`, first match in that order). The greeter's `LockPreview` draws it as the logon background; the tree's `wallpaper/` folder rides along whole |
 
 `stage_for_rice` — the one implementation of the stage half, shared by
@@ -1991,7 +1993,7 @@ they always were.
 ### `/stage/wallpaper-provider` — **v0**
 
 One word: the name of the provider that paints a rice's wallpaper on this host.
-It is the fact `aoide.wallpaper.provider` (nucleus, §0's enable-facts table)
+It is the fact `strillix.wallpaper.provider` (nucleus, §0's enable-facts table)
 written into the runtime root by the `strillix` lane's activation seed, beside the
 staged theme that seed already publishes. `quickshell` — the shell's own
 `aoide-wallpaper` layer — is the default and the answer when the file is absent
@@ -2025,7 +2027,7 @@ the staged state without a rebuild.
 
 ### `run/qml/components.json` — **v0**
 
-The component slots this host filled: `aoide.components` (§0's facts table)
+The component slots this host filled: `strillix.components` (§0's facts table)
 as the shell reads it, one entry per slot, keyed by slot name.
 
 ```json
@@ -2062,8 +2064,8 @@ refusal, exit 1.
 ### `/declared/theme.json` — **v0**
 
 The DECLARED rice's notes: the active rice's committed `theme.json` with the
-venue's `aoide.theme.override` applied and the host's resolved geometry (the
-non-null fields of `aoide.theme.geometry`) laid over the rice's own
+venue's `strillix.theme.override` applied and the host's resolved geometry (the
+non-null fields of `strillix.theme.geometry`) laid over the rice's own
 (`lib/theme.nix`'s `stagePatch`, §1's override and geometry tiers), its
 top-level `rice` field set to that rice's name, keys sorted (`jq -S`, matching `serde_json::Value`'s BTreeMap ordering). Written by
 the SAME activation seed that writes `/stage/theme.json` above
@@ -2100,9 +2102,9 @@ Nothing in the Rust crates writes it — `handle_rice_stage` only reads.
 
 The venue's part of the DECLARED rice, as data: a JSON object keyed by theme
 tier (`palette`, `base16`, `bar`, `notif`, `window`, `geometry`). A colour
-tier's value is the slots the host's `aoide.theme.override` changes in the
+tier's value is the slots the host's `strillix.theme.override` changes in the
 active rice's committed `theme.json`; `geometry`'s is the fields the host's
-`aoide.theme.geometry` sets to a value other than the document's, such as
+`strillix.theme.geometry` sets to a value other than the document's, such as
 `{"palette":{"bg":"#191724"},"geometry":{"terminalOpacity":1}}`. It is
 `lib/theme.nix`'s `venueDelta` — `stagePatch`'s result minus the committed
 document — so a slot or field the venue leaves alone is not in it, and the file
@@ -2155,7 +2157,7 @@ syntax — the DECLARED rice's terminal opacity, and nothing else.
 Writer: `home.activation.aoideSeedStage`'s seed script
 (`modules/dendrites/strillix/runtime.nix`), the same run that publishes the two
 `theme.json` twins above and below. It writes the active rice's
-`aoide.theme.geometry.terminalOpacity` (§1), and **deletes the file when that
+`strillix.theme.geometry.terminalOpacity` (§1), and **deletes the file when that
 is `null`** — an absent file is what makes kitty fall through to the host's
 `background_opacity`, and a value left over from a previous rice must not
 outlive it. Read-only for everyone else: no runtime writer touches it, and no
@@ -2389,7 +2391,7 @@ venue's own look has it.
 | Variable | Value | Source |
 | --- | --- | --- |
 | `$aoide_lock_color` | `rgb(rrggbb)` | `palette.bg`, the ground behind the picture |
-| `$aoide_lock_image` | absolute path | the rice's `lockscreen.<ext>` (§5) in the RUNTIME rices, `$AOIDE_ROOT/rices/<rice>/` |
+| `$aoide_lock_image` | absolute path | the rice's `lockscreen.<ext>` (§5) in the RUNTIME rices, `$STRILLIX_ROOT/rices/<rice>/` |
 | `$aoide_lock_field_y` | `-26%` | `theme::emit::hyprlock::FIELD_Y`: the password field's centre, percent of output height below the middle |
 | `$aoide_lock_field_outer` | `rgb(rrggbb)` | `window.border` |
 | `$aoide_lock_field_inner` | `rgb(rrggbb)` | `notif.bg` |
@@ -6943,11 +6945,11 @@ habit.rice.declared = "sonata";   ──┬──────►  aggregations.<
 habit.rice.available = [ ];       ──┼──────►  built-in set (declared ∪ available, closed under borrows)
                                   ──┴──────►  habit.aggregation.<declared>.enable   (host only)
                                   ──────────►  extraModulesFor: checks, then rice/borrow/rices,
-                                               aoide.rice, aoide.rices.{builtIn,greeter}
+                                               strillix.rice, strillix.rices.{builtIn,greeter}
 ```
 
 - **`declared`** is the rice this host PERFORMS. It becomes the platform fact
-  `aoide.rice` and selects that rice's body as an aggregation on the host: the
+  `strillix.rice` and selects that rice's body as an aggregation on the host: the
   `system` half, and the `home` half for every Home Manager user with
   `home.enable = true` (habit v0.5.0: a host-selected group's home half reaches
   each such user, as if it had selected the group). On a host with more than one
@@ -6972,7 +6974,7 @@ it was given:
 | a second rice's aggregation enabled by hand (exclusivity) | `rice aggregation <n> is enabled, but habit.rice.declared = …` |
 | a rice folder named like an aggregation (name collision) | `… share a name with an aggregation` |
 
-A host that names no rice performs none: `aoide.rice` is null, no body is
+A host that names no rice performs none: `strillix.rice` is null, no body is
 imported, no paint lane is selected by a rice, and the rice renderer comes
 only with a rice (or with a strillix provider, which brings the runtime). The
 platform asserts that a built-in rice is painted by the strillix runtime
@@ -7005,7 +7007,7 @@ as data and imports only what it selects. Its shape:
     };
     module = { lib, rice, borrow, ... }: {   # WHAT the paint is: theme, layout
       config = lib.mkDefault {
-        aoide.theme.palette = { bg = "…"; fg = "…"; accent = "…"; urgent = "…"; };
+        strillix.theme.palette = { bg = "…"; fg = "…"; accent = "…"; urgent = "…"; };
       };
     };
   };
@@ -7037,8 +7039,8 @@ as data and imports only what it selects. Its shape:
   4. the rice: `rice.hyprland.*`, and its `mkDefault` values;
   5. group and dendrite values. The lint reads only the rice, so a plain group
      or dendrite write outranks it, and rank 4 holds over 5 only where that
-     value is `mkDefault` too. No `modules/` file plain-writes `aoide.theme` or
-     `aoide.layout` today.
+     value is `mkDefault` too. No `modules/` file plain-writes `strillix.theme` or
+     `strillix.layout` today.
 - The **ten component slots** are `bar`, `launcher`, `powermenu`,
   `notifications`, `wallpaper`, `dock`, `calendar`, `switcher`, `lock` and
   `greeter`. Each is filled by its `strillix` provider: the Quickshell component
@@ -7048,7 +7050,7 @@ as data and imports only what it selects. Its shape:
   so it brings no runtime (`modules/dendrites/greeter.nix`). A consumer names another provider for
   a slot in its own selection (a plain write outranks the body's default,
   `habit.dendrites.wallpaper.provider = "skwd-wall"`).
-- **Providers say WHO; `aoide.layout` says WHAT.** A body's layout
+- **Providers say WHO; `strillix.layout` says WHAT.** A body's layout
   declares the surface and widget types it brings into existence; its
   providers choose the implementation of each slot. The two never overlap.
 - `hyprland.conf` is the rice's own hyprlang file (binds, unbinds, layout and
@@ -7104,7 +7106,7 @@ does not read the body.
   wrapper. It refuses a module that declares `imports` or `options`, so the walk
   sees every value the module can set.
 
-The **full** "only sets `aoide.theme`" invariant is a documented convention:
+The **full** "only sets `strillix.theme`" invariant is a documented convention:
 the priority half above is checked, the option set is not. Per-module
 option-diffing is disproportionate, so `tests/rice-shape/run.sh` (fixtures that
 fail without the check) and `tests/selection` back the rest.
@@ -7131,7 +7133,7 @@ field, nothing in `rice.nix`. Only a rice that ships it dresses the lock
 screen, with the picture and colours from tiers it already authors
 (`/stage/hyprlock.conf`, §4); a rice that ships none leaves the lock as the
 venue has it, and deleting the file takes the opinion away with no trace. The
-name is the render surface's, `aoide.surfaces.lockscreen`. The declared rice's
+name is the render surface's, `strillix.surfaces.lockscreen`. The declared rice's
 dress is rendered at build time (`/declared/hyprlock.conf`, §4). The
 picture dresses hyprlock only: a rice that also ships a `widgets/lockscreen.qml`
 face is locked by the shell's session-lock host instead (`strx lock`;
@@ -7146,7 +7148,7 @@ there the field overlaps the tile's lower edge.
 
 ### Per-rice flavor widgets
 
-Beyond `aoide.theme` notes, a rice MAY also carry its own QML for a fixed
+Beyond `strillix.theme` notes, a rice MAY also carry its own QML for a fixed
 set of "flavor" surfaces — committed files, not nix options:
 
 - **Convention:** `rices/<name>/widgets/<slot>.qml`. ANY `.qml` file
@@ -7194,7 +7196,7 @@ set of "flavor" surfaces — committed files, not nix options:
   (`ThemeState`) and `bridge` (`ShellBridge`) always, plus whatever
   slot-specific extras the anchor declares (e.g. the bar slot's `shared`)
   — **never** nix `config.*`. This does not loosen the rice-shape rule above:
-  a rice's body still sets **ONLY** `aoide.theme` and `aoide.layout` in
+  a rice's body still sets **ONLY** `strillix.theme` and `strillix.layout` in
   its `module` — widgets are
   committed QML files carried by the build, not nix options, and a widget is
   structurally incapable of reaching host/lane options through this surface.
@@ -7215,7 +7217,7 @@ set of "flavor" surfaces — committed files, not nix options:
 `StagingEngine.resolveRice(rice, slot)` resolves a slot through a floor, not
 just the one rice: the active rice's own file if it authored the slot, else
 **sonata**'s (the shipped standard rice — the baseline every rice can fall
-back to, a fixed constant independent of `aoide.rice`'s own default, which
+back to, a fixed constant independent of `strillix.rice`'s own default, which
 is null), else `""` (the anchor's own lane-side
 `fallback` Component, when it has one, or nothing). `WidgetSlot.resolvedSource`
 keys off the RESOLVED rice, not a bool, so a live rice-switch between two
@@ -7257,9 +7259,9 @@ additions introduce (`shared`, the powermenu slot's `.item` handle,
 
 **Additive (2026-08-17) — declared widget-type registry:** everything above
 this paragraph is the **anchored** catalog — a slot name a host surface
-already wired a `WidgetSlot`/`SurfaceSlot` for. `aoide.layout.widgets`
+already wired a `WidgetSlot`/`SurfaceSlot` for. `strillix.layout.widgets`
 (`modules/nucleus/options.nix`, house rule 5's other half of the closed
-`aoide.theme` + `aoide.layout` pair) is a second, independent
+`strillix.theme` + `strillix.layout` pair) is a second, independent
 mechanism: it lets a rice **register a brand-new slot** via nix, apart from
 the fixed catalog above, instead of only dressing a name the lane already
 anchored. `layout` carries the rice's STRUCTURE (which widget/surface
@@ -7305,7 +7307,7 @@ acts.
 top-level `.widgets` key, sibling to `.palette`/`.base16`/`.bar`
 (`theme.json`'s fields are flat-per-concern, never nested under a
 `"theme"` key; precedent: `theme.json` already carries a top-level `rice`
-key with no `aoide.theme.rice` option). No separate file: `theme.json` is
+key with no `strillix.theme.rice` option). No separate file: `theme.json` is
 the one stage/draft-routed twin file (`rice mode draft` symlinks it), so
 splitting a second file off would have to duplicate that same routing and
 keep two files atomically consistent across every flip — a cost the option
@@ -7325,7 +7327,7 @@ entry, `{}` when absent, never an error, never a skipped rice. `rice
 stage` hot-syncs one rice's entry live, no rebuild
 (`sync_rice_registry`, `pkgs/aoide/crates/strillix-rice/src/widgets.rs`), mirroring
 `sync_rice_widgets`'s existing `manifest.json` hot-sync. The compositor
-look (`modules/dendrites/compositor/hyprland/default.nix`) reads `aoide.layout.widgets`
+look (`modules/dendrites/compositor/hyprland/default.nix`) reads `strillix.layout.widgets`
 (the nix option, active rice only) to generate one layerrule pair per
 `kind = "surface"` entry — filtered to `surface` first, since a `dock` entry
 has no layer surface of its own and must never generate a namespace/glass
@@ -7365,9 +7367,9 @@ own `rice.nix` the same way and hosted by `RiceSurfaces.qml`.
 
 ### Expected paint — `run/qml/rices/surfaces.json`
 
-`aoide.layout.surfaces` (`modules/nucleus/options.nix`, the same
+`strillix.layout.surfaces` (`modules/nucleus/options.nix`, the same
 `layout` namespace as `widgets` above — deliberately NOT a fourth
-top-level `aoide.*` name, and not `aoide.surfaces`, which is the separate
+top-level `aoide.*` name, and not `strillix.surfaces`, which is the separate
 lane ownership registry Stylix reads) declares which painted surfaces a
 rice **expects to be mapped**. It is `attrsOf` one-flag entries, keyed by
 slot name, `perMonitor` (bool, default `false`): `true` = one mapped layer
@@ -7390,7 +7392,7 @@ rice's statement, not a hardcoded list.
 `$out/qml/rices/surfaces.json`, deployed with the rest of the tree to
 `run/qml/rices/surfaces.json`. It is deliberately NOT keyed by rice, unlike
 `manifest.json`/`registry.json` beside it: those describe the whole
-rices because `rice preview` can switch rices at runtime, whereas an
+rices because `strx rice stage` can switch rices at runtime, whereas an
 expectation is about what the **active rice** should have mapped right now —
 and the option it comes from already is that, since the active rice is the
 one body the host selected. So one object, whose keys are the
@@ -7405,7 +7407,7 @@ directly against the compositor's layer list and derives nothing of its own:
                 "aoide-dock": { "perMonitor": false } } }
 ```
 
-`rice` is `config.aoide.rice`. The file is published on every host, so a
+`rice` is `config.strillix.rice`. The file is published on every host, so a
 rice that declares none ships an empty `surfaces` object — emitted rather
 than omitted, and read exactly as an absent file (below).
 
@@ -7479,7 +7481,7 @@ on refusal:
   unknown or malformed placeholder is a structured error, never a silent
   no-op.
 - `surfaces` — optional list of surface names the element claims; folded
-  into `aoide.surfaces` with `owner = "<element>"` once the elements lane
+  into `strillix.surfaces` with `owner = "<element>"` once the elements lane
   (L-E3) lands. Not consumed by the cargo pipeline itself.
 - `run.exec` — the full command line; the literal token `{run}` is
   substituted with the absolute `run/elements/<element>` path at
@@ -7510,7 +7512,7 @@ The ONLY place a running element reads its config from; nothing under
 pipeline, `run_elements_dir()`, and `element seed` are implemented and
 tested. `rice stage` does not yet render elements as part of the stage
 loop, and no nix lane yet reads `elements/` at eval or generates a
-systemd unit / exec-once line / `aoide.surfaces` claim — those are L-E2
+systemd unit / exec-once line / `strillix.surfaces` claim — those are L-E2
 and L-E3, later phases in the same lane, not yet built.
 
 ---

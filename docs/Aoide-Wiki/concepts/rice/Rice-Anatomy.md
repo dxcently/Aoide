@@ -17,17 +17,17 @@ committed or runtime, and who writes it. The vocabulary those roles are named
 in lives in [[Rice-Vocabulary]]; this page grounds the words in the actual
 directories.
 
-The committed score lives in the dev git checkout at `$AOIDE_FLAKE_ROOT/rice/`
-(default `~/Aoide/rice`; `strx onboard` links `~/rice` → the checkout's
-`rice/` dir, never clobbering an existing file or symlink, and seeds the
+The committed score lives in the dev git checkout at `$AOIDE_FLAKE_ROOT/rices/`
+(default `~/Aoide/rices`; `strx onboard` links `~/rice` → the checkout's
+`rices/` dir without clobbering an existing file or symlink, and seeds the
 checkout's `rices/preferences.md` when absent). The checkout's
 `rices/` is the **rice agent's writable committed domain** (house rule
 #1, `AGENTS.md`): the agent commits *there* and, for score, nowhere else. The
-runtime half hangs off `$AOIDE_ROOT` (absolute-path-wins, default `~/.aoide`):
+runtime half hangs off `$STRILLIX_ROOT` (absolute-path-wins, default `~/.strillix`):
 the stage the desktop reads (`$STRILLIX_ROOT/stage/`), the composed host
-rices `strx rice compose` writes (`$AOIDE_ROOT/rices/<name>/`),
-saved drafts (`$AOIDE_ROOT/rices/<rice>/drafts/`), plus `run/qml/`,
-`state/`, and `log`. `strx rice declare <name>` is the seam between the two
+rices `strx rice compose` writes (`$STRILLIX_ROOT/rices/<name>/`),
+saved drafts (`$STRILLIX_ROOT/rices/<rice>/drafts/`). Core's `run/qml/`,
+`state/` and `log` hang off `$AOIDE_ROOT` (default `~/.aoide`). `strx rice declare <name>` is the seam between the two
 roots: it copies a composed rice from the runtime rices into the checkout's
 `rices/<name>/`, less its top-level `history/` and `drafts/` (the
 machine's undo history and scratch, which stay behind) — no `git add`, no rebuild; the user gates those.
@@ -37,16 +37,16 @@ machine's undo history and scratch, which stay behind) — no `git add`, no rebu
 | Subfolder | Role | Tree | Written by |
 |---|---|---|---|
 | `rices/` (checkout) | per-rice homes + cross-cutting design memory | committed score | rice agent |
-| `/stage/` | live preview state — the seam the desktop reads | runtime (`$AOIDE_ROOT`) | [[theme]] · `strx rice` · QML |
-| `rices/<name>/` | the composed host rices | runtime (`$AOIDE_ROOT`) | `strx rice compose` |
-| `rices/<rice>/drafts/` | saved drafts | runtime (`$AOIDE_ROOT`) | `strx rice draft save` |
+| `$STRILLIX_ROOT/stage/` | live preview state — the seam the desktop reads | runtime (`$STRILLIX_ROOT`) | [[theme]] · `strx rice` · QML |
+| `rices/<name>/` | the composed host rices | runtime (`$STRILLIX_ROOT`) | `strx rice compose` |
+| `rices/<rice>/drafts/` | saved drafts | runtime (`$STRILLIX_ROOT`) | `strx rice draft save` |
 
-Everything in the checkout's `rice/` is versioned score; the runtime surface
-sits outside it under `$AOIDE_ROOT`, created on demand.
+Everything in the checkout's `rices/` is versioned score; the runtime surface
+sits outside it under `$STRILLIX_ROOT`, created on demand.
 
 > **The shipped standard rice lives in the rices like any other.**
 > The shipped standard, `rices/sonata/`, is upstream-owned and
-> evolving; a host performs it by naming it (`aoide.rice = "sonata";`).
+> evolving; a host performs it by naming it (`strillix.rice = "sonata";`).
 > Every other rice is clone-owned, and upstream never touches it. See [[Self-Ricing#The Shipped Baseline Is Guarded, Not
 > Frozen]] for the full guarantee.
 > `pkgs/strillix-rices` bakes the committed `rices/` tree into
@@ -72,7 +72,7 @@ holds:
 
 | Subfolder/file | Holds |
 |---|---|
-| `rice.nix` | a body (`system`: the ten strillix providers and a `module` setting `aoide.theme.*` (palette + base16 + component tiers + geometry + fonts + wallpaper) and `aoide.layout.*`; `home`: the `strillix` renderer and `hyprland.conf`). **No** host options, no host capabilities — so one score replays at any venue (`CONTRACTS.md §5`, [[Rice-Vocabulary#Replay — any rice, any host]]). The wallpaper note points at a file in the shared `/wallpapers/` library (`../../wallpapers/<file>`), not a per-rice `assets/` dir. |
+| `rice.nix` | a body (`system`: the ten strillix providers and a `module` setting `strillix.theme.*` (palette + base16 + component tiers + geometry + fonts + wallpaper) and `strillix.layout.*`; `home`: the `strillix` renderer and `hyprland.conf`). **No** host options, no host capabilities — so one score replays at any venue (`CONTRACTS.md §5`, [[Rice-Vocabulary#Replay — any rice, any host]]). The wallpaper note points at a file in the shared `/wallpapers/` library (`../../wallpapers/<file>`), not a per-rice `assets/` dir. |
 | `theme.json` | the rice's resolved theme values — the [[theme]] schema: `palette`, `polarity`, `base16`, `bar`/`notif`/`window`, `geometry`. The baked-only tiers (`wallpaper`, `fonts`) live in `rice.nix` alone and have no twin here — a convention, not a gate: the schema never walks a document's top-level keys, so a stray copy would pass `rice lint` and ride the activation seed into the stage file unread. |
 | `palette/` | this rice's transpose keys — the palette variants `rice transpose <rice> <key>` swaps among |
 | `sounds/` | notification + system sounds (the chimes dimension) |
@@ -118,18 +118,17 @@ folder in the repo, not the wiki.
 
 The live preview/runtime state, hot-reloaded by [[Quickshell]] and never
 committed. Written only by **atomic write-temp-then-rename**, so a reader never
-sees a torn file (`CONTRACTS.md §4`). Split by owner into two trees, both off
-the runtime root (`$AOIDE_ROOT`, default `~/.aoide`):
-`$STRILLIX_ROOT/stage/` holds rice/paint staging,
-`$AOIDE_ROOT/state/stage/` holds CONDUCTING state. The files:
+sees a torn file (`CONTRACTS.md §4`). Split by owner into two trees: `$STRILLIX_ROOT/stage/` (default `~/.strillix/stage`)
+holds rice/paint staging, and `$AOIDE_ROOT/state/stage/` (default `~/.aoide/state/stage`)
+holds CONDUCTING state. The files:
 
 | File | Holds | Written by | Tree |
 |---|---|---|---|
 | `theme.json` | the fully-resolved theme values (colours concrete, no `null`) | [[theme]] `emit stage` / `strx rice stage`, the strillix lane's activation seed (`home.activation.aoideSeedStage`), `strx reload` | `/stage/` |
 | `wallpaper.json` | the live wallpaper: `{"path": …}` (the rice's own DEFAULT) plus `"pick": true` when it is the user's own choice, `"kind": "static"/"video"/"we"` naming what the pick is (a scene carries `"weId"` instead of a path), and, for a picked still, `"tile": true` when it repeats at 1:1 and `"position": "tile"/"fill"` when `wallpaper set --position` forced one | `strx rice stage` (the rice's derivable wallpaper), `strx wallpaper set`/`wallpaper set --clear`/`wallpaper set --from-skwd`, `strx rice back` | `/stage/` |
-| `wallpaper-provider` | one word: the name of the SETTER that paints a rice's wallpaper here — `quickshell` (the shell's own layer) or a provider of the `wallpaper` capability; absent means `quickshell` | the strillix lane's `home.activation.aoideSeedStage` (it publishes the fact `aoide.wallpaper.provider`) | `/stage/` |
-| `theme.json` | the DECLARED rice's notes, venue `aoide.theme.override` and the host's geometry applied, `"rice"` naming it — the read-only twin `rice mode declarative` re-pins that rice from ([[theme]]) | the strillix lane's `home.activation.aoideSeedStage` | `/declared/` |
-| `venue.json` | the slots the venue's `aoide.theme.override` recolours and the geometry the host sets in the declared rice, per tier (`{}` with neither) — what staging lays over the runtime copy of that rice ([[theme]]) | the strillix lane's `home.activation.aoideSeedStage` | `/declared/` |
+| `wallpaper-provider` | one word: the name of the SETTER that paints a rice's wallpaper here — `quickshell` (the shell's own layer) or a provider of the `wallpaper` capability; absent means `quickshell` | the strillix lane's `home.activation.aoideSeedStage` (it publishes the fact `strillix.wallpaper.provider`) | `/stage/` |
+| `theme.json` | the DECLARED rice's notes, venue `strillix.theme.override` and the host's geometry applied, `"rice"` naming it — the read-only twin `rice mode declarative` re-pins that rice from ([[theme]]) | the strillix lane's `home.activation.aoideSeedStage` | `/declared/` |
+| `venue.json` | the slots the venue's `strillix.theme.override` recolours and the geometry the host sets in the declared rice, per tier (`{}` with neither) — what staging lays over the runtime copy of that rice ([[theme]]) | the strillix lane's `home.activation.aoideSeedStage` | `/declared/` |
 | `sessions.json` | the agent-session roster (`sessionId, agent, windowAddress, workspace, cwd, state, startedAt`, optional `parentSessionId`) | [[shellbridge]] + `aoide session` | `state/stage/` |
 | `hooks.json` | live Claude Code hook phases | shellbridge + `aoide session` | `state/stage/` |
 | `projects.json` | the project-anchor registry | `aoide project` | `state/stage/` |
@@ -147,8 +146,8 @@ absolute-path override, so relocating it relocates both trees at once; with
 no override each falls back to its own default under `$AOIDE_ROOT`
 (`stage_dir()` → `$STRILLIX_ROOT/stage`, `conducting_stage_dir()` →
 `$AOIDE_ROOT/state/stage`, itself `$AOIDE_STATE_DIR` when absolute else
-`$AOIDE_ROOT/state` — [[shellbridge]]). On first run the binaries migrate any
-pre-existing `~/Aoide/{rice/stage,state,log}` trees into `$AOIDE_ROOT`
+`$AOIDE_ROOT/state` — [[shellbridge]]). On first run the core binaries migrate any
+pre-existing `~/Aoide/{state,log}` trees into `$AOIDE_ROOT`
 (`fs::migrate_root_once`). The flake's `rice-runtime-untracked` check forbids
 any nix module reading `/stage/` at build time, so runtime state can
 never become load-bearing for the build.
@@ -156,7 +155,7 @@ never become load-bearing for the build.
 ## Repo Layout (the rice surface)
 
 ```
-$AOIDE_FLAKE_ROOT/rice/  (dev git checkout — committed score, default ~/Aoide/rice)
+$AOIDE_FLAKE_ROOT/rices/  (dev git checkout — committed score, default ~/Aoide/rices)
 ├── rices/            committed rices + cross-cutting design memory
 │   ├── sonata/          the shipped standard — upstream-owned, evolving; a LIGHT Greek key with no wallpaper (a marble ground baked from palette.bg)
 │   │   ├── rice.nix · theme.json
@@ -186,7 +185,7 @@ top-level `rice/` dir. The lookup is the Rice Map
 - [[Rice-Vocabulary]] — the vocabulary these roles are named in
 - [[Snowflake-Anatomy]] — the frozen sibling (`modules/`)
 - [[Self-Ricing]] — the rice loop, rices discipline, and coverage tiers
-- [[theme]] — the engine that resolves/lints/emits the stage file, the `aoide.theme` seam `theme.json` carries
+- [[theme]] — the engine that resolves/lints/emits the stage file, the `strillix.theme` seam `theme.json` carries
 - [[shellbridge]] · [[Session-Graph]] — the writers of the runtime stage files
 - [[Ricing-Protocol]] — the ricing protocol this page's per-rice design memory
   supports

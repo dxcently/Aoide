@@ -110,7 +110,7 @@ fn reload_staging_or_draft(inv: &Invocation, marker: mode::ModeMarker) -> Outcom
         return Outcome::error(
             "reload",
             "no rice currently staged or drafted — nothing to reload \
-             (`aoide rice mode stage` or `aoide rice mode draft <name>` first)",
+             (`strillix rice mode stage` or `strillix rice mode draft <name>` first)",
         )
         .with_data(json!({ "reason": "not-staged-or-drafted" }));
     };

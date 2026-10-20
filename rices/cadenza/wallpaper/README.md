@@ -28,7 +28,7 @@ The canvas warns that WallpaperPcb has no `clipboard`, `dock`, `ledger`,
 passes the same props to every widget, so these warnings are expected.
 
 Stage live with `strx wallpaper set <abs path>`. Declaring the wallpaper into
-`aoide.theme.wallpaper` for the rebuild is the User's call.
+`strillix.theme.wallpaper` for the rebuild is the User's call.
 
 ## The live board — `widgets/wallpaper.qml`
 

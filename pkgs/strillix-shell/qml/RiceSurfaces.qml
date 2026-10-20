@@ -1,6 +1,6 @@
 // RiceSurfaces.qml — non-visual host for the active rice's DECLARED
 // surface-kind widgets (CONTRACTS.md §5's "Per-rice flavor widgets";
-// `aoide.layout.widgets`, `modules/nucleus/options.nix` — this is the
+// `strillix.layout.widgets`, `modules/nucleus/options.nix` — this is the
 // QML runtime half, Phase 4, of a feature whose nix option + build-time
 // registry.json walk (Phase 1/2) and `rice stage`/`preview` runtime
 // hot-sync + `rice lint` validation (Phase 3) already landed).
@@ -18,7 +18,7 @@
 // renders nothing for free, no extra plumbing needed here.
 //
 // Instantiator (QtQml.Models) keyed on the declared-widgets list, so a live
-// rice switch (`aoide rice preview <name>`) tears down the old rice's
+// rice switch (`strillix rice stage <name>`) tears down the old rice's
 // entries and stands up the new rice's — the same reactive contract
 // WidgetSlot.resolvedSource already gives per-slot (CONTRACTS.md's
 // "Additive 2026-08-14 baseline-fallback resolution"). No other precedent

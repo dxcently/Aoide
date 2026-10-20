@@ -18,23 +18,22 @@ in
       default = "/home/${config.aoide.user}/.aoide";
       defaultText = literalExpression ''"/home/''${config.aoide.user}/.aoide"'';
       description = ''
-        The AOIDE RUNTIME root (L-C2, strillix-carrier lane, task #107) —
-        `state/` (conducting state + account/usage state), `run/` (the
-        live-deployed QML and element trees), `log` and the sessions all hang
-        off this one directory. Rice state does not: it lives under
-        `strillix.root`. Exported as `AOIDE_ROOT` on every unit that runs
-        an `aoide`/`aoided`/`strillix` binary, and into `aoide.user`'s own login
-        shells (never another account's, root's included). Core code default,
+        The AOIDE RUNTIME root: `state/` (conducting state + account/usage
+        state), `run/` (the live-deployed QML and element trees), `log` and the
+        sessions all hang off this one directory. Rice state does not: it lives
+        under the strillix runtime root. Exported as `AOIDE_ROOT` on every unit
+        that runs an `aoide` or `aoided` binary, and into `aoide.user`'s own
+        login shells (never another account's, root's included). Core code
+        default,
         matching this option's own default exactly (unset == set-to-default):
         `~/.aoide`, no nix required.
 
-        `~/Aoide` (this option's sibling, `aoide.checkout`) is NOT the
-        runtime root on any host — it is purely the dev git checkout. A
-        pre-L-C2 host's old `~/Aoide/{rice/stage,state,log}` trees migrate
-        into this root's equivalents one-shot, at the first real
-        `aoide`/`aoided`/`strillix` invocation after the switch (see
-        `aoide_storage::fs::migrate_root_once`'s own doc for the exact
-        mechanism).
+        `~/Aoide` (this option's sibling, `aoide.checkout`) is NOT the runtime
+        root on any host — it is purely the dev git checkout. A pre-split host's
+        old `~/Aoide/{state,log}` trees move into this root one-shot, at the
+        first real `aoide`/`aoided` invocation after the switch
+        (`aoide_storage::fs::migrate_root_once`). Rice state does not move here:
+        it stays under the strillix runtime root.
       '';
     };
 

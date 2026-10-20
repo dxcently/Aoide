@@ -40,14 +40,14 @@ shared per-widget blueprint anywhere.
 
 sonata is the rices's shipped standard — the light key, and the fallback
 every unauthored slot resolves to. Any host in the
-fleet performs it with one line — `aoide.rice = "sonata";` — and the whole
-`aoide.theme` fan-out swaps with zero other edits.
+fleet performs it with one line — `strillix.rice = "sonata";` — and the whole
+`strillix.theme` fan-out swaps with zero other edits.
 
 ## Host-agnostic by construction
 
-This rice sets ONLY `aoide.theme`. It names no host, enables no lane or
+This rice sets ONLY `strillix.theme`. It names no host, enables no lane or
 dendrite, touches no hardware or service, and keys its own polarity —
-`aoide.theme.polarity = "light"`, declared beside the palette in `rice.nix`
+`strillix.theme.polarity = "light"`, declared beside the palette in `rice.nix`
 (CONTRACTS.md §1). The venue
 (host) decides its instruments; sonata carries only the notes. That is exactly
 what lets one score be performed on any host with its own specifics and its own
@@ -65,7 +65,7 @@ opacity, not colour": kitty renders at `background_opacity` 0.86 and the bar
 sheet at ~0.30 opacity **over** this ground — `base00` stays in the pale
 marble-glass family, a warm sunlit stone.
 
-The polarity is **light**, the rice's own declaration (`aoide.theme.polarity`
+The polarity is **light**, the rice's own declaration (`strillix.theme.polarity`
 in `rice.nix`, mirrored in `theme.json`): `base00` is the lightest
 value and `base05`–`base07` are the dark inks.
 
@@ -314,7 +314,7 @@ not yet ended) names that terminal, "Kill terminal <name>"; anything else reads
   instead of near-vanishing into the marble ground. Edited in both
   `theme.json` and `rice.nix` (kept in sync). The compositor lane
   (`modules/dendrites/compositor/hyprland/default.nix`) already derives
-  `col.active_border`/`col.inactive_border` from `aoide.theme.window.border`/
+  `col.active_border`/`col.inactive_border` from `strillix.theme.window.border`/
   `.borderInactive` (falling back to `palette.accent`/`palette.bg` when a rice
   leaves them null) — no compositor-side change was needed, the pipeline just
   picked up the new rice-owned notes.

@@ -437,7 +437,7 @@ ShellRoot {
         }
     }
     // The declared widget-type registry's runtime half (CONTRACTS.md §5;
-    // aoide.layout.widgets, registry.json): hosts one SurfaceSlot per
+    // strillix.layout.widgets, registry.json): hosts one SurfaceSlot per
     // surface-kind entry the active rice declares. Empty registry (sonata
     // today) → no-op, same as powermenu/launcher above but data-driven
     // instead of a fixed slot name.

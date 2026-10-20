@@ -839,7 +839,7 @@ aoide/shellbridge.sock`).
 No adapter on the `aoide-conduct`/`strillix` side currently tails the mirrored
 aoide log (`~/Aoide/log`) and republishes anything from it into `notifications`
 either — `aoide-client`'s adapter skeleton (`crates/client/src/adapter.rs`)
-subscribes to `EventClass::{Audit,Gate,Rice,Content,Notification}` but has
+subscribes to `EventClass::{Audit,Gate,Content,Notification}` but has
 no `Secret` case at all, and no other crate in this workspace tails that
 file live.
 
@@ -1752,11 +1752,10 @@ display for a dialog); `Type = "simple"` + `Restart = "on-failure"` for the
 same "blocks forever" reason the broker service above holds. Its `path`
 carries `zenity` (a systemd user unit's default `PATH` does not reliably
 carry `environment.systemPackages` entries, the same lesson `shellbridge.nix`
-already learned for `hyprctl`/`curl`), and, only when `aoide.strillix.enable` is
-on, `AOIDE_DIALOG_CMD` names `pkgs.aoide.strillix`'s own `strillix` — `strillix`
-ships from a SEPARATE output than the `aoide` binary this unit execs (P-A8 of the
-binary-split workstream), so no sibling of `aoide` can be it and the provider is
-named explicitly. No explicit ordering
+already learned for `hyprctl`/`curl`), and `AOIDE_DIALOG_CMD` arrives from the user manager's environment, where the
+strillix dendrite sets it: the provider ships from a SEPARATE output than the
+`aoide` binary this unit execs (P-A8 of the binary-split workstream), so no
+sibling of `aoide` can be it. No explicit ordering
 against the SYSTEM `aoide-secrets-serve.service` exists or is needed: `watch::
 wait_for_follower` already waits out a not-yet-created events feed rather
 than exiting, so this unit coming up before the broker has bound its socket

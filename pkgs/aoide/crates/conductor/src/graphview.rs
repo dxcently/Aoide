@@ -1241,7 +1241,6 @@ pub fn hit_node(area: Rect, app: &App, x: u16, y: u16) -> Option<usize> {
 /// write clipped to the viewport.
 pub struct GraphScene<'a> {
     model: &'a Model,
-    palette: &'a crate::app::Palette,
     /// The card drawn with the bright selection, or `usize::MAX` for none
     /// (another pane holds the keyboard).
     selected: usize,
@@ -1258,8 +1257,8 @@ impl Widget for GraphScene<'_> {
         // hue), so an active agent lights its own connections; project trunks
         // keep the accent.
         let wire = |n: &Node| match n.state.as_deref() {
-            Some(s) if n.kind == NodeKind::Session => theme::state_style(s, self.palette),
-            _ => theme::accent_style(self.palette),
+            Some(s) if n.kind == NodeKind::Session => theme::state_style(s),
+            _ => Style::default(),
         };
         let port = |n: &Node| {
             let r = cam.scale_rect(n.world);
@@ -1354,7 +1353,7 @@ impl Widget for GraphScene<'_> {
             } else {
                 scratch.reset();
             }
-            render_card_into(n, i == self.selected, self.palette, &mut scratch);
+            render_card_into(n, i == self.selected, &mut scratch);
             blit_card(&mut p, o, r.x, r.y, &scratch);
         }
     }
@@ -1434,7 +1433,6 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
     f.render_widget(
         GraphScene {
             model: &model,
-            palette: &app.palette,
             selected: if app.sidebar_focused {
                 usize::MAX
             } else {
@@ -1458,40 +1456,27 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
 /// enumerated `(text, style)` sequence (dropping an empty row so the ones
 /// below it compact upward), and hand-timing each one's `y` to `set_line`
 /// needs no `Vec<Line>` collection step `Paragraph` would otherwise want.
-fn render_card_into(n: &Node, selected: bool, pal: &crate::app::Palette, buf: &mut Buffer) {
+fn render_card_into(n: &Node, selected: bool, buf: &mut Buffer) {
     let area = *buf.area();
-    let surface = theme::surface(
-        pal,
-        if n.kind != NodeKind::Session {
-            10
-        } else if n.role == "shell" || n.harness == "shell" {
-            3
-        } else {
-            6
-        },
-    );
-    let accent = theme::role_color(
-        pal,
-        if n.kind == NodeKind::Host {
-            theme::Role::Host
-        } else if n.kind != NodeKind::Session {
-            theme::Role::Project
-        } else if n.harness == "shell" || n.role == "terminal" {
-            theme::Role::Terminal
-        } else {
-            theme::Role::Agent
-        },
-    );
-    let border = if selected {
-        surface.fg(accent).add_modifier(Modifier::BOLD)
+    let accent = theme::role_color(if n.kind == NodeKind::Host {
+        theme::Role::Host
     } else if n.kind != NodeKind::Session {
-        surface.fg(accent)
+        theme::Role::Project
+    } else if n.harness == "shell" || n.role == "terminal" {
+        theme::Role::Terminal
     } else {
-        surface.patch(theme::state_style(n.state.as_deref().unwrap_or(""), pal))
+        theme::Role::Agent
+    });
+    let border = if selected {
+        Style::default().fg(accent).add_modifier(Modifier::BOLD)
+    } else if n.kind != NodeKind::Session {
+        Style::default().fg(accent)
+    } else {
+        theme::state_style(n.state.as_deref().unwrap_or(""))
     };
     // A cached card is muted whole, like the Mesh row it mirrors.
-    let surface = if n.cached { surface.patch(theme::muted(pal)) } else { surface };
-    let border = if n.cached { border.patch(theme::muted(pal)) } else { border };
+    let surface = if n.cached { theme::muted() } else { Style::default() };
+    let border = if n.cached { border.patch(theme::muted()) } else { border };
     let state = n.state.as_deref().unwrap_or("");
     let role = if n.role.is_empty() {
         if n.harness == "shell" {
@@ -1571,7 +1556,7 @@ fn render_card_into(n: &Node, selected: bool, pal: &crate::app::Palette, buf: &m
             top,
             vec![
                 (String::new(), surface),
-                (heading, surface.patch(theme::state_style(state, pal))),
+                (heading, surface.patch(theme::state_style(state))),
                 (third, surface),
             ],
         )
@@ -1613,7 +1598,7 @@ fn render_card_into(n: &Node, selected: bool, pal: &crate::app::Palette, buf: &m
                 _ => String::new(),
             },
             match n.folded {
-                Some(fold) if fold.awaiting > 0 => border.patch(theme::state_style("awaiting", pal)),
+                Some(fold) if fold.awaiting > 0 => border.patch(theme::state_style("awaiting")),
                 _ => border.add_modifier(Modifier::BOLD),
             },
         )))
@@ -1748,22 +1733,16 @@ fn truncate_end(s: &str, budget: usize) -> String {
 /// Render one card in isolation, at its own retained world size, for tests
 /// that inspect a single card's buffer without a `GraphScene`/`Camera`.
 #[cfg(test)]
-fn block_cells(n: &Node, selected: bool, pal: &crate::app::Palette) -> Buffer {
-    block_cells_at(n, selected, pal, n.world.w, n.world.h)
+fn block_cells(n: &Node, selected: bool) -> Buffer {
+    block_cells_at(n, selected, n.world.w, n.world.h)
 }
 
 /// As [`block_cells`], but at an explicit size — used to probe clipping at
 /// sizes the retained world rectangle would not itself produce.
 #[cfg(test)]
-fn block_cells_at(
-    n: &Node,
-    selected: bool,
-    pal: &crate::app::Palette,
-    width: i32,
-    height: i32,
-) -> Buffer {
+fn block_cells_at(n: &Node, selected: bool, width: i32, height: i32) -> Buffer {
     let mut buf = Buffer::empty(Rect::new(0, 0, width.max(2) as u16, height.max(2) as u16));
-    render_card_into(n, selected, pal, &mut buf);
+    render_card_into(n, selected, &mut buf);
     buf
 }
 
@@ -1825,7 +1804,6 @@ mod tests {
     use crate::app::App;
     use crate::scene::Placed;
     use aoide_conduct::graph::{Project, SessionRecord};
-    use ratatui::style::Color;
     use serde_json::Map;
     use std::time::Duration;
 
@@ -1902,7 +1880,6 @@ mod tests {
         let mut buf = Buffer::empty(area);
         GraphScene {
             model: &model,
-            palette: &app.palette,
             selected: model.selected,
         }
         .render(area, &mut buf);
@@ -2920,7 +2897,7 @@ mod tests {
                 "cards never resize"
             );
             let r = model.camera.scale_rect(n.world);
-            let cells = block_cells_at(n, true, &app.palette, r.w, r.h);
+            let cells = block_cells_at(n, true, r.w, r.h);
             assert_eq!(
                 (cells.area().width as i32, cells.area().height as i32),
                 (r.w, r.h)
@@ -3002,7 +2979,7 @@ mod tests {
         let app = App::for_test(vec![], vec![session("root", "/x", "working", None)], vec![]);
         let model = build_model(&app);
         let n = node(&model, "root");
-        let card = block_cells(n, false, &app.palette);
+        let card = block_cells(n, false);
         let (cw, ch) = (CARD_W as u16, CARD_H as u16);
 
         let cases: [(i32, i32, u16, u16); 4] = [
@@ -3035,7 +3012,7 @@ mod tests {
         let app = App::for_test(vec![], vec![session("root", "/x", "working", None)], vec![]);
         let model = build_model(&app);
         let n = node(&model, "root");
-        let card = block_cells(n, false, &app.palette);
+        let card = block_cells(n, false);
         let area = Rect::new(0, 0, 10, 10);
 
         for o in [(1000, 1000), (-1000, -1000)] {
@@ -3277,7 +3254,7 @@ mod tests {
     // ── Card content ──────────────────────────────────────────────────────
 
     #[test]
-    fn blocks_preserve_metadata_and_palette_contrast() {
+    fn blocks_preserve_metadata() {
         let mut parent = session("root", "/x", "working", None);
         parent.title = Some("Distinct task title".into());
         parent.petname = Some("brave-otter".into());
@@ -3290,31 +3267,17 @@ mod tests {
         let model = build_model(&app);
         let root = node(&model, "root");
         assert_eq!(root.world.x, node(&model, "child").world.x);
-        for (bg, fg) in [(0, 15), (15, 0)] {
-            let pal = crate::app::Palette {
-                bg: Some(bg),
-                fg: Some(fg),
-                accent: Some(3),
-                urgent: Some(1),
-                ..Default::default()
-            };
-            let cells = block_cells(root, true, &pal);
-            let text = buffer_rows(&cells).concat();
-            assert!(
-                text.contains("Distinct task title")
-                    && text.contains(" (…root)")
-                    && text.contains("claude · model-one")
-            );
-            assert_eq!(cells[(0, 0)].symbol(), "┏");
-            // `surface`'s foreground stays constant across layers -- only the
-            // background is layer-mixed -- so layer 0 is as good a probe as
-            // the card's real layer for the (layer-independent) fg value.
-            assert_eq!(cells[(2, 1)].fg, theme::surface(&pal, 0).fg.unwrap());
-            assert_ne!(cells[(2, 1)].bg, Color::Reset);
-        }
+        let cells = block_cells(root, true);
+        let text = buffer_rows(&cells).concat();
+        assert!(
+            text.contains("Distinct task title")
+                && text.contains(" (…root)")
+                && text.contains("claude · model-one")
+        );
+        assert_eq!(cells[(0, 0)].symbol(), "┏");
         let mut wide = root.clone();
         wide.title = "界".repeat(50);
-        let lines = grid_to_lines(&block_cells(&wide, false, &app.palette));
+        let lines = grid_to_lines(&block_cells(&wide, false));
         assert!(lines.iter().all(|l| l.width() as i32 == CARD_W));
     }
 
@@ -3344,7 +3307,7 @@ mod tests {
             node.label.chars().count()
         );
 
-        let block = block_cells(node, false, &app.palette);
+        let block = block_cells(node, false);
         let rendered = buffer_rows(&block).concat();
         assert!(
             rendered.contains("working"),
@@ -3398,7 +3361,7 @@ mod tests {
         app.graph.view = View::All;
         select_index(&mut app, 1);
         let model = build_model(&app);
-        let cells = block_cells(model.visible().nth(1).unwrap(), true, &app.palette);
+        let cells = block_cells(model.visible().nth(1).unwrap(), true);
         let rows = buffer_rows(&cells);
         let line = |y: usize| rows[y].clone();
         // 24×5: the title rides the top border, then identity, state and
@@ -3434,7 +3397,7 @@ mod tests {
         let rec = session("r", "/x", "working", None); // title stays None
         let app = App::for_test(vec![], vec![rec], vec![]);
         let model = build_model(&app);
-        let cells = block_cells(node(&model, "r"), false, &app.palette);
+        let cells = block_cells(node(&model, "r"), false);
         let text = buffer_rows(&cells).concat();
         assert_eq!(
             text.matches("claude").count(),

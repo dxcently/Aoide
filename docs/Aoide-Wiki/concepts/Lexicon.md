@@ -15,7 +15,7 @@ Before the familiar nine, Greek tradition (Pausanias, describing the cult at Mou
 
 | Muse | Greek | Domain | In this system |
 |---|---|---|---|
-| **Aoide** | Ἀοιδή | song, voice | the running, performing system — the orchestration core singing, headless or as the full Strillix desktop |
+| **Aoide** | Ἀοιδή | song, voice | the running, performing system — the orchestration core singing, headless or under the Strillix OS |
 | **Melete** | Μελέτη | practice, exercise | [[Melete]] — the coding agent, the **doer**: it practices, writes, builds, rehearses |
 | **Mneme** | Μνήμη | memory | [[Mneme]] — the knowledge server, the **rememberer**: the vault, the wiki, what was learned |
 
@@ -27,7 +27,7 @@ The engraved thesis (after Goethe's *"Architektur ist erstarrte Musik"*) splits 
 
 - **The frozen half** — the nix layer. Immutable, evaluated. The **score**: determines everything, performs nothing.
 - **The performed half** — the running desktop. Live, hot-reloadable, ephemeral. The **performance**: what the score sounds like tonight, at this venue.
-- **The seam** — [[theme]]. Theme values are frozen into the crystal at build time *and* sounded live at runtime (`stage/theme.json`, hyprctl, the kitty control socket). Both fan-outs derive from the same `aoide.theme`, so the baked theme and the live preview cannot drift.
+- **The seam** — [[theme]]. Theme values are frozen into the crystal at build time *and* sounded live at runtime (`stage/theme.json`, hyprctl, the kitty control socket). Both fan-outs derive from the same `strillix.theme`, so the baked theme and the live preview cannot drift.
 
 Each half gets its own word family, so a sentence always names which side of the seam it stands on.
 
@@ -78,7 +78,7 @@ Terms naming the connective tissue rather than either half:
 
 A **theme** is the single set of house colours a whole retinue wears in unison — a servant, a ship, a herald read at a glance as one household's. The industry term for this layer is *design tokens* (W3C design-tokens format, `CONTRACTS.md` §1), but a token names a single value; the engine dresses *every* surface in one rice's identity, which a token alone doesn't capture. One word covers both the values and the act of stamping them.
 
-The seam sits on neither of the two existing axes — the Greek axis (who acts) or the music axis (what is made and performed) — a seam-level name of its own. `aoide.layout` sits at the same seam, theme's structural sibling: theme is the rice's DRESS (palette · base16 · component tiers · geometry · fonts · wallpaper), layout is its STRUCTURE — which widget/surface TYPES a rice brings into existence (`modules/nucleus/options.nix`), stored in the same `theme.json` and read under the same closed paint-read whitelist (`AGENTS.md` house rule 5).
+The seam sits on neither of the two existing axes — the Greek axis (who acts) or the music axis (what is made and performed) — a seam-level name of its own. `strillix.layout` sits at the same seam, theme's structural sibling: theme is the rice's DRESS (palette · base16 · component tiers · geometry · fonts · wallpaper), layout is its STRUCTURE — which widget/surface TYPES a rice brings into existence (`modules/nucleus/options.nix`), stored in the same `theme.json` and read under the same closed paint-read whitelist (`AGENTS.md` house rule 5).
 
 ## How it all flows
 

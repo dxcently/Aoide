@@ -1,4 +1,4 @@
-# modules/dendrites/aoided.nix — the Strillix deltas for the aoided unit.
+# modules/dendrites/aoided.nix — the Aoide deployment on the core aoided unit.
 #
 # Deselecting this dendrite does not remove the aoided daemon: `aoided.service`,
 # its tmpfiles rules and the core session variables come from the core module
@@ -15,9 +15,7 @@
 # variables, and the `aoided.service` unit itself (portable, nixpkgs-only).
 # `aoide.sessionTarget` — the seam the core unit anchors through — is NOT set
 # here: the lane that brings a graphical session up sets it, so this file reads
-# no lane's option (root AGENTS.md house rule 5). Below that, the doors (mcp, a2a,
-# pair-watch), the discovery-advertisement firewall carve, and the usage widget
-# poller — core *binaries* in a still-Strillix *deployment* (migration brief §2.6 item 4).
+# no lane's option (root AGENTS.md house rule 5).
 #
 # The doors' settings (`aoide.mcp`, `aoide.a2a`, `aoide.mail.adapter`,
 # `aoide.usage`) are declared below, beside the units that read them, so they

@@ -207,7 +207,7 @@ pub fn rice_notes(name: &str) -> std::path::PathBuf {
 /// (CONTRACTS.md §4).
 ///
 /// Same content as the active rice's committed `theme.json` with the venue's
-/// `aoide.theme.override` applied (a plain file, never a symlink), published
+/// `strillix.theme.override` applied (a plain file, not a symlink), published
 /// by the strillix lane's activation seed — the file's own `"rice"` field
 /// says WHICH rice that was. Read for the declarative re-pin
 /// (`rice mode declarative`), which restores declared truth, and by
@@ -230,7 +230,7 @@ pub fn rice_record(name: &str) -> std::path::PathBuf {
 }
 
 /// The venue's recolour of the declared rice — `<rice>/declared/venue.json`
-/// (CONTRACTS.md §4): the slots `aoide.theme.override` changes, tier by tier,
+/// (CONTRACTS.md §4): the slots `strillix.theme.override` changes, tier by tier,
 /// published by the strillix lane's activation seed (`{}` when the host sets no
 /// override). Staging the declared rice overlays it on the runtime rices's
 /// copy. Absent on a host that never activated the lane; readers then overlay

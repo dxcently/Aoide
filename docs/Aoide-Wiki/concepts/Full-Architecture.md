@@ -104,7 +104,7 @@ routed through the desktop, not through `aoided`'s CLI trunk).
   rices/<rice>     place, never copies)          │
   rice.nix + theme.json                                 ▼
   rices/ (write-back)                          ┌─────────────┐
-       │                                          │  Theme   │  aoide.theme — one source
+       │                                          │  Theme   │  strillix.theme — one source
        └───────────────────────────────────────► └──────┬──────┘  [[theme]]
                                     two fan-outs         │
                        ┌─────────────────────────────────┴───────────────┐
@@ -138,7 +138,7 @@ the implemented/stubbed ladder.
 | [[aoided]]           | CLI+MCP operations; desktop events             | audit log (`$AOIDE_ROOT/log`); default-deny event bus   | implemented (skeleton)                     |
 | [[Self-Ricing]]      | prompt/wallpaper; `rices/`; shipped standard | `rices/<rice>/`; rices append; stage    | mostly real (`transpose` exit 64) |
 | [[Content-Pipeline]] | folders + manifests; Mneme API                 | in-place index; quarantine on lint fail             | stubbed (all commands exit 64)                |
-| [[theme]]         | `aoide.theme` (palette + component tiers)   | `/stage/theme.json`; baked dendrites + Stylix   | implemented (v0)                           |
+| [[theme]]         | `strillix.theme` (palette + component tiers)   | `/stage/theme.json`; baked dendrites + Stylix   | implemented (v0)                           |
 | [[shellbridge]]      | unix-socket commands; Hyprland IPC             | atomic JSON in `state/stage/` (conducting) + `/stage/` (rice); `hyprctl` dispatch    | implemented (accept loop live: `focuswindow`) |
 | [[Quickshell]]       | `state/stage/*.json` (sessions/hooks/graph/notifications) + `/stage/*.json` (theme/mode)  | widget socket commands; rendered surfaces            | implemented (9 real surfaces)              |
 | [[Hyprland]]         | baked config + `hyprctl` keywords              | IPC event/state socket                              | implemented                                |
@@ -147,14 +147,14 @@ the implemented/stubbed ladder.
 ## The theme seam in detail — one source, two fan-outs, zero drift
 
 Why preview and adopted state can never diverge: both derive from the same
-`aoide.theme` values. The theme schema v0 (palette `bg/fg/accent/urgent` + component
+`strillix.theme` values. The theme schema v0 (palette `bg/fg/accent/urgent` + component
 tiers `bar`/`notif`/`window`, each field `null` → palette, with the fallback
 applied **in the paint dendrites**) rides the external W3C design-tokens container
 format; [[theme]] (native Rust in `crates/strillix-rice/src/theme/`; commands `lint` /
 `resolve` / `emit {stage,hyprctl,osc,file}`) is the engine. See [[theme]].
 
 ```
-                     aoide.theme  (palette → component, v0)
+                     strillix.theme  (palette → component, v0)
                            │  single source of truth
              ┌─────────────┴──────────────┐
              ▼ REHEARSAL (live, uncommitted) ▼ RECORDING (adopted, committed)
@@ -240,13 +240,13 @@ default) — see [[Self-Ricing#Staging vs Declarative Mode]].
         ▼
   commit to rices/<rice>/   ──►  gated rebuild   ──►  RECORDING
         │                                     ↓ fleet-available: any host sets
-        └──►  append rices/ (learnings, preferences)      aoide.rice = "<name>"
+        └──►  append rices/ (learnings, preferences)      strillix.rice = "<name>"
               ← the "self" in self-ricing
 ```
 
 `rices/` is a rice agent's writable domain; nothing else is.
 
-Rice replay is implemented: `aoide.rice` (nucleus option, `nullOr str`,
+Rice replay is implemented: `strillix.rice` (nucleus option, `nullOr str`,
 default `null` — naming no rice performs no rice) is the rice a host
 performs, and a host SELECTS its rices (`habit.rice.declared` is what it performs,
 `habit.rice.available` what it builds in to stage without a rebuild);
@@ -364,22 +364,20 @@ conducting orchestration is `aoide`'s identity, painting is `strillix`'s:
   the 5-command `content` group (`register`/`propose`/`ingest`/`query`/
   `approve`), `make`, `update`. Core is nix-independent: cargo
   build, zero nix shell-outs.
-- **`strillix`** — the Strillix paint binary. `strx schema --json` holds the other
-  **48 commands**: the same `guide`/`schema`/`mcp serve` trio as their
-  `aoide` spellings, over strillix's own registry; the 18-command `rice` group
+- **`strillix`** — the Strillix paint binary. `strx schema --json` holds the rest of the surface: the same `guide`/`schema`/`mcp serve` trio as their
+  `aoide` spellings, over strillix's own registry; the `rice` group
   (`lint`, `stage`, `compose`, the 3-command `rice draft` group, the
   4-command `rice mode` group, the 5-command `rice history` rehearsal-snapshot
   group, `rice back`, `declare`; `transpose` is the 1 stub), `wallpaper set`,
   the 3-command `theme` group (`lint`/`resolve`/`emit`
   — the native design-token engine), `element seed` (renders a rice's
   committed `elements/*/element.json` into `run/elements/`), `shellbridge`,
-  the 2-command `quickshell` group (`reload` — the Quickshell IPC hot-reload
+  `reload` (the Quickshell IPC hot-reload
   trigger, rebuilding the whole scene from `shell.qml` in-process to pick up
-  dynamically-loaded widget/shell QML the file watcher can't track — and
-  `healthcheck`, the placeholder-screen lockup watchdog), `notifications push`,
+  dynamically-loaded widget/shell QML the file watcher can't track) and
+  `quickshell healthcheck` (the placeholder-screen lockup watchdog), `notifications push`,
   `onboard` (the nix half of installation: generates `./aoide.nix` — or
-  `--out <path>` — listing every
-  `aoide.*` module option, 161 today, derived live from the modules via the
+  `--out <path>` — listing every module option, derived live from the modules via the
   flake's `aoideOptions` output, defaults commented out with one-line
   descriptions, plus the env-knob appendix as comments, and prints the
   `imports = [ ./aoide.nix ];` line for the user's own flake — it never edits
@@ -467,7 +465,7 @@ for the layer anatomy, [[Codebase]] for file-level detail):
 │   └── overrides/   capability-scoped fixes (no records yet)
 ├── hosts/           one record per machine (yomi-strix is the real one; `_`-prefixed
 │                    dirs are the templates to copy) — flags, aggregations, the
-│                    aoide.rice selector, and a real
+│                    strillix.rice selector, and a real
 │                    hardware profile, switched live and running as the daily desktop
 ├── pkgs/            aoide/ (Rust workspace, two binaries — aoide/aoided core +
 │                    strillix paint), strillix-shell/ (the QML skeleton), strillix-rices/
@@ -490,13 +488,13 @@ option): `/stage/`, `/declared/`, `state/` (+ `state/stage/`),
 `run/qml/`, the composed
 host `rices/`, and the audit `log/`, created at runtime by
 systemd-tmpfiles, the quickshell lane's home-manager activation, and the
-binaries themselves; on first run the binaries migrate pre-existing
-`~/Aoide/{rice/stage,state,log}` into the root, each piece gated on its own
+binaries themselves; on first run the core binaries migrate pre-existing
+`~/Aoide/{state,log}` into the root, each piece gated on its own
 override being unset. `rices/**` in the checkout is
 versioned score, legitimately walked at eval.
 
 `hosts/` knows dendrites; dendrites never know hosts. Paint lanes read only
-`aoide.theme`, `aoide.layout` and `aoide.surfaces` plus the core scalars
+`strillix.theme`, `strillix.layout` and `strillix.surfaces` plus the core scalars
 and the rice selection root `AGENTS.md` house rule 5 enumerates; no
 module reads another module.
 The coupling discipline is contractual — the flake's checks (`surface-ownership`,

@@ -40,7 +40,7 @@
 
 let
   # The same Quickshell package the strillix lane installs — the
-  # daemon's rice-toggle path re-execs `aoide rice …`, whose widget-sync half
+  # daemon's rice-toggle path re-execs `strillix rice …`, whose widget-sync half
   # shells out to `quickshell ipc call shell reload`; the client binary must
   # be the build the live shell actually runs.
   quickshellPkg = aoideInputs.quickshell.packages.${pkgs.stdenv.hostPlatform.system}.default;
@@ -58,15 +58,15 @@ in
 lib.mkIf config.strillix.enable {
 
   # ── Runtime directories ──────────────────────────────────────────────────
-  # $STRILLIX_ROOT/stage/ is shared with aoided.nix's tmpfiles rules; systemd-tmpfiles
-  # deduplicates identical rules so declaring it here as well is safe.
+  # $STRILLIX_ROOT/stage/ is made here; core's tmpfiles rules (pkgs/aoide/module/aoided.nix)
+  # cover core's own trees only.
   systemd.user.tmpfiles.rules = [
     "d ${config.strillix.root}/stage 0755 - - -"
   ];
 
   # ── shellbridge systemd user service ─────────────────────────────────────
   systemd.user.services.shellbridge = {
-    description = "Aoide shellbridge — desktop ↔ agent bridge (socket in, stage-files out)";
+    description = "Strillix shellbridge — the desktop bridge (socket in, stage files out)";
 
     wantedBy = [ "graphical-session.target" ];
     after = [
@@ -193,7 +193,7 @@ lib.mkIf config.strillix.enable {
   # the same reach to the bridge acting on that session's behalf.
   #
   # The four ids are PowerAction::command()'s table in
-  # `crates/conduct/src/shellbridge.rs` — suspend, hibernate, reboot, poweroff.
+  # `pkgs/aoide/crates/strillix/src/bridge/power.rs` — suspend, hibernate, reboot, poweroff.
   security.polkit.extraConfig = ''
     polkit.addRule(function(action, subject) {
       if (subject.user === "${config.aoide.user}" &&
