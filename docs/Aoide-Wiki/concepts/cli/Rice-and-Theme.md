@@ -29,7 +29,7 @@ parent, so the whole rice tree rides that one override, and `run/qml/`
 resolves one level further up (the stage dir's parent's parent —
 `$AOIDE_ROOT/run/qml/` on the default layout, relocated by an
 `$AOIDE_STAGE_DIR` override too). `$AOIDE_STATE_DIR` (absolute) likewise
-overrides `state/`. All three binaries call `fs::migrate_root_once()` at
+overrides `state/`. Both core binaries call `fs::migrate_root_once()` at
 process start: on first run it moves a pre-existing
 `~/Aoide/{rice/stage,state,log}` tree into the current root, each piece
 gated on its own override being unset. All file

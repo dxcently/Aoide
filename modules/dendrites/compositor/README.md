@@ -31,13 +31,12 @@ modules/dendrites/compositor/
   `geometry.blurEnabled`, so a blur-off rice is glassless in the bake exactly as
   it is after a stage.
 - **`hyprland/behaviour.nix` — the BEHAVIOUR.** Keybinds, input devices, tiling
-  layout, misc quality-of-life, behavioural window rules — everything a re-rice
-  must not disturb. Its options (`aoide.hyprland.monitors`,
+  layout, misc quality-of-life, behavioural window rules — everything a re-rice leaves alone. Its options (`strillix.hyprland.monitors`,
   `.scrollingMonitor`) stay a host-facing surface, which is why the catalogue
   keeps the name `hyprland` for this file while the look is reached through
   `compositor`.
 - **`modules/dendrites/greeter.nix` — the greeter.** When the declared rice
-  ships `widgets/greeter.qml` (`aoide.rices.greeter`), greetd running
+  ships `widgets/greeter.qml` (`strillix.rices.greeter`), greetd running
   `cage` + Quickshell as its greeter user on a store tree (the lane's
   `GreeterHost.qml`, the face and the rice's `icons/` from the shipped
   rices, the dress, and the
@@ -51,9 +50,9 @@ modules/dendrites/compositor/
 
 ## What it consumes
 
-Exactly the dress (`aoide.theme` — palette and component tiers, plus the
+Exactly the dress (`strillix.theme` — palette and component tiers, plus the
 override tier through `lib/theme.nix`'s `resolve`), the structure
-(`aoide.layout` — declared widget/surface types drive the generated
+(`strillix.layout` — declared widget/surface types drive the generated
 layerrules), the identity scalar `aoide.user`, and its own fact. Nothing else,
 from no other module (root `AGENTS.md` house rule 5). The venue recolour is a
 read: `resolve` rewrites colours equal to an overridden anchor's authored value

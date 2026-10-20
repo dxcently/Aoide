@@ -3,6 +3,6 @@
 {
   imports = [ ./runtime.nix ];
   habit.home.imports = [ ./runtime-home.nix ];
-  aoide.components.bar.provider = "strillix";
-  aoide.surfaces.bar.owner = "quickshell";
+  strillix.components.bar.provider = "strillix";
+  strillix.surfaces.bar.owner = "quickshell";
 }

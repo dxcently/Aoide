@@ -64,5 +64,5 @@ draws around `rice/`.
 Nothing above itself. The catalogue plus the contract aggregate are the whole
 surface a host sees; the layers below never read from outside their own
 directory tree (root `AGENTS.md` house rule 5 is the one enumerated exception,
-for paint lanes reading `aoide.theme`/`aoide.layout`/`aoide.surfaces`
+for paint lanes reading `strillix.theme`/`strillix.layout`/`strillix.surfaces`
 plus the core scalars and the rice selection).

@@ -1069,6 +1069,44 @@ fn an_absent_aoided_gets_no_call_until_it_listens() {
     let _ = std::fs::remove_dir_all(&stage);
 }
 
+/// A no from core that arrives after aoided stopped listening leaves the call owed. The probe found
+/// aoided up, the CLI ran and answered no, and the socket was gone when the door looked again. The
+/// verb may already have reached aoided, so the door reports Absent, and the verb goes out again
+/// once aoided listens.
+#[cfg(unix)]
+#[test]
+fn a_no_from_core_after_aoided_stops_listening_leaves_the_call_owed() {
+    let _guard = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+    let _env = EnvVars::save(&["AOIDE_CORE_BIN", "AOIDE_DAEMON_SOCKET"]);
+    let dir = aoide_test_support::unique_tmp("stopped");
+    std::fs::create_dir_all(&dir).unwrap();
+    let socket = dir.join("aoided.sock");
+    let _first = std::os::unix::net::UnixListener::bind(&socket).unwrap();
+    let stub = dir.join("aoide");
+    std::fs::write(
+        &stub,
+        format!(
+            "#!/bin/sh\nprintf 'argv: %s\\n' \"$*\" >> '{}'\nrm -f '{}'\n[ -e '{}' ] || exit 1\n",
+            dir.join("calls").display(),
+            socket.display(),
+            dir.join("answers-yes").display(),
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&stub, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+    std::env::set_var("AOIDE_CORE_BIN", &stub);
+    std::env::set_var("AOIDE_DAEMON_SOCKET", &socket);
+
+    assert_eq!(super::door::call(&["session", "codex", "sync"], None), super::door::Reply::Absent);
+    assert_eq!(core_calls(&dir), ["session codex sync --json"], "the CLI ran and answered no");
+
+    std::fs::write(dir.join("answers-yes"), "").unwrap();
+    let _second = std::os::unix::net::UnixListener::bind(&socket).unwrap();
+    assert_eq!(super::door::call(&["session", "codex", "sync"], None), super::door::Reply::Done);
+    assert_eq!(core_calls(&dir).len(), 2, "the owed verb goes out again once aoided listens");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// A socket file a dead aoided left behind refuses connections, so it counts as absent.
 #[cfg(unix)]
 #[test]

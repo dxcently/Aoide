@@ -12,7 +12,7 @@
 {
   imports = [ ../strillix/runtime.nix ];
   habit.home.imports = [ ../strillix/runtime-home.nix ];
-  aoide.components.wallpaper.provider = "strillix";
-  aoide.surfaces.wallpaper.owner = "quickshell";
-  aoide.wallpaper.provider = lib.mkDefault "quickshell";
+  strillix.components.wallpaper.provider = "strillix";
+  strillix.surfaces.wallpaper.owner = "quickshell";
+  strillix.wallpaper.provider = lib.mkDefault "quickshell";
 }

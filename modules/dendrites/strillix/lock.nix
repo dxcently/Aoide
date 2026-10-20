@@ -7,8 +7,8 @@
 {
   imports = [ ./runtime.nix ];
   habit.home.imports = [ ./runtime-home.nix ];
-  aoide.components.lock.provider = "strillix";
-  aoide.surfaces.lockscreen.owner = "quickshell";
+  strillix.components.lock.provider = "strillix";
+  strillix.surfaces.lockscreen.owner = "quickshell";
 
   # ── The lock (`strillix lock`) ──────────────────────────────────────────────
   # `strillix lock` runs one of two lockers, and this provider carries both and
@@ -50,8 +50,8 @@
     $aoide_lock_name_y = -200%
     $aoide_lock_name_font = 0x00000000
 
-    source = ${config.aoide.strillix.root}/declared/hyprlock.conf
-    source = ${config.aoide.strillix.root}/stage/hyprlock.conf
+    source = ${config.strillix.root}/declared/hyprlock.conf
+    source = ${config.strillix.root}/stage/hyprlock.conf
 
     background {
         color = $aoide_lock_color

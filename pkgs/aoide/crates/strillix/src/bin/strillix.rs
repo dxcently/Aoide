@@ -9,15 +9,6 @@ fn main() {
         libc::signal(libc::SIGPIPE, libc::SIG_DFL);
     }
 
-    // One-shot, idempotent `~/Aoide` → `$AOIDE_ROOT` migration (L-C2, task
-    // #107) — see `aoide_storage::fs::root`'s own doc for why this runs
-    // here, explicitly, rather than hanging off a path getter. A moved
-    // `state/` that cannot be locked owner-only stops the run here.
-    if let Err(e) = aoide_storage::fs::migrate_root_once() {
-        eprintln!("strillix: {e}");
-        std::process::exit(1);
-    }
-
     let argv: Vec<String> = std::env::args().skip(1).collect();
     let verb = argv.first().map(String::as_str);
     // The rice tree's move is `strx migrate`'s own job, so the start-up hook

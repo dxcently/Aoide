@@ -8,9 +8,9 @@
 # The drawing grammar (panes, instruments, the switchboard, motion, the glow budget)
 # is design/intent.md; the per-surface coverage is design/coverage.md.
 #
-# HOST-AGNOSTIC DISCIPLINE (CONTRACTS.md §5): a rice sets ONLY aoide.theme
-# and aoide.layout. All values are literal nix (no rice/ runtime reads).
-# The key is DARK: it declares `aoide.theme.polarity = "dark"` beside its
+# HOST-AGNOSTIC DISCIPLINE (CONTRACTS.md §5): a rice sets ONLY strillix.theme
+# and strillix.layout. All values are literal nix (no rice/ runtime reads).
+# The key is DARK: it declares `strillix.theme.polarity = "dark"` beside its
 # palette, so the stylix lane bakes this phosphor ramp as a dark register
 # instead of the lane's own light default. Baked only — GTK/Qt take it at
 # build time, so a polarity change lands on the user-gated rebuild.
@@ -33,14 +33,14 @@
         # ── Expected paint — the three shell-owned surfaces cadenza keeps mapped ──
         # Same declaration as sonata: bar/wallpaper per output, the dock (the
         # message board) a single surface. On-demand surfaces are not declared.
-        aoide.layout.surfaces = {
+        strillix.layout.surfaces = {
           bar.perMonitor = true;
           wallpaper.perMonitor = true;
           dock.perMonitor = false;
         };
 
         # ── Palette tier ─────────────────────────────────────────────────────────
-        aoide.theme.palette = {
+        strillix.theme.palette = {
           bg = "#050a06"; # CRT black, green-cast                 (base00)
           fg = "#86f2a0"; # phosphor green — body text            (base05)
           accent = "#39ff6a"; # bright phosphor — titles, focused rule, active pad
@@ -54,10 +54,10 @@
         # `stylix.polarity` so every Stylix-managed target (GTK/Qt, terminal,
         # editors) reads it as one register. Baked only: no emitter carries it and
         # staging does not apply it, so flipping it is a rebuild, not a stage.
-        aoide.theme.polarity = "dark";
+        strillix.theme.polarity = "dark";
 
         # ── Base16 tier — the phosphor ramp + termui accents ─────────────────────
-        aoide.theme.base16 = {
+        strillix.theme.base16 = {
           base00 = "#050a06"; # CRT black (bg)
           base01 = "#0a140c"; # pane fill — one step up the tube
           base02 = "#12261a"; # selection / focused row
@@ -78,17 +78,17 @@
 
         # ── Component tier ───────────────────────────────────────────────────────
         # null → fall back to palette; the key does the work.
-        aoide.theme.bar = {
+        strillix.theme.bar = {
           bg = null;
           fg = null;
           accent = null;
         };
-        aoide.theme.notif = {
+        strillix.theme.notif = {
           bg = null;
           fg = null;
           urgent = null;
         };
-        aoide.theme.window = {
+        strillix.theme.window = {
           border = "#39ff6a"; # bright phosphor — the focused window is the lit one
           borderInactive = "#2e5a3a"; # dim phosphor — recedes without vanishing
         };
@@ -99,7 +99,7 @@
         # keyword — it rides `$STRILLIX_ROOT/stage/terminal-colors.conf` as kitty's
         # `background_opacity` (CONTRACTS.md §1), so the phosphor tube stays
         # readable over the wallpaper without going translucent.
-        aoide.theme.geometry = {
+        strillix.theme.geometry = {
           gapsOut = 8;
           gapsIn = 4;
           borderSize = 1;
@@ -118,14 +118,14 @@
         # (U+2500/2502/250C/2510, U+2588, U+2591 — checked against the installed
         # face). Widgets keep JetBrainsMono (widgets/Kit.js, intent §2 "one face"):
         # that is the pane's cell, this is the terminal an agent lands in.
-        aoide.theme.fonts.monospace = {
+        strillix.theme.fonts.monospace = {
           name = "ShureTechMono Nerd Font Mono";
           package = pkgs.nerd-fonts.shure-tech-mono;
         };
 
         # ── Wallpaper-art note ───────────────────────────────────────────────────────
         # null → the stylix lane bakes a solid field from palette.bg: the tube.
-        aoide.theme.wallpaper = null;
+        strillix.theme.wallpaper = null;
       };
     };
   };

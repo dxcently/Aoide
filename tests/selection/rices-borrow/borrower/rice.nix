@@ -3,6 +3,6 @@
 # Minimal on purpose: the borrow cases are about OWNERSHIP, not about what a rice paints.
 {
   system.module = _: {
-    aoide.theme.palette.bg = "#000000";
+    strillix.theme.palette.bg = "#000000";
   };
 }

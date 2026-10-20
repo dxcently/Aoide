@@ -8,7 +8,7 @@
 # (`strillix/README.md`).
 #
 # The login prompt, in one of two shapes chosen at build time by the DECLARED
-# rice (`aoide.rices.greeter`, the fact the selection hook derives):
+# rice (`strillix.rices.greeter`, the fact the selection hook derives):
 #
 #   * The declared rice ships `widgets/greeter.qml` → greetd with a Quickshell
 #     greeter. greetd runs `cage` as its greeter user, and in it Quickshell on
@@ -42,7 +42,7 @@
 #     greeter itself, never a desktop, and there is no `initial_session`.
 #   * Otherwise → `ly` on tty1, authenticating through PAM and launching the
 #     same registered session. Every colour — the animation's included — is
-#     an `aoide.theme` read; ly takes colours as 32-bit `0xSSRRGGBB` (a
+#     an `strillix.theme` read; ly takes colours as 32-bit `0xSSRRGGBB` (a
 #     styling byte ahead of the RGB: 00 plain, 01 bold) with `full_color` on
 #     by default, so the palette's own hex goes in unmapped. Box title and key
 #     hints stay at ly's defaults.
@@ -51,8 +51,8 @@
 # registers a real login for it.
 #
 # Filling the slot is the switch: a host that does not select it boots to the
-# tty it lands on. Reads the dress (`aoide.theme`), the rice selection
-# (`aoide.rice`, `aoide.rices.greeter`), the session the display manager
+# tty it lands on. Reads the dress (`strillix.theme`), the rice selection
+# (`strillix.rice`, `strillix.rices.greeter`), the session the display manager
 # registers (`services.displayManager.sessionData`, which ly reads too) and
 # the host's keyboard (`services.xserver.xkb`) — root AGENTS.md house rule 5.
 {
@@ -67,12 +67,12 @@ let
   # rewrites colours equal to an overridden anchor's authored value, in one
   # pass, with no option-system recursion — the option itself stays inert
   # either way.
-  t = (import ../../lib/theme.nix { inherit lib; }).resolve config.aoide.theme;
+  t = (import ../../lib/theme.nix { inherit lib; }).resolve config.strillix.theme;
 
   lyPlain = hex: "0x00${lib.removePrefix "#" hex}";
   lyBold = hex: "0x01${lib.removePrefix "#" hex}";
 
-  face = config.aoide.rices.greeter;
+  face = config.strillix.rices.greeter;
 
   quickshellPkg = aoideInputs.quickshell.packages.${pkgs.stdenv.hostPlatform.system}.default;
 
@@ -83,14 +83,14 @@ let
     builtins.toJSON (
       lib.filterAttrsRecursive (_: v: v != null) (removeAttrs t [ "override" ])
       // {
-        rice = config.aoide.rice;
+        rice = config.strillix.rice;
       }
     )
   );
 
   manifest = pkgs.writeText "aoide-greeter-manifest.json" (
     builtins.toJSON {
-      ${config.aoide.rice} = {
+      ${config.strillix.rice} = {
         greeter = face;
       };
     }
@@ -135,7 +135,7 @@ let
       for ext in webp png jpg jpeg; do
         logon="$out/rices/${face.owner}/wallpaper/${face.owner}-logon.$ext"
         if [ -f "$logon" ]; then
-          jq -n --arg p "$logon" --arg s ${lib.escapeShellArg config.aoide.rice} '{path: $p, rice: $s}' \
+          jq -n --arg p "$logon" --arg s ${lib.escapeShellArg config.strillix.rice} '{path: $p, rice: $s}' \
             > "$out/stage/wallpaper.json"
           break
         fi
@@ -172,8 +172,8 @@ in
 {
   config = lib.mkMerge [
     {
-      aoide.components.greeter.provider = "strillix";
-      aoide.surfaces.greeter.owner = "quickshell";
+      strillix.components.greeter.provider = "strillix";
+      strillix.surfaces.greeter.owner = "quickshell";
     }
 
     (lib.mkIf (face != null) {

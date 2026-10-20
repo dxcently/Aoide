@@ -5,7 +5,7 @@
 # discovery specifically):
 #
 #   1. surface-ownership — no render surface may have two owners. The
-#      strillix lane declares `aoide.surfaces.<name>.owner`; the stylix lane reads
+#      strillix lane declares `strillix.surfaces.<name>.owner`; the stylix lane reads
 #      the same registry and disables derivation for owned surfaces. Two
 #      modules claiming the same surface is a build-time error.
 #
@@ -63,7 +63,7 @@
 #      lint is a hard failure naming file, line, and lint code.
 #
 #   10. theme-fanout — the two fan-outs (baked Stylix, `$STRILLIX_ROOT/stage/
-#       theme.json` seed) resolve an `aoide.theme.override` identically.
+#       theme.json` seed) resolve an `strillix.theme.override` identically.
 #       Proves the general law against a fixed in-file fixture (never a real
 #       host or committed rice): `lib/theme.nix`'s `stagePatch`'s palette
 #       output matches `resolve`'s under a one-anchor override,
@@ -106,7 +106,7 @@ let
       throw "aoide check ${name} FAILED: ${msg}";
 
   # ── Check 1: surface ownership ────────────────────────────────────────────
-  # Consumes the evaluated `aoide.surfaces` registry. Duplicate detection is a
+  # Consumes the evaluated `strillix.surfaces` registry. Duplicate detection is a
   # no-op today because attrsets cannot hold duplicate keys; the real teeth
   # arrive when a lane asserts, in its own module, that it is the sole owner
   # of a surface (Wave-1 wires the mkMerge/last-wins guard). Here we assert the
@@ -165,7 +165,7 @@ let
   #     (`moduleProblemList`, below);
   #   - no stray `.nix` joins the module merge, and no `.nix` names a path out of
   #     its own folder (`strayNixFiles`, `escapingNixFiles`).
-  #   - a declared `aoide.theme.wallpaper` is the rice's own `wallpaper/<rice>-desktop.<ext>`,
+  #   - a declared `strillix.theme.wallpaper` is the rice's own `wallpaper/<rice>-desktop.<ext>`,
   #     the one name the activation seed and `rice stage` both resolve.
   #
   # The body, the hyprland.conf and the rice modules are the reads here that look
@@ -307,7 +307,7 @@ let
         let
           raw = rawOf module;
           picked = unwrapOverride (
-            lib.attrByPath [ "aoide" "theme" "wallpaper" ] null (unwrapOverride (raw.config or raw))
+            lib.attrByPath [ "strillix" "theme" "wallpaper" ] null (unwrapOverride (raw.config or raw))
           );
           path = if picked == null then null else toString picked;
         in
@@ -320,7 +320,7 @@ let
           [ ]
         else
           [
-            "rice ${name}'s ${half}.module sets aoide.theme.wallpaper to ${path}; the picture must be wallpaper/${name}-desktop.<ext> (CONTRACTS.md §4)"
+            "rice ${name}'s ${half}.module sets strillix.theme.wallpaper to ${path}; the picture must be wallpaper/${name}-desktop.<ext> (CONTRACTS.md §4)"
           ];
       moduleProblems =
         name: half: module:
@@ -817,7 +817,7 @@ let
   # `lib/theme.nix`'s `resolve` (the baked Stylix/compositor fan-out) and
   # `stagePatch` (the `$STRILLIX_ROOT/stage/theme.json` seed) must apply the identical
   # override rule (CONTRACTS.md §1). Proved here against a FIXED fixture —
-  # never a real host's `aoide.theme` or a committed rices file, so this
+  # never a real host's `strillix.theme` or a committed rices file, so this
   # check never depends on which rices or hosts are in the tree. One case (a
   # single overridden anchor recolours a matching palette slot) plus the
   # no-override identity `stagePatch` promises callers. `venueDelta` (the

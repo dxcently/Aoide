@@ -1,7 +1,7 @@
 # lib/options.nix — the aoide.* option-derivation output (P-I3, onboarding
 # lane, docs/architecture/ONBOARD.md "The vars-file generator"). Feeds `strillix
 # onboard`'s `aoide.nix` generator: `nix eval --json <checkout>#aoideOptions`
-# returns every VISIBLE, non-internal `aoide.*` option declared across
+# returns every VISIBLE, non-internal `aoide.*` and `strillix.*` option declared across
 # modules/nucleus (the contract) and the dendrites the registry catalogues,
 # narrowed to exactly what the generator needs to render one commented line —
 # name, description, and the default already rendered as nix SOURCE TEXT
@@ -32,7 +32,7 @@
 # OUTSIDE the `aoide.*` tree (`habit.home`, `systemd.*`, …) that a
 # real host declares via the NixOS/home-manager module sets this bare eval
 # never loads. Those thunks are never forced (this file only reads
-# `.options.aoide`, never `.config`), but disabling the check is the
+# `.options`, never `.config`), but disabling the check is the
 # defensive, documented reason nothing here depends on loading those module
 # sets just to read option DECLARATIONS.
 {
@@ -87,7 +87,10 @@ let
   docList = lib.optionAttrSetToDocList evaled.options;
 
   aoideOptions = builtins.filter (
-    o: o.visible == true && o.internal == false && lib.hasPrefix "aoide." o.name
+    o:
+    o.visible == true
+    && o.internal == false
+    && (lib.hasPrefix "aoide." o.name || lib.hasPrefix "strillix." o.name)
   ) docList;
 in
 map (o: {

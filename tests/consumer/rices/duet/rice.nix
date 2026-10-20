@@ -20,7 +20,7 @@
       greeter = "strillix";
     };
     module = _: {
-      aoide.theme.palette = {
+      strillix.theme.palette = {
         bg = "#1c1418";
         fg = "#efe6e8";
         accent = "#f88ab4";

@@ -176,7 +176,7 @@ fn default_root() -> std::path::PathBuf {
 
 
 /// One-shot, idempotent move of the old `~/Aoide/{state,log}` trees into the
-/// CURRENT `$AOIDE_ROOT` resolution. `pub`: the binaries call this ONCE, early
+/// CURRENT `$AOIDE_ROOT` resolution. `pub`: the core binaries call this ONCE, early
 /// in their own `main()`, never from a library getter (see [`root`]'s own doc
 /// for the incident that settled this). Safe to call more than once and from a
 /// test directly; nothing here is gated behind a process-wide `Once`, because

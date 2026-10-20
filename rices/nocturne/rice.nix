@@ -6,14 +6,14 @@
 # through to sonata's OWN committed widget bodies wholesale (identical
 # structure/layout/text, only the palette differs). Scaffolded via `aoide
 # rice compose nocturne --from sonata`, then hand-edited: `rice compose` has
-# no template for `aoide.layout` —
+# no template for `strillix.layout` —
 # this block is authored directly, matching the shape `rice lint`
 # (`theme/schema.rs`) validates. Name deliberately avoids "moonlight-sonata"
 # — that name is reserved for a separate, real future design-rice; nocturne
 # is a throwaway demo only.
 #
-# HOST-AGNOSTIC DISCIPLINE (CONTRACTS.md §5): a rice sets ONLY aoide.theme
-# and aoide.layout. All values are literal nix (no rice/ runtime reads).
+# HOST-AGNOSTIC DISCIPLINE (CONTRACTS.md §5): a rice sets ONLY strillix.theme
+# and strillix.layout. All values are literal nix (no rice/ runtime reads).
 {
   system = {
     providers = {
@@ -34,7 +34,7 @@
         # Deliberately dark and distinct from BOTH sonata's light marble register
         # and any other throwaway palette, so the two never read as the same
         # thing if khoa flips between them later.
-        aoide.theme.palette = {
+        strillix.theme.palette = {
           bg = "#0a0e27"; # deep navy/indigo night ground
           fg = "#e8ecf7"; # near-white cool ivory ink — high contrast on navy
           accent = "#9fb8e0"; # pale moonlight-silver-blue chrome
@@ -44,7 +44,7 @@
         # Window frames follow the palette (border = accent, borderInactive = bg)
         # — written explicit here so the resolved value is self-evident, same
         # style sonata's own rice.nix uses.
-        aoide.theme.window = {
+        strillix.theme.window = {
           border = "#9fb8e0";
           borderInactive = "#0a0e27";
         };
@@ -55,7 +55,7 @@
         # shipped gadgets and notifications-center. `order = 0` is the only sort key
         # among declared dock entries; the widget body lives at
         # rices/nocturne/widgets/vigil.qml, same convention as any slot.
-        aoide.layout.widgets.vigil = {
+        strillix.layout.widgets.vigil = {
           kind = "dock";
           order = 0;
         };

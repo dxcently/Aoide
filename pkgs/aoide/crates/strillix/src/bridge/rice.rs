@@ -667,7 +667,7 @@ mod tests {
             "shellbridge-menu-list",
             r#"{"mode":"declarative","rice":"sonata","stagingRice":"cadenza"}"#,
         );
-        std::env::set_var("AOIDE_HOST_CONFIG", "/home/u/dxflake/hosts/box/default.nix");
+        std::env::set_var("STRILLIX_HOST_CONFIG", "/home/u/dxflake/hosts/box/default.nix");
         assert_eq!(
             dispatch_rice_menu(),
             json!({

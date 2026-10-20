@@ -12,11 +12,11 @@ lane.
   is applied under its catalogue key, so it would be applied twice.
 - **The home import is `habit.home.imports = [ ./home.nix ]`,** never
   `habit.home = ./home.nix`, which habit turns into a module with no key.
-- **The home half is `aoide.quickshell.home`,** an internal `deferredModule`
+- **The home half is `strillix.quickshell.home`,** an internal `deferredModule`
   set in `system.nix` and imported by `home.nix` through `osConfig`. A change
   to the unit is a change to that value.
-- **No rice and no strillix.** The service is gated on `aoide.quickshell.config`,
-  never on `aoide.rice`; the one strillix read is the `aoide.strillix.enable` fact
+- **No rice and no strillix.** The service is gated on `strillix.quickshell.config`,
+  never on `strillix.rice`; the one strillix read is the `strillix.enable` fact
   that puts `STRILLIX_TEMPLATES` on the unit.
 
 ## Docs in the same commit

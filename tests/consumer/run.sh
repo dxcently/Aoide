@@ -20,6 +20,9 @@
 #      (deployed config, seeded stage, seeded machine rices, templates on the
 #      units) is there. `aoide-rices` performs Aoide's own `sonata` through the
 #      `ricesRoot` export, and its strillix lane is handed that same directory.
+#      `strillix-only` is the desktop with aoide off: it evaluates, defines no
+#      aoided unit, and neither its bridge nor its migration call carries
+#      AOIDE_CORE_BIN.
 set -uo pipefail
 cd "$(dirname "$0")" || exit 1
 root=$(cd ../.. && pwd)
@@ -106,7 +109,7 @@ expr="
     consumerCfg = out.nixosConfigurations.consumer.config;
     stubbed = {
       drv = stubbedCfg.system.build.toplevel.drvPath;
-      components = builtins.mapAttrs (_: c: c.provider) stubbedCfg.aoide.components;
+      components = builtins.mapAttrs (_: c: c.provider) stubbedCfg.strillix.components;
       shellUnits = builtins.length (
         builtins.filter (n: n == \"aoide-quickshell\") (builtins.attrNames (stubbedHome.systemd.user.services or { }))
       );
@@ -115,7 +118,7 @@ expr="
       );
       aggregations = out.inventory.stubbed.aggregation;
     };
-    consumerComponents = builtins.mapAttrs (_: c: c.provider) consumerCfg.aoide.components;
+    consumerComponents = builtins.mapAttrs (_: c: c.provider) consumerCfg.strillix.components;
     # The parts are the ten strillix providers, each a file that exists; the rices
     # are the committed rices with a rice.nix.
     parts = {
@@ -146,40 +149,73 @@ expr="
       ];
     };
     mergedCfg = out.nixosConfigurations.merged.config;
+    onlyCfg = out.nixosConfigurations.strillix-only.config;
+    onlyHome = onlyCfg.home-manager.users.fixture;
   in {
     aoideRices = {
       drv = aoideRices.system.build.toplevel.drvPath;
-      rice = aoideRices.aoide.rice;
-      builtIn = aoideRices.aoide.rices.builtIn;
-      bg = aoideRices.aoide.theme.palette.bg;
+      rice = aoideRices.strillix.rice;
+      builtIn = aoideRices.strillix.rices.builtIn;
+      bg = aoideRices.strillix.theme.palette.bg;
       ricesIsExport = toString out.nixosConfigurations.aoide-rices._module.args.ricesRoot == toString flake.ricesRoot;
     };
     merged = {
       drv = mergedCfg.system.build.toplevel.drvPath;
-      rice = mergedCfg.aoide.rice;
-      builtIn = mergedCfg.aoide.rices.builtIn;
-      bg = mergedCfg.aoide.theme.palette.bg;
+      rice = mergedCfg.strillix.rice;
+      builtIn = mergedCfg.strillix.rices.builtIn;
+      bg = mergedCfg.strillix.theme.palette.bg;
       borrowed = mergedRices.riceMeta.encore.manifest == mergedRices.riceMeta.sonata.manifest && mergedRices.riceMeta.encore.manifest != { };
       names = mergedRices.discoveredNames;
       ricesIsMerged = toString out.nixosConfigurations.merged._module.args.ricesRoot == toString mergedRices.dir;
     };
     drv = out.nixosConfigurations.consumer.config.system.build.toplevel.drvPath;
-    rice = cfg.aoide.rice;
-    builtIn = cfg.aoide.rices.builtIn;
-    bg = cfg.aoide.theme.palette.bg;
-    strillix = cfg.aoide.strillix.enable;
-    stylix = cfg.aoide.stylix.enable;
-    quickshell = cfg.aoide.quickshell.enable;
-    config = cfg.aoide.quickshell.config;
+    rice = cfg.strillix.rice;
+    builtIn = cfg.strillix.rices.builtIn;
+    bg = cfg.strillix.theme.palette.bg;
+    strillix = cfg.strillix.enable;
+    stylix = cfg.strillix.stylix.enable;
+    quickshell = cfg.strillix.quickshell.enable;
+    config = cfg.strillix.quickshell.config;
     activation = builtins.attrNames (home.home.activation or { });
     hmServices = builtins.attrNames (home.systemd.user.services or { });
     systemdUserServices = builtins.attrNames cfg.systemd.user.services;
     templates = map (e: builtins.replaceStrings [ \"STRILLIX_TEMPLATES=\" ] [ \"\" ] e) (
       builtins.filter (e: builtins.match \"STRILLIX_TEMPLATES=.*\" e != null)
-        (envOf cfg.systemd.user.services \"aoided\" ++ envOf cfg.systemd.user.services \"shellbridge\")
+        (envOf cfg.systemd.user.services \"shellbridge\")
     );
+    aoidedUnit = builtins.hasAttr \"aoided\" cfg.systemd.user.services;
+    aoidedTemplates = builtins.length (
+      builtins.filter (e: builtins.match \"STRILLIX_TEMPLATES=.*\" e != null) (envOf cfg.systemd.user.services \"aoided\")
+    );
+    strillixOnPath = builtins.length (builtins.filter (p: (p.name or \"\") == \"strillix\") cfg.environment.systemPackages);
+    strillixOnlyPath = builtins.length (builtins.filter (p: (p.name or \"\") == \"strillix\") onlyCfg.environment.systemPackages);
     front = {
       inherit stubbed consumerComponents parts rices collision;
+    };
+    strillixOnly = {
+      drv = onlyCfg.system.build.toplevel.drvPath;
+      aoide = onlyCfg.aoide.enable;
+      strillix = onlyCfg.strillix.enable;
+      aoided = builtins.hasAttr \"aoided\" onlyCfg.systemd.user.services;
+      components = builtins.mapAttrs (_: c: c.provider) onlyCfg.strillix.components;
+      shellUnits = builtins.length (
+        builtins.filter (n: n == \"aoide-quickshell\") (builtins.attrNames (onlyHome.systemd.user.services or { }))
+      );
+      bridgeUnits = builtins.length (
+        builtins.filter (n: n == \"shellbridge\") (builtins.attrNames onlyCfg.systemd.user.services)
+      );
+      bridgeCoreBin = builtins.length (
+        builtins.filter (e: builtins.match \"AOIDE_CORE_BIN=.*\" e != null) (envOf onlyCfg.systemd.user.services \"shellbridge\")
+      );
+      consumerBridgeCoreBin = builtins.length (
+        builtins.filter (e: builtins.match \"AOIDE_CORE_BIN=.*\" e != null) (envOf cfg.systemd.user.services \"shellbridge\")
+      );
+      migrateCoreBin = builtins.length (
+        flake.inputs.nixpkgs.lib.splitString \"AOIDE_CORE_BIN=\" onlyHome.home.activation.aoideMigrateRoots.data
+      ) - 1;
+      consumerMigrateCoreBin = builtins.length (
+        flake.inputs.nixpkgs.lib.splitString \"AOIDE_CORE_BIN=\" home.home.activation.aoideMigrateRoots.data
+      ) - 1;
     };
   }
 "
@@ -210,9 +246,57 @@ check "the shell's unit is there"             "1" \
   "$(o '[.hmServices[] | select(test("^aoide-quickshell$"))] | length')"
 check "the bridge's unit is there"            "1" \
   "$(o '[.systemdUserServices[] | select(test("^shellbridge$"))] | length')"
-check "the units carry the templates"         "2" "$(o '.templates | length')"
-check "…and both name one directory"          "true" \
+check "the bridge unit carries the templates"  "1" "$(o '.templates | length')"
+check "…and it names the shipped directory"   "true" \
   "$(o '(.templates | unique | length) == 1 and (.templates[0] | endswith("-strillix-rices-templates/share/strillix/rices"))')"
+check "the consumer's aoided unit is there"   "true" "$(o .aoidedUnit)"
+check "aoided's unit carries no templates"    "0" "$(o .aoidedTemplates)"
+check "the host PATH carries one strillix"    "1" "$(o .strillixOnPath)"
+
+# ── 2b. The installed strillix, run with its variable unset ───────────────────
+# The strillix on the host PATH is built and run with no home and no exported
+# templates. `rice refresh --check` lists what a refresh would bring in, and it
+# writes nothing to the rices. It still names the shipped rices. The bare core
+# binary is the control: with no default it finds none. An exported value wins
+# over the default.
+host_expr="
+let
+flake = builtins.getFlake \"$ref\";
+out = (import ./flake.nix).outputs {
+nixpkgs = flake.inputs.nixpkgs;
+home-manager = flake.inputs.home-manager;
+aoide = flake;
+};
+cfg = out.nixosConfigurations.consumer.config;
+in
+builtins.head (builtins.filter (p: (p.name or \"\") == \"strillix\") cfg.environment.systemPackages)
+"
+core_expr="
+let
+flake = builtins.getFlake \"$ref\";
+out = (import ./flake.nix).outputs {
+nixpkgs = flake.inputs.nixpkgs;
+home-manager = flake.inputs.home-manager;
+aoide = flake;
+};
+in
+out.nixosConfigurations.consumer.pkgs.aoide.strillix
+"
+host_pkg=$(nix build --no-link --print-out-paths --impure --expr "$host_expr" 2>"$tmp/host.err") || host_pkg=""
+core_pkg=$(nix build --no-link --print-out-paths --impure --expr "$core_expr" 2>"$tmp/core.err") || core_pkg=""
+check "the host PATH strillix builds"         "true" "$([ -n "$host_pkg" ] && echo true || echo false)"
+check "the bare core strillix builds"         "true" "$([ -n "$core_pkg" ] && echo true || echo false)"
+
+mkdir -p "$tmp/aoide" "$tmp/strillix"
+clean() { env -u STRILLIX_TEMPLATES HOME=/homeless-shelter AOIDE_ROOT="$tmp/aoide" STRILLIX_ROOT="$tmp/strillix" "$@"; }
+names() { jq -r '[.data.rices[]?.rice] | sort | join(" ")' 2>/dev/null; }
+check "strx links to the installed strillix"  "strillix" "$(readlink "$host_pkg/bin/strx" 2>/dev/null)"
+check "the installed strillix lists its rices" "duet solo" \
+  "$(clean "$host_pkg/bin/strillix" rice refresh --check --json 2>/dev/null | names)"
+bare_rc=0; clean "$core_pkg/bin/strillix" rice refresh --check >/dev/null 2>&1 || bare_rc=$?
+check "control: the bare core strillix finds none" "1" "$bare_rc"
+check "control: an exported value wins over it" "" \
+  "$(env STRILLIX_TEMPLATES="$tmp/nowhere" HOME=/homeless-shelter AOIDE_ROOT="$tmp/aoide" STRILLIX_ROOT="$tmp/strillix" "$host_pkg/bin/strillix" rice refresh --check --json 2>/dev/null | names)"
 
 check "front: the stubbed host fills bar and dock"  '{"bar":"stub","dock":"strillix"}' \
   "$(o '.front.stubbed.components | tojson')"
@@ -277,6 +361,24 @@ check "merged: its strillix lane reads the merged directory" "true" "$(o .merged
 
 printf '%-52s %s\n' "aoide-rices toplevel drvPath" "$(o .aoideRices.drv)"
 printf '%-52s %s\n' "merged toplevel drvPath" "$(o .merged.drv)"
+
+# ── 4. Strillix with Aoide off ──────────────────────────────────────────────
+# The desktop aggregation alone, with no core under it: the strillix lane
+# evaluates, no aoided unit is defined, and the bridge and the migration call
+# carry no AOIDE_CORE_BIN.
+check "strillix-only: aoide is off"                  "false" "$(o .strillixOnly.aoide)"
+check "strillix-only: the strillix lane is on"       "true" "$(o .strillixOnly.strillix)"
+check "strillix-only: no aoided unit is defined"     "false" "$(o .strillixOnly.aoided)"
+check "strillix-only: the desktop fills ten slots, all strillix" "10 strillix" \
+  "$(o '"\(.strillixOnly.components | length) \(.strillixOnly.components | [.[]] | unique | join(","))"')"
+check "strillix-only: the shell's unit is there"     "1" "$(o .strillixOnly.shellUnits)"
+check "strillix-only: the bridge's unit is there"    "1" "$(o .strillixOnly.bridgeUnits)"
+check "strillix-only: the bridge carries no AOIDE_CORE_BIN" "0" "$(o .strillixOnly.bridgeCoreBin)"
+check "strillix-only: the host PATH carries one strillix" "1" "$(o .strillixOnlyPath)"
+check "control: the consumer's bridge carries AOIDE_CORE_BIN" "1" "$(o .strillixOnly.consumerBridgeCoreBin)"
+check "strillix-only: the migration call carries no AOIDE_CORE_BIN" "0" "$(o .strillixOnly.migrateCoreBin)"
+check "control: the consumer's migration call carries AOIDE_CORE_BIN" "1" "$(o .strillixOnly.consumerMigrateCoreBin)"
+printf '%-52s %s\n' "strillix-only toplevel drvPath" "$(o .strillixOnly.drv)"
 
 printf '%s\n' "--------------------------------------------------------------------"
 printf '%d passed, %d failed\n' "$pass" "$fail"

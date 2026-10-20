@@ -41,7 +41,7 @@ contract in `modules/nucleus/*` has no `mkIf` guard by design. A host opts in wi
 ## Flat option assignment
 
 Write host and module options one per line — `aoide.enable = true;`,
-`aoide.rice = "sonata";` — never gathered into `aoide = { … }`. The two are
+`strillix.rice = "sonata";` — never gathered into `aoide = { … }`. The two are
 identical to nix; the flat form greps and diffs cleanly, and enabling a
 capability stays one copyable line. `statix.toml` disables `repeated_keys`
 for this reason, so the linter does not fight the style.

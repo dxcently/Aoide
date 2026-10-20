@@ -3,5 +3,5 @@
 {
   imports = [ ./runtime.nix ];
   habit.home.imports = [ ./runtime-home.nix ];
-  aoide.components.powermenu.provider = "strillix";
+  strillix.components.powermenu.provider = "strillix";
 }

@@ -13,8 +13,9 @@ Three payloads under `$out/share/strillix/`, one per consumer:
 | `nix/` — the OFFLINE generator: `manifest.nix` + copies of `lib/rices.nix` and `lib/rice.nix` + the locked nixpkgs `lib/` (tests dropped) | `strillix-rice::widgets`'s `plan_stage`, which evaluates `nix/manifest.nix` with a plain `nix-instantiate --eval --strict --json` over the machine's own rices |
 | `aoide-options.json` — `lib/options.nix`'s output | `strillix`'s `onboard`, through `fs::strillix_share_dir` (this dir) |
 
-Only `strillix-rice`/`strillix` read any of it, and only `strillix` links them, so
-the package is wired onto the units whose process actually execs `strillix`.
+`strillix-rice` and `strillix` read it. The installed strillix
+(`modules/dendrites/strillix/package.nix`) names the `rices/` path as its default, and
+the strillix dendrite's units that exec `strillix` spell the same path.
 
 ## Knobs
 
@@ -58,11 +59,11 @@ subdirectory of the whole `rices` tree, and the baked
 `manifest.json`/`registry.json` are `builtins.toFile` over the shipped set only.
 
 That is a contract with every host, not a micro-optimisation. This package's
-store path is a STRING in a host's `environment.sessionVariables`
-(`STRILLIX_TEMPLATES`) and in its `aoideSeedRices` activation entry, so both
-the `etc` and `activate` derivations of a NixOS system name it — which means
-anything that rehashes this derivation moves the host's **toplevel drvPath**
-even when no configuration changed. While the build read the rices directory,
+store path is a STRING in the installed strillix (`modules/dendrites/strillix/package.nix`,
+its `STRILLIX_TEMPLATES` default), in the units that spell it, and in the
+`aoideSeedRices` activation entry, so the system derivations that name it move with
+it — which means anything that rehashes this derivation moves the host's
+**toplevel drvPath** even when no configuration changed. While the build read the rices directory,
 that was true of every rice in the repo: editing a rice a host does not even
 build in moved that host's system. Now it is true only of the rices it ships.
 

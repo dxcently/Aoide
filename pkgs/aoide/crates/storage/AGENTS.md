@@ -268,15 +268,15 @@
   stage-file writer takes one, so a migration hung off the getters would run
   from an ordinary test that never meant to touch the operator's `$HOME`.
   `conducting_stage_dir` has no such shared caller, which is why its own
-  migration is safe to hang off its resolution. The three real binaries call
+  migration is safe to hang off its resolution. The two core binaries call
   `migrate_root_once()` once, explicitly, at the top of their own `main()`
-  (`crates/cli/src/bin/{aoide,aoided}.rs`, `crates/strillix/src/bin/strillix.rs`).
+  (`crates/cli/src/bin/{aoide,aoided}.rs`).
   It moves `state/` and `log`, renames the peer-era state names, and never
   touches the rice tree. A test may call it directly: it is a plain idempotent
   function with no `Once` to reset. A move that fails is narrated and leaves
   the old tree in place. Its one `Err` is a `state/` that exists and cannot be
   locked owner-only, on EVERY run: it locks `state_dir()` first, before any
-  move, and the tree a move lands in is locked again. All three binaries exit
+  move, and the tree a move lands in is locked again. Both core binaries exit
   on it rather than read a tree they could not make private. A `state/` that
   is absent is not created there, and one whose parent is not a directory
   counts as absent, so the narrated failure stays the failure.

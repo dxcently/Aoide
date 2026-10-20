@@ -13,8 +13,18 @@ use aoide_storage::fs::{atomic_write, migrate_dir, migrate_file, root};
 /// the file renames inside it, and the lyra link tree ([`migrate_strillix_state`]).
 /// Runs only when asked: the strillix binary calls it from [`rice_root_at_start`]
 /// when `STRILLIX_MIGRATE=1`, and from `strx migrate`. Idempotent, like every
-/// piece here.
+/// piece here. While an aoide binary resolves ([`aoide_protocol::bin::core_present`])
+/// and core's legacy state is still due ([`legacy_state_pending`]), it returns an
+/// error, moving nothing: core moves that state when an aoide binary runs. With
+/// no aoide binary, nothing would move that state, so the move runs and leaves
+/// core's legacy `~/Aoide/state` where it is.
 pub fn migrate_rice_root() -> std::io::Result<()> {
+    if aoide_protocol::bin::core_present() && legacy_state_pending() {
+        return Err(std::io::Error::other(format!(
+            "core has not moved its old root yet ({} still holds state): run any aoide command once, then retry; nothing moved",
+            aoide_protocol::aoide_home().join("Aoide").join("state").display()
+        )));
+    }
     let refused = match rice_status() {
         RiceStatus::Both(paths) => Some(("held by both roots", paths)),
         RiceStatus::Refused(paths) => Some(("held across homes", paths)),
@@ -36,6 +46,26 @@ pub fn migrate_rice_root() -> std::io::Result<()> {
     migrate_theme_files(&strillix_root());
     migrate_wallpaper_files(&strillix_root())?;
     Ok(())
+}
+
+/// Whether core's legacy `~/Aoide/state` is still due to move: it holds state,
+/// `$AOIDE_STATE_DIR` is unset, and the root's `state/` is absent or empty. Those
+/// are the conditions under which `aoide_storage::fs::migrate_root_once` moves it.
+/// A legacy `state/` that core would not move (the root's `state/` already holds
+/// anything) is not waited on. [`migrate_rice_root`] waits on this state while an
+/// aoide binary resolves. The legacy audit log is not checked: the aoided
+/// units export `AOIDE_AUDIT_LOG`, which keeps `migrate_root_once` from moving a
+/// legacy log in that process.
+fn legacy_state_pending() -> bool {
+    let legacy = aoide_protocol::aoide_home().join("Aoide");
+    let current = root();
+    let current_state = current.join("state");
+    let current_state_free =
+        !current_state.exists() || std::fs::read_dir(&current_state).is_ok_and(|mut d| d.next().is_none());
+    legacy != current
+        && std::env::var("AOIDE_STATE_DIR").is_err()
+        && holds_state(&legacy.join("state"))
+        && current_state_free
 }
 
 /// Where the rice state stands, read without moving anything (`strx migrate
@@ -317,8 +347,8 @@ mod tests {
         std::env::temp_dir().join(name).to_string_lossy().to_string()
     }
 
-    /// The migration as the strillix binary runs it under `STRILLIX_MIGRATE=1`:
-    /// the core pieces, then the rice tree.
+    /// The two steps in the order an operator runs them: core's root move (any
+    /// `aoide` run), then the rice tree. The strillix binary runs just the second step.
     fn migrate_all() -> std::io::Result<()> {
         aoide_storage::fs::migrate_root_once()?;
         migrate_rice_root()
@@ -334,6 +364,49 @@ mod tests {
         std::env::set_var("AOIDE_ROOT", base.join("aoide"));
         std::env::set_var("STRILLIX_ROOT", base.join("strillix"));
         base
+    }
+
+    /// Points `AOIDE_CORE_BIN` at `base/bin/aoide`, the tier `bin::core_present`
+    /// resolves first: a planted file when `installed`, a missing path otherwise.
+    /// The returned saver restores the variable on drop.
+    fn core_bin_at(base: &std::path::Path, installed: bool) -> aoide_test_support::EnvSaver {
+        let env = aoide_test_support::EnvSaver::capture(&["AOIDE_CORE_BIN"]);
+        let bin = base.join("bin").join("aoide");
+        if installed {
+            std::fs::create_dir_all(base.join("bin")).unwrap();
+            std::fs::write(&bin, "").unwrap();
+        }
+        std::env::set_var("AOIDE_CORE_BIN", &bin);
+        env
+    }
+
+    /// Core's legacy `state/` under the private HOME `rice_roots` sets, holding
+    /// what `migrate_root_once` moves: a file, and a file one folder down.
+    fn plant_legacy_state(base: &std::path::Path) -> std::path::PathBuf {
+        let state = base.join("home").join("Aoide").join("state");
+        std::fs::create_dir_all(state.join("nested")).unwrap();
+        std::fs::write(state.join("usage.json"), "{}").unwrap();
+        std::fs::write(state.join("nested").join("sessions.json"), "[1,2]").unwrap();
+        state
+    }
+
+    /// Every file under `dir` with its bytes, paths relative to `dir` and sorted:
+    /// a tree that a run touched in any way reads back different.
+    fn file_bytes(dir: &std::path::Path) -> Vec<(std::path::PathBuf, Vec<u8>)> {
+        fn walk(root: &std::path::Path, dir: &std::path::Path, out: &mut Vec<(std::path::PathBuf, Vec<u8>)>) {
+            for entry in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    walk(root, &path, out);
+                } else {
+                    out.push((path.strip_prefix(root).unwrap().to_path_buf(), std::fs::read(&path).unwrap()));
+                }
+            }
+        }
+        let mut out = Vec::new();
+        walk(dir, dir, &mut out);
+        out.sort();
+        out
     }
 
     #[test]
@@ -666,6 +739,82 @@ mod tests {
         assert!(song.is_file(), "the finished move leaves the marker");
         assert_eq!(rice_status(), RiceStatus::Settled);
         rice_root_at_start().unwrap();
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// With an aoide binary installed, core's legacy `state/` still in `~/Aoide`
+    /// holds the rice move back: it returns an error and moves nothing, the lyra
+    /// link included. Once core has moved the state (`migrate_root_once`), the
+    /// same tree moves.
+    #[test]
+    fn the_rice_move_waits_while_core_has_not_moved_its_legacy_state() {
+        let _guard = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = MigrationEnvGuard::capture_and_clear();
+        let base = rice_roots("legacy-state");
+        let _core = core_bin_at(&base, true);
+        let legacy_state = base.join("home").join("Aoide").join("state");
+        std::fs::create_dir_all(&legacy_state).unwrap();
+        std::fs::write(legacy_state.join("usage.json"), "{}").unwrap();
+        let song = base.join("aoide").join("song");
+        std::fs::create_dir_all(song.join("stage")).unwrap();
+        std::fs::write(song.join("stage").join("mode.json"), r#"{"song":"sonata"}"#).unwrap();
+        let lyra_link = plant_lyra(&base);
+
+        let err = migrate_rice_root().expect_err("the rice move waits for core");
+        assert!(err.to_string().contains("core has not moved its old root yet"), "{err}");
+        assert!(song.join("stage").join("mode.json").is_file(), "the old rice tree stays");
+        assert!(lyra_link.is_file(), "the lyra link tree stays");
+        assert!(legacy_state.join("usage.json").is_file(), "core's legacy state stays for core to move");
+        assert!(!base.join("strillix").exists(), "nothing lands in the strillix root");
+
+        aoide_storage::fs::migrate_root_once().unwrap();
+        migrate_rice_root().unwrap();
+        assert!(base.join("strillix").join("stage").join("mode.json").is_file());
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// With no aoide binary installed, nothing would move core's legacy `state/`,
+    /// so the rice move does not wait on it: the rice tree and the lyra link
+    /// move, and the legacy state stays byte for byte where it is.
+    #[test]
+    fn the_rice_move_runs_without_aoide_and_leaves_core_legacy_state_in_place() {
+        let _guard = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = MigrationEnvGuard::capture_and_clear();
+        let base = rice_roots("no-aoide");
+        let _core = core_bin_at(&base, false);
+        let legacy_state = plant_legacy_state(&base);
+        let before = file_bytes(&legacy_state);
+        let song = base.join("aoide").join("song");
+        std::fs::create_dir_all(song.join("stage")).unwrap();
+        std::fs::write(song.join("stage").join("mode.json"), r#"{"song":"sonata"}"#).unwrap();
+        plant_lyra(&base);
+
+        migrate_rice_root().expect("with no aoide the rice move does not wait on core");
+        assert!(base.join("strillix").join("stage").join("mode.json").is_file(), "the rice tree moved");
+        assert!(base.join("home/.local/state/strillix/rice.conf").is_file(), "the lyra link moved");
+        assert_eq!(file_bytes(&legacy_state), before, "core's legacy state is untouched");
+        assert!(!base.join("aoide").join("state").exists(), "the rice move creates no core state");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// The rice move leaves core's legacy `state/` for an aoide run: core's own
+    /// `migrate_root_once`, run later, moves it into the core root with its bytes.
+    #[test]
+    fn a_later_core_run_moves_the_legacy_state_the_rice_move_left_behind() {
+        let _guard = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = MigrationEnvGuard::capture_and_clear();
+        let base = rice_roots("core-after");
+        let _core = core_bin_at(&base, false);
+        let legacy_state = plant_legacy_state(&base);
+        let before = file_bytes(&legacy_state);
+        let song = base.join("aoide").join("song");
+        std::fs::create_dir_all(song.join("stage")).unwrap();
+        std::fs::write(song.join("stage").join("mode.json"), r#"{"song":"sonata"}"#).unwrap();
+
+        migrate_rice_root().unwrap();
+        aoide_storage::fs::migrate_root_once().unwrap();
+        assert!(!legacy_state.exists(), "core moved its legacy state out of ~/Aoide");
+        assert_eq!(file_bytes(&base.join("aoide").join("state")), before, "the core root holds the same bytes");
         let _ = std::fs::remove_dir_all(&base);
     }
 

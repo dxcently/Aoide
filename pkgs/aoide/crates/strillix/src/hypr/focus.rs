@@ -51,24 +51,25 @@ pub fn focused_workspace() -> Option<i64> {
 /// A structured failure from [`focus_window`]. `reason` is a stable machine
 /// code (`hyprctl-unavailable` / `hyprctl-failed` / `window-not-found` /
 /// `no-window-address`) reused verbatim by every focus-jump caller's own
-/// error envelope (the conductor TUI and the shellbridge socket loop).
+/// error envelope (the `strillix focus session` verb and the bridge's socket
+/// loop).
 #[derive(Debug, Clone)]
 pub struct FocusError {
     pub reason: &'static str,
     pub message: String,
 }
 
-/// The shared verify-then-dispatch used by BOTH the conductor TUI's Enter-key
-/// jump ([`focus_session`], called directly — no CLI command exists for this
-/// anymore) and the shellbridge socket loop (a widget click). `hyprctl
-/// dispatch focuswindow`
-/// exits 0 even when the target window is already gone, so we first list live
-/// clients (`hyprctl clients -j`) and confirm the address is actually present
-/// before dispatching — a vanished terminal is a `window-not-found` error, not
-/// a silent no-op. Returns `Ok(())` only on a dispatched focus; every failure
-/// (empty address, missing/failed hyprctl, unparseable JSON, absent window) is
-/// a structured `Err` — this fn NEVER panics, so a socket loop can call it on
-/// arbitrary input without risk.
+/// The shared verify-then-dispatch used by BOTH the `strillix focus session`
+/// verb (run through the AOIDE_FOCUS_CMD wrapper, which the conductor's Enter
+/// key runs) and the bridge's socket loop (a widget click).
+/// `hyprctl dispatch focuswindow` exits 0 even when the target window is
+/// already gone, so we first list live clients (`hyprctl clients -j`) and
+/// confirm the address is actually present before dispatching — a vanished
+/// terminal is a `window-not-found` error, not a silent no-op. Returns
+/// `Ok(())` only on a dispatched focus; every failure (empty address,
+/// missing/failed hyprctl, unparseable JSON, absent window) is a structured
+/// `Err` — this fn NEVER panics, so a socket loop can call it on arbitrary
+/// input without risk.
 pub fn focus_window(addr: &str) -> Result<(), FocusError> {
     let addr = addr.trim();
     if addr.is_empty() {
@@ -129,17 +130,18 @@ pub fn focus_window(addr: &str) -> Result<(), FocusError> {
     }
 }
 
-/// Resolve a `sessionId` to a live jump and dispatch it — the socket-reachable
-/// counterpart to the CLI [`focus`]. shellbridge drives this on a roster
-/// row-click: QML sends only the sessionId (which every row already holds), and
-/// the DAEMON owns the id→window resolution, so a widget never carries a stale or
-/// empty address (the bug this fixes: the old socket command took a window address,
-/// but the widgets passed a sessionId, so every tracked-row jump silently
-/// no-op'd as `window-not-found`). Prefers the exact `windowAddress` (which also
-/// brings its workspace forward); if that isn't resolved yet but the `workspace`
-/// is known, falls back to switching to that workspace. Both come from one
-/// `aoide session show <id>` through the door. It does not panic — a socket loop
-/// calls it on arbitrary input.
+/// Resolve a `sessionId` to a live jump and dispatch it. The `strillix focus session`
+/// verb and the bridge's focussession arm both run this. shellbridge drives this on a
+/// roster row-click: QML sends only the sessionId (which every row already holds), and
+/// this function owns the id→window resolution, so a widget never carries a stale or
+/// empty address (the bug this fixes: the old socket command took a window address, but
+/// the widgets passed a sessionId, so every tracked-row jump silently no-op'd as
+/// `window-not-found`). Prefers the exact `windowAddress` (which also brings its
+/// workspace forward); if that isn't resolved yet but the `workspace` is known, falls
+/// back to switching to that workspace. Both come from one `aoide session show <id>`,
+/// exec'd directly: that verb reads core's stage and needs no aoided, so this runs
+/// whether or not aoided listens. It does not panic — a socket loop calls it on
+/// arbitrary input.
 pub fn focus_session(id: &str) -> Result<(), FocusError> {
     let id = id.strip_prefix("session:").unwrap_or(id).trim();
     if !safe_session_id(id) {
@@ -148,11 +150,17 @@ pub fn focus_session(id: &str) -> Result<(), FocusError> {
             message: "a session id is required".to_string(),
         });
     }
-    // The session is core state: aoide answers its window and workspace, and the desktop does not
-    // reads sessions.json for it.
+    // The session is core state: aoide answers its window and workspace, so the desktop does not
+    // read sessions.json for it. With no aoide program on this host there is no answer to ask for.
+    if !aoide_protocol::bin::core_present() {
+        return Err(FocusError {
+            reason: "no-aoide",
+            message: "the session's window is core's to answer, and Aoide is not installed on this host".to_string(),
+        });
+    }
     let argv = ["session".to_string(), "show".to_string(), id.to_string()];
     let (exited_ok, stdout, stderr) = run_core_step(&argv).map_err(|message| FocusError {
-        reason: "no-aoide",
+        reason: "core-unavailable",
         message,
     })?;
     let (ok, message, data) = outcome_triple("session", "show", exited_ok, &stdout, &stderr);

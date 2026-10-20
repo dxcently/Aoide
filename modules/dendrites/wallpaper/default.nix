@@ -13,8 +13,8 @@
 # rice's default AND the user's picks. `skwd-wall` hands picks to the external
 # engine of that name, which paints them on its own surface while the shell's
 # layer stays mapped and paints nothing. Both bring the strillix runtime by path
-# (the shell's picker and layer stay), both write `aoide.components.wallpaper`,
-# and both name themselves in the fact `aoide.wallpaper.provider`, which the
+# (the shell's picker and layer stay), both write `strillix.components.wallpaper`,
+# and both name themselves in the fact `strillix.wallpaper.provider`, which the
 # runtime reads (CONTRACTS.md §4) — `strillix` by the value `"quickshell"`.
 #
 # Adding an alternative is one file plus one line here; removing it is

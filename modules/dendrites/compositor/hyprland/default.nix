@@ -28,8 +28,8 @@
 #
 # Reading discipline (CONTRACTS.md §1): a paint dendrite reads the dress, the
 # structure, the surfaces and identity — nothing else (root AGENTS.md house
-# rule 5). Here that is `aoide.theme` (palette + component tiers) and
-# `aoide.layout` (declared widget/surface types).
+# rule 5). Here that is `strillix.theme` (palette + component tiers) and
+# `strillix.layout` (declared widget/surface types).
 #   - Component-tier fallback applied locally.
 #   - NEVER reads rice/ runtime paths (structurally: checks.rice-runtime-untracked).
 {
@@ -42,8 +42,8 @@ let
   # Read-side venue recolour (CONTRACTS.md §1, override tier): resolve rewrites
   # colours equal to an overridden anchor's authored value, in one pass, with
   # no option-system recursion — the option itself stays inert either way.
-  t = (import ../../../../lib/theme.nix { inherit lib; }).resolve config.aoide.theme;
-  arr = config.aoide.layout;
+  t = (import ../../../../lib/theme.nix { inherit lib; }).resolve config.strillix.theme;
+  arr = config.strillix.layout;
 
   # ── Component-tier fallback helpers ────────────────────────────────────────
   # No hex lives here by design (CONTRACTS.md §1/§5): this file is host- and
@@ -59,7 +59,7 @@ let
 
   # ── Derived geometry values ───────────────────────────────────────────────
   # v0 geometry tier (additive-optional, CONTRACTS.md §1): a rice MAY set
-  # aoide.theme.geometry.*; every field is nullOr and falls back to the
+  # strillix.theme.geometry.*; every field is nullOr and falls back to the
   # opinionated defaults below when unset (component-tier fallback pattern,
   # same as windowBorder/windowBorderInactive above). No rice sets geometry
   # today, so these fallbacks ARE the immutable baseline in practice.
@@ -75,7 +75,7 @@ let
   blurSize = if geo.blurSize != null then geo.blurSize else 8;
 
   # ── Declared widget-type registry → compositor layerrules (v1) ───────────
-  # aoide.layout.widgets (nucleus/options.nix, Phase 1) is the registry a
+  # strillix.layout.widgets (nucleus/options.nix, Phase 1) is the registry a
   # rice uses to declare a brand-new surface-kind widget TYPE. It is empty
   # for every rice until Phase 3/4/6 land (Sonata, the only committed rice
   # today, declares nothing) — mapAttrsToList over {} yields [ ], so every
@@ -128,7 +128,7 @@ let
   # during rehearsal to live-patch these values without a rebuild.
   hyprNoteConfig = ''
     # ── Aoide notes — compositor lane ───────────────────────────────────
-    # Generated from aoide.theme at build time; live-patched by the theme
+    # Generated from strillix.theme at build time; live-patched by the theme
     # emitter during rice preview (hyprctl keyword).
 
     general {
@@ -185,7 +185,7 @@ let
     # the same reason.
     layerrule = blur off, match:namespace aoide-calendar
 
-    # aoide.layout.widgets (declared widget-type registry, v1): one
+    # strillix.layout.widgets (declared widget-type registry, v1): one
     # layerrule pair (or a pinned blur-off) per registered slot, same idiom
     # as the aoide-* rules above. Empty today for every rice — expands only
     # once a rice's rice.nix actually populates .widgets (Phase 3/4/6).

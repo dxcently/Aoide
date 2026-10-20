@@ -8,6 +8,6 @@
 # text scan — so it never has to resolve, and it deliberately does not.
 {
   system.module = _: {
-    aoide.theme.palette.bg = "#000000";
+    strillix.theme.palette.bg = "#000000";
   };
 }

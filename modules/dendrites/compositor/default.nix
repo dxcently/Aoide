@@ -12,7 +12,7 @@
 # file: `hyprland/default.nix` is the LOOK (theme-derived appearance and
 # session plumbing; selecting the provider is its switch) and
 # `hyprland/behaviour.nix` is the BEHAVIOUR (keybinds, input, tiling, window
-# rules — its own catalogue entry, `hyprland`, because `aoide.hyprland.*`
+# rules — its own catalogue entry, `hyprland`, because `strillix.hyprland.*`
 # stays a host-facing option).
 #
 # Adding an alternative is one file plus one line here; removing it is

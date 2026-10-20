@@ -21,7 +21,7 @@
       cfg = config.rice.hyprland;
       jsonFormat = pkgs.formats.json { };
       hypr = config.wayland.windowManager.hyprland;
-      twin = "${osConfig.aoide.strillix.root}/declared/rice.conf";
+      twin = "${osConfig.strillix.root}/declared/rice.conf";
       importantPrefixes = lib.unique (
         hypr.importantPrefixes ++ lib.optional hypr.sourceFirst "source" ++ [ "unbind" ]
       );

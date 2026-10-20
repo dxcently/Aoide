@@ -13,7 +13,7 @@ package build from the same one-line input.
   overlay line of their own.
 - `options.nix` — THE core `aoide.*` option contract: `enable`, `root`,
   `checkout`, `auditLog`, `terminal`, `user`, `sessionTarget`. Every
-  Strillix-side unit (`modules/nucleus/{aoided,secrets,config}.nix`,
+  unit (`modules/dendrites/{aoided,aoide-secrets,aoide-config}.nix`,
   `modules/dendrites/strillix/shellbridge.nix`) reads these options; this file only
   declares them.
 - `aoided.nix` — the `aoided` systemd user service itself: the tmpfiles
@@ -28,10 +28,15 @@ package build from the same one-line input.
   and that anchor decides only when the unit STARTS: there is no `partOf`, so
   a desktop that dies takes the paint down and leaves the daemon, its audit
   log, its gate and its doors running.
-  `modules/dendrites/aoided.nix` carries the
-  strillix-gated `STRILLIX_TEMPLATES` variable plus every door
-  (mcp/a2a/pair-watch), the discovery firewall carve, and the usage
-  poller — all still Strillix-side deployment.
+  `modules/dendrites/aoided.nix` carries every door (mcp/a2a/pair-watch), the
+  discovery firewall carve, and the usage poller, all deployment on top of this
+  unit. The strillix dendrite writes nothing onto it: the installed strillix
+  defaults `STRILLIX_TEMPLATES` to its shipped rices itself.
+- `reap.nix` — the liveness reaper: the `aoide-graph-reap` oneshot service
+  (`aoide session reap`) and its timer (about every 12 s). It is anchored to
+  `aoide.sessionTarget` the way `aoided` is, and carries no compositor: a window
+  that closed reaches it through the door (`session window closed`), not through
+  a Hyprland read.
 
 ## How a consumer imports it
 

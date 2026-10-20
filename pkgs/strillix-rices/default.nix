@@ -30,21 +30,17 @@
 # `STRILLIX_TEMPLATES` (rices/) and by its parent (nix/,
 # aoide-options.json) — `strillix rice compose --from <rice>`,
 # `strillix-rice::widgets`'s registry/manifest regeneration, and `strillix onboard`
-# all read it on a repo-less host (no `$AOIDE_FLAKE_ROOT` checkout there). ONLY
-# `strillix-rice`/`strillix` read this var, and
-# only `strillix` links them — so it is wired onto exactly the units
-# whose PROCESS actually execs `strillix`, not every unit that happens to carry
-# `AOIDE_ROOT`/`AOIDE_FLAKE_ROOT` (review finding, task #107: paint data on a
-# headless-core unit only drags this package's closure onto it for nothing).
-# That is `modules/dendrites/strillix/shellbridge.nix`'s main `shellbridge` service
-# (execs `strillix shellbridge --run`) plus `modules/dendrites/aoided.nix`'s
-# `environment.sessionVariables`, itself gated on `aoide.strillix.enable` — the
-# option that actually controls whether `strillix` is installed on this host —
-# for an operator's own interactive `strillix rice compose`. On a NixOS host this
-# env tier always wins, so the core Rust's OWN sibling-of-binary fallback
-# tier is never actually exercised there; that tier exists for a future
-# non-nix tarball install (`bin/strillix` + `share/strillix/rices/` shipped side
-# by side).
+# all read it on a repo-less host (no `$AOIDE_FLAKE_ROOT` checkout there).
+#
+# Only `strillix-rice` and `strillix` read any of it, so the path is named where
+# strillix runs: the installed strillix (`modules/dendrites/strillix/package.nix`)
+# defaults `STRILLIX_TEMPLATES` to `rices/`, and the strillix dendrite's units
+# (`shellbridge`, `aoide-rice-reload`, `aoide-quickshell`) and its activation's
+# `strillix rice refresh` spell the same path themselves. Core's `aoided` unit
+# names none of it. On a NixOS host the installed strillix sets the variable by
+# default, so the core Rust's own sibling-of-binary fallback is reached only by a
+# binary run without that default; that tier exists for a future non-nix tarball
+# install (`bin/strillix` + `share/strillix/rices/` shipped side by side).
 #
 # ── Two knobs, and they are what "built in" means ─────────────────────────
 # `rices` and `builtin` default to the WHOLE committed rices and to no

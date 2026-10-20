@@ -1,6 +1,7 @@
 //! The Hyprland event listener: one `socket2` stream, the window events the desktop reports to core
 //! through the door, and the 5 s tick between them. What the listener owes core is [`Owed`]: a call
-//! core answers is settled, and a call that did not run stays owed.
+//! core answers is settled unless aoided stops listening during it, and a call that did not run
+//! stays owed.
 
 use super::client::hyprctl_clients;
 use super::door::{self, Latch};
@@ -97,8 +98,9 @@ pub(crate) fn is_read_timeout(e: &std::io::Error) -> bool {
 /// The calls the desktop still owes core. A closed window is reported once per event, a codex sync
 /// runs on each appearance and each reconnect, a sweep runs on each tick, each reconnect and each
 /// window event but a close, and the roster goes out when its content changes ([`RosterGate`]). A
-/// call core answers, yes or no, is settled. A call that did not run stays owed and is tried again on
-/// a later tick; a call with aoided not listening waits, unsent, until it does.
+/// yes from core settles a call, and so does a no given while aoided listens; a no given while
+/// aoided stops listening leaves the call owed. A call that did not run stays owed and is tried
+/// again on a later tick; a call with aoided not listening waits, unsent, until it does.
 #[derive(Default)]
 pub(crate) struct Owed {
     closed: Vec<String>,

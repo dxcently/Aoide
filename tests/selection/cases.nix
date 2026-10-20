@@ -68,6 +68,29 @@ rec {
     in
     builtins.concatStringsSep "," inv.aggregation;
 
+  # Strillix stands without Aoide. A host that selects the renderer and not
+  # the core evaluates to a selection with the renderer on, `aoided` off, and the
+  # renderer's own file importing as a module. The renderer gates on its own fact;
+  # `aoide.enable` puts AOIDE_CORE_BIN on the bridge, on the activation's migration
+  # call and in the focus wrapper, and makes the activation run `aoide --help` before
+  # its migration call. The core scalars (AOIDE_USER, AOIDE_ROOT, AOIDE_FLAKE_ROOT)
+  # are set either way.
+  strillixWithoutAoide =
+    let
+      selection = selectionOf { dendrites.strillix.enable = true; };
+      renderer = composition.implOf selection.catalogue "strillix" selection.dendrites.strillix.provider;
+      imports =
+        let
+          m = import renderer.path;
+        in
+        builtins.isAttrs m || builtins.isFunction m;
+    in
+    builtins.concatStringsSep ":" [
+      (lib.boolToString selection.dendrites.strillix.enable)
+      (lib.boolToString selection.dendrites.aoided.enable)
+      (lib.boolToString imports)
+    ];
+
   # ── Rices: discovery and selection (lib/rices.nix's hook) ──────────────
   # The hook over the fixture rices, composed through habit exactly as
   # `lib/strillix.nix` composes the real one: a rice is an aggregation whose body

@@ -172,11 +172,13 @@ by decision — no embedded database yet
   the peer-era state names are renamed. It is deliberately NOT wired into
   `fs::root`'s own resolution, because the stage locks reach `root` and
   `state_dir`, and a migration hung off them would run from any test that
-  takes a lock. The three binaries (`aoide`, `aoided`, `strillix`) call it
+  takes a lock. The two core binaries (`aoide`, `aoided`) call it
   once, explicitly, at the top of their `main()`. The rice tree
   (`~/Aoide/song`, `$AOIDE_ROOT/song`) is not core's: `strillix-rice`'s
   `migrate` moves it on explicit request only, with the
-  `~/.local/state/lyra` link tree in the same request. Rice state held in
+  `~/.local/state/lyra` link tree in the same request. With an aoide binary
+  installed, it waits while core's legacy `~/Aoide/state` is still due to
+  move. Rice state held in
   both roots, or across homes, is refused there (see
   `strillix-rice/AGENTS.md`), with nothing moved. `fs::repo_root` is GONE (its one caller, `aoide-upkeep`'s
   `soundcheck`, now reads `fs::flake_root` directly — a runtime root is not
@@ -190,8 +192,8 @@ by decision — no embedded database yet
   dir, where the offline generator (`nix/manifest.nix`) and
   `aoide-options.json` (`strx onboard`) sit — and `fs::rices_root` is the
   machine's `<rice>/rices/`, the argument that generator is pointed at.
-  `fs::host_config` is the host's own config file (`$AOIDE_HOST_CONFIG`, the
-  nix option `aoide.hostConfig`, default `<flake_root>/hosts/<hostname>/
+  `strillix_rice::paths::host_config()` reads the host's own config file (`$STRILLIX_HOST_CONFIG`, the
+  nix option `strillix.hostConfig`, default `<flake_root>/hosts/<hostname>/
   default.nix`), the one `strx rice declare --host` rewrites.
   Two tiers — `$STRILLIX_TEMPLATES` (absolute-wins, same
   discipline as every override above), else a sibling of `current_exe()`'s

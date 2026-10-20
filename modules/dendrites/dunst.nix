@@ -6,7 +6,7 @@
 #     history and the pause levels), libnotify for the stock `notify-send`
 #     client other aoide code already calls, and the daemon unit itself via
 #     Home Manager's services.dunst module
-#   - reads no other module. Note what is NOT read any more: config.aoide.theme.
+#   - reads no other module. Note what is NOT read any more: config.strillix.theme.
 #     dunst draws nothing now, so it has no dress and needs no design tokens.
 #
 # ── dunst is the daemon; it is not the face ───────────────────────────────
@@ -63,7 +63,7 @@
 #
 # hosts/ knows dendrites; dendrites never know hosts.
 #
-# ── P-A8: also gated on aoide.strillix.enable ──────────────────────────────────
+# ── P-A8: also gated on strillix.enable ──────────────────────────────────
 # The notifications-feed rule below hands every notification to `strillix notifications push`
 # (pkgs.aoide.strillix — a SEPARATE, droppable output as of P-A8's multi-output
 # split); that push is this whole module's reason to exist, so a config that
@@ -81,7 +81,7 @@
 
 {
 
-  config = lib.mkIf config.aoide.strillix.enable {
+  config = lib.mkIf config.strillix.enable {
     # libnotify rides along for `notify-send`: the stock client the freedesktop
     # world (and aoide's own shellbridge mode-toggle path) reaches for. dunstify
     # alone left it missing on the box.

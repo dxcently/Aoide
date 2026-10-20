@@ -317,7 +317,7 @@
       # ── Checks ─────────────────────────────────────────────────────────────
       # The contractual coupling discipline (lib/checks.nix). They pass
       # trivially now (no lane declares surface owners yet) and become real as
-      # the paint lanes populate `aoide.surfaces`. Also builds EVERY package as
+      # the paint lanes populate `strillix.surfaces`. Also builds EVERY package as
       # `pkg-<name>` — one per DISCOVERED package (lib/pkgs.nix; whatever
       # currently lives under pkgs/ — no fixed list here to go stale) plus
       # `pkg-aoide` explicit from the `aoide` input, since the core is
@@ -347,7 +347,7 @@
         in
         pkgChecks
         // {
-          surface-ownership = checks.surfaceOwnership (hostCfg.aoide.surfaces or { });
+          surface-ownership = checks.surfaceOwnership (hostCfg.strillix.surfaces or { });
           # A rice's runtime dirs are gitignored state; this fails if one was
           # committed anyway (it replaced `no-rice-read`, which scanned module
           # paths for those names and could not fire).
@@ -372,7 +372,7 @@
             manifest = ricesLib.manifestAttrs;
           };
           # The two theme fan-outs (baked Stylix, stage seed) agree under an
-          # `aoide.theme.override` — proved against a fixed fixture inside
+          # `strillix.theme.override` — proved against a fixed fixture inside
           # lib/checks.nix, not this host's own config (see lib/theme.nix
           # and lib/checks.nix's Check 10).
           theme-fanout = checks.themeFanout;

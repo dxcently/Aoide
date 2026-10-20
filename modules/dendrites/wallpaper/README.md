@@ -14,8 +14,8 @@ modules/dendrites/wallpaper/
 
 Both providers bring the strillix runtime by path (`../strillix/README.md`): the
 shell's picker and its `aoide-wallpaper` layer stay mapped under either, so
-each declares `aoide.surfaces.wallpaper` and writes its own
-`aoide.components.wallpaper` entry (`strillix` or `skwd-wall`).
+each declares `strillix.surfaces.wallpaper` and writes its own
+`strillix.components.wallpaper` entry (`strillix` or `skwd-wall`).
 
 ## Named seams (what it exposes)
 
@@ -25,7 +25,7 @@ each declares `aoide.surfaces.wallpaper` and writes its own
   contributes every provider's `body`. Adding an alternative is one file plus
   one line here; removing it is deleting both, with no other edit in the tree.
   Each provider file is a plain module of its own.
-- **The fact `aoide.wallpaper.provider`** (`modules/nucleus/options.nix`) is the
+- **The fact `strillix.wallpaper.provider`** (`modules/nucleus/options.nix`) is the
   name of the provider that answers here: each provider sets it to its own name
   `mkDefault`, so a host may stand a provider's config down by overriding it
   without deselecting it. `strillix` publishes it to the runtime as

@@ -5,7 +5,7 @@
 # own, and keeps the engine's own config to what Aoide owns: theming off, its
 # library inside `aoide.root`, one post-processing hook. WHO PAINTS is the host's
 # choice, so no rice is consulted — the seam is the fact
-# `aoide.wallpaper.provider = "skwd-wall"` (CONTRACTS.md §0), which this file SETS
+# `strillix.wallpaper.provider = "skwd-wall"` (CONTRACTS.md §0), which this file SETS
 # `mkDefault` and guards on.
 #
 # `AOIDE_SKWD_WALL_STANDIN` is the step-aside image — `strillix wallpaper sync`'s
@@ -104,11 +104,11 @@ in
   config = lib.mkMerge [
     {
       habit.home.imports = [ ../strillix/runtime-home.nix ];
-      aoide.components.wallpaper.provider = "skwd-wall";
-      aoide.surfaces.wallpaper.owner = "quickshell";
-      aoide.wallpaper.provider = lib.mkDefault "skwd-wall";
+      strillix.components.wallpaper.provider = "skwd-wall";
+      strillix.surfaces.wallpaper.owner = "quickshell";
+      strillix.wallpaper.provider = lib.mkDefault "skwd-wall";
     }
-    (lib.mkIf (config.aoide.wallpaper.provider == "skwd-wall") {
+    (lib.mkIf (config.strillix.wallpaper.provider == "skwd-wall") {
 
       # ── The engine's packages ──────────────────────────────────────────────
       # The picker (`skwd-wall-v2`) is the user's own door onto the engine's
@@ -170,7 +170,7 @@ in
                 "SKWD_WALL_V2_CONFIG=${configDir}"
                 "SKWD_WALL_V2_CACHE=${cacheDir}"
                 "AOIDE_ROOT=${config.aoide.root}"
-                "STRILLIX_ROOT=${config.aoide.strillix.root}"
+                "STRILLIX_ROOT=${config.strillix.root}"
                 "AOIDE_SKWD_WALL_STANDIN=${standinPng}"
                 # PATH replaces the manager's: every bare name the daemon execs
                 # (`sh`/`setsid`, `ffmpeg`, `file`, `strillix`, the renderer).

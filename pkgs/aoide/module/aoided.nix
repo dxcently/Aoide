@@ -32,18 +32,14 @@ in
 lib.mkIf config.aoide.enable {
 
   # ── Runtime directories ──────────────────────────────────────────────────
-  # Two atomic JSON state trees (CONTRACTS.md §4), both created at runtime,
-  # never committed, never imported by any module (checks.rice-runtime-untracked):
-  # `$STRILLIX_ROOT/stage/` is rice/paint staging (theme.json, mode.json — strillix's
-  # tree); `state/stage/` is CONDUCTING state (sessions.json/hooks.json/
-  # projects.json/graph.json/pending.json/notifications.json — command-defrag S1,
-  # 2026-08-27). `state/stage/` nests under the already-0700 `state/` dir, so
-  # its own 0755 grants nothing beyond the owner the parent doesn't already
-  # gate — matching `$STRILLIX_ROOT/stage/`'s own mode rather than inventing a second
-  # convention for the same class of data.
+  # `state/stage/` is CONDUCTING state (sessions.json/hooks.json/projects.json/
+  # graph.json/pending.json/notifications.json — command-defrag S1, 2026-08-27),
+  # created at runtime, never committed, never imported by any module
+  # (checks.rice-runtime-untracked). It nests under the already-0700 `state/`
+  # dir, so its own 0755 grants nothing beyond the owner the parent doesn't
+  # already gate. Strillix's paint stage is its own tree, made by its own module.
   systemd.user.tmpfiles.rules = [
     "d ${config.aoide.root}/log        0700 - - -"
-    "d ${config.aoide.strillix.root}/stage 0755 - - -"
     "d ${config.aoide.root}/state      0700 - - -"
     "d ${config.aoide.root}/state/stage 0755 - - -"
   ];
@@ -57,19 +53,18 @@ lib.mkIf config.aoide.enable {
     AOIDE_TERMINAL = config.aoide.terminal;
   };
 
-  # The runtime root, checkout and host config are `aoide.user`'s, so only
-  # that user's login shells get them. A system-wide export would hand khoa's `~/.aoide` to every
+  # The runtime root and checkout are `aoide.user`'s, so only that user's login
+  # shells get them. A system-wide export would hand khoa's `~/.aoide` to every
   # login shell, root's included: root's `aoide` would then write into khoa's
   # home (the vm-boot failure), and AOIDE_ROOT beats HOME, so no HOME fallback
   # could stop it. Non-default values only need to WORK; the defaults already
   # match core's own code default (L-C2, task #107), and this export keeps an
-  # interactive shell agreeing with every unit above on where they sit.
+  # interactive shell agreeing with every unit above on where they sit. Strillix's
+  # own root and host file are exported by its own module, never here.
   environment.extraInit = ''
     if [ "$(id -un)" = ${lib.escapeShellArg config.aoide.user} ]; then
       export AOIDE_ROOT=${lib.escapeShellArg config.aoide.root}
-      export STRILLIX_ROOT=${lib.escapeShellArg config.aoide.strillix.root}
       export AOIDE_FLAKE_ROOT=${lib.escapeShellArg config.aoide.checkout}
-      export AOIDE_HOST_CONFIG=${lib.escapeShellArg config.aoide.hostConfig}
     fi
   '';
 
@@ -168,9 +163,7 @@ lib.mkIf config.aoide.enable {
         "AOIDE_AUDIT_LOG=${config.aoide.auditLog}"
         "AOIDE_USER=${config.aoide.user}"
         "AOIDE_ROOT=${config.aoide.root}"
-        "STRILLIX_ROOT=${config.aoide.strillix.root}"
         "AOIDE_FLAKE_ROOT=${config.aoide.checkout}"
-        "AOIDE_HOST_CONFIG=${config.aoide.hostConfig}"
       ]
       # Quoted as one assignment per systemd.exec(5)'s own `Environment=`
       # syntax (`Environment="VAR=word1 word2"`): the template carries

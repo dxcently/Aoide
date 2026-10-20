@@ -2,7 +2,7 @@
 #
 # Every other module (dendrites) builds against the options
 # declared here. This is versioned in CONTRACTS.md (theme schema v0). A paint
-# lane reads `aoide.theme`, `aoide.layout` and `aoide.surfaces` from here,
+# lane reads `strillix.theme`, `strillix.layout` and `strillix.surfaces` from here,
 # plus the core scalars and the rice selection declared beside them — the
 # enumerated, closed set root `AGENTS.md` house rule 5 states in full; no module
 # reads another module. That discipline is a documented convention, backed by
@@ -15,6 +15,7 @@
 # it wires no behaviour, so an empty config evaluates cleanly.
 {
   lib,
+  config,
   ...
 }:
 let
@@ -465,7 +466,40 @@ in
   # list is what `config` is assembled from, so the read is a cycle), and this
   # file must keep evaluating when a bare `evalModules` imports it without any
   # lane around it (`lib/options.nix` reads the option declarations that way).
-  options.aoide = {
+  options.strillix = {
+    # ── Rice runtime root and host file (moved here from the core module) ──
+    # Both name Strillix's own state. The core module (`pkgs/aoide/module`) owns
+    # no strillix option, so nothing in core reads them: a host that never
+    # selects the strillix dendrite still carries these as plain defaults.
+    root = mkOption {
+      type = types.str;
+      default = "/home/${config.aoide.user}/.strillix";
+      defaultText = literalExpression ''"/home/''${config.aoide.user}/.strillix"'';
+      description = ''
+        The RICE runtime root (`$STRILLIX_ROOT`): the stage (`stage/`, the
+        live twin the paint reads), `declared/` (the declared twin), `rices/`
+        (the machine's own rices) and `wallpapers/`. Exported as
+        `STRILLIX_ROOT` on every unit that runs a `strillix` binary, and into
+        `aoide.user`'s login shells beside `AOIDE_ROOT`. Code default, matching
+        this option's default exactly: `~/.strillix`.
+      '';
+    };
+
+    hostConfig = mkOption {
+      type = types.str;
+      default = "${config.aoide.checkout}/hosts/${config.networking.hostName}/default.nix";
+      defaultText = literalExpression ''"''${config.aoide.checkout}/hosts/''${config.networking.hostName}/default.nix"'';
+      description = ''
+        This machine's host config file — the module holding its one
+        `habit.rice.declared = "<rice>";` line, which `strillix rice declare
+        <rice> --host` rewrites so the next rebuild performs that rice.
+        Exported as `STRILLIX_HOST_CONFIG` on the strillix units, and in
+        `aoide.user`'s own login shells. A consumer whose hosts live elsewhere
+        sets its own path. Code default, matching this option's own default
+        exactly: `<checkout>/hosts/<hostname>/default.nix`.
+      '';
+    };
+
     # ── Rice selection — the replay seam ───────────────────────────────────
     # The rice (rice) this host performs. A rice is host-agnostic: ANY host in
     # the fleet replays any committed rice by naming it here — one line, no
@@ -489,16 +523,16 @@ in
         an empty surface, and no rice's body is imported. Naming a rice is what
         puts a shell tree under the runtime root;
         a host that brings its own config directory still runs a shell on it
-        (`aoide.quickshell.config`), rice or no rice. A host wanting the
+        (`strillix.quickshell.config`), rice or no rice. A host wanting the
         desktop names its rice explicitly, e.g.
-        `aoide.rice = "sonata";` for the shipped standard.
+        `strillix.rice = "sonata";` for the shipped standard.
       '';
     };
 
     # The rices this host BUILDS IN — the host's `habit.rice.declared ∪
     # habit.rice.available`, derived and set by the constructor's hook
     # (`lib/strillix.nix`, over `lib/rices.nix`'s `builtIn`). A FACT about the
-    # selection, exactly as `aoide.rice` is, and never hand-set: the lane that
+    # selection, exactly as `strillix.rice` is, and never hand-set: the lane that
     # builds a rice's widgets, installs its packages and seeds its folder reads
     # it instead of asking the host, which it cannot see.
     #
@@ -670,13 +704,13 @@ in
     layout = mkOption {
       description = ''
         The v1 layout schema — one of the three namespaces a paint lane may
-        read. Where `aoide.theme` carries the rice's DRESS (palette · base16
+        read. Where `strillix.theme` carries the rice's DRESS (palette · base16
         · component tiers · geometry · fonts · wallpaper), layout carries its
         STRUCTURE: which widget/surface TYPES the rice brings into existence
         (`widgets`) and which painted surfaces it expects to stay mapped
         (`surfaces`). Dress and structure are different questions, so they
         are different option trees; the paint read-whitelist stays an
-        enumerated, closed set — theme, layout, and the `aoide.surfaces`
+        enumerated, closed set — theme, layout, and the `strillix.surfaces`
         ownership registry (AGENTS.md house rule 5) — never an open `aoide.*`.
       '';
       default = { };
@@ -707,7 +741,7 @@ in
               atomically consistent across the flip. The option-tree split is a
               NIX NAMESPACE decision about what paint lanes may read; it is not a
               file split. Precedent: theme.json already carries a top-level
-              `rice` key with no `aoide.theme.rice` option (CONTRACTS.md §4).
+              `rice` key with no `strillix.theme.rice` option (CONTRACTS.md §4).
             '';
           };
           surfaces = mkOption {
@@ -806,7 +840,7 @@ in
     # module is in the host (selected, or imported by path by a lane that brings
     # it), and a file in that dendrite's directory sets it to plain `true`;
     # `mkFact` refuses any other write that takes effect. Each defaults to `false`: a host with no
-    # paint lane is headless. `aoide.strillix.enable` below, declared beside the
+    # paint lane is headless. `strillix.enable` below, declared beside the
     # package it installs, is the third fact in this family.
     quickshell = {
       enable = mkOption {
@@ -879,21 +913,21 @@ in
     };
 
     # ── Strillix paint binary (P-A8 of the binary-split workstream) ────────────
-    strillix = {
-      enable = mkOption {
-        type = mkFact "strillix";
-        default = false;
-        description = ''
-          A fact: the `strillix` paint/rice binary is installed — `pkgs.aoide.strillix`,
-          the separate output P-A8 split off the combined aoide/aoided/strillix
-          derivation so a headless closure never has to carry it. True exactly
-          when the `strillix` dendrite's runtime (`dendrites/strillix/runtime.nix`) is
-          imported, which sets it. Set only from that dendrite's directory;
-          read it, never set it. Every unit that execs `strillix`
-          (shellbridge, the dunst notifications feed) gates on this fact too, so a host
-          without the dendrite never has a unit pointed at a missing binary.
-        '';
-      };
+    # The fact is Strillix's own, not Aoide's: a host may select strillix with
+    # Aoide disabled, and nothing in core reads this.
+    enable = mkOption {
+      type = mkFact "strillix";
+      default = false;
+      description = ''
+        A fact: the `strillix` paint/rice binary is installed — `pkgs.aoide.strillix`,
+        the separate output P-A8 split off the combined aoide/aoided/strillix
+        derivation so a headless closure never has to carry it. True exactly
+        when the `strillix` dendrite's runtime (`dendrites/strillix/runtime.nix`) is
+        imported, which sets it. Set only from that dendrite's directory;
+        read it, never set it. Every unit that execs `strillix`
+        (shellbridge, the dunst notifications feed) gates on this fact too, so a host
+        without the dendrite never has a unit pointed at a missing binary.
+      '';
     };
 
   };

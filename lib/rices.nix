@@ -354,7 +354,7 @@ let
               description = ''
                 The rice this host performs. A committed rice name (a folder under
                 `rices/<name>/` with a `rice.nix`); null means no rice is
-                named. It becomes the platform fact `aoide.rice`, and its body is
+                named. It becomes the platform fact `strillix.rice`, and its body is
                 the one aggregation the host selects.
               '';
             };
@@ -430,9 +430,9 @@ let
                 ricesRoot = ricesDir;
                 inherit riceDirs;
               };
-              aoide.rice = sel.rice.declared;
-              aoide.rices.builtIn = builtIn sel.rice;
-              aoide.rices.greeter = greeter sel.rice;
+              strillix.rice = sel.rice.declared;
+              strillix.rices.builtIn = builtIn sel.rice;
+              strillix.rices.greeter = greeter sel.rice;
             }
           ];
       };
@@ -476,7 +476,7 @@ let
   # when the declared rice dresses no greeter. The greeter is chosen before the
   # system is built, so this is read at eval time from the rices itself,
   # and it is a fact about the selection like `builtIn`
-  # (`aoide.rices.greeter`). Only the DECLARED rice counts: the login
+  # (`strillix.rices.greeter`). Only the DECLARED rice counts: the login
   # screen is part of the build, never of what a user later stages.
   greeter =
     sel: if sel.declared == null then null else riceMeta.${sel.declared}.manifest.greeter or null;
@@ -484,7 +484,7 @@ let
   # The package names the built-in rices' widgets declare (`lib/rice.nix`'s
   # `composeRice`), resolved by the caller against its own `pkgs`. Takes the
   # NAMES, not a selection: the lane that installs them reads the fact
-  # `aoide.rices.builtIn`, not the host module.
+  # `strillix.rices.builtIn`, not the host module.
   packagesFor = names: lib.unique (lib.concatMap (name: riceMeta.${name}.packages or [ ]) names);
 in
 {

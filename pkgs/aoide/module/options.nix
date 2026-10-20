@@ -22,7 +22,7 @@ in
         `state/` (conducting state + account/usage state), `run/` (the
         live-deployed QML and element trees), `log` and the sessions all hang
         off this one directory. Rice state does not: it lives under
-        `aoide.strillix.root`. Exported as `AOIDE_ROOT` on every unit that runs
+        `strillix.root`. Exported as `AOIDE_ROOT` on every unit that runs
         an `aoide`/`aoided`/`strillix` binary, and into `aoide.user`'s own login
         shells (never another account's, root's included). Core code default,
         matching this option's own default exactly (unset == set-to-default):
@@ -35,20 +35,6 @@ in
         `aoide`/`aoided`/`strillix` invocation after the switch (see
         `aoide_storage::fs::migrate_root_once`'s own doc for the exact
         mechanism).
-      '';
-    };
-
-    strillix.root = mkOption {
-      type = types.str;
-      default = "/home/${config.aoide.user}/.strillix";
-      defaultText = literalExpression ''"/home/''${config.aoide.user}/.strillix"'';
-      description = ''
-        The RICE runtime root (`$STRILLIX_ROOT`): the stage (`stage/`, the
-        live twin the paint reads), `declared/` (the declared twin), `rices/`
-        (the machine's own rices) and `wallpapers/`. Exported as
-        `STRILLIX_ROOT` on every unit that runs a `strillix` binary, and into
-        `aoide.user`'s login shells beside `AOIDE_ROOT`. Core code default,
-        matching this option's default exactly: `~/.strillix`.
       '';
     };
 
@@ -66,22 +52,6 @@ in
         a rice happens under the runtime root, committing it happens in
         this checkout. Core code default, matching this option's own
         default exactly: `~/Aoide`.
-      '';
-    };
-
-    hostConfig = mkOption {
-      type = types.str;
-      default = "${config.aoide.checkout}/hosts/${config.networking.hostName}/default.nix";
-      defaultText = literalExpression ''"''${config.aoide.checkout}/hosts/''${config.networking.hostName}/default.nix"'';
-      description = ''
-        This machine's host config file — the module holding its one
-        `habit.rice.declared = "<rice>";` line, which `strillix rice declare
-        <rice> --host` rewrites so the next rebuild performs that rice.
-        Exported as `AOIDE_HOST_CONFIG` on the same units, and in
-        `aoide.user`'s own login shells, as `aoide.checkout` is. A consumer
-        whose hosts live elsewhere sets its own path. Core code default,
-        matching this option's own default exactly:
-        `<checkout>/hosts/<hostname>/default.nix`.
       '';
     };
 

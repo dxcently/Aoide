@@ -54,7 +54,6 @@
   config,
   lib,
   pkgs,
-  aoideInputs,
   ...
 }:
 {
@@ -296,21 +295,12 @@
         # is listed explicitly rather than assumed from the systemPackages
         # entry above (that entry serves `secrets enroll`'s own QR rendering
         # and an operator's interactive shell, never this unit).
-        # `quickshell` rides the same rule for the strillix dialog path:
-        # `strillix secrets ask` spawns it by bare name, so the unit that spawns
-        # strillix must carry it — the live gap that let the first unit-spawned
-        # dialog fail silently (strillix resolved, its quickshell ENOENT'd, the
-        # ask just stayed parked). Gated on the strillix fact, for the same reason: a unit can
-        # only spawn strillix when the strillix fact put the binary on this host, and
-        # a host without strillix takes the zenity path and has no use for
-        # quickshell in its closure — the pair-watch unit's own pattern
-        # (`aoided.nix`).
+        # A desktop dialog provider carries its own closure (the provider
+        # `AOIDE_DIALOG_CMD` names puts quickshell on its own PATH), so this unit
+        # lists only what the zenity fallback needs.
         path = [
           pkgs.zenity
-        ]
-        ++
-          lib.optional config.aoide.strillix.enable
-            aoideInputs.quickshell.packages.${pkgs.stdenv.hostPlatform.system}.default;
+        ];
 
         serviceConfig = {
           Type = "simple";
@@ -325,7 +315,6 @@
             # keeps working if that default ever changes.
             "AOIDE_SECRETS_SOCKET=/run/aoide-secrets/secrets.sock"
             "AOIDE_ROOT=${config.aoide.root}"
-            "STRILLIX_ROOT=${config.aoide.strillix.root}"
             "AOIDE_FLAKE_ROOT=${config.aoide.checkout}"
           ];
           # `secrets watch` runs the dialog provider `AOIDE_DIALOG_CMD` names. The desktop's home half

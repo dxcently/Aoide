@@ -15,10 +15,10 @@ covers only what's specific to dendrites.
   lanes read each other only through the facts `modules/nucleus/options.nix`
   declares. `quickshell`, `stylix` and `strillix` each set their fact
   `true`, from a file in their own directory (`mkFact` accepts any file under a
-  directory entry); a `wallpaper` provider sets `aoide.wallpaper.provider` to its own name
+  directory entry); a `wallpaper` provider sets `strillix.wallpaper.provider` to its own name
   (`mkDefault`), and every component slot's provider writes its own
-  `aoide.components.<slot>` entry. Never declare `aoide.<that name>.enable` a
-  second time.
+  `strillix.components.<slot>` entry. A paint fact is declared once, in
+  `modules/nucleus/options.nix`, and no dendrite declares it again.
 - **A dependency rides the guard that needs it, never an unconditional
   `imports`.** `lib/options.nix` evaluates every dendrite in a bare
   `evalModules` to render `aoideOptions`, so a module that pulls in a
@@ -63,7 +63,7 @@ covers only what's specific to dendrites.
   Committed rices score (`rices/**`) is not a runtime path.
 - **The activation seed goes through `lib/theme.nix`, never the raw committed
   file.** `stageTheme` patches the active rice's committed `theme.json` with
-  `stagePatch` (the same `aoide.theme.override` rule `resolve` applies for
+  `stagePatch` (the same `strillix.theme.override` rule `resolve` applies for
   stylix/the compositor) before it is jq-stamped with `rice` and written to
   `/stage/theme.json` — `checks.theme-fanout` is the gate. The seed
   RENAMES that file over the stage entry and never writes through it, so a
@@ -119,8 +119,8 @@ them in addition to the ones above.
   document is the split-brain the point-don't-copy design exists to avoid.
 - **A member reads the contract, never another member.** `aoided` and
   `melete-adapter` order against `aoided.service`, a unit the core module
-  defines on `aoide.enable` alone (the `aoided` dendrite adds only the Strillix
-  deltas: doors, popup, usage poller, firewall carve, `STRILLIX_TEMPLATES`);
+  defines on `aoide.enable` alone (the `aoided` dendrite adds its own deltas:
+  doors, popup, usage poller, firewall carve);
   none reads another member's option or config, so a host may deselect any one
   of them and still evaluate (checked by deselecting each in turn on
   `hosts/yomi-strix`). An option a member reads is declared in that member

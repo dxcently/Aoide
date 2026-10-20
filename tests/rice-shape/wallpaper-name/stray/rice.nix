@@ -4,7 +4,7 @@
   system = {
     module = { lib, ... }: {
       config = lib.mkDefault {
-        aoide.theme.wallpaper = ./wallpaper/dusk.jpg;
+        strillix.theme.wallpaper = ./wallpaper/dusk.jpg;
       };
     };
   };

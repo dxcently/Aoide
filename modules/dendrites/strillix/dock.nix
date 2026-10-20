@@ -3,5 +3,5 @@
 {
   imports = [ ./runtime.nix ];
   habit.home.imports = [ ./runtime-home.nix ];
-  aoide.components.dock.provider = "strillix";
+  strillix.components.dock.provider = "strillix";
 }

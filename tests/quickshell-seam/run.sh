@@ -9,7 +9,7 @@
 # reads the constructor, the catalogue, nucleus and the four host modules out
 # of it, so a commit ref tests that commit. Every eval below carries the ref.
 #
-# `test-quickshell-only` — quickshell selected, `aoide.quickshell.config` = the
+# `test-quickshell-only` — quickshell selected, `strillix.quickshell.config` = the
 # fixture directory, no strillix: the host's own shell runs (one `aoide-quickshell`
 # unit, on that directory), and nothing strillix would have brought is there (no
 # rice binary, no `rices/`, no shellbridge unit, no healthcheck, no rice-reload
@@ -143,7 +143,7 @@ if evalf riceWithoutStrillix "$tmp/rice.err" >/dev/null; then
   fail=$((fail+1))
 elif grep -qF -- 'needs the strillix runtime' "$tmp/rice.err"; then
   printf '%-46s PASS  (%s)\n' "rice without the strillix runtime is refused" \
-    "$(tr -d '\n' < "$tmp/rice.err" | grep -o -m1 -- 'aoide.rice = "sonata" needs the strillix runtime: pick [^"]*')"
+    "$(tr -d '\n' < "$tmp/rice.err" | grep -o -m1 -- 'strillix.rice = "sonata" needs the strillix runtime: pick [^"]*')"
   pass=$((pass+1))
 else
   printf '%-46s FAIL (wrong error)\n' "rice without the strillix runtime is refused"
@@ -165,17 +165,18 @@ else
     "$(y '[.systemdUserServices[] | select(test("shellbridge"))] | length')"
   check "control: yomi HAS the rice binary"     "1" \
     "$(y '[.packages[] | select(test("-strillix$"))] | length')"
-  # The staging path's session-sourced variable, declared on every unit a
-  # staged rice can descend from — and all three naming ONE directory, so a
-  # unit cannot go stale on its own (found at the S9 yomi switch: an inherited
-  # login-environment value survived a switch until the operator relogged).
-  check "control: aoided declares the templates" "1" "$(y '.templates.aoided | length')"
+  # The staging path's variable, spelled on every unit that stages — and all of
+  # them naming ONE directory, so a unit cannot go stale on its own (found at the
+  # S9 yomi switch: an inherited login-environment value survived a switch until
+  # the operator relogged). Core's aoided names none: the installed strillix
+  # carries the default.
+  check "control: aoided declares no templates" "0" "$(y '.templates.aoided | length')"
   check "control: shellbridge declares it"      "1" "$(y '.templates.shellbridge | length')"
   check "control: the shell declares it"        "1" "$(y '.templates.quickshell | length')"
   check "control: the rice reload declares it"  "1" "$(y '.templates.riceReload | length')"
   check "control: every unit names one directory" "true" "$(y '.templatesAgree')"
   check "control: it is the shipped rices"   "true" \
-    "$(y '.templates.aoided[0] | endswith("-strillix-rices-templates/share/strillix/rices")')"
+    "$(y '.templates.shellbridge[0] | endswith("-strillix-rices-templates/share/strillix/rices")')"
   # The unit that brings a staged or drafted rice back after a login or a
   # switch: ordered before the shell (its first frame is the staged rice), run in
   # the user manager once the session is up, one shot that stays active even when

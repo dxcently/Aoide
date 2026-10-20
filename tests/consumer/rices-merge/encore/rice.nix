@@ -22,9 +22,9 @@
     module =
       { rice, borrow, ... }:
       {
-        aoide.layout.widgets = (rice.composeRice (borrow "sonata")).layout.widgets;
+        strillix.layout.widgets = (rice.composeRice (borrow "sonata")).layout.widgets;
 
-        aoide.theme.palette = {
+        strillix.theme.palette = {
           bg = "#1a1424";
           fg = "#ece6f2";
           accent = "#b48cf0";

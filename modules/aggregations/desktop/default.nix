@@ -2,7 +2,7 @@
 #
 # The session's own surfaces are the `strillix` aggregation, which is why a host
 # can take this one and answer the shell question differently (`quickshell`
-# selected with its own `aoide.quickshell.config`, or not at all). What is here
+# selected with its own `strillix.quickshell.config`, or not at all). What is here
 # is what a graphical session needs regardless of who draws it: sound, the
 # clipboard, notifications, the network applet, a browser, and the two halves of
 # screenshotting (hyprshot/satty for the human, grim/slurp for agents).

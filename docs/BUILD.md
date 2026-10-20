@@ -77,41 +77,36 @@ no fact.
 | Option                         | Type                         | Notes |
 | ------------------------------ | ---------------------------- | ----- |
 | `aoide.enable`                 | bool                         | core switch: set `true` by each nucleus member, not written by hand |
-| `aoide.rice`                   | nullOr str (default `null`)  | the rice this host performs; names a `rices/<name>/`. Null — no rice named — means a paint lane deploys nothing: no QML tree, no seeded stage, no rice restart |
+| `strillix.rice`                   | nullOr str (default `null`)  | the rice this host performs; names a `rices/<name>/`. Null — no rice named — means a paint lane deploys nothing: no QML tree, no seeded stage, no rice restart |
 | `aoide.user`                   | str (default `"khoa"`)       | owner of the `~/Aoide` clone |
 | `aoide.root`                   | str (default `"~/.aoide"`)   | the RUNTIME root — `/stage/`, `/declared/`, `state/`, `run/qml/`, composed `rices/`; exported as `AOIDE_ROOT` (to `aoide.user`'s login shells). Core code default, nix-independent (L-C2, task #107) |
 | `aoide.checkout`               | str (default `"~/Aoide"`)    | the dev git checkout — `rice declare`'s commit-in target, `soundcheck`'s scan root, the rices `nix eval` registry regen; exported as `AOIDE_FLAKE_ROOT` (to `aoide.user`'s login shells) |
-| `aoide.hostConfig`             | str (default `"<checkout>/hosts/<hostName>/default.nix"`) | the host's own config file, whose one `habit.rice.declared` line `strx rice declare <rice> --host` rewrites; exported as `AOIDE_HOST_CONFIG` (to `aoide.user`'s login shells) |
-| `aoide.theme.palette.{bg,fg,accent,urgent}` | hex        | v0 palette (base16) |
-| `aoide.theme.bar.{bg,fg,accent}` | nullOr hex                | component override; null → palette |
-| `aoide.theme.notif.{bg,fg,urgent}` | nullOr hex              | component override; null → palette |
-| `aoide.theme.window.{border,borderInactive}` | nullOr hex     | component override; null → palette |
-| `aoide.surfaces.<name>.owner`  | str                          | surface-ownership registry |
+| `strillix.hostConfig`             | str (default `"<checkout>/hosts/<hostName>/default.nix"`) | the host's own config file, whose one `habit.rice.declared` line `strx rice declare <rice> --host` rewrites; exported as `STRILLIX_HOST_CONFIG` (to `aoide.user`'s login shells) |
+| `strillix.theme.palette.{bg,fg,accent,urgent}` | hex        | v0 palette (base16) |
+| `strillix.theme.bar.{bg,fg,accent}` | nullOr hex                | component override; null → palette |
+| `strillix.theme.notif.{bg,fg,urgent}` | nullOr hex              | component override; null → palette |
+| `strillix.theme.window.{border,borderInactive}` | nullOr hex     | component override; null → palette |
+| `strillix.surfaces.<name>.owner`  | str                          | surface-ownership registry |
 | `aoide.mcp.enable`             | bool (default false)         | MCP façade toggle |
 | `aoide.auditLog`               | str (default `$AOIDE_ROOT/log`, i.e. `~/.aoide/log`) | single audit log |
 
-`STRILLIX_TEMPLATES` (L-C3, task #107) is not its own `aoide.*` option — it
-is wired directly, as `${pkgs.strillix-rices}/share/strillix/rices`, but NOT
-onto the same broad unit list `AOIDE_ROOT`/`AOIDE_FLAKE_ROOT` ride: only the
-staging paths read it and only `strillix` links them, so it rides the units that
-exec or spawn `strillix` —
-`modules/dendrites/strillix/shellbridge.nix`'s main `shellbridge` service,
-`modules/dendrites/quickshell/system.nix`'s `aoide-quickshell` unit (the QML it
-starts execs `strillix`), `modules/dendrites/strillix/runtime.nix`'s
-`aoide-rice-reload` unit (it runs `strx reload`) — and
-`modules/dendrites/aoided.nix`'s `environment.sessionVariables` plus its own unit `Environment`, all gated on
-`aoide.strillix.enable`, never the core-only units that exec plain
-`aoide` (a headless core carries no `pkgs.strillix-rices` closure). Each unit
-spells it in its OWN `Environment=` as well as inheriting the login copy:
-a session variable is a LOGIN fact, so a unit that started before a switch
-would otherwise keep the previous build's rices until the operator relogs.
-That
-package (`pkgs/strillix-rices/default.nix`) bakes the built-in
-`rices/` tree plus `manifest.json`/`registry.json` (via
-`lib/rices.nix`) at build time, so a repo-less host's `rice compose --from
-<rice>` and its registry/manifest regeneration both have something to fall
-back to with no `nix eval` shell-out. See `CONTRACTS.md`'s path-model section
-for the full resolution ladder.
+`STRILLIX_TEMPLATES` is not its own `aoide.*` option. The strillix dendrite
+gives it a default in the binary it installs: `modules/dendrites/strillix/package.nix`
+wraps `pkgs.aoide.strillix` with `makeWrapper --set-default STRILLIX_TEMPLATES
+${pkgs.strillix-rices}/share/strillix/rices`, and `runtime.nix` puts that wrapper on
+the system PATH, so `strillix` and `strx` find the shipped rices from any shell with no
+session variable. A value already in the environment wins over the default. The units
+that exec or spawn `strillix` also spell the same path in their own `Environment=`, so a
+unit restarted by a switch takes this build's rices: `shellbridge.nix`'s `shellbridge`
+service, `modules/dendrites/quickshell/system.nix`'s `aoide-quickshell` unit, and
+`runtime.nix`'s `aoide-rice-reload` unit. Those exist where strillix is selected.
+Core's `aoided` unit names none of it, and a headless core (no strillix dendrite
+selected) carries no `pkgs.strillix-rices` closure. The package
+(`pkgs/strillix-rices/default.nix`) bakes the built-in `rices/` tree plus
+`manifest.json`/`registry.json` (via `lib/rices.nix`) at build time, so a repo-less
+host's `rice compose --from <rice>` and its registry/manifest regeneration both have
+something to fall back to with no `nix eval` shell-out. See `CONTRACTS.md`'s
+path-model section for the full resolution ladder.
 
 See `CONTRACTS.md §1` for the full note schema and fallback rules.
 
@@ -140,10 +135,10 @@ hosts.
 
 ## Authoring a paint lane
 
-A paint lane renders appearance: it reads the dress (`aoide.theme`), the
-structure (`aoide.layout`), the surface registry (`aoide.surfaces`), the
+A paint lane renders appearance: it reads the dress (`strillix.theme`), the
+structure (`strillix.layout`), the surface registry (`strillix.surfaces`), the
 core scalars and the rice selection — root `AGENTS.md` house rule 5, and nothing
-else. If it owns a surface it declares that in `aoide.surfaces`. Apply component
+else. If it owns a surface it declares that in `strillix.surfaces`. Apply component
 fallbacks yourself.
 
 ```nix
@@ -151,23 +146,23 @@ fallbacks yourself.
 # declares, sets the fact on selection, and renders the rest.
 { config, lib, ... }:
 let
-  t = config.aoide.theme;
+  t = config.strillix.theme;
   # component-tier fallback: null → palette (see CONTRACTS.md §1)
   barBg = if t.bar.bg != null then t.bar.bg else t.palette.bg;
 in
 {
   config = {
-    aoide.strillix.enable = true;
+    strillix.enable = true;
     # Declare surface ownership — the stylix lane reads this and stands
     # down for `bar`.
-    aoide.surfaces.bar.owner = "quickshell";
+    strillix.surfaces.bar.owner = "quickshell";
     # … render the bar using barBg / t.palette.* …
   };
 }
 ```
 
 The `checks.surface-ownership` assertion fails eval if a declared surface has no
-owner; the stylix lane must read `config.aoide.surfaces` and disable its own
+owner; the stylix dendrite reads `config.strillix.surfaces` and disables its own
 derivation for any surface already owned (overlap resolution,
 `concepts/Notes`).
 
@@ -211,7 +206,7 @@ and imports only the one the host performs.
     module = { lib, ... }: {
       # every value the module sets is a default: lib.mkDefault, once for all
       config = lib.mkDefault {
-        aoide.theme.palette = { bg = "#0b1021"; fg = "#c8d3f5"; accent = "#82aaff"; urgent = "#ff757f"; };
+        strillix.theme.palette = { bg = "#0b1021"; fg = "#c8d3f5"; accent = "#82aaff"; urgent = "#ff757f"; };
         # component tier (bar/notif/window) — null falls back to palette
       };
     };
@@ -226,12 +221,12 @@ and imports only the one the host performs.
 Naming it performs it on one line in `hosts/<host>/default.nix`:
 `habit.rice.declared = "moonlight";`. Naming no rice performs no rice: a host
 with no rice named gets no deployed QML and no shell service, not an empty
-surface, and no rice's body is imported (`aoide.rice` is null). Name a rice
+surface, and no rice's body is imported (`strillix.rice` is null). Name a rice
 explicitly to get a desktop, `habit.rice.declared = "sonata";` for the shipped
 standard (`rices/sonata/rice.nix`).
 
 **Host-agnostic rules (CONTRACTS.md §5):** a rice's `system.module` sets ONLY
-`aoide.theme` and `aoide.layout`, and its body selects only the paint: the
+`strillix.theme` and `strillix.layout`, and its body selects the paint: the
 ten component providers and the `strillix` renderer. It NEVER selects host
 capabilities (monitors, hardware, services, people). Note values are literal
 nix; a rice never reads `rice/` runtime paths. The `rices/**` tree is
@@ -353,7 +348,7 @@ See `tests/README.md` for why Rust's own tests do NOT live here.
 
 `lib/checks.nix` rides as flake `checks`:
 
-- `surface-ownership` — every `aoide.surfaces.<name>` names a non-empty owner.
+- `surface-ownership` — every `strillix.surfaces.<name>` names a non-empty owner.
 - `rice-runtime-untracked` — no `rice/` **runtime** dir (`stage/`, `auditions/`,
   `declared/`) exists in the source tree at all (`rices/**` is versioned
   score, legitimately read at eval).

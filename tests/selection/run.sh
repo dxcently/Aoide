@@ -23,6 +23,7 @@ cases=$(cat <<'EOF'
 realRegistryResolvesStrillix         ok      "compositor,hyprland,stylix:hyprland"
 realRegistryDendritesImport         ok      true
 realRegistryInventory               ok      "agents,desktop,nucleus,strillix"
+strillixWithoutAoide                ok      "true:false:true"
 riceDiscovery                       ok      "alpha landmine noshelf"
 riceLandmineUnread                  ok      "1:true"
 riceLandmineFires                   throws  rices landmine: an unselected rice's rice.nix was imported

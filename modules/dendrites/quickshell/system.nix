@@ -4,32 +4,32 @@
 # Two things and nothing else: the quickshell PACKAGE, and the
 # `aoide-quickshell` user service, started from the config directory a host (or
 # another lane) has named. This lane renders no QML, deploys nothing, and knows
-# no rice: it starts the shell on whatever `aoide.quickshell.config` points at.
+# no rice: it starts the shell on whatever `strillix.quickshell.config` points at.
 #
 # A plain module with no `habit` key, imported only BY PATH: by this
 # directory's `default.nix` (the catalogue entry) and by any lane that brings
 # the shell with it, so every importer lands on the one module. Its home half
-# is the internal `aoide.quickshell.home`, which `home.nix` beside it imports
+# is the internal `strillix.quickshell.home`, which `home.nix` beside it imports
 # into each user's home (README.md).
 #
 # The seam (CONTRACTS.md §0). Facts, never lanes — no module reads another
 # module (root AGENTS.md house rule 5):
-#   - SET here: `aoide.quickshell.enable` — "a shell surface exists on this
+#   - SET here: `strillix.quickshell.enable` — "a shell surface exists on this
 #     host", a read-only fact true exactly when this file is imported.
-#   - READ here: `aoide.quickshell.config : nullOr str` — the directory the
+#   - READ here: `strillix.quickshell.config : nullOr str` — the directory the
 #     shell runs — which the `strillix` lane sets to its deployed runtime root
 #     (`$AOIDE_ROOT/run/qml`) and a host may set to any config directory of its
 #     own. strillix sets it, this lane reads it; neither names the other's option.
 #
 # The two allowed shapes of quickshell WITHOUT strillix:
 #   * own config — a host that brings its own directory sets
-#     `aoide.quickshell.config = "/home/<u>/.config/quickshell"` (or a store
+#     `strillix.quickshell.config = "/home/<u>/.config/quickshell"` (or a store
 #     path) in the host module; this service runs from it.
 #   * bare — `config` stays null (the default): the package is installed and no
 #     service runs. No shell, no graphical-session anchor, nothing to fail.
 #
 # Reading discipline (house rule 5): the dress and the core scalars this lane
-# genuinely uses — `aoide.theme.wallpaper` (the shell's baked wallpaper env, so a
+# genuinely uses — `strillix.theme.wallpaper` (the shell's baked wallpaper env, so a
 # wallpapered rice survives a rebuild) and `aoide.root` (the runtime root the
 # QML reads its stage files from). Nothing else, and no `rice/` path at all:
 # what this lane starts is a directory, not a rice.
@@ -46,7 +46,7 @@ let
   quickshellPkg = aoideInputs.quickshell.packages.${pkgs.stdenv.hostPlatform.system}.default;
 
   # The directory the shell runs. `null` is the bare shape above.
-  configDir = config.aoide.quickshell.config;
+  configDir = config.strillix.quickshell.config;
 
   # Quickshell loads `<dir>/shell.qml` when handed a directory, so this is
   # the entry point inside whatever directory was named. Spelled out rather
@@ -58,7 +58,7 @@ in
 {
   # The home half, as a module of the system config: it closes over the values
   # above, and `home.nix` imports it through `osConfig`.
-  options.aoide.quickshell.home = lib.mkOption {
+  options.strillix.quickshell.home = lib.mkOption {
     type = lib.types.deferredModule;
     internal = true;
     default = { };
@@ -66,7 +66,7 @@ in
   };
 
   config = {
-    aoide.quickshell.enable = true;
+    strillix.quickshell.enable = true;
 
     # ── Quickshell package ──────────────────────────────────────────────────
     environment.systemPackages = [ quickshellPkg ];
@@ -118,11 +118,11 @@ in
     # config the rebuild path already satisfies it, so nothing about this
     # unit needs to change to grow that second producer.
     #
-    # Gated on the CONFIG, never on `aoide.rice`: a shell that paints a
+    # Gated on the CONFIG, never on `strillix.rice`: a shell that paints a
     # host's own config has no rice and starts exactly the same way. The
     # rice-gated half (deploy the tree, seed the stage, restart the rice)
     # is the `strillix` lane's, which is also the lane that sets this config.
-    aoide.quickshell.home =
+    strillix.quickshell.home =
       { lib, ... }:
       lib.optionalAttrs (configDir != null) {
         systemd.user.services.aoide-quickshell = {
@@ -173,14 +173,14 @@ in
               # (theme/wallpaper/grimoire/sessions/usage) — the QML falls back to
               # ~/.aoide when unset, but a configured aoide.root must win.
               "AOIDE_ROOT=${config.aoide.root}"
-              "STRILLIX_ROOT=${config.aoide.strillix.root}"
+              "STRILLIX_ROOT=${config.strillix.root}"
             ]
             # Export the rice's baked wallpaper (immutable store path) so
             # AoideWallpaper always has the right wallpaper on boot/rebuild — the live
             # stage/wallpaper.json overrides it, but nothing re-seeded it from the
             # rice before, so a rebuild lost the background. Null → no env.
-            ++ lib.optionals (config.aoide.theme.wallpaper != null) [
-              "AOIDE_WALLPAPER=${config.aoide.theme.wallpaper}"
+            ++ lib.optionals (config.strillix.theme.wallpaper != null) [
+              "AOIDE_WALLPAPER=${config.strillix.theme.wallpaper}"
             ]
             # The shipped templates, spelled on the unit rather than left to
             # the LOGIN environment (`environment.sessionVariables`, nucleus/
@@ -199,7 +199,7 @@ in
             # Declared here, a restart is enough. Gated on the
             # strillix dendrite for the same reason the nucleus delta is: a
             # shell with no `strillix` installed has no reader for it.
-            ++ lib.optionals config.aoide.strillix.enable [
+            ++ lib.optionals config.strillix.enable [
               "STRILLIX_TEMPLATES=${pkgs.strillix-rices}/share/strillix/rices"
             ];
             Restart = "always";

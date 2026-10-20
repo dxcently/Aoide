@@ -79,9 +79,9 @@ let
   # check that reads only the first would pass on a host that has the bridge.
   #
   # `templates` is the units' OWN `STRILLIX_TEMPLATES` (the staging path's
-  # one session-sourced variable — `fs::rice_templates_dir`): declared on the
-  # unit, not inherited from the systemd user manager's login environment, so a
-  # unit restarted after a switch stages from THIS build's rices. The two
+  # one variable — `fs::rice_templates_dir`): declared on the unit, not
+  # inherited from the systemd user manager's login environment, so a unit
+  # restarted after a switch stages from THIS build's rices. The two
   # module systems spell it differently — NixOS user units put it under
   # `serviceConfig.Environment`, home-manager units under `Service.Environment`
   # — so both are read here rather than assumed.
@@ -105,9 +105,9 @@ let
       systemUnits = cfg.systemd.user.services;
     in
     {
-      config = cfg.aoide.quickshell.config;
-      rice = cfg.aoide.rice;
-      strillix = cfg.aoide.strillix.enable;
+      config = cfg.strillix.quickshell.config;
+      rice = cfg.strillix.rice;
+      strillix = cfg.strillix.enable;
       sessionTarget = cfg.aoide.sessionTarget;
       packages = map (p: baseNameOf p.outPath) cfg.environment.systemPackages;
       userServices = builtins.attrNames userUnits;
@@ -132,8 +132,8 @@ let
       # there (what strillix deploys) would flip this. Null when no directory was
       # named: the bare shape has nothing to read.
       configEntries =
-        if cfg.aoide.quickshell.config != null then
-          builtins.attrNames (builtins.readDir cfg.aoide.quickshell.config)
+        if cfg.strillix.quickshell.config != null then
+          builtins.attrNames (builtins.readDir cfg.strillix.quickshell.config)
         else
           null;
     };
@@ -144,7 +144,7 @@ in
 
   # Two component slots, each bringing the strillix runtime by path: what is read
   # is that the runtime landed ONCE — one shell unit, one bridge, one home half
-  # (`aoide.strillix.home` declared by one file), an environment no second copy
+  # (`strillix.home` declared by one file), an environment no second copy
   # doubled — and that both components were recorded.
   twoComponents =
     let
@@ -163,10 +163,10 @@ in
         lib.filter (lib.hasInfix "shellbridge") (builtins.attrNames cfg.systemd.user.services)
       );
       envDuplicates = builtins.length env - builtins.length (lib.unique env);
-      homeDeclarations = builtins.length opts.aoide.strillix.home.declarations;
-      components = builtins.attrNames cfg.aoide.components;
-      strillix = cfg.aoide.strillix.enable;
-      quickshell = cfg.aoide.quickshell.enable;
+      homeDeclarations = builtins.length opts.strillix.home.declarations;
+      components = builtins.attrNames cfg.strillix.components;
+      strillix = cfg.strillix.enable;
+      quickshell = cfg.strillix.quickshell.enable;
     };
 
   # The third eval — the one that must FAIL. Forcing the toplevel is what a

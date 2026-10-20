@@ -8,7 +8,7 @@
 # What this dendrite does:
 #   - programs.firefox via home-manager, installing the browser and letting
 #     home-manager own its profile/settings management.
-#   - Theming (GTK/colours) is left to the stylix lane (aoide.stylix.enable),
+#   - Theming (GTK/colours) is left to the stylix lane (strillix.stylix.enable),
 #     same posture as kitty.nix — no colours hard-coded here.
 
 { lib, ... }:

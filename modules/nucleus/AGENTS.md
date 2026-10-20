@@ -15,8 +15,8 @@ covers only what's specific to the contract.
   nothing?* An option an unselected module may read: yes, here. Behaviour: no,
   a member.
 - **`options.nix` is the one file every other module builds against.**
-  Widening the read whitelist (`aoide.theme`/`aoide.layout`/
-  `aoide.surfaces`) is a decision that touches root `AGENTS.md` house rule 5
+  Widening the read whitelist (`strillix.theme`/`strillix.layout`/
+  `strillix.surfaces`) is a decision that touches root `AGENTS.md` house rule 5
   too — don't add a fourth namespace without updating both.
 - **Core options live in the core flake; the contract declares only the paint
   half.** `enable`/`root`/`checkout`/`auditLog`/`terminal`/`user`/
@@ -31,7 +31,7 @@ covers only what's specific to the contract.
   (`aoided`: the doors; `aoide-secrets`: `members`; `aoide-config`: `settings`).
 - **The contract reads FACTS, never a lane's option.** The enable facts
   (`aoide.{quickshell,strillix,stylix}.enable`, set only by their owner, each defaulting `false`,
-  `aoide.quickshell.config`, defaulting `null`, and `aoide.wallpaper.provider` —
+  `strillix.quickshell.config`, defaulting `null`, and `strillix.wallpaper.provider` —
   the active provider's own name, defaulting `"quickshell"`) are declared here;
   the dendrite that owns one sets it `true`, and no host writes it. The owner is
   the file Aoide's own catalogue names for it (`options.nix`'s `mkFact`), so a
@@ -68,4 +68,4 @@ covers only what's specific to the contract.
 - This `README.md` when a new contract file or option namespace is added, or a
   member of the `nucleus` aggregation is added or removed.
 - `CONTRACTS.md` — the theme schema when `options.nix`'s theme contract
-  changes shape, §0 when the enable facts or `aoide.quickshell.config` do.
+  changes shape, §0 when the enable facts or `strillix.quickshell.config` do.

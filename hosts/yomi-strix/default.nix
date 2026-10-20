@@ -40,7 +40,7 @@
 
   # ── Rices ──────────────────────────────────────────────────────────────────
   # `habit.rice.declared` is the rice this host PERFORMS: it becomes the fact
-  # `aoide.rice` and selects that rice's body. `available` is what it builds in
+  # `strillix.rice` and selects that rice's body. `available` is what it builds in
   # to STAGE without a rebuild but does not perform.
   #
   # yomi performs barcarolle: Windows 7 Aero rebuilt on the Strillix slots — a
@@ -95,7 +95,7 @@
 
   # ── Aoide ──────────────────────────────────────────────────────────────
   # The `nucleus` dendrites select the core (`aoide.enable`) and the doors
-  # below exist because those dendrites are selected; `aoide.rice` is DERIVED
+  # below exist because those dendrites are selected; `strillix.rice` is DERIVED
   # from `habit.rice.declared` by the constructor's hook. None of them is a
   # line here.
   aoide.user = "khoa";
@@ -103,8 +103,8 @@
   # Monitors: none declared, so Hyprland autodetects whatever is plugged in
   # (DP-1 landscape today) and every workspace stays on the global dwindle.
   # A rotated or scrolling panel is a host value, not a module edit:
-  #   aoide.hyprland.monitors = [ "HDMI-A-1,1920x1080@60,0x0,1,transform,3" ];
-  #   aoide.hyprland.scrollingMonitor = "HDMI-A-1";
+  #   strillix.hyprland.monitors = [ "HDMI-A-1,1920x1080@60,0x0,1,transform,3" ];
+  #   strillix.hyprland.scrollingMonitor = "HDMI-A-1";
 
   # Take subnet routes from the tailnet: off campus, owls-nest's
   # 10.1.10.236/32 route is how this machine reaches *.minerva-csc.club.

@@ -3910,7 +3910,7 @@ mod tests {
         let rice_nix = std::fs::read_to_string(target.join("rice.nix")).unwrap();
         assert!(rice_nix.contains("bar = \"strillix\";"), "the system half selects the paint: {rice_nix}");
         assert!(rice_nix.contains("members = [ \"strillix\" ];"), "the home half selects the renderer");
-        assert!(!rice_nix.contains("config.aoide.rice"), "a body is never self-gated: {rice_nix}");
+        assert!(!rice_nix.contains("config.strillix.rice"), "a body is never self-gated: {rice_nix}");
         let hypr = std::fs::read_to_string(target.join("hyprland.conf")).unwrap();
         assert!(hypr.contains("No keys yet"), "no --from hyprland.conf: the header is written: {hypr}");
         assert!(rice_nix.contains("\"#0b1021\""), "palette bg copied: {rice_nix}");

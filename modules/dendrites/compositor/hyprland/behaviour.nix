@@ -13,7 +13,7 @@
 #
 #   LOOK / SHAPE  → default.nix beside this file (the `hyprland` provider of
 #     the `compositor` capability)
-#     Anything derived from `aoide.theme`: border colours, gaps, rounding,
+#     Anything derived from `strillix.theme`: border colours, gaps, rounding,
 #     blur, the aoide-* layerrules, hyprglass, the kitty rounding
 #     rules. Re-riced whenever the rice changes. That file also owns the
 #     session plumbing (programs.hyprland, the systemd/Wayland env handoff,
@@ -26,9 +26,9 @@
 #     window rules, which are theme's business and stay in the look).
 #     Swapping rices must never disturb any of it.
 #
-# The look reads `aoide.theme` and is a paint dendrite (CONTRACTS.md §2); this
+# The look reads `strillix.theme` and is a paint dendrite (CONTRACTS.md §2); this
 # module reads no theme and renders nothing, so its own options stay a
-# host-facing surface (`aoide.hyprland.*` — monitors, scrollingMonitor) — the
+# host-facing surface (`strillix.hyprland.*` — monitors, scrollingMonitor) — the
 # same shape these binds had in dxflake before the port.
 #
 # ── Ordering inside hyprland.conf ─────────────────────────────────────────────
@@ -53,7 +53,7 @@
   ...
 }:
 let
-  cfg = config.aoide.hyprland;
+  cfg = config.strillix.hyprland;
 in
 {
 
@@ -64,7 +64,7 @@ in
   # upstream, and a submodule would only re-spell it with more to keep in
   # sync. Empty list emits nothing, so a host that says nothing keeps
   # Hyprland's own autodetection.
-  options.aoide.hyprland.monitors = lib.mkOption {
+  options.strillix.hyprland.monitors = lib.mkOption {
     type = lib.types.listOf lib.types.str;
     default = [ ];
     example = [ "HDMI-A-1,1920x1080@60,0x0,1,transform,3" ];
@@ -81,7 +81,7 @@ in
   # carries layout:<name>", which is what this option generates. Naming a
   # monitor here leaves `general:layout` (dwindle) untouched as the default
   # every other output keeps.
-  options.aoide.hyprland.scrollingMonitor = lib.mkOption {
+  options.strillix.hyprland.scrollingMonitor = lib.mkOption {
     type = lib.types.nullOr lib.types.str;
     default = null;
     example = "HDMI-A-1";
@@ -121,7 +121,7 @@ in
         }
 
         # ── Monitors ──────────────────────────────────────────────────────────
-        # Host-supplied (aoide.hyprland.monitors); empty on a host that says
+        # Host-supplied (strillix.hyprland.monitors); empty on a host that says
         # nothing, leaving Hyprland's autodetection alone.
         ${lib.concatMapStrings (m: "monitor = ${m}\n") cfg.monitors}
         # ── Tiling layout ─────────────────────────────────────────────────────
@@ -237,10 +237,9 @@ in
 
         # Rice preview / adopt shortcuts. `rice` left core's registry at P-A5
         # of the binary-split workstream — it lives only in `strillix` now
-        # (bare name resolves via PATH: modules/dendrites/aoide-packages.nix puts
-        # `pkgs.aoide.strillix` — strillix's own droppable output, P-A8 — on
-        # systemPackages whenever `aoide.strillix.enable` is on, which defaults
-        # to the strillix fact).
+        # (bare name resolves through PATH to the installed strillix, the
+        # wrapper the strillix dendrite installs:
+        # modules/dendrites/strillix/package.nix).
         bind = SUPER SHIFT, P, exec, strillix rice preview
         bind = SUPER SHIFT, A, exec, strillix rice adopt
 

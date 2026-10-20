@@ -4,19 +4,19 @@
 # Renders the complete Aoide shell surface using Quickshell (QML runtime).
 # A plain module with no `habit` key, imported only BY PATH, with its home half
 # `runtime-home.nix` beside it (AGENTS.md): the home half is the internal
-# `aoide.strillix.home`, which that file imports into each user's home.
+# `strillix.home`, which that file imports into each user's home.
 # Surfaces owned: osd, agentWidgets, sessionGraph; each component provider
-# beside this file owns its own, and writes its `aoide.components` entry, which
+# beside this file owns its own, and writes its `strillix.components` entry, which
 # this file publishes as `components.json` at the top of the deployed tree.
 #
 # Reading discipline (CONTRACTS.md §1): a paint dendrite reads the dress, the
 # structure, the surfaces and identity — nothing else (root AGENTS.md house
-# rule 5). Here: `aoide.theme` (palette + component tiers), `aoide.surfaces`
-# (the registry it declares its own surfaces in), `aoide.layout`, the
+# rule 5). Here: `strillix.theme` (palette + component tiers), `strillix.surfaces`
+# (the registry it declares its own surfaces in), `strillix.layout`, the
 # core scalars (`aoide.enable`, `aoide.root`, `aoide.checkout`,
-# `aoide.hostConfig`, `aoide.user`),
-# the rice selection (`aoide.rice`) and the derived fact
-# `aoide.rices.builtIn` (the rices this host builds in — what this lane's
+# `strillix.hostConfig`, `aoide.user`),
+# the rice selection (`strillix.rice`) and the derived fact
+# `strillix.rices.builtIn` (the rices this host builds in — what this lane's
 # deployed manifest, widget copy, installed packages, shipped templates and seed
 # are built FROM) and its own fact.
 #   - Component-tier fallback (null → palette) applied locally, never pushed
@@ -45,14 +45,14 @@ let
   # `checks.rice-shape`'s `strayNixFiles` and `checks.rice-runtime-untracked`).
   #
   # Handed in as a module argument by the same hook that sets
-  # `aoide.rices.builtIn` (lib/strillix.nix, and every consumer's copy of
+  # `strillix.rices.builtIn` (lib/strillix.nix, and every consumer's copy of
   # that wiring): a consumer's rices may be its own tree's or Aoide's
   # exported `ricesRoot`, so this lane must not name a path inside
   # Aoide's.
 
   # ── What this host BUILDS IN ────────────────────────────────────────────
   # `habit.rice.declared ∪ habit.rice.available` in its module, derived by the
-  # constructor's hook into the fact `aoide.rices.builtIn`. Everything below
+  # constructor's hook into the fact `strillix.rices.builtIn`. Everything below
   # the deployed manifest and registry, the widget bodies, the installed
   # packages, the shipped templates and the machine-rices seed all run over
   # these names, never over every committed rice.
@@ -66,7 +66,7 @@ let
     discovered = config._module.args.riceDirs;
   };
 
-  # The `aoide.*` option doc list the shipped `aoide-options.json` carries
+  # The option doc list the shipped `aoide-options.json` carries
   # (`lib/options.nix`) — `strillix onboard`'s offline source, and the reason
   # the shipped `strillix-rices` needs an argument `callPackage` cannot
   # fill. Derived here rather than handed down: this lane is what builds
@@ -78,9 +78,33 @@ let
     pkgs = aoideInputs.nixpkgs.legacyPackages.${pkgs.stdenv.hostPlatform.system};
   };
 
-  builtIn = config.aoide.rices.builtIn;
+  builtIn = config.strillix.rices.builtIn;
 
-  refreshCmd = "${pkgs.coreutils}/bin/env AOIDE_ROOT=${config.aoide.root} STRILLIX_ROOT=${config.aoide.strillix.root} STRILLIX_TEMPLATES=${pkgs.strillix-rices}/share/strillix/rices ${pkgs.aoide.strillix}/bin/strillix rice refresh";
+  # The installed strillix (package.nix): the one binary this dendrite installs and runs.
+  strillixPkg = import ./package.nix { inherit pkgs; };
+
+  # Names this build's rices on the command itself, so the seed reads them whatever
+  # the environment holds.
+  refreshCmd = "${pkgs.coreutils}/bin/env AOIDE_ROOT=${config.aoide.root} STRILLIX_ROOT=${config.strillix.root} STRILLIX_TEMPLATES=${pkgs.strillix-rices}/share/strillix/rices ${strillixPkg}/bin/strillix rice refresh";
+
+  # The two desktop provider wrappers. `AOIDE_DIALOG_CMD` is run by the
+  # dialog units with the argv they build (`pair ask …`, `secrets ask …`), and
+  # `strillix pair ask` spawns quickshell by bare name, so the wrapper puts it
+  # on PATH: no unit that runs the dialog has to carry quickshell itself.
+  # `AOIDE_FOCUS_CMD` is run by the conductor with the session id as its only
+  # argument, and goes to the `focus session` verb.
+  quickshellPkg = aoideInputs.quickshell.packages.${pkgs.stdenv.hostPlatform.system}.default;
+  dialogCmd = pkgs.writeShellScript "strillix-dialog" ''
+    export PATH=${lib.makeBinPath [ quickshellPkg ]}''${PATH:+:$PATH}
+    exec ${strillixPkg}/bin/strillix "$@"
+  '';
+  # With Aoide on, the focus wrapper exports `AOIDE_CORE_BIN`, so `focus session` finds
+  # core: strillix runs out of its own output and aoide out of another.
+  focusCmd = pkgs.writeShellScript "strillix-focus" ''
+    ${lib.optionalString config.aoide.enable ''
+      export AOIDE_CORE_BIN=${pkgs.aoide}/bin/aoide
+    ''}exec ${strillixPkg}/bin/strillix focus session "$1"
+  '';
 
   # ── The rices this derivation reads, as their OWN store paths ────────────
   # The same contract `pkgs/strillix-rices` keeps, for the same reason: a path
@@ -109,23 +133,23 @@ let
   # naming the ACTIVE rice's theme file here is allowed for the same reason
   # `rices` above is. Path concatenation (not string-interpolating the
   # whole `rices` dir) so only this one file gets copied into the store.
-  activeRiceTheme = ricesLib.riceDirs.${config.aoide.rice} + "/theme.json";
+  activeRiceTheme = ricesLib.riceDirs.${config.strillix.rice} + "/theme.json";
 
   theme = import ../../../lib/theme.nix { inherit lib; };
 
   committedTheme = builtins.fromJSON (builtins.readFile activeRiceTheme);
 
   # The stage twin is the committed theme with the VENUE applied — the same
-  # `aoide.theme.override` recolour the Stylix and compositor fan-outs get
+  # `strillix.theme.override` recolour the Stylix and compositor fan-outs get
   # (CONTRACTS.md §1, override tier), through the same `lib/theme.nix`, and
-  # the geometry the host resolves (`aoide.theme.geometry`, which
+  # the geometry the host resolves (`strillix.theme.geometry`, which
   # `hyprland.conf` and the kitty fragment already bake) laid over the rice's
   # own, so the twin equals the bake. Not a second rule: `stagePatch` is
   # `resolve`'s two passes against the file's own shape. Identity when the
   # host sets no override and no geometry beyond the rice's own, so a host
   # without a venue stages exactly the committed bytes it staged before.
   stageTheme = pkgs.writeText "aoide-stage-theme.json" (
-    builtins.toJSON (theme.stagePatch config.aoide.theme committedTheme)
+    builtins.toJSON (theme.stagePatch config.strillix.theme committedTheme)
   );
 
   # The venue as DATA — only the slots it recolours and the geometry it
@@ -135,7 +159,7 @@ let
   # rice from the runtime rices and overlays this, so the recolour law
   # stays in nix alone.
   venueFile = pkgs.writeText "aoide-declared-venue.json" (
-    builtins.toJSON (theme.venueDelta config.aoide.theme committedTheme)
+    builtins.toJSON (theme.venueDelta config.strillix.theme committedTheme)
   );
 
   # The declared rice's lock-screen dress (CONTRACTS.md §4,
@@ -146,13 +170,13 @@ let
   # `lockscreen.<ext>` renders comments only.
   declaredLockscreen = pkgs.runCommand "aoide-declared-hyprlock.conf" { } ''
     export HOME=$TMPDIR AOIDE_ROOT=$TMPDIR/root
-    ${pkgs.aoide.strillix}/bin/strillix theme emit hyprlock ${stageTheme} \
-      --rice-dir ${pkgs.strillix-rices}/share/strillix/rices/${config.aoide.rice} \
+    ${strillixPkg}/bin/strillix theme emit hyprlock ${stageTheme} \
+      --rice-dir ${pkgs.strillix-rices}/share/strillix/rices/${config.strillix.rice} \
       --out "$TMPDIR/hyprlock.conf"
     cp "$TMPDIR/hyprlock.conf" "$out"
   '';
 
-  # The active rice's terminal opacity (`aoide.theme.geometry.terminalOpacity`,
+  # The active rice's terminal opacity (`strillix.theme.geometry.terminalOpacity`,
   # CONTRACTS.md §1): `null` is "no opinion" and leaves the kitty dendrite's
   # baked value standing. The seed below publishes it as the one-line
   # `$STRILLIX_ROOT/declared/terminal-opacity.conf`, which kitty includes BEFORE the
@@ -160,7 +184,7 @@ let
   # terminal at the rice's opacity. This lane carries the read because it is
   # the lane that already reads the dress (root AGENTS.md rule 5); the kitty
   # lane names only the file's path under `aoide.root`.
-  opacity = config.aoide.theme.geometry.terminalOpacity;
+  opacity = config.strillix.theme.geometry.terminalOpacity;
 
   # ── Rices manifest + registry, typed (W3a/W3b), generated once (C4) ──
   # `manifest.json`/`registry.json` source from eval-time nix: a `_widgets/`
@@ -191,14 +215,14 @@ let
   manifestJsonFile = pkgs.writeText "aoide-quickshell-manifest.json" (builtins.toJSON manifestAttrs);
   registryJsonFile = pkgs.writeText "aoide-quickshell-registry.json" (builtins.toJSON registryAttrs);
 
-  # ── Expected paint, published (v1 `aoide.layout.surfaces`) ─────────
+  # ── Expected paint, published (v1 `strillix.layout.surfaces`) ─────────
   # The ACTIVE rice's expected-paint declaration, published so a health
   # consumer can assert what SHOULD be mapped instead of only counting what
   # is (`strillix quickshell healthcheck`). Deliberately NOT keyed by rice, unlike
   # the two files above: those describe the whole rices because
   # `rice preview` can switch rices at runtime, while an expectation is about
   # what the ACTIVE rice should have mapped right now — and
-  # `config.aoide.layout.surfaces` already IS that (only the performed
+  # `config.strillix.layout.surfaces` already IS that (only the performed
   # rice's body is imported). `rice` names which rice's declaration
   # this is; the keys are the RESOLVED layer-shell namespaces (`aoide-<slot>`
   # — the same derivation `widgetType.namespace` applies when null), so the
@@ -209,21 +233,21 @@ let
   # (CONTRACTS.md §5).
   surfacesJsonFile = pkgs.writeText "aoide-quickshell-surfaces.json" (
     builtins.toJSON {
-      rice = config.aoide.rice;
+      rice = config.strillix.rice;
       surfaces = lib.mapAttrs' (
         slot: entry: lib.nameValuePair "aoide-${slot}" entry
-      ) config.aoide.layout.surfaces;
+      ) config.strillix.layout.surfaces;
     }
   );
 
   # ── The selected components, published ──────────────────────────────────
-  # `aoide.components` as the shell reads it: `{ "<slot>": { provider,
+  # `strillix.components` as the shell reads it: `{ "<slot>": { provider,
   # actions } }`, one entry per component slot this host filled (CONTRACTS.md
   # §4). It sits at the TOP of the deployed tree, beside `shell.qml`, because
   # it is build data and not rice data: staging syncs only under `rices/`
   # (`rice/src/widgets.rs`), so no stage ever changes it.
   componentsJsonFile = pkgs.writeText "aoide-quickshell-components.json" (
-    builtins.toJSON config.aoide.components
+    builtins.toJSON config.strillix.components
   );
 
   # ── Seed script for `home.activation.aoideSeedStage` (below) ───────────────
@@ -252,35 +276,35 @@ let
   # sequence.
   seedStageScript = pkgs.writeShellScript "aoide-seed-stage" ''
     set -euo pipefail
-    mkdir -p "${config.aoide.strillix.root}/stage" "${config.aoide.strillix.root}/declared"
-    tmp=$(mktemp "${config.aoide.strillix.root}/stage/.theme.json.XXXXXX")
-    ${pkgs.jq}/bin/jq -S '. + {rice: $rice}' --arg rice "${config.aoide.rice}" \
+    mkdir -p "${config.strillix.root}/stage" "${config.strillix.root}/declared"
+    tmp=$(mktemp "${config.strillix.root}/stage/.theme.json.XXXXXX")
+    ${pkgs.jq}/bin/jq -S '. + {rice: $rice}' --arg rice "${config.strillix.rice}" \
       "${stageTheme}" > "$tmp"
     # The declared twin is the SAME bytes, published in its own directory
     # (CONTRACTS.md §4) — copied into a temp there rather than renamed across
     # directories, so the rename below can never cross a filesystem.
-    declared=$(mktemp "${config.aoide.strillix.root}/declared/.theme.json.XXXXXX")
+    declared=$(mktemp "${config.strillix.root}/declared/.theme.json.XXXXXX")
     cp "$tmp" "$declared"
-    mv -f "$tmp" "${config.aoide.strillix.root}/stage/theme.json"
-    mv -f "$declared" "${config.aoide.strillix.root}/declared/theme.json"
-    venue=$(mktemp "${config.aoide.strillix.root}/declared/.venue.json.XXXXXX")
+    mv -f "$tmp" "${config.strillix.root}/stage/theme.json"
+    mv -f "$declared" "${config.strillix.root}/declared/theme.json"
+    venue=$(mktemp "${config.strillix.root}/declared/.venue.json.XXXXXX")
     cp "${venueFile}" "$venue"
-    mv -f "$venue" "${config.aoide.strillix.root}/declared/venue.json"
+    mv -f "$venue" "${config.strillix.root}/declared/venue.json"
     # The active wallpaper setter's name — ONE word the CLI and the QML both
     # read (CONTRACTS.md §4), published here because this is the seed that
     # hands the runtime its facts and because choosing a provider is a
     # rebuild: the file follows the switch.
-    provider=$(mktemp "${config.aoide.strillix.root}/stage/.wallpaper-provider.XXXXXX")
-    printf '%s\n' ${lib.escapeShellArg config.aoide.wallpaper.provider} > "$provider"
-    mv -f "$provider" "${config.aoide.strillix.root}/stage/wallpaper-provider"
+    provider=$(mktemp "${config.strillix.root}/stage/.wallpaper-provider.XXXXXX")
+    printf '%s\n' ${lib.escapeShellArg config.strillix.wallpaper.provider} > "$provider"
+    mv -f "$provider" "${config.strillix.root}/stage/wallpaper-provider"
     # The declared rice's own wallpaper, as the default (CONTRACTS.md §4): the
-    # picture `aoide.theme.wallpaper` names, published as `stage/wallpaper.json`
+    # picture `strillix.theme.wallpaper` names, published as `stage/wallpaper.json`
     # the way `rice stage` writes a default. A standing pick is left standing
     # (lib/wallpaper-seed.sh). A rice with no picture leaves the file alone: the
     # layer ignores a wallpaper that names another rice.
-    ${lib.optionalString (config.aoide.theme.wallpaper != null) ''
+    ${lib.optionalString (config.strillix.theme.wallpaper != null) ''
       ${pkgs.bash}/bin/bash ${../../../lib/wallpaper-seed.sh} ${pkgs.jq}/bin/jq \
-        "${config.aoide.strillix.root}" "${config.aoide.rice}" "${config.aoide.theme.wallpaper}"
+        "${config.strillix.root}" "${config.strillix.rice}" "${config.strillix.theme.wallpaper}"
     ''}
     # The declared rice's terminal opacity, as a one-line kitty fragment
     # (CONTRACTS.md §4). The kitty dendrite includes this BEFORE the staged
@@ -292,21 +316,21 @@ let
     # through to the baked value, and a stale 0.7 from a previous rice must
     # not outlive it.
     ${lib.optionalString (opacity == null) ''
-      rm -f "${config.aoide.strillix.root}/declared/terminal-opacity.conf"
+      rm -f "${config.strillix.root}/declared/terminal-opacity.conf"
     ''}
     ${lib.optionalString (opacity != null) ''
-      otmp=$(mktemp "${config.aoide.strillix.root}/declared/.terminal-opacity.conf.XXXXXX")
+      otmp=$(mktemp "${config.strillix.root}/declared/.terminal-opacity.conf.XXXXXX")
       printf 'background_opacity %s\n' "$(printf '%g' ${toString opacity})" > "$otmp"
-      mv -f "$otmp" "${config.aoide.strillix.root}/declared/terminal-opacity.conf"
+      mv -f "$otmp" "${config.strillix.root}/declared/terminal-opacity.conf"
     ''}
     # The declared rice's lock-screen dress (CONTRACTS.md §4), rendered at
     # build time. The lock sources it BEFORE the staged one, so a host that
     # never staged anything locks in the declared rice. It is always
     # written, comments only for a rice with no lock picture, so no earlier
     # rice's dress can outlive a switch.
-    ltmp=$(mktemp "${config.aoide.strillix.root}/declared/.hyprlock.conf.XXXXXX")
+    ltmp=$(mktemp "${config.strillix.root}/declared/.hyprlock.conf.XXXXXX")
     cp ${declaredLockscreen} "$ltmp"
-    mv -f "$ltmp" "${config.aoide.strillix.root}/declared/hyprlock.conf"
+    mv -f "$ltmp" "${config.strillix.root}/declared/hyprlock.conf"
   '';
 
   # ── QML root — the full skeleton config installed into run/qml/ ────────────
@@ -322,7 +346,7 @@ let
   # ── Per-rice flavor widgets (CONTRACTS.md §5) ───────────────────────────
   # Beyond the shared, rice-blind QML tree above, this also carries per-rice
   # widget QML from rices/<rice>/widgets/ — versioned score, not
-  # runtime — for the rices this host BUILT IN (`aoide.rices.builtIn`, from
+  # runtime — for the rices this host BUILT IN (`strillix.rices.builtIn`, from
   # its record), so a live `aoide rice preview <name>` can hot-swap a
   # widget's BODY (not just its colours) with no rebuild. A rice built in as
   # `available` but not declared is carried here too: that is what "can stage
@@ -347,7 +371,7 @@ let
   # bodies exist"). Computed above (`registryAttrs`) from each committed
   # rice's `theme.json` (`.widgets // {}`) for a shelf-less rice, or
   # `composeRice`'s own `layout.widgets` for a shelf-present one — never
-  # from any nix OPTION: `config.aoide.layout.widgets` (Phase 1) only
+  # from any nix OPTION: `config.strillix.layout.widgets` (Phase 1) only
   # exists for the ACTIVE rice at eval time (only the performed rice's body is
   # imported), so cross-rice data has to come from
   # committed FILES. Every committed rice gets an entry — `{}` when the rice
@@ -449,7 +473,7 @@ in
 
   # The home half, as a module of the system config: it closes over the values
   # above, and `runtime-home.nix` imports it through `osConfig`.
-  options.aoide.strillix.home = lib.mkOption {
+  options.strillix.home = lib.mkOption {
     type = lib.types.deferredModule;
     internal = true;
     default = { };
@@ -458,9 +482,9 @@ in
 
   # ── Config ─────────────────────────────────────────────────────────────────
   # Importing the runtime is the switch; it sets the read-only fact
-  # `aoide.strillix.enable` (declared in modules/nucleus/options.nix) to true.
+  # `strillix.enable` (declared in modules/nucleus/options.nix) to true.
   config = {
-    aoide.strillix.enable = true;
+    strillix.enable = true;
 
     # name -> rice directory, the rices's registry. The rice hook sets it
     # (lib/rices.nix's `riceDirs`) so a merged rices's rices come from
@@ -482,7 +506,7 @@ in
     # The shell lane spells `<dir>/shell.qml` for quickshell's entry point,
     # so `$AOIDE_ROOT/run/qml` here is the same command line as the day the
     # service lived in this file.
-    aoide.quickshell.config = qmlDir;
+    strillix.quickshell.config = qmlDir;
 
     # ── The templates this host ships ───────────────────────────────────────
     # `pkgs.strillix-rices` is the baseline `STRILLIX_TEMPLATES`: what
@@ -495,10 +519,10 @@ in
     # staging checks a non-built-in rice's needs against before refusing to
     # stage it (the machine owns its rices; the baseline is the fallback).
     #
-    # An overlay rather than a reference, because the templates dir is read
-    # by units that resolve `pkgs.strillix-rices` themselves (`aoided`'s
-    # session variables, shellbridge's `STRILLIX_TEMPLATES`) — house rule
-    # 5: neither of those names this lane.
+    # An overlay rather than a reference: the readers of the templates dir
+    # resolve `pkgs.strillix-rices` by name (the installed strillix's default in
+    # package.nix, shellbridge's `STRILLIX_TEMPLATES`), and only the overlay
+    # gives them this host's built-in set.
     nixpkgs.overlays = [
       (_final: prev: {
         # A FRESH `callPackage`, never `.override` on whatever the walker's
@@ -514,7 +538,7 @@ in
         strillix-rices = prev.callPackage ../../../pkgs/strillix-rices {
           rices = builtIn;
           builtin = {
-            declared = config.aoide.rice;
+            declared = config.strillix.rice;
             rices = builtIn;
             packages = ricesLib.packagesFor builtIn;
           };
@@ -529,7 +553,7 @@ in
     # component provider beside this file declares its own (README.md).
     # Stylix reads this registry and stands down for these surfaces
     # (concepts/Notes).
-    aoide.surfaces = {
+    strillix.surfaces = {
       osd.owner = "quickshell";
       agentWidgets.owner = "quickshell";
       sessionGraph.owner = "quickshell";
@@ -558,6 +582,11 @@ in
     # carries adds nothing.
     environment.systemPackages = lib.unique (
       [
+        # The `strillix` binary (package.nix: P-A8's separate output, with the
+        # shipped rices named by default), installed here because this dendrite is
+        # its owner. A host that never selects it has no `strillix` on PATH, and
+        # core never installs it.
+        strillixPkg
         pkgs.pavucontrol
         pkgs.pulseaudio # for `pactl` only; pipewire-pulse remains the server
       ]
@@ -567,6 +596,18 @@ in
       # there is no record to declare them in.
       ++ map (name: pkgs.${name}) (ricesLib.packagesFor builtIn)
     );
+
+    # ── Login shells: Strillix's own root and host file ──────────────────────
+    # `STRILLIX_ROOT` and `STRILLIX_HOST_CONFIG` reach `aoide.user`'s shells only,
+    # for the same reason core's `AOIDE_ROOT` does: a system-wide export would
+    # hand khoa's root to root. The shipped rices need no login variable: the
+    # `strillix` on PATH names them itself (package.nix).
+    environment.extraInit = ''
+      if [ "$(id -un)" = ${lib.escapeShellArg config.aoide.user} ]; then
+        export STRILLIX_ROOT=${lib.escapeShellArg config.strillix.root}
+        export STRILLIX_HOST_CONFIG=${lib.escapeShellArg config.strillix.hostConfig}
+      fi
+    '';
 
     # ── Deploy QML config tree into run/qml/ (rsync, not a symlink tree) ────
     # The config tree (bar/notif/launcher/OSD/lockscreen/greeter/wallpaper)
@@ -627,7 +668,7 @@ in
     # The source is the deployed baseline (`pkgs.strillix-rices`, which this
     # host already restricted to its built-in set, `builtin.json` included,
     # which a bare `rice refresh` reads).
-    aoide.strillix.home =
+    strillix.home =
       { lib, ... }:
       {
         # Two gates, two sets — merged by the module system, not by `//`
@@ -636,23 +677,34 @@ in
         # two assignments to this option path, which one module file may not
         # make.
         config = lib.mkMerge [
-          # ── The dialog provider every user unit inherits (D17) ─────────────
-          # `AOIDE_DIALOG_CMD` names the desktop's dialog provider. It is set on the user manager's
-          # environment, so aoided and aoide-secrets inherit it without naming strillix themselves
-          # (house rule 5). Unset falls back to zenity.
+          # ── The desktop's providers, by name ────────────────────────
+          # `AOIDE_DIALOG_CMD` is set on the user manager's environment, so aoided
+          # and aoide-secrets inherit it without naming strillix themselves (house
+          # rule 5). Unset falls back to zenity. `AOIDE_FOCUS_CMD` is the conductor's
+          # focus provider for the session; unset is its taught refusal.
           {
-            systemd.user.sessionVariables.AOIDE_DIALOG_CMD = "${pkgs.aoide.strillix}/bin/strillix";
+            systemd.user.sessionVariables.AOIDE_DIALOG_CMD = "${dialogCmd}";
+            home.sessionVariables.AOIDE_FOCUS_CMD = "${focusCmd}";
           }
           # ── Move the old rice state before anything seeds the strillix root ───
           # Every seed below creates `$STRILLIX_ROOT/*` or `~/.local/state/strillix`
           # before any binary starts, and `migrate_dir` only moves into an absent
-          # or empty target. So the migration runs first: `--help` exits before
-          # any command, and the root migration in `main()` is its only effect.
-          # Skipped under a dry run, which must not move anything.
+          # or empty target. So the migration runs first. Core moves its own old root
+          # when any aoide command starts, and the rice move waits for that root, so
+          # with Aoide on, `aoide --help` runs before `strillix --help`. With Aoide on,
+          # the `strillix --help` call also passes `AOIDE_CORE_BIN`, the core binary's
+          # path: strillix runs out of its own output and aoide out of another, so the
+          # sibling lookup cannot find core, and the rice move finds it through the
+          # variable. A failure in either does not stop activation: the binary prints
+          # its refusal and the later entries still run. Under a dry run the hook moves
+          # nothing.
           {
             home.activation.aoideMigrateRoots = lib.hm.dag.entryBefore [ "writeBoundary" ] ''
               if [[ ! -v DRY_RUN ]]; then
-                run ${pkgs.coreutils}/bin/env AOIDE_ROOT=${config.aoide.root} STRILLIX_ROOT=${config.aoide.strillix.root} STRILLIX_MIGRATE=1 ${pkgs.aoide.strillix}/bin/strillix --help >/dev/null
+                ${lib.optionalString config.aoide.enable ''
+                  run ${pkgs.coreutils}/bin/env AOIDE_ROOT=${config.aoide.root} ${pkgs.aoide}/bin/aoide --help >/dev/null || true
+                ''}
+                run ${pkgs.coreutils}/bin/env AOIDE_ROOT=${config.aoide.root} STRILLIX_ROOT=${config.strillix.root} STRILLIX_MIGRATE=1 ${lib.optionalString config.aoide.enable "AOIDE_CORE_BIN=${pkgs.aoide}/bin/aoide "}${strillixPkg}/bin/strillix --help >/dev/null || true
               fi
             '';
           }
@@ -670,12 +722,12 @@ in
           # ── No rice, nothing to paint ──────────────────────────────────────
           # Every entry below reaches for the ACTIVE rice (activeRiceTheme,
           # seedStageScript's jq --arg, or a shell entry deployed FROM the rice's
-          # QML) — with `aoide.rice` null there is no active rice to bake, so this
-          # whole block is `lib.optionalAttrs`-gated on `config.aoide.rice != null`
+          # QML) — with `strillix.rice` null there is no active rice to bake, so this
+          # whole block is `lib.optionalAttrs`-gated on `config.strillix.rice != null`
           # rather than `lib.mkIf`: optionalAttrs never forces its `attrs` argument
           # when the condition is false (plain nix laziness, no module-system
           # merging involved at this attrset-literal level), so a null-rice host's
-          # eval never touches `${config.aoide.rice}` here — no deployed QML, no
+          # eval never touches `${config.strillix.rice}` here — no deployed QML, no
           # seeded stage, no restart of the rice; not an empty surface, simply
           # absent. A host that names a rice gets exactly today's behaviour.
           #
@@ -684,7 +736,7 @@ in
           # deployed — or on a directory the host brought itself, rice or no rice.
           # A null-rice host with no such directory still runs no shell (that lane's
           # own bare case).
-          (lib.optionalAttrs (config.aoide.rice != null) {
+          (lib.optionalAttrs (config.strillix.rice != null) {
             home.activation.aoideDeployQml = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
               run mkdir -p "${config.aoide.root}/run"
               run ${pkgs.rsync}/bin/rsync -a --delete --chmod=u+w \
@@ -776,7 +828,7 @@ in
             home.activation.aoideVerifyRice = lib.hm.dag.entryAfter [ "aoideRestartRice" ] ''
               run ${pkgs.coreutils}/bin/sleep 5
               run env XDG_RUNTIME_DIR=/run/user/$(${pkgs.coreutils}/bin/id -u) \
-                ${pkgs.aoide.strillix}/bin/strillix quickshell healthcheck || true
+                ${strillixPkg}/bin/strillix quickshell healthcheck || true
             '';
 
             # ── Live mid-session watchdog: the placeholder-screen lockup ───────────
@@ -801,13 +853,13 @@ in
             # never-started unit, and a restart could undo the decision.
             #
             # `quickshell` is a strillix-only command family (left core's registry at
-            # P-A5), so this execs `pkgs.aoide.strillix` — strillix's own droppable output
-            # (P-A8) — the same reference shellbridge.nix's `shellbridge` service
-            # uses for the same reason.
+            # P-A5), so this execs the installed strillix (package.nix, over
+            # `pkgs.aoide.strillix`, strillix's own droppable output P-A8) — the same
+            # binary shellbridge.nix's `shellbridge` service execs for the same reason.
             #
             # Unlike `shellbridge`/`aoide-graph-reap` (NixOS-level `systemd.user.
             # services`, whose module gives a flat `path`/`description` sugar),
-            # this pair is nested inside the home half (`aoide.strillix.home`),
+            # this pair is nested inside the home half (`strillix.home`),
             # like `aoide-quickshell` in the quickshell lane — home-manager's OWN systemd
             # module has no such sugar (checked against its `modules/systemd.nix`:
             # only `Unit`/`Service`/`Install` freeform sections exist, and no
@@ -829,7 +881,7 @@ in
               };
               Service = {
                 Type = "oneshot";
-                ExecStart = "${pkgs.aoide.strillix}/bin/strillix quickshell healthcheck";
+                ExecStart = "${strillixPkg}/bin/strillix quickshell healthcheck";
 
                 Environment = [
                   "PATH=${
@@ -844,7 +896,7 @@ in
                   # tree under $AOIDE_ROOT/run/qml, and its restart backoff marker lives under
                   # $STRILLIX_ROOT.
                   "AOIDE_ROOT=${config.aoide.root}"
-                  "STRILLIX_ROOT=${config.aoide.strillix.root}"
+                  "STRILLIX_ROOT=${config.strillix.root}"
                 ];
 
                 NoNewPrivileges = true;
@@ -915,13 +967,13 @@ in
               Service = {
                 Type = "oneshot";
                 RemainAfterExit = true;
-                ExecStart = "-${pkgs.coreutils}/bin/timeout 60 ${pkgs.aoide.strillix}/bin/strillix reload";
+                ExecStart = "-${pkgs.coreutils}/bin/timeout 60 ${strillixPkg}/bin/strillix reload";
                 Environment = [
                   "AOIDE_ROOT=${config.aoide.root}"
-                  "STRILLIX_ROOT=${config.aoide.strillix.root}"
-                  # Same declaration as aoide-quickshell's own: the staging path's one
-                  # session-sourced variable, spelled on the unit so a reload after a
-                  # switch stages from THIS build's rices.
+                  "STRILLIX_ROOT=${config.strillix.root}"
+                  # The same path aoide-quickshell and shellbridge spell: the staging
+                  # path's one variable, on the unit so a reload after a switch stages
+                  # from THIS build's rices, whatever the login environment holds.
                   "STRILLIX_TEMPLATES=${pkgs.strillix-rices}/share/strillix/rices"
                 ];
               };

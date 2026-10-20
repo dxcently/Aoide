@@ -272,7 +272,7 @@ in
 
       declared = lib.filterAttrs (_: w: (w.kind or null) != null) widgets;
 
-      # Exactly `aoide.layout.widgets.<slot>`'s shape, field for field
+      # Exactly `strillix.layout.widgets.<slot>`'s shape, field for field
       # against `modules/nucleus/options.nix`'s `widgetType` submodule. The
       # defaults are restated here rather than left to the option so the
       # generated value is complete at this layer too — the derivation reads

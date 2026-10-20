@@ -41,7 +41,7 @@ out=$(check theme-leak clean)
 if [[ $out == *"ok"* && $out != *FAILED* ]]; then echo "ok    clean: passes"; else echo "FAIL  clean: $out"; fail=1; fi
 
 out=$(check module-leak plain)
-if [[ $out == *"rice plain's system.module sets aoide.theme.polarity outside lib.mkDefault"* ]]; then echo "ok    plain: unwrapped value refused"; else echo "FAIL  plain: $out"; fail=1; fi
+if [[ $out == *"rice plain's system.module sets strillix.theme.polarity outside lib.mkDefault"* ]]; then echo "ok    plain: unwrapped value refused"; else echo "FAIL  plain: $out"; fail=1; fi
 out=$(check module-leak settings)
 if [[ $out == *"rice settings's home.module writes wayland.windowManager.hyprland.settings"* ]]; then echo "ok    settings: base settings write refused"; else echo "FAIL  settings: $out"; fail=1; fi
 out=$(check module-leak extra)
@@ -51,5 +51,5 @@ if [[ $out == *"ok"* && $out != *FAILED* ]]; then echo "ok    wrapped: mkDefault
 out=$(check wallpaper-name named)
 if [[ $out == *"ok"* && $out != *FAILED* ]]; then echo "ok    named: wallpaper/<rice>-desktop picture passes"; else echo "FAIL  named: $out"; fail=1; fi
 out=$(check wallpaper-name stray)
-if [[ $out == *"sets aoide.theme.wallpaper to"*"dusk.jpg"*"wallpaper/stray-desktop"* ]]; then echo "ok    stray: other-named picture refused"; else echo "FAIL  stray: $out"; fail=1; fi
+if [[ $out == *"sets strillix.theme.wallpaper to"*"dusk.jpg"*"wallpaper/stray-desktop"* ]]; then echo "ok    stray: other-named picture refused"; else echo "FAIL  stray: $out"; fail=1; fi
 exit $fail

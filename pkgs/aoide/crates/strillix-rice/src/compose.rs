@@ -151,8 +151,8 @@ pub fn render_rice_nix(name: &str, from: &str, notes: &Value) -> String {
     s.push_str("#\n");
     s.push_str("# A body (CONTRACTS.md §5): habit reads it only when this rice is performed\n");
     s.push_str("# or built in. The `system` half selects the paint; the `home` half the renderer.\n");
-    s.push_str("# HOST-AGNOSTIC DISCIPLINE (CONTRACTS.md §5): the rice sets ONLY aoide.theme\n");
-    s.push_str("# and aoide.layout; its literal values are no reads of rice/ or of config.\n");
+    s.push_str("# HOST-AGNOSTIC DISCIPLINE (CONTRACTS.md §5): the rice sets ONLY strillix.theme\n");
+    s.push_str("# and strillix.layout; its literal values are no reads of rice/ or of config.\n");
     s.push_str("{\n");
     s.push_str("  system = {\n");
     s.push_str("    providers = {\n");
@@ -160,20 +160,20 @@ pub fn render_rice_nix(name: &str, from: &str, notes: &Value) -> String {
     s.push_str("    };\n");
     s.push_str("    module = _: {\n");
 
-    s.push_str("      aoide.theme.palette = {\n");
+    s.push_str("      strillix.theme.palette = {\n");
     s.push_str(&palette_lines);
     s.push_str("      };\n");
 
     s.push_str(&format!("\n      # polarity: light | dark — {polarity_comment}\n"));
-    s.push_str(&format!("      aoide.theme.polarity = \"{polarity}\";\n"));
+    s.push_str(&format!("      strillix.theme.polarity = \"{polarity}\";\n"));
 
     s.push_str(&format!("\n      # {window_comment}\n"));
-    s.push_str("      aoide.theme.window = {\n");
+    s.push_str("      strillix.theme.window = {\n");
     s.push_str(&window_lines);
     s.push_str("      };\n");
 
     s.push_str(&format!("\n      # {geometry_comment}\n"));
-    s.push_str("      aoide.theme.geometry = {\n");
+    s.push_str("      strillix.theme.geometry = {\n");
     s.push_str(&geometry_lines);
     s.push_str("      };\n");
 

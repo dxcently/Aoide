@@ -8,7 +8,7 @@
 # What this dendrite does (ported from dxflake modules/dendrites/kitty.nix):
 #   - programs.kitty with the dxflake settings (scrollback, padding, powerline
 #     tab bar, no audio bell) and its alt-key window/tab keybindings.
-#   - Font/colours are left to the stylix lane (aoide.stylix.enable), exactly
+#   - Font/colours are left to the stylix lane (strillix.stylix.enable), exactly
 #     as dxflake left them to its stylix layer — so no colours are hard-coded
 #     here.
 #   - Staged colours (house rule 10: staging hot-loads, never waits on a
@@ -188,12 +188,12 @@
           # sit outside the `mkForce` on purpose: a forced extraConfig would
           # drop Stylix's include. kitty skips a missing include with one log
           # line, so with neither file present the baked colours and opacity
-          # stand. This lane reads no `aoide.theme` (root AGENTS.md rule 5)
-          # — it names two paths under `aoide.root` and nothing else.
+          # stand. This lane reads no `strillix.theme` (root AGENTS.md rule 5)
+          # — it names two paths under `strillix.root` and nothing else.
           {
             extraConfig = lib.mkAfter ''
-              include ${config.aoide.strillix.root}/declared/terminal-opacity.conf
-              include ${config.aoide.strillix.root}/stage/terminal-colors.conf
+              include ${config.strillix.root}/declared/terminal-opacity.conf
+              include ${config.strillix.root}/stage/terminal-colors.conf
             '';
           }
         ];

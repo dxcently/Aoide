@@ -3,7 +3,7 @@
   system = {
     providers.greeter = "strillix";
     module = { lib, ... }: {
-      aoide.theme.polarity = "dark";
+      strillix.theme.polarity = "dark";
     };
   };
   home = {

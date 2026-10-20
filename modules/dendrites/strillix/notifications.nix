@@ -12,6 +12,6 @@
 {
   imports = [ ./runtime.nix ];
   habit.home.imports = [ ./runtime-home.nix ];
-  aoide.components.notifications.provider = "strillix";
-  aoide.surfaces.notifications.owner = "quickshell";
+  strillix.components.notifications.provider = "strillix";
+  strillix.surfaces.notifications.owner = "quickshell";
 }

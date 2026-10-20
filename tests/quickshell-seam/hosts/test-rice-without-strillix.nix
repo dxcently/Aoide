@@ -1,7 +1,7 @@
 # tests/quickshell-seam/hosts/test-rice-without-strillix.nix — a rice with no
 # performer.
 #
-# `aoide.rice` is a FACT: it says "perform this rice". A host that says so and
+# `strillix.rice` is a FACT: it says "perform this rice". A host that says so and
 # takes no strillix runtime has nothing to build the QML from, deploy it, seed the
 # stage or restart — the failure is silent everywhere else (the body that would
 # have brought the runtime is never imported for a hand-set fact, and no other
@@ -22,8 +22,8 @@ _: {
   };
 
   aoide.enable = true;
-  aoide.rice = "sonata";
-  aoide.quickshell.config = toString ../fixture;
+  strillix.rice = "sonata";
+  strillix.quickshell.config = toString ../fixture;
 
   networking.hostName = "test-rice-without-strillix";
   boot.loader.grub.enable = false;

@@ -5,6 +5,6 @@
 # nothing — these cases are about DISCOVERY and SELECTION, not about what a rice paints.
 {
   system.module = _: {
-    aoide.theme.palette.bg = "#000000";
+    strillix.theme.palette.bg = "#000000";
   };
 }

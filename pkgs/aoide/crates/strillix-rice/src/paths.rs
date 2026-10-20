@@ -55,14 +55,14 @@ pub fn run_elements_dir() -> std::path::PathBuf {
 
 /// The host's own config file — the NixOS module holding this machine's
 /// `habit.rice.declared` line, which `strillix rice declare <rice> --host`
-/// rewrites. `$AOIDE_HOST_CONFIG` (the core option `aoide.hostConfig`,
+/// rewrites. `$STRILLIX_HOST_CONFIG` (the core option `strillix.hostConfig`,
 /// exported beside `$AOIDE_FLAKE_ROOT` on the same units and login shells) when
 /// it is absolute; otherwise the option's own default spelled in code,
 /// `<flake_root>/hosts/<hostname>/default.nix`, so unset == set-to-default.
 /// `None` when neither names a file: no override and no usable hostname (one
 /// carrying a `/` or spelling `.`/`..` is never joined into a path).
 pub fn host_config() -> Option<std::path::PathBuf> {
-    if let Ok(file) = std::env::var("AOIDE_HOST_CONFIG") {
+    if let Ok(file) = std::env::var("STRILLIX_HOST_CONFIG") {
         let p = std::path::PathBuf::from(&file);
         if p.is_absolute() {
             return Some(p);
@@ -134,18 +134,19 @@ fn resolve_rice_templates_dir(
 /// other override in this file:
 ///   1. `$STRILLIX_TEMPLATES` — trusted unconditionally once it resolves
 ///      to an absolute path, no existence check (same as [`root`]/
-///      [`flake_root`]). The tier a nix unit sets, wired onto every unit
-///      that already carries `$AOIDE_ROOT`/`$AOIDE_FLAKE_ROOT`
-///      (`modules/nucleus/{aoided,shellbridge,secrets,melete-adapter}.nix`)
-///      — a store-path boundary sibling resolution cannot cross.
+///      [`flake_root`]). A store-path boundary sibling resolution cannot
+///      cross, so the nix side sets it: the installed strillix defaults it
+///      to the shipped rices (`modules/dendrites/strillix/package.nix`,
+///      `makeWrapper --set-default`), and the strillix dendrite's units
+///      spell it too.
 ///   2. the sibling of `current_exe()`'s directory,
 ///      `<exe_dir>/../share/strillix/rices` — ONLY if that directory
 ///      actually exists (mirrors `aoide_protocol::bin`'s own tier-2 rule:
 ///      handing back a path that isn't there only moves the failure
 ///      downstream for no benefit). What a non-nix tarball install
 ///      (`bin/strillix` + `share/strillix/rices/` sitting beside it) uses; on a
-///      NixOS host this tier is never actually reached, since tier 1 is
-///      always set there.
+///      NixOS host the installed strillix sets tier 1 by default, so this tier
+///      is reached by a binary run without that default.
 ///
 /// `None` when neither resolves — this function has no opinion on error
 /// text (same as every other pure resolver here); the caller turns that
@@ -353,8 +354,8 @@ mod tests {
     #[test]
     fn host_config_honors_an_absolute_override() {
         let _guard = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _env = EnvSaver::capture(&["AOIDE_HOST_CONFIG"]);
-        std::env::set_var("AOIDE_HOST_CONFIG", scratch("strillix-paths-host.nix"));
+        let _env = EnvSaver::capture(&["STRILLIX_HOST_CONFIG"]);
+        std::env::set_var("STRILLIX_HOST_CONFIG", scratch("strillix-paths-host.nix"));
         assert_eq!(host_config(), Some(std::path::PathBuf::from(scratch("strillix-paths-host.nix"))));
     }
 

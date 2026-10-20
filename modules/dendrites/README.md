@@ -57,16 +57,16 @@ The shell runtime is two lanes, split by what each one knows:
 ```
 quickshell/       the PACKAGE, and the one `aoide-quickshell` user service.
                   Knows no rice, deploys nothing: it starts a shell on the
-                  directory `aoide.quickshell.config` names and stops there.
+                  directory `strillix.quickshell.config` names and stops there.
 strillix/             the SURFACE. Builds the QML tree from `pkgs/strillix-shell` plus
                   the built-in rices' `widgets/`, deploys it, seeds the stage,
                   restarts the rice, watches it (healthcheck), owns shellbridge
-                  and the `aoide.surfaces` registry.
+                  and the `strillix.surfaces` registry.
 ```
 
-They meet on one fact. `strillix` sets `aoide.quickshell.config` to its deployed
+They meet on one fact. `strillix` sets `strillix.quickshell.config` to its deployed
 runtime root (`$AOIDE_ROOT/run/qml`); the shell lane reads that fact, owns
-`aoide.quickshell.enable` and starts the service. `strillix` brings the shell with
+`strillix.quickshell.enable` and starts the service. `strillix` brings the shell with
 it by importing the shell lane's two plain halves by path, and names nothing
 else of it; the shell lane never names `strillix`, and keeps running the day a
 different lane (or a host) supplies the directory instead.
@@ -76,10 +76,10 @@ no rice binary:
 
 | Shape | How | What runs |
 |---|---|---|
-| own config | the host sets `aoide.quickshell.config` to its own config directory (a store path or a host path) | the package, plus `aoide-quickshell` on that directory, plus the graphical-session anchor `aoided` needs |
+| own config | the host sets `strillix.quickshell.config` to its own config directory (a store path or a host path) | the package, plus `aoide-quickshell` on that directory, plus the graphical-session anchor `aoided` needs |
 | bare | nothing sets it (`null`, the default) | the package only: no service, no session claim |
 
-The service is gated on the config, never on `aoide.rice` — a shell that paints
+The service is gated on the config, never on `strillix.rice` — a shell that paints
 a host's own config has no rice and starts exactly the same way. What is
 rice-gated is `strillix`'s half: deploy, seed, restart.
 
@@ -100,7 +100,7 @@ wallpaper/
                     own theming off and its library inside `aoide.root`.
 ```
 
-Both providers set the fact `aoide.wallpaper.provider` to their own name, so
+Both providers set the fact `strillix.wallpaper.provider` to their own name, so
 exactly one answer exists on a host; `strillix` publishes that one word as
 `/stage/wallpaper-provider`, and both readers — the CLI
 (`strillix-rice`'s `wallpaper_provider`) and `ThemeState.qml` — read the same file.
@@ -114,7 +114,7 @@ what every pick write runs. Because "applies" is decided per STAGED RICE, a
 rice switch steps the engine aside with no extra call: the pick simply stops
 applying, and the shell's board is back.
 
-Nothing here is declared in `aoide.surfaces`: `wallpaper.owner` stays
+Nothing here is declared in `strillix.surfaces`: `wallpaper.owner` stays
 `quickshell`, because the shell's surface stays mapped (transparent) while an
 external provider has a pick on screen; the provider's own paper surface is the
 compositor's, not an `aoide-<slot>`.
@@ -129,11 +129,12 @@ like the rest: selecting one switches it on, and each of the six sets
 `aoide.enable` (the core switch). The option tree they act on is the
 contract in `modules/nucleus`; an option a member reads is declared in that member.
 
-- `aoided.nix` — carries only the Strillix deltas for the `aoided` unit
+- `aoided.nix` — carries the Aoide deployment on the `aoided` unit
   (`pkgs/aoide/module/aoided.nix` owns the unit itself, its tmpfiles rules, and
-  the core session variables): the strillix-gated `STRILLIX_TEMPLATES` session
-  variable, and nothing else paint-shaped. The pair-watch unit this file also
-  defines carries the strillix-gated `AOIDE_DIALOG_CMD`. `aoide.sessionTarget` is set by the
+  the core session variables). The strillix dendrite writes nothing onto that
+  unit, and nothing paint-shaped lives here. The
+  pair-watch unit this file also defines takes its dialog provider from
+  `AOIDE_DIALOG_CMD`, which strillix sets on the user manager. `aoide.sessionTarget` is set by the
   lane that brings a graphical session up (the `quickshell` lane, which names the
   session when it has a shell config to run), so this file reads no lane's
   option either. Below that: every door (mcp, a2a, pair-watch) the daemon's
@@ -146,17 +147,18 @@ contract in `modules/nucleus`; an option a member reads is declared in that memb
   interface without it), and the usage poller. It also declares a
   graphical-session USER unit, `aoide-pair-watch.service`, running `aoide pair
   watch --popup`, gated on `aoide.a2a.enable && aoide.a2a.pairingPopup` (the
-  last DEFAULT FALSE). NOT gated on `aoide.quickshell.enable`: this unit needs a
+  last DEFAULT FALSE). NOT gated on `strillix.quickshell.enable`: this unit needs a
   graphical session and a dialog binary, and that fact says only that Aoide
   paints a shell here — a host painted by something else has the session, takes
   the zenity path, and would otherwise be locked out for an unrelated reason.
-  `quickshell` on the unit's `path` follows `aoide.strillix.enable`, and the popup
-  runs the provider `AOIDE_DIALOG_CMD` names (strillix's `pair ask` and `pair
-  confirm`) when it is set, zenity otherwise. The secrets watcher does the same.
+  The unit's `path` is zenity and libnotify. The popup runs the provider
+  `AOIDE_DIALOG_CMD` names (strillix's `pair ask` and `pair confirm`, through a
+  wrapper that puts quickshell on its own PATH) when it is set, zenity otherwise.
+  The secrets watcher takes the same path.
 - `melete-adapter.nix` — the concrete thin-adapter exemplar on the `aoided`
   event stream. It orders itself against `aoided.service`, which the core module
-  defines on `aoide.enable` alone (the `aoided` dendrite adds only the Strillix
-  deltas to it), so it evaluates with or without the `aoided` dendrite.
+  defines on `aoide.enable` alone (the `aoided` dendrite adds its own deltas to
+  it), so it evaluates with or without the `aoided` dendrite.
 - `aoide-secrets.nix` — the secrets broker's deployment: its own system user
   `aoide-secrets` + groups `aoide-secrets`/`aoide-secrets-access`, and a SYSTEM
   `aoide-secrets-serve.service` (own uid, `/var/lib` home) running `aoide
@@ -180,8 +182,9 @@ contract in `modules/nucleus`; an option a member reads is declared in that memb
   set), and the CLI's own write refuses with a taught error naming this option.
 - `aoide-nix.nix` — flake-native nix settings (Aoide IS a flake; every rebuild/
   check/`aoide update` runs through the flake CLI).
-- `aoide-packages.nix` — puts the `aoide`/`strillix` binaries on the system `PATH`
-  (systemd units ExecStart absolute store paths instead).
+- `aoide-packages.nix` — puts the `aoide` binary and git on the system `PATH`
+  (the strillix binary comes with the strillix dendrite; systemd units ExecStart
+  absolute store paths instead).
 
 A consumer that takes `nixosModules.nucleus` gets the contract and none of these;
 it selects them by name from its own aggregation.
@@ -216,9 +219,9 @@ no GPU override. Neither package needs `allowUnfree` (both MIT).
 
 `config.aoide.*` options it declares itself, plus stock NixOS/Home-Manager
 options. A dendrite reads no other module's internals — not even another
-dendrite's. A paint dendrite reads the dress (`aoide.theme`), the structure
-(`aoide.layout`), the surface registry (`aoide.surfaces`), the component
-slots (`aoide.components`), the identity scalars and its own fact; nothing else (root `AGENTS.md` house rule 5).
+dendrite's. A paint dendrite reads the dress (`strillix.theme`), the structure
+(`strillix.layout`), the surface registry (`strillix.surfaces`), the component
+slots (`strillix.components`), the identity scalars and its own fact; nothing else (root `AGENTS.md` house rule 5).
 
 ## How it composes
 

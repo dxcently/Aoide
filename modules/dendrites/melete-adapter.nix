@@ -75,7 +75,6 @@
         "AOIDE_ADAPTER_MELETE_ENABLE=1"
         "AOIDE_USER=${config.aoide.user}"
         "AOIDE_ROOT=${config.aoide.root}"
-        "STRILLIX_ROOT=${config.aoide.strillix.root}"
         "AOIDE_FLAKE_ROOT=${config.aoide.checkout}"
       ];
 

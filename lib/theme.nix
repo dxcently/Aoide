@@ -1,6 +1,6 @@
 # lib/theme.nix — the venue resolver (CONTRACTS.md §1, override and geometry tiers).
 #
-# `aoide.theme.override.*` is a HOST-set, never rice-set tier. Two registers,
+# `strillix.theme.override.*` is a HOST-set, never rice-set tier. Two registers,
 # two passes, fixed order:
 #
 #   1. Anchor pass (`anchorResolve`, Phase 1, unchanged) — the five optional
@@ -32,13 +32,13 @@
 # only overlays what it is handed.
 #
 # Geometry is the venue's third register and the one that is not a recolour:
-# `aoide.theme.geometry` is set by the rice AND by the host (a host-wide
+# `strillix.theme.geometry` is set by the rice AND by the host (a host-wide
 # `blurEnabled = false`, a rice-conditional `terminalOpacity`), and the baked
 # `hyprland.conf` and kitty fragment already carry the host's value. `stagePatch`
 # lays the option's non-null geometry over the document's own, so the twin
 # equals the bake.
 #
-# Usage: (import ./lib/theme.nix { inherit lib; }).resolve config.aoide.theme
+# Usage: (import ./lib/theme.nix { inherit lib; }).resolve config.strillix.theme
 { lib }:
 rec {
   norm = c: lib.toLower (lib.removePrefix "#" c);
@@ -95,7 +95,7 @@ rec {
       namedB16 = named "base16";
     in
     assert lib.assertMsg (base.base16 != null || namedB16 == { })
-      "aoide.theme.override.base16.${lib.concatStringsSep "/" (lib.attrNames namedB16)}: the performed rice carries no base16 scheme (aoide.theme.base16 is null) to patch a named slot into.";
+      "strillix.theme.override.base16.${lib.concatStringsSep "/" (lib.attrNames namedB16)}: the performed rice carries no base16 scheme (strillix.theme.base16 is null) to patch a named slot into.";
     base
     // {
       base16 = if base.base16 == null then null else base.base16 // namedB16;
@@ -151,7 +151,7 @@ rec {
         };
     in
     assert lib.assertMsg ((doc.base16 or null) != null || !(slots ? base16))
-      "aoide.theme.override.base16.${lib.concatStringsSep "/" (lib.attrNames slots.base16)}: the active rice's theme.json carries no base16 scheme to patch a named slot into.";
+      "strillix.theme.override.base16.${lib.concatStringsSep "/" (lib.attrNames slots.base16)}: the active rice's theme.json carries no base16 scheme to patch a named slot into.";
     doc
     // patch "palette" (
       lib.optionalAttrs ((doc.palette.hot or null) == null && (o.hot or null) != null) {

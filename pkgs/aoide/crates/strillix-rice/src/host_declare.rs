@@ -2,7 +2,7 @@
 //! performs on its next rebuild, by rewriting the host config's
 //! `habit.rice.declared = "<name>";` line (CONTRACTS.md §3, the rice commands).
 //!
-//! The host file is [`crate::paths::host_config`] (`aoide.hostConfig`).
+//! The host file is [`crate::paths::host_config`] (`strillix.hostConfig`).
 //! The line must occur EXACTLY once, in the shape nixfmt writes it: leading
 //! indentation, blanks around `=` and before `;`, nothing after the `;`. Zero
 //! or several such lines is a refusal naming the file and the count; the
@@ -112,8 +112,8 @@ fn declare_racing(
             Kind::Refused,
             "no-host-config",
             "no host config file is known".into(),
-            "`$AOIDE_HOST_CONFIG` is unset and this machine's hostname could not be read".into(),
-            Fix::Set("aoide.hostConfig".into()),
+            "`$STRILLIX_HOST_CONFIG` is unset and this machine's hostname could not be read".into(),
+            Fix::Set("strillix.hostConfig".into()),
         );
     };
     let file = std::fs::canonicalize(&file).unwrap_or(file);
@@ -127,7 +127,7 @@ fn declare_racing(
                 "host-config-unreadable",
                 format!("cannot read the host config `{}`", file.display()),
                 cause.why,
-                Fix::Set("aoide.hostConfig".into()),
+                Fix::Set("strillix.hostConfig".into()),
             )
             .with_fields(json!({ "detail": cause.detail }));
         }

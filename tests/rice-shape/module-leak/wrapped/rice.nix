@@ -5,7 +5,7 @@
     providers.greeter = "strillix";
     module = { lib, pkgs, ... }: {
       config = lib.mkDefault {
-        aoide.theme.polarity = "dark";
+        strillix.theme.polarity = "dark";
         environment.systemPackages = [ pkgs.jq ];
       };
     };

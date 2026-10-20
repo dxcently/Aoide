@@ -44,25 +44,24 @@ let
   # shells out to `quickshell ipc call shell reload`; the client binary must
   # be the build the live shell actually runs.
   quickshellPkg = aoideInputs.quickshell.packages.${pkgs.stdenv.hostPlatform.system}.default;
+  strillixPkg = import ./package.nix { inherit pkgs; };
 in
 
-# Gated on the strillix fact alone: a host may select strillix with no Aoide. This file
-# reads the FACT, never the strillix dendrite's own option (root AGENTS.md house rule 5). The
-# desktop's socket needs no aoided: with aoided absent its core-routed widgets show nothing, and
-# its core calls log once and skip. The core socket and the reaper are core's, in
-# pkgs/aoide/module/aoided.nix.
+# Gated on the strillix fact alone: a host may select strillix with no Aoide. The desktop's socket
+# needs no aoided: with aoided absent its core-routed widgets show nothing, and its core calls log
+# once and wait for aoided. The core socket and the reaper are core's, in pkgs/aoide/module/aoided.nix.
 #
-# `aoide.strillix.enable` is the gate because strillix OWNS this bridge
-# (docs/architecture/PACKAGE-LAYOUT.md): ExecStart below execs strillix out of
-# `pkgs.aoide.strillix`, a SEPARATE, droppable output — so a host that leaves the
-# fact off must not start a unit that execs a binary its closure does not carry.
-lib.mkIf config.aoide.strillix.enable {
+# `strillix.enable` is the gate because strillix OWNS this bridge
+# (docs/architecture/PACKAGE-LAYOUT.md): ExecStart below execs the installed strillix
+# (package.nix, a wrapper over `pkgs.aoide.strillix`, a SEPARATE, droppable output). With the fact
+# off, `lib.mkIf` defines no unit here, so no unit execs a binary the closure lacks.
+lib.mkIf config.strillix.enable {
 
   # ── Runtime directories ──────────────────────────────────────────────────
   # $STRILLIX_ROOT/stage/ is shared with aoided.nix's tmpfiles rules; systemd-tmpfiles
   # deduplicates identical rules so declaring it here as well is safe.
   systemd.user.tmpfiles.rules = [
-    "d ${config.aoide.strillix.root}/stage 0755 - - -"
+    "d ${config.strillix.root}/stage 0755 - - -"
   ];
 
   # ── shellbridge systemd user service ─────────────────────────────────────
@@ -128,9 +127,10 @@ lib.mkIf config.aoide.strillix.enable {
       # same `pkgs.aoide` derivation (P-A7), but as of P-A8 `strillix` lives in
       # that derivation's separate `strillix` output (`pkgs.aoide.strillix`) —
       # sibling resolution breaks across store paths (protocol::bin's
-      # resolver walks current_exe's own directory), so this must name the
-      # rice output explicitly rather than lean on that inference.
-      ExecStart = "${pkgs.aoide.strillix}/bin/strillix shellbridge --run";
+      # resolver walks current_exe's own directory), so this names the
+      # installed strillix (package.nix, which wraps that output) rather than
+      # lean on that inference.
+      ExecStart = "${strillixPkg}/bin/strillix shellbridge --run";
 
       Restart = "on-failure";
       RestartSec = "3s";
@@ -146,27 +146,22 @@ lib.mkIf config.aoide.strillix.enable {
         # HYPRLAND_INSTANCE_SIGNATURE is set by the compositor at session start.
         "AOIDE_USER=${config.aoide.user}"
         "AOIDE_ROOT=${config.aoide.root}"
-        "STRILLIX_ROOT=${config.aoide.strillix.root}"
+        "STRILLIX_ROOT=${config.strillix.root}"
         "AOIDE_FLAKE_ROOT=${config.aoide.checkout}"
         # The host file the RICE menu's Declare row rewrites
         # (`ricedeclare` → `strillix rice declare <rice> --host`).
-        "AOIDE_HOST_CONFIG=${config.aoide.hostConfig}"
+        "STRILLIX_HOST_CONFIG=${config.strillix.hostConfig}"
         # This unit execs `strillix shellbridge --run` (below) — the process that
         # actually reads `STRILLIX_TEMPLATES` (`strillix-rice::widgets`, `strillix`-only).
-        # Paint data belongs on the unit that paints (task #107).
+        # Paint data belongs on the unit that paints.
         "STRILLIX_TEMPLATES=${pkgs.strillix-rices}/share/strillix/rices"
       ]
-      ++ [
-        # The process running this unit IS strillix now, so shellbridge's core_bin()
-        # re-exec sites (protocol::bin's sibling resolver — the usage/recheck
-        # calls, shellbridge.rs) need this set explicitly (P-A7 of the
-        # binary-split workstream). As of P-A8 that is no longer optional
-        # belt-and-suspenders: `strillix` runs out of the `strillix` output while
-        # `aoide` stays in `out` — two different store paths — so the
-        # sibling-directory inference would not find `aoide` next to `strillix`
-        # even if left to it.
-        "AOIDE_CORE_BIN=${pkgs.aoide}/bin/aoide"
-      ];
+      # The core binary's path, for shellbridge's core_bin() re-exec sites (the
+      # usage/recheck calls, the session window attach and the workspace verbs).
+      # `strillix` runs out of its own output and `aoide` out of another, so the
+      # sibling inference cannot find it. With Aoide off there is no binary to
+      # name: the variable is absent and those calls are skipped.
+      ++ lib.optional config.aoide.enable "AOIDE_CORE_BIN=${pkgs.aoide}/bin/aoide";
 
       # The desktop's socket directory under XDG_RUNTIME_DIR (`strillix/`).
       RuntimeDirectory = "strillix";

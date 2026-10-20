@@ -318,7 +318,7 @@ Live-side state, all under the runtime root (`$AOIDE_ROOT`, default
   own tree under the runtime root (`$AOIDE_ROOT` absolute-path-wins, else
   `~/.aoide`; `$AOIDE_STATE_DIR` relocates `state/` alone with the same
   precedence) — the documented CLI ↔ unit seam,
-  pinned by a serialized precedence test. On first run the binaries run a
+  pinned by a serialized precedence test. On first run the core binaries run a
   one-shot root migration (`fs::migrate_root_once()`) moving pre-existing
   `~/Aoide/{rice/stage,state,log}` into the root, each piece gated on its
   own override being unset. The first no-override resolution

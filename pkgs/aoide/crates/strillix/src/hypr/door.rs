@@ -1,13 +1,14 @@
 //! The desktop's calls into core. Each call is one core verb, execed through the core door: `aoide`
 //! on `AOIDE_CORE_BIN`, else on PATH. aoided gates and audits every write that way, and strillix
-//! links no core writer. Nothing is execed while aoided is not listening: the call waits, unsent,
-//! until its socket answers. A call core answers, yes or no, is settled. A call whose exec failed
-//! stays owed and is tried again on a later tick. No aoide binary at all skips the call with one log
-//! line and no error: the desktop runs without core.
+//! links no core writer. A call is not execed while aoided is not listening: it waits, unsent,
+//! until its socket answers. A yes from core settles a call, and so does a no given while aoided
+//! listens. A no given while aoided is not listening leaves the call owed, since the verb may
+//! already have reached aoided. A call whose exec failed stays owed and is tried again on a later
+//! tick. No aoide binary at all skips the call with one log line and no error: the desktop runs
+//! without core.
 
 use aoide_conduct::shellbridge::run_core_step_with;
 use std::collections::HashSet;
-use std::path::Path;
 use std::time::Duration;
 
 /// How long the listening probe waits on aoided's socket before it counts aoided absent.
@@ -22,7 +23,8 @@ pub(crate) enum Reply {
     Refused,
     /// The exec, spawn or wait failed, so core did not run the call. The call stays owed.
     NotRun,
-    /// aoided is not listening, so nothing was sent. The call stays owed until aoided listens.
+    /// aoided is not listening: the call was not sent, or core answered no after aoided stopped
+    /// listening. The call stays owed until aoided listens.
     Absent,
     /// No aoide binary could run. The call is skipped.
     Unavailable,
@@ -32,17 +34,20 @@ pub(crate) enum Reply {
 /// that is not listening is not called. The probe connects and closes at once; aoided reads that
 /// end of file and returns, running no verb and writing no audit line.
 pub(crate) fn call<S: AsRef<str>>(argv: &[S], stdin: Option<&str>) -> Reply {
+    if !aoide_protocol::bin::core_present() {
+        return Reply::Unavailable;
+    }
     if !aoided_listening() {
-        return if core_binary_present() {
-            Reply::Absent
-        } else {
-            Reply::Unavailable
-        };
+        return Reply::Absent;
     }
     let argv: Vec<String> = argv.iter().map(|s| s.as_ref().to_string()).collect();
     match run_core_step_with(&argv, stdin) {
         Ok((true, _, _)) => Reply::Done,
-        // A CLI that loses aoided mid-call answers not-ok: settled too, and pid liveness covers the window.
+        // A not-ok while aoided is not listening waits, as a call made while aoided is down
+        // does: the CLI answers it without sending when it cannot reach aoided, and a verb
+        // aoided read before it stopped is sent again. Any other not-ok is core's answer, and
+        // it is settled.
+        Ok((false, _, _)) if !aoided_listening() => Reply::Absent,
         Ok((false, _, _)) => Reply::Refused,
         Err(_) => Reply::NotRun,
     }
@@ -52,17 +57,6 @@ pub(crate) fn call<S: AsRef<str>>(argv: &[S], stdin: Option<&str>) -> Reply {
 fn aoided_listening() -> bool {
     let socket = aoide_storage::attest::daemon_socket_path();
     aoide_storage::attest::connect_bounded(&socket, PROBE_TIMEOUT).is_some()
-}
-
-/// Would the exec find an aoide binary? The same resolution the spawn uses: an absolute path is
-/// checked where it is, a bare name is looked up on PATH.
-fn core_binary_present() -> bool {
-    let bin = aoide_protocol::bin::core_bin();
-    if Path::new(&bin).is_absolute() {
-        Path::new(&bin).is_file()
-    } else {
-        aoide_protocol::bin::on_path(&bin)
-    }
 }
 
 /// Logs each problem once, not on every tick: a streak of one problem is logged when it starts, and
@@ -108,6 +102,19 @@ impl Latch {
                 true
             }
         }
+    }
+
+    /// Logs a problem that is not a core call, once per streak: logged when `key` starts, and again
+    /// after [`Latch::recovered`] has run for it.
+    pub(crate) fn problem(&mut self, key: &str, message: &str) {
+        if self.logged.insert(key.to_string()) {
+            eprintln!("{message}");
+        }
+    }
+
+    /// Ends the streak that [`Latch::problem`] logged under `key`.
+    pub(crate) fn recovered(&mut self, key: &str) {
+        self.logged.remove(key);
     }
 
     /// Has core refused this fact, named by its session, window and workspace?

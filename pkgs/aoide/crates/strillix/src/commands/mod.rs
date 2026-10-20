@@ -49,13 +49,15 @@
 //! `clipboard clear`, over the `cliphist` on `PATH`: one history entry or all
 //! of them, with the launcher's cached thumbnails) follows, and `lock` (`lock`,
 //! the one lock entry, and `lock hint`, logind's LockedHint for the shell's
-//! lock host) closes the list.
+//! lock host) follows, and `focus` (`focus session`, the compositor jump the
+//! strillix home module's `AOIDE_FOCUS_CMD` wrapper runs) closes the list.
 //! `registry.rs`'s golden test is the sole authority for the command set
 //! (`pkgs/aoide/crates/AGENTS.md`, "Golden discipline").
 pub mod apps;
 pub mod clipboard;
 pub mod component;
 pub mod dialog_qml;
+pub mod focus;
 pub mod icon;
 pub mod infra;
 pub mod lock;
@@ -100,6 +102,7 @@ const LAYOUT: Layout = Layout {
             &[
                 ("screen", "See and drive the desktop: info, shots, pointer, OCR, diff"),
                 ("lock", "Lock the screen in the staged rice's face, or with hyprlock"),
+                ("focus", "Focus a session's window, or its workspace"),
             ],
         ),
         (
@@ -143,6 +146,7 @@ pub fn all() -> Registry {
     apps::register(&mut r); // apps list/show/publish — installed desktop apps with resolved icons, rice/stage/apps.json
     clipboard::register(&mut r); // clipboard delete/clear — remove cliphist history entries and their cached thumbnails
     lock::register(&mut r); // lock + lock.hint — the one lock entry (the shell's LockHost for a rice with a face, else hyprlock) and logind's LockedHint
+    focus::register(&mut r); // focus session — the compositor jump AOIDE_FOCUS_CMD's wrapper runs
     migrate::register(&mut r); // migrate + --check — the rice state's move, run by hand (the start-up hook runs it only under STRILLIX_MIGRATE=1)
     component::register(&mut r); // component — a cross-component call: the slot's provider answers the verb (strillix shell, or its declared argv)
 

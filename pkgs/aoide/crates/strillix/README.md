@@ -16,7 +16,7 @@ are core `aoide` identity, root `AGENTS.md`).
 - `dispatch`/`registry` — strillix's own argv parsing, dispatch, and golden
   command-path snapshot, independent of core's.
 - `commands::LAYOUT` — how `strillix` lists itself (Start here · Rices &
-  themes · Widgets & icons · Desktop apps · Clipboard · Screen control (screen, lock) ·
+  themes · Widgets & icons · Desktop apps · Clipboard · Screen control (screen, lock, focus) ·
   Dialogs & notices · Agent interfaces · System), adopted by `all()` through
   `Registry::arrange`; bare `strillix`, `--help`, group pages and `guide` read it.
 - `guide` — `strx guide`.
@@ -427,6 +427,12 @@ are core `aoide` identity, root `AGENTS.md`).
   provider fills <slot>`, or `provider <p> declares no <verb>`). It shares
   `lock`'s `ipc_argv` and `run_ipc`, so the shell's IPC spelling lives in one
   place.
+- `commands::focus` — `focus session <id>`, the compositor jump the strillix home
+  module's `AOIDE_FOCUS_CMD` wrapper runs. It asks core for the session's window
+  and workspace (`session show`), which it execs directly: that verb reads core's
+  stage and needs no aoided, so it runs whether or not aoided listens. It verifies
+  the window on hyprctl, and dispatches it through `hypr::focus_session`, the
+  resolution the bridge's `focussession` arm answers too.
 - `commands::lock` — `lock` and `lock hint [yes|no]`, the one lock entry
   (`SUPER+ESCAPE`, shellbridge's power-menu `lock`, the `lock` alias). A
   staged rice whose OWN manifest entry carries `lockscreen` is locked by the
@@ -582,17 +588,18 @@ event socket   ──► listener.rs ─┬─ closewindow ───────
                                 └─ any event, any tick ───────► terminals.rs ─► door ─► session window roster
 ```
 
-The desktop calls core when it has something new to say. A closed window is
-reported once per event. The codex sync runs on an appearance (`openwindow`) and on each
-reconnect; a move or a retitle owes it nothing. The sweep runs on each window event but a
-close, on each tick and on each reconnect, and calls core for a binding that changed
-and that core has not refused. The roster goes out on a reconnect and whenever its windows
-or the sessions' claims change. A call core answers is final: a refused call
-is not sent again for the same fact. A call that did not run stays owed and goes out on a
-later tick. A call made while aoided's socket does not answer is not sent: it waits, logged
-once, and goes out on the first tick after aoided answers. With no aoide binary each call is
-skipped, with one log line and no error. The sweep and the roster read `sessions.json` and
-write nothing in it.
+A closed window is reported once per event. The codex sync runs on an appearance
+(`openwindow`) and on each reconnect; a move or a retitle owes it nothing. The sweep
+runs on each window event but a close, on each tick and on each reconnect, and calls
+core for a binding that changed and that core has not refused. The roster goes out on
+a reconnect and whenever its windows or the sessions' claims change. A yes from core
+is final, and so is a no given while aoided listens: that call is not sent again for
+the same fact. A no given while aoided's socket does not answer leaves the call owed,
+since the verb may already have reached aoided. A call that did not run stays owed and
+goes out on a later tick. An owed call made while aoided's socket does not answer is
+not sent: it waits, logged once, and goes out on the first tick after aoided answers.
+With no aoide binary each call is skipped, with one log line and no error. The sweep
+and the roster read `sessions.json` and write nothing in it.
 
 ## What it consumes
 
@@ -602,22 +609,28 @@ serve --stdio`'s door loop).
 
 ## Start-up migration
 
-Every `strillix` run calls `aoide_storage::fs::migrate_root_once` first (state
-and log only). The rice tree moves from `$AOIDE_ROOT/song/` into
-`$STRILLIX_ROOT` only when asked: `STRILLIX_MIGRATE=1` (the home activation sets
+A `strillix` run moves no core state. `aoide_storage::fs::migrate_root_once` is
+the core binaries' call (`aoide`, `aoided`): it moves a pre-split host's
+`~/Aoide/{state,log}` into the root. The rice tree moves from `$AOIDE_ROOT/song/`
+into `$STRILLIX_ROOT` only when asked: `STRILLIX_MIGRATE=1` (the home activation sets
 it on every switch) or `strx migrate`. A plain run with old state prints one
 line naming `strx migrate` and moves nothing. `strx migrate --check` reports
 the rice state (`settled`, `due`, or `both`) and moves nothing; `strx migrate`
 moves it and reports before and after. A `song` that is a marker file (a regular
 file, not a directory) means that move is done. Rice state held by both roots
-is refused: nothing moves, and `strillix` still runs on the strillix root.
+is refused: nothing moves, and `strillix` still runs on the strillix root. While
+an aoide binary is installed and core's legacy `~/Aoide/state` still holds
+state, the rice move refuses with `core has not moved its old root yet` and
+moves nothing; running any `aoide` command once moves that state into the root,
+and the retry goes through. With no aoide binary, the rice move runs and leaves
+`~/Aoide/state` where it is.
 
 ## How it composes
 
 Command paths: onboard/rice/draft/mode/wallpaper/theme/quickshell/screen/
 shellbridge/notifications/history/element/migrate/secrets ask/pair ask/pair show/preview/
 preview set/preview declare/preview shot/preview tree/preview notes/icon/
-apps/clipboard/lock/lock hint — everything that paints, or that only a desktop needs.
+apps/clipboard/lock/lock hint/focus session — everything that paints, or that a desktop needs.
 `element seed` (L-E1,
 docs/architecture/ELEMENTS.md) renders a rice's committed
 `elements/*/element.json` (non-QML rice targets — waybar, dunst, anything

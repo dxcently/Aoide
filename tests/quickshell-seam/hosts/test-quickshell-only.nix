@@ -19,7 +19,7 @@ _: {
   };
 
   aoide.enable = true;
-  aoide.quickshell.config = toString ../fixture;
+  strillix.quickshell.config = toString ../fixture;
 
   # The floors a real machine has; a toplevel wants them.
   networking.hostName = "test-quickshell-only";

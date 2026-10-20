@@ -1,7 +1,7 @@
 # tests/consumer/rices/solo/rice.nix — the fixture's declared rice, as a body.
 #
 # A consumer's rice is a rice: its `system` half selects the paint providers and
-# sets ONLY `aoide.theme` and `aoide.layout` (CONTRACTS.md §5). It reaches its
+# sets ONLY `strillix.theme` and `strillix.layout` (CONTRACTS.md §5). It reaches its
 # own widget records through the injected `borrow` door rather than through a path.
 {
   system = {
@@ -23,9 +23,9 @@
         widgets = borrow "solo";
       in
       {
-        aoide.layout.widgets = (rice.composeRice widgets).layout.widgets;
+        strillix.layout.widgets = (rice.composeRice widgets).layout.widgets;
 
-        aoide.theme.palette = {
+        strillix.theme.palette = {
           bg = "#14161c";
           fg = "#e6e8ef";
           accent = "#8ab4f8";

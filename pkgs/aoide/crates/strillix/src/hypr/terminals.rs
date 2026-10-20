@@ -109,10 +109,11 @@ mod tests {
     }
 }
 
-/// Publishes the roster when it differs from the one core last answered. A roster core answers, yes or
-/// no, or skips for want of a binary, is recorded as sent: it goes out again when the roster or its
-/// claims change, or on a reconnect. A roster that was not sent (aoided not listening, or an exec that
-/// failed) stays owed and goes out on a later tick.
+/// Publishes the roster when it differs from the one core last answered. A roster that core
+/// accepts, or refuses while aoided listens, or that skips for want of a binary, is recorded as
+/// sent: it goes out again when the roster or its claims change, or on a reconnect. A roster that
+/// was not sent (aoided not listening, including a no given once aoided stopped listening, or an
+/// exec that failed) stays owed and goes out on a later tick.
 #[derive(Default)]
 pub(crate) struct RosterGate {
     sent: Option<Roster>,

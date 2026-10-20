@@ -10,7 +10,7 @@ file covers only the strillix lane.
   else of it: `imports = [ ./runtime.nix ]` (or `../strillix/runtime.nix`) and
   `habit.home.imports = [ ./runtime-home.nix ]`. The module system lands a
   path once however many lanes import it; an inline copy or a let-bound
-  attrset of either is a second module that declares `aoide.strillix.home` twice.
+  attrset of either is a second module that declares `strillix.home` twice.
 - **The home import is a list, never `habit.home = ./runtime-home.nix`.** habit
   unifies a bare path into a module with no key, so two lanes that wrote it
   that way would apply the home half twice.
@@ -21,7 +21,7 @@ file covers only the strillix lane.
   path is applied twice. `default.nix` is the catalogue's renderer and imports
   neither half: a host that selects `strillix` alone gets the rice seams and no
   shell, and the shell comes only with a `strillix` provider.
-- **The home half lives in `aoide.strillix.home`.** It is an internal
+- **The home half lives in `strillix.home`.** It is an internal
   `deferredModule` that `runtime.nix` sets, closing over the system config
   (`config.aoide.root`, the built-in set, the derivations in its `let`), and
   `runtime-home.nix` imports through `osConfig`. Home Manager's `pkgs` is the
@@ -31,17 +31,23 @@ file covers only the strillix lane.
   lane's rices library and every per-rice path come from that map, so a
   merged rices (a derivation) is never read at evaluation. Absent, the
   lane discovers `rices` itself.
-- **`runtime.nix` sets `aoide.strillix.enable` and `aoide.quickshell.config`,** and
+- **`runtime.nix` sets `strillix.enable` and `strillix.quickshell.config`,** and
   brings the shell by importing `../quickshell/system.nix`; `runtime-home.nix`
-  imports `../quickshell/home.nix` beside `aoide.strillix.home`. `mkFact` accepts
+  imports `../quickshell/home.nix` beside `strillix.home`. `mkFact` accepts
   both facts because each is written from its owner's directory.
+- **`package.nix` is the installed strillix.** It wraps `pkgs.aoide.strillix` with
+  `STRILLIX_TEMPLATES` defaulting to the shipped rices, and `strx` links to the
+  wrapper. `runtime.nix` installs it, and `runtime.nix` and `shellbridge.nix` exec
+  it. Core's `aoided` unit names no strillix variable: this dendrite writes nothing
+  onto it. Login shells reach the shipped rices through the installed strillix on
+  PATH, not through `environment.sessionVariables`.
 
 - **The renderer writes `hyprland.conf` by one line and reads no runtime
   fact.** Its `extraConfig` is one `source` line at `mkAfter`, after the
   look (500) and the behaviour (1000). It reads `rice.hyprland.*` (its own
   options), Home Manager's `wayland.windowManager.hyprland` state (`enable`,
   `finalPackage`, `configType`, `importantPrefixes`, `sourceFirst`), and
-  `osConfig.aoide.root`. It never sets `aoide.strillix.enable`: that fact means
+  `osConfig.aoide.root`. It never sets `strillix.enable`: that fact means
   "the strillix runtime is present", and only `runtime.nix` can say so.
 - **Render order is fixed: the rice's `hyprland.conf` first, the Nix settings
   last.** A setting in `rice.hyprland.settings` therefore overrides the rice's
@@ -57,7 +63,7 @@ file covers only the strillix lane.
   `mkIf` gates the import, because the module system dedups by path and a
   gated import would let two providers disagree on whether the runtime exists.
 - **A component provider writes only its own slot.** It sets
-  `aoide.components.<its slot>` and the surfaces that component owns, never
+  `strillix.components.<its slot>` and the surfaces that component owns, never
   another slot's entry or a surface the runtime keeps (`osd`, `agentWidgets`,
   `sessionGraph`). What the runtime always needs stays in `runtime.nix`: the
   declared lock dress is staging data the seed writes atomically with the
@@ -74,7 +80,7 @@ file covers only the strillix lane.
 - A new rice seam is one more `rice.hyprland.*` option in `default.nix`, and
   it belongs in the rendered file's place in the order above.
 - A new unit or activation step of the runtime's home half goes in
-  `aoide.strillix.home` in `runtime.nix`, not in a new `habit.home`.
+  `strillix.home` in `runtime.nix`, not in a new `habit.home`.
 
 ## Docs in the same commit
 

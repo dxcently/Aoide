@@ -68,8 +68,8 @@ would prove nothing.
   run.** `migrate_root_once` errs only when a `state/` that exists cannot be
   locked owner-only, whether this run moved it or an earlier one did;
   `aoide` and `aoided` print it and exit 1 rather than read that tree
-  (`tests/migrate_root.rs` runs `aoide` twice against one). `strillix` exits the
-  same way.
+  (`tests/migrate_root.rs` runs `aoide` twice against one). `strillix` runs no core
+  migration, so this does not reach it.
 - **SIGPIPE stays ignored in BOTH binaries.** Writes to a child's stdin
   (`secrets` backends, `curl`, `qrencode`) must return their error, not kill
   the process. A closed stdout (`aoide … | head`) is handled where the result

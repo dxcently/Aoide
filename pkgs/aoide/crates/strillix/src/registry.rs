@@ -145,6 +145,7 @@ mod tests {
             "wallpaper.set",
             "wallpaper.sync",
             "element.seed",
+            "focus.session",
             "guide",
             "notifications.push",
             "icon.collections",
@@ -307,7 +308,7 @@ mod tests {
         heads.dedup();
         let desktop: &[&str] = &[
             "apps", "clipboard", "component", "wallpaper", "element", "notifications", "icon", "theme",
-            "lock", "preview", "quickshell", "reload", "rice", "screen", "shellbridge", "migrate",
+            "lock", "focus", "preview", "quickshell", "reload", "rice", "screen", "shellbridge", "migrate",
         ];
         let mut expected: Vec<&str> = desktop.iter().chain(SHARED_HEADS).copied().collect();
         expected.sort();

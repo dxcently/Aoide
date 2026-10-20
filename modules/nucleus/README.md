@@ -15,20 +15,20 @@ aggregation is the part any host can.
 
 ## Named seams (what it exposes)
 
-- `options.nix` — the paint half of the option contract: `aoide.theme`,
-  `aoide.layout`, `aoide.surfaces` — the enumerated, closed set a paint
+- `options.nix` — the paint half of the option contract: `strillix.theme`,
+  `strillix.layout`, `strillix.surfaces` — the enumerated, closed set a paint
   lane is allowed to read (root `AGENTS.md` house rule 5). Versioned in
   CONTRACTS.md (theme schema v0). The door and secrets settings are not declared
   here: each lives in the member dendrite that reads it. And it declares the ENABLE FACTS — the seam
   between this layer and the paint lanes (CONTRACTS.md §0):
-  `aoide.quickshell.enable` (a shell surface exists here), `aoide.strillix.enable`
-  (the paint/rice binary is installed), `aoide.stylix.enable`, each a fact defaulting `false`,
-  plus `aoide.quickshell.config : nullOr str` — the directory a shell runs
+  `strillix.quickshell.enable` (a shell surface exists here), `strillix.enable`
+  (the paint/rice binary is installed), `strillix.stylix.enable`, each a fact defaulting `false`,
+  plus `strillix.quickshell.config : nullOr str` — the directory a shell runs
   (`null` is the bare case: package installed, no shell service) — and
-  `aoide.wallpaper.provider` (default `"quickshell"`), the one fact that names
+  `strillix.wallpaper.provider` (default `"quickshell"`), the one fact that names
   an ALTERNATIVE rather than a capability: which provider of the `wallpaper`
   registry paints a rice's wallpaper here. Beside the facts it declares
-  `aoide.components` — `attrsOf { provider : str; actions : attrsOf (listOf
+  `strillix.components` — `attrsOf { provider : str; actions : attrsOf (listOf
   str) }`, keyed by component slot — which each slot's chosen provider writes
   for itself; it is a contract option rather than the strillix runtime's because
   a consumer's own provider writes it on a host with no runtime. The dendrite that owns a fact sets it
@@ -46,7 +46,7 @@ aggregation is the part any host can.
 
 - `assertions.nix` — the platform's invariant surface: the twin of the
   constructor's gate pass (habit's composition), for the failures only an
-  evaluated module graph can see. It reads the identity scalar `aoide.rice`
+  evaluated module graph can see. It reads the identity scalar `strillix.rice`
   and the lane facts and declares nothing, so it adds no option, no unit and
   no package. Today: a rice named with no `strillix` lane to paint it fails the
   host's own evaluation with the taught fix, and forcing the three facts fails
@@ -60,10 +60,10 @@ members (`modules/dendrites/README.md`, "The core-service dendrites"):
 
 | catalogue name   | file                                    | what it is                                             |
 |------------------|-----------------------------------------|--------------------------------------------------------|
-| `aoided`         | `modules/dendrites/aoided.nix`          | the Strillix deltas on the core `aoided.service` (which `aoide.enable` alone provides): the a2a/mcp/mail doors, the pair-watch popup, the usage poller and timer, the discovery firewall carve, `STRILLIX_TEMPLATES` |
+| `aoided`         | `modules/dendrites/aoided.nix`          | the Strillix deltas on the core `aoided.service` (which `aoide.enable` alone provides): the a2a/mcp/mail doors, the pair-watch popup, the usage poller and timer, the discovery firewall carve |
 | `melete-adapter` | `modules/dendrites/melete-adapter.nix`  | the thin adapter on the `aoided` event stream          |
 | `aoide-nix`      | `modules/dendrites/aoide-nix.nix`       | flake-native nix settings                              |
-| `aoide-packages` | `modules/dendrites/aoide-packages.nix`  | the `aoide`/`strillix` binaries on the system `PATH`       |
+| `aoide-packages` | `modules/dendrites/aoide-packages.nix`  | the `aoide` binary and git on the system `PATH`       |
 
 `aoide-secrets` (the secrets broker and its popup watcher) and `aoide-config`
 (renders `aoide.config.settings` and points `AOIDE_CONFIG` at it) are catalogue
@@ -82,9 +82,9 @@ existence reaches the contract.
 ## How it composes
 
 Every dendrite reads its own options and stock ones; a paint dendrite reads
-`aoide.theme`/`aoide.layout`/`aoide.surfaces` from here and nothing else of
+`strillix.theme`/`strillix.layout`/`strillix.surfaces` from here and nothing else of
 the contract's internals. The contract reads back only options a lane SETS — an
-enable fact it declared itself (`aoide.quickshell.enable`, `aoide.strillix.enable`,
+enable fact it declared itself (`strillix.quickshell.enable`, `strillix.enable`,
 …) or the core seam `aoide.sessionTarget` (`pkgs/aoide/module/options.nix`). In
 both directions the subject is an option declared outside the lane: the contract
 never reads a lane's own option, and no lane reads another lane.

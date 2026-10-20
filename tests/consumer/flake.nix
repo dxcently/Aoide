@@ -119,6 +119,8 @@
         consumer = mkHost "consumer" ./rices;
         aoide-rices = mkHost "aoide-rices" aoide.ricesRoot;
         stubbed = mkHost "stubbed" ./rices;
+        # Strillix with Aoide off: the desktop aggregation alone, no core and no nucleus.
+        strillix-only = mkHost "strillix-only" ./rices;
         # Aoide's rices and the consumer's own, merged into one directory
         # before anything reads it: `encore` (the consumer's) borrows `sonata`
         # (Aoide's) across the two.

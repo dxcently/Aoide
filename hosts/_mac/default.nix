@@ -17,7 +17,7 @@
 # See docs/architecture/PACKAGE-LAYOUT.md — "NixOS optional, never required."
 #
 # The shape once that lands — Aoide core only (the paint lanes are Linux:
-# Hyprland); rices still RESOLVE (a rice.nix only sets aoide.theme.*, our own
+# Hyprland); rices still RESOLVE (a rice.nix only sets strillix.theme.*, our own
 # option namespace) but nothing renders them on macOS. NOTE: no
 # `imports = [ ../common ]` here on purpose — common carries NixOS-only
 # options (and defaults the blocked-off dendrites below ON), so until it gets
@@ -41,7 +41,7 @@
   #   aoide.audio       (services.pipewire)        aoide.clipboard (systemd service)
   #   aoide.screenshot  (hyprshot/grim, wayland)   aoide.vision    (grim/slurp)
   #   aoide.obsidian    (systemd service)          aoide.firefox   (broken on nixpkgs-darwin)
-  #   aoide.hyprland + every paint lane            (the Strillix desktop is Linux)
+  #   strillix.hyprland + every paint lane            (the Strillix desktop is Linux)
 
   # No paint lane — the desktop is Strillix-on-Linux. What a mac host runs:
   # aoided, the session graph, conduct, agent hooks — the headless profile,

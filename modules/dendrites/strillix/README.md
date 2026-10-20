@@ -11,10 +11,11 @@ modules/dendrites/strillix/
 ├── default.nix        the catalogue entry: the rice renderer (below)
 ├── runtime.nix        the strillix runtime, system half: builds the QML tree,
 │                      deploys it, watches it; publishes its home half as
-│                      `aoide.strillix.home`
+│                      `strillix.home`
 ├── runtime-home.nix   the runtime's home half: the shell lane's home half
-│                      plus `aoide.strillix.home`, read through `osConfig`
+│                      plus `strillix.home`, read through `osConfig`
 ├── shellbridge.nix    the bidirectional bridge (socket + stage files)
+├── package.nix        the installed strillix: the core binary with its shipped rices named
 └── bar.nix  launcher.nix  powermenu.nix  notifications.nix
     dock.nix calendar.nix  switcher.nix   lock.nix
                        the `strillix` provider of each component slot
@@ -62,11 +63,11 @@ explicitly).
 A desktop is made of component slots, each a provider set in the catalogue
 (`bar = { providers.strillix = ./dendrites/strillix/bar.nix; };`). The `strillix`
 provider of a slot is that Quickshell component on the runtime's bridges: it
-imports the runtime pair by path, records itself in `aoide.components`, and
+imports the runtime pair by path, records itself in `strillix.components`, and
 declares the surface it owns. Two strillix slots on one host share one runtime:
 one shell, one bridge, one deployed tree.
 
-| Slot | Provider file | `aoide.surfaces` owner it declares |
+| Slot | Provider file | `strillix.surfaces` owner it declares |
 |---|---|---|
 | `bar` | `bar.nix` | `bar` |
 | `launcher` | `launcher.nix` | `launcher` |
@@ -93,16 +94,16 @@ stay the runtime's own. `runtime.nix` publishes the filled slots as
 - **`runtime.nix` — the paint lane.** Renders the Aoide shell surface with
   Quickshell, builds the config from `pkgs/strillix-shell`'s QML
   plus the widget bodies of the rices this host BUILT IN
-  (`aoide.rices.builtIn`, from its own record), and deploys it to
+  (`strillix.rices.builtIn`, from its own record), and deploys it to
   `$AOIDE_ROOT/run/qml` (`home.activation.aoideDeployQml` — an rsync, not a
   symlink tree: a deploy target the runtime writes into, never a source, so a
   switch reasserts the store over it). It declares
-  the surfaces it owns in `aoide.surfaces` (stylix stands down for those),
-  publishes `aoide.components` as `components.json`,
+  the surfaces it owns in `strillix.surfaces` (stylix stands down for those),
+  publishes `strillix.components` as `components.json`,
   seeds the declared rice into both stage twins, reasserts the paint on every
   activation, brings the staged or drafted rice back (below), runs the
-  healthcheck timer, and installs `pkgs.aoide.strillix` — the strillix binary — as the
-  `aoide.strillix.enable` fact. It also owns what "built in"
+  healthcheck timer, and installs the strillix binary (`package.nix`, the wrapper over
+  `pkgs.aoide.strillix`) as the `strillix.enable` fact. It also owns what "built in"
   means at the byte level: the deployed `manifest.json`/`registry.json` cover
   the built-in rices only, `pkgs.strillix-rices` is overridden to ship just those
   folders plus `builtin.json` (`{ declared, rices, packages }`), and
@@ -119,7 +120,13 @@ stay the runtime's own. `runtime.nix` publishes the filled slots as
   selected rice's records name their slot bodies by `owner`, so the lenders ship
   and seed beside it, which is what makes every manifest record resolve to a
   directory that exists on the host. Selecting the lane is the switch; it sets
-  `aoide.strillix.enable` `true`.
+  `strillix.enable` `true`.
+  `runtime.nix` also sets the desktop's two providers that core runs.
+  `AOIDE_DIALOG_CMD` is set on the user manager's environment to a wrapper
+  that puts quickshell on `PATH` and runs `strillix` with the argv it is
+  given; `AOIDE_FOCUS_CMD` is a home session variable set to a wrapper that
+  runs `strillix focus session` with the session id and, with Aoide on,
+  exports `AOIDE_CORE_BIN` first.
 - **`lock.nix` — the lock.** `strx lock` runs one of two lockers, and the
   `lock` slot's strillix provider installs both and their PAM services: `aoide-lock`
   for the shell's `LockHost.qml` (a service of its own, not `login`'s
@@ -133,9 +140,15 @@ stay the runtime's own. `runtime.nix` publishes the filled slots as
 - **`shellbridge.nix` — the bridge.** The bidirectional seam between the daemon
   / agents and the live desktop: OUT as atomic JSON under `state/stage/`, IN as
   unix-socket commands, and the only consumer of Hyprland's IPC (QML never
-  speaks an agent protocol). Gated on `aoide.enable && aoide.strillix.enable`:
-  strillix owns the bridge, and its `ExecStart` execs strillix out of `pkgs.aoide.strillix`,
-  a separate droppable output.
+  speaks an agent protocol). Gated on `strillix.enable`; `aoide.enable` decides whether its units carry `AOIDE_CORE_BIN`:
+  strillix owns the bridge, and its `ExecStart` execs the installed strillix
+  (`package.nix`), a wrapper over `pkgs.aoide.strillix`, a separate droppable output.
+  The unit also spells `STRILLIX_TEMPLATES` in its own `Environment`.
+- **`package.nix` — the installed strillix.** `pkgs.aoide.strillix` wrapped with
+  `makeWrapper --set-default STRILLIX_TEMPLATES` pointing at `pkgs.strillix-rices`'
+  shipped rices, and `strx` linked beside it. The default applies while the environment leaves the variable unset. `runtime.nix` puts the wrapper on the system
+  PATH in place of the bare binary, and the runtime's units and activation exec it.
+  Core's `aoided` unit names no strillix variable, and nothing here writes onto it.
 - **`runtime.nix` — `aoide-rice-reload`, the staged rice comes back.** Declared truth is laid
   down first, exactly as the activation always does (the rsync into `run/qml`
   and the seed into both stage twins), and nix never reads `stage/mode.json`.
@@ -154,11 +167,13 @@ stay the runtime's own. `runtime.nix` publishes the filled slots as
   seeds (`aoideDeployQml`, `aoideSeedStage`, `aoideSeedRices` — the reload
   reads the runtime rices), which is what puts the reload between the seed
   and the shell's restart. `aoideMigrateRoots` runs before every seed and
-  before `strillixRice`: it runs `strillix --help` once under
-  `STRILLIX_MIGRATE=1`, so the old rice state moves into the strillix root before
-  any seed creates it (a dry run skips it). Outside that activation the rice move
-  waits for `strx migrate`, and `strillix` refuses every verb that could write
-  until it settles.
+  before `strillixRice`: with Aoide on, it first runs `aoide --help`, so core
+  moves its own old root, which the rice move waits for; it then runs
+  `strillix --help` once under `STRILLIX_MIGRATE=1` (with Aoide on, also under
+  `AOIDE_CORE_BIN`, the core binary's path), so the old rice state moves into
+  the strillix root before any seed creates it (a dry run skips it). Outside
+  that activation the rice move waits for `strx migrate`, and `strillix`
+  refuses every verb that could write until it settles.
   Once the rice tree has moved, `$AOIDE_ROOT/song` is a marker file, and the
   migration reads it as already done. Nothing here creates `song/` again.
 
@@ -175,20 +190,20 @@ that selects both lanes gets the one module of each.
 Beyond those imports the two meet on one fact:
 
 ```
-strillix      sets  aoide.quickshell.config = "$AOIDE_ROOT/run/qml"   (this lane's deploy target)
+strillix      sets  strillix.quickshell.config = "$AOIDE_ROOT/run/qml"   (this lane's deploy target)
 quickshell reads it, installs the package, runs  quickshell -p <config>/shell.qml,
           and anchors `aoided` at graphical-session.target
 ```
 
 So a shell with no strillix is a supported host, in either of two shapes: **own
-config** — the host sets `aoide.quickshell.config` to a config directory of its
+config** — the host sets `strillix.quickshell.config` to a config directory of its
 own (a store path or a path in someone's home) and gets the package, the
 service, and the session anchor; or **bare** — nothing is set, and the host gets
 the package and nothing else. Neither shape builds a QML tree, installs the
 rice binary, runs shellbridge, the healthcheck or the rice reload: those are
 this lane's, and this lane is what a rice needs.
 
-That is also why the rice is gated here and not in the shell lane: `aoide.rice`
+That is also why the rice is gated here and not in the shell lane: `strillix.rice`
 with no `strillix` is a host that says "perform this rice" with nothing to perform
 it, and the platform asserts on exactly that (`modules/nucleus/assertions.nix`).
 The service itself no longer cares — it starts on a config directory, rice or
@@ -200,13 +215,13 @@ fixtures; `pkgs/strillix-rices` ships the built-in rices and their manifests.
 
 ## What it consumes
 
-Only the dress (`aoide.theme`), the structure (`aoide.layout`), the
-surface registry it declares into (`aoide.surfaces`), the component slots it
-publishes (`aoide.components`), the core scalars
-(`aoide.enable`, `aoide.root`, `aoide.checkout`, `aoide.hostConfig`,
-`aoide.user`), the rice
-selection (`aoide.rice`), the derived fact
-`aoide.rices.builtIn` — the rices this host builds in, which is what the
+Only the dress (`strillix.theme`), the structure (`strillix.layout`), the
+surface registry it declares into (`strillix.surfaces`), the component slots it
+publishes (`strillix.components`), the core scalars
+(`aoide.enable`, `aoide.root`, `aoide.checkout`, `aoide.user`), its own options
+(`strillix.root`, `strillix.hostConfig`), the rice
+selection (`strillix.rice`), the derived fact
+`strillix.rices.builtIn` — the rices this host builds in, which is what the
 deployed tree, the installed packages, the shipped templates and the seed are
 built from — and its own fact: root `AGENTS.md` house rule 5. Component-tier
 fallback (null → palette) is applied locally and
@@ -215,7 +230,7 @@ at build time (the structural half is `checks.rice-runtime-untracked`); committe
 rices score is not a runtime path.
 
 `checks.theme-fanout` guards the activation seed: the stage twin is the active
-rice's committed theme with the venue's `aoide.theme.override` applied and the
+rice's committed theme with the venue's `strillix.theme.override` applied and the
 host's geometry laid over the rice's own, through `lib/theme.nix`'s
 `stagePatch`, and the same jq run publishes the declared twin
 (`/declared/theme.json`) — this lane is its only writer. The same script
@@ -239,7 +254,7 @@ declared one.
 
 ## How it composes
 
-Naming no rice performs no rice: `aoide.rice` defaults to null, no rice's body
+Naming no rice performs no rice: `strillix.rice` defaults to null, no rice's body
 is imported, and this lane's deploy/seed/restart half is gated on the performed
 rice — so a host that names nothing
 gets no QML tree and nothing deployed, rather than an empty surface. The shell

@@ -1412,10 +1412,11 @@ piece gated independently on its OWN override (`$AOIDE_STATE_DIR`/
 `$AOIDE_AUDIT_LOG`) being unset, so a host that already relocated one tree
 never has a sibling moved out from under it. Its rice half (the pre-L-C2
 `~/Aoide/song/stage` and the rice tree) is the rice move above, not this one.
-Idempotent, and deliberately NOT wired into any path getter — the three real
-binaries (`aoide`, `aoided`, `strillix`) call it explicitly, once, at process
-start (`fs::migrate_root_once`; the rice half, `fs::migrate_rice_root`, runs
-only in `strillix`, and only when asked; see that function's own doc for why
+Idempotent, and deliberately NOT wired into any path getter — the two core
+binaries (`aoide`, `aoided`) call it explicitly, once, at process start
+(`fs::migrate_root_once`; the rice half, `strillix_rice::migrate::migrate_rice_root`,
+runs in `strillix` when asked, and with an aoide binary installed it refuses while
+core's legacy `state/` is still in `~/Aoide`; see that function's own doc for why
 a path getter is the wrong place to hang a process-wide side effect, the
 kind `with_stage_lock`'s pervasive fan-out makes unsafe there). Composes
 correctly with S1 in either order: whichever migration a given process's

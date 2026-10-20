@@ -42,7 +42,7 @@
     clipboard = ./dendrites/clipboard.nix;
     # The compositor capability: a provider registry, not a plain module. Its
     # `hyprland` provider is the LOOK; the BEHAVIOUR is the `hyprland` entry
-    # below, which keeps that name because `aoide.hyprland.*` stays a
+    # below, which keeps that name because `strillix.hyprland.*` stays a
     # host-facing option.
     compositor = ./dendrites/compositor;
     devtools = ./dendrites/devtools.nix;

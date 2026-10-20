@@ -30,7 +30,7 @@ fn unimplemented(_inv: &Invocation) -> Outcome {
 pub fn register_rice_late(r: &mut Registry) {
     r.insert(cmd!(
         path: ["rice", "declare"],
-        summary: "Copy a composed rice from $AOIDE_ROOT/rices/<name> into the checkout's rices/<name>, so it can be committed, less the machine's top-level history/ and drafts/. Refuses while git shows uncommitted changes in that folder, when the checkout is not a git repository (git history is the archive), or when the staged rice.nix is the old function-module shape (`strillix rice refresh <name>`). With --host, instead rewrite the one `habit.rice.declared = \"…\";` line in this host's config (aoide.hostConfig) to <name>, a rice this host's build carries; it takes effect on the next rebuild, and warns when the checkout's rice folder is dirty. The gated rebuild itself is the user's own git commit + nix switch, never this command.",
+        summary: "Copy a composed rice from $AOIDE_ROOT/rices/<name> into the checkout's rices/<name>, so it can be committed, less the machine's top-level history/ and drafts/. Refuses while git shows uncommitted changes in that folder, when the checkout is not a git repository (git history is the archive), or when the staged rice.nix is the old function-module shape (`strillix rice refresh <name>`). With --host, instead rewrite the one `habit.rice.declared = \"…\";` line in this host's config (strillix.hostConfig) to <name>, a rice this host's build carries; it takes effect on the next rebuild, and warns when the checkout's rice folder is dirty. The gated rebuild itself is the user's own git commit + nix switch, never this command.",
         args: [arg!("name", "string", true, "Rice/rice name to declare.")],
         flags: [flag!("host", "bool", "Rewrite this host's declared-rice line to <name> instead of copying the rice into the checkout. CLI-only: it changes what the next rebuild performs.", doors: &[Door::Cli])],
         gated: true,
@@ -206,14 +206,14 @@ mod tests {
     #[test]
     fn host_flag_rewrites_the_host_line_and_copies_nothing() {
         let _g = env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT", "AOIDE_FLAKE_ROOT", "AOIDE_HOST_CONFIG", "STRILLIX_TEMPLATES"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT", "AOIDE_FLAKE_ROOT", "STRILLIX_HOST_CONFIG", "STRILLIX_TEMPLATES"]);
         let root = unique_tmp("declare-host");
         aoide_test_support::pin_stage(root.join("rice").join("stage"));
         let checkout = root.join("checkout");
         std::env::set_var("AOIDE_FLAKE_ROOT", &checkout);
         let host = root.join("default.nix");
         std::fs::write(&host, "{\n  habit.rice.declared = \"sonata\";\n}\n").unwrap();
-        std::env::set_var("AOIDE_HOST_CONFIG", &host);
+        std::env::set_var("STRILLIX_HOST_CONFIG", &host);
         let templates = root.join("templates");
         std::fs::create_dir_all(templates.join("dusk")).unwrap();
         std::fs::write(templates.join("dusk").join("rice.nix"), "{ ... }: { }\n").unwrap();
@@ -235,7 +235,7 @@ mod tests {
     #[test]
     fn host_flag_warns_about_a_dirty_rice_folder_and_still_declares() {
         let _g = env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT", "AOIDE_FLAKE_ROOT", "AOIDE_HOST_CONFIG", "STRILLIX_TEMPLATES"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT", "AOIDE_FLAKE_ROOT", "STRILLIX_HOST_CONFIG", "STRILLIX_TEMPLATES"]);
         let root = unique_tmp("declare-host-warn");
         aoide_test_support::pin_stage(root.join("rice").join("stage"));
         let checkout = root.join("checkout");
@@ -250,7 +250,7 @@ mod tests {
 
         let host = root.join("default.nix");
         std::fs::write(&host, "{\n  habit.rice.declared = \"sonata\";\n}\n").unwrap();
-        std::env::set_var("AOIDE_HOST_CONFIG", &host);
+        std::env::set_var("STRILLIX_HOST_CONFIG", &host);
         let templates = root.join("templates");
         std::fs::create_dir_all(templates.join("dusk")).unwrap();
         std::fs::write(templates.join("dusk").join("rice.nix"), "{ ... }: { }\n").unwrap();

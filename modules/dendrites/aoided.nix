@@ -6,22 +6,18 @@
 # set. This dendrite sets it, and so does every other catalogue member of
 # `nucleus`; the core's own switch is never written by hand.
 #
-# What this dendrite carries is the Strillix deployment on top of that unit:
-# the a2a, mcp and mail-adapter doors, the pair-watch popup, the usage poller
-# and its timer, the discovery firewall carve (UDP 8711) and
-# `STRILLIX_TEMPLATES`.
+# What this dendrite carries is the Aoide deployment on top of that unit: the
+# a2a, mcp and mail-adapter doors, the pair-watch popup, the usage poller and
+# its timer, and the discovery firewall carve (UDP 8711). It names no strillix
+# package, binary or fact.
 #
 # `pkgs/aoide/module/aoided.nix` owns the tmpfiles rules, the core session
 # variables, and the `aoided.service` unit itself (portable, nixpkgs-only).
-# This file carries only what is paint-dependent: the strillix-gated
-# `STRILLIX_TEMPLATES` — as a session variable for interactive shells AND on
-# the unit's own `Environment`, so a process aoided spawns resolves this
-# build's templates rather than whatever the login session was handed. `aoide.sessionTarget` — the seam
-# the core unit anchors through — is NOT set here: the lane that brings a
-# graphical session up sets it, so this file reads no lane's option (root
-# AGENTS.md house rule 5). Below that, the doors (mcp, a2a, pair-watch), the
-# discovery-advertisement firewall carve, and the usage widget poller — core
-# *binaries* in a still-Strillix *deployment* (migration brief §2.6 item 4).
+# `aoide.sessionTarget` — the seam the core unit anchors through — is NOT set
+# here: the lane that brings a graphical session up sets it, so this file reads
+# no lane's option (root AGENTS.md house rule 5). Below that, the doors (mcp, a2a,
+# pair-watch), the discovery-advertisement firewall carve, and the usage widget
+# poller — core *binaries* in a still-Strillix *deployment* (migration brief §2.6 item 4).
 #
 # The doors' settings (`aoide.mcp`, `aoide.a2a`, `aoide.mail.adapter`,
 # `aoide.usage`) are declared below, beside the units that read them, so they
@@ -30,7 +26,6 @@
   config,
   lib,
   pkgs,
-  aoideInputs,
   ...
 }:
 let
@@ -244,51 +239,6 @@ in
   config = {
     aoide.enable = true;
 
-    # ── Strillix-only session variable ────────────────────────────────────────
-    # `STRILLIX_TEMPLATES` (L-C3, task #107) is paint data (the shipped
-    # rices), not core state like `AOIDE_ROOT`/`AOIDE_FLAKE_ROOT`
-    # (`pkgs/aoide/module/aoided.nix`'s own contract) — gated on
-    # `aoide.strillix.enable`, the option that actually controls whether the
-    # `strillix` binary is installed on this host at all (review finding: a
-    # headless-core box that never installs `strillix` has no reader for this
-    # var, so exporting it unconditionally only drags the
-    # `pkgs.strillix-rices` closure onto every interactive shell for no
-    # reason). An operator's own `strillix rice compose` still needs it — the
-    # sibling-of-binary fallback tier (`fs::rice_templates_dir`'s own doc)
-    # can't resolve across `strillix`'s separate `strillix` output, so this env
-    # export is the ONLY way an interactive shell agrees with `strillix` on
-    # where the templates are.
-    environment.sessionVariables = lib.optionalAttrs config.aoide.strillix.enable {
-      STRILLIX_TEMPLATES = "${pkgs.strillix-rices}/share/strillix/rices";
-    };
-
-    # ── The same variable on the unit itself ─────────────────────────────────
-    # The session variable above is a LOGIN fact: it lands in the systemd user
-    # manager's environment when the operator logs in and stays there, so a unit
-    # that started before a `nixos-rebuild switch` keeps the PREVIOUS build's
-    # templates until they relog (found at the S9 yomi switch). Any process
-    # aoided spawns — a conducted session, an agent, a terminal — inherits the
-    # unit's environment, so a `strillix rice stage` run from one of them resolved
-    # the old rices with nothing saying so. Declared here, a unit restart is
-    # enough, and the value always names THIS build's `pkgs.strillix-rices`.
-    #
-    # Why here and not in the portable core module: the templates path is
-    # `pkgs.strillix-rices` (paint), which core neither knows nor may name. Why
-    # only this unit, `aoide-quickshell` and `aoide-rice-reload`:
-    # `fs::rice_templates_dir` is read on the staging path (`rice stage|compose|
-    # preview|mode`, `take`, `onboard`), and those are what a shell born of
-    # `aoide-quickshell` runs and what `aoide-rice-reload` re-stages with at
-    # login and after a switch — shellbridge already spells it for the one
-    # process that stages in-process, and a door that spawns a fixed dialog
-    # (`strillix pair ask`, `strillix secrets ask`) never reaches the staging path at
-    # all. The rest of what the staging path reads
-    # from session variables was audited with it: `AOIDE_ROOT` and
-    # `AOIDE_FLAKE_ROOT` are spelled by every unit that can reach it,
-    # `AOIDE_STAGE_DIR` is deliberately unset anywhere (the default layout
-    # resolves under `AOIDE_ROOT`), and `XDG_RUNTIME_DIR` is the manager's own.
-    systemd.user.services.aoided.serviceConfig.Environment =
-      lib.optional config.aoide.strillix.enable "STRILLIX_TEMPLATES=${pkgs.strillix-rices}/share/strillix/rices";
-
     # ── MCP façade (opt-in, off by default per house policy) ────────────────
     # When aoide.mcp.enable is true, also start the per-session MCP server stub.
     # Agents spawn `aoide mcp serve --stdio` themselves; this service is the
@@ -309,7 +259,6 @@ in
           "AOIDE_AUDIT_LOG=${config.aoide.auditLog}"
           "AOIDE_USER=${config.aoide.user}"
           "AOIDE_ROOT=${config.aoide.root}"
-          "STRILLIX_ROOT=${config.aoide.strillix.root}"
           "AOIDE_FLAKE_ROOT=${config.aoide.checkout}"
         ];
         NoNewPrivileges = true;
@@ -371,7 +320,6 @@ in
           "AOIDE_AUDIT_LOG=${config.aoide.auditLog}"
           "AOIDE_USER=${config.aoide.user}"
           "AOIDE_ROOT=${config.aoide.root}"
-          "STRILLIX_ROOT=${config.aoide.strillix.root}"
           "AOIDE_FLAKE_ROOT=${config.aoide.checkout}"
         ];
         NoNewPrivileges = true;
@@ -411,7 +359,6 @@ in
           "AOIDE_AUDIT_LOG=${config.aoide.auditLog}"
           "AOIDE_USER=${config.aoide.user}"
           "AOIDE_ROOT=${config.aoide.root}"
-          "STRILLIX_ROOT=${config.aoide.strillix.root}"
           "AOIDE_FLAKE_ROOT=${config.aoide.checkout}"
         ];
         NoNewPrivileges = true;
@@ -466,24 +413,17 @@ in
           # `zenity` must resolve off a bare-name `PATH` lookup
           # (`pair_watch::zenity_available`/`spawn_zenity_entry`, both take the
           # binary NAME, never a hardcoded path) — the same PATH gap
-          # `aoide-secrets-watch` documents in `secrets.nix`. It rides
+          # `aoide-secrets-watch` documents in `aoide-secrets.nix`. It rides
           # unconditionally: it is the fallback the whole unit's reachability
-          # rests on, and the only dialog a host without strillix ever gets.
-          #
-          # `quickshell` rides the strillix fact, and for the one reason: `strillix pair ask` spawns quickshell by
-          # bare name, so the unit that can spawn strillix must carry it — and the
-          # unit can only spawn strillix when `aoide.strillix.enable` put the binary
-          # there. A host without strillix takes the zenity path and has no use
-          # for quickshell in its closure.
+          # rests on. A desktop provider's own closure (quickshell, for
+          # the provider `AOIDE_DIALOG_CMD` names) is its provider's to carry,
+          # not this unit's.
           # `libnotify` provides `notify-send`, resolved the SAME bare-name way
           # for the reply-code toast (`pair_watch::notify_reply_code`).
           path = [
             pkgs.zenity
             pkgs.libnotify
-          ]
-          ++
-            lib.optional config.aoide.strillix.enable
-              aoideInputs.quickshell.packages.${pkgs.stdenv.hostPlatform.system}.default;
+          ];
 
           serviceConfig = {
             Type = "simple";
@@ -494,12 +434,11 @@ in
 
             Environment = [
               "AOIDE_ROOT=${config.aoide.root}"
-              "STRILLIX_ROOT=${config.aoide.strillix.root}"
               "AOIDE_FLAKE_ROOT=${config.aoide.checkout}"
               "AOIDE_USER=${config.aoide.user}"
             ];
             # `pair_watch` runs the dialog provider `AOIDE_DIALOG_CMD` names. The desktop's home half sets
-            # it on the user manager's environment, so this unit inherits it (D17).
+            # it on the user manager's environment, so this unit inherits it.
 
             NoNewPrivileges = true;
             StandardOutput = "journal";
@@ -556,7 +495,6 @@ in
         ExecStart = "${pkgs.aoide}/bin/aoide usage";
         Environment = [
           "AOIDE_ROOT=${config.aoide.root}"
-          "STRILLIX_ROOT=${config.aoide.strillix.root}"
           "AOIDE_FLAKE_ROOT=${config.aoide.checkout}"
           "AOIDE_USER=${config.aoide.user}"
         ];

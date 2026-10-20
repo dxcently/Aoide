@@ -15,9 +15,12 @@ use serde_json::Value;
 /// nothing windowed, costs no client read.
 pub(crate) fn resolve_windows(latch: &mut Latch) -> bool {
     let file = match load_stage::<SessionsFile>(&sessions_path()) {
-        Ok(file) => file,
+        Ok(file) => {
+            latch.recovered("sessions-read");
+            file
+        }
         Err(e) => {
-            eprintln!("[aoide/shellbridge] the window sweep binds nothing: {e}");
+            latch.problem("sessions-read", &format!("[aoide/shellbridge] the window sweep binds nothing: {e}"));
             return false;
         }
     };
