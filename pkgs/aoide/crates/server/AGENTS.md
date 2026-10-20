@@ -988,8 +988,8 @@ a2a spawn probe needs `/bin/sh` + `printf`'s byte-exact output.
 
 ## Extension points
 
-- **A new serve-side command** (`daemon`, `shellbridge` registration, `a2a
-  serve`, `events tail`) adds a `cmd!`/`register` entry in `commands.rs`,
+- **A new serve-side command** (`daemon`, `a2a serve`, `events tail`) adds a
+  `cmd!`/`register` entry in `commands.rs`,
   wired into the owning app crate's `commands::all()` — core-only today
   (`daemon`/`a2a serve`/`events tail` are core identity, per root
   `AGENTS.md`).

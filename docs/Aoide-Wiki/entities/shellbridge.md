@@ -24,7 +24,7 @@ the bar a live reflection of the agent's execution phase.
 ## Implementation
 
 shellbridge runs as the `shellbridge` systemd user service via `strillix
-shellbridge --run` (the `strillix` binary's sub-command; `modules/nucleus/
+shellbridge --run` (the `strillix` binary's sub-command; `modules/dendrites/strillix/
 shellbridge.nix`'s `ExecStart`), not the core `aoide` binary. Its socket
 path is a hard contract, never computed independently:
 `$XDG_RUNTIME_DIR/aoide/shellbridge.sock` (the unit's `RuntimeDirectory=aoide`
@@ -77,8 +77,9 @@ The conductor card and its Details page are its only callers
 flight, stopped the moment nothing is looked at — a snapshot while viewed, never
 a token stream). Refusals are audited; a successful poll is not.
 
-**The RICE menu** is three verbs over the runtime rices and the rice's
-saved rice drafts, all re-execs of the sibling `strillix` (`rice` lives there) and
+**The RICE menu** is four verbs over the runtime rices and the rice's
+saved rice drafts, served by strillix's bridge (`src/bridge/rice.rs`), all re-execs of
+the sibling `strillix` (`rice` lives there) and
 none holding a rice rule of its own — the CLI owns the name regexes, the
 minting and every refusal, and conduct never depends on the rice crate. Any
 click on the bar's RICE cell opens the one menu; nothing switches until a row

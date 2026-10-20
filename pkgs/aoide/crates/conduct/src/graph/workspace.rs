@@ -38,10 +38,10 @@ use std::collections::BTreeSet;
 
 /// The taught refusal an omitted `<workspace>` gets when the compositor cannot
 /// be asked. One text, both doors: the CLI's own caller-side resolution here,
-/// and shellbridge's `workspaceaction` (which resolves an omitted workspace in
-/// the same process that owns the adapter, `dispatch_workspace_action`) — one
-/// authority for the sentence, so an operator greps one string.
-pub(crate) const NO_COMPOSITOR: &str =
+/// and strillix's bridge `workspaceaction` (which resolves an omitted workspace
+/// in the same process that owns the adapter) — one authority for the
+/// sentence, so an operator greps one string.
+pub const NO_COMPOSITOR: &str =
     "no compositor adapter here to say which workspace is focused — give the workspace id";
 
 /// One `<workspace>` argument as a workspace ID, or a taught refusal naming

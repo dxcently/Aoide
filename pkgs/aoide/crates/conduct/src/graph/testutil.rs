@@ -108,64 +108,10 @@ pub(crate) fn fixture_projects() -> Vec<Project> {
         },
     ]
 }
-/// Install a FAKE `hyprctl` on `PATH` (the established shim technique — this
-/// crate's own `crates/AGENTS.md` note on replacing a real binary) so the
-/// compositor-facing half can be driven end-to-end with no compositor at all.
-/// Both `clients -j` and `activeworkspace -j` answer: `clients` prints ONE
-/// client whose `pid` is `$AOIDE_TEST_CLIENT_PID` (default: the TEST process's
-/// own `$PPID`, where the pid ancestry walk starts), whose `class` is
-/// `$AOIDE_TEST_CLIENT_CLASS` (default `kitty`), and whose workspace id comes
-/// from `$AOIDE_TEST_WS`. `activeworkspace` prints that same id in the
-/// focused-workspace shape. A test that needs a client owned by some other
-/// process (an app window its harnesses run under) sets the two client vars.
-/// Returns the env guard (restores `PATH`/`HYPRLAND_INSTANCE_SIGNATURE`/
-/// `AOIDE_TEST_WS`/`AOIDE_TEST_CLIENT_PID`/`AOIDE_TEST_CLIENT_CLASS` on drop)
-/// and the shim directory, for the caller to remove.
-///
-/// GATED on Unix, with its reason: the shim is a `#!/bin/sh` SCRIPT made
-/// executable by a mode, and `CreateProcess` understands neither a shebang nor
-/// an extension-less name — the identical gate (and the identical reason) the
-/// client crate's `curl`/`zenity` shim groups carry. Its subject is a
-/// compositor that does not exist on native Windows (the adapter's own
-/// "no adapter" path is what runs there), so a Windows twin would have to
-/// build a real `.exe` to fake a program the host never launches. The callers
-/// below are the `activeworkspace` and dispatch seams; the client list has its
-/// own fake, [`fake_hypr_socket`].
+// `fake_hyprctl` lives in `aoide-test-support`: the strillix bridge's
+// workspace-adapter test drives the same shim. Re-exported at the old path.
 #[cfg(unix)]
-pub(crate) fn fake_hyprctl(tag: &str) -> (EnvVars, PathBuf) {
-    use std::os::unix::fs::PermissionsExt;
-    let dir = std::env::temp_dir().join(format!("aoide-fake-hypr-{tag}-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
-    let shim = dir.join("hyprctl");
-    std::fs::write(
-        &shim,
-        r#"#!/bin/sh
-ws=${AOIDE_TEST_WS:-3}
-cpid=${AOIDE_TEST_CLIENT_PID:-$PPID}
-cclass=${AOIDE_TEST_CLIENT_CLASS:-kitty}
-client="{\"address\":\"0xAA\",\"class\":\"$cclass\",\"title\":\"t\",\"pid\":$cpid,\"workspace\":{\"id\":$ws,\"name\":\"ws\"},\"mapped\":true,\"at\":[0,0],\"size\":[1,1]}"
-if [ "$1" = "activeworkspace" ]; then
-  echo "{\"id\":$ws,\"name\":\"ws\"}"
-else
-  echo "[$client]"
-fi
-"#,
-    )
-    .unwrap();
-    std::fs::set_permissions(&shim, std::fs::Permissions::from_mode(0o755)).unwrap();
-    let env = EnvVars::save(&[
-        "PATH",
-        "HYPRLAND_INSTANCE_SIGNATURE",
-        "AOIDE_TEST_WS",
-        "AOIDE_TEST_CLIENT_PID",
-        "AOIDE_TEST_CLIENT_CLASS",
-    ]);
-    let path = std::env::var("PATH").unwrap_or_default();
-    std::env::set_var("PATH", format!("{}:{path}", dir.display()));
-    std::env::set_var("HYPRLAND_INSTANCE_SIGNATURE", "test");
-    std::env::set_var("AOIDE_TEST_WS", "3");
-    (env, dir)
-}
+pub(crate) use aoide_test_support::fake_hyprctl;
 
 /// The fake Hyprland request socket behind [`super::window::hyprctl_clients`]: a
 /// listener at `<root>/hypr/test/.socket.sock`, with `XDG_RUNTIME_DIR=<root>` and

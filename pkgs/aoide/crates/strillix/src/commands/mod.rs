@@ -66,6 +66,7 @@ pub mod pair;
 pub mod preview;
 pub mod preview_tools;
 pub mod secrets;
+pub mod shellbridge;
 pub mod stubs;
 
 use crate::registry::{Layout, Registry};
@@ -127,7 +128,7 @@ pub fn all() -> Registry {
     strillix_rice::commands::wallpaper::register(&mut r); // wallpaper set
     strillix_rice::commands::theme::register(&mut r); // theme emit, resolve, lint
     stubs::register_rice_late(&mut r); // rice declare, transpose
-    aoide_conduct::commands::shellbridge::register(&mut r); // shellbridge (own module since P-A2)
+    shellbridge::register(&mut r); // the process that serves the desktop verbs
     strillix_rice::commands::quickshell::register(&mut r); // quickshell healthcheck — placeholder-screen watchdog
     strillix_rice::commands::reload::register(&mut r); // reload — the one mode-aware iteration command (absorbed quickshell reload)
     aoide_screen::commands::register(&mut r); // screen info, shot, point *, ocr, diff, send (own crate since P-A1)

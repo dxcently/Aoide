@@ -761,36 +761,6 @@ in the message.
   one timed-out tick can outrun. Refusals are audited; a successful poll is not
   (one line per second per card is not a human gesture), and an audit line never
   carries an argument value.
-- **The RICE menu's verbs hold no rice rule, and the planner is the one place
-  a mode changes the plan.** `ricedraft` is `RiceDraftAction::from_wire` (the
-  ONE gate: `enter` and `drop` need a `safe_session_id`-shaped `name`, `new`
-  and `save` REFUSE one — an ignored field is a caller's mistake read as success — and a
-  line that fails it is dropped with no reply) → `rice_draft_plan(mode,
-  action)` (pure; the unlock step and the Declarative-`save`/`drop` refusals
-  live there and nowhere else) → `dispatch_rice_draft` (the sequencer; `new`'s entering
-  step takes the `data.name` the save step answered). Never validate the
-  draft-name regex here — `strillix-rice` is strillix-only and conduct must not depend
-  on it — and never pre-check that a draft exists: `rice mode draft` creates
-  one, so an `enter` is enter-or-create and a pre-check would only race it;
-  a `drop` of a missing draft or of the draft in force is the CLI's refusal. The
-  unlock is a BARE `rice mode stage` (house rule 10), never a declared rice. `drafts_rice` and
-  the plan agree on ONE rice per mode: declarative lists `stagingRice` because
-  an unlock lands there, and refuses `save` and `drop` because the stage there
-  is the declared rice — change one and the other moves with it. `ricemenu` is a
-  READ: it answers on its own connection with both children under the one
-  `RICE_MENU_TIMEOUT` budget (below the client's 5 s reply timeout), the
-  `rice list` data passes through verbatim with `host` and `hostConfig` beside
-  it (`hostConfig` from `aoide_storage::fs::host_config`, the resolver the
-  CLI's declare uses, never respelled here), a child that did not answer is a
-  refusal and never an empty list, and a failed `rice list` starts no second
-  child. `ricemode` takes `stage` + one argv-token `name` or a bare
-  `declarative` (the CLI resolves the declared twin — never an env rice here).
-  `ricedeclare` takes one rice-shaped `name` (`rice_name`) and nothing else:
-  which rice a host may declare, and the host file it rewrites, are the CLI's
-  (`strx rice declare --host`), never checked here. No audit line of the other
-  three verbs carries a draft or a rice name; `ricedeclare`'s names the rice
-  it declared (`rice_declare_audit`: `ok changed`, `ok unchanged`, `failed`),
-  which is why its parse holds the name to the rice shape.
 
 - **`session bind` assigns continuity, never authority.** Keep the operation
   daemon-owned and local-only; no missing-daemon fallback. It does not load
@@ -808,6 +778,15 @@ in the message.
   socket path `shellbridge` owns. Don't move the files to chase the commands —
   see `docs/architecture/PACKAGE-LAYOUT.md`'s "Charter exceptions" for the
   full reasoning before touching either.
+- **The socket's verb table is a registration seam, not a second parser.**
+  `run(verbs)` takes the binary's `&'static [Verb]`. A line that no core parser arm
+  claims goes to the first entry naming its `cmd`. With no entry, `drop_unparsed`
+  audits it and drops it, except that a line naming `sessiontrace` is answered.
+  Core registers nothing. A registered verb whose caller is parked on a reply calls
+  `drop_unparsed` itself for a line it cannot parse, so every drop is audited the
+  same way. The desktop verbs are strillix's (`pkgs/aoide/crates/strillix/AGENTS.md`);
+  don't re-add them here.
+
 - **The bridge's action whitelists never become a translator.** It is no
   longer just five session actions: `session_action_args` (subject: a
   session id) and `project_action_args` (subject: a project name, no
@@ -819,34 +798,9 @@ in the message.
   `dispatch_session_action`/`run_session_step`/`session_action_reply`) so
   the two whitelists share one runner instead of two copies of it — the
   five original session actions are byte-identical through that sequencer
-  to before the split. `workspaceaction` (the bar's bind click, W-P5) is a
-  THIRD whitelist that does NOT join that sequencer, and its shape is why:
-  its plan is ONE argv (`WorkspaceBinding::plan` — the CLI's own `workspace
-  set <ws> <project> [--new]` / `workspace clear <ws>`), and its reply is
-  keyed by a workspace id with an optional project beside it, which the
-  `ActionSubject` identity pair (one key, one string value) does not fit; a
-  one-step plan can have no partial state either. It shares the parts that
-  ARE common instead: `run_core_step` (the one mutation-side spawn) and
-  `outcome_triple` (the one `--json` envelope read), so CLI answers are read
-  in one place and replies are shaped in one place across all three actions.
-  `WorkspaceBinding::from_wire` is the ONE authority for that wire's shape
-  and `parse_command`'s only gate call site — SHAPE only, never state: the
-  CLI stays the authority on whether a project exists, and a `clear`
-  carrying a binding field is refused by name rather than ignored, so a
-  mis-shaped click can never read as a successful unbind. Its one resolved
-  field is the workspace: an omitted one is the FOCUSED one, read with
-  `crate::graph::focused_workspace` in `dispatch_workspace_action` (never a
-  second compositor read), so the forwarded argv always carries an integer —
-  `workspace clear` takes an id and has no focused default of its own. A
-  host with no adapter is ANSWERED (`reason: "no-compositor"`, message =
-  `graph/workspace.rs::NO_COMPOSITOR`, the CLI's own sentence, one authority
-  for the text), never dropped: a well-formed click is parked on a reply, so
-  even a malformed line that NAMES this verb is ANSWERED with a `bad-request`
-  refusal — the same rule `sessiontrace` holds, one rule for every parked
-  caller — while a malformed line that names some OTHER verb is dropped with
-  none. The wire takes a
-  NEGATIVE workspace id (`as_i64`), matching `SessionRecord.workspace` and
-  the CLI's own `workspace_id`. `safe_session_id` (session ids: no whitespace) and
+  to before the split. The third closed whitelist, `workspaceaction`, lives in strillix's bridge
+  (`pkgs/aoide/crates/strillix/AGENTS.md`), and it shares `run_core_step` and
+  `outcome_triple` with the two above, so every CLI answer is read in one place. `safe_session_id` (session ids: no whitespace) and
   `safe_action_value` (project/host/create/edit names: ordinary spaces
   allowed) are two different checks — an id is a bookkeeping key, a name is
   user-facing text — and both reject empty, `-`-prefixed, or
@@ -2872,7 +2826,7 @@ in the message.
   being a conducted wrap just because its socket briefly vanished, so
   don't migrate or clear the stored field to "fix" a stale report.
   `shellbridge.service` owns `$XDG_RUNTIME_DIR/aoide` with
-  `RuntimeDirectoryPreserve=yes` (`modules/nucleus/shellbridge.nix`), so
+  `RuntimeDirectoryPreserve=yes` (`modules/dendrites/strillix/shellbridge.nix`), so
   an ordinary service restart no longer deletes a live session's socket
   file out from under it — but the on-disk check stays regardless,
   because a socket file can still outlive or predate its process (a
@@ -2963,12 +2917,12 @@ in the message.
   `docs/Aoide-Wiki/concepts/orchestration/Session-Graph.md`'s "Programs with no
   harness — the screen" (the table and the quiet are written there too) and
   the `question` and `needsSudo` fields in `CONTRACTS.md` §4.
-- A change to shellbridge's replying verbs — the
-  `sessionaction`/`projectaction`/`workspaceaction` whitelists and reply
-  shapes, the `sessiontrace`/`ricemenu` reads, the `ricedeclare` answer — or to the fire-and-forget
-  `ricemode`/`ricedraft` sets updates `ShellBridge.qml`'s protocol comment
+- A change to shellbridge's replying verbs — the `sessionaction`/`projectaction`
+  whitelists and reply shapes, or the `sessiontrace` read — or to the fire-and-forget
+  core verbs updates `ShellBridge.qml`'s protocol comment
   (`pkgs/strillix-shell/qml/ShellBridge.qml`, which names the verbs it answers) and
-  `concepts/cli/Doors-and-Nodes.md`'s socket-command list, in the same commit.
+  `concepts/cli/Doors-and-Nodes.md`'s socket-command list, in the same commit. A
+  desktop verb's wire is strillix's, and its AGENTS.md names the same two places.
 - **`graph.json`'s compositor block (`doc::workspace_block`) is ONE seam.**
   `build_graph` publishes it and `aoide workspace list --json` prints it from
   the same function — never a second builder, never a reader re-deriving the

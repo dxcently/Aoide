@@ -10,11 +10,9 @@
 //! `aoide_client::commands::register_nodes`, so `schema --json` order never
 //! shifts.
 //!
-//! `shellbridge` moved out at P-A2 of the binary-split workstream
-//! (docs/architecture/PACKAGE-LAYOUT.md): it belongs with the graphical
-//! binary (`strillix`), not core, so its registration now lives in
-//! `aoide_conduct::commands::shellbridge` — `commands::all()` calls it
-//! directly after [`register_infra`] so the assembled order is unchanged.
+//! `shellbridge` belongs with the graphical binary (`strillix`), not core
+//! (docs/architecture/PACKAGE-LAYOUT.md), so its registration lives there and
+//! not in `commands::all()`, which does not name it.
 //!
 //! `a2a serve` itself is a long-running blocking server, so the root
 //! package's `run_cli` special-cases its launch exactly like
@@ -80,8 +78,7 @@ fn handle_daemon(inv: &Invocation) -> Outcome {
 }
 
 /// `daemon`, registered directly after the root package's own `mcp serve`
-/// entry (the historical pre-`graph` order; `shellbridge` used to register
-/// here too — see the module doc for where it moved).
+/// entry (the historical pre-`graph` order).
 pub fn register_infra(r: &mut Registry) {
     r.insert(cmd!(
         path: ["daemon"],

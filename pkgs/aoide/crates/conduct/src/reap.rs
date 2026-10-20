@@ -1305,8 +1305,8 @@ pub fn reap_and_announce(inv: &Invocation) -> Outcome {
 /// the sweep's own exit (the reaper is a `oneshot` on a 12s timer — a wedged
 /// child would stack units). A missing/failed notifier is an eprintln, never an
 /// error: the sweep already happened, and losing the toast must not turn a
-/// successful reap into a failed one. Same idiom as shellbridge's
-/// `dispatch_rice_mode`. The message can echo session and node names: `--`
+/// successful reap into a failed one. Same idiom as strillix's `ricemode`
+/// toast. The message can echo session and node names: `--`
 /// keeps a leading `-` from reading as an option and
 /// `aoide_protocol::dialog::escape_markup` keeps markup inert; the summary is
 /// fixed text.

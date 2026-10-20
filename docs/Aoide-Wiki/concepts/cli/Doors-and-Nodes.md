@@ -20,7 +20,8 @@ Handlers are spread across
 `pkgs/aoide/crates/server/src/{commands,mcp,daemon,a2a}.rs` (the server
 domain), `pkgs/aoide/crates/client/src/{commands,adapter,node,wire}.rs`
 (the outbound half), `pkgs/aoide/crates/conductor/src/` (the TUI), and
-`pkgs/aoide/crates/conduct/src/shellbridge.rs`; `mcp serve`'s registration
+`pkgs/aoide/crates/strillix/src/commands/shellbridge.rs` (over the loop in
+`pkgs/aoide/crates/conduct/src/shellbridge.rs`); `mcp serve`'s registration
 stays in `pkgs/aoide/crates/cli/src/commands/infra.rs`. The long-running
 launches (`mcp serve --stdio`, `a2a serve`, `conductor`) are special-cased in
 `pkgs/aoide/crates/cli/src/lib.rs::run_cli`.
@@ -147,7 +148,8 @@ strx shellbridge [--run] [--json]
 - **Output:** blocks forever serving the socket (systemd unit is
   `Type=simple`); returns an error document only on bind failure
   (`state: "error"`, data `{socket, stageDir, wrote}`). Socket commands
-  (`pkgs/aoide/crates/conduct/src/shellbridge.rs`): `focuswindow` /
+  (the core verbs in `pkgs/aoide/crates/conduct/src/shellbridge.rs`, the desktop
+  verbs in `pkgs/aoide/crates/strillix/src/bridge/`): `focuswindow` /
   `focussession` (Hyprland jump via `crate::graph`), `power`
   (`lock|logout|suspend|hibernate|reboot|shutdown` → `hyprctl dispatch exec
   "strx lock"` (the compositor runs the locker, so it never inherits this
@@ -228,7 +230,7 @@ strx shellbridge [--run] [--json]
   `bad-request` refusal instead of silence (`CONTRACTS.md` §4's
   workspaceaction paragraph has the shapes).
 - **Notes:** not gated. The `--run` flag is registered in the schema but the
-  handler (`conduct/src/commands/shellbridge.rs::handle_shellbridge`) never
+  handler (`strillix/src/commands/shellbridge.rs::handle_shellbridge`) never
   consults it — bare `strx shellbridge` runs the blocking loop either way. The
   accept loop reads `SO_PEERCRED` on every connection and refuses one whose
   peer uid differs from the process's own euid — a cross-uid floor,

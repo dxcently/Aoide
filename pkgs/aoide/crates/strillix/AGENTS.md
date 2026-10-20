@@ -225,10 +225,13 @@
   run. The env-knob appendix (`ENV_KNOBS` in `commands/onboard.rs`) is the
   ONE allowed hand-list, because env vars aren't module options and so
   can't be derived the same way — keep it small.
-- **`shellbridge`/`notifications` registration only, never the files.** The command
-  registration lines for these live in strillix's `commands`; the implementation
-  files stay in `aoide-conduct` (see that crate's charter-smudge note) —
-  don't duplicate or move them here.
+- **`shellbridge` is strillix's process; its socket loop is not.** The command
+  (`src/commands/shellbridge.rs`) and the desktop verbs (`src/bridge/`) live here.
+  The socket loop, the core verbs and the stage seeding stay in `aoide-conduct`
+  (`shellbridge.rs`, see that crate's charter-smudge note). This crate passes its
+  `bridge::VERBS` table to `run` and adds no other handler to the loop.
+  `notifications` is registration only; its files stay in `aoide-conduct`. Don't
+  move the loop here, and don't duplicate it.
 - **`commands::dialog_qml::spawn_quickshell` arms `PR_SET_PDEATHSIG` on the
   quickshell child BEFORE it execs — this is what actually closes an ask
   dialog when `strx secrets ask`/`strx pair ask`/`strx pair show` itself is killed, not this
@@ -401,11 +404,75 @@
   marker (storage's `migrate_rice_tree`): never add a nix or Rust path that
   creates `song/...` under `$AOIDE_ROOT`.
 
+- **The RICE menu's verbs hold no rice rule, and the planner is the one place
+  a mode changes the plan.** `ricedraft` is `RiceDraftAction::from_wire` (the
+  ONE gate: `enter` and `drop` need a `safe_session_id`-shaped `name`, `new`
+  and `save` REFUSE one — an ignored field is a caller's mistake read as success — and a
+  line that fails it is dropped with no reply) → `rice_draft_plan(mode,
+  action)` (pure; the unlock step and the Declarative-`save`/`drop` refusals
+  live there and nowhere else) → `dispatch_rice_draft` (the sequencer; `new`'s entering
+  step takes the `data.name` the save step answered). Never validate the
+  draft-name regex here — `strillix-rice` is strillix-only and conduct must not depend
+  on it — and never pre-check that a draft exists: `rice mode draft` creates
+  one, so an `enter` is enter-or-create and a pre-check would only race it;
+  a `drop` of a missing draft or of the draft in force is the CLI's refusal. The
+  unlock is a BARE `rice mode stage` (house rule 10), never a declared rice. `drafts_rice` and
+  the plan agree on ONE rice per mode: declarative lists `stagingRice` because
+  an unlock lands there, and refuses `save` and `drop` because the stage there
+  is the declared rice — change one and the other moves with it. `ricemenu` is a
+  READ: it answers on its own connection with both children under the one
+  `RICE_MENU_TIMEOUT` budget (below the client's 5 s reply timeout), the
+  `rice list` data passes through verbatim with `host` and `hostConfig` beside
+  it (`hostConfig` from `aoide_storage::fs::host_config`, the resolver the
+  CLI's declare uses, never respelled here), a child that did not answer is a
+  refusal and never an empty list, and a failed `rice list` starts no second
+  child. `ricemode` takes `stage` + one argv-token `name` or a bare
+  `declarative` (the CLI resolves the declared twin — never an env rice here).
+  `ricedeclare` takes one rice-shaped `name` (`rice_name`) and nothing else:
+  which rice a host may declare, and the host file it rewrites, are the CLI's
+  (`strx rice declare --host`), never checked here. No audit line of the other
+  three verbs carries a draft or a rice name; `ricedeclare`'s names the rice
+  it declared (`rice_declare_audit`: `ok changed`, `ok unchanged`, `failed`),
+  which is why its parse holds the name to the rice shape.
+
+- `workspaceaction` (the bar's bind click, W-P5) is a
+  THIRD whitelist that does NOT join that sequencer, and its shape is why:
+  its plan is ONE argv (`WorkspaceBinding::plan` — the CLI's own `workspace
+  set <ws> <project> [--new]` / `workspace clear <ws>`), and its reply is
+  keyed by a workspace id with an optional project beside it, which the
+  `ActionSubject` identity pair (one key, one string value) does not fit; a
+  one-step plan can have no partial state either. It shares the parts that
+  ARE common instead: `run_core_step` (the one mutation-side spawn) and
+  `outcome_triple` (the one `--json` envelope read), so CLI answers are read
+  in one place and replies are shaped in one place across all three actions, the two core ones included.
+  `WorkspaceBinding::from_wire` is the ONE authority for that wire's shape
+  and `parse_command`'s only gate call site — SHAPE only, never state: the
+  CLI stays the authority on whether a project exists, and a `clear`
+  carrying a binding field is refused by name rather than ignored, so a
+  mis-shaped click can never read as a successful unbind. Its one resolved
+  field is the workspace: an omitted one is the FOCUSED one, read with
+  `aoide_conduct::graph::focused_workspace` in `dispatch_workspace_action` (never a
+  second compositor read), so the forwarded argv always carries an integer —
+  `workspace clear` takes an id and has no focused default of its own. A
+  host with no adapter is ANSWERED (`reason: "no-compositor"`, message =
+  `aoide_conduct::graph::NO_COMPOSITOR`, the CLI's own sentence, one authority
+  for the text), never dropped: a well-formed click is parked on a reply, so
+  even a malformed line that NAMES this verb is ANSWERED with a `bad-request`
+  refusal — the same rule `sessiontrace` holds, one rule for every parked
+  caller — while a malformed line that names some OTHER verb is dropped with
+  none. The wire takes a
+  NEGATIVE workspace id (`as_i64`), matching `SessionRecord.workspace` and
+  the CLI's own `workspace_id`.
+
 ## Extension points
 
 - **A new paint command** adds a `cmd!`/`register` entry in the owning domain
-  crate (`rice`, `screen`, or `conduct` for shellbridge/notifications), wired into
-  strillix's `commands::all()`.
+  crate (`rice` or `screen`; `notifications` is conduct's), wired into strillix's
+  `commands::all()`.
+- **A new desktop verb** is one `Verb` entry in `bridge::VERBS`, its arm in
+  `bridge::parse_command`, and its serve function beside the domain module it
+  drives. The same commit updates `ShellBridge.qml`'s protocol comment and the
+  socket-command list in `docs/Aoide-Wiki/concepts/cli/Doors-and-Nodes.md`.
 - **A new special-cased command** extends the `special` closure passed to
   `aoide_protocol::door::run` in `run_strillix`.
 - **A new reader of desktop entries** (the planned `strx launch`) calls
@@ -444,4 +511,6 @@
   ran and `false` otherwise, and `commands/component.rs` judges the words
   of the answer. A void `act` would look the same whether the item ran
   the verb or not. Change the verb set (`componentVerbs`) in the same
-  commit as the bridge's charset (`conduct/src/shellbridge.rs`).
+  commit as the bridge's charset (`src/bridge/component.rs`).
+- `ShellBridge.qml`'s protocol comment and `docs/Aoide-Wiki/concepts/cli/Doors-and-Nodes.md`'s
+  socket-command list, when a desktop verb's wire, reply or audit line changes.

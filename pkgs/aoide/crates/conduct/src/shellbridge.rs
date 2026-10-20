@@ -1,40 +1,33 @@
-//! shellbridge's socket loop — the session/hook state bridge
-//! (concepts/shellbridge).
+//! shellbridge's socket loop: the unix socket that widgets send newline-delimited
+//! JSON commands to (concepts/shellbridge).
 //!
-//! Registers agent sessions + window addresses and records Claude Code hook
-//! phases, publishing them to `state/stage/` for Quickshell to read. Writes
-//! are atomic (write-temp-then-rename) so a hot-reload never sees a torn file
-//! (CONTRACTS.md §4 discipline).
+//! This module owns the loop and the CORE verbs: the session and project actions,
+//! the read-only trace query, the notification ledger, and the usage and session
+//! refreshes. A binary that serves desktop verbs on the same socket passes its own
+//! [`Verb`] table to [`run`]; core registers none. A line no table claims is audited
+//! as `unparseable` and dropped. A malformed `sessiontrace` line, whose caller is
+//! parked, is answered with a refusal instead of silence.
 //!
-//! The process seeds the stage files (atomic writer), then binds its unix
-//! socket and serves newline-delimited JSON commands: a widget click sends
-//! `{ "cmd": "focuswindow", "address": "0x…" }` and shellbridge dispatches the
-//! Hyprland focus (the Terminal-Commander session-jump flow). The accept loop
-//! is robust: a malformed line, an unknown command, or a dropped connection is
-//! logged and skipped — nothing ever kills the service.
+//! `run` seeds the stage files (atomic writer), binds the socket, and serves forever.
+//! A malformed line, an unknown command, or a dropped connection is logged and
+//! skipped; nothing ever kills the service.
 //!
 //! Moved here from root `src/shellbridge.rs` (Phase 3b restructure,
-//! docs/architecture/PACKAGE-LAYOUT.md) — ONLY the socket-loop half
-//! (`socket_path`, `BridgeCommand`, `parse_command`, `run`); the stage-file FS
-//! substrate (`stage_dir`, `atomic_write`, `with_stage_lock`, …) already
-//! moved to `aoide-storage` in Phase 3a and stays there. Root re-exports both
-//! halves at their old `crate::shellbridge::*` path so no caller changes.
+//! docs/architecture/PACKAGE-LAYOUT.md); the stage-file FS substrate (`stage_dir`,
+//! `atomic_write`, `with_stage_lock`, …) lives in `aoide-storage`.
 
 use aoide_protocol as daemon;
 use aoide_storage::fs::{conducting_stage_dir, seed_if_absent};
-use aoide_storage::mode::{load_mode_marker, ModeMarker, RiceMode};
 use serde_json::{json, Value};
-// The compositor adapter's focused-workspace read and the ONE sentence an
-// omitted `<workspace>` with no adapter to ask gets (`graph/workspace.rs`,
-// re-exported beside `focused_workspace` at `crate::graph` — the bridge
-// resolves an omitted `workspaceaction` workspace with the very function the
-// CLI's own caller-side resolution uses, and speaks the CLI's own words).
-use crate::graph::{focused_workspace, NO_COMPOSITOR};
 use std::io::{BufRead, BufReader};
 #[cfg(unix)]
-use std::os::unix::net::{UnixListener, UnixStream};
+use std::os::unix::net::UnixListener;
+#[cfg(unix)]
+pub use std::os::unix::net::UnixStream;
 #[cfg(windows)]
-use aoide_protocol::win_unix::{UnixListener, UnixStream};
+use aoide_protocol::win_unix::UnixListener;
+#[cfg(windows)]
+pub use aoide_protocol::win_unix::UnixStream;
 use std::path::PathBuf;
 
 /// The shellbridge socket path — **contract**: never computed independently.
@@ -54,10 +47,6 @@ const TRACE_LINES_MAX: usize = 40;
 /// (`docs/architecture/EIDOLON-TRACE.md`), so this bound never fires on a
 /// legitimately slow export — only on a wedged one.
 const TRACE_QUERY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
-/// How long one `ricemenu` answer may take, both children together: under
-/// ShellBridge.qml's own five second `replyTimeoutMs`, so the daemon abandons
-/// the child and says so before the caller gives up on the daemon.
-const RICE_MENU_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(4);
 /// How often the bounded runner re-checks a child that has not exited.
 const CHILD_POLL: std::time::Duration = std::time::Duration::from_millis(20);
 /// How long a child's pipes are given to reach EOF after the child itself
@@ -76,37 +65,27 @@ const READ_CHUNKS: usize = 4;
 /// the CLI's own bounds (`--tail` window × clip) can produce.
 const MAX_ANSWER_BYTES: u64 = 4 * 1024 * 1024;
 
-/// One parsed inbound command from the socket wire (newline-delimited JSON).
-/// The wire shape is defined by ShellBridge.qml; the only command today is the
-/// session-jump `focuswindow`.
+/// What a verb tells the connection loop: keep reading (`Next`), or the line took the
+/// connection's one reply channel and the connection is done (`Answered`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Flow {
+    Next,
+    Answered,
+}
+
+/// One verb a binary registers on the shellbridge socket: the wire `cmd` word it
+/// claims, and the handler that serves a line naming it. Core consults the table
+/// only for a line its own parser does not claim.
+pub struct Verb {
+    pub cmd: &'static str,
+    pub serve: fn(&str, &mut Option<UnixStream>) -> Flow,
+}
+
+/// One parsed core command from the socket wire (newline-delimited JSON). The wire
+/// shape is defined by ShellBridge.qml. A desktop verb is parsed by the binary that
+/// registered it, never here.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BridgeCommand {
-    /// `{ "cmd": "focuswindow", "address": "0x…" }` — jump to a window.
-    Focus { address: String },
-    /// `{ "cmd": "focussession", "sessionId": "…" }` — jump to a SESSION by id.
-    /// The daemon resolves id → `windowAddress` (focus the exact window), or
-    /// falls back to id → `workspace` (switch to it) when the address isn't
-    /// resolved yet. This is the source-of-truth jump: QML sends only the
-    /// sessionId a roster row already holds, never a stale/empty address.
-    FocusSession { session_id: String },
-    /// `{ "cmd": "power", "action": "lock|logout|suspend|hibernate|reboot|shutdown" }`
-    /// — a system action from the Exodos powermenu (AoideExodos.qml). QML never
-    /// shells out; this command is the gate through which the six endings reach
-    /// strillix lock / hyprctl / systemctl.
-    Power { action: PowerAction },
-    /// `{ "cmd": "component", "slot": "…", "verb": "…", "arg": "…"? }` — a
-    /// cross-component call (ShellBridge.qml's `component`): the component that
-    /// fills `slot` does `verb`, with `arg` when it takes one. Fire-and-forget,
-    /// like [`Self::Power`]; the names are held to the closed charsets of
-    /// [`component_slot`], [`component_verb`] and [`component_arg`], and the
-    /// spelling is [`component_command`].
-    Component { slot: String, verb: String, arg: Option<String> },
-    /// `{ "cmd": "ricemode", "action": "stage|declarative", "name": "…" }` — a
-    /// row of the bar's RICE menu: switch the stage to the named runtime rice,
-    /// or lock back to declarative. Fire-and-forget like [`Self::RiceDraft`]:
-    /// the outcome is a toast, never a reply. The closed set and its field
-    /// rules are [`RiceModeAction`]'s. See [`dispatch_rice_mode`].
-    RiceMode { action: RiceModeAction },
     /// `{ "cmd": "refreshusage" }` — a click on the CLAUDE ledger gadget's ❋
     /// spark (UsageGadget.qml). No payload: the daemon re-runs `aoide usage`
     /// itself, which atomic-writes `state/usage.json`, and the gadget's own
@@ -172,287 +151,15 @@ pub enum BridgeCommand {
     /// word is REFUSED rather than silently widened, and the child is killed
     /// and reaped on [`TRACE_QUERY_TIMEOUT`]. `sessionId` is non-blank and
     /// carries no whitespace/control characters, exactly like
-    /// [`Self::FocusSession`]'s — it becomes one argv element, never a shell
+    /// [`safe_session_id`]'s — it becomes one argv element, never a shell
     /// word.
     SessionTrace { session_id: String, lines: usize, clip: String },
-    /// `{ "cmd": "workspaceaction", "action": "set|clear", "workspace": <int>,
-    /// "project": "<name>", "new": <bool> }` — the bar's click that binds a
-    /// compositor workspace to a project, or unbinds it (W-P5). Modelled on
-    /// [`Self::ProjectAction`]: zero-session (no session id anywhere on the
-    /// wire, in the plan, the reply, or the audit line), a closed two-action
-    /// set ([`WorkspaceBinding`]), and no binding logic of its own — it plans
-    /// the same argv `aoide workspace set [<ws>] <project> [--new]` /
-    /// `aoide workspace clear <ws>` take and runs it through the same core
-    /// re-exec every acknowledged action uses.
-    ///
-    /// `workspace` is the compositor's own workspace id, omitted to mean the
-    /// FOCUSED one. Unlike a session or project action, one field is resolved
-    /// here rather than left to the child: [`dispatch_workspace_action`] asks
-    /// the compositor adapter ([`focused_workspace`]) and plans the RESOLVED
-    /// integer, because `workspace clear` takes an id and no wire caller can
-    /// be expected to know the focused one. A host with no adapter is
-    /// ANSWERED (`reason: "no-compositor"`), never dropped — the click is
-    /// parked on a reply.
-    WorkspaceAction { workspace: Option<i64>, binding: WorkspaceBinding },
-    /// `{ "cmd": "ricemenu" }` — the RICE menu's READ: the runtime rices
-    /// and the mode, plus the drafts of the rice the current mode is working
-    /// on, answered on this connection like [`Self::SessionTrace`]. No
-    /// payload: the daemon runs `strillix rice list --json` and, when the mode
-    /// names a rice ([`drafts_rice`]), `strillix rice draft list <rice> --json`,
-    /// both under one [`RICE_MENU_TIMEOUT`] budget. Nothing is written. See
-    /// [`dispatch_rice_menu`].
-    RiceMenu,
-    /// `{ "cmd": "ricedraft", "action": "enter|new|save|drop", "name": "…" }` —
-    /// a picker click that enters a draft, forks a new one and enters it,
-    /// saves the stage as a draft, or deletes a saved one. Fire-and-forget like [`Self::RiceMode`]:
-    /// the outcome is a toast, never a reply. The closed set and its field
-    /// rules are [`RiceDraftAction`]'s; the plan, in `rice` argv, is
-    /// [`rice_draft_plan`]. See [`dispatch_rice_draft`].
-    RiceDraft { action: RiceDraftAction },
-    /// `{ "cmd": "ricedeclare", "name": "<rice>" }` — the menu's Declare row:
-    /// make `name` the rice this host performs on its next rebuild. Answered
-    /// on this connection like [`Self::RiceMenu`], because the outcome is a
-    /// balloon the surface paints, never a toast. `name` must be a rice name
-    /// ([`rice_name`]: lowercase letters, digits, hyphens, no leading hyphen),
-    /// so it is one argv token and safe to name in the audit line; every rule
-    /// about WHICH rice may be declared is the CLI's. See
-    /// [`dispatch_rice_declare`].
-    RiceDeclare { name: String },
 }
 
-/// The two things a `ricemode` line can ask for. A closed set: an unknown or
-/// non-string action, a `stage` with no usable `name`, or a `declarative`
-/// carrying one is refused at the wire (`parse_command` → `None`, no reply).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum RiceModeAction {
-    /// Stage this runtime rice. Whether it exists is the CLI's call.
-    Stage { name: String },
-    /// Lock back to the declared rice; the CLI resolves which that is.
-    Declarative,
-}
-
-impl RiceModeAction {
-    fn from_wire(v: &Value) -> Option<Self> {
-        let name = v.get("name");
-        match v.get("action").and_then(Value::as_str)? {
-            "stage" => {
-                let name = name?.as_str()?;
-                safe_session_id(name).then(|| Self::Stage { name: name.to_string() })
-            }
-            "declarative" => name.is_none().then_some(Self::Declarative),
-            _ => None,
-        }
-    }
-
-    /// The wire name back, for the audit line.
-    fn as_str(&self) -> &'static str {
-        match self {
-            Self::Stage { .. } => "stage",
-            Self::Declarative => "declarative",
-        }
-    }
-}
-
-/// The four things a `ricedraft` line can ask for. A closed set: an unknown
-/// or non-string action, an `enter`/`drop` with no usable `name`, or a
-/// `new`/`save` carrying one is refused at the wire (`parse_command` → `None`, no reply),
-/// never dispatched.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum RiceDraftAction {
-    /// Route the stage into this draft. The name is one argv token and no
-    /// more: whether it is a valid draft name is the CLI's call —
-    /// `strillix-rice` is strillix-only and conduct never depends on it, so the
-    /// regex lives in one place. Whether the draft EXISTS is nobody's check
-    /// here: `rice mode draft` forks the current stage into a valid name that
-    /// is not there yet, so an enter is enter-or-create.
-    Enter { name: String },
-    /// Mint the next free draft name from the staged rice, then enter it.
-    New,
-    /// Snapshot the stage as a draft of the staged rice. Never changes mode,
-    /// and is refused while declarative is locked ([`rice_draft_plan`]).
-    Save,
-    /// Delete this saved draft of the staged rice. The name rules are
-    /// `Enter`'s; whether the draft exists, and the refusal of the draft in
-    /// force, are the CLI's (`rice draft drop`). Never changes mode, and is
-    /// refused while declarative is locked, like `Save`.
-    Drop { name: String },
-}
-
-impl RiceDraftAction {
-    /// Parse one wire line's `action` and its own fields. `new` and `save`
-    /// take no `name`: one beside them is a caller that meant `enter`, and
-    /// silently ignoring it would let that mistake read as success (the
-    /// [`WorkspaceBinding`] `clear` rule).
-    fn from_wire(v: &Value) -> Option<Self> {
-        let name = v.get("name");
-        match v.get("action").and_then(Value::as_str)? {
-            "enter" => {
-                let name = name?.as_str()?;
-                safe_session_id(name).then(|| Self::Enter { name: name.to_string() })
-            }
-            "new" => name.is_none().then_some(Self::New),
-            "save" => name.is_none().then_some(Self::Save),
-            "drop" => {
-                let name = name?.as_str()?;
-                safe_session_id(name).then(|| Self::Drop { name: name.to_string() })
-            }
-            _ => None,
-        }
-    }
-
-    /// The wire name back, for the audit line.
-    fn as_str(&self) -> &'static str {
-        match self {
-            Self::Enter { .. } => "enter",
-            Self::New => "new",
-            Self::Save => "save",
-            Self::Drop { .. } => "drop",
-        }
-    }
-}
-
-/// The two things a `workspaceaction` line can ask for. A closed set: an
-/// unknown action word, a `clear` carrying a `project`, or a `project` that is
-/// not a name is refused at the wire (`parse_command` → `None`, no reply, like
-/// every other line the whitelists refuse), never dispatched.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum WorkspaceBinding {
-    /// Bind. `new` is `--new`: register the name when it is unregistered
-    /// (name-only, no folder) and bind it in one call — the CLI stays the one
-    /// authority on whether the name exists, the bridge never pre-checks.
-    Set { project: String, new: bool },
-    /// Unbind.
-    Clear,
-}
-
-impl WorkspaceBinding {
-    /// Parse one wire line's `action` and its own fields. SHAPE only, never
-    /// state — whether the project exists, and whether this workspace is
-    /// already bound, are the CLI's checks, not the bridge's.
-    fn from_wire(action: &str, fields: &Value) -> Option<Self> {
-        match action {
-            "set" => {
-                // A missing, `null`, or non-string `project` is refused
-                // outright: there is no "clear" reading of a malformed
-                // bind request.
-                let project = fields.get("project").and_then(Value::as_str)?.trim();
-                if !safe_action_value(project) {
-                    return None;
-                }
-                let new = match fields.get("new") {
-                    None | Some(Value::Null) => false,
-                    Some(Value::Bool(new)) => *new,
-                    // Present but not a bool: refused, never read as false.
-                    Some(_) => return None,
-                };
-                Some(Self::Set { project: project.to_string(), new })
-            }
-            // `clear` carries a workspace and nothing else: a `project` or a
-            // `new` beside it is a caller that meant `set`, and silently
-            // ignoring the field would let that mistake read as a successful
-            // unbind.
-            "clear" => {
-                if fields.get("project").is_some() || fields.get("new").is_some() {
-                    return None;
-                }
-                Some(Self::Clear)
-            }
-            _ => None,
-        }
-    }
-
-    /// The wire name back, for the reply and the audit line.
-    fn as_str(&self) -> &'static str {
-        match self {
-            Self::Set { .. } => "set",
-            Self::Clear => "clear",
-        }
-    }
-
-    /// The ONE argv this binding plans for one RESOLVED workspace id — exactly
-    /// the argv the CLI takes, so `--new` is the only optional element and
-    /// nothing here re-implements a binding. `--json` is appended by the
-    /// runner ([`run_core_step`]), never planned here.
-    fn plan(&self, ws: i64) -> Vec<String> {
-        match self {
-            Self::Set { project, new } => {
-                let mut argv = vec![
-                    "workspace".to_string(),
-                    "set".to_string(),
-                    ws.to_string(),
-                    project.clone(),
-                ];
-                if *new {
-                    argv.push("--new".to_string());
-                }
-                argv
-            }
-            Self::Clear => vec!["workspace".to_string(), "clear".to_string(), ws.to_string()],
-        }
-    }
-}
-
-/// The six system actions the powermenu can request. A closed set — an unknown
-/// action string parses to `None` at the wire, never to a dispatch.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PowerAction {
-    Lock,
-    Logout,
-    Suspend,
-    Hibernate,
-    Reboot,
-    Shutdown,
-}
-
-impl PowerAction {
-    /// Parse the wire's `action` string. Case-sensitive lowercase by contract
-    /// (ShellBridge.qml sends exactly these), anything else is `None`.
-    fn from_wire(s: &str) -> Option<Self> {
-        match s {
-            "lock" => Some(Self::Lock),
-            "logout" => Some(Self::Logout),
-            "suspend" => Some(Self::Suspend),
-            "hibernate" => Some(Self::Hibernate),
-            "reboot" => Some(Self::Reboot),
-            "shutdown" => Some(Self::Shutdown),
-            _ => None,
-        }
-    }
-
-    /// The program + args this action spawns. `lock` asks the compositor to
-    /// run `strillix lock` (the one lock entry: the shell's lock host for a rice
-    /// with a face, else hyprlock) rather than spawning it here: this unit
-    /// runs with NoNewPrivileges, which a child inherits, and hyprlock's PAM
-    /// check needs the setuid `unix_chkpwd`, so a locker spawned here refuses
-    /// every password. `logout` exits the compositor; the rest are systemd
-    /// commands.
-    fn command(self) -> (&'static str, &'static [&'static str]) {
-        match self {
-            Self::Lock => ("hyprctl", &["dispatch", "exec", "strillix lock"]),
-            Self::Logout => ("hyprctl", &["dispatch", "exit"]),
-            Self::Suspend => ("systemctl", &["suspend"]),
-            Self::Hibernate => ("systemctl", &["hibernate"]),
-            Self::Reboot => ("systemctl", &["reboot"]),
-            Self::Shutdown => ("systemctl", &["poweroff"]),
-        }
-    }
-
-    /// The wire name back, for audit lines.
-    fn as_str(self) -> &'static str {
-        match self {
-            Self::Lock => "lock",
-            Self::Logout => "logout",
-            Self::Suspend => "suspend",
-            Self::Hibernate => "hibernate",
-            Self::Reboot => "reboot",
-            Self::Shutdown => "shutdown",
-        }
-    }
-}
-
-/// Parse ONE wire line into a [`BridgeCommand`]. Pure and total: malformed
-/// JSON, a missing/unknown `cmd`, or a `focuswindow` with an empty/absent
-/// `address` all yield `None` (the loop logs and ignores them) — never a panic.
+/// Parse ONE wire line into a core [`BridgeCommand`]. Pure and total: malformed
+/// JSON, a missing/unknown `cmd`, or a core verb with an empty or absent required
+/// field yields `None` (the loop audits and drops it), never a panic. A desktop
+/// verb yields `None` here too: a registered [`Verb`] parses it.
 pub fn parse_command(line: &str) -> Option<BridgeCommand> {
     let v: Value = serde_json::from_str(line.trim()).ok()?;
     match v.get("cmd").and_then(Value::as_str)? {
@@ -470,72 +177,6 @@ pub fn parse_command(line: &str) -> Option<BridgeCommand> {
             // at the top level (§2d's wire shape), never nested.
             project_action_args(&name, &action, &v)?;
             Some(BridgeCommand::ProjectAction { name, action, fields: v })
-        }
-        "workspaceaction" => {
-            let action = v.get("action")?.as_str()?;
-            // `fields` here IS the whole wire object, the `projectaction`
-            // shape: `project`/`new` sit at the top level, never nested.
-            let binding = WorkspaceBinding::from_wire(action, &v)?;
-            // An INTEGER, the same value `SessionRecord.workspace` holds: a
-            // string or a float is refused (`as_i64`), a NEGATIVE is accepted
-            // — Hyprland's named/special workspaces carry negative ids, and
-            // the CLI's own `workspace_id` parses the same `i64`. Absent (or
-            // `null`) means "the focused one", resolved at dispatch.
-            let workspace = match v.get("workspace") {
-                None | Some(Value::Null) => None,
-                Some(raw) => Some(raw.as_i64()?),
-            };
-            Some(BridgeCommand::WorkspaceAction { workspace, binding })
-        }
-        "focuswindow" => {
-            let address = v
-                .get("address")
-                .and_then(Value::as_str)
-                .unwrap_or("")
-                .trim()
-                .to_string();
-            if address.is_empty() {
-                return None;
-            }
-            Some(BridgeCommand::Focus { address })
-        }
-        "focussession" => {
-            let session_id = v
-                .get("sessionId")
-                .and_then(Value::as_str)
-                .unwrap_or("")
-                .trim()
-                .to_string();
-            if session_id.is_empty() {
-                return None;
-            }
-            Some(BridgeCommand::FocusSession { session_id })
-        }
-        "power" => {
-            let action = v
-                .get("action")
-                .and_then(Value::as_str)
-                .unwrap_or("")
-                .trim()
-                .to_string();
-            PowerAction::from_wire(&action).map(|action| BridgeCommand::Power { action })
-        }
-        "component" => {
-            let slot = v.get("slot")?.as_str()?;
-            let verb = v.get("verb")?.as_str()?;
-            let arg = match v.get("arg") {
-                None => None,
-                Some(a) => Some(a.as_str().filter(|s| component_arg(s))?.to_string()),
-            };
-            (component_slot(slot) && component_verb(verb))
-                .then(|| BridgeCommand::Component { slot: slot.to_string(), verb: verb.to_string(), arg })
-        }
-        "ricemode" => RiceModeAction::from_wire(&v).map(|action| BridgeCommand::RiceMode { action }),
-        "ricemenu" => Some(BridgeCommand::RiceMenu),
-        "ricedraft" => RiceDraftAction::from_wire(&v).map(|action| BridgeCommand::RiceDraft { action }),
-        "ricedeclare" => {
-            let name = v.get("name")?.as_str()?;
-            rice_name(name).then(|| BridgeCommand::RiceDeclare { name: name.to_string() })
         }
         "refreshusage" => Some(BridgeCommand::RefreshUsage),
         "rechecksessions" => Some(BridgeCommand::RecheckSessions),
@@ -578,7 +219,7 @@ pub fn parse_command(line: &str) -> Option<BridgeCommand> {
                 .trim()
                 .to_string();
             // A blank or non-id-shaped session names nothing to read: refused,
-            // like `focussession`'s own blank id, never defaulted to "all".
+            // never defaulted to "all".
             if !safe_session_id(&session_id) {
                 return None;
             }
@@ -616,358 +257,6 @@ pub fn parse_command(line: &str) -> Option<BridgeCommand> {
     }
 }
 
-/// Dispatch ONE power action: spawn the mapped command and return. NEVER waits
-/// for exit — several of these actions kill or freeze the very process that
-/// would be waiting (logout tears the session down, suspend stops the clock) —
-/// a detached reaper thread collects the child's status so it never lingers as
-/// a zombie. A spawn failure is an `Err` for the caller to log; nothing here
-/// can take down the accept loop.
-fn dispatch_power(action: PowerAction) -> std::io::Result<()> {
-    let (prog, args) = action.command();
-    spawn_detached(prog, args)
-}
-
-/// Spawn `prog args` and return at once: a detached reaper collects the
-/// child's status, so it never lingers as a zombie. Never waits — the caller
-/// may be an action that kills or freezes what would be waiting.
-fn spawn_detached<S: AsRef<str>>(prog: &str, args: &[S]) -> std::io::Result<()> {
-    let mut child = std::process::Command::new(prog).args(args.iter().map(|a| a.as_ref())).spawn()?;
-    std::thread::spawn(move || {
-        let _ = child.wait();
-    });
-    Ok(())
-}
-
-/// A component slot name: lowercase start, then lowercase, digits or `-`.
-fn component_slot(s: &str) -> bool {
-    let mut chars = s.chars();
-    matches!(chars.next(), Some(c) if c.is_ascii_lowercase())
-        && chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
-}
-
-/// A component verb: an ASCII letter start, then ASCII letters or digits
-/// (`openTab` is camelCase by contract).
-fn component_verb(s: &str) -> bool {
-    let mut chars = s.chars();
-    matches!(chars.next(), Some(c) if c.is_ascii_alphabetic()) && chars.all(|c| c.is_ascii_alphanumeric())
-}
-
-/// A component verb's one argument: 1 to 64 characters of ASCII letters,
-/// digits, `.`, `_` or `-`, never a leading `-` (a flag to the provider).
-fn component_arg(s: &str) -> bool {
-    (1..=64).contains(&s.len())
-        && !s.starts_with('-')
-        && s.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
-}
-
-/// The program and argv that run `strillix component <slot> <verb> [arg]`. It goes
-/// through the compositor (`hyprctl dispatch exec`), as `PowerAction::Lock`
-/// does, and never as this unit's child: NoNewPrivileges is inherited, and a
-/// provider's action may reach a setuid helper. The charsets above make the one
-/// spelled line safe for the compositor's shell.
-fn component_command(slot: &str, verb: &str, arg: Option<&str>) -> (&'static str, Vec<String>) {
-    let mut line = format!("strillix component {slot} {verb}");
-    if let Some(arg) = arg {
-        line.push(' ');
-        line.push_str(arg);
-    }
-    ("hyprctl", vec!["dispatch".to_string(), "exec".to_string(), line])
-}
-
-/// Dispatch ONE `ricemode` action: `strillix rice mode stage <name>` or a bare
-/// `strillix rice mode declarative` (the CLI resolves the declared twin), waited
-/// for through [`run_rice_step`]. The sibling `strillix` is the callee because
-/// `rice` lives there, not in this running binary. NOT inside
-/// `with_stage_lock`: holding it across a blocking child wait is a deadlock
-/// waiting to happen. UNBOUNDED like every mutation here. `Ok` is the CLI's
-/// own `message`; `Err` is its refusal or the spawn error.
-fn dispatch_rice_mode(action: &RiceModeAction) -> Result<String, String> {
-    let argv: Vec<String> = match action {
-        RiceModeAction::Stage { name } => vec!["rice".into(), "mode".into(), "stage".into(), name.clone()],
-        RiceModeAction::Declarative => vec!["rice".into(), "mode".into(), "declarative".into()],
-    };
-    match run_rice_step(&argv) {
-        (true, message, _) => Ok(message),
-        (false, message, _) => Err(message),
-    }
-}
-
-/// Fire a detached `notify-send -- "Aoide" <message>` — the same reaper-thread
-/// idiom as [`dispatch_power`]'s spawned child, so a slow or hung
-/// `notify-send` can never block a connection. The message can echo a rice
-/// folder name: `--` keeps a leading `-` from reading as an option and
-/// [`aoide_protocol::dialog::escape_markup`] keeps markup inert. A spawn failure is logged and
-/// nothing more: the action this toast reports already ran, and a dead or
-/// missing `notify-send` must not turn its outcome into a different one.
-fn notify(message: &str) {
-    match std::process::Command::new("notify-send")
-        .arg("--")
-        .arg("Aoide")
-        .arg(aoide_protocol::dialog::escape_markup(message))
-        .spawn()
-    {
-        Ok(mut child) => {
-            std::thread::spawn(move || {
-                let _ = child.wait();
-            });
-        }
-        Err(e) => eprintln!("[aoide/shellbridge] notify-send failed (the action's own outcome stands): {e}"),
-    }
-}
-
-// ── the RICE menu (`ricemenu`, `ricedraft`, `ricedeclare`) ─────────────────
-
-/// Pure plan: the `strillix` argv, in order and without `--json`, that one
-/// `ricedraft` action takes in this mode, or the taught refusal that ends it.
-/// `enter` and `new` route the stage into a draft, which `rice mode draft`
-/// refuses while declarative is locked, so from `Declarative` they unlock
-/// first — with a BARE `rice mode stage`, which restores the remembered
-/// `stagingRice` (house rule 10), never the declared rice. `save` and `drop`
-/// never change the mode, and both are refused while declarative is locked:
-/// the stage there is the DECLARED rice (the lock re-pins it), `rice draft
-/// save`/`drop` act on the rice `stage/theme.json` names, and the listing
-/// ([`drafts_rice`]) names `stagingRice` — a save would land under, and a drop
-/// would delete from, a rice the picker never shows. Unlocking first to make
-/// them land would change the mode as a side effect of a save or a delete.
-/// The unlock is one click away, so the refusal costs one click. `new` plans only the save: the draft's name is minted by the CLI and
-/// is not known until that step has answered, so [`dispatch_rice_draft`]
-/// appends the entering step itself.
-fn rice_draft_plan(mode: RiceMode, action: &RiceDraftAction) -> Result<Vec<Vec<String>>, &'static str> {
-    let step = |words: &[&str]| words.iter().map(|w| w.to_string()).collect::<Vec<String>>();
-    let mut plan = Vec::new();
-    if mode == RiceMode::Declarative {
-        match action {
-            RiceDraftAction::Save => return Err("declarative mode is locked — unlock first, then save the draft"),
-            RiceDraftAction::Drop { .. } => {
-                return Err("declarative mode is locked — unlock first, then delete the draft")
-            }
-            RiceDraftAction::Enter { .. } | RiceDraftAction::New => {}
-        }
-        plan.push(step(&["rice", "mode", "stage"]));
-    }
-    match action {
-        RiceDraftAction::Enter { name } => plan.push(step(&["rice", "mode", "draft", name.as_str()])),
-        RiceDraftAction::New | RiceDraftAction::Save => plan.push(step(&["rice", "draft", "save"])),
-        RiceDraftAction::Drop { name } => plan.push(step(&["rice", "draft", "drop", name.as_str()])),
-    }
-    Ok(plan)
-}
-
-/// Run ONE planned step: `strillix <argv> --json`, waited for — the sibling `strillix` ([`daemon::bin::rice_bin`]) because `rice`
-/// lives there and not in this running binary — and read through
-/// [`outcome_triple`], the one reader of a `--json` envelope. NOT inside
-/// `with_stage_lock` (a blocking child wait under it is a deadlock waiting to
-/// happen). A child that
-/// could not be started is `ok: false` with the spawn error as the message,
-/// naming the first two argv words only — the command path, never a value.
-fn run_rice_step(argv: &[String]) -> (bool, String, Option<Value>) {
-    match std::process::Command::new(daemon::bin::rice_bin())
-        .args(argv)
-        .arg("--json")
-        .output()
-    {
-        Ok(out) => outcome_triple(
-            "rice",
-            argv.get(1).map(String::as_str).unwrap_or(""),
-            out.status.success(),
-            &String::from_utf8_lossy(&out.stdout),
-            &String::from_utf8_lossy(&out.stderr),
-        ),
-        Err(e) => (
-            false,
-            format!(
-                "spawning `strillix {} {}`: {e}",
-                argv.first().map(String::as_str).unwrap_or(""),
-                argv.get(1).map(String::as_str).unwrap_or("")
-            ),
-            None,
-        ),
-    }
-}
-
-/// Run ONE `ricedraft` action: [`rice_draft_plan`] for the current mode, each
-/// step through [`run_rice_step`], stopping at the first that fails. `Ok` is
-/// the last step's own CLI `message`; `Err((message, partial))` is the failing
-/// step's (or the planner's refusal, before any step ran), with `partial` true
-/// when an earlier step had already succeeded — the mode may be unlocked, or a
-/// draft saved, and nothing here rolls it back: the toast says so, and the
-/// click that follows is one gesture away.
-///
-/// `new` is the one action whose second step depends on the first's answer:
-/// the CLI mints the name (`rice draft save` with none), and the entering
-/// step takes that step's `data.name`. UNBOUNDED like every mutation here: one
-/// per human gesture, and killing a half-applied one to tidy up is worse than
-/// waiting.
-fn dispatch_rice_draft(action: &RiceDraftAction) -> Result<String, (String, bool)> {
-    let mut plan = rice_draft_plan(load_mode_marker().mode, action).map_err(|why| (why.to_string(), false))?;
-    let mut said = String::new();
-    let mut ran = 0;
-    while ran < plan.len() {
-        let (ok, message, data) = run_rice_step(&plan[ran]);
-        if !ok {
-            return Err((message, ran > 0));
-        }
-        if *action == RiceDraftAction::New && plan[ran] == ["rice", "draft", "save"] {
-            let Some(name) = data.as_ref().and_then(|d| d.get("name")).and_then(Value::as_str) else {
-                return Err(("`rice draft save` answered with no draft name".to_string(), true));
-            };
-            plan.push(vec!["rice".to_string(), "mode".to_string(), "draft".to_string(), name.to_string()]);
-        }
-        said = message;
-        ran += 1;
-    }
-    Ok(said)
-}
-
-/// Run ONE `ricedeclare`: `strillix rice declare <name> --host --json`, waited
-/// for like every mutation here (one per human gesture), and read into the
-/// reply [`rice_declare_reply`] shapes.
-fn dispatch_rice_declare(name: &str) -> Value {
-    let argv: Vec<String> = ["rice", "declare", name, "--host"].iter().map(|w| w.to_string()).collect();
-    let (ok, message, data) = run_rice_step(&argv);
-    rice_declare_reply(ok, message, data)
-}
-
-/// The rice-name shape (`strillix_rice::compose::valid_rice_name`, restated
-/// because conduct does not depend on the rice crate): a lowercase letter or
-/// digit, then lowercase letters, digits and hyphens.
-fn rice_name(s: &str) -> bool {
-    let mut chars = s.chars();
-    matches!(chars.next(), Some(c) if c.is_ascii_lowercase() || c.is_ascii_digit())
-        && chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
-}
-
-/// Pure: the audit event and outcome a `ricedeclare` answer is logged as, in
-/// [`audit_bridge_action`]'s `<noun> action <action>: <outcome>` vocabulary
-/// with the rice as the action: `ok changed` / `ok unchanged` (the host
-/// already declared it) or `failed`.
-fn rice_declare_audit(answer: &Value) -> (&'static str, &'static str) {
-    if answer.get("ok").and_then(Value::as_bool) != Some(true) {
-        return ("ricedeclare-failed", "failed");
-    }
-    match answer.get("changed").and_then(Value::as_bool) {
-        Some(false) => ("ricedeclare", "ok unchanged"),
-        _ => ("ricedeclare", "ok changed"),
-    }
-}
-
-/// Pure: the one line a `ricedeclare` answers with. Success carries the CLI's
-/// own message and `name`, `host`, `changed`, `stagedDiffers` from its data; a
-/// refusal carries `reason` (the CLI's, else `cli-failed`) and a `message` that
-/// is the refusal's what and why, so the balloon can say both.
-fn rice_declare_reply(ok: bool, message: String, data: Option<Value>) -> Value {
-    let data = data.unwrap_or(Value::Null);
-    let field = |key: &str| data.get(key).cloned().unwrap_or(Value::Null);
-    if ok {
-        return json!({
-            "ok": true,
-            "message": message,
-            "name": field("name"),
-            "host": field("host"),
-            "changed": field("changed"),
-            "stagedDiffers": field("stagedDiffers"),
-        });
-    }
-    let message = match data.pointer("/refusal/why").and_then(Value::as_str) {
-        Some(why) if !why.is_empty() => format!("{message}: {why}"),
-        _ => message,
-    };
-    let reason = data.get("reason").and_then(Value::as_str).unwrap_or("cli-failed");
-    json!({ "ok": false, "reason": reason, "message": message })
-}
-
-/// Pure decision: which rice's drafts the menu lists, from the marker. The
-/// menu's `enter` and `new` from `Declarative` unlock through a bare `rice
-/// mode stage`, which lands on the remembered `stagingRice` — so that is the
-/// rice a declarative listing must name, ahead of `rice` (the declared one the
-/// lock overwrote). Its `save` and `drop` are refused there
-/// ([`rice_draft_plan`]), so no action ever writes under, or deletes from, a
-/// rice this listing does not name. Every other
-/// mode is already working on `rice`; `stagingRice` is only the fallback for a
-/// marker that lacks it.
-fn drafts_rice(m: &ModeMarker) -> Option<String> {
-    match m.mode {
-        RiceMode::Declarative => m.staging_rice.clone().or_else(|| m.rice.clone()),
-        RiceMode::Staging | RiceMode::Draft => m.rice.clone().or_else(|| m.staging_rice.clone()),
-    }
-}
-
-/// The ONE line a `ricemenu` refusal answers with: the machine `reason`
-/// (`cli-failed` — the CLI answered and refused; `no-answer` — nothing
-/// readable came back) and a `message` that is the CLI's own where it has one.
-fn rice_menu_refusal(reason: &str, message: &str) -> Value {
-    json!({ "ok": false, "reason": reason, "message": message })
-}
-
-/// Run ONE bounded `strillix <argv> --json` and return its envelope's `data`, or
-/// the refusal the menu answers with. `argv` carries no `--json`.
-fn run_rice_json(argv: &[&str], timeout: std::time::Duration) -> Result<Value, Value> {
-    let mut args: Vec<String> = argv.iter().map(|w| w.to_string()).collect();
-    args.push("--json".to_string());
-    let label = argv.iter().take(3).copied().collect::<Vec<_>>().join(" ");
-    let (stdout, stderr) = match run_bin_bounded(&daemon::bin::rice_bin(), &args, timeout) {
-        Ok((_exited_ok, stdout, stderr)) => (stdout, stderr),
-        Err(message) => return Err(rice_menu_refusal("no-answer", &message)),
-    };
-    let Some((ok, message, data)) = outcome_envelope(&stdout).or_else(|| outcome_envelope(&stderr)) else {
-        return Err(rice_menu_refusal("no-answer", &format!("`strillix {label}` printed no parseable answer")));
-    };
-    if !ok {
-        return Err(rice_menu_refusal("cli-failed", &message));
-    }
-    data.ok_or_else(|| rice_menu_refusal("no-answer", &format!("`strillix {label}` answered with no data")))
-}
-
-/// Dispatch ONE read-only menu query: `strillix rice list --json` under
-/// [`RICE_MENU_TIMEOUT`], its `data` (`mode`, `rice`, `draft`, `stagingRice`,
-/// `declared`, `rices`) passed through verbatim with this machine's `host`
-/// name beside it (the name the Declare row's alert speaks) and `hostConfig`,
-/// the file `strillix rice declare --host` would rewrite
-/// ([`aoide_storage::fs::host_config`], null when none resolves), then — when
-/// [`drafts_rice`] names a rice for the marker — `strillix rice draft list <rice>
-/// --json` with the budget the first child left, projected to `draftsRice`
-/// and `drafts: [{name, savedAt, current}]`. No rice means `drafts: []` and
-/// no second child; a failed list starts none either. A failed, unreadable
-/// or out-of-budget child is a refusal ([`rice_menu_refusal`]), never an empty
-/// answer — the menu must tell "nothing there" from "nobody answered".
-fn dispatch_rice_menu() -> Value {
-    let deadline = std::time::Instant::now() + RICE_MENU_TIMEOUT;
-    let mut answer = match run_rice_json(&["rice", "list"], RICE_MENU_TIMEOUT) {
-        Ok(Value::Object(map)) => map,
-        Ok(_) => return rice_menu_refusal("no-answer", "`strillix rice list` answered with no object"),
-        Err(refusal) => return refusal,
-    };
-    let marker = load_mode_marker();
-    let rice = drafts_rice(&marker);
-    let mut drafts: Vec<Value> = Vec::new();
-    if let Some(rice) = &rice {
-        let left = deadline.saturating_duration_since(std::time::Instant::now());
-        if left.is_zero() {
-            return rice_menu_refusal("no-answer", "the menu's time budget ran out before the drafts were listed");
-        }
-        let data = match run_rice_json(&["rice", "draft", "list", rice.as_str()], left) {
-            Ok(data) => data,
-            Err(refusal) => return refusal,
-        };
-        let Some(listed) = data.get("drafts").and_then(Value::as_array) else {
-            return rice_menu_refusal("no-answer", "`strillix rice draft list` answered with no `drafts`");
-        };
-        drafts = listed
-            .iter()
-            .map(|d| {
-                let field = |key: &str| d.get(key).cloned().unwrap_or(Value::Null);
-                json!({ "name": field("name"), "savedAt": field("savedAt"), "current": field("current") })
-            })
-            .collect();
-    }
-    answer.insert("ok".to_string(), Value::Bool(true));
-    answer.insert("host".to_string(), json!(aoide_storage::display::os_hostname()));
-    answer.insert("hostConfig".to_string(), json!(aoide_storage::fs::host_config()));
-    answer.insert("draftsRice".to_string(), json!(rice));
-    answer.insert("drafts".to_string(), Value::Array(drafts));
-    Value::Object(answer)
-}
-
 /// Pure decision: did one finished `aoide usage --json` actually refresh the
 /// state file? Judged on the CLI's own JSON envelope `status`, NOT the exit
 /// code alone — the same "success is the real output, not the exit status"
@@ -982,7 +271,7 @@ fn dispatch_rice_menu() -> Value {
 /// gadget is built to render — so the refresh SUCCEEDED. Only a failed write,
 /// a non-zero exit, or unparseable output is an `Err`. Returns the CLI's own
 /// `message` on success so the audit line reuses that exact wording rather than
-/// inventing new copy (same discipline as [`dispatch_rice_mode`]).
+/// inventing new copy.
 fn classify_usage_refresh(exited_ok: bool, stdout: &str, stderr: &str) -> Result<String, String> {
     if !exited_ok {
         // `--json` still prints the structured envelope on failure; prefer a
@@ -1028,7 +317,7 @@ fn classify_usage_refresh(exited_ok: bool, stdout: &str, stderr: &str) -> Result
 /// up to 15 s for no reason (§3b's thread-per-connection accept loop keeps
 /// that from starving anyone else, but there is still no reason to hold it).
 /// So this SPAWNS and returns immediately — the same no-block posture
-/// [`dispatch_power`] takes — and the thread collects the child and audits the
+/// strillix's `power` spawn takes — and the thread collects the child and audits the
 /// result so it neither lingers nor blocks. The gadget updates itself off the
 /// resulting `state/usage.json` write through its own FileView watch regardless
 /// of what this logs; the audit line exists for the operator, not to push data.
@@ -1170,7 +459,7 @@ fn dispatch_recheck_sessions() {
 /// A wire value that becomes a bare argv token: a SESSION ID. Stricter than
 /// [`safe_action_value`] below — a session id is a bookkeeping key with no
 /// legitimate use for whitespace, so any is refused outright.
-fn safe_session_id(s: &str) -> bool {
+pub fn safe_session_id(s: &str) -> bool {
     !s.is_empty()
         && !s.starts_with('-')
         && s.chars().all(|c| !c.is_whitespace() && !c.is_control())
@@ -1311,7 +600,7 @@ fn run_core_bounded(
 /// A partial read is DISCARDED in every one of those cases, never parsed as if
 /// it were whole. No shell is involved anywhere: `argv` is passed to
 /// `Command::args` whole.
-fn run_bin_bounded(
+pub fn run_bin_bounded(
     bin: &str,
     argv: &[String],
     timeout: std::time::Duration,
@@ -1422,20 +711,63 @@ fn run_bin_bounded(
     ))
 }
 
-/// Does this raw wire line NAMED the trace verb (whatever else was wrong with
-/// it)? The one question `handle_conn`'s refusal path asks of an unparseable
+/// The `cmd` word a wire line names, when it parses as one JSON object. Total:
+/// malformed JSON names nothing. A verb whose caller is parked on a reply reads
+/// it to recognise its own line after `parse_command` has dropped that line.
+pub fn wire_cmd(line: &str) -> Option<String> {
+    serde_json::from_str::<Value>(line.trim())
+        .ok()?
+        .get("cmd")?
+        .as_str()
+        .map(str::to_string)
+}
+
+/// Does this raw wire line name `cmd`? `drop_unparsed` asks it of an unparseable
 /// line: a `sessiontrace` that failed its own gate must be answered, and every
 /// other unknown line keeps its plain drop-and-audit.
-/// One raw line's `cmd` word, whatever else is wrong with it — how a verb
-/// whose caller is PARKED on a reply recognises itself after `parse_command`
-/// has already dropped the line (`sessiontrace`, `workspaceaction`). Total:
-/// malformed JSON names nothing.
 fn wire_names(line: &str, cmd: &str) -> bool {
-    serde_json::from_str::<Value>(line.trim())
-        .ok()
-        .and_then(|v| v.get("cmd").and_then(Value::as_str).map(str::to_string))
-        .as_deref()
-        == Some(cmd)
+    wire_cmd(line).as_deref() == Some(cmd)
+}
+
+/// What a line no verb served leaves behind: the `unparseable` audit (a byte count,
+/// never the payload), then, for a `sessiontrace` line that names itself and fails its
+/// own gate, the refusal its parked caller is owed. A registered verb that claims a
+/// line it cannot parse calls this too, so every drop is audited alike.
+pub fn drop_unparsed(line: &str, reply: &mut Option<UnixStream>) -> Flow {
+    let _ = daemon::audit(
+        &daemon::default_audit_log(),
+        daemon::Door::Daemon,
+        daemon::EventClass::Audit,
+        "shellbridge",
+        "unparseable",
+        &format!("dropped one unparseable or unknown command line ({} bytes)", line.len()),
+    );
+    if wire_names(line, "sessiontrace") {
+        if let Some(mut reply) = reply.take() {
+            let answer = trace_refusal(
+                "",
+                "",
+                0,
+                "bad-request",
+                "a sessiontrace line takes a non-blank sessionId, a positive integer \
+                 `lines` (clamped to 40 from above), and `clip` line|detail",
+            );
+            let _ = daemon::audit(
+                &daemon::default_audit_log(),
+                daemon::Door::Daemon,
+                daemon::EventClass::Audit,
+                "shellbridge",
+                "sessiontrace-refused",
+                "trace query refused: bad-request",
+            );
+            std::thread::spawn(move || {
+                use std::io::Write;
+                let _ = writeln!(reply, "{answer}");
+            });
+            return Flow::Answered;
+        }
+    }
+    Flow::Next
 }
 
 /// The ONE JSON line a `sessiontrace` refusal answers with: the CLI's own
@@ -1539,7 +871,7 @@ fn dispatch_session_trace(session_id: &str, lines: usize, clip: &str) -> Value {
 /// passed to `Command::arg` whole, never through a shell — so only
 /// emptiness, a leading `-` (flag-shaped), and control characters are
 /// refused. Session ids keep the stricter [`safe_session_id`] above.
-fn safe_action_value(s: &str) -> bool {
+pub fn safe_action_value(s: &str) -> bool {
     !s.is_empty() && !s.starts_with('-') && !s.chars().any(char::is_control)
 }
 
@@ -1870,7 +1202,7 @@ fn project_action_args(name: &str, action: &str, fields: &Value) -> Option<Vec<V
 /// when the key is absent — carried through verbatim by
 /// [`session_action_reply`] when a step's CLI outcome has one (a `kill`
 /// reply's resolved target/pid, say).
-fn outcome_envelope(stream: &str) -> Option<(bool, String, Option<Value>)> {
+pub fn outcome_envelope(stream: &str) -> Option<(bool, String, Option<Value>)> {
     let v: Value = serde_json::from_str(stream.trim()).ok()?;
     let ok = v.get("status").and_then(Value::as_str)? == "ok";
     let message = v.get("message").and_then(Value::as_str).unwrap_or("").trim().to_string();
@@ -1881,7 +1213,7 @@ fn outcome_envelope(stream: &str) -> Option<(bool, String, Option<Value>)> {
 /// One step's CLI outcome as `(ok, message, data)` — pure and total, the ONE
 /// authority for reading a `--json` envelope into a reply, shared by every
 /// acknowledged bridge action ([`session_action_reply`],
-/// [`workspace_reply`]). Mirrors [`classify_recheck`]'s own rule: success is
+/// strillix's `workspaceaction` reply). Mirrors [`classify_recheck`]'s own rule: success is
 /// the real output, not the exit status alone.
 ///
 /// `--json` puts its envelope on a DIFFERENT stream depending on where the
@@ -1891,7 +1223,7 @@ fn outcome_envelope(stream: &str) -> Option<(bool, String, Option<Value>)> {
 /// would hand QML a raw JSON blob as its "message". `noun` is the word a
 /// generated message uses when the envelope carries none of its own
 /// (`"session"`/`"project"`/`"workspace"`); `action` the wire action name.
-fn outcome_triple(
+pub fn outcome_triple(
     noun: &str,
     action: &str,
     exited_ok: bool,
@@ -1949,36 +1281,6 @@ fn session_action_reply(
     reply
 }
 
-/// The ONE reply line for a `workspaceaction` —
-/// `{ok, message, action, workspace, project?, data?}`. Same read as every
-/// other acknowledged action ([`outcome_triple`], the CLI's own `message`
-/// and `data` carried verbatim), keyed by the RESOLVED workspace id, so a
-/// caller that omitted the workspace learns which one it actually touched.
-/// `project` rides only on `set` — the one action that has one.
-fn workspace_reply(
-    binding: &WorkspaceBinding,
-    ws: i64,
-    exited_ok: bool,
-    stdout: &str,
-    stderr: &str,
-) -> Value {
-    let action = binding.as_str();
-    let (ok, message, data) = outcome_triple("workspace", action, exited_ok, stdout, stderr);
-    let mut reply = json!({
-        "ok": ok,
-        "message": message,
-        "action": action,
-        "workspace": ws,
-    });
-    if let WorkspaceBinding::Set { project, .. } = binding {
-        reply["project"] = json!(project);
-    }
-    if let Some(data) = data {
-        reply["data"] = data;
-    }
-    reply
-}
-
 /// One step, spawned: [`run_core_step`] the argv and shape the reply for
 /// whichever subject owns the action.
 fn run_session_step(subject: ActionSubject, action: &str, argv: &[String]) -> Value {
@@ -2011,7 +1313,7 @@ fn run_session_step(subject: ActionSubject, action: &str, argv: &[String]) -> Va
 /// up a slow one is worse than waiting. This call is NOT inside
 /// `with_stage_lock` — see `protocol::bin`'s module doc for why that would
 /// matter if it ever were.
-fn run_core_step(argv: &[String]) -> Result<(bool, String, String), String> {
+pub fn run_core_step(argv: &[String]) -> Result<(bool, String, String), String> {
     match std::process::Command::new(daemon::bin::core_bin())
         .args(argv)
         .arg("--json")
@@ -2043,7 +1345,7 @@ fn run_core_step(argv: &[String]) -> Result<(bool, String, String), String> {
 /// (`"session"`/`"project"`/`"workspace"`) is the only thing that varies
 /// from the original `"session action …"` wording, so a session subject's
 /// message is byte-identical to before the `projectaction` split.
-fn audit_bridge_action(noun: &str, action: &str, event: &str, outcome: &str) {
+pub fn audit_bridge_action(noun: &str, action: &str, event: &str, outcome: &str) {
     let _ = daemon::audit(
         &daemon::default_audit_log(),
         daemon::Door::Daemon,
@@ -2131,66 +1433,12 @@ fn dispatch_session_action(subject: ActionSubject, action: &str, fields: &Value)
     last
 }
 
-/// Run ONE `workspaceaction` (W-P5): resolve an omitted workspace, plan the
-/// CLI argv and exec it. The one compositor-shaped half is that resolution,
-/// and it runs in THIS process — the bridge is the process that owns the
-/// compositor adapter (`graph/window.rs`) and already spawns `hyprctl` for a
-/// focus jump, and it resolves exactly what the CLI's own CALLER resolves when
-/// a `<workspace>` is omitted, so the child always receives an integer. Why
-/// here and not in the child: `aoide workspace clear` takes a workspace id, and
-/// no wire caller can be expected to know the focused one. Nothing else is
-/// resolved, folded or re-parsed — the CLI's binding, its refusals
-/// (`unknown-project`, and `--new` on a name that is taken) and its own
-/// message ARE the answer.
-///
-/// A host with no adapter is ANSWERED rather than dropped: `reason:
-/// "no-compositor"` and the same sentence the CLI's own taught refusal
-/// carries ([`NO_COMPOSITOR`], one authority for the text). A malformed LINE
-/// is still dropped with no reply, like every other whitelist refusal — but a
-/// well-formed click whose workspace merely cannot be resolved is parked on a
-/// reply and gets one.
-fn dispatch_workspace_action(workspace: Option<i64>, binding: &WorkspaceBinding) -> Value {
-    let action = binding.as_str();
-    let Some(ws) = workspace.or_else(focused_workspace) else {
-        audit_bridge_action("workspace", action, "workspaceaction-failed", "failed");
-        return json!({
-            "ok": false,
-            "action": action,
-            "reason": "no-compositor",
-            "message": NO_COMPOSITOR,
-        });
-    };
-    let argv = binding.plan(ws);
-    match run_core_step(&argv) {
-        Ok((exited_ok, stdout, stderr)) => {
-            let reply = workspace_reply(binding, ws, exited_ok, &stdout, &stderr);
-            let ok = reply.get("ok").and_then(Value::as_bool).unwrap_or(false);
-            audit_bridge_action(
-                "workspace",
-                action,
-                if ok { "workspaceaction" } else { "workspaceaction-failed" },
-                if ok { "ok" } else { "failed" },
-            );
-            reply
-        }
-        Err(message) => {
-            audit_bridge_action("workspace", action, "workspaceaction-failed", "failed");
-            json!({
-                "ok": false,
-                "message": message,
-                "action": action,
-                "workspace": ws,
-            })
-        }
-    }
-}
-
-/// Run shellbridge: seed the `sessions.json`/`hooks.json` stage files (v0
-/// shapes) atomically, then bind the unix socket and serve commands forever.
-/// Only a fatal bind failure returns (with an error document dispatch reports);
-/// on success this never returns — the systemd unit is `Type=simple` and stays
-/// up on the blocking accept loop.
-pub fn run() -> serde_json::Value {
+/// Run shellbridge: seed the `sessions.json`/`hooks.json` stage files (v0 shapes)
+/// atomically, then bind the unix socket and serve commands forever. `verbs` is the
+/// binary's registered table, handed to [`serve`]. Only a fatal bind failure returns
+/// (with an error document dispatch reports); on success this never returns: the
+/// systemd unit is `Type=simple` and stays up on the blocking accept loop.
+pub fn run(verbs: &'static [Verb]) -> serde_json::Value {
     let sock = socket_path();
     let stage = conducting_stage_dir();
 
@@ -2273,7 +1521,7 @@ pub fn run() -> serde_json::Value {
     std::thread::spawn(crate::graph::run_hypr_window_listener);
 
     // Serve forever. `serve` never returns and never panics on client input.
-    serve(&listener);
+    serve(&listener, verbs);
 
     // Only reached if `incoming()` ends (listener closed) — treat as a clean
     // stop so systemd's `Restart=on-failure` can bring us back.
@@ -2297,7 +1545,7 @@ pub fn run() -> serde_json::Value {
 /// read-modify-write is wrapped in `with_stage_lock` to close it. Never call
 /// this from inside a CLI re-exec path (`dispatch_session_action`,
 /// `dispatch_recheck_sessions`, `dispatch_usage_refresh`,
-/// `dispatch_rice_mode`) — holding the stage lock across a blocking
+/// strillix's `ricemode` change) — holding the stage lock across a blocking
 /// child-process wait is a deadlock waiting to happen; none of those paths
 /// touch the notifications ledger today, and that must stay true. A missing or
 /// corrupt file is not an error: it reads as an empty ledger and is
@@ -2449,7 +1697,9 @@ fn cross_uid_gate(peer: Option<crate::graph::identity::PeerCred>) -> Option<Stri
     }
 }
 
-fn serve(listener: &UnixListener) {
+/// Accept connections forever, one thread per connection, behind the cross-uid
+/// gate. `verbs` is the binary's registered table (empty for core alone).
+pub fn serve(listener: &UnixListener, verbs: &'static [Verb]) {
     for conn in listener.incoming() {
         match conn {
             Ok(stream) => {
@@ -2465,23 +1715,22 @@ fn serve(listener: &UnixListener) {
                     );
                     continue; // Dropped, unconditionally — never reaches `handle_conn`.
                 }
-                std::thread::spawn(move || handle_conn(stream));
+                std::thread::spawn(move || handle_conn(stream, verbs));
             }
             Err(e) => eprintln!("[aoide/shellbridge] accept error (continuing): {e}"),
         }
     }
 }
 
-/// Handle ONE client connection, on its OWN thread (`serve` spawns one per
-/// accepted connection): read newline-delimited JSON lines and act on each.
-/// Containment is now per-connection, not per-process — a panic here dies
-/// with its own thread instead of unwinding into `serve`, and a slow or idle
-/// connection can no longer starve any other. A read error (dropped
-/// connection) ends only THIS connection, an unparseable/unknown line is
-/// audited and skipped, and a focus dispatch failure is logged. No read
-/// timeout is set on the accepted stream: a client may idle between
-/// commands, and idleness was never the fault here — serial accept was.
-fn handle_conn(stream: UnixStream) {
+/// Handle ONE client connection, on its OWN thread (`serve` spawns one per accepted
+/// connection): read newline-delimited JSON lines and act on each. A core verb is
+/// acted on here; any other line is offered to the registered table, and a line no
+/// table claims is audited and dropped. Containment is per-connection: a panic dies
+/// with its own thread, and a slow or idle connection never starves another. A read
+/// error (a dropped connection) ends only THIS connection. No read timeout is set on
+/// the accepted stream: a client may idle between commands, and idleness was never
+/// the fault; serial accept was.
+fn handle_conn(stream: UnixStream, verbs: &'static [Verb]) {
     let mut reply = stream.try_clone().ok();
     let reader = BufReader::new(stream);
     for line in reader.lines() {
@@ -2517,6 +1766,7 @@ fn handle_conn(stream: UnixStream) {
                 });
                 return;
             }
+
             Some(BridgeCommand::ProjectAction { name, action, fields }) => {
                 // Same one-shot-connection discipline as `SessionAction`
                 // above: no reply channel means the action does not run.
@@ -2538,217 +1788,19 @@ fn handle_conn(stream: UnixStream) {
                 });
                 return;
             }
-            Some(BridgeCommand::WorkspaceAction { workspace, binding }) => {
-                // Same one-shot-connection discipline as the two actions
-                // above: no reply channel means the action does not run.
-                let action = binding.as_str();
-                let Some(mut reply) = reply.take() else {
-                    let _ = daemon::audit(
-                        &daemon::default_audit_log(),
-                        daemon::Door::Daemon,
-                        daemon::EventClass::Audit,
-                        "shellbridge",
-                        "workspaceaction-noreply",
-                        &format!("workspace action {action}: no reply channel; not dispatched"),
-                    );
-                    return;
-                };
-                std::thread::spawn(move || {
-                    use std::io::Write;
-                    let _ = writeln!(reply, "{}", dispatch_workspace_action(workspace, &binding));
-                });
-                return;
-            }
-            Some(BridgeCommand::Focus { address }) => match crate::graph::focus_window(&address) {
-                Ok(()) => {
-                    let _ = daemon::audit(
-                        &daemon::default_audit_log(),
-                        daemon::Door::Daemon,
-                        daemon::EventClass::Audit,
-                        "shellbridge",
-                        "focus",
-                        &format!("focused window {address}"),
-                    );
-                }
-                Err(e) => {
-                    let _ = daemon::audit(
-                        &daemon::default_audit_log(),
-                        daemon::Door::Daemon,
-                        daemon::EventClass::Audit,
-                        "shellbridge",
-                        "focus-failed",
-                        &format!("{} ({}): {}", address, e.reason, e.message),
-                    );
-                }
-            },
-            Some(BridgeCommand::FocusSession { session_id }) => {
-                match crate::graph::focus_session(&session_id) {
-                    Ok(()) => {
-                        let _ = daemon::audit(
-                            &daemon::default_audit_log(),
-                            daemon::Door::Daemon,
-                            daemon::EventClass::Audit,
-                            "shellbridge",
-                            "focus",
-                            &format!("focused session {session_id}"),
-                        );
-                    }
-                    Err(e) => {
-                        let _ = daemon::audit(
-                            &daemon::default_audit_log(),
-                            daemon::Door::Daemon,
-                            daemon::EventClass::Audit,
-                            "shellbridge",
-                            "focus-failed",
-                            &format!("session {} ({}): {}", session_id, e.reason, e.message),
-                        );
-                    }
-                }
-            }
-            Some(BridgeCommand::Power { action }) => match dispatch_power(action) {
-                Ok(()) => {
-                    let _ = daemon::audit(
-                        &daemon::default_audit_log(),
-                        daemon::Door::Daemon,
-                        daemon::EventClass::Audit,
-                        "shellbridge",
-                        "power",
-                        &format!("spawned power action {}", action.as_str()),
-                    );
-                }
-                Err(e) => {
-                    let _ = daemon::audit(
-                        &daemon::default_audit_log(),
-                        daemon::Door::Daemon,
-                        daemon::EventClass::Audit,
-                        "shellbridge",
-                        "power-failed",
-                        &format!("power action {}: {e}", action.as_str()),
-                    );
-                }
-            },
-            Some(BridgeCommand::Component { slot, verb, arg }) => {
-                let (prog, args) = component_command(&slot, &verb, arg.as_deref());
-                let (event, outcome) = match spawn_detached(prog, &args) {
-                    Ok(()) => ("component", "spawned".to_string()),
-                    Err(e) => ("component-failed", format!("{e}")),
-                };
-                let _ = daemon::audit(
-                    &daemon::default_audit_log(),
-                    daemon::Door::Daemon,
-                    daemon::EventClass::Audit,
-                    "shellbridge",
-                    event,
-                    &format!("{slot} {verb}: {outcome}"),
-                );
-            }
-            // Fire-and-forget: the outcome is a toast, never a reply. The audit
-            // line names the action and its outcome and nothing else — never a
-            // rice, which the toast alone carries.
-            Some(BridgeCommand::RiceMode { action }) => {
-                let (event, outcome) = match dispatch_rice_mode(&action) {
-                    Ok(message) => {
-                        notify(&message);
-                        ("ricemode", "ok")
-                    }
-                    Err(message) => {
-                        notify(&message);
-                        ("ricemode-failed", "failed")
-                    }
-                };
-                audit_bridge_action("ricemode", action.as_str(), event, outcome);
-            }
-            // Fire-and-forget like `ricemode`: the outcome is a toast, never a
-            // reply, and the steps run inline for the same reason (a mode
-            // change never takes this process down). The audit line names the
-            // action and its outcome and nothing else — never a draft or a
-            // rice, which the toast alone carries.
-            Some(BridgeCommand::RiceDraft { action }) => {
-                let (event, outcome) = match dispatch_rice_draft(&action) {
-                    Ok(message) => {
-                        notify(&message);
-                        ("ricedraft", "ok")
-                    }
-                    Err((message, true)) => {
-                        notify(&format!("partial: {message}"));
-                        ("ricedraft-partial", "partial")
-                    }
-                    Err((message, false)) => {
-                        notify(&message);
-                        ("ricedraft-failed", "failed")
-                    }
-                };
-                audit_bridge_action("ricedraft", action.as_str(), event, outcome);
-            }
-            // The Declare row: answered on this connection and run on its OWN
-            // thread like the menu's read, because the surface paints the
-            // answer. A gesture, so every outcome is audited, naming the rice
-            // (a validated rice name) and whether the host file changed.
-            Some(BridgeCommand::RiceDeclare { name }) => {
-                let Some(mut reply) = reply.take() else {
-                    let _ = daemon::audit(
-                        &daemon::default_audit_log(),
-                        daemon::Door::Daemon,
-                        daemon::EventClass::Audit,
-                        "shellbridge",
-                        "ricedeclare-noreply",
-                        "ricedeclare: no reply channel; not dispatched",
-                    );
-                    return;
-                };
-                std::thread::spawn(move || {
-                    use std::io::Write;
-                    let answer = dispatch_rice_declare(&name);
-                    let (event, outcome) = rice_declare_audit(&answer);
-                    audit_bridge_action("ricedeclare", &name, event, outcome);
-                    let _ = writeln!(reply, "{answer}");
-                });
-                return;
-            }
-            // The menu's read: answered on this connection and run on its OWN
-            // thread, like `sessiontrace`, because it re-execs the CLI under a
-            // bound. No reply channel means the query does not run at all.
-            // Only a REFUSAL is audited — a read is not a gesture.
-            Some(BridgeCommand::RiceMenu) => {
-                let Some(mut reply) = reply.take() else {
-                    let _ = daemon::audit(
-                        &daemon::default_audit_log(),
-                        daemon::Door::Daemon,
-                        daemon::EventClass::Audit,
-                        "shellbridge",
-                        "ricemenu-noreply",
-                        "ricemenu: no reply channel; not dispatched",
-                    );
-                    return;
-                };
-                std::thread::spawn(move || {
-                    use std::io::Write;
-                    let answer = dispatch_rice_menu();
-                    if answer.get("ok").and_then(Value::as_bool) != Some(true) {
-                        let reason = answer.get("reason").and_then(Value::as_str).unwrap_or("failed");
-                        let _ = daemon::audit(
-                            &daemon::default_audit_log(),
-                            daemon::Door::Daemon,
-                            daemon::EventClass::Audit,
-                            "shellbridge",
-                            "ricemenu-refused",
-                            &format!("ricemenu refused: {reason}"),
-                        );
-                    }
-                    let _ = writeln!(reply, "{answer}");
-                });
-                return;
-            }
+
             // Fire-and-forget: dispatch_usage_refresh audits its OWN outcome from
             // a detached thread (the re-exec's live fetch is ≤15s, too long to
             // block the accept loop inline — see the function). Nothing to match
             // on here, unlike the arms above.
             Some(BridgeCommand::RefreshUsage) => dispatch_usage_refresh(),
+
             // Fire-and-forget, same posture: dispatch_recheck_sessions re-execs
             // `aoide session reap` on a detached thread and audits its own outcome
             // (the sweep shells out to hyprctl, which must never block the accept
             // loop). The gadgets refresh off the resulting stage writes.
             Some(BridgeCommand::RecheckSessions) => dispatch_recheck_sessions(),
+
             // The ledger writes are inline: they are a read-modify-write of one
             // small local file. Concurrent pushes from different connections'
             // threads (§3b) are serialised by `edit_ledger`'s own
@@ -2756,12 +1808,15 @@ fn handle_conn(stream: UnixStream) {
             Some(BridgeCommand::NotificationsPush { notification }) => {
                 dispatch_notifications_push(*notification)
             }
+
             Some(BridgeCommand::NotificationsDismiss { id }) => dispatch_notifications_dismiss(id),
+
             // Detached, like the other two fire-and-forget arms: this one walks
             // the stage files and writes to a session's control socket.
             Some(BridgeCommand::NotificationsVerdict { id, verdict }) => {
                 dispatch_notifications_verdict(id, verdict)
             }
+
             // The read-only trace query: answered on this connection like
             // `sessionaction` (the caller reads one line back), and run on its
             // OWN thread because it re-execs the CLI — a bounded child
@@ -2805,86 +1860,26 @@ fn handle_conn(stream: UnixStream) {
                 });
                 return;
             }
+
             None => {
-                let _ = daemon::audit(
-                    &daemon::default_audit_log(),
-                    daemon::Door::Daemon,
-                    daemon::EventClass::Audit,
-                    "shellbridge",
-                    "unparseable",
-                    &format!("dropped one unparseable or unknown command line ({} bytes)", line.len()),
-                );
-                // The verbs whose caller is PARKED waiting for an answer —
-                // `sessiontrace`, `workspaceaction` — never leave it there on
-                // a malformed line: a line that NAMES one of them and fails
-                // its own gate is answered with a refusal instead of silence
-                // (the widgets' own clients normalise what they send, so this
-                // is the door's honesty, not its fast path). ONE rule for
-                // every parked caller; a fire-and-forget verb keeps the plain
-                // drop above.
-                if wire_names(&line, "sessiontrace") {
-                    if let Some(mut reply) = reply.take() {
-                        let answer = trace_refusal(
-                            "",
-                            "",
-                            0,
-                            "bad-request",
-                            "a sessiontrace line takes a non-blank sessionId, a positive integer \
-                             `lines` (clamped to 40 from above), and `clip` line|detail",
-                        );
-                        let _ = daemon::audit(
-                            &daemon::default_audit_log(),
-                            daemon::Door::Daemon,
-                            daemon::EventClass::Audit,
-                            "shellbridge",
-                            "sessiontrace-refused",
-                            "trace query refused: bad-request",
-                        );
-                        std::thread::spawn(move || {
-                            use std::io::Write;
-                            let _ = writeln!(reply, "{answer}");
-                        });
-                        return;
-                    }
-                }
-                if wire_names(&line, "workspaceaction") {
-                    if let Some(mut reply) = reply.take() {
-                        // Nothing parsed, so the answer names nothing back:
-                        // no `workspace` (none was resolved), no `project`,
-                        // and no `action` word to echo — the same reason
-                        // `trace_refusal` echoes only what the CLI resolved.
-                        let answer = json!({
-                            "ok": false,
-                            "reason": "bad-request",
-                            "message": "a workspaceaction line takes action set|clear, an \
-                                        integer `workspace` (omitted = the focused one), and \
-                                        for set a project name with an optional bool `new`",
-                        });
-                        let _ = daemon::audit(
-                            &daemon::default_audit_log(),
-                            daemon::Door::Daemon,
-                            daemon::EventClass::Audit,
-                            "shellbridge",
-                            "workspaceaction-refused",
-                            "workspace action refused: bad-request",
-                        );
-                        std::thread::spawn(move || {
-                            use std::io::Write;
-                            let _ = writeln!(reply, "{answer}");
-                        });
-                        return;
-                    }
+                let flow = match wire_cmd(&line).and_then(|cmd| verbs.iter().find(|v| v.cmd == cmd)) {
+                    Some(verb) => (verb.serve)(&line, &mut reply),
+                    None => drop_unparsed(&line, &mut reply),
+                };
+                if flow == Flow::Answered {
+                    return;
                 }
             }
         }
     }
 }
 
-// ── Tests (the socket-command wire contract) ──────────────────────────────
+// ── Tests (the socket-command wire contract) ──
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aoide_test_support::sv;
 
     // ── cross_uid_gate (LANE IDENTITY P-ID3, G7) ────────────────────────
 
@@ -2927,44 +1922,6 @@ mod tests {
         let (a, _b) = UnixStream::pair().expect("socketpair");
         let peer = crate::graph::identity::peer_cred(&a);
         assert_eq!(cross_uid_gate(peer), None);
-    }
-
-    #[test]
-    fn parse_command_accepts_a_valid_focuswindow() {
-        assert_eq!(
-            parse_command(r#"{"cmd":"focuswindow","address":"0x55aabb"}"#),
-            Some(BridgeCommand::Focus {
-                address: "0x55aabb".to_string()
-            })
-        );
-        // Trailing newline / surrounding whitespace is tolerated (wire lines
-        // arrive newline-terminated) and the address is trimmed.
-        assert_eq!(
-            parse_command("  {\"cmd\":\"focuswindow\",\"address\":\" 0xABC \"}\n"),
-            Some(BridgeCommand::Focus {
-                address: "0xABC".to_string()
-            })
-        );
-    }
-
-    #[test]
-    fn parse_command_accepts_a_valid_focussession() {
-        assert_eq!(
-            parse_command(r#"{"cmd":"focussession","sessionId":"conduct-1-2"}"#),
-            Some(BridgeCommand::FocusSession {
-                session_id: "conduct-1-2".to_string()
-            })
-        );
-        // Trimmed like focuswindow's address.
-        assert_eq!(
-            parse_command("{\"cmd\":\"focussession\",\"sessionId\":\" abc \"}\n"),
-            Some(BridgeCommand::FocusSession {
-                session_id: "abc".to_string()
-            })
-        );
-        // Empty/absent sessionId → None (never dispatch a blank session jump).
-        assert_eq!(parse_command(r#"{"cmd":"focussession","sessionId":""}"#), None);
-        assert_eq!(parse_command(r#"{"cmd":"focussession"}"#), None);
     }
 
     #[test]
@@ -3038,140 +1995,6 @@ mod tests {
     }
 
     #[test]
-    fn parse_command_accepts_every_valid_power_action() {
-        let cases = [
-            ("lock", PowerAction::Lock),
-            ("logout", PowerAction::Logout),
-            ("suspend", PowerAction::Suspend),
-            ("hibernate", PowerAction::Hibernate),
-            ("reboot", PowerAction::Reboot),
-            ("shutdown", PowerAction::Shutdown),
-        ];
-        for (wire, want) in cases {
-            assert_eq!(
-                parse_command(&format!(r#"{{"cmd":"power","action":"{wire}"}}"#)),
-                Some(BridgeCommand::Power { action: want }),
-                "power action {wire} must parse"
-            );
-        }
-        // Whitespace around the action is trimmed (wire lines arrive
-        // newline-terminated), same tolerance as focuswindow's address.
-        assert_eq!(
-            parse_command("  {\"cmd\":\"power\",\"action\":\" lock \"}\n"),
-            Some(BridgeCommand::Power {
-                action: PowerAction::Lock
-            })
-        );
-    }
-
-    #[test]
-    fn parse_command_accepts_a_component_call_with_and_without_an_arg() {
-        assert_eq!(
-            parse_command(r#"{"cmd":"component","slot":"powermenu","verb":"show","arg":"lock"}"#),
-            Some(BridgeCommand::Component {
-                slot: "powermenu".into(),
-                verb: "show".into(),
-                arg: Some("lock".into()),
-            })
-        );
-        assert_eq!(
-            parse_command(r#"{"cmd":"component","slot":"dock","verb":"openTab"}"#),
-            Some(BridgeCommand::Component { slot: "dock".into(), verb: "openTab".into(), arg: None })
-        );
-        assert_eq!(
-            parse_command(r#"{"cmd":"component","slot":"calendar","verb":"toggle","arg":"DP-1"}"#),
-            Some(BridgeCommand::Component {
-                slot: "calendar".into(),
-                verb: "toggle".into(),
-                arg: Some("DP-1".into()),
-            })
-        );
-    }
-
-    #[test]
-    fn parse_command_rejects_a_component_name_outside_its_charset() {
-        let refused = [
-            r#"{"cmd":"component","slot":"pow;rm -rf ~","verb":"toggle"}"#,
-            r#"{"cmd":"component","slot":"Powermenu","verb":"toggle"}"#,
-            r#"{"cmd":"component","slot":"","verb":"toggle"}"#,
-            r#"{"cmd":"component","slot":"dock","verb":"to ggle"}"#,
-            r#"{"cmd":"component","slot":"dock","verb":"9toggle"}"#,
-            r#"{"cmd":"component","slot":"dock","verb":"toggle","arg":"DP-1 && x"}"#,
-            r#"{"cmd":"component","slot":"dock","verb":"toggle","arg":"--evil"}"#,
-            r#"{"cmd":"component","slot":"dock","verb":"toggle","arg":""}"#,
-            r#"{"cmd":"component","slot":"dock","verb":"toggle","arg":7}"#,
-            r#"{"cmd":"component","verb":"toggle"}"#,
-            r#"{"cmd":"component","slot":"dock"}"#,
-        ];
-        for line in refused {
-            assert_eq!(parse_command(line), None, "must refuse {line}");
-        }
-        let too_long = format!(r#"{{"cmd":"component","slot":"dock","verb":"toggle","arg":"{}"}}"#, "a".repeat(65));
-        assert_eq!(parse_command(&too_long), None, "an arg over 64 characters is refused");
-    }
-
-    #[test]
-    fn a_component_call_is_spelled_as_one_line_through_the_compositor() {
-        assert_eq!(
-            component_command("powermenu", "show", Some("lock")),
-            ("hyprctl", vec!["dispatch".into(), "exec".into(), "strillix component powermenu show lock".into()])
-        );
-        assert_eq!(
-            component_command("dock", "toggle", None),
-            ("hyprctl", vec!["dispatch".into(), "exec".into(), "strillix component dock toggle".into()])
-        );
-    }
-
-    #[test]
-    fn lock_is_started_by_the_compositor_never_as_this_units_child() {
-        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let (prog, args) = PowerAction::Lock.command();
-        assert_eq!((prog, args), ("hyprctl", &["dispatch", "exec", "strillix lock"][..]));
-    }
-
-    #[test]
-    fn parse_command_rejects_bad_power_actions() {
-        // Unknown action → None (a typo must never reach a dispatch).
-        assert_eq!(parse_command(r#"{"cmd":"power","action":"explode"}"#), None);
-        // Case matters — the wire contract is lowercase.
-        assert_eq!(parse_command(r#"{"cmd":"power","action":"Reboot"}"#), None);
-        // Empty / absent / non-string action → None.
-        assert_eq!(parse_command(r#"{"cmd":"power","action":""}"#), None);
-        assert_eq!(parse_command(r#"{"cmd":"power"}"#), None);
-        assert_eq!(parse_command(r#"{"cmd":"power","action":42}"#), None);
-    }
-
-    #[test]
-    fn parse_command_accepts_ricemenu_and_both_ricemode_shapes() {
-        assert_eq!(parse_command(r#"{"cmd":"ricemenu"}"#), Some(BridgeCommand::RiceMenu));
-        assert_eq!(parse_command("  {\"cmd\":\"ricemenu\"}\n"), Some(BridgeCommand::RiceMenu));
-        assert_eq!(
-            parse_command(r#"{"cmd":"ricemode","action":"stage","name":"fugue"}"#),
-            Some(BridgeCommand::RiceMode { action: RiceModeAction::Stage { name: "fugue".to_string() } })
-        );
-        assert_eq!(
-            parse_command(r#"{"cmd":"ricemode","action":"declarative"}"#),
-            Some(BridgeCommand::RiceMode { action: RiceModeAction::Declarative })
-        );
-    }
-
-    #[test]
-    fn parse_command_refuses_every_malformed_ricemode_and_the_retired_verbs() {
-        for line in [
-            r#"{"cmd":"ricemode"}"#,
-            r#"{"cmd":"ricemode","action":"stage"}"#,
-            r#"{"cmd":"ricemode","action":"stage","name":"-x"}"#,
-            r#"{"cmd":"ricemode","action":"stage","name":7}"#,
-            r#"{"cmd":"ricemode","action":"declarative","name":"fugue"}"#,
-            r#"{"cmd":"ricemode","action":"toggle"}"#,
-            r#"{"cmd":"ricemode","action":42}"#,
-            r#"{"cmd":"ricedrafts"}"#,
-        ] {
-            assert_eq!(parse_command(line), None, "{line}");
-        }
-    }
-
-    #[test]
     fn parse_command_accepts_a_valid_refreshusage() {
         assert_eq!(
             parse_command(r#"{"cmd":"refreshusage"}"#),
@@ -3204,7 +2027,7 @@ mod tests {
                 clip: "line".to_string(),
             })
         );
-        // Trimmed like `focussession`'s id, and an explicit clip is carried.
+        // Trimmed like every session id, and an explicit clip is carried.
         assert_eq!(
             parse_command("{\"cmd\":\"sessiontrace\",\"sessionId\":\" Aoide-7d23 \",\"lines\":8,\"clip\":\"detail\"}\n"),
             Some(BridgeCommand::SessionTrace {
@@ -3255,15 +2078,8 @@ mod tests {
             "sessiontrace"
         ));
         assert!(wire_names(r#"{"cmd":"sessiontrace"}"#, "sessiontrace"));
-        assert!(!wire_names(r#"{"cmd":"focussession"}"#, "sessiontrace"));
+        assert!(!wire_names(r#"{"cmd":"rechecksessions"}"#, "sessiontrace"));
         assert!(!wire_names("{ not json", "sessiontrace"));
-        // The same pure question, for the OTHER parked verb — a
-        // `workspaceaction` line names itself whatever else it got wrong.
-        assert!(wire_names(
-            r#"{"cmd":"workspaceaction","action":"clear","project":"aoide"}"#,
-            "workspaceaction"
-        ));
-        assert!(!wire_names(r#"{"cmd":"sessionaction"}"#, "workspaceaction"));
         for line in [
             r#"{"cmd":"sessiontrace"}"#,
             r#"{"cmd":"sessiontrace","sessionId":""}"#,
@@ -3625,553 +2441,7 @@ exit 1
     }
 
     #[test]
-    fn parse_command_accepts_every_ricedraft_shape() {
-        assert_eq!(
-            parse_command(r#"{"cmd":"ricedraft","action":"enter","name":"draft-2"}"#),
-            Some(BridgeCommand::RiceDraft {
-                action: RiceDraftAction::Enter { name: "draft-2".to_string() }
-            })
-        );
-        assert_eq!(
-            parse_command(r#"{"cmd":"ricedraft","action":"new"}"#),
-            Some(BridgeCommand::RiceDraft { action: RiceDraftAction::New })
-        );
-        assert_eq!(
-            parse_command(r#"{"cmd":"ricedraft","action":"save"}"#),
-            Some(BridgeCommand::RiceDraft { action: RiceDraftAction::Save })
-        );
-        assert_eq!(
-            parse_command(r#"{"cmd":"ricedraft","action":"drop","name":"draft-2"}"#),
-            Some(BridgeCommand::RiceDraft {
-                action: RiceDraftAction::Drop { name: "draft-2".to_string() }
-            })
-        );
-    }
-
-    #[test]
-    fn parse_command_refuses_a_ricedraft_it_cannot_name() {
-        for line in [
-            // `enter` needs a name that is one argv token.
-            r#"{"cmd":"ricedraft","action":"enter"}"#,
-            r#"{"cmd":"ricedraft","action":"enter","name":""}"#,
-            r#"{"cmd":"ricedraft","action":"enter","name":"-x"}"#,
-            r#"{"cmd":"ricedraft","action":"enter","name":"a b"}"#,
-            r#"{"cmd":"ricedraft","action":"enter","name":"a\n"}"#,
-            r#"{"cmd":"ricedraft","action":"enter","name":7}"#,
-            r#"{"cmd":"ricedraft","action":"enter","name":null}"#,
-            // `drop` needs one exactly like `enter`.
-            r#"{"cmd":"ricedraft","action":"drop"}"#,
-            r#"{"cmd":"ricedraft","action":"drop","name":""}"#,
-            r#"{"cmd":"ricedraft","action":"drop","name":"-x"}"#,
-            r#"{"cmd":"ricedraft","action":"drop","name":"a b"}"#,
-            r#"{"cmd":"ricedraft","action":"drop","name":"a\n"}"#,
-            r#"{"cmd":"ricedraft","action":"drop","name":7}"#,
-            r#"{"cmd":"ricedraft","action":"drop","name":null}"#,
-            // `new` and `save` take none: a name beside them is a caller that
-            // meant `enter`, and ignoring it would read as success.
-            r#"{"cmd":"ricedraft","action":"new","name":"draft-2"}"#,
-            r#"{"cmd":"ricedraft","action":"save","name":"draft-2"}"#,
-            r#"{"cmd":"ricedraft","action":"save","name":null}"#,
-            // a closed set
-            r#"{"cmd":"ricedraft","action":"delete","name":"draft-2"}"#,
-            r#"{"cmd":"ricedraft","action":"Drop","name":"draft-2"}"#,
-            r#"{"cmd":"ricedraft","action":"Enter","name":"draft-2"}"#,
-            r#"{"cmd":"ricedraft","action":7}"#,
-            r#"{"cmd":"ricedraft","action":null}"#,
-            r#"{"cmd":"ricedraft"}"#,
-        ] {
-            assert_eq!(parse_command(line), None, "{line}");
-        }
-    }
-
-    #[test]
-    fn rice_draft_plan_unlocks_declarative_for_enter_and_new_and_refuses_its_save_and_drop() {
-        let enter = RiceDraftAction::Enter { name: "draft-2".to_string() };
-        let drop = RiceDraftAction::Drop { name: "draft-2".to_string() };
-        let gone = sv(&["rice", "draft", "drop", "draft-2"]);
-        let unlock = sv(&["rice", "mode", "stage"]);
-        let save = sv(&["rice", "draft", "save"]);
-        let go = sv(&["rice", "mode", "draft", "draft-2"]);
-
-        // Declarative: `enter` and `new` unlock FIRST, bare — never a rice.
-        assert_eq!(rice_draft_plan(RiceMode::Declarative, &enter), Ok(vec![unlock.clone(), go.clone()]));
-        assert_eq!(rice_draft_plan(RiceMode::Declarative, &RiceDraftAction::New), Ok(vec![unlock, save.clone()]));
-        // `save` there would nest under the DECLARED rice, which the listing
-        // (the staged one) never shows: a taught refusal, nothing planned.
-        assert_eq!(
-            rice_draft_plan(RiceMode::Declarative, &RiceDraftAction::Save),
-            Err("declarative mode is locked — unlock first, then save the draft")
-        );
-        // `drop` there would delete from the DECLARED rice's drafts: the same
-        // refusal, and no unlock as a side effect of a delete.
-        assert_eq!(
-            rice_draft_plan(RiceMode::Declarative, &drop),
-            Err("declarative mode is locked — unlock first, then delete the draft")
-        );
-        // Staging and Draft are already unlocked: one step. `new` plans the
-        // save alone — the entering step needs the name that step mints.
-        for mode in [RiceMode::Staging, RiceMode::Draft] {
-            assert_eq!(rice_draft_plan(mode, &enter), Ok(vec![go.clone()]), "{mode:?}");
-            assert_eq!(rice_draft_plan(mode, &RiceDraftAction::New), Ok(vec![save.clone()]), "{mode:?}");
-            assert_eq!(rice_draft_plan(mode, &RiceDraftAction::Save), Ok(vec![save.clone()]), "{mode:?}");
-            assert_eq!(rice_draft_plan(mode, &drop), Ok(vec![gone.clone()]), "{mode:?}");
-        }
-    }
-
-    #[test]
-    fn drafts_rice_names_the_rice_the_mode_will_work_on() {
-        let marker = |mode, rice: Option<&str>, staging: Option<&str>| ModeMarker {
-            mode,
-            rice: rice.map(str::to_string),
-            staging_rice: staging.map(str::to_string),
-            ..ModeMarker::default()
-        };
-        // Declarative: the lock overwrote `rice` with the declared one; the
-        // unlock lands on `stagingRice`, so that is what the picker lists.
-        let declarative = marker(RiceMode::Declarative, Some("sonata"), Some("cadenza"));
-        assert_eq!(drafts_rice(&declarative).as_deref(), Some("cadenza"));
-        assert_eq!(drafts_rice(&marker(RiceMode::Declarative, Some("sonata"), None)).as_deref(), Some("sonata"));
-        // Staging and Draft already work on `rice`.
-        for mode in [RiceMode::Staging, RiceMode::Draft] {
-            assert_eq!(drafts_rice(&marker(mode, Some("sonata"), Some("cadenza"))).as_deref(), Some("sonata"));
-            assert_eq!(drafts_rice(&marker(mode, None, Some("cadenza"))).as_deref(), Some("cadenza"));
-            assert_eq!(drafts_rice(&marker(mode, None, None)), None);
-        }
-        assert_eq!(drafts_rice(&marker(RiceMode::Declarative, None, None)), None);
-    }
-
-    /// A `#!/bin/sh` stand-in for `strillix`, a stage dir holding a marker for
-    /// `mode`, and the env that points both at them. It logs every argv it is
-    /// given beside itself, and answers the verbs the menu plans with
-    /// the envelopes the CLI prints: `list` echoes a fixed rices, `draft save` mints `draft-3`, `draft list`
-    /// lists two drafts, anything else succeeds. A `refuse-draft`,
-    /// `refuse-drop`, `refuse-list` or `refuse-rices` file beside it turns that verb into a refusal. NO notify
-    /// is ever reached — the tests drive the sequencer, not `handle_conn`.
-    ///
-    /// GATED on Unix with its reason (its callers are gated with it): a
-    /// `#!/bin/sh` script made executable by a mode, which `CreateProcess`
-    /// launches neither by shebang nor by an extension-less name.
-    #[cfg(unix)]
-    fn stub_rice_bin(tag: &str, marker: &str) -> (aoide_test_support::EnvSaver, PathBuf) {
-        let root = aoide_test_support::unique_tmp(tag);
-        std::fs::create_dir_all(&root).unwrap();
-        let stub = root.join("stub-strillix");
-        std::fs::write(
-            &stub,
-            r#"#!/bin/sh
-here="$(dirname "$0")"
-echo "$*" >> "$here/argv.log"
-case "$2 $3" in
-"list --json")
-  if [ -f "$here/refuse-rices" ]; then
-    printf '{"status":"error","message":"rices unreadable","data":{"reason":"x"}}\n'; exit 1
-  fi
-  printf '{"status":"ok","message":"2 rice(s)","data":{"mode":"declarative","rice":"sonata","draft":null,"stagingRice":"cadenza","declared":"sonata","rices":[{"name":"cadenza","ok":true},{"name":"sonata","ok":true}]}}\n' ;;
-"draft save")
-  printf '{"status":"ok","message":"saved","data":{"name":"draft-3"}}\n' ;;
-"draft drop")
-  if [ -f "$here/refuse-drop" ]; then
-    printf '{"status":"error","message":"cannot drop `%s` — it is the live draft","data":{"reason":"draft-is-live"}}\n' "$4"; exit 1
-  fi
-  printf '{"status":"ok","message":"dropped %s","data":{}}\n' "$4" ;;
-"draft list")
-  if [ -f "$here/refuse-list" ]; then
-    printf '{"status":"error","message":"no rice staged","data":{"reason":"x"}}\n'; exit 1
-  fi
-  printf '{"status":"ok","message":"2 draft(s)","data":{"drafts":[{"rice":"%s","name":"draft-1","savedAt":"2026-01-01T00:00:00Z","current":false},{"rice":"%s","name":"draft-2","savedAt":null,"current":true}],"scope":"%s"}}\n' "$4" "$4" "$4" ;;
-"declare "*)
-  if [ -f "$here/refuse-declare" ]; then
-    printf '{"status":"error","message":"`%s` is not in the rices box builds from","data":{"reason":"not-built-in","refusal":{"kind":"refused","what":"`%s` is not in the rices box builds from","why":"this build carries sonata","fix":{"set":"x"}}}}\n' "$3" "$3"; exit 1
-  fi
-  printf '{"status":"ok","message":"declared `%s`; takes effect on the next rebuild.","data":{"name":"%s","host":"box","hostConfig":"/h/default.nix","previous":"sonata","changed":true,"stagedDiffers":true}}\n' "$3" "$3" ;;
-"mode draft")
-  if [ -f "$here/refuse-draft" ]; then
-    printf '{"status":"error","message":"no rice is currently staged","data":{"reason":"no-resolvable-rice"}}\n'; exit 1
-  fi
-  printf '{"status":"ok","message":"routed %s","data":{}}\n' "$4" ;;
-*)
-  printf '{"status":"ok","message":"staged","data":{}}\n' ;;
-esac
-"#,
-        )
-        .unwrap();
-        std::fs::set_permissions(&stub, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
-        std::fs::write(root.join("mode.json"), marker).unwrap();
-        let env = aoide_test_support::EnvSaver::capture(&["STRILLIX_BIN", "AOIDE_STAGE_DIR", "AOIDE_HOST_CONFIG"]);
-        std::env::set_var("STRILLIX_BIN", &stub);
-        std::env::set_var("AOIDE_STAGE_DIR", &root);
-        (env, root)
-    }
-
-    #[cfg(unix)]
-    fn stub_argv_log(root: &std::path::Path) -> Vec<String> {
-        std::fs::read_to_string(root.join("argv.log"))
-            .unwrap_or_default()
-            .lines()
-            .map(str::to_string)
-            .collect()
-    }
-
-    /// GATED on Unix with its reason (see [`stub_rice_bin`]).
-    #[cfg(unix)]
-    #[test]
-    fn a_new_draft_from_declarative_unlocks_saves_and_enters_the_name_the_cli_minted() {
-        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let (_env, root) = stub_rice_bin(
-            "shellbridge-draft-new",
-            r#"{"mode":"declarative","rice":"sonata","stagingRice":"cadenza"}"#,
-        );
-        assert_eq!(dispatch_rice_draft(&RiceDraftAction::New), Ok("routed draft-3".to_string()));
-        assert_eq!(
-            stub_argv_log(&root),
-            ["rice mode stage --json", "rice draft save --json", "rice mode draft draft-3 --json"]
-        );
-        let _ = std::fs::remove_dir_all(&root);
-    }
-
-    /// GATED on Unix with its reason (see [`stub_rice_bin`]).
-    #[cfg(unix)]
-    #[test]
-    fn an_enter_from_draft_is_one_step_and_a_save_from_declarative_is_refused_unrun() {
-        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let (_env, root) = stub_rice_bin("shellbridge-draft-one", r#"{"mode":"draft","rice":"sonata","draft":"draft-1"}"#);
-        let enter = RiceDraftAction::Enter { name: "draft-2".to_string() };
-        assert_eq!(dispatch_rice_draft(&enter), Ok("routed draft-2".to_string()));
-        assert_eq!(stub_argv_log(&root), ["rice mode draft draft-2 --json"]);
-
-        std::fs::write(root.join("mode.json"), r#"{"mode":"declarative","rice":"sonata"}"#).unwrap();
-        std::fs::remove_file(root.join("argv.log")).unwrap();
-        // The refusal is the first thing that happens: not partial, no child.
-        assert_eq!(
-            dispatch_rice_draft(&RiceDraftAction::Save),
-            Err(("declarative mode is locked — unlock first, then save the draft".to_string(), false))
-        );
-        assert!(stub_argv_log(&root).is_empty(), "a refused save starts no child");
-
-        std::fs::write(root.join("mode.json"), r#"{"mode":"staging","rice":"sonata"}"#).unwrap();
-        assert_eq!(dispatch_rice_draft(&RiceDraftAction::Save), Ok("saved".to_string()));
-        assert_eq!(stub_argv_log(&root), ["rice draft save --json"]);
-        let _ = std::fs::remove_dir_all(&root);
-    }
-
-    /// GATED on Unix with its reason (see [`stub_rice_bin`]).
-    #[cfg(unix)]
-    #[test]
-    fn a_drop_is_one_step_its_refusal_is_the_clis_and_declarative_refuses_it_unrun() {
-        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let (_env, root) = stub_rice_bin("shellbridge-draft-drop", r#"{"mode":"draft","rice":"sonata","draft":"draft-2"}"#);
-        let drop1 = RiceDraftAction::Drop { name: "draft-1".to_string() };
-        assert_eq!(dispatch_rice_draft(&drop1), Ok("dropped draft-1".to_string()));
-        assert_eq!(stub_argv_log(&root), ["rice draft drop draft-1 --json"]);
-
-        // The draft in force: the bridge does not second-guess it, the CLI
-        // refuses, and its own message is the answer (first step, not partial).
-        std::fs::remove_file(root.join("argv.log")).unwrap();
-        std::fs::write(root.join("refuse-drop"), "").unwrap();
-        let live = RiceDraftAction::Drop { name: "draft-2".to_string() };
-        assert_eq!(
-            dispatch_rice_draft(&live),
-            Err(("cannot drop `draft-2` — it is the live draft".to_string(), false))
-        );
-        assert_eq!(stub_argv_log(&root), ["rice draft drop draft-2 --json"]);
-
-        std::fs::write(root.join("mode.json"), r#"{"mode":"declarative","rice":"sonata","stagingRice":"cadenza"}"#).unwrap();
-        std::fs::remove_file(root.join("argv.log")).unwrap();
-        assert_eq!(
-            dispatch_rice_draft(&drop1),
-            Err(("declarative mode is locked — unlock first, then delete the draft".to_string(), false))
-        );
-        assert!(stub_argv_log(&root).is_empty(), "a refused drop starts no child");
-        let _ = std::fs::remove_dir_all(&root);
-    }
-
-    /// GATED on Unix with its reason (see [`stub_rice_bin`]).
-    #[cfg(unix)]
-    #[test]
-    fn a_failing_later_step_is_partial_and_a_failing_first_step_is_not() {
-        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let (_env, root) = stub_rice_bin(
-            "shellbridge-draft-partial",
-            r#"{"mode":"declarative","rice":"sonata"}"#,
-        );
-        std::fs::write(root.join("refuse-draft"), "").unwrap();
-        let enter = RiceDraftAction::Enter { name: "nope".to_string() };
-        // The unlock ran and the entering step refused: the mode is now
-        // unlocked, and the answer says so rather than reading as a clean no.
-        assert_eq!(dispatch_rice_draft(&enter), Err(("no rice is currently staged".to_string(), true)));
-        assert_eq!(stub_argv_log(&root), ["rice mode stage --json", "rice mode draft nope --json"]);
-
-        // Already unlocked: the same refusal is the FIRST step, nothing ran.
-        std::fs::write(root.join("mode.json"), r#"{"mode":"staging","rice":"sonata"}"#).unwrap();
-        assert_eq!(dispatch_rice_draft(&enter), Err(("no rice is currently staged".to_string(), false)));
-        let _ = std::fs::remove_dir_all(&root);
-    }
-
-    /// GATED on Unix with its reason (see [`stub_rice_bin`]).
-    #[cfg(unix)]
-    #[test]
-    fn dispatch_rice_menu_merges_the_rices_with_the_modes_rice_drafts() {
-        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let (_env, root) = stub_rice_bin(
-            "shellbridge-menu-list",
-            r#"{"mode":"declarative","rice":"sonata","stagingRice":"cadenza"}"#,
-        );
-        std::env::set_var("AOIDE_HOST_CONFIG", "/home/u/dxflake/hosts/box/default.nix");
-        assert_eq!(
-            dispatch_rice_menu(),
-            json!({
-                "ok": true,
-                "mode": "declarative",
-                "rice": "sonata",
-                "draft": null,
-                "stagingRice": "cadenza",
-                "declared": "sonata",
-                "rices": [{ "name": "cadenza", "ok": true }, { "name": "sonata", "ok": true }],
-                "host": aoide_storage::display::os_hostname(),
-                "hostConfig": "/home/u/dxflake/hosts/box/default.nix",
-                "draftsRice": "cadenza",
-                "drafts": [
-                    { "name": "draft-1", "savedAt": "2026-01-01T00:00:00Z", "current": false },
-                    { "name": "draft-2", "savedAt": null, "current": true },
-                ],
-            })
-        );
-        assert_eq!(stub_argv_log(&root), ["rice list --json", "rice draft list cadenza --json"]);
-
-        // A CLI that refuses is a refusal carrying its own words — never an
-        // empty list the menu would paint as "no drafts yet".
-        std::fs::write(root.join("refuse-list"), "").unwrap();
-        assert_eq!(
-            dispatch_rice_menu(),
-            json!({ "ok": false, "reason": "cli-failed", "message": "no rice staged" })
-        );
-        let _ = std::fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn parse_command_takes_a_ricedeclare_with_one_usable_name() {
-        assert_eq!(
-            parse_command(r#"{"cmd":"ricedeclare","name":"barcarolle"}"#),
-            Some(BridgeCommand::RiceDeclare { name: "barcarolle".to_string() })
-        );
-        for line in [
-            r#"{"cmd":"ricedeclare"}"#,
-            r#"{"cmd":"ricedeclare","name":""}"#,
-            r#"{"cmd":"ricedeclare","name":"-x"}"#,
-            r#"{"cmd":"ricedeclare","name":"a b"}"#,
-            r#"{"cmd":"ricedeclare","name":7}"#,
-            r#"{"cmd":"ricedeclare","name":"Barcarolle"}"#,
-            r#"{"cmd":"ricedeclare","name":"a_b"}"#,
-            r#"{"cmd":"ricedeclare","name":"../x"}"#,
-            r#"{"cmd":"ricedeclare","name":"a:b"}"#,
-        ] {
-            assert_eq!(parse_command(line), None, "{line}");
-        }
-    }
-
-    #[test]
-    fn a_declare_is_audited_by_rice_and_whether_it_changed() {
-        assert_eq!(rice_declare_audit(&json!({ "ok": true, "changed": true })), ("ricedeclare", "ok changed"));
-        assert_eq!(rice_declare_audit(&json!({ "ok": true, "changed": false })), ("ricedeclare", "ok unchanged"));
-        assert_eq!(rice_declare_audit(&json!({ "ok": false, "reason": "not-built-in" })), ("ricedeclare-failed", "failed"));
-        assert_eq!(rice_declare_audit(&json!({})), ("ricedeclare-failed", "failed"));
-    }
-
-    /// GATED on Unix with its reason (see [`stub_rice_bin`]).
-    #[cfg(unix)]
-    #[test]
-    fn dispatch_rice_declare_runs_the_host_declare_and_answers_both_outcomes() {
-        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let (_env, root) = stub_rice_bin("shellbridge-declare", r#"{"mode":"staging","rice":"barcarolle"}"#);
-        assert_eq!(
-            dispatch_rice_declare("barcarolle"),
-            json!({
-                "ok": true,
-                "message": "declared `barcarolle`; takes effect on the next rebuild.",
-                "name": "barcarolle",
-                "host": "box",
-                "changed": true,
-                "stagedDiffers": true,
-            })
-        );
-        assert_eq!(stub_argv_log(&root), ["rice declare barcarolle --host --json"]);
-
-        std::fs::write(root.join("refuse-declare"), "").unwrap();
-        assert_eq!(
-            dispatch_rice_declare("fugue"),
-            json!({
-                "ok": false,
-                "reason": "not-built-in",
-                "message": "`fugue` is not in the rices box builds from: this build carries sonata",
-            })
-        );
-        let _ = std::fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn a_declare_with_no_envelope_is_a_cli_failure() {
-        assert_eq!(
-            rice_declare_reply(false, "spawning `strillix rice declare`: not found".to_string(), None),
-            json!({ "ok": false, "reason": "cli-failed", "message": "spawning `strillix rice declare`: not found" })
-        );
-    }
-
-    /// GATED on Unix with its reason (see [`stub_rice_bin`]).
-    #[cfg(unix)]
-    #[test]
-    fn a_failed_rice_list_is_a_refusal_and_starts_no_second_child() {
-        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let (_env, root) = stub_rice_bin("shellbridge-menu-nolist", r#"{"mode":"staging","rice":"sonata"}"#);
-        std::fs::write(root.join("refuse-rices"), "").unwrap();
-        assert_eq!(
-            dispatch_rice_menu(),
-            json!({ "ok": false, "reason": "cli-failed", "message": "rices unreadable" })
-        );
-        assert_eq!(stub_argv_log(&root), ["rice list --json"]);
-        let _ = std::fs::remove_dir_all(&root);
-    }
-
-    /// GATED on Unix with its reason (see [`stub_rice_bin`]).
-    #[cfg(unix)]
-    #[test]
-    fn dispatch_rice_menu_with_no_rice_answers_no_drafts_after_one_child() {
-        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let (_env, root) = stub_rice_bin("shellbridge-menu-none", r#"{"mode":"staging"}"#);
-        let reply = dispatch_rice_menu();
-        assert_eq!(reply["ok"], true, "{reply}");
-        assert_eq!(reply["draftsRice"], Value::Null);
-        assert_eq!(reply["drafts"], json!([]));
-        assert_eq!(reply["rices"].as_array().map(Vec::len), Some(2));
-        assert_eq!(stub_argv_log(&root), ["rice list --json"], "no rice means no drafts child");
-        let _ = std::fs::remove_dir_all(&root);
-    }
-
-    /// GATED on Unix with its reason (see [`stub_rice_bin`]).
-    #[cfg(unix)]
-    #[test]
-    fn dispatch_rice_mode_names_the_rice_to_stage_and_none_for_declarative() {
-        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let (_env, root) = stub_rice_bin("shellbridge-mode", r#"{"mode":"staging","rice":"sonata"}"#);
-        assert_eq!(
-            dispatch_rice_mode(&RiceModeAction::Stage { name: "fugue".to_string() }),
-            Ok("staged".to_string())
-        );
-        assert_eq!(dispatch_rice_mode(&RiceModeAction::Declarative), Ok("staged".to_string()));
-        assert_eq!(
-            stub_argv_log(&root),
-            ["rice mode stage fugue --json", "rice mode declarative --json"]
-        );
-        let _ = std::fs::remove_dir_all(&root);
-    }
-
-    /// `notify` hands `notify-send` a `--` before the positionals and a body
-    /// with markup escaped, so a hostile folder name is neither an option nor
-    /// markup. A stub `notify-send` on PATH logs its argv; the real one is
-    /// never reached.
-    ///
-    /// GATED on Unix with its reason: the stub is a `#!/bin/sh` script.
-    #[cfg(unix)]
-    #[test]
-    fn notify_ends_options_and_escapes_the_body() {
-        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let root = aoide_test_support::unique_tmp("shellbridge-notify");
-        std::fs::create_dir_all(&root).unwrap();
-        let stub = root.join("notify-send");
-        let log = root.join("argv.log");
-        std::fs::write(
-            &stub,
-            format!("#!/bin/sh\nfor a in \"$@\"; do printf '%s\\n' \"$a\"; done > '{}'\n", log.display()),
-        )
-        .unwrap();
-        std::fs::set_permissions(&stub, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
-        let _env = aoide_test_support::EnvSaver::capture(&["PATH"]);
-        std::env::set_var("PATH", &root);
-
-        notify("-x <b>a&b</b>");
-        for _ in 0..200 {
-            if std::fs::read_to_string(&log).map(|t| t.lines().count() >= 3).unwrap_or(false) {
-                break;
-            }
-            std::thread::sleep(std::time::Duration::from_millis(25));
-        }
-        let argv: Vec<String> = std::fs::read_to_string(&log).unwrap().lines().map(str::to_string).collect();
-        assert_eq!(argv, ["--", "Aoide", "-x &lt;b&gt;a&amp;b&lt;/b&gt;"]);
-        let _ = std::fs::remove_dir_all(&root);
-    }
-
-    /// The menu over a REAL socket: `ricemenu` is answered with one line
-    /// on its own connection and the audit log never learns a rice or draft
-    /// name; a `ricedraft` line the gate refuses changes nothing and gets NO
-    /// reply — it is fire-and-forget, so nothing is parked on one — beyond
-    /// the `unparseable` byte count. (No valid `ricedraft` is sent: it would
-    /// toast through the real `notify-send`.)
-    ///
-    /// GATED on Unix with its reason (see [`stub_rice_bin`]).
-    #[cfg(unix)]
-    #[test]
-    fn ricemenu_is_answered_over_the_socket_and_a_refused_ricedraft_is_not() {
-        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let (_stub_env, root) = stub_rice_bin(
-            "shellbridge-menu-sock",
-            r#"{"mode":"staging","rice":"quietsong"}"#,
-        );
-        let _env = aoide_test_support::EnvSaver::capture(&["AOIDE_ROOT", "STRILLIX_ROOT", "AOIDE_AUDIT_LOG", "AOIDE_STATE_DIR", "XDG_RUNTIME_DIR"]);
-        std::env::set_var("AOIDE_ROOT", &root);
-        std::env::set_var("STRILLIX_ROOT", &root);
-        std::env::set_var("AOIDE_AUDIT_LOG", root.join("log"));
-        std::env::set_var("AOIDE_STATE_DIR", &root);
-        std::env::set_var("XDG_RUNTIME_DIR", &root);
-
-        let sock = short_sock("menu");
-        let listener = UnixListener::bind(&sock).unwrap();
-        std::thread::spawn(move || serve(&listener)); // never joined
-
-        use std::io::Write;
-        let mut refused = UnixStream::connect(&sock).unwrap();
-        refused.write_all(b"{\"cmd\":\"ricedraft\",\"action\":\"enter\"}\n").unwrap();
-        refused.flush().unwrap();
-        refused.set_read_timeout(Some(std::time::Duration::from_millis(400))).unwrap();
-        let mut silence = String::new();
-        let heard = BufReader::new(&refused).read_line(&mut silence);
-        assert!(
-            heard.is_err() || silence.is_empty(),
-            "a refused ricedraft is never answered: {silence:?}"
-        );
-
-        let mut client = UnixStream::connect(&sock).unwrap();
-        client.write_all(b"{\"cmd\":\"ricemenu\"}\n").unwrap();
-        client.flush().unwrap();
-        client.set_read_timeout(Some(std::time::Duration::from_secs(5))).unwrap();
-        let mut answer = String::new();
-        BufReader::new(client).read_line(&mut answer).unwrap();
-        let reply: Value = serde_json::from_str(answer.trim()).expect("one JSON reply line");
-        assert_eq!(reply["ok"], true, "{reply}");
-        assert_eq!(reply["draftsRice"], "quietsong");
-        assert_eq!(reply["rices"].as_array().map(Vec::len), Some(2), "{reply}");
-        assert_eq!(reply["drafts"].as_array().map(Vec::len), Some(2), "{reply}");
-
-        let log = root.join("log");
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
-        let mut text = String::new();
-        while std::time::Instant::now() < deadline {
-            text = std::fs::read_to_string(&log).unwrap_or_default();
-            if text.contains("unparseable") {
-                break;
-            }
-            std::thread::sleep(std::time::Duration::from_millis(20));
-        }
-        assert!(text.contains("unparseable"), "{text}");
-        assert!(!text.contains("quietsong") && !text.contains("draft-"), "no names in the audit: {text}");
-
-        let _ = std::fs::remove_dir_all(&root);
-    }
-
-    #[test]
     fn parse_command_rejects_bad_or_empty_input() {
-        // Empty / absent address → None (never dispatch a blank focus).
-        assert_eq!(parse_command(r#"{"cmd":"focuswindow","address":""}"#), None);
-        assert_eq!(parse_command(r#"{"cmd":"focuswindow","address":"   "}"#), None);
-        assert_eq!(parse_command(r#"{"cmd":"focuswindow"}"#), None);
         // Unknown command → None.
         assert_eq!(parse_command(r#"{"cmd":"explode","address":"0x1"}"#), None);
         // Missing cmd → None.
@@ -4181,14 +2451,6 @@ esac
         assert_eq!(parse_command("{ broken"), None);
         assert_eq!(parse_command(""), None);
         assert_eq!(parse_command("[1,2,3]"), None);
-    }
-
-    // ── session actions (the acknowledged session-menu bridge) ─────────────
-
-    /// Build a `Vec<String>` argv/plan-row from string literals — test-only
-    /// sugar so the argv-exactness assertions below read as plain literals.
-    fn sv(items: &[&str]) -> Vec<String> {
-        items.iter().map(|s| s.to_string()).collect()
     }
 
     // -- parse gate: acceptance --
@@ -4273,162 +2535,6 @@ esac
             }
             other => panic!("expected a ProjectAction, got {other:?}"),
         }
-    }
-
-    #[test]
-    fn parse_command_accepts_every_workspaceaction_shape() {
-        // `set`, with an explicit workspace.
-        assert_eq!(
-            parse_command(r#"{"cmd":"workspaceaction","action":"set","workspace":3,"project":"aoide"}"#),
-            Some(BridgeCommand::WorkspaceAction {
-                workspace: Some(3),
-                binding: WorkspaceBinding::Set {
-                    project: "aoide".to_string(),
-                    new: false,
-                },
-            })
-        );
-        // `set --new`, with no workspace at all — "the focused one".
-        assert_eq!(
-            parse_command(r#"{"cmd":"workspaceaction","action":"set","project":"cadenza","new":true}"#),
-            Some(BridgeCommand::WorkspaceAction {
-                workspace: None,
-                binding: WorkspaceBinding::Set {
-                    project: "cadenza".to_string(),
-                    new: true,
-                },
-            })
-        );
-        // An explicit `false` is the same ask as an absent `new`.
-        assert_eq!(
-            parse_command(r#"{"cmd":"workspaceaction","action":"set","project":"aoide","new":false}"#),
-            Some(BridgeCommand::WorkspaceAction {
-                workspace: None,
-                binding: WorkspaceBinding::Set {
-                    project: "aoide".to_string(),
-                    new: false,
-                },
-            })
-        );
-        // `clear`, explicit workspace, and `clear` with an explicit `null`
-        // workspace — read as "no workspace" (the focused one), the same
-        // tolerance `sessiontrace`'s `lines` holds for a null.
-        assert_eq!(
-            parse_command(r#"{"cmd":"workspaceaction","action":"clear","workspace":3}"#),
-            Some(BridgeCommand::WorkspaceAction {
-                workspace: Some(3),
-                binding: WorkspaceBinding::Clear,
-            })
-        );
-        assert_eq!(
-            parse_command(r#"{"cmd":"workspaceaction","action":"clear","workspace":null}"#),
-            Some(BridgeCommand::WorkspaceAction {
-                workspace: None,
-                binding: WorkspaceBinding::Clear,
-            })
-        );
-        // A NEGATIVE id is a real workspace — Hyprland's named and special
-        // workspaces carry them, and the CLI's own `workspace_id` parses the
-        // same `i64` (the focused-workspace read surfaces one verbatim).
-        assert_eq!(
-            parse_command(r#"{"cmd":"workspaceaction","action":"set","workspace":-99,"project":"aoide"}"#),
-            Some(BridgeCommand::WorkspaceAction {
-                workspace: Some(-99),
-                binding: WorkspaceBinding::Set {
-                    project: "aoide".to_string(),
-                    new: false,
-                },
-            })
-        );
-        // Ordinary spaces and surrounding whitespace are legal in a name
-        // (`safe_action_value`); no session id appears anywhere.
-        match parse_command(
-            r#"  {"cmd":"workspaceaction","action":"set","workspace":1,"project":" My Project "}"#,
-        ) {
-            Some(BridgeCommand::WorkspaceAction { binding, .. }) => assert_eq!(
-                binding,
-                WorkspaceBinding::Set {
-                    project: "My Project".to_string(),
-                    new: false,
-                }
-            ),
-            other => panic!("expected a WorkspaceAction, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn parse_command_refuses_a_workspace_action_it_cannot_name() {
-        // A closed set of TWO: anything else — including a plausible synonym
-        // — is refused at the wire, never dispatched as a default.
-        for action in ["unset", "bind", "SET", "", "clearall"] {
-            assert_eq!(
-                parse_command(&format!(
-                    r#"{{"cmd":"workspaceaction","action":"{action}","project":"aoide"}}"#
-                )),
-                None,
-                "{action} must be refused"
-            );
-        }
-        // `set` needs a name that passes the existing name rule: a missing
-        // key, `null`, a non-string, an empty/blank string and a
-        // flag-shaped one are all refused — there is no reading of a
-        // malformed bind request as anything else.
-        for fields in [
-            r#""workspace":3"#,
-            r#""workspace":3,"project":null"#,
-            r#""workspace":3,"project":5"#,
-            r#""workspace":3,"project":"""#,
-            r#""workspace":3,"project":"   ""#,
-            r#""workspace":3,"project":"-rf""#,
-        ] {
-            assert_eq!(
-                parse_command(&format!(
-                    r#"{{"cmd":"workspaceaction","action":"set",{fields}}}"#
-                )),
-                None,
-                "{fields} must be refused"
-            );
-        }
-        // `new` must BE a bool — a string or a number is refused, never read
-        // as false.
-        for new in [r#""yes""#, r#"1"#, r#"{}"#] {
-            assert_eq!(
-                parse_command(&format!(
-                    r#"{{"cmd":"workspaceaction","action":"set","workspace":3,"project":"aoide","new":{new}}}"#
-                )),
-                None,
-                "new={new} must be refused"
-            );
-        }
-        // A `clear` carrying a binding field is a caller that meant `set`:
-        // refused by name, so the mistake can never read as a successful
-        // unbind.
-        assert_eq!(
-            parse_command(r#"{"cmd":"workspaceaction","action":"clear","workspace":3,"project":"aoide"}"#),
-            None
-        );
-        assert_eq!(
-            parse_command(r#"{"cmd":"workspaceaction","action":"clear","workspace":3,"new":true}"#),
-            None
-        );
-        // A workspace id is an INTEGER: a string, a bool and a float are all
-        // refused, never coerced.
-        for ws in [r#""3""#, r#"true"#, r#"3.5"#, r#"[3]"#] {
-            assert_eq!(
-                parse_command(&format!(
-                    r#"{{"cmd":"workspaceaction","action":"set","workspace":{ws},"project":"aoide"}}"#
-                )),
-                None,
-                "workspace={ws} must be refused"
-            );
-        }
-        // No action at all is refused too.
-        assert_eq!(
-            parse_command(r#"{"cmd":"workspaceaction","workspace":3,"project":"aoide"}"#),
-            None
-        );
-        // And a blank/absent `cmd` is not this command.
-        assert_eq!(parse_command(r#"{"cmd":"workspace","action":"set"}"#), None);
     }
 
     // -- parse gate: rejection --
@@ -4828,209 +2934,6 @@ esac
         );
     }
 
-    // -- workspaceaction, the bar's bind click (W-P5) --
-
-    /// A stub `aoide` on `AOIDE_CORE_BIN` (the tier `bin::core_bin` resolves
-    /// first) that answers with a CLI-shaped `ok` envelope quoting the WHOLE
-    /// argv it was handed, so a dispatch test asserts both the planned argv
-    /// and the reply shaping with no daemon and no stage write.
-    ///
-    /// GATED on Unix with its reason (its callers are gated with it): the stub
-    /// is a `#!/bin/sh` SCRIPT made executable by a mode, and `CreateProcess`
-    /// understands neither a shebang nor an extension-less name — the same
-    /// gate the client crate's own shim groups carry.
-    #[cfg(unix)]
-    fn stub_workspace_core(tag: &str) -> (aoide_test_support::EnvSaver, PathBuf) {
-        let root = aoide_test_support::unique_tmp(tag);
-        std::fs::create_dir_all(&root).unwrap();
-        let stub = root.join("stub-aoide");
-        std::fs::write(
-            &stub,
-            r#"#!/bin/sh
-printf '{"status":"ok","command":"workspace","message":"argv: %s","data":{"workspace":%s}}\n' "$*" "$3"
-"#,
-        )
-        .unwrap();
-        std::fs::set_permissions(&stub, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
-        let env = aoide_test_support::EnvSaver::capture(&["AOIDE_CORE_BIN"]);
-        std::env::set_var("AOIDE_CORE_BIN", &stub);
-        (env, root)
-    }
-
-    #[test]
-    fn workspace_binding_plans_the_exact_argv_for_each_shape() {
-        let set = WorkspaceBinding::Set {
-            project: "aoide".to_string(),
-            new: false,
-        };
-        assert_eq!(set.plan(3), sv(&["workspace", "set", "3", "aoide"]));
-        // `--new` rides LAST, exactly where the CLI's own examples put it,
-        // and ONLY when asked for.
-        let set_new = WorkspaceBinding::Set {
-            project: "cadenza".to_string(),
-            new: true,
-        };
-        assert_eq!(set_new.plan(3), sv(&["workspace", "set", "3", "cadenza", "--new"]));
-        assert_eq!(WorkspaceBinding::Clear.plan(3), sv(&["workspace", "clear", "3"]));
-        // A negative (special) workspace id goes through verbatim, and a name
-        // with a space stays ONE argv element — no shell anywhere.
-        assert_eq!(set.plan(-99), sv(&["workspace", "set", "-99", "aoide"]));
-        let spaced = WorkspaceBinding::Set {
-            project: "My Project".to_string(),
-            new: false,
-        };
-        assert_eq!(spaced.plan(1), sv(&["workspace", "set", "1", "My Project"]));
-    }
-
-    /// GATED on Unix with its reason (see [`stub_workspace_core`]): the
-    /// fixture is a `#!/bin/sh` shim `CreateProcess` cannot launch.
-    #[cfg(unix)]
-    #[test]
-    fn dispatch_workspace_action_runs_the_planned_argv_and_keys_the_reply() {
-        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let (_env, root) = stub_workspace_core("shellbridge-ws-set");
-
-        let reply = dispatch_workspace_action(
-            Some(3),
-            &WorkspaceBinding::Set {
-                project: "aoide".to_string(),
-                new: false,
-            },
-        );
-        assert_eq!(reply["ok"], true, "{reply}");
-        assert_eq!(reply["action"], "set");
-        assert_eq!(reply["workspace"], 3);
-        assert_eq!(reply["project"], "aoide");
-        // The CLI's own message and `data` are carried verbatim, and the
-        // argv the child actually got is the plan plus `--json`.
-        assert_eq!(reply["message"], "argv: workspace set 3 aoide --json");
-        assert_eq!(reply["data"], json!({"workspace": 3}));
-
-        // `--new` is planned, and a clear carries no `project` key at all.
-        let reply = dispatch_workspace_action(
-            Some(5),
-            &WorkspaceBinding::Set {
-                project: "cadenza".to_string(),
-                new: true,
-            },
-        );
-        assert_eq!(reply["message"], "argv: workspace set 5 cadenza --new --json");
-
-        let reply = dispatch_workspace_action(Some(3), &WorkspaceBinding::Clear);
-        assert_eq!(reply["ok"], true, "{reply}");
-        assert_eq!(reply["action"], "clear");
-        assert_eq!(reply["workspace"], 3);
-        assert_eq!(reply["message"], "argv: workspace clear 3 --json");
-        assert!(
-            reply.get("project").is_none(),
-            "a clear has no project to name: {reply}"
-        );
-
-        let _ = std::fs::remove_dir_all(&root);
-    }
-
-    /// GATED on Unix with its reason (see `testutil::fake_hyprctl`): the
-    /// fixture is a `#!/bin/sh` shim `CreateProcess` cannot launch, over a
-    /// compositor native Windows does not run.
-    #[cfg(unix)]
-    #[test]
-    fn dispatch_workspace_action_resolves_an_omitted_workspace_through_the_adapter() {
-        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let (_env, root) = stub_workspace_core("shellbridge-ws-focused");
-        let (hypr, shim) = crate::graph::testutil::fake_hyprctl("ws-action-focused");
-        std::env::set_var("AOIDE_TEST_WS", "7");
-
-        // Both verbs resolve the FOCUSED workspace, so `clear` (which takes an
-        // id and no focused default of its own) is reachable from a click
-        // with no workspace on the wire.
-        let reply = dispatch_workspace_action(
-            None,
-            &WorkspaceBinding::Set {
-                project: "aoide".to_string(),
-                new: false,
-            },
-        );
-        assert_eq!(reply["workspace"], 7, "{reply}");
-        assert_eq!(reply["message"], "argv: workspace set 7 aoide --json");
-
-        let reply = dispatch_workspace_action(None, &WorkspaceBinding::Clear);
-        assert_eq!(reply["workspace"], 7, "{reply}");
-        assert_eq!(reply["message"], "argv: workspace clear 7 --json");
-
-        drop(hypr);
-        let _ = std::fs::remove_dir_all(&shim);
-        let _ = std::fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn dispatch_workspace_action_answers_a_host_with_no_compositor() {
-        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _sig = crate::graph::testutil::EnvVars::save(&["HYPRLAND_INSTANCE_SIGNATURE"]);
-        std::env::remove_var("HYPRLAND_INSTANCE_SIGNATURE");
-        // A core binary that cannot exist: if this refusal were ever a spawn
-        // attempt, the reply would say so instead.
-        let _bin = aoide_test_support::EnvSaver::capture(&["AOIDE_CORE_BIN"]);
-        std::env::set_var("AOIDE_CORE_BIN", "/nonexistent/aoide");
-
-        let reply = dispatch_workspace_action(None, &WorkspaceBinding::Clear);
-        assert_eq!(reply["ok"], false);
-        assert_eq!(reply["action"], "clear");
-        assert_eq!(reply["reason"], "no-compositor");
-        // The CLI's own sentence, verbatim — one authority for the text.
-        assert_eq!(reply["message"], NO_COMPOSITOR);
-        assert!(reply.get("workspace").is_none(), "nothing was resolved: {reply}");
-    }
-
-    #[test]
-    fn workspace_reply_carries_an_error_envelope_and_falls_back_honestly() {
-        let clear = WorkspaceBinding::Clear;
-        // An error envelope still makes a reply, not an ok.
-        let reply = workspace_reply(
-            &clear,
-            3,
-            false,
-            r#"{"status":"error","command":"workspace.clear","message":"aoided must be running for project management"}"#,
-            "",
-        );
-        assert_eq!(reply["ok"], false);
-        assert_eq!(reply["message"], "aoided must be running for project management");
-        assert_eq!(reply["action"], "clear");
-        assert_eq!(reply["workspace"], 3);
-
-        // A usage envelope lands on stderr when the parser refused the argv
-        // before dispatch — read there, never mistaken for gibberish.
-        let reply = workspace_reply(
-            &clear,
-            3,
-            false,
-            "",
-            r#"{"status":"usage","command":"workspace.clear","message":"`x` is not a workspace id"}"#,
-        );
-        assert_eq!(reply["ok"], false);
-        assert_eq!(reply["message"], "`x` is not a workspace id");
-
-        // Neither stream an envelope: the raw line is the message, and an
-        // empty outcome still says something true.
-        let reply = workspace_reply(&clear, 3, false, "boom", "");
-        assert_eq!(reply["message"], "boom");
-        let reply = workspace_reply(&clear, 3, false, "", "");
-        assert_ne!(reply["message"].as_str().unwrap_or(""), "");
-
-        // One wire line, always.
-        let reply = workspace_reply(
-            &WorkspaceBinding::Set {
-                project: "a\nb".to_string(),
-                new: false,
-            },
-            3,
-            true,
-            r#"{"status":"ok","command":"workspace.set","message":"a\nb"}"#,
-            "",
-        );
-        assert!(!reply.to_string().contains('\n'));
-        assert_eq!(reply["project"], "a\nb");
-    }
-
     // -- reply shaping --
 
     #[test]
@@ -5135,81 +3038,6 @@ printf '{"status":"ok","command":"workspace","message":"argv: %s","data":{"works
         aoide_test_support::short_tmp(&format!("sb-{tag}")).join("s.sock")
     }
 
-    /// The §0 corollary's own test for the newest arm: a `workspaceaction`
-    /// line that the whitelist REFUSES over a REAL socket is dropped, audited
-    /// (`unparseable`, a byte count, never the payload), and — because the
-    /// click that sent it is parked on a reply — ANSWERED with a `bad-request`
-    /// refusal, the same rule `sessiontrace` holds. No child is spawned: one
-    /// refused line, whose reply is the whole observable.
-    #[test]
-    fn a_refused_workspaceaction_line_is_audited_and_answered_over_the_socket() {
-        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _env = aoide_test_support::EnvSaver::capture(&[
-            "AOIDE_ROOT",
-            "STRILLIX_ROOT",
-            "AOIDE_AUDIT_LOG",
-            "AOIDE_STATE_DIR",
-            "AOIDE_STAGE_DIR",
-            "XDG_RUNTIME_DIR",
-            "AOIDE_CORE_BIN",
-        ]);
-        let root = aoide_test_support::unique_tmp("shellbridge-ws-refused");
-        std::env::set_var("AOIDE_ROOT", &root);
-        std::env::set_var("STRILLIX_ROOT", &root);
-        std::env::set_var("AOIDE_AUDIT_LOG", root.join("log"));
-        std::env::set_var("AOIDE_STATE_DIR", &root);
-        std::env::set_var("AOIDE_STAGE_DIR", &root);
-        std::env::set_var("XDG_RUNTIME_DIR", &root);
-        // A `clear` carrying a `project` is refused by name at the gate; the
-        // core binary is pointed somewhere that cannot exist so a spawn would
-        // be unmistakable if the gate ever let this through.
-        std::env::set_var("AOIDE_CORE_BIN", "/nonexistent/aoide");
-
-        let sock = short_sock("ws-refused");
-        let listener = UnixListener::bind(&sock).unwrap();
-        std::thread::spawn(move || serve(&listener)); // never joined
-
-        let mut client = UnixStream::connect(&sock).unwrap();
-        {
-            use std::io::Write;
-            client
-                .write_all(
-                    b"{\"cmd\":\"workspaceaction\",\"action\":\"clear\",\"workspace\":3,\"project\":\"aoide\"}\n",
-                )
-                .unwrap();
-            client.flush().unwrap();
-        }
-        // The parked caller is ANSWERED, once, on its own connection.
-        client
-            .set_read_timeout(Some(std::time::Duration::from_secs(5)))
-            .unwrap();
-        let mut reader = BufReader::new(client);
-        let mut answer = String::new();
-        reader.read_line(&mut answer).unwrap();
-        let reply: Value = serde_json::from_str(answer.trim()).expect("one JSON reply line");
-        assert_eq!(reply["ok"], false, "{reply}");
-        assert_eq!(reply["reason"], "bad-request");
-        assert!(reply.get("workspace").is_none(), "nothing was resolved: {reply}");
-        assert!(reply.get("action").is_none(), "nothing parsed to echo: {reply}");
-
-        // And the drop is audited, with a byte count and no payload.
-        let log = root.join("log");
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
-        let mut text = String::new();
-        while std::time::Instant::now() < deadline {
-            text = std::fs::read_to_string(&log).unwrap_or_default();
-            if text.contains("unparseable") && text.contains("workspaceaction-refused") {
-                break;
-            }
-            std::thread::sleep(std::time::Duration::from_millis(20));
-        }
-        assert!(text.contains("unparseable"), "{text}");
-        assert!(text.contains("workspaceaction-refused"), "{text}");
-        assert!(!text.contains("aoide"), "no payload in the audit line: {text}");
-
-        let _ = std::fs::remove_dir_all(&root);
-    }
-
     /// Confirms `serve` spawns a thread per connection rather than serving
     /// serially: an idle, persistent client must never block a later
     /// client's line from ever being dispatched. This test binds its
@@ -5248,7 +3076,7 @@ printf '{"status":"ok","command":"workspace","message":"argv: %s","data":{"works
 
         let sock = short_sock("idle");
         let listener = UnixListener::bind(&sock).unwrap();
-        std::thread::spawn(move || serve(&listener)); // never joined
+        std::thread::spawn(move || serve(&listener, &[])); // never joined
 
         // Client 1: connect and hold the link open, writing nothing — the
         // shape of a client idling between commands.
@@ -5313,7 +3141,7 @@ printf '{"status":"ok","command":"workspace","message":"argv: %s","data":{"works
 
         let sock = short_sock("notifications");
         let listener = UnixListener::bind(&sock).unwrap();
-        std::thread::spawn(move || serve(&listener)); // never joined, own listener
+        std::thread::spawn(move || serve(&listener, &[])); // never joined, own listener
 
         const N: usize = 12;
         let senders: Vec<_> = (0..N)
@@ -5357,6 +3185,49 @@ printf '{"status":"ok","command":"workspace","message":"argv: %s","data":{"works
              {count} instead — a lost update means edit_ledger's read-modify-write is \
              racing under the thread-per-connection accept loop"
         );
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A desktop verb is nothing to core: with no table registered, the line is
+    /// audited `unparseable` and dropped, and no reply is written.
+    #[cfg(unix)]
+    #[test]
+    fn a_desktop_line_with_no_registered_verb_is_dropped_unanswered() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = aoide_test_support::EnvSaver::capture(&["AOIDE_ROOT", "AOIDE_AUDIT_LOG", "XDG_RUNTIME_DIR"]);
+        let root = aoide_test_support::unique_tmp("shellbridge-no-verb");
+        std::env::set_var("AOIDE_ROOT", &root);
+        std::env::set_var("AOIDE_AUDIT_LOG", root.join("log"));
+        std::env::set_var("XDG_RUNTIME_DIR", &root);
+
+        let sock = short_sock("no-verb");
+        let listener = UnixListener::bind(&sock).unwrap();
+        std::thread::spawn(move || serve(&listener, &[])); // never joined
+
+        use std::io::Write;
+        let mut client = UnixStream::connect(&sock).unwrap();
+        client.write_all(b"{\"cmd\":\"ricemenu\"}\n").unwrap();
+        client.flush().unwrap();
+        client.set_read_timeout(Some(std::time::Duration::from_millis(400))).unwrap();
+        let mut silence = String::new();
+        let heard = BufReader::new(&client).read_line(&mut silence);
+        assert!(
+            heard.is_err() || silence.is_empty(),
+            "an unclaimed desktop line is never answered: {silence:?}"
+        );
+
+        let log = root.join("log");
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        let mut text = String::new();
+        while std::time::Instant::now() < deadline {
+            text = std::fs::read_to_string(&log).unwrap_or_default();
+            if text.contains("unparseable") {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        assert!(text.contains("unparseable"), "{text}");
 
         let _ = std::fs::remove_dir_all(&root);
     }

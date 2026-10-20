@@ -656,8 +656,7 @@ terminal's rights to its remote callers.
   thread costs discovery only, never the door. The RECEIVE half
   (`node discover`/`aoide pair`'s hostname-target sweep) lives in
   `aoide-client::discover` instead; this crate stays inbound/serve-only.
-- `commands` — this crate's CLI commands: `daemon`, `shellbridge` (registration
-  only — the files stay in `conduct`), `a2a serve`, `events tail` (P-D3,
+- `commands` — this crate's CLI commands: `daemon`, `a2a serve`, `events tail` (P-D3,
   appended newest — CLI-only, the same door-policy shape `a2a serve`/
   `aoide_secrets::commands::handle_secrets_watch` already hold for a
   foreground/blocking command).

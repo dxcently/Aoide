@@ -7,6 +7,7 @@
 //! (concepts/Agent-Interface) — the MCP door reuses these exact command
 //! handlers, same as core's.
 
+pub mod bridge;
 pub mod commands;
 pub mod daemon;
 pub mod dispatch;

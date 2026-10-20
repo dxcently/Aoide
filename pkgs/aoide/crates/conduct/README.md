@@ -131,8 +131,8 @@ stripping one, and a held spawn shows as its whole command.
   bar/dock draws "workspace N → project X" and pulses it off the document it
   already hot-reloads (a headless host's document carries neither key at all).
   `aoide workspace list --json` prints the SAME block, from the same builder.
-  A desktop click reaches the same two mutations through the shellbridge
-  socket's `workspaceaction` (the action list below). `list` is a READ (no
+  A desktop click reaches the same two mutations through strillix's bridge
+  `workspaceaction` (`pkgs/aoide/crates/strillix/README.md`). `list` is a READ (no
   lock, no daemon, no write): the bindings plus every workspace a local
   session reports, sorted by id, with `"observed": false` and a named `reason`
   on a host where no session reports one — §A's taught-refusal shape without a
@@ -941,9 +941,10 @@ stripping one, and a held spawn shows as its whole command.
   `sync_codex_app_threads`; `reap.rs::profile_for` already dispatches an
   eidolon-enrolled record to `EIDOLON_PROFILE` for free, off `rec.agent`
   alone, the same generic path every other harness takes.
-- `shellbridge`, `notifications` — files only; their CLI commands (registry lines)
-  moved to `strillix` at P-A2, but both stay resident here (see charter smudge
-  below). The socket answers five commands with a reply. Two of them run
+- `shellbridge`, `notifications` — the socket loop and the core verbs. Their CLI
+  commands (registry lines) live in `strillix`, and so do the desktop verbs; both
+  files stay resident here (see charter smudge below). The socket answers three
+  commands with a reply. Two of them run
   through the same sequencer over either subject they name by: a SESSION
   id (`sessionaction`) or a PROJECT name (`projectaction`, zero-session — no
   session id anywhere on that wire, in its plan, its reply, or its audit
@@ -968,39 +969,13 @@ stripping one, and a held spawn shows as its whole command.
   with no roots for a host uses `add` instead, so a host with nothing to
   replace keeps its existing roots rather than being wiped); `removehost`
   runs `project remove <name> --host <host>` and requires exactly one host.
-  `workspaceaction` is a third closed whitelist of its own, two actions
-  (`set` / `clear`, `shellbridge.rs::WorkspaceBinding`) for the bar's bind
-  click: zero-session too, and it plans the exact argv the
-  CLI takes — `aoide workspace set <ws> <project> [--new]` /
-  `aoide workspace clear <ws>` — so no second binding exists anywhere. It is
-  the one acknowledged action that resolves a field itself: an omitted
-  `workspace` means the FOCUSED workspace, read in-process through the
-  compositor adapter (`window.rs::focused_workspace`, the same function the
-  CLI's own caller-side resolution uses) because `workspace clear` takes an
-  id and no caller can be expected to know the focused one, so the child
-  always receives an integer. A host with no adapter is ANSWERED
-  (`reason: "no-compositor"`, the CLI's own sentence) rather than dropped,
-  because a click is parked on a reply. Its one reply line is
-  `{ok, message, action, workspace, project?, data?}` — the CLI's `message`
-  and `data` verbatim, keyed by the RESOLVED workspace id, `project` riding
-  only on `set`. `workspace` is ABSENT on the `no-compositor` refusal
-  (`{ok:false, action, reason, message}` — nothing was resolved to name), and
-  both `workspace` and `action` are absent on a `bad-request` refusal
-  (nothing parsed to echo) — and a malformed line that NAMES this verb is
-  ANSWERED with that refusal rather than dropped, the same rule
-  `sessiontrace` holds: one rule for every parked caller.
-  The other replying commands are the READS, `sessiontrace` and `ricemenu`,
-  and the RICE menu's `ricedeclare` (all below); every other socket command,
-  `ricemode` and `ricedraft` among them, stays fire-and-forget.
-  `{"cmd":"component","slot","verb","arg"?}` is a cross-component call,
-  fire-and-forget (`ShellBridge.qml`'s `component`). `slot` is `[a-z][a-z0-9-]*`,
-  `verb` is an ASCII letter then ASCII letters or digits (`openTab` is
-  camelCase), and `arg`, when present, is 1 to 64 of `[A-Za-z0-9._-]` and never
-  starts with `-`; a name outside those charsets is dropped. The bridge spells
-  one line, `strx component <slot> <verb> [arg]`, and runs it through
-  `hyprctl dispatch exec`, as `power lock` does: a provider's action never
-  inherits this unit's NoNewPrivileges. The audit line is `component <slot>
-  <verb>: spawned` or the spawn error.
+  The socket's loop takes the binary's verb table, `run(verbs)` over
+  `&'static [Verb]`. A line that the core parser does not claim goes to the first
+  entry naming its `cmd`. With no entry, `drop_unparsed` audits it and drops it,
+  except that a line naming `sessiontrace` is answered. Core's own tests pass an
+  empty table; the `strillix shellbridge --run` process passes `bridge::VERBS`,
+  where the desktop verbs are served. Their wire, replies and audit lines are in
+  `pkgs/aoide/crates/strillix/README.md`.
 - `commands` — this crate's CLI commands, registered from one `register()`
   call (`conduct/src/commands/graph.rs`, still that file's name
   post-cutover) — the `graph` family narrowed at task #101 R1 to the bare
@@ -1077,66 +1052,6 @@ stripping one, and a held spawn shows as its whole command.
   DISCARDED (`no-answer`) rather than answered from partially. Audits refuse,
   never every poll: one line per second per card is not a human gesture, and the
   audit line carries no argument values.
-- **The RICE menu's four verbs over the bridge (`shellbridge.rs::RiceMenu`,
-  `RiceMode`, `RiceDraft`, `RiceDeclare`).** Any click on the bar's RICE cell opens the one
-  menu; nothing switches until a row is chosen. All four re-exec the sibling
-  `strillix` (`daemon::bin::rice_bin()`): `rice` lives there and conduct never
-  depends on the rice crate, so the name regexes, the minting and every refusal
-  stay the CLI's.
-  `{"cmd":"ricemenu"}` is the second READ, answered on its own connection and
-  thread like `sessiontrace`: `dispatch_rice_menu` runs `rice list --json`
-  under one 4 s budget (`RICE_MENU_TIMEOUT`, under the QML client's 5 s) and
-  passes its `data` through (`mode`, `rice`, `draft`, `stagingRice`,
-  `declared`, `rices`) with this machine's `host` name and `hostConfig` (the
-  file `rice declare --host` rewrites, from `aoide_storage::fs::host_config`,
-  null when none resolves) beside it; then, when `drafts_rice` names a rice from the mode
-  marker (`stagingRice` first while declarative is locked, since an unlock
-  lands there; `rice` first otherwise), runs `rice draft list <rice> --json`
-  with the budget left. The answer adds `draftsRice` and `drafts:
-  [{name, savedAt, current}]`, or is `{ok:false, reason: cli-failed|no-answer,
-  message}`: a child that did not answer is never an empty list, and a failed
-  `rice list` starts no second child. With no rice `drafts` is empty and one
-  child ran.
-  `{"cmd":"ricemode","action":"stage|declarative","name"?}` is the switch,
-  fire-and-forget: `stage` takes a `name` that is one argv token and runs `rice
-  mode stage <name>`; `declarative` refuses one and runs a bare `rice mode
-  declarative` (the CLI resolves the declared twin); anything else is dropped.
-  The outcome is a toast through the shared `notify`, on success and failure;
-  the audit line is `ricemode action <stage|declarative>: <ok|failed>` and
-  carries no rice name.
-  `{"cmd":"ricedraft","action":"enter|new|save|drop","name"?}` is
-  fire-and-forget like `ricemode`, its outcome a toast through the shared
-  `notify`. The set is closed (`RiceDraftAction::from_wire`: `enter` and `drop`
-  take a `name` that is one argv token, `new` and `save` refuse one, so a mistaken caller is dropped rather
-  than read as success), planned by the pure `rice_draft_plan` and run step by
-  step by `dispatch_rice_draft`, each step `strx rice … --json`, unbounded,
-  stopping at the first failure — `partial` when an earlier step had
-  succeeded, which nothing rolls back. From declarative, `enter` and `new` first
-  run a BARE `rice mode stage` (house rule 10: it restores `stagingRice`,
-  never the declared rice), and `save` and `drop` are taught refusals,
-  `declarative mode is locked — unlock first, then save the draft` / `…then
-  delete the draft`: the stage there is the declared rice, `rice draft
-  save`/`drop` act on the rice the stage names, and the listing names
-  `stagingRice`, so a save would land, and a drop would delete, where the menu
-  never looks (unlocking first would change the mode as a side effect).
-  Elsewhere `drop` is one step, `rice draft drop <name>`; a missing draft or
-  the draft in force is the CLI's refusal, toasted as its own message.
-  `enter` is enter-or-create: `rice mode draft` forks the stage into a name
-  that does not exist yet, and the bridge cannot tell. The audit line is one
-  per action (`ricedraft action <enter|new|save|drop>: <ok|partial|failed>`) and carries
-  neither a draft nor a rice name.
-  `{"cmd":"ricedeclare","name":"<rice>"}` is the Declare row, ANSWERED on its
-  own connection and thread like `ricemenu` because the surface paints the
-  outcome as a balloon: `name` is a rice name (lowercase letters, digits,
-  hyphens; anything else is dropped with no reply), and `dispatch_rice_declare` runs `strx rice declare <name>
-  --host --json`, unbounded like every mutation, which rewrites the host
-  config's `habit.rice.declared` line and never rebuilds. `rice_declare_reply`
-  answers `{ok:true, message, name, host, changed, stagedDiffers}` or
-  `{ok:false, reason, message}`, the message carrying the refusal's what and
-  why, `reason` the CLI's own (`not-built-in`, `staged-draft`,
-  `host-line-count`, …) or `cli-failed`. The audit line names the rice and
-  whether the host file changed: `ricedeclare action <rice>: <ok changed|ok
-  unchanged|failed>`.
 - **The durable session ledger + resurrect (P-D8, `docs/architecture/
   AOIDED.md`'s "L5"):** `graph/doc.rs::ledger_session_exit` is the ONE
   shared call both `session_store.rs::do_session_end_inner` (a clean
