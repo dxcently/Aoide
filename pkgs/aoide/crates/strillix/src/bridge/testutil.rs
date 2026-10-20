@@ -108,6 +108,21 @@ pub(crate) fn stub_argv_log(root: &std::path::Path) -> Vec<String> {
 /// argv it was handed, so a dispatch test asserts both the planned argv
 /// and the reply shaping with no daemon and no stage write.
 ///
+/// A stub `aoide` that prints one fixed `--json` envelope and exits `exit`: a core that answers a
+/// read the way the CLI does, for the desktop's door calls. Unix only, for the same reason as
+/// [`stub_workspace_core`].
+#[cfg(unix)]
+pub(crate) fn stub_core_answering(tag: &str, envelope: &str, exit: i32) -> (aoide_test_support::EnvSaver, PathBuf) {
+    let root = aoide_test_support::unique_tmp(tag);
+    std::fs::create_dir_all(&root).unwrap();
+    let stub = root.join("aoide");
+    std::fs::write(&stub, format!("#!/bin/sh\nprintf '%s\\n' '{envelope}'\nexit {exit}\n")).unwrap();
+    std::fs::set_permissions(&stub, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+    let env = aoide_test_support::EnvSaver::capture(&["AOIDE_CORE_BIN"]);
+    std::env::set_var("AOIDE_CORE_BIN", &stub);
+    (env, root)
+}
+
 /// GATED on Unix with its reason (its callers are gated with it): the stub
 /// is a `#!/bin/sh` SCRIPT made executable by a mode, and `CreateProcess`
 /// understands neither a shebang nor an extension-less name — the same
@@ -116,7 +131,7 @@ pub(crate) fn stub_argv_log(root: &std::path::Path) -> Vec<String> {
 pub(crate) fn stub_workspace_core(tag: &str) -> (aoide_test_support::EnvSaver, PathBuf) {
     let root = aoide_test_support::unique_tmp(tag);
     std::fs::create_dir_all(&root).unwrap();
-    let stub = root.join("stub-aoide");
+    let stub = root.join("aoide");
     std::fs::write(
         &stub,
         r#"#!/bin/sh
@@ -140,7 +155,7 @@ printf '{"status":"ok","command":"workspace","message":"argv: %s","data":{"works
 pub(crate) fn stub_core_door(tag: &str) -> (aoide_test_support::EnvSaver, PathBuf) {
     let root = aoide_test_support::unique_tmp(tag);
     std::fs::create_dir_all(&root).unwrap();
-    let stub = root.join("stub-aoide");
+    let stub = root.join("aoide");
     std::fs::write(
         &stub,
         format!(

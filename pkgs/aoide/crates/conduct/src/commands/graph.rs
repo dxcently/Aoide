@@ -473,6 +473,16 @@ pub fn register(r: &mut Registry) {
         examples: ["session codex sync"],
     ));
     r.insert(cmd!(
+        path: ["session", "show"],
+        summary: "Show one local session's window and workspace, read-only: the facts the desktop's focus verb needs. `<id>` is an exact session id, as `session find` prints it. No stage write, no lock, no daemon. Refused as `session-not-found` when no local record carries the id.",
+        args: [arg!("id", "string", true, "Exact local session id.")],
+        flags: [],
+        gated: false,
+        implemented: true,
+        handler: crate::graph::session_show,
+        examples: ["session show 7e3f5976-98b2-44a4-827c-c687a0d9526e"],
+    ));
+    r.insert(cmd!(
         path: ["session", "bind"],
         summary: "Bind a local executor to an explicit enduring agent key; idempotent, refuses a conflicting binding, requires aoided. Does not grant access or require Mneme.",
         args: [],

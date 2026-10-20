@@ -943,7 +943,7 @@ fn a_call_that_did_not_run_is_tried_again_on_the_next_tick() {
     let _guard = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
     let _sig = no_compositor();
     let (_core, core_root) = stub_core_door("owed-not-run");
-    let stub = core_root.join("stub-aoide");
+    let stub = core_root.join("aoide");
     std::fs::set_permissions(&stub, std::os::unix::fs::PermissionsExt::from_mode(0o644)).unwrap();
     let mut owed = Owed::default();
     owed.window_closed("55aabb".into());

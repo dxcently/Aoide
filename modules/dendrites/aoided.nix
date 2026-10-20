@@ -470,8 +470,7 @@ in
           # unconditionally: it is the fallback the whole unit's reachability
           # rests on, and the only dialog a host without strillix ever gets.
           #
-          # `quickshell` rides the SAME condition as `AOIDE_DIALOG_CMD` below,
-          # and for the same one reason: `strillix pair ask` spawns quickshell by
+          # `quickshell` rides the strillix fact, and for the one reason: `strillix pair ask` spawns quickshell by
           # bare name, so the unit that can spawn strillix must carry it — and the
           # unit can only spawn strillix when `aoide.strillix.enable` put the binary
           # there. A host without strillix takes the zenity path and has no use
@@ -498,14 +497,9 @@ in
               "STRILLIX_ROOT=${config.aoide.strillix.root}"
               "AOIDE_FLAKE_ROOT=${config.aoide.checkout}"
               "AOIDE_USER=${config.aoide.user}"
-            ]
-            # `pair_watch` runs the dialog provider that `AOIDE_DIALOG_CMD` names
-            # (`dialog_provider`), never a guess at PATH. `strillix` ships from
-            # `pkgs.aoide.strillix`, a SEPARATE output from the `aoide` binary this
-            # unit execs, so the provider is named explicitly here. Only set when
-            # `aoide.strillix.enable` is actually on — mirrors
-            # `aoide-secrets-watch`'s own identical guard.
-            ++ lib.optional config.aoide.strillix.enable "AOIDE_DIALOG_CMD=${pkgs.aoide.strillix}/bin/strillix";
+            ];
+            # `pair_watch` runs the dialog provider `AOIDE_DIALOG_CMD` names. The desktop's home half sets
+            # it on the user manager's environment, so this unit inherits it (D17).
 
             NoNewPrivileges = true;
             StandardOutput = "journal";

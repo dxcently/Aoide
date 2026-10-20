@@ -139,7 +139,7 @@ pub(crate) fn workspace_reply(
 pub(crate) fn dispatch_workspace_action(workspace: Option<i64>, binding: &WorkspaceBinding) -> Value {
     let action = binding.as_str();
     let Some(ws) = workspace.or_else(focused_workspace) else {
-        audit_bridge_action("workspace", action, "workspaceaction-failed", "failed");
+        audit_bridge_action(&super::audit_log(), "workspace", action, "workspaceaction-failed", "failed");
         return json!({
             "ok": false,
             "action": action,
@@ -153,6 +153,7 @@ pub(crate) fn dispatch_workspace_action(workspace: Option<i64>, binding: &Worksp
             let reply = workspace_reply(binding, ws, exited_ok, &stdout, &stderr);
             let ok = reply.get("ok").and_then(Value::as_bool).unwrap_or(false);
             audit_bridge_action(
+                &super::audit_log(),
                 "workspace",
                 action,
                 if ok { "workspaceaction" } else { "workspaceaction-failed" },
@@ -161,7 +162,7 @@ pub(crate) fn dispatch_workspace_action(workspace: Option<i64>, binding: &Worksp
             reply
         }
         Err(message) => {
-            audit_bridge_action("workspace", action, "workspaceaction-failed", "failed");
+            audit_bridge_action(&super::audit_log(), "workspace", action, "workspaceaction-failed", "failed");
             json!({
                 "ok": false,
                 "message": message,
@@ -178,7 +179,7 @@ mod tests {
     use crate::bridge::testutil::env_lock;
     use crate::bridge::testutil::short_sock;
     use aoide_conduct::shellbridge::serve;
-    use crate::bridge::VERBS;
+    use crate::bridge::SOCKET;
     use crate::bridge::testutil::{stub_workspace_core};
     use aoide_test_support::sv;
     use std::io::{BufRead, BufReader};
@@ -547,7 +548,7 @@ mod tests {
 
         let sock = short_sock("ws-refused");
         let listener = UnixListener::bind(&sock).unwrap();
-        std::thread::spawn(move || serve(&listener, VERBS)); // never joined
+        std::thread::spawn(move || serve(&listener, &SOCKET)); // not joined
 
         let mut client = UnixStream::connect(&sock).unwrap();
         {

@@ -410,7 +410,7 @@ mod tests {
     use crate::bridge::testutil::env_lock;
     use crate::bridge::testutil::short_sock;
     use aoide_conduct::shellbridge::serve;
-    use crate::bridge::VERBS;
+    use crate::bridge::SOCKET;
     use crate::bridge::testutil::{stub_argv_log, stub_rice_bin};
     use aoide_test_support::sv;
     use std::io::{BufRead, BufReader};
@@ -875,7 +875,7 @@ mod tests {
 
         let sock = short_sock("menu");
         let listener = UnixListener::bind(&sock).unwrap();
-        std::thread::spawn(move || serve(&listener, VERBS)); // never joined
+        std::thread::spawn(move || serve(&listener, &SOCKET)); // not joined
 
         use std::io::Write;
         let mut refused = UnixStream::connect(&sock).unwrap();

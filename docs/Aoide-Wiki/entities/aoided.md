@@ -39,7 +39,7 @@ the log in order: `--audit-log` flag → `$AOIDE_AUDIT_LOG` → `$AOIDE_ROOT/log
 The real policy-surface code paths: the audit log is **JSON-lines** (one
 record per append, tagged with door / event class / status), appended for
 every dispatch through either door. The neutral event stream is a real
-default-deny-per-class type (classes: audit, gate, rice, content,
+default-deny-per-class type (classes: audit, gate, content,
 notification) — a forwarded notification is denied unless `Notification` is
 explicitly subscribed, and even then it is carried as opaque `untrusted_data`,
 never executed. The user rebuild gate is **propose-only**: `propose()` records

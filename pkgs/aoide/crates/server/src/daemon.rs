@@ -261,7 +261,7 @@ pub fn run(log_path: PathBuf) -> serde_json::Value {
             "agentCanAdmit": false,
             "lastProposal": proposal.description,
         },
-        "eventClasses": ["audit", "gate", "rice", "content", "notification"],
+        "eventClasses": ["audit", "gate", "content", "notification"],
     })
 }
 
@@ -1364,6 +1364,11 @@ pub fn run_loop(
     let accept_watcher = Arc::clone(&hand_edit_watcher);
     std::thread::Builder::new()
         .spawn(move || accept_loop(listener, accept_events_path, registry, dispatch, accept_watcher))?;
+
+    // The core shellbridge (aoide/shellbridge.sock) starts after this daemon's own locks
+    // and socket are bound, so the stale-socket unlink inside it cannot hit a live one.
+    // Not gated on strillix: core's widgets and notifications run with no desktop process.
+    std::thread::Builder::new().spawn(aoide_conduct::shellbridge::run_core)?;
 
     // P-D8 boot-time auto-resume (module doc's "Open knobs" — decided: daemon
     // start). Runs ONCE here, at `run_loop` entry — never inside the tick

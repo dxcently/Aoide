@@ -19,7 +19,11 @@ pub fn registry() -> &'static Registry {
     REGISTRY.get_or_init(crate::commands::all)
 }
 
-pub(crate) use aoide_protocol::audit_log_path;
+/// The audit log one invocation writes to: `--audit-log` when given, else the desktop's own
+/// `$STRILLIX_ROOT/log`. Core keeps `$AOIDE_ROOT/log`.
+fn audit_log_path(inv: &Invocation) -> std::path::PathBuf {
+    inv.flags.get("audit-log").map(std::path::PathBuf::from).unwrap_or_else(strillix_rice::paths::audit_log)
+}
 
 /// Dispatch one invocation to its handler and return the structured outcome.
 /// Every path here also appends to the single audit log — strillix inherits the

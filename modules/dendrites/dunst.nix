@@ -135,7 +135,7 @@
         # suppressed.
         #
         # The script is `strx notifications push`, which reads the DUNST_* environment
-        # and writes the record over $AOIDE_BRIDGE_SOCKET. It is a real command and
+        # and writes the record to aoided's socket (`aoide/shellbridge.sock`). It is a real command and
         # not a shell wrapper on purpose: notification bodies are arbitrary
         # sender text, and hand-rolled shell JSON escaping is a bug farm.
         #

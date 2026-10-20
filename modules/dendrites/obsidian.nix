@@ -51,9 +51,6 @@
         # behavior the header comment describes) or a real
         # `aoide bridge register-window-class` command.
         ExecStart = "${pkgs.coreutils}/bin/true";
-        Environment = [
-          "AOIDE_BRIDGE_SOCKET=%t/aoide/shellbridge.sock"
-        ];
         NoNewPrivileges = true;
       };
     };

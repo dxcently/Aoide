@@ -214,6 +214,27 @@ else
     "$(y '(.migrateRoots.data // "") | contains("STRILLIX_MIGRATE=1 ") and contains("/bin/strillix --help")')"
 fi
 
+# ── the cmd routing table (ShellBridge.qml) ──────────────────────────────────
+# Static, no nix: the 17 wire cmds of the Bridge section each sit on exactly one
+# socket, the table's owner matches the parser that serves the cmd, and nothing
+# is unrouted. The QML `routes` table is the only place the QML knows the split.
+qml="$root/pkgs/strillix-shell/qml/ShellBridge.qml"
+core_rs="$root/pkgs/aoide/crates/conduct/src/shellbridge.rs"
+desk_rs="$root/pkgs/aoide/crates/strillix/src/bridge/mod.rs"
+table=$(awk '/readonly property var routes/{on=1;next} on&&/^ *\}\)/{exit} on' "$qml" \
+  | sed -nE 's/^ *([a-z]+): *"(core|desktop)",?$/\1 \2/p')
+owners() { printf '%s\n' "$table" | awk -v o="$1" '$2==o{print $1}' | LC_ALL=C sort | tr '\n' ' '; }
+want_core="notificationsdismiss notificationspush notificationsverdict projectaction rechecksessions refreshusage sessionaction sessiontrace "
+want_desk="component focussession focuswindow power ricedeclare ricedraft ricemenu ricemode workspaceaction "
+check "routes: 17 cmds, one entry each"      "17" "$(printf '%s\n' "$table" | grep -c .)"
+check "routes: no cmd on two sockets"        "0"  "$(printf '%s\n' "$table" | awk '{print $1}' | sort | uniq -d | grep -c .)"
+check "routes: core cmds are the core set"   "$want_core" "$(owners core)"
+check "routes: desktop cmds are the desktop set" "$want_desk" "$(owners desktop)"
+served_core=$(awk '/^pub fn parse_command/{on=1} on&&/^}/{exit} on' "$core_rs" | grep -oE '^ {8}"[a-z]+" =>' | grep -oE '[a-z]+' | LC_ALL=C sort | tr '\n' ' ')
+served_desk=$(awk '/^pub const VERBS/{on=1} on&&/^\];/{exit} on' "$desk_rs" | grep -oE 'cmd: "[a-z]+"' | grep -oE '[a-z]+"?$' | tr -d '"' | LC_ALL=C sort | tr '\n' ' ')
+check "routes: core parser serves the core set" "$want_core" "$served_core"
+check "routes: desktop verbs are the desktop set" "$want_desk" "$served_desk"
+
 printf '%s\n' "-----------------------------------------------------------------"
 printf '%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

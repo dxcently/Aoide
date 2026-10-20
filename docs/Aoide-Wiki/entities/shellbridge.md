@@ -168,9 +168,8 @@ The socket handler's `focus_window` shells out to `hyprctl`; the
 window→session event listener reads Hyprland's request socket and needs no
 PATH. A systemd user unit's default PATH is
 minimal (coreutils/findutils/grep/sed/systemd) and excludes the compositor,
-so a unit-level `path = [ pkgs.hyprland ]` on both the `shellbridge` and
-`aoide-graph-reap` services (`modules/dendrites/strillix/shellbridge.nix`) puts
-`hyprctl` on PATH explicitly. It is a *unit* option, a sibling of
+so a unit-level `path = [ pkgs.hyprland ]` on the `shellbridge` service
+(`modules/dendrites/strillix/shellbridge.nix`) puts `hyprctl` on PATH explicitly. It is a *unit* option, a sibling of
 `serviceConfig`, not a `serviceConfig` key — nesting it there emits an inert
 raw `path=` line and PATH stays broken. Without it, every widget click
 fails with `hyprctl unavailable: No such file or directory` (audited as

@@ -396,7 +396,8 @@ either binary. Exit codes are contractual, identical in both binaries: 0 ok,
 1 error, 2 usage, 64 not-implemented.
 
 On the host, the plane runs as systemd user units, all from the nucleus:
-`aoided`, `shellbridge` (socket `$XDG_RUNTIME_DIR/aoide/shellbridge.sock`),
+`aoided` (core shellbridge on `$XDG_RUNTIME_DIR/aoide/shellbridge.sock`),
+`shellbridge` (desktop socket `$XDG_RUNTIME_DIR/strillix/bridge.sock`),
 the `aoide-graph-reap` timer (the liveness reaper, ~12s interval, sweeps
 sessions a killed terminal could never mark `done`),
 `aoide-melete-adapter`, and `aoide-mcp` (gated on `aoide.mcp.enable`, default

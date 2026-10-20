@@ -5,6 +5,7 @@
   imports = [
     ./options.nix
     ./aoided.nix
+    ./reap.nix
   ];
   nixpkgs.overlays = [ self.overlays.default ];
 }

@@ -140,6 +140,12 @@ lib.mkIf config.aoide.enable {
       Restart = "on-failure";
       RestartSec = "5s";
 
+      # aoided owns `$XDG_RUNTIME_DIR/aoide/`: its control socket and the core shellbridge
+      # (`aoide/shellbridge.sock`) are bound there. Owner-only, like every runtime dir here.
+      RuntimeDirectory = "aoide";
+      RuntimeDirectoryMode = "0700";
+      RuntimeDirectoryPreserve = "yes";
+
       # Audit log path comes from the option contract (modules/nucleus/options.nix).
       # Passed as an environment variable so the daemon picks it up without a
       # secondary config file. The control socket and events feed need no

@@ -199,6 +199,19 @@ pub fn core_bin() -> String {
     resolve_bin("AOIDE_CORE_BIN", "aoide")
 }
 
+/// Is an aoide program here? It is [`core_bin`]'s answer when that is a program named `aoide`
+/// (`aoide.exe` on Windows) that exists: an absolute path is checked where it is, a bare name is
+/// looked up on `PATH` with [`on_path`]. A program named anything else does not count. A refusal
+/// that names `aoide` to a person asks this first.
+pub fn core_present() -> bool {
+    let bin = core_bin();
+    let path = Path::new(&bin);
+    if !path.file_stem().is_some_and(|stem| stem == "aoide") {
+        return false;
+    }
+    if path.is_absolute() { path.is_file() } else { on_path(&bin) }
+}
+
 /// Is `name` a program discoverable on `PATH`? The proactive probe the tier
 /// logic above deliberately skips: tier 3 (the bare name) is left for
 /// `Command::spawn` to resolve at exec time rather than checked here, but a

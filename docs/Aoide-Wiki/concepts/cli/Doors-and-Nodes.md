@@ -248,7 +248,7 @@ aoide adapter melete [--run] [--json]
 ```
 
 - **Reads:** env `$AOIDE_ADAPTER_SUBSCRIBE` — a comma-separated allow-list of
-  event classes (`audit`, `gate`, `rice`, `content`, `notification`); unknown
+  event classes (`audit`, `gate`, `content`, `notification`); unknown
   names are ignored and nothing is allowed by default.
 - **Writes:** appends one `adapter.melete started` audit record (door
   `daemon`) to the default audit log.

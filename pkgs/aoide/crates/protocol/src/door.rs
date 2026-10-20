@@ -64,7 +64,7 @@
 //! (CONTRACTS.md §3 states the "never gated" rule as permanent, by
 //! construction, not merely by omission today).
 
-use crate::audit::{audit, default_audit_log, Door, EventClass};
+use crate::audit::{audit, Door, EventClass};
 use crate::invocation::Invocation;
 use crate::help::{self, Row};
 use crate::output::{exit, Fix, Kind, Outcome, Status};
@@ -303,18 +303,16 @@ fn command_for<'a>(path: &[String], registry: &'a Registry) -> Option<&'a Comman
     registry.get(path)
 }
 
-/// Heads only `aoide` registers, heads only `strillix` registers, and heads both
-/// do (`cli`'s and `strillix`'s registry tests pin all three against the real
-/// registries). A typed head the running binary lacks but the other owns
-/// gets a "run it there" refusal instead of a did-you-mean.
+/// Heads only `aoide` registers, and heads both do (`cli`'s and `strillix`'s
+/// registry tests pin them against the real registries). A typed head the running
+/// binary lacks but `aoide` owns is refused instead of a did-you-mean: the refusal
+/// names the command to run in `aoide` when `AOIDE_CORE_BIN` or `PATH` finds an
+/// aoide binary, and says aoide is not installed when neither does. Core names no
+/// desktop head: a `strillix` verb typed at `aoide` is an unknown command there.
 pub const AOIDE_ONLY_HEADS: &[&str] = &[
     "a2a", "adapter", "conduct", "conductor", "config", "content", "context", "daemon", "events", "graph",
     "hooks", "identity", "mail", "make", "melete", "mesh", "node", "project", "resurrect", "send", "session",
     "soundcheck", "spawn", "update", "usage", "workspace",
-];
-pub const STRILLIX_ONLY_HEADS: &[&str] = &[
-    "apps", "clipboard", "component", "wallpaper", "element", "notifications", "icon", "theme", "lock", "preview", "quickshell", "reload",
-    "rice", "screen", "shellbridge", "migrate",
 ];
 pub const SHARED_HEADS: &[&str] = &["guide", "mcp", "onboard", "pair", "schema", "secrets"];
 
@@ -324,7 +322,6 @@ fn other_binary(head: &str, bin_name: &str, registry: &Registry) -> Option<&'sta
         return None;
     }
     match bin_name {
-        "aoide" if STRILLIX_ONLY_HEADS.contains(&head) => Some("strillix"),
         "strillix" if AOIDE_ONLY_HEADS.contains(&head) => Some("aoide"),
         _ => None,
     }
@@ -346,13 +343,15 @@ fn unknown_command_outcome(positionals: &[String], registry: &Registry, bin_name
         return help_outcome(&positionals.join("."), listing);
     }
     if let Some(other) = other_binary(&positionals[0], bin_name, registry) {
-        return Outcome::refuse(
-            positionals[0].clone(),
-            Kind::Usage,
-            format!("`{}` is {} command, not {} one", positionals[0], article_for(other), article_for(bin_name)),
-            format!("{other} owns it; `{bin_name}` does not register it"),
-            Fix::Run(format!("{other} {}", positionals.join(" "))),
-        );
+        let what = format!("`{}` is {} command, not {} one", positionals[0], article_for(other), article_for(bin_name));
+        let (why, fix) = if crate::bin::core_present() {
+            let run = format!("{other} {}", positionals.join(" "));
+            (format!("{other} owns it; `{bin_name}` does not register it"), Fix::Run(run))
+        } else {
+            let absent = "it belongs to Aoide, which is not installed on this host";
+            (absent.to_string(), Fix::None("nothing on this host runs it"))
+        };
+        return Outcome::refuse(positionals[0].clone(), Kind::Usage, what, why, fix);
     }
     let mut message = format!("unknown command: `{}`", positionals.join(" "));
     let suggestions = did_you_mean(positionals, registry);
@@ -782,8 +781,9 @@ fn probe_external(argv: &[String], bin_name: &str, registry: &Registry) -> Optio
 /// A spawn failure (bad binary, permission denied) is audited `"error"` and
 /// exits [`exit::ERROR`], reason on stderr, same shape `session_conduct`
 /// (`crates/conduct/src/graph/conduct.rs`) uses for its own spawn failure.
-fn run_external(path: &std::path::Path, args: &[String], bin_name: &str, name: &str) -> i32 {
-    let log = default_audit_log();
+/// `log` is the audit log the launch is written to: core's for `aoide`, the
+/// desktop's own for `strillix`.
+fn run_external(path: &std::path::Path, args: &[String], bin_name: &str, name: &str, log: &std::path::Path) -> i32 {
     let command = format!("external.{name}");
     let mut child = match Process::new(path)
         .args(args)
@@ -794,13 +794,13 @@ fn run_external(path: &std::path::Path, args: &[String], bin_name: &str, name: &
     {
         Ok(c) => c,
         Err(e) => {
-            let _ = audit(&log, Door::Cli, EventClass::Audit, &command, "error", &format!("{}: {e}", path.display()));
+            let _ = audit(log, Door::Cli, EventClass::Audit, &command, "error", &format!("{}: {e}", path.display()));
             eprintln!("{bin_name} {name}: spawning `{}`: {e}", path.display());
             return exit::ERROR;
         }
     };
     let _ = audit(
-        &log,
+        log,
         Door::Cli,
         EventClass::Audit,
         &command,
@@ -830,16 +830,20 @@ fn wants_json(argv: &[String]) -> bool {
 /// `Some(code)` short-circuits `run` with that exit code (the special case
 /// already did its own printing); `None` falls through to the uniform
 /// dispatch+render path below, unchanged from every other command.
+///
+/// `audit_log` is where a launched external command is audited: the caller's own
+/// log, so each binary keeps its own.
 pub fn run(
     argv: &[String],
     door: Door,
     bin_name: &str,
     registry: &Registry,
+    audit_log: &std::path::Path,
     dispatch: fn(&Invocation) -> Outcome,
     special: impl FnOnce(&Invocation, bool) -> Option<i32>,
 ) -> i32 {
     if let Some(path) = probe_external(argv, bin_name, registry) {
-        return run_external(&path, &argv[1..], bin_name, &argv[0]);
+        return run_external(&path, &argv[1..], bin_name, &argv[0], audit_log);
     }
 
     let json = wants_json(argv);
@@ -1531,7 +1535,7 @@ mod tests {
         );
 
         let reg = test_registry();
-        let code = run(&argv(&["deploy", "--env", "prod", "x"]), Door::Cli, "aoide", &reg, noop, |_inv, _json| None);
+        let code = run(&argv(&["deploy", "--env", "prod", "x"]), Door::Cli, "aoide", &reg, &crate::audit::default_audit_log(), noop, |_inv, _json| None);
         assert_eq!(code, 42, "argv[1..] must reach the child verbatim");
 
         restore_path(dir, saved);
@@ -1551,7 +1555,7 @@ mod tests {
         std::env::set_var("AOIDE_AUDIT_LOG", &log);
 
         let path = std::path::PathBuf::from("/definitely/not/a/real/path/aoide-deploy");
-        let code = run_external(&path, &[], "aoide", "deploy");
+        let code = run_external(&path, &[], "aoide", "deploy", &log);
         assert_eq!(code, exit::ERROR);
 
         match saved_log {
@@ -1588,6 +1592,7 @@ mod tests {
             Door::Cli,
             "aoide",
             &reg,
+            &crate::audit::default_audit_log(),
             noop,
             |_inv, _json| None,
         );
@@ -1610,7 +1615,7 @@ mod tests {
     fn run_falls_through_to_dispatch_when_special_declines() {
         let _guard = crate::bin::path_test_lock().lock().unwrap_or_else(|e| e.into_inner());
         let reg = test_registry();
-        let code = run(&argv(&["graph", "view"]), Door::Cli, "aoide", &reg, noop, |_inv, _json| None);
+        let code = run(&argv(&["graph", "view"]), Door::Cli, "aoide", &reg, &crate::audit::default_audit_log(), noop, |_inv, _json| None);
         assert_eq!(code, exit::OK);
     }
 
@@ -1618,7 +1623,7 @@ mod tests {
     fn run_short_circuits_when_special_claims_the_invocation() {
         let _guard = crate::bin::path_test_lock().lock().unwrap_or_else(|e| e.into_inner());
         let reg = test_registry();
-        let code = run(&argv(&["graph", "view"]), Door::Cli, "aoide", &reg, noop, |_inv, _json| Some(exit::NOT_IMPLEMENTED));
+        let code = run(&argv(&["graph", "view"]), Door::Cli, "aoide", &reg, &crate::audit::default_audit_log(), noop, |_inv, _json| Some(exit::NOT_IMPLEMENTED));
         assert_eq!(code, exit::NOT_IMPLEMENTED);
     }
 
@@ -1748,19 +1753,116 @@ mod tests {
         assert_eq!(tie, vec!["alpha go"]);
     }
 
+    /// `AOIDE_CORE_BIN` set to `value`, or unset for `None`, for one test. Returns the value it
+    /// replaced, for [`restore_core_bin`]. Callers hold `crate::bin::path_test_lock()`.
+    fn scoped_core_bin(value: Option<&std::path::Path>) -> Option<std::ffi::OsString> {
+        let saved = std::env::var_os("AOIDE_CORE_BIN");
+        match value {
+            Some(path) => std::env::set_var("AOIDE_CORE_BIN", path),
+            None => std::env::remove_var("AOIDE_CORE_BIN"),
+        }
+        saved
+    }
+
+    fn restore_core_bin(saved: Option<std::ffi::OsString>) {
+        match saved {
+            Some(v) => std::env::set_var("AOIDE_CORE_BIN", v),
+            None => std::env::remove_var("AOIDE_CORE_BIN"),
+        }
+    }
+
+    /// `spawn x` typed at strillix, refused: the rendered text and the `fix` the refusal names.
+    fn refused_spawn_at_strillix() -> (String, serde_json::Value) {
+        let reg = test_registry();
+        let back = parse(&argv(&["spawn", "x"]), Door::Cli, "strillix", &reg).unwrap_err();
+        let fix = back.data.as_ref().map(|d| d["refusal"]["fix"].clone()).unwrap_or_default();
+        (back.render(false).0, fix)
+    }
+
+    /// An aoide head typed at strillix names `aoide` and the command to run when an aoide binary
+    /// is on `PATH`.
     #[test]
-    fn a_head_the_other_binary_owns_says_where_to_run_it() {
+    fn a_core_head_typed_at_strillix_names_aoide_when_aoide_is_on_path() {
+        let _guard = crate::bin::path_test_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_core = scoped_core_bin(None);
+        let (dir, saved) = scoped_empty_path("core_on_path");
+        write_executable(&dir, "aoide", "#!/bin/sh\nexit 0\n");
+
+        let (text, fix) = refused_spawn_at_strillix();
+        assert!(text.contains("`spawn` is an aoide command, not a strillix one"), "{text}");
+        assert!(text.contains("why: aoide owns it; `strillix` does not register it"), "{text}");
+        assert!(text.contains("fix: aoide spawn x"), "{text}");
+        assert_eq!(fix, serde_json::json!({ "run": "aoide spawn x" }));
+
+        restore_path(dir, saved);
+        restore_core_bin(saved_core);
+    }
+
+    /// The same refusal when `AOIDE_CORE_BIN` names an aoide binary that is not on `PATH`.
+    #[test]
+    fn a_core_head_typed_at_strillix_names_aoide_when_core_bin_names_a_file() {
+        let _guard = crate::bin::path_test_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (dir, saved) = scoped_empty_path("core_by_env");
+        let elsewhere = dir.join("elsewhere");
+        std::fs::create_dir_all(&elsewhere).unwrap();
+        let stub = write_executable(&elsewhere, "aoide", "#!/bin/sh\nexit 0\n");
+        let saved_core = scoped_core_bin(Some(stub.as_path()));
+
+        let (text, fix) = refused_spawn_at_strillix();
+        assert!(text.contains("why: aoide owns it; `strillix` does not register it"), "{text}");
+        assert_eq!(fix, serde_json::json!({ "run": "aoide spawn x" }));
+
+        restore_core_bin(saved_core);
+        restore_path(dir, saved);
+    }
+
+    /// With no aoide on `PATH` and `AOIDE_CORE_BIN` unset, the refusal says aoide is not installed
+    /// on this host and offers no command to run.
+    #[test]
+    fn a_core_head_typed_at_strillix_says_aoide_is_not_installed_when_none_resolves() {
+        let _guard = crate::bin::path_test_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_core = scoped_core_bin(None);
+        let (dir, saved) = scoped_empty_path("core_absent");
+
+        let (text, fix) = refused_spawn_at_strillix();
+        assert!(text.contains("`spawn` is an aoide command, not a strillix one"), "{text}");
+        assert!(text.contains("why: it belongs to Aoide, which is not installed on this host"), "{text}");
+        assert!(text.contains("fix: none: nothing on this host runs it"), "{text}");
+        assert_eq!(fix, serde_json::json!({ "none": "nothing on this host runs it" }));
+
+        restore_path(dir, saved);
+        restore_core_bin(saved_core);
+    }
+
+    /// `AOIDE_CORE_BIN` is taken as named, without a look at the file, so an override that names
+    /// no file counts as not installed even when `PATH` holds an aoide.
+    #[test]
+    fn a_core_bin_override_that_names_no_file_is_not_installed_even_with_aoide_on_path() {
+        let _guard = crate::bin::path_test_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (dir, saved) = scoped_empty_path("core_stale_env");
+        write_executable(&dir, "aoide", "#!/bin/sh\nexit 0\n");
+        let missing = dir.join("gone").join("aoide");
+        let saved_core = scoped_core_bin(Some(missing.as_path()));
+
+        let (text, fix) = refused_spawn_at_strillix();
+        assert!(text.contains("why: it belongs to Aoide, which is not installed on this host"), "{text}");
+        assert_eq!(fix, serde_json::json!({ "none": "nothing on this host runs it" }));
+
+        restore_core_bin(saved_core);
+        restore_path(dir, saved);
+    }
+
+    /// A desktop head typed at core is an unknown command, not a redirect.
+    #[test]
+    fn a_desktop_head_typed_at_aoide_is_not_redirected() {
         let _guard = crate::bin::path_test_lock().lock().unwrap_or_else(|e| e.into_inner());
         let reg = test_registry();
         let err = parse(&argv(&["rice", "stage", "dusk"]), Door::Cli, "aoide", &reg).unwrap_err();
         assert_eq!(err.status, Status::Usage);
         assert_eq!(err.command, "rice", "typed arguments never leak into the command id");
         let text = err.render(false).0;
-        assert!(text.contains("`rice` is a strillix command, not an aoide one"), "{text}");
-        assert!(text.contains("fix: strillix rice stage dusk"), "{text}");
-
-        let back = parse(&argv(&["spawn", "x"]), Door::Cli, "strillix", &reg).unwrap_err();
-        assert!(back.render(false).0.contains("`spawn` is an aoide command, not a strillix one"), "{}", back.message);
+        assert!(!text.contains("strillix"), "core names no desktop head: {text}");
+        assert!(text.contains("unknown command: `rice stage dusk`"), "{text}");
     }
 
     #[test]

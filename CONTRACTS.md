@@ -4023,8 +4023,8 @@ keeps it off the wire for a project no binding has touched — the
 field stays byte-identical. Written by `workspace set` (under the same stage
 lock local roots go through; daemon-owned, like every other `projects.json`
 mutation) and by `workspace clear` — and, from a desktop click, through the
-shellbridge socket's `workspaceaction` (W-P5), which re-execs those same two
-commands and writes nothing itself. ONE INVARIANT: a workspace id appears in AT
+desktop's socket's `workspaceaction` (W-P5), which execs those same two
+commands through the door and writes nothing itself. ONE INVARIANT: a workspace id appears in AT
 MOST ONE project — `workspace set` MOVES it off whatever project held it —
 while two workspaces may show the same project. A binding is not a root: it
 anchors nothing by cwd, a rootless project may carry one, and `project remove
@@ -4041,7 +4041,7 @@ below) — the resolved projection the bar/dock widgets already hot-reload, so a
 binding arrives in the same atomic rewrite as the roster. `aoide workspace
 list --json` prints the same block for a terminal door. A
 click binds or unbinds by sending ONE line to
-shellbridge's socket: `{"cmd":"workspaceaction","action":"set|clear",
+the desktop's socket (`$XDG_RUNTIME_DIR/strillix/bridge.sock`): `{"cmd":"workspaceaction","action":"set|clear",
 "workspace":<int, omitted = the focused one>,"project":"<name>","new":<bool>}`,
 answered with one JSON reply — `{ok, message, action, workspace, project?,
 data?}`, the CLI's own `message`/`data` verbatim, `project` only on `set`.
@@ -4281,8 +4281,8 @@ The notification ledger the Quickshell notifications draws from. Its
 `schemaVersion` is `"1"`. dunst owns
 `org.freedesktop.Notifications` but draws NOTHING (`skip_display` on every
 rule); it hands each notification to `strx notifications push` through its `script`
-hook, which forwards it over the shellbridge socket. **The shellbridge daemon
-is the single writer** — dunst runs its scripts asynchronously, so two
+hook, which forwards it over aoided's shellbridge socket. **aoided is the
+single writer** — dunst runs its scripts asynchronously, so two
 notifications arriving together would otherwise race a read-modify-write and
 one would be lost. QML only ever READS this file; a click sends a socket
 command (`notificationsverdict` / `notificationsdismiss`) and never writes.
@@ -10241,9 +10241,10 @@ node: `{ id: "node:<name>", kind: "node", name, url, state, children? }`.
   and NO `children`. `error` carries the last pull failure's reason when
   present. It is never a crash and never a silently dropped node.
 
-Local graph commands (`session prune`/`session reap`/`graph link`) and the focus
-jump (strillix's `focus_session`/`focus_window`, shellbridge-driven, no CLI
-command) keep ignoring `node:*` ids. The test
+Local graph commands (`session prune`/`session reap`/`graph link`), the local
+read `session show <id>` that the desktop's focus jump calls, and the jump itself
+(strillix's `focus_session`/`focus_window`, desktop-socket-driven) keep ignoring
+`node:*` ids. The test
 `conduct::graph::manage::tests::local_only_commands_ignore_node_ids` pins this.
 None of those commands reads `node_store`. They operate purely on
 `sessions.json`'s `SessionRecord`s, so a `node:*` id is never a session id they

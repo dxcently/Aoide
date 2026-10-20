@@ -1,5 +1,7 @@
 # AGENTS.md — pkgs/aoide/module
 
+`reap.nix` is core's liveness reaper: a timer and a oneshot `aoide session reap` service, gated on `aoide.enable` and started from `aoide.sessionTarget`.
+
 ## Invariants
 
 - **nixpkgs-only.** This directory lives inside the core flake (root

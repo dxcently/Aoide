@@ -490,6 +490,30 @@ pub fn session_window_closed(inv: &Invocation) -> Outcome {
     outcome
 }
 
+/// `aoide session show <id>`: one local session's window and workspace, read-only. The desktop's
+/// focus verb reads them through the door, not from `sessions.json` itself. `<id>` is an
+/// exact local session id; an id no record carries is refused as `session-not-found`.
+pub fn session_show(inv: &Invocation) -> Outcome {
+    let cmd = "session.show";
+    let id = inv.args.first().map_or("", |s| s.trim());
+    if id.is_empty() {
+        return Outcome::usage(cmd, "session show takes the id of a local session");
+    }
+    let file: SessionsFile = match load_stage(&sessions_path()) {
+        Ok(f) => f,
+        Err(e) => return super::common::stage_error(cmd, e),
+    };
+    let Some(rec) = file.sessions.iter().find(|s| s.session_id == id) else {
+        return Outcome::error(cmd, format!("no local session with id `{id}`"))
+            .with_data(json!({ "reason": "session-not-found", "sessionId": id }));
+    };
+    Outcome::ok(cmd, format!("session {id}")).with_data(json!({
+        "sessionId": rec.session_id,
+        "windowAddress": rec.window_address,
+        "workspace": rec.workspace,
+    }))
+}
+
 /// `aoide session window roster`, the terminal windows on stdin as a JSON array of `TermWindow`s:
 /// the one reconcile the desktop makes, a `win:*` record for each terminal window no tracked session
 /// claims and the removal of any whose window is gone. Requires aoided. The CLI leg reads stdin once
@@ -1804,6 +1828,32 @@ mod tests {
             pid,
             ..session(id, "/w", "working", &crate::graph::now_iso_utc(), None)
         }
+    }
+
+    /// `session show` answers one local session's window and workspace through the door, and
+    /// refuses an id no record carries as `session-not-found`: the two facts the desktop's focus verb
+    /// reads, and nothing else of the roster.
+    #[test]
+    fn session_show_answers_a_local_session_and_refuses_an_unknown_one() {
+        let _world = window_world("session-show");
+        let mut rec = ran_in("show-me", "0x55d0c2a1", None);
+        rec.workspace = Some(3);
+        write_stage(
+            &sessions_path(),
+            &SessionsFile { schema_version: "0".into(), sessions: vec![rec] },
+        )
+        .unwrap();
+
+        let found = session_show(&invocation(&["session", "show"], &["show-me"]));
+        assert_eq!(found.status, aoide_protocol::output::Status::Ok, "{}", found.message);
+        let data = found.data.expect("the answer carries its data");
+        assert_eq!(data["sessionId"], "show-me");
+        assert_eq!(data["windowAddress"], "0x55d0c2a1");
+        assert_eq!(data["workspace"], 3);
+
+        let missing = session_show(&invocation(&["session", "show"], &["nobody"]));
+        assert_eq!(missing.status, aoide_protocol::output::Status::Error);
+        assert_eq!(missing.data.expect("a refusal names its reason")["reason"], "session-not-found");
     }
 
     /// The roster verb through the door, its stdin payload on the flag the CLI leg forwards.

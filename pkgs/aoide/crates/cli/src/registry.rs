@@ -439,6 +439,7 @@ mod tests {
             "session.phase",
             "session.prune",
             "session.reap",
+            "session.show",
             "session.start",
             "session.trace",
             "session.watch",
@@ -720,7 +721,7 @@ mod tests {
     /// between binaries fails here instead of misdirecting a typo.
     #[test]
     fn cross_binary_heads_match_the_registry() {
-        use aoide_protocol::door::{AOIDE_ONLY_HEADS, STRILLIX_ONLY_HEADS, SHARED_HEADS};
+        use aoide_protocol::door::{AOIDE_ONLY_HEADS, SHARED_HEADS};
         let r = crate::commands::all();
         let mut heads: Vec<&str> = r.commands().map(|c| c.path[0]).collect();
         heads.sort();
@@ -728,7 +729,6 @@ mod tests {
         let mut expected: Vec<&str> = AOIDE_ONLY_HEADS.iter().chain(SHARED_HEADS).copied().collect();
         expected.sort();
         assert_eq!(heads, expected, "AOIDE_ONLY_HEADS + SHARED_HEADS must be exactly this binary's heads");
-        assert!(STRILLIX_ONLY_HEADS.iter().all(|h| !heads.contains(h)), "STRILLIX_ONLY_HEADS must not appear here");
     }
 
     /// The declarative fields are additive (CONTRACTS.md §3): a command that

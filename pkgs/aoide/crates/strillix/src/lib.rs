@@ -30,7 +30,7 @@ use daemon::Door;
 /// `conductor` — those are core identity, never strillix's (plan P-A4: "NO a2a
 /// serve, NO conductor").
 pub fn run_strillix(argv: &[String]) -> i32 {
-    aoide_protocol::door::run(argv, Door::Cli, "strillix", dispatch::registry(), dispatch::dispatch, |inv, json| {
+    aoide_protocol::door::run(argv, Door::Cli, "strillix", dispatch::registry(), &strillix_rice::paths::audit_log(), dispatch::dispatch, |inv, json| {
         // `mcp serve --stdio` is a long-running server, not a one-shot
         // dispatch. The registry + dispatcher are injected here (the DI
         // seam `aoide-server`'s module doc comment explains) — STRILLIX's own
@@ -58,7 +58,7 @@ pub fn run_strillix(argv: &[String]) -> i32 {
         if inv.path == ["schema"] {
             // Still record the read through the single audit log for parity.
             let _ = daemon::audit(
-                &daemon::default_audit_log(),
+                &strillix_rice::paths::audit_log(),
                 Door::Cli,
                 daemon::EventClass::Audit,
                 "schema",

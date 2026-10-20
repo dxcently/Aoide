@@ -57,9 +57,9 @@ in
       default = "/home/${config.aoide.user}/Aoide";
       defaultText = literalExpression ''"/home/''${config.aoide.user}/Aoide"'';
       description = ''
-        The dev git checkout — the seam `rice declare`'s commit-in step,
-        `aoide soundcheck`'s scan root, and the committed rices's `nix
-        eval` registry regen all read the checkout through. Exported as
+        The dev git checkout — the seam `aoide soundcheck`'s scan root and the
+        committed rices's `nix eval` registry regen all read the checkout through.
+        Exported as
         `AOIDE_FLAKE_ROOT` on the same units, and in `aoide.user`'s own login
         shells, as `aoide.root` is.
         Separate from the runtime root (`aoide.root`) since L-C2: composing

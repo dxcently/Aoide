@@ -32,6 +32,12 @@ pub fn stage_dir() -> std::path::PathBuf {
     strillix_root().join("stage")
 }
 
+/// The desktop's audit log: `$STRILLIX_ROOT/log`. Every strillix dispatch, bridge and schema
+/// line lands here; core keeps `$AOIDE_ROOT/log`.
+pub fn audit_log() -> std::path::PathBuf {
+    strillix_root().join("log")
+}
+
 /// The live-deployed QML tree the desktop shell reads: `$AOIDE_ROOT/run/qml/`
 /// (default `~/.aoide/run/qml/`), a sibling of `state/`. Never under the rice
 /// stage.

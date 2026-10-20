@@ -8,9 +8,10 @@
 # constructor (habit's `composition.mkNixosModules`, as
 # lib/strillix.nix does) over the host module below — plus the aoide package, greeter
 # wiring, the aoided user service, and the graph commands, without real hardware
-# or external network access. shellbridge is NOT exercised: its module gates on
-# the strillix enable fact (it exists to feed the painted shell), and this VM does
-# not select the strillix lane at all — see the trims below.
+# or external network access. The strillix shellbridge is NOT exercised: its
+# module gates on the strillix enable fact (it exists to feed the painted shell),
+# and this VM does not select the strillix lane at all — see the trims below.
+# The core shellbridge is aoided's own and IS exercised (socket and stage seeds).
 #
 # Wired in flake.nix as:
 #   checks.<system>.vm-boot = import ./tests/vm-boot.nix { inherit pkgs inputs lib; };
@@ -26,9 +27,10 @@
 #     NixOS Wayland closure; its autostart (`quickshell -c shell.qml`) cannot
 #     render on the virtual GPU.  The compositor lane IS selected because it
 #     wires programs.hyprland, and the greeter lane because the test asserts the
-#     ly unit.  Not selecting strillix also means shellbridge.service does not
-#     exist: shellbridge.nix gates on the strillix fact, so the test neither starts
-#     nor asserts it. With strillix unselected the VM also names NO rice: a rice
+#     ly unit.  Not selecting strillix also means strillix's shellbridge.service
+#     does not exist (shellbridge.nix gates on the strillix fact), so the test
+#     neither starts nor asserts it. With strillix unselected the VM also names
+#     NO rice: a rice
 #     with no strillix lane to paint it is refused by the platform
 #     (`modules/nucleus/assertions.nix`), and the palette the greeter reads is
 #     then nucleus's own default — still palette-shaped and non-stock, which is
@@ -181,8 +183,9 @@ pkgs.testers.runNixOSTest {
             # Quickshell/strillix/stylix are not SELECTED (heavy closure, and
             # quickshell cannot render on the virtual GPU), so nothing has to
             # switch them off: their facts default false in nucleus and their
-            # lanes are never imported. With strillix off, shellbridge.service does
-            # not exist at all, so the test neither starts nor asserts it.
+            # lanes are never imported. With strillix off, strillix's
+            # shellbridge.service does not exist at all, so the test neither starts
+            # nor asserts it (the core shellbridge is aoided's and is asserted).
             #
             # No rice: the rice half of the stack is strillix's (deploy, stage seed,
             # restart), and a rice named with no strillix lane is refused by the
@@ -295,11 +298,10 @@ pkgs.testers.runNixOSTest {
         assert line in ly_cfg, f"ly config missing {line}:\n{ly_cfg}"
 
     # ── 4. User service: aoided ──────────────────────────────────────────────
-    # shellbridge.service does not exist in this VM at all: shellbridge.nix
+    # strillix's shellbridge.service does not exist in this VM: shellbridge.nix
     # gates the whole module on the strillix enable fact (it exists to feed the
-    # painted shell), and this VM leaves that fact off — so only aoided is
-    # started and asserted here, and the stage files shellbridge would seed are
-    # not expected either.
+    # painted shell), and this VM leaves that fact off. The core shellbridge is
+    # aoided's own thread and is not gated on strillix, so its socket is asserted.
     # Enable linger so the user slice persists, then start it explicitly.
     machine.succeed("loginctl enable-linger khoa")
 
@@ -344,9 +346,12 @@ pkgs.testers.runNixOSTest {
         )
 
     assert_service_ran_ok("aoided.service")
+    # run_loop spawns run_core: it seeds the stage files, then binds the socket.
+    machine.wait_until_succeeds(f"test -S {runtime_dir}/aoide/shellbridge.sock", timeout=60)
 
-    # Stage dir: without shellbridge nothing pre-seeds sessions.json/hooks.json
-    # here; the graph commands below create what they need under this path via
+    # Stage dir: aoided's core shellbridge seeds sessions.json/hooks.json here
+    # before it binds its socket; the graph commands below create what they need
+    # under this path via
     # AOIDE_STAGE_DIR. Only conducting files (sessions.json, graph.json) are
     # ever touched under it — quickshell is disabled in this VM (see the
     # trims note at the top of this file), so nothing rice-shaped is
@@ -355,6 +360,7 @@ pkgs.testers.runNixOSTest {
     # $AOIDE_ROOT/state/stage: `project add` goes through that daemon, which
     # writes projects.json there, so the CLI graph must read the same file.
     stage_dir = "/home/khoa/.aoide/state/stage"
+    machine.succeed(f"test -s {stage_dir}/sessions.json && test -s {stage_dir}/hooks.json")
 
     # ── 5. Graph commands (run as khoa) ──────────────────────────────────────
     # AOIDE_STAGE_DIR is set explicitly because graph commands are invoked via
@@ -398,6 +404,9 @@ pkgs.testers.runNixOSTest {
     # VM) so prune has something to actually drop rather than taking its
     # no-op early return, then delete graph.json so its reappearance can
     # only be explained by THIS invocation (re)staging it.
+    # The reap timer is core's and runs in this VM too: a sweep between the seed and
+    # the prune would drop the probe first. Stop it, and any sweep in flight, here.
+    machine.succeed(user_cmd("systemctl --user stop aoide-graph-reap.timer aoide-graph-reap.service"))
     sessions_seed = json.dumps({
         "schemaVersion": "0",
         "sessions": [{"sessionId": "vmtest-prune-probe", "state": "done"}],

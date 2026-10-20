@@ -66,7 +66,7 @@ use daemon::Door;
 /// talks to the broker itself; see that crate's `commands` module doc for
 /// why its shape differs from `exec`/`enroll`.
 pub fn run_cli(argv: &[String]) -> i32 {
-    protocol::door::run(argv, Door::Cli, "aoide", dispatch::registry(), dispatch::dispatch, |inv, json| {
+    protocol::door::run(argv, Door::Cli, "aoide", dispatch::registry(), &protocol::default_audit_log(), dispatch::dispatch, |inv, json| {
         // `mcp serve --stdio` is a long-running server, not a one-shot dispatch.
         // The registry + dispatcher are injected here (the DI seam
         // `aoide-server`'s module doc comment explains — `aoide-server` cannot

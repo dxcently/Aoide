@@ -6,8 +6,10 @@
 // shellbridge dispatches to hyprctl.
 //
 // Protocol: newline-delimited JSON. Each command is a JSON object with a
-// "cmd" field and payload fields. The socket path is the shellbridge default:
-// $XDG_RUNTIME_DIR/aoide/shellbridge.sock (falls back to /run/user/<uid>/aoide/shellbridge.sock).
+// "cmd" field and payload fields. Two sockets under $XDG_RUNTIME_DIR (falling
+// back to /run/user/<uid>): aoide/shellbridge.sock serves the core cmds (aoided),
+// strillix/bridge.sock serves the desktop cmds (strillix). `routes` below is the
+// one table that names the split.
 // Every command is fire-and-forget except "sessionaction", "projectaction",
 // "workspaceaction", "sessiontrace", "ricemenu" and "ricedeclare", which are answered with
 // one JSON line on the same connection, which then closes.
@@ -22,14 +24,56 @@ import Quickshell.Io
 QtObject {
     id: root
 
-    // ── Socket path ────────────────────────────────────────────────────────
-    // shellbridge daemon writes its socket here. Every command connects to it
-    // fresh, over a socket of its own (see sendCommand and actionFactory).
-    readonly property string socketPath: {
-        var runtimeDir = Quickshell.env("XDG_RUNTIME_DIR")
-        if (!runtimeDir || runtimeDir.length === 0)
-            runtimeDir = "/run/user/" + Quickshell.env("UID")
-        return runtimeDir + "/aoide/shellbridge.sock"
+    // ── Sockets ────────────────────────────────────────────────────────────
+    // Every command connects fresh, over a socket of its own, to the socket
+    // its cmd is routed to (sendCommand and _ask).
+    readonly property string runtimeDir: {
+        var dir = Quickshell.env("XDG_RUNTIME_DIR")
+        if (!dir || dir.length === 0)
+            dir = "/run/user/" + Quickshell.env("UID")
+        return dir
+    }
+
+    // The one place the split lives: which owner serves each wire cmd. A cmd
+    // with no entry has no socket and is dropped. tests/quickshell-seam checks
+    // this table against both parsers, so each cmd sits on exactly one socket.
+    readonly property var routes: ({
+        focussession: "desktop",
+        focuswindow: "desktop",
+        power: "desktop",
+        component: "desktop",
+        ricemode: "desktop",
+        ricemenu: "desktop",
+        ricedraft: "desktop",
+        ricedeclare: "desktop",
+        workspaceaction: "desktop",
+        sessionaction: "core",
+        projectaction: "core",
+        sessiontrace: "core",
+        refreshusage: "core",
+        rechecksessions: "core",
+        notificationspush: "core",
+        notificationsverdict: "core",
+        notificationsdismiss: "core"
+    })
+
+    function socketFor(cmd) {
+        var owner = routes[cmd]
+        if (owner === "desktop")
+            return runtimeDir + "/strillix/bridge.sock"
+        if (owner === "core")
+            return runtimeDir + "/aoide/shellbridge.sock"
+        return ""
+    }
+
+    // A dropped command is logged once per cmd, not on every send: a sessiontrace
+    // poll against an absent aoided must not flood the journal.
+    property var _dropped: ({})
+    function _drop(cmd, why) {
+        if (_dropped[cmd] === true)
+            return
+        _dropped[cmd] = true
+        console.warn("ShellBridge: dropped '" + cmd + "', " + why)
     }
 
     // ── Session-jump ───────────────────────────────────────────────────────
@@ -121,8 +165,9 @@ QtObject {
     // line out, one JSON line back to `callback`. `unavailable` is what the
     // callback gets when no connection could be made at all.
     function _ask(wanted, callback, unavailable) {
-        var conn = actionFactory.createObject(root, {
-            path: root.socketPath,
+        var path = socketFor("" + wanted.cmd)
+        var conn = path.length === 0 ? null : actionFactory.createObject(root, {
+            path: path,
             cb: callback || null,
             wanted: wanted
         })
@@ -383,15 +428,20 @@ QtObject {
     // the daemon returns would be a shutdown nobody asked for. The connection
     // closes after its write, because the daemon serves one connection per thread.
     function sendCommand(obj) {
+        var path = socketFor("" + obj.cmd)
+        if (path.length === 0) {
+            _drop("" + obj.cmd, "no socket routes it")
+            return
+        }
         var conn = commandFactory.createObject(root, {
-            path: root.socketPath,
+            path: path,
             cmd: "" + obj.cmd,
             line: JSON.stringify(obj) + "\n"
         })
         if (conn)
             conn.connected = true
         else
-            console.warn("ShellBridge: could not open a socket for '" + obj.cmd + "', dropped")
+            _drop("" + obj.cmd, "could not open a socket")
     }
 
     // ── Command connection ──────────────────────────────────────────────────
@@ -414,7 +464,7 @@ QtObject {
             }
 
             onError: function (err) {
-                console.warn("ShellBridge: dropped '" + cmd + "', shellbridge unreachable")
+                root._drop(cmd, "shellbridge unreachable")
                 destroy()
             }
         }

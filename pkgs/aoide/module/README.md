@@ -17,9 +17,10 @@ package build from the same one-line input.
   `modules/dendrites/strillix/shellbridge.nix`) reads these options; this file only
   declares them.
 - `aoided.nix` — the `aoided` systemd user service itself: the tmpfiles
-  rules for the runtime tree and the core session variables
-  (`AOIDE_TERMINAL`, `AOIDE_ROOT`, `AOIDE_FLAKE_ROOT`), portable and
-  nixpkgs-only. The unit's `wantedBy`/`after` anchor to
+  rules for the core state tree, its `RuntimeDirectory` (`$XDG_RUNTIME_DIR/aoide/`,
+  which holds the control socket and the core shellbridge socket), and the core
+  session variables (`AOIDE_TERMINAL`, `AOIDE_ROOT`, `AOIDE_FLAKE_ROOT`), portable
+  and nixpkgs-only. The unit's `wantedBy`/`after` anchor to
   `aoide.sessionTarget` — the seam a paint-dependent value enters
   through, since this file may not read a lane's option directly. The lane
   that brings a graphical session up sets that option (the lane that ships

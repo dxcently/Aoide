@@ -1,9 +1,9 @@
-//! The desktop verbs of the shellbridge socket. `strillix shellbridge --run`
-//! hands [`VERBS`] to `aoide_conduct::shellbridge::run`, which owns the socket
-//! and the core verbs. A line naming one of these verbs is parsed here
-//! ([`parse_command`]) and served here ([`serve_line`]).
+//! The desktop verbs of the desktop's own shellbridge socket. `strillix shellbridge --run` serves
+//! [`SOCKET`] (`$XDG_RUNTIME_DIR/strillix/bridge.sock`) through `aoide_conduct::shellbridge::run_on`.
+//! Core's verbs are aoided's, on `aoide/shellbridge.sock`, and this process serves none of them. A line naming one of these verbs is parsed here ([`parse_command`]) and served here
+//! ([`serve_line`]).
 
-use aoide_conduct::shellbridge::{audit_bridge_action, drop_unparsed, wire_cmd, Flow, UnixStream, Verb};
+use aoide_conduct::shellbridge::{audit_bridge_action, drop_unparsed, wire_cmd, Flow, Socket, UnixStream, Verb};
 use aoide_protocol as daemon;
 use serde_json::{json, Value};
 
@@ -22,8 +22,22 @@ mod workspace;
 #[cfg(test)]
 pub(crate) mod testutil;
 
-/// The verbs `strillix shellbridge --run` registers on the shellbridge socket.
-/// Each is served by [`serve_line`]; core claims none of them.
+/// The desktop's socket: `$XDG_RUNTIME_DIR/strillix/bridge.sock`. ShellBridge.qml sends the
+/// desktop verbs here and the core verbs to aoided's socket.
+pub fn socket_path() -> std::path::PathBuf {
+    aoide_storage::runtime_dir::runtime_root().join("strillix").join("bridge.sock")
+}
+
+/// The audit log this socket's drops, refusals and outcomes land in: `$STRILLIX_ROOT/log`.
+pub fn audit_log() -> std::path::PathBuf {
+    strillix_rice::paths::audit_log()
+}
+
+/// The desktop socket's rules: the desktop verbs and no core arm, logged to the desktop's trail.
+pub static SOCKET: Socket = Socket { core: false, verbs: VERBS, log: audit_log };
+
+/// The verbs `strillix shellbridge --run` registers on its socket. Each is served by
+/// [`serve_line`]; no core verb is among them.
 pub const VERBS: &[Verb] = &[
     Verb { cmd: "focuswindow", serve: serve_line },
     Verb { cmd: "focussession", serve: serve_line },
@@ -201,7 +215,7 @@ pub(crate) fn serve_line(line: &str, reply: &mut Option<UnixStream>) -> Flow {
             let action = binding.as_str();
             let Some(mut reply) = reply.take() else {
                 let _ = daemon::audit(
-                    &daemon::default_audit_log(),
+                    &audit_log(),
                     daemon::Door::Daemon,
                     daemon::EventClass::Audit,
                     "shellbridge",
@@ -220,7 +234,7 @@ pub(crate) fn serve_line(line: &str, reply: &mut Option<UnixStream>) -> Flow {
         Some(BridgeCommand::Focus { address }) => match crate::hypr::focus_window(&address) {
             Ok(()) => {
                 let _ = daemon::audit(
-                    &daemon::default_audit_log(),
+                    &audit_log(),
                     daemon::Door::Daemon,
                     daemon::EventClass::Audit,
                     "shellbridge",
@@ -230,7 +244,7 @@ pub(crate) fn serve_line(line: &str, reply: &mut Option<UnixStream>) -> Flow {
             }
             Err(e) => {
                 let _ = daemon::audit(
-                    &daemon::default_audit_log(),
+                    &audit_log(),
                     daemon::Door::Daemon,
                     daemon::EventClass::Audit,
                     "shellbridge",
@@ -244,7 +258,7 @@ pub(crate) fn serve_line(line: &str, reply: &mut Option<UnixStream>) -> Flow {
             match crate::hypr::focus_session(&session_id) {
                 Ok(()) => {
                     let _ = daemon::audit(
-                        &daemon::default_audit_log(),
+                        &audit_log(),
                         daemon::Door::Daemon,
                         daemon::EventClass::Audit,
                         "shellbridge",
@@ -254,7 +268,7 @@ pub(crate) fn serve_line(line: &str, reply: &mut Option<UnixStream>) -> Flow {
                 }
                 Err(e) => {
                     let _ = daemon::audit(
-                        &daemon::default_audit_log(),
+                        &audit_log(),
                         daemon::Door::Daemon,
                         daemon::EventClass::Audit,
                         "shellbridge",
@@ -268,7 +282,7 @@ pub(crate) fn serve_line(line: &str, reply: &mut Option<UnixStream>) -> Flow {
         Some(BridgeCommand::Power { action }) => match dispatch_power(action) {
             Ok(()) => {
                 let _ = daemon::audit(
-                    &daemon::default_audit_log(),
+                    &audit_log(),
                     daemon::Door::Daemon,
                     daemon::EventClass::Audit,
                     "shellbridge",
@@ -278,7 +292,7 @@ pub(crate) fn serve_line(line: &str, reply: &mut Option<UnixStream>) -> Flow {
             }
             Err(e) => {
                 let _ = daemon::audit(
-                    &daemon::default_audit_log(),
+                    &audit_log(),
                     daemon::Door::Daemon,
                     daemon::EventClass::Audit,
                     "shellbridge",
@@ -295,7 +309,7 @@ pub(crate) fn serve_line(line: &str, reply: &mut Option<UnixStream>) -> Flow {
                 Err(e) => ("component-failed", format!("{e}")),
             };
             let _ = daemon::audit(
-                &daemon::default_audit_log(),
+                &audit_log(),
                 daemon::Door::Daemon,
                 daemon::EventClass::Audit,
                 "shellbridge",
@@ -318,7 +332,7 @@ pub(crate) fn serve_line(line: &str, reply: &mut Option<UnixStream>) -> Flow {
                     ("ricemode-failed", "failed")
                 }
             };
-            audit_bridge_action("ricemode", action.as_str(), event, outcome);
+            audit_bridge_action(&audit_log(), "ricemode", action.as_str(), event, outcome);
         }
 
         // Fire-and-forget like `ricemode`: the outcome is a toast, never a
@@ -341,7 +355,7 @@ pub(crate) fn serve_line(line: &str, reply: &mut Option<UnixStream>) -> Flow {
                     ("ricedraft-failed", "failed")
                 }
             };
-            audit_bridge_action("ricedraft", action.as_str(), event, outcome);
+            audit_bridge_action(&audit_log(), "ricedraft", action.as_str(), event, outcome);
         }
 
         // The Declare row: answered on this connection and run on its OWN
@@ -351,7 +365,7 @@ pub(crate) fn serve_line(line: &str, reply: &mut Option<UnixStream>) -> Flow {
         Some(BridgeCommand::RiceDeclare { name }) => {
             let Some(mut reply) = reply.take() else {
                 let _ = daemon::audit(
-                    &daemon::default_audit_log(),
+                    &audit_log(),
                     daemon::Door::Daemon,
                     daemon::EventClass::Audit,
                     "shellbridge",
@@ -364,7 +378,7 @@ pub(crate) fn serve_line(line: &str, reply: &mut Option<UnixStream>) -> Flow {
                 use std::io::Write;
                 let answer = dispatch_rice_declare(&name);
                 let (event, outcome) = rice_declare_audit(&answer);
-                audit_bridge_action("ricedeclare", &name, event, outcome);
+                audit_bridge_action(&audit_log(), "ricedeclare", &name, event, outcome);
                 let _ = writeln!(reply, "{answer}");
             });
             return Flow::Answered;
@@ -377,7 +391,7 @@ pub(crate) fn serve_line(line: &str, reply: &mut Option<UnixStream>) -> Flow {
         Some(BridgeCommand::RiceMenu) => {
             let Some(mut reply) = reply.take() else {
                 let _ = daemon::audit(
-                    &daemon::default_audit_log(),
+                    &audit_log(),
                     daemon::Door::Daemon,
                     daemon::EventClass::Audit,
                     "shellbridge",
@@ -392,7 +406,7 @@ pub(crate) fn serve_line(line: &str, reply: &mut Option<UnixStream>) -> Flow {
                 if answer.get("ok").and_then(Value::as_bool) != Some(true) {
                     let reason = answer.get("reason").and_then(Value::as_str).unwrap_or("failed");
                     let _ = daemon::audit(
-                        &daemon::default_audit_log(),
+                        &audit_log(),
                         daemon::Door::Daemon,
                         daemon::EventClass::Audit,
                         "shellbridge",
@@ -406,7 +420,7 @@ pub(crate) fn serve_line(line: &str, reply: &mut Option<UnixStream>) -> Flow {
         }
 
     None => {
-        if drop_unparsed(line, reply) == Flow::Answered {
+        if drop_unparsed(&audit_log(), line, reply) == Flow::Answered {
             return Flow::Answered;
         }
         if wire_cmd(line).as_deref() == Some("workspaceaction") {
@@ -423,7 +437,7 @@ pub(crate) fn serve_line(line: &str, reply: &mut Option<UnixStream>) -> Flow {
                                 for set a project name with an optional bool `new`",
                 });
                 let _ = daemon::audit(
-                    &daemon::default_audit_log(),
+                    &audit_log(),
                     daemon::Door::Daemon,
                     daemon::EventClass::Audit,
                     "shellbridge",

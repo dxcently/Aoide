@@ -394,4 +394,49 @@ mod tests {
         assert_eq!(n.summary, "<b>not markup</b>");
         assert_eq!(n.body, "--force; rm -rf / `whoami`");
     }
+
+    /// `strx notifications push` files while no desktop process runs: core's own socket
+    /// (aoided's `aoide/shellbridge.sock`) takes the push. This binds that socket itself and
+    /// sends the one line `publish` sends. No strillix process exists here.
+    #[test]
+    fn a_push_files_through_core_with_no_desktop_process() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = aoide_test_support::EnvSaver::capture(&[
+            "AOIDE_ROOT",
+            "AOIDE_STAGE_DIR",
+            "AOIDE_STATE_DIR",
+            "AOIDE_AUDIT_LOG",
+            "XDG_RUNTIME_DIR",
+        ]);
+        let root = aoide_test_support::unique_tmp("notifications-no-desktop");
+        let runtime = aoide_test_support::short_tmp("nd-run");
+        std::fs::create_dir_all(runtime.join("aoide")).unwrap();
+        std::env::set_var("AOIDE_ROOT", &root);
+        std::env::set_var("AOIDE_STAGE_DIR", &root);
+        std::env::set_var("AOIDE_STATE_DIR", &root);
+        std::env::set_var("AOIDE_AUDIT_LOG", root.join("log"));
+        std::env::set_var("XDG_RUNTIME_DIR", &runtime);
+
+        let listener = std::os::unix::net::UnixListener::bind(crate::shellbridge::socket_path()).unwrap();
+        std::thread::spawn(move || crate::shellbridge::serve(&listener, &crate::shellbridge::CORE)); // not joined
+
+        publish(&notif("no-desktop", "")).expect("core's socket takes the push");
+        let path = root.join("notifications.json");
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+        let filed = loop {
+            let ids: Vec<String> = std::fs::read_to_string(&path)
+                .ok()
+                .and_then(|t| serde_json::from_str::<NotificationsFile>(&t).ok())
+                .map(|f| f.notifications.into_iter().map(|n| n.id).collect())
+                .unwrap_or_default();
+            if ids.iter().any(|id| id == "no-desktop") {
+                break true;
+            }
+            if std::time::Instant::now() >= deadline {
+                break false;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        };
+        assert!(filed, "a push must be filed in the core ledger with no desktop process running");
+    }
 }

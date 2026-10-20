@@ -233,9 +233,9 @@ switched on by selecting their dendrite (each sets `aoide.enable`):
 
 | Unit | From | Notes |
 |---|---|---|
-| `aoided` | core module `pkgs/aoide/module/aoided.nix` | runs `${pkgs.aoide}/bin/aoided`; env `AOIDE_AUDIT_LOG`, `AOIDE_USER` |
-| `shellbridge` | `dendrites/strillix/shellbridge.nix` | runs `strx shellbridge --run`; `RuntimeDirectory=aoide` for the socket |
-| `aoide-graph-reap` | `dendrites/strillix/shellbridge.nix` | timer, ~12s interval; the liveness reaper sweeping sessions a killed terminal could never mark `done` |
+| `aoided` | core module `pkgs/aoide/module/aoided.nix` | runs `${pkgs.aoide}/bin/aoided`; env `AOIDE_AUDIT_LOG`, `AOIDE_USER`; `RuntimeDirectory=aoide` for `aoided.sock` and the core `shellbridge.sock` |
+| `shellbridge` | `dendrites/strillix/shellbridge.nix` (gated on `aoide.strillix.enable`) | runs `strillix shellbridge --run`; `RuntimeDirectory=strillix` for `strillix/bridge.sock` |
+| `aoide-graph-reap` | core module `pkgs/aoide/module/aoided.nix` | timer, ~12s interval; the liveness reaper sweeping sessions a killed terminal could never mark `done` |
 | `aoide-melete-adapter` | `dendrites/melete-adapter.nix` | runs `aoide adapter melete --run`; `AOIDE_ADAPTER_SUBSCRIBE` allow-list |
 | `aoide-mcp` | `dendrites/aoided.nix` | **gated on `aoide.mcp.enable`**; `bindsTo` aoided |
 | `aoide-a2a` | `dendrites/aoided.nix` | **gated on `aoide.a2a.enable`**; the [[A2A-Door]] serve unit |

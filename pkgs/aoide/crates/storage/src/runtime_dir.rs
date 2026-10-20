@@ -44,15 +44,15 @@ use std::path::PathBuf;
 /// `<runtime root>/aoide` — the directory an aoide socket is bound into, and
 /// the one authority for it on either host.
 pub fn socket_dir() -> PathBuf {
-    root().join("aoide")
+    runtime_root().join("aoide")
 }
 
 /// The runtime ROOT: `$XDG_RUNTIME_DIR` on either host, else this host's own
 /// per-user answer (`/run/user/<euid>` on Unix, `%LOCALAPPDATA%` — falling
 /// back to the temp dir when that variable is somehow absent — on native
-/// Windows). Private: [`socket_dir`] is the one spelling callers use, so no
-/// caller can end up outside the `aoide` segment this convention owns.
-fn root() -> PathBuf {
+/// Windows). Each owner appends its own segment: [`socket_dir`] for aoide,
+/// `strillix/` for the desktop's bridge socket.
+pub fn runtime_root() -> PathBuf {
     if let Some(dir) = std::env::var("XDG_RUNTIME_DIR").ok().filter(|s| !s.is_empty()) {
         return PathBuf::from(dir);
     }

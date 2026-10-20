@@ -300,8 +300,7 @@
         # `strillix secrets ask` spawns it by bare name, so the unit that spawns
         # strillix must carry it — the live gap that let the first unit-spawned
         # dialog fail silently (strillix resolved, its quickshell ENOENT'd, the
-        # ask just stayed parked). Gated on the same flag as `AOIDE_DIALOG_CMD`
-        # below, and for the same reason: a unit can
+        # ask just stayed parked). Gated on the strillix fact, for the same reason: a unit can
         # only spawn strillix when the strillix fact put the binary on this host, and
         # a host without strillix takes the zenity path and has no use for
         # quickshell in its closure — the pair-watch unit's own pattern
@@ -328,17 +327,9 @@
             "AOIDE_ROOT=${config.aoide.root}"
             "STRILLIX_ROOT=${config.aoide.strillix.root}"
             "AOIDE_FLAKE_ROOT=${config.aoide.checkout}"
-          ]
-          # `secrets watch` runs the strillix dialog provider that
-          # `AOIDE_DIALOG_CMD` names (`watch::dialog_provider`), never a guess at
-          # PATH. `strillix` ships from `pkgs.aoide.strillix`, a SEPARATE output
-          # from the `aoide` binary this unit execs (P-A8 of the binary-split
-          # workstream), so no sibling of `aoide` can be it and the provider is
-          # named explicitly. Only set when `aoide.strillix.enable` is actually
-          # on — mirrors shellbridge.nix's own guard, since a host with the lane
-          # on but strillix explicitly disabled has no `pkgs.aoide.strillix`
-          # output to point at.
-          ++ lib.optional config.aoide.strillix.enable "AOIDE_DIALOG_CMD=${pkgs.aoide.strillix}/bin/strillix";
+          ];
+          # `secrets watch` runs the dialog provider `AOIDE_DIALOG_CMD` names. The desktop's home half
+          # sets it on the user manager's environment, so this unit inherits it.
 
           NoNewPrivileges = true;
           StandardOutput = "journal";

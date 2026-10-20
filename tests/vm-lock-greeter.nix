@@ -296,6 +296,9 @@ pkgs.testers.runNixOSTest {
         assert cls == "user", f"khoa's session is class {cls!r}, not 'user'"
         face.wait_until_succeeds("ps -u khoa -o args= | grep -Eq '(^|/)Hyprland( |$)'", timeout=60)
         wait_shell(face)
+        # The desktop's socket is strillix's own (strillix/bridge.sock), served by the
+        # shellbridge unit with the Hyprland session; ShellBridge.qml routes its verbs there.
+        face.wait_until_succeeds(f"test -S /run/user/{uid(face)}/strillix/bridge.sock", timeout=60)
         face.sleep(5)
         face.screenshot("03-desktop")
         # Every window-owning slot was handed the shellbridge.

@@ -678,8 +678,8 @@ the two paths agree either way. The window-gone signal remains the reaper's
 safety net for the case the listener never saw (service down, off-Hyprland,
 or a stamped address whose `closewindow` was missed).
 
-It runs on a systemd user timer (`aoide-graph-reap`, next to shellbridge in
-[[shellbridge]]'s unit): first sweep 15s after the graphical session comes up,
+It runs on a systemd user timer (`aoide-graph-reap`, a core unit beside
+`aoided`): first sweep 15s after the graphical session comes up,
 then every ~12s thereafter — cheap enough (one `hyprctl` call + a stage read,
 a write only when something changed) to run continuously without agents ever
 seeing a stale "haunting" session.

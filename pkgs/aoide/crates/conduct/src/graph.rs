@@ -305,7 +305,7 @@ pub use self::who::{glyph, session_roster};
 // deep per-node view.
 pub use self::node_list::node_list;
 pub use self::window::{
-    pid_ancestry, session_window_attach, session_window_closed, session_window_roster,
+    pid_ancestry, session_show, session_window_attach, session_window_closed, session_window_roster,
     windowless_by_lineage, TermWindow,
 };
 // `workspace set/clear/list/root` — the workspace ↔ project binding

@@ -225,11 +225,12 @@
   run. The env-knob appendix (`ENV_KNOBS` in `commands/onboard.rs`) is the
   ONE allowed hand-list, because env vars aren't module options and so
   can't be derived the same way — keep it small.
-- **`shellbridge` is strillix's process; its socket loop is not.** The command
+- **`shellbridge` is strillix's process; its socket loop is conduct's.** The command
   (`src/commands/shellbridge.rs`) and the desktop verbs (`src/bridge/`) live here.
-  The socket loop, the core verbs and the stage seeding stay in `aoide-conduct`
-  (`shellbridge.rs`, see that crate's charter-smudge note). This crate passes its
-  `bridge::VERBS` table to `run` and adds no other handler to the loop.
+  The loop (`aoide-conduct`'s `shellbridge.rs`, see that crate's charter-smudge
+  note) serves this crate's own socket through `run_on(path, &SOCKET)`, with
+  `SOCKET` = the desktop verbs and no core arm. Core verbs are aoided's on its own
+  socket; this crate does not serve them.
   `notifications` is registration only; its files stay in `aoide-conduct`. Don't
   move the loop here, and don't duplicate it.
 - **`commands::dialog_qml::spawn_quickshell` arms `PR_SET_PDEATHSIG` on the

@@ -164,8 +164,9 @@ listings_fit_and_hang}` hold both binaries to it.
   (a section, and a blurb when the head has several commands) in the same
   commit; a `brief` keeps its list line from being cut mid-sentence.
 - **A head moving between `aoide` and `strillix`** updates
-  `door::{AOIDE_ONLY,STRILLIX_ONLY,SHARED}_HEADS` in the same commit; each app
-  crate's `cross_binary_heads_match_the_registry` test pins its half.
+  `door::{AOIDE_ONLY,SHARED}_HEADS` in the same commit; each app crate's
+  `cross_binary_heads_match_the_registry` test pins its own heads (the desktop's
+  list lives in strillix's test, since core names no desktop head).
 
 ## What needs a docs update in the same commit
 

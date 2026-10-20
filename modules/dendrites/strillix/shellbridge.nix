@@ -46,24 +46,17 @@ let
   quickshellPkg = aoideInputs.quickshell.packages.${pkgs.stdenv.hostPlatform.system}.default;
 in
 
-# Gated on the master switch and the strillix fact — `aoide.enable &&
-# aoide.strillix.enable` — not on bare aoide.enable: everything in this file is
-# graphical-session machinery (the bridge serves the painted shell; the reap
-# units are wantedBy/partOf graphical-session.target and never fire headless).
-# `aoide.enable` is set by any nucleus member and `aoide.strillix.enable` by the
-# strillix dendrite; this file reads the FACTS, never that lane's own option (root
-# AGENTS.md house rule 5). On a headless aoide box
-# (aoide.enable + the doors only) these units would sit inert while their PATH
-# entries (quickshell, hyprland, hyprlock) drag the whole Qt/Wayland stack into
-# the closure — found live on sakaki, whose only aoide duty is the A2A door.
+# Gated on the strillix fact alone: a host may select strillix with no Aoide. This file
+# reads the FACT, never the strillix dendrite's own option (root AGENTS.md house rule 5). The
+# desktop's socket needs no aoided: with aoided absent its core-routed widgets show nothing, and
+# its core calls log once and skip. The core socket and the reaper are core's, in
+# pkgs/aoide/module/aoided.nix.
 #
 # `aoide.strillix.enable` is the gate because strillix OWNS this bridge
 # (docs/architecture/PACKAGE-LAYOUT.md): ExecStart below execs strillix out of
 # `pkgs.aoide.strillix`, a SEPARATE, droppable output — so a host that leaves the
 # fact off must not start a unit that execs a binary its closure does not carry.
-# A shell with no strillix is a legitimate (if unusual) configuration; it simply has
-# no bridge.
-lib.mkIf (config.aoide.enable && config.aoide.strillix.enable) {
+lib.mkIf config.aoide.strillix.enable {
 
   # ── Runtime directories ──────────────────────────────────────────────────
   # $STRILLIX_ROOT/stage/ is shared with aoided.nix's tmpfiles rules; systemd-tmpfiles
@@ -123,11 +116,10 @@ lib.mkIf (config.aoide.enable && config.aoide.strillix.enable) {
     ];
 
     serviceConfig = {
-      # shellbridge is a sub-command of the aoide binary. `--run` seeds the
-      # stage files, then binds the unix socket and serves commands on a
-      # blocking accept loop — a long-running foreground process, so the default
-      # Type=simple is correct (declared explicitly here) and keeps the unit
-      # active on the loop rather than treating an immediate return as done.
+      # `strillix shellbridge --run` binds the desktop's socket and serves its verbs on a blocking
+      # accept loop — a long-running foreground process, so Type=simple is correct (declared
+      # explicitly here) and keeps the unit active on the loop rather than treating an immediate
+      # return as done. The stage seeding is aoided's now.
       Type = "simple";
       # `shellbridge` left core's registry at P-A5 of the binary-split
       # workstream — it now lives only in `strillix` (crates/strillix/src/registry.rs;
@@ -144,9 +136,6 @@ lib.mkIf (config.aoide.enable && config.aoide.strillix.enable) {
       RestartSec = "3s";
 
       Environment = [
-        # Stable socket path — adapters and QML widgets bind to this.
-        # Convention: XDG_RUNTIME_DIR is available inside user services.
-        "AOIDE_BRIDGE_SOCKET=%t/aoide/shellbridge.sock"
         # No AOIDE_STAGE_DIR override (command-defrag lane S2): the two
         # stage trees (CONTRACTS.md §4) now live at different roots —
         # $STRILLIX_ROOT/stage/ for rice/paint, state/stage/ for CONDUCTING state —
@@ -162,12 +151,9 @@ lib.mkIf (config.aoide.enable && config.aoide.strillix.enable) {
         # The host file the RICE menu's Declare row rewrites
         # (`ricedeclare` → `strillix rice declare <rice> --host`).
         "AOIDE_HOST_CONFIG=${config.aoide.hostConfig}"
-        # This unit execs `strillix shellbridge --run` (below) — the ONE unit in
-        # this file whose process actually reads `STRILLIX_TEMPLATES`
-        # (`strillix-rice::widgets`, `strillix`-only). `aoide-graph-reap` further
-        # down execs plain `aoide`, never touches paint data, and does not
-        # carry this var — review finding, task #107: paint data belongs on
-        # the unit that paints, not every unit this file happens to declare.
+        # This unit execs `strillix shellbridge --run` (below) — the process that
+        # actually reads `STRILLIX_TEMPLATES` (`strillix-rice::widgets`, `strillix`-only).
+        # Paint data belongs on the unit that paints (task #107).
         "STRILLIX_TEMPLATES=${pkgs.strillix-rices}/share/strillix/rices"
       ]
       ++ [
@@ -182,8 +168,8 @@ lib.mkIf (config.aoide.enable && config.aoide.strillix.enable) {
         "AOIDE_CORE_BIN=${pkgs.aoide}/bin/aoide"
       ];
 
-      # Create the socket directory under XDG_RUNTIME_DIR.
-      RuntimeDirectory = "aoide";
+      # The desktop's socket directory under XDG_RUNTIME_DIR (`strillix/`).
+      RuntimeDirectory = "strillix";
       RuntimeDirectoryMode = "0700";
       # Independently running conductors own sockets in this shared directory.
       RuntimeDirectoryPreserve = "yes";
@@ -224,91 +210,6 @@ lib.mkIf (config.aoide.enable && config.aoide.strillix.enable) {
       }
     });
   '';
-
-  # ── Liveness reaper: timer + oneshot service ─────────────────────────────
-  # A terminal killed with SUPER+Q / SIGKILL is torn down uncatchably, so the
-  # `conduct`/`wrap` process can never run its own `session end` — the
-  # session record is stranded `running` in the roster forever (22 dead
-  # `conduct-*` shells piled up in ~8 minutes of use). No QML surface can fix
-  # this: widgets/conductor cannot spawn `hyprctl` (no process-spawning in QML).
-  #
-  # So the sweep lives HERE, next to the stage/graph infra it repairs: a cheap
-  # periodic `aoide session reap` that gathers live `hyprctl clients -j` window
-  # addresses (falling back to pid-only liveness off Hyprland), marks every dead
-  # session `done`, and prunes it — re-staging graph.json atomically only when
-  # something actually changed. One hyprctl call + a stage read/write; it never
-  # exits non-zero on "nothing to reap".
-  #
-  # Seam: this is the OUT-OF-BAND cleanup path for sessions whose IN-BAND
-  # cleanup (do_session_end on normal exit) could not run. It is gated with the
-  # rest of shellbridge on its enable facts (a painted shell with strillix exists
-  # here), ordered into the graphical session so it inherits
-  # HYPRLAND_INSTANCE_SIGNATURE (the compositor imports its env into the user
-  # manager), and resolves the same state/stage/ tree
-  # shellbridge itself writes — neither unit overrides AOIDE_STAGE_DIR.
-  # Unit name kept as `aoide-graph-reap` (command-defrag lane R2): renaming it
-  # would churn enabled-unit state at the next switch for no functional gain.
-  # Only the ExecStart spelling follows the CLI's dissolved `graph` prefix.
-  systemd.user.services.aoide-graph-reap = {
-    description = "Aoide graph reaper — resolve KILLED sessions (SUPER+Q/SIGKILL) that could not self-clean";
-
-    after = [ "graphical-session.target" ];
-    partOf = [ "graphical-session.target" ];
-
-    # The reaper gathers live window addresses via `hyprctl clients -j`; like
-    # shellbridge it needs hyprctl on PATH (else it silently falls back to
-    # pid-only liveness and never sees the window-gone signal). Unit-level option.
-    # libnotify rides along for `notify-send`: a sweep that actually changed the
-    # roster raises a toast through dunst (a quiet sweep stays silent), and a
-    # unit PATH without it would degrade that to a journal line nobody reads.
-    # procps rides along for the same reap's desktop-Codex scan (`ps` to
-    # resolve thread ownership) — without it the scan can only ever
-    # report Unknown, never a removed or enrolled record (P-CX-4).
-    path = [
-      pkgs.hyprland
-      pkgs.libnotify
-      pkgs.procps
-    ];
-
-    serviceConfig = {
-      Type = "oneshot";
-      ExecStart = "${pkgs.aoide}/bin/aoide session reap";
-
-      # No AOIDE_STAGE_DIR override either (command-defrag lane S2, same
-      # reasoning as shellbridge's own unit above): the reaper touches only
-      # CONDUCTING files (graph.json/sessions.json), which resolve under
-      # state/stage/ on the default layout with no override needed.
-      # AOIDE_USER is set explicitly like every other unit — resolution
-      # works off systemd's inherited HOME without it, but no unit in this
-      # tree leans on that inheritance alone.
-      Environment = [
-        "AOIDE_USER=${config.aoide.user}"
-        "AOIDE_ROOT=${config.aoide.root}"
-        "STRILLIX_ROOT=${config.aoide.strillix.root}"
-        "AOIDE_FLAKE_ROOT=${config.aoide.checkout}"
-      ];
-
-      NoNewPrivileges = true;
-      StandardOutput = "journal";
-      StandardError = "journal";
-    };
-  };
-
-  systemd.user.timers.aoide-graph-reap = {
-    description = "Aoide graph reaper timer — periodic liveness sweep (~12s)";
-
-    wantedBy = [ "graphical-session.target" ];
-    partOf = [ "graphical-session.target" ];
-
-    timerConfig = {
-      # Cheap and frequent: a killed terminal resolves within ~12s. First sweep
-      # 15s after the session comes up (let shellbridge seed the stage first);
-      # thereafter every 12s since the previous run finished.
-      OnActiveSec = "15s";
-      OnUnitActiveSec = "12s";
-      AccuracySec = "2s";
-    };
-  };
 
   # ── Stage-file paths exposed as options for downstream modules ────────────
   # These are the stable v0 stage paths (CONTRACTS.md §4), split by tree.

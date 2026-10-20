@@ -337,12 +337,11 @@ pub fn status_color(status: &str) -> Color {
     }
 }
 
-/// One hue per event class so a scanning eye sorts audit from gate from rice.
+/// One hue per event class so a scanning eye sorts audit from gate from content.
 pub fn class_color(class: &str) -> Option<Color> {
     match class {
         "audit" => Some(Color::Cyan),
         "gate" => Some(Color::Yellow),
-        "rice" => Some(Color::Magenta),
         "content" => Some(Color::Blue),
         "notification" => Some(Color::Red),
         _ => None,

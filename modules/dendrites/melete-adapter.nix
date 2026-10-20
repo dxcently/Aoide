@@ -62,13 +62,12 @@
         "AOIDE_AUDIT_LOG=${config.aoide.auditLog}"
         # Subscription manifest: only these event classes reach the adapter.
         # Values are comma-separated event class names that `adapter.rs`'s
-        # `parse_class` recognizes (audit|gate|rice|content|notification) —
+        # `parse_class` recognizes (audit|gate|content|notification) —
         # anything else is silently dropped, so the names must match exactly.
-        # Melete subscribes to: gate (rebuild proposals through the gate), rice
-        # (rice-preview lifecycle), notification (structured notification
-        # actions). aoided enforces the allow-list; the adapter never sees a
-        # class it has not subscribed to.
-        "AOIDE_ADAPTER_SUBSCRIBE=gate,rice,notification"
+        # Melete subscribes to: gate (rebuild proposals through the gate) and
+        # notification (structured notification actions). aoided enforces the
+        # allow-list; the adapter never sees a class it has not subscribed to.
+        "AOIDE_ADAPTER_SUBSCRIBE=gate,notification"
         # Security: forwarded notification body is NEVER in the subscription
         # list. The adapter receives structured action records only.
         # (This env var is documentation-as-configuration at skeleton stage;
@@ -92,7 +91,6 @@
     # | aoided event class | Melete action                                  |
     # |--------------------|------------------------------------------------|
     # | gate               | Post a Melete job: "user admitted rebuild"     |
-    # | rice               | Notify Melete: preview is live, await adopt    |
     # | notification       | Forward structured action to Melete task       |
     #
     # Security invariant (hard rule):

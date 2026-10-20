@@ -61,8 +61,9 @@
   serializes byte-identical. A stub is never checked (it answers 64). The
   taught-error shape (`Outcome::refuse`, `Fix`, `io_cause`) is defined in
   `pkgs/aoide/crates/AGENTS.md`; `suggest` holds the only edit-distance
-  matcher. `door::{AOIDE_ONLY,STRILLIX_ONLY,SHARED}_HEADS` is a static copy of
-  the two registries' heads — update it with them.
+  matcher. `door::{AOIDE_ONLY,SHARED}_HEADS` is a static copy of the registries'
+  heads — update it with them. Core names no desktop head: a strillix verb
+  typed at `aoide` is an unknown command there.
 - **Listings, color and width live in `help` and `style` and nowhere else.**
   A formatter says what text IS (`style.name(..)`, `style.why(..)`), never an
   escape code; no other module writes `\x1b`, reads `COLUMNS` or asks whether

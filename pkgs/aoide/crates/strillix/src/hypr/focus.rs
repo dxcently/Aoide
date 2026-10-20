@@ -2,7 +2,8 @@
 //! the focused workspace. Each is one `hyprctl dispatch` (or one client read) over the request
 //! socket. Refusals carry a stable reason so the bridge can say what happened.
 
-use aoide_conduct::graph::{load_stage, normalize_addr, sessions_path, SessionsFile};
+use aoide_conduct::graph::normalize_addr;
+use aoide_conduct::shellbridge::{outcome_triple, run_core_step, safe_session_id};
 use serde_json::Value;
 
 /// The taught refusal an omitted workspace gets when no compositor can say which one is focused.
@@ -136,38 +137,40 @@ pub fn focus_window(addr: &str) -> Result<(), FocusError> {
 /// but the widgets passed a sessionId, so every tracked-row jump silently
 /// no-op'd as `window-not-found`). Prefers the exact `windowAddress` (which also
 /// brings its workspace forward); if that isn't resolved yet but the `workspace`
-/// is known, falls back to switching to that workspace. Never panics — a socket
-/// loop calls it on arbitrary input.
+/// is known, falls back to switching to that workspace. Both come from one
+/// `aoide session show <id>` through the door. It does not panic — a socket loop
+/// calls it on arbitrary input.
 pub fn focus_session(id: &str) -> Result<(), FocusError> {
     let id = id.strip_prefix("session:").unwrap_or(id).trim();
-    if id.is_empty() {
+    if !safe_session_id(id) {
         return Err(FocusError {
             reason: "no-session-id",
-            message: "empty session id".to_string(),
+            message: "a session id is required".to_string(),
         });
     }
-    let file: SessionsFile = match load_stage(&sessions_path()) {
-        Ok(f) => f,
-        Err(_) => {
-            return Err(FocusError {
-                reason: "stage-unreadable",
-                message: "could not read sessions.json".to_string(),
-            });
-        }
-    };
-    let Some(rec) = file.sessions.iter().find(|s| s.session_id == id) else {
-        return Err(FocusError {
-            reason: "session-not-found",
-            message: format!("unknown session `{id}`"),
-        });
-    };
+    // The session is core state: aoide answers its window and workspace, and the desktop does not
+    // reads sessions.json for it.
+    let argv = ["session".to_string(), "show".to_string(), id.to_string()];
+    let (exited_ok, stdout, stderr) = run_core_step(&argv).map_err(|message| FocusError {
+        reason: "no-aoide",
+        message,
+    })?;
+    let (ok, message, data) = outcome_triple("session", "show", exited_ok, &stdout, &stderr);
+    let data = data.unwrap_or(Value::Null);
+    if !ok {
+        let reason = match data.get("reason").and_then(Value::as_str) {
+            Some("session-not-found") => "session-not-found",
+            _ => "session-show-failed",
+        };
+        return Err(FocusError { reason, message });
+    }
     // Prefer the exact window — focuswindow also brings its workspace forward.
-    if !rec.window_address.trim().is_empty() {
-        return focus_window(&rec.window_address);
+    if let Some(window) = data.get("windowAddress").and_then(Value::as_str).filter(|w| !w.trim().is_empty()) {
+        return focus_window(window);
     }
     // The window isn't resolved yet (discovery is best-effort), but if we know
     // the workspace we can still take the user there.
-    if let Some(ws) = rec.workspace {
+    if let Some(ws) = data.get("workspace").and_then(Value::as_i64) {
         return focus_workspace(ws);
     }
     Err(FocusError {
@@ -197,5 +200,33 @@ pub fn focus_workspace(ws: i64) -> Result<(), FocusError> {
             ),
         }),
         Ok(_) => Ok(()),
+    }
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+    use crate::bridge::testutil::{env_lock, stub_core_answering};
+
+    /// A session core does not know is refused through the door, and the refusal keeps core's own
+    /// reason: the desktop reads no `sessions.json` to say so.
+    #[test]
+    fn focus_session_takes_the_core_refusal_for_an_unknown_session() {
+        let _guard = env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, _root) = stub_core_answering(
+            "focus-unknown-session",
+            r#"{"status":"error","command":"session.show","message":"no local session with id `nobody`","data":{"reason":"session-not-found","sessionId":"nobody"}}"#,
+            1,
+        );
+        let err = focus_session("nobody").unwrap_err();
+        assert_eq!(err.reason, "session-not-found");
+        assert!(err.message.contains("no local session"), "{}", err.message);
+    }
+
+    /// An id that could read as a flag does not become one of core's argv tokens.
+    #[test]
+    fn focus_session_refuses_an_id_that_is_not_one_argv_token() {
+        let err = focus_session("--json").unwrap_err();
+        assert_eq!(err.reason, "no-session-id");
     }
 }

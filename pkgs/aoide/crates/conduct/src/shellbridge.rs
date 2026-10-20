@@ -1,16 +1,16 @@
 //! shellbridge's socket loop: the unix socket that widgets send newline-delimited
 //! JSON commands to (concepts/shellbridge).
 //!
-//! This module owns the loop and the CORE verbs: the session and project actions,
-//! the read-only trace query, the notification ledger, and the usage and session
-//! refreshes. A binary that serves desktop verbs on the same socket passes its own
-//! [`Verb`] table to [`run`]; core registers none. A line no table claims is audited
-//! as `unparseable` and dropped. A malformed `sessiontrace` line, whose caller is
-//! parked, is answered with a refusal instead of silence.
+//! Two sockets, one loop, routed by command name in ShellBridge.qml. [`CORE`] is
+//! aoided's `aoide/shellbridge.sock`: the session and project actions, the read-only
+//! trace query, the notification ledger, and the usage and session refreshes. A desktop
+//! process serves its own socket with [`run_on`] and a [`Socket`] of its verbs, and no
+//! core arm: core state is written through aoided. A line no table claims is
+//! audited to that socket's log as `unparseable` and dropped. A malformed `sessiontrace`
+//! line, whose caller is parked, is answered with a refusal instead of silence.
 //!
-//! `run` seeds the stage files (atomic writer), binds the socket, and serves forever.
-//! A malformed line, an unknown command, or a dropped connection is logged and
-//! skipped; nothing ever kills the service.
+//! [`run_core`] seeds the stage files and serves [`CORE`]. A malformed line, an unknown
+//! command, or a dropped connection is logged and skipped; nothing ever kills the service.
 //!
 //! Moved here from root `src/shellbridge.rs` (Phase 3b restructure,
 //! docs/architecture/PACKAGE-LAYOUT.md); the stage-file FS substrate (`stage_dir`,
@@ -28,10 +28,11 @@ pub use std::os::unix::net::UnixStream;
 use aoide_protocol::win_unix::UnixListener;
 #[cfg(windows)]
 pub use aoide_protocol::win_unix::UnixStream;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
-/// The shellbridge socket path — **contract**: never computed independently.
-/// `$XDG_RUNTIME_DIR/aoide/shellbridge.sock`.
+/// aoided's shellbridge socket — **contract**: not computed independently.
+/// `$XDG_RUNTIME_DIR/aoide/shellbridge.sock`. The desktop's socket is strillix's
+/// `bridge::socket_path()`; ShellBridge.qml routes between the two by cmd.
 pub fn socket_path() -> PathBuf {
     aoide_storage::runtime_dir::socket_dir().join("shellbridge.sock")
 }
@@ -80,6 +81,18 @@ pub struct Verb {
     pub cmd: &'static str,
     pub serve: fn(&str, &mut Option<UnixStream>) -> Flow,
 }
+
+/// What one shellbridge socket serves: the core arms (`core`), the desktop verbs it
+/// registers, and the audit log its drops and refusals land in. A socket with
+/// `core: false` does not parse a core command, so no core arm runs in a desktop process.
+pub struct Socket {
+    pub core: bool,
+    pub verbs: &'static [Verb],
+    pub log: fn() -> PathBuf,
+}
+
+/// aoided's socket: the core arms, no desktop verbs, the core audit log.
+pub static CORE: Socket = Socket { core: true, verbs: &[], log: daemon::default_audit_log };
 
 /// One parsed core command from the socket wire (newline-delimited JSON). The wire
 /// shape is defined by ShellBridge.qml. A desktop verb is parsed by the binary that
@@ -732,9 +745,9 @@ fn wire_names(line: &str, cmd: &str) -> bool {
 /// never the payload), then, for a `sessiontrace` line that names itself and fails its
 /// own gate, the refusal its parked caller is owed. A registered verb that claims a
 /// line it cannot parse calls this too, so every drop is audited alike.
-pub fn drop_unparsed(line: &str, reply: &mut Option<UnixStream>) -> Flow {
+pub fn drop_unparsed(log: &Path, line: &str, reply: &mut Option<UnixStream>) -> Flow {
     let _ = daemon::audit(
-        &daemon::default_audit_log(),
+        log,
         daemon::Door::Daemon,
         daemon::EventClass::Audit,
         "shellbridge",
@@ -752,7 +765,7 @@ pub fn drop_unparsed(line: &str, reply: &mut Option<UnixStream>) -> Flow {
                  `lines` (clamped to 40 from above), and `clip` line|detail",
             );
             let _ = daemon::audit(
-                &daemon::default_audit_log(),
+                log,
                 daemon::Door::Daemon,
                 daemon::EventClass::Audit,
                 "shellbridge",
@@ -1370,9 +1383,9 @@ pub fn run_core_step_with(argv: &[String], stdin: Option<&str>) -> Result<(bool,
 /// (`"session"`/`"project"`/`"workspace"`) is the only thing that varies
 /// from the original `"session action …"` wording, so a session subject's
 /// message is byte-identical to before the `projectaction` split.
-pub fn audit_bridge_action(noun: &str, action: &str, event: &str, outcome: &str) {
+pub fn audit_bridge_action(log: &Path, noun: &str, action: &str, event: &str, outcome: &str) {
     let _ = daemon::audit(
-        &daemon::default_audit_log(),
+        log,
         daemon::Door::Daemon,
         daemon::EventClass::Audit,
         "shellbridge",
@@ -1414,6 +1427,7 @@ fn dispatch_session_action(subject: ActionSubject, action: &str, fields: &Value)
         if !step_ok {
             if i == 0 {
                 audit_bridge_action(
+                    &daemon::default_audit_log(),
                     subject.noun(),
                     action,
                     &format!("{}-failed", subject.event_prefix()),
@@ -1423,6 +1437,7 @@ fn dispatch_session_action(subject: ActionSubject, action: &str, fields: &Value)
             }
             let cli_message = reply.get("message").and_then(Value::as_str).unwrap_or("");
             audit_bridge_action(
+                &daemon::default_audit_log(),
                 subject.noun(),
                 action,
                 &format!("{}-partial", subject.event_prefix()),
@@ -1454,20 +1469,17 @@ fn dispatch_session_action(subject: ActionSubject, action: &str, fields: &Value)
         }
         last = reply;
     }
-    audit_bridge_action(subject.noun(), action, subject.event_prefix(), "ok");
+    audit_bridge_action(&daemon::default_audit_log(), subject.noun(), action, subject.event_prefix(), "ok");
     last
 }
 
-/// Run shellbridge: seed the `sessions.json`/`hooks.json` stage files (v0 shapes)
-/// atomically, then bind the unix socket and serve commands forever. `verbs` is the
-/// binary's registered table, handed to [`serve`]. Only a fatal bind failure returns
-/// (with an error document dispatch reports); on success this never returns: the
-/// systemd unit is `Type=simple` and stays up on the blocking accept loop.
-pub fn run(verbs: &'static [Verb]) -> serde_json::Value {
-    let sock = socket_path();
+/// aoided's shellbridge: seed the `sessions.json`/`hooks.json` stage files (v0 shapes)
+/// when absent or corrupt, so a populated roster survives a restart, then serve
+/// [`CORE`] on [`socket_path`] until the listener closes. The daemon's run loop calls
+/// this after it holds its own locks and has bound its own socket, so nothing here can
+/// unlink a live socket.
+pub fn run_core() {
     let stage = conducting_stage_dir();
-
-    // Seed the two stage files with their documented shapes (empty registries).
     let sessions = json!({
         "schemaVersion": "0",
         // records: { sessionId, agent, windowAddress, cwd, state, startedAt,
@@ -1479,76 +1491,65 @@ pub fn run(verbs: &'static [Verb]) -> serde_json::Value {
         // records: { sessionId, phase, updatedAt }
         "hooks": []
     });
-
     // Seed each registry ONLY when absent/corrupt — a populated roster is
     // preserved across this restart (see [`seed_if_absent`]). The unconditional
     // re-seed this replaced was the transient-drop bug: every shellbridge restart
     // (a nixos switch / compositor restart cascades through
     // graphical-session.target) wiped all live sessions to `[]`.
-    let mut wrote: Vec<String> = Vec::new();
-    let s_path = stage.join("sessions.json");
-    let h_path = stage.join("hooks.json");
-    if let Some(p) =
-        seed_if_absent(&s_path, &serde_json::to_string_pretty(&sessions).unwrap(), "sessions")
-    {
-        wrote.push(p);
-    }
-    if let Some(p) =
-        seed_if_absent(&h_path, &serde_json::to_string_pretty(&hooks).unwrap(), "hooks")
-    {
-        wrote.push(p);
-    }
+    let _ = seed_if_absent(
+        &stage.join("sessions.json"),
+        &serde_json::to_string_pretty(&sessions).unwrap(),
+        "sessions",
+    );
+    let _ = seed_if_absent(&stage.join("hooks.json"), &serde_json::to_string_pretty(&hooks).unwrap(), "hooks");
+    run_on(&socket_path(), &CORE);
+}
 
-    // Bind the socket. `RuntimeDirectory=aoide` on the unit creates the parent
-    // dir; a stale socket from an unclean shutdown would make bind fail with
-    // EADDRINUSE, so remove it first (the path is single-owner per user).
-    if let Some(parent) = sock.parent() {
+/// Serve `socket` on `path` until the listener closes. A stale socket from an unclean
+/// shutdown would make the bind fail with EADDRINUSE, so it is unlinked first (the path
+/// is single-owner per user). A bind failure is audited to the socket's log and reported
+/// in the returned status; nothing here panics.
+pub fn run_on(path: &Path, socket: &'static Socket) -> Value {
+    let log = (socket.log)();
+    if let Some(parent) = path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
-    let _ = std::fs::remove_file(&sock);
-    let listener = match UnixListener::bind(&sock) {
+    let _ = std::fs::remove_file(path);
+    let listener = match UnixListener::bind(path) {
         Ok(l) => l,
         Err(e) => {
             let _ = daemon::audit(
-                &daemon::default_audit_log(),
+                &log,
                 daemon::Door::Daemon,
                 daemon::EventClass::Audit,
                 "shellbridge",
                 "bind-failed",
-                &format!("could not bind {}: {e}", sock.display()),
+                &format!("could not bind {}: {e}", path.display()),
             );
             return json!({
                 "process": "shellbridge",
                 "state": "error",
-                "error": format!("bind {}: {e}", sock.display()),
-                "socket": sock.to_string_lossy(),
-                "stageDir": stage.to_string_lossy(),
-                "wrote": wrote,
+                "error": format!("bind {}: {e}", path.display()),
+                "socket": path.to_string_lossy(),
             });
         }
     };
 
     let _ = daemon::audit(
-        &daemon::default_audit_log(),
+        &log,
         daemon::Door::Daemon,
         daemon::EventClass::Audit,
         "shellbridge",
         "started",
-        &format!("shellbridge online; listening on {}", sock.display()),
+        &format!("shellbridge online; listening on {}", path.display()),
     );
 
     // Serve forever. `serve` never returns and never panics on client input.
-    serve(&listener, verbs);
+    serve(&listener, socket);
 
-    // Only reached if `incoming()` ends (listener closed) — treat as a clean
-    // stop so systemd's `Restart=on-failure` can bring us back.
-    json!({
-        "process": "shellbridge",
-        "state": "stopped",
-        "socket": sock.to_string_lossy(),
-        "stageDir": stage.to_string_lossy(),
-        "wrote": wrote,
-    })
+    // Reached when `incoming()` ends (listener closed) — a clean stop, so systemd's
+    // `Restart=on-failure` can bring us back.
+    json!({ "process": "shellbridge", "state": "stopped", "socket": path.to_string_lossy() })
 }
 
 // ── the notifications ledger ─────────────────────────────────────────────────────
@@ -1715,15 +1716,15 @@ fn cross_uid_gate(peer: Option<crate::graph::identity::PeerCred>) -> Option<Stri
 }
 
 /// Accept connections forever, one thread per connection, behind the cross-uid
-/// gate. `verbs` is the binary's registered table (empty for core alone).
-pub fn serve(listener: &UnixListener, verbs: &'static [Verb]) {
+/// gate. `socket` names the arms it serves and the log its refusals land in.
+pub fn serve(listener: &UnixListener, socket: &'static Socket) {
     for conn in listener.incoming() {
         match conn {
             Ok(stream) => {
                 let peer = crate::graph::identity::peer_cred(&stream);
                 if let Some(reason) = cross_uid_gate(peer) {
                     let _ = daemon::audit(
-                        &daemon::default_audit_log(),
+                        &(socket.log)(),
                         daemon::Door::Daemon,
                         daemon::EventClass::Audit,
                         "shellbridge",
@@ -1732,7 +1733,7 @@ pub fn serve(listener: &UnixListener, verbs: &'static [Verb]) {
                     );
                     continue; // Dropped, unconditionally — never reaches `handle_conn`.
                 }
-                std::thread::spawn(move || handle_conn(stream, verbs));
+                std::thread::spawn(move || handle_conn(stream, socket));
             }
             Err(e) => eprintln!("[aoide/shellbridge] accept error (continuing): {e}"),
         }
@@ -1747,7 +1748,7 @@ pub fn serve(listener: &UnixListener, verbs: &'static [Verb]) {
 /// error (a dropped connection) ends only THIS connection. No read timeout is set on
 /// the accepted stream: a client may idle between commands, and idleness was never
 /// the fault; serial accept was.
-fn handle_conn(stream: UnixStream, verbs: &'static [Verb]) {
+fn handle_conn(stream: UnixStream, socket: &'static Socket) {
     let mut reply = stream.try_clone().ok();
     let reader = BufReader::new(stream);
     for line in reader.lines() {
@@ -1759,7 +1760,9 @@ fn handle_conn(stream: UnixStream, verbs: &'static [Verb]) {
         if line.trim().is_empty() {
             continue;
         }
-        match parse_command(&line) {
+        // A socket that serves no core arms does not parse one; its lines go to its table.
+        let parsed = if socket.core { parse_command(&line) } else { None };
+        match parsed {
             Some(BridgeCommand::SessionAction { session_id, action, fields }) => {
                 // The connection is dedicated to this one action and its reply clone is
                 // the only channel the acknowledgement has. Without it the action would
@@ -1879,9 +1882,9 @@ fn handle_conn(stream: UnixStream, verbs: &'static [Verb]) {
             }
 
             None => {
-                let flow = match wire_cmd(&line).and_then(|cmd| verbs.iter().find(|v| v.cmd == cmd)) {
+                let flow = match wire_cmd(&line).and_then(|cmd| socket.verbs.iter().find(|v| v.cmd == cmd)) {
                     Some(verb) => (verb.serve)(&line, &mut reply),
-                    None => drop_unparsed(&line, &mut reply),
+                    None => drop_unparsed(&(socket.log)(), &line, &mut reply),
                 };
                 if flow == Flow::Answered {
                     return;
@@ -3093,7 +3096,7 @@ exit 1
 
         let sock = short_sock("idle");
         let listener = UnixListener::bind(&sock).unwrap();
-        std::thread::spawn(move || serve(&listener, &[])); // never joined
+        std::thread::spawn(move || serve(&listener, &CORE)); // not joined
 
         // Client 1: connect and hold the link open, writing nothing — the
         // shape of a client idling between commands.
@@ -3158,7 +3161,7 @@ exit 1
 
         let sock = short_sock("notifications");
         let listener = UnixListener::bind(&sock).unwrap();
-        std::thread::spawn(move || serve(&listener, &[])); // never joined, own listener
+        std::thread::spawn(move || serve(&listener, &CORE)); // not joined, own listener
 
         const N: usize = 12;
         let senders: Vec<_> = (0..N)
@@ -3220,7 +3223,7 @@ exit 1
 
         let sock = short_sock("no-verb");
         let listener = UnixListener::bind(&sock).unwrap();
-        std::thread::spawn(move || serve(&listener, &[])); // never joined
+        std::thread::spawn(move || serve(&listener, &CORE)); // not joined
 
         use std::io::Write;
         let mut client = UnixStream::connect(&sock).unwrap();

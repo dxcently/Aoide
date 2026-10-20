@@ -40,7 +40,6 @@ fn parse_class(name: &str) -> Option<EventClass> {
     match name {
         "audit" => Some(EventClass::Audit),
         "gate" => Some(EventClass::Gate),
-        "rice" => Some(EventClass::Rice),
         "content" => Some(EventClass::Content),
         "notification" => Some(EventClass::Notification),
         _ => None,

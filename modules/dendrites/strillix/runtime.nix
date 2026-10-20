@@ -636,6 +636,13 @@ in
         # two assignments to this option path, which one module file may not
         # make.
         config = lib.mkMerge [
+          # ── The dialog provider every user unit inherits (D17) ─────────────
+          # `AOIDE_DIALOG_CMD` names the desktop's dialog provider. It is set on the user manager's
+          # environment, so aoided and aoide-secrets inherit it without naming strillix themselves
+          # (house rule 5). Unset falls back to zenity.
+          {
+            systemd.user.sessionVariables.AOIDE_DIALOG_CMD = "${pkgs.aoide.strillix}/bin/strillix";
+          }
           # ── Move the old rice state before anything seeds the strillix root ───
           # Every seed below creates `$STRILLIX_ROOT/*` or `~/.local/state/strillix`
           # before any binary starts, and `migrate_dir` only moves into an absent

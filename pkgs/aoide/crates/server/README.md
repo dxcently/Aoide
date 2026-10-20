@@ -30,6 +30,9 @@ terminal's rights to its remote callers.
 
 ## Named seams (what it exposes)
 
+- The resident daemon also serves the core shellbridge: `run_loop` spawns
+  `aoide_conduct::shellbridge::run_core` once its own socket is bound, so
+  `aoide/shellbridge.sock` (the core arms, not gated on strillix) starts with aoided.
 - `daemon` — the `aoided` daemon. `run` is the one-shot policy self-check
   `aoide daemon` still runs. `run_loop`/`serve_daemon` (P-D2,
   `docs/architecture/AOIDED.md`) are the RESIDENT daemon `bin/aoided.rs`

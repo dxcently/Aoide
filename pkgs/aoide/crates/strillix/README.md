@@ -456,10 +456,13 @@ are core `aoide` identity, root `AGENTS.md`).
 
 ## The desktop bridge (`src/bridge/`)
 
-`strillix shellbridge --run` is the desktop process. It calls
-`aoide_conduct::shellbridge::run(bridge::VERBS)`: conduct's socket loop owns the
-socket, the core verbs and the stage seeding, and `bridge::VERBS` serves the nine
-desktop verbs. `bridge/mod.rs` holds the table, `parse_command` and `serve_line`;
+`strillix shellbridge --run` is the desktop process. It serves its own socket,
+`$XDG_RUNTIME_DIR/strillix/bridge.sock`, through
+`aoide_conduct::shellbridge::run_on(&socket_path(), &SOCKET)`. `SOCKET` carries the
+nine desktop verbs (`bridge::VERBS`) and no core arm: the core verbs and the stage
+seeding are aoided's, on `aoide/shellbridge.sock`, and ShellBridge.qml routes each
+cmd to one of the two. The desktop's drops, refusals and verb outcomes land in
+`$STRILLIX_ROOT/log`; core keeps `$AOIDE_ROOT/log`. `bridge/mod.rs` holds the table, `parse_command` and `serve_line`;
 `power.rs`, `component.rs`, `rice.rs` and `workspace.rs` hold the work their verbs
 drive. `focuswindow`, `focussession` and `power` are listed with their wire shapes
 in `docs/Aoide-Wiki/concepts/cli/Doors-and-Nodes.md`.
