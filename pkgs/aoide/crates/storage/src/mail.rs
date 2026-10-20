@@ -843,7 +843,7 @@ fn migrate_cursors_if_needed() -> Result<(), String> {
                     cursor.insert(name.clone(), Mark { seq: old_seq, rung: 0 });
                 } else {
                     for reader in readers {
-                        cursor.insert(reader, Mark { seq: old_seq, rung: 0 });
+                        cursor.insert(migrated_reader_key(&name, reader), Mark { seq: old_seq, rung: 0 });
                     }
                 }
                 out.insert(name, cursor);
@@ -853,7 +853,13 @@ fn migrate_cursors_if_needed() -> Result<(), String> {
                 // pass it through untouched.
                 let cursor: Cursor = serde_json::from_value(value)
                     .map_err(|e| format!("{}: unreadable cursor for {name:?}: {e}", path.display()))?;
-                out.insert(name, cursor);
+                let mut migrated = Cursor::new();
+                for (reader, mark) in cursor {
+                    let key = migrated_reader_key(&name, reader.clone());
+                    rewritten |= key != reader;
+                    migrated.insert(key, mark);
+                }
+                out.insert(name, migrated);
             }
         }
     }
@@ -1543,8 +1549,38 @@ fn save_cursors(c: &Cursors) -> Result<(), String> {
 /// entry under it — never re-derived per row.
 fn reader_id(name: &str, reader_session: Option<&str>) -> String {
     match reader_session {
-        Some(s) if !s.is_empty() => s.to_string(),
+        Some(s) if !s.is_empty() => session_reader_key(s),
         _ => name.to_string(),
+    }
+}
+
+/// The prefix every session reader's cursor key carries. A session's own box
+/// is named by its session id, so a bare session id as a reader key would be
+/// the box's pseudo-reader key (the name itself): an unconducted read would
+/// then consume the live session's mark. `:` is refused by the box grammar
+/// ([`valid_box_name`]), so no box name is a session key and no session key is
+/// a box name.
+const SESSION_KEY_PREFIX: &str = "session:";
+
+/// The cursor key a session reads under. Every session reader key is made
+/// here; callers pass the bare session id.
+pub fn session_reader_key(session: &str) -> String {
+    format!("{SESSION_KEY_PREFIX}{session}")
+}
+
+/// The session id behind a reader key, or `None` for the pseudo-reader.
+fn session_of_key(key: &str) -> Option<&str> {
+    key.strip_prefix(SESSION_KEY_PREFIX)
+}
+
+/// A reader key under `name` as it must read after the migration: the
+/// pseudo-reader (`name` itself) and keys already prefixed stay as they are,
+/// and any other reader is a bare session id that gains the prefix.
+fn migrated_reader_key(name: &str, reader: String) -> String {
+    if reader == name || reader.starts_with(SESSION_KEY_PREFIX) {
+        reader
+    } else {
+        session_reader_key(&reader)
     }
 }
 
@@ -2329,12 +2365,10 @@ pub fn ring_targets(name: &str) -> Result<RingTargets, String> {
         let mut enrolled = Vec::new();
         if let Some(cursor) = cursors.get(&name) {
             for (reader, mark) in cursor {
-                if *reader == name {
-                    continue;
-                }
-                enrolled.push(reader.clone());
+                let Some(session) = session_of_key(reader) else { continue };
+                enrolled.push(session.to_string());
                 if max_arm > mark.seq && mark.rung <= mark.seq {
-                    armed.push((reader.clone(), max_arm));
+                    armed.push((session.to_string(), max_arm));
                 }
             }
         }
@@ -2359,7 +2393,7 @@ pub fn stamp_rung(name: &str, reader: &str, seq: u64) -> Result<(), String> {
         let mut cursors = load_cursors()?;
         let mark = cursors
             .get_mut(&name)
-            .and_then(|c| c.get_mut(&reader))
+            .and_then(|c| c.get_mut(&session_reader_key(&reader)))
             .ok_or_else(|| format!("{reader}: not an enrolled reader of {name}"))?;
         if seq > mark.rung {
             mark.rung = seq;
@@ -2382,11 +2416,12 @@ pub fn armed_names_for_reader(reader: &str) -> Result<Vec<(String, u64)>, String
     with_lock(move || {
         let cursors = load_cursors()?;
         let mut out = Vec::new();
+        let key = session_reader_key(&reader);
         for (name, cursor) in &cursors {
             if name == &reader {
                 continue;
             }
-            let Some(mark) = cursor.get(&reader) else { continue };
+            let Some(mark) = cursor.get(&key) else { continue };
             let max_arm = read_file_entries(&box_path(name))?
                 .iter()
                 .filter(|e| &e.envelope.header.to.name == name && arms(&e.kind))
@@ -2420,7 +2455,7 @@ pub fn enrol_reader(name: &str, reader: &str) -> Result<(), String> {
     with_lock(move || {
         create_box_unlocked(&name)?;
         let mut cursors = load_cursors()?;
-        cursors.entry(name).or_default().entry(reader).or_default();
+        cursors.entry(name).or_default().entry(session_reader_key(&reader)).or_default();
         save_cursors(&cursors)?;
         Ok(())
     })
@@ -2445,9 +2480,10 @@ pub fn retire_readers(live: &std::collections::HashSet<&str>) -> Result<Vec<(Str
             let mut cursors = load_cursors()?;
             for (name, readers) in cursors.iter_mut() {
                 readers.retain(|reader, _| {
-                    let keep = reader == name || live.contains(reader.as_str());
+                    let session = session_of_key(reader);
+                    let keep = reader == name || session.is_some_and(|id| live.contains(id));
                     if !keep {
-                        retired.push((name.clone(), reader.clone()));
+                        retired.push((name.clone(), session.unwrap_or(reader).to_string()));
                     }
                     keep
                 });
@@ -2635,6 +2671,59 @@ mod tests {
 
     fn root(tag: &str) -> (aoide_test_support::EnvSaver, PathBuf) {
         aoide_test_support::isolated_mail_root(tag)
+    }
+
+    /// A session's own box is named by its session id. Its read as the session
+    /// moves the session's key only, and an unconducted read afterwards still
+    /// sees the letter: the pseudo-reader never took it.
+    #[test]
+    fn an_own_box_read_moves_the_session_and_never_the_pseudo_reader() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, _dir) = root("mail-own-box");
+        file_letter("alice", "sess-a", "for the session").unwrap();
+        assert_eq!(read_for("sess-a", false, Some("sess-a")).unwrap().len(), 1);
+        let cursors = load_cursors().unwrap();
+        assert_eq!(cursors["sess-a"].get("sess-a"), None, "the pseudo-reader's mark moved: {cursors:?}");
+        assert_eq!(read_for("sess-a", false, None).unwrap().len(), 1, "an unconducted read lost the letter");
+    }
+
+    /// The one-shot migration prefixes every bare session reader and leaves the
+    /// pseudo-reader and already-prefixed keys alone; a second run is a no-op.
+    #[test]
+    fn the_reader_key_migration_prefixes_sessions_once() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, _dir) = root("mail-reader-migrate");
+        std::fs::create_dir_all(mail_dir()).unwrap();
+        let legacy = serde_json::json!({
+            "box-x": { "box-x": { "seq": 1, "rung": 0 }, "sess-b": { "seq": 3, "rung": 0 } },
+            "box-y": { "session:sess-c": { "seq": 2, "rung": 0 } }
+        });
+        std::fs::write(cursors_path(), legacy.to_string()).unwrap();
+        with_lock(migrate_cursors_if_needed).unwrap();
+        let once = load_cursors().unwrap();
+        assert_eq!(once["box-x"]["box-x"].seq, 1, "the pseudo-reader keeps its key");
+        assert_eq!(once["box-x"]["session:sess-b"].seq, 3, "a bare session key gains the prefix");
+        assert!(!once["box-x"].contains_key("sess-b"), "{once:?}");
+        assert_eq!(once["box-y"]["session:sess-c"].seq, 2, "a prefixed key is left as it is");
+        with_lock(migrate_cursors_if_needed).unwrap();
+        assert_eq!(load_cursors().unwrap(), once, "a second migration changed the cursors");
+    }
+
+    /// Reaping retires a session key that left the roster and keeps a live one,
+    /// with the key stored under its prefix.
+    #[test]
+    fn retire_readers_retires_a_session_key_that_left_the_roster() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, _dir) = root("mail-reap-keys");
+        file_letter("alice", "box-r", "x").unwrap();
+        enrol_reader("box-r", "live-s").unwrap();
+        enrol_reader("box-r", "gone-s").unwrap();
+        let live: std::collections::HashSet<&str> = ["live-s"].into_iter().collect();
+        let retired = retire_readers(&live).unwrap();
+        assert_eq!(retired, vec![("box-r".to_string(), "gone-s".to_string())]);
+        let cursors = load_cursors().unwrap();
+        assert!(cursors["box-r"].contains_key("session:live-s"), "{cursors:?}");
+        assert!(!cursors["box-r"].contains_key("session:gone-s"), "{cursors:?}");
     }
 
     /// Each raw mail writer locks a wide `state/` before it creates or appends
@@ -3495,8 +3584,8 @@ mod tests {
 
         let cursors = load_cursors().unwrap();
         let cursor = cursors.get("bob").unwrap();
-        assert_eq!(cursor.get("sess-1").unwrap().seq, 2);
-        assert!(cursor.get("sess-2").is_none(), "a second reader has no mark until it reads");
+        assert_eq!(cursor.get(&session_reader_key("sess-1")).unwrap().seq, 2);
+        assert!(cursor.get(&session_reader_key("sess-2")).is_none(), "a second reader has no mark until it reads");
 
         // A second reader, same name: still sees every entry — sess-1's
         // read never touched it.
@@ -3505,8 +3594,8 @@ mod tests {
 
         let cursors = load_cursors().unwrap();
         let cursor = cursors.get("bob").unwrap();
-        assert_eq!(cursor.get("sess-1").unwrap().seq, 2, "sess-1's mark is untouched by sess-2's read");
-        assert_eq!(cursor.get("sess-2").unwrap().seq, 2);
+        assert_eq!(cursor.get(&session_reader_key("sess-1")).unwrap().seq, 2, "sess-1's mark is untouched by sess-2's read");
+        assert_eq!(cursor.get(&session_reader_key("sess-2")).unwrap().seq, 2);
 
         // sess-1 reading again with nothing new returns nothing, and does
         // not duplicate anything.
@@ -3530,10 +3619,10 @@ mod tests {
         assert_eq!(got.len(), 3, "sess-1's first read_all_names sees every entry, across every name");
 
         let cursors = load_cursors().unwrap();
-        assert_eq!(cursors.get("bob").unwrap().get("sess-1").unwrap().seq, 2);
-        assert_eq!(cursors.get("carol").unwrap().get("sess-1").unwrap().seq, 3);
-        assert!(cursors.get("bob").unwrap().get("sess-2").is_none(), "a second reader has no mark until it reads");
-        assert!(cursors.get("carol").unwrap().get("sess-2").is_none());
+        assert_eq!(cursors.get("bob").unwrap().get(&session_reader_key("sess-1")).unwrap().seq, 2);
+        assert_eq!(cursors.get("carol").unwrap().get(&session_reader_key("sess-1")).unwrap().seq, 3);
+        assert!(cursors.get("bob").unwrap().get(&session_reader_key("sess-2")).is_none(), "a second reader has no mark until it reads");
+        assert!(cursors.get("carol").unwrap().get(&session_reader_key("sess-2")).is_none());
 
         // A second reader, same names: still sees every entry — sess-1's
         // read_all_names never touched it.
@@ -3541,10 +3630,10 @@ mod tests {
         assert_eq!(got2.len(), 3, "a second reader consumes nothing sess-1 already read, across every name");
 
         let cursors = load_cursors().unwrap();
-        assert_eq!(cursors.get("bob").unwrap().get("sess-1").unwrap().seq, 2, "sess-1's mark under bob is untouched by sess-2's read_all_names");
-        assert_eq!(cursors.get("carol").unwrap().get("sess-1").unwrap().seq, 3, "sess-1's mark under carol is untouched by sess-2's read_all_names");
-        assert_eq!(cursors.get("bob").unwrap().get("sess-2").unwrap().seq, 2);
-        assert_eq!(cursors.get("carol").unwrap().get("sess-2").unwrap().seq, 3);
+        assert_eq!(cursors.get("bob").unwrap().get(&session_reader_key("sess-1")).unwrap().seq, 2, "sess-1's mark under bob is untouched by sess-2's read_all_names");
+        assert_eq!(cursors.get("carol").unwrap().get(&session_reader_key("sess-1")).unwrap().seq, 3, "sess-1's mark under carol is untouched by sess-2's read_all_names");
+        assert_eq!(cursors.get("bob").unwrap().get(&session_reader_key("sess-2")).unwrap().seq, 2);
+        assert_eq!(cursors.get("carol").unwrap().get(&session_reader_key("sess-2")).unwrap().seq, 3);
 
         // sess-1 reading again with nothing new returns nothing.
         let again = read_all_names(false, Some("sess-1")).unwrap();
@@ -3572,7 +3661,7 @@ mod tests {
 
         let cursors = load_cursors().unwrap();
         let cursor = cursors.get("bob").unwrap();
-        assert_eq!(cursor.get("sess-1").unwrap().seq, 1, "the conducted reader's mark is untouched");
+        assert_eq!(cursor.get(&session_reader_key("sess-1")).unwrap().seq, 1, "the conducted reader's mark is untouched");
         assert_eq!(cursor.get("bob").unwrap().seq, 1, "the pseudo-reader is keyed by the mailbox name");
 
         // A second unconducted read now sees nothing new.
@@ -3599,8 +3688,8 @@ mod tests {
 
         let cursors = load_cursors().unwrap();
         let bob = cursors.get("bob").unwrap();
-        assert_eq!(bob.get("sess-1").unwrap().seq, 5, "each listed reader inherits the name's old seq");
-        assert_eq!(bob.get("sess-2").unwrap().seq, 5);
+        assert_eq!(bob.get(&session_reader_key("sess-1")).unwrap().seq, 5, "each listed reader inherits the name's old seq");
+        assert_eq!(bob.get(&session_reader_key("sess-2")).unwrap().seq, 5);
         let carol = cursors.get("carol").unwrap();
         assert_eq!(carol.len(), 1, "no listed reader: exactly one reader, the name itself");
         assert_eq!(carol.get("carol").unwrap().seq, 3, "a name with no listed reader keeps its mark under the name");
@@ -3624,7 +3713,7 @@ mod tests {
         let twice = load_cursors().unwrap();
 
         assert_eq!(once, twice, "a second open must not undo or redo the migration");
-        assert_eq!(twice.get("bob").unwrap().get("sess-1").unwrap().seq, 5);
+        assert_eq!(twice.get("bob").unwrap().get(&session_reader_key("sess-1")).unwrap().seq, 5);
 
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -3645,13 +3734,13 @@ mod tests {
         let once = load_cursors().unwrap();
         let bob = once.get("bob").unwrap();
         assert_eq!(bob.len(), 1, "the only listed reader is the one literally named \"seq\"");
-        assert_eq!(bob.get("seq").unwrap().seq, 5, "a reader named seq inherits the old seq like any other");
+        assert_eq!(bob.get(&session_reader_key("seq")).unwrap().seq, 5, "a reader named seq inherits the old seq like any other");
 
         let raw = std::fs::read_to_string(cursors_path()).unwrap();
         let raw_json: serde_json::Value = serde_json::from_str(&raw).unwrap();
         assert_eq!(
             raw_json["bob"],
-            serde_json::json!({ "seq": { "seq": 5 } }),
+            serde_json::json!({ "session:seq": { "seq": 5 } }),
             "the migrated shape nests seq inside the reader object, never as a bare number"
         );
 
@@ -3661,7 +3750,7 @@ mod tests {
         read_base().unwrap();
         let twice = load_cursors().unwrap();
         assert_eq!(once, twice, "a reader named seq must be left untouched by a second migration pass");
-        assert_eq!(twice.get("bob").unwrap().get("seq").unwrap().seq, 5);
+        assert_eq!(twice.get("bob").unwrap().get(&session_reader_key("seq")).unwrap().seq, 5);
 
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -3682,8 +3771,8 @@ mod tests {
 
         let cursors = load_cursors().unwrap();
         let cursor = cursors.get("bob").unwrap();
-        assert_eq!(cursor.get("sess-1").unwrap().seq, 2, "reread still only ever advances forward");
-        assert_eq!(cursor.get("sess-2").unwrap().seq, 2, "a reread by sess-1 never moves sess-2's mark");
+        assert_eq!(cursor.get(&session_reader_key("sess-1")).unwrap().seq, 2, "reread still only ever advances forward");
+        assert_eq!(cursor.get(&session_reader_key("sess-2")).unwrap().seq, 2, "a reread by sess-1 never moves sess-2's mark");
 
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -3701,8 +3790,8 @@ mod tests {
 
         let cursors = load_cursors().unwrap();
         let cursor = cursors.get("bob").unwrap();
-        assert_eq!(cursor.get("sess-1").unwrap().seq, 2);
-        assert!(cursor.get("sess-2").is_none(), "mark never touches a reader that never called it");
+        assert_eq!(cursor.get(&session_reader_key("sess-1")).unwrap().seq, 2);
+        assert!(cursor.get(&session_reader_key("sess-2")).is_none(), "mark never touches a reader that never called it");
 
         // sess-2 still sees both letters as new — mark is scoped to sess-1.
         let got = read_for("bob", false, Some("sess-2")).unwrap();
@@ -4104,14 +4193,14 @@ mod tests {
 
         let cursors = load_cursors().unwrap();
         let cursor = cursors.get("bob").unwrap();
-        assert_eq!(cursor.get("sess-1").unwrap().seq, 1, "stamp_rung never moves seq");
-        assert_eq!(cursor.get("sess-1").unwrap().rung, 5);
-        assert_eq!(cursor.get("sess-2").unwrap().seq, 0, "a second reader is untouched by another reader's stamp");
-        assert_eq!(cursor.get("sess-2").unwrap().rung, 0);
+        assert_eq!(cursor.get(&session_reader_key("sess-1")).unwrap().seq, 1, "stamp_rung never moves seq");
+        assert_eq!(cursor.get(&session_reader_key("sess-1")).unwrap().rung, 5);
+        assert_eq!(cursor.get(&session_reader_key("sess-2")).unwrap().seq, 0, "a second reader is untouched by another reader's stamp");
+        assert_eq!(cursor.get(&session_reader_key("sess-2")).unwrap().rung, 0);
 
         stamp_rung("bob", "sess-1", 2).unwrap(); // lower than the current rung
         let cursors = load_cursors().unwrap();
-        assert_eq!(cursors.get("bob").unwrap().get("sess-1").unwrap().rung, 5, "rung only ever advances");
+        assert_eq!(cursors.get("bob").unwrap().get(&session_reader_key("sess-1")).unwrap().rung, 5, "rung only ever advances");
 
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -4131,7 +4220,7 @@ mod tests {
         let err2 = stamp_rung("bob", "sess-1", 1).unwrap_err();
         assert!(!err2.is_empty());
         let cursors = load_cursors().unwrap();
-        assert!(cursors.get("bob").unwrap().get("sess-1").is_none(), "stamping an unenrolled reader must never insert one");
+        assert!(cursors.get("bob").unwrap().get(&session_reader_key("sess-1")).is_none(), "stamping an unenrolled reader must never insert one");
         assert_eq!(cursors.get("bob").unwrap().len(), 1, "only the already-enrolled reader exists");
 
         let _ = std::fs::remove_dir_all(&dir);
@@ -4229,15 +4318,15 @@ mod tests {
         let cursors = load_cursors().unwrap();
         let cursor = cursors.get("bob").unwrap();
         assert_eq!(cursor.len(), 1, "enrolling twice creates exactly one key");
-        assert_eq!(cursor.get("sess-1").unwrap().seq, 0);
-        assert_eq!(cursor.get("sess-1").unwrap().rung, 0);
+        assert_eq!(cursor.get(&session_reader_key("sess-1")).unwrap().seq, 0);
+        assert_eq!(cursor.get(&session_reader_key("sess-1")).unwrap().rung, 0);
 
         file_letter("alice", "bob", "one").unwrap();
         read_for("bob", false, Some("sess-1")).unwrap(); // seq -> 1
         enrol_reader("bob", "sess-1").unwrap(); // must not reset the mark
         let cursors = load_cursors().unwrap();
         assert_eq!(
-            cursors.get("bob").unwrap().get("sess-1").unwrap().seq,
+            cursors.get("bob").unwrap().get(&session_reader_key("sess-1")).unwrap().seq,
             1,
             "enrolling an already-enrolled reader never moves its mark"
         );
@@ -4512,7 +4601,7 @@ mod tests {
         assert!(!box_path("bob").exists(), "the box's log is gone");
         let cursors = load_cursors().unwrap();
         assert!(cursors.get("bob").is_none(), "the box's cursor keys are gone");
-        assert!(cursors.get("carol").is_some_and(|c| c.contains_key("sess-2")), "another box's keys stay");
+        assert!(cursors.get("carol").is_some_and(|c| c.contains_key(&session_reader_key("sess-2"))), "another box's keys stay");
         assert!(box_path("carol").exists(), "another box stays");
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -4975,7 +5064,7 @@ mod tests {
         }
         enrol_reader("bob", "r1").unwrap();
         let mut cursors = load_cursors().unwrap();
-        cursors.get_mut("bob").unwrap().get_mut("r1").unwrap().seq = 2;
+        cursors.get_mut("bob").unwrap().get_mut(&session_reader_key("r1")).unwrap().seq = 2;
         save_cursors(&cursors).unwrap();
 
         assert!(compact_unlocked(&box_path("bob"), &load_cursors().unwrap()).unwrap(), "two lines are read");

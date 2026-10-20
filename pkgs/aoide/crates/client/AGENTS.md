@@ -2,6 +2,12 @@
 
 ## Invariants
 
+- **Only conduct registers the MCP-open mail handlers.** `register_mail_names`
+  and `register_mail_reads` declare the four MCP-open reads and their flags, and
+  take their handlers from the caller. The caller must be `aoide-conduct`
+  (`graph::mail_reads`), since the MCP clip is conduct's walk. A second caller
+  is a bypass of that clip, so do not add one.
+
 - A fresh structured letter mints one secure random thread ID before fanout; all copies share it. Replies explicitly retain the thread and name the parent; forwarding starts fresh.
 - **An ack is signed as `routing::own_name_in`'s name for this box in the letter's mesh** (`own_name`), the rule a letter's sender uses. A charter mesh that does not carry this box's key mints no ack and audits `mail.ack.withheld`; the hostname is never the fallback there.
 - Structured letter fanout reuses the scalar mail handler. Validate all recipients before effects, report every copy, and never retry accepted copies as a group. Metadata remains inside signed text, never unsigned envelope fields.

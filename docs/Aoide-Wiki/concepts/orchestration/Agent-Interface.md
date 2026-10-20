@@ -40,8 +40,10 @@ The MCP layer is deliberately optional and agent-added:
 
 Over MCP the session read commands (roster, `session find`, `graph`) answer
 only for the caller's own attested subtree: its session and every session under
-it by attested spawn edges. An unattested caller sees nothing. `mail` read is
-not opened to MCP, so the caller cannot read a mailbox it does not own.
+it by attested spawn edges. An unattested caller sees nothing. The mail reads
+(`mail`, `mail read`, `mail show`, `mail mark`) answer for the same subtree and
+act as the attested session only; `mail send` and `--all-names` stay CLI-only
+(MAIL.md "Reading over MCP").
 
 An MCP caller is attested the way a CLI caller is, and never approves. The stdio
 server dispatches in its own process, so the gate walks that process's ancestry

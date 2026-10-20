@@ -1149,6 +1149,42 @@ a terminal escape in a letter is the reader's terminal's problem to
 render inertly, which every modern one does, and the `--json` form
 carries the exact bytes for the reader that wants them.
 
+## Reading over MCP
+
+The MCP door opens four reads: bare `mail` (the names unread by the caller),
+`mail read`, `mail show` and `mail mark`. They answer the CLI and MCP doors
+only, not the daemon hop. Everything else in the family stays CLI-only,
+`mail send` and `mail ring` included.
+
+An MCP read is clipped to the caller's attested session and every session under
+it by attested spawn edges, the same subtree the roster and `session find` use.
+The caller's own box is its session id, and so is each descendant's box. A read
+or mark acts as the attested session's reader key alone: it never moves the
+pseudo-reader's mark or another reader's. Concretely:
+
+- An unattested MCP caller is refused with the taught reason and reads nothing.
+- A mailbox outside the subtree is refused with the same words as a mailbox that
+  does not exist, so a probe learns nothing about either.
+- `mail show` answers an entry outside the subtree as an unknown msgid, and its
+  teaching lists only msgids the subtree can read.
+- No read suggests a mailbox name over MCP, since a suggestion names a mailbox
+  the caller may not read. Teaching over MCP names the tool, never a CLI line.
+- `--all-names` is a CLI-only flag and is refused by its flag door over MCP.
+
+Reader keys. A session reads under the key `session:<id>`, and a mailbox's
+pseudo-reader is keyed by the mailbox name itself. A session's own box is named
+by its session id, so a bare id as a key would collide with that box's
+pseudo-reader, and an unconducted read would consume the live session's mark.
+The `session:` prefix holds a character the box grammar refuses, so no session
+key is a box name. The one-shot migration of `cursors.json` prefixes each bare
+session key and leaves the pseudo-reader and prefixed keys alone.
+
+The clip is an MCP door policy, not a confidentiality boundary against a
+same-uid shell agent, which can run `aoide mail read` directly. The real wall
+is per-agent uids (the org design).
+
+The CLI reads every mailbox as the reader this process names, unchanged.
+
 ## Boards
 
 A board is every group conversation: a direct board between two

@@ -18,7 +18,7 @@
 
 use crate::teach;
 use aoide_protocol::output::{Fix, Kind, Outcome};
-use aoide_protocol::registry::{arg, cmd, flag, Registry};
+use aoide_protocol::registry::{arg, cmd, flag, Registry, CLI_DOORS};
 use aoide_protocol::Invocation;
 use serde_json::{json, Value};
 use std::io::{BufRead, Read, Write};
@@ -4867,7 +4867,12 @@ pub fn register_post_graph(r: &mut Registry) {
 /// receive trigger a quiet box needs, and `mail route` is the dry run of the
 /// four steps ([`aoide_storage::routing::Letter::route`]) — a read that
 /// prints the path and sends nothing.
-pub fn register_mail(r: &mut Registry) {
+/// `mail` (bare) and the three MCP-open reads, declared here with their
+/// flags, and answered by handlers the caller supplies: conduct supplies
+/// them, because the MCP clip that scopes a read is conduct's. Registered
+/// in the order the CLI always had (`mail`, `mail send`, `mail read/show/mark`,
+/// then the rest), so `schema --json` keeps its order.
+pub fn register_mail_names(r: &mut Registry, names: fn(&Invocation) -> Outcome) {
     r.insert(cmd!(
         path: ["mail"],
         summary: "Names with mail unread by this reader in this box's mailbase (state/mail/). This phase shows the names half only — the caller's own new letters is a later phase (P-M5).",
@@ -4875,10 +4880,58 @@ pub fn register_mail(r: &mut Registry) {
         flags: [],
         gated: false,
         implemented: true,
-        handler: handle_mail_names,
+        handler: names,
         examples: ["mail"],
         brief: "List the mailboxes that hold mail you have not read.",
+        doors: &[Door::Cli, Door::Mcp],
     ));
+}
+
+pub fn register_mail_reads(r: &mut Registry, read: fn(&Invocation) -> Outcome, show: fn(&Invocation) -> Outcome, mark: fn(&Invocation) -> Outcome) {
+    r.insert(cmd!(
+        path: ["mail", "read"],
+        summary: "Print unread letters and advance the reader's cursor. --for <name> reads one mailbox; --all-names reads every name with anything unread; --reread also reprints already-read entries for the name(s) selected (the cursor still only ever advances forward).",
+        args: [],
+        flags: [
+            flag!("for", "string", "Read this mailbox name only. Mutually exclusive with --all-names.", value: "mailbox", conflicts: &["all-names"]),
+            flag!("all-names", "bool", "Read every name that has unread mail. Mutually exclusive with --for.", conflicts: &["for"], doors: CLI_DOORS),
+            flag!("reread", "bool", "Also print already-read entries for the selected name(s)."),
+        ],
+        gated: false,
+        implemented: true,
+        handler: read,
+        examples: ["mail read --for conductor", "mail read --all-names"],
+        brief: "Print unread letters and move the cursor past them.",
+        one_of: &[&["for", "all-names"]],
+        doors: &[Door::Cli, Door::Mcp],
+    ));
+    r.insert(cmd!(
+        path: ["mail", "show"],
+        summary: "Print one entry by its exact msgid. Does not touch any cursor.",
+        args: [arg!("msgid", "string", true, "The entry's msgid, as shown by `mail read`.")],
+        flags: [],
+        gated: false,
+        implemented: true,
+        handler: show,
+        examples: ["mail show <msgid>"],
+        brief: "Print one mail entry by its msgid, leaving cursors alone.",
+        doors: &[Door::Cli, Door::Mcp],
+    ));
+    r.insert(cmd!(
+        path: ["mail", "mark"],
+        summary: "Advance a mailbox's cursor to its latest entry without printing anything.",
+        args: [],
+        flags: [flag!("for", "string", "The mailbox name to mark.", value: "mailbox", required: true)],
+        gated: false,
+        implemented: true,
+        handler: mark,
+        examples: ["mail mark --for conductor"],
+        brief: "Move a mailbox's cursor to its latest entry, printing nothing.",
+        doors: &[Door::Cli, Door::Mcp],
+    ));
+}
+
+pub fn register_mail_send(r: &mut Registry) {
     r.insert(cmd!(
         path: ["mail", "send"],
         summary: "File a letter into the mailbase. --to self/<name> files locally — self never crosses the wire. --to <node>/<name> spools it into that (already verified/paired) node's outbox and makes one best-effort delivery attempt right away; this command reports the WRITE, never the delivery outcome — see `mail outbox` for that. --hold spools without ever dialing: the entry leaves when that node polls.",
@@ -4899,44 +4952,9 @@ pub fn register_mail(r: &mut Registry) {
         examples: ["mail send --to self/conductor -- status?", "mail send --to yomi-strix/conductor -- build finished"],
         brief: "Send a letter to self/<name> or to <node>/<name>.",
     ));
-    r.insert(cmd!(
-        path: ["mail", "read"],
-        summary: "Print unread letters and advance the reader's cursor. --for <name> reads one mailbox; --all-names reads every name with anything unread; --reread also reprints already-read entries for the name(s) selected (the cursor still only ever advances forward).",
-        args: [],
-        flags: [
-            flag!("for", "string", "Read this mailbox name only. Mutually exclusive with --all-names.", value: "mailbox", conflicts: &["all-names"]),
-            flag!("all-names", "bool", "Read every name that has unread mail. Mutually exclusive with --for.", conflicts: &["for"]),
-            flag!("reread", "bool", "Also print already-read entries for the selected name(s)."),
-        ],
-        gated: false,
-        implemented: true,
-        handler: handle_mail_read,
-        examples: ["mail read --for conductor", "mail read --all-names"],
-        brief: "Print unread letters and move the cursor past them.",
-        one_of: &[&["for", "all-names"]],
-    ));
-    r.insert(cmd!(
-        path: ["mail", "show"],
-        summary: "Print one entry by its exact msgid. Does not touch any cursor.",
-        args: [arg!("msgid", "string", true, "The entry's msgid, as shown by `mail read`.")],
-        flags: [],
-        gated: false,
-        implemented: true,
-        handler: handle_mail_show,
-        examples: ["mail show <msgid>"],
-        brief: "Print one mail entry by its msgid, leaving cursors alone.",
-    ));
-    r.insert(cmd!(
-        path: ["mail", "mark"],
-        summary: "Advance a mailbox's cursor to its latest entry without printing anything.",
-        args: [],
-        flags: [flag!("for", "string", "The mailbox name to mark.", value: "mailbox", required: true)],
-        gated: false,
-        implemented: true,
-        handler: handle_mail_mark,
-        examples: ["mail mark --for conductor"],
-        brief: "Move a mailbox's cursor to its latest entry, printing nothing.",
-    ));
+}
+
+pub fn register_mail(r: &mut Registry) {
     r.insert(cmd!(
         path: ["mail", "box", "add"],
         summary: "Create an empty mailbox on this node, so a far letter to it can file. A far deposit to a name with no box is refused `unknown-box`: a box exists only because a local act created it. Idempotent: an existing box is left as it is.",
@@ -5067,7 +5085,7 @@ fn mail_sender_attribution(inv: &Invocation) -> Option<String> {
 /// mailbox name itself is those functions' own, not this helper's, so an
 /// unconducted caller still gets a real (pseudo-)reader with its own mark,
 /// never a shared one.
-fn mail_reader_session() -> Option<String> {
+pub fn mail_reader_session() -> Option<String> {
     std::env::var("AOIDE_SESSION_ID").ok().filter(|s| !s.is_empty())
 }
 
@@ -5087,14 +5105,38 @@ fn render_entry(e: &aoide_storage::mail::Entry) -> String {
     )
 }
 
-/// `aoide mail [--json]` — bare listing: names with mail unread by this
-/// reader (this process's own `AOIDE_SESSION_ID` via [`mail_reader_session`],
-/// or the mailbox name itself outside a conducted session — that fallback
-/// is `names_with_unread`'s own).
-fn handle_mail_names(_inv: &Invocation) -> Outcome {
+/// Which mailboxes a mail read may name. `None` is every mailbox (the CLI and
+/// the daemon door). `Some` is the MCP door's clip: the caller's own attested
+/// session and every session under it, each one's mailbox being its own
+/// session id. Built by conduct (`graph::mail_reads`), never here, because the
+/// attested walk lives in conduct.
+pub type MailScope = Option<std::collections::BTreeSet<String>>;
+
+/// Whether a read with `scope` may name the mailbox `name`.
+fn readable(scope: &MailScope, name: &str) -> bool {
+    scope.as_ref().is_none_or(|set| set.contains(name))
+}
+
+/// The one refusal for a mailbox a read may not name. Its words never depend
+/// on whether that mailbox exists, so a probe learns nothing.
+fn outside_scope(cmd: &str) -> Outcome {
+    Outcome::refuse(
+        cmd,
+        Kind::Refused,
+        "mailbox not readable over this door",
+        "an MCP read reaches only its own session's mailbox and the mailboxes of the sessions it spawned",
+        Fix::None("list the mailboxes this session can read with `aoide mail`"),
+    )
+}
+
+/// `aoide mail [--json]` — bare listing: names with mail unread by `reader`
+/// (the mailbox name itself when there is no reader — that fallback is
+/// `names_with_unread`'s own). Under a `scope`, only the names it covers.
+pub fn mail_names(scope: &MailScope, reader: Option<&str>) -> Outcome {
     let cmd = "mail";
-    match aoide_storage::mail::names_with_unread(mail_reader_session().as_deref()) {
+    match aoide_storage::mail::names_with_unread(reader) {
         Ok(names) => {
+            let names: Vec<String> = names.into_iter().filter(|n| readable(scope, n)).collect();
             let n = names.len();
             let body = if n == 0 { "no unread mail".to_string() } else { names.join("\n") };
             Outcome::ok(cmd, format!("{n} name{} with unread mail\n{body}", if n == 1 { "" } else { "s" }))
@@ -5730,16 +5772,19 @@ fn handle_mail_route(inv: &Invocation) -> Outcome {
 }
 
 /// `aoide mail read (--for <name> | --all-names) [--reread] [--json]`.
-fn handle_mail_read(inv: &Invocation) -> Outcome {
+pub fn mail_read(inv: &Invocation, scope: &MailScope, reader: Option<&str>) -> Outcome {
     let cmd = "mail.read";
     let reread = inv.flag_present("reread");
     let all_names = inv.flag_present("all-names");
     let for_name = inv.flags.get("for").map(|s| s.trim().to_string());
-    let reader = mail_reader_session();
-    let near = for_name.as_deref().and_then(near_mailbox);
+    if scope.is_some() && (all_names || for_name.as_deref().is_none_or(|name| !readable(scope, name))) {
+        return outside_scope(cmd);
+    }
+    // A suggestion names another mailbox, which a scoped read may not learn of.
+    let near = if scope.is_none() { for_name.as_deref().and_then(near_mailbox) } else { None };
     let result = match (&for_name, all_names) {
-        (Some(name), false) => aoide_storage::mail::read_for(name, reread, reader.as_deref()),
-        _ => aoide_storage::mail::read_all_names(reread, reader.as_deref()),
+        (Some(name), false) => aoide_storage::mail::read_for(name, reread, reader),
+        _ => aoide_storage::mail::read_all_names(reread, reader),
     };
 
     match result {
@@ -5786,33 +5831,54 @@ fn with_suggestion(out: Outcome, typed: &str, near: Option<String>) -> Outcome {
 }
 
 /// `aoide mail show <msgid> [--json]`.
-fn handle_mail_show(inv: &Invocation) -> Outcome {
+pub fn mail_show(inv: &Invocation, scope: &MailScope) -> Outcome {
     let cmd = "mail.show";
     let msgid = inv.args[0].trim();
     match aoide_storage::mail::show(msgid) {
-        Ok(Some(entry)) => {
+        Ok(Some(entry)) if readable(scope, &entry.envelope.header.to.name) => {
             Outcome::ok(cmd, render_entry(&entry)).with_data(serde_json::to_value(&entry).unwrap_or_default())
         }
-        Ok(None) => {
+        // An entry outside the scope answers exactly as an absent one does: the
+        // same teaching, listing only the msgids the scope can read.
+        Ok(_) => {
             // Newest first: the ids a person most likely meant are the recent ones.
             let valid: Vec<String> = aoide_storage::mail::read_base()
                 .unwrap_or_default()
                 .into_iter()
                 .rev()
+                .filter(|e| readable(scope, &e.envelope.header.to.name))
                 .map(|e| e.envelope.msgid)
                 .collect();
+            // The `--all-names` teaching is a CLI-only spelling, so a scoped
+            // caller is pointed at the listing it may run.
+            if scope.is_some() {
+                return teach::unknown_name(
+                    inv,
+                    cmd,
+                    "msgid",
+                    teach::Slot::Arg(0),
+                    msgid,
+                    &valid,
+                    "latest msgids",
+                    "mail",
+                    Fix::None("list what you can read with the `mail` tool, then pass one of its msgids to `mail.show`"),
+                );
+            }
             teach::unknown_name(inv, cmd, "msgid", teach::Slot::Arg(0), msgid, &valid, "latest msgids", "aoide mail read --all-names --reread", Fix::Run("aoide mail read --all-names --reread".to_string()))
         }
         Err(e) => teach::store_failed(cmd, "state/mail", &e),
     }
 }
 
-/// `aoide mail mark --for <name> [--json]`.
-fn handle_mail_mark(inv: &Invocation) -> Outcome {
+/// `aoide mail mark --for <name> [--json]`. Advances only `reader`'s mark.
+pub fn mail_mark(inv: &Invocation, scope: &MailScope, reader: Option<&str>) -> Outcome {
     let cmd = "mail.mark";
     let name = inv.flags["for"].trim();
-    let near = near_mailbox(name);
-    match aoide_storage::mail::mark(name, mail_reader_session().as_deref()) {
+    if !readable(scope, name) {
+        return outside_scope(cmd);
+    }
+    let near = if scope.is_none() { near_mailbox(name) } else { None };
+    match aoide_storage::mail::mark(name, reader) {
         Ok(seq) => with_suggestion(
             Outcome::ok(cmd, format!("{name}: cursor marked through seq {seq}"))
                 .changed(vec![format!("state/mail/cursors.json: {name} -> {seq}")])
@@ -6479,6 +6545,30 @@ fn retry_refused_entries(cmd: &str, target: Option<&str>) -> Outcome {
 mod tests {
     use super::*;
 
+    /// The mail reads' handlers, as tests call them: the unscoped (CLI) reads
+    /// with the reader this process names, which is what conduct passes off MCP.
+    fn handle_mail_names(_inv: &Invocation) -> Outcome {
+        mail_names(&None, mail_reader_session().as_deref())
+    }
+    fn handle_mail_read(inv: &Invocation) -> Outcome {
+        mail_read(inv, &None, mail_reader_session().as_deref())
+    }
+    fn handle_mail_show(inv: &Invocation) -> Outcome {
+        mail_show(inv, &None)
+    }
+    fn handle_mail_mark(inv: &Invocation) -> Outcome {
+        mail_mark(inv, &None, mail_reader_session().as_deref())
+    }
+
+    /// Every mail command the CLI registers, in its order, with the reads'
+    /// handlers standing in for conduct's.
+    fn register_all_mail(r: &mut Registry) {
+        register_mail_names(r, handle_mail_names);
+        register_mail_send(r);
+        register_mail_reads(r, handle_mail_read, handle_mail_show, handle_mail_mark);
+        register_mail(r);
+    }
+
     /// What `Command::check` says about an invocation of one of the families
     /// this module registers: the declared half of validation, run the way every
     /// door runs it before a handler.
@@ -6487,7 +6577,7 @@ mod tests {
         register_nodes(&mut r);
         register_node_discovery(&mut r);
         register_pair(&mut r);
-        register_mail(&mut r);
+        register_all_mail(&mut r);
         crate::mesh::register(&mut r);
         crate::charter::register(&mut r);
         let p: Vec<String> = path.iter().map(|s| s.to_string()).collect();
@@ -9774,7 +9864,7 @@ mod tests {
     #[test]
     fn register_mail_wires_all_eleven_commands() {
         let mut r = Registry::new();
-        register_mail(&mut r);
+        register_all_mail(&mut r);
         let paths: Vec<String> = r.commands().map(|c| c.dotted()).collect();
         for want in ["mail", "mail.send", "mail.read", "mail.show", "mail.mark", "mail.rm", "mail.outbox", "mail.outbox.rm", "mail.outbox.retry", "mail.export", "mail.poll"] {
             assert!(paths.contains(&want.to_string()), "missing {want}");
@@ -11512,7 +11602,7 @@ mod tests {
         // seq would pass this test even if the export marked it — there would
         // be nothing left to advance — so the mark starts at zero.
         let cursors = aoide_storage::mail::cursors_path();
-        std::fs::write(&cursors, r#"{"conductor":{"reader-a":{"seq":0}}}"#).unwrap();
+        std::fs::write(&cursors, r#"{"conductor":{"session:reader-a":{"seq":0}}}"#).unwrap();
         let before = std::fs::read(&cursors).unwrap();
         assert_eq!(
             aoide_storage::mail::unread_for("conductor", reader).unwrap().1.len(),

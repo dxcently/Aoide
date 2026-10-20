@@ -389,6 +389,30 @@ impl Command {
         }
         for group in self.one_of {
             if !group.iter().any(|n| Self::given(inv, n)) {
+                // Over a door, only the members that door may take are choices, and
+                // the line names the tool, not the CLI spelling a caller cannot run.
+                let open: Vec<&str> = group
+                    .iter()
+                    .copied()
+                    .filter(|n| self.flag(n).is_none_or(|f| f.doors.is_empty() || f.doors.contains(&inv.door)))
+                    .collect();
+                if inv.door == Door::Mcp {
+                    let Some(first) = open.first() else { continue };
+                    let names: Vec<String> = open.iter().map(|n| format!("--{n}")).collect();
+                    let parts: Vec<String> = open
+                        .iter()
+                        .map(|n| match self.flag(n) {
+                            Some(f) => format!("--{n} ({})", lead(f.description)),
+                            None => format!("--{n}"),
+                        })
+                        .collect();
+                    let call = format!("{} {}", self.dotted(), serde_json::json!({ *first: "<value>" }));
+                    return Err(usage(
+                        format!("`{}` needs one of {}", self.dotted(), names.join(" or ")),
+                        format!("none was given; the choices are {}", parts.join(", ")),
+                        call,
+                    ));
+                }
                 let names: Vec<String> = group.iter().map(|n| format!("--{n}")).collect();
                 let parts: Vec<String> = group
                     .iter()

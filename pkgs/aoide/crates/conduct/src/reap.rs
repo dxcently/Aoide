@@ -2933,7 +2933,7 @@ mod tests {
         let raw = std::fs::read_to_string(aoide_storage::mail::cursors_path()).unwrap();
         let cursors: aoide_storage::mail::Cursors = serde_json::from_str(&raw).unwrap();
         assert_eq!(cursors.keys().collect::<Vec<_>>(), vec!["bob"], "carol's box went dead with its only reader, holds no mail, and is reaped with its key");
-        assert_eq!(cursors["bob"].keys().collect::<Vec<_>>(), vec!["live-1"]);
+        assert_eq!(cursors["bob"].keys().collect::<Vec<_>>(), vec!["session:live-1"]);
 
         let _ = std::fs::remove_dir_all(&stage);
     }

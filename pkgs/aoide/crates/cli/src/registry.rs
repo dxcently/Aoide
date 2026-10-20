@@ -552,6 +552,67 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    /// The MCP door reads mail through the attested subtree only: the four
+    /// read commands answer it, `--all-names` never does, and the mail-send
+    /// family stays CLI-only (MAIL.md "Reading over MCP").
+    #[test]
+    fn the_mcp_door_offers_the_mail_reads_and_closes_all_names() {
+        let r = crate::commands::all();
+        let tools = aoide_server::mcp::tool_list(&r);
+        let list = tools["tools"].as_array().unwrap();
+        let names: Vec<&str> = list.iter().map(|t| t["name"].as_str().unwrap()).collect();
+        for want in ["mail", "mail.read", "mail.show", "mail.mark"] {
+            assert!(names.contains(&want), "{want} must be an MCP tool: {names:?}");
+        }
+        assert!(!names.contains(&"mail.send"), "mail.send stays CLI-only");
+        let read = list.iter().find(|t| t["name"] == "mail.read").unwrap();
+        assert!(read["inputSchema"]["properties"].get("all-names").is_none(), "--all-names is not an MCP argument");
+    }
+
+    /// An MCP mail read with no attested session is refused with the taught
+    /// reason and reads nothing: the letter's text never reaches the caller.
+    #[test]
+    fn an_unattested_mcp_mail_read_is_taught_and_reads_nothing() {
+        use aoide_protocol::audit::Door;
+        let _guard = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let root = aoide_test_support::short_tmp("mcp-mail-unattested");
+        std::fs::create_dir_all(root.join("home")).unwrap();
+        let _env = aoide_test_support::EnvSaver::capture(&["AOIDE_ROOT", "AOIDE_AUDIT_LOG", "AOIDE_STAGE_DIR", "XDG_RUNTIME_DIR", "HOME", "AOIDE_SESSION_ID"]);
+        std::env::set_var("AOIDE_ROOT", &root);
+        std::env::set_var("AOIDE_AUDIT_LOG", root.join("log"));
+        std::env::set_var("AOIDE_STAGE_DIR", root.join("stage"));
+        std::env::set_var("XDG_RUNTIME_DIR", root.join("run"));
+        std::env::set_var("HOME", root.join("home"));
+        std::env::remove_var("AOIDE_SESSION_ID");
+        aoide_storage::mail::file_letter("alice", "victim", "the victim's secret words").unwrap();
+
+        let inv = aoide_protocol::Invocation {
+            path: vec!["mail".into(), "read".into()],
+            args: vec![],
+            flags: [("for".to_string(), "victim".to_string())].into_iter().collect(),
+            door: Door::Mcp,
+        };
+        let outcome = crate::dispatch::dispatch(&inv);
+        assert!(outcome.message.contains("attested session"), "unattested MCP read must be taught: {}", outcome.message);
+        assert!(!outcome.message.contains("secret words"), "{}", outcome.message);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// `--all-names` is a CLI-only flag: over MCP its flag door refuses it
+    /// before the handler runs.
+    #[test]
+    fn mcp_all_names_is_refused_by_its_flag_door() {
+        use aoide_protocol::audit::Door;
+        let inv = aoide_protocol::Invocation {
+            path: vec!["mail".into(), "read".into()],
+            args: vec![],
+            flags: [("all-names".to_string(), "true".to_string())].into_iter().collect(),
+            door: Door::Mcp,
+        };
+        let outcome = crate::dispatch::dispatch(&inv);
+        assert!(outcome.message.contains("`--all-names` is not open to the mcp door"), "{}", outcome.message);
+    }
+
     /// The MCP tool list is the MCP-open set, name for name (CONTRACTS.md §3).
     #[test]
     fn the_mcp_tool_list_is_exactly_the_mcp_open_set() {
@@ -559,7 +620,7 @@ mod tests {
         let tools = aoide_server::mcp::tool_list(&r);
         let mut names: Vec<String> = tools["tools"].as_array().unwrap().iter().map(|t| t["name"].as_str().unwrap().to_string()).collect();
         names.sort();
-        let mut expected = vec!["graph", "guide", "schema", "send", "session", "session.find", "session.watch", "soundcheck", "spawn"];
+        let mut expected = vec!["graph", "guide", "mail", "mail.mark", "mail.read", "mail.show", "schema", "send", "session", "session.find", "session.watch", "soundcheck", "spawn"];
         expected.sort();
         assert_eq!(names, expected);
     }
@@ -585,7 +646,7 @@ mod tests {
             door: aoide_protocol::audit::Door::Cli,
         };
         let outcome = crate::dispatch::dispatch(&inv);
-        assert_eq!(outcome.data.as_ref().unwrap()["toolCount"], 9, "{outcome:?}");
+        assert_eq!(outcome.data.as_ref().unwrap()["toolCount"], 13, "{outcome:?}");
     }
 
     /// Golden snapshot: the commands an MCP caller may list and call. Every
@@ -595,7 +656,7 @@ mod tests {
         let r = crate::commands::all();
         let mut got: Vec<String> = r.commands().filter(|c| c.opens(aoide_protocol::audit::Door::Mcp)).map(|c| c.dotted()).collect();
         got.sort();
-        let mut expected = vec!["graph", "guide", "schema", "send", "session", "session.find", "session.watch", "soundcheck", "spawn"];
+        let mut expected = vec!["graph", "guide", "mail", "mail.mark", "mail.read", "mail.show", "schema", "send", "session", "session.find", "session.watch", "soundcheck", "spawn"];
         expected.sort();
         assert_eq!(got, expected, "MCP-open set drifted from the golden snapshot");
     }

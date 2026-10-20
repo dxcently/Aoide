@@ -32,6 +32,7 @@ mod common;
 mod conduct;
 mod doc;
 mod doorbell;
+mod mail_reads;
 // The P-EIDOLON adapter lane, slice E1b (readiness E2 folded in): the pure
 // presence reconciler plus its read-only discovery seam over
 // `$XDG_RUNTIME_DIR/eidolon`, mirroring `codex_app`'s split rule for rule.
@@ -138,6 +139,7 @@ pub use self::doc::{build_graph, render, resolve_graph_document};
 // itself, callable in-process by any door that has this crate (the daemon
 // on a Stop hook, the CLI on `mail ring`, `aoide-server`'s deposit arm).
 pub use self::doorbell::{mail_ring, ring, RingReport};
+pub use self::mail_reads::{mail_mark, mail_names, mail_read, mail_show};
 // The ping-back (P-EIDOLON slice E5b): a parent hears the children it spawned.
 // `reap.rs` (a SIBLING of this module) is its one caller, from the sweep's
 // post-lock collector block — so this stays `pub(crate)`, never crossing the

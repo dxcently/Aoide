@@ -884,7 +884,7 @@ pub(crate) fn mail_facts(rows: &mut [Row], cursors: &Cursors, entries: &[Entry])
         let mut reads = Vec::new();
         let mut held: Vec<usize> = Vec::new();
         for (name, readers) in cursors {
-            let Some(mark) = readers.get(&reader) else { continue };
+            let Some(mark) = readers.get(&aoide_storage::mail::session_reader_key(&reader)) else { continue };
             reads.push(ReadMailbox { name: clip(name), unread: unread(name, mark.seq) as u64, via: via.clone() });
             held.extend(in_mailbox.get(name.as_str()).into_iter().flatten());
         }
@@ -3574,7 +3574,7 @@ mod tests {
     fn read_from_start(mailboxes: &[String], readers: &[String]) -> Cursors {
         mailboxes
             .iter()
-            .map(|name| (name.clone(), readers.iter().map(|r| (r.clone(), mail::Mark::default())).collect()))
+            .map(|name| (name.clone(), readers.iter().map(|r| (mail::session_reader_key(r), mail::Mark::default())).collect()))
             .collect()
     }
 
@@ -3628,7 +3628,7 @@ mod tests {
             (1..=40_000u64).map(|seq| filed_letter(seq, &mailboxes[(seq as usize - 1) % 10_000], "plain".into())).collect();
         let mut cursors = read_from_start(&mailboxes, &["r0".to_string()]);
         for readers in cursors.values_mut() {
-            readers.insert("r0".to_string(), mail::Mark { seq: 2, rung: 0 });
+            readers.insert(mail::session_reader_key("r0"), mail::Mark { seq: 2, rung: 0 });
         }
         let mut rows = reader_rows(1);
 
@@ -3825,7 +3825,7 @@ mod tests {
         let n = 2_000;
         let entries: Vec<Entry> = (1..=40_000u64).map(|seq| thread_letter(seq, &format!("m{}", seq as usize % n), "b")).collect();
         let cursors: Cursors = (0..n)
-            .map(|i| (format!("m{i}"), std::iter::once((format!("r{i}"), mail::Mark::default())).collect()))
+            .map(|i| (format!("m{i}"), std::iter::once((mail::session_reader_key(&format!("r{i}")), mail::Mark::default())).collect()))
             .collect();
         let mut rows = reader_rows(n);
 
