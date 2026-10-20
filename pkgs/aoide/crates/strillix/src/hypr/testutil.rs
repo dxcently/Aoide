@@ -216,3 +216,33 @@ impl Drop for EnvVars {
         }
     }
 }
+
+/// A socket that accepts every connection and reads nothing: where a test's aoided is up. The door's
+/// probe connects and closes, and the accept loop drops the stream, so nothing is ever sent to it.
+/// Bound once per test process.
+#[cfg(unix)]
+pub(crate) fn accepting_daemon() -> PathBuf {
+    static DAEMON: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+    DAEMON
+        .get_or_init(|| {
+            let dir = aoide_test_support::unique_tmp("dmn");
+            std::fs::create_dir_all(&dir).unwrap();
+            let path = dir.join("aoided.sock");
+            let listener = std::os::unix::net::UnixListener::bind(&path).unwrap();
+            std::thread::spawn(move || {
+                for stream in listener.incoming() {
+                    drop(stream);
+                }
+            });
+            path
+        })
+        .clone()
+}
+
+/// aoided is up for the guard's span: the door finds the daemon listening and execs the core stub.
+#[cfg(unix)]
+pub(crate) fn core_up() -> EnvVars {
+    let env = EnvVars::save(&["AOIDE_DAEMON_SOCKET"]);
+    std::env::set_var("AOIDE_DAEMON_SOCKET", accepting_daemon());
+    env
+}

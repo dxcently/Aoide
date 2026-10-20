@@ -66,7 +66,7 @@ use aoide_protocol::Invocation;
 use aoide_protocol::agents::{agent_profile, AgentProfile, CLAUDE_PROFILE};
 use crate::graph::{
     canonical_state, codex_home, drop_remote_child_rows, drop_sessions, harness_pid, hooks_path,
-    ledger_session_exit, lineage_of, load_stage, now_iso_utc, pingback, pingback_pull,
+    ledger_session_exit, lineage_of, load_stage, normalize_addr, now_iso_utc, pingback, pingback_pull,
     prune_done_sparing, refresh_subagent_says, refresh_transcript_fields, restage_graph, sessions_path,
     stage_error, superseded_by, DroppedEidolon,
     sync_codex_app_threads, sync_eidolon_sessions, upsert_hook, write_stage, HookRecord, HooksFile,
@@ -164,8 +164,9 @@ pub const REAP_SPAWNED_SHELL_STALE_SECS: i64 = 48 * 3600; // 48 hours (2 days)
 ///     alive and staleness must never overrule it. A live pid of the record's own vetoes the
 ///     staleness arm: the record's terminal and its agent cannot be told apart by pid alone, so a
 ///     live pid is taken as proof of life.
-///   A closed window is not a death signal here: the desktop clears the closed address, and the
-///   pid decides the record from there. One more veto, orthogonal to all of the above: `rec.exempt`
+///   A closed window is not a death signal here: `session window closed` judges the sessions that
+///   ran in it on that evidence alone ([`reap_closed_window`]), and the pid decides every other
+///   record. One more veto, orthogonal to all of the above: `rec.exempt`
 ///   (task #20, `aoide session grant exempt on|off`) vetoes `stale_abandoned` alone — pid-gone still
 ///   fires on an exempt record, since only staleness can ever take a LIVE session and that is
 ///   exactly what the exemption promises against.
@@ -227,6 +228,12 @@ pub fn is_session_dead(
 /// unrelated live process holds the record until that process exits, the fail-safe side.
 fn harness_alive(rec: &SessionRecord, proc_exists: &impl Fn(u32) -> bool) -> bool {
     !rec.hook_ancestry.is_empty() && harness_pid(rec).is_some_and(proc_exists)
+}
+
+/// Does this record claim `window`? `window` is already normalised; the record's own address is
+/// normalised here, the same compare every window verb makes.
+fn holds_window(rec: &SessionRecord, window: &str) -> bool {
+    !rec.window_address.is_empty() && normalize_addr(&rec.window_address) == window
 }
 
 // ── Same-window agent dedup: retire a superseded / phantom re-registration ──
@@ -952,6 +959,21 @@ pub(crate) fn decay_stopped_sessions(
 /// reaped. NEVER errors non-zero on "nothing to reap".
 ///
 pub fn reap(inv: &Invocation) -> Outcome {
+    reap_pass(inv, None)
+}
+
+/// `session window closed`: the same pass as [`reap`] with the closed window as evidence. Every
+/// session that ran in `window` ends unless a live harness anchors it, and every claim on the window
+/// is released (see [`reap_inner`]). Quiet like [`reap`]: the verb's handler decides the announcement.
+pub fn reap_closed_window(inv: &Invocation, window: &str) -> Outcome {
+    let window = normalize_addr(window);
+    let mut outcome = reap_pass(inv, Some(window.as_str()).filter(|w| !w.is_empty()));
+    outcome.command = "session.window.closed".to_string();
+    outcome.message = format!("window {window} closed; {}", outcome.message);
+    outcome
+}
+
+fn reap_pass(inv: &Invocation, closed: Option<&str>) -> Outcome {
     // The managed task wrapper's exit-report lane, run FIRST and outside the
     // stage lock `reap_inner` takes below: its trigger is a finished task
     // record still on the roster, and `reap_inner`'s own prune sweeps every
@@ -970,7 +992,7 @@ pub fn reap(inv: &Invocation) -> Outcome {
     }
     let ((mut outcome, tunnel_candidates, gone_remote), retired_readers) =
         aoide_storage::fs::with_stage_lock(move || {
-            let reaped = reap_inner(inv);
+            let reaped = reap_inner(inv, closed);
             (reaped, retire_mail_readers())
         });
     if !retired_readers.is_empty() {
@@ -1141,13 +1163,19 @@ pub fn reap_and_announce(inv: &Invocation) -> Outcome {
         return outcome;
     }
     let mut outcome = reap(inv);
+    announce_if_changed(inv, &mut outcome);
+    outcome
+}
+
+/// Toast a pass's outcome when it changed the roster, or on every pass under `--announce`, and record
+/// in `data.announced` whether the notifier took it.
+pub(crate) fn announce_if_changed(inv: &Invocation, outcome: &mut Outcome) {
     if inv.flag_present("announce") || !outcome.changed.is_empty() {
         let announced = announce_reap(&outcome.message);
         if let Some(data) = outcome.data.as_mut() {
             data["announced"] = json!(announced);
         }
     }
-    outcome
 }
 
 /// Raise the reap toast through the stock freedesktop client, detached: spawned
@@ -1347,7 +1375,16 @@ fn retire_mail_readers() -> Vec<(String, String)> {
 /// under the lock, never the trace itself): the record's own `cwd`/`log_path`
 /// are the honest hint for it, and the 1 MiB trace READ happens in `pingback`,
 /// outside this lock, exactly as it does for a sync drop.
-fn reap_inner(inv: &Invocation) -> (Outcome, Vec<aoide_storage::tunnel::TunnelRecord>, Vec<DroppedEidolon>) {
+///
+/// `closed` is the normalised address of a window the desktop reports closed. Every
+/// session that claims it is a candidate to end, whatever its pid says: a terminal outlives the
+/// agent inside it, so pid liveness cannot judge that record. A live harness still anchors its
+/// record, and every protection below applies to these candidates too. Every claim on the window
+/// is then released, spared records included, so no record keeps pointing at a window that is gone.
+fn reap_inner(
+    inv: &Invocation,
+    closed: Option<&str>,
+) -> (Outcome, Vec<aoide_storage::tunnel::TunnelRecord>, Vec<DroppedEidolon>) {
     let cmd = "session.reap";
     let mut s_file: SessionsFile = match load_stage(&sessions_path()) {
         Ok(f) => f,
@@ -1495,8 +1532,26 @@ fn reap_inner(inv: &Invocation) -> (Outcome, Vec<aoide_storage::tunnel::TunnelRe
         }
     }
 
-    // The reaper ends a record only once its process is dead.
-    // A protected live wrap (`identity::is_protected_live_wrap`) is spared
+    // The window the desktop reported closed: its sessions are candidates on that evidence
+    // alone. A live harness anchors its record (`harness_alive`), and the protections below still apply.
+    let window_candidates: Vec<String> = closed
+        .map(|window| {
+            s_file
+                .sessions
+                .iter()
+                .filter(|s| s.state != "done" && holds_window(s, window) && !harness_alive(s, &proc_exists))
+                .map(|s| s.session_id.clone())
+                .collect()
+        })
+        .unwrap_or_default();
+    for id in &window_candidates {
+        if !reaped.contains(id) {
+            reaped.push(id.clone());
+        }
+    }
+
+    // The reaper ends a record once its process is dead, or once the window it ran in closed
+    // (`window_candidates`). A protected live wrap (`identity::is_protected_live_wrap`) is spared
     // whichever liveness signal (window, staleness, ghost) named it.
     if !reaped.is_empty() {
         let live_wraps = crate::graph::identity::live_sealed_wrap_ids(&s_file.sessions);
@@ -1509,6 +1564,24 @@ fn reap_inner(inv: &Invocation) -> (Outcome, Vec<aoide_storage::tunnel::TunnelRe
     // leave it nothing to record (see `owned_by_live_wraps`).
     let owned = crate::graph::owned_by_live_wraps(&s_file.sessions, &h_file.hooks, &reaped);
     reaped.retain(|id| !owned.contains(id));
+    let window_ended: Vec<String> = window_candidates
+        .iter()
+        .filter(|id| reaped.contains(id))
+        .cloned()
+        .collect();
+
+    // Every session that still claims the closed window before this pass touches anything. A pass
+    // with a claimant writes even when nothing else moved, because the claim is released below.
+    let claimants: Vec<String> = closed
+        .map(|window| {
+            s_file
+                .sessions
+                .iter()
+                .filter(|s| holds_window(s, window))
+                .map(|s| s.session_id.clone())
+                .collect()
+        })
+        .unwrap_or_default();
 
     // The exempt idle spawned shells the waived arm just skipped — a human
     // gesture only (`spawned_shell_band.is_none()` iff `--now`); the
@@ -1621,6 +1694,7 @@ fn reap_inner(inv: &Invocation) -> (Outcome, Vec<aoide_storage::tunnel::TunnelRe
         && superseded_done.is_empty()
         && orphan_sockets.is_empty()
         && tunnel_candidates.is_empty()
+        && claimants.is_empty()
     {
         // A pressed button that spares something says so, even on an
         // otherwise quiet pass — the whole point of `--now` sparing an
@@ -1642,6 +1716,8 @@ fn reap_inner(inv: &Invocation) -> (Outcome, Vec<aoide_storage::tunnel::TunnelRe
                 "supersededDone": [],
                 "orphanSockets": [],
                 "orphanTunnels": [],
+                "windowEnded": [],
+                "windowReleased": [],
                 "spared": spared,
             })),
             Vec::new(),
@@ -1752,6 +1828,21 @@ fn reap_inner(inv: &Invocation) -> (Outcome, Vec<aoide_storage::tunnel::TunnelRe
         h_file.hooks.retain(|h| !orphaned.contains(h.session_id.as_str()));
     }
 
+    // The closed window's claim, released from every session still on the roster (spared, held or
+    // an unpruned tombstone): no record keeps pointing at a window that is gone.
+    let window_released: Vec<String> = match closed {
+        Some(window) => s_file
+            .sessions
+            .iter_mut()
+            .filter(|s| holds_window(s, window))
+            .map(|s| {
+                s.window_address.clear();
+                s.session_id.clone()
+            })
+            .collect(),
+        None => Vec::new(),
+    };
+
     if s_file.schema_version.is_empty() {
         s_file.schema_version = STAGE_GRAPH_VERSION.to_string();
     }
@@ -1770,8 +1861,19 @@ fn reap_inner(inv: &Invocation) -> (Outcome, Vec<aoide_storage::tunnel::TunnelRe
 
     let mut changed: Vec<String> = reaped
         .iter()
-        .map(|id| format!("reaped dead session {id} (killed; running → done → dropped)"))
+        .map(|id| {
+            if window_ended.contains(id) {
+                format!("ended session {id} (its window closed; running → done → dropped)")
+            } else {
+                format!("reaped dead session {id} (killed; running → done → dropped)")
+            }
+        })
         .collect();
+    changed.extend(
+        window_released
+            .iter()
+            .map(|id| format!("released the closed window's claim of {id}")),
+    );
     changed.extend(
         decayed
             .iter()
@@ -1834,6 +1936,8 @@ fn reap_inner(inv: &Invocation) -> (Outcome, Vec<aoide_storage::tunnel::TunnelRe
             "supersededDone": superseded_done,
             "orphanSockets": orphan_sockets,
             "orphanTunnels": Vec::<String>::new(),
+            "windowEnded": window_ended,
+            "windowReleased": window_released,
             "spared": spared,
         }));
     let gone_remote: Vec<DroppedEidolon> = remote_before

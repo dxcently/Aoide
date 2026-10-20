@@ -564,17 +564,32 @@ window and runs no `hyprctl`: it stores what this module reports.
 | Module | Owns |
 |---|---|
 | `client.rs` | the request socket (`j/clients`, bounded connect), `hyprctl_clients`, `client_workspace_for_address` |
+| `door.rs` | `call`: one core verb execed through the core door (`aoide` on `AOIDE_CORE_BIN`, else on PATH) once aoided's socket answers a probe; its `Reply`, and `Latch`, which logs each problem once and holds the facts core refused |
 | `focus.rs` | `focus_window`, `focus_session`, `focus_workspace`, `focused_workspace`, `NO_COMPOSITOR` |
-| `listener.rs` | the event socket (`socket2`) and `run_hypr_window_listener`, spawned by the `shellbridge` command |
-| `sweep.rs` | `resolve_windows`: binds each pending session to its window through `aoide session window attach`, and re-stamps a bound session's workspace |
-| `terminals.rs` | a terminal-class client as a `TermWindow` (cwd from `/proc`), handed to core's untracked-terminal roster |
+| `listener.rs` | the event socket (`socket2`), `run_hypr_window_listener` (spawned by the `shellbridge` command), and `Owed`: the calls the desktop still owes core |
+| `sweep.rs` | `resolve_windows`: decides which pending session runs in which window, and which bound session moved workspace; each decision is `aoide session window attach` |
+| `terminals.rs` | a terminal-class client as a `TermWindow` (cwd from `/proc`), and `RosterGate`: the roster published through `aoide session window roster` when it changes |
 
 ```
-request socket  ──► client.rs ─┬─► focus.rs     (focuswindow, workspace N)
-                               ├─► sweep.rs ──► aoide session window attach   (core: pid-only)
-                               └─► terminals.rs ──► core untracked-terminal roster
-event socket    ──► listener.rs ─► resolve_windows · terminal roster · clear_closed_window
+request socket ──► client.rs ─┬─► focus.rs                      focuswindow, workspace N
+                              └─► sweep.rs and terminals.rs read the same snapshot
+event socket   ──► listener.rs ─┬─ closewindow ─────────────────► door ─► session window closed
+                                ├─ openwindow, reconnect ─────► door ─► session codex sync
+                                ├─ open, move, retitle, reconnect, tick ─► sweep.rs ─► door ─► session window attach
+                                └─ any event, any tick ───────► terminals.rs ─► door ─► session window roster
 ```
+
+The desktop calls core when it has something new to say. A closed window is
+reported once per event. The codex sync runs on an appearance (`openwindow`) and on each
+reconnect; a move or a retitle owes it nothing. The sweep runs on each window event but a
+close, on each tick and on each reconnect, and calls core for a binding that changed
+and that core has not refused. The roster goes out on a reconnect and whenever its windows
+or the sessions' claims change. A call core answers is final: a refused call
+is not sent again for the same fact. A call that did not run stays owed and goes out on a
+later tick. A call made while aoided's socket does not answer is not sent: it waits, logged
+once, and goes out on the first tick after aoided answers. With no aoide binary each call is
+skipped, with one log line and no error. The sweep and the roster read `sessions.json` and
+write nothing in it.
 
 ## What it consumes
 

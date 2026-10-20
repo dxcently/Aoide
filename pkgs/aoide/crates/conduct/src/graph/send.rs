@@ -2936,7 +2936,7 @@ fn hook_profile_for(inv: &Invocation) -> Result<&'static AgentProfile, Outcome> 
 /// `invocation_from_dispatch_request` copies `flags` verbatim off the wire)
 /// and reads the payload from there instead of its own process's stdin,
 /// which is never the calling hook's own pipe.
-const STDIN_PAYLOAD_FLAG: &str = "__daemon-stdin-payload";
+pub(in crate::graph) const STDIN_PAYLOAD_FLAG: &str = "__daemon-stdin-payload";
 
 /// Internal-only flag key carrying the DOOR's own kernel-attested peer pid —
 /// stamped by `aoided` on every dispatch request it builds

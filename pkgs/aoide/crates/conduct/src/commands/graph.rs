@@ -335,7 +335,7 @@ pub fn register(r: &mut Registry) {
     ));
     r.insert(cmd!(
         path: ["session", "reap"],
-        summary: "Reap dead sessions: mark every KILLED session (its pid gone from /proc) done and drop it, decay every `stopped` session at rest over an hour to `idle`, then re-stage. Also collects the three ghosts no liveness signal catches — a record whose every timestamp predates this boot (a recycled pid reads as alive forever), a sub-agent whose parent has left the roster, and the control socket a killed `conduct` left in $XDG_RUNTIME_DIR (only ever one nothing is listening on). Plus the worker shells `aoide spawn` left running that no one has typed in for two days — see `--now`, which takes those on the spot. Judged on pid-only liveness, on every host: a window the desktop reports closed is cleared, never judged here. Never errors on nothing-to-reap.",
+        summary: "Reap dead sessions: mark every KILLED session (its pid gone from /proc) done and drop it, decay every `stopped` session at rest over an hour to `idle`, then re-stage. Also collects the three ghosts no liveness signal catches — a record whose every timestamp predates this boot (a recycled pid reads as alive forever), a sub-agent whose parent has left the roster, and the control socket a killed `conduct` left in $XDG_RUNTIME_DIR (only ever one nothing is listening on). Plus the worker shells `aoide spawn` left running that no one has typed in for two days — see `--now`, which takes those on the spot. Judged on pid-only liveness, on every host; a window the desktop reports closed is judged by `session window closed`, which ends the sessions that ran in it. Never errors on nothing-to-reap.",
         args: [],
         flags: [
             flag!("announce", "bool", "Always raise the desktop toast, even on a quiet pass — for the dock's reap control, where a human pressed something and is owed an answer. Unflagged, the sweep only toasts when it actually changed the roster."),
@@ -439,6 +439,38 @@ pub fn register(r: &mut Registry) {
         implemented: true,
         handler: crate::graph::session_window_attach,
         examples: ["session window attach s-1 0x55d0c2a1 --workspace 3"],
+    ));
+    r.insert(cmd!(
+        path: ["session", "window", "closed"],
+        summary: "Record that a terminal window closed. The sessions that ran in it end now, except one a live harness or a reaper protection still anchors, and every session that claimed the window lets go of it. A session whose pid is still alive ends too: a terminal outlives the agent in it. The desktop's window listener calls this once per closed window; requires aoided.",
+        args: [
+            arg!("address", "string", true, "The window address the compositor reports as closed, e.g. 0x55d0c2a1."),
+        ],
+        flags: [],
+        gated: false,
+        implemented: true,
+        handler: crate::graph::session_window_closed,
+        examples: ["session window closed 0x55d0c2a1"],
+    ));
+    r.insert(cmd!(
+        path: ["session", "window", "roster"],
+        summary: "Publish the terminal windows the desktop sees. The window list is read from stdin as a JSON array of window objects (address, class, title, workspace, pid, mapped, cwd); every terminal window no tracked session claims gets a `win:*` record, and a `win:*` record whose window is gone is removed. Idempotent: an unchanged roster changes nothing. Requires aoided.",
+        args: [],
+        flags: [],
+        gated: false,
+        implemented: true,
+        handler: crate::graph::session_window_roster,
+        examples: ["session window roster"],
+    ));
+    r.insert(cmd!(
+        path: ["session", "codex", "sync"],
+        summary: "Reconcile the desktop's codex threads now: enroll the live ones, drop the ones that have stopped, and fill in their titles. The reaper runs the same reconcile on every pass; the desktop calls this when a window appears and on each reconnect, so a thread enrolled just now is stamped with its window in the same pass. Requires aoided.",
+        args: [],
+        flags: [],
+        gated: false,
+        implemented: true,
+        handler: crate::graph::session_codex_sync,
+        examples: ["session codex sync"],
     ));
     r.insert(cmd!(
         path: ["session", "bind"],

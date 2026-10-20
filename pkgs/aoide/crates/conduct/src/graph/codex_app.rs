@@ -82,6 +82,9 @@ use super::model::{
     load_stage, sessions_path, write_stage, SessionRecord, SessionsFile, STAGE_GRAPH_VERSION,
 };
 use super::session_store::is_reserved_id;
+use aoide_protocol::output::Outcome;
+use aoide_protocol::{Door, Invocation};
+use serde_json::json;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
@@ -976,7 +979,7 @@ fn apply_codex_merges(
 /// thread's own [`capture_for`] onto its `"app"` record
 /// ([`apply_codex_merges`], which internally calls [`apply_codex_capture`]
 /// then [`apply_codex_lineage`]), and re-stages `graph.json` only when
-/// something changed. Mirrors [`super::window::sync_untracked_terminal_windows`]'s
+/// something changed. Mirrors `sync_untracked_terminal_rows`'s
 /// shape. An `Unknown` scan takes NO stage lock and writes NOTHING —
 /// [`audit_scan_unknown_once`] notes it and this returns `false`, same as
 /// an ordinary no-op tick.
@@ -1050,6 +1053,32 @@ pub fn sync_codex_app_threads() -> bool {
         }
         false
     })
+}
+
+/// `aoide session codex sync`: one reconcile of the desktop's codex threads, the same one the reaper
+/// runs each pass. The desktop calls it when a window appears and on each (re)connect, so a thread
+/// enrolled just now is stamped with its window in the same pass. Requires aoided.
+pub fn session_codex_sync(inv: &Invocation) -> Outcome {
+    let cmd = "session.codex.sync";
+    if inv.door != Door::Daemon {
+        return aoide_client::daemon::daemon_dispatch(inv)
+            .unwrap_or_else(|| Outcome::error(cmd, "aoided must be running to sync desktop codex threads"));
+    }
+    let changed = sync_codex_app_threads();
+    let out = Outcome::ok(
+        cmd,
+        if changed {
+            "reconciled desktop codex threads"
+        } else {
+            "desktop codex threads already current"
+        },
+    )
+    .with_data(json!({ "changed": changed }));
+    if changed {
+        out.changed(["reconciled desktop codex threads".to_string()])
+    } else {
+        out
+    }
 }
 
 #[cfg(test)]

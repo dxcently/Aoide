@@ -1313,22 +1313,48 @@ fn run_session_step(subject: ActionSubject, action: &str, argv: &[String]) -> Va
 /// `with_stage_lock` — see `protocol::bin`'s module doc for why that would
 /// matter if it ever were.
 pub fn run_core_step(argv: &[String]) -> Result<(bool, String, String), String> {
-    match std::process::Command::new(daemon::bin::core_bin())
-        .args(argv)
-        .arg("--json")
-        .output()
-    {
-        Ok(out) => Ok((
-            out.status.success(),
-            String::from_utf8_lossy(&out.stdout).into_owned(),
-            String::from_utf8_lossy(&out.stderr).into_owned(),
-        )),
-        Err(e) => Err(format!(
+    run_core_step_with(argv, None)
+}
+
+/// [`run_core_step`] with `stdin` piped in when it is `Some` (the roster verb reads the window list
+/// from it). The payload is written from its own thread, so a reply the child writes early cannot
+/// wedge the write.
+pub fn run_core_step_with(argv: &[String], stdin: Option<&str>) -> Result<(bool, String, String), String> {
+    use std::io::Write;
+    use std::process::Stdio;
+    let spawn_failure = |e: std::io::Error| {
+        format!(
             "spawning `aoide {} {}`: {e}",
             argv.first().map(String::as_str).unwrap_or(""),
             argv.get(1).map(String::as_str).unwrap_or("")
-        )),
+        )
+    };
+    let mut child = std::process::Command::new(daemon::bin::core_bin())
+        .args(argv)
+        .arg("--json")
+        .stdin(if stdin.is_some() { Stdio::piped() } else { Stdio::null() })
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(spawn_failure)?;
+    let writer = match (stdin, child.stdin.take()) {
+        (Some(text), Some(mut pipe)) => {
+            let text = text.to_string();
+            Some(std::thread::spawn(move || {
+                let _ = pipe.write_all(text.as_bytes());
+            }))
+        }
+        _ => None,
+    };
+    let out = child.wait_with_output().map_err(spawn_failure)?;
+    if let Some(writer) = writer {
+        let _ = writer.join();
     }
+    Ok((
+        out.status.success(),
+        String::from_utf8_lossy(&out.stdout).into_owned(),
+        String::from_utf8_lossy(&out.stderr).into_owned(),
+    ))
 }
 
 /// One audit line per ACTION, never per step: detail is the action name and

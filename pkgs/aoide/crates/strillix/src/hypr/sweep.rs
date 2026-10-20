@@ -1,21 +1,25 @@
-//! The session-window sweep: binds each session with no window to the terminal window it runs
-//! in, and keeps a bound session's workspace current. The bind is written by the core door
-//! (`aoide session window attach`). The closed-window clear and the terminal roster are not:
-//! they call core's library in this process (see `listener.rs`).
+//! The session-window sweep: decides which session with no window runs in which terminal window,
+//! and which bound session moved to another workspace. Each decision is one core call (`session
+//! window attach`) through the door, and core writes the binding. The sweep does not write
+//! `sessions.json`.
 
 use super::client::{client_workspace_for_address, hyprctl_clients};
+use super::door::{self, Latch, Reply};
 use aoide_conduct::graph::{
     load_stage, pid_ancestry, sessions_path, windowless_by_lineage, SessionRecord, SessionsFile,
 };
-use aoide_conduct::shellbridge::run_core_step;
 use serde_json::Value;
 
 /// Bind every session the clients snapshot can place, and re-stamp every bound session's
-/// workspace. Returns true iff any session changed. No compositor, or nothing pending and
+/// workspace. Returns true iff core accepted a binding. No compositor, or nothing pending and
 /// nothing windowed, costs no client read.
-pub fn resolve_windows() -> bool {
-    let Ok(file) = load_stage::<SessionsFile>(&sessions_path()) else {
-        return false;
+pub(crate) fn resolve_windows(latch: &mut Latch) -> bool {
+    let file = match load_stage::<SessionsFile>(&sessions_path()) {
+        Ok(file) => file,
+        Err(e) => {
+            eprintln!("[aoide/shellbridge] the window sweep binds nothing: {e}");
+            return false;
+        }
     };
     let has_work = file.sessions.iter().any(|s| {
         !s.window_address.is_empty()
@@ -28,7 +32,9 @@ pub fn resolve_windows() -> bool {
     let Some(clients) = hyprctl_clients() else {
         return false;
     };
-    resolve_windows_in(&file.sessions, &clients, &mut attach_through_core)
+    resolve_windows_in(&file.sessions, &clients, &mut |id, window, ws| {
+        attach_through_core(&mut *latch, id, window, ws)
+    })
 }
 
 /// The sweep over one stage snapshot and one client snapshot. `attach` records a binding
@@ -72,16 +78,29 @@ pub(crate) fn resolve_windows_in(
     changed
 }
 
-/// `aoide session window attach <id> <window> [--workspace <n>]` through the core door, the
-/// gated write for a window binding. Its failure is a no-op for the sweep: the next tick tries again.
-fn attach_through_core(id: &str, window: &str, workspace: Option<i64>) -> bool {
-    let mut argv: Vec<String> = ["session", "window", "attach", id, window]
-        .map(String::from)
-        .to_vec();
-    if let Some(ws) = workspace {
-        argv.extend(["--workspace".to_string(), ws.to_string()]);
+/// `aoide session window attach <id> <window> [--workspace <n>]` through the core door, the one write
+/// a window binding makes. A binding core refused is final: the same session, window and workspace
+/// is not asked again. A call that did not run is asked again by the next sweep.
+fn attach_through_core(latch: &mut Latch, id: &str, window: &str, workspace: Option<i64>) -> bool {
+    let fact = format!("{id} {window} {workspace:?}");
+    if latch.is_refused(&fact) {
+        return false;
     }
-    matches!(run_core_step(&argv), Ok((true, _, _)))
+    let ws = workspace.map(|ws| ws.to_string());
+    let mut argv = vec!["session", "window", "attach", id, window];
+    if let Some(ws) = ws.as_deref() {
+        argv.extend(["--workspace", ws]);
+    }
+    let reply = door::call(&argv, None);
+    if reply == Reply::Refused {
+        latch.refuse(fact);
+    }
+    latch.reply(
+        format!("attach {id}"),
+        &format!("binding session {id} to window {window}"),
+        reply,
+    );
+    reply == Reply::Done
 }
 
 /// Address-and-pid variant of the ancestor↔client match: also returns the

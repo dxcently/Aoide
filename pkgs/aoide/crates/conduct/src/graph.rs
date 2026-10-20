@@ -305,8 +305,8 @@ pub use self::who::{glyph, session_roster};
 // deep per-node view.
 pub use self::node_list::node_list;
 pub use self::window::{
-    attach_window, clear_closed_window, pid_ancestry, session_window_attach,
-    sync_untracked_terminal_rows, windowless_by_lineage, Attach, TermWindow,
+    pid_ancestry, session_window_attach, session_window_closed, session_window_roster,
+    windowless_by_lineage, TermWindow,
 };
 // `workspace set/clear/list/root` — the workspace ↔ project binding
 // (`graph/workspace.rs`'s own module doc). Bindings live on the project
@@ -335,8 +335,8 @@ pub(crate) use self::model::{hooks_path, STAGE_GRAPH_VERSION};
 pub(crate) use self::session_store::{
     lineage_of, owned_by_live_wraps, refresh_subagent_says, refresh_transcript_fields, superseded_by, upsert_hook,
 };
-pub(crate) use self::codex_app::codex_home;
-pub use self::codex_app::sync_codex_app_threads;
+pub(crate) use self::codex_app::{codex_home, sync_codex_app_threads};
+pub use self::codex_app::session_codex_sync;
 pub(crate) use self::eidolon::{sync_eidolon_sessions, DroppedEidolon};
 /// Widened from `pub(crate)` to `pub` at P-A1 of the binary-split
 /// workstream: `aoide-screen` (moved out of this crate) needs the same

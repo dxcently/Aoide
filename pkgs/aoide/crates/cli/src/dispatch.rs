@@ -394,4 +394,71 @@ mod tests {
         }
         let _ = std::fs::remove_dir_all(&dir);
     }
+
+    /// The audit record `dispatch` wrote for `command`: the last one on `log`, the log the test named.
+    fn audited(log: &std::path::Path, command: &str) -> serde_json::Value {
+        let contents = std::fs::read_to_string(log).expect("dispatch wrote the audit log");
+        contents
+            .lines()
+            .map(|line| serde_json::from_str::<serde_json::Value>(line).expect("one JSON-lines record per dispatch"))
+            .rfind(|r| r["command"] == command)
+            .unwrap_or_else(|| panic!("no {command} record in:\n{contents}"))
+    }
+
+    /// The three window and codex verbs each leave one audit record per call with the status the
+    /// handler returned: a closed window with no aoided refuses, a call with no address is a usage
+    /// error before any handler runs, and the roster and codex verbs answer from the daemon door.
+    #[test]
+    fn the_window_and_codex_verbs_are_audited_with_the_status_they_return() {
+        let _guard = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let dir = aoide_test_support::unique_tmp("cli-window-audit");
+        std::fs::create_dir_all(&dir).unwrap();
+        let _env = aoide_test_support::EnvSaver::capture(&[
+            "AOIDE_STAGE_DIR",
+            "AOIDE_STATE_DIR",
+            "CODEX_HOME",
+            "AOIDE_DAEMON_SOCKET",
+            "XDG_RUNTIME_DIR",
+        ]);
+        std::env::set_var("AOIDE_STAGE_DIR", dir.join("stage"));
+        std::env::set_var("AOIDE_STATE_DIR", dir.join("state"));
+        std::env::set_var("CODEX_HOME", dir.join("codex"));
+        std::env::set_var("AOIDE_DAEMON_SOCKET", dir.join("no-aoided.sock"));
+        std::env::set_var("XDG_RUNTIME_DIR", dir.join("xdg"));
+        let log = dir.join("log");
+        const STDIN_PAYLOAD_FLAG: &str = "__daemon-stdin-payload";
+        let call = |path: &[&str], args: &[&str], door: Door, extra: &[(&str, &str)]| {
+            let mut flags = BTreeMap::from([("audit-log".to_string(), log.to_string_lossy().into_owned())]);
+            flags.extend(extra.iter().map(|(k, v)| (k.to_string(), v.to_string())));
+            Invocation {
+                path: path.iter().map(|s| s.to_string()).collect(),
+                args: args.iter().map(|s| s.to_string()).collect(),
+                flags,
+                door,
+            }
+        };
+
+        let closed = dispatch(&call(&["session", "window", "closed"], &["0xW"], Door::Cli, &[]));
+        assert_eq!(closed.status, Status::Error, "{}", closed.message);
+        assert_eq!(audited(&log, "session.window.closed")["status"], "error");
+
+        let bare = dispatch(&call(&["session", "window", "closed"], &[], Door::Cli, &[]));
+        assert_eq!(bare.status, Status::Usage, "{}", bare.message);
+        assert_eq!(audited(&log, "session.window.closed")["status"], "usage");
+
+        let roster = dispatch(&call(
+            &["session", "window", "roster"],
+            &[],
+            Door::Daemon,
+            &[(STDIN_PAYLOAD_FLAG, "[]")],
+        ));
+        assert_eq!(roster.status, Status::Ok, "{}", roster.message);
+        assert_eq!(audited(&log, "session.window.roster")["status"], "ok");
+
+        let codex = dispatch(&call(&["session", "codex", "sync"], &[], Door::Daemon, &[]));
+        assert_eq!(codex.status, Status::Ok, "{}", codex.message);
+        assert_eq!(audited(&log, "session.codex.sync")["status"], "ok");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

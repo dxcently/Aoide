@@ -1,8 +1,11 @@
 //! Session pid and window records, core side: the harness walk over a hook's pid ancestry, the
 //! chain a hook door stores, registration parentage, the untracked-terminal (`win:*`) reconciler,
-//! and the window-record writes: `session window attach` (the desktop binds a session's window
-//! through it) and the closed-window clear. Nothing here reads a compositor. A window is known
-//! to core only once the desktop attaches it, and a session's liveness is its pid alone.
+//! and the three window verbs the desktop calls through the door: `session window attach` (a
+//! session's window and workspace), `session window closed` (the sessions that ran in a closed
+//! window end, via the reaper) and `session window roster` (the terminal windows the desktop
+//! reads, published as `win:*` records). Nothing here reads a compositor: the desktop hands core
+//! what it saw. A session's liveness is its pid alone, except that a window reported closed is
+//! evidence the reaper acts on at once.
 
 use super::conduct::{is_invocation_plumbing, proc_argv};
 use super::doc::restage_graph;
@@ -10,12 +13,15 @@ use super::model::{
     canonical_state, load_stage, observe_workspace, projects_path, sessions_path, write_stage, Project,
     ProjectsFile, SessionRecord, SessionsFile, STAGE_GRAPH_VERSION,
 };
+use super::send::STDIN_PAYLOAD_FLAG;
 use super::session_store::{ancestry_may_move, chain_is_takeable};
 use aoide_protocol::output::Outcome;
-use aoide_protocol::Invocation;
+use aoide_protocol::{Door, Invocation};
 use aoide_storage::fs::{pid_is_alive, with_stage_lock};
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::collections::{HashMap, HashSet};
+use std::io::{IsTerminal, Read};
 
 /// Normalise a Hyprland window address for comparison: lowercased, with any
 /// leading `0x` stripped. The stored `windowAddress` and hyprctl's reported
@@ -391,7 +397,7 @@ pub fn attach_window(id: &str, window: &str, workspace: Option<i64>) -> Attach {
 /// a different window.
 pub fn session_window_attach(inv: &Invocation) -> Outcome {
     let cmd = "session.window.attach";
-    if inv.door != aoide_protocol::Door::Daemon {
+    if inv.door != Door::Daemon {
         return aoide_client::daemon::daemon_dispatch(inv).unwrap_or_else(|| {
             Outcome::error(cmd, "aoided must be running to attach a session window")
         });
@@ -437,8 +443,8 @@ pub fn session_window_attach(inv: &Invocation) -> Outcome {
 
 /// Publish the untracked-terminal roster for these terminal windows: a `shell` record for every
 /// window no tracked session claims, and removal of any `win:*` record whose window has closed.
-/// Returns true iff `sessions.json` changed. The desktop calls it with the windows it reads.
-pub fn sync_untracked_terminal_rows(windows: &[TermWindow]) -> bool {
+/// Returns true iff `sessions.json` changed. Called by [`session_window_roster`].
+fn sync_untracked_terminal_rows(windows: &[TermWindow]) -> bool {
     with_stage_lock(|| {
         let mut file: SessionsFile = match load_stage(&sessions_path()) {
             Ok(f) => f,
@@ -466,36 +472,58 @@ pub fn sync_untracked_terminal_rows(windows: &[TermWindow]) -> bool {
 
 
 
-/// Clear a closed window's address off any session that stored it (normalised
-/// compare, so `0x…`/case differences still match). The record is left in place
-/// for the reaper to resolve via its pid signal. Returns true iff a session was
-/// cleared.
-pub fn clear_closed_window(address: &str) -> bool {
-    let want = normalize_addr(address);
-    if want.is_empty() {
-        return false;
+/// `aoide session window closed <address>`: the desktop saw this window close. The reaper judges the
+/// sessions that ran in it on that evidence alone (`reap::reap_closed_window`): each ends unless a
+/// live harness still anchors it, and every claim on the window is released. Requires aoided.
+pub fn session_window_closed(inv: &Invocation) -> Outcome {
+    let cmd = "session.window.closed";
+    let window = inv.args.first().map_or("", |w| w.trim());
+    if window.is_empty() {
+        return Outcome::usage(cmd, "session window closed takes the address of the window that closed");
     }
-    with_stage_lock(|| {
-        let mut file: SessionsFile = match load_stage(&sessions_path()) {
-            Ok(f) => f,
-            Err(_) => return false,
-        };
-        let mut changed = false;
-        for s in file.sessions.iter_mut() {
-            if !s.window_address.is_empty() && normalize_addr(&s.window_address) == want {
-                s.window_address.clear();
-                changed = true;
-            }
+    if inv.door != Door::Daemon {
+        return aoide_client::daemon::daemon_dispatch(inv)
+            .unwrap_or_else(|| Outcome::error(cmd, "aoided must be running to record a closed window"));
+    }
+    let mut outcome = crate::reap::reap_closed_window(inv, window);
+    crate::reap::announce_if_changed(inv, &mut outcome);
+    outcome
+}
+
+/// `aoide session window roster`, the terminal windows on stdin as a JSON array of `TermWindow`s:
+/// the one reconcile the desktop makes, a `win:*` record for each terminal window no tracked session
+/// claims and the removal of any whose window is gone. Requires aoided. The CLI leg reads stdin once
+/// and forwards it on the payload flag, as `session hook` does.
+pub fn session_window_roster(inv: &Invocation) -> Outcome {
+    let cmd = "session.window.roster";
+    if inv.door != Door::Daemon {
+        if std::io::stdin().is_terminal() {
+            return Outcome::usage(cmd, "pipe the window list in on stdin: a JSON array of terminal windows");
         }
-        if !changed {
-            return false;
+        let mut payload = String::new();
+        if let Err(e) = std::io::stdin().read_to_string(&mut payload) {
+            return Outcome::error(cmd, format!("reading the window list from stdin: {e}"));
         }
-        if write_stage(&sessions_path(), &file).is_ok() {
-            let _ = restage_graph();
-            return true;
-        }
-        false
-    })
+        let mut routed = inv.clone();
+        routed.flags.insert(STDIN_PAYLOAD_FLAG.to_string(), payload);
+        return aoide_client::daemon::daemon_dispatch(&routed)
+            .unwrap_or_else(|| Outcome::error(cmd, "aoided must be running to publish the window roster"));
+    }
+    let Some(payload) = inv.flags.get(STDIN_PAYLOAD_FLAG) else {
+        return Outcome::usage(cmd, "session window roster reads the window list from stdin");
+    };
+    let windows: Vec<TermWindow> = match serde_json::from_str(payload) {
+        Ok(w) => w,
+        Err(e) => return Outcome::usage(cmd, format!("stdin is not a JSON array of terminal windows: {e}")),
+    };
+    let changed = sync_untracked_terminal_rows(&windows);
+    let out = Outcome::ok(cmd, format!("published {} terminal window(s)", windows.len()))
+        .with_data(json!({ "windows": windows.len(), "changed": changed }));
+    if changed {
+        out.changed([sessions_path().to_string_lossy().into_owned()])
+    } else {
+        out
+    }
 }
 
 /// Terminal window CLASSES we recognize as a tty (mirrors the QML `termClassRe`
@@ -542,8 +570,9 @@ pub(crate) fn is_terminal_class(class: &str) -> bool {
 /// One live terminal window distilled from a client the desktop reads off the compositor — the
 /// pure-core input for [`reconcile_untracked_terminals`], so the reconciliation
 /// is testable without a compositor (`cwd` is pre-read from `/proc/<pid>/cwd` by
-/// the I/O wrapper).
-#[derive(Debug, Clone, Default)]
+/// the I/O wrapper). The wire shape of one entry in the roster verb's stdin array.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct TermWindow {
     pub address: String,
     pub class: String,
@@ -1738,5 +1767,212 @@ mod tests {
         );
         assert_eq!(out[0].workspace, Some(99));
         assert_eq!(out[0].workspace_project, None);
+    }
+
+    use aoide_protocol::output::Status;
+
+    /// One window-verb test's world: a private stage, codex home and runtime dir, the env pointing at
+    /// them, and the env lock held. Fields drop in order, so the env is restored before the lock goes.
+    struct WindowWorld {
+        _env: EnvVars,
+        _xdg: EnvVars,
+        stage: std::path::PathBuf,
+        _guard: std::sync::MutexGuard<'static, ()>,
+    }
+
+    impl Drop for WindowWorld {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.stage);
+        }
+    }
+
+    fn window_world(tag: &str) -> WindowWorld {
+        let guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let env = EnvVars::save(&["AOIDE_STAGE_DIR", "CODEX_HOME", "AOIDE_DAEMON_SOCKET"]);
+        let stage = unique_stage(tag);
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        std::env::set_var("CODEX_HOME", unique_stage(&format!("{tag}-codex")));
+        std::env::set_var("AOIDE_DAEMON_SOCKET", stage.join("no-aoided.sock"));
+        let xdg = isolated_xdg_runtime(&format!("{tag}-xdg"));
+        WindowWorld { _env: env, _xdg: xdg, stage, _guard: guard }
+    }
+
+    /// A session that ran in `window` with `pid`, started now: the fixture the window verbs judge.
+    fn ran_in(id: &str, window: &str, pid: Option<u32>) -> SessionRecord {
+        SessionRecord {
+            window_address: window.into(),
+            pid,
+            ..session(id, "/w", "working", &crate::graph::now_iso_utc(), None)
+        }
+    }
+
+    /// The roster verb through the door, its stdin payload on the flag the CLI leg forwards.
+    fn roster_door(payload: Option<&str>) -> Invocation {
+        let mut inv = invocation(&["session", "window", "roster"], &[]);
+        inv.door = Door::Daemon;
+        if let Some(text) = payload {
+            inv.flags.insert(STDIN_PAYLOAD_FLAG.to_string(), text.to_string());
+        }
+        inv
+    }
+
+    /// The closed window ends what ran in it and nothing in another window: the pid of the first is
+    /// dead, the second's pid is alive yet it still ends, because a terminal outlives its agent.
+    #[test]
+    fn a_closed_window_ends_the_sessions_that_ran_in_it_and_spares_another_window() {
+        let world = window_world("window-closed-ends");
+        let me = std::process::id();
+        write_stage(
+            &sessions_path(),
+            &SessionsFile {
+                schema_version: "0".into(),
+                sessions: vec![
+                    ran_in("gone", "0xW", Some(reaped_pid())),
+                    ran_in("pid-alive", "0xW", Some(me)),
+                    ran_in("elsewhere", "0xV", Some(me)),
+                ],
+            },
+        )
+        .unwrap();
+
+        let inv = invocation(&["session", "window", "closed"], &["0xW"]);
+        let out = crate::reap::reap_closed_window(&inv, "0xW");
+        assert_eq!(out.status, Status::Ok);
+        assert_eq!(out.data.as_ref().unwrap()["windowEnded"], json!(["gone", "pid-alive"]));
+        let after: SessionsFile = load_stage(&sessions_path()).unwrap();
+        let ids: Vec<&str> = after.sessions.iter().map(|s| s.session_id.as_str()).collect();
+        assert_eq!(ids, ["elsewhere"], "the other window's session is untouched");
+        assert_eq!(after.sessions[0].window_address, "0xV");
+        drop(world);
+    }
+
+    /// A live harness anchors its session through the closed window: the record survives, and its
+    /// claim on the window is released so no record points at a window that is gone.
+    #[test]
+    fn a_closed_window_spares_a_harness_anchored_session_and_releases_its_claim() {
+        let world = window_world("window-closed-anchored");
+        let mut anchored = ran_in("anchored", "0xW", None);
+        anchored.hook_ancestry = vec![std::process::id() as i32];
+        write_stage(&sessions_path(), &SessionsFile { schema_version: "0".into(), sessions: vec![anchored] }).unwrap();
+
+        let inv = invocation(&["session", "window", "closed"], &["0xW"]);
+        let out = crate::reap::reap_closed_window(&inv, "0xW");
+        let data = out.data.as_ref().unwrap();
+        assert_eq!(data["windowEnded"], json!([]));
+        assert_eq!(data["windowReleased"], json!(["anchored"]));
+        let after: SessionsFile = load_stage(&sessions_path()).unwrap();
+        assert_eq!(after.sessions.len(), 1, "a live harness keeps its record");
+        assert!(after.sessions[0].window_address.is_empty(), "and lets go of the closed window");
+        drop(world);
+    }
+
+    /// The verb refuses a missing or blank address before anything is reaped, and without aoided it
+    /// says so rather than reaping in-process.
+    #[test]
+    fn the_closed_window_verb_refuses_a_missing_address_and_needs_aoided() {
+        let world = window_world("window-closed-verb");
+        let bare = session_window_closed(&invocation(&["session", "window", "closed"], &[]));
+        assert_eq!(bare.status, Status::Usage);
+        let blank = session_window_closed(&invocation(&["session", "window", "closed"], &["  "]));
+        assert_eq!(blank.status, Status::Usage);
+        let no_daemon = session_window_closed(&invocation(&["session", "window", "closed"], &["0xW"]));
+        assert_eq!(no_daemon.status, Status::Error);
+        assert!(no_daemon.message.contains("aoided must be running"), "{}", no_daemon.message);
+        drop(world);
+    }
+
+    /// The roster publishes a terminal's `win:*` record once, is idempotent, and keeps that record
+    /// through a reap while its window is open (its live pid is the proof). A payload that is not a
+    /// roster is refused.
+    #[test]
+    fn the_roster_verb_publishes_a_terminal_once_and_refuses_what_is_not_a_roster() {
+        let world = window_world("window-roster");
+        write_stage(&sessions_path(), &SessionsFile { schema_version: "0".into(), sessions: vec![] }).unwrap();
+        let window = TermWindow {
+            address: "0xROSTER".into(),
+            class: "kitty".into(),
+            title: String::new(),
+            workspace: Some(1),
+            pid: Some(std::process::id() as i32),
+            mapped: true,
+            cwd: "/w".into(),
+        };
+        let payload = serde_json::to_string(&vec![window]).unwrap();
+
+        let first = session_window_roster(&roster_door(Some(&payload)));
+        assert_eq!(first.status, Status::Ok);
+        assert_eq!(first.data.as_ref().unwrap()["changed"], json!(true));
+        let after: SessionsFile = load_stage(&sessions_path()).unwrap();
+        let term = after
+            .sessions
+            .iter()
+            .find(|s| s.session_id == "win:roster")
+            .expect("the terminal gets a win record");
+        assert_eq!(term.window_address, "0xROSTER");
+
+        let again = session_window_roster(&roster_door(Some(&payload)));
+        assert_eq!(again.data.as_ref().unwrap()["changed"], json!(false), "the same roster changes nothing");
+        assert!(again.changed.is_empty());
+
+        crate::reap::reap(&invocation(&["session", "reap"], &[]));
+        let kept: SessionsFile = load_stage(&sessions_path()).unwrap();
+        assert!(kept.sessions.iter().any(|s| s.session_id == "win:roster"), "its window is open: the reap keeps it");
+
+        for bad in [None, Some("not json"), Some("{\"not\": \"an array\"}")] {
+            assert_eq!(session_window_roster(&roster_door(bad)).status, Status::Usage);
+        }
+        drop(world);
+    }
+
+    /// The attach verb through the door binds an empty window once, writes nothing for the same
+    /// window and workspace again, writes a real workspace move, and refuses a second window.
+    #[test]
+    fn the_attach_verb_binds_a_window_once_and_writes_only_a_real_workspace_move() {
+        let world = window_world("window-attach-verb");
+        let term = SessionRecord { window_address: String::new(), ..session("term", "/w", "working", "1", None) };
+        write_stage(&sessions_path(), &SessionsFile { schema_version: "0".into(), sessions: vec![term] }).unwrap();
+        let attach = |window: &str, workspace: Option<&str>| {
+            let mut inv = invocation(&["session", "window", "attach"], &["term", window]);
+            inv.door = Door::Daemon;
+            if let Some(ws) = workspace {
+                inv.flags.insert("workspace".into(), ws.into());
+            }
+            session_window_attach(&inv)
+        };
+
+        let bound = attach("0xA", Some("3"));
+        assert_eq!(bound.status, Status::Ok);
+        assert_eq!(bound.data.as_ref().unwrap()["changed"], json!(true));
+        assert_eq!(bound.data.as_ref().unwrap()["workspace"], json!(3));
+        let same = attach("0xA", Some("3"));
+        assert_eq!(same.data.as_ref().unwrap()["changed"], json!(false));
+        let moved = attach("0xA", Some("5"));
+        assert_eq!(moved.data.as_ref().unwrap()["changed"], json!(true));
+        assert_eq!(moved.data.as_ref().unwrap()["workspace"], json!(5));
+        let held = attach("0xB", None);
+        assert_eq!(held.status, Status::Error);
+        assert_eq!(held.data.as_ref().unwrap()["reason"], json!("window-held"));
+        assert_eq!(attach("0xA", Some("x")).status, Status::Usage);
+        drop(world);
+    }
+
+    /// The codex verb with no desktop threads on disk changes nothing and enrolls no thread; without
+    /// aoided it says so.
+    #[test]
+    fn the_codex_sync_verb_is_quiet_when_the_desktop_has_no_threads() {
+        let world = window_world("window-codex-quiet");
+        write_stage(&sessions_path(), &SessionsFile { schema_version: "0".into(), sessions: vec![] }).unwrap();
+        let mut inv = invocation(&["session", "codex", "sync"], &[]);
+        inv.door = Door::Daemon;
+        let out = crate::graph::session_codex_sync(&inv);
+        assert_eq!(out.status, Status::Ok);
+        assert_eq!(out.data.as_ref().unwrap()["changed"], json!(false));
+        assert!(out.changed.is_empty());
+        let after: SessionsFile = load_stage(&sessions_path()).unwrap();
+        assert!(after.sessions.is_empty(), "no thread is enrolled");
+        let cli = crate::graph::session_codex_sync(&invocation(&["session", "codex", "sync"], &[]));
+        assert_eq!(cli.status, Status::Error);
+        assert!(cli.message.contains("aoided must be running"), "{}", cli.message);
+        drop(world);
     }
 }

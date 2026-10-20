@@ -464,9 +464,14 @@
   the CLI's own `workspace_id`.
 - **`src/hypr/` is the only compositor reader the desktop has, and core reads none.**
   Core (`aoide-conduct`) reads no window, runs no `hyprctl`, and stamps no owner
-  pid. A session's window reaches core only through `aoide session window attach`,
-  which `hypr/sweep.rs` execs. A new compositor read goes in `hypr/`; a new window
-  fact core must store arrives as a gated core verb first.
+  pid. The desktop reports what it sees through the core door, one verb per
+  call (`hypr/door.rs`): `session window attach` (the sweep), `session window
+  closed`, `session window roster` and `session codex sync`. Outside its tests, no module under
+  `src/hypr/` calls a conduct graph writer in-process or writes
+  `sessions.json`. Compositor reads live in `hypr/`; a new window fact core stores comes in as a gated core verb, called through `door::call`.
+  `door::call` sends nothing while aoided's socket does not answer, so a down aoided
+  costs no exec and no audit line. A retitle or a move owes core nothing but the
+  sweep and the roster; an appearance (`openwindow`) owes the codex sync.
 
 ## Extension points
 

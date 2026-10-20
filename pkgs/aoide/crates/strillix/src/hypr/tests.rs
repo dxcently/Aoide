@@ -3,32 +3,56 @@
 //! fake `hyprctl` shim, never a live compositor.
 
 use super::client::*;
+use super::door::Latch;
 use super::focus::*;
 use super::listener::*;
 use super::sweep::*;
 use super::terminals::*;
 use super::testutil::*;
 use aoide_conduct::graph::{
-    attach_window, load_stage, normalize_addr, sessions_path, write_stage, Attach, Project,
-    ProjectsFile, SessionRecord, SessionsFile,
+    load_stage, normalize_addr, sessions_path, write_stage, SessionRecord, SessionsFile,
 };
-use aoide_storage::stage::projects_path;
 use aoide_test_support::fake_hyprctl;
 use serde_json::{json, Value};
 use std::path::PathBuf;
 
-/// The sweep as the desktop runs it, with the bind written in-process (the same library call the
-/// core door makes) rather than exec'd, so these tests need no built `aoide`.
+/// The recording core stub with aoided up: the door's probe finds the daemon listening, so each
+/// call reaches the stub. A test that wants aoided down sets `AOIDE_DAEMON_SOCKET` after this.
+fn stub_core_door(tag: &str) -> ((aoide_test_support::EnvSaver, EnvVars), PathBuf) {
+    let (core, root) = crate::bridge::testutil::stub_core_door(tag);
+    ((core, core_up()), root)
+}
+
+/// The sweep as the desktop runs it. Each bind it decides goes through the core door, which the
+/// recording stub on `AOIDE_CORE_BIN` answers. The stub writes nothing, so a test that needs core's
+/// write records it itself.
 fn resolve_pending_session_windows() -> bool {
-    let Some(clients) = hyprctl_clients() else {
-        return false;
-    };
-    let Ok(file) = load_stage::<SessionsFile>(&sessions_path()) else {
-        return false;
-    };
-    resolve_windows_in(&file.sessions, &clients, &mut |id, window, ws| {
-        matches!(attach_window(id, window, ws), Attach::Bound { changed: true, .. })
-    })
+    resolve_windows(&mut Latch::default())
+}
+
+/// The argv of each call the stub core recorded, in order.
+fn core_calls(root: &std::path::Path) -> Vec<String> {
+    std::fs::read_to_string(root.join("calls"))
+        .unwrap_or_default()
+        .lines()
+        .filter_map(|line| line.strip_prefix("argv: ").map(str::to_string))
+        .collect()
+}
+
+/// The binding core writes once it has accepted a bind: the window and the workspace it observed.
+fn record_binding(id: &str, window: &str, workspace: Option<i64>) {
+    let mut file: SessionsFile = load_stage(&sessions_path()).unwrap();
+    let rec = file.sessions.iter_mut().find(|s| s.session_id == id).unwrap();
+    rec.window_address = window.into();
+    rec.workspace = workspace;
+    write_stage(&sessions_path(), &file).unwrap();
+}
+
+/// No compositor for the length of a test, whatever the box runs under.
+fn no_compositor() -> EnvVars {
+    let env = EnvVars::save(&["HYPRLAND_INSTANCE_SIGNATURE"]);
+    std::env::remove_var("HYPRLAND_INSTANCE_SIGNATURE");
+    env
 }
 
 fn match_window_for_ancestry(ancestry: &[i32], clients: &[Value]) -> Option<String> {
@@ -214,29 +238,28 @@ fn match_window_for_ancestry(ancestry: &[i32], clients: &[Value]) -> Option<Stri
                 address: "55aabbccdd00".to_string()
             })
         );
-        // movewindow / movewindowv2 re-check (session may have registered late).
+        // A move (movewindow, movewindowv2) and a retitle (windowtitle, windowtitlev2) change a known window.
         assert_eq!(
             parse_hypr_window_event("movewindow>>55aabb,2"),
-            Some(HyprWindowEvent::Appeared {
+            Some(HyprWindowEvent::Changed {
                 address: "55aabb".to_string()
             })
         );
         assert_eq!(
             parse_hypr_window_event("movewindowv2>>55aabb,2,two"),
-            Some(HyprWindowEvent::Appeared {
+            Some(HyprWindowEvent::Changed {
                 address: "55aabb".to_string()
             })
         );
-        // windowtitle (old, ADDR only) and windowtitlev2 (ADDR,TITLE).
         assert_eq!(
             parse_hypr_window_event("windowtitle>>55aabb"),
-            Some(HyprWindowEvent::Appeared {
+            Some(HyprWindowEvent::Changed {
                 address: "55aabb".to_string()
             })
         );
         assert_eq!(
             parse_hypr_window_event("windowtitlev2>>55aabb,a new title"),
-            Some(HyprWindowEvent::Appeared {
+            Some(HyprWindowEvent::Changed {
                 address: "55aabb".to_string()
             })
         );
@@ -453,30 +476,17 @@ fn match_window_for_ancestry(ancestry: &[i32], clients: &[Value]) -> Option<Stri
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// GATED on Unix with its reason (see `testutil::fake_hyprctl`): the
-    /// fixture is a `#!/bin/sh` shim `CreateProcess` cannot launch, over a
-    /// compositor native Windows does not run.
+    /// The sweep decides when core is asked to bind: once for a pending window, once more for each real
+    /// move to another workspace, and not for an observation core already holds. The stamp itself is
+    /// core's (its own tests cover it), so the stub core records the calls the sweep makes.
     #[cfg(unix)]
     #[test]
-    fn the_sweep_stamps_the_default_at_birth_and_never_on_a_move() {
-        // The compositor stamp site, end to end: the sweep resolves our own
-        // pid to the shim's client, observes its workspace through the ONE
-        // seam, and the birth default lands — once, and only once.
+    fn the_sweep_asks_core_to_bind_a_pending_window_and_again_only_on_a_move() {
         let _guard = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
-        let stage = unique_stage("sweep-stamps-default");
+        let stage = unique_stage("sweep-asks-core");
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
-        write_stage(
-            &projects_path(),
-            &ProjectsFile {
-                schema_version: "0".into(),
-                projects: vec![
-                    Project { name: "aoide".into(), workspaces: vec![3], ..Default::default() },
-                    Project { name: "cadenza".into(), workspaces: vec![7], ..Default::default() },
-                ],
-            },
-        )
-        .unwrap();
+        let (_core, core_root) = stub_core_door("sweep-asks-core");
         let mut rec = session("s1", "/w", "working", "t", None);
         rec.window_address = String::new();
         rec.pid = Some(std::process::id());
@@ -486,29 +496,25 @@ fn match_window_for_ancestry(ancestry: &[i32], clients: &[Value]) -> Option<Stri
         )
         .unwrap();
 
-        let (env, dir) = fake_hypr_socket("sweep-stamp");
-        assert!(
-            resolve_pending_session_windows(),
-            "the pending window resolves against the shim"
-        );
-        let after: SessionsFile = load_stage(&sessions_path()).unwrap();
-        assert_eq!(after.sessions[0].window_address, "0xAA");
-        assert_eq!(after.sessions[0].workspace, Some(3));
-        assert_eq!(
-            after.sessions[0].workspace_project.as_deref(),
-            Some("aoide"),
-            "born on workspace 3 → the bound project"
-        );
+        let (env, dir) = fake_hypr_socket("sweep-asks-core");
+        assert!(resolve_pending_session_windows(), "the pending window binds through core");
+        assert_eq!(core_calls(&core_root), ["session window attach s1 0xAA --workspace 3 --json"]);
+        record_binding("s1", "0xAA", Some(3));
 
-        // Dragged to another BOUND workspace: the id follows, the default holds.
+        // Dragged to another bound workspace: core is asked for the new workspace, once.
         std::env::set_var("AOIDE_TEST_WS", "7");
         assert!(resolve_pending_session_windows());
-        let after: SessionsFile = load_stage(&sessions_path()).unwrap();
-        assert_eq!(after.sessions[0].workspace, Some(7));
-        assert_eq!(after.sessions[0].workspace_project.as_deref(), Some("aoide"));
+        assert_eq!(
+            core_calls(&core_root),
+            [
+                "session window attach s1 0xAA --workspace 3 --json",
+                "session window attach s1 0xAA --workspace 7 --json",
+            ]
+        );
+        record_binding("s1", "0xAA", Some(7));
 
-        // Nothing left to write once the observation is already current.
-        assert!(!resolve_pending_session_windows(), "idempotent once settled");
+        assert!(!resolve_pending_session_windows(), "idempotent once core holds the observation");
+        assert_eq!(core_calls(&core_root).len(), 2);
 
         drop(env);
         let _ = std::fs::remove_dir_all(&dir);
@@ -567,17 +573,18 @@ fn match_window_for_ancestry(ancestry: &[i32], clients: &[Value]) -> Option<Stri
         assert_eq!(window_for_hook_chain(&[500, 1], &clients, |_, _| true), None);
     }
 
-    /// The sweep binds pid-less hosted sessions through their hook chain, binds
-    /// none of the stale, done, windowless-by-lineage or chainless ones, and
-    /// later retires only the one whose process is gone. The real children stand
-    /// in for harnesses beneath the app, which is this test process's own client.
+    /// The sweep asks core to bind the pid-less hosted sessions whose hook chain runs under a live
+    /// client, asks for none of the stale, done, windowless-by-lineage or chainless ones, and writes
+    /// nothing itself. The real children stand in for harnesses beneath the app, which is this test
+    /// process's own client.
     #[cfg(unix)]
     #[test]
-    fn the_sweep_binds_pid_less_hosted_sessions_by_their_hook_chain() {
+    fn the_sweep_asks_core_to_bind_pid_less_hosted_sessions_by_their_hook_chain() {
         let _guard = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
         let stage = unique_stage("sweep-hook-chain");
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        let (_core, core_root) = stub_core_door("sweep-hook-chain");
 
         let me = std::process::id() as i32;
         let dead = 2_000_000_000_i32;
@@ -617,25 +624,24 @@ fn match_window_for_ancestry(ancestry: &[i32], clients: &[Value]) -> Option<Stri
             &SessionsFile { schema_version: "0".into(), sessions: recs },
         )
         .unwrap();
+        let before = std::fs::read(sessions_path()).unwrap();
 
         let (env, dir) = fake_hypr_socket("sweep-hook-chain");
         std::env::set_var("AOIDE_TEST_CLIENT_PID", me.to_string());
         std::env::set_var("AOIDE_TEST_CLIENT_CLASS", "com.example.App");
-        assert!(resolve_pending_session_windows(), "the hook-chain sessions bind");
+        assert!(resolve_pending_session_windows(), "the hook-chain sessions bind through core");
 
-        let by_id = |s: &SessionsFile, id: &str| {
-            s.sessions.iter().find(|r| r.session_id == id).unwrap().clone()
-        };
-        let after: SessionsFile = load_stage(&sessions_path()).unwrap();
+        let calls = core_calls(&core_root);
         for id in ["h1", "h2", "h3"] {
-            let r = by_id(&after, id);
-            assert_eq!(r.window_address, "0xAA", "{id} binds through its live chain");
-            assert_eq!(r.workspace, Some(3));
-            assert_eq!(r.pid, None, "the sweep never gives a pid-less session a pid");
+            let ask = format!("session window attach {id} 0xAA --workspace 3 --json");
+            assert!(calls.contains(&ask), "{id} binds through its live chain: {calls:?}");
         }
-        for id in ["dead", "done", "nested", "chainless", "wrap"] {
-            assert!(by_id(&after, id).window_address.is_empty(), "{id} stays unbound");
-        }
+        assert_eq!(calls.len(), 3, "and nothing else is asked: {calls:?}");
+        assert_eq!(
+            std::fs::read(sessions_path()).unwrap(),
+            before,
+            "the desktop never writes sessions.json itself"
+        );
 
         for c in children.iter_mut() {
             let _ = c.kill();
@@ -736,3 +742,371 @@ fn match_window_for_ancestry(ancestry: &[i32], clients: &[Value]) -> Option<Stri
         }
         let _ = std::fs::remove_dir_all(&stage);
     }
+
+// -- The owed calls: each is held to what it is owed --
+//
+// A closed window is reported once per event, the codex sync runs on an appearance or a
+// reconnect, the roster goes out when its content or its claims change, a call core answers is
+// settled, a call that did not run is tried on the next tick, and with no aoide binary every call is
+// skipped with one log line.
+
+/// A closed window is reported once, and not again once core has answered.
+#[cfg(unix)]
+#[test]
+fn a_closed_window_is_reported_once_and_not_again_once_core_answers() {
+    let _guard = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+    let _sig = no_compositor();
+    let (_core, core_root) = stub_core_door("owed-closed-once");
+    let mut owed = Owed::default();
+    owed.window_closed("55aabb".into());
+    owed.settle_calls();
+    owed.settle_calls();
+    assert_eq!(core_calls(&core_root), ["session window closed 55aabb --json"]);
+}
+
+/// A refused close is final: core answered, so the close is not sent again on a tick, and the refusal
+/// is logged once.
+#[cfg(unix)]
+#[test]
+fn a_refused_close_is_settled_and_not_sent_again() {
+    let _guard = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+    let _sig = no_compositor();
+    let _stage = EnvVars::save(&["AOIDE_STAGE_DIR"]);
+    let stage = unique_stage("owed-closed-refused");
+    std::env::set_var("AOIDE_STAGE_DIR", &stage);
+    let (_core, core_root) = stub_core_door("owed-closed-refused");
+    std::fs::write(core_root.join("refuse"), "").unwrap();
+    let mut owed = Owed::default();
+    owed.window_closed("55aabb".into());
+    owed.settle_calls();
+    owed.settle_calls();
+    owed.tick();
+    owed.tick();
+    assert_eq!(core_calls(&core_root), ["session window closed 55aabb --json"], "sent once, however many ticks follow");
+    assert_eq!(owed.logged(), 1, "the refusal is logged once");
+    std::fs::remove_file(core_root.join("refuse")).unwrap();
+    owed.tick();
+    assert_eq!(core_calls(&core_root).len(), 1, "a settled close is not sent again, even once core would accept it");
+    let _ = std::fs::remove_dir_all(&stage);
+}
+
+/// A refused codex sync is final: the appearance that owed it is sent once, and idle ticks send nothing.
+#[cfg(unix)]
+#[test]
+fn a_refused_codex_sync_is_not_sent_again() {
+    let _guard = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+    let _sig = no_compositor();
+    let (_core, core_root) = stub_core_door("owed-codex-refused");
+    std::fs::write(core_root.join("refuse"), "").unwrap();
+    let mut owed = Owed::default();
+    owed.event(HyprWindowEvent::Appeared { address: "55aabb".into() });
+    owed.tick();
+    owed.tick();
+    assert_eq!(core_calls(&core_root), ["session codex sync --json"], "a refused sync is sent once");
+    std::fs::remove_file(core_root.join("refuse")).unwrap();
+    owed.tick();
+    assert_eq!(core_calls(&core_root).len(), 1, "a settled sync is not sent again");
+}
+
+/// The codex sync runs when a window appears and on each reconnect, and not on a tick in between.
+#[cfg(unix)]
+#[test]
+fn the_codex_sync_is_owed_on_an_appearance_and_a_reconnect_and_never_on_a_tick() {
+    let _guard = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+    let _sig = no_compositor();
+    let (_core, core_root) = stub_core_door("owed-codex");
+    let mut owed = Owed::default();
+    owed.settle_calls();
+    owed.tick();
+    assert!(core_calls(&core_root).is_empty(), "nothing owed, nothing sent");
+    owed.event(HyprWindowEvent::Appeared { address: "55aabb".into() });
+    owed.tick();
+    assert_eq!(core_calls(&core_root), ["session codex sync --json"]);
+    owed.reconnected();
+    owed.settle_calls();
+    owed.tick();
+    assert_eq!(core_calls(&core_root), ["session codex sync --json"; 2]);
+}
+
+/// The roster goes out once when it first exists, then when the terminal windows or the sessions'
+/// claims change, and again on each reconnect.
+#[cfg(unix)]
+#[test]
+fn the_roster_goes_out_on_a_change_and_on_a_reconnect_and_never_on_an_unchanged_tick() {
+    let _guard = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+    let _env = EnvVars::save(&["AOIDE_STAGE_DIR", "AOIDE_TEST_CLIENT_CLASS"]);
+    let stage = unique_stage("owed-roster");
+    std::env::set_var("AOIDE_STAGE_DIR", &stage);
+    let (_core, core_root) = stub_core_door("owed-roster");
+    let (_hypr, _hypr_root) = fake_hypr_socket("owed-roster");
+    std::env::set_var("AOIDE_TEST_CLIENT_CLASS", "kitty");
+    let mut owed = Owed::default();
+
+    owed.settle_roster();
+    owed.settle_roster();
+    assert_eq!(core_calls(&core_root).len(), 1, "the first roster goes out, an unchanged one does not");
+
+    write_stage(
+        &sessions_path(),
+        &SessionsFile {
+            schema_version: "0".into(),
+            sessions: vec![SessionRecord { window_address: "0xAA".into(), ..session("claimant", "/w", "working", "t", None) }],
+        },
+    )
+    .unwrap();
+    owed.settle_roster();
+    assert_eq!(core_calls(&core_root).len(), 2, "a session claiming the window changes the roster");
+    owed.settle_roster();
+    assert_eq!(core_calls(&core_root).len(), 2);
+
+    std::env::set_var("AOIDE_TEST_CLIENT_CLASS", "firefox");
+    owed.settle_roster();
+    assert_eq!(core_calls(&core_root).len(), 3, "a window that is no longer a terminal changes it");
+
+    owed.reconnected();
+    owed.settle_roster();
+    assert_eq!(core_calls(&core_root).len(), 4, "a reconnect sends the roster again");
+    let _ = std::fs::remove_dir_all(&stage);
+}
+
+/// A refused roster is final: idle ticks send nothing more, and a changed roster is sent once.
+#[cfg(unix)]
+#[test]
+fn a_refused_roster_is_not_sent_again_until_the_roster_changes() {
+    let _guard = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+    let _env = EnvVars::save(&["AOIDE_STAGE_DIR", "AOIDE_TEST_CLIENT_CLASS"]);
+    let stage = unique_stage("owed-roster-refused");
+    std::env::set_var("AOIDE_STAGE_DIR", &stage);
+    let (_core, core_root) = stub_core_door("owed-roster-refused");
+    let (_hypr, _hypr_root) = fake_hypr_socket("owed-roster-refused");
+    std::env::set_var("AOIDE_TEST_CLIENT_CLASS", "kitty");
+    std::fs::write(core_root.join("refuse"), "").unwrap();
+    let mut owed = Owed::default();
+    owed.settle_roster();
+    assert_eq!(core_calls(&core_root).len(), 1, "a refused roster is sent once");
+    for _ in 0..10 {
+        owed.tick();
+    }
+    assert_eq!(core_calls(&core_root).len(), 1, "idle ticks send nothing more");
+    std::env::set_var("AOIDE_TEST_CLIENT_CLASS", "firefox");
+    owed.tick();
+    assert_eq!(core_calls(&core_root).len(), 2, "a changed roster is sent once");
+    owed.tick();
+    assert_eq!(core_calls(&core_root).len(), 2, "and not again while it stays refused");
+    let _ = std::fs::remove_dir_all(&stage);
+}
+
+/// Without an aoide binary every owed call is skipped: none errors, and each is logged once however
+/// many ticks pass.
+#[cfg(unix)]
+#[test]
+fn with_no_aoide_binary_each_owed_call_is_skipped_and_logged_once() {
+    let _guard = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+    let _core = EnvVars::save(&["AOIDE_CORE_BIN", "AOIDE_STAGE_DIR"]);
+    std::env::set_var("AOIDE_CORE_BIN", "/nonexistent/aoide");
+    let stage = unique_stage("owed-no-binary");
+    std::env::set_var("AOIDE_STAGE_DIR", &stage);
+    let (_hypr, _hypr_root) = fake_hypr_socket("owed-no-binary");
+    let mut owed = Owed::default();
+    owed.reconnected();
+    owed.window_closed("55aabb".into());
+    owed.settle_calls();
+    owed.tick();
+    owed.tick();
+    assert_eq!(owed.logged(), 3, "the codex sync, the closed window and the roster, each once");
+    let _ = std::fs::remove_dir_all(&stage);
+}
+
+/// A core binary that is present but cannot exec did not run: the door reports NotRun, so the call stays
+/// owed and a later tick tries again. It is not skipped as a missing binary is.
+#[cfg(unix)]
+#[test]
+fn a_binary_that_cannot_exec_is_a_call_that_did_not_run_not_a_skipped_one() {
+    let _guard = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+    let _daemon = core_up();
+    let dir = aoide_test_support::unique_tmp("unexecutable");
+    std::fs::create_dir_all(&dir).unwrap();
+    let bin = dir.join("aoide");
+    std::fs::write(&bin, "not a program").unwrap();
+    let _core = EnvVars::save(&["AOIDE_CORE_BIN"]);
+    std::env::set_var("AOIDE_CORE_BIN", &bin);
+    let reply = super::door::call(&["session", "codex", "sync"], None);
+    assert_eq!(reply, super::door::Reply::NotRun);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A call whose exec failed did not run: it stays owed and is logged once, and the next tick sends it
+/// once the exec works.
+#[cfg(unix)]
+#[test]
+fn a_call_that_did_not_run_is_tried_again_on_the_next_tick() {
+    let _guard = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+    let _sig = no_compositor();
+    let (_core, core_root) = stub_core_door("owed-not-run");
+    let stub = core_root.join("stub-aoide");
+    std::fs::set_permissions(&stub, std::os::unix::fs::PermissionsExt::from_mode(0o644)).unwrap();
+    let mut owed = Owed::default();
+    owed.window_closed("55aabb".into());
+    owed.settle_calls();
+    owed.tick();
+    assert!(core_calls(&core_root).is_empty(), "a stub that cannot exec runs nothing");
+    assert_eq!(owed.logged(), 1, "the failed exec is logged once");
+    std::fs::set_permissions(&stub, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+    owed.tick();
+    assert_eq!(core_calls(&core_root), ["session window closed 55aabb --json"], "the next tick tries it again");
+    assert_eq!(owed.logged(), 0, "an accepted call clears its latch");
+}
+
+/// Without an aoide binary the sweep binds nothing, reports false, and logs the refused bind once.
+#[cfg(unix)]
+#[test]
+fn with_no_aoide_binary_the_sweep_binds_nothing_and_logs_once() {
+    let _guard = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+    let _env = EnvVars::save(&["AOIDE_STAGE_DIR", "AOIDE_CORE_BIN"]);
+    let stage = unique_stage("sweep-no-binary");
+    std::env::set_var("AOIDE_STAGE_DIR", &stage);
+    std::env::set_var("AOIDE_CORE_BIN", "/nonexistent/aoide");
+    let mut rec = session("s1", "/w", "working", "t", None);
+    rec.window_address = String::new();
+    rec.pid = Some(std::process::id());
+    write_stage(&sessions_path(), &SessionsFile { schema_version: "0".into(), sessions: vec![rec] }).unwrap();
+    let (_hypr, _hypr_root) = fake_hypr_socket("sweep-no-binary");
+
+    let mut latch = Latch::default();
+    assert!(!resolve_windows(&mut latch));
+    assert!(!resolve_windows(&mut latch));
+    assert_eq!(latch.logged(), 1, "the skipped bind is logged once");
+    let after: SessionsFile = load_stage(&sessions_path()).unwrap();
+    assert_eq!(after.sessions[0].window_address, "", "nothing was bound");
+    let _ = std::fs::remove_dir_all(&stage);
+}
+
+/// A bind core refuses is final for its session, window and workspace: no later sweep asks for it again,
+/// and a move to another workspace is a new binding, which is asked once.
+#[cfg(unix)]
+#[test]
+fn a_refused_bind_is_settled_and_a_new_workspace_is_asked() {
+    let _guard = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+    let _env = EnvVars::save(&["AOIDE_STAGE_DIR", "AOIDE_TEST_WS"]);
+    let stage = unique_stage("sweep-refused");
+    std::env::set_var("AOIDE_STAGE_DIR", &stage);
+    let (_core, core_root) = stub_core_door("sweep-refused");
+    let mut rec = session("s1", "/w", "working", "t", None);
+    rec.window_address = String::new();
+    rec.pid = Some(std::process::id());
+    write_stage(&sessions_path(), &SessionsFile { schema_version: "0".into(), sessions: vec![rec] }).unwrap();
+    let (_hypr, _hypr_root) = fake_hypr_socket("sweep-refused");
+    std::fs::write(core_root.join("refuse"), "").unwrap();
+
+    let mut latch = Latch::default();
+    assert!(!resolve_windows(&mut latch));
+    assert!(!resolve_windows(&mut latch));
+    assert_eq!(core_calls(&core_root), ["session window attach s1 0xAA --workspace 3 --json"], "a refused bind is sent once");
+    assert_eq!(latch.logged(), 1, "and logged once");
+    std::fs::remove_file(core_root.join("refuse")).unwrap();
+    assert!(!resolve_windows(&mut latch), "the refused binding is not sent again, even once core would accept it");
+    assert_eq!(core_calls(&core_root).len(), 1);
+
+    std::env::set_var("AOIDE_TEST_WS", "7");
+    assert!(resolve_windows(&mut latch), "the new workspace is a new binding, and core accepts it");
+    assert_eq!(core_calls(&core_root)[1], "session window attach s1 0xAA --workspace 7 --json");
+    assert_eq!(latch.logged(), 0, "an accepted call clears its latch");
+    let _ = std::fs::remove_dir_all(&stage);
+}
+
+/// A bind that aoided did not take is not lost to a quiet stretch: the sweep runs on each tick, so the
+/// bind goes out on the first tick after aoided listens.
+#[cfg(unix)]
+#[test]
+fn an_unsent_bind_goes_out_on_a_later_tick() {
+    let _guard = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+    let _env = EnvVars::save(&["AOIDE_STAGE_DIR", "AOIDE_DAEMON_SOCKET"]);
+    let stage = unique_stage("owed-bind-tick");
+    std::env::set_var("AOIDE_STAGE_DIR", &stage);
+    let (_core, core_root) = stub_core_door("owed-bind-tick");
+    let (_hypr, _hypr_root) = fake_hypr_socket("owed-bind-tick");
+    let mut rec = session("s1", "/w", "working", "t", None);
+    rec.window_address = String::new();
+    rec.pid = Some(std::process::id());
+    write_stage(&sessions_path(), &SessionsFile { schema_version: "0".into(), sessions: vec![rec] }).unwrap();
+    std::env::set_var("AOIDE_DAEMON_SOCKET", "/nonexistent/aoided-is-down.sock");
+    let mut owed = Owed::default();
+    owed.tick();
+    assert!(core_calls(&core_root).is_empty(), "no exec while aoided is down");
+    std::env::set_var("AOIDE_DAEMON_SOCKET", accepting_daemon());
+    owed.tick();
+    assert!(
+        core_calls(&core_root).iter().any(|call| call == "session window attach s1 0xAA --workspace 3 --json"),
+        "the bind goes out on the first tick after aoided listens: {:?}",
+        core_calls(&core_root)
+    );
+    let _ = std::fs::remove_dir_all(&stage);
+}
+
+/// With aoided not listening nothing is execed: the owed close waits, logged once, and goes out on the
+/// first tick after aoided listens.
+#[cfg(unix)]
+#[test]
+fn an_absent_aoided_gets_no_call_until_it_listens() {
+    let _guard = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+    let _sig = no_compositor();
+    let (_core, core_root) = stub_core_door("owed-absent");
+    let _stage = EnvVars::save(&["AOIDE_STAGE_DIR"]);
+    let stage = unique_stage("owed-absent");
+    std::env::set_var("AOIDE_STAGE_DIR", &stage);
+    std::env::set_var("AOIDE_DAEMON_SOCKET", "/nonexistent/aoided-is-down.sock");
+    let mut owed = Owed::default();
+    owed.event(HyprWindowEvent::Closed { address: "55aabb".into() });
+    owed.tick();
+    owed.tick();
+    assert!(core_calls(&core_root).is_empty(), "no exec while aoided is down");
+    assert_eq!(owed.logged(), 1, "the wait is logged once");
+    std::env::set_var("AOIDE_DAEMON_SOCKET", accepting_daemon());
+    owed.tick();
+    owed.tick();
+    assert_eq!(core_calls(&core_root), ["session window closed 55aabb --json"], "sent once, once aoided listens");
+    assert_eq!(owed.logged(), 0, "an accepted call clears its latch");
+    let _ = std::fs::remove_dir_all(&stage);
+}
+
+/// A socket file a dead aoided left behind refuses connections, so it counts as absent.
+#[cfg(unix)]
+#[test]
+fn a_stale_daemon_socket_counts_as_absent() {
+    let _guard = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+    let _sig = no_compositor();
+    let (_core, core_root) = stub_core_door("owed-stale");
+    let _stage = EnvVars::save(&["AOIDE_STAGE_DIR"]);
+    let stage = unique_stage("owed-stale");
+    std::env::set_var("AOIDE_STAGE_DIR", &stage);
+    let dir = aoide_test_support::unique_tmp("stale");
+    std::fs::create_dir_all(&dir).unwrap();
+    let stale = dir.join("aoided.sock");
+    drop(std::os::unix::net::UnixListener::bind(&stale).unwrap());
+    std::env::set_var("AOIDE_DAEMON_SOCKET", &stale);
+    let mut owed = Owed::default();
+    owed.event(HyprWindowEvent::Closed { address: "55aabb".into() });
+    assert!(core_calls(&core_root).is_empty(), "a refused connect is absent, not a daemon");
+    let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::fs::remove_dir_all(&stage);
+}
+
+/// An appearance owes the codex sync: a move and a retitle reconcile the sweep and the roster.
+#[cfg(unix)]
+#[test]
+fn a_retitle_owes_no_codex_sync_and_an_appearance_does() {
+    let _guard = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+    let _sig = no_compositor();
+    let (_core, core_root) = stub_core_door("owed-retitle");
+    let _stage = EnvVars::save(&["AOIDE_STAGE_DIR"]);
+    let stage = unique_stage("owed-retitle");
+    std::env::set_var("AOIDE_STAGE_DIR", &stage);
+    let mut owed = Owed::default();
+    for line in ["windowtitle>>55aabb", "windowtitlev2>>55aabb,new title", "movewindow>>55aabb,2"] {
+        owed.event(parse_hypr_window_event(line).expect("a window event"));
+    }
+    assert!(core_calls(&core_root).is_empty(), "a retitle or a move owes core nothing");
+    owed.event(parse_hypr_window_event("openwindow>>55aabb,1,kitty,t").expect("a window event"));
+    assert_eq!(core_calls(&core_root), ["session codex sync --json"]);
+    let _ = std::fs::remove_dir_all(&stage);
+}

@@ -3820,7 +3820,11 @@ site:
 
 A session with no parent, or whose chain anchors in a windowed conducted
 session directly (an interactive `conduct` with a real `windowAddress`),
-keeps the ordinary backfill. The backfill is the desktop's: its sweep binds the window and its workspace through `aoide session window attach <id> <address> [--workspace <n>]`, a daemon verb that fills an empty window, moves the workspace when the same window reports again, and refuses a second window while the first is held. Core walks no window, and the owning app's pid is never stamped as the session's pid. The same-window eviction
+keeps the ordinary backfill. The backfill is the desktop's: its sweep binds the window and its workspace through `aoide session window attach <id> <address> [--workspace <n>]`, a daemon verb that fills an empty window, moves the workspace when the same window reports again, and refuses a second window while the first is held. Core walks no window, and the owning app's pid is never stamped as the session's pid. The
+desktop's other window facts come through the same door: `aoide session window closed <address>`
+judges the sessions that ran in a closed window and releases their claims, `aoide session window
+roster` (a JSON array of terminal windows on stdin) publishes the untracked-terminal records, and
+`aoide session codex sync` reconciles the desktop's codex threads. The same-window eviction
 (immediately above `graph.json`'s render, below) never retires a sharing
 window by itself. A same-window record is retired only as a superseded twin
 (`superseded_by`): it has no live process of its own outside the new

@@ -129,3 +129,29 @@ printf '{"status":"ok","command":"workspace","message":"argv: %s","data":{"works
     std::env::set_var("AOIDE_CORE_BIN", &stub);
     (env, root)
 }
+
+/// A stub `aoide` on `AOIDE_CORE_BIN` that records each call the desktop's door makes: its argv on
+/// one line, then its stdin payload (empty when there is none). It exits 1 while `<root>/refuse`
+/// exists, which stands in for a core that refuses a call or cannot reach aoided. The record is read
+/// from `<root>/calls`; the refusal switch is the file `<root>/refuse`.
+///
+/// GATED on Unix with its callers, as [`stub_workspace_core`] is: the stub is a `#!/bin/sh` script.
+#[cfg(unix)]
+pub(crate) fn stub_core_door(tag: &str) -> (aoide_test_support::EnvSaver, PathBuf) {
+    let root = aoide_test_support::unique_tmp(tag);
+    std::fs::create_dir_all(&root).unwrap();
+    let stub = root.join("stub-aoide");
+    std::fs::write(
+        &stub,
+        format!(
+            "#!/bin/sh\nprintf 'argv: %s\\nstdin: %s\\n' \"$*\" \"$(cat)\" >> '{}'\n[ -e '{}' ] && exit 1\nexit 0\n",
+            root.join("calls").display(),
+            root.join("refuse").display(),
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&stub, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+    let env = aoide_test_support::EnvSaver::capture(&["AOIDE_CORE_BIN"]);
+    std::env::set_var("AOIDE_CORE_BIN", &stub);
+    (env, root)
+}

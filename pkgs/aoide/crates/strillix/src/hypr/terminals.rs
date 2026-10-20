@@ -1,9 +1,10 @@
 //! The untracked-terminal roster from the desktop side: each terminal-class client becomes a
-//! `TermWindow` (its cwd read from `/proc`), and the core reconciler publishes the `win:*`
-//! records from the list.
+//! `TermWindow` (its cwd read from `/proc`), and the roster goes to core through the door. Core's
+//! reconciler writes the `win:*` records. A roster goes out when its content changes, or when the
+//! sessions that claim its windows change ([`RosterGate`]).
 
-use super::client::hyprctl_clients;
-use aoide_conduct::graph::{proc_cwd, sync_untracked_terminal_rows, TermWindow};
+use super::door::{self, Latch};
+use aoide_conduct::graph::{load_stage, normalize_addr, proc_cwd, sessions_path, SessionsFile, TermWindow};
 use serde_json::Value;
 
 /// Extract a [`TermWindow`] from one `hyprctl clients -j` client object, reading
@@ -54,14 +55,82 @@ pub(crate) fn term_window_from_client(c: &Value) -> Option<TermWindow> {
     })
 }
 
-/// Publish the roster from the live clients: the core reconciler sees every terminal window
-/// now, and removes any `win:*` record whose window has closed. Returns true iff
-/// `sessions.json` changed. No compositor, no change.
-pub fn sync_untracked_terminal_windows() -> bool {
-    let Some(clients) = hyprctl_clients() else {
-        return false;
-    };
-    let windows: Vec<TermWindow> = clients.iter().filter_map(term_window_from_client).collect();
-    sync_untracked_terminal_rows(&windows)
+/// What the roster verb would be told this tick: the terminal windows the compositor shows, and the
+/// window addresses the tracked sessions already hold. Core keeps a terminal's record while no
+/// session claims its window, so a change in either makes a publish owed. A `win:*` record is core's
+/// own roster entry, not a claim, so publishing it changes nothing here.
+#[derive(Clone, PartialEq)]
+pub(crate) struct Roster {
+    windows: Vec<TermWindow>,
+    claims: Vec<String>,
 }
 
+impl Roster {
+    /// The roster this tick would publish, from the live clients and the stage's current claims.
+    pub(crate) fn of(clients: &[Value]) -> Self {
+        let windows: Vec<TermWindow> = clients.iter().filter_map(term_window_from_client).collect();
+        let mut claims: Vec<String> = load_stage::<SessionsFile>(&sessions_path())
+            .map(|file| {
+                file.sessions
+                    .iter()
+                    .filter(|s| !s.session_id.starts_with("win:") && !s.window_address.is_empty())
+                    .map(|s| normalize_addr(&s.window_address))
+                    .collect()
+            })
+            .unwrap_or_default();
+        claims.sort();
+        claims.dedup();
+        Self { windows, claims }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::hypr::testutil::{session, unique_stage, EnvVars};
+    use aoide_conduct::graph::{write_stage, SessionsFile};
+    use serde_json::json;
+
+    /// A `win:*` record is core's roster entry, not a claim. Its window is not held by a session, so
+    /// the roster names no claims, and publishing a terminal does not make the next roster owed.
+    #[test]
+    fn a_win_record_holds_no_claim() {
+        let _guard = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&["AOIDE_STAGE_DIR"]);
+        let stage = unique_stage("roster-win-claim");
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        let mut win = session("win:aa", "", "running", "", None);
+        win.window_address = "0xAA".into();
+        let file = SessionsFile { schema_version: "0".into(), sessions: vec![win] };
+        write_stage(&aoide_conduct::graph::sessions_path(), &file).unwrap();
+        let clients = [json!({ "address": "0xAA", "class": "kitty" })];
+        assert!(Roster::of(&clients).claims.is_empty());
+        let _ = std::fs::remove_dir_all(&stage);
+    }
+}
+
+/// Publishes the roster when it differs from the one core last answered. A roster core answers, yes or
+/// no, or skips for want of a binary, is recorded as sent: it goes out again when the roster or its
+/// claims change, or on a reconnect. A roster that was not sent (aoided not listening, or an exec that
+/// failed) stays owed and goes out on a later tick.
+#[derive(Default)]
+pub(crate) struct RosterGate {
+    sent: Option<Roster>,
+}
+
+impl RosterGate {
+    pub(crate) fn forget(&mut self) {
+        self.sent = None;
+    }
+
+    pub(crate) fn settle(&mut self, roster: Roster, latch: &mut Latch) {
+        if self.sent.as_ref() == Some(&roster) {
+            return;
+        }
+        let payload = serde_json::to_string(&roster.windows).unwrap_or_else(|_| "[]".to_string());
+        let reply = door::call(&["session", "window", "roster"], Some(&payload));
+        self.sent = latch
+            .reply("roster".to_string(), "publishing the terminal roster", reply)
+            .then_some(roster);
+    }
+}

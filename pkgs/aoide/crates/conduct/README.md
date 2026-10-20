@@ -623,7 +623,8 @@ stripping one, and a held spawn shows as its whole command.
   carries a real touch signal and the timer can take it on its own —
   the gesture (`--now`) is no longer the only path in.
 - `graph/window.rs` — the session window record (`session window attach`,
-  the closed-window clear, the untracked-terminal reconciler) PLUS the
+  `session window closed`, `session window roster`, the untracked-terminal
+  reconciler) PLUS the
   automatic-parenting seam (task #89):
   `is_windowless_wrap` (a conducted record is windowless when `headless` is
   set OR its own `windowAddress` is empty — `headless` overrides a stray
@@ -681,8 +682,12 @@ stripping one, and a held spawn shows as its whole command.
   Core binds no window. A window is a fact the desktop reports: `session window
   attach <id> <address> [--workspace <n>]` fills an empty window, moves the
   workspace when the same window reports again, and refuses a second window while
-  the first one is held. A closed window is cleared by `clear_closed_window`, from
-  the desktop's close event. Core reads no compositor and stamps no owner pid.
+  the first one is held. A closed window is reported by `session window closed <address>`: the
+  reaper judges the sessions that ran in it at once (`reap::reap_closed_window`),
+  sparing one a live harness still anchors, and releases every claim on it. The
+  desktop's terminal roster arrives as `session window roster` (a JSON array of
+  terminal windows on stdin) and reconciles the `win:*` records. Core reads no
+  compositor and stamps no owner pid.
   `hookAncestry` is filled and healed by a per-turn hook through
   `ensure_session_chain`: a chainless record takes the hook's chain unless a live
   process of its own holds it outside that chain, and a stored chain is replaced
@@ -749,13 +754,14 @@ stripping one, and a held spawn shows as its whole command.
   one, ever removes a `kind:"app"` record. See AGENTS.md's invariants
   for why `kind:"app"` exists and what it must never gain.
 
-  `sync_codex_app_threads` (P-CX-3) has two call sites. The reaper's own
-  tick (`reap.rs`, run immediately before its title refresh so a thread
-  enrolled this pass gets its title in the same pass) is PRIMARY — it runs
-  wherever `aoided` runs, Hyprland or not. The desktop's `run_hypr_window_listener`
-  (strillix's `hypr/listener.rs`) calls it too, beside every `sync_untracked_terminal_rows`
-  tick (startup, reconnect, the ~5s timeout, `Appeared`, `Closed`), but only
-  for PROMPTNESS on a host where that listener happens to be running.
+  `sync_codex_app_threads` (P-CX-3) has two call sites, the same reconcile. The
+  reaper's own tick (`reap.rs`, run immediately before its title refresh so a
+  thread enrolled this pass gets its title in the same pass) is PRIMARY: it runs
+  wherever `aoided` runs, Hyprland or not. The second is `session codex sync`
+  (`session_codex_sync`), which the desktop's listener calls when a window appears
+  and on each reconnect, so a thread enrolled just now is stamped with its window
+  in the same pass. It is not on the listener's tick: the reaper already runs there.
+
 - `graph/codex_capture.rs` — native capture from a Codex thread's own rollout
   JSONL, beside the association `codex_app.rs` already reads (P-CX-5).
   `fold_rollout_from` is a PURE fold (no I/O, no stage):
