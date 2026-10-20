@@ -595,3 +595,17 @@ pub fn register_mail_ring(r: &mut Registry) {
         ],
     ));
 }
+
+/// `mail` (bare) — the first of the MCP-open mail reads. The declaration is
+/// the client's; the handler is conduct's, because the MCP clip is. Called by
+/// `aoide-cli`'s `commands::all()` before the client's `mail send`, so the
+/// CLI's order is the one it always had.
+pub fn register_mail_names(r: &mut Registry) {
+    aoide_client::commands::register_mail_names(r, crate::graph::mail_names);
+}
+
+/// `mail read`, `mail show`, `mail mark` — the MCP-open reads, registered after
+/// `mail send` for the same order reason as [`register_mail_names`].
+pub fn register_mail_reads(r: &mut Registry) {
+    aoide_client::commands::register_mail_reads(r, crate::graph::mail_read, crate::graph::mail_show, crate::graph::mail_mark);
+}

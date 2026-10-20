@@ -476,7 +476,7 @@ fn report_body(rec: &SessionRecord, slug: &str, mailbox: &str) -> String {
 /// entry, and the mailbase is the authority on what was actually written.
 fn file_report(rec: &SessionRecord, slug: &str, mailbox: &str) -> Result<Option<String>, String> {
     let mut registry = Registry::new();
-    aoide_client::commands::register_mail(&mut registry);
+    aoide_client::commands::register_mail_send(&mut registry);
     let path = vec!["mail".to_string(), "send".to_string()];
     let Some(command) = registry.get(&path) else {
         return Err("mail.send is not registered in this build".to_string());

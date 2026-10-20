@@ -636,9 +636,14 @@ never the inbound/serve half (that's `aoide-server`).
 - `commands` — this crate's CLI commands:
   `node add/remove/pull/status/hub/allow/spawn/discover`,
   `aoide pair` + `pair.reject`/`pair.watch` (P-P2, P-PV2, task #135 P3',
-  CONTRACTS.md §6/§7 — **`register_mail`'s eleven commands (`mail`, `mail
+  CONTRACTS.md §6/§7 — **the mail family (`mail`, `mail
   send/read/show/mark/rm/outbox/outbox.rm/outbox.retry/export/route`, P-M1/P-M2,
-  `docs/architecture/MAIL.md`) moved here from `aoide-storage` at P-M2,
+  `docs/architecture/MAIL.md`) moved here from `aoide-storage` at P-M2. The
+  four MCP-open reads (`mail`, `mail read/show/mark`) are declared here by
+  `register_mail_names`/`register_mail_reads`, which take their handlers from
+  the caller: conduct's, because the MCP clip is a conduct walk (MAIL.md
+  "Reading over MCP"). `register_mail_send` and `register_mail` carry the rest,
+  split so the CLI keeps its order. The family lives here
   because `handle_mail_send`'s non-self branch now dials out and only this
   crate may hold that dial:** `handle_mail_send` mints and spools an outbound
   letter through `aoide_storage::mail`/`outbox` exactly as before, then —

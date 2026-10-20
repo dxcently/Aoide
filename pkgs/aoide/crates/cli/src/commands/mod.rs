@@ -152,7 +152,10 @@ pub fn all() -> Registry {
     aoide_client::commands::register_pair(&mut r); // pair + pair reject/watch — the pairing ceremony's whole CLI face, one smart command (task #135 P3', superseding the node pair family — hard cutover)
     aoide_storage::commands::register_config(&mut r); // config, config set — the portable runtime config file (task #135 P-C, appended newest)
     aoide_client::mesh::register(&mut r); // mesh + mesh pair — the declared-mesh-vs-live-registry drift report and the converge that closes it (task #135 P4/P5, appended newest)
-    aoide_client::commands::register_mail(&mut r); // mail send/read/show/mark/rm/outbox/outbox.rm — the addressed, signed, append-only mailbase plus its outbox spool for a directly paired node (messaging plan P-M1/P-M2, docs/architecture/MAIL.md, appended newest)
+    aoide_conduct::commands::graph::register_mail_names(&mut r); // mail — the reader's own unread names; MCP-open, clipped to the attested subtree (MAIL.md "Reading over MCP")
+    aoide_client::commands::register_mail_send(&mut r); // mail send — the addressed, signed letter (messaging plan P-M1/P-M2, docs/architecture/MAIL.md)
+    aoide_conduct::commands::graph::register_mail_reads(&mut r); // mail read/show/mark — MCP-open, clipped to the attested subtree
+    aoide_client::commands::register_mail(&mut r); // mail box/rm/outbox/outbox.rm/export/poll/route — the mailbase and its outbox spool (MAIL.md) — the addressed, signed, append-only mailbase plus its outbox spool for a directly paired node (messaging plan P-M1/P-M2, docs/architecture/MAIL.md, appended newest)
 
     aoide_client::context::register(&mut r); // explicit shared persona/memory retrieval
     aoide_conduct::commands::graph::register_mail_ring(&mut r); // the local doorbell (MAIL.md "Delivery and the doorbell", P-M5a-2)
