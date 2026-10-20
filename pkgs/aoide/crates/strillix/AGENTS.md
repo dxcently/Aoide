@@ -26,7 +26,7 @@
   routed through the SAME `strillix_rice::theme::resolve::resolve` +
   `to_json_string` engine call `strx theme resolve` itself uses (never a
   hand-rolled shortcut for any one form):** `live` (the resolved LIVE stage
-  twin, `aoide_storage::fs::stage_dir().join("theme.json")` — read only,
+  twin, `strillix_rice::paths::stage_dir().join("theme.json")` — read only,
   never written); a bare rice name (that rice's own
   `rices/<name>/theme.json` — independent of the preview's own
   `--rice`); a path to a theme file; or a path to a base16 scheme (JSON
@@ -394,8 +394,8 @@
   because over another door it would hold the call open forever.
 
 - **The rice tree moves only when asked, and `aoideMigrateRoots` is the
-  activation that asks.** The strillix binary runs `fs::migrate_rice_root`
-  from `rice_root_at_start` only under `STRILLIX_MIGRATE=1` or through
+  activation that asks.** The strillix binary runs
+  `strillix_rice::migrate::migrate_rice_root` from `rice_root_at_start` only under `STRILLIX_MIGRATE=1` or through
   `strx migrate`; a plain run moves nothing. `aoideMigrateRoots` sets the flag
   on `strillix --help` and runs before `writeBoundary`, so the move precedes
   every seed. The nix side never writes under `$AOIDE_ROOT/song`: every seed
@@ -423,8 +423,7 @@
   READ: it answers on its own connection with both children under the one
   `RICE_MENU_TIMEOUT` budget (below the client's 5 s reply timeout), the
   `rice list` data passes through verbatim with `host` and `hostConfig` beside
-  it (`hostConfig` from `aoide_storage::fs::host_config`, the resolver the
-  CLI's declare uses, never respelled here), a child that did not answer is a
+  it (`hostConfig` from `strillix_rice::paths::host_config`, the resolver `rice declare` uses; this crate calls it rather than respelling it), a child that did not answer is a
   refusal and never an empty list, and a failed `rice list` starts no second
   child. `ricemode` takes `stage` + one argv-token `name` or a bare
   `declarative` (the CLI resolves the declared twin — never an env rice here).

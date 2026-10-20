@@ -9,7 +9,7 @@
 //! dependency-free leaves (Phase 5a). `compose` (the pure `rice compose`
 //! scaffolding/rendering engine) and `wallpaper` (wallpaper-art derivation +
 //! resolution) land in Phase 5b with a `aoide-storage` dependency
-//! (`aoide_storage::fs::strillix_dir`).
+//! (`crate::paths::strillix_root`).
 
 pub mod checkout_gate;
 pub mod commands;
@@ -17,9 +17,14 @@ pub mod compose;
 pub mod wallpaper;
 pub mod elements;
 pub mod health;
+pub mod history;
 pub mod host_declare;
 pub mod ipc;
 pub mod live;
+pub mod lock;
+pub mod migrate;
+pub mod mode;
+pub mod paths;
 pub mod theme;
 pub mod lint;
 pub mod wallpaper_provider;

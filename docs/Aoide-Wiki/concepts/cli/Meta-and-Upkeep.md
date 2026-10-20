@@ -290,7 +290,7 @@ strx quickshell healthcheck [--json]
   timestamp (`journalctl --user -u aoide-quickshell.service --since
   <timestamp>`) for Qt's placeholder-screen line; `hyprctl -j layers` for the
   live surface count. A restart-history marker at
-  `state/quickshell-healthcheck-restarts` under the state dir
+  `quickshell-healthcheck-restarts` under the strillix root (`$STRILLIX_ROOT`)
   (`pkgs/aoide/crates/strillix-rice/src/health.rs`).
 - **Writes:** the marker file (restart timestamps plus an optional
   `notified:<epoch>` sentinel), and — on a confirmed, ladder-permitted

@@ -56,7 +56,7 @@ const REACHABLE_POLL: Duration = Duration::from_millis(250);
 
 /// The staged provider: the file the lane publishes, else the shell's own layer.
 pub fn provider() -> String {
-    std::fs::read_to_string(aoide_storage::fs::stage_dir().join(PROVIDER_FILE))
+    std::fs::read_to_string(crate::paths::stage_dir().join(PROVIDER_FILE))
         .ok()
         .map(|raw| raw.trim().to_string())
         .filter(|name| !name.is_empty())
@@ -82,7 +82,7 @@ pub fn applying_pick() -> Option<(String, String)> {
 
 /// The rice the stage file names.
 fn staged_rice() -> Option<String> {
-    let raw = std::fs::read_to_string(aoide_storage::fs::stage_dir().join("theme.json")).ok()?;
+    let raw = std::fs::read_to_string(crate::paths::stage_dir().join("theme.json")).ok()?;
     let doc: Value = serde_json::from_str(&raw).ok()?;
     doc.get("rice")?.as_str().map(str::to_string)
 }
@@ -332,10 +332,10 @@ mod tests {
     #[test]
     fn the_provider_is_the_published_name_and_quickshell_when_absent() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         let root = unique_tmp("provider-name");
         let stage = stage(&root);
-        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        aoide_test_support::pin_stage(&stage);
 
         assert_eq!(provider(), PROVIDER_QUICKSHELL, "absent means the shell's own layer");
         std::fs::write(stage.join(PROVIDER_FILE), "skwd-wall\n").unwrap();
@@ -352,10 +352,10 @@ mod tests {
     #[test]
     fn a_pick_applies_for_its_own_staged_rice_and_for_the_legacy_shape() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         let root = unique_tmp("provider-applying-pick");
         let stage = stage(&root);
-        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        aoide_test_support::pin_stage(&stage);
         stage_rice(&stage, "cadenza");
 
         wallpaper::stage_pick(std::path::Path::new("/tmp/clip.mp4"), Some("cadenza"), None).unwrap();
@@ -413,10 +413,10 @@ mod tests {
     #[test]
     fn both_doors_are_inert_in_this_crates_own_test_build() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         let root = unique_tmp("provider-sync-test-build");
         let stage = stage(&root);
-        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        aoide_test_support::pin_stage(&stage);
 
         assert!(sync().starts_with("not the wallpaper provider"));
         assert!(sync_waiting().starts_with("not the wallpaper provider"));

@@ -370,10 +370,10 @@ pub fn seed_tree(elements_root: &Path, run_root: &Path, resolved: &Resolved) -> 
 /// docs/architecture/ELEMENTS.md's "Declared" flow — a rebuild's activation
 /// hook re-seeds from the STORE copy the same way).
 pub fn seed_rice(rice: &str) -> Result<SeedReport, ElementsError> {
-    let elements_root = aoide_storage::fs::rice_dir(rice).join("elements");
-    let run_root = aoide_storage::fs::run_elements_dir();
+    let elements_root = crate::paths::rice_dir(rice).join("elements");
+    let run_root = crate::paths::run_elements_dir();
 
-    let notes_path = aoide_storage::fs::rice_notes(rice);
+    let notes_path = crate::paths::rice_notes(rice);
     let raw_notes = std::fs::read_to_string(&notes_path)
         .map_err(|e| ElementsError::new(format!("cannot read {}: {e}", notes_path.display())))?;
     let notes: serde_json::Value = serde_json::from_str(&raw_notes)

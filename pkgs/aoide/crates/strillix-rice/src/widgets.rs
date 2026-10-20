@@ -193,7 +193,7 @@ pub fn plan_stage(name: &str) -> Result<StageRices, WidgetSyncErr> {
         return parse_rices_eval(&bytes, &path);
     }
 
-    let Some(templates) = aoide_storage::fs::rice_templates_dir() else {
+    let Some(templates) = crate::paths::rice_templates_dir() else {
         return Err(WidgetSyncErr {
             error: format!(
                 "no shipped rice templates dir found: $STRILLIX_TEMPLATES is unset (or not \
@@ -206,7 +206,7 @@ pub fn plan_stage(name: &str) -> Result<StageRices, WidgetSyncErr> {
 
     let builtin = read_builtin(&templates)?;
     let built_in = builtin.rices.iter().any(|rice| rice == name);
-    let machine_dir = aoide_storage::fs::rice_dir(name);
+    let machine_dir = crate::paths::rice_dir(name);
     let machine = machine_dir.is_dir();
 
     // §7.5's own precondition: `<n>` must exist in the machine's rices, in
@@ -285,7 +285,7 @@ pub fn plan_stage(name: &str) -> Result<StageRices, WidgetSyncErr> {
 /// "the rices is genuinely empty" and write out.
 fn eval_generator(name: &str, templates: &Path) -> Result<Generated, WidgetSyncErr> {
     let manifest_nix = templates.join("..").join("nix").join("manifest.nix");
-    let rices = aoide_storage::fs::rices_root();
+    let rices = crate::paths::rices_root();
     let expr = format!(
         "import {} {{ rices = {}; }}",
         nix_string(&manifest_nix.to_string_lossy()),
@@ -454,7 +454,7 @@ fn refusal_rebuild_needed(name: &str, missing: &[String]) -> String {
 /// Net effect: the SHIPPED rices's entries, with this machine's own
 /// previously-staged rices preserved and the staged rice self-healed.
 fn baseline_rices(name: &str, templates: &Path) -> Result<StageRices, WidgetSyncErr> {
-    let run_qml = aoide_storage::fs::run_qml_dir();
+    let run_qml = crate::paths::run_qml_dir();
     let manifest_path = templates.join("manifest.json");
     let registry_path = templates.join("registry.json");
     if !manifest_path.is_file() || !registry_path.is_file() {
@@ -475,7 +475,7 @@ fn baseline_rices(name: &str, templates: &Path) -> Result<StageRices, WidgetSync
     // can only express the shelf-less shape (`rice compose` never writes a
     // shelf), so a shelf rice takes the baseline and the overlay as they are:
     // patching it with a scan would DROP every borrowed slot it has.
-    let shelf_dir = aoide_storage::fs::rice_dir(name).join("_widgets");
+    let shelf_dir = crate::paths::rice_dir(name).join("_widgets");
 
     let manifest_bytes = std::fs::read(&manifest_path).map_err(|e| WidgetSyncErr {
         error: format!(
@@ -526,7 +526,7 @@ fn baseline_rices(name: &str, templates: &Path) -> Result<StageRices, WidgetSync
     // has nothing local to scan, and its baked baseline entry is the truth;
     // an empty patch here deleted sonata from osaka's manifest and blanked
     // every surface.
-    if aoide_storage::fs::rice_dir(name).is_dir() && !shelf_dir.is_dir() {
+    if crate::paths::rice_dir(name).is_dir() && !shelf_dir.is_dir() {
         let (own_manifest, own_registry) = scan_own_entry(name)?;
         let manifest_obj = manifest.as_object_mut().expect("checked is_object above");
         // Only rices with at least one slot appear in manifest.json (the same
@@ -552,7 +552,7 @@ fn baseline_rices(name: &str, templates: &Path) -> Result<StageRices, WidgetSync
 /// Layer 2 of [`baseline_rices`]'s merge: copy every entry
 /// from the EXISTING on-disk file at `existing_path` into `target` (already
 /// validated as a JSON object by the caller) — but ONLY for a rice that
-/// still has a directory under [`aoide_storage::fs::rice_dir`] in the
+/// still has a directory under [`crate::paths::rice_dir`] in the
 /// host rices. A rice whose directory was since removed is silently
 /// skipped, which is the prune: its entry has nowhere to survive from (not
 /// in the frozen baseline, not in the on-disk overlay), so it simply isn't
@@ -578,7 +578,7 @@ fn overlay_surviving_entries(target: &mut serde_json::Value, existing_path: &Pat
         .as_object_mut()
         .expect("baseline_rices already validated `target` is an object");
     for (rice, entry) in existing_obj {
-        if aoide_storage::fs::rice_dir(rice).is_dir() {
+        if crate::paths::rice_dir(rice).is_dir() {
             target_obj.insert(rice.clone(), entry.clone());
         }
     }
@@ -593,9 +593,9 @@ fn overlay_surviving_entries(target: &mut serde_json::Value, existing_path: &Pat
 /// composed rice can ever have — [`baseline_rices`] checks for
 /// a shelf and refuses before ever calling this.
 fn scan_own_entry(name: &str) -> Result<(serde_json::Value, serde_json::Value), WidgetSyncErr> {
-    let strillix_dir = aoide_storage::fs::rice_dir(name);
+    let strillix_root = crate::paths::rice_dir(name);
 
-    let widgets_dir = strillix_dir.join("widgets");
+    let widgets_dir = strillix_root.join("widgets");
     let manifest_entry = if widgets_dir.is_dir() {
         let slots = scan_slot_names(&widgets_dir)?;
         let mut m = serde_json::Map::new();
@@ -610,14 +610,14 @@ fn scan_own_entry(name: &str) -> Result<(serde_json::Value, serde_json::Value), 
         serde_json::Value::Object(serde_json::Map::new())
     };
 
-    let theme_path = strillix_dir.join("theme.json");
+    let theme_path = strillix_root.join("theme.json");
     let registry_entry = if theme_path.is_file() {
         let raw = std::fs::read_to_string(&theme_path).map_err(|e| WidgetSyncErr {
             error: e.to_string(),
             target: theme_path.to_string_lossy().into_owned(),
         })?;
         let parsed: serde_json::Value = serde_json::from_str(&raw).map_err(|e| WidgetSyncErr {
-            error: format!("{}'s theme.json is not valid JSON: {e}", strillix_dir.display()),
+            error: format!("{}'s theme.json is not valid JSON: {e}", strillix_root.display()),
             target: theme_path.to_string_lossy().into_owned(),
         })?;
         parsed
@@ -751,7 +751,7 @@ pub const MACHINE_RUNTIME_DIRS: &[&str] = &["history", "drafts"];
 /// missing shipped folder counts as differing — there is nothing to be equal
 /// to.
 fn machine_copy_differs(name: &str, templates: &Path) -> bool {
-    let machine = aoide_storage::fs::rice_dir(name);
+    let machine = crate::paths::rice_dir(name);
     if !machine.is_dir() {
         return false;
     }
@@ -846,7 +846,7 @@ fn parse_rices_eval(bytes: &[u8], target: &str) -> Result<StageRices, WidgetSync
 /// text, so an unreadable file here means something is already wrong, not
 /// something to silently skip.
 pub fn snapshot_widget_bodies(rice: &str) -> Result<serde_json::Value, WidgetSyncErr> {
-    let src = aoide_storage::fs::rice_dir(rice).join("widgets");
+    let src = crate::paths::rice_dir(rice).join("widgets");
     let mut map = serde_json::Map::new();
     if src.is_dir() {
         capture_tree(&src, &src, &mut map)?;
@@ -950,7 +950,7 @@ pub fn sync_rice_widgets(
     name: &str,
     rices: &StageRices,
 ) -> Result<WidgetSyncOk, WidgetSyncErr> {
-    let run_qml = aoide_storage::fs::run_qml_dir();
+    let run_qml = crate::paths::run_qml_dir();
     if !run_qml.is_dir() {
         return Ok(WidgetSyncOk {
             changed: vec![],
@@ -960,7 +960,7 @@ pub fn sync_rice_widgets(
         });
     }
 
-    let src = aoide_storage::fs::rice_dir(name).join("widgets");
+    let src = crate::paths::rice_dir(name).join("widgets");
     let mut changed: Vec<String> = Vec::new();
     let local_slots = if src.is_dir() {
         let dst = run_qml.join("rices").join(name);
@@ -978,7 +978,7 @@ pub fn sync_rice_widgets(
         if owner == name {
             continue;
         }
-        let lender_src = aoide_storage::fs::rice_dir(&owner).join("widgets");
+        let lender_src = crate::paths::rice_dir(&owner).join("widgets");
         if !lender_src.is_dir() {
             return Err(WidgetSyncErr {
                 error: format!(
@@ -1158,7 +1158,7 @@ pub fn sync_rice_registry(
     name: &str,
     rices: &StageRices,
 ) -> Result<RegistrySyncOk, WidgetSyncErr> {
-    let run_qml = aoide_storage::fs::run_qml_dir();
+    let run_qml = crate::paths::run_qml_dir();
     if !run_qml.is_dir() {
         return Ok(RegistrySyncOk {
             changed: vec![],
@@ -1204,11 +1204,11 @@ mod tests {
     #[test]
     fn machine_runtime_dirs_are_scratch_at_the_top_level_only() {
         let _g = env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         let root = unique_tmp("widgets-machine-copy");
-        std::env::set_var("AOIDE_STAGE_DIR", root.join("rice").join("stage"));
+        aoide_test_support::pin_stage(root.join("rice").join("stage"));
         let templates = root.join("templates");
-        let machine = aoide_storage::fs::rice_dir("dusk");
+        let machine = crate::paths::rice_dir("dusk");
         for dir in [templates.join("dusk"), machine.clone()] {
             write(&dir.join("theme.json"), "{}");
             write(&dir.join("widgets").join("history").join("Bar.qml"), "// bar\n");

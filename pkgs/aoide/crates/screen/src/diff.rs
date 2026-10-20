@@ -341,7 +341,7 @@ pub fn diff(inv: &Invocation) -> Outcome {
 
     let dest = match inv.flags.get("out") {
         Some(p) => PathBuf::from(p),
-        None => aoide_storage::fs::captures_dir().join(capture::auto_name(
+        None => crate::paths::captures_dir().join(capture::auto_name(
             capture::unix_ts(),
             std::process::id(),
             capture::next_auto_name_seq(),

@@ -18,9 +18,9 @@ fn private_home(tag: &str) -> PathBuf {
     dir
 }
 
-fn strillix(home: &Path, argv0: &str, args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_strillix"))
-        .arg0(argv0)
+fn strillix(home: &Path, argv0: &str, migrate: bool, args: &[&str]) -> Output {
+    let mut c = Command::new(env!("CARGO_BIN_EXE_strillix"));
+    c.arg0(argv0)
         .args(args)
         .env("HOME", home)
         .env_remove("AOIDE_USER")
@@ -30,16 +30,20 @@ fn strillix(home: &Path, argv0: &str, args: &[&str]) -> Output {
         .env("AOIDE_STAGE_DIR", home.join("stage"))
         .env("AOIDE_AUDIT_LOG", home.join("log"))
         .env("XDG_RUNTIME_DIR", home.join("run"))
-        .env("COLUMNS", "105")
-        .output()
-        .expect("the strillix binary runs")
+        .env("COLUMNS", "105");
+    if migrate {
+        c.env("STRILLIX_MIGRATE", "1");
+    } else {
+        c.env_remove("STRILLIX_MIGRATE");
+    }
+    c.output().expect("the strillix binary runs")
 }
 
 #[test]
 fn argv0_strx_prints_exactly_what_strillix_prints() {
     let home = private_home("argv0");
-    let as_strx = strillix(&home, "strx", &["rice", "--help"]);
-    let as_strillix = strillix(&home, "strillix", &["rice", "--help"]);
+    let as_strx = strillix(&home, "strx", false, &["rice", "--help"]);
+    let as_strillix = strillix(&home, "strillix", false, &["rice", "--help"]);
     assert_eq!(as_strx.status.code(), as_strillix.status.code());
     assert_eq!(as_strx.stdout, as_strillix.stdout, "argv[0] leaked into the help text");
     let text = String::from_utf8_lossy(&as_strx.stdout);
@@ -48,19 +52,27 @@ fn argv0_strx_prints_exactly_what_strillix_prints() {
 }
 
 #[test]
-fn a_boot_moves_the_strillix_state_link_once() {
+fn a_boot_moves_the_lyra_link_once_and_only_under_the_flag() {
     let home = private_home("boot");
     let target = home.join("declared-rice.conf");
     std::fs::write(&target, "source\n").unwrap();
     let old = home.join(".local/state/lyra");
     std::fs::create_dir_all(&old).unwrap();
     symlink(&target, old.join("rice.conf")).unwrap();
-
-    strillix(&home, "strillix", &["rice", "--help"]);
     let new = home.join(".local/state/strillix/rice.conf");
-    assert!(!old.exists(), "the old state tree survived the boot");
+
+    strillix(&home, "strillix", false, &["rice", "--help"]);
+    assert_eq!(
+        std::fs::read_link(old.join("rice.conf")).ok(),
+        Some(target.clone()),
+        "a plain boot moved the lyra link",
+    );
+    assert!(!new.exists(), "a plain boot wrote the strillix link");
+
+    strillix(&home, "strillix", true, &["rice", "--help"]);
+    assert!(!old.exists(), "the flagged boot left the old state tree");
     assert_eq!(std::fs::read_link(&new).unwrap(), target);
 
-    strillix(&home, "strillix", &["rice", "--help"]);
+    strillix(&home, "strillix", true, &["rice", "--help"]);
     assert_eq!(std::fs::read_link(&new).unwrap(), target, "the second boot moved it again");
 }

@@ -118,28 +118,19 @@ by decision — no embedded database yet
   read/write I/O every stage consumer (this crate's own `commands`, `conduct`,
   `rice`, `conductor`) goes through instead of touching JSON on disk directly.
   Every runtime tree `fs` resolves hangs off ONE root, `fs::root` —
-  `$AOIDE_ROOT` (absolute-path-wins), default `<home>/.aoide`, nix-free
-  (L-C2, strillix-carrier lane, task #107) — EXCEPT `fs::flake_root`, which
-  stays pinned to the dev git checkout (`$AOIDE_FLAKE_ROOT`, default
-  `<home>/Aoide`) since that is not a runtime tree. Beside it sits
-  `fs::STRILLIX_SHELL_SRC` — the ONE checkout-relative source path named from
-  outside this crate (the strillix shell's `qml`/`icons`/`preview` tree, and the
-  same directory `pkgs/strillix-shell` is built from, so what a checkout is read
-  from and what the package ships cannot drift apart). `fs` resolves TWO stage
-  roots off that one root, not one (command-defrag lane S1, 2026-08-27,
-  CONTRACTS.md §4): `stage_dir` — unchanged, `$STRILLIX_ROOT/stage/`,
-  rice/paint (`theme.json`/`mode.json`, strillix's tree) — and
-  `conducting_stage_dir` — new, `$AOIDE_ROOT/state/stage/`, core
-  orchestration state (`stage`'s own four path helpers, plus
-  `aoide-conduct`'s `notifications::notifications_path`/`graph::pending_path`). Both honor
-  `$AOIDE_STAGE_DIR` (absolute-path-wins) as one combined override, same as
-  before the split; `conducting_stage_dir`'s own no-override fallback is
-  `state_dir().join("stage")` instead of `stage_dir`'s `rice/stage`.
+  `$AOIDE_ROOT` (absolute-path-wins), default `<home>/.aoide`, nix-free —
+  EXCEPT `fs::flake_root`, which stays pinned to the dev git checkout
+  (`$AOIDE_FLAKE_ROOT`, default `<home>/Aoide`) since that is not a runtime
+  tree. Core keeps ONE stage root, `fs::conducting_stage_dir`
+  (`$AOIDE_ROOT/state/stage/`), which holds the core orchestration state:
+  `stage`'s own path helpers, plus `aoide-conduct`'s
+  `notifications::notifications_path` and `graph::pending_path`. The
+  `$AOIDE_STAGE_DIR` override (absolute-path-wins) names that directory and
+  nothing else; its no-override fallback is `state_dir().join("stage")`.
 
-  The rice's three files (CONTRACTS.md §4) are resolved here too:
-  `rice_conf_link` (`<home>/.local/state/strillix/rice.conf`, `<home>` = `aoide_home()`; the one path outside
-  `$AOIDE_ROOT`), `declared_rice_conf` (`root()`'s `/declared/rice.conf`)
-  and `empty_rice_conf` (`stage_dir()`'s `empty-hyprland.conf`).
+  The rice runtime is not core's. The rice stage (`$STRILLIX_ROOT/stage/`),
+  the declared twin, the rice link, the rice tree and the checkout-relative
+  shell source path (`STRILLIX_SHELL_SRC`) live in `strillix-rice`'s `paths`.
   `atomic_symlink` is the retarget: a temp link renamed over the link.
 
   **The host split inside `fs`.** Two places, and both are seams rather than
@@ -173,31 +164,21 @@ by decision — no embedded database yet
   CONTRACTS.md §4.
   `conducting_stage_dir`'s first no-override resolution in a process also
   drives `fs::migrate_conducting_stage`: a one-shot, idempotent move of the
-  six core files off their pre-split `/stage/` location, never
-  clobbering a fresher `state/stage/` file and never touching a rice file.
+  six core files off their legacy location, `$STRILLIX_ROOT/stage/`, into
+  `state/stage/`. It never clobbers a fresher `state/stage/` file and never
+  touches a rice file.
   `fs::migrate_root_once` is the one-shot migration for the root layout
-  itself (an old host's `~/Aoide/{state,log}` into the current root) —
-  deliberately NOT wired into `fs::root`'s own
-  resolution the way `migrate_conducting_stage` is wired into
-  `conducting_stage_dir`'s: `root`/`stage_dir`/`state_dir` are reached by
-  `with_stage_lock`, the shared lock primitive nearly every stage-file
-  writer across the whole workspace routes through regardless of which file
-  it is actually touching, so hanging a migration off that path made an
-  ordinary `state_dir()`-only test capable of silently migrating the
-  operator's real `$HOME` (a live incident during this lane's own
-  development). `migrate_root_once` is `pub` and idempotent instead — the
-  three real binaries (`aoide`, `aoided`, `strillix`) call it once, explicitly,
-  at the top of their own `main()`; see `fs::root`'s own doc for the full
-  reasoning. It moves `state/` and `log` only. The rice tree
-  (`$AOIDE_ROOT/song/`) moves into `$STRILLIX_ROOT` through
-  `fs::migrate_rice_root`, which only the strillix binary calls, and only
-  under `STRILLIX_MIGRATE=1` (`fs::rice_root_at_start`) or `strx migrate`
-  (`fs::rice_status` reads its state without moving): `songbook-aside` becomes `rices-aside`, and a move
-  that empties `song/` leaves a regular FILE named `song` in its place,
-  which says where the state went. That file is the "already migrated"
-  marker, and an old binary that opens `song/stage` fails on it (ENOTDIR)
-  instead of recreating a second live tree. Rice state in both roots is
-  refused, with nothing moved. `fs::repo_root` is GONE (its one caller, `aoide-upkeep`'s
+  itself: an old host's `~/Aoide/{state,log}` moves into the current root, and
+  the peer-era state names are renamed. It is deliberately NOT wired into
+  `fs::root`'s own resolution, because the stage locks reach `root` and
+  `state_dir`, and a migration hung off them would run from any test that
+  takes a lock. The three binaries (`aoide`, `aoided`, `strillix`) call it
+  once, explicitly, at the top of their `main()`. The rice tree
+  (`~/Aoide/song`, `$AOIDE_ROOT/song`) is not core's: `strillix-rice`'s
+  `migrate` moves it on explicit request only, with the
+  `~/.local/state/lyra` link tree in the same request. Rice state held in
+  both roots, or across homes, is refused there (see
+  `strillix-rice/AGENTS.md`), with nothing moved. `fs::repo_root` is GONE (its one caller, `aoide-upkeep`'s
   `soundcheck`, now reads `fs::flake_root` directly — a runtime root is not
   a repo, so deriving a checkout path from stage-dir parentage stopped
   making sense the moment the two could diverge). `fs::rice_templates_dir`

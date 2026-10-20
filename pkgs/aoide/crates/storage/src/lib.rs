@@ -1,9 +1,10 @@
 //! aoide-storage — Aoide's durable session data (Phase 3a restructure,
 //! docs/architecture/PACKAGE-LAYOUT.md): the stage-file record shapes
 //! (`records`), atomic stage I/O (`fs`, `stage`), time formatting (`time`),
-//! the pure session/hook upsert ops (`session`), the staging/declarative
-//! mode marker (`mode`), and the node-federation registry + pull cache
-//! (`node_store`, CONTRACTS.md §7).
+//! the pure session/hook upsert ops (`session`), and the node-federation
+//! registry + pull cache (`node_store`, CONTRACTS.md §7). The rice stage and
+//! the rice tree belong to `strillix-rice` (its `paths`, `mode`, `history`,
+//! `migrate`); this crate never names them.
 //!
 //! Extracted from root `src/` (`shellbridge.rs`, `graph/model.rs`,
 //! `graph/session_store.rs`, `conductor/theme.rs`, `a2a.rs`) following the
@@ -148,7 +149,6 @@ pub mod ledger;
 pub mod letter;
 pub mod mail;
 pub mod manifest;
-pub mod mode;
 pub mod outbox;
 pub mod pairing;
 pub mod node_store;
@@ -162,7 +162,6 @@ pub mod seal;
 pub mod sealed_id;
 pub mod session;
 pub mod stage;
-pub mod history;
 pub mod time;
 pub mod tunnel;
 pub mod undying;

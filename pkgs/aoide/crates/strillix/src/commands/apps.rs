@@ -102,7 +102,7 @@ fn handle_show(inv: &Invocation) -> Outcome {
 fn handle_publish(inv: &Invocation) -> Outcome {
     let cmd = "apps.publish";
     let env = Env::from_process();
-    let path = aoide_storage::fs::stage_dir().join(FILE);
+    let path = strillix_rice::paths::stage_dir().join(FILE);
     if inv.flag_present("run") {
         run(&env, &path);
     }

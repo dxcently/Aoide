@@ -21,7 +21,8 @@
 //! elsewhere (that unawareness, plus `atomic_write`'s symlink transparency,
 //! is the entire mechanism).
 
-use crate::fs::{atomic_write, stage_dir};
+use aoide_storage::fs::atomic_write;
+use crate::paths::stage_dir;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -116,11 +117,11 @@ mod tests {
 
     #[test]
     fn a_saved_marker_is_stamped_with_its_format_version() {
-        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let saved = std::env::var("AOIDE_STAGE_DIR").ok();
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _pin = aoide_test_support::EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         let dir = std::env::temp_dir().join(format!("aoide-mode-stamp-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
-        std::env::set_var("AOIDE_STAGE_DIR", &dir);
+        aoide_test_support::pin_stage(dir.join("stage"));
         let marker = ModeMarker { mode: RiceMode::Staging, rice: Some("sonata".into()), ..Default::default() };
         save_mode_marker(&marker).unwrap();
         let raw = std::fs::read_to_string(mode_marker_path()).unwrap();
@@ -128,39 +129,31 @@ mod tests {
         assert_eq!(v["schemaVersion"], MODE_SCHEMA_VERSION);
         assert_eq!(v["rice"], "sonata");
         assert_eq!(load_mode_marker(), marker, "the stamp does not change what loads");
-        match saved {
-            Some(v) => std::env::set_var("AOIDE_STAGE_DIR", v),
-            None => std::env::remove_var("AOIDE_STAGE_DIR"),
-        }
         let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
     fn missing_marker_file_loads_as_the_declarative_default() {
-        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let saved = std::env::var("AOIDE_STAGE_DIR").ok();
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _pin = aoide_test_support::EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         let dir = std::env::temp_dir().join(format!("aoide-mode-missing-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
-        std::env::set_var("AOIDE_STAGE_DIR", &dir);
+        aoide_test_support::pin_stage(dir.join("stage"));
 
         let m = load_mode_marker();
         assert_eq!(m, ModeMarker::default());
         assert!(!mode_marker_path().exists());
 
         let _ = std::fs::remove_dir_all(&dir);
-        match saved {
-            Some(v) => std::env::set_var("AOIDE_STAGE_DIR", v),
-            None => std::env::remove_var("AOIDE_STAGE_DIR"),
-        }
     }
 
     #[test]
     fn save_load_round_trips_through_a_temp_stage_dir() {
-        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let saved = std::env::var("AOIDE_STAGE_DIR").ok();
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _pin = aoide_test_support::EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         let dir = std::env::temp_dir().join(format!("aoide-mode-rt-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
-        std::env::set_var("AOIDE_STAGE_DIR", &dir);
+        aoide_test_support::pin_stage(dir.join("stage"));
 
         let marker = ModeMarker {
             mode: RiceMode::Staging,
@@ -181,19 +174,15 @@ mod tests {
         assert!(v.get("stagingRice").is_none(), "stagingRice omitted when None");
 
         let _ = std::fs::remove_dir_all(&dir);
-        match saved {
-            Some(v) => std::env::set_var("AOIDE_STAGE_DIR", v),
-            None => std::env::remove_var("AOIDE_STAGE_DIR"),
-        }
     }
 
     #[test]
     fn draft_mode_round_trips_with_a_draft_name_and_serializes_lowercase() {
-        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let saved = std::env::var("AOIDE_STAGE_DIR").ok();
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _pin = aoide_test_support::EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         let dir = std::env::temp_dir().join(format!("aoide-mode-draft-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
-        std::env::set_var("AOIDE_STAGE_DIR", &dir);
+        aoide_test_support::pin_stage(dir.join("stage"));
 
         let marker = ModeMarker {
             mode: RiceMode::Draft,
@@ -213,29 +202,21 @@ mod tests {
         assert_eq!(v["stagingRice"], "sonata");
 
         let _ = std::fs::remove_dir_all(&dir);
-        match saved {
-            Some(v) => std::env::set_var("AOIDE_STAGE_DIR", v),
-            None => std::env::remove_var("AOIDE_STAGE_DIR"),
-        }
     }
 
     #[test]
     fn corrupt_marker_file_loads_as_the_declarative_default() {
-        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let saved = std::env::var("AOIDE_STAGE_DIR").ok();
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _pin = aoide_test_support::EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         let dir = std::env::temp_dir().join(format!("aoide-mode-corrupt-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        std::env::set_var("AOIDE_STAGE_DIR", &dir);
+        std::fs::create_dir_all(dir.join("stage")).unwrap();
+        aoide_test_support::pin_stage(dir.join("stage"));
 
         std::fs::write(mode_marker_path(), "not json").unwrap();
         let m = load_mode_marker();
         assert_eq!(m, ModeMarker::default());
 
         let _ = std::fs::remove_dir_all(&dir);
-        match saved {
-            Some(v) => std::env::set_var("AOIDE_STAGE_DIR", v),
-            None => std::env::remove_var("AOIDE_STAGE_DIR"),
-        }
     }
 }

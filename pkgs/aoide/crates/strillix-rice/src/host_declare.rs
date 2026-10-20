@@ -2,7 +2,7 @@
 //! performs on its next rebuild, by rewriting the host config's
 //! `habit.rice.declared = "<name>";` line (CONTRACTS.md §3, the rice commands).
 //!
-//! The host file is [`aoide_storage::fs::host_config`] (`aoide.hostConfig`).
+//! The host file is [`crate::paths::host_config`] (`aoide.hostConfig`).
 //! The line must occur EXACTLY once, in the shape nixfmt writes it: leading
 //! indentation, blanks around `=` and before `;`, nothing after the `;`. Zero
 //! or several such lines is a refusal naming the file and the count; the
@@ -36,7 +36,7 @@ use crate::commands::refresh::staged_differs;
 use crate::widgets::read_builtin;
 use aoide_protocol::output::{io_cause, Fix, Kind, Outcome, Status};
 use aoide_storage::fs as shellbridge;
-use aoide_storage::mode::{load_mode_marker, RiceMode};
+use crate::mode::{load_mode_marker, RiceMode};
 use serde_json::{json, Value};
 use std::ops::Range;
 use std::path::{Path, PathBuf};
@@ -49,7 +49,7 @@ const KEY: &str = "habit.rice.declared";
 /// declared (this path never refuses for git), with a warning field: the
 /// rebuild builds the committed rices, so those edits are not in it.
 pub fn declare_on_host(name: &str) -> Outcome {
-    let out = declare(name, shellbridge::host_config(), shellbridge::rice_templates_dir());
+    let out = declare(name, crate::paths::host_config(), crate::paths::rice_templates_dir());
     if out.status != Status::Ok {
         return out;
     }
@@ -421,7 +421,7 @@ mod tests {
     fn rig(tag: &str, host_text: &str, built_in: &[&str]) -> Rig {
         let env = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         let root = unique_tmp(tag);
-        std::env::set_var("AOIDE_STAGE_DIR", root.join("rice").join("stage"));
+        aoide_test_support::pin_stage(root.join("rice").join("stage"));
         std::fs::create_dir_all(root.join("rice").join("stage")).unwrap();
         let host = root.join("hosts").join("box").join("default.nix");
         std::fs::create_dir_all(host.parent().unwrap()).unwrap();
@@ -544,7 +544,7 @@ mod tests {
         let _g = env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let r = rig("hd-draft", HOST, &["sonata", "barcarolle"]);
         std::fs::write(
-            aoide_storage::mode::mode_marker_path(),
+            crate::mode::mode_marker_path(),
             r#"{"mode":"draft","rice":"barcarolle","draft":"draft-2"}"#,
         )
         .unwrap();
@@ -638,7 +638,7 @@ mod tests {
     fn staged_edits_are_reported() {
         let _g = env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let r = rig("hd-differs", HOST, &["sonata", "barcarolle"]);
-        let machine = shellbridge::rice_dir("barcarolle");
+        let machine = crate::paths::rice_dir("barcarolle");
         shellbridge::copy_dir_recursive(&r.templates.join("barcarolle"), &machine).unwrap();
         std::fs::create_dir_all(machine.join("history")).unwrap();
         std::fs::write(machine.join("history").join("head.json"), "{}").unwrap();

@@ -8,7 +8,7 @@ use crate::dispatch::Invocation;
 use crate::output::Outcome;
 use crate::registry::{cmd, flag, Registry};
 use aoide_protocol::Door;
-use aoide_storage::fs::{migrate_rice_root, rice_status, RiceStatus};
+use strillix_rice::migrate::{migrate_rice_root, rice_status, RiceStatus};
 use serde_json::{json, Value};
 
 pub fn register(r: &mut Registry) {

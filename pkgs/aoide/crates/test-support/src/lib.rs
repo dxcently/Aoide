@@ -405,6 +405,61 @@ pub fn isolated_mail_root(tag: &str) -> (EnvSaver, PathBuf) {
     (env, root)
 }
 
+/// Point both runtime roots at `root` for the returned guard's lifetime:
+/// `AOIDE_ROOT` (core state, the conducting stage, `run/`) and `STRILLIX_ROOT`
+/// (the rice stage, `declared/`, `rices/`). Clears `AOIDE_STATE_DIR` and
+/// `AOIDE_STAGE_DIR` so no override can point outside `root`. Restored on
+/// drop. The caller holds [`env_lock`] and removes `root`, as with
+/// [`isolated_mail_root`].
+pub fn pin_roots(root: &std::path::Path) -> EnvSaver {
+    let env = EnvSaver::capture(&["AOIDE_ROOT", "STRILLIX_ROOT", "AOIDE_STATE_DIR", "AOIDE_STAGE_DIR"]);
+    std::env::set_var("AOIDE_ROOT", root);
+    std::env::set_var("STRILLIX_ROOT", root);
+    std::env::remove_var("AOIDE_STATE_DIR");
+    std::env::remove_var("AOIDE_STAGE_DIR");
+    env
+}
+
+/// Pins the rice stage to `stage`, a directory named `stage` inside a runtime
+/// root: `AOIDE_ROOT` and `STRILLIX_ROOT` both become its parent, so
+/// `stage_dir()` resolves to `stage` and every other rice path sits beside it.
+/// Clears the conducting stage override, so the conducting stage resolves under
+/// the same root. Sets no guard: a caller restores through an [`EnvSaver`] that
+/// captures `AOIDE_STAGE_DIR`, `AOIDE_ROOT` and `STRILLIX_ROOT`.
+pub fn pin_stage(stage: impl AsRef<std::path::Path>) {
+    let stage = stage.as_ref();
+    assert_eq!(stage.file_name(), Some(std::ffi::OsStr::new("stage")), "pin_stage needs a directory named `stage`: {}", stage.display());
+    let root = stage.parent().unwrap_or(stage);
+    std::env::set_var("AOIDE_ROOT", root);
+    std::env::set_var("STRILLIX_ROOT", root);
+    std::env::remove_var("AOIDE_STAGE_DIR");
+}
+
+/// Saves every variable a root migration reads and clears the ones that
+/// would redirect it, so a migration test sees only the roots it pins. `HOME`
+/// is saved but left alone: tests repoint it themselves. Restored on drop.
+pub struct MigrationEnvGuard {
+    _saved: EnvSaver,
+}
+impl MigrationEnvGuard {
+    pub fn capture_and_clear() -> Self {
+        let env = EnvSaver::capture(&[
+            "HOME",
+            "AOIDE_USER",
+            "AOIDE_STAGE_DIR",
+            "AOIDE_STATE_DIR",
+            "AOIDE_ROOT",
+            "STRILLIX_ROOT",
+            "AOIDE_AUDIT_LOG",
+            "STRILLIX_MIGRATE",
+        ]);
+        for key in ["AOIDE_USER", "AOIDE_STAGE_DIR", "AOIDE_STATE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT", "AOIDE_AUDIT_LOG", "STRILLIX_MIGRATE"] {
+            std::env::remove_var(key);
+        }
+        MigrationEnvGuard { _saved: env }
+    }
+}
+
 pub const VALID_NOTES: &str = r##"{ "schemaVersion":"0",
     "palette": {"bg":"#0b1021","fg":"#c8d3f5","accent":"#82aaff","urgent":"#ff757f"} }"##;
 

@@ -124,8 +124,8 @@ pub const DESKTOP_WALLPAPER_STEM: &str = "desktop";
 /// other consumer) draws from. A bare `wallpaper.<ext>` would be ambiguous in the
 /// shared dir, so both names carry the rice's name.
 pub fn derive_wallpaper(name: &str) -> Option<PathBuf> {
-    let own = aoide_storage::fs::rice_dir(name).join("wallpaper");
-    let wallpapers = aoide_storage::fs::strillix_dir().join("wallpapers");
+    let own = crate::paths::rice_dir(name).join("wallpaper");
+    let wallpapers = crate::paths::strillix_root().join("wallpapers");
     WALLPAPER_EXTS
         .iter()
         .map(|ext| own.join(format!("{name}-{DESKTOP_WALLPAPER_STEM}.{ext}")))
@@ -141,10 +141,10 @@ pub fn derive_wallpaper(name: &str) -> Option<PathBuf> {
 /// folder, the first of [`WALLPAPER_EXTS`] that exists. The name is the render
 /// surface's (`aoide.surfaces.lockscreen`), so a rice declares nothing: the
 /// file is the whole opinion, and deleting it takes the opinion away.
-pub fn lockscreen_image(strillix_dir: &Path) -> Option<PathBuf> {
+pub fn lockscreen_image(strillix_root: &Path) -> Option<PathBuf> {
     WALLPAPER_EXTS
         .iter()
-        .map(|ext| strillix_dir.join(format!("lockscreen.{ext}")))
+        .map(|ext| strillix_root.join(format!("lockscreen.{ext}")))
         .find(|p| p.is_file())
 }
 
@@ -159,7 +159,7 @@ pub fn resolve_wallpaper_arg(arg: &str) -> PathBuf {
     if literal.is_absolute() {
         literal
     } else {
-        aoide_storage::fs::strillix_dir().join("wallpapers").join(arg)
+        crate::paths::strillix_root().join("wallpapers").join(arg)
     }
 }
 
@@ -167,7 +167,7 @@ pub fn resolve_wallpaper_arg(arg: &str) -> PathBuf {
 
 /// `<stage>/wallpaper.json`.
 pub fn staged_wallpaper_json() -> PathBuf {
-    aoide_storage::fs::stage_dir().join("wallpaper.json")
+    crate::paths::stage_dir().join("wallpaper.json")
 }
 
 fn read_staged() -> Option<serde_json::Value> {
@@ -385,8 +385,8 @@ mod tests {
         // could race a rice.rs/mode.rs test holding the OTHER lock and clobber
         // its env mid-flight.
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
-        std::env::set_var("AOIDE_STAGE_DIR", "/tmp/aoide-wallpaper-test/stage");
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
+        aoide_test_support::pin_stage("/tmp/aoide-wallpaper-test/stage");
 
         let resolved = resolve_wallpaper_arg("sonata.webp");
         assert_eq!(
@@ -398,7 +398,7 @@ mod tests {
     #[test]
     fn derive_wallpaper_finds_the_first_matching_extension_or_none() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         let root =
             std::env::temp_dir().join(format!("strillix-rice-derive-wallpaper-{}", std::process::id()));
         let stage = root.join("stage");
@@ -406,7 +406,7 @@ mod tests {
         std::fs::create_dir_all(&stage).unwrap();
         std::fs::create_dir_all(&wallpapers).unwrap();
         std::fs::write(wallpapers.join("dusk.png"), b"\x89PNG stub").unwrap();
-        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        aoide_test_support::pin_stage(&stage);
 
         assert_eq!(derive_wallpaper("dusk"), Some(wallpapers.join("dusk.png")));
         assert_eq!(derive_wallpaper("nope"), None);
@@ -417,7 +417,7 @@ mod tests {
     #[test]
     fn derive_wallpaper_prefers_the_rices_own_desktop_picture_over_the_shared_library() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         let root = std::env::temp_dir().join(format!("strillix-rice-own-wallpaper-{}", std::process::id()));
         let stage = root.join("stage");
         let own = root.join("rices").join("barcarolle").join("wallpaper");
@@ -428,7 +428,7 @@ mod tests {
         std::fs::write(wallpapers.join("barcarolle.png"), b"\x89PNG shared").unwrap();
         // The logon picture is the greeter's, never the desktop default.
         std::fs::write(own.join("barcarolle-logon.jpg"), b"logon").unwrap();
-        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        aoide_test_support::pin_stage(&stage);
 
         // Only the logon picture in the rice's wallpaper/: the shared library wins.
         assert_eq!(derive_wallpaper("barcarolle"), Some(wallpapers.join("barcarolle.png")));
@@ -469,11 +469,11 @@ mod tests {
     #[test]
     fn every_staged_wallpaper_write_is_stamped_with_its_version() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         let root = unique_tmp("wallpaper-stamp");
         let stage = root.join("stage");
         std::fs::create_dir_all(&stage).unwrap();
-        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        aoide_test_support::pin_stage(&stage);
 
         stage_pick(Path::new("/tmp/user-choice.png"), Some("dusk"), None).unwrap();
         let v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(staged_wallpaper_json()).unwrap()).unwrap();
@@ -491,11 +491,11 @@ mod tests {
     #[test]
     fn a_pick_is_marked_and_a_default_is_not() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         let root = unique_tmp("wallpaper-pick-field");
         let stage = root.join("stage");
         std::fs::create_dir_all(&stage).unwrap();
-        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        aoide_test_support::pin_stage(&stage);
 
         stage_pick(Path::new("/tmp/user-choice.png"), Some("dusk"), None).unwrap();
         assert!(staged_is_pick());
@@ -528,11 +528,11 @@ mod tests {
     #[test]
     fn a_legacy_wallpaper_json_without_the_rice_field_is_never_kept() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         let root = unique_tmp("wallpaper-v0-field");
         let stage = root.join("stage");
         std::fs::create_dir_all(&stage).unwrap();
-        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        aoide_test_support::pin_stage(&stage);
 
         std::fs::write(staged_wallpaper_json(), "{\"path\":\"/tmp/old.png\"}\n").unwrap();
         assert!(!staged_is_pick());
@@ -565,14 +565,14 @@ mod tests {
     #[test]
     fn restaging_the_same_rice_keeps_a_pick_and_a_rice_switch_drops_it() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         let root = unique_tmp("wallpaper-rice-switch");
         let stage = root.join("stage");
         let wallpapers = root.join("wallpapers");
         std::fs::create_dir_all(&stage).unwrap();
         std::fs::create_dir_all(&wallpapers).unwrap();
         std::fs::write(wallpapers.join("dusk.png"), b"\x89PNG stub").unwrap();
-        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        aoide_test_support::pin_stage(&stage);
 
         stage_pick(Path::new("/tmp/user-choice.png"), Some("cadenza"), None).unwrap();
         assert!(matches!(stage_for_rice("cadenza").unwrap(), WallpaperStage::PickKept));
@@ -640,11 +640,11 @@ mod tests {
     #[test]
     fn a_scene_pick_is_marked_with_an_id_and_no_path() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         let root = unique_tmp("wallpaper-scene");
         let stage = root.join("stage");
         std::fs::create_dir_all(&stage).unwrap();
-        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        aoide_test_support::pin_stage(&stage);
 
         stage_scene("123", Some("cadenza")).unwrap();
         assert!(staged_is_pick(), "a scene with an id is a pick");
@@ -718,11 +718,11 @@ mod tests {
     #[test]
     fn a_pick_carries_position_only_when_forced_and_tile_only_when_it_tiles() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         let root = unique_tmp("wallpaper-position");
         let stage = root.join("stage");
         std::fs::create_dir_all(&stage).unwrap();
-        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        aoide_test_support::pin_stage(&stage);
         let staged = || -> serde_json::Value {
             serde_json::from_str(&std::fs::read_to_string(staged_wallpaper_json()).unwrap()).unwrap()
         };
@@ -754,11 +754,11 @@ mod tests {
     #[test]
     fn a_provider_pick_is_stamped_like_any_other() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         let root = unique_tmp("wallpaper-engine-pick");
         let stage = root.join("stage");
         std::fs::create_dir_all(&stage).unwrap();
-        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        aoide_test_support::pin_stage(&stage);
 
         stage_provider_pick(KIND_VIDEO, "/tmp/clip.mp4", Some("cadenza")).unwrap();
         assert!(staged_is_pick());

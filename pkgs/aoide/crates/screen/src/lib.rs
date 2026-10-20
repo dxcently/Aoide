@@ -76,6 +76,7 @@ pub mod commands;
 pub mod diff;
 pub mod hypr;
 pub mod ocr;
+pub mod paths;
 pub mod point;
 pub mod send;
 /// The pointer-synthesis boundary's HOW half (Phase A, pointer-emulation

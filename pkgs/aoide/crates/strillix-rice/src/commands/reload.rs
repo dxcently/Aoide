@@ -62,7 +62,7 @@
 use aoide_protocol::Invocation;
 use aoide_protocol::output::{Fix, Kind, Outcome, Status};
 use aoide_protocol::registry::{cmd, Registry};
-use aoide_storage::mode::{self, RiceMode};
+use crate::mode::{self, RiceMode};
 use serde_json::{json, Value};
 use aoide_protocol::Door;
 
@@ -103,7 +103,7 @@ fn shell_reload_only() -> Outcome {
 /// The staging/draft arm: sync → snapshot (deduped) → shell reload — see
 /// the module doc for why sync runs FIRST. Resolves "the current rice" off
 /// the mode marker's own `rice` field — populated in both `Staging` and
-/// `Draft` (`aoide_storage::mode::ModeMarker`'s own doc) — never re-guesses
+/// `Draft` (`crate::mode::ModeMarker`'s own doc) — never re-guesses
 /// it a second way.
 fn reload_staging_or_draft(inv: &Invocation, marker: mode::ModeMarker) -> Outcome {
     let Some(rice) = marker.rice.clone() else {
@@ -151,7 +151,7 @@ fn reload_staging_or_draft(inv: &Invocation, marker: mode::ModeMarker) -> Outcom
     }
     let mut changed = synced.changed.clone();
     if rerouted {
-        changed.push(aoide_storage::fs::stage_dir().join("theme.json").to_string_lossy().into_owned());
+        changed.push(crate::paths::stage_dir().join("theme.json").to_string_lossy().into_owned());
         changed.push(mode::mode_marker_path().to_string_lossy().into_owned());
     }
 
@@ -162,12 +162,12 @@ fn reload_staging_or_draft(inv: &Invocation, marker: mode::ModeMarker) -> Outcom
     let entry_data = match super::history::snapshot_if_identical_to_head("reload", "reload") {
         Ok(Some(record)) => {
             changed.push(
-                aoide_storage::history::history_path(&rice, draft, record.entry)
+                crate::history::history_path(&rice, draft, record.entry)
                     .to_string_lossy()
                     .into_owned(),
             );
             changed.push(
-                aoide_storage::history::head_path(&rice, draft)
+                crate::history::head_path(&rice, draft)
                     .to_string_lossy()
                     .into_owned(),
             );
@@ -215,7 +215,7 @@ fn reload_staging_or_draft(inv: &Invocation, marker: mode::ModeMarker) -> Outcom
 /// before anything is written, dangling link or not: re-routing to it would
 /// leave a link to nothing.
 fn route_to_marked_draft(rice: &str, draft: &str) -> Result<bool, Outcome> {
-    let want = aoide_storage::fs::draft_dir(rice, draft).join("theme.json");
+    let want = crate::paths::draft_dir(rice, draft).join("theme.json");
     if !want.is_file() {
         return Err(Outcome::refuse(
             "reload",
@@ -225,7 +225,7 @@ fn route_to_marked_draft(rice: &str, draft: &str) -> Result<bool, Outcome> {
             Fix::Run("strillix rice mode stage".to_string()),
         ));
     }
-    let link = aoide_storage::fs::stage_dir().join("theme.json");
+    let link = crate::paths::stage_dir().join("theme.json");
     if std::fs::read_link(&link).is_ok_and(|to| to == want) {
         return Ok(false);
     }
@@ -245,7 +245,7 @@ fn route_to_marked_draft(rice: &str, draft: &str) -> Result<bool, Outcome> {
 /// Staging-only: see this module's own doc for why reusing it here would
 /// clobber the draft.
 fn sync_draft_in_place(rice: &str) -> Outcome {
-    let stage = aoide_storage::fs::stage_dir();
+    let stage = crate::paths::stage_dir();
     let theme_path = stage.join("theme.json");
     let raw = match std::fs::read_to_string(&theme_path) {
         Ok(s) => s,
@@ -301,7 +301,7 @@ fn sync_draft_in_place(rice: &str) -> Outcome {
 
     // The lock screen is written after the gate, unlike the terminal call
     // above, which predates it.
-    let lock_image = crate::wallpaper::lockscreen_image(&aoide_storage::fs::rice_dir(rice));
+    let lock_image = crate::wallpaper::lockscreen_image(&crate::paths::rice_dir(rice));
     let (lock_changed, lock_data) = super::rice::stage_lockscreen(
         crate::live::lockscreen_fragment(&parsed, lock_image.as_deref()),
         lock_image.as_deref(),
@@ -328,8 +328,7 @@ fn sync_draft_in_place(rice: &str) -> Outcome {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aoide_storage::fs as shellbridge;
-    use aoide_storage::mode::{save_mode_marker, ModeMarker};
+    use crate::mode::{save_mode_marker, ModeMarker};
     use aoide_test_support::*;
     use std::os::unix::fs::MetadataExt;
     use std::path::{Path, PathBuf};
@@ -355,7 +354,7 @@ mod tests {
     /// link, with the marker saved as `rice mode draft` would. Returns the
     /// draft's `theme.json`.
     fn route_a_draft(stage: &Path) -> PathBuf {
-        let draft_theme = shellbridge::draft_dir("sonata", "neon-night").join("theme.json");
+        let draft_theme = crate::paths::draft_dir("sonata", "neon-night").join("theme.json");
         std::fs::create_dir_all(draft_theme.parent().unwrap()).unwrap();
         std::fs::write(&draft_theme, ROUTED_NOTES).unwrap();
         std::os::unix::fs::symlink(&draft_theme, stage.join("theme.json")).unwrap();
@@ -390,12 +389,12 @@ mod tests {
     #[test]
     fn declarative_mode_is_shell_reload_only_and_always_ok() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         let root = unique_tmp("reload-declarative");
         let stage = root.join("stage");
         std::fs::create_dir_all(&stage).unwrap();
         crate::commands::test_support::ensure_default_rices_fixture();
-        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        aoide_test_support::pin_stage(&stage);
 
         let out = handle_reload(&reload_inv());
         assert_eq!(out.status, Status::Ok);
@@ -414,12 +413,12 @@ mod tests {
     #[test]
     fn declarative_mode_never_mints_a_take() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         let root = unique_tmp("reload-declarative-no-take");
         let stage = root.join("stage");
         std::fs::create_dir_all(&stage).unwrap();
         crate::commands::test_support::ensure_default_rices_fixture();
-        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        aoide_test_support::pin_stage(&stage);
         save_mode_marker(&ModeMarker {
             mode: RiceMode::Declarative,
             rice: Some("sonata".to_string()),
@@ -429,7 +428,7 @@ mod tests {
 
         handle_reload(&reload_inv());
         assert!(
-            !aoide_storage::history::history_dir("sonata", None).is_dir(),
+            !crate::history::history_dir("sonata", None).is_dir(),
             "declarative reload must never create a history/ directory"
         );
         let _ = std::fs::remove_dir_all(&root);
@@ -442,15 +441,15 @@ mod tests {
     #[test]
     fn staging_mode_reload_takes_off_the_rice_and_succeeds() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT", "AOIDE_SESSION_ID"]);
         std::env::remove_var("AOIDE_SESSION_ID");
         let root = unique_tmp("reload-staging-routing");
         let stage = root.join("stage");
         std::fs::create_dir_all(&stage).unwrap();
         crate::commands::test_support::ensure_default_rices_fixture();
-        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        aoide_test_support::pin_stage(&stage);
 
-        let rices = shellbridge::rice_dir("sonata");
+        let rices = crate::paths::rice_dir("sonata");
         std::fs::create_dir_all(&rices).unwrap();
         std::fs::write(rices.join("theme.json"), VALID_NOTES).unwrap();
         std::fs::write(stage.join("theme.json"), VALID_NOTES).unwrap();
@@ -468,11 +467,11 @@ mod tests {
         assert_eq!(out.data.as_ref().unwrap()["entry"]["deduped"], false);
         assert_eq!(out.data.as_ref().unwrap()["entry"]["entry"], 1);
 
-        let record = aoide_storage::history::load_history("sonata", None, 1)
+        let record = crate::history::load_history("sonata", None, 1)
             .expect("take 1 lives under rices/sonata/history/, not a draft");
         assert_eq!(record.cause, "reload");
         assert!(
-            !shellbridge::rice_drafts_dir("sonata").join("history").is_dir(),
+            !crate::paths::rice_drafts_dir("sonata").join("history").is_dir(),
             "a staging-mode take must never be nested under drafts/"
         );
         let _ = std::fs::remove_dir_all(&root);
@@ -485,15 +484,15 @@ mod tests {
     #[test]
     fn staging_mode_reload_dedupes_against_an_unchanged_head() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT", "AOIDE_SESSION_ID"]);
         std::env::remove_var("AOIDE_SESSION_ID");
         let root = unique_tmp("reload-staging-dedupe");
         let stage = root.join("stage");
         std::fs::create_dir_all(&stage).unwrap();
         crate::commands::test_support::ensure_default_rices_fixture();
-        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        aoide_test_support::pin_stage(&stage);
 
-        let rices = shellbridge::rice_dir("sonata");
+        let rices = crate::paths::rice_dir("sonata");
         std::fs::create_dir_all(&rices).unwrap();
         std::fs::write(rices.join("theme.json"), VALID_NOTES).unwrap();
         std::fs::write(stage.join("theme.json"), VALID_NOTES).unwrap();
@@ -514,7 +513,7 @@ mod tests {
         assert_eq!(second.status, Status::Ok, "{:?}", second.data);
         assert_eq!(second.data.as_ref().unwrap()["entry"]["deduped"], true, "{:?}", second.data);
         assert_eq!(
-            aoide_storage::history::list_history("sonata", None).len(),
+            crate::history::list_history("sonata", None).len(),
             1,
             "an unchanged second reload must not mint a second take"
         );
@@ -532,7 +531,7 @@ mod tests {
         let third = handle_reload(&reload_inv());
         assert_eq!(third.status, Status::Ok, "{:?}", third.data);
         assert_eq!(third.data.as_ref().unwrap()["entry"]["deduped"], false, "{:?}", third.data);
-        assert_eq!(aoide_storage::history::list_history("sonata", None).len(), 2);
+        assert_eq!(crate::history::list_history("sonata", None).len(), 2);
 
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -554,21 +553,21 @@ mod tests {
     #[test]
     fn draft_mode_reload_takes_off_the_draft_and_never_clobbers_it() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT", "AOIDE_SESSION_ID"]);
         std::env::remove_var("AOIDE_SESSION_ID");
         let root = unique_tmp("reload-draft-routing");
         let stage = root.join("stage");
         std::fs::create_dir_all(&stage).unwrap();
         crate::commands::test_support::ensure_default_rices_fixture();
-        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        aoide_test_support::pin_stage(&stage);
 
-        let rices = shellbridge::rice_dir("sonata");
+        let rices = crate::paths::rice_dir("sonata");
         std::fs::create_dir_all(&rices).unwrap();
         // Deliberately DIFFERENT from the draft's own content below — the
         // committed truth a clobber would silently overwrite the draft with.
         std::fs::write(rices.join("theme.json"), VALID_NOTES).unwrap();
 
-        let draft_dir = shellbridge::draft_dir("sonata", "neon-night");
+        let draft_dir = crate::paths::draft_dir("sonata", "neon-night");
         std::fs::create_dir_all(&draft_dir).unwrap();
         const DRAFT_NOTES: &str = r##"{"schemaVersion":"0","palette":{"bg":"#abcdef"}}"##;
         std::fs::write(draft_dir.join("theme.json"), DRAFT_NOTES).unwrap();
@@ -595,7 +594,7 @@ mod tests {
             "a link that was already right is not a swap: mode.json is not rewritten"
         );
 
-        let record = aoide_storage::history::load_history("sonata", Some("neon-night"), 1)
+        let record = crate::history::load_history("sonata", Some("neon-night"), 1)
             .expect("the take lives under the draft");
         assert_eq!(
             record.theme,
@@ -603,7 +602,7 @@ mod tests {
             "the captured take is the DRAFT's content, not the rices's"
         );
         assert!(
-            aoide_storage::history::list_history("sonata", None).is_empty(),
+            crate::history::list_history("sonata", None).is_empty(),
             "and NOT under the rice's own staging-mode history/ root"
         );
 
@@ -626,11 +625,11 @@ mod tests {
     #[test]
     fn draft_mode_reload_restores_the_link_the_seed_renamed_over() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT", "AOIDE_SESSION_ID"]);
         std::env::remove_var("AOIDE_SESSION_ID");
         let (root, stage) = runtime_stage("reload-draft-heal");
         crate::commands::test_support::ensure_default_rices_fixture();
-        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        aoide_test_support::pin_stage(&stage);
         let draft_theme = route_a_draft(&stage);
         rename_declared_over(&stage);
         let stage_theme = stage.join("theme.json");
@@ -664,11 +663,11 @@ mod tests {
     #[test]
     fn draft_mode_reload_refuses_a_vanished_draft_and_writes_nothing() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT", "AOIDE_SESSION_ID"]);
         std::env::remove_var("AOIDE_SESSION_ID");
         let (root, stage) = runtime_stage("reload-draft-gone");
         crate::commands::test_support::ensure_default_rices_fixture();
-        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        aoide_test_support::pin_stage(&stage);
         let draft_theme = route_a_draft(&stage);
         std::fs::remove_dir_all(draft_theme.parent().unwrap()).unwrap();
         let stage_theme = stage.join("theme.json");
@@ -705,10 +704,10 @@ mod tests {
     #[test]
     fn declarative_mode_reload_leaves_the_stage_theme_alone() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         let (root, stage) = runtime_stage("reload-declarative-theme");
         crate::commands::test_support::ensure_default_rices_fixture();
-        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        aoide_test_support::pin_stage(&stage);
         rename_declared_over(&stage);
         save_mode_marker(&ModeMarker {
             mode: RiceMode::Declarative,
@@ -746,8 +745,8 @@ mod tests {
         )
         .unwrap();
         std::env::set_var(crate::widgets::RICES_EVAL_FIXTURE_VAR, &fixture);
-        std::env::set_var("AOIDE_STAGE_DIR", &stage);
-        let rices = shellbridge::rice_dir("sonata");
+        aoide_test_support::pin_stage(&stage);
+        let rices = crate::paths::rice_dir("sonata");
         std::fs::create_dir_all(rices.join("widgets")).unwrap();
         std::fs::write(rices.join("theme.json"), VALID_NOTES).unwrap();
         std::fs::write(rices.join("widgets").join("bar.qml"), "// bar\n").unwrap();
@@ -759,7 +758,7 @@ mod tests {
         })
         .unwrap();
         let stage_theme = stage.join("theme.json");
-        let rices = shellbridge::run_qml_dir().join("rices");
+        let rices = crate::paths::run_qml_dir().join("rices");
         let staged_rice = || -> Value {
             serde_json::from_str::<Value>(&std::fs::read_to_string(&stage_theme).unwrap()).unwrap()["rice"].clone()
         };
@@ -800,18 +799,18 @@ mod tests {
     #[test]
     fn draft_mode_reload_dresses_the_lock_off_the_draft() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT", "AOIDE_SESSION_ID"]);
         std::env::remove_var("AOIDE_SESSION_ID");
         let (root, stage) = runtime_stage("reload-draft-lock");
         crate::commands::test_support::ensure_default_rices_fixture();
-        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        aoide_test_support::pin_stage(&stage);
 
-        let rices = shellbridge::rice_dir("sonata");
+        let rices = crate::paths::rice_dir("sonata");
         std::fs::create_dir_all(&rices).unwrap();
         std::fs::write(rices.join("theme.json"), VALID_NOTES).unwrap();
         std::fs::write(rices.join("lockscreen.png"), b"").unwrap();
 
-        let draft_dir = shellbridge::draft_dir("sonata", "neon-night");
+        let draft_dir = crate::paths::draft_dir("sonata", "neon-night");
         std::fs::create_dir_all(&draft_dir).unwrap();
         std::fs::write(
             draft_dir.join("theme.json"),

@@ -102,8 +102,8 @@
   path; never route them to a stale live focus or project mutation. Project
   resurrection retains the backend's undying semantics. Do not advertise
   unsupported Rename or Kill actions.
-- Semantic colors read exact RGB Base16 tokens from rice-stage theme;
-  ANSI colors are fallbacks for absent tokens, not a competing theme.
+- Semantic colors come from the terminal's own ANSI 16 base. The conductor
+  reads no rice theme, so no rice palette changes its colours.
 - History is separate from live state. Ledger entries never enter
   `App::merged()` or the live graph. Opening one only selects historical
   detail; stale live selection must not receive Enter, kill or focus while
@@ -138,9 +138,9 @@
 - Bounded mail/audit reads ignore incomplete final records without
   modifying files. Failed refreshes expose the error and retain prior
   data. Raw audit fields remain inspectable; absent facts stay unknown.
-- Conducting stage and rice stage are distinct. Project/session/hook reads
-  use `App::stage`; palette notes use `App::rice_stage`. Historical ledger,
-  mail and audit paths use their existing owning APIs.
+- The conductor reads the conducting stage only. Project/session/hook reads
+  use `App::stage`. Historical ledger, mail and audit paths use their existing
+  owning APIs.
 - Roster probes remain bounded and asynchronous; refresh throttling must
   not freeze input. The tick's probe is the one read that bypasses
   `DispatchFn`: it calls `aoide_conduct::graph::session_roster` through

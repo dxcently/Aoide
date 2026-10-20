@@ -67,7 +67,7 @@ fn handle_component(inv: &Invocation) -> Outcome {
     let slot = inv.args[0].as_str();
     let verb = inv.args[1].as_str();
     let arg = inv.args.get(2).map(String::as_str).filter(|a| !a.is_empty());
-    let shell_qml = aoide_storage::fs::run_qml_dir().join("shell.qml");
+    let shell_qml = strillix_rice::paths::run_qml_dir().join("shell.qml");
     match resolve(read_components().as_ref(), slot, verb) {
         Ok(Route::Shell) => shell_act(cmd, &shell_qml, slot, verb, arg),
         Ok(Route::Argv(argv)) => spawn_argv(cmd, &argv, arg),
@@ -77,7 +77,7 @@ fn handle_component(inv: &Invocation) -> Outcome {
 
 /// `run/qml/components.json`, or `None` when it is missing or unreadable.
 fn read_components() -> Option<Value> {
-    let text = std::fs::read_to_string(aoide_storage::fs::run_qml_dir().join("components.json")).ok()?;
+    let text = std::fs::read_to_string(strillix_rice::paths::run_qml_dir().join("components.json")).ok()?;
     serde_json::from_str(&text).ok()
 }
 

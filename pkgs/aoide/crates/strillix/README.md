@@ -505,7 +505,7 @@ in `docs/Aoide-Wiki/concepts/cli/Doors-and-Nodes.md`.
   under one 4 s budget (`RICE_MENU_TIMEOUT`, under the QML client's 5 s) and
   passes its `data` through (`mode`, `rice`, `draft`, `stagingRice`,
   `declared`, `rices`) with this machine's `host` name and `hostConfig` (the
-  file `rice declare --host` rewrites, from `aoide_storage::fs::host_config`,
+  file `rice declare --host` rewrites, from `strillix_rice::paths::host_config`,
   null when none resolves) beside it; then, when `drafts_rice` names a rice from the mode
   marker (`stagingRice` first while declarative is locked, since an unlock
   lands there; `rice` first otherwise), runs `rice draft list <rice> --json`

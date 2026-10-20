@@ -5,7 +5,7 @@
 //! never overwrites, so a fix shipped in the templates would never arrive. This
 //! is the three-way rule that lets it arrive without clobbering an edit. Per
 //! file: S = the shipped templates copy, M = the machine copy, R = the hash this
-//! command last wrote, kept in `aoide_storage::fs::rice_record(rice)` —
+//! command last wrote, kept in `crate::paths::rice_record(rice)` —
 //! outside the rice folder, so the §7.5 folder-equality gate, `rice declare`,
 //! `rice list`, `rice history` and the widget sync never see it.
 //!
@@ -127,7 +127,7 @@ impl RiceReport {
 
 fn handle_rice_refresh(inv: &Invocation) -> Outcome {
     let check = inv.flag_present("check");
-    let Some(templates) = shellbridge::rice_templates_dir() else {
+    let Some(templates) = crate::paths::rice_templates_dir() else {
         return Outcome::refuse(
             "rice.refresh",
             Kind::Refused,
@@ -156,7 +156,7 @@ fn handle_rice_refresh(inv: &Invocation) -> Outcome {
     };
 
     let (mut reports, mut errors) = (Vec::new(), Vec::new());
-    shellbridge::with_stage_lock(|| {
+    crate::lock::with_stage_lock(|| {
         for name in &names {
             if !crate::compose::valid_rice_name(name) {
                 reports.push(RiceReport {
@@ -268,7 +268,7 @@ fn hash_file(path: &Path) -> Result<String, String> {
 /// because a rebuild builds the rices version. A rice with no machine copy
 /// differs in nothing. Symlinks on either side are not compared.
 pub(crate) fn staged_differs(rice: &str, templates: &Path) -> Result<bool, String> {
-    let machine = shellbridge::rice_dir(rice);
+    let machine = crate::paths::rice_dir(rice);
     if !machine.is_dir() {
         return Ok(false);
     }
@@ -365,7 +365,7 @@ fn fix_modes(path: &Path, apply: bool, root: bool) -> Result<usize, String> {
 type Record = BTreeMap<String, String>;
 
 fn read_record(rice: &str) -> Result<Record, String> {
-    let path = shellbridge::rice_record(rice);
+    let path = crate::paths::rice_record(rice);
     let raw = match std::fs::read_to_string(&path) {
         Ok(raw) => raw,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Record::new()),
@@ -380,7 +380,7 @@ fn read_record(rice: &str) -> Result<Record, String> {
 }
 
 fn write_record(rice: &str, source: &Path, files: &Record) -> Result<(), String> {
-    let path = shellbridge::rice_record(rice);
+    let path = crate::paths::rice_record(rice);
     let doc = json!({
         "schemaVersion": "0", "rice": rice, "source": source.to_string_lossy(), "files": files,
     });
@@ -405,12 +405,12 @@ fn prune_empty_parents(root: &Path, mut dir: &Path) {
 }
 
 pub(crate) fn refresh_rice(rice: &str, templates: &Path, check: bool) -> Result<RiceReport, String> {
-    shellbridge::with_stage_lock(|| refresh_rice_locked(rice, templates, check))
+    crate::lock::with_stage_lock(|| refresh_rice_locked(rice, templates, check))
 }
 
 fn refresh_rice_locked(rice: &str, templates: &Path, check: bool) -> Result<RiceReport, String> {
     let source = templates.join(rice);
-    let machine = shellbridge::rice_dir(rice);
+    let machine = crate::paths::rice_dir(rice);
     let mut report = RiceReport { rice: rice.into(), skipped: None, seeded: false, entries: vec![], modes: 0 };
 
     let store = walk(&source, true)?;
@@ -542,7 +542,6 @@ mod tests {
             std::fs::create_dir_all(&templates).unwrap();
             std::env::set_var("AOIDE_ROOT", root.join("aoide"));
             std::env::set_var("STRILLIX_ROOT", root.join("aoide"));
-            std::env::remove_var("AOIDE_STAGE_DIR");
             std::env::set_var("STRILLIX_TEMPLATES", &templates);
             let fx = Fx { root, templates, _g: g, _s: s };
             fx.builtin(&["sonata"]);
@@ -556,10 +555,10 @@ mod tests {
             put(&self.templates.join("sonata").join(rel), body);
         }
         fn machine(&self, rel: &str, body: &str) {
-            put(&shellbridge::rice_dir("sonata").join(rel), body);
+            put(&crate::paths::rice_dir("sonata").join(rel), body);
         }
         fn read(&self, rel: &str) -> Option<String> {
-            std::fs::read_to_string(shellbridge::rice_dir("sonata").join(rel)).ok()
+            std::fs::read_to_string(crate::paths::rice_dir("sonata").join(rel)).ok()
         }
         fn record(&self) -> Record {
             read_record("sonata").unwrap()
@@ -646,9 +645,9 @@ mod tests {
         assert_eq!(rec.len(), 3);
         assert_eq!(rec["bar.qml"], h("B1"));
         for rel in ["theme.json", "bar.qml", "widgets/dock.qml"] {
-            assert_ne!(mode(&shellbridge::rice_dir("sonata").join(rel)) & 0o200, 0, "{rel}");
+            assert_ne!(mode(&crate::paths::rice_dir("sonata").join(rel)) & 0o200, 0, "{rel}");
         }
-        let leftovers: Vec<_> = std::fs::read_dir(shellbridge::rices_root())
+        let leftovers: Vec<_> = std::fs::read_dir(crate::paths::rices_root())
             .unwrap()
             .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
             .collect();
@@ -722,8 +721,8 @@ mod tests {
         std::fs::remove_dir(fx.templates.join("sonata/widgets")).unwrap();
         let out = fx.run(&[], false);
         assert_eq!(file_state(&out, "widgets/dock.qml"), ("gone".into(), "delete".into()));
-        assert!(!shellbridge::rice_dir("sonata").join("widgets").exists());
-        assert!(shellbridge::rice_dir("sonata").is_dir(), "never the rice root");
+        assert!(!crate::paths::rice_dir("sonata").join("widgets").exists());
+        assert!(crate::paths::rice_dir("sonata").is_dir(), "never the rice root");
         assert!(!fx.record().contains_key("widgets/dock.qml"));
     }
 
@@ -743,7 +742,7 @@ mod tests {
     fn machine_deleted_inherited_file_is_not_re_added() {
         let fx = Fx::new("refresh-machine-deleted");
         seeded(&fx);
-        std::fs::remove_file(shellbridge::rice_dir("sonata").join("bar.qml")).unwrap();
+        std::fs::remove_file(crate::paths::rice_dir("sonata").join("bar.qml")).unwrap();
         for _ in 0..2 {
             let out = fx.run(&[], false);
             assert_eq!(file_state(&out, "bar.qml"), ("machine-deleted".into(), "keep".into()));
@@ -759,13 +758,13 @@ mod tests {
         fx.machine("history/1/theme.json", "T");
         fx.machine("drafts/d.json", "D");
         fx.machine("notes.md", "mine");
-        let link = shellbridge::rice_dir("sonata").join("link.qml");
+        let link = crate::paths::rice_dir("sonata").join("link.qml");
         std::os::unix::fs::symlink("/nonexistent", &link).unwrap();
         fx.store("history/9/x", "shipped takes are not a rice file");
-        let before = snapshot(&shellbridge::rice_dir("sonata"));
+        let before = snapshot(&crate::paths::rice_dir("sonata"));
         let out = fx.run(&[], false);
         assert!(out.changed.is_empty());
-        assert_eq!(snapshot(&shellbridge::rice_dir("sonata")), before);
+        assert_eq!(snapshot(&crate::paths::rice_dir("sonata")), before);
         assert!(is_symlink(&link));
         assert!(!fx.record().keys().any(|k| k.starts_with("history") || k == "notes.md"));
         assert!(fx.read("history/9/x").is_none());
@@ -788,7 +787,7 @@ mod tests {
     fn read_only_tree_has_its_modes_fixed_and_refreshes() {
         let fx = Fx::new("refresh-modes");
         seeded(&fx);
-        let rice = shellbridge::rice_dir("sonata");
+        let rice = crate::paths::rice_dir("sonata");
         fx.store("bar.qml", "B2");
         std::fs::set_permissions(rice.join("bar.qml"), std::fs::Permissions::from_mode(0o444)).unwrap();
         std::fs::set_permissions(rice.join("widgets/dock.qml"), std::fs::Permissions::from_mode(0o444)).unwrap();
@@ -808,13 +807,13 @@ mod tests {
         shipped(&fx);
         let elsewhere = fx.root.join("elsewhere");
         std::fs::create_dir_all(&elsewhere).unwrap();
-        std::fs::create_dir_all(shellbridge::rices_root()).unwrap();
-        std::os::unix::fs::symlink(&elsewhere, shellbridge::rice_dir("sonata")).unwrap();
+        std::fs::create_dir_all(crate::paths::rices_root()).unwrap();
+        std::os::unix::fs::symlink(&elsewhere, crate::paths::rice_dir("sonata")).unwrap();
         let out = fx.run(&[], false);
         assert_eq!(out.status, Status::Ok);
         assert!(out.data.as_ref().unwrap()["rices"][0]["skipped"].is_string());
         assert_eq!(std::fs::read_dir(&elsewhere).unwrap().count(), 0);
-        assert!(!shellbridge::rice_record("sonata").exists());
+        assert!(!crate::paths::rice_record("sonata").exists());
     }
 
     #[test]
@@ -825,12 +824,12 @@ mod tests {
         fx.store("widgets/clock.qml", "C1");
         fx.machine("theme.json", "MINE");
         fx.store("theme.json", "L2");
-        let rice = shellbridge::rice_dir("sonata");
+        let rice = crate::paths::rice_dir("sonata");
         let tree = snapshot(&rice);
-        let record = std::fs::read(shellbridge::rice_record("sonata")).unwrap();
+        let record = std::fs::read(crate::paths::rice_record("sonata")).unwrap();
         let checked = fx.run(&[], true);
         assert_eq!(snapshot(&rice), tree);
-        assert_eq!(std::fs::read(shellbridge::rice_record("sonata")).unwrap(), record);
+        assert_eq!(std::fs::read(crate::paths::rice_record("sonata")).unwrap(), record);
         assert!(checked.changed.is_empty());
         let applied = fx.run(&[], false);
         assert_eq!(checked.data.as_ref().unwrap()["rices"], applied.data.as_ref().unwrap()["rices"]);
@@ -843,8 +842,8 @@ mod tests {
         shipped(&fx);
         let out = fx.run(&[], true);
         assert_eq!(file_state(&out, "bar.qml"), ("new".into(), "add".into()));
-        assert!(!shellbridge::rice_dir("sonata").exists());
-        assert!(!shellbridge::rice_record("sonata").exists());
+        assert!(!crate::paths::rice_dir("sonata").exists());
+        assert!(!crate::paths::rice_record("sonata").exists());
     }
 
     #[test]
@@ -854,10 +853,10 @@ mod tests {
         put(&fx.templates.join("other/theme.json"), "O");
         let out = fx.run(&[], false);
         assert_eq!(out.data.as_ref().unwrap()["rices"].as_array().unwrap().len(), 1);
-        assert!(!shellbridge::rice_dir("other").exists(), "not in builtin.json");
+        assert!(!crate::paths::rice_dir("other").exists(), "not in builtin.json");
         let named = fx.run(&["other"], false);
         assert_eq!(named.status, Status::Ok);
-        assert!(shellbridge::rice_dir("other").is_dir());
+        assert!(crate::paths::rice_dir("other").is_dir());
         let unknown = fx.run(&["nope"], false);
         assert_eq!(unknown.status, Status::Error);
         assert!(unknown.message.contains("`nope`"));
@@ -876,7 +875,7 @@ mod tests {
         fx.run(&[], false);
         let store = fx.templates.join("sonata");
         assert!(crate::widgets::trees_equal(
-            &shellbridge::rice_dir("sonata"),
+            &crate::paths::rice_dir("sonata"),
             &store,
             MACHINE_RUNTIME_DIRS
         ));
@@ -888,13 +887,13 @@ mod tests {
         seeded(&fx);
         fx.store("bar.qml", "B2");
         assert!(!fx.run(&[], false).changed.is_empty());
-        let rice = shellbridge::rice_dir("sonata");
+        let rice = crate::paths::rice_dir("sonata");
         let tree = snapshot(&rice);
-        let record = std::fs::read(shellbridge::rice_record("sonata")).unwrap();
+        let record = std::fs::read(crate::paths::rice_record("sonata")).unwrap();
         let again = fx.run(&[], false);
         assert!(again.changed.is_empty());
         assert_eq!(snapshot(&rice), tree);
-        assert_eq!(std::fs::read(shellbridge::rice_record("sonata")).unwrap(), record);
+        assert_eq!(std::fs::read(crate::paths::rice_record("sonata")).unwrap(), record);
     }
 
     #[test]
@@ -905,7 +904,7 @@ mod tests {
         let out = fx.run(&[], false);
         assert_eq!(out.status, Status::Error);
         assert!(out.message.contains("symlink"), "{}", out.message);
-        assert!(!shellbridge::rice_dir("sonata").exists());
+        assert!(!crate::paths::rice_dir("sonata").exists());
     }
 
     #[test]
@@ -928,7 +927,7 @@ mod tests {
         fx.machine("bar.qml", "B");
         let outside = fx.root.join("outside");
         put(&outside.join("dock.qml"), "PRECIOUS");
-        let rice = shellbridge::rice_dir("sonata");
+        let rice = crate::paths::rice_dir("sonata");
         std::os::unix::fs::symlink(&outside, rice.join("widgets")).unwrap();
         let out = fx.run(&[], false);
         assert_eq!(out.status, Status::Ok, "{}", out.message);
@@ -945,7 +944,7 @@ mod tests {
         seeded(&fx);
         fx.machine("history/1/theme.json", "T");
         fx.machine("drafts/d.json", "D");
-        let rice = shellbridge::rice_dir("sonata");
+        let rice = crate::paths::rice_dir("sonata");
         for rel in ["history/1/theme.json", "drafts/d.json"] {
             std::fs::set_permissions(rice.join(rel), std::fs::Permissions::from_mode(0o444)).unwrap();
         }
@@ -966,7 +965,7 @@ mod tests {
         fx.run(&[], false);
         assert_eq!(fx.read("widgets/dock.qml").unwrap(), "D2");
         assert_eq!(fx.read("widgets/foo.tmp.999999").unwrap(), "mine");
-        let left: Vec<_> = std::fs::read_dir(shellbridge::rice_dir("sonata").join("widgets"))
+        let left: Vec<_> = std::fs::read_dir(crate::paths::rice_dir("sonata").join("widgets"))
             .unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
         assert!(!left.iter().any(|n| n.contains("aoide-refresh")), "{left:?}");
     }
@@ -981,16 +980,16 @@ mod tests {
         let rices = out.data.as_ref().unwrap()["rices"].as_array().unwrap().clone();
         assert_eq!(rices[0]["rice"], "../x");
         assert!(rices[0]["skipped"].is_string());
-        assert!(shellbridge::rice_dir("sonata").is_dir());
-        assert!(!fx.root.join("aoide/rice/x").exists() && !shellbridge::rices_root().join("../x").exists());
+        assert!(crate::paths::rice_dir("sonata").is_dir());
+        assert!(!fx.root.join("aoide/rice/x").exists() && !crate::paths::rices_root().join("../x").exists());
     }
 
     #[test]
     fn the_seeder_reports_nothing_seeded_when_refresh_skipped() {
         let fx = Fx::new("refresh-seed-skipped");
         shipped(&fx);
-        std::fs::create_dir_all(shellbridge::rices_root()).unwrap();
-        std::os::unix::fs::symlink("/nonexistent-dangling", shellbridge::rice_dir("sonata")).unwrap();
+        std::fs::create_dir_all(crate::paths::rices_root()).unwrap();
+        std::os::unix::fs::symlink("/nonexistent-dangling", crate::paths::rice_dir("sonata")).unwrap();
         let seeded = crate::commands::rice::seed_rices_from_templates("sonata").unwrap();
         assert!(seeded.is_none());
     }
@@ -999,7 +998,7 @@ mod tests {
     fn a_crash_between_seed_rename_and_record_self_heals() {
         let fx = Fx::new("refresh-crash-heal");
         seeded(&fx);
-        std::fs::remove_file(shellbridge::rice_record("sonata")).unwrap();
+        std::fs::remove_file(crate::paths::rice_record("sonata")).unwrap();
         let out = fx.run(&[], false);
         assert_eq!(file_state(&out, "bar.qml"), ("in-sync".into(), "none".into()));
         assert_eq!(fx.record().len(), 3);
@@ -1024,7 +1023,7 @@ mod tests {
         seeded(&fx);
         std::fs::remove_file(fx.templates.join("sonata/widgets/dock.qml")).unwrap();
         std::fs::remove_dir(fx.templates.join("sonata/widgets")).unwrap();
-        let rice = shellbridge::rice_dir("sonata");
+        let rice = crate::paths::rice_dir("sonata");
         std::fs::set_permissions(rice.join("widgets"), std::fs::Permissions::from_mode(0o555)).unwrap();
         let out = fx.run(&[], false);
         assert_eq!(file_state(&out, "widgets/dock.qml"), ("gone".into(), "delete".into()));

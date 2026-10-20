@@ -90,11 +90,11 @@ fn handle_onboard(inv: &Invocation) -> Outcome {
 /// The `aoide.*` option doc set, read from the SHIPPED
 /// `share/strillix/aoide-options.json` — `pkgs/strillix-rices` builds it from
 /// `lib/options.nix` at nix-build time, and it sits beside the rice templates
-/// [`aoide_storage::fs::strillix_share_dir`] resolves. The FILE is the eval, so
+/// [`strillix_rice::paths::strillix_share_dir`] resolves. The FILE is the eval, so
 /// `strillix onboard` needs neither a checkout nor `nix` on PATH: it works from any
 /// cwd, on a machine that has never seen the Aoide source.
 fn read_aoide_options() -> Result<Vec<OptionEntry>, String> {
-    let share = aoide_storage::fs::strillix_share_dir()
+    let share = strillix_rice::paths::strillix_share_dir()
         .ok_or_else(|| "no shipped strillix data dir: $STRILLIX_TEMPLATES names none (or is not absolute) and no `share/strillix/rices` sits beside this binary".to_string())?;
     let path = share.join("aoide-options.json");
     let bytes = std::fs::read(&path)

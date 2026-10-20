@@ -31,7 +31,7 @@
 //! content-hashing trivially safe, because "the file on disk" and "the entry
 //! as minted" are never allowed to diverge.
 //!
-//! **Every function here is UNLOCKED.** `crate::fs::with_stage_lock` nests for
+//! **Every function here is UNLOCKED.** `crate::lock::with_stage_lock` nests for
 //! the thread that already holds it (`fs.rs`), so this module still never
 //! calls it itself — one acquire belongs around the WHOLE multi-step body a
 //! caller owns (entry-number allocation is read max, write max+1; wrapping only
@@ -45,7 +45,8 @@
 //! draft name checks are `crate::compose::valid_rice_name`'s job, one layer
 //! up, exactly like every other `draft_dir` consumer).
 
-use crate::fs::{atomic_write, draft_dir, rice_dir};
+use aoide_storage::fs::atomic_write;
+use crate::paths::{draft_dir, rice_dir};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::BTreeMap;
@@ -359,7 +360,7 @@ mod tests {
         let root = unique_tmp(tag);
         let stage = root.join("stage");
         std::fs::create_dir_all(&stage).unwrap();
-        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        aoide_test_support::pin_stage(&stage);
         ("sonata".to_string(), "neon-night".to_string())
     }
 
@@ -382,7 +383,7 @@ mod tests {
     #[test]
     fn a_entry_record_round_trips_through_atomic_write_with_its_parent_pointer_intact() {
         let _g = env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         let (rice, draft) = routed("entries-roundtrip");
 
         let mut record = rec(9, Some(1));
@@ -412,7 +413,7 @@ mod tests {
     #[test]
     fn load_entry_is_none_for_a_missing_or_corrupt_file() {
         let _g = env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         let (rice, draft) = routed("entries-missing");
 
         assert!(load_history(&rice, Some(&draft), 1).is_none());
@@ -427,7 +428,7 @@ mod tests {
     #[test]
     fn next_entry_number_is_one_for_an_empty_store() {
         let _g = env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         let (rice, draft) = routed("entries-next-empty");
         assert_eq!(next_history_number(&rice, Some(&draft)), 1);
     }
@@ -435,7 +436,7 @@ mod tests {
     #[test]
     fn next_entry_number_is_gap_tolerant_not_first_free_slot() {
         let _g = env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         let (rice, draft) = routed("entries-next-gap");
         save_history(&rice, Some(&draft), &rec(1, None)).unwrap();
         save_history(&rice, Some(&draft), &rec(4, Some(1))).unwrap();
@@ -447,7 +448,7 @@ mod tests {
     #[test]
     fn list_and_next_sort_by_parsed_number_not_filename_lexical_order() {
         let _g = env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         let (rice, draft) = routed("entries-numeric-sort");
         // "10000.json" < "0002.json" as strings — a lexicographic sort would
         // put 10000 first and hand next_history_number the wrong maximum.
@@ -463,7 +464,7 @@ mod tests {
     #[test]
     fn list_entries_skips_head_marks_and_unparseable_entries() {
         let _g = env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         let (rice, draft) = routed("entries-list-skip");
         save_history(&rice, Some(&draft), &rec(1, None)).unwrap();
         save_head(&rice, Some(&draft), 1).unwrap();
@@ -477,7 +478,7 @@ mod tests {
     #[test]
     fn a_record_on_disk_that_says_take_loads_as_entry_and_saves_as_entry() {
         let _g = env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         let (rice, draft) = routed("entry-alias");
         let old = r#"{"schemaVersion":"1","take":3,"parent":2,"at":"2026-10-18T00:00:00Z","cause":"stage","theme":{}}"#;
         std::fs::create_dir_all(history_dir(&rice, Some(&draft))).unwrap();
@@ -498,7 +499,7 @@ mod tests {
     #[test]
     fn load_head_is_none_for_an_empty_store_and_falls_back_to_max_when_absent() {
         let _g = env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         let (rice, draft) = routed("entries-head-absent-empty");
         assert_eq!(load_head(&rice, Some(&draft)), None, "nothing minted yet");
 
@@ -511,7 +512,7 @@ mod tests {
     #[test]
     fn load_head_falls_back_to_max_when_the_claimed_head_entry_no_longer_exists() {
         let _g = env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         let (rice, draft) = routed("entries-head-stale");
         save_history(&rice, Some(&draft), &rec(1, None)).unwrap();
         save_history(&rice, Some(&draft), &rec(2, Some(1))).unwrap();
@@ -526,7 +527,7 @@ mod tests {
     #[test]
     fn save_head_round_trips_a_valid_claim() {
         let _g = env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         let (rice, draft) = routed("entries-head-valid");
         save_history(&rice, Some(&draft), &rec(1, None)).unwrap();
         save_history(&rice, Some(&draft), &rec(2, Some(1))).unwrap();
@@ -539,7 +540,7 @@ mod tests {
     #[test]
     fn marks_round_trip_and_moving_a_letter_is_one_atomic_write_of_the_map() {
         let _g = env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         let (rice, draft) = routed("entries-marks-move");
 
         let mut marks = BTreeMap::new();
@@ -560,7 +561,7 @@ mod tests {
     #[test]
     fn load_marks_tolerates_a_missing_or_corrupt_file_as_empty() {
         let _g = env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         let (rice, draft) = routed("entries-marks-missing");
         assert!(load_marks(&rice, Some(&draft)).is_empty());
 

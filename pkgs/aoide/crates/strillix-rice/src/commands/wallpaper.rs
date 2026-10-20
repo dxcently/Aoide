@@ -53,14 +53,14 @@ fn handle_wallpaper_sync(_inv: &Invocation) -> Outcome {
 /// RECORD door exempt (CONTRACTS.md §4). The pure
 /// write logic stays in [`handle_wallpaper_set`] guard-free.
 fn handle_wallpaper_set_entry(inv: &Invocation) -> Outcome {
-    let mode_marker = aoide_storage::mode::load_mode_marker();
+    let mode_marker = crate::mode::load_mode_marker();
     // EXEMPT: `--from-skwd` RECORDS what an external provider is already
     // showing. The lock exists so nix stays the only writer of the DECLARED
     // state; refusing the record would leave `stage/wallpaper.json` describing
     // something the screen is not showing (CONTRACTS.md §4). Every other
     // spelling of this command — a plain `wallpaper set`, `--clear` — stays refused.
     if !inv.flag_present("from-skwd")
-        && mode_marker.mode == aoide_storage::mode::RiceMode::Declarative
+        && mode_marker.mode == crate::mode::RiceMode::Declarative
     {
         return Outcome::error(
             "wallpaper.set",
@@ -80,7 +80,7 @@ fn handle_wallpaper_set_entry(inv: &Invocation) -> Outcome {
         == Some(false);
     if out.status == aoide_protocol::output::Status::Ok
         && !recorded_nothing
-        && mode_marker.mode == aoide_storage::mode::RiceMode::Draft
+        && mode_marker.mode == crate::mode::RiceMode::Draft
     {
         super::history::attach_entry(&mut out, &mode_marker, super::history::snapshot("wallpaper.set", "wallpaper-set").map(Some));
     }
@@ -449,13 +449,13 @@ mod tests {
     #[test]
     fn wallpaper_set_stages_an_absolute_path() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         let root = unique_tmp("wallpaper-abs");
         let stage = root.join("stage");
         std::fs::create_dir_all(&stage).unwrap();
         let img = root.join("elsewhere.png");
         std::fs::write(&img, b"\x89PNG stub").unwrap();
-        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        aoide_test_support::pin_stage(&stage);
 
         let out = handle_wallpaper_set(&inv(&["wallpaper", "set"], &[img.to_str().unwrap()]));
         assert_eq!(out.status, Status::Ok);
@@ -477,14 +477,14 @@ mod tests {
     #[test]
     fn wallpaper_set_resolves_a_bare_name_against_the_wallpapers_library() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         let root = unique_tmp("wallpaper-name");
         let stage = root.join("stage");
         let wallpapers = root.join("wallpapers");
         std::fs::create_dir_all(&stage).unwrap();
         std::fs::create_dir_all(&wallpapers).unwrap();
         std::fs::write(wallpapers.join("sonata.webp"), b"RIFF stub").unwrap();
-        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        aoide_test_support::pin_stage(&stage);
 
         let out = handle_wallpaper_set(&inv(&["wallpaper", "set"], &["sonata.webp"]));
         assert_eq!(out.status, Status::Ok);
@@ -501,11 +501,11 @@ mod tests {
     #[test]
     fn wallpaper_set_missing_file_is_error_exit_1() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         let root = unique_tmp("wallpaper-missing");
         let stage = root.join("stage");
         std::fs::create_dir_all(&stage).unwrap();
-        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        aoide_test_support::pin_stage(&stage);
 
         let out = handle_wallpaper_set(&inv(&["wallpaper", "set"], &["nope.png"]));
         assert_eq!(out.status, Status::Error);
@@ -532,14 +532,14 @@ mod tests {
     #[test]
     fn clear_drops_the_pick_and_restores_the_rices_own_default() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         let root = unique_tmp("wallpaper-clear");
         let stage = root.join("stage");
         let wallpapers = root.join("wallpapers");
         std::fs::create_dir_all(&stage).unwrap();
         std::fs::create_dir_all(&wallpapers).unwrap();
         std::fs::write(wallpapers.join("dusk.png"), b"\x89PNG stub").unwrap();
-        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        aoide_test_support::pin_stage(&stage);
 
         // What `rice stage dusk` leaves: the rice, and dusk's own wallpaper as a
         // DEFAULT.
@@ -575,11 +575,11 @@ mod tests {
     #[test]
     fn clear_removes_the_file_when_the_rice_derives_none_and_is_idempotent() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         let root = unique_tmp("wallpaper-clear-none");
         let stage = root.join("stage");
         std::fs::create_dir_all(&stage).unwrap();
-        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        aoide_test_support::pin_stage(&stage);
 
         std::fs::write(
             stage.join("theme.json"),
@@ -610,11 +610,11 @@ mod tests {
     #[test]
     fn clear_with_nothing_staged_only_removes() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         let root = unique_tmp("wallpaper-clear-norice");
         let stage = root.join("stage");
         std::fs::create_dir_all(&stage).unwrap();
-        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        aoide_test_support::pin_stage(&stage);
 
         crate::wallpaper::stage_pick(std::path::Path::new("/tmp/old-choice.png"), None, None).unwrap();
         let out = handle_wallpaper_set(&clear_inv(&[]));
@@ -638,11 +638,11 @@ mod tests {
     #[test]
     fn clear_entry_refuses_while_declarative_mode_is_locked() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         let root = unique_tmp("wallpaper-clear-locked");
         let stage = root.join("stage");
         std::fs::create_dir_all(&stage).unwrap();
-        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        aoide_test_support::pin_stage(&stage);
         crate::wallpaper::stage_pick(std::path::Path::new("/tmp/old-choice.png"), None, None).unwrap();
 
         let out = handle_wallpaper_set_entry(&clear_inv(&[]));
@@ -658,17 +658,17 @@ mod tests {
     #[test]
     fn from_skwd_no_op_mints_no_take_in_draft_mode() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SKWD_WALL_STANDIN"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT", "AOIDE_SKWD_WALL_STANDIN"]);
         let root = unique_tmp("wallpaper-from-skwd-draft-noop");
         let stage = root.join("stage");
         std::fs::create_dir_all(&stage).unwrap();
         std::fs::write(stage.join("theme.json"), VALID_NOTES).unwrap();
         std::fs::write(stage.join("wallpaper-provider"), "skwd-wall\n").unwrap();
-        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        aoide_test_support::pin_stage(&stage);
         std::env::remove_var("AOIDE_SKWD_WALL_STANDIN");
 
-        aoide_storage::mode::save_mode_marker(&aoide_storage::mode::ModeMarker {
-            mode: aoide_storage::mode::RiceMode::Draft,
+        crate::mode::save_mode_marker(&crate::mode::ModeMarker {
+            mode: crate::mode::RiceMode::Draft,
             rice: Some("moonlight".to_string()),
             draft: Some("neon-night".to_string()),
             ..Default::default()
@@ -692,7 +692,7 @@ mod tests {
         assert_eq!(data["unchanged"], true);
         assert!(data.get("entry").is_none(), "a no-op mints no take: {data}");
         assert_eq!(
-            aoide_storage::history::list_history("moonlight", Some("neon-night")).len(),
+            crate::history::list_history("moonlight", Some("neon-night")).len(),
             1,
             "the take tree records writes only"
         );
@@ -706,7 +706,7 @@ mod tests {
         assert_eq!(ignored.status, Status::Ok);
         assert_eq!(ignored.data.unwrap()["ignored"], "standin");
         assert_eq!(
-            aoide_storage::history::list_history("moonlight", Some("neon-night")).len(),
+            crate::history::list_history("moonlight", Some("neon-night")).len(),
             1
         );
         let _ = std::fs::remove_dir_all(&root);
@@ -726,11 +726,11 @@ mod tests {
     #[test]
     fn clear_with_from_skwd_is_a_usage_refusal_and_keeps_the_pick() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SKWD_WALL_STANDIN"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT", "AOIDE_SKWD_WALL_STANDIN"]);
         let root = unique_tmp("wallpaper-clear-from-skwd");
         let stage = root.join("stage");
         stage_theme(&stage, Some("skwd-wall"));
-        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        aoide_test_support::pin_stage(&stage);
         std::env::remove_var("AOIDE_SKWD_WALL_STANDIN");
 
         // A recorded pick first, then the locked combination.
@@ -762,11 +762,11 @@ mod tests {
     #[test]
     fn from_skwd_refuses_a_scene_token_as_its_identity() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SKWD_WALL_STANDIN"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT", "AOIDE_SKWD_WALL_STANDIN"]);
         let root = unique_tmp("wallpaper-from-skwd-token");
         let stage = root.join("stage");
         stage_theme(&stage, Some("skwd-wall"));
-        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        aoide_test_support::pin_stage(&stage);
         std::env::remove_var("AOIDE_SKWD_WALL_STANDIN");
 
         let out = handle_wallpaper_set(&set_inv(
@@ -787,17 +787,17 @@ mod tests {
     #[test]
     fn from_skwd_is_exempt_from_the_declarative_lock() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SKWD_WALL_STANDIN"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT", "AOIDE_SKWD_WALL_STANDIN"]);
         let root = unique_tmp("wallpaper-from-skwd-locked");
         let stage = root.join("stage");
         stage_theme(&stage, Some("skwd-wall"));
-        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        aoide_test_support::pin_stage(&stage);
         std::env::remove_var("AOIDE_SKWD_WALL_STANDIN");
 
         // No marker file at all reads as `declarative` — the locked default.
         assert_eq!(
-            aoide_storage::mode::load_mode_marker().mode,
-            aoide_storage::mode::RiceMode::Declarative
+            crate::mode::load_mode_marker().mode,
+            crate::mode::RiceMode::Declarative
         );
 
         let recorded = handle_wallpaper_set_entry(&set_inv(
@@ -832,13 +832,13 @@ mod tests {
     #[test]
     fn wallpaper_set_entry_refuses_while_declarative_mode_is_locked() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         let root = unique_tmp("wallpaper-entry-locked");
         let stage = root.join("stage");
         std::fs::create_dir_all(&stage).unwrap();
         let img = root.join("elsewhere.png");
         std::fs::write(&img, b"\x89PNG stub").unwrap();
-        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        aoide_test_support::pin_stage(&stage);
 
         let out = handle_wallpaper_set_entry(&inv(&["wallpaper", "set"], &[img.to_str().unwrap()]));
         assert_eq!(out.status, Status::Error);
@@ -850,16 +850,16 @@ mod tests {
     #[test]
     fn wallpaper_set_entry_allows_writes_once_staging_mode_is_unlocked() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         let root = unique_tmp("wallpaper-entry-unlocked");
         let stage = root.join("stage");
         std::fs::create_dir_all(&stage).unwrap();
         let img = root.join("elsewhere.png");
         std::fs::write(&img, b"\x89PNG stub").unwrap();
-        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        aoide_test_support::pin_stage(&stage);
 
-        aoide_storage::mode::save_mode_marker(&aoide_storage::mode::ModeMarker {
-            mode: aoide_storage::mode::RiceMode::Staging,
+        crate::mode::save_mode_marker(&crate::mode::ModeMarker {
+            mode: crate::mode::RiceMode::Staging,
             ..Default::default()
         })
         .unwrap();
@@ -875,17 +875,17 @@ mod tests {
     #[test]
     fn wallpaper_set_entry_in_draft_mode_mints_an_auto_take_on_a_real_change() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         let root = unique_tmp("wallpaper-autotake-fires");
         let stage = root.join("stage");
         std::fs::create_dir_all(&stage).unwrap();
         std::fs::write(stage.join("theme.json"), VALID_NOTES).unwrap();
         let img = root.join("elsewhere.png");
         std::fs::write(&img, b"\x89PNG stub").unwrap();
-        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        aoide_test_support::pin_stage(&stage);
 
-        aoide_storage::mode::save_mode_marker(&aoide_storage::mode::ModeMarker {
-            mode: aoide_storage::mode::RiceMode::Draft,
+        crate::mode::save_mode_marker(&crate::mode::ModeMarker {
+            mode: crate::mode::RiceMode::Draft,
             rice: Some("moonlight".to_string()),
             draft: Some("neon-night".to_string()),
             ..Default::default()
@@ -898,7 +898,7 @@ mod tests {
         assert!(out.changed.iter().any(|c| c.ends_with("history/0001.json")));
         assert!(out.changed.iter().any(|c| c.ends_with("history/head.json")));
 
-        let record = aoide_storage::history::load_history("moonlight", Some("neon-night"), 1).unwrap();
+        let record = crate::history::load_history("moonlight", Some("neon-night"), 1).unwrap();
         assert_eq!(record.cause, "wallpaper-set");
         assert!(record.wallpaper.is_some(), "the wallpaper that was just set is carried on the take");
         let _ = std::fs::remove_dir_all(&root);
@@ -915,17 +915,17 @@ mod tests {
         // duplicate-take noise is `rice history prune`'s problem (phase A9),
         // not this hook's.
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         let root = unique_tmp("wallpaper-autotake-repeat");
         let stage = root.join("stage");
         std::fs::create_dir_all(&stage).unwrap();
         std::fs::write(stage.join("theme.json"), VALID_NOTES).unwrap();
         let img = root.join("elsewhere.png");
         std::fs::write(&img, b"\x89PNG stub").unwrap();
-        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        aoide_test_support::pin_stage(&stage);
 
-        aoide_storage::mode::save_mode_marker(&aoide_storage::mode::ModeMarker {
-            mode: aoide_storage::mode::RiceMode::Draft,
+        crate::mode::save_mode_marker(&crate::mode::ModeMarker {
+            mode: crate::mode::RiceMode::Draft,
             rice: Some("moonlight".to_string()),
             draft: Some("neon-night".to_string()),
             ..Default::default()
@@ -944,10 +944,10 @@ mod tests {
         );
         assert!(second.changed.iter().any(|c| c.ends_with("history/0002.json")));
 
-        let record = aoide_storage::history::load_history("moonlight", Some("neon-night"), 2).unwrap();
+        let record = crate::history::load_history("moonlight", Some("neon-night"), 2).unwrap();
         assert_eq!(record.parent, Some(1), "the second take hangs off the first");
         assert_eq!(
-            aoide_storage::history::list_history("moonlight", Some("neon-night")).len(),
+            crate::history::list_history("moonlight", Some("neon-night")).len(),
             2,
             "both writes are on record, even though their content is identical"
         );
@@ -989,11 +989,11 @@ mod tests {
     #[test]
     fn wallpaper_set_stages_a_scene_token_as_a_scene_pick() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         let root = unique_tmp("wallpaper-scene-token");
         let stage = root.join("stage");
         stage_theme(&stage, None);
-        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        aoide_test_support::pin_stage(&stage);
 
         let out = handle_wallpaper_set(&inv(&["wallpaper", "set"], &["we:123"]));
         assert_eq!(out.status, Status::Ok, "{:?}", out.data);
@@ -1017,13 +1017,13 @@ mod tests {
     #[test]
     fn wallpaper_set_takes_the_kind_from_a_video_extension() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         let root = unique_tmp("wallpaper-video-kind");
         let stage = root.join("stage");
         stage_theme(&stage, None);
         let clip = root.join("clip.mp4");
         std::fs::write(&clip, b"\x00\x00\x00\x18ftypmp42").unwrap();
-        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        aoide_test_support::pin_stage(&stage);
 
         let out = handle_wallpaper_set(&inv(&["wallpaper", "set"], &[clip.to_str().unwrap()]));
         assert_eq!(out.status, Status::Ok, "{:?}", out.data);
@@ -1042,11 +1042,11 @@ mod tests {
     #[test]
     fn wallpaper_set_position_forces_or_follows_the_file_name() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         let root = unique_tmp("wallpaper-position-set");
         let stage = root.join("stage");
         stage_theme(&stage, None);
-        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        aoide_test_support::pin_stage(&stage);
         let plain = root.join("plain.png");
         let brick = root.join("Brick_Tile.png");
         std::fs::write(&plain, b"\x89PNG stub").unwrap();
@@ -1081,11 +1081,11 @@ mod tests {
     #[test]
     fn wallpaper_set_position_refuses_a_scene_and_a_video() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         let root = unique_tmp("wallpaper-position-refused");
         let stage = root.join("stage");
         stage_theme(&stage, None);
-        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        aoide_test_support::pin_stage(&stage);
         let clip = root.join("loop_tile.mp4");
         std::fs::write(&clip, b"\x00\x00\x00\x18ftypmp42").unwrap();
 
@@ -1111,13 +1111,13 @@ mod tests {
     #[test]
     fn wallpaper_set_position_is_declared_against_clear_from_skwd_and_other_words() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         let root = unique_tmp("wallpaper-position-declared");
         let stage = root.join("stage");
         stage_theme(&stage, None);
-        std::env::set_var("AOIDE_STAGE_DIR", &stage);
-        aoide_storage::mode::save_mode_marker(&aoide_storage::mode::ModeMarker {
-            mode: aoide_storage::mode::RiceMode::Staging,
+        aoide_test_support::pin_stage(&stage);
+        crate::mode::save_mode_marker(&crate::mode::ModeMarker {
+            mode: crate::mode::RiceMode::Staging,
             ..Default::default()
         })
         .unwrap();
@@ -1154,11 +1154,11 @@ mod tests {
     #[test]
     fn from_skwd_records_the_providers_pick_for_the_staged_rice() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SKWD_WALL_STANDIN"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT", "AOIDE_SKWD_WALL_STANDIN"]);
         let root = unique_tmp("wallpaper-from-skwd");
         let stage = root.join("stage");
         stage_theme(&stage, Some("skwd-wall"));
-        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        aoide_test_support::pin_stage(&stage);
         std::env::remove_var("AOIDE_SKWD_WALL_STANDIN");
 
         let out = handle_wallpaper_set(&set_inv(
@@ -1190,11 +1190,11 @@ mod tests {
     #[test]
     fn from_skwd_is_ignored_when_the_shell_paints() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SKWD_WALL_STANDIN"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT", "AOIDE_SKWD_WALL_STANDIN"]);
         let root = unique_tmp("wallpaper-from-skwd-shell");
         let stage = root.join("stage");
         stage_theme(&stage, None);
-        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        aoide_test_support::pin_stage(&stage);
         std::env::remove_var("AOIDE_SKWD_WALL_STANDIN");
 
         let out = handle_wallpaper_set(&set_inv(
@@ -1224,11 +1224,11 @@ mod tests {
     #[test]
     fn from_skwd_ignores_the_standin_image() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SKWD_WALL_STANDIN"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT", "AOIDE_SKWD_WALL_STANDIN"]);
         let root = unique_tmp("wallpaper-from-skwd-standin");
         let stage = root.join("stage");
         stage_theme(&stage, Some("skwd-wall"));
-        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        aoide_test_support::pin_stage(&stage);
         std::env::set_var("AOIDE_SKWD_WALL_STANDIN", "/nix/store/x-standin.png");
 
         let out = handle_wallpaper_set(&set_inv(
@@ -1249,11 +1249,11 @@ mod tests {
     #[test]
     fn from_skwd_is_a_no_op_when_the_pick_already_matches() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SKWD_WALL_STANDIN"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT", "AOIDE_SKWD_WALL_STANDIN"]);
         let root = unique_tmp("wallpaper-from-skwd-noop");
         let stage = root.join("stage");
         stage_theme(&stage, Some("skwd-wall"));
-        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        aoide_test_support::pin_stage(&stage);
         std::env::remove_var("AOIDE_SKWD_WALL_STANDIN");
 
         let first = handle_wallpaper_set(&set_inv(

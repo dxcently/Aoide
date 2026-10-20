@@ -580,8 +580,10 @@ pub(crate) fn marker_body(timestamps: &[i64], notified: Option<i64>) -> String {
     lines.join("\n")
 }
 
+/// The restart ledger lives under the strillix root: the healthcheck is paint, and core's state
+/// directory is core's to write.
 fn marker_path() -> PathBuf {
-    aoide_storage::fs::state_dir().join("quickshell-healthcheck-restarts")
+    crate::paths::strillix_root().join("quickshell-healthcheck-restarts")
 }
 
 fn now_epoch() -> i64 {
@@ -668,7 +670,7 @@ fn hyprctl_json(subcommand: &str) -> Value {
 /// The published expected-paint declaration, read from the live deployed
 /// tree: `run/qml/rices/surfaces.json` beside `manifest.json` and
 /// `registry.json` (CONTRACTS.md §5). The path resolves through
-/// [`aoide_storage::fs::run_qml_dir`] like every other reader of that tree
+/// [`crate::paths::run_qml_dir`] like every other reader of that tree
 /// (`crate::ipc`'s `shell.qml` lookup is the sibling case) rather than
 /// spelling `$AOIDE_ROOT` or `~/.aoide` here — the runtime root is one
 /// relocatable seam, and a second spelling would be the one that drifts.
@@ -687,14 +689,14 @@ fn hyprctl_json(subcommand: &str) -> Value {
 /// and [`surfaces_fall_short`] is a plain [`Value`] so the judgement itself
 /// stays unit-testable against literal fixtures.
 fn published_surfaces() -> Option<Value> {
-    published_json(&aoide_storage::fs::run_qml_dir().join("rices").join("surfaces.json"))
+    published_json(&crate::paths::run_qml_dir().join("rices").join("surfaces.json"))
 }
 
 /// The selected components, `run/qml/components.json` (CONTRACTS.md §4),
 /// at the top of the deployed tree beside `shell.qml`. Every failure mode is
 /// `None`, which [`asserted_expectation`] reads as "intersect nothing".
 fn published_components() -> Option<Value> {
-    published_json(&aoide_storage::fs::run_qml_dir().join("components.json"))
+    published_json(&crate::paths::run_qml_dir().join("components.json"))
 }
 
 fn published_json(path: &std::path::Path) -> Option<Value> {
@@ -790,11 +792,9 @@ pub fn run_healthcheck() -> HealthOutcome {
     let now = now_epoch();
     let marker = marker_path();
     if let Some(parent) = marker.parent() {
-        // Best-effort, same guarded posture as every write below: `state/`
-        // is normally seeded by the nix module's systemd-tmpfiles rule
-        // (`pkgs/aoide/module/aoided.nix`), but nothing in this crate creates
-        // it, and an absent directory would otherwise make BOTH writes below
-        // silently fail — `recent` would then never accumulate, the ladder
+        // Best-effort, same guarded posture as every write below. The directory
+        // may be absent, and then BOTH writes below would fail silently —
+        // `recent` would then never accumulate, the ladder
         // would permanently take its "no prior restart" branch, and the
         // shell would get restarted every ~15s forever, the exact inverse of
         // the future-timestamp defect above and just as bad. A failure here

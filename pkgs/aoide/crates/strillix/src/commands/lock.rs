@@ -229,13 +229,13 @@ fn hint_failed(cmd: &str, detail: String) -> Outcome {
 /// The staged rice: `stage/theme.json`'s `rice`, the name the shell itself
 /// paints (`ThemeState.riceName`).
 fn active_rice() -> Option<String> {
-    let raw = std::fs::read_to_string(aoide_storage::fs::stage_dir().join("theme.json")).ok()?;
+    let raw = std::fs::read_to_string(strillix_rice::paths::stage_dir().join("theme.json")).ok()?;
     let doc: Value = serde_json::from_str(&raw).ok()?;
     doc.get("rice")?.as_str().filter(|s| !s.is_empty()).map(str::to_string)
 }
 
 fn manifest_path() -> std::path::PathBuf {
-    aoide_storage::fs::run_qml_dir().join("rices").join("manifest.json")
+    strillix_rice::paths::run_qml_dir().join("rices").join("manifest.json")
 }
 
 /// Does `rice`'s OWN manifest entry carry the face slot? The baseline rice is
@@ -311,7 +311,7 @@ pub(crate) fn run_ipc(argv: &[String], deadline: Instant) -> Result<String, Stri
 
 /// `lock`'s own target: `quickshell -p <run/qml/shell.qml> ipc call lock <function>`.
 fn qs_call(function: &[&str], deadline: Instant) -> Result<String, String> {
-    run_ipc(&ipc_argv(&aoide_storage::fs::run_qml_dir().join("shell.qml"), "lock", function), deadline)
+    run_ipc(&ipc_argv(&strillix_rice::paths::run_qml_dir().join("shell.qml"), "lock", function), deadline)
 }
 
 /// The child's exit status, or `None` once `deadline` passes — the child is
@@ -439,7 +439,7 @@ esac
 
     impl Rig {
         fn new(tag: &str) -> Rig {
-            let env = EnvSaver::capture(&["PATH", "AOIDE_STAGE_DIR", "XDG_SESSION_ID"]);
+            let env = EnvSaver::capture(&["PATH", "AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT", "XDG_SESSION_ID"]);
             let root = unique_tmp(tag);
             let bin = root.join("bin");
             std::fs::create_dir_all(&bin).unwrap();
@@ -450,18 +450,18 @@ esac
             }
             let stage = root.join("aoide/rice/stage");
             std::fs::create_dir_all(&stage).unwrap();
-            std::fs::create_dir_all(root.join("aoide/run/qml/rices")).unwrap();
+            std::fs::create_dir_all(root.join("aoide/rice/run/qml/rices")).unwrap();
             std::fs::create_dir_all(root.join("pam")).unwrap();
             std::fs::write(root.join("pam/aoide-lock"), b"").unwrap();
             std::env::set_var("PATH", &bin);
-            std::env::set_var("AOIDE_STAGE_DIR", &stage);
+            aoide_test_support::pin_stage(&stage);
             std::env::remove_var("XDG_SESSION_ID");
             Rig { root, _env: env }
         }
 
         fn stage(&self, rice: &str, manifest: &str) {
             std::fs::write(self.root.join("aoide/rice/stage/theme.json"), format!(r#"{{"rice":"{rice}"}}"#)).unwrap();
-            std::fs::write(self.root.join("aoide/run/qml/rices/manifest.json"), manifest).unwrap();
+            std::fs::write(self.root.join("aoide/rice/run/qml/rices/manifest.json"), manifest).unwrap();
         }
 
         fn lock(&self) -> Outcome {

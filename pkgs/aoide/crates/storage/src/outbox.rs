@@ -1904,7 +1904,7 @@ mod tests {
         // fails with EISDIR — the same technique
         // `mail::an_unwritable_lock_path_makes_every_mail_write_err` uses for
         // the SAME underlying `try_stage_lock`.
-        std::fs::create_dir_all(crate::fs::stage_dir().join(".stage.lock")).unwrap();
+        std::fs::create_dir_all(crate::fs::conducting_stage_dir().join(".stage.lock")).unwrap();
 
         let entry = OutboxEntry::fresh(envelope("here", "there", "msg-1"));
         assert!(write_entry("there", &entry).is_err());

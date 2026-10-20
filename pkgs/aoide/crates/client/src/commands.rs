@@ -11064,7 +11064,7 @@ mod tests {
         // cannot_be_taken` uses for the SAME underlying `try_stage_lock`.
         // `outbox::write_entry` is the very first outbox call `mail send`
         // makes, so this fails before any drain is even attempted.
-        std::fs::create_dir_all(aoide_storage::fs::stage_dir().join(".stage.lock")).unwrap();
+        std::fs::create_dir_all(aoide_storage::fs::conducting_stage_dir().join(".stage.lock")).unwrap();
 
         let out = handle_mail_send(&mail_inv_with_flags(&["mail", "send"], &["hi"], &[("to", "peer-node/bob")]));
         assert_eq!(out.status, aoide_protocol::output::Status::Error, "a local spool write failure is a command error, never a masked delivery status");
@@ -11131,7 +11131,7 @@ mod tests {
         // THEN the re-read breaks: the spool's own successful write already
         // left `.stage.lock` behind as a regular (flocked) file, so it has
         // to come out before the same path can be re-made as a directory.
-        let lock_path = aoide_storage::fs::stage_dir().join(".stage.lock");
+        let lock_path = aoide_storage::fs::conducting_stage_dir().join(".stage.lock");
         let _ = std::fs::remove_file(&lock_path);
         std::fs::create_dir_all(&lock_path).unwrap();
 

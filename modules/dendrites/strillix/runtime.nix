@@ -833,8 +833,9 @@ in
                     ]
                   }"
                   # Same "a configured aoide.root must win" reasoning as
-                  # aoide-quickshell's own Environment above — health.rs's restart
-                  # backoff marker lives under $AOIDE_ROOT/state.
+                  # aoide-quickshell's own Environment above — health.rs reads the live QML
+                  # tree under $AOIDE_ROOT/run/qml, and its restart backoff marker lives under
+                  # $STRILLIX_ROOT.
                   "AOIDE_ROOT=${config.aoide.root}"
                   "STRILLIX_ROOT=${config.aoide.strillix.root}"
                 ];

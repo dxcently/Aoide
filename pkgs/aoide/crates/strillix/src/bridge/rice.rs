@@ -6,7 +6,7 @@ use aoide_conduct::shellbridge::{
     outcome_envelope, outcome_triple, run_bin_bounded, safe_session_id,
 };
 use aoide_protocol as daemon;
-use aoide_storage::mode::{load_mode_marker, ModeMarker, RiceMode};
+use strillix_rice::mode::{load_mode_marker, ModeMarker, RiceMode};
 use serde_json::{json, Value};
 
 /// How long one `ricemenu` answer may take, both children together: under
@@ -351,7 +351,7 @@ pub(crate) fn run_rice_json(argv: &[&str], timeout: std::time::Duration) -> Resu
 /// `declared`, `rices`) passed through verbatim with this machine's `host`
 /// name beside it (the name the Declare row's alert speaks) and `hostConfig`,
 /// the file `strillix rice declare --host` would rewrite
-/// ([`aoide_storage::fs::host_config`], null when none resolves), then — when
+/// ([`strillix_rice::paths::host_config`], null when none resolves), then — when
 /// [`drafts_rice`] names a rice for the marker — `strillix rice draft list <rice>
 /// --json` with the budget the first child left, projected to `draftsRice`
 /// and `drafts: [{name, savedAt, current}]`. No rice means `drafts: []` and
@@ -390,7 +390,7 @@ pub(crate) fn dispatch_rice_menu() -> Value {
     }
     answer.insert("ok".to_string(), Value::Bool(true));
     answer.insert("host".to_string(), json!(aoide_storage::display::os_hostname()));
-    answer.insert("hostConfig".to_string(), json!(aoide_storage::fs::host_config()));
+    answer.insert("hostConfig".to_string(), json!(strillix_rice::paths::host_config()));
     answer.insert("draftsRice".to_string(), json!(rice));
     answer.insert("drafts".to_string(), Value::Array(drafts));
     Value::Object(answer)
@@ -582,7 +582,7 @@ mod tests {
         assert_eq!(dispatch_rice_draft(&enter), Ok("routed draft-2".to_string()));
         assert_eq!(stub_argv_log(&root), ["rice mode draft draft-2 --json"]);
 
-        std::fs::write(root.join("mode.json"), r#"{"mode":"declarative","rice":"sonata"}"#).unwrap();
+        std::fs::write(root.join("stage").join("mode.json"), r#"{"mode":"declarative","rice":"sonata"}"#).unwrap();
         std::fs::remove_file(root.join("argv.log")).unwrap();
         // The refusal is the first thing that happens: not partial, no child.
         assert_eq!(
@@ -591,7 +591,7 @@ mod tests {
         );
         assert!(stub_argv_log(&root).is_empty(), "a refused save starts no child");
 
-        std::fs::write(root.join("mode.json"), r#"{"mode":"staging","rice":"sonata"}"#).unwrap();
+        std::fs::write(root.join("stage").join("mode.json"), r#"{"mode":"staging","rice":"sonata"}"#).unwrap();
         assert_eq!(dispatch_rice_draft(&RiceDraftAction::Save), Ok("saved".to_string()));
         assert_eq!(stub_argv_log(&root), ["rice draft save --json"]);
         let _ = std::fs::remove_dir_all(&root);
@@ -618,7 +618,7 @@ mod tests {
         );
         assert_eq!(stub_argv_log(&root), ["rice draft drop draft-2 --json"]);
 
-        std::fs::write(root.join("mode.json"), r#"{"mode":"declarative","rice":"sonata","stagingRice":"cadenza"}"#).unwrap();
+        std::fs::write(root.join("stage").join("mode.json"), r#"{"mode":"declarative","rice":"sonata","stagingRice":"cadenza"}"#).unwrap();
         std::fs::remove_file(root.join("argv.log")).unwrap();
         assert_eq!(
             dispatch_rice_draft(&drop1),
@@ -645,7 +645,7 @@ mod tests {
         assert_eq!(stub_argv_log(&root), ["rice mode stage --json", "rice mode draft nope --json"]);
 
         // Already unlocked: the same refusal is the FIRST step, nothing ran.
-        std::fs::write(root.join("mode.json"), r#"{"mode":"staging","rice":"sonata"}"#).unwrap();
+        std::fs::write(root.join("stage").join("mode.json"), r#"{"mode":"staging","rice":"sonata"}"#).unwrap();
         assert_eq!(dispatch_rice_draft(&enter), Err(("no rice is currently staged".to_string(), false)));
         let _ = std::fs::remove_dir_all(&root);
     }

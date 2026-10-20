@@ -523,7 +523,7 @@ mod tests {
     /// Point `AOIDE_STATE_DIR` at a fresh scratch dir so `edits_path()`
     /// resolves under it — mirrors `history.rs::tests::routed`'s shape, one
     /// env var lower in the stack ([`edits_path`] hangs off `state_dir()`,
-    /// not `stage_dir()`).
+    /// not the stage dir).
     fn routed(tag: &str) {
         let dir = unique_tmp(tag);
         std::env::set_var("AOIDE_STATE_DIR", &dir);

@@ -35,7 +35,7 @@
 use crate::dispatch::Invocation;
 use crate::output::Outcome;
 use crate::registry::{arg, cmd, flag, Registry};
-use aoide_storage::fs::STRILLIX_SHELL_SRC;
+use strillix_rice::paths::STRILLIX_SHELL_SRC;
 use serde_json::{json, Map, Value};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -1066,7 +1066,7 @@ enum ThemeStageError {
 ///     tells the two apart.
 fn load_theme_container(spec: &str, checkout: &Path) -> Result<Value, ThemeStageError> {
     let src: PathBuf = if spec == "live" {
-        aoide_storage::fs::stage_dir().join("theme.json")
+        strillix_rice::paths::stage_dir().join("theme.json")
     } else if !spec.contains('/')
         && strillix_rice::compose::valid_rice_name(spec)
         && checkout.join("rices").join(spec).is_dir()
@@ -1588,12 +1588,12 @@ fn compute_stage_map(checkout: &Path, root: &Path, watch: &[String]) -> Map<Stri
 }
 
 /// `ROOT/run/qml/rices/{manifest,registry}.json` — copied verbatim from the
-/// LIVE deployed tree (`aoide_storage::fs::run_qml_dir()`) when present,
+/// LIVE deployed tree (`strillix_rice::paths::run_qml_dir()`) when present,
 /// else the literal `{}` (a fresh host with no `strillix rice stage` history
 /// yet has neither file).
 fn stage_rices_manifest(run_qml_rices: &Path) -> Result<(), String> {
     for name in ["manifest.json", "registry.json"] {
-        let src = aoide_storage::fs::run_qml_dir().join("rices").join(name);
+        let src = strillix_rice::paths::run_qml_dir().join("rices").join(name);
         let dst = run_qml_rices.join(name);
         match std::fs::read(&src) {
             Ok(bytes) => aoide_storage::fs::atomic_write_bytes(&dst, &bytes),
@@ -2086,7 +2086,7 @@ mod tests {
 
     #[test]
     fn root_builder_creates_the_exact_tree_with_manifest_fallback() {
-        // `stage_rices_manifest` reads `aoide_storage::fs::run_qml_dir()`,
+        // `stage_rices_manifest` reads `strillix_rice::paths::run_qml_dir()`,
         // which honors `$AOIDE_STAGE_DIR` (process-global,
         // `pkgs/aoide/crates/AGENTS.md`'s "per-crate tests only" note) --
         // pin it at a scratch dir with no deployed manifest so this test
@@ -2095,13 +2095,13 @@ mod tests {
         let _guard = aoide_test_support::env_lock()
             .lock()
             .unwrap_or_else(|e| e.into_inner());
-        let saved_stage_dir = std::env::var_os("AOIDE_STAGE_DIR");
+        let _pin = aoide_test_support::EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
 
         let base = scratch("root_builder");
         let checkout = base.join("checkout");
         let root = base.join("root");
         fake_checkout(&checkout);
-        std::env::set_var("AOIDE_STAGE_DIR", base.join("unrelated-live-stage"));
+        aoide_test_support::pin_stage(base.join("unrelated-live").join("stage"));
 
         let stage_rice_dir = root.join("stage");
         std::fs::create_dir_all(&stage_rice_dir).unwrap();
@@ -2192,10 +2192,6 @@ mod tests {
         assert!(stage_rice_dir.join("grimoire.json").is_file());
         assert!(root.join("state").join("usage.json").is_file());
 
-        match saved_stage_dir {
-            Some(v) => std::env::set_var("AOIDE_STAGE_DIR", v),
-            None => std::env::remove_var("AOIDE_STAGE_DIR"),
-        }
     }
 
     #[test]
@@ -2217,18 +2213,14 @@ mod tests {
         flags.insert("root".to_string(), root.to_str().unwrap().to_string());
         flags.insert("no-launch".to_string(), "true".to_string());
         let outcome = with_flake_root(&checkout, || {
-            let saved_stage_dir = std::env::var_os("AOIDE_STAGE_DIR");
-            std::env::set_var("AOIDE_STAGE_DIR", base.join("unrelated-live-stage"));
+            let _pin = aoide_test_support::EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
+            aoide_test_support::pin_stage(base.join("unrelated-live").join("stage"));
             let outcome = handle_preview(&Invocation {
                 path: vec!["preview".to_string()],
                 args: vec![],
                 flags,
                 door: aoide_protocol::Door::Cli,
             });
-            match saved_stage_dir {
-                Some(v) => std::env::set_var("AOIDE_STAGE_DIR", v),
-                None => std::env::remove_var("AOIDE_STAGE_DIR"),
-            }
             outcome
         });
         assert_eq!(
@@ -2335,7 +2327,7 @@ mod tests {
         fake_checkout(&checkout);
         std::env::set_var("AOIDE_ROOT", base.join("live-root"));
         std::env::set_var("STRILLIX_ROOT", base.join("live-root"));
-        let live_stage = aoide_storage::fs::stage_dir();
+        let live_stage = strillix_rice::paths::stage_dir();
         std::fs::create_dir_all(&live_stage).unwrap();
         std::fs::write(
             live_stage.join("theme.json"),

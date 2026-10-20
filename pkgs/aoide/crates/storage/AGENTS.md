@@ -185,34 +185,23 @@
 - **Stage files are read/written through `fs`/`stage`, never ad hoc.** A new
   consumer that wants a JSON file under the stage tree adds a typed
   accessor here rather than `serde_json::from_str`-ing a raw path elsewhere.
-- **Two stage roots, not one — pick the right one, don't blur them
-  (command-defrag S1, 2026-08-27).** `fs::stage_dir` is rice/paint
-  (`/stage/`); `fs::conducting_stage_dir` is core orchestration state
-  (`state/stage/`). A new stage-file accessor for something the
-  `aoide`/`aoided` binaries alone read or write goes through
-  `conducting_stage_dir`; a new one for something only `strillix`/QML writes
-  goes through `stage_dir`. Don't "simplify" by routing a core file through
-  `stage_dir` for convenience — that is exactly the coupling the split
-  exists to remove (root `AGENTS.md`'s core-vs-strillix boundary, applied to the
-  stage tree itself).
-- **`fs::rice_conf_link` is the first writer outside `$AOIDE_ROOT`.** It names
-  `<home>/.local/state/strillix/rice.conf` (`<home>` = `aoide_home()`, the home
-  `root` defaults through), because the renderer's Nix activation
-  hardcodes that path and the two halves must name one file. A test that
-  exercises it sets `HOME` under the temp dir (`EnvSaver` captures it); the
-  rice crate's writer skips a test build whose `HOME` is not isolated, so an
-  unisolated test cannot repoint the operator's link. The one way to retarget a
-  link here is `fs::atomic_symlink` (a temp link renamed over it), never
-  remove-then-link: a reader must see the old target or the new one.
-- **`fs::declared_rice_conf` is off `root()`, not `strillix_dir()`.** The renderer
-  writes under `aoide.root` and never sees `$AOIDE_STAGE_DIR`, so the twin
-  must not follow that override. `fs::empty_rice_conf` is under `stage_dir()`.
+- **One stage root in core: `conducting_stage_dir` (`state/stage/`).** A
+  stage-file accessor for something the `aoide`/`aoided` binaries alone read
+  or write goes through it. The rice stage (`$STRILLIX_ROOT/stage/`) belongs
+  to `strillix-rice`'s `paths::stage_dir` and is never named from core: a core
+  file routed through the rice stage for convenience is the coupling the
+  split exists to remove (root `AGENTS.md`'s core-vs-strillix boundary,
+  applied to the stage tree itself).
+- **The rice paths are `strillix-rice`'s, not core's.** The rice stage, the
+  declared twin, the rice link `rice.conf` and the rice tree's roots are
+  `strillix_rice::paths`, and core never names them. The invariants for those
+  paths, and for the rice link's own writer, live in `strillix-rice/AGENTS.md`.
 - **`fs::migrate_conducting_stage` is a ONE-SHOT, Once-guarded move, not a
   sync.** It runs at most once per process, only from
   `conducting_stage_dir`'s no-override fallback branch (an `$AOIDE_STAGE_DIR`
   override names the same directory for old and new, so there is nothing to
   move and that branch never calls it). It moves a file only when it exists
-  at the OLD `/stage/` path and is ABSENT at the new one — never
+  at the OLD `$STRILLIX_ROOT/stage/` path and is ABSENT at the new one — never
   clobbers a fresher `state/stage/` file, never touches a rice file. Don't
   turn this into a periodic or unconditional re-sync; a second boot with
   both a old-path leftover and a populated new path should leave the new
@@ -273,57 +262,29 @@
   the roster — this layer refuses nothing on its own, and a rejected-nothing
   call is not a write, the same change-only discipline every other mutator
   here holds.
-- **`fs::migrate_root_once` is `pub` and deliberately NOT wired into any
-  path getter (L-C2, strillix-carrier lane, task #107) — don't "fix" this by
-  hanging it off `fs::root`'s no-override fallback the way
-  `migrate_conducting_stage` hangs off `conducting_stage_dir`'s.** `root`/
-  `stage_dir`/`state_dir` are reached by `with_stage_lock`, the SHARED lock
-  primitive nearly every stage-file writer across the whole workspace
-  routes through regardless of which file it is actually touching
-  (`with_stage_lock`'s own doc: it always locks `stage_dir()`, even for a
-  `conducting_stage_dir`-domain caller) — a real incident during this
-  lane's own development proved that an ordinary `state_dir()`-only test
-  (overriding only `$AOIDE_STATE_DIR`, never anticipating a need to touch
-  `$AOIDE_STAGE_DIR` too) still reaches `stage_dir()`'s fallback through
-  `with_stage_lock`, and would silently drive a real migration against the
-  operator's actual `$HOME` the first time such a test ran unguarded.
-  `conducting_stage_dir` has no such shared low-level caller, which is why
-  ITS migration is safe to hang off its own resolution while `root`'s is
-  not. The three real binaries call `migrate_root_once()` once, explicitly,
-  at the top of their own `main()` instead (`crates/cli/src/bin/{aoide,
-  aoided}.rs`, `crates/strillix/src/bin/strillix.rs`); it moves only
-  `state/` and `log` (and the old `~/.local/state/lyra` link tree),
-  never the rice tree. A test may call it directly
-  too (it is a plain idempotent function, no `Once`/env-isolation dance
-  needed, unlike `migrate_conducting_stage`'s own test suite). A move that
-  fails is narrated and leaves the old tree in place. Its one `Err` is a
-  `state/` that exists and cannot be locked owner-only, on EVERY run: it
-  locks `state_dir()` first, before any move, and the tree a move lands in
-  is locked again. All three binaries exit on it rather than read a tree
-  they could not make private. A `state/` that is absent is not created
-  there, and one whose parent is not a directory counts as absent, so the
-  narrated failure stays the failure.
-- **The rice move is opt-in: `fs::migrate_rice_root`, reached only through
-  `fs::rice_root_at_start` under `STRILLIX_MIGRATE=1` or `strx migrate`.**
-  `rice_root_at_start` is the strillix binary's start-up hook. Without the
-  flag it moves nothing and writes no marker; when old rice state sits under
-  `$AOIDE_ROOT/song` it prints one line naming `strx migrate`. `rice_status`
-  reads the state from disk without moving (`Settled`, `Due(paths)`,
-  `Both(paths)`), and `strx migrate --check` reports it. Never call
-  `migrate_rice_root` from a library getter or a core binary: a plain start
-  must never move a live rice tree.
-- **The rice tree's move leaves a marker, and two states refuse it
-  (`fs::migrate_rice_tree`).** A `$AOIDE_ROOT/song` that is a FILE is the
-  marker: the move is done, so nothing moves and nothing is narrated. Do not
-  "tidy" it into a directory or delete it: the file is what makes an old
-  `aoide`/`aoided` binary fail (ENOTDIR on `song/stage`) rather than
-  recreate a second live rice tree. The marker is written only over an
-  empty directory this run emptied; a leftover keeps `song/` as a directory
-  and is narrated. When BOTH `song/` and `$STRILLIX_ROOT` hold rice state
-  (`holds_state`: any file at any depth; empty dirs do not count, so the
-  pre-created `$STRILLIX_ROOT/stage` never trips it), nothing moves and the
-  refusal exits 0, so the binaries keep running on the strillix root.
-- **A checkout-relative source path is named ONCE, here — `fs::STRILLIX_SHELL_SRC`
+- **`fs::migrate_root_once` is `pub` and deliberately NOT wired into any path
+  getter.** `root` and `state_dir` are reached by the stage locks (the
+  conducting lock resolves its directory through `state_dir`), and every
+  stage-file writer takes one, so a migration hung off the getters would run
+  from an ordinary test that never meant to touch the operator's `$HOME`.
+  `conducting_stage_dir` has no such shared caller, which is why its own
+  migration is safe to hang off its resolution. The three real binaries call
+  `migrate_root_once()` once, explicitly, at the top of their own `main()`
+  (`crates/cli/src/bin/{aoide,aoided}.rs`, `crates/strillix/src/bin/strillix.rs`).
+  It moves `state/` and `log`, renames the peer-era state names, and never
+  touches the rice tree. A test may call it directly: it is a plain idempotent
+  function with no `Once` to reset. A move that fails is narrated and leaves
+  the old tree in place. Its one `Err` is a `state/` that exists and cannot be
+  locked owner-only, on EVERY run: it locks `state_dir()` first, before any
+  move, and the tree a move lands in is locked again. All three binaries exit
+  on it rather than read a tree they could not make private. A `state/` that
+  is absent is not created there, and one whose parent is not a directory
+  counts as absent, so the narrated failure stays the failure.
+- **The rice tree's move is `strillix-rice`'s, not core's.** `strillix_rice::migrate`
+  owns `migrate_rice_root`, `rice_status` and `rice_root_at_start`. The
+  invariants for the move, its refusals and its marker live in
+  `strillix-rice/AGENTS.md`. Core's `migrate_root_once` never moves a rice path.
+- **A checkout-relative source path is named ONCE, in `strillix_rice::paths` — `STRILLIX_SHELL_SRC`
   (`"pkgs/strillix-shell"`) is the pattern, not an exception.** The strillix shell's
   QML/icons/preview tree is read by `strillix`'s `commands::preview` (which
   stages it into an isolated preview root) and named in the scaffold doc

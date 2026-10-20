@@ -78,6 +78,29 @@ fn the_flag_runs_the_move_from_the_start_up_hook() {
     let _ = std::fs::remove_dir_all(&sb);
 }
 
+/// The paint link Hyprland sources until the activation rewrites its config.
+fn old_lyra_link(sb: &Path) -> PathBuf {
+    let lyra = sb.join("home").join(".local").join("state").join("lyra");
+    std::fs::create_dir_all(&lyra).unwrap();
+    std::fs::write(lyra.join("rice.conf"), "source\n").unwrap();
+    lyra.join("rice.conf")
+}
+
+#[test]
+fn the_lyra_link_moves_only_under_the_flag() {
+    let sb = sandbox("lyra");
+    let link = old_lyra_link(&sb);
+    let plain = strillix(&sb, false, &["--help"]);
+    assert!(plain.status.success(), "{}", String::from_utf8_lossy(&plain.stderr));
+    assert!(link.is_file(), "a plain start leaves the lyra link where Hyprland sources it");
+    assert!(!sb.join("home").join(".local/state/strillix").exists());
+    let flagged = strillix(&sb, true, &["--help"]);
+    assert!(flagged.status.success(), "{}", String::from_utf8_lossy(&flagged.stderr));
+    assert!(sb.join("home/.local/state/strillix/rice.conf").is_file(), "the flag moves the lyra link");
+    assert!(!link.exists());
+    let _ = std::fs::remove_dir_all(&sb);
+}
+
 #[test]
 fn migrate_check_reports_due_and_moves_nothing() {
     let sb = sandbox("check");

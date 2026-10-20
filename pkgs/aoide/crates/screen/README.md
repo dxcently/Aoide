@@ -18,6 +18,7 @@ Paint-side — ships in `strillix`, not core.
 - `ocr`/`text` — tesseract extraction and OCR-word-name click targeting.
 - `diff` — pixel-changed bounding box + `hypr::info_delta`, turning "did my
   click do anything?" into a measurement.
+- `paths` — the screen family's two durable state paths: `captures_dir()` (capture artifacts) and `pointer_state_file()` (the saved pointer position), both under `$AOIDE_ROOT/state/`. Only this crate reads or writes them.
 - `commands` — this crate's CLI commands (`screen info/shot/point/ocr/diff/…`).
 
 ## What it consumes

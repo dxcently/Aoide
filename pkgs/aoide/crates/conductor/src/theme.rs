@@ -8,7 +8,7 @@
 //! roster reads in musical notation (♪ working, 𝄐 awaiting, 𝄁 stopped, 𝄽 idle,
 //! 𝄂 done).
 //!
-//! Colour comes from stage theme palette and Base16 tokens as exact RGB.
+//! Colour comes from the terminal's ANSI 16 base; no rice palette is read.
 //! Missing semantic tokens retain ANSI fallbacks; focused tabs use role fills,
 //! while inactive selections keep subdued foreground/background-derived shades.
 
@@ -483,25 +483,6 @@ mod tests {
         assert_eq!(active.fg, Some(Color::Rgb(240, 230, 220)));
         assert_ne!(tab_style(&pal, Role::Project, true, false).bg, active.bg);
         assert_eq!(role_color(&Palette::default(), Role::Agent), Color::Magenta);
-    }
-
-    #[test]
-    fn loader_reads_actual_base16_keys_and_ignores_invalid_tokens() {
-        let path = std::env::temp_dir().join(format!(
-            "conductor-theme-{}-{}.json",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        std::fs::write(&path, r##"{"palette":{"bg":"#f2ebde","fg":"#2f2a33","urgent":"#b0472f"},"base16":{"base0D":"#345f81","base0E":"bad-token","base0B":"#4e8b45"}}"##).unwrap();
-        let pal = crate::app::load_palette(&path);
-        std::fs::remove_file(path).unwrap();
-        assert_eq!(pal.base16[13], Some((52, 95, 129)));
-        assert_eq!(pal.base16[14], None);
-        assert_eq!(pal.base16[0], None);
-        assert_eq!(pal.urgent_rgb, Some((176, 71, 47)));
     }
 
     fn rec_with_tags(tags: serde_json::Value) -> SessionRecord {

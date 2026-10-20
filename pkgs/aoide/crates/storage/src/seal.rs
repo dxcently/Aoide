@@ -2519,7 +2519,7 @@ mod tests {
     fn the_gate_refuses_when_the_stage_lock_cannot_be_opened() {
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let (_env, dir) = aoide_test_support::isolated_mail_root("gate-lock-unopenable");
-        std::fs::create_dir_all(crate::fs::stage_dir().join(".stage.lock")).unwrap();
+        std::fs::create_dir_all(crate::fs::conducting_stage_dir().join(".stage.lock")).unwrap();
 
         assert!(record_admitted(&sample_container(), "digest-1").is_err(), "a record without its lock is refused");
         assert!(check_seen(&sample_container(), "digest-1").is_err(), "a read without its lock is refused");

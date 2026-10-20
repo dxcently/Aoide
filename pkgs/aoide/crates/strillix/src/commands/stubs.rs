@@ -104,7 +104,7 @@ fn handle_rice_declare(inv: &Invocation) -> Outcome {
         .with_data(json!({ "reason": "invalid-name", "name": name }));
     }
 
-    let src = aoide_storage::fs::rice_dir(&name);
+    let src = strillix_rice::paths::rice_dir(&name);
     if !src.is_dir() {
         return Outcome::error(
             "rice.declare",
@@ -206,9 +206,9 @@ mod tests {
     #[test]
     fn host_flag_rewrites_the_host_line_and_copies_nothing() {
         let _g = env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_FLAKE_ROOT", "AOIDE_HOST_CONFIG", "STRILLIX_TEMPLATES"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT", "AOIDE_FLAKE_ROOT", "AOIDE_HOST_CONFIG", "STRILLIX_TEMPLATES"]);
         let root = unique_tmp("declare-host");
-        std::env::set_var("AOIDE_STAGE_DIR", root.join("rice").join("stage"));
+        aoide_test_support::pin_stage(root.join("rice").join("stage"));
         let checkout = root.join("checkout");
         std::env::set_var("AOIDE_FLAKE_ROOT", &checkout);
         let host = root.join("default.nix");
@@ -235,9 +235,9 @@ mod tests {
     #[test]
     fn host_flag_warns_about_a_dirty_rice_folder_and_still_declares() {
         let _g = env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_FLAKE_ROOT", "AOIDE_HOST_CONFIG", "STRILLIX_TEMPLATES"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT", "AOIDE_FLAKE_ROOT", "AOIDE_HOST_CONFIG", "STRILLIX_TEMPLATES"]);
         let root = unique_tmp("declare-host-warn");
-        std::env::set_var("AOIDE_STAGE_DIR", root.join("rice").join("stage"));
+        aoide_test_support::pin_stage(root.join("rice").join("stage"));
         let checkout = root.join("checkout");
         std::env::set_var("AOIDE_FLAKE_ROOT", &checkout);
         let folder = checkout.join("rices").join("dusk");
@@ -274,9 +274,9 @@ mod tests {
     #[test]
     fn copy_refuses_a_dirty_rice_folder_and_leaves_it_alone() {
         let _g = env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_FLAKE_ROOT"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT", "AOIDE_FLAKE_ROOT"]);
         let stage_root = unique_tmp("declare-dirty");
-        std::env::set_var("AOIDE_STAGE_DIR", stage_root.join("rice").join("stage"));
+        aoide_test_support::pin_stage(stage_root.join("rice").join("stage"));
         let rices = stage_root.join("rice").join("rices").join("dusk");
         std::fs::create_dir_all(&rices).unwrap();
         std::fs::write(rices.join("theme.json"), "{\"runtime\":true}").unwrap();
@@ -333,9 +333,9 @@ mod tests {
     #[test]
     fn no_composed_rice_is_a_taught_error() {
         let _g = env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_FLAKE_ROOT"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT", "AOIDE_FLAKE_ROOT"]);
         let stage_root = unique_tmp("declare-norice");
-        std::env::set_var("AOIDE_STAGE_DIR", stage_root.join("rice").join("stage"));
+        aoide_test_support::pin_stage(stage_root.join("rice").join("stage"));
         std::env::set_var("AOIDE_FLAKE_ROOT", unique_tmp("declare-norice-checkout"));
 
         let out = handle_rice_declare(&inv(&["nope"]));
@@ -348,9 +348,9 @@ mod tests {
     #[test]
     fn no_checkout_is_a_taught_error() {
         let _g = env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_FLAKE_ROOT"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT", "AOIDE_FLAKE_ROOT"]);
         let stage_root = unique_tmp("declare-nocheckout");
-        std::env::set_var("AOIDE_STAGE_DIR", stage_root.join("rice").join("stage"));
+        aoide_test_support::pin_stage(stage_root.join("rice").join("stage"));
         let rices = stage_root.join("rice").join("rices").join("dusk");
         std::fs::create_dir_all(&rices).unwrap();
         std::fs::write(rices.join("theme.json"), "{}").unwrap();
@@ -370,9 +370,9 @@ mod tests {
     #[test]
     fn an_old_shape_rice_nix_is_refused_and_nothing_is_copied() {
         let _g = env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_FLAKE_ROOT"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT", "AOIDE_FLAKE_ROOT"]);
         let stage_root = unique_tmp("declare-old-shape");
-        std::env::set_var("AOIDE_STAGE_DIR", stage_root.join("rice").join("stage"));
+        aoide_test_support::pin_stage(stage_root.join("rice").join("stage"));
         let rices = stage_root.join("rice").join("rices").join("dusk");
         std::fs::create_dir_all(&rices).unwrap();
         std::fs::write(rices.join("theme.json"), "{}").unwrap();
@@ -399,9 +399,9 @@ mod tests {
     #[test]
     fn a_v1_body_passes_the_shape_check_and_is_copied() {
         let _g = env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_FLAKE_ROOT"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT", "AOIDE_FLAKE_ROOT"]);
         let stage_root = unique_tmp("declare-v1-body");
-        std::env::set_var("AOIDE_STAGE_DIR", stage_root.join("rice").join("stage"));
+        aoide_test_support::pin_stage(stage_root.join("rice").join("stage"));
         let rices = stage_root.join("rice").join("rices").join("dusk");
         std::fs::create_dir_all(&rices).unwrap();
         std::fs::write(rices.join("theme.json"), "{}").unwrap();
@@ -422,9 +422,9 @@ mod tests {
     #[test]
     fn copies_the_composed_rice_into_the_checkout_and_is_idempotent() {
         let _g = env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_FLAKE_ROOT"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT", "AOIDE_FLAKE_ROOT"]);
         let stage_root = unique_tmp("declare-copy");
-        std::env::set_var("AOIDE_STAGE_DIR", stage_root.join("rice").join("stage"));
+        aoide_test_support::pin_stage(stage_root.join("rice").join("stage"));
         let rices = stage_root.join("rice").join("rices").join("dusk");
         std::fs::create_dir_all(rices.join("widgets")).unwrap();
         std::fs::write(rices.join("theme.json"), "{\"a\":1}").unwrap();
@@ -457,9 +457,9 @@ mod tests {
     #[test]
     fn the_machines_takes_and_drafts_never_reach_the_checkout() {
         let _g = env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_FLAKE_ROOT"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT", "AOIDE_FLAKE_ROOT"]);
         let stage_root = unique_tmp("declare-scratch");
-        std::env::set_var("AOIDE_STAGE_DIR", stage_root.join("rice").join("stage"));
+        aoide_test_support::pin_stage(stage_root.join("rice").join("stage"));
         let rices = stage_root.join("rice").join("rices").join("dusk");
         std::fs::create_dir_all(rices.join("history")).unwrap();
         std::fs::create_dir_all(rices.join("drafts").join("neon")).unwrap();
@@ -497,9 +497,9 @@ mod tests {
     #[test]
     fn a_takes_symlink_is_skipped_and_does_not_fail_the_declare() {
         let _g = env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_FLAKE_ROOT"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT", "AOIDE_FLAKE_ROOT"]);
         let stage_root = unique_tmp("declare-takes-link");
-        std::env::set_var("AOIDE_STAGE_DIR", stage_root.join("rice").join("stage"));
+        aoide_test_support::pin_stage(stage_root.join("rice").join("stage"));
         let rices = stage_root.join("rice").join("rices").join("dusk");
         let elsewhere = stage_root.join("elsewhere");
         std::fs::create_dir_all(&rices).unwrap();

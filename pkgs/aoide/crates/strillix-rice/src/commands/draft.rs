@@ -58,7 +58,7 @@ use aoide_protocol::Invocation;
 use aoide_protocol::output::Outcome;
 use aoide_protocol::registry::{arg, cmd, Registry};
 use aoide_storage::fs as shellbridge;
-use aoide_storage::mode::{load_mode_marker, RiceMode};
+use crate::mode::{load_mode_marker, RiceMode};
 use serde_json::{json, Value};
 use aoide_protocol::Door;
 
@@ -128,7 +128,7 @@ fn no_resolvable_rice(cmd: &str) -> Outcome {
 /// (`rices/<rice>/drafts/`, never `stage/`), so it works in any mode
 /// without changing what's currently active.
 fn handle_draft_save(inv: &Invocation) -> Outcome {
-    let theme_src = shellbridge::stage_dir().join("theme.json");
+    let theme_src = crate::paths::stage_dir().join("theme.json");
     let raw = match std::fs::read_to_string(&theme_src) {
         Ok(s) => s,
         Err(e) => {
@@ -185,7 +185,7 @@ fn handle_draft_save(inv: &Invocation) -> Outcome {
 /// absent `drafts/` is empty. Candidates carry no leading zero, so `draft-01`,
 /// `draft-0` and `draft-x` never collide with one.
 fn mint_draft_name(rice: &str) -> String {
-    let taken: Vec<String> = std::fs::read_dir(shellbridge::rice_drafts_dir(rice))
+    let taken: Vec<String> = std::fs::read_dir(crate::paths::rice_drafts_dir(rice))
         .map(|read| {
             read.flatten()
                 .map(|e| e.file_name().to_string_lossy().into_owned())
@@ -219,7 +219,7 @@ fn mint_draft_name(rice: &str) -> String {
 /// reasons; `handle_mode_draft` already has it via
 /// [`super::mode::current_staged_rice`]).
 pub(crate) fn fork_stage_into(rice: &str, name: &str) -> Outcome {
-    let stage = shellbridge::stage_dir();
+    let stage = crate::paths::stage_dir();
     let theme_src = stage.join("theme.json");
     let raw = match std::fs::read_to_string(&theme_src) {
         Ok(s) => s,
@@ -242,7 +242,7 @@ pub(crate) fn fork_stage_into(rice: &str, name: &str) -> Outcome {
         .with_data(json!({ "reason": "invalid-json", "theme": theme_src.to_string_lossy() }));
     }
 
-    let dir = shellbridge::draft_dir(rice, name);
+    let dir = crate::paths::draft_dir(rice, name);
     let theme_dst = dir.join("theme.json");
     if let Err(e) = shellbridge::atomic_write(&theme_dst, &raw) {
         return Outcome::error(
@@ -318,7 +318,7 @@ fn handle_draft_list(inv: &Invocation) -> Outcome {
     let rices: Vec<String> = match &scope {
         Some(s) => vec![s.clone()],
         None => {
-            let root = shellbridge::strillix_dir().join("rices");
+            let root = crate::paths::strillix_root().join("rices");
             std::fs::read_dir(&root)
                 .map(|read| {
                     let mut names: Vec<String> = read
@@ -335,7 +335,7 @@ fn handle_draft_list(inv: &Invocation) -> Outcome {
 
     let mut entries: Vec<((String, String), Value)> = Vec::new();
     for rice in &rices {
-        let dir = shellbridge::rice_drafts_dir(rice);
+        let dir = crate::paths::rice_drafts_dir(rice);
         let Ok(read) = std::fs::read_dir(&dir) else {
             continue;
         };
@@ -419,7 +419,7 @@ fn handle_draft_drop(inv: &Invocation) -> Outcome {
         .with_data(json!({ "reason": "draft-is-live", "name": name, "rice": rice }));
     }
 
-    let dir = shellbridge::draft_dir(&rice, &name);
+    let dir = crate::paths::draft_dir(&rice, &name);
     if !dir.is_dir() {
         return Outcome::error(
             "rice.draft.drop",
@@ -450,7 +450,7 @@ fn handle_draft_drop(inv: &Invocation) -> Outcome {
 mod tests {
     use super::*;
     use aoide_protocol::output::Status;
-    use aoide_storage::mode::{save_mode_marker, ModeMarker};
+    use crate::mode::{save_mode_marker, ModeMarker};
     use aoide_test_support::*;
 
     /// Every test's stage carries a `"rice"` breadcrumb — `save`/`drop` both
@@ -471,14 +471,14 @@ mod tests {
     #[test]
     fn save_creates_the_draft_dir_nested_under_its_rice_and_files() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         let root = unique_tmp("draft-save-ok");
         let stage = root.join("stage");
         std::fs::create_dir_all(&stage).unwrap();
         stage_with_rice(&stage, "sonata");
         std::fs::write(stage.join("wallpaper.json"), r#"{"path":"x.png"}"#).unwrap();
         crate::commands::test_support::ensure_default_rices_fixture();
-        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        aoide_test_support::pin_stage(&stage);
 
         let out = handle_draft_save(&inv(&["rice", "draft", "save"], &["neon-night"]));
         assert_eq!(out.status, Status::Ok, "{:?}", out.data);
@@ -507,10 +507,10 @@ mod tests {
     #[test]
     fn save_without_a_staged_theme_errors() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
-        let stage = unique_tmp("draft-save-nostage");
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
+        let stage = unique_tmp("draft-save-nostage").join("stage");
         crate::commands::test_support::ensure_default_rices_fixture();
-        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        aoide_test_support::pin_stage(&stage);
 
         let out = handle_draft_save(&inv(&["rice", "draft", "save"], &["neon-night"]));
         assert_eq!(out.status, Status::Error);
@@ -521,13 +521,13 @@ mod tests {
     #[test]
     fn save_with_a_riceless_staged_theme_errors_no_resolvable_rice() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
-        let stage = unique_tmp("draft-save-norice");
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
+        let stage = unique_tmp("draft-save-norice").join("stage");
         std::fs::create_dir_all(&stage).unwrap();
         // VALID_NOTES parses fine but carries no "rice" field.
         std::fs::write(stage.join("theme.json"), VALID_NOTES).unwrap();
         crate::commands::test_support::ensure_default_rices_fixture();
-        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        aoide_test_support::pin_stage(&stage);
 
         let out = handle_draft_save(&inv(&["rice", "draft", "save"], &["neon-night"]));
         assert_eq!(out.status, Status::Error);
@@ -538,13 +538,13 @@ mod tests {
     #[test]
     fn save_upserts_an_existing_draft() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         let root = unique_tmp("draft-save-upsert");
         let stage = root.join("stage");
         std::fs::create_dir_all(&stage).unwrap();
         stage_with_rice(&stage, "sonata");
         crate::commands::test_support::ensure_default_rices_fixture();
-        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        aoide_test_support::pin_stage(&stage);
 
         handle_draft_save(&inv(&["rice", "draft", "save"], &["neon-night"]));
 
@@ -564,14 +564,14 @@ mod tests {
     #[test]
     fn save_clears_a_stale_wallpaper_when_the_current_stage_has_none() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         let root = unique_tmp("draft-save-stale-wallpaper");
         let stage = root.join("stage");
         std::fs::create_dir_all(&stage).unwrap();
         stage_with_rice(&stage, "sonata");
         std::fs::write(stage.join("wallpaper.json"), r#"{"path":"x.png"}"#).unwrap();
         crate::commands::test_support::ensure_default_rices_fixture();
-        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        aoide_test_support::pin_stage(&stage);
 
         handle_draft_save(&inv(&["rice", "draft", "save"], &["neon-night"]));
         let dir = root.join("rices").join("sonata").join("drafts").join("neon-night");
@@ -588,13 +588,13 @@ mod tests {
     #[test]
     fn saving_one_draft_never_touches_another() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         let root = unique_tmp("draft-save-independent");
         let stage = root.join("stage");
         std::fs::create_dir_all(&stage).unwrap();
         stage_with_rice(&stage, "sonata");
         crate::commands::test_support::ensure_default_rices_fixture();
-        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        aoide_test_support::pin_stage(&stage);
 
         handle_draft_save(&inv(&["rice", "draft", "save"], &["amber-dusk"]));
         let updated = r##"{"schemaVersion":"0","rice":"sonata","palette":{"bg":"#222222"}}"##;
@@ -618,13 +618,13 @@ mod tests {
     #[test]
     fn drafts_of_two_different_rices_never_collide_even_with_the_same_name() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         let root = unique_tmp("draft-save-cross-rice");
         let stage = root.join("stage");
         std::fs::create_dir_all(&stage).unwrap();
         stage_with_rice(&stage, "sonata");
         crate::commands::test_support::ensure_default_rices_fixture();
-        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        aoide_test_support::pin_stage(&stage);
         handle_draft_save(&inv(&["rice", "draft", "save"], &["neon-night"]));
 
         stage_with_rice(&stage, "moonlight");
@@ -656,7 +656,7 @@ mod tests {
         // std::fs::read_to_string follows symlinks transparently, same as
         // any other reader — and forks it into a brand-new draft.
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         let root = unique_tmp("draft-save-through-symlink");
         let stage = root.join("stage");
         std::fs::create_dir_all(&stage).unwrap();
@@ -666,7 +666,7 @@ mod tests {
         std::fs::write(existing_dir.join("theme.json"), routed_notes).unwrap();
         std::os::unix::fs::symlink(&existing_dir.join("theme.json"), stage.join("theme.json")).unwrap();
         crate::commands::test_support::ensure_default_rices_fixture();
-        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        aoide_test_support::pin_stage(&stage);
 
         let out = handle_draft_save(&inv(&["rice", "draft", "save"], &["amber-dusk"]));
         assert_eq!(out.status, Status::Ok, "{:?}", out.data);
@@ -681,13 +681,13 @@ mod tests {
     #[test]
     fn save_with_no_name_mints_draft_1_for_a_rice_with_no_drafts() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         let root = unique_tmp("draft-mint-first");
         let stage = root.join("stage");
         std::fs::create_dir_all(&stage).unwrap();
         stage_with_rice(&stage, "sonata");
         crate::commands::test_support::ensure_default_rices_fixture();
-        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        aoide_test_support::pin_stage(&stage);
 
         let out = handle_draft_save(&inv(&["rice", "draft", "save"], &[]));
         assert_eq!(out.status, Status::Ok, "{:?}", out.data);
@@ -704,13 +704,13 @@ mod tests {
     #[test]
     fn minting_fills_the_lowest_gap() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         let root = unique_tmp("draft-mint-gap");
         let stage = root.join("stage");
         std::fs::create_dir_all(&stage).unwrap();
         stage_with_rice(&stage, "sonata");
         crate::commands::test_support::ensure_default_rices_fixture();
-        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        aoide_test_support::pin_stage(&stage);
         let drafts = root.join("rices").join("sonata").join("drafts");
         for taken in ["draft-1", "draft-3"] {
             std::fs::create_dir_all(drafts.join(taken)).unwrap();
@@ -724,13 +724,13 @@ mod tests {
     #[test]
     fn minting_ignores_every_name_that_is_not_draft_n() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         let root = unique_tmp("draft-mint-ignores");
         let stage = root.join("stage");
         std::fs::create_dir_all(&stage).unwrap();
         stage_with_rice(&stage, "sonata");
         crate::commands::test_support::ensure_default_rices_fixture();
-        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        aoide_test_support::pin_stage(&stage);
         let drafts = root.join("rices").join("sonata").join("drafts");
         for other in ["draft-0", "draft-01", "draft-x", "neon-night"] {
             std::fs::create_dir_all(drafts.join(other)).unwrap();
@@ -744,13 +744,13 @@ mod tests {
     #[test]
     fn minting_counts_a_directory_with_no_theme_as_taken() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         let root = unique_tmp("draft-mint-halfwritten");
         let stage = root.join("stage");
         std::fs::create_dir_all(&stage).unwrap();
         stage_with_rice(&stage, "sonata");
         crate::commands::test_support::ensure_default_rices_fixture();
-        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        aoide_test_support::pin_stage(&stage);
         let half = root.join("rices").join("sonata").join("drafts").join("draft-1");
         std::fs::create_dir_all(&half).unwrap();
         std::fs::write(half.join("wallpaper.json"), "{}").unwrap();
@@ -764,13 +764,13 @@ mod tests {
     #[test]
     fn minting_counts_only_the_staged_rices_drafts() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         let root = unique_tmp("draft-mint-per-rice");
         let stage = root.join("stage");
         std::fs::create_dir_all(&stage).unwrap();
         stage_with_rice(&stage, "sonata");
         crate::commands::test_support::ensure_default_rices_fixture();
-        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        aoide_test_support::pin_stage(&stage);
         std::fs::create_dir_all(root.join("rices").join("moonlight").join("drafts").join("draft-1")).unwrap();
 
         let out = handle_draft_save(&inv(&["rice", "draft", "save"], &[]));
@@ -781,13 +781,13 @@ mod tests {
     #[test]
     fn save_with_no_name_and_no_staged_rice_refuses_and_creates_nothing() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         let root = unique_tmp("draft-mint-norice");
         let stage = root.join("stage");
         std::fs::create_dir_all(&stage).unwrap();
         std::fs::write(stage.join("theme.json"), VALID_NOTES).unwrap();
         crate::commands::test_support::ensure_default_rices_fixture();
-        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        aoide_test_support::pin_stage(&stage);
 
         let out = handle_draft_save(&inv(&["rice", "draft", "save"], &[]));
         assert_eq!(out.status, Status::Error);
@@ -799,13 +799,13 @@ mod tests {
     #[test]
     fn save_returns_the_name_whether_it_was_given_or_minted() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         let root = unique_tmp("draft-mint-data-name");
         let stage = root.join("stage");
         std::fs::create_dir_all(&stage).unwrap();
         stage_with_rice(&stage, "sonata");
         crate::commands::test_support::ensure_default_rices_fixture();
-        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        aoide_test_support::pin_stage(&stage);
 
         let given = handle_draft_save(&inv(&["rice", "draft", "save"], &["neon"])).data.unwrap();
         let minted = handle_draft_save(&inv(&["rice", "draft", "save"], &[])).data.unwrap();
@@ -821,10 +821,10 @@ mod tests {
     #[test]
     fn list_with_no_rices_at_all_is_ok_with_an_empty_list() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
-        let stage = unique_tmp("draft-list-absent");
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
+        let stage = unique_tmp("draft-list-absent").join("stage");
         crate::commands::test_support::ensure_default_rices_fixture();
-        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        aoide_test_support::pin_stage(&stage);
 
         let out = handle_draft_list(&inv(&["rice", "draft", "list"], &[]));
         assert_eq!(out.status, Status::Ok, "{:?}", out.data);
@@ -835,13 +835,13 @@ mod tests {
     #[test]
     fn list_scoped_to_a_rice_with_no_drafts_is_ok_with_an_empty_list() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         let root = unique_tmp("draft-list-scoped-empty");
         let stage = root.join("stage");
         std::fs::create_dir_all(&stage).unwrap();
         std::fs::create_dir_all(root.join("rices").join("sonata")).unwrap();
         crate::commands::test_support::ensure_default_rices_fixture();
-        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        aoide_test_support::pin_stage(&stage);
 
         let out = handle_draft_list(&inv(&["rice", "draft", "list"], &["sonata"]));
         assert_eq!(out.status, Status::Ok, "{:?}", out.data);
@@ -852,13 +852,13 @@ mod tests {
     #[test]
     fn list_surfaces_multiple_drafts_of_one_rice_with_the_current_one_flagged() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         let root = unique_tmp("draft-list-multi");
         let stage = root.join("stage");
         std::fs::create_dir_all(&stage).unwrap();
         stage_with_rice(&stage, "sonata");
         crate::commands::test_support::ensure_default_rices_fixture();
-        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        aoide_test_support::pin_stage(&stage);
 
         handle_draft_save(&inv(&["rice", "draft", "save"], &["amber-dusk"]));
         handle_draft_save(&inv(&["rice", "draft", "save"], &["neon-night"]));
@@ -887,13 +887,13 @@ mod tests {
     #[test]
     fn list_with_no_arg_walks_every_rice_and_scoping_by_name_narrows_it() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         let root = unique_tmp("draft-list-allrices");
         let stage = root.join("stage");
         std::fs::create_dir_all(&stage).unwrap();
         stage_with_rice(&stage, "sonata");
         crate::commands::test_support::ensure_default_rices_fixture();
-        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        aoide_test_support::pin_stage(&stage);
         handle_draft_save(&inv(&["rice", "draft", "save"], &["neon-night"]));
 
         stage_with_rice(&stage, "moonlight");
@@ -918,13 +918,13 @@ mod tests {
     #[test]
     fn drop_removes_a_draft() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         let root = unique_tmp("draft-drop-ok");
         let stage = root.join("stage");
         std::fs::create_dir_all(&stage).unwrap();
         stage_with_rice(&stage, "sonata");
         crate::commands::test_support::ensure_default_rices_fixture();
-        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        aoide_test_support::pin_stage(&stage);
 
         handle_draft_save(&inv(&["rice", "draft", "save"], &["neon-night"]));
         let dir = root.join("rices").join("sonata").join("drafts").join("neon-night");
@@ -939,13 +939,13 @@ mod tests {
     #[test]
     fn drop_rejects_a_path_traversal_name_before_touching_the_filesystem() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         let root = unique_tmp("draft-drop-traversal");
         let stage = root.join("stage");
         std::fs::create_dir_all(&stage).unwrap();
         stage_with_rice(&stage, "sonata");
         crate::commands::test_support::ensure_default_rices_fixture();
-        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        aoide_test_support::pin_stage(&stage);
 
         // `draft_dir(rice, name)` joins `name` straight into a path — a
         // traversal name must be rejected before it ever reaches
@@ -959,10 +959,10 @@ mod tests {
     #[test]
     fn drop_with_an_empty_name_is_an_invalid_name_not_a_panic() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
-        let stage = unique_tmp("draft-drop-empty");
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
+        let stage = unique_tmp("draft-drop-empty").join("stage");
         crate::commands::test_support::ensure_default_rices_fixture();
-        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        aoide_test_support::pin_stage(&stage);
 
         for args in [&[][..], &[""][..]] {
             let out = handle_draft_drop(&inv(&["rice", "draft", "drop"], args));
@@ -975,12 +975,12 @@ mod tests {
     #[test]
     fn drop_on_a_missing_draft_errors() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
-        let stage = unique_tmp("draft-drop-missing");
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
+        let stage = unique_tmp("draft-drop-missing").join("stage");
         std::fs::create_dir_all(&stage).unwrap();
         stage_with_rice(&stage, "sonata");
         crate::commands::test_support::ensure_default_rices_fixture();
-        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        aoide_test_support::pin_stage(&stage);
 
         let out = handle_draft_drop(&inv(&["rice", "draft", "drop"], &["nope"]));
         assert_eq!(out.status, Status::Error);
@@ -992,10 +992,10 @@ mod tests {
     #[test]
     fn drop_with_no_resolvable_rice_errors() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
-        let stage = unique_tmp("draft-drop-norice");
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
+        let stage = unique_tmp("draft-drop-norice").join("stage");
         crate::commands::test_support::ensure_default_rices_fixture();
-        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        aoide_test_support::pin_stage(&stage);
 
         let out = handle_draft_drop(&inv(&["rice", "draft", "drop"], &["neon-night"]));
         assert_eq!(out.status, Status::Error);
@@ -1006,13 +1006,13 @@ mod tests {
     #[test]
     fn drop_of_the_live_draft_is_refused_not_silently_torn_down() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         let root = unique_tmp("draft-drop-live");
         let stage = root.join("stage");
         std::fs::create_dir_all(&stage).unwrap();
         stage_with_rice(&stage, "sonata");
         crate::commands::test_support::ensure_default_rices_fixture();
-        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        aoide_test_support::pin_stage(&stage);
 
         handle_draft_save(&inv(&["rice", "draft", "save"], &["neon-night"]));
         save_mode_marker(&ModeMarker {
@@ -1042,13 +1042,13 @@ mod tests {
     #[test]
     fn drop_of_a_different_draft_succeeds_while_another_is_live() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         let root = unique_tmp("draft-drop-other");
         let stage = root.join("stage");
         std::fs::create_dir_all(&stage).unwrap();
         stage_with_rice(&stage, "sonata");
         crate::commands::test_support::ensure_default_rices_fixture();
-        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        aoide_test_support::pin_stage(&stage);
 
         handle_draft_save(&inv(&["rice", "draft", "save"], &["amber-dusk"]));
         handle_draft_save(&inv(&["rice", "draft", "save"], &["neon-night"]));

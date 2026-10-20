@@ -77,7 +77,7 @@ pub fn register(r: &mut Registry) {
 fn resolve_notes(inv: &Invocation, cmd: &str, skip: usize) -> Result<PathBuf, Outcome> {
     match inv.args.get(skip) {
         None => {
-            let staged = shellbridge::stage_dir().join("theme.json");
+            let staged = crate::paths::stage_dir().join("theme.json");
             if staged.is_file() {
                 Ok(staged)
             } else {
@@ -101,7 +101,7 @@ fn resolve_notes(inv: &Invocation, cmd: &str, skip: usize) -> Result<PathBuf, Ou
             if literal.is_file() {
                 Ok(literal)
             } else {
-                Ok(shellbridge::rice_notes(arg))
+                Ok(crate::paths::rice_notes(arg))
             }
         }
     }
@@ -329,9 +329,9 @@ mod tests {
 
     const FIXTURE: &str = "tests/fixtures/valid-base16.json";
 
-    fn emit_hyprlock(strillix_dir: Option<&Path>) -> Outcome {
+    fn emit_hyprlock(strillix_root: Option<&Path>) -> Outcome {
         let mut i = inv(&["theme", "emit"], &["hyprlock", FIXTURE]);
-        if let Some(dir) = strillix_dir {
+        if let Some(dir) = strillix_root {
             i.flags.insert("rice-dir".into(), dir.to_string_lossy().into_owned());
         }
         handle_theme_emit(&i)

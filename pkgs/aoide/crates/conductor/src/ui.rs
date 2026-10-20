@@ -674,21 +674,12 @@ fn draw_projects(f: &mut Frame, area: Rect, app: &App) {
 /// the painted height and no line can be clipped by a second, drifting count
 /// (the palette summary was the one that fell off the old hand-counted split).
 pub(crate) fn status_env_block(app: &App) -> Vec<Line<'static>> {
-    // Two roots since command-defrag S1 (2026-08-27): conducting state
-    // (`sessions.json`/`hooks.json`/`projects.json`/`graph.json`) lives under
-    // `state/stage/`; rice/paint state (`theme.json`) stays `rice/stage/`.
-    // They coincide under an `$AOIDE_STAGE_DIR` override (every test fixture
-    // here), and diverge only on the default production layout.
     let stage = aoide_storage::fs::conducting_stage_dir();
-    let rice_stage = aoide_storage::fs::stage_dir();
     let sock = aoide_conduct::shellbridge::socket_path();
     let audit = aoide_protocol::default_audit_log();
 
     let mut lines: Vec<Line> = Vec::new();
     lines.push(Line::from(format!(" stage dir   {}", stage.display())));
-    if rice_stage != stage {
-        lines.push(Line::from(format!(" rice dir    {}", rice_stage.display())));
-    }
     lines.push(Line::from(""));
     lines.push(file_status(
         &stage.join("projects.json"),
@@ -709,11 +700,6 @@ pub(crate) fn status_env_block(app: &App) -> Vec<Line<'static>> {
         &stage.join("graph.json"),
         "graph",
         graph_node_count(&stage.join("graph.json")),
-    ));
-    lines.push(file_status(
-        &rice_stage.join("theme.json"),
-        "theme",
-        palette_count(app),
     ));
     lines.push(Line::from(""));
     lines.push(Line::from(format!(

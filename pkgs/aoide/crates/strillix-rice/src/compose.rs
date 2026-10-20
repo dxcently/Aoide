@@ -8,7 +8,7 @@
 //! (reading `--from`'s notes, writing the scaffolded files) and calls
 //! through to this module for the actual rendering.
 
-use aoide_storage::fs::STRILLIX_SHELL_SRC;
+use crate::paths::STRILLIX_SHELL_SRC;
 use serde_json::Value;
 
 use crate::theme::schema::{POLARITY_DEFAULT, POLARITY_VALUES};

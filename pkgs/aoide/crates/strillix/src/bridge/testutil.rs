@@ -84,10 +84,11 @@ esac
     )
     .unwrap();
     std::fs::set_permissions(&stub, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
-    std::fs::write(root.join("mode.json"), marker).unwrap();
-    let env = aoide_test_support::EnvSaver::capture(&["STRILLIX_BIN", "AOIDE_STAGE_DIR", "AOIDE_HOST_CONFIG"]);
+    std::fs::create_dir_all(root.join("stage")).unwrap();
+    std::fs::write(root.join("stage").join("mode.json"), marker).unwrap();
+    let env = aoide_test_support::EnvSaver::capture(&["STRILLIX_BIN", "AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT", "AOIDE_HOST_CONFIG"]);
     std::env::set_var("STRILLIX_BIN", &stub);
-    std::env::set_var("AOIDE_STAGE_DIR", &root);
+    aoide_test_support::pin_stage(root.join("stage"));
     (env, root)
 }
 

@@ -23,7 +23,7 @@ fn main() {
     // The rice tree's move is `strx migrate`'s own job, so the start-up hook
     // stays out of its way (`--check` must report, never move).
     if verb != Some("migrate") {
-        if let Err(e) = aoide_storage::fs::rice_root_at_start() {
+        if let Err(e) = strillix_rice::migrate::rice_root_at_start() {
             eprintln!("strillix: {e}");
             std::process::exit(1);
         }
@@ -31,7 +31,7 @@ fn main() {
         // strillix root would create the second live root the move refuses.
         // Only the verbs that read nothing from it run.
         let reads_nothing = matches!(verb, None | Some("help" | "--help" | "-h" | "--version" | "-V"));
-        if !reads_nothing && aoide_storage::fs::rice_status() != aoide_storage::fs::RiceStatus::Settled {
+        if !reads_nothing && strillix_rice::migrate::rice_status() != strillix_rice::migrate::RiceStatus::Settled {
             eprintln!("strillix: the rice state is not settled; run `strx migrate --check`, then `strx migrate`. Nothing ran");
             std::process::exit(1);
         }

@@ -538,7 +538,7 @@ mod tests {
         std::env::set_var("STRILLIX_ROOT", &root);
         std::env::set_var("AOIDE_AUDIT_LOG", root.join("log"));
         std::env::set_var("AOIDE_STATE_DIR", &root);
-        std::env::set_var("AOIDE_STAGE_DIR", &root);
+        aoide_test_support::pin_stage(root.join("stage"));
         std::env::set_var("XDG_RUNTIME_DIR", &root);
         // A `clear` carrying a `project` is refused by name at the gate; the
         // core binary is pointed somewhere that cannot exist so a spawn would

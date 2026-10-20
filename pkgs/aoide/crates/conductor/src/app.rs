@@ -24,7 +24,7 @@ use aoide_conduct::graph::{self, HooksFile, ProjectsFile, SessionRecord, Session
 use aoide_protocol::output::{Outcome, Status};
 use aoide_protocol::Door;
 use aoide_protocol::Invocation;
-use aoide_storage::fs::{conducting_stage_dir, stage_dir};
+use aoide_storage::fs::conducting_stage_dir;
 use crossterm::event::{KeyCode, KeyEvent};
 use std::collections::{BTreeMap, HashSet};
 use std::path::PathBuf;
@@ -78,8 +78,8 @@ impl Panel {
     }
 }
 
-/// Exact RGB palette and Base16 tokens from stage theme, with ANSI-256
-/// compatibility fields. Missing colors retain terminal fallbacks.
+/// The colours the conductor paints with. Every slot is optional: an unset slot
+/// takes the terminal's own ANSI 16 base.
 #[derive(Debug, Clone, Default)]
 pub struct Palette {
     pub base16: [Option<(u8, u8, u8)>; 16],
@@ -438,7 +438,6 @@ struct StageMtimes {
     sessions: Option<SystemTime>,
     hooks: Option<SystemTime>,
     projects: Option<SystemTime>,
-    notes: Option<SystemTime>,
     audit: Option<SystemTime>,
 }
 
@@ -1244,17 +1243,10 @@ impl App {
         std::fs::metadata(path).and_then(|m| m.modified()).ok()
     }
 
-    /// The CONDUCTING stage dir (`sessions.json`/`hooks.json`/`projects.json`/
-    /// `graph.json`) — `state/stage/` (command-defrag S1). Distinct from
-    /// [`App::rice_stage`], which stays `rice/stage/` for `theme.json`; the
-    /// two coincide whenever `$AOIDE_STAGE_DIR` is set (every test fixture
-    /// here does), and diverge only on the default production layout.
+    /// The conducting stage dir (`sessions.json`/`hooks.json`/`projects.json`/
+    /// `graph.json`): `state/stage/`.
     fn stage() -> PathBuf {
         conducting_stage_dir()
-    }
-    /// The rice/paint stage dir (`theme.json`) — unchanged, `rice/stage/`.
-    fn rice_stage() -> PathBuf {
-        stage_dir()
     }
     fn audit_path() -> PathBuf {
         aoide_protocol::default_audit_log()
@@ -1290,7 +1282,6 @@ impl App {
         self.projects = p.projects;
         self.sessions = s.sessions;
         self.hooks = h.hooks;
-        self.palette = load_palette(&stage_notes_path(&Self::rice_stage()));
         self.reload_log();
         self.reload_history();
         // A local read through the dispatcher (P-C5) — `reload_all` runs
@@ -1322,7 +1313,6 @@ impl App {
             sessions: Self::mtime(&dir.join("sessions.json")),
             hooks: Self::mtime(&dir.join("hooks.json")),
             projects: Self::mtime(&dir.join("projects.json")),
-            notes: Self::mtime(&stage_notes_path(&Self::rice_stage())),
             audit: Self::mtime(&Self::audit_path()),
         };
         self.note_new_sessions();
@@ -1395,7 +1385,6 @@ impl App {
     /// when anything changed (so the loop repaints).
     pub fn poll_refresh(&mut self) -> bool {
         let dir = Self::stage();
-        let rice_dir = Self::rice_stage();
         let mut changed = false;
         if self.panel == Panel::Mail
             && self
@@ -1411,7 +1400,6 @@ impl App {
             sessions: Self::mtime(&dir.join("sessions.json")),
             hooks: Self::mtime(&dir.join("hooks.json")),
             projects: Self::mtime(&dir.join("projects.json")),
-            notes: Self::mtime(&stage_notes_path(&rice_dir)),
             audit: Self::mtime(&Self::audit_path()),
         };
 
@@ -1437,10 +1425,6 @@ impl App {
             self.hooks = h.hooks;
             changed = true;
             stage_changed = true;
-        }
-        if cur.notes != self.mtimes.notes {
-            self.palette = load_palette(&stage_notes_path(&rice_dir));
-            changed = true;
         }
         if cur.audit != self.mtimes.audit {
             self.reload_log();
@@ -5213,138 +5197,6 @@ pub fn sorted_project_names(projects: &[graph::Project]) -> Vec<String> {
     names
 }
 
-// ── theme.json palette → ANSI-256 ─────────────────────────────────────────
-
-/// The stage notes path — `stage/theme.json`, the canonical stage note file
-/// (CONTRACTS.md §4). Both the palette load and the mtime watch go through
-/// this, so the watch tracks the same file the palette loads.
-fn stage_notes_path(dir: &std::path::Path) -> std::path::PathBuf {
-    dir.join("theme.json")
-}
-
-/// Load exact palette/Base16 RGB and compatibility ANSI-256 indices.
-pub fn load_palette(path: &std::path::Path) -> Palette {
-    let Ok(s) = std::fs::read_to_string(path) else {
-        return Palette::default();
-    };
-    let Ok(v) = serde_json::from_str::<serde_json::Value>(&s) else {
-        return Palette::default();
-    };
-    let pal = v.get("palette");
-    let pick = |key: &str| -> Option<u8> {
-        pal.and_then(|p| p.get(key))
-            .and_then(|x| x.as_str())
-            .and_then(hex_to_ansi256)
-    };
-    Palette {
-        base16: std::array::from_fn(|i| {
-            v.get("base16")
-                .and_then(|p| p.get(format!("base{i:02X}")))
-                .and_then(|v| v.as_str())
-                .and_then(parse_hex)
-        }),
-        urgent_rgb: pal
-            .and_then(|p| p.get("urgent"))
-            .and_then(|v| v.as_str())
-            .and_then(parse_hex),
-        bg_rgb: pal
-            .and_then(|p| p.get("bg"))
-            .and_then(|v| v.as_str())
-            .and_then(parse_hex),
-        fg_rgb: pal
-            .and_then(|p| p.get("fg"))
-            .and_then(|v| v.as_str())
-            .and_then(parse_hex),
-        accent_rgb: pal
-            .and_then(|p| p.get("accent"))
-            .and_then(|v| v.as_str())
-            .and_then(parse_hex),
-        bg: pick("bg"),
-        fg: pick("fg"),
-        accent: pick("accent"),
-        urgent: pick("urgent"),
-    }
-}
-
-/// Parse `#rrggbb` (or `#rgb`) and map to the nearest ANSI-256 colour index.
-pub fn hex_to_ansi256(hex: &str) -> Option<u8> {
-    let (r, g, b) = parse_hex(hex)?;
-    Some(rgb_to_ansi256(r, g, b))
-}
-
-fn parse_hex(hex: &str) -> Option<(u8, u8, u8)> {
-    let h = hex.trim().trim_start_matches('#');
-    if !h.is_ascii() {
-        return None;
-    }
-    let (r, g, b) = match h.len() {
-        6 => (
-            u8::from_str_radix(&h[0..2], 16).ok()?,
-            u8::from_str_radix(&h[2..4], 16).ok()?,
-            u8::from_str_radix(&h[4..6], 16).ok()?,
-        ),
-        3 => {
-            let r = u8::from_str_radix(&h[0..1], 16).ok()?;
-            let g = u8::from_str_radix(&h[1..2], 16).ok()?;
-            let b = u8::from_str_radix(&h[2..3], 16).ok()?;
-            (r * 17, g * 17, b * 17) // 0xN → 0xNN
-        }
-        _ => return None,
-    };
-    Some((r, g, b))
-}
-
-/// Nearest xterm-256 index for an RGB triple. Considers both the 6×6×6 colour
-/// cube and the 24-step grey ramp and picks whichever is closer, exactly like
-/// the common terminal conversion.
-pub fn rgb_to_ansi256(r: u8, g: u8, b: u8) -> u8 {
-    // 6×6×6 cube: channel steps are 0,95,135,175,215,255.
-    fn cube_idx(c: u8) -> u8 {
-        if c < 48 {
-            0
-        } else if c < 115 {
-            1
-        } else {
-            ((c as u16 - 35) / 40) as u8
-        }
-    }
-    fn cube_val(i: u8) -> u8 {
-        if i == 0 {
-            0
-        } else {
-            55 + 40 * i
-        }
-    }
-    let (ri, gi, bi) = (cube_idx(r), cube_idx(g), cube_idx(b));
-    let (cr, cg, cb) = (cube_val(ri), cube_val(gi), cube_val(bi));
-    let cube = 16 + 36 * ri + 6 * gi + bi;
-    let cube_dist = dist2(r, g, b, cr, cg, cb);
-
-    // Grey ramp: indices 232..=255, values 8,18,…,238.
-    let grey_level = ((r as u16 + g as u16 + b as u16) / 3) as u8;
-    let gi2 = if grey_level < 8 {
-        0
-    } else {
-        ((grey_level as u16 - 8) / 10).min(23) as u8
-    };
-    let gv = 8 + 10 * gi2;
-    let grey = 232 + gi2;
-    let grey_dist = dist2(r, g, b, gv, gv, gv);
-
-    if grey_dist < cube_dist {
-        grey
-    } else {
-        cube
-    }
-}
-
-fn dist2(r: u8, g: u8, b: u8, r2: u8, g2: u8, b2: u8) -> u32 {
-    let dr = r as i32 - r2 as i32;
-    let dg = g as i32 - g2 as i32;
-    let db = b as i32 - b2 as i32;
-    (dr * dr + dg * dg + db * db) as u32
-}
-
 #[cfg(test)]
 mod tests {
     /// The conductor's petname check and storage's box grammar are one rule:
@@ -5706,54 +5558,12 @@ mod tests {
         });
     }
 
-    #[test]
-    fn stage_notes_path_is_unconditionally_theme_json() {
-        // Phase 4: no fallback — the function returns dir/theme.json without
-        // probing for any other file, even when no note file exists yet.
-        let dir = std::env::temp_dir().join(format!(
-            "aoide-conductor-stage-notes-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        std::fs::create_dir_all(&dir).unwrap();
-        assert_eq!(stage_notes_path(&dir), dir.join("theme.json"));
-
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn hex_maps_to_plausible_ansi256() {
-        // Pure red → cube red (196) region.
-        let red = hex_to_ansi256("#ff0000").unwrap();
-        assert!((160..=231).contains(&red), "red mapped to {red}");
-        // Near-black grey → the low grey ramp or cube 16.
-        let dark = hex_to_ansi256("#1e1e2e").unwrap();
-        assert!(dark == 16 || (232..=240).contains(&dark) || (16..=60).contains(&dark));
-        // Catppuccin accent blue (#89b4fa) → some blue-ish cube index.
-        let blue = hex_to_ansi256("#89b4fa").unwrap();
-        assert!(blue >= 16);
-        // 3-digit form works.
-        assert_eq!(hex_to_ansi256("#fff"), hex_to_ansi256("#ffffff"));
-        // Garbage → None.
-        assert!(hex_to_ansi256("nope").is_none());
-    }
-
-    #[test]
-    fn white_and_black_extremes() {
-        assert_eq!(rgb_to_ansi256(255, 255, 255), 231); // top of the cube (white)
-        assert_eq!(rgb_to_ansi256(0, 0, 0), 16); // bottom of the cube (black)
-    }
-
     // ── Enter's branch: log tail vs. the focus jump ─────────────────────────
 
     use serde_json::Map;
     use std::sync::Mutex;
 
-    /// A unique scratch dir per call (pid + nanos), mirroring
-    /// `stage_notes_path_is_unconditionally_theme_json` above.
+    /// A unique scratch dir per call (pid + nanos).
     fn tmp_dir(tag: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!(
             "aoide-conductor-{tag}-{}-{}",
@@ -5838,10 +5648,9 @@ mod tests {
     /// Point `AOIDE_STAGE_DIR`/`AOIDE_AUDIT_LOG` at a fresh empty tempdir for
     /// the duration of `f`, restoring whatever was set before. Any test that
     /// calls `App::dispatch` or `App::poll_refresh` needs this — both read
-    /// the real stage dirs otherwise, and on this machine that's the live
-    /// `~/Aoide/state/stage` (conducting) and `~/Aoide/rice/stage` (rice),
-    /// not a fixture. `AOIDE_STAGE_DIR` overrides both at once, same as
-    /// today — see `App::stage`/`App::rice_stage`.
+    /// the real stage dir otherwise, and on this machine that's the live
+    /// `~/.aoide/state/stage`, not a fixture. `AOIDE_STAGE_DIR` overrides it,
+    /// same as today — see `App::stage`.
     /// [`with_isolated_stage`] as a guard, for a test that needs the isolated
     /// stage across several statements (the artifact renders) instead of one
     /// closure. Same lock, same env vars, same cleanup.

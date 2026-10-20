@@ -1266,7 +1266,7 @@ pub fn point_save(_inv: &Invocation) -> Outcome {
         Ok(p) => p,
         Err(e) => return hypr::hypr_error_outcome(cmd, &e),
     };
-    let path = aoide_storage::fs::pointer_state_file();
+    let path = crate::paths::pointer_state_file();
     let text = serde_json::to_string(&p).unwrap_or_default();
     if let Err(e) = aoide_storage::fs::atomic_write(&path, &text) {
         return Outcome::error(cmd, format!("read cursor but failed to persist it: {e}"))
@@ -1282,7 +1282,7 @@ pub fn point_save(_inv: &Invocation) -> Outcome {
 /// here). MOVES the pointer — NOT executed live this phase (HARD RULE 5).
 pub fn point_restore(_inv: &Invocation) -> Outcome {
     let cmd = "screen.point.restore";
-    let path = aoide_storage::fs::pointer_state_file();
+    let path = crate::paths::pointer_state_file();
     let text = match std::fs::read_to_string(&path) {
         Ok(t) => t,
         Err(_) => {

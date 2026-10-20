@@ -3438,8 +3438,8 @@ mod tests {
 
         // Force `stage_dir()/.stage.lock` to be a directory, so opening it
         // for writing fails cleanly (EISDIR) rather than ever taking the flock.
-        std::fs::create_dir_all(crate::fs::stage_dir()).unwrap();
-        std::fs::create_dir_all(crate::fs::stage_dir().join(".stage.lock")).unwrap();
+        std::fs::create_dir_all(crate::fs::conducting_stage_dir()).unwrap();
+        std::fs::create_dir_all(crate::fs::conducting_stage_dir().join(".stage.lock")).unwrap();
 
         let err = file_letter("alice", "bob", "should never land").unwrap_err();
         assert!(!err.is_empty());
@@ -3452,9 +3452,9 @@ mod tests {
     fn a_held_lock_serializes_a_second_writer_behind_the_first_rather_than_failing_it() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let (_env, dir) = root("held-lock");
-        std::fs::create_dir_all(crate::fs::stage_dir()).unwrap();
+        std::fs::create_dir_all(crate::fs::conducting_stage_dir()).unwrap();
 
-        let lock_path = crate::fs::stage_dir().join(".stage.lock");
+        let lock_path = crate::fs::conducting_stage_dir().join(".stage.lock");
         let held = std::fs::OpenOptions::new().create(true).write(true).open(&lock_path).unwrap();
         assert!(crate::fs::lock_exclusive(&held), "test setup must actually hold the lock");
 

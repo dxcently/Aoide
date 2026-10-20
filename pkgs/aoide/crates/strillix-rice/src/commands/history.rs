@@ -6,7 +6,7 @@
 //!
 //! **Locking discipline (advisor verdict, defect D2) — read this before
 //! adding a caller.** [`snapshot_unlocked`] and [`snapshot_if_drifted_unlocked`]
-//! never take `aoide_storage::fs::with_stage_lock` themselves — allocating a
+//! never take `crate::lock::with_stage_lock` themselves — allocating a
 //! entry number is a read-max/write-max+1 race exactly like the lock exists
 //! for, and closing it is the CALLER-held boundary's job.
 //! `with_stage_lock` nests for the thread that already holds it
@@ -33,7 +33,7 @@
 //! wraps `with_stage_lock` around its own whole body itself. The auto-entry
 //! hooks are NOT a second caller of the drift check: an entry records every
 //! write, not just the ones that changed something
-//! (`aoide_storage::history`' own module doc: "minted on every rehearsal
+//! (`crate::history`' own module doc: "minted on every rehearsal
 //! write") — a content-identical restage still mints, and the resulting
 //! noise is `rice history prune`'s problem (phase A9, §7.1), not write-time
 //! suppression's. The drift check's whole reason to exist is different: A5
@@ -48,7 +48,7 @@
 //! first edit undoable.
 //!
 //! Everything else about the model — the parent pointer, the flat monotone
-//! counter, the head cursor — lives in `aoide_storage::history`; this module
+//! counter, the head cursor — lives in `crate::history`; this module
 //! is CLI + orchestration on top of that pure store.
 //!
 //! **Command-name threading (phase A3, advisor-flagged).** [`snapshot_unlocked`],
@@ -69,8 +69,8 @@ use aoide_protocol::output::Outcome;
 use aoide_protocol::pick;
 use aoide_protocol::registry::{arg, cmd, flag, Registry};
 use aoide_storage::fs as shellbridge;
-use aoide_storage::mode::{self, RiceMode};
-use aoide_storage::history::{self, HistoryRecord};
+use crate::mode::{self, RiceMode};
+use crate::history::{self, HistoryRecord};
 use aoide_storage::time::{now_iso_utc, parse_iso_utc};
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
@@ -151,11 +151,11 @@ pub fn register(r: &mut Registry) {
 /// The shared "must be staged or routed into a draft" guard every entry
 /// command starts with: entries live inside `rices/<rice>/history/` when
 /// staged directly, `rices/<rice>/drafts/<draft>/history/` when routed into
-/// a draft ([`aoide_storage::history::history_dir`]) — the staging-mode reach
+/// a draft ([`crate::history::history_dir`]) — the staging-mode reach
 /// `strillix reload`'s design (settled 2026-08-31) extends `rice history`/`rice
 /// back` to, so nothing about them is resolvable outside `Staging`/`Draft`
 /// at all; `Declarative` has nothing unlocked to snapshot. `mode.json`'s
-/// `draft` field is `Some` **iff** `mode == Draft` (`aoide_storage::mode`'s
+/// `draft` field is `Some` **iff** `mode == Draft` (`crate::mode`'s
 /// own module doc records the invariant) — the `None` returned here for
 /// `Staging` is that same fact, not a separate guess. `cmd` is the caller's
 /// own dotted command name (`rice.history`, `rice.back`, …) so the refusal's
@@ -201,14 +201,14 @@ fn entry_content_value(theme: &Value, wallpaper: &Option<Value>, widgets: &Value
 /// Read the routed draft's CURRENT `theme.json` (required — an absent or
 /// unparseable stage theme is refused, there is nothing to snapshot) and
 /// `wallpaper.json` (optional — absent simply means no wallpaper, not an error).
-/// Both are read straight off [`aoide_storage::fs::stage_dir`], not the
+/// Both are read straight off [`crate::paths::stage_dir`], not the
 /// draft directory itself: while `Draft` mode is routed, `stage/theme.json`
 /// IS the draft's live content (a symlink `aoide_storage::fs::atomic_write`
 /// resolves transparently, and a plain `read_to_string` follows the same
 /// way) — reading the stage is reading the draft, with zero extra
 /// symlink-awareness needed here.
 fn read_staged_content(cmd: &str) -> Result<(Value, Option<Value>), Outcome> {
-    let stage = shellbridge::stage_dir();
+    let stage = crate::paths::stage_dir();
     let theme_path = stage.join("theme.json");
     let raw = std::fs::read_to_string(&theme_path).map_err(|e| {
         Outcome::error(
@@ -248,7 +248,7 @@ fn read_staged_content(cmd: &str) -> Result<(Value, Option<Value>), Outcome> {
 /// — see the module doc's "command-name threading" note. `cause` is the
 /// entry-store's own event vocabulary (`"explicit"`, `"stage"`, `"wallpaper-set"`,
 /// `"drift"` — distinct from an `Outcome` reason string,
-/// `aoide_storage::history`' `HistoryRecord::cause` doc explains why).
+/// `crate::history`' `HistoryRecord::cause` doc explains why).
 pub(crate) fn snapshot_unlocked(cmd: &str, cause: &str) -> Result<HistoryRecord, Outcome> {
     let (rice, draft) = resolve_scope(cmd)?;
     let (theme, wallpaper) = read_staged_content(cmd)?;
@@ -288,7 +288,7 @@ pub(crate) fn snapshot_unlocked(cmd: &str, cause: &str) -> Result<HistoryRecord,
 /// doc for the rule and who must NOT call this. `cmd`/`cause` pass straight
 /// through to [`snapshot_unlocked`].
 pub(crate) fn snapshot(cmd: &str, cause: &str) -> Result<HistoryRecord, Outcome> {
-    shellbridge::with_stage_lock(|| snapshot_unlocked(cmd, cause))
+    crate::lock::with_stage_lock(|| snapshot_unlocked(cmd, cause))
 }
 
 /// The unlocked drift-check core: mint an entry only when the routed draft's
@@ -296,7 +296,7 @@ pub(crate) fn snapshot(cmd: &str, cause: &str) -> Result<HistoryRecord, Outcome>
 /// parsed [`Value`]s, never raw bytes, so a document that merely
 /// re-serialized (different key order, different whitespace) never reads as
 /// drift. An absent head — an empty store, or a stale `head.json`
-/// `aoide_storage::history::load_head` couldn't resolve at all — has no
+/// `crate::history::load_head` couldn't resolve at all — has no
 /// existing entry to compare against, so it counts as drift unconditionally:
 /// there is nothing on record yet, and the first content a store ever sees
 /// is always worth capturing. `Ok(None)` is the no-op case; `Ok(Some(_))` is
@@ -367,7 +367,7 @@ pub(crate) fn snapshot_if_identical_to_head_unlocked(cmd: &str, cause: &str) -> 
 /// same shape as [`snapshot`], reused because neither `strillix reload` nor
 /// `rice mode draft` is itself already inside a locked mutator.
 pub(crate) fn snapshot_if_identical_to_head(cmd: &str, cause: &str) -> Result<Option<HistoryRecord>, Outcome> {
-    shellbridge::with_stage_lock(|| snapshot_if_identical_to_head_unlocked(cmd, cause))
+    crate::lock::with_stage_lock(|| snapshot_if_identical_to_head_unlocked(cmd, cause))
 }
 
 /// Fold the entry a write minted into that write's outcome, the one shape
@@ -438,7 +438,7 @@ fn handle_rice_entry(_inv: &Invocation) -> Outcome {
 // ── `rice history list` — the tree (phase A6) ──────────────────────────────────
 
 /// Every mark letter currently naming `entry` — usually zero or one, but nothing in
-/// [`aoide_storage::history::save_marks`] forbids two letters landing on the same entry, so this
+/// [`crate::history::save_marks`] forbids two letters landing on the same entry, so this
 /// returns however many actually do, sorted (the map iterates by letter already, since it's a
 /// `BTreeMap`). Shared between [`render_node`] and [`handle_rice_entry_list`]'s `--json` builder
 /// so the two never compute this differently.
@@ -450,12 +450,12 @@ fn mark_letters_for(marks: &BTreeMap<String, u32>, entry: u32) -> Vec<String> {
 /// print one with; the caller, [`handle_rice_entry_list`], prepends that) — so this stays a
 /// **pure** function of exactly what an entry store already knows, unit-testable with zero
 /// terminal and zero clock. Children are walked in ascending number order
-/// ([`aoide_storage::history::children`], already sorted — reused, not reimplemented). A straight
+/// ([`crate::history::children`], already sorted — reused, not reimplemented). A straight
 /// single-child descent draws no branch glyph at all; only an actual fork (2+ children sharing a
 /// parent) draws `├─`/`└─`, with a `│` continuation column threaded down the non-last branch —
 /// the shape `references/fleshing-out-aoide-ricing.md` §3.2's mockup draws by hand. The head
 /// entry is marked `← head`; a mark letter (or letters, see [`mark_letters_for`]) is bracketed
-/// after the row. `marks` is the raw letter→entry map [`aoide_storage::history::load_marks`]
+/// after the row. `marks` is the raw letter→entry map [`crate::history::load_marks`]
 /// returns — a stale entry naming an entry absent from `entries` is simply never looked up (this
 /// walks `entries` itself outward from its roots, never `marks`' own keys), so it is skipped for
 /// free, exactly the self-healing read the advisor verdict (D6) requires, with no extra
@@ -465,12 +465,12 @@ fn mark_letters_for(marks: &BTreeMap<String, u32>, entry: u32) -> Vec<String> {
 /// make this function impure and its own tests non-deterministic, which is the entire reason it
 /// takes no `now` argument. The raw ISO-8601 `at` timestamp is printed verbatim instead.
 ///
-/// **Orphans are swept in, never dropped.** `aoide_storage::history` is deliberately tolerant of
+/// **Orphans are swept in, never dropped.** `crate::history` is deliberately tolerant of
 /// partial state (`list_history` survives a half-written record, `load_head` falls back on a stale
 /// pointer) — a `parent` naming an entry number that no longer exists on disk is exactly that kind
 /// of state, and `rice history list` is the command someone uses to FIND an entry to revert to, so a real
 /// record that exists on disk must never render as nothing. The first pass walks outward from the
-/// `parent == None` roots via [`aoide_storage::history::children`]; a second pass then sweeps every
+/// `parent == None` roots via [`crate::history::children`]; a second pass then sweeps every
 /// entry number, ascending, that the first pass never reached and renders each as its own
 /// top-level entry, labeled `detached` — this covers both a dangling parent pointer AND a pure
 /// parent cycle with no root at all (two entries each naming the other), which the first pass can
@@ -521,7 +521,7 @@ fn detached_note(entries: &[HistoryRecord], n: u32) -> String {
 /// marks exactly the entry that had no real root, never the entries hanging off it. Returns
 /// immediately, without rendering, if `n` is already in `visited` — this is what stops the sweep
 /// from spinning forever the instant it walks into a parent cycle — or if `n` isn't actually in
-/// `entries` (defensive; every real caller only ever passes numbers [`aoide_storage::history::children`]
+/// `entries` (defensive; every real caller only ever passes numbers [`crate::history::children`]
 /// itself just returned, or a number [`render_tree`]'s own sweep just confirmed is present).
 fn render_node(
     entries: &[HistoryRecord],
@@ -676,7 +676,7 @@ pub(crate) fn mark_unlocked(cmd: &str, letter: &str, target: u32) -> Result<(u32
 /// around [`mark_unlocked`]'s whole read-mutate-write. `cmd`/`letter`/
 /// `target` pass straight through.
 pub(crate) fn mark(cmd: &str, letter: &str, target: u32) -> Result<(u32, bool, Option<u32>), Outcome> {
-    shellbridge::with_stage_lock(|| mark_unlocked(cmd, letter, target))
+    crate::lock::with_stage_lock(|| mark_unlocked(cmd, letter, target))
 }
 
 /// `rice history mark <letter> [--entry N]` — the phase-A standalone command
@@ -685,7 +685,7 @@ pub(crate) fn mark(cmd: &str, letter: &str, target: u32) -> Result<(u32, bool, O
 /// this handler is not itself part of that state machine).
 ///
 /// `--entry N` names the target explicitly; omitted, it defaults to the
-/// CURRENT HEAD (`aoide_storage::history::load_head`) — "mark where I am
+/// CURRENT HEAD (`crate::history::load_head`) — "mark where I am
 /// right now" is the common case. An empty store (no head at all, nothing
 /// ever entered) reports `entry-not-found`: from the caller's point of view
 /// "no head to default to" and "the named entry doesn't exist" are the same
@@ -834,7 +834,7 @@ fn render_diff_value(v: &Value) -> String {
 /// absent); `--mark X` resolves through `history/marks.json` exactly like [`back_unlocked`]'s own
 /// resolution (`mark-not-found` for an unstamped letter, or one naming an entry that no longer
 /// exists — the map's self-healing read, D6). With neither flag, the default is the NEAREST MARK
-/// ON THE HEAD'S ANCESTRY (plan §3.3): walk [`aoide_storage::history::ancestry`] from the head
+/// ON THE HEAD'S ANCESTRY (plan §3.3): walk [`crate::history::ancestry`] from the head
 /// itself — its own first element — back toward the root, and stop at the first entry carrying any
 /// mark letter. Checking the head first is deliberate: a head that was just marked diffs against
 /// itself, and "what changed since the last mark" is correctly empty for un-staged content in
@@ -1033,7 +1033,7 @@ fn now_epoch() -> i64 {
 /// store (the same read-then-decide shape [`resolve_base`]/[`entry_lane_rows`]
 /// already use elsewhere in this file — nothing here writes).
 struct PrunePlan {
-    /// The head and its whole ancestry (`aoide_storage::history::ancestry`,
+    /// The head and its whole ancestry (`crate::history::ancestry`,
     /// walked from the head) — every one of these is excluded BEFORE any
     /// selector runs, and no flag, including `--force`, can put one back in.
     /// This is the never-prune-the-ground-you-are-standing-on rail.
@@ -1111,7 +1111,7 @@ struct PruneResult {
 
 /// The unlocked prune core: given an already-decided candidate set (from a
 /// [`PrunePlan`], or hand-picked via the tty picker), splice each one out
-/// with [`aoide_storage::history::reparent`], persist every surviving entry
+/// with [`crate::history::reparent`], persist every surviving entry
 /// whose `parent` the splice actually changed, delete every pruned entry's
 /// own file, and rewrite `history/marks.json` in the SAME pass to drop any
 /// letter naming an entry this call just removed (advisor verdict D6 — the
@@ -1138,7 +1138,7 @@ struct PruneResult {
 ///
 /// The (now-filtered) `doomed` is folded one at a time through `reparent`,
 /// and this is order-independent by construction:
-/// [`aoide_storage::history::reparent`] always looks up the CURRENT (possibly
+/// [`crate::history::reparent`] always looks up the CURRENT (possibly
 /// already-spliced) parent of the entry being removed, so an entry whose own
 /// parent was ALSO pruned in this same pass still lands its surviving
 /// children on the nearest ancestor that makes it through the whole pass,
@@ -1214,7 +1214,7 @@ fn prune_unlocked(rice: &str, draft: Option<&str>, doomed: &[u32]) -> Result<Pru
 /// crate's one-hold-per-mutator rule (module doc's "Locking discipline"
 /// section), the same shape every other mutator in this file uses.
 fn prune(rice: &str, draft: Option<&str>, doomed: &[u32]) -> Result<PruneResult, String> {
-    shellbridge::with_stage_lock(|| prune_unlocked(rice, draft, doomed))
+    crate::lock::with_stage_lock(|| prune_unlocked(rice, draft, doomed))
 }
 
 /// One picker row for a prune candidate — same fields as
@@ -1470,7 +1470,7 @@ fn back_unlocked(cmd: &str, entry_flag: Option<u32>, mark_flag: Option<String>) 
     // reload`'s design extends `rice back` to) has no symlink to check at
     // all — `stage/theme.json` is a plain file there, exactly like `rice
     // stage`'s own write, so this whole rail is Draft-only.
-    let stage = shellbridge::stage_dir();
+    let stage = crate::paths::stage_dir();
     let theme_path = stage.join("theme.json");
     if let Some(draft_name) = draft.as_deref() {
         let routed = std::fs::symlink_metadata(&theme_path)
@@ -1580,7 +1580,7 @@ fn back_unlocked(cmd: &str, entry_flag: Option<u32>, mark_flag: Option<String>) 
     // And the lock screen's dress, off the same theme: the rice's own picture
     // from the runtime rices, or nothing, which clears the dress a later
     // staged rice left behind.
-    let lock_image = crate::wallpaper::lockscreen_image(&shellbridge::rice_dir(&rice));
+    let lock_image = crate::wallpaper::lockscreen_image(&crate::paths::rice_dir(&rice));
     let (lock_changed, lock_screen) = super::rice::stage_lockscreen(
         crate::live::lockscreen_fragment(&target_record.theme, lock_image.as_deref()),
         lock_image.as_deref(),
@@ -1724,7 +1724,7 @@ pub(crate) fn handle_rice_back(inv: &Invocation) -> Outcome {
         .with_data(json!({ "reason": "no-selection" }));
     }
 
-    match shellbridge::with_stage_lock(|| back_unlocked("rice.back", entry_flag, mark_flag)) {
+    match crate::lock::with_stage_lock(|| back_unlocked("rice.back", entry_flag, mark_flag)) {
         Ok(result) => render_back_outcome(result),
         Err(o) => o,
     }
@@ -1832,7 +1832,7 @@ fn handle_rice_back_picker() -> Outcome {
     match pick::choose(&prompt, &rows, default_idx) {
         Some(idx) => {
             let target = lane[idx].0;
-            match shellbridge::with_stage_lock(|| back_unlocked("rice.back", Some(target), None)) {
+            match crate::lock::with_stage_lock(|| back_unlocked("rice.back", Some(target), None)) {
                 Ok(result) => render_back_outcome(result),
                 Err(o) => o,
             }
@@ -1847,7 +1847,7 @@ fn handle_rice_back_picker() -> Outcome {
 mod tests {
     use super::*;
     use aoide_protocol::output::Status;
-    use aoide_storage::mode::{save_mode_marker, ModeMarker};
+    use crate::mode::{save_mode_marker, ModeMarker};
     use aoide_test_support::*;
 
     /// A bare in-memory `HistoryRecord` for [`render_tree`]'s own tests — those exercise a pure
@@ -1878,7 +1878,7 @@ mod tests {
         let stage = root.join("stage");
         std::fs::create_dir_all(&stage).unwrap();
         crate::commands::test_support::ensure_default_rices_fixture();
-        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        aoide_test_support::pin_stage(&stage);
         let rice = "sonata".to_string();
         let draft = "neon-night".to_string();
         save_mode_marker(&ModeMarker {
@@ -1896,10 +1896,10 @@ mod tests {
     #[test]
     fn first_snapshot_in_a_routed_draft_is_0001_with_no_parent() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT", "AOIDE_SESSION_ID"]);
         std::env::remove_var("AOIDE_SESSION_ID");
         let (root, rice, draft) = routed_draft("entry-first");
-        std::fs::write(shellbridge::stage_dir().join("theme.json"), VALID_NOTES).unwrap();
+        std::fs::write(crate::paths::stage_dir().join("theme.json"), VALID_NOTES).unwrap();
 
         let record = snapshot("rice.history", "explicit").unwrap();
         assert_eq!(record.entry, 1);
@@ -1912,16 +1912,16 @@ mod tests {
     #[test]
     fn second_snapshot_parents_off_the_first() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT", "AOIDE_SESSION_ID"]);
         std::env::remove_var("AOIDE_SESSION_ID");
         let (root, rice, draft) = routed_draft("entry-second");
-        std::fs::write(shellbridge::stage_dir().join("theme.json"), VALID_NOTES).unwrap();
+        std::fs::write(crate::paths::stage_dir().join("theme.json"), VALID_NOTES).unwrap();
 
         let first = snapshot("rice.history", "stage").unwrap();
         assert_eq!(first.entry, 1);
 
         std::fs::write(
-            shellbridge::stage_dir().join("theme.json"),
+            crate::paths::stage_dir().join("theme.json"),
             r##"{"schemaVersion":"0","palette":{"bg":"#111111"}}"##,
         )
         .unwrap();
@@ -1935,12 +1935,12 @@ mod tests {
     #[test]
     fn snapshot_outside_staging_or_draft_mode_refuses() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         let root = unique_tmp("entry-not-staged-or-drafted");
         let stage = root.join("stage");
         std::fs::create_dir_all(&stage).unwrap();
         crate::commands::test_support::ensure_default_rices_fixture();
-        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        aoide_test_support::pin_stage(&stage);
 
         // No marker at all IS declarative (the safe default) — refused:
         // nothing is unlocked, so there is nothing to snapshot.
@@ -1963,13 +1963,13 @@ mod tests {
     #[test]
     fn snapshot_in_staging_mode_entries_off_the_rice_directly() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT", "AOIDE_SESSION_ID"]);
         std::env::remove_var("AOIDE_SESSION_ID");
         let root = unique_tmp("entry-staging-routing");
         let stage = root.join("stage");
         std::fs::create_dir_all(&stage).unwrap();
         crate::commands::test_support::ensure_default_rices_fixture();
-        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        aoide_test_support::pin_stage(&stage);
 
         save_mode_marker(&ModeMarker {
             mode: RiceMode::Staging,
@@ -1982,12 +1982,12 @@ mod tests {
         let record = snapshot("rice.history", "explicit").unwrap();
         assert_eq!(record.entry, 1);
         assert_eq!(
-            aoide_storage::history::load_history("sonata", None, 1).map(|r| r.entry),
+            crate::history::load_history("sonata", None, 1).map(|r| r.entry),
             Some(1),
             "the entry lives directly under rices/sonata/history/"
         );
         assert!(
-            !shellbridge::rice_drafts_dir("sonata").is_dir(),
+            !crate::paths::rice_drafts_dir("sonata").is_dir(),
             "no drafts/ directory was ever created for a staging-mode entry"
         );
         let _ = std::fs::remove_dir_all(&root);
@@ -2005,10 +2005,10 @@ mod tests {
     #[test]
     fn snapshot_unlocked_refusal_reports_the_invoking_command_not_rice_entry() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
-        let stage = unique_tmp("entry-cmd-thread-snapshot");
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
+        let stage = unique_tmp("entry-cmd-thread-snapshot").join("stage");
         crate::commands::test_support::ensure_default_rices_fixture();
-        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        aoide_test_support::pin_stage(&stage);
 
         // No marker at all IS declarative — refused before this even reaches
         // the entry store, so the refusal must name the REAL caller.
@@ -2021,10 +2021,10 @@ mod tests {
     #[test]
     fn snapshot_if_drifted_unlocked_refusal_reports_the_invoking_command_not_rice_entry() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
-        let stage = unique_tmp("entry-cmd-thread-drift");
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
+        let stage = unique_tmp("entry-cmd-thread-drift").join("stage");
         crate::commands::test_support::ensure_default_rices_fixture();
-        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        aoide_test_support::pin_stage(&stage);
 
         let err = snapshot_if_drifted_unlocked("wallpaper.set", "wallpaper-set").unwrap_err();
         assert_eq!(err.command, "wallpaper.set", "not the hardcoded rice.history");
@@ -2043,10 +2043,10 @@ mod tests {
     #[test]
     fn snapshot_if_drifted_unlocked_is_a_noop_when_unchanged_and_mints_when_changed() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT", "AOIDE_SESSION_ID"]);
         std::env::remove_var("AOIDE_SESSION_ID");
         let (root, rice, draft) = routed_draft("entry-drift");
-        std::fs::write(shellbridge::stage_dir().join("theme.json"), VALID_NOTES).unwrap();
+        std::fs::write(crate::paths::stage_dir().join("theme.json"), VALID_NOTES).unwrap();
 
         let first = snapshot("rice.history", "stage").unwrap();
         assert_eq!(first.entry, 1);
@@ -2054,14 +2054,14 @@ mod tests {
         // Re-serialized but VALUE-identical content must not read as drift.
         let reparsed: Value = serde_json::from_str(VALID_NOTES).unwrap();
         let reserialized = serde_json::to_string_pretty(&reparsed).unwrap();
-        std::fs::write(shellbridge::stage_dir().join("theme.json"), reserialized).unwrap();
+        std::fs::write(crate::paths::stage_dir().join("theme.json"), reserialized).unwrap();
         let noop = snapshot_if_drifted_unlocked("rice.history", "drift").unwrap();
         assert!(noop.is_none(), "byte-different, value-identical content is not drift");
         assert_eq!(history::list_history(&rice, Some(&draft)).len(), 1, "no new entry minted");
 
         // A genuine change mints an entry, parented off the head it drifted from.
         std::fs::write(
-            shellbridge::stage_dir().join("theme.json"),
+            crate::paths::stage_dir().join("theme.json"),
             r##"{"schemaVersion":"0","palette":{"bg":"#222222"}}"##,
         )
         .unwrap();
@@ -2076,10 +2076,10 @@ mod tests {
     #[test]
     fn snapshot_if_drifted_unlocked_mints_unconditionally_on_an_empty_store() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT", "AOIDE_SESSION_ID"]);
         std::env::remove_var("AOIDE_SESSION_ID");
         let (root, _rice, _draft) = routed_draft("entry-drift-empty");
-        std::fs::write(shellbridge::stage_dir().join("theme.json"), VALID_NOTES).unwrap();
+        std::fs::write(crate::paths::stage_dir().join("theme.json"), VALID_NOTES).unwrap();
 
         // No head exists yet — there is nothing to compare against, so the
         // very first content is always worth capturing.
@@ -2095,9 +2095,9 @@ mod tests {
     #[test]
     fn entry_carries_session_id_when_set_and_omits_when_not() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT", "AOIDE_SESSION_ID"]);
         let (root, _rice, _draft) = routed_draft("entry-session");
-        std::fs::write(shellbridge::stage_dir().join("theme.json"), VALID_NOTES).unwrap();
+        std::fs::write(crate::paths::stage_dir().join("theme.json"), VALID_NOTES).unwrap();
 
         std::env::remove_var("AOIDE_SESSION_ID");
         let no_session = snapshot("rice.history", "explicit").unwrap();
@@ -2114,10 +2114,10 @@ mod tests {
     #[test]
     fn rice_entry_handler_mints_and_reports_the_entry_and_head_files_changed() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT", "AOIDE_SESSION_ID"]);
         std::env::remove_var("AOIDE_SESSION_ID");
         let (root, rice, draft) = routed_draft("entry-handler-ok");
-        std::fs::write(shellbridge::stage_dir().join("theme.json"), VALID_NOTES).unwrap();
+        std::fs::write(crate::paths::stage_dir().join("theme.json"), VALID_NOTES).unwrap();
 
         let out = handle_rice_entry(&inv(&["rice", "history"], &[]));
         assert_eq!(out.status, Status::Ok, "{:?}", out.data);
@@ -2134,10 +2134,10 @@ mod tests {
     #[test]
     fn rice_entry_handler_refuses_outside_draft_mode() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
-        let stage = unique_tmp("entry-handler-not-draft");
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
+        let stage = unique_tmp("entry-handler-not-draft").join("stage");
         crate::commands::test_support::ensure_default_rices_fixture();
-        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        aoide_test_support::pin_stage(&stage);
 
         let out = handle_rice_entry(&inv(&["rice", "history"], &[]));
         assert_eq!(out.status, Status::Error);
@@ -2163,10 +2163,10 @@ mod tests {
     #[test]
     fn mark_stamps_the_current_head_by_default() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT", "AOIDE_SESSION_ID"]);
         std::env::remove_var("AOIDE_SESSION_ID");
         let (root, rice, draft) = routed_draft("mark-head-default");
-        std::fs::write(shellbridge::stage_dir().join("theme.json"), VALID_NOTES).unwrap();
+        std::fs::write(crate::paths::stage_dir().join("theme.json"), VALID_NOTES).unwrap();
         let first = snapshot("rice.history", "explicit").unwrap();
         assert_eq!(first.entry, 1);
 
@@ -2185,13 +2185,13 @@ mod tests {
     #[test]
     fn mark_entry_flag_targets_a_specific_entry_not_the_head() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT", "AOIDE_SESSION_ID"]);
         std::env::remove_var("AOIDE_SESSION_ID");
         let (root, rice, draft) = routed_draft("mark-entry-flag");
-        std::fs::write(shellbridge::stage_dir().join("theme.json"), VALID_NOTES).unwrap();
+        std::fs::write(crate::paths::stage_dir().join("theme.json"), VALID_NOTES).unwrap();
         snapshot("rice.history", "explicit").unwrap(); // entry 1
         std::fs::write(
-            shellbridge::stage_dir().join("theme.json"),
+            crate::paths::stage_dir().join("theme.json"),
             r##"{"schemaVersion":"0","palette":{"bg":"#222222"}}"##,
         )
         .unwrap();
@@ -2210,13 +2210,13 @@ mod tests {
     #[test]
     fn mark_restamping_a_letter_moves_it_entry_files_stay_untouched_one_map_entry() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT", "AOIDE_SESSION_ID"]);
         std::env::remove_var("AOIDE_SESSION_ID");
         let (root, rice, draft) = routed_draft("mark-move");
-        std::fs::write(shellbridge::stage_dir().join("theme.json"), VALID_NOTES).unwrap();
+        std::fs::write(crate::paths::stage_dir().join("theme.json"), VALID_NOTES).unwrap();
         let first = snapshot("rice.history", "explicit").unwrap();
         std::fs::write(
-            shellbridge::stage_dir().join("theme.json"),
+            crate::paths::stage_dir().join("theme.json"),
             r##"{"schemaVersion":"0","palette":{"bg":"#222222"}}"##,
         )
         .unwrap();
@@ -2259,10 +2259,10 @@ mod tests {
     #[test]
     fn mark_rejects_lowercase_multichar_and_non_letter_marks() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT", "AOIDE_SESSION_ID"]);
         std::env::remove_var("AOIDE_SESSION_ID");
         let (root, _rice, _draft) = routed_draft("mark-invalid");
-        std::fs::write(shellbridge::stage_dir().join("theme.json"), VALID_NOTES).unwrap();
+        std::fs::write(crate::paths::stage_dir().join("theme.json"), VALID_NOTES).unwrap();
         snapshot("rice.history", "explicit").unwrap();
 
         for bad in ["a", "AB", "1", "", "Å"] {
@@ -2276,7 +2276,7 @@ mod tests {
     #[test]
     fn mark_missing_letter_arg_is_a_usage_error() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         let (root, _rice, _draft) = routed_draft("mark-missing-arg");
 
         let out = handle_rice_entry_mark(&inv(&["rice", "history", "mark"], &[]));
@@ -2288,10 +2288,10 @@ mod tests {
     #[test]
     fn mark_refuses_outside_draft_mode() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
-        let stage = unique_tmp("mark-not-draft");
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
+        let stage = unique_tmp("mark-not-draft").join("stage");
         crate::commands::test_support::ensure_default_rices_fixture();
-        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        aoide_test_support::pin_stage(&stage);
 
         let out = handle_rice_entry_mark(&inv(&["rice", "history", "mark"], &["A"]));
         assert_eq!(out.status, Status::Error);
@@ -2302,10 +2302,10 @@ mod tests {
     #[test]
     fn mark_on_a_nonexistent_entry_errors_entry_not_found() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT", "AOIDE_SESSION_ID"]);
         std::env::remove_var("AOIDE_SESSION_ID");
         let (root, _rice, _draft) = routed_draft("mark-entry-missing");
-        std::fs::write(shellbridge::stage_dir().join("theme.json"), VALID_NOTES).unwrap();
+        std::fs::write(crate::paths::stage_dir().join("theme.json"), VALID_NOTES).unwrap();
         snapshot("rice.history", "explicit").unwrap(); // only entry 1 exists
 
         let out = handle_rice_entry_mark(&inv_with_entry("A", 99));
@@ -2317,7 +2317,7 @@ mod tests {
     #[test]
     fn mark_with_no_entries_at_all_and_no_entry_flag_errors_entry_not_found() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         let (root, _rice, _draft) = routed_draft("mark-empty-store");
 
         // Draft mode, but nothing has ever been entered — no head to default
@@ -2331,10 +2331,10 @@ mod tests {
     #[test]
     fn mark_invalid_entry_flag_is_a_usage_error() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT", "AOIDE_SESSION_ID"]);
         std::env::remove_var("AOIDE_SESSION_ID");
         let (root, _rice, _draft) = routed_draft("mark-entry-flag-invalid");
-        std::fs::write(shellbridge::stage_dir().join("theme.json"), VALID_NOTES).unwrap();
+        std::fs::write(crate::paths::stage_dir().join("theme.json"), VALID_NOTES).unwrap();
         snapshot("rice.history", "explicit").unwrap();
 
         let out = handle_rice_entry_mark(&Invocation {
@@ -2361,10 +2361,10 @@ mod tests {
         let stage = root.join("stage");
         std::fs::create_dir_all(&stage).unwrap();
         crate::commands::test_support::ensure_default_rices_fixture();
-        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        aoide_test_support::pin_stage(&stage);
         let rice = "sonata".to_string();
         let draft = "neon-night".to_string();
-        let draft_dir = shellbridge::draft_dir(&rice, &draft);
+        let draft_dir = crate::paths::draft_dir(&rice, &draft);
         std::fs::create_dir_all(&draft_dir).unwrap();
         let draft_theme = draft_dir.join("theme.json");
         std::fs::write(&draft_theme, "{}").unwrap();
@@ -2414,10 +2414,10 @@ mod tests {
     #[test]
     fn revert_to_a_mark_branches_and_leaves_the_old_line_intact() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT", "AOIDE_SESSION_ID"]);
         std::env::remove_var("AOIDE_SESSION_ID");
         let (root, rice, draft, draft_theme) = routed_draft_symlinked("back-branch-acceptance");
-        let stage = shellbridge::stage_dir();
+        let stage = crate::paths::stage_dir();
 
         write_theme(&stage, "#111111");
         let entry1 = snapshot("rice.history", "stage").unwrap();
@@ -2476,10 +2476,10 @@ mod tests {
     #[test]
     fn revert_by_entry_number_moves_head_and_restores_content() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT", "AOIDE_SESSION_ID"]);
         std::env::remove_var("AOIDE_SESSION_ID");
         let (root, rice, draft, draft_theme) = routed_draft_symlinked("back-by-entry");
-        let stage = shellbridge::stage_dir();
+        let stage = crate::paths::stage_dir();
 
         write_theme(&stage, "#aaaaaa");
         let entry1 = snapshot("rice.history", "stage").unwrap();
@@ -2504,11 +2504,11 @@ mod tests {
     #[test]
     fn back_restores_the_lock_dress_off_the_target_entry() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT", "AOIDE_SESSION_ID"]);
         std::env::remove_var("AOIDE_SESSION_ID");
         let (root, rice, _draft, _draft_theme) = routed_draft_symlinked("back-lock-dress");
-        let stage = shellbridge::stage_dir();
-        let picture = shellbridge::rice_dir(&rice).join("lockscreen.png");
+        let stage = crate::paths::stage_dir();
+        let picture = crate::paths::rice_dir(&rice).join("lockscreen.png");
         std::fs::write(&picture, b"").unwrap();
         let write_full = |bg: &str| {
             std::fs::write(
@@ -2551,10 +2551,10 @@ mod tests {
         // file's other `--entry` tests target unmarked entries, so this was
         // otherwise asserted nowhere.
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT", "AOIDE_SESSION_ID"]);
         std::env::remove_var("AOIDE_SESSION_ID");
         let (root, rice, draft, _draft_theme) = routed_draft_symlinked("back-entry-target-has-mark");
-        let stage = shellbridge::stage_dir();
+        let stage = crate::paths::stage_dir();
 
         write_theme(&stage, "#111111");
         snapshot("rice.history", "stage").unwrap(); // entry 1
@@ -2575,10 +2575,10 @@ mod tests {
     #[test]
     fn back_snapshots_an_unentered_hand_edit_before_overwriting_it() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT", "AOIDE_SESSION_ID"]);
         std::env::remove_var("AOIDE_SESSION_ID");
         let (root, rice, draft, draft_theme) = routed_draft_symlinked("back-drift-preserved");
-        let stage = shellbridge::stage_dir();
+        let stage = crate::paths::stage_dir();
 
         write_theme(&stage, "#111111");
         snapshot("rice.history", "stage").unwrap(); // entry 1, head
@@ -2609,10 +2609,10 @@ mod tests {
     #[test]
     fn back_mints_no_drift_entry_when_the_stage_already_matches_the_head() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT", "AOIDE_SESSION_ID"]);
         std::env::remove_var("AOIDE_SESSION_ID");
         let (root, rice, draft, _draft_theme) = routed_draft_symlinked("back-no-drift");
-        let stage = shellbridge::stage_dir();
+        let stage = crate::paths::stage_dir();
 
         write_theme(&stage, "#111111");
         snapshot("rice.history", "stage").unwrap(); // entry 1, head — stage matches it exactly
@@ -2639,10 +2639,10 @@ mod tests {
         // between the two calls — the second call's drift comparison is
         // against exactly what the first call's own write just produced.
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT", "AOIDE_SESSION_ID"]);
         std::env::remove_var("AOIDE_SESSION_ID");
         let (root, rice, draft, _draft_theme) = routed_draft_symlinked("back-repeat-same-target");
-        let stage = shellbridge::stage_dir();
+        let stage = crate::paths::stage_dir();
 
         write_theme(&stage, "#111111");
         snapshot("rice.history", "stage").unwrap(); // entry 1
@@ -2670,10 +2670,10 @@ mod tests {
     #[test]
     fn back_clears_a_stale_stage_wallpaper_when_the_target_entry_has_none() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT", "AOIDE_SESSION_ID"]);
         std::env::remove_var("AOIDE_SESSION_ID");
         let (root, _rice, _draft, _draft_theme) = routed_draft_symlinked("back-wallpaper-clear");
-        let stage = shellbridge::stage_dir();
+        let stage = crate::paths::stage_dir();
 
         write_theme(&stage, "#111111");
         let entry1 = snapshot("rice.history", "stage").unwrap();
@@ -2704,10 +2704,10 @@ mod tests {
     #[test]
     fn back_round_trips_a_pick_as_a_pick() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT", "AOIDE_SESSION_ID"]);
         std::env::remove_var("AOIDE_SESSION_ID");
         let (root, _rice, _draft, _draft_theme) = routed_draft_symlinked("back-wallpaper-pick");
-        let stage = shellbridge::stage_dir();
+        let stage = crate::paths::stage_dir();
 
         write_theme(&stage, "#111111");
         crate::wallpaper::stage_default(std::path::Path::new("/tmp/rice-wallpaper.png"), "sonata")
@@ -2745,13 +2745,13 @@ mod tests {
     #[test]
     fn back_refuses_when_the_routing_symlink_is_missing() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT", "AOIDE_SESSION_ID"]);
         std::env::remove_var("AOIDE_SESSION_ID");
         let root = unique_tmp("back-routing-broken");
         let stage = root.join("stage");
         std::fs::create_dir_all(&stage).unwrap();
         crate::commands::test_support::ensure_default_rices_fixture();
-        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        aoide_test_support::pin_stage(&stage);
         let rice = "sonata".to_string();
         let draft = "neon-night".to_string();
         // Draft mode claimed, but stage/theme.json is a PLAIN file, never
@@ -2770,7 +2770,7 @@ mod tests {
         // fallback in `load_head` lands on 1 whether or not `save_head` ever
         // ran, so that assertion would hold even if the routing-broken
         // refusal secretly still moved the cursor.
-        std::fs::create_dir_all(shellbridge::draft_dir(&rice, &draft).join("history")).unwrap();
+        std::fs::create_dir_all(crate::paths::draft_dir(&rice, &draft).join("history")).unwrap();
         let seed = |n: u32, parent: Option<u32>| HistoryRecord {
             schema_version: String::new(),
             entry: n,
@@ -2811,10 +2811,10 @@ mod tests {
         // ruled a silent `--entry`-wins priority defensible but unpinned —
         // this test is the pin.
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT", "AOIDE_SESSION_ID"]);
         std::env::remove_var("AOIDE_SESSION_ID");
         let (root, rice, draft, _draft_theme) = routed_draft_symlinked("back-both-flags-entry-wins");
-        let stage = shellbridge::stage_dir();
+        let stage = crate::paths::stage_dir();
 
         write_theme(&stage, "#111111");
         snapshot("rice.history", "stage").unwrap(); // entry 1
@@ -2834,10 +2834,10 @@ mod tests {
     #[test]
     fn back_entry_not_found_and_mark_not_found() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT", "AOIDE_SESSION_ID"]);
         std::env::remove_var("AOIDE_SESSION_ID");
         let (root, _rice, _draft, _draft_theme) = routed_draft_symlinked("back-not-found");
-        let stage = shellbridge::stage_dir();
+        let stage = crate::paths::stage_dir();
         write_theme(&stage, "#111111");
         snapshot("rice.history", "stage").unwrap(); // only entry 1 exists, no marks
 
@@ -2891,15 +2891,15 @@ mod tests {
         );
         crate::commands::test_support::prepend_path(&root.join("fake-bin"));
 
-        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        aoide_test_support::pin_stage(&stage);
         std::env::set_var("STRILLIX_TEMPLATES", &templates);
         std::env::remove_var(crate::widgets::RICES_EVAL_FIXTURE_VAR);
 
         std::fs::write(stage.join("theme.json"), VALID_NOTES).unwrap();
-        let strillix_dir = shellbridge::rice_dir("sonata");
-        std::fs::create_dir_all(strillix_dir.join("widgets")).unwrap();
-        std::fs::write(strillix_dir.join("theme.json"), VALID_NOTES).unwrap();
-        std::fs::write(strillix_dir.join("widgets").join("bar.qml"), "// bar\n").unwrap();
+        let strillix_root = crate::paths::rice_dir("sonata");
+        std::fs::create_dir_all(strillix_root.join("widgets")).unwrap();
+        std::fs::write(strillix_root.join("theme.json"), VALID_NOTES).unwrap();
+        std::fs::write(strillix_root.join("widgets").join("bar.qml"), "// bar\n").unwrap();
         // Unlocked staging mode: `rice back` refuses while declarative, and
         // entries only exist while unlocked — a mode refusal would mask the gate.
         save_mode_marker(&ModeMarker {
@@ -2931,7 +2931,7 @@ mod tests {
         std::fs::write(stage.join(".stage.lock"), "").unwrap();
 
         let head_before = history::load_head("sonata", None);
-        let before = crate::commands::test_support::tree_snapshot(&[&stage, &strillix_dir]);
+        let before = crate::commands::test_support::tree_snapshot(&[&stage, &strillix_root]);
         let out = handle_rice_back(&inv_back(None, Some(1)));
 
         assert_eq!(out.status, Status::Error, "{:?}", out.data);
@@ -2943,7 +2943,7 @@ mod tests {
             out.message
         );
         assert_eq!(
-            crate::commands::test_support::tree_snapshot(&[&stage, &strillix_dir]),
+            crate::commands::test_support::tree_snapshot(&[&stage, &strillix_root]),
             before,
             "a refused `rice back` writes nothing: stage/ and the rice dir are byte-unchanged"
         );
@@ -2977,10 +2977,10 @@ mod tests {
     #[test]
     fn back_bare_invocation_refuses_without_reading_stdin_or_writing_anything() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT", "AOIDE_SESSION_ID"]);
         std::env::remove_var("AOIDE_SESSION_ID");
         let (root, rice, draft, _draft_theme) = routed_draft_symlinked("back-bare-refuses");
-        let stage = shellbridge::stage_dir();
+        let stage = crate::paths::stage_dir();
         write_theme(&stage, "#111111");
         snapshot("rice.history", "stage").unwrap();
 
@@ -3019,10 +3019,10 @@ mod tests {
     #[test]
     fn back_bare_invocation_off_a_tty_names_the_picker_and_still_refuses() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT", "AOIDE_SESSION_ID"]);
         std::env::remove_var("AOIDE_SESSION_ID");
         let (root, rice, draft, _draft_theme) = routed_draft_symlinked("back-bare-verbatim");
-        let stage = shellbridge::stage_dir();
+        let stage = crate::paths::stage_dir();
         write_theme(&stage, "#111111");
         snapshot("rice.history", "stage").unwrap();
 
@@ -3042,10 +3042,10 @@ mod tests {
     #[test]
     fn back_refuses_outside_draft_mode() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
-        let stage = unique_tmp("back-not-draft");
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
+        let stage = unique_tmp("back-not-draft").join("stage");
         crate::commands::test_support::ensure_default_rices_fixture();
-        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        aoide_test_support::pin_stage(&stage);
 
         let out = handle_rice_back(&inv_back(None, Some(1)));
         assert_eq!(out.status, Status::Error);
@@ -3174,7 +3174,7 @@ mod tests {
     #[test]
     fn render_tree_renders_an_orphan_entry_marked_detached_instead_of_vanishing() {
         // Entry 5's parent (2) is not in the store at all — a crash mid-prune, or a hand edit.
-        // `aoide_storage::history` is deliberately tolerant of exactly this shape; the tree view
+        // `crate::history` is deliberately tolerant of exactly this shape; the tree view
         // must surface it, not silently drop an entry that still exists on disk.
         let entries = vec![rec(1, None), rec(5, Some(2))];
         let marks = BTreeMap::new();
@@ -3220,7 +3220,7 @@ mod tests {
     #[test]
     fn rice_entry_list_handler_on_an_empty_store_is_ok_with_an_empty_list() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         let (root, _rice, _draft) = routed_draft("entry-list-empty");
 
         let out = handle_rice_entry_list(&inv(&["rice", "history", "list"], &[]));
@@ -3234,10 +3234,10 @@ mod tests {
     #[test]
     fn rice_entry_list_handler_refuses_outside_draft_mode() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
-        let stage = unique_tmp("entry-list-not-draft");
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
+        let stage = unique_tmp("entry-list-not-draft").join("stage");
         crate::commands::test_support::ensure_default_rices_fixture();
-        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        aoide_test_support::pin_stage(&stage);
 
         let out = handle_rice_entry_list(&inv(&["rice", "history", "list"], &[]));
         assert_eq!(out.status, Status::Error);
@@ -3248,14 +3248,14 @@ mod tests {
     #[test]
     fn rice_entry_list_json_shape_carries_parent_and_mark_for_a_branching_store() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT", "AOIDE_SESSION_ID"]);
         std::env::remove_var("AOIDE_SESSION_ID");
         let (root, rice, draft) = routed_draft("entry-list-json-shape");
-        std::fs::write(shellbridge::stage_dir().join("theme.json"), VALID_NOTES).unwrap();
+        std::fs::write(crate::paths::stage_dir().join("theme.json"), VALID_NOTES).unwrap();
 
         let entry1 = snapshot("rice.history", "explicit").unwrap(); // 1, no parent
         std::fs::write(
-            shellbridge::stage_dir().join("theme.json"),
+            crate::paths::stage_dir().join("theme.json"),
             r##"{"schemaVersion":"0","palette":{"bg":"#222222"}}"##,
         )
         .unwrap();
@@ -3288,7 +3288,7 @@ mod tests {
         // walk's orphan defect, but this pins that fact so it can't regress silently if the
         // builder ever gets rewritten to reuse the tree instead.
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         let (root, rice, draft) = routed_draft("entry-list-json-orphan");
 
         let seed = |n: u32, parent: Option<u32>| HistoryRecord {
@@ -3390,10 +3390,10 @@ mod tests {
     #[test]
     fn diff_default_base_is_the_nearest_ancestral_mark_on_the_current_branch_not_the_highest_letter() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT", "AOIDE_SESSION_ID"]);
         std::env::remove_var("AOIDE_SESSION_ID");
         let (root, rice, draft, _draft_theme) = routed_draft_symlinked("diff-nearest-ancestral-mark");
-        let stage = shellbridge::stage_dir();
+        let stage = crate::paths::stage_dir();
 
         // entry 1 — the root.
         write_theme(&stage, "#111111");
@@ -3451,27 +3451,27 @@ mod tests {
     #[test]
     fn diff_default_base_finds_a_mark_at_ancestry_depth_three_not_just_the_head_or_its_immediate_parent() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT", "AOIDE_SESSION_ID"]);
         std::env::remove_var("AOIDE_SESSION_ID");
         let (root, _rice, _draft) = routed_draft("diff-depth-three-mark");
-        std::fs::write(shellbridge::stage_dir().join("theme.json"), VALID_NOTES).unwrap();
+        std::fs::write(crate::paths::stage_dir().join("theme.json"), VALID_NOTES).unwrap();
         snapshot("rice.history", "stage").unwrap(); // entry 1 — the root, marked
         mark("rice.history.mark", "A", 1).unwrap();
 
         std::fs::write(
-            shellbridge::stage_dir().join("theme.json"),
+            crate::paths::stage_dir().join("theme.json"),
             r##"{"schemaVersion":"0","palette":{"bg":"#222222"}}"##,
         )
         .unwrap();
         snapshot("rice.history", "stage").unwrap(); // entry 2 — unmarked
         std::fs::write(
-            shellbridge::stage_dir().join("theme.json"),
+            crate::paths::stage_dir().join("theme.json"),
             r##"{"schemaVersion":"0","palette":{"bg":"#333333"}}"##,
         )
         .unwrap();
         snapshot("rice.history", "stage").unwrap(); // entry 3 — unmarked
         std::fs::write(
-            shellbridge::stage_dir().join("theme.json"),
+            crate::paths::stage_dir().join("theme.json"),
             r##"{"schemaVersion":"0","palette":{"bg":"#444444"}}"##,
         )
         .unwrap();
@@ -3491,13 +3491,13 @@ mod tests {
     #[test]
     fn diff_falls_back_to_the_heads_parent_when_nothing_in_the_ancestry_is_marked() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT", "AOIDE_SESSION_ID"]);
         std::env::remove_var("AOIDE_SESSION_ID");
         let (root, _rice, _draft) = routed_draft("diff-fallback-parent");
-        std::fs::write(shellbridge::stage_dir().join("theme.json"), VALID_NOTES).unwrap();
+        std::fs::write(crate::paths::stage_dir().join("theme.json"), VALID_NOTES).unwrap();
         snapshot("rice.history", "stage").unwrap(); // entry 1
         std::fs::write(
-            shellbridge::stage_dir().join("theme.json"),
+            crate::paths::stage_dir().join("theme.json"),
             r##"{"schemaVersion":"0","palette":{"bg":"#222222"}}"##,
         )
         .unwrap();
@@ -3512,7 +3512,7 @@ mod tests {
     #[test]
     fn diff_on_an_entirely_empty_store_reports_nothing_to_diff_against() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         let (root, _rice, _draft) = routed_draft("diff-empty-store");
 
         let out = handle_rice_entry_diff(&inv_diff(None, None));
@@ -3526,10 +3526,10 @@ mod tests {
     #[test]
     fn diff_with_a_single_unmarked_root_entry_reports_nothing_to_diff_against() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT", "AOIDE_SESSION_ID"]);
         std::env::remove_var("AOIDE_SESSION_ID");
         let (root, _rice, _draft) = routed_draft("diff-root-only-unmarked");
-        std::fs::write(shellbridge::stage_dir().join("theme.json"), VALID_NOTES).unwrap();
+        std::fs::write(crate::paths::stage_dir().join("theme.json"), VALID_NOTES).unwrap();
         snapshot("rice.history", "stage").unwrap(); // entry 1 — the only entry, no parent, no mark
 
         let out = handle_rice_entry_diff(&inv_diff(None, None));
@@ -3543,10 +3543,10 @@ mod tests {
     #[test]
     fn diff_identical_content_against_a_self_marked_head_is_an_empty_diff() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT", "AOIDE_SESSION_ID"]);
         std::env::remove_var("AOIDE_SESSION_ID");
         let (root, _rice, _draft) = routed_draft("diff-identical-self-mark");
-        std::fs::write(shellbridge::stage_dir().join("theme.json"), VALID_NOTES).unwrap();
+        std::fs::write(crate::paths::stage_dir().join("theme.json"), VALID_NOTES).unwrap();
         let entry1 = snapshot("rice.history", "stage").unwrap();
         mark("rice.history.mark", "A", entry1.entry).unwrap();
 
@@ -3563,13 +3563,13 @@ mod tests {
     #[test]
     fn diff_entry_flag_overrides_the_default_base() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT", "AOIDE_SESSION_ID"]);
         std::env::remove_var("AOIDE_SESSION_ID");
         let (root, _rice, _draft) = routed_draft("diff-entry-flag");
-        std::fs::write(shellbridge::stage_dir().join("theme.json"), VALID_NOTES).unwrap();
+        std::fs::write(crate::paths::stage_dir().join("theme.json"), VALID_NOTES).unwrap();
         snapshot("rice.history", "stage").unwrap(); // entry 1
         std::fs::write(
-            shellbridge::stage_dir().join("theme.json"),
+            crate::paths::stage_dir().join("theme.json"),
             r##"{"schemaVersion":"0","palette":{"bg":"#222222"}}"##,
         )
         .unwrap();
@@ -3584,14 +3584,14 @@ mod tests {
     #[test]
     fn diff_mark_flag_overrides_the_default_base() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT", "AOIDE_SESSION_ID"]);
         std::env::remove_var("AOIDE_SESSION_ID");
         let (root, _rice, _draft) = routed_draft("diff-mark-flag");
-        std::fs::write(shellbridge::stage_dir().join("theme.json"), VALID_NOTES).unwrap();
+        std::fs::write(crate::paths::stage_dir().join("theme.json"), VALID_NOTES).unwrap();
         snapshot("rice.history", "stage").unwrap(); // entry 1
         mark("rice.history.mark", "A", 1).unwrap();
         std::fs::write(
-            shellbridge::stage_dir().join("theme.json"),
+            crate::paths::stage_dir().join("theme.json"),
             r##"{"schemaVersion":"0","palette":{"bg":"#222222"}}"##,
         )
         .unwrap();
@@ -3612,13 +3612,13 @@ mod tests {
     #[test]
     fn diff_mark_flag_naming_a_entry_that_no_longer_exists_is_mark_not_found_not_a_silent_default() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT", "AOIDE_SESSION_ID"]);
         std::env::remove_var("AOIDE_SESSION_ID");
         let (root, rice, draft) = routed_draft("diff-mark-dangling");
-        std::fs::write(shellbridge::stage_dir().join("theme.json"), VALID_NOTES).unwrap();
+        std::fs::write(crate::paths::stage_dir().join("theme.json"), VALID_NOTES).unwrap();
         snapshot("rice.history", "stage").unwrap(); // entry 1
         std::fs::write(
-            shellbridge::stage_dir().join("theme.json"),
+            crate::paths::stage_dir().join("theme.json"),
             r##"{"schemaVersion":"0","palette":{"bg":"#222222"}}"##,
         )
         .unwrap();
@@ -3641,13 +3641,13 @@ mod tests {
     #[test]
     fn diff_with_both_entry_and_mark_given_entry_wins() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT", "AOIDE_SESSION_ID"]);
         std::env::remove_var("AOIDE_SESSION_ID");
         let (root, _rice, _draft) = routed_draft("diff-both-flags-entry-wins");
-        std::fs::write(shellbridge::stage_dir().join("theme.json"), VALID_NOTES).unwrap();
+        std::fs::write(crate::paths::stage_dir().join("theme.json"), VALID_NOTES).unwrap();
         snapshot("rice.history", "stage").unwrap(); // entry 1
         std::fs::write(
-            shellbridge::stage_dir().join("theme.json"),
+            crate::paths::stage_dir().join("theme.json"),
             r##"{"schemaVersion":"0","palette":{"bg":"#222222"}}"##,
         )
         .unwrap();
@@ -3663,10 +3663,10 @@ mod tests {
     #[test]
     fn diff_entry_not_found_and_mark_not_found() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT", "AOIDE_SESSION_ID"]);
         std::env::remove_var("AOIDE_SESSION_ID");
         let (root, _rice, _draft) = routed_draft("diff-not-found");
-        std::fs::write(shellbridge::stage_dir().join("theme.json"), VALID_NOTES).unwrap();
+        std::fs::write(crate::paths::stage_dir().join("theme.json"), VALID_NOTES).unwrap();
         snapshot("rice.history", "stage").unwrap(); // only entry 1 exists, no marks
 
         let missing_entry = handle_rice_entry_diff(&inv_diff(None, Some(99)));
@@ -3698,10 +3698,10 @@ mod tests {
     #[test]
     fn diff_refuses_outside_draft_mode() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
-        let stage = unique_tmp("diff-not-draft");
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
+        let stage = unique_tmp("diff-not-draft").join("stage");
         crate::commands::test_support::ensure_default_rices_fixture();
-        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        aoide_test_support::pin_stage(&stage);
 
         let out = handle_rice_entry_diff(&inv_diff(None, None));
         assert_eq!(out.status, Status::Error);
@@ -3785,7 +3785,7 @@ mod tests {
     #[test]
     fn plan_prune_never_lets_the_head_or_its_ancestry_into_candidates_even_with_force() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         let (root, rice, draft) = routed_draft("prune-plan-ancestry-rail");
         seed(&rice, Some(&draft), 1, None, OLD_AT, None);
         seed(&rice, Some(&draft), 2, Some(1), OLD_AT, None);
@@ -3805,7 +3805,7 @@ mod tests {
     #[test]
     fn prune_bare_non_tty_prints_the_dry_run_and_changes_nothing() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         let (root, rice, draft) = routed_draft("prune-dry-run");
         seed(&rice, Some(&draft), 1, None, OLD_AT, None);
         seed(&rice, Some(&draft), 2, Some(1), OLD_AT, None);
@@ -3832,7 +3832,7 @@ mod tests {
     #[test]
     fn prune_never_selects_the_head_or_its_ancestry_under_force_and_all_but_marks() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         let (root, rice, draft) = routed_draft("prune-force-ancestry-rail");
         seed(&rice, Some(&draft), 1, None, OLD_AT, None);
         seed(&rice, Some(&draft), 2, Some(1), OLD_AT, None);
@@ -3856,7 +3856,7 @@ mod tests {
     #[test]
     fn prune_keep_n_keeps_the_newest_n_eligible_entries() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         let (root, rice, draft) = routed_draft("prune-keep-n");
         seed(&rice, Some(&draft), 1, None, OLD_AT, None);
         for n in 2u32..=6 {
@@ -3875,7 +3875,7 @@ mod tests {
     #[test]
     fn prune_keep_n_exceeding_the_entry_count_prunes_nothing() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         let (root, rice, draft) = routed_draft("prune-keep-exceeds");
         seed(&rice, Some(&draft), 1, None, OLD_AT, None);
         seed(&rice, Some(&draft), 2, Some(1), OLD_AT, None);
@@ -3892,7 +3892,7 @@ mod tests {
     #[test]
     fn prune_older_than_selects_only_entries_past_the_threshold() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         let (root, rice, draft) = routed_draft("prune-older-than");
         seed(&rice, Some(&draft), 1, None, OLD_AT, None);
         seed(&rice, Some(&draft), 2, Some(1), OLD_AT, None); // 2020 — well past any sane threshold.
@@ -3909,7 +3909,7 @@ mod tests {
     #[test]
     fn prune_older_than_malformed_value_is_a_usage_error_that_changes_nothing() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         let (root, rice, draft) = routed_draft("prune-older-than-bad");
         seed(&rice, Some(&draft), 1, None, OLD_AT, None);
         seed(&rice, Some(&draft), 2, Some(1), OLD_AT, None);
@@ -3938,7 +3938,7 @@ mod tests {
     #[test]
     fn prune_marks_survive_by_default_and_go_under_force_dropping_the_letter_from_the_map() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         let (root, rice, draft) = routed_draft("prune-marks-protection");
         seed(&rice, Some(&draft), 1, None, OLD_AT, None);
         seed(&rice, Some(&draft), 2, Some(1), OLD_AT, Some('A'));
@@ -3970,7 +3970,7 @@ mod tests {
     #[test]
     fn prune_reparents_surviving_children_and_ancestry_still_resolves() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         let (root, rice, draft) = routed_draft("prune-splice");
         seed(&rice, Some(&draft), 1, None, OLD_AT, None);
         seed(&rice, Some(&draft), 2, Some(1), OLD_AT, None);
@@ -3997,7 +3997,7 @@ mod tests {
     #[test]
     fn prune_cascades_through_a_splice_target_that_is_also_pruned_in_the_same_pass() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
 
         for (tag, order) in [("prune-cascade-fwd", [9u32, 17]), ("prune-cascade-rev", [17, 9])] {
             let (root, rice, draft) = routed_draft(tag);
@@ -4024,7 +4024,7 @@ mod tests {
     #[test]
     fn prune_an_orphan_entry_is_prunable_and_does_not_corrupt_the_store() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         let (root, rice, draft) = routed_draft("prune-orphan");
         seed(&rice, Some(&draft), 1, None, OLD_AT, None);
         seed(&rice, Some(&draft), 2, Some(999), OLD_AT, None); // dangling parent — A6 established this is reachable.
@@ -4051,7 +4051,7 @@ mod tests {
     #[test]
     fn prune_re_checks_the_ancestry_rail_against_a_fresh_read_and_skips_a_stale_candidate() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         let (root, rice, draft) = routed_draft("prune-stale-plan-race");
         seed(&rice, Some(&draft), 1, None, OLD_AT, None);
         seed(&rice, Some(&draft), 2, Some(1), OLD_AT, None); // now the head — as if `rice back --entry 2` raced the plan.
@@ -4076,7 +4076,7 @@ mod tests {
     #[test]
     fn prune_re_checks_the_whole_fresh_ancestry_not_just_the_bare_head() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         let (root, rice, draft) = routed_draft("prune-stale-plan-ancestry-race");
         seed(&rice, Some(&draft), 1, None, OLD_AT, None);
         seed(&rice, Some(&draft), 2, Some(1), OLD_AT, None); // about to become the head's PARENT.
@@ -4097,7 +4097,7 @@ mod tests {
     #[test]
     fn prune_changed_never_lists_a_path_the_rail_re_check_stripped() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         let (root, rice, draft) = routed_draft("prune-changed-accuracy-stale");
         seed(&rice, Some(&draft), 1, None, OLD_AT, None);
         seed(&rice, Some(&draft), 2, Some(1), OLD_AT, None); // races into being the head.
@@ -4118,7 +4118,7 @@ mod tests {
     #[test]
     fn prune_changed_never_lists_a_doomed_entry_whose_file_was_already_gone() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         let (root, rice, draft) = routed_draft("prune-changed-accuracy-already-gone");
         seed(&rice, Some(&draft), 1, None, OLD_AT, None);
         seed(&rice, Some(&draft), 2, Some(1), OLD_AT, None);
@@ -4133,10 +4133,10 @@ mod tests {
     #[test]
     fn prune_refuses_outside_draft_mode() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
-        let stage = unique_tmp("prune-not-draft");
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
+        let stage = unique_tmp("prune-not-draft").join("stage");
         crate::commands::test_support::ensure_default_rices_fixture();
-        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        aoide_test_support::pin_stage(&stage);
 
         let out = handle_rice_entry_prune(&inv_prune(None, None, true, false));
         assert_eq!(out.status, Status::Error);

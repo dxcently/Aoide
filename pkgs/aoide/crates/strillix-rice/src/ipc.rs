@@ -108,7 +108,7 @@ pub fn quickshell_ipc_reload() -> ReloadStatus {
     if cfg!(test) || quickshell_service_main_pid().is_none() {
         return ReloadStatus::NotRunning;
     }
-    let shell_qml = aoide_storage::fs::run_qml_dir().join("shell.qml");
+    let shell_qml = crate::paths::run_qml_dir().join("shell.qml");
     match std::process::Command::new("quickshell")
         .arg("-p")
         .arg(shell_qml)

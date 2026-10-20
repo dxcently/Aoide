@@ -92,12 +92,12 @@ mod tests {
         // (`root/stage` → rice tree resolves at `root`) — mirrors
         // `commands/rice.rs`'s own test rig.
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
         let root = unique_tmp("element-seed-cmd");
-        std::env::set_var("AOIDE_STAGE_DIR", root.join("stage"));
+        aoide_test_support::pin_stage(root.join("stage"));
 
-        let strillix_dir = root.join("rices").join("moonlight");
-        let elements_dir = strillix_dir.join("elements").join("waybar");
+        let strillix_root = root.join("rices").join("moonlight");
+        let elements_dir = strillix_root.join("elements").join("waybar");
         std::fs::create_dir_all(&elements_dir).unwrap();
         std::fs::write(elements_dir.join("config.jsonc"), "{}").unwrap();
         std::fs::write(
@@ -105,7 +105,7 @@ mod tests {
             r#"{ "v": 0, "element": "waybar", "files": [{"src":"config.jsonc"}], "run": {"exec":"waybar -c {run}/config.jsonc","via":"unit"} }"#,
         )
         .unwrap();
-        std::fs::write(strillix_dir.join("theme.json"), aoide_test_support::VALID_NOTES).unwrap();
+        std::fs::write(strillix_root.join("theme.json"), aoide_test_support::VALID_NOTES).unwrap();
 
         let out = handle_element_seed(&aoide_test_support::inv(&["element", "seed"], &["moonlight"]));
         assert_eq!(out.status, aoide_protocol::output::Status::Ok, "{out:?}");
