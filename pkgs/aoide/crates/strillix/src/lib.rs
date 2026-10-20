@@ -73,20 +73,20 @@ pub fn run_strillix(argv: &[String]) -> i32 {
 
         // `secrets ask` (P3) speaks zenity's own output contract, not the
         // generic `Outcome` envelope — `crates/strillix/src/commands/secrets.rs`'s
-        // module doc: `aoide_secrets::watch::spawn_strillix_entry` reads this
+        // module doc: `aoide_secrets::watch::spawn_provider_entry` reads this
         // process's stdout expecting EXACTLY the typed code (exit 0), the
         // literal string `Dismiss ask` (exit 1), or a bare cancel (exit 1,
         // nothing on stdout) — never a JSON envelope, `--json` included,
         // since the caller spawning this process is never passing that flag
         // and a human running it by hand gets the identical zenity-shaped
-        // output either way. `"failed"` (live-incident fix, this commit) is
+        // output either way. `"failed"` is
         // the ONE addition on top of that contract: `commands::secrets::
-        // EXIT_INFRA_FAILURE`'s own doc has the full incident (a killed
+        // EXIT_INFRA_FAILURE`'s own doc has the mechanism (a killed
         // dialog silently treated as a user Cancel) this distinct exit code
         // and this `eprintln!` both exist to close — `stdout stays EMPTY on
         // this path (the code/`Dismiss ask` contract is unaffected), the
         // failure reason goes to STDERR, which `aoide_secrets::watch`'s own
-        // `spawn_strillix_entry` now inherits straight through to the journal
+        // `spawn_provider_entry` now inherits straight through to the journal
         // (that crate's own doc on why).
         if inv.path == ["secrets", "ask"] {
             let outcome = dispatch::dispatch(inv);

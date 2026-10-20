@@ -35,29 +35,29 @@ installs.
 
 With `aoide` on `PATH`, the two lines above are the whole thing. `onboard` is
 a CLI-door command and runs from inside a checkout: it performs the core half
-itself, delegates the nix half to `strx onboard` when the `strillix` binary
-resolves, and finishes by printing the four-tier agent guide
-([[Agent-Interface]]). On a box with no nix and no `strillix` it says so and stops
-— *"strillix: not found ... core setup is complete"* — and the core half is
-installed either way.
+(the clone registration and the harness hooks) and finishes by printing the
+four-tier agent guide ([[Agent-Interface]]). The desktop half is `strx onboard`,
+run after it: the rice seed, the `~/rice` link and the nix half. Core never runs
+it, so a box with no nix and no `strillix` completes the core half and says so.
 
 ## First-Boot Onboarding Flow
 
-`aoide onboard` is idempotent. The core half:
+`aoide onboard` is idempotent and is the core half:
 
 1. Register the clone as a graph project ([[Session-Graph]]).
-2. Link `~/rice` → `<checkout>/rice`, never clobbering an existing file or symlink.
-3. Seed `rices/preferences.md` when absent ([[Rice-Anatomy]]).
-4. Ask which agent harnesses to wire — interactively, or via `--harness a,b` / `--yes` non-interactively — and run `hooks install` for each chosen harness ([[Agent-Hooking]]).
+2. Ask which agent harnesses to wire — interactively, or via `--harness a,b` / `--yes` non-interactively — and run `hooks install` for each chosen harness ([[Agent-Hooking]]).
 
-If the `strillix` binary resolves, `onboard` then delegates the nix half to `strx onboard`:
+It closes by printing the agent guide and this machine's node line.
 
-1. Generate `./aoide.nix` (or `--out <path>`): every `aoide.*` module option — 161 today, derived live from the modules through the flake's `aoideOptions` output, never a hand-list — with its default commented out and a one-line description, plus an appendix listing the env knobs (`AOIDE_CONDUCT_AUTOGATE`, `AOIDE_TERMINAL`, `AOIDE_CORE_BIN`/`STRILLIX_BIN`, `AOIDE_DISCOVERY_ADVERTISE`) as comments.
+The desktop half is `strx onboard`, run after it:
+
+1. Generate `./aoide.nix` (or `--out <path>`): every `aoide.*` module option — 161 today, derived live from the modules through the flake's `aoideOptions` output, never a hand-list — with its default commented out and a one-line description, plus an appendix listing the env knobs (`AOIDE_CONDUCT_AUTOGATE`, `AOIDE_TERMINAL`, `AOIDE_CORE_BIN`/`STRILLIX_BIN`, `AOIDE_DIALOG_CMD`, `AOIDE_DISCOVERY_ADVERTISE`) as comments.
 2. Print the `imports = [ ./aoide.nix ];` line for the user's own flake. Onboard never edits the flake; adding the import is the user's one manual step.
+3. From a checkout: seed `rices/preferences.md` when absent ([[Rice-Anatomy]]), and link `~/rice` → `<checkout>/rice`, never clobbering an existing file or symlink.
 
 Re-running `strx onboard` warns and backs the old file up to `<out>.bak`; a file it did not generate is refused, never overwritten.
 
-**Done-state check**: bar shows agent session + connection state; a notification round-trips agent → center; `aoide schema --json` validates.
+: bar shows agent session + connection state; a notification round-trips agent → center; `aoide schema --json` validates.
 
 On a NixOS host the daemon is started for you: `pkgs/aoide/module/aoided.nix` writes
 the `aoided` systemd **user** unit and anchors it to `aoide.sessionTarget`. That module is the declared path. Off nix — a plain Linux

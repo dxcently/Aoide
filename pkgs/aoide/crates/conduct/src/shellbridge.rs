@@ -589,7 +589,7 @@ fn run_core_bounded(
 }
 
 /// Run `argv` through `bin` — a sibling resolver's answer
-/// (`daemon::bin::core_bin()` or `rice_bin()`), never a bare name relying on
+/// (`daemon::bin::core_bin()`, or a caller's own sibling resolver), never a bare name relying on
 /// PATH alone — with a WALL-CLOCK bound that actually holds.
 /// `Ok((exited_ok, stdout, stderr))`, or
 /// `Err(reason)` when no complete answer arrived: the child could not be

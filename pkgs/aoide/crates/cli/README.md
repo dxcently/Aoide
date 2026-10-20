@@ -38,11 +38,10 @@ correspondence").
 - `guide` — `aoide guide`, the onboarding tier map.
 - `commands` — the root-coupled groups that must read the ASSEMBLED
   registry: `meta` (guide/schema), `stubs` (not-yet-implemented
-  placeholders), `onboard` (`aoide onboard`, P-I2 — the first-boot flow:
-  registers the clone, seeds the rices, wires harness hooks by calling
-  the already-registered `hooks.install` handler directly off the registry,
-  probes for `strillix` and delegates the nix half to `strx onboard` as a child
-  process when it resolves, prints the closing guide, then prints this
+  placeholders), `onboard` (`aoide onboard`, P-I2 — the first-boot flow's core half:
+  registers the clone, wires harness hooks by calling the already-registered
+  `hooks.install` handler directly off the registry, prints the closing guide,
+  then prints this
   machine's **node line** — `aoide_storage::charter::node_line`, the one
   public key plus binding an operator pastes into a charter, and the last
   thing the operator walks away with), `infra` (`mcp

@@ -104,8 +104,8 @@ impl RiceDraftAction {
 
 /// Dispatch ONE `ricemode` action: `strillix rice mode stage <name>` or a bare
 /// `strillix rice mode declarative` (the CLI resolves the declared twin), waited
-/// for through [`run_rice_step`]. The sibling `strillix` is the callee because
-/// `rice` lives there, not in this running binary. NOT inside
+/// for through [`run_rice_step`]. The callee is this build's own `strillix`
+/// ([`strillix_bin`]). NOT inside
 /// `with_stage_lock`: holding it across a blocking child wait is a deadlock
 /// waiting to happen. UNBOUNDED like every mutation here. `Ok` is the CLI's
 /// own `message`; `Err` is its refusal or the spawn error.
@@ -181,15 +181,23 @@ pub(crate) fn rice_draft_plan(mode: RiceMode, action: &RiceDraftAction) -> Resul
     Ok(plan)
 }
 
-/// Run ONE planned step: `strillix <argv> --json`, waited for — the sibling `strillix` ([`daemon::bin::rice_bin`]) because `rice`
-/// lives there and not in this running binary — and read through
+/// The `strillix` the rice bridge re-execs: the sibling-binary resolver's
+/// answer with this crate's own override (`STRILLIX_BIN`, then a sibling of
+/// the running executable, then PATH), so a built `strillix` runs the same
+/// build of itself.
+fn strillix_bin() -> String {
+    daemon::bin::resolve_bin("STRILLIX_BIN", "strillix")
+}
+
+/// Run ONE planned step: `strillix <argv> --json`, waited for, through
+/// [`strillix_bin`] — and read through
 /// [`outcome_triple`], the one reader of a `--json` envelope. NOT inside
 /// `with_stage_lock` (a blocking child wait under it is a deadlock waiting to
 /// happen). A child that
 /// could not be started is `ok: false` with the spawn error as the message,
 /// naming the first two argv words only — the command path, never a value.
 pub(crate) fn run_rice_step(argv: &[String]) -> (bool, String, Option<Value>) {
-    match std::process::Command::new(daemon::bin::rice_bin())
+    match std::process::Command::new(strillix_bin())
         .args(argv)
         .arg("--json")
         .output()
@@ -333,7 +341,7 @@ pub(crate) fn run_rice_json(argv: &[&str], timeout: std::time::Duration) -> Resu
     let mut args: Vec<String> = argv.iter().map(|w| w.to_string()).collect();
     args.push("--json".to_string());
     let label = argv.iter().take(3).copied().collect::<Vec<_>>().join(" ");
-    let (stdout, stderr) = match run_bin_bounded(&daemon::bin::rice_bin(), &args, timeout) {
+    let (stdout, stderr) = match run_bin_bounded(&strillix_bin(), &args, timeout) {
         Ok((_exited_ok, stdout, stderr)) => (stdout, stderr),
         Err(message) => return Err(rice_menu_refusal("no-answer", &message)),
     };

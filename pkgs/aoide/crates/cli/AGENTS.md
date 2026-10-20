@@ -23,8 +23,7 @@ on Windows as `WSAETIMEDOUT`). Those six tests serialize on
 contention-sensitive on a busy box, so read its result single-threaded.
 
 Gated with reasons, never stubbed: the two `#!/bin/sh` plugin-shim tests (a
-`CreateProcess`-invisible fixture) and the two symlink-privilege
-`register_clone` tests (`SeCreateSymbolicLinkPrivilege`).
+`CreateProcess`-invisible fixture).
 
 `mcp_attested_door` is unix-only for the same reason: it seals a session over a
 real pid, runs the real `aoide mcp serve --stdio` as that pid's child, and

@@ -40,7 +40,7 @@ run reports **933** (both measured, the runs named in `CORE-POSIX.md`); the
 43-test gap is the crate's host-gated set — **58** tests need a POSIX fixture and
 **15** are Windows-only — each gate naming its own reason in place. The gates are the fixture
 groups rather than a number to be trusted: a `#!/bin/sh` script or shim and its
-mode (the curl transport, the `zenity`/`strillix` dialogs, `sh`-based conduct
+mode (the curl transport and `sh`-based conduct
 children), `fork`/`SO_PEERCRED`/`setsid` facts, `/proc` reads, `socat`-style
 doors, and the SIGTERM-survivor pair — each naming its own reason in place. The
 fifteen Windows-only ones are the seam's seven (`ready_of_wait`'s table, a
@@ -2274,7 +2274,7 @@ in the message.
   `daemon_dispatch` short-circuits to `None` on `Door::Daemon` for exactly
   this reentrancy reason; every other door is refused as local-only.
   `register_bootstrap_project` (also in `manage.rs`) is the one exception:
-  `aoide onboard`'s `register_clone` is its sole caller, calling straight
+  `aoide onboard`'s `register_project` is its sole caller, calling straight
   into `add_roots` before any daemon exists to dispatch to, never through
   `local_daemon`. The local
   mutation lives in three inner helpers (`add_roots`/`remove_roots`/

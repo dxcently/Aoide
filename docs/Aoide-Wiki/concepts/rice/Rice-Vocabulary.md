@@ -15,7 +15,7 @@ Rice vocabulary names the performed half. Snowflake vocabulary names the frozen 
 ## The Rice Map
 
 Every term maps to a literal path — committed score under the dev checkout's
-`$AOIDE_FLAKE_ROOT/rice/` (default `~/Aoide/rice`; onboard links `~/rice` →
+`$AOIDE_FLAKE_ROOT/rice/` (default `~/Aoide/rice`; `strx onboard` links `~/rice` →
 the checkout's `rice/`), runtime state under `$STRILLIX_ROOT/` (default
 `~/.aoide/rice`).
 

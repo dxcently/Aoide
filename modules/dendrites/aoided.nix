@@ -172,8 +172,9 @@ in
         description = ''
           Enable the `aoide-pair-watch.service` graphical-session user unit
           (`aoide pair watch --popup`) — a typed-code entry dialog per
-          actionable pairing request, `strillix pair ask` when it resolves
-          (the same six-boxes-plus-dash surface `strillix secrets ask` renders),
+          actionable pairing request, the dialog provider `AOIDE_DIALOG_CMD`
+          names when set (the same six-boxes-plus-dash surface that provider
+          renders),
           `zenity --entry` otherwise. Off by default, same house policy as
           the MCP façade/A2A door/usage poller/secrets broker: the unit is
           graphical-session-gated exactly like `aoide-secrets-watch`
@@ -420,7 +421,7 @@ in
     };
 
     # ── Pairing events watcher (P-P5; popup upgraded to a typed-code entry
-    # dialog + strillix/zenity feature-detection, and gated behind its own opt-in
+    # dialog + provider/zenity feature-detection, and gated behind its own opt-in
     # flag, at P-PV3 task #132) ────────────────────────────────────────────────
     # Surfaces the pairing ceremony's own events feed (`aoide pair watch
     # --popup`, CONTRACTS.md §6's "Pairing events feed" subsection) as a
@@ -428,9 +429,9 @@ in
     # `secrets.nix`'s own `aoide-secrets-watch` holds (graphical-session.target,
     # `Type = simple` + `Restart = on-failure`, explicit `zenity`/`quickshell`
     # `path` entries, journal both streams, NoNewPrivileges), including that
-    # unit's own `strillix`-preferred-with-zenity-fallback shape: `strillix pair ask`
-    # (`pair_watch::resolve_strillix_bin`) when `STRILLIX_BIN` resolves it, else
-    # `zenity --entry`. No ordering against `aoide-a2a` (the process that
+    # unit's own dialog shape: the provider `AOIDE_DIALOG_CMD` names
+    # (`pair_watch::dialog_provider`) when set, else `zenity --entry`.
+    # No ordering against `aoide-a2a` (the process that
     # actually emits onto this feed) — `pair_watch::wait_for_follower` already
     # retries until the events feed appears rather than exiting 1, so this
     # unit starting before `a2a serve` has bound its socket, or before
@@ -449,7 +450,7 @@ in
     # one painting lane happened to pick. A host whose desktop is painted by
     # something else — osaka, running core Aoide beside dxflake's own Hyprland
     # and Stylix — has the session but no such anchor, gets zenity from the
-    # `path` below, and `pair_watch` itself only refuses when NEITHER `strillix`
+    # `path` below, and `pair_watch` itself refuses when neither the provider
     # nor `zenity` resolves. Gating on the session target would have made the
     # popup structurally unreachable there for a reason that has nothing to do
     # with pairing.
@@ -469,7 +470,7 @@ in
           # unconditionally: it is the fallback the whole unit's reachability
           # rests on, and the only dialog a host without strillix ever gets.
           #
-          # `quickshell` rides the SAME condition as `STRILLIX_BIN` below,
+          # `quickshell` rides the SAME condition as `AOIDE_DIALOG_CMD` below,
           # and for the same one reason: `strillix pair ask` spawns quickshell by
           # bare name, so the unit that can spawn strillix must carry it — and the
           # unit can only spawn strillix when `aoide.strillix.enable` put the binary
@@ -498,14 +499,13 @@ in
               "AOIDE_FLAKE_ROOT=${config.aoide.checkout}"
               "AOIDE_USER=${config.aoide.user}"
             ]
-            # `pair_watch::resolve_strillix_bin` resolves `strillix` via
-            # `STRILLIX_BIN` (tier 1, trusted unconditionally) or a sibling
-            # of `current_exe()` (tier 2) — `strillix` ships from `pkgs.aoide.strillix`,
-            # a SEPARATE output from the `aoide` binary this unit execs, so
-            # sibling resolution would silently fail here without this. Only
-            # set when `aoide.strillix.enable` is actually on — mirrors
+            # `pair_watch` runs the dialog provider that `AOIDE_DIALOG_CMD` names
+            # (`dialog_provider`), never a guess at PATH. `strillix` ships from
+            # `pkgs.aoide.strillix`, a SEPARATE output from the `aoide` binary this
+            # unit execs, so the provider is named explicitly here. Only set when
+            # `aoide.strillix.enable` is actually on — mirrors
             # `aoide-secrets-watch`'s own identical guard.
-            ++ lib.optional config.aoide.strillix.enable "STRILLIX_BIN=${pkgs.aoide.strillix}/bin/strillix";
+            ++ lib.optional config.aoide.strillix.enable "AOIDE_DIALOG_CMD=${pkgs.aoide.strillix}/bin/strillix";
 
             NoNewPrivileges = true;
             StandardOutput = "journal";

@@ -850,7 +850,7 @@ pub fn detach(command: &mut std::process::Command) {
 /// call: Unix's `symlink(2)` is kind-agnostic, while native Windows has two
 /// calls and asks the creator which one it is, so a directory gets
 /// `symlink_dir` there, never `symlink_file`. One implementation, two callers
-/// (`conduct`'s `hooks install` skill links, `cli`'s `onboard` rice link) —
+/// (`conduct`'s `hooks install` skill links, the desktop half's `~/rice` link) —
 /// never a second copy.
 ///
 /// A refused creation surfaces its own error to the caller: native Windows

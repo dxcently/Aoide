@@ -249,7 +249,7 @@
   would simply be reparented to a subreaper (or pid 1) and keep running
   forever: the exact "orphaned window left open" failure mode `aoide-
   secrets`' own `AGENTS.md` names as the reason `run_zenity_entry`/
-  `run_strillix_entry` hold the child's EXACT pid at all. `PR_SET_PDEATHSIG`
+  `run_provider_entry` hold the child's EXACT pid at all. `PR_SET_PDEATHSIG`
   makes the KERNEL deliver `SIGKILL` to the quickshell process itself the
   instant its parent (`strillix`) dies for ANY reason — no cooperation from
   either process's own code required at the moment of death. Armed inside

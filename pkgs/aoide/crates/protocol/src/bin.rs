@@ -1,23 +1,25 @@
-//! Sibling-binary resolver: how one aoide process locates the OTHER aoide
-//! binary (core `aoide` from strillix's side is not this phase's problem — P-A6
-//! only wires conduct's shellbridge, which needs `aoide` for itself and
-//! `strillix` for the RICE menu's `riceMode`) without hardcoding a bare name that
-//! could resolve to nothing off `PATH`.
+//! Sibling-binary resolver: how one process locates a binary it re-execs
+//! without hardcoding a bare name that could resolve to nothing off `PATH`.
+//! Core uses it for one binary only: `aoide` itself, from its shellbridge
+//! and daemon re-execs ([`core_bin`]). A binary that ships beside its own
+//! sibling resolves that sibling with [`resolve_bin`], passing its own env
+//! var and file name.
 //!
 //! Three tiers, tried in order:
-//!   1. an explicit env var override (`AOIDE_CORE_BIN`/`STRILLIX_BIN`) —
-//!      the tier a nix unit sets across store-path boundaries, where
-//!      sibling resolution cannot work (P-A8: `strillix` moves to its own
-//!      output, so it is never actually `current_exe()`'s sibling on a
-//!      built system).
+//!   1. an explicit env var override (`AOIDE_CORE_BIN`, or the caller's own
+//!      variable) — the tier a nix unit sets across store-path boundaries,
+//!      where sibling resolution cannot work (a binary that ships from its
+//!      own output is never actually `current_exe()`'s sibling on a built
+//!      system).
 //!   2. the sibling of `current_exe()` — the same directory THIS process
 //!      was launched from — ONLY if that file actually exists. A
-//!      single-binary dev build (`cargo run -p aoide-cli`) has no `strillix`
-//!      sibling; handing back a path that doesn't exist would just move
+//!      single-binary dev build (`cargo run -p aoide-cli`) has no sibling
+//!      to point at; handing back a path that doesn't exist would just move
 //!      the failure from "resolve" to "spawn" for no benefit, so this
 //!      tier falls through instead.
-//!   3. the bare name (`"aoide"`/`"strillix"`), left for `Command::spawn` to
-//!      resolve off `PATH` at exec time — the tier that always exists.
+//!   3. the bare name (`"aoide"`, or the caller's own), left for
+//!      `Command::spawn` to resolve off `PATH` at exec time — the tier that
+//!      always exists.
 //!
 //! NEVER re-exec the SIBLING binary (this module's result) from inside
 //! `with_stage_lock`: the lock is a `flock`, already cross-process safe,
@@ -162,7 +164,7 @@ fn resolve(env_value: Option<&str>, exe_dir: Option<&Path>, sibling: Option<&str
 
 /// This directory's own file name for the sibling binary, or `None` when it
 /// holds none. The name asked for first is the one this platform's binaries
-/// carry — `std::env::consts::EXE_SUFFIX`, so `aoide.exe`/`strillix.exe` on
+/// carry — `std::env::consts::EXE_SUFFIX`, so `aoide.exe`/`tool.exe` on
 /// Windows and the bare name on unix — with the bare name kept behind it, the
 /// same order `Command::new(dir.join(name))` resolves for itself. `PATHEXT`
 /// deliberately does NOT apply here: a sibling is the build sitting beside this
@@ -174,13 +176,14 @@ fn sibling_in(dir: &Path, name: &str) -> Option<String> {
     found.map(str::to_string)
 }
 
-/// The impure wrapper shared by [`core_bin`]/[`rice_bin`]: reads the real
-/// env var and `current_exe()`, does the real `exists()` stat, then hands
-/// everything to [`resolve`] for the actual tier decision. The override reaches
-/// `resolve` exactly as it always has — trimmed — and is then returned
-/// untouched: never suffixed, never built into a shell string (a `.cmd`/`.bat`
-/// override is run by `Command`, which wraps a batch file in `cmd.exe` itself).
-fn resolve_bin(env_var: &str, name: &str) -> String {
+/// The impure wrapper behind [`core_bin`] and any other binary's own sibling
+/// resolver: reads the real env var and `current_exe()`, does the real
+/// `exists()` stat, then hands everything to [`resolve`] for the actual tier
+/// decision. The override reaches `resolve` exactly as it always has —
+/// trimmed — and is then returned untouched: never suffixed, never built into
+/// a shell string (a `.cmd`/`.bat` override is run by `Command`, which wraps a
+/// batch file in `cmd.exe` itself).
+pub fn resolve_bin(env_var: &str, name: &str) -> String {
     let env_value = std::env::var(env_var).ok();
     let exe_dir = std::env::current_exe().ok().and_then(|p| p.parent().map(Path::to_path_buf));
     let sibling = exe_dir.as_deref().and_then(|dir| sibling_in(dir, name));
@@ -196,31 +199,18 @@ pub fn core_bin() -> String {
     resolve_bin("AOIDE_CORE_BIN", "aoide")
 }
 
-/// Resolve the paint binary `strillix` for a cross-binary re-exec:
-/// `STRILLIX_BIN` env override, else `current_exe()`'s sibling named
-/// `strillix` (`strillix.exe` on Windows) if it exists, else the bare name `"strillix"`
-/// for `PATH` resolution at spawn time. See the module doc for the
-/// with_stage_lock hazard this exists to route around, not to walk into.
-pub fn rice_bin() -> String {
-    resolve_bin("STRILLIX_BIN", "strillix")
-}
-
 /// Is `name` a program discoverable on `PATH`? The proactive probe the tier
 /// logic above deliberately skips: tier 3 (the bare name) is left for
 /// `Command::spawn` to resolve at exec time rather than checked here, but a
 /// caller that needs to know BEFORE spawning has nowhere else in the tree to
 /// ask — every existing PATH-adjacent check (`aoide-secrets`' age-binary
-/// probe) is a spawn-failure/ENOENT catch instead. Onboard's own strillix probe
-/// (ONBOARD.md decision 3) is the first caller: `rice_bin()`'s tier-1/2
-/// results are already trusted by the resolver itself (env unconditionally,
-/// the sibling only after its own `exists()` check), so this only needs
-/// calling on a bare-name result. `agents::on_path` is the other caller,
-/// over an `AgentProfile`'s own `launch` program name.
+/// probe) is a spawn-failure/ENOENT catch instead. `agents::on_path` is the
+/// caller, over an `AgentProfile`'s own `launch` program name.
 ///
 /// `is_file()` alone stays the predicate — a caller whose contract is
 /// "present", not "spawnable" (see [`is_executable_file`]) — but the names
 /// tried are [`candidate_names`]': on unix still `dir.join(name)` alone, on
-/// Windows `strillix` is `strillix.exe`.
+/// Windows `tool` is `tool.exe`.
 pub fn on_path(name: &str) -> bool {
     let candidates = candidate_names(name, &command_suffixes());
     std::env::var_os("PATH")
@@ -263,7 +253,7 @@ fn executable_predicate(path: &Path, _meta: &std::fs::Metadata) -> bool {
 /// true executability (a stray non-executable `aoide-foo` must fall through
 /// to the ordinary unknown-command error, same as a miss). Kept as its own
 /// walk rather than widening `on_path`'s contract: `on_path`'s existing
-/// callers (`agents::on_path`, onboard's own strillix probe) and its own
+/// callers (`agents::on_path`) and its own
 /// regression test intentionally accept a non-executable same-named file as
 /// "found," and that must not change under them.
 ///
@@ -429,11 +419,11 @@ mod tests {
             },
             Case {
                 label: "env wins over the bare-name fallback too",
-                env_value: Some("/opt/custom/strillix"),
+                env_value: Some("/opt/custom/tool"),
                 exe_dir: None,
                 sibling: None,
-                name: "strillix",
-                expect: "/opt/custom/strillix".into(),
+                name: "tool",
+                expect: "/opt/custom/tool".into(),
             },
             Case {
                 label: "a blank env value is treated as unset",
@@ -447,9 +437,9 @@ mod tests {
                 label: "sibling used only when it actually exists",
                 env_value: None,
                 exe_dir: Some("/usr/bin"),
-                sibling: Some("strillix"),
-                name: "strillix",
-                expect: Path::new("/usr/bin").join("strillix").to_string_lossy().into_owned(),
+                sibling: Some("tool"),
+                name: "tool",
+                expect: Path::new("/usr/bin").join("tool").to_string_lossy().into_owned(),
             },
             Case {
                 label: "the sibling's own file name is what comes back (aoide.exe, not aoide)",
@@ -464,8 +454,8 @@ mod tests {
                 env_value: None,
                 exe_dir: Some("/usr/bin"),
                 sibling: None,
-                name: "strillix",
-                expect: "strillix".into(),
+                name: "tool",
+                expect: "tool".into(),
             },
             Case {
                 label: "no exe dir at all falls through to the bare name",
@@ -529,8 +519,8 @@ mod tests {
         );
         // The unix list is the single empty suffix, so the same rule spells
         // today's `dir.join(name)` exactly — dotted names included.
-        assert_eq!(candidate_names("strillix", &[String::new()]), vec!["strillix"]);
-        assert_eq!(candidate_names("strillix.exe", &[String::new()]), vec!["strillix.exe"]);
+        assert_eq!(candidate_names("tool", &[String::new()]), vec!["tool"]);
+        assert_eq!(candidate_names("tool.exe", &[String::new()]), vec!["tool.exe"]);
         #[cfg(unix)]
         assert_eq!(command_suffixes(), vec![String::new()], "unix appends nothing, as it always has");
     }
@@ -552,7 +542,7 @@ mod tests {
         assert_eq!(strip_command_prefix("aoide-deploy.exe", "aoide-", false), Some("deploy.exe"));
         assert_eq!(strip_command_prefix("AOIDE-Deploy.EXE", "aoide-", false), None, "unix matches bytes");
         assert_eq!(strip_command_prefix("AOIDE-Deploy.EXE", "aoide-", true), Some("Deploy.EXE"));
-        assert_eq!(strip_command_prefix("strillix-deploy", "aoide-", true), None);
+        assert_eq!(strip_command_prefix("tool-deploy", "aoide-", true), None);
     }
 
     /// unix-only: the scoped file is extensionless, which IS a program there
@@ -751,17 +741,17 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("aoide.cmd"), "").unwrap();
-        std::fs::write(dir.join("strillix.exe"), "").unwrap();
+        std::fs::write(dir.join("tool.exe"), "").unwrap();
 
-        assert_eq!(sibling_in(&dir, "strillix"), Some("strillix.exe".to_string()));
+        assert_eq!(sibling_in(&dir, "tool"), Some("tool.exe".to_string()));
         assert_eq!(
             sibling_in(&dir, "aoide"),
             None,
             "`aoide.cmd` is not the sibling's name — this tier asks for EXE_SUFFIX, never PATHEXT"
         );
         assert_eq!(
-            resolve(None, Some(&dir), sibling_in(&dir, "strillix").as_deref(), "strillix"),
-            dir.join("strillix.exe").to_string_lossy()
+            resolve(None, Some(&dir), sibling_in(&dir, "tool").as_deref(), "tool"),
+            dir.join("tool.exe").to_string_lossy()
         );
         assert_eq!(sibling_in(&dir, "conductor"), None, "no sibling at all still falls through to the bare name");
 
@@ -823,17 +813,5 @@ mod tests {
             Some(v) => std::env::set_var("PATH", v),
             None => std::env::remove_var("PATH"),
         }
-    }
-
-    #[test]
-    fn core_bin_and_rice_bin_resolve_to_different_env_vars() {
-        // No filesystem/env stubbing here (the process env is process-wide
-        // and races under parallel tests) — this only checks the two public
-        // entries stay wired to their own env var / bare name and never
-        // collide, using the pure `resolve` core directly rather than the
-        // real `std::env::var`/`current_exe` the wrappers call.
-        assert_eq!(resolve(None, None, None, "aoide"), "aoide");
-        assert_eq!(resolve(None, None, None, "strillix"), "strillix");
-        assert_ne!(resolve(None, None, None, "aoide"), resolve(None, None, None, "strillix"));
     }
 }

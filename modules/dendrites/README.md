@@ -132,7 +132,8 @@ contract in `modules/nucleus`; an option a member reads is declared in that memb
 - `aoided.nix` — carries only the Strillix deltas for the `aoided` unit
   (`pkgs/aoide/module/aoided.nix` owns the unit itself, its tmpfiles rules, and
   the core session variables): the strillix-gated `STRILLIX_TEMPLATES` session
-  variable, and nothing else paint-shaped. `aoide.sessionTarget` is set by the
+  variable, and nothing else paint-shaped. The pair-watch unit this file also
+  defines carries the strillix-gated `AOIDE_DIALOG_CMD`. `aoide.sessionTarget` is set by the
   lane that brings a graphical session up (the `quickshell` lane, which names the
   session when it has a shell config to run), so this file reads no lane's
   option either. Below that: every door (mcp, a2a, pair-watch) the daemon's
@@ -150,8 +151,8 @@ contract in `modules/nucleus`; an option a member reads is declared in that memb
   paints a shell here — a host painted by something else has the session, takes
   the zenity path, and would otherwise be locked out for an unrelated reason.
   `quickshell` on the unit's `path` follows `aoide.strillix.enable`, and the popup
-  prefers `strx pair ask` / `strx pair confirm` over their zenity equivalents,
-  the same way the secrets watcher prefers `strx secrets ask`.
+  runs the provider `AOIDE_DIALOG_CMD` names (strillix's `pair ask` and `pair
+  confirm`) when it is set, zenity otherwise. The secrets watcher does the same.
 - `melete-adapter.nix` — the concrete thin-adapter exemplar on the `aoided`
   event stream. It orders itself against `aoided.service`, which the core module
   defines on `aoide.enable` alone (the `aoided` dendrite adds only the Strillix

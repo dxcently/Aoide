@@ -115,11 +115,12 @@
   surface exposes the LOGICAL name, suffix (and, on Windows, case) folded
   away; `on_path` keeps its weaker `is_file` predicate on the same
   candidates. The sibling tier is the one deliberate exception: it asks for
-  `EXE_SUFFIX` (`aoide.exe`/`strillix.exe`) with the bare name behind it, never
+  `EXE_SUFFIX` (`aoide.exe`) with the bare name behind it, never
   `PATHEXT`, so an `aoide.cmd` beside the build cannot shadow it (and is not a
   sibling at all when it is the only file there); and an
-  `AOIDE_CORE_BIN`/`STRILLIX_BIN` override still reaches `resolve`
-  trimmed and comes back untouched. Windows tests compare the two surfaces'
+  `AOIDE_CORE_BIN` override (or `resolve_bin`'s caller variable) still reaches
+  `resolve` trimmed and comes back untouched. Core resolves exactly one
+  sibling, `aoide`; no protocol item names any other binary. Windows tests compare the two surfaces'
   paths by `std::fs::canonicalize` identity, never by string equality —
   `resolve_executable_on_path` returns the spelling it ASKED for while
   `read_dir` reports the spelling on disk, so one file can be two
@@ -196,15 +197,19 @@
   widen an item's visibility just because moving it needs an import
   statement to exist. Don't add a SECOND string constant for a dismiss
   label a new dialog ceremony wants ("Reject request", P-P5's own pairing
-  confirm dialog) — `DISMISS_LABEL` is `aoide-secrets`' own zenity/strillix
-  dialogs' label specifically; a new ceremony with its own wording defines
+  confirm dialog) — `DISMISS_LABEL` is `aoide-secrets`' own zenity and
+  provider dialogs' label specifically; a new ceremony with its own wording defines
   its own constant beside its own caller, the same way `feed`'s record
   shape stays the caller's contract, never this module's. **`run_entry_dialog`
   takes its dismiss label as a PARAMETER, not a constant it reads
   internally** — the whole reason two ceremonies can share one loop with
   two different labels; don't collapse it back to reading `DISMISS_LABEL`
   directly, that would make every OTHER caller's own label
-  unreachable again.
+  unreachable again. **The dialog provider is named by `AOIDE_DIALOG_CMD`
+  alone, read only through `dialog_provider`.** A provider is a value the
+  unit that runs a popup sets; no crate in this workspace names a desktop
+  binary to spawn, and the exit code every dialog child speaks is
+  `DIALOG_INFRA_FAILURE_EXIT` (3), shared by zenity and every provider.
 
 ## Extension points
 

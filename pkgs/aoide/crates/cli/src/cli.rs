@@ -229,20 +229,6 @@ mod tests {
         );
     }
 
-    // No CLI-internal aliases (khoa, 2026-08-14): each command has exactly one
-    // spelling. The rice family lives in strillix, so `aoide rice …` says so and
-    // names the command to run there; a retired spelling is never resolved.
-    #[test]
-    fn rice_is_a_strillix_command_and_aoide_says_where_to_run_it() {
-        for retired in ["new", "preview"] {
-            let err = parse(&argv(&["rice", retired, "dusk"]), Door::Cli).unwrap_err();
-            assert_eq!(err.status, Status::Usage);
-            let text = err.render(false).0;
-            assert!(text.contains("`rice` is a strillix command, not an aoide one"), "{text}");
-            assert!(text.contains(&format!("fix: strillix rice {retired} dusk")), "{text}");
-        }
-    }
-
     #[test]
     fn a_bare_session_grant_still_teaches_the_grantable_kinds() {
         let err = parse(&argv(&["session", "grant"]), Door::Cli).unwrap_err();

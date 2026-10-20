@@ -879,10 +879,10 @@ never the inbound/serve half (that's `aoide-server`).
   tail/reconcile loop (`aoide_secrets::watch::wait_for_follower`'s exact
   retry-until-exists shape, a 30s reconcile safety tick). **`--popup`
   (F6, upgraded P-PV3/task #132: TWO dialog shapes, one per pairing
-  direction, never a single bare yes/no)** refuses up front when NEITHER
-  `strillix` nor `zenity` resolves (`resolve_strillix_bin`, the SAME three-tier
-  check `aoide_secrets::watch::resolve_strillix_bin` runs, repeated here since
-  neither crate may depend on the other); past that, `popup_tick` replaces
+  direction, never a single bare yes/no)** refuses up front when no dialog provider is named (`AOIDE_DIALOG_CMD`
+  unset) and `zenity` does not resolve (`aoide_protocol::dialog::dialog_provider`,
+  the SAME check `aoide_secrets::watch` runs, repeated here since neither crate
+  may depend on the other); past that, `popup_tick` replaces
   the plain narrate-only reconcile with: pick the next `Pending` that
   `eligible_for_dialog` admits — `actionable`, un-ignored, and no LIVE
   blocking `aoide pair` holding that id's pid marker (`PairActiveMarker`,
@@ -900,10 +900,10 @@ never the inbound/serve half (that's `aoide-server`).
   dialog shape on BOTH directions now (the mutual-code redesign, R1 —
   this reverses P-PV3's own outbound CONFIRM dialog; `pair_watch`'s
   module doc has the theater-argument reasoning for why that reversal
-  doesn't repeat P-PV3's original mistake): `run_ask_dialog`** — `strillix
-  pair ask` (the SAME six-box entry surface `strx secrets ask` renders)
-  when `resolve_strillix_bin` found one, falling back to `zenity --entry` on a
-  `strillix` `SpawnError`/`DialogFailure` for that one attempt
+  doesn't repeat P-PV3's original mistake): `run_ask_dialog`** — the provider
+  `AOIDE_DIALOG_CMD` names (`strillix pair ask`, the SAME six-box entry surface
+  `strx secrets ask` renders) when set, falling back to `zenity --entry` on a
+  provider `SpawnError`/`DialogFailure` for that one attempt
   (`aoide_secrets::watch::run_ask_dialog`'s own fallback shape, reused
   unchanged), `--no-markup` load-bearing on the zenity path for the same
   Pango-corruption reasoning `aoide_secrets::watch::spawn_zenity_entry`
@@ -913,7 +913,7 @@ never the inbound/serve half (that's `aoide-server`).
   and `MAX_CODE_TRIES` auto-deny/auto-abort machinery the CLI tty/`--code`
   paths already hold, byte-identical. Both arms share: the `REJECT_LABEL`
   extra button/dismiss control → `reject_by_id`; a bare Cancel →
-  session-only `ignored`; a spawn/infra failure on BOTH binaries →
+  session-only `ignored`; a spawn/infra failure on both the provider and zenity →
   backoff, NEVER `ignored`, the same "a broken binary doesn't silently
   stop offering the request" stance `aoide_secrets::watch::popup_loop`
   already holds. `dialog_title`/`dialog_context` are pure and read ONLY

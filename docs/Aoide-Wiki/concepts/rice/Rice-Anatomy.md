@@ -18,7 +18,7 @@ in lives in [[Rice-Vocabulary]]; this page grounds the words in the actual
 directories.
 
 The committed score lives in the dev git checkout at `$AOIDE_FLAKE_ROOT/rice/`
-(default `~/Aoide/rice`; `aoide onboard` links `~/rice` → the checkout's
+(default `~/Aoide/rice`; `strx onboard` links `~/rice` → the checkout's
 `rice/` dir, never clobbering an existing file or symlink, and seeds the
 checkout's `rices/preferences.md` when absent). The checkout's
 `rices/` is the **rice agent's writable committed domain** (house rule

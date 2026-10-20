@@ -19,33 +19,28 @@
 //! carry only prompt TEXT/identifiers, never the code). The entry is VISIBLE
 //! (a TOTP code is a 30-second secret, not a password — nothing is gained by
 //! hiding digits the operator is about to read off an authenticator anyway).
-//! **P3 (this commit) adds a second dialog binary ahead of zenity's own:**
-//! [`resolve_strillix_bin`] checks whether `strillix` resolves to a real executable
-//! (`aoide_protocol::bin::rice_bin` + `on_path`, the SAME two-tier check
-//! `cli::commands::onboard::strillix_bin_if_resolved` already runs — this crate
-//! cannot depend on `aoide-cli`, so the three-line "is it actually there"
-//! wrapper is repeated here rather than imported, the shared part
-//! (`aoide-protocol::bin`'s resolver itself) is not duplicated) and, when it
-//! does, spawns `strillix secrets ask --secret <name> --consumer <who> --seconds
-//! <n>` instead of `zenity --entry` — [`spawn_strillix_entry`]/
+//! **The dialog provider is the one choice.** `AOIDE_DIALOG_CMD` (read by
+//! [`dialog_provider`], `aoide_protocol::dialog`) names a provider that
+//! `--popup` runs as `<provider> secrets ask --secret <name> --consumer <who>
+//! --seconds <n>` in place of `zenity --entry` — [`spawn_provider_entry`]/
 //! [`spawn_zenity_entry`] share the identical output contract (code on
 //! stdout + exit 0 = approved; the literal [`DISMISS_LABEL`] on stdout +
 //! exit 1 = dismissed; anything else non-zero = cancelled) through the same
 //! [`run_entry_dialog`] wait/parse loop, so [`popup_loop`]'s result handling
 //! and its kill-by-pid expiry path never need to know which binary answered.
-//! **Presence of `strillix` IS the choice — no new env flag exists to pick
-//! between them** (the plugin philosophy, root `AGENTS.md` house rule 7):
-//! absent, `--popup` falls back to zenity exactly as before this phase.
+//! Core names no provider. The unit that runs `--popup` sets the variable
+//! when a desktop provider is installed (house rule 7: a capability enters as
+//! a plugin, named by the unit that carries it); unset or blank is zenity.
 //! `zenity` remains a runtime shell-out declared BY NAME (zero new Cargo
 //! dependencies, same feature-detection shape `enroll::render_qr` already
-//! uses for `qrencode`); [`run`]'s own startup gate now refuses to enter
-//! `--popup` only when NEITHER binary is available. Popups are
+//! uses for `qrencode`); [`run`]'s own startup gate refuses to enter
+//! `--popup` only when NEITHER the provider NOR zenity is available. Popups are
 //! UNLOCK-GATED ([`locked_state`]: `loginctl
 //! LockedHint` OR'd with a `/proc` scan for a named locker process, default
 //! `hyprlock` — `AOIDE_SECRETS_LOCKER` overrides it; the design doc verified
 //! hyprlock cannot set `LockedHint`, so the `/proc` half is load-bearing,
 //! not a redundant fallback. The shell's own lock host sets `LockedHint`
-//! through `strillix lock hint`, and the hint is read on the user's display
+//! through the desktop's lock hint, and the hint is read on the user's display
 //! session when this unit has no `$XDG_SESSION_ID`, so a shell lock holds
 //! popups too) and PARKED-ONLY: `released`/`completed`/
 //! `dismissed`/`expired` never spawn a dialog, only narrate (same as every
@@ -60,35 +55,27 @@
 //! handle_secrets_watch`) — the two modes both own "how a parked ask is
 //! completed," and can't both drive it.
 //!
-//! **A dialog-child lifecycle failure must NEVER be silent (this commit,
-//! live-incident fix).** The deployed popup watcher unit had
-//! `STRILLIX_BIN` set, chose the `strillix` dialog for a real parked ask, and
-//! `strillix`'s own `quickshell` spawn ENOENT'd (`quickshell` wasn't on the
-//! unit's own `PATH` — fixed nix-side, `modules/dendrites/aoide-secrets.nix`). On
-//! screen: nothing. In the journal: nothing after the `parked` line — the
-//! ask sat parked until its own timeout with no operator-visible signal at
-//! all, the exact "invisible failure" shape this crate keeps re-learning
-//! (P-V4d/P-G4's own incidents, this module's history). Three parts close
-//! it:
-//! 1. **Narration.** [`spawn_strillix_entry`] now inherits `strillix`'s own stderr
-//!    (was `Stdio::null()`) rather than discarding it — `strillix secrets
-//!    ask`'s own failure `eprintln!`s (`crates/strillix/src/lib.rs`'s `special`
-//!    hook) land directly in THIS process's stderr, which the deployed unit
-//!    already routes to the journal (`StandardError = "journal"`,
-//!    `modules/dendrites/aoide-secrets.nix`). [`popup_loop`] adds its OWN
-//!    `eprintln!` alongside it, naming the ask id and which binary failed —
-//!    the two together give an operator both the specific cause (from
-//!    `strillix`'s own line) and the consequence (from this crate's).
-//! 2. **A distinct exit code.** `strillix secrets ask` reserves exit `3`
-//!    (`strillix::commands::secrets::EXIT_INFRA_FAILURE`, that constant's
-//!    own doc has the matching half of this incident) for "the dialog
-//!    infrastructure itself failed" — NEVER folded into zenity's own
-//!    cancel code (`1`), which is what let the original incident's ask get
-//!    silently `ignore`d as if the user had pressed Esc.
+//! **A dialog-child lifecycle failure must NEVER be silent.** A provider that
+//! cannot show its dialog (its own `quickshell` missing from the unit's
+//! `PATH`, say) must not leave a parked ask with no operator-visible signal
+//! until its timeout — the "invisible failure" shape this crate keeps
+//! re-learning (P-V4d/P-G4's own incidents). Three parts keep it visible:
+//! 1. **Narration.** [`spawn_provider_entry`] inherits the provider's stderr
+//!    rather than discarding it — its own failure lines land directly in
+//!    THIS process's stderr, which the popup unit routes to the journal
+//!    (`StandardError = "journal"`, `modules/dendrites/aoide-secrets.nix`).
+//!    [`popup_loop`] adds its OWN `eprintln!` alongside it, naming the ask id
+//!    and which binary failed — the two together give an operator both the
+//!    specific cause (from the provider's line) and the consequence (from
+//!    this crate's).
+//! 2. **A distinct exit code.** A provider reserves exit `3`
+//!    ([`DIALOG_INFRA_FAILURE_EXIT`]) for "the dialog infrastructure itself
+//!    failed" — NEVER folded into zenity's own cancel code (`1`), which would
+//!    let an infrastructure failure read as the operator pressing Esc.
 //!    [`run_entry_dialog`] checks for this code BEFORE falling through to
 //!    its own `Cancelled` case, returning [`ZenityResult::DialogFailure`]
 //!    instead — that variant's own doc has the exact check.
-//! 3. **Fallback, not abandonment.** [`popup_loop`] reacts to a `strillix`
+//! 3. **Fallback, not abandonment.** [`popup_loop`] reacts to a provider
 //!    `SpawnError`/`DialogFailure` by immediately retrying the SAME ask
 //!    through `zenity` instead ([`zenity_available`] permitting) — the
 //!    plugin philosophy's whole point (root `AGENTS.md` house rule 7) is
@@ -97,15 +84,13 @@
 //!    (or `zenity` isn't available either), the ask is narrated and left
 //!    parked — but NEVER added to `ignored`, so `popup_loop`'s own loop
 //!    keeps re-offering it on every later iteration (backed off by
-//!    [`SPAWN_BACKOFF_INITIAL`]/[`next_spawn_backoff`], the SAME mechanism
-//!    a `SpawnError` already used before this phase). **This loop, not the
+//!    [`SPAWN_BACKOFF_INITIAL`]/[`next_spawn_backoff`]). **This loop, not the
 //!    30-second `reconcile` tick, is what retries a failed dialog** —
 //!    `Queue::reconcile` only ever syncs which asks EXIST against the
 //!    broker's own truth; it has no opinion on `popup_loop`'s local
 //!    `ignored` set or on re-driving a dialog attempt. Don't let a future
-//!    change insert a `strillix`-failed ask into `ignored` "since it already
-//!    got its one retry" — that would silently re-introduce this exact
-//!    incident's own failure mode, just one layer up.
+//!    change insert a provider-failed ask into `ignored` "since it already
+//!    got its one retry" — that re-introduces the silent failure one layer up.
 //!
 //! **Why this crate, not a conductor pane.** Reaching the broker from
 //! `aoide-conductor` would add a NEW `aoide-conductor` → `aoide-secrets`
@@ -170,8 +155,8 @@ use std::time::Duration;
 pub use aoide_protocol::dialog::DialogResult as ZenityResult;
 pub use aoide_protocol::dialog::locked_state;
 use aoide_protocol::dialog::{
-    is_locked, locker_process_name, next_spawn_backoff, run_entry_dialog, sleep_backoff_interruptible, zenity_available, DISMISS_LABEL,
-    SPAWN_BACKOFF_INITIAL, SPAWN_BACKOFF_MAX,
+    dialog_provider, is_locked, locker_process_name, next_spawn_backoff, run_entry_dialog, sleep_backoff_interruptible,
+    zenity_available, DISMISS_LABEL, SPAWN_BACKOFF_INITIAL, SPAWN_BACKOFF_MAX,
 };
 
 // ── P1: the pure fold ───────────────────────────────────────────────────
@@ -558,8 +543,8 @@ fn mmss(remaining_secs: i64) -> String {
 /// reason, so a caller with nothing to show adds nothing (every surface
 /// renders EXACTLY as before this phase when `reason` is absent, module
 /// doc). The wrapping quotes/label live here, the ONE place, so the tty
-/// prompt and zenity's `--text` show byte-identical wording — `strillix secrets
-/// ask` gets the RAW `reason` text instead ([`spawn_strillix_entry`]'s own doc)
+/// prompt and zenity's `--text` show byte-identical wording — the provider's
+/// `secrets ask` gets the RAW `reason` text instead ([`spawn_provider_entry`]'s own doc)
 /// since its own QML owns that surface's layout.
 fn format_reason_line(reason: &Option<String>) -> Option<String> {
     reason.as_deref().map(|r| format!("for: \"{r}\""))
@@ -573,10 +558,10 @@ fn format_reason_line(reason: &Option<String>) -> Option<String> {
 /// itself wasn't (should not happen in practice — `peercred::peer_cred`
 /// either resolves the whole `PeerCred` or none of it — kept anyway so this
 /// function never assumes that invariant from outside). This is the ONE
-/// place this wording is built — `strillix secrets ask` receives the finished
+/// place this wording is built — the provider's `secrets ask` receives the finished
 /// string via `--from` rather than re-deriving it from separate flags
-/// ([`spawn_strillix_entry`]'s own doc), so all three surfaces (tty, zenity,
-/// strillix) show byte-identical text.
+/// ([`spawn_provider_entry`]'s own doc), so all three surfaces (tty, zenity,
+/// provider) show byte-identical text.
 fn format_origin_line(origin: &client::PendingOrigin) -> Option<String> {
     if origin.username.is_none() && origin.pid.is_none() && origin.comm.is_none() && origin.hostname.is_none() {
         return None;
@@ -688,7 +673,7 @@ pub use aoide_protocol::feed::Follower;
 const ZENITY_CMD: &str = "zenity";
 
 // `DISMISS_LABEL`/`SPAWN_BACKOFF_INITIAL`/`SPAWN_BACKOFF_MAX`/
-// `next_spawn_backoff`/`STRILLIX_INFRA_FAILURE_EXIT`/`ZenityResult` (now
+// `next_spawn_backoff`/`DIALOG_INFRA_FAILURE_EXIT`/`ZenityResult` (now
 // `dialog::DialogResult`, shimmed back under the old name) all live in
 // `aoide_protocol::dialog` now (P-P5, F5) — see this module's own shim
 // import block near the top.
@@ -718,27 +703,27 @@ fn spawn_zenity_entry(zenity_cmd: &str, title: &str, text: &str) -> std::io::Res
         .spawn()
 }
 
-/// `strillix secrets ask`'s own argv (P3) — `--secret`/`--consumer`/`--seconds`
+/// The provider's `secrets ask` argv — `--secret`/`--consumer`/`--seconds`
 /// always, plus two OPTIONAL context flags, the same "identifiers and TEXT
 /// only, never a code" argv discipline `spawn_zenity_entry` already holds.
-/// `reason` rides RAW (`ask.reason`'s own text, untouched — `strillix secrets
+/// `reason` rides RAW (`ask.reason`'s own text, untouched — the provider's `secrets
 /// ask` owns how it labels/quotes it in its own context block); `from_line`
 /// rides PRE-FORMATTED by [`format_origin_line`] — the ONE place that
 /// multi-part conditional formatting lives, so zenity's `--text`, the tty
-/// prompt, and strillix's dialog render the IDENTICAL "from: ..." wording rather
-/// than three independent reimplementations that could drift. `strillix_cmd` is
-/// a path/name parameter, never a hardcoded `Command::new("strillix")`, matching
+/// prompt, and the provider's dialog render the IDENTICAL "from: ..." wording rather
+/// than three independent reimplementations that could drift. `provider` is
+/// a path/name parameter, never a hardcoded program name, matching
 /// `spawn_zenity_entry`'s own shape so this module's tests can stand in a
 /// fake shim for either binary without a `PATH` mutation.
-fn spawn_strillix_entry(
-    strillix_cmd: &str,
+fn spawn_provider_entry(
+    provider: &str,
     secret: &str,
     consumer: &str,
     seconds: u64,
     reason: Option<&str>,
     from_line: Option<&str>,
 ) -> std::io::Result<Child> {
-    let mut cmd = Command::new(strillix_cmd);
+    let mut cmd = Command::new(provider);
     cmd.args(["secrets", "ask", "--secret", secret, "--consumer", consumer, "--seconds", &seconds.to_string()]);
     if let Some(r) = reason {
         cmd.args(["--reason", r]);
@@ -746,11 +731,10 @@ fn spawn_strillix_entry(
     if let Some(f) = from_line {
         cmd.args(["--from", f]);
     }
-    // `stderr(Stdio::inherit())` — this commit, live-incident fix (module
-    // doc): `strillix secrets ask` narrates its OWN failures on stderr
-    // (`crates/strillix/src/lib.rs`'s `special` hook, the `"failed"` arm), and
-    // that text used to be discarded outright (`Stdio::null()`) rather than
-    // ever reaching an operator. Inheriting means it lands directly in THIS
+    // `stderr(Stdio::inherit())` (module doc's failure section): a provider
+    // narrates its OWN failures on stderr (its failure hook prints `failed`),
+    // and that text must reach an operator rather than be discarded
+    // (`Stdio::null()`). Inheriting means it lands directly in THIS
     // process's own stderr — which the deployed unit already routes to the
     // journal (`StandardError = "journal"`) — with no capture/re-print step
     // needed here. `stdout` stays piped (the code/`Dismiss ask` contract);
@@ -767,8 +751,8 @@ fn run_zenity_entry(zenity_cmd: &str, title: &str, text: &str, should_cancel: im
 }
 
 #[allow(clippy::too_many_arguments)]
-fn run_strillix_entry(
-    strillix_cmd: &str,
+fn run_provider_entry(
+    provider: &str,
     secret: &str,
     consumer: &str,
     seconds: u64,
@@ -776,19 +760,19 @@ fn run_strillix_entry(
     from_line: Option<&str>,
     should_cancel: impl FnMut() -> bool,
 ) -> ZenityResult {
-    run_entry_dialog(|| spawn_strillix_entry(strillix_cmd, secret, consumer, seconds, reason, from_line), DISMISS_LABEL, should_cancel)
+    run_entry_dialog(|| spawn_provider_entry(provider, secret, consumer, seconds, reason, from_line), DISMISS_LABEL, should_cancel)
 }
 
-/// The dialog CHOICE itself (module doc's P3 section): `strillix_cmd` present
-/// means it already resolved to a real executable ([`resolve_strillix_bin`]'s
+/// The dialog CHOICE itself (module doc's P3 section): `provider` present
+/// means it already resolved to a real executable ([`dialog_provider`]'s
 /// own job, done ONCE by the caller — never re-checked here), so this
 /// function never re-derives that fact, only branches on it. Both arms end
 /// up in [`run_entry_dialog`] through the SAME `should_cancel` closure the
 /// caller built once — the choice changes which child is spawned, nothing
 /// about how its result is read back.
 ///
-/// **Fallback on a `strillix` infrastructure failure (this commit, live-
-/// incident fix — module doc's own section has the full story).** A `strillix`
+/// **Fallback on a provider infrastructure failure (module doc's own section
+/// has the full story).** A provider
 /// attempt that comes back `SpawnError`/`DialogFailure` is retried, ONCE,
 /// immediately, through `zenity` for the SAME ask — [`zenity_available`]
 /// permitting — rather than leaving the ask with no dialog at all (the
@@ -802,7 +786,7 @@ fn run_strillix_entry(
 /// either way.
 #[allow(clippy::too_many_arguments)]
 fn run_ask_dialog(
-    strillix_cmd: Option<&str>,
+    provider: Option<&str>,
     zenity_cmd: &str,
     ask_id: &str,
     secret: &str,
@@ -814,14 +798,14 @@ fn run_ask_dialog(
     from_line: Option<&str>,
     mut should_cancel: impl FnMut() -> bool,
 ) -> ZenityResult {
-    let Some(strillix) = strillix_cmd else {
+    let Some(provider) = provider else {
         return run_zenity_entry(zenity_cmd, title, text, should_cancel);
     };
-    let result = run_strillix_entry(strillix, secret, consumer, seconds, reason, from_line, &mut should_cancel);
+    let result = run_provider_entry(provider, secret, consumer, seconds, reason, from_line, &mut should_cancel);
     match &result {
         ZenityResult::SpawnError(e) | ZenityResult::DialogFailure(e) => {
             eprintln!(
-                "aoide secrets watch --popup: strillix secrets ask failed for ask {ask_id}: {e} \u{2014} falling back to zenity for this ask"
+                "aoide secrets watch --popup: the dialog provider failed for ask {ask_id}: {e} \u{2014} falling back to zenity for this ask"
             );
             if zenity_available(zenity_cmd) {
                 run_zenity_entry(zenity_cmd, title, text, should_cancel)
@@ -858,26 +842,10 @@ fn zenity_error_dialog(zenity_cmd: &str, text: &str) {
 // `zenity_available` lives in `aoide_protocol::dialog` now (P-P5, F5),
 // shimmed back at this name.
 
-/// P3's dialog choice: is a REAL `strillix` executable resolvable right now?
-/// Mirrors `cli::commands::onboard::strillix_bin_if_resolved`'s exact env-tier/
-/// sibling-tier/bare-name-on-`PATH` check byte for byte (module doc: this
-/// crate cannot depend on `aoide-cli`, so the three-line "is it actually
-/// there" wrapper is repeated here rather than imported — the shared part,
-/// `aoide-protocol::bin`'s resolver itself, is not duplicated). `rice_bin`'s
-/// own env/sibling tiers are already trusted (both return a path containing
-/// `/`, or the env override verbatim); only its bare-name fallback
-/// (`"strillix"`, left for `Command::spawn` to resolve at exec time) needs a
-/// `PATH` probe of our own before this crate treats it as "resolved."
-fn resolve_strillix_bin() -> Option<String> {
-    let bin = aoide_protocol::bin::rice_bin();
-    let resolved = bin.contains('/') || aoide_protocol::bin::on_path(&bin);
-    resolved.then_some(bin)
-}
-
 /// The `--popup` loop — main thread only, mirrors [`prompt_loop`]'s own
 /// shape (pick the next un-ignored ask, act, repeat) but drives a dialog
-/// instead of reading `[a]`/`[d]`/`[i]` from stdin — `strillix` when
-/// [`resolve_strillix_bin`] found one, `zenity` otherwise ([`run_ask_dialog`]).
+/// instead of reading `[a]`/`[d]`/`[i]` from stdin — the provider when
+/// [`dialog_provider`] found one, `zenity` otherwise ([`run_ask_dialog`]).
 /// `ignored` is the SAME "Cancel/close stops re-prompting for THIS ask, this
 /// session only" semantics `[i]` holds in [`prompt_loop`] (design doc:
 /// "Cancel/close = IGNORE") — without it, a cancelled dialog would reopen
@@ -888,7 +856,7 @@ fn popup_loop(
     queue: &Arc<Mutex<Queue>>,
     out_lock: &Arc<Mutex<()>>,
     zenity_cmd: &str,
-    strillix_cmd: Option<&str>,
+    provider: Option<&str>,
     locker_process: &str,
 ) {
     let mut ignored: HashSet<String> = HashSet::new();
@@ -944,7 +912,7 @@ fn popup_loop(
         // tells the two apart afterward by re-checking whether the ask is
         // still in the queue.
         let result = run_ask_dialog(
-            strillix_cmd,
+            provider,
             zenity_cmd,
             &ask.id,
             &ask.secret,
@@ -991,23 +959,22 @@ fn popup_loop(
                         Err(e) => println!("  \u{2717} invalid or already-used code \u{2014} the ask is STILL PARKED, nothing was spent ({e})"),
                     }
                 }
-                // The wrong-code error dialog is zenity-specific (no `strillix
-                // secrets ask` error surface exists — P3's brief covers the
-                // entry dialog only); on the strillix path the ask simply stays
-                // parked and the next poll reopens its `strillix secrets ask`
-                // entry dialog fresh, same as any other re-prompt. KNOWN
-                // IMPRECISION (this commit's own fallback addition): this
-                // still checks the STATIC `strillix_cmd.is_none()` choice, not
-                // "did `run_ask_dialog` actually fall back to zenity for
-                // THIS attempt" — a wrong code entered through a
-                // strillix-failed-then-fell-back-to-zenity dialog won't get this
-                // retry dialog either, same as an ordinary strillix attempt
-                // wouldn't. Narrow enough (two failures compounding: strillix's
-                // own infra failure, then a wrong code on the fallback) not
-                // to chase further here; a future fix would need
+                // The wrong-code error dialog is zenity-specific (no provider
+                // error surface exists — P3's brief covers the entry dialog
+                // only); on the provider path the ask simply stays parked and
+                // the next poll reopens the provider's `secrets ask` entry
+                // dialog fresh, same as any other re-prompt. KNOWN
+                // IMPRECISION: this still checks the STATIC `provider.is_none()`
+                // choice, not "did `run_ask_dialog` actually fall back to
+                // zenity for THIS attempt" — a wrong code entered through a
+                // provider-failed-then-fell-back-to-zenity dialog won't get this
+                // retry dialog either, same as an ordinary provider attempt
+                // wouldn't. Narrow enough (two failures compounding: the
+                // provider's own infra failure, then a wrong code on the
+                // fallback) not to chase further here; a future fix would need
                 // `run_ask_dialog` to report which binary actually answered,
                 // not just the result.
-                if approved.is_err() && strillix_cmd.is_none() {
+                if approved.is_err() && provider.is_none() {
                     zenity_error_dialog(
                         zenity_cmd,
                         &format!("invalid code for `{}` \u{2014} the ask is still parked, try again", ask.secret),
@@ -1050,12 +1017,12 @@ fn popup_loop(
                 }
             }
             // `SpawnError`/`DialogFailure` land here ONLY when `run_ask_dialog`'s
-            // own fallback (module doc's live-incident section) already
+            // own fallback (module doc's failure section) already
             // ran and either wasn't possible (`zenity_available` was
             // false) or itself failed — the SPECIFIC cause (which binary,
             // which error) was already `eprintln!`'d there and, for a
-            // `strillix` failure, on `strillix`'s own inherited stderr too
-            // (`spawn_strillix_entry`'s doc). This arm's only job is the
+            // provider failure, on the provider's own inherited stderr too
+            // (`spawn_provider_entry`'s doc). This arm's only job is the
             // shared backoff bookkeeping so a persistently broken dialog
             // binary doesn't busy-loop every ~200ms — deliberately
             // binary-agnostic wording, since by the time either variant
@@ -1393,15 +1360,15 @@ fn wait_for_follower(events_path: &Path, poll_interval: Duration) -> Result<Foll
 /// tty (module doc); `popup_mode` (`--popup`, mutually exclusive with
 /// `json_mode` — `commands::handle_secrets_watch` refuses the combination
 /// before this function is ever called) swaps the tty prompt for a dialog —
-/// `strillix secrets ask` when [`resolve_strillix_bin`] finds one, `zenity`
-/// otherwise (module doc's P3 section) — and runs regardless of whether
+/// the provider's `secrets ask` when [`dialog_provider`] names one, `zenity`
+/// otherwise (module doc's provider section) — and runs regardless of whether
 /// stdin is a terminal. See [`select_mode`] for the exact precedence between
 /// the three.
 pub fn run(socket_path: &Path, events_path: &Path, json_mode: bool, popup_mode: bool) -> i32 {
-    let strillix_cmd = resolve_strillix_bin();
-    if popup_mode && strillix_cmd.is_none() && !zenity_available(ZENITY_CMD) {
+    let provider = dialog_provider();
+    if popup_mode && provider.is_none() && !zenity_available(ZENITY_CMD) {
         eprintln!(
-            "aoide secrets watch --popup: neither `strillix` nor `zenity` was found \u{2014} install \
+            "aoide secrets watch --popup: neither the dialog provider (AOIDE_DIALOG_CMD) nor `zenity` was found \u{2014} install \
              one of them, or run `aoide secrets watch` (without --popup) instead"
         );
         return 1;
@@ -1438,7 +1405,7 @@ pub fn run(socket_path: &Path, events_path: &Path, json_mode: bool, popup_mode: 
 
     match mode {
         Mode::Popup => {
-            popup_loop(socket_path, &queue, &out_lock, ZENITY_CMD, strillix_cmd.as_deref(), &locker_process_name());
+            popup_loop(socket_path, &queue, &out_lock, ZENITY_CMD, provider.as_deref(), &locker_process_name());
             0
         }
         Mode::InteractiveTty => {
@@ -2245,17 +2212,17 @@ mod tests {
         remove_shim(&shim);
     }
 
-    /// P3: `strillix secrets ask --secret <name> --consumer <who> --seconds <n>`
-    /// is the exact argv `spawn_strillix_entry` sends — pinned the same way the
+    /// The provider's `secrets ask --secret <name> --consumer <who> --seconds <n>`
+    /// is the exact argv `spawn_provider_entry` sends — pinned the same way the
     /// zenity argv test above pins `--hide-text`'s absence.
     // cfg(unix): the fixture is a POSIX shell template or a `#!/bin/sh` shim
     // (the module note above names the class; the code under test is portable).
     #[cfg(unix)]
     #[test]
-    fn spawn_strillix_entry_argv_matches_the_documented_contract() {
+    fn spawn_provider_entry_argv_matches_the_documented_contract() {
         let _guard = shim_lock();
-        let shim = write_shim("strillix-argv", "#!/bin/sh\necho \"$@\" > \"$(dirname \"$0\")/argv.log\"\necho 111222\nexit 0\n");
-        let result = run_strillix_entry(shim.to_str().unwrap(), "db-prod", "claude", 42, None, None, || false);
+        let shim = write_shim("provider-argv", "#!/bin/sh\necho \"$@\" > \"$(dirname \"$0\")/argv.log\"\necho 111222\nexit 0\n");
+        let result = run_provider_entry(shim.to_str().unwrap(), "db-prod", "claude", 42, None, None, || false);
         assert!(matches!(result, ZenityResult::Approved(ref c) if c == "111222"), "expected Approved(\"111222\"), got {result:?}");
         let argv = std::fs::read_to_string(shim.parent().unwrap().join("argv.log")).unwrap();
         assert_eq!(argv.trim(), "secrets ask --secret db-prod --consumer claude --seconds 42");
@@ -2264,16 +2231,16 @@ mod tests {
 
     /// P3: `--reason`/`--from` ride the SAME argv, present ONLY when the ask
     /// actually carries them — the RAW reason text and the PRE-FORMATTED
-    /// origin line respectively (`spawn_strillix_entry`'s own doc on why neither
+    /// origin line respectively (`spawn_provider_entry`'s own doc on why neither
     /// is reformatted twice).
     // cfg(unix): the fixture is a POSIX shell template or a `#!/bin/sh` shim
     // (the module note above names the class; the code under test is portable).
     #[cfg(unix)]
     #[test]
-    fn spawn_strillix_entry_argv_carries_reason_and_from_only_when_present() {
+    fn spawn_provider_entry_argv_carries_reason_and_from_only_when_present() {
         let _guard = shim_lock();
-        let shim = write_shim("strillix-argv-context", "#!/bin/sh\necho \"$@\" > \"$(dirname \"$0\")/argv.log\"\necho 333444\nexit 0\n");
-        let result = run_strillix_entry(
+        let shim = write_shim("provider-argv-context", "#!/bin/sh\necho \"$@\" > \"$(dirname \"$0\")/argv.log\"\necho 333444\nexit 0\n");
+        let result = run_provider_entry(
             shim.to_str().unwrap(),
             "db-prod",
             "claude",
@@ -2291,19 +2258,19 @@ mod tests {
         remove_shim(&shim);
     }
 
-    /// P3: when a `strillix` binary resolves, [`run_ask_dialog`] spawns IT, not
-    /// zenity — proven by handing it a deliberately bogus `zenity_cmd` path
-    /// alongside a real strillix shim: if the dispatch ever fell through to
+    /// When a provider is named, [`run_ask_dialog`] spawns IT, not zenity —
+    /// proven by handing it a deliberately bogus `zenity_cmd` path alongside a
+    /// real provider shim: if the dispatch ever fell through to
     /// zenity by mistake, this would come back `SpawnError`, not `Approved`.
     // cfg(unix): the fixture is a POSIX shell template or a `#!/bin/sh` shim
     // (the module note above names the class; the code under test is portable).
     #[cfg(unix)]
     #[test]
-    fn run_ask_dialog_prefers_strillix_when_it_resolves() {
+    fn run_ask_dialog_prefers_provider_when_it_resolves() {
         let _guard = shim_lock();
-        let strillix_shim = write_shim("dialog-strillix", "#!/bin/sh\necho strillix-picked\nexit 0\n");
+        let provider_shim = write_shim("dialog-provider", "#!/bin/sh\necho provider-picked\nexit 0\n");
         let result = run_ask_dialog(
-            Some(strillix_shim.to_str().unwrap()),
+            Some(provider_shim.to_str().unwrap()),
             "/no/such/aoide-secrets-watch-zenity-shim",
             "ask-1",
             "db-prod",
@@ -2315,17 +2282,16 @@ mod tests {
             None,
             || false,
         );
-        assert!(matches!(result, ZenityResult::Approved(ref c) if c == "strillix-picked"), "expected the strillix shim's own output, got {result:?}");
-        remove_shim(&strillix_shim);
+        assert!(matches!(result, ZenityResult::Approved(ref c) if c == "provider-picked"), "expected the provider shim's own output, got {result:?}");
+        remove_shim(&provider_shim);
     }
 
-    /// P3: with no `strillix` resolved, [`run_ask_dialog`] falls back to zenity
-    /// exactly as before this phase.
+    /// With no provider named, [`run_ask_dialog`] falls back to zenity.
     // cfg(unix): the fixture is a POSIX shell template or a `#!/bin/sh` shim
     // (the module note above names the class; the code under test is portable).
     #[cfg(unix)]
     #[test]
-    fn run_ask_dialog_falls_back_to_zenity_when_strillix_is_absent() {
+    fn run_ask_dialog_falls_back_to_zenity_when_provider_is_absent() {
         let _guard = shim_lock();
         let zenity_shim = write_shim("dialog-zenity", "#!/bin/sh\necho zenity-picked\nexit 0\n");
         let result =
@@ -2334,10 +2300,10 @@ mod tests {
         remove_shim(&zenity_shim);
     }
 
-    // ── live-incident fix: strillix infra failures narrate + fall back ───────
+    // ── provider infra failures narrate + fall back ──────────────────────────
 
-    /// A `strillix` that ENOENTs (the exact live incident — `quickshell` missing
-    /// from the deployed unit's own `PATH`, module doc) must not leave the
+    /// A provider that ENOENTs (its own `quickshell` missing from the unit's
+    /// `PATH`, module doc) must not leave the
     /// ask undialoged: `run_ask_dialog` retries it through zenity
     /// immediately, and the FINAL result is whatever that zenity attempt
     /// produced. (Asserting the `eprintln!` narration itself would need
@@ -2350,11 +2316,11 @@ mod tests {
     // (the module note above names the class; the code under test is portable).
     #[cfg(unix)]
     #[test]
-    fn run_ask_dialog_falls_back_to_zenity_when_strillix_fails_to_spawn() {
+    fn run_ask_dialog_falls_back_to_zenity_when_provider_fails_to_spawn() {
         let _guard = shim_lock();
         let zenity_shim = write_shim("fallback-spawn-error", "#!/bin/sh\necho fallback-code\nexit 0\n");
         let result = run_ask_dialog(
-            Some("/no/such/aoide-secrets-watch-strillix-shim"),
+            Some("/no/such/aoide-secrets-watch-provider-shim"),
             zenity_shim.to_str().unwrap(),
             "ask-1",
             "db-prod",
@@ -2370,7 +2336,7 @@ mod tests {
         remove_shim(&zenity_shim);
     }
 
-    /// A `strillix` that spawns, runs, and exits `EXIT_INFRA_FAILURE` (3) — a
+    /// A provider that spawns, runs, and exits `DIALOG_INFRA_FAILURE_EXIT` (3) — a
     /// `quickshell` crash, a QML load error, anything short of a genuine
     /// user action — gets the SAME immediate zenity fallback as a spawn
     /// failure. Distinguishes this from a genuine cancel (exit 1, the next
@@ -2379,12 +2345,12 @@ mod tests {
     // (the module note above names the class; the code under test is portable).
     #[cfg(unix)]
     #[test]
-    fn run_ask_dialog_falls_back_to_zenity_when_strillix_exits_infra_failure() {
+    fn run_ask_dialog_falls_back_to_zenity_when_provider_exits_infra_failure() {
         let _guard = shim_lock();
-        let strillix_shim = write_shim("infra-failure", "#!/bin/sh\nexit 3\n");
+        let provider_shim = write_shim("infra-failure", "#!/bin/sh\nexit 3\n");
         let zenity_shim = write_shim("fallback-infra-failure", "#!/bin/sh\necho fallback-code-2\nexit 0\n");
         let result = run_ask_dialog(
-            Some(strillix_shim.to_str().unwrap()),
+            Some(provider_shim.to_str().unwrap()),
             zenity_shim.to_str().unwrap(),
             "ask-2",
             "db-prod",
@@ -2397,7 +2363,7 @@ mod tests {
             || false,
         );
         assert!(matches!(result, ZenityResult::Approved(ref c) if c == "fallback-code-2"), "expected the zenity fallback's own output, got {result:?}");
-        remove_shim(&strillix_shim);
+        remove_shim(&provider_shim);
         remove_shim(&zenity_shim);
     }
 
@@ -2411,12 +2377,12 @@ mod tests {
     fn run_entry_dialog_reads_exit_three_as_dialog_failure_not_cancelled() {
         let _guard = shim_lock();
         let shim = write_shim("bare-exit-three", "#!/bin/sh\nexit 3\n");
-        let result = run_entry_dialog(|| spawn_strillix_entry(shim.to_str().unwrap(), "t", "m", 1, None, None), DISMISS_LABEL, || false);
+        let result = run_entry_dialog(|| spawn_provider_entry(shim.to_str().unwrap(), "t", "m", 1, None, None), DISMISS_LABEL, || false);
         assert!(matches!(result, ZenityResult::DialogFailure(_)), "expected DialogFailure, got {result:?}");
         remove_shim(&shim);
     }
 
-    /// The genuine-cancel control case: `strillix` exits 1 with NO stdout (a
+    /// The genuine-cancel control case: the provider exits 1 with NO stdout (a
     /// bare Esc/close, `AskResult::Cancelled`'s own contract) must be read
     /// as `Cancelled` and must NOT trigger a zenity fallback — proven by
     /// pointing `zenity_cmd` at a path that does not exist: if the fallback
@@ -2428,11 +2394,11 @@ mod tests {
     // (the module note above names the class; the code under test is portable).
     #[cfg(unix)]
     #[test]
-    fn run_ask_dialog_genuine_strillix_cancel_is_not_retried_via_zenity() {
+    fn run_ask_dialog_genuine_provider_cancel_is_not_retried_via_zenity() {
         let _guard = shim_lock();
-        let strillix_shim = write_shim("genuine-cancel", "#!/bin/sh\nexit 1\n");
+        let provider_shim = write_shim("genuine-cancel", "#!/bin/sh\nexit 1\n");
         let result = run_ask_dialog(
-            Some(strillix_shim.to_str().unwrap()),
+            Some(provider_shim.to_str().unwrap()),
             "/no/such/aoide-secrets-watch-zenity-shim-never-invoked",
             "ask-3",
             "db-prod",
@@ -2445,7 +2411,7 @@ mod tests {
             || false,
         );
         assert!(matches!(result, ZenityResult::Cancelled), "a genuine cancel must never fall back, got {result:?}");
-        remove_shim(&strillix_shim);
+        remove_shim(&provider_shim);
     }
 
     /// P1: `run()`'s own startup reconcile (`reconcile_once`, called before

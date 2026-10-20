@@ -264,11 +264,11 @@
     # (sakaki) selects `aoide-secrets` for its A2A door's own
     # bearer-token resolve but has no display for a dialog, and ungated zenity
     # would drag GTK into that box's closure for nothing this unit could ever
-    # show. `secrets watch --popup` itself feature-detects BOTH dialog binaries
-    # at runtime (`watch::resolve_strillix_bin`/`watch::zenity_available`,
-    # `crates/secrets/src/watch.rs`) and refuses to start only when neither
-    # resolves — this gate exists purely to keep the unit off a box with no
-    # graphical session at all, not to pick which binary it uses.
+    # show. `secrets watch --popup` itself reads the dialog provider at runtime
+    # (`AOIDE_DIALOG_CMD`, `crates/protocol/src/dialog.rs`) and refuses to start
+    # only when neither that provider nor `zenity` is available — this gate exists
+    # purely to keep the unit off a box with no graphical session at all, not to
+    # pick which dialog it uses.
     #
     # Like the broker service above (module doc's "headless service-anchoring
     # lesson"), `aoide secrets watch --popup` blocks forever on its own tail
@@ -299,9 +299,9 @@
         # `quickshell` rides the same rule for the strillix dialog path:
         # `strillix secrets ask` spawns it by bare name, so the unit that spawns
         # strillix must carry it — the live gap that let the first unit-spawned
-        # dialog fail silently (strillix resolved via STRILLIX_BIN, its
-        # quickshell ENOENT'd, the ask just stayed parked). Gated on the same
-        # flag as `STRILLIX_BIN` below, and for the same reason: a unit can
+        # dialog fail silently (strillix resolved, its quickshell ENOENT'd, the
+        # ask just stayed parked). Gated on the same flag as `AOIDE_DIALOG_CMD`
+        # below, and for the same reason: a unit can
         # only spawn strillix when the strillix fact put the binary on this host, and
         # a host without strillix takes the zenity path and has no use for
         # quickshell in its closure — the pair-watch unit's own pattern
@@ -329,18 +329,16 @@
             "STRILLIX_ROOT=${config.aoide.strillix.root}"
             "AOIDE_FLAKE_ROOT=${config.aoide.checkout}"
           ]
-          # `watch::resolve_strillix_bin` resolves `strillix` via `STRILLIX_BIN` (tier
-          # 1, trusted unconditionally) or a sibling of `current_exe()` (tier
-          # 2) — but `strillix` ships from `pkgs.aoide.strillix`, a SEPARATE output
+          # `secrets watch` runs the strillix dialog provider that
+          # `AOIDE_DIALOG_CMD` names (`watch::dialog_provider`), never a guess at
+          # PATH. `strillix` ships from `pkgs.aoide.strillix`, a SEPARATE output
           # from the `aoide` binary this unit execs (P-A8 of the binary-split
-          # workstream, the exact sibling-resolution break shellbridge.nix's
-          # own `AOIDE_CORE_BIN` comment already documents in the other
-          # direction), so sibling resolution would silently fail here without
-          # this. Only set when `aoide.strillix.enable` is actually on — mirrors
-          # shellbridge.nix's own guard, since a host with the lane on but
-          # strillix explicitly disabled has no `pkgs.aoide.strillix` output to point
-          # at.
-          ++ lib.optional config.aoide.strillix.enable "STRILLIX_BIN=${pkgs.aoide.strillix}/bin/strillix";
+          # workstream), so no sibling of `aoide` can be it and the provider is
+          # named explicitly. Only set when `aoide.strillix.enable` is actually
+          # on — mirrors shellbridge.nix's own guard, since a host with the lane
+          # on but strillix explicitly disabled has no `pkgs.aoide.strillix`
+          # output to point at.
+          ++ lib.optional config.aoide.strillix.enable "AOIDE_DIALOG_CMD=${pkgs.aoide.strillix}/bin/strillix";
 
           NoNewPrivileges = true;
           StandardOutput = "journal";

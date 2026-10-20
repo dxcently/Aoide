@@ -85,16 +85,17 @@ with `no-checkout` naming that marker):
 cd ~/Aoide && aoide onboard            # ~/.cargo/bin/aoide
 ```
 
-It is idempotent, and the core half is four acts: register the clone as a graph
-project, link `~/rice` → `<checkout>/rice` (never clobbering an existing file),
-seed `rices/preferences.md` when absent, then ask which agent harnesses
-to wire and run `hooks install` for each chosen harness.
+It is idempotent, and the core half is two acts: register the clone as a graph
+project, then ask which agent harnesses to wire and run `hooks install` for each
+chosen harness. The desktop half (seed `rices/preferences.md`, link `~/rice` →
+`<checkout>/rice` without clobbering an existing file, and the nix half) is
+`strx onboard`, run next from the same checkout.
 
 - `--harness claude,eidolon` wires exactly that list; `--yes` takes every
   harness found on `PATH` and skips every prompt.
-- When the `strillix` binary resolves it delegates the nix half to `strx onboard`;
-  on a core-only box it says so and stops — *"strillix: not found ... skipping the
-  desktop half; core setup is complete"*. That line is success, not a failure.
+- Core runs no strillix. On a box with strillix, run `strx onboard` from the
+  same checkout for the desktop half; on a core-only box, skip it: the core half
+  is complete on its own.
 - Run it in a directory you own: a session registered from a Windows path under
   WSL lands `(unanchored)` on the graph (see § 6).
 

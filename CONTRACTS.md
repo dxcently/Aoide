@@ -9078,9 +9078,10 @@ SAS-only gate re-raises the typed-code dialog on every tick for a request the
 operator already answered. `--popup` swaps that narration for a dialog: ONE
 shape on BOTH directions — `strx pair ask`
 (`crates/strillix/src/commands/dialog_qml.rs`'s shared quickshell surface) when
-`aoide_client::pair_watch:: resolve_strillix_bin` feature-detects it (the identical
-three-tier check `aoide_secrets::watch::resolve_strillix_bin` uses), else `zenity
---entry`, falling back to zenity on a `strillix` spawn/infra failure for that one
+`AOIDE_DIALOG_CMD` names a provider (`aoide_client::pair_watch` reads it through
+`aoide_protocol::dialog::dialog_provider`, the same read `aoide_secrets::watch`
+makes), else `zenity
+--entry`, falling back to zenity on a provider spawn/infra failure for that one
 attempt. **A TYPED-CODE entry dialog on EITHER leg, never a bare yes/no.** `strillix
 pair ask` — the SAME six-boxes-plus-dash surface `strx secrets ask` renders — or
 `zenity --entry`. Exit 0 hands back the TYPED code, gated through

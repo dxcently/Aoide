@@ -182,8 +182,8 @@ mod tests {
         // P-ID4) — the per-secret remote-origin admission bit the broker's
         // origin gate enforces (deny by default; the first real consumer
         // of the sealed session credential) — reached 82. Bumped by 1 for
-        // `session window attach` (S3): the desktop's window sweep binds a
-        // session's window through core — reached 83.
+        // `session window attach`: the desktop's window sweep binds a session's
+        // window through core — reached 83.
         //
         // Session-surface redesign (command-defrag lane X, 2026-08-28) —
         // three movements in the SAME commit, net 82 -> 81:

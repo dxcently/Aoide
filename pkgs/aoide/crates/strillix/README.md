@@ -28,8 +28,9 @@ are core `aoide` identity, root `AGENTS.md`).
   only the registry line is strillix's), plus strillix's own root-
   coupled `onboard` (below).
 - `commands::onboard` — `strx onboard` (P-I3, docs/architecture/ONBOARD.md):
-  the nix half of the onboarding flow, reached only via `aoide onboard`'s
-  delegate spawn once `rice_bin()` resolves. Reads the SHIPPED
+  the desktop half of the onboarding flow: the nix half (below), plus the rice
+  half (`rices/preferences.md` seeded, `~/rice` linked; from inside a checkout
+  only). Core's `aoide onboard` never runs it. Reads the SHIPPED
   `share/strillix/aoide-options.json` (`fs::strillix_share_dir()`, which
   `pkgs/strillix-rices` builds from `lib/options.nix` — every `aoide.*` option
   declared across `modules/{nucleus,dendrites}`, derived, not hand-listed) and
@@ -84,7 +85,8 @@ are core `aoide` identity, root `AGENTS.md`).
   data.
 - `commands::secrets` — `strx secrets ask` (P3): the rice-shaped code-entry
   dialog `aoide secrets watch --popup` spawns in place of `zenity --entry`
-  once it resolves (`aoide_secrets::watch::resolve_strillix_bin`). Owns only its
+  when `AOIDE_DIALOG_CMD` names it (`aoide_protocol::dialog::dialog_provider`).
+  Owns only its
   own flags (`--secret`/`--consumer`/`--seconds`/`--reason`/`--from`) and
   header wording ("release `X` -> Y") on top of `commands::dialog_qml`'s
   shared entry surface; speaks zenity's own output contract byte for byte
@@ -93,13 +95,13 @@ are core `aoide` identity, root `AGENTS.md`).
   dialog-result parsing never needs to know which binary answered — that
   crate's `watch.rs` module doc has the wire-side half. `EXIT_INFRA_FAILURE`
   (exit `3`, reserved for a spawn failure or a marker-less quickshell exit,
-  never folded into a bare cancel) is a re-export of `dialog_qml`'s own
-  constant, kept at this path since `lib.rs`'s `special` hook already
+  never folded into a bare cancel) is `aoide_protocol::dialog::DIALOG_INFRA_FAILURE_EXIT`,
+  re-exported through `dialog_qml` and kept at this path since `lib.rs`'s `special` hook already
   reads it here.
 - `commands::pair` — the pairing ceremony's own TWO dialog commands,
   spawned by `aoide pair watch --popup` in place of the matching zenity
-  invocation once `aoide_client::pair_watch::resolve_strillix_bin` finds this
-  binary: **`strx pair ask`** is the six-box entry surface, on EITHER
+  invocation once `AOIDE_DIALOG_CMD` names this binary (`aoide_client::pair_watch`
+  reads it through `dialog_provider`): **`strx pair ask`** is the six-box entry surface, on EITHER
   pairing direction now (the mutual-code redesign, R1) — `--id`/`--name`/
   `--context` only, no `--code` flag at all, because the whole gate is
   typing a value that arrives from elsewhere (the requester's own screen
@@ -496,10 +498,9 @@ in `docs/Aoide-Wiki/concepts/cli/Doors-and-Nodes.md`.
 
 - **The RICE menu's four verbs (`src/bridge/rice.rs`: `RiceMenu`,
   `RiceMode`, `RiceDraft`, `RiceDeclare`).** Any click on the bar's RICE cell opens the one
-  menu; nothing switches until a row is chosen. All four re-exec the sibling
-  `strillix` (`daemon::bin::rice_bin()`): `rice` lives there and conduct never
-  depends on the rice crate, so the name regexes, the minting and every refusal
-  stay the CLI's.
+  menu; nothing switches until a row is chosen. All four re-exec this build's own
+  `strillix` (`strillix_bin()`, the sibling resolver with `STRILLIX_BIN`): `rice`
+  lives there, so the name regexes, the minting and every refusal stay the CLI's.
   `{"cmd":"ricemenu"}` is the second READ, answered on its own connection and
   thread like `sessiontrace`: `dispatch_rice_menu` runs `rice list --json`
   under one 4 s budget (`RICE_MENU_TIMEOUT`, under the QML client's 5 s) and

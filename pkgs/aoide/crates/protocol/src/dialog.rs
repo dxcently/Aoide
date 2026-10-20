@@ -22,7 +22,7 @@
 //! (a bare `use` shim, preserving the exact same restricted visibility).
 //! The one rename is [`DialogResult`] itself (`ZenityResult` in the old
 //! crate) — this substrate now backs more than one dialog binary
-//! (`aoide-secrets`' `zenity`/`strillix` entry dialogs AND P-P5's own pairing
+//! (`aoide-secrets`' zenity and provider entry dialogs AND P-P5's own pairing
 //! confirm dialog), so the type name drops the single-binary implication;
 //! the shim re-exports it under the old name at the old path.
 //! [`escape_markup`] is the one item that is not an extraction: it never
@@ -237,15 +237,33 @@ pub const DISMISS_LABEL: &str = "Dismiss ask";
 
 /// The exit code that means "the dialog infrastructure itself failed" —
 /// NEVER a user action, never collapsed into [`DialogResult::Cancelled`].
-/// Mirrors `strillix::commands::secrets::EXIT_INFRA_FAILURE` byte for
-/// byte; there is no shared Rust type to enforce that agreement (no crate
-/// in this workspace may depend on `strillix` — root `AGENTS.md`'s
-/// core/paint boundary), so both constants carry this SAME comment
-/// pointing at the other file. A dialog's OWN real exit codes are
+/// Every dialog child speaks it: the zenity path and whichever provider
+/// [`dialog_provider`] names. A dialog's OWN real exit codes are
 /// `0`/`1`/a `--timeout`-only range, none of which collide with this one
 /// in practice, so checking for it unconditionally in [`run_entry_dialog`]
 /// — regardless of which binary answered — is safe.
-pub const STRILLIX_INFRA_FAILURE_EXIT: i32 = 3;
+pub const DIALOG_INFRA_FAILURE_EXIT: i32 = 3;
+
+/// The dialog provider core runs in place of zenity: the `AOIDE_DIALOG_CMD`
+/// value, or `None` when it is unset or blank. Core names no provider itself;
+/// the unit that runs a popup sets this variable when a desktop provider
+/// is installed, and the provider is run with the argv its caller builds
+/// (`secrets ask …` for the secrets popup, `pair ask …` and `pair show …`
+/// for the pairing popup). A provider speaks the exit contract of
+/// [`DIALOG_INFRA_FAILURE_EXIT`] and the stdout contract of
+/// [`run_entry_dialog`]. A value that does not spawn is a
+/// [`DialogResult::SpawnError`], and the caller falls back to zenity for that
+/// same attempt.
+pub fn dialog_provider() -> Option<String> {
+    dialog_provider_from(std::env::var("AOIDE_DIALOG_CMD").ok().as_deref())
+}
+
+/// Pure: [`dialog_provider`]'s rule on an already-read variable value — trimmed,
+/// and blank counts as unset. Kept free of the environment so the rule is
+/// testable without touching process-wide state.
+pub fn dialog_provider_from(raw: Option<&str>) -> Option<String> {
+    raw.map(str::trim).filter(|v| !v.is_empty()).map(str::to_string)
+}
 
 /// Outcome of one code-entry dialog round trip — never a bare `Result`,
 /// since "the user closed it," "a wrong code," "spawning it failed," and
@@ -273,11 +291,11 @@ pub enum DialogResult {
     /// `io::Error` from `Command::spawn`/`Child::try_wait`).
     SpawnError(String),
     /// The dialog process spawned and ran, but exited signaling
-    /// [`STRILLIX_INFRA_FAILURE_EXIT`] — a genuine infrastructure failure,
+    /// [`DIALOG_INFRA_FAILURE_EXIT`] — a genuine infrastructure failure,
     /// never a user action. The `String` names the exit status only (a
-    /// `strillix`-shaped caller inherits that child's stderr straight through
-    /// to its own, so the actual failure detail already reached the
-    /// journal directly and does not need to be re-captured here).
+    /// provider inherits its stderr straight through to the caller's own, so
+    /// the actual failure detail already reached the journal directly and
+    /// does not need to be re-captured here).
     DialogFailure(String),
 }
 
@@ -295,7 +313,7 @@ pub enum DialogResult {
 /// dialog binary sharing this loop must share its output CONTRACT (exit
 /// 0 = typed value on stdout, exit 1 + `dismiss_label` on stdout =
 /// dismissed, exit 1 + anything else on stdout (including empty) =
-/// cancelled, [`STRILLIX_INFRA_FAILURE_EXIT`] = infrastructure failure).
+/// cancelled, [`DIALOG_INFRA_FAILURE_EXIT`] = infrastructure failure).
 ///
 /// `dismiss_label` is a PARAMETER, not [`DISMISS_LABEL`] read internally —
 /// two different ceremonies share this loop with two different extra-
@@ -325,7 +343,7 @@ pub fn run_entry_dialog(
                     DialogResult::Approved(out)
                 } else if out == dismiss_label {
                     DialogResult::Dismissed
-                } else if status.code() == Some(STRILLIX_INFRA_FAILURE_EXIT) {
+                } else if status.code() == Some(DIALOG_INFRA_FAILURE_EXIT) {
                     // Checked BEFORE falling through to `Cancelled` — the
                     // ONE branch point this whole distinction exists for
                     // ([`DialogResult::DialogFailure`]'s own doc).
@@ -574,6 +592,19 @@ mod tests {
         let shim = write_shim("version", "#!/bin/sh\necho zenity 3.99.0\nexit 0\n");
         assert!(zenity_available(shim.to_str().unwrap()));
         remove_shim(&shim);
+    }
+
+    // ── dialog_provider: the AOIDE_DIALOG_CMD rule ──────────────────────
+
+    #[test]
+    fn dialog_provider_is_the_trimmed_variable_and_blank_means_unset() {
+        assert_eq!(dialog_provider_from(None), None, "unset means zenity");
+        assert_eq!(dialog_provider_from(Some("")), None);
+        assert_eq!(dialog_provider_from(Some("   ")), None);
+        assert_eq!(
+            dialog_provider_from(Some(" /opt/dialogs/bin/provider ")),
+            Some("/opt/dialogs/bin/provider".to_string())
+        );
     }
 
     // ── probe_locker_running (the locker half of the lock gate) ────────

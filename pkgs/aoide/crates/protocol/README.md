@@ -187,7 +187,8 @@ other crate in this workspace sits above.
   out the full up-to-60s backoff), `escape_markup` (the one escaper for
   `notify-send` text, shared by `aoide-client` and `aoide-conduct`), and the one pure
   `strip_one_trailing_newline` trim every dialog child's stdout is read
-  through. Extracted from `aoide-secrets`' `watch`/`client` modules (P-P5,
+  through, and `dialog_provider` (`AOIDE_DIALOG_CMD`: the one dialog provider a
+  popup may name in place of zenity; unset or blank means zenity). Extracted from `aoide-secrets`' `watch`/`client` modules (P-P5,
   same `feed`-precedent shape above) so a SECOND dialog consumer
   (`aoide-client`'s own pairing-confirm popup) shares it rather than
   forking a copy — `aoide-secrets` consumes every item back at its old
@@ -250,12 +251,12 @@ other crate in this workspace sits above.
   parse ONE trace line into its variant name and payload, the shape
   `docs/architecture/EIDOLON-TRACE.md` fixes (eidolon owns it; Aoide reads
   it) — the same parse `conduct`'s state fold reads, never a second one.
-- `bin` — sibling-binary resolution (`core_bin`/`rice_bin`; env override →
-  sibling-of-`current_exe` → bare `PATH` name), plus `on_path` (P-I2,
-  ONBOARD.md decision 3): the proactive `PATH` probe the resolver's own
-  bare-name tier deliberately leaves for `Command::spawn` to resolve at
-  exec time — the caller onboard's own strillix probe needs, checked BEFORE
-  spawning rather than caught as an `ENOENT` after. `resolve_executable_on_
+- `bin` — sibling-binary resolution (`core_bin` for `aoide`, and `resolve_bin`
+  for any other binary's own sibling: env override → sibling-of-`current_exe`
+  → bare `PATH` name), plus `on_path`: the proactive `PATH` probe the
+  resolver's own bare-name tier deliberately leaves for `Command::spawn` to
+  resolve at exec time — `agents::on_path` needs it, checked BEFORE spawning
+  rather than caught as an `ENOENT` after. `resolve_executable_on_
   path` (task #138) is the SPAWNABLE sibling of `on_path`: it additionally
   checks the executable bit and returns the resolved absolute path rather
   than a bool — kept as its own walk rather than widening `on_path`'s
@@ -264,7 +265,7 @@ other crate in this workspace sits above.
   every `<bin_name>-<name>` executable, sorted by name — the one PATH-scan
   `door::run`'s external-command probe and `registry::Schema`'s additive
   `external` key (CONTRACTS.md §3) both build on. On Windows the sibling is
-  `aoide.exe`/`strillix.exe` (`EXE_SUFFIX`, deliberately NOT `PATHEXT`, so an
+  `aoide.exe`/`<name>.exe` (`EXE_SUFFIX`, deliberately NOT `PATHEXT`, so an
   `aoide.cmd` beside the build never shadows it) and the executable-bit
   question becomes the shell's own: a candidate name is tried as given, else
   with each `PATHEXT` entry in that variable's order, restricted to the

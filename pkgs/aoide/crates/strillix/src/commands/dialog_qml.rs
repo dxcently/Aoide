@@ -33,9 +33,8 @@
 //! [`EXIT_INFRA_FAILURE`] (exit 3) for a spawn failure or a quickshell that
 //! exits without ever printing a recognized marker line — never folded into
 //! the bare-cancel case (a killed dialog must never be silently read as a
-//! user Cancel — the live incident `strillix secrets ask`'s own original doc
-//! tells in full). `aoide_secrets::watch::spawn_strillix_entry` and
-//! `aoide_client::pair_watch::spawn_strillix_entry` are the two readers of this
+//! user Cancel). `aoide_secrets::watch::spawn_provider_entry` and
+//! `aoide_client::pair_watch::spawn_provider_entry` are the two readers of this
 //! contract on the other side of the process boundary — don't change it
 //! here without updating both callers' own docs in the same commit.
 //!
@@ -51,14 +50,10 @@ use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 
 /// The exit code that means "the dialog infrastructure itself failed" —
-/// NEVER a user action, never collapsed into a bare cancel. Mirrors
-/// `aoide_protocol::dialog::STRILLIX_INFRA_FAILURE_EXIT` byte for byte; there is
-/// no shared Rust type to enforce that agreement (no crate in this
-/// workspace may depend on `strillix` — root `AGENTS.md`'s core/paint
-/// boundary), so both constants carry this same comment pointing at the
-/// other. `3` sits clear of zenity's own real exit codes (`0`/`1`/a
-/// `--timeout`-only range).
-pub const EXIT_INFRA_FAILURE: i32 = 3;
+/// NEVER a user action, never collapsed into a bare cancel. The protocol's one
+/// constant, shared with every dialog provider (`3` sits clear of zenity's own
+/// real exit codes, `0`/`1`/a `--timeout`-only range).
+pub const EXIT_INFRA_FAILURE: i32 = aoide_protocol::dialog::DIALOG_INFRA_FAILURE_EXIT;
 
 pub(crate) const QUICKSHELL_CMD: &str = "quickshell";
 

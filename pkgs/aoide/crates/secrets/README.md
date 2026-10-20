@@ -927,7 +927,7 @@ for what was already `pub` here, a bare `use` for what stayed
 crate-private, matching each item's OLD visibility exactly rather than
 widening anything. `aoide-client`'s own P-P5 pairing-confirm popup is the
 SECOND consumer that forced the move; `spawn_zenity_entry`/
-`spawn_strillix_entry`/`run_zenity_entry`/`run_strillix_entry`/`run_ask_dialog`/
+`spawn_provider_entry`/`run_zenity_entry`/`run_provider_entry`/`run_ask_dialog`/
 `zenity_error_dialog`/`popup_loop` stay here exactly as before — they know
 which secrets-specific binary and argv to spawn, which the generic
 run-loop never needed to.
@@ -1084,28 +1084,27 @@ complete an ask. The entry is VISIBLE, digits and all — a TOTP code is a
 30-second secret the operator is about to read off an authenticator, not a
 password worth hiding.
 
-**Two dialog binaries, one output contract (P3).** `watch::resolve_strillix_bin`
-checks whether `strillix` resolves to a real executable (`aoide-protocol`'s own
-sibling-binary resolver, `rice_bin`, plus a `PATH` probe on its bare-name
-fallback — the SAME check `aoide onboard`'s own "is strillix enabled" test
-already runs); when it does, each parked ask opens `strx secrets ask
---secret <name> --consumer <who> --seconds <n>` — a small quickshell window
+**One provider, one output contract (P3).** `aoide_protocol::dialog::dialog_provider`
+reads `AOIDE_DIALOG_CMD` (trimmed; blank or unset means none). When it names a
+program, each parked ask opens that program's `secrets ask --secret <name>
+--consumer <who> --seconds <n>` dialog — the units that run the popup set it to
+`strillix` when the strillix fact is on, which opens a small quickshell window
 with six individually-boxed digit inputs (`XXX-XXX`), autofocus, auto-advance,
 and paste-to-fill (`crates/strillix`'s own docs) — instead of a `zenity --entry`
-dialog. **Presence of `strillix` IS the choice** (the plugin philosophy, root
-`AGENTS.md` house rule 7) — no flag exists to pick between them, and there is
-nothing to configure: `strillix` absent falls back to `zenity` exactly as this
-mode has always worked. Both binaries obey the IDENTICAL output contract —
-code on stdout + exit 0 = approved; the literal string `Dismiss ask` on
-stdout + exit 1 = dismissed; anything else non-zero = cancelled — so
-`watch.rs`'s result parsing and its kill-by-pid expiry path (below) never
-need to know which one answered.
+dialog. **The variable is the choice** (the plugin philosophy, root `AGENTS.md`
+house rule 7): core names no provider, and with the variable unset the popup is
+zenity, exactly as this mode has always worked. Every provider obeys the
+IDENTICAL output contract — code on stdout + exit 0 = approved; the literal
+string `Dismiss ask` on stdout + exit 1 = dismissed; anything else non-zero =
+cancelled; exit `3` = the dialog infrastructure itself failed — so `watch.rs`'s
+result parsing and its kill-by-pid expiry path (below) never need to know which
+one answered.
 
 ```
 $ aoide secrets watch --popup
 watching secret events — ^C to leave (parked asks stay parked)
   19:06:02  parked      db-prod → claude   ask 3f2a-3   times out in 5m00s
-[with strillix resolved: `strx secrets ask --secret db-prod --consumer claude --seconds 287`
+[with `AOIDE_DIALOG_CMD` naming strillix: `strx secrets ask --secret db-prod --consumer claude --seconds 287`
  opens six boxed digit inputs, grouped XXX-XXX, submitting once all six are filled;
  without it: a zenity --entry dialog opens, "code for `db-prod` ← claude · 287s left",
  with an extra "Dismiss ask" button beside OK/Cancel — both show the digits as typed]
@@ -1115,7 +1114,7 @@ watching secret events — ^C to leave (parked asks stay parked)
   `client::approve` — never argv.** Neither binary's own argv (`Command::
   new`'s `args`) carries anything but identifiers and prompt TEXT (secret
   name, consumer, remaining seconds) — never a code, never a value. Grep the
-  spawn calls yourself (`watch::spawn_zenity_entry`/`watch::spawn_strillix_entry`)
+  spawn calls yourself (`watch::spawn_zenity_entry`/`watch::spawn_provider_entry`)
   if in doubt.
 - **`--text` is UNTRUSTED display data (`reason`/`origin.comm` in
   particular) and zenity renders `--text` as Pango markup by default, even
@@ -1127,7 +1126,7 @@ watching secret events — ^C to leave (parked asks stay parked)
   renders as literal text instead of formatting or a parse warning.
 - **The dialog window can never be left orphaned when `strx secrets ask`
   itself is killed** — `watch.rs`'s own near-expiry/resolved-elsewhere kill
-  (`run_zenity_entry`/`run_strillix_entry`'s `child.kill()`) only ever reaches
+  (`run_zenity_entry`/`run_provider_entry`'s `child.kill()`) only ever reaches
   the `strillix` PROCESS this crate spawned; the quickshell GRANDCHILD `strillix`
   spawns is invisible to this crate (no pid, no handle), and `SIGKILL` is
   untrappable, so `strillix`'s own best-effort cleanup of that grandchild never
@@ -1136,26 +1135,23 @@ watching secret events — ^C to leave (parked asks stay parked)
   — the kernel kills it the instant `strillix` dies, no cooperation needed from
   either process at that moment. See `crates/strillix/AGENTS.md`'s own note for
   the full mechanism; this crate's `AGENTS.md` has the matching half.
-- **A `strillix` infrastructure failure narrates and falls back to zenity —
-  never a silent parked ask (live-incident fix, this commit).** The
-  deployed popup watcher unit chose the `strillix` dialog for a real ask,
-  `strillix`'s own `quickshell` spawn ENOENT'd, and the ask sat parked with
-  nothing on screen and nothing in the journal until it timed out.
-  `watch::spawn_strillix_entry` now inherits `strillix`'s own stderr straight
-  through to this process's own (`strx secrets ask`'s failures land in the
-  journal directly); `strx secrets ask` reserves exit `3`
-  (`strillix::commands::secrets::EXIT_INFRA_FAILURE`) for "the dialog
-  infrastructure itself broke," never colliding with zenity's own cancel
-  code (`1`); and `watch::run_ask_dialog` retries the SAME ask through
-  zenity immediately on either a `strillix` spawn error or an exit-3 — the
-  plugin philosophy's fancy-surface-degrades-to-the-plain-one rule, not a
-  reason to leave the ask undialoged. A genuine user cancel (`strillix` exiting
-  1 with no marker line) is UNCHANGED — narrated as `[i]`gnore, same as
-  always, never retried. See `watch.rs`'s own module doc for the full
-  mechanism (all three parts: narration, the reserved exit code, the
-  fallback).
+- **A provider's infrastructure failure narrates and falls back to zenity —
+  never a silent parked ask.** A provider whose own quickshell spawn fails
+  (ENOENT, say) would otherwise leave the ask parked with nothing on screen and
+  nothing in the journal until it timed out. `watch::spawn_provider_entry`
+  inherits the provider's own stderr straight through to this process's own
+  (`strx secrets ask`'s failures land in the journal directly); the dialog
+  contract reserves exit `3` (`aoide_protocol::dialog::DIALOG_INFRA_FAILURE_EXIT`)
+  for "the dialog infrastructure itself broke," never colliding with zenity's own
+  cancel code (`1`); and `watch::run_ask_dialog` retries the SAME ask through
+  zenity immediately on either a provider spawn error or an exit-3 — the plugin
+  philosophy's fancy-surface-degrades-to-the-plain-one rule, not a reason to leave
+  the ask undialoged. A genuine user cancel (a provider exiting 1 with no marker
+  line) is UNCHANGED — narrated as `[i]`gnore, same as always, never retried.
+  See `watch.rs`'s own module doc for the full mechanism (all three parts:
+  narration, the reserved exit code, the fallback).
 - **Wrong code**: on the zenity path, a brief `zenity --error` shows, then
-  the SAME ask's entry dialog re-opens; on the strillix path there is no separate
+  the SAME ask's entry dialog re-opens; on a provider path there is no separate
   error surface (P3's scope is the entry dialog only) — the ask simply stays
   parked and the next poll reopens `strx secrets ask` fresh. Either way the
   ask stays parked, the replay ledger unburned, same as the tty path's own
@@ -1256,10 +1252,10 @@ watching secret events — ^C to leave (parked asks stay parked)
   error** (`commands::handle_secrets_watch`, before `watch::run` is ever
   reached): the two modes both own "how a parked ask gets completed" and
   can't both drive it.
-- **Both dialog spawn paths take the binary name as a parameter**
-  (`watch::ZENITY_CMD`/`"zenity"` in production for one, `watch::
-  resolve_strillix_bin`'s own result for the other) rather than hardcoding
-  `Command::new("zenity")`/`Command::new("strillix")` — this is what lets this
+- **Both dialog spawn paths take the program name as a parameter**
+  (`watch::ZENITY_CMD`/`"zenity"` in production for one, the `AOIDE_DIALOG_CMD`
+  provider for the other) rather than hardcoding `Command::new("zenity")`/
+  `Command::new("strillix")` — this is what lets this
   crate's own tests stand in a fake shim script (a tempdir executable that
   echoes a fixed code, or a fixed exit code) for EITHER binary WITHOUT
   mutating `PATH` (unlike `enroll::render_qr`'s older PATH-shim test, which
@@ -1757,10 +1753,10 @@ same "blocks forever" reason the broker service above holds. Its `path`
 carries `zenity` (a systemd user unit's default `PATH` does not reliably
 carry `environment.systemPackages` entries, the same lesson `shellbridge.nix`
 already learned for `hyprctl`/`curl`), and, only when `aoide.strillix.enable` is
-on, `STRILLIX_BIN` points at `pkgs.aoide.strillix`'s own `strillix` — `strillix` ships
-from a SEPARATE output than the `aoide` binary this unit execs (P-A8 of the
-binary-split workstream), so `watch::resolve_strillix_bin`'s sibling-of-
-`current_exe()` tier would otherwise never find it. No explicit ordering
+on, `AOIDE_DIALOG_CMD` names `pkgs.aoide.strillix`'s own `strillix` — `strillix`
+ships from a SEPARATE output than the `aoide` binary this unit execs (P-A8 of the
+binary-split workstream), so no sibling of `aoide` can be it and the provider is
+named explicitly. No explicit ordering
 against the SYSTEM `aoide-secrets-serve.service` exists or is needed: `watch::
 wait_for_follower` already waits out a not-yet-created events feed rather
 than exiting, so this unit coming up before the broker has bound its socket

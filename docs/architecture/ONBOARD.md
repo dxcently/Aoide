@@ -22,31 +22,34 @@ and fallback behavior.
 
 ## Settled decisions
 
-1. **`onboard` becomes the first-boot install-script flow.** The stub's
-   summary is honored as written: register the clone, seed the
-   rices, print the guide — plus harness wiring and the nix half
-   below. Golden count holds at 80; `implemented` flips (stubs 8→7).
+1. **`onboard` becomes the first-boot install-script flow, in two halves.**
+   Core's `aoide onboard` registers the clone, wires the harness hooks and
+   prints the guide. The desktop half (the rice seed, the `~/rice` link, the
+   nix half) is `strx onboard`'s (decision 4). Golden count holds at 80;
+   `implemented` flips (stubs 8→7).
 2. **It generates AND teaches.** The nix half emits one file a user can
    read top to bottom: every configurable option with its default and a
    one-line comment. Reading the file IS the teaching. More install
    concerns join later; the file is where new knobs appear.
-3. **"strillix enabled" = `protocol::bin::rice_bin()` resolves** (env →
-   sibling → PATH), then a wiring-state check. Three outcomes: skip
-   (no strillix — one line, nothing nix-shaped is ever spoken), configure,
-   already-configured.
-4. **Core delegates the nix half.** `aoide onboard` runs the shell-only
-   half itself and, when `rice_bin()` resolves, delegates to
-   `strx onboard` — a registered strillix command (golden 42→43), never a
-   hidden subcommand. Nix knowledge stays strillix-side; core remains
-   cargo-buildable on any Linux (the hard constraint).
+3. **The nix half is a command the user runs, and it has three outcomes.**
+   Core never probes for strillix. `strx onboard` finds no file at the target
+   path (configure), finds its own previous file (already-configured: warn,
+   back up, regenerate), or finds a hand-written file (refused, never
+   overwritten).
+4. **The desktop half is strillix's.** `strx onboard` owns everything
+   nix- and desktop-shaped: the rice seed, the `~/rice` link and the nix half.
+   It is a registered strillix command (golden 42→43), never a hidden
+   subcommand. Core never runs it: core stays cargo-buildable on any Linux
+   with no strillix on PATH (the hard constraint), and the user runs the two
+   halves in order, core first.
 5. **The vars file is a generated nix module, `aoide.nix`.** Every
    `aoide.*` option the modules declare, DERIVED from the declarations
    themselves — never a hand-list — each entry spelled with its default
    and one-line description. Env knobs (`AOIDE_CONDUCT_AUTOGATE`,
-   `AOIDE_TERMINAL`, `AOIDE_CORE_BIN`/`STRILLIX_BIN`, discovery
+   `AOIDE_TERMINAL`, `AOIDE_CORE_BIN`/`STRILLIX_BIN`, `AOIDE_DIALOG_CMD`, discovery
    advertise) ride along as commented entries.
 6. **Emit and teach, never edit.** The file lands at a stated path
-   (default `./aoide.nix`, `--out` overrides); onboard prints the
+   (default `./aoide.nix`, `--out` overrides); `strx onboard` prints the
    `imports = [ ./aoide.nix ]` line for the user's own flake. The
    user's flake is never touched.
 7. **Harness wiring is asked, not assumed.** Onboard asks which
@@ -65,29 +68,29 @@ and fallback behavior.
 10. **`onboard` runs from a checkout.** Its own contract says "register
     the clone", and the skill link needs the repo (the package does not
     ship the skill dir — proven by the sandbox `skill_source()` probe).
-    A taught refusal names the requirement when run elsewhere.
+    A taught refusal names the requirement when run elsewhere. The nix half
+    needs no checkout (its option set ships with the package); the rice half
+    does, and `strx onboard` skips it with a note outside one.
 
 ## The flow
 
 ```
 aoide onboard                        (Door::Cli only, from a checkout)
   |
-  |- 1. shell half (core, no nix knowledge)
-  |     register the clone . seed rices . hooks install
-  |     ASK: which harnesses?   <- inquire MultiSelect, preselected by
-  |         PATH presence; --harness <name> (repeatable) + --yes for
-  |         non-interactive runs
+  |- 1. register the clone (core, no nix knowledge)
+  |- 2. ASK: which harnesses?   <- inquire MultiSelect, preselected by
+  |         PATH presence; --harness <a,b> + --yes for non-interactive runs
+  |- 3. hooks install for each chosen harness
+  `- 4. print the guide, then this machine's node line
+
+strx onboard                         (Door::Cli only; the desktop half, run by the user)
   |
-  |- 2. strillix probe: rice_bin() resolves?
-  |     |- no  -> one line, skip the nix half entirely
-  |     `- yes -> wiring-state check -> skip / configure / already-configured
-  |              `- delegate: exec `strx onboard` (registered, 42->43)
-  |
-  |- 3. strillix half: generate aoide.nix (decision 5), emit to --out
-  |     (default ./aoide.nix), print the imports line; re-run warns
-  |     and backs up to aoide.nix.bak
-  |
-  `- 4. print the guide
+  |- A. nix half (no checkout needed): derive the aoide.* options from the
+  |     shipped set, emit aoide.nix to --out (default ./aoide.nix), print the
+  |     imports line; re-run warns and backs up to aoide.nix.bak; a
+  |     hand-written file at the path is refused
+  `- B. rice half (from a checkout only): seed rices/preferences.md, link
+        ~/rice -> <checkout>/rice
 ```
 
 ## Prompt substrate — wrap, don't scatter
@@ -137,11 +140,11 @@ in the same commit as the change they witness.
   Gate: `choose_reading` tests green unmodified; piped `secrets put`
   round-trip byte-identical; `cargo tree` shows `inquire` in protocol
   only; behavior on `TERM=dumb` verified and stated in the commit.
-- **P-I2 (M) core `onboard`.** The shell half + probe + delegate +
-  guide; `--harness`/`--yes`/`--out` flags; from-a-checkout refusal;
+- **P-I2 (M) core `onboard`.** The shell half + guide;
+  `--harness`/`--yes` flags; from-a-checkout refusal;
   the `hooks.install` summary update (schema-visible, deliberate).
   Golden 80 holds, stub count 8→7. Gate: non-interactive run green in
-  a scratch HOME; strillix-less box output contains no nix spelling.
+  a scratch HOME; a box with no strillix completes the core half and says so.
 - **P-I3 (M) `strx onboard` + generator.** The registered command
   (golden 42→43), the flake options output, the aoide.nix formatter,
   re-run warn+backup. Gate: generated file evaluates (`nix eval` a

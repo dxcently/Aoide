@@ -4809,12 +4809,12 @@ pub fn register_pair(r: &mut Registry) {
     ));
     r.insert(cmd!(
         path: ["pair", "watch"],
-        summary: "Foreground, line-mode follow of the pairing-ceremony events feed (parked/revealed/awaiting-confirm) plus a 30s reconcile safety tick. --json emits one event object per line instead of narration. --popup (opt-in, aoide.a2a.pairingPopup) swaps the terminal narration for a typed-code entry dialog on each actionable request, either direction — strillix when it resolves, zenity otherwise — mutually exclusive with --json. CLI-only — blocks until Ctrl-C.",
+        summary: "Foreground, line-mode follow of the pairing-ceremony events feed (parked/revealed/awaiting-confirm) plus a 30s reconcile safety tick. --json emits one event object per line instead of narration. --popup (opt-in, aoide.a2a.pairingPopup) swaps the terminal narration for a typed-code entry dialog on each actionable request, either direction — the dialog provider named by AOIDE_DIALOG_CMD when set, zenity otherwise — mutually exclusive with --json. CLI-only — blocks until Ctrl-C.",
         args: [],
         flags: [flag!(
             "popup",
             "bool",
-            "Surface each actionable request as a typed-code entry dialog instead of terminal narration, either direction — strillix when it resolves, zenity otherwise. Requires one of the two on PATH. Mutually exclusive with --json.",
+            "Surface each actionable request as a typed-code entry dialog instead of terminal narration, either direction — the dialog provider named by AOIDE_DIALOG_CMD when set, zenity otherwise. Requires one of the two. Mutually exclusive with --json.",
             conflicts: &["json"]
         )],
         gated: false,

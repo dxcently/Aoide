@@ -352,12 +352,12 @@ conducting orchestration is `aoide`'s identity, painting is `strillix`'s:
   conducted session is `conduct` or `spawn`, and jumping to a
   session's window is a library call the conductor and `shellbridge` reach
   directly, not a CLI subcommand), and `onboard` — the
-  core half of installation: registers the clone as a graph project, links
-  `~/rice` to the checkout's `rice/` (never clobbering an existing file or
-  symlink), seeds `rices/preferences.md` when absent, wires the
+  core half of installation: registers the clone as a graph project, wires the
   agent harnesses (an interactive pick over `hooks install`, or `--harness
-  a,b`/`--yes` non-interactive), then delegates the nix half to `strillix
-  onboard` when the strillix binary resolves and prints the guide. Interactive
+  a,b`/`--yes` non-interactive), and prints the guide. The desktop half —
+  seeding `rices/preferences.md`, linking `~/rice` to the checkout's `rice/`
+  (never clobbering an existing file or symlink) and the nix half — is
+  `strillix onboard`'s, run after it. Interactive
   prompts CLI-wide (picker, y/N confirms, hidden input) ride `inquire`
   behind seams in `crates/protocol/src/pick.rs`; piped/non-tty behavior is
   unchanged. Stubs (7, exit 64):

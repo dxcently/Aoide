@@ -6,7 +6,7 @@
 //! - **`pair ask`** — a TYPED-CODE entry dialog: the SAME six-boxes-
 //!   plus-dash digit ENTRY surface `strillix secrets ask` (P3) renders,
 //!   spawned by `aoide pair watch --popup` in place of `zenity
-//!   --entry` once `aoide_client::pair_watch::resolve_strillix_bin` finds this
+//!   --entry` once `AOIDE_DIALOG_CMD` names this
 //!   binary — **on BOTH pairing directions now (the mutual-code redesign,
 //!   R1)**, never a bare yes/no on either. The INBOUND (approver) leg types
 //!   the code shown on the REQUESTER's screen; the OUTBOUND (requester) leg
@@ -133,9 +133,8 @@ const RESULT_MARKER: &str = "AOIDE_PAIR_ASK_RESULT:";
 
 /// `aoide_client::pair_watch::REJECT_LABEL`, restated here as a literal —
 /// this crate cannot depend on `aoide-client` for one string constant, the
-/// same "no shared Rust type across the core/paint boundary" posture
-/// `aoide_protocol::dialog::STRILLIX_INFRA_FAILURE_EXIT`'s own doc holds for
-/// its own mirrored constant. `pair ask` alone reads it now — `pair show`
+/// same "no shared Rust type across the core/paint boundary" posture this
+/// module's other restated constants hold. `pair ask` alone reads it now — `pair show`
 /// carries no reject control, so it has no dismiss label to render.
 const DISMISS_TEXT: &str = "Reject request";
 

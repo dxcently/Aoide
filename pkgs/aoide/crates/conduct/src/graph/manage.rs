@@ -464,7 +464,7 @@ fn add_roots(name: &str, paths: &[String], new: bool, auto_resume: bool, host: O
     })
 }
 
-/// The onboarding-only bootstrap entry: `aoide onboard`'s `register_clone`
+/// The onboarding-only bootstrap entry: `aoide onboard`'s `register_project`
 /// is its SOLE caller. Onboarding registers the clone as a project before
 /// any daemon exists to answer a dispatch — the documented first-run path
 /// is `git clone … && cd ~/Aoide && aoide onboard`, no daemon step — so
@@ -1733,7 +1733,7 @@ mod tests {
 
     #[test]
     fn register_bootstrap_project_writes_under_the_lock_with_cli_equivalent_validation() {
-        // The onboarding-only entry point (`register_clone`'s sole caller):
+        // The onboarding-only entry point (`register_project`'s sole caller):
         // never touches `local_daemon`, so it writes locally with no daemon
         // reachable at all -- and still refuses the same invalid root
         // `project_add`'s CLI path refuses, writing nothing.

@@ -106,38 +106,33 @@ aoide update [--check-only] [--json]
 ### aoide onboard
 
 ```
-aoide onboard [--harness <a,b,...>] [--yes] [--out <path>] [--json]
+aoide onboard [--harness <a,b,...>] [--yes] [--json]
 ```
 
 - **Reads:** the checkout root, found by walking up from the cwd to
   `.claude/skills/aoide/SKILL.md` (`hooks::skill_source()`'s walk-up);
   outside a checkout the run fails exit 1, `reason: "no-checkout"`. PATH
   probes for each known harness (`claude`, `kimi`, `pi` via
-  `aoide_protocol::agents`) and for the strillix binary (`rice_bin()`:
-  `$STRILLIX_BIN`, a sibling binary, then PATH).
-- **Writes:** registers the clone by dispatching the already-registered
-  `project add aoide <checkout>` handler (stage-file effects per
-  [[Graph-and-Conduct]]); links `~/rice` → `<checkout>/rice` when nothing is
-  there (a correct existing link is a no-op; a wrong-target symlink or a
-  non-symlink is left alone with a note, never clobbered); seeds
-  `rices/preferences.md` when absent (created once, never
-  overwritten). For each chosen harness, runs the registered
-  `hooks install <agent>` handler (harness settings merge and skill symlink
-  per [[Content-and-Hooks]]).
+  `aoide_protocol::agents`).
+- **Writes:** registers the clone through the onboarding-only bootstrap entry
+  (`register_bootstrap_project`, since no daemon exists at first boot; stage-file
+  effects per [[Graph-and-Conduct]]). For each chosen harness, runs the
+  registered `hooks install <agent>` handler (harness settings merge and skill
+  symlink per [[Content-and-Hooks]]).
 - **Pipes to / output:** progress lines per phase; the closing output is the
   full `aoide guide` text rendered from the same assembled registry. Message
-  `"onboard: clone registered, N harness(es) wired -- <strillix note>"`;
-  `--json` data `{root, harnesses, hooks: [{agent, ok, message}], strillix}`.
+  `"onboard: core half complete -- clone registered, N harness(es) wired. The
+  desktop half (rice seed, ~/rice link, nix half) is not part of this command."`;
+  `--json` data `{root, harnesses, hooks: [{agent, ok, message}],
+  projectRegistered}`.
 - **Notes:** not gated; `implemented: true`, registered in
   `pkgs/aoide/crates/cli/src/commands/onboard.rs`. CLI door only — any other
   door is a usage error (exit 2). Harness selection: `--harness` wires
   exactly the comma-separated list (an unknown name is a usage error); given
   neither flag, a tty gets the interactive multi-select preselected by the
   PATH probe, while `--yes` or a non-tty run wires every harness found on
-  PATH. When strillix resolves, the nix half is delegated to a child `strillix
-  onboard` with inherited stdio (`--out` and `--yes` forward; `--harness`
-  does not) — a spawn failure or nonzero exit degrades to a note, not an
-  onboard failure. See [[Clone-and-Run]].
+  PATH. Core never runs strillix: the desktop half is `strx onboard`'s, run by
+  the user afterwards. See [[Clone-and-Run]].
 
 ### strx onboard
 
@@ -145,28 +140,28 @@ aoide onboard [--harness <a,b,...>] [--yes] [--out <path>] [--json]
 strx onboard [--out <path>] [--yes] [--json]
 ```
 
-- **Reads:** the checkout root, found by walking up from the cwd for a
-  directory holding both `flake.nix` and `pkgs/aoide`; outside a checkout the
-  run fails exit 1, `reason: "no-checkout"`. The option set is derived live
-  with `nix eval <checkout>#aoideOptions` (165 options today), never from a
-  hand-list.
+- **Reads:** the shipped option set (`share/strillix/aoide-options.json`), so the
+  nix half needs no checkout and no `nix`. The rice half reads the checkout
+  root, found by walking up from the cwd for a directory holding both
+  `flake.nix` and `pkgs/aoide`; outside one, it skips the rice half with a note.
 - **Writes:** `./aoide.nix` (`--out <path>` overrides) — a nix module the
   user imports, listing every `aoide.*` module option commented out at its
   current default with a one-line description each, plus a commented
   env-knob appendix (`AOIDE_CONDUCT_AUTOGATE`, `AOIDE_TERMINAL`,
-  `AOIDE_CORE_BIN`/`STRILLIX_BIN`, `AOIDE_DISCOVERY_ADVERTISE`). Re-running
-  over a file it generated warns and backs the old file up to `<out>.bak`
-  (an interactive confirm unless `--yes`); a file it did not generate is
-  refused, never overwritten.
+  `AOIDE_CORE_BIN`/`STRILLIX_BIN`, `AOIDE_DIALOG_CMD`,
+  `AOIDE_DISCOVERY_ADVERTISE`). Re-running over a file it generated warns and
+  backs the old file up to `<out>.bak` (an interactive confirm unless `--yes`);
+  a file it did not generate is refused, never overwritten. From a checkout it
+  also seeds `rices/preferences.md` when absent (created once, never
+  overwritten) and links `~/rice` → `<checkout>/rice` (a correct existing link
+  is a no-op; a wrong-target symlink or a non-symlink is left alone with a note).
 - **Pipes to / output:** prints the teaching line `imports = [ ./aoide.nix
-  ];` — the user's flake is never edited. Message `"strx onboard: wrote
-  <out> (N options) -- imports = [ ... ];"` (`regenerated` on a rerun);
-  `--json` data `{out, optionCount, backedUp, importsLine}`.
+  ];` — the user's flake is never edited. Message `"strillix onboard: wrote
+  <out> (N options) -- imports = [ ... ];"` (`regenerated` on a rerun); `--json`
+  data `{out, optionCount, backedUp, importsLine, checkout, riceNotes}`.
 - **Notes:** not gated; `implemented: true`, registered in
-  `pkgs/aoide/crates/strillix/src/commands/onboard.rs`. CLI door only, from a
-  checkout — the derivation needs the repo's `modules/` and `flake.nix`. In
-  the normal flow this runs as `aoide onboard`'s delegate child, but it
-  stands alone. See [[strillix]].
+  `pkgs/aoide/crates/strillix/src/commands/onboard.rs`. CLI door only. Core never
+  runs it: the user runs it after `aoide onboard`. See [[strillix]].
 
 ### aoide usage
 

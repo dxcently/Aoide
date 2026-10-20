@@ -80,7 +80,7 @@ the groups it documents.
 | `content register/propose/ingest/query` | 4 | stub |
 | `content approve` | 1 | stub, gated |
 | `make` ([[Widget-Maker]] entry) | 1 | stub |
-| `onboard` | 1 | real — the clone-onboarding lane, delegates the nix half to `strx onboard` ([[Clone-and-Run]]) |
+| `onboard` | 1 | real — the clone-onboarding lane: registers the clone and wires harness hooks; the desktop half is `strx onboard`'s ([[Clone-and-Run]]) |
 | `update` | 1 | stub, gated |
 | `mcp serve`, `daemon` | 2 | real |
 | `graph`, `graph link` | 2 | real — the read/analysis lens the `graph` prefix kept |
@@ -135,9 +135,8 @@ a distinct idempotency key so capture entries coexist with the plain ones
 links `~/rice` to `<checkout>/rice` (never clobbering an existing file or
 symlink), and seeds `rices/preferences.md` when absent; then it
 asks which agent harnesses to wire (`--harness a,b`, or `--yes` for
-non-interactive) and runs `hooks install` for each. When the `strillix` binary
-resolves it delegates the nix half to `strx onboard`, and finally prints
-the guide. See [[Clone-and-Run]].
+non-interactive) and runs `hooks install` for each. It finally prints
+the guide; the desktop half is `strx onboard`'s, run after it. See [[Clone-and-Run]].
 
 A stub returns a structured `Outcome` with status `not-implemented` (exit
 `64`), never a crash — arg-parsing, the schema entry, the audit-log append,

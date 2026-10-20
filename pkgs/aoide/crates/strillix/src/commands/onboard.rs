@@ -1,8 +1,12 @@
-//! `strillix onboard` — the nix half of the onboarding flow (docs/architecture/
-//! ONBOARD.md), reached only by `aoide onboard`'s delegate spawn
-//! (`crates/cli/src/commands/onboard.rs::probe_and_delegate_strillix`) once
-//! `rice_bin()` resolves. Derives every `aoide.*` option the modules
-//! declare (`flake.nix`'s `aoideOptions` output, `lib/options.nix` — ladder
+//! `strillix onboard` — the desktop half of the first-boot flow
+//! (docs/architecture/ONBOARD.md). Core's `aoide onboard` registers the clone
+//! and wires the harness hooks; it never runs this command. The desktop half
+//! is two steps, both the user's own: the nix half (`aoide.nix`, below), which
+//! needs no checkout, and the rice half (`rices/preferences.md` seeded, `~/rice`
+//! linked into the checkout), which needs one.
+//!
+//! The nix half derives every `aoide.*` option the modules declare
+//! (`flake.nix`'s `aoideOptions` output, `lib/options.nix` — ladder
 //! rung (a), `lib.evalModules` + `lib.optionAttrSetToDocList`, held with no
 //! fallback to `nixosSystem` needed) and renders `aoide.nix`: a nix module
 //! the user imports, every option commented out at its current default, so
@@ -12,19 +16,11 @@
 //!
 //! Door::Cli-only (ONBOARD.md's flow diagram): an interactive install flow
 //! that shells out to `nix eval` makes no sense over MCP/A2A/the daemon,
-//! the same reasoning core's own `onboard` carries. From a checkout only
-//! (decision 10): the derivation needs `modules/` and `flake.nix`, which a
-//! built/installed `strillix` never carries — [`checkout_root`] is strillix's own
-//! equivalent of core's `hooks::skill_source()` walk-up, but anchored on
-//! different markers: strillix has no skill dir to walk up to, and
-//! `current_exe()` is the WRONG anchor here (a built `strillix` binary lives in
-//! the nix store, nowhere near the checkout that spawned it) — a plain
-//! `cwd` walk-up looking for `flake.nix` + `pkgs/aoide` is the cleanest
-//! equivalent, and correct in practice: core's own `checkout_root()` already
-//! proved the invoking cwd sits inside the checkout before it ever spawns
-//! `strillix onboard` (inherited stdio, inherited cwd — Command::new never
-//! changes it), so strillix's independent walk-up finds the exact same root.
-
+//! the same reasoning core's own `onboard` carries. [`checkout_root`] is
+//! strillix's own walk-up from the cwd, anchored on `flake.nix` + `pkgs/aoide`
+//! rather than core's skill dir: `current_exe()` is the WRONG anchor (a built
+//! `strillix` binary lives in the nix store, nowhere near the checkout it was
+//! run from), and a cwd walk-up is the one that finds the clone.
 use crate::dispatch::Invocation;
 use crate::output::Outcome;
 use crate::registry::{cmd, flag, Registry};
@@ -35,7 +31,7 @@ use std::path::{Path, PathBuf};
 pub fn register(r: &mut Registry) {
     r.insert(cmd!(
         path: ["onboard"],
-        summary: "Generate `aoide.nix`: every `aoide.*` module option, derived fresh from modules/{nucleus,dendrites}, commented out at its current default -- then print the `imports` line to teach it in. Never edits the user's flake.",
+        summary: "Generate `aoide.nix`: every `aoide.*` module option, derived fresh from modules/{nucleus,dendrites}, commented out at its current default -- then print the `imports` line to teach it in. From a checkout also seeds rices/preferences.md and links ~/rice. Never edits the user's flake.",
         args: [],
         flags: [
             flag!("out", "string", "Where to emit the generated module (default: ./aoide.nix)."),
@@ -60,33 +56,147 @@ fn handle_onboard(inv: &Invocation) -> Outcome {
     let door = inv.door;
     let yes = inv.flag_present("yes");
 
-    match emit_generated(&out_path, &options, || resolve_regenerate(&out_path, door, yes)) {
-        Ok(r) => {
-            let teach = format!("imports = [ {} ];", out_path.display());
-            println!("{teach}");
-            let mut changed = vec![r.wrote.display().to_string()];
-            if let Some(bak) = &r.backed_up {
-                changed.push(bak.display().to_string());
-            }
-            let message = if r.regenerated {
-                format!("strillix onboard: regenerated {} ({} options) -- {teach}", out_path.display(), options.len())
-            } else {
-                format!("strillix onboard: wrote {} ({} options) -- {teach}", out_path.display(), options.len())
-            };
-            Outcome::ok(cmd, message).changed(changed).with_data(json!({
-                "out": out_path.display().to_string(),
-                "optionCount": options.len(),
-                "backedUp": r.backed_up.map(|p| p.display().to_string()),
-                "importsLine": teach,
-            }))
-        }
-        Err(e) => Outcome::error(cmd, e),
+    let r = match emit_generated(&out_path, &options, || resolve_regenerate(&out_path, door, yes)) {
+        Ok(r) => r,
+        Err(e) => return Outcome::error(cmd, e),
+    };
+    let teach = format!("imports = [ {} ];", out_path.display());
+    println!("{teach}");
+    let mut changed = vec![r.wrote.display().to_string()];
+    if let Some(bak) = &r.backed_up {
+        changed.push(bak.display().to_string());
     }
+    let message = if r.regenerated {
+        format!("strillix onboard: regenerated {} ({} options) -- {teach}", out_path.display(), options.len())
+    } else {
+        format!("strillix onboard: wrote {} ({} options) -- {teach}", out_path.display(), options.len())
+    };
+
+    let checkout = checkout_root();
+    let rice_notes = match &checkout {
+        Some(root) => {
+            let (seeded, seed_note) = seed_rices(root);
+            let (linked, link_note) = link_rice(root);
+            if seeded {
+                changed.push(seed_note.clone());
+            }
+            if linked {
+                changed.push(format!("~/rice -> {}", root.join("rice").display()));
+            }
+            vec![seed_note, link_note]
+        }
+        None => vec![
+            "no Aoide checkout above the cwd -- skipped the rice seed and the ~/rice link (run from inside the clone for those)"
+                .to_string(),
+        ],
+    };
+    for note in &rice_notes {
+        println!("  {note}");
+    }
+
+    Outcome::ok(cmd, message).changed(changed).with_data(json!({
+        "out": out_path.display().to_string(),
+        "optionCount": options.len(),
+        "backedUp": r.backed_up.map(|p| p.display().to_string()),
+        "importsLine": teach,
+        "checkout": checkout.map(|p| p.display().to_string()),
+        "riceNotes": rice_notes,
+    }))
 }
 
 /// The invoking checkout's root: walk up from `cwd` looking for a directory
 /// carrying both `flake.nix` and `pkgs/aoide` — the two markers that
-/// distinguish a real Aoide checkout from an arbitrary directory. See the
+/// distinguish a real Aoide checkout from an arbitrary directory. Only the
+/// rice half needs one: the seed and the `~/rice` link land inside it.
+fn checkout_root() -> Option<PathBuf> {
+    let mut dir = std::env::current_dir().ok()?;
+    loop {
+        if dir.join("flake.nix").is_file() && dir.join("pkgs/aoide").is_dir() {
+            return Some(dir);
+        }
+        if !dir.pop() {
+            return None;
+        }
+    }
+}
+
+/// "seed rices" (ONBOARD.md's stub-summary contract, decision 1):
+/// `rices/` travels committed with the clone itself
+/// (`learnings.md`/`update-playbook.md` are already there on any fresh
+/// checkout) — the one root file Rice-Anatomy.md documents as part of the
+/// rices's cross-cutting trio that a fresh clone still lacks is
+/// `preferences.md`. Idempotent: only ever created, never overwritten.
+fn seed_rices(root: &Path) -> (bool, String) {
+    let path = root.join("rices/preferences.md");
+    if path.exists() {
+        return (false, format!("{} already present", path.display()));
+    }
+    let body = "\
+# Rices Preferences
+
+Cross-cutting preferences that apply across rices, not any one rice's
+`design/` folder -- the sibling of `learnings.md`. Sparse today; the agent
+reads this before every ricing iteration and appends after declare/reject
+decisions, the same write-back discipline `learnings.md` already holds.
+";
+    match std::fs::write(&path, body) {
+        Ok(()) => (true, format!("seeded {}", path.display())),
+        Err(e) => (false, format!("could not seed {}: {e}", path.display())),
+    }
+}
+
+/// "link ~/rice" (Rice-Anatomy.md, Rice-Vocabulary.md and Clone-and-Run.md all
+/// document `~/rice` -> `~/Aoide/rice`; this makes that symlink real). Never a
+/// clobber: an existing correct link is a no-op, anything else at either path
+/// is left alone with a note. Returns whether this call created the link.
+fn link_rice(root: &Path) -> (bool, String) {
+    let home_rice = aoide_protocol::aoide_home().join("rice");
+    let root_rice = root.join("rice");
+    match std::fs::symlink_metadata(&home_rice) {
+        Ok(meta) if meta.file_type().is_symlink() => {
+            // The exact-path compare catches a symlink correctly aimed at
+            // `root_rice` whose target doesn't (yet) exist -- canonicalize
+            // fails on a dangling target, which would otherwise misreport a
+            // correctly-targeted link as "elsewhere" just because the read
+            // happened before `root/rice` existed. The canonicalize fallback
+            // still catches an equivalent but differently-spelled target
+            // (relative vs absolute, a symlink chain) once it resolves.
+            let same_target = std::fs::read_link(&home_rice).map(|t| t == root_rice).unwrap_or(false);
+            let resolves = same_target
+                || matches!(
+                    (std::fs::canonicalize(&home_rice), std::fs::canonicalize(&root_rice)),
+                    (Ok(l), Ok(s)) if l == s
+                );
+            if resolves {
+                (false, format!("~/rice already links to {}", root_rice.display()))
+            } else {
+                let target = std::fs::read_link(&home_rice)
+                    .map(|p| p.display().to_string())
+                    .unwrap_or_else(|_| "<unreadable>".to_string());
+                (
+                    false,
+                    format!(
+                        "{} is already a symlink to {target}, not to {} -- leaving it (remove it yourself to relink)",
+                        home_rice.display(),
+                        root_rice.display()
+                    ),
+                )
+            }
+        }
+        Ok(_) => (
+            false,
+            format!(
+                "{} already exists and is not a symlink -- leaving it (move it aside to let onboard link it)",
+                home_rice.display()
+            ),
+        ),
+        Err(_) => match aoide_storage::fs::link_dir(&root_rice, &home_rice) {
+            Ok(()) => (true, format!("linked {} -> {}", home_rice.display(), root_rice.display())),
+            Err(e) => (false, format!("could not link {}: {e}", home_rice.display())),
+        },
+    }
+}
+
 /// The `aoide.*` option doc set, read from the SHIPPED
 /// `share/strillix/aoide-options.json` — `pkgs/strillix-rices` builds it from
 /// `lib/options.nix` at nix-build time, and it sits beside the rice templates
@@ -149,8 +259,7 @@ const GENERATED_HEADER: &str =
     "# Generated by `strillix onboard` -- re-running this command regenerates this file in place (the previous version is copied to a .bak file first, overwritten on the next rerun).";
 
 /// The three states a `--out` target can be in (ONBOARD.md decision 3, minus
-/// "skip" — core never spawns `strillix onboard` at all when strillix is absent, so
-/// that outcome never reaches this crate).
+/// its "skip" outcome: this command runs only when someone asks for it).
 enum FileState {
     /// Nothing at the path yet — the plain "configure" case.
     Absent,
@@ -276,7 +385,11 @@ const ENV_KNOBS: &[(&str, &str)] = &[
     ),
     (
         "AOIDE_CORE_BIN / STRILLIX_BIN",
-        "Override the sibling-binary resolver for aoide/strillix cross-exec (crates/protocol/src/bin.rs).",
+        "Override the sibling-binary resolver: `aoide` for the core calls strillix makes, `strillix` for its own rice bridge (crates/protocol/src/bin.rs).",
+    ),
+    (
+        "AOIDE_DIALOG_CMD",
+        "Replace the zenity dialog for secret asks and pairing popups; the provider speaks the strillix dialog argv (crates/protocol/src/dialog.rs).",
     ),
     (
         "AOIDE_DISCOVERY_ADVERTISE",
@@ -629,6 +742,178 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    // ── checkout_root, seed_rices, link_rice: the rice half ──────────────
+
+    #[test]
+    fn checkout_root_finds_the_repo_root_by_walking_up_to_the_flake_and_pkgs_markers() {
+        let _g = env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let root = unique_tmp("strillix-onboard-checkout-found");
+        std::fs::create_dir_all(root.join("pkgs/aoide")).unwrap();
+        std::fs::write(root.join("flake.nix"), "{ }\n").unwrap();
+        let nested = root.join("pkgs/aoide/crates/strillix");
+        std::fs::create_dir_all(&nested).unwrap();
+
+        let saved_cwd = std::env::current_dir().unwrap();
+        std::env::set_current_dir(&nested).unwrap();
+        let found = checkout_root();
+        std::env::set_current_dir(&saved_cwd).unwrap();
+
+        assert_eq!(
+            found.map(|p| std::fs::canonicalize(p).unwrap()),
+            Some(std::fs::canonicalize(&root).unwrap())
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn checkout_root_is_none_outside_a_checkout() {
+        let _g = env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let root = unique_tmp("strillix-onboard-checkout-missing");
+        std::fs::create_dir_all(&root).unwrap();
+
+        let saved_cwd = std::env::current_dir().unwrap();
+        std::env::set_current_dir(&root).unwrap();
+        let found = checkout_root();
+        std::env::set_current_dir(&saved_cwd).unwrap();
+
+        assert!(found.is_none(), "found a checkout root where there is none: {found:?}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn seed_rices_creates_preferences_once_then_leaves_it_untouched() {
+        let root = unique_tmp("strillix-onboard-seed");
+        std::fs::create_dir_all(root.join("rices")).unwrap();
+        let path = root.join("rices/preferences.md");
+
+        let (seeded, note) = seed_rices(&root);
+        assert!(seeded);
+        assert!(note.contains("seeded"), "note: {note}");
+        let first = std::fs::read_to_string(&path).unwrap();
+        assert!(first.contains("Rices Preferences"));
+
+        let (seeded2, note2) = seed_rices(&root);
+        assert!(!seeded2);
+        assert!(note2.contains("already present"), "note2: {note2}");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), first, "a second run must never overwrite");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn link_rice_links_when_absent_and_is_idempotent_on_rerun() {
+        let _g = env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvSaver::capture(&["HOME", "AOIDE_USER"]);
+        let root = unique_tmp("strillix-onboard-link-fresh");
+        std::fs::create_dir_all(root.join("rice")).unwrap();
+        let home = unique_tmp("strillix-onboard-link-fresh-home");
+        std::fs::create_dir_all(&home).unwrap();
+        std::env::set_var("HOME", &home);
+        std::env::remove_var("AOIDE_USER");
+        let home_rice = home.join("rice");
+
+        let (linked, note) = link_rice(&root);
+        assert!(linked, "note: {note}");
+        let meta = std::fs::symlink_metadata(&home_rice).unwrap();
+        assert!(meta.file_type().is_symlink(), "~/rice was not created as a symlink");
+        assert_eq!(
+            std::fs::canonicalize(&home_rice).unwrap(),
+            std::fs::canonicalize(root.join("rice")).unwrap()
+        );
+        assert!(note.contains("linked"), "note: {note}");
+
+        // Re-run: a no-op, reported present, never reported as newly linked.
+        let (linked2, note2) = link_rice(&root);
+        assert!(!linked2, "a second run must not report the link as new");
+        assert!(note2.contains("already links to"), "note2: {note2}");
+
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    /// GATED on Unix with its reason: the fixture creates a symlink to a second
+    /// directory, and native Windows needs `SeCreateSymbolicLinkPrivilege` for
+    /// that call at all -- `aoide_storage::fs::link_dir` surfaces the refusal,
+    /// so the conflict this test stages cannot be built there. No native twin.
+    #[cfg(unix)]
+    #[test]
+    fn link_rice_leaves_a_wrong_target_symlink_alone_with_a_note() {
+        let _g = env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvSaver::capture(&["HOME", "AOIDE_USER"]);
+        let root = unique_tmp("strillix-onboard-link-wrong");
+        std::fs::create_dir_all(root.join("rice")).unwrap();
+        let home = unique_tmp("strillix-onboard-link-wrong-home");
+        std::fs::create_dir_all(&home).unwrap();
+        std::env::set_var("HOME", &home);
+        std::env::remove_var("AOIDE_USER");
+        let home_rice = home.join("rice");
+        let elsewhere = unique_tmp("strillix-onboard-link-wrong-elsewhere");
+        std::os::unix::fs::symlink(&elsewhere, &home_rice).unwrap();
+
+        let (linked, note) = link_rice(&root);
+        assert!(!linked);
+        assert!(
+            note.contains("is already a symlink to") && note.contains(&elsewhere.display().to_string()),
+            "note: {note}"
+        );
+        assert_eq!(std::fs::read_link(&home_rice).unwrap(), elsewhere, "the wrong link must survive untouched");
+
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&home);
+        let _ = std::fs::remove_dir_all(&elsewhere);
+    }
+
+    #[test]
+    fn link_rice_leaves_a_regular_file_alone_with_a_note() {
+        let _g = env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvSaver::capture(&["HOME", "AOIDE_USER"]);
+        let root = unique_tmp("strillix-onboard-link-file");
+        std::fs::create_dir_all(root.join("rice")).unwrap();
+        let home = unique_tmp("strillix-onboard-link-file-home");
+        std::fs::create_dir_all(&home).unwrap();
+        std::env::set_var("HOME", &home);
+        std::env::remove_var("AOIDE_USER");
+        let home_rice = home.join("rice");
+        std::fs::write(&home_rice, "not a symlink").unwrap();
+
+        let (linked, note) = link_rice(&root);
+        assert!(!linked);
+        assert!(note.contains("already exists and is not a symlink"), "note: {note}");
+        assert_eq!(std::fs::read_to_string(&home_rice).unwrap(), "not a symlink", "the file must survive untouched");
+
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    /// GATED on Unix with its reason: the fixture creates a symlink (and
+    /// deliberately a DANGLING one), which native Windows refuses without
+    /// `SeCreateSymbolicLinkPrivilege` -- see
+    /// `link_rice_leaves_a_wrong_target_symlink_alone_with_a_note`'s own gate.
+    #[cfg(unix)]
+    #[test]
+    fn link_rice_reports_a_dangling_but_correctly_targeted_link_as_already_linked() {
+        // The cosmetic fix: a symlink aimed at the RIGHT path whose target
+        // doesn't exist yet must not be misreported as "elsewhere" just
+        // because `canonicalize` can't resolve a dangling target.
+        let _g = env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvSaver::capture(&["HOME", "AOIDE_USER"]);
+        let root = unique_tmp("strillix-onboard-link-dangling");
+        // Deliberately no `root/rice` directory -- the link points at a path
+        // that does not exist on disk.
+        let home = unique_tmp("strillix-onboard-link-dangling-home");
+        std::fs::create_dir_all(&home).unwrap();
+        std::env::set_var("HOME", &home);
+        std::env::remove_var("AOIDE_USER");
+        std::os::unix::fs::symlink(root.join("rice"), home.join("rice")).unwrap();
+
+        let (linked, note) = link_rice(&root);
+        assert!(!linked);
+        assert!(note.contains("already links to"), "note: {note}");
+
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
     // ── The generated file against a REAL module eval -- #[ignore]'d: needs
     // `nix`/network, per crates/strillix-rice/src/widgets.rs's identical precedent. Run
     // by hand via the discipline's own `nix develop -c cargo test` (which has
@@ -653,7 +938,7 @@ mod tests {
     ///
     /// The checkout this probe imports is named by CWD-INDEPENDENT compile-time
     /// knowledge (this crate's own manifest dir), never by a runtime walk-up:
-    /// `strillix onboard` itself needs no checkout any more, so the only place a
+    /// The nix half of `strillix onboard` needs no checkout, so the only place a
     /// checkout may be named is a TEST that exercises the module system.
     #[test]
     #[ignore = "shells to a real `nix eval`; same sandbox constraint as the eval tests above"]

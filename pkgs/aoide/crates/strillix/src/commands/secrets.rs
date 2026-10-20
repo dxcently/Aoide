@@ -1,6 +1,6 @@
 //! `strillix secrets ask` — the rice-shaped code-entry dialog `aoide secrets
 //! watch --popup` spawns instead of `zenity --entry` once
-//! `aoide_secrets::watch::resolve_strillix_bin` finds this binary
+//! `AOIDE_DIALOG_CMD` names this binary
 //! (`crates/secrets/src/watch.rs`'s own P3 doc). Six individually-boxed
 //! digit inputs, grouped `[X][X][X] - [X][X][X]`, auto-submitting the
 //! instant all six are filled; Esc or the window's own close button
