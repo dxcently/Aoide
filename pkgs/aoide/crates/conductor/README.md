@@ -109,6 +109,12 @@ the selected session, `s` writes a letter to the selected agent directly
 without opening the actions menu, and `p` prunes ended sessions — the one
 mutation the panel dispatches on its own.
 
+Enter on a session with a log opens the tail of its log. Enter on a session
+without one runs the program that `AOIDE_FOCUS_CMD` names, with the session
+id as its only argument, and audits the outcome as `graph.focus`. With
+`AOIDE_FOCUS_CMD` unset, that outcome is a usage refusal that names the
+variable, and no program runs.
+
 `f` folds the selected card's children away and unfolds them again. A folded
 card wears a mark on its bottom border — `▸ 5 · 1 awaiting`, the hidden
 count and then the most urgent class among them (awaiting over working),

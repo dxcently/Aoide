@@ -65,10 +65,7 @@ use super::session_store::{
     refresh_transcript_fields, set_owner_activity, stamp_attested_parent,
     stamp_harness_session_id, stamp_session_start_at, stored_phase,
 };
-use super::window::{
-    discover_window_from, ensure_session_window, hook_chain, hyprctl_clients, owns_client,
-    pid_ancestry, windowless_by_lineage_from_parent,
-};
+use super::window::{ensure_session_chain, hook_chain, pid_ancestry};
 use aoide_protocol::agents::{agent_profile, known_agents, AgentProfile, HookClass, CLAUDE_PROFILE};
 use aoide_protocol::{Door, Invocation};
 use aoide_protocol::output::{Fix, Kind, Outcome};
@@ -1153,7 +1150,7 @@ pub(in crate::graph) fn deliver_local_with(
     let cmd = "send";
     // Accept the exact `session:<id>` form `graph --json` emits for a
     // node id, so a copy-pasted id round-trips through `--id` — mirrors
-    // `focus_session`'s identical `session:` stripping (window.rs). Only this
+    // `focus_session`'s identical `session:` stripping (strillix `hypr/focus.rs`). Only this
     // known prefix is special-cased; anything else passes through untouched
     // and still falls into the `unknown session` error below, same as
     // before this fix. `--to`'s LOCAL branch already hands in a bare,
@@ -2159,27 +2156,14 @@ fn payload_pid(payload: &Value) -> Option<u32> {
         .and_then(|p| u32::try_from(p).ok())
 }
 
-/// The payload's self-reported pid, kept only when this hook process's own
-/// kernel ancestry vouches for it: the harness that fires a hook is the
-/// hook's own parent chain, so a pid outside `hook_pid`'s `/proc` ancestry is
-/// someone else's process named by whoever wrote the payload, and is dropped.
-/// Ancestry also reaches the window owner, an ancestor of every hook, so a pid
-/// that owns a compositor client is refused even when ancestry vouches for it: a
-/// window belongs to its app, never to the session. Window discovery never stamps
-/// the owner's pid, and this refusal keeps a self-report from doing it. The client
-/// lookup runs only for a self-report that ancestry vouched for. It answers nothing
-/// where `HYPRLAND_INSTANCE_SIGNATURE` or `XDG_RUNTIME_DIR` is unset or the request
-/// socket cannot be reached, and there ancestry alone vouches.
-/// No `hook_pid` (no door-stamped peer) vouches for nothing.
+/// The payload's self-reported pid, kept only when this hook process's own kernel ancestry
+/// vouches for it: the harness that fires a hook is the hook's own parent chain, so a pid outside
+/// `hook_pid`'s `/proc` ancestry is someone else's process named by whoever wrote the payload, and
+/// is dropped. No `hook_pid` (no door-stamped peer) vouches for nothing.
 fn vouched_payload_pid(payload: &Value, hook_pid: Option<i32>) -> Option<u32> {
     let reported = payload_pid(payload)?;
     let reported_pid = i32::try_from(reported).ok()?;
-    if !pid_ancestry(hook_pid?).contains(&reported_pid) {
-        return None;
-    }
-    let is_window_owner =
-        hyprctl_clients().is_some_and(|clients| owns_client(&clients, reported_pid));
-    (!is_window_owner).then_some(reported)
+    pid_ancestry(hook_pid?).contains(&reported_pid).then_some(reported)
 }
 
 /// A hook payload's self-reported `context_ceiling` — the active model's
@@ -2370,26 +2354,15 @@ fn hook_ensure_session_with(
     // find the ENCLOSING terminal's window, not this session's own (it has
     // none), which is exactly what made the same-window eviction treat two
     // unrelated agents as stale twins.
-    let windowless = existing
-        .as_ref()
-        .map(|f| windowless_by_lineage_from_parent(parent, &f.sessions))
-        .unwrap_or(false);
-    // Discovery walks the HOOK process (`hook_pid`), never this one, and yields
-    // only the window: the record's pid is the harness's own self-report
-    // (`reported`, pid-trust rules apply), never the window's owning pid. A hook
-    // with no harness (`hook_chain`) binds nothing and moves no chain.
-    let chain = hook_pid.and_then(hook_chain).unwrap_or_default();
-    let window = if windowless || chain.is_empty() {
-        None
-    } else {
-        hook_pid.and_then(discover_window_from).map(|(addr, _)| addr)
-    };
+    // The window is the desktop's to bind (`session window attach`), so the hook stores the
+    // chain and the reported pid only. A hook with no harness (`hook_chain`) moves no chain.
+    let chain: Vec<i32> = hook_pid.and_then(hook_chain).unwrap_or_default();
     let _ = do_hook_session_start(
         door,
         id,
         Some(profile.name),
         cwd.as_deref(),
-        window.as_deref(),
+        None,
         parent,
         reported,
         &chain,
@@ -2567,28 +2540,12 @@ fn hook_for_profile_gated(
             // outright rather than pid-ancestry-walking to the ENCLOSING
             // terminal's window (the exact same-window collision that made
             // the eviction pass treat two unrelated agents as stale twins).
-            let windowless = existing
-                .as_ref()
-                .map(|f| windowless_by_lineage_from_parent(parent.as_deref(), &f.sessions))
-                .unwrap_or(false);
-            // Best-effort: the hook is a subprocess of the agent's terminal, so
-            // discover that window now, from the HOOK process (`hook_pid`: this
-            // process on the CLI arm, the door's peer pid on the daemon arm), and
-            // register it — this is what makes a hook-only Claude session
-            // focus-jumpable. Discovery yields only the window; the record's pid
-            // is the harness's own self-report (see [`payload_pid`] — pi reports
-            // `process.pid`, so a pi that dies inside a still-open terminal still
-            // trips the reaper's `/proc` signal), and [`vouched_payload_pid`]
-            // refuses a self-report that owns the window.
-            // Workspace is stamped later by the shellbridge window-event listener
-            // (resolve_pending_session_windows), which is authoritative and keeps
-            // it fresh across moves.
-            let chain = hook_pid.and_then(hook_chain).unwrap_or_default();
-            let window = if windowless || chain.is_empty() {
-                None
-            } else {
-                hook_pid.and_then(discover_window_from).map(|(addr, _)| addr)
-            };
+            // The window is the desktop's to bind (`session window attach`), so the hook stores
+            // the chain only. The record's pid is the harness's own self-report (see
+            // [`payload_pid`]: pi reports `process.pid`, so a pi that dies inside a still-open
+            // terminal still trips the reaper's pid signal). The desktop's window sweep binds the
+            // window and keeps its workspace current.
+            let chain: Vec<i32> = hook_pid.and_then(hook_chain).unwrap_or_default();
             // The check lane's own settled/mid-turn split (task #139 phase
             // 2): read the STORED phase before either mutating call below
             // touches it — `do_session_phase_if` just past this block is the
@@ -2605,7 +2562,7 @@ fn hook_for_profile_gated(
                 &id,
                 Some(profile.name),
                 cwd.as_deref(),
-                window.as_deref(),
+                None,
                 parent.as_deref(),
                 pid,
                 &chain,
@@ -2660,7 +2617,7 @@ fn hook_for_profile_gated(
             // Backfill a still-empty windowAddress on any later hook — covers a
             // session that registered before the window mapped (or before this
             // discovery shipped), so it becomes jumpable without a restart.
-            ensure_session_window(&id, hook_pid);
+            ensure_session_chain(&id, hook_pid);
             let out = do_session_phase(&id, &phase);
             // The first user prompt names the session (set-once).
             if let Some(n) = name {
@@ -2751,7 +2708,7 @@ fn hook_for_profile_gated(
             // an active turn), same rate as the `Phase` self-heal above.
             claim_note = hook_ensure_session(door, profile, &payload, &id, hook_pid, true, claim)
                 .and_then(|c| claim_trace(&c, may_ring));
-            ensure_session_window(&id, hook_pid);
+            ensure_session_chain(&id, hook_pid);
             do_session_phase_if(&id, &phase, "working")
         }
         HookAction::ToolStart {
@@ -2768,7 +2725,7 @@ fn hook_for_profile_gated(
                 door, profile, &payload, &session, hook_pid, false, claim,
             )
                 .and_then(|c| claim_trace(&c, may_ring));
-            ensure_session_window(&session, hook_pid);
+            ensure_session_chain(&session, hook_pid);
             // Spawn the child FIRST so it exists before its parent's activity
             // points at it, then mark the owner working + its current activity.
             if let Some(sp) = spawn {
@@ -2788,7 +2745,7 @@ fn hook_for_profile_gated(
                 door, profile, &payload, &session, hook_pid, false, claim,
             )
                 .and_then(|c| claim_trace(&c, may_ring));
-            ensure_session_window(&session, hook_pid);
+            ensure_session_chain(&session, hook_pid);
             if let Some(sub) = end_sub {
                 do_subagent_end(&sub);
             }
@@ -2808,7 +2765,7 @@ fn hook_for_profile_gated(
                 door, profile, &payload, &session, hook_pid, false, claim,
             )
                 .and_then(|c| claim_trace(&c, may_ring));
-            ensure_session_window(&session, hook_pid);
+            ensure_session_chain(&session, hook_pid);
             do_subagent_rekey(&from_sub_id, &to_sub_id);
             // The launch returned; the parent is no longer running that tool in
             // the foreground (its sub-agent runs on in the background) — clear the
@@ -7623,31 +7580,16 @@ mod tests {
         }
         let _ = std::fs::remove_dir_all(&stage);
     }
-    /// A self-report is vouched only as an ancestor of the hook that owns no window:
-    /// an ancestry-reachable pid that owns a client is refused. Off Hyprland there is
-    /// no client lookup, so ancestry alone vouches for it.
+    /// A self-report is vouched by the hook's own ancestry alone: an ancestor is kept, and a pid
+    /// outside that ancestry is refused. No compositor is asked.
     #[cfg(unix)]
     #[test]
-    fn a_self_reported_window_owner_is_refused_and_a_windowless_ancestor_is_kept() {
-        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+    fn a_self_report_is_vouched_only_by_the_hooks_own_ancestry() {
         let me = std::process::id() as i32;
         let parent = pid_ancestry(me)[1];
-        let (_fake_env, fake_dir) = fake_hypr_socket("vouch-owner");
-
-        // The shim's default client is owned by this process, the test's own pid.
-        assert_eq!(vouched_payload_pid(&json!({ "pid": me }), Some(me)), None);
-        assert_eq!(vouched_payload_pid(&json!({ "pid": parent }), Some(me)), Some(parent as u32));
-
-        // Now the parent owns the window: the parent is refused, this process is kept.
-        std::env::set_var("AOIDE_TEST_CLIENT_PID", parent.to_string());
-        assert_eq!(vouched_payload_pid(&json!({ "pid": parent }), Some(me)), None);
         assert_eq!(vouched_payload_pid(&json!({ "pid": me }), Some(me)), Some(me as u32));
-
-        // Off Hyprland the lookup answers nothing, so ancestry alone vouches.
-        std::env::remove_var("HYPRLAND_INSTANCE_SIGNATURE");
         assert_eq!(vouched_payload_pid(&json!({ "pid": parent }), Some(me)), Some(parent as u32));
-
-        let _ = std::fs::remove_dir_all(&fake_dir);
+        assert_eq!(vouched_payload_pid(&json!({ "pid": 2_000_000_000u32 }), Some(me)), None);
     }
 
     #[test]
@@ -8344,17 +8286,14 @@ mod tests {
     /// session through the door's pid, and still stamps no pid.
     #[cfg(unix)]
     #[test]
-    fn a_daemon_served_hook_walks_the_door_pid_for_its_window_never_its_own() {
+    fn a_daemon_served_hook_walks_the_door_pid_for_its_chain_never_its_own() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let (_root_env, _root) = aoide_test_support::isolated_mail_root("hook-door-window");
         let profile = agent_profile(CLAUDE_PROFILE.name).unwrap();
         let me = std::process::id() as i32;
         let mut child = std::process::Command::new("sleep").arg("30").spawn().unwrap();
         let c = child.id() as i32;
-        let (_fake_env, fake_dir) = fake_hypr_socket("hook-door");
         // The client (app window) is owned by the child `c`: the door's pid.
-        std::env::set_var("AOIDE_TEST_CLIENT_PID", c.to_string());
-        std::env::set_var("AOIDE_TEST_CLIENT_CLASS", "com.example.App");
 
         let load = |id: &str| {
             load_stage::<SessionsFile>(&sessions_path())
@@ -8387,19 +8326,17 @@ mod tests {
         ]);
         assert_eq!(out.status, aoide_protocol::output::Status::Ok);
         let rec = load("hd");
-        assert_eq!(rec.window_address, "0xAA", "the door's pid walks to the app window");
-        assert_eq!(rec.pid, None, "the window's owner is never the session's pid");
+        assert!(rec.window_address.is_empty(), "the hook binds no window: the desktop's sweep does");
+        assert_eq!(rec.pid, None, "the hook never stamps a pid from the door");
         assert_eq!(rec.hook_ancestry.first(), Some(&me), "the chain starts at the door's harness, this process");
         assert!(!rec.hook_ancestry.contains(&c), "the door process itself is never stored");
 
         // 2. No door pid (an older aoided): nothing is walked, even though this
         // process is a client owner of the shim.
-        std::env::set_var("AOIDE_TEST_CLIENT_PID", me.to_string());
         door(&[(STDIN_PAYLOAD_FLAG, start("hd2"))]);
         let rec = load("hd2");
-        assert!(rec.window_address.is_empty(), "no door pid, no discovery");
+        assert!(rec.window_address.is_empty(), "no door pid, no chain");
         assert!(rec.hook_ancestry.is_empty(), "and no chain either");
-        std::env::set_var("AOIDE_TEST_CLIENT_PID", c.to_string());
 
         // 3. The CLI arm walks itself: the client is the child `c`, which is not
         // one of this process's ancestors, so no window.
@@ -8418,7 +8355,7 @@ mod tests {
             (DAEMON_PEER_PID_FLAG, c.to_string()),
         ]);
         let rec = load("hb");
-        assert_eq!(rec.window_address, "0xAA", "the per-turn backfill walks the door's pid");
+        assert!(rec.window_address.is_empty(), "the per-turn hook binds no window");
         assert_eq!(rec.pid, None, "and it stamps no pid");
         assert_eq!(rec.hook_ancestry.first(), Some(&me), "and the bind lands the door's harness chain");
 
@@ -8437,36 +8374,27 @@ mod tests {
             (DAEMON_PEER_PID_FLAG, c.to_string()),
         ]);
         let rec = load("hs");
-        assert_eq!(rec.window_address, "0xAA", "a stale chain still binds through the door's pid");
+        assert!(rec.window_address.is_empty(), "a stale chain heals without a bind");
         assert_eq!(rec.hook_ancestry.first(), Some(&me), "the bind replaces the stale chain");
 
         let _ = child.kill();
         let _ = child.wait();
-        let _ = std::fs::remove_dir_all(&fake_dir);
     }
 
-    /// The window bind is the one route where only the chain rule stands
-    /// between a stranger's per-turn hook and a record's chain: a windowless
-    /// record's hook binds the window its caller owns and then moves the chain
-    /// to the caller's. A live harness outside the caller's chain keeps the
-    /// chain; a dead one lets it move. A record that stores no chain but a pid
-    /// holds it the same, since that pid is its harness. A live harness outside
-    /// the caller's chain also anchors the record against the bind itself: the
-    /// window stays unbound. Where no live harness anchors it, the window binds
-    /// and moves no chain, parent or fact.
+    /// A per-turn hook takes a record's stored chain for its caller only where
+    /// the stored harness is dead. A live harness outside the caller's chain
+    /// holds it, and so does a live pid on a chainless record, since that pid is
+    /// its harness.
     #[cfg(unix)]
     #[test]
-    fn a_per_turn_hook_that_binds_a_window_cannot_take_the_chain_of_a_live_harness() {
+    fn a_per_turn_hook_never_takes_the_chain_of_a_live_harness() {
         const DEAD: i32 = 2_000_000_000;
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let (_root_env, _root) = aoide_test_support::isolated_mail_root("anchor-bind");
+        let (_root_env, _root) = aoide_test_support::isolated_mail_root("live-chain");
         let profile = agent_profile(CLAUDE_PROFILE.name).unwrap();
         let me = std::process::id() as i32;
         let mut owner = std::process::Command::new("sleep").arg("30").spawn().unwrap();
         let mut harness = std::process::Command::new("sleep").arg("30").spawn().unwrap();
-        let (_fake_env, fake_dir) = fake_hypr_socket("anchor-bind");
-        std::env::set_var("AOIDE_TEST_CLIENT_PID", owner.id().to_string());
-        std::env::set_var("AOIDE_TEST_CLIENT_CLASS", "com.example.App");
         let chain_of = |id: &str| {
             let file: SessionsFile = load_stage(&sessions_path()).unwrap();
             file.sessions.into_iter().find(|r| r.session_id == id).unwrap().hook_ancestry
@@ -8486,27 +8414,12 @@ mod tests {
             let payload = json!({ "session_id": id, "hook_event_name": "UserPromptSubmit", "prompt": "go" });
             hook_for_profile_gated(aoide_protocol::Door::Cli, profile, &payload.to_string(), false, Some(owner.id() as i32), None);
         }
-        let window_of = |id: &str| {
-            let file: SessionsFile = load_stage(&sessions_path()).unwrap();
-            file.sessions.into_iter().find(|r| r.session_id == id).unwrap().window_address
-        };
         assert!(chain_of("pid-held").is_empty(), "a live pid is the harness of a chainless record, and holds it");
-        assert_eq!(window_of("pid-held"), "", "a stranger's bind onto an anchored record is refused");
-        assert_eq!(window_of("held"), "", "and so is one onto a record anchored by its stored chain");
-        // The fake compositor answers one read per discovery, and a loaded box can
-        // miss its budget once. A turn retries the bind until it lands, so retry too.
-        let free_payload = json!({ "session_id": "pid-free", "hook_event_name": "UserPromptSubmit", "prompt": "go" });
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
-        while window_of("pid-free") != "0xAA" && std::time::Instant::now() < deadline {
-            hook_for_profile_gated(aoide_protocol::Door::Cli, profile, &free_payload.to_string(), false, Some(owner.id() as i32), None);
-        }
-        assert_eq!(window_of("pid-free"), "0xAA", "the window binds where no live harness anchors the record");
         assert_eq!(chain_of("pid-free").first(), Some(&me), "a dead pid lets the caller's chain land");
         for c in [&mut owner, &mut harness] {
             let _ = c.kill();
             let _ = c.wait();
         }
-        let _ = std::fs::remove_dir_all(&fake_dir);
     }
 
     /// A SessionStart refreshes the stored hook chain only where trust allows. A
@@ -9402,11 +9315,9 @@ mod tests {
     fn a_forged_hook_naming_a_protected_wrap_stamps_binds_and_spawns_nothing() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let (_env, _root_env, root) = forged_hook_world("forged-turns");
-        let (_hypr, _hypr_root) = crate::graph::testutil::fake_hypr_socket("forged-turns-hypr");
         let me = std::process::id() as i32;
         let ancestry = crate::graph::window::pid_ancestry(me);
         assert!(ancestry.len() >= 3, "the test process has a window owner above it");
-        std::env::set_var("AOIDE_TEST_CLIENT_PID", ancestry[1].to_string());
         let mut hook = std::process::Command::new("sleep").arg("30").spawn().unwrap();
         let hook_pid = hook.id() as i32;
         let claude = agent_profile(CLAUDE_PROFILE.name).unwrap();
@@ -9420,7 +9331,7 @@ mod tests {
             Door::Cli, claude, &payload("plain", "UserPromptSubmit", r#", "user_prompt": "go""#), false, Some(hook_pid), None,
         );
         let plain = stored("plain").unwrap_or_else(|| panic!("control: the hook registers a session: {}", control.message));
-        assert_eq!(plain.window_address, "0xAA", "control: this rig lets a hook bind a window");
+        assert!(plain.window_address.is_empty(), "control: a hook binds no window");
         assert_eq!(plain.context_ceiling, Some(200000), "control: and stamp a ceiling");
         assert_eq!(plain.harness_session_id.as_deref(), Some("plain"));
         let (sessions, phases) = stage_bytes();

@@ -18,8 +18,8 @@ pub use actions::{session_kill, session_project};
 // The P-CX desktop Codex/ChatGPT association design
 // (`docs/architecture/CODEX-INTEGRATION.md`): the pure reconciler plus its
 // discovery seam. `sync_codex_app_threads` (re-exported below) is called
-// from the reaper tick (`reap.rs`) and, for promptness, the Hyprland window
-// listener (`window.rs`); `codex_home` is re-exported separately for
+// from the reaper tick (`reap.rs`) and, for promptness, the desktop's window
+// listener (strillix's `hypr::listener`); `codex_home` is re-exported separately for
 // `reap.rs`'s own title refresh. Only `reconcile_codex_app_threads` itself
 // stays reachable from its own tests alone.
 mod codex_app;
@@ -129,7 +129,7 @@ pub use self::conduct::program_is_a_shell;
 pub use self::conduct::wrapped_harness;
 // The one refusal every automatic reader makes (the ping-back, the doorbell's PTY
 // arm, the A2A door's inject), so the three cannot drift.
-pub use self::conduct::{auto_type_refusal, AutoTypeRefusal};
+pub use self::conduct::{auto_type_refusal, proc_cwd, AutoTypeRefusal};
 // The screen episode's one clearing write (`question` and the `sudo` lock badge
 // together), shared by the session end, the reaper and the refresh writer.
 pub(crate) use self::model::clear_screen_ask;
@@ -302,18 +302,16 @@ pub use self::who::{glyph, session_roster};
 // (`node_list.rs`'s module doc) — `node status` (aoide-client) keeps the
 // deep per-node view.
 pub use self::node_list::node_list;
-pub use self::window::{focus_session, focus_window, focused_workspace, run_hypr_window_listener, FocusError};
-// `workspace set/clear/list` — the compositor workspace ↔ project binding
+pub use self::window::{
+    attach_window, clear_closed_window, pid_ancestry, session_window_attach,
+    sync_untracked_terminal_rows, windowless_by_lineage, Attach, TermWindow,
+};
+// `workspace set/clear/list/root` — the workspace ↔ project binding
 // (`graph/workspace.rs`'s own module doc). Bindings live on the project
-// (`Project.workspaces`), so a removed project takes its own with it; the
-// one compositor-shaped fact (`focused_workspace`) is re-exported above
-// beside the other window-adapter reads.
+// (`Project.workspaces`), so a removed project takes its own with it. Every
+// verb takes its workspace id; the desktop resolves a focused one.
 mod workspace;
 pub use self::workspace::{workspace_clear, workspace_list, workspace_root, workspace_set};
-// The one sentence an omitted `<workspace>` with no compositor to ask gets.
-// `pub`, because strillix's bridge resolves an omitted `workspaceaction`
-// workspace with the `focused_workspace` above and refuses with these words.
-pub use self::workspace::NO_COMPOSITOR;
 
 // Storage/time passthroughs root's `a2a.rs` / `commands/{a2a,usage}.rs` still
 // reach at `crate::graph::{load_stage, now_iso_utc, sessions_path,
@@ -335,9 +333,8 @@ pub(crate) use self::model::{hooks_path, STAGE_GRAPH_VERSION};
 pub(crate) use self::session_store::{
     lineage_of, owned_by_live_wraps, refresh_subagent_says, refresh_transcript_fields, superseded_by, upsert_hook,
 };
-pub(crate) use self::window::hyprctl_clients;
 pub(crate) use self::codex_app::codex_home;
-pub(crate) use self::codex_app::sync_codex_app_threads;
+pub use self::codex_app::sync_codex_app_threads;
 pub(crate) use self::eidolon::{sync_eidolon_sessions, DroppedEidolon};
 /// Widened from `pub(crate)` to `pub` at P-A1 of the binary-split
 /// workstream: `aoide-screen` (moved out of this crate) needs the same

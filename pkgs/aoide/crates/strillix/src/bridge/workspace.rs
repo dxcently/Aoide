@@ -3,7 +3,7 @@
 //! compositor adapter; the binding itself is `aoide workspace set|clear`, run through
 //! the core CLI.
 
-use aoide_conduct::graph::{focused_workspace, NO_COMPOSITOR};
+use crate::hypr::{focused_workspace, NO_COMPOSITOR};
 use aoide_conduct::shellbridge::{audit_bridge_action, outcome_triple, run_core_step, safe_action_value};
 use serde_json::{json, Value};
 

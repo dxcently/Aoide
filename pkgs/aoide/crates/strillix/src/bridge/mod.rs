@@ -80,7 +80,7 @@ pub enum BridgeCommand {
     /// `workspace` is the compositor's own workspace id, omitted to mean the
     /// FOCUSED one. Unlike a session or project action, one field is resolved
     /// here rather than left to the child: [`dispatch_workspace_action`] asks
-    /// the compositor adapter (`aoide_conduct::graph::focused_workspace`) and plans the RESOLVED
+    /// the compositor adapter (`crate::hypr::focused_workspace`) and plans the RESOLVED
     /// integer, because `workspace clear` takes an id and no wire caller can
     /// be expected to know the focused one. A host with no adapter is
     /// ANSWERED (`reason: "no-compositor"`), never dropped — the click is
@@ -217,7 +217,7 @@ pub(crate) fn serve_line(line: &str, reply: &mut Option<UnixStream>) -> Flow {
             return Flow::Answered;
         }
 
-        Some(BridgeCommand::Focus { address }) => match aoide_conduct::graph::focus_window(&address) {
+        Some(BridgeCommand::Focus { address }) => match crate::hypr::focus_window(&address) {
             Ok(()) => {
                 let _ = daemon::audit(
                     &daemon::default_audit_log(),
@@ -241,7 +241,7 @@ pub(crate) fn serve_line(line: &str, reply: &mut Option<UnixStream>) -> Flow {
         },
 
         Some(BridgeCommand::FocusSession { session_id }) => {
-            match aoide_conduct::graph::focus_session(&session_id) {
+            match crate::hypr::focus_session(&session_id) {
                 Ok(()) => {
                     let _ = daemon::audit(
                         &daemon::default_audit_log(),

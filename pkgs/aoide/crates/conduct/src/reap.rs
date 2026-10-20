@@ -9,22 +9,20 @@
 //!
 //! A third case sits outside both signals: a hook-only Claude Code (UUID)
 //! session that never picked up a `windowAddress`/`pid` mapping. Such a session
-//! carries neither the window nor the pid signal, so it used to be left `idle`
-//! forever (absence of evidence is never evidence of death — see
-//! [`is_session_dead`]). But an at-rest (`idle`/`stopped`) hook-only session
-//! whose last evidence of life is many hours stale is no longer "absence of
-//! evidence" — the staleness itself IS positive evidence of abandonment. The
+//! carries neither the window nor the pid signal, and absence of evidence is
+//! never evidence of death (see [`is_session_dead`]). An at-rest
+//! (`idle`/`stopped`) hook-only session whose last evidence of life is many
+//! hours stale has positive evidence against it: the staleness itself. The
 //! third signal reaps exactly that case, conservatively (see
 //! [`REAP_IDLE_STALE_SECS`]).
 //!
-//! Hardened against the two ghost classes a still-live window/pid used to
-//! shield forever:
+//! Two ghost classes that a live window or pid would otherwise shield forever:
 //!   * an AGENT killed inside its still-open terminal or parent session: the
-//!     recorded pid is the TERMINAL's (it outlives the agent), the window is
-//!     live — every old signal blind. The staleness evidence now also judges
-//!     agent records whose window/pid are live, discriminated by the
-//!     window-owner map: a live pid that is NOT its window's owner is the
-//!     agent's own process (the payload-pid seam) and vetoes the signal;
+//!     recorded pid is the TERMINAL's (it outlives the agent), and the window
+//!     is live. Liveness is pid-only, so a live pid of the record's own spares
+//!     the record until that pid exits. The terminal and the agent cannot be
+//!     told apart by pid alone, and a false reap of a live session is the
+//!     worse error;
 //!   * a HEADLESS record stuck mid-turn (`working`/`awaiting`) whose process
 //!     is gone: silence past a week-long band (see
 //!     [`REAP_WORKING_STALE_SECS`]) condemns it, while a live harness firing
@@ -67,8 +65,8 @@
 use aoide_protocol::Invocation;
 use aoide_protocol::agents::{agent_profile, AgentProfile, CLAUDE_PROFILE};
 use crate::graph::{
-    canonical_state, codex_home, drop_remote_child_rows, drop_sessions, harness_pid, hooks_path, hyprctl_clients,
-    ledger_session_exit, lineage_of, load_stage, normalize_addr, now_iso_utc, pingback, pingback_pull,
+    canonical_state, codex_home, drop_remote_child_rows, drop_sessions, harness_pid, hooks_path,
+    ledger_session_exit, lineage_of, load_stage, now_iso_utc, pingback, pingback_pull,
     prune_done_sparing, refresh_subagent_says, refresh_transcript_fields, restage_graph, sessions_path,
     stage_error, superseded_by, DroppedEidolon,
     sync_codex_app_threads, sync_eidolon_sessions, upsert_hook, write_stage, HookRecord, HooksFile,
@@ -146,79 +144,53 @@ pub const REAP_SUBAGENT_STALE_SECS: i64 = 2 * 3600; // 2 hours
 /// [`abandoned_spawned_shells`]'s `band` parameter for what waiving does).
 pub const REAP_SPAWNED_SHELL_STALE_SECS: i64 = 48 * 3600; // 48 hours (2 days)
 
-/// Is a session DEAD — orphaned so that NO process will ever clean it up? Pure
-/// and unit-tested (feed a fake live-address set + window-owner map, a fake
-/// `proc_exists`, and a fake `last_seen`).
+/// Is a session DEAD — orphaned so that NO process will ever clean it up? Pure and unit-tested
+/// (feed a fake `proc_exists` and a fake `last_seen`).
 ///
-/// DEAD when ANY of three signals fires:
-///   * **window gone** — a non-empty `windowAddress` that is NOT among the live
-///     `hyprctl clients -j` addresses (the SUPER+Q kill: the window vanished), OR
-///   * **process gone** — a recorded `pid` that no longer names a live process
-///     (the process-killed case), per the `kill(pid, 0)` probe `proc_exists`, OR
-///   * **stale abandonment** — every evidence stream (`last_seen` — the MAX of
-///     transcript mtime, hook `updatedAt`, and `startedAt`) has been silent
-///     past a state-dependent band, for a record staleness may judge:
-///       - **at rest** (`idle`/`stopped`), silent past
-///         [`REAP_IDLE_STALE_SECS`] (72h), OR
-///       - **mid-turn** (`working`/`awaiting`), silent past
-///         [`REAP_WORKING_STALE_SECS`] (7 days) — except a `subagent`-kind
-///         record, which judges mid-turn silence against
-///         [`REAP_SUBAGENT_STALE_SECS`] (2h) instead: it cannot legitimately
-///         outlive its parent's own Task-tool call, so it needs no week-long
-///         grace.
-///     Eligible records: a HEADLESS one (no window AND no pid — the classic
-///     hook-only shape; every `subagent` record is shaped this way) or an
-///     AGENT one ([`is_agent_kind`]). The agent arm is
-///     the hardening: an agent killed inside its still-open terminal/parent
-///     keeps a live window and a live TERMINAL pid forever, so only the
-///     silence of every evidence stream can condemn it. The kind gate keeps
-///     SHELLS out — a shell record's pid IS its terminal, so a live pid means
-///     the shell is alive and staleness must never overrule it. One veto on
-///     top: a live pid that is NOT its window's owning pid is the agent's OWN
-///     process (the payload-pid seam) — positive proof of life, governed by
-///     the pid signal alone.
-///   One more veto, orthogonal to all of the above: `rec.exempt` (task #20,
-///   `aoide session grant exempt on|off`) vetoes `stale_abandoned` alone —
-///   window-gone and pid-gone still fire on an exempt record, since only
-///   staleness can ever take a LIVE session and that is exactly what the
-///   exemption promises against.
+/// DEAD when ANY of two signals fires:
+///   * **process gone** — a recorded `pid` that no longer names a live process (the
+///     process-killed case), per the `kill(pid, 0)` probe `proc_exists`, OR
+///   * **stale abandonment** — every evidence stream (`last_seen` — the MAX of transcript mtime,
+///     hook `updatedAt`, and `startedAt`) has been silent past a state-dependent band, for a
+///     record staleness may judge:
+///       - **at rest** (`idle`/`stopped`), silent past [`REAP_IDLE_STALE_SECS`] (72h), OR
+///       - **mid-turn** (`working`/`awaiting`), silent past [`REAP_WORKING_STALE_SECS`] (7 days) —
+///         except a `subagent`-kind record, which judges mid-turn silence against
+///         [`REAP_SUBAGENT_STALE_SECS`] (2h) instead: it cannot legitimately outlive its parent's
+///         own Task-tool call, so it needs no week-long grace.
+///     Eligible records: a HEADLESS one (no window AND no pid — the classic hook-only shape; every
+///     `subagent` record is shaped this way) or an AGENT one ([`is_agent_kind`]). The kind gate
+///     keeps SHELLS out — a shell record's pid IS its terminal, so a live pid means the shell is
+///     alive and staleness must never overrule it. A live pid of the record's own vetoes the
+///     staleness arm: the record's terminal and its agent cannot be told apart by pid alone, so a
+///     live pid is taken as proof of life.
+///   A closed window is not a death signal here: the desktop clears the closed address, and the
+///   pid decides the record from there. One more veto, orthogonal to all of the above: `rec.exempt`
+///   (task #20, `aoide session grant exempt on|off`) vetoes `stale_abandoned` alone — pid-gone still
+///   fires on an exempt record, since only staleness can ever take a LIVE session and that is
+///   exactly what the exemption promises against.
 ///
 /// The never-false-reap guards:
-///   * `live_addresses` is an `Option`: `None` means the compositor could not be
-///     queried (no Hyprland, no request socket, or the read failed) — the window signal is then
-///     UNKNOWN and contributes nothing, so we never reap a windowed session we
-///     merely failed to see. Only a `Some(live)` we actually gathered can fire it.
-///   * Absence of evidence is never evidence of death, but STALENESS is
-///     evidence, not absence — `last_seen` returning `None` (no transcript, no
-///     parseable `startedAt`, no hook record) never counts as stale, so the
-///     guard holds. A just-started session has a recent `last_seen` and sits
-///     far under every band.
-///   * A false reap of a merely-quiet live session is recoverable: the hook
-///     door re-registers the record on the session's next event
-///     (`hook_ensure_session`), so the cost is a temporarily missing row,
-///     never a lost session.
+///   * Absence of evidence is never evidence of death, but STALENESS is evidence, not absence —
+///     `last_seen` returning `None` (no transcript, no parseable `startedAt`, no hook record)
+///     never counts as stale, so the guard holds. A just-started session has a recent `last_seen`
+///     and sits far under every band.
+///   * A false reap of a merely-quiet live session is recoverable: the hook door re-registers the
+///     record on the session's next event (`hook_ensure_session`), so the cost is a temporarily
+///     missing row, never a lost session.
 pub fn is_session_dead(
     rec: &SessionRecord,
-    live_addresses: Option<&HashSet<String>>,
-    window_owners: Option<&HashMap<String, u32>>,
     proc_exists: impl Fn(u32) -> bool,
     now_epoch: i64,
     last_seen: impl Fn(&SessionRecord) -> Option<i64>,
 ) -> bool {
     let pid_signal = matches!(rec.pid, Some(p) if !proc_exists(p));
-    // A live harness anchors its record: it is positive proof of life, so the
-    // window signal, the orphan arm and the staleness bands never judge it
-    // (see `harness_alive`). A dead pid of the record's own still counts.
-    if harness_alive(rec, window_owners, &proc_exists) {
+    // A live harness anchors its record: it is positive proof of life, so the orphan arm and the
+    // staleness bands never judge it (see `harness_alive`). A dead pid of the record's own still
+    // counts.
+    if harness_alive(rec, &proc_exists) {
         return pid_signal;
     }
-    let window_signal = match live_addresses {
-        Some(live) => {
-            !rec.window_address.is_empty()
-                && !live.contains(&normalize_addr(&rec.window_address))
-        }
-        None => false, // compositor not queried — window liveness is unknown.
-    };
     let state = canonical_state(&rec.state);
     let at_rest = matches!(state, "idle" | "stopped");
     let mid_turn = matches!(state, "working" | "awaiting");
@@ -227,21 +199,15 @@ pub fn is_session_dead(
             .map(|seen| now_epoch.saturating_sub(seen) > secs)
             .unwrap_or(false)
     };
-    // A LIVE pid that is NOT its window's owning pid is the agent's OWN process
-    // (the payload-pid seam) — positive proof of life: the pid signal alone
-    // governs that record and staleness must never fire over it. A pid equal to
-    // the window's owner is the TERMINAL's, which outlives the agent, so it
-    // cannot veto. No owner map (compositor unqueried) reads a live pid
-    // conservatively as the agent's own.
-    let live_agent_pid = rec.pid.is_some_and(|p| agent_alive(rec, window_owners, &proc_exists, p));
-    // WHO staleness may judge: a headless record (no window AND no pid — the
-    // classic hook-only shape) or an AGENT record (the hardened arm — see the
-    // doc above for why shells are excluded).
+    // A live pid of the record's own vetoes staleness (see the doc above).
+    let live_agent_pid = rec.pid.is_some_and(&proc_exists);
+    // WHO staleness may judge: a headless record (no window AND no pid — the classic hook-only
+    // shape) or an AGENT record (the hardened arm — see the doc above for why shells are excluded).
     let stale_eligible =
         (rec.window_address.is_empty() && rec.pid.is_none()) || is_agent_kind(rec);
-    // A subagent cannot legitimately outlive its parent's own Task-tool call
-    // (see REAP_SUBAGENT_STALE_SECS), so its mid-turn silence is judged
-    // against a far shorter band than the general working/awaiting case.
+    // A subagent cannot legitimately outlive its parent's own Task-tool call (see
+    // REAP_SUBAGENT_STALE_SECS), so its mid-turn silence is judged against a far shorter band than
+    // the general working/awaiting case.
     let working_band = if rec.kind.as_deref() == Some("subagent") {
         REAP_SUBAGENT_STALE_SECS
     } else {
@@ -252,113 +218,15 @@ pub fn is_session_dead(
         && !rec.exempt
         && ((at_rest && stale_beyond(REAP_IDLE_STALE_SECS))
             || (mid_turn && stale_beyond(working_band)));
-    window_signal || pid_signal || stale_abandoned
+    pid_signal || stale_abandoned
 }
 
-/// Is `pid` alive as the agent's own process, not as the terminal that owns the
-/// record's window (a terminal outlives its agent, so its pid never vouches)?
-/// No owner map reads a live pid as the agent's own.
-fn agent_alive(
-    rec: &SessionRecord,
-    window_owners: Option<&HashMap<String, u32>>,
-    proc_exists: &impl Fn(u32) -> bool,
-    pid: u32,
-) -> bool {
-    proc_exists(pid)
-        && !window_owners
-            .and_then(|m| m.get(&normalize_addr(&rec.window_address)).copied())
-            .is_some_and(|owner| owner == pid)
-}
-
-/// Is `rec`'s harness alive as an agent process? Only a stored hook chain
-/// names one: its first pid, the harness [`harness_pid`] reads. A record with
-/// no chain falls back to its own pid there, and that pid is the agent's own
-/// process, which the window signal has always judged (a window closed under
-/// a live pid is dead, SUPER+Q), so it is not spared here. Liveness alone
-/// decides it: a chain stores no start time, so a pid recycled by an unrelated
-/// live process holds the record until that process exits, the fail-safe side.
-fn harness_alive(
-    rec: &SessionRecord,
-    window_owners: Option<&HashMap<String, u32>>,
-    proc_exists: &impl Fn(u32) -> bool,
-) -> bool {
-    !rec.hook_ancestry.is_empty()
-        && harness_pid(rec).is_some_and(|h| agent_alive(rec, window_owners, proc_exists, h))
-}
-
-/// Gather the live windows from Hyprland's request socket (`j/clients`, the JSON
-/// `hyprctl clients -j` prints) — BOTH the normalised
-/// addresses (for the window-liveness signal and the transient-read grace)
-/// and each window's OWNING pid (for the staleness veto in
-/// [`is_session_dead`]: a record's pid equal to its window's owner is the
-/// TERMINAL's pid, which outlives the agent — the owners map is how that is
-/// told apart from an agent's self-reported pid). Returns `None` whenever the
-/// compositor cannot be consulted authoritatively (see
-/// [`crate::graph::hyprctl_clients`]). This is the seam that keeps the reaper
-/// safe off-Hyprland — it degrades to the pid signal instead of blindly
-/// reaping every windowed session it could not see.
-fn live_windows() -> Option<(HashSet<String>, HashMap<String, u32>)> {
-    let clients = hyprctl_clients()?;
-    let mut addrs = HashSet::new();
-    let mut owners = HashMap::new();
-    for c in &clients {
-        let Some(addr) = c.get("address").and_then(Value::as_str) else {
-            continue;
-        };
-        if addr.is_empty() {
-            continue;
-        }
-        let addr = normalize_addr(addr);
-        addrs.insert(addr.clone());
-        if let Some(pid) = c
-            .get("pid")
-            .and_then(Value::as_i64)
-            .and_then(|p| u32::try_from(p).ok())
-        {
-            owners.insert(addr, pid);
-        }
-    }
-    Some((addrs, owners))
-}
-
-/// The reaper's transient-read grace (pure, unit-tested). Given the set of live
-/// window addresses the compositor just reported and the current sessions,
-/// decide the window-liveness set this reap pass should actually trust.
-///
-/// During a reload/restart (a quickshell restart, `hyprctl reload`, a nixos
-/// switch) Hyprland's `j/clients` can momentarily answer with ZERO windows
-/// while the terminals are in fact alive — the compositor is mid-reload. Reaping
-/// the whole windowed roster off that snapshot is exactly the transient drop this
-/// fix targets, so an EMPTY gathered set against a roster that still holds
-/// windowed, not-`done` sessions is treated as degenerate and DOWNGRADED to
-/// `None` (pid-only liveness) for the pass — a vanished pid is still
-/// authoritative, so a genuinely-closed terminal (its owning pid gone too) is
-/// still reaped, while a live-but-momentarily-unlisted window is spared. A
-/// non-empty set, or an empty set with nothing windowed to protect, passes
-/// through unchanged.
-///
-/// Bounded edge (acceptable): a not-`done`, windowed, PID-LESS session whose
-/// terminal genuinely closed while the desktop is at zero windows carries neither
-/// a pid signal nor — under this downgrade — a window signal, so it is NOT reaped
-/// on that pass. It self-heals the moment ANY window exists (the snapshot is no
-/// longer empty, the stale address is then absent from a real set, and the window
-/// signal fires as normal). A lone stale record briefly lingering is the right
-/// trade for never mass-sweeping a live roster off a mid-reload read.
-pub(crate) fn effective_live_addresses(
-    gathered: Option<HashSet<String>>,
-    sessions: &[SessionRecord],
-) -> Option<HashSet<String>> {
-    match &gathered {
-        Some(set)
-            if set.is_empty()
-                && sessions
-                    .iter()
-                    .any(|s| s.state != "done" && !s.window_address.is_empty()) =>
-        {
-            None
-        }
-        _ => gathered,
-    }
+/// Is `rec`'s harness alive? Only a stored hook chain names one: its first pid, the harness
+/// [`harness_pid`] reads. A record with no chain holds nothing here, and the pid signal alone
+/// judges it. Liveness alone decides it: a chain stores no start time, so a pid recycled by an
+/// unrelated live process holds the record until that process exits, the fail-safe side.
+fn harness_alive(rec: &SessionRecord, proc_exists: &impl Fn(u32) -> bool) -> bool {
+    !rec.hook_ancestry.is_empty() && harness_pid(rec).is_some_and(proc_exists)
 }
 
 // ── Same-window agent dedup: retire a superseded / phantom re-registration ──
@@ -597,10 +465,8 @@ pub fn boot_epoch() -> Option<i64> {
 ///
 /// A reboot is a hard fact about the world: no process, no window address and
 /// no pty survives one. A record that has shown no sign of life since the
-/// machine came up therefore cannot be attached to anything running, and all
-/// three existing signals can miss it:
-///   * the window signal only fires when `hyprctl` answers, and a compositor
-///     that also restarted may not be up yet on the first passes;
+/// machine came up therefore cannot be attached to anything running, and both
+/// remaining signals can miss it:
 ///   * the pid signal reads a RECYCLED pid as alive — on a busy box (22 dead
 ///     `conduct-*` in eight minutes of use) a fresh process lands on the old
 ///     number and the pid reads live again, shielding the ghost forever;
@@ -1082,21 +948,9 @@ pub(crate) fn decay_stopped_sessions(
 /// `session reap` — the automatic liveness sweep. Marks every DEAD (killed,
 /// orphaned) session `done` (and its hook record), then reuses [`prune_done`] to
 /// drop them + clear orphaned parent links, re-staging `graph.json` atomically.
-/// Cheap: one compositor read + a stage read, and a stage WRITE only when
-/// something was actually reaped. NEVER errors non-zero on "nothing to reap" and
-/// NEVER on an unavailable compositor (it falls back to pid-only liveness).
+/// Cheap: one stage read, and a stage WRITE only when something was actually
+/// reaped. NEVER errors non-zero on "nothing to reap".
 ///
-/// The client list is gathered BEFORE the stage lock is taken, not inside it: it
-/// is a socket round trip (real wall-clock cost, bounded by its 2 s budget, so a
-/// stalled compositor cannot hang the reaper) that touches no stage file, so it needs
-/// none of the lock's atomicity — holding the lock across it would block
-/// every other stage writer (`send`, session-start/end, hook updates,
-/// …) for as long as it runs. The window-liveness signal is already treated
-/// as a best-effort, racy-by-nature snapshot throughout this module (see
-/// `effective_live_addresses`'s transient-read grace), so gathering it a
-/// moment before the lock rather than inside it changes nothing about
-/// correctness — only the sessions/hooks read-decide-write below needs the
-/// lock, and that still happens entirely inside it.
 pub fn reap(inv: &Invocation) -> Outcome {
     // The managed task wrapper's exit-report lane, run FIRST and outside the
     // stage lock `reap_inner` takes below: its trigger is a finished task
@@ -1114,13 +968,9 @@ pub fn reap(inv: &Invocation) -> Outcome {
             task_report.failed.len()
         );
     }
-    let (gathered_addrs, window_owners) = match live_windows() {
-        Some((addrs, owners)) => (Some(addrs), Some(owners)),
-        None => (None, None),
-    };
     let ((mut outcome, tunnel_candidates, gone_remote), retired_readers) =
         aoide_storage::fs::with_stage_lock(move || {
-            let reaped = reap_inner(inv, gathered_addrs, window_owners);
+            let reaped = reap_inner(inv);
             (reaped, retire_mail_readers())
         });
     if !retired_readers.is_empty() {
@@ -1497,11 +1347,7 @@ fn retire_mail_readers() -> Vec<(String, String)> {
 /// under the lock, never the trace itself): the record's own `cwd`/`log_path`
 /// are the honest hint for it, and the 1 MiB trace READ happens in `pingback`,
 /// outside this lock, exactly as it does for a sync drop.
-fn reap_inner(
-    inv: &Invocation,
-    gathered_addrs: Option<HashSet<String>>,
-    window_owners: Option<HashMap<String, u32>>,
-) -> (Outcome, Vec<aoide_storage::tunnel::TunnelRecord>, Vec<DroppedEidolon>) {
+fn reap_inner(inv: &Invocation) -> (Outcome, Vec<aoide_storage::tunnel::TunnelRecord>, Vec<DroppedEidolon>) {
     let cmd = "session.reap";
     let mut s_file: SessionsFile = match load_stage(&sessions_path()) {
         Ok(f) => f,
@@ -1529,11 +1375,6 @@ fn reap_inner(
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0);
 
-    let hyprctl_available = gathered_addrs.is_some();
-    // Apply the transient-read grace: a degenerate empty snapshot during a reload
-    // window falls back to pid-only liveness so we never sweep the live roster off
-    // a momentary "zero windows" answer.
-    let live = effective_live_addresses(gathered_addrs, &s_file.sessions);
     // This session's hook record's `updatedAt` — the exact timestamp
     // `decay_stopped_sessions` below reads for the `stopped` clock, mirrored
     // here as evidence for the third signal too: a foreign-harness/headless
@@ -1578,14 +1419,7 @@ fn reap_inner(
         .sessions
         .iter()
         .filter(|s| s.state != "done")
-        .filter(|s| is_session_dead(
-            s,
-            live.as_ref(),
-            window_owners.as_ref(),
-            proc_exists,
-            now_epoch,
-            last_seen,
-        ))
+        .filter(|s| is_session_dead(s, proc_exists, now_epoch, last_seen))
         .map(|s| s.session_id.clone())
         .collect();
 
@@ -1627,7 +1461,7 @@ fn reap_inner(
     // Same settle grace as the dedup above, so an infant awaiting its own
     // parent link is never judged.
     // A record whose live harness anchors it is spared (see `harness_alive`).
-    let spared = |s: &SessionRecord| harness_alive(s, window_owners.as_ref(), &proc_exists);
+    let spared = |s: &SessionRecord| harness_alive(s, &proc_exists);
     for id in orphaned_subagents(&s_file.sessions, is_recent, spared) {
         if !reaped.contains(&id) {
             reaped.push(id);
@@ -1808,7 +1642,6 @@ fn reap_inner(
                 "supersededDone": [],
                 "orphanSockets": [],
                 "orphanTunnels": [],
-                "hyprctlAvailable": hyprctl_available,
                 "spared": spared,
             })),
             Vec::new(),
@@ -2001,7 +1834,6 @@ fn reap_inner(
             "supersededDone": superseded_done,
             "orphanSockets": orphan_sockets,
             "orphanTunnels": Vec::<String>::new(),
-            "hyprctlAvailable": hyprctl_available,
             "spared": spared,
         }));
     let gone_remote: Vec<DroppedEidolon> = remote_before
@@ -2180,8 +2012,8 @@ mod tests {
     }
 
     /// A hook-only agent under a live harness, with every other signal against
-    /// it: its window is gone from the compositor, its last evidence of life is
-    /// a century old, and its parent left the roster. The harness is `555`.
+    /// it: its last evidence of life is a century old, and its parent left the
+    /// roster. The harness is `555`.
     fn anchored_by(harness_alive: bool) -> (SessionRecord, impl Fn(u32) -> bool) {
         let mut rec = hook_only("anchored", "idle");
         rec.window_address = "0xdead".into();
@@ -2190,19 +2022,18 @@ mod tests {
         (rec, move |p| harness_alive && p == 555)
     }
 
-    /// A live harness is positive proof of life: the window signal, the
-    /// staleness band and the orphan arm never judge its record, and the
+    /// A live harness is positive proof of life: the staleness band and the
+    /// orphan arm never judge its record, and the
     /// same record with the harness gone is judged as ever.
     #[test]
     fn a_live_harness_spares_its_record_from_window_staleness_and_orphan_signals() {
         let (rec, alive) = anchored_by(true);
         let now = 4_000_000_000;
         let ancient = |_: &SessionRecord| Some(0);
-        let no_live = HashSet::new();
-        assert!(!is_session_dead(&rec, Some(&no_live), None, &alive, now, ancient));
+        assert!(!is_session_dead(&rec, &alive, now, ancient));
         let (rec, dead) = anchored_by(false);
-        assert!(is_session_dead(&rec, Some(&no_live), None, &dead, now, ancient));
-        let spared = |s: &SessionRecord| harness_alive(s, None, &alive);
+        assert!(is_session_dead(&rec, &dead, now, ancient));
+        let spared = |s: &SessionRecord| harness_alive(s, &alive);
         let mut hook_only_rec = rec.clone();
         hook_only_rec.window_address.clear();
         assert!(orphaned_subagents(std::slice::from_ref(&hook_only_rec), |_| false, spared).is_empty());
@@ -2219,20 +2050,7 @@ mod tests {
     fn a_dead_pid_of_the_record_is_still_dead_under_a_live_harness() {
         let (mut rec, alive) = anchored_by(true);
         rec.pid = Some(42);
-        assert!(is_session_dead(&rec, None, None, &alive, 0, |_| None));
-    }
-
-    /// A terminal's pid is not the agent's harness: it owns the window and
-    /// outlives the agent, so it cannot veto the window signal (the same rule
-    /// the pid veto applies).
-    #[test]
-    fn a_terminal_that_owns_the_window_is_not_a_live_harness() {
-        let (mut rec, _) = anchored_by(true);
-        rec.hook_ancestry = vec![600];
-        let owners: HashMap<String, u32> = [(normalize_addr("0xdead"), 600)].into();
-        let alive = |p: u32| p == 600;
-        let no_live = HashSet::new();
-        assert!(is_session_dead(&rec, Some(&no_live), Some(&owners), &alive, 0, |_| None));
+        assert!(is_session_dead(&rec, &alive, 0, |_| None));
     }
 
     #[test]
@@ -2243,23 +2061,9 @@ mod tests {
         // window nor pid signal can fire), so wire up dummies.
         let now = 1_800_000_000_i64;
         let stale = |_: &SessionRecord| Some(now - 100 * 3600);
-        assert!(is_session_dead(
-            &hook_only("orphan-idle", "idle"),
-            None,
-            None,
-            |_| true,
-            now,
-            stale,
-        ));
+        assert!(is_session_dead(&hook_only("orphan-idle", "idle"), |_| true, now, stale));
         // `stopped` is equally "at rest" and equally reapable once stale.
-        assert!(is_session_dead(
-            &hook_only("orphan-stopped", "stopped"),
-            None,
-            None,
-            |_| true,
-            now,
-            stale,
-        ));
+        assert!(is_session_dead(&hook_only("orphan-stopped", "stopped"), |_| true, now, stale));
     }
 
     #[test]
@@ -2269,14 +2073,7 @@ mod tests {
         // be swept.
         let now = 1_800_000_000_i64;
         let one_hour_ago = |_: &SessionRecord| Some(now - 3600);
-        assert!(!is_session_dead(
-            &hook_only("fresh", "idle"),
-            None,
-            None,
-            |_| true,
-            now,
-            one_hour_ago,
-        ));
+        assert!(!is_session_dead(&hook_only("fresh", "idle"), |_| true, now, one_hour_ago));
     }
 
     #[test]
@@ -2288,31 +2085,10 @@ mod tests {
         let now = 1_800_000_000_i64;
         let hundred_hours = |_: &SessionRecord| Some(now - 100 * 3600);
         let two_hundred_hours = |_: &SessionRecord| Some(now - 200 * 3600);
-        assert!(!is_session_dead(
-            &hook_only("busy", "working"),
-            None,
-            None,
-            |_| true,
-            now,
-            hundred_hours,
-        ));
-        assert!(is_session_dead(
-            &hook_only("busy", "working"),
-            None,
-            None,
-            |_| true,
-            now,
-            two_hundred_hours,
-        ));
+        assert!(!is_session_dead(&hook_only("busy", "working"), |_| true, now, hundred_hours));
+        assert!(is_session_dead(&hook_only("busy", "working"), |_| true, now, two_hundred_hours));
         // `awaiting` is equally mid-turn.
-        assert!(is_session_dead(
-            &hook_only("asking", "awaiting"),
-            None,
-            None,
-            |_| true,
-            now,
-            two_hundred_hours,
-        ));
+        assert!(is_session_dead(&hook_only("asking", "awaiting"), |_| true, now, two_hundred_hours));
     }
 
     #[test]
@@ -2327,43 +2103,15 @@ mod tests {
         let eleven_hours = |_: &SessionRecord| Some(now - 11 * 3600);
 
         // 30m of silence: comfortably inside a real multi-tool subagent turn.
-        assert!(!is_session_dead(
-            &subagent("busy-sub", "working"),
-            None,
-            None,
-            |_| true,
-            now,
-            thirty_minutes,
-        ));
+        assert!(!is_session_dead(&subagent("busy-sub", "working"), |_| true, now, thirty_minutes));
         // 3h: past the 2h subagent band (though still nowhere near the 7-day
         // general one) — silence that long is abandonment for a subagent.
-        assert!(is_session_dead(
-            &subagent("busy-sub", "working"),
-            None,
-            None,
-            |_| true,
-            now,
-            three_hours,
-        ));
+        assert!(is_session_dead(&subagent("busy-sub", "working"), |_| true, now, three_hours));
         // `awaiting` is equally mid-turn for a subagent.
-        assert!(is_session_dead(
-            &subagent("asking-sub", "awaiting"),
-            None,
-            None,
-            |_| true,
-            now,
-            three_hours,
-        ));
+        assert!(is_session_dead(&subagent("asking-sub", "awaiting"), |_| true, now, three_hours));
         // The actual 11h-stale shape of the two live ghosts that motivated
         // this constant is caught, well past the 2h band.
-        assert!(is_session_dead(
-            &subagent("ghost-sub", "working"),
-            None,
-            None,
-            |_| true,
-            now,
-            eleven_hours,
-        ));
+        assert!(is_session_dead(&subagent("ghost-sub", "working"), |_| true, now, eleven_hours));
     }
 
     // ── exempt (task #20): vetoes `stale_abandoned` alone, in every band —
@@ -2378,36 +2126,23 @@ mod tests {
         let mut idle = hook_only("shielded-idle", "idle");
         idle.exempt = true;
         assert!(
-            !is_session_dead(&idle, None, None, |_| true, now, hundred_hours),
+            !is_session_dead(&idle, |_| true, now, hundred_hours),
             "the at-rest band must not condemn an exempt record"
         );
 
         let mut working = hook_only("shielded-working", "working");
         working.exempt = true;
         assert!(
-            !is_session_dead(&working, None, None, |_| true, now, two_hundred_hours),
+            !is_session_dead(&working, |_| true, now, two_hundred_hours),
             "the mid-turn band must not condemn an exempt record"
         );
 
         let mut sub = subagent("shielded-sub", "working");
         sub.exempt = true;
         assert!(
-            !is_session_dead(&sub, None, None, |_| true, now, hundred_hours),
+            !is_session_dead(&sub, |_| true, now, hundred_hours),
             "the subagent band must not condemn an exempt record either"
         );
-    }
-
-    #[test]
-    fn exempt_record_is_still_reaped_by_the_window_gone_signal() {
-        // Staleness is the only signal class the exemption vetoes -- a
-        // vanished window is positive proof the session is gone, and the
-        // exemption never promises otherwise.
-        let now = 1_800_000_000_i64;
-        let fresh = |_: &SessionRecord| Some(now); // no staleness in play at all
-        let mut rec = agent("shielded", "0xAAA", "2026-07-30T00:00:00Z");
-        rec.exempt = true;
-        let live: HashSet<String> = HashSet::new(); // the window is NOT among the live set
-        assert!(is_session_dead(&rec, Some(&live), None, |_| true, now, fresh));
     }
 
     #[test]
@@ -2417,7 +2152,7 @@ mod tests {
         let mut rec = hook_only("shielded-pid", "working");
         rec.exempt = true;
         rec.pid = Some(42);
-        assert!(is_session_dead(&rec, None, None, |_| false, now, fresh)); // pid 42 gone
+        assert!(is_session_dead(&rec, |_| false, now, fresh)); // pid 42 gone
     }
 
     #[test]
@@ -2429,14 +2164,7 @@ mod tests {
         // 3h is past the subagent band but nowhere near the week-long one.
         let now = 1_800_000_000_i64;
         let three_hours = |_: &SessionRecord| Some(now - 3 * 3600);
-        assert!(!is_session_dead(
-            &hook_only("busy-headless", "working"),
-            None,
-            None,
-            |_| true,
-            now,
-            three_hours,
-        ));
+        assert!(!is_session_dead(&hook_only("busy-headless", "working"), |_| true, now, three_hours));
     }
 
     #[test]
@@ -2466,7 +2194,7 @@ mod tests {
             .flatten()
             .max()
         };
-        assert!(!is_session_dead(&rec, None, None, |_| true, now, last_seen));
+        assert!(!is_session_dead(&rec, |_| true, now, last_seen));
     }
 
     /// THE BLOCKER regression, end-to-end through `reap()`: a headless session
@@ -2478,8 +2206,7 @@ mod tests {
     fn reap_spares_a_headless_session_kept_alive_by_a_fresh_hook_updated_at() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _env =
-            crate::graph::testutil::EnvVars::save(&["AOIDE_STAGE_DIR", "HYPRLAND_INSTANCE_SIGNATURE"]);
-        std::env::remove_var("HYPRLAND_INSTANCE_SIGNATURE"); // pid-only/no-window liveness
+            crate::graph::testutil::EnvVars::save(&["AOIDE_STAGE_DIR"]);
         let stage = crate::graph::testutil::unique_stage("reap-hookfold");
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
         let _xdg = crate::graph::testutil::isolated_xdg_runtime("reap-hookfold-xdg");
@@ -2533,8 +2260,7 @@ mod tests {
     fn reap_drops_orphaned_hook_records_with_no_session() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _env =
-            crate::graph::testutil::EnvVars::save(&["AOIDE_STAGE_DIR", "HYPRLAND_INSTANCE_SIGNATURE"]);
-        std::env::remove_var("HYPRLAND_INSTANCE_SIGNATURE"); // pid-only/no-window liveness
+            crate::graph::testutil::EnvVars::save(&["AOIDE_STAGE_DIR"]);
         let stage = crate::graph::testutil::unique_stage("reap-orphan-hooks");
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
         let _xdg = crate::graph::testutil::isolated_xdg_runtime("reap-orphan-hooks-xdg");
@@ -2591,27 +2317,16 @@ mod tests {
     }
 
     #[test]
-    fn windowed_agent_at_rest_with_stale_evidence_is_reaped() {
-        // THE hardened corpse: an agent killed inside its still-open terminal —
-        // live window, live TERMINAL-owner pid, yet every evidence stream 100h
-        // stale. Before the hardening, the live pid + live window shielded this
-        // record from every signal forever; the staleness bands now condemn it.
+    fn a_live_terminal_pid_spares_a_stale_agent_until_that_pid_goes() {
+        // Pid-only liveness: the record's pid is the terminal hosting the agent. While that pid
+        // lives, stale evidence never reaps the record, and the pid's exit does.
         let now = 1_800_000_000_i64;
         let stale = |_: &SessionRecord| Some(now - 100 * 3600);
         let mut rec = agent("ghost", "0xAAA", "2026-07-30T00:00:00Z");
         rec.state = "idle".into();
-        rec.pid = Some(42); // the terminal's pid — alive
-        let live: HashSet<String> = ["aaa"].iter().map(|s| s.to_string()).collect();
-        let mut owners: HashMap<String, u32> = HashMap::new();
-        owners.insert("aaa".into(), 42); // the window belongs to pid 42
-        assert!(is_session_dead(
-            &rec,
-            Some(&live),
-            Some(&owners),
-            |_| true,
-            now,
-            stale,
-        ));
+        rec.pid = Some(42);
+        assert!(!is_session_dead(&rec, |_| true, now, stale));
+        assert!(is_session_dead(&rec, |_| false, now, stale));
     }
 
     #[test]
@@ -2625,26 +2340,11 @@ mod tests {
         let mut rec = agent("p9", "0xAAA", "2026-07-30T00:00:00Z");
         rec.state = "idle".into();
         rec.pid = Some(999); // the agent's own pid — alive
-        let live: HashSet<String> = ["aaa"].iter().map(|s| s.to_string()).collect();
-        let mut owners: HashMap<String, u32> = HashMap::new();
-        owners.insert("aaa".into(), 42); // the window belongs to the terminal
-        assert!(!is_session_dead(
-            &rec,
-            Some(&live),
-            Some(&owners),
-            |_| true, // pid 999 alive
-            now,
-            stale,
-        ));
+        assert!(!is_session_dead(&rec, |_| true, // pid 999 alive
+            now, stale));
         // Its death is caught by the pid signal, exactly as before.
-        assert!(is_session_dead(
-            &rec,
-            Some(&live),
-            Some(&owners),
-            |p| p != 999, // pid 999 gone
-            now,
-            stale,
-        ));
+        assert!(is_session_dead(&rec, |p| p != 999, // pid 999 gone
+            now, stale));
     }
 
     #[test]
@@ -2658,17 +2358,7 @@ mod tests {
         shell.kind = Some("shell".into());
         shell.state = "idle".into();
         shell.pid = Some(42);
-        let live: HashSet<String> = ["aaa"].iter().map(|s| s.to_string()).collect();
-        let mut owners: HashMap<String, u32> = HashMap::new();
-        owners.insert("aaa".into(), 42);
-        assert!(!is_session_dead(
-            &shell,
-            Some(&live),
-            Some(&owners),
-            |_| true,
-            now,
-            stale,
-        ));
+        assert!(!is_session_dead(&shell, |_| true, now, stale));
     }
 
     #[test]
@@ -2679,7 +2369,7 @@ mod tests {
         let fresh = |_: &SessionRecord| Some(now);
         let mut rec = hook_only("pid-dead", "working");
         rec.pid = Some(42);
-        assert!(is_session_dead(&rec, None, None, |_| false, now, fresh));
+        assert!(is_session_dead(&rec, |_| false, now, fresh));
     }
 
     /// A hosted claude in window `win`, its chain the only fact a test varies.
@@ -2982,10 +2672,8 @@ mod tests {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _env = crate::graph::testutil::EnvVars::save(&[
             "AOIDE_STAGE_DIR",
-            "HYPRLAND_INSTANCE_SIGNATURE",
             "HOME",
         ]);
-        std::env::remove_var("HYPRLAND_INSTANCE_SIGNATURE"); // pid-only/no-window liveness
         let stage = crate::graph::testutil::unique_stage("reap-refresh");
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
         let _xdg = crate::graph::testutil::isolated_xdg_runtime("reap-refresh-xdg");
@@ -3046,10 +2734,8 @@ mod tests {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _env = crate::graph::testutil::EnvVars::save(&[
             "AOIDE_STAGE_DIR",
-            "HYPRLAND_INSTANCE_SIGNATURE",
             "XDG_RUNTIME_DIR",
         ]);
-        std::env::remove_var("HYPRLAND_INSTANCE_SIGNATURE"); // pid-only/no-window liveness
         let stage = crate::graph::testutil::unique_stage("reap-superseded-done");
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
         // Isolate from any real presence root: this pass must stay quiet
@@ -3172,9 +2858,7 @@ mod tests {
         let _env = crate::graph::testutil::EnvVars::save(&[
             "AOIDE_STAGE_DIR",
             "AOIDE_STATE_DIR",
-            "HYPRLAND_INSTANCE_SIGNATURE",
         ]);
-        std::env::remove_var("HYPRLAND_INSTANCE_SIGNATURE"); // pid-only/no-window liveness
         let stage = crate::graph::testutil::unique_stage("reap-ledger");
         let state = stage.join("state");
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
@@ -3218,9 +2902,7 @@ mod tests {
             "AOIDE_STAGE_DIR",
             "AOIDE_STATE_DIR",
             "AOIDE_AUDIT_LOG",
-            "HYPRLAND_INSTANCE_SIGNATURE",
         ]);
-        std::env::remove_var("HYPRLAND_INSTANCE_SIGNATURE");
         let stage = crate::graph::testutil::unique_stage("reap-retire-readers");
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
         std::env::set_var("AOIDE_STATE_DIR", stage.join("state"));
@@ -3310,9 +2992,7 @@ mod tests {
         let _env = crate::graph::testutil::EnvVars::save(&[
             "AOIDE_STAGE_DIR",
             "AOIDE_STATE_DIR",
-            "HYPRLAND_INSTANCE_SIGNATURE",
         ]);
-        std::env::remove_var("HYPRLAND_INSTANCE_SIGNATURE");
         let stage = crate::graph::testutil::unique_stage("reap-retire-lock");
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
         std::env::set_var("AOIDE_STATE_DIR", stage.join("state"));
@@ -3353,9 +3033,7 @@ mod tests {
         let _env = crate::graph::testutil::EnvVars::save(&[
             "AOIDE_STAGE_DIR",
             "AOIDE_STATE_DIR",
-            "HYPRLAND_INSTANCE_SIGNATURE",
         ]);
-        std::env::remove_var("HYPRLAND_INSTANCE_SIGNATURE");
         let stage = crate::graph::testutil::unique_stage("reap-remote-exit");
         let state = stage.join("state");
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
@@ -3958,9 +3636,7 @@ mod tests {
         let _env = crate::graph::testutil::EnvVars::save(&[
             "AOIDE_STAGE_DIR",
             "AOIDE_STATE_DIR",
-            "HYPRLAND_INSTANCE_SIGNATURE",
         ]);
-        std::env::remove_var("HYPRLAND_INSTANCE_SIGNATURE"); // pid-only/no-window liveness
         let stage = crate::graph::testutil::unique_stage("reap-spawned-shell-stale");
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
         std::env::set_var("AOIDE_STATE_DIR", stage.join("state"));
@@ -4001,9 +3677,7 @@ mod tests {
         let _env = crate::graph::testutil::EnvVars::save(&[
             "AOIDE_STAGE_DIR",
             "AOIDE_STATE_DIR",
-            "HYPRLAND_INSTANCE_SIGNATURE",
         ]);
-        std::env::remove_var("HYPRLAND_INSTANCE_SIGNATURE");
         let stage = crate::graph::testutil::unique_stage("reap-done-clears-screen");
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
         std::env::set_var("AOIDE_STATE_DIR", stage.join("state"));
@@ -4103,9 +3777,7 @@ mod tests {
         let _env = crate::graph::testutil::EnvVars::save(&[
             "AOIDE_STAGE_DIR",
             "AOIDE_STATE_DIR",
-            "HYPRLAND_INSTANCE_SIGNATURE",
         ]);
-        std::env::remove_var("HYPRLAND_INSTANCE_SIGNATURE");
         let stage = crate::graph::testutil::unique_stage("reap-spawned-shell-fresh");
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
         std::env::set_var("AOIDE_STATE_DIR", stage.join("state"));
@@ -4146,9 +3818,7 @@ mod tests {
         let _env = crate::graph::testutil::EnvVars::save(&[
             "AOIDE_STAGE_DIR",
             "AOIDE_STATE_DIR",
-            "HYPRLAND_INSTANCE_SIGNATURE",
         ]);
-        std::env::remove_var("HYPRLAND_INSTANCE_SIGNATURE");
         let stage = crate::graph::testutil::unique_stage("reap-spawned-shell-now");
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
         std::env::set_var("AOIDE_STATE_DIR", stage.join("state"));
@@ -4565,9 +4235,7 @@ mod tests {
         let _env = crate::graph::testutil::EnvVars::save(&[
             "AOIDE_STAGE_DIR",
             "XDG_RUNTIME_DIR",
-            "HYPRLAND_INSTANCE_SIGNATURE",
         ]);
-        std::env::remove_var("HYPRLAND_INSTANCE_SIGNATURE"); // pid-only/no-window liveness
         let stage = crate::graph::testutil::unique_stage("reap-done-tunnel-stage");
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
         let runtime = crate::graph::testutil::unique_stage("reap-done-tunnel-runtime");
@@ -4682,10 +4350,8 @@ mod tests {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _env = crate::graph::testutil::EnvVars::save(&[
             "AOIDE_STAGE_DIR",
-            "HYPRLAND_INSTANCE_SIGNATURE",
             "XDG_RUNTIME_DIR",
         ]);
-        std::env::remove_var("HYPRLAND_INSTANCE_SIGNATURE");
         let stage = crate::graph::testutil::unique_stage("reap-held-superseded");
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
         let _xdg = crate::graph::testutil::isolated_xdg_runtime("reap-held-superseded-xdg");
@@ -4740,10 +4406,8 @@ mod tests {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _env = crate::graph::testutil::EnvVars::save(&[
             "AOIDE_STAGE_DIR",
-            "HYPRLAND_INSTANCE_SIGNATURE",
             "XDG_RUNTIME_DIR",
         ]);
-        std::env::remove_var("HYPRLAND_INSTANCE_SIGNATURE");
         let stage = crate::graph::testutil::unique_stage("reap-live-wrap-owns");
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
         let _xdg = crate::graph::testutil::isolated_xdg_runtime("reap-live-wrap-owns-xdg");
@@ -4812,8 +4476,7 @@ mod tests {
     fn reap_spares_an_orphan_hook_whose_death_the_tick_has_not_said() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _env =
-            crate::graph::testutil::EnvVars::save(&["AOIDE_STAGE_DIR", "HYPRLAND_INSTANCE_SIGNATURE", "XDG_RUNTIME_DIR"]);
-        std::env::remove_var("HYPRLAND_INSTANCE_SIGNATURE");
+            crate::graph::testutil::EnvVars::save(&["AOIDE_STAGE_DIR", "XDG_RUNTIME_DIR"]);
         let stage = crate::graph::testutil::unique_stage("reap-held-orphan");
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
         let _xdg = crate::graph::testutil::isolated_xdg_runtime("reap-held-orphan-xdg");

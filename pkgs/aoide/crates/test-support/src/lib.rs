@@ -527,7 +527,7 @@ pub fn env_lock() -> &'static std::sync::Mutex<()> {
 /// "no adapter" path is what runs there), so a Windows twin would have to
 /// build a real `.exe` to fake a program the host never launches. The callers
 /// below are the `activeworkspace` and dispatch seams; the client list has its
-/// own fake, `fake_hypr_socket`, in conduct's `graph::testutil`.
+/// own fake, `fake_hypr_socket`, in strillix's `hypr::testutil`.
 #[cfg(unix)]
 pub fn fake_hyprctl(tag: &str) -> (EnvSaver, PathBuf) {
     use std::os::unix::fs::PermissionsExt;

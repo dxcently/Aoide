@@ -296,8 +296,9 @@ mod tests {
         );
         // …but `session reap --help` keeps the full prose.
         let full = parse(&argv(&["session", "reap", "--help"]), Door::Cli).unwrap_err();
+        let prose = full.message.split_whitespace().collect::<Vec<_>>().join(" ");
         assert!(
-            full.message.contains("pid-only liveness"),
+            prose.contains("pid-only liveness"),
             "per-command --help keeps the full prose: {}",
             full.message
         );

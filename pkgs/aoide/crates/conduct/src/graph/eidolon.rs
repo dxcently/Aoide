@@ -272,8 +272,8 @@ fn is_conduct_owned(rec: &SessionRecord) -> bool {
 /// petname) is only ever READ here, never written.
 ///
 /// `windowAddress`/`workspace` are left at their `Default` (empty/absent) on
-/// every insert and never touched on upsert — the existing
-/// `resolve_pending_session_windows` sweep fills them from the same
+/// every insert and never touched on upsert — the desktop's
+/// window sweep fills them from the same
 /// ancestry, because the record carries a pid and an empty address.
 pub(crate) fn reconcile_eidolon_sessions(
     mut sessions: Vec<SessionRecord>,

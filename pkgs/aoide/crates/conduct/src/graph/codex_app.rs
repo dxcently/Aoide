@@ -189,8 +189,8 @@ pub(crate) enum ScanFailure {
 /// window address; that dedup would otherwise retire N−1 of them) and
 /// `is_session_dead`'s staleness arm (a shared app-server pid must never
 /// stand as proof any one thread is alive). `windowAddress`/`workspace` are
-/// left empty here by design — the existing `resolve_pending_session_windows`
-/// sweep fills them later; this function has no compositor access and must
+/// left empty here by design — the desktop's window sweep
+/// fills them later; this function has no compositor access and must
 /// not invent one.
 pub(crate) fn reconcile_codex_app_threads(
     mut sessions: Vec<SessionRecord>,
@@ -354,8 +354,7 @@ pub(crate) fn lock_is_held(path: &Path) -> Option<bool> {
 }
 
 /// The whole system's process table, `ps -axo pid=,ppid=,command=` — the
-/// SAME argv shape on Linux and BSD/macOS (precedent and shape:
-/// [`super::window::hyprctl_clients`]'s shell-out). Callers must gate this
+/// SAME argv shape on Linux and BSD/macOS. Callers must gate this
 /// behind "at least one lock came back held" (see [`codex_app_threads`]) so
 /// a box with no desktop app installed forks nothing.
 #[cfg(unix)]
@@ -990,7 +989,7 @@ fn apply_codex_merges(
 /// probes, the `ps` shell-out, the rollout walk for a genuinely new id, and
 /// now each live thread's bounded rollout tail) stays OUTSIDE the stage
 /// lock either way, unchanged from before.
-pub(crate) fn sync_codex_app_threads() -> bool {
+pub fn sync_codex_app_threads() -> bool {
     let known: BTreeMap<String, String> = load_stage::<SessionsFile>(&sessions_path())
         .map(|f| {
             f.sessions
@@ -1196,7 +1195,7 @@ mod tests {
             "kind:\"app\" must never read as an agent for dedup"
         );
         assert!(
-            !crate::reap::is_session_dead(rec, None, None, |_| true, 0, |_| None),
+            !crate::reap::is_session_dead(rec, |_| true, 0, |_| None),
             "a live holder pid must never let staleness condemn an app record"
         );
     }

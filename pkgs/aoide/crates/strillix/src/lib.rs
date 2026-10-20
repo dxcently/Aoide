@@ -12,6 +12,7 @@ pub mod commands;
 pub mod daemon;
 pub mod dispatch;
 pub mod guide;
+pub mod hypr;
 pub mod output;
 pub mod registry;
 pub mod xdg;

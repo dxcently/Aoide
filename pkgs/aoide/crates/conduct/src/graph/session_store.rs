@@ -221,6 +221,21 @@ pub(in crate::graph) fn chain_is_stale(
             .any(|&p| !rec.hook_ancestry.contains(&p) && u32::try_from(p).is_ok_and(&alive))
 }
 
+/// May a per-turn hook give `rec` the chain `chain`? A stored chain is replaced only once it goes
+/// stale ([`chain_is_stale`]). A chainless record takes the chain unless a live process of its own
+/// holds it outside the chain: the window bind that once carried the chain to such records is the
+/// desktop's now, so the hook itself must deliver it, or the sweep can never place the window.
+pub(in crate::graph) fn chain_is_takeable(
+    rec: &SessionRecord,
+    chain: &[i32],
+    alive: impl Fn(u32) -> bool,
+) -> bool {
+    if rec.hook_ancestry.is_empty() {
+        return !lives_apart(rec, chain, None, &alive);
+    }
+    chain_is_stale(rec, chain, alive)
+}
+
 /// The refusal of a door that cannot approve changing the parent of a session
 /// that already exists to `parent`, or `None` when nothing would change or the
 /// door may. The parent is what the send gate's parent and sibling rules read
@@ -952,7 +967,7 @@ pub(in crate::graph) fn clear_stale_parent(id: &str) {
 /// unconditionally right after `do_session_start` whenever `--headless` was
 /// given, regardless of whether window discovery or the log-file open below
 /// succeed. Distinct from "`windowAddress` happens to be empty right now":
-/// `window::windowless_by_lineage`/`resolve_pending_session_windows` key off
+/// `window::windowless_by_lineage` and the desktop's window sweep key off
 /// THIS field first, so a headless wrap's windowlessness (and its whole
 /// hook-child subtree's) survives even if something upstream still manages
 /// to stamp a stray window onto the record. Change-only (a no-op once
@@ -2419,7 +2434,7 @@ mod tests {
     use crate::graph::manage::{project_add, view};
     // The reaper moved to `crate::reap`; its tests still live here (they
     // lean on session-lifecycle fixtures/helpers this module owns).
-    use crate::reap::{effective_live_addresses, is_session_dead, reap};
+    use crate::reap::{is_session_dead, reap};
 
     #[test]
     fn do_subagent_spawn_mints_a_petname_on_create() {
@@ -3870,7 +3885,6 @@ mod tests {
     }
     #[test]
     fn is_session_dead_combines_signals_and_never_false_reaps() {
-        let live: HashSet<String> = ["aaa", "bbb"].iter().map(|s| s.to_string()).collect();
         let alive = |_p: u32| true; // /proc/<pid> exists
         let dead_proc = |_p: u32| false; // /proc/<pid> is gone
         let rec = |window: &str, pid: Option<u32>| SessionRecord {
@@ -3878,98 +3892,30 @@ mod tests {
             pid,
             ..Default::default()
         };
-        // These assertions are about the window/pid signals only; pin the third
+        // These assertions are about the pid signal only; pin the third
         // (stale hook-only) signal off by reporting "just seen right now" for
         // every record, regardless of state.
         let now = 0_i64;
         let fresh = |_: &SessionRecord| Some(now);
 
-        // Window-gone (the SUPER+Q kill): a non-empty window absent from the live
-        // set is dead even when the pid is alive. The match is 0x/case-tolerant.
-        assert!(is_session_dead(
-            &rec("0xCCC", None),
-            Some(&live),
-            None,
-            alive,
-            now,
-            fresh
-        ));
-        assert!(is_session_dead(
-            &rec("0xCCC", Some(9)),
-            Some(&live),
-            None,
-            alive,
-            now,
-            fresh
-        ));
-        // A live window (normalised match) with a live pid → NOT dead.
-        assert!(!is_session_dead(
-            &rec("0xAAA", Some(9)),
-            Some(&live),
-            None,
-            alive,
-            now,
-            fresh
-        ));
-
-        // Process-gone: a pid whose /proc vanished is dead regardless of window
-        // (here the window IS live, so ONLY the pid signal fires).
-        assert!(is_session_dead(
-            &rec("0xAAA", Some(9)),
-            Some(&live),
-            None,
-            dead_proc,
-            now,
-            fresh
-        ));
-
-        // NEVER-FALSE-REAP #1 — neither signal (no window, no pid), and the third
-        // signal reports "just seen": left alone.
-        assert!(!is_session_dead(
-            &rec("", None),
-            Some(&live),
-            None,
-            dead_proc,
-            now,
-            fresh
-        ));
-
-        // NEVER-FALSE-REAP #2 — compositor NOT queried (None): the window signal
-        // is suppressed, so a windowed session we could not SEE is never reaped;
-        // only the authoritative pid signal remains.
-        assert!(!is_session_dead(
-            &rec("0xCCC", None),
-            None,
-            None,
-            alive,
-            now,
-            fresh
-        ));
-        assert!(!is_session_dead(
-            &rec("0xCCC", Some(9)),
-            None,
-            None,
-            alive,
-            now,
-            fresh
-        )); // pid alive → alive
-        assert!(is_session_dead(
-            &rec("0xCCC", Some(9)),
-            None,
-            None,
-            dead_proc,
-            now,
-            fresh
-        )); // pid gone → dead
+        // The window is not a signal: a window the compositor lost changes nothing, and a
+        // record with a live pid is alive whatever its window says.
+        assert!(!is_session_dead(&rec("0xCCC", None), alive, now, fresh));
+        assert!(!is_session_dead(&rec("0xCCC", Some(9)), alive, now, fresh));
+        assert!(!is_session_dead(&rec("0xAAA", Some(9)), alive, now, fresh));
+        // Process-gone: a pid whose /proc vanished is dead, whatever the window says.
+        assert!(is_session_dead(&rec("0xAAA", Some(9)), dead_proc, now, fresh));
+        assert!(is_session_dead(&rec("0xCCC", Some(9)), dead_proc, now, fresh));
+        // Neither signal and fresh evidence: left alone.
+        assert!(!is_session_dead(&rec("", None), dead_proc, now, fresh));
     }
     #[test]
     fn reap_drops_killed_sessions_but_spares_the_living() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _env = EnvVars::save(&["AOIDE_STAGE_DIR", "HYPRLAND_INSTANCE_SIGNATURE"]);
+        let _env = EnvVars::save(&["AOIDE_STAGE_DIR"]);
         // Force pid-only liveness: with no compositor the window signal is
         // suppressed, so the reap decision rests purely on /proc/<pid> — fully
         // deterministic in a test (no hyprctl, no real windows).
-        std::env::remove_var("HYPRLAND_INSTANCE_SIGNATURE");
         let stage = unique_stage("reap");
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
         let _xdg = isolated_xdg_runtime("reap-killed-vs-living-xdg");
@@ -4022,7 +3968,6 @@ mod tests {
         assert_eq!(out.status, aoide_protocol::output::Status::Ok);
         let data = out.data.unwrap();
         assert_eq!(data["reaped"], json!(["killed"]));
-        assert_eq!(data["hyprctlAvailable"], json!(false)); // pid-only fallback
 
         // The killed session AND its hook are gone; live + hook-only survive.
         let s2: SessionsFile = load_stage(&sessions_path()).unwrap();
@@ -4053,8 +3998,7 @@ mod tests {
     #[test]
     fn reap_cascades_an_orphaned_subagent_when_its_top_level_parent_is_reaped() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _env = EnvVars::save(&["AOIDE_STAGE_DIR", "HYPRLAND_INSTANCE_SIGNATURE"]);
-        std::env::remove_var("HYPRLAND_INSTANCE_SIGNATURE"); // pid-only liveness
+        let _env = EnvVars::save(&["AOIDE_STAGE_DIR"]);
         let stage = unique_stage("reap-subagent-cascade");
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
         let _xdg = isolated_xdg_runtime("reap-subagent-cascade-xdg");
@@ -4112,8 +4056,7 @@ mod tests {
         // reload/restart window — must survive the sweep. (hooks.json is left
         // absent, so the session is maximally hook-silent.)
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _env = EnvVars::save(&["AOIDE_STAGE_DIR", "HYPRLAND_INSTANCE_SIGNATURE"]);
-        std::env::remove_var("HYPRLAND_INSTANCE_SIGNATURE"); // pid-only liveness
+        let _env = EnvVars::save(&["AOIDE_STAGE_DIR"]);
         let stage = unique_stage("reap-hooksilent");
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
         let _xdg = isolated_xdg_runtime("reap-hooksilent-xdg");
@@ -4150,42 +4093,6 @@ mod tests {
 
         let _ = std::fs::remove_dir_all(&stage);
     }
-    #[test]
-    fn reaper_grace_ignores_a_degenerate_empty_clients_snapshot() {
-        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        // A momentary empty `hyprctl clients` read during a reload window must not
-        // mass-reap the windowed roster: the grace downgrades it to pid-only.
-        let windowed = vec![SessionRecord {
-            window_address: "0xabc".into(),
-            state: "running".into(),
-            ..Default::default()
-        }];
-        // Empty gathered set + a windowed live session → degrade to None (pid-only).
-        assert!(effective_live_addresses(Some(HashSet::new()), &windowed).is_none());
-
-        // A NON-empty set is trusted as gathered (the normal path).
-        let set: HashSet<String> = ["0xabc".to_string()].into_iter().collect();
-        assert_eq!(
-            effective_live_addresses(Some(set.clone()), &windowed),
-            Some(set)
-        );
-
-        // Empty set but nothing windowed to protect (a genuinely empty desktop, or
-        // an all-`done` roster) → the empty set passes through; pid signal governs.
-        let done_only = vec![SessionRecord {
-            window_address: "0xabc".into(),
-            state: "done".into(),
-            ..Default::default()
-        }];
-        assert_eq!(
-            effective_live_addresses(Some(HashSet::new()), &done_only),
-            Some(HashSet::new())
-        );
-
-        // No compositor at all stays None (unchanged).
-        assert!(effective_live_addresses(None, &windowed).is_none());
-    }
-
     #[test]
     fn stamp_resumed_from_lands_the_field_and_renders_a_resumed_edge() {
         // P-D8: the mechanical half of "resurrect mints a new id with
@@ -4662,7 +4569,6 @@ mod hosted_death_tests {
         let _env = crate::graph::testutil::EnvVars::save(&[
             "AOIDE_STAGE_DIR",
             "AOIDE_SESSION_ID",
-            "HYPRLAND_INSTANCE_SIGNATURE",
             "XDG_RUNTIME_DIR",
         ]);
         let stage = crate::graph::testutil::unique_stage(tag);
@@ -4671,7 +4577,6 @@ mod hosted_death_tests {
         // point it at the stage, never at the real registry of the box.
         std::env::set_var("XDG_RUNTIME_DIR", &stage);
         std::env::remove_var("AOIDE_SESSION_ID");
-        std::env::remove_var("HYPRLAND_INSTANCE_SIGNATURE");
         let at = "2026-10-07T10:00:00Z";
         let mut spawner = crate::graph::testutil::session("P", "/p", "working", at, None);
         spawner.conductable = Some(true);
@@ -4700,8 +4605,6 @@ mod hosted_death_tests {
     /// terminal, the window owner above a shell ends the walk with no harness.
     fn my_chain() -> Vec<i32> {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _env = crate::graph::testutil::EnvVars::save(&["HYPRLAND_INSTANCE_SIGNATURE"]);
-        std::env::remove_var("HYPRLAND_INSTANCE_SIGNATURE");
         crate::graph::window::hook_chain(std::process::id() as i32).expect("the test process has a harness above it")
     }
 
@@ -4916,13 +4819,11 @@ mod hosted_death_tests {
         let _env = crate::graph::testutil::EnvVars::save(&[
             "AOIDE_STAGE_DIR",
             "AOIDE_SESSION_ID",
-            "HYPRLAND_INSTANCE_SIGNATURE",
             "XDG_RUNTIME_DIR",
         ]);
         let stage = crate::graph::testutil::unique_stage(tag);
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
         std::env::set_var("XDG_RUNTIME_DIR", &stage);
-        std::env::remove_var("HYPRLAND_INSTANCE_SIGNATURE");
         let at = &now_iso_utc();
         let orchestrator = |id: &str| {
             let mut s = crate::graph::testutil::session(id, "/p", "working", at, None);
@@ -5877,8 +5778,6 @@ mod live_sealed_wrap_guards {
     fn a_reaped_spawner_keeps_a_protected_survivors_edge_and_clears_a_plain_childs() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let (_env, kp, stage) = seal_world("live-wrap-reap-edge");
-        let _hypr = EnvVars::save(&["HYPRLAND_INSTANCE_SIGNATURE"]);
-        std::env::remove_var("HYPRLAND_INSTANCE_SIGNATURE");
         std::fs::create_dir_all(stage.join("aoide")).unwrap();
         std::env::set_var("AOIDE_DAEMON_SOCKET", stage.join("no-such-aoided.sock"));
 

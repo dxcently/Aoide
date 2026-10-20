@@ -414,10 +414,9 @@ fn classify_recheck(exited_ok: bool, stdout: &str, stderr: &str) -> Result<Strin
 /// not inferred — this runs on a detached thread with no tty, so
 /// `reap::with_human_gesture`'s own probe would read it as the timer.
 ///
-/// Runs on a DETACHED thread. `session reap` reads Hyprland's request socket
-/// (`j/clients`) for window liveness; that is normally instant, but a hung compositor query
-/// must never tie up this connection's own thread waiting on it (§3b's
-/// thread-per-connection accept loop keeps a stuck query from starving anyone
+/// Runs on a DETACHED thread. `session reap` judges liveness by pid alone, and a
+/// slow reap must never tie up this connection's own thread (§3b's
+/// thread-per-connection accept loop keeps a stuck pass from starving anyone
 /// else, but there is still no reason to hold it). So this SPAWNS and returns
 /// immediately — the same no-block posture [`dispatch_usage_refresh`] takes —
 /// and the thread collects the child and audits the outcome via
@@ -1512,14 +1511,6 @@ pub fn run(verbs: &'static [Verb]) -> serde_json::Value {
         &format!("shellbridge online; listening on {}", sock.display()),
     );
 
-    // Spawn the Hyprland window→session event listener on a background thread:
-    // it is the AUTHORITATIVE, creation-time source of each session's
-    // `windowAddress` (concepts/Terminal-Commander), keeping the widget's
-    // click-to-jump reliable instead of depending on the lazy hook-time backfill.
-    // It runs concurrently with — and can never block or kill — the accept loop,
-    // and degrades to a no-op off-Hyprland (logs once, returns).
-    std::thread::spawn(crate::graph::run_hypr_window_listener);
-
     // Serve forever. `serve` never returns and never panics on client input.
     serve(&listener, verbs);
 
@@ -1797,8 +1788,8 @@ fn handle_conn(stream: UnixStream, verbs: &'static [Verb]) {
 
             // Fire-and-forget, same posture: dispatch_recheck_sessions re-execs
             // `aoide session reap` on a detached thread and audits its own outcome
-            // (the sweep shells out to hyprctl, which must never block the accept
-            // loop). The gadgets refresh off the resulting stage writes.
+            // (a pass that must never block the accept loop). The gadgets refresh off
+            // the resulting stage writes.
             Some(BridgeCommand::RecheckSessions) => dispatch_recheck_sessions(),
 
             // The ledger writes are inline: they are a read-modify-write of one

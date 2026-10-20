@@ -525,26 +525,19 @@ mod tests {
     }
 
     #[test]
-    fn a_wrap_the_compositor_has_lost_is_condemned_by_liveness_and_spared_by_its_seal() {
-        // The reaper's own composition (`reap_inner`): `is_session_dead` names the
-        // record, and `live_sealed_wrap_ids` removes it from the reap set.
+    fn a_wrap_whose_window_is_lost_lives_and_dies_by_its_pid_and_seal() {
+        // The reaper's own composition (`reap_inner`): liveness is the pid alone, so a window the
+        // compositor lost changes nothing, a live sealed pid keeps the wrap out of the reap set,
+        // and its exit condemns it.
         let kp = identity::mint_ephemeral().unwrap();
         let me = std::process::id() as i32;
         let mut wrap = sealed_record("wrap", me, None, &kp);
         wrap.conductable = Some(true);
         wrap.window_address = "0xGONE".into();
-        let live: HashSet<String> = HashSet::new();
-        let owners = std::collections::HashMap::new();
 
-        assert!(crate::reap::is_session_dead(
-            &wrap,
-            Some(&live),
-            Some(&owners),
-            |_| true,
-            1_800_000_000,
-            |_| None,
-        ));
-        assert!(live_sealed_wrap_ids(&[wrap]).contains("wrap"));
+        assert!(!crate::reap::is_session_dead(&wrap, |_| true, 1_800_000_000, |_| None));
+        assert!(live_sealed_wrap_ids(&[wrap.clone()]).contains("wrap"));
+        assert!(crate::reap::is_session_dead(&wrap, |_| false, 1_800_000_000, |_| None));
     }
 
     // ── verify_seal_over ──────────────────────────────────────────────────

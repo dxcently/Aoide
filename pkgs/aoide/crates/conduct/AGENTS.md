@@ -344,10 +344,9 @@ in the message.
   sites.** `SessionRecord.workspaceProject` (additive, `skip_serializing_if`)
   is written only by `graph/model.rs::observe_workspace` — the same seam
   `SessionRecord.workspace` is written through — and every site that observes
-  a workspace calls it: `window.rs::ensure_session_window` (the lazy
-  hook-time backfill), the event-driven `resolve_pending_session_windows`
-  sweep (both its pending-resolution and its move branches) and
-  `reconcile_untracked_terminals` (the synthetic `win:` record a bare tty
+  a workspace calls it: `window.rs::attach_window` (the desktop's
+  `session window attach --workspace`) and `reconcile_untracked_terminals`
+  (both its upsert and its move branches) (the synthetic `win:` record a bare tty
   gets — a terminal on a bound workspace joins the project exactly as an
   agent's session does, so that publisher builds its record with
   `workspace: None` and lets the seam do the observation). A NEW adapter
@@ -452,9 +451,8 @@ in the message.
 
 - **No path may synthesize a per-thread window address.** A Codex-app
   record's `windowAddress` is the window owning the process that holds that
-  thread's writer lock, stamped ONLY by the existing
-  `resolve_pending_session_windows` sweep — the one window resolver in this
-  crate. `reconcile_codex_app_threads` itself never touches
+  thread's writer lock, stamped ONLY by the desktop's window sweep, through
+  `session window attach` — core resolves no window. `reconcile_codex_app_threads` itself never touches
   `windowAddress`/`workspace`; N threads of one app therefore share one
   address by construction, and focusing any of them raises the app, which
   is the only thing the app lets anyone do.
@@ -670,9 +668,8 @@ in the message.
   `aoide_storage::petname::mint_for` exactly once per NEW presence id, the
   same insert-only timing `reconcile_codex_app_threads` holds; a rescan of
   an unchanged presence must never re-mint one, and `windowAddress`/
-  `workspace` are left empty here for the existing
-  `resolve_pending_session_windows` sweep to fill — this module has no
-  compositor access either.
+  `workspace` are left empty here for the desktop's window sweep to fill — this
+  module reads no compositor either.
 
 - **A record whose presence stops being observed is dropped only on an
   `Observed` pass, never on `Unknown` — identical to the Codex ruling
@@ -1279,9 +1276,9 @@ in the message.
   the harness away whole, with `harness-anchored` as its reason and the session
   and harness pid in its message, and skips a per-turn hook's attested-parent
   re-stamp. A per-turn hook from outside is not refused: it still sets the
-  phase. It binds a window the record lacks only where no live harness outside
-  its chain anchors the record (`ensure_session_window`, under
-  `live_harness_outside`); the bind moves no chain, parent or fact.
+  phase. It fills or heals the record's chain only where no live harness outside
+  its chain anchors the record (`ensure_session_chain`, through
+  `ancestry_may_move`); the write moves no parent or fact.
   `session start` with a `--window` or `--parent` that would change the stored
   value, and `graph link` that would re-parent the record, are refused by
   `anchored_start_refusal` and `manage::link` with `harness-anchored`, unless
@@ -1292,7 +1289,7 @@ in the message.
   no `sessions.json` state, no ledger exit, subagent cascade, tunnel close or
   check-lane baseline forget). The outcome begins `refused:` and carries
   `reason: harness-anchored`. `session_phase` sends a `done` phase to
-  `do_session_end`, so the phase door is no way round the caller test. The reaper spares a record whose stored chain names a live harness (`reap::harness_alive`): the window signal, the orphan arm and the staleness bands skip it, and only the pid signal of the record's own pid still judges it. A pid-only record is not spared, since its window signal is the SUPER+Q case. A
+  `do_session_end`, so the phase door is no way round the caller test. The reaper spares a record whose stored chain names a live harness (`reap::harness_alive`): the orphan arm and the staleness bands skip it, and only the pid signal of the record's own pid still judges it. When that pid is the terminal hosting the agent, a stale agent lives until the terminal closes: that is the accepted cost of pid-only liveness. A
   session that has ended (`state` `done`: its own `SessionEnd`, `/clear` and
   resume included), a dead harness, or a hook that runs under the harness
   releases the anchor, which is what lets `claude --resume` in another terminal
@@ -1636,34 +1633,29 @@ in the message.
   pid-ancestry-walk it to a window (task #89).**
   It is NOT enough to gate the backfill call sites alone — a
   headless wrap's OWN record needs the same protection its descendants get,
-  or the whole mechanism re-poisons on a live compositor. Two parts, both
+  or the whole mechanism re-poisons on a live compositor. The parts, each
   required:
-  - **The discovery gate.** `graph/conduct.rs::session_conduct` must never
-    call window discovery for a `--headless` registration in the first
-    place — gated on `!headless`, right where the winsize/headless branch
-    already lives. `setsid()` detaches the tty/session-leader relationship,
-    not the OS parent-child (`/proc` ppid) one, so an unconditional
-    discovery call on a headless wrap resolves straight through to its
-    ENCLOSING terminal's window, the failure this rule exists to stop. The same call
-    site stamps the permanent `headless: bool` marker via
-    `session_store::stamp_headless` (change-only, written once, never
-    cleared) right after registration.
-  - **The listener self-check.** `window::windowless_by_lineage` checks a
+  - **The registration gate.** Registration (`graph/conduct.rs::session_conduct`)
+    never reads a window, so a `--headless` wrap has nothing to discover. The
+    permanent `headless: bool` marker is still written there, through
+    `session_store::stamp_headless` (change-only, written once, never cleared),
+    right after registration.
+  - **The chain and sweep gates.** `window::windowless_by_lineage` checks a
     session's OWN record FIRST (via `is_windowless_wrap`: `conductable` and
-    (`headless` OR its own `windowAddress` empty)) before ever walking its
-    parent chain — so the wrap's own record is caught by the same function
-    that catches its descendants, not by a bolted-on second mechanism. Every
-    backfill site routes through this one function: `resolve_pending_session_windows`
-    (the shellbridge event listener), `graph/window.rs::ensure_session_window`,
-    the five `ensure_session_window` call sites in `graph/send.rs`, and the
-    two `discover_window_from` call sites in `graph/send.rs`'s hook Start
-    handling (`hook_for_profile_gated`, `hook_ensure_session_with`). Miss the
-    discovery gate, the self-check, OR any one of these sites, and a nested
-    `conduct --headless`/`spawn`
-    re-acquires the ENCLOSING terminal's window — which is exactly what made
+    (`headless` OR its own `windowAddress` empty)) before walking its parent
+    chain, so the wrap's own record is caught by the same function that catches
+    its descendants. Two callers route through it: `ensure_session_chain`, which
+    returns early, and the desktop's sweep (strillix `hypr/sweep.rs`), which skips
+    the record. Miss either, and a nested `conduct --headless`/`spawn` picks up a
+    chain the sweep can bind to the ENCLOSING terminal's window. That is what made
     the same-window eviction (below) treat an agent and its own headless
-    grandchild as stale twins, and (via `reap`'s dedup pass, next bullet)
-    then retire one of them.
+    grandchild as stale twins.
+  - **Open: `session window attach` does not re-check lineage.** The verb trusts
+    its caller, and its one automated caller, the desktop's sweep, applies the gate
+    above first. A core-side check cannot reuse `is_windowless_wrap` as it stands,
+    because that predicate also marks an unwindowed conducted wrap, which the
+    desktop must still be able to bind after registration. The rule for that case
+    is undecided.
   - `headless` deliberately overrides a stray non-empty `windowAddress`:
     it is a PERMANENT self-reported registration fact, not a live re-check,
     so a bug elsewhere that stamps a window onto a headless wrap's record
@@ -1686,22 +1678,27 @@ in the message.
   `reap`'s dedup pass (`superseded_agent_duplicates`) call that ONE rule, so
   they cannot disagree. Do not reintroduce a window-only test in either
   pass: a live sibling sharing the window would be retired.
-- **Window discovery walks the process it is given and yields a window, never
-  a pid.** `window::discover_window_from(pid)` walks `pid`'s own ancestry to
-  the nearest client and returns the address and workspace. The hook door
-  passes the HOOK process: this process on the CLI arm, the `SO_PEERCRED` pid
-  on the daemon arm. It never walks `std::process::id()` (daemon-side that is
-  `aoided`, whose ancestry is systemd's). Discovery never stamps the owning
-  app's pid on a session. A window's owner is the app, not the session's
-  process, and a stamped owner pid made every subprocess of the app attest as
-  that record. The window sweep (`resolve_pending_session_windows`) and
-  `ensure_session_window(id, hook_pid)` follow the same rule, and
-  `ensure_session_window` does nothing without an attested door pid. Only
-  conduct's own discovery (`discover_window_address`) walks its own pid, and
-  conduct IS the process in the terminal. A self-reported `pid` that owns a Hyprland client is refused by `send.rs::vouched_payload_pid`: a payload may name its harness, never the app that owns the window.
-- **A pid-less hosted session binds only through a live chain.**
-  `window::window_for_hook_chain` walks a record's stored `hookAncestry`: the
-  nearest chain pid that owns a client is the owner, and the record binds while any process of its own chain, a tab shell included, stands beneath that owner (`window_for_hook_chain` tests `pid_ancestry(p).contains(owner)` for each chain pid below the owner). A dead chain binds nothing (a dead pid's ancestry is itself), and a reused pid outside the owner's tree binds nothing. The sweep never writes a pid for such a record. A chain with no live process beneath the owner is replaced by the next per-turn hook from its live harness (`hookAncestry` above), and then binds, given a compositor to discover the window.
+- **A window is a fact the desktop reports, never one core discovers.** Core
+  reads no compositor. The desktop's sweep (strillix `hypr/sweep.rs`) places a
+  session's window and writes it through `aoide session window attach`, the one
+  core verb that records a window. It fills an empty window, moves the workspace
+  when the same window reports again, and refuses a second window while the first
+  is held (`Attach::Held`). Core never stamps an owner's pid on a session: a
+  window's owner is the app, not the session's process, and a stamped owner pid
+  made every subprocess of the app attest as that record. A self-reported `pid` is
+  vouched only when it is one of the hook's own ancestors
+  (`send.rs::vouched_payload_pid`), so a payload may name its harness and never the
+  app that owns the window.
+- **A pid-less hosted session binds only through a live chain, and the desktop
+  makes that walk.** The desktop's sweep (strillix `hypr/sweep.rs`,
+  `window_for_hook_chain`) walks a record's stored `hookAncestry`: the nearest
+  chain pid that owns a client is the owner, and the record binds while any
+  process of its own chain, a tab shell included, stands beneath that owner. A
+  dead chain binds nothing (a dead pid's ancestry is itself), and a reused pid
+  outside the owner's tree binds nothing. Core never performs this walk and never
+  writes a pid for such a record. A chain with no live process beneath the owner is
+  replaced by the next per-turn hook from its live harness (`ensure_session_chain`),
+  and then binds at the desktop's next sweep.
 - **`RestoreSnapshot.idle` is captured as its OWN field, never inferred
   from `state` (P-C5).** `reap.rs`'s sweep assigns `s.state = "done"`
   BEFORE calling `ledger_session_exit` — by the time the ledger line is
@@ -2002,7 +1999,7 @@ in the message.
   (`spawned_shell_shape` is the one shared shape both
   `abandoned_spawned_shells` and `spared_exempt_spawned_shells` read, so a
   record can never be both reaped and reported spared, or neither). It
-  vetoes staleness ONLY: window-gone, pid-gone, pre-boot ghosts, superseded
+  vetoes staleness ONLY: pid-gone, pre-boot ghosts, superseded
   duplicates, orphaned subagents, and done-sibling tombstones all still fire
   on an exempt record, because those are positive-evidence signals, not
   staleness — the exemption's whole promise is "never take a LIVE session,"
@@ -2029,59 +2026,53 @@ in the message.
   time "to simplify" — the whole point is the operator finds out BEFORE the
   undying set is relied on, not after a later resurrect silently restores
   nothing.
-- **`hookAncestry` is the chain of the latest registration, bind or heal, starts at
+- **`hookAncestry` is the chain of the latest registration or heal, starts at
   the hook's harness, and moves only where `session_store::ancestry_may_move` allows.**
   `window::hook_chain` walks up from the hook's parent past every process whose
   argv[0] basename is a shell or a forwarding launcher (`conduct`'s
   `is_invocation_plumbing`, reading the lists `SHELL_BASENAMES` and
   `FORWARDING_LAUNCHERS` in `conduct.rs`) and takes the first other process as the
-  harness. A process that owns a compositor client ends the walk with no harness, and
-  so does the end of the chain: the door then moves no chain and binds no window. An
-  unreadable pid counts as plumbing. It lands
-  in the same locked write as three events: the registration
-  (`do_hook_session_start`, except on a protected live wrap, whose start
-  writes nothing), a first window bind (`ensure_session_window`), and
-  a per-turn heal (`ensure_session_window` again, through
-  `session_store::chain_is_stale`). Registration is a SessionStart, or the first
-  hook event of an unknown id, so a resumed harness that runs in a new process
-  gets a current chain. `ancestry_may_move` refuses only while the record's
-  session is live and its own pid or its harness (`harness_pid`: the first
-  stored pid, else the pid) is alive outside the new chain, on the registration
-  and the window bind alike, so two live processes under one session id do not
-  trade the chain: the holder keeps it until it exits. Those two processes are
-  the only anchors, because a chain-wide liveness test would hold a stale chain
-  for as long as any process of it lives (a shell outlives its harness). The
-  chain is the hook door's kernel fact, never a payload claim, and attestation
-  never reads it (`attested_record` reads only sealed pids).
-  The heal (`chain_is_stale`) is stricter than registration. It fires only on a
-  dead→live transition: the record has a stored chain and no pid of its own (its
-  pid or a stored chain pid) is alive outside the hook's chain (`lives_apart`), and
-  the hook's chain holds a live harness the stored one lacks. Both chains start at
-  the harness, so no shell layer is counted: the heal reads the same way under a
+  harness. The walk reads process ancestry only, so a process that owns a window
+  is an ordinary process to it. An unreadable pid counts as plumbing, and no
+  harness above the hook means the door moves no chain. The chain lands in one
+  locked write on three events: the registration (`do_hook_session_start`, except
+  on a protected live wrap, whose start writes nothing), a per-turn hook that finds
+  the record chainless (`ensure_session_chain`, through
+  `session_store::chain_is_takeable`), and a per-turn hook that heals a stale chain
+  (the same call). Registration is a SessionStart, or the first hook event of an
+  unknown id, so a resumed harness that runs in a new process gets a current chain.
+  `ancestry_may_move` refuses only while the record's session is live and its own
+  pid or its harness (`harness_pid`: the first stored pid, else the pid) is alive
+  outside the new chain, on the registration and the fill alike, so two live
+  processes under one session id do not trade the chain: the holder keeps it until
+  it exits. Those two processes are the only anchors, because a chain-wide liveness
+  test would hold a stale chain for as long as any process of it lives (a shell
+  outlives its harness). The chain is the hook door's kernel fact, never a payload
+  claim, and attestation never reads it (`attested_record` reads only sealed pids).
+  The fill and heal are stricter than registration. A chainless record takes the
+  chain unless a live process of its own holds it outside the hook's chain
+  (`lives_apart`). A stored chain is healed only on a dead-to-live transition: the
+  record holds no live pid of its own outside the hook's chain, and the hook's chain
+  holds a live harness the stored one lacks (`chain_is_stale`). Both chains start at
+  the harness, so no shell layer is counted: the walk reads the same way under a
   direct child, a compound `sh -c`, an exec-in-place `sh -c` and a capture pipeline
   (`window.rs`'s `a_direct_child_hook_finds_its_harness_at_once`,
   `a_hook_under_a_compound_sh_c_finds_its_harness_past_the_shell`,
   `a_hook_under_an_exec_in_place_sh_c_finds_its_harness` and
   `a_capture_pipeline_hook_finds_its_harness_past_the_pipeline_shell` pin the four).
-  The heal runs with or without a compositor; only the bind needs one. A bound turn
-  whose stored chain is live walks without the compositor and asks it nothing:
-  `ensure_session_window` reads `j/clients` only once a bind or a heal is wanted
-  (`a_bound_turn_with_a_live_stored_chain_never_asks_the_compositor`). The owner check runs
-  before the plumbing verdict: a hook whose walk meets a window owner before any harness has
-  no harness, a shell owner included, and binds nothing. With no client list (`hyprctl_clients`
-  is `None`: off Hyprland, or an unreadable request socket) no owner check runs
-  (`a_hand_run_hook_under_a_window_owner_binds_nothing`,
-  `a_shell_that_owns_a_window_ends_the_walk_with_no_harness`). Two residuals. A hand-run
-  hook under an `aoide conduct` wrap or a multiplexer server takes that process as its
-  harness and binds the window it sits under, since the plumbing list names shells and
+  A bound turn whose stored chain is live is left alone: one read of `sessions.json`
+  and one ancestry walk, and no compositor is asked anything
+  (`a_bound_turn_with_a_live_stored_chain_is_left_alone`).
+  Two residuals. A hand-run hook under an `aoide conduct` wrap or a multiplexer server
+  takes that process as its harness, since the plumbing list names shells and
   forwarding launchers only. A hook behind `timeout`, `script`, `nix`, `su`, `doas` or
-  `sudo` takes that launcher as its harness and binds the same window, and its stored chain
-  heals once per turn, since each turn's launcher is a new pid (`program_is_a_shell` reads
-  those names, the plumbing list does not). Making the wrap or the server plumbing is a new
-  entry in `conduct.rs`'s lists, which changes the verdict every reader of
+  `sudo` takes that launcher as its harness, and its stored chain heals once per turn,
+  since each turn's launcher is a new pid (`program_is_a_shell` reads those names, the
+  plumbing list does not). Making the wrap or the server plumbing is a new entry in
+  `conduct.rs`'s lists, which changes the verdict every reader of
   `is_invocation_plumbing` gets. Adding `timeout` to `FORWARDING_LAUNCHERS` is not a
-  one-line change: its duration is positional, and `program_is_a_shell`'s `timeout` arm
-  exists so a bare number is not read as an option. The window owner
+  one-line change: its duration is positional, and `program_is_a_shell`'s `timeout`
+  arm exists so a bare number is not read as an option. The shared far ancestors
   and systemd stay alive while any sibling runs, so their liveness is not
   evidence of the record's own process. Its consequence: a live stored chain is
   never rewritten by a per-turn hook, and no write happens per turn. Two readers

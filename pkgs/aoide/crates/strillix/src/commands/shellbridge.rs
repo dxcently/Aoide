@@ -7,6 +7,10 @@ use aoide_protocol::registry::{cmd, flag, Registry};
 use aoide_protocol::Invocation;
 
 fn handle_shellbridge(_inv: &Invocation) -> Outcome {
+    // The Hyprland event listener runs beside the socket loop: it binds session windows through
+    // the core door and clears closed ones. It returns at once off Hyprland, and never blocks
+    // the accept loop.
+    std::thread::spawn(crate::hypr::run_hypr_window_listener);
     let status = aoide_conduct::shellbridge::run(crate::bridge::VERBS);
     Outcome::ok("shellbridge", "shellbridge skeleton self-check complete").with_data(status)
 }

@@ -469,11 +469,11 @@ in `docs/Aoide-Wiki/concepts/cli/Doors-and-Nodes.md`.
   `aoide workspace clear <ws>` — so no second binding exists anywhere. It is
   the one acknowledged action that resolves a field itself: an omitted
   `workspace` means the FOCUSED workspace, read in-process through the
-  compositor adapter (`aoide_conduct::graph::focused_workspace`, the same function the
-  CLI's own caller-side resolution uses) because `workspace clear` takes an
+  compositor adapter (`crate::hypr::focused_workspace`, the same reader the
+  desktop's focus verbs use) because `workspace clear` takes an
   id and no caller can be expected to know the focused one, so the child
   always receives an integer. A host with no adapter is ANSWERED
-  (`reason: "no-compositor"`, the CLI's own sentence) rather than dropped,
+  (`reason: "no-compositor"`, the adapter's own sentence) rather than dropped,
   because a click is parked on a reply. Its one reply line is
   `{ok, message, action, workspace, project?, data?}` — the CLI's `message`
   and `data` verbatim, keyed by the RESOLVED workspace id, `project` riding
@@ -554,6 +554,26 @@ in `docs/Aoide-Wiki/concepts/cli/Doors-and-Nodes.md`.
   `host-line-count`, …) or `cli-failed`. The audit line names the rice and
   whether the host file changed: `ricedeclare action <rice>: <ok changed|ok
   unchanged|failed>`.
+
+## The Hyprland adapter (`src/hypr/`)
+
+The one reader and driver of the compositor in the desktop. Core reads no
+window and runs no `hyprctl`: it stores what this module reports.
+
+| Module | Owns |
+|---|---|
+| `client.rs` | the request socket (`j/clients`, bounded connect), `hyprctl_clients`, `client_workspace_for_address` |
+| `focus.rs` | `focus_window`, `focus_session`, `focus_workspace`, `focused_workspace`, `NO_COMPOSITOR` |
+| `listener.rs` | the event socket (`socket2`) and `run_hypr_window_listener`, spawned by the `shellbridge` command |
+| `sweep.rs` | `resolve_windows`: binds each pending session to its window through `aoide session window attach`, and re-stamps a bound session's workspace |
+| `terminals.rs` | a terminal-class client as a `TermWindow` (cwd from `/proc`), handed to core's untracked-terminal roster |
+
+```
+request socket  ──► client.rs ─┬─► focus.rs     (focuswindow, workspace N)
+                               ├─► sweep.rs ──► aoide session window attach   (core: pid-only)
+                               └─► terminals.rs ──► core untracked-terminal roster
+event socket    ──► listener.rs ─► resolve_windows · terminal roster · clear_closed_window
+```
 
 ## What it consumes
 

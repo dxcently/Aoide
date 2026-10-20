@@ -192,10 +192,9 @@ The binding between a compositor **workspace** (an integer id, exactly the
 value a session's `workspace` already holds) and a **project**: a workspace
 carries its project, so sessions born on a bound workspace join it.
 
-- `set` binds. `<workspace>` may be omitted, and then the FOCUSED workspace is
-  resolved through the compositor adapter (`hyprctl activeworkspace -j`) in the
-  caller's process; a host with no adapter gets a taught refusal asking for the
-  number (exit 2, `data.reason: "no-compositor"`). An unregistered project is
+- `set` binds. `<workspace>` is required: an omitted one is a taught refusal
+  asking for the number (exit 2). The desktop resolves the focused workspace
+  before it calls core. An unregistered project is
   refused by name (exit 1, `data.reason: "unknown-project"`, nothing written) —
   `--new` means it explicitly: it registers a NAME-ONLY project and binds it in
   one call, and on a name that already exists it just binds (it never edits
@@ -222,10 +221,10 @@ carries its project, so sessions born on a bound workspace join it.
 aoide workspace root [<workspace>] [--json]
 ```
 
-The FIRST folder of the project bound to a workspace (or to the FOCUSED one
-when `<workspace>` is omitted) — the one read a launcher needs:
+The FIRST folder of the project bound to a workspace — the one read a launcher
+needs:
 
-    kitty --directory "$(aoide workspace root 2>/dev/null || echo "$HOME")"
+    kitty --directory "$(aoide workspace root 3 2>/dev/null || echo "$HOME")"
 
 - Read-only: no lock, no daemon, no stage write.
 - Text mode prints ONE BARE PATH on stdout (the command is special-cased in the
@@ -233,7 +232,7 @@ when `<workspace>` is omitted) — the one read a launcher needs:
   substitution) and NOTHING on stdout when it refuses — the exit code plus the
   line on stderr is the whole report. Refusals: an unbound workspace
   (`data.reason: "no-binding"`), a project with no folder (`"no-folder"`), an
-  omitted workspace with no compositor to ask (exit 2, `"no-compositor"`), and a
+  omitted workspace (exit 2, a usage refusal naming the number), and a
   non-integer id (`"invalid-workspace"`).
 - `--json` keeps the envelope: `data: {workspace, project, root}`.
 
@@ -385,8 +384,8 @@ aoide session grant [<kind>] [<state>] [--self | --id <id>] [--json]
   form, since its motivating caller is a script, not an interactive session.
   The undying mark itself is the input bare `resurrect`'s selection reads
   (below) and `spawn --undying` writes at birth; the exempt mark vetoes the
-  reaper's staleness judgments for a LIVE session, never its window-gone/
-  pid-gone/ghost/orphan signals. On first load, `load_undying` renames a
+  reaper's staleness judgments for a LIVE session, never its pid-gone/ghost/orphan
+  signals. On first load, `load_undying` renames a
   pre-existing `state/carry.json` onto `state/undying.json` — a one-shot,
   narrated, never-clobbering migration; the read side tolerates the legacy
   `"carried"` key until the next save normalizes it. Registered as a parent
@@ -442,8 +441,8 @@ aoide session hook [--agent <claude|kimi|pi>] [--json]   # reads ONE hook JSON o
 - **Reads:** stdin (one harness hook payload); the agent profile's event map
   (`aoide_protocol::agents`); `state/stage/{sessions,hooks}.json`; env
   `AOIDE_SESSION_ID` (threads a launching conductor as the parent),
-  `HYPRLAND_INSTANCE_SIGNATURE` + the `j/clients` socket read + `/proc/<pid>/stat`
-  ancestry walk (best-effort window/pid backfill); harness transcripts for the
+  `/proc/<pid>/stat` ancestry walk for the harness chain (core reads no
+  compositor); harness transcripts for the
   `say`/`title`/`model`/`contextTokens` refresh (claude:
   `~/.claude/projects/<munge(cwd)>/<session_id>.jsonl`).
 - **Writes:** any of `sessions.json`/`hooks.json` the mapped action implies
@@ -977,11 +976,11 @@ aoide session reap [--announce] [--json]
   the max of transcript mtime/hook `updatedAt`/`startedAt` — 72 h at rest
   (`idle`/`stopped`), 7 days mid-turn (`working`/`awaiting`), 2 h for
   `subagent` kind — plus the three ghosts: all-evidence-predates-boot,
-  parent-gone dependents, orphaned sockets. A live agent pid that is not its
-  window's owner vetoes staleness.
+  parent-gone dependents, orphaned sockets. A live pid of the record vetoes
+  staleness, and a terminal's pid counts too.
 - **Output:** `data: {reaped, decayed, orphanHooks, supersededDone,
-  orphanSockets, hyprctlAvailable}` (+ `refreshed`, `announced`). NEVER errors
-  on nothing-to-reap or an unavailable compositor (exit 0,
+  orphanSockets}` (+ `refreshed`, `announced`). NEVER errors on
+  nothing-to-reap (exit 0,
   `"nothing to reap (all sessions live)"`).
 - **Notes:** the ~12 s systemd timer runs this command unannounced; the dock's
   reap control runs it `--announce` via the shellbridge. A false reap of a

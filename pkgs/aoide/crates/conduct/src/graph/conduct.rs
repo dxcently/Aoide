@@ -25,7 +25,7 @@ use super::session_store::{
     stamp_headless, stamp_origin, stamp_attested_spawner, stamp_session_exit, stamp_spawned, stamp_task,
     stamp_wrap,
 };
-use super::window::{discover_window_address, spawner_is_attested, resolve_registration_parent};
+use super::window::{spawner_is_attested, resolve_registration_parent};
 use aoide_protocol::agents::agent_profile;
 use aoide_protocol::Invocation;
 use aoide_protocol::output::{Fix, Outcome};
@@ -960,14 +960,14 @@ fn open_session_log(id: &str) -> Option<(std::fs::File, PathBuf)> {
 /// `cwd` its session record stamped at registration) is what a roster refresh
 /// shows there.
 #[cfg(unix)]
-pub(in crate::graph) fn proc_cwd(pid: i32) -> Option<String> {
+pub fn proc_cwd(pid: i32) -> Option<String> {
     std::fs::read_link(format!("/proc/{pid}/cwd"))
         .ok()
         .and_then(|p| p.to_str().map(str::to_string))
 }
 
 #[cfg(windows)]
-pub(in crate::graph) fn proc_cwd(_pid: i32) -> Option<String> {
+pub fn proc_cwd(_pid: i32) -> Option<String> {
     None
 }
 
@@ -1933,8 +1933,8 @@ fn killed_with_label(ended: &Ended) -> String {
 /// mirrored, real code in `data.exitCode`; `AOIDE_SESSION_ID` exported) PLUS:
 /// its own terminal + controlling tty, a per-session injection socket, the
 /// `conductable`/`socket` fields on the record so `graph send` can steer it, and
-/// a best-effort `windowAddress` (phase ② discovery) so the focus jump
-/// (`focus_session`) can reach it. Both hosts: the terminal itself is
+/// a `windowAddress` the desktop binds through `session window attach`, so the
+/// focus jump can reach it. Both hosts: the terminal itself is
 /// `super::pty`'s seam.
 pub fn session_conduct(inv: &Invocation) -> Outcome {
     let cmd = "conduct";
@@ -2095,18 +2095,8 @@ pub fn session_conduct(inv: &Invocation) -> Outcome {
     let conductable = inbox.is_some();
     let socket_str = socket_path.to_string_lossy().into_owned();
 
-    // Phase ②: best-effort window-address discovery (never fails/slows
-    // conduct) — INTERACTIVE only. `headless` has no controlling tty at all,
-    // but its `/proc` ancestry still passes straight through whatever
-    // launched it (a shell, an agent, a terminal) — `setsid()` (below)
-    // detaches its TTY session, never its OS parent — so an unconditional
-    // discovery here found and stamped the ENCLOSING terminal's window onto
-    // a headless wrap's own record (task #89, review round 2): a `graph
-    // spawn` run from inside an agent's shell tool re-acquired its
-    // grandparent terminal's window every time, defeating the windowless-
-    // lineage fix below (its whole premise is that a headless wrap's own
-    // record NEVER holds a window).
-    let window = if headless { None } else { discover_window_address() };
+    // The window is the desktop's to bind (`session window attach`), so a registration never
+    // carries one: the sweep binds a conducted session's window from its own pid ancestry.
 
     // Automatic parenting (task #89): explicit `--parent` > this registering
     // process's own `/proc` ancestry matched against a live agent's
@@ -2129,7 +2119,7 @@ pub fn session_conduct(inv: &Invocation) -> Outcome {
         &id,
         Some(&agent),
         cwd.as_deref(),
-        window.as_deref(),
+        None,
         parent.as_deref(),
         Some(conductable),
         if conductable {
@@ -2153,7 +2143,7 @@ pub fn session_conduct(inv: &Invocation) -> Outcome {
     // Stamp `headless` unconditionally (not only once the log file opens
     // below) — it is a registration fact about THIS wrap's own record, the
     // PERMANENT signal `windowless_by_lineage` and
-    // `resolve_pending_session_windows` key off (task #89, review round 2):
+    // the window sweep keys off (task #89, review round 2):
     // even if the discovery gate above or the listener skip below somehow
     // missed, this field is what makes a headless wrap's own windowlessness
     // survive a corrupted `windowAddress`.
@@ -4871,14 +4861,10 @@ mod tests {
     }
     /// Review round 2 of task #89: `--headless` registration must stamp the
     /// PERMANENT `headless` marker AND never call window discovery at all.
-    /// The discovery GATE itself (`if headless { None } else {
-    /// discover_window_address() }`) can't be distinguished from "discovery
-    /// ran and simply found nothing" in this test environment (no
-    /// `HYPRLAND_INSTANCE_SIGNATURE` — `discover_window_address()` would
-    /// return `None` either way, gated or not), so this pins the one thing
-    /// that IS honestly observable without a live compositor: the stamped
-    /// `headless` flag, which is what makes the wrap's windowlessness
-    /// permanent regardless of what any discovery path does or doesn't find.
+    /// The registration never reads a window: the desktop binds one later through
+    /// `session window attach`. The one thing observable here is the stamped `headless`
+    /// flag, which is what makes the wrap's windowlessness permanent whatever a desktop
+    /// later reports for it.
     /// GATED on Unix with its reason: the PTY-backed conduct channel, refused
     /// by name on native Windows (see `conduct_mirrors_a_nonzero_child_exit`).
     #[cfg(unix)]

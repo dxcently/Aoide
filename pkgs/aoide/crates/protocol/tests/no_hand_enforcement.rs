@@ -26,7 +26,7 @@ const ALLOWED: &[(&str, usize)] = &[
     ("conduct/src/graph/send.rs", 3),
     ("conduct/src/graph/spawn.rs", 1),
     ("conduct/src/graph/undying.rs", 1),
-    ("conduct/src/graph/workspace.rs", 4),
+    ("conduct/src/graph/workspace.rs", 2),
     ("strillix/src/commands/pair.rs", 7),
     ("strillix/src/commands/preview_tools.rs", 3),
     ("strillix/src/commands/secrets.rs", 3),

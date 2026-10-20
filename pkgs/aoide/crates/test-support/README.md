@@ -27,6 +27,12 @@ of those exists as a copy per crate.
   (native Windows reads its policy off a DACL, which has no Unix equivalent).
 - `built_aoide_bin` — the real `aoide` binary beside the running test's own
   executable.
+- `fake_hyprctl` — a `hyprctl` shim on `PATH`: `activeworkspace` answers the
+  workspace, any other query one client. The desktop's client-list fake is
+  strillix's `hypr::testutil`.
+- `MigrationEnvGuard` — clears the migration env (`HOME`, the roots,
+  `STRILLIX_MIGRATE`) for one test, and restores it on drop.
+- `sv` — an argv literal as owned `String`s.
 - `on_small_stack` (and its `SMALL_STACK`) / `finishes_within` — the two
   fixtures that make a hostile document's SHAPE a test: the first runs the
   work on a 256 KiB stack, so a walk that recurses per level of a depth the

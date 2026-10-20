@@ -114,7 +114,7 @@ pub fn register(r: &mut Registry) {
                 flag!("id", "string", "Session id (required); its node id becomes session:<id>."),
                 flag!("agent", "string", "Agent name driving the session (default claude)."),
                 flag!("cwd", "string", "Working directory; the session anchors under the longest-prefix project."),
-                flag!("window", "string", "Hyprland window address for the focus jump (`focus_session`) to use."),
+                flag!("window", "string", "Window address to record for the session. The desktop normally binds it (`session window attach`); a session with no window is still focusable by workspace."),
                 flag!("parent", "string", "Spawning session id — records the spawned-by edge (cycle-checked). On a session that already exists it re-parents it, which a door that cannot approve (MCP, A2A) is refused; any door may register a new session under a parent."),
             ],
             gated: false,
@@ -335,7 +335,7 @@ pub fn register(r: &mut Registry) {
     ));
     r.insert(cmd!(
         path: ["session", "reap"],
-        summary: "Reap dead sessions: mark every KILLED session (window gone per hyprctl, or pid's /proc gone) done and drop it, decay every `stopped` session at rest over an hour to `idle`, then re-stage. Also collects the three ghosts no liveness signal catches — a record whose every timestamp predates this boot (a recycled pid reads as alive forever), a sub-agent whose parent has left the roster, and the control socket a killed `conduct` left in $XDG_RUNTIME_DIR (only ever one nothing is listening on). Plus the worker shells `aoide spawn` left running that no one has typed in for two days — see `--now`, which takes those on the spot. Automatic liveness sweep for SUPER+Q / SIGKILL'd terminals whose own cleanup could never run. Falls back to pid-only liveness off Hyprland; never errors on nothing-to-reap.",
+        summary: "Reap dead sessions: mark every KILLED session (its pid gone from /proc) done and drop it, decay every `stopped` session at rest over an hour to `idle`, then re-stage. Also collects the three ghosts no liveness signal catches — a record whose every timestamp predates this boot (a recycled pid reads as alive forever), a sub-agent whose parent has left the roster, and the control socket a killed `conduct` left in $XDG_RUNTIME_DIR (only ever one nothing is listening on). Plus the worker shells `aoide spawn` left running that no one has typed in for two days — see `--now`, which takes those on the spot. Judged on pid-only liveness, on every host: a window the desktop reports closed is cleared, never judged here. Never errors on nothing-to-reap.",
         args: [],
         flags: [
             flag!("announce", "bool", "Always raise the desktop toast, even on a quiet pass — for the dock's reap control, where a human pressed something and is owed an answer. Unflagged, the sweep only toasts when it actually changed the roster."),
@@ -424,6 +424,21 @@ pub fn register(r: &mut Registry) {
             "session grant exempt on --self",
             "session grant exempt off --id <session-id>",
         ],
+    ));
+    r.insert(cmd!(
+        path: ["session", "window", "attach"],
+        summary: "Record the terminal window a session runs in. A session with no window takes this one; the same window again only moves its workspace; a different window is refused while the first one is held. The desktop's window sweep is the caller; requires aoided.",
+        args: [
+            arg!("id", "string", true, "Session id to attach the window to."),
+            arg!("address", "string", true, "The window address the compositor reports, e.g. 0x55d0c2a1."),
+        ],
+        flags: [
+            flag!("workspace", "string", "Workspace id the window is on now (an integer). Moves the session's workspace; the birth default project is never re-stamped."),
+        ],
+        gated: false,
+        implemented: true,
+        handler: crate::graph::session_window_attach,
+        examples: ["session window attach s-1 0x55d0c2a1 --workspace 3"],
     ));
     r.insert(cmd!(
         path: ["session", "bind"],
@@ -544,9 +559,9 @@ pub fn register_mail_ring(r: &mut Registry) {
     // sorted list.
     r.insert(cmd!(
         path: ["workspace", "set"],
-        summary: "Bind a compositor workspace to a project: sessions BORN on that workspace join it. Omit the workspace to use the focused one.",
+        summary: "Bind a workspace to a project: sessions BORN on that workspace join it. The workspace id is required; a desktop that means its focused workspace resolves it first.",
         args: [
-            arg!("workspace", "integer", false, "Workspace id (an integer, the same value sessions.json holds). Omit it to use the FOCUSED workspace, resolved through the compositor adapter — a host with no adapter gets a taught refusal asking for the number."),
+            arg!("workspace", "integer", true, "Workspace id (an integer, the same value sessions.json holds)."),
             arg!("project", "string", true, "Registered project name to bind. A project may have no folder; with --new an unregistered name is created name-only and bound in one call."),
         ],
         flags: [
@@ -557,8 +572,7 @@ pub fn register_mail_ring(r: &mut Registry) {
         handler: crate::graph::workspace_set,
         examples: [
             "workspace set 3 aoide",
-            "workspace set cadenza --new",
-            "workspace set aoide",
+            "workspace set 4 cadenza --new",
         ],
     ));
     r.insert(cmd!(
@@ -583,15 +597,12 @@ pub fn register_mail_ring(r: &mut Registry) {
     ));
     r.insert(cmd!(
         path: ["workspace", "root"],
-        summary: "Print the first folder of the project bound to a workspace (or to the FOCUSED one), for a launcher to open a terminal in — one bare path on stdout, nothing at all when it refuses.",
-        args: [arg!("workspace", "integer", false, "Workspace id; omit it to use the focused workspace, resolved through the compositor adapter.")],
+        summary: "Print the first folder of the project bound to a workspace, for a launcher to open a terminal in — one bare path on stdout, nothing at all when it refuses.",
+        args: [arg!("workspace", "integer", true, "Workspace id.")],
         flags: [],
         gated: false,
         implemented: true,
         handler: crate::graph::workspace_root,
-        examples: [
-            "workspace root 3",
-            "workspace root",
-        ],
+        examples: ["workspace root 3"],
     ));
 }

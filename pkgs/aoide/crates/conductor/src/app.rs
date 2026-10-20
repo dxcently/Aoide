@@ -3601,20 +3601,34 @@ impl App {
     /// UNCHANGED in effect: the same no-window-address status error surfaces
     /// when neither is set. Routing changed with `graph focus`'s deletion
     /// (command-defrag lane, task #101) — the capability was never anything
-    /// but a thin CLI wrapper over [`graph::focus_session`], so Enter now
-    /// calls it directly instead of round-tripping through the registry
-    /// dispatcher, the same way the shellbridge socket loop already calls it
-    /// for a widget click (`shellbridge.rs`'s `focussession` command). The
-    /// audit line this used to get for free from `dispatch` is written here
-    /// by hand so the one-audit-log invariant still holds.
+    /// but a thin CLI wrapper, so Enter calls the focus provider directly. Focusing a
+    /// window is the desktop's: `AOIDE_FOCUS_CMD` names the provider, run with the
+    /// session id as its only argument, and unset means a taught refusal. The audit
+    /// line is written here by hand so the one-audit-log invariant still holds.
     fn cue_session(&mut self, rec: &SessionRecord) {
         if rec.log_path.is_some() {
             self.open_tail(rec);
         } else {
             let id = rec.session_id.clone();
-            let outcome = match graph::focus_session(&id) {
-                Ok(()) => Outcome::ok("graph.focus", format!("focused session `{id}`")),
-                Err(e) => Outcome::error("graph.focus", format!("{id}: {}", e.message)),
+            let outcome = match std::env::var_os("AOIDE_FOCUS_CMD") {
+                Some(provider) => match std::process::Command::new(&provider).arg(&id).status() {
+                    Ok(status) if status.success() => {
+                        Outcome::ok("graph.focus", format!("focused session `{id}`"))
+                    }
+                    Ok(status) => {
+                        Outcome::error("graph.focus", format!("{id}: the focus provider exited with {status}"))
+                    }
+                    Err(e) => Outcome::error(
+                        "graph.focus",
+                        format!("{id}: the focus provider did not start: {e}"),
+                    ),
+                },
+                None => Outcome::usage(
+                    "graph.focus",
+                    format!(
+                        "{id}: no focus provider here — set AOIDE_FOCUS_CMD to a command that takes the session id"
+                    ),
+                ),
             };
             let status = match outcome.status {
                 Status::Ok => "ok",
@@ -5737,7 +5751,7 @@ mod tests {
     }
 
     #[test]
-    fn enter_on_a_windowed_roster_row_still_focuses_the_session() {
+    fn enter_on_a_windowed_roster_row_still_attempts_the_focus_jump() {
         with_isolated_stage(|| {
             // No `log_path` — only `window_address` (set by the `session`
             // fixture) — so this is the unchanged branch.
@@ -5754,7 +5768,7 @@ mod tests {
                 "windowed Enter still focuses the session"
             );
 
-            // The focus jump calls `graph::focus_session` DIRECTLY (no
+            // The focus jump runs the `AOIDE_FOCUS_CMD` provider DIRECTLY (no
             // registry dispatch since the `graph focus` command was deleted),
             // hand-rolling its audit record — pin that the record actually
             // lands with the dispatcher's shape, so the single-audit-log

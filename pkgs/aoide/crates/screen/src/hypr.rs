@@ -4,9 +4,8 @@
 //! khoa's module-hygiene note (2026-08-16) — not a trait, not a backend seam.
 //!
 //! Every query parses into a typed struct via serde — no string-munging JSON
-//! (`graph::window`'s existing `hyprctl_clients() -> Vec<Value>` predates
-//! this discipline for a narrow window-focus lookup and is left as-is; it is
-//! not this module's concern to change).
+//! (strillix's `hypr::client::hyprctl_clients()` returns the client list as
+//! untyped JSON; it is the desktop's seam, not this module's concern).
 //!
 //! ── Shell-out doctrine (mirrors `rice::ipc`'s house standard) ─────────────
 //! [`classify_json`] is the pure judge of one already-finished `hyprctl -j`

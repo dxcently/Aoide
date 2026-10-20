@@ -450,11 +450,11 @@
   carrying a binding field is refused by name rather than ignored, so a
   mis-shaped click can never read as a successful unbind. Its one resolved
   field is the workspace: an omitted one is the FOCUSED one, read with
-  `aoide_conduct::graph::focused_workspace` in `dispatch_workspace_action` (never a
+  `crate::hypr::focused_workspace` in `dispatch_workspace_action` (never a
   second compositor read), so the forwarded argv always carries an integer —
   `workspace clear` takes an id and has no focused default of its own. A
   host with no adapter is ANSWERED (`reason: "no-compositor"`, message =
-  `aoide_conduct::graph::NO_COMPOSITOR`, the CLI's own sentence, one authority
+  `crate::hypr::NO_COMPOSITOR`, the adapter's own sentence, one authority
   for the text), never dropped: a well-formed click is parked on a reply, so
   even a malformed line that NAMES this verb is ANSWERED with a `bad-request`
   refusal — the same rule `sessiontrace` holds, one rule for every parked
@@ -462,6 +462,11 @@
   none. The wire takes a
   NEGATIVE workspace id (`as_i64`), matching `SessionRecord.workspace` and
   the CLI's own `workspace_id`.
+- **`src/hypr/` is the only compositor reader the desktop has, and core reads none.**
+  Core (`aoide-conduct`) reads no window, runs no `hyprctl`, and stamps no owner
+  pid. A session's window reaches core only through `aoide session window attach`,
+  which `hypr/sweep.rs` execs. A new compositor read goes in `hypr/`; a new window
+  fact core must store arrives as a gated core verb first.
 
 ## Extension points
 

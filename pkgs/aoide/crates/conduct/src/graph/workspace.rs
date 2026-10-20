@@ -1,4 +1,4 @@
-//! `workspace set/clear/list` — the compositor's workspace ↔ project binding
+//! `workspace set/clear/list/root` — the workspace ↔ project binding
 //! (store, commands and resolution: core-seams design §B).
 //!
 //! A **workspace** is the compositor's own workspace id, an integer, exactly
@@ -11,10 +11,10 @@
 //! Composition: the binding is a `projects.json` mutation, so it is
 //! DAEMON-OWNED exactly like the project mutations next door
 //! ([`super::manage::local_daemon`]) — a CLI caller forwards to `aoided` and
-//! errors when none answers. The one compositor-shaped half is resolving an
-//! OMITTED `<workspace>`: that happens in the caller's process, before the
-//! forward, because `aoided` is a service with no compositor environment —
-//! the forwarded argv carries the resolved integer, never "focused".
+//! errors when none answers. Every verb takes its `<workspace>` as typed; a
+//! desktop that wants the focused workspace resolves it first (strillix does),
+//! so the forwarded argv always carries an integer and `aoided`, a service with
+//! no compositor environment, never sees the word "focused".
 //!
 //! `list` is a read: no lock, no daemon, no stage write. It answers
 //! honestly off a compositor-less host too — bindings still print, and
@@ -29,20 +29,11 @@ use super::model::{
     sorted_projects, write_stage, HooksFile, Project, ProjectsFile, SessionsFile,
     STAGE_GRAPH_VERSION,
 };
-use super::window::focused_workspace;
 use aoide_protocol::output::Outcome;
 use aoide_protocol::Invocation;
 use aoide_storage::fs::with_stage_lock;
 use serde_json::{json, Value};
 use std::collections::BTreeSet;
-
-/// The taught refusal an omitted `<workspace>` gets when the compositor cannot
-/// be asked. One text, both doors: the CLI's own caller-side resolution here,
-/// and strillix's bridge `workspaceaction` (which resolves an omitted workspace
-/// in the same process that owns the adapter) — one authority for the
-/// sentence, so an operator greps one string.
-pub const NO_COMPOSITOR: &str =
-    "no compositor adapter here to say which workspace is focused — give the workspace id";
 
 /// One `<workspace>` argument as a workspace ID, or a taught refusal naming
 /// the value. The key is an INTEGER, matching `SessionRecord.workspace`
@@ -58,7 +49,7 @@ fn workspace_id(cmd: &str, raw: &str) -> Result<i64, Outcome> {
     })
 }
 
-/// `workspace set [<workspace>] <project>` — bind. The project must be
+/// `workspace set <workspace> <project>` — bind. The project must be
 /// registered unless `--new` says to create it (name-only: a project may have
 /// no folder), the id is MOVED off whatever project held it, and the binding
 /// applies to sessions born afterwards (nothing is adopted retroactively).
@@ -68,20 +59,10 @@ pub fn workspace_set(inv: &Invocation) -> Outcome {
     // the RESOLVED argv — see the module doc.
     let (raw_ws, project) = match inv.args.as_slice() {
         [ws, project] => (ws.clone(), project.clone()),
-        [project] => match focused_workspace() {
-            Some(ws) => (ws.to_string(), project.clone()),
-            None => {
-                return Outcome::usage(
-                    "workspace.set",
-                    format!("{NO_COMPOSITOR}\nusage: aoide workspace set [<workspace>] <project>"),
-                )
-                .with_data(json!({ "reason": "no-compositor" }));
-            }
-        },
         _ => {
             return Outcome::usage(
                 "workspace.set",
-                "usage: aoide workspace set [<workspace>] <project> — with no workspace, the focused one is used",
+                "usage: aoide workspace set <workspace> <project> — the workspace id is required",
             );
         }
     };
@@ -297,16 +278,6 @@ pub fn workspace_list(_inv: &Invocation) -> Outcome {
 /// (no binding, no folder, or no workspace given and no compositor to ask).
 pub fn workspace_root(inv: &Invocation) -> Outcome {
     let ws = match inv.args.as_slice() {
-        [] => match focused_workspace() {
-            Some(ws) => ws,
-            None => {
-                return Outcome::usage(
-                    "workspace.root",
-                    format!("{NO_COMPOSITOR}\nusage: aoide workspace root [<workspace>]"),
-                )
-                .with_data(json!({ "reason": "no-compositor" }));
-            }
-        },
         [raw] => match workspace_id("workspace.root", raw) {
             Ok(ws) => ws,
             Err(e) => return e,
@@ -314,7 +285,7 @@ pub fn workspace_root(inv: &Invocation) -> Outcome {
         _ => {
             return Outcome::usage(
                 "workspace.root",
-                "usage: aoide workspace root [<workspace>] — with no workspace, the focused one is used",
+                "usage: aoide workspace root <workspace>",
             );
         }
     };
@@ -476,38 +447,22 @@ mod tests {
     }
 
     #[test]
-    fn an_omitted_workspace_needs_a_compositor_and_never_guesses() {
+    fn an_omitted_workspace_is_refused_and_never_guesses() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved = std::env::var("AOIDE_STAGE_DIR").ok();
-        let saved_sig = std::env::var("HYPRLAND_INSTANCE_SIGNATURE").ok();
-        let stage = unique_stage("ws-set-focused-none");
+        let stage = unique_stage("ws-set-no-id");
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
-        std::env::remove_var("HYPRLAND_INSTANCE_SIGNATURE");
         two_projects(&stage);
 
         let out = workspace_set(&daemon_invocation(&["workspace", "set"], &["aoide"]));
         assert_eq!(out.status, aoide_protocol::output::Status::Usage);
-        assert_eq!(out.data.as_ref().unwrap()["reason"], "no-compositor");
-        assert!(
-            out.message.contains("give the workspace id"),
-            "taught, asking for the number: {}",
-            out.message
-        );
+        assert!(out.message.contains("workspace id is required"), "taught: {}", out.message);
         let file: ProjectsFile = load_stage(&projects_path()).unwrap();
         assert!(
             file.projects.iter().all(|p| p.workspaces.is_empty()),
             "nothing is bound without the id"
         );
 
-        // A non-integer id is refused by name, not silently coerced.
-        let out = workspace_set(&daemon_invocation(&["workspace", "set"], &["three", "aoide"]));
-        assert_eq!(out.status, aoide_protocol::output::Status::Usage);
-        assert_eq!(out.data.as_ref().unwrap()["reason"], "invalid-workspace");
-
-        match saved_sig {
-            Some(v) => std::env::set_var("HYPRLAND_INSTANCE_SIGNATURE", v),
-            None => std::env::remove_var("HYPRLAND_INSTANCE_SIGNATURE"),
-        }
         match saved {
             Some(v) => std::env::set_var("AOIDE_STAGE_DIR", v),
             None => std::env::remove_var("AOIDE_STAGE_DIR"),
@@ -711,26 +666,19 @@ mod tests {
     }
 
     #[test]
-    fn root_with_no_workspace_needs_the_compositor_and_never_guesses() {
+    fn root_with_no_workspace_is_refused_and_never_guesses() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved = std::env::var("AOIDE_STAGE_DIR").ok();
-        let saved_sig = std::env::var("HYPRLAND_INSTANCE_SIGNATURE").ok();
-        let stage = unique_stage("ws-root-focused");
+        let stage = unique_stage("ws-root-no-id");
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
-        std::env::remove_var("HYPRLAND_INSTANCE_SIGNATURE");
         two_projects(&stage);
         workspace_set(&daemon_invocation(&["workspace", "set"], &["3", "aoide"]));
 
         let out = workspace_root(&daemon_invocation(&["workspace", "root"], &[]));
         assert_eq!(out.status, aoide_protocol::output::Status::Usage);
-        assert_eq!(out.data.as_ref().unwrap()["reason"], "no-compositor");
         assert_ne!(out.status.exit_code(), 0);
-        assert!(out.message.contains("give the workspace id"), "{}", out.message);
+        assert!(out.message.contains("usage: aoide workspace root <workspace>"), "{}", out.message);
 
-        match saved_sig {
-            Some(v) => std::env::set_var("HYPRLAND_INSTANCE_SIGNATURE", v),
-            None => std::env::remove_var("HYPRLAND_INSTANCE_SIGNATURE"),
-        }
         match saved {
             Some(v) => std::env::set_var("AOIDE_STAGE_DIR", v),
             None => std::env::remove_var("AOIDE_STAGE_DIR"),
@@ -738,27 +686,19 @@ mod tests {
         let _ = std::fs::remove_dir_all(&stage);
     }
 
-    /// GATED on Unix with its reason (see `testutil::fake_hyprctl`): the
-    /// fixture is a `#!/bin/sh` shim `CreateProcess` cannot launch, over a
-    /// compositor native Windows does not run. The socket TYPE is the seam
-    /// either way — what keeps this off Windows is the shim, not the socket.
+    /// GATED on Unix: the stub daemon listens on a Unix socket.
     #[cfg(unix)]
     #[test]
-    fn the_forwarded_argv_carries_the_resolved_workspace_not_the_word_focused() {
-        // ONE positional is the PROJECT: the workspace comes from the
-        // compositor adapter, in the CALLER's process. What the daemon
-        // receives must therefore be the RESOLVED INTEGER — `aoided` is a
-        // service with no compositor environment, so "focused" can never cross
-        // the wire. A stub daemon stands at `AOIDE_DAEMON_SOCKET` and hands
-        // back the request it was given.
+    fn the_forwarded_argv_carries_the_typed_workspace_id() {
+        // Two positionals are `<workspace> <project>`: the id the caller typed
+        // is the integer the daemon receives, and nothing is resolved on the
+        // way. A stub daemon stands at `AOIDE_DAEMON_SOCKET` and hands back the
+        // request it was given.
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved = EnvVars::save(&["AOIDE_STAGE_DIR", "AOIDE_DAEMON_SOCKET"]);
         let stage = unique_stage("ws-forward");
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
         two_projects(&stage);
-
-        let (shim, dir) = fake_hyprctl("ws-forward");
-        std::env::set_var("AOIDE_TEST_WS", "5");
 
         let sock = stage.join("d.sock");
         let listener = std::os::unix::net::UnixListener::bind(&sock).unwrap();
@@ -778,7 +718,7 @@ mod tests {
             line
         });
 
-        let mut inv = daemon_invocation(&["workspace", "set"], &["aoide"]);
+        let mut inv = daemon_invocation(&["workspace", "set"], &["5", "aoide"]);
         inv.door = Door::Cli;
         inv.flags.insert("new".into(), "true".into());
         let out = workspace_set(&inv);
@@ -790,7 +730,7 @@ mod tests {
         assert_eq!(
             req["args"],
             serde_json::json!(["5", "aoide"]),
-            "the forwarded argv carries the RESOLVED integer, never the word `focused`: {}",
+            "the forwarded argv carries the typed integer: {}",
             req["args"]
         );
         assert_eq!(req["flags"]["new"], "true", "flags ride along with the resolved argv");
@@ -799,8 +739,6 @@ mod tests {
         let file: ProjectsFile = load_stage(&projects_path()).unwrap();
         assert!(file.projects.iter().all(|p| p.workspaces.is_empty()));
 
-        drop(shim);
-        let _ = std::fs::remove_dir_all(&dir);
         drop(saved);
         let _ = std::fs::remove_dir_all(&stage);
     }

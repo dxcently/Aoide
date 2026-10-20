@@ -1,34 +1,21 @@
-//! Focus + Hyprland window discovery/reconcile/listener: the session-jump
-//! (`focus_session`/`focus_window`) capability, the shared verify-then-dispatch
-//! hyprctl seam, phase-② pid-ancestry window discovery, the authoritative
-//! `socket2` event listener, and the untracked-terminal (`win:*`)
-//! synthetic-record reconciler.
-//!
-//! **Both hosts reach this now.** Phase-② discovery
-//! (`discover_window_address`, `ancestry_parent`, `resolve_registration_parent`)
-//! is called from the conducted session's registration, which is `graph/pty`'s
-//! seam on both hosts — so the `allow(dead_code)` this module carried while the
-//! PTY was refused on native Windows is gone with the refusal. On native
-//! Windows the compositor adapter itself still degrades through its own "no
-//! adapter" path, which is untouched: the discovery runs and answers `None`,
-//! rather than not being reached at all.
+//! Session pid and window records, core side: the harness walk over a hook's pid ancestry, the
+//! chain a hook door stores, registration parentage, the untracked-terminal (`win:*`) reconciler,
+//! and the window-record writes: `session window attach` (the desktop binds a session's window
+//! through it) and the closed-window clear. Nothing here reads a compositor. A window is known
+//! to core only once the desktop attaches it, and a session's liveness is its pid alone.
 
-use super::codex_app::sync_codex_app_threads;
-use super::conduct::{is_invocation_plumbing, proc_argv, proc_cwd};
+use super::conduct::{is_invocation_plumbing, proc_argv};
 use super::doc::restage_graph;
 use super::model::{
-    canonical_state, load_stage, observe_workspace, projects_path, sessions_path, write_stage,
-    Project, ProjectsFile, SessionRecord, SessionsFile, STAGE_GRAPH_VERSION,
+    canonical_state, load_stage, observe_workspace, projects_path, sessions_path, write_stage, Project,
+    ProjectsFile, SessionRecord, SessionsFile, STAGE_GRAPH_VERSION,
 };
-use super::session_store::{ancestry_may_move, chain_is_stale, live_harness_outside};
+use super::session_store::{ancestry_may_move, chain_is_takeable};
+use aoide_protocol::output::Outcome;
+use aoide_protocol::Invocation;
 use aoide_storage::fs::{pid_is_alive, with_stage_lock};
-use serde_json::Value;
+use serde_json::json;
 use std::collections::{HashMap, HashSet};
-#[cfg(unix)]
-use std::os::unix::net::UnixStream;
-#[cfg(windows)]
-use aoide_protocol::win_unix::UnixStream;
-use std::path::PathBuf;
 
 /// Normalise a Hyprland window address for comparison: lowercased, with any
 /// leading `0x` stripped. The stored `windowAddress` and hyprctl's reported
@@ -48,162 +35,6 @@ pub fn normalize_addr(addr: &str) -> String {
     a.to_ascii_lowercase()
 }
 
-/// Does `want` name a live window in the parsed `hyprctl clients -j` array?
-/// Pure over the already-decoded JSON so it is unit-testable without a
-/// compositor. Matches on the normalised `address` field of any client.
-fn window_present(clients: &[Value], want: &str) -> bool {
-    let want = normalize_addr(want);
-    clients.iter().any(|c| {
-        c.get("address")
-            .and_then(Value::as_str)
-            .map(|a| normalize_addr(a) == want)
-            .unwrap_or(false)
-    })
-}
-
-/// The Hyprland workspace id of the client whose `address` matches `want` in a
-/// decoded `hyprctl clients -j` array (`workspace.id` in the client JSON).
-/// Pure over the decoded JSON — unit-testable without a compositor. Address
-/// comparison is `0x`/case-tolerant via [`normalize_addr`] (the stored
-/// `windowAddress` and hyprctl can disagree on both). `None` when the window is
-/// absent from the list or carries no numeric `workspace.id` — the caller then
-/// leaves the stored `workspace` untouched (degrade gracefully, never a panic).
-fn client_workspace_for_address(clients: &[Value], want: &str) -> Option<i64> {
-    let want = normalize_addr(want);
-    if want.is_empty() {
-        return None;
-    }
-    clients.iter().find_map(|c| {
-        let a = c.get("address").and_then(Value::as_str)?;
-        if normalize_addr(a) != want {
-            return None;
-        }
-        c.get("workspace")
-            .and_then(|w| w.get("id"))
-            .and_then(Value::as_i64)
-    })
-}
-
-#[cfg(test)]
-thread_local! {
-    /// `j/clients` reads made on this thread. A test proves a path asks the compositor nothing
-    /// by counting its own thread's reads, which no other test thread can add to.
-    static CLIENT_READS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
-}
-
-#[cfg(test)]
-fn client_reads() -> usize {
-    CLIENT_READS.with(std::cell::Cell::get)
-}
-
-/// The compositor's client list, decoded into a JSON array. It asks Hyprland's
-/// request socket, `$XDG_RUNTIME_DIR/hypr/$HYPRLAND_INSTANCE_SIGNATURE/.socket.sock`,
-/// for `j/clients` (the JSON `hyprctl clients -j` prints), and reads the reply to EOF.
-/// No `hyprctl` binary and no PATH lookup: `aoided`'s service PATH carries none, so
-/// the old spawn found no clients inside the daemon. Returns `None` whenever the
-/// compositor cannot be consulted authoritatively: no `HYPRLAND_INSTANCE_SIGNATURE`
-/// or `XDG_RUNTIME_DIR`, no socket, a connect, request or reply that outlasts the 2 s
-/// budget, or a reply that is not a JSON array. The connect, the request and the whole
-/// reply share that one budget, so a listener that never accepts, or a reply that
-/// trickles, cannot hold the caller past it. This is the single clients-reading seam
-/// every consumer shares (the reaper's live set, phase-② discovery, the window-event
-/// listener, and the D6 refusal), so they all degrade identically (never a panic, never a
-/// false result).
-pub(crate) fn hyprctl_clients() -> Option<Vec<Value>> {
-    #[cfg(test)]
-    CLIENT_READS.with(|n| n.set(n.get() + 1));
-    use std::io::{Read, Write};
-    let signature = std::env::var_os("HYPRLAND_INSTANCE_SIGNATURE")?;
-    let runtime = std::env::var_os("XDG_RUNTIME_DIR")?;
-    let socket = PathBuf::from(runtime)
-        .join("hypr")
-        .join(signature)
-        .join(".socket.sock");
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
-    let left = || {
-        deadline
-            .checked_duration_since(std::time::Instant::now())
-            .filter(|d| !d.is_zero())
-    };
-    let mut stream = connect_bounded(&socket, left()?)?;
-    stream.set_write_timeout(Some(left()?)).ok()?;
-    stream.write_all(b"j/clients").ok()?;
-    let mut reply = Vec::new();
-    let mut chunk = [0u8; 8192];
-    loop {
-        stream.set_read_timeout(Some(left()?)).ok()?;
-        match stream.read(&mut chunk) {
-            Ok(0) => break,
-            Ok(n) => reply.extend_from_slice(&chunk[..n]),
-            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
-            Err(_) => return None,
-        }
-    }
-    match serde_json::from_slice(&reply) {
-        Ok(Value::Array(a)) => Some(a),
-        _ => None,
-    }
-}
-
-/// Connects to the unix socket at `path`, returning within `budget` even when the
-/// listener's accept backlog is full. `UnixStream::connect` has no bound of its own: on
-/// a full backlog it blocks until a slot frees. Linux applies `SO_SNDTIMEO` to that
-/// blocking connect, so the bound is set on the socket before the connect runs. `None`
-/// when the path does not fit `sun_path`, the socket cannot be made, or the connect fails
-/// or times out.
-#[cfg(unix)]
-fn connect_bounded(path: &std::path::Path, budget: std::time::Duration) -> Option<UnixStream> {
-    use std::os::unix::ffi::OsStrExt;
-    use std::os::unix::io::FromRawFd;
-    #[cfg(any(target_os = "linux", target_os = "android"))]
-    const CLOEXEC: libc::c_int = libc::SOCK_CLOEXEC;
-    #[cfg(not(any(target_os = "linux", target_os = "android")))]
-    const CLOEXEC: libc::c_int = 0;
-    let bytes = path.as_os_str().as_bytes();
-    // SAFETY: `sockaddr_un` is plain data, and all-zero is a valid value of it.
-    let mut addr: libc::sockaddr_un = unsafe { std::mem::zeroed() };
-    if bytes.len() >= addr.sun_path.len() {
-        return None;
-    }
-    addr.sun_family = libc::AF_UNIX as libc::sa_family_t;
-    for (dst, src) in addr.sun_path.iter_mut().zip(bytes) {
-        *dst = *src as libc::c_char;
-    }
-    let len = std::mem::size_of::<libc::sa_family_t>() + bytes.len() + 1;
-    // SAFETY: a plain syscall; a negative result is refused before the descriptor is used.
-    let fd = unsafe { libc::socket(libc::AF_UNIX, libc::SOCK_STREAM | CLOEXEC, 0) };
-    if fd < 0 {
-        return None;
-    }
-    // SAFETY: `fd` is a fresh descriptor this call owns, and the stream closes it on drop.
-    let stream = unsafe { UnixStream::from_raw_fd(fd) };
-    let tv = libc::timeval {
-        tv_sec: budget.as_secs() as libc::time_t,
-        tv_usec: budget.subsec_micros() as libc::suseconds_t,
-    };
-    // SAFETY: `tv` outlives the call, and its size is passed with the pointer.
-    let bounded = unsafe {
-        libc::setsockopt(
-            fd,
-            libc::SOL_SOCKET,
-            libc::SO_SNDTIMEO,
-            (&tv as *const libc::timeval).cast(),
-            std::mem::size_of::<libc::timeval>() as libc::socklen_t,
-        )
-    } == 0;
-    // SAFETY: `addr` is a live `sockaddr_un`, and `len` covers its family, the path bytes and the NUL.
-    let connected = bounded
-        && unsafe {
-            libc::connect(fd, (&addr as *const libc::sockaddr_un).cast(), len as libc::socklen_t)
-        } == 0;
-    connected.then_some(stream)
-}
-
-#[cfg(windows)]
-fn connect_bounded(path: &std::path::Path, _budget: std::time::Duration) -> Option<UnixStream> {
-    UnixStream::connect(path).ok()
-}
-
 /// The registered projects, for [`observe_workspace`] — read INSIDE the same
 /// stage-lock hold the observation is written under, so a binding can never be
 /// read half-written, and an unreadable/absent `projects.json` degrades to "no
@@ -213,194 +44,6 @@ fn projects_now() -> Vec<Project> {
         .map(|f| f.projects)
         .unwrap_or_default()
 }
-
-/// The compositor's currently FOCUSED workspace id — the one fact an omitted
-/// `<workspace>` needs (`aoide workspace set <project>`, `aoide workspace root`).
-/// `hyprctl activeworkspace -j`'s `id`, read through the same
-/// `HYPRLAND_INSTANCE_SIGNATURE` gate as [`hyprctl_clients`]. `None` whenever
-/// the compositor cannot be consulted authoritatively — no signature, a
-/// missing/failed `hyprctl`, or JSON with no integer `id` — which the caller
-/// turns into a taught error asking for the number, never a guess. Note it is
-/// the CALLER's process that can answer this: `aoided` runs as a service with
-/// no compositor environment, so a forwarded invocation always carries a
-/// resolved integer.
-pub fn focused_workspace() -> Option<i64> {
-    if std::env::var_os("HYPRLAND_INSTANCE_SIGNATURE").is_none() {
-        return None;
-    }
-    let out = std::process::Command::new("hyprctl")
-        .args(["activeworkspace", "-j"])
-        .output()
-        .ok()?;
-    if !out.status.success() {
-        return None;
-    }
-    let v: Value = serde_json::from_slice(&out.stdout).ok()?;
-    v.get("id").and_then(Value::as_i64)
-}
-
-/// A structured failure from [`focus_window`]. `reason` is a stable machine
-/// code (`hyprctl-unavailable` / `hyprctl-failed` / `window-not-found` /
-/// `no-window-address`) reused verbatim by every focus-jump caller's own
-/// error envelope (the conductor TUI and the shellbridge socket loop).
-#[derive(Debug, Clone)]
-pub struct FocusError {
-    pub reason: &'static str,
-    pub message: String,
-}
-
-/// The shared verify-then-dispatch used by BOTH the conductor TUI's Enter-key
-/// jump ([`focus_session`], called directly — no CLI command exists for this
-/// anymore) and the shellbridge socket loop (a widget click). `hyprctl
-/// dispatch focuswindow`
-/// exits 0 even when the target window is already gone, so we first list live
-/// clients (`hyprctl clients -j`) and confirm the address is actually present
-/// before dispatching — a vanished terminal is a `window-not-found` error, not
-/// a silent no-op. Returns `Ok(())` only on a dispatched focus; every failure
-/// (empty address, missing/failed hyprctl, unparseable JSON, absent window) is
-/// a structured `Err` — this fn NEVER panics, so a socket loop can call it on
-/// arbitrary input without risk.
-pub fn focus_window(addr: &str) -> Result<(), FocusError> {
-    let addr = addr.trim();
-    if addr.is_empty() {
-        return Err(FocusError {
-            reason: "no-window-address",
-            message: "empty window address".to_string(),
-        });
-    }
-
-    // Verify the window exists before dispatching: focuswindow can't tell us.
-    let clients: Vec<Value> = match std::process::Command::new("hyprctl")
-        .args(["clients", "-j"])
-        .output()
-    {
-        Err(e) => {
-            return Err(FocusError {
-                reason: "hyprctl-unavailable",
-                message: format!("hyprctl unavailable: {e}"),
-            });
-        }
-        Ok(out) if !out.status.success() => {
-            return Err(FocusError {
-                reason: "hyprctl-failed",
-                message: format!("hyprctl clients failed (exit {:?})", out.status.code()),
-            });
-        }
-        Ok(out) => match serde_json::from_slice(&out.stdout) {
-            Ok(Value::Array(a)) => a,
-            _ => {
-                return Err(FocusError {
-                    reason: "hyprctl-failed",
-                    message: "hyprctl clients: unparseable JSON".to_string(),
-                });
-            }
-        },
-    };
-    if !window_present(&clients, addr) {
-        return Err(FocusError {
-            reason: "window-not-found",
-            message: format!("window {addr} is gone (terminal closed?)"),
-        });
-    }
-
-    let dispatch = format!("address:{addr}");
-    match std::process::Command::new("hyprctl")
-        .args(["dispatch", "focuswindow", &dispatch])
-        .output()
-    {
-        Err(e) => Err(FocusError {
-            reason: "hyprctl-unavailable",
-            message: format!("hyprctl unavailable: {e}"),
-        }),
-        Ok(out) if !out.status.success() => Err(FocusError {
-            reason: "hyprctl-failed",
-            message: format!("hyprctl dispatch failed (exit {:?})", out.status.code()),
-        }),
-        Ok(_) => Ok(()),
-    }
-}
-
-/// Resolve a `sessionId` to a live jump and dispatch it — the socket-reachable
-/// counterpart to the CLI [`focus`]. shellbridge drives this on a roster
-/// row-click: QML sends only the sessionId (which every row already holds), and
-/// the DAEMON owns the id→window resolution, so a widget never carries a stale or
-/// empty address (the bug this fixes: the old socket command took a window address,
-/// but the widgets passed a sessionId, so every tracked-row jump silently
-/// no-op'd as `window-not-found`). Prefers the exact `windowAddress` (which also
-/// brings its workspace forward); if that isn't resolved yet but the `workspace`
-/// is known, falls back to switching to that workspace. Never panics — a socket
-/// loop calls it on arbitrary input.
-pub fn focus_session(id: &str) -> Result<(), FocusError> {
-    let id = id.strip_prefix("session:").unwrap_or(id).trim();
-    if id.is_empty() {
-        return Err(FocusError {
-            reason: "no-session-id",
-            message: "empty session id".to_string(),
-        });
-    }
-    let file: SessionsFile = match load_stage(&sessions_path()) {
-        Ok(f) => f,
-        Err(_) => {
-            return Err(FocusError {
-                reason: "stage-unreadable",
-                message: "could not read sessions.json".to_string(),
-            });
-        }
-    };
-    let Some(rec) = file.sessions.iter().find(|s| s.session_id == id) else {
-        return Err(FocusError {
-            reason: "session-not-found",
-            message: format!("unknown session `{id}`"),
-        });
-    };
-    // Prefer the exact window — focuswindow also brings its workspace forward.
-    if !rec.window_address.trim().is_empty() {
-        return focus_window(&rec.window_address);
-    }
-    // The window isn't resolved yet (discovery is best-effort), but if we know
-    // the workspace we can still take the user there.
-    if let Some(ws) = rec.workspace {
-        return focus_workspace(ws);
-    }
-    Err(FocusError {
-        reason: "no-window-address",
-        message: format!("session `{id}` has no window or workspace to focus"),
-    })
-}
-
-/// Switch to a Hyprland workspace by numeric id (`hyprctl dispatch workspace
-/// <id>`) — the fallback jump for a session whose window address isn't resolved
-/// yet but whose workspace is known. Structured `Err` on a missing/failed
-/// hyprctl; never panics.
-pub fn focus_workspace(ws: i64) -> Result<(), FocusError> {
-    match std::process::Command::new("hyprctl")
-        .args(["dispatch", "workspace", &ws.to_string()])
-        .output()
-    {
-        Err(e) => Err(FocusError {
-            reason: "hyprctl-unavailable",
-            message: format!("hyprctl unavailable: {e}"),
-        }),
-        Ok(out) if !out.status.success() => Err(FocusError {
-            reason: "hyprctl-failed",
-            message: format!(
-                "hyprctl dispatch workspace failed (exit {:?})",
-                out.status.code()
-            ),
-        }),
-        Ok(_) => Ok(()),
-    }
-}
-
-// ── Phase ②: window-address discovery (pid-ancestry ↔ hyprctl clients) ──────
-//
-// A conducted terminal's window is the ancestor process that owns a Hyprland
-// client: conduct is exec'd (same pid) by the shell wrapper, itself a child of
-// the terminal (kitty). Walking conduct's pid up the ppid chain and matching a
-// pid against `hyprctl clients -j` finds that window — the first ancestor with a
-// client wins. All of this is BEST-EFFORT: it must never fail or slow a conduct,
-// so every impure step is guarded and an empty result just leaves the address
-// unset (exactly as before this phase).
 
 /// The pid-ancestry chain of `pid`, self first, walking up the ppid chain via
 /// `/proc`. Bounded (a bad `/proc` or a self-parenting loop can never spin) and
@@ -415,62 +58,40 @@ pub fn focus_workspace(ws: i64) -> Result<(), FocusError> {
 /// secrets broker's origin gate needs the identical walk and `aoide-secrets`
 /// cannot depend on this crate (that module's own doc has the full DAG
 /// argument); this delegate keeps every `crate::graph` call site unchanged.
-pub(in crate::graph) fn pid_ancestry(pid: i32) -> Vec<i32> {
+pub fn pid_ancestry(pid: i32) -> Vec<i32> {
     aoide_storage::attest::pid_ancestry(pid)
 }
 
-/// Whether a process owns a client in a `hyprctl clients -j` snapshot: the process
-/// a window belongs to. Discovery never hands that pid to a session, and the hook
-/// walk never accepts it as a harness.
-pub(in crate::graph) fn owns_client(clients: &[Value], pid: i32) -> bool {
-    clients.iter().any(|c| c.get("pid").and_then(Value::as_i64) == Some(i64::from(pid)))
+/// The index in `ancestry` (self-first, the hook process at 0) of the hook's harness: the first
+/// ancestor past the hook that is not invocation plumbing ([`is_invocation_plumbing`]). `None`
+/// when the chain ends first.
+fn harness_index(ancestry: &[i32]) -> Option<usize> {
+    ancestry
+        .iter()
+        .enumerate()
+        .skip(1)
+        .find(|&(_, &pid)| !is_invocation_plumbing(proc_argv(pid).as_deref()))
+        .map(|(i, _)| i)
 }
 
-/// The index in `ancestry` (self-first, the hook process at 0) of the hook's harness:
-/// the first ancestor past the hook that is not invocation plumbing
-/// ([`is_invocation_plumbing`]). Each ancestor is checked for a window owner before its
-/// plumbing verdict, so an owner ends the walk with no harness wherever it stands, a shell
-/// or a launcher included. So does the end of the chain. `clients` is `None` when the
-/// compositor cannot be read (off Hyprland, or no client array back from its request
-/// socket), and then no owner check applies.
-fn harness_index(ancestry: &[i32], clients: Option<&[Value]>) -> Option<usize> {
-    for (i, &pid) in ancestry.iter().enumerate().skip(1) {
-        if clients.is_some_and(|cs| owns_client(cs, pid)) {
-            return None;
-        }
-        if !is_invocation_plumbing(proc_argv(pid).as_deref()) {
-            return Some(i);
-        }
-    }
-    None
-}
-
-/// The chain a hook door lands on its record: the hook's ancestry from its harness up,
-/// self-first, at most 8 pids. The walk is [`harness_index`]'s, so the hook process and
-/// every shell or launcher beneath the harness are never stored, whatever wrap ran the
-/// hook. `None` when no harness is found: the door then moves no chain and binds no
-/// window. It lands at registration (a SessionStart, or the first hook event of an
-/// unknown id, through `session_store::do_hook_session_start`), when a window is bound,
-/// and when a per-turn hook finds the stored chain stale ([`ensure_session_window`]).
-/// Each move is gated by `ancestry_may_move`, and a stale-chain move also by
-/// [`chain_is_stale`]. It is consumed by a `wrap`/`conduct`/`spawn` registration's own
-/// ancestry walk (`ancestry_parent`) and by the window sweep, which binds a pid-less
-/// hosted session through it. Walks `hook_pid`, never `std::process::id()`: on the
-/// daemon-routed path those are two different processes, and `aoided`'s own ancestry
-/// describes systemd's tree, not the agent's — the same substitution
-/// `DAEMON_PEER_PID_FLAG` exists for, and the same reason it must not be undone here
-/// (a session stamped with the daemon's chain would hand every later registration under
-/// that daemon's own process tree a false parent).
+/// The chain a hook door lands on its record: the hook's ancestry from its harness up, self-first,
+/// at most 8 pids. The hook process and every shell or launcher beneath the harness are never
+/// stored, whatever wrap ran the hook. `None` when no harness is found, and the door then moves no
+/// chain. It lands at registration and when a per-turn hook finds the stored chain stale or empty
+/// ([`ensure_session_chain`]). Each move is gated by `ancestry_may_move`, and a per-turn move also
+/// by `chain_is_takeable`. It walks `hook_pid`, never `std::process::id()`: on the daemon-routed
+/// path those are two different processes, and `aoided`'s own ancestry describes systemd's tree,
+/// not the agent's.
 pub(in crate::graph) fn hook_chain(hook_pid: i32) -> Option<Vec<i32>> {
-    chain_of(&pid_ancestry(hook_pid), hyprctl_clients().as_deref())
+    chain_of(&pid_ancestry(hook_pid))
 }
 
-/// [`hook_chain`]'s walk over an ancestry already read, so a caller can walk one snapshot
-/// twice: first without the compositor, then with it.
-fn chain_of(ancestry: &[i32], clients: Option<&[Value]>) -> Option<Vec<i32>> {
-    let at = harness_index(ancestry, clients)?;
+/// [`hook_chain`]'s walk over an ancestry already read.
+fn chain_of(ancestry: &[i32]) -> Option<Vec<i32>> {
+    let at = harness_index(ancestry)?;
     Some(ancestry[at..].iter().take(8).copied().collect())
 }
+
 
 /// Read `pid`'s start time (`/proc/<pid>/stat` field 22, 1-indexed —
 /// `man proc(5)`) — LANE IDENTITY P-ID1's other half of the (pid,
@@ -637,16 +258,16 @@ pub(in crate::graph) fn windowless_by_lineage_from_parent(
 }
 
 /// Same check, starting from an ALREADY-REGISTERED session's own record
-/// rather than a raw parent id — the shape `ensure_session_window`/
-/// `resolve_pending_session_windows` need. `false` (keep today's backfill)
+/// rather than a raw parent id — the shape the desktop's sweep and the
+/// chain fill need. `false` (keep today's backfill)
 /// for an unknown `id`. Answers `true` in TWO cases: `id` is ITSELF a
-/// windowless conducted wrap (task #89 — the sweep in
-/// `resolve_pending_session_windows` iterates every record with an empty
+/// windowless conducted wrap (task #89 — the desktop's
+/// sweep iterates every record with an empty
 /// address, the wrap's own included, so its self-windowlessness must be
 /// checked directly, not only inferred from a child's parent chain), or its
 /// `parentSessionId` chain is (delegates to
 /// [`windowless_by_lineage_from_parent`]).
-pub(in crate::graph) fn windowless_by_lineage(id: &str, sessions: &[SessionRecord]) -> bool {
+pub fn windowless_by_lineage(id: &str, sessions: &[SessionRecord]) -> bool {
     let Some(rec) = sessions.iter().find(|s| s.session_id == id) else {
         return false;
     };
@@ -656,141 +277,35 @@ pub(in crate::graph) fn windowless_by_lineage(id: &str, sessions: &[SessionRecor
     windowless_by_lineage_from_parent(rec.parent_session_id.as_deref(), sessions)
 }
 
-/// Pure core: the window address of the nearest ancestor in `ancestry` that owns
-/// a client in the decoded `hyprctl clients -j` array. Walks the ancestry from
-/// self outward and returns the first client whose `pid` matches and whose
-/// `address` is non-empty. Pure over the decoded JSON + the pid list, so it is
-/// unit-testable with a fake client list and a fake ancestry — no `/proc`, no
-/// compositor. `None` when no ancestor owns a window.
-#[cfg(test)]
-fn match_window_for_ancestry(ancestry: &[i32], clients: &[Value]) -> Option<String> {
-    match_window_and_pid(ancestry, clients).map(|(addr, _)| addr)
-}
-
-/// Address-and-pid variant of the ancestor↔client match: also returns the
-/// matched client's `pid` — the terminal window's owning process. The hook door
-/// records this pid on the session so the reaper has a `/proc` liveness signal
-/// that vanishes with the window (never a false reap: the pid lives exactly as
-/// long as the window).
-fn match_window_and_pid(ancestry: &[i32], clients: &[Value]) -> Option<(String, u32)> {
-    for &pid in ancestry {
-        for c in clients {
-            if c.get("pid").and_then(Value::as_i64) == Some(pid as i64) {
-                if let Some(addr) = c.get("address").and_then(Value::as_str) {
-                    if !addr.is_empty() {
-                        return Some((addr.to_string(), pid as u32));
-                    }
-                }
-            }
-        }
-    }
-    None
-}
-
-/// Best-effort discovery of THIS conduct process's terminal window address (see
-/// the phase ② note). Guarded end-to-end: no Hyprland instance signature, a
-/// missing/failed `hyprctl`, unparseable JSON, or no ancestor match each yield
-/// `None` — never an error, never a slow path beyond one bounded request-socket read.
-pub(in crate::graph) fn discover_window_address() -> Option<String> {
-    discover_window_from(std::process::id() as i32).map(|(addr, _)| addr)
-}
-
-/// Best-effort discovery of the window hosting `pid`: the nearest ancestor of
-/// `pid` (itself first) that owns a client, read off one `hyprctl clients -j`
-/// snapshot. Returns the address and that client's workspace, never the
-/// owner's pid: a window's pid belongs to the app that owns it, and a session
-/// record's pid must be the session's own process (see `pid_may_move`). Guarded
-/// end-to-end: no Hyprland instance signature, a missing/failed `hyprctl`,
-/// unparseable JSON, or no ancestor match each yield `None` — never an error,
-/// never a slow path beyond one bounded request-socket read.
-///
-/// `pid` is whichever process the caller is hosting: conduct passes its own
-/// pid, and the hook door passes the hook process (its own pid on the CLI arm,
-/// the kernel-attested peer pid on the daemon arm). Never `aoided`'s own pid.
-pub(in crate::graph) fn discover_window_from(pid: i32) -> Option<(String, Option<i64>)> {
-    // Cheap gate + one bounded request-socket read, both inside the shared seam.
-    let clients = hyprctl_clients()?;
-    let (addr, _owner) = match_window_and_pid(&pid_ancestry(pid), &clients)?;
-    // Stamp the window's workspace off the SAME clients snapshot (no second
-    // hyprctl call); `None` when the client carries no numeric workspace id.
-    let workspace = client_workspace_for_address(&clients, &addr);
-    Some((addr, workspace))
-}
-
-/// Per-turn backfill for a hook-registered session: the window it still lacks, and
-/// the stored `hookAncestry` a dead→live transition left stale. `hook_pid` is the
-/// hook process (see [`discover_window_from`]); `None` means the door attested no
-/// pid, and nothing is walked. The chain is [`hook_chain`]'s: a hook with no harness
-/// (the walk reached a window owner, or the chain's end) moves no chain and binds no
-/// window. Gated on the record not being windowless by lineage,
-/// and on nothing else: the bind needs a compositor, which [`discover_window_from`]
-/// answers `None` without `HYPRLAND_INSTANCE_SIGNATURE` (through `hyprctl_clients`),
-/// while the heal reads only `/proc`. A bind fills `windowAddress`, the workspace
-/// observation, and the record's `hookAncestry` (the harness's chain, through
-/// `ancestry_may_move`) in one locked write. A bind is refused onto a record that
-/// a live harness outside the chain anchors ([`live_harness_outside`]). A stale stored chain ([`chain_is_stale`])
-/// takes the same chain in one locked write, with or without a bind, so a live
-/// harness the record never recorded is recorded on its next turn, compositor or not.
-/// A live stored chain is never written here. It never writes `pid` (discovery is
-/// not the session's process), and never the session `state` (the hook phase's job).
-pub(in crate::graph) fn ensure_session_window(id: &str, hook_pid: Option<i32>) {
+/// Per-turn fill and heal of a hook-registered session's stored `hookAncestry`: a chainless record
+/// live transition left it behind) is replaced by the live harness's chain, in one locked write. A
+/// takes the live harness's chain, and a stale chain (a dead to live transition left it behind) is
+/// replaced, in one locked write. A chain a live process of the record's own holds is never
+/// written here, and a windowless-by-lineage record is never touched.
+/// `hook_pid` is the hook process, and `None` walks nothing. It never writes `pid`,
+/// `windowAddress` or the session `state`: binding a window is the desktop's, through
+/// [`attach_window`].
+pub(in crate::graph) fn ensure_session_chain(id: &str, hook_pid: Option<i32>) {
     let Some(hook_pid) = hook_pid else {
         return;
     };
-    // Cheap, unlocked pre-check: bail before paying for a `hyprctl` round trip
-    // (`discover_window_from`, below) when there is nothing to do. `load_stage`/
-    // `write_stage` are atomic-rename based, so an unlocked read never tears, only
-    // occasionally stales; a stale reading here costs one redundant discovery or
-    // chain walk at worst, never a lost update (the actual write is locked+re-checked
-    // below).
+    // Cheap, unlocked pre-check. `load_stage`/`write_stage` are atomic-rename based, so an unlocked
+    // read never tears, only occasionally stales; the locked write below re-checks.
     let Ok(file) = load_stage::<SessionsFile>(&sessions_path()) else {
         return;
     };
     let Some(rec) = file.sessions.iter().find(|s| s.session_id == id) else {
         return;
     };
-    // Windowless by construction (task #89): a nested headless `conduct`/`spawn`
-    // whose lineage runs through an unwindowed wrap must never backfill via
-    // pid-ancestry — that walk would find the ENCLOSING terminal's window, the exact
-    // same-window collision that made the reaper evict this session and its
-    // launching agent as if they were stale twins.
     if windowless_by_lineage(id, &file.sessions) {
         return;
     }
-    let windowless = rec.window_address.is_empty();
-    if !windowless && rec.hook_ancestry.is_empty() {
-        return;
-    }
-    // The walk runs twice on one snapshot. Without the compositor first, which is all a
-    // turn needs when nothing is to bind and the stored chain is live; with it only once a
-    // bind or a heal is wanted. A window owner turns the walk into `None` and never into
-    // another chain, so a live chain found without clients is the one found with them.
-    let ancestry = pid_ancestry(hook_pid);
-    let Some(walked) = chain_of(&ancestry, None) else {
+    let Some(chain) = chain_of(&pid_ancestry(hook_pid)) else {
         return;
     };
-    // A bind onto a record its live harness anchors is a stranger's, so it is refused.
-    let needs_window = windowless && live_harness_outside(rec, &walked, pid_is_alive).is_none();
-    let needs_heal = chain_is_stale(rec, &walked, pid_is_alive);
-    if !needs_window && !needs_heal {
+    if !chain_is_takeable(rec, &chain, pid_is_alive) {
         return;
     }
-    let Some(chain) = chain_of(&ancestry, hyprctl_clients().as_deref()) else {
-        return;
-    };
-    let found = if needs_window {
-        discover_window_from(hook_pid)
-    } else {
-        None
-    };
-    if found.is_none() && !needs_heal {
-        return;
-    }
-    // The actual load-mutate-write is locked and re-loads fresh (rather than
-    // reusing the pre-check's copy above) so a concurrent writer's changes —
-    // made anywhere between the pre-check and here — are never clobbered. The
-    // re-checks below are what make that safe even though discovery's hyprctl
-    // round trip ran unlocked.
     with_stage_lock(|| {
         let mut file: SessionsFile = match load_stage(&sessions_path()) {
             Ok(f) => f,
@@ -799,31 +314,10 @@ pub(in crate::graph) fn ensure_session_window(id: &str, hook_pid: Option<i32>) {
         let Some(s) = file.sessions.iter_mut().find(|s| s.session_id == id) else {
             return;
         };
-        // A window filled by a concurrent writer while we were discovering is kept, and
-        // so is a record a live harness outside `chain` has come to anchor.
-        let bind = found.filter(|_| {
-            s.window_address.is_empty() && live_harness_outside(s, &chain, pid_is_alive).is_none()
-        });
-        let moves = bind.is_some() || chain_is_stale(s, &chain, pid_is_alive);
-        let mut changed = false;
-        if let Some((addr, workspace)) = bind {
-            s.window_address = addr;
-            // The workspace observation goes through the ONE seam (which also
-            // stamps the workspace's default project, once, at birth); the
-            // listener keeps the id fresh on later moves.
-            observe_workspace(s, workspace, &projects_now());
-            changed = true;
-        }
-        // The chain moves on a bind (the bound record's chain holds the process that
-        // bound it) or on a stale stored chain, under the registration rule
-        // ([`ancestry_may_move`]): a live pid of the record's own holds its chain.
-        if moves && ancestry_may_move(s, &chain, pid_is_alive) {
-            s.hook_ancestry = chain.clone();
-            changed = true;
-        }
-        if !changed {
+        if !chain_is_takeable(s, &chain, pid_is_alive) || !ancestry_may_move(s, &chain, pid_is_alive) {
             return;
         }
+        s.hook_ancestry = chain.clone();
         if file.schema_version.is_empty() {
             file.schema_version = STAGE_GRAPH_VERSION.to_string();
         }
@@ -833,213 +327,129 @@ pub(in crate::graph) fn ensure_session_window(id: &str, hook_pid: Option<i32>) {
     });
 }
 
-// ── Authoritative window capture: the Hyprland event listener ────────────────
-//
-// The hook-time backfill above is LAZY — a session's `windowAddress` only lands
-// on the *next* hook fire, so at click time it is frequently empty and the
-// widget's focus jump fails. The fix is EVENT-DRIVEN, creation-time
-// capture: the shellbridge service runs a background thread reading Hyprland's
-// `socket2` event stream and, the moment a window opens (or moves / retitles /
-// closes), it (re)resolves every tracked session's window authoritatively. This
-// is the PRIMARY source of `windowAddress`; the hook backfill stays as a
-// belt-and-suspenders fallback. All of it is best-effort and off-Hyprland-safe:
-// no instance signature → the listener logs once and returns, and the accept
-// loop keeps serving regardless.
-
-/// Path to the Hyprland event socket (`socket2`):
-/// `$XDG_RUNTIME_DIR/hypr/$HYPRLAND_INSTANCE_SIGNATURE/.socket2.sock`. Returns
-/// `None` when not under a Hyprland session (no signature, or no runtime dir) —
-/// the listener then degrades to "disabled" rather than crashing.
-pub fn hypr_event_socket_path() -> Option<PathBuf> {
-    let sig = std::env::var("HYPRLAND_INSTANCE_SIGNATURE").ok()?;
-    if sig.trim().is_empty() {
-        return None;
-    }
-    let runtime = std::env::var("XDG_RUNTIME_DIR").ok()?;
-    Some(
-        PathBuf::from(runtime)
-            .join("hypr")
-            .join(sig)
-            .join(".socket2.sock"),
-    )
+/// What a window attach did: the stage it left, or the refusal it hit.
+pub enum Attach {
+    /// The session holds the window now. `changed` says the stage moved, and `workspace` is the id
+    /// it holds.
+    Bound { changed: bool, workspace: Option<i64> },
+    /// No session has that id.
+    NoSession,
+    /// The session already holds another window: one window per session until that one closes.
+    Held { window: String },
+    /// `sessions.json` could not be read or written.
+    Unwritten,
 }
 
-/// One parsed Hyprland `socket2` event we act on (window lifecycle only). Every
-/// other event line maps to `None` and is ignored.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum HyprWindowEvent {
-    /// A window opened / moved / retitled — (re)resolve pending session windows.
-    /// `address` is the raw event address (no `0x` prefix); we resolve off the
-    /// live `hyprctl clients` list rather than trusting it, so it is advisory.
-    Appeared { address: String },
-    /// A window closed — clear its address off whatever session stored it, so the
-    /// roster stops advertising a dead jump target (the reaper then removes the
-    /// record via its pid signal).
-    Closed { address: String },
-}
-
-/// Parse ONE `socket2` line (`EVENT>>DATA`) into a [`HyprWindowEvent`], or `None`
-/// for the many events we ignore. Pure and total (unit-tested): a line without
-/// `>>`, an unhandled event name, or an empty address all yield `None` — never a
-/// panic. The address is Hyprland's bare hex (e.g. `55aabb`); [`normalize_addr`]
-/// reconciles it with `hyprctl`'s `0x…` form at compare time.
-pub fn parse_hypr_window_event(line: &str) -> Option<HyprWindowEvent> {
-    let (event, data) = line.split_once(">>")?;
-    match event {
-        // openwindow>>ADDR,WORKSPACE,CLASS,TITLE · movewindow>>ADDR,WORKSPACE
-        // movewindowv2>>ADDR,WSID,WSNAME · windowtitle>>ADDR
-        // windowtitlev2>>ADDR,TITLE — in every case ADDR is the first field.
-        "openwindow" | "movewindow" | "movewindowv2" | "windowtitle" | "windowtitlev2" => {
-            let addr = data.split(',').next().unwrap_or("").trim();
-            if addr.is_empty() {
-                return None;
+/// Record the window a session runs in. Filling an empty window is the bind. The same window
+/// again only moves the workspace, through the one `observe_workspace` seam, so the birth default
+/// project is never re-stamped. A different window is refused.
+pub fn attach_window(id: &str, window: &str, workspace: Option<i64>) -> Attach {
+    with_stage_lock(|| {
+        let mut file: SessionsFile = match load_stage(&sessions_path()) {
+            Ok(f) => f,
+            Err(_) => return Attach::Unwritten,
+        };
+        let Some(s) = file.sessions.iter_mut().find(|s| s.session_id == id) else {
+            return Attach::NoSession;
+        };
+        if !s.window_address.is_empty() && normalize_addr(&s.window_address) != normalize_addr(window) {
+            return Attach::Held {
+                window: s.window_address.clone(),
+            };
+        }
+        let mut changed = false;
+        if s.window_address.is_empty() {
+            s.window_address = window.to_string();
+            changed = true;
+        }
+        if let Some(ws) = workspace {
+            changed |= observe_workspace(s, Some(ws), &projects_now());
+        }
+        let bound = Attach::Bound {
+            changed,
+            workspace: s.workspace,
+        };
+        if !changed {
+            return bound;
+        }
+        if file.schema_version.is_empty() {
+            file.schema_version = STAGE_GRAPH_VERSION.to_string();
+        }
+        match write_stage(&sessions_path(), &file) {
+            Ok(_) => {
+                let _ = restage_graph();
+                bound
             }
-            Some(HyprWindowEvent::Appeared {
-                address: addr.to_string(),
-            })
+            Err(_) => Attach::Unwritten,
         }
-        // closewindow>>ADDR — the whole payload is the address.
-        "closewindow" => {
-            let addr = data.trim();
-            if addr.is_empty() {
-                return None;
+    })
+}
+
+/// `aoide session window attach <id> <address> [--workspace <n>]`, the one write a desktop window
+/// binding makes. It routes through `aoided` as `session bind` does. The gate refuses a missing
+/// or blank id or address; the handler refuses an unknown session and a session that already holds
+/// a different window.
+pub fn session_window_attach(inv: &Invocation) -> Outcome {
+    let cmd = "session.window.attach";
+    if inv.door != aoide_protocol::Door::Daemon {
+        return aoide_client::daemon::daemon_dispatch(inv).unwrap_or_else(|| {
+            Outcome::error(cmd, "aoided must be running to attach a session window")
+        });
+    }
+    let id = inv.args.first().map_or("", String::as_str);
+    let window = inv.args.get(1).map_or("", |w| w.trim());
+    let workspace = match inv.flags.get("workspace") {
+        None => None,
+        Some(raw) => match raw.parse::<i64>() {
+            Ok(ws) => Some(ws),
+            Err(_) => {
+                return Outcome::usage(cmd, format!("--workspace takes an integer id, not `{raw}`"));
             }
-            Some(HyprWindowEvent::Closed {
-                address: addr.to_string(),
-            })
+        },
+    };
+    match attach_window(id, window, workspace) {
+        Attach::Bound { changed, workspace } => {
+            let out = Outcome::ok(cmd, format!("session `{id}` runs in window {window}"))
+                .with_data(json!({
+                    "session": id,
+                    "window": window,
+                    "workspace": workspace,
+                    "changed": changed,
+                }));
+            if changed {
+                out.changed([sessions_path().to_string_lossy().into_owned()])
+            } else {
+                out
+            }
         }
-        _ => None,
+        Attach::NoSession => Outcome::error(cmd, format!("no session `{id}`"))
+            .with_data(json!({ "reason": "session-not-found", "session": id })),
+        Attach::Held { window: held } => Outcome::error(
+            cmd,
+            format!("session `{id}` already runs in window {held}; a session has one window until it closes"),
+        )
+        .with_data(json!({ "reason": "window-held", "session": id, "window": held })),
+        Attach::Unwritten => Outcome::error(cmd, "could not write sessions.json"),
     }
 }
 
-/// The window a pid-less hosted session is bound to, read off its stored
-/// `hookAncestry` (a window hosts any number of agents, and a harness that never
-/// reports a pid is found only through its chain). The owner is the nearest chain
-/// pid that owns a client — the same nearest-ancestor rule [`match_window_and_pid`]
-/// applies to a recorded pid. The chain binds only when a process of its own
-/// stands BENEATH that owner right now: a stale chain whose pids are all dead
-/// (`pid_ancestry` of a dead pid is that pid alone) or reused outside the owner's
-/// tree binds nothing. `beneath(p, owner)` is that probe, injected for tests;
-/// production passes `pid_ancestry(p).contains(&owner)`.
-fn window_for_hook_chain(
-    chain: &[i32],
-    clients: &[Value],
-    beneath: impl Fn(i32, i32) -> bool,
-) -> Option<String> {
-    let (addr, owner) = match_window_and_pid(chain, clients)?;
-    let owner = owner as i32;
-    let i = chain.iter().position(|&p| p == owner)?;
-    chain[..i].iter().any(|&p| beneath(p, owner)).then_some(addr)
-}
 
-/// (Re)resolve the `windowAddress` of every tracked session that has no window
-/// yet, stamping the canonical `hyprctl` address — AND keep every
-/// already-resolved session's `workspace` id current off the same clients
-/// snapshot, so a terminal dragged to another workspace re-stamps here (the
-/// `movewindow`/`movewindowv2` event re-runs this pass; concepts/Terminal-
-/// Commander's hover-preview bridge). A session with a recorded `pid` resolves
-/// through that pid's ancestry, the window client being one of its ancestors.
-/// A pid-less hosted session (the hook-only shape) resolves through its stored
-/// `hookAncestry`, and only while a process of that chain is still alive beneath
-/// the window's owner ([`window_for_hook_chain`]); it never gains a `pid` here.
-/// Runs in the shellbridge process, which can see the compositor. Cheap-guarded:
-/// zero `hyprctl` work when no session has either a pending window OR a resolved
-/// one. It only ever FILLS an empty address (never overwrites a good one), and
-/// every `workspace` write goes through the ONE seam (`observe_workspace`): an
-/// observation of a PRESENT id updates it, and an observation that resolves to
-/// NO id CLEARS it — a window whose client reports no workspace has none
-/// (`clear_closed_window` clears only the address, so a record can sit at
-/// address-empty + `workspace: Some` and be cleared exactly here). The seam
-/// never touches `pid`, `state`, or a session's birth default. Returns true iff
-/// `sessions.json` changed.
-pub fn resolve_pending_session_windows() -> bool {
-    // Cheap, unlocked pre-check (see `ensure_session_window`'s identical
-    // reasoning above): skip the `hyprctl` round trip entirely when there's
-    // nothing to do. A stale reading here costs one redundant `hyprctl`
-    // call at worst — the write below is locked and re-loads fresh.
-    let has_work = match load_stage::<SessionsFile>(&sessions_path()) {
-        Ok(f) => {
-            // Work to do if a session still needs its window (empty address +
-            // a pid or a hook chain to walk) OR already has one whose workspace
-            // we can (re)stamp. The latter is what keeps `workspace` fresh across
-            // a move; without it a steady-state roster would never re-stamp.
-            let has_pending = f.sessions.iter().any(|s| {
-                s.window_address.is_empty()
-                    && (s.pid.is_some() || (!s.hook_ancestry.is_empty() && s.state != "done"))
-            });
-            let has_windowed = f.sessions.iter().any(|s| !s.window_address.is_empty());
-            has_pending || has_windowed
-        }
-        Err(_) => return false,
-    };
-    if !has_work {
-        return false;
-    }
-    let Some(clients) = hyprctl_clients() else {
-        return false;
-    };
+
+/// Publish the untracked-terminal roster for these terminal windows: a `shell` record for every
+/// window no tracked session claims, and removal of any `win:*` record whose window has closed.
+/// Returns true iff `sessions.json` changed. The desktop calls it with the windows it reads.
+pub fn sync_untracked_terminal_rows(windows: &[TermWindow]) -> bool {
     with_stage_lock(|| {
         let mut file: SessionsFile = match load_stage(&sessions_path()) {
             Ok(f) => f,
             Err(_) => return false,
         };
-        // Windowless-by-construction ids (task #89):
-        // computed off an immutable snapshot BEFORE the mutable loop below.
-        // Two distinct cases `windowless_by_lineage` now catches: (a) a
-        // nested headless session's own recorded pid (self-reported by the
-        // harness, independent of window discovery) would otherwise
-        // pid-ancestry-walk straight to the ENCLOSING terminal's window
-        // here — the same collision `ensure_session_window` guards against;
-        // and (b) a headless `conduct` wrap's OWN record ALSO carries a pid
-        // (conduct's own, stamped at registration) and an empty address —
-        // this sweep would otherwise "discover" and stamp the SAME
-        // enclosing-terminal window onto the wrap itself, which is exactly
-        // what re-poisons (a)'s check downstream (it inspects the parent's
-        // `headless`/`windowAddress`). `windowless_by_lineage`'s own
-        // self-check (`is_windowless_wrap`) is what catches (b) — this
-        // sweep never needs a second, parallel `headless` filter here.
-        let windowless: HashSet<String> = file
-            .sessions
-            .iter()
-            .filter(|s| s.window_address.is_empty() && windowless_by_lineage(&s.session_id, &file.sessions))
-            .map(|s| s.session_id.clone())
-            .collect();
-        let mut changed = false;
-        let projects = projects_now();
-        for s in file.sessions.iter_mut() {
-            if s.window_address.is_empty() {
-                if windowless.contains(&s.session_id) {
-                    continue;
-                }
-                // Pending window: resolve it via the recorded pid's ancestry,
-                // or — for a pid-less hosted session — its hook chain, observing
-                // the workspace off the same snapshot through the ONE seam (a
-                // workspace the client does not report clears the stored id,
-                // and the default project is stamped only at birth).
-                let bound = match s.pid {
-                    Some(pid) => match_window_and_pid(&pid_ancestry(pid as i32), &clients)
-                        .map(|(addr, _)| addr),
-                    None if s.state != "done" => window_for_hook_chain(
-                        &s.hook_ancestry,
-                        &clients,
-                        |p, owner| pid_ancestry(p).contains(&owner),
-                    ),
-                    None => None,
-                };
-                if let Some(addr) = bound {
-                    let ws = client_workspace_for_address(&clients, &addr);
-                    s.window_address = addr;
-                    observe_workspace(s, ws, &projects);
-                    changed = true;
-                }
-            } else if let Some(ws) = client_workspace_for_address(&clients, &s.window_address) {
-                // Resolved window still live: keep its workspace current (the
-                // drag-between-workspaces re-stamp). A move updates the id and
-                // NEVER re-stamps the birth default; a vanished window leaves
-                // the stored workspace intact.
-                changed |= observe_workspace(s, Some(ws), &projects);
-            }
-        }
+        let (sessions, changed) = reconcile_untracked_terminals(
+            std::mem::take(&mut file.sessions),
+            windows,
+            &projects_now(),
+        );
+        file.sessions = sessions;
         if !changed {
             return false;
         }
@@ -1053,6 +463,8 @@ pub fn resolve_pending_session_windows() -> bool {
         false
     })
 }
+
+
 
 /// Clear a closed window's address off any session that stored it (normalised
 /// compare, so `0x…`/case differences still match). The record is left in place
@@ -1085,18 +497,6 @@ pub fn clear_closed_window(address: &str) -> bool {
         false
     })
 }
-
-// ── Untracked-terminal capture: publish a synthetic record per bare tty ──────
-//
-// The Terminals roster is the PROCESS view of every open terminal window, tracked
-// or not (concepts/desktop/Terminal-Commander). A bare `kitty` running a plain
-// `bash` has no Aoide hook and no `conduct` PTY, so nothing publishes it — the
-// widget used to enumerate `hyprctl clients` itself and merge, violating the
-// Widget–Bridge Contract ("never enumerate the system in QML"). This moves that
-// enumeration into the daemon: for every LIVE terminal-class window with no
-// tracked session claiming its `windowAddress`, we upsert a lightweight `shell`
-// record keyed `win:<normalized-address>`, so `sessions.json` ALONE is a complete
-// terminal roster the widget reads as a pure view.
 
 /// Terminal window CLASSES we recognize as a tty (mirrors the QML `termClassRe`
 /// this supersedes) — ascii-lowercased compare.
@@ -1139,12 +539,12 @@ pub(crate) fn is_terminal_class(class: &str) -> bool {
     TERMINAL_CLASSES.contains(&c.as_str())
 }
 
-/// One live terminal window distilled from a `hyprctl clients -j` client — the
+/// One live terminal window distilled from a client the desktop reads off the compositor — the
 /// pure-core input for [`reconcile_untracked_terminals`], so the reconciliation
 /// is testable without a compositor (`cwd` is pre-read from `/proc/<pid>/cwd` by
 /// the I/O wrapper).
 #[derive(Debug, Clone, Default)]
-pub(crate) struct TermWindow {
+pub struct TermWindow {
     pub address: String,
     pub class: String,
     pub title: String,
@@ -1169,7 +569,7 @@ pub(crate) struct TermWindow {
 ///     never double-published (the tracked record carries the rich state).
 ///   * A synthetic `win:*` record whose window no longer appears live (closed, or
 ///     newly claimed by a tracked session) is REMOVED.
-pub(crate) fn reconcile_untracked_terminals(
+pub fn reconcile_untracked_terminals(
     mut sessions: Vec<SessionRecord>,
     windows: &[TermWindow],
     projects: &[Project],
@@ -1281,217 +681,12 @@ pub(crate) fn reconcile_untracked_terminals(
     (sessions, changed)
 }
 
-/// Extract a [`TermWindow`] from one `hyprctl clients -j` client object, reading
-/// its owning process's cwd from `/proc/<pid>/cwd`. `None` for a client with no
-/// usable `address`. The one I/O seam over the pure [`reconcile_untracked_terminals`].
-fn term_window_from_client(c: &Value) -> Option<TermWindow> {
-    let address = c.get("address").and_then(Value::as_str)?.trim().to_string();
-    if address.is_empty() {
-        return None;
-    }
-    let class = c
-        .get("class")
-        .and_then(Value::as_str)
-        .unwrap_or("")
-        .to_string();
-    let title = c
-        .get("title")
-        .and_then(Value::as_str)
-        .unwrap_or("")
-        .to_string();
-    let workspace = c
-        .get("workspace")
-        .and_then(|w| w.get("id"))
-        .and_then(Value::as_i64);
-    // Checked, not `as i32`: hyprctl's JSON pid is an i64, and a value outside
-    // i32's range would otherwise silently wrap into an arbitrary in-range
-    // pid before it's used both for `/proc/<pid>/cwd` below and, later, a
-    // widening `as u32` in `reconcile_untracked_terminals`. `try_from` simply
-    // drops an out-of-range value (`None`) rather than wrapping it into a
-    // bogus one.
-    let pid = c
-        .get("pid")
-        .and_then(Value::as_i64)
-        .and_then(|p| i32::try_from(p).ok())
-        .filter(|p| *p > 0);
-    // `mapped` defaults to true when absent — a client with no `mapped` field is
-    // treated as a shown window rather than silently dropped.
-    let mapped = c.get("mapped").and_then(Value::as_bool).unwrap_or(true);
-    let cwd = pid.and_then(proc_cwd).unwrap_or_default();
-    Some(TermWindow {
-        address,
-        class,
-        title,
-        workspace,
-        pid,
-        mapped,
-        cwd,
-    })
-}
-
-/// Publish a lightweight `shell` session record for every LIVE terminal-class
-/// window that has no tracked session already claiming its `windowAddress`, and
-/// remove any synthetic `win:*` record whose window has closed — so
-/// `sessions.json` is a complete terminal roster and QML never enumerates
-/// `hyprctl` itself. The I/O wrapper over [`reconcile_untracked_terminals`]:
-/// gathers the clients, distils each into a [`TermWindow`], reconciles under the
-/// stage lock, and re-stages `graph.json` only when something changed. Best-effort
-/// and off-Hyprland-safe like its siblings — returns early (no panic) when
-/// `hyprctl_clients()` is unavailable. Returns true iff `sessions.json` changed.
-pub fn sync_untracked_terminal_windows() -> bool {
-    let Some(clients) = hyprctl_clients() else {
-        return false;
-    };
-    let windows: Vec<TermWindow> = clients.iter().filter_map(term_window_from_client).collect();
-    with_stage_lock(|| {
-        let mut file: SessionsFile = match load_stage(&sessions_path()) {
-            Ok(f) => f,
-            Err(_) => return false,
-        };
-        let (sessions, changed) = reconcile_untracked_terminals(
-            std::mem::take(&mut file.sessions),
-            &windows,
-            &projects_now(),
-        );
-        file.sessions = sessions;
-        if !changed {
-            return false;
-        }
-        if file.schema_version.is_empty() {
-            file.schema_version = STAGE_GRAPH_VERSION.to_string();
-        }
-        if write_stage(&sessions_path(), &file).is_ok() {
-            let _ = restage_graph();
-            return true;
-        }
-        false
-    })
-}
-
-/// Is `e` a read-timeout expiry rather than a genuine socket failure? A blocking
-/// read on a Unix stream whose `SO_RCVTIMEO` elapses returns `EAGAIN`, which
-/// Rust surfaces as [`ErrorKind::WouldBlock`] on Unix (Windows uses `TimedOut`);
-/// std documents either kind, so we accept both. Pure/testable, in the style of
-/// [`is_terminal_class`] & friends — the listener uses it to tell "nothing
-/// happened for 5s, re-tick" apart from "socket dropped, reconnect".
-pub(crate) fn is_read_timeout(e: &std::io::Error) -> bool {
-    matches!(
-        e.kind(),
-        std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
-    )
-}
-
-/// Run the Hyprland window→session event listener FOREVER — the shellbridge
-/// service spawns this on a background thread so it can never block or kill the
-/// socket accept loop. It connects to the `socket2` event stream and keeps
-/// `sessions.json` authoritative: an opened/moved/retitled window (re)resolves
-/// pending session windows, a closed window is cleared. Degrades gracefully — no
-/// Hyprland signature logs once and returns (headless/non-Hypr aoide is
-/// unaffected); a failed connect or a dropped socket logs and retries after a
-/// short backoff. NEVER panics. A ~5s read timeout on the connection also
-/// re-ticks the untracked-terminal sync (see [`is_read_timeout`]) so a bare tty's
-/// cwd/title doesn't go stale between window events.
-///
-/// Every one of those same ticks also calls [`sync_codex_app_threads`] — for
-/// PROMPTNESS only. The reaper's own tick (`reap.rs`) is the primary,
-/// portable call site (it runs wherever `aoided` runs, Hyprland or not);
-/// this listener merely reconciles sooner on a host where it happens to be
-/// running. Wherever [`resolve_pending_session_windows`] also runs (reconnect,
-/// `Appeared`), it comes AFTER the codex sync so a thread enrolled just now
-/// is stamped with its window in the same pass.
-pub fn run_hypr_window_listener() {
-    use std::io::{BufRead, BufReader};
-    let Some(sock) = hypr_event_socket_path() else {
-        eprintln!(
-            "[aoide/shellbridge] no HYPRLAND_INSTANCE_SIGNATURE — window-event listener disabled"
-        );
-        return;
-    };
-    // Populate the untracked-terminal roster once at startup, so the Terminals
-    // widget has a complete tty roster the instant shellbridge comes up — not
-    // only after the next window event fires.
-    sync_codex_app_threads();
-    sync_untracked_terminal_windows();
-    loop {
-        match UnixStream::connect(&sock) {
-            Ok(stream) => {
-                // On every (re)connect, sweep any windows that opened while we
-                // were not listening (service start mid-session, or a reconnect).
-                sync_codex_app_threads();
-                resolve_pending_session_windows();
-                sync_untracked_terminal_windows();
-                // Coarse read timeout so a blocking read wakes every ~5s even
-                // when no window event fires — the periodic tick that refreshes
-                // cwd/title for bare, untracked terminals. Best-effort: if it
-                // fails the listener still works, just event-driven only.
-                let _ = stream.set_read_timeout(Some(std::time::Duration::from_secs(5)));
-                for line in BufReader::new(stream).lines() {
-                    let line = match line {
-                        Ok(line) => line,
-                        // Timeout expiry (no event for ~5s): stay on this SAME
-                        // connection, re-tick the untracked roster, keep reading.
-                        // The read itself blocked for the full 5s, so this paces
-                        // itself — no busy-loop.
-                        Err(e) if is_read_timeout(&e) => {
-                            sync_codex_app_threads();
-                            sync_untracked_terminal_windows();
-                            continue;
-                        }
-                        // Any other error: socket dropped → reconnect.
-                        Err(_) => break,
-                    };
-                    match parse_hypr_window_event(&line) {
-                        Some(HyprWindowEvent::Appeared { .. }) => {
-                            sync_codex_app_threads();
-                            resolve_pending_session_windows();
-                            sync_untracked_terminal_windows();
-                        }
-                        Some(HyprWindowEvent::Closed { address }) => {
-                            clear_closed_window(&address);
-                            sync_codex_app_threads();
-                            sync_untracked_terminal_windows();
-                        }
-                        None => {}
-                    }
-                }
-            }
-            Err(e) => {
-                eprintln!("[aoide/shellbridge] hypr event socket connect failed ({e}); retrying");
-            }
-        }
-        std::thread::sleep(std::time::Duration::from_secs(2));
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::graph::session_store::{do_hook_session_start, superseded_by};
     use crate::graph::testutil::*;
-    use serde_json::json;
 
-    #[test]
-    fn read_timeout_predicate_distinguishes_tick_from_drop() {
-        use std::io::{Error, ErrorKind};
-        // A read-timeout expiry surfaces as WouldBlock on Unix — that's a tick,
-        // not a failure: keep the connection.
-        assert!(is_read_timeout(&Error::new(ErrorKind::WouldBlock, "timed out")));
-        // Windows/std also documents TimedOut for the same event: accept it too.
-        assert!(is_read_timeout(&Error::new(ErrorKind::TimedOut, "timed out")));
-        // A genuine socket drop is NOT a timeout → the listener must reconnect.
-        assert!(!is_read_timeout(&Error::new(
-            ErrorKind::ConnectionReset,
-            "node reset"
-        )));
-        assert!(!is_read_timeout(&Error::new(
-            ErrorKind::BrokenPipe,
-            "broken pipe"
-        )));
-        assert!(!is_read_timeout(&Error::new(
-            ErrorKind::UnexpectedEof,
-            "eof"
-        )));
-    }
     #[test]
     fn terminal_class_is_case_insensitive_and_exact() {
         assert!(is_terminal_class("kitty"));
@@ -1500,23 +695,6 @@ mod tests {
         assert!(!is_terminal_class("firefox"));
         assert!(!is_terminal_class("kittyfoo"));
         assert!(!is_terminal_class(""));
-    }
-    #[test]
-    fn term_window_from_client_drops_a_pid_outside_i32_range_instead_of_wrapping() {
-        // Before the fix, `as i32` on an out-of-range i64 would silently wrap
-        // into an arbitrary (possibly small, positive) i32 — which then feeds
-        // `/proc/<pid>/cwd` right below, and later a widening `as u32` in
-        // `reconcile_untracked_terminals`. The checked conversion must drop
-        // it instead of wrapping.
-        let c = serde_json::json!({
-            "address": "0xAABB",
-            "class": "kitty",
-            "title": "t",
-            "pid": (i32::MAX as i64) + 1,
-            "mapped": true,
-        });
-        let w = term_window_from_client(&c).expect("a valid address still yields a TermWindow");
-        assert_eq!(w.pid, None, "an out-of-i32-range pid must be dropped, never wrapped");
     }
 
     #[test]
@@ -1535,6 +713,7 @@ mod tests {
         assert_eq!(r.workspace, Some(1));
         assert_eq!(r.pid, Some(4321));
     }
+
     #[test]
     fn window_claimed_by_tracked_session_gets_no_synthetic_duplicate() {
         // A tracked agent already owns 0xAABB (address stored 0x-prefixed here,
@@ -1551,6 +730,7 @@ mod tests {
         assert_eq!(out[0].session_id, "efdc");
         assert!(!out.iter().any(|s| s.session_id.starts_with("win:")));
     }
+
     #[test]
     fn closed_windows_synthetic_record_is_removed() {
         // A pre-existing synthetic record whose window no longer appears live is
@@ -1570,6 +750,7 @@ mod tests {
         assert_eq!(out[0].session_id, "win:live");
         assert!(!out.iter().any(|s| s.session_id == "win:dead"));
     }
+
     #[test]
     fn non_terminal_class_window_is_ignored() {
         let (out, changed) =
@@ -1577,6 +758,7 @@ mod tests {
         assert!(!changed);
         assert!(out.is_empty());
     }
+
     #[test]
     fn unmapped_terminal_window_is_ignored() {
         let mut w = term_win("0xAABB", "kitty", "/home/khoa");
@@ -1585,6 +767,7 @@ mod tests {
         assert!(!changed);
         assert!(out.is_empty());
     }
+
     #[test]
     fn rescan_is_idempotent_and_upserts_in_place() {
         let (first, _) =
@@ -1601,6 +784,7 @@ mod tests {
         assert_eq!(third.len(), 1);
         assert_eq!(third[0].cwd, "/other");
     }
+
     #[test]
     fn reconcile_untracked_terminals_mints_petname_and_never_rewrites_a_named_record() {
         // A NEW synthetic terminal gets a minted petname on creation…
@@ -1616,248 +800,7 @@ mod tests {
         assert!(!changed2, "re-scanning an already-named record must not flip changed");
         assert_eq!(second[0].petname, first[0].petname, "an existing petname must never be re-minted");
     }
-    #[test]
-    fn focus_address_matching_is_prefix_and_case_tolerant() {
-        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        // hyprctl reports `0x…` lowercase; the stored windowAddress may differ
-        // on case and on a present/absent `0x` prefix — all must match.
-        let clients = vec![
-            json!({ "address": "0x55aabbccdd00", "class": "kitty" }),
-            json!({ "address": "0x1234ef", "class": "foot" }),
-        ];
-        assert!(window_present(&clients, "0x55aabbccdd00")); // exact
-        assert!(window_present(&clients, "55aabbccdd00")); // missing 0x prefix
-        assert!(window_present(&clients, "0x55AABBCCDD00")); // upper case
-        assert!(window_present(&clients, "55AABBCCDD00")); // both
-        assert!(window_present(&clients, "0X1234EF")); // 0X + upper
-                                                       // A vanished window is absent.
-        assert!(!window_present(&clients, "0xdeadbeef"));
-        assert!(!window_present(&clients, ""));
-        // Client entry without an address field is ignored, not a false match.
-        let noaddr = vec![json!({ "class": "kitty" })];
-        assert!(!window_present(&noaddr, "0x1"));
 
-        // Normalisation is idempotent and prefix-agnostic.
-        assert_eq!(normalize_addr("0xABC"), "abc");
-        assert_eq!(normalize_addr("abc"), "abc");
-        assert_eq!(normalize_addr("  0Xabc  "), "abc");
-    }
-    #[test]
-    fn window_discovery_matches_the_nearest_ancestor_client() {
-        // conduct(pid 100) ← shell(same pid, exec) ← kitty(pid 42) ← hypr(pid 7).
-        // kitty owns the window; the compositor (7) does not.
-        let clients = vec![
-            json!({ "pid": 42, "address": "0xKITTY", "class": "kitty" }),
-            json!({ "pid": 999, "address": "0xOTHER", "class": "firefox" }),
-        ];
-        let ancestry = vec![100, 42, 7];
-        assert_eq!(
-            match_window_for_ancestry(&ancestry, &clients),
-            Some("0xKITTY".to_string())
-        );
-
-        // The NEAREST ancestor with a window wins (self before its parents), even
-        // if a further-up ancestor also owns a client.
-        let nested = vec![
-            json!({ "pid": 42, "address": "0xOUTER" }),
-            json!({ "pid": 100, "address": "0xINNER" }),
-        ];
-        assert_eq!(
-            match_window_for_ancestry(&[100, 42, 7], &nested),
-            Some("0xINNER".to_string())
-        );
-
-        // No ancestor owns a window → None (address stays unset, as before).
-        assert_eq!(match_window_for_ancestry(&[100, 42, 7], &[json!({ "pid": 5, "address": "0xX" })]), None);
-        // A client whose pid matches but whose address is empty/absent is skipped.
-        assert_eq!(
-            match_window_for_ancestry(&[42], &[json!({ "pid": 42, "address": "" })]),
-            None
-        );
-        assert_eq!(
-            match_window_for_ancestry(&[42], &[json!({ "pid": 42, "class": "kitty" })]),
-            None
-        );
-        // Empty inputs never match.
-        assert_eq!(match_window_for_ancestry(&[], &clients), None);
-        assert_eq!(match_window_for_ancestry(&ancestry, &[]), None);
-    }
-    #[test]
-    fn window_discovery_also_returns_the_owning_pid() {
-        // The hook door records the matched terminal pid (helps the reaper): a
-        // `/proc` liveness signal that vanishes with the window, never a false
-        // reap. The pid returned is the matched ancestor/client pid.
-        let clients = vec![
-            json!({ "pid": 42, "address": "0xKITTY", "class": "kitty" }),
-            json!({ "pid": 999, "address": "0xOTHER" }),
-        ];
-        assert_eq!(
-            match_window_and_pid(&[100, 42, 7], &clients),
-            Some(("0xKITTY".to_string(), 42))
-        );
-        // Nearest ancestor wins, and its pid comes back with it.
-        let nested = vec![
-            json!({ "pid": 42, "address": "0xOUTER" }),
-            json!({ "pid": 100, "address": "0xINNER" }),
-        ];
-        assert_eq!(
-            match_window_and_pid(&[100, 42, 7], &nested),
-            Some(("0xINNER".to_string(), 100))
-        );
-        // No match → None (address AND pid stay unset, never a partial record).
-        assert_eq!(match_window_and_pid(&[5], &clients), None);
-        assert_eq!(match_window_and_pid(&[42], &[json!({ "pid": 42, "address": "" })]), None);
-    }
-    #[test]
-    fn client_workspace_lookup_reads_workspace_id_and_tolerates_address_form() {
-        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        // `hyprctl clients -j` carries `workspace: { id, name }`; the lookup pulls
-        // the numeric id for the matching window. Address match is 0x/case
-        // tolerant, exactly like window_present (the stored addr may differ).
-        let clients = vec![
-            json!({ "address": "0x55aabb", "workspace": { "id": 3, "name": "3" } }),
-            json!({ "address": "0x1234ef", "workspace": { "id": 7, "name": "seven" } }),
-            // Special workspaces carry NEGATIVE ids — surfaced verbatim.
-            json!({ "address": "0xdeadbe", "workspace": { "id": -99, "name": "special:magic" } }),
-        ];
-        assert_eq!(client_workspace_for_address(&clients, "0x55aabb"), Some(3));
-        assert_eq!(client_workspace_for_address(&clients, "55AABB"), Some(3)); // no 0x + upper
-        assert_eq!(client_workspace_for_address(&clients, "0X1234EF"), Some(7));
-        assert_eq!(client_workspace_for_address(&clients, "0xdeadbe"), Some(-99));
-
-        // A window absent from the list → None (leave the stored workspace be).
-        assert_eq!(client_workspace_for_address(&clients, "0xnope"), None);
-        // An empty address never matches.
-        assert_eq!(client_workspace_for_address(&clients, ""), None);
-        // A client without a workspace object (or without a numeric id) → None,
-        // never a panic — degrade gracefully when Hyprland omits the field.
-        let noworkspace = vec![
-            json!({ "address": "0xaa" }),
-            json!({ "address": "0xbb", "workspace": {} }),
-            json!({ "address": "0xcc", "workspace": { "name": "3" } }),
-        ];
-        assert_eq!(client_workspace_for_address(&noworkspace, "0xaa"), None);
-        assert_eq!(client_workspace_for_address(&noworkspace, "0xbb"), None);
-        assert_eq!(client_workspace_for_address(&noworkspace, "0xcc"), None);
-    }
-    #[test]
-    fn hypr_event_parses_window_lifecycle_and_ignores_the_rest() {
-        // openwindow>>ADDR,WORKSPACE,CLASS,TITLE — address is the first field
-        // (Hyprland emits it WITHOUT the `0x` prefix; a title may contain commas).
-        assert_eq!(
-            parse_hypr_window_event("openwindow>>55aabbccdd00,1,kitty,shell — /home/x, y"),
-            Some(HyprWindowEvent::Appeared {
-                address: "55aabbccdd00".to_string()
-            })
-        );
-        // movewindow / movewindowv2 re-check (session may have registered late).
-        assert_eq!(
-            parse_hypr_window_event("movewindow>>55aabb,2"),
-            Some(HyprWindowEvent::Appeared {
-                address: "55aabb".to_string()
-            })
-        );
-        assert_eq!(
-            parse_hypr_window_event("movewindowv2>>55aabb,2,two"),
-            Some(HyprWindowEvent::Appeared {
-                address: "55aabb".to_string()
-            })
-        );
-        // windowtitle (old, ADDR only) and windowtitlev2 (ADDR,TITLE).
-        assert_eq!(
-            parse_hypr_window_event("windowtitle>>55aabb"),
-            Some(HyprWindowEvent::Appeared {
-                address: "55aabb".to_string()
-            })
-        );
-        assert_eq!(
-            parse_hypr_window_event("windowtitlev2>>55aabb,a new title"),
-            Some(HyprWindowEvent::Appeared {
-                address: "55aabb".to_string()
-            })
-        );
-        // closewindow>>ADDR — the whole payload is the address.
-        assert_eq!(
-            parse_hypr_window_event("closewindow>>55aabb"),
-            Some(HyprWindowEvent::Closed {
-                address: "55aabb".to_string()
-            })
-        );
-        // Events we don't act on → None.
-        assert_eq!(parse_hypr_window_event("workspace>>2"), None);
-        assert_eq!(parse_hypr_window_event("activewindow>>kitty,shell"), None);
-        assert_eq!(parse_hypr_window_event("focusedmon>>DP-1,2"), None);
-        // Malformed / empty-address lines → None (never a panic, never a blank).
-        assert_eq!(parse_hypr_window_event("no-delimiter-here"), None);
-        assert_eq!(parse_hypr_window_event("openwindow>>"), None);
-        assert_eq!(parse_hypr_window_event("openwindow>> ,1,kitty,t"), None);
-        assert_eq!(parse_hypr_window_event("closewindow>>   "), None);
-        assert_eq!(parse_hypr_window_event(""), None);
-    }
-    #[test]
-    fn hypr_event_socket_path_needs_a_signature() {
-        // `hypr_event_socket_path()` reads process-global env; serialise it
-        // against the other env-touching tests with the crate-wide lock.
-        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let saved_sig = std::env::var("HYPRLAND_INSTANCE_SIGNATURE").ok();
-        let saved_rt = std::env::var("XDG_RUNTIME_DIR").ok();
-
-        // No signature → no socket (listener disables itself off-Hyprland).
-        std::env::remove_var("HYPRLAND_INSTANCE_SIGNATURE");
-        assert_eq!(hypr_event_socket_path(), None);
-
-        // A blank signature is treated as absent, not as a path segment.
-        std::env::set_var("HYPRLAND_INSTANCE_SIGNATURE", "   ");
-        std::env::set_var("XDG_RUNTIME_DIR", "/run/user/1000");
-        assert_eq!(hypr_event_socket_path(), None);
-
-        // Signature + runtime dir → the documented socket2 path.
-        std::env::set_var("HYPRLAND_INSTANCE_SIGNATURE", "abc123_99");
-        assert_eq!(
-            hypr_event_socket_path(),
-            Some(PathBuf::from(
-                "/run/user/1000/hypr/abc123_99/.socket2.sock"
-            ))
-        );
-
-        match saved_sig {
-            Some(v) => std::env::set_var("HYPRLAND_INSTANCE_SIGNATURE", v),
-            None => std::env::remove_var("HYPRLAND_INSTANCE_SIGNATURE"),
-        }
-        match saved_rt {
-            Some(v) => std::env::set_var("XDG_RUNTIME_DIR", v),
-            None => std::env::remove_var("XDG_RUNTIME_DIR"),
-        }
-    }
-    #[test]
-    fn focus_window_rejects_an_empty_address_without_touching_hyprctl() {
-        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        // The shared focus fn is called by the socket loop on arbitrary input;
-        // an empty/blank address is a structured error, never a panic and never
-        // a stray `hyprctl` dispatch.
-        let err = focus_window("").expect_err("empty address must error");
-        assert_eq!(err.reason, "no-window-address");
-        let err = focus_window("   ").expect_err("blank address must error");
-        assert_eq!(err.reason, "no-window-address");
-    }
-    #[test]
-    fn focus_window_never_succeeds_for_a_nonexistent_window() {
-        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        // A bogus address is never a live client, so the verify step fails —
-        // either `window-not-found` (hyprctl present) or `hyprctl-unavailable`
-        // (no compositor / hyprctl absent, e.g. the build sandbox). Both are
-        // structured Errs: the fn must NEVER report a false focus and NEVER
-        // panic, whatever the environment.
-        let err = focus_window("0xdeadbeefcafe").expect_err("bogus address must not focus");
-        assert!(
-            matches!(
-                err.reason,
-                "window-not-found" | "hyprctl-unavailable" | "hyprctl-failed"
-            ),
-            "unexpected reason {}",
-            err.reason
-        );
-    }
     #[test]
     fn pid_ancestry_starts_at_self_and_is_bounded() {
         // Real /proc: our own ancestry begins with our pid and includes a parent.
@@ -1970,7 +913,7 @@ mod tests {
 
         // The self-check on `windowless_by_lineage` (not just `_from_parent`)
         // also answers true for the WRAP's own record — the shape
-        // `resolve_pending_session_windows`'s sweep needs, since it iterates
+        // the desktop's sweep needs, since it iterates
         // every record with an empty address (or, here, a stray non-empty
         // one it might otherwise "confirm") including the wrap itself.
         assert!(is_windowless_wrap(&wrap));
@@ -1986,312 +929,17 @@ mod tests {
         assert!(!is_windowless_wrap(&interactive));
     }
 
-    /// `resolve_pending_session_windows`'s SKIP decision for a headless
-    /// wrap's own record is `windowless_by_lineage`'s self-check (proven
-    /// directly above) — the listener function itself is deliberately NOT
-    /// exercised end-to-end here: it early-returns the moment
-    /// `hyprctl_clients()` fails (no `HYPRLAND_INSTANCE_SIGNATURE` in a
-    /// CI/test environment), so the mutating loop that consults the
-    /// `windowless` set never even runs off-Hyprland. This test pins the
-    /// one thing that IS honestly testable without a compositor: the
-    /// function is a safe, total no-op — never a panic, never a change —
-    /// on a roster that includes a headless wrap when Hyprland is absent.
+    /// The walk's pure core over synthetic ancestry: the hook's own pid is never a candidate, a
+    /// dead pid is plumbing (its argv cannot be read), and the harness is the first live ancestor
+    /// past the hook that is not plumbing.
     #[test]
-    fn a_bare_terminal_born_on_a_bound_workspace_joins_its_project() {
-        // The THIRD stamp site: the synthetic `win:` record for a bare tty has
-        // no agent, no project and no birth of its own — but it is a session on
-        // the workspace, so a bound workspace carries it exactly as it carries
-        // an agent's.
-        let projects = vec![
-            Project { name: "aoide".into(), workspaces: vec![3], ..Default::default() },
-            Project { name: "cadenza".into(), workspaces: vec![7], ..Default::default() },
-        ];
-        let mut w = term_win("0xAABB", "kitty", "/home/khoa");
-        w.workspace = Some(3);
-        let (out, changed) = reconcile_untracked_terminals(vec![], &[w.clone()], &projects);
-        assert!(changed);
-        assert_eq!(out[0].session_id, "win:aabb");
-        assert_eq!(out[0].workspace, Some(3));
-        assert_eq!(
-            out[0].workspace_project.as_deref(),
-            Some("aoide"),
-            "a bare terminal on a bound workspace joins its project"
-        );
-
-        // A re-scan after the window is DRAGGED: the id follows, the birth
-        // default does not.
-        let mut moved = w.clone();
-        moved.workspace = Some(7);
-        let (out, changed) = reconcile_untracked_terminals(out, &[moved], &projects);
-        assert!(changed);
-        assert_eq!(out[0].workspace, Some(7));
-        assert_eq!(out[0].workspace_project.as_deref(), Some("aoide"));
-
-        // Unbound, and with no projects at all: observed and unstamped.
-        let mut unbound = w.clone();
-        unbound.workspace = Some(99);
-        let (out, _) = reconcile_untracked_terminals(
-            vec![SessionRecord {
-                session_id: "win:aabb".into(),
-                workspace: None,
-                ..Default::default()
-            }],
-            &[unbound],
-            &[],
-        );
-        assert_eq!(out[0].workspace, Some(99));
-        assert_eq!(out[0].workspace_project, None);
-    }
-
-    /// The client list comes off the request socket, never a `hyprctl` binary: with
-    /// PATH pointed at an empty directory (the daemon's service PATH carries no
-    /// `hyprctl`), the read still answers the window the socket holds.
-    #[cfg(unix)]
-    #[test]
-    fn hyprctl_clients_reads_the_request_socket_with_no_hyprctl_on_path() {
-        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let saved = EnvVars::save(&["PATH"]);
-        let empty = unique_stage("socket-no-path");
-        std::env::set_var("PATH", &empty);
-        assert!(std::process::Command::new("hyprctl").output().is_err(), "no hyprctl on this PATH");
-
-        let (socket, dir) = fake_hypr_socket("clients-socket");
-        let clients = hyprctl_clients().expect("the socket answers j/clients");
-        assert_eq!(clients.len(), 1);
-        assert_eq!(clients[0]["address"], "0xAA");
-        assert_eq!(clients[0]["workspace"]["id"], 3);
-        drop(socket);
-        drop(saved);
-        let _ = std::fs::remove_dir_all(&dir);
-        let _ = std::fs::remove_dir_all(&empty);
-    }
-
-    /// A request socket bound at `<root>/hypr/test/.socket.sock`, with `XDG_RUNTIME_DIR=<root>`
-    /// and `HYPRLAND_INSTANCE_SIGNATURE=test` set. The caller owns the listener and the env.
-    #[cfg(unix)]
-    fn bind_request_socket(tag: &str) -> (EnvVars, PathBuf, std::os::unix::net::UnixListener) {
-        let root = unique_stage(tag);
-        let dir = root.join("hypr").join("test");
-        std::fs::create_dir_all(&dir).unwrap();
-        let listener = std::os::unix::net::UnixListener::bind(dir.join(".socket.sock")).unwrap();
-        let env = EnvVars::save(&["XDG_RUNTIME_DIR", "HYPRLAND_INSTANCE_SIGNATURE"]);
-        std::env::set_var("XDG_RUNTIME_DIR", &root);
-        std::env::set_var("HYPRLAND_INSTANCE_SIGNATURE", "test");
-        (env, root, listener)
-    }
-
-    /// A request socket that never accepts: its backlog fills, the next plain connect blocks
-    /// in the kernel, and `hyprctl_clients` must still answer `None` within its budget.
-    #[cfg(unix)]
-    #[test]
-    fn hyprctl_clients_gives_up_within_its_budget_when_the_backlog_is_full() {
-        use std::os::unix::net::UnixStream;
-        use std::sync::atomic::{AtomicUsize, Ordering};
-        use std::sync::Arc;
-        use std::time::Duration;
-        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let (_env, root, listener) = bind_request_socket("backlog-full");
-        let socket = root.join("hypr").join("test").join(".socket.sock");
-
-        // Connect until the kernel blocks one; nothing accepts, so the queue fills and stays full.
-        let queued = Arc::new(AtomicUsize::new(0));
-        {
-            let queued = Arc::clone(&queued);
-            std::thread::spawn(move || {
-                let mut held = Vec::new();
-                while let Ok(s) = UnixStream::connect(&socket) {
-                    held.push(s);
-                    queued.fetch_add(1, Ordering::SeqCst);
-                }
-            });
-        }
-        let mut seen = queued.load(Ordering::SeqCst);
-        loop {
-            std::thread::sleep(Duration::from_millis(100));
-            let now = queued.load(Ordering::SeqCst);
-            if now == seen {
-                break;
-            }
-            seen = now;
-        }
-        assert!(seen > 0, "the filler never connected");
-
-        let (tx, rx) = std::sync::mpsc::channel();
-        std::thread::spawn(move || {
-            let _ = tx.send(hyprctl_clients());
-        });
-        let answered = rx
-            .recv_timeout(Duration::from_secs(3))
-            .expect("hyprctl_clients was still blocked after 3 s on a full backlog");
-        assert!(answered.is_none(), "a listener that never accepts answers nothing");
-        drop(listener);
-        let _ = std::fs::remove_dir_all(&root);
-    }
-
-    /// A reply that trickles in a byte at a time, each gap inside the per-read timeout, still
-    /// outlasts the budget. It is a complete JSON array, so only the shared deadline can refuse it.
-    #[cfg(unix)]
-    #[test]
-    fn hyprctl_clients_gives_up_on_a_reply_that_trickles_past_its_budget() {
-        use std::io::{Read, Write};
-        use std::time::{Duration, Instant};
-        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let (_env, root, listener) = bind_request_socket("trickle");
-        let server = std::thread::spawn(move || {
-            let (mut conn, _) = listener.accept().unwrap();
-            let mut request = [0u8; 16];
-            let _ = conn.read(&mut request);
-            let _ = conn.write_all(b"[");
-            for _ in 0..10 {
-                std::thread::sleep(Duration::from_millis(300));
-                if conn.write_all(b" ").is_err() {
-                    return;
-                }
-            }
-            std::thread::sleep(Duration::from_millis(300));
-            let _ = conn.write_all(b"]");
-        });
-        let started = Instant::now();
-        let answered = hyprctl_clients();
-        let took = started.elapsed();
-        assert!(answered.is_none(), "a reply cut off at the budget is no reply");
-        assert!(took < Duration::from_secs(3), "the reply read ran {took:?}");
-        let _ = server.join();
-        let _ = std::fs::remove_dir_all(&root);
-    }
-
-    /// GATED on Unix with its reason (see `testutil::fake_hyprctl`): the
-    /// fixture is a `#!/bin/sh` shim `CreateProcess` cannot launch, over a
-    /// compositor native Windows does not run.
-    #[cfg(unix)]
-    #[test]
-    fn the_sweep_stamps_the_default_at_birth_and_never_on_a_move() {
-        // The compositor stamp site, end to end: the sweep resolves our own
-        // pid to the shim's client, observes its workspace through the ONE
-        // seam, and the birth default lands — once, and only once.
-        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
-        let stage = unique_stage("sweep-stamps-default");
-        std::env::set_var("AOIDE_STAGE_DIR", &stage);
-        write_stage(
-            &projects_path(),
-            &ProjectsFile {
-                schema_version: "0".into(),
-                projects: vec![
-                    Project { name: "aoide".into(), workspaces: vec![3], ..Default::default() },
-                    Project { name: "cadenza".into(), workspaces: vec![7], ..Default::default() },
-                ],
-            },
-        )
-        .unwrap();
-        let mut rec = session("s1", "/w", "working", "t", None);
-        rec.window_address = String::new();
-        rec.pid = Some(std::process::id());
-        write_stage(
-            &sessions_path(),
-            &SessionsFile { schema_version: "0".into(), sessions: vec![rec] },
-        )
-        .unwrap();
-
-        let (env, dir) = fake_hypr_socket("sweep-stamp");
-        assert!(
-            resolve_pending_session_windows(),
-            "the pending window resolves against the shim"
-        );
-        let after: SessionsFile = load_stage(&sessions_path()).unwrap();
-        assert_eq!(after.sessions[0].window_address, "0xAA");
-        assert_eq!(after.sessions[0].workspace, Some(3));
-        assert_eq!(
-            after.sessions[0].workspace_project.as_deref(),
-            Some("aoide"),
-            "born on workspace 3 → the bound project"
-        );
-
-        // Dragged to another BOUND workspace: the id follows, the default holds.
-        std::env::set_var("AOIDE_TEST_WS", "7");
-        assert!(resolve_pending_session_windows());
-        let after: SessionsFile = load_stage(&sessions_path()).unwrap();
-        assert_eq!(after.sessions[0].workspace, Some(7));
-        assert_eq!(after.sessions[0].workspace_project.as_deref(), Some("aoide"));
-
-        // Nothing left to write once the observation is already current.
-        assert!(!resolve_pending_session_windows(), "idempotent once settled");
-
-        drop(env);
-        let _ = std::fs::remove_dir_all(&dir);
-        match saved_stage {
-            Some(v) => std::env::set_var("AOIDE_STAGE_DIR", v),
-            None => std::env::remove_var("AOIDE_STAGE_DIR"),
-        }
-        let _ = std::fs::remove_dir_all(&stage);
-    }
-
-    /// A decoded `hyprctl clients -j` entry: an app window owned by `pid`.
-    fn client(addr: &str, pid: i64, class: &str) -> Value {
-        json!({ "address": addr, "pid": pid, "class": class })
-    }
-
-    #[test]
-    fn a_desktop_chain_binds_to_its_app_window_not_a_terminal() {
-        // A harness (1137986) under a desktop app (867785) whose window's class is
-        // not a terminal's. The owner is found by pid alone, whatever the class.
-        let clients = [client("0x639050c25000", 867785, "com.example.App")];
-        let chain = [119735, 1137986, 867785, 1454];
-        let beneath = |p: i32, owner: i32| p == 1137986 && owner == 867785;
-        assert_eq!(
-            window_for_hook_chain(&chain, &clients, beneath).as_deref(),
-            Some("0x639050c25000")
-        );
-    }
-
-    #[test]
-    fn a_stale_chain_with_nothing_beneath_its_owner_binds_nothing() {
-        let clients = [client("0xAA", 867785, "com.example.App")];
-        let chain = [2_000_000_000, 2_000_000_001, 867785, 1454];
-        assert_eq!(window_for_hook_chain(&chain, &clients, |_, _| false), None);
-    }
-
-    #[test]
-    fn a_chain_with_no_owner_client_binds_nothing() {
-        let clients = [client("0xAA", 999, "com.example.App")];
-        assert_eq!(window_for_hook_chain(&[1, 2, 3], &clients, |_, _| true), None);
-    }
-
-    #[test]
-    fn the_nearest_owner_wins_over_a_farther_one() {
-        let clients = [client("0xFAR", 900, "com.example.App"), client("0xNEAR", 500, "kitty")];
-        let chain = [10, 500, 900];
-        let beneath = |p: i32, owner: i32| p == 10 && owner == 500;
-        assert_eq!(
-            window_for_hook_chain(&chain, &clients, beneath).as_deref(),
-            Some("0xNEAR")
-        );
-    }
-
-    #[test]
-    fn an_owner_at_the_head_of_the_chain_has_nothing_beneath_it() {
-        let clients = [client("0xAA", 500, "kitty")];
-        assert_eq!(window_for_hook_chain(&[500, 1], &clients, |_, _| true), None);
-    }
-
-    /// The walk's pure core over synthetic ancestry: the hook's own pid is never a
-    /// candidate, a dead pid is plumbing (its argv cannot be read), and a window owner
-    /// ends the walk with no harness wherever it stands. An owner above the harness
-    /// does not reach the walk at all.
-    #[test]
-    fn harness_index_skips_plumbing_and_refuses_a_window_owner() {
+    fn harness_index_skips_plumbing() {
         const DEAD: i32 = 2_000_000_000;
         let me = std::process::id() as i32;
         let parent = pid_ancestry(me)[1];
         let ancestry = [DEAD, DEAD + 1, me, parent];
-        assert_eq!(harness_index(&ancestry, None), Some(2), "the dead hook and sh are plumbing");
-        let owner_above = [client("0xAA", parent as i64, "com.example.App")];
-        assert_eq!(harness_index(&ancestry, Some(&owner_above[..])), Some(2));
-        let owner_at_harness = [client("0xAA", me as i64, "com.example.App")];
-        assert_eq!(harness_index(&ancestry, Some(&owner_at_harness[..])), None);
-        let owner_in_plumbing = [client("0xAA", (DEAD + 1) as i64, "com.example.App")];
-        assert_eq!(harness_index(&ancestry, Some(&owner_in_plumbing[..])), None);
-        assert_eq!(harness_index(&[DEAD], None), None, "a hook with no parent has no harness");
+        assert_eq!(harness_index(&ancestry), Some(2), "the dead hook and sh are plumbing");
+        assert_eq!(harness_index(&[DEAD]), None, "a hook with no parent has no harness");
     }
 
     /// Spawns one stand-in hook through `spawn`, which gets the path of `standin.sh` (it
@@ -2366,13 +1014,10 @@ mod tests {
         assert_eq!(chain, ancestry[depth..].iter().copied().take(8).collect::<Vec<i32>>());
     }
 
-    /// Runs one stand-in shape against this test process as the harness, with no window
-    /// owner among its ancestors (the client pid is init, which the walk never reaches).
+    /// Runs one stand-in shape against this test process as the harness.
     #[cfg(unix)]
-    fn with_a_non_owning_client(name: &str, body: impl FnOnce(&std::path::Path)) {
+    fn with_a_harness_above(name: &str, body: impl FnOnce(&std::path::Path)) {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let (_socket, _root) = fake_hypr_socket(name);
-        std::env::set_var("AOIDE_TEST_CLIENT_PID", "1");
         let dir = unique_stage(name);
         std::fs::create_dir_all(&dir).unwrap();
         body(&dir);
@@ -2383,7 +1028,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_hook_under_a_compound_sh_c_finds_its_harness_past_the_shell() {
-        with_a_non_owning_client("hook-walk-compound", |dir| {
+        with_a_harness_above("hook-walk-compound", |dir| {
             let (child, hook) = stand_in_hook(dir, "pid", |s, o| {
                 sh_c(&format!("sh {} {}; true", s.display(), o.display()))
             });
@@ -2397,7 +1042,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_hook_under_an_exec_in_place_sh_c_finds_its_harness() {
-        with_a_non_owning_client("hook-walk-exec", |dir| {
+        with_a_harness_above("hook-walk-exec", |dir| {
             let (child, hook) = stand_in_hook(dir, "pid", |s, o| {
                 sh_c(&format!("exec sh {} {}", s.display(), o.display()))
             });
@@ -2410,7 +1055,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_capture_pipeline_hook_finds_its_harness_past_the_pipeline_shell() {
-        with_a_non_owning_client("hook-walk-capture", |dir| {
+        with_a_harness_above("hook-walk-capture", |dir| {
             let tee = dir.join("hooks.jsonl");
             let (child, hook) = stand_in_hook(dir, "pid", |s, o| {
                 sh_c(&format!("tee -a {} | sh {} {}", tee.display(), s.display(), o.display()))
@@ -2424,7 +1069,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_direct_child_hook_finds_its_harness_at_once() {
-        with_a_non_owning_client("hook-walk-direct", |dir| {
+        with_a_harness_above("hook-walk-direct", |dir| {
             let (child, hook) = stand_in_hook(dir, "pid", |s, o| {
                 let mut cmd = std::process::Command::new("sh");
                 cmd.arg(s).arg(o);
@@ -2441,7 +1086,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_hook_behind_env_and_nice_launchers_finds_its_harness() {
-        with_a_non_owning_client("hook-walk-launchers", |dir| {
+        with_a_harness_above("hook-walk-launchers", |dir| {
             let (child, hook) = stand_in_hook(dir, "real", |s, o| {
                 sh_c(&format!("env A=1 nice -n 5 sh {} {}; true", s.display(), o.display()))
             });
@@ -2467,72 +1112,14 @@ mod tests {
         });
     }
 
-    /// The hand-run case: the hook's shell sits under a window owner (this process owns
-    /// the client). The walk answers no harness, so the door binds nothing and moves no
-    /// chain, and a record already holding a chain and a window keeps both.
-    #[cfg(unix)]
-    #[test]
-    fn a_hand_run_hook_under_a_window_owner_binds_nothing() {
-        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _stage_env = EnvVars::save(&["AOIDE_STAGE_DIR"]);
-        let stage = unique_stage("hook-walk-hand-run");
-        std::env::set_var("AOIDE_STAGE_DIR", &stage);
-        let (_socket, _root) = fake_hypr_socket("hook-walk-hand-run");
-        let me = std::process::id() as i32;
-        std::env::set_var("AOIDE_TEST_CLIENT_PID", me.to_string());
-        let dir = unique_stage("hook-walk-hand-run-shell");
-        std::fs::create_dir_all(&dir).unwrap();
-
-        const DEAD: i32 = 2_000_000_000;
-        do_hook_session_start(aoide_protocol::Door::Cli, "hand", Some("claude"), Some("/w"), Some("0xW"), None, None, &[DEAD + 2]);
-        do_hook_session_start(aoide_protocol::Door::Cli, "bare", Some("claude"), Some("/w"), None, None, None, &[]);
-
-        let (child, hook) = stand_in_hook(&dir, "pid", |s, o| {
-            sh_c(&format!("sh {} {}; true", s.display(), o.display()))
-        });
-        assert_eq!(hook_chain(hook), None, "a window owner on the walk: no harness");
-        ensure_session_window("hand", Some(hook));
-        ensure_session_window("bare", Some(hook));
-        let s: SessionsFile = load_stage(&sessions_path()).unwrap();
-        let by = |id: &str| s.sessions.iter().find(|r| r.session_id == id).unwrap().clone();
-        assert_eq!(by("hand").hook_ancestry, vec![DEAD + 2], "the stored chain is untouched");
-        assert_eq!(by("hand").window_address, "0xW", "the stored window is untouched");
-        assert!(by("bare").window_address.is_empty(), "nothing is bound to the bare record");
-        assert!(by("bare").hook_ancestry.is_empty(), "and no chain is moved onto it");
-        release_stand_in(child, hook);
-        let _ = std::fs::remove_dir_all(&dir);
-        let _ = std::fs::remove_dir_all(&stage);
-    }
-
-    /// The owner check runs before the plumbing verdict, so a shell that owns the window
-    /// ends the walk too. Without the owner the same live compound shell is plumbing and
-    /// the walk runs past it to this process, which the first assertion proves, so the
-    /// `None` after the owner is registered is the refusal and not a plumbing mismatch.
-    #[cfg(unix)]
-    #[test]
-    fn a_shell_that_owns_a_window_ends_the_walk_with_no_harness() {
-        with_a_non_owning_client("hook-walk-shell-owner", |dir| {
-            let (child, hook) = stand_in_hook(dir, "pid", |s, o| {
-                sh_c(&format!("sh {} {}; true", s.display(), o.display()))
-            });
-            assert_walk_finds_this_process_at_depth(hook, 2);
-            let shell = pid_ancestry(hook)[1];
-            std::env::set_var("AOIDE_TEST_CLIENT_PID", shell.to_string());
-            assert_eq!(hook_chain(hook), None, "a shell that owns the window ends the walk");
-            release_stand_in(child, hook);
-        });
-    }
-
     /// A bound turn whose stored chain is live asks the compositor for nothing. The read is
-    /// counted on this thread (`client_reads`), so another test's read cannot land in it.
     #[cfg(unix)]
     #[test]
-    fn a_bound_turn_with_a_live_stored_chain_never_asks_the_compositor() {
+    fn a_bound_turn_with_a_live_stored_chain_is_left_alone() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _env = EnvVars::save(&["AOIDE_STAGE_DIR", "HYPRLAND_INSTANCE_SIGNATURE"]);
+        let _env = EnvVars::save(&["AOIDE_STAGE_DIR"]);
         let stage = unique_stage("hook-walk-quiet-turn");
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
-        std::env::remove_var("HYPRLAND_INSTANCE_SIGNATURE");
         let dir = unique_stage("hook-walk-quiet-turn-shell");
         std::fs::create_dir_all(&dir).unwrap();
 
@@ -2543,9 +1130,7 @@ mod tests {
         assert_eq!(stored.first(), Some(&(std::process::id() as i32)), "the stored chain starts at the harness");
         do_hook_session_start(aoide_protocol::Door::Cli, "bound", Some("claude"), Some("/w"), Some("0xW"), None, None, &stored);
 
-        let before = client_reads();
-        ensure_session_window("bound", Some(hook));
-        assert_eq!(client_reads() - before, 0, "a bound turn with a live stored chain asked the compositor");
+        ensure_session_chain("bound", Some(hook));
 
         let s: SessionsFile = load_stage(&sessions_path()).unwrap();
         let rec = s.sessions.iter().find(|r| r.session_id == "bound").unwrap();
@@ -2553,109 +1138,6 @@ mod tests {
         assert_eq!(rec.window_address, "0xW", "the bound window is untouched");
         release_stand_in(child, hook);
         let _ = std::fs::remove_dir_all(&dir);
-        let _ = std::fs::remove_dir_all(&stage);
-    }
-
-    /// The sweep binds pid-less hosted sessions through their hook chain, binds
-    /// none of the stale, done, windowless-by-lineage or chainless ones, and
-    /// later retires only the one whose process is gone. The real children stand
-    /// in for harnesses beneath the app, which is this test process's own client.
-    #[cfg(unix)]
-    #[test]
-    fn the_sweep_binds_pid_less_hosted_sessions_by_their_hook_chain() {
-        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
-        let stage = unique_stage("sweep-hook-chain");
-        std::env::set_var("AOIDE_STAGE_DIR", &stage);
-
-        let me = std::process::id() as i32;
-        let dead = 2_000_000_000_i32;
-        let mut children: Vec<std::process::Child> = (0..3)
-            .map(|_| std::process::Command::new("sleep").arg("30").spawn().unwrap())
-            .collect();
-        let kids: Vec<i32> = children.iter().map(|c| c.id() as i32).collect();
-
-        let hosted = |id: &str, chain: Vec<i32>| {
-            let mut r = session(id, "/w", "working", "t", None);
-            r.window_address = String::new();
-            r.hook_ancestry = chain;
-            r
-        };
-        let mut recs: Vec<SessionRecord> = kids
-            .iter()
-            .enumerate()
-            .map(|(i, &k)| hosted(&format!("h{}", i + 1), vec![dead, dead + 1, k, me]))
-            .collect();
-        recs.push(hosted("dead", vec![dead, dead + 1, dead + 2, me]));
-        let mut done = hosted("done", vec![kids[0], me]);
-        done.state = "done".into();
-        recs.push(done);
-        let mut wrap = session("wrap", "/w", "idle", "t", None);
-        wrap.window_address = String::new();
-        wrap.conductable = Some(true);
-        wrap.headless = true;
-        recs.push(wrap);
-        let mut nested = hosted("nested", vec![kids[0], me]);
-        nested.parent_session_id = Some("wrap".into());
-        recs.push(nested);
-        let mut chainless = session("chainless", "/w", "working", "t", None);
-        chainless.window_address = String::new();
-        recs.push(chainless);
-        write_stage(
-            &sessions_path(),
-            &SessionsFile { schema_version: "0".into(), sessions: recs },
-        )
-        .unwrap();
-
-        let (env, dir) = fake_hypr_socket("sweep-hook-chain");
-        std::env::set_var("AOIDE_TEST_CLIENT_PID", me.to_string());
-        std::env::set_var("AOIDE_TEST_CLIENT_CLASS", "com.example.App");
-        assert!(resolve_pending_session_windows(), "the hook-chain sessions bind");
-
-        let by_id = |s: &SessionsFile, id: &str| {
-            s.sessions.iter().find(|r| r.session_id == id).unwrap().clone()
-        };
-        let after: SessionsFile = load_stage(&sessions_path()).unwrap();
-        for id in ["h1", "h2", "h3"] {
-            let r = by_id(&after, id);
-            assert_eq!(r.window_address, "0xAA", "{id} binds through its live chain");
-            assert_eq!(r.workspace, Some(3));
-            assert_eq!(r.pid, None, "the sweep never gives a pid-less session a pid");
-        }
-        for id in ["dead", "done", "nested", "chainless", "wrap"] {
-            assert!(by_id(&after, id).window_address.is_empty(), "{id} stays unbound");
-        }
-
-        // Nothing is a twin: all three harnesses are alive beneath the app.
-        let none_recent = |_: &SessionRecord| false;
-        let no_tx = |_: &SessionRecord| false;
-        assert!(
-            crate::reap::superseded_agent_duplicates(&after.sessions, none_recent, no_tx, crate::reap::proc_exists)
-                .is_empty()
-        );
-
-        // The middle harness exits: its record is the superseded twin, and the
-        // two live harnesses are kept.
-        let _ = children[1].kill();
-        let _ = children[1].wait();
-        let losers = crate::reap::superseded_agent_duplicates(
-            &after.sessions,
-            none_recent,
-            no_tx,
-            crate::reap::proc_exists,
-        );
-        assert_eq!(losers, vec!["h2".to_string()]);
-
-        for c in children.iter_mut() {
-            let _ = c.kill();
-            let _ = c.wait();
-        }
-        drop(env);
-        let _ = std::fs::remove_dir_all(&dir);
-        match saved_stage {
-            Some(v) => std::env::set_var("AOIDE_STAGE_DIR", v),
-            None => std::env::remove_var("AOIDE_STAGE_DIR"),
-        }
         let _ = std::fs::remove_dir_all(&stage);
     }
 
@@ -2671,8 +1153,6 @@ mod tests {
         let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
         let stage = unique_stage("per-turn-heal");
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
-        let _hypr = EnvVars::save(&["HYPRLAND_INSTANCE_SIGNATURE"]);
-        std::env::set_var("HYPRLAND_INSTANCE_SIGNATURE", "test");
 
         const DEAD: i32 = 2_000_000_000;
         let me = std::process::id() as i32;
@@ -2716,7 +1196,7 @@ mod tests {
         let hook_pid = hook.id() as i32;
         let live_chain: Vec<i32> = pid_ancestry(hook_pid).into_iter().skip(1).take(8).collect();
         assert_eq!(live_chain, a.iter().copied().take(8).collect::<Vec<i32>>());
-        ensure_session_window("h", Some(hook_pid));
+        ensure_session_chain("h", Some(hook_pid));
         assert_eq!(load("h").hook_ancestry, live_chain, "the live chain is recorded");
         assert_eq!(load("h").window_address, "0xW", "the window is untouched");
 
@@ -2735,7 +1215,7 @@ mod tests {
         // A later turn from a new hook process, same harness: the live chain is not rewritten.
         let mut next_hook = spawn();
         let before = bytes();
-        ensure_session_window("h", Some(next_hook.id() as i32));
+        ensure_session_chain("h", Some(next_hook.id() as i32));
         assert!(bytes() == before, "a live stored chain is never rewritten per turn");
 
         for c in [&mut sibling, &mut next_hook] {
@@ -2758,8 +1238,6 @@ mod tests {
         let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
         let stage = unique_stage("all-dead-heal");
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
-        let _hypr = EnvVars::save(&["HYPRLAND_INSTANCE_SIGNATURE"]);
-        std::env::set_var("HYPRLAND_INSTANCE_SIGNATURE", "test");
 
         const DEAD: i32 = 2_000_000_000;
         let me = std::process::id() as i32;
@@ -2771,7 +1249,7 @@ mod tests {
         );
         let mut hook = std::process::Command::new("sleep").arg("30").spawn().unwrap();
         let hook_pid = hook.id() as i32;
-        ensure_session_window("old", Some(hook_pid));
+        ensure_session_chain("old", Some(hook_pid));
         let s: SessionsFile = load_stage(&sessions_path()).unwrap();
         let rec = s.sessions.iter().find(|r| r.session_id == "old").unwrap();
         assert_eq!(
@@ -2816,8 +1294,6 @@ mod tests {
         let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
         let stage = unique_stage("heal-without-compositor");
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
-        let _hypr = EnvVars::save(&["HYPRLAND_INSTANCE_SIGNATURE"]);
-        std::env::remove_var("HYPRLAND_INSTANCE_SIGNATURE");
 
         const DEAD: i32 = 2_000_000_000;
         let me = std::process::id() as i32;
@@ -2852,7 +1328,7 @@ mod tests {
         );
 
         let hook_pid = hook.id() as i32;
-        ensure_session_window("h", Some(hook_pid));
+        ensure_session_chain("h", Some(hook_pid));
         let live_chain: Vec<i32> = pid_ancestry(hook_pid).into_iter().skip(1).take(8).collect();
         assert_eq!(record().hook_ancestry, live_chain, "the live chain is recorded");
         assert_eq!(
@@ -2873,7 +1349,7 @@ mod tests {
         );
 
         let before = std::fs::read(sessions_path()).unwrap();
-        ensure_session_window("h", Some(next_hook.id() as i32));
+        ensure_session_chain("h", Some(next_hook.id() as i32));
         assert!(
             std::fs::read(sessions_path()).unwrap() == before,
             "a live stored chain is never rewritten per turn"
@@ -2899,8 +1375,6 @@ mod tests {
         let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
         let stage = unique_stage("anchored-no-heal");
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
-        let _hypr = EnvVars::save(&["HYPRLAND_INSTANCE_SIGNATURE"]);
-        std::env::set_var("HYPRLAND_INSTANCE_SIGNATURE", "test");
 
         const DEAD: i32 = 2_000_000_000;
         let me = std::process::id() as i32;
@@ -2918,7 +1392,7 @@ mod tests {
             &stored,
         );
         let before = std::fs::read(sessions_path()).unwrap();
-        ensure_session_window("anchored", Some(hook.id() as i32));
+        ensure_session_chain("anchored", Some(hook.id() as i32));
         assert!(
             std::fs::read(sessions_path()).unwrap() == before,
             "a live pid of the record's own holds its chain against a per-turn heal"
@@ -2927,93 +1401,6 @@ mod tests {
         for c in [&mut anchor, &mut hook] {
             let _ = c.kill();
             let _ = c.wait();
-        }
-        match saved_stage {
-            Some(v) => std::env::set_var("AOIDE_STAGE_DIR", v),
-            None => std::env::remove_var("AOIDE_STAGE_DIR"),
-        }
-        let _ = std::fs::remove_dir_all(&stage);
-    }
-
-    /// The host WITHOUT a compositor — the arm native Windows runs, and the one
-    /// the adapter's whole "no adapter" posture rests on: an unset
-    /// `HYPRLAND_INSTANCE_SIGNATURE` means no guess is ever made.
-    #[test]
-    fn focused_workspace_refuses_a_host_without_a_compositor() {
-        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let saved_sig = std::env::var("HYPRLAND_INSTANCE_SIGNATURE").ok();
-        std::env::remove_var("HYPRLAND_INSTANCE_SIGNATURE");
-        assert_eq!(focused_workspace(), None, "off-Hyprland: no guess, ever");
-        match saved_sig {
-            Some(v) => std::env::set_var("HYPRLAND_INSTANCE_SIGNATURE", v),
-            None => std::env::remove_var("HYPRLAND_INSTANCE_SIGNATURE"),
-        }
-    }
-
-    /// The compositor-PRESENT half of that pair — GATED on Unix with its
-    /// reason: the fixture is a `#!/bin/sh` shim (`testutil::fake_hyprctl`)
-    /// that `CreateProcess` cannot launch at all (no shebang, no extension),
-    /// and the subject is a compositor native Windows does not have — the same
-    /// gate the client crate's shim-driven groups carry.
-    #[cfg(unix)]
-    #[test]
-    fn focused_workspace_reads_the_compositor() {
-        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let saved_sig = std::env::var("HYPRLAND_INSTANCE_SIGNATURE").ok();
-        std::env::remove_var("HYPRLAND_INSTANCE_SIGNATURE");
-        assert_eq!(focused_workspace(), None, "off-Hyprland: no guess, ever");
-
-        let (env, dir) = fake_hyprctl("focused");
-        std::env::set_var("AOIDE_TEST_WS", "5");
-        assert_eq!(focused_workspace(), Some(5), "the shim reports workspace 5");
-        std::env::set_var("AOIDE_TEST_WS", "-99");
-        assert_eq!(
-            focused_workspace(),
-            Some(-99),
-            "a special workspace's negative id is surfaced verbatim"
-        );
-
-        drop(env);
-        let _ = std::fs::remove_dir_all(&dir);
-        match saved_sig {
-            Some(v) => std::env::set_var("HYPRLAND_INSTANCE_SIGNATURE", v),
-            None => std::env::remove_var("HYPRLAND_INSTANCE_SIGNATURE"),
-        }
-    }
-
-    #[test]
-    fn resolve_pending_session_windows_is_a_safe_noop_off_hyprland() {
-        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let saved_sig = std::env::var("HYPRLAND_INSTANCE_SIGNATURE").ok();
-        std::env::remove_var("HYPRLAND_INSTANCE_SIGNATURE");
-        let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
-        let stage = unique_stage("resolve-pending-noop");
-        std::env::set_var("AOIDE_STAGE_DIR", &stage);
-
-        let mut wrap = session("wrap", "/w", "working", "1", None);
-        wrap.conductable = Some(true);
-        wrap.headless = true;
-        wrap.window_address = String::new();
-        wrap.pid = Some(999999);
-        let file = SessionsFile {
-            schema_version: "0".into(),
-            sessions: vec![wrap],
-        };
-        write_stage(&sessions_path(), &file).unwrap();
-
-        assert!(
-            !resolve_pending_session_windows(),
-            "no Hyprland signature → hyprctl_clients() fails → an honest false, never a stray write"
-        );
-        let after: SessionsFile = load_stage(&sessions_path()).unwrap();
-        assert_eq!(
-            after.sessions[0].window_address, "",
-            "the headless wrap's record is untouched"
-        );
-
-        match saved_sig {
-            Some(v) => std::env::set_var("HYPRLAND_INSTANCE_SIGNATURE", v),
-            None => std::env::remove_var("HYPRLAND_INSTANCE_SIGNATURE"),
         }
         match saved_stage {
             Some(v) => std::env::set_var("AOIDE_STAGE_DIR", v),
@@ -3181,5 +1568,175 @@ mod tests {
             resolve_registration_parent(None, "new-id", &[live]),
             Some("live-sid".to_string())
         );
+    }
+
+    /// One window per session: the first attach fills the empty window, the same window again
+    /// writes nothing, another window is refused, and an unknown session is refused.
+    #[test]
+    fn attach_fills_an_empty_window_and_refuses_a_second_one() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&["AOIDE_STAGE_DIR"]);
+        let stage = unique_stage("attach-fills");
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        let file = SessionsFile {
+            sessions: vec![SessionRecord { window_address: String::new(), ..session("term", "/w", "working", "1", None) }],
+            ..Default::default()
+        };
+        write_stage(&sessions_path(), &file).unwrap();
+
+        assert!(matches!(
+            attach_window("term", "0xA", None),
+            Attach::Bound { changed: true, workspace: None }
+        ));
+        assert!(matches!(
+            attach_window("term", "0xA", None),
+            Attach::Bound { changed: false, .. }
+        ));
+        assert!(matches!(
+            attach_window("term", "0xB", None),
+            Attach::Held { ref window } if window == "0xA"
+        ));
+        assert!(matches!(attach_window("ghost", "0xA", None), Attach::NoSession));
+
+        let s: SessionsFile = load_stage(&sessions_path()).unwrap();
+        assert_eq!(s.sessions[0].window_address, "0xA");
+        let _ = std::fs::remove_dir_all(&stage);
+    }
+
+    /// The workspace follows the window's report: a move updates the id, and the same id again
+    /// changes nothing.
+    #[test]
+    fn attach_moves_the_workspace_and_only_a_real_move_writes() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&["AOIDE_STAGE_DIR"]);
+        let stage = unique_stage("attach-moves");
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        let file = SessionsFile {
+            sessions: vec![SessionRecord { window_address: String::new(), ..session("term", "/w", "working", "1", None) }],
+            ..Default::default()
+        };
+        write_stage(&sessions_path(), &file).unwrap();
+
+        assert!(matches!(
+            attach_window("term", "0xA", Some(3)),
+            Attach::Bound { changed: true, workspace: Some(3) }
+        ));
+        assert!(matches!(
+            attach_window("term", "0xA", Some(3)),
+            Attach::Bound { changed: false, workspace: Some(3) }
+        ));
+        assert!(matches!(
+            attach_window("term", "0xA", Some(5)),
+            Attach::Bound { changed: true, workspace: Some(5) }
+        ));
+        let _ = std::fs::remove_dir_all(&stage);
+    }
+
+    /// The session hook, the reaper and the window attach run with no Hyprland environment at
+    /// all: no signature, no request socket under the runtime dir, and a `hyprctl` first on the
+    /// search path that leaves a marker when run. The marker must never appear.
+    #[cfg(unix)]
+    #[test]
+    fn hook_reap_and_attach_run_with_no_hyprland_environment() {
+        use std::os::unix::fs::PermissionsExt;
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&[
+            "AOIDE_STAGE_DIR",
+            "HYPRLAND_INSTANCE_SIGNATURE",
+            "XDG_RUNTIME_DIR",
+            "PATH",
+        ]);
+        let stage = unique_stage("no-hyprland-env");
+        std::fs::create_dir_all(&stage).unwrap();
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        std::env::set_var("XDG_RUNTIME_DIR", &stage);
+        std::env::remove_var("HYPRLAND_INSTANCE_SIGNATURE");
+        let shim_dir = stage.join("shim");
+        std::fs::create_dir_all(&shim_dir).unwrap();
+        let marker = stage.join("hyprctl-ran");
+        let shim = shim_dir.join("hyprctl");
+        std::fs::write(&shim, format!("#!/bin/sh\n: > '{}'\necho '[]'\n", marker.display())).unwrap();
+        std::fs::set_permissions(&shim, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let path = std::env::var("PATH").unwrap_or_default();
+        std::env::set_var("PATH", format!("{}:{path}", shim_dir.display()));
+
+        let me = std::process::id() as i32;
+        assert!(hook_chain(me).is_some(), "the walk finds a harness with no compositor");
+
+        const DEAD: i32 = 2_000_000_000;
+        let mut rec = session("hooked", "/w", "working", "1", None);
+        rec.window_address.clear();
+        rec.hook_ancestry = vec![DEAD, DEAD + 1];
+        let file = SessionsFile {
+            sessions: vec![rec],
+            ..Default::default()
+        };
+        write_stage(&sessions_path(), &file).unwrap();
+        ensure_session_chain("hooked", Some(me));
+        let healed: SessionsFile = load_stage(&sessions_path()).unwrap();
+        assert_eq!(healed.sessions[0].hook_ancestry, hook_chain(me).unwrap());
+
+        crate::reap::reap(&invocation(&["session", "reap"], &[]));
+        let kept: SessionsFile = load_stage(&sessions_path()).unwrap();
+        assert!(
+            kept.sessions.iter().any(|s| s.session_id == "hooked"),
+            "a live harness keeps its record through the reap"
+        );
+
+        assert!(matches!(
+            attach_window("hooked", "0xW", Some(3)),
+            Attach::Bound { changed: true, workspace: Some(3) }
+        ));
+        let bound: SessionsFile = load_stage(&sessions_path()).unwrap();
+        assert_eq!(bound.sessions[0].window_address, "0xW");
+        assert!(!marker.exists(), "the core ran hyprctl: it must read no compositor");
+        let _ = std::fs::remove_dir_all(&stage);
+    }
+
+    #[test]
+    fn a_bare_terminal_born_on_a_bound_workspace_joins_its_project() {
+        // The THIRD stamp site: the synthetic `win:` record for a bare tty has
+        // no agent, no project and no birth of its own — but it is a session on
+        // the workspace, so a bound workspace carries it exactly as it carries
+        // an agent's.
+        let projects = vec![
+            Project { name: "aoide".into(), workspaces: vec![3], ..Default::default() },
+            Project { name: "cadenza".into(), workspaces: vec![7], ..Default::default() },
+        ];
+        let mut w = term_win("0xAABB", "kitty", "/home/khoa");
+        w.workspace = Some(3);
+        let (out, changed) = reconcile_untracked_terminals(vec![], &[w.clone()], &projects);
+        assert!(changed);
+        assert_eq!(out[0].session_id, "win:aabb");
+        assert_eq!(out[0].workspace, Some(3));
+        assert_eq!(
+            out[0].workspace_project.as_deref(),
+            Some("aoide"),
+            "a bare terminal on a bound workspace joins its project"
+        );
+
+        // A re-scan after the window is DRAGGED: the id follows, the birth
+        // default does not.
+        let mut moved = w.clone();
+        moved.workspace = Some(7);
+        let (out, changed) = reconcile_untracked_terminals(out, &[moved], &projects);
+        assert!(changed);
+        assert_eq!(out[0].workspace, Some(7));
+        assert_eq!(out[0].workspace_project.as_deref(), Some("aoide"));
+
+        // Unbound, and with no projects at all: observed and unstamped.
+        let mut unbound = w.clone();
+        unbound.workspace = Some(99);
+        let (out, _) = reconcile_untracked_terminals(
+            vec![SessionRecord {
+                session_id: "win:aabb".into(),
+                workspace: None,
+                ..Default::default()
+            }],
+            &[unbound],
+            &[],
+        );
+        assert_eq!(out[0].workspace, Some(99));
+        assert_eq!(out[0].workspace_project, None);
     }
 }

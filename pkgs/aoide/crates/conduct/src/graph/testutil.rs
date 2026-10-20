@@ -13,9 +13,7 @@ use std::collections::BTreeMap;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::Arc;
-use std::time::Duration;
+use std::sync::atomic::{AtomicU64, Ordering};
 pub(crate) fn term_win(addr: &str, class: &str, cwd: &str) -> TermWindow {
     TermWindow {
         address: addr.into(),
@@ -108,100 +106,6 @@ pub(crate) fn fixture_projects() -> Vec<Project> {
         },
     ]
 }
-// `fake_hyprctl` lives in `aoide-test-support`: the strillix bridge's
-// workspace-adapter test drives the same shim. Re-exported at the old path.
-#[cfg(unix)]
-pub(crate) use aoide_test_support::fake_hyprctl;
-
-/// The fake Hyprland request socket behind [`super::window::hyprctl_clients`]: a
-/// listener at `<root>/hypr/test/.socket.sock`, with `XDG_RUNTIME_DIR=<root>` and
-/// `HYPRLAND_INSTANCE_SIGNATURE=test` set. It answers `j/clients` with the one
-/// window [`fake_hyprctl`]'s shim would print, built from the same vars
-/// (`AOIDE_TEST_CLIENT_PID`, `AOIDE_TEST_CLIENT_CLASS`, `AOIDE_TEST_WS`) read per
-/// request, so a test that sets them mid-way sees the change. Any other request
-/// gets no reply. The guard owns the server thread: dropping it stops and joins
-/// the thread, then restores the env. GATED on Unix, like the shim.
-#[cfg(unix)]
-pub(crate) struct HyprSocket {
-    _env: EnvVars,
-    stop: Arc<AtomicBool>,
-    server: Option<std::thread::JoinHandle<()>>,
-}
-
-#[cfg(unix)]
-impl Drop for HyprSocket {
-    fn drop(&mut self) {
-        self.stop.store(true, Ordering::Relaxed);
-        if let Some(server) = self.server.take() {
-            let _ = server.join();
-        }
-    }
-}
-
-#[cfg(unix)]
-pub(crate) fn fake_hypr_socket(tag: &str) -> (HyprSocket, PathBuf) {
-    use std::io::{Read, Write};
-    use std::os::unix::net::UnixListener;
-    let root = unique_stage(tag);
-    let sockets = root.join("hypr").join("test");
-    std::fs::create_dir_all(&sockets).unwrap();
-    let listener = UnixListener::bind(sockets.join(".socket.sock")).unwrap();
-    listener.set_nonblocking(true).unwrap();
-    let env = EnvVars::save(&[
-        "XDG_RUNTIME_DIR",
-        "HYPRLAND_INSTANCE_SIGNATURE",
-        "AOIDE_TEST_WS",
-        "AOIDE_TEST_CLIENT_PID",
-        "AOIDE_TEST_CLIENT_CLASS",
-    ]);
-    std::env::set_var("XDG_RUNTIME_DIR", &root);
-    std::env::set_var("HYPRLAND_INSTANCE_SIGNATURE", "test");
-    std::env::set_var("AOIDE_TEST_WS", "3");
-    let stop = Arc::new(AtomicBool::new(false));
-    let server = {
-        let stop = Arc::clone(&stop);
-        std::thread::spawn(move || {
-            while !stop.load(Ordering::Relaxed) {
-                match listener.accept() {
-                    Ok((mut conn, _)) => {
-                        conn.set_nonblocking(false).unwrap();
-                        conn.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
-                        let mut request = [0u8; 64];
-                        let n = conn.read(&mut request).unwrap_or(0);
-                        if &request[..n] == b"j/clients" {
-                            let env_or = |k: &str| std::env::var(k).ok();
-                            let ws = env_or("AOIDE_TEST_WS")
-                                .and_then(|s| s.parse::<i64>().ok())
-                                .unwrap_or(3);
-                            let pid = env_or("AOIDE_TEST_CLIENT_PID")
-                                .and_then(|s| s.parse::<u32>().ok())
-                                .unwrap_or_else(std::process::id);
-                            let class = env_or("AOIDE_TEST_CLIENT_CLASS")
-                                .unwrap_or_else(|| "kitty".to_string());
-                            let reply = serde_json::json!([{
-                                "address": "0xAA",
-                                "class": class,
-                                "title": "t",
-                                "pid": pid,
-                                "workspace": { "id": ws, "name": "ws" },
-                                "mapped": true,
-                                "at": [0, 0],
-                                "size": [1, 1],
-                            }]);
-                            let _ = conn.write_all(reply.to_string().as_bytes());
-                        }
-                    }
-                    Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                        std::thread::sleep(Duration::from_millis(2));
-                    }
-                    Err(_) => break,
-                }
-            }
-        })
-    };
-    (HyprSocket { _env: env, stop, server: Some(server) }, root)
-}
-
 pub(crate) fn argv(parts: &[&str]) -> Vec<String> {
     parts.iter().map(|s| s.to_string()).collect()
 }

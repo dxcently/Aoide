@@ -722,14 +722,7 @@ fn build_task(sessions: &[SessionRecord], id: &str) -> Result<Task, (i64, String
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0);
-    let dead = aoide_conduct::reap::is_session_dead(
-        rec,
-        None,
-        None,
-        aoide_conduct::reap::proc_exists,
-        now_epoch,
-        |_| None,
-    );
+    let dead = aoide_conduct::reap::is_session_dead(rec, aoide_conduct::reap::proc_exists, now_epoch, |_| None);
     let state = a2a_task_state_checked(dead, canonical, needs_sudo);
     Ok(Task {
         id: rec.session_id.clone(),

@@ -235,8 +235,8 @@ pub struct CaptureTarget {
 /// site, never a panic or a full-screen fallback. Address comparison reuses
 /// `graph::window`'s own `0x`/case-tolerant [`aoide_conduct::graph::normalize_addr`]
 /// — the stored/typed address and what a human pastes off `hyprctl clients`
-/// can disagree on both, exactly the same tolerance `graph::focus_session`/
-/// `graph::focus_window` already need for the same reason.
+/// can disagree on both, exactly the same tolerance the desktop's focus verbs
+/// (strillix `hypr::focus`) already need for the same reason.
 pub fn find_window<'a>(clients: &'a [hypr::Client], address: &str) -> Option<&'a hypr::Client> {
     let want = aoide_conduct::graph::normalize_addr(address);
     clients.iter().find(|c| aoide_conduct::graph::normalize_addr(&c.address) == want)
@@ -294,7 +294,7 @@ pub enum SessionRegionError {
 ///     `windowAddress` resolves to a real one. For a harness that
 ///     self-reports its own pid (pi's "payload-pid seam") it is likewise the
 ///     AGENT's pid, distinct from the terminal. It equals the window-owning
-///     pid only where `graph::window::ensure_session_window` backfills it
+///     pid only where the desktop's window sweep backfills it
 ///     (a harness with no self-reported pid). So `pid` is tried only as a
 ///     FALLBACK, via [`find_client_for_pid`] — for a session whose window
 ///     hasn't been discovered yet (or has gone stale) but still carries a

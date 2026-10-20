@@ -282,10 +282,11 @@ pub struct SessionRecord {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pid: Option<u32>,
     /// The Hyprland workspace id this session's window currently lives on,
-    /// stamped by the `socket2` window-event listener alongside `windowAddress`
-    /// (and re-stamped when the window moves between workspaces). Additive and
-    /// v0-safe: absent on a legacy record and whenever the window/workspace
-    /// could not be resolved (off-Hyprland, or the window not yet open). The
+    /// stamped by the desktop's window sweep alongside `windowAddress`, through
+    /// `session window attach --workspace` (and re-stamped when the window moves
+    /// between workspaces). Additive and v0-safe: absent on a legacy record and
+    /// whenever the window/workspace has not been reported (off-Hyprland, or the
+    /// window not yet open). The
     /// gadget-dock roster reads it to preview-highlight the bar's WorkspaceRow
     /// on hover (concepts/Terminal-Commander) — a pure-data bridge, no dispatch.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -514,12 +515,12 @@ pub struct SessionRecord {
     /// True for a HEADLESS `aoide conduct` wrap's own record — a PERMANENT,
     /// self-reported registration fact (stamped once, at `--headless`
     /// registration, never cleared) distinct from "`windowAddress` happens
-    /// to be empty right now": a bug in window discovery or the backfill
-    /// listener could otherwise stamp a stray window onto a headless wrap
+    /// to be empty right now": a bug in the desktop's window sweep
+    /// could otherwise stamp a stray window onto a headless wrap
     /// (task #89: an unconditional discovery call would find the ENCLOSING
     /// terminal's window through the wrap's own `/proc` ancestry, so the
     /// registration path never makes one). `windowless_by_lineage` and
-    /// `resolve_pending_session_windows` both key off THIS field first, not
+    /// the desktop's window sweep both key off THIS field first, not
     /// `windowAddress` emptiness, so a headless wrap's windowlessness (and
     /// its whole hook-child subtree's) survives even a corrupted address.
     /// Additive/v0-safe: `false`/absent for every INTERACTIVE session and
@@ -577,7 +578,7 @@ pub struct SessionRecord {
     /// starts at death), this field's meaning ENDS at death: a resurrected
     /// session mints a fresh id, so the mark has nothing to survive onto and
     /// belongs on the record itself, not a durable set — it vanishes with
-    /// the record the moment a REAL death signal (window-gone, pid-gone, a
+    /// the record the moment a REAL death signal (pid-gone, a
     /// pre-boot ghost, an orphaned subagent) takes it. `reap.rs`'s
     /// `is_session_dead` (the `stale_abandoned` signal) and
     /// `abandoned_spawned_shells` are the only two judgments it vetoes —
