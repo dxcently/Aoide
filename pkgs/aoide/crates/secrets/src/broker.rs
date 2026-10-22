@@ -2115,6 +2115,21 @@ fn append_events_feed(events_path: &Path, payload: &Value) {
     aoide_protocol::feed::FeedWriter::new(events_path.to_path_buf(), EVENTS_MAX_BYTES, EVENTS_CREATE_MODE).append(payload);
 }
 
+/// A wire text as an audit line holds it: each control, format and invisible
+/// character spelled `\u{hex}`, so no terminal that reads the log is rewritten
+/// by what a requester sent.
+fn audit_visible(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for c in text.chars() {
+        if aoide_protocol::untrusted::is_unsafe(c) {
+            out.push_str(&format!("\\u{{{:x}}}", u32::from(c)));
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
 /// Write BOTH audit lines for one resolve attempt (module doc). Name-only,
 /// by construction: nothing passed here is ever the secret's value.
 /// **`peer_uid` (task #73) rides alongside the self-asserted `consumer`
@@ -2132,6 +2147,9 @@ fn audit_resolve(
     reason: Option<&String>,
     peer_uid: Option<&PeerUser>,
 ) {
+    let (secret, consumer) = (audit_visible(secret), audit_visible(consumer));
+    let argv0 = argv0.map(audit_visible);
+    let reason = reason.map(String::as_str).map(audit_visible);
     let record = json!({
         "ts": aoide_protocol::audit::now_secs(),
         "secret": secret,
@@ -5097,6 +5115,32 @@ mod tests {
             Some(v) => std::env::set_var(crate::park::PARK_TIMEOUT_ENV, v),
             None => std::env::remove_var(crate::park::PARK_TIMEOUT_ENV),
         }
+    }
+
+    /// A refused park's audit lines hold no raw control, format or invisible
+    /// character. The requester's consumer is written with its code point
+    /// spelled out, in the broker's own log and in the mirrored aoide log.
+    #[test]
+    fn a_refused_park_writes_no_raw_unsafe_character_to_either_audit_log() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let home = tmp_home("audit-escape");
+        seed_enrolled(&home, Policy::new("t", "scratch", "stored-value"));
+        let parked = ParkRegistry::new();
+        let line = "{\"op\":\"resolve\",\"secret\":\"t\",\"consumer\":\"m\u{202e}x\"}";
+        let reply = with_redirected_audit_log(&home, || {
+            handle_line(&home, &home.join("events.jsonl"), line, &parked, &mut Vec::new(), None)
+        });
+        assert_eq!(reply["ok"], false, "{reply}");
+        for log in [home.join("mirrored-aoide-log"), own_audit_log_path(&home)] {
+            let text = std::fs::read_to_string(&log).unwrap_or_default();
+            assert!(!text.is_empty(), "the refusal is audited to {}", log.display());
+            let raw: Vec<char> = text
+                .chars()
+                .filter(|c| *c != '\n' && aoide_protocol::untrusted::is_unsafe(*c))
+                .collect();
+            assert!(raw.is_empty(), "raw unsafe characters in {}: {raw:?}", log.display());
+        }
+        std::fs::remove_dir_all(&home).ok();
     }
 
     /// Concurrency, at the connection-thread level (task's hard
