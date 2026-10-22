@@ -335,7 +335,7 @@
 use crate::park::{AskOrigin, ParkOutcome, ParkRegistry, WaitResult};
 use crate::peercred::PeerUser;
 use serde_json::{json, Value};
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, Read, Write};
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 #[cfg(unix)]
@@ -481,13 +481,19 @@ pub fn serve(secrets_home: &Path, socket_path: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
+/// The most bytes one request line may hold, newline excluded. A request is one
+/// small JSON object, so the cap only stops an unterminated line from growing
+/// the broker's memory without bound.
+const MAX_REQUEST_LINE: usize = 64 * 1024;
+
 /// Handle ONE client connection, on its OWN thread (module doc, P-N2): read
 /// newline-delimited JSON requests and reply to each. A read error (dropped
 /// connection) ends only this connection; nothing here can unwind into
 /// `serve`'s accept loop OR into any other connection's own thread. A
 /// `resolve` that parks (`handle_resolve`) blocks THIS thread only, for as
 /// long as `crate::park::park_timeout()` allows — every other connection's
-/// `handle_conn` thread is unaffected.
+/// `handle_conn` thread is unaffected. A request line over
+/// [`MAX_REQUEST_LINE`] gets one refusal, and then the connection closes.
 fn handle_conn(secrets_home: &Path, events_path: &Path, stream: UnixStream, parked: &ParkRegistry) {
     // #73: read SO_PEERCRED ONCE, at connection start, and thread the same
     // value into every op this connection sends — never re-read per line
@@ -504,16 +510,38 @@ fn handle_conn(secrets_home: &Path, events_path: &Path, stream: UnixStream, park
             return;
         }
     };
-    let reader = BufReader::new(stream);
-    for line in reader.lines() {
-        let line = match line {
-            Ok(l) => l,
+    let mut reader = BufReader::new(stream);
+    let mut line = Vec::new();
+    loop {
+        line.clear();
+        // At most one byte past the cap is read, so an over-long line is seen
+        // at the cap and never buffered up to its newline.
+        let read = match (&mut reader).take(MAX_REQUEST_LINE as u64 + 1).read_until(b'\n', &mut line) {
+            Ok(n) => n,
             Err(_) => break,
         };
-        if line.trim().is_empty() {
+        if read == 0 {
+            break;
+        }
+        if line.last() == Some(&b'\n') {
+            line.pop();
+        } else if line.len() > MAX_REQUEST_LINE {
+            let refusal = json!({
+                "ok": false,
+                "error": format!(
+                    "a request line is over {MAX_REQUEST_LINE} bytes; a request is one JSON object on one line, and this connection is closed"
+                ),
+            });
+            let _ = write_json_line(&mut writer, &refusal);
+            break;
+        }
+        let Ok(text) = std::str::from_utf8(&line) else {
+            break;
+        };
+        if text.trim().is_empty() {
             continue;
         }
-        let reply = handle_line(secrets_home, events_path, &line, parked, &mut writer, peer.clone());
+        let reply = handle_line(secrets_home, events_path, text, parked, &mut writer, peer.clone());
         if write_json_line(&mut writer, &reply).is_err() {
             break;
         }
@@ -4695,6 +4723,55 @@ mod tests {
             let err = reply["error"].as_str().unwrap();
             assert!(err.contains("timed out"), "an approve for a timed-out ask must say so: {err}");
         });
+        std::fs::remove_dir_all(&home).ok();
+    }
+
+    /// F25: a request line is capped at 64 KiB. A writer that sends more than the
+    /// cap with no newline is refused and disconnected, instead of the broker
+    /// reading on for a newline that never comes.
+    #[test]
+    fn an_unterminated_request_line_over_the_cap_is_refused_and_closed() {
+        let home = tmp_home("request-line-cap");
+        let (mut client, server) = UnixStream::pair().expect("socketpair");
+        client.set_read_timeout(Some(std::time::Duration::from_secs(5))).unwrap();
+        let (server_home, server_events) = (home.clone(), home.join("events.jsonl"));
+        std::thread::spawn(move || {
+            let parked = ParkRegistry::new();
+            handle_conn(&server_home, &server_events, server, &parked);
+        });
+
+        client.write_all(&vec![b'x'; 64 * 1024 + 1]).expect("the cap-plus-one bytes are written");
+        let mut reply = String::new();
+        BufReader::new(&client)
+            .read_line(&mut reply)
+            .expect("the broker must refuse an over-cap line, not wait for its newline");
+        let refusal: Value = serde_json::from_str(reply.trim()).expect("the refusal is one JSON line");
+        assert_eq!(refusal["ok"], false, "{refusal}");
+        assert!(refusal["error"].as_str().unwrap().contains("over 65536 bytes"), "{refusal}");
+        std::fs::remove_dir_all(&home).ok();
+    }
+
+    /// F25: a request line of exactly the cap, newline excluded, is still a
+    /// request and gets its reply. Only the byte past the cap is refused.
+    #[test]
+    fn a_request_line_at_the_cap_is_still_answered() {
+        let home = tmp_home("request-line-at-cap");
+        let (mut client, server) = UnixStream::pair().expect("socketpair");
+        client.set_read_timeout(Some(std::time::Duration::from_secs(5))).unwrap();
+        let (server_home, server_events) = (home.clone(), home.join("events.jsonl"));
+        std::thread::spawn(move || {
+            let parked = ParkRegistry::new();
+            handle_conn(&server_home, &server_events, server, &parked);
+        });
+
+        let op = r#"{"op":"status"}"#;
+        let mut request = op.to_string();
+        request.push_str(&" ".repeat(64 * 1024 - op.len()));
+        request.push('\n');
+        client.write_all(request.as_bytes()).expect("the request is written");
+        let mut reply = String::new();
+        BufReader::new(&client).read_line(&mut reply).expect("the broker answers a line at the cap");
+        assert!(!reply.contains("over 65536 bytes"), "a line of exactly the cap must not be refused: {reply}");
         std::fs::remove_dir_all(&home).ok();
     }
 

@@ -280,6 +280,11 @@ line is `resolve`'s park announcement below — a future op/mode extends the
 wire with a new interim shape or a new `op`, never by widening `wait` (see
 below) into something richer.
 
+A request line holds at most 64 KiB, newline excluded (`MAX_REQUEST_LINE`).
+A longer line gets one refusal, `{"ok":false,"error":"a request line is over
+65536 bytes; ..."}`, and the connection closes. The broker reads at most one
+byte past the cap, so an unterminated line never grows its buffer.
+
 ```
 -> {"op":"resolve","secret":"<name>","consumer":"<consumer>","totp":"<code>"?,"argv0":"<cmd>"?,"wait":<bool>?,"reason":"<text>"?}
 <- {"interim":true,"parked":true,"id":"<id>","timeoutSecs":<N>,"expiresAt":<unix-seconds>}

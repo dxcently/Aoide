@@ -582,6 +582,11 @@
   widening `resolve`'s `wait` field (still a plain bool) into something
   richer — `wait` is closed on purpose (invariant below, unchanged from
   P-N2).
+- **A request line is capped at `MAX_REQUEST_LINE` (64 KiB), newline
+  excluded.** `handle_conn` reads each line through `take(cap + 1)`, so an
+  over-long line is refused at the cap and the connection closes; the broker
+  never buffers a line up to its newline. Don't swap that read back for
+  `BufRead::lines()`, which has no cap.
 - **`approve` MUST re-run the full authorization gate against the ask's
   STORED consumer, immediately before fetching — never trust a code alone
   (P-N2c, FIX 2, hard constraint).** Before this fix, `handle_approve`
