@@ -679,6 +679,11 @@ pub struct SecretAskRow {
     pub consumer: String,
     pub requested_at: String,
     pub peer_uid: Option<String>,
+    /// The requester's claims, shown under a claims label on the review row and
+    /// each cleaned as it is read (F5). `None` when the ask carries none.
+    pub reason: Option<String>,
+    pub argv0: Option<String>,
+    pub origin_line: Option<String>,
 }
 
 /// One registered node's trust row — `node status --json`'s `data.nodes[]`, the
@@ -2148,6 +2153,9 @@ impl App {
                     .filter(|p| !p.is_null())
                     .map(scalar_text)
                     .filter(|s| !s.is_empty()),
+                reason: v.get("reason").and_then(|r| r.as_str()).map(aoide_protocol::untrusted::clean_line),
+                argv0: v.get("argv0").and_then(|a| a.as_str()).map(aoide_protocol::untrusted::clean_line),
+                origin_line: v.get("originLine").and_then(|o| o.as_str()).map(aoide_protocol::untrusted::clean_line),
             })
             .collect()
     }
@@ -7214,7 +7222,9 @@ mod tests {
             "secrets.pending" => Outcome::ok("secrets.pending", "1 pending ask(s)")
                 .with_data(json!({ "pending": [
                     { "id": "3", "secret": "db-prod", "consumer": "m",
-                      "requestedAt": 1789862400, "peerUid": 1000 },
+                      "requestedAt": 1789862400, "peerUid": 1000,
+                      "reason": "nightly deploy", "argv0": "/usr/bin/psql",
+                      "originLine": "from: khoa \u{b7} psql (pid 42) @ box" },
                 ] })),
             "secrets.status" => {
                 if let Some(o) = T1_STATUS.lock().unwrap().clone() {
@@ -8203,6 +8213,26 @@ mod tests {
             std::thread::sleep(std::time::Duration::from_millis(5));
             tick(app);
         }
+    }
+
+    /// F5: the claims a person reads before typing a code are on the review
+    /// row itself, under a label that says they are the requester's claims.
+    #[test]
+    fn an_ask_row_shows_its_claims_under_a_claims_label() {
+        let _g = T1_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let mut app = t1_app();
+        let _stage = IsolatedStage::new();
+        app.select_panel(Panel::Pending);
+        settle_reads(&mut app);
+        let backend = ratatui::backend::TestBackend::new(120, 30);
+        let mut term = ratatui::Terminal::new(backend).unwrap();
+        term.draw(|f| crate::board::draw(f, &app)).unwrap();
+        let text = dump_cells(term.backend().buffer());
+        assert!(
+            text.contains("claims (unverified): reason \"nightly deploy\", program /usr/bin/psql"),
+            "the review row names the claims: {text}"
+        );
+        assert!(text.contains("from: khoa \u{b7} psql (pid 42) @ box"), "{text}");
     }
 
     #[test]

@@ -916,6 +916,7 @@ fn pending_row(a: &crate::client::PendingAsk) -> serde_json::Value {
             "comm": a.origin.comm,
             "hostname": a.origin.hostname,
         },
+        "originLine": crate::watch::format_origin_line(&a.origin),
     })
 }
 
@@ -1091,6 +1092,7 @@ mod tests {
         assert_eq!(row["reason"], "nightly deploy", "{row}");
         assert_eq!(row["argv0"], "/usr/bin/psql", "{row}");
         assert_eq!(row["origin"]["comm"], "psql", "{row}");
+        assert_eq!(row["originLine"], "from: khoa \u{b7} psql (pid 42) @ box", "{row}");
     }
 
     #[cfg(unix)]

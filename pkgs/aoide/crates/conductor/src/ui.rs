@@ -1000,17 +1000,28 @@ fn review_row_item<'a>(row: &crate::app::ReviewRow) -> ListItem<'a> {
             if r.url.is_empty() { "no url" } else { &r.url },
             r.requested_at,
         ))),
-        ReviewRow::Ask(r) => ListItem::new(Line::from(format!(
-            "[{}] {} → {}  (requested {}){}",
-            r.id,
-            r.secret,
-            r.consumer,
-            r.requested_at,
-            r.peer_uid
-                .as_deref()
-                .map(|u| format!("  peer uid {u}"))
-                .unwrap_or_default(),
-        ))),
+        ReviewRow::Ask(r) => {
+            let reason = r.reason.as_deref().map_or_else(|| "none given".to_string(), |v| format!("\"{v}\""));
+            let program = r.argv0.as_deref().unwrap_or("none given");
+            let mut lines = vec![
+                Line::from(format!(
+                    "[{}] {} → {}  (requested {}){}",
+                    r.id,
+                    r.secret,
+                    r.consumer,
+                    r.requested_at,
+                    r.peer_uid
+                        .as_deref()
+                        .map(|u| format!("  peer uid {u}"))
+                        .unwrap_or_default(),
+                )),
+                Line::from(format!("    claims (unverified): reason {reason}, program {program}")),
+            ];
+            if let Some(origin) = &r.origin_line {
+                lines.push(Line::from(format!("    claims (unverified): {origin}")));
+            }
+            ListItem::new(lines)
+        }
     }
 }
 

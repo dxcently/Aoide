@@ -204,6 +204,12 @@
   line and no flag, and captures both streams; the status line shows the
   rendered message. `the_totp_prompt_approves_through_the_cli_with_the_code_on_stdin`
   pins it against a fake broker.
+- An ask's `reason`, `argv0` and `originLine` (from `secrets pending
+  --json`) are the requester's claims. They are cleaned with `clean_line`
+  when the row is read, and the review row shows them under a claims
+  label: what a person reads before typing a code is the same as what
+  `approve` shows. The conductor does not render the origin itself; the
+  secrets crate does, once, as `originLine`.
 - While a pairing leg is in flight, no node write is advertised or dispatched:
   the leg's commit writes `state/nodes.json` from its own thread, so a
   `node allow`/`node remove` from the UI thread at the same time is a lost
