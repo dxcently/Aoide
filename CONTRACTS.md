@@ -4403,8 +4403,14 @@ A2a             `aoide a2a serve`, loopback included    no          queued only;
   conductable record with a socket on disk) is refused with `reason:
   "target-not-live"`, and the entry stays queued. An A2A spawn's opening turn
   can be held before its child registers, so approve again once it does. A
-  held spawn has no target yet, since approving it is what creates one, so it
-  skips that check.
+  target with no record is told it is not live yet. A target whose record
+  exists but cannot be typed into is told it is registered, and approve again
+  once it can be typed into. A held spawn has no target yet, since approving it
+  is what creates one, so it skips that check.
+- `session pending approve` for a gone entry is refused with `reason: "gone"`,
+  before the take, and the entry stays queued until `deny`. An entry is gone
+  when its target's record is `done`, or when no record exists for its target
+  four hours after the entry was queued. A held spawn is never gone.
 - The MCP door has no generic passthrough. Every command is its own tool,
   and `spawn` and `conduct` take one `command` argument, which is one argv
   element, so an MCP caller cannot express `aoide send --yes` as a child
@@ -4432,8 +4438,9 @@ and for an MCP send whose server runs under a sealed session, and on any other
 send a door that cannot approve parks whatever it asks for. Read and resolved
 by `aoide session pending list/approve/deny`: `list` enumerates every entry (a
 malformed one — a stale hand-edited line — surfaces as `"state": "malformed"`
-rather than failing the read), giving each well-formed entry `pending` until it
-is seven days past its `queuedAt` and `expired` after that, or at once when its
+rather than failing the read), giving each well-formed entry `pending`, `gone`
+when its target can never take it (see the `approve` bullet above), or
+`expired` once it is seven days past its `queuedAt`, or at once when its
 `queuedAt` is empty or does not parse; each carries `expires` (`queuedAt` plus
 seven days, or null). `approve` re-drives the entry through the SAME
 gated injection door with `--yes`, in-process, and only on a door that can
@@ -4515,7 +4522,9 @@ one `session.pending.evict` audit line per entry it drops (`status:
 "evicted"`, the head of its text as `untrusted_data`), whichever door queued
 the hold. A queue at its file bound therefore takes a new hold again once an
 expired entry is evicted. `approve` refuses an expired entry with `reason:
-"expired"`, before anything is taken or launched; `deny` removes it.
+"expired"`, before anything is taken or launched; `deny` removes it. A gone
+entry is refused the same way with `reason: "gone"`, and eviction leaves it
+alone: it stays queued until it is denied or reaches its seven days.
 
 Approval does not re-decide what the hold decided. `approve` takes the entry it
 read, under the stage lock, only when the entry's content still matches the

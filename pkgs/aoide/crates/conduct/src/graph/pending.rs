@@ -48,7 +48,8 @@
 use super::common::{clean_line, refuse_unapproving_door, require_args, stage_error, visible, visible_held};
 use super::doc::is_conductable_now;
 use super::model::{
-    load_stage, resolved_parent, sessions_path, write_stage, SessionRecord, SessionsFile,
+    canonical_state, load_stage, resolved_parent, sessions_path, write_stage, SessionRecord,
+    SessionsFile,
 };
 use super::send::{expires_stamp, is_expired, pending_path, PendingSpawn, DOOR_CANNOT_APPROVE};
 use aoide_protocol::output::{Fix, Kind, Outcome, Status};
@@ -134,6 +135,24 @@ fn from_label(id: &str, by_id: &BTreeMap<&str, &SessionRecord>) -> String {
     }
 }
 
+/// A hold whose target has no record this long after it was queued is gone.
+const GONE_ABSENT_SECS: i64 = 4 * 3_600;
+
+/// Why a hold's target can never take it, or `None` while it still might. A
+/// `done` record is a finished session. No record at all, once `GONE_ABSENT_SECS`
+/// have passed since the hold was queued, is treated as gone: the hold is refused,
+/// not held forever.
+fn gone_reason(record: Option<&SessionRecord>, queued_at: &str, now: i64) -> Option<&'static str> {
+    match record {
+        Some(r) if canonical_state(&r.state) == "done" => Some("its session is done"),
+        Some(_) => None,
+        None => {
+            let queued = aoide_storage::time::parse_iso_utc(queued_at)?;
+            (now >= queued + GONE_ABSENT_SECS).then_some("its session has no record")
+        }
+    }
+}
+
 /// How long ago a hold was queued, in the largest whole unit it fills. `None`
 /// when `queuedAt` does not parse: there is no age to show.
 fn queued_ago(queued_at: &str, now: i64) -> Option<String> {
@@ -205,7 +224,19 @@ fn entry_view(
     let shown = if spawn.is_some() { visible_held(&text) } else { visible(&text) };
     let plan: Vec<String> = spawn.as_ref().map(|s| s.shown.iter().map(|l| visible_held(l)).collect()).unwrap_or_default();
     let expired = is_expired(&queued_at, now);
-    let state = if expired { "expired" } else { "pending" };
+    // A held spawn has no target until it is approved, so it is never gone.
+    let gone = if spawn.is_none() && !expired {
+        gone_reason(by_id.get(session_id.as_str()).copied(), &queued_at, now)
+    } else {
+        None
+    };
+    let state = if expired {
+        "expired"
+    } else if gone.is_some() {
+        "gone"
+    } else {
+        "pending"
+    };
     let mut json = json!({
         "id": index.to_string(),
         "fingerprint": fingerprint(v),
@@ -227,12 +258,20 @@ fn entry_view(
         Some(_) => format!("spawn {} ← {shown}", visible(&session_id)),
         None => format!("{} ← {shown}", visible(&grammar_label(&session_id, by_id, ids, host))),
     };
-    let since = match queued_ago(&queued_at, now) {
-        Some(ago) => format!("{state}, queued {ago} ago"),
-        None => format!("{state}, queued at no readable time"),
+    let words = match gone {
+        Some(why) => format!("gone ({why})"),
+        None => state.to_string(),
     };
-    // A lapsed hold offers one resolution, deny: approving it is refused.
-    let hint = if expired { format!("; deny it: aoide session pending deny {index}") } else { String::new() };
+    let since = match queued_ago(&queued_at, now) {
+        Some(ago) => format!("{words}, queued {ago} ago"),
+        None => format!("{words}, queued at no readable time"),
+    };
+    // A lapsed or gone hold offers one resolution, deny: approving it is refused.
+    let hint = if expired || gone.is_some() {
+        format!("; deny it: aoide session pending deny {index}")
+    } else {
+        String::new()
+    };
     let line = format!(
         "[{index}] {since}: {what}{}{}{} ({}){hint}",
         if submit { " [submit]" } else { "" },
@@ -423,10 +462,11 @@ pub fn pending_approve(inv: &Invocation) -> Outcome {
         return Outcome::error(cmd, e)
             .with_data(json!({ "reason": "pending-entry-unresolvable", "id": index.to_string() }));
     };
-    // A lapsed hold is refused before the entry leaves the queue. The list offers
-    // only deny for it, and a deny removes it.
+    // A lapsed or gone hold is refused before the entry leaves the queue. The list
+    // offers only deny for either, and a deny removes it.
+    let now = super::conduct::unix_ts() as i64;
     let queued = observed.get("queuedAt").and_then(Value::as_str).unwrap_or("");
-    if is_expired(queued, super::conduct::unix_ts() as i64) {
+    if is_expired(queued, now) {
         audit_pending(inv, cmd, "refused", &format!("approve [{index}]: expired (queued {queued})"), "");
         return Outcome::refuse(
             cmd,
@@ -436,6 +476,28 @@ pub fn pending_approve(inv: &Invocation) -> Outcome {
             Fix::Run(format!("aoide session pending deny {index}")),
         )
         .with_fields(json!({ "reason": "expired", "id": index.to_string() }));
+    }
+    // The roster is read once for the gone check here and the registered wording
+    // at the target check below.
+    let roster: Vec<SessionRecord> = load_stage::<SessionsFile>(&sessions_path())
+        .map(|f| f.sessions)
+        .unwrap_or_default();
+    let target_sid = observed.get("sessionId").and_then(Value::as_str).unwrap_or("");
+    let gone = if spawn_of(&observed).is_none() {
+        gone_reason(roster.iter().find(|s| s.session_id == target_sid), queued, now)
+    } else {
+        None
+    };
+    if let Some(why) = gone {
+        audit_pending(inv, cmd, "refused", &format!("approve [{index}] {target_sid}: gone ({why})"), "");
+        return Outcome::refuse(
+            cmd,
+            Kind::Refused,
+            format!("pending entry {index} is gone: {why}"),
+            "deny it: its target can no longer take it",
+            Fix::Run(format!("aoide session pending deny {index}")),
+        )
+        .with_fields(json!({ "reason": "gone", "id": index.to_string(), "sessionId": target_sid }));
     }
     let spawn_id = spawn_of(&observed).filter(|s| !s.is_resurrect()).and_then(|s| s.flags.get("id").cloned());
     if let Some(id) = spawn_id {
@@ -473,12 +535,25 @@ pub fn pending_approve(inv: &Invocation) -> Outcome {
         .filter(|v| spawn_of(v).is_none())
         .and_then(|v| v.get("sessionId").and_then(Value::as_str).map(str::to_string));
     if let Some(sid) = target.filter(|sid| !target_is_live(sid)) {
+        // A session with a record has registered: it is told when it can be typed
+        // into, never to register again.
+        let (what, why) = if roster.iter().any(|s| s.session_id == sid) {
+            (
+                format!("`{}` is registered but cannot be typed into now", visible(&sid)),
+                "approve again once it can be typed into",
+            )
+        } else {
+            (
+                format!("`{}` is not live yet", visible(&sid)),
+                "the session is not live yet; approve again once it registers",
+            )
+        };
         audit_pending(inv, cmd, "refused", &format!("approve [{index}] {sid}: target not live"), "");
         return Outcome::refuse(
             cmd,
             Kind::Refused,
-            format!("`{}` is not live yet", visible(&sid)),
-            "the session is not live yet; approve again once it registers",
+            what,
+            why,
             Fix::Run(format!("aoide session pending approve {index}")),
         )
         .with_fields(json!({ "reason": "target-not-live", "id": index.to_string(), "sessionId": sid }));
@@ -1956,6 +2031,11 @@ mod tests {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _env = EnvVars::save(&["AOIDE_STAGE_DIR", "XDG_RUNTIME_DIR", "AOIDE_AUDIT_LOG", "AOIDE_CONDUCT_AUTOGATE", "AOIDE_SESSION_ID"]);
         let root = setup("pnd-seven-days");
+        // Both targets are registered: an absent one is gone four hours in, and
+        // this test is about the seven-day line alone.
+        for id in ["young", "old"] {
+            do_session_start(id, Some("claude"), Some("/w"), None, None, None, None, None, None);
+        }
         write_queue(&[
             queued_entry("young", &stamp_ago(7 * 86_400 - 3_600), "a", 5),
             queued_entry("old", &stamp_ago(7 * 86_400 + 3_600), "b", 5),
@@ -2113,6 +2193,108 @@ mod tests {
         let left = load_pending_array().unwrap();
         assert!(left.iter().all(|e| e["sessionId"] != "last"), "the expired entry is gone");
         assert_eq!(eviction_lines(&root), 1, "one audit line for the one evicted entry");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Set the stored `state` of every session record named `id`.
+    fn set_session_state(id: &str, state: &str) {
+        let mut file: SessionsFile = load_stage(&sessions_path()).unwrap();
+        for s in file.sessions.iter_mut().filter(|s| s.session_id == id) {
+            s.state = state.to_string();
+        }
+        write_stage(&sessions_path(), &file).unwrap();
+    }
+
+    #[test]
+    fn an_absent_target_stays_pending_until_four_hours_then_lists_as_gone() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&["AOIDE_STAGE_DIR", "XDG_RUNTIME_DIR", "AOIDE_AUDIT_LOG", "AOIDE_CONDUCT_AUTOGATE", "AOIDE_SESSION_ID"]);
+        let root = setup("pnd-absent-gone");
+        write_queue(&[
+            queued_entry("absent-young", &stamp_ago(3_600), "someone", 5),
+            queued_entry("absent-old", &stamp_ago(4 * 3_600 + 60), "someone", 5),
+        ]);
+
+        assert_eq!(listed_row(0)["state"], "pending", "an hour old, still registering");
+        assert_eq!(listed_row(1)["state"], "gone", "absent four hours after it was queued");
+
+        let young = pending_approve(&pending_invocation(&["session", "pending", "approve"], &["0"]));
+        assert_eq!(young.data.as_ref().unwrap()["reason"], "target-not-live", "{}", young.message);
+        assert_eq!(
+            young.data.as_ref().unwrap()["refusal"]["why"],
+            "the session is not live yet; approve again once it registers"
+        );
+        let old = pending_approve(&pending_invocation(&["session", "pending", "approve"], &["1"]));
+        assert_eq!(old.data.as_ref().unwrap()["reason"], "gone", "{}", old.message);
+        assert_eq!(load_pending_array().unwrap().len(), 2, "both refusals leave the queue alone");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_target_whose_record_is_done_lists_as_gone_and_approve_refuses_it_while_deny_removes_it() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&["AOIDE_STAGE_DIR", "XDG_RUNTIME_DIR", "AOIDE_AUDIT_LOG", "AOIDE_CONDUCT_AUTOGATE", "AOIDE_SESSION_ID"]);
+        let root = setup("pnd-done-gone");
+        let id = "done-target";
+        let listener = register_live(id);
+        listener.set_nonblocking(true).unwrap();
+        set_session_state(id, "done");
+        write_queue(&[queued_entry(id, &stamp_ago(3_600), "someone", 5)]);
+
+        assert_eq!(listed_row(0)["state"], "gone", "a done target is gone however young the hold");
+        let out = pending_approve(&pending_invocation(&["session", "pending", "approve"], &["0"]));
+        assert_eq!(out.status, Status::Error, "{}", out.message);
+        assert_eq!(out.data.as_ref().unwrap()["reason"], "gone", "{}", out.message);
+        assert!(!out.message.contains("not live yet"), "a gone hold is not 'not live yet': {}", out.message);
+        assert!(
+            matches!(listener.accept(), Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock),
+            "a gone hold delivers nothing"
+        );
+        assert_eq!(load_pending_array().unwrap().len(), 1, "the refused approval leaves it queued");
+
+        let denied = pending_deny(&pending_invocation(&["session", "pending", "deny"], &["0"]));
+        assert_eq!(denied.status, Status::Ok, "{}", denied.message);
+        assert!(load_pending_array().unwrap().is_empty(), "deny removes a gone hold");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_registered_target_that_cannot_be_typed_into_lists_as_pending_and_never_says_once_it_registers() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&["AOIDE_STAGE_DIR", "XDG_RUNTIME_DIR", "AOIDE_AUDIT_LOG", "AOIDE_CONDUCT_AUTOGATE", "AOIDE_SESSION_ID"]);
+        let root = setup("pnd-registered");
+        let id = "registered-plain";
+        do_session_start(id, Some("claude"), Some("/w"), None, None, None, None, None, None);
+        write_queue(&[queued_entry(id, &stamp_ago(3_600), "someone", 5)]);
+
+        assert_eq!(listed_row(0)["state"], "pending", "registered and not done is pending");
+        let out = pending_approve(&pending_invocation(&["session", "pending", "approve"], &["0"]));
+        assert_eq!(out.status, Status::Error, "{}", out.message);
+        assert!(out.message.contains("registered but cannot be typed into now"), "{}", out.message);
+        let why = out.data.as_ref().unwrap()["refusal"]["why"].as_str().unwrap().to_string();
+        assert!(!why.contains("once it registers"), "a registered session has registered: {why}");
+        assert!(why.contains("once it can"), "{why}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_held_spawn_is_never_gone_even_when_its_id_names_a_done_record() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&["AOIDE_STAGE_DIR", "XDG_RUNTIME_DIR", "AOIDE_AUDIT_LOG", "AOIDE_CONDUCT_AUTOGATE", "AOIDE_SESSION_ID"]);
+        let root = setup("pnd-spawn-never-gone");
+        let id = "spawn-done-id";
+        do_session_start(id, Some("claude"), Some("/w"), None, None, None, None, None, None);
+        set_session_state(id, "done");
+        write_queue(&[json!({
+            "sessionId": id,
+            "text": "aoide spawn --id=spawn-done-id -- true",
+            "submit": false,
+            "queuedAt": stamp_ago(5 * 3_600),
+            "from": "mcp",
+            "spawn": { "path": ["spawn"], "args": ["true"], "flags": { "id": id } },
+        })]);
+
+        assert_eq!(listed_row(0)["state"], "pending", "a held spawn has no target until it is approved");
         let _ = std::fs::remove_dir_all(&root);
     }
 }

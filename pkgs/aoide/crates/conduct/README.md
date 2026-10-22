@@ -98,6 +98,11 @@ counts a source's cap or the file bound, and writes one `session.pending.evict`
 audit line per entry it drops, so holds nobody will approve cannot fill the
 queue.
 
+A hold whose target can never take it is `gone`. `list` offers only a deny for
+it and `approve` refuses it. Its target's record is `done`, or no record for
+the target exists four hours after the hold was queued. Eviction leaves a gone
+hold alone: it stays queued until it is denied or reaches its seven days.
+
 ## Named seams (what it exposes)
 
 - **The workspace ↔ project binding (§B)**: `graph/workspace.rs` implements

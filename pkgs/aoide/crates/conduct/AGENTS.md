@@ -105,8 +105,8 @@ in the message.
   only past that check, so a send from a remote door parks whatever it asks
   for unless an attested rule delivers it (next bullet), and
   `pending_approve` refuses before it takes an entry off the queue: when the
-  door cannot approve, when the entry has expired, and when its target is not
-  live yet.
+  door cannot approve, when the entry has expired, when its target is gone, and
+  when its target is not live yet.
   `pending_deny` refuses on the same predicate, so a door that cannot approve
   cannot empty the queue under the human either. The same predicate gates
   the other two things a human's approval answers: `session_permit` files no
@@ -264,9 +264,10 @@ in the message.
   either cap.** `is_expired` (`graph/send.rs`) reads the stamp each time an
   entry is read, and expiry is never stored. An empty `queuedAt`, or one that
   does not parse, is expired, with no `expires`. `pending_list` reports
-  `state` `pending` or `expired` and `expires` (`queuedAt` plus seven days),
-  and an expired entry's human line offers only deny. `pending_approve`
-  refuses an expired entry before the take, taught, and launches nothing.
+  `state` `pending`, `gone` (next invariant) or `expired`, and `expires`
+  (`queuedAt` plus seven days). An expired entry's human line offers only
+  deny. `pending_approve` refuses an expired entry before the take, taught, and
+  launches nothing.
   `pending_deny` removes it. `record_pending` drops every expired entry under
   the stage lock before it counts a cap, and writes one
   `session.pending.evict` audit line per entry it drops, from whichever door
@@ -287,6 +288,23 @@ in the message.
   `a_held_send_evicts_expired_entries_and_audits_each_one`,
   `a_queue_at_its_file_cap_refuses_a_hold_taught_while_nothing_in_it_is_expired`
   and `a_queue_at_its_file_cap_takes_a_hold_again_once_an_expired_entry_is_evicted`.
+- **A hold is gone when its target can never take it, and approve refuses it.**
+  `gone_reason` (`graph/pending.rs`) reads the session roster: a record whose
+  `state` folds to `done` makes its hold gone at once, and no record at all
+  makes it gone once `GONE_ABSENT_SECS` (four hours) have passed since
+  `queuedAt`. A registered target that cannot be typed into yet is pending, not
+  gone. A held spawn has no target and is never gone. Expiry is checked first,
+  so an expired hold reads expired whatever its target. `pending_list` gives
+  `state` `gone` and a deny-only line, and `pending_approve` refuses a gone
+  entry before the take, taught with `reason: "gone"`, and launches nothing.
+  Assume breach: the roster is a file a process running as the user can
+  rewrite. A rewrite can make a hold read gone, which costs an approval and
+  nothing more, since gone only ever refuses; it never redirects a delivery to
+  another target. Pinned by
+  `an_absent_target_stays_pending_until_four_hours_then_lists_as_gone`,
+  `a_target_whose_record_is_done_lists_as_gone_and_approve_refuses_it_while_deny_removes_it`,
+  `a_registered_target_that_cannot_be_typed_into_lists_as_pending_and_never_says_once_it_registers`
+  and `a_held_spawn_is_never_gone_even_when_its_id_names_a_done_record`.
 - **An approver is shown what replays, in escapes, never stripped.** Every
   human view of a queued entry (`pending list`'s line, the answers of `approve`
   and `deny`, and across the crate boundary the conductor's PENDING rows) spells
