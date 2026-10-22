@@ -889,18 +889,9 @@ fn status_text(secrets: &[crate::client::StatusSecret]) -> String {
     out
 }
 
-/// `secrets pending` (P-N2) — CLI-only via the the door gate as
-/// `put`/`exec`, but deliberately **NOT** [`require_admin_identity`]: this
-/// is the operator-side socket surface (task requirement — "like put/exec,
-/// NOT admin/euid commands"), reading in-memory broker state over the socket
-/// rather than `policy.json`, so the euid-ownership guard that protects
-/// `policy.json` writes doesn't apply here. The list `crate::client::
-/// pending` returns is value-free by construction (`PendingAsk` has no
-/// value field at all); this handler only re-shapes it into JSON, adding
-/// nothing.
 /// One pending ask as its `secrets pending --json` row. Every claim the approve
 /// screen shows is carried, so a surface that lists the asks shows the same
-/// claims `approve` would (F5).
+/// claims `approve` would.
 fn pending_row(a: &crate::client::PendingAsk) -> serde_json::Value {
     json!({
         "id": a.id,
@@ -920,6 +911,15 @@ fn pending_row(a: &crate::client::PendingAsk) -> serde_json::Value {
     })
 }
 
+/// `secrets pending` — CLI-only through the door gate, as
+/// `put`/`exec`, but deliberately **NOT** [`require_admin_identity`]: this
+/// is the operator-side socket surface (task requirement — "like put/exec,
+/// NOT admin/euid commands"), reading in-memory broker state over the socket
+/// rather than `policy.json`, so the euid-ownership guard that protects
+/// `policy.json` writes doesn't apply here. The list `crate::client::
+/// pending` returns is value-free by construction (`PendingAsk` has no
+/// value field at all); this handler only re-shapes it into JSON, adding
+/// nothing.
 fn handle_secrets_pending(inv: &Invocation) -> Outcome {
     let cmd = "secrets.pending";
     match crate::client::pending(&crate::socket::socket_path()) {
@@ -932,7 +932,7 @@ fn handle_secrets_pending(inv: &Invocation) -> Outcome {
     }
 }
 
-/// `secrets approve <id>` (P-N2) — same operator-side gate as `secrets
+/// `secrets approve <id>` — same operator-side gate as `secrets
 /// pending` above (CLI-only, no admin-identity check). The code is read by
 /// `crate::client::approve_with` (a no-echo prompt, or one stdin line), never
 /// taken from argv. The wire's `approve` reply never carries a value: the

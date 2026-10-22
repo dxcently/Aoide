@@ -1132,7 +1132,7 @@ fn authorize_release(secrets_home: &Path, secret: &str, consumer: &str) -> Resul
     Ok(())
 }
 
-/// `approve <id>` with its `totp` (P-N2, re-gated P-N2c): validate the code
+/// `approve <id>` with its `totp`: validate the code
 /// with the SAME [`verify_totp_gate`] a fast-path `resolve` uses (same RFC
 /// 6238 verify, same single-use replay ledger — the code is consumed
 /// identically either way), re-run [`authorize_release`] against the ask's
@@ -1945,7 +1945,7 @@ fn verify_totp_gate(secrets_home: &Path, totp: Option<&str>, now_unix: u64) -> R
     let budget = budgets.entry(secrets_home.to_path_buf()).or_default();
     // Only a LATER step starts a fresh budget. A check from an older step (one
     // that read the clock before the step turned) is judged by the budget the
-    // newest step has spent, never by a reset to its own step (F11).
+    // newest step has spent, never by a reset to its own step.
     if step > budget.step {
         *budget = TotpBudget { step, ..TotpBudget::default() };
     }
@@ -4352,7 +4352,7 @@ mod tests {
         assert_eq!(third["ok"], false, "{third}");
     }
 
-    /// F11: the budget belongs to the newest step it has seen. A check from an
+    /// The budget belongs to the newest step it has seen. A check from an
     /// older step (one that read the clock before the step turned) is judged by
     /// that budget, so it cannot reset the budget to a fresh one.
     #[test]
@@ -4831,7 +4831,7 @@ mod tests {
         std::fs::remove_dir_all(&home).ok();
     }
 
-    /// F20: an approve for an ask whose wait ran out is refused as a timed-out
+    /// An approve for an ask whose wait ran out is refused as a timed-out
     /// ask, not as an unknown id, so the person is told why it is gone.
     #[test]
     fn an_approve_for_an_ask_whose_wait_ran_out_says_it_timed_out() {
@@ -4855,7 +4855,7 @@ mod tests {
         std::fs::remove_dir_all(&home).ok();
     }
 
-    /// F25: a request line is capped at 64 KiB. A writer that sends more than the
+    /// A request line is capped at 64 KiB. A writer that sends more than the
     /// cap with no newline is refused and disconnected, instead of the broker
     /// reading on for a newline that never comes.
     #[test]
@@ -4880,7 +4880,7 @@ mod tests {
         std::fs::remove_dir_all(&home).ok();
     }
 
-    /// F25: a request line of exactly the cap, newline excluded, is still a
+    /// A request line of exactly the cap, newline excluded, is still a
     /// request and gets its reply. Only the byte past the cap is refused.
     #[test]
     fn a_request_line_at_the_cap_is_still_answered() {
@@ -4906,7 +4906,7 @@ mod tests {
         std::fs::remove_dir_all(&home).ok();
     }
 
-    /// F2: a parked ask is shown to a person exactly as written, so a request
+    /// A parked ask is shown to a person exactly as written, so a request
     /// whose reason, consumer or argv0 holds a control or invisible character
     /// is refused at ingest: nothing parks, and the refusal names the rule and
     /// the field.
@@ -4928,7 +4928,7 @@ mod tests {
         assert_refused_at_ingest("argv0", r#"{"op":"resolve","secret":"t","consumer":"m","argv0":"sh\u001b[2J"}"#);
     }
 
-    /// V1: a field over the approve dialog's bound is refused at park, so no
+    /// A field over the approve dialog's bound is refused at park, so no
     /// person is shown a field that cannot be read on one screen.
     #[test]
     fn a_consumer_over_4_kib_is_refused_and_parks_nothing() {
@@ -4948,7 +4948,7 @@ mod tests {
         assert_refused_at_ingest_with("argv0", &line, "is over 4096 bytes");
     }
 
-    /// V1: a field over 60 lines is refused at park, by the line bound's own
+    /// A field over 60 lines is refused at park, by the line bound's own
     /// wording (61 lines is 122 bytes, under the byte bound).
     #[test]
     fn a_reason_over_60_lines_is_refused_and_parks_nothing() {
@@ -4956,7 +4956,7 @@ mod tests {
         assert_refused_at_ingest_with("reason", &line, "is over 60 lines");
     }
 
-    /// N4: an argv0 within the bound parks whole. The clip to the one-line bound
+    /// An argv0 within the bound parks whole. The clip to the one-line bound
     /// is gone, so the parked row carries the program the requester named.
     #[test]
     fn a_3_kib_argv0_parks_and_the_row_shows_it_whole() {
@@ -5033,7 +5033,7 @@ mod tests {
         std::fs::remove_dir_all(&home).ok();
     }
 
-    /// F19: a code that checked out for an ask already gone must say the code
+    /// A code that checked out for an ask already gone must say the code
     /// was used, so the person does not retry it.
     #[test]
     fn a_code_checked_for_a_gone_ask_says_the_code_was_used() {
@@ -5073,7 +5073,7 @@ mod tests {
         reply
     }
 
-    /// F3: a parked ask carries the argv0 the resolve named, so the approve
+    /// A parked ask carries the argv0 the resolve named, so the approve
     /// screen can show which program the requester says receives the value.
     #[test]
     fn a_pending_row_carries_the_argv0_the_resolve_named() {
@@ -6023,7 +6023,7 @@ mod tests {
         serde_json::from_str(line.trim()).expect("reply must be JSON")
     }
 
-    /// V2: the admin op checks a secret name with the rule `add` and `put` use,
+    /// The admin op checks a secret name with the rule `add` and `put` use,
     /// so a name holding a control character is refused and nothing is written.
     #[test]
     fn admin_add_with_a_control_character_in_the_name_is_refused_and_policy_json_is_untouched() {
@@ -6048,7 +6048,7 @@ mod tests {
         std::fs::remove_dir_all(&home).ok();
     }
 
-    /// V2: `grant` refuses a consumer holding a control or invisible character,
+    /// `grant` refuses a consumer holding a control or invisible character,
     /// and the secret's consumer list is unchanged.
     #[test]
     fn admin_grant_with_a_control_character_in_the_consumer_is_refused_and_changes_nothing() {

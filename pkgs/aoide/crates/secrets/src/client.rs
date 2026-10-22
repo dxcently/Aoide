@@ -2697,7 +2697,7 @@ mod tests {
     }
 
     /// The history report and the task register keep the decisions as they were
-    /// written, `--totp` included (review F18), so they are not scanned.
+    /// written, `--totp` included, so they are not scanned.
     const TOTP_HISTORY: [&str; 2] = ["docs/architecture/aoide-report.html", "docs/architecture/TASK-REGISTER.md"];
 
     /// The scan root for a crate: the nearest ancestor holding a `.git` entry (a
@@ -2740,7 +2740,7 @@ mod tests {
         assert_eq!(got_checkout, want_checkout, "a checkout scans the repo root, not the workspace");
     }
 
-    /// F22: no text in the workspace teaches a TOTP code in argv. The scan covers
+    /// No text in the workspace teaches a TOTP code in argv. The scan covers
     /// the repo's text files, not six source files, so a teaching string in the
     /// strillix, conductor or docs trees fails it too.
     #[test]
@@ -2981,7 +2981,7 @@ mod argv_free_tests {
         assert!(!format!("{err:?}").contains("123456"), "the refusal echoed the code: {err:?}");
     }
 
-    /// F3: the approve screen names the program the requester says receives the
+    /// The approve screen names the program the requester says receives the
     /// value, as a claim, so a person sees what the code releases before typing it.
     #[test]
     fn approve_context_names_the_parked_argv0_as_a_claim() {
@@ -2996,7 +2996,7 @@ mod argv_free_tests {
         );
     }
 
-    /// V1: the secret and consumer are the last line before the prompt, so a
+    /// The secret and consumer are the last line before the prompt, so a
     /// long claim above them cannot scroll them off the screen.
     #[test]
     fn approve_context_puts_the_secret_and_consumer_on_the_line_above_the_prompt() {
@@ -3122,7 +3122,7 @@ mod argv_free_tests {
         assert_eq!(input, &b"REST"[..], "the reader took more than its line");
     }
 
-    /// F21: a code line is capped at 256 bytes. A line up to the cap is read;
+    /// A code line is capped at 256 bytes. A line up to the cap is read;
     /// one byte past it is refused, so a writer that never sends a newline
     /// cannot grow the buffer without bound.
     #[test]
@@ -3211,7 +3211,7 @@ mod argv_free_tests {
         assert!(result.expect_err("the final reply is the timeout").contains("timed out"));
     }
 
-    /// F20: the park line gives the instant the ask expires, read from the
+    /// The park line gives the instant the ask expires, read from the
     /// broker's interim line, so a person typing a code sees the window.
     #[test]
     fn parked_exec_prints_the_instant_the_park_expires() {

@@ -641,7 +641,7 @@ mod tests {
         assert!(!reg.remove_only("not-a-number"));
     }
 
-    /// F20: the timed-out memory keeps the newest timeouts and forgets the
+    /// The timed-out memory keeps the newest timeouts and forgets the
     /// oldest, so it cannot grow with the number of parks that expire.
     #[test]
     fn the_timed_out_memory_keeps_the_newest_timeouts_only() {

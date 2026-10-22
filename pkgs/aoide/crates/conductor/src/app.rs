@@ -688,7 +688,7 @@ pub struct SecretAskRow {
     pub requested_at: String,
     pub peer_uid: Option<String>,
     /// The requester's claims, shown under a claims label on the review row and
-    /// each cleaned as it is read (F5). `None` when the ask carries none.
+    /// each cleaned as it is read. `None` when the ask carries none.
     pub reason: Option<String>,
     pub argv0: Option<String>,
     pub origin_line: Option<String>,
@@ -8238,7 +8238,7 @@ mod tests {
         }
     }
 
-    /// F5: the claims a person reads before typing a code are on the review
+    /// The claims a person reads before typing a code are on the review
     /// row itself, under a label that says they are the requester's claims.
     #[test]
     fn an_ask_row_shows_its_claims_under_a_claims_label() {

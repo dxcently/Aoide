@@ -174,7 +174,7 @@ use aoide_protocol::untrusted::clean_line;
 pub enum Event {
     Released { secret: String, consumer: String, ts: u64 },
     /// A step's wrong-code budget is spent (ruling 44). It names no ask, so it
-    /// carries no secret or consumer: it is about the step, not one request (F8).
+    /// carries no secret or consumer: it is about the step, not one request.
     BudgetSpent { ts: u64 },
     /// `reason`/`origin` are additive (P3): the wire's optional,
     /// self-asserted/best-effort context block a popup/prompt surface shows
@@ -575,7 +575,7 @@ pub(crate) fn format_origin_line(origin: &client::PendingOrigin) -> Option<Strin
     }
     // Each field is cleaned as it is shown: the broker validates none of them
     // (comm is the process's own text, and the host and user are the machine's),
-    // so an escape or a return in one would otherwise rewrite the line (F2).
+    // so an escape or a return in one would otherwise rewrite the line.
     let mut who = origin.username.as_deref().map_or_else(|| "unidentified".to_string(), clean_line);
     if let Some(comm) = &origin.comm {
         who.push_str(&format!(" \u{b7} {}", clean_line(comm)));
@@ -617,7 +617,7 @@ pub fn narrate_event(event: &Event) -> String {
             format!("  {}  expired     {secret} \u{2192} {consumer}   ask {id}   (park timed out)", hms(*ts))
         }
         Event::BudgetSpent { ts } => {
-            format!("  {}  budget      a step's wrong-code budget is spent: checks are refused until the next 30 s step", hms(*ts))
+            format!("  {}  budget      a step's wrong-code budget is spent: checks are refused until the next {} s step", hms(*ts), crate::totp::STEP_SECONDS)
         }
     }
 }
@@ -1569,7 +1569,7 @@ mod tests {
         // None of these is the broker's own word: comm is set by the process and
         // the username and hostname come from the machine. Each is cleaned as it
         // is shown, so the escape and the return are gone and the line stays one
-        // line (F2).
+        // line.
         let origin = client::PendingOrigin {
             username: Some("khoa\u{1b}[2J".into()),
             pid: Some(4242),
@@ -1604,7 +1604,7 @@ mod tests {
         assert_eq!(parse_notify_line(&notify_line(&payload), 1), None);
     }
 
-    /// F8: `broker::handle_resolve` writes this exact line when a step's
+    /// `broker::handle_resolve` writes this exact line when a step's
     /// wrong-code budget is spent. It names no secret or consumer, so the
     /// parser must not require either, or the watch never shows the notice.
     #[test]
