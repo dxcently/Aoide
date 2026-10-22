@@ -621,13 +621,14 @@ sends nothing. `secrets exec` shows the same context for its own park, read from
 `secrets pending` before it asks for any code; if that row cannot be read, it
 asks for no code and keeps waiting. It then reads the code: from a no-echo
 prompt on a terminal, or one line of at most 256 bytes read byte by byte on a
-pipe, so the wrapped command inherits the rest of stdin. On a terminal the
-wrapped command inherits the terminal after the code. It approves its own id on
-a second connection, and the value returns on the first. At end of input it
-prints the approve line and keeps waiting until the park times out. `--totp` on
-either verb is refused with a taught refusal and no broker op: any process of
-this uid can read argv, and a code is not bound to a park, so a reader could
-spend it on its own request first.
+pipe, so the wrapped command inherits the rest of stdin. On Windows the pipe is
+read ahead, so the wrapped command can miss the bytes after its line. On a
+terminal the wrapped command inherits the terminal after the code. It approves
+its own id on a second connection, and the value returns on the first. At end of
+input it prints the approve line and keeps waiting until the park times out.
+`--totp` on either verb is refused with a taught refusal and no broker op: any
+process of this uid can read argv, and a code is not bound to a park, so a
+reader could spend it on its own request first.
 
 **`wait:false` is the wire-only escape hatch** for a caller that has no way
 to ever supply a code and would rather fail fast than tie up a connection
@@ -738,6 +739,9 @@ lands in `policy.json`.
 re-flipping the same state, or granting/revoking a consumer already
 in/out of the list, reports "unchanged" and writes nothing.
 
+An automation-open secret takes no TOTP code and spends no budget: `resolve`
+never reaches the TOTP gate for it.
+
 **Honesty note (mirrors the replay-ledger ruling below, for the identical
 reason):** the wire's `consumer` field is SELF-ASSERTED — nothing
 authenticates it (this crate's `AGENTS.md`, `CONTRACTS.md`'s "Secrets
@@ -801,7 +805,7 @@ authenticates the SESSION and its CLASS, never the `consumer` string.
 Every notable broker event fires a NAME-ONLY notification, so a desktop can
 surface secret activity — and so a future popup phase (the code-entry UI
 P-N2's own doc already named as this substrate's eventual consumer) has a
-signal to key off of, not just `secrets pending`'s poll. Six events, with
+signal to key off of, not just `secrets pending`'s poll. The events, with
 these shapes:
 
 ```
@@ -821,8 +825,8 @@ above for what each carries and where it comes from; this event is simply
 the FIRST of the three places they ride (registry row -> `pending` reply ->
 this event).
 
-**P-G1 (task #70) adds a SIXTH event, `age-identity-minted`, through the
-SAME `emit_notify` mechanism** — `{"event":"age-identity-minted"}`, fired
+**`age-identity-minted`** (P-G1) goes through the SAME `emit_notify`
+mechanism — `{"event":"age-identity-minted"}`, fired
 from `handle_put` exactly once, the first time an `age`-backed `put`
 lazily mints `age.key`/`age.recipient` ("Backend presets" above). Carries
 no `secret`/`consumer`/`id` at all — the identity is host-level, not tied
@@ -2439,9 +2443,12 @@ the same commit as any change.
   check in the step is refused untested, a right code included, and the
   refusal names when the next step starts. The step's first such refusal
   writes one name-only `totp-budget-spent` notice. The budget lives in memory
-  and a broker restart clears it. Its cost is deliberate: a same-uid process
-  can spend a step's budget and so block the person's approvals for that step
-  (ruling 29). `AGENTS.md` states the full invariant.
+  and a broker restart clears it. Its cost is deliberate: any member of the
+  `aoide-secrets-access` group can spend a step's budget and so block the
+  person's approvals for that step, not only a same-uid process (ruling 29).
+  At three guesses a step the guessing rate is about 0.026 hits a day, a mean
+  of about 39 days and a median of about 27 days to a hit, and those figures
+  assume no restart. `AGENTS.md` states the full invariant.
 - A secret's VALUE never appears on a `#[derive(Serialize)]`/`Deserialize`
   type anywhere in this crate. `policy::Policy` is still the only such
   type that touches the wire, and it has no value field. The resolve
@@ -2495,11 +2502,11 @@ the same commit as any change.
   channel — `approve` fetches fresh through the backend only AFTER a code
   has already validated, and sends it straight down that channel; nothing
   in `park`/`broker` ever holds a value across the wait.
-- **Three production, non-test locks exist in this crate tree, all
+- **Five production locks guard the broker and the park registry, all
   poisoned-lock-recovering** (`.lock().unwrap_or_else(|e| e.into_inner())`,
-  never a bare `.unwrap()`): `park::ParkRegistry`'s internal `Mutex` was
-  the first (P-N2 — every earlier `Mutex`/`RwLock` use was test-only env
-  serialization); thread-per-connection then exposed two more
+  never a bare `.unwrap()`): `park::ParkRegistry`'s `inner` map was the first
+  (P-N2), and its `timed_out_ids` queue is written only under `inner`, in
+  `remove_only`. Thread-per-connection then exposed two more
   read-modify-write sections the old serial accept loop used to serialize
   implicitly, just by never running two connections' code at once — a
   reviewer-confirmed race (empirically reproduced, ~5/20 iterations
@@ -2514,4 +2521,5 @@ the same commit as any change.
   "one connection's failure never touches another's" discipline
   (`broker.rs`'s own module doc). Neither new lock caches anything — both
   sections still read fresh from disk on every call, same "NO CACHE,
-  EVER" invariant as always; the lock only serializes the section.
+  EVER" invariant as always; the lock only serializes the section. `watch.rs`
+  and `backend.rs` keep locks of their own, outside this list.

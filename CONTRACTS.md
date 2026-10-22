@@ -6525,20 +6525,19 @@ until it times out (a corollary of the ask outliving that one socket).
 ```
 `totp`/`argv0`/`reason` are optional. `reason` (P3) is free-text,
 self-asserted, DISPLAY-ONLY context for why this ask exists — it only ever
-matters when the resolve PARKS (below): it rides onto the parked-ask
-registry row, the `pending` reply, and the `parked` events-feed line, for a
-popup/prompt surface to show. It never gates anything; `secrets exec`
-derives it automatically from the wrapped command when `--reason` isn't
-given (`crates/secrets/README.md`'s "Secrets wire" section has the full
-derivation). Error strings (never containing the secret's
-value): `"secret not found"`; `"consumer not authorized for this secret"`;
-`"requireTotp is set but no TOTP enrollment exists on this host yet"`;
-`"requireTotp is set but no totp code was provided"`; `"malformed totp
-code"`; `"totp code invalid or expired"`; `"totp code already used"`
-(replay); the budget's refusal, which names the spend and the next step's
-start and never carries a code (ruling 44, "Invariants held" in
-`crates/secrets/README.md`); `"unknown backend `<name>`"`; `"backend `<name>` exited
-<status>"` (the backend's own stderr never rides this reply — it is
+matters when the resolve PARKS (below): it rides onto the parked-ask registry
+row, the `pending` reply, and the `parked` events-feed line, for a popup/prompt
+surface to show. It never gates anything; `secrets exec` derives it
+automatically from the wrapped command when `--reason` isn't given
+(`crates/secrets/README.md`'s "Secrets wire" section has the full derivation).
+Error strings (never containing the secret's value): `"secret not found"`;
+`"consumer not authorized for this secret"`; `"requireTotp is set but no TOTP
+enrollment exists on this host yet"`; `"requireTotp is set but no totp code was
+provided"`; `"malformed totp code"`; `"totp code invalid or expired"`; `"totp
+code already used"` (replay); the budget's refusal, which names the spend and
+the next step's start and never carries a code (ruling 44, "Invariants held" in
+`crates/secrets/README.md`); `"unknown backend `<name>`"`; `"backend `<name>`
+exited <status>"` (the backend's own stderr never rides this reply — it is
 `eprintln!`'d to the broker's own stderr only).
 
 **Parking (P-N2): a `requireTotp` resolve with no code now WAITS instead of

@@ -40,10 +40,9 @@
 //!
 //! **The QML is paint only** (root `AGENTS.md` house rule 7's "delete every
 //! `.qml`" test) — every capability behind this dialog stays reachable with
-//! nothing but a shell: `aoide secrets approve <id>` (it reads the code) / `aoide
-//! pair <id> --code <code>`, plus each caller's own zenity
-//! fallback (`aoide_secrets::watch`'s `--entry`, `aoide_client::pair_watch`'s
-//! own).
+//! nothing but a shell: `aoide secrets approve <id>` (it reads the code) /
+//! `aoide pair <id> --code <code>`, plus each caller's own zenity fallback
+//! (`aoide_secrets::watch`'s `--entry`, `aoide_client::pair_watch`'s own).
 
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;

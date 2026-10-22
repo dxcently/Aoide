@@ -202,8 +202,9 @@
 - The TOTP `approve` does not dispatch. It runs `secrets approve <id>` from
   `App::approve_exe` (the running `aoide`), with the typed code as one stdin
   line and no flag, and captures both streams; the status line shows the
-  rendered message. `the_totp_prompt_approves_through_the_cli_with_the_code_on_stdin`
-  pins it against a fake broker.
+  rendered message. The test
+  `the_totp_prompt_approves_through_the_cli_with_the_code_on_stdin` pins it
+  against a fake broker.
 - An ask's `reason`, `argv0` and `originLine` (from `secrets pending
   --json`) are the requester's claims. They are cleaned with `clean_line`
   when the row is read, and the review row shows them under a claims

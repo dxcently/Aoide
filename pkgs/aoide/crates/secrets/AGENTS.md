@@ -164,16 +164,19 @@
   budget belongs to the newest step a check has named: a check from an older
   step is judged by that budget, and only a later step starts a fresh one.
   The step's first untested refusal calls `emit_notify` once with the
-  name-only
-  `totp-budget-spent` kind, which is also the burst's one audit line; later
-  refusals in that step write nothing. The three counted failures keep their
-  per-attempt audit lines. The budget is one per secrets home, lives only in
-  memory, and a broker restart clears it. Parking is not a check, so a
-  resolve without a code still parks while the budget is spent, and its
-  approve is refused until the next step. **The cost, on purpose:** a
-  same-uid process can spend a step's budget and so block the person's
-  approvals for that step. The uid boundary already allows that (ruling 29).
-  Removing the budget is the User's call, not a cleanup.
+  name-only `totp-budget-spent` kind, which is also the step's one audit line;
+  later refusals in that step write nothing. The three counted failures keep
+  their per-attempt audit lines. The budget is one per secrets home, lives only
+  in memory, and a broker restart clears it. Parking is not a check, so a
+  resolve without a code still parks while the budget is spent, and its approve
+  is refused until the next step. **The cost, on purpose:** any member of the
+  `aoide-secrets-access` group can spend a step's budget, not only the person's
+  uid, and so block the person's approvals for that step. The uid boundary
+  already allows that (ruling 29). At three guesses a step, the guessing rate is
+  about 0.026 hits a day (3 guesses x 2880 steps a day x 3 valid codes out of
+  10^6): a mean of about 39 days and a median of about 27 days to a hit. Those
+  figures assume no restart, since a restart clears the count. Removing the
+  budget is the User's call, not a cleanup.
 - **`SO_PEERCRED` (task #73) gives kernel-truth CALLER identity — it does
   NOT authenticate the wire's `consumer` field, which stays self-asserted
   exactly as the ruling above states.** `handle_conn` reads `SO_PEERCRED`
@@ -441,7 +444,9 @@
   authentication remains a separate, unbuilt axis (#51-adjacent, not
   planned). Don't treat `automation` as adding
   any cryptographic boundary beyond what `consumers[]` already has — it's
-  a courtesy label on the same self-asserted field, not a stronger one.
+  a courtesy label on the same self-asserted field, not a stronger one. An
+  automation-open secret takes no code and spends no budget: `resolve` never
+  reaches `verify_totp_gate` for it.
 - **`Policy::remote` (P-N1) gates NOTHING today — that is deliberate, not
   a gap.** No non-local entry point onto this broker exists yet. This is
   a forward-looking crate invariant, written down now while the field is
@@ -484,12 +489,14 @@
   Don't add a "cache the value once fetched, in case the connection reads
   slowly" optimization to `ParkedAsk` — the value must exist ONLY inside
   the one send/receive handoff, same as everywhere else in this crate.
-- **Four production (non-test) locks exist in this crate tree, all
+- **Five production locks guard the broker and the park registry, all
   poisoned-lock-recovering, all following the SAME convention
-  `park::ParkRegistry`'s established first.** Every earlier `Mutex`/
-  `RwLock` in this crate was test-only env serialization (`env_lock()`);
-  `park::ParkRegistry`'s internal `Mutex` was the first one live code
-  touched (P-N2). Thread-per-connection then exposed two more
+  `park::ParkRegistry`'s established first.** The inventory covers those two
+  only: `watch.rs` keeps three locks of its own (queue, out_lock, prompt_frame)
+  and `backend.rs` one Windows pipe lock. `park::ParkRegistry`'s `inner` map was
+  the first one live code touched (P-N2). Its `timed_out_ids` queue is written
+  only under `inner`, in `remove_only`, the one place they nest.
+  Thread-per-connection then exposed two more
   read-modify-write sections the old SERIAL accept loop used to serialize
   for free, just by never running two connections' code at once — a
   reviewer-confirmed race, reproduced empirically before the fix (5/20
@@ -507,17 +514,16 @@
   must never poison every OTHER connection's ability to park/list/
   approve/dismiss/resolve/put, matching this crate's own "one
   connection's failure is contained to that connection" discipline
-  (`broker.rs`'s module doc). The two ledger and put sections still read fresh from
-  disk every time; their locks only serialize the section and never remember
-  what it read (this crate's "NO CACHE, EVER" invariant, unchanged). The
-  budget is the one in-memory state here: it holds a count of failed checks,
-  never a code, a secret or a ledger. A future
-  production lock elsewhere in this crate follows the SAME recovery
-  pattern, not a bare `.unwrap()` — and, per `replay_ledger_lock`/
-  `put_lock` being TWO separate locks rather than one shared one, a new
-  lock guards exactly the resource it protects rather than reaching for
-  one broad "broker file ops" lock that would serialize unrelated
-  operations against each other for no reason.
+  (`broker.rs`'s module doc). The two ledger and put sections still read fresh
+  from disk every time; their locks only serialize the section and never
+  remember what it read (this crate's "NO CACHE, EVER" invariant, unchanged).
+  The budget holds a count of failed checks, never a code, a secret or a ledger,
+  and the timed-out memory holds ids only. A future production lock in the
+  broker or the park registry follows the SAME recovery pattern, not a bare
+  `.unwrap()` — and, per `replay_ledger_lock`/ `put_lock` being TWO separate
+  locks rather than one shared one, a new lock guards exactly the resource it
+  protects rather than reaching for one broad "broker file ops" lock that would
+  serialize unrelated operations against each other for no reason.
 - **`serve`'s accept loop is thread-per-connection, and must never block on
   a parked one (P-N2, hard constraint).** Before this phase the loop called
   `handle_conn` INLINE, serially — safe only because nothing ever blocked
@@ -542,7 +548,7 @@
   which variant it got, and that branch is the entire mechanism that turns
   a no-code resolve into a park instead of a refusal.
 - **A park refuses, never cleans, a consumer, reason or argv0 holding a
-  control or invisible character (F2).** `handle_resolve` checks those three
+  control or invisible character.** `handle_resolve` checks those three
   with `aoide_protocol::untrusted::is_unsafe` before anything parks, and names
   the field in the refusal. Cleaning would show a reason the requester never
   sent. The origin line is different: the broker does not validate comm,
@@ -550,12 +556,12 @@
   The secret needs no check: `policy::valid_secret_name` admits no such
   character at add or put.
 - **A parked ask's argv0 is a claim the approve screen shows, never a
-  gate (F3).** `park::ParkedAsk::argv0` is the resolve's argv0, clipped to
+  gate.** `park::ParkedAsk::argv0` is the resolve's argv0, clipped to
   `LINE_MAX` at ingest (`handle_resolve`), and `approve_context` prints it
   as the program the requester says receives the value. The broker does
   not run it or check it against anything, so nothing may decide a
   release from it.
-- **`exec` reads a park's row before it asks for a code (F4).** The code
+- **`exec` reads a park's row before it asks for a code.** The code
   is what releases the value, so `resolve_for_exec` shows
   `approve_context` from `pending` first, and asks for no code when the
   row cannot be read. Don't move the code read ahead of that lookup.
@@ -1308,8 +1314,10 @@
   `parse_exec_args` runs that gate first. `resolve_for_exec` reads at most one
   line through `read_line_unbuffered`, byte by byte on the descriptor
   (`RawStdin`), so the wrapped command inherits the rest of stdin. A line past
-  `MAX_CODE_LINE` (256 bytes) is refused, never buffered. Don't add a
-  flag, env var or temp file that carries a code into either verb.
+  `MAX_CODE_LINE` (256 bytes) is refused, never buffered. On Windows
+  `RawStdin` falls back to std stdin, which reads ahead, so a piped exec child
+  can miss the bytes after its line; that gap is recorded, not closed. Don't
+  add a flag, env var or temp file that carries a code into either verb.
   **Popups are PARKED-ONLY, deliberately (User-flagged default)** —
   `popup_loop` is only ever entered from a `parked` ask picked off the
   SAME `Queue`/`pick_next` the tty prompt uses; `released`/`completed`/
