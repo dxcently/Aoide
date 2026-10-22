@@ -1438,9 +1438,15 @@ impl io::Read for RawStdin {
     }
 }
 
+/// The most bytes a code line may hold, newline excluded. A TOTP code is six
+/// digits; the cap only stops a writer that never sends a newline from growing
+/// the buffer without bound.
+const MAX_CODE_LINE: usize = 256;
+
 /// One line, read a byte at a time, so nothing past its newline is taken from
 /// `input`. The newline is not part of the line; end of input gives what
-/// arrived before it.
+/// arrived before it. A line past [`MAX_CODE_LINE`] bytes is refused at the
+/// byte that passes the cap, so nothing beyond it is read.
 pub(crate) fn read_line_unbuffered(input: &mut impl io::Read) -> io::Result<String> {
     let mut line = Vec::new();
     let mut byte = [0u8; 1];
@@ -1448,6 +1454,12 @@ pub(crate) fn read_line_unbuffered(input: &mut impl io::Read) -> io::Result<Stri
         match input.read(&mut byte) {
             Ok(0) => break,
             Ok(_) if byte[0] == b'\n' => break,
+            Ok(_) if line.len() == MAX_CODE_LINE => {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("the line is longer than {MAX_CODE_LINE} bytes, so it is not a code"),
+                ));
+            }
             Ok(_) => line.push(byte[0]),
             Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
             Err(e) => return Err(e),
@@ -2992,6 +3004,18 @@ mod argv_free_tests {
         let mut input: &[u8] = b"123456\nREST";
         assert_eq!(read_line_unbuffered(&mut input).unwrap(), "123456");
         assert_eq!(input, &b"REST"[..], "the reader took more than its line");
+    }
+
+    /// F21: a code line is capped at 256 bytes. A line up to the cap is read;
+    /// one byte past it is refused, so a writer that never sends a newline
+    /// cannot grow the buffer without bound.
+    #[test]
+    fn read_line_unbuffered_refuses_a_line_past_the_cap() {
+        let at_cap = format!("{}\n", "1".repeat(256));
+        assert_eq!(read_line_unbuffered(&mut at_cap.as_bytes()).unwrap().len(), 256);
+        let past = "1".repeat(257);
+        let mut past_cap: &[u8] = past.as_bytes();
+        assert!(read_line_unbuffered(&mut past_cap).is_err(), "a 257-byte line must be refused, not buffered");
     }
 
     #[test]

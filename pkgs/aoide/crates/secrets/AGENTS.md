@@ -1302,7 +1302,8 @@
   before any broker op, with a taught refusal that never repeats the value.
   `parse_exec_args` runs that gate first. `resolve_for_exec` reads at most one
   line through `read_line_unbuffered`, byte by byte on the descriptor
-  (`RawStdin`), so the wrapped command inherits the rest of stdin. Don't add a
+  (`RawStdin`), so the wrapped command inherits the rest of stdin. A line past
+  `MAX_CODE_LINE` (256 bytes) is refused, never buffered. Don't add a
   flag, env var or temp file that carries a code into either verb.
   **Popups are PARKED-ONLY, deliberately (User-flagged default)** —
   `popup_loop` is only ever entered from a `parked` ask picked off the
