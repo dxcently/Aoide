@@ -538,6 +538,14 @@
   code condition" — `handle_resolve` is the ONE call site that branches on
   which variant it got, and that branch is the entire mechanism that turns
   a no-code resolve into a park instead of a refusal.
+- **A park refuses, never cleans, a consumer, reason or argv0 holding a
+  control or invisible character (F2).** `handle_resolve` checks those three
+  with `aoide_protocol::untrusted::is_unsafe` before anything parks, and names
+  the field in the refusal. Cleaning would show a reason the requester never
+  sent. The origin line is different: the broker does not validate comm,
+  hostname or username, so `watch::format_origin_line` cleans them at display.
+  The secret needs no check: `policy::valid_secret_name` admits no such
+  character at add or put.
 - **`wait:false` is wire-only — no CLI flag exists, and none should be
   added casually (P-N2).** It exists for a machine caller with no way to
   ever supply a code (this crate's own `README.md`, "Parking a TOTP

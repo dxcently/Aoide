@@ -158,6 +158,7 @@ use aoide_protocol::dialog::{
     dialog_provider, is_locked, locker_process_name, next_spawn_backoff, run_entry_dialog, sleep_backoff_interruptible,
     zenity_available, DISMISS_LABEL, SPAWN_BACKOFF_INITIAL, SPAWN_BACKOFF_MAX,
 };
+use aoide_protocol::untrusted::clean_line;
 
 // ── P1: the pure fold ───────────────────────────────────────────────────
 
@@ -566,16 +567,19 @@ pub(crate) fn format_origin_line(origin: &client::PendingOrigin) -> Option<Strin
     if origin.username.is_none() && origin.pid.is_none() && origin.comm.is_none() && origin.hostname.is_none() {
         return None;
     }
-    let mut who = origin.username.clone().unwrap_or_else(|| "unidentified".to_string());
+    // Each field is cleaned as it is shown: the broker validates none of them
+    // (comm is the process's own text, and the host and user are the machine's),
+    // so an escape or a return in one would otherwise rewrite the line (F2).
+    let mut who = origin.username.as_deref().map_or_else(|| "unidentified".to_string(), clean_line);
     if let Some(comm) = &origin.comm {
-        who.push_str(&format!(" \u{b7} {comm}"));
+        who.push_str(&format!(" \u{b7} {}", clean_line(comm)));
     }
     let mut line = format!("from: {who}");
     if let Some(pid) = origin.pid {
         line.push_str(&format!(" (pid {pid})"));
     }
     if let Some(host) = &origin.hostname {
-        line.push_str(&format!(" @ {host}"));
+        line.push_str(&format!(" @ {}", clean_line(host)));
     }
     Some(line)
 }
@@ -1548,6 +1552,24 @@ mod tests {
         // with nothing after the label.
         let origin = client::PendingOrigin { hostname: Some("yomi-strix".into()), ..Default::default() };
         assert_eq!(format_origin_line(&origin), Some("from: unidentified @ yomi-strix".into()));
+    }
+
+    #[test]
+    fn format_origin_line_strips_control_bytes_from_every_field_it_shows() {
+        // None of these is the broker's own word: comm is set by the process and
+        // the username and hostname come from the machine. Each is cleaned as it
+        // is shown, so the escape and the return are gone and the line stays one
+        // line (F2).
+        let origin = client::PendingOrigin {
+            username: Some("khoa\u{1b}[2J".into()),
+            pid: Some(4242),
+            comm: Some("bash\u{1b}[31m".into()),
+            hostname: Some("yomi\rstrix".into()),
+        };
+        assert_eq!(
+            format_origin_line(&origin),
+            Some("from: khoa[2J \u{b7} bash[31m (pid 4242) @ yomistrix".into())
+        );
     }
 
     /// `age-identity-minted` (P-G1) is the one `emit_notify` kind this

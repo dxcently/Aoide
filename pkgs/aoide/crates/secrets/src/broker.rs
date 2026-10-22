@@ -734,6 +734,28 @@ fn handle_resolve(
                 audit_resolve(secrets_home, &secret, &consumer, argv0.as_deref(), false, Some(&reason), peer_uid);
                 return json!({"ok": false, "error": reason});
             }
+            // F2: a parked ask is shown to a person exactly as written, so a
+            // request whose consumer, reason or argv0 holds a control or
+            // invisible character is refused here, before anything parks. The
+            // secret needs no check: `policy::valid_secret_name` admits no such
+            // character when a secret is added or put.
+            let unsafe_field = [
+                ("consumer", Some(consumer.as_str())),
+                ("reason", ask_reason.as_deref()),
+                ("argv0", argv0.as_deref()),
+            ]
+            .into_iter()
+            .find(|(_, value)| value.is_some_and(|v| v.chars().any(aoide_protocol::untrusted::is_unsafe)))
+            .map(|(name, _)| name);
+            if let Some(field) = unsafe_field {
+                let reason = format!(
+                    "refused: the {field} holds a control or invisible character. A parked ask \
+                     is shown to a person exactly as written, so send the {field} as plain \
+                     text: no escape sequences, no line breaks"
+                );
+                audit_resolve(secrets_home, &secret, &consumer, argv0.as_deref(), false, Some(&reason), peer_uid);
+                return json!({"ok": false, "error": reason});
+            }
             let cap = crate::park::park_cap();
             // #73: the requesting connection's own kernel-truth peer uid is
             // stamped onto the ask right here, at park time — the ONE fact
@@ -4592,6 +4614,62 @@ mod tests {
             assert!(err.contains("secrets approve"), "must name the approve completion path: {err}");
         });
         assert!(parked.list().is_empty(), "a timed-out ask must be removed");
+
+        match saved_timeout {
+            Some(v) => std::env::set_var(crate::park::PARK_TIMEOUT_ENV, v),
+            None => std::env::remove_var(crate::park::PARK_TIMEOUT_ENV),
+        }
+        std::fs::remove_dir_all(&home).ok();
+    }
+
+    /// F2: a parked ask is shown to a person exactly as written, so a request
+    /// whose reason, consumer or argv0 holds a control or invisible character
+    /// is refused at ingest: nothing parks, and the refusal names the rule and
+    /// the field.
+    #[test]
+    fn a_reason_with_an_escape_and_a_return_is_refused_and_parks_nothing() {
+        assert_refused_at_ingest(
+            "reason",
+            r#"{"op":"resolve","secret":"t","consumer":"m","reason":"nightly\u001b\r  secret: deploy-key"}"#,
+        );
+    }
+
+    #[test]
+    fn a_consumer_with_an_escape_is_refused_and_parks_nothing() {
+        assert_refused_at_ingest("consumer", r#"{"op":"resolve","secret":"t","consumer":"m\u001b[2J"}"#);
+    }
+
+    #[test]
+    fn an_argv0_with_an_escape_is_refused_and_parks_nothing() {
+        assert_refused_at_ingest("argv0", r#"{"op":"resolve","secret":"t","consumer":"m","argv0":"sh\u001b[2J"}"#);
+    }
+
+    /// One park request whose `field` is unsafe. The registry is read from a
+    /// second thread 100 ms in, while a park that did happen would still be
+    /// parked (the timeout is 1 s), so "parks nothing" is not a timing accident.
+    fn assert_refused_at_ingest(field: &str, line: &str) {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_timeout = std::env::var(crate::park::PARK_TIMEOUT_ENV).ok();
+        std::env::set_var(crate::park::PARK_TIMEOUT_ENV, "1");
+
+        let home = tmp_home(&format!("ingest-refuses-{field}"));
+        seed_enrolled(&home, Policy::new("t", "scratch", "stored-value"));
+        let parked = ParkRegistry::new();
+
+        with_redirected_audit_log(&home, || {
+            let reply = std::thread::scope(|s| {
+                let call = s.spawn(|| {
+                    handle_line(&home, &home.join("events.jsonl"), line, &parked, &mut Vec::new(), None)
+                });
+                std::thread::sleep(std::time::Duration::from_millis(100));
+                assert!(parked.list().is_empty(), "a refused request must park nothing: {} parked", parked.list().len());
+                call.join().unwrap()
+            });
+            assert_eq!(reply["ok"], false, "{reply}");
+            let err = reply["error"].as_str().unwrap();
+            assert!(err.contains("holds a control or invisible character"), "the refusal states the rule: {err}");
+            assert!(err.contains(field), "and names the field: {err}");
+        });
 
         match saved_timeout {
             Some(v) => std::env::set_var(crate::park::PARK_TIMEOUT_ENV, v),
