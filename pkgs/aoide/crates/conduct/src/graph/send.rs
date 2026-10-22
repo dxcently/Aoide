@@ -717,18 +717,14 @@ struct HoldLog {
 }
 
 impl HoldLog {
-    /// The log an invocation writes to: its `audit-log` flag, else the default.
     fn of(inv: &Invocation) -> Self {
-        Self {
-            door: inv.door,
-            path: inv.flags.get("audit-log").map(PathBuf::from).unwrap_or_else(aoide_protocol::default_audit_log),
-        }
+        Self { door: inv.door, path: audit_log_of(inv) }
     }
+}
 
-    /// The default log, for a door that holds without an invocation.
-    fn at(door: Door) -> Self {
-        Self { door, path: aoide_protocol::default_audit_log() }
-    }
+/// The audit log an invocation writes to: its `audit-log` flag, else the default.
+pub(super) fn audit_log_of(inv: &Invocation) -> PathBuf {
+    inv.flags.get("audit-log").map(PathBuf::from).unwrap_or_else(aoide_protocol::default_audit_log)
 }
 
 /// One audit line for an expired hold that [`record_pending`] dropped while it
@@ -822,19 +818,29 @@ fn record_pending(
 /// its spawn's opening turn (`aoide-server`'s `opening_turn_worker`). `from` is
 /// that door's own resolution, `node:<name>` for the node whose signature it
 /// verified; no other door calls this. Same queue, same cap, so `session
-/// pending approve` treats it exactly like any other held send.
-pub fn hold_pending(id: &str, text: &str, submit: bool, from: Option<&str>) -> Result<(), HoldRefused> {
+/// pending approve` treats it exactly like any other held send. `audit_log` is
+/// the log the door writes to: an eviction this hold causes is audited there.
+pub fn hold_pending(
+    id: &str,
+    text: &str,
+    submit: bool,
+    from: Option<&str>,
+    audit_log: &Path,
+) -> Result<(), HoldRefused> {
     let origin = PendingOrigin { from: from.map(str::to_string), claimed: None };
-    record_pending(id, text, submit, &origin, None, &HoldLog::at(Door::A2a))
+    let log = HoldLog { door: Door::A2a, path: audit_log.to_path_buf() };
+    record_pending(id, text, submit, &origin, None, &log)
 }
 
 /// Park a spawn the MCP door could not attribute, to launch only when a human
 /// approves it. `id` is the id its child will register under, `command` the
 /// line the approver is shown, and the entry counts against the MCP door's
-/// own bucket, the one every unattested MCP send shares.
-pub fn hold_spawn(id: &str, command: &str, spawn: PendingSpawn) -> Result<(), HoldRefused> {
+/// own bucket, the one every unattested MCP send shares. `audit_log` is the log
+/// the MCP call writes to: an eviction this hold causes is audited there.
+pub fn hold_spawn(id: &str, command: &str, spawn: PendingSpawn, audit_log: &Path) -> Result<(), HoldRefused> {
     let origin = PendingOrigin { from: Some(MCP_SOURCE.to_string()), claimed: None };
-    record_pending(id, command, false, &origin, Some(spawn), &HoldLog::at(Door::Mcp))
+    let log = HoldLog { door: Door::Mcp, path: audit_log.to_path_buf() };
+    record_pending(id, command, false, &origin, Some(spawn), &log)
 }
 
 /// Auto-rename: write `title` onto the session record and re-stage the graph so
@@ -4610,7 +4616,7 @@ mod tests {
     fn fill_bucket(id: &str, from: &str) -> Vec<String> {
         let texts: Vec<String> = (0..PENDING_CAP_PER_SOURCE).map(|n| format!("{from} #{n}")).collect();
         for text in &texts {
-            hold_pending(id, text, true, Some(from)).unwrap();
+            hold_pending(id, text, true, Some(from), &aoide_protocol::default_audit_log()).unwrap();
         }
         texts
     }
@@ -4692,7 +4698,7 @@ mod tests {
             assert!(kept.chars().count() <= AUDIT_REFUSED_TEXT_MAX, "and only the head: {}", kept.len());
         }
 
-        let held = hold_pending(&id, &big, true, Some("node:big"));
+        let held = hold_pending(&id, &big, true, Some("node:big"), &aoide_protocol::default_audit_log());
         assert!(matches!(held, Err(HoldRefused::TooLarge(n)) if n > PENDING_ENTRY_MAX_BYTES), "{held:?}");
         assert_eq!(queued().len(), 1);
         assert!(nothing_connected(&listener), "a door that cannot approve delivers nothing");
@@ -4786,7 +4792,7 @@ mod tests {
         assert_eq!(data["from"], "mcp");
         assert_eq!(queued().len(), PENDING_CAP_PER_SOURCE, "nothing was added");
 
-        hold_pending(&id, "from a node", true, Some("node:peer")).expect("a node's own bucket is unaffected");
+        hold_pending(&id, "from a node", true, Some("node:peer"), &aoide_protocol::default_audit_log()).expect("a node's own bucket is unaffected");
         assert_eq!(queued_from("node:peer"), ["from a node"]);
         let _ = std::fs::remove_dir_all(&root);
     }

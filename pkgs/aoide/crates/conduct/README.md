@@ -95,8 +95,9 @@ A hold is kept for seven days from its `queuedAt`. Past that it is `expired`:
 `list` shows the state with its age and offers only a deny, `approve` refuses
 it, and `deny` removes it. The next hold drops every expired entry before it
 counts a source's cap or the file bound, and writes one `session.pending.evict`
-audit line per entry it drops, so holds nobody will approve cannot fill the
-queue.
+audit line per entry it drops to the audit log of the call that queued the
+hold, so holds nobody will approve cannot fill the queue. A failed append is
+not retried.
 
 A hold whose target can never take it is `gone`. `list` offers only a deny for
 it and `approve` refuses it. Its target's record is `done`, or no record for

@@ -1034,7 +1034,7 @@ mod tests {
             None,
             None,
         );
-        crate::graph::hold_pending(id, "hello from afar", true, Some("node:peer")).unwrap();
+        crate::graph::hold_pending(id, "hello from afar", true, Some("node:peer"), &aoide_protocol::default_audit_log()).unwrap();
 
         let acc = expect_delivery(listener, "an approved entry delivers under the source it was queued with");
         let out = pending_approve(&pending_invocation(&["session", "pending", "approve"], &["0"]));
@@ -1552,7 +1552,7 @@ mod tests {
             flags: BTreeMap::from([("agent".into(), "claude".into()), ("windowed".into(), "true".into())]),
             ..PendingSpawn::default()
         };
-        crate::graph::send::hold_spawn("held-1", &spawn.command_line(), spawn.clone()).unwrap();
+        crate::graph::send::hold_spawn("held-1", &spawn.command_line(), spawn.clone(), &aoide_protocol::default_audit_log()).unwrap();
 
         let out = pending_list(&pending_invocation(&["session", "pending", "list"], &[]));
         assert_eq!(out.status, Status::Ok, "{}", out.message);
@@ -1649,7 +1649,7 @@ mod tests {
         let listener = UnixListener::bind(&socket).unwrap();
         listener.set_nonblocking(true).unwrap();
         do_session_start(id, Some("claude"), Some("/w"), None, Some("orch"), Some(true), Some(socket.to_str().unwrap()), None, None);
-        crate::graph::send::hold_pending(id, "held", true, Some("someone")).unwrap();
+        crate::graph::send::hold_pending(id, "held", true, Some("someone"), &aoide_protocol::default_audit_log()).unwrap();
 
         let on_mcp = |path: &[&str], args: &[&str], flags: &[(&str, &str)]| {
             let mut inv = pending_invocation(path, args);
@@ -1694,7 +1694,7 @@ mod tests {
         do_session_start("orch", Some("claude"), Some("/w"), None, None, None, None, None, Some(std::process::id()));
         seal_record("orch", &kp);
         for n in 0..3 {
-            crate::graph::send::hold_pending("target", &format!("entry {n}"), false, Some("someone")).unwrap();
+            crate::graph::send::hold_pending("target", &format!("entry {n}"), false, Some("someone"), &aoide_protocol::default_audit_log()).unwrap();
         }
         let texts = || -> Vec<String> {
             load_pending_array().unwrap().iter().map(|e| e["text"].as_str().unwrap().to_string()).collect()
@@ -1835,7 +1835,7 @@ mod tests {
             flags: BTreeMap::from([("id".into(), "sub:escape".into())]),
             ..PendingSpawn::default()
         };
-        crate::graph::send::hold_spawn("sub:escape", &reserved.command_line(), reserved).unwrap();
+        crate::graph::send::hold_spawn("sub:escape", &reserved.command_line(), reserved, &aoide_protocol::default_audit_log()).unwrap();
 
         let out = pending_approve(&pending_invocation(&["session", "pending", "approve"], &["0"]));
         assert_eq!(out.status, Status::Error, "{}", out.message);
@@ -1853,7 +1853,7 @@ mod tests {
         let root = setup("pnd-expect");
         for id in ["held-a", "held-b"] {
             let spawn = PendingSpawn::default();
-            crate::graph::send::hold_spawn(id, &spawn.command_line(), spawn).unwrap();
+            crate::graph::send::hold_spawn(id, &spawn.command_line(), spawn, &aoide_protocol::default_audit_log()).unwrap();
         }
         let listed = pending_list(&pending_invocation(&["session", "pending", "list"], &[]));
         let fp = listed.data.as_ref().unwrap()["pending"][0]["fingerprint"].as_str().unwrap().to_string();
@@ -2009,7 +2009,7 @@ mod tests {
         ]);
         assert_eq!(listed_row(0)["state"], "gone", "a done target is gone however young the hold");
 
-        let held = crate::graph::send::hold_pending("gone-survives-fresh", "new text", false, Some("node:fresh"));
+        let held = crate::graph::send::hold_pending("gone-survives-fresh", "new text", false, Some("node:fresh"), &aoide_protocol::default_audit_log());
         assert!(held.is_ok(), "{held:?}");
         let left: Vec<String> = load_pending_array()
             .unwrap()
@@ -2034,12 +2034,61 @@ mod tests {
         // lock falls back to running unlocked, so only the write fails.
         let stage = root.join("stage");
         std::fs::set_permissions(&stage, std::fs::Permissions::from_mode(0o555)).unwrap();
-        let held = crate::graph::send::hold_pending("failed-write-fresh", "new text", false, Some("node:fresh"));
+        let held = crate::graph::send::hold_pending("failed-write-fresh", "new text", false, Some("node:fresh"), &aoide_protocol::default_audit_log());
         std::fs::set_permissions(&stage, std::fs::Permissions::from_mode(0o755)).unwrap();
 
         assert!(matches!(held, Err(crate::graph::send::HoldRefused::Stage(_))), "{held:?}");
         assert_eq!(eviction_lines(&root), 0, "a write that did not land audits no eviction");
         assert_eq!(load_pending_array().unwrap().len(), 1, "the lapsed entry is still on disk");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// An eviction a held spawn causes goes to the log its caller writes: a spawn
+    /// held over MCP with `audit-log` set audits the eviction there, and the
+    /// default log stays untouched.
+    #[test]
+    fn an_eviction_from_a_spawn_held_over_mcp_goes_to_the_callers_log() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&["AOIDE_STAGE_DIR", "XDG_RUNTIME_DIR", "AOIDE_AUDIT_LOG", "AOIDE_CONDUCT_AUTOGATE", "AOIDE_SESSION_ID"]);
+        let root = setup("pnd-evict-caller-log");
+        let caller = root.join("caller");
+        std::fs::create_dir_all(&caller).unwrap();
+        write_queue(&[queued_entry("caller-lapsed", &stamp_ago(8 * 86_400), "node:x", 5)]);
+
+        let mcp = Invocation {
+            path: vec!["spawn".into()],
+            args: vec!["true".into()],
+            flags: BTreeMap::from([("audit-log".to_string(), caller.join("log").to_string_lossy().into_owned())]),
+            door: aoide_protocol::Door::Mcp,
+        };
+        let held = PendingSpawn {
+            path: vec!["spawn".into()],
+            args: vec!["true".into()],
+            flags: BTreeMap::from([("id".to_string(), "caller-held".to_string())]),
+            ..PendingSpawn::default()
+        };
+        let spawned = crate::graph::spawn::hold_whole(&mcp, "caller-held", held, "");
+        assert_eq!(spawned.status, Status::Ok, "{}", spawned.message);
+        assert_eq!(eviction_lines(&caller), 1, "the eviction is audited in the log the caller named");
+        assert_eq!(eviction_lines(&root), 0, "and not in the default log");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The same for a send held over A2A: its eviction goes to the log the A2A
+    /// worker writes, and the default log stays untouched.
+    #[test]
+    fn an_eviction_from_a_send_held_over_a2a_goes_to_the_callers_log() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&["AOIDE_STAGE_DIR", "XDG_RUNTIME_DIR", "AOIDE_AUDIT_LOG", "AOIDE_CONDUCT_AUTOGATE", "AOIDE_SESSION_ID"]);
+        let root = setup("pnd-evict-a2a-log");
+        let caller = root.join("caller");
+        std::fs::create_dir_all(&caller).unwrap();
+        write_queue(&[queued_entry("a2a-lapsed", &stamp_ago(8 * 86_400), "node:x", 5)]);
+
+        let held = crate::graph::send::hold_pending("a2a-fresh", "new text", true, Some("node:fresh"), &caller.join("log"));
+        assert!(held.is_ok(), "{held:?}");
+        assert_eq!(eviction_lines(&caller), 1, "the eviction is audited in the log the A2A worker writes");
+        assert_eq!(eviction_lines(&root), 0, "and not in the default log");
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -2091,7 +2140,7 @@ mod tests {
         let _env = EnvVars::save(&["AOIDE_STAGE_DIR", "XDG_RUNTIME_DIR", "AOIDE_AUDIT_LOG", "AOIDE_SESSION_ID"]);
         let root = setup("pnd-whole-preview");
         let text = format!("{} \n rm -rf ~", "x".repeat(300));
-        crate::graph::send::hold_pending("held-long", &text, false, Some("node:victim")).unwrap();
+        crate::graph::send::hold_pending("held-long", &text, false, Some("node:victim"), &aoide_protocol::default_audit_log()).unwrap();
 
         let out = pending_list(&pending_invocation(&["session", "pending", "list"], &[]));
         assert!(out.message.contains("rm -rf ~"), "the tail is on the line: {}", out.message);
@@ -2115,7 +2164,7 @@ mod tests {
         let mut refused = None;
         for i in 0..400 {
             let from = format!("node:{i}");
-            if let Err(e) = crate::graph::send::hold_pending(&format!("id{i}"), &big, true, Some(&from)) {
+            if let Err(e) = crate::graph::send::hold_pending(&format!("id{i}"), &big, true, Some(&from), &aoide_protocol::default_audit_log()) {
                 refused = Some(e);
                 break;
             }
@@ -2132,7 +2181,7 @@ mod tests {
         let _env = EnvVars::save(&["AOIDE_STAGE_DIR", "XDG_RUNTIME_DIR", "AOIDE_AUDIT_LOG", "AOIDE_SESSION_ID"]);
         let root = setup("pnd-changed-id");
         let spawn = PendingSpawn { args: vec!["true".into()], ..PendingSpawn::default() };
-        crate::graph::send::hold_spawn("bad\n  changed: ok", &spawn.command_line(), spawn).unwrap();
+        crate::graph::send::hold_spawn("bad\n  changed: ok", &spawn.command_line(), spawn, &aoide_protocol::default_audit_log()).unwrap();
         let out = pending_deny(&pending_invocation(&["session", "pending", "deny"], &["0"]));
         assert_eq!(out.status, Status::Ok, "{}", out.message);
         assert!(out.changed.iter().all(|c| !c.contains('\n')), "{:?}", out.changed);
@@ -2335,7 +2384,7 @@ mod tests {
             .collect();
         write_queue(&full);
 
-        let held = crate::graph::send::hold_pending("fresh", "new text", false, Some("node:evict"));
+        let held = crate::graph::send::hold_pending("fresh", "new text", false, Some("node:evict"), &aoide_protocol::default_audit_log());
         assert!(held.is_ok(), "expired entries do not count against the source cap: {held:?}");
         assert_eq!(load_pending_array().unwrap().len(), 1, "only the new hold is left");
         assert_eq!(
@@ -2357,7 +2406,7 @@ mod tests {
         ]);
 
         let spawn = PendingSpawn { args: vec!["true".into()], ..PendingSpawn::default() };
-        let held = crate::graph::send::hold_spawn("held-new", &spawn.command_line(), spawn);
+        let held = crate::graph::send::hold_spawn("held-new", &spawn.command_line(), spawn, &aoide_protocol::default_audit_log());
         assert!(held.is_ok(), "{held:?}");
         assert_eq!(load_pending_array().unwrap().len(), 1, "only the new spawn is left");
         assert_eq!(eviction_lines(&root), 2, "one audit line per evicted entry, from the spawn's entry point");
@@ -2415,7 +2464,7 @@ mod tests {
         let root = setup("pnd-cap-evict");
         queue_near_the_file_cap(true);
 
-        let held = crate::graph::send::hold_pending("fresh", &"y".repeat(3_000), false, Some("node:fresh"));
+        let held = crate::graph::send::hold_pending("fresh", &"y".repeat(3_000), false, Some("node:fresh"), &aoide_protocol::default_audit_log());
         assert!(held.is_ok(), "the expired entry is evicted before the file bound is counted: {held:?}");
         let left = load_pending_array().unwrap();
         assert!(left.iter().all(|e| e["sessionId"] != "last"), "the expired entry is gone");

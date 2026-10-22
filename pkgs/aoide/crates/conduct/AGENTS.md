@@ -272,8 +272,10 @@ in the message.
   the stage lock before it counts a cap, and writes one
   `session.pending.evict` audit line per entry it drops, from whichever door
   queued the hold (`hold_pending` binds the A2A door, `hold_spawn` the MCP
-  door). The line is written once the file that dropped the entry is on disk,
-  so a failed write audits nothing. A queue at its file bound refuses a new
+  door) to the log the queuing call passes in (`audit_log_of`, or the A2A
+  worker's own log). The line is written once the file that dropped the entry
+  is on disk, so a failed write audits nothing; a failed append is not retried.
+  A queue at its file bound refuses a new
   hold, taught, and takes it once an expired entry is evicted. Assume breach:
   a process running as the user can edit `pending.json` and age a hold past
   its week. Approval stays on the person's terminal: the MCP door still
@@ -289,6 +291,8 @@ in the message.
   `a_hold_both_expired_and_gone_lists_and_refuses_as_expired`,
   `each_eviction_line_carries_the_door_of_the_call_that_triggered_it`,
   `a_failed_file_write_audits_nothing`,
+  `an_eviction_from_a_spawn_held_over_mcp_goes_to_the_callers_log`,
+  `an_eviction_from_a_send_held_over_a2a_goes_to_the_callers_log`,
   `a_queue_at_its_file_cap_refuses_a_hold_taught_while_nothing_in_it_is_expired`
   and `a_queue_at_its_file_cap_takes_a_hold_again_once_an_expired_entry_is_evicted`.
 - **A hold is gone when its target can never take it, and approve refuses it.**

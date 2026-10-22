@@ -4520,7 +4520,8 @@ time and never stored. `record_pending` drops every expired entry under the
 same stage lock before it counts a source's cap or the file bound, and writes
 one `session.pending.evict` audit line per entry it drops (`status:
 "evicted"`, the head of its text as `untrusted_data`), whichever door queued
-the hold. A queue at its file bound therefore takes a new hold again once an
+the hold, to the audit log that queuing call writes to; a failed append is not
+retried. A queue at its file bound therefore takes a new hold again once an
 expired entry is evicted. `approve` refuses an expired entry with `reason:
 "expired"`, before anything is taken or launched; `deny` removes it. A gone
 entry is refused the same way with `reason: "gone"`, and eviction leaves it

@@ -49,8 +49,8 @@ use super::model::{canonical_state, load_stage, sessions_path, SessionsFile};
 use super::common::stage_error;
 use super::pending::audit_pending;
 use super::send::{
-    deliver_local_with, hold_spawn, real_attested_sender, HoldRefused, PendingSpawn, PENDING_CAP_PER_SOURCE,
-    PENDING_ENTRY_MAX_BYTES, PENDING_FILE_FULL, PENDING_FILE_MAX_BYTES, PENDING_TOO_LARGE,
+    audit_log_of, deliver_local_with, hold_spawn, real_attested_sender, HoldRefused, PendingSpawn,
+    PENDING_CAP_PER_SOURCE, PENDING_ENTRY_MAX_BYTES, PENDING_FILE_FULL, PENDING_FILE_MAX_BYTES, PENDING_TOO_LARGE,
 };
 use super::session_store::{is_reserved_id, now_iso_utc, reserved_id_refusal};
 use super::undying::nothing_to_restore_warning;
@@ -910,7 +910,7 @@ fn refuse_held_input(inv: &Invocation, id: &str, why: &str) -> Outcome {
 pub(in crate::graph) fn hold_whole(inv: &Invocation, id: &str, held: PendingSpawn, note: &str) -> Outcome {
     let cmd = if held.is_resurrect() { "resurrect" } else { "spawn" };
     let line = held.command_line();
-    match hold_spawn(id, &line, held) {
+    match hold_spawn(id, &line, held, &audit_log_of(inv)) {
         Ok(()) => {
             let out = Outcome::ok(cmd, format!("{cmd} of `{id}` held pending approval{note}: nothing launched"))
                 .changed(vec![format!("pending {cmd} queued for {id}")])
