@@ -102,7 +102,10 @@ not retried.
 A hold whose target can never take it is `gone`. `list` offers only a deny for
 it and `approve` refuses it. Its target's record is `done`, or no record for
 the target exists four hours after the hold was queued. Eviction leaves a gone
-hold alone: it stays queued until it is denied or reaches its seven days.
+hold alone: it stays queued until it is denied or reaches its seven days. A
+dead session reads `pending` until a reaper pass marks its record `done` (the
+reaper's silence bands); that pass usually prunes the record too, so the target
+reads as absent, and the hold lists as `gone` four hours after it was queued.
 
 `approve` and `deny` take `--expect <fingerprint>`, the `fingerprint` that
 `list --json` prints for the entry. A stale one takes nothing and says to list
