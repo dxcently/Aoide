@@ -278,7 +278,9 @@ in the message.
   A queue at its file bound refuses a new
   hold, taught, and takes it once an expired entry is evicted. Assume breach:
   a process running as the user can edit `pending.json` and age a hold past
-  its week. Approval stays on the person's terminal: the MCP door still
+  its week, mark a target's record `done` in `sessions.json` (its holds read
+  `gone` at once), or delete the record (its holds read `gone` 4 h after they
+  were queued). Approval stays on the person's terminal: the MCP door still
   cannot approve or deny, whatever the queue holds. Pinned by
   `a_hold_queued_over_seven_days_ago_lists_as_expired_and_offers_only_deny`,
   `a_hold_is_held_for_seven_days_from_its_queued_stamp_and_no_longer`,
