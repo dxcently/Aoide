@@ -4884,6 +4884,7 @@ mod tests {
     /// request and gets its reply. Only the byte past the cap is refused.
     #[test]
     fn a_request_line_at_the_cap_is_still_answered() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let home = tmp_home("request-line-at-cap");
         let (mut client, server) = UnixStream::pair().expect("socketpair");
         client.set_read_timeout(Some(std::time::Duration::from_secs(5))).unwrap();
@@ -4898,9 +4899,10 @@ mod tests {
         request.push_str(&" ".repeat(64 * 1024 - op.len()));
         request.push('\n');
         client.write_all(request.as_bytes()).expect("the request is written");
-        let mut reply = String::new();
-        BufReader::new(&client).read_line(&mut reply).expect("the broker answers a line at the cap");
-        assert!(!reply.contains("over 65536 bytes"), "a line of exactly the cap must not be refused: {reply}");
+        let mut line = String::new();
+        BufReader::new(&client).read_line(&mut line).expect("the broker answers a line at the cap");
+        let reply: Value = serde_json::from_str(&line).unwrap_or_else(|e| panic!("no reply line ({e}): {line:?}"));
+        assert_eq!(reply["ok"], true, "a line of exactly the cap is answered, not refused: {reply}");
         std::fs::remove_dir_all(&home).ok();
     }
 
@@ -4998,6 +5000,36 @@ mod tests {
             Some(v) => std::env::set_var(crate::park::PARK_TIMEOUT_ENV, v),
             None => std::env::remove_var(crate::park::PARK_TIMEOUT_ENV),
         }
+        std::fs::remove_dir_all(&home).ok();
+    }
+
+    /// An approve whose ask leaves while its code is being checked is refused
+    /// through `handle_approve`: the code was checked and spent, nothing is
+    /// released, and the refusal says so. The approve thread waits on the
+    /// budget lock the check takes, and the ask is taken away in that wait.
+    #[test]
+    fn an_approve_whose_ask_leaves_during_the_check_is_refused_as_taken() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let home = tmp_home("approve-taken");
+        let secret = seed_enrolled(&home, Policy::new("t", "scratch", "stored-value"));
+        let parked = ParkRegistry::new();
+        let (id, _rx) = parked.park("t", "m", NOW);
+        let req = json!({"id": id, "totp": code_for_now(&secret, NOW)});
+        let events = home.join("events.jsonl");
+        let reply = with_redirected_audit_log(&home, || {
+            let budget = totp_budget_lock().lock().unwrap_or_else(|e| e.into_inner());
+            std::thread::scope(|s| {
+                let approve = s.spawn(|| handle_approve(&home, &events, &parked, &req, None, NOW));
+                std::thread::sleep(std::time::Duration::from_millis(250));
+                drop(parked.take(&id));
+                drop(budget);
+                approve.join().unwrap()
+            })
+        });
+        assert_eq!(reply["ok"], false, "{reply}");
+        let err = reply["error"].as_str().unwrap();
+        assert!(err.contains("the code was checked and used"), "{err}");
+        assert!(err.contains("nothing was released"), "{err}");
         std::fs::remove_dir_all(&home).ok();
     }
 
