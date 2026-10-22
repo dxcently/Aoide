@@ -178,7 +178,8 @@ pub enum InputKind {
         name: String,
         outbound: bool,
     },
-    /// The TOTP for one parked secrets ask — typed at `secrets approve <id>`'s prompt.
+    /// The TOTP for one parked secrets ask. It is sent to `secrets approve <id>`
+    /// as one stdin line, never as an argument.
     /// Masked like [`InputKind::PairCode`]; the value never rides any reply.
     TotpCode {
         id: String,
@@ -987,6 +988,11 @@ pub struct App {
     /// real one in — see [`DispatchFn`]'s doc comment for why this is
     /// injected rather than reached for as a trunk global.
     dispatch_fn: DispatchFn,
+    /// The binary the TOTP prompt runs `secrets approve` from. The conductor is
+    /// registered only inside `aoide` itself, so [`App::load`] sets this to the
+    /// running executable (the CLI). Empty until then; a test points it at the
+    /// built binary.
+    approve_exe: PathBuf,
     roster_fn: RosterFn,
     /// The ROSTER panel's cache — last `session --hosts` fetch + when.
     pub roster: RosterCache,
@@ -1084,6 +1090,51 @@ fn no_dispatch(_: &Invocation) -> Outcome {
     Outcome::usage("conductor", "dispatch not wired for this App")
 }
 
+/// `secrets approve <id>`, run as the CLI's own child: the code is one line on
+/// its stdin and its argv holds the id alone. Both streams are captured, so
+/// nothing it prints reaches this terminal. The status line shows the message
+/// of its rendered result: stdout on success, stderr on a refusal.
+fn run_approve_child(exe: &std::path::Path, id: &str, code: &str) -> Outcome {
+    const CMD: &str = "secrets.approve";
+    let spawned = std::process::Command::new(exe)
+        .args(["secrets", "approve", id])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn();
+    let mut child = match spawned {
+        Ok(child) => child,
+        Err(e) => return Outcome::error(CMD, format!("could not start `aoide secrets approve`: {e}")),
+    };
+    if let Some(mut stdin) = child.stdin.take() {
+        // Dropped at the end of this block: the child reads one line, then end of input.
+        let _ = std::io::Write::write_all(&mut stdin, format!("{code}\n").as_bytes());
+    }
+    let output = match child.wait_with_output() {
+        Ok(output) => output,
+        Err(e) => return Outcome::error(CMD, format!("`aoide secrets approve` did not finish: {e}")),
+    };
+    if output.status.success() {
+        Outcome::ok(CMD, rendered_message(&output.stdout))
+    } else {
+        let refusal = rendered_message(&output.stderr);
+        Outcome::error(CMD, if refusal.is_empty() { rendered_message(&output.stdout) } else { refusal })
+    }
+}
+
+/// The message of the CLI's own rendered line, `[tag] command: message`, cleaned
+/// as untrusted text. Falls back to the last non-blank line when no rendered
+/// line is there.
+fn rendered_message(bytes: &[u8]) -> String {
+    let text = String::from_utf8_lossy(bytes);
+    let line = text
+        .lines()
+        .find(|l| l.starts_with('['))
+        .or_else(|| text.lines().rev().find(|l| !l.trim().is_empty()))
+        .unwrap_or("");
+    aoide_protocol::untrusted::clean_line(line.split_once(": ").map_or(line, |(_, message)| message))
+}
+
 /// The bracketed status tag shared by the global status line
 /// ([`App::status_message`]) and the ROSTER pane's fetch status
 /// ([`App::roster_status`]) — one mapping, not two (P-C4 review nit).
@@ -1141,6 +1192,7 @@ impl App {
             initialized: false,
             mtimes: StageMtimes::default(),
             dispatch_fn: no_dispatch,
+            approve_exe: PathBuf::new(),
             roster_fn: aoide_conduct::graph::session_roster,
             roster: RosterCache::default(),
             roster_rx: None,
@@ -1208,6 +1260,7 @@ impl App {
     pub fn load(dispatch: DispatchFn) -> Self {
         let mut app = App::empty();
         app.dispatch_fn = dispatch;
+        app.approve_exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("aoide"));
         app.reload_all();
         app.refresh_mail();
         app
@@ -1978,14 +2031,21 @@ impl App {
         self.secrets_mutation_label.as_deref()
     }
 
-    /// Run one secrets mutation on the shared worker. If one is already in
-    /// flight the invocation is NOT dispatched and NOT queued: the status line
-    /// says which one is running.
+    /// Run one secrets mutation through the dispatcher on the shared worker.
     fn spawn_secrets_action(&mut self, inv: Invocation, label: &str) {
+        let dispatch_fn = self.dispatch_fn;
+        let path = inv.path.join(".");
+        self.spawn_secrets_worker(&path, label, move || dispatch_fn(&inv));
+    }
+
+    /// Run one secrets mutation on the shared worker. If one is already in
+    /// flight the work is NOT run and NOT queued: the status line says which
+    /// one is running.
+    fn spawn_secrets_worker(&mut self, path: &str, label: &str, work: impl FnOnce() -> Outcome + Send + 'static) {
         if self.secrets_mutation_rx.is_some() {
             let running = self.secrets_mutation_label.clone().unwrap_or_default();
             self.last_outcome = Some(Outcome::usage(
-                inv.path.join("."),
+                path,
                 format!(
                     "{running} is already in flight — wait for the broker's answer before \
                      starting another secrets action"
@@ -1994,9 +2054,8 @@ impl App {
             return;
         }
         let (tx, rx) = mpsc::channel();
-        let dispatch_fn = self.dispatch_fn;
         std::thread::spawn(move || {
-            let _ = tx.send(dispatch_fn(&inv));
+            let _ = tx.send(work());
         });
         self.secrets_mutation_rx = Some(rx);
         self.secrets_mutation_label = Some(label.to_string());
@@ -4965,19 +5024,15 @@ impl App {
                     }
                     // Same no-replay rule as the pairing code: the prompt is
                     // dropped, so a rejected TOTP is never re-sent by a second
-                    // Enter. The round trip crosses the broker socket, whose read
-                    // is unbounded, so it runs on the serialized secrets worker.
+                    // Enter. The approve runs as the CLI's own child on the
+                    // serialized secrets worker (its broker round trip is
+                    // unbounded), and the code reaches the child as stdin.
                     self.input = None;
                     let label = format!("approving ask #{id}");
-                    self.spawn_secrets_action(
-                        Invocation {
-                            path: vec!["secrets".to_string(), "approve".to_string()],
-                            args: vec![id],
-                            flags: BTreeMap::from([("totp".to_string(), totp)]),
-                            door: Door::Cli,
-                        },
-                        &label,
-                    );
+                    let exe = self.approve_exe.clone();
+                    self.spawn_secrets_worker("secrets.approve", &label, move || {
+                        run_approve_child(&exe, &id, &totp)
+                    });
                 }
                 InputKind::ConfigValue { key, .. } => {
                     let value = input.buffer.trim().to_string();
@@ -7980,28 +8035,24 @@ mod tests {
         settle_reads(&mut app);
         assert_eq!(app.secret_ask_rows().len(), 1);
 
-        // A stalled MUTATION: the TOTP submit goes to the worker (its socket
-        // round trip is unbounded), the tick keeps running, and a second submit
-        // is refused instead of racing the first.
-        stall("secrets.approve");
+        // A stalled MUTATION: the dismiss goes to the worker (its socket round
+        // trip is unbounded), the tick keeps running, and a second action is
+        // refused instead of racing the first. (The TOTP approve runs as a CLI
+        // child; the_totp_prompt_approves_through_the_cli_with_the_code_on_stdin
+        // pins that path.)
+        stall("secrets.dismiss");
         let ask = app
             .review_rows()
             .iter()
             .position(|r| matches!(r, ReviewRow::Ask(_)))
             .unwrap();
         app.select_review_row(ask);
-        app.handle_key(KeyEvent::from(KeyCode::Char('a')));
-        assert!(app.input.as_ref().is_some_and(Input::masked), "still masked");
-        for c in "123456".chars() {
-            app.handle_key(KeyEvent::from(KeyCode::Char(c)));
-        }
-        app.handle_key(KeyEvent::from(KeyCode::Enter));
+        app.handle_key(KeyEvent::from(KeyCode::Char('d')));
         assert_eq!(
             app.secrets_action_busy(),
-            Some("approving ask #3"),
+            Some("dismissing ask #3"),
             "the pane knows what is running"
         );
-        assert!(app.input.is_none(), "the prompt was dropped, never replayed");
 
         let started = Instant::now();
         for _ in 0..5 {
@@ -8013,24 +8064,15 @@ mod tests {
             started.elapsed()
         );
         assert!(
-            app.secrets_pending_status().contains("approving ask #3…"),
+            app.secrets_pending_status().contains("dismissing ask #3…"),
             "the busy line names it: {}",
             app.secrets_pending_status()
         );
 
-        // A second action while the first is in flight: refused, visibly, and
-        // nothing dispatched. (The refusal is synchronous, so this is exact; the
-        // count of the mutation itself is asserted once the worker has landed.)
+        // A second action while the first is in flight: refused synchronously, so
+        // nothing is spawned. The broker count is asserted once the stalled
+        // dismiss has landed.
         app.handle_key(KeyEvent::from(KeyCode::Char('d'))); // dismiss the same ask
-        settle_ticks(&mut app, 5);
-        let dismissals: Vec<Recorded> = t1_calls()
-            .into_iter()
-            .filter(|(p, _, _)| p == "secrets.dismiss")
-            .collect();
-        assert!(
-            dismissals.is_empty(),
-            "no competing mutation was spawned: {dismissals:?}"
-        );
         assert!(
             app.status_message().contains("already in flight"),
             "the refusal is visible: {}",
@@ -8043,14 +8085,115 @@ mod tests {
         assert_eq!(
             t1_calls()
                 .iter()
-                .filter(|(p, _, _)| p == "secrets.approve")
+                .filter(|(p, _, _)| p == "secrets.dismiss")
                 .count(),
             1,
             "exactly one mutation reached the broker — the refused second never did"
         );
+    }
+
+    /// Points `AOIDE_SECRETS_SOCKET` at a fake broker and `AOIDE_ROOT` at a
+    /// scratch dir, under the lock every env-touching test here takes, and puts
+    /// both back on drop. Without it a spawned `aoide` reaches the real broker
+    /// and writes the real audit log.
+    struct SecretsEnv {
+        socket: PathBuf,
+        dir: PathBuf,
+        saved: [(&'static str, Option<std::ffi::OsString>); 2],
+        _guard: std::sync::MutexGuard<'static, ()>,
+    }
+    impl SecretsEnv {
+        fn new() -> Self {
+            let guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+            let dir = tmp_dir("approve");
+            let socket = dir.join("broker.sock");
+            let saved = [
+                ("AOIDE_SECRETS_SOCKET", std::env::var_os("AOIDE_SECRETS_SOCKET")),
+                ("AOIDE_ROOT", std::env::var_os("AOIDE_ROOT")),
+            ];
+            std::env::set_var("AOIDE_SECRETS_SOCKET", &socket);
+            std::env::set_var("AOIDE_ROOT", dir.join("root"));
+            Self { socket, dir, saved, _guard: guard }
+        }
+    }
+    impl Drop for SecretsEnv {
+        fn drop(&mut self) {
+            for (key, value) in &self.saved {
+                match value {
+                    Some(v) => std::env::set_var(key, v),
+                    None => std::env::remove_var(key),
+                }
+            }
+            let _ = std::fs::remove_dir_all(&self.dir);
+        }
+    }
+
+    /// A fake broker on `socket`: `pending` answers the one ask the review row
+    /// shows (id "3"), every other op answers ok, and each request line is kept
+    /// in arrival order.
+    fn fake_approve_broker(socket: &std::path::Path) -> std::sync::Arc<Mutex<Vec<Value>>> {
+        let listener = std::os::unix::net::UnixListener::bind(socket).expect("bind the fake broker");
+        let seen = std::sync::Arc::new(Mutex::new(Vec::new()));
+        let log = seen.clone();
+        std::thread::spawn(move || {
+            for stream in listener.incoming().flatten() {
+                let mut line = String::new();
+                let read = std::io::BufRead::read_line(&mut std::io::BufReader::new(&stream), &mut line);
+                if !matches!(read, Ok(n) if n > 0) {
+                    continue;
+                }
+                let request: Value = serde_json::from_str(line.trim()).unwrap_or(Value::Null);
+                let reply = if request["op"] == "pending" {
+                    json!({"ok": true, "pending": [{
+                        "id": "3", "secret": "db-prod", "consumer": "m",
+                        "requestedAt": 1789862400u64, "peerUid": 1000
+                    }]})
+                } else {
+                    json!({"ok": true})
+                };
+                log.lock().unwrap().push(request);
+                let _ = std::io::Write::write_all(&mut &stream, format!("{reply}\n").as_bytes());
+            }
+        });
+        seen
+    }
+
+    /// The TOTP prompt approves through the CLI: the typed code reaches the
+    /// broker as the one `approve` op's `totp`, and it reaches the `secrets
+    /// approve` child on stdin, never as an argument or a dispatched flag.
+    #[test]
+    fn the_totp_prompt_approves_through_the_cli_with_the_code_on_stdin() {
+        let _t1 = T1_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let env = SecretsEnv::new();
+        let requests = fake_approve_broker(&env.socket);
+        let mut app = t1_app();
+        app.approve_exe = aoide_test_support::built_aoide_bin();
+        app.select_panel(Panel::Pending);
+        settle_reads(&mut app);
+        let ask = app
+            .review_rows()
+            .iter()
+            .position(|r| matches!(r, ReviewRow::Ask(_)))
+            .unwrap();
+        app.select_review_row(ask);
+        app.handle_key(KeyEvent::from(KeyCode::Char('a')));
+        for c in "123456".chars() {
+            app.handle_key(KeyEvent::from(KeyCode::Char(c)));
+        }
+        app.handle_key(KeyEvent::from(KeyCode::Enter));
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        while app.secrets_action_busy().is_some() && std::time::Instant::now() < deadline {
+            settle_ticks(&mut app, 1);
+        }
+        let sent = requests.lock().unwrap().clone();
+        let approves: Vec<&Value> = sent.iter().filter(|r| r["op"] == "approve").collect();
+        assert_eq!(approves.len(), 1, "one approve op must reach the broker: {sent:?}");
+        assert_eq!(approves[0]["id"], "3", "{sent:?}");
+        assert_eq!(approves[0]["totp"], "123456", "the typed code is the op's totp: {sent:?}");
         assert!(
-            t1_calls().iter().any(|(p, _, _)| p == "secrets.approve"),
-            "the approved mutation's own outcome landed"
+            app.status_message().contains("approved pending ask `3`"),
+            "the status line shows the child's result: {}",
+            app.status_message()
         );
     }
 

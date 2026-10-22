@@ -199,6 +199,11 @@
   visible reason, never queued or raced — and nothing retries automatically.
   While a read is in flight the last rows stay on screen and the pane says it
   is reading.
+- The TOTP `approve` does not dispatch. It runs `secrets approve <id>` from
+  `App::approve_exe` (the running `aoide`), with the typed code as one stdin
+  line and no flag, and captures both streams; the status line shows the
+  rendered message. `the_totp_prompt_approves_through_the_cli_with_the_code_on_stdin`
+  pins it against a fake broker.
 - While a pairing leg is in flight, no node write is advertised or dispatched:
   the leg's commit writes `state/nodes.json` from its own thread, so a
   `node allow`/`node remove` from the UI thread at the same time is a lost
