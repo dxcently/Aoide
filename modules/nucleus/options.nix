@@ -501,11 +501,14 @@ in
     };
 
     # ── Rice selection — the replay seam ───────────────────────────────────
-    # The rice (rice) this host performs. A rice is host-agnostic: ANY host in
-    # the fleet replays any committed rice by naming it here — one line, no
-    # other edits. The shipped standard is rice "sonata"; committed rices live
-    # under rices/<name>/ as bodies that the selected rice alone brings
-    # in (the same selection discipline as a dendrite — see CONTRACTS.md §5).
+    # The rice (rice) this host performs. A host names it in
+    # `habit.rice.declared`; the rice hook (lib/rices.nix) derives this option
+    # from that name, so it is never hand-set. A rice is host-agnostic: ANY
+    # host in the fleet replays any committed rice by naming it there — one
+    # line, no other edits. The shipped standard is rice "sonata"; committed
+    # rices live under rices/<name>/ as bodies that the selected rice alone
+    # brings in (the same selection discipline as a dendrite — see
+    # CONTRACTS.md §5).
     #
     # The VENUE (host) decides its instruments (dendrites, hardware);
     # the RICE carries only the theme (palette + component tiers). A rice must
@@ -515,9 +518,10 @@ in
       default = null;
       example = "sonata";
       description = ''
-        The rice (rice) this host performs. Set to a committed rice name
-        (a folder under rices/<name>/) to replay it on this host;
-        the theme fan-out swaps with zero other edits. Null (the default)
+        The rice (rice) this host performs. The rice hook derives it from
+        `habit.rice.declared`: a host names a committed rice (a folder under
+        rices/<name>/) there to replay it on this host, and the theme fan-out
+        swaps with zero other edits. It is never hand-set. Null (the default)
         means no rice is named: a paint lane reads this null and deploys
         nothing — no QML tree, no seeded stage, no rice restart — rather than
         an empty surface, and no rice's body is imported. Naming a rice is what
@@ -525,7 +529,7 @@ in
         a host that brings its own config directory still runs a shell on it
         (`strillix.quickshell.config`), rice or no rice. A host wanting the
         desktop names its rice explicitly, e.g.
-        `strillix.rice = "sonata";` for the shipped standard.
+        `habit.rice.declared = "sonata";` for the shipped standard.
       '';
     };
 

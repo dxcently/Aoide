@@ -10,7 +10,7 @@ lit by lamps.
 **References:** `refs/ref-termui.png` (the pane grammar: box rules, green
 titles, braille/dot charts, sparklines, a gauge) and `refs/ref-crt.jpg` (the
 light: green phosphor on near-black, a faint bloom, nothing else).
-**Polarity:** dark. Needs a theme field the lane does not read yet (§5).
+**Polarity:** dark. `strillix.theme.polarity = "dark"` in `rice.nix` (§5), handed to `stylix.polarity` by the stylix lane.
 **Wallpaper:** a static circuit board on the CRT black (§3.9): dim copper-green
 tracks, pads and vias, generated from the palette. Staged live with
 `strx wallpaper set`; the wallpaper note stays `null` until the wallpaper is

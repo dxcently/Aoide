@@ -91,7 +91,7 @@ only `strillix.theme`, no host options, no lane toggles):
 
 ```nix
 # hosts/<host>/default.nix
-strillix.rice = "sonata";
+habit.rice.declared = "sonata";
 ```
 
 This re-fans the whole `strillix.theme` tree for that host. **Replay** =

@@ -59,7 +59,7 @@ staged copy holds theme or widget edits the build's copy lacks
 (`stagedDiffers`): the rebuild builds the rices version, not the live
 edits, so those reach the build through the first step and a commit.
 
-Staging is the sketch — a live compositor call, no rebuild; `strillix.rice` selecting a rice and rebuilding is the truth — it bakes `hyprland.conf` (geometry, borders), themes every nix-manageable app via [[Stylix]], assembles and deploys the rice's widgets, and sets the host's boot default. GTK/Qt surfaces require app restarts and are declare-only, accepted by design.
+Staging is the sketch — a live compositor call, no rebuild; `habit.rice.declared` selecting a rice and rebuilding is the truth — it bakes `hyprland.conf` (geometry, borders), themes every nix-manageable app via [[Stylix]], assembles and deploys the rice's widgets, and sets the host's boot default. GTK/Qt surfaces require app restarts and are declare-only, accepted by design.
 
 ## Composing a rice
 
@@ -418,7 +418,7 @@ lays the rice's own fields over it.
 ## The Shipped Baseline Is Guarded, Not Frozen
 
 `sonata` is the shipped standard, guaranteed present under
-`rices/sonata/`. `strillix.rice` (`nullOr str`) defaults to `null` —
+`rices/sonata/`. `habit.rice.declared` (`nullOr str`) defaults to `null` —
 naming no rice performs no rice: a host opts into the desktop by naming the
 rice explicitly. A missing baseline is a loud nix eval failure, never a
 silent no-op. `sonata` is upstream-owned and
@@ -456,12 +456,13 @@ The discipline is already in use: the retired `default` rice's declared aestheti
 the checkout's `rices/<rice>/` as durable, versioned, fleet-available
 score — a gated byte-diff copy (a repeat with nothing new is a no-op), with
 no `git add` and no rebuild: the user commits and runs the gated rebuild
-herself. **`strillix.rice`** is the per-host
-selector (`nullOr str`, default `null` — naming no rice performs no rice) —
-one line in `hosts/<host>/default.nix`:
+herself. **`habit.rice.declared`** is the per-host
+selector (`nullOr str`, default `null` — naming no rice performs no rice; the
+rice hook derives `strillix.rice` from it) — one line in
+`hosts/<host>/default.nix`:
 
 ```nix
-strillix.rice = "sonata";
+habit.rice.declared = "sonata";
 ```
 
 **Replay** is performing a declared rice at a different host: the rice
@@ -472,7 +473,7 @@ A host lacking an instrument does not sound that part.
 **Transpose** vs **replay**: transpose is same venue, new key (new
 palette); replay is same score, new venue (different host). Both are
 one-line operations on a declared rice — the replay declaration
-(`strillix.rice = "<name>";`) is real, `rice transpose` itself is planned.
+(`habit.rice.declared = "<name>";`) is real, `rice transpose` itself is planned.
 
 ## Keys and Transposition
 
