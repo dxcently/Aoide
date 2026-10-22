@@ -6602,6 +6602,17 @@ code (ruling 87): it prints that line and waits, reading nothing from stdin,
 until the park is approved from another process or times out, and it sends no
 approve op of its own.
 
+**A connection is bounded.** The broker serves at most 128 connections at
+once. The cap and both timeouts are compiled in, not env knobs. A connection
+that arrives while 128 are open gets one refusal line, `"ok":false` with an
+`error` that names the cap, and is closed. A connection that goes 10 s
+without sending a byte is closed with no reply, and so is one that does not
+take a reply within 10 s. A parked `resolve` is not reading, so its park
+timer, not either timeout, ends it. The cost is part of the contract: a
+silent client holds a slot for up to 10 s, so 128 of them refuse other
+callers for that window, and a client that sends one byte inside each 10 s
+keeps its slot, since the timeout bounds idle time, not a line's total time.
+
 **A parked field is bounded.** A consumer, reason or argv0 over 4 KiB or 60
 lines is refused at park, and so is one holding a control or invisible
 character: the reply names the field and the rule, and nothing parks. The

@@ -440,12 +440,18 @@ pub fn serve(secrets_home: &Path, socket_path: &Path) -> std::io::Result<()> {
     // follow in this loop (`AGENTS.md`).
     let events_path = crate::socket::events_path(socket_path);
     let parked = Arc::new(ParkRegistry::new());
+    let live = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     for conn in listener.incoming() {
         match conn {
             Ok(stream) => {
+                if live.load(std::sync::atomic::Ordering::SeqCst) >= MAX_CONNECTIONS {
+                    refuse_over_cap(stream);
+                    continue;
+                }
                 let home = home.clone();
                 let events_path = events_path.clone();
                 let parked = Arc::clone(&parked);
+                let counted = LiveConnection::enter(&live);
                 // FIX 3a (P-N2c, deploy blocker): `std::thread::spawn`
                 // PANICS if the OS refuses to create a thread (e.g. the
                 // process is already at its thread/fd limit) — that panic
@@ -458,9 +464,10 @@ pub fn serve(secrets_home: &Path, socket_path: &Path) -> std::io::Result<()> {
                 // accepting everyone else, same "one connection's failure
                 // never touches another's" discipline this module doc
                 // already holds for every other per-connection failure.
-                if let Err(e) = std::thread::Builder::new()
-                    .spawn(move || handle_conn(&home, &events_path, stream, &parked))
-                {
+                if let Err(e) = std::thread::Builder::new().spawn(move || {
+                    let _counted = counted;
+                    handle_conn(&home, &events_path, stream, &parked)
+                }) {
                     eprintln!("[aoide/secrets] could not spawn a connection thread (dropping this connection): {e}");
                 }
             }
@@ -491,6 +498,24 @@ const MAX_REQUEST_LINE: usize = 64 * 1024;
 const PARKED_FIELD_BYTES_MAX: usize = 4096;
 const PARKED_FIELD_LINES_MAX: usize = 60;
 
+/// Most connections the broker serves at once. One more is refused with a line
+/// and closed. Tests get a small cap, so the refusal is cheap to reach.
+#[cfg(not(test))]
+const MAX_CONNECTIONS: usize = 128;
+#[cfg(test)]
+const MAX_CONNECTIONS: usize = 8;
+
+/// How long a connection may sit silent between bytes, and how long one write
+/// to it may block. Past either, the connection is closed.
+#[cfg(not(test))]
+const READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+#[cfg(test)]
+const READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(1);
+#[cfg(not(test))]
+const WRITE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+#[cfg(test)]
+const WRITE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(1);
+
 /// Why a parked field is over its bound, if it is.
 fn oversized(value: &str) -> Option<String> {
     if value.len() > PARKED_FIELD_BYTES_MAX {
@@ -502,6 +527,45 @@ fn oversized(value: &str) -> Option<String> {
     }
 }
 
+/// One live connection, counted from accept until its thread ends, however it
+/// ends. The accept loop refuses a connection while the count is at the cap.
+struct LiveConnection(Arc<std::sync::atomic::AtomicUsize>);
+
+impl LiveConnection {
+    fn enter(live: &Arc<std::sync::atomic::AtomicUsize>) -> Self {
+        live.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Self(Arc::clone(live))
+    }
+}
+
+impl Drop for LiveConnection {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+/// The one line a connection over [`MAX_CONNECTIONS`] is sent before it is
+/// closed. What it already sent is read first (bounded), so closing the socket
+/// does not reset the connection before the line is read.
+fn refuse_over_cap(mut stream: UnixStream) {
+    if stream.set_nonblocking(true).is_ok() {
+        let mut drain = [0u8; 4096];
+        for _ in 0..16 {
+            if !matches!(stream.read(&mut drain), Ok(n) if n > 0) {
+                break;
+            }
+        }
+    }
+    if stream.set_nonblocking(false).is_err() || stream.set_write_timeout(Some(WRITE_TIMEOUT)).is_err() {
+        return;
+    }
+    let refusal = json!({
+        "ok": false,
+        "error": format!("the secrets broker has {MAX_CONNECTIONS} connections open; retry in a moment"),
+    });
+    let _ = write_json_line(&mut stream, &refusal);
+}
+
 /// Handle ONE client connection, on its OWN thread (module doc, P-N2): read
 /// newline-delimited JSON requests and reply to each. A read error (dropped
 /// connection) ends only this connection; nothing here can unwind into
@@ -511,6 +575,10 @@ fn oversized(value: &str) -> Option<String> {
 /// `handle_conn` thread is unaffected. A request line over
 /// [`MAX_REQUEST_LINE`] gets one refusal, and then the connection closes.
 fn handle_conn(secrets_home: &Path, events_path: &Path, stream: UnixStream, parked: &ParkRegistry) {
+    if stream.set_read_timeout(Some(READ_TIMEOUT)).and_then(|()| stream.set_write_timeout(Some(WRITE_TIMEOUT))).is_err() {
+        eprintln!("[aoide/secrets] could not bound a connection's reads and writes (dropping it)");
+        return;
+    }
     // #73: read SO_PEERCRED ONCE, at connection start, and thread the same
     // value into every op this connection sends — never re-read per line
     // (the peer identity of an already-accepted connection cannot change
@@ -4964,6 +5032,71 @@ mod tests {
             r#"{"op":"resolve","secret":"t","consumer":"m","argv0":"/usr/bin/psql"}"#,
         );
         assert_eq!(reply["pending"][0]["argv0"], "/usr/bin/psql", "{reply}");
+    }
+
+    /// A connection that never sends a request line is closed when the read
+    /// timeout ends, so a silent holder cannot keep its thread for ever.
+    #[test]
+    fn a_silent_connection_is_closed_when_the_read_timeout_ends() {
+        let home = tmp_home("silent-conn");
+        let events = home.join("events.jsonl");
+        let (mut client, server) = UnixStream::pair().expect("socketpair");
+        let conn = std::thread::spawn(move || handle_conn(&home, &events, server, &ParkRegistry::new()));
+        client.set_read_timeout(Some(std::time::Duration::from_secs(2))).unwrap();
+        let mut byte = [0u8; 1];
+        let got = client.read(&mut byte);
+        assert!(matches!(got, Ok(0)), "a silent connection was held open: {got:?}");
+        conn.join().unwrap();
+    }
+
+    /// One connection over the cap gets a one-line refusal and is closed.
+    /// The connections under the cap are held, and not touched.
+    #[test]
+    fn a_connection_over_the_cap_is_refused_with_one_line_and_closed() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let home = tmp_home("conn-cap");
+        let socket = crate::fixtures::real_broker(&home, "conn-cap");
+        let held: Vec<UnixStream> = (0..MAX_CONNECTIONS).map(|_| UnixStream::connect(&socket).expect("connect")).collect();
+        let mut over = UnixStream::connect(&socket).expect("connect");
+        over.set_read_timeout(Some(std::time::Duration::from_secs(2))).unwrap();
+        let mut line = String::new();
+        let got = BufReader::new(&mut over).read_line(&mut line);
+        assert!(got.is_ok() && line.contains("connections"), "the connection over the cap was not refused with one line: {got:?} {line:?}");
+        drop(held);
+        std::fs::remove_dir_all(&home).ok();
+    }
+
+    /// A parked resolve waits on its own park timer, not on the read
+    /// timeout. The park ends with its timeout refusal, and the connection is
+    /// not closed under it.
+    #[test]
+    fn a_parked_resolve_is_answered_by_its_park_timer_not_the_read_timeout() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_timeout = std::env::var(crate::park::PARK_TIMEOUT_ENV).ok();
+        std::env::set_var(crate::park::PARK_TIMEOUT_ENV, "1");
+        let home = tmp_home("parked-outlives-read");
+        seed_enrolled(&home, Policy::new("t", "scratch", "stored-value"));
+        let events = home.join("events.jsonl");
+        with_redirected_audit_log(&home, || {
+            let (mut client, server) = UnixStream::pair().expect("socketpair");
+            let (home_for_conn, events_for_conn) = (home.clone(), events.clone());
+            let conn = std::thread::spawn(move || handle_conn(&home_for_conn, &events_for_conn, server, &ParkRegistry::new()));
+            client.write_all(b"{\"op\":\"resolve\",\"secret\":\"t\",\"consumer\":\"m\"}\n").unwrap();
+            let mut reader = BufReader::new(client);
+            reader.get_mut().set_read_timeout(Some(std::time::Duration::from_secs(5))).unwrap();
+            let mut interim = String::new();
+            reader.read_line(&mut interim).expect("the interim line");
+            assert!(interim.contains("\"parked\":true"), "{interim}");
+            let mut last = String::new();
+            let got = reader.read_line(&mut last);
+            assert!(got.is_ok() && last.contains("timed out"), "the park was not ended by its own timer: {got:?} {last:?}");
+            drop(reader);
+            conn.join().unwrap();
+        });
+        match saved_timeout {
+            Some(v) => std::env::set_var(crate::park::PARK_TIMEOUT_ENV, v),
+            None => std::env::remove_var(crate::park::PARK_TIMEOUT_ENV),
+        }
     }
 
     /// Concurrency, at the connection-thread level (task's hard

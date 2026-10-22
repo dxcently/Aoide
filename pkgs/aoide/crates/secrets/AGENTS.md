@@ -536,6 +536,22 @@
   `park::wait_for_outcome`'s own timeout/completion race — a second
   ad hoc blocking point would need this same accept-loop guarantee
   re-proven from scratch.
+- **Every connection is timed, and the count is capped (hard constraint).**
+  `serve` counts a connection from accept until its thread ends
+  (`LiveConnection`). At `MAX_CONNECTIONS` (128; 8 under test) the accept
+  loop answers the next one with one refusal line and closes it
+  (`refuse_over_cap`), after draining what the client already sent, so the
+  close does not reset the line. `handle_conn` sets `READ_TIMEOUT` (10 s; 1 s
+  under test) on reads and `WRITE_TIMEOUT` (10 s; 1 s under test) on writes.
+  A read that times out or errors closes the connection with no reply. Both
+  timeouts apply per call, so they bound idle time, not a line's total time.
+  A parked `resolve` is not reading, so its park timer ends it, not the read
+  timeout. Costs: a silent or stalled client holds one slot for up to 10 s,
+  so 128 of them refuse honest callers for that window, and a client that
+  sends one byte inside each 10 s keeps its slot. Parks have their own cap
+  (`AOIDE_SECRETS_PARK_CAP`, 32 by default), so a default broker keeps 96
+  slots free for callers that are not parked. A change to either number
+  states its cost in the same commit.
 - **`resolve_gate` returns a `GateOutcome` (`Granted`/`Denied`/
   `NeedsTotp`), not a bare `Result` (P-N2 — replaced the old
   `(bool, Result<String,String>)` tuple).** `NeedsTotp` is the park

@@ -655,6 +655,15 @@ thread, and every other connection (an unrelated `resolve`, a `put`, a
 parked. `AGENTS.md`'s own invariant list has the poisoned-lock convention
 this introduced (the crate's first production, non-test, lock).
 
+The connection count is capped too. At most 128 connections are served at
+once (`MAX_CONNECTIONS`), and one more gets a single refusal line and is
+closed. A connection that goes 10 s (`READ_TIMEOUT`) without a byte, or does
+not take a reply within 10 s (`WRITE_TIMEOUT`), is closed with no reply. A
+parked `resolve` is ended by its park timer, not by either timeout. The
+costs are the ones `AGENTS.md`'s accept-loop invariant states: a stalled
+client holds a slot for up to 10 s, and a client that sends a byte inside
+each 10 s keeps its slot.
+
 **Review fix, same commit as the fix below in git history: two
 read-modify-write sections the serial accept loop used to serialize for
 free needed an EXPLICIT lock once connections stopped running one at a
