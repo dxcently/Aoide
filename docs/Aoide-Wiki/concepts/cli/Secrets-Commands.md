@@ -124,12 +124,13 @@ aoide secrets exec --as <consumer> --secret <name[:VAR]> [--reason <text>] [--js
   once the child runs, its exit code is the command's.
 - **Notes:** CLI-only — the value would otherwise have to cross a door
   that isn't this process's own stdio. A `requireTotp` secret PARKS the
-  resolve rather than refusing outright. The park is completed by typing
-  the code at this command's prompt (a no-echo
-  prompt on a terminal; one piped line on a pipe, read byte by byte so the
-  command inherits the rest of stdin), or from another terminal with
-  `secrets approve <id>`, or by waiting out the timeout. `--totp` is refused
-  with no broker op: a code in argv is readable by every process of this uid.
+  resolve rather than refusing outright. This command never asks for a
+  code: it prints the park line, which names `aoide secrets approve <id>`,
+  and waits, reading nothing from stdin, so the wrapped command inherits
+  stdin whole. The park is completed by `secrets approve <id>` (the code is
+  typed there, in the conductor, or in the app), or it times out. `--totp`
+  is refused with no broker op: a code in argv is readable by every process
+  of this uid.
 
 ## aoide secrets add
 

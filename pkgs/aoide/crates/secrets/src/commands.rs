@@ -214,7 +214,7 @@ pub fn register(r: &mut Registry) {
         flags: [
             flag!("as", "string", "The consumer name to present to the broker (self-asserted — the policy's consumers[] list is the real gate, not caller identity).", value: "consumer", required: true),
             flag!("secret", "string", "The secret's policy name, optionally `name:VAR` to name the injected env var explicitly (default: the name, uppercased, `-` -> `_`).", value: "name[:VAR]", required: true),
-            flag!("totp", "string", "Refused: a TOTP code in argv is readable by every process of this uid. Leave it out: a parked ask asks for the code itself, at a prompt on a terminal or from one piped line. Declared so the refusal can teach.", value: "code"),
+            flag!("totp", "string", "Refused: a TOTP code in argv is readable by every process of this uid. Leave it out: exec parks and prints `aoide secrets approve <id>`, where the code is typed. Declared so the refusal can teach.", value: "code"),
             flag!("reason", "string", "Free-text context for a popup/prompt surface to show alongside a parked ask -- what this ask is FOR, never a value. Defaults to the wrapped command's own argv, space-joined and truncated to ~60 chars, when omitted.", value: "text")
         ],
         gated: false,

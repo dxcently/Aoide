@@ -150,7 +150,8 @@ immediately rather than watching a silent hang.
 
 ```
 agent     ──► aoide secrets exec --as m --secret db-prod -- psql   (no --totp)
-          ──► parks: {id: "3f2a-3", secret: "db-prod", consumer: "m", …}
+          ──► parks, and prints on stderr: parked as ask 3f2a-3 —
+              complete with: aoide secrets approve 3f2a-3  (no code is read)
 
 operator  ──► aoide secrets pending                       (a separate connection)
           ──► aoide secrets approve 3f2a-3   (a third connection; types the code)

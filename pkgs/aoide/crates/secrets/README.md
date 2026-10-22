@@ -151,9 +151,9 @@ The broker must NOT exec the agent's command: it runs as the secrets uid
 agent  -> aoide secrets exec --as <consumer> --secret <name>[:VAR] -- <cmd>
        -> client (agent uid) connects, sends {op:"resolve", secret, consumer, argv0?}
        -> broker (secrets uid): policy gate (name exists, consumer authorized,
-          requireTotp -> verify the code against the enrolled secret,
-          single-use per timestep) -> fetch via the backend template AS
-          SECRETS UID -> release the value over the socket
+          requireTotp -> a codeless resolve PARKS until `secrets approve`
+          completes it) -> fetch via the backend template AS SECRETS UID
+          -> release the value over the socket
        -> client injects the value as an env var, Stdio::inherit()
           throughout, execs, returns the CHILD's own exit code
 ```

@@ -500,9 +500,10 @@ pub fn default_var_name(secret: &str) -> String {
 /// as positionals (that module's own doc). The registry entry declares
 /// `--as`, `--secret` and the command required, so `Command::check` has
 /// already refused their absence. A `--totp` is refused first of all: a code
-/// never travels in argv, the parked ask asks for it.
+/// never travels in argv, and exec never asks for one. The park is completed
+/// by `secrets approve <id>`, where the code is typed.
 pub fn parse_exec_args(inv: &Invocation) -> Result<ExecArgs, Refusal> {
-    let fix = Fix::Run("the same exec without --totp: a parked ask asks for the code itself, at a prompt or from one piped line".to_string());
+    let fix = Fix::Run("the same exec without --totp: it parks and prints `aoide secrets approve <id>`; the code is typed there".to_string());
     if let Some(refusal) = totp_in_argv(inv, fix) {
         return Err(refusal);
     }
@@ -2050,6 +2051,14 @@ mod tests {
         let err = parse_exec_args(&i).unwrap_err();
         assert!(err.what.contains("--totp"), "{err:?}");
         assert!(!format!("{err:?}").contains("123456"), "{err:?}");
+    }
+
+    #[test]
+    fn the_exec_totp_refusal_names_the_approve_line_and_promises_no_prompt() {
+        let i = inv(&[("as", "m"), ("secret", "t"), ("totp", "123456")], &["cmd"]);
+        let refusal = format!("{:?}", parse_exec_args(&i).unwrap_err());
+        assert!(!refusal.contains("prompt"), "exec never asks for a code, so the refusal must promise no prompt: {refusal}");
+        assert!(refusal.contains("aoide secrets approve <id>"), "the refusal must name the approve line: {refusal}");
     }
 
     #[test]
