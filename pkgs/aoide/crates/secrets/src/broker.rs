@@ -1789,13 +1789,17 @@ fn verify_totp_gate(secrets_home: &Path, totp: Option<&str>, now_unix: u64) -> R
     let step = crate::totp::timestep(now_unix);
     let mut budgets = totp_budget_lock().lock().unwrap_or_else(|e| e.into_inner());
     let budget = budgets.entry(secrets_home.to_path_buf()).or_default();
-    if budget.step != step {
+    // Only a LATER step starts a fresh budget. A check from an older step (one
+    // that read the clock before the step turned) is judged by the budget the
+    // newest step has spent, never by a reset to its own step (F11).
+    if step > budget.step {
         *budget = TotpBudget { step, ..TotpBudget::default() };
     }
     if budget.wrong >= TOTP_WRONG_BUDGET {
         let first = !std::mem::replace(&mut budget.reported, true);
+        let reason = budget_spent_reason(budget.step, now_unix);
         drop(budgets);
-        return Err(TotpRefusal::Spent { first, reason: budget_spent_reason(now_unix) });
+        return Err(TotpRefusal::Spent { first, reason });
     }
     let checked = check_totp_code(secrets_home, &secret, code_str, now_unix);
     if matches!(checked, Err(CodeError::Wrong(_))) {
@@ -1856,12 +1860,12 @@ impl CodeError {
 
 /// The refusal for a check the budget refused untested. It names the spend and the
 /// unix second the next step starts, and never a code.
-fn budget_spent_reason(now_unix: u64) -> String {
-    let next = (crate::totp::timestep(now_unix) + 1) * crate::totp::STEP_SECONDS;
+fn budget_spent_reason(spent_step: u64, now_unix: u64) -> String {
+    let next = (spent_step + 1) * crate::totp::STEP_SECONDS;
     format!(
         "totp checks are refused untested: the wrong-code budget is spent ({TOTP_WRONG_BUDGET} wrong codes this {}s step); the next step starts at unix {next}, in {}s",
         crate::totp::STEP_SECONDS,
-        next - now_unix
+        next.saturating_sub(now_unix)
     )
 }
 
@@ -4174,6 +4178,31 @@ mod tests {
         assert_eq!(second["ok"], false, "{second}");
         let third = resolve_with_code_at(home, parked, &wrong_code(secret, NOW), NOW);
         assert_eq!(third["ok"], false, "{third}");
+    }
+
+    /// F11: the budget belongs to the newest step it has seen. A check from an
+    /// older step (one that read the clock before the step turned) is judged by
+    /// that budget, so it cannot reset the budget to a fresh one.
+    #[test]
+    fn a_check_from_an_older_step_is_judged_by_the_newer_steps_spent_budget() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let home = tmp_home("budget-older-step");
+        let secret = seed_enrolled(&home, Policy::new("t", "scratch", "stored-value"));
+        let parked = ParkRegistry::new();
+        let (id, _rx) = parked.park_if_room("t", "m", NOW, 16, None, None, None, capture_origin(None)).expect("the registry has room");
+        let later = NOW + 30;
+        with_redirected_audit_log(&home, || {
+            // The next step's budget is spent: three counted checks there.
+            assert_eq!(approve_at(&home, &parked, &id, &wrong_code(&secret, later), later)["ok"], false);
+            assert_eq!(approve_at(&home, &parked, &id, "abc", later)["ok"], false);
+            assert_eq!(approve_at(&home, &parked, &id, &wrong_code(&secret, later), later)["ok"], false);
+            // A check that read the clock one step earlier is judged by that budget.
+            let stale = approve_at(&home, &parked, &id, &wrong_code(&secret, NOW), NOW);
+            assert!(error_of(&stale).contains("budget is spent"), "an older step's check is refused by the spent budget: {stale}");
+            let next = (crate::totp::timestep(later) + 1) * crate::totp::STEP_SECONDS;
+            assert!(error_of(&stale).contains(&format!("unix {next}")), "and it names the spent step's next start: {stale}");
+        });
+        std::fs::remove_dir_all(&home).ok();
     }
 
     /// Three counted checks, from both callers, spend the step's budget. The

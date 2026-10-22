@@ -161,7 +161,10 @@
   so neither counts. Past the budget, the next check in that step is refused
   before any verification, so a right code is refused too. The refusal names
   the spend and the next step's start (unix seconds) and never a code. The
-  step's first untested refusal calls `emit_notify` once with the name-only
+  budget belongs to the newest step a check has named: a check from an older
+  step is judged by that budget, and only a later step starts a fresh one.
+  The step's first untested refusal calls `emit_notify` once with the
+  name-only
   `totp-budget-spent` kind, which is also the burst's one audit line; later
   refusals in that step write nothing. The three counted failures keep their
   per-attempt audit lines. The budget is one per secrets home, lives only in
