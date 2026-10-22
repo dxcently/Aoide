@@ -184,6 +184,10 @@ pub struct ParkedAsk {
     /// carries). Never gates anything, never interpreted as anything but
     /// text a human reads on a dialog/prompt (`broker.rs`'s module doc).
     pub reason: Option<String>,
+    /// The argv0 the resolve named, clipped to `LINE_MAX` at ingest: the program
+    /// the requester says receives the value. Display-only, never a gate, like
+    /// `reason`.
+    pub argv0: Option<String>,
     /// WHO/WHERE this ask's requesting connection came from, captured ONCE
     /// at park time — see [`AskOrigin`]'s own doc.
     pub origin: AskOrigin,
@@ -281,7 +285,7 @@ impl ParkRegistry {
     /// caller (tests, and any future one with no cap concern) keeps this
     /// simpler unconditional signature.
     pub fn park(&self, secret: &str, consumer: &str, requested_at: u64) -> (String, mpsc::Receiver<ParkOutcome>) {
-        self.park_if_room(secret, consumer, requested_at, usize::MAX, None, None, AskOrigin::default())
+        self.park_if_room(secret, consumer, requested_at, usize::MAX, None, None, None, AskOrigin::default())
             .expect("an unbounded park (cap = usize::MAX) must never refuse")
     }
 
@@ -306,6 +310,7 @@ impl ParkRegistry {
         cap: usize,
         peer_user: Option<crate::peercred::PeerUser>,
         reason: Option<&str>,
+        argv0: Option<&str>,
         origin: AskOrigin,
     ) -> Option<(String, mpsc::Receiver<ParkOutcome>)> {
         let (tx, rx) = mpsc::channel();
@@ -322,6 +327,7 @@ impl ParkRegistry {
                 requested_at,
                 peer_user,
                 reason: reason.map(str::to_string),
+                argv0: argv0.map(str::to_string),
                 origin,
                 tx,
             },
@@ -378,7 +384,7 @@ impl ParkRegistry {
     /// `BTreeMap`'s own iteration order — the nonce prefix is constant
     /// across every entry in one registry, so formatting it on afterward
     /// never disturbs that order.
-    pub fn list(&self) -> Vec<(String, String, String, u64, Option<crate::peercred::PeerUser>, Option<String>, AskOrigin)> {
+    pub fn list(&self) -> Vec<(String, String, String, u64, Option<crate::peercred::PeerUser>, Option<String>, AskOrigin, Option<String>)> {
         self.lock()
             .iter()
             .map(|(id, ask)| {
@@ -390,6 +396,7 @@ impl ParkRegistry {
                     ask.peer_user.clone(),
                     ask.reason.clone(),
                     ask.origin.clone(),
+                    ask.argv0.clone(),
                 )
             })
             .collect()
@@ -485,7 +492,7 @@ mod tests {
         // `park` (unbounded, no peer info) always stamps `None` — only
         // `park_if_room`'s real production caller (`broker::handle_resolve`)
         // ever supplies a peer uid.
-        assert_eq!(list[0], (id, "db-prod".to_string(), "m".to_string(), 1_700_000_000, None, None, AskOrigin::default()));
+        assert_eq!(list[0], (id, "db-prod".to_string(), "m".to_string(), 1_700_000_000, None, None, AskOrigin::default(), None));
     }
 
     #[test]
@@ -529,16 +536,16 @@ mod tests {
     #[test]
     fn park_if_room_refuses_beyond_the_cap_and_admits_again_after_a_take() {
         let reg = ParkRegistry::new();
-        assert!(reg.park_if_room("a", "m", 1, 2, None, None, AskOrigin::default()).is_some());
-        assert!(reg.park_if_room("b", "m", 2, 2, None, None, AskOrigin::default()).is_some());
-        assert!(reg.park_if_room("c", "m", 3, 2, None, None, AskOrigin::default()).is_none(), "a third park must refuse at cap 2");
+        assert!(reg.park_if_room("a", "m", 1, 2, None, None, None, AskOrigin::default()).is_some());
+        assert!(reg.park_if_room("b", "m", 2, 2, None, None, None, AskOrigin::default()).is_some());
+        assert!(reg.park_if_room("c", "m", 3, 2, None, None, None, AskOrigin::default()).is_none(), "a third park must refuse at cap 2");
         assert_eq!(reg.list().len(), 2);
 
         // Freeing one slot (a take, as approve/dismiss/timeout would do)
         // lets the next park through again.
         let first_id = reg.list().into_iter().next().unwrap().0;
         reg.take(&first_id);
-        assert!(reg.park_if_room("d", "m", 4, 2, None, None, AskOrigin::default()).is_some());
+        assert!(reg.park_if_room("d", "m", 4, 2, None, None, None, AskOrigin::default()).is_some());
     }
 
     #[test]
@@ -556,7 +563,7 @@ mod tests {
     #[test]
     fn park_if_room_stamps_the_given_peer_uid_and_peek_returns_it() {
         let reg = ParkRegistry::new();
-        let (id, _rx) = reg.park_if_room("t", "m", 1, usize::MAX, Some(PeerUser::Uid(4242)), None, AskOrigin::default()).unwrap();
+        let (id, _rx) = reg.park_if_room("t", "m", 1, usize::MAX, Some(PeerUser::Uid(4242)), None, None, AskOrigin::default()).unwrap();
         assert_eq!(reg.peek(&id), Some(("t".to_string(), "m".to_string(), Some(PeerUser::Uid(4242)))));
         let list = reg.list();
         assert_eq!(list.len(), 1);
@@ -568,7 +575,7 @@ mod tests {
         let reg = ParkRegistry::new();
         let origin =
             AskOrigin { username: Some("khoa".into()), pid: Some(4242), comm: Some("bash".into()), hostname: Some("yomi-strix".into()) };
-        let (id, _rx) = reg.park_if_room("t", "m", 1, usize::MAX, Some(PeerUser::Uid(4242)), Some("sudo nixos-rebuild switch"), origin.clone()).unwrap();
+        let (id, _rx) = reg.park_if_room("t", "m", 1, usize::MAX, Some(PeerUser::Uid(4242)), Some("sudo nixos-rebuild switch"), None, origin.clone()).unwrap();
         let list = reg.list();
         assert_eq!(list.len(), 1);
         assert_eq!(list[0].0, id);
@@ -579,7 +586,7 @@ mod tests {
     #[test]
     fn park_if_room_with_no_peer_uid_stamps_none() {
         let reg = ParkRegistry::new();
-        let (id, _rx) = reg.park_if_room("t", "m", 1, usize::MAX, None, None, AskOrigin::default()).unwrap();
+        let (id, _rx) = reg.park_if_room("t", "m", 1, usize::MAX, None, None, None, AskOrigin::default()).unwrap();
         assert_eq!(reg.peek(&id), Some(("t".to_string(), "m".to_string(), None)));
     }
 

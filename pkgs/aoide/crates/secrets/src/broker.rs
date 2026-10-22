@@ -765,8 +765,13 @@ fn handle_resolve(
             // doc: the pid can exit and be reused long before this ask
             // resolves or a dialog renders it).
             let origin = capture_origin(peer.clone());
+            // The argv0 is the requester's claim about the program that receives the
+            // value. Clipped to the one-line bound here, at park time (F3).
+            let park_argv0 = argv0
+                .as_deref()
+                .map(|a| aoide_protocol::untrusted::clip_flat(a, aoide_protocol::untrusted::LINE_MAX));
             let Some((id, rx)) =
-                parked.park_if_room(&secret, &consumer, now_unix, cap, peer_identity.clone(), ask_reason.as_deref(), origin.clone())
+                parked.park_if_room(&secret, &consumer, now_unix, cap, peer_identity.clone(), ask_reason.as_deref(), park_argv0.as_deref(), origin.clone())
             else {
                 // FIX 3b: at the registry-wide cap — the SAME immediate
                 // refusal `wait:false` gives, plus a hint naming the
@@ -871,7 +876,7 @@ fn handle_pending(parked: &ParkRegistry) -> Value {
     let pending: Vec<Value> = parked
         .list()
         .into_iter()
-        .map(|(id, secret, consumer, requested_at, peer_user, reason, origin)| {
+        .map(|(id, secret, consumer, requested_at, peer_user, reason, origin, argv0)| {
             // The identity rides the row TWICE: `peerUid` where the host has
             // a uid (the field every reader already knows, `null` where it
             // does not), and `peerSid` only where the identity IS a SID.
@@ -885,6 +890,7 @@ fn handle_pending(parked: &ParkRegistry) -> Value {
                 // precedent, task #73) — `null` per field when unknown.
                 "reason": reason,
                 "origin": origin_to_json(&origin),
+                "argv0": argv0,
             });
             with_peer_sid(row, peer_user.as_ref())
         })
@@ -3836,7 +3842,7 @@ mod tests {
                 let mut id = None;
                 for _ in 0..200 {
                     let list = parked.list();
-                    if let Some((pid, secret, consumer, _, _, _, _)) = list.into_iter().next() {
+                    if let Some((pid, secret, consumer, _, _, _, _, _)) = list.into_iter().next() {
                         assert_eq!(secret, "t");
                         assert_eq!(consumer, "m");
                         id = Some(pid);
@@ -4179,7 +4185,7 @@ mod tests {
         let home = tmp_home("budget-spent");
         let secret = seed_enrolled(&home, Policy::new("t", "scratch", "stored-value"));
         let parked = ParkRegistry::new();
-        let (id, _rx) = parked.park_if_room("t", "m", NOW, 16, None, None, capture_origin(None)).expect("the registry has room");
+        let (id, _rx) = parked.park_if_room("t", "m", NOW, 16, None, None, None, capture_origin(None)).expect("the registry has room");
         let right = code_for_now(&secret, NOW);
         with_redirected_audit_log(&home, || {
             spend_the_budget_at_now(&home, &parked, &id, &secret);
@@ -4203,7 +4209,7 @@ mod tests {
         let home = tmp_home("budget-names-next");
         let secret = seed_enrolled(&home, Policy::new("t", "scratch", "stored-value"));
         let parked = ParkRegistry::new();
-        let (id, _rx) = parked.park_if_room("t", "m", NOW, 16, None, None, capture_origin(None)).expect("the registry has room");
+        let (id, _rx) = parked.park_if_room("t", "m", NOW, 16, None, None, None, capture_origin(None)).expect("the registry has room");
         let right = code_for_now(&secret, NOW);
         with_redirected_audit_log(&home, || {
             spend_the_budget_at_now(&home, &parked, &id, &secret);
@@ -4227,7 +4233,7 @@ mod tests {
         let home = tmp_home("budget-one-notice");
         let secret = seed_enrolled(&home, Policy::new("t", "scratch", "stored-value"));
         let parked = ParkRegistry::new();
-        let (id, _rx) = parked.park_if_room("t", "m", NOW, 16, None, None, capture_origin(None)).expect("the registry has room");
+        let (id, _rx) = parked.park_if_room("t", "m", NOW, 16, None, None, None, capture_origin(None)).expect("the registry has room");
         let wrong = wrong_code(&secret, NOW);
         let right = code_for_now(&secret, NOW);
         with_redirected_audit_log(&home, || {
@@ -4260,7 +4266,7 @@ mod tests {
         let home = tmp_home("budget-next-step");
         let secret = seed_enrolled(&home, Policy::new("t", "scratch", "stored-value"));
         let parked = ParkRegistry::new();
-        let (id, _rx) = parked.park_if_room("t", "m", NOW, 16, None, None, capture_origin(None)).expect("the registry has room");
+        let (id, _rx) = parked.park_if_room("t", "m", NOW, 16, None, None, None, capture_origin(None)).expect("the registry has room");
         let right = code_for_now(&secret, NOW);
         with_redirected_audit_log(&home, || {
             spend_the_budget_at_now(&home, &parked, &id, &secret);
@@ -4282,9 +4288,9 @@ mod tests {
         let home = tmp_home("budget-reused");
         let secret = seed_enrolled(&home, Policy::new("t", "scratch", "stored-value"));
         let parked = ParkRegistry::new();
-        let (a, _ra) = parked.park_if_room("t", "m", NOW, 16, None, None, capture_origin(None)).expect("the registry has room");
-        let (b, _rb) = parked.park_if_room("t", "m", NOW, 16, None, None, capture_origin(None)).expect("the registry has room");
-        let (c, _rc) = parked.park_if_room("t", "m", NOW, 16, None, None, capture_origin(None)).expect("the registry has room");
+        let (a, _ra) = parked.park_if_room("t", "m", NOW, 16, None, None, None, capture_origin(None)).expect("the registry has room");
+        let (b, _rb) = parked.park_if_room("t", "m", NOW, 16, None, None, None, capture_origin(None)).expect("the registry has room");
+        let (c, _rc) = parked.park_if_room("t", "m", NOW, 16, None, None, None, capture_origin(None)).expect("the registry has room");
         let right = code_for_now(&secret, NOW);
         let wrong = wrong_code(&secret, NOW);
         let next_step = code_for_now(&secret, NOW + crate::totp::STEP_SECONDS);
@@ -4314,7 +4320,7 @@ mod tests {
         let home = tmp_home("budget-missing-code");
         let secret = seed_enrolled(&home, Policy::new("t", "scratch", "stored-value"));
         let parked = ParkRegistry::new();
-        let (id, _rx) = parked.park_if_room("t", "m", NOW, 16, None, None, capture_origin(None)).expect("the registry has room");
+        let (id, _rx) = parked.park_if_room("t", "m", NOW, 16, None, None, None, capture_origin(None)).expect("the registry has room");
         let right = code_for_now(&secret, NOW);
         with_redirected_audit_log(&home, || {
             for _ in 0..5 {
@@ -4337,7 +4343,7 @@ mod tests {
         let home = tmp_home("budget-io");
         let secret = seed_enrolled(&home, Policy::new("t", "scratch", "stored-value"));
         let parked = ParkRegistry::new();
-        let (id, _rx) = parked.park_if_room("t", "m", NOW, 16, None, None, capture_origin(None)).expect("the registry has room");
+        let (id, _rx) = parked.park_if_room("t", "m", NOW, 16, None, None, None, capture_origin(None)).expect("the registry has room");
         let right = code_for_now(&secret, NOW);
         std::fs::write(crate::store::replay_ledger_path(&home), b"not json").unwrap();
         with_redirected_audit_log(&home, || {
@@ -4443,7 +4449,7 @@ mod tests {
         // broker-euid bypass in `dismiss_authorized`).
         let owner_uid = real_euid.wrapping_add(10_000);
         let wrong_uid = real_euid.wrapping_add(20_000);
-        let (id, _rx) = parked.park_if_room("t", "m", NOW, usize::MAX, Some(PeerUser::Uid(owner_uid)), None, AskOrigin::default()).unwrap();
+        let (id, _rx) = parked.park_if_room("t", "m", NOW, usize::MAX, Some(PeerUser::Uid(owner_uid)), None, None, AskOrigin::default()).unwrap();
 
         with_redirected_audit_log(&home, || {
             let wrong_peer = Some(crate::peercred::PeerCred { uid: Some(wrong_uid), gid: Some(0), sid: None, pid: 0 });
@@ -4474,7 +4480,7 @@ mod tests {
         let parked = ParkRegistry::new();
         let real_euid = real_euid_or_a_value_no_identity_on_this_host_will_equal();
         let owner_uid = real_euid.wrapping_add(30_000);
-        let (id, _rx) = parked.park_if_room("t", "m", NOW, usize::MAX, Some(PeerUser::Uid(owner_uid)), None, AskOrigin::default()).unwrap();
+        let (id, _rx) = parked.park_if_room("t", "m", NOW, usize::MAX, Some(PeerUser::Uid(owner_uid)), None, None, AskOrigin::default()).unwrap();
 
         with_redirected_audit_log(&home, || {
             let matching_peer = Some(crate::peercred::PeerCred { uid: Some(owner_uid), gid: Some(0), sid: None, pid: 0 });
@@ -4554,7 +4560,7 @@ mod tests {
         let entry = arr.iter().find(|e| e["id"] == unstamped_id).unwrap();
         assert!(entry["peerUid"].is_null(), "{entry}");
 
-        let (stamped_id, _rx2) = parked.park_if_room("with-peer", "m", 2, usize::MAX, Some(PeerUser::Uid(4242)), None, AskOrigin::default()).unwrap();
+        let (stamped_id, _rx2) = parked.park_if_room("with-peer", "m", 2, usize::MAX, Some(PeerUser::Uid(4242)), None, None, AskOrigin::default()).unwrap();
         let listed = handle_line(&home, &home.join("events.jsonl"), r#"{"op":"pending"}"#, &parked, &mut Vec::new(), None);
         let arr = listed["pending"].as_array().unwrap();
         let entry = arr.iter().find(|e| e["id"] == stamped_id).unwrap();
@@ -4676,6 +4682,60 @@ mod tests {
             None => std::env::remove_var(crate::park::PARK_TIMEOUT_ENV),
         }
         std::fs::remove_dir_all(&home).ok();
+    }
+
+    /// The `pending` reply while one parked resolve, `line`, is still parked.
+    /// The resolve blocks its own thread until the 1 s timeout, so the reply
+    /// is read 100 ms in, from this thread, while the park is still there.
+    fn pending_reply_while_parked(tag: &str, line: &str) -> Value {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_timeout = std::env::var(crate::park::PARK_TIMEOUT_ENV).ok();
+        std::env::set_var(crate::park::PARK_TIMEOUT_ENV, "1");
+
+        let home = tmp_home(tag);
+        seed_enrolled(&home, Policy::new("t", "scratch", "stored-value"));
+        let parked = ParkRegistry::new();
+        let reply = with_redirected_audit_log(&home, || {
+            std::thread::scope(|s| {
+                let call = s.spawn(|| {
+                    handle_line(&home, &home.join("events.jsonl"), line, &parked, &mut Vec::new(), None)
+                });
+                std::thread::sleep(std::time::Duration::from_millis(100));
+                let reply = handle_line(&home, &home.join("events.jsonl"), r#"{"op":"pending"}"#, &parked, &mut Vec::new(), None);
+                call.join().unwrap();
+                reply
+            })
+        });
+
+        match saved_timeout {
+            Some(v) => std::env::set_var(crate::park::PARK_TIMEOUT_ENV, v),
+            None => std::env::remove_var(crate::park::PARK_TIMEOUT_ENV),
+        }
+        std::fs::remove_dir_all(&home).ok();
+        reply
+    }
+
+    /// F3: a parked ask carries the argv0 the resolve named, so the approve
+    /// screen can show which program the requester says receives the value.
+    #[test]
+    fn a_pending_row_carries_the_argv0_the_resolve_named() {
+        let reply = pending_reply_while_parked(
+            "pending-argv0",
+            r#"{"op":"resolve","secret":"t","consumer":"m","argv0":"/usr/bin/psql"}"#,
+        );
+        assert_eq!(reply["pending"][0]["argv0"], "/usr/bin/psql", "{reply}");
+    }
+
+    /// F3: the argv0 is clipped to the one-line bound at park time, so a long
+    /// claim cannot fill the approve screen.
+    #[test]
+    fn a_parked_argv0_is_clipped_to_the_line_max() {
+        let long = "a".repeat(300);
+        let line = format!(r#"{{"op":"resolve","secret":"t","consumer":"m","argv0":"{long}"}}"#);
+        let reply = pending_reply_while_parked("pending-argv0-clip", &line);
+        let shown = reply["pending"][0]["argv0"].as_str().unwrap_or_default();
+        assert!(shown.starts_with("aaa"), "the parked argv0 is the one the resolve sent: {reply}");
+        assert_eq!(shown.chars().count(), aoide_protocol::untrusted::LINE_MAX, "clipped to LINE_MAX");
     }
 
     /// Concurrency, at the connection-thread level (task's hard

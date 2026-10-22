@@ -1653,6 +1653,7 @@ mod tests {
             peer_uid: None,
                 peer_sid: None,
             reason: None,
+            argv0: None,
             origin: client::PendingOrigin::default(),
         }];
         q.reconcile(&pending, 300);
@@ -1684,6 +1685,7 @@ mod tests {
                 peer_uid: None,
                 peer_sid: None,
                 reason: None,
+                argv0: None,
                 origin: client::PendingOrigin::default(),
             }];
         q.reconcile(&pending, 300);

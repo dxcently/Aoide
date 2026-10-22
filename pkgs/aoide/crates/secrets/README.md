@@ -369,8 +369,10 @@ adds is a separate, orthogonal fact this crate did not have before: the
 connecting process's real uid, read via `SO_PEERCRED` (kernel-truth, not
 self-asserted) and recorded alongside the self-asserted `consumer` name,
 never in place of it — see "Peer identity (`SO_PEERCRED`, task #73)" below.
-`argv0` (the wrapped command's own argv[0], sent by `secrets exec`) exists
-purely so the broker's audit lines can name it — the broker never runs it.
+`argv0` (the wrapped command's own argv[0], sent by `secrets exec`) names the
+program in the audit lines. On a resolve that parks, the broker keeps it,
+clipped to `LINE_MAX`, and the approve screen shows it as the program the
+requester says receives the value. The broker never runs it.
 **`reason` (P3) is free-text, self-asserted, DISPLAY-ONLY context for why
 this ask exists** — `secrets exec` sends the wrapped command's own argv,
 space-joined and truncated to ~60 chars, unless the caller overrides it with

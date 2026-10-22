@@ -893,6 +893,9 @@ pub struct PendingAsk {
     /// #73) — the wire's optional, self-asserted, display-only
     /// `resolve.reason`, `None` when the caller sent none.
     pub reason: Option<String>,
+    /// Additive again — the argv0 the resolve named, clipped at park time: the
+    /// program the requester says receives the value. A claim, shown as one.
+    pub argv0: Option<String>,
     /// Additive again — best-effort "who/where this ask came from"
     /// (`park::AskOrigin`'s own doc), captured broker-side at park time.
     pub origin: PendingOrigin,
@@ -965,6 +968,7 @@ pub fn pending(socket_path: &Path) -> Result<Vec<PendingAsk>, String> {
                 peer_sid: a.get("peerSid").and_then(Value::as_str).map(str::to_string),
                 // P3: additive again — same absent-or-null tolerance.
                 reason: a.get("reason").and_then(Value::as_str).map(str::to_string),
+                argv0: a.get("argv0").and_then(Value::as_str).map(str::to_string),
                 origin: a
                     .get("origin")
                     .map(|o| PendingOrigin {
@@ -1471,7 +1475,7 @@ pub(crate) fn park_hint(id: &str, timeout_secs: u64) -> String {
 }
 
 /// What `approve` shows before it reads a code. The secret, consumer, reason
-/// and origin are the requester's claims. The peer uid is the kernel's word,
+/// argv0 and origin are the requester's claims. The peer uid is the kernel's word,
 /// and so is the origin's pid, as read at park time (`park::AskOrigin`'s doc).
 /// `comm` is process-controlled text, shown as data and never trusted.
 pub(crate) fn approve_context(ask: &PendingAsk) -> String {
@@ -1487,11 +1491,12 @@ pub(crate) fn approve_context(ask: &PendingAsk) -> String {
         None => String::new(),
     };
     format!(
-        "parked ask {}\n  the requester claims (unverified): secret {}, consumer {}, reason {}\n{origin}  the kernel stamped the peer: {peer}\n",
+        "parked ask {}\n  the requester claims (unverified): secret {}, consumer {}, reason {}\n  the requester claims (unverified): the program that receives the value is {}\n{origin}  the kernel stamped the peer: {peer}\n",
         ask.id,
         ask.secret,
         ask.consumer,
         ask.reason.as_deref().unwrap_or("none given"),
+        ask.argv0.as_deref().unwrap_or("none given"),
     )
 }
 
@@ -2843,6 +2848,21 @@ mod argv_free_tests {
         let err = result.expect_err("--totp must be refused");
         assert!(err.what.contains("--totp"), "{err:?}");
         assert!(!format!("{err:?}").contains("123456"), "the refusal echoed the code: {err:?}");
+    }
+
+    /// F3: the approve screen names the program the requester says receives the
+    /// value, as a claim, so a person sees what the code releases before typing it.
+    #[test]
+    fn approve_context_names_the_parked_argv0_as_a_claim() {
+        let row = r#"{"id":"3f2a-3","secret":"db-prod","consumer":"m","requestedAt":1700000000,"peerUid":1000,"reason":"psql","argv0":"/usr/bin/psql","origin":{"username":"khoa","pid":42,"comm":"psql","hostname":"box"}}"#;
+        let s = park_broker(format!("[{row}]"), r#"{"ok":true}"#);
+        let mut out = Vec::new();
+        approve_with(&approve_inv(PARK_ID, &[]), &s.socket, &mut &b"123456\n"[..], &mut out, false).unwrap();
+        let shown = String::from_utf8(out).unwrap();
+        assert!(
+            shown.contains("the requester claims (unverified): the program that receives the value is /usr/bin/psql"),
+            "{shown}"
+        );
     }
 
     #[test]

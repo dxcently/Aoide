@@ -546,6 +546,12 @@
   hostname or username, so `watch::format_origin_line` cleans them at display.
   The secret needs no check: `policy::valid_secret_name` admits no such
   character at add or put.
+- **A parked ask's argv0 is a claim the approve screen shows, never a
+  gate (F3).** `park::ParkedAsk::argv0` is the resolve's argv0, clipped to
+  `LINE_MAX` at ingest (`handle_resolve`), and `approve_context` prints it
+  as the program the requester says receives the value. The broker does
+  not run it or check it against anything, so nothing may decide a
+  release from it.
 - **`wait:false` is wire-only — no CLI flag exists, and none should be
   added casually (P-N2).** It exists for a machine caller with no way to
   ever supply a code (this crate's own `README.md`, "Parking a TOTP
