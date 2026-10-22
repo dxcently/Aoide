@@ -105,7 +105,7 @@ hold alone: it stays queued until it is denied or reaches its seven days.
 
 `approve` and `deny` take `--expect <fingerprint>`, the `fingerprint` that
 `list --json` prints for the entry. A stale one takes nothing and says to list
-the queue again.
+the queue again; a blank one is refused before anything is taken.
 
 ## Named seams (what it exposes)
 

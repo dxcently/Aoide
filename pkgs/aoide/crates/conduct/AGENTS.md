@@ -333,7 +333,8 @@ in the message.
   removes it under the stage lock only when its fingerprint is the `--expect`
   the caller named (the conductor sends the one its row drew) and it still
   passes `PendingSpawn::is_known`. `--expect` is a declared string flag on both
-  verbs, so the CLI parser takes it; a stale value takes nothing.
+  verbs, so the CLI parser takes it; a stale value takes nothing, and a blank
+  one is refused before the take with `reason: "expect-empty"`.
   A held resurrect's `shown` plan is checked
   by `resurrect::approved_selection` before the take, so a ledger that moved
   since the hold refuses without consuming the entry. Hold-time pins: a held
@@ -346,8 +347,10 @@ in the message.
   `approve_refuses_a_held_spawn_that_no_hold_would_queue_and_keeps_it`,
   `a_held_resurrect_refuses_to_launch_a_plan_its_approver_was_not_shown`,
   `approving_a_resurrect_that_revives_nothing_is_not_reported_as_launched`,
-  `a_held_spawn_pins_its_cwd_and_relative_argv0_and_refuses_stdin` and
-  `an_instructions_path_that_is_not_a_regular_file_is_refused_over_mcp_before_any_read`.
+  `a_held_spawn_pins_its_cwd_and_relative_argv0_and_refuses_stdin`,
+  `an_instructions_path_that_is_not_a_regular_file_is_refused_over_mcp_before_any_read`,
+  `approve_refuses_an_empty_expect_before_the_take` and
+  `deny_refuses_an_empty_expect_before_the_take`.
 - **Spawn ids are distinct per call and never a socket that answers.**
   A minted id carries a process-wide counter, since the clock is seconds
   (`spawn_id`). `spawn_id_in_use` is a `connect` probe, so a socket file nothing

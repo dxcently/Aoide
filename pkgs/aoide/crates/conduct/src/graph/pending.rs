@@ -382,6 +382,25 @@ fn expect_flag(inv: &Invocation) -> Option<String> {
     inv.flags.get("expect").map(|e| e.trim().to_string()).filter(|e| !e.is_empty())
 }
 
+/// A blank `--expect` names no entry, and reading it as no bind would let the
+/// take resolve by position alone. Refused before the take, so nothing moves.
+fn refuse_empty_expect(inv: &Invocation, cmd: &str, index: usize) -> Option<Outcome> {
+    if !inv.flags.get("expect").is_some_and(|e| e.trim().is_empty()) {
+        return None;
+    }
+    audit_pending(inv, cmd, "refused", &format!("{cmd} [{index}]: --expect is empty"), "");
+    Some(
+        Outcome::refuse(
+            cmd,
+            Kind::Refused,
+            format!("pending entry {index} not resolved: --expect is empty"),
+            "the fingerprint is empty; list the queue again and copy it",
+            Fix::Run("aoide session pending list".to_string()),
+        )
+        .with_fields(json!({ "reason": "expect-empty", "id": index.to_string() })),
+    )
+}
+
 /// One audit line per pending-resolution outcome, same shape as
 /// [`super::send::session_send`]'s own `audit_send` — the injected/dropped
 /// text rides as `untrusted_data`, never re-interpreted as a command.
@@ -449,6 +468,9 @@ pub fn pending_approve(inv: &Invocation) -> Outcome {
         Fix::Run(format!("aoide session pending approve {index}")),
     ) {
         return refusal.with_fields(json!({ "id": index.to_string() }));
+    }
+    if let Some(refusal) = refuse_empty_expect(inv, cmd, index) {
+        return refusal;
     }
     // Refused before the entry leaves the queue while its target is not live.
     // An A2A spawn's opening turn can be held before its child has registered,
@@ -540,7 +562,7 @@ pub fn pending_approve(inv: &Invocation) -> Outcome {
         let (what, why) = if roster.iter().any(|s| s.session_id == sid) {
             (
                 format!("`{}` is registered but cannot be typed into now", visible(&sid)),
-                "approve again once it can be typed into",
+                "approve again once it can be typed into, or deny it",
             )
         } else {
             (
@@ -742,6 +764,9 @@ pub fn pending_deny(inv: &Invocation) -> Outcome {
         Fix::Run(format!("aoide session pending deny {index}")),
     ) {
         return refusal.with_fields(json!({ "id": index.to_string() }));
+    }
+    if let Some(refusal) = refuse_empty_expect(inv, cmd, index) {
+        return refusal;
     }
     let observed = load_pending_array().ok().and_then(|a| a.get(index).cloned()).unwrap_or(Value::Null);
     let removed = match take_pending_entry(index, &observed, expect_flag(inv).as_deref()) {
@@ -1854,6 +1879,58 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    /// An empty `--expect` names no entry, so approve refuses it before the take.
+    /// Read as no bind at all, a script's unset `$fp` would approve by position.
+    #[test]
+    fn approve_refuses_an_empty_expect_before_the_take() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&["AOIDE_STAGE_DIR", "XDG_RUNTIME_DIR", "AOIDE_AUDIT_LOG", "AOIDE_CONDUCT_AUTOGATE", "AOIDE_SESSION_ID"]);
+        let root = setup("pnd-empty-expect-approve");
+        let id = "empty-expect-live";
+        let listener = register_live(id);
+        listener.set_nonblocking(true).unwrap();
+        write_queue(&[queued_entry(id, &stamp_ago(3_600), "someone", 5)]);
+
+        let inv = Invocation {
+            path: vec!["session".into(), "pending".into(), "approve".into()],
+            args: vec!["0".into()],
+            flags: BTreeMap::from([("expect".to_string(), String::new())]),
+            door: aoide_protocol::Door::Cli,
+        };
+        let out = pending_approve(&inv);
+        assert_eq!(out.status, Status::Error, "{}", out.message);
+        let data = out.data.as_ref().unwrap();
+        assert_eq!(data["reason"], "expect-empty", "{data}");
+        assert_eq!(data["refusal"]["why"], "the fingerprint is empty; list the queue again and copy it", "{data}");
+        assert_eq!(load_pending_array().unwrap().len(), 1, "a refused approval leaves the entry queued");
+        assert!(
+            matches!(listener.accept(), Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock),
+            "an empty bind delivers nothing"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The deny side of the empty `--expect` refusal: a blank value removes nothing.
+    #[test]
+    fn deny_refuses_an_empty_expect_before_the_take() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&["AOIDE_STAGE_DIR", "XDG_RUNTIME_DIR", "AOIDE_AUDIT_LOG", "AOIDE_CONDUCT_AUTOGATE", "AOIDE_SESSION_ID"]);
+        let root = setup("pnd-empty-expect-deny");
+        write_queue(&[queued_entry("empty-expect-held", &stamp_ago(3_600), "someone", 5)]);
+
+        let inv = Invocation {
+            path: vec!["session".into(), "pending".into(), "deny".into()],
+            args: vec!["0".into()],
+            flags: BTreeMap::from([("expect".to_string(), " ".to_string())]),
+            door: aoide_protocol::Door::Cli,
+        };
+        let out = pending_deny(&inv);
+        assert_eq!(out.status, Status::Error, "{}", out.message);
+        assert_eq!(out.data.as_ref().unwrap()["reason"], "expect-empty", "{}", out.message);
+        assert_eq!(load_pending_array().unwrap().len(), 1, "a refused deny removes nothing");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     /// A hold that is both expired and gone lists and refuses as expired: the
     /// expiry check runs before the gone check.
     #[test]
@@ -2423,7 +2500,7 @@ mod tests {
         assert!(out.message.contains("registered but cannot be typed into now"), "{}", out.message);
         let why = out.data.as_ref().unwrap()["refusal"]["why"].as_str().unwrap().to_string();
         assert!(!why.contains("once it registers"), "a registered session has registered: {why}");
-        assert!(why.contains("once it can"), "{why}");
+        assert_eq!(why, "approve again once it can be typed into, or deny it", "{why}");
         let _ = std::fs::remove_dir_all(&root);
     }
 

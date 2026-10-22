@@ -4405,8 +4405,8 @@ A2a             `aoide a2a serve`, loopback included    no          queued only;
   can be held before its child registers, so approve again once it does. A
   target with no record is told it is not live yet. A target whose record
   exists but cannot be typed into is told it is registered, and approve again
-  once it can be typed into. A held spawn has no target yet, since approving it
-  is what creates one, so it skips that check.
+  once it can be typed into, or deny it. A held spawn has no target yet, since
+  approving it is what creates one, so it skips that check.
 - `session pending approve` for a gone entry is refused with `reason: "gone"`,
   before the take, and the entry stays queued until `deny`. An entry is gone
   when its target's record is `done`, or when no record exists for its target
@@ -4531,7 +4531,8 @@ read, under the stage lock, only when the entry's content still matches the
 `fingerprint` `list` prints, passed as `--expect <fingerprint>` (a string flag
 declared on `session pending approve` and `deny`; the conductor's rows and its
 held-spawn confirm pass it on every approve and deny; a wrong fingerprint takes
-nothing). The entry must also still pass the shape check a hold applies
+nothing, and a blank one is refused before the take with `reason:
+"expect-empty"`). The entry must also still pass the shape check a hold applies
 (`PendingSpawn::is_known`: a plain `--id` outside `sub:`, no `--parent`, a
 `resurrect` with a `--project`); one that does not is malformed and stays where
 it is. A held resurrect stores the plan it showed in `spawn.shown`, one line per
