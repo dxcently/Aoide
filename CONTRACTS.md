@@ -4529,11 +4529,14 @@ alone: it stays queued until it is denied or reaches its seven days.
 
 Approval does not re-decide what the hold decided. `approve` takes the entry it
 read, under the stage lock, only when the entry's content still matches the
-`fingerprint` `list` prints, passed as `--expect <fingerprint>` (a string flag
-declared on `session pending approve` and `deny`; the conductor's rows and its
-held-spawn confirm pass it on every approve and deny; a wrong fingerprint takes
-nothing, and a blank one is refused before the take with `reason:
-"expect-empty"`). The entry must also still pass the shape check a hold applies
+`fingerprint` `list` prints, passed as `--expect <fingerprint>`. The flag is
+declared on `session pending approve` and `deny`, and both require it: the
+conductor's rows and its held-spawn confirm pass it on every approve and deny. A
+bare index is refused before the take with `reason: "expect-required"`, and the
+refusal prints the entry it names (state, target, sender, age, the head of its
+text) and the command that names it by fingerprint. A wrong fingerprint takes
+nothing, and a blank one is refused with `reason: "expect-empty"`. The entry
+must also still pass the shape check a hold applies
 (`PendingSpawn::is_known`: a plain `--id` outside `sub:`, no `--parent`, a
 `resurrect` with a `--project`); one that does not is malformed and stays where
 it is. A held resurrect stores the plan it showed in `spawn.shown`, one line per

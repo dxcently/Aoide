@@ -295,21 +295,21 @@ pub fn register(r: &mut Registry) {
         path: ["session", "pending", "approve"],
         summary: "Approve one held pending entry: re-drive it through the one gated injection door (`send`, in-process, --yes) and remove it from the queue. A held spawn whose `--id` has since gone live is refused and stays queued. A malformed or out-of-range id fails cleanly, leaving the entry untouched.",
         args: [arg!("id", "string", true, "Pending entry id — its position from `session pending list`.")],
-        flags: [flag!("expect", "string", "Fingerprint of the entry to approve, as `session pending list --json` prints it (its `fingerprint`). The entry is taken only while it still matches; a stale one takes nothing and says to list the queue again.")],
+        flags: [flag!("expect", "string", "Fingerprint of the entry to approve, as `session pending list --json` prints it (its `fingerprint`). Approve refuses without it: a bare index is refused before anything is taken, and the refusal prints the entry and this command with its fingerprint. The entry is taken only while it still matches; a stale one takes nothing and says to list the queue again.")],
         gated: false,
         implemented: true,
         handler: crate::graph::pending_approve,
-        examples: ["session pending approve 0"],
+        examples: ["session pending approve 0 --expect <fingerprint>"],
     ));
     r.insert(cmd!(
         path: ["session", "pending", "deny"],
         summary: "Reject one held pending entry: remove it from the queue and inject nothing. A door that cannot approve (MCP, the network door) is refused, as for approve. A malformed or out-of-range id fails cleanly, leaving the entry untouched.",
         args: [arg!("id", "string", true, "Pending entry id — its position from `session pending list`.")],
-        flags: [flag!("expect", "string", "Fingerprint of the entry to deny, as `session pending list --json` prints it (its `fingerprint`). The entry is removed only while it still matches; a stale one removes nothing and says to list the queue again.")],
+        flags: [flag!("expect", "string", "Fingerprint of the entry to deny, as `session pending list --json` prints it (its `fingerprint`). Deny refuses without it: a bare index is refused before anything is removed, and the refusal prints the entry and this command with its fingerprint. The entry is removed only while it still matches; a stale one removes nothing and says to list the queue again.")],
         gated: false,
         implemented: true,
         handler: crate::graph::pending_deny,
-        examples: ["session pending deny 0"],
+        examples: ["session pending deny 0 --expect <fingerprint>"],
     ));
     r.insert(cmd!(
         path: ["session", "permit"],

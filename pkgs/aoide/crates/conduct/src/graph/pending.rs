@@ -165,6 +165,22 @@ fn queued_ago(queued_at: &str, now: i64) -> Option<String> {
     })
 }
 
+/// A hold's state, as `list` and every resolution refusal read it: `expired`
+/// past seven days, else `gone` with its reason when its target can no longer
+/// take it, else `pending`. A held spawn has no target until it is approved, so
+/// it is never `gone`.
+fn hold_state(v: &Value, record: Option<&SessionRecord>, now: i64) -> (&'static str, Option<&'static str>) {
+    let queued = v.get("queuedAt").and_then(Value::as_str).unwrap_or("");
+    let gone = if spawn_of(v).is_none() { gone_reason(record, queued, now) } else { None };
+    if is_expired(queued, now) {
+        ("expired", None)
+    } else if gone.is_some() {
+        ("gone", gone)
+    } else {
+        ("pending", None)
+    }
+}
+
 /// One JSON view of a pending entry for `list`'s `data.pending`, and the text
 /// line for its human render. `from` is the source the door derived at queue
 /// time (see [`super::send::PendingSend`]) — `None`/absent for an unattributed
@@ -223,20 +239,8 @@ fn entry_view(
     let text = spawn.as_ref().map(PendingSpawn::command_line).unwrap_or(text);
     let shown = if spawn.is_some() { visible_held(&text) } else { visible(&text) };
     let plan: Vec<String> = spawn.as_ref().map(|s| s.shown.iter().map(|l| visible_held(l)).collect()).unwrap_or_default();
-    let expired = is_expired(&queued_at, now);
-    // A held spawn has no target until it is approved, so it is never gone.
-    let gone = if spawn.is_none() && !expired {
-        gone_reason(by_id.get(session_id.as_str()).copied(), &queued_at, now)
-    } else {
-        None
-    };
-    let state = if expired {
-        "expired"
-    } else if gone.is_some() {
-        "gone"
-    } else {
-        "pending"
-    };
+    let (state, gone) = hold_state(v, by_id.get(session_id.as_str()).copied(), now);
+    let expired = state == "expired";
     let mut json = json!({
         "id": index.to_string(),
         "fingerprint": fingerprint(v),
@@ -268,7 +272,7 @@ fn entry_view(
     };
     // A lapsed or gone hold offers one resolution, deny: approving it is refused.
     let hint = if expired || gone.is_some() {
-        format!("; deny it: aoide session pending deny {index}")
+        format!("; deny it: aoide session pending deny {index} --expect {}", fingerprint(v))
     } else {
         String::new()
     };
@@ -401,6 +405,85 @@ fn refuse_empty_expect(inv: &Invocation, cmd: &str, index: usize) -> Option<Outc
     )
 }
 
+/// How much of an entry's text a refusal shows, in characters.
+const SHOWN_HEAD_CHARS: usize = 60;
+
+/// The command that resolves the entry at `index` by its fingerprint: what a
+/// refusal tells the person to run. With no readable entry there is nothing to
+/// name, so it points at the list.
+fn resolve_command(verb: &str, index: usize, entry: Option<&Value>) -> String {
+    match entry.filter(|v| !is_malformed(v)) {
+        Some(v) => format!("aoide session pending {verb} {index} --expect {}", fingerprint(v)),
+        None => "aoide session pending list".to_string(),
+    }
+}
+
+/// The raw entry at `index` as the queue holds it now.
+fn entry_at(index: usize) -> Option<Value> {
+    load_pending_array().ok().and_then(|a| a.get(index).cloned())
+}
+
+/// `approve` and `deny` name an entry by position, and a position moves: an
+/// eviction, or a resolution ahead of the entry, shifts what an index names. So
+/// a bare index resolves nothing. The refusal prints the entry the index names
+/// and the command that names it by fingerprint; nothing is taken or launched.
+fn refuse_bare_index(inv: &Invocation, cmd: &str, verb: &str, index: usize, observed: &Value) -> Option<Outcome> {
+    if inv.flags.contains_key("expect") || is_malformed(observed) {
+        return None;
+    }
+    let now = super::conduct::unix_ts() as i64;
+    let sid = observed.get("sessionId").and_then(Value::as_str).unwrap_or("");
+    let queued = observed.get("queuedAt").and_then(Value::as_str).unwrap_or("");
+    let roster: Vec<SessionRecord> = load_stage::<SessionsFile>(&sessions_path())
+        .map(|f| f.sessions)
+        .unwrap_or_default();
+    let (state, gone) = hold_state(observed, roster.iter().find(|r| r.session_id == sid), now);
+    let state = match gone {
+        Some(why) => format!("{state} ({why})"),
+        None => state.to_string(),
+    };
+    let spawn = spawn_of(observed);
+    let target = match spawn {
+        Some(_) => format!("spawn {}", visible(sid)),
+        None => visible(sid),
+    };
+    let sender = observed
+        .get("from")
+        .and_then(Value::as_str)
+        .filter(|f| !f.is_empty())
+        .map_or_else(|| "unattributed".to_string(), visible);
+    let age = queued_ago(queued, now).unwrap_or_else(|| "no readable queue time".to_string());
+    let text = match &spawn {
+        Some(spawn) => spawn.command_line(),
+        None => observed.get("text").and_then(Value::as_str).unwrap_or("").to_string(),
+    };
+    // A line break is a space to the reader; `clean_line` would delete it and join the words.
+    let flat: String = text.chars().map(|c| if c.is_whitespace() { ' ' } else { c }).collect();
+    let clean = clean_line(&flat);
+    let head = if clean.chars().count() > SHOWN_HEAD_CHARS {
+        format!("{}...", clean.chars().take(SHOWN_HEAD_CHARS).collect::<String>())
+    } else {
+        clean
+    };
+    audit_pending(inv, cmd, "refused", &format!("{verb} [{index}]: no --expect"), "");
+    Some(
+        Outcome::refuse(
+            cmd,
+            Kind::Refused,
+            format!(
+                "pending entry {index} not resolved: {verb} needs --expect\n  state:  {state}\n  target: {target}\n  sender: {sender}\n  age:    {age}\n  text:   {head}"
+            ),
+            "a position moves when an entry ahead of it resolves or expires, so --expect names the entry you read",
+            Fix::Run(resolve_command(verb, index, Some(observed))),
+        )
+        .with_fields(json!({
+            "reason": "expect-required",
+            "id": index.to_string(),
+            "fingerprint": fingerprint(observed),
+        })),
+    )
+}
+
 /// One audit line per pending-resolution outcome, same shape as
 /// [`super::send::session_send`]'s own `audit_send` — the injected/dropped
 /// text rides as `untrusted_data`, never re-interpreted as a command.
@@ -465,7 +548,7 @@ pub fn pending_approve(inv: &Invocation) -> Outcome {
         cmd,
         "this door cannot approve a gated send".to_string(),
         DOOR_CANNOT_APPROVE,
-        Fix::Run(format!("aoide session pending approve {index}")),
+        Fix::Run(resolve_command("approve", index, entry_at(index).as_ref())),
     ) {
         return refusal.with_fields(json!({ "id": index.to_string() }));
     }
@@ -484,6 +567,9 @@ pub fn pending_approve(inv: &Invocation) -> Outcome {
         return Outcome::error(cmd, e)
             .with_data(json!({ "reason": "pending-entry-unresolvable", "id": index.to_string() }));
     };
+    if let Some(refusal) = refuse_bare_index(inv, cmd, "approve", index, &observed) {
+        return refusal;
+    }
     // A lapsed or gone hold is refused before the entry leaves the queue. The list
     // offers only deny for either, and a deny removes it.
     let now = super::conduct::unix_ts() as i64;
@@ -495,7 +581,7 @@ pub fn pending_approve(inv: &Invocation) -> Outcome {
             Kind::Refused,
             format!("pending entry {index} expired (queued {})", visible(queued)),
             "deny it, or ask again",
-            Fix::Run(format!("aoide session pending deny {index}")),
+            Fix::Run(resolve_command("deny", index, Some(&observed))),
         )
         .with_fields(json!({ "reason": "expired", "id": index.to_string() }));
     }
@@ -517,7 +603,7 @@ pub fn pending_approve(inv: &Invocation) -> Outcome {
             Kind::Refused,
             format!("pending entry {index} is gone: {why}"),
             "deny it: its target can no longer take it",
-            Fix::Run(format!("aoide session pending deny {index}")),
+            Fix::Run(resolve_command("deny", index, Some(&observed))),
         )
         .with_fields(json!({ "reason": "gone", "id": index.to_string(), "sessionId": target_sid }));
     }
@@ -533,7 +619,7 @@ pub fn pending_approve(inv: &Invocation) -> Outcome {
                 Kind::Refused,
                 format!("`{}` names a session that is live", visible(&id)),
                 "launching would take over that session's record and control socket",
-                Fix::Run(format!("aoide session pending deny {index}")),
+                Fix::Run(resolve_command("deny", index, Some(&observed))),
             )
             .with_fields(json!({ "reason": "id-in-use", "id": index.to_string(), "sessionId": id }));
         }
@@ -576,7 +662,7 @@ pub fn pending_approve(inv: &Invocation) -> Outcome {
             Kind::Refused,
             what,
             why,
-            Fix::Run(format!("aoide session pending approve {index}")),
+            Fix::Run(resolve_command("approve", index, Some(&observed))),
         )
         .with_fields(json!({ "reason": "target-not-live", "id": index.to_string(), "sessionId": sid }));
     }
@@ -761,7 +847,7 @@ pub fn pending_deny(inv: &Invocation) -> Outcome {
         "this door cannot deny a held entry".to_string(),
         "entries are addressed by position and positions shift as entries resolve, so only a door that \
          can approve resolves them; approval comes from a terminal or the conductor",
-        Fix::Run(format!("aoide session pending deny {index}")),
+        Fix::Run(resolve_command("deny", index, entry_at(index).as_ref())),
     ) {
         return refusal.with_fields(json!({ "id": index.to_string() }));
     }
@@ -769,6 +855,9 @@ pub fn pending_deny(inv: &Invocation) -> Outcome {
         return refusal;
     }
     let observed = load_pending_array().ok().and_then(|a| a.get(index).cloned()).unwrap_or(Value::Null);
+    if let Some(refusal) = refuse_bare_index(inv, cmd, "deny", index, &observed) {
+        return refusal;
+    }
     let removed = match take_pending_entry(index, &observed, expect_flag(inv).as_deref()) {
         Ok(v) => v,
         Err(e) => {
@@ -785,6 +874,14 @@ pub fn pending_deny(inv: &Invocation) -> Outcome {
     Outcome::ok(cmd, format!("pending entry {index} for `{}` denied — nothing injected", visible(&session_id)))
         .changed(vec![format!("pending[{index}] for {}: denied", visible(&session_id))])
         .with_data(json!({ "id": index.to_string(), "sessionId": session_id, "injected": false }))
+}
+
+/// The `--expect` an approver names for the entry at `index` as the queue
+/// holds it now, for tests in other modules that approve what they queued.
+#[cfg(test)]
+pub(crate) fn expect_at(index: usize) -> BTreeMap<String, String> {
+    let fp = load_pending_array().ok().and_then(|a| a.get(index).map(fingerprint)).unwrap_or_default();
+    BTreeMap::from([("expect".to_string(), fp)])
 }
 
 #[cfg(test)]
@@ -808,6 +905,17 @@ mod tests {
             flags: BTreeMap::new(),
             door: aoide_protocol::Door::Cli,
         }
+    }
+
+    /// The invocation an approver types after reading the list: `verb` at
+    /// `index`, with the fingerprint the queue holds there.
+    fn named_invocation(verb: &str, index: &str) -> Invocation {
+        let mut inv = pending_invocation(&["session", "pending", verb], &[index]);
+        let entry = index.parse::<usize>().ok().and_then(|i| load_pending_array().ok()?.get(i).cloned());
+        if let Some(entry) = entry {
+            inv.flags.insert("expect".to_string(), fingerprint(&entry));
+        }
+        inv
     }
 
     fn setup(tag: &str) -> std::path::PathBuf {
@@ -988,7 +1096,7 @@ mod tests {
 
         let acc = expect_delivery(listener, "an approved entry re-drives the injection door");
 
-        let out = pending_approve(&pending_invocation(&["session", "pending", "approve"], &["0"]));
+        let out = pending_approve(&named_invocation("approve", "0"));
         let got = acc.join().unwrap();
 
         assert_eq!(out.status, Status::Ok, "msg: {}", out.message);
@@ -1037,7 +1145,7 @@ mod tests {
         crate::graph::hold_pending(id, "hello from afar", true, Some("node:peer"), &aoide_protocol::default_audit_log()).unwrap();
 
         let acc = expect_delivery(listener, "an approved entry delivers under the source it was queued with");
-        let out = pending_approve(&pending_invocation(&["session", "pending", "approve"], &["0"]));
+        let out = pending_approve(&named_invocation("approve", "0"));
         let got = acc.join().unwrap();
 
         assert_eq!(out.status, Status::Ok, "msg: {}", out.message);
@@ -1143,7 +1251,7 @@ mod tests {
         assert!(aoide_storage::mail::read_base().unwrap().is_empty());
 
         let acc = expect_delivery(listener, "an approved entry's delivery is filed into the mailbase");
-        let out = pending_approve(&pending_invocation(&["session", "pending", "approve"], &["0"]));
+        let out = pending_approve(&named_invocation("approve", "0"));
         let _ = acc.join().unwrap();
         assert_eq!(out.status, Status::Ok, "msg: {}", out.message);
 
@@ -1208,7 +1316,7 @@ mod tests {
         std::env::set_var("AOIDE_SESSION_ID", "sender-b");
         listener.set_nonblocking(false).unwrap();
         let acc = expect_delivery(listener, "the original queuer's attribution reaches the socket");
-        let approved = pending_approve(&pending_invocation(&["session", "pending", "approve"], &["0"]));
+        let approved = pending_approve(&named_invocation("approve", "0"));
         let got = acc.join().unwrap();
         assert_eq!(approved.status, Status::Ok, "msg: {}", approved.message);
         assert_eq!(
@@ -1268,7 +1376,7 @@ mod tests {
         std::env::set_var("AOIDE_SESSION_ID", "approver-x");
         listener.set_nonblocking(false).unwrap();
         let acc = expect_delivery(listener, "an anonymous entry's delivery wears no approver name");
-        let approved = pending_approve(&pending_invocation(&["session", "pending", "approve"], &["0"]));
+        let approved = pending_approve(&named_invocation("approve", "0"));
         let got = acc.join().unwrap();
         assert_eq!(approved.status, Status::Ok, "msg: {}", approved.message);
         assert_eq!(
@@ -1337,7 +1445,7 @@ mod tests {
 
         listener.set_nonblocking(false).unwrap();
         let acc = expect_delivery(listener, "the local CLI still approves the same entry");
-        let out = pending_approve(&pending_invocation(&["session", "pending", "approve"], &["0"]));
+        let out = pending_approve(&named_invocation("approve", "0"));
         let _ = acc.join().unwrap();
         assert_eq!(out.status, Status::Ok, "msg: {}", out.message);
         assert_eq!(out.data.as_ref().unwrap()["injected"], true);
@@ -1370,7 +1478,7 @@ mod tests {
         )
         .unwrap();
 
-        let out = pending_approve(&pending_invocation(&["session", "pending", "approve"], &["0"]));
+        let out = pending_approve(&named_invocation("approve", "0"));
         assert_eq!(out.status, Status::Error, "msg: {}", out.message);
         let data = out.data.as_ref().unwrap();
         assert_eq!(data["reason"], "target-not-live", "data: {data}");
@@ -1395,7 +1503,7 @@ mod tests {
             None,
         );
         let acc = expect_delivery(listener, "the registered session receives the approved opening turn");
-        let out = pending_approve(&pending_invocation(&["session", "pending", "approve"], &["0"]));
+        let out = pending_approve(&named_invocation("approve", "0"));
         let _ = acc.join().unwrap();
         assert_eq!(out.status, Status::Ok, "msg: {}", out.message);
         assert!(load_pending_array().unwrap().is_empty(), "approved, so it left the queue");
@@ -1450,7 +1558,7 @@ mod tests {
         assert_eq!(arr[0]["from"], Value::Null, "no attribution on a legacy entry");
 
         let acc = expect_delivery(listener, "a legacy entry's delivery carries no prefix");
-        let approved = pending_approve(&pending_invocation(&["session", "pending", "approve"], &["0"]));
+        let approved = pending_approve(&named_invocation("approve", "0"));
         let got = acc.join().unwrap();
         assert_eq!(approved.status, Status::Ok, "msg: {}", approved.message);
         assert_eq!(
@@ -1527,7 +1635,7 @@ mod tests {
         assert_eq!(data["pending"][0]["sessionId"], "tgt\u{1b}[2J");
         assert!(data["pending"][1]["text"].as_str().unwrap().contains("hi\nreboot\u{202e}"));
 
-        let denied = pending_deny(&pending_invocation(&["session", "pending", "deny"], &["0"]));
+        let denied = pending_deny(&named_invocation("deny", "0"));
         assert_eq!(denied.status, Status::Ok, "{}", denied.message);
         assert!(denied.message.contains("tgt\\x1b[2J"), "{}", denied.message);
         assert!(!unsafe_in(&denied.message), "{:?}", denied.message);
@@ -1577,7 +1685,7 @@ mod tests {
         );
         assert!(out.message.contains("(from mcp)"), "{}", out.message);
 
-        let denied = pending_deny(&pending_invocation(&["session", "pending", "deny"], &["0"]));
+        let denied = pending_deny(&named_invocation("deny", "0"));
         assert_eq!(denied.status, Status::Ok, "{}", denied.message);
         assert!(load_pending_array().unwrap().is_empty());
         std::thread::sleep(std::time::Duration::from_millis(300));
@@ -1611,7 +1719,7 @@ mod tests {
 
         let out = pending_list(&pending_invocation(&["session", "pending", "list"], &[]));
         assert_eq!(out.data.as_ref().unwrap()["pending"][0]["state"], "malformed");
-        let out = pending_approve(&pending_invocation(&["session", "pending", "approve"], &["0"]));
+        let out = pending_approve(&named_invocation("approve", "0"));
         assert_eq!(out.status, Status::Error, "{}", out.message);
         assert_eq!(load_pending_array().unwrap().len(), 1, "the entry stays for a human to inspect");
         assert!(
@@ -1726,7 +1834,7 @@ mod tests {
             .count();
         assert_eq!(refused, 3, "each refusal is audited");
 
-        let out = pending_deny(&pending_invocation(&["session", "pending", "deny"], &["0"]));
+        let out = pending_deny(&named_invocation("deny", "0"));
         assert_eq!(out.status, Status::Ok, "the CLI still denies: {}", out.message);
         assert_eq!(texts(), ["entry 1", "entry 2"]);
         let _ = std::fs::remove_dir_all(&root);
@@ -1770,7 +1878,7 @@ mod tests {
         )
         .unwrap();
 
-        let out = pending_deny(&pending_invocation(&["session", "pending", "deny"], &["0"]));
+        let out = pending_deny(&named_invocation("deny", "0"));
         assert_eq!(out.status, Status::Ok, "msg: {}", out.message);
         assert_eq!(out.data.as_ref().unwrap()["injected"], false);
 
@@ -1802,22 +1910,22 @@ mod tests {
         )
         .unwrap();
 
-        let out = pending_approve(&pending_invocation(&["session", "pending", "approve"], &["0"]));
+        let out = pending_approve(&named_invocation("approve", "0"));
         assert_eq!(out.status, Status::Error, "a malformed entry cannot be approved");
         assert_eq!(out.data.unwrap()["reason"], "pending-entry-unresolvable");
         // Left exactly where it was — a failed resolve must not destroy it.
         assert_eq!(load_pending_array().unwrap().len(), 1);
 
-        let out = pending_deny(&pending_invocation(&["session", "pending", "deny"], &["0"]));
+        let out = pending_deny(&named_invocation("deny", "0"));
         assert_eq!(out.status, Status::Error, "a malformed entry cannot be denied either");
         assert_eq!(load_pending_array().unwrap().len(), 1, "still there");
 
         // An out-of-range index is the same clean error, not a panic.
-        let out = pending_approve(&pending_invocation(&["session", "pending", "approve"], &["9"]));
+        let out = pending_approve(&named_invocation("approve", "9"));
         assert_eq!(out.status, Status::Error);
 
         // A non-numeric id is a usage error.
-        let out = pending_deny(&pending_invocation(&["session", "pending", "deny"], &["not-a-number"]));
+        let out = pending_deny(&named_invocation("deny", "not-a-number"));
         assert_eq!(out.status, Status::Usage);
 
         let _ = std::fs::remove_dir_all(&root);
@@ -1837,7 +1945,7 @@ mod tests {
         };
         crate::graph::send::hold_spawn("sub:escape", &reserved.command_line(), reserved, &aoide_protocol::default_audit_log()).unwrap();
 
-        let out = pending_approve(&pending_invocation(&["session", "pending", "approve"], &["0"]));
+        let out = pending_approve(&named_invocation("approve", "0"));
         assert_eq!(out.status, Status::Error, "{}", out.message);
         assert_eq!(load_pending_array().unwrap().len(), 1, "the entry is kept, not consumed");
         let _ = std::fs::remove_dir_all(&root);
@@ -1931,6 +2039,191 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    #[test]
+    fn a_bare_approve_is_refused_and_prints_its_fingerprinted_command() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&["AOIDE_STAGE_DIR", "XDG_RUNTIME_DIR", "AOIDE_AUDIT_LOG", "AOIDE_CONDUCT_AUTOGATE", "AOIDE_SESSION_ID"]);
+        let root = setup("pnd-bare-approve");
+        let id = "bare-approve-live";
+        let listener = register_live(id);
+        listener.set_nonblocking(true).unwrap();
+        write_queue(&[queued_entry(id, &stamp_ago(3_600), "someone", 5)]);
+        let fp = listed_row(0)["fingerprint"].as_str().unwrap().to_string();
+
+        let out = pending_approve(&pending_invocation(&["session", "pending", "approve"], &["0"]));
+        assert_eq!(out.status, Status::Error, "{}", out.message);
+        let data = out.data.as_ref().unwrap();
+        assert_eq!(data["reason"], "expect-required", "{data}");
+        assert!(out.message.contains("state:  pending"), "{}", out.message);
+        assert!(out.message.contains("sender: someone"), "{}", out.message);
+        assert_eq!(data["refusal"]["fix"]["run"], format!("aoide session pending approve 0 --expect {fp}"), "{data}");
+        assert_eq!(load_pending_array().unwrap().len(), 1, "a refused approve takes nothing");
+        assert!(
+            matches!(listener.accept(), Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock),
+            "a refused approve delivers nothing"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn the_printed_approve_command_approves_that_entry() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&["AOIDE_STAGE_DIR", "XDG_RUNTIME_DIR", "AOIDE_AUDIT_LOG", "AOIDE_CONDUCT_AUTOGATE", "AOIDE_SESSION_ID"]);
+        let root = setup("pnd-printed-approve");
+        let (first, second) = ("printed-approve-first", "printed-approve-second");
+        let _first_listener = register_live(first);
+        let _second_listener = register_live(second);
+        write_queue(&[
+            queued_entry(first, &stamp_ago(3_600), "someone", 5),
+            queued_entry(second, &stamp_ago(3_600), "someone", 6),
+        ]);
+
+        let refused = pending_approve(&pending_invocation(&["session", "pending", "approve"], &["0"]));
+        let run = refused.data.as_ref().unwrap()["refusal"]["fix"]["run"].as_str().unwrap_or_default().to_string();
+        let fp = run
+            .strip_prefix("aoide session pending approve 0 --expect ")
+            .unwrap_or_else(|| panic!("the refusal prints no approve command: {run:?}"))
+            .to_string();
+
+        let mut printed = pending_invocation(&["session", "pending", "approve"], &["0"]);
+        printed.flags.insert("expect".to_string(), fp);
+        let out = pending_approve(&printed);
+        assert_eq!(out.status, Status::Ok, "{}", out.message);
+        assert_eq!(out.data.as_ref().unwrap()["sessionId"], first, "{:?}", out.data);
+        let left = load_pending_array().unwrap();
+        assert_eq!(left.len(), 1, "only the named entry left the queue");
+        assert_eq!(left[0]["sessionId"], second);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn an_old_approve_fingerprint_after_an_eviction_resolves_nothing() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&["AOIDE_STAGE_DIR", "XDG_RUNTIME_DIR", "AOIDE_AUDIT_LOG", "AOIDE_CONDUCT_AUTOGATE", "AOIDE_SESSION_ID"]);
+        let root = setup("pnd-evict-approve");
+        let (first, second) = ("evict-approve-first", "evict-approve-second");
+        let _first_listener = register_live(first);
+        let _second_listener = register_live(second);
+        write_queue(&[
+            queued_entry("evict-approve-old", &stamp_ago(8 * 86_400), "someone", 3),
+            queued_entry(first, &stamp_ago(3_600), "someone", 4),
+            queued_entry(second, &stamp_ago(3_600), "someone", 5),
+        ]);
+        let read_fp = listed_row(1)["fingerprint"].as_str().unwrap().to_string();
+
+        crate::graph::send::hold_pending(
+            "evict-approve-new",
+            "new text",
+            false,
+            Some("node:fresh"),
+            &aoide_protocol::default_audit_log(),
+        )
+        .unwrap();
+        assert_eq!(load_pending_array().unwrap()[0]["sessionId"], first, "the eviction moved the first entry up");
+
+        let mut stale = pending_invocation(&["session", "pending", "approve"], &["1"]);
+        stale.flags.insert("expect".to_string(), read_fp);
+        let out = pending_approve(&stale);
+        assert_eq!(out.status, Status::Error, "{}", out.message);
+        assert_eq!(load_pending_array().unwrap().len(), 3, "the old fingerprint resolved nothing");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_bare_deny_is_refused_and_prints_its_fingerprinted_command() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&["AOIDE_STAGE_DIR", "XDG_RUNTIME_DIR", "AOIDE_AUDIT_LOG", "AOIDE_CONDUCT_AUTOGATE", "AOIDE_SESSION_ID"]);
+        let root = setup("pnd-bare-deny");
+        write_queue(&[queued_entry("bare-deny-held", &stamp_ago(3_600), "someone", 5)]);
+        let fp = listed_row(0)["fingerprint"].as_str().unwrap().to_string();
+
+        let out = pending_deny(&pending_invocation(&["session", "pending", "deny"], &["0"]));
+        assert_eq!(out.status, Status::Error, "{}", out.message);
+        let data = out.data.as_ref().unwrap();
+        assert_eq!(data["reason"], "expect-required", "{data}");
+        assert!(out.message.contains("state:  pending"), "{}", out.message);
+        assert_eq!(data["refusal"]["fix"]["run"], format!("aoide session pending deny 0 --expect {fp}"), "{data}");
+        assert_eq!(load_pending_array().unwrap().len(), 1, "a refused deny removes nothing");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn the_printed_deny_command_removes_that_entry() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&["AOIDE_STAGE_DIR", "XDG_RUNTIME_DIR", "AOIDE_AUDIT_LOG", "AOIDE_CONDUCT_AUTOGATE", "AOIDE_SESSION_ID"]);
+        let root = setup("pnd-printed-deny");
+        write_queue(&[
+            queued_entry("printed-deny-first", &stamp_ago(3_600), "someone", 5),
+            queued_entry("printed-deny-second", &stamp_ago(3_600), "someone", 6),
+        ]);
+
+        let refused = pending_deny(&pending_invocation(&["session", "pending", "deny"], &["0"]));
+        let run = refused.data.as_ref().unwrap()["refusal"]["fix"]["run"].as_str().unwrap_or_default().to_string();
+        let fp = run
+            .strip_prefix("aoide session pending deny 0 --expect ")
+            .unwrap_or_else(|| panic!("the refusal prints no deny command: {run:?}"))
+            .to_string();
+
+        let mut printed = pending_invocation(&["session", "pending", "deny"], &["0"]);
+        printed.flags.insert("expect".to_string(), fp);
+        let out = pending_deny(&printed);
+        assert_eq!(out.status, Status::Ok, "{}", out.message);
+        let left = load_pending_array().unwrap();
+        assert_eq!(left.len(), 1, "only the named entry left the queue");
+        assert_eq!(left[0]["sessionId"], "printed-deny-second");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn an_old_deny_fingerprint_after_an_eviction_removes_nothing() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&["AOIDE_STAGE_DIR", "XDG_RUNTIME_DIR", "AOIDE_AUDIT_LOG", "AOIDE_CONDUCT_AUTOGATE", "AOIDE_SESSION_ID"]);
+        let root = setup("pnd-evict-deny");
+        let (first, second) = ("evict-deny-first", "evict-deny-second");
+        write_queue(&[
+            queued_entry("evict-deny-old", &stamp_ago(8 * 86_400), "someone", 3),
+            queued_entry(first, &stamp_ago(3_600), "someone", 4),
+            queued_entry(second, &stamp_ago(3_600), "someone", 5),
+        ]);
+        let read_fp = listed_row(1)["fingerprint"].as_str().unwrap().to_string();
+
+        crate::graph::send::hold_pending(
+            "evict-deny-new",
+            "new text",
+            false,
+            Some("node:fresh"),
+            &aoide_protocol::default_audit_log(),
+        )
+        .unwrap();
+        assert_eq!(load_pending_array().unwrap()[0]["sessionId"], first, "the eviction moved the first entry up");
+
+        let mut stale = pending_invocation(&["session", "pending", "deny"], &["1"]);
+        stale.flags.insert("expect".to_string(), read_fp);
+        let out = pending_deny(&stale);
+        assert_eq!(out.status, Status::Error, "{}", out.message);
+        assert_eq!(load_pending_array().unwrap().len(), 3, "the old fingerprint removed nothing");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_bare_refusal_prints_a_multi_line_text_as_one_line() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&["AOIDE_STAGE_DIR", "XDG_RUNTIME_DIR", "AOIDE_AUDIT_LOG", "AOIDE_CONDUCT_AUTOGATE", "AOIDE_SESSION_ID"]);
+        let root = setup("pnd-bare-head");
+        write_queue(&[json!({
+            "sessionId": "bare-head-held",
+            "text": "hello from afar\nsecond line",
+            "submit": false,
+            "queuedAt": stamp_ago(3_600),
+            "from": "someone",
+        })]);
+
+        let out = pending_deny(&pending_invocation(&["session", "pending", "deny"], &["0"]));
+        assert_eq!(out.status, Status::Error, "{}", out.message);
+        assert!(out.message.contains("text:   hello from afar second line"), "{}", out.message);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     /// A hold that is both expired and gone lists and refuses as expired: the
     /// expiry check runs before the gone check.
     #[test]
@@ -1942,7 +2235,7 @@ mod tests {
         write_queue(&[queued_entry("absent-and-lapsed", &stamp_ago(8 * 86_400), "someone", 5)]);
 
         assert_eq!(listed_row(0)["state"], "expired", "expiry is checked before gone");
-        let out = pending_approve(&pending_invocation(&["session", "pending", "approve"], &["0"]));
+        let out = pending_approve(&named_invocation("approve", "0"));
         assert_eq!(out.status, Status::Error, "{}", out.message);
         assert_eq!(out.data.as_ref().unwrap()["reason"], "expired", "{}", out.message);
         assert_eq!(load_pending_array().unwrap().len(), 1, "a refused approval leaves the entry queued");
@@ -2182,7 +2475,7 @@ mod tests {
         let root = setup("pnd-changed-id");
         let spawn = PendingSpawn { args: vec!["true".into()], ..PendingSpawn::default() };
         crate::graph::send::hold_spawn("bad\n  changed: ok", &spawn.command_line(), spawn, &aoide_protocol::default_audit_log()).unwrap();
-        let out = pending_deny(&pending_invocation(&["session", "pending", "deny"], &["0"]));
+        let out = pending_deny(&named_invocation("deny", "0"));
         assert_eq!(out.status, Status::Ok, "{}", out.message);
         assert!(out.changed.iter().all(|c| !c.contains('\n')), "{:?}", out.changed);
         assert!(out.changed.iter().any(|c| c.contains("bad\\n  changed: ok")), "{:?}", out.changed);
@@ -2332,7 +2625,7 @@ mod tests {
         let queued = stamp_ago(8 * 86_400);
         write_queue(&[queued_entry(id, &queued, "someone", 5)]);
 
-        let out = pending_approve(&pending_invocation(&["session", "pending", "approve"], &["0"]));
+        let out = pending_approve(&named_invocation("approve", "0"));
         assert_eq!(out.status, Status::Error, "{}", out.message);
         let data = out.data.as_ref().unwrap();
         assert_eq!(data["reason"], "expired", "{data}");
@@ -2353,7 +2646,7 @@ mod tests {
         let root = setup("pnd-expired-deny");
         write_queue(&[queued_entry("old-target", &stamp_ago(8 * 86_400), "someone", 5)]);
 
-        let out = pending_deny(&pending_invocation(&["session", "pending", "deny"], &["0"]));
+        let out = pending_deny(&named_invocation("deny", "0"));
         assert_eq!(out.status, Status::Ok, "{}", out.message);
         assert_eq!(out.data.as_ref().unwrap()["injected"], false);
         assert!(load_pending_array().unwrap().is_empty(), "deny removes an expired hold");
@@ -2494,13 +2787,13 @@ mod tests {
         assert_eq!(listed_row(0)["state"], "pending", "an hour old, still registering");
         assert_eq!(listed_row(1)["state"], "gone", "absent four hours after it was queued");
 
-        let young = pending_approve(&pending_invocation(&["session", "pending", "approve"], &["0"]));
+        let young = pending_approve(&named_invocation("approve", "0"));
         assert_eq!(young.data.as_ref().unwrap()["reason"], "target-not-live", "{}", young.message);
         assert_eq!(
             young.data.as_ref().unwrap()["refusal"]["why"],
             "the session is not live yet; approve again once it registers"
         );
-        let old = pending_approve(&pending_invocation(&["session", "pending", "approve"], &["1"]));
+        let old = pending_approve(&named_invocation("approve", "1"));
         assert_eq!(old.data.as_ref().unwrap()["reason"], "gone", "{}", old.message);
         assert_eq!(load_pending_array().unwrap().len(), 2, "both refusals leave the queue alone");
         let _ = std::fs::remove_dir_all(&root);
@@ -2518,7 +2811,7 @@ mod tests {
         write_queue(&[queued_entry(id, &stamp_ago(3_600), "someone", 5)]);
 
         assert_eq!(listed_row(0)["state"], "gone", "a done target is gone however young the hold");
-        let out = pending_approve(&pending_invocation(&["session", "pending", "approve"], &["0"]));
+        let out = pending_approve(&named_invocation("approve", "0"));
         assert_eq!(out.status, Status::Error, "{}", out.message);
         assert_eq!(out.data.as_ref().unwrap()["reason"], "gone", "{}", out.message);
         assert!(!out.message.contains("not live yet"), "a gone hold is not 'not live yet': {}", out.message);
@@ -2528,7 +2821,7 @@ mod tests {
         );
         assert_eq!(load_pending_array().unwrap().len(), 1, "the refused approval leaves it queued");
 
-        let denied = pending_deny(&pending_invocation(&["session", "pending", "deny"], &["0"]));
+        let denied = pending_deny(&named_invocation("deny", "0"));
         assert_eq!(denied.status, Status::Ok, "{}", denied.message);
         assert!(load_pending_array().unwrap().is_empty(), "deny removes a gone hold");
         let _ = std::fs::remove_dir_all(&root);
@@ -2544,7 +2837,7 @@ mod tests {
         write_queue(&[queued_entry(id, &stamp_ago(3_600), "someone", 5)]);
 
         assert_eq!(listed_row(0)["state"], "pending", "registered and not done is pending");
-        let out = pending_approve(&pending_invocation(&["session", "pending", "approve"], &["0"]));
+        let out = pending_approve(&named_invocation("approve", "0"));
         assert_eq!(out.status, Status::Error, "{}", out.message);
         assert!(out.message.contains("registered but cannot be typed into now"), "{}", out.message);
         let why = out.data.as_ref().unwrap()["refusal"]["why"].as_str().unwrap().to_string();

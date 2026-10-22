@@ -337,8 +337,11 @@ in the message.
   removes it under the stage lock only when its fingerprint is the `--expect`
   the caller named (the conductor sends the one its row drew) and it still
   passes `PendingSpawn::is_known`. `--expect` is a declared string flag on both
-  verbs, so the CLI parser takes it; a stale value takes nothing, and a blank
-  one is refused before the take with `reason: "expect-empty"`.
+  verbs, so the CLI parser takes it, and both require it: a bare index is
+  refused before the take with `reason: "expect-required"`, and the refusal
+  prints the entry and the command with its fingerprint (`refuse_bare_index`).
+  A stale value takes nothing; a blank one is refused with `reason:
+  "expect-empty"`.
   A held resurrect's `shown` plan is checked
   by `resurrect::approved_selection` before the take, so a ledger that moved
   since the hold refuses without consuming the entry. Hold-time pins: a held
@@ -353,8 +356,14 @@ in the message.
   `approving_a_resurrect_that_revives_nothing_is_not_reported_as_launched`,
   `a_held_spawn_pins_its_cwd_and_relative_argv0_and_refuses_stdin`,
   `an_instructions_path_that_is_not_a_regular_file_is_refused_over_mcp_before_any_read`,
-  `approve_refuses_an_empty_expect_before_the_take` and
-  `deny_refuses_an_empty_expect_before_the_take`.
+  `approve_refuses_an_empty_expect_before_the_take`,
+  `deny_refuses_an_empty_expect_before_the_take`,
+  `a_bare_approve_is_refused_and_prints_its_fingerprinted_command`,
+  `the_printed_approve_command_approves_that_entry`,
+  `an_old_approve_fingerprint_after_an_eviction_resolves_nothing`,
+  `a_bare_deny_is_refused_and_prints_its_fingerprinted_command`,
+  `the_printed_deny_command_removes_that_entry` and
+  `an_old_deny_fingerprint_after_an_eviction_removes_nothing`.
 - **Spawn ids are distinct per call and never a socket that answers.**
   A minted id carries a process-wide counter, since the clock is seconds
   (`spawn_id`). `spawn_id_in_use` is a `connect` probe, so a socket file nothing

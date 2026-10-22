@@ -1937,7 +1937,7 @@ mod tests {
         let approve = crate::graph::pending::pending_approve(&Invocation {
             path: vec!["session".into(), "pending".into(), "approve".into()],
             args: vec!["0".into()],
-            flags: BTreeMap::new(),
+            flags: crate::graph::pending::expect_at(0),
             door: Door::Cli,
         });
         assert_eq!(approve.status, Status::Ok, "msg: {}", approve.message);
@@ -2082,7 +2082,7 @@ mod tests {
             crate::graph::pending::pending_approve(&Invocation {
                 path: vec!["session".into(), "pending".into(), "approve".into()],
                 args: vec!["0".into()],
-                flags: BTreeMap::new(),
+                flags: crate::graph::pending::expect_at(0),
                 door: Door::Cli,
             })
         };
@@ -3021,7 +3021,7 @@ mod tests {
         let approve = crate::graph::pending::pending_approve(&Invocation {
             path: vec!["session".into(), "pending".into(), "approve".into()],
             args: vec!["0".into()],
-            flags: BTreeMap::new(),
+            flags: crate::graph::pending::expect_at(0),
             door: Door::Cli,
         });
         assert_eq!(approve.status, Status::Ok, "{}", approve.message);

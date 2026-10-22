@@ -107,9 +107,11 @@ dead session reads `pending` until a reaper pass marks its record `done` (the
 reaper's silence bands); that pass usually prunes the record too, so the target
 reads as absent, and the hold lists as `gone` four hours after it was queued.
 
-`approve` and `deny` take `--expect <fingerprint>`, the `fingerprint` that
-`list --json` prints for the entry. A stale one takes nothing and says to list
-the queue again; a blank one is refused before anything is taken.
+`approve` and `deny` require `--expect <fingerprint>`, the `fingerprint` that
+`list --json` prints for the entry. A bare index is refused before anything is
+taken: the refusal prints the entry it names and the command that names it by
+fingerprint. A stale one takes nothing and says to list the queue again; a
+blank one is refused too.
 
 ## Named seams (what it exposes)
 
