@@ -600,18 +600,22 @@ it down the channel the original `resolve` call is blocked reading —
   stale id at that point would only mislead (`broker::park_timeout_message`).
 
 **The code is typed, never passed.** `secrets approve <id>` first shows the
-parked ask: the secret, consumer and reason are the requester's claims, and
-so is the origin line (`from: <username> · <comm> (pid <pid>) @ <hostname>`).
+parked ask: the secret, consumer, reason and argv0 (the program the
+requester says receives the value) are the requester's claims, and so is
+the origin line (`from: <username> · <comm> (pid <pid>) @ <hostname>`).
 The peer uid is the kernel's word, and so is the pid in the origin line, as
 read at park time; `comm` is process-controlled text, shown as data. It then
 reads one code, from a no-echo prompt on a terminal or from exactly one stdin
 line. An id that is not in
 `secrets pending` is refused before any prompt, with no approve op. Empty
-input sends nothing. `secrets exec` does the same for its own park: on a
-terminal it prompts; on a pipe it reads one line byte by byte, so the
-wrapped command inherits the rest of stdin. It approves its own id on a
-second connection, and the value returns on the first. At end of input it
-prints the approve line and keeps waiting until the park times out. `--totp`
+input sends nothing. `secrets exec` shows the same context for its own park,
+read from `secrets pending` before it asks for any code; if that row cannot be
+read, it asks for no code and keeps waiting. It then reads the code: from a
+no-echo prompt on a terminal, or one line byte by byte on a pipe, so the
+wrapped command inherits the rest of stdin. On a terminal the wrapped command
+inherits the terminal after the code. It approves its own id on a second
+connection, and the value returns on the first. At end of input it prints the
+approve line and keeps waiting until the park times out. `--totp`
 on either verb is refused with a taught refusal and no broker op: any process
 of this uid can read argv, and a code is not bound to a park, so a reader
 could spend it on its own request first.

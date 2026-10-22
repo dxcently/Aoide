@@ -552,6 +552,10 @@
   as the program the requester says receives the value. The broker does
   not run it or check it against anything, so nothing may decide a
   release from it.
+- **`exec` reads a park's row before it asks for a code (F4).** The code
+  is what releases the value, so `resolve_for_exec` shows
+  `approve_context` from `pending` first, and asks for no code when the
+  row cannot be read. Don't move the code read ahead of that lookup.
 - **`wait:false` is wire-only — no CLI flag exists, and none should be
   added casually (P-N2).** It exists for a machine caller with no way to
   ever supply a code (this crate's own `README.md`, "Parking a TOTP

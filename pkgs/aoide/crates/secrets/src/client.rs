@@ -1553,9 +1553,10 @@ pub(crate) fn approve_with(
     Ok(id)
 }
 
-/// `secrets exec` for a parked ask. The park line is shown, then one code is
-/// read (a no-echo prompt on a terminal, else one stdin line) and approved on
-/// a SECOND connection; the value still returns on the first. A wrong code is
+/// `secrets exec` for a parked ask. The park line and the ask's context (what
+/// the code releases, as `approve` shows it) are shown, then one code is read
+/// (a no-echo prompt on a terminal, else one stdin line) and approved on a
+/// SECOND connection; the value still returns on the first. A wrong code is
 /// reported and the wait goes on. End of input prints the approve line and
 /// waits until the park times out.
 pub(crate) fn resolve_for_exec(
@@ -1572,6 +1573,17 @@ pub(crate) fn resolve_for_exec(
         let id = interim.get("id").and_then(Value::as_str).unwrap_or("?");
         let timeout_secs = interim.get("timeoutSecs").and_then(Value::as_u64).unwrap_or(0);
         let _ = writeln!(out, "{}", park_hint(id, timeout_secs));
+        // F4: what the code releases is shown from the park's own row, the same
+        // context `approve` shows, before any code is read. A row that cannot be
+        // read asks for no code.
+        let Some(ask) = pending(socket_path).ok().and_then(|asks| asks.into_iter().find(|a| a.id == id)) else {
+            let _ = writeln!(
+                out,
+                "no code asked for: the details of ask {id} could not be read; still waiting, complete with: aoide secrets approve {id}"
+            );
+            return;
+        };
+        let _ = write!(out, "{}", approve_context(&ask));
         match read_park_code(input, tty, &format!("TOTP code for ask {id}: ")) {
             Ok(Some(code)) => {
                 if let Err(e) = approve(socket_path, id, &code) {
@@ -3017,14 +3029,59 @@ mod argv_free_tests {
         assert_eq!(std::fs::read_to_string(&out).unwrap(), "REST", "the child did not get the rest of its stdin");
     }
 
+    /// F4: the code a park's exec prompt asks for releases the secret, so the
+    /// prompt shows what it releases first, read from the park's own row (the
+    /// `approve` context), before any code is read.
+    #[test]
+    fn parked_exec_shows_what_the_code_releases_before_it_reads_the_code() {
+        let s = scripted("c1-exec-context", |req| match req["op"].as_str() {
+            Some("resolve") => format!("{}\n{}", park_line(PARK_ID), r#"{"ok":true,"value":"stored-value"}"#),
+            Some("pending") => format!(r#"{{"ok":true,"pending":[{PARKED_ROW}]}}"#),
+            Some("approve") => r#"{"ok":true}"#.to_string(),
+            _ => r#"{"ok":false,"error":"unexpected op"}"#.to_string(),
+        });
+        let exec = parse_exec_args(&exec_inv(&[("as", "m"), ("secret", "locked")], &["true"])).unwrap();
+        let shown = Arc::new(Mutex::new(Vec::new()));
+        let mut probe = Probe { shown: shown.clone(), at_first_read: None, rest: b"123456\nREST" };
+        let value = resolve_for_exec(&s.socket, &exec, &mut probe, false, &mut Shared(shown.clone()));
+        assert_eq!(value.expect("the value returns on the first connection"), "stored-value");
+        let before_read = probe.at_first_read.expect("the code was never read");
+        for claim in ["db-prod", "consumer", "psql", "requester", "kernel"] {
+            assert!(before_read.contains(claim), "`{claim}` is not shown before the code is read:\n{before_read}");
+        }
+    }
+
+    /// F4: a park whose row cannot be read asks for no code, because the code
+    /// is what releases the value and nothing would show what it releases.
+    #[test]
+    fn parked_exec_asks_for_no_code_when_the_park_cannot_be_read() {
+        let s = scripted("c1-no-row", |req| match req["op"].as_str() {
+            Some("resolve") => format!("{}\n{TIMED_OUT}", park_line(PARK_ID)),
+            Some("pending") => r#"{"ok":true,"pending":[]}"#.to_string(),
+            _ => r#"{"ok":false,"error":"unexpected op"}"#.to_string(),
+        });
+        let exec = parse_exec_args(&exec_inv(&[("as", "m"), ("secret", "locked")], &["true"])).unwrap();
+        let mut input: &[u8] = b"123456\nREST";
+        let mut out = Vec::new();
+        let result = resolve_for_exec(&s.socket, &exec, &mut input, false, &mut out);
+        assert_eq!(ops(&s.requests), ["resolve", "pending"], "no approve, and no code asked for, without the row");
+        assert_eq!(input, &b"123456\nREST"[..], "a code line was read although the park was not shown");
+        let said = String::from_utf8_lossy(&out).into_owned();
+        assert!(said.contains("no code asked for"), "{said}");
+        assert!(result.expect_err("the final reply is the timeout").contains("timed out"));
+    }
+
     #[test]
     fn parked_exec_pipe_eof_prints_the_approve_line_and_keeps_waiting() {
-        let s = scripted("c1-eof", |_| format!("{}\n{TIMED_OUT}", park_line(PARK_ID)));
+        let s = scripted("c1-eof", |req| match req["op"].as_str() {
+            Some("pending") => format!(r#"{{"ok":true,"pending":[{PARKED_ROW}]}}"#),
+            _ => format!("{}\n{TIMED_OUT}", park_line(PARK_ID)),
+        });
         let exec = parse_exec_args(&exec_inv(&[("as", "m"), ("secret", "locked")], &["true"])).unwrap();
         let mut out = Vec::new();
         let result = resolve_for_exec(&s.socket, &exec, &mut &b""[..], false, &mut out);
         let said = String::from_utf8_lossy(&out).into_owned();
-        assert_eq!(ops(&s.requests), ["resolve"], "end of stdin must not approve");
+        assert_eq!(ops(&s.requests), ["resolve", "pending"], "end of stdin must not approve");
         assert!(said.contains("aoide secrets approve 3f2a-3"), "{said}");
         assert!(!said.contains("--totp"), "{said}");
         let err = result.expect_err("the final reply is the timeout");
@@ -3035,6 +3092,7 @@ mod argv_free_tests {
     fn parked_exec_approves_its_own_park_on_a_second_connection_and_returns_the_value() {
         let s = scripted("c1-own-park", |req| match req["op"].as_str() {
             Some("resolve") => format!("{}\n{}", park_line(PARK_ID), r#"{"ok":true,"value":"stored-value"}"#),
+            Some("pending") => format!(r#"{{"ok":true,"pending":[{PARKED_ROW}]}}"#),
             Some("approve") => r#"{"ok":true}"#.to_string(),
             _ => r#"{"ok":false,"error":"unexpected op"}"#.to_string(),
         });
@@ -3042,7 +3100,7 @@ mod argv_free_tests {
         let mut input: &[u8] = b"123456\nREST";
         let mut out = Vec::new();
         let value = resolve_for_exec(&s.socket, &exec, &mut input, false, &mut out);
-        assert_eq!(ops(&s.requests), ["resolve", "approve"]);
+        assert_eq!(ops(&s.requests), ["resolve", "pending", "approve"]);
         let sent = approves(&s);
         assert_eq!(sent[0]["id"], PARK_ID);
         assert_eq!(sent[0]["totp"], "123456");
@@ -3054,6 +3112,7 @@ mod argv_free_tests {
     fn parked_exec_reports_a_wrong_code_once_and_keeps_waiting() {
         let s = scripted("c1-wrong", |req| match req["op"].as_str() {
             Some("resolve") => format!("{}\n{TIMED_OUT}", park_line(PARK_ID)),
+            Some("pending") => format!(r#"{{"ok":true,"pending":[{PARKED_ROW}]}}"#),
             Some("approve") => r#"{"ok":false,"error":"the TOTP code is wrong"}"#.to_string(),
             _ => r#"{"ok":false,"error":"unexpected op"}"#.to_string(),
         });
@@ -3061,7 +3120,7 @@ mod argv_free_tests {
         let mut input: &[u8] = b"000000\nREST";
         let mut out = Vec::new();
         let result = resolve_for_exec(&s.socket, &exec, &mut input, false, &mut out);
-        assert_eq!(ops(&s.requests), ["resolve", "approve"], "a wrong code is one attempt, not a loop");
+        assert_eq!(ops(&s.requests), ["resolve", "pending", "approve"], "a wrong code is one attempt, not a loop");
         let said = String::from_utf8_lossy(&out).into_owned();
         assert!(said.contains("the TOTP code is wrong"), "{said}");
         assert!(result.expect_err("the final reply is the timeout").contains("timed out"));
