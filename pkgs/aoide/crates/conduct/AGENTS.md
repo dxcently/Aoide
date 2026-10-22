@@ -286,6 +286,9 @@ in the message.
   `a_hold_evicts_expired_entries_before_the_source_cap_and_audits_each_one`,
   `a_held_spawn_evicts_expired_entries_and_audits_each_one`,
   `a_held_send_evicts_expired_entries_and_audits_each_one`,
+  `a_hold_both_expired_and_gone_lists_and_refuses_as_expired`,
+  `each_eviction_line_carries_the_door_of_the_call_that_triggered_it`,
+  `a_failed_file_write_audits_nothing`,
   `a_queue_at_its_file_cap_refuses_a_hold_taught_while_nothing_in_it_is_expired`
   and `a_queue_at_its_file_cap_takes_a_hold_again_once_an_expired_entry_is_evicted`.
 - **A hold is gone when its target can never take it, and approve refuses it.**
@@ -303,7 +306,8 @@ in the message.
   another target. Pinned by
   `an_absent_target_stays_pending_until_four_hours_then_lists_as_gone`,
   `a_target_whose_record_is_done_lists_as_gone_and_approve_refuses_it_while_deny_removes_it`,
-  `a_registered_target_that_cannot_be_typed_into_lists_as_pending_and_never_says_once_it_registers`
+  `a_registered_target_that_cannot_be_typed_into_lists_as_pending_and_never_says_once_it_registers`,
+  `a_gone_hold_that_is_not_expired_survives_an_eviction_pass`
   and `a_held_spawn_is_never_gone_even_when_its_id_names_a_done_record`.
 - **An approver is shown what replays, in escapes, never stripped.** Every
   human view of a queued entry (`pending list`'s line, the answers of `approve`

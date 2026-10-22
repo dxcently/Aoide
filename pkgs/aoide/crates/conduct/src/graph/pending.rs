@@ -1854,6 +1854,118 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    /// A hold that is both expired and gone lists and refuses as expired: the
+    /// expiry check runs before the gone check.
+    #[test]
+    fn a_hold_both_expired_and_gone_lists_and_refuses_as_expired() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&["AOIDE_STAGE_DIR", "XDG_RUNTIME_DIR", "AOIDE_AUDIT_LOG", "AOIDE_CONDUCT_AUTOGATE", "AOIDE_SESSION_ID"]);
+        let root = setup("pnd-expired-and-gone");
+        // An absent target is gone four hours in; eight days in, the hold is also expired.
+        write_queue(&[queued_entry("absent-and-lapsed", &stamp_ago(8 * 86_400), "someone", 5)]);
+
+        assert_eq!(listed_row(0)["state"], "expired", "expiry is checked before gone");
+        let out = pending_approve(&pending_invocation(&["session", "pending", "approve"], &["0"]));
+        assert_eq!(out.status, Status::Error, "{}", out.message);
+        assert_eq!(out.data.as_ref().unwrap()["reason"], "expired", "{}", out.message);
+        assert_eq!(load_pending_array().unwrap().len(), 1, "a refused approval leaves the entry queued");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Each eviction line carries the door of the call that triggered it: a send
+    /// on the CLI door and a spawn held over MCP each write their own door.
+    #[test]
+    fn each_eviction_line_carries_the_door_of_the_call_that_triggered_it() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&["AOIDE_STAGE_DIR", "XDG_RUNTIME_DIR", "AOIDE_AUDIT_LOG", "AOIDE_CONDUCT_AUTOGATE", "AOIDE_SESSION_ID"]);
+        let root = setup("pnd-evict-doors");
+        let target = "evict-doors-target";
+        let _listener = register_live(target);
+        let sender = "evict-doors-sender";
+        do_session_start(sender, Some("claude"), Some("/w"), None, None, None, None, None, None);
+
+        write_queue(&[queued_entry("cli-lapsed", &stamp_ago(8 * 86_400), "node:x", 5)]);
+        std::env::set_var("AOIDE_SESSION_ID", sender);
+        let sent = session_send(&send_invocation(&["do", "the", "thing"], &[("id", target), ("submit", "true")]));
+        assert_eq!(sent.data.as_ref().unwrap()["state"], "pending", "{}", sent.message);
+
+        write_queue(&[queued_entry("mcp-lapsed", &stamp_ago(8 * 86_400), "node:x", 5)]);
+        let mcp = Invocation {
+            path: vec!["spawn".into()],
+            args: vec!["true".into()],
+            flags: BTreeMap::new(),
+            door: aoide_protocol::Door::Mcp,
+        };
+        let held = PendingSpawn {
+            path: vec!["spawn".into()],
+            args: vec!["true".into()],
+            flags: BTreeMap::from([("id".to_string(), "mcp-held".to_string())]),
+            ..PendingSpawn::default()
+        };
+        let spawned = crate::graph::spawn::hold_whole(&mcp, "mcp-held", held, "");
+        assert_eq!(spawned.status, Status::Ok, "{}", spawned.message);
+
+        let doors: Vec<String> = std::fs::read_to_string(root.join("log"))
+            .unwrap_or_default()
+            .lines()
+            .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+            .filter(|v| v["command"] == "session.pending.evict")
+            .map(|v| v["door"].as_str().unwrap_or_default().to_string())
+            .collect();
+        assert_eq!(doors, ["cli", "mcp"], "each eviction line names the door that queued the hold");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A gone hold that is not expired survives an eviction pass: eviction drops
+    /// only the lapsed, and a gone hold waits for its deny or its seven days.
+    #[test]
+    fn a_gone_hold_that_is_not_expired_survives_an_eviction_pass() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&["AOIDE_STAGE_DIR", "XDG_RUNTIME_DIR", "AOIDE_AUDIT_LOG", "AOIDE_CONDUCT_AUTOGATE", "AOIDE_SESSION_ID"]);
+        let root = setup("pnd-gone-survives");
+        let done = "gone-survives-done";
+        let _listener = register_live(done);
+        set_session_state(done, "done");
+        write_queue(&[
+            queued_entry(done, &stamp_ago(3_600), "someone", 5),
+            queued_entry("gone-survives-lapsed", &stamp_ago(8 * 86_400), "someone", 5),
+        ]);
+        assert_eq!(listed_row(0)["state"], "gone", "a done target is gone however young the hold");
+
+        let held = crate::graph::send::hold_pending("gone-survives-fresh", "new text", false, Some("node:fresh"));
+        assert!(held.is_ok(), "{held:?}");
+        let left: Vec<String> = load_pending_array()
+            .unwrap()
+            .iter()
+            .map(|v| v["sessionId"].as_str().unwrap_or_default().to_string())
+            .collect();
+        assert_eq!(left, [done, "gone-survives-fresh"], "the lapsed hold goes and the gone one stays");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A failed file write audits nothing: an eviction is recorded only once the
+    /// file that dropped the entry is on disk.
+    #[cfg(unix)]
+    #[test]
+    fn a_failed_file_write_audits_nothing() {
+        use std::os::unix::fs::PermissionsExt;
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&["AOIDE_STAGE_DIR", "XDG_RUNTIME_DIR", "AOIDE_AUDIT_LOG", "AOIDE_CONDUCT_AUTOGATE", "AOIDE_SESSION_ID"]);
+        let root = setup("pnd-failed-write");
+        write_queue(&[queued_entry("failed-write-lapsed", &stamp_ago(8 * 86_400), "someone", 5)]);
+        // A stage directory that cannot take the temp file fails the rewrite. The
+        // lock falls back to running unlocked, so only the write fails.
+        let stage = root.join("stage");
+        std::fs::set_permissions(&stage, std::fs::Permissions::from_mode(0o555)).unwrap();
+        let held = crate::graph::send::hold_pending("failed-write-fresh", "new text", false, Some("node:fresh"));
+        std::fs::set_permissions(&stage, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        assert!(matches!(held, Err(crate::graph::send::HoldRefused::Stage(_))), "{held:?}");
+        assert_eq!(eviction_lines(&root), 0, "a write that did not land audits no eviction");
+        assert_eq!(load_pending_array().unwrap().len(), 1, "the lapsed entry is still on disk");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     /// Approve binds to the fingerprint the way deny does: a stale one takes
     /// nothing and says to list the queue again, and the listed one delivers.
     #[test]
