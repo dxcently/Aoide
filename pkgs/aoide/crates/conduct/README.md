@@ -91,6 +91,13 @@ replays: `pending list` and the conductor spell every unsafe character of an
 entry as a visible escape (`visible`: `\n`, `\x1b`, `\u{202e}`), never
 stripping one, and a held spawn shows as its whole command.
 
+A hold is kept for seven days from its `queuedAt`. Past that it is `expired`:
+`list` shows the state with its age and offers only a deny, `approve` refuses
+it, and `deny` removes it. The next hold drops every expired entry before it
+counts a source's cap or the file bound, and writes one `session.pending.evict`
+audit line per entry it drops, so holds nobody will approve cannot fill the
+queue.
+
 ## Named seams (what it exposes)
 
 - **The workspace ↔ project binding (§B)**: `graph/workspace.rs` implements

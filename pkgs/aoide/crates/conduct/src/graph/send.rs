@@ -681,42 +681,136 @@ fn stored_len<T: Serialize>(value: &T) -> Result<usize, HoldRefused> {
         .map_err(|e| HoldRefused::Stage(format!("pending.json: serialize: {e}")))
 }
 
-/// Queue one held send. The entry's size is judged first, so an oversize entry
-/// is refused whatever the queue holds, and the source cap, the file cap and
-/// the append happen under ONE stage lock, so two callers racing for the last
-/// slot cannot both take it.
+/// How long a held send or spawn waits for its approval, counted from its
+/// `queuedAt`. Expiry is derived from the stamp each time an entry is read and
+/// is never written down, so no second clock can disagree with it.
+const HOLD_TTL_SECS: i64 = 7 * 86_400;
+
+/// Has a hold queued at `queued_at` outlived [`HOLD_TTL_SECS`] at `now`? A stamp
+/// that does not parse is expired: nothing says when it was queued, so nothing
+/// keeps it.
+pub(super) fn is_expired(queued_at: &str, now: i64) -> bool {
+    aoide_storage::time::parse_iso_utc(queued_at).map_or(true, |queued| now > queued + HOLD_TTL_SECS)
+}
+
+/// The instant a hold expires, as the stamp `list --json` shows, or `None` when
+/// its `queuedAt` does not parse.
+pub(super) fn expires_stamp(queued_at: &str) -> Option<String> {
+    aoide_storage::time::parse_iso_utc(queued_at)
+        .map(|queued| aoide_storage::time::iso_utc_from_epoch(queued + HOLD_TTL_SECS))
+}
+
+/// Is `entry` an expired hold that [`record_pending`] may drop? An entry the
+/// approval list reads as malformed stays put for a human to inspect, so only a
+/// well-formed one that has lapsed goes.
+fn is_evictable(entry: &PendingSend, now: i64) -> bool {
+    !entry.session_id.is_empty()
+        && entry.spawn.as_ref().map_or(true, |spawn| spawn.is_known())
+        && is_expired(&entry.queued_at, now)
+}
+
+/// Where the audit lines for a hold's evictions go: the door that queued it and
+/// the log that door writes to.
+struct HoldLog {
+    door: Door,
+    path: PathBuf,
+}
+
+impl HoldLog {
+    /// The log an invocation writes to: its `audit-log` flag, else the default.
+    fn of(inv: &Invocation) -> Self {
+        Self {
+            door: inv.door,
+            path: inv.flags.get("audit-log").map(PathBuf::from).unwrap_or_else(aoide_protocol::default_audit_log),
+        }
+    }
+
+    /// The default log, for a door that holds without an invocation.
+    fn at(door: Door) -> Self {
+        Self { door, path: aoide_protocol::default_audit_log() }
+    }
+}
+
+/// One audit line for an expired hold that [`record_pending`] dropped while it
+/// queued `admitted`. Its text rides as untrusted data, clipped to the head a
+/// refusal keeps: no one reads an expired body back whole.
+fn audit_eviction(log: &HoldLog, dropped: &PendingSend, admitted: &str) {
+    let from = dropped.from.as_deref().unwrap_or("unattributed");
+    let _ = aoide_protocol::append_audit(
+        &log.path,
+        &aoide_protocol::AuditRecord {
+            ts: super::conduct::unix_ts(),
+            door: log.door,
+            class: aoide_protocol::EventClass::Audit,
+            command: "session.pending.evict".to_string(),
+            status: "evicted".to_string(),
+            message: format!(
+                "expired hold {} (from {from}, queued {}) dropped while queueing {admitted}",
+                dropped.session_id, dropped.queued_at
+            ),
+            untrusted_data: Some(dropped.text.chars().take(AUDIT_REFUSED_TEXT_MAX).collect()),
+        },
+    );
+}
+
+/// Append `entry` to `file` if it fits: under the entry cap, under its source's
+/// cap, and under the file cap once written.
+fn admit(file: &mut PendingFile, entry: PendingSend) -> Result<(), HoldRefused> {
+    let bytes = stored_len(&entry)?;
+    if bytes > PENDING_ENTRY_MAX_BYTES {
+        return Err(HoldRefused::TooLarge(bytes));
+    }
+    if file.pending.iter().filter(|p| p.from == entry.from).count() >= PENDING_CAP_PER_SOURCE {
+        return Err(HoldRefused::Full);
+    }
+    file.schema_version = STAGE_GRAPH_VERSION.to_string();
+    file.pending.push(entry);
+    if stored_len(&*file)? > PENDING_FILE_MAX_BYTES {
+        file.pending.pop();
+        return Err(HoldRefused::FileFull);
+    }
+    Ok(())
+}
+
+/// Queue one held send. Under ONE stage lock, every expired entry is dropped
+/// first, so a lapsed hold never counts against a cap, and then the new entry is
+/// admitted or refused: the source cap, the file cap and the append all happen
+/// under the same lock, so two callers racing for the last slot cannot both take
+/// it. A dropped entry is audited once the file that dropped it is written, so a
+/// failed write audits nothing it did not remove.
 fn record_pending(
     id: &str,
     text: &str,
     submit: bool,
     origin: &PendingOrigin,
     spawn: Option<PendingSpawn>,
+    log: &HoldLog,
 ) -> Result<(), HoldRefused> {
-    with_stage_lock(|| {
+    let entry = PendingSend {
+        session_id: id.to_string(),
+        text: text.to_string(),
+        submit,
+        queued_at: now_iso_utc(),
+        from: origin.from.clone(),
+        claimed: origin.claimed.clone(),
+        spawn,
+    };
+    let now = super::conduct::unix_ts() as i64;
+    let (verdict, dropped) = with_stage_lock(|| -> Result<_, HoldRefused> {
         let mut file: PendingFile = load_stage(&pending_path()).map_err(HoldRefused::Stage)?;
-        let entry = PendingSend {
-            session_id: id.to_string(),
-            text: text.to_string(),
-            submit,
-            queued_at: now_iso_utc(),
-            from: origin.from.clone(),
-            claimed: origin.claimed.clone(),
-            spawn,
-        };
-        let bytes = stored_len(&entry)?;
-        if bytes > PENDING_ENTRY_MAX_BYTES {
-            return Err(HoldRefused::TooLarge(bytes));
+        let (dropped, kept): (Vec<PendingSend>, Vec<PendingSend>) =
+            std::mem::take(&mut file.pending).into_iter().partition(|p| is_evictable(p, now));
+        file.pending = kept;
+        let verdict = admit(&mut file, entry);
+        if verdict.is_ok() || !dropped.is_empty() {
+            write_stage(&pending_path(), &file).map_err(HoldRefused::Stage)?;
         }
-        if file.pending.iter().filter(|p| p.from == origin.from).count() >= PENDING_CAP_PER_SOURCE {
-            return Err(HoldRefused::Full);
-        }
-        file.schema_version = STAGE_GRAPH_VERSION.to_string();
-        file.pending.push(entry);
-        if stored_len(&file)? > PENDING_FILE_MAX_BYTES {
-            return Err(HoldRefused::FileFull);
-        }
-        write_stage(&pending_path(), &file).map_err(HoldRefused::Stage)
-    })
+        Ok((verdict, dropped))
+    })?;
+    for expired in &dropped {
+        audit_eviction(log, expired, id);
+    }
+    verdict
 }
 
 /// Park a send in `pending.json` without touching any socket: the one seam the
@@ -726,7 +820,8 @@ fn record_pending(
 /// verified; no other door calls this. Same queue, same cap, so `session
 /// pending approve` treats it exactly like any other held send.
 pub fn hold_pending(id: &str, text: &str, submit: bool, from: Option<&str>) -> Result<(), HoldRefused> {
-    record_pending(id, text, submit, &PendingOrigin { from: from.map(str::to_string), claimed: None }, None)
+    let origin = PendingOrigin { from: from.map(str::to_string), claimed: None };
+    record_pending(id, text, submit, &origin, None, &HoldLog::at(Door::A2a))
 }
 
 /// Park a spawn the MCP door could not attribute, to launch only when a human
@@ -735,7 +830,7 @@ pub fn hold_pending(id: &str, text: &str, submit: bool, from: Option<&str>) -> R
 /// own bucket, the one every unattested MCP send shares.
 pub fn hold_spawn(id: &str, command: &str, spawn: PendingSpawn) -> Result<(), HoldRefused> {
     let origin = PendingOrigin { from: Some(MCP_SOURCE.to_string()), claimed: None };
-    record_pending(id, command, false, &origin, Some(spawn))
+    record_pending(id, command, false, &origin, Some(spawn), &HoldLog::at(Door::Mcp))
 }
 
 /// Auto-rename: write `title` onto the session record and re-stage the graph so
@@ -1285,7 +1380,7 @@ pub(in crate::graph) fn deliver_local_with(
                 return out;
             }
         };
-        match record_pending(&id, &text, submit, &origin, None) {
+        match record_pending(&id, &text, submit, &origin, None, &HoldLog::of(inv)) {
             Ok(()) => {}
             Err(HoldRefused::Stage(e)) => return stage_error(cmd, e),
             Err(HoldRefused::Full) => {

@@ -104,8 +104,9 @@ in the message.
   and `A2a` never do. `--yes` and the global autogate environment are read
   only past that check, so a send from a remote door parks whatever it asks
   for unless an attested rule delivers it (next bullet), and
-  `pending_approve` refuses before it takes an entry off the queue, both when
-  the door cannot approve and when the entry's target is not live yet.
+  `pending_approve` refuses before it takes an entry off the queue: when the
+  door cannot approve, when the entry has expired, and when its target is not
+  live yet.
   `pending_deny` refuses on the same predicate, so a door that cannot approve
   cannot empty the queue under the human either. The same predicate gates
   the other two things a human's approval answers: `session_permit` files no
@@ -243,8 +244,9 @@ in the message.
   `an_attested_mcp_callers_restore_is_held_pending_though_its_send_would_deliver`
   and `a_restore_over_an_mcp_door_is_held_pending_and_never_typed`.
 - **`pending.json` has one writer, and it holds the per-source cap and the
-  per-entry size.** `record_pending` (`graph/send.rs`) counts the entries
-  carrying the new entry's `from` and appends under ONE stage lock, refusing
+  per-entry size.** `record_pending` (`graph/send.rs`) drops the expired
+  entries first (next invariant), then counts the entries carrying the new
+  entry's `from` and appends under ONE stage lock, refusing
   at `PENDING_CAP_PER_SOURCE` without touching what is queued, and refusing an
   entry that serializes past `PENDING_ENTRY_MAX_BYTES` (a send's text and a
   spawn's argv alike) with `HoldRefused::TooLarge`, and refusing a write that
@@ -258,6 +260,33 @@ in the message.
   `an_entry_over_the_byte_cap_is_refused_audited_and_leaves_the_queue_alone`,
   `the_file_bound_refuses_a_hold_and_the_stored_file_stays_under_it` and
   `an_oversize_held_spawn_is_refused_audited_and_never_queued`.
+- **A hold expires seven days after its `queuedAt`, and eviction runs before
+  either cap.** `is_expired` (`graph/send.rs`) reads the stamp each time an
+  entry is read, and expiry is never stored. An empty `queuedAt`, or one that
+  does not parse, is expired, with no `expires`. `pending_list` reports
+  `state` `pending` or `expired` and `expires` (`queuedAt` plus seven days),
+  and an expired entry's human line offers only deny. `pending_approve`
+  refuses an expired entry before the take, taught, and launches nothing.
+  `pending_deny` removes it. `record_pending` drops every expired entry under
+  the stage lock before it counts a cap, and writes one
+  `session.pending.evict` audit line per entry it drops, from whichever door
+  queued the hold (`hold_pending` binds the A2A door, `hold_spawn` the MCP
+  door). The line is written once the file that dropped the entry is on disk,
+  so a failed write audits nothing. A queue at its file bound refuses a new
+  hold, taught, and takes it once an expired entry is evicted. Assume breach:
+  a process running as the user can edit `pending.json` and age a hold past
+  its week. Approval stays on the person's terminal: the MCP door still
+  cannot approve or deny, whatever the queue holds. Pinned by
+  `a_hold_queued_over_seven_days_ago_lists_as_expired_and_offers_only_deny`,
+  `a_hold_is_held_for_seven_days_from_its_queued_stamp_and_no_longer`,
+  `approve_refuses_an_expired_hold_before_the_take_and_delivers_nothing`,
+  `deny_removes_an_expired_hold_and_injects_nothing`,
+  `an_empty_or_unreadable_queued_at_counts_as_expired_with_no_expiry`,
+  `a_hold_evicts_expired_entries_before_the_source_cap_and_audits_each_one`,
+  `a_held_spawn_evicts_expired_entries_and_audits_each_one`,
+  `a_held_send_evicts_expired_entries_and_audits_each_one`,
+  `a_queue_at_its_file_cap_refuses_a_hold_taught_while_nothing_in_it_is_expired`
+  and `a_queue_at_its_file_cap_takes_a_hold_again_once_an_expired_entry_is_evicted`.
 - **An approver is shown what replays, in escapes, never stripped.** Every
   human view of a queued entry (`pending list`'s line, the answers of `approve`
   and `deny`, and across the crate boundary the conductor's PENDING rows) spells

@@ -50,7 +50,7 @@ use super::doc::is_conductable_now;
 use super::model::{
     load_stage, resolved_parent, sessions_path, write_stage, SessionRecord, SessionsFile,
 };
-use super::send::{pending_path, PendingSpawn, DOOR_CANNOT_APPROVE};
+use super::send::{expires_stamp, is_expired, pending_path, PendingSpawn, DOOR_CANNOT_APPROVE};
 use aoide_protocol::output::{Fix, Kind, Outcome, Status};
 use aoide_protocol::Invocation;
 use serde_json::{json, Value};
@@ -134,6 +134,18 @@ fn from_label(id: &str, by_id: &BTreeMap<&str, &SessionRecord>) -> String {
     }
 }
 
+/// How long ago a hold was queued, in the largest whole unit it fills. `None`
+/// when `queuedAt` does not parse: there is no age to show.
+fn queued_ago(queued_at: &str, now: i64) -> Option<String> {
+    let secs = (now - aoide_storage::time::parse_iso_utc(queued_at)?).max(0);
+    Some(match secs {
+        s if s >= 86_400 => format!("{} d", s / 86_400),
+        s if s >= 3_600 => format!("{} h", s / 3_600),
+        s if s >= 60 => format!("{} min", s / 60),
+        s => format!("{s} s"),
+    })
+}
+
 /// One JSON view of a pending entry for `list`'s `data.pending`, and the text
 /// line for its human render. `from` is the source the door derived at queue
 /// time (see [`super::send::PendingSend`]) — `None`/absent for an unattributed
@@ -152,6 +164,7 @@ fn entry_view(
     by_id: &BTreeMap<&str, &SessionRecord>,
     ids: &HashSet<&str>,
     host: &str,
+    now: i64,
 ) -> (Value, String) {
     let malformed = is_malformed(v);
     if malformed {
@@ -191,6 +204,8 @@ fn entry_view(
     let text = spawn.as_ref().map(PendingSpawn::command_line).unwrap_or(text);
     let shown = if spawn.is_some() { visible_held(&text) } else { visible(&text) };
     let plan: Vec<String> = spawn.as_ref().map(|s| s.shown.iter().map(|l| visible_held(l)).collect()).unwrap_or_default();
+    let expired = is_expired(&queued_at, now);
+    let state = if expired { "expired" } else { "pending" };
     let mut json = json!({
         "id": index.to_string(),
         "fingerprint": fingerprint(v),
@@ -199,9 +214,10 @@ fn entry_view(
         "shown": shown,
         "submit": submit,
         "queuedAt": queued_at,
+        "expires": expires_stamp(&queued_at),
         "from": from,
         "claimed": claimed,
-        "state": "pending",
+        "state": state,
     });
     if let Some(spawn) = &spawn {
         json["spawn"] = json!(spawn);
@@ -211,8 +227,14 @@ fn entry_view(
         Some(_) => format!("spawn {} ← {shown}", visible(&session_id)),
         None => format!("{} ← {shown}", visible(&grammar_label(&session_id, by_id, ids, host))),
     };
+    let since = match queued_ago(&queued_at, now) {
+        Some(ago) => format!("{state}, queued {ago} ago"),
+        None => format!("{state}, queued at no readable time"),
+    };
+    // A lapsed hold offers one resolution, deny: approving it is refused.
+    let hint = if expired { format!("; deny it: aoide session pending deny {index}") } else { String::new() };
     let line = format!(
-        "[{index}] {what}{}{}{} ({})",
+        "[{index}] {since}: {what}{}{}{} ({}){hint}",
         if submit { " [submit]" } else { "" },
         from.as_deref()
             .map(|f| format!(" (from {})", visible(&from_label(f, by_id))))
@@ -242,11 +264,12 @@ pub fn pending_list(_inv: &Invocation) -> Outcome {
         sessions.iter().map(|s| (s.session_id.as_str(), s)).collect();
     let ids: HashSet<&str> = sessions.iter().map(|s| s.session_id.as_str()).collect();
     let host = aoide_storage::display::local_host_name();
+    let now = super::conduct::unix_ts() as i64;
 
     let mut data = Vec::with_capacity(arr.len());
     let mut lines = Vec::with_capacity(arr.len());
     for (i, v) in arr.iter().enumerate() {
-        let (j, l) = entry_view(i, v, &by_id, &ids, &host);
+        let (j, l) = entry_view(i, v, &by_id, &ids, &host, now);
         data.push(j);
         lines.push(l);
     }
@@ -400,6 +423,20 @@ pub fn pending_approve(inv: &Invocation) -> Outcome {
         return Outcome::error(cmd, e)
             .with_data(json!({ "reason": "pending-entry-unresolvable", "id": index.to_string() }));
     };
+    // A lapsed hold is refused before the entry leaves the queue. The list offers
+    // only deny for it, and a deny removes it.
+    let queued = observed.get("queuedAt").and_then(Value::as_str).unwrap_or("");
+    if is_expired(queued, super::conduct::unix_ts() as i64) {
+        audit_pending(inv, cmd, "refused", &format!("approve [{index}]: expired (queued {queued})"), "");
+        return Outcome::refuse(
+            cmd,
+            Kind::Refused,
+            format!("pending entry {index} expired (queued {})", visible(queued)),
+            "deny it, or ask again",
+            Fix::Run(format!("aoide session pending deny {index}")),
+        )
+        .with_fields(json!({ "reason": "expired", "id": index.to_string() }));
+    }
     let spawn_id = spawn_of(&observed).filter(|s| !s.is_resurrect()).and_then(|s| s.flags.get("id").cloned());
     if let Some(id) = spawn_id {
         // The id was free when the spawn was held. Launching binds its socket,
@@ -701,10 +738,11 @@ mod tests {
         std::fs::write(
             pending_path(),
             r#"{"schemaVersion":"0","pending":[
-                {"sessionId":"s1","text":"do the thing","submit":true,"queuedAt":"2026-08-13T14:01:10Z"},
+                {"sessionId":"s1","text":"do the thing","submit":true,"queuedAt":"QUEUED_AT"},
                 "SHOULD_NOT_RUN_UNAUTH",
                 {"text":"no session id at all"}
-            ]}"#,
+            ]}"#
+            .replace("QUEUED_AT", &stamp_ago(3_600)),
         )
         .unwrap();
 
@@ -839,10 +877,11 @@ mod tests {
             None,
         );
 
+        let queued = stamp_ago(3_600);
         std::fs::write(
             pending_path(),
             format!(
-                r#"{{"schemaVersion":"0","pending":[{{"sessionId":"{id}","text":"hello world","submit":true,"queuedAt":"2026-08-13T14:01:10Z"}}]}}"#
+                r#"{{"schemaVersion":"0","pending":[{{"sessionId":"{id}","text":"hello world","submit":true,"queuedAt":"{queued}"}}]}}"#
             ),
         )
         .unwrap();
@@ -991,10 +1030,11 @@ mod tests {
             None,
         );
 
+        let queued = stamp_ago(3_600);
         std::fs::write(
             pending_path(),
             format!(
-                r#"{{"schemaVersion":"0","pending":[{{"sessionId":"{id}","text":"hello mail","submit":true,"queuedAt":"2026-08-13T14:01:10Z","from":"queuer-a"}}]}}"#
+                r#"{{"schemaVersion":"0","pending":[{{"sessionId":"{id}","text":"hello mail","submit":true,"queuedAt":"{queued}","from":"queuer-a"}}]}}"#
             ),
         )
         .unwrap();
@@ -1172,10 +1212,11 @@ mod tests {
             None,
             None,
         );
+        let queued = stamp_ago(3_600);
         std::fs::write(
             pending_path(),
             format!(
-                r#"{{"schemaVersion":"0","pending":[{{"sessionId":"{id}","text":"hello world","submit":true,"queuedAt":"2026-08-13T14:01:10Z"}}]}}"#
+                r#"{{"schemaVersion":"0","pending":[{{"sessionId":"{id}","text":"hello world","submit":true,"queuedAt":"{queued}"}}]}}"#
             ),
         )
         .unwrap();
@@ -1220,10 +1261,11 @@ mod tests {
         let root = setup("pnd-early");
 
         let id = "apr-early";
+        let queued = stamp_ago(3_600);
         std::fs::write(
             pending_path(),
             format!(
-                r#"{{"schemaVersion":"0","pending":[{{"sessionId":"{id}","text":"opening turn","submit":true,"queuedAt":"2026-08-13T14:01:10Z"}}]}}"#
+                r#"{{"schemaVersion":"0","pending":[{{"sessionId":"{id}","text":"opening turn","submit":true,"queuedAt":"{queued}"}}]}}"#
             ),
         )
         .unwrap();
@@ -1292,10 +1334,11 @@ mod tests {
         );
 
         // Hand-written, NO `from` key at all — exactly the pre-P6 shape.
+        let queued = stamp_ago(3_600);
         std::fs::write(
             pending_path(),
             format!(
-                r#"{{"schemaVersion":"0","pending":[{{"sessionId":"{id}","text":"legacy send","submit":false,"queuedAt":"2026-08-13T14:01:10Z"}}]}}"#
+                r#"{{"schemaVersion":"0","pending":[{{"sessionId":"{id}","text":"legacy send","submit":false,"queuedAt":"{queued}"}}]}}"#
             ),
         )
         .unwrap();
@@ -1347,7 +1390,7 @@ mod tests {
                     {
                         "sessionId": "held\u{1b}[8m",
                         "text": "ignored for a spawn",
-                        "queuedAt": "2026-10-15T00:00:00Z",
+                        "queuedAt": stamp_ago(3_600),
                         "from": "mcp",
                         "spawn": { "args": ["sh", "-c", "echo hi\nreboot\u{202e}"], "flags": {} },
                     },
@@ -1374,8 +1417,9 @@ mod tests {
             lines[0]
         );
         assert!(lines[0].contains("(from mcp:evil\\u{202e})"), "{}", lines[0]);
-        assert!(lines[0].ends_with("(2026\\x07)"), "{}", lines[0]);
-        assert!(lines[1].starts_with("[1] spawn held\\x1b[8m"), "{}", lines[1]);
+        assert!(lines[0].contains("(2026\\x07)"), "{}", lines[0]);
+        assert!(lines[1].starts_with("[1] pending, queued "), "{}", lines[1]);
+        assert!(lines[1].contains("spawn held\\x1b[8m"), "{}", lines[1]);
         assert!(lines[1].contains("echo hi\\nreboot\\u{202e}"), "{}", lines[1]);
 
         let data = out.data.as_ref().unwrap();
@@ -1456,10 +1500,11 @@ mod tests {
         let listener = UnixListener::bind(&socket).unwrap();
         listener.set_nonblocking(true).unwrap();
         do_session_start(id, Some("claude"), Some("/w"), None, None, Some(true), Some(socket.to_str().unwrap()), None, None);
+        let queued = stamp_ago(3_600);
         std::fs::write(
             pending_path(),
             format!(
-                r#"{{"schemaVersion":"0","pending":[{{"sessionId":"{id}","text":"aoide spawn -- rm","spawn":"not an object","queuedAt":"2026-08-13T14:01:10Z"}}]}}"#
+                r#"{{"schemaVersion":"0","pending":[{{"sessionId":"{id}","text":"aoide spawn -- rm","spawn":"not an object","queuedAt":"{queued}"}}]}}"#
             ),
         )
         .unwrap();
@@ -1616,10 +1661,11 @@ mod tests {
             None,
         );
 
+        let queued = stamp_ago(3_600);
         std::fs::write(
             pending_path(),
             format!(
-                r#"{{"schemaVersion":"0","pending":[{{"sessionId":"{id}","text":"SHOULD_NOT_RUN","submit":false,"queuedAt":"2026-08-13T14:01:10Z"}}]}}"#
+                r#"{{"schemaVersion":"0","pending":[{{"sessionId":"{id}","text":"SHOULD_NOT_RUN","submit":false,"queuedAt":"{queued}"}}]}}"#
             ),
         )
         .unwrap();
@@ -1801,6 +1847,272 @@ mod tests {
         assert_eq!(out.status, Status::Ok);
         assert_eq!(out.data.unwrap()["pending"].as_array().unwrap().len(), 0);
         assert!(out.message.contains("0 pending"));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    // ── H1 slice 1: derived expiry and the eviction ───────────────────────
+    //
+    // Every `queuedAt` below is read off the clock (`stamp_ago`), so the 7-day
+    // rule never ages a fixture out, and no test sleeps.
+
+    /// The stamp `secs` seconds before now, in the shape the queue writes.
+    fn stamp_ago(secs: i64) -> String {
+        aoide_storage::time::shift_iso_utc(&aoide_storage::time::now_iso_utc(), -secs)
+    }
+
+    /// A raw `pending.json` entry sent by `from`, queued at `queued_at`, whose
+    /// text is `text_len` bytes.
+    fn queued_entry(id: &str, queued_at: &str, from: &str, text_len: usize) -> Value {
+        json!({
+            "sessionId": id,
+            "text": "x".repeat(text_len),
+            "submit": false,
+            "queuedAt": queued_at,
+            "from": from,
+        })
+    }
+
+    /// Replace `pending.json` with `entries`, written the way the queue writes it.
+    fn write_queue(entries: &[Value]) {
+        write_stage(&pending_path(), &json!({ "schemaVersion": "0", "pending": entries })).unwrap();
+    }
+
+    /// The row `session pending list --json` reports at `index`.
+    fn listed_row(index: usize) -> Value {
+        let out = pending_list(&pending_invocation(&["session", "pending", "list"], &[]));
+        out.data.unwrap()["pending"][index].clone()
+    }
+
+    /// How many lines in the audit log `setup` points at record an eviction.
+    fn eviction_lines(root: &std::path::Path) -> usize {
+        std::fs::read_to_string(root.join("log"))
+            .unwrap_or_default()
+            .lines()
+            .filter(|l| l.contains("session.pending.evict"))
+            .count()
+    }
+
+    /// Register `id` as a live conducted session with a control socket, and
+    /// return the listener its deliveries would reach.
+    fn register_live(id: &str) -> UnixListener {
+        let socket = conduct_socket_path(id);
+        std::fs::create_dir_all(socket.parent().unwrap()).unwrap();
+        let listener = UnixListener::bind(&socket).unwrap();
+        do_session_start(
+            id,
+            Some("claude"),
+            Some("/w"),
+            None,
+            None,
+            Some(true),
+            Some(socket.to_str().unwrap()),
+            None,
+            None,
+        );
+        listener
+    }
+
+    /// Fill `pending.json` to exactly 1 200 bytes under `PENDING_FILE_MAX_BYTES`:
+    /// 138 live holds of 60 000 bytes, a 60 000-byte hold that is expired when
+    /// `last_expired` and live otherwise, and a tuning entry that closes the gap.
+    fn queue_near_the_file_cap(last_expired: bool) {
+        let max = crate::graph::send::PENDING_FILE_MAX_BYTES;
+        let live = stamp_ago(3_600);
+        let last_at = if last_expired { stamp_ago(8 * 86_400) } else { live.clone() };
+        let mut entries: Vec<Value> = (0..138)
+            .map(|n| queued_entry(&format!("live-{n}"), &live, &format!("node:live-{n}"), 60_000))
+            .collect();
+        entries.push(queued_entry("last", &last_at, "node:last", 60_000));
+        entries.push(queued_entry("tuned", &live, "node:tuned", 0));
+        write_queue(&entries);
+        let base = std::fs::metadata(pending_path()).unwrap().len() as usize;
+        entries.last_mut().unwrap()["text"] = json!("x".repeat(max - 1_200 - base));
+        write_queue(&entries);
+        let on_disk = std::fs::metadata(pending_path()).unwrap().len() as usize;
+        assert_eq!(on_disk, max - 1_200, "the fixture sits 1 200 bytes under the file cap");
+    }
+
+    #[test]
+    fn a_hold_queued_over_seven_days_ago_lists_as_expired_and_offers_only_deny() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&["AOIDE_STAGE_DIR", "XDG_RUNTIME_DIR", "AOIDE_AUDIT_LOG", "AOIDE_CONDUCT_AUTOGATE", "AOIDE_SESSION_ID"]);
+        let root = setup("pnd-expired-list");
+        let queued = stamp_ago(8 * 86_400);
+        write_queue(&[queued_entry("old-target", &queued, "someone", 5)]);
+
+        let row = listed_row(0);
+        assert_eq!(row["state"], "expired", "{row}");
+        assert_eq!(row["expires"], aoide_storage::time::shift_iso_utc(&queued, 7 * 86_400).as_str(), "{row}");
+
+        let out = pending_list(&pending_invocation(&["session", "pending", "list"], &[]));
+        let line = out.message.lines().nth(1).unwrap();
+        assert!(line.contains("expired") && line.contains("deny it"), "{line}");
+        assert!(!line.contains("approve"), "an expired hold offers only deny: {line}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_hold_is_held_for_seven_days_from_its_queued_stamp_and_no_longer() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&["AOIDE_STAGE_DIR", "XDG_RUNTIME_DIR", "AOIDE_AUDIT_LOG", "AOIDE_CONDUCT_AUTOGATE", "AOIDE_SESSION_ID"]);
+        let root = setup("pnd-seven-days");
+        write_queue(&[
+            queued_entry("young", &stamp_ago(7 * 86_400 - 3_600), "a", 5),
+            queued_entry("old", &stamp_ago(7 * 86_400 + 3_600), "b", 5),
+        ]);
+        assert_eq!(listed_row(0)["state"], "pending", "six days and 23 hours old is still held");
+        assert_eq!(listed_row(1)["state"], "expired", "seven days and an hour old is expired");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn approve_refuses_an_expired_hold_before_the_take_and_delivers_nothing() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&["AOIDE_STAGE_DIR", "XDG_RUNTIME_DIR", "AOIDE_AUDIT_LOG", "AOIDE_CONDUCT_AUTOGATE", "AOIDE_SESSION_ID"]);
+        let root = setup("pnd-expired-approve");
+        let id = "expired-live";
+        let listener = register_live(id);
+        listener.set_nonblocking(true).unwrap();
+        let queued = stamp_ago(8 * 86_400);
+        write_queue(&[queued_entry(id, &queued, "someone", 5)]);
+
+        let out = pending_approve(&pending_invocation(&["session", "pending", "approve"], &["0"]));
+        assert_eq!(out.status, Status::Error, "{}", out.message);
+        let data = out.data.as_ref().unwrap();
+        assert_eq!(data["reason"], "expired", "{data}");
+        assert!(out.message.contains(&format!("expired (queued {queued})")), "{}", out.message);
+        assert_eq!(data["refusal"]["why"], "deny it, or ask again", "{data}");
+        assert_eq!(load_pending_array().unwrap().len(), 1, "a refused approval leaves the entry queued");
+        assert!(
+            matches!(listener.accept(), Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock),
+            "an expired hold delivers nothing"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn deny_removes_an_expired_hold_and_injects_nothing() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&["AOIDE_STAGE_DIR", "XDG_RUNTIME_DIR", "AOIDE_AUDIT_LOG", "AOIDE_CONDUCT_AUTOGATE", "AOIDE_SESSION_ID"]);
+        let root = setup("pnd-expired-deny");
+        write_queue(&[queued_entry("old-target", &stamp_ago(8 * 86_400), "someone", 5)]);
+
+        let out = pending_deny(&pending_invocation(&["session", "pending", "deny"], &["0"]));
+        assert_eq!(out.status, Status::Ok, "{}", out.message);
+        assert_eq!(out.data.as_ref().unwrap()["injected"], false);
+        assert!(load_pending_array().unwrap().is_empty(), "deny removes an expired hold");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn an_empty_or_unreadable_queued_at_counts_as_expired_with_no_expiry() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&["AOIDE_STAGE_DIR", "XDG_RUNTIME_DIR", "AOIDE_AUDIT_LOG", "AOIDE_CONDUCT_AUTOGATE", "AOIDE_SESSION_ID"]);
+        let root = setup("pnd-empty-stamp");
+        write_queue(&[queued_entry("blank", "", "a", 5), queued_entry("unreadable", "2026-10-12T09:14Z", "b", 5)]);
+        for index in 0..2 {
+            let row = listed_row(index);
+            assert_eq!(row["state"], "expired", "{row}");
+            assert!(row["expires"].is_null(), "no readable stamp, no expiry: {row}");
+        }
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_hold_evicts_expired_entries_before_the_source_cap_and_audits_each_one() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&["AOIDE_STAGE_DIR", "XDG_RUNTIME_DIR", "AOIDE_AUDIT_LOG", "AOIDE_CONDUCT_AUTOGATE", "AOIDE_SESSION_ID"]);
+        let root = setup("pnd-evict-hold");
+        let full: Vec<Value> = (0..crate::graph::send::PENDING_CAP_PER_SOURCE)
+            .map(|n| queued_entry(&format!("old{n}"), &stamp_ago(8 * 86_400), "node:evict", 5))
+            .collect();
+        write_queue(&full);
+
+        let held = crate::graph::send::hold_pending("fresh", "new text", false, Some("node:evict"));
+        assert!(held.is_ok(), "expired entries do not count against the source cap: {held:?}");
+        assert_eq!(load_pending_array().unwrap().len(), 1, "only the new hold is left");
+        assert_eq!(
+            eviction_lines(&root),
+            crate::graph::send::PENDING_CAP_PER_SOURCE,
+            "one audit line per evicted entry"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_held_spawn_evicts_expired_entries_and_audits_each_one() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&["AOIDE_STAGE_DIR", "XDG_RUNTIME_DIR", "AOIDE_AUDIT_LOG", "AOIDE_CONDUCT_AUTOGATE", "AOIDE_SESSION_ID"]);
+        let root = setup("pnd-evict-spawn");
+        write_queue(&[
+            queued_entry("old-a", &stamp_ago(8 * 86_400), "mcp", 5),
+            queued_entry("old-b", &stamp_ago(9 * 86_400), "mcp", 5),
+        ]);
+
+        let spawn = PendingSpawn { args: vec!["true".into()], ..PendingSpawn::default() };
+        let held = crate::graph::send::hold_spawn("held-new", &spawn.command_line(), spawn);
+        assert!(held.is_ok(), "{held:?}");
+        assert_eq!(load_pending_array().unwrap().len(), 1, "only the new spawn is left");
+        assert_eq!(eviction_lines(&root), 2, "one audit line per evicted entry, from the spawn's entry point");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_held_send_evicts_expired_entries_and_audits_each_one() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&["AOIDE_STAGE_DIR", "XDG_RUNTIME_DIR", "AOIDE_AUDIT_LOG", "AOIDE_CONDUCT_AUTOGATE", "AOIDE_SESSION_ID"]);
+        let root = setup("pnd-evict-send");
+        let target = "evict-send-target";
+        let _listener = register_live(target);
+        let sender = "evict-send-sender";
+        do_session_start(sender, Some("claude"), Some("/w"), None, None, None, None, None, None);
+        write_queue(&[
+            queued_entry("old-1", &stamp_ago(8 * 86_400), "node:x", 5),
+            queued_entry("old-2", &stamp_ago(8 * 86_400), "node:x", 5),
+        ]);
+
+        std::env::set_var("AOIDE_SESSION_ID", sender);
+        let queued = session_send(&send_invocation(&["do", "the", "thing"], &[("id", target), ("submit", "true")]));
+        assert_eq!(queued.data.as_ref().unwrap()["state"], "pending", "{}", queued.message);
+        assert_eq!(load_pending_array().unwrap().len(), 1, "only the new send is left");
+        assert_eq!(eviction_lines(&root), 2, "one audit line per evicted entry, from the send's entry point");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_queue_at_its_file_cap_refuses_a_hold_taught_while_nothing_in_it_is_expired() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&["AOIDE_STAGE_DIR", "XDG_RUNTIME_DIR", "AOIDE_AUDIT_LOG", "AOIDE_CONDUCT_AUTOGATE", "AOIDE_SESSION_ID"]);
+        let root = setup("pnd-cap-refused");
+        let target = "cap-target";
+        let _listener = register_live(target);
+        let sender = "cap-sender";
+        do_session_start(sender, Some("claude"), Some("/w"), None, None, None, None, None, None);
+        std::env::set_var("AOIDE_SESSION_ID", sender);
+        queue_near_the_file_cap(false);
+
+        let big = "y".repeat(3_000);
+        let out = session_send(&send_invocation(&[big.as_str()], &[("id", target)]));
+        let data = out.data.as_ref().unwrap();
+        assert_eq!(out.status, Status::Error, "{}", out.message);
+        assert_eq!(data["reason"], crate::graph::send::PENDING_FILE_FULL, "{data}");
+        assert!(!data["refusal"]["fix"].is_null(), "the refusal teaches its next step: {data}");
+        assert_eq!(load_pending_array().unwrap().len(), 140, "nothing is dropped while nothing has expired");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_queue_at_its_file_cap_takes_a_hold_again_once_an_expired_entry_is_evicted() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&["AOIDE_STAGE_DIR", "XDG_RUNTIME_DIR", "AOIDE_AUDIT_LOG", "AOIDE_CONDUCT_AUTOGATE", "AOIDE_SESSION_ID"]);
+        let root = setup("pnd-cap-evict");
+        queue_near_the_file_cap(true);
+
+        let held = crate::graph::send::hold_pending("fresh", &"y".repeat(3_000), false, Some("node:fresh"));
+        assert!(held.is_ok(), "the expired entry is evicted before the file bound is counted: {held:?}");
+        let left = load_pending_array().unwrap();
+        assert!(left.iter().all(|e| e["sessionId"] != "last"), "the expired entry is gone");
+        assert_eq!(eviction_lines(&root), 1, "one audit line for the one evicted entry");
         let _ = std::fs::remove_dir_all(&root);
     }
 }

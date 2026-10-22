@@ -4432,7 +4432,10 @@ and for an MCP send whose server runs under a sealed session, and on any other
 send a door that cannot approve parks whatever it asks for. Read and resolved
 by `aoide session pending list/approve/deny`: `list` enumerates every entry (a
 malformed one — a stale hand-edited line — surfaces as `"state": "malformed"`
-rather than failing the read); `approve` re-drives the entry through the SAME
+rather than failing the read), giving each well-formed entry `pending` until it
+is seven days past its `queuedAt` and `expired` after that, or at once when its
+`queuedAt` is empty or does not parse; each carries `expires` (`queuedAt` plus
+seven days, or null). `approve` re-drives the entry through the SAME
 gated injection door with `--yes`, in-process, and only on a door that can
 approve (the table below); `deny` only on a door that can approve (the same
 table). Either resolution
@@ -4504,6 +4507,15 @@ the stored, pretty-printed form `write_stage` writes, refused with `reason:
 full queue (§6).
 The A2A door's own answer to a full source is in §6 ("This door parks every
 send").
+
+A held entry expires seven days after its `queuedAt`, read off the stamp each
+time and never stored. `record_pending` drops every expired entry under the
+same stage lock before it counts a source's cap or the file bound, and writes
+one `session.pending.evict` audit line per entry it drops (`status:
+"evicted"`, the head of its text as `untrusted_data`), whichever door queued
+the hold. A queue at its file bound therefore takes a new hold again once an
+expired entry is evicted. `approve` refuses an expired entry with `reason:
+"expired"`, before anything is taken or launched; `deny` removes it.
 
 Approval does not re-decide what the hold decided. `approve` takes the entry it
 read, under the stage lock, only when the entry's content still matches the
