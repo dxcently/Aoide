@@ -2618,18 +2618,50 @@ mod tests {
         std::fs::remove_file(&sock).ok();
     }
 
-    /// True when `line` holds `--totp` followed by a space or `=` and a token.
+    /// True when `line` holds `--totp` followed by whitespace or `=` and a token.
     /// A backticked `--totp`, the prose that refuses it, is not one.
     fn teaches_totp_in_argv(line: &str) -> bool {
         line.match_indices("--totp").any(|(at, flag)| {
             let rest = &line[at + flag.len()..];
-            (rest.starts_with(' ') || rest.starts_with('=')) && rest[1..].chars().next().is_some_and(|c| !c.is_whitespace())
+            let separator = rest.chars().take_while(|c| c.is_whitespace() || *c == '=').count();
+            separator > 0 && rest.chars().nth(separator).is_some_and(|c| !c.is_whitespace())
         })
+    }
+
+    /// The Rust source with each test module blanked: from its `mod` line through
+    /// the `}` that closes it at column zero, as rustfmt writes it. Blank lines
+    /// keep the line numbers, and code after a test module is kept.
+    fn without_test_modules(text: &str) -> String {
+        let mut kept = String::with_capacity(text.len());
+        let (mut after_attribute, mut in_module) = (false, false);
+        for line in text.lines() {
+            if in_module {
+                in_module = line != "}";
+                kept.push('\n');
+                continue;
+            }
+            if after_attribute && line.starts_with("mod ") && line.ends_with('{') {
+                in_module = true;
+                after_attribute = false;
+                kept.push('\n');
+                continue;
+            }
+            after_attribute = is_test_attribute(line);
+            kept.push_str(line);
+            kept.push('\n');
+        }
+        kept
+    }
+
+    /// A `cfg` attribute that gates code to test builds: `#[cfg(test)]`, or
+    /// `#[cfg(all(test, unix))]`, but not `#[cfg(not(test))]`.
+    fn is_test_attribute(line: &str) -> bool {
+        line.starts_with("#[cfg(") && line.contains("test") && !line.contains("not(test")
     }
 
     /// Every text file under `dir`, relative to `root` in each hit. Links are not
     /// followed, `.git` and `target` are skipped, a file that is not UTF-8 is
-    /// skipped, and a Rust file is scanned up to its first test module.
+    /// skipped, and a Rust file is scanned to its end, with each test module left out.
     fn totp_teaching_hits(dir: &Path, root: &Path, hits: &mut Vec<String>) {
         let Ok(entries) = std::fs::read_dir(dir) else {
             return;
@@ -2655,11 +2687,7 @@ mod tests {
             let Ok(text) = std::fs::read_to_string(&path) else {
                 continue;
             };
-            let production = if path.extension().is_some_and(|e| e == "rs") {
-                text.split("\n#[cfg(test)]\nmod tests").next().unwrap_or(&text)
-            } else {
-                &text
-            };
+            let production = if path.extension().is_some_and(|e| e == "rs") { without_test_modules(&text) } else { text };
             for (n, line) in production.lines().enumerate() {
                 if teaches_totp_in_argv(line) {
                     hits.push(format!("{rel}:{}: {}", n + 1, line.trim()));
@@ -2721,6 +2749,27 @@ mod tests {
         let mut hits = Vec::new();
         totp_teaching_hits(&root, &root, &mut hits);
         assert!(hits.is_empty(), "text still teaches a code in argv:\n{}", hits.join("\n"));
+    }
+
+    /// The scan flags a tab after `--totp`, and a teaching line after a Rust test
+    /// module, so neither can hide from it. Both plants are written to a temp
+    /// dir, which is removed before the asserts run.
+    #[test]
+    fn the_totp_scan_flags_a_tab_after_the_flag_and_a_line_after_a_test_module() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let dir = std::env::temp_dir().join(format!("aoide-totp-scan-plant-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("tab.rs"), "// aoide secrets exec --totp\t123456 -- psql\n").unwrap();
+        std::fs::write(
+            dir.join("after.rs"),
+            "fn f() {}\n\n#[cfg(test)]\nmod tests {\n    #[test]\n    fn t() {}\n}\n\n// aoide secrets exec --totp 123456 -- psql\n",
+        )
+        .unwrap();
+        let mut hits = Vec::new();
+        totp_teaching_hits(&dir, &dir, &mut hits);
+        std::fs::remove_dir_all(&dir).ok();
+        assert!(hits.iter().any(|h| h.starts_with("tab.rs:1:")), "a tab after --totp must be flagged: {hits:?}");
+        assert!(hits.iter().any(|h| h.starts_with("after.rs:9:")), "a line after a test module must be flagged: {hits:?}");
     }
 }
 
