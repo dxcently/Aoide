@@ -22,9 +22,14 @@
 // (bridge.riceMenu(cb)), top to bottom:
 //   rices                  the runtime rices; a row stages that rice
 //                          (bridge.riceMode("stage", name)). A rice that does not
-//                          load is a dim row that does nothing
+//                          load is a dim row that does nothing. A rice whose
+//                          `pending` is true reads `<name> · pending`; one whose
+//                          `nixChanged` is true has a dim `rice.nix changed` row
+//                          under it
 //   declarative · <rice>   locks back to the declared rice
-//                          (bridge.riceMode("declarative"))
+//                          (bridge.riceMode("declarative")); a dim
+//                          `next rebuild: <rice>` row follows it when the
+//                          answer's `nextRebuild` names a rice
 //   drafts · <rice>        the staged rice's saved drafts (an `enter` row each),
 //                          `+ new draft`, and `save current as draft`, which is
 //                          offered in staging only (in draft mode writes already
@@ -329,20 +334,30 @@ Item {
                     }
                     Repeater {
                         model: root.rices
-                        PickRow {
+                        Column {
+                            id: riceEntry
+                            width: parent ? parent.width : 0
                             required property var modelData
                             readonly property bool here: root.ready && root.mode === "staging" && modelData.name === root.answer.rice
                             readonly property bool last: root.ready && root.mode === "declarative" && modelData.name === root.answer.stagingRice
-                            live: !!modelData.ok
-                            ink: modelData.ok ? 0.88 : 0.4
-                            label: modelData.ok ? "" + modelData.name
-                                   : modelData.name + " · " + (modelData.reason || "unreadable")
-                            marked: here || last
-                            hollow: last
-                            markColor: root.modeColor("staging")
-                            onActivated: {
-                                if (here) root.open = false
-                                else root.act("stage", "" + modelData.name)
+                            PickRow {
+                                live: !!riceEntry.modelData.ok
+                                ink: riceEntry.modelData.ok ? 0.88 : 0.4
+                                label: riceEntry.modelData.ok ? "" + riceEntry.modelData.name + (riceEntry.modelData.pending === true ? " · pending" : "")
+                                       : riceEntry.modelData.name + " · " + (riceEntry.modelData.reason || "unreadable")
+                                marked: riceEntry.here || riceEntry.last
+                                hollow: riceEntry.last
+                                markColor: root.modeColor("staging")
+                                onActivated: {
+                                    if (riceEntry.here) root.open = false
+                                    else root.act("stage", "" + riceEntry.modelData.name)
+                                }
+                            }
+                            PickRow {
+                                visible: riceEntry.modelData.nixChanged === true
+                                live: false
+                                ink: 0.55
+                                label: "rice.nix changed"
                             }
                         }
                     }
@@ -354,6 +369,12 @@ Item {
                             if (root.mode === "declarative") root.open = false
                             else root.act("declarative")
                         }
+                    }
+                    PickRow {
+                        visible: root.ready && !!root.answer.nextRebuild
+                        live: false
+                        ink: 0.55
+                        label: root.ready && root.answer.nextRebuild ? "next rebuild: " + root.answer.nextRebuild : ""
                     }
                     PickRow {
                         live: false

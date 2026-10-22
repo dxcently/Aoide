@@ -89,16 +89,28 @@ Glass is a frame, content is a plate, light comes from above.
   (joins, leaves, state changes, notifications toasts, asks), then `New terminal`.
   No text input anywhere. It closes on a click outside, Escape or its close
   box, and counts as the open flyout on its own monitor only.
-- **RICE cell + menu**: the cell shows the mode glyph and word (`Stage`) with
-  a chevron. The menu: header `Rice · <rice> · <mode>`, rices with the
-  current one ticked (staged / declared tags), `Back to declarative ·
-  <declared>`, drafts of the current rice, `+ New draft`, `Save current as
-  draft`, `Declare`. Declare is greyed while a draft is staged or the staged
-  rice is already the declared one; it asks in a Platinum alert (Cancel the
-  default, Return and Escape cancel) and then rewrites the host config's
-  declared-rice line, for the next rebuild. Its balloon says Declared, Not
-  declared with the refusal, or No answer yet when the bridge timed out,
-  naming the host file to check (the menu's `hostConfig`).
+- **RICE cell + menu**: the cell is the mode's tray glyph (staging or
+  declarative). Hovered for half a second it tips `Staging · <rice>`
+  (`· <draft>` added while a draft is staged) or `Declarative ·
+  <declared>`; a click opens its menu: the rices (the staged one ticked
+  while staging, the one staging returns to ringed while declarative, an
+  unreadable one greyed), then `Declarative: <declared>`, ticked while
+  declarative. A rice whose dress differs from the build's copy reads
+  `<rice> · pending`, with a greyed `rice.nix changed` row under it when
+  its `rice.nix` is among the edits, and a greyed `next rebuild: <rice>`
+  row follows the declarative row when the host file declares another
+  rice. The G3 launcher's Rice menu lists the same rows, and its Finder
+  shows the rices as folders beside Declarative and Drafts. The Start
+  menu's `Stage` row opens the same rows, then `drafts · <rice>` with that
+  rice's drafts (the current one ticked; a right-click offers Delete, which
+  asks first), `New Draft`, `Save as Draft` (while staging) and `Declare
+  <rice>…`. Declare is live only while a rice, not a draft, is staged and
+  it is not already the declared one; it asks in a Platinum alert (Cancel
+  the default, Return and Escape cancel) and then rewrites the host
+  config's declared-rice line, for the next rebuild. Its balloon says
+  Declared, Not declared with the refusal, or No answer yet when the
+  bridge timed out, naming the host file to check (the menu's
+  `hostConfig`).
 - **Tray flyouts**: the Win7 narrow volume flyout (device, slider, percent,
   mute, `Mixer` footer), the network flyout from its tray icon, and the
   calendar flyout from the clock (month grid, today ringed, an analogue

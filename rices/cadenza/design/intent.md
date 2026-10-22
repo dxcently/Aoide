@@ -254,16 +254,20 @@ One 28px line in the tmux/termui idiom, left to right:
   middle) opens the menu, marked by the `󰅀` after the word; the cell itself
   never switches. The menu is a kit Pane titled RICE (its stat the live
   rice) with three sections: the runtime rices (the staged one lit, the
-  last-staged one hollow while locked, an unreadable one dim and dead), the
-  `[declarative]` row, and `drafts · <rice>` listing the staged rice's saved
-  drafts (the current one lit), `[+ new draft]`, and, in staging only,
-  `[save as draft]`. A row sends one switch and the cell reads a dim `󰏘 …`
-  (padded to the word, so nothing moves) at once; clicks do nothing until
-  the mode (`/stage/mode.json` `mode`, through `theme.riceMode`), the
-  draft or the rice actually changes, or 10s pass. A switch reloads the
-  shell; one that changed nothing in 10s simply returns the cell to its word
-  and says no more. The Pane has no inner glow, takes no keyboard, and closes
-  on a row, a click on the cell, or 600ms after the pointer leaves both.
+  last-staged one hollow while locked, an unreadable one dim and dead, one
+  whose dress differs from the build's copy marked `· pending`, with a dim
+  `rice.nix changed` line under it when its `rice.nix` is among the edits),
+  the `[declarative]` row (a dim `next rebuild: <rice>` line under it when
+  the host file declares another rice), and `drafts · <rice>` listing the
+  staged rice's saved drafts (the current one lit), `[+ new draft]`, and, in
+  staging only, `[save as draft]`. A row sends one switch and the cell
+  reads a dim `󰏘 …` (padded to the word, so nothing moves) at once; clicks
+  do nothing until the mode (`/stage/mode.json` `mode`, through
+  `theme.riceMode`), the draft or the rice actually changes, or 10s pass.
+  A switch reloads the shell; one that changed nothing in 10s simply
+  returns the cell to its word and says no more. The Pane has no inner
+  glow, takes no keyboard, and closes on a row, a click on the cell, or
+  600ms after the pointer leaves both.
 - **The sound + bluetooth pane.** One pane, two sections. SOUND: the output
   and input with volume and mute (click toggles mute, wheel steps volume),
   and the default device picker. BLUETOOTH: a power toggle `[on]`/`[off]`,

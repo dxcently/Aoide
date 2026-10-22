@@ -60,3 +60,8 @@
   machine copy's theme, `rice.nix`, `hyprland.conf` or widgets differ from the
   shipped copy or the build ships none, and `nixChanged`, true when `rice.nix`
   is among those. Both are null where the templates dir or a read cannot say.
+- The barcarolle, cadenza and sonata rice menus draw them: a readable rice
+  whose `pending` is true reads `<rice> · pending`, a dimmed `rice.nix
+  changed` row sits under a rice whose `nixChanged` is true, and a dimmed
+  `next rebuild: <rice>` row under the declarative row. A bridge that sends
+  none of the fields leaves the menus as they were.
