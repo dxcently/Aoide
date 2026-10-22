@@ -500,22 +500,21 @@
   poisoned-lock-recovering, all following the SAME convention
   `park::ParkRegistry`'s established first.** The inventory covers those two
   only: `watch.rs` keeps three locks of its own (queue, out_lock, prompt_frame)
-  and `backend.rs` one Windows pipe lock. `park::ParkRegistry`'s `inner` map was
-  the first one live code touched (P-N2). Its `timed_out_ids` queue is written
-  only under `inner`, in `remove_only`, the one place they nest.
-  Thread-per-connection then exposed two more
-  read-modify-write sections the old SERIAL accept loop used to serialize
-  for free, just by never running two connections' code at once — a
-  reviewer-confirmed race, reproduced empirically before the fix (5/20
-  iterations of a two-thread test double-granted the same TOTP code):
+  and `backend.rs` one Windows pipe lock. `park::ParkRegistry`'s `inner` map
+  is the first. Its `timed_out_ids` queue is written only under `inner`, in
+  `remove_only`, the one place they nest.
+  Thread-per-connection exposes two more
+  read-modify-write sections that a serial accept loop serializes for
+  free, just by never running two connections' code at once — a race
+  reproduced empirically (5/20 iterations of a two-thread test
+  double-granted the same TOTP code):
   `broker::replay_ledger_lock` guards `check_totp_code`'s FULL
   load -> record -> prune -> save of the replay ledger,
   `broker::totp_budget_lock` guards each whole TOTP check with its
   wrong-code count (ruling 44; the replay lock nests inside it), and
   `broker::put_lock` guards `put_gate`'s FULL existence-probe -> store
-  (the same newly-exposed TOCTOU shape, one code redeeming twice /
-  one overwrite:false put silently losing the race, respectively — both
-  fixed in the SAME commit as this note, P-N2 review fix). All four
+  (the same TOCTOU shape: one code redeeming twice, or one
+  overwrite:false put silently losing the race). All four
   locks go through `.lock().unwrap_or_else(|e| e.into_inner())`, never a
   bare `.lock().unwrap()` — a panic inside one connection's own thread
   must never poison every OTHER connection's ability to park/list/

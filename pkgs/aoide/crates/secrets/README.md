@@ -289,9 +289,8 @@ byte past the cap, so an unterminated line never grows its buffer.
 -> {"op":"resolve","secret":"<name>","consumer":"<consumer>","totp":"<code>"?,"argv0":"<cmd>"?,"wait":<bool>?,"reason":"<text>"?}
 <- {"interim":true,"parked":true,"id":"<id>","timeoutSecs":<N>,"expiresAt":<unix-seconds>}
                                                       (INTERIM, only when this
-                                                      resolve parks — P-N2c
-                                                      FIX 1; never on the fast
-                                                      path)
+                                                      resolve parks; never on
+                                                      the fast path)
 <- {"ok":true,"value":"<value>"}                    (granted — immediately,
                                                       or after a park completes)
 <- {"ok":false,"error":"<value-free message>"}      (denied/error/timeout/dismissed)
@@ -842,7 +841,7 @@ above for what each carries and where it comes from; this event is simply
 the FIRST of the three places they ride (registry row -> `pending` reply ->
 this event).
 
-**`age-identity-minted`** (P-G1) goes through the SAME `emit_notify`
+**`age-identity-minted`** goes through the SAME `emit_notify`
 mechanism — `{"event":"age-identity-minted"}`, fired
 from `handle_put` exactly once, the first time an `age`-backed `put`
 lazily mints `age.key`/`age.recipient` ("Backend presets" above). Carries
@@ -2521,14 +2520,13 @@ the same commit as any change.
   in `park`/`broker` ever holds a value across the wait.
 - **Five production locks guard the broker and the park registry, all
   poisoned-lock-recovering** (`.lock().unwrap_or_else(|e| e.into_inner())`,
-  never a bare `.unwrap()`): `park::ParkRegistry`'s `inner` map was the first
-  (P-N2), and its `timed_out_ids` queue is written only under `inner`, in
-  `remove_only`. Thread-per-connection then exposed two more
-  read-modify-write sections the old serial accept loop used to serialize
-  implicitly, just by never running two connections' code at once — a
-  reviewer-confirmed race (empirically reproduced, ~5/20 iterations
-  double-granting the same TOTP code before the fix). `broker::
-  replay_ledger_lock` now guards `verify_totp_gate`'s full
+  never a bare `.unwrap()`): `park::ParkRegistry`'s `inner` map is the first,
+  and its `timed_out_ids` queue is written only under `inner`, in
+  `remove_only`. Thread-per-connection exposes two more read-modify-write
+  sections that a serial accept loop serializes implicitly, just by never
+  running two connections' code at once. The same race was reproduced
+  empirically (~5/20 iterations double-granting the same TOTP code).
+  `broker::replay_ledger_lock` guards `verify_totp_gate`'s full
   load→record→prune→save of the replay ledger, and `broker::put_lock`
   guards `put_gate`'s full existence-probe→store — two SEPARATE locks,
   since `put` and `resolve`/`approve` guard different files and there is
@@ -2536,7 +2534,7 @@ the same commit as any change.
   own thread must never poison every OTHER connection's ability to
   park/list/approve/dismiss/resolve/put, matching this crate's existing
   "one connection's failure never touches another's" discipline
-  (`broker.rs`'s own module doc). Neither new lock caches anything — both
+  (`broker.rs`'s own module doc). Neither lock caches anything — both
   sections still read fresh from disk on every call, same "NO CACHE,
   EVER" invariant as always; the lock only serializes the section. `watch.rs`
   and `backend.rs` keep locks of their own, outside this list.
