@@ -2649,27 +2649,69 @@ mod tests {
         std::fs::remove_file(&sock).ok();
     }
 
-    #[test]
-    fn no_production_string_teaches_a_totp_code_in_argv() {
-        let sources = [
-            ("client.rs", include_str!("client.rs")),
-            ("commands.rs", include_str!("commands.rs")),
-            ("broker.rs", include_str!("broker.rs")),
-            ("watch.rs", include_str!("watch.rs")),
-            ("park.rs", include_str!("park.rs")),
-            ("lib.rs", include_str!("lib.rs")),
-        ];
-        let mut hits = Vec::new();
-        for (name, text) in sources {
-            let production = text.split("\n#[cfg(test)]\nmod tests").next().unwrap_or(text);
+    /// True when `line` holds `--totp` followed by a space or `=` and a token.
+    /// A backticked `--totp`, the prose that refuses it, is not one.
+    fn teaches_totp_in_argv(line: &str) -> bool {
+        line.match_indices("--totp").any(|(at, flag)| {
+            let rest = &line[at + flag.len()..];
+            (rest.starts_with(' ') || rest.starts_with('=')) && rest[1..].chars().next().is_some_and(|c| !c.is_whitespace())
+        })
+    }
+
+    /// Every text file under `dir`, relative to `root` in each hit. Links are not
+    /// followed, `.git` and `target` are skipped, a file that is not UTF-8 is
+    /// skipped, and a Rust file is scanned up to its first test module.
+    fn totp_teaching_hits(dir: &Path, root: &Path, hits: &mut Vec<String>) {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let Ok(kind) = entry.file_type() else {
+                continue;
+            };
+            if kind.is_dir() {
+                if !matches!(entry.file_name().to_str(), Some(".git" | "target")) {
+                    totp_teaching_hits(&path, root, hits);
+                }
+                continue;
+            }
+            if !kind.is_file() {
+                continue;
+            }
+            let rel = path.strip_prefix(root).unwrap_or(&path).to_string_lossy().replace('\\', "/");
+            if TOTP_HISTORY.contains(&rel.as_str()) {
+                continue;
+            }
+            let Ok(text) = std::fs::read_to_string(&path) else {
+                continue;
+            };
+            let production = if path.extension().is_some_and(|e| e == "rs") {
+                text.split("\n#[cfg(test)]\nmod tests").next().unwrap_or(&text)
+            } else {
+                &text
+            };
             for (n, line) in production.lines().enumerate() {
-                let code_line = !line.trim_start().starts_with("//");
-                if code_line && ["--totp <code>", "--totp 123456", "--totp NNNNNN"].iter().any(|p| line.contains(p)) {
-                    hits.push(format!("{name}:{}: {}", n + 1, line.trim()));
+                if teaches_totp_in_argv(line) {
+                    hits.push(format!("{rel}:{}: {}", n + 1, line.trim()));
                 }
             }
         }
-        assert!(hits.is_empty(), "production text still teaches a code in argv:\n{}", hits.join("\n"));
+    }
+
+    /// The history report and the task register keep the decisions as they were
+    /// written, `--totp` included (review F18), so they are not scanned.
+    const TOTP_HISTORY: [&str; 2] = ["docs/architecture/aoide-report.html", "docs/architecture/TASK-REGISTER.md"];
+
+    /// F22: no text in the workspace teaches a TOTP code in argv. The scan covers
+    /// the repo's text files, not six source files, so a teaching string in the
+    /// strillix, conductor or docs trees fails it too.
+    #[test]
+    fn no_text_in_the_workspace_teaches_a_totp_code_in_argv() {
+        let root = std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../..")).expect("the repo root");
+        let mut hits = Vec::new();
+        totp_teaching_hits(&root, &root, &mut hits);
+        assert!(hits.is_empty(), "text still teaches a code in argv:\n{}", hits.join("\n"));
     }
 }
 
