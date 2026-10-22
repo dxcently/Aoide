@@ -329,7 +329,8 @@ aoide secrets approve <id> [--json]
   whose `allowRemoteOrigin` is off is refused before it can ever park.
 - **Output:** ok → `{"ok":true}` to the approver; the value itself never
   rides this reply. An invalid or expired code leaves the ask parked and
-  the replay ledger unburned.
+  the replay ledger unburned. Past three failed codes in one 30 s step, every
+  check is refused untested until the next step.
 - **Notes:** over-the-socket operator command.
 
 ## aoide secrets dismiss

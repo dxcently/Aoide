@@ -588,6 +588,8 @@ it down the channel the original `resolve` call is blocked reading —
 **Three ways out**, all removing the ask from the registry:
 - `secrets approve <id>` — a valid code, typed at its prompt, releases the
   value to the original caller; an invalid one leaves the ask parked, unburned.
+  Three failed codes in one 30 s step spend that step's budget, and every later
+  check in it is refused untested (see "Invariants held").
 - `secrets dismiss <id>` — the original caller gets a clean "dismissed"
   refusal, no code needed.
 - Timeout (default 300s, `AOIDE_SECRETS_PARK_TIMEOUT` env override) — the
@@ -640,7 +642,7 @@ valid TOTP code could both load the ledger before either saved and both
 grant (breaking single-use), and two concurrent `overwrite:false` puts
 could both pass the existence probe before either stored. Both follow the
 SAME poisoned-lock-recovery convention `ParkRegistry`'s lock set. See
-"Invariants held" below for the full three-lock inventory.
+"Invariants held" below for the full four-lock inventory.
 
 **`approve` re-gates authorization at release time (P-N2c, FIX 2).** Before
 this fix, `handle_approve` discarded the ask's stored consumer and
@@ -814,6 +816,13 @@ event parser (`watch::parse_notify_line` requires both `secret` and
 silently skipped there, exactly like any other unrecognized `event` kind
 already is) — a deliberate scope cut, not an oversight: task #70 asked
 only for the audit line, not a new `watch` narration.
+
+**The wrong-code budget adds a SEVENTH event, `totp-budget-spent`,** through
+the same `emit_notify`: `{"event":"totp-budget-spent"}`, fired once per step,
+by the first check of that step that the budget refuses untested ("Invariants
+held" below). Like `age-identity-minted` it is name-only, and
+`watch::parse_notify_line` skips it for the same reason: no `secret` or
+`consumer` on it.
 
 `released` fires ONLY on a TOTP-free grant — `requireTotp:false`, or an
 automation-skip (P-N1's `automation.enabled` + a listed consumer) — never on
@@ -2410,6 +2419,14 @@ the same commit as any change.
 
 ## Invariants held (see `AGENTS.md` for the full list)
 
+- **The TOTP wrong-code budget (ruling 44).** At most three failed TOTP
+  checks per 30 s step, across approve and resolve alike. Past that, every
+  check in the step is refused untested, a right code included, and the
+  refusal names when the next step starts. The step's first such refusal
+  writes one name-only `totp-budget-spent` notice. The budget lives in memory
+  and a broker restart clears it. Its cost is deliberate: a same-uid process
+  can spend a step's budget and so block the person's approvals for that step
+  (ruling 29). `AGENTS.md` states the full invariant.
 - A secret's VALUE never appears on a `#[derive(Serialize)]`/`Deserialize`
   type anywhere in this crate. `policy::Policy` is still the only such
   type that touches the wire, and it has no value field. The resolve

@@ -6535,7 +6535,9 @@ value): `"secret not found"`; `"consumer not authorized for this secret"`;
 `"requireTotp is set but no TOTP enrollment exists on this host yet"`;
 `"requireTotp is set but no totp code was provided"`; `"malformed totp
 code"`; `"totp code invalid or expired"`; `"totp code already used"`
-(replay); `"unknown backend `<name>`"`; `"backend `<name>` exited
+(replay); the budget's refusal, which names the spend and the next step's
+start and never carries a code (ruling 44, "Invariants held" in
+`crates/secrets/README.md`); `"unknown backend `<name>`"`; `"backend `<name>` exited
 <status>"` (the backend's own stderr never rides this reply — it is
 `eprintln!`'d to the broker's own stderr only).
 
@@ -6643,11 +6645,13 @@ the ORIGINAL parked connection (never this reply):
 Validated with the SAME RFC 6238 verify + single-use replay ledger an
 inline `resolve` code uses — the code is consumed identically either way.
 An invalid/expired/already-used code leaves the ask PARKED (never removed)
-and the ledger UNBURNED, so a caller can simply retry with the right code;
+and the ledger UNBURNED, so a caller can simply retry with the right code,
+until the step's wrong-code budget is spent (ruling 44);
 only a code that validates resolves the ask one way or another. Errors:
 `"unknown pending id `<id>`"`; `"malformed request: `id` is required"`;
 `"malformed request: `totp` is required"`; plus every `resolve`-shaped TOTP
-error above (`"totp code invalid or expired"`, `"totp code already used"`,
+error above, and the budget's refusal (`"totp code invalid or expired"`,
+`"totp code already used"`,
 ...). This reply NEVER carries a `value` field — the value only ever
 reaches the ORIGINAL parked connection's own `resolve` reply.
 

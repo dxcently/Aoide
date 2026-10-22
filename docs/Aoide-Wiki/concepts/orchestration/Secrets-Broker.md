@@ -165,7 +165,9 @@ operator  ──► aoide secrets pending                       (a separate conn
 trusting the stored ask) is what keeps a `secrets revoke` issued while an
 ask sits parked effective: a revoked consumer's parked ask denies at
 release, not merely at the moment it first parked. A wrong code leaves the
-ask parked, ledger unburned; a right code that the re-gate then denies
+ask parked, ledger unburned. Past three failed codes in one 30 s step, every
+check is refused untested until the next step (ruling 44). A right code that
+the re-gate then denies
 returns the same denial to both the operator's `approve` call and the
 agent's original `resolve` call, and the ask is removed either way. `wait:
 false` on the wire (no CLI flag) restores the pre-parking immediate refusal

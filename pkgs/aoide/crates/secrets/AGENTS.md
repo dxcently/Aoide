@@ -152,6 +152,25 @@
   label. Don't reintroduce a consumer dimension to `replay::ReplayLedger`
   without authenticated consumer identity landing first (#51-adjacent,
   not planned).
+- **The TOTP wrong-code budget (ruling 44): at most three failed checks per
+  30 s step, across every caller.** A check is a TOTP code verified by
+  `verify_totp_gate`, from approve or from a resolve that carries a code. A
+  failed check is a malformed code, an invalid or expired one, or an already
+  used one, and each counts from any caller against `totp::timestep`'s step.
+  A missing code is not a check, and an I/O failure never judged the code,
+  so neither counts. Past the budget, the next check in that step is refused
+  before any verification, so a right code is refused too. The refusal names
+  the spend and the next step's start (unix seconds) and never a code. The
+  step's first untested refusal calls `emit_notify` once with the name-only
+  `totp-budget-spent` kind, which is also the burst's one audit line; later
+  refusals in that step write nothing. The three counted failures keep their
+  per-attempt audit lines. The budget is one per secrets home, lives only in
+  memory, and a broker restart clears it. Parking is not a check, so a
+  resolve without a code still parks while the budget is spent, and its
+  approve is refused until the next step. **The cost, on purpose:** a
+  same-uid process can spend a step's budget and so block the person's
+  approvals for that step. The uid boundary already allows that (ruling 29).
+  Removing the budget is the User's call, not a cleanup.
 - **`SO_PEERCRED` (task #73) gives kernel-truth CALLER identity — it does
   NOT authenticate the wire's `consumer` field, which stays self-asserted
   exactly as the ruling above states.** `handle_conn` reads `SO_PEERCRED`
@@ -462,7 +481,7 @@
   Don't add a "cache the value once fetched, in case the connection reads
   slowly" optimization to `ParkedAsk` — the value must exist ONLY inside
   the one send/receive handoff, same as everywhere else in this crate.
-- **Three production (non-test) locks exist in this crate tree, all
+- **Four production (non-test) locks exist in this crate tree, all
   poisoned-lock-recovering, all following the SAME convention
   `park::ParkRegistry`'s established first.** Every earlier `Mutex`/
   `RwLock` in this crate was test-only env serialization (`env_lock()`);
@@ -472,21 +491,24 @@
   for free, just by never running two connections' code at once — a
   reviewer-confirmed race, reproduced empirically before the fix (5/20
   iterations of a two-thread test double-granted the same TOTP code):
-  `broker::replay_ledger_lock` guards `verify_totp_gate`'s FULL
-  load -> record -> prune -> save of the replay ledger, and
+  `broker::replay_ledger_lock` guards `check_totp_code`'s FULL
+  load -> record -> prune -> save of the replay ledger,
+  `broker::totp_budget_lock` guards each whole TOTP check with its
+  wrong-code count (ruling 44; the replay lock nests inside it), and
   `broker::put_lock` guards `put_gate`'s FULL existence-probe -> store
   (the same newly-exposed TOCTOU shape, one code redeeming twice /
   one overwrite:false put silently losing the race, respectively — both
-  fixed in the SAME commit as this note, P-N2 review fix). All three
+  fixed in the SAME commit as this note, P-N2 review fix). All four
   locks go through `.lock().unwrap_or_else(|e| e.into_inner())`, never a
   bare `.lock().unwrap()` — a panic inside one connection's own thread
   must never poison every OTHER connection's ability to park/list/
   approve/dismiss/resolve/put, matching this crate's own "one
   connection's failure is contained to that connection" discipline
-  (`broker.rs`'s module doc). Neither of the two new locks introduces
-  caching — both sections still read fresh from disk every time; the
-  lock only serializes the section, never remembers what it read
-  (this crate's "NO CACHE, EVER" invariant, unchanged). A future
+  (`broker.rs`'s module doc). The two ledger and put sections still read fresh from
+  disk every time; their locks only serialize the section and never remember
+  what it read (this crate's "NO CACHE, EVER" invariant, unchanged). The
+  budget is the one in-memory state here: it holds a count of failed checks,
+  never a code, a secret or a ledger. A future
   production lock elsewhere in this crate follows the SAME recovery
   pattern, not a bare `.unwrap()` — and, per `replay_ledger_lock`/
   `put_lock` being TWO separate locks rather than one shared one, a new
@@ -608,10 +630,11 @@
   need `env_lock` for.
 - **`emit_notify` is called ONLY after every lock its outcome depended on
   has already been released (P-N3, hard constraint).** No notification I/O
-  happens while holding `park::ParkRegistry`'s internal `Mutex` or
-  `broker::replay_ledger_lock` — every call site (`handle_resolve`'s
-  `Granted`/`NeedsTotp`-park/`WaitResult::TimedOut` arms, `handle_approve`'s
-  success arm, `handle_dismiss`'s found arm) fires only after the
+  happens while holding `park::ParkRegistry`'s internal `Mutex`,
+  `broker::replay_ledger_lock` or `broker::totp_budget_lock` — every call site
+  (`handle_resolve`'s `Granted`/`NeedsTotp`-park/`WaitResult::TimedOut`/
+  `BudgetSpent` arms, `handle_approve`'s success and budget-refusal arms,
+  `handle_dismiss`'s found arm) fires only after the
   `ParkRegistry` method or `verify_totp_gate` call that produced its
   id/ask/grant has already returned (their own internal locks are
   acquire-then-release entirely inside those functions, never held across

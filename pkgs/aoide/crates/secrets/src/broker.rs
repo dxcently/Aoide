@@ -543,6 +543,34 @@ fn write_json_line(writer: &mut impl Write, value: &Value) -> std::io::Result<()
 /// unknown `op` always gets a FINAL reply line, never a silently dropped
 /// connection (unlike shellbridge's fire-and-forget commands, a secrets
 /// client is BLOCKED waiting on this reply).
+fn handle_line_at(
+    secrets_home: &Path,
+    events_path: &Path,
+    line: &str,
+    parked: &ParkRegistry,
+    interim_out: &mut impl Write,
+    peer: Option<crate::peercred::PeerCred>,
+    now_unix: u64,
+) -> Value {
+    let req: Value = match serde_json::from_str(line.trim()) {
+        Ok(v) => v,
+        Err(_) => return json!({"ok": false, "error": "malformed request: not valid JSON"}),
+    };
+    match req.get("op").and_then(Value::as_str) {
+        Some("resolve") => handle_resolve(secrets_home, events_path, &req, parked, interim_out, peer, now_unix),
+        Some("put") => handle_put(secrets_home, events_path, &req, peer),
+        Some("pending") => handle_pending(parked),
+        Some("status") => handle_status(secrets_home),
+        Some("approve") => handle_approve(secrets_home, events_path, parked, &req, peer, now_unix),
+        Some("dismiss") => handle_dismiss(secrets_home, events_path, parked, &req, peer),
+        Some("admin") => handle_admin(secrets_home, &req, peer),
+        Some(other) => json!({"ok": false, "error": format!("unknown op `{other}`")}),
+        None => json!({"ok": false, "error": "malformed request: missing `op`"}),
+    }
+}
+
+/// [`handle_line_at`] on the real clock: what `handle_conn` calls for every
+/// wire line. Tests that need a fixed TOTP step call `handle_line_at`.
 fn handle_line(
     secrets_home: &Path,
     events_path: &Path,
@@ -551,21 +579,7 @@ fn handle_line(
     interim_out: &mut impl Write,
     peer: Option<crate::peercred::PeerCred>,
 ) -> Value {
-    let req: Value = match serde_json::from_str(line.trim()) {
-        Ok(v) => v,
-        Err(_) => return json!({"ok": false, "error": "malformed request: not valid JSON"}),
-    };
-    match req.get("op").and_then(Value::as_str) {
-        Some("resolve") => handle_resolve(secrets_home, events_path, &req, parked, interim_out, peer),
-        Some("put") => handle_put(secrets_home, events_path, &req, peer),
-        Some("pending") => handle_pending(parked),
-        Some("status") => handle_status(secrets_home),
-        Some("approve") => handle_approve(secrets_home, events_path, parked, &req, peer),
-        Some("dismiss") => handle_dismiss(secrets_home, events_path, parked, &req, peer),
-        Some("admin") => handle_admin(secrets_home, &req, peer),
-        Some(other) => json!({"ok": false, "error": format!("unknown op `{other}`")}),
-        None => json!({"ok": false, "error": "malformed request: missing `op`"}),
-    }
+    handle_line_at(secrets_home, events_path, line, parked, interim_out, peer, aoide_protocol::audit::now_secs())
 }
 
 /// Render a peer uid for a taught error message or an audit line — `None`
@@ -651,6 +665,7 @@ fn handle_resolve(
     parked: &ParkRegistry,
     interim_out: &mut impl Write,
     peer: Option<crate::peercred::PeerCred>,
+    now_unix: u64,
 ) -> Value {
     let secret = req.get("secret").and_then(Value::as_str).unwrap_or("").to_string();
     let consumer = req.get("consumer").and_then(Value::as_str).unwrap_or("").to_string();
@@ -671,11 +686,9 @@ fn handle_resolve(
         return json!({"ok": false, "error": "malformed request: `secret` and `consumer` are required"});
     }
 
-    // The one real-clock read in this function — see module doc. The
-    // caller's attested origin is resolved here too, once per resolve
+    // The caller's attested origin is resolved here, once per resolve
     // (LANE IDENTITY P-ID4) — like the clock, an impure read taken at the
     // edge and handed into the deterministic gate as a parameter.
-    let now_unix = aoide_protocol::audit::now_secs();
     let caller = attested_caller_origin(peer.clone());
     match resolve_gate(
         secrets_home,
@@ -704,6 +717,15 @@ fn handle_resolve(
         }
         GateOutcome::Denied(reason) => {
             audit_resolve(secrets_home, &secret, &consumer, argv0.as_deref(), false, Some(&reason), peer_uid);
+            json!({"ok": false, "error": reason})
+        }
+        GateOutcome::BudgetSpent { first, reason } => {
+            // Ruling 44: an untested refusal writes no per-attempt audit line.
+            // The step's first one writes the burst's single notice, which is
+            // its audit line too (`emit_notify`). No lock is held here.
+            if first {
+                emit_notify(secrets_home, events_path, "totp-budget-spent", json!({"event": "totp-budget-spent"}));
+            }
             json!({"ok": false, "error": reason})
         }
         GateOutcome::NeedsTotp => {
@@ -984,6 +1006,7 @@ fn handle_approve(
     parked: &ParkRegistry,
     req: &Value,
     peer: Option<crate::peercred::PeerCred>,
+    now_unix: u64,
 ) -> Value {
     let approver_identity = peer.as_ref().and_then(|p| p.user());
     let approver_uid = approver_identity.as_ref();
@@ -1004,13 +1027,21 @@ fn handle_approve(
         return json!({"ok": false, "error": reason});
     };
 
-    // The one real-clock read in this function — see module doc.
-    let now_unix = aoide_protocol::audit::now_secs();
-    if let Err(e) = verify_totp_gate(secrets_home, Some(code), now_unix) {
-        // Invalid/expired/already-used code: the ask STAYS parked (task
-        // requirement) — never `take`n on this path.
-        audit_approve(secrets_home, &id, Some(&secret), false, &e, approver_uid);
-        return json!({"ok": false, "error": e});
+    if let Err(refusal) = verify_totp_gate(secrets_home, Some(code), now_unix) {
+        // Invalid/expired/already-used code, or the budget's refusal: the ask
+        // STAYS parked (task requirement) — never `take`n on this path.
+        return match refusal {
+            TotpRefusal::Spent { first, reason } => {
+                if first {
+                    emit_notify(secrets_home, events_path, "totp-budget-spent", json!({"event": "totp-budget-spent"}));
+                }
+                json!({"ok": false, "error": reason})
+            }
+            TotpRefusal::Failed(e) => {
+                audit_approve(secrets_home, &id, Some(&secret), false, &e, approver_uid);
+                json!({"ok": false, "error": e})
+            }
+        };
     }
 
     // The code is now valid AND consumed — the ask must resolve one way or
@@ -1551,6 +1582,9 @@ enum GateOutcome {
     Granted { value: String, totp_free: bool },
     Denied(String),
     NeedsTotp,
+    /// The wrong-code budget refused this check untested (ruling 44). `first`
+    /// marks the step's first such refusal, the one that owes the notice.
+    BudgetSpent { first: bool, reason: String },
 }
 
 /// The policy gate + backend fetch, in one place. `now_unix` is the
@@ -1623,8 +1657,11 @@ fn resolve_gate(
                 };
             }
             Some(code) => {
-                if let Err(e) = verify_totp_gate(secrets_home, Some(code), now_unix) {
-                    return GateOutcome::Denied(e);
+                if let Err(refusal) = verify_totp_gate(secrets_home, Some(code), now_unix) {
+                    return match refusal {
+                        TotpRefusal::Spent { first, reason } => GateOutcome::BudgetSpent { first, reason },
+                        TotpRefusal::Failed(e) => GateOutcome::Denied(e),
+                    };
                 }
             }
         }
@@ -1668,7 +1705,7 @@ fn attested_caller_origin(peer: Option<crate::peercred::PeerCred>) -> Option<(St
     aoide_storage::attest::attested_caller(peer?.pid)
 }
 
-/// Serializes [`verify_totp_gate`]'s ENTIRE replay-ledger load -> record ->
+/// Serializes [`check_totp_code`]'s ENTIRE replay-ledger load -> record ->
 /// prune -> save critical section (P-N2 review fix, this commit — a
 /// CONFIRMED race, reproduced by a two-thread test iterated ~20x before
 /// this lock existed). See the module doc's "read-modify-write sections"
@@ -1696,38 +1733,131 @@ fn replay_ledger_lock() -> &'static std::sync::Mutex<()> {
 /// on timestep alone, never consumer). Every error string here is
 /// value-free AND code-free by construction: the caller-typed `totp`
 /// string is untrusted input (module doc) and is never interpolated into
-/// any returned message, only parsed/compared. **P-N2 review fix:** the
-/// ledger's load/record/prune/save is held under [`replay_ledger_lock`]
-/// for its full extent — see that function's own doc.
-fn verify_totp_gate(secrets_home: &Path, totp: Option<&str>, now_unix: u64) -> Result<(), String> {
+/// any returned message, only parsed/compared. The ledger's load, record,
+/// prune and save are held under [`replay_ledger_lock`] inside
+/// [`check_totp_code`] (see that function's own doc).
+///
+/// **Ruling 44:** every check runs under [`totp_budget_lock`]. A failed check
+/// (malformed, invalid or expired, already used) counts, from any caller. Once
+/// the step has [`TOTP_WRONG_BUDGET`] of them, the next check is refused before
+/// any verification, a right code included, until the next step. A missing code
+/// is not a check, and an I/O failure never judged the code, so neither counts.
+/// The budget lock is released before this returns, so the caller may notify
+/// with no lock held.
+fn verify_totp_gate(secrets_home: &Path, totp: Option<&str>, now_unix: u64) -> Result<(), TotpRefusal> {
     let secret = match crate::store::load_totp_secret(secrets_home) {
         Ok(Some(s)) => s,
         Ok(None) => {
-            return Err("requireTotp is set but no TOTP enrollment exists on this host yet".to_string())
+            return Err(TotpRefusal::Failed(
+                "requireTotp is set but no TOTP enrollment exists on this host yet".to_string(),
+            ))
         }
-        Err(e) => return Err(format!("totp.secret: {e}")),
+        Err(e) => return Err(TotpRefusal::Failed(format!("totp.secret: {e}"))),
     };
     let Some(code_str) = totp else {
-        return Err("requireTotp is set but no totp code was provided".to_string());
+        return Err(TotpRefusal::Failed("requireTotp is set but no totp code was provided".to_string()));
     };
+
+    let step = crate::totp::timestep(now_unix);
+    let mut budgets = totp_budget_lock().lock().unwrap_or_else(|e| e.into_inner());
+    let budget = budgets.entry(secrets_home.to_path_buf()).or_default();
+    if budget.step != step {
+        *budget = TotpBudget { step, ..TotpBudget::default() };
+    }
+    if budget.wrong >= TOTP_WRONG_BUDGET {
+        let first = !std::mem::replace(&mut budget.reported, true);
+        drop(budgets);
+        return Err(TotpRefusal::Spent { first, reason: budget_spent_reason(now_unix) });
+    }
+    let checked = check_totp_code(secrets_home, &secret, code_str, now_unix);
+    if matches!(checked, Err(CodeError::Wrong(_))) {
+        budget.wrong += 1;
+    }
+    drop(budgets);
+    checked.map_err(|e| TotpRefusal::Failed(e.into_message()))
+}
+
+/// Ruling 44: at most this many failed TOTP checks per step (`totp::timestep`),
+/// across every caller. See [`verify_totp_gate`].
+const TOTP_WRONG_BUDGET: u32 = 3;
+
+/// One secrets home's wrong-code budget. In memory only: a broker restart clears
+/// it, and nothing here is ever written to disk.
+#[derive(Default)]
+struct TotpBudget {
+    /// The step this count belongs to. A check in a later step starts at zero.
+    step: u64,
+    /// Failed checks this step: malformed, invalid or expired, or already used.
+    wrong: u32,
+    /// Whether this step's first untested refusal has been reported.
+    reported: bool,
+}
+
+/// Every home's [`TotpBudget`], keyed by the secrets home. One broker process has
+/// one home. The key keeps two homes in one process (the tests) from sharing a
+/// count. Held around each whole check, and always taken before
+/// [`replay_ledger_lock`], never after it. Poisoning recovers like every lock here.
+fn totp_budget_lock() -> &'static std::sync::Mutex<std::collections::BTreeMap<PathBuf, TotpBudget>> {
+    static LOCK: std::sync::Mutex<std::collections::BTreeMap<PathBuf, TotpBudget>> =
+        std::sync::Mutex::new(std::collections::BTreeMap::new());
+    &LOCK
+}
+
+/// Why [`verify_totp_gate`] refused. `Spent` is the budget's own refusal: no check
+/// ran, and `first` marks the step's first one, which owes the notice. `Failed` is
+/// an ordinary refusal, audited per attempt as before.
+enum TotpRefusal {
+    Spent { first: bool, reason: String },
+    Failed(String),
+}
+
+/// A checked code's failure. `Wrong` could not open the gate, so it counts.
+/// `Unchecked` is an I/O failure: the code was never judged, so it counts nothing.
+enum CodeError {
+    Wrong(String),
+    Unchecked(String),
+}
+
+impl CodeError {
+    fn into_message(self) -> String {
+        match self {
+            Self::Wrong(message) | Self::Unchecked(message) => message,
+        }
+    }
+}
+
+/// The refusal for a check the budget refused untested. It names the spend and the
+/// unix second the next step starts, and never a code.
+fn budget_spent_reason(now_unix: u64) -> String {
+    let next = (crate::totp::timestep(now_unix) + 1) * crate::totp::STEP_SECONDS;
+    format!(
+        "totp checks are refused untested: the wrong-code budget is spent ({TOTP_WRONG_BUDGET} wrong codes this {}s step); the next step starts at unix {next}, in {}s",
+        crate::totp::STEP_SECONDS,
+        next - now_unix
+    )
+}
+
+/// One code, checked against the enrolled secret and then the replay ledger. Called
+/// only under [`totp_budget_lock`], so the ledger lock nests inside it.
+fn check_totp_code(secrets_home: &Path, secret: &[u8], code_str: &str, now_unix: u64) -> Result<(), CodeError> {
     let Ok(code) = code_str.trim().parse::<u32>() else {
-        return Err("malformed totp code".to_string());
+        return Err(CodeError::Wrong("malformed totp code".to_string()));
     };
-    let Some(step) = crate::totp::verify(&secret, code, now_unix, crate::totp::DEFAULT_WINDOW) else {
-        return Err("totp code invalid or expired".to_string());
+    let Some(step) = crate::totp::verify(secret, code, now_unix, crate::totp::DEFAULT_WINDOW) else {
+        return Err(CodeError::Wrong("totp code invalid or expired".to_string()));
     };
 
     let _guard = replay_ledger_lock().lock().unwrap_or_else(|e| e.into_inner());
     let mut ledger = match crate::store::load_replay_ledger(secrets_home) {
         Ok(l) => l,
-        Err(e) => return Err(format!("totp-replay.json: {e}")),
+        Err(e) => return Err(CodeError::Unchecked(format!("totp-replay.json: {e}"))),
     };
     if !ledger.record(step) {
-        return Err("totp code already used".to_string());
+        return Err(CodeError::Wrong("totp code already used".to_string()));
     }
     ledger.prune_before(crate::totp::timestep(now_unix).saturating_sub(REPLAY_RETENTION_STEPS));
     if let Err(e) = crate::store::save_replay_ledger(secrets_home, &ledger) {
-        return Err(format!("writing totp-replay.json: {e}"));
+        return Err(CodeError::Unchecked(format!("writing totp-replay.json: {e}")));
     }
     Ok(())
 }
@@ -2038,14 +2168,14 @@ fn audit_dismiss(secrets_home: &Path, id: &str, secret: &str, granted: bool, rea
 /// `eprintln!`/swallowed exactly like every `audit_*` function's own `if
 /// let Err(e) = ...` above — never a `?`, never a panic.
 ///
-/// **MUST be called with no crate lock held** (`AGENTS.md`'s three-lock
-/// inventory — `replay_ledger_lock`, `put_lock`, `ParkRegistry`'s own
-/// internal `Mutex`). Every call site above already satisfies this: each
-/// one fires after the park-registry call that produced its `id`/`ask` has
-/// already returned (that call's own internal lock is acquired and released
-/// entirely inside `ParkRegistry`'s own methods), and after
-/// `verify_totp_gate`'s `replay_ledger_lock` guard (a block-scoped
-/// `_guard`) has already gone out of scope. A future call site follows the
+/// **MUST be called with no crate lock held** (`AGENTS.md`'s four-lock
+/// inventory — `replay_ledger_lock`, `put_lock`, `totp_budget_lock`,
+/// `ParkRegistry`'s own internal `Mutex`). Every call site above already
+/// satisfies this: each one fires after the park-registry call that produced
+/// its `id`/`ask` has already returned (that call's own internal lock is
+/// acquired and released entirely inside `ParkRegistry`'s own methods), and
+/// after `verify_totp_gate` has released its budget guard, which also dropped
+/// the replay guard inside `check_totp_code`. A future call site follows the
 /// same rule: emit only once every lock this event's own outcome depended
 /// on has already been released. `append_events_feed` inherits this same
 /// guarantee (its own doc) rather than re-earning it.
@@ -2178,6 +2308,7 @@ mod tests {
             GateOutcome::Granted { value, .. } => (true, Ok(value)),
             GateOutcome::Denied(e) => (false, Err(e)),
             GateOutcome::NeedsTotp => (false, Err("needs a totp code (would park)".to_string())),
+            GateOutcome::BudgetSpent { reason, .. } => (false, Err(reason)),
         }
     }
 
@@ -2351,6 +2482,7 @@ mod tests {
                 assert!(reason.contains("allowRemoteOrigin"), "{reason}");
             }
             GateOutcome::NeedsTotp => panic!("a refused remote-origin caller must never park"),
+            GateOutcome::BudgetSpent { .. } => panic!("no TOTP check runs for a refused remote-origin caller"),
             GateOutcome::Granted { .. } => panic!("must be denied"),
         }
         std::fs::remove_dir_all(&home).ok();
@@ -3974,6 +4106,226 @@ mod tests {
                 assert_eq!(resolved["ok"], true, "{resolved}");
                 assert_eq!(resolved["value"], "stored-value");
             });
+        });
+        std::fs::remove_dir_all(&home).ok();
+    }
+
+    // ── ruling 44: one wrong-code budget for the whole broker ───────────
+
+    /// `approve` as one wire line, at an injected step.
+    fn approve_at(home: &Path, parked: &ParkRegistry, id: &str, code: &str, now: u64) -> Value {
+        let line = format!(r#"{{"op":"approve","id":"{id}","totp":"{code}"}}"#);
+        handle_line_at(home, &home.join("events.jsonl"), &line, parked, &mut Vec::new(), None, now)
+    }
+
+    /// `resolve` with an inline code, at an injected step. A code was given,
+    /// so the resolve checks it, and a failed check counts, rather than parks.
+    fn resolve_with_code_at(home: &Path, parked: &ParkRegistry, code: &str, now: u64) -> Value {
+        let line = format!(r#"{{"op":"resolve","secret":"t","consumer":"m","totp":"{code}"}}"#);
+        handle_line_at(home, &home.join("events.jsonl"), &line, parked, &mut Vec::new(), None, now)
+    }
+
+    /// Six digits that the verify window accepts at none of the previous,
+    /// current and next step, so checking one is always a failed check.
+    fn wrong_code(secret: &[u8], now: u64) -> String {
+        let accepted: Vec<String> = [now - 30, now, now + 30].into_iter().map(|t| code_for_now(secret, t)).collect();
+        (0..1_000_000u32).map(crate::totp::format6).find(|c| !accepted.contains(c)).unwrap()
+    }
+
+    /// The reply's error text, or "" for a reply without one.
+    fn error_of(reply: &Value) -> &str {
+        reply["error"].as_str().unwrap_or("")
+    }
+
+    /// Three counted checks in the step `NOW`, from both callers: a wrong
+    /// approve, a malformed approve and a wrong resolve.
+    fn spend_the_budget_at_now(home: &Path, parked: &ParkRegistry, id: &str, secret: &[u8]) {
+        let first = approve_at(home, parked, id, &wrong_code(secret, NOW), NOW);
+        assert_eq!(first["ok"], false, "{first}");
+        let second = approve_at(home, parked, id, "abc", NOW);
+        assert_eq!(second["ok"], false, "{second}");
+        let third = resolve_with_code_at(home, parked, &wrong_code(secret, NOW), NOW);
+        assert_eq!(third["ok"], false, "{third}");
+    }
+
+    /// Three counted checks, from both callers, spend the step's budget. The
+    /// fourth check is refused untested, a right code included, and the
+    /// refused check burns nothing.
+    #[test]
+    fn a_fourth_wrong_code_in_one_step_is_refused_untested_across_approve_and_resolve() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let home = tmp_home("budget-spent");
+        let secret = seed_enrolled(&home, Policy::new("t", "scratch", "stored-value"));
+        let parked = ParkRegistry::new();
+        let (id, _rx) = parked.park_if_room("t", "m", NOW, 16, None, None, capture_origin(None)).expect("the registry has room");
+        let right = code_for_now(&secret, NOW);
+        with_redirected_audit_log(&home, || {
+            spend_the_budget_at_now(&home, &parked, &id, &secret);
+
+            let fourth = approve_at(&home, &parked, &id, &right, NOW);
+            assert!(error_of(&fourth).contains("budget is spent"), "the 4th check is refused untested, a right code too: {fourth}");
+            let fifth = resolve_with_code_at(&home, &parked, &right, NOW);
+            assert!(error_of(&fifth).contains("budget is spent"), "a resolve after the spend is refused untested too: {fifth}");
+            assert_eq!(parked.list().len(), 1, "a refused check leaves the ask parked");
+            let ledger = crate::store::load_replay_ledger(&home).unwrap();
+            assert!(!ledger.is_used(crate::totp::timestep(NOW)), "a refused check must not burn its code");
+        });
+        std::fs::remove_dir_all(&home).ok();
+    }
+
+    /// The refusal says the budget is spent and names the unix second the next
+    /// step starts. It never echoes the code it refused.
+    #[test]
+    fn the_refusal_names_when_the_next_step_starts() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let home = tmp_home("budget-names-next");
+        let secret = seed_enrolled(&home, Policy::new("t", "scratch", "stored-value"));
+        let parked = ParkRegistry::new();
+        let (id, _rx) = parked.park_if_room("t", "m", NOW, 16, None, None, capture_origin(None)).expect("the registry has room");
+        let right = code_for_now(&secret, NOW);
+        with_redirected_audit_log(&home, || {
+            spend_the_budget_at_now(&home, &parked, &id, &secret);
+
+            let refused = approve_at(&home, &parked, &id, &right, NOW);
+            let reason = error_of(&refused);
+            let next_step = (crate::totp::timestep(NOW) + 1) * crate::totp::STEP_SECONDS;
+            assert!(reason.contains("budget is spent"), "{refused}");
+            assert!(reason.contains(&next_step.to_string()), "the refusal names the next step's start, {next_step}: {refused}");
+            assert!(!reason.contains(&right), "the refusal echoes no code: {refused}");
+        });
+        std::fs::remove_dir_all(&home).ok();
+    }
+
+    /// The first untested refusal of a step writes one notice and one audit
+    /// line, the name-only `totp-budget-spent` event. The refusals after it
+    /// write nothing. The spend itself, the third wrong code, writes no notice.
+    #[test]
+    fn the_first_untested_refusal_of_a_step_writes_one_notice_and_one_audit_line() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let home = tmp_home("budget-one-notice");
+        let secret = seed_enrolled(&home, Policy::new("t", "scratch", "stored-value"));
+        let parked = ParkRegistry::new();
+        let (id, _rx) = parked.park_if_room("t", "m", NOW, 16, None, None, capture_origin(None)).expect("the registry has room");
+        let wrong = wrong_code(&secret, NOW);
+        let right = code_for_now(&secret, NOW);
+        with_redirected_audit_log(&home, || {
+            spend_the_budget_at_now(&home, &parked, &id, &secret);
+            let burst = |home: &Path| -> Vec<Value> {
+                events_feed_lines(home).into_iter().filter(|l| l["event"] == "totp-budget-spent").collect()
+            };
+            assert!(burst(&home).is_empty(), "the spend itself writes no notice");
+            let audit_before = own_log_lines(&home).len();
+
+            let first = approve_at(&home, &parked, &id, &right, NOW);
+            assert!(error_of(&first).contains("budget is spent"), "{first}");
+            resolve_with_code_at(&home, &parked, &right, NOW);
+            approve_at(&home, &parked, &id, &wrong, NOW);
+            approve_at(&home, &parked, &id, &right, NOW);
+
+            let notices = burst(&home);
+            assert_eq!(notices.len(), 1, "one notice per burst: {notices:?}");
+            assert!(notices[0].get("secret").is_none() && notices[0].get("consumer").is_none(), "the notice is name-only: {}", notices[0]);
+            assert_eq!(own_log_lines(&home).len() - audit_before, 1, "one audit line for the burst; the later refusals add none");
+        });
+        std::fs::remove_dir_all(&home).ok();
+    }
+
+    /// The budget is per step: the step after a spend checks again, and the
+    /// right code for that step approves the ask that was waiting.
+    #[test]
+    fn the_next_step_checks_again() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let home = tmp_home("budget-next-step");
+        let secret = seed_enrolled(&home, Policy::new("t", "scratch", "stored-value"));
+        let parked = ParkRegistry::new();
+        let (id, _rx) = parked.park_if_room("t", "m", NOW, 16, None, None, capture_origin(None)).expect("the registry has room");
+        let right = code_for_now(&secret, NOW);
+        with_redirected_audit_log(&home, || {
+            spend_the_budget_at_now(&home, &parked, &id, &secret);
+            let refused = approve_at(&home, &parked, &id, &right, NOW);
+            assert!(error_of(&refused).contains("budget is spent"), "{refused}");
+
+            let later = NOW + crate::totp::STEP_SECONDS;
+            let again = approve_at(&home, &parked, &id, &code_for_now(&secret, later), later);
+            assert_eq!(again["ok"], true, "the next step checks again: {again}");
+        });
+        std::fs::remove_dir_all(&home).ok();
+    }
+
+    /// A reused code is a failed check and counts like any other. The budget
+    /// keys on the failure, not on which ask it is aimed at.
+    #[test]
+    fn a_reused_code_counts_toward_the_budget() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let home = tmp_home("budget-reused");
+        let secret = seed_enrolled(&home, Policy::new("t", "scratch", "stored-value"));
+        let parked = ParkRegistry::new();
+        let (a, _ra) = parked.park_if_room("t", "m", NOW, 16, None, None, capture_origin(None)).expect("the registry has room");
+        let (b, _rb) = parked.park_if_room("t", "m", NOW, 16, None, None, capture_origin(None)).expect("the registry has room");
+        let (c, _rc) = parked.park_if_room("t", "m", NOW, 16, None, None, capture_origin(None)).expect("the registry has room");
+        let right = code_for_now(&secret, NOW);
+        let wrong = wrong_code(&secret, NOW);
+        let next_step = code_for_now(&secret, NOW + crate::totp::STEP_SECONDS);
+        with_redirected_audit_log(&home, || {
+            let spent = approve_at(&home, &parked, &a, &right, NOW);
+            assert_eq!(spent["ok"], true, "{spent}");
+            let reused = approve_at(&home, &parked, &b, &right, NOW);
+            assert!(error_of(&reused).contains("already used"), "{reused}");
+            let second = approve_at(&home, &parked, &c, &wrong, NOW);
+            assert_eq!(second["ok"], false, "{second}");
+            let third = approve_at(&home, &parked, &b, &wrong, NOW);
+            assert_eq!(third["ok"], false, "{third}");
+
+            // Valid and unused, but the reuse and the two wrong codes spent the
+            // budget: refused untested, so it is not verified either.
+            let refused = approve_at(&home, &parked, &c, &next_step, NOW);
+            assert!(error_of(&refused).contains("budget is spent"), "a reuse plus two wrong codes must spend the budget: {refused}");
+        });
+        std::fs::remove_dir_all(&home).ok();
+    }
+
+    /// A missing code is refused before any check, so it spends nothing. This
+    /// is a guard: it passes before the budget exists and must keep passing.
+    #[test]
+    fn a_missing_code_is_not_a_check_and_spends_nothing() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let home = tmp_home("budget-missing-code");
+        let secret = seed_enrolled(&home, Policy::new("t", "scratch", "stored-value"));
+        let parked = ParkRegistry::new();
+        let (id, _rx) = parked.park_if_room("t", "m", NOW, 16, None, None, capture_origin(None)).expect("the registry has room");
+        let right = code_for_now(&secret, NOW);
+        with_redirected_audit_log(&home, || {
+            for _ in 0..5 {
+                let line = format!(r#"{{"op":"approve","id":"{id}"}}"#);
+                let reply = handle_line_at(&home, &home.join("events.jsonl"), &line, &parked, &mut Vec::new(), None, NOW);
+                assert_eq!(reply["ok"], false, "{reply}");
+            }
+            let granted = approve_at(&home, &parked, &id, &right, NOW);
+            assert_eq!(granted["ok"], true, "a missing code spent the budget: {granted}");
+        });
+        std::fs::remove_dir_all(&home).ok();
+    }
+
+    /// An unreadable replay ledger is an I/O failure, not a wrong code: the
+    /// code is never judged, so four such checks spend nothing. This is a
+    /// guard, like the one above.
+    #[test]
+    fn an_unreadable_replay_ledger_is_not_counted_as_a_wrong_code() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let home = tmp_home("budget-io");
+        let secret = seed_enrolled(&home, Policy::new("t", "scratch", "stored-value"));
+        let parked = ParkRegistry::new();
+        let (id, _rx) = parked.park_if_room("t", "m", NOW, 16, None, None, capture_origin(None)).expect("the registry has room");
+        let right = code_for_now(&secret, NOW);
+        std::fs::write(crate::store::replay_ledger_path(&home), b"not json").unwrap();
+        with_redirected_audit_log(&home, || {
+            for _ in 0..4 {
+                let reply = approve_at(&home, &parked, &id, &right, NOW);
+                assert!(error_of(&reply).contains("totp-replay.json"), "{reply}");
+            }
+            std::fs::remove_file(crate::store::replay_ledger_path(&home)).unwrap();
+            let granted = approve_at(&home, &parked, &id, &right, NOW);
+            assert_eq!(granted["ok"], true, "I/O failures spent the budget: {granted}");
         });
         std::fs::remove_dir_all(&home).ok();
     }
