@@ -765,11 +765,15 @@ fn admit(file: &mut PendingFile, entry: PendingSend) -> Result<(), HoldRefused> 
     }
     file.schema_version = STAGE_GRAPH_VERSION.to_string();
     file.pending.push(entry);
-    if stored_len(&*file)? > PENDING_FILE_MAX_BYTES {
+    let fits = stored_len(&*file).map(|len| len <= PENDING_FILE_MAX_BYTES);
+    if !matches!(fits, Ok(true)) {
         file.pending.pop();
-        return Err(HoldRefused::FileFull);
     }
-    Ok(())
+    match fits {
+        Ok(true) => Ok(()),
+        Ok(false) => Err(HoldRefused::FileFull),
+        Err(e) => Err(e),
+    }
 }
 
 /// Queue one held send. Under ONE stage lock, every expired entry is dropped
