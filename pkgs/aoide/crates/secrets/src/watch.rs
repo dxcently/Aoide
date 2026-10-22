@@ -560,9 +560,9 @@ fn format_reason_line(reason: &Option<String>) -> Option<String> {
 /// function never assumes that invariant from outside). This is the ONE
 /// place this wording is built — the provider's `secrets ask` receives the finished
 /// string via `--from` rather than re-deriving it from separate flags
-/// ([`spawn_provider_entry`]'s own doc), so all three surfaces (tty, zenity,
-/// provider) show byte-identical text.
-fn format_origin_line(origin: &client::PendingOrigin) -> Option<String> {
+/// ([`spawn_provider_entry`]'s own doc), so every surface (the watch's tty and
+/// zenity prompts, `approve`'s prompt, the provider) shows byte-identical text.
+pub(crate) fn format_origin_line(origin: &client::PendingOrigin) -> Option<String> {
     if origin.username.is_none() && origin.pid.is_none() && origin.comm.is_none() && origin.hostname.is_none() {
         return None;
     }

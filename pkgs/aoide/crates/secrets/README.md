@@ -597,8 +597,11 @@ it down the channel the original `resolve` call is blocked reading —
 
 **The code is typed, never passed.** `secrets approve <id>` first shows the
 parked ask: the secret, consumer and reason are the requester's claims, and
-the peer uid is the kernel's word. It then reads one code, from a no-echo
-prompt on a terminal or from exactly one stdin line. An id that is not in
+so is the origin line (`from: <username> · <comm> (pid <pid>) @ <hostname>`).
+The peer uid is the kernel's word, and so is the pid in the origin line, as
+read at park time; `comm` is process-controlled text, shown as data. It then
+reads one code, from a no-echo prompt on a terminal or from exactly one stdin
+line. An id that is not in
 `secrets pending` is refused before any prompt, with no approve op. Empty
 input sends nothing. `secrets exec` does the same for its own park: on a
 terminal it prompts; on a pipe it reads one line byte by byte, so the

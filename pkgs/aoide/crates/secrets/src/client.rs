@@ -1470,16 +1470,24 @@ pub(crate) fn park_hint(id: &str, timeout_secs: u64) -> String {
     format!("parked as ask {id} — complete with: aoide secrets approve {id}  (or dismiss {id}); times out in {timeout_secs}s")
 }
 
-/// What `approve` shows before it reads a code. The secret, consumer and
-/// reason are the requester's claims; the peer uid is the kernel's word.
+/// What `approve` shows before it reads a code. The secret, consumer, reason
+/// and origin are the requester's claims. The peer uid is the kernel's word,
+/// and so is the origin's pid, as read at park time (`park::AskOrigin`'s doc).
+/// `comm` is process-controlled text, shown as data and never trusted.
 pub(crate) fn approve_context(ask: &PendingAsk) -> String {
     let peer = match (ask.peer_uid, &ask.peer_sid) {
         (Some(uid), _) => format!("uid {uid}"),
         (None, Some(sid)) => format!("sid {sid}"),
         (None, None) => "unidentified".to_string(),
     };
+    let origin = match crate::watch::format_origin_line(&ask.origin) {
+        Some(line) => format!(
+            "  the requester claims (unverified): {line}\n  the pid is the kernel's word at park time; comm is process-controlled text, shown as data\n"
+        ),
+        None => String::new(),
+    };
     format!(
-        "parked ask {}\n  the requester claims (unverified): secret {}, consumer {}, reason {}\n  the kernel stamped the peer: {peer}\n",
+        "parked ask {}\n  the requester claims (unverified): secret {}, consumer {}, reason {}\n{origin}  the kernel stamped the peer: {peer}\n",
         ask.id,
         ask.secret,
         ask.consumer,
@@ -2894,6 +2902,20 @@ mod argv_free_tests {
         for claim in ["db-prod", "consumer", "psql", "1000", "requester", "kernel"] {
             assert!(before_read.contains(claim), "`{claim}` is not shown before the code is read:\n{before_read}");
         }
+    }
+
+    #[test]
+    fn approve_shows_the_park_origin_pid_before_it_reads_the_code() {
+        let s = park_broker(format!("[{PARKED_ROW}]"), r#"{"ok":true}"#);
+        let shown = Arc::new(Mutex::new(Vec::new()));
+        let mut probe = Probe { shown: shown.clone(), at_first_read: None, rest: b"123456\n" };
+        let outcome = approve_with(&approve_inv(PARK_ID, &[]), &s.socket, &mut probe, &mut Shared(shown.clone()), false);
+        assert!(outcome.is_ok(), "{outcome:?}");
+        let before_read = probe.at_first_read.expect("the code was never read");
+        assert!(
+            before_read.contains("from: khoa \u{b7} psql (pid 42) @ box"),
+            "the park's origin line, with its park-time pid 42, is not shown before the code is read:\n{before_read}"
+        );
     }
 
     #[test]
