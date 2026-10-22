@@ -69,87 +69,91 @@ let
   # ── Component override submodules ─────────────────────────────────────────
   # v0 component tier: bar.* / notif.* / window.*. Each field is optional and
   # falls back to the palette when unset. Paint dendrites read these; nothing else.
+  componentOptions =
+    fields:
+    lib.mapAttrs (
+      _: descr:
+      mkOption {
+        type = types.nullOr hexColor;
+        default = null;
+        description = descr;
+      }
+    ) fields;
   mkComponent =
     fields:
     types.submodule {
-      options = lib.mapAttrs (
-        _: descr:
-        mkOption {
-          type = types.nullOr hexColor;
-          default = null;
-          description = descr;
-        }
-      ) fields;
+      options = componentOptions fields;
     };
 
-  barType = mkComponent {
+  barFields = {
     bg = "Bar background colour. Falls back to palette.bg when null.";
     fg = "Bar foreground/text colour. Falls back to palette.fg when null.";
     accent = "Bar accent (active workspace, highlights). Falls back to palette.accent.";
   };
-  notifType = mkComponent {
+  notifFields = {
     bg = "Notification-center background. Falls back to palette.bg.";
     fg = "Notification text colour. Falls back to palette.fg.";
     urgent = "Urgent-notification colour. Falls back to palette.urgent.";
   };
-  windowType = mkComponent {
+  windowFields = {
     border = "Focused window border colour. Falls back to palette.accent.";
     borderInactive = "Unfocused window border colour. Falls back to palette.bg.";
   };
+  barType = mkComponent barFields;
+  notifType = mkComponent notifFields;
+  windowType = mkComponent windowFields;
 
-  # ── Geometry submodule (v0 optional tier: gaps/border/rounding/blur/opacity)
+  # ── Geometry tier (v0 optional tier: gaps/border/rounding/blur/opacity)
   # Additive-optional under the existing v0 schema (same nullOr-with-fallback
   # shape as the component tier above): every field is optional and falls
   # back to the compositor lane's opinionated default when unset
   # (`terminalOpacity`: the host's bake in kitty.conf, no Aoide constant). A theme
   # file with no `geometry` block behaves exactly as before — the compositor
   # lane applies the fallback, not the option system.
-  geometryType = types.submodule {
-    options = {
-      gapsOut = mkOption {
-        type = types.nullOr types.int;
-        default = null;
-        description = "Outer gap between windows and the screen edge (px). Falls back to the compositor lane's default (8) when null.";
-      };
-      gapsIn = mkOption {
-        type = types.nullOr types.int;
-        default = null;
-        description = "Inner gap between adjacent windows (px). Falls back to the compositor lane's default (6) when null.";
-      };
-      borderSize = mkOption {
-        type = types.nullOr types.int;
-        default = null;
-        description = "Window border thickness (px). Falls back to the compositor lane's default (2) when null.";
-      };
-      rounding = mkOption {
-        type = types.nullOr types.int;
-        default = null;
-        description = "Window corner radius (px). Falls back to the compositor lane's default (0) when null.";
-      };
-      blurEnabled = mkOption {
-        type = types.nullOr types.bool;
-        default = null;
-        description = "Whether compositor blur is enabled. Falls back to the compositor lane's default (true) when null.";
-      };
-      blurSize = mkOption {
-        type = types.nullOr types.int;
-        default = null;
-        description = "Blur kernel size. Falls back to the compositor lane's default (8) when null.";
-      };
-      blurPasses = mkOption {
-        type = types.nullOr types.int;
-        default = null;
-        description = "Blur pass count. Falls back to the compositor lane's default (3) when null.";
-      };
-      terminalOpacity = mkOption {
-        type = types.nullOr (types.numbers.between 0 1);
-        default = null;
-        description = "Terminal (kitty) background opacity, 0–1. Live-side only, in two files: the activation seed writes it into `$STRILLIX_ROOT/declared/terminal-opacity.conf` (deleted when null), and `rice stage` writes it into the staged terminal file (only for a rice with an opinion) and has open kitty windows reload their config. The staged file is included second, so an opinionated stage wins; null is no opinion and the host's bake in kitty.conf shows, with no Aoide constant behind it.";
-      };
+  geometryOptions = {
+    gapsOut = mkOption {
+      type = types.nullOr types.int;
+      default = null;
+      description = "Outer gap between windows and the screen edge (px). Falls back to the compositor lane's default (8) when null.";
+    };
+    gapsIn = mkOption {
+      type = types.nullOr types.int;
+      default = null;
+      description = "Inner gap between adjacent windows (px). Falls back to the compositor lane's default (6) when null.";
+    };
+    borderSize = mkOption {
+      type = types.nullOr types.int;
+      default = null;
+      description = "Window border thickness (px). Falls back to the compositor lane's default (2) when null.";
+    };
+    rounding = mkOption {
+      type = types.nullOr types.int;
+      default = null;
+      description = "Window corner radius (px). Falls back to the compositor lane's default (0) when null.";
+    };
+    blurEnabled = mkOption {
+      type = types.nullOr types.bool;
+      default = null;
+      description = "Whether compositor blur is enabled. Falls back to the compositor lane's default (true) when null.";
+    };
+    blurSize = mkOption {
+      type = types.nullOr types.int;
+      default = null;
+      description = "Blur kernel size. Falls back to the compositor lane's default (8) when null.";
+    };
+    blurPasses = mkOption {
+      type = types.nullOr types.int;
+      default = null;
+      description = "Blur pass count. Falls back to the compositor lane's default (3) when null.";
+    };
+    terminalOpacity = mkOption {
+      type = types.nullOr (types.numbers.between 0 1);
+      default = null;
+      description = "Terminal (kitty) background opacity, 0–1. Live-side only, in two files: the activation seed writes it into `$STRILLIX_ROOT/declared/terminal-opacity.conf` (deleted when null), and `rice stage` writes it into the staged terminal file (only for a rice with an opinion) and has open kitty windows reload their config. The staged file is included second, so an opinionated stage wins; null is no opinion and the host's bake in kitty.conf shows, with no Aoide constant behind it.";
     };
   };
 
-  # ── Font submodule (v0 optional overrides: the face the rice wears) ───────
+  # ── Font tier (v0 optional overrides: the face the rice wears) ────────────
   # Additive-optional, the geometry tier's posture: an absent tier means "the
   # stylix lane's own default". The ROLE shape is Stylix's own — `{ package,
   # name }` — because the stylix lane is the tier's one consumer and passes the
@@ -177,53 +181,49 @@ let
     };
   };
 
-  fontType = types.submodule {
-    options = {
-      monospace = mkOption {
-        type = types.nullOr fontRoleType;
-        default = null;
-        description = ''
-          The fixed-pitch face — the terminal, where agents live. Falls back to
-          the stylix lane's default ("Linux Libertine Mono O") when null. The
-          one role a rice uses today; the remaining roles stay the lane's.
-        '';
-      };
+  fontOptions = {
+    monospace = mkOption {
+      type = types.nullOr fontRoleType;
+      default = null;
+      description = ''
+        The fixed-pitch face — the terminal, where agents live. Falls back to
+        the stylix lane's default ("Linux Libertine Mono O") when null. The
+        one role a rice uses today; the remaining roles stay the lane's.
+      '';
     };
   };
 
-  # ── Palette submodule (v0 closed tier: base16-derived) ────────────────────
-  paletteType = types.submodule {
-    options = {
-      bg = mkOption {
-        type = hexColor;
-        default = "#1e1e2e";
-        description = "Base background colour (base16 base00).";
-      };
-      fg = mkOption {
-        type = hexColor;
-        default = "#cdd6f4";
-        description = "Base foreground/text colour (base16 base05).";
-      };
-      accent = mkOption {
-        type = hexColor;
-        default = "#89b4fa";
-        description = "Primary accent colour (base16 base0D).";
-      };
-      urgent = mkOption {
-        type = hexColor;
-        default = "#f38ba8";
-        description = "Urgent/error colour (base16 base08).";
-      };
-      hot = mkOption {
-        type = types.nullOr hexColor;
-        default = null;
-        description = ''
-          Hot/trace highlight — the one-neon element (the Pantheon stills'
-          optic-nerve green, base16 base0B). Optional: falls back to accent
-          when null. NOT part of the stylix base16 synthesis (the base16 tier
-          already carries the real scheme); this is the live-note trace colour.
-        '';
-      };
+  # ── Palette tier (v0 closed tier: base16-derived) ────────────────────────
+  paletteOptions = {
+    bg = mkOption {
+      type = hexColor;
+      default = "#1e1e2e";
+      description = "Base background colour (base16 base00).";
+    };
+    fg = mkOption {
+      type = hexColor;
+      default = "#cdd6f4";
+      description = "Base foreground/text colour (base16 base05).";
+    };
+    accent = mkOption {
+      type = hexColor;
+      default = "#89b4fa";
+      description = "Primary accent colour (base16 base0D).";
+    };
+    urgent = mkOption {
+      type = hexColor;
+      default = "#f38ba8";
+      description = "Urgent/error colour (base16 base08).";
+    };
+    hot = mkOption {
+      type = types.nullOr hexColor;
+      default = null;
+      description = ''
+        Hot/trace highlight — the one-neon element (the Pantheon stills'
+        optic-nerve green, base16 base0B). Optional: falls back to accent
+        when null. NOT part of the stylix base16 synthesis (the base16 tier
+        already carries the real scheme); this is the live-note trace colour.
+      '';
     };
   };
 
@@ -579,124 +579,101 @@ in
     };
 
     # ── Theme seam (v0 schema) — the ONLY thing paint lanes read ─────────
-    theme = mkOption {
-      description = ''
-        The v0 theme schema — the single seam between the frozen nix layer
-        and the live desktop. Paint dendrites consume this and nothing else.
-        Aoide's design-token layer: the tokens themselves, named for the one
-        set of house colours every surface wears in unison. Values and engine
-        are one thing: the tokens are theme, resolved/validated/emitted by
-        theme. The container remains the W3C design-tokens format. Versioned
-        as "theme schema v0" in CONTRACTS.md.
-      '';
-      default = { };
-      type = types.submodule {
-        options = {
-          palette = mkOption {
-            type = paletteType;
-            default = { };
-            description = "Palette tier (base16-derived): bg / fg / accent / urgent.";
-          };
-          polarity = mkOption {
-            type = types.enum [
-              "light"
-              "dark"
-            ];
-            default = "light";
-            description = ''
-              The register the base16 ramp reads as — "light" or "dark". A rice
-              declares it beside its palette (a palette brings its polarity),
-              and the stylix lane hands it to `stylix.polarity`, which themes
-              every Stylix-managed target from it. The default keeps every host
-              that names no polarity evaluating exactly as before.
+    # The v0 theme schema — the single seam between the frozen nix layer
+    # and the live desktop. Paint dendrites consume this and nothing else.
+    # Aoide's design-token layer: the tokens themselves, named for the one
+    # set of house colours every surface wears in unison. Values and engine
+    # are one thing: the tokens are theme, resolved/validated/emitted by
+    # theme. The container remains the W3C design-tokens format. Versioned
+    # as "theme schema v0" in CONTRACTS.md.
+    #
+    # A plain option set, not a submodule. The module system pushes a rice's
+    # `mkDefault` down through option sets to each option, and an option whose
+    # type is a submodule takes its value whole. So each value below is its own
+    # option: a host's plain write outranks only the value it names, except for
+    # `base16`, `fonts.monospace` and `override`, which a host replaces whole.
+    theme = {
+      # Palette tier (base16-derived): bg / fg / accent / urgent.
+      palette = paletteOptions;
+      polarity = mkOption {
+        type = types.enum [
+          "light"
+          "dark"
+        ];
+        default = "light";
+        description = ''
+          The register the base16 ramp reads as — "light" or "dark". A rice
+          declares it beside its palette (a palette brings its polarity),
+          and the stylix lane hands it to `stylix.polarity`, which themes
+          every Stylix-managed target from it. The default keeps every host
+          that names no polarity evaluating exactly as before.
 
-              BAKED ONLY, the font tier's posture: no emitter carries it and
-              `rice stage` does not apply it — GTK/Qt and Stylix read it at
-              build time, so flipping it is a user-gated rebuild, not a stage.
-              It is still carried in a rice's `theme.json` beside `palette`
-              and validated by `rice lint` (exactly "light"|"dark", or absent
-              for "no opinion"), and it reaches `$STRILLIX_ROOT/stage/theme.json` through
-              the activation seed like every other top-level key — where nothing
-              reads it today.
-            '';
-          };
-          base16 = mkOption {
-            type = types.nullOr base16Type;
-            default = null;
-            description = ''
-              Optional full base16 scheme (all 16 slots, base16-standard
-              semantics). When set, the stylix lane bakes this scheme for
-              terminals/editors/GTK instead of synthesising one from the
-              4-anchor palette. The palette tier still drives the live
-              (stage/theme.json) side; keep the two in the same key.
-            '';
-          };
-          bar = mkOption {
-            type = barType;
-            default = { };
-            description = "Component overrides for the Quickshell bar surface.";
-          };
-          notif = mkOption {
-            type = notifType;
-            default = { };
-            description = "Component overrides for the notification surface.";
-          };
-          window = mkOption {
-            type = windowType;
-            default = { };
-            description = "Component overrides for compositor window decoration.";
-          };
-          geometry = mkOption {
-            type = geometryType;
-            default = { };
-            description = ''
-              Geometry tier (v0 optional overrides): gaps/border/rounding/blur.
-              Every field is nullOr and falls back to the compositor lane's
-              opinionated default when unset — additive-optional, same status
-              as the base16 tier. Hyprland-only in this pass; no QML consumer.
-            '';
-          };
-          fonts = mkOption {
-            type = fontType;
-            default = { };
-            description = ''
-              Font tier (v0 optional overrides, the geometry tier's posture):
-              the face this rice wears, per Stylix font role — `monospace`
-              today, the terminal an agent lands in. Null means "the stylix
-              lane's own default" (Linux Libertine), so a rice that sets no
-              face bakes exactly the theme it baked before.
-
-              BAKED ONLY — like `wallpaper`, and unlike `geometry`: this tier
-              has no `stage/theme.json` twin and no engine schema entry,
-              because a face cannot hot-swap. It lands on the user-gated
-              rebuild, and a staged rice cannot re-face the terminal without
-              one.
-            '';
-          };
-          wallpaper = mkOption {
-            type = types.nullOr types.path;
-            default = null;
-            description = ''
-              The wallpaper-art note: the wallpaper image this rice carries, as a
-              literal nix path (copied to the store — never a rice/ runtime
-              read). Paint dendrites bake it as the stylix base-context image. null
-              "no wallpaper" — the stylix lane falls back to its deterministic
-              solid-colour derivation (from palette.bg), so the baked path stays
-              buildable with no binary asset.
-            '';
-          };
-          override = mkOption {
-            type = overrideType;
-            default = { };
-            description = ''
-              Venue recolour tier (CONTRACTS.md §1, "Override tier"). Set by
-              the HOST (never by a rice) to repaint the performed rice's
-              anchors without editing the rices. Consumers apply it
-              through lib/theme.nix's `resolve` — the option system stores
-              it inert, same posture as the component-tier nulls.
-            '';
-          };
-        };
+          BAKED ONLY, the font tier's posture: no emitter carries it and
+          `rice stage` does not apply it — GTK/Qt and Stylix read it at
+          build time, so flipping it is a user-gated rebuild, not a stage.
+          It is still carried in a rice's `theme.json` beside `palette`
+          and validated by `rice lint` (exactly "light"|"dark", or absent
+          for "no opinion"), and it reaches `$STRILLIX_ROOT/stage/theme.json` through
+          the activation seed like every other top-level key — where nothing
+          reads it today.
+        '';
+      };
+      base16 = mkOption {
+        type = types.nullOr base16Type;
+        default = null;
+        description = ''
+          Optional full base16 scheme (all 16 slots, base16-standard
+          semantics). When set, the stylix lane bakes this scheme for
+          terminals/editors/GTK instead of synthesising one from the
+          4-anchor palette. The palette tier still drives the live
+          (stage/theme.json) side; keep the two in the same key.
+        '';
+      };
+      # Component overrides for the Quickshell bar surface.
+      bar = componentOptions barFields;
+      # Component overrides for the notification surface.
+      notif = componentOptions notifFields;
+      # Component overrides for compositor window decoration.
+      window = componentOptions windowFields;
+      # Geometry tier (v0 optional overrides): gaps/border/rounding/blur.
+      # Every field is nullOr and falls back to the compositor lane's
+      # opinionated default when unset — additive-optional, same status
+      # as the base16 tier. Hyprland-only in this pass; no QML consumer.
+      geometry = geometryOptions;
+      # Font tier (v0 optional overrides, the geometry tier's posture):
+      # the face this rice wears, per Stylix font role — `monospace`
+      # today, the terminal an agent lands in. Null means "the stylix
+      # lane's own default" (Linux Libertine), so a rice that sets no
+      # face bakes exactly the theme it baked before.
+      #
+      # BAKED ONLY — like `wallpaper`, and unlike `geometry`: this tier
+      # has no `stage/theme.json` twin and no engine schema entry,
+      # because a face cannot hot-swap. It lands on the user-gated
+      # rebuild, and a staged rice cannot re-face the terminal without
+      # one.
+      fonts = fontOptions;
+      wallpaper = mkOption {
+        type = types.nullOr types.path;
+        default = null;
+        description = ''
+          The wallpaper-art note: the wallpaper image this rice carries, as a
+          literal nix path (copied to the store — never a rice/ runtime
+          read). Paint dendrites bake it as the stylix base-context image. null
+          "no wallpaper" — the stylix lane falls back to its deterministic
+          solid-colour derivation (from palette.bg), so the baked path stays
+          buildable with no binary asset.
+        '';
+      };
+      override = mkOption {
+        type = overrideType;
+        default = { };
+        description = ''
+          Venue recolour tier (CONTRACTS.md §1, "Override tier"). Set by
+          the HOST (never by a rice) to repaint the performed rice's
+          anchors without editing the rices. Consumers apply it
+          through lib/theme.nix's `resolve` — the option system stores
+          it inert, same posture as the component-tier nulls.
+        '';
       };
     };
 

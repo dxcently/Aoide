@@ -36,3 +36,18 @@
   Until the state settles, `strillix` refuses every verb except `migrate`,
   help and version. Rice state held by both roots, or across homes, is
   refused: nothing moves, and the verb exits nonzero.
+
+### A host's theme value outranks only that value
+
+- A host's plain write to one `strillix.theme` value now outranks only that
+  value. Before, `strillix.theme` was one submodule option, so a host write to
+  any single value (`strillix.theme.geometry.terminalOpacity`, say) dropped the
+  performed rice's whole theme back to the option defaults.
+- A whole-tier write such as `strillix.theme.palette = lib.mkForce { … }` now
+  sets only the values it names. `strillix onboard`'s generated `aoide.nix`
+  lists the tiers' values but no longer the seven tier entries
+  (`strillix.theme`, `.palette`, `.bar`, `.notif`, `.window`, `.geometry`,
+  `.fonts`).
+- `base16` and `fonts.monospace` stay whole units (a host value replaces the
+  rice's whole scheme or face), and `override` stays the host's own tier
+  (CONTRACTS.md §5).

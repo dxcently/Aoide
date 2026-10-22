@@ -53,6 +53,13 @@ covers only what's specific to the contract.
   ordered, with that lane's scope named). A rice agent proposing a contract
   change writes the diff and gets it reviewed/merged the normal way, same as
   any other core-structure change.
+- **`strillix.theme` and its palette/bar/notif/window/geometry/fonts tiers stay
+  plain option sets, never a `types.submodule` option.** The module system
+  judges priority per definition at an option, and a rice's values arrive at
+  `mkDefault`: a submodule there lets a host's one theme write drop the
+  performed rice's whole theme. `base16`, `fonts.monospace` and `override` are
+  whole on purpose. The consumer suite's `…and wears sonata's theme` check
+  (`tests/consumer/run.sh`) guards it.
 
 ## Extension points
 

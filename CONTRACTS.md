@@ -7025,13 +7025,23 @@ as data and imports only what it selects. Its shape:
   `borrow` (below). Name only what the module uses and keep the `...`.
 - **Every value a rice module sets is under `lib.mkDefault`**, once for the
   whole module: `config = lib.mkDefault { … };`. The module system pushes that
-  priority down to each leaf, so a rice is a default: a host's plain value
-  outranks it, and the order the group's modules land in decides nothing. The
-  one exception is `rice.hyprland.*`, the rice's own options, which may sit in
-  the same `config`. A module with nothing but `rice.hyprland.*` may stay a bare
-  attrset, which is how every `home.module` is written.
-  Any `wayland.windowManager.hyprland.*` key is refused in a rice outright,
-  whatever its priority: the rice's hyprland keys are `rice.hyprland.*` (§7).
+  priority down through option sets to each option, so a rice is a default: a
+  host's plain value outranks it, and the order the group's modules land in
+  decides nothing. `strillix.theme` and its `palette`, `bar`, `notif`, `window`,
+  `geometry` and `fonts` tiers are plain option sets, so a host's plain value
+  outranks only the value it names. A venue's colours go through `override` (§1,
+  the tier the venue authors); the stage twin takes the rice's colours from its
+  `theme.json`, so a direct host colour write reaches the bake alone. Three
+  theme values are whole units, where a host value replaces the rice's whole
+  one: `base16` (a host scheme must name all sixteen slots; one slot is
+  `override.base16`'s job), `fonts.monospace` (a face) and `override` (the
+  host's own tier). `strillix.layout` is a single option, so a host value
+  anywhere in it replaces the rice's whole layout. The one exception is
+  `rice.hyprland.*`, the rice's own options, which may sit in the same `config`.
+  A module with nothing but `rice.hyprland.*` may stay a bare attrset, which is
+  how every `home.module` is written. Any `wayland.windowManager.hyprland.*` key
+  is refused in a rice outright, whatever its priority: the rice's hyprland keys
+  are `rice.hyprland.*` (§7).
 - **Who wins**, strongest first (§7 has the mechanism):
   1. the host's `rice.hyprland.host` / `hostConf` (sourced last);
   2. the host's plain values;
