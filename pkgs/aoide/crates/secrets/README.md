@@ -510,6 +510,10 @@ narrowed by this phase to exactly that one remaining case).
 -> {"op":"admin","command":"migrate","name":"<name>","target":"<backend>"}
 ```
 
+Every admin op's `name` is checked with `valid_secret_name` before anything is
+read or written, and a `grant` or `revoke` `consumer` is refused for a control
+or invisible character. A refusal changes nothing and is audited.
+
 **The peer-cred gate is strict where `dismiss`'s is permissive: ONLY the
 broker's own effective uid may send `{"op":"admin"}`, full stop.** Unlike
 `dismiss` (any caller may dismiss its OWN ask), an admin mutation touches

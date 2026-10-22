@@ -558,7 +558,9 @@
   newline is itself a control character. The origin line is different: the
   broker does not validate comm, hostname or username, so
   `watch::format_origin_line` cleans them at display. The secret needs no
-  check: `policy::valid_secret_name` admits no such character at add or put.
+  check here: `policy::valid_secret_name` admits no such character at add, at
+  put, or in any admin op (`broker::handle_admin` checks every name it takes,
+  and a grant's or revoke's consumer for control and invisible characters).
 - **A parked ask's argv0 is a claim the approve screen shows, never a
   gate.** `park::ParkedAsk::argv0` is the resolve's argv0, kept whole under
   the parked-field bound, and `approve_context` prints it as the program the

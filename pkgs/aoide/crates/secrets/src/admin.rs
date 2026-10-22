@@ -19,9 +19,12 @@
 //! belongs entirely to whichever caller is invoking it, matching the
 //! `home::admin_identity_check`/`broker::handle_admin` split.
 //!
-//! **Argument validation (name shape, "on"/"off" spelling, `<name> <consumer>`
-//! presence) still lives ONLY in `commands.rs`, never duplicated here.** A
-//! wire-side `{op:"admin"}` request that omits a required field, or spells
+//! **Name and consumer characters are checked in `broker::handle_admin`, before
+//! any function here runs, on the wire and the CLI alike: `valid_secret_name`
+//! for every name, `is_unsafe` for a grant's or revoke's consumer.** The CLI
+//! also validates on its own path (`commands.rs`). "on"/"off" spelling and
+//! `<name> <consumer>` presence are checked only in `commands.rs`. A wire-side
+//! `{op:"admin"}` request that omits a required field, or spells
 //! `state`/`action` wrong, gets a plain `Err(String)` from the function
 //! below rather than a second parallel usage-error vocabulary — the CLI
 //! path's own `Outcome::usage` messages are unreachable from the broker
@@ -222,8 +225,8 @@ pub fn automate_toggle(home: &Path, name: &str, want: bool) -> Result<AdminOutco
 /// secret's own `consumers` does not admit (a non-empty list; an empty one
 /// admits everyone): the broker checks `consumers` first, so that grant could
 /// never open anything. `want_listed` is `true` for `grant`,
-/// `false` for `revoke` — caller already validated `consumer`'s shape
-/// (`valid_secret_name`, `commands.rs`'s own job, never duplicated here).
+/// `false` for `revoke`. The broker checks `name` and `consumer`'s characters
+/// before this call (`broker::handle_admin`).
 pub fn automate_consumer(home: &Path, name: &str, consumer: &str, want_listed: bool) -> Result<AdminOutcome, String> {
     let mut policies = store::load_policies(home).map_err(|e| policy_io_error(home, e))?;
     let Some(policy) = policies.iter_mut().find(|p| p.name == name) else {

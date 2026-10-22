@@ -1443,6 +1443,20 @@ fn handle_admin(secrets_home: &Path, req: &Value, peer: Option<crate::peercred::
     };
 
     let name = str_field("name");
+    if !crate::policy::valid_secret_name(&name) {
+        let reason = format!(
+            "refused: `{}` is not a valid secret name. A name is lowercase letters, digits and hyphens; it starts and ends with a letter or digit, and has no double hyphen",
+            aoide_protocol::untrusted::clean_line(&name)
+        );
+        audit_admin(secrets_home, subcommand, "", false, Some(&reason), peer_uid);
+        return json!({"ok": false, "error": reason});
+    }
+    let consumer = str_field("consumer");
+    if matches!(subcommand, "grant" | "revoke") && consumer.chars().any(aoide_protocol::untrusted::is_unsafe) {
+        let reason = "refused: the consumer holds a control or invisible character. A consumer is shown to a person exactly as written, so send it as plain text".to_string();
+        audit_admin(secrets_home, subcommand, &name, false, Some(&reason), peer_uid);
+        return json!({"ok": false, "error": reason});
+    }
     let result: Result<crate::admin::AdminOutcome, String> = {
         // `put_lock`'s critical section covers exactly the mutation call —
         // never the audit write that follows (P-N3's "no lock held across
@@ -5777,6 +5791,76 @@ mod tests {
         let policies = crate::store::load_policies(&home).unwrap();
         assert_eq!(policies.len(), 1, "the admin op must have landed a real policy row");
         assert_eq!(policies[0].name, "t");
+        std::fs::remove_dir_all(&home).ok();
+    }
+
+    /// One admin request over a real socket connection, as the round trip above
+    /// sends it. Returns the reply line.
+    fn admin_over_real_connection(home: &Path, parked: &Arc<ParkRegistry>, req: Value) -> Value {
+        let (client_end, server_end) = UnixStream::pair().expect("socketpair");
+        let home_for_conn = home.to_path_buf();
+        let events_for_conn = home.join("events.jsonl");
+        let parked_for_conn = Arc::clone(parked);
+        let conn_handle =
+            std::thread::spawn(move || handle_conn(&home_for_conn, &events_for_conn, server_end, &parked_for_conn));
+        let mut writer = client_end.try_clone().expect("clone client end");
+        writer.write_all((req.to_string() + "\n").as_bytes()).unwrap();
+        let mut reader = BufReader::new(client_end);
+        let mut line = String::new();
+        reader.read_line(&mut line).expect("reading the admin reply");
+        drop(reader);
+        drop(writer);
+        conn_handle.join().unwrap();
+        serde_json::from_str(line.trim()).expect("reply must be JSON")
+    }
+
+    /// V2: the admin op checks a secret name with the rule `add` and `put` use,
+    /// so a name holding a control character is refused and nothing is written.
+    #[test]
+    fn admin_add_with_a_control_character_in_the_name_is_refused_and_policy_json_is_untouched() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let home = tmp_home("admin-add-unsafe-name");
+        let parked = Arc::new(ParkRegistry::new());
+        with_redirected_audit_log(&home, || {
+            let reply = admin_over_real_connection(
+                &home,
+                &parked,
+                json!({
+                    "op": "admin", "command": "add", "name": "t\u{1b}[2J", "backend": "scratch", "key": "k",
+                    "requireTotp": false, "consumers": [],
+                }),
+            );
+            assert_eq!(reply["ok"], false, "an unsafe secret name must be refused: {reply}");
+        });
+        assert!(
+            crate::store::load_policies(&home).unwrap_or_default().is_empty(),
+            "policy.json must be untouched by a refused add"
+        );
+        std::fs::remove_dir_all(&home).ok();
+    }
+
+    /// V2: `grant` refuses a consumer holding a control or invisible character,
+    /// and the secret's consumer list is unchanged.
+    #[test]
+    fn admin_grant_with_a_control_character_in_the_consumer_is_refused_and_changes_nothing() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let home = tmp_home("admin-grant-unsafe-consumer");
+        let parked = Arc::new(ParkRegistry::new());
+        with_redirected_audit_log(&home, || {
+            crate::admin::add(&home, "t", "scratch", "k", false, vec![]).expect("the secret to grant on");
+            let reply = admin_over_real_connection(
+                &home,
+                &parked,
+                json!({"op": "admin", "command": "grant", "name": "t", "consumer": "m\u{202e}x"}),
+            );
+            assert_eq!(reply["ok"], false, "an unsafe consumer must be refused: {reply}");
+        });
+        let granted = crate::store::load_policies(&home).unwrap();
+        assert!(
+            granted[0].consumers.iter().all(|c| !c.contains('\u{202e}')),
+            "the refused consumer must not be granted: {:?}",
+            granted[0].consumers
+        );
         std::fs::remove_dir_all(&home).ok();
     }
 
