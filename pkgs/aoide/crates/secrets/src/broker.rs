@@ -4708,6 +4708,7 @@ mod tests {
     /// ask, not as an unknown id, so the person is told why it is gone.
     #[test]
     fn an_approve_for_an_ask_whose_wait_ran_out_says_it_timed_out() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let home = tmp_home("approve-after-timeout");
         let p = Policy::new("t", "scratch", "stored-value");
         seed_enrolled(&home, p);
