@@ -486,6 +486,22 @@ pub fn serve(secrets_home: &Path, socket_path: &Path) -> std::io::Result<()> {
 /// the broker's memory without bound.
 const MAX_REQUEST_LINE: usize = 64 * 1024;
 
+/// The bound a parked field must fit, in bytes and in lines: the approve
+/// dialog's cap. A field over either is refused at park, with nothing parked.
+const PARKED_FIELD_BYTES_MAX: usize = 4096;
+const PARKED_FIELD_LINES_MAX: usize = 60;
+
+/// Why a parked field is over its bound, if it is.
+fn oversized(value: &str) -> Option<String> {
+    if value.len() > PARKED_FIELD_BYTES_MAX {
+        Some(format!("is over {PARKED_FIELD_BYTES_MAX} bytes"))
+    } else if value.lines().count() > PARKED_FIELD_LINES_MAX {
+        Some(format!("is over {PARKED_FIELD_LINES_MAX} lines"))
+    } else {
+        None
+    }
+}
+
 /// Handle ONE client connection, on its OWN thread (module doc, P-N2): read
 /// newline-delimited JSON requests and reply to each. A read error (dropped
 /// connection) ends only this connection; nothing here can unwind into
@@ -762,11 +778,26 @@ fn handle_resolve(
                 audit_resolve(secrets_home, &secret, &consumer, argv0.as_deref(), false, Some(&reason), peer_uid);
                 return json!({"ok": false, "error": reason});
             }
-            // F2: a parked ask is shown to a person exactly as written, so a
-            // request whose consumer, reason or argv0 holds a control or
-            // invisible character is refused here, before anything parks. The
-            // secret needs no check: `policy::valid_secret_name` admits no such
-            // character when a secret is added or put.
+            // A parked ask is shown to a person exactly as written, so a request
+            // whose consumer, reason or argv0 is over the approve dialog's bound,
+            // or holds a control or invisible character, is refused here, before
+            // anything parks. The secret needs no check: `policy::valid_secret_name`
+            // admits no such character when a secret is added or put.
+            let oversized_field = [
+                ("consumer", Some(consumer.as_str())),
+                ("reason", ask_reason.as_deref()),
+                ("argv0", argv0.as_deref()),
+            ]
+            .into_iter()
+            .find_map(|(name, value)| value.and_then(oversized).map(|why| (name, why)));
+            if let Some((field, why)) = oversized_field {
+                let reason = format!(
+                    "refused: the {field} {why}. A parked ask is shown to a person in full, and \
+                     a longer {field} cannot be read on one screen, so send a shorter {field}"
+                );
+                audit_resolve(secrets_home, &secret, &consumer, argv0.as_deref(), false, Some(&reason), peer_uid);
+                return json!({"ok": false, "error": reason});
+            }
             let unsafe_field = [
                 ("consumer", Some(consumer.as_str())),
                 ("reason", ask_reason.as_deref()),
@@ -793,13 +824,8 @@ fn handle_resolve(
             // doc: the pid can exit and be reused long before this ask
             // resolves or a dialog renders it).
             let origin = capture_origin(peer.clone());
-            // The argv0 is the requester's claim about the program that receives the
-            // value. Clipped to the one-line bound here, at park time (F3).
-            let park_argv0 = argv0
-                .as_deref()
-                .map(|a| aoide_protocol::untrusted::clip_flat(a, aoide_protocol::untrusted::LINE_MAX));
             let Some((id, rx)) =
-                parked.park_if_room(&secret, &consumer, now_unix, cap, peer_identity.clone(), ask_reason.as_deref(), park_argv0.as_deref(), origin.clone())
+                parked.park_if_room(&secret, &consumer, now_unix, cap, peer_identity.clone(), ask_reason.as_deref(), argv0.as_deref(), origin.clone())
             else {
                 // FIX 3b: at the registry-wide cap — the SAME immediate
                 // refusal `wait:false` gives, plus a hint naming the
@@ -4800,10 +4826,51 @@ mod tests {
         assert_refused_at_ingest("argv0", r#"{"op":"resolve","secret":"t","consumer":"m","argv0":"sh\u001b[2J"}"#);
     }
 
-    /// One park request whose `field` is unsafe. The registry is read from a
+    /// V1: a field over the approve dialog's bound is refused at park, so no
+    /// person is shown a field that cannot be read on one screen.
+    #[test]
+    fn a_consumer_over_4_kib_is_refused_and_parks_nothing() {
+        let line = json!({"op": "resolve", "secret": "t", "consumer": "c".repeat(5 * 1024)}).to_string();
+        assert_refused_at_ingest_with("consumer", &line, "is over 4096 bytes");
+    }
+
+    #[test]
+    fn a_reason_over_4_kib_is_refused_and_parks_nothing() {
+        let line = json!({"op": "resolve", "secret": "t", "consumer": "m", "reason": "r".repeat(5 * 1024)}).to_string();
+        assert_refused_at_ingest_with("reason", &line, "is over 4096 bytes");
+    }
+
+    #[test]
+    fn an_argv0_over_4_kib_is_refused_and_parks_nothing() {
+        let line = json!({"op": "resolve", "secret": "t", "consumer": "m", "argv0": "a".repeat(5 * 1024)}).to_string();
+        assert_refused_at_ingest_with("argv0", &line, "is over 4096 bytes");
+    }
+
+    /// V1: a field over 60 lines is refused at park, by the line bound's own
+    /// wording (61 lines is 122 bytes, under the byte bound).
+    #[test]
+    fn a_reason_over_60_lines_is_refused_and_parks_nothing() {
+        let line = json!({"op": "resolve", "secret": "t", "consumer": "m", "reason": "x\n".repeat(61)}).to_string();
+        assert_refused_at_ingest_with("reason", &line, "is over 60 lines");
+    }
+
+    /// N4: an argv0 within the bound parks whole. The clip to the one-line bound
+    /// is gone, so the parked row carries the program the requester named.
+    #[test]
+    fn a_3_kib_argv0_parks_and_the_row_shows_it_whole() {
+        let line = json!({"op": "resolve", "secret": "t", "consumer": "m", "argv0": "a".repeat(3 * 1024)}).to_string();
+        let reply = pending_reply_while_parked("pending-argv0-whole", &line);
+        assert_eq!(reply["pending"][0]["argv0"].as_str().map(str::len), Some(3 * 1024), "{reply}");
+    }
+
+    fn assert_refused_at_ingest(field: &str, line: &str) {
+        assert_refused_at_ingest_with(field, line, "holds a control or invisible character");
+    }
+
+    /// One park request whose `field` is refused. The registry is read from a
     /// second thread 100 ms in, while a park that did happen would still be
     /// parked (the timeout is 1 s), so "parks nothing" is not a timing accident.
-    fn assert_refused_at_ingest(field: &str, line: &str) {
+    fn assert_refused_at_ingest_with(field: &str, line: &str, wording: &str) {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved_timeout = std::env::var(crate::park::PARK_TIMEOUT_ENV).ok();
         std::env::set_var(crate::park::PARK_TIMEOUT_ENV, "1");
@@ -4823,7 +4890,7 @@ mod tests {
             });
             assert_eq!(reply["ok"], false, "{reply}");
             let err = reply["error"].as_str().unwrap();
-            assert!(err.contains("holds a control or invisible character"), "the refusal states the rule: {err}");
+            assert!(err.contains(wording), "the refusal states the rule: {err}");
             assert!(err.contains(field), "and names the field: {err}");
         });
 
@@ -4883,18 +4950,6 @@ mod tests {
             r#"{"op":"resolve","secret":"t","consumer":"m","argv0":"/usr/bin/psql"}"#,
         );
         assert_eq!(reply["pending"][0]["argv0"], "/usr/bin/psql", "{reply}");
-    }
-
-    /// F3: the argv0 is clipped to the one-line bound at park time, so a long
-    /// claim cannot fill the approve screen.
-    #[test]
-    fn a_parked_argv0_is_clipped_to_the_line_max() {
-        let long = "a".repeat(300);
-        let line = format!(r#"{{"op":"resolve","secret":"t","consumer":"m","argv0":"{long}"}}"#);
-        let reply = pending_reply_while_parked("pending-argv0-clip", &line);
-        let shown = reply["pending"][0]["argv0"].as_str().unwrap_or_default();
-        assert!(shown.starts_with("aaa"), "the parked argv0 is the one the resolve sent: {reply}");
-        assert_eq!(shown.chars().count(), aoide_protocol::untrusted::LINE_MAX, "clipped to LINE_MAX");
     }
 
     /// Concurrency, at the connection-thread level (task's hard

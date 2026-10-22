@@ -547,20 +547,23 @@
   code condition" — `handle_resolve` is the ONE call site that branches on
   which variant it got, and that branch is the entire mechanism that turns
   a no-code resolve into a park instead of a refusal.
-- **A park refuses, never cleans, a consumer, reason or argv0 holding a
-  control or invisible character.** `handle_resolve` checks those three
-  with `aoide_protocol::untrusted::is_unsafe` before anything parks, and names
-  the field in the refusal. Cleaning would show a reason the requester never
-  sent. The origin line is different: the broker does not validate comm,
-  hostname or username, so `watch::format_origin_line` cleans them at display.
-  The secret needs no check: `policy::valid_secret_name` admits no such
-  character at add or put.
+- **A park refuses, never cleans or clips, a consumer, reason or argv0 over
+  the approve dialog's bound (4 KiB or 60 lines) or holding a control or
+  invisible character.** `handle_resolve` checks the size first
+  (`PARKED_FIELD_BYTES_MAX`, `PARKED_FIELD_LINES_MAX`), then the characters
+  with `aoide_protocol::untrusted::is_unsafe`, before anything parks, and names
+  the field and the rule in the refusal. Cleaning would show a reason the
+  requester never sent, and clipping would hide the tail of a field the person
+  approves. The line bound is reached only by a field past 60 lines, since a
+  newline is itself a control character. The origin line is different: the
+  broker does not validate comm, hostname or username, so
+  `watch::format_origin_line` cleans them at display. The secret needs no
+  check: `policy::valid_secret_name` admits no such character at add or put.
 - **A parked ask's argv0 is a claim the approve screen shows, never a
-  gate.** `park::ParkedAsk::argv0` is the resolve's argv0, clipped to
-  `LINE_MAX` at ingest (`handle_resolve`), and `approve_context` prints it
-  as the program the requester says receives the value. The broker does
-  not run it or check it against anything, so nothing may decide a
-  release from it.
+  gate.** `park::ParkedAsk::argv0` is the resolve's argv0, kept whole under
+  the parked-field bound, and `approve_context` prints it as the program the
+  requester says receives the value. The broker does not run it or check it
+  against anything, so nothing may decide a release from it.
 - **`exec` never asks for a code (ruling 87).** A park prints the approve
   line and waits; `resolve_for_exec` reads nothing from stdin and sends no
   approve op. The context a person reads before typing a code is

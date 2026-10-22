@@ -378,9 +378,11 @@ connecting process's real uid, read via `SO_PEERCRED` (kernel-truth, not
 self-asserted) and recorded alongside the self-asserted `consumer` name,
 never in place of it — see "Peer identity (`SO_PEERCRED`, task #73)" below.
 `argv0` (the wrapped command's own argv[0], sent by `secrets exec`) names the
-program in the audit lines. On a resolve that parks, the broker keeps it,
-clipped to `LINE_MAX`, and the approve screen shows it as the program the
-requester says receives the value. The broker never runs it.
+program in the audit lines. On a resolve that parks, the broker keeps it whole,
+and the approve screen shows it as the program the requester says receives the
+value. The broker never runs it. A parked consumer, reason or argv0 over 4 KiB
+or 60 lines is refused at park, with nothing parked, the same as one holding a
+control or invisible character: the approve dialog's bound, not a second one.
 **`reason` (P3) is free-text, self-asserted, DISPLAY-ONLY context for why
 this ask exists** — `secrets exec` sends the wrapped command's own argv,
 space-joined and truncated to ~60 chars, unless the caller overrides it with
@@ -613,7 +615,8 @@ parked ask: the secret, consumer, reason and argv0 (the program the requester
 says receives the value) are the requester's claims, and so is the origin line
 (`from: <username> · <comm> (pid <pid>) @ <hostname>`). The peer uid is the
 kernel's word, and so is the pid in the origin line, as read at park time;
-`comm` is process-controlled text, shown as data. It then reads one code, from a
+`comm` is process-controlled text, shown as data. The secret and consumer are
+the last line before the prompt. Approve then reads one code, from a
 no-echo prompt on a terminal or from exactly one stdin line of at most 256
 bytes; a longer one is refused, and nothing is sent. An id that is not in
 `secrets pending` is refused before any prompt, with no approve op. Empty input

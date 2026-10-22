@@ -6602,6 +6602,11 @@ code (ruling 87): it prints that line and waits, reading nothing from stdin,
 until the park is approved from another process or times out, and it sends no
 approve op of its own.
 
+**A parked field is bounded.** A consumer, reason or argv0 over 4 KiB or 60
+lines is refused at park, and so is one holding a control or invisible
+character: the reply names the field and the rule, and nothing parks. The
+bound is the approve dialog's cap. The argv0 is kept whole, never clipped.
+
 **Ids are nonce-prefixed (P-N2c, FIX 4), not a bare counter.** An id has the
 shape `<4-hex-nonce>-<counter>` (e.g. `3f2a-7`) — the nonce is 2 random
 bytes read once per broker process start and shared by every id that

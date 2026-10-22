@@ -1492,8 +1492,9 @@ pub(crate) fn park_hint(id: &str, timeout_secs: u64, expires_at: Option<u64>) ->
     format!("parked as ask {id} — complete with: aoide secrets approve {id}  (or dismiss {id}); {until}")
 }
 
-/// What `approve` shows before it reads a code. The secret, consumer, reason
-/// argv0 and origin are the requester's claims. The peer uid is the kernel's word,
+/// What `approve` shows before it reads a code. The reason, argv0 and origin are
+/// the requester's claims, and the secret and consumer come last, on the line
+/// above the prompt. The peer uid is the kernel's word,
 /// and so is the origin's pid, as read at park time (`park::AskOrigin`'s doc).
 /// `comm` is process-controlled text, shown as data and never trusted.
 pub(crate) fn approve_context(ask: &PendingAsk) -> String {
@@ -1509,12 +1510,12 @@ pub(crate) fn approve_context(ask: &PendingAsk) -> String {
         None => String::new(),
     };
     format!(
-        "parked ask {}\n  the requester claims (unverified): secret {}, consumer {}, reason {}\n  the requester claims (unverified): the program that receives the value is {}\n{origin}  the kernel stamped the peer: {peer}\n",
+        "parked ask {}\n  the requester claims (unverified): reason {}\n  the requester claims (unverified): the program that receives the value is {}\n{origin}  the kernel stamped the peer: {peer}\n  the requester claims (unverified): secret {}, consumer {}\n",
         ask.id,
-        ask.secret,
-        ask.consumer,
         ask.reason.as_deref().unwrap_or("none given"),
         ask.argv0.as_deref().unwrap_or("none given"),
+        ask.secret,
+        ask.consumer,
     )
 }
 
@@ -2943,6 +2944,22 @@ mod argv_free_tests {
         assert!(
             shown.contains("the requester claims (unverified): the program that receives the value is /usr/bin/psql"),
             "{shown}"
+        );
+    }
+
+    /// V1: the secret and consumer are the last line before the prompt, so a
+    /// long claim above them cannot scroll them off the screen.
+    #[test]
+    fn approve_context_puts_the_secret_and_consumer_on_the_line_above_the_prompt() {
+        let row = r#"{"id":"3f2a-3","secret":"db-prod","consumer":"deploy-bot","requestedAt":1700000000,"peerUid":1000,"reason":"psql","argv0":"/usr/bin/psql","origin":{"username":"khoa","pid":42,"comm":"psql","hostname":"box"}}"#;
+        let s = park_broker(format!("[{row}]"), r#"{"ok":true}"#);
+        let mut out = Vec::new();
+        approve_with(&approve_inv(PARK_ID, &[]), &s.socket, &mut &b"123456\n"[..], &mut out, false).unwrap();
+        let shown = String::from_utf8(out).unwrap();
+        let last = shown.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or_default();
+        assert!(
+            last.contains("db-prod") && last.contains("deploy-bot"),
+            "the secret and consumer are not the last line before the prompt:\n{shown}"
         );
     }
 

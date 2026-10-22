@@ -184,9 +184,9 @@ pub struct ParkedAsk {
     /// carries). Never gates anything, never interpreted as anything but
     /// text a human reads on a dialog/prompt (`broker.rs`'s module doc).
     pub reason: Option<String>,
-    /// The argv0 the resolve named, clipped to `LINE_MAX` at ingest: the program
-    /// the requester says receives the value. Display-only, never a gate, like
-    /// `reason`.
+    /// The argv0 the resolve named, whole: ingest refuses one over the parked-field
+    /// bound rather than clipping it. The program the requester says receives the
+    /// value. Display-only, never a gate, like `reason`.
     pub argv0: Option<String>,
     /// WHO/WHERE this ask's requesting connection came from, captured ONCE
     /// at park time — see [`AskOrigin`]'s own doc.
