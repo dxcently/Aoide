@@ -1075,7 +1075,7 @@ fn handle_approve(
     // The code is now valid AND consumed — the ask must resolve one way or
     // another from here, never stay parked.
     let Some(ask) = parked.take(&id) else {
-        let reason = format!("pending ask `{id}` no longer exists (it may have timed out or been dismissed)");
+        let reason = refuse_taken_after_check(&id);
         audit_approve(secrets_home, &id, Some(&secret), false, &reason, approver_uid);
         return json!({"ok": false, "error": reason});
     };
@@ -1111,6 +1111,12 @@ fn handle_approve(
             json!({"ok": false, "error": e})
         }
     }
+}
+
+/// The refusal when a code checked out but its ask was no longer parked when it
+/// was taken. The check already spent the code, so a retry cannot use it.
+fn refuse_taken_after_check(id: &str) -> String {
+    format!("the code was checked and used, but ask `{id}` is no longer parked (it timed out or was dismissed), so nothing was released; run the resolve again")
 }
 
 /// Fetch `secret`'s value fresh through its policy's backend — the SAME
@@ -4711,6 +4717,15 @@ mod tests {
             None => std::env::remove_var(crate::park::PARK_TIMEOUT_ENV),
         }
         std::fs::remove_dir_all(&home).ok();
+    }
+
+    /// F19: a code that checked out for an ask already gone must say the code
+    /// was used, so the person does not retry it.
+    #[test]
+    fn a_code_checked_for_a_gone_ask_says_the_code_was_used() {
+        let reason = refuse_taken_after_check("3f2a-3");
+        assert!(reason.contains("the code was checked and used"), "{reason}");
+        assert!(reason.contains("nothing was released"), "{reason}");
     }
 
     /// The `pending` reply while one parked resolve, `line`, is still parked.
