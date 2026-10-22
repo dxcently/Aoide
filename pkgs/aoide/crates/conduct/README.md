@@ -91,6 +91,28 @@ replays: `pending list` and the conductor spell every unsafe character of an
 entry as a visible escape (`visible`: `\n`, `\x1b`, `\u{202e}`), never
 stripping one, and a held spawn shows as its whole command.
 
+A hold is kept for seven days from its `queuedAt`. Past that it is `expired`:
+`list` shows the state with its age and offers only a deny, `approve` refuses
+it, and `deny` removes it. The next hold drops every expired entry before it
+counts a source's cap or the file bound, and writes one `session.pending.evict`
+audit line per entry it drops to the audit log of the call that queued the
+hold, so holds nobody will approve cannot fill the queue. A failed append is
+not retried.
+
+A hold whose target can never take it is `gone`. `list` offers only a deny for
+it and `approve` refuses it. Its target's record is `done`, or no record for
+the target exists four hours after the hold was queued. Eviction leaves a gone
+hold alone: it stays queued until it is denied or reaches its seven days. A
+dead session reads `pending` until a reaper pass marks its record `done` (the
+reaper's silence bands); that pass usually prunes the record too, so the target
+reads as absent, and the hold lists as `gone` four hours after it was queued.
+
+`approve` and `deny` require `--expect <fingerprint>`, the `fingerprint` that
+`list --json` prints for the entry. A bare index is refused before anything is
+taken: the refusal prints the entry it names and the command that names it by
+fingerprint. A stale one takes nothing and says to list the queue again; a
+blank one is refused too.
+
 ## Named seams (what it exposes)
 
 - **The workspace ↔ project binding (§B)**: `graph/workspace.rs` implements

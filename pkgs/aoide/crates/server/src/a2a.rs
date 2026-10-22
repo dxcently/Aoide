@@ -805,7 +805,7 @@ fn opening_turn_worker(
     let word = if prompt.is_empty() {
         "skipped-empty"
     } else {
-        hold_opening_turn(&id, &prompt, from.as_deref())
+        hold_opening_turn(&id, &prompt, from.as_deref(), &audit_log)
     };
     aoide_conduct::graph::stamp_opening_turn(&id, word);
     let _ = audit(
@@ -825,8 +825,8 @@ fn opening_turn_worker(
 /// node already holds the queue's per-source cap or the file's whole bound,
 /// `hold-failed` when the write itself failed or the prompt is over the queue's
 /// per-entry byte cap.
-fn hold_opening_turn(id: &str, prompt: &str, from: Option<&str>) -> &'static str {
-    match hold_pending(id, prompt, true, from) {
+fn hold_opening_turn(id: &str, prompt: &str, from: Option<&str>, audit_log: &Path) -> &'static str {
+    match hold_pending(id, prompt, true, from, audit_log) {
         Ok(()) => "held-pending",
         Err(HoldRefused::Full | HoldRefused::FileFull) => "queue-full",
         Err(HoldRefused::Stage(_) | HoldRefused::TooLarge(_)) => "hold-failed",
@@ -12313,7 +12313,8 @@ mod tests {
     /// itself queues: through `hold_pending`.
     fn fill_source(id: &str, from: &str) {
         for n in 0..aoide_conduct::graph::PENDING_CAP_PER_SOURCE {
-            aoide_conduct::graph::hold_pending(id, &format!("{from} #{n}"), true, Some(from)).unwrap();
+            let log = aoide_protocol::default_audit_log();
+            aoide_conduct::graph::hold_pending(id, &format!("{from} #{n}"), true, Some(from), &log).unwrap();
         }
     }
 

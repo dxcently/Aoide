@@ -768,9 +768,12 @@ aoide session pending list [--json]
 ### aoide session pending approve
 
 ```
-aoide session pending approve <id> [--json]
+aoide session pending approve <id> --expect <fingerprint> [--json]
 ```
 
+- **Requires:** `--expect <fingerprint>`, the `fingerprint` that `list --json`
+  prints for the entry. Without it nothing is taken: the refusal
+  (`reason: "expect-required"`) prints the entry and the command that names it.
 - **Reads:** `state/stage/pending.json`; `<id>` is the entry's list position.
 - **Writes:** re-synthesizes and runs the exact `send --id <sessionId>
   --yes -- <text>` (with `--submit`/`--from` carried through) the held entry
@@ -792,9 +795,11 @@ aoide session pending approve <id> [--json]
 ### aoide session pending deny
 
 ```
-aoide session pending deny <id> [--json]
+aoide session pending deny <id> --expect <fingerprint> [--json]
 ```
 
+- **Requires:** `--expect <fingerprint>`, as for `approve`. Without it nothing
+  is removed.
 - **Reads:** `state/stage/pending.json`; `<id>` is the entry's list position.
 - **Writes:** removes the entry from `pending.json` under the stage lock —
   injects nothing. The drop is recorded: a resolution record under

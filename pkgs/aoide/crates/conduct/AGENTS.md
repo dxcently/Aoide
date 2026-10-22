@@ -104,8 +104,9 @@ in the message.
   and `A2a` never do. `--yes` and the global autogate environment are read
   only past that check, so a send from a remote door parks whatever it asks
   for unless an attested rule delivers it (next bullet), and
-  `pending_approve` refuses before it takes an entry off the queue, both when
-  the door cannot approve and when the entry's target is not live yet.
+  `pending_approve` refuses before it takes an entry off the queue: when the
+  door cannot approve, when the entry has expired, when its target is gone, and
+  when its target is not live (not registered yet, or ended).
   `pending_deny` refuses on the same predicate, so a door that cannot approve
   cannot empty the queue under the human either. The same predicate gates
   the other two things a human's approval answers: `session_permit` files no
@@ -243,8 +244,9 @@ in the message.
   `an_attested_mcp_callers_restore_is_held_pending_though_its_send_would_deliver`
   and `a_restore_over_an_mcp_door_is_held_pending_and_never_typed`.
 - **`pending.json` has one writer, and it holds the per-source cap and the
-  per-entry size.** `record_pending` (`graph/send.rs`) counts the entries
-  carrying the new entry's `from` and appends under ONE stage lock, refusing
+  per-entry size.** `record_pending` (`graph/send.rs`) drops the expired
+  entries first (next invariant), then counts the entries carrying the new
+  entry's `from` and appends under ONE stage lock, refusing
   at `PENDING_CAP_PER_SOURCE` without touching what is queued, and refusing an
   entry that serializes past `PENDING_ENTRY_MAX_BYTES` (a send's text and a
   spawn's argv alike) with `HoldRefused::TooLarge`, and refusing a write that
@@ -258,6 +260,61 @@ in the message.
   `an_entry_over_the_byte_cap_is_refused_audited_and_leaves_the_queue_alone`,
   `the_file_bound_refuses_a_hold_and_the_stored_file_stays_under_it` and
   `an_oversize_held_spawn_is_refused_audited_and_never_queued`.
+- **A hold expires seven days after its `queuedAt`, and eviction runs before
+  either cap.** `is_expired` (`graph/send.rs`) reads the stamp each time an
+  entry is read, and expiry is never stored. An empty `queuedAt`, or one that
+  does not parse, is expired, with no `expires`. `pending_list` reports
+  `state` `pending`, `gone` (next invariant) or `expired`, and `expires`
+  (`queuedAt` plus seven days). An expired entry's human line offers only
+  deny. `pending_approve` refuses an expired entry before the take, taught, and
+  launches nothing.
+  `pending_deny` removes it. `record_pending` drops every expired entry under
+  the stage lock before it counts a cap, and writes one
+  `session.pending.evict` audit line per entry it drops, from whichever door
+  queued the hold (`hold_pending` binds the A2A door, `hold_spawn` the MCP
+  door) to the log the queuing call passes in (`audit_log_of`, or the A2A
+  worker's own log). The line is written once the file that dropped the entry
+  is on disk, so a failed write audits nothing; a failed append is not retried.
+  A queue at its file bound refuses a new
+  hold, taught, and takes it once an expired entry is evicted. Assume breach:
+  a process running as the user can edit `pending.json` and age a hold past
+  its week, mark a target's record `done` in `sessions.json` (its holds read
+  `gone` at once), or delete the record (its holds read `gone` 4 h after they
+  were queued). Approval stays on the person's terminal: the MCP door still
+  cannot approve or deny, whatever the queue holds. Pinned by
+  `a_hold_queued_over_seven_days_ago_lists_as_expired_and_offers_only_deny`,
+  `a_hold_is_held_for_seven_days_from_its_queued_stamp_and_no_longer`,
+  `approve_refuses_an_expired_hold_before_the_take_and_delivers_nothing`,
+  `deny_removes_an_expired_hold_and_injects_nothing`,
+  `an_empty_or_unreadable_queued_at_counts_as_expired_with_no_expiry`,
+  `a_hold_evicts_expired_entries_before_the_source_cap_and_audits_each_one`,
+  `a_held_spawn_evicts_expired_entries_and_audits_each_one`,
+  `a_held_send_evicts_expired_entries_and_audits_each_one`,
+  `a_hold_both_expired_and_gone_lists_and_refuses_as_expired`,
+  `each_eviction_line_carries_the_door_of_the_call_that_triggered_it`,
+  `a_failed_file_write_audits_nothing`,
+  `an_eviction_from_a_spawn_held_over_mcp_goes_to_the_callers_log`,
+  `an_eviction_from_a_send_held_over_a2a_goes_to_the_callers_log`,
+  `a_queue_at_its_file_cap_refuses_a_hold_taught_while_nothing_in_it_is_expired`
+  and `a_queue_at_its_file_cap_takes_a_hold_again_once_an_expired_entry_is_evicted`.
+- **A hold is gone when its target can never take it, and approve refuses it.**
+  `gone_reason` (`graph/pending.rs`) reads the session roster: a record whose
+  `state` folds to `done` makes its hold gone at once, and no record at all
+  makes it gone once `GONE_ABSENT_SECS` (four hours) have passed since
+  `queuedAt`. A registered target that cannot be typed into yet is pending, not
+  gone. A held spawn has no target and is never gone. Expiry is checked first,
+  so an expired hold reads expired whatever its target. `pending_list` gives
+  `state` `gone` and a deny-only line, and `pending_approve` refuses a gone
+  entry before the take, taught with `reason: "gone"`, and launches nothing.
+  Assume breach: the roster is a file a process running as the user can
+  rewrite. A rewrite can make a hold read gone, which costs an approval and
+  nothing more, since gone only ever refuses; it never redirects a delivery to
+  another target. Pinned by
+  `an_absent_target_stays_pending_until_four_hours_then_lists_as_gone`,
+  `a_target_whose_record_is_done_lists_as_gone_and_approve_refuses_it_while_deny_removes_it`,
+  `a_registered_target_that_cannot_be_typed_into_lists_as_pending_and_never_says_once_it_registers`,
+  `a_gone_hold_that_is_not_expired_survives_an_eviction_pass`
+  and `a_held_spawn_is_never_gone_even_when_its_id_names_a_done_record`.
 - **An approver is shown what replays, in escapes, never stripped.** Every
   human view of a queued entry (`pending list`'s line, the answers of `approve`
   and `deny`, and across the crate boundary the conductor's PENDING rows) spells
@@ -281,7 +338,13 @@ in the message.
   `pending_approve` and `pending_deny` read the entry first, then `take_pending_entry`
   removes it under the stage lock only when its fingerprint is the `--expect`
   the caller named (the conductor sends the one its row drew) and it still
-  passes `PendingSpawn::is_known`. A held resurrect's `shown` plan is checked
+  passes `PendingSpawn::is_known`. `--expect` is a declared string flag on both
+  verbs, so the CLI parser takes it, and both require it: a bare index is
+  refused before the take with `reason: "expect-required"`, and the refusal
+  prints the entry and the command with its fingerprint (`refuse_bare_index`).
+  A stale value takes nothing; a blank one is refused with `reason:
+  "expect-empty"`.
+  A held resurrect's `shown` plan is checked
   by `resurrect::approved_selection` before the take, so a ledger that moved
   since the hold refuses without consuming the entry. Hold-time pins: a held
   spawn's `cwd` and a relative argv[0] are absolute, an `@file` is inlined
@@ -293,8 +356,16 @@ in the message.
   `approve_refuses_a_held_spawn_that_no_hold_would_queue_and_keeps_it`,
   `a_held_resurrect_refuses_to_launch_a_plan_its_approver_was_not_shown`,
   `approving_a_resurrect_that_revives_nothing_is_not_reported_as_launched`,
-  `a_held_spawn_pins_its_cwd_and_relative_argv0_and_refuses_stdin` and
-  `an_instructions_path_that_is_not_a_regular_file_is_refused_over_mcp_before_any_read`.
+  `a_held_spawn_pins_its_cwd_and_relative_argv0_and_refuses_stdin`,
+  `an_instructions_path_that_is_not_a_regular_file_is_refused_over_mcp_before_any_read`,
+  `approve_refuses_an_empty_expect_before_the_take`,
+  `deny_refuses_an_empty_expect_before_the_take`,
+  `a_bare_approve_is_refused_and_prints_its_fingerprinted_command`,
+  `the_printed_approve_command_approves_that_entry`,
+  `an_old_approve_fingerprint_after_an_eviction_resolves_nothing`,
+  `a_bare_deny_is_refused_and_prints_its_fingerprinted_command`,
+  `the_printed_deny_command_removes_that_entry` and
+  `an_old_deny_fingerprint_after_an_eviction_removes_nothing`.
 - **Spawn ids are distinct per call and never a socket that answers.**
   A minted id carries a process-wide counter, since the clock is seconds
   (`spawn_id`). `spawn_id_in_use` is a `connect` probe, so a socket file nothing

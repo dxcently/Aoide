@@ -4403,8 +4403,15 @@ A2a             `aoide a2a serve`, loopback included    no          queued only;
   conductable record with a socket on disk) is refused with `reason:
   "target-not-live"`, and the entry stays queued. An A2A spawn's opening turn
   can be held before its child registers, so approve again once it does. A
-  held spawn has no target yet, since approving it is what creates one, so it
-  skips that check.
+  target with no record is told it is not live (not registered yet, or ended),
+  and approve again once it is live, or deny. A target whose record exists but
+  cannot be typed into is told it is registered, and approve again
+  once it can be typed into, or deny it. A held spawn has no target yet, since
+  approving it is what creates one, so it skips that check.
+- `session pending approve` for a gone entry is refused with `reason: "gone"`,
+  before the take, and the entry stays queued until `deny`. An entry is gone
+  when its target's record is `done`, or when no record exists for its target
+  four hours after the entry was queued. A held spawn is never gone.
 - The MCP door has no generic passthrough. Every command is its own tool,
   and `spawn` and `conduct` take one `command` argument, which is one argv
   element, so an MCP caller cannot express `aoide send --yes` as a child
@@ -4432,7 +4439,11 @@ and for an MCP send whose server runs under a sealed session, and on any other
 send a door that cannot approve parks whatever it asks for. Read and resolved
 by `aoide session pending list/approve/deny`: `list` enumerates every entry (a
 malformed one — a stale hand-edited line — surfaces as `"state": "malformed"`
-rather than failing the read); `approve` re-drives the entry through the SAME
+rather than failing the read), giving each well-formed entry `pending`, `gone`
+when its target can never take it (see the `approve` bullet above), or
+`expired` once it is seven days past its `queuedAt`, or at once when its
+`queuedAt` is empty or does not parse; each carries `expires` (`queuedAt` plus
+seven days, or null). `approve` re-drives the entry through the SAME
 gated injection door with `--yes`, in-process, and only on a door that can
 approve (the table below); `deny` only on a door that can approve (the same
 table). Either resolution
@@ -4505,11 +4516,28 @@ full queue (§6).
 The A2A door's own answer to a full source is in §6 ("This door parks every
 send").
 
+A held entry expires seven days after its `queuedAt`, read off the stamp each
+time and never stored. `record_pending` drops every expired entry under the
+same stage lock before it counts a source's cap or the file bound, and writes
+one `session.pending.evict` audit line per entry it drops (`status:
+"evicted"`, the head of its text as `untrusted_data`), whichever door queued
+the hold, to the audit log that queuing call writes to; a failed append is not
+retried. A queue at its file bound therefore takes a new hold again once an
+expired entry is evicted. `approve` refuses an expired entry with `reason:
+"expired"`, before anything is taken or launched; `deny` removes it. A gone
+entry is refused the same way with `reason: "gone"`, and eviction leaves it
+alone: it stays queued until it is denied or reaches its seven days.
+
 Approval does not re-decide what the hold decided. `approve` takes the entry it
 read, under the stage lock, only when the entry's content still matches the
-`fingerprint` `list` prints, passed as `--expect` (the conductor's rows and its
-held-spawn confirm pass it on every approve and deny; a wrong fingerprint takes
-nothing). The entry must also still pass the shape check a hold applies
+`fingerprint` `list` prints, passed as `--expect <fingerprint>`. The flag is
+declared on `session pending approve` and `deny`, and both require it: the
+conductor's rows and its held-spawn confirm pass it on every approve and deny. A
+bare index is refused before the take with `reason: "expect-required"`, and the
+refusal prints the entry it names (state, target, sender, age, the head of its
+text) and the command that names it by fingerprint. A wrong fingerprint takes
+nothing, and a blank one is refused with `reason: "expect-empty"`. The entry
+must also still pass the shape check a hold applies
 (`PendingSpawn::is_known`: a plain `--id` outside `sub:`, no `--parent`, a
 `resurrect` with a `--project`); one that does not is malformed and stays where
 it is. A held resurrect stores the plan it showed in `spawn.shown`, one line per
