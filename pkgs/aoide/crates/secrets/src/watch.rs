@@ -173,6 +173,9 @@ use aoide_protocol::untrusted::clean_line;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Event {
     Released { secret: String, consumer: String, ts: u64 },
+    /// A step's wrong-code budget is spent (ruling 44). It names no ask, so it
+    /// carries no secret or consumer: it is about the step, not one request (F8).
+    BudgetSpent { ts: u64 },
     /// `reason`/`origin` are additive (P3): the wire's optional,
     /// self-asserted/best-effort context block a popup/prompt surface shows
     /// alongside the ask (`park::ParkedAsk::reason`/`park::AskOrigin`'s own
@@ -196,7 +199,7 @@ impl Event {
     /// it never carries an id, `broker.rs`'s own notify shape table).
     pub fn ask_id(&self) -> Option<&str> {
         match self {
-            Event::Released { .. } => None,
+            Event::Released { .. } | Event::BudgetSpent { .. } => None,
             Event::Parked { id, .. }
             | Event::Completed { id, .. }
             | Event::Dismissed { id, .. }
@@ -225,6 +228,9 @@ impl Event {
 pub fn parse_notify_line(line: &str, ts: u64) -> Option<Event> {
     let payload: Value = serde_json::from_str(line).ok()?;
     let kind = payload.get("event").and_then(Value::as_str)?;
+    if kind == "totp-budget-spent" {
+        return Some(Event::BudgetSpent { ts });
+    }
     let secret = payload.get("secret").and_then(Value::as_str)?.to_string();
     let consumer = payload.get("consumer").and_then(Value::as_str)?.to_string();
 
@@ -371,7 +377,7 @@ impl Queue {
             Event::Completed { id, .. } | Event::Dismissed { id, .. } | Event::Expired { id, .. } => {
                 self.remove(id);
             }
-            Event::Released { .. } => {}
+            Event::Released { .. } | Event::BudgetSpent { .. } => {}
         }
     }
 
@@ -610,6 +616,9 @@ pub fn narrate_event(event: &Event) -> String {
         Event::Expired { id, secret, consumer, ts } => {
             format!("  {}  expired     {secret} \u{2192} {consumer}   ask {id}   (park timed out)", hms(*ts))
         }
+        Event::BudgetSpent { ts } => {
+            format!("  {}  budget      a step's wrong-code budget is spent: checks are refused until the next 30 s step", hms(*ts))
+        }
     }
 }
 
@@ -643,6 +652,7 @@ pub fn event_to_json(event: &Event) -> Value {
         Event::Expired { id, secret, consumer, ts } => {
             json!({ "event": "expired", "id": id, "secret": secret, "consumer": consumer, "ts": ts })
         }
+        Event::BudgetSpent { ts } => json!({ "event": "totp-budget-spent", "ts": ts }),
     }
 }
 
@@ -1592,6 +1602,21 @@ mod tests {
     fn an_unrecognized_event_kind_is_skipped() {
         let payload = json!({ "event": "something-new", "secret": "t", "consumer": "m" });
         assert_eq!(parse_notify_line(&notify_line(&payload), 1), None);
+    }
+
+    /// F8: `broker::handle_resolve` writes this exact line when a step's
+    /// wrong-code budget is spent. It names no secret or consumer, so the
+    /// parser must not require either, or the watch never shows the notice.
+    #[test]
+    fn the_budget_notice_parses_though_it_names_no_secret_or_consumer() {
+        assert!(parse_notify_line(r#"{"event":"totp-budget-spent"}"#, 1).is_some(), "the budget notice is parsed");
+    }
+
+    #[test]
+    fn the_budget_notice_is_narrated_as_a_line_for_the_person() {
+        let event = parse_notify_line(r#"{"event":"totp-budget-spent"}"#, 1).expect("the budget notice parses");
+        let line = narrate_event(&event);
+        assert!(line.contains("wrong"), "the watch says what was refused: {line}");
     }
 
     #[test]

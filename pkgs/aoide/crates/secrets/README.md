@@ -793,8 +793,8 @@ authenticates the SESSION and its CLASS, never the `consumer` string.
 Every notable broker event fires a NAME-ONLY notification, so a desktop can
 surface secret activity — and so a future popup phase (the code-entry UI
 P-N2's own doc already named as this substrate's eventual consumer) has a
-signal to key off of, not just `secrets pending`'s poll. Five events, the
-task's own exact shapes:
+signal to key off of, not just `secrets pending`'s poll. Six events, with
+these shapes:
 
 ```
 released:  {"event":"released", "secret", "consumer"}            — a TOTP-free grant
@@ -802,6 +802,7 @@ parked:    {"event":"parked", "id", "secret", "consumer", "timeoutSecs", "reason
 completed: {"event":"completed", "id", "secret", "consumer"}      — a successful approve
 dismissed: {"event":"dismissed", "id", "secret", "consumer"}
 expired:   {"event":"expired", "id", "secret", "consumer"}        — a park that timed out
+totp-budget-spent: {"event":"totp-budget-spent"}                  — a step's wrong-code budget is spent
 ```
 
 **`parked`'s `reason`/`origin` are additive (P3)** — `null`/absent on a
@@ -824,12 +825,11 @@ silently skipped there, exactly like any other unrecognized `event` kind
 already is) — a deliberate scope cut, not an oversight: task #70 asked
 only for the audit line, not a new `watch` narration.
 
-**The wrong-code budget adds a SEVENTH event, `totp-budget-spent`,** through
-the same `emit_notify`: `{"event":"totp-budget-spent"}`, fired once per step,
-by the first check of that step that the budget refuses untested ("Invariants
-held" below). Like `age-identity-minted` it is name-only, and
-`watch::parse_notify_line` skips it for the same reason: no `secret` or
-`consumer` on it.
+**The wrong-code budget emits `totp-budget-spent`,** through the same
+`emit_notify`: `{"event":"totp-budget-spent"}`, once per step, from the first
+check of that step that the budget refuses untested ("Invariants held"
+below). It is name-only, so `watch::parse_notify_line` reads it before it
+requires a `secret` or `consumer`, and `secrets watch` prints one line for it.
 
 `released` fires ONLY on a TOTP-free grant — `requireTotp:false`, or an
 automation-skip (P-N1's `automation.enabled` + a listed consumer) — never on
