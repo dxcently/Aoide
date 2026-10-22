@@ -8656,6 +8656,69 @@ mod tests {
     /// daemon's own process tree. The same claim on the local arm (this very
     /// process IS the hook) links normally, because the difference is the pid,
     /// not the claim: one rule, two arms.
+    /// A target whose record is `done` (the reaper writes `done` into both files)
+    /// and registers again under its id: a hook SessionStart and a `session start`
+    /// both keep the record `done`, so its hold still lists `gone`.
+    #[test]
+    fn a_done_target_that_registers_again_still_lists_gone() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _window_env = EnvVars::save(&["HYPRLAND_INSTANCE_SIGNATURE"]);
+        std::env::remove_var("HYPRLAND_INSTANCE_SIGNATURE");
+        let (_root_env, _root) = aoide_test_support::isolated_mail_root("done-reregister");
+        let claude = agent_profile(CLAUDE_PROFILE.name).unwrap();
+        let id = "done-reregister-target";
+        let start = format!(r#"{{ "session_id": "{id}", "hook_event_name": "SessionStart", "cwd": "/p" }}"#);
+        let hold_state = || {
+            let list = Invocation {
+                path: vec!["session".into(), "pending".into(), "list".into()],
+                args: vec![],
+                flags: BTreeMap::new(),
+                door: aoide_protocol::Door::Cli,
+            };
+            crate::graph::pending_list(&list).data.unwrap()["pending"][0]["state"].clone()
+        };
+        let record_state = || {
+            load_stage::<SessionsFile>(&sessions_path())
+                .unwrap()
+                .sessions
+                .into_iter()
+                .find(|s| s.session_id == id)
+                .unwrap()
+                .state
+        };
+
+        let first = hook_for_profile_gated(aoide_protocol::Door::Cli, claude, &start, false, None, None);
+        assert!(!first.message.contains("no-op"), "{}", first.message);
+        crate::graph::hold_pending(
+            id,
+            "held for a session that ends",
+            true,
+            Some("node:peer"),
+            &aoide_protocol::default_audit_log(),
+        )
+        .unwrap();
+        assert_eq!(hold_state(), "pending", "a registered, not done target holds pending");
+        let mut sessions: SessionsFile = load_stage(&sessions_path()).unwrap();
+        for s in sessions.sessions.iter_mut().filter(|s| s.session_id == id) {
+            s.state = "done".to_string();
+        }
+        write_stage(&sessions_path(), &sessions).unwrap();
+        let mut hooks: HooksFile = load_stage(&hooks_path()).unwrap_or_default();
+        aoide_storage::session::upsert_hook(&mut hooks.hooks, id, "done", "2026-10-22T10:00:00Z");
+        write_stage(&hooks_path(), &hooks).unwrap();
+        assert_eq!(hold_state(), "gone", "a done target lists as gone");
+
+        let again = hook_for_profile_gated(aoide_protocol::Door::Cli, claude, &start, false, None, None);
+        assert!(!again.message.contains("no-op"), "{}", again.message);
+        assert_eq!(hold_state(), "gone", "a hook re-registration keeps the done record gone");
+        assert_eq!(record_state(), "done", "a hook re-registration writes no state");
+
+        let started = crate::graph::session_store::do_session_start(id, Some("claude"), Some("/p"), None, None, None, None, None, None);
+        assert_eq!(started.status, aoide_protocol::output::Status::Ok, "{}", started.message);
+        assert_eq!(hold_state(), "gone", "a session start keeps the done record gone");
+        assert_eq!(record_state(), "done", "a session start writes no state");
+    }
+
     #[test]
     fn a_daemon_served_hook_with_no_door_pid_links_nothing_and_stamps_no_ancestry() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
