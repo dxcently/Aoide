@@ -898,22 +898,32 @@ fn status_text(secrets: &[crate::client::StatusSecret]) -> String {
 /// pending` returns is value-free by construction (`PendingAsk` has no
 /// value field at all); this handler only re-shapes it into JSON, adding
 /// nothing.
+/// One pending ask as its `secrets pending --json` row. Every claim the approve
+/// screen shows is carried, so a surface that lists the asks shows the same
+/// claims `approve` would (F5).
+fn pending_row(a: &crate::client::PendingAsk) -> serde_json::Value {
+    json!({
+        "id": a.id,
+        "secret": a.secret,
+        "consumer": a.consumer,
+        "requestedAt": a.requested_at,
+        "peerUid": a.peer_uid,
+        "reason": a.reason,
+        "argv0": a.argv0,
+        "origin": {
+            "username": a.origin.username,
+            "pid": a.origin.pid,
+            "comm": a.origin.comm,
+            "hostname": a.origin.hostname,
+        },
+    })
+}
+
 fn handle_secrets_pending(inv: &Invocation) -> Outcome {
     let cmd = "secrets.pending";
     match crate::client::pending(&crate::socket::socket_path()) {
         Ok(asks) => {
-            let data: Vec<serde_json::Value> = asks
-                .iter()
-                .map(|a| {
-                    json!({
-                        "id": a.id,
-                        "secret": a.secret,
-                        "consumer": a.consumer,
-                        "requestedAt": a.requested_at,
-                        "peerUid": a.peer_uid,
-                    })
-                })
-                .collect();
+            let data: Vec<serde_json::Value> = asks.iter().map(pending_row).collect();
             Outcome::ok(cmd, format!("{} pending ask(s)", asks.len())).with_data(json!({ "pending": data }))
         }
         Err(e) => teach::from_broker(&teach::Where { inv, socket: &crate::socket::socket_path(), secret: None }, &e)
@@ -1059,6 +1069,30 @@ fn handle_secrets_migrate(inv: &Invocation) -> Outcome {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn pending_row_carries_the_claims_approve_shows() {
+        let ask = crate::client::PendingAsk {
+            id: "3".into(),
+            secret: "db-prod".into(),
+            consumer: "m".into(),
+            requested_at: 1_789_862_400,
+            peer_uid: Some(1000),
+            peer_sid: None,
+            reason: Some("nightly deploy".into()),
+            argv0: Some("/usr/bin/psql".into()),
+            origin: crate::client::PendingOrigin {
+                username: Some("khoa".into()),
+                pid: Some(42),
+                comm: Some("psql".into()),
+                hostname: Some("box".into()),
+            },
+        };
+        let row = pending_row(&ask);
+        assert_eq!(row["reason"], "nightly deploy", "{row}");
+        assert_eq!(row["argv0"], "/usr/bin/psql", "{row}");
+        assert_eq!(row["origin"]["comm"], "psql", "{row}");
+    }
+
     #[cfg(unix)]
     #[test]
     fn approve_refuses_a_totp_flag_through_the_registry_before_any_broker_op() {

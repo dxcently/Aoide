@@ -303,7 +303,7 @@ below) into something richer.
 <- {"ok":false,"error":"<value-free message>"}      (denied/error)
 
 -> {"op":"pending"}
-<- {"ok":true,"pending":[{"id":"<id>","secret":"<name>","consumer":"<consumer>","requestedAt":<unix-seconds>,"peerUid":<uid-or-null>,"reason":"<text>"|null,"origin":{"username":<string-or-null>,"pid":<int-or-null>,"comm":<string-or-null>,"hostname":<string-or-null>}},...]}
+<- {"ok":true,"pending":[{"id":"<id>","secret":"<name>","consumer":"<consumer>","requestedAt":<unix-seconds>,"peerUid":<uid-or-null>,"reason":"<text>"|null,"origin":{"username":<string-or-null>,"pid":<int-or-null>,"comm":<string-or-null>,"hostname":<string-or-null>},"argv0":<string-or-null>},...]}
 
 -> {"op":"status"}
 <- {"ok":true,"home":"<the secrets home the broker read>","secrets":[{"name":"<name>","backend":"<backend>","requireTotp":<bool>,"consumers":[...],"automation":{"enabled":<bool>,"consumers":[...]},"sharedWith":[...],"remote":<bool>,"allowRemoteOrigin":<bool>},...]}
@@ -580,9 +580,10 @@ operator -> aoide secrets pending                          (a SEPARATE connectio
 ```
 
 **The value never exists anywhere until the ask resolves.** Parking stores
-only `{id, secret name, consumer, requestedAt}` — never a value, never a
-partial fetch — the SAME "never store or park a value" invariant every
-other command in this crate holds (`AGENTS.md`). `approve` fetches fresh,
+only `{id, secret name, consumer, requestedAt}` and the display-only claims
+(`reason`, `argv0`, `origin`) — never a value, never a partial fetch — the
+SAME "never store or park a value" invariant every other command in this
+crate holds (`AGENTS.md`). `approve` fetches fresh,
 through the backend, only after a code has already validated, then sends
 it down the channel the original `resolve` call is blocked reading —
 `approve`'s own wire reply to the operator carries no `value` field at all.
