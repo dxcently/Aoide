@@ -51,3 +51,12 @@
 - `base16` and `fonts.monospace` stay whole units (a host value replaces the
   rice's whole scheme or face), and `override` stays the host's own tier
   (CONTRACTS.md §5).
+
+### `rice list` reports pending edits and the next rebuild
+
+- `strillix rice list --json` gains a top-level `nextRebuild`: the rice the
+  host file's one `habit.rice.declared` line names, when it differs from
+  `declared` (null otherwise). Each rice row gains `pending`, true when the
+  machine copy's theme, `rice.nix`, `hyprland.conf` or widgets differ from the
+  shipped copy or the build ships none, and `nixChanged`, true when `rice.nix`
+  is among those. Both are null where the templates dir or a read cannot say.

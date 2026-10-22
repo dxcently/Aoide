@@ -87,7 +87,10 @@ is chosen.
 
 `{cmd:"ricemenu"}` is the socket's other READ. It runs `strx rice list --json`
 and passes its `data` through (`mode`, `rice`, `draft`, `stagingRice`,
-`declared`, `rices`), then names the drafts' rice through the mode marker —
+`declared`, `rices`, `nextRebuild`; a row's `pending` is its dress differing
+from the build's copy or the build shipping none, `nixChanged` is `rice.nix`
+among those, and `nextRebuild` is the host file's declared rice when it is not
+`declared`), then names the drafts' rice through the mode marker —
 `stagingRice` first while declarative is locked (the rice an unlock lands on),
 `rice` first in every other mode — and runs `strx rice draft list <rice>
 --json` with the budget left of one 4 s wall clock, below the QML client's own

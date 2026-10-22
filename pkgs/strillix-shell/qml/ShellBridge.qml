@@ -266,10 +266,15 @@ QtObject {
     // `riceMenu` answers like traceSession: `cb` EXACTLY ONCE, on its own
     // throwaway socket, no replay, the daemon's children bounded
     // together under replyTimeoutMs. The answer is
-    // { ok: true, mode, rice, draft, stagingRice, declared, rices: [{ name, ok,
-    // reason? }], draftsRice, drafts: [{ name, savedAt, current }] } — `rice`,
-    // `draft`, `stagingRice`, `declared` and `draftsRice` null when unset, and
-    // `drafts` empty when no rice is named — or { ok: false, reason, message }
+    // { ok: true, mode, rice, draft, stagingRice, declared, nextRebuild,
+    // rices: [{ name, ok, reason?, pending, nixChanged }], draftsRice,
+    // drafts: [{ name, savedAt, current }] } — `rice`, `draft`, `stagingRice`,
+    // `declared`, `nextRebuild` and `draftsRice` null when unset, and `drafts`
+    // empty when no rice is named. A row's `pending` is true when its dress
+    // differs from the build's copy or the build ships none; `nixChanged` is
+    // true when `rice.nix` is among those; both are null when the list cannot
+    // say. `nextRebuild` is the host file's declared rice when it is not
+    // `declared`. Or { ok: false, reason, message }
     // with `reason` cli-failed / no-answer / no-client / no-reply (no-reply:
     // nothing answered within replyTimeoutMs, which every answered verb can
     // return). A socket error or an unreadable line answers { ok: false,

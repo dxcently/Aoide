@@ -57,7 +57,11 @@ line; it rewrites the string between the quotes and nothing else, so the next
 rebuild performs that rice. It says so in its answer, and says too when the
 staged copy holds theme or widget edits the build's copy lacks
 (`stagedDiffers`): the rebuild builds the rices version, not the live
-edits, so those reach the build through the first step and a commit.
+edits, so those reach the build through the first step and a commit. `rice
+list` reports the same state: each rice's `pending` (its dress differs from the
+build's copy, or the build does not ship it), its `nixChanged` (`rice.nix` is
+among those), and the top-level `nextRebuild` (the host file's rice, when that
+is not the declared one).
 
 Staging is the sketch — a live compositor call, no rebuild; `habit.rice.declared` selecting a rice and rebuilding is the truth — it bakes `hyprland.conf` (geometry, borders), themes every nix-manageable app via [[Stylix]], assembles and deploys the rice's widgets, and sets the host's boot default. GTK/Qt surfaces require app restarts and are declare-only, accepted by design.
 

@@ -514,7 +514,10 @@ in `docs/Aoide-Wiki/concepts/cli/Doors-and-Nodes.md`.
   thread like `sessiontrace`: `dispatch_rice_menu` runs `rice list --json`
   under one 4 s budget (`RICE_MENU_TIMEOUT`, under the QML client's 5 s) and
   passes its `data` through (`mode`, `rice`, `draft`, `stagingRice`,
-  `declared`, `rices`) with this machine's `host` name and `hostConfig` (the
+  `declared`, `rices`, `nextRebuild`: a row's `pending` says its dress differs
+  from the build's copy or the build ships none, `nixChanged` says `rice.nix` is
+  among those, and `nextRebuild` is the host file's declared rice when it is not
+  `declared`) with this machine's `host` name and `hostConfig` (the
   file `rice declare --host` rewrites, from `strillix_rice::paths::host_config`,
   null when none resolves) beside it; then, when `drafts_rice` names a rice from the mode
   marker (`stagingRice` first while declarative is locked, since an unlock

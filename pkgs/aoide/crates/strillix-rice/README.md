@@ -134,9 +134,12 @@ a config file). Paint-side — ships in `strillix`, not core.
   `rice.nix`, refusing a draft, an unknown or lending-only rice, zero or
   several lines, and a file edited between the read and the rename, and
   reports `stagedDiffers` through
-  `commands::refresh::staged_differs` (the machine copy's theme and widgets
-  hashed against the shipped copy's). CONTRACTS.md, "Declaring a rice from
-  the machine", is the contract.
+  `commands::refresh::staged_differs` (the machine copy's dress — `theme.json`,
+  `rice.nix`, `hyprland.conf`, `widgets/` — hashed against the shipped copy's).
+  CONTRACTS.md, "Declaring a rice from the machine", is the contract. `rice
+  list` reads the same two seams: `staged_diff` (the differing dress paths
+  behind `staged_differs`) for each row's `pending` and `nixChanged`, and
+  `declared_in_file` (the one live line, by the same lexer) for `nextRebuild`.
 - `paths` — the rice runtime's roots: `strillix_root()` (`$STRILLIX_ROOT`, default `<home>/.strillix`), the rice stage (`stage_dir()`), the declared twin, the rice tree (`rices_root`, `rice_dir`), the drafts, the link `rice_conf_link()` (the one link outside `$AOIDE_ROOT`) and the checkout-relative `STRILLIX_SHELL_SRC`. Every rice path derives from here; core never names one.
 - `lock` — `with_stage_lock`, the rice stage's own lock on `stage/.stage.lock`. It is the rice domain's counterpart to core's conducting lock; the two never guard the same file.
 - `migrate` — the rice state's moves and status: `migrate_rice_root` (explicit; with an aoide binary installed it refuses, moving nothing, while core's legacy `~/Aoide/state` is still due), `rice_status` (`Settled`, `Due`, `Both`, `Refused`), `rice_root_at_start` (the start-up hook: one notice, or the move under `STRILLIX_MIGRATE=1`) and `migrate_strillix_state` (the lyra link tree, moved in the same explicit run as the rice tree).
