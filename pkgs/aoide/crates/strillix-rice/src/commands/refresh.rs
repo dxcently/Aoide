@@ -31,7 +31,7 @@ use aoide_protocol::Invocation;
 use aoide_storage::fs as shellbridge;
 use aoide_storage::seal::{hex_encode, sha256};
 use serde_json::{json, Value};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
@@ -262,15 +262,20 @@ fn hash_file(path: &Path) -> Result<String, String> {
         .map_err(|e| format!("cannot read {}: {e}", path.display()))
 }
 
-/// True when the machine copy of `rice` carries a `theme.json`, `rice.nix`,
-/// `hyprland.conf` or `widgets/` file whose hash differs from the shipped
-/// copy's, or a file the other side lacks — the edits a declare does not carry,
-/// because a rebuild builds the rices version. A rice with no machine copy
-/// differs in nothing. Symlinks on either side are not compared.
-pub(crate) fn staged_differs(rice: &str, templates: &Path) -> Result<bool, String> {
+/// The dress files of `rice`'s machine copy that differ from its shipped copy
+/// under `templates`, as sorted relative paths: `theme.json`, `rice.nix`,
+/// `hyprland.conf` and everything under `widgets/`, compared by hash, a file on
+/// one side only counting as a difference. `None` when there is no shipped copy.
+/// A rice with no machine copy differs in nothing. Symlinks on either side are
+/// not compared.
+pub(crate) fn staged_diff(rice: &str, templates: &Path) -> Result<Option<Vec<String>>, String> {
     let machine = crate::paths::rice_dir(rice);
     if !machine.is_dir() {
-        return Ok(false);
+        return Ok(Some(Vec::new()));
+    }
+    let shipped_dir = templates.join(rice);
+    if !shipped_dir.is_dir() {
+        return Ok(None);
     }
     let dressed = |tree: BTreeMap<String, PathBuf>| -> BTreeMap<String, PathBuf> {
         tree.into_iter()
@@ -280,17 +285,29 @@ pub(crate) fn staged_differs(rice: &str, templates: &Path) -> Result<bool, Strin
             })
             .collect()
     };
-    let shipped = dressed(walk(&templates.join(rice), false)?);
+    let shipped = dressed(walk(&shipped_dir, false)?);
     let staged = dressed(walk(&machine, false)?);
-    if !shipped.keys().eq(staged.keys()) {
-        return Ok(true);
-    }
-    for (rel, path) in &shipped {
-        if hash_file(path)? != hash_file(&staged[rel])? {
-            return Ok(true);
+    let mut differing = Vec::new();
+    for rel in shipped.keys().chain(staged.keys()).collect::<BTreeSet<_>>() {
+        let same = match (shipped.get(rel), staged.get(rel)) {
+            (Some(s), Some(m)) => hash_file(s)? == hash_file(m)?,
+            _ => false,
+        };
+        if !same {
+            differing.push(rel.clone());
         }
     }
-    Ok(false)
+    Ok(Some(differing))
+}
+
+/// True when [`staged_diff`] finds a difference: the edits a declare does not
+/// carry, because a rebuild builds the rices version. No shipped copy is an
+/// error, which `rice declare` reports as `stagedDiffers: null`.
+pub(crate) fn staged_differs(rice: &str, templates: &Path) -> Result<bool, String> {
+    match staged_diff(rice, templates)? {
+        Some(differing) => Ok(!differing.is_empty()),
+        None => Err(format!("no shipped copy of `{rice}` under {}", templates.display())),
+    }
 }
 
 /// True when no component from `root` down to `path`'s parent is a symlink (a

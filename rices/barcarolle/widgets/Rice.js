@@ -4,14 +4,18 @@
 // A surface paints rows and calls act(); it never decides what a row means.
 // `answer` is bridge.riceMenu's reply, `mode` is theme.riceMode.
 // A row: { label, mark ("✓" in force, "○" where staging returns, ""), live, kind, name, here }.
+// A row of kind "" is an inert note (never live).
 
 function ready(answer) { return !!answer && answer.ok === true }
 
+function note(label) { return { label: label, mark: "", live: false, kind: "", name: "", here: false } }
+
 function waiting(answer) {
-    return { label: !answer ? "…" : "" + (answer.message || "no answer"), mark: "", live: false, kind: "", name: "", here: false }
+    return note(!answer ? "…" : "" + (answer.message || "no answer"))
 }
 
-// every rice in the runtime rices, then the declared build (kind "declarative", the last row)
+// every rice in the runtime rices, a "rice.nix changed" note under one whose rice.nix differs from the build's copy;
+// then the declared build (kind "declarative"), and a "next rebuild: <rice>" note when the host file declares another rice
 function switchRows(answer, mode) {
     if (!ready(answer)) return [waiting(answer)]
     var rows = []
@@ -20,12 +24,14 @@ function switchRows(answer, mode) {
         var name = "" + rices[i].name
         var here = mode === "staging" && name === answer.rice
         var back = mode === "declarative" && name === answer.stagingRice
-        rows.push({ label: rices[i].ok ? name : name + " · unreadable", mark: here ? "✓" : (back ? "○" : ""),
-                    live: !!rices[i].ok, kind: "stage", name: name, here: here })
+        rows.push({ label: rices[i].ok ? name + (rices[i].pending === true ? " · pending" : "") : name + " · unreadable",
+                    mark: here ? "✓" : (back ? "○" : ""), live: !!rices[i].ok, kind: "stage", name: name, here: here })
+        if (rices[i].nixChanged === true) rows.push(note("rice.nix changed"))
     }
     var decl = mode === "declarative"
     rows.push({ label: "Declarative" + (answer.declared ? ": " + answer.declared : ""), mark: decl ? "✓" : "",
                 live: true, kind: "declarative", name: "", here: decl })
+    if (answer.nextRebuild) rows.push(note("next rebuild: " + answer.nextRebuild))
     return rows
 }
 

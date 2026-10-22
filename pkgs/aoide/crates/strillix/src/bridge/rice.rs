@@ -356,9 +356,9 @@ pub(crate) fn run_rice_json(argv: &[&str], timeout: std::time::Duration) -> Resu
 
 /// Dispatch ONE read-only menu query: `strillix rice list --json` under
 /// [`RICE_MENU_TIMEOUT`], its `data` (`mode`, `rice`, `draft`, `stagingRice`,
-/// `declared`, `rices`) passed through verbatim with this machine's `host`
-/// name beside it (the name the Declare row's alert speaks) and `hostConfig`,
-/// the file `strillix rice declare --host` would rewrite
+/// `declared`, `rices`, `nextRebuild`) passed through verbatim with this
+/// machine's `host` name beside it (the name the Declare row's alert speaks)
+/// and `hostConfig`, the file `strillix rice declare --host` would rewrite
 /// ([`strillix_rice::paths::host_config`], null when none resolves), then — when
 /// [`drafts_rice`] names a rice for the marker — `strillix rice draft list <rice>
 /// --json` with the budget the first child left, projected to `draftsRice`

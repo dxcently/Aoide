@@ -51,9 +51,10 @@ ramp reads as, and every Stylix-managed target honours it. The rice declares it
 as `strillix.theme.polarity` beside its palette (CONTRACTS.md §1; the option
 defaults to `"light"`), and this lane hands it to Stylix `mkDefault` — so a
 venue or host that names `stylix.polarity` itself still wins. Naming
-`strillix.theme.polarity` at a venue is a different thing: a rice's own
-definition is a plain one, so a host overriding it needs `mkForce`, exactly as
-for every other rice-declared theme field. Because polarity is a
+`strillix.theme.polarity` at a venue is a different thing: a rice's value is a
+default (its module sits under `lib.mkDefault`, CONTRACTS.md §5), so a host's
+plain `strillix.theme.polarity` outranks it, as for every other theme value a
+rice declares. Because polarity is a
 single fan-out switch,
 flipping it is cheap — the discipline that makes it *look* right everywhere
 (terminal, bar, every widget agreeing) is the vision-check in

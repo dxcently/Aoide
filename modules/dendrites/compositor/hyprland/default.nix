@@ -61,8 +61,8 @@ let
   # v0 geometry tier (additive-optional, CONTRACTS.md §1): a rice MAY set
   # strillix.theme.geometry.*; every field is nullOr and falls back to the
   # opinionated defaults below when unset (component-tier fallback pattern,
-  # same as windowBorder/windowBorderInactive above). No rice sets geometry
-  # today, so these fallbacks ARE the immutable baseline in practice.
+  # same as windowBorder/windowBorderInactive above). barcarolle and cadenza
+  # set geometry; the fallbacks apply to a rice that sets none.
   geo = t.geometry;
   gapOuter = if geo.gapsOut != null then geo.gapsOut else 8;
   gapInner = if geo.gapsIn != null then geo.gapsIn else 6;

@@ -1,6 +1,6 @@
 # sonata — Design Intent
 
-**Rice:** sonata (committed rice; the shipped standard — the key every unauthored slot falls back to. yomi-strix performs `cadenza`.)
+**Rice:** sonata (committed rice; the shipped standard — the key every unauthored slot falls back to. yomi-strix performs `barcarolle`.)
 **Palette:** a Greek marble key — pale warm-marble ground, plum-charcoal ink,
 deep Attic-gold chrome accent, terracotta urgent, a true laurel leaf-green
 one-hot blaze; aegean blue steps back to a preview/information role
@@ -40,7 +40,7 @@ shared per-widget blueprint anywhere.
 
 sonata is the rices's shipped standard — the light key, and the fallback
 every unauthored slot resolves to. Any host in the
-fleet performs it with one line — `strillix.rice = "sonata";` — and the whole
+fleet performs it with one line — `habit.rice.declared = "sonata";` — and the whole
 `strillix.theme` fan-out swaps with zero other edits.
 
 ## Host-agnostic by construction
@@ -60,10 +60,11 @@ wallpaper image: a temple in daylight. It is a marble ground under dark ink, wit
 chrome drawn from a temple's own materials — aegean sea-blue, terracotta clay,
 Attic gold, laurel green, bronze verdigris, Tyrian purple, deep bronze.
 
-Because the desktop is a **marble frosted-glass** surface — "brightness is
-opacity, not colour": kitty renders at `background_opacity` 0.86 and the bar
-sheet at ~0.30 opacity **over** this ground — `base00` stays in the pale
-marble-glass family, a warm sunlit stone.
+Because much of the desktop is **marble frosted-glass** — "brightness is
+opacity, not colour": kitty renders at `background_opacity` 0.86 and the
+popouts and gadget frames at 0.72 **over** this ground, while the bar is an
+opaque strip of it (alpha 1.0) — `base00` stays in the pale marble-glass
+family, a warm sunlit stone.
 
 The polarity is **light**, the rice's own declaration (`strillix.theme.polarity`
 in `rice.nix`, mirrored in `theme.json`): `base00` is the lightest

@@ -62,7 +62,7 @@ Deeper reads:
 
 ### Self-ricing
 
-The headline feature. An agent generates, lints, stages (hot-loads live, nothing committed), and adopts a **rice** — a rice the system performs, drawn from a wallpaper or a prompt. Committed rices live in `rices/<name>/`; any host performs any committed rice by naming it (`strillix.rice = "moonlight";`). Staging vs declarative mode lets an agent hot-iterate on a rice live without ever touching the committed, home-manager-declared state until an explicit `adopt`. → [Self-Ricing](docs/Aoide-Wiki/concepts/rice/Self-Ricing.md), [Ricing Protocol](docs/Aoide-Wiki/concepts/rice/Ricing-Protocol.md).
+The headline feature. An agent generates, lints, stages (hot-loads live, nothing committed), and adopts a **rice** — a rice the system performs, drawn from a wallpaper or a prompt. Committed rices live in `rices/<name>/`; any host performs any committed rice by naming it (`habit.rice.declared = "sonata";`). Staging vs declarative mode lets an agent hot-iterate on a rice live without ever touching the committed, home-manager-declared state until an explicit `adopt`. → [Self-Ricing](docs/Aoide-Wiki/concepts/rice/Self-Ricing.md), [Ricing Protocol](docs/Aoide-Wiki/concepts/rice/Ricing-Protocol.md).
 
 ### Conducting — every terminal is a tracked session
 

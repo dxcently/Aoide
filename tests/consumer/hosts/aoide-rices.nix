@@ -18,6 +18,11 @@ _: {
 
   habit.rice.declared = "sonata";
 
+  # A venue's own theme value, written the way a real host writes one (a
+  # host-wide `blurEnabled`, a `terminalOpacity`). It must outrank only itself,
+  # never the performed rice's theme (CONTRACTS.md §5).
+  strillix.theme.geometry.gapsOut = 3;
+
   habit.users.fixture = {
     definition = ../user.nix;
     home.enable = true;

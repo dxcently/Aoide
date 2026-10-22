@@ -170,7 +170,10 @@ strx shellbridge [--run] [--json]
   failed>`, never a name), `ricemenu` (the menu's READ: re-execs `strx rice
   list --json`, then `strx rice draft list <rice> --json` when the mode names a
   rice, under one 4 s budget, and answers one line, the list's `{mode, rice,
-  draft, stagingRice, declared, rices}` plus `{draftsRice, drafts: [{name,
+  draft, stagingRice, declared, rices, nextRebuild}` (a row's `pending` is its
+  dress differing from the build's copy or the build shipping none, `nixChanged`
+  is `rice.nix` among those, and `nextRebuild` is the host file's declared rice
+  when it is not `declared`) plus `{draftsRice, drafts: [{name,
   savedAt, current}]}` and this machine's `host` and `hostConfig` (the file
   the declare rewrites), or `{ok:false, reason, message}`; it takes no fields, so
   it has no gate to fail), `ricedeclare` (the menu's Declare row, ANSWERED on
