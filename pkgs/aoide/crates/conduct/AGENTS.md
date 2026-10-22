@@ -106,7 +106,7 @@ in the message.
   for unless an attested rule delivers it (next bullet), and
   `pending_approve` refuses before it takes an entry off the queue: when the
   door cannot approve, when the entry has expired, when its target is gone, and
-  when its target is not live yet.
+  when its target is not live (not registered yet, or ended).
   `pending_deny` refuses on the same predicate, so a door that cannot approve
   cannot empty the queue under the human either. The same predicate gates
   the other two things a human's approval answers: `session_permit` files no

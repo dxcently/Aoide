@@ -4403,8 +4403,9 @@ A2a             `aoide a2a serve`, loopback included    no          queued only;
   conductable record with a socket on disk) is refused with `reason:
   "target-not-live"`, and the entry stays queued. An A2A spawn's opening turn
   can be held before its child registers, so approve again once it does. A
-  target with no record is told it is not live yet. A target whose record
-  exists but cannot be typed into is told it is registered, and approve again
+  target with no record is told it is not live (not registered yet, or ended),
+  and approve again once it is live, or deny. A target whose record exists but
+  cannot be typed into is told it is registered, and approve again
   once it can be typed into, or deny it. A held spawn has no target yet, since
   approving it is what creates one, so it skips that check.
 - `session pending approve` for a gone entry is refused with `reason: "gone"`,

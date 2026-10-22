@@ -652,8 +652,8 @@ pub fn pending_approve(inv: &Invocation) -> Outcome {
             )
         } else {
             (
-                format!("`{}` is not live yet", visible(&sid)),
-                "the session is not live yet; approve again once it registers",
+                format!("`{}` is not live (not registered yet, or ended)", visible(&sid)),
+                "approve again once it is live, or deny",
             )
         };
         audit_pending(inv, cmd, "refused", &format!("approve [{index}] {sid}: target not live"), "");
@@ -1483,7 +1483,11 @@ mod tests {
         let data = out.data.as_ref().unwrap();
         assert_eq!(data["reason"], "target-not-live", "data: {data}");
         assert_eq!(
-            data["refusal"]["why"], "the session is not live yet; approve again once it registers",
+            data["refusal"]["why"], "approve again once it is live, or deny",
+            "data: {data}"
+        );
+        assert!(
+            data["refusal"]["what"].as_str().unwrap_or_default().contains("is not live (not registered yet, or ended)"),
             "data: {data}"
         );
         assert_eq!(load_pending_array().unwrap().len(), 1, "the early approve took nothing");
@@ -2791,7 +2795,7 @@ mod tests {
         assert_eq!(young.data.as_ref().unwrap()["reason"], "target-not-live", "{}", young.message);
         assert_eq!(
             young.data.as_ref().unwrap()["refusal"]["why"],
-            "the session is not live yet; approve again once it registers"
+            "approve again once it is live, or deny"
         );
         let old = pending_approve(&named_invocation("approve", "1"));
         assert_eq!(old.data.as_ref().unwrap()["reason"], "gone", "{}", old.message);
