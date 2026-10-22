@@ -3151,6 +3151,9 @@ mod argv_free_tests {
             assert_eq!(run_exec(&exec, &s.socket).unwrap(), 0);
             return;
         }
+        // The child inherits this process's PATH to run `sh`. The tests that
+        // replace PATH hold this lock, so the spawn cannot see one of them.
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let out = std::env::temp_dir().join(format!("c1-unparked-{}.txt", std::process::id()));
         let test = "client::argv_free_tests::unparked_exec_leaves_the_child_stdin_whole";
         let mut child = spawn_role(test, "unparked-exec", &[(OUT, out.as_os_str())], None);
