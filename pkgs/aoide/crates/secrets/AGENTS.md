@@ -1133,8 +1133,9 @@
   CLI-only, door-gated but NOT `require_admin_identity` commands complete
   or refuse a parked ask over the socket, same operator-side-not-admin-side
   shape `put`/`exec` already draw: `secrets pending` (lists asks, never a
-  value), `secrets approve <id> --totp <code>` (validates with the SAME
-  `verify_totp_gate` an inline code uses, fetches fresh, releases down the
+  value), `secrets approve <id>` (reads the code, never from argv, and validates
+  it with the SAME `verify_totp_gate` an inline code uses, fetches fresh,
+  releases down the
   ORIGINAL connection — an invalid code leaves the ask parked, ledger
   unburned), `secrets dismiss <id>` (clean refusal to the original caller,
   no code needed). `resolve` gained one optional wire field, `wait`
@@ -1242,6 +1243,15 @@
   `--totp`-shaped flag or an intermediate shell wrapper to this spawn path
   that would put a code anywhere argv-visible — `client::approve` is
   called with the code exactly the way the tty prompt already does.
+  **The CLI takes no code in argv, on either verb.** `secrets approve` and
+  `secrets exec` read the code from a no-echo prompt on a terminal or one
+  stdin line (`client::approve_with`, `client::resolve_for_exec`, both through
+  `read_park_code`). `--totp` on either verb is refused by `totp_in_argv`
+  before any broker op, with a taught refusal that never repeats the value.
+  `parse_exec_args` runs that gate first. `resolve_for_exec` reads at most one
+  line through `read_line_unbuffered`, byte by byte on the descriptor
+  (`RawStdin`), so the wrapped command inherits the rest of stdin. Don't add a
+  flag, env var or temp file that carries a code into either verb.
   **Popups are PARKED-ONLY, deliberately (User-flagged default)** —
   `popup_loop` is only ever entered from a `parked` ask picked off the
   SAME `Queue`/`pick_next` the tty prompt uses; `released`/`completed`/

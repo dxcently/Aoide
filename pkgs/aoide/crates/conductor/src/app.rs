@@ -178,7 +178,7 @@ pub enum InputKind {
         name: String,
         outbound: bool,
     },
-    /// The TOTP for one parked secrets ask — `secrets approve <id> --totp`.
+    /// The TOTP for one parked secrets ask — typed at `secrets approve <id>`'s prompt.
     /// Masked like [`InputKind::PairCode`]; the value never rides any reply.
     TotpCode {
         id: String,

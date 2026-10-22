@@ -76,8 +76,8 @@ below for the gate order and the exact boundary. **P-N2 (this commit) parks a
 `requireTotp` resolve with no code instead of refusing it outright**: the
 requesting connection now WAITS (default 300s, `AOIDE_SECRETS_PARK_TIMEOUT`
 to change it) while the ask is completed from a SEPARATE connection —
-`secrets pending`/`secrets approve <id> --totp <code>`/`secrets dismiss
-<id>` — or the timeout elapses. This is what moved [`broker::serve`] from
+`secrets pending`/`secrets approve <id>`/`secrets dismiss <id>` — or the
+timeout elapses. This is what moved [`broker::serve`] from
 a single-threaded serial accept loop to thread-per-connection (a parked
 connection must never stall every other client behind it on `accept(2)`) —
 see "Parking a TOTP resolve" below for the full lifecycle. A resolve WITH
@@ -148,8 +148,8 @@ The broker must NOT exec the agent's command: it runs as the secrets uid
 (wrong cwd/env, and the child would inherit secrets privileges). Instead:
 
 ```
-agent  -> aoide secrets exec --as <consumer> --secret <name>[:VAR] [--totp NNNNNN] -- <cmd>
-       -> client (agent uid) connects, sends {op:"resolve", secret, consumer, totp?, argv0?}
+agent  -> aoide secrets exec --as <consumer> --secret <name>[:VAR] -- <cmd>
+       -> client (agent uid) connects, sends {op:"resolve", secret, consumer, argv0?}
        -> broker (secrets uid): policy gate (name exists, consumer authorized,
           requireTotp -> verify the code against the enrolled secret,
           single-use per timestep) -> fetch via the backend template AS
@@ -354,7 +354,7 @@ below) into something richer.
 `client::resolve` (`secrets exec`/`secrets get`) consumes any interim line
 itself and never surfaces it on stdout — a park prints ONE line to STDERR
 instead: `parked as ask <id> — complete with: aoide secrets approve <id>
---totp <code>  (or dismiss <id>); times out in <N>s`, so an interactive
+(or dismiss <id>); times out in <N>s`, so an interactive
 caller learns its own ask id immediately rather than watching a silent hang
 that is indistinguishable from a wedged broker for up to
 `AOIDE_SECRETS_PARK_TIMEOUT` seconds.
@@ -556,7 +556,7 @@ agent  -> aoide secrets exec --as m --secret db-prod -- psql        (no --totp)
 
 operator -> aoide secrets pending                          (a SEPARATE connection)
          <- [{"id":"3f2a-3","secret":"db-prod","consumer":"m","requestedAt":...}]
-         -> aoide secrets approve 3f2a-3 --totp 123456       (a THIRD connection)
+         -> aoide secrets approve 3f2a-3       (a THIRD connection; reads the code)
          -> broker: verify_totp_gate("123456") — SAME RFC 6238 verify +
             replay ledger an inline `--totp` code uses
             -> valid: re-run the FULL authorization gate (exists + consumer
@@ -586,14 +586,28 @@ it down the channel the original `resolve` call is blocked reading —
 `approve`'s own wire reply to the operator carries no `value` field at all.
 
 **Three ways out**, all removing the ask from the registry:
-- `secrets approve <id> --totp <code>` — a valid code releases the value to
-  the original caller; an invalid one leaves the ask parked, unburned.
+- `secrets approve <id>` — a valid code, typed at its prompt, releases the
+  value to the original caller; an invalid one leaves the ask parked, unburned.
 - `secrets dismiss <id>` — the original caller gets a clean "dismissed"
   refusal, no code needed.
 - Timeout (default 300s, `AOIDE_SECRETS_PARK_TIMEOUT` env override) — the
   original caller's refusal names the timeout, the env knob, AND both
-  completion paths (`secrets approve`/an inline `--totp` retry), since a
+  completion paths (`secrets approve`, or running the resolve again), since a
   stale id at that point would only mislead (`broker::park_timeout_message`).
+
+**The code is typed, never passed.** `secrets approve <id>` first shows the
+parked ask: the secret, consumer and reason are the requester's claims, and
+the peer uid is the kernel's word. It then reads one code, from a no-echo
+prompt on a terminal or from exactly one stdin line. An id that is not in
+`secrets pending` is refused before any prompt, with no approve op. Empty
+input sends nothing. `secrets exec` does the same for its own park: on a
+terminal it prompts; on a pipe it reads one line byte by byte, so the
+wrapped command inherits the rest of stdin. It approves its own id on a
+second connection, and the value returns on the first. At end of input it
+prints the approve line and keeps waiting until the park times out. `--totp`
+on either verb is refused with a taught refusal and no broker op: any process
+of this uid can read argv, and a code is not bound to a park, so a reader
+could spend it on its own request first.
 
 **`wait:false` is the wire-only escape hatch** for a caller that has no way
 to ever supply a code and would rather fail fast than tie up a connection
@@ -1050,7 +1064,7 @@ regardless — the broker may come back. Clean exit on Ctrl-C (a SIGINT
 handler sets a flag the tail loop notices within its next 1s poll) or on
 stdin EOF during a prompt; either way, the parting line names how many asks
 are still parked: `left the watcher — N ask(s) still parked; complete with
-aoide secrets approve <id> --totp <code>`.
+aoide secrets approve <id>`.
 
 **Startup: waits for the events feed, rather than exiting 1, if it's not
 there yet** (review rider, extended at P-G4 to the feed). On a brand-new

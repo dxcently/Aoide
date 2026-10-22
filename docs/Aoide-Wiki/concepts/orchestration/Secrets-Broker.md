@@ -31,8 +31,8 @@ cwd/env and hand secrets privileges to an arbitrary child. Instead, a value
 releases across the socket into the CALLING process:
 
 ```
-agent  ──►  aoide secrets exec --as <consumer> --secret <name> [--totp NNNNNN] -- <cmd>
-        ──►  client (caller's own uid) connects, sends {op:"resolve", secret, consumer, totp?}
+agent  ──►  aoide secrets exec --as <consumer> --secret <name> -- <cmd>
+        ──►  client (caller's own uid) connects, sends {op:"resolve", secret, consumer}
         ──►  broker (aoide-secrets uid): policy gate (exists → consumer
              authorized → remote-origin) → TOTP gate (if required)
              → fetch via the backend, AS THE BROKER'S OWN UID
@@ -153,7 +153,7 @@ agent     ──► aoide secrets exec --as m --secret db-prod -- psql   (no --t
           ──► parks: {id: "3f2a-3", secret: "db-prod", consumer: "m", …}
 
 operator  ──► aoide secrets pending                       (a separate connection)
-          ──► aoide secrets approve 3f2a-3 --totp 123456   (a third connection)
+          ──► aoide secrets approve 3f2a-3   (a third connection; types the code)
               → verifies the code, RE-RUNS the full authorization gate
                 against the ask's STORED consumer, fetches fresh, and
                 releases the value down the ORIGINAL connection

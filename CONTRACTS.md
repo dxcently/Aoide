@@ -6566,8 +6566,8 @@ then later the final reply (granted/denied/dismissed/timed-out) as
 described below. Without this line a caller has no way to learn its own
 ask's id short of a separate `pending` call raced against the park — `aoide
 secrets exec` prints it to STDERR as `parked as ask <id> — complete with:
-aoide secrets approve <id> --totp <code>  (or dismiss <id>); times out in
-<N>s` so an interactive caller is never left staring at a silent hang
+aoide secrets approve <id>  (or dismiss <id>); times out in <N>s` so an
+interactive caller is never left staring at a silent hang
 indistinguishable from a wedged broker.
 
 **Ids are nonce-prefixed (P-N2c, FIX 4), not a bare counter.** An id has the
@@ -6609,7 +6609,7 @@ in whole seconds — no config-file knob exists in the secrets home for this;
 env-only, same precedent as `AOIDE_SECRETS_HOME`/`AOIDE_SECRETS_SOCKET`),
 the parked connection gets:
 ```text
-<- {"ok":false,"error":"the pending TOTP ask for `<name>` timed out after <N>s (AOIDE_SECRETS_PARK_TIMEOUT to change the default) — resolve again with an inline `--totp <code>`, or approve the next ask before it expires with `aoide secrets approve <id> --totp <code>`"}
+<- {"ok":false,"error":"the pending TOTP ask for `<name>` timed out after <N>s (AOIDE_SECRETS_PARK_TIMEOUT to change the default) — run it again and type the code at its prompt, or approve the next ask before it expires with `aoide secrets approve <id>`"}
 ```
 naming the timeout, the env knob, and BOTH completion paths — the ask is
 removed from the registry once timed out (a late `approve`/`dismiss` against

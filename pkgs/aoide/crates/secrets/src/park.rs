@@ -20,7 +20,7 @@
 //! already-in-flight resolve.
 //!
 //! **Ids are a small monotonic counter, not a UUID** — short and
-//! human-typeable (`secrets approve 3f2a-3 --totp 123456`), the same shape
+//! human-typeable (`secrets approve 3f2a-3`), the same shape
 //! `aoide_conduct::graph::pending`'s own list-position ids favor for the
 //! same reason. Unlike that module's ids (a `pending.json` array position,
 //! reused the moment an earlier entry resolves), this counter never

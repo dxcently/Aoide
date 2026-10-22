@@ -131,7 +131,7 @@
 //! lives in one local `String` from [`crate::client::read_hidden_line`] to
 //! the [`crate::client::approve`] call and is never logged, echoed,
 //! narrated, or placed on argv (`client::approve` sends it over the socket
-//! directly, the same path `secrets approve --totp` already uses).
+//! directly, the same path `secrets approve` already uses).
 
 use crate::client::{self, PendingAsk};
 use serde_json::{json, Value};
@@ -1116,7 +1116,7 @@ fn print_farewell(queue: &Mutex<Queue>, out_lock: &Mutex<()>) {
     let _g = out_lock.lock().unwrap_or_else(|e| e.into_inner());
     let n = queue.lock().unwrap_or_else(|e| e.into_inner()).len();
     println!();
-    println!("left the watcher \u{2014} {n} ask(s) still parked; complete with aoide secrets approve <id> --totp <code>");
+    println!("left the watcher \u{2014} {n} ask(s) still parked; complete with aoide secrets approve <id>");
     let _ = std::io::stdout().flush();
 }
 

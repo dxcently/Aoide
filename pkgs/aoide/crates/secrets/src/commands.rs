@@ -214,7 +214,7 @@ pub fn register(r: &mut Registry) {
         flags: [
             flag!("as", "string", "The consumer name to present to the broker (self-asserted — the policy's consumers[] list is the real gate, not caller identity).", value: "consumer", required: true),
             flag!("secret", "string", "The secret's policy name, optionally `name:VAR` to name the injected env var explicitly (default: the name, uppercased, `-` -> `_`).", value: "name[:VAR]", required: true),
-            flag!("totp", "string", "A TOTP code for a requireTotp-gated secret — verified live against this host's enrolled secret (±1-timestep window, single-use: a wrong or already-used code is a plain denial). Omitted (or wrong) on a requireTotp secret PARKS the resolve instead of refusing outright — complete it with `secrets pending`/`secrets approve <id> --totp <code>` from another terminal, or wait out the timeout. Unresolvable only when no TOTP enrollment exists yet on this host (`secrets enroll`).", value: "code"),
+            flag!("totp", "string", "Refused: a TOTP code in argv is readable by every process of this uid. Leave it out: a parked ask asks for the code itself, at a prompt on a terminal or from one piped line. Declared so the refusal can teach.", value: "code"),
             flag!("reason", "string", "Free-text context for a popup/prompt surface to show alongside a parked ask -- what this ask is FOR, never a value. Defaults to the wrapped command's own argv, space-joined and truncated to ~60 chars, when omitted.", value: "text")
         ],
         gated: false,
@@ -381,13 +381,13 @@ pub fn register(r: &mut Registry) {
     ));
     r.insert(cmd!(
         path: ["secrets", "approve"],
-        summary: "Complete a parked resolve with a TOTP code, releasing the value down the ORIGINAL requesting connection (never into this command's own reply). Invalid/expired code: the ask stays parked and the replay ledger is unburned.",
+        summary: "Complete a parked resolve with a TOTP code, releasing the value down the ORIGINAL requesting connection (never into this command's own reply). The code is read from a no-echo prompt on a terminal, or one line on stdin, and is never an argument. Invalid/expired code: the ask stays parked and the replay ledger is unburned.",
         args: [arg!("id", "string", true, "The parked ask's id, from `secrets pending`.")],
-        flags: [flag!("totp", "string", "The TOTP code to validate against this host's enrollment.", value: "code", required: true)],
+        flags: [flag!("totp", "string", "Refused: a TOTP code in argv is readable by every process of this uid. Run `aoide secrets approve <id>` and type the code, or pipe one line. Declared so the refusal can teach.", value: "code")],
         gated: false,
         implemented: true,
         handler: handle_secrets_approve,
-        examples: ["secrets approve 3 --totp 123456"],
+        examples: ["secrets approve 3"],
         brief: "Release a parked resolve with a TOTP code.",
         doors: &[Door::Cli],
     ));
@@ -921,19 +921,19 @@ fn handle_secrets_pending(inv: &Invocation) -> Outcome {
     }
 }
 
-/// `secrets approve <id> --totp <code>` (P-N2) — same operator-side gate as
-/// `secrets pending` above (CLI-only, no admin-identity check). Delegates
-/// straight to `crate::client::approve`, whose `Result<(), String>` carries
-/// no value on either arm (the wire's own `approve` reply never has one —
-/// `broker::handle_approve`'s own doc: the value goes down the ORIGINAL
-/// parked connection, never this reply).
+/// `secrets approve <id>` (P-N2) — same operator-side gate as `secrets
+/// pending` above (CLI-only, no admin-identity check). The code is read by
+/// `crate::client::approve_with` (a no-echo prompt, or one stdin line), never
+/// taken from argv. The wire's `approve` reply never carries a value: the
+/// value goes down the ORIGINAL parked connection (`broker::handle_approve`'s
+/// own doc), never this reply.
 fn handle_secrets_approve(inv: &Invocation) -> Outcome {
     let cmd = "secrets.approve";
-    let (id, totp) = (inv.args[0].clone(), inv.flags["totp"].clone());
     let socket = crate::socket::socket_path();
-    match crate::client::approve(&socket, &id, &totp) {
-        Ok(()) => Outcome::ok(cmd, format!("approved pending ask `{id}`")).changed(vec![format!("pending:{id}")]),
-        Err(e) => teach::from_broker(&teach::Where { inv, socket: &socket, secret: None }, &e).into_outcome(cmd),
+    let mut stdin = crate::client::RawStdin;
+    match crate::client::approve_with(inv, &socket, &mut stdin, &mut std::io::stderr(), crate::client::stdin_is_tty()) {
+        Ok(id) => Outcome::ok(cmd, format!("approved pending ask `{id}`")).changed(vec![format!("pending:{id}")]),
+        Err(refusal) => refusal.into_outcome(cmd),
     }
 }
 
@@ -1059,6 +1059,36 @@ fn handle_secrets_migrate(inv: &Invocation) -> Outcome {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(unix)]
+    #[test]
+    fn approve_refuses_a_totp_flag_through_the_registry_before_any_broker_op() {
+        use std::sync::atomic::Ordering;
+        let s = crate::fixtures::scripted("c1-registry-approve", |_| r#"{"ok":true}"#.to_string());
+        with_secrets_home("c1-approve-argv", |_home| {
+            std::env::set_var("AOIDE_SECRETS_SOCKET", &s.socket);
+            let out = run(&inv(Door::Cli, &["secrets", "approve"], &["3"], &[("totp", "123456")]));
+            assert_eq!(s.connections.load(Ordering::SeqCst), 0, "--totp reached the broker: {out:?}");
+            let text = out.render(false).0;
+            assert_eq!(out.status, Status::Usage, "{out:?}");
+            assert!(text.contains("argv"), "{text}");
+            assert!(!text.contains("123456"), "{text}");
+        });
+    }
+
+    #[test]
+    fn totp_help_on_exec_and_approve_teaches_the_refusal_and_never_says_a_wrong_code_parks() {
+        let mut r = Registry::new();
+        register(&mut r);
+        for verb in ["exec", "approve"] {
+            let path = vec!["secrets".to_string(), verb.to_string()];
+            let cmd = r.get(&path).expect("registered");
+            let flag = cmd.flags.iter().find(|f| f.name == "totp").expect("declared, so the refusal can teach");
+            assert!(!flag.required, "{verb}: --totp must not be demanded in argv");
+            assert!(flag.description.contains("argv"), "{verb}: {}", flag.description);
+            assert!(!flag.description.contains("PARKS") && !flag.description.contains("wrong"), "{verb}: {}", flag.description);
+        }
+    }
+
     #[test]
     fn status_text_says_each_secrets_policy_without_a_value() {
         use crate::client::{StatusAutomation, StatusSecret};
@@ -1362,8 +1392,8 @@ mod tests {
             }
             assert_eq!(std::fs::read(store::policy_path(home)).unwrap(), bytes);
             let approve = run(&inv(Door::Cli, &["secrets", "approve"], &["3"], &[]));
-            assert_eq!(approve.status, Status::Usage, "{approve:?}");
-            assert!(approve.message.contains("needs --totp <code>"), "{}", approve.message);
+            assert_ne!(approve.status, Status::Usage, "{approve:?}");
+            assert!(!approve.message.contains("--totp"), "{}", approve.message);
             let exec = run(&inv(Door::Cli, &["secrets", "exec"], &["true"], &[("as", "m")]));
             assert!(exec.message.contains("needs --secret <name[:VAR]>"), "{}", exec.message);
         });

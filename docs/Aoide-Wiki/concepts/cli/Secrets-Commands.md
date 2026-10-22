@@ -107,7 +107,7 @@ aoide secrets serve [--json]
 ## aoide secrets exec
 
 ```
-aoide secrets exec --as <consumer> --secret <name[:VAR]> [--totp <code>] [--reason <text>] [--json] -- <cmd>
+aoide secrets exec --as <consumer> --secret <name[:VAR]> [--reason <text>] [--json] -- <cmd>
 ```
 
 - **Reads:** `--secret <name>` (optionally `name:VAR` to name the injected
@@ -123,11 +123,13 @@ aoide secrets exec --as <consumer> --secret <name[:VAR]> [--totp <code>] [--reas
   socket, a spawn failure) goes through the envelope and honours `--json`;
   once the child runs, its exit code is the command's.
 - **Notes:** CLI-only — the value would otherwise have to cross a door
-  that isn't this process's own stdio. `--totp` is verified live against
-  this host's enrollment (`±1`-timestep window, single-use). Omitted (or
-  wrong) on a `requireTotp` secret PARKS the resolve rather than refusing
-  outright; complete it with `secrets pending`/`secrets approve <id>
-  --totp <code>` from another terminal, or wait out the timeout.
+  that isn't this process's own stdio. A `requireTotp` secret PARKS the
+  resolve rather than refusing outright. The park is completed by typing
+  the code at this command's prompt (a no-echo
+  prompt on a terminal; one piped line on a pipe, read byte by byte so the
+  command inherits the rest of stdin), or from another terminal with
+  `secrets approve <id>`, or by waiting out the timeout. `--totp` is refused
+  with no broker op: a code in argv is readable by every process of this uid.
 
 ## aoide secrets add
 
@@ -313,10 +315,12 @@ aoide secrets pending [--json]
 ## aoide secrets approve
 
 ```
-aoide secrets approve <id> --totp <code> [--json]
+aoide secrets approve <id> [--json]
 ```
 
-- **Reads:** the parked ask named `<id>` (from `secrets pending`).
+- **Reads:** the parked ask named `<id>` (from `secrets pending`), shown
+  before the code is read, then one TOTP code: a no-echo prompt on a
+  terminal, or exactly one stdin line. `--totp` is refused with no broker op.
 - **Writes:** releases the value down the ORIGINAL requesting connection,
   never into this command's own reply. Re-runs the full authorization gate
   (exists + consumer authorized) against the ask's stored consumer before

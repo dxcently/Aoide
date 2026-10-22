@@ -75,7 +75,7 @@
 //! thread on it (which is why [`broker::serve`]'s accept loop moved to
 //! thread-per-connection this phase — a parked connection must never block
 //! the broker from admitting anyone else) until an operator completes the
-//! ask over a SEPARATE connection (`secrets approve <id> --totp <code>` /
+//! ask over a SEPARATE connection (`secrets approve <id>` /
 //! `secrets dismiss <id>`, new wire ops [`broker`]'s module doc documents)
 //! or [`park::park_timeout`] elapses. A resolve WITH a code is completely
 //! unchanged (the fast path); the wire's optional `wait:false` field
@@ -156,4 +156,113 @@ pub mod test_net {
     pub use std::os::unix::net::{UnixListener, UnixStream};
     #[cfg(windows)]
     pub use aoide_protocol::win_unix::{UnixListener, UnixStream};
+}
+
+/// Socket fixtures shared by this crate's client and command tests, Unix
+/// only (every caller is a Unix socket test). A scripted broker answers one
+/// request per connection and records what it was sent, so a test can count
+/// the broker operations a command made; a real broker is `broker::serve` on
+/// a scratch socket.
+#[cfg(all(test, unix))]
+pub(crate) mod fixtures {
+    use serde_json::Value;
+    use std::io::{BufRead, BufReader, Write};
+    use std::path::{Path, PathBuf};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{Arc, Mutex};
+
+    pub(crate) fn scratch_socket(tag: &str) -> PathBuf {
+        let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().subsec_nanos();
+        std::env::temp_dir().join(format!("as-{tag}-{}-{nanos}.sock", std::process::id()))
+    }
+
+    pub(crate) struct Scripted {
+        pub socket: PathBuf,
+        /// Every request line received, parsed, in arrival order.
+        pub requests: Arc<Mutex<Vec<Value>>>,
+        /// Every connection accepted, whether or not it sent a request.
+        pub connections: Arc<AtomicUsize>,
+    }
+
+    /// Binds a scratch socket and answers each connection with `reply(&request)`,
+    /// as one line. The thread is detached: the test process tears it down.
+    pub(crate) fn scripted(tag: &str, reply: impl Fn(&Value) -> String + Send + 'static) -> Scripted {
+        let socket = scratch_socket(tag);
+        let listener = crate::test_net::UnixListener::bind(&socket).unwrap();
+        let requests = Arc::new(Mutex::new(Vec::new()));
+        let connections = Arc::new(AtomicUsize::new(0));
+        let (log, count) = (requests.clone(), connections.clone());
+        std::thread::spawn(move || {
+            for stream in listener.incoming().flatten() {
+                count.fetch_add(1, Ordering::SeqCst);
+                let mut line = String::new();
+                if BufReader::new(&stream).read_line(&mut line).unwrap_or(0) == 0 {
+                    continue;
+                }
+                let request: Value = serde_json::from_str(line.trim()).unwrap_or(Value::Null);
+                log.lock().unwrap().push(request.clone());
+                let mut writer = &stream;
+                let _ = writer.write_all(format!("{}\n", reply(&request)).as_bytes());
+            }
+        });
+        Scripted { socket, requests, connections }
+    }
+
+    /// The `op` of every request a scripted broker recorded, in order.
+    pub(crate) fn ops(requests: &Arc<Mutex<Vec<Value>>>) -> Vec<String> {
+        requests.lock().unwrap().iter().map(|r| r["op"].as_str().unwrap_or("?").to_string()).collect()
+    }
+
+    /// A real `broker::serve` on a scratch socket, detached, returned once it
+    /// accepts. The caller holds `env_lock()` for its whole test, as every
+    /// test that starts a broker does.
+    pub(crate) fn real_broker(home: &Path, tag: &str) -> PathBuf {
+        let socket = scratch_socket(tag);
+        let (home, serving) = (home.to_path_buf(), socket.clone());
+        std::thread::spawn(move || {
+            let _ = crate::broker::serve(&home, &serving);
+        });
+        for _ in 0..200 {
+            if std::os::unix::net::UnixStream::connect(&socket).is_ok() {
+                return socket;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        panic!("broker did not bind {}", socket.display());
+    }
+
+    /// A scratch secrets home with one TOTP-gated secret, `locked`, whose
+    /// value is its own key (`stored-value`, through the `scratch` backend),
+    /// and this host enrolled with the returned secret. Unix only: the
+    /// backend template is `printf`.
+    pub(crate) fn enrolled_home(tag: &str) -> (PathBuf, Vec<u8>) {
+        let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().subsec_nanos();
+        let home = std::env::temp_dir().join(format!("as-home-{tag}-{}-{nanos}", std::process::id()));
+        std::fs::create_dir_all(&home).unwrap();
+        crate::home::secure_dir(&home).unwrap();
+        let mut policy = crate::policy::Policy::new("locked", "scratch", "stored-value");
+        policy.require_totp = true;
+        crate::store::save_policies(&home, &[policy]).unwrap();
+        let backends = serde_json::json!({ "scratch": { "get": "printf %s {name}" } });
+        std::fs::write(crate::backend::backends_path(&home), serde_json::to_vec(&backends).unwrap()).unwrap();
+        let secret = b"a-twenty-byte-totp-s".to_vec();
+        crate::store::save_totp_secret(&home, &secret).unwrap();
+        (home, secret)
+    }
+
+    /// The code the broker's own clock accepts right now (the step, never a sleep).
+    pub(crate) fn code_now(secret: &[u8]) -> String {
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+        crate::totp::format6(crate::totp::hotp(secret, crate::totp::timestep(now), crate::totp::DIGITS))
+    }
+
+    /// Whether `code` occurs in `text` as a whole run of digits: a timestamp
+    /// can hold six digits by chance, and a leak check must not trip on that.
+    pub(crate) fn bare_digits_contain(text: &str, code: &str) -> bool {
+        text.match_indices(code).any(|(i, _)| {
+            let before = text[..i].chars().next_back().is_some_and(|c| c.is_ascii_digit());
+            let after = text[i + code.len()..].chars().next().is_some_and(|c| c.is_ascii_digit());
+            !before && !after
+        })
+    }
 }

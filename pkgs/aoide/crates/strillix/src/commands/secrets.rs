@@ -26,7 +26,7 @@
 //!
 //! **The QML is paint only** (root `AGENTS.md` house rule 7's "delete every
 //! `.qml`" test) — the capability (entering a TOTP code) stays reachable
-//! with nothing but a shell: `aoide secrets approve <id> --totp <code>` and
+//! with nothing but a shell: `aoide secrets approve <id>` and
 //! the zenity fallback both work with this file deleted entirely.
 
 use super::dialog_qml::{self, EXIT_INFRA_FAILURE as DIALOG_EXIT_INFRA_FAILURE, HeaderLine};

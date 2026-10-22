@@ -477,7 +477,6 @@ pub struct ExecArgs {
     pub consumer: String,
     pub secret: String,
     pub var: String,
-    pub totp: Option<String>,
     pub cmd: Vec<String>,
     /// Optional, self-asserted, DISPLAY-ONLY context for a popup/prompt
     /// surface to show ("release `db-prod` for: sudo nixos-rebuild switch")
@@ -494,19 +493,19 @@ pub fn default_var_name(secret: &str) -> String {
     secret.to_uppercase().replace('-', "_")
 }
 
-/// Parse `aoide secrets exec --as <consumer> --secret <name>[:VAR] [--totp N]
-/// -- <cmd>` out of an already-parsed [`Invocation`]. `inv.args` is exactly
-/// the wrapped command + its args — `aoide_protocol::door::parse` already
-/// treats a bare `--` as ending flag parsing, so everything after it
-/// arrives here verbatim as positionals (that module's own doc).
-/// Parse `aoide secrets exec --as <consumer> --secret <name>[:VAR] [--totp N]
-/// -- <cmd>` out of an already-parsed [`Invocation`]. `inv.args` is exactly
-/// the wrapped command + its args — `aoide_protocol::door::parse` already
-/// treats a bare `--` as ending flag parsing, so everything after it
-/// arrives here verbatim as positionals (that module's own doc). The
-/// registry entry declares `--as`, `--secret` and the command required, so
-/// `Command::check` has already refused their absence.
+/// Parse `aoide secrets exec --as <consumer> --secret <name>[:VAR] -- <cmd>`
+/// out of an already-parsed [`Invocation`]. `inv.args` is exactly the wrapped
+/// command + its args — `aoide_protocol::door::parse` already treats a bare
+/// `--` as ending flag parsing, so everything after it arrives here verbatim
+/// as positionals (that module's own doc). The registry entry declares
+/// `--as`, `--secret` and the command required, so `Command::check` has
+/// already refused their absence. A `--totp` is refused first of all: a code
+/// never travels in argv, the parked ask asks for it.
 pub fn parse_exec_args(inv: &Invocation) -> Result<ExecArgs, Refusal> {
+    let fix = Fix::Run("the same exec without --totp: a parked ask asks for the code itself, at a prompt or from one piped line".to_string());
+    if let Some(refusal) = totp_in_argv(inv, fix) {
+        return Err(refusal);
+    }
     let consumer = inv.flags["as"].clone();
     let secret_flag = inv.flags["secret"].clone();
     let (secret, var) = match secret_flag.split_once(':') {
@@ -520,10 +519,9 @@ pub fn parse_exec_args(inv: &Invocation) -> Result<ExecArgs, Refusal> {
     if !crate::policy::valid_secret_name(&secret) {
         return Err(crate::teach::invalid_name(inv, "secret", &secret));
     }
-    let totp = inv.flags.get("totp").cloned();
     let cmd = inv.args.clone();
     let reason = inv.flags.get("reason").cloned().or_else(|| derive_reason(&cmd));
-    Ok(ExecArgs { consumer, secret, var, totp, cmd, reason })
+    Ok(ExecArgs { consumer, secret, var, cmd, reason })
 }
 
 /// Auto-derived when `--reason` is omitted: the wrapped command's own argv,
@@ -560,6 +558,18 @@ pub fn resolve(
     argv0: Option<&str>,
     reason: Option<&str>,
 ) -> Result<String, String> {
+    resolve_with(socket_path, secret, consumer, totp, argv0, reason, &mut announce_interim)
+}
+
+fn resolve_with(
+    socket_path: &Path,
+    secret: &str,
+    consumer: &str,
+    totp: Option<&str>,
+    argv0: Option<&str>,
+    reason: Option<&str>,
+    on_interim: &mut dyn FnMut(&Value),
+) -> Result<String, String> {
     let mut stream = connect_bounded(socket_path, CONNECT_TIMEOUT).map_err(|e| {
         describe_connect_error(
             socket_path,
@@ -588,7 +598,7 @@ pub fn resolve(
         .map_err(|e| io_cause("write to", socket_path, &e).why)?;
 
     let mut reader = BufReader::new(stream);
-    let reply = read_final_reply(&mut reader)?;
+    let reply = read_final_reply_with(&mut reader, on_interim)?;
 
     if reply.get("ok").and_then(Value::as_bool) == Some(true) {
         reply
@@ -617,6 +627,10 @@ pub fn resolve(
 /// future op gaining interim lines reuses this loop instead of
 /// re-deriving it.
 fn read_final_reply(reader: &mut impl BufRead) -> Result<Value, String> {
+    read_final_reply_with(reader, &mut announce_interim)
+}
+
+fn read_final_reply_with(reader: &mut impl BufRead, on_interim: &mut dyn FnMut(&Value)) -> Result<Value, String> {
     loop {
         let mut line = String::new();
         reader
@@ -628,7 +642,7 @@ fn read_final_reply(reader: &mut impl BufRead) -> Result<Value, String> {
         let value: Value = serde_json::from_str(line.trim())
             .map_err(|e| format!("the secrets broker sent an unparseable reply: {e}"))?;
         if value.get("interim").and_then(Value::as_bool) == Some(true) {
-            announce_interim(&value);
+            on_interim(&value);
             continue;
         }
         return Ok(value);
@@ -711,10 +725,7 @@ fn announce_interim(value: &Value) {
     if value.get("parked").and_then(Value::as_bool) == Some(true) {
         let id = value.get("id").and_then(Value::as_str).unwrap_or("?");
         let timeout_secs = value.get("timeoutSecs").and_then(Value::as_u64).unwrap_or(0);
-        eprintln!(
-            "parked as ask {id} — complete with: aoide secrets approve {id} --totp <code>  (or dismiss {id}); \
-             times out in {timeout_secs}s"
-        );
+        eprintln!("{}", park_hint(id, timeout_secs));
     }
 }
 
@@ -977,7 +988,7 @@ pub fn pending(socket_path: &Path) -> Result<Vec<PendingAsk>, String> {
 /// an unknown id, comes back as a value-free `Err`.
 pub fn approve(socket_path: &Path, id: &str, totp: &str) -> Result<(), String> {
     let mut stream = connect_bounded(socket_path, CONNECT_TIMEOUT)
-        .map_err(|e| describe_connect_error(socket_path, &e, &format!("aoide secrets approve {id} --totp ...")))?;
+        .map_err(|e| describe_connect_error(socket_path, &e, &format!("aoide secrets approve {id}")))?;
 
     let line = json!({ "op": "approve", "id": id, "totp": totp }).to_string() + "\n";
     stream.write_all(line.as_bytes()).map_err(|e| io_cause("write to", socket_path, &e).why)?;
@@ -1380,15 +1391,8 @@ fn spawn_with_secret(cmd: &[String], var: &str, value: &str) -> Result<i32, Stri
 pub fn run_exec(inv: &Invocation, socket_path: &Path) -> Result<i32, Refusal> {
     let args = parse_exec_args(inv)?;
     let at = crate::teach::Where { inv, socket: socket_path, secret: Some(&args.secret) };
-    let value = resolve(
-        socket_path,
-        &args.secret,
-        &args.consumer,
-        args.totp.as_deref(),
-        args.cmd.first().map(String::as_str),
-        args.reason.as_deref(),
-    )
-    .map_err(|e| crate::teach::from_broker(&at, &e))?;
+    let value = resolve_for_exec(socket_path, &args, &mut RawStdin, stdin_is_tty(), &mut io::stderr())
+        .map_err(|e| crate::teach::from_broker(&at, &e))?;
     spawn_with_secret(&args.cmd, &args.var, &value).map_err(|e| {
         Refusal::new(
             Kind::Failed,
@@ -1397,6 +1401,187 @@ pub fn run_exec(inv: &Invocation, socket_path: &Path) -> Result<i32, Refusal> {
             Fix::Set("check that the command exists and is executable on PATH".to_string()),
         )
     })
+}
+
+/// Standard input read one byte per `read(2)`, with no buffer in between: a
+/// byte this process does not take stays unread for the child that inherits
+/// the descriptor (`secrets exec`'s parked pipe path).
+pub(crate) struct RawStdin;
+
+#[cfg(unix)]
+impl io::Read for RawStdin {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        loop {
+            let n = unsafe { libc::read(0, buf.as_mut_ptr().cast(), buf.len()) };
+            if n >= 0 {
+                return Ok(n as usize);
+            }
+            let err = io::Error::last_os_error();
+            if err.kind() != io::ErrorKind::Interrupted {
+                return Err(err);
+            }
+        }
+    }
+}
+
+/// No unbuffered descriptor read is wired on Windows: std's stdin reads
+/// ahead, so a piped child can miss bytes past its park line. A known gap.
+#[cfg(windows)]
+impl io::Read for RawStdin {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        io::Read::read(&mut io::stdin(), buf)
+    }
+}
+
+/// One line, read a byte at a time, so nothing past its newline is taken from
+/// `input`. The newline is not part of the line; end of input gives what
+/// arrived before it.
+pub(crate) fn read_line_unbuffered(input: &mut impl io::Read) -> io::Result<String> {
+    let mut line = Vec::new();
+    let mut byte = [0u8; 1];
+    loop {
+        match input.read(&mut byte) {
+            Ok(0) => break,
+            Ok(_) if byte[0] == b'\n' => break,
+            Ok(_) => line.push(byte[0]),
+            Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
+            Err(e) => return Err(e),
+        }
+    }
+    Ok(String::from_utf8_lossy(&line).trim_end_matches('\r').to_string())
+}
+
+/// The code a parked ask waits for: a no-echo prompt on a terminal, else one
+/// line of `input`. `Ok(None)` when nothing arrived (end of input or a blank
+/// line), so the caller decides what an absent code means to it.
+pub(crate) fn read_park_code(input: &mut impl io::Read, tty: bool, prompt: &str) -> Result<Option<String>, String> {
+    let typed = if tty {
+        read_hidden_line(prompt)?
+    } else {
+        read_line_unbuffered(input).map_err(|e| io_cause("read the code from", Path::new("stdin"), &e).why)?
+    };
+    let code = typed.trim().to_string();
+    Ok((!code.is_empty()).then_some(code))
+}
+
+/// The park line a person reads: where the code is completed, and when the
+/// ask times out.
+pub(crate) fn park_hint(id: &str, timeout_secs: u64) -> String {
+    format!("parked as ask {id} — complete with: aoide secrets approve {id}  (or dismiss {id}); times out in {timeout_secs}s")
+}
+
+/// What `approve` shows before it reads a code. The secret, consumer and
+/// reason are the requester's claims; the peer uid is the kernel's word.
+pub(crate) fn approve_context(ask: &PendingAsk) -> String {
+    let peer = match (ask.peer_uid, &ask.peer_sid) {
+        (Some(uid), _) => format!("uid {uid}"),
+        (None, Some(sid)) => format!("sid {sid}"),
+        (None, None) => "unidentified".to_string(),
+    };
+    format!(
+        "parked ask {}\n  the requester claims (unverified): secret {}, consumer {}, reason {}\n  the kernel stamped the peer: {peer}\n",
+        ask.id,
+        ask.secret,
+        ask.consumer,
+        ask.reason.as_deref().unwrap_or("none given"),
+    )
+}
+
+/// The refusal for a `--totp` in argv: any process of this uid can read argv,
+/// and a code is not bound to a park, so a reader could spend it first.
+pub(crate) fn totp_in_argv(inv: &Invocation, fix: Fix) -> Option<Refusal> {
+    inv.flags.contains_key("totp").then(|| {
+        Refusal::new(
+            Kind::Usage,
+            "`--totp` puts the TOTP code in argv",
+            "any process of this uid can read argv, and a code is not bound to a park, so a reader can spend it on its own request first",
+            fix,
+        )
+    })
+}
+
+/// `secrets approve <id>`: shows the parked ask, then reads one code (a no-echo
+/// prompt on a terminal, else one stdin line) and sends it. The code is never
+/// an argument. Returns the id it completed.
+pub(crate) fn approve_with(
+    inv: &Invocation,
+    socket_path: &Path,
+    input: &mut impl io::Read,
+    out: &mut impl io::Write,
+    tty: bool,
+) -> Result<String, Refusal> {
+    let id = inv.args[0].clone();
+    let at = crate::teach::Where { inv, socket: socket_path, secret: None };
+    let fix = Fix::Run(format!("aoide secrets approve {id}, then type the code (a program pipes one line)"));
+    if let Some(refusal) = totp_in_argv(inv, fix) {
+        return Err(refusal);
+    }
+    let asks = pending(socket_path).map_err(|e| crate::teach::from_broker(&at, &e))?;
+    let Some(ask) = asks.iter().find(|a| a.id == id) else {
+        return Err(Refusal::new(
+            Kind::Refused,
+            format!("no parked ask `{id}`"),
+            "only a parked ask takes a code, so nothing was asked for one",
+            Fix::Run("aoide secrets pending".to_string()),
+        ));
+    };
+    let _ = write!(out, "{}", approve_context(ask));
+    let code = read_park_code(input, tty, &format!("TOTP code for ask {id}: "))
+        .map_err(|e| Refusal::new(Kind::Failed, "could not read the code", e, Fix::Run(format!("aoide secrets approve {id}"))))?
+        .ok_or_else(|| {
+            Refusal::new(
+                Kind::Usage,
+                "no code arrived",
+                "nothing was typed or piped, so no code was sent",
+                Fix::Run(format!("aoide secrets approve {id}, typing the code at a terminal or piping one line")),
+            )
+        })?;
+    approve(socket_path, &id, &code).map_err(|e| crate::teach::from_broker(&at, &e))?;
+    Ok(id)
+}
+
+/// `secrets exec` for a parked ask. The park line is shown, then one code is
+/// read (a no-echo prompt on a terminal, else one stdin line) and approved on
+/// a SECOND connection; the value still returns on the first. A wrong code is
+/// reported and the wait goes on. End of input prints the approve line and
+/// waits until the park times out.
+pub(crate) fn resolve_for_exec(
+    socket_path: &Path,
+    args: &ExecArgs,
+    input: &mut impl io::Read,
+    tty: bool,
+    out: &mut impl io::Write,
+) -> Result<String, String> {
+    let mut on_interim = |interim: &Value| {
+        if interim.get("parked").and_then(Value::as_bool) != Some(true) {
+            return;
+        }
+        let id = interim.get("id").and_then(Value::as_str).unwrap_or("?");
+        let timeout_secs = interim.get("timeoutSecs").and_then(Value::as_u64).unwrap_or(0);
+        let _ = writeln!(out, "{}", park_hint(id, timeout_secs));
+        match read_park_code(input, tty, &format!("TOTP code for ask {id}: ")) {
+            Ok(Some(code)) => {
+                if let Err(e) = approve(socket_path, id, &code) {
+                    let _ = writeln!(out, "{e}");
+                }
+            }
+            Ok(None) => {
+                let _ = writeln!(out, "no code given: still waiting; complete with: aoide secrets approve {id}");
+            }
+            Err(e) => {
+                let _ = writeln!(out, "{e}");
+            }
+        }
+    };
+    resolve_with(
+        socket_path,
+        &args.secret,
+        &args.consumer,
+        None,
+        args.cmd.first().map(String::as_str),
+        args.reason.as_deref(),
+        &mut on_interim,
+    )
 }
 
 #[cfg(test)]
@@ -1835,7 +2020,6 @@ mod tests {
         assert_eq!(args.consumer, "m");
         assert_eq!(args.secret, "db-prod");
         assert_eq!(args.var, "DB_PROD");
-        assert_eq!(args.totp, None);
         assert_eq!(args.cmd, vec!["psql", "-c", "select 1"]);
     }
 
@@ -1848,10 +2032,11 @@ mod tests {
     }
 
     #[test]
-    fn totp_flag_is_carried_through() {
+    fn totp_flag_is_refused_and_its_code_is_not_carried() {
         let i = inv(&[("as", "m"), ("secret", "t"), ("totp", "123456")], &["cmd"]);
-        let args = parse_exec_args(&i).unwrap();
-        assert_eq!(args.totp.as_deref(), Some("123456"));
+        let err = parse_exec_args(&i).unwrap_err();
+        assert!(err.what.contains("--totp"), "{err:?}");
+        assert!(!format!("{err:?}").contains("123456"), "{err:?}");
     }
 
     #[test]
@@ -2418,5 +2603,464 @@ mod tests {
         assert!(elapsed >= STATUS_TIMEOUT, "must actually wait out its own bound, took {elapsed:?}");
         assert!(elapsed < STATUS_TIMEOUT + Duration::from_secs(5), "must not overrun the bound, took {elapsed:?}");
         std::fs::remove_file(&sock).ok();
+    }
+
+    #[test]
+    fn no_production_string_teaches_a_totp_code_in_argv() {
+        let sources = [
+            ("client.rs", include_str!("client.rs")),
+            ("commands.rs", include_str!("commands.rs")),
+            ("broker.rs", include_str!("broker.rs")),
+            ("watch.rs", include_str!("watch.rs")),
+            ("park.rs", include_str!("park.rs")),
+            ("lib.rs", include_str!("lib.rs")),
+        ];
+        let mut hits = Vec::new();
+        for (name, text) in sources {
+            let production = text.split("\n#[cfg(test)]\nmod tests").next().unwrap_or(text);
+            for (n, line) in production.lines().enumerate() {
+                let code_line = !line.trim_start().starts_with("//");
+                if code_line && ["--totp <code>", "--totp 123456", "--totp NNNNNN"].iter().any(|p| line.contains(p)) {
+                    hits.push(format!("{name}:{}: {}", n + 1, line.trim()));
+                }
+            }
+        }
+        assert!(hits.is_empty(), "production text still teaches a code in argv:\n{}", hits.join("\n"));
+    }
+}
+
+#[cfg(all(test, unix))]
+mod argv_free_tests {
+    use super::*;
+    use crate::fixtures::{bare_digits_contain, code_now, enrolled_home, ops, real_broker, scripted, Scripted};
+    use aoide_protocol::Door;
+    use std::collections::BTreeMap;
+    use std::fs::File;
+    use std::io::Read;
+    use std::os::unix::io::{AsRawFd, FromRawFd};
+    use std::os::unix::process::CommandExt;
+    use std::process::Stdio;
+    use std::sync::atomic::Ordering;
+    use std::sync::{Arc, Mutex};
+    use std::time::{Duration, Instant};
+
+    const ROLE: &str = "AOIDE_C1_ROLE";
+    const OUT: &str = "AOIDE_C1_OUT";
+    const SOCKET: &str = "AOIDE_C1_SOCKET";
+    const PARK_ID: &str = "3f2a-3";
+    const PARKED_ROW: &str = r#"{"id":"3f2a-3","secret":"db-prod","consumer":"m","requestedAt":1700000000,"peerUid":1000,"reason":"psql","origin":{"username":"khoa","pid":42,"comm":"psql","hostname":"box"}}"#;
+    const TIMED_OUT: &str = r#"{"ok":false,"error":"the pending TOTP ask for `locked` timed out after 300s"}"#;
+
+    fn role() -> Option<String> {
+        std::env::var(ROLE).ok()
+    }
+
+    fn park_line(id: &str) -> String {
+        format!(r#"{{"interim":true,"parked":true,"id":"{id}","timeoutSecs":300}}"#)
+    }
+
+    fn inv_of(path: &[&str], args: &[&str], flags: &[(&str, &str)]) -> Invocation {
+        Invocation {
+            path: path.iter().map(|s| s.to_string()).collect(),
+            args: args.iter().map(|s| s.to_string()).collect(),
+            flags: flags.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect::<BTreeMap<_, _>>(),
+            door: Door::Cli,
+        }
+    }
+
+    fn exec_inv(flags: &[(&str, &str)], args: &[&str]) -> Invocation {
+        inv_of(&["secrets", "exec"], args, flags)
+    }
+
+    fn approve_inv(id: &str, flags: &[(&str, &str)]) -> Invocation {
+        inv_of(&["secrets", "approve"], &[id], flags)
+    }
+
+    /// Answers `pending` with `rows` (a JSON array), `approve` with `approve_reply`.
+    fn park_broker(rows: String, approve_reply: &'static str) -> Scripted {
+        scripted("c1-approve", move |req| match req["op"].as_str() {
+            Some("pending") => format!(r#"{{"ok":true,"pending":{rows}}}"#),
+            Some("approve") => approve_reply.to_string(),
+            _ => r#"{"ok":false,"error":"unexpected op"}"#.to_string(),
+        })
+    }
+
+    fn approves(s: &Scripted) -> Vec<Value> {
+        s.requests.lock().unwrap().iter().filter(|r| r["op"] == "approve").cloned().collect()
+    }
+
+    fn wait_for_park(socket: &Path) -> String {
+        for _ in 0..500 {
+            if let Some(ask) = pending(socket).unwrap().first() {
+                return ask.id.clone();
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        panic!("nothing parked on {}", socket.display());
+    }
+
+    /// Sets env vars for one test; the old values come back on drop, so a
+    /// panic cannot leak them into the next test.
+    struct Env(Vec<(&'static str, Option<String>)>);
+
+    impl Env {
+        fn set(pairs: &[(&'static str, String)]) -> Self {
+            let saved = pairs.iter().map(|(k, _)| (*k, std::env::var(k).ok())).collect();
+            for (k, v) in pairs {
+                std::env::set_var(k, v);
+            }
+            Env(saved)
+        }
+    }
+
+    impl Drop for Env {
+        fn drop(&mut self) {
+            for (k, v) in &self.0 {
+                match v {
+                    Some(v) => std::env::set_var(k, v),
+                    None => std::env::remove_var(k),
+                }
+            }
+        }
+    }
+
+    /// Output that the test can read after handing it to the code under test.
+    struct Shared(Arc<Mutex<Vec<u8>>>);
+
+    impl Write for Shared {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(buf);
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    /// A code reader that records what the output held when it was first asked for a byte.
+    struct Probe {
+        shown: Arc<Mutex<Vec<u8>>>,
+        at_first_read: Option<String>,
+        rest: &'static [u8],
+    }
+
+    impl Read for Probe {
+        fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+            if self.at_first_read.is_none() {
+                self.at_first_read = Some(String::from_utf8_lossy(&self.shown.lock().unwrap()).into_owned());
+            }
+            self.rest.read(buf)
+        }
+    }
+
+    fn open_pty() -> (File, File) {
+        let (mut master, mut slave) = (0, 0);
+        let rc = unsafe { libc::openpty(&mut master, &mut slave, std::ptr::null_mut(), std::ptr::null(), std::ptr::null()) };
+        assert_eq!(rc, 0, "openpty failed");
+        unsafe { (File::from_raw_fd(master), File::from_raw_fd(slave)) }
+    }
+
+    /// One poll-bounded read of the master: false on EOF, once the child side
+    /// has closed, or at the deadline.
+    fn pty_step(master: &mut File, transcript: &mut Vec<u8>, deadline: Instant) -> bool {
+        let left = deadline.saturating_duration_since(Instant::now());
+        if left.is_zero() {
+            return false;
+        }
+        let mut fd = libc::pollfd { fd: master.as_raw_fd(), events: libc::POLLIN, revents: 0 };
+        if unsafe { libc::poll(&mut fd, 1, left.as_millis().min(500) as i32) } <= 0 {
+            return true;
+        }
+        let mut buf = [0u8; 4096];
+        match master.read(&mut buf) {
+            Ok(n) if n > 0 => {
+                transcript.extend_from_slice(&buf[..n]);
+                true
+            }
+            _ => false,
+        }
+    }
+
+    fn pty_read_until(master: &mut File, transcript: &mut Vec<u8>, needle: &[u8], limit: Duration) -> bool {
+        let deadline = Instant::now() + limit;
+        while !transcript.windows(needle.len()).any(|w| w == needle) {
+            if !pty_step(master, transcript, deadline) {
+                return false;
+            }
+        }
+        true
+    }
+
+    fn pty_drain(master: &mut File, transcript: &mut Vec<u8>, limit: Duration) {
+        let deadline = Instant::now() + limit;
+        while pty_step(master, transcript, deadline) {}
+    }
+
+    /// Runs one test of this binary in a fresh process with `role` set, so the
+    /// test body owns the child's fd 0. With `tty`, the child's stdio is that
+    /// terminal and the child leads its own session on it.
+    fn spawn_role(test: &str, role: &str, envs: &[(&str, &std::ffi::OsStr)], tty: Option<File>) -> std::process::Child {
+        let mut cmd = std::process::Command::new(std::env::current_exe().unwrap());
+        cmd.args(["--exact", test, "--nocapture", "--test-threads=1"]).env(ROLE, role);
+        for (k, v) in envs {
+            cmd.env(k, v);
+        }
+        match tty {
+            Some(slave) => {
+                let fd = slave.as_raw_fd();
+                let stdio = || unsafe { Stdio::from(File::from_raw_fd(libc::dup(fd))) };
+                cmd.stdin(stdio()).stdout(stdio()).stderr(stdio());
+                unsafe {
+                    cmd.pre_exec(|| {
+                        libc::setsid();
+                        libc::ioctl(0, libc::TIOCSCTTY as _, 0);
+                        Ok(())
+                    });
+                }
+            }
+            None => {
+                cmd.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
+            }
+        }
+        cmd.spawn().unwrap()
+    }
+
+    #[test]
+    fn approve_refuses_a_totp_flag_before_any_broker_op() {
+        let s = park_broker(format!("[{PARKED_ROW}]"), r#"{"ok":true}"#);
+        let mut input: &[u8] = b"";
+        let result = approve_with(&approve_inv(PARK_ID, &[("totp", "123456")]), &s.socket, &mut input, &mut Vec::new(), false);
+        assert_eq!(ops(&s.requests), Vec::<String>::new(), "--totp reached the broker: {result:?}");
+        let err = result.expect_err("--totp must be refused");
+        assert!(err.what.contains("--totp"), "{err:?}");
+        assert!(!format!("{err:?}").contains("123456"), "the refusal echoed the code: {err:?}");
+    }
+
+    #[test]
+    fn exec_refuses_a_totp_flag_before_any_broker_op() {
+        let s = scripted("c1-exec-refuse", |_| r#"{"ok":true,"value":"v"}"#.to_string());
+        let exec = exec_inv(&[("as", "m"), ("secret", "locked"), ("totp", "123456")], &["true"]);
+        let result = run_exec(&exec, &s.socket);
+        assert_eq!(s.connections.load(Ordering::SeqCst), 0, "--totp reached the broker: {result:?}");
+        let err = result.expect_err("exec must refuse --totp");
+        assert!(err.what.contains("--totp"), "{err:?}");
+        assert!(!format!("{err:?}").contains("123456"), "the refusal echoed the code: {err:?}");
+    }
+
+    #[test]
+    fn approve_reads_one_piped_line_and_sends_one_approve_op() {
+        let s = park_broker(format!("[{PARKED_ROW}]"), r#"{"ok":true}"#);
+        let mut input: &[u8] = b"123456\nTRAILING";
+        let id = approve_with(&approve_inv(PARK_ID, &[]), &s.socket, &mut input, &mut Vec::new(), false)
+            .expect("a piped code approves");
+        assert_eq!(id, PARK_ID);
+        let sent = approves(&s);
+        assert_eq!(sent.len(), 1, "{:?}", ops(&s.requests));
+        assert_eq!(sent[0]["id"], PARK_ID);
+        assert_eq!(sent[0]["totp"], "123456");
+    }
+
+    #[test]
+    fn approve_refuses_an_empty_code_with_no_approve_op() {
+        for empty in [&b""[..], &b"\n"[..]] {
+            let s = park_broker(format!("[{PARKED_ROW}]"), r#"{"ok":true}"#);
+            let mut input = empty;
+            let result = approve_with(&approve_inv(PARK_ID, &[]), &s.socket, &mut input, &mut Vec::new(), false);
+            assert!(approves(&s).is_empty(), "an empty code reached approve: {:?}", ops(&s.requests));
+            assert!(result.is_err(), "{result:?}");
+        }
+    }
+
+    #[test]
+    fn approve_refuses_an_unknown_id_before_it_reads_a_code() {
+        let other = r#"[{"id":"other-1","secret":"x","consumer":"m","requestedAt":1,"peerUid":1000,"origin":{}}]"#;
+        let s = park_broker(other.to_string(), r#"{"ok":true}"#);
+        let mut input: &[u8] = b"123456\n";
+        let result = approve_with(&approve_inv(PARK_ID, &[]), &s.socket, &mut input, &mut Vec::new(), false);
+        assert_eq!(ops(&s.requests), ["pending"], "{result:?}");
+        assert!(result.is_err(), "{result:?}");
+        assert_eq!(input, &b"123456\n"[..], "a code was read for an id that is not parked");
+    }
+
+    #[test]
+    fn approve_shows_the_park_and_labels_the_claims_before_it_reads_the_code() {
+        let s = park_broker(format!("[{PARKED_ROW}]"), r#"{"ok":true}"#);
+        let shown = Arc::new(Mutex::new(Vec::new()));
+        let mut probe = Probe { shown: shown.clone(), at_first_read: None, rest: b"123456\n" };
+        let outcome = approve_with(&approve_inv(PARK_ID, &[]), &s.socket, &mut probe, &mut Shared(shown.clone()), false);
+        assert!(outcome.is_ok(), "{outcome:?}");
+        let before_read = probe.at_first_read.expect("the code was never read");
+        for claim in ["db-prod", "consumer", "psql", "1000", "requester", "kernel"] {
+            assert!(before_read.contains(claim), "`{claim}` is not shown before the code is read:\n{before_read}");
+        }
+    }
+
+    #[test]
+    fn approve_prompts_without_echo_on_a_tty() {
+        if role().as_deref() == Some("pty-approve") {
+            let s = park_broker(format!("[{PARKED_ROW}]"), r#"{"ok":true}"#);
+            let result = approve_with(&approve_inv(PARK_ID, &[]), &s.socket, &mut RawStdin, &mut std::io::stderr(), crate::client::stdin_is_tty());
+            let record = json!({ "ok": result.is_ok(), "approves": approves(&s) });
+            std::fs::write(std::env::var(OUT).unwrap(), record.to_string()).unwrap();
+            return;
+        }
+        let out = std::env::temp_dir().join(format!("c1-pty-{}.json", std::process::id()));
+        let (mut master, slave) = open_pty();
+        let test = "client::argv_free_tests::approve_prompts_without_echo_on_a_tty";
+        let mut child = spawn_role(test, "pty-approve", &[(OUT, out.as_os_str())], Some(slave));
+        let mut transcript = Vec::new();
+        assert!(
+            pty_read_until(&mut master, &mut transcript, b"TOTP code", Duration::from_secs(15)),
+            "no prompt on the tty:\n{}",
+            String::from_utf8_lossy(&transcript)
+        );
+        let typed_from = transcript.len();
+        master.write_all(b"123456\r").unwrap();
+        pty_drain(&mut master, &mut transcript, Duration::from_secs(15));
+        let status = child.wait().unwrap();
+        let after_prompt = String::from_utf8_lossy(&transcript[typed_from..]).into_owned();
+        assert!(!after_prompt.contains("123456"), "the typed code echoed on the tty:\n{after_prompt}");
+        assert!(status.success(), "the child failed:\n{}", String::from_utf8_lossy(&transcript));
+        let record: Value = serde_json::from_str(&std::fs::read_to_string(&out).unwrap()).unwrap();
+        assert_eq!(record["approves"][0]["totp"], "123456", "{record}");
+    }
+
+    #[test]
+    fn read_line_unbuffered_takes_one_line_and_leaves_the_rest() {
+        let mut input: &[u8] = b"123456\nREST";
+        assert_eq!(read_line_unbuffered(&mut input).unwrap(), "123456");
+        assert_eq!(input, &b"REST"[..], "the reader took more than its line");
+    }
+
+    #[test]
+    fn unparked_exec_leaves_the_child_stdin_whole() {
+        if role().as_deref() == Some("unparked-exec") {
+            let s = scripted("c1-unparked", |_| r#"{"ok":true,"value":"v"}"#.to_string());
+            let exec = exec_inv(&[("as", "m"), ("secret", "locked")], &["sh", "-c", "cat > \"$AOIDE_C1_OUT\""]);
+            assert_eq!(run_exec(&exec, &s.socket).unwrap(), 0);
+            return;
+        }
+        let out = std::env::temp_dir().join(format!("c1-unparked-{}.txt", std::process::id()));
+        let test = "client::argv_free_tests::unparked_exec_leaves_the_child_stdin_whole";
+        let mut child = spawn_role(test, "unparked-exec", &[(OUT, out.as_os_str())], None);
+        child.stdin.take().unwrap().write_all(b"one\ntwo\n").unwrap();
+        let output = child.wait_with_output().unwrap();
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        assert_eq!(std::fs::read_to_string(&out).unwrap(), "one\ntwo\n");
+    }
+
+    #[test]
+    fn parked_exec_reads_one_line_approves_its_own_park_and_the_child_reads_the_rest() {
+        if role().as_deref() == Some("parked-exec") {
+            let socket = std::env::var(SOCKET).unwrap();
+            let exec = exec_inv(&[("as", "m"), ("secret", "locked")], &["sh", "-c", "cat > \"$AOIDE_C1_OUT\""]);
+            assert_eq!(run_exec(&exec, Path::new(&socket)).unwrap(), 0);
+            return;
+        }
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (home, secret) = enrolled_home("c1-parked-exec");
+        let _env = Env::set(&[
+            ("AOIDE_SECRETS_PARK_TIMEOUT", "2".to_string()),
+            ("AOIDE_AUDIT_LOG", home.join("mirrored-aoide-log").display().to_string()),
+        ]);
+        let socket = real_broker(&home, "c1-parked-exec");
+        let out = std::env::temp_dir().join(format!("c1-parked-{}.txt", std::process::id()));
+        let test = "client::argv_free_tests::parked_exec_reads_one_line_approves_its_own_park_and_the_child_reads_the_rest";
+        let mut child = spawn_role(test, "parked-exec", &[(SOCKET, socket.as_os_str()), (OUT, out.as_os_str())], None);
+        let line = format!("{}\nREST", code_now(&secret));
+        child.stdin.take().unwrap().write_all(line.as_bytes()).unwrap();
+        let output = child.wait_with_output().unwrap();
+        assert!(output.status.success(), "the parked exec failed:\n{}", String::from_utf8_lossy(&output.stderr));
+        assert_eq!(std::fs::read_to_string(&out).unwrap(), "REST", "the child did not get the rest of its stdin");
+    }
+
+    #[test]
+    fn parked_exec_pipe_eof_prints_the_approve_line_and_keeps_waiting() {
+        let s = scripted("c1-eof", |_| format!("{}\n{TIMED_OUT}", park_line(PARK_ID)));
+        let exec = parse_exec_args(&exec_inv(&[("as", "m"), ("secret", "locked")], &["true"])).unwrap();
+        let mut out = Vec::new();
+        let result = resolve_for_exec(&s.socket, &exec, &mut &b""[..], false, &mut out);
+        let said = String::from_utf8_lossy(&out).into_owned();
+        assert_eq!(ops(&s.requests), ["resolve"], "end of stdin must not approve");
+        assert!(said.contains("aoide secrets approve 3f2a-3"), "{said}");
+        assert!(!said.contains("--totp"), "{said}");
+        let err = result.expect_err("the final reply is the timeout");
+        assert!(err.contains("timed out"), "{err}");
+    }
+
+    #[test]
+    fn parked_exec_approves_its_own_park_on_a_second_connection_and_returns_the_value() {
+        let s = scripted("c1-own-park", |req| match req["op"].as_str() {
+            Some("resolve") => format!("{}\n{}", park_line(PARK_ID), r#"{"ok":true,"value":"stored-value"}"#),
+            Some("approve") => r#"{"ok":true}"#.to_string(),
+            _ => r#"{"ok":false,"error":"unexpected op"}"#.to_string(),
+        });
+        let exec = parse_exec_args(&exec_inv(&[("as", "m"), ("secret", "locked")], &["true"])).unwrap();
+        let mut input: &[u8] = b"123456\nREST";
+        let mut out = Vec::new();
+        let value = resolve_for_exec(&s.socket, &exec, &mut input, false, &mut out);
+        assert_eq!(ops(&s.requests), ["resolve", "approve"]);
+        let sent = approves(&s);
+        assert_eq!(sent[0]["id"], PARK_ID);
+        assert_eq!(sent[0]["totp"], "123456");
+        assert_eq!(value.expect("the value returns on the first connection"), "stored-value");
+        assert_eq!(input, &b"REST"[..], "the code line was not read one byte at a time");
+    }
+
+    #[test]
+    fn parked_exec_reports_a_wrong_code_once_and_keeps_waiting() {
+        let s = scripted("c1-wrong", |req| match req["op"].as_str() {
+            Some("resolve") => format!("{}\n{TIMED_OUT}", park_line(PARK_ID)),
+            Some("approve") => r#"{"ok":false,"error":"the TOTP code is wrong"}"#.to_string(),
+            _ => r#"{"ok":false,"error":"unexpected op"}"#.to_string(),
+        });
+        let exec = parse_exec_args(&exec_inv(&[("as", "m"), ("secret", "locked")], &["true"])).unwrap();
+        let mut input: &[u8] = b"000000\nREST";
+        let mut out = Vec::new();
+        let result = resolve_for_exec(&s.socket, &exec, &mut input, false, &mut out);
+        assert_eq!(ops(&s.requests), ["resolve", "approve"], "a wrong code is one attempt, not a loop");
+        let said = String::from_utf8_lossy(&out).into_owned();
+        assert!(said.contains("the TOTP code is wrong"), "{said}");
+        assert!(result.expect_err("the final reply is the timeout").contains("timed out"));
+    }
+
+    #[test]
+    fn park_hint_names_the_approve_line_and_no_totp_code() {
+        let hint = park_hint(PARK_ID, 300);
+        assert!(hint.contains("aoide secrets approve 3f2a-3"), "{hint}");
+        assert!(!hint.contains("--totp"), "{hint}");
+    }
+
+    #[test]
+    fn the_code_reaches_no_outcome_no_log_no_feed_and_no_environment() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (home, secret) = enrolled_home("c1-no-leak");
+        let mirror = home.join("mirrored-aoide-log");
+        let events = home.join("events.jsonl");
+        let _env = Env::set(&[
+            ("AOIDE_AUDIT_LOG", mirror.display().to_string()),
+            ("AOIDE_SECRETS_EVENTS", events.display().to_string()),
+            ("AOIDE_SECRETS_PARK_TIMEOUT", "5".to_string()),
+        ]);
+        let socket = real_broker(&home, "c1-no-leak");
+        let parked = {
+            let socket = socket.clone();
+            std::thread::spawn(move || resolve(&socket, "locked", "m", None, None, None))
+        };
+        let id = wait_for_park(&socket);
+        let code = code_now(&secret);
+        let line = format!("{code}\n");
+        let mut input = line.as_bytes();
+        let mut out = Vec::new();
+        let released = approve_with(&approve_inv(&id, &[]), &socket, &mut input, &mut out, false);
+        released.expect("a right code approves");
+        assert_eq!(parked.join().unwrap().expect("the parked caller gets the value"), "stored-value");
+        let mut seen = String::from_utf8_lossy(&out).into_owned();
+        for file in [home.join("audit.log"), mirror, events] {
+            seen += &std::fs::read_to_string(file).unwrap_or_default();
+        }
+        assert!(!bare_digits_contain(&seen, &code), "the code reached an outcome, a log or the feed:\n{seen}");
+        assert!(!std::env::vars().any(|(_, v)| bare_digits_contain(&v, &code)), "the code reached the environment");
     }
 }

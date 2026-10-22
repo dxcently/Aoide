@@ -152,7 +152,7 @@
 //! [`crate::park::ParkedAsk`] in the shared [`crate::park::ParkRegistry`]
 //! and blocks THIS connection's own thread on [`crate::park::
 //! wait_for_outcome`] until one of three things happens:
-//! - `secrets approve <id> --totp <code>` ([`handle_approve`]) validates
+//! - `secrets approve <id>` ([`handle_approve`]) validates
 //!   the code with the SAME [`verify_totp_gate`] a fast-path `resolve`
 //!   would use (same RFC 6238 verify, same single-use-per-timestep replay
 //!   ledger — a code is consumed identically either way), fetches the value
@@ -168,7 +168,7 @@
 //! - [`crate::park::park_timeout`] elapses first (default 300s,
 //!   `AOIDE_SECRETS_PARK_TIMEOUT` to change it) — the parked connection gets
 //!   a refusal naming the timeout, the knob, and both completion paths
-//!   (inline `--totp` on a fresh resolve, or `secrets approve`); the ask is
+//!   (run the resolve again, or `secrets approve`); the ask is
 //!   removed.
 //!
 //! Audit gains three new event kinds alongside the unchanged `secrets.
@@ -731,8 +731,7 @@ fn handle_resolve(
                 // about connections, not about this being unbounded).
                 let reason = format!(
                     "requireTotp is set but no totp code was provided, and the pending-ask queue is full \
-                     ({cap} parked already — {} to raise it); retry with an inline `--totp <code>`, or once \
-                     an operator clears a pending ask",
+                     ({cap} parked already — {} to raise it); retry once an operator clears a pending ask",
                     crate::park::PARK_CAP_ENV
                 );
                 audit_resolve(secrets_home, &secret, &consumer, argv0.as_deref(), false, Some(&reason), peer_uid);
@@ -808,8 +807,8 @@ fn handle_resolve(
 fn park_timeout_message(secret: &str, timeout_secs: u64) -> String {
     format!(
         "the pending TOTP ask for `{secret}` timed out after {timeout_secs}s ({} to change the default) — \
-         resolve again with an inline `--totp <code>`, or approve the next ask before it expires with \
-         `aoide secrets approve <id> --totp <code>`",
+         run it again and type the code at its prompt, or approve the next ask before it expires with \
+         `aoide secrets approve <id>`",
         crate::park::PARK_TIMEOUT_ENV
     )
 }
@@ -955,7 +954,7 @@ fn authorize_release(secrets_home: &Path, secret: &str, consumer: &str) -> Resul
     Ok(())
 }
 
-/// `approve <id> --totp <code>` (P-N2, re-gated P-N2c): validate the code
+/// `approve <id>` with its `totp` (P-N2, re-gated P-N2c): validate the code
 /// with the SAME [`verify_totp_gate`] a fast-path `resolve` uses (same RFC
 /// 6238 verify, same single-use replay ledger — the code is consumed
 /// identically either way), re-run [`authorize_release`] against the ask's
@@ -3663,7 +3662,7 @@ mod tests {
 
     /// The deliverable's own end-to-end proof at the wire level: a
     /// `resolve` with no code PARKS (default `wait`), `secrets pending`
-    /// sees it, `secrets approve <id> --totp <code>` releases the value
+    /// sees it, `secrets approve <id>` releases the value
     /// down the ORIGINAL parked connection's own reply (never the
     /// approver's), and the approver's own reply carries no value at all.
     #[test]
@@ -4237,7 +4236,7 @@ mod tests {
             let err = reply["error"].as_str().unwrap();
             assert!(err.contains("timed out after 1s"), "{err}");
             assert!(err.contains(crate::park::PARK_TIMEOUT_ENV), "must name the knob: {err}");
-            assert!(err.contains("--totp"), "must name the inline completion path: {err}");
+            assert!(!err.contains("--totp"), "must not teach a code in argv: {err}");
             assert!(err.contains("secrets approve"), "must name the approve completion path: {err}");
         });
         assert!(parked.list().is_empty(), "a timed-out ask must be removed");
