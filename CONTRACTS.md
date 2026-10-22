@@ -6504,7 +6504,9 @@ and made the saturated-backlog scenario worse, caught and fixed on review.
 path `/run/aoide-secrets/secrets.sock`, P-V4d — corrected from an earlier
 secrets-home-relative default after the first live deployment found it sent
 an env-less client to the wrong path) as a unix stream socket. One JSON
-object per line, newline-terminated, on both sides.
+object per line, newline-terminated, on both sides. A request line holds at
+most 64 KiB (65536 bytes), newline excluded. A longer line gets one refusal,
+`"a request line is over 65536 bytes; ..."`, and the connection closes.
 
 **The events feed (P-G4, task #77) is a sibling FILE beside this socket, not
 a second wire op.** A machine consumer that wants a PUSH signal instead of
@@ -6589,10 +6591,12 @@ above) never parks either, exactly as it never required a code before.
 broker writes an INTERIM line (this section's Transport paragraph) down the
 SAME requesting connection, before ever blocking on the wait:
 ```text
-<- {"interim":true,"parked":true,"id":"<id>","timeoutSecs":<N>}
+<- {"interim":true,"parked":true,"id":"<id>","timeoutSecs":<N>,"expiresAt":<unix-seconds>}
 ```
-then later the final reply (granted/denied/dismissed/timed-out) as
-described below. Without this line a caller has no way to learn its own
+`expiresAt` is the unix time the park ends, `now` plus `timeoutSecs`. A broker
+that predates it sends the line without the field, and a caller treats the
+field as optional. Then the final reply (granted/denied/dismissed/timed-out)
+comes as described below. Without this line a caller has no way to learn its own
 ask's id short of a separate `pending` call raced against the park — `aoide
 secrets exec` prints it to STDERR as `parked as ask <id> — complete with:
 aoide secrets approve <id>  (or dismiss <id>); times out in <N>s` so an
@@ -6667,7 +6671,7 @@ would).
 **`pending`** — list every parked ask (never a value):
 ```text
 -> {"op":"pending"}
-<- {"ok":true,"pending":[{"id":"<id>","secret":"<name>","consumer":"<consumer>","requestedAt":<unix-seconds>,"peerUid":<uid-or-null>,"reason":<string-or-null>,"origin":{"username":<string-or-null>,"pid":<int-or-null>,"comm":<string-or-null>,"hostname":<string-or-null>}},...]}
+<- {"ok":true,"pending":[{"id":"<id>","secret":"<name>","consumer":"<consumer>","requestedAt":<unix-seconds>,"peerUid":<uid-or-null>,"reason":<string-or-null>,"argv0":<string-or-null>,"origin":{"username":<string-or-null>,"pid":<int-or-null>,"comm":<string-or-null>,"hostname":<string-or-null>},"originLine":<string>},...]}
 ```
 Never errors (an empty queue is `{"ok":true,"pending":[]}`); not audited —
 a read of in-memory state only, same precedent `session pending list` already
@@ -6680,6 +6684,13 @@ sent (above); `origin` is best-effort "who/where," captured ONCE at park
 time from the SAME `SO_PEERCRED` stamp `peerUid` reads (username/pid/comm)
 plus the broker's own hostname — every field UNTRUSTED DISPLAY DATA,
 `null` per field when unknown, never an error.
+
+`argv0` (the program the wrapped command names, from `secrets exec`) and
+`originLine` (the origin as one display line, built from the cleaned origin
+fields) are additive too. A park refuses a `reason` or `argv0` that holds a
+control, format or invisible character, or one over 4 KiB or 60 lines, so
+what `pending` shows is what the requester sent. Both are the requester's own
+words. The conductor and `approve` label them as claims.
 
 **`approve`** — complete a parked ask with a code, releasing the value down
 the ORIGINAL parked connection (never this reply):
@@ -6700,6 +6711,11 @@ error above, and the budget's refusal (`"totp code invalid or expired"`,
 `"totp code already used"`,
 ...). This reply NEVER carries a `value` field — the value only ever
 reaches the ORIGINAL parked connection's own `resolve` reply.
+
+On a pipe, `secrets approve` reads the code as one stdin line of at most 256
+bytes, newline excluded. A line past 256 bytes is refused,
+`the line is longer than 256 bytes, so it is not a code`, and nothing past the
+257th byte is read.
 
 **`approve` re-runs the FULL authorization gate at release time (P-N2c, FIX
 2), not just the TOTP check.** Before this fix, `approve` validated only
