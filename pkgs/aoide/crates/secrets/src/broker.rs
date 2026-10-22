@@ -4693,6 +4693,7 @@ mod tests {
             assert!(err.contains(crate::park::PARK_TIMEOUT_ENV), "must name the knob: {err}");
             assert!(!err.contains("--totp"), "must not teach a code in argv: {err}");
             assert!(err.contains("secrets approve"), "must name the approve completion path: {err}");
+            assert!(err.contains("run it again"), "must name the rerun completion path: {err}");
         });
         assert!(parked.list().is_empty(), "a timed-out ask must be removed");
 
