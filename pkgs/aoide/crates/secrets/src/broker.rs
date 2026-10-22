@@ -652,8 +652,8 @@ fn origin_to_json(origin: &AskOrigin) -> Value {
 /// module doc) parks the connection via [`ParkRegistry::park`]/
 /// [`crate::park::wait_for_outcome`]; `wait:false` restores the pre-P-N2
 /// immediate refusal. **P-N2c:** the instant a park is registered, an
-/// INTERIM line (`{"interim":true,"parked":true,"id":...,"timeoutSecs":...}`)
-/// writes down `interim_out` BEFORE this function blocks on
+/// INTERIM line (`{"interim":true,"parked":true,"id":...,"timeoutSecs":...,`
+/// `"expiresAt":...}`) writes down `interim_out` BEFORE this function blocks on
 /// `wait_for_outcome` — a write failure here (the caller already hung up)
 /// is swallowed, not propagated: the park proceeds regardless, since a
 /// gone caller learning its own id is moot but the ask itself is still a
@@ -812,7 +812,13 @@ fn handle_resolve(
             // failure here (the caller already hung up) is swallowed, not
             // propagated (this function's own doc): the ask stays
             // legitimately parked either way.
-            let interim = json!({"interim": true, "parked": true, "id": id, "timeoutSecs": timeout.as_secs()});
+            let interim = json!({
+                "interim": true,
+                "parked": true,
+                "id": id,
+                "timeoutSecs": timeout.as_secs(),
+                "expiresAt": now_unix + timeout.as_secs(),
+            });
             let _ = write_json_line(interim_out, &interim);
             match crate::park::wait_for_outcome(parked, &id, rx, timeout) {
                 WaitResult::Approved(value) => {
@@ -1043,7 +1049,7 @@ fn handle_approve(
         return json!({"ok": false, "error": "malformed request: `id` is required"});
     }
     let Some((secret, consumer, _ask_peer_uid)) = parked.peek(&id) else {
-        let reason = format!("unknown pending id `{id}`");
+        let reason = if parked.timed_out(&id) { refuse_timed_out(&id) } else { format!("unknown pending id `{id}`") };
         audit_approve(secrets_home, &id, None, false, &reason, approver_uid);
         return json!({"ok": false, "error": reason});
     };
@@ -1117,6 +1123,12 @@ fn handle_approve(
 /// was taken. The check already spent the code, so a retry cannot use it.
 fn refuse_taken_after_check(id: &str) -> String {
     format!("the code was checked and used, but ask `{id}` is no longer parked (it timed out or was dismissed), so nothing was released; run the resolve again")
+}
+
+/// The refusal for an approve whose ask ran out its park timeout before a code
+/// arrived. Nothing is parked under the id any more; a new resolve parks one.
+fn refuse_timed_out(id: &str) -> String {
+    format!("ask `{id}` timed out before a code was given, so nothing is parked under it; run the resolve again")
 }
 
 /// Fetch `secret`'s value fresh through its policy's backend — the SAME
@@ -4660,6 +4672,29 @@ mod tests {
             Some(v) => std::env::set_var(crate::park::PARK_TIMEOUT_ENV, v),
             None => std::env::remove_var(crate::park::PARK_TIMEOUT_ENV),
         }
+        std::fs::remove_dir_all(&home).ok();
+    }
+
+    /// F20: an approve for an ask whose wait ran out is refused as a timed-out
+    /// ask, not as an unknown id, so the person is told why it is gone.
+    #[test]
+    fn an_approve_for_an_ask_whose_wait_ran_out_says_it_timed_out() {
+        let home = tmp_home("approve-after-timeout");
+        let p = Policy::new("t", "scratch", "stored-value");
+        seed_enrolled(&home, p);
+        let parked = ParkRegistry::new();
+        let (id, rx) = parked.park("t", "m", 0);
+        assert!(matches!(
+            crate::park::wait_for_outcome(&parked, &id, rx, std::time::Duration::ZERO),
+            WaitResult::TimedOut
+        ));
+
+        with_redirected_audit_log(&home, || {
+            let approve = format!(r#"{{"op":"approve","id":"{id}"}}"#);
+            let reply = handle_line(&home, &home.join("events.jsonl"), &approve, &parked, &mut Vec::new(), None);
+            let err = reply["error"].as_str().unwrap();
+            assert!(err.contains("timed out"), "an approve for a timed-out ask must say so: {err}");
+        });
         std::fs::remove_dir_all(&home).ok();
     }
 

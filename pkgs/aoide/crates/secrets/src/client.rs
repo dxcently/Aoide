@@ -725,7 +725,8 @@ fn announce_interim(value: &Value) {
     if value.get("parked").and_then(Value::as_bool) == Some(true) {
         let id = value.get("id").and_then(Value::as_str).unwrap_or("?");
         let timeout_secs = value.get("timeoutSecs").and_then(Value::as_u64).unwrap_or(0);
-        eprintln!("{}", park_hint(id, timeout_secs));
+        let expires_at = value.get("expiresAt").and_then(Value::as_u64);
+        eprintln!("{}", park_hint(id, timeout_secs, expires_at));
     }
 }
 
@@ -1469,9 +1470,14 @@ pub(crate) fn read_park_code(input: &mut impl io::Read, tty: bool, prompt: &str)
 }
 
 /// The park line a person reads: where the code is completed, and when the
-/// ask times out.
-pub(crate) fn park_hint(id: &str, timeout_secs: u64) -> String {
-    format!("parked as ask {id} — complete with: aoide secrets approve {id}  (or dismiss {id}); times out in {timeout_secs}s")
+/// ask times out. `expires_at` is the broker's instant for that; a broker
+/// older than the field does not send it, and the line then gives the span.
+pub(crate) fn park_hint(id: &str, timeout_secs: u64, expires_at: Option<u64>) -> String {
+    let until = match expires_at {
+        Some(at) => format!("times out in {timeout_secs}s (expires at unix {at})"),
+        None => format!("times out in {timeout_secs}s"),
+    };
+    format!("parked as ask {id} — complete with: aoide secrets approve {id}  (or dismiss {id}); {until}")
 }
 
 /// What `approve` shows before it reads a code. The secret, consumer, reason
@@ -1572,7 +1578,8 @@ pub(crate) fn resolve_for_exec(
         }
         let id = interim.get("id").and_then(Value::as_str).unwrap_or("?");
         let timeout_secs = interim.get("timeoutSecs").and_then(Value::as_u64).unwrap_or(0);
-        let _ = writeln!(out, "{}", park_hint(id, timeout_secs));
+        let expires_at = interim.get("expiresAt").and_then(Value::as_u64);
+        let _ = writeln!(out, "{}", park_hint(id, timeout_secs, expires_at));
         // F4: what the code releases is shown from the park's own row, the same
         // context `approve` shows, before any code is read. A row that cannot be
         // read asks for no code.
@@ -3051,6 +3058,25 @@ mod argv_free_tests {
         }
     }
 
+    /// F20: the park line gives the instant the ask expires, read from the
+    /// broker's interim line, so a person typing a code sees the window.
+    #[test]
+    fn parked_exec_prints_the_instant_the_park_expires() {
+        let interim = format!(r#"{{"interim":true,"parked":true,"id":"{PARK_ID}","timeoutSecs":300,"expiresAt":1700000300}}"#);
+        let s = scripted("c1-expiry-instant", move |req| match req["op"].as_str() {
+            Some("resolve") => format!("{interim}\n{}", r#"{"ok":true,"value":"stored-value"}"#),
+            Some("pending") => format!(r#"{{"ok":true,"pending":[{PARKED_ROW}]}}"#),
+            _ => r#"{"ok":false,"error":"unexpected op"}"#.to_string(),
+        });
+        let exec = parse_exec_args(&exec_inv(&[("as", "m"), ("secret", "locked")], &["true"])).unwrap();
+        let shown = Arc::new(Mutex::new(Vec::new()));
+        let mut input = std::io::empty();
+        let value = resolve_for_exec(&s.socket, &exec, &mut input, false, &mut Shared(shown.clone()));
+        assert_eq!(value.expect("the value returns on the first connection"), "stored-value");
+        let shown = String::from_utf8(shown.lock().unwrap().clone()).unwrap();
+        assert!(shown.contains("expires at unix 1700000300"), "the park line must give the expiry instant:\n{shown}");
+    }
+
     /// F4: a park whose row cannot be read asks for no code, because the code
     /// is what releases the value and nothing would show what it releases.
     #[test]
@@ -3128,7 +3154,7 @@ mod argv_free_tests {
 
     #[test]
     fn park_hint_names_the_approve_line_and_no_totp_code() {
-        let hint = park_hint(PARK_ID, 300);
+        let hint = park_hint(PARK_ID, 300, None);
         assert!(hint.contains("aoide secrets approve 3f2a-3"), "{hint}");
         assert!(!hint.contains("--totp"), "{hint}");
     }

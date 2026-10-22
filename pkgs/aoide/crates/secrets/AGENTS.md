@@ -626,6 +626,14 @@
   refusal `wait:false` produces, naming the cap and its env knob. Don't
   make the cap check a separate `len()` call followed by a separate
   `insert` — that reintroduces exactly the TOCTOU this fix exists to close.
+- **A timed-out ask's id is remembered for its refusal, in a bounded
+  memory.** `ParkRegistry::remove_only` records an id only when its wait won
+  the race for it (a genuine timeout); an approve or dismiss that took the
+  ask first leaves no record. `ParkRegistry::timed_out` reads the newest
+  `TIMED_OUT_MEMORY` (64) ids, and `handle_approve` refuses a timed-out id as
+  timed out, not as unknown. An older id falls off the memory and gets the
+  unknown-id refusal. `client::park_hint` takes the interim's `expiresAt` as
+  optional, so a broker that predates the field still gets a park line.
 - **A connection thread that fails to spawn must drop ONE connection,
   never crash the broker (P-N2c, FIX 3a/3c, hard constraint).** `serve`'s
   accept loop uses the FALLIBLE `std::thread::Builder::new().spawn(...)`,

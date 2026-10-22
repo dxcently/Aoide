@@ -53,7 +53,7 @@
 //! `handle_conn` thread must never wedge every OTHER connection's access to
 //! the shared park registry.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 use std::io::Read;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc;
@@ -233,6 +233,10 @@ impl ParkedAsk {
     }
 }
 
+/// How many timed-out ids a [`ParkRegistry`] remembers, newest kept. An approve
+/// for an older one is refused as an unknown id.
+const TIMED_OUT_MEMORY: usize = 64;
+
 /// The shared registry every connection-handling thread reaches through an
 /// `Arc` (`broker::serve`'s one instance, cloned per spawned thread). Ids
 /// are internally `u64` (the monotonic counter, module doc) and only ever
@@ -241,6 +245,9 @@ impl ParkedAsk {
 /// anything but the string form.
 pub struct ParkRegistry {
     inner: Mutex<BTreeMap<u64, ParkedAsk>>,
+    /// The ids whose wait ran out, oldest first, at most [`TIMED_OUT_MEMORY`].
+    /// Only [`Self::remove_only`] writes it, on a genuine timeout.
+    timed_out_ids: Mutex<VecDeque<u64>>,
     counter: AtomicU64,
     /// This registry's own per-process nonce (module doc, FIX 4) — fixed
     /// for the registry's whole lifetime, generated once in [`Self::new`].
@@ -255,7 +262,12 @@ impl Default for ParkRegistry {
 
 impl ParkRegistry {
     pub fn new() -> Self {
-        Self { inner: Mutex::new(BTreeMap::new()), counter: AtomicU64::new(0), nonce: random_nonce() }
+        Self {
+            inner: Mutex::new(BTreeMap::new()),
+            timed_out_ids: Mutex::new(VecDeque::new()),
+            counter: AtomicU64::new(0),
+            nonce: random_nonce(),
+        }
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, BTreeMap<u64, ParkedAsk>> {
@@ -363,14 +375,33 @@ impl ParkRegistry {
     /// [`wait_for_outcome`]'s own timeout branch, which has nothing to
     /// hand back through the (already-timed-out) channel. Returns whether
     /// this call is what removed it (the timeout race's tie-breaker: `true`
-    /// means this really was a genuine timeout; `false` means an
-    /// approve/dismiss already got there first and this call must instead
-    /// wait for the message already in flight).
+    /// means this really was a genuine timeout, and the id is remembered as
+    /// one for [`Self::timed_out`]; `false` means an approve/dismiss already
+    /// got there first and this call must instead wait for the message
+    /// already in flight).
     fn remove_only(&self, id: &str) -> bool {
-        match self.parse_id(id) {
-            Some(n) => self.lock().remove(&n).is_some(),
-            None => false,
+        let Some(n) = self.parse_id(id) else {
+            return false;
+        };
+        // Recorded under the same lock that removes the ask, so an approve
+        // never finds the ask gone before its timeout is on record.
+        let mut asks = self.lock();
+        let removed = asks.remove(&n).is_some();
+        if removed {
+            let mut timed_out = self.timed_out_ids.lock().unwrap_or_else(|e| e.into_inner());
+            if timed_out.len() >= TIMED_OUT_MEMORY {
+                timed_out.pop_front();
+            }
+            timed_out.push_back(n);
         }
+        removed
+    }
+
+    /// Whether `id`'s wait ran out and it is still among the remembered
+    /// timeouts ([`TIMED_OUT_MEMORY`]). An id that was approved or dismissed,
+    /// never existed, or has aged out of the memory is not.
+    pub fn timed_out(&self, id: &str) -> bool {
+        self.parse_id(id).is_some_and(|n| self.timed_out_ids.lock().unwrap_or_else(|e| e.into_inner()).contains(&n))
     }
 
     /// Every parked ask's `(id, secret, consumer, requested_at, peer_uid,
@@ -608,6 +639,21 @@ mod tests {
         assert!(reg.peek("not-a-number").is_none());
         assert!(reg.take("not-a-number").is_none());
         assert!(!reg.remove_only("not-a-number"));
+    }
+
+    /// F20: the timed-out memory keeps the newest timeouts and forgets the
+    /// oldest, so it cannot grow with the number of parks that expire.
+    #[test]
+    fn the_timed_out_memory_keeps_the_newest_timeouts_only() {
+        let reg = ParkRegistry::new();
+        let mut ids = Vec::new();
+        for _ in 0..=TIMED_OUT_MEMORY {
+            let (id, rx) = reg.park("t", "m", 1);
+            assert!(matches!(wait_for_outcome(&reg, &id, rx, Duration::ZERO), WaitResult::TimedOut));
+            ids.push(id);
+        }
+        assert!(reg.timed_out(ids.last().unwrap()), "the newest timeout must be remembered");
+        assert!(!reg.timed_out(&ids[0]), "the oldest timeout must be forgotten once the memory is full");
     }
 
     #[test]

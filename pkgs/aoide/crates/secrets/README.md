@@ -282,10 +282,11 @@ below) into something richer.
 
 ```
 -> {"op":"resolve","secret":"<name>","consumer":"<consumer>","totp":"<code>"?,"argv0":"<cmd>"?,"wait":<bool>?,"reason":"<text>"?}
-<- {"interim":true,"parked":true,"id":"<id>","timeoutSecs":<N>}   (INTERIM,
-                                                      only when this resolve
-                                                      parks — P-N2c FIX 1;
-                                                      never on the fast path)
+<- {"interim":true,"parked":true,"id":"<id>","timeoutSecs":<N>,"expiresAt":<unix-seconds>}
+                                                      (INTERIM, only when this
+                                                      resolve parks — P-N2c
+                                                      FIX 1; never on the fast
+                                                      path)
 <- {"ok":true,"value":"<value>"}                    (granted — immediately,
                                                       or after a park completes)
 <- {"ok":false,"error":"<value-free message>"}      (denied/error/timeout/dismissed)
@@ -325,7 +326,9 @@ below) into something richer.
                                                       connection, never here)
 <- {"ok":false,"error":"<value-free message>"}      (unknown id / invalid or
                                                       missing code — the ask
-                                                      STAYS parked either way)
+                                                      STAYS parked either way;
+                                                      an id whose ask timed out
+                                                      is refused as timed out)
 
 -> {"op":"dismiss","id":"<id>"}
 <- {"ok":true}                                       (the parked caller gets
@@ -354,9 +357,9 @@ below) into something richer.
 `client::resolve` (`secrets exec`/`secrets get`) consumes any interim line
 itself and never surfaces it on stdout — a park prints ONE line to STDERR
 instead: `parked as ask <id> — complete with: aoide secrets approve <id>
-(or dismiss <id>); times out in <N>s`, so an interactive
-caller learns its own ask id immediately rather than watching a silent hang
-that is indistinguishable from a wedged broker for up to
+(or dismiss <id>); times out in <N>s (expires at unix <N>)`, so an
+interactive caller learns its own ask id immediately rather than watching a
+silent hang that is indistinguishable from a wedged broker for up to
 `AOIDE_SECRETS_PARK_TIMEOUT` seconds.
 
 `totp`/`argv0`/`wait`/`reason` are optional on `resolve` (`wait` defaults to
