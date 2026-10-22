@@ -175,12 +175,23 @@ strx rice list [--json]
 
 - **Reads:** the directories under `rices/` whose name is a valid rice
   name and which hold a `theme.json`; each one's notes are parsed. Also reads
-  `/stage/mode.json` and the declared twin `/declared/theme.json`.
+  `/stage/mode.json`, the declared twin `/declared/theme.json`, the shipped
+  copies under the templates dir and the host config (for `pending`,
+  `nixChanged` and `nextRebuild`).
 - **Output:** `"N rice(s)"`; data `{mode, rice, draft, stagingRice, declared,
-  rices: [{name, ok, reason?}]}`, `rices` sorted by name. `mode` is the rice
-  mode; `rice` and `draft` are the live pair, `stagingRice` the last-staged
-  rice, `declared` the declared one (each null when absent). `ok` is false with
-  `reason` `unreadable` or `invalid-json` when the notes do not parse.
+  rices: [{name, ok, reason?, pending, nixChanged}], nextRebuild}`, `rices`
+  sorted by name. `mode` is the rice mode; `rice` and `draft` are the live
+  pair, `stagingRice` the last-staged rice, `declared` the declared one (each
+  null when absent). `ok` is false with `reason` `unreadable` or
+  `invalid-json` when the notes do not parse. `pending` is true when a dress
+  file (`theme.json`, `rice.nix`, `hyprland.conf`, `widgets/`) differs from the
+  shipped copy, or the build ships no copy of the rice (performing it needs a
+  rebuild); `nixChanged` is true when `rice.nix` is one of those files. Both
+  are null when the templates dir is absent or a read fails, and `nixChanged`
+  is null when there is no shipped copy. `nextRebuild` is the rice the host
+  config's one live `habit.rice.declared` line names, when that is not
+  `declared`; null when it is `declared`, when the host config is absent or
+  unreadable, and when it holds zero or two such lines.
 - **Notes:** read-only. The rice-stage gate (the §7.5 rices evaluation) is
   not run, so `ok` means the notes parse and `strx rice mode stage <name>`
   decides the rest. An absent rices is `ok` with an empty list.

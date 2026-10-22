@@ -36,3 +36,32 @@
   Until the state settles, `strillix` refuses every verb except `migrate`,
   help and version. Rice state held by both roots, or across homes, is
   refused: nothing moves, and the verb exits nonzero.
+
+### A host's theme value outranks only that value
+
+- A host's plain write to one `strillix.theme` value now outranks only that
+  value. Before, `strillix.theme` was one submodule option, so a host write to
+  any single value (`strillix.theme.geometry.terminalOpacity`, say) dropped the
+  performed rice's whole theme back to the option defaults.
+- A whole-tier write such as `strillix.theme.palette = lib.mkForce { … }` now
+  sets only the values it names. `strillix onboard`'s generated `aoide.nix`
+  lists the tiers' values but no longer the seven tier entries
+  (`strillix.theme`, `.palette`, `.bar`, `.notif`, `.window`, `.geometry`,
+  `.fonts`).
+- `base16` and `fonts.monospace` stay whole units (a host value replaces the
+  rice's whole scheme or face), and `override` stays the host's own tier
+  (CONTRACTS.md §5).
+
+### `rice list` reports pending edits and the next rebuild
+
+- `strillix rice list --json` gains a top-level `nextRebuild`: the rice the
+  host file's one `habit.rice.declared` line names, when it differs from
+  `declared` (null otherwise). Each rice row gains `pending`, true when the
+  machine copy's theme, `rice.nix`, `hyprland.conf` or widgets differ from the
+  shipped copy or the build ships none, and `nixChanged`, true when `rice.nix`
+  is among those. Both are null where the templates dir or a read cannot say.
+- The barcarolle, cadenza and sonata rice menus draw them: a readable rice
+  whose `pending` is true reads `<rice> · pending`, a dimmed `rice.nix
+  changed` row sits under a rice whose `nixChanged` is true, and a dimmed
+  `next rebuild: <rice>` row under the declarative row. A bridge that sends
+  none of the fields leaves the menus as they were.

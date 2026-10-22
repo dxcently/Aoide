@@ -62,6 +62,7 @@ pub fn register(r: &mut Registry) {
 }
 
 fn handle_rice_list(_inv: &Invocation) -> Outcome {
+    let templates = crate::paths::rice_templates_dir().filter(|t| t.is_dir());
     let mut rices: Vec<Value> = std::fs::read_dir(crate::paths::rices_root())
         .into_iter()
         .flatten()
@@ -77,22 +78,52 @@ fn handle_rice_list(_inv: &Invocation) -> Outcome {
                 .and_then(|raw| {
                     serde_json::from_str::<Value>(&raw).map_err(|_| "invalid-json")
                 });
+            let (pending, nix_changed) = templates
+                .as_deref()
+                .map_or((None, None), |t| rice_pending(&name, t));
             match parsed {
-                Ok(_) => json!({ "name": name, "ok": true }),
-                Err(reason) => json!({ "name": name, "ok": false, "reason": reason }),
+                Ok(_) => json!({
+                    "name": name, "ok": true,
+                    "pending": pending, "nixChanged": nix_changed,
+                }),
+                Err(reason) => json!({
+                    "name": name, "ok": false, "reason": reason,
+                    "pending": pending, "nixChanged": nix_changed,
+                }),
             }
         })
         .collect();
     rices.sort_by(|a, b| a["name"].as_str().cmp(&b["name"].as_str()));
     let m = crate::mode::load_mode_marker();
+    let declared = declared_rice();
+    let next_rebuild = crate::paths::host_config()
+        .and_then(|file| crate::host_declare::declared_in_file(&file))
+        .filter(|next| declared.as_deref() != Some(next.as_str()));
     Outcome::ok("rice.list", format!("{} rice(s)", rices.len())).with_data(json!({
         "mode": super::mode::mode_word(m.mode),
         "rice": m.rice,
         "draft": m.draft,
         "stagingRice": m.staging_rice,
-        "declared": declared_rice(),
+        "declared": declared,
         "rices": rices,
+        "nextRebuild": next_rebuild,
     }))
+}
+
+/// One row's `(pending, nixChanged)`: whether the machine copy's dress differs
+/// from the shipped copy, and whether `rice.nix` is one of the differences. A
+/// rice with no shipped copy is pending, since the build does not carry it and
+/// performing it needs a rebuild; its `nixChanged` is null. A read error leaves
+/// both null.
+fn rice_pending(name: &str, templates: &std::path::Path) -> (Option<bool>, Option<bool>) {
+    match super::refresh::staged_diff(name, templates) {
+        Ok(None) => (Some(true), None),
+        Ok(Some(differing)) => (
+            Some(!differing.is_empty()),
+            Some(differing.iter().any(|p| p == "rice.nix")),
+        ),
+        Err(_) => (None, None),
+    }
 }
 
 /// Resolve the `theme.json` a `rice` command should act on:
@@ -1196,11 +1227,19 @@ mod tests {
     use aoide_protocol::output::Status;
 
     fn list_fixture(tag: &str) -> (std::path::PathBuf, EnvSaver) {
-        let saver = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
+        let saver = EnvSaver::capture(&[
+            "AOIDE_STAGE_DIR",
+            "AOIDE_ROOT",
+            "STRILLIX_ROOT",
+            "STRILLIX_HOST_CONFIG",
+            "STRILLIX_TEMPLATES",
+        ]);
         let root = unique_tmp(tag);
         let stage = root.join("stage");
         std::fs::create_dir_all(&stage).unwrap();
         aoide_test_support::pin_stage(&stage);
+        std::env::set_var("STRILLIX_HOST_CONFIG", root.join("host.nix"));
+        std::env::set_var("STRILLIX_TEMPLATES", root.join("templates"));
         (root, saver)
     }
 
@@ -1208,6 +1247,33 @@ mod tests {
         let dir = root.join("rices").join(name);
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("theme.json"), body).unwrap();
+    }
+
+    fn put_file(dir: &std::path::Path, rel: &str, body: &str) {
+        let path = dir.join(rel);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, body).unwrap();
+    }
+
+    /// Lists a tree holding one rice, `sonata`, whose machine copy is `machine`
+    /// and whose shipped copy is `shipped` (`(relpath, body)` pairs). `None` leaves
+    /// no templates dir at all; `Some(&[])` leaves one with no `sonata` in it.
+    fn list_sonata(tag: &str, machine: &[(&str, &str)], shipped: Option<&[(&str, &str)]>) -> Value {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (root, _s) = list_fixture(tag);
+        for (rel, body) in machine {
+            put_file(&root.join("rices").join("sonata"), rel, body);
+        }
+        if let Some(files) = shipped {
+            let templates = root.join("templates");
+            std::fs::create_dir_all(&templates).unwrap();
+            for (rel, body) in files {
+                put_file(&templates.join("sonata"), rel, body);
+            }
+        }
+        let out = handle_rice_list(&inv(&["rice", "list"], &[]));
+        let _ = std::fs::remove_dir_all(&root);
+        out.data.unwrap()
     }
 
     #[test]
@@ -1275,6 +1341,120 @@ mod tests {
         assert_eq!(d["stagingRice"], "cadenza");
         assert_eq!(d["declared"], "sonata");
         assert!(d["draft"].is_null());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn list_pending_is_false_when_the_dress_matches_the_shipped_copy() {
+        let files = [("theme.json", "{}"), ("rice.nix", "{ }"), ("widgets/bar.qml", "Bar {}")];
+        let d = list_sonata("rice-list-same", &files, Some(&files[..]));
+        assert_eq!(d["rices"][0]["pending"], false);
+        assert_eq!(d["rices"][0]["nixChanged"], false);
+    }
+
+    #[test]
+    fn list_pending_sees_a_theme_edit_and_leaves_nix_changed_false() {
+        let machine = [("theme.json", "{\"edited\":1}"), ("rice.nix", "{ }"), ("widgets/bar.qml", "Bar {}")];
+        let shipped = [("theme.json", "{}"), ("rice.nix", "{ }"), ("widgets/bar.qml", "Bar {}")];
+        let d = list_sonata("rice-list-theme", &machine, Some(&shipped[..]));
+        assert_eq!(d["rices"][0]["pending"], true);
+        assert_eq!(d["rices"][0]["nixChanged"], false);
+    }
+
+    #[test]
+    fn list_nix_changed_when_rice_nix_differs() {
+        let machine = [("theme.json", "{}"), ("rice.nix", "{ pkgs }"), ("widgets/bar.qml", "Bar {}")];
+        let shipped = [("theme.json", "{}"), ("rice.nix", "{ }"), ("widgets/bar.qml", "Bar {}")];
+        let d = list_sonata("rice-list-nix", &machine, Some(&shipped[..]));
+        assert_eq!(d["rices"][0]["pending"], true);
+        assert_eq!(d["rices"][0]["nixChanged"], true);
+    }
+
+    #[test]
+    fn list_pending_sees_a_widget_on_one_side_only() {
+        let machine = [("theme.json", "{}"), ("widgets/bar.qml", "Bar {}"), ("widgets/extra.qml", "X {}")];
+        let shipped = [("theme.json", "{}"), ("widgets/bar.qml", "Bar {}")];
+        let d = list_sonata("rice-list-widget", &machine, Some(&shipped[..]));
+        assert_eq!(d["rices"][0]["pending"], true);
+        assert_eq!(d["rices"][0]["nixChanged"], false);
+    }
+
+    #[test]
+    fn list_history_and_drafts_never_make_a_rice_pending() {
+        let machine = [
+            ("theme.json", "{}"),
+            ("history/0001.json", "old"),
+            ("drafts/alt/theme.json", "{\"alt\":1}"),
+        ];
+        let shipped = [("theme.json", "{}")];
+        let d = list_sonata("rice-list-runtime", &machine, Some(&shipped[..]));
+        assert_eq!(d["rices"][0]["pending"], false);
+        assert_eq!(d["rices"][0]["nixChanged"], false);
+    }
+
+    #[test]
+    fn list_without_a_shipped_copy_is_pending_with_nix_changed_null() {
+        let machine = [("theme.json", "{}")];
+        let d = list_sonata("rice-list-unshipped", &machine, Some(&[]));
+        assert_eq!(d["rices"][0]["pending"], true);
+        assert!(d["rices"][0]["nixChanged"].is_null());
+    }
+
+    #[test]
+    fn list_pending_and_nix_changed_are_null_without_a_templates_dir() {
+        let machine = [("theme.json", "{}")];
+        let d = list_sonata("rice-list-notemplates", &machine, None);
+        assert!(d["rices"][0]["pending"].is_null());
+        assert!(d["rices"][0]["nixChanged"].is_null());
+    }
+
+    #[test]
+    fn list_next_rebuild_is_the_host_declared_rice_when_it_differs() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (root, _s) = list_fixture("rice-list-next");
+        put_rice(&root, "sonata", "{}");
+        put_file(&root.join("declared"), "theme.json", r#"{"rice":"sonata"}"#);
+        put_file(&root, "host.nix", "{\n  habit.rice.declared = \"cadenza\";\n}\n");
+        let d = handle_rice_list(&inv(&["rice", "list"], &[])).data.unwrap();
+        assert_eq!(d["nextRebuild"], "cadenza");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn list_next_rebuild_is_null_when_the_host_matches_declared() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (root, _s) = list_fixture("rice-list-next-same");
+        put_rice(&root, "sonata", "{}");
+        put_file(&root.join("declared"), "theme.json", r#"{"rice":"sonata"}"#);
+        put_file(&root, "host.nix", "{\n  habit.rice.declared = \"sonata\";\n}\n");
+        let d = handle_rice_list(&inv(&["rice", "list"], &[])).data.unwrap();
+        assert!(d["nextRebuild"].is_null());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn list_next_rebuild_is_null_without_a_host_file() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (root, _s) = list_fixture("rice-list-next-nofile");
+        put_rice(&root, "sonata", "{}");
+        let d = handle_rice_list(&inv(&["rice", "list"], &[])).data.unwrap();
+        assert!(d["nextRebuild"].is_null());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn list_next_rebuild_is_null_with_two_declared_lines() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (root, _s) = list_fixture("rice-list-next-two");
+        put_rice(&root, "sonata", "{}");
+        put_file(&root.join("declared"), "theme.json", r#"{"rice":"sonata"}"#);
+        put_file(
+            &root,
+            "host.nix",
+            "{\n  habit.rice.declared = \"cadenza\";\n  habit.rice.declared = \"barcarolle\";\n}\n",
+        );
+        let d = handle_rice_list(&inv(&["rice", "list"], &[])).data.unwrap();
+        assert!(d["nextRebuild"].is_null());
         let _ = std::fs::remove_dir_all(&root);
     }
 

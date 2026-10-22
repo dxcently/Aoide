@@ -157,6 +157,7 @@ expr="
       rice = aoideRices.strillix.rice;
       builtIn = aoideRices.strillix.rices.builtIn;
       bg = aoideRices.strillix.theme.palette.bg;
+      gapsOut = aoideRices.strillix.theme.geometry.gapsOut;
       ricesIsExport = toString out.nixosConfigurations.aoide-rices._module.args.ricesRoot == toString flake.ricesRoot;
     };
     merged = {
@@ -356,6 +357,7 @@ printf '%-52s %s\n' "consumer toplevel drvPath" "$(o .drv)"
 check "aoide-rices performs Aoide's sonata"           "sonata" "$(o .aoideRices.rice)"
 check "…and builds in sonata alone"                 "sonata" "$(o '.aoideRices.builtIn | join(" ")')"
 check "…and wears sonata's theme"                  "#f2ebde" "$(o .aoideRices.bg)"
+check "…and its host's own gapsOut lands beside it"   "3" "$(o .aoideRices.gapsOut)"
 check "…its strillix lane reads the exported rices"  "true" "$(o .aoideRices.ricesIsExport)"
 check "merged: its strillix lane reads the merged directory" "true" "$(o .merged.ricesIsMerged)"
 

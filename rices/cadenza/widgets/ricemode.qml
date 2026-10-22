@@ -10,8 +10,13 @@
 //   rices                  the runtime rices; a row sends
 //                          bridge.riceMode("stage", name). A rice that does not
 //                          load is a dim `<name> · unreadable` row that does nothing
-//                          (the reason does not fit the 22-cell row)
-//   [declarative] <rice>   sends bridge.riceMode("declarative")
+//                          (the reason does not fit the 22-cell row). A rice whose
+//                          `pending` is true reads `<name> · pending`; one whose
+//                          `nixChanged` is true has a dim `rice.nix changed` line
+//                          under it
+//   [declarative] <rice>   sends bridge.riceMode("declarative"); a dim
+//                          `next rebuild: <rice>` line follows it when the
+//                          answer's `nextRebuild` names a rice
 //   drafts · <rice>        the staged rice's drafts, a row sends
 //                          bridge.riceDraft("enter", name); the two fixed rows
 //                          send ("new") and ("save"); `save` is offered in
@@ -79,6 +84,7 @@ Item {
     readonly property int pickLines: 1 + (root.ready ? root.rices.length : 1) + 2
                                      + (root.ready && root.drafts.length === 0 ? 1 : 0) + root.drafts.length
                                      + 1 + (root.mode === "staging" ? 1 : 0)
+                                     + root.rices.filter(function (r) { return r.nixChanged === true }).length + (root.ready && root.answer.nextRebuild ? 1 : 0)
 
     onModeChanged: root.pending = false
     onDraftChanged: root.pending = false
@@ -216,18 +222,28 @@ Item {
             }
             Repeater {
                 model: root.rices
-                PickRow {
+                Column {
+                    id: riceEntry
                     required property var modelData
                     readonly property bool here: root.ready && root.mode === "staging" && modelData.name === root.answer.rice
                     readonly property bool last: root.ready && root.mode === "declarative" && modelData.name === root.answer.stagingRice
-                    live: !!modelData.ok
-                    lamp: here ? root.kit.lampGlyph("working") : (last ? root.kit.lampGlyph("idle") : "")
-                    lampColor: here ? root.modeColor("staging") : root.kit.dim
-                    name: modelData.ok ? "" + modelData.name : modelData.name + " · unreadable"
-                    nameColor: modelData.ok ? root.kit.ink : root.kit.dim
-                    onActivated: {
-                        if (here) root.open = false
-                        else root.act("stage", "" + modelData.name)
+                    PickRow {
+                        live: !!riceEntry.modelData.ok
+                        lamp: riceEntry.here ? root.kit.lampGlyph("working") : (riceEntry.last ? root.kit.lampGlyph("idle") : "")
+                        lampColor: riceEntry.here ? root.modeColor("staging") : root.kit.dim
+                        name: riceEntry.modelData.ok ? "" + riceEntry.modelData.name + (riceEntry.modelData.pending === true ? " · pending" : "")
+                            : riceEntry.modelData.name + " · unreadable"
+                        nameColor: riceEntry.modelData.ok ? root.kit.ink : root.kit.dim
+                        onActivated: {
+                            if (riceEntry.here) root.open = false
+                            else root.act("stage", "" + riceEntry.modelData.name)
+                        }
+                    }
+                    PickRow {
+                        visible: riceEntry.modelData.nixChanged === true
+                        live: false
+                        name: "rice.nix changed"
+                        nameColor: root.kit.dim
                     }
                 }
             }
@@ -240,6 +256,12 @@ Item {
                     if (root.mode === "declarative") root.open = false
                     else root.act("declarative")
                 }
+            }
+            PickRow {
+                visible: root.ready && !!root.answer.nextRebuild
+                live: false
+                name: root.ready && root.answer.nextRebuild ? "next rebuild: " + root.answer.nextRebuild : ""
+                nameColor: root.kit.dim
             }
             PickRow {
                 live: false

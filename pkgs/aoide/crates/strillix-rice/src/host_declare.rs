@@ -262,6 +262,17 @@ fn declare_racing(
     .with_data(data(true))
 }
 
+/// The rice a host file declares: the value of its one live
+/// `habit.rice.declared` line. `None` when the file cannot be read or holds
+/// zero or several such lines, the counts `rice declare` refuses on.
+pub(crate) fn declared_in_file(file: &Path) -> Option<String> {
+    let text = std::fs::read_to_string(file).ok()?;
+    match declared_values(&text).as_slice() {
+        [only] => Some(text[only.clone()].to_string()),
+        _ => None,
+    }
+}
+
 /// The byte range of the quoted value on every live line that is exactly one
 /// `habit.rice.declared = "<value>";` statement, whitespace aside. A line is
 /// live when it starts outside a comment or string ([`Lexer`]).

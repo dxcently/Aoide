@@ -46,7 +46,7 @@ sits outside it under `$STRILLIX_ROOT`, created on demand.
 
 > **The shipped standard rice lives in the rices like any other.**
 > The shipped standard, `rices/sonata/`, is upstream-owned and
-> evolving; a host performs it by naming it (`strillix.rice = "sonata";`).
+> evolving; a host performs it by naming it (`habit.rice.declared = "sonata";`).
 > Every other rice is clone-owned, and upstream never touches it. See [[Self-Ricing#The Shipped Baseline Is Guarded, Not
 > Frozen]] for the full guarantee.
 > `pkgs/strillix-rices` bakes the committed `rices/` tree into
@@ -64,15 +64,15 @@ A rice is SELECTED, not walked: a host module names what it performs
 typed scan and `lib/strillix.nix` wires exactly the selected rices' `rice.nix`
 files in as bodies, and only the performed one is imported ([[Self-Ricing]],
 [[Snowflake-Anatomy]]). Rices committed today: `cadenza` (the phosphor key, a
-dark green-CRT console — the rice **yomi-strix performs**), `sonata` (the
+dark green-CRT console), `sonata` (the
 shipped standard, a light Greek key with no wallpaper: a marble ground baked from
-`palette.bg`), and the rices the rices also carries — `barcarolle` (the
-Windows 7 Aero glass), `nocturne`. Each folder
+`palette.bg`), and `barcarolle` (the
+Windows 7 Aero glass, the rice **yomi-strix performs**), `nocturne`. Each folder
 holds:
 
 | Subfolder/file | Holds |
 |---|---|
-| `rice.nix` | a body (`system`: the ten strillix providers and a `module` setting `strillix.theme.*` (palette + base16 + component tiers + geometry + fonts + wallpaper) and `strillix.layout.*`; `home`: the `strillix` renderer and `hyprland.conf`). **No** host options, no host capabilities — so one score replays at any venue (`CONTRACTS.md §5`, [[Rice-Vocabulary#Replay — any rice, any host]]). The wallpaper note points at a file in the shared `/wallpapers/` library (`../../wallpapers/<file>`), not a per-rice `assets/` dir. |
+| `rice.nix` | a body (`system`: the ten strillix providers and a `module` setting `strillix.theme.*` (palette + base16 + component tiers + geometry + fonts + wallpaper) and `strillix.layout.*`; `home`: the `strillix` renderer and `hyprland.conf`). **No** host options, no host capabilities — so one score replays at any venue (`CONTRACTS.md §5`, [[Rice-Vocabulary#Replay — any rice, any host]]). The wallpaper note is a path into the rice's own folder (barcarolle: `./wallpaper/barcarolle-desktop.jpg`), or no note (`null`), which bakes a solid from `palette.bg` (sonata, cadenza, nocturne). |
 | `theme.json` | the rice's resolved theme values — the [[theme]] schema: `palette`, `polarity`, `base16`, `bar`/`notif`/`window`, `geometry`. The baked-only tiers (`wallpaper`, `fonts`) live in `rice.nix` alone and have no twin here — a convention, not a gate: the schema never walks a document's top-level keys, so a stray copy would pass `rice lint` and ride the activation seed into the stage file unread. |
 | `palette/` | this rice's transpose keys — the palette variants `rice transpose <rice> <key>` swaps among |
 | `sounds/` | notification + system sounds (the chimes dimension) |

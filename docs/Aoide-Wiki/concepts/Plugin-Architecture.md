@@ -22,8 +22,9 @@ by being added to a list.
   their directories' own shallow scans ([[Codebase#The catalogue, the
   constructor (`lib/`)]], [[Snowflake-Anatomy]]).
 - **Self-gating, not switched from outside.** Each discovered module gates
-  itself on its own `enable`/`strillix.rice`, rather than a parent module
-  turning it on.
+  itself on its own `enable` (the quickshell service on its own config),
+  rather than a parent module turning it on. Only the paint lanes that paint
+  a rice (`strillix`, `greeter`) gate on the performed rice.
 - **Resolution by name, not by import.** A widget resolves through
   `StagingEngine.resolveRice(rice, slot)` — by slot *name*, falling back to
   sonata — so no host surface ever imports a concrete widget

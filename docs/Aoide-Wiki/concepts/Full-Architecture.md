@@ -240,7 +240,7 @@ default) — see [[Self-Ricing#Staging vs Declarative Mode]].
         ▼
   commit to rices/<rice>/   ──►  gated rebuild   ──►  RECORDING
         │                                     ↓ fleet-available: any host sets
-        └──►  append rices/ (learnings, preferences)      strillix.rice = "<name>"
+        └──►  append rices/ (learnings, preferences)      habit.rice.declared = "<name>"
               ← the "self" in self-ricing
 ```
 
@@ -465,7 +465,7 @@ for the layer anatomy, [[Codebase]] for file-level detail):
 │   └── overrides/   capability-scoped fixes (no records yet)
 ├── hosts/           one record per machine (yomi-strix is the real one; `_`-prefixed
 │                    dirs are the templates to copy) — flags, aggregations, the
-│                    strillix.rice selector, and a real
+│                    habit.rice.declared selector, and a real
 │                    hardware profile, switched live and running as the daily desktop
 ├── pkgs/            aoide/ (Rust workspace, two binaries — aoide/aoided core +
 │                    strillix paint), strillix-shell/ (the QML skeleton), strillix-rices/
