@@ -1854,6 +1854,44 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    /// Approve binds to the fingerprint the way deny does: a stale one takes
+    /// nothing and says to list the queue again, and the listed one delivers.
+    #[test]
+    fn approve_with_a_stale_fingerprint_takes_nothing_and_the_listed_one_delivers() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&[
+            "AOIDE_STAGE_DIR",
+            "XDG_RUNTIME_DIR",
+            "AOIDE_AUDIT_LOG",
+            "AOIDE_CONDUCT_AUTOGATE",
+            "AOIDE_SESSION_ID",
+        ]);
+        let root = setup("pnd-approve-expect");
+        let id = "bound-live";
+        let _listener = register_live(id);
+        write_queue(&[queued_entry(id, &stamp_ago(3_600), "someone", 5)]);
+        let fp = listed_row(0)["fingerprint"].as_str().unwrap().to_string();
+
+        let approve = |expect: &str| {
+            let inv = Invocation {
+                path: vec!["session".into(), "pending".into(), "approve".into()],
+                args: vec!["0".into()],
+                flags: BTreeMap::from([("expect".to_string(), expect.to_string())]),
+                door: aoide_protocol::Door::Cli,
+            };
+            pending_approve(&inv)
+        };
+        let stale = approve("0000000000000000");
+        assert_eq!(stale.status, Status::Error, "{}", stale.message);
+        assert!(stale.message.contains("list the queue again"), "{}", stale.message);
+        assert_eq!(load_pending_array().unwrap().len(), 1, "a stale bind takes nothing");
+
+        let bound = approve(&fp);
+        assert_eq!(bound.status, Status::Ok, "{}", bound.message);
+        assert!(load_pending_array().unwrap().is_empty(), "the listed entry, and only it, was approved");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     /// A held send's human line is its whole escaped text, not a clip of its
     /// first sixty characters: the tail that matters is shown, and the JSON
     /// carries the same spelling as `shown`. Before the change the line stopped

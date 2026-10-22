@@ -328,7 +328,9 @@ in the message.
   `pending_approve` and `pending_deny` read the entry first, then `take_pending_entry`
   removes it under the stage lock only when its fingerprint is the `--expect`
   the caller named (the conductor sends the one its row drew) and it still
-  passes `PendingSpawn::is_known`. A held resurrect's `shown` plan is checked
+  passes `PendingSpawn::is_known`. `--expect` is a declared string flag on both
+  verbs, so the CLI parser takes it; a stale value takes nothing.
+  A held resurrect's `shown` plan is checked
   by `resurrect::approved_selection` before the take, so a ledger that moved
   since the hold refuses without consuming the entry. Hold-time pins: a held
   spawn's `cwd` and a relative argv[0] are absolute, an `@file` is inlined

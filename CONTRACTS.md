@@ -4528,7 +4528,8 @@ alone: it stays queued until it is denied or reaches its seven days.
 
 Approval does not re-decide what the hold decided. `approve` takes the entry it
 read, under the stage lock, only when the entry's content still matches the
-`fingerprint` `list` prints, passed as `--expect` (the conductor's rows and its
+`fingerprint` `list` prints, passed as `--expect <fingerprint>` (a string flag
+declared on `session pending approve` and `deny`; the conductor's rows and its
 held-spawn confirm pass it on every approve and deny; a wrong fingerprint takes
 nothing). The entry must also still pass the shape check a hold applies
 (`PendingSpawn::is_known`: a plain `--id` outside `sub:`, no `--parent`, a

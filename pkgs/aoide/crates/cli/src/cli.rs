@@ -323,4 +323,17 @@ mod tests {
         let bare = parse(&argv(&["session", "prune", "--help"]), Door::Cli).unwrap_err();
         assert!(!bare.message.contains("examples:"), "{}", bare.message);
     }
+
+    #[test]
+    fn pending_approve_and_deny_take_a_typed_expect_flag() {
+        for verb in ["approve", "deny"] {
+            let (inv, _) = parse(
+                &argv(&["session", "pending", verb, "2", "--expect", "0123456789abcdef"]),
+                Door::Cli,
+            )
+            .unwrap_or_else(|e| panic!("{verb}: {}", e.message));
+            assert_eq!(inv.args, ["2"], "{verb}");
+            assert_eq!(inv.flags.get("expect").map(String::as_str), Some("0123456789abcdef"), "{verb}");
+        }
+    }
 }

@@ -103,6 +103,10 @@ it and `approve` refuses it. Its target's record is `done`, or no record for
 the target exists four hours after the hold was queued. Eviction leaves a gone
 hold alone: it stays queued until it is denied or reaches its seven days.
 
+`approve` and `deny` take `--expect <fingerprint>`, the `fingerprint` that
+`list --json` prints for the entry. A stale one takes nothing and says to list
+the queue again.
+
 ## Named seams (what it exposes)
 
 - **The workspace ↔ project binding (§B)**: `graph/workspace.rs` implements
