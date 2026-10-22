@@ -561,10 +561,11 @@
   as the program the requester says receives the value. The broker does
   not run it or check it against anything, so nothing may decide a
   release from it.
-- **`exec` reads a park's row before it asks for a code.** The code
-  is what releases the value, so `resolve_for_exec` shows
-  `approve_context` from `pending` first, and asks for no code when the
-  row cannot be read. Don't move the code read ahead of that lookup.
+- **`exec` never asks for a code (ruling 87).** A park prints the approve
+  line and waits; `resolve_for_exec` reads nothing from stdin and sends no
+  approve op. The context a person reads before typing a code is
+  `approve_context`, drawn only by `secrets approve`. Don't teach `exec` to
+  read a code or to approve its own park.
 - **`wait:false` is wire-only — no CLI flag exists, and none should be
   added casually (P-N2).** It exists for a machine caller with no way to
   ever supply a code (this crate's own `README.md`, "Parking a TOTP
@@ -1306,18 +1307,18 @@
   `--totp`-shaped flag or an intermediate shell wrapper to this spawn path
   that would put a code anywhere argv-visible — `client::approve` is
   called with the code exactly the way the tty prompt already does.
-  **The CLI takes no code in argv, on either verb.** `secrets approve` and
-  `secrets exec` read the code from a no-echo prompt on a terminal or one
-  stdin line (`client::approve_with`, `client::resolve_for_exec`, both through
-  `read_park_code`). `--totp` on either verb is refused by `totp_in_argv`
-  before any broker op, with a taught refusal that never repeats the value.
-  `parse_exec_args` runs that gate first. `resolve_for_exec` reads at most one
-  line through `read_line_unbuffered`, byte by byte on the descriptor
-  (`RawStdin`), so the wrapped command inherits the rest of stdin. A line past
-  `MAX_CODE_LINE` (256 bytes) is refused, never buffered. On Windows
-  `RawStdin` falls back to std stdin, which reads ahead, so a piped exec child
-  can miss the bytes after its line; that gap is recorded, not closed. Don't
-  add a flag, env var or temp file that carries a code into either verb.
+  **The CLI takes no code in argv, and `exec` takes no code at all (ruling
+  87).** `secrets approve` reads the code from a no-echo prompt on a terminal
+  or one stdin line (`client::approve_with`, through `read_park_code`).
+  `--totp` on either verb is refused by `totp_in_argv` before any broker op,
+  with a taught refusal that never repeats the value. `parse_exec_args` runs
+  that gate first. `secrets exec` never reads stdin: `client::resolve_for_exec`
+  prints the park line and waits, so the wrapped command inherits stdin whole.
+  Approve reads at most one line through `read_line_unbuffered`, byte by byte
+  on the descriptor (`RawStdin`); a line past `MAX_CODE_LINE` (256 bytes) is
+  refused, never buffered. Don't add a flag, env var or temp file that carries
+  a code into either verb, and don't give `exec` a code prompt: a code prompt
+  in an agent's pane is fake by definition.
   **Popups are PARKED-ONLY, deliberately (User-flagged default)** —
   `popup_loop` is only ever entered from a `parked` ask picked off the
   SAME `Queue`/`pick_next` the tty prompt uses; `released`/`completed`/

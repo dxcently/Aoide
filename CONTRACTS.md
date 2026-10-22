@@ -6597,7 +6597,10 @@ ask's id short of a separate `pending` call raced against the park — `aoide
 secrets exec` prints it to STDERR as `parked as ask <id> — complete with:
 aoide secrets approve <id>  (or dismiss <id>); times out in <N>s` so an
 interactive caller is never left staring at a silent hang
-indistinguishable from a wedged broker.
+indistinguishable from a wedged broker. `aoide secrets exec` never asks for a
+code (ruling 87): it prints that line and waits, reading nothing from stdin,
+until the park is approved from another process or times out, and it sends no
+approve op of its own.
 
 **Ids are nonce-prefixed (P-N2c, FIX 4), not a bare counter.** An id has the
 shape `<4-hex-nonce>-<counter>` (e.g. `3f2a-7`) — the nonce is 2 random
@@ -6638,7 +6641,7 @@ in whole seconds — no config-file knob exists in the secrets home for this;
 env-only, same precedent as `AOIDE_SECRETS_HOME`/`AOIDE_SECRETS_SOCKET`),
 the parked connection gets:
 ```text
-<- {"ok":false,"error":"the pending TOTP ask for `<name>` timed out after <N>s (AOIDE_SECRETS_PARK_TIMEOUT to change the default) — run it again and type the code at its prompt, or approve the next ask before it expires with `aoide secrets approve <id>`"}
+<- {"ok":false,"error":"the pending TOTP ask for `<name>` timed out after <N>s (AOIDE_SECRETS_PARK_TIMEOUT to change the default) — run it again to park a new ask, or approve the next ask before it expires with `aoide secrets approve <id>`"}
 ```
 naming the timeout, the env knob, and BOTH completion paths — the ask is
 removed from the registry once timed out (a late `approve`/`dismiss` against

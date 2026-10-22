@@ -617,15 +617,16 @@ kernel's word, and so is the pid in the origin line, as read at park time;
 no-echo prompt on a terminal or from exactly one stdin line of at most 256
 bytes; a longer one is refused, and nothing is sent. An id that is not in
 `secrets pending` is refused before any prompt, with no approve op. Empty input
-sends nothing. `secrets exec` shows the same context for its own park, read from
-`secrets pending` before it asks for any code; if that row cannot be read, it
-asks for no code and keeps waiting. It then reads the code: from a no-echo
-prompt on a terminal, or one line of at most 256 bytes read byte by byte on a
-pipe, so the wrapped command inherits the rest of stdin. On Windows the pipe is
-read ahead, so the wrapped command can miss the bytes after its line. On a
-terminal the wrapped command inherits the terminal after the code. It approves
-its own id on a second connection, and the value returns on the first. At end of
-input it prints the approve line and keeps waiting until the park times out.
+sends nothing.
+
+**`secrets exec` never asks for a code (ruling 87).** A park prints the line
+`parked as ask <id> — complete with: aoide secrets approve <id>`, with the
+expiry, and exec waits. It reads nothing from stdin, so the wrapped command
+inherits stdin whole, and it sends no approve op. The value returns when the
+park is approved by `secrets approve`, the conductor or the app, or the wait
+times out. A code prompt in an agent's pane is fake by definition: a code is
+typed only where aoide draws from the broker's record.
+
 `--totp` on either verb is refused with a taught refusal and no broker op: any
 process of this uid can read argv, and a code is not bound to a park, so a
 reader could spend it on its own request first.

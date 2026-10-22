@@ -890,7 +890,7 @@ fn handle_resolve(
 fn park_timeout_message(secret: &str, timeout_secs: u64) -> String {
     format!(
         "the pending TOTP ask for `{secret}` timed out after {timeout_secs}s ({} to change the default) — \
-         run it again and type the code at its prompt, or approve the next ask before it expires with \
+         run it again to park a new ask, or approve the next ask before it expires with \
          `aoide secrets approve <id>`",
         crate::park::PARK_TIMEOUT_ENV
     )
@@ -4694,6 +4694,7 @@ mod tests {
             assert!(!err.contains("--totp"), "must not teach a code in argv: {err}");
             assert!(err.contains("secrets approve"), "must name the approve completion path: {err}");
             assert!(err.contains("run it again"), "must name the rerun completion path: {err}");
+            assert!(!err.contains("type the code"), "exec never asks for a code, so the rerun must not say to type one: {err}");
         });
         assert!(parked.list().is_empty(), "a timed-out ask must be removed");
 
