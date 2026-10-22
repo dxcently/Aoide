@@ -2703,12 +2703,52 @@ mod tests {
     /// written, `--totp` included (review F18), so they are not scanned.
     const TOTP_HISTORY: [&str; 2] = ["docs/architecture/aoide-report.html", "docs/architecture/TASK-REGISTER.md"];
 
+    /// The scan root for a crate: the nearest ancestor holding a `.git` entry (a
+    /// checkout), else the nearest holding a `Cargo.lock` (the workspace of a copy
+    /// with no checkout, such as a nix build's `pkgs/aoide`).
+    fn scan_root(manifest: &Path) -> std::path::PathBuf {
+        let above = || manifest.ancestors();
+        above()
+            .find(|dir| dir.join(".git").exists())
+            .or_else(|| above().find(|dir| dir.join("Cargo.lock").exists()))
+            .expect("a checkout or a workspace root above the crate")
+            .to_path_buf()
+    }
+
+    /// A nix build copies `pkgs/aoide` to `/build/source`, so the crate sits two
+    /// levels below the workspace root and four `..` climb past it, to the
+    /// filesystem root. The scan root is the checkout (`.git`) or else the
+    /// workspace (`Cargo.lock`), never above either. Assumes no `.git` above the
+    /// temp dir, which holds on any box that keeps its temp dir outside a checkout.
+    #[test]
+    fn the_scan_root_is_the_checkout_or_the_workspace_never_above_it() {
+        let base = std::env::temp_dir().join(format!(
+            "aoide-scan-root-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        let copy = base.join("source");
+        std::fs::create_dir_all(copy.join("crates/secrets")).unwrap();
+        std::fs::write(copy.join("Cargo.lock"), "").unwrap();
+        let checkout = base.join("repo");
+        std::fs::create_dir_all(checkout.join("pkgs/aoide/crates/secrets")).unwrap();
+        std::fs::write(checkout.join("pkgs/aoide/Cargo.lock"), "").unwrap();
+        std::fs::write(checkout.join(".git"), "gitdir: elsewhere\n").unwrap();
+        let canon = |p: std::path::PathBuf| std::fs::canonicalize(p).unwrap();
+        let got_copy = canon(scan_root(&copy.join("crates/secrets")));
+        let got_checkout = canon(scan_root(&checkout.join("pkgs/aoide/crates/secrets")));
+        let (want_copy, want_checkout) = (canon(copy.clone()), canon(checkout.clone()));
+        std::fs::remove_dir_all(&base).ok();
+        assert_eq!(got_copy, want_copy, "a copy with no .git scans its workspace root");
+        assert_eq!(got_checkout, want_checkout, "a checkout scans the repo root, not the workspace");
+    }
+
     /// F22: no text in the workspace teaches a TOTP code in argv. The scan covers
     /// the repo's text files, not six source files, so a teaching string in the
     /// strillix, conductor or docs trees fails it too.
     #[test]
     fn no_text_in_the_workspace_teaches_a_totp_code_in_argv() {
-        let root = std::fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../..")).expect("the repo root");
+        let root = std::fs::canonicalize(scan_root(Path::new(env!("CARGO_MANIFEST_DIR")))).expect("the scan root");
         let mut hits = Vec::new();
         totp_teaching_hits(&root, &root, &mut hits);
         assert!(hits.is_empty(), "text still teaches a code in argv:\n{}", hits.join("\n"));
