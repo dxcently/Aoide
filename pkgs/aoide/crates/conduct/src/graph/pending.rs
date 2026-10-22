@@ -437,10 +437,12 @@ fn refuse_bare_index(inv: &Invocation, cmd: &str, verb: &str, index: usize, obse
     let roster: Vec<SessionRecord> = load_stage::<SessionsFile>(&sessions_path())
         .map(|f| f.sessions)
         .unwrap_or_default();
-    let (state, gone) = hold_state(observed, roster.iter().find(|r| r.session_id == sid), now);
+    let (hold, gone) = hold_state(observed, roster.iter().find(|r| r.session_id == sid), now);
+    // Approve refuses a lapsed hold before any take, so the command it names is deny.
+    let fix_verb = if verb == "approve" && hold != "pending" { "deny" } else { verb };
     let state = match gone {
-        Some(why) => format!("{state} ({why})"),
-        None => state.to_string(),
+        Some(why) => format!("{hold} ({why})"),
+        None => hold.to_string(),
     };
     let spawn = spawn_of(observed);
     let target = match spawn {
@@ -474,7 +476,7 @@ fn refuse_bare_index(inv: &Invocation, cmd: &str, verb: &str, index: usize, obse
                 "pending entry {index} not resolved: {verb} needs --expect\n  state:  {state}\n  target: {target}\n  sender: {sender}\n  age:    {age}\n  text:   {head}"
             ),
             "a position moves when an entry ahead of it resolves or expires, so --expect names the entry you read",
-            Fix::Run(resolve_command(verb, index, Some(observed))),
+            Fix::Run(resolve_command(fix_verb, index, Some(observed))),
         )
         .with_fields(json!({
             "reason": "expect-required",
@@ -521,16 +523,17 @@ fn parse_id(cmd: &str, raw: &str) -> Result<usize, Outcome> {
     })
 }
 
-/// `session pending approve <id> [--json]` — approve one held entry: re-drive
-/// it through [`super::send::session_send`] with `--yes` (the one injection
-/// door, in-process, no shell-out — see the module doc), then remove it from
-/// the queue. The entry is taken OFF the queue before injection is attempted
-/// (matching `send`'s own "every outcome is audited, nothing pending
-/// forever" posture) — if delivery then fails (the target session died while
-/// queued, say), that failure is reported plainly rather than silently
-/// re-queued; the human re-sends by hand if the target is still reachable.
-/// A target that is not live yet is refused before the take, so an entry held
-/// for a session still registering is not lost to the failed delivery.
+/// `session pending approve <id> --expect <fingerprint> [--json]` — approve one
+/// held entry: re-drive it through [`super::send::session_send`] with `--yes`
+/// (the one injection door, in-process, no shell-out — see the module doc),
+/// then remove it from the queue. The entry is taken OFF the queue before
+/// injection is attempted (matching `send`'s own "every outcome is audited,
+/// nothing pending forever" posture) — if delivery then fails (the target
+/// session died while queued, say), that failure is reported plainly rather
+/// than silently re-queued; the human re-sends by hand if the target is still
+/// reachable. A target that is not live yet is refused before the take, so an
+/// entry held for a session still registering is not lost to the failed
+/// delivery.
 pub fn pending_approve(inv: &Invocation) -> Outcome {
     let cmd = "session.pending.approve";
     let args = match require_args(inv, &["id"]) {
@@ -826,8 +829,8 @@ fn approve_spawn(
         }))
 }
 
-/// `session pending deny <id> [--json]` — reject one held entry: remove it from
-/// the queue, inject nothing, one audit line.
+/// `session pending deny <id> --expect <fingerprint> [--json]` — reject one
+/// held entry: remove it from the queue, inject nothing, one audit line.
 pub fn pending_deny(inv: &Invocation) -> Outcome {
     let cmd = "session.pending.deny";
     let args = match require_args(inv, &["id"]) {
@@ -2066,6 +2069,45 @@ mod tests {
             matches!(listener.accept(), Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock),
             "a refused approve delivers nothing"
         );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_bare_approve_of_an_expired_hold_prints_the_deny_command() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&["AOIDE_STAGE_DIR", "XDG_RUNTIME_DIR", "AOIDE_AUDIT_LOG", "AOIDE_CONDUCT_AUTOGATE", "AOIDE_SESSION_ID"]);
+        let root = setup("pnd-bare-expired-fix");
+        write_queue(&[queued_entry("bare-expired-held", &stamp_ago(8 * 86_400), "someone", 5)]);
+        let fp = listed_row(0)["fingerprint"].as_str().unwrap().to_string();
+
+        let out = pending_approve(&pending_invocation(&["session", "pending", "approve"], &["0"]));
+        assert_eq!(out.status, Status::Error, "{}", out.message);
+        let data = out.data.as_ref().unwrap();
+        assert_eq!(data["reason"], "expect-required", "{data}");
+        assert!(out.message.contains("state:  expired"), "{}", out.message);
+        assert_eq!(data["refusal"]["fix"]["run"], format!("aoide session pending deny 0 --expect {fp}"), "{data}");
+        assert_eq!(load_pending_array().unwrap().len(), 1, "a refused approve takes nothing");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_bare_approve_of_a_gone_hold_prints_the_deny_command() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&["AOIDE_STAGE_DIR", "XDG_RUNTIME_DIR", "AOIDE_AUDIT_LOG", "AOIDE_CONDUCT_AUTOGATE", "AOIDE_SESSION_ID"]);
+        let root = setup("pnd-bare-gone-fix");
+        let id = "bare-gone-target";
+        do_session_start(id, Some("claude"), Some("/w"), None, None, None, None, None, None);
+        write_queue(&[queued_entry(id, &stamp_ago(3_600), "someone", 5)]);
+        set_session_state(id, "done");
+        let fp = listed_row(0)["fingerprint"].as_str().unwrap().to_string();
+
+        let out = pending_approve(&pending_invocation(&["session", "pending", "approve"], &["0"]));
+        assert_eq!(out.status, Status::Error, "{}", out.message);
+        let data = out.data.as_ref().unwrap();
+        assert_eq!(data["reason"], "expect-required", "{data}");
+        assert!(out.message.contains("state:  gone"), "{}", out.message);
+        assert_eq!(data["refusal"]["fix"]["run"], format!("aoide session pending deny 0 --expect {fp}"), "{data}");
+        assert_eq!(load_pending_array().unwrap().len(), 1, "a refused approve takes nothing");
         let _ = std::fs::remove_dir_all(&root);
     }
 
