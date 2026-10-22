@@ -207,10 +207,12 @@
   against a fake broker.
 - An ask's `reason`, `argv0` and `originLine` (from `secrets pending
   --json`) are the requester's claims. They are cleaned with `clean_line`
-  when the row is read, and the review row shows them under a claims
-  label: what a person reads before typing a code is the same as what
-  `approve` shows. The conductor does not render the origin itself; the
-  secrets crate does, once, as `originLine`.
+  when the row is read. The review row and the TOTP popup draw the same
+  claim lines (`SecretAskRow::claim_lines`), labelled unverified. The popup
+  adds the peer uid and puts the secret and consumer on the line directly
+  above `totp:`. `approve` draws its own context before its prompt, and the
+  popup shows part of it. The conductor does not render the origin itself;
+  the secrets crate does, once, as `originLine`.
 - While a pairing leg is in flight, no node write is advertised or dispatched:
   the leg's commit writes `state/nodes.json` from its own thread, so a
   `node allow`/`node remove` from the UI thread at the same time is a lost

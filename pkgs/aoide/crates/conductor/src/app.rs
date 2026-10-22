@@ -107,6 +107,15 @@ pub struct Input {
 /// The one glyph a masked prompt draws per typed character.
 pub const MASK: char = '*';
 
+/// Overwrites a typed code's text before its buffer is dropped, so the code is
+/// not left in the freed allocation. The capacity is reused, not reallocated.
+fn wipe_text(text: &mut String) {
+    let len = text.len();
+    text.clear();
+    text.extend(std::iter::repeat('\0').take(len));
+    text.clear();
+}
+
 impl Input {
     /// True while this prompt collects a code the operator is reading off
     /// ANOTHER screen (a pairing code, a TOTP). Every render path draws
@@ -178,13 +187,12 @@ pub enum InputKind {
         name: String,
         outbound: bool,
     },
-    /// The TOTP for one parked secrets ask. It is sent to `secrets approve <id>`
-    /// as one stdin line, never as an argument.
+    /// The TOTP for one parked secrets ask, `ask` being the row the prompt was
+    /// opened on. It is sent to `secrets approve <id>` as one stdin line, never
+    /// as an argument.
     /// Masked like [`InputKind::PairCode`]; the value never rides any reply.
     TotpCode {
-        id: String,
-        secret: String,
-        consumer: String,
+        ask: SecretAskRow,
     },
     /// Edit ONE existing config key through `config set <key> <value>`. The
     /// snapshot is the key plus the value the pane last read, so a refresh
@@ -672,7 +680,7 @@ impl PairingRow {
 /// value-free by construction (`secrets::client::PendingAsk` has no value field
 /// at all). Nothing here is re-derived and nothing here is invented: an absent
 /// field stays absent.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SecretAskRow {
     pub id: String,
     pub secret: String,
@@ -684,6 +692,21 @@ pub struct SecretAskRow {
     pub reason: Option<String>,
     pub argv0: Option<String>,
     pub origin_line: Option<String>,
+}
+
+impl SecretAskRow {
+    /// The requester's claims as the review row and the TOTP popup both draw
+    /// them: reason and program on one line, then the origin when the ask
+    /// carries one. Each is the requester's own word, labelled unverified.
+    pub fn claim_lines(&self) -> Vec<String> {
+        let reason = self.reason.as_deref().map_or_else(|| "none given".to_string(), |v| format!("\"{v}\""));
+        let program = self.argv0.as_deref().unwrap_or("none given");
+        let mut lines = vec![format!("claims (unverified): reason {reason}, program {program}")];
+        if let Some(origin) = &self.origin_line {
+            lines.push(format!("claims (unverified): {origin}"));
+        }
+        lines
+    }
 }
 
 /// One registered node's trust row — `node status --json`'s `data.nodes[]`, the
@@ -2532,11 +2555,7 @@ impl App {
                         buffer: String::new(),
                         step: 0,
                         collected: Vec::new(),
-                        kind: InputKind::TotpCode {
-                            id: r.id.clone(),
-                            secret: r.secret.clone(),
-                            consumer: r.consumer.clone(),
-                        },
+                        kind: InputKind::TotpCode { ask: r.clone() },
                     });
                 } else {
                     self.spawn_secrets_action(
@@ -5024,22 +5043,26 @@ impl App {
                         self.land_pair_outcome(outcome);
                     }
                 }
-                InputKind::TotpCode { id, .. } => {
-                    let totp = input.buffer.trim().to_string();
+                InputKind::TotpCode { ask } => {
+                    let mut totp = input.buffer.trim().to_string();
                     if totp.is_empty() {
                         self.input = Some(input);
                         return;
                     }
+                    wipe_text(&mut input.buffer);
                     // Same no-replay rule as the pairing code: the prompt is
                     // dropped, so a rejected TOTP is never re-sent by a second
                     // Enter. The approve runs as the CLI's own child on the
                     // serialized secrets worker (its broker round trip is
                     // unbounded), and the code reaches the child as stdin.
                     self.input = None;
+                    let id = ask.id;
                     let label = format!("approving ask #{id}");
                     let exe = self.approve_exe.clone();
                     self.spawn_secrets_worker("secrets.approve", &label, move || {
-                        run_approve_child(&exe, &id, &totp)
+                        let outcome = run_approve_child(&exe, &id, &totp);
+                        wipe_text(&mut totp);
+                        outcome
                     });
                 }
                 InputKind::ConfigValue { key, .. } => {
@@ -8233,6 +8256,36 @@ mod tests {
             "the review row names the claims: {text}"
         );
         assert!(text.contains("from: khoa \u{b7} psql (pid 42) @ box"), "{text}");
+    }
+
+    /// The TOTP popup draws the ask's claims above the prompt, and the secret
+    /// and consumer on the line directly above `totp:`. Only the overlay is
+    /// drawn, so the review row cannot supply the claims.
+    #[test]
+    fn the_totp_popup_draws_the_claims_and_puts_the_secret_last() {
+        let _g = T1_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let mut app = t1_app();
+        let _stage = IsolatedStage::new();
+        app.select_panel(Panel::Pending);
+        settle_reads(&mut app);
+        let ask = app
+            .review_rows()
+            .iter()
+            .position(|r| matches!(r, ReviewRow::Ask(_)))
+            .unwrap();
+        app.select_review_row(ask);
+        app.handle_key(KeyEvent::from(KeyCode::Char('a')));
+        let mut term = ratatui::Terminal::new(ratatui::backend::TestBackend::new(120, 30)).unwrap();
+        term.draw(|f| crate::ui::draw_overlays(f, &app)).unwrap();
+        let text = dump_cells(term.backend().buffer());
+        assert!(
+            text.contains("claims (unverified): reason \"nightly deploy\", program /usr/bin/psql"),
+            "the TOTP popup draws the claims: {text}"
+        );
+        let rows: Vec<&str> = text.lines().collect();
+        let secret = rows.iter().position(|r| r.contains("TOTP for")).expect(&text);
+        let prompt = rows.iter().position(|r| r.contains("totp:")).expect(&text);
+        assert_eq!(prompt, secret + 1, "the secret line is not above the prompt: {text}");
     }
 
     #[test]

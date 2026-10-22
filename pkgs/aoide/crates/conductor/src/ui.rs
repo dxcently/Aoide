@@ -142,33 +142,50 @@ pub(crate) fn draw_overlays(f: &mut Frame, app: &App) {
                     popup,
                 );
             }
-            crate::app::InputKind::TotpCode {
-                secret, consumer, ..
-            } => {
+            crate::app::InputKind::TotpCode { ask } => {
+                // The claims and the peer sit above a fixed block, so the
+                // secret and consumer stay the line directly above `totp:`
+                // however much room a long claim takes above them.
                 let width = area.width.min(70);
-                let height = area.height.min(9);
+                let inner_width = usize::from(width.saturating_sub(2).max(1));
+                let mut above = ask.claim_lines();
+                above.push(match &ask.peer_uid {
+                    Some(uid) => format!("peer uid {uid}"),
+                    None => "peer uid unknown".to_string(),
+                });
+                above.push("The code approves the ORIGINAL parked request; it is never echoed back.".to_string());
+                let above_rows: usize = above.iter().map(|line| line.chars().count().max(1).div_ceil(inner_width)).sum();
+                const BELOW_ROWS: u16 = 5;
+                let height = area
+                    .height
+                    .min(u16::try_from(above_rows).unwrap_or(u16::MAX).saturating_add(BELOW_ROWS + 2));
                 let popup = Rect::new(
                     area.x + (area.width - width) / 2,
                     area.y + (area.height - height) / 2,
                     width,
                     height,
                 );
+                let block = Block::default()
+                    .title(" Secrets approval (masked) ")
+                    .borders(Borders::ALL);
+                let parts = Layout::vertical([Constraint::Min(0), Constraint::Length(BELOW_ROWS)]).split(block.inner(popup));
                 f.render_widget(Clear, popup);
+                f.render_widget(block, popup);
+                f.render_widget(
+                    Paragraph::new(above.join("\n")).wrap(ratatui::widgets::Wrap { trim: false }),
+                    parts[0],
+                );
                 f.render_widget(
                     Paragraph::new(format!(
-                        "TOTP for `{secret}` requested by {consumer}.\n\
-                         The code approves the ORIGINAL parked request; it is never echoed back.\n\n\
+                        "TOTP for `{}` requested by {} (unverified).\n\
                          totp: {}▏\n\n\
                          Enter approves; Esc cancels. Nothing is sent while the field is empty.",
+                        ask.secret,
+                        ask.consumer,
                         input.display_buffer()
                     ))
-                    .wrap(ratatui::widgets::Wrap { trim: false })
-                    .block(
-                        Block::default()
-                            .title(" Secrets approval (masked) ")
-                            .borders(Borders::ALL),
-                    ),
-                    popup,
+                    .wrap(ratatui::widgets::Wrap { trim: false }),
+                    parts[1],
                 );
             }
             crate::app::InputKind::NodeRemove { name } => {
@@ -1001,25 +1018,18 @@ fn review_row_item<'a>(row: &crate::app::ReviewRow) -> ListItem<'a> {
             r.requested_at,
         ))),
         ReviewRow::Ask(r) => {
-            let reason = r.reason.as_deref().map_or_else(|| "none given".to_string(), |v| format!("\"{v}\""));
-            let program = r.argv0.as_deref().unwrap_or("none given");
-            let mut lines = vec![
-                Line::from(format!(
-                    "[{}] {} → {}  (requested {}){}",
-                    r.id,
-                    r.secret,
-                    r.consumer,
-                    r.requested_at,
-                    r.peer_uid
-                        .as_deref()
-                        .map(|u| format!("  peer uid {u}"))
-                        .unwrap_or_default(),
-                )),
-                Line::from(format!("    claims (unverified): reason {reason}, program {program}")),
-            ];
-            if let Some(origin) = &r.origin_line {
-                lines.push(Line::from(format!("    claims (unverified): {origin}")));
-            }
+            let mut lines = vec![Line::from(format!(
+                "[{}] {} → {}  (requested {}){}",
+                r.id,
+                r.secret,
+                r.consumer,
+                r.requested_at,
+                r.peer_uid
+                    .as_deref()
+                    .map(|u| format!("  peer uid {u}"))
+                    .unwrap_or_default(),
+            ))];
+            lines.extend(r.claim_lines().into_iter().map(|claim| Line::from(format!("    {claim}"))));
             ListItem::new(lines)
         }
     }
