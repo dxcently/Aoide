@@ -63,7 +63,7 @@ use aoide_protocol::wire::{
 use aoide_protocol::{audit, Door, EventClass, Invocation};
 use aoide_storage::records::RemoteParent;
 use serde_json::{json, Value};
-use std::collections::VecDeque;
+use std::collections::BTreeMap;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{IpAddr, TcpListener, TcpStream};
 #[cfg(unix)]
@@ -2541,7 +2541,7 @@ fn message_send(
         ConnOrigin::Loopback | ConnOrigin::Unknown => None,
     };
     // `signed_caller` arrives ALREADY VERIFIED: `handle_connection` checked the
-    // ed25519 signature, the replay window and the nonce cache
+    // ed25519 signature, the replay window and the nonce sets
     // (`verify_signed_request`) before this function runs. Its name is the
     // record whose stored pubkey verified the signature, never the wire's
     // `X-Aoide-Node` label, so the lookup below is not a trust decision. When
@@ -4415,7 +4415,7 @@ fn pair_reveal(params: &Value, audit_log: &Path) -> Result<Value, (i64, String)>
 /// rather than reinvented, with an empty body — a poll carries no body of
 /// its own to bind).
 ///
-/// The nonce is signed but NOT replay-checked (no `nonce_is_replay` here,
+/// The nonce is signed but NOT replay-checked (no `consume_nonce` here,
 /// unlike P-P4's request path): a captured poll replays cleanly inside the
 /// skew window, and that is accepted deliberately — the response is
 /// idempotent and releases only B's own pubkey, which `aoide/pairRequest`
@@ -4689,14 +4689,14 @@ enum PreDispatch {
 /// carry, a pair mesh (its keys need no declaration and would have resolved) —
 /// which leaves the door's own `-32007` standing.
 ///
-/// **A verified request still CONSUMES its nonce** (`nonce_is_replay`, keyed
+/// **A verified request still CONSUMES its nonce** (`consume_nonce`, keyed
 /// exactly as the ladder keys it: the signer's lowercase key hex plus the nonce),
-/// and a replay answers `-32009` here rather than being dispatched: without it,
+/// and a replay answers `-32009` here (a full key `-32013`) rather than being dispatched: without it,
 /// bytes the door already answered `config-invalid` could be replayed inside the
 /// skew window — once the config is back — into a method that has never seen
 /// them, and a `mailPoll` retires and hands over entries. The audit line is the
 /// method's own; nothing about the load error goes on the wire.
-fn mail_unloadable_declaration(req: &HttpRequest, method: &str, audit_log: &Path) -> PreDispatch {
+fn mail_unloadable_declaration(req: &HttpRequest, method: &str, audit_log: &Path, now_epoch: i64) -> PreDispatch {
     // Only POST is a signed request (`verify_signed_request`). This arm is
     // reached for every -32007 refusal, so it repeats that gate: a method
     // spelled `ANSWER` must never reach the canonical string below.
@@ -4739,12 +4739,10 @@ fn mail_unloadable_declaration(req: &HttpRequest, method: &str, audit_log: &Path
     if !aoide_storage::wire_auth::verify_signature_hex(&line.key, canonical.as_bytes(), signature) {
         return PreDispatch::Keep;
     }
-    if nonce_is_replay(&line.key.to_ascii_lowercase(), nonce) {
-        let message = format!(
-            "nonce replay: charter node `{node}` reused a `{}` value already seen within the current \
-             replay window",
-            aoide_storage::wire_auth::HEADER_NONCE
-        );
+    // Only a timestamp this door can read is recorded. One it cannot read returns
+    // `Keep`, and the door's own `-32007` stands for it.
+    let Some(ts_epoch) = aoide_storage::time::parse_iso_utc(timestamp) else { return PreDispatch::Keep };
+    if let Err((code, message)) = consume_nonce(&format!("charter node `{node}`"), &line.key, nonce, ts_epoch, now_epoch) {
         let _ = audit(
             audit_log,
             Door::A2a,
@@ -4753,7 +4751,7 @@ fn mail_unloadable_declaration(req: &HttpRequest, method: &str, audit_log: &Path
             "unauthorized",
             &message,
         );
-        return PreDispatch::Error(-32009, message);
+        return PreDispatch::Error(code, message);
     }
     let detail = format!("{CONFIG_INVALID}: {refusal}");
     let _ = audit(audit_log, Door::A2a, EventClass::Audit, method, "invalid", &detail);
@@ -5388,60 +5386,120 @@ fn method_not_allowed(method: &str, path: &str) -> (u16, Vec<u8>, String) {
 // of this — [`SignedRequestOutcome::Unsigned`] — and flows through exactly
 // as it did before this phase.
 
-/// Bound on the in-memory replay-nonce cache — PROCESS-LOCAL, in-memory,
-/// never disk-persisted (unlike everything else this door's underlying
-/// crate stores — `aoide-storage`'s `wire_auth` module doc states this
-/// placement's own reasoning). An `a2a serve` restart clears it outright: a
-/// KNOWN, ACCEPTED limitation, the same "process-local guard, not durable
-/// state" shape `aoide_storage::pairing`'s own `PARK_LOCK` doc already
-/// accepts for a different concern. Within one process's lifetime this
-/// correctly refuses a replay inside the skew window; a replay that arrives
-/// after a restart (whose cache never survived it) is NOT caught by this
-/// cache alone — the timestamp window ([`aoide_storage::wire_auth::
-/// signature_skew_secs`]) is the OTHER, independent defense that narrow gap
-/// leans on, which is why both checks run rather than either alone. Sized
-/// generously relative to plausible signed-request rates within one skew
-/// window (default ±120s) — bounds worst-case memory against a hostile or
-/// malfunctioning node hammering the door; never expected to be reached in
-/// normal operation.
-const NONCE_CACHE_CAP: usize = 4096;
-
-/// `(verifying pubkey hex, nonce)` pairs seen within roughly the current
-/// replay window, oldest-first — see [`NONCE_CACHE_CAP`]'s doc for the
-/// process-locality and sizing reasoning. Keyed on the PUBKEY that verified
-/// the request, not any node name (#63 P-ID5: identity IS the key): the
-/// `X-Aoide-Node` header is not part of the canonical string, so a captured
-/// request replayed under a different claimed name still lands on the same
-/// cache key — two verified records sharing one pubkey share one replay
-/// namespace, exactly because they are one signer.
-static NONCE_CACHE: Mutex<VecDeque<(String, String)>> = Mutex::new(VecDeque::new());
-
-/// Check-and-record: `true` (nothing recorded) when `(key, nonce)` was
-/// ALREADY seen — a replay the caller must refuse. `false` (now recorded)
-/// the first time. Evicts the OLDEST entry once at [`NONCE_CACHE_CAP`],
-/// never growing past it. Poison-recovering like every other process-local
-/// lock in this workspace (`pairing.rs`'s `PARK_LOCK` precedent): a panic
-/// inside one caller must never wedge every OTHER signed request behind a
-/// poisoned lock forever.
+/// One replay memory per verifying key: `nonce -> the epoch its frame stops
+/// being accepted`, which is the frame's own timestamp plus
+/// `signature_skew_secs()`. PROCESS-LOCAL and never disk-persisted
+/// (`aoide-storage`'s `wire_auth` module doc gives the placement's reasoning).
+/// A restart clears it, and the start check in [`verify_signed_request`] closes
+/// that gap: a frame stamped at or before this process started is refused, so
+/// nothing an earlier process accepted can be accepted again here.
 ///
-/// Both halves are keyed in the form the signature covers.
-/// `wire_auth::canonical_string` trims and lowercases the nonce before it
-/// signs it, so a captured request whose nonce header has only its case
-/// changed still verifies. Keying the raw text would admit that copy as a
-/// fresh nonce and run the request a second time, signed answer included.
-/// One normalisation, here, covers every caller.
-fn nonce_is_replay(key: &str, nonce: &str) -> bool {
+/// Keyed on the PUBKEY that verified the request, not any node name (#63
+/// P-ID5): `X-Aoide-Node` is outside the canonical string, so a captured request
+/// replayed under another claimed name lands in the same set, exactly because it
+/// is one signer. Only a signature that verified ever reaches a set, so the map
+/// holds at most one entry per signer that has authenticated.
+static NONCE_SETS: Mutex<BTreeMap<String, BTreeMap<String, i64>>> = Mutex::new(BTreeMap::new());
+
+/// The default for [`NONCE_PER_KEY_ENV`]: unexpired nonces one key may hold.
+const NONCE_PER_KEY_DEFAULT: usize = 512;
+
+/// The knob for [`NONCE_PER_KEY_DEFAULT`]. Unset, blank, non-numeric or zero
+/// all give the default, as the door's other knobs do.
+const NONCE_PER_KEY_ENV: &str = "AOIDE_NONCE_PER_KEY";
+
+/// The code for a key whose set is full of unexpired nonces. It is answered
+/// over HTTP 503 ([`refusal_status`]), which a caller's transport path backs off
+/// on, so its letter stays live.
+const NONCE_BUSY_CODE: i64 = -32013;
+
+/// What [`nonce_check`] decided for one `(key, nonce)` pair.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum NonceCheck {
+    /// Not recorded under this key. It is recorded now, until its window closes.
+    Fresh,
+    /// Recorded under this key, and its window is still open.
+    Replay,
+    /// This key's set is full of unexpired nonces. Nothing is recorded.
+    Busy,
+}
+
+/// Check-and-record one verified request's nonce under its signer's key, with at
+/// most `cap` unexpired entries per key.
+///
+/// Only THIS key's expired entries are dropped, and only here. A set never evicts
+/// an unexpired entry to make room: a full set refuses its next new nonce as
+/// [`NonceCheck::Busy`] and records nothing. The recorded-nonce check comes before
+/// the cap, so a replay at the cap is still a replay. Both halves are normalised
+/// the way the signature covers them (`wire_auth::canonical_string` trims and
+/// lowercases the nonce), so a case-changed copy of a captured nonce is the same
+/// nonce. Poison-recovering like every other process-local lock in this
+/// workspace (`pairing.rs`'s `PARK_LOCK` precedent): a panic inside one caller
+/// must never wedge every other signed request.
+fn nonce_check(key: &str, nonce: &str, ts_epoch: i64, now_epoch: i64, cap: usize) -> NonceCheck {
     let key = key.trim().to_ascii_lowercase();
     let nonce = nonce.trim().to_ascii_lowercase();
-    let mut cache = NONCE_CACHE.lock().unwrap_or_else(|e| e.into_inner());
-    if cache.iter().any(|(p, n)| *p == key && *n == nonce) {
-        return true;
+    let expires = ts_epoch + aoide_storage::wire_auth::signature_skew_secs();
+    let mut sets = NONCE_SETS.lock().unwrap_or_else(|e| e.into_inner());
+    let seen = sets.entry(key).or_default();
+    seen.retain(|_, until| *until >= now_epoch);
+    if seen.contains_key(&nonce) {
+        NonceCheck::Replay
+    } else if seen.len() >= cap {
+        NonceCheck::Busy
+    } else {
+        seen.insert(nonce, expires);
+        NonceCheck::Fresh
     }
-    if cache.len() >= NONCE_CACHE_CAP {
-        cache.pop_front();
+}
+
+/// [`nonce_check`]'s cap: [`NONCE_PER_KEY_ENV`] when it parses, else the default.
+fn nonce_cap() -> usize {
+    parse_nonce_cap(std::env::var(NONCE_PER_KEY_ENV).ok().as_deref())
+}
+
+/// The parse behind [`nonce_cap`], split out so the knob's fallbacks are tested
+/// without touching the process environment.
+fn parse_nonce_cap(raw: Option<&str>) -> usize {
+    raw.map(str::trim)
+        .and_then(|v| v.parse::<usize>().ok())
+        .filter(|n| *n > 0)
+        .unwrap_or(NONCE_PER_KEY_DEFAULT)
+}
+
+/// The one replay step every verified request takes, so the three consumers (the
+/// registry rung, the charter rung and [`mail_unloadable_declaration`]) word and
+/// code their refusals alike. `who` names the signer in the text.
+fn consume_nonce(who: &str, key: &str, nonce: &str, ts_epoch: i64, now_epoch: i64) -> Result<(), (i64, String)> {
+    let cap = nonce_cap();
+    match nonce_check(key, nonce, ts_epoch, now_epoch, cap) {
+        NonceCheck::Fresh => Ok(()),
+        NonceCheck::Replay => Err((
+            -32009,
+            format!(
+                "nonce replay: {who} reused a `{}` value already seen within the current replay window",
+                aoide_storage::wire_auth::HEADER_NONCE
+            ),
+        )),
+        NonceCheck::Busy => Err((
+            NONCE_BUSY_CODE,
+            format!(
+                "busy: {who} already has {cap} signed requests recorded in the current replay window, so this one is \
+                 refused and not recorded; retry once the oldest of them expires (`{NONCE_PER_KEY_ENV}` raises the cap)"
+            ),
+        )),
     }
-    cache.push_back((key, nonce));
-    false
+}
+
+/// The HTTP status a refusal is answered with. A busy key is 503, so the caller
+/// backs off on its transport path and the letter stays live; every other
+/// refusal is 200 with the code in the body.
+fn refusal_status(code: i64) -> u16 {
+    if code == NONCE_BUSY_CODE {
+        503
+    } else {
+        200
+    }
 }
 
 /// The caller identity [`verify_signed_request`] PROVED for one request: the
@@ -5512,7 +5570,7 @@ enum SignedRequestOutcome {
 /// Verify a request's P-P4 signature headers, if it carries any (module doc
 /// above). Pure aside from two reads: the node registry
 /// (`aoide_storage::node_store::load_nodes`) and the process-local
-/// [`NONCE_CACHE`] — `now_epoch` is the caller's own "now" so this stays
+/// [`NONCE_SETS`] — `now_epoch` is the caller's own "now" so this stays
 /// unit-testable against a fixed clock, the same shape
 /// `aoide_storage::pairing::park_inbound`'s own `now_epoch` parameter
 /// holds.
@@ -5543,8 +5601,8 @@ enum SignedRequestOutcome {
 /// a request that's already disqualified for a cheaper reason (malformed
 /// headers, unparsable timestamp, clock skew), and records the nonce ONLY
 /// after a genuine signature match — a forged or garbage nonce never
-/// consumes a cache slot.
-fn verify_signed_request(req: &HttpRequest, now_epoch: i64) -> SignedRequestOutcome {
+/// consumes a nonce-set entry.
+fn verify_signed_request(req: &HttpRequest, now_epoch: i64, started_epoch: i64) -> SignedRequestOutcome {
     use aoide_storage::wire_auth::{HEADER_NONCE, HEADER_NODE, HEADER_SIGNATURE, HEADER_TIMESTAMP, SIGNATURE_SKEW_ENV};
 
     let claims_signed =
@@ -5612,6 +5670,21 @@ fn verify_signed_request(req: &HttpRequest, now_epoch: i64) -> SignedRequestOutc
         );
     }
 
+    // The start check. The nonce sets are process-local and a restart clears them,
+    // so a frame an earlier process accepted must not be accepted here. Both
+    // times are whole seconds, so a frame stamped in the start second is refused
+    // too (CONTRACTS.md section 6 names the cost).
+    if ts_epoch <= started_epoch {
+        return SignedRequestOutcome::Refused(
+            -32008,
+            format!(
+                "this request's `{HEADER_TIMESTAMP}` (`{}`) is not after this door's start (`{}`): the replay memory \
+                 is cleared at every start, so a frame stamped before it is refused; retry with a fresh timestamp",
+                aoide_storage::time::iso_utc_from_epoch(ts_epoch),
+                aoide_storage::time::iso_utc_from_epoch(started_epoch),
+            ),
+        );
+    }
     // `&req.method` (P-P4 review finding 2), not a hardcoded `"POST"`
     // literal: the OBSERVED method of THIS request, so the canonical
     // string is genuinely bound to what arrived, not a re-typed assumption
@@ -5669,13 +5742,8 @@ fn verify_signed_request(req: &HttpRequest, now_epoch: i64) -> SignedRequestOutc
                 return SignedRequestOutcome::Refused(-32007, "signature verification failed".to_string());
             };
             let pubkey_hex = key.to_ascii_lowercase();
-            if nonce_is_replay(&pubkey_hex, nonce) {
-                return SignedRequestOutcome::Refused(
-                    -32009,
-                    format!(
-                        "nonce replay: charter node `{name}` reused a `{HEADER_NONCE}` value already seen within the current replay window"
-                    ),
-                );
+            if let Err((code, message)) = consume_nonce(&format!("charter node `{name}`"), &pubkey_hex, nonce, ts_epoch, now_epoch) {
+                return SignedRequestOutcome::Refused(code, message);
             }
             return SignedRequestOutcome::Verified {
                 resolved: name,
@@ -5706,14 +5774,8 @@ fn verify_signed_request(req: &HttpRequest, now_epoch: i64) -> SignedRequestOutc
     // one replay-cache key.
     let pubkey_hex = resolved.pubkey.as_deref().unwrap_or_default().to_ascii_lowercase();
 
-    if nonce_is_replay(&pubkey_hex, nonce) {
-        return SignedRequestOutcome::Refused(
-            -32009,
-            format!(
-                "nonce replay: node `{}` reused a `{HEADER_NONCE}` value already seen within the current replay window",
-                resolved.name
-            ),
-        );
+    if let Err((code, message)) = consume_nonce(&format!("node `{}`", resolved.name), &pubkey_hex, nonce, ts_epoch, now_epoch) {
+        return SignedRequestOutcome::Refused(code, message);
     }
 
     SignedRequestOutcome::Verified {
@@ -6183,6 +6245,7 @@ pub fn serve(
     discovery_advertise: bool,
     registry: &'static Registry,
 ) -> std::io::Result<()> {
+    let started_epoch = unix_ts_now() as i64;
     let listener = TcpListener::bind((bind, port))?;
     eprintln!("aoide a2a: listening on http://{bind}:{port}/");
     let bearer_cfg = InboundBearerConfig {
@@ -6275,6 +6338,7 @@ pub fn serve(
                 Some(&bearer_cfg),
                 Listener::A2a,
                 registry,
+                started_epoch,
             ) {
                 eprintln!("aoide a2a: connection error: {e}");
             }
@@ -6296,12 +6360,13 @@ pub fn serve(
 ///
 /// Shares the door's hostile-input hardening ([`MAX_BODY`], [`MAX_LINE`],
 /// [`MAX_HEADERS`], [`MAX_REQUEST`], [`MAX_CONN`]/[`IN_FLIGHT`]) and its
-/// per-request signature verification (and so its process-local nonce cache
+/// per-request signature verification (and so its process-local nonce sets
 /// and the single audit log) — those are properties of the transport, not of
 /// the method table. Deliberately NOT shared: the inbound bearer (no token
 /// concept here), discovery advertising (an adapter is not a discoverable
 /// agent), and `message/stream`.
 pub fn serve_mail(port: u16, audit_log: &Path, registry: &'static Registry) -> std::io::Result<()> {
+    let started_epoch = unix_ts_now() as i64;
     let listener = TcpListener::bind((MAIL_ADAPTER_BIND, port))?;
     eprintln!(
         "aoide mail serve: listening on http://{MAIL_ADAPTER_BIND}:{port}/ (loopback only; TLS \
@@ -6350,6 +6415,7 @@ pub fn serve_mail(port: u16, audit_log: &Path, registry: &'static Registry) -> s
                 None,
                 Listener::Mail,
                 registry,
+                started_epoch,
             ) {
                 eprintln!("aoide mail serve: connection error: {e}");
             }
@@ -6372,6 +6438,7 @@ fn handle_connection(
     bearer_cfg: Option<&InboundBearerConfig>,
     listener: Listener,
     registry: &Registry,
+    started_epoch: i64,
 ) -> std::io::Result<()> {
     // The connection's ORIGIN (CONTRACTS.md §6 amendment, 2026-08-14): TCP
     // `peer_addr()`, not any client-supplied field — a hostile client cannot
@@ -6448,7 +6515,7 @@ fn handle_connection(
     // Owned here, borrowed below: the outcome owns its two strings, and the
     // borrowed `SignedCaller` is what this door threads through `route` and
     // `stream_task`.
-    let verified: Option<(String, String, Option<String>)> = match verify_signed_request(&req, now_epoch) {
+    let verified: Option<(String, String, Option<String>)> = match verify_signed_request(&req, now_epoch, started_epoch) {
         SignedRequestOutcome::Unsigned => None,
         SignedRequestOutcome::Verified { resolved, key, claimed, mesh } => {
             if let Some(detail) = attribution_drift_detail(&claimed, &resolved) {
@@ -6476,7 +6543,7 @@ fn handle_connection(
             // an unresolved caller. Every other case keeps `-32007`.
             if code == -32007 {
                 if let Some(method) = mail_method_of(&req.body) {
-                    match mail_unloadable_declaration(&req, method, audit_log) {
+                    match mail_unloadable_declaration(&req, method, audit_log, now_epoch) {
                         PreDispatch::Unloadable { detail } => {
                             let body_val = JsonRpcResponse::ok(
                                 request_id(&req.body),
@@ -6492,8 +6559,9 @@ fn handle_connection(
                             let body_val = jsonrpc_error_value(err, message);
                             let body = serde_json::to_vec(&body_val).unwrap_or_default();
                             // Never signed: a replay answers with a nonce the request already spent,
-                            // and a signature here would bind the door to the old signature.
-                            return write_http_response(&mut writer, 200, &body);
+                            // and a signature here would bind the door to the old signature. A busy key
+                            // answers 503 through `refusal_status`, still unsigned.
+                            return write_http_response(&mut writer, refusal_status(err), &body);
                         }
                         PreDispatch::Keep => {}
                     }
@@ -6511,7 +6579,7 @@ fn handle_connection(
             );
             // Never signed: a refused request was not verified, and the door never signs
             // bytes an unverified sender chose.
-            return write_http_response(&mut writer, 200, &body);
+            return write_http_response(&mut writer, refusal_status(code), &body);
         }
     };
     // The audience step, once, before either dispatch path. A verified request
@@ -7467,7 +7535,7 @@ mod tests {
         // signature is the one registered key's.
         let req = signed_request(&kp, "sakaki-impostor", "/", &body_bytes, now, &unique_nonce("rp-resolved"));
 
-        let (signed_caller, signed_key) = match verify_signed_request(&req, now) {
+        let (signed_caller, signed_key) = match verify_signed_request(&req, now, 0) {
             SignedRequestOutcome::Verified { resolved, key, .. } => (resolved, key),
             other => panic!("expected a REAL genuine signature to verify, got {other:?}"),
         };
@@ -9182,7 +9250,7 @@ mod tests {
         }
     }
 
-    /// A unique nonce per test call — `NONCE_CACHE` is a single process-wide
+    /// A unique nonce per test call — `NONCE_SETS` is a single process-wide
     /// static shared across every test in this binary (module doc), so two
     /// tests reusing the same literal nonce string could spuriously see
     /// each other's entries; a wall-clock-derived suffix keeps every test's
@@ -9207,7 +9275,7 @@ mod tests {
             signed_mesh: None,
         };
         assert_eq!(
-            verify_signed_request(&req, 0),
+            verify_signed_request(&req, 0, 0),
             SignedRequestOutcome::Unsigned,
             "no signature headers at all — the untouched, pre-P-P4 path"
         );
@@ -9229,7 +9297,7 @@ mod tests {
             signed_signature: None,
             signed_mesh: None,
         };
-        match verify_signed_request(&req, 0) {
+        match verify_signed_request(&req, 0, 0) {
             SignedRequestOutcome::Refused(code, msg) => {
                 assert_eq!(code, -32007);
                 assert!(msg.contains("must all be present together"));
@@ -9253,7 +9321,7 @@ mod tests {
         let now = 1_800_000_000_i64;
         let req = signed_request(&kp, "box-b", "/", b"{\"a\":1}", now, &unique_nonce("ok"));
         assert_eq!(
-            verify_signed_request(&req, now),
+            verify_signed_request(&req, now, 0),
             SignedRequestOutcome::Verified {
                 resolved: "box-b".to_string(),
                 key: kp.info().pubkey_hex.clone(),
@@ -9291,7 +9359,7 @@ mod tests {
         // Unknown key: nothing registered at all — the claimed name resolves
         // nothing because names resolve nothing; no stored key verifies.
         let req = signed_request(&kp, "nobody", "/", b"{}", now, &unique_nonce("unknown"));
-        let unknown_key_refusal = match verify_signed_request(&req, now) {
+        let unknown_key_refusal = match verify_signed_request(&req, now, 0) {
             SignedRequestOutcome::Refused(code, msg) => {
                 assert_eq!(code, -32007);
                 (code, msg)
@@ -9305,7 +9373,7 @@ mod tests {
         unverified_node.pubkey = Some(kp.info().pubkey_hex);
         aoide_storage::node_store::save_nodes(&[unverified_node]).unwrap();
         let req2 = signed_request(&kp, "box-c", "/", b"{}", now, &unique_nonce("unverified"));
-        let unverified_refusal = match verify_signed_request(&req2, now) {
+        let unverified_refusal = match verify_signed_request(&req2, now, 0) {
             SignedRequestOutcome::Refused(code, msg) => (code, msg),
             other => panic!("expected Refused, got {other:?}"),
         };
@@ -9319,7 +9387,7 @@ mod tests {
         aoide_storage::node_store::save_nodes(&[verified_node]).unwrap();
         let mut req3 = signed_request(&kp, "box-c", "/", b"{\"real\":true}", now, &unique_nonce("bad-sig"));
         req3.body = b"{\"real\":false}".to_vec();
-        let bad_sig_refusal = match verify_signed_request(&req3, now) {
+        let bad_sig_refusal = match verify_signed_request(&req3, now, 0) {
             SignedRequestOutcome::Refused(code, msg) => (code, msg),
             other => panic!("expected Refused, got {other:?}"),
         };
@@ -9353,7 +9421,7 @@ mod tests {
         // matches.
         let mut req = signed_request(&kp, "box-b", "/", b"{\"real\":true}", now, &unique_nonce("tamper-body"));
         req.body = b"{\"real\":false}".to_vec();
-        match verify_signed_request(&req, now) {
+        match verify_signed_request(&req, now, 0) {
             SignedRequestOutcome::Refused(code, msg) => {
                 assert_eq!(code, -32007);
                 assert!(msg.contains("signature verification failed"));
@@ -9365,7 +9433,7 @@ mod tests {
         // path — same signature, different canonical string.
         let mut req2 = signed_request(&kp, "box-b", "/", b"{}", now, &unique_nonce("tamper-path"));
         req2.path = "/other".to_string();
-        match verify_signed_request(&req2, now) {
+        match verify_signed_request(&req2, now, 0) {
             SignedRequestOutcome::Refused(code, _) => assert_eq!(code, -32007),
             other => panic!("a tampered path must refuse, got {other:?}"),
         }
@@ -9394,7 +9462,7 @@ mod tests {
         // ±120s default window.
         let verifier_now = signed_at + 600;
         let req = signed_request(&kp, "box-b", "/", b"{}", signed_at, &unique_nonce("skew"));
-        match verify_signed_request(&req, verifier_now) {
+        match verify_signed_request(&req, verifier_now, 0) {
             SignedRequestOutcome::Refused(code, msg) => {
                 assert_eq!(code, -32008);
                 assert!(msg.contains(&aoide_storage::time::iso_utc_from_epoch(signed_at)), "must name the request's OWN timestamp: {msg:?}");
@@ -9430,7 +9498,7 @@ mod tests {
         let req = signed_request(&kp, "box-b", "/", b"{}", now, &nonce);
 
         assert_eq!(
-            verify_signed_request(&req, now),
+            verify_signed_request(&req, now, 0),
             SignedRequestOutcome::Verified {
                 resolved: "box-b".to_string(),
                 key: kp.info().pubkey_hex.clone(),
@@ -9443,7 +9511,7 @@ mod tests {
         // The EXACT same request, replayed — same nonce, still inside the
         // window — must now refuse, even though the signature itself is
         // still perfectly valid.
-        match verify_signed_request(&req, now) {
+        match verify_signed_request(&req, now, 0) {
             SignedRequestOutcome::Refused(code, msg) => {
                 assert_eq!(code, -32009);
                 assert!(msg.contains("replay"));
@@ -9485,7 +9553,7 @@ mod tests {
 
         let now = 1_800_000_000_i64;
         let req = signed_request(&kp, "box-b", "/", b"{}", now, &unique_nonce("by-key"));
-        match verify_signed_request(&req, now) {
+        match verify_signed_request(&req, now, 0) {
             SignedRequestOutcome::Verified { resolved, claimed, .. } => {
                 assert_eq!(resolved, "box-a", "the record whose stored key verifies IS the caller");
                 assert_eq!(claimed, "box-b", "the wire's claim rides along for attribution");
@@ -9522,7 +9590,7 @@ mod tests {
         // The wire still claims the name from before the local rename —
         // registered nowhere.
         let req = signed_request(&kp, "old-name", "/", b"{}", now, &unique_nonce("renamed"));
-        match verify_signed_request(&req, now) {
+        match verify_signed_request(&req, now, 0) {
             SignedRequestOutcome::Verified { resolved, claimed, .. } => {
                 assert_eq!(resolved, "renamed-node");
                 assert_eq!(claimed, "old-name");
@@ -9567,7 +9635,7 @@ mod tests {
         let now = 1_800_000_000_i64;
         // Claimed name matches one twin exactly — that one wins.
         let req = signed_request(&kp, "twin-b", "/", b"{}", now, &unique_nonce("twin-exact"));
-        match verify_signed_request(&req, now) {
+        match verify_signed_request(&req, now, 0) {
             SignedRequestOutcome::Verified { resolved, claimed, .. } => {
                 assert_eq!(resolved, "twin-b");
                 assert_eq!(claimed, "twin-b");
@@ -9577,7 +9645,7 @@ mod tests {
 
         // Claimed name matches neither — refused as ambiguous, taught.
         let req2 = signed_request(&kp, "twin-c", "/", b"{}", now, &unique_nonce("twin-none"));
-        match verify_signed_request(&req2, now) {
+        match verify_signed_request(&req2, now, 0) {
             SignedRequestOutcome::Refused(code, msg) => {
                 assert_eq!(code, -32007);
                 assert!(msg.contains("ambiguous"), "must refuse as ambiguous, never pick a record arbitrarily: {msg:?}");
@@ -9594,8 +9662,8 @@ mod tests {
 
     #[test]
     fn a_nonce_replay_is_caught_across_shared_key_records() {
-        // The nonce cache keys on the verifying PUBKEY, not any name
-        // (`NONCE_CACHE`'s doc): `X-Aoide-Node` is outside the canonical
+        // The nonce sets key on the verifying PUBKEY, not any name
+        // (`NONCE_SETS`'s doc): `X-Aoide-Node` is outside the canonical
         // string, so a captured request replayed under a shared-key twin's
         // name still lands on the same cache key and refuses.
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
@@ -9621,7 +9689,7 @@ mod tests {
         let nonce = unique_nonce("twin-replay");
         let req = signed_request(&kp, "twin-a", "/", b"{}", now, &nonce);
         assert!(
-            matches!(verify_signed_request(&req, now), SignedRequestOutcome::Verified { .. }),
+            matches!(verify_signed_request(&req, now, 0), SignedRequestOutcome::Verified { .. }),
             "first use must verify"
         );
 
@@ -9631,7 +9699,7 @@ mod tests {
         // ed25519) signature — exactly what a captured-and-relabeled replay
         // carries. Same key, same nonce: still a replay.
         let replayed = signed_request(&kp, "twin-b", "/", b"{}", now, &nonce);
-        match verify_signed_request(&replayed, now) {
+        match verify_signed_request(&replayed, now, 0) {
             SignedRequestOutcome::Refused(code, _) => assert_eq!(code, -32009),
             other => panic!("a replay under the twin's name must still be caught, got {other:?}"),
         }
@@ -9651,30 +9719,164 @@ mod tests {
         assert!(detail.contains("X-Aoide-Node"), "names the header the claim rode in on: {detail:?}");
     }
 
+    /// One key's flood must not make ANOTHER key's recorded nonce replayable.
+    /// Red on the old FIFO: the oldest entry in the one shared queue is J's, and
+    /// K's flood past the cap pushes it out. Per-key sets cannot reach across.
     #[test]
-    fn nonce_is_replay_is_capped_and_evicts_the_oldest_entry_fifo() {
-        // A tiny, direct pin on the cache primitive itself (module doc,
-        // `NONCE_CACHE_CAP`) — proves the FIFO eviction shape without
-        // driving `NONCE_CACHE_CAP` (4096) real entries through the full
-        // `verify_signed_request` flow. Uses its own uniquely-tagged node
-        // namespace so it can never collide with any OTHER test's entries
-        // in the same process-wide static cache.
-        let tag = unique_nonce("cap-probe-node");
-        assert!(!nonce_is_replay(&tag, "n1"), "first use of a fresh (node, nonce) pair is never a replay");
-        assert!(nonce_is_replay(&tag, "n1"), "the SAME pair, reused, is a replay");
-        assert!(!nonce_is_replay(&tag, "n2"), "a DIFFERENT nonce for the SAME node tag is not a replay");
+    fn a_flood_on_one_key_never_makes_another_keys_recorded_nonce_replayable() {
+        let j = unique_nonce("flood-j");
+        let k = unique_nonce("flood-k");
+        let now = 1_800_000_000_i64;
+        let cap = NONCE_PER_KEY_DEFAULT;
+        assert_eq!(nonce_check(&j, "j-once", now, now, cap), NonceCheck::Fresh, "J's first nonce is recorded");
+        for i in 0..cap {
+            assert_eq!(nonce_check(&k, &format!("k-{i}"), now, now, cap), NonceCheck::Fresh);
+        }
+        assert_eq!(nonce_check(&k, "k-over", now, now, cap), NonceCheck::Busy, "K is at its cap");
+        assert_eq!(nonce_check(&j, "j-once", now, now, cap), NonceCheck::Replay, "K's flood never evicted J's recorded nonce");
+    }
+
+    /// A nonce is remembered only for its own window. Once the window of the
+    /// request that used it has passed, a freshly signed request reusing that
+    /// nonce value is not a replay, and the OLD bytes are refused by the clock.
+    #[test]
+    fn a_nonce_whose_window_has_passed_is_forgotten_and_the_old_bytes_are_refused_by_the_clock() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (root, saved) = adapter_root("nonce-expiry");
+        let kp = setup_signed_node("box-b");
+        let then = 1_800_000_000_i64;
+        let skew = aoide_storage::wire_auth::signature_skew_secs();
+        let nonce = unique_nonce("expiry");
+        let first = signed_request(&kp, "box-b", "/", b"{}", then, &nonce);
+        assert!(matches!(verify_signed_request(&first, then, 0), SignedRequestOutcome::Verified { .. }), "the first use verifies");
+
+        let later = then + skew + 1;
+        let fresh = signed_request(&kp, "box-b", "/", b"{}", later, &nonce);
+        assert!(
+            matches!(verify_signed_request(&fresh, later, 0), SignedRequestOutcome::Verified { .. }),
+            "the window has passed, so the nonce no longer blocks a new request"
+        );
+        assert!(
+            matches!(verify_signed_request(&first, later, 0), SignedRequestOutcome::Refused(-32008, _)),
+            "the old bytes are refused by the timestamp, whatever the cache remembers"
+        );
+        adapter_cleanup(&root, saved);
+    }
+
+    /// A frame minted before this door started is refused though the skew window
+    /// would admit it: the door holds no nonce from before its own start, so a
+    /// frame from before a restart cannot be replayed into the new process. A
+    /// frame minted after the start is accepted.
+    #[test]
+    fn a_frame_minted_before_the_door_started_is_refused_and_one_after_it_is_accepted() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (root, saved) = adapter_root("start-gate");
+        let kp = setup_signed_node("box-b");
+        let started = 1_800_000_000_i64;
+        let early = signed_request(&kp, "box-b", "/", b"{}", started - 1, &unique_nonce("start-early"));
+        match verify_signed_request(&early, started, started) {
+            SignedRequestOutcome::Refused(-32008, message) => {
+                assert!(message.contains(&aoide_storage::time::iso_utc_from_epoch(started - 1)), "{message}");
+                assert!(message.contains(&aoide_storage::time::iso_utc_from_epoch(started)), "{message}");
+            }
+            other => panic!("a frame minted before the door started is refused: {other:?}"),
+        }
+        let same_second = signed_request(&kp, "box-b", "/", b"{}", started, &unique_nonce("start-same"));
+        assert!(
+            matches!(verify_signed_request(&same_second, started, started), SignedRequestOutcome::Refused(-32008, _)),
+            "a frame stamped in the start second is refused too: the start is whole seconds"
+        );
+        let late = signed_request(&kp, "box-b", "/", b"{}", started + 1, &unique_nonce("start-late"));
+        assert!(
+            matches!(verify_signed_request(&late, started + 1, started), SignedRequestOutcome::Verified { .. }),
+            "a frame minted after the start is accepted"
+        );
+        adapter_cleanup(&root, saved);
+    }
+
+    /// A key whose set is full is refused busy over HTTP 503, unsigned, and
+    /// records nothing. The set is filled to the default cap through
+    /// `nonce_check`, not the knob, so this test never changes the cap for a test
+    /// running beside it.
+    #[test]
+    fn a_key_at_its_cap_answers_busy_over_http_503_and_the_answer_is_unsigned() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (root, saved) = adapter_root("nonce-busy-socket");
+        let audit = root.join("log");
+        let port = free_loopback_port();
+        raise_a2a_door(port, &audit);
+
+        let kp = setup_signed_node_with_allows("box-b", &["message"]);
+        let key = kp.info().pubkey_hex.clone();
+        let now = epoch_now();
+        for i in 0..NONCE_PER_KEY_DEFAULT {
+            assert_eq!(nonce_check(&key, &format!("fill-{i}"), now, now, NONCE_PER_KEY_DEFAULT), NonceCheck::Fresh);
+        }
+
+        let body = json!({ "jsonrpc": "2.0", "id": 1, "method": "aoide/graphSummary", "params": { "to": key } }).to_string();
+        let nonce = unique_nonce("busy");
+        let answer = send_raw(
+            port,
+            &raw_request("127.0.0.1", "POST", "/", body.as_bytes(), Some((&kp, "box-b", now, nonce.as_str())), None),
+        );
+        assert!(answer.starts_with("HTTP/1.1 503"), "a key at its cap is refused busy: {answer}");
+        let answer_body: Value = serde_json::from_str(answer.split("\r\n\r\n").nth(1).unwrap()).unwrap();
+        assert_eq!(answer_body["error"]["code"], -32013, "{answer_body}");
+        assert!(
+            aoide_test_support::raw_header(&answer, aoide_storage::wire_auth::HEADER_ANSWER_SIGNATURE).is_none(),
+            "a busy refusal is unsigned"
+        );
+        adapter_cleanup(&root, saved);
+    }
+
+    /// A full key refuses its next new nonce as busy and records nothing, and
+    /// that nonce goes through once an entry's window has closed. A replay at the
+    /// cap is still a replay: the recorded-nonce check comes before the cap.
+    #[test]
+    fn a_full_key_refuses_busy_until_an_entry_expires_and_a_replay_at_the_cap_is_still_a_replay() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let tag = unique_nonce("busy-unit");
+        let skew = aoide_storage::wire_auth::signature_skew_secs();
+        let now = 1_800_000_000_i64;
+        assert_eq!(nonce_check(&tag, "n1", now, now, 2), NonceCheck::Fresh);
+        assert_eq!(nonce_check(&tag, "n2", now + 1, now + 1, 2), NonceCheck::Fresh);
+        assert_eq!(nonce_check(&tag, "n3", now + 2, now + 2, 2), NonceCheck::Busy, "a full key refuses a new nonce");
+        assert_eq!(nonce_check(&tag, "n3", now + 2, now + 2, 2), NonceCheck::Busy, "and records nothing, so it stays new");
+        assert_eq!(nonce_check(&tag, "n2", now + 2, now + 2, 2), NonceCheck::Replay, "a recorded nonce is a replay at the cap");
+        assert_eq!(
+            nonce_check(&tag, "n3", now + skew + 1, now + skew + 1, 2),
+            NonceCheck::Fresh,
+            "n1's window has closed, so its slot is free"
+        );
     }
 
     #[test]
-    fn nonce_is_replay_is_blind_to_letter_case_and_surrounding_space() {
-        // The signature folds the nonce (`canonical_string`), so the cache must
+    fn the_per_key_cap_is_the_knob_when_it_parses_to_a_positive_integer_and_the_default_otherwise() {
+        assert_eq!(parse_nonce_cap(None), NONCE_PER_KEY_DEFAULT);
+        assert_eq!(parse_nonce_cap(Some("")), NONCE_PER_KEY_DEFAULT);
+        assert_eq!(parse_nonce_cap(Some("   ")), NONCE_PER_KEY_DEFAULT);
+        assert_eq!(parse_nonce_cap(Some("lots")), NONCE_PER_KEY_DEFAULT);
+        assert_eq!(parse_nonce_cap(Some("0")), NONCE_PER_KEY_DEFAULT);
+        assert_eq!(parse_nonce_cap(Some("-3")), NONCE_PER_KEY_DEFAULT);
+        assert_eq!(parse_nonce_cap(Some(" 7 ")), 7);
+    }
+
+    #[test]
+    fn nonce_check_is_blind_to_letter_case_and_surrounding_space() {
+        // The signature folds the nonce (`canonical_string`), so the sets must
         // fold it too: every spelling of one nonce is one nonce, and so is every
         // spelling of one key.
         let tag = unique_nonce("case-node");
-        assert!(!nonce_is_replay(&tag, "AbC123"), "the first spelling is recorded");
-        assert!(nonce_is_replay(&tag, "abc123"), "the lower-case spelling is the same nonce");
-        assert!(nonce_is_replay(&tag, " ABC123 "), "and surrounding space is not a new nonce");
-        assert!(nonce_is_replay(&tag.to_uppercase(), "abc123"), "and the key's case does not split the namespace");
+        let now = 1_800_000_000_i64;
+        let cap = NONCE_PER_KEY_DEFAULT;
+        assert_eq!(nonce_check(&tag, "AbC123", now, now, cap), NonceCheck::Fresh, "the first spelling is recorded");
+        assert_eq!(nonce_check(&tag, "abc123", now, now, cap), NonceCheck::Replay, "the lower-case spelling is the same nonce");
+        assert_eq!(nonce_check(&tag, " ABC123 ", now, now, cap), NonceCheck::Replay, "and surrounding space is not a new nonce");
+        assert_eq!(
+            nonce_check(&tag.to_uppercase(), "abc123", now, now, cap),
+            NonceCheck::Replay,
+            "and the key's case does not split the namespace"
+        );
     }
 
     // ── P-P5b (`node spawn`) — the real signed wire round trip ──────────────
@@ -9720,7 +9922,7 @@ mod tests {
         let now = 1_800_000_000_i64;
         let req = signed_request(&kp, "yomi-strix", "/", &body_bytes, now, &unique_nonce("admit"));
 
-        let signed_caller = match verify_signed_request(&req, now) {
+        let signed_caller = match verify_signed_request(&req, now, 0) {
             SignedRequestOutcome::Verified { resolved, .. } => resolved,
             other => panic!("expected a REAL genuine signature to verify, got {other:?}"),
         };
@@ -9772,7 +9974,7 @@ mod tests {
         let body_bytes = serde_json::to_vec(&body).unwrap();
         let now = 1_800_000_000_i64;
         let req = signed_request(&kp, "yomi-strix", "/", &body_bytes, now, &unique_nonce("revoked"));
-        let (signed_name, signed_key) = match verify_signed_request(&req, now) {
+        let (signed_name, signed_key) = match verify_signed_request(&req, now, 0) {
             SignedRequestOutcome::Verified { resolved, key, .. } => (resolved, key),
             other => panic!("expected a REAL genuine signature to verify, got {other:?}"),
         };
@@ -9832,7 +10034,7 @@ mod tests {
         let body_bytes = serde_json::to_vec(&body).unwrap();
         let now = 1_800_000_000_i64;
         let req = signed_request(&kp, "yomi-strix", "/", &body_bytes, now, &unique_nonce("bad-from"));
-        let (signed_name, signed_key) = match verify_signed_request(&req, now) {
+        let (signed_name, signed_key) = match verify_signed_request(&req, now, 0) {
             SignedRequestOutcome::Verified { resolved, key, .. } => (resolved, key),
             other => panic!("expected a REAL genuine signature to verify, got {other:?}"),
         };
@@ -9942,7 +10144,7 @@ mod tests {
         let body_bytes = serde_json::to_vec(&body).unwrap();
         let now = 1_800_000_000_i64;
         let req = signed_request(&kp, "yomi-strix", "/", &body_bytes, now, &unique_nonce("inject-bad-from"));
-        let (signed_name, signed_key) = match verify_signed_request(&req, now) {
+        let (signed_name, signed_key) = match verify_signed_request(&req, now, 0) {
             SignedRequestOutcome::Verified { resolved, key, .. } => (resolved, key),
             other => panic!("expected a REAL genuine signature to verify, got {other:?}"),
         };
@@ -10030,7 +10232,7 @@ mod tests {
         let body_bytes = serde_json::to_vec(&body).unwrap();
         let now = 1_800_000_000_i64;
         let req = signed_request(&kp, "yomi-strix", "/", &body_bytes, now, &unique_nonce("rp-twin"));
-        let (signed_name, signed_key) = match verify_signed_request(&req, now) {
+        let (signed_name, signed_key) = match verify_signed_request(&req, now, 0) {
             SignedRequestOutcome::Verified { resolved, key, .. } => (resolved, key),
             other => panic!("expected a REAL genuine signature to verify, got {other:?}"),
         };
@@ -11758,7 +11960,7 @@ mod tests {
         let body_bytes = serde_json::to_vec(&body).unwrap();
         let now = 1_800_000_000_i64;
         let req = signed_request(&kp, "yomi-strix", "/", &body_bytes, now, &unique_nonce("s5-signed"));
-        let (signed_name, signed_key) = match verify_signed_request(&req, now) {
+        let (signed_name, signed_key) = match verify_signed_request(&req, now, 0) {
             SignedRequestOutcome::Verified { resolved, key, .. } => (resolved, key),
             other => panic!("expected a REAL genuine signature to verify, got {other:?}"),
         };
@@ -15196,7 +15398,7 @@ mod tests {
         // (`grant_in_mesh`) — while a key the charter does not list resolves to
         // nothing, and a mesh that charter does not govern resolves to nothing.
         let req = signed_request_in_mesh(&op_kp, "opbox", "/", &body, now, &unique_nonce("carriage"), Some("home"));
-        match verify_signed_request(&req, now) {
+        match verify_signed_request(&req, now, 0) {
             SignedRequestOutcome::Verified { resolved, key, .. } => {
                 assert_eq!(resolved, "opbox", "the charter's line names the signer");
                 assert_eq!(key, op_key, "and its key is the one that verified — identity only, no grant");
@@ -15211,12 +15413,12 @@ mod tests {
         let stranger_req =
             signed_request_in_mesh(&stranger_kp, "opbox", "/", &body, now, &unique_nonce("carriage-stranger"), Some("home"));
         assert!(matches!(
-            verify_signed_request(&stranger_req, now),
+            verify_signed_request(&stranger_req, now, 0),
             SignedRequestOutcome::Refused(_, _)
         ), "a key the charter does not list resolves to nothing");
         let away_req = signed_request_in_mesh(&op_kp, "opbox", "/", &body, now, &unique_nonce("carriage-away"), Some("away"));
         assert!(matches!(
-            verify_signed_request(&away_req, now),
+            verify_signed_request(&away_req, now, 0),
             SignedRequestOutcome::Refused(_, _)
         ), "and the rung never crosses meshes");
 
@@ -16671,7 +16873,7 @@ mod tests {
     fn verified_caller(kp: &aoide_storage::identity::Keypair, body: &[u8]) -> (String, String) {
         let now = 1_800_000_000_i64;
         let req = signed_request(kp, "yomi-strix", "/", body, now, &unique_nonce("frame"));
-        match verify_signed_request(&req, now) {
+        match verify_signed_request(&req, now, 0) {
             SignedRequestOutcome::Verified { resolved, key, .. } => (resolved, key),
             other => panic!("expected a real signature to verify, got {other:?}"),
         }
@@ -18409,6 +18611,13 @@ mod tests {
         let deadline = std::time::Instant::now() + Duration::from_secs(5);
         loop {
             if std::net::TcpStream::connect(("127.0.0.1", port)).is_ok() {
+                // A real `serve_mail` stamps its own start, so a request signed against it must be
+                // stamped after the second that start fell in. The start came before the bind, so
+                // the clock leaving the second the door was listening in leaves the start behind.
+                let ready = epoch_now();
+                while epoch_now() <= ready {
+                    std::thread::sleep(Duration::from_millis(20));
+                }
                 return;
             }
             assert!(std::time::Instant::now() < deadline, "the adapter never came up on 127.0.0.1:{port}");
@@ -18818,7 +19027,7 @@ mod tests {
             for stream in listener.incoming().flatten() {
                 let audit_log = audit_log.clone();
                 std::thread::spawn(move || {
-                    let _ = handle_connection(stream, "127.0.0.1", port, &audit_log, "", "", "box-a", None, Listener::A2a, registry);
+                    let _ = handle_connection(stream, "127.0.0.1", port, &audit_log, "", "", "box-a", None, Listener::A2a, registry, 0);
                 });
             }
         });

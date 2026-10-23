@@ -111,6 +111,11 @@ impl Drop for Door {
     }
 }
 
+/// The wall clock's whole second, the unit a door stamps its start in.
+fn whole_second() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
+}
+
 /// Raise one door on `port` for `root`, and wait until it answers TCP.
 pub fn raise_door(root: &std::path::Path, name: &str, port: u16) -> Door {
     let runtime = root.join("runtime");
@@ -135,6 +140,13 @@ pub fn raise_door(root: &std::path::Path, name: &str, port: u16) -> Door {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
     loop {
         if std::net::TcpStream::connect(("127.0.0.1", port)).is_ok() {
+            // The door stamps its start second before it binds, and refuses a frame stamped at or
+            // before that second. Wait for the clock to leave the second it came up in, so the
+            // first signed request built against this door is after its start.
+            let ready = whole_second();
+            while whole_second() <= ready {
+                std::thread::sleep(std::time::Duration::from_millis(20));
+            }
             return door;
         }
         assert!(

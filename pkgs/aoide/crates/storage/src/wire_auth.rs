@@ -46,13 +46,14 @@
 //! **Replay guard split**: [`signature_skew_secs`] (the ±120s-default
 //! timestamp window, `AOIDE_SIGNATURE_SKEW_SECS` override) is a pure env
 //! read and lives here, next to the canonical string it bounds. The
-//! **nonce cache** does NOT live here — it's ephemeral, in-memory,
-//! per-`a2a serve`-PROCESS runtime state with no durable file behind it at
+//! **nonce sets** do NOT live here — they are ephemeral, in-memory,
+//! per-`a2a serve`-PROCESS runtime state with no durable file behind them at
 //! all, unlike everything else this crate persists
-//! (`state/node-pairing-*.json`, `state/nodes.json`, …); it lives in
-//! `aoide-server::a2a` instead, next to the verification flow that's its
-//! only consumer — see that module's own doc comment for the process-
-//! locality note.
+//! (`state/node-pairing-*.json`, `state/nodes.json`, …); they live in
+//! `aoide-server::a2a` (`NONCE_SETS`), next to the verification flow that's
+//! their only consumer. Each set's entries expire at a frame's own timestamp
+//! plus [`signature_skew_secs`], so the window this function reads is also the
+//! lifetime of every nonce the server holds.
 
 use crate::identity::Keypair;
 use ed25519_dalek::Signature;
