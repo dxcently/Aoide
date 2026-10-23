@@ -2266,16 +2266,21 @@ The rice tree lives under `$STRILLIX_ROOT/rices/` (`$STRILLIX_ROOT` defaults to
 `~/.strillix`); a rice's own `wallpaper/` picture folder and `history/` entry
 store sit beside its `theme.json`.
 
-**The rice-tree move and its marker.** The old `$AOIDE_ROOT/song/`
-tree moves into `$STRILLIX_ROOT` in one no-clobber pass: `stage/` (its
-`mode.json` `song` key becomes `rice`), `declared/`, `covers/` to
-`wallpapers/`, `songbook/` to `rices/`, `songbook-aside/` to `rices-aside/`
-(old names inside it untouched), and every `takes/` to `history/`. A move
-that leaves `$AOIDE_ROOT/song` empty replaces it with a regular FILE of that
-name, whose text names the strillix root. The file is the marker: an old
-binary that opens `song/stage` fails with ENOTDIR and recreates nothing, and
-a new binary reads the marker as already migrated. A leftover keeps `song/`
-a directory and is narrated. When `song/` and `$STRILLIX_ROOT` both hold rice
+**The rice-tree move and its marker.** The old `$AOIDE_ROOT/song/` tree moves
+into `$STRILLIX_ROOT` in one no-clobber pass: `stage/` (its `mode.json`
+`song` and `stagingSong` keys become `rice` and `stagingRice`), `declared/`
+(its `songbook/` becomes `rices/`), `covers/` to `wallpapers/`, `songbook/`
+to `rices/`, `songbook-aside/` to `rices-aside/` (old names inside it
+untouched), and every `takes/` to `history/`. The state files take the new
+names too: `song` keys become `rice`, a history entry's `take`, `livery` and
+`cover` become `entry`, `theme` and `wallpaper`, and each path a file holds
+that the move relocated is rewritten to where its file now sits. A rice's own
+files (`widgets/`, `design/`, `rice.nix`) are never rewritten. A move that
+leaves `$AOIDE_ROOT/song` empty replaces it with a regular FILE of that name,
+whose text names the strillix root. The file is the marker: an old binary
+that opens `song/stage` fails with ENOTDIR and recreates nothing, and a new
+binary reads the marker as already migrated. A leftover keeps `song/` a
+directory and is narrated. When `song/` and `$STRILLIX_ROOT` both hold rice
 state, nothing moves and the move is refused. Only the old tree's own folders
 (`stage`, `declared`, `covers`, `songbook`, `songbook-aside`) count as rice
 state; a stray file beside them neither blocks nor moves.

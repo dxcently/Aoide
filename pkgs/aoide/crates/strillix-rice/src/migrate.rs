@@ -10,7 +10,8 @@ use aoide_storage::fs::{atomic_write, migrate_dir, migrate_file, root};
 /// The rice runtime's move, which no core binary runs: the old
 /// `~/Aoide/song/stage`, the rice tree
 /// (`$AOIDE_ROOT/song/*`, see [`migrate_rice_tree`]) into `$STRILLIX_ROOT`,
-/// the file renames inside it, and the lyra link tree ([`migrate_strillix_state`]).
+/// the file renames inside it, the names and paths those files store
+/// ([`migrate_stored_names`]), and the lyra link tree ([`migrate_strillix_state`]).
 /// Runs only when asked: the strillix binary calls it from [`rice_root_at_start`]
 /// when `STRILLIX_MIGRATE=1`, and from `strx migrate`. Idempotent, like every
 /// piece here. While an aoide binary resolves ([`aoide_protocol::bin::core_present`])
@@ -43,8 +44,11 @@ pub fn migrate_rice_root() -> std::io::Result<()> {
         migrate_dir(&old_root.join("song").join("stage"), &new_root.join("song").join("stage"))?;
     }
     migrate_rice_tree(&new_root.join("song"))?;
+    let declared = strillix_root().join("declared");
+    migrate_dir(&declared.join("songbook"), &declared.join("rices"))?;
     migrate_theme_files(&strillix_root());
     migrate_wallpaper_files(&strillix_root())?;
+    migrate_stored_names(&strillix_root(), &new_root.join("song"));
     Ok(())
 }
 
@@ -82,12 +86,14 @@ pub enum RiceStatus {
     Refused(Vec<std::path::PathBuf>),
 }
 
-/// The rice state's status, read from disk and moving nothing. Mirrors what
-/// [`migrate_rice_root`] would do: a `song` that is a file is the marker. The
-/// old `~/Aoide/song/stage` hops through `song` on its way to the strillix root,
-/// so it and `song` are judged together before anything moves: rice state in
-/// both roots is [`RiceStatus::Both`], and rice state the roots would carry
-/// across homes is [`RiceStatus::Refused`].
+/// The rice state's status, read from disk and moving nothing. Judges the tree
+/// move ([`migrate_rice_tree`]) the way [`migrate_rice_root`] would: a `song`
+/// that is a file is the marker. The renames after the move (the declared
+/// `songbook/` folder, the theme and wallpaper files, the stored names) never
+/// change the status. The old `~/Aoide/song/stage` hops through `song` on its
+/// way to the strillix root, so it and `song` are judged together before
+/// anything moves: rice state in both roots is [`RiceStatus::Both`], and rice
+/// state the roots would carry across homes is [`RiceStatus::Refused`].
 pub fn rice_status() -> RiceStatus {
     let home = aoide_protocol::aoide_home();
     let old_root = home.join("Aoide");
@@ -184,15 +190,235 @@ fn migrate_wallpaper_files(strillix: &std::path::Path) -> std::io::Result<()> {
     Ok(())
 }
 
+/// The names and paths the moved state files store, rewritten to the names the
+/// files now carry. Rewritten: the stage's `theme.json` and `wallpaper.json`, the
+/// declared `theme.json`, every `declared/rices/*.json`, each rice's `theme.json`,
+/// each draft's `theme.json` and `wallpaper.json`, and every `history/*.json` (an
+/// entry, see [`migrate_stored_file`]). Nothing else is read: never `rices-aside/`, a rice's
+/// own folders, or the other stage files (`mode.json` is
+/// [`migrate_mode_song_key`]'s). A missing file or folder is skipped. No-clobber
+/// and idempotent, like its siblings.
+fn migrate_stored_names(strillix: &std::path::Path, old_song: &std::path::Path) {
+    let stored = |file: &std::path::Path, history: bool| {
+        migrate_stored_file(file, history, strillix, old_song)
+    };
+    stored(&strillix.join("stage").join("theme.json"), false);
+    stored(&strillix.join("stage").join("wallpaper.json"), false);
+    stored(&strillix.join("declared").join("theme.json"), false);
+    for file in json_files(&strillix.join("declared").join("rices")) {
+        stored(&file, false);
+    }
+    for rice in children(&strillix.join("rices")) {
+        stored(&rice.join("theme.json"), false);
+        for file in json_files(&rice.join("history")) {
+            stored(&file, true);
+        }
+        for draft in children(&rice.join("drafts")) {
+            stored(&draft.join("theme.json"), false);
+            stored(&draft.join("wallpaper.json"), false);
+            for file in json_files(&draft.join("history")) {
+                stored(&file, true);
+            }
+        }
+    }
+}
+
+/// Rewrites one stored file in place. Its top-level `song` key becomes `rice`.
+/// A history entry (`history`) also takes `entry`, `theme` and `wallpaper` for
+/// `take`, `livery` and `cover`, and the `song` keys of its `theme` and
+/// `wallpaper` objects become `rice`. Then every string value, at any depth,
+/// runs through [`moved_path`]. A missing or unreadable file is skipped. A file
+/// that is not a JSON object is left as it is, narrated. A file whose value did
+/// not change is not written, and a failed write is narrated.
+fn migrate_stored_file(
+    path: &std::path::Path,
+    history: bool,
+    strillix: &std::path::Path,
+    old_song: &std::path::Path,
+) {
+    let Ok(raw) = std::fs::read_to_string(path) else {
+        return;
+    };
+    let parsed: Option<serde_json::Value> = serde_json::from_str(&raw).ok();
+    let Some(mut value) = parsed.filter(serde_json::Value::is_object) else {
+        eprintln!(
+            "aoide: {} is not a JSON object; its names are left as they are",
+            path.display()
+        );
+        return;
+    };
+    let mut changed = rename_key(&mut value, "song", "rice");
+    if history {
+        changed |= rename_key(&mut value, "take", "entry");
+        changed |= rename_key(&mut value, "livery", "theme");
+        changed |= rename_key(&mut value, "cover", "wallpaper");
+        for object in ["theme", "wallpaper"] {
+            if let Some(inner) = value.get_mut(object) {
+                changed |= rename_key(inner, "song", "rice");
+            }
+        }
+    }
+    changed |= rewrite_paths(&mut value, old_song, strillix);
+    if !changed {
+        return;
+    }
+    let Ok(text) = serde_json::to_string_pretty(&value) else {
+        eprintln!(
+            "aoide: could not serialize {}; its names are left as they are",
+            path.display()
+        );
+        return;
+    };
+    if let Err(e) = atomic_write(path, &text) {
+        eprintln!(
+            "aoide: could not rewrite the stored names in {} ({e})",
+            path.display()
+        );
+    }
+}
+
+/// Runs every string value in `value`, at any depth, through [`moved_path`] and
+/// keeps each one that moved. A moved value is kept only when its new home
+/// exists: a path whose new home does not exist stays exactly as it was,
+/// because the move kept that file where it was, or the file is gone. Keys are
+/// names, not paths, and stay as they are. True when any value moved.
+fn rewrite_paths(
+    value: &mut serde_json::Value,
+    old_song: &std::path::Path,
+    strillix: &std::path::Path,
+) -> bool {
+    let mut moved = false;
+    match value {
+        serde_json::Value::String(text) => {
+            if let Some(new) = moved_path(text.as_str(), old_song, strillix)
+                .filter(|new| std::path::Path::new(new).exists())
+            {
+                *text = new;
+                moved = true;
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for item in items {
+                moved |= rewrite_paths(item, old_song, strillix);
+            }
+        }
+        serde_json::Value::Object(fields) => {
+            for field in fields.values_mut() {
+                moved |= rewrite_paths(field, old_song, strillix);
+            }
+        }
+        _ => {}
+    }
+    moved
+}
+
+/// The new home of a path the migration moved, or `None` when it did not move.
+/// A path under `old_song` takes its first folder's new name: `stage` and
+/// `declared` keep theirs, `covers` becomes `wallpapers`, `songbook` becomes
+/// `rices`, and `songbook-aside` becomes `rices-aside`. Any other first folder
+/// stayed behind, so the path is `None`. A
+/// path under `strillix` keeps its root and renames only `covers`. Then the
+/// inner renames apply ([`renamed_inside`]), and a path left where it was is
+/// `None`.
+fn moved_path(
+    path: &str,
+    old_song: &std::path::Path,
+    strillix: &std::path::Path,
+) -> Option<String> {
+    let path = std::path::Path::new(path);
+    let mut segs = match below(path, old_song) {
+        Some(mut segs) => {
+            let to = match segs.first()?.as_str() {
+                "stage" => "stage",
+                "declared" => "declared",
+                "covers" => "wallpapers",
+                "songbook" => "rices",
+                "songbook-aside" => "rices-aside",
+                _ => return None,
+            };
+            segs[0] = to.to_string();
+            segs
+        }
+        None => {
+            let mut segs = below(path, strillix)?;
+            if segs.first().is_some_and(|first| first == "covers") {
+                segs[0] = "wallpapers".to_string();
+            }
+            segs
+        }
+    };
+    renamed_inside(&mut segs);
+    let moved = segs
+        .iter()
+        .fold(strillix.to_path_buf(), |dir, seg| dir.join(seg));
+    (moved.as_path() != path).then(|| moved.to_string_lossy().into_owned())
+}
+
+/// The inner renames on a path's segments under the strillix root, each keyed by
+/// position: a stage or declared file, the declared `songbook` folder, and within
+/// a rice (or a draft) its `cover`, `takes` and `livery.json` (or `cover.json`)
+/// names. `rices-aside` never matches `rices`, and a rice's own folders match none
+/// of these.
+fn renamed_inside(segs: &mut [String]) {
+    let names: Vec<&str> = segs.iter().map(String::as_str).collect();
+    let (at, to) = match names.as_slice() {
+        ["stage", "livery.json"] => (1, "theme.json"),
+        ["stage", "cover.json"] => (1, "wallpaper.json"),
+        ["declared", "livery.json"] => (1, "theme.json"),
+        ["declared", "songbook", ..] => (1, "rices"),
+        ["rices", _, "cover", ..] => (2, "wallpaper"),
+        ["rices", _, "takes", ..] => (2, "history"),
+        ["rices", _, "livery.json"] => (2, "theme.json"),
+        ["rices", _, "drafts", _, "takes", ..] => (4, "history"),
+        ["rices", _, "drafts", _, "livery.json"] => (4, "theme.json"),
+        ["rices", _, "drafts", _, "cover.json"] => (4, "wallpaper.json"),
+        _ => return,
+    };
+    segs[at] = to.to_string();
+}
+
+/// The segments of `path` below `root`, or `None` when `path` is not under it.
+/// Any component below `root` that is not a plain name (a `..`, say) gives
+/// `None` too, so a path with `..` is never rewritten.
+fn below(path: &std::path::Path, root: &std::path::Path) -> Option<Vec<String>> {
+    path.strip_prefix(root)
+        .ok()?
+        .components()
+        .map(|component| match component {
+            std::path::Component::Normal(name) => name.to_str().map(str::to_string),
+            _ => None,
+        })
+        .collect()
+}
+
+/// The paths directly inside `dir`; none when `dir` is missing.
+fn children(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
+    std::fs::read_dir(dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|entry| entry.path())
+        .collect()
+}
+
+/// The `.json` files directly inside `dir`.
+fn json_files(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
+    children(dir)
+        .into_iter()
+        .filter(|path| path.extension().is_some_and(|ext| ext == "json"))
+        .collect()
+}
+
 /// The rice tree's move out of aoide's root (`$AOIDE_ROOT/song/` into
 /// `$STRILLIX_ROOT`):
-/// `song/stage` becomes the stage, `song/declared` and `song/covers` keep
-/// their names, `song/songbook` becomes `rices`, `song/songbook-aside`
-/// becomes `rices-aside`, and every rice's `takes/` becomes `history/` (its
-/// own drafts' included). `mode.json`'s `song` key becomes `rice`. `old_song`
-/// is the old tree; the target is [`strillix_root`], the rice tree root
-/// every reader derives from. A missing tree, or one already in place, is a
-/// no-op.
+/// `song/stage` becomes the stage, `song/declared` keeps its name,
+/// `song/covers` becomes `wallpapers`, `song/songbook` becomes `rices`,
+/// `song/songbook-aside` becomes `rices-aside`, and every rice's `takes/`
+/// becomes `history/` (its own drafts' included). `mode.json`'s `song` and
+/// `stagingSong` keys become `rice` and `stagingRice`. `old_song` is the old
+/// tree; the target is [`strillix_root`], the rice tree root every reader
+/// derives from. A missing tree, or one already in place, moves nothing; only
+/// `mode.json`'s key renames ([`migrate_mode_song_key`]) still run.
 ///
 /// Two states stop the move before it starts. A `song` that is a FILE is the
 /// marker a finished move leaves behind ([`mark_rice_tree_moved`]): already
@@ -203,7 +429,8 @@ fn migrate_wallpaper_files(strillix: &std::path::Path) -> std::io::Result<()> {
 fn migrate_rice_tree(old_song: &std::path::Path) -> std::io::Result<()> {
     let target = strillix_root();
     if old_song == target || old_song.is_file() || !old_rice_held(old_song) {
-        return migrate_mode_song_key(&stage_dir());
+        migrate_mode_song_key(&stage_dir());
+        return Ok(());
     }
     migrate_dir(&old_song.join("stage"), &stage_dir())?;
     migrate_dir(&old_song.join("declared"), &target.join("declared"))?;
@@ -217,7 +444,7 @@ fn migrate_rice_tree(old_song: &std::path::Path) -> std::io::Result<()> {
             migrate_dir(&draft.path().join("takes"), &draft.path().join("history"))?;
         }
     }
-    migrate_mode_song_key(&stage_dir())?;
+    migrate_mode_song_key(&stage_dir());
     mark_rice_tree_moved(old_song, &target)
 }
 
@@ -308,24 +535,61 @@ fn rice_move_allowed(old_song: &std::path::Path, target: &std::path::Path) -> bo
     old_song.starts_with(&home) && target.starts_with(&home)
 }
 
-/// Rewrites a staged `mode.json`'s `song` key to `rice` (the same value, the
-/// new name). A file already carrying `rice`, or no `song` key, is left as it
-/// is; an unparseable file is left alone and narrated, never clobbered.
-fn migrate_mode_song_key(stage: &std::path::Path) -> std::io::Result<()> {
-    let path = stage.join("mode.json");
-    let Ok(raw) = std::fs::read_to_string(&path) else { return Ok(()) };
-    let Ok(mut value) = serde_json::from_str::<serde_json::Value>(&raw) else {
-        eprintln!("aoide: {} is not JSON; its `song` key is left as it is", path.display());
-        return Ok(());
+/// Renames the key `from` to `to` in the JSON object `value`, and only when `to`
+/// is absent: a key already under its new name is never overwritten. True when a
+/// key moved; a value that is not an object moves nothing.
+fn rename_key(value: &mut serde_json::Value, from: &str, to: &str) -> bool {
+    let Some(obj) = value.as_object_mut() else {
+        return false;
     };
-    let Some(obj) = value.as_object_mut() else { return Ok(()) };
-    if obj.contains_key("rice") {
-        return Ok(());
+    if obj.contains_key(to) {
+        return false;
     }
-    let Some(song) = obj.remove("song") else { return Ok(()) };
-    obj.insert("rice".to_string(), song);
-    let text = serde_json::to_string_pretty(&value).unwrap_or_default();
-    atomic_write(&path, &text)
+    let Some(moved) = obj.remove(from) else {
+        return false;
+    };
+    obj.insert(to.to_string(), moved);
+    true
+}
+
+/// Renames a staged `mode.json`'s `song` key to `rice` and its `stagingSong` key
+/// to `stagingRice` (the same values, the new names). Each key is judged on its
+/// own by [`rename_key`], so a file carrying both names of a pair keeps both. A
+/// file with neither key, or one that is not a JSON object, is left as it is; an
+/// unparseable file is left alone and narrated, never clobbered. The file is
+/// written only when a key moved. A file it cannot rewrite keeps its old
+/// keys and is narrated, the migration goes on, and the next explicit run
+/// retries it.
+fn migrate_mode_song_key(stage: &std::path::Path) {
+    let path = stage.join("mode.json");
+    let Ok(raw) = std::fs::read_to_string(&path) else {
+        return;
+    };
+    let Ok(mut value) = serde_json::from_str::<serde_json::Value>(&raw) else {
+        eprintln!(
+            "aoide: {} is not JSON; its `song` and `stagingSong` keys are left as they are",
+            path.display()
+        );
+        return;
+    };
+    let renamed_song = rename_key(&mut value, "song", "rice");
+    let renamed_staging = rename_key(&mut value, "stagingSong", "stagingRice");
+    if !renamed_song && !renamed_staging {
+        return;
+    }
+    let Ok(text) = serde_json::to_string_pretty(&value) else {
+        eprintln!(
+            "aoide: could not serialize {}; its old keys stay",
+            path.display()
+        );
+        return;
+    };
+    if let Err(e) = atomic_write(&path, &text) {
+        eprintln!(
+            "aoide: could not rewrite {} ({e}); its old keys stay",
+            path.display()
+        );
+    }
 }
 
 /// `~/.local/state/lyra` becomes `~/.local/state/strillix`. Hyprland sources
@@ -1196,6 +1460,340 @@ mod tests {
         std::env::remove_var("AOIDE_ROOT");
         let _ = std::fs::remove_dir_all(&home);
         let _ = std::fs::remove_dir_all(&custom_root);
+    }
+
+    /// Writes `value` as the JSON file at `path`, folder included.
+    fn write_json(path: &std::path::Path, value: serde_json::Value) {
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, value.to_string()).unwrap();
+    }
+
+    /// Reads the JSON file at `path` back as a value.
+    fn read_json(path: &std::path::Path) -> serde_json::Value {
+        serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
+    }
+
+    /// The old tree the stored-names tests move, under `base/aoide/song`: one
+    /// file of each kind the pass rewrites, and what it must leave alone (the
+    /// aside, a rice's own `rice.nix`).
+    fn plant_old_stored_tree(base: &std::path::Path) {
+        let song = base.join("aoide").join("song");
+        let song_path = song.display().to_string();
+        let livery = || {
+            serde_json::json!({
+                "schemaVersion": "0",
+                "song": "barcarolle",
+                "palette": {"bg": "#000000", "fg": "#ffffff", "accent": "#111111", "urgent": "#222222"}
+            })
+        };
+        let rice = song.join("songbook").join("barcarolle");
+        let draft = rice.join("drafts").join("draft-1");
+        let cover_path = format!("{song_path}/songbook/barcarolle/cover/barcarolle-desktop.jpg");
+        std::fs::create_dir_all(song.join("covers")).unwrap();
+        std::fs::write(song.join("covers").join("bliss.jpg"), "jpeg").unwrap();
+        std::fs::create_dir_all(rice.join("cover")).unwrap();
+        std::fs::write(rice.join("cover").join("barcarolle-desktop.jpg"), "jpeg").unwrap();
+        std::fs::write(rice.join("rice.nix"), "{}").unwrap();
+        let pick = serde_json::json!({"kind": "static", "path": format!("{song_path}/covers/bliss.jpg"), "pick": true, "song": "barcarolle"});
+        write_json(&song.join("stage").join("cover.json"), pick.clone());
+        write_json(&draft.join("cover.json"), pick);
+        write_json(&song.join("stage").join("livery.json"), livery());
+        write_json(
+            &song.join("stage").join("mode.json"),
+            serde_json::json!({"mode": "staging", "song": "barcarolle", "stagingSong": "barcarolle", "since": "2026-10-19T22:32:13Z"}),
+        );
+        write_json(
+            &rice.join("takes").join("head.json"),
+            serde_json::json!({"head": 7}),
+        );
+        write_json(
+            &rice.join("takes").join("0007.json"),
+            serde_json::json!({"take": 7, "parent": 6, "at": "t", "cause": "reload", "livery": livery(),
+                "cover": {"kind": "static", "path": cover_path.clone(), "pick": false, "song": "barcarolle"}}),
+        );
+        write_json(
+            &draft.join("takes").join("0001.json"),
+            serde_json::json!({"take": 1, "at": "t", "cause": "reload", "livery": livery(),
+                "cover": {"kind": "static", "path": cover_path, "pick": false, "song": "barcarolle"}}),
+        );
+        write_json(
+            &draft.join("livery.json"),
+            serde_json::json!({"schemaVersion": "0", "song": "barcarolle"}),
+        );
+        write_json(
+            &song.join("declared").join("livery.json"),
+            serde_json::json!({"schemaVersion": "0", "song": "barcarolle"}),
+        );
+        write_json(
+            &song.join("declared").join("songbook").join("cadenza.json"),
+            serde_json::json!({"schemaVersion": "0", "song": "cadenza", "source": "/nix/store/x-templates", "files": {}}),
+        );
+        let aside = song.join("songbook-aside").join("cadenza-20261008");
+        std::fs::create_dir_all(&aside).unwrap();
+        std::fs::write(aside.join("livery.json"), r#"{"song":"cadenza"}"#).unwrap();
+    }
+
+    /// An old box's stored names and paths follow the move: the stage pick and
+    /// mode marker, a history entry and the paths it holds, a draft, and the
+    /// declared records. The aside keeps its names.
+    #[test]
+    fn an_old_box_s_stored_paths_and_names_follow_the_move() {
+        let _guard = aoide_test_support::env_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let _env = MigrationEnvGuard::capture_and_clear();
+        let base = rice_roots("stored-names");
+        plant_old_stored_tree(&base);
+        let s = base.join("strillix");
+        let rice = s.join("rices").join("barcarolle");
+        let draft = rice.join("drafts").join("draft-1");
+
+        migrate_all().unwrap();
+
+        assert_eq!(
+            read_json(&s.join("stage").join("wallpaper.json")),
+            serde_json::json!({"kind": "static", "path": format!("{}/wallpapers/bliss.jpg", s.display()), "pick": true, "rice": "barcarolle"})
+        );
+        assert!(s.join("wallpapers").join("bliss.jpg").is_file());
+        let mode = read_json(&s.join("stage").join("mode.json"));
+        assert_eq!(mode["rice"], "barcarolle");
+        assert_eq!(mode["stagingRice"], "barcarolle");
+        assert!(mode.get("song").is_none() && mode.get("stagingSong").is_none());
+        assert_eq!(
+            crate::mode::load_mode_marker().staging_rice,
+            Some("barcarolle".into())
+        );
+        let theme = read_json(&s.join("stage").join("theme.json"));
+        assert_eq!(theme["rice"], "barcarolle");
+        assert!(theme.get("song").is_none());
+
+        let wallpaper = format!(
+            "{}/rices/barcarolle/wallpaper/barcarolle-desktop.jpg",
+            s.display()
+        );
+        let entry = read_json(&rice.join("history").join("0007.json"));
+        assert_eq!(entry["entry"], 7);
+        assert_eq!(entry["theme"]["rice"], "barcarolle");
+        assert_eq!(entry["wallpaper"]["rice"], "barcarolle");
+        assert_eq!(entry["wallpaper"]["path"], wallpaper);
+        for old in ["take", "livery", "cover"] {
+            assert!(entry.get(old).is_none(), "{old} must have moved");
+        }
+        let wallpaper_file = rice.join("wallpaper").join("barcarolle-desktop.jpg");
+        assert!(wallpaper_file.is_file());
+        let loaded = crate::history::load_history("barcarolle", None, 7);
+        assert!(loaded.is_some_and(|record| !record.theme.is_null()));
+        assert_eq!(
+            read_json(&rice.join("history").join("head.json")),
+            serde_json::json!({"head": 7})
+        );
+
+        assert_eq!(read_json(&draft.join("theme.json"))["rice"], "barcarolle");
+        let pick = read_json(&draft.join("wallpaper.json"));
+        assert_eq!(pick["rice"], "barcarolle");
+        assert_eq!(
+            pick["path"],
+            format!("{}/wallpapers/bliss.jpg", s.display())
+        );
+        let draft_entry = read_json(&draft.join("history").join("0001.json"));
+        assert_eq!(draft_entry["entry"], 1);
+        assert_eq!(draft_entry["theme"]["rice"], "barcarolle");
+        assert_eq!(draft_entry["wallpaper"]["rice"], "barcarolle");
+        assert_eq!(draft_entry["wallpaper"]["path"], wallpaper);
+        for old in ["take", "livery", "cover"] {
+            assert!(draft_entry.get(old).is_none(), "{old} must have moved");
+        }
+
+        let record = read_json(&s.join("declared").join("rices").join("cadenza.json"));
+        assert_eq!(record["rice"], "cadenza");
+        assert!(record.get("song").is_none());
+        assert!(!s.join("declared").join("songbook").exists());
+        assert_eq!(
+            read_json(&s.join("declared").join("theme.json"))["rice"],
+            "barcarolle"
+        );
+        let aside = s
+            .join("rices-aside")
+            .join("cadenza-20261008")
+            .join("livery.json");
+        assert_eq!(
+            std::fs::read_to_string(aside).unwrap(),
+            r#"{"song":"cadenza"}"#
+        );
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// A second pass over a moved tree changes no byte: the pass writes only
+    /// what changes.
+    #[test]
+    fn the_stored_names_pass_is_idempotent() {
+        let _guard = aoide_test_support::env_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let _env = MigrationEnvGuard::capture_and_clear();
+        let base = rice_roots("stored-idempotent");
+        plant_old_stored_tree(&base);
+        migrate_all().unwrap();
+        assert_eq!(
+            read_json(&base.join("strillix").join("stage").join("wallpaper.json"))["rice"],
+            "barcarolle",
+            "the first run converts the stored names, or the second pass proves nothing"
+        );
+        let strillix = base.join("strillix");
+        let before = file_bytes(&strillix);
+        migrate_rice_root().unwrap();
+        assert_eq!(
+            file_bytes(&strillix),
+            before,
+            "a second pass must change no byte"
+        );
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// A stored name never overwrites a name already in place: each pair of keys
+    /// is judged on its own, so a file carrying both names of a pair keeps both.
+    #[test]
+    fn a_stored_name_never_clobbers_a_new_one() {
+        let _guard = aoide_test_support::env_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let _env = MigrationEnvGuard::capture_and_clear();
+        let base = rice_roots("stored-clobber");
+        let s = base.join("strillix");
+        let stage = s.join("stage");
+        std::fs::create_dir_all(s.join("wallpapers")).unwrap();
+        std::fs::write(s.join("wallpapers").join("x.jpg"), "jpeg").unwrap();
+        let pick = serde_json::json!({"kind": "static", "song": "a", "rice": "b", "path": format!("{}/covers/x.jpg", s.display())});
+        let mode = serde_json::json!({"mode": "staging", "song": "x", "stagingSong": "a", "stagingRice": "b"});
+        write_json(&stage.join("wallpaper.json"), pick);
+        write_json(&stage.join("mode.json"), mode);
+
+        migrate_all().unwrap();
+
+        let expect_pick = serde_json::json!({"kind": "static", "song": "a", "rice": "b", "path": format!("{}/wallpapers/x.jpg", s.display())});
+        let expect_mode = serde_json::json!({"mode": "staging", "rice": "x", "stagingSong": "a", "stagingRice": "b"});
+        assert_eq!(read_json(&stage.join("wallpaper.json")), expect_pick);
+        assert_eq!(read_json(&stage.join("mode.json")), expect_mode);
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// A stored path whose file did not move keeps its exact text: a path is
+    /// rewritten only when its new home exists, and this one has none.
+    #[test]
+    fn a_stored_path_with_no_moved_file_stays() {
+        let _guard = aoide_test_support::env_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let _env = MigrationEnvGuard::capture_and_clear();
+        let base = rice_roots("stored-gone");
+        let song = base.join("aoide").join("song");
+        let song_path = song.display().to_string();
+        std::fs::create_dir_all(song.join("stage")).unwrap();
+        std::fs::create_dir_all(song.join("covers")).unwrap();
+        std::fs::write(song.join("covers").join("kept.jpg"), "jpeg").unwrap();
+        write_json(
+            &song.join("stage").join("cover.json"),
+            serde_json::json!({"kind": "static", "path": format!("{song_path}/covers/gone.jpg"), "pick": true, "song": "barcarolle"}),
+        );
+        write_json(
+            &song.join("stage").join("mode.json"),
+            serde_json::json!({"song": "barcarolle"}),
+        );
+
+        migrate_all().unwrap();
+
+        assert_eq!(
+            read_json(&base.join("strillix").join("stage").join("wallpaper.json")),
+            serde_json::json!({"kind": "static", "path": format!("{song_path}/covers/gone.jpg"), "pick": true, "rice": "barcarolle"})
+        );
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// A `mode.json` the migration cannot rewrite keeps its old keys, and the
+    /// call returns: the failed write is narrated, never raised.
+    #[cfg(unix)]
+    #[test]
+    fn a_mode_file_that_cannot_be_rewritten_never_aborts() {
+        use std::os::unix::fs::PermissionsExt;
+        let _guard = aoide_test_support::env_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let _env = MigrationEnvGuard::capture_and_clear();
+        let dir = std::env::temp_dir().join(format!("aoide-mode-readonly-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("mode.json"), r#"{"song":"a"}"#).unwrap();
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o555)).unwrap();
+
+        migrate_mode_song_key(&dir);
+
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(dir.join("mode.json")).unwrap(),
+            r#"{"song":"a"}"#
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Each move maps an old path to where its file now sits. A path that did not
+    /// move, a rice's own folder, and `rices-aside/` below its top level map to
+    /// `None`.
+    #[test]
+    fn moved_path_follows_every_move() {
+        let song = std::path::Path::new("/h/.aoide/song");
+        let s = std::path::Path::new("/h/.strillix");
+        let moved = |path: &str| moved_path(path, song, s);
+        let old = |rel: &str| format!("/h/.aoide/song/{rel}");
+        let at_s = |rel: &str| format!("/h/.strillix/{rel}");
+        let new = |rel: &str| Some(format!("/h/.strillix/{rel}"));
+        assert_eq!(moved(&old("stage/x")), new("stage/x"));
+        assert_eq!(moved(&old("declared/x")), new("declared/x"));
+        assert_eq!(moved(&old("covers/x")), new("wallpapers/x"));
+        assert_eq!(moved(&old("songbook/x")), new("rices/x"));
+        assert_eq!(moved(&old("songbook-aside/x")), new("rices-aside/x"));
+        assert_eq!(
+            moved(&old("songbook-aside/r/cover/x")),
+            new("rices-aside/r/cover/x")
+        );
+        assert_eq!(moved(&at_s("covers/x")), new("wallpapers/x"));
+        assert_eq!(moved(&at_s("declared/songbook/x")), new("declared/rices/x"));
+        assert_eq!(moved(&at_s("stage/livery.json")), new("stage/theme.json"));
+        assert_eq!(
+            moved(&at_s("stage/cover.json")),
+            new("stage/wallpaper.json")
+        );
+        assert_eq!(
+            moved(&at_s("declared/livery.json")),
+            new("declared/theme.json")
+        );
+        assert_eq!(moved(&at_s("rices/r/cover/x")), new("rices/r/wallpaper/x"));
+        assert_eq!(moved(&at_s("rices/r/takes/x")), new("rices/r/history/x"));
+        assert_eq!(
+            moved(&at_s("rices/r/livery.json")),
+            new("rices/r/theme.json")
+        );
+        assert_eq!(
+            moved(&at_s("rices/r/drafts/d/takes/x")),
+            new("rices/r/drafts/d/history/x")
+        );
+        assert_eq!(
+            moved(&at_s("rices/r/drafts/d/livery.json")),
+            new("rices/r/drafts/d/theme.json")
+        );
+        assert_eq!(
+            moved(&at_s("rices/r/drafts/d/cover.json")),
+            new("rices/r/drafts/d/wallpaper.json")
+        );
+        assert_eq!(moved(&old("elsewhere/x")), None);
+        assert_eq!(moved("/nix/store/x"), None);
+        assert_eq!(moved(&at_s("rices-aside/r/cover/x")), None);
+        assert_eq!(moved(&at_s("wallpapers/x")), None);
+        assert_eq!(moved(&at_s("rices/r/widgets/cover/x")), None);
+        assert_eq!(moved(&old("../song/covers/x")), None);
+        assert_eq!(moved(&old("songbook/r/../../../x")), None);
+        assert_eq!(moved("/h/.aoide/songbook/x"), None);
+        assert_eq!(moved("/h/.aoide/song"), None);
+        assert_eq!(moved("/h/.strillix"), None);
     }
 }
 

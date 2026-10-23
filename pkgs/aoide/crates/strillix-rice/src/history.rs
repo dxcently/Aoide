@@ -25,11 +25,13 @@
 //! the letter (both entries claim it) or loses it (neither does), and no
 //! atomic fix exists for two sequential file writes. The map makes a move
 //! ONE `atomic_write` of one file. The second win: entry records stay
-//! write-once from the moment `save_history` first writes them — nothing ever
-//! opens an entry file to mutate it — which keeps drift comparison (a
+//! write-once from the moment `save_history` first writes them. Nothing opens
+//! an entry file to mutate it, save the one-shot rice-tree move, which renames
+//! an old entry's keys and moved paths once and keeps its meaning
+//! (`migrate::migrate_stored_names`). That keeps drift comparison (a
 //! parse-and-compare against an entry's `theme`/`wallpaper`) and any future
-//! content-hashing trivially safe, because "the file on disk" and "the entry
-//! as minted" are never allowed to diverge.
+//! content-hashing trivially safe: the file on disk is the entry as minted, or
+//! that same entry under its new names.
 //!
 //! **Every function here is UNLOCKED.** `crate::lock::with_stage_lock` nests for
 //! the thread that already holds it (`fs.rs`), so this module still never
