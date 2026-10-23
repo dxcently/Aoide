@@ -8658,6 +8658,21 @@ for a cheaper reason:
    the same cache key. The nonce is recorded ONLY after every earlier check
    (including the signature itself) passes, so a forged or garbage nonce
    never consumes a cache slot.
+8. **Audience** (`handle_connection`, once, after step 7 and before either dispatch
+   path, the streaming one and the one-shot one): a `params.to`, when present, must
+   be this door's own identity key, lowercase hex, compared trimmed and lowercased.
+   The key is read with `identity::load_existing`, never minted, so a door with no
+   key refuses every `to`. A present `to` that does not match is refused `-32012`
+   `wrong-audience` for every method. An absent `to` is admitted only for
+   `aoide/mailDeposit`, `aoide/mailPoll`, `aoide/binding` and `aoide/charterFetch`
+   (`UNTAGGED_METHODS`, the old-client allow-list), audited with status `untagged`
+   and the method's name. Any other signed method without `to` is refused `-32012`
+   with a line that names the method, says it needs `to`, and tells the caller to
+   upgrade. The allow-list is closed: a new signed method is refused until it is
+   listed. A body with no `method` (a batch array, or bytes that are not JSON) is
+   admitted to dispatch, which answers `-32600` or `-32700` and runs nothing, so no
+   element of a batch reaches a method. Every `-32012` is written unsigned: the
+   request was not addressed to this door, so the door signs nothing for it.
 
 A request that fails ANY of these fails CLOSED — no fallthrough to the
 addr/token resolution ladder for a request that claims to be a paired
@@ -8667,6 +8682,17 @@ carrying NONE of the four headers is untouched by any of this — the
 existing token/addr resolution ladder and the door-wide bearer path (read
 arms, `tasks/get`, the AgentCard GET) apply unchanged,
 for every caller that never signs.
+
+**What `to` stops, and what it leaves open.** A hostile paired node holds every
+signed request it was sent. A request carrying `to` cannot be used at a third door:
+that door's key is not the one it names, so step 8 refuses it. What `to` does not
+stop: (a) an untagged request to one of the four old-client methods, which is
+admitted without `to` and so is not audience-bound until the planned switch (not
+built); its replay at another door is bounded only by the timestamp window; (b) a
+process running as this box's uid, which can sign as the box, because the key is on
+this box's disk. The switch is the planned end of the old-client arm: it refuses
+untagged requests on every method, and it lands once every host and launch carries
+`to`.
 
 **Nonce cache** (`aoide-server::a2a::NONCE_CACHE`) — a bounded, in-memory,
 PER-`a2a serve`-PROCESS `VecDeque<(pubkey, nonce)>`, capped at 4096 entries
@@ -8686,7 +8712,8 @@ operation.
 covers the malformed-header and ambiguous-signer shapes above, plus the
 single no-key-verifies refusal that unknown-key/unverified-node/keyless-
 record/bad-signature all collapse into), `-32008` (clock skew beyond the
-window), `-32009` (nonce replay).
+window), `-32009` (nonce replay), `-32012` (audience: a `to` that is not this door's
+key, or no `to` on a method outside the old-client allow-list; always unsigned).
 
 **Outbound (client side)** — `aoide-client::commands::sign_headers_for_node` is
 the ONE production call site that ever builds these headers: for a
@@ -8694,9 +8721,15 @@ the ONE production call site that ever builds these headers: for a
 (`aoide_storage::identity::load_or_mint`), mints a nonce, stamps "now," signs
 the canonical string, and returns the four header pairs; for an
 unverified/unpaired node it returns an empty header list, leaving that call's
-transport byte-identical to an unsigned POST. Wired into all three real
-node-POST call sites (`pull_one_node`, `pull_node_live`, `send_message_to_node`)
-— never into the pairing-ceremony's own wire calls.
+transport byte-identical to an unsigned POST. It also refuses (an `Err` with a
+taught line) to sign a body whose `params.to` is missing or names a key other than
+the record's `pubkey`, and signs nothing for a keyless record, so no caller can
+forget `to`. Every signed body is built through `commands::with_to`, which sets
+`params.to` from that record's key: the mail calls (`mail_wire::post_signed`), the
+graph-summary reads (`pull_one_node`, `pull_node_live`), `message/send`
+(`send_message_to_node`, and spawn through `spawn_on_node_via`), and the `tasks/get`
+frame and history reads (`task_get_on_node`, `task_history_on_node`). The pairing
+ceremony's own wire calls never pass through this function.
 `aoide/pairRequest`/`aoide/pairReveal` stay fully unauthenticated by design (see
 "Pairing wire" above) and always pass an empty header slice; `aoide/pairPoll`
 (see "Pairing wire", below) carries a signature too, but a SEPARATE
@@ -9562,6 +9595,7 @@ operations cross which way is a rule of the wire, not of any command:
 | --- | --- | --- |
 | the pairing ceremony (`pairRequest`, `pairReveal`, `pairPoll`) | **works** — its own signatures carry no mesh (`wire_auth::canonical_string("PAIRPOLL", …, None)`, byte-identical on both sides) | **works** |
 | every signed command (`node pull`, `send` to `node/<q>`, `node spawn`, `tasks get`/`history` on a node, `aoide/mailDeposit`, `aoide/mailPoll`, `aoide/binding`) | **refused `-32007` "signature verification failed"** — the sixth field is not in the bytes the older verifier rebuilds | **works**, judged in `[pairing] homeMesh`, so a grant that lives only in a NAMED mesh is still refused |
+| the `to` audience tag (`params.to`, carried by every signed call this build makes) | **works**: an old door ignores `params.to` and verifies the same bytes, but it does not check the audience, so the tag protects only upgraded doors | **works** for `aoide/mailDeposit`, `aoide/mailPoll`, `aoide/binding` and `aoide/charterFetch` (audited `untagged`); every other signed command is **refused `-32012`**, with a line naming the upgrade |
 
 So a pair across the versions succeeds and looks healthy in `node list` while
 being **one-way**: the older node reaches the newer one and the newer node
@@ -9573,6 +9607,13 @@ then have the mesh stripped from the signed bytes and the request judged in the
 receiving box's home mesh — precisely the re-aiming the sixth field exists to
 stop. **The remedy is upgrading every node**; the `aoide-storage` pin for it is
 `wire_auth::tests::wire_encoding_skew_the_five_and_six_field_signatures_never_interchange`.
+
+The `to` row is the one place the wire is two-way on purpose, and only for four
+methods: an old client's `aoide/mailDeposit`, `aoide/mailPoll`, `aoide/binding` and
+`aoide/charterFetch` reach an upgraded door without `to`, because the door admits
+them untagged. Until the planned switch refuses untagged requests on every method
+(see step 8 above), those four are the old-client arm, and every other old signed
+command is refused.
 
 **The answer signature is a second boundary, named by its header, not by a
 version.** A door that sends `X-Aoide-Answer-Signature` on its answers to

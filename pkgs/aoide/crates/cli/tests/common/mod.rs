@@ -71,6 +71,9 @@ pub struct Fixture {
     /// Every box's node line, as minted on its own machine: `sakaki`'s goes
     /// into both charters, which is the fixture's one-node-one-key case.
     pub lines: BTreeMap<&'static str, String>,
+    /// Node name → that box's identity key (lowercase hex): the `params.to` a
+    /// signed request for its door carries.
+    pub keys: BTreeMap<&'static str, String>,
     /// Node name → the loopback port that box's `https://` address names, where
     /// a REAL door can be raised (`Fixture::doors`). `chiyo` has one too, though
     /// its declared address is `poll` — nothing dials it.
@@ -150,12 +153,13 @@ pub fn raise_door(root: &std::path::Path, name: &str, port: u16) -> Door {
 /// speaks the wire itself.
 pub fn door_post(
     port: u16,
+    to: &str,
     from: &str,
     mesh: &str,
     method: &str,
     params: serde_json::Value,
 ) -> serde_json::Value {
-    door_post_with(port, from, mesh, method, params, false)
+    door_post_with(port, to, from, mesh, method, params, false)
 }
 
 /// [`door_post`], with the request's signature CORRUPTED after it is computed —
@@ -163,12 +167,13 @@ pub fn door_post(
 /// make the door disbelieve an otherwise well-formed caller.
 pub fn door_post_tampered(
     port: u16,
+    to: &str,
     from: &str,
     mesh: &str,
     method: &str,
     params: serde_json::Value,
 ) -> serde_json::Value {
-    door_post_with(port, from, mesh, method, params, true)
+    door_post_with(port, to, from, mesh, method, params, true)
 }
 
 /// The same signature with its last hex digit changed: well-formed hex that
@@ -182,25 +187,40 @@ fn flip_last_hex(sig: &str) -> String {
 
 fn door_post_with(
     port: u16,
+    to: &str,
     from: &str,
     mesh: &str,
     method: &str,
     params: serde_json::Value,
     tamper: bool,
 ) -> serde_json::Value {
-    door_post_raw(port, &signed_door_request(from, mesh, method, params, tamper))
+    door_post_raw(port, &signed_door_request(to, from, mesh, method, params, tamper))
 }
 
 /// One signed JSON-RPC POST as the exact bytes that go on the wire — exposed so a
 /// test can send the SAME bytes twice: a replay is about the bytes, and re-signing
 /// would mint a fresh nonce and hide the very thing being tested.
 pub fn signed_door_request(
+    to: &str,
     from: &str,
     mesh: &str,
     method: &str,
-    params: serde_json::Value,
+    mut params: serde_json::Value,
     tamper: bool,
 ) -> String {
+    params["to"] = serde_json::json!(to);
+    signed_post(from, mesh, method, params, tamper)
+}
+
+/// [`signed_door_request`] with NO `params.to`: an old client's request. The door
+/// admits it only for the four allow-listed methods, so only a test of that arm
+/// uses this.
+pub fn signed_door_request_untagged(from: &str, mesh: &str, method: &str, params: serde_json::Value) -> String {
+    signed_post(from, mesh, method, params, false)
+}
+
+/// The JSON-RPC body, signed by this process's identity over the four headers.
+fn signed_post(from: &str, mesh: &str, method: &str, params: serde_json::Value, tamper: bool) -> String {
     let body = serde_json::json!({ "jsonrpc": "2.0", "id": 1, "method": method, "params": params }).to_string();
     let ts = aoide_storage::time::now_iso_utc();
     let nonce = aoide_storage::pairing::random_hex(16);
@@ -234,6 +254,12 @@ pub fn signed_door_request(
         body
     );
     request
+}
+
+/// The identity key of the box this process is entered on: the `to` a signed
+/// request for a door raised on that box's root carries.
+pub fn entered_key() -> String {
+    aoide_storage::identity::load_existing().unwrap().expect("the entered box has an identity").info().pubkey_hex
 }
 
 /// POST `request` verbatim to `port` and return the parsed answer.
@@ -299,10 +325,12 @@ impl Fixture {
         let ports: BTreeMap<&'static str, u16> =
             BOXES.iter().map(|name| (*name, free_port())).collect();
         let mut lines = BTreeMap::new();
+        let mut keys = BTreeMap::new();
         for (name, dir) in &boxes {
             enter(dir, name);
             let line = line_at(&charter::node_line().unwrap(), &hop_of(name, ports[name]));
             lines.insert(*name, line);
+            keys.insert(*name, entered_key());
         }
 
         // The operator roots both meshes and signs both charters. `sakaki`'s
@@ -348,7 +376,7 @@ impl Fixture {
             })
             .collect();
 
-        let fixture = Fixture { root, operator: operator_root, boxes, operators, signed, lines, ports };
+        let fixture = Fixture { root, operator: operator_root, boxes, operators, signed, lines, keys, ports };
         // Every other box trusts the operator key and TAKES both charters —
         // the real path by which a signature reaches a machine.
         for name in BOXES {

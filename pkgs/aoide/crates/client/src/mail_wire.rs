@@ -195,7 +195,7 @@ fn post_signed(node: &Node, method: &str, params: Value, mesh: Option<&str>) -> 
     }
     let key = node.pubkey.clone().unwrap_or_default();
 
-    let body = json!({ "jsonrpc": "2.0", "id": 1, "method": method, "params": params });
+    let body = crate::commands::with_to(node, json!({ "jsonrpc": "2.0", "id": 1, "method": method, "params": params }));
     let body_str = serde_json::to_string(&body).unwrap_or_default();
 
     let bearer = match crate::commands::resolve_node_bearer(node) {
@@ -2300,6 +2300,23 @@ mod tests {
         ));
     }
 
+    /// Every signed mail call goes through [`post_signed`], and its body names
+    /// the callee's key in `params.to`: the far door refuses a body that does
+    /// not, so a mail call that forgot it would never be delivered.
+    #[test]
+    fn a_signed_mail_call_addresses_its_body_to_the_callee_key() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, _dir) = root("mail-call-to");
+        let (_listener, port, seen) = answering_door(|_| r#"{"jsonrpc":"2.0","id":1,"result":{"envelopes":[]}}"#.to_string());
+        let mut node = keyed_node("callee");
+        node.url = format!("http://127.0.0.1:{port}/");
+        let _ = post_signed(&node, "aoide/mailPoll", json!({ "node": "callee" }), None);
+
+        let sent = recorded(&seen);
+        assert_eq!(sent.len(), 1, "one call, one post: {sent:?}");
+        assert_eq!(sent[0]["params"]["to"], json!(node.pubkey.clone().unwrap()), "{sent:?}");
+    }
+
     /// **A `down` refusal is a LINK state, and the next pass delivers once the
     /// peer is no longer `down`**: the entry is never parked,
     /// never needs `retry --refused`, and the link's own back-off is what brings
@@ -3381,8 +3398,9 @@ mod tests {
     }
 
     /// The relay proves its charter key, and the poll then goes out signed. This
-    /// box sends no binding of its own on the way (the identity check's body is
-    /// empty), so the relay is never asked to learn a record it has no room for.
+    /// box sends no binding of its own on the way (the identity check's params
+    /// carry only `to`, the relay's key), so the relay is never asked to learn a
+    /// record it has no room for.
     #[test]
     fn a_charter_relay_is_polled_after_it_proves_its_key_and_no_binding_is_sent() {
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
@@ -3399,7 +3417,12 @@ mod tests {
         assert_eq!(outcome.filed, 0, "an empty spool files nothing, and says so as an answer");
         let seen = seen.lock().unwrap();
         assert_eq!(seen.len(), 2, "the identity check, then the poll: {seen:?}");
-        assert!(seen[0].contains("aoide/binding") && seen[0].contains("\"params\":{}"), "{}", seen[0]);
+        let relay_key = box_keypair(&dir.join("relay-box")).info().pubkey_hex;
+        assert!(
+            seen[0].contains("aoide/binding") && seen[0].contains(&format!("\"params\":{{\"to\":\"{relay_key}\"}}")),
+            "{}",
+            seen[0]
+        );
         assert!(seen[1].contains("aoide/mailPoll"), "{}", seen[1]);
         let signature = aoide_storage::wire_auth::HEADER_SIGNATURE.to_ascii_lowercase();
         assert!(seen[1].to_ascii_lowercase().contains(&signature), "the poll is signed: {}", seen[1]);

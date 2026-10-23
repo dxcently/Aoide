@@ -579,6 +579,17 @@ terminal's rights to its remote callers.
   replayed into the method once the config returns. A request whose signature
   does not verify, or naming a node that charter does not carry, still reads
   `-32007`.
+- **Audience (`params.to`).** A verified request whose `params.to` is not this
+  door's own identity key is refused `-32012` whatever its method. A request with no
+  `to` is admitted only for the four old-client methods (`aoide/mailDeposit`,
+  `aoide/mailPoll`, `aoide/binding`, `aoide/charterFetch`), audited `untagged`; for
+  any other method it is refused `-32012` with a line naming the upgrade. The check
+  runs once in `handle_connection`, after verification and before either dispatch
+  path, and its refusals are unsigned. What it stops: a request signed for one door,
+  replayed at another door that trusts the same signer. What it does not stop: a
+  process running as this box's uid can sign as the box, since the key is on this
+  box's disk; and an untagged call to the four methods is not audience-bound until
+  the planned switch (gate slice 10, not built).
 - **Signed answers (relay-proof).** A JSON-RPC POST to `/` whose signature
   verified is answered with `X-Aoide-Answer-Signature`: the identity key signs
   `wire_auth::answer_string` over the request's own signature and nonce, the

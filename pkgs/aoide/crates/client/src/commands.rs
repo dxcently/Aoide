@@ -764,6 +764,36 @@ pub(crate) fn unknown_node(inv: &Invocation, cmd: &str, name: &str, nodes: &[aoi
     teach::unknown_name(inv, cmd, "node", slot, name, &valid, "registered nodes", "aoide node status", Fix::Run("aoide pair".to_string()))
 }
 
+/// Resolve the mesh one outbound signed request acts in — the shared rule
+/// [`sign_headers_for_node`] applies (`node_store::resolve_mesh` over the
+/// record's grants and THE CAPABILITY THE CALL NEEDS: `message` for the mail
+/// methods, `read` for a frame/history/roster read, `spawn` for a spawn), so
+/// every caller's error message is the same taught sentence.
+pub fn request_mesh(node: &aoide_storage::node_store::Node, named: Option<&str>, cap: &str) -> Result<String, String> {
+    aoide_storage::node_store::resolve_mesh(named, &node.grants, &aoide_storage::config::home_mesh(), cap)
+}
+
+/// The identity key a signed call to `node` is addressed to: the record's own
+/// key, trimmed and lowercased. `None` when the record holds no key.
+fn callee_key(node: &aoide_storage::node_store::Node) -> Option<String> {
+    node.pubkey.as_deref().map(|k| k.trim().to_ascii_lowercase()).filter(|k| !k.is_empty())
+}
+
+/// Address a signed JSON-RPC body to its callee: `params.to` becomes the
+/// record's key. Every signed call builds its body through here, so no caller
+/// can sign one that names no callee (`sign_headers_for_node` refuses it). A
+/// record with no key leaves the body as it is.
+pub(crate) fn with_to(node: &aoide_storage::node_store::Node, mut body: Value) -> Value {
+    let Some(key) = callee_key(node) else { return body };
+    if let Some(request) = body.as_object_mut() {
+        let params = request.entry("params").or_insert_with(|| json!({}));
+        if let Some(params) = params.as_object_mut() {
+            params.insert("to".to_string(), Value::String(key));
+        }
+    }
+    body
+}
+
 /// Build the four P-P4 signature headers for one outbound POST to `node`,
 /// or `vec![]` when `node.verified` is `false` — an unpaired/unverified
 /// node keeps today's door-wide-bearer-only path exactly as before this
@@ -828,15 +858,13 @@ pub(crate) fn unknown_node(inv: &Invocation, cmd: &str, name: &str, nodes: &[aoi
 /// unsigned request to a node that has since upgraded to require signed
 /// spawn admission would otherwise fail opaquely on the far end instead of
 /// here, where the real cause is known.
-/// Resolve the mesh one outbound signed request acts in — the shared rule
-/// [`sign_headers_for_node`] applies (`node_store::resolve_mesh` over the
-/// record's grants and THE CAPABILITY THE CALL NEEDS: `message` for the mail
-/// methods, `read` for a frame/history/roster read, `spawn` for a spawn), so
-/// every caller's error message is the same taught sentence.
-pub fn request_mesh(node: &aoide_storage::node_store::Node, named: Option<&str>, cap: &str) -> Result<String, String> {
-    aoide_storage::node_store::resolve_mesh(named, &node.grants, &aoide_storage::config::home_mesh(), cap)
-}
-
+///
+/// The body names its callee: `params.to` must be the record's own identity
+/// key, lowercase hex (`with_to` writes it; a body without it, or with
+/// another key, is refused here, never signed). A far door refuses a request
+/// addressed to another key, so a relay cannot carry it on to a third node
+/// that trusts this caller. A record with no key has nothing to verify the
+/// request under, so nothing is signed.
 pub(crate) fn sign_headers_for_node(
     node: &aoide_storage::node_store::Node,
     body: &str,
@@ -845,6 +873,27 @@ pub(crate) fn sign_headers_for_node(
 ) -> Result<Vec<(String, String)>, String> {
     if !node.verified {
         return Ok(Vec::new());
+    }
+    let Some(key) = callee_key(node) else { return Ok(Vec::new()) };
+    let named = serde_json::from_str::<Value>(body)
+        .ok()
+        .and_then(|request| request.pointer("/params/to").and_then(Value::as_str).map(|to| to.trim().to_ascii_lowercase()));
+    match named {
+        Some(to) if to == key => {}
+        Some(to) => {
+            return Err(format!(
+                "not signed: the request to node `{}` names `params.to` = `{to}`, not the key on file for it (`{key}`); \
+                 a signed call is addressed to the key of the record it is sent to",
+                node.name
+            ))
+        }
+        None => {
+            return Err(format!(
+                "not signed: the request to node `{}` names no `params.to`; a signed call names its callee's key \
+                 (`commands::with_to` writes it)",
+                node.name
+            ))
+        }
     }
     // The mesh is resolved with THE CAPABILITY THE CALL NEEDS (review
     // N2/N3/N4/N12): a mail call asks about `message`, a frame/history/roster
@@ -1320,7 +1369,7 @@ fn handle_node_hub(inv: &Invocation) -> Outcome {
 /// row for the aggregate Outcome's `data.results`.
 fn pull_one_node(node: &aoide_storage::node_store::Node, named: Option<&str>) -> Value {
     let now = aoide_storage::time::now_iso_utc();
-    let body = crate::node::build_graph_summary_request();
+    let body = with_to(node, crate::node::build_graph_summary_request());
     let body_str = serde_json::to_string(&body).unwrap_or_default();
 
     let attempt: Result<aoide_storage::node_store::NodeCacheEntry, String> = (|| {
@@ -1377,7 +1426,7 @@ fn pull_one_node(node: &aoide_storage::node_store::Node, named: Option<&str>) ->
 /// resolved `graph` document (`{nodes, edges}`) — the roster core has no use
 /// for the envelope's `instance` field `pull_one_node` also captures.
 pub fn pull_node_live(node: &aoide_storage::node_store::Node, timeout_secs: u64, named: Option<&str>) -> Result<Value, String> {
-    let body = crate::node::build_graph_summary_request();
+    let body = with_to(node, crate::node::build_graph_summary_request());
     let body_str = serde_json::to_string(&body).unwrap_or_default();
     let bearer = resolve_node_bearer(node)?;
     let extra_headers = sign_headers_for_node(node, &body_str, named, "read")?;
@@ -1424,7 +1473,7 @@ pub fn send_message_to_node(
     named_mesh: Option<&str>,
 ) -> Result<Value, String> {
     let message_id = gen_message_id();
-    let body = crate::wire::build_message_send_body(text, &message_id, Some(context_id), from_session, None);
+    let body = with_to(node, crate::wire::build_message_send_body(text, &message_id, Some(context_id), from_session, None));
     let body_str = serde_json::to_string(&body).unwrap_or_default();
     let bearer = resolve_node_bearer(node)?;
     let extra_headers = sign_headers_for_node(node, &body_str, named_mesh, "message")?;
@@ -1482,7 +1531,7 @@ pub fn task_get_on_node(
     frame_tail: u64,
     named_mesh: Option<&str>,
 ) -> Result<Value, crate::node::FrameReadError> {
-    let wire = crate::node::build_task_get_frame_request(id, frame_tail);
+    let wire = with_to(node, crate::node::build_task_get_frame_request(id, frame_tail));
     let body_str = serde_json::to_string(&wire).unwrap_or_default();
     let plain = |message: String| crate::node::FrameReadError { code: None, message };
     let bearer = resolve_node_bearer(node).map_err(plain)?;
@@ -1537,7 +1586,7 @@ pub fn task_history_on_node(
     tunnel_key: &str,
     named_mesh: Option<&str>,
 ) -> Result<Value, crate::node::FrameReadError> {
-    let wire = crate::node::build_task_get_history_request(id, lines_after);
+    let wire = with_to(node, crate::node::build_task_get_history_request(id, lines_after));
     let body_str = serde_json::to_string(&wire).unwrap_or_default();
     let plain = |message: String| crate::node::FrameReadError { code: None, message };
     let bearer = resolve_node_bearer(node).map_err(plain)?;
@@ -1672,7 +1721,7 @@ pub fn spawn_on_node_via(
     named_mesh: Option<&str>,
 ) -> Result<Value, SpawnNodeError> {
     let message_id = gen_message_id();
-    let body = crate::wire::build_message_send_body(text, &message_id, None, from_session, task);
+    let body = with_to(node, crate::wire::build_message_send_body(text, &message_id, None, from_session, task));
     let body_str = serde_json::to_string(&body).unwrap_or_default();
     let bearer =
         resolve_node_bearer(node).map_err(|e| SpawnNodeError::new("bearer-resolve-failed", e))?;
@@ -6958,8 +7007,9 @@ mod tests {
             let info = aoide_storage::identity::load_or_mint().unwrap().0.info();
             let mut node = fixture_node(None);
             node.verified = true;
-            let body = r#"{"jsonrpc":"2.0","method":"message/send"}"#;
-            let headers = sign_headers_for_node(&node, body, None, "read").unwrap();
+            node.pubkey = Some(info.pubkey_hex.clone());
+            let body = json!({ "jsonrpc": "2.0", "method": "message/send", "params": { "to": info.pubkey_hex } }).to_string();
+            let headers = sign_headers_for_node(&node, &body, None, "read").unwrap();
 
             let get = |name: &str| {
                 headers
@@ -7019,6 +7069,97 @@ mod tests {
         });
     }
 
+    /// A verified record for this instance's own identity, granted what the
+    /// signed call sites ask for, in the home mesh. Must run inside
+    /// [`with_node_state`] (it reads the identity).
+    fn verified_callee() -> aoide_storage::node_store::Node {
+        let info = aoide_storage::identity::load_or_mint().unwrap().0.info();
+        let mut node = fixture_node(None);
+        node.verified = true;
+        node.pubkey = Some(info.pubkey_hex);
+        node.grants = aoide_storage::node_store::grants_in(&aoide_storage::config::default_home_mesh(), &["read", "message", "spawn"]);
+        node
+    }
+
+    #[test]
+    fn sign_headers_for_node_refuses_a_body_with_no_to() {
+        with_node_state("sign-no-to", || {
+            let node = verified_callee();
+            let untagged = r#"{"jsonrpc":"2.0","id":1,"method":"tasks/get","params":{"id":"x"}}"#;
+            let err = sign_headers_for_node(&node, untagged, None, "read").expect_err("an unaddressed body is never signed");
+            assert!(err.contains("params.to"), "the refusal names the field the body lacks: {err}");
+        });
+    }
+
+    #[test]
+    fn sign_headers_for_node_refuses_a_body_addressed_to_another_key() {
+        with_node_state("sign-other-to", || {
+            let node = verified_callee();
+            let elsewhere = aoide_storage::identity::mint_ephemeral().unwrap().info().pubkey_hex;
+            let body = json!({ "jsonrpc": "2.0", "id": 1, "method": "tasks/get", "params": { "id": "x", "to": elsewhere } }).to_string();
+            let err = sign_headers_for_node(&node, &body, None, "read").expect_err("a body for another callee is never signed");
+            assert!(err.contains("params.to"), "{err}");
+        });
+    }
+
+    #[test]
+    fn sign_headers_for_node_signs_a_body_addressed_to_the_callee_key() {
+        with_node_state("sign-to-ok", || {
+            let node = verified_callee();
+            let body = json!({ "jsonrpc": "2.0", "id": 1, "method": "tasks/get", "params": { "id": "x", "to": node.pubkey } }).to_string();
+            let headers = sign_headers_for_node(&node, &body, None, "read").unwrap();
+            assert!(headers.iter().any(|(k, _)| k == aoide_storage::wire_auth::HEADER_SIGNATURE), "{headers:?}");
+        });
+    }
+
+    #[test]
+    fn a_verified_record_with_no_key_signs_nothing() {
+        with_node_state("sign-keyless", || {
+            let mut node = fixture_node(None);
+            node.verified = true;
+            let body = json!({ "jsonrpc": "2.0", "id": 1, "method": "tasks/get", "params": { "id": "x" } }).to_string();
+            let headers = sign_headers_for_node(&node, &body, None, "read").unwrap();
+            assert!(headers.is_empty(), "no key on file, so nothing is signed: {headers:?}");
+        });
+    }
+
+    /// Every signed call site posts a body addressed to the callee's key. The
+    /// capturing shim keeps what each one sends, so a site that forgets `to`
+    /// is caught here, not only by the far door.
+    #[cfg(unix)]
+    #[test]
+    fn every_signed_call_site_addresses_its_body_to_the_callee_key() {
+        with_node_state("sign-call-sites", || {
+            let node = verified_callee();
+            let key = node.pubkey.clone().unwrap();
+            let capture = std::env::temp_dir().join(format!("aoide-client-to-{}", std::process::id()));
+            let _shim = install_capturing_curl(
+                "call-sites",
+                &capture,
+                r#"{"jsonrpc":"2.0","id":1,"error":{"code":-32601,"message":"method not found"}}"#,
+            );
+            let posted = |label: &str| {
+                let raw = std::fs::read_to_string(&capture).unwrap_or_default();
+                let _ = std::fs::remove_file(&capture);
+                let sent: serde_json::Value = serde_json::from_str(&raw)
+                    .unwrap_or_else(|e| panic!("{label} posted nothing signed ({e}): {raw:?}"));
+                assert_eq!(sent["params"]["to"], key, "{label} must address its body to the callee's key: {sent}");
+            };
+            let _ = pull_one_node(&node, None);
+            posted("pull_one_node");
+            let _ = pull_node_live(&node, 2, None);
+            posted("pull_node_live");
+            let _ = send_message_to_node(&node, "hi", "ctx-1", None, None);
+            posted("send_message_to_node");
+            let _ = task_get_on_node(&node, "sess-1", 4, None);
+            posted("task_get_on_node");
+            let _ = task_history_on_node(&node, "sess-1", 4, &node.name, None);
+            posted("task_history_on_node");
+            let _ = spawn_on_node_via(&node, "hi", None, None, None, None);
+            posted("spawn_on_node_via");
+        });
+    }
+
     #[test]
     fn sign_headers_for_node_sends_this_instances_own_self_name_not_the_node_nickname() {
         // Live yomi<->sakaki defect, 2026-08-26: e78999f fixed the pairing
@@ -7036,7 +7177,9 @@ mod tests {
             let mut node = fixture_node(None);
             node.name = "this-sides-nickname-for-the-approver".to_string();
             node.verified = true;
-            let headers = sign_headers_for_node(&node, "{}", None, "read").unwrap();
+            node.pubkey = Some(aoide_storage::identity::load_or_mint().unwrap().0.info().pubkey_hex);
+            let body = with_to(&node, json!({ "jsonrpc": "2.0", "id": 1, "method": "tasks/get", "params": {} }));
+            let headers = sign_headers_for_node(&node, &body.to_string(), None, "read").unwrap();
             let sent = headers
                 .iter()
                 .find(|(k, _)| k == aoide_storage::wire_auth::HEADER_NODE)
@@ -7191,7 +7334,8 @@ mod tests {
         with_node_state("spawn-signs", || {
             let mut node = fixture_node(None);
             node.verified = true;
-            let body = crate::wire::build_message_send_body("do the thing", &gen_message_id(), None, None, None);
+            node.pubkey = Some(aoide_storage::identity::load_or_mint().unwrap().0.info().pubkey_hex);
+            let body = with_to(&node, crate::wire::build_message_send_body("do the thing", &gen_message_id(), None, None, None));
             assert!(body["params"]["message"].get("contextId").is_none(), "spawn-shaped body carries no contextId");
             let body_str = serde_json::to_string(&body).unwrap();
             let headers = sign_headers_for_node(&node, &body_str, None, "read").unwrap();
@@ -7892,10 +8036,12 @@ mod tests {
             // node's empty-headers shortcut is untouched by via either way.
             assert_eq!(sign_headers_for_node(&node, "{}", None, "read").unwrap(), Vec::<(String, String)>::new(), "unverified nodes are unaffected, via or not");
             node.verified = true;
-            let headers_with_via = sign_headers_for_node(&node, "{}", None, "read").unwrap();
+            node.pubkey = Some(aoide_storage::identity::load_or_mint().unwrap().0.info().pubkey_hex);
+            let addressed = with_to(&node, json!({ "jsonrpc": "2.0", "id": 1, "method": "tasks/get", "params": {} })).to_string();
+            let headers_with_via = sign_headers_for_node(&node, &addressed, None, "read").unwrap();
             let mut node_no_via = node.clone();
             node_no_via.via = None;
-            let headers_without_via = sign_headers_for_node(&node_no_via, "{}", None, "read").unwrap();
+            let headers_without_via = sign_headers_for_node(&node_no_via, &addressed, None, "read").unwrap();
             // Nonce/timestamp differ call to call (fresh each time) — but
             // the NODE identity header (never derived from via) must agree.
             let node_header_idx = aoide_storage::wire_auth::HEADER_NODE;
@@ -8165,6 +8311,19 @@ mod tests {
     /// caller's write into an EPIPE (`crates/AGENTS.md`).
     #[cfg(unix)]
     fn install_fake_curl(tag: &str, script: &str) -> FakeCurl {
+        install_shim(tag, &format!("#!/bin/sh\ncat > /dev/null\n{script}"))
+    }
+
+    /// [`install_fake_curl`] for a shim that keeps the body it is handed: it
+    /// writes stdin to `capture`, then answers `reply` with status 200 — the
+    /// caller reads that as `body\n%{http_code}`.
+    #[cfg(unix)]
+    fn install_capturing_curl(tag: &str, capture: &std::path::Path, reply: &str) -> FakeCurl {
+        install_shim(tag, &format!("#!/bin/sh\ncat > '{}'\nprintf '%s\\n200' '{reply}'\n", capture.display()))
+    }
+
+    #[cfg(unix)]
+    fn install_shim(tag: &str, shim_text: &str) -> FakeCurl {
         assert!(
             matches!(crate::env_lock().try_lock(), Err(std::sync::TryLockError::WouldBlock)),
             "install_fake_curl needs env_lock held by its caller"
@@ -8176,7 +8335,7 @@ mod tests {
         ));
         std::fs::create_dir_all(&shim_dir).unwrap();
         let shim = shim_dir.join("curl");
-        std::fs::write(&shim, format!("#!/bin/sh\ncat > /dev/null\n{script}")).unwrap();
+        std::fs::write(&shim, shim_text).unwrap();
         {
             use std::os::unix::fs::PermissionsExt;
             std::fs::set_permissions(&shim, std::fs::Permissions::from_mode(0o755)).unwrap();

@@ -5749,6 +5749,64 @@ fn attribution_drift_detail(claimed: &str, resolved: &str) -> Option<String> {
     })
 }
 
+/// The signed methods an old client may still call without `params.to`: the
+/// two mail methods, the binding read and the LAN join's charter read. Any
+/// other signed method needs `to`, and a method added later is closed until
+/// it is listed here.
+const UNTAGGED_METHODS: &[&str] = &["aoide/mailDeposit", "aoide/mailPoll", "aoide/binding", "aoide/charterFetch"];
+
+/// What the audience step decides for one VERIFIED request. `params.to` is
+/// the callee's identity key (lowercase hex), so a request signed for another
+/// door fails here even though this door trusts its signer.
+#[derive(Debug, PartialEq, Eq)]
+enum Audience {
+    /// Dispatch it. Either `to` names this door's key, or the body is not a
+    /// call at all: an array (a batch) or a body with no method reads no
+    /// method, so dispatch answers it `-32600`/`-32700` exactly as before.
+    Admit,
+    /// No `to` on an allow-listed method: an old client, admitted and audited.
+    Untagged { method: String },
+    /// Refused, answered `-32012` with this message.
+    Refuse(String),
+}
+
+fn audience(body: &[u8], own_key: Option<&str>) -> Audience {
+    let Ok(request) = serde_json::from_slice::<Value>(body) else { return Audience::Admit };
+    let Some(method) = request.get("method").and_then(Value::as_str).filter(|m| !m.is_empty()) else {
+        return Audience::Admit;
+    };
+    match request.get("params").and_then(|p| p.get("to")) {
+        Some(to) => {
+            let named = to.as_str().map(|t| t.trim().to_ascii_lowercase());
+            if named.is_some() && named.as_deref() == own_key {
+                Audience::Admit
+            } else {
+                Audience::Refuse(
+                    "wrong-audience: `params.to` is not this door's identity key, so this request was signed \
+                     for another door; address it to the key of the node it is sent to"
+                        .to_string(),
+                )
+            }
+        }
+        None if UNTAGGED_METHODS.contains(&method) => Audience::Untagged { method: method.to_string() },
+        None => Audience::Refuse(format!(
+            "`{method}` needs `params.to`, the callee's identity key, and this request has none: this is a client \
+             that predates `to`, so upgrade aoide on the caller. Without `to` only {} are open",
+            UNTAGGED_METHODS.join(", ")
+        )),
+    }
+}
+
+/// This box's own identity key, read WITHOUT minting one: answering a request
+/// never creates the identity (the answer path's own rule, `answer_headers`).
+/// `None` when no key is on disk, which makes every `to` wrong.
+fn own_identity_key() -> Option<String> {
+    aoide_storage::identity::load_existing()
+        .ok()
+        .flatten()
+        .map(|kp| kp.info().pubkey_hex.trim().to_ascii_lowercase())
+}
+
 /// Route one parsed request to (HTTP status, response body, audit-log
 /// command label). `audit_log`/`spawn_agent`/`origin` are only consulted by a
 /// POST `/` whose body parses as `message/send`; `node_name` (plus the
@@ -6456,6 +6514,36 @@ fn handle_connection(
             return write_http_response(&mut writer, 200, &body);
         }
     };
+    // The audience step, once, before either dispatch path. A verified request
+    // whose `params.to` is not this door's key was signed for another door: it
+    // is refused unsigned, because this door was not the one it was addressed to.
+    if verified.is_some() {
+        match audience(&req.body, own_identity_key().as_deref()) {
+            Audience::Admit => {}
+            Audience::Untagged { method } => {
+                let _ = audit(
+                    audit_log,
+                    Door::A2a,
+                    EventClass::Audit,
+                    "a2a.signed-request",
+                    "untagged",
+                    &listener.audit_detail_with(&format!("{method} sent without params.to"), origin),
+                );
+            }
+            Audience::Refuse(message) => {
+                let body = serde_json::to_vec(&jsonrpc_error_value(-32012, message.clone())).unwrap_or_default();
+                let _ = audit(
+                    audit_log,
+                    Door::A2a,
+                    EventClass::Audit,
+                    "a2a.signed-request",
+                    "unauthorized",
+                    &listener.audit_detail_with(&message, origin),
+                );
+                return write_http_response(&mut writer, 200, &body);
+            }
+        }
+    }
     let signed_caller = verified
         .as_ref()
         .map(|(name, key, mesh)| SignedCaller { name: name.as_str(), key: key.as_str(), mesh: mesh.as_deref() });
@@ -18021,7 +18109,8 @@ mod tests {
                 .map(|d| d.as_secs() as i64)
                 .unwrap_or(0)
         };
-        let body = br#"{"jsonrpc":"2.0","id":1,"method":"aoide/mailPoll","params":{"node":"receiverbox"}}"#;
+        let body = json!({ "jsonrpc": "2.0", "id": 1, "method": "aoide/mailPoll", "params": { "node": "receiverbox", "to": kp.info().pubkey_hex } })
+            .to_string();
         let poll = |nonce: &str| {
             send_raw(
                 port,
@@ -18029,7 +18118,7 @@ mod tests {
                     "aoide.necoconeco.net",
                     "POST",
                     "/",
-                    body,
+                    body.as_bytes(),
                     Some((&kp, "receiverbox", now(), nonce)),
                     Some("home"),
                 ),
@@ -18615,6 +18704,109 @@ mod tests {
         adapter_cleanup(&root, saved);
     }
 
+    /// One signed `POST /` from `box-b` to a live door, answered as JSON.
+    fn signed_post(port: u16, kp: &aoide_storage::identity::Keypair, body: &[u8]) -> Value {
+        let nonce = unique_nonce("aud");
+        let raw = send_raw(port, &raw_request("127.0.0.1", "POST", "/", body, Some((kp, "box-b", epoch_now(), &nonce)), None));
+        serde_json::from_str(raw.split("\r\n\r\n").nth(1).unwrap()).unwrap()
+    }
+
+    #[test]
+    fn a_signed_request_for_another_door_is_refused_here_though_this_door_trusts_the_signer() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (root, saved) = adapter_root("audience-wrong-to");
+        let audit = root.join("log");
+        let mail_port = free_loopback_port();
+        raise_mail_adapter(mail_port, &audit);
+        let a2a_port = free_loopback_port();
+        raise_a2a_door(a2a_port, &audit);
+
+        // The signer is this process's own identity, registered as a verified
+        // node: this door trusts it. `to` names some OTHER door's key, the J of
+        // the replay, so the frame is refused at both doors.
+        let kp = setup_signed_node_with_allows("box-b", &["message"]);
+        let j = aoide_storage::identity::mint_ephemeral().unwrap().info().pubkey_hex;
+        let body = json!({ "jsonrpc": "2.0", "id": 1, "method": "aoide/mailPoll", "params": { "node": "box-b", "to": j } });
+        for port in [mail_port, a2a_port] {
+            let answer = signed_post(port, &kp, body.to_string().as_bytes());
+            assert_eq!(answer["error"]["code"], -32012, "wrong-audience at port {port}: {answer}");
+            assert!(answer["error"]["message"].as_str().unwrap_or_default().contains("wrong-audience"), "{answer}");
+        }
+
+        adapter_cleanup(&root, saved);
+    }
+
+    #[test]
+    fn an_untagged_call_to_a_method_off_the_allow_list_is_refused_with_the_upgrade_line() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (root, saved) = adapter_root("audience-untagged-refused");
+        let audit = root.join("log");
+        let port = free_loopback_port();
+        raise_a2a_door(port, &audit);
+        let kp = setup_signed_node("box-b");
+
+        let bodies = [
+            json!({ "jsonrpc": "2.0", "id": 1, "method": "aoide/graphSummary", "params": {} }),
+            json!({ "jsonrpc": "2.0", "id": 1, "method": "tasks/get", "params": { "id": "no-such-task" } }),
+            json!({ "jsonrpc": "2.0", "id": 1, "method": "message/send", "params": { "message": {
+                "role": "user", "messageId": "m-spawn", "parts": [{ "kind": "text", "text": "hi" }] } } }),
+            json!({ "jsonrpc": "2.0", "id": 1, "method": "message/send", "params": { "message": {
+                "role": "user", "messageId": "m-inject", "contextId": "ctx-1", "parts": [{ "kind": "text", "text": "hi" }] } } }),
+        ];
+        for body in bodies {
+            let answer = signed_post(port, &kp, body.to_string().as_bytes());
+            assert_eq!(answer["error"]["code"], -32012, "{body} -> {answer}");
+            assert!(answer["error"]["message"].as_str().unwrap_or_default().contains("upgrade"), "{answer}");
+        }
+
+        adapter_cleanup(&root, saved);
+    }
+
+    #[test]
+    fn an_untagged_mail_poll_is_dispatched_and_audited_as_untagged() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (root, saved) = adapter_root("audience-untagged-poll");
+        let audit = root.join("log");
+        let port = free_loopback_port();
+        raise_mail_adapter(port, &audit);
+        let kp = setup_signed_node_with_allows("box-b", &["message"]);
+
+        let answer = signed_post(port, &kp, br#"{"jsonrpc":"2.0","id":1,"method":"aoide/mailPoll","params":{"node":"box-b"}}"#);
+        assert!(answer.get("error").is_none(), "an old client's mailPoll is still admitted: {answer}");
+        let log = std::fs::read_to_string(&audit).unwrap_or_default();
+        assert!(
+            log.lines().any(|l| l.contains(r#""status":"untagged""#) && l.contains("aoide/mailPoll")),
+            "the untagged call leaves its own audit line: {log}"
+        );
+
+        adapter_cleanup(&root, saved);
+    }
+
+    #[test]
+    fn a_call_addressed_to_this_door_is_not_refused_by_the_audience_step() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (root, saved) = adapter_root("audience-tagged-ok");
+        let audit = root.join("log");
+        let port = free_loopback_port();
+        raise_a2a_door(port, &audit);
+        let kp = setup_signed_node_with_allows("box-b", &["message", "read"]);
+        let own = kp.info().pubkey_hex;
+
+        let bodies = [
+            json!({ "jsonrpc": "2.0", "id": 1, "method": "aoide/graphSummary", "params": { "to": own } }),
+            json!({ "jsonrpc": "2.0", "id": 1, "method": "tasks/get", "params": { "id": "no-such-task", "to": own } }),
+            json!({ "jsonrpc": "2.0", "id": 1, "method": "message/send", "params": { "to": own, "message": {
+                "role": "user", "messageId": "m-tagged", "parts": [{ "kind": "text", "text": "hi" }] } } }),
+            json!({ "jsonrpc": "2.0", "id": 1, "method": "aoide/mailPoll", "params": { "node": "box-b", "to": own } }),
+        ];
+        for body in bodies {
+            let answer = signed_post(port, &kp, body.to_string().as_bytes());
+            assert_ne!(answer["error"]["code"], -32012, "a call to this door is admitted: {body} -> {answer}");
+        }
+
+        adapter_cleanup(&root, saved);
+    }
+
     /// The A2A door's own per-connection handler on a background thread: the
     /// same `handle_connection` `serve` runs for each accepted socket. The
     /// listener is bound before the thread starts, so a connect cannot race it.
@@ -18688,8 +18880,8 @@ mod tests {
         raise_a2a_door(port, Path::new("/dev/null"));
 
         let kp = setup_signed_node_with_allows("box-b", &["message"]);
-        let body = br#"{"jsonrpc":"2.0","id":1,"method":"aoide/no-such-method"}"#;
-        let request = raw_request("127.0.0.1", "POST", "/", body, Some((&kp, "box-b", epoch_now(), &unique_nonce("a2a-answer-signed"))), None);
+        let body = json!({ "jsonrpc": "2.0", "id": 1, "method": "aoide/no-such-method", "params": { "to": kp.info().pubkey_hex } }).to_string();
+        let request = raw_request("127.0.0.1", "POST", "/", body.as_bytes(), Some((&kp, "box-b", epoch_now(), &unique_nonce("a2a-answer-signed"))), None);
         let answer = send_raw(port, &request);
 
         let answer_body: Value = serde_json::from_str(answer.split_once("\r\n\r\n").unwrap().1).unwrap();

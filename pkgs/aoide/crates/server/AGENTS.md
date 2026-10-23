@@ -380,6 +380,19 @@ a2a spawn probe needs `/bin/sh` + `printf`'s byte-exact output.
   through the daemon process (they're separate processes) — don't thread
   a socket call through here to "unify" the two writers; the cap-truncate
   race that creates is already accepted (module doc, CONTRACTS.md §6).
+- **The audience step (`params.to`, CONTRACTS.md §6 step 8) runs once in
+  `handle_connection`, right after `verify_signed_request` and before either
+  dispatch path.** A `to` that is present must equal this door's own identity
+  key, for every method: `own_identity_key` reads it with `identity::load_existing`
+  (trimmed, lowercased, never minted), so a door with no key refuses every `to`.
+  A MISSING `to` is admitted only for `UNTAGGED_METHODS` (the four old-client
+  methods), audited `untagged`; any other signed method without `to` is refused
+  `-32012` with the upgrade line. The allow-list is closed: a new signed method is
+  refused until someone lists it there on purpose. Every `-32012` is written
+  UNSIGNED, because the door was not the one the request was addressed to. A batch
+  array has no `method`, so `audience` admits it and dispatch's empty-method arm
+  answers `-32600`: nothing in a batch reaches a method. Keep the check above the
+  streaming/one-shot split, or the two paths can disagree about who may call.
 - **`message_send`'s Spawn arm gates on `spawn_admitted`, which requires a
   resolved, paired, spawn-allowed node identified via its OWN PER-REQUEST
   SIGNATURE — never a bare token, and never the address rung (P-P3

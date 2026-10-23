@@ -49,7 +49,11 @@
 - **`sign_headers_for_node` (P-P4) is the ONE production call site that
   ever builds the `X-Aoide-*` signature headers — every real node-POST
   function threads `post_json`'s `extra_headers` through it, never
-  hand-rolls a header set inline.** It returns `vec![]` for an
+  hand-rolls a header set inline.** It refuses (an `Err`) a body whose `params.to`
+  is missing or names another key than the record's `pubkey`: every signed body is
+  built through `commands::with_to`, which writes `to` from that record, so a new
+  call site that skips it fails loudly instead of signing a body the far end would
+  refuse. A keyless record signs nothing. It returns `vec![]` for an
   unverified/unpaired node, never a partial or malformed header set —
   `verify_signed_request` (`aoide-server`) refuses a request carrying SOME
   but not all four headers, so a future edit that adds a header
