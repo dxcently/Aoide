@@ -648,4 +648,18 @@ mod tests {
         }
         assert!(text.contains(r"\u{202e}") && text.contains(r"\u{9b}"), "the escapes are written: {text}");
     }
+
+    /// A typed `\u{202e}` and a real U+202E in one message reach the log as
+    /// two different escapes, each once, and no raw bidi character reaches it.
+    #[test]
+    fn a_typed_escape_and_a_bidi_char_in_one_message_reach_the_log_apart() {
+        let log = tmp_log("typed-and-char");
+        let message = format!("{} then {}", r"\u{202e}", '\u{202e}');
+        append_audit(&log, &record_with_message(message)).unwrap();
+        let text = std::fs::read_to_string(&log).unwrap();
+        assert!(!text.contains('\u{202e}'), "raw U+202E in the log: {text}");
+        let lines = read_lines(&log);
+        assert_eq!(lines[0]["message"], r"\\u{202e} then \u{202e}", "{text}");
+        std::fs::remove_dir_all(log.parent().unwrap()).ok();
+    }
 }

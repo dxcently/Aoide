@@ -56,20 +56,39 @@ pub fn is_unsafe(c: char) -> bool {
 /// The text an audit writer stores for a character no terminal may be handed.
 /// Only what a JSON writer leaves raw is spelled here: DEL, the C1 controls,
 /// `Cf` and the invisible set. A C0 control is already a JSON escape (`\u001b`,
-/// `\n`) and stays one, so a decoded value keeps the caller's text for it. The
-/// spelling is ASCII text, so the JSON writer escapes its backslash too: the
-/// raw line reads `\\u{202e}`, and a decoder hands back the visible `\u{202e}`,
-/// never the character itself.
+/// `\n`) and stays one, so a decoded value keeps the caller's text for it.
+///
+/// A spelled character reads `\u{hex}`. A literal backslash is doubled, two out
+/// for one in, exactly when the character after it in the output is a backslash
+/// or `u`. A spelled character starts with a backslash, so a backslash before
+/// one is doubled too, and every other backslash is written as it was. The
+/// typed text `\u{202e}` reads `\\u{202e}` and U+202E reads `\u{202e}`, so
+/// distinct inputs never share an output. The mapping is not idempotent: escape
+/// each value exactly once: escaping an escape again doubles its backslash.
 pub fn escape_for_log(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
-    for c in text.chars() {
-        if u32::from(c) >= 0x7f && is_unsafe(c) {
+    let mut chars = text.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '\\' {
+            let doubled = match chars.peek() {
+                Some('\\' | 'u') => true,
+                Some(&next) => spelled(next),
+                None => false,
+            };
+            out.push_str(if doubled { r"\\" } else { r"\" });
+        } else if spelled(c) {
             out.extend(c.escape_unicode());
         } else {
             out.push(c);
         }
     }
     out
+}
+
+/// What [`escape_for_log`] spells: an [`is_unsafe`] character at DEL or above.
+/// A C0 control stays raw, so the backslash rule reads it as raw text too.
+fn spelled(c: char) -> bool {
+    u32::from(c) >= 0x7f && is_unsafe(c)
 }
 
 /// [`escape_for_log`] over every string a JSON value holds, for a writer that
@@ -232,5 +251,54 @@ mod tests {
         let out = clean_line(&"é".repeat(LINE_MAX + 50));
         assert_eq!(out.chars().count(), LINE_MAX);
         assert!(out.ends_with('…'));
+    }
+
+    #[test]
+    fn a_typed_escape_and_the_character_it_names_escape_apart() {
+        assert_eq!(escape_for_log(r"\u{202e}"), r"\\u{202e}");
+        assert_eq!(escape_for_log("\u{202e}"), r"\u{202e}");
+    }
+
+    #[test]
+    fn a_backslash_before_an_escaped_character_is_doubled() {
+        assert_eq!(escape_for_log("\\\u{202e}"), r"\\\u{202e}");
+        assert_eq!(escape_for_log(r"\u{202e}"), r"\\u{202e}");
+    }
+
+    #[test]
+    fn a_backslash_before_a_backslash_is_doubled() {
+        assert_eq!(escape_for_log(r"\\"), r"\\\");
+        assert_eq!(escape_for_log(r"\"), r"\");
+    }
+
+    #[test]
+    fn other_backslashes_are_written_as_they_were() {
+        assert_eq!(escape_for_log(r"a\nb"), r"a\nb");
+        assert_eq!(escape_for_log(r"C:\Users\x"), r"C:\Users\x");
+    }
+
+    /// Every string of up to three tokens escapes to a text no other string
+    /// escapes to. The set holds a typed escape and the character it names.
+    #[test]
+    fn escape_for_log_is_one_to_one_over_short_strings() {
+        let tokens = ["\\", "u", "\\u{202e}", "\u{202e}", "\u{1b}", "a"];
+        let mut strings = vec![String::new()];
+        let mut level = vec![String::new()];
+        for _ in 0..3 {
+            level = level
+                .iter()
+                .flat_map(|s| tokens.iter().map(move |t| format!("{s}{t}")))
+                .collect();
+            strings.extend(level.iter().cloned());
+        }
+        let mut owner = std::collections::HashMap::new();
+        for s in &strings {
+            let out = escape_for_log(s);
+            let earlier = owner.insert(out.clone(), s);
+            assert!(
+                earlier.is_none(),
+                "{earlier:?} and {s:?} both escape to {out:?}"
+            );
+        }
     }
 }

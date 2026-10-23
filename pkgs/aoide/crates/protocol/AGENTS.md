@@ -129,8 +129,11 @@
 - **`audit::append_audit` is the one writer of the shared audit log, and it
   escapes every string field.** `untrusted::escape_for_log` spells DEL, C1,
   `Cf` and the invisible set as `\u{hex}` before serde_json would write them
-  raw; C0 stays serde's own escape. A second writer of the same log calls
-  `escape_for_log_value` first, as `aoide-secrets`' `append_own_log` does.
+  raw; C0 stays serde's own escape. A literal backslash is doubled when the
+  next output character is a backslash or `u`, so typed text never reads as a
+  spelled character. Callers pass raw text, and each value is escaped exactly
+  once: `escape_for_log` is not idempotent. A second writer of the same log
+  calls `escape_for_log_value` first, as `aoide-secrets`' `append_own_log` does.
 - **`feed`'s identity question has ONE authority, and it is crate-visible
   for that reason.** `path_identity` returns one opaque, comparable
   `PathIdentity` (`(dev, ino)` on Unix, the native 128-bit id on Windows) and
