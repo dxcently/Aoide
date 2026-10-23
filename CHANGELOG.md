@@ -36,6 +36,11 @@
   Until the state settles, `strillix` refuses every verb except `migrate`,
   help and version. Rice state held by both roots, or across homes, is
   refused: nothing moves, and the verb exits nonzero.
+  The move also rewrites the names and paths the state files store: `song`
+  becomes `rice`, `stagingSong` becomes `stagingRice`, a history entry's `take`,
+  `livery` and `cover` become `entry`, `theme` and `wallpaper`, and each path
+  that moved is rewritten to where its file now sits. `declared/songbook/`
+  becomes `declared/rices/`, and `rices-aside/` is left as it was.
 
 ### A host's theme value outranks only that value
 
