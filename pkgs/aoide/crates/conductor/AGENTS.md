@@ -214,15 +214,21 @@
   `approve_with`, in the child's own process); and the worker's copy when a
   panic leaves the closure before its wipe.
 - An ask's `reason`, `argv0` and `originLine` (from `secrets pending
-  --json`) are the requester's claims. `reason` and `originLine` are cleaned
-  with `clean_line` when the row is read. `argv0` is stripped of its unsafe
-  characters and not clipped, so the popup wraps the whole program (the broker
-  bounds it at 4096 bytes). The review row and the TOTP popup draw the same
-  claim lines (`SecretAskRow::claim_lines`), labelled unverified. The popup
-  adds the peer uid and puts the secret and consumer on the line directly
-  above `totp:`. `approve` draws its own context before its prompt, and the
-  popup shows part of it. The conductor does not render the origin itself;
-  the secrets crate does, once, as `originLine`.
+  --json`) are the requester's claims, labelled unverified by
+  `SecretAskRow::origin_claim`, `reason_claim` and `program_claim`.
+  `originLine` is cleaned with `clean_line`. `reason` and `argv0` are only
+  stripped of unsafe characters, so the popup can wrap them whole; the
+  broker bounds each at 4096 bytes. The review row clips each claim line to
+  its width. The TOTP popup wraps its claims at spaces into rows of its
+  inside width, and draws the fixed lines first: the origin, the peer uid,
+  and the note that the code approves the ORIGINAL parked request. Then the
+  reason, then the program. The secret and consumer stay on the line
+  directly above `totp:`. On a terminal too short for every claim row, the
+  popup shows the rows that fit; its last visible row says how many rows are
+  not shown and names `aoide secrets approve <id>`, which prints the whole
+  ask. `approve` draws its own context before its prompt. The conductor does
+  not render the origin itself; the secrets crate does, once, as
+  `originLine`.
 - While a pairing leg is in flight, no node write is advertised or dispatched:
   the leg's commit writes `state/nodes.json` from its own thread, so a
   `node allow`/`node remove` from the UI thread at the same time is a lost

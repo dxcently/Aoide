@@ -587,10 +587,11 @@ fn a_second_connection_is_accepted_and_served_while_the_first_sits_parked() {
 /// integration-test level (unit tests already cover it inside the crate)
 /// — cheap, and this file is the only integration-test binary that could
 /// plausibly also want to exercise it against a real `secrets add` flow
-/// later. Does not touch the shared crate-internal `env_lock` (a separate
-/// OS process from the lib's own unit tests, so no race is possible).
+/// later. Takes the env lock the other tests here take: they run as threads of
+/// this one process, so one test's `set_var` can race another's env read.
 #[test]
 fn secrets_home_resolves_through_the_env_override() {
+    let _guard = audit_env_lock().lock().unwrap_or_else(|e| e.into_inner());
     let dir = short_tmp("home-override");
     std::env::set_var("AOIDE_SECRETS_HOME", &dir);
     assert_eq!(home::secrets_home(), dir);

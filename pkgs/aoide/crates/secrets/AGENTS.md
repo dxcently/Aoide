@@ -550,8 +550,10 @@
   (`UidSlots`, keyed by the uid `SO_PEERCRED` reads; a connection whose uid
   cannot be read shares one bucket). At `PER_UID_CONNECTIONS` (16; 8 under
   test) that uid is refused with the same shape of line, and no other uid is
-  affected. `READ_TIMEOUT` (10 s; 1 s under test) bounds silence between
-  bytes, and `WRITE_TIMEOUT` (10 s; 1 s under test) bounds one write. A read
+  affected. An unidentified connection refused at its bucket's cap is told its
+  peer uid could not be read. `READ_TIMEOUT` (10 s; 1 s under test) bounds
+  silence between bytes, and `WRITE_TIMEOUT` (10 s; 1 s under test) is one
+  budget for a whole reply, however many writes it takes. A read
   that times out closes the connection with no reply. `REQUEST_DEADLINE`
   (10 s; 1 s under test) bounds a whole request line: it starts at the line's
   first byte, blank lines do not reset it, and no read may run past it, so a
@@ -566,12 +568,18 @@
     the 128, so it takes 8 uids to fill them all.
   - 10 s read timeout: a client silent for more than 10 s is dropped, and it
     holds its slot for that long first.
-  - 10 s write timeout: a client that stops reading its reply is dropped
-    after 10 s, and the broker thread waits that long for it.
+  - 10 s write budget per reply: the whole reply, however many write calls
+    it takes, must be taken within 10 s (`write_json_line` spends one budget
+    across its loop, each call bounded by what is left). A reader that takes
+    it slower is dropped at the budget, so the broker thread waits at most
+    10 s for each reply. A pending reply at the default park cap carries up
+    to about 256 KiB of reason and argv0 (32 parks at 4 KiB each), so it
+    needs a reader taking about 26 KiB a second.
   - 10 s request deadline: a request line not complete within 10 s of its
-    first byte is dropped. A client that keeps sending complete requests
-    keeps its connection for as long as it sends; only the per-uid cap bounds
-    how many such connections one uid holds.
+    first byte is dropped. There is no connection lifetime cap: a client that
+    keeps sending complete requests keeps its connection for as long as it
+    sends, and only the per-uid cap (16) bounds how many such connections one
+    uid holds.
   - 250 ms hang-up probe: one `poll(2)` per parked ask every 250 ms, which is
     also the detection latency. A client that only half-closes its write side
     is not treated as gone, so its park stays until the timer. Windows has no
@@ -579,7 +587,10 @@
   - `AOIDE_SECRETS_PARK_CAP` (32 by default) bounds parked asks. A parked ask
     holds one of the 128 connection slots, so at most 32 of them are parked.
     The cap reserves nothing: parked and unparked connections share all 128,
-    so eight uids holding 16 idle connections each fill it.
+    so eight uids holding 16 idle connections each fill all 128. The cap's own
+    cost: two uids with 16 parked resolves each fill the default 32, and every
+    other park is refused. With `AOIDE_SECRETS_PARK_CAP` at 16 or below, one
+    uid fills it alone.
   A change to any number states its cost in the same commit.
 - **`resolve_gate` returns a `GateOutcome` (`Granted`/`Denied`/
   `NeedsTotp`), not a bare `Result` (P-N2 — replaced the old
@@ -1291,7 +1302,8 @@
   Part 1, IN THIS crate, not `aoide-conduct`/`strillix`** — `watch.rs` (one of
   the seven I/O modules, invariant above) tail-follows the SAME mirrored
   log P-N3 writes to and narrates its five events, plus prompts inline for
-  a parked ask when stdin is a terminal. This does NOT contradict the P-N3
+  a parked ask when stdin is a terminal, and takes no code (ruling 98).
+  This does NOT contradict the P-N3
   note above ("never a new edge pointing the other way"): `watch` adds NO
   new dependency edge — it lives inside `aoide-secrets` itself and reaches
   `client::pending`/`approve`/`dismiss` the same way `commands.rs` already
@@ -1316,7 +1328,9 @@
   socket (`/run/aoide-secrets/events.jsonl` by default, env override
   `AOIDE_SECRETS_EVENTS`), inside the SAME `RuntimeDirectory` the socket
   itself already lives in, so it survives `ProtectHome=true` the same way
-  the socket does. `watch::parse_notify_line` now parses THIS feed's bare
+  the socket does. Every string in the feed is escaped first, as the audit
+  logs' are, so the feed never carries a raw unsafe character.
+  `watch::parse_notify_line` now parses THIS feed's bare
   `{"event": "<kind>", ...}` lines directly (no `AuditRecord` wrapper, no
   `message`-as-JSON-string indirection — that shape only ever existed on
   the mirrored-log side) and takes its `ts` as a PARAMETER rather than

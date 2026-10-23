@@ -2621,18 +2621,64 @@ mod tests {
         std::fs::remove_file(&sock).ok();
     }
 
-    /// The escapes a Rust string literal writes for ASCII whitespace. A source
-    /// file holds the escape, not the byte, so the scan reads each one as a space.
-    const WHITESPACE_ESCAPES: [&str; 15] = [
-        r"\t", r"\n", r"\r", r"\x09", r"\x0a", r"\x0b", r"\x0c", r"\x0d", r"\x20",
-        r"\u{9}", r"\u{a}", r"\u{b}", r"\u{c}", r"\u{d}", r"\u{20}",
-    ];
+    /// `line` with each Rust string escape that spells ASCII whitespace read
+    /// as a space: `\t`, `\n`, `\r`, and the `\x..` and `\u{..}` forms of those
+    /// and of a space. A source file holds the escape, not the byte, so the
+    /// scan reads each one as a space. Hex digits may be either case, and
+    /// `\u{..}` may be zero-padded.
+    fn whitespace_escapes_as_spaces(line: &str) -> String {
+        let mut out = String::with_capacity(line.len());
+        let mut rest = line;
+        while let Some(at) = rest.find('\\') {
+            out.push_str(&rest[..at]);
+            rest = &rest[at..];
+            match escape_value(rest) {
+                Some((used, value)) if matches!(value, 0x09..=0x0d | 0x20) => {
+                    out.push(' ');
+                    rest = &rest[used..];
+                }
+                _ => {
+                    out.push('\\');
+                    rest = &rest[1..];
+                }
+            }
+        }
+        out.push_str(rest);
+        out
+    }
+
+    /// The bytes an escape at the start of `text` spans, and the code point it
+    /// spells: `\t`, `\n`, `\r`, `\x..` or `\u{..}`.
+    fn escape_value(text: &str) -> Option<(usize, u32)> {
+        match *text.as_bytes().get(1)? {
+            b't' => return Some((2, 0x09)),
+            b'n' => return Some((2, 0x0a)),
+            b'r' => return Some((2, 0x0d)),
+            _ => {}
+        }
+        if let Some(hex) = text.strip_prefix("\\x") {
+            return hex_value(hex.get(..2)?).map(|value| (4, value));
+        }
+        let body = text.strip_prefix("\\u{")?;
+        let digits = &body[..body.find('}')?];
+        if digits.len() > 6 {
+            return None;
+        }
+        hex_value(digits).map(|value| (3 + digits.len() + 1, value))
+    }
+
+    fn hex_value(digits: &str) -> Option<u32> {
+        if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_hexdigit()) {
+            return None;
+        }
+        u32::from_str_radix(digits, 16).ok()
+    }
 
     /// True when `line` holds `--totp` followed by whitespace or `=` and a token.
     /// A backticked `--totp`, the prose that refuses it, is not one. Whitespace
-    /// spelled as one of `WHITESPACE_ESCAPES` counts as whitespace.
+    /// spelled as an escape counts as whitespace.
     fn teaches_totp_in_argv(line: &str) -> bool {
-        let line = WHITESPACE_ESCAPES.iter().fold(line.to_string(), |text, escape| text.replace(*escape, " "));
+        let line = whitespace_escapes_as_spaces(line);
         line.match_indices("--totp").any(|(at, flag)| {
             let rest = &line[at + flag.len()..];
             let separator = rest.chars().take_while(|c| c.is_whitespace() || *c == '=').count();
@@ -2796,13 +2842,13 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(
             dir.join("escape.rs"),
-            "let tab = \"aoide secrets exec --totp\\t123456 -- psql\";\nlet newline = \"aoide secrets exec --totp\\n123456 -- psql\";\nlet hex = \"aoide secrets exec --totp\\x20123456 -- psql\";\n",
+            "let tab = \"aoide secrets exec --totp\\t123456 -- psql\";\nlet newline = \"aoide secrets exec --totp\\n123456 -- psql\";\nlet hex = \"aoide secrets exec --totp\\x20123456 -- psql\";\nlet upper = \"aoide secrets exec --totp\\x0A123456 -- psql\";\nlet vt = \"aoide secrets exec --totp\\x0B123456 -- psql\";\nlet ff = \"aoide secrets exec --totp\\x0C123456 -- psql\";\nlet cr = \"aoide secrets exec --totp\\x0D123456 -- psql\";\nlet padded = \"aoide secrets exec --totp\\u{0009}123456 -- psql\";\nlet padded_lower = \"aoide secrets exec --totp\\u{000a}123456 -- psql\";\n",
         )
         .unwrap();
         let mut hits = Vec::new();
         totp_teaching_hits(&dir, &dir, &mut hits);
         std::fs::remove_dir_all(&dir).ok();
-        for line in [1, 2, 3] {
+        for line in 1..=9 {
             assert!(hits.iter().any(|h| h.starts_with(&format!("escape.rs:{line}:"))), "an escape after --totp must be flagged on line {line}: {hits:?}");
         }
     }

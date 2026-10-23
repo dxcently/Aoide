@@ -143,22 +143,27 @@ pub(crate) fn draw_overlays(f: &mut Frame, app: &App) {
                 );
             }
             crate::app::InputKind::TotpCode { ask } => {
-                // The claims and the peer sit above a fixed block, so the
-                // secret and consumer stay the line directly above `totp:`
-                // however much room a long claim takes above them.
+                // The claims sit above a fixed block, so the secret and
+                // consumer stay the line directly above `totp:`. Claims wrap
+                // into rows of the popup's inner width; past the screen, the
+                // last row says how many are not shown and where the whole ask
+                // prints.
                 let width = area.width.min(70);
                 let inner_width = usize::from(width.saturating_sub(2).max(1));
-                let mut above = ask.claim_lines();
+                let mut above: Vec<String> = ask.origin_claim().into_iter().collect();
                 above.push(match &ask.peer_uid {
                     Some(uid) => format!("peer uid {uid}"),
                     None => "peer uid unknown".to_string(),
                 });
                 above.push("The code approves the ORIGINAL parked request; it is never echoed back.".to_string());
-                let above_rows: usize = above.iter().map(|line| line.chars().count().max(1).div_ceil(inner_width)).sum();
+                above.push(ask.reason_claim());
+                above.push(ask.program_claim());
+                let rows = claim_rows(&above, inner_width);
                 const BELOW_ROWS: u16 = 5;
                 let height = area
                     .height
-                    .min(u16::try_from(above_rows).unwrap_or(u16::MAX).saturating_add(BELOW_ROWS + 2));
+                    .min(u16::try_from(rows.len()).unwrap_or(u16::MAX).saturating_add(BELOW_ROWS + 2));
+                let room = usize::from(height.saturating_sub(BELOW_ROWS + 2));
                 let popup = Rect::new(
                     area.x + (area.width - width) / 2,
                     area.y + (area.height - height) / 2,
@@ -171,10 +176,7 @@ pub(crate) fn draw_overlays(f: &mut Frame, app: &App) {
                 let parts = Layout::vertical([Constraint::Min(0), Constraint::Length(BELOW_ROWS)]).split(block.inner(popup));
                 f.render_widget(Clear, popup);
                 f.render_widget(block, popup);
-                f.render_widget(
-                    Paragraph::new(above.join("\n")).wrap(ratatui::widgets::Wrap { trim: false }),
-                    parts[0],
-                );
+                f.render_widget(Paragraph::new(fit_claims(rows, room, inner_width, &ask.id).join("\n")), parts[0]);
                 f.render_widget(
                     Paragraph::new(format!(
                         "TOTP for `{}` requested by {} (unverified).\n\
@@ -989,18 +991,55 @@ fn draw_pending(f: &mut Frame, area: Rect, app: &App) {
         return;
     }
 
-    let items: Vec<ListItem> = rows.iter().map(review_row_item).collect();
+    let width = usize::from(parts[2].width);
+    let items: Vec<ListItem> = rows.iter().map(|row| review_row_item(row, width)).collect();
     let list = List::new(items).highlight_style(selection_style(app));
     let mut state = ListState::default();
     state.select(Some(app.review_sel.min(rows.len().saturating_sub(1))));
     f.render_stateful_widget(list, parts[2], &mut state);
 }
 
+/// Each line cut into rows no wider than `width` characters. A row breaks at
+/// the last space that fits, so a word stays whole; a word longer than a row
+/// is cut where the row ends.
+fn claim_rows(lines: &[String], width: usize) -> Vec<String> {
+    let mut rows = Vec::new();
+    for line in lines {
+        let mut rest = line.as_str();
+        while rest.chars().count() > width {
+            let cut = rest.char_indices().nth(width).map_or(rest.len(), |(at, _)| at);
+            let at = rest[..cut].rfind(' ').filter(|&at| at > 0).unwrap_or(cut);
+            rows.push(rest[..at].trim_end().to_string());
+            rest = rest[at..].trim_start_matches(' ');
+        }
+        rows.push(rest.to_string());
+    }
+    rows
+}
+
+/// The rows that fit `room`. When some do not, the last row that does is a
+/// marker: how many rows are not shown, and where the whole ask prints.
+fn fit_claims(rows: Vec<String>, room: usize, width: usize, id: &str) -> Vec<String> {
+    if rows.len() <= room {
+        return rows;
+    }
+    let mut keep = room;
+    let marker = loop {
+        let hidden = rows.len() - keep;
+        let marker = claim_rows(&[format!("{hidden} rows not shown: `aoide secrets approve {id}` prints it whole")], width);
+        if keep + marker.len() <= room || keep == 0 {
+            break marker;
+        }
+        keep = room.saturating_sub(marker.len());
+    };
+    rows.into_iter().take(keep).chain(marker).collect()
+}
+
 /// One Review row: a section header, or one queue entry in its own shape. The
 /// pairing row states the direction, the node and that entry's own state — and
 /// never a code; the ask row shows only the five metadata fields the read
 /// carries.
-fn review_row_item<'a>(row: &crate::app::ReviewRow) -> ListItem<'a> {
+fn review_row_item<'a>(row: &crate::app::ReviewRow, width: usize) -> ListItem<'a> {
     use crate::app::ReviewRow;
     match row {
         ReviewRow::Header(title) => ListItem::new(Line::from(Span::styled(
@@ -1029,7 +1068,9 @@ fn review_row_item<'a>(row: &crate::app::ReviewRow) -> ListItem<'a> {
                     .map(|u| format!("  peer uid {u}"))
                     .unwrap_or_default(),
             ))];
-            lines.extend(r.claim_lines().into_iter().map(|claim| Line::from(format!("    {claim}"))));
+            lines.extend(r.claim_lines().into_iter().map(|claim| {
+                Line::from(format!("    {}", aoide_protocol::untrusted::clip_flat(&claim, width.saturating_sub(4))))
+            }));
             ListItem::new(lines)
         }
     }
@@ -2168,6 +2209,48 @@ mod tests {
         term.draw(|f| draw(f, &a)).unwrap();
         let out = dump(term.backend().buffer());
         assert!(out.contains("tail-marker"), "the program's last characters are on screen: {out}");
+    }
+
+    /// The approve popup keeps its fixed claims on a short screen and cuts
+    /// the program last. A 4 KiB program on a 50-row terminal leaves the
+    /// origin, the peer, the note, the reason and a marker naming
+    /// `aoide secrets approve`, and the reason's end reads whole.
+    #[test]
+    fn the_totp_popup_keeps_its_fixed_claims_on_a_short_screen() {
+        let reason = format!("{} reason-tail", "r".repeat(240));
+        let program = format!("{} tail-marker", "p ".repeat(2000));
+        let mut a = App::for_test(vec![], vec![], vec![]);
+        a.secrets_pending = Some(
+            aoide_protocol::output::Outcome::ok("secrets.pending", "1 pending").with_data(serde_json::json!({
+                "pending": [{
+                    "id": "7", "secret": "db", "consumer": "psql", "requestedAt": 1789862400,
+                    "peerUid": 1000, "reason": reason, "argv0": program,
+                    "originLine": "from: khoa \u{b7} psql (pid 42) @ box",
+                }],
+            })),
+        );
+        let ask = a.secret_ask_rows().remove(0);
+        a.input = Some(crate::app::Input {
+            label: "TOTP for secrets approve #7".to_string(),
+            buffer: String::new(),
+            step: 0,
+            collected: Vec::new(),
+            kind: crate::app::InputKind::TotpCode { ask },
+        });
+        let mut term = Terminal::new(TestBackend::new(100, 50)).unwrap();
+        term.draw(|f| draw(f, &a)).unwrap();
+        let out = dump(term.backend().buffer());
+        for fixed in [
+            "claims (unverified): from: khoa",
+            "peer uid 1000",
+            "ORIGINAL parked request",
+            "reason-tail",
+            "aoide secrets approve 7",
+            "TOTP for `db` requested by psql",
+        ] {
+            assert!(out.contains(fixed), "{fixed:?} stays on screen: {out}");
+        }
+        assert!(!out.contains("tail-marker"), "the program is cut past the screen: {out}");
     }
 
     /// A pending row is a human view of text someone else wrote: an ESC, a

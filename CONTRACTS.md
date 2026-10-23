@@ -841,7 +841,8 @@ count.
   newest, tracker #71 Part 1 — a foreground, line-mode terminal surface
   that tail-follows the mirrored aoide log and narrates every broker event
   (`released`/`parked`/`completed`/`dismissed`/`expired`), prompting inline
-  for a parked ask when stdin is a terminal; `--json` emits one event
+  for a parked ask when stdin is a terminal, and takes no code (ruling 98);
+  `--json` emits one event
   object per line instead — see `crates/secrets/README.md`'s "Watching
   events" section for the exact shape; `secrets migrate`, appended newest,
   P-G2 (task #72) — moves an existing secret's stored value from its
@@ -6624,16 +6625,21 @@ compiled in, not env knobs. A connection that arrives while 128 are open gets
 one refusal line, `"ok":false` with an `error` that names the cap, and is
 closed. A connection whose uid already holds 16 gets the same shape of
 refusal, its `error` naming the uid's cap, and no other uid is affected. A
-connection that goes 10 s without sending a byte is closed with no reply, and
-so is one that does not take a reply within 10 s. A request line must complete
-within 10 s of its first byte, and blank lines do not restart that clock, so a
-client that trickles bytes is closed at the deadline. A parked `resolve` is not
-reading, so its park timer ends it, or the broker's hang-up probe does within
-250 ms of its client closing the socket. The costs are part of the contract: a
-silent client holds a slot for up to 10 s, so 128 of them refuse other callers
-for that window; a client that keeps sending complete requests keeps its slot
-for as long as it sends; and a user running more than 16 connections at once
-is refused.
+connection whose uid cannot be read shares one bucket with the others that
+cannot be read, and its `error` says so. A connection that goes 10 s without
+sending a byte is closed with no reply. A reply has one 10 s budget across all
+of its writes: a connection that does not take the whole reply within it is
+closed. A request line must complete within 10 s of its first byte, and blank
+lines do not restart that clock, so a client that trickles bytes is closed at
+the deadline. A parked `resolve` is not reading, so its park timer ends it, or
+the broker's hang-up probe does within 250 ms of its client closing the socket.
+The costs are part of the contract: a silent client holds a slot for up to
+10 s, so 128 of them refuse other callers for that window; there is no
+lifetime cap, so a client that keeps sending complete requests keeps its slot
+for as long as it sends, and only the per-uid cap bounds that; and a user
+running more than 16 connections at once is refused. A reply at the default
+park cap can carry up to about 256 KiB of reason and argv0, which its reader
+must take within 10 s.
 
 **A parked field is bounded.** A consumer, reason or argv0 over 4 KiB or 60
 lines is refused at park, and so is one holding a control or invisible
@@ -6740,7 +6746,11 @@ an ask that timed out; plus every `resolve`-shaped TOTP error above, and the
 budget's refusal (`"totp code invalid or expired"`,
 `"totp code already used"`,
 ...). This reply NEVER carries a `value` field — the value only ever
-reaches the ORIGINAL parked connection's own `resolve` reply.
+reaches the ORIGINAL parked connection's own `resolve` reply. When the approved
+value reached no connected client, because its parked connection had hung up,
+the reply is `"ok":false` with `"error":"approved, client hung up before
+delivery"`; the audit records the approve as not granted with that reason, and
+no completed notice is sent.
 
 On a pipe, `secrets approve` reads the code as one stdin line of at most 256
 bytes, newline excluded. A line past 256 bytes is refused,

@@ -693,26 +693,34 @@ pub struct SecretAskRow {
     pub requested_at: String,
     pub peer_uid: Option<String>,
     /// The requester's claims, shown under a claims label on the review row and
-    /// each cleaned as it is read: `reason` by `clean_line`, `argv0` only of its
-    /// unsafe characters, so the popup wraps the whole program. `None` when the
-    /// ask carries none.
+    /// the TOTP popup. `originLine` is cleaned by `clean_line`; `reason` and
+    /// `argv0` only lose their unsafe characters, so the popup can wrap them
+    /// whole. `None` when the ask carries none.
     pub reason: Option<String>,
     pub argv0: Option<String>,
     pub origin_line: Option<String>,
 }
 
 impl SecretAskRow {
-    /// The requester's claims as the review row and the TOTP popup both draw
-    /// them: reason and program on one line, then the origin when the ask
-    /// carries one. Each is the requester's own word, labelled unverified.
-    pub fn claim_lines(&self) -> Vec<String> {
+    /// The origin claim, when the ask carries one. Each claim is the
+    /// requester's own word, labelled unverified.
+    pub fn origin_claim(&self) -> Option<String> {
+        self.origin_line.as_deref().map(|origin| format!("claims (unverified): {origin}"))
+    }
+
+    pub fn reason_claim(&self) -> String {
         let reason = self.reason.as_deref().map_or_else(|| "none given".to_string(), |v| format!("\"{v}\""));
-        let program = self.argv0.as_deref().unwrap_or("none given");
-        let mut lines = vec![format!("claims (unverified): reason {reason}, program {program}")];
-        if let Some(origin) = &self.origin_line {
-            lines.push(format!("claims (unverified): {origin}"));
-        }
-        lines
+        format!("claims (unverified): reason {reason}")
+    }
+
+    pub fn program_claim(&self) -> String {
+        format!("claims (unverified): program {}", self.argv0.as_deref().unwrap_or("none given"))
+    }
+
+    /// The claims in the order the review row draws them: origin, reason,
+    /// program.
+    pub fn claim_lines(&self) -> Vec<String> {
+        self.origin_claim().into_iter().chain([self.reason_claim(), self.program_claim()]).collect()
     }
 }
 
@@ -2183,7 +2191,7 @@ impl App {
                     .filter(|p| !p.is_null())
                     .map(scalar_text)
                     .filter(|s| !s.is_empty()),
-                reason: v.get("reason").and_then(|r| r.as_str()).map(aoide_protocol::untrusted::clean_line),
+                reason: v.get("reason").and_then(|r| r.as_str()).map(aoide_protocol::untrusted::strip_unsafe),
                 argv0: v.get("argv0").and_then(|a| a.as_str()).map(aoide_protocol::untrusted::strip_unsafe),
                 origin_line: v.get("originLine").and_then(|o| o.as_str()).map(aoide_protocol::untrusted::clean_line),
             })
@@ -8259,7 +8267,7 @@ mod tests {
         term.draw(|f| crate::board::draw(f, &app)).unwrap();
         let text = dump_cells(term.backend().buffer());
         assert!(
-            text.contains("claims (unverified): reason \"nightly deploy\", program /usr/bin/psql"),
+            text.contains("claims (unverified): reason \"nightly deploy\"") && text.contains("claims (unverified): program /usr/bin/psql"),
             "the review row names the claims: {text}"
         );
         assert!(text.contains("from: khoa \u{b7} psql (pid 42) @ box"), "{text}");
@@ -8286,7 +8294,7 @@ mod tests {
         term.draw(|f| crate::ui::draw_overlays(f, &app)).unwrap();
         let text = dump_cells(term.backend().buffer());
         assert!(
-            text.contains("claims (unverified): reason \"nightly deploy\", program /usr/bin/psql"),
+            text.contains("claims (unverified): reason \"nightly deploy\"") && text.contains("claims (unverified): program /usr/bin/psql"),
             "the TOTP popup draws the claims: {text}"
         );
         let rows: Vec<&str> = text.lines().collect();

@@ -290,7 +290,8 @@ cap plus one chunk.
 ```
 -> {"op":"resolve","secret":"<name>","consumer":"<consumer>",
     "argv0":"<cmd>"?,"wait":<bool>?,"reason":"<text>"?}
-<- {"interim":true,"parked":true,"id":"<id>","timeoutSecs":<N>,"expiresAt":<unix-seconds>}
+<- {"interim":true,"parked":true,"id":"<id>",
+    "timeoutSecs":<N>,"expiresAt":<unix-seconds>}
                                                       (INTERIM, only when this
                                                       resolve parks; never on
                                                       the fast path)
@@ -311,7 +312,12 @@ cap plus one chunk.
 <- {"ok":false,"error":"<value-free message>"}      (denied/error)
 
 -> {"op":"pending"}
-<- {"ok":true,"pending":[{"id":"<id>","secret":"<name>","consumer":"<consumer>","requestedAt":<unix-seconds>,"peerUid":<uid-or-null>,"reason":"<text>"|null,"origin":{"username":<string-or-null>,"pid":<int-or-null>,"comm":<string-or-null>,"hostname":<string-or-null>},"argv0":<string-or-null>},...]}
+<- {"ok":true,"pending":[{"id":"<id>","secret":"<name>",
+    "consumer":"<consumer>","requestedAt":<unix-seconds>,
+    "peerUid":<uid-or-null>,"reason":"<text>"|null,
+    "origin":{"username":<string-or-null>,"pid":<int-or-null>,
+    "comm":<string-or-null>,"hostname":<string-or-null>},
+    "argv0":<string-or-null>},...]}
 
 -> {"op":"status"}
 <- {"ok":true,"home":"<the secrets home the broker read>","secrets":[{"name":"<name>","backend":"<backend>","requireTotp":<bool>,"consumers":[...],"automation":{"enabled":<bool>,"consumers":[...]},"sharedWith":[...],"remote":<bool>,"allowRemoteOrigin":<bool>},...]}
@@ -617,9 +623,10 @@ it down the channel the original `resolve` call is blocked reading —
   completion paths (`secrets approve`, or running the resolve again), since a
   stale id at that point would only mislead (`broker::park_timeout_message`).
 
-**The code is typed, never passed.** `secrets approve <id>` first shows the
-parked ask: the secret, consumer, reason and argv0 (the program the requester
-says receives the value) are the requester's claims, and so is the origin line
+**The code is read, never passed in argv.**
+`secrets approve <id>` first shows the parked ask: the secret, consumer, reason
+and argv0 (the program the requester says receives the value) are the
+requester's claims, and so is the origin line
 (`from: <username> · <comm> (pid <pid>) @ <hostname>`). The peer uid is the
 kernel's word, and so is the pid in the origin line, as read at park time;
 `comm` is process-controlled text, shown as data. The secret and consumer are
@@ -628,6 +635,12 @@ no-echo prompt on a terminal or from exactly one stdin line of at most 256
 bytes; a longer one is refused, and nothing is sent. An id that is not in
 `secrets pending` is refused before any prompt, with no approve op. Empty input
 sends nothing.
+
+A code on a pipe is read the same as one typed at a terminal: a terminal
+check is fakeable by any process with the person's uid, so the broker cannot
+tell the two apart. What that leaves: an agent the person hands a code to can
+approve its own park from its own pane. This is ruling 29's residual, and it
+stays until the phone key.
 
 **`secrets exec` never asks for a code (ruling 87).** A park prints the line
 `parked as ask <id> — complete with: aoide secrets approve <id>`, with the
@@ -662,8 +675,13 @@ The connection count is capped too. At most 128 connections are served at
 once (`MAX_CONNECTIONS`), and one more gets a single refusal line and is
 closed. No one uid may hold more than 16 of them (`PER_UID_CONNECTIONS`); a
 uid at its cap gets the same shape of refusal line, and no other uid is
-affected. A connection that goes 10 s (`READ_TIMEOUT`) without a byte, or does
-not take a reply within 10 s (`WRITE_TIMEOUT`), is closed with no reply. A
+affected. A connection whose uid cannot be read shares one bucket with the
+others that cannot be read, and its refusal says so. A connection that goes
+10 s (`READ_TIMEOUT`) without a byte is closed with no reply. A reply has one
+10 s budget (`WRITE_TIMEOUT`) across all of its writes: a connection that does
+not take the whole reply within it is closed. There is no lifetime cap: a
+client that keeps sending complete requests keeps its connection, and only the
+per-uid cap of 16 bounds how many it holds. A
 request line must complete within 10 s (`REQUEST_DEADLINE`) of its first byte;
 blank lines do not reset that clock, so a client that trickles bytes is closed
 at the deadline. A parked `resolve` is not reading: its park timer ends it, or
@@ -716,7 +734,10 @@ process.
 `AOIDE_SECRETS_PARK_CAP` env override — `park::park_cap()`, same
 tolerant-fallback shape as `park_timeout()`. Beyond the cap, a codeless
 `resolve` gets the immediate `wait:false`-shaped refusal (never a park),
-naming the cap and its env knob. `ParkRegistry::park_if_room` checks
+naming the cap and its env knob. Its cost, with numbers: two uids with 16
+parked resolves each fill the default 32, and every other park is refused.
+With `AOIDE_SECRETS_PARK_CAP` at 16 or below, one uid fills it alone, since
+one uid may hold 16 connections. `ParkRegistry::park_if_room` checks
 `len() >= cap` and inserts under the SAME lock acquisition — never two
 separate lock calls — so two racing threads can never jointly overrun the
 cap by one (the same TOCTOU discipline `put_lock`/`replay_ledger_lock`
@@ -925,7 +946,9 @@ cross-host-readable audit-trail half, UNCHANGED by P-G4), and NOW the
 broker-owned **events feed** (`append_events_feed`, `socket::events_path` —
 default a sibling of the broker's own socket, e.g.
 `/run/aoide-secrets/events.jsonl` next to `secrets.sock`; env override
-`AOIDE_SECRETS_EVENTS`). All three writes are best-effort: a notification
+`AOIDE_SECRETS_EVENTS`). Every string in the feed is escaped first, as the
+audit logs' are, so `secrets watch --json` never shows a raw unsafe
+character. All three writes are best-effort: a notification
 must never fail or block the resolve/approve/dismiss it rides alongside, so
 every one of `append_own_log`/`aoide_protocol::audit`/`append_events_feed`'s
 own errors is `eprintln!`d and swallowed, the SAME posture every `audit_*`

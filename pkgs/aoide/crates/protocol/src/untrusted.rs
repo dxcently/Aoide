@@ -101,7 +101,8 @@ fn is_invisible(c: char) -> bool {
         | '\u{fe00}'..='\u{fe0f}'           // variation selectors 1-16
         | '\u{e0100}'..='\u{e01ef}'         // variation selectors supplement
         | '\u{034f}'                        // combining grapheme joiner
-        | '\u{180b}'..='\u{180d}'           // Mongolian free variation selectors
+        | '\u{180b}'..='\u{180d}'           // Mongolian free variation selectors 1-3
+        | '\u{180f}'                        // Mongolian free variation selector 4
         | '\u{17b4}'..='\u{17b5}'           // Khmer vowel inherent aq, aa
     )
 }
@@ -200,14 +201,14 @@ mod tests {
 
     #[test]
     fn line_separators_and_the_fillers_are_unsafe() {
-        for c in ['\u{2028}', '\u{2029}', '\u{34f}', '\u{180b}', '\u{180c}', '\u{180d}', '\u{17b4}', '\u{17b5}'] {
+        for c in ['\u{2028}', '\u{2029}', '\u{34f}', '\u{180b}', '\u{180c}', '\u{180d}', '\u{17b4}', '\u{17b5}', '\u{180f}'] {
             assert!(is_unsafe(c), "U+{:04X} must be unsafe", u32::from(c));
         }
     }
 
     #[test]
     fn clean_line_strips_the_combining_joiner_and_the_mongolian_and_khmer_fillers() {
-        assert_eq!(clean_line("a\u{34f}b\u{180b}c\u{180d}d\u{17b4}e\u{17b5}f"), "abcdef");
+        assert_eq!(clean_line("a\u{34f}b\u{180b}c\u{180d}d\u{17b4}e\u{17b5}f\u{180f}g"), "abcdefg");
     }
 
     #[test]
