@@ -47,19 +47,27 @@ const TOTP_PROMPT_LABEL: &str = "totp: ";
 /// The fixed block's rows: the secret, the consumer, the prompt, a gap and the
 /// two-row hint.
 const TOTP_FIXED_ROWS: u16 = 6;
+/// The two hint rows. Each is drawn whole on its own row, never wrapped.
+const TOTP_HINT_ROWS: [&str; 2] = ["Enter approves; Esc cancels.", "An empty field sends nothing."];
 /// The popup's minimum size, derived from the fixed block: its rows, one row for
-/// the marker and the two borders; its widest label, the two borders and one
-/// more column. Below either, the popup draws only [`totp_notice`].
+/// the marker and the two borders; its widest fixed row, a label or a hint row,
+/// the two borders and one more column. Below either, the popup draws only
+/// [`totp_notice`].
 const TOTP_MIN_ROWS: u16 = TOTP_FIXED_ROWS + 1 + 2;
-const TOTP_MIN_COLUMNS: u16 =
-    longest_label(&[TOTP_SECRET_LABEL, TOTP_CONSUMER_LABEL, TOTP_PROMPT_LABEL]) as u16 + 2 + 1;
+const TOTP_MIN_COLUMNS: u16 = widest_row(&[
+    TOTP_SECRET_LABEL,
+    TOTP_CONSUMER_LABEL,
+    TOTP_PROMPT_LABEL,
+    TOTP_HINT_ROWS[0],
+    TOTP_HINT_ROWS[1],
+]) as u16 + 2 + 1;
 
-const fn longest_label(labels: &[&str]) -> usize {
+const fn widest_row(rows: &[&str]) -> usize {
     let mut widest = 0;
     let mut i = 0;
-    while i < labels.len() {
-        if labels[i].len() > widest {
-            widest = labels[i].len();
+    while i < rows.len() {
+        if rows[i].len() > widest {
+            widest = rows[i].len();
         }
         i += 1;
     }
@@ -252,11 +260,7 @@ pub(crate) fn draw_overlays(f: &mut Frame, app: &App) {
                 let prompt_row = tail_row(TOTP_PROMPT_LABEL, &typed, inner_width);
                 f.render_widget(Paragraph::new(prompt_row), prompt);
                 f.render_widget(
-                    Paragraph::new(
-                        "Enter approves; Esc cancels. \
-                         Nothing is sent while the field is empty.",
-                    )
-                    .wrap(ratatui::widgets::Wrap { trim: false }),
+                    Paragraph::new(format!("{}\n{}", TOTP_HINT_ROWS[0], TOTP_HINT_ROWS[1])),
                     hint,
                 );
             }
@@ -2498,6 +2502,27 @@ mod tests {
             assert!(out.contains(fixed), "{fixed:?} stays on screen: {out}");
         }
         assert!(!out.contains("this popup is too small"), "no notice at the minimum: {out}");
+    }
+
+    /// At the minimum, a consumer longer than its room keeps its label whole and
+    /// cuts its value with the cut marker.
+    #[test]
+    fn the_totp_minimum_keeps_the_consumer_label_whole_and_cuts_a_long_consumer() {
+        let consumer = "abcdefghijklmnopqrstuvwxyz0123456789ABCD";
+        let a = totp_prompt_app("db", consumer, "nightly", "/usr/bin/psql");
+        let out = totp_popup_dump(&a, TOTP_MIN_COLUMNS, TOTP_MIN_ROWS);
+        assert!(out.contains("consumer (unverified): abcdef…"), "the consumer row is not cut at its room: {out}");
+    }
+
+    /// At the minimum, both hint rows show whole, each on its own row.
+    #[test]
+    fn the_totp_minimum_shows_both_hint_rows_whole() {
+        let consumer = "abcdefghijklmnopqrstuvwxyz0123456789ABCD";
+        let a = totp_prompt_app("db", consumer, "nightly", "/usr/bin/psql");
+        let out = totp_popup_dump(&a, TOTP_MIN_COLUMNS, TOTP_MIN_ROWS);
+        for row in ["Enter approves; Esc cancels.", "An empty field sends nothing."] {
+            assert!(out.contains(row), "{row:?} is not whole at the minimum: {out}");
+        }
     }
 
     /// One row below the minimum height the popup draws only the notice, which

@@ -276,7 +276,8 @@ BYTE-IDENTICAL to before: `client::stdin_is_tty` is false in that case and
 
 **Framing (P-N2c, FIX 1):** write ONE request line; read zero or more
 INTERIM lines (`"interim":true`) followed by exactly one FINAL reply line
-(no `interim` field, or `interim` absent/false). Today the only interim
+(no `interim` field, or `interim` absent/false). No final line follows an
+interim line that did not reach the client whole. Today the only interim
 line is `resolve`'s park announcement below — a future op/mode extends the
 wire with a new interim shape or a new `op`, never by widening `wait` (see
 below) into something richer.

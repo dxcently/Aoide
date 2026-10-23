@@ -738,10 +738,7 @@ fn handle_conn(secrets_home: &Path, events_path: &Path, stream: UnixStream, park
             peer.clone(),
             aoide_protocol::audit::now_secs(),
         );
-        let delivery = match answer.delivery {
-            Some(delivery) => delivery,
-            None => write_json_line(&mut writer, &answer.reply),
-        };
+        let delivery = write_answer(&mut writer, &answer);
         if delivery != Delivery::Whole {
             break;
         }
@@ -865,6 +862,15 @@ struct Answer {
 impl Answer {
     fn plain(reply: Value) -> Self {
         Answer { reply, delivery: None }
+    }
+}
+
+/// What an answer owes its client: its reply, unless the parked resolve that
+/// made it already wrote the reply and reports how that went.
+fn write_answer(writer: &mut impl BoundedWrite, answer: &Answer) -> Delivery {
+    match answer.delivery {
+        Some(delivery) => delivery,
+        None => write_json_line(writer, &answer.reply),
     }
 }
 
@@ -1060,11 +1066,10 @@ fn handle_resolve(
                 audit_resolve(secrets_home, &secret, &consumer, argv0.as_deref(), Status::Denied, Some(&reason), peer_uid);
                 return Answer::plain(json!({"ok": false, "error": reason}));
             }
-            // `aoide secrets approve <id>` prints a parked ask whole, but the
-            // conductor cuts the consumer to one row. So a request whose
-            // consumer, reason or argv0 is over the approve dialog's bound, or
-            // holds a control or invisible character, is refused here, before
-            // anything parks. The secret needs no check:
+            // `aoide secrets approve <id>` prints a parked ask whole. So a
+            // request whose consumer, reason or argv0 is over the broker's
+            // bound, or holds a control or invisible character, is refused
+            // here, before anything parks. The secret needs no check:
             // `policy::valid_secret_name` admits no such character when a
             // secret is added or put.
             let oversized_field = [
@@ -1075,18 +1080,11 @@ fn handle_resolve(
             .into_iter()
             .find_map(|(name, value)| value.and_then(oversized).map(|why| (name, why)));
             if let Some((field, why)) = oversized_field {
-                let reason = if field == "consumer" {
-                    format!(
-                        "refused: the consumer {why}. The conductor cuts the consumer to one \
-                         row, so send a shorter consumer"
-                    )
-                } else {
-                    format!(
-                        "refused: the {field} {why}. The broker bounds each parked reason or \
-                         argv0 at {PARKED_FIELD_BYTES_MAX} bytes and {PARKED_FIELD_LINES_MAX} \
-                         lines, so send a shorter {field}"
-                    )
-                };
+                let reason = format!(
+                    "refused: the {field} {why}. The broker bounds each parked field at \
+                     {PARKED_FIELD_BYTES_MAX} bytes and {PARKED_FIELD_LINES_MAX} lines, so \
+                     send a shorter {field}"
+                );
                 audit_resolve(secrets_home, &secret, &consumer, argv0.as_deref(), Status::Denied, Some(&reason), peer_uid);
                 return Answer::plain(json!({"ok": false, "error": reason}));
             }
@@ -1170,16 +1168,16 @@ fn handle_resolve(
             } else {
                 crate::park::end_unreachable(parked, &id, rx)
             };
-            match outcome {
+            let answer = match outcome {
                 WaitResult::Approved(value, receipt) if !interim_whole => {
                     // A cut line ends the stream's framing, so no value byte goes
-                    // after it: the approver is told nothing reached the client.
+                    // after it: the approver is told no byte of the reply was sent.
                     drop(value);
                     let _ = receipt.send(Delivery::Nothing);
                     let (status, reason) = grant_status(Delivery::Nothing);
                     let reason = reason.unwrap_or_default();
                     audit_resolve(secrets_home, &secret, &consumer, argv0.as_deref(), status, Some(&reason), peer_uid);
-                    Answer { reply: json!({"ok": false, "error": reason}), delivery: Some(Delivery::Nothing) }
+                    Answer::plain(json!({"ok": false, "error": reason}))
                 }
                 WaitResult::Approved(value, receipt) => {
                     // The reply's write decides the grant. The receipt goes out
@@ -1225,6 +1223,13 @@ fn handle_resolve(
                     );
                     Answer::plain(json!({"ok": false, "error": reason}))
                 }
+            };
+            // A cut interim line ends the stream: whatever the outcome, nothing
+            // more is written on this connection.
+            if interim_whole {
+                answer
+            } else {
+                Answer { delivery: Some(Delivery::Nothing), ..answer }
             }
         }
     }
@@ -1398,8 +1403,8 @@ thread_local! {
 
 /// What an approver is told, and its audit line says, when no byte of an
 /// approved reply was written.
-const UNDELIVERED: &str = "approved, but nothing reached the client: no byte \
-    of the reply was written, so the value was not handed over";
+const UNDELIVERED: &str = "approved, but the reply was not written: no byte of it was \
+    sent, so the value was not handed over";
 
 /// What an approver is told when the parked connection ended before it
 /// reported how its reply went: the value may have reached the client.
@@ -1594,7 +1599,7 @@ fn handle_approve(
 /// The refusal when a code checked out but its ask was no longer parked when it
 /// was taken. The check already spent the code, so a retry cannot use it.
 fn refuse_taken_after_check(id: &str) -> String {
-    format!("the code was checked and used, but ask `{id}` is no longer parked, so nothing was released; run the resolve again")
+    format!("the code was checked and used, but ask `{id}` is no longer parked; run the resolve again")
 }
 
 /// The refusal for an approve whose ask ran out its park timeout before a code
@@ -5342,7 +5347,7 @@ mod tests {
         assert_eq!(reply["ok"], false, "{reply}");
         let err = reply["error"].as_str().unwrap();
         assert!(err.contains("the code was checked and used"), "{err}");
-        assert!(err.contains("nothing was released"), "{err}");
+        assert!(err.contains("run the resolve again"), "{err}");
         std::fs::remove_dir_all(&home).ok();
     }
 
@@ -5352,7 +5357,7 @@ mod tests {
     fn a_code_checked_for_a_gone_ask_says_the_code_was_used() {
         let reason = refuse_taken_after_check("3f2a-3");
         assert!(reason.contains("the code was checked and used"), "{reason}");
-        assert!(reason.contains("nothing was released"), "{reason}");
+        assert!(reason.contains("run the resolve again"), "{reason}");
     }
 
     /// The `pending` reply while one parked resolve, `line`, is still parked.
@@ -5710,7 +5715,7 @@ mod tests {
 
     /// The parked connection finds its client gone when the approve's reply
     /// reaches it, so nothing is written: both audit lines say undelivered, and
-    /// the approver is told nothing reached the client.
+    /// the approver is told no byte of the reply was sent.
     #[cfg(unix)]
     #[test]
     fn an_approve_that_takes_the_ask_as_its_client_hangs_up_is_told_so() {
@@ -5998,11 +6003,14 @@ mod tests {
         std::fs::remove_dir_all(&home).ok();
     }
 
-    /// A sink whose interim write blocks until an approve has taken the ask, then
-    /// fails with no byte taken. Every later write is accepted into `bytes`, so
-    /// a value written after the cut would show there.
+    /// A sink whose interim line is cut. Its first write takes `takes` bytes when
+    /// it takes any; the write that cuts the line waits until the ask is taken
+    /// and then fails. That is the first write when `takes` is zero. Every write
+    /// after the cut is accepted into `bytes`, so a line written after it shows
+    /// there.
     struct InterimCutSink<'a> {
         parked: &'a ParkRegistry,
+        takes: usize,
         writes: usize,
         bytes: Vec<u8>,
     }
@@ -6011,7 +6019,12 @@ mod tests {
         fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
             let made = self.writes;
             self.writes += 1;
-            if made == 0 {
+            if self.takes > 0 && made == 0 {
+                let take = self.takes.min(buf.len());
+                self.bytes.extend_from_slice(&buf[..take]);
+                return Ok(take);
+            }
+            if made == usize::from(self.takes > 0) {
                 let started = std::time::Instant::now();
                 while !self.parked.list().is_empty() && started.elapsed() < std::time::Duration::from_secs(5) {
                     std::thread::sleep(std::time::Duration::from_millis(5));
@@ -6039,35 +6052,77 @@ mod tests {
         }
     }
 
-    /// An approve that takes the ask while its interim line is being written, and
-    /// that line then fails: nothing is written after the cut. The approver is
-    /// told undelivered, both audit lines say undelivered, and no byte of the
-    /// value reaches the connection.
-    #[test]
-    fn an_approve_that_lands_during_a_failed_interim_line_is_undelivered() {
-        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let home = tmp_home("interim-cut-approve");
-        let secret = seed_enrolled(&home, Policy::new("t", "scratch", "stored-value"));
+    /// Resolves a secret whose interim line is cut, and approves its ask while
+    /// that line is being written. Returns the approver's reply and the bytes the
+    /// connection took.
+    fn approve_while_the_interim_line_is_cut(home: &Path) -> (Value, Vec<u8>) {
+        let secret = seed_enrolled(home, Policy::new("t", "scratch", "stored-value"));
         let events = home.join("events.jsonl");
         let parked = ParkRegistry::new();
-        let (approved, written) = with_redirected_audit_log(&home, || {
+        with_redirected_audit_log(home, || {
             std::thread::scope(|s| {
                 let resolve = s.spawn(|| {
-                    let mut sink = InterimCutSink { parked: &parked, writes: 0, bytes: Vec::new() };
-                    handle_line(&home, &events, r#"{"op":"resolve","secret":"t","consumer":"m"}"#, &parked, &mut sink, None);
+                    let mut sink = InterimCutSink { parked: &parked, takes: 0, writes: 0, bytes: Vec::new() };
+                    handle_line(home, &events, r#"{"op":"resolve","secret":"t","consumer":"m"}"#, &parked, &mut sink, None);
                     sink.bytes
                 });
                 let id = parked_id(&parked);
                 let req = json!({"id": id, "totp": code_for_now(&secret, NOW)});
-                let approved = handle_approve(&home, &events, &parked, &req, None, NOW);
+                let approved = handle_approve(home, &events, &parked, &req, None, NOW);
                 (approved, resolve.join().unwrap())
             })
-        });
+        })
+    }
+
+    /// An approve that takes the ask while its interim line is cut is told it was
+    /// undelivered, and both of its audit lines say undelivered.
+    #[test]
+    fn an_approve_that_lands_during_a_failed_interim_line_is_undelivered() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let home = tmp_home("interim-cut-approve");
+        let (approved, _) = approve_while_the_interim_line_is_cut(&home);
         assert_eq!(approved["error"], UNDELIVERED, "{approved}");
-        assert!(written.is_empty(), "bytes reached the connection after its interim line failed: {written:?}");
         let lines = own_log_lines(&home);
         assert!(lines.iter().any(|l| l["op"] == "approve" && l["status"] == "undelivered"), "{lines:?}");
         assert!(lines.iter().any(|l| l["op"].is_null() && l["status"] == "undelivered"), "{lines:?}");
+        std::fs::remove_dir_all(&home).ok();
+    }
+
+    /// The same approve writes no byte of the value: the cut came first.
+    #[test]
+    fn no_byte_of_the_value_follows_a_cut_interim_line() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let home = tmp_home("interim-cut-bytes");
+        let (_, written) = approve_while_the_interim_line_is_cut(&home);
+        assert!(written.is_empty(), "bytes reached the connection after its interim line failed: {written:?}");
+        std::fs::remove_dir_all(&home).ok();
+    }
+
+    /// A dismiss takes the ask after its interim line was cut in part. The
+    /// connection keeps only the bytes the cut let through: no final line follows.
+    #[test]
+    fn nothing_follows_a_cut_interim_line_when_the_ask_is_dismissed() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let home = tmp_home("cut-then-dismiss");
+        seed_enrolled(&home, Policy::new("t", "scratch", "stored-value"));
+        let events = home.join("events.jsonl");
+        let parked = ParkRegistry::new();
+        let takes = 10;
+        let written = with_redirected_audit_log(&home, || {
+            std::thread::scope(|s| {
+                let resolve = s.spawn(|| {
+                    let mut sink = InterimCutSink { parked: &parked, takes, writes: 0, bytes: Vec::new() };
+                    let answer = handle_line_at(&home, &events, r#"{"op":"resolve","secret":"t","consumer":"m"}"#, &parked, &mut sink, None, NOW);
+                    write_answer(&mut sink, &answer);
+                    sink.bytes
+                });
+                let id = parked_id(&parked);
+                let dismissed = handle_line(&home, &events, &format!(r#"{{"op":"dismiss","id":"{id}"}}"#), &parked, &mut Vec::new(), operator_peer());
+                assert_eq!(dismissed["ok"], true, "{dismissed}");
+                resolve.join().unwrap()
+            })
+        });
+        assert_eq!(written.len(), takes, "bytes followed the cut interim line: {written:?}");
         std::fs::remove_dir_all(&home).ok();
     }
 
@@ -6298,45 +6353,29 @@ mod tests {
         std::fs::remove_dir_all(&home).ok();
     }
 
-    /// An oversized field is refused before anything parks, and the refusal says
-    /// its own cause: the conductor's one row for a consumer, the broker's bound
-    /// for a reason or an argv0.
+    /// An oversized consumer, reason or argv0 is refused before anything parks,
+    /// and each refusal names the broker's bound.
     #[test]
-    fn an_oversized_field_is_refused_with_its_own_cause() {
+    fn an_oversized_field_is_refused_with_the_bound() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let home = tmp_home("oversized-cause");
         seed_enrolled(&home, Policy::new("t", "scratch", "stored-value"));
         let events = home.join("events.jsonl");
         let parked = ParkRegistry::new();
         let long = "x".repeat(PARKED_FIELD_BYTES_MAX + 1);
-        let (consumer, reason) = with_redirected_audit_log(&home, || {
-            let consumer = handle_line(
-                &home,
-                &events,
-                &json!({"op": "resolve", "secret": "t", "consumer": long}).to_string(),
-                &parked,
-                &mut Vec::new(),
-                None,
-            );
-            let reason = handle_line(
-                &home,
-                &events,
-                &json!({"op": "resolve", "secret": "t", "consumer": "m", "reason": long}).to_string(),
-                &parked,
-                &mut Vec::new(),
-                None,
-            );
-            (consumer, reason)
+        let refuse = |request: Value| handle_line(&home, &events, &request.to_string(), &parked, &mut Vec::new(), None);
+        let (consumer, reason, argv0) = with_redirected_audit_log(&home, || {
+            (
+                refuse(json!({"op": "resolve", "secret": "t", "consumer": long})),
+                refuse(json!({"op": "resolve", "secret": "t", "consumer": "m", "reason": long})),
+                refuse(json!({"op": "resolve", "secret": "t", "consumer": "m", "argv0": long})),
+            )
         });
         assert_eq!(parked.list().len(), 0, "a refused field parks nothing");
-        assert!(
-            consumer["error"].as_str().unwrap_or_default().contains("The conductor cuts the consumer to one row"),
-            "{consumer}"
-        );
-        assert!(
-            reason["error"].as_str().unwrap_or_default().contains("The broker bounds each parked reason or argv0 at 4096 bytes"),
-            "{reason}"
-        );
+        let bound = format!("The broker bounds each parked field at {PARKED_FIELD_BYTES_MAX} bytes and {PARKED_FIELD_LINES_MAX} lines");
+        for (field, refusal) in [("consumer", &consumer), ("reason", &reason), ("argv0", &argv0)] {
+            assert!(refusal["error"].as_str().unwrap_or_default().contains(&bound), "{field}: {refusal}");
+        }
         std::fs::remove_dir_all(&home).ok();
     }
 

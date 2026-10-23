@@ -503,7 +503,9 @@
   The parked side's writes bound that wait: the reply's budget (10 s) after the
   reply's write starts, plus the rest of the interim line's write (at most
   another 10 s) when the approve landed during it. That report decides the audit
-  status (the approve reply in CONTRACTS.md).
+  status (the approve reply in CONTRACTS.md). A cut interim line ends the
+  stream: every outcome after it writes nothing more on that connection
+  (`Answer.delivery` is `Some(Delivery::Nothing)`).
   Don't add a "cache the value once fetched, in case the connection reads
   slowly" optimization to `ParkedAsk` — the value must exist ONLY inside
   the one send/receive handoff, same as everywhere else in this crate.
@@ -659,7 +661,8 @@
   actually needs it from a terminal.
 - **The wire's framing contract is "one request line -> zero or more
   INTERIM lines -> exactly one FINAL reply line" (P-N2c, FIX 1) — not
-  "one request, one reply."** An interim line is any line whose object
+  "one request, one reply."** No FINAL line follows an interim line that did
+  not reach the client whole. An interim line is any line whose object
   carries `"interim":true`; `broker::write_json_line` is the ONE place
   this crate formats a wire line, shared by `handle_conn`'s final-reply
   write and `handle_resolve`'s interim-line write, so a change to the line

@@ -1194,7 +1194,8 @@ and `aoided.lock` in the state dir, for that process's life. A second
 `aoided` refuses to start rather than replace either (`docs/architecture/
 AOIDED.md` "Socket"). It speaks the secrets wire's framing verbatim: one
 newline-delimited JSON request line → zero or more interim lines
-(`"interim":true`) → exactly one final reply line. Three ops, a closed set:
+(`"interim":true`) → exactly one final reply line, except after an interim
+line that did not reach the client whole. Three ops, a closed set:
 
 ```json
 {"v":0,"op":"ping"}
@@ -6546,17 +6547,18 @@ The framing (P-N2c,
 FIX 1): write ONE request line, then read **zero or more INTERIM lines
 followed by exactly one FINAL reply line** — an interim line is any line
 whose object carries `"interim":true`; the first line without it is the
-final reply and ends that request. Today the only interim line is the park
+final reply and ends that request. No final line follows an interim line that
+did not reach the client whole. Today the only interim line is the park
 announcement below; a future op/mode extends the wire by adding a new
 interim shape or a new `op`, never by overloading the final-reply shape or
 widening `wait` (a bool, see below) into something richer. The connection
 may be reused for further request/reply pairs or dropped after one — but a
 dropped connection is NOT free of state: a `resolve` that parked (below) IS
 per-connection state, held in the broker's in-memory registry until an
-`approve`/`dismiss` from another connection or the timeout resolves it: it
-is not delivered to a `resolve` reply from any other connection. Dropping
-the parked connection does not cancel the ask — it abandons it, unreachable
-until it times out (a corollary of the ask outliving that one socket).
+`approve`/`dismiss` from another connection, the timeout, or the hang-up
+probe resolves it: it is not delivered to a `resolve` reply from any other
+connection. Dropping the parked connection frees its ask at the next
+hang-up probe, as `hung-up`.
 
 **`resolve`** — read a secret's value:
 ```text
@@ -6610,7 +6612,9 @@ SAME requesting connection, before ever blocking on the wait:
 that predates it sends the line without the field, and a caller treats the
 field as optional. Then the final reply (granted/denied/dismissed/timed-out)
 comes as described below, and the audit's status words are listed with the
-approve reply. Without this line a caller has no way to learn its own
+approve reply. An interim line that does not reach the client whole ends the
+ask as `unreachable`, and nothing more is written on that connection. Without
+this line a caller has no way to learn its own
 ask's id short of a separate `pending` call raced against the park — `aoide
 secrets exec` prints it to STDERR as `parked as ask <id> — complete with:
 aoide secrets approve <id>  (or dismiss <id>); times out in <N>s` so an
@@ -6768,9 +6772,8 @@ Otherwise it is `"ok":false`, and the audit line's `status` says what the
 write did:
 
 - `granted`: every byte was written. The value counts as handed over.
-- `undelivered`: no byte was written. The `error` is `"approved, but nothing
-  reached the client: no byte of the reply was written, so the value was not
-  handed over"`.
+- `undelivered`: no byte was written. The `error` is `"approved, but the reply
+  was not written: no byte of it was sent, so the value was not handed over"`.
 - `partial`: the write failed or ran out of budget after part of the reply.
   The `error` is `"approved, but the reply was cut after N of M bytes: part
   of the value may have reached the client, so treat it as exposed"`, and
@@ -6791,8 +6794,11 @@ undelivered). A park that does not complete writes one of these words instead:
   was dropped and no value was released.
 - `dismissed`: a `dismiss` ended it.
 - `denied`: nothing was released. The ask was refused, or a step failed (a
-  policy-file, TOTP-secret or backend read, or an approve that took the ask and
-  ended without answering). The reason says which.
+  policy-file or backend read, or an approve that took the ask and ended
+  without answering). The reason says which.
+
+A failed TOTP-secret read ends that approve alone: its approve line says
+`denied`, and the ask stays parked.
 
 No completed notice is sent unless the status is `granted`.
 

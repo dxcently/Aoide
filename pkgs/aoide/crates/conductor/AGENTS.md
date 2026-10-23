@@ -225,11 +225,11 @@
   character takes two). They keep this order: the origin, the peer uid, the
   note that the code approves the ORIGINAL parked request, the reason, then
   the program. Below them is a fixed block of six rows: the secret, the
-  consumer, the `totp:` prompt, a gap, and the two-row hint, which a narrow
-  popup cuts. The secret and consumer rows are each cut to one row with an
-  ellipsis. The consumer's label is never cut by its name, and the label
-  itself is cut only on a popup under 25 columns. A typed code is cut from its
-  front, so the cursor stays on the row.
+  consumer, the `totp:` prompt, a gap, and the two-row hint. Each hint row is
+  drawn whole, never wrapped. The secret and consumer rows are each cut to one
+  row with an ellipsis. The minimum below leaves the consumer's label its room,
+  so the label is never cut. A typed code is cut from its front, so the cursor
+  stays on the row.
 - A secret name can be longer than a row. `valid_secret_name` (in
   `crates/secrets/src/policy.rs`) bounds the characters and the hyphens, not
   the length, and the broker's park check does not bound the secret either.
@@ -238,11 +238,12 @@
   the whole ask. If the room left is shorter than the marker's rows, the
   marker alone is drawn, cut to one row with an ellipsis. The minimum popup
   is derived from the fixed block, not picked: 9 rows (the 6 fixed rows, one
-  row for the marker, 2 borders) and 26 columns (the widest fixed label,
-  `consumer (unverified): `, 23 columns, plus 2 borders and one more). Below
-  either, the popup draws one notice line naming `aoide secrets approve <id>`
-  and no fixed row, and Enter sends nothing: the prompt stays open with its
-  code. The prompt tests the size the last frame drew (`App::frame`).
+  row for the marker, 2 borders) and 32 columns (the widest fixed row, the
+  hint's `An empty field sends nothing.`, 29 columns, plus 2 borders and one
+  more). Below either, the popup draws one notice line naming
+  `aoide secrets approve <id>` and no fixed row, and Enter sends nothing: the
+  prompt stays open with its code. The prompt tests the area the last draw
+  used (`App::frame`, from the frame `terminal.draw` returns).
   `approve` draws its own context before its prompt.
   The conductor does not render the origin itself; the secrets crate does,
   once, as `originLine`.

@@ -962,8 +962,9 @@ impl StatusRow {
 /// The whole conductor state.
 pub struct App {
     pub panel: Panel,
-    /// The terminal's size as the last frame drew it. The TOTP prompt sends
-    /// nothing below its popup's minimum, so its Enter reads this.
+    /// The area the last `terminal.draw` drew into, as the frame reports it.
+    /// The TOTP prompt sends nothing below its popup's minimum, so its Enter
+    /// reads this.
     pub frame: ratatui::layout::Rect,
     pub home_sel: usize,
     pub sidebar_focused: bool,
