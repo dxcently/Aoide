@@ -1758,7 +1758,7 @@ mod tests {
             }
             assert!(connected, "broker did not bind {} in time", socket_path.display());
 
-            let err = crate::client::resolve(&socket_path, "locked", "m", None, None, None).unwrap_err();
+            let err = crate::client::resolve(&socket_path, "locked", "m", None, None).unwrap_err();
             assert!(err.contains("no TOTP enrollment"), "{err}");
 
             drop(broker_thread);

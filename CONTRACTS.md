@@ -6549,11 +6549,12 @@ until it times out (a corollary of the ask outliving that one socket).
 
 **`resolve`** — read a secret's value:
 ```text
--> {"op":"resolve","secret":"<name>","consumer":"<consumer>","totp":"<code>"?,"argv0":"<cmd>"?,"reason":"<text>"?}
+-> {"op":"resolve","secret":"<name>","consumer":"<consumer>","argv0":"<cmd>"?,"reason":"<text>"?}
 <- {"ok":true,"value":"<value>"}
 <- {"ok":false,"error":"<message>"}
 ```
-`totp`/`argv0`/`reason` are optional. `reason` (P3) is free-text,
+`argv0`/`reason` are optional; a `totp` is refused (a code is approved, never
+resolved). `reason` (P3) is free-text,
 self-asserted, DISPLAY-ONLY context for why this ask exists — it only ever
 matters when the resolve PARKS (below): it rides onto the parked-ask registry
 row, the `pending` reply, and the `parked` events-feed line, for a popup/prompt
@@ -6570,11 +6571,10 @@ the next step's start and never carries a code (ruling 44, "Invariants held" in
 exited <status>"` (the backend's own stderr never rides this reply — it is
 `eprintln!`'d to the broker's own stderr only).
 
-**Parking (P-N2): a `requireTotp` resolve with no code now WAITS instead of
-refusing outright.** Before this phase, `"requireTotp is set but no totp
-code was provided"` was an immediate refusal. Now, when a policy's
-`totp_required` is `true`, an enrollment exists on this host, and `totp` is
-absent/empty on the wire, the broker instead PARKS the ask: it registers
+**Parking: a `requireTotp` resolve WAITS instead of being refused outright.**
+A resolve carries no code, so when a policy's `totp_required` is `true` and an
+enrollment exists on this host, the broker PARKS the ask (`wait:false` refuses
+it at once instead). It registers
 `{id, secret, consumer, requestedAt}` in an in-memory registry and holds the
 REQUESTING CONNECTION open — never storing or fetching a value at this
 point — until an operator completes it from a SEPARATE connection
@@ -6582,9 +6582,9 @@ point — until an operator completes it from a SEPARATE connection
 thread blocks on this wait; the broker's accept loop itself never blocks
 (thread-per-connection, `crates/secrets/src/broker.rs`'s module doc), so
 every OTHER connection — including a totally unrelated `resolve` — is
-admitted and served normally while one sits parked. A `resolve` WITH a
-non-empty `totp` is completely unaffected by this phase — same fast path,
-same errors, as before. An `automation`-open listed consumer (the gate
+admitted and served normally while one sits parked. A `resolve` that
+carries a `totp` is refused before the gate runs, and nothing parks. An
+`automation`-open listed consumer (the gate
 above) never parks either, exactly as it never required a code before.
 
 **The park announces itself (P-N2c, FIX 1).** The instant an ask parks, the
@@ -6699,8 +6699,8 @@ the ORIGINAL parked connection (never this reply):
 <- {"ok":true}
 <- {"ok":false,"error":"<message>"}
 ```
-Validated with the SAME RFC 6238 verify + single-use replay ledger an
-inline `resolve` code uses — the code is consumed identically either way.
+Validated with the RFC 6238 verify + single-use replay ledger every code
+check uses.
 An invalid/expired/already-used code leaves the ask PARKED (never removed)
 and the ledger UNBURNED, so a caller can simply retry with the right code,
 until the step's wrong-code budget is spent (ruling 44);

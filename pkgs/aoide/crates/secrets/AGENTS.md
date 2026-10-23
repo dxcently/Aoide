@@ -59,7 +59,7 @@
   host, never a silent downgrade to a standing grant in either
   direction.** `broker::resolve_gate`/`verify_totp_gate` (P-V3): no
   `totp.secret` -> reject outright, same wording as before P-V3;
-  enrolled -> verify the wire's `totp` code (`totp::verify`, `±1` window)
+  enrolled -> `approve` checks its code (`totp::verify`, `±1` window)
   and consume the matched timestep in the persisted
   `replay::ReplayLedger` — a missing/wrong/already-used code is an
   ordinary denial, the backend never runs. Don't let a `requireTotp`
@@ -161,7 +161,7 @@
   not planned).
 - **The TOTP wrong-code budget (ruling 44): at most three failed checks per
   30 s step, across every caller.** A check is a TOTP code verified by
-  `verify_totp_gate`, from approve or from a resolve that carries a code. A
+  `verify_totp_gate`, from approve. A
   failed check is a malformed code, an invalid or expired one, or an already
   used one, and each counts from any caller against `totp::timestep`'s step.
   A missing code is not a check, and an I/O failure never judged the code,
@@ -490,7 +490,7 @@
   ParkedAsk` carries only `secret`/`consumer`/`requested_at` and a private
   send-once channel; `broker::handle_approve` fetches the value fresh
   through the backend ONLY after a code has already validated
-  (`verify_totp_gate`, the SAME function an inline `resolve` code uses),
+  (`verify_totp_gate`, the one code check),
   and sends it straight down that channel — never holding it in the
   registry, never in `approve`'s own wire reply back to the operator.
   Don't add a "cache the value once fetched, in case the connection reads
@@ -561,8 +561,8 @@
 - **`resolve_gate` returns a `GateOutcome` (`Granted`/`Denied`/
   `NeedsTotp`), not a bare `Result` (P-N2 — replaced the old
   `(bool, Result<String,String>)` tuple).** `NeedsTotp` is the park
-  candidate: `totp_required` is true, an enrollment exists, but no/empty
-  code rode the wire — every OTHER `requireTotp`-true-with-no-enrollment
+  candidate: `totp_required` is true and an enrollment exists (a resolve
+  never carries a code) — every OTHER `requireTotp`-true-with-no-enrollment
   case is still an immediate `Denied` (unchanged wording), never a park,
   since there is nothing an operator could approve against. Don't collapse
   `NeedsTotp` back into `Denied` "since both come from the same missing-
@@ -700,8 +700,8 @@
   has already been released (P-N3, hard constraint).** No notification I/O
   happens while holding `park::ParkRegistry`'s internal `Mutex`,
   `broker::replay_ledger_lock` or `broker::totp_budget_lock` — every call site
-  (`handle_resolve`'s `Granted`/`NeedsTotp`-park/`WaitResult::TimedOut`/
-  `BudgetSpent` arms, `handle_approve`'s success and budget-refusal arms,
+  (`handle_resolve`'s `Granted`/`NeedsTotp`-park/`WaitResult::TimedOut`
+  arms, `handle_approve`'s success and budget-refusal arms,
   `handle_dismiss`'s found arm) fires only after the
   `ParkRegistry` method or `verify_totp_gate` call that produced its
   id/ask/grant has already returned (their own internal locks are
@@ -712,15 +712,11 @@
   this same guarantee rather than re-earning it** — don't call it from
   anywhere else without re-deriving the no-lock-held proof this note gives
   `emit_notify`'s own three call sites.
-- **`released` fires ONLY on a TOTP-free grant, never on a code-verified
-  one (P-N3).** `GateOutcome::Granted`'s `totp_free: bool` field is the ONE
-  place this is decided — set once in `resolve_gate` from the SAME
-  `totp_required` call that already gated the `if` (never a second policy
-  load to re-derive it). A resolve that validated its own inline `--totp`
-  code is granted exactly as before but must never notify — the caller
-  already knows, they just typed the code. Don't collapse `totp_free`
-  back out of `GateOutcome::Granted` "since both grant the same way" — it
-  is the only signal `handle_resolve` has to tell the two apart.
+- **`released` fires on every grant a resolve makes, and never on an
+  approve.** A resolve is granted only without a code (`totp_required` is
+  false: `requireTotp:false` or an automation-skip), so each grant it makes is
+  TOTP-free. `handle_approve` releases through the park and never notifies:
+  the person who typed the code already knows.
 - **No dedup or throttle on any notify event, deliberately (P-N3, User
   decision).** Every TOTP-free resolve fires its own `released` line, even
   a tight loop from the same consumer. Don't add a rate limit, a time
@@ -1225,13 +1221,13 @@
   or refuse a parked ask over the socket, same operator-side-not-admin-side
   shape `put`/`exec` already draw: `secrets pending` (lists asks, never a
   value), `secrets approve <id>` (reads the code, never from argv, and validates
-  it with the SAME `verify_totp_gate` an inline code uses, fetches fresh,
+  it with `verify_totp_gate`, fetches fresh,
   releases down the
   ORIGINAL connection — an invalid code leaves the ask parked, ledger
   unburned), `secrets dismiss <id>` (clean refusal to the original caller,
   no code needed). `resolve` gained one optional wire field, `wait`
   (default `true`) — `wait:false` is the wire-only (no CLI flag) escape
-  hatch back to the pre-P-N2 immediate refusal. Timeout is
+  hatch that refuses at once. Timeout is
   `AOIDE_SECRETS_PARK_TIMEOUT` (default 300s, env-only — no config-file
   knob exists in this crate for numeric settings, and none was invented for
   this). A future phase adding a code-entry UI (a popup, a notification)

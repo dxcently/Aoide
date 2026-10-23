@@ -555,18 +555,16 @@ pub fn resolve(
     socket_path: &Path,
     secret: &str,
     consumer: &str,
-    totp: Option<&str>,
     argv0: Option<&str>,
     reason: Option<&str>,
 ) -> Result<String, String> {
-    resolve_with(socket_path, secret, consumer, totp, argv0, reason, &mut announce_interim)
+    resolve_with(socket_path, secret, consumer, argv0, reason, &mut announce_interim)
 }
 
 fn resolve_with(
     socket_path: &Path,
     secret: &str,
     consumer: &str,
-    totp: Option<&str>,
     argv0: Option<&str>,
     reason: Option<&str>,
     on_interim: &mut dyn FnMut(&Value),
@@ -580,9 +578,6 @@ fn resolve_with(
     })?;
 
     let mut req = json!({ "op": "resolve", "secret": secret, "consumer": consumer });
-    if let Some(t) = totp {
-        req["totp"] = Value::String(t.to_string());
-    }
     if let Some(a) = argv0 {
         req["argv0"] = Value::String(a.to_string());
     }
@@ -1591,7 +1586,6 @@ pub(crate) fn resolve_for_exec(socket_path: &Path, args: &ExecArgs, out: &mut im
         socket_path,
         &args.secret,
         &args.consumer,
-        None,
         args.cmd.first().map(String::as_str),
         args.reason.as_deref(),
         &mut on_interim,
@@ -2133,7 +2127,7 @@ mod tests {
     #[test]
     fn resolve_against_a_dead_socket_is_a_connect_error() {
         let dead = Path::new("/tmp/aoide-secrets-nonexistent-test.sock");
-        let err = resolve(dead, "t", "m", None, None, None).unwrap_err();
+        let err = resolve(dead, "t", "m", None, None).unwrap_err();
         assert!(err.contains("connecting"), "{err}");
     }
 
@@ -2292,7 +2286,7 @@ mod tests {
         assert_eq!(pending(&socket_path).unwrap(), Vec::new());
 
         let sock_for_resolve = socket_path.clone();
-        let resolve_thread = std::thread::spawn(move || resolve(&sock_for_resolve, "t", "m", None, None, None));
+        let resolve_thread = std::thread::spawn(move || resolve(&sock_for_resolve, "t", "m", None, None));
 
         let mut ask = None;
         for _ in 0..200 {
@@ -2378,7 +2372,7 @@ mod tests {
         // here as a reminder that FIX 1's new loop sits strictly AFTER the
         // connect step, never wrapping it.
         let dead = Path::new("/tmp/aoide-secrets-nonexistent-interim-test.sock");
-        let err = resolve(dead, "t", "m", None, None, None).unwrap_err();
+        let err = resolve(dead, "t", "m", None, None).unwrap_err();
         assert!(err.contains("connecting"), "{err}");
     }
 
@@ -3262,7 +3256,7 @@ mod argv_free_tests {
         let socket = real_broker(&home, "c1-no-leak");
         let parked = {
             let socket = socket.clone();
-            std::thread::spawn(move || resolve(&socket, "locked", "m", None, None, None))
+            std::thread::spawn(move || resolve(&socket, "locked", "m", None, None))
         };
         let id = wait_for_park(&socket);
         let code = code_now(&secret);

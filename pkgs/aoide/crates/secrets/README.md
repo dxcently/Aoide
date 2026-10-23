@@ -72,17 +72,18 @@ the secret opts in. The three axes never conflate: `remote` = transport
 (may the secret be SERVED non-locally), `automation` = code (may a listed
 consumer skip TOTP), `allowRemoteOrigin` = caller provenance (may a
 session a REMOTE NODE created resolve it locally). See "The origin gate"
-below for the gate order and the exact boundary. **P-N2 (this commit) parks a
-`requireTotp` resolve with no code instead of refusing it outright**: the
-requesting connection now WAITS (default 300s, `AOIDE_SECRETS_PARK_TIMEOUT`
+below for the gate order and the exact boundary. **A `requireTotp` resolve
+parks instead of being refused outright**: the requesting connection WAITS
+(default 300s, `AOIDE_SECRETS_PARK_TIMEOUT`
 to change it) while the ask is completed from a SEPARATE connection —
 `secrets pending`/`secrets approve <id>`/`secrets dismiss <id>` — or the
 timeout elapses. This is what moved [`broker::serve`] from
 a single-threaded serial accept loop to thread-per-connection (a parked
 connection must never stall every other client behind it on `accept(2)`) —
-see "Parking a TOTP resolve" below for the full lifecycle. A resolve WITH
-a code is completely unchanged; the wire's new `wait:false` field restores
-the pre-P-N2 immediate refusal for a caller that can't type a code.
+see "Parking a TOTP resolve" below for the full lifecycle. A resolve that
+carries a `totp` is refused: a code is approved, never resolved. The wire's
+`wait:false` field refuses a `requireTotp` resolve at once, for a caller that
+would rather fail fast.
 **P-N3 (this commit) fires a NAME-ONLY notification on every notable broker
 event** — `released` (a TOTP-free grant: `requireTotp:false`, or an
 automation-skip), `parked`, `completed` (a successful `approve`),
@@ -112,8 +113,8 @@ timestep, stop mattering the moment the secret changes).
 A `requireTotp: true` policy is UNRESOLVABLE only when NO enrollment
 exists on this host yet — the broker rejects it with "no TOTP enrollment
 on this host yet", never a silent standing-grant fallback. Once enrolled,
-`broker::resolve_gate` verifies the wire's `totp` code against the
-enrolled secret (`±1`-timestep window) and consumes the matched timestep
+`broker::verify_totp_gate` checks a code typed on `secrets approve` against
+the enrolled secret (`±1`-timestep window) and consumes the matched timestep
 in a persisted `replay::ReplayLedger` — a missing, wrong, or replayed
 code is a denial, same as any other gate failure (the backend never
 runs).
@@ -286,7 +287,7 @@ A longer line gets one refusal, `{"ok":false,"error":"a request line is over
 byte past the cap, so an unterminated line never grows its buffer.
 
 ```
--> {"op":"resolve","secret":"<name>","consumer":"<consumer>","totp":"<code>"?,"argv0":"<cmd>"?,"wait":<bool>?,"reason":"<text>"?}
+-> {"op":"resolve","secret":"<name>","consumer":"<consumer>","argv0":"<cmd>"?,"wait":<bool>?,"reason":"<text>"?}
 <- {"interim":true,"parked":true,"id":"<id>","timeoutSecs":<N>,"expiresAt":<unix-seconds>}
                                                       (INTERIM, only when this
                                                       resolve parks; never on
@@ -366,8 +367,9 @@ interactive caller learns its own ask id immediately rather than watching a
 silent hang that is indistinguishable from a wedged broker for up to
 `AOIDE_SECRETS_PARK_TIMEOUT` seconds.
 
-`totp`/`argv0`/`wait`/`reason` are optional on `resolve` (`wait` defaults to
-`true` — see "Parking a TOTP resolve" below); `put` has neither, but gained
+`argv0`/`wait`/`reason` are optional on `resolve` (`wait` defaults to
+`true` — see "Parking a TOTP resolve" below); a `totp` on `resolve` is
+refused. `put` has none of these, but gained
 `overwrite` at P-67 (also optional — absent means `false`, same shape as
 `resolve`'s own optional fields). `consumer` is SELF-ASSERTED (the V1
 ruling `replay.rs` carries): the policy's `consumers[]` list is the real
@@ -403,10 +405,10 @@ UNTRUSTED DISPLAY DATA — `comm` in particular is PROCESS-CONTROLLED text
 (`prctl(PR_SET_NAME, ...)` lets any process name itself anything) — a
 surface renders it, never interprets it, the same posture `consumer`/
 `reason` already hold; `null` per field when unknown, never an error.
-`totp` is consulted ONLY when the resolved policy has `requireTotp: true`
-(`broker::verify_totp_gate`) — on a policy without it, or on a `put` (never
-checked at all), `totp` rides the wire unread if present, same as before
-P-V3. The `exists` flag on a denied `put` is what a consumer of this wire
+`totp` is read ONLY by `approve`, and only when the parked ask's policy has
+`requireTotp: true` (`broker::verify_totp_gate`). A `resolve` that carries a
+`totp` is refused before the gate runs, and a `put` never reads one. The
+`exists` flag on a denied `put` is what a consumer of this wire
 checks — never string-matching the `error` text — to tell "already has a
 value" apart from every other denial.
 
@@ -572,8 +574,8 @@ agent  -> aoide secrets exec --as m --secret db-prod -- psql        (no --totp)
 operator -> aoide secrets pending                          (a SEPARATE connection)
          <- [{"id":"3f2a-3","secret":"db-prod","consumer":"m","requestedAt":...}]
          -> aoide secrets approve 3f2a-3       (a THIRD connection; reads the code)
-         -> broker: verify_totp_gate("123456") — SAME RFC 6238 verify +
-            replay ledger an inline `--totp` code uses
+         -> broker: verify_totp_gate("123456") — the RFC 6238 verify +
+            replay ledger every code check uses
             -> valid: re-run the FULL authorization gate (exists + consumer
                authorized, P-N2c FIX 2, see below) against the ask's STORED
                consumer BEFORE fetching — then fetch fresh through the
@@ -859,13 +861,11 @@ check of that step that the budget refuses untested ("Invariants held"
 below). It is name-only, so `watch::parse_notify_line` reads it before it
 requires a `secret` or `consumer`, and `secrets watch` prints one line for it.
 
-`released` fires ONLY on a TOTP-free grant — `requireTotp:false`, or an
-automation-skip (P-N1's `automation.enabled` + a listed consumer) — never on
-a resolve that validated its own inline `--totp` code: the caller just typed
-the code themselves, there is nothing for a desktop popup to tell them.
-`GateOutcome::Granted`'s `totp_free` field (`broker.rs`) is the ONE place
-this distinction is recorded, right where `resolve_gate` already decides
-`totp_required` — see `broker.rs`'s own doc on that variant.
+`released` fires on every grant a resolve makes. A resolve is granted only
+without a code (`requireTotp:false`, or an automation-skip: P-N1's
+`automation.enabled` + a listed consumer), so each such grant is TOTP-free. A
+value released by an `approve` never fires it: a person typed that code and
+already knows.
 
 **No dedup, no throttle — deliberate (User decision, this phase).** Every
 TOTP-free resolve fires its own `released` line, even a hundred calls in a
@@ -2321,10 +2321,8 @@ Daemon/socket/CLI (P-V2, extended P-V3):
   routes through — see "Broker notifications" above for the exact shapes
   and the two destinations it writes (the SAME `append_own_log`/
   `aoide_protocol::audit` primitives every `audit_*` function already
-  uses); `GateOutcome::Granted` grew a `totp_free: bool` field (set once, in
-  `resolve_gate`, from the SAME `totp_required` call that already gated the
-  `if`) so `handle_resolve` can tell a TOTP-free grant apart from a
-  code-verified one without a second policy load.
+  uses). A `resolve` grant is always TOTP-free, so `handle_resolve` fires
+  `released` on every `Granted`; an approve never does.
 - `client` — `resolve` (one round trip over the socket, now via
   `read_final_reply` — P-N2c FIX 1: loops reading lines, consuming and
   `announce_interim`-ing any `"interim":true` line, returning the first
