@@ -228,16 +228,16 @@
         ]
       },
       "locked": {
-        "lastModified": 1792260086,
-        "narHash": "sha256-6eAY4e02zQoGLtO5ijoRO+rFBREtZY4gbkT5evmaezY=",
+        "lastModified": 1792725183,
+        "narHash": "sha256-AJYxqRu1CmctEr9T1rLAYQlXnwCfBPoMobigVvmUtRM=",
         "owner": "dxcently",
         "repo": "habit",
-        "rev": "4e1a5d69649e98f1db65605c0683f54a5314cb13",
+        "rev": "676cccc3423922f768da89e6d8e049e81e96f248",
         "type": "github"
       },
       "original": {
         "owner": "dxcently",
-        "ref": "v0.5.0",
+        "ref": "v0.7.0",
         "repo": "habit",
         "type": "github"
       }
