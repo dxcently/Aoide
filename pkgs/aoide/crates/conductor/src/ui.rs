@@ -2141,6 +2141,35 @@ mod tests {
         );
     }
 
+    /// The approve popup draws the requester's program whole. A 3 KiB argv0 is
+    /// not clipped at ingest, and the popup wraps it, so its last characters are
+    /// on screen.
+    #[test]
+    fn the_totp_popup_draws_a_long_program_to_its_last_character() {
+        let program = format!("{} tail-marker", "p ".repeat(1536));
+        let mut a = App::for_test(vec![], vec![], vec![]);
+        a.secrets_pending = Some(
+            aoide_protocol::output::Outcome::ok("secrets.pending", "1 pending").with_data(serde_json::json!({
+                "pending": [{
+                    "id": "7", "secret": "db", "consumer": "psql", "requestedAt": 1789862400,
+                    "peerUid": 1000, "reason": "nightly", "argv0": program,
+                }],
+            })),
+        );
+        let ask = a.secret_ask_rows().remove(0);
+        a.input = Some(crate::app::Input {
+            label: "TOTP for secrets approve #7".to_string(),
+            buffer: String::new(),
+            step: 0,
+            collected: Vec::new(),
+            kind: crate::app::InputKind::TotpCode { ask },
+        });
+        let mut term = Terminal::new(TestBackend::new(100, 90)).unwrap();
+        term.draw(|f| draw(f, &a)).unwrap();
+        let out = dump(term.backend().buffer());
+        assert!(out.contains("tail-marker"), "the program's last characters are on screen: {out}");
+    }
+
     /// A pending row is a human view of text someone else wrote: an ESC, a
     /// newline and a bidi override show as visible escapes in it, never raw.
     #[test]

@@ -693,7 +693,9 @@ pub struct SecretAskRow {
     pub requested_at: String,
     pub peer_uid: Option<String>,
     /// The requester's claims, shown under a claims label on the review row and
-    /// each cleaned as it is read. `None` when the ask carries none.
+    /// each cleaned as it is read: `reason` by `clean_line`, `argv0` only of its
+    /// unsafe characters, so the popup wraps the whole program. `None` when the
+    /// ask carries none.
     pub reason: Option<String>,
     pub argv0: Option<String>,
     pub origin_line: Option<String>,
@@ -2182,7 +2184,7 @@ impl App {
                     .map(scalar_text)
                     .filter(|s| !s.is_empty()),
                 reason: v.get("reason").and_then(|r| r.as_str()).map(aoide_protocol::untrusted::clean_line),
-                argv0: v.get("argv0").and_then(|a| a.as_str()).map(aoide_protocol::untrusted::clean_line),
+                argv0: v.get("argv0").and_then(|a| a.as_str()).map(aoide_protocol::untrusted::strip_unsafe),
                 origin_line: v.get("originLine").and_then(|o| o.as_str()).map(aoide_protocol::untrusted::clean_line),
             })
             .collect()

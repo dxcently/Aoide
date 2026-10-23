@@ -213,8 +213,10 @@
   `approve_with`, in the child's own process); and the worker's copy when a
   panic leaves the closure before its wipe.
 - An ask's `reason`, `argv0` and `originLine` (from `secrets pending
-  --json`) are the requester's claims. They are cleaned with `clean_line`
-  when the row is read. The review row and the TOTP popup draw the same
+  --json`) are the requester's claims. `reason` and `originLine` are cleaned
+  with `clean_line` when the row is read. `argv0` is stripped of its unsafe
+  characters and not clipped, so the popup wraps the whole program (the broker
+  bounds it at 4096 bytes). The review row and the TOTP popup draw the same
   claim lines (`SecretAskRow::claim_lines`), labelled unverified. The popup
   adds the peer uid and puts the secret and consumer on the line directly
   above `totp:`. `approve` draws its own context before its prompt, and the
