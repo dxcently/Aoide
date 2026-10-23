@@ -2621,9 +2621,18 @@ mod tests {
         std::fs::remove_file(&sock).ok();
     }
 
+    /// The escapes a Rust string literal writes for ASCII whitespace. A source
+    /// file holds the escape, not the byte, so the scan reads each one as a space.
+    const WHITESPACE_ESCAPES: [&str; 15] = [
+        r"\t", r"\n", r"\r", r"\x09", r"\x0a", r"\x0b", r"\x0c", r"\x0d", r"\x20",
+        r"\u{9}", r"\u{a}", r"\u{b}", r"\u{c}", r"\u{d}", r"\u{20}",
+    ];
+
     /// True when `line` holds `--totp` followed by whitespace or `=` and a token.
-    /// A backticked `--totp`, the prose that refuses it, is not one.
+    /// A backticked `--totp`, the prose that refuses it, is not one. Whitespace
+    /// spelled as one of `WHITESPACE_ESCAPES` counts as whitespace.
     fn teaches_totp_in_argv(line: &str) -> bool {
+        let line = WHITESPACE_ESCAPES.iter().fold(line.to_string(), |text, escape| text.replace(*escape, " "));
         line.match_indices("--totp").any(|(at, flag)| {
             let rest = &line[at + flag.len()..];
             let separator = rest.chars().take_while(|c| c.is_whitespace() || *c == '=').count();
@@ -2632,14 +2641,16 @@ mod tests {
     }
 
     /// The Rust source with each test module blanked: from its `mod` line through
-    /// the `}` that closes it at column zero, as rustfmt writes it. Blank lines
-    /// keep the line numbers, and code after a test module is kept.
+    /// the first line whose first column is `}`, the one that closes it as rustfmt
+    /// writes it. A comment after that brace (`} // tests`) still closes it, and an
+    /// indented `}` inside it does not. Blank lines keep the line numbers, and code
+    /// after a test module is kept.
     fn without_test_modules(text: &str) -> String {
         let mut kept = String::with_capacity(text.len());
         let (mut after_attribute, mut in_module) = (false, false);
         for line in text.lines() {
             if in_module {
-                in_module = line != "}";
+                in_module = !line.starts_with('}');
                 kept.push('\n');
                 continue;
             }
@@ -2773,6 +2784,47 @@ mod tests {
         std::fs::remove_dir_all(&dir).ok();
         assert!(hits.iter().any(|h| h.starts_with("tab.rs:1:")), "a tab after --totp must be flagged: {hits:?}");
         assert!(hits.iter().any(|h| h.starts_with("after.rs:9:")), "a line after a test module must be flagged: {hits:?}");
+    }
+
+    /// A Rust string literal spells whitespace as an escape, and the scan reads
+    /// `\t`, `\n` and the other whitespace escapes as the separator they spell.
+    /// Each plant holds the escape text, as a source file does.
+    #[test]
+    fn the_totp_scan_reads_a_whitespace_escape_as_a_separator() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let dir = std::env::temp_dir().join(format!("aoide-totp-scan-escape-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("escape.rs"),
+            "let tab = \"aoide secrets exec --totp\\t123456 -- psql\";\nlet newline = \"aoide secrets exec --totp\\n123456 -- psql\";\nlet hex = \"aoide secrets exec --totp\\x20123456 -- psql\";\n",
+        )
+        .unwrap();
+        let mut hits = Vec::new();
+        totp_teaching_hits(&dir, &dir, &mut hits);
+        std::fs::remove_dir_all(&dir).ok();
+        for line in [1, 2, 3] {
+            assert!(hits.iter().any(|h| h.starts_with(&format!("escape.rs:{line}:"))), "an escape after --totp must be flagged on line {line}: {hits:?}");
+        }
+    }
+
+    /// A test module ends at its first column-zero `}`, a comment after the brace
+    /// or not. An indented `}` inside it does not end it, so a line still inside
+    /// the module stays blanked.
+    #[test]
+    fn the_totp_scan_ends_a_test_module_at_a_column_zero_brace() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let dir = std::env::temp_dir().join(format!("aoide-totp-scan-brace-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("brace.rs"),
+            "fn f() {}\n\n#[cfg(test)]\nmod tests {\n    #[test]\n    fn t() {\n    }\n    // aoide secrets exec --totp 123456 -- psql\n} // tests\n\n// aoide secrets exec --totp 123456 -- psql\n",
+        )
+        .unwrap();
+        let mut hits = Vec::new();
+        totp_teaching_hits(&dir, &dir, &mut hits);
+        std::fs::remove_dir_all(&dir).ok();
+        assert!(hits.iter().any(|h| h.starts_with("brace.rs:11:")), "a line after a commented closing brace must be flagged: {hits:?}");
+        assert!(!hits.iter().any(|h| h.starts_with("brace.rs:8:")), "a line inside the module stays blanked: {hits:?}");
     }
 }
 
