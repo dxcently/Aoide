@@ -581,8 +581,10 @@
   broker does not validate comm, hostname or username, so
   `watch::format_origin_line` cleans them at display. The secret needs no
   check here: `policy::valid_secret_name` admits no such character at add, at
-  put, or in any admin op (`broker::handle_admin` checks every name it takes,
-  and a grant's or revoke's consumer for control and invisible characters).
+  put, or in any admin op (`broker::handle_admin` checks every name it takes).
+  Every consumer on add, grant, revoke and automate, and the migrate target, is
+  checked for control and invisible characters in `admin.rs` (`check_plain`),
+  on the wire and in the CLI alike.
 - **A parked ask's argv0 is a claim the approve screen shows, never a
   gate.** `park::ParkedAsk::argv0` is the resolve's argv0, kept whole under
   the parked-field bound, and `approve_context` prints it as the program the

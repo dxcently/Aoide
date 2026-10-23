@@ -1513,6 +1513,21 @@ mod tests {
     }
 
     #[test]
+    fn cli_add_and_grant_refuse_an_unsafe_consumer_and_change_nothing() {
+        with_secrets_home("cli-unsafe-consumer", |home| {
+            let add = inv(Door::Cli, &["secrets", "add"], &["t"], &[("backend", "pass"), ("key", "x"), ("consumers", "m\nx")]);
+            assert_ne!(run(&add).status, Status::Ok, "add must refuse a consumer with a line break");
+            assert!(store::load_policies(home).map(|p| p.is_empty()).unwrap_or(true), "a refused add writes no policy");
+
+            let add_ok = inv(Door::Cli, &["secrets", "add"], &["t"], &[("backend", "pass"), ("key", "x")]);
+            assert_eq!(run(&add_ok).status, Status::Ok);
+            let grant = inv(Door::Cli, &["secrets", "grant"], &["t", "m\u{202e}x"], &[]);
+            assert_ne!(run(&grant).status, Status::Ok, "grant must refuse a bidi override");
+            assert!(store::load_policies(home).unwrap()[0].consumers.is_empty(), "a refused grant writes nothing");
+        });
+    }
+
+    #[test]
     fn grant_on_an_unknown_secret_is_an_error() {
         with_secrets_home("grant-unknown", |_home| {
             let grant = inv(Door::Cli, &["secrets", "grant"], &["nope", "m"], &[]);

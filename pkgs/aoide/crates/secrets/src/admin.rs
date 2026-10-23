@@ -19,10 +19,11 @@
 //! belongs entirely to whichever caller is invoking it, matching the
 //! `home::admin_identity_check`/`broker::handle_admin` split.
 //!
-//! **Name and consumer characters are checked in `broker::handle_admin`, before
-//! any function here runs, on the wire and the CLI alike: `valid_secret_name`
-//! for every name, `is_unsafe` for a grant's or revoke's consumer.** The CLI
-//! also validates on its own path (`commands.rs`). "on"/"off" spelling and
+//! **Names are checked in `broker::handle_admin`, before any function here runs:
+//! `valid_secret_name` for every name.** The CLI also validates names on its own
+//! path (`commands.rs`). Consumers and the migrate target are checked by each
+//! function here (`check_plain`, `is_unsafe`), so the wire and the CLI refuse
+//! the same input. "on"/"off" spelling and
 //! `<name> <consumer>` presence are checked only in `commands.rs`. A wire-side
 //! `{op:"admin"}` request that omits a required field, or spells
 //! `state`/`action` wrong, gets a plain `Err(String)` from the function
@@ -89,6 +90,19 @@ fn policy_io_error(home: &Path, err: std::io::Error) -> String {
     home::describe_home_file_error(home, &store::policy_path(home), &err)
 }
 
+/// Refuses a consumer or a migrate target a person would read as fake text: one
+/// that holds a control, format or invisible character (ruling 79's set). Each
+/// function here calls it before its first write, so a refused request leaves
+/// `policy.json` as it was.
+fn check_plain(what: &str, text: &str) -> Result<(), String> {
+    if text.chars().any(aoide_protocol::untrusted::is_unsafe) {
+        return Err(format!(
+            "refused: the {what} holds a control or invisible character. A {what} is shown to a person exactly as written, so send it as plain text"
+        ));
+    }
+    Ok(())
+}
+
 /// `secrets add <name> --key <key> [--backend <backend>]` — the same
 /// existence check, `Policy::new`, and `requireTotp`/`consumers` seeding
 /// `commands::handle_secrets_add` ran inline before this phase.
@@ -100,6 +114,9 @@ pub fn add(
     require_totp: bool,
     consumers: Vec<String>,
 ) -> Result<AdminOutcome, String> {
+    for consumer in &consumers {
+        check_plain("consumer", consumer)?;
+    }
     let mut policies = store::load_policies(home).map_err(|e| policy_io_error(home, e))?;
     if policies.iter().any(|p| p.name == name) {
         return Err(format!("secret `{name}` already has a policy — use `secrets rm` first"));
@@ -127,6 +144,7 @@ pub fn rm(home: &Path, name: &str) -> Result<AdminOutcome, String> {
 /// Shared shape behind `grant`/`revoke` — mirrors `commands::edit_consumer`'s
 /// old inline body exactly, minus the `Invocation`/gate plumbing.
 fn edit_consumer(home: &Path, name: &str, consumer: &str, edit: impl FnOnce(&mut Vec<String>, &str)) -> Result<AdminOutcome, String> {
+    check_plain("consumer", consumer)?;
     let mut policies = store::load_policies(home).map_err(|e| policy_io_error(home, e))?;
     let Some(policy) = policies.iter_mut().find(|p| p.name == name) else {
         return Err(no_policy(name));
@@ -228,6 +246,7 @@ pub fn automate_toggle(home: &Path, name: &str, want: bool) -> Result<AdminOutco
 /// `false` for `revoke`. The broker checks `name` and `consumer`'s characters
 /// before this call (`broker::handle_admin`).
 pub fn automate_consumer(home: &Path, name: &str, consumer: &str, want_listed: bool) -> Result<AdminOutcome, String> {
+    check_plain("consumer", consumer)?;
     let mut policies = store::load_policies(home).map_err(|e| policy_io_error(home, e))?;
     let Some(policy) = policies.iter_mut().find(|p| p.name == name) else {
         return Err(no_policy(name));
@@ -294,6 +313,7 @@ impl MigrateError {
 /// See [`MigrateError`] for why the `Err` arm carries the source backend
 /// name alongside the message, not just the message.
 pub fn migrate(home: &Path, door: Door, name: &str, target: &str) -> Result<(AdminOutcome, String, String), MigrateError> {
+    check_plain("target", target).map_err(MigrateError::unknown_source)?;
     let mut policies = store::load_policies(home).map_err(|e| MigrateError::unknown_source(policy_io_error(home, e)))?;
     let Some(policy) = policies.iter_mut().find(|p| p.name == name) else {
         return Err(MigrateError::unknown_source(no_policy(name)));
@@ -350,4 +370,40 @@ pub fn migrate(home: &Path, door: Door, name: &str, target: &str) -> Result<(Adm
         ),
     };
     Ok((AdminOutcome::changed(message, format!("policy:{name}")), source, target.to_string()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn tmp_home(tag: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("aoide-secrets-admin-test-{tag}-{}", std::process::id()));
+        std::fs::remove_dir_all(&dir).ok();
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// Every path that writes a consumer, and the migrate target, refuses a line
+    /// break and a bidi override before it touches `policy.json`. The wire and
+    /// the CLI both call these functions, so one test covers both.
+    #[test]
+    fn each_consumer_and_target_path_refuses_a_planted_character_and_writes_nothing() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let home = tmp_home("consumer-checks");
+        add(&home, "t", "scratch", "k", false, vec![]).expect("the secret to write on");
+        let before = store::load_policies(&home).unwrap();
+        for planted in ["m\nx", "m\u{202e}x"] {
+            assert!(add(&home, "u", "scratch", "k", false, vec![planted.to_string()]).is_err(), "add: {planted:?}");
+            assert!(grant(&home, "t", planted).is_err(), "grant: {planted:?}");
+            assert!(revoke(&home, "t", planted).is_err(), "revoke: {planted:?}");
+            assert!(automate_consumer(&home, "t", planted, true).is_err(), "automate grant: {planted:?}");
+            assert!(automate_consumer(&home, "t", planted, false).is_err(), "automate revoke: {planted:?}");
+            let Err(refused) = migrate(&home, Door::Cli, "t", &format!("scratch{planted}")) else {
+                panic!("migrate must refuse the target {planted:?}");
+            };
+            assert!(refused.message.contains("control or invisible"), "migrate target {planted:?}: {}", refused.message);
+        }
+        assert_eq!(store::load_policies(&home).unwrap(), before, "a refused consumer or target writes nothing");
+        std::fs::remove_dir_all(&home).ok();
+    }
 }

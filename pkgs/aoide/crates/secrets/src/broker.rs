@@ -1509,12 +1509,6 @@ fn handle_admin(secrets_home: &Path, req: &Value, peer: Option<crate::peercred::
         audit_admin(secrets_home, subcommand, "", false, Some(&reason), peer_uid);
         return json!({"ok": false, "error": reason});
     }
-    let consumer = str_field("consumer");
-    if matches!(subcommand, "grant" | "revoke") && consumer.chars().any(aoide_protocol::untrusted::is_unsafe) {
-        let reason = "refused: the consumer holds a control or invisible character. A consumer is shown to a person exactly as written, so send it as plain text".to_string();
-        audit_admin(secrets_home, subcommand, &name, false, Some(&reason), peer_uid);
-        return json!({"ok": false, "error": reason});
-    }
     let result: Result<crate::admin::AdminOutcome, String> = {
         // `put_lock`'s critical section covers exactly the mutation call —
         // never the audit write that follows (P-N3's "no lock held across
@@ -5993,6 +5987,32 @@ mod tests {
 
     /// `grant` refuses a consumer holding a control or invisible character,
     /// and the secret's consumer list is unchanged.
+    #[test]
+    fn admin_add_and_revoke_refuse_an_unsafe_consumer_and_change_nothing() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let home = tmp_home("admin-add-revoke-unsafe");
+        let parked = Arc::new(ParkRegistry::new());
+        with_redirected_audit_log(&home, || {
+            crate::admin::add(&home, "t", "scratch", "k", false, vec!["m".to_string()]).expect("the secret to revoke from");
+            let added = admin_over_real_connection(
+                &home,
+                &parked,
+                json!({"op": "admin", "command": "add", "name": "u", "backend": "scratch", "key": "k", "consumers": ["m\nx"]}),
+            );
+            assert_eq!(added["ok"], false, "an add with a line break must be refused: {added}");
+            let revoked = admin_over_real_connection(
+                &home,
+                &parked,
+                json!({"op": "admin", "command": "revoke", "name": "t", "consumer": "m\u{202e}x"}),
+            );
+            assert_eq!(revoked["ok"], false, "a revoke with a bidi override must be refused: {revoked}");
+        });
+        let policies = crate::store::load_policies(&home).unwrap();
+        assert_eq!(policies.len(), 1, "a refused add creates no policy");
+        assert_eq!(policies[0].consumers, vec!["m".to_string()], "a refused revoke removes nothing");
+        std::fs::remove_dir_all(&home).ok();
+    }
+
     #[test]
     fn admin_grant_with_a_control_character_in_the_consumer_is_refused_and_changes_nothing() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
