@@ -288,7 +288,8 @@ and checks the cap after each one, so an unterminated line holds at most the
 cap plus one chunk.
 
 ```
--> {"op":"resolve","secret":"<name>","consumer":"<consumer>","argv0":"<cmd>"?,"wait":<bool>?,"reason":"<text>"?}
+-> {"op":"resolve","secret":"<name>","consumer":"<consumer>",
+    "argv0":"<cmd>"?,"wait":<bool>?,"reason":"<text>"?}
 <- {"interim":true,"parked":true,"id":"<id>","timeoutSecs":<N>,"expiresAt":<unix-seconds>}
                                                       (INTERIM, only when this
                                                       resolve parks; never on

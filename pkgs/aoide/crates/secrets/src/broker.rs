@@ -46,7 +46,8 @@
 //!
 //! Wire (`resolve`/`put`/`pending`/`status`/`approve`/`dismiss`):
 //! ```text
-//! -> {"op":"resolve","secret":"<name>","consumer":"<consumer>","argv0":"<cmd>"?,"wait":<bool>?}
+//! -> {"op":"resolve","secret":"<name>","consumer":"<consumer>",
+//!    "argv0":"<cmd>"?,"wait":<bool>?}
 //! <- {"ok":true,"value":"<value>"}                    (granted — immediately, or after a park completes)
 //! <- {"ok":false,"error":"<value-free message>"}      (denied/error/timeout/dismissed)
 //!
@@ -5285,8 +5286,8 @@ mod tests {
         std::fs::remove_dir_all(&home).ok();
     }
 
-    /// Each wire writer the review names (approve, dismiss, put and the admin
-    /// gate) writes a planted bidi override and C1 control escaped, in both logs.
+    /// Each wire writer (approve, dismiss, put and the admin gate) writes a
+    /// planted bidi override and C1 control escaped, in both logs.
     #[test]
     fn every_wire_writer_escapes_a_planted_bidi_override_and_c1_control() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());

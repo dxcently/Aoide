@@ -208,7 +208,8 @@
 - `wipe_text` zeroes a typed code in place with volatile writes, on the prompt's
   buffer and on the worker's trimmed copy. Residual, not wiped here: the
   allocation `Input::buffer` gave up when it grew while the code was typed; the
-  `format!` line that carries the code to the child's stdin (`run_approve_child`);
+  `format!` line that carries the code to the child's stdin
+  (`run_approve_child`);
   the JSON approve request the child builds with the code in it (`client`'s
   `approve_with`, in the child's own process); and the worker's copy when a
   panic leaves the closure before its wipe.
