@@ -95,11 +95,11 @@ phase chose (and the one it didn't), and the no-dedup decision.
 
 **`secrets watch` (this commit, tracker #71 Part 1) is the terminal
 completion surface P-N2's own doc named as its eventual consumer**: a
-foreground, line-mode command that tail-follows the mirrored log, narrates
-every P-N3 event, and — on a terminal — prompts inline for a parked ask
-(approve with a hidden code, dismiss, or ignore). `--json` emits one event
-object per line, the pickup point a future graphical popup (tracker #71
-Part 2) subscribes to instead of re-tailing the log itself. See "Watching
+foreground, line-mode command that tail-follows the broker's events feed,
+narrates every event, and — on a terminal — prompts inline for a parked ask
+(print the `secrets approve` command, dismiss, or ignore). `--json` emits one
+event object per line, the pickup point a graphical popup subscribes to
+instead of re-tailing the feed itself. See "Watching
 events" below for the full mechanism.
 
 `secrets enroll` generates a fresh 20-byte secret from `/dev/urandom`,
@@ -996,11 +996,9 @@ are all `use`/`pub use` shims onto `aoide_protocol::dialog` now — `pub use`
 for what was already `pub` here, a bare `use` for what stayed
 crate-private, matching each item's OLD visibility exactly rather than
 widening anything. `aoide-client`'s own P-P5 pairing-confirm popup is the
-SECOND consumer that forced the move; `spawn_zenity_entry`/
-`spawn_provider_entry`/`run_zenity_entry`/`run_provider_entry`/`run_ask_dialog`/
-`zenity_error_dialog`/`popup_loop` stay here exactly as before — they know
-which secrets-specific binary and argv to spawn, which the generic
-run-loop never needed to.
+SECOND consumer that forced the move; `spawn_zenity_notice`/
+`run_zenity_notice`/`popup_loop` stay here — they know which secrets-specific
+binary and argv to spawn, which the generic run-loop never needed to.
 
 ## Watching events (`secrets watch`, tracker #71 Part 1)
 
@@ -1048,38 +1046,27 @@ watching secret events — ^C to leave (parked asks stay parked)
   19:06:02  parked      db-prod → claude   ask 3f2a-3   times out in 5m00s
 
 ┌ ask 3f2a-3 ─ db-prod ← claude ─ asked 19:06:02 ─ 4m41s left
-│ [a] approve (enter code)   [d] dismiss the ask   [i] ignore (stays parked)
+│ [a] show the approve command   [d] dismiss the ask   [i] ignore (stays parked)
 └ > a
-  code for `db-prod` (input hidden): ······
-  ✓ approved 3f2a-3 — value released to the waiting caller
+  approve it with: aoide secrets approve 3f2a-3
 ```
 
 **On a terminal** (`client::stdin_is_tty`, and `--json` absent), each
 parked ask prompts inline, one at a time, FIFO by `requestedAt` (the ask
 closest to expiry prompts first) — a second ask arriving mid-prompt is
-narrated immediately and counted as "queued", never double-prompted (a code
-typed into the wrong ask would be spent for nothing). The three keys are
+narrated immediately and counted as "queued", never double-prompted (so `[a]`
+always names the ask on screen). The three keys are
 read as a LINE (`a⏎`), never raw single-key — no cbreak/raw mode, no
 terminal-state restoration risk, works over ssh and with a piped stdin:
-- `[a]` opens a hidden-input code prompt (`client::read_hidden_line`,
-  reused VERBATIM — the code goes straight to `client::approve`, NEVER
-  argv) — a wrong code narrates `the ask is STILL PARKED, nothing was
-  spent` and re-opens the same prompt (no retry cap; the park's own
-  timeout is the bound).
+- `[a]` prints the command that completes the ask: `aoide secrets approve
+  <id>`. Watch reads no code and sends no approve op (ruling 98). The code is
+  typed where `secrets approve` runs, the conductor's approve child, or the
+  app's entry window (ruling 87).
 - `[d]` calls `client::dismiss` — the ask is GONE, the waiting caller gets
   a clean refusal.
 - `[i]` ignores the ask FOR THIS SESSION ONLY — it stays parked,
   completable from any terminal, and still narrates when it completes or
   expires (never a blindfold).
-
-**Near-expiry lockout: 10 seconds** (`crate::watch::LOCKOUT_SECS`),
-enforced twice — a code prompt refuses to OPEN below the threshold, and the
-remaining time is re-checked again AFTER the code is read but BEFORE
-`client::approve` is called, so a code typed right at the boundary is
-discarded unspent rather than raced against the broker's own backend
-shell-out — bounded since task #74 (`AOIDE_SECRETS_BACKEND_TIMEOUT`,
-default 10s, "Bounded backend shell-outs" below) but still not
-instantaneous, so this double-check remains load-bearing.
 
 **Non-tty stdin, or `--json`: narration only, no prompts, ever** — `aoide
 secrets watch | tee` and a systemd unit both behave. `--json` emits one
@@ -1138,7 +1125,7 @@ prompt, popup narration, and the plain pipe path alike).
 
 **After an async narration line interrupts an open tty prompt, the FULL
 prompt frame reprints underneath it** — header, the `[a]`/`[d]`/`[i]`
-options line (or the `CLOSED` variant), and the `└ > ` entry marker, never
+options line, and the `└ > ` entry marker, never
 just the bare header (review rider — the "1.3 Signal flow" ASCII above
 already showed the full block reprinted this way; a stray header-only line
 with no visible options would be confusing on its own).
@@ -1146,191 +1133,98 @@ with no visible options would be confusing on its own).
 ## Popup mode (`secrets watch --popup`, tracker #71 Part 2)
 
 `aoide secrets watch --popup` is the same watcher loop, `--json` and the
-socket ops unchanged, with one swap: a parked ask surfaces as a code-entry
-dialog instead of the terminal's `[a]`/`[d]`/`[i]` prompt — the terminal path
-(narration, `pending`/`approve`/`dismiss` from ANOTHER window) still works
-exactly as before, `--popup` only changes how THIS process itself offers to
-complete an ask. The entry is VISIBLE, digits and all — a TOTP code is a
-30-second secret the operator is about to read off an authenticator, not a
-password worth hiding.
-
-**One provider, one output contract (P3).** `aoide_protocol::dialog::dialog_provider`
-reads `AOIDE_DIALOG_CMD` (trimmed; blank or unset means none). When it names a
-program, each parked ask opens that program's `secrets ask --secret <name>
---consumer <who> --seconds <n>` dialog — the units that run the popup set it to
-`strillix` when the strillix fact is on, which opens a small quickshell window
-with six individually-boxed digit inputs (`XXX-XXX`), autofocus, auto-advance,
-and paste-to-fill (`crates/strillix`'s own docs) — instead of a `zenity --entry`
-dialog. **The variable is the choice** (the plugin philosophy, root `AGENTS.md`
-house rule 7): core names no provider, and with the variable unset the popup is
-zenity, exactly as this mode has always worked. Every provider obeys the
-IDENTICAL output contract — code on stdout + exit 0 = approved; the literal
-string `Dismiss ask` on stdout + exit 1 = dismissed; anything else non-zero =
-cancelled; exit `3` = the dialog infrastructure itself failed — so `watch.rs`'s
-result parsing and its kill-by-pid expiry path (below) never need to know which
-one answered.
+socket ops unchanged, with one swap: a parked ask surfaces as a zenity
+`--info` notice instead of the terminal's `[a]`/`[d]`/`[i]` prompt. The
+notice names the command that completes the ask:
 
 ```
 $ aoide secrets watch --popup
 watching secret events — ^C to leave (parked asks stay parked)
   19:06:02  parked      db-prod → claude   ask 3f2a-3   times out in 5m00s
-[with `AOIDE_DIALOG_CMD` naming strillix: `strx secrets ask --secret db-prod --consumer claude --seconds 287`
- opens six boxed digit inputs, grouped XXX-XXX, submitting once all six are filled;
- without it: a zenity --entry dialog opens, "code for `db-prod` ← claude · 287s left",
- with an extra "Dismiss ask" button beside OK/Cancel — both show the digits as typed]
+[a zenity notice opens:
+   ask 3f2a-3 for `db-prod` ← claude · 287s left
+   run: aoide secrets approve 3f2a-3
+ OK closes it. The ask stays parked.]
 ```
 
-- **The typed code rides the CHILD's own stdout pipe straight into
-  `client::approve` — never argv.** Neither binary's own argv (`Command::
-  new`'s `args`) carries anything but identifiers and prompt TEXT (secret
-  name, consumer, remaining seconds) — never a code, never a value. Grep the
-  spawn calls yourself (`watch::spawn_zenity_entry`/`watch::spawn_provider_entry`)
-  if in doubt.
+**The watch takes no code, on either surface (ruling 98).** A TOTP code is
+typed only at `aoide secrets approve <id>`, the conductor's approve child,
+and the app's entry window (ruling 87). Watch's terminal prompt and its popup
+neither read a code nor send an approve op. Completing an ask from the popup
+is the operator running `secrets approve` in a terminal.
+
+```
+parked ask (broker events feed + pending reconcile)
+   |
+   v
+popup_loop --- locked? ---yes--> wait, re-poll each 1s
+   |
+   no
+   v
+zenity --info  (no entry field, --no-markup)
+   |
+   +-- OK or Esc -----------> ignored for this session; ask stays parked
+   +-- ask resolved elsewhere > child killed by its exact handle, narrated
+   +-- spawn fails ---------> narrated; backoff 1s..60s; ask re-offered
+```
+
 - **`--text` is UNTRUSTED display data (`reason`/`origin.comm` in
-  particular) and zenity renders `--text` as Pango markup by default, even
-  on `--entry`** (verified live on this host's zenity 4.2.2 — undocumented
-  under `--help-entry`'s own section, but accepted and honored there).
-  `spawn_zenity_entry`/`zenity_error_dialog` both pass `--no-markup`, so a
-  `reason` or an origin `comm` (self-asserted/process-controlled text, this
-  file's own honesty notes above) containing real markup, or a bare `&`,
-  renders as literal text instead of formatting or a parse warning.
-- **The dialog window can never be left orphaned when `strx secrets ask`
-  itself is killed** — `watch.rs`'s own near-expiry/resolved-elsewhere kill
-  (`run_zenity_entry`/`run_provider_entry`'s `child.kill()`) only ever reaches
-  the `strillix` PROCESS this crate spawned; the quickshell GRANDCHILD `strillix`
-  spawns is invisible to this crate (no pid, no handle), and `SIGKILL` is
-  untrappable, so `strillix`'s own best-effort cleanup of that grandchild never
-  runs in that case. `strillix`'s `spawn_quickshell` closes the gap on its own
-  side by arming `PR_SET_PDEATHSIG` on the quickshell child before it execs
-  — the kernel kills it the instant `strillix` dies, no cooperation needed from
-  either process at that moment. See `crates/strillix/AGENTS.md`'s own note for
-  the full mechanism; this crate's `AGENTS.md` has the matching half.
-- **A provider's infrastructure failure narrates and falls back to zenity —
-  never a silent parked ask.** A provider whose own quickshell spawn fails
-  (ENOENT, say) would otherwise leave the ask parked with nothing on screen and
-  nothing in the journal until it timed out. `watch::spawn_provider_entry`
-  inherits the provider's own stderr straight through to this process's own
-  (`strx secrets ask`'s failures land in the journal directly); the dialog
-  contract reserves exit `3` (`aoide_protocol::dialog::DIALOG_INFRA_FAILURE_EXIT`)
-  for "the dialog infrastructure itself broke," never colliding with zenity's own
-  cancel code (`1`); and `watch::run_ask_dialog` retries the SAME ask through
-  zenity immediately on either a provider spawn error or an exit-3 — the plugin
-  philosophy's fancy-surface-degrades-to-the-plain-one rule, not a reason to leave
-  the ask undialoged. A genuine user cancel (a provider exiting 1 with no marker
-  line) is UNCHANGED — narrated as `[i]`gnore, same as always, never retried.
-  See `watch.rs`'s own module doc for the full mechanism (all three parts:
-  narration, the reserved exit code, the fallback).
-- **Wrong code**: on the zenity path, a brief `zenity --error` shows, then
-  the SAME ask's entry dialog re-opens; on a provider path there is no separate
-  error surface (P3's scope is the entry dialog only) — the ask simply stays
-  parked and the next poll reopens `strx secrets ask` fresh. Either way the
-  ask stays parked, the replay ledger unburned, same as the tty path's own
-  wrong-code retry.
-- **Cancel/close the dialog = IGNORE** (same session-only semantics as the
-  tty prompt's `[i]`) — the ask stays parked, completable from any other
-  terminal. The dialog's extra **"Dismiss ask" button** maps to
-  `client::dismiss` — a real refusal, never confused with a Cancel: the two
-  are always a different button, worded differently, exactly the design's
-  own "never adjacent, never share a word" rule for `[d]` vs `[i]`.
-- **Unlock-gated.** Before opening a dialog, `watch::is_locked` ORs two
-  signals: `loginctl show-session <id> -p LockedHint --value` on
-  `$XDG_SESSION_ID`, else on the user's logind display session (this unit
-  runs outside every session; skipped when neither names one, and an
-  unanswerable probe reads as "not locked," never as "locked") OR'd with a
-  `/proc` scan for a named locker PROCESS, `AOIDE_SECRETS_LOCKER` (default
-  `hyprlock` — the design doc verified hyprlock 0.9.6 sets no `LockedHint`,
-  so this half is load-bearing for hyprlock, not a redundant fallback). The
-  shell's own lock (`LockHost.qml`, `strx lock`) sets the hint itself. While locked, the
-  loop holds the dialog and re-polls once a second; once unlocked it opens
-  the dialog — but ONLY if the near-expiry rule below still allows it.
-- **Near-expiry, two coherent thresholds, one policy (task #76 item 1,
-  `watch::LOCKOUT_SECS`'s own doc is now the single canonical statement of
-  both halves — this bullet restates it, doesn't duplicate it).**
-  BEFORE-OPEN: no dialog opens below the SAME 10-second lockout
-  (`watch::LOCKOUT_SECS`) the tty prompt refuses `[a]` below — checked
-  BEFORE showing (a locked-then-expiring ask is skipped, never shown late)
-  and RE-CHECKED after the dialog returns, before the code is sent (the
-  same double-enforcement "Near-expiry lockout" above documents for the
-  tty path). ALREADY-OPEN: `zenity --entry`'s own `--text` bakes "Ns left"
-  at spawn time and CANNOT be updated in place — a dialog that was fine to
-  open a moment ago can silently go stale while the operator is still
-  looking at it, since nothing about an open zenity window itself ticks
-  down. `watch::POPUP_KILL_LOCKOUT_SECS` (15s, `LOCKOUT_SECS + 5`,
-  deliberately AHEAD of the before-open threshold) closes that: once an
-  ask crosses below it, `popup_loop` kills the ALREADY-OPEN dialog for it —
-  through the SAME `should_cancel`/`ZenityResult::CancelledExternally` kill
-  idiom the "resolved elsewhere" case below already used, not a second
-  mechanism — and does NOT reopen a fresh one for that ask (`ignored`
-  gains its id), since a code typed into a dialog opened this close to
-  expiry would race the deadline exactly the way a not-yet-opened one
-  would. The ask itself is untouched — it stays parked, completable from
-  the tty prompt or another terminal the whole time.
-- **If the ask completes/expires elsewhere while its dialog sits open**,
-  `watch::run_zenity_entry` kills that dialog's EXACT child — the
-  `std::process::Child` handle it already holds, never a re-derived pid,
-  never a name match — and narrates `ask <id> resolved elsewhere while its
-  popup was open`. This includes an ask that simply VANISHES from `pending`
-  with no event at all (a broker restart wiped the park registry, or a
-  feed line was lost, task #76 item 2) — `Queue::reconcile`'s own 30s
-  safety tick (or the next event-triggered reconcile) drops such an ask
-  from the queue the same way it drops a normally-completed one, and
-  `popup_loop`'s `should_cancel` closure reacts identically either way: it
-  only ever asks "is this id still in the queue," never "did an event say
-  so" — so a phantom ask's dialog closes on its own instead of sitting open
-  forever.
-- **A failing zenity spawn backs off instead of busy-looping (task #76
-  item 3).** A missing binary or a dead display mid-session (distinct from
-  the startup `zenity_available` check, which already refuses to even
-  ENTER `--popup` mode on a missing `zenity`) doubles the retry delay from
-  1s up to a 60s ceiling (`watch::SPAWN_BACKOFF_INITIAL`/
-  `SPAWN_BACKOFF_MAX`/`next_spawn_backoff`) rather than reattempting every
-  ~200ms poll tick forever. ONE line narrates entering the failing state
-  and ONE narrates recovery (the next successful spawn, which also resets
-  the backoff to the floor) — not a line per failed attempt. **The backoff
-  is GLOBAL across every parked ask, not per-ask** — `popup_loop`'s single
-  serial loop picks one ask at a time and its backoff sleep
-  (`aoide_protocol::dialog::sleep_backoff_interruptible`, #108) blocks that
-  same loop, so a second ask parking mid-backoff is not given its own timer;
-  it simply waits out whatever sleep is already running before the loop can
-  pick it up. This is deliberate: zenity itself is what is broken (a missing
-  binary, a dead display) when this path triggers at all, not any one ask,
-  so there is nothing to gain from racing a fresh spawn attempt per ask
-  against a display that is failing for all of them. **The sleep itself is
-  chopped into ~200ms ticks against `INTERRUPTED` (#108)** — a plain
-  `thread::sleep(spawn_backoff)` would make Ctrl-C/shutdown wait out the
-  full backoff (up to `SPAWN_BACKOFF_MAX`, 60s) before `popup_loop`'s own
-  top-of-loop `INTERRUPTED` check is reached again; the interruptible sleep
-  is shared with `aoide-client`'s own pairing popup loop rather than
-  duplicated (`pkgs/aoide/crates/AGENTS.md`'s "no cross-crate copying").
-- **`released`/`completed`/`dismissed`/`expired` are SUPPRESSED as
-  popups** — parked-only is the default (User-flagged): every mode
-  narrates all five events on stdout regardless, but only a `parked` event
-  ever drives a dialog. A tight automation loop firing many `released`
-  events therefore narrates a scrolling terminal, never a toast storm of
-  dialogs.
-- **Both `strillix` and `zenity` are runtime shell-outs declared BY NAME — zero
-  new Cargo dependencies** (the plugin philosophy, root `AGENTS.md` house
-  rule 7; the same feature-detection shape `enroll::render_qr` already uses
-  for `qrencode`). `run`'s own startup gate refuses to even ENTER `--popup`
-  only when NEITHER resolves: a taught error naming both fixes (install
-  `strillix` or `zenity`, or drop `--popup` and run plain `secrets watch`),
-  clean exit 1 — checked once, before the tail thread or the socket
-  reconcile ever starts. `strillix` resolved alone is sufficient; `zenity`
-  missing in that case is simply never consulted.
-- **`--popup` works over a non-tty stdin** (dialogs replace prompts, so
-  there's nothing for stdin to drive) — **`--popup`+`--json` is a usage
-  error** (`commands::handle_secrets_watch`, before `watch::run` is ever
-  reached): the two modes both own "how a parked ask gets completed" and
-  can't both drive it.
-- **Both dialog spawn paths take the program name as a parameter**
-  (`watch::ZENITY_CMD`/`"zenity"` in production for one, the `AOIDE_DIALOG_CMD`
-  provider for the other) rather than hardcoding `Command::new("zenity")`/
-  `Command::new("strillix")` — this is what lets this
-  crate's own tests stand in a fake shim script (a tempdir executable that
-  echoes a fixed code, or a fixed exit code) for EITHER binary WITHOUT
-  mutating `PATH` (unlike `enroll::render_qr`'s older PATH-shim test, which
-  needs `env_lock` because `PATH` is process-global); see `watch.rs`'s own
-  test section for the exact shape.
+  particular), so the notice passes `--no-markup`.** Zenity renders `--text`
+  as Pango markup by default (verified live on this host's zenity 4.2.2). A
+  `reason` or an origin `comm` (self-asserted or process-controlled text)
+  containing real markup, or a bare `&`, would otherwise render as formatting
+  or a parse warning. `watch::spawn_zenity_notice` is the one place this
+  argv is built.
+- **Notices are unlock-gated.** Before opening one, `watch::is_locked` ORs
+  two signals: `loginctl show-session <id> -p LockedHint --value` on
+  `$XDG_SESSION_ID`, else on the user's logind display session (this unit runs
+  outside every session; skipped when neither names one, and an unanswerable
+  probe reads as "not locked," never as "locked") OR'd with a `/proc` scan for
+  a named locker PROCESS, `AOIDE_SECRETS_LOCKER` (default `hyprlock`; the
+  design doc verified hyprlock 0.9.6 sets no `LockedHint`, so this half is
+  load-bearing). The shell's own lock (`LockHost.qml`, `strx lock`) sets the
+  hint itself. While locked, the loop holds the notice and re-polls once a
+  second.
+- **`released`/`completed`/`dismissed`/`expired` never open a notice.** Every
+  mode narrates all five events on stdout; only a `parked` event drives a
+  notice, so a tight automation loop never becomes a storm of dialogs.
+- **An ask that resolves while its notice is open closes the notice.**
+  `watch::run_zenity_notice` kills that notice's EXACT child (the
+  `std::process::Child` handle it holds, never a re-derived pid or a name
+  match) and narrates `ask <id> resolved elsewhere while its notice was
+  open`. This includes an ask that VANISHES from `pending` with no event at
+  all (a broker restart wiped the park registry, or a feed line was lost):
+  `Queue::reconcile` drops it, and the notice's `should_cancel` closure asks
+  only "is this id still in the queue," never "did an event say so."
+- **OK and Esc both mean "seen."** Either adds the ask to the session's
+  `ignored` set, so the loop stops re-offering it. The ask stays parked and
+  completable from any terminal running `secrets approve`.
+- **A failing zenity spawn backs off instead of busy-looping.** A missing
+  binary or a dead display mid-session doubles the retry delay from 1s up to
+  a 60s ceiling (`watch::SPAWN_BACKOFF_INITIAL`/`SPAWN_BACKOFF_MAX`/
+  `next_spawn_backoff`). ONE line narrates entering the failing state and ONE
+  narrates recovery. A failed ask is never added to `ignored`, so the loop
+  re-offers it. The backoff is GLOBAL across parked asks: `popup_loop` is one
+  serial loop, and zenity is what is broken when this path triggers, not any
+  one ask. The sleep is chopped into ~200ms ticks against `INTERRUPTED`, so
+  Ctrl-C does not wait out a 60s backoff.
+- **`zenity` is a runtime shell-out declared BY NAME, with zero new Cargo
+  dependencies** (the plugin philosophy, root `AGENTS.md` house rule 7; the
+  same feature-detection shape `enroll::render_qr` uses for `qrencode`).
+  `run`'s startup gate refuses to enter `--popup` only when `zenity` does not
+  resolve: a taught error naming the fix (install `zenity`, or drop `--popup`
+  and run plain `secrets watch`), clean exit 1, checked before the tail thread
+  or the socket reconcile starts.
+- **`--popup` works over a non-tty stdin** (notices replace prompts, so there
+  is nothing for stdin to drive). **`--popup`+`--json` is a usage error**
+  (`commands::handle_secrets_watch`, before `watch::run` is reached): the two
+  modes both own "how a parked ask is narrated," and they cannot both drive
+  it.
+- **The notice program is a parameter** (`watch::ZENITY_CMD` in production),
+  so this crate's tests stand in a fake shim script for zenity, a tempdir
+  executable with a fixed exit code, WITHOUT mutating `PATH` (unlike
+  `enroll::render_qr`'s older PATH-shim test, which needs `env_lock` because
+  `PATH` is process-global).
 
 ## TOTP enrollment (`secrets enroll`, P-V3)
 
@@ -1822,10 +1716,9 @@ display for a dialog); `Type = "simple"` + `Restart = "on-failure"` for the
 same "blocks forever" reason the broker service above holds. Its `path`
 carries `zenity` (a systemd user unit's default `PATH` does not reliably
 carry `environment.systemPackages` entries, the same lesson `shellbridge.nix`
-already learned for `hyprctl`/`curl`), and `AOIDE_DIALOG_CMD` arrives from the user manager's environment, where the
-strillix dendrite sets it: the provider ships from a SEPARATE output than the
-`aoide` binary this unit execs (P-A8 of the binary-split workstream), so no
-sibling of `aoide` can be it. No explicit ordering
+already learned for `hyprctl`/`curl`). The watcher reads no
+`AOIDE_DIALOG_CMD`: its notices are zenity only (ruling 98 removed the code
+entry a dialog provider carried). No explicit ordering
 against the SYSTEM `aoide-secrets-serve.service` exists or is needed: `watch::
 wait_for_follower` already waits out a not-yet-created events feed rather
 than exiting, so this unit coming up before the broker has bound its socket

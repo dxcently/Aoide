@@ -328,7 +328,7 @@
   type's own implementation now lives one crate down the DAG. Similarly,
   `broker::append_events_feed`'s own file-write mechanics moved to
   `aoide_protocol::feed::FeedWriter`, called from `broker` alone.
-- **`watch`'s pure fold (`Event`/`Queue`/`pick_next`/`code_prompt_allowed`)
+- **`watch`'s pure fold (`Event`/`Queue`/`pick_next`/`narrate_event`)
   holds the SAME clock-as-parameter discipline this crate's `totp`/`replay`
   modules already hold** (invariant above), extended here for the identical
   testability reason: `Queue::apply`/`Queue::reconcile` take an event/
@@ -341,7 +341,7 @@
   `unix_now()`) touches the real clock, the same "thin wrapper reads the
   real clock, never the pure functions" split `broker.rs`'s own P-N2 tests
   already establish. Don't add a `SystemTime::now()` call inside
-  `Event`/`Queue`/`pick_next`/`code_prompt_allowed`/`narrate_event`/
+  `Event`/`Queue`/`pick_next`/`narrate_event`/
   `event_to_json`/`parse_notify_line` — grep for it before merging a
   change to `watch.rs`'s pure half.
 - **`watch`'s tail is a TRIGGER; `client::pending` is the AUTHORITY** — the
@@ -364,11 +364,9 @@
   `aoide-protocol::dialog` (its own `AGENTS.md`), never patched locally
   "just this once" — `aoide-client`'s own P-P5 popup arm shares the exact
   same code, and a local fork here would silently drift the two. What
-  stays genuinely local: `spawn_zenity_entry`/`spawn_provider_entry`/
-  `run_zenity_entry`/`run_provider_entry`/`run_ask_dialog`/
-  `zenity_error_dialog`/`popup_loop` — everything that knows THIS crate's
-  dialog argv (zenity's own, and the `AOIDE_DIALOG_CMD` provider's), which the
-  generic run-loop never needed to know.
+  stays genuinely local: `spawn_zenity_notice`/`run_zenity_notice`/
+  `popup_loop` — everything that knows THIS crate's notice argv (zenity's
+  own), which the generic run-loop never needed to know.
 - **Every admin command that reads/writes `policy.json`/`totp.secret` refuses
   the wrong effective uid BEFORE touching the file, never after** (P-V4f,
   the yomi-strix incident, 2026-08-22: plain `sudo aoide secrets add …`
@@ -1200,8 +1198,8 @@
   the prompt, it was never part of the value — unlike the OLD
   `read_line`-based path, which needed `client::strip_one_trailing_newline`
   to remove the one that key press produced — that function still exists
-  and is still exercised: `watch.rs`'s `--popup` zenity-entry reader is
-  its other reuse, untouched by this phase).
+  and is still exercised: `aoide_protocol::dialog::run_entry_dialog` reads
+  every dialog child's stdout through it, `watch`'s notice included).
 - **`secrets put` warns and confirms before an overwrite, P-67 (this
   commit).** The wire's `put` op gained an optional `overwrite` bool
   (absent means `false`); `broker::put_gate` probes existence via
@@ -1336,29 +1334,29 @@
   `aoide_protocol::default_audit_log()` "for consistency with the other
   audit-trail readers" — that mirror is exactly the path this fix moved
   off of, for a proven, live reason.
-- **`--popup` (tracker #71 Part 2) is CORE, not a `strillix`/
-  desktop feature, and stays inside `watch.rs` — no new module, no new
-  crate dependency.** The root `AGENTS.md`'s own boundary line ("a
-  capability that works with only a shell and touches no paint is Aoide")
-  is why: `zenity` is a shell-out declared by NAME (`watch::ZENITY_CMD`),
-  the SAME feature-detection shape `enroll::render_qr` already uses for
-  `qrencode` — it is reachable from ANY shell with `zenity` on `PATH`, not
-  only a Quickshell/Strillix session, so it belongs beside the tty prompt it
-  is an alternative to, not in `strillix`. A future RICE-SHAPED popup (matching
-  the desktop's own look, replacing zenity's default GTK chrome) would be
-  the `strillix`-side consumer of `secrets watch --json` this note originally
-  anticipated — `--popup` itself is not that, and does not block it.
-  **Codes never touch argv, in this popup path either** — `watch::
-  spawn_zenity_entry`'s `Command::new(zenity_cmd).args([...])` carries only
-  the dialog's TITLE and TEXT (secret name, consumer, remaining seconds,
-  all name-only, `README.md`'s own display-fields rule extended here); the
-  typed code arrives back over the CHILD's stdout pipe
-  (`run_zenity_entry`'s `child.stdout.take()`), never a command-line
-  argument, never a second process, never a temp file. Don't add a
-  `--totp`-shaped flag or an intermediate shell wrapper to this spawn path
-  that would put a code anywhere argv-visible — `client::approve` is
-  called with the code exactly the way the tty prompt already does.
-  **The CLI takes no code in argv, and `exec` takes no code at all (ruling
+- **`--popup` (tracker #71 Part 2) is CORE, not a `strillix`/desktop feature,
+  and stays inside `watch.rs` — no new module, no new crate dependency.** The
+  root `AGENTS.md`'s own boundary line ("a capability that works with only a
+  shell and touches no paint is Aoide") is why: `zenity` is a shell-out
+  declared by NAME (`watch::ZENITY_CMD`), the SAME feature-detection shape
+  `enroll::render_qr` already uses for `qrencode`. It is reachable from ANY
+  shell with `zenity` on `PATH`, not only a Quickshell/Strillix session, so it
+  belongs beside the tty prompt it is an alternative to, not in `strillix`. A
+  future RICE-SHAPED popup would be the `strillix`-side consumer of
+  `secrets watch --json`; `--popup` itself is not that, and does not block it.
+  **The popup is a NOTICE, and it takes no code (ruling 98).** `popup_loop`
+  opens one zenity `--info` box per parked ask, and its text names
+  `aoide secrets approve <id>`. Watch never reads a code on any surface and
+  never sends an approve op. Do not add a code entry, a dialog provider, or an
+  approve call to this path: a code is typed at `secrets approve`, the
+  conductor's approve child, and the app's entry window (ruling 87).
+  **The notice's argv carries no code and no markup.** `spawn_zenity_notice`
+  builds `zenity --info --no-markup --title <t> --text <x>`. `--no-markup` is
+  there because `--text` carries untrusted `reason`/`origin.comm` text. Go
+  through `spawn_zenity_notice`/`run_zenity_notice` and the `ZENITY_CMD`
+  parameter, never an inline `Command::new("zenity")`, so this crate's tests
+  can stand in a fake shim by full path with no `PATH` mutation.
+- **The CLI takes no code in argv, and `exec` takes no code at all (ruling
   87).** `secrets approve` reads the code from a no-echo prompt on a terminal
   or one stdin line (`client::approve_with`, through `read_park_code`). The
   pipe is accepted for the same reason the terminal is: a terminal check is
@@ -1380,8 +1378,8 @@
   `popup_loop` is only ever entered from a `parked` ask picked off the
   SAME `Queue`/`pick_next` the tty prompt uses; `released`/`completed`/
   `dismissed`/`expired` narrate on stdout in every mode (unchanged) but
-  never drive a dialog in ANY mode, popup included. Don't wire a second
-  event kind into `popup_loop`'s dialog trigger without re-deriving why
+  never drive a notice in ANY mode, popup included. Don't wire a second
+  event kind into `popup_loop`'s notice trigger without re-deriving why
   parked-only was chosen (the open Part-1 design question about a toast
   storm from undeduped `released` events, resolved here by simply never
   popping one up).
@@ -1397,18 +1395,19 @@
   first (OR'd, not replaced) so a locker that DOES set `LockedHint` is
   still honored. An unanswerable probe (no session id, no `loginctl`, a
   failed scan) reads as "not locked," never as "locked" — don't flip that
-  default; a false negative here only delays a dialog by one poll tick, a
-  false positive would silently show a code-entry dialog to whoever is
+  default; a false negative here only delays a notice by one poll tick, a
+  false positive would silently show a notice to whoever is
   physically at a supposedly-locked screen.
-  **`watch::popup_action` orders near-expiry ahead of lock-wait, never the
-  reverse** — a dialog must not open below [`LOCKOUT_SECS`] EVEN IF the
-  screen happens to be unlocked at that instant, and an ask already too
-  late to show must never sit "waiting for unlock" either, since that
-  would only spend the time that's left doing nothing. Don't reorder this
-  check without re-deriving why (the pure `popup_action` unit tests assert
-  the ordering directly).
+  **OK and Esc both mean "seen."** Either adds the ask to the session's
+  `ignored` set, so `popup_loop` stops re-offering it. The ask stays parked and
+  completable from any terminal running `secrets approve`. `ignored` is
+  session-only: a restarted watcher offers the ask again.
+  **No near-expiry lockout on this surface.** `LOCKOUT_SECS` guards a typed
+  code against its ask's deadline. A notice carries no code, so no time
+  threshold guards it, and the lock gate above is the only gate. Don't port a
+  deadline check into the notice path: nothing is typed there.
   **A dialog left open for an ask that resolves ELSEWHERE gets killed by
-  its EXACT pid** — `watch::run_zenity_entry` holds the `std::process::
+  its EXACT pid** — `watch::run_zenity_notice` holds the `std::process::
   Child` it spawned and calls `child.kill()` on it directly (never a
   re-derived pid from a stored integer, never a name/argv match) the
   moment its own `should_cancel` closure (checking the SAME `Queue` the
@@ -1424,88 +1423,14 @@
   `enroll::render_qr`'s older `PATH`-shim test). Don't inline
   `Command::new("zenity")` into a new call site "since it's just one
   string" — go through the same parameterized functions
-  (`spawn_zenity_entry`/`run_zenity_entry`/`zenity_available`) so a future
+  (`spawn_zenity_notice`/`run_zenity_notice`/`zenity_available`) so a future
   test can fake it the same way.
-- **The entry dialog is VISIBLE, and a dialog provider is a SECOND feature-detected
-  dialog ahead of zenity's own.** `--hide-text` is gone from `spawn_zenity_entry`'s
-  argv — a TOTP code is a 30-second secret the operator is about to read off an
-  authenticator, not a password worth hiding; don't re-add it "for consistency
-  with a password prompt," this crate's own tty path (`client::read_hidden_line`)
-  hides ADMIN input like `secrets put`'s value, never a short-lived code.
-  `aoide_protocol::dialog::dialog_provider` reads `AOIDE_DIALOG_CMD` (trimmed;
-  blank or unset means none), and when it names a program, `<program> secrets ask
-  --secret <name> --consumer <who> --seconds <n>` replaces `zenity --entry` for a
-  given dialog. Core names no provider: the units that run the popup set the
-  variable (`aoide-secrets-watch` sets it to `strillix` when the strillix fact is
-  on), and a host without it gets zenity. **The variable is the choice — no
-  `AOIDE_SECRETS_*` env var and no CLI flag picks between them** (plugin
-  philosophy, root `AGENTS.md` house rule 7): don't add one "for an operator who
-  wants zenity even with strillix installed" without a real complaint driving it,
-  the same "wait for the field" posture this crate's other UX knobs were all born
-  from. `watch::spawn_provider_entry`/`watch::spawn_zenity_entry` are BOTH thin
-  `Command::new(bin).args([...])` builders feeding the SAME `watch::run_entry_dialog`
-  wait/parse loop — this is what makes the CONTRACT load-bearing rather than
-  incidental: a provider's `secrets ask` (`crates/strillix`) MUST print the code on
-  stdout with exit 0 on submit, the literal string `Dismiss ask` on stdout with exit
-  1 on dismiss, and any other non-zero exit for a bare cancel — byte-identical to
-  zenity's own `--extra-button` contract — because `run_entry_dialog` and
-  `popup_loop`'s kill-by-pid expiry path never branch on which program answered.
-  Don't let a future `strx secrets ask` change (a new flag, a different exit code
-  for some case) drift from this contract without updating it here AND in
-  `README.md`'s "Popup mode" section in the same commit — any provider is
-  interchangeable ONLY as long as this holds. `run`'s own startup gate
-  (`dialog_provider`/`zenity_available`) refuses to enter `--popup` only when NEITHER
-  a provider is named nor `zenity` is available — a named provider alone is
-  sufficient, and `zenity` missing in that case is simply never consulted.
-- **On the `strillix` path, `run_entry_dialog`'s `child.kill()` (near-expiry,
-  resolved-elsewhere) only ever reaches the `strillix` PROCESS — the quickshell
-  GRANDCHILD it spawned is a separate process this crate never sees a
-  handle to, and `SIGKILL` (what `.kill()` sends) is UNTRAPPABLE, so `strillix`'s
-  own cleanup code (`strillix::commands::secrets::spawn_and_wait_for_
-  marker`'s own `child.kill()` on quickshell) never runs when THIS is what
-  killed it (review fix, ownership-chain note; `crates/strillix/AGENTS.md`
-  carries this crate's own half in full).** This crate's own kill-by-EXACT-
-  pid discipline (this file's `run_zenity_entry`/`run_provider_entry` invariant,
-  above) is still correct and still necessary — it is what stops a `strillix`
-  process (and everything under it) from lingering — but it is NOT what
-  closes the quickshell WINDOW in that case; `strillix`'s own `spawn_quickshell`
-  arms `PR_SET_PDEATHSIG` on the quickshell child specifically so the KERNEL
-  closes that gap the instant `strillix` itself dies, no cooperation from either
-  process's own code required at the moment of death. Don't read a future
-  `strx secrets ask` rewrite that drops `PR_SET_PDEATHSIG` as "this crate's
-  problem to solve from the `watch.rs` side" — `aoide-secrets` has no
-  visibility into `strillix`'s own process tree (no pid, no process-group
-  handle) to kill a grandchild it never held even a handle to; the fix has
-  to live where the grandchild is actually spawned.
-- **A provider's infrastructure failure is NEVER folded into `ZenityResult::
-  Cancelled` — it gets its own variant, its own reserved exit code, and an
-  IMMEDIATE zenity retry for the same ask (see `watch.rs`'s module doc for
-  the full mechanism).** `strx secrets ask` reserves exit `3`
-  (`aoide_protocol::dialog::DIALOG_INFRA_FAILURE_EXIT`, the code every dialog
-  provider shares) for "the dialog infrastructure itself broke" — `run_entry_dialog` checks
-  `status.code() == Some(DIALOG_INFRA_FAILURE_EXIT)` BEFORE falling through to
-  `Cancelled`, returning `ZenityResult::DialogFailure` instead. Don't widen
-  `Cancelled`'s own match arm to "catch" this case "since it's still a
-  non-zero exit" — that collapse is the failure mode the exit code exists to prevent (a killed
-  dialog silently read as a user Cancel, the ask sitting parked with no
-  operator-visible signal until its own timeout). `run_ask_dialog` reacts to
-  `SpawnError`/`DialogFailure` from a provider attempt by retrying the SAME
-  ask through `zenity` immediately (`zenity_available` permitting) — never
-  leaving the ask with no dialog attempt at all just because the fancy
-  surface broke (plugin philosophy, root `AGENTS.md` house rule 7). A
-  provider-failed ask that still has no fallback available (or whose fallback
-  also failed) is deliberately NEVER added to `popup_loop`'s own `ignored`
-  set — `Queue::reconcile`'s 30s tick has NO opinion on that set at all (it
-  only syncs which asks EXIST, never re-drives a dialog attempt), so
-  `popup_loop`'s own loop, backed off by the pre-existing `spawn_backoff`
-  mechanism, is what actually keeps retrying such an ask. Don't add an
-  `ignored.insert(...)` to either failure arm "since it already got its
-  retry" — that would silently strand the ask exactly the way the original
-  incident did, one layer up. `spawn_provider_entry` now inherits `strillix`'s own
-  stderr (was `Stdio::null()`) specifically so `strillix`'s own failure
-  `eprintln!`s reach the journal at all — don't revert that to a piped or
-  null stream "to keep stdout/stderr symmetric with zenity's own spawn";
-  zenity has no equivalent internal-failure-narration contract to preserve.
+- **A notice failure is NEVER silent, and never ignored.** A zenity spawn
+  that fails (`SpawnError`) or a dialog that reports `DialogFailure` leaves
+  the ask parked, narrates once on stderr, and backs off (`next_spawn_backoff`,
+  1s to 60s). `popup_loop` never adds a failed ask to `ignored`, so the ask
+  stays in the offer set. Don't add an `ignored.insert(...)` to those arms:
+  that strands the ask behind a failure nobody can see.
 - **A parked ask carries an OPTIONAL "context block" — `reason` (free-text,
   self-asserted) and `origin` (best-effort, kernel-traced) — for a popup/
   prompt surface to show WHY and FROM WHERE an ask exists, not just which
@@ -1539,54 +1464,15 @@
   `reason`" just because it traces back to a kernel-verified pid — the PID
   is kernel-truth, the STRING that process chose to report is not.
   **The ride is `resolve` request -> `park::ParkedAsk` registry row ->
-  `pending` reply -> `parked` events-feed line -> three rendered surfaces**
+  `pending` reply -> `parked` events-feed line -> two rendered surfaces**
   (`watch::format_reason_line`/`watch::format_origin_line`, the ONE place
-  each line's wording is built): the tty prompt (`format_prompt_header`),
-  zenity's `--text` (`popup_loop`), and `strx secrets ask`'s own `--reason`/
-  `--from` argv (`spawn_provider_entry` — `reason` rides RAW since `strillix`'s own
-  QML owns that surface's layout, `from` rides PRE-FORMATTED by
-  `format_origin_line` so the wording never drifts between the three
-  surfaces). Don't reformat `origin` a fourth time inside `strillix`'s own QML;
-  `--from` already carries the finished line. Both are absent-safe
+  each line's wording is built): the tty prompt (`format_prompt_header`) and
+  the notice's `--text` (`popup_loop`). Both lines are built once, so the two
+  surfaces never drift apart. Both are absent-safe
   end-to-end — an ask with neither renders EXACTLY as it did before this
   phase on every surface (`format_reason_line`/`format_origin_line` both
   return `None` when there's nothing to show, and every call site treats
   `None` as "add nothing," never a placeholder line).
-- **P-N4 (task #76) closes three popup gaps the field/an Opus-judge review
-  found, all landed together, none touching the `--json` machine feed
-  (byte-stable throughout).** (1) **The near-expiry policy is now TWO
-  coherent thresholds, stated in ONE place** (`watch::LOCKOUT_SECS`'s own
-  doc comment — every other mention, this file included, restates it,
-  never redefines it): `LOCKOUT_SECS` (10s) still governs BEFORE-OPEN (no
-  dialog opens, no `[a]` prompt reads a code, below it); `watch::
-  POPUP_KILL_LOCKOUT_SECS` (`LOCKOUT_SECS + POPUP_KILL_MARGIN_SECS` = 15s,
-  a DERIVED constant, never an independently-tuned second magic number)
-  is the NEW already-open half — `zenity --entry`'s own `--text` bakes
-  "Ns left" at spawn time and cannot be updated in place, so an open
-  dialog can go stale while the operator is still looking at it.
-  `popup_loop`'s `should_cancel` closure now ORs `popup_kill_already_open`
-  (pure, unit-tested the same way `code_prompt_allowed` is) alongside the
-  pre-existing "vanished from the queue" check — the SAME
-  `ZenityResult::CancelledExternally` kill idiom fires either way, never a
-  second kill mechanism. `popup_loop` disambiguates the two causes
-  AFTERWARD (is the ask still in the queue?) only to pick the right
-  narration line and to add the ask's id to `ignored` on the near-expiry
-  branch — "don't respawn for that ask" is `ignored`, the same mechanism
-  a Cancel/close already uses, not a new one. (2) **Phantom-ask reaping**:
-  `Queue::reconcile` already dropped an ask no longer in `pending` with no
-  event (P-N2/tracker #71's own doc); this phase pins that `popup_loop`'s
-  kill closure reacts to THAT removal identically to an explicit
-  Completed/Dismissed/Expired event, since it only ever asks the queue "is
-  this id still here," never "did an event say so." (3) **Spawn-retry
-  backoff**: `watch::next_spawn_backoff` doubles from `SPAWN_BACKOFF_INITIAL`
-  (1s) to `SPAWN_BACKOFF_MAX` (60s) on consecutive `ZenityResult::
-  SpawnError`s, reset to the floor on the next successful spawn —
-  `popup_loop`'s own `spawn_failing`/`spawn_backoff` locals, narrated ONCE
-  per state transition (entering the failing state, and recovering from
-  it), never once per attempt. Don't reach for a `SystemTime::now()` call
-  inside `popup_kill_already_open`/`next_spawn_backoff` — both stay pure,
-  clock/timing-as-parameter, the same discipline every other pure fold in
-  this module already holds (`watch.rs`'s own module doc).
 - **The built-in `age` backend + the per-backend `has` template + the
   `secrets add` default flip LANDED at P-G1 (task #70, this commit).**
   `Backend` gained an OPTIONAL `has: Option<String>` field, `#[serde(default)]`

@@ -7,90 +7,43 @@
 //! lines, falling back to its 30s pending-reconcile tick for every popup —
 //! found live on yomi-strix, 2026-08-23), narrates every broker event, and
 //! — when stdin is a terminal and `--json` is absent — prompts inline for
-//! each parked ask: approve with a hidden TOTP code, dismiss it outright,
+//! each parked ask: print the approve command, dismiss it outright,
 //! or ignore it (leaving it parked for any other terminal). This is one of
 //! the seven I/O-carrying modules in the crate (`AGENTS.md`'s "I/O is
 //! confined to seven named modules" invariant) — `broker`/`client`/`store`/
 //! `backend`/`enroll` are the other five.
 //!
-//! **`--popup` (tracker #71 Part 2)** swaps the tty prompt for a code-entry
-//! dialog on each parked ask — the CHILD's own stdout pipe carries the typed
-//! code straight into [`client::approve`], never argv (`Command::new`'s args
-//! carry only prompt TEXT/identifiers, never the code). The entry is VISIBLE
-//! (a TOTP code is a 30-second secret, not a password — nothing is gained by
-//! hiding digits the operator is about to read off an authenticator anyway).
-//! **The dialog provider is the one choice.** `AOIDE_DIALOG_CMD` (read by
-//! [`dialog_provider`], `aoide_protocol::dialog`) names a provider that
-//! `--popup` runs as `<provider> secrets ask --secret <name> --consumer <who>
-//! --seconds <n>` in place of `zenity --entry` — [`spawn_provider_entry`]/
-//! [`spawn_zenity_entry`] share the identical output contract (code on
-//! stdout + exit 0 = approved; the literal [`DISMISS_LABEL`] on stdout +
-//! exit 1 = dismissed; anything else non-zero = cancelled) through the same
-//! [`run_entry_dialog`] wait/parse loop, so [`popup_loop`]'s result handling
-//! and its kill-by-pid expiry path never need to know which binary answered.
-//! Core names no provider. The unit that runs `--popup` sets the variable
-//! when a desktop provider is installed (house rule 7: a capability enters as
-//! a plugin, named by the unit that carries it); unset or blank is zenity.
-//! `zenity` remains a runtime shell-out declared BY NAME (zero new Cargo
-//! dependencies, same feature-detection shape `enroll::render_qr` already
-//! uses for `qrencode`); [`run`]'s own startup gate refuses to enter
-//! `--popup` only when NEITHER the provider NOR zenity is available. Popups are
-//! UNLOCK-GATED ([`locked_state`]: `loginctl
-//! LockedHint` OR'd with a `/proc` scan for a named locker process, default
-//! `hyprlock` — `AOIDE_SECRETS_LOCKER` overrides it; the design doc verified
-//! hyprlock cannot set `LockedHint`, so the `/proc` half is load-bearing,
-//! not a redundant fallback. The shell's own lock host sets `LockedHint`
-//! through the desktop's lock hint, and the hint is read on the user's display
-//! session when this unit has no `$XDG_SESSION_ID`, so a shell lock holds
-//! popups too) and PARKED-ONLY: `released`/`completed`/
-//! `dismissed`/`expired` never spawn a dialog, only narrate (same as every
-//! other mode) — a tight automation loop never becomes a toast storm. The
-//! near-expiry lockout ([`LOCKOUT_SECS`]) is enforced exactly as it is for
-//! the tty prompt: no dialog OPENS below it, and the remaining time is
-//! re-checked again after the dialog returns, before the code is sent. If
-//! an ask resolves elsewhere (another terminal, or its own timeout) while
-//! its dialog is open, [`run_zenity_entry`] kills that EXACT child by the
-//! `std::process::Child` handle it already holds (never a re-derived pid)
-//! and narrates. `--popup`+`--json` is a usage error (`commands::
-//! handle_secrets_watch`) — the two modes both own "how a parked ask is
-//! completed," and can't both drive it.
+//! **`--popup` (tracker #71 Part 2)** swaps the tty prompt for a zenity
+//! `--info` notice on each parked ask. The notice names
+//! `aoide secrets approve <id>`; it takes no code. The watch never reads a
+//! code on either surface (ruling 98): a code is typed only at
+//! `secrets approve`, the conductor's approve child, and the app's entry
+//! window (ruling 87). `zenity` remains a runtime shell-out declared BY NAME
+//! (zero new Cargo dependencies, the same feature-detection shape
+//! `enroll::render_qr` uses for `qrencode`); [`run`]'s startup gate refuses
+//! to enter `--popup` only when `zenity` is not available.
 //!
-//! **A dialog-child lifecycle failure must NEVER be silent.** A provider that
-//! cannot show its dialog (its own `quickshell` missing from the unit's
-//! `PATH`, say) must not leave a parked ask with no operator-visible signal
-//! until its timeout — the "invisible failure" shape this crate keeps
-//! re-learning (P-V4d/P-G4's own incidents). Three parts keep it visible:
-//! 1. **Narration.** [`spawn_provider_entry`] inherits the provider's stderr
-//!    rather than discarding it — its own failure lines land directly in
-//!    THIS process's stderr, which the popup unit routes to the journal
-//!    (`StandardError = "journal"`, `modules/dendrites/aoide-secrets.nix`).
-//!    [`popup_loop`] adds its OWN `eprintln!` alongside it, naming the ask id
-//!    and which binary failed — the two together give an operator both the
-//!    specific cause (from the provider's line) and the consequence (from
-//!    this crate's).
-//! 2. **A distinct exit code.** A provider reserves exit `3`
-//!    ([`DIALOG_INFRA_FAILURE_EXIT`]) for "the dialog infrastructure itself
-//!    failed" — NEVER folded into zenity's own cancel code (`1`), which would
-//!    let an infrastructure failure read as the operator pressing Esc.
-//!    [`run_entry_dialog`] checks for this code BEFORE falling through to
-//!    its own `Cancelled` case, returning [`ZenityResult::DialogFailure`]
-//!    instead — that variant's own doc has the exact check.
-//! 3. **Fallback, not abandonment.** [`popup_loop`] reacts to a provider
-//!    `SpawnError`/`DialogFailure` by immediately retrying the SAME ask
-//!    through `zenity` instead ([`zenity_available`] permitting) — the
-//!    plugin philosophy's whole point (root `AGENTS.md` house rule 7) is
-//!    that the fancy surface degrades to the plain one, not that a fancy-
-//!    surface failure leaves the ask stranded. If that fallback ALSO fails
-//!    (or `zenity` isn't available either), the ask is narrated and left
-//!    parked — but NEVER added to `ignored`, so `popup_loop`'s own loop
-//!    keeps re-offering it on every later iteration (backed off by
-//!    [`SPAWN_BACKOFF_INITIAL`]/[`next_spawn_backoff`]). **This loop, not the
-//!    30-second `reconcile` tick, is what retries a failed dialog** —
-//!    `Queue::reconcile` only ever syncs which asks EXIST against the
-//!    broker's own truth; it has no opinion on `popup_loop`'s local
-//!    `ignored` set or on re-driving a dialog attempt. Don't let a future
-//!    change insert a provider-failed ask into `ignored` "since it already
-//!    got its one retry" — that re-introduces the silent failure one layer up.
+//! Notices are UNLOCK-GATED ([`locked_state`]: `loginctl LockedHint` OR'd
+//! with a `/proc` scan for a named locker process, default `hyprlock`;
+//! `AOIDE_SECRETS_LOCKER` overrides it). The `/proc` half is load-bearing:
+//! hyprlock cannot set `LockedHint`, so a shell lock holds notices too. A
+//! notice waits while the screen is locked and is PARKED-ONLY:
+//! `released`/`completed`/`dismissed`/`expired` never open a notice, only
+//! narrate, so a tight automation loop never becomes a toast storm. If an
+//! ask resolves elsewhere while its notice is open, [`run_zenity_notice`]
+//! kills that EXACT child by the `std::process::Child` handle it holds and
+//! narrates. `--popup`+`--json` is a usage error (`commands::
+//! handle_secrets_watch`).
+//!
+//! **A notice failure must NEVER be silent.** A notice that cannot open
+//! (zenity missing from the unit's `PATH`, say) must not leave a parked ask
+//! invisible until its timeout. [`popup_loop`] narrates the failure on
+//! stderr, names the ask id, and backs off ([`SPAWN_BACKOFF_INITIAL`]/
+//! [`next_spawn_backoff`]). A failed ask is never added to `ignored`, so the
+//! loop keeps re-offering it. **This loop, not the 30-second `reconcile`
+//! tick, is what retries a failed notice** (`Queue::reconcile` syncs which
+//! asks exist; it does not re-drive a dialog). Do not insert a failed ask
+//! into `ignored` to stop the retries: that re-introduces the silent failure.
 //!
 //! **Why this crate, not a conductor pane.** Reaching the broker from
 //! `aoide-conductor` would add a NEW `aoide-conductor` → `aoide-secrets`
@@ -101,7 +54,7 @@
 //! `--json` stream — never a reason to duplicate this logic elsewhere.
 //!
 //! **Shape**: [`parse_notify_line`]/[`Queue`]/[`pick_next`]/
-//! [`code_prompt_allowed`]/[`narrate_event`]/[`event_to_json`] are PURE —
+//! [`narrate_event`]/[`event_to_json`] are PURE —
 //! clock-as-parameter throughout (this crate's own standing rule for
 //! `totp`/`replay`; extended here to the fold, for the same testability
 //! reason — `parse_notify_line` takes its own `ts` as a parameter for
@@ -127,11 +80,9 @@
 //! is a guess, not a fact from the broker.
 //!
 //! **Never displayed, ever: a secret value.** This module holds `id`,
-//! secret *name*, consumer, timing — never a value. The typed TOTP code
-//! lives in one local `String` from [`crate::client::read_hidden_line`] to
-//! the [`crate::client::approve`] call and is never logged, echoed,
-//! narrated, or placed on argv (`client::approve` sends it over the socket
-//! directly, the same path `secrets approve` already uses).
+//! secret *name*, consumer, timing — never a value. No code reaches
+//! this module: a TOTP code is typed only at `secrets approve`, the
+//! conductor's approve child, and the app's entry window (ruling 87).
 
 use crate::client::{self, PendingAsk};
 use serde_json::{json, Value};
@@ -155,7 +106,7 @@ use std::time::Duration;
 pub use aoide_protocol::dialog::DialogResult as ZenityResult;
 pub use aoide_protocol::dialog::locked_state;
 use aoide_protocol::dialog::{
-    dialog_provider, is_locked, locker_process_name, next_spawn_backoff, run_entry_dialog, sleep_backoff_interruptible,
+    is_locked, locker_process_name, next_spawn_backoff, run_entry_dialog, sleep_backoff_interruptible,
     zenity_available, DISMISS_LABEL, SPAWN_BACKOFF_INITIAL, SPAWN_BACKOFF_MAX,
 };
 use aoide_protocol::untrusted::clean_line;
@@ -418,57 +369,6 @@ pub fn pick_next<'a>(asks: &'a [Ask], ignored: &HashSet<String>) -> Option<&'a A
     asks.iter().filter(|a| !ignored.contains(&a.id)).min_by_key(|a| a.requested_at)
 }
 
-/// Near-expiry lockout threshold, seconds (design doc's "1.5 Prompt flow" —
-/// a TOTP step is 30s with a ±1 window, typing six digits takes ~3-5s, and
-/// the approve round trip includes an unbounded backend shell-out; under
-/// 10s the likely outcome is a code spent against an ask that expires
-/// mid-flight). This is the BEFORE-OPEN half of the policy: no code prompt
-/// (tty `[a]`) and no popup dialog ever OPENS once an ask has fewer than
-/// this many seconds left ([`code_prompt_allowed`]/[`popup_action`]).
-///
-/// **The near-expiry policy, stated once, here, for both surfaces (P-N4,
-/// task #76 item 1):** the tty prompt only ever needs this ONE threshold —
-/// nothing keeps it open once opened (it blocks on a line read, not a
-/// timer), so a stale-but-still-typeable prompt is re-checked at submit
-/// time only (`handle_approve`'s own post-read check, same value). A
-/// `--popup` dialog is different: `zenity --entry`'s own `--text` bakes
-/// "Ns left" at spawn time and cannot be updated in place, so an ALREADY-
-/// OPEN dialog can silently go stale while the operator is still looking at
-/// it. [`POPUP_KILL_LOCKOUT_SECS`] is the SECOND half of the same policy,
-/// set [`POPUP_KILL_MARGIN_SECS`] seconds AHEAD of this one: once an ask's
-/// remaining time crosses below it, `popup_loop` kills the dialog that's
-/// already open for it (the SAME [`ZenityResult::CancelledExternally`]/
-/// `should_cancel` idiom that already kills a dialog whose ask resolved
-/// elsewhere — no second kill mechanism) and does NOT reopen a fresh one
-/// for that ask (a code typed into a dialog opened this close to expiry
-/// would race the deadline exactly the way a not-yet-opened one would,
-/// which is the entire reason [`LOCKOUT_SECS`] exists in the first place).
-/// The two thresholds are deliberately coupled (one constant derived from
-/// the other, never two independently-tuned magic numbers) so a future
-/// change to one is a conscious choice about the other too.
-pub const LOCKOUT_SECS: i64 = 10;
-
-/// How far AHEAD of [`LOCKOUT_SECS`] the popup's kill-already-open
-/// threshold sits (see [`LOCKOUT_SECS`]'s own doc for the full policy) —
-/// enough margin that a dialog killed here still leaves the operator the
-/// remaining [`LOCKOUT_SECS`] worth of time to react via the tty prompt or
-/// another terminal, rather than being caught mid-type in a dialog that
-/// vanishes with no warning right at the wire.
-const POPUP_KILL_MARGIN_SECS: i64 = 5;
-
-/// Near-expiry threshold for an ALREADY-OPEN `--popup` dialog — see
-/// [`LOCKOUT_SECS`]'s own doc for the full two-threshold policy this
-/// extends to the already-open case.
-pub const POPUP_KILL_LOCKOUT_SECS: i64 = LOCKOUT_SECS + POPUP_KILL_MARGIN_SECS;
-
-/// Is the code prompt allowed to open for `ask` at `now`? Enforced TWICE by
-/// the caller ([`run`]'s prompt loop): once before opening the prompt, once
-/// again after the code is read but before it is sent — this predicate is
-/// the ONE decision both checks share.
-pub fn code_prompt_allowed(ask: &Ask, now: u64) -> bool {
-    ask.remaining(now) >= LOCKOUT_SECS
-}
-
 /// Which loop `run` drives, decided once from the three inputs that can
 /// ever disagree — pure and total, so every combination (including the
 /// `json_mode && popup_mode` one `commands::handle_secrets_watch` already
@@ -498,42 +398,6 @@ pub fn select_mode(json_mode: bool, popup_mode: bool, stdin_tty: bool) -> Mode {
     }
 }
 
-/// What `--popup`'s loop should do about the ask it just picked, given `now`
-/// and the CURRENT locked state — pure, so the ordering itself (near-expiry
-/// beats lock-wait, never the other way around) is unit-tested without a
-/// real screen lock. A dialog must never open below [`LOCKOUT_SECS`]
-/// regardless of lock state (design doc: "no dialog opens below the
-/// existing 10s lockout") — waiting for an unlock that might take minutes
-/// would only spend the ask's remaining time doing nothing.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PopupAction {
-    Show,
-    WaitUnlock,
-    TooLateToShow,
-}
-
-pub fn popup_action(ask: &Ask, now: u64, locked: bool) -> PopupAction {
-    if !code_prompt_allowed(ask, now) {
-        PopupAction::TooLateToShow
-    } else if locked {
-        PopupAction::WaitUnlock
-    } else {
-        PopupAction::Show
-    }
-}
-
-/// Should an ALREADY-OPEN `--popup` dialog for `ask` be killed at `now`? —
-/// the kill-open half of [`LOCKOUT_SECS`]'s own doc, checked on every poll
-/// tick of `popup_loop`'s `should_cancel` closure alongside "did the ask
-/// vanish from the queue" (the same [`ZenityResult::CancelledExternally`]
-/// idiom kills the dialog either way — this predicate only decides WHETHER,
-/// never HOW). Pure and unit-tested the same way [`code_prompt_allowed`]
-/// is — `<`, not `<=`, matching [`code_prompt_allowed`]'s own `>=` so the
-/// two thresholds never disagree about the exact boundary second.
-pub fn popup_kill_already_open(ask: &Ask, now: u64) -> bool {
-    ask.remaining(now) < POPUP_KILL_LOCKOUT_SECS
-}
-
 // ── narration + `--json` rendering (pure) ───────────────────────────────
 
 fn hms(ts: u64) -> String {
@@ -550,9 +414,7 @@ fn mmss(remaining_secs: i64) -> String {
 /// reason, so a caller with nothing to show adds nothing (every surface
 /// renders EXACTLY as before this phase when `reason` is absent, module
 /// doc). The wrapping quotes/label live here, the ONE place, so the tty
-/// prompt and zenity's `--text` show byte-identical wording — the provider's
-/// `secrets ask` gets the RAW `reason` text instead ([`spawn_provider_entry`]'s own doc)
-/// since its own QML owns that surface's layout.
+/// prompt and zenity's `--text` show byte-identical wording.
 fn format_reason_line(reason: &Option<String>) -> Option<String> {
     reason.as_deref().map(|r| format!("for: \"{r}\""))
 }
@@ -566,9 +428,8 @@ fn format_reason_line(reason: &Option<String>) -> Option<String> {
 /// either resolves the whole `PeerCred` or none of it — kept anyway so this
 /// function never assumes that invariant from outside). This is the ONE
 /// place this wording is built — the provider's `secrets ask` receives the finished
-/// string via `--from` rather than re-deriving it from separate flags
-/// ([`spawn_provider_entry`]'s own doc), so every surface (the watch's tty and
-/// zenity prompts, `approve`'s prompt, the provider) shows byte-identical text.
+/// string rather than re-deriving it, so every surface (the watch's tty
+/// prompt, the popup notice, `approve`'s prompt) shows byte-identical text.
 pub(crate) fn format_origin_line(origin: &client::PendingOrigin) -> Option<String> {
     if origin.username.is_none() && origin.pid.is_none() && origin.comm.is_none() && origin.hostname.is_none() {
         return None;
@@ -602,7 +463,7 @@ pub fn narrate_event(event: &Event) -> String {
             // terse one-line narration (`format_prompt_header`'s own doc) —
             // keeping the scrolling narration line unchanged in shape.
             format!(
-                "  {}  parked      {secret} \u{2192} {consumer}   ask {id}   times out in {}",
+                "  {}  parked      {secret} \u{2192} {consumer}   ask {id}   times out in {}   approve: aoide secrets approve {id}",
                 hms(*ts),
                 mmss(*timeout_secs as i64)
             )
@@ -692,7 +553,7 @@ const ZENITY_CMD: &str = "zenity";
 // `aoide_protocol::dialog` now (P-P5, F5) — see this module's own shim
 // import block near the top.
 
-/// `--no-markup` (this commit, review fix): `--text` is built by
+/// `--no-markup`: `--text` is built by
 /// interpolating `secret`/`consumer`/`reason`/the origin line — all
 /// UNTRUSTED display text (`ask.reason`/`ask.origin.comm` in particular,
 /// this crate's own honesty note: `comm` is PROCESS-CONTROLLED, any process
@@ -708,171 +569,44 @@ const ZENITY_CMD: &str = "zenity";
 /// GMarkup parse warning. Don't drop this flag "since the text is just a
 /// secret/consumer name" — `reason`/`origin` (P3) made this sink reachable
 /// with genuinely free-text, caller-influenced content for the first time.
-fn spawn_zenity_entry(zenity_cmd: &str, title: &str, text: &str) -> std::io::Result<Child> {
+fn spawn_zenity_notice(zenity_cmd: &str, title: &str, text: &str) -> std::io::Result<Child> {
     Command::new(zenity_cmd)
-        .args(["--entry", "--no-markup", "--title", title, "--text", text, "--extra-button", DISMISS_LABEL])
+        .args(["--info", "--no-markup", "--title", title, "--text", text])
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .spawn()
 }
 
-/// The provider's `secrets ask` argv — `--secret`/`--consumer`/`--seconds`
-/// always, plus two OPTIONAL context flags, the same "identifiers and TEXT
-/// only, never a code" argv discipline `spawn_zenity_entry` already holds.
-/// `reason` rides RAW (`ask.reason`'s own text, untouched — the provider's `secrets
-/// ask` owns how it labels/quotes it in its own context block); `from_line`
-/// rides PRE-FORMATTED by [`format_origin_line`] — the ONE place that
-/// multi-part conditional formatting lives, so zenity's `--text`, the tty
-/// prompt, and the provider's dialog render the IDENTICAL "from: ..." wording rather
-/// than three independent reimplementations that could drift. `provider` is
-/// a path/name parameter, never a hardcoded program name, matching
-/// `spawn_zenity_entry`'s own shape so this module's tests can stand in a
-/// fake shim for either binary without a `PATH` mutation.
-fn spawn_provider_entry(
-    provider: &str,
-    secret: &str,
-    consumer: &str,
-    seconds: u64,
-    reason: Option<&str>,
-    from_line: Option<&str>,
-) -> std::io::Result<Child> {
-    let mut cmd = Command::new(provider);
-    cmd.args(["secrets", "ask", "--secret", secret, "--consumer", consumer, "--seconds", &seconds.to_string()]);
-    if let Some(r) = reason {
-        cmd.args(["--reason", r]);
+// `run_entry_dialog` lives in `aoide_protocol::dialog` (P-P5, F5). `--info`
+// has no extra button, so the dismiss label can never match its empty stdout;
+// it is passed only because the shared reader takes one.
+fn run_zenity_notice(zenity_cmd: &str, title: &str, text: &str, should_cancel: impl FnMut() -> bool) -> ZenityResult {
+    run_entry_dialog(|| spawn_zenity_notice(zenity_cmd, title, text), DISMISS_LABEL, should_cancel)
+}
+
+/// The popup's text for one parked ask: the line a person reads, then the
+/// same context lines the tty prompt shows (reason, origin), each present only
+/// when the ask carries it.
+fn popup_text(ask: &Ask, seconds: u64) -> String {
+    let mut text = format!("ask {} for `{}` \u{2190} {} \u{00b7} {}s left\nrun: aoide secrets approve {}", ask.id, ask.secret, ask.consumer, seconds, ask.id);
+    for line in [format_reason_line(&ask.reason), format_origin_line(&ask.origin)].into_iter().flatten() {
+        text.push('\n');
+        text.push_str(&line);
     }
-    if let Some(f) = from_line {
-        cmd.args(["--from", f]);
-    }
-    // `stderr(Stdio::inherit())` (module doc's failure section): a provider
-    // narrates its OWN failures on stderr (its failure hook prints `failed`),
-    // and that text must reach an operator rather than be discarded
-    // (`Stdio::null()`). Inheriting means it lands directly in THIS
-    // process's own stderr — which the deployed unit already routes to the
-    // journal (`StandardError = "journal"`) — with no capture/re-print step
-    // needed here. `stdout` stays piped (the code/`Dismiss ask` contract);
-    // `stdin` stays null (never an interactive child).
-    cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::inherit()).spawn()
+    text
 }
-
-// `run_entry_dialog` itself lives in `aoide_protocol::dialog` now (P-P5,
-// F5), shimmed back at this name — the wrappers below are what still stay
-// here, since they know which secrets-specific binary/argv to spawn.
-
-fn run_zenity_entry(zenity_cmd: &str, title: &str, text: &str, should_cancel: impl FnMut() -> bool) -> ZenityResult {
-    run_entry_dialog(|| spawn_zenity_entry(zenity_cmd, title, text), DISMISS_LABEL, should_cancel)
-}
-
-#[allow(clippy::too_many_arguments)]
-fn run_provider_entry(
-    provider: &str,
-    secret: &str,
-    consumer: &str,
-    seconds: u64,
-    reason: Option<&str>,
-    from_line: Option<&str>,
-    should_cancel: impl FnMut() -> bool,
-) -> ZenityResult {
-    run_entry_dialog(|| spawn_provider_entry(provider, secret, consumer, seconds, reason, from_line), DISMISS_LABEL, should_cancel)
-}
-
-/// The dialog CHOICE itself (module doc's P3 section): `provider` present
-/// means it already resolved to a real executable ([`dialog_provider`]'s
-/// own job, done ONCE by the caller — never re-checked here), so this
-/// function never re-derives that fact, only branches on it. Both arms end
-/// up in [`run_entry_dialog`] through the SAME `should_cancel` closure the
-/// caller built once — the choice changes which child is spawned, nothing
-/// about how its result is read back.
-///
-/// **Fallback on a provider infrastructure failure (module doc's own section
-/// has the full story).** A provider
-/// attempt that comes back `SpawnError`/`DialogFailure` is retried, ONCE,
-/// immediately, through `zenity` for the SAME ask — [`zenity_available`]
-/// permitting — rather than leaving the ask with no dialog at all (the
-/// plugin philosophy's whole point, root `AGENTS.md` house rule 7: the
-/// fancy surface degrades to the plain one). Both the fallback attempt and
-/// the "no fallback possible" case narrate on stderr, naming the ask id and
-/// which binary failed — [`popup_loop`]'s own caller-side narration
-/// (spawn-backoff bookkeeping, the `spawn_failing` flag) still applies on
-/// top of whatever this function returns; it has no reason to know a
-/// fallback happened underneath it, since the RESULT is what it reacts to
-/// either way.
-#[allow(clippy::too_many_arguments)]
-fn run_ask_dialog(
-    provider: Option<&str>,
-    zenity_cmd: &str,
-    ask_id: &str,
-    secret: &str,
-    consumer: &str,
-    seconds: u64,
-    title: &str,
-    text: &str,
-    reason: Option<&str>,
-    from_line: Option<&str>,
-    mut should_cancel: impl FnMut() -> bool,
-) -> ZenityResult {
-    let Some(provider) = provider else {
-        return run_zenity_entry(zenity_cmd, title, text, should_cancel);
-    };
-    let result = run_provider_entry(provider, secret, consumer, seconds, reason, from_line, &mut should_cancel);
-    match &result {
-        ZenityResult::SpawnError(e) | ZenityResult::DialogFailure(e) => {
-            eprintln!(
-                "aoide secrets watch --popup: the dialog provider failed for ask {ask_id}: {e} \u{2014} falling back to zenity for this ask"
-            );
-            if zenity_available(zenity_cmd) {
-                run_zenity_entry(zenity_cmd, title, text, should_cancel)
-            } else {
-                eprintln!(
-                    "aoide secrets watch --popup: zenity is not available either \u{2014} ask {ask_id} stays parked, will retry"
-                );
-                result
-            }
-        }
-        _ => result,
-    }
-}
-
-/// A brief `zenity --error`, shown after a wrong code (design doc: "show a
-/// brief zenity --error ... and re-offer"). Blocks until the user closes it
-/// — deliberately no `--timeout`, so the message is never dismissed before
-/// it's read; the ask stays parked underneath regardless of how long this
-/// sits open, same as the tty path's own wrong-code retry.
-fn zenity_error_dialog(zenity_cmd: &str, text: &str) {
-    // `--no-markup` for the identical reason `spawn_zenity_entry` carries
-    // it now (that function's own doc) — this dialog's own `text` only
-    // ever interpolates `ask.secret` today (charset-restricted by
-    // `policy::valid_secret_name`, never free text), but there is no
-    // reason to leave this sink one property away from the others.
-    let _ = Command::new(zenity_cmd)
-        .args(["--error", "--no-markup", "--text", text])
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status();
-}
-
-// `zenity_available` lives in `aoide_protocol::dialog` now (P-P5, F5),
-// shimmed back at this name.
 
 /// The `--popup` loop — main thread only, mirrors [`prompt_loop`]'s own
 /// shape (pick the next un-ignored ask, act, repeat) but drives a dialog
-/// instead of reading `[a]`/`[d]`/`[i]` from stdin — the provider when
-/// [`dialog_provider`] found one, `zenity` otherwise ([`run_ask_dialog`]).
+/// instead of reading `[a]`/`[d]`/`[i]` from stdin: a zenity notice, see
+/// [`run_zenity_notice`].
 /// `ignored` is the SAME "Cancel/close stops re-prompting for THIS ask, this
 /// session only" semantics `[i]` holds in [`prompt_loop`] (design doc:
 /// "Cancel/close = IGNORE") — without it, a cancelled dialog would reopen
 /// every ~200ms forever.
 #[allow(clippy::too_many_arguments)]
-fn popup_loop(
-    socket_path: &Path,
-    queue: &Arc<Mutex<Queue>>,
-    out_lock: &Arc<Mutex<()>>,
-    zenity_cmd: &str,
-    provider: Option<&str>,
-    locker_process: &str,
-) {
+fn popup_loop(queue: &Arc<Mutex<Queue>>, out_lock: &Arc<Mutex<()>>, zenity_cmd: &str, locker_process: &str) {
     let mut ignored: HashSet<String> = HashSet::new();
     let mut spawn_backoff = SPAWN_BACKOFF_INITIAL;
     let mut spawn_failing = false;
@@ -889,172 +623,48 @@ fn popup_loop(
             thread::sleep(Duration::from_millis(200));
             continue;
         };
-
-        let now = unix_now();
-        match popup_action(&ask, now, is_locked(locker_process)) {
-            PopupAction::TooLateToShow => {
-                thread::sleep(Duration::from_millis(200));
-                continue;
-            }
-            PopupAction::WaitUnlock => {
-                thread::sleep(Duration::from_secs(1));
-                continue;
-            }
-            PopupAction::Show => {}
+        if is_locked(locker_process) {
+            thread::sleep(Duration::from_secs(1));
+            continue;
         }
 
-        let seconds = ask.remaining(now).max(0) as u64;
+        let seconds = ask.remaining(unix_now()).max(0) as u64;
         let title = format!("aoide \u{b7} {}", ask.secret);
-        let mut text = format!("code for `{}` \u{2190} {} \u{00b7} {}s left", ask.secret, ask.consumer, seconds);
-        // P3: the SAME context lines `format_prompt_header` shows the tty
-        // prompt, appended to zenity's own `--text` — absent when the ask
-        // carries neither, byte-identical to before this phase in that case.
-        for line in [format_reason_line(&ask.reason), format_origin_line(&ask.origin)].into_iter().flatten() {
-            text.push('\n');
-            text.push_str(&line);
-        }
-        let reason = ask.reason.clone();
-        let from_line = format_origin_line(&ask.origin);
-
+        let text = popup_text(&ask, seconds);
         let cancel_queue = Arc::clone(queue);
         let cancel_id = ask.id.clone();
-        let cancel_ask = ask.clone();
-        // The SAME kill idiom serves two different reasons a dialog must
-        // close mid-poll (`should_cancel`'s own doc): the ask vanished from
-        // the queue (resolved/reaped elsewhere), OR it is now within
-        // `POPUP_KILL_LOCKOUT_SECS` of expiry — `popup_loop`'s own arm below
-        // tells the two apart afterward by re-checking whether the ask is
-        // still in the queue.
-        let result = run_ask_dialog(
-            provider,
-            zenity_cmd,
-            &ask.id,
-            &ask.secret,
-            &ask.consumer,
-            seconds,
-            &title,
-            &text,
-            reason.as_deref(),
-            from_line.as_deref(),
-            || {
-                cancel_queue.lock().unwrap_or_else(|e| e.into_inner()).get(&cancel_id).is_none()
-                    || popup_kill_already_open(&cancel_ask, unix_now())
-            },
-        );
+        let result = run_zenity_notice(zenity_cmd, &title, &text, || {
+            cancel_queue.lock().unwrap_or_else(|e| e.into_inner()).get(&cancel_id).is_none()
+        });
 
         if !matches!(result, ZenityResult::SpawnError(_) | ZenityResult::DialogFailure(_)) && spawn_failing {
             spawn_failing = false;
             spawn_backoff = SPAWN_BACKOFF_INITIAL;
             let _g = out_lock.lock().unwrap_or_else(|e| e.into_inner());
-            println!("  aoide secrets watch --popup: the dialog is spawning again \u{2014} backoff cleared");
+            println!("  aoide secrets watch --popup: the notice is opening again \u{2014} backoff cleared");
         }
 
         match result {
-            ZenityResult::Approved(code) => {
-                let still_parked = queue.lock().unwrap_or_else(|e| e.into_inner()).get(&ask.id).cloned();
-                let Some(current) = still_parked else {
-                    let _g = out_lock.lock().unwrap_or_else(|e| e.into_inner());
-                    println!("  ask {} is no longer parked \u{2014} the code was NOT sent", ask.id);
-                    continue;
-                };
-                if !code_prompt_allowed(&current, unix_now()) {
-                    let _g = out_lock.lock().unwrap_or_else(|e| e.into_inner());
-                    println!("  too little time left \u{2014} the code was NOT sent");
-                    continue;
-                }
-                let approved = client::approve(socket_path, &ask.id, &code);
-                if approved.is_ok() {
-                    queue.lock().unwrap_or_else(|e| e.into_inner()).remove(&ask.id);
-                }
-                {
-                    let _g = out_lock.lock().unwrap_or_else(|e| e.into_inner());
-                    match &approved {
-                        Ok(()) => println!("  \u{2713} approved {} (popup) \u{2014} value released to the waiting caller", ask.id),
-                        Err(e) => println!("  \u{2717} invalid or already-used code \u{2014} the ask is STILL PARKED, nothing was spent ({e})"),
-                    }
-                }
-                // The wrong-code error dialog is zenity-specific (no provider
-                // error surface exists — P3's brief covers the entry dialog
-                // only); on the provider path the ask simply stays parked and
-                // the next poll reopens the provider's `secrets ask` entry
-                // dialog fresh, same as any other re-prompt. KNOWN
-                // IMPRECISION: this still checks the STATIC `provider.is_none()`
-                // choice, not "did `run_ask_dialog` actually fall back to
-                // zenity for THIS attempt" — a wrong code entered through a
-                // provider-failed-then-fell-back-to-zenity dialog won't get this
-                // retry dialog either, same as an ordinary provider attempt
-                // wouldn't. Narrow enough (two failures compounding: the
-                // provider's own infra failure, then a wrong code on the
-                // fallback) not to chase further here; a future fix would need
-                // `run_ask_dialog` to report which binary actually answered,
-                // not just the result.
-                if approved.is_err() && provider.is_none() {
-                    zenity_error_dialog(
-                        zenity_cmd,
-                        &format!("invalid code for `{}` \u{2014} the ask is still parked, try again", ask.secret),
-                    );
-                }
-            }
-            ZenityResult::Dismissed => {
-                let dismissed = client::dismiss(socket_path, &ask.id);
-                queue.lock().unwrap_or_else(|e| e.into_inner()).remove(&ask.id);
-                let _g = out_lock.lock().unwrap_or_else(|e| e.into_inner());
-                match dismissed {
-                    Ok(()) => println!("  dismissed ask {} (popup) \u{2014} the waiting caller gets a clean refusal", ask.id),
-                    Err(e) => println!("  could not dismiss ask {}: {e}", ask.id),
-                }
-            }
-            ZenityResult::Cancelled => {
+            // OK and a bare close both mean "seen". The ask stays parked, and
+            // `secrets approve` is the only way to complete it.
+            ZenityResult::Approved(_) | ZenityResult::Dismissed | ZenityResult::Cancelled => {
                 ignored.insert(ask.id.clone());
             }
             ZenityResult::CancelledExternally => {
-                // Still in the queue: this WASN'T a vanished/resolved-
-                // elsewhere ask — the kill was `popup_kill_already_open`
-                // firing (LOCKOUT_SECS's own doc). `ignored` here is what
-                // makes "don't respawn for that ask" real — otherwise the
-                // very next loop iteration would just pick it again and
-                // instantly re-trigger the same kill, on repeat, until
-                // `popup_action`'s own before-open check finally catches up
-                // a few seconds later.
-                let still_parked = queue.lock().unwrap_or_else(|e| e.into_inner()).get(&ask.id).is_some();
-                if still_parked {
-                    ignored.insert(ask.id.clone());
-                }
                 let _g = out_lock.lock().unwrap_or_else(|e| e.into_inner());
-                if still_parked {
-                    println!(
-                        "  ask {} \u{2014} too little time left to type a code safely, closing the dialog (won't reopen for this ask)",
-                        ask.id
-                    );
-                } else {
-                    println!("  ask {} resolved elsewhere while its popup was open \u{2014} closing the dialog", ask.id);
-                }
+                println!("  ask {} resolved elsewhere while its notice was open \u{2014} closing the notice", ask.id);
             }
-            // `SpawnError`/`DialogFailure` land here ONLY when `run_ask_dialog`'s
-            // own fallback (module doc's failure section) already
-            // ran and either wasn't possible (`zenity_available` was
-            // false) or itself failed — the SPECIFIC cause (which binary,
-            // which error) was already `eprintln!`'d there and, for a
-            // provider failure, on the provider's own inherited stderr too
-            // (`spawn_provider_entry`'s doc). This arm's only job is the
-            // shared backoff bookkeeping so a persistently broken dialog
-            // binary doesn't busy-loop every ~200ms — deliberately
-            // binary-agnostic wording, since by the time either variant
-            // reaches here the specific failure is already on record.
             ZenityResult::SpawnError(e) | ZenityResult::DialogFailure(e) => {
                 if !spawn_failing {
                     spawn_failing = true;
                     let _g = out_lock.lock().unwrap_or_else(|e2| e2.into_inner());
                     eprintln!(
-                        "  aoide secrets watch --popup: ask {} has no working dialog right now ({e}) \u{2014} backing off, retrying up to every {}s",
+                        "  aoide secrets watch --popup: ask {} has no working notice right now ({e}) \u{2014} backing off, retrying up to every {}s",
                         ask.id,
                         SPAWN_BACKOFF_MAX.as_secs()
                     );
                 }
-                // #108: interruptible — a plain `thread::sleep` here would
-                // make Ctrl-C wait out the full backoff (up to
-                // `SPAWN_BACKOFF_MAX`, 60s) before this loop's own
-                // `INTERRUPTED` check (top of `popup_loop`) is reached again.
+                // #108: interruptible, so Ctrl-C does not wait out the backoff.
                 sleep_backoff_interruptible(spawn_backoff, &INTERRUPTED);
                 spawn_backoff = next_spawn_backoff(spawn_backoff);
             }
@@ -1164,10 +774,10 @@ fn tail_loop(mut follower: Follower, socket_path: PathBuf, queue: Arc<Mutex<Queu
     }
 }
 
-fn format_prompt_header(ask: &Ask, remaining: i64, closed: bool, queued: usize) -> String {
+fn format_prompt_header(ask: &Ask, remaining: i64, queued: usize) -> String {
     let asked = hms(ask.requested_at);
     let est = if ask.estimated { "~" } else { "" };
-    let left = if closed { format!("{est}{}s left \u{2014} CLOSED", remaining.max(0)) } else { format!("{est}{} left", mmss(remaining)) };
+    let left = format!("{est}{} left", mmss(remaining));
     let tail = if queued > 0 { format!(" \u{2014} {queued} queued \u{2014}") } else { String::new() };
     let mut header =
         format!("\u{250c} ask {} \u{2500} {} \u{2190} {} \u{2500} asked {asked} \u{2500} {left}{tail}", ask.id, ask.secret, ask.consumer);
@@ -1183,15 +793,11 @@ fn format_prompt_header(ask: &Ask, remaining: i64, closed: bool, queued: usize) 
 
 /// The FULL prompt block `emit_event` reprints verbatim after an async
 /// narration line (this module's own "reprint the full frame" rider,
-/// `emit_event`'s doc) — `header`, the options-or-closed line, and the
+/// `emit_event`'s doc) — `header`, the options line, and the
 /// `└ > ` entry marker, ending WITHOUT a trailing newline so the cursor
 /// sits ready for input exactly where it would after the original print.
-fn format_prompt_frame(header: &str, closed: bool) -> String {
-    let options = if closed {
-        "\u{2502} too little time left to type a code safely \u{2014} [d] dismiss  [i] ignore"
-    } else {
-        "\u{2502} [a] approve (enter code)   [d] dismiss the ask   [i] ignore (stays parked)"
-    };
+fn format_prompt_frame(header: &str) -> String {
+    let options = "\u{2502} [a] show the approve command   [d] dismiss the ask   [i] ignore (stays parked)";
     format!("{header}\n{options}\n\u{2514} > ")
 }
 
@@ -1205,7 +811,13 @@ fn clear_prompt_frame(prompt_frame: &Mutex<Option<String>>) {
 /// block, and reads ONE line for `[a]`/`[d]`/`[i]` — never raw single-key
 /// (design doc's "1.5 Prompt flow": works over ssh, no terminal-state
 /// restoration risk).
-fn prompt_loop(socket_path: &Path, queue: &Arc<Mutex<Queue>>, out_lock: &Arc<Mutex<()>>, prompt_frame: &Arc<Mutex<Option<String>>>) {
+fn prompt_loop(
+    socket_path: &Path,
+    queue: &Arc<Mutex<Queue>>,
+    out_lock: &Arc<Mutex<()>>,
+    prompt_frame: &Arc<Mutex<Option<String>>>,
+    input: &mut impl BufRead,
+) {
     let mut ignored: HashSet<String> = HashSet::new();
     loop {
         if INTERRUPTED.load(Ordering::SeqCst) {
@@ -1225,9 +837,8 @@ fn prompt_loop(socket_path: &Path, queue: &Arc<Mutex<Queue>>, out_lock: &Arc<Mut
 
         let now = unix_now();
         let remaining = ask.remaining(now);
-        let closed = !code_prompt_allowed(&ask, now);
-        let header = format_prompt_header(&ask, remaining, closed, queued);
-        let frame = format_prompt_frame(&header, closed);
+        let header = format_prompt_header(&ask, remaining, queued);
+        let frame = format_prompt_frame(&header);
         {
             let _g = out_lock.lock().unwrap_or_else(|e| e.into_inner());
             *prompt_frame.lock().unwrap_or_else(|e| e.into_inner()) = Some(frame.clone());
@@ -1237,7 +848,7 @@ fn prompt_loop(socket_path: &Path, queue: &Arc<Mutex<Queue>>, out_lock: &Arc<Mut
         }
 
         let mut line = String::new();
-        let read = std::io::stdin().lock().read_line(&mut line);
+        let read = input.read_line(&mut line);
         match read {
             Ok(0) | Err(_) => {
                 clear_prompt_frame(prompt_frame);
@@ -1248,10 +859,9 @@ fn prompt_loop(socket_path: &Path, queue: &Arc<Mutex<Queue>>, out_lock: &Arc<Mut
         let choice = line.trim().to_ascii_lowercase();
 
         match choice.as_str() {
-            "a" if !closed => handle_approve(socket_path, &ask, queue, out_lock),
             "a" => {
                 let _g = out_lock.lock().unwrap_or_else(|e| e.into_inner());
-                println!("  too little time left to type a code safely \u{2014} [d] dismiss or [i] ignore instead");
+                println!("  approve it with: aoide secrets approve {}", ask.id);
             }
             "d" => {
                 let result = client::dismiss(socket_path, &ask.id);
@@ -1267,56 +877,10 @@ fn prompt_loop(socket_path: &Path, queue: &Arc<Mutex<Queue>>, out_lock: &Arc<Mut
             }
             _ => {
                 let _g = out_lock.lock().unwrap_or_else(|e| e.into_inner());
-                println!("  unrecognized \u{2014} [a] approve  [d] dismiss  [i] ignore");
+                println!("  unrecognized \u{2014} [a] approve command  [d] dismiss  [i] ignore");
             }
         }
         clear_prompt_frame(prompt_frame);
-    }
-}
-
-/// The `[a]` branch: read the hidden code (`client::read_hidden_line`,
-/// reused VERBATIM — module doc), re-check the ask is still parked AND
-/// still above [`LOCKOUT_SECS`] (design doc's "after" half of the lockout —
-/// a code typed near the boundary must not be sent once time has run out
-/// underneath it), then `client::approve`. A wrong code narrates and
-/// leaves the ask parked for a retry; a right code narrates success and
-/// removes the ask from the LOCAL queue immediately (the tail thread's own
-/// `completed` line will confirm it within its next 1s poll either way —
-/// this optimistic removal only stops an immediate re-prompt for the same,
-/// already-approved ask).
-fn handle_approve(socket_path: &Path, ask: &Ask, queue: &Arc<Mutex<Queue>>, out_lock: &Arc<Mutex<()>>) {
-    let code = match client::read_hidden_line(&format!("  code for `{}` (input hidden): ", ask.secret)) {
-        Ok(c) => c,
-        Err(e) => {
-            let _g = out_lock.lock().unwrap_or_else(|e2| e2.into_inner());
-            println!("  {e}");
-            return;
-        }
-    };
-
-    let still_parked = {
-        let q = queue.lock().unwrap_or_else(|e| e.into_inner());
-        q.get(&ask.id).cloned()
-    };
-    let Some(current) = still_parked else {
-        let _g = out_lock.lock().unwrap_or_else(|e| e.into_inner());
-        println!("  ask {} is no longer parked \u{2014} the code was NOT sent", ask.id);
-        return;
-    };
-    if !code_prompt_allowed(&current, unix_now()) {
-        let _g = out_lock.lock().unwrap_or_else(|e| e.into_inner());
-        println!("  too little time left \u{2014} the code was NOT sent");
-        return;
-    }
-
-    let result = client::approve(socket_path, &ask.id, &code);
-    if result.is_ok() {
-        queue.lock().unwrap_or_else(|e| e.into_inner()).remove(&ask.id);
-    }
-    let _g = out_lock.lock().unwrap_or_else(|e| e.into_inner());
-    match result {
-        Ok(()) => println!("  \u{2713} approved {} \u{2014} value released to the waiting caller", ask.id),
-        Err(e) => println!("  \u{2717} invalid or already-used code \u{2014} the ask is STILL PARKED, nothing was spent ({e})"),
     }
 }
 
@@ -1373,17 +937,14 @@ fn wait_for_follower(events_path: &Path, poll_interval: Duration) -> Result<Foll
 /// see module doc for why). `json_mode` forces narration-only regardless of
 /// tty (module doc); `popup_mode` (`--popup`, mutually exclusive with
 /// `json_mode` — `commands::handle_secrets_watch` refuses the combination
-/// before this function is ever called) swaps the tty prompt for a dialog —
-/// the provider's `secrets ask` when [`dialog_provider`] names one, `zenity`
-/// otherwise (module doc's provider section) — and runs regardless of whether
+/// before this function is ever called) swaps the tty prompt for a zenity
+/// notice — and runs regardless of whether
 /// stdin is a terminal. See [`select_mode`] for the exact precedence between
 /// the three.
 pub fn run(socket_path: &Path, events_path: &Path, json_mode: bool, popup_mode: bool) -> i32 {
-    let provider = dialog_provider();
-    if popup_mode && provider.is_none() && !zenity_available(ZENITY_CMD) {
+    if popup_mode && !zenity_available(ZENITY_CMD) {
         eprintln!(
-            "aoide secrets watch --popup: neither the dialog provider (AOIDE_DIALOG_CMD) nor `zenity` was found \u{2014} install \
-             one of them, or run `aoide secrets watch` (without --popup) instead"
+            "aoide secrets watch --popup: `zenity` was not found \u{2014} install it, or run `aoide secrets watch` (without --popup) instead"
         );
         return 1;
     }
@@ -1419,11 +980,11 @@ pub fn run(socket_path: &Path, events_path: &Path, json_mode: bool, popup_mode: 
 
     match mode {
         Mode::Popup => {
-            popup_loop(socket_path, &queue, &out_lock, ZENITY_CMD, provider.as_deref(), &locker_process_name());
+            popup_loop(&queue, &out_lock, ZENITY_CMD, &locker_process_name());
             0
         }
         Mode::InteractiveTty => {
-            prompt_loop(socket_path, &queue, &out_lock, &prompt_frame);
+            prompt_loop(socket_path, &queue, &out_lock, &prompt_frame, &mut std::io::stdin().lock());
             0
         }
         Mode::Json | Mode::NarrationOnly => {
@@ -1748,28 +1309,6 @@ mod tests {
         assert_eq!(pick_next(&[], &HashSet::new()), None);
     }
 
-    // ── code_prompt_allowed (the lockout predicate) ──────────────────
-
-    #[test]
-    fn lockout_boundary_is_exactly_ten_seconds_remaining() {
-        let ask = |requested_at: u64, timeout_secs: u64| Ask {
-            id: "1".into(),
-            secret: "t".into(),
-            consumer: "m".into(),
-            requested_at,
-            timeout_secs,
-            estimated: false,
-            reason: None,
-            origin: Default::default(),
-        };
-        // Exactly 10s remaining: allowed (>=).
-        assert!(code_prompt_allowed(&ask(0, 10), 0));
-        // 9s remaining: refused.
-        assert!(!code_prompt_allowed(&ask(0, 9), 0));
-        // Already past due: refused.
-        assert!(!code_prompt_allowed(&ask(0, 5), 100));
-    }
-
     // ── narration / --json rendering ─────────────────────────────────
 
     #[test]
@@ -1794,6 +1333,94 @@ mod tests {
         });
         assert!(line.contains("ab12-1"));
         assert!(line.contains("5m00s"));
+    }
+
+    /// The terminal prompt reads no code and sends no approve op. Given `a`,
+    /// then
+    /// a code line, it names the approve command and never asks for the code.
+    /// The fake socket records every request it gets and refuses each one, so a
+    /// request that reached it is on record.
+    #[test]
+    fn the_terminal_prompt_reads_no_code_and_sends_no_approve_op() {
+        let socket = tmp_path("prompt-no-approve");
+        let _ = std::fs::remove_file(&socket);
+        let listener = std::os::unix::net::UnixListener::bind(&socket).expect("bind the fake socket");
+        listener.set_nonblocking(true).expect("nonblocking accept");
+        let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let recorded: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+        let server = {
+            let stop = Arc::clone(&stop);
+            let recorded = Arc::clone(&recorded);
+            thread::spawn(move || {
+                while !stop.load(Ordering::SeqCst) {
+                    match listener.accept() {
+                        Ok((mut stream, _)) => {
+                            let mut line = String::new();
+                            let mut reader = std::io::BufReader::new(stream.try_clone().expect("clone the stream"));
+                            if reader.read_line(&mut line).is_ok() {
+                                recorded.lock().unwrap_or_else(|e| e.into_inner()).push(line);
+                            }
+                            let _ = stream.write_all(b"{\"ok\":false,\"error\":\"fake\"}\n");
+                        }
+                        Err(_) => thread::sleep(Duration::from_millis(10)),
+                    }
+                }
+            })
+        };
+
+        let queue = Arc::new(Mutex::new(Queue::new()));
+        queue.lock().unwrap_or_else(|e| e.into_inner()).apply(&Event::Parked {
+            id: "7".into(),
+            secret: "db-prod".into(),
+            consumer: "claude".into(),
+            timeout_secs: 300,
+            ts: unix_now(),
+            reason: None,
+            origin: Default::default(),
+        });
+        let out_lock = Arc::new(Mutex::new(()));
+        let prompt_frame: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+        let mut input = std::io::Cursor::new(b"a\n654321\n".to_vec());
+        prompt_loop(&socket, &queue, &out_lock, &prompt_frame, &mut input);
+
+        stop.store(true, Ordering::SeqCst);
+        server.join().expect("the fake socket thread");
+        let _ = std::fs::remove_file(&socket);
+        let requests = recorded.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        let approves = requests.iter().filter(|line| serde_json::from_str::<Value>(line.trim()).is_ok_and(|v| v["op"] == "approve")).count();
+        assert_eq!(approves, 0, "the terminal prompt sent an approve op: {requests:?}");
+    }
+
+    /// The parked narration names the command that completes the ask.
+    #[test]
+    fn a_parked_notice_names_the_approve_command() {
+        let line = narrate_event(&Event::Parked {
+            id: "ab12-1".into(),
+            secret: "db-prod".into(),
+            consumer: "claude".into(),
+            timeout_secs: 300,
+            ts: 0,
+            reason: None,
+            origin: Default::default(),
+        });
+        assert!(line.contains("aoide secrets approve ab12-1"), "the parked notice names the command: {line}");
+    }
+
+    /// The popup notice names the command that completes the ask.
+    #[test]
+    fn the_popup_notice_names_the_approve_command() {
+        let ask = Ask {
+            id: "ab12-1".into(),
+            secret: "db-prod".into(),
+            consumer: "claude".into(),
+            requested_at: 0,
+            timeout_secs: 300,
+            estimated: false,
+            reason: None,
+            origin: Default::default(),
+        };
+        let text = popup_text(&ask, 300);
+        assert!(text.contains("aoide secrets approve ab12-1"), "the popup notice names the command: {text}");
     }
 
     #[test]
@@ -2014,68 +1641,9 @@ mod tests {
     // `locked_state`'s own tests moved to `aoide_protocol::dialog`'s test
     // module (P-P5, F5) with the function itself.
 
-    // ── popup_action (dialog-allowed gating, pure) ────────────────────
-
-    fn popup_ask(timeout_secs: u64) -> Ask {
-        Ask { id: "1".into(), secret: "t".into(), consumer: "m".into(), requested_at: 0, timeout_secs, estimated: false, reason: None, origin: Default::default() }
-    }
-
-    #[test]
-    fn popup_action_shows_when_unlocked_and_well_within_time() {
-        assert_eq!(popup_action(&popup_ask(300), 0, false), PopupAction::Show);
-    }
-
-    #[test]
-    fn popup_action_waits_for_unlock_when_locked_but_in_time() {
-        assert_eq!(popup_action(&popup_ask(300), 0, true), PopupAction::WaitUnlock);
-    }
-
-    #[test]
-    fn popup_action_refuses_below_the_lockout_regardless_of_lock_state() {
-        // 5s remaining is below LOCKOUT_SECS (10) — must never show OR wait,
-        // since waiting for an unlock would only spend the time that's left.
-        assert_eq!(popup_action(&popup_ask(5), 0, false), PopupAction::TooLateToShow);
-        assert_eq!(popup_action(&popup_ask(5), 0, true), PopupAction::TooLateToShow);
-    }
-
-    // ── popup_kill_already_open (kill-open near-expiry, pure) ─────────
-
-    #[test]
-    fn popup_kill_already_open_is_false_well_within_time() {
-        assert!(!popup_kill_already_open(&popup_ask(300), 0));
-    }
-
-    #[test]
-    fn popup_kill_already_open_boundary_is_exactly_fifteen_seconds_remaining() {
-        // Exactly POPUP_KILL_LOCKOUT_SECS (15s) remaining: NOT yet killed
-        // (`<`, matching `code_prompt_allowed`'s own `>=` — the two
-        // thresholds must never disagree about the boundary second,
-        // `popup_kill_already_open`'s own doc).
-        assert!(!popup_kill_already_open(&popup_ask(15), 0));
-        // One second later (14s remaining): killed.
-        assert!(popup_kill_already_open(&popup_ask(14), 0));
-    }
-
-    #[test]
-    fn popup_kill_already_open_true_once_past_due() {
-        assert!(popup_kill_already_open(&popup_ask(5), 100));
-    }
-
-    #[test]
-    fn popup_kill_threshold_sits_strictly_above_the_before_open_lockout() {
-        // The coherence task #76 item 1 asks for: the kill-open threshold
-        // must never be BELOW the before-open one, or a dialog could stay
-        // open into the window `popup_action` itself would already have
-        // refused to open a fresh one in.
-        assert!(POPUP_KILL_LOCKOUT_SECS > LOCKOUT_SECS);
-    }
-
-    // `next_spawn_backoff`'s own tests moved to `aoide_protocol::dialog`'s
-    // test module (P-P5, F5) with the function itself.
-
-    // ── zenity_available / run_zenity_entry (fake-zenity shims) ──────
+    // ── run_zenity_notice (fake-zenity shims) ──
     //
-    // Every shim here is a full path handed directly to `run_zenity_entry`/
+    // Every shim here is a full path handed directly to `run_zenity_notice`/
     // `zenity_available` as `zenity_cmd` — never a `PATH` mutation (module
     // doc: this is exactly why `run`'s `zenity_cmd` parameter exists,
     // distinct from `enroll::render_qr`'s older `PATH`-shim precedent,
@@ -2109,7 +1677,7 @@ mod tests {
     /// immediately EXECS it, against every OTHER such test — diagnosed root
     /// cause of the "Text file busy" flake this lock exists to close (this
     /// commit, reproduced live under `--test-threads` > 1 and confirmed by
-    /// instrumenting `write_shim`/`run_zenity_entry` with a shared debug
+    /// instrumenting `write_shim`/`run_zenity_notice` with a shared debug
     /// log): it is NOT a path collision — every shim already gets its own
     /// unique tempdir (`write_shim`'s own doc, `{tag}-{pid}-{nanos}`), and
     /// the instrumented trace caught the failure on a test's OWN
@@ -2145,396 +1713,52 @@ mod tests {
     // (the module note above names the class; the code under test is portable).
     #[cfg(unix)]
     #[test]
-    fn run_zenity_entry_returns_the_typed_code_on_exit_zero() {
+    fn run_zenity_notice_treats_a_bare_close_as_cancelled() {
         let _guard = shim_lock();
-        let shim = write_shim("approve", "#!/bin/sh\necho 654321\nexit 0\n");
-        let result = run_zenity_entry(shim.to_str().unwrap(), "t", "x", || false);
-        match result {
-            ZenityResult::Approved(code) => assert_eq!(code, "654321"),
-            other => panic!("expected Approved(\"654321\"), got {other:?}"),
-        }
-        remove_shim(&shim);
-    }
-
-    // cfg(unix): the fixture is a POSIX shell template or a `#!/bin/sh` shim
-    // (the module note above names the class; the code under test is portable).
-    #[cfg(unix)]
-    #[test]
-    fn run_zenity_entry_recognizes_the_dismiss_extra_button_by_its_label() {
-        let _guard = shim_lock();
-        let shim = write_shim("dismiss", "#!/bin/sh\necho 'Dismiss ask'\nexit 1\n");
-        let result = run_zenity_entry(shim.to_str().unwrap(), "t", "x", || false);
-        assert!(matches!(result, ZenityResult::Dismissed), "expected Dismissed, got {result:?}");
-        remove_shim(&shim);
-    }
-
-    // cfg(unix): the fixture is a POSIX shell template or a `#!/bin/sh` shim
-    // (the module note above names the class; the code under test is portable).
-    #[cfg(unix)]
-    #[test]
-    fn run_zenity_entry_treats_a_bare_cancel_as_cancelled_not_dismissed() {
-        let _guard = shim_lock();
-        let shim = write_shim("cancel", "#!/bin/sh\nexit 1\n");
-        let result = run_zenity_entry(shim.to_str().unwrap(), "t", "x", || false);
+        let shim = write_shim("bare-close", "#!/bin/sh\nexit 1\n");
+        let result = run_zenity_notice(shim.to_str().unwrap(), "t", "x", || false);
         assert!(matches!(result, ZenityResult::Cancelled), "expected Cancelled, got {result:?}");
         remove_shim(&shim);
     }
 
     #[test]
-    fn run_zenity_entry_reports_a_spawn_error_for_a_nonexistent_shim() {
-        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        // No shim is written here at all (the path is deliberately bogus),
-        // so this test never touches `shim_lock` — nothing here can
-        // collide with the write/exec race the lock exists to serialize.
-        let result = run_zenity_entry("/no/such/aoide-secrets-watch-zenity-shim", "t", "x", || false);
+    fn run_zenity_notice_reports_a_spawn_error_for_a_nonexistent_shim() {
+        let result = run_zenity_notice("/no/such/aoide-secrets-watch-zenity-shim", "t", "x", || false);
         assert!(matches!(result, ZenityResult::SpawnError(_)), "expected SpawnError, got {result:?}");
     }
 
-    /// The dialog group's contract, natively: a child this host really has,
-    /// asked a zenity-shaped question it answers with nothing but a non-zero
-    /// exit, is NEVER an approval and never a dismissal — only a clean exit-0
-    /// stdout carrying a code is (`ZenityResult`'s own variants). The shim
-    /// tests above pin that parse in detail through a `#!/bin/sh` script; this
-    /// is the same reading against `findstr`, a program every Windows host
-    /// has, which rejects this argv outright.
-    #[cfg(windows)]
-    #[test]
-    fn a_native_child_that_answers_nothing_but_an_exit_code_is_never_an_approval() {
-        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let result = run_zenity_entry("findstr", "t", "x", || false);
-        assert!(
-            matches!(result, ZenityResult::Cancelled | ZenityResult::DialogFailure(_)),
-            "a non-zero exit with no code on stdout is a non-answer, got {result:?}"
-        );
-    }
-
-    /// P1: the entry dialog is VISIBLE — a TOTP code is a 30-second secret,
-    /// not a password, and `--hide-text` was dropped from
-    /// `spawn_zenity_entry`'s own argv. Pins the exact argv a real `zenity`
-    /// would receive by having the shim log its own `"$@"` before answering,
-    /// rather than trusting `spawn_zenity_entry`'s source to stay in sync
-    /// with this test by inspection alone.
+    /// The notice is an info box with no entry field: `--info` and
+    /// `--no-markup` ride every call, `--entry` never does. `--no-markup`
+    /// matters because `--text` carries untrusted `reason`/`origin` text
+    /// (`spawn_zenity_notice`'s own doc).
     // cfg(unix): the fixture is a POSIX shell template or a `#!/bin/sh` shim
     // (the module note above names the class; the code under test is portable).
     #[cfg(unix)]
     #[test]
-    fn spawn_zenity_entry_argv_has_no_hide_text() {
+    fn spawn_zenity_notice_argv_is_an_info_box_with_no_markup_and_no_entry() {
         let _guard = shim_lock();
-        let shim = write_shim("argv-visible", "#!/bin/sh\necho \"$@\" > \"$(dirname \"$0\")/argv.log\"\necho 654321\nexit 0\n");
-        let result = run_zenity_entry(shim.to_str().unwrap(), "aoide \u{b7} db-prod", "code for `db-prod`", || false);
-        assert!(matches!(result, ZenityResult::Approved(ref c) if c == "654321"), "expected Approved(\"654321\"), got {result:?}");
+        let shim = write_shim("argv-notice", "#!/bin/sh\necho \"$@\" > \"$(dirname \"$0\")/argv.log\"\nexit 0\n");
+        let _ = run_zenity_notice(shim.to_str().unwrap(), "t", "x", || false);
         let argv = std::fs::read_to_string(shim.parent().unwrap().join("argv.log")).unwrap();
-        assert!(!argv.contains("--hide-text"), "argv must not carry --hide-text, got: {argv}");
-        assert!(argv.contains("--entry"), "argv should still carry --entry, got: {argv}");
+        assert!(argv.contains("--info") && argv.contains("--no-markup"), "argv must be a no-markup info box, got: {argv}");
+        assert!(!argv.contains("--entry"), "a notice takes no code, so no entry field, got: {argv}");
         remove_shim(&shim);
-    }
-
-    /// Review fix: `--text` interpolates untrusted `reason`/`origin.comm`
-    /// (P3) and zenity renders `--text` as Pango markup by default, even on
-    /// `--entry` (`spawn_zenity_entry`'s own doc, confirmed live against
-    /// zenity on this host). `--no-markup` must ride every zenity dialog
-    /// this crate ever opens.
-    // cfg(unix): the fixture is a POSIX shell template or a `#!/bin/sh` shim
-    // (the module note above names the class; the code under test is portable).
-    #[cfg(unix)]
-    #[test]
-    fn spawn_zenity_entry_argv_carries_no_markup() {
-        let _guard = shim_lock();
-        let shim = write_shim("argv-no-markup", "#!/bin/sh\necho \"$@\" > \"$(dirname \"$0\")/argv.log\"\necho 111111\nexit 0\n");
-        let result = run_zenity_entry(shim.to_str().unwrap(), "t", "x", || false);
-        assert!(matches!(result, ZenityResult::Approved(_)), "expected Approved, got {result:?}");
-        let argv = std::fs::read_to_string(shim.parent().unwrap().join("argv.log")).unwrap();
-        assert!(argv.contains("--no-markup"), "argv must carry --no-markup, got: {argv}");
-        remove_shim(&shim);
-    }
-
-    // cfg(unix): the fixture is a POSIX shell template or a `#!/bin/sh` shim
-    // (the module note above names the class; the code under test is portable).
-    #[cfg(unix)]
-    #[test]
-    fn zenity_error_dialog_argv_carries_no_markup() {
-        let _guard = shim_lock();
-        let shim = write_shim("error-no-markup", "#!/bin/sh\necho \"$@\" > \"$(dirname \"$0\")/argv.log\"\nexit 0\n");
-        zenity_error_dialog(shim.to_str().unwrap(), "invalid code for `db-prod`");
-        let argv = std::fs::read_to_string(shim.parent().unwrap().join("argv.log")).unwrap();
-        assert!(argv.contains("--no-markup"), "argv must carry --no-markup, got: {argv}");
-        remove_shim(&shim);
-    }
-
-    /// The provider's `secrets ask --secret <name> --consumer <who> --seconds <n>`
-    /// is the exact argv `spawn_provider_entry` sends — pinned the same way the
-    /// zenity argv test above pins `--hide-text`'s absence.
-    // cfg(unix): the fixture is a POSIX shell template or a `#!/bin/sh` shim
-    // (the module note above names the class; the code under test is portable).
-    #[cfg(unix)]
-    #[test]
-    fn spawn_provider_entry_argv_matches_the_documented_contract() {
-        let _guard = shim_lock();
-        let shim = write_shim("provider-argv", "#!/bin/sh\necho \"$@\" > \"$(dirname \"$0\")/argv.log\"\necho 111222\nexit 0\n");
-        let result = run_provider_entry(shim.to_str().unwrap(), "db-prod", "claude", 42, None, None, || false);
-        assert!(matches!(result, ZenityResult::Approved(ref c) if c == "111222"), "expected Approved(\"111222\"), got {result:?}");
-        let argv = std::fs::read_to_string(shim.parent().unwrap().join("argv.log")).unwrap();
-        assert_eq!(argv.trim(), "secrets ask --secret db-prod --consumer claude --seconds 42");
-        remove_shim(&shim);
-    }
-
-    /// P3: `--reason`/`--from` ride the SAME argv, present ONLY when the ask
-    /// actually carries them — the RAW reason text and the PRE-FORMATTED
-    /// origin line respectively (`spawn_provider_entry`'s own doc on why neither
-    /// is reformatted twice).
-    // cfg(unix): the fixture is a POSIX shell template or a `#!/bin/sh` shim
-    // (the module note above names the class; the code under test is portable).
-    #[cfg(unix)]
-    #[test]
-    fn spawn_provider_entry_argv_carries_reason_and_from_only_when_present() {
-        let _guard = shim_lock();
-        let shim = write_shim("provider-argv-context", "#!/bin/sh\necho \"$@\" > \"$(dirname \"$0\")/argv.log\"\necho 333444\nexit 0\n");
-        let result = run_provider_entry(
-            shim.to_str().unwrap(),
-            "db-prod",
-            "claude",
-            42,
-            Some("sudo nixos-rebuild switch"),
-            Some("from: khoa \u{b7} bash (pid 123) @ yomi-strix"),
-            || false,
-        );
-        assert!(matches!(result, ZenityResult::Approved(ref c) if c == "333444"), "expected Approved(\"333444\"), got {result:?}");
-        let argv = std::fs::read_to_string(shim.parent().unwrap().join("argv.log")).unwrap();
-        assert_eq!(
-            argv.trim(),
-            "secrets ask --secret db-prod --consumer claude --seconds 42 --reason sudo nixos-rebuild switch --from from: khoa \u{b7} bash (pid 123) @ yomi-strix"
-        );
-        remove_shim(&shim);
-    }
-
-    /// When a provider is named, [`run_ask_dialog`] spawns IT, not zenity —
-    /// proven by handing it a deliberately bogus `zenity_cmd` path alongside a
-    /// real provider shim: if the dispatch ever fell through to
-    /// zenity by mistake, this would come back `SpawnError`, not `Approved`.
-    // cfg(unix): the fixture is a POSIX shell template or a `#!/bin/sh` shim
-    // (the module note above names the class; the code under test is portable).
-    #[cfg(unix)]
-    #[test]
-    fn run_ask_dialog_prefers_provider_when_it_resolves() {
-        let _guard = shim_lock();
-        let provider_shim = write_shim("dialog-provider", "#!/bin/sh\necho provider-picked\nexit 0\n");
-        let result = run_ask_dialog(
-            Some(provider_shim.to_str().unwrap()),
-            "/no/such/aoide-secrets-watch-zenity-shim",
-            "ask-1",
-            "db-prod",
-            "claude",
-            42,
-            "t",
-            "x",
-            None,
-            None,
-            || false,
-        );
-        assert!(matches!(result, ZenityResult::Approved(ref c) if c == "provider-picked"), "expected the provider shim's own output, got {result:?}");
-        remove_shim(&provider_shim);
-    }
-
-    /// With no provider named, [`run_ask_dialog`] falls back to zenity.
-    // cfg(unix): the fixture is a POSIX shell template or a `#!/bin/sh` shim
-    // (the module note above names the class; the code under test is portable).
-    #[cfg(unix)]
-    #[test]
-    fn run_ask_dialog_falls_back_to_zenity_when_provider_is_absent() {
-        let _guard = shim_lock();
-        let zenity_shim = write_shim("dialog-zenity", "#!/bin/sh\necho zenity-picked\nexit 0\n");
-        let result =
-            run_ask_dialog(None, zenity_shim.to_str().unwrap(), "ask-1", "db-prod", "claude", 42, "t", "x", None, None, || false);
-        assert!(matches!(result, ZenityResult::Approved(ref c) if c == "zenity-picked"), "expected the zenity shim's own output, got {result:?}");
-        remove_shim(&zenity_shim);
-    }
-
-    // ── provider infra failures narrate + fall back ──────────────────────────
-
-    /// A provider that ENOENTs (its own `quickshell` missing from the unit's
-    /// `PATH`, module doc) must not leave the
-    /// ask undialoged: `run_ask_dialog` retries it through zenity
-    /// immediately, and the FINAL result is whatever that zenity attempt
-    /// produced. (Asserting the `eprintln!` narration itself would need
-    /// process-wide stderr fd redirection, which would corrupt `cargo
-    /// test`'s own output capture for every OTHER test running in parallel
-    /// — the functional fallback behavior pinned here is the reliable,
-    /// safe-to-test half; the narration calls themselves are unconditional
-    /// and reviewable directly in `run_ask_dialog`'s source.)
-    // cfg(unix): the fixture is a POSIX shell template or a `#!/bin/sh` shim
-    // (the module note above names the class; the code under test is portable).
-    #[cfg(unix)]
-    #[test]
-    fn run_ask_dialog_falls_back_to_zenity_when_provider_fails_to_spawn() {
-        let _guard = shim_lock();
-        let zenity_shim = write_shim("fallback-spawn-error", "#!/bin/sh\necho fallback-code\nexit 0\n");
-        let result = run_ask_dialog(
-            Some("/no/such/aoide-secrets-watch-provider-shim"),
-            zenity_shim.to_str().unwrap(),
-            "ask-1",
-            "db-prod",
-            "claude",
-            42,
-            "t",
-            "x",
-            None,
-            None,
-            || false,
-        );
-        assert!(matches!(result, ZenityResult::Approved(ref c) if c == "fallback-code"), "expected the zenity fallback's own output, got {result:?}");
-        remove_shim(&zenity_shim);
-    }
-
-    /// A provider that spawns, runs, and exits `DIALOG_INFRA_FAILURE_EXIT` (3) — a
-    /// `quickshell` crash, a QML load error, anything short of a genuine
-    /// user action — gets the SAME immediate zenity fallback as a spawn
-    /// failure. Distinguishes this from a genuine cancel (exit 1, the next
-    /// test): only exit 3 triggers the fallback.
-    // cfg(unix): the fixture is a POSIX shell template or a `#!/bin/sh` shim
-    // (the module note above names the class; the code under test is portable).
-    #[cfg(unix)]
-    #[test]
-    fn run_ask_dialog_falls_back_to_zenity_when_provider_exits_infra_failure() {
-        let _guard = shim_lock();
-        let provider_shim = write_shim("infra-failure", "#!/bin/sh\nexit 3\n");
-        let zenity_shim = write_shim("fallback-infra-failure", "#!/bin/sh\necho fallback-code-2\nexit 0\n");
-        let result = run_ask_dialog(
-            Some(provider_shim.to_str().unwrap()),
-            zenity_shim.to_str().unwrap(),
-            "ask-2",
-            "db-prod",
-            "claude",
-            42,
-            "t",
-            "x",
-            None,
-            None,
-            || false,
-        );
-        assert!(matches!(result, ZenityResult::Approved(ref c) if c == "fallback-code-2"), "expected the zenity fallback's own output, got {result:?}");
-        remove_shim(&provider_shim);
-        remove_shim(&zenity_shim);
-    }
-
-    /// The other half of the SAME distinction, at the `run_entry_dialog`
-    /// level directly (no fallback involved) — exit 3 with no stdout must
-    /// be read as `DialogFailure`, never `Cancelled`.
-    // cfg(unix): the fixture is a POSIX shell template or a `#!/bin/sh` shim
-    // (the module note above names the class; the code under test is portable).
-    #[cfg(unix)]
-    #[test]
-    fn run_entry_dialog_reads_exit_three_as_dialog_failure_not_cancelled() {
-        let _guard = shim_lock();
-        let shim = write_shim("bare-exit-three", "#!/bin/sh\nexit 3\n");
-        let result = run_entry_dialog(|| spawn_provider_entry(shim.to_str().unwrap(), "t", "m", 1, None, None), DISMISS_LABEL, || false);
-        assert!(matches!(result, ZenityResult::DialogFailure(_)), "expected DialogFailure, got {result:?}");
-        remove_shim(&shim);
-    }
-
-    /// The genuine-cancel control case: the provider exits 1 with NO stdout (a
-    /// bare Esc/close, `AskResult::Cancelled`'s own contract) must be read
-    /// as `Cancelled` and must NOT trigger a zenity fallback — proven by
-    /// pointing `zenity_cmd` at a path that does not exist: if the fallback
-    /// wrongly fired, the result would come back `SpawnError` instead of
-    /// `Cancelled`. This is the "today's behavior for an actual user
-    /// action stays exactly as it was" pin the live-incident fix must not
-    /// regress.
-    // cfg(unix): the fixture is a POSIX shell template or a `#!/bin/sh` shim
-    // (the module note above names the class; the code under test is portable).
-    #[cfg(unix)]
-    #[test]
-    fn run_ask_dialog_genuine_provider_cancel_is_not_retried_via_zenity() {
-        let _guard = shim_lock();
-        let provider_shim = write_shim("genuine-cancel", "#!/bin/sh\nexit 1\n");
-        let result = run_ask_dialog(
-            Some(provider_shim.to_str().unwrap()),
-            "/no/such/aoide-secrets-watch-zenity-shim-never-invoked",
-            "ask-3",
-            "db-prod",
-            "claude",
-            42,
-            "t",
-            "x",
-            None,
-            None,
-            || false,
-        );
-        assert!(matches!(result, ZenityResult::Cancelled), "a genuine cancel must never fall back, got {result:?}");
-        remove_shim(&provider_shim);
-    }
-
-    /// P1: `run()`'s own startup reconcile (`reconcile_once`, called before
-    /// the tail thread ever spawns — module doc, the same call site the live
-    /// incident this phase's brief cites traced back to a watcher that
-    /// simply wasn't RUNNING, not to a missing reconcile) surfaces an ask
-    /// that was already parked before this watcher process started, using
-    /// nothing but a fake broker answering ONE `pending` request — the exact
-    /// call `reconcile_once` makes, never the tail/events-feed path at all.
-    #[test]
-    fn reconcile_once_surfaces_an_ask_already_pending_at_startup() {
-        // A SHORT, deliberate path, never a descriptive tag: an `AF_UNIX` path
-        // is capped at 107 bytes (108 with the terminator) on native Windows,
-        // and `%TEMP%` alone is ~35 of them — the descriptive name this fixture
-        // used first measured 110 and was refused BY NAME by the transport
-        // (`win_unix`'s budget check) before it ever reached the code under
-        // test.
-        let dir = std::env::temp_dir().join(format!(
-            "as-reconcile-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
-        ));
-        std::fs::create_dir_all(&dir).unwrap();
-        let sock_path = dir.join("secrets.sock");
-        let listener = crate::test_net::UnixListener::bind(&sock_path).unwrap();
-
-        let server = thread::spawn(move || {
-            if let Ok((stream, _)) = listener.accept() {
-                let mut reader = std::io::BufReader::new(&stream);
-                let mut line = String::new();
-                let _ = reader.read_line(&mut line);
-                let reply = json!({
-                    "ok": true,
-                    "pending": [{
-                        "id": "preexisting-1",
-                        "secret": "db-prod",
-                        "consumer": "claude",
-                        "requestedAt": 100,
-                        "peerUid": Value::Null,
-                    }]
-                });
-                let _ = writeln!(&stream, "{reply}");
-            }
-        });
-
-        let queue = Mutex::new(Queue::new());
-        reconcile_once(&sock_path, &queue);
-        server.join().unwrap();
-
-        let q = queue.lock().unwrap_or_else(|e| e.into_inner());
-        let ask = q.get("preexisting-1").expect("a pre-existing pending ask must be reconciled into the queue at startup");
-        assert_eq!(ask.secret, "db-prod");
-        assert_eq!(ask.consumer, "claude");
-        assert!(ask.estimated, "an ask reconciled with no prior `parked` event has an ESTIMATED timeout");
-        drop(q);
-
-        std::fs::remove_dir_all(&dir).ok();
     }
 
     /// Proves the "kill by its EXACT pid" mechanism (module doc,
     /// [`ZenityResult::CancelledExternally`]): a shim that sleeps far longer
     /// than this test's own timeout must still be killed and this call must
-    /// still return promptly, once `should_cancel` starts returning `true`
-    /// — never left waiting out the shim's own sleep.
+    /// still return promptly, once `should_cancel` starts returning `true`.
     // cfg(unix): the fixture is a POSIX shell template or a `#!/bin/sh` shim
     // (the module note above names the class; the code under test is portable).
     #[cfg(unix)]
     #[test]
-    fn run_zenity_entry_kills_the_exact_child_when_the_ask_resolves_elsewhere() {
+    fn run_zenity_notice_kills_the_exact_child_when_the_ask_resolves_elsewhere() {
         let _guard = shim_lock();
         let shim = write_shim("longsleep", "#!/bin/sh\nsleep 30\necho should-not-appear\nexit 0\n");
         let mut polls = 0u32;
         let start = std::time::Instant::now();
-        let result = run_zenity_entry(shim.to_str().unwrap(), "t", "x", || {
+        let result = run_zenity_notice(shim.to_str().unwrap(), "t", "x", || {
             polls += 1;
             polls >= 2 // cancel on the second poll tick, well before the 30s sleep would finish
         });
@@ -2544,78 +1768,16 @@ mod tests {
         remove_shim(&shim);
     }
 
-    /// Task #76 item 1: an ALREADY-OPEN popup must be killed once its ask
-    /// crosses into its last `POPUP_KILL_LOCKOUT_SECS` unresolved — never
-    /// left open to bake a stale "Ns left" past the point a typed code
-    /// could still land safely. This drives `run_zenity_entry` with the
-    /// EXACT closure shape `popup_loop` itself builds (vanished-from-queue
-    /// OR near-expiry, `popup_loop`'s own doc) against an ask that is
-    /// ALREADY inside the kill window from the very first poll — proving
-    /// the near-expiry half fires even though the ask never left the
-    /// queue at all (the queue-vanished half is covered separately by
-    /// `popup_kills_the_dialog_when_the_ask_vanishes_via_reconcile_not_an_event`
-    /// below).
+    /// An ask that vanishes from `pending` with NO feed event at all (a
+    /// broker restart wiped the park registry, or an event line was lost)
+    /// must not leave a notice up forever. `Queue::reconcile` drops such an
+    /// ask (`reconcile_drops_an_ask_completed_elsewhere`, above); this pins
+    /// that the notice path acts on that removal.
     // cfg(unix): the fixture is a POSIX shell template or a `#!/bin/sh` shim
     // (the module note above names the class; the code under test is portable).
     #[cfg(unix)]
     #[test]
-    fn popup_closure_kills_an_already_open_dialog_once_it_crosses_the_kill_lockout() {
-        let _guard = shim_lock();
-        let shim = write_shim("nearexpiry", "#!/bin/sh\nsleep 30\necho should-not-appear\nexit 0\n");
-
-        let queue: Arc<Mutex<Queue>> = Arc::new(Mutex::new(Queue::new()));
-        // 12s remaining: inside POPUP_KILL_LOCKOUT_SECS (15) but still
-        // above the before-open LOCKOUT_SECS (10) — a dialog for this ask
-        // COULD have opened a moment ago and must now be killed, never a
-        // case `popup_action` would have refused to open in the first
-        // place (that's a different, already-covered path).
-        let now = unix_now();
-        queue.lock().unwrap().apply(&Event::Parked {
-            id: "1".into(),
-            secret: "t".into(),
-            consumer: "m".into(),
-            timeout_secs: 12,
-            ts: now,
-            reason: None,
-            origin: Default::default(),
-        });
-        let ask = queue.lock().unwrap().get("1").unwrap().clone();
-        assert!(code_prompt_allowed(&ask, now), "precondition: still above the before-open lockout");
-        assert!(popup_kill_already_open(&ask, now), "precondition: already inside the kill-open window");
-
-        let cancel_queue = Arc::clone(&queue);
-        let start = std::time::Instant::now();
-        let result = run_zenity_entry(shim.to_str().unwrap(), "t", "x", || {
-            cancel_queue.lock().unwrap_or_else(|e| e.into_inner()).get("1").is_none() || popup_kill_already_open(&ask, unix_now())
-        });
-        let elapsed = start.elapsed();
-
-        assert!(matches!(result, ZenityResult::CancelledExternally), "expected CancelledExternally, got {result:?}");
-        assert!(elapsed < Duration::from_secs(10), "the near-expiry kill should fire promptly, took {elapsed:?}");
-        // The ask itself is untouched by this — it stays parked, still
-        // completable from another terminal (`popup_loop`'s own doc: this
-        // predicate only decides whether to kill the DIALOG, never the ask).
-        assert!(queue.lock().unwrap().get("1").is_some(), "the ask itself must remain parked");
-
-        remove_shim(&shim);
-    }
-
-    /// Task #76 item 2 (Opus-judge deferral from P-N2, "phantom-ask
-    /// reaping"): an ask that vanishes from `pending` with NO feed event at
-    /// all (a broker restart wiped the park registry, or an event line was
-    /// lost) must not leave a popup dialog up forever. `Queue::reconcile`
-    /// already drops such an ask on its own
-    /// (`reconcile_drops_an_ask_completed_elsewhere`, above) — THIS test
-    /// pins that the POPUP PATH actually acts on that removal: the exact
-    /// closure shape `popup_loop` hands to `run_zenity_entry` must react to
-    /// a `reconcile`-driven removal (an empty `pending` list, never an
-    /// `Event::Completed`/`Dismissed`/`Expired`) exactly the same way it
-    /// reacts to an explicit event.
-    // cfg(unix): the fixture is a POSIX shell template or a `#!/bin/sh` shim
-    // (the module note above names the class; the code under test is portable).
-    #[cfg(unix)]
-    #[test]
-    fn popup_kills_the_dialog_when_the_ask_vanishes_via_reconcile_not_an_event() {
+    fn popup_kills_the_notice_when_the_ask_vanishes_via_reconcile_not_an_event() {
         let _guard = shim_lock();
         let shim = write_shim("phantom", "#!/bin/sh\nsleep 30\necho should-not-appear\nexit 0\n");
 
@@ -2634,23 +1796,21 @@ mod tests {
         let reconciler_queue = Arc::clone(&queue);
         let reconciler = thread::spawn(move || {
             thread::sleep(Duration::from_millis(150));
-            // The phantom-ask scenario itself: `pending` no longer lists
-            // the ask (broker restart / lost line) and NO `Event` of any
-            // kind fires for it — `reconcile` is the only thing that ever
-            // learns about this.
+            // `pending` no longer lists the ask and NO `Event` fires for it:
+            // `reconcile` is the only thing that ever learns about this.
             reconciler_queue.lock().unwrap_or_else(|e| e.into_inner()).reconcile(&[], 300);
         });
 
         let cancel_queue = Arc::clone(&queue);
         let start = std::time::Instant::now();
-        let result = run_zenity_entry(shim.to_str().unwrap(), "t", "x", || {
+        let result = run_zenity_notice(shim.to_str().unwrap(), "t", "x", || {
             cancel_queue.lock().unwrap_or_else(|e| e.into_inner()).get("1").is_none()
         });
         let elapsed = start.elapsed();
         reconciler.join().unwrap();
 
         assert!(matches!(result, ZenityResult::CancelledExternally), "expected CancelledExternally, got {result:?}");
-        assert!(elapsed < Duration::from_secs(10), "a phantom-ask reconcile should kill the dialog promptly, took {elapsed:?}");
+        assert!(elapsed < Duration::from_secs(10), "a phantom-ask reconcile should kill the notice promptly, took {elapsed:?}");
         assert!(queue.lock().unwrap().get("1").is_none(), "the phantom ask must stay gone from the queue");
 
         remove_shim(&shim);

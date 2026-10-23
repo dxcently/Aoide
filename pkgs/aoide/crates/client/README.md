@@ -909,10 +909,9 @@ never the inbound/serve half (that's `aoide-server`).
   `AOIDE_DIALOG_CMD` names (`strillix pair ask`, the SAME six-box entry surface
   `strx secrets ask` renders) when set, falling back to `zenity --entry` on a
   provider `SpawnError`/`DialogFailure` for that one attempt
-  (`aoide_secrets::watch::run_ask_dialog`'s own fallback shape, reused
-  unchanged), `--no-markup` load-bearing on the zenity path for the same
-  Pango-corruption reasoning `aoide_secrets::watch::spawn_zenity_entry`
-  already carries. Exit 0 hands back the TYPED code, gated through
+  (`pair_watch::run_ask_dialog`'s own fallback shape), `--no-markup`
+  load-bearing on the zenity path for the same Pango-corruption reasoning
+  `pair_watch::spawn_zenity_entry` already carries. Exit 0 hands back the TYPED code, gated through
   `commit_approval` — `CodeGate::Code` on EITHER arm, inbound against
   `derive_sas`, outbound against `derive_reply_sas` — the SAME comparison
   and `MAX_CODE_TRIES` auto-deny/auto-abort machinery the CLI tty/`--code`

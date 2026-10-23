@@ -366,18 +366,20 @@ aoide secrets watch [--json] [--popup]
   every event plus a 30-second safety tick.
 - **Writes:** nothing.
 - **Output:** narrates five event kinds — `released` (a TOTP-free grant),
-  `parked`, `completed`, `dismissed`, `expired`. On a terminal, a parked
-  ask prompts inline (`[a]` approve with a hidden code, `[d]` dismiss,
-  `[i]` ignore for this session), FIFO by expiry. `--json` emits one event
-  object per line.
-- **Notes:** CLI-only, operator-side, blocks until Ctrl-C. `--popup`
-  swaps the terminal prompt for a `zenity --entry --hide-text` dialog,
-  parked-only, unlock-gated (`loginctl`'s `LockedHint` on `$XDG_SESSION_ID`,
-  else the user's display session, OR'd with an `AOIDE_SECRETS_LOCKER`-named
-  `/proc` scan, default `hyprlock`); a code
-  prompt refuses to open below 10 seconds remaining and force-closes at
-  15 seconds without reopening. `--json` and `--popup` are mutually
-  exclusive (declared on the registry entry).
+  `parked`, `completed`, `dismissed`, `expired`. On a terminal, a parked ask
+  prints the command that completes it (`aoide secrets approve <id>`), with
+  `[d]` to dismiss and `[i]` to ignore for this session, FIFO by expiry. The
+  watch reads no code and sends no approve op (ruling 98): a code is typed
+  only at `secrets approve`, the conductor's approve child, or the app's
+  entry window (ruling 87). `--json` emits one event object per line.
+- **Notes:** CLI-only, operator-side, blocks until Ctrl-C. `--popup` swaps the
+  terminal prompt for a zenity `--info` notice per parked ask, naming
+  `aoide secrets approve <id>`. OK and Esc both mean "seen": the ask stays
+  parked, and the watcher stops offering it for this session. The notice is
+  parked-only and unlock-gated (`loginctl`'s `LockedHint` on
+  `$XDG_SESSION_ID`, else the user's display session, OR'd with an
+  `AOIDE_SECRETS_LOCKER`-named `/proc` scan, default `hyprlock`). `--json` and
+  `--popup` are mutually exclusive (declared on the registry entry).
 
 ## aoide secrets migrate
 

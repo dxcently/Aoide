@@ -184,38 +184,38 @@ socket, capped at 1 MiB and truncated in place past the cap) and narrates
 five event kinds: `released` (a TOTP-free grant), `parked`,
 `completed` (a successful `approve`), `dismissed`, and `expired` (a park that
 timed out). On
-a terminal, a parked ask prompts inline — `[a]` approve with a hidden code
-prompt, `[d]` dismiss, `[i]` ignore for this session only (the ask stays
-parked, completable from elsewhere) — FIFO by whichever ask is closest to
-expiry. `--json` emits one event object per line, flushed per line, the
-pickup point a graphical consumer subscribes to instead of re-tailing the
-feed itself.
+a terminal, a parked ask prints the command that completes it,
+`aoide secrets approve <id>`. `[d]` dismisses the ask, and `[i]` ignores it
+for this session only (the ask stays parked, completable from elsewhere).
+Prompts are FIFO by whichever ask is closest to expiry. `--json` emits one
+event object per line, flushed per line, the pickup point a graphical
+consumer subscribes to instead of re-tailing the feed itself.
+
+Watch takes no code, on the terminal or in the popup (ruling 98). A code is
+typed only at `secrets approve`, the conductor's approve child, and the
+app's entry window (ruling 87), so a running watcher never holds one.
 
 The events feed is a push signal, not the authority: `secrets pending`'s
 own poll of the broker's in-memory registry is, and `watch` reconciles
 against it once at startup and again on every event plus a 30-second safety
 tick, so a missed line, a truncation, or a broker restart never leaves a
-parked ask permanently invisible. Two near-expiry lockouts protect a code
-from being typed and spent too close to the deadline: a code prompt refuses
-to open below 10 seconds remaining, and an already-open prompt is force-
-closed once an ask crosses below 15 seconds, without reopening — the ask
-itself stays parked, completable from elsewhere, the whole time.
+parked ask permanently invisible.
 
-**`--popup`** swaps the terminal prompt for a `zenity --entry --hide-text`
-dialog with an added "Dismiss ask" button — Cancel maps to ignore, the
-extra button maps to dismiss, and the two are always visually and texturally
-distinct so neither is mistaken for the other. A dialog opens only when the
-screen is unlocked, checked by ORing `loginctl`'s `LockedHint` with a
-`/proc` scan for a named locker process (`AOIDE_SECRETS_LOCKER`, default
-`hyprlock`). The hint is read on `$XDG_SESSION_ID`, else on the user's
-display session, because the watcher is a user unit outside every session.
-The shell's lock host sets it (`strx lock hint`); the process scan exists
-because hyprlock sets no `LockedHint` at all, and `strx lock` clears a
-shell's stale `yes` once hyprlock holds the screen. A failing `zenity` spawn backs off from 1 second up to
-a 60-second ceiling globally across every ask, rather than retrying on
-every poll tick forever. `released`/`completed`/`dismissed`/`expired` never
-drive a dialog — only `parked` does — so a busy automation consumer never
-produces a storm of popups, only scrolling terminal narration.
+**`--popup`** swaps the terminal prompt for a zenity `--info` notice per parked
+ask. The notice names `aoide secrets approve <id>`. OK and Esc both mean "seen":
+the ask stays parked, and the watcher stops offering it for this session. A
+notice opens only when the screen is unlocked, checked by ORing `loginctl`'s
+`LockedHint` with a `/proc` scan for a named locker process
+(`AOIDE_SECRETS_LOCKER`, default `hyprlock`). The hint is read on
+`$XDG_SESSION_ID`, else on the user's display session, because the watcher is a
+user unit outside every session. The shell's lock host sets it (`strx lock
+hint`); the process scan exists because hyprlock sets no `LockedHint` at all,
+and `strx lock` clears a shell's stale `yes` once hyprlock holds the screen. A
+failing `zenity` spawn backs off from 1 second up to a 60-second ceiling
+globally across every ask, rather than retrying on every poll tick forever.
+`released`/`completed`/`dismissed`/`expired` never drive a notice — only
+`parked` does — so a busy automation consumer never produces a storm of popups,
+only scrolling terminal narration.
 
 ## The age lane — the built-in encrypted backend
 
