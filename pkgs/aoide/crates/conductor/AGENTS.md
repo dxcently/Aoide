@@ -213,22 +213,35 @@
   the JSON approve request the child builds with the code in it (`client`'s
   `approve_with`, in the child's own process); and the worker's copy when a
   panic leaves the closure before its wipe.
-- An ask's `reason`, `argv0` and `originLine` (from `secrets pending
-  --json`) are the requester's claims, labelled unverified by
-  `SecretAskRow::origin_claim`, `reason_claim` and `program_claim`.
-  `originLine` is cleaned with `clean_line`. `reason` and `argv0` are only
-  stripped of unsafe characters, so the popup can wrap them whole; the
-  broker bounds each at 4096 bytes. The review row clips each claim line to
-  its width. The TOTP popup wraps its claims at spaces into rows of its
-  inside width, and draws the fixed lines first: the origin, the peer uid,
-  and the note that the code approves the ORIGINAL parked request. Then the
-  reason, then the program. The secret and consumer stay on the line
-  directly above `totp:`. On a terminal too short for every claim row, the
-  popup shows the rows that fit; its last visible row says how many rows are
-  not shown and names `aoide secrets approve <id>`, which prints the whole
-  ask. `approve` draws its own context before its prompt. The conductor does
-  not render the origin itself; the secrets crate does, once, as
-  `originLine`.
+- An ask's `reason`, `argv0`, `originLine` and `consumer` (from `secrets
+  pending --json`) are the requester's own words. `SecretAskRow::origin_claim`,
+  `reason_claim` and `program_claim` label the claims unverified, and the
+  consumer row does the same. `originLine` is cleaned with `clean_line`. The
+  broker refuses a parked consumer, reason or argv0 that is over 4096 bytes or
+  60 lines, or that holds a control or invisible character. The review row
+  clips each claim line to its width.
+- The TOTP popup draws the claims at the top, wrapped at spaces into rows of
+  its inside width, counted in display columns (`Span::width`, so a wide
+  character takes two). They keep this order: the origin, the peer uid, the
+  note that the code approves the ORIGINAL parked request, the reason, then
+  the program. Below them is a fixed block of six rows: the secret, the
+  consumer, the `totp:` prompt, a gap, and the two-row hint, which a narrow
+  popup cuts. The secret and consumer rows are each cut to one row with an
+  ellipsis. The consumer's label is never cut by its name, and the label
+  itself is cut only on a popup under 25 columns. A typed code is cut from its
+  front, so the cursor stays on the row.
+- A secret name can be longer than a row. `valid_secret_name` (in
+  `crates/secrets/src/policy.rs`) bounds the characters and the hyphens, not
+  the length, and the broker's park check does not bound the secret either.
+- When the claims do not fit, the rows that fit come first and a marker last:
+  how many rows are not shown, and `aoide secrets approve <id>`, which prints
+  the whole ask. If the room left is shorter than the marker's rows, the
+  marker alone is drawn, cut to one row with an ellipsis. The minimum popup
+  height is 9 rows: 2 borders, the 6-row fixed block and 1 row for the marker.
+  At 8 rows it shows the fixed block with no claim row; below 8 it cannot show
+  the fixed block whole. `approve` draws its own context before its prompt.
+  The conductor does not render the origin itself; the secrets crate does,
+  once, as `originLine`.
 - While a pairing leg is in flight, no node write is advertised or dispatched:
   the leg's commit writes `state/nodes.json` from its own thread, so a
   `node allow`/`node remove` from the UI thread at the same time is a lost

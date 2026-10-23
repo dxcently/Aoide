@@ -8273,9 +8273,9 @@ mod tests {
         assert!(text.contains("from: khoa \u{b7} psql (pid 42) @ box"), "{text}");
     }
 
-    /// The TOTP popup draws the ask's claims above the prompt, and the secret
-    /// and consumer on the line directly above `totp:`. Only the overlay is
-    /// drawn, so the review row cannot supply the claims.
+    /// The TOTP popup draws the ask's claims above a fixed block: the secret,
+    /// the consumer, then the `totp:` prompt, one row each. Only the overlay
+    /// is drawn, so the review row cannot supply the claims.
     #[test]
     fn the_totp_popup_draws_the_claims_and_puts_the_secret_last() {
         let _g = T1_LOCK.lock().unwrap_or_else(|e| e.into_inner());
@@ -8299,8 +8299,21 @@ mod tests {
         );
         let rows: Vec<&str> = text.lines().collect();
         let secret = rows.iter().position(|r| r.contains("TOTP for")).expect(&text);
+        let consumer = rows
+            .iter()
+            .position(|r| r.contains("consumer (unverified): m"))
+            .expect(&text);
         let prompt = rows.iter().position(|r| r.contains("totp:")).expect(&text);
-        assert_eq!(prompt, secret + 1, "the secret line is not above the prompt: {text}");
+        assert_eq!(
+            consumer,
+            secret + 1,
+            "the consumer row is not under the secret: {text}"
+        );
+        assert_eq!(
+            prompt,
+            consumer + 1,
+            "the consumer row is not above the prompt: {text}"
+        );
     }
 
     #[test]

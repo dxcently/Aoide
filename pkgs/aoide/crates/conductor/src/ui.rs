@@ -143,11 +143,11 @@ pub(crate) fn draw_overlays(f: &mut Frame, app: &App) {
                 );
             }
             crate::app::InputKind::TotpCode { ask } => {
-                // The claims sit above a fixed block, so the secret and
-                // consumer stay the line directly above `totp:`. Claims wrap
-                // into rows of the popup's inner width; past the screen, the
-                // last row says how many are not shown and where the whole ask
-                // prints.
+                // The claims wrap above a fixed block: the secret, the
+                // consumer, the `totp:` prompt, a gap and the hint. The secret
+                // and consumer rows are cut to one row each. Past the room
+                // left, `fit_claims` ends the claims with a marker that says
+                // how many are not shown and where the whole ask prints.
                 let width = area.width.min(70);
                 let inner_width = usize::from(width.saturating_sub(2).max(1));
                 let mut above: Vec<String> = ask.origin_claim().into_iter().collect();
@@ -159,11 +159,13 @@ pub(crate) fn draw_overlays(f: &mut Frame, app: &App) {
                 above.push(ask.reason_claim());
                 above.push(ask.program_claim());
                 let rows = claim_rows(&above, inner_width);
-                const BELOW_ROWS: u16 = 5;
-                let height = area
-                    .height
-                    .min(u16::try_from(rows.len()).unwrap_or(u16::MAX).saturating_add(BELOW_ROWS + 2));
-                let room = usize::from(height.saturating_sub(BELOW_ROWS + 2));
+                const FIXED_ROWS: u16 = 6;
+                let height = area.height.min(
+                    u16::try_from(rows.len())
+                        .unwrap_or(u16::MAX)
+                        .saturating_add(FIXED_ROWS + 2),
+                );
+                let room = usize::from(height.saturating_sub(FIXED_ROWS + 2));
                 let popup = Rect::new(
                     area.x + (area.width - width) / 2,
                     area.y + (area.height - height) / 2,
@@ -173,21 +175,47 @@ pub(crate) fn draw_overlays(f: &mut Frame, app: &App) {
                 let block = Block::default()
                     .title(" Secrets approval (masked) ")
                     .borders(Borders::ALL);
-                let parts = Layout::vertical([Constraint::Min(0), Constraint::Length(BELOW_ROWS)]).split(block.inner(popup));
+                let [claims, fixed] = Layout::vertical([
+                    Constraint::Min(0),
+                    Constraint::Length(FIXED_ROWS),
+                ])
+                .areas(block.inner(popup));
+                let [secret, consumer, prompt, _gap, hint] =
+                    Layout::vertical([
+                        Constraint::Length(1),
+                        Constraint::Length(1),
+                        Constraint::Length(1),
+                        Constraint::Length(1),
+                        Constraint::Min(0),
+                    ])
+                    .areas(fixed);
                 f.render_widget(Clear, popup);
                 f.render_widget(block, popup);
-                f.render_widget(Paragraph::new(fit_claims(rows, room, inner_width, &ask.id).join("\n")), parts[0]);
+                let claim_text =
+                    fit_claims(rows, room, inner_width, &ask.id).join("\n");
+                f.render_widget(Paragraph::new(claim_text), claims);
+                let secret_row = labelled_row(
+                    "TOTP for `",
+                    &format!("{}`", ask.secret),
+                    inner_width,
+                );
+                f.render_widget(Paragraph::new(secret_row), secret);
+                let consumer_row = labelled_row(
+                    "consumer (unverified): ",
+                    &ask.consumer,
+                    inner_width,
+                );
+                f.render_widget(Paragraph::new(consumer_row), consumer);
+                let typed = format!("{}▏", input.display_buffer());
+                let prompt_row = tail_row("totp: ", &typed, inner_width);
+                f.render_widget(Paragraph::new(prompt_row), prompt);
                 f.render_widget(
-                    Paragraph::new(format!(
-                        "TOTP for `{}` requested by {} (unverified).\n\
-                         totp: {}▏\n\n\
-                         Enter approves; Esc cancels. Nothing is sent while the field is empty.",
-                        ask.secret,
-                        ask.consumer,
-                        input.display_buffer()
-                    ))
+                    Paragraph::new(
+                        "Enter approves; Esc cancels. \
+                         Nothing is sent while the field is empty.",
+                    )
                     .wrap(ratatui::widgets::Wrap { trim: false }),
-                    parts[1],
+                    hint,
                 );
             }
             crate::app::InputKind::NodeRemove { name } => {
@@ -999,15 +1027,82 @@ fn draw_pending(f: &mut Frame, area: Rect, app: &App) {
     f.render_stateful_widget(list, parts[2], &mut state);
 }
 
-/// Each line cut into rows no wider than `width` characters. A row breaks at
-/// the last space that fits, so a word stays whole; a word longer than a row
+/// The display width of `text` in terminal columns, the measure ratatui lays
+/// text out by: a wide character takes two, a combining mark none.
+fn columns(text: &str) -> usize {
+    Span::raw(text).width()
+}
+
+/// The end of the longest prefix of `text` that fits `width` columns.
+fn prefix_end(text: &str, width: usize) -> usize {
+    let mut used = 0;
+    let mut end = 0;
+    for (at, ch) in text.char_indices() {
+        used += columns(ch.encode_utf8(&mut [0; 4]));
+        if used > width {
+            break;
+        }
+        end = at + ch.len_utf8();
+    }
+    end
+}
+
+/// The start of the longest suffix of `text` that fits `width` columns.
+fn suffix_start(text: &str, width: usize) -> usize {
+    let mut used = 0;
+    let mut start = text.len();
+    for (at, ch) in text.char_indices().rev() {
+        used += columns(ch.encode_utf8(&mut [0; 4]));
+        if used > width {
+            break;
+        }
+        start = at;
+    }
+    start
+}
+
+/// `text` cut to `width` columns, its last column an ellipsis when it is cut.
+fn cut_row(text: &str, width: usize) -> String {
+    if columns(text) <= width {
+        return text.to_string();
+    }
+    format!("{}…", &text[..prefix_end(text, width.saturating_sub(1))])
+}
+
+/// A label and a value on one row of `width` columns. The value is cut to the
+/// room the label leaves, so cutting the value never cuts the label.
+fn labelled_row(label: &str, value: &str, width: usize) -> String {
+    let room = width.saturating_sub(columns(label));
+    if room == 0 {
+        return cut_row(label, width);
+    }
+    format!("{label}{}", cut_row(value, room))
+}
+
+/// A label and a value on one row. A value too long for its room is cut from
+/// the front under a leading ellipsis, so its end stays on the row.
+fn tail_row(label: &str, value: &str, width: usize) -> String {
+    let room = width.saturating_sub(columns(label));
+    if room == 0 {
+        return cut_row(label, width);
+    }
+    if columns(value) <= room {
+        return format!("{label}{value}");
+    }
+    let start = suffix_start(value, room.saturating_sub(1));
+    format!("{label}…{}", &value[start..])
+}
+
+/// Each line cut into rows no wider than `width` display columns. A row breaks
+/// at the last space that fits, so a word stays whole; a word longer than a row
 /// is cut where the row ends.
 fn claim_rows(lines: &[String], width: usize) -> Vec<String> {
     let mut rows = Vec::new();
     for line in lines {
         let mut rest = line.as_str();
-        while rest.chars().count() > width {
-            let cut = rest.char_indices().nth(width).map_or(rest.len(), |(at, _)| at);
+        while columns(rest) > width {
+            let first = rest.chars().next().map_or(0, char::len_utf8);
+            let cut = prefix_end(rest, width).max(first);
             let at = rest[..cut].rfind(' ').filter(|&at| at > 0).unwrap_or(cut);
             rows.push(rest[..at].trim_end().to_string());
             rest = rest[at..].trim_start_matches(' ');
@@ -1017,22 +1112,35 @@ fn claim_rows(lines: &[String], width: usize) -> Vec<String> {
     rows
 }
 
-/// The rows that fit `room`. When some do not, the last row that does is a
-/// marker: how many rows are not shown, and where the whole ask prints.
-fn fit_claims(rows: Vec<String>, room: usize, width: usize, id: &str) -> Vec<String> {
-    if rows.len() <= room {
+/// The marker for `hidden` rows that are not shown.
+fn marker_text(hidden: usize, id: &str) -> String {
+    format!(
+        "{hidden} rows not shown: `aoide secrets approve {id}` prints it whole"
+    )
+}
+
+/// The rows that fit `room`. When some do not, the rows that fit are followed
+/// by a marker: how many rows are not shown, and where the whole ask prints.
+/// A marker too tall for the room left is drawn alone, cut to one row.
+fn fit_claims(
+    rows: Vec<String>,
+    room: usize,
+    width: usize,
+    id: &str,
+) -> Vec<String> {
+    let total = rows.len();
+    if total <= room {
         return rows;
     }
-    let mut keep = room;
-    let marker = loop {
-        let hidden = rows.len() - keep;
-        let marker = claim_rows(&[format!("{hidden} rows not shown: `aoide secrets approve {id}` prints it whole")], width);
-        if keep + marker.len() <= room || keep == 0 {
-            break marker;
+    let marker =
+        |keep: usize| claim_rows(&[marker_text(total - keep, id)], width);
+    match (0..=room).rev().find(|&keep| keep + marker(keep).len() <= room) {
+        Some(keep) => {
+            rows.into_iter().take(keep).chain(marker(keep)).collect()
         }
-        keep = room.saturating_sub(marker.len());
-    };
-    rows.into_iter().take(keep).chain(marker).collect()
+        None if room == 0 => Vec::new(),
+        None => vec![cut_row(&marker_text(total, id), width)],
+    }
 }
 
 /// One Review row: a section header, or one queue entry in its own shape. The
@@ -2246,11 +2354,124 @@ mod tests {
             "ORIGINAL parked request",
             "reason-tail",
             "aoide secrets approve 7",
-            "TOTP for `db` requested by psql",
+            "TOTP for `db`",
+            "consumer (unverified): psql",
+            "totp:",
         ] {
             assert!(out.contains(fixed), "{fixed:?} stays on screen: {out}");
         }
         assert!(!out.contains("tail-marker"), "the program is cut past the screen: {out}");
+    }
+
+    /// An app holding one parked TOTP ask, with its prompt open and empty.
+    fn totp_prompt_app(
+        secret: &str,
+        consumer: &str,
+        reason: &str,
+        program: &str,
+    ) -> App {
+        let mut a = App::for_test(vec![], vec![], vec![]);
+        let pending = serde_json::json!({
+            "pending": [{
+                "id": "7", "secret": secret, "consumer": consumer,
+                "requestedAt": 1789862400, "peerUid": 1000,
+                "reason": reason, "argv0": program,
+            }],
+        });
+        a.secrets_pending = Some(
+            aoide_protocol::output::Outcome::ok("secrets.pending", "1 pending")
+                .with_data(pending),
+        );
+        let ask = a.secret_ask_rows().remove(0);
+        a.input = Some(crate::app::Input {
+            label: "TOTP for secrets approve #7".to_string(),
+            buffer: String::new(),
+            step: 0,
+            collected: Vec::new(),
+            kind: crate::app::InputKind::TotpCode { ask },
+        });
+        a
+    }
+
+    /// The approve popup alone on a `width` by `height` terminal, as text.
+    fn totp_popup_dump(a: &App, width: u16, height: u16) -> String {
+        let mut term = Terminal::new(TestBackend::new(width, height)).unwrap();
+        term.draw(|f| draw_overlays(f, a)).unwrap();
+        dump(term.backend().buffer())
+    }
+
+    /// A 4000-byte consumer is one row, cut with an ellipsis under its label.
+    /// The secret and the `totp:` row keep their own rows.
+    #[test]
+    fn the_totp_popup_cuts_a_long_consumer_to_its_row() {
+        let consumer = "c".repeat(4000);
+        let a = totp_prompt_app("db", &consumer, "nightly", "/usr/bin/psql");
+        let out = totp_popup_dump(&a, 100, 50);
+        assert!(
+            out.contains("consumer (unverified): c"),
+            "the label stays: {out}"
+        );
+        assert!(out.contains("TOTP for `db`"), "the secret stays: {out}");
+        assert!(out.contains("c…│"), "the consumer is cut with …: {out}");
+        assert!(out.contains("totp:"), "the totp row stays: {out}");
+    }
+
+    /// A secret name can be longer than a row, since `valid_secret_name` sets
+    /// no length bound. Its row is cut the way the consumer's row is.
+    #[test]
+    fn the_totp_popup_cuts_a_long_secret_name_to_its_row() {
+        let secret = "s".repeat(300);
+        let a = totp_prompt_app(&secret, "psql", "nightly", "/usr/bin/psql");
+        let out = totp_popup_dump(&a, 100, 50);
+        assert!(
+            out.contains("consumer (unverified): psql"),
+            "the consumer row stays whole: {out}"
+        );
+        assert!(out.contains("s…│"), "the secret row is cut with …: {out}");
+        assert!(out.contains("totp:"), "the totp row stays: {out}");
+    }
+
+    /// At the minimum popup height, nine rows, the one row left above the
+    /// fixed block holds the marker, cut to that row with an ellipsis.
+    #[test]
+    fn the_totp_popup_cuts_the_marker_to_one_row_at_the_minimum_height() {
+        let reason = "r".repeat(300);
+        let a = totp_prompt_app("db", "psql", &reason, "/usr/bin/psql");
+        let out = totp_popup_dump(&a, 40, 9);
+        let marker = out.lines().find(|l| l.contains("rows not shown"));
+        let marker = marker.expect(&out).trim_matches('│').trim_end();
+        assert!(marker.ends_with('…'), "the marker is cut with …: {out}");
+        for fixed in ["TOTP for `db`", "consumer (unverified): psql", "totp:"] {
+            assert!(out.contains(fixed), "{fixed:?} stays on screen: {out}");
+        }
+    }
+
+    /// A wide reason wraps by display columns: no claim row is wider than the
+    /// popup's inner width, and the reason's last characters stay on screen.
+    #[test]
+    fn a_wide_reason_wraps_within_the_popup_columns() {
+        let reason = format!("{} cjk-tail", "数据库迁移".repeat(30));
+        let a = totp_prompt_app("db", "psql", &reason, "/usr/bin/psql");
+        let ask = a.secret_ask_rows().remove(0);
+        for row in claim_rows(&[ask.reason_claim()], 68) {
+            let columns = Span::raw(row.as_str()).width();
+            assert!(columns <= 68, "{columns} columns in one row: {row:?}");
+        }
+        let out = totp_popup_dump(&a, 100, 50);
+        assert!(out.contains("cjk-tail"), "the reason's end shows: {out}");
+    }
+
+    /// The `totp:` row is one row whatever the typed code's length. A long
+    /// code is cut from its front, so the cursor stays on the row.
+    #[test]
+    fn the_totp_row_keeps_its_cursor_for_a_long_typed_code() {
+        let mut a = totp_prompt_app("db", "psql", "nightly", "/usr/bin/psql");
+        if let Some(input) = a.input.as_mut() {
+            input.buffer = "1".repeat(200);
+        }
+        let out = totp_popup_dump(&a, 100, 50);
+        let row = out.lines().find(|l| l.contains("totp:")).expect(&out);
+        assert!(row.contains('▏'), "the totp row carries the cursor: {out}");
     }
 
     /// A pending row is a human view of text someone else wrote: an ESC, a
