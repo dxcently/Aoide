@@ -109,10 +109,15 @@ pub const MASK: char = '*';
 
 /// Overwrites a typed code's text before its buffer is dropped, so the code is
 /// not left in the freed allocation. The capacity is reused, not reallocated.
+/// The writes are volatile: an ordinary store into a buffer nothing reads again
+/// is a dead store the optimizer may drop, and then the wipe wipes nothing.
 fn wipe_text(text: &mut String) {
-    let len = text.len();
-    text.clear();
-    text.extend(std::iter::repeat('\0').take(len));
+    // SAFETY: NUL is one byte of valid UTF-8, so the String stays well-formed
+    // while its bytes are zeroed, and it is cleared straight after.
+    for byte in unsafe { text.as_mut_vec() }.iter_mut() {
+        // SAFETY: `byte` is a live, exclusive reference into the String's buffer.
+        unsafe { std::ptr::write_volatile(byte, 0) };
+    }
     text.clear();
 }
 

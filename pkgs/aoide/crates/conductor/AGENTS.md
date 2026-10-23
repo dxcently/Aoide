@@ -205,6 +205,13 @@
   rendered message. The test
   `the_totp_prompt_approves_through_the_cli_with_the_code_on_stdin` pins it
   against a fake broker.
+- `wipe_text` zeroes a typed code in place with volatile writes, on the prompt's
+  buffer and on the worker's trimmed copy. Residual, not wiped here: the
+  allocation `Input::buffer` gave up when it grew while the code was typed; the
+  `format!` line that carries the code to the child's stdin (`run_approve_child`);
+  the JSON approve request the child builds with the code in it (`client`'s
+  `approve_with`, in the child's own process); and the worker's copy when a
+  panic leaves the closure before its wipe.
 - An ask's `reason`, `argv0` and `originLine` (from `secrets pending
   --json`) are the requester's claims. They are cleaned with `clean_line`
   when the row is read. The review row and the TOTP popup draw the same
