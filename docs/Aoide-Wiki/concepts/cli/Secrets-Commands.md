@@ -332,7 +332,11 @@ aoide secrets approve <id> [--json]
   rides this reply. An invalid or expired code leaves the ask parked and
   the replay ledger unburned. Past three failed codes in one 30 s step, every
   check is refused untested until the next step.
-- **Notes:** over-the-socket operator command.
+- **Notes:** over-the-socket operator command. A code on a pipe is read the
+  same as one typed at a terminal, because a terminal check is fakeable by any
+  process with the person's uid. So an agent the person hands a code to can
+  approve its own park from its own pane. This is ruling 29's residual, and
+  it stays until the phone key.
 
 ## aoide secrets dismiss
 

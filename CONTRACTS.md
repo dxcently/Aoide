@@ -6721,7 +6721,11 @@ reaches the ORIGINAL parked connection's own `resolve` reply.
 On a pipe, `secrets approve` reads the code as one stdin line of at most 256
 bytes, newline excluded. A line past 256 bytes is refused,
 `the line is longer than 256 bytes, so it is not a code`, and nothing past the
-257th byte is read.
+257th byte is read. A code on a pipe is read the same as one typed at a
+terminal: a terminal check is fakeable by any process with the person's uid,
+so the broker cannot tell the two apart. What that leaves: an agent the person
+hands a code to can approve its own park from its own pane. This is ruling
+29's residual, and it stays until the phone key.
 
 **`approve` re-runs the FULL authorization gate at release time (P-N2c, FIX
 2), not just the TOTP check.** Before this fix, `approve` validated only

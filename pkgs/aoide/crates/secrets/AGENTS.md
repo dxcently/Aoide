@@ -1360,7 +1360,13 @@
   called with the code exactly the way the tty prompt already does.
   **The CLI takes no code in argv, and `exec` takes no code at all (ruling
   87).** `secrets approve` reads the code from a no-echo prompt on a terminal
-  or one stdin line (`client::approve_with`, through `read_park_code`).
+  or one stdin line (`client::approve_with`, through `read_park_code`). The
+  pipe is accepted for the same reason the terminal is: a terminal check is
+  fakeable by any process with the person's uid, so the broker cannot tell
+  them apart. The residual, stated in ruling 97's terms: an agent the person
+  hands a code to can approve its own park from its own pane. That is ruling
+  29's residual, and it stays until the phone key. Don't add a terminal-only
+  check to `approve` as if it closed this; it does not.
   `--totp` on either verb is refused by `totp_in_argv` before any broker op,
   with a taught refusal that never repeats the value. `parse_exec_args` runs
   that gate first. `secrets exec` never reads stdin: `client::resolve_for_exec`
