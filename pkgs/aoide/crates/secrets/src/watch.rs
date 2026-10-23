@@ -1342,6 +1342,7 @@ mod tests {
     /// request that reached it is on record.
     #[test]
     fn the_terminal_prompt_reads_no_code_and_sends_no_approve_op() {
+        let _env = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let socket = tmp_path("prompt-no-approve");
         let _ = std::fs::remove_file(&socket);
         let listener = std::os::unix::net::UnixListener::bind(&socket).expect("bind the fake socket");
@@ -1714,6 +1715,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn run_zenity_notice_treats_a_bare_close_as_cancelled() {
+        let _env = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _guard = shim_lock();
         let shim = write_shim("bare-close", "#!/bin/sh\nexit 1\n");
         let result = run_zenity_notice(shim.to_str().unwrap(), "t", "x", || false);
@@ -1736,6 +1738,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn spawn_zenity_notice_argv_is_an_info_box_with_no_markup_and_no_entry() {
+        let _env = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _guard = shim_lock();
         let shim = write_shim("argv-notice", "#!/bin/sh\necho \"$@\" > \"$(dirname \"$0\")/argv.log\"\nexit 0\n");
         let _ = run_zenity_notice(shim.to_str().unwrap(), "t", "x", || false);
@@ -1754,6 +1757,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn run_zenity_notice_kills_the_exact_child_when_the_ask_resolves_elsewhere() {
+        let _env = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _guard = shim_lock();
         let shim = write_shim("longsleep", "#!/bin/sh\nsleep 30\necho should-not-appear\nexit 0\n");
         let mut polls = 0u32;
@@ -1778,6 +1782,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn popup_kills_the_notice_when_the_ask_vanishes_via_reconcile_not_an_event() {
+        let _env = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _guard = shim_lock();
         let shim = write_shim("phantom", "#!/bin/sh\nsleep 30\necho should-not-appear\nexit 0\n");
 

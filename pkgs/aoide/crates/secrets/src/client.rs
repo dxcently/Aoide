@@ -3051,6 +3051,28 @@ mod argv_free_tests {
         );
     }
 
+    /// Every claim the approve screen shows carries the `(unverified)` label, and
+    /// the claims come in the order `approve_context` prints them: the reason,
+    /// the program that receives the value, the origin, then the secret and
+    /// consumer. The kernel's own peer line is not a claim.
+    #[test]
+    fn approve_context_labels_every_claim_unverified_in_order() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let row = r#"{"id":"3f2a-3","secret":"db-prod","consumer":"deploy-bot","requestedAt":1700000000,"peerUid":1000,"reason":"psql","argv0":"/usr/bin/psql","origin":{"username":"khoa","pid":42,"comm":"psql","hostname":"box"}}"#;
+        let s = park_broker(format!("[{row}]"), r#"{"ok":true}"#);
+        let mut out = Vec::new();
+        approve_with(&approve_inv(PARK_ID, &[]), &s.socket, &mut &b"123456\n"[..], &mut out, false).unwrap();
+        let shown = String::from_utf8(out).unwrap();
+        let claims: Vec<&str> = shown.lines().filter(|l| l.contains("requester claims")).collect();
+        assert_eq!(claims.len(), 4, "the screen shows four claims:\n{shown}");
+        assert!(claims[0].contains("(unverified)") && claims[0].contains("reason psql"), "{claims:?}");
+        assert!(claims[1].contains("(unverified)") && claims[1].contains("receives the value is /usr/bin/psql"), "{claims:?}");
+        assert!(claims[2].contains("(unverified)") && claims[2].contains("khoa"), "{claims:?}");
+        assert!(claims[3].contains("(unverified)") && claims[3].contains("secret db-prod, consumer deploy-bot"), "{claims:?}");
+        let kernel = shown.lines().find(|l| l.contains("the kernel stamped the peer")).expect("the screen shows the kernel's peer line");
+        assert!(!kernel.contains("(unverified)"), "the kernel's line is not a claim: {kernel}");
+    }
+
     /// The secret and consumer are the last line before the prompt, so a
     /// long claim above them cannot scroll them off the screen.
     #[test]

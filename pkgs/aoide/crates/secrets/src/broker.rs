@@ -1272,6 +1272,14 @@ fn authorize_release(secrets_home: &Path, secret: &str, consumer: &str) -> Resul
     Ok(())
 }
 
+#[cfg(test)]
+thread_local! {
+    /// Test seam: a test that sets a barrier on its approve thread gets the
+    /// thread parked there right after the peek, so the test can take the ask
+    /// only once the peek has seen it. Production builds have no such seam.
+    static APPROVE_AFTER_PEEK: std::cell::RefCell<Option<std::sync::Arc<std::sync::Barrier>>> = const { std::cell::RefCell::new(None) };
+}
+
 /// `approve <id>` with its `totp`: validate the code
 /// with the SAME [`verify_totp_gate`] a fast-path `resolve` uses (same RFC
 /// 6238 verify, same single-use replay ledger — the code is consumed
@@ -1315,6 +1323,12 @@ fn handle_approve(
         audit_approve(secrets_home, &id, None, false, &reason, approver_uid);
         return json!({"ok": false, "error": reason});
     };
+    #[cfg(test)]
+    APPROVE_AFTER_PEEK.with(|hook| {
+        if let Some(barrier) = hook.borrow().as_ref() {
+            barrier.wait();
+        }
+    });
 
     let totp = req.get("totp").and_then(Value::as_str).map(str::trim).filter(|s| !s.is_empty());
     let Some(code) = totp else {
@@ -2622,6 +2636,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn an_unreadable_policy_json_teaches_the_chown_reference_fix_on_both_gates() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         if crate::home::running_as_root() {
             return;
         }
@@ -4930,6 +4945,7 @@ mod tests {
     /// reading on for a newline that never comes.
     #[test]
     fn an_unterminated_request_line_over_the_cap_is_refused_and_closed() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let home = tmp_home("request-line-cap");
         let (mut client, server) = UnixStream::pair().expect("socketpair");
         client.set_read_timeout(Some(std::time::Duration::from_secs(5))).unwrap();
@@ -5096,9 +5112,17 @@ mod tests {
         let events = home.join("events.jsonl");
         let reply = with_redirected_audit_log(&home, || {
             let budget = totp_budget_lock().lock().unwrap_or_else(|e| e.into_inner());
+            let peeked = std::sync::Arc::new(std::sync::Barrier::new(2));
             std::thread::scope(|s| {
-                let approve = s.spawn(|| handle_approve(&home, &events, &parked, &req, None, NOW));
-                std::thread::sleep(std::time::Duration::from_millis(250));
+                let hook = std::sync::Arc::clone(&peeked);
+                let approve = s.spawn(|| {
+                    APPROVE_AFTER_PEEK.with(|slot| *slot.borrow_mut() = Some(hook));
+                    handle_approve(&home, &events, &parked, &req, None, NOW)
+                });
+                // The approve thread has peeked the ask and waits on the barrier.
+                // The take runs while this test holds the budget, so the check
+                // finds the ask gone.
+                peeked.wait();
                 drop(parked.take(&id));
                 drop(budget);
                 approve.join().unwrap()
@@ -5166,6 +5190,7 @@ mod tests {
     /// timeout ends, so a silent holder cannot keep its thread for ever.
     #[test]
     fn a_silent_connection_is_closed_when_the_read_timeout_ends() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let home = tmp_home("silent-conn");
         let events = home.join("events.jsonl");
         let (mut client, server) = UnixStream::pair().expect("socketpair");
@@ -5201,7 +5226,7 @@ mod tests {
     fn a_parked_resolve_is_answered_by_its_park_timer_not_the_read_timeout() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved_timeout = std::env::var(crate::park::PARK_TIMEOUT_ENV).ok();
-        std::env::set_var(crate::park::PARK_TIMEOUT_ENV, "1");
+        std::env::set_var(crate::park::PARK_TIMEOUT_ENV, "3");
         let home = tmp_home("parked-outlives-read");
         seed_enrolled(&home, Policy::new("t", "scratch", "stored-value"));
         let events = home.join("events.jsonl");
@@ -5209,6 +5234,7 @@ mod tests {
             let (mut client, server) = UnixStream::pair().expect("socketpair");
             let (home_for_conn, events_for_conn) = (home.clone(), events.clone());
             let conn = std::thread::spawn(move || handle_conn(&home_for_conn, &events_for_conn, server, &ParkRegistry::new(), &UidSlots::new(PER_UID_CONNECTIONS)));
+            let started = std::time::Instant::now();
             client.write_all(b"{\"op\":\"resolve\",\"secret\":\"t\",\"consumer\":\"m\"}\n").unwrap();
             let mut reader = BufReader::new(client);
             reader.get_mut().set_read_timeout(Some(std::time::Duration::from_secs(5))).unwrap();
@@ -5217,7 +5243,12 @@ mod tests {
             assert!(interim.contains("\"parked\":true"), "{interim}");
             let mut last = String::new();
             let got = reader.read_line(&mut last);
-            assert!(got.is_ok() && last.contains("timed out"), "the park was not ended by its own timer: {got:?} {last:?}");
+            let waited = started.elapsed();
+            assert!(got.is_ok() && last.contains("timed out after 3s"), "the park was not ended by its own timer: {got:?} {last:?}");
+            assert!(
+                waited >= std::time::Duration::from_secs(3),
+                "the timed-out line came after {waited:?}, before the 3 s park timer: the read timeout ended the park"
+            );
             drop(reader);
             conn.join().unwrap();
         });
@@ -5343,6 +5374,7 @@ mod tests {
     /// 100 ms is closed at the same deadline, not kept open by them.
     #[test]
     fn blank_lines_do_not_extend_the_request_deadline() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         assert_closed_at_deadline(b"\n");
     }
 
@@ -5394,6 +5426,7 @@ mod tests {
     /// request it sent is drained first, so the close does not reset the line.
     #[test]
     fn a_connection_from_a_uid_at_its_cap_gets_one_refusal_line() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let home = tmp_home("uid-cap-refusal");
         let (mut client, server) = UnixStream::pair().expect("socketpair");
         client.write_all(b"{\"op\":\"status\"}\n").unwrap();
