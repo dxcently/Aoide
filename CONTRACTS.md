@@ -6607,15 +6607,21 @@ until the park is approved from another process or times out, and it sends no
 approve op of its own.
 
 **A connection is bounded.** The broker serves at most 128 connections at
-once. The cap and both timeouts are compiled in, not env knobs. A connection
-that arrives while 128 are open gets one refusal line, `"ok":false` with an
-`error` that names the cap, and is closed. A connection that goes 10 s
-without sending a byte is closed with no reply, and so is one that does not
-take a reply within 10 s. A parked `resolve` is not reading, so its park
-timer, not either timeout, ends it. The cost is part of the contract: a
-silent client holds a slot for up to 10 s, so 128 of them refuse other
-callers for that window, and a client that sends one byte inside each 10 s
-keeps its slot, since the timeout bounds idle time, not a line's total time.
+once, and one peer uid at most 16 of them. The caps and every timeout are
+compiled in, not env knobs. A connection that arrives while 128 are open gets
+one refusal line, `"ok":false` with an `error` that names the cap, and is
+closed. A connection whose uid already holds 16 gets the same shape of
+refusal, its `error` naming the uid's cap, and no other uid is affected. A
+connection that goes 10 s without sending a byte is closed with no reply, and
+so is one that does not take a reply within 10 s. A request line must complete
+within 10 s of its first byte, and blank lines do not restart that clock, so a
+client that trickles bytes is closed at the deadline. A parked `resolve` is not
+reading, so its park timer ends it, or the broker's hang-up probe does within
+250 ms of its client closing the socket. The costs are part of the contract: a
+silent client holds a slot for up to 10 s, so 128 of them refuse other callers
+for that window; a client that keeps sending complete requests keeps its slot
+for as long as it sends; and a user running more than 16 connections at once
+is refused.
 
 **A parked field is bounded.** A consumer, reason or argv0 over 4 KiB or 60
 lines is refused at park, and so is one holding a control or invisible

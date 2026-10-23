@@ -58,7 +58,7 @@ use std::io::Read;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::sync::Mutex;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 /// Env override for the park timeout, read once per park (not cached — a
 /// long-running broker picks up a changed value on its very next park,
@@ -397,6 +397,13 @@ impl ParkRegistry {
         removed
     }
 
+    /// Remove `id` because its client hung up. Nothing is sent and no timeout
+    /// is recorded, so the ask reads as dropped, not expired. Returns whether
+    /// this call removed it; `false` means an approve or dismiss took it first.
+    fn remove_hung_up(&self, id: &str) -> bool {
+        self.parse_id(id).is_some_and(|n| self.lock().remove(&n).is_some())
+    }
+
     /// Whether `id`'s wait ran out and it is still among the remembered
     /// timeouts ([`TIMED_OUT_MEMORY`]). An id that was approved or dismissed,
     /// never existed, or has aged out of the memory is not.
@@ -434,19 +441,27 @@ impl ParkRegistry {
     }
 }
 
-/// What [`wait_for_outcome`] resolves to — the parked connection's own
-/// three possible fates, mirroring [`ParkOutcome`] plus the timeout case
-/// that never reaches the channel at all.
+/// How often a parked wait checks whether its client has hung up. A hang-up
+/// frees its ask within one probe, so this is the detection latency.
+const HANGUP_PROBE: Duration = Duration::from_millis(250);
+
+/// What [`wait_for_outcome`] resolves to: the parked connection's fate. It is
+/// one of [`ParkOutcome`]'s three, a timeout that never reaches the channel, or
+/// a hang-up that never reaches it either.
 pub enum WaitResult {
     Approved(String),
     Denied(String),
     Dismissed,
     TimedOut,
+    HungUp,
 }
 
 /// Block the calling thread (a `handle_conn` connection thread — never the
 /// accept loop, which is why P-N2 moved `serve` to thread-per-connection in
-/// the first place) until `id`'s ask completes or `timeout` elapses.
+/// the first place) until `id`'s ask completes, `timeout` elapses, or the
+/// client hangs up. The hang-up is probed every [`HANGUP_PROBE`]; a hung-up
+/// client's ask is removed with no timeout on record, so it reads as dropped
+/// ([`WaitResult::HungUp`]), not expired.
 ///
 /// **The timeout/completion race, resolved by who removes the registry
 /// entry first** (the module doc's "registry lock is the single point of
@@ -475,32 +490,54 @@ pub enum WaitResult {
 /// `recv()` is bounded by that same ceiling in the worst case, no longer
 /// truly unbounded, even though it is still not "promptly" in the sub-second
 /// sense the happy path holds.
-pub fn wait_for_outcome(registry: &ParkRegistry, id: &str, rx: mpsc::Receiver<ParkOutcome>, timeout: Duration) -> WaitResult {
-    match rx.recv_timeout(timeout) {
-        Ok(ParkOutcome::Approved(v)) => WaitResult::Approved(v),
-        Ok(ParkOutcome::Denied(e)) => WaitResult::Denied(e),
-        Ok(ParkOutcome::Dismissed) => WaitResult::Dismissed,
-        Err(mpsc::RecvTimeoutError::Timeout) => {
-            if registry.remove_only(id) {
-                WaitResult::TimedOut
-            } else {
-                // Lost the race — an approve/dismiss already took the
-                // entry and is sending (or has sent) right now.
-                match rx.recv() {
-                    Ok(ParkOutcome::Approved(v)) => WaitResult::Approved(v),
-                    Ok(ParkOutcome::Denied(e)) => WaitResult::Denied(e),
-                    Ok(ParkOutcome::Dismissed) => WaitResult::Dismissed,
-                    // Unreachable in practice (the taker always sends
-                    // before dropping its Sender) — a safe fallback rather
-                    // than a panic if it ever somehow happened.
-                    Err(_) => WaitResult::TimedOut,
-                }
+pub fn wait_for_outcome(
+    registry: &ParkRegistry,
+    id: &str,
+    rx: mpsc::Receiver<ParkOutcome>,
+    timeout: Duration,
+    hung_up: &dyn Fn() -> bool,
+) -> WaitResult {
+    let started = Instant::now();
+    loop {
+        let left = timeout.saturating_sub(started.elapsed());
+        match rx.recv_timeout(left.min(HANGUP_PROBE)) {
+            Ok(outcome) => return from_outcome(outcome),
+            // Unreachable in practice: a `ParkedAsk` is only removed by `take`,
+            // whose caller always sends before its Sender drops. A safe
+            // fallback rather than a panic.
+            Err(mpsc::RecvTimeoutError::Disconnected) => return WaitResult::TimedOut,
+            Err(mpsc::RecvTimeoutError::Timeout) if left.is_zero() => break,
+            Err(mpsc::RecvTimeoutError::Timeout) if hung_up() => {
+                return if registry.remove_hung_up(id) { WaitResult::HungUp } else { settle(&rx) };
             }
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
         }
-        // Unreachable in practice (a `ParkedAsk` is only ever removed by
-        // `take`, whose caller always sends before the `Sender` drops) —
-        // same safe fallback as above.
-        Err(mpsc::RecvTimeoutError::Disconnected) => WaitResult::TimedOut,
+    }
+    if registry.remove_only(id) {
+        WaitResult::TimedOut
+    } else {
+        // Lost the race: an approve/dismiss already took the entry and is
+        // sending (or has sent) right now.
+        settle(&rx)
+    }
+}
+
+fn from_outcome(outcome: ParkOutcome) -> WaitResult {
+    match outcome {
+        ParkOutcome::Approved(v) => WaitResult::Approved(v),
+        ParkOutcome::Denied(e) => WaitResult::Denied(e),
+        ParkOutcome::Dismissed => WaitResult::Dismissed,
+    }
+}
+
+/// The outcome a taker has committed to sending, read once this wait has lost
+/// the race to it.
+fn settle(rx: &mpsc::Receiver<ParkOutcome>) -> WaitResult {
+    match rx.recv() {
+        Ok(outcome) => from_outcome(outcome),
+        // Unreachable in practice: the taker always sends before its Sender
+        // drops. A safe fallback rather than a panic.
+        Err(_) => WaitResult::TimedOut,
     }
 }
 
@@ -649,7 +686,7 @@ mod tests {
         let mut ids = Vec::new();
         for _ in 0..=TIMED_OUT_MEMORY {
             let (id, rx) = reg.park("t", "m", 1);
-            assert!(matches!(wait_for_outcome(&reg, &id, rx, Duration::ZERO), WaitResult::TimedOut));
+            assert!(matches!(wait_for_outcome(&reg, &id, rx, Duration::ZERO, &|| false), WaitResult::TimedOut));
             ids.push(id);
         }
         assert!(reg.timed_out(ids.last().unwrap()), "the newest timeout must be remembered");
@@ -662,7 +699,7 @@ mod tests {
         let (id, rx) = reg.park("t", "m", 1);
         let ask = reg.take(&id).unwrap();
         ask.send(ParkOutcome::Approved("the-value".to_string()));
-        match wait_for_outcome(&reg, &id, rx, Duration::from_secs(5)) {
+        match wait_for_outcome(&reg, &id, rx, Duration::from_secs(5), &|| false) {
             WaitResult::Approved(v) => assert_eq!(v, "the-value"),
             _ => panic!("expected Approved"),
         }
@@ -674,7 +711,7 @@ mod tests {
         let (id, rx) = reg.park("t", "m", 1);
         let ask = reg.take(&id).unwrap();
         ask.send(ParkOutcome::Denied("backend exploded".to_string()));
-        match wait_for_outcome(&reg, &id, rx, Duration::from_secs(5)) {
+        match wait_for_outcome(&reg, &id, rx, Duration::from_secs(5), &|| false) {
             WaitResult::Denied(e) => assert_eq!(e, "backend exploded"),
             _ => panic!("expected Denied"),
         }
@@ -686,14 +723,30 @@ mod tests {
         let (id, rx) = reg.park("t", "m", 1);
         let ask = reg.take(&id).unwrap();
         ask.send(ParkOutcome::Dismissed);
-        assert!(matches!(wait_for_outcome(&reg, &id, rx, Duration::from_secs(5)), WaitResult::Dismissed));
+        assert!(matches!(wait_for_outcome(&reg, &id, rx, Duration::from_secs(5), &|| false), WaitResult::Dismissed));
+    }
+
+    /// A client that hung up frees its ask at the next probe: the wait returns
+    /// `HungUp`, the ask is gone, and a hang-up is not recorded as a timeout.
+    #[test]
+    fn wait_for_outcome_frees_an_ask_whose_client_hung_up() {
+        let reg = ParkRegistry::new();
+        let (id, rx) = reg.park("t", "m", 0);
+        let started = std::time::Instant::now();
+        assert!(
+            matches!(wait_for_outcome(&reg, &id, rx, Duration::from_secs(3), &|| true), WaitResult::HungUp),
+            "a hung-up client frees its ask as HungUp"
+        );
+        assert!(started.elapsed() < Duration::from_secs(2), "the probe does not wait out the timer");
+        assert!(reg.peek(&id).is_none(), "the ask is gone");
+        assert!(!reg.timed_out(&id), "a hang-up is not recorded as a timeout");
     }
 
     #[test]
     fn wait_for_outcome_times_out_and_removes_the_entry() {
         let reg = ParkRegistry::new();
         let (id, rx) = reg.park("t", "m", 1);
-        assert!(matches!(wait_for_outcome(&reg, &id, rx, Duration::from_millis(50)), WaitResult::TimedOut));
+        assert!(matches!(wait_for_outcome(&reg, &id, rx, Duration::from_millis(50), &|| false), WaitResult::TimedOut));
         // The genuine-timeout path must have removed the entry itself.
         assert!(reg.peek(&id).is_none());
     }
@@ -717,7 +770,7 @@ mod tests {
                         ask.send(ParkOutcome::Approved("raced-value".to_string()));
                     }
                 });
-                match wait_for_outcome(reg_ref, &id, rx, Duration::from_millis(10)) {
+                match wait_for_outcome(reg_ref, &id, rx, Duration::from_millis(10), &|| false) {
                     WaitResult::Approved(v) => assert_eq!(v, "raced-value"),
                     WaitResult::TimedOut => {} // also legitimate if the sender lost the race
                     _other => panic!("must be Approved or TimedOut, got a Dismissed/Denied"),

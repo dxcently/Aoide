@@ -540,25 +540,49 @@
   sharing one `Arc<park::ParkRegistry>`. Don't reintroduce an inline
   `handle_conn` call in the accept loop, and don't add a SECOND kind of
   long-lived wait anywhere in `handle_conn` that isn't routed through
-  `park::wait_for_outcome`'s own timeout/completion race — a second
+  `park::wait_for_outcome`'s own timeout/hang-up/completion race — a second
   ad hoc blocking point would need this same accept-loop guarantee
   re-proven from scratch.
 - **Every connection is timed, and the count is capped (hard constraint).**
   `serve` counts a connection from accept until its thread ends
   (`LiveConnection`). At `MAX_CONNECTIONS` (128; 8 under test) the accept
-  loop answers the next one with one refusal line and closes it
-  (`refuse_over_cap`), after draining what the client already sent, so the
-  close does not reset the line. `handle_conn` sets `READ_TIMEOUT` (10 s; 1 s
-  under test) on reads and `WRITE_TIMEOUT` (10 s; 1 s under test) on writes.
-  A read that times out or errors closes the connection with no reply. Both
-  timeouts apply per call, so they bound idle time, not a line's total time.
-  A parked `resolve` is not reading, so its park timer ends it, not the read
-  timeout. Costs: a silent or stalled client holds one slot for up to 10 s,
-  so 128 of them refuse honest callers for that window, and a client that
-  sends one byte inside each 10 s keeps its slot. Parks have their own cap
-  (`AOIDE_SECRETS_PARK_CAP`, 32 by default), so a default broker keeps 96
-  slots free for callers that are not parked. A change to either number
-  states its cost in the same commit.
+  loop answers the next one with one refusal line and closes it (`refuse`),
+  after draining what the client already sent, so the close does not reset
+  the line. `handle_conn` then takes a slot for the connection's peer uid
+  (`UidSlots`, keyed by the uid `SO_PEERCRED` reads; a connection whose uid
+  cannot be read shares one bucket). At `PER_UID_CONNECTIONS` (16; 8 under
+  test) that uid is refused with the same shape of line, and no other uid is
+  affected. `READ_TIMEOUT` (10 s; 1 s under test) bounds silence between
+  bytes, and `WRITE_TIMEOUT` (10 s; 1 s under test) bounds one write. A read
+  that times out closes the connection with no reply. `REQUEST_DEADLINE`
+  (10 s; 1 s under test) bounds a whole request line: it starts at the line's
+  first byte, blank lines do not reset it, and no read may run past it, so a
+  client that trickles bytes is closed at the deadline. A parked `resolve` is
+  not reading, so neither read timeout applies to it: it ends at its park
+  timer, or within `HANGUP_PROBE` (250 ms) of its client closing its socket.
+  Costs, per number:
+  - 128: a silent or trickling client holds one slot until its timeout, so
+    128 of them refuse honest callers for that window.
+  - 16 per uid: a user running more than 16 connections at once is refused,
+    and every process of that uid shares the 16. One uid holds at most 16 of
+    the 128, so it takes 8 uids to fill them all.
+  - 10 s read timeout: a client silent for more than 10 s is dropped, and it
+    holds its slot for that long first.
+  - 10 s write timeout: a client that stops reading its reply is dropped
+    after 10 s, and the broker thread waits that long for it.
+  - 10 s request deadline: a request line not complete within 10 s of its
+    first byte is dropped. A client that keeps sending complete requests
+    keeps its connection for as long as it sends; only the per-uid cap bounds
+    how many such connections one uid holds.
+  - 250 ms hang-up probe: one `poll(2)` per parked ask every 250 ms, which is
+    also the detection latency. A client that only half-closes its write side
+    is not treated as gone, so its park stays until the timer. Windows has no
+    probe, so a parked ask there ends only at its timer.
+  - `AOIDE_SECRETS_PARK_CAP` (32 by default) bounds parked asks. A parked ask
+    holds a connection, so at most 32 of the 128 are parked. The cap reserves
+    nothing: the other 96 are shared with every other connection, and eight
+    uids holding 16 idle connections each fill all 128.
+  A change to any number states its cost in the same commit.
 - **`resolve_gate` returns a `GateOutcome` (`Granted`/`Denied`/
   `NeedsTotp`), not a bare `Result` (P-N2 — replaced the old
   `(bool, Result<String,String>)` tuple).** `NeedsTotp` is the park
@@ -620,10 +644,11 @@
   richer — `wait` is closed on purpose (invariant below, unchanged from
   P-N2).
 - **A request line is capped at `MAX_REQUEST_LINE` (64 KiB), newline
-  excluded.** `handle_conn` reads each line through `take(cap + 1)`, so an
-  over-long line is refused at the cap and the connection closes; the broker
-  never buffers a line up to its newline. Don't swap that read back for
-  `BufRead::lines()`, which has no cap.
+  excluded.** `read_request_line` reads a line in chunks and checks the cap
+  after each one, so an over-long line is refused at the cap and the
+  connection closes; the broker never holds more than the cap plus one read
+  chunk of a line. Don't swap that read back for `BufRead::lines()`, which
+  has no cap, or for `read_until` over an uncapped reader.
 - **`approve` MUST re-run the full authorization gate against the ask's
   STORED consumer, immediately before fetching — never trust a code alone
   (P-N2c, FIX 2, hard constraint).** Before this fix, `handle_approve`

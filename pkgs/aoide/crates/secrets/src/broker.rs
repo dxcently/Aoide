@@ -12,7 +12,7 @@
 //! code now PARKS (see below) and can legitimately hold its connection open
 //! for the FULL park timeout (default 300s, [`crate::park::park_timeout`]).
 //! [`serve`] now spawns ONE THREAD PER CONNECTION
-//! (`std::thread::spawn(move || handle_conn(...))`), so a parked connection
+//! (`std::thread::spawn(move || handle_conn(..., &UidSlots::new(PER_UID_CONNECTIONS)))`), so a parked connection
 //! blocks only its own thread — the accept loop keeps admitting new
 //! connections, and an unrelated `resolve`/`put`/`pending` on a different
 //! connection completes normally while another sits parked. Every failure
@@ -339,6 +339,8 @@ use std::io::{BufRead, BufReader, Read, Write};
 use std::os::unix::fs::PermissionsExt;
 #[cfg(unix)]
 use std::os::unix::net::{UnixListener, UnixStream};
+#[cfg(unix)]
+use std::os::unix::io::AsRawFd;
 #[cfg(windows)]
 use aoide_protocol::win_unix::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
@@ -440,17 +442,19 @@ pub fn serve(secrets_home: &Path, socket_path: &Path) -> std::io::Result<()> {
     let events_path = crate::socket::events_path(socket_path);
     let parked = Arc::new(ParkRegistry::new());
     let live = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let slots = UidSlots::new(PER_UID_CONNECTIONS);
     for conn in listener.incoming() {
         match conn {
             Ok(stream) => {
                 if live.load(std::sync::atomic::Ordering::SeqCst) >= MAX_CONNECTIONS {
-                    refuse_over_cap(stream);
+                    refuse(stream, &format!("the secrets broker has {MAX_CONNECTIONS} connections open; retry in a moment"));
                     continue;
                 }
                 let home = home.clone();
                 let events_path = events_path.clone();
                 let parked = Arc::clone(&parked);
                 let counted = LiveConnection::enter(&live);
+                let slots = Arc::clone(&slots);
                 // FIX 3a (P-N2c, deploy blocker): `std::thread::spawn`
                 // PANICS if the OS refuses to create a thread (e.g. the
                 // process is already at its thread/fd limit) — that panic
@@ -465,7 +469,7 @@ pub fn serve(secrets_home: &Path, socket_path: &Path) -> std::io::Result<()> {
                 // already holds for every other per-connection failure.
                 if let Err(e) = std::thread::Builder::new().spawn(move || {
                     let _counted = counted;
-                    handle_conn(&home, &events_path, stream, &parked)
+                    handle_conn(&home, &events_path, stream, &parked, &slots)
                 }) {
                     eprintln!("[aoide/secrets] could not spawn a connection thread (dropping this connection): {e}");
                 }
@@ -514,6 +518,17 @@ const READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(1);
 const WRITE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 #[cfg(test)]
 const WRITE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(1);
+/// Most connections one peer uid holds at once (test cap 8: the global-cap
+/// test uses one uid, so the per-uid cap must not bite there).
+#[cfg(not(test))]
+const PER_UID_CONNECTIONS: usize = 16;
+#[cfg(test)]
+const PER_UID_CONNECTIONS: usize = 8;
+/// How long one request line may take from its first byte.
+#[cfg(not(test))]
+const REQUEST_DEADLINE: std::time::Duration = std::time::Duration::from_secs(10);
+#[cfg(test)]
+const REQUEST_DEADLINE: std::time::Duration = std::time::Duration::from_secs(1);
 
 /// Why a parked field is over its bound, if it is.
 fn oversized(value: &str) -> Option<String> {
@@ -543,10 +558,85 @@ impl Drop for LiveConnection {
     }
 }
 
-/// The one line a connection over [`MAX_CONNECTIONS`] is sent before it is
-/// closed. What it already sent is read first (bounded), so closing the socket
-/// does not reset the connection before the line is read.
-fn refuse_over_cap(mut stream: UnixStream) {
+/// Connections held per peer uid, from admission to the connection's end. A
+/// uid at its cap is refused; each uid counts only its own connections.
+pub(crate) struct UidSlots {
+    cap: usize,
+    held: std::sync::Mutex<std::collections::HashMap<Option<PeerUser>, usize>>,
+}
+
+impl UidSlots {
+    pub(crate) fn new(cap: usize) -> Arc<Self> {
+        Arc::new(Self { cap, held: std::sync::Mutex::new(std::collections::HashMap::new()) })
+    }
+
+    fn admit(self: &Arc<Self>, uid: Option<PeerUser>) -> Option<UidSlot> {
+        let mut held = self.held.lock().unwrap_or_else(|e| e.into_inner());
+        let count = held.entry(uid.clone()).or_insert(0);
+        if *count >= self.cap {
+            return None;
+        }
+        *count += 1;
+        Some(UidSlot { slots: Arc::clone(self), uid })
+    }
+}
+
+/// One admitted connection's place in its uid's count. Dropping it frees the place.
+pub(crate) struct UidSlot {
+    slots: Arc<UidSlots>,
+    uid: Option<PeerUser>,
+}
+
+impl Drop for UidSlot {
+    fn drop(&mut self) {
+        let mut held = self.slots.held.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(count) = held.get_mut(&self.uid) {
+            *count -= 1;
+            if *count == 0 {
+                held.remove(&self.uid);
+            }
+        }
+    }
+}
+
+/// Whether the client on the other end has hung up. A parked `resolve` asks on every probe.
+pub(crate) trait PeerHangUp {
+    fn hung_up(&self) -> bool;
+}
+
+impl PeerHangUp for Vec<u8> {
+    fn hung_up(&self) -> bool {
+        false
+    }
+}
+
+#[cfg(unix)]
+impl PeerHangUp for UnixStream {
+    /// A closed peer raises POLLHUP on this socket. A peer that only shut its
+    /// write side does not, so a client that half-closes while parked still
+    /// reads as connected.
+    fn hung_up(&self) -> bool {
+        let mut probe = libc::pollfd { fd: self.as_raw_fd(), events: 0, revents: 0 };
+        // SAFETY: `probe` is one initialised pollfd and the count is 1. A zero
+        // timeout makes the call return at once.
+        let ready = unsafe { libc::poll(&mut probe, 1, 0) };
+        ready > 0 && (probe.revents & (libc::POLLHUP | libc::POLLERR)) != 0
+    }
+}
+
+#[cfg(windows)]
+impl PeerHangUp for UnixStream {
+    /// No probe on Windows: a parked ask ends at its timer.
+    fn hung_up(&self) -> bool {
+        false
+    }
+}
+
+/// The one line a refused connection is sent before it is closed: over the
+/// global cap or over its uid's cap. What it already sent is read first
+/// (bounded), so closing the socket does not reset the connection before the
+/// line is read.
+fn refuse(mut stream: UnixStream, error: &str) {
     if stream.set_nonblocking(true).is_ok() {
         let mut drain = [0u8; 4096];
         for _ in 0..16 {
@@ -558,10 +648,7 @@ fn refuse_over_cap(mut stream: UnixStream) {
     if stream.set_nonblocking(false).is_err() || stream.set_write_timeout(Some(WRITE_TIMEOUT)).is_err() {
         return;
     }
-    let refusal = json!({
-        "ok": false,
-        "error": format!("the secrets broker has {MAX_CONNECTIONS} connections open; retry in a moment"),
-    });
+    let refusal = json!({ "ok": false, "error": error });
     let _ = write_json_line(&mut stream, &refusal);
 }
 
@@ -572,8 +659,10 @@ fn refuse_over_cap(mut stream: UnixStream) {
 /// `resolve` that parks (`handle_resolve`) blocks THIS thread only, for as
 /// long as `crate::park::park_timeout()` allows — every other connection's
 /// `handle_conn` thread is unaffected. A request line over
-/// [`MAX_REQUEST_LINE`] gets one refusal, and then the connection closes.
-fn handle_conn(secrets_home: &Path, events_path: &Path, stream: UnixStream, parked: &ParkRegistry) {
+/// [`MAX_REQUEST_LINE`] gets one refusal, and then the connection closes. A
+/// request line not complete within [`REQUEST_DEADLINE`] of its first byte
+/// closes the connection without a reply.
+fn handle_conn(secrets_home: &Path, events_path: &Path, stream: UnixStream, parked: &ParkRegistry, slots: &Arc<UidSlots>) {
     if stream.set_read_timeout(Some(READ_TIMEOUT)).and_then(|()| stream.set_write_timeout(Some(WRITE_TIMEOUT))).is_err() {
         eprintln!("[aoide/secrets] could not bound a connection's reads and writes (dropping it)");
         return;
@@ -586,6 +675,10 @@ fn handle_conn(secrets_home: &Path, events_path: &Path, stream: UnixStream, park
     // a panic" contract) — every handler below already treats an absent
     // peer uid as "cannot be authorized," never as "trust it."
     let peer = crate::peercred::peer_cred(&stream);
+    let Some(_slot) = slots.admit(peer.as_ref().and_then(|p| p.user())) else {
+        refuse(stream, &format!("this uid already holds its {} connections; close one and retry", slots.cap));
+        return;
+    };
     let mut writer = match stream.try_clone() {
         Ok(w) => w,
         Err(e) => {
@@ -595,28 +688,24 @@ fn handle_conn(secrets_home: &Path, events_path: &Path, stream: UnixStream, park
     };
     let mut reader = BufReader::new(stream);
     let mut line = Vec::new();
+    // Set at a request's first byte. A non-blank line clears it once complete,
+    // so blank lines never push the request deadline out.
+    let mut armed = None;
     loop {
         line.clear();
-        // At most one byte past the cap is read, so an over-long line is seen
-        // at the cap and never buffered up to its newline.
-        let read = match (&mut reader).take(MAX_REQUEST_LINE as u64 + 1).read_until(b'\n', &mut line) {
-            Ok(n) => n,
-            Err(_) => break,
-        };
-        if read == 0 {
-            break;
-        }
-        if line.last() == Some(&b'\n') {
-            line.pop();
-        } else if line.len() > MAX_REQUEST_LINE {
-            let refusal = json!({
-                "ok": false,
-                "error": format!(
-                    "a request line is over {MAX_REQUEST_LINE} bytes; a request is one JSON object on one line, and this connection is closed"
-                ),
-            });
-            let _ = write_json_line(&mut writer, &refusal);
-            break;
+        match read_request_line(&mut reader, &mut line, &mut armed) {
+            Ok(LineRead::Line) => {}
+            Ok(LineRead::Overlong) => {
+                let refusal = json!({
+                    "ok": false,
+                    "error": format!(
+                        "a request line is over {MAX_REQUEST_LINE} bytes; a request is one JSON object on one line, and this connection is closed"
+                    ),
+                });
+                let _ = write_json_line(&mut writer, &refusal);
+                break;
+            }
+            Ok(LineRead::Ended) | Err(_) => break,
         }
         let Ok(text) = std::str::from_utf8(&line) else {
             break;
@@ -624,9 +713,65 @@ fn handle_conn(secrets_home: &Path, events_path: &Path, stream: UnixStream, park
         if text.trim().is_empty() {
             continue;
         }
+        armed = None;
         let reply = handle_line(secrets_home, events_path, text, parked, &mut writer, peer.clone());
         if write_json_line(&mut writer, &reply).is_err() {
             break;
+        }
+    }
+}
+
+/// What [`read_request_line`] found on the wire.
+enum LineRead {
+    /// One request line with its newline excluded. A partial line at the end
+    /// of the stream counts as one.
+    Line,
+    /// More than [`MAX_REQUEST_LINE`] bytes with no newline among them.
+    Overlong,
+    /// The stream ended with no bytes of a line left to read.
+    Ended,
+}
+
+/// Read one request line into `line`. `armed` is the instant the current
+/// request's first byte arrived; the caller clears it once a non-blank line is
+/// complete. While it is set, each read is bounded by what is left of
+/// [`REQUEST_DEADLINE`], so a client that trickles bytes is cut at the
+/// deadline. Before the first byte, [`READ_TIMEOUT`] bounds the silence.
+fn read_request_line(
+    reader: &mut BufReader<UnixStream>,
+    line: &mut Vec<u8>,
+    armed: &mut Option<std::time::Instant>,
+) -> std::io::Result<LineRead> {
+    loop {
+        let bound = match *armed {
+            Some(first) => {
+                let left = (first + REQUEST_DEADLINE).saturating_duration_since(std::time::Instant::now());
+                if left.is_zero() {
+                    return Err(std::io::ErrorKind::TimedOut.into());
+                }
+                left.min(READ_TIMEOUT)
+            }
+            None => READ_TIMEOUT,
+        };
+        reader.get_ref().set_read_timeout(Some(bound))?;
+        let chunk = reader.fill_buf()?;
+        if chunk.is_empty() {
+            return Ok(if line.is_empty() { LineRead::Ended } else { LineRead::Line });
+        }
+        if armed.is_none() {
+            *armed = Some(std::time::Instant::now());
+        }
+        let (used, complete) = match chunk.iter().position(|&byte| byte == b'\n') {
+            Some(at) => (at + 1, true),
+            None => (chunk.len(), false),
+        };
+        line.extend_from_slice(&chunk[..used - usize::from(complete)]);
+        reader.consume(used);
+        if line.len() > MAX_REQUEST_LINE {
+            return Ok(LineRead::Overlong);
+        }
+        if complete {
+            return Ok(LineRead::Line);
         }
     }
 }
@@ -659,7 +804,7 @@ fn handle_line_at(
     events_path: &Path,
     line: &str,
     parked: &ParkRegistry,
-    interim_out: &mut impl Write,
+    interim_out: &mut (impl Write + PeerHangUp),
     peer: Option<crate::peercred::PeerCred>,
     now_unix: u64,
 ) -> Value {
@@ -687,7 +832,7 @@ fn handle_line(
     events_path: &Path,
     line: &str,
     parked: &ParkRegistry,
-    interim_out: &mut impl Write,
+    interim_out: &mut (impl Write + PeerHangUp),
     peer: Option<crate::peercred::PeerCred>,
 ) -> Value {
     handle_line_at(secrets_home, events_path, line, parked, interim_out, peer, aoide_protocol::audit::now_secs())
@@ -774,7 +919,7 @@ fn handle_resolve(
     events_path: &Path,
     req: &Value,
     parked: &ParkRegistry,
-    interim_out: &mut impl Write,
+    interim_out: &mut (impl Write + PeerHangUp),
     peer: Option<crate::peercred::PeerCred>,
     now_unix: u64,
 ) -> Value {
@@ -932,7 +1077,7 @@ fn handle_resolve(
                 "expiresAt": now_unix + timeout.as_secs(),
             });
             let _ = write_json_line(interim_out, &interim);
-            match crate::park::wait_for_outcome(parked, &id, rx, timeout) {
+            match crate::park::wait_for_outcome(parked, &id, rx, timeout, &|| interim_out.hung_up()) {
                 WaitResult::Approved(value) => {
                     audit_resolve(secrets_home, &secret, &consumer, argv0.as_deref(), true, None, peer_uid);
                     json!({"ok": true, "value": value})
@@ -946,6 +1091,11 @@ fn handle_resolve(
                     // holding a valid socket connection can dismiss, not
                     // necessarily "an operator" in any privileged sense.
                     let reason = "the pending TOTP ask was dismissed before a code was provided".to_string();
+                    audit_resolve(secrets_home, &secret, &consumer, argv0.as_deref(), false, Some(&reason), peer_uid);
+                    json!({"ok": false, "error": reason})
+                }
+                WaitResult::HungUp => {
+                    let reason = "the client hung up while its ask was parked, so the ask was dropped".to_string();
                     audit_resolve(secrets_home, &secret, &consumer, argv0.as_deref(), false, Some(&reason), peer_uid);
                     json!({"ok": false, "error": reason})
                 }
@@ -4149,7 +4299,7 @@ mod tests {
             let events_for_conn = home.join("events.jsonl");
             let parked_for_conn = Arc::clone(&parked);
             let conn_handle = std::thread::spawn(move || {
-                handle_conn(&home_for_conn, &events_for_conn, server_end, &parked_for_conn)
+                handle_conn(&home_for_conn, &events_for_conn, server_end, &parked_for_conn, &UidSlots::new(PER_UID_CONNECTIONS))
             });
 
             let mut writer = client_end.try_clone().expect("clone client end");
@@ -4762,7 +4912,7 @@ mod tests {
         let parked = ParkRegistry::new();
         let (id, rx) = parked.park("t", "m", 0);
         assert!(matches!(
-            crate::park::wait_for_outcome(&parked, &id, rx, std::time::Duration::ZERO),
+            crate::park::wait_for_outcome(&parked, &id, rx, std::time::Duration::ZERO, &|| false),
             WaitResult::TimedOut
         ));
 
@@ -4786,7 +4936,7 @@ mod tests {
         let (server_home, server_events) = (home.clone(), home.join("events.jsonl"));
         std::thread::spawn(move || {
             let parked = ParkRegistry::new();
-            handle_conn(&server_home, &server_events, server, &parked);
+            handle_conn(&server_home, &server_events, server, &parked, &UidSlots::new(PER_UID_CONNECTIONS));
         });
 
         client.write_all(&vec![b'x'; 64 * 1024 + 1]).expect("the cap-plus-one bytes are written");
@@ -4811,7 +4961,7 @@ mod tests {
         let (server_home, server_events) = (home.clone(), home.join("events.jsonl"));
         std::thread::spawn(move || {
             let parked = ParkRegistry::new();
-            handle_conn(&server_home, &server_events, server, &parked);
+            handle_conn(&server_home, &server_events, server, &parked, &UidSlots::new(PER_UID_CONNECTIONS));
         });
 
         let op = r#"{"op":"status"}"#;
@@ -5019,7 +5169,7 @@ mod tests {
         let home = tmp_home("silent-conn");
         let events = home.join("events.jsonl");
         let (mut client, server) = UnixStream::pair().expect("socketpair");
-        let conn = std::thread::spawn(move || handle_conn(&home, &events, server, &ParkRegistry::new()));
+        let conn = std::thread::spawn(move || handle_conn(&home, &events, server, &ParkRegistry::new(), &UidSlots::new(PER_UID_CONNECTIONS)));
         client.set_read_timeout(Some(std::time::Duration::from_secs(2))).unwrap();
         let mut byte = [0u8; 1];
         let got = client.read(&mut byte);
@@ -5058,7 +5208,7 @@ mod tests {
         with_redirected_audit_log(&home, || {
             let (mut client, server) = UnixStream::pair().expect("socketpair");
             let (home_for_conn, events_for_conn) = (home.clone(), events.clone());
-            let conn = std::thread::spawn(move || handle_conn(&home_for_conn, &events_for_conn, server, &ParkRegistry::new()));
+            let conn = std::thread::spawn(move || handle_conn(&home_for_conn, &events_for_conn, server, &ParkRegistry::new(), &UidSlots::new(PER_UID_CONNECTIONS)));
             client.write_all(b"{\"op\":\"resolve\",\"secret\":\"t\",\"consumer\":\"m\"}\n").unwrap();
             let mut reader = BufReader::new(client);
             reader.get_mut().set_read_timeout(Some(std::time::Duration::from_secs(5))).unwrap();
@@ -5157,6 +5307,142 @@ mod tests {
             for raw in ['\u{202e}', '\u{9b}'] {
                 assert!(!text.contains(raw), "a raw {raw:?} reached {}: {text}", log.display());
             }
+        }
+        std::fs::remove_dir_all(&home).ok();
+    }
+
+    /// A closed peer reads as hung up: its close raises POLLHUP on our socket.
+    #[cfg(unix)]
+    #[test]
+    fn a_peer_that_closed_its_socket_reads_as_hung_up() {
+        let (client, server) = UnixStream::pair().expect("socketpair");
+        drop(client);
+        assert!(server.hung_up(), "a closed peer must read as hung up");
+    }
+
+    /// A peer that only shut its write side can still read its reply, so the
+    /// probe does not read it as hung up.
+    #[cfg(unix)]
+    #[test]
+    fn a_peer_that_half_closed_does_not_read_as_hung_up() {
+        let (client, server) = UnixStream::pair().expect("socketpair");
+        client.shutdown(std::net::Shutdown::Write).expect("half-close");
+        assert!(!server.hung_up(), "a half-closed peer still reads its reply");
+        drop(client);
+    }
+
+    /// A request line that trickles in past [`REQUEST_DEADLINE`] is closed at the
+    /// deadline. The client writes a byte every 100 ms, which never trips the
+    /// per-read timeout, so only the whole-line deadline can close it.
+    #[test]
+    fn a_trickled_request_line_is_closed_at_its_deadline() {
+        assert_closed_at_deadline(b"{\"op\"");
+    }
+
+    /// Blank lines do not reset the clock: a client that sends a newline every
+    /// 100 ms is closed at the same deadline, not kept open by them.
+    #[test]
+    fn blank_lines_do_not_extend_the_request_deadline() {
+        assert_closed_at_deadline(b"\n");
+    }
+
+    fn assert_closed_at_deadline(trickle: &[u8]) {
+        let home = tmp_home("request-deadline");
+        let (mut client, server) = UnixStream::pair().expect("socketpair");
+        let parked = ParkRegistry::new();
+        let slots = UidSlots::new(PER_UID_CONNECTIONS);
+        let events = home.join("events.jsonl");
+        let started = std::time::Instant::now();
+        let closed_after = std::thread::scope(|s| {
+            let conn = s.spawn(|| handle_conn(&home, &events, server, &parked, &slots));
+            let mut closed_after = None;
+            for _ in 0..30 {
+                if client.write_all(trickle).is_err() {
+                    closed_after = Some(started.elapsed());
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
+            drop(client);
+            conn.join().unwrap();
+            closed_after
+        });
+        std::fs::remove_dir_all(&home).ok();
+        assert!(
+            closed_after.is_some_and(|t| t < std::time::Duration::from_secs(2)),
+            "the trickled line must be closed before 2 s, closed at {closed_after:?}"
+        );
+    }
+
+    /// One uid at its cap is refused, and another uid is not refused by it: the
+    /// cap counts each uid's own connections only, and a closed one frees a slot.
+    #[test]
+    fn one_uids_connections_do_not_refuse_another_uid() {
+        let slots = UidSlots::new(2);
+        let one = Some(PeerUser::Uid(1));
+        let two = Some(PeerUser::Uid(2));
+        let first = slots.admit(one.clone());
+        let second = slots.admit(one.clone());
+        assert!(first.is_some() && second.is_some(), "a uid gets up to its cap");
+        assert!(slots.admit(one.clone()).is_none(), "uid 1's third connection is refused");
+        assert!(slots.admit(two).is_some(), "uid 2 is not refused by uid 1's connections");
+        drop(first);
+        assert!(slots.admit(one).is_some(), "a closed connection frees its uid's slot");
+    }
+
+    /// A connection from a uid at its cap gets one refusal line and no reply. The
+    /// request it sent is drained first, so the close does not reset the line.
+    #[test]
+    fn a_connection_from_a_uid_at_its_cap_gets_one_refusal_line() {
+        let home = tmp_home("uid-cap-refusal");
+        let (mut client, server) = UnixStream::pair().expect("socketpair");
+        client.write_all(b"{\"op\":\"status\"}\n").unwrap();
+        client.shutdown(std::net::Shutdown::Write).unwrap();
+        let events = home.join("events.jsonl");
+        let conn = std::thread::spawn(move || handle_conn(&home, &events, server, &ParkRegistry::new(), &UidSlots::new(0)));
+        let mut line = String::new();
+        std::io::BufReader::new(client).read_line(&mut line).unwrap();
+        conn.join().unwrap();
+        let reply: Value = serde_json::from_str(line.trim()).unwrap_or(Value::Null);
+        assert_eq!(reply["ok"], false, "a uid at its cap is refused: {reply}");
+        assert!(reply["error"].as_str().unwrap_or("").contains("uid"), "the refusal names the cap: {reply}");
+    }
+
+    /// A parked resolve whose client hangs up frees its park within one probe,
+    /// not at its timer, so the hung-up client's slot is released promptly.
+    #[cfg(unix)]
+    #[test]
+    fn a_hung_up_client_frees_its_park() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved = std::env::var(crate::park::PARK_TIMEOUT_ENV).ok();
+        std::env::set_var(crate::park::PARK_TIMEOUT_ENV, "3");
+        let home = tmp_home("hangup-park");
+        seed_enrolled(&home, Policy::new("t", "scratch", "stored-value"));
+        let events = home.join("events.jsonl");
+        let (mut client, server) = UnixStream::pair().expect("socketpair");
+        client.write_all(b"{\"op\":\"resolve\",\"secret\":\"t\",\"consumer\":\"m\"}\n").unwrap();
+        let parked = ParkRegistry::new();
+        let slots = UidSlots::new(PER_UID_CONNECTIONS);
+        with_redirected_audit_log(&home, || {
+            std::thread::scope(|s| {
+                let conn = s.spawn(|| handle_conn(&home, &events, server, &parked, &slots));
+                let started = std::time::Instant::now();
+                while parked.list().is_empty() && started.elapsed() < std::time::Duration::from_secs(1) {
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
+                assert_eq!(parked.list().len(), 1, "the resolve parks");
+                drop(client);
+                let hung_up = std::time::Instant::now();
+                while !parked.list().is_empty() && hung_up.elapsed() < std::time::Duration::from_secs(2) {
+                    std::thread::sleep(std::time::Duration::from_millis(20));
+                }
+                assert!(parked.list().is_empty(), "a park whose client hung up frees its slot: {} still parked", parked.list().len());
+                conn.join().unwrap();
+            });
+        });
+        match saved {
+            Some(v) => std::env::set_var(crate::park::PARK_TIMEOUT_ENV, v),
+            None => std::env::remove_var(crate::park::PARK_TIMEOUT_ENV),
         }
         std::fs::remove_dir_all(&home).ok();
     }
@@ -5962,7 +6248,7 @@ mod tests {
             let events_for_conn = home.join("events.jsonl");
             let parked_for_conn = Arc::clone(&parked);
             let conn_handle =
-                std::thread::spawn(move || handle_conn(&home_for_conn, &events_for_conn, server_end, &parked_for_conn));
+                std::thread::spawn(move || handle_conn(&home_for_conn, &events_for_conn, server_end, &parked_for_conn, &UidSlots::new(PER_UID_CONNECTIONS)));
 
             let mut writer = client_end.try_clone().expect("clone client end");
             let req = json!({
@@ -5998,7 +6284,7 @@ mod tests {
         let events_for_conn = home.join("events.jsonl");
         let parked_for_conn = Arc::clone(parked);
         let conn_handle =
-            std::thread::spawn(move || handle_conn(&home_for_conn, &events_for_conn, server_end, &parked_for_conn));
+            std::thread::spawn(move || handle_conn(&home_for_conn, &events_for_conn, server_end, &parked_for_conn, &UidSlots::new(PER_UID_CONNECTIONS)));
         let mut writer = client_end.try_clone().expect("clone client end");
         writer.write_all((req.to_string() + "\n").as_bytes()).unwrap();
         let mut reader = BufReader::new(client_end);
@@ -6204,7 +6490,7 @@ mod tests {
             let events_for_conn = home.join("events.jsonl");
             let parked_for_conn = Arc::clone(&parked);
             let conn_handle =
-                std::thread::spawn(move || handle_conn(&home_for_conn, &events_for_conn, server_end, &parked_for_conn));
+                std::thread::spawn(move || handle_conn(&home_for_conn, &events_for_conn, server_end, &parked_for_conn, &UidSlots::new(PER_UID_CONNECTIONS)));
 
             let mut writer = client_end.try_clone().expect("clone client end");
             let req = json!({"op": "admin", "command": "migrate", "name": "t", "target": "age"});

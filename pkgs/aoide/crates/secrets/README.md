@@ -283,8 +283,9 @@ below) into something richer.
 
 A request line holds at most 64 KiB, newline excluded (`MAX_REQUEST_LINE`).
 A longer line gets one refusal, `{"ok":false,"error":"a request line is over
-65536 bytes; ..."}`, and the connection closes. The broker reads at most one
-byte past the cap, so an unterminated line never grows its buffer.
+65536 bytes; ..."}`, and the connection closes. The broker reads in chunks
+and checks the cap after each one, so an unterminated line holds at most the
+cap plus one chunk.
 
 ```
 -> {"op":"resolve","secret":"<name>","consumer":"<consumer>","argv0":"<cmd>"?,"wait":<bool>?,"reason":"<text>"?}
@@ -658,12 +659,19 @@ this introduced (the crate's first production, non-test, lock).
 
 The connection count is capped too. At most 128 connections are served at
 once (`MAX_CONNECTIONS`), and one more gets a single refusal line and is
-closed. A connection that goes 10 s (`READ_TIMEOUT`) without a byte, or does
+closed. No one uid may hold more than 16 of them (`PER_UID_CONNECTIONS`); a
+uid at its cap gets the same shape of refusal line, and no other uid is
+affected. A connection that goes 10 s (`READ_TIMEOUT`) without a byte, or does
 not take a reply within 10 s (`WRITE_TIMEOUT`), is closed with no reply. A
-parked `resolve` is ended by its park timer, not by either timeout. The
-costs are the ones `AGENTS.md`'s accept-loop invariant states: a stalled
-client holds a slot for up to 10 s, and a client that sends a byte inside
-each 10 s keeps its slot.
+request line must complete within 10 s (`REQUEST_DEADLINE`) of its first byte;
+blank lines do not reset that clock, so a client that trickles bytes is closed
+at the deadline. A parked `resolve` is not reading: its park timer ends it, or
+the hang-up probe does within 250 ms (`HANGUP_PROBE`) once its client has closed
+its socket. A client that only half-closes stays parked until the timer, and
+Windows has no probe. The costs are the ones `AGENTS.md`'s accept-loop
+invariant states: a stalled client holds a slot for up to 10 s, a client that
+keeps sending complete requests keeps its slot, and a user running more than
+16 connections at once is refused.
 
 **Review fix, same commit as the fix below in git history: two
 read-modify-write sections the serial accept loop used to serialize for
