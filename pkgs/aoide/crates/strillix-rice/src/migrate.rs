@@ -418,7 +418,10 @@ fn json_files(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
 /// `stagingSong` keys become `rice` and `stagingRice`. `old_song` is the old
 /// tree; the target is [`strillix_root`], the rice tree root every reader
 /// derives from. A missing tree, or one already in place, moves nothing; only
-/// `mode.json`'s key renames ([`migrate_mode_song_key`]) still run.
+/// `mode.json`'s key renames ([`migrate_mode_song_key`]) still run. A `covers`
+/// that is a link over a `covers.backup` directory is replaced by the backup
+/// first ([`restore_backed_up_covers`]). When that repair fails, `covers` stays
+/// in `song/`, which keeps `song` and is retried by the next run.
 ///
 /// Two states stop the move before it starts. A `song` that is a FILE is the
 /// marker a finished move leaves behind ([`mark_rice_tree_moved`]): already
@@ -434,7 +437,10 @@ fn migrate_rice_tree(old_song: &std::path::Path) -> std::io::Result<()> {
     }
     migrate_dir(&old_song.join("stage"), &stage_dir())?;
     migrate_dir(&old_song.join("declared"), &target.join("declared"))?;
-    migrate_dir(&old_song.join("covers"), &target.join("wallpapers"))?;
+    let covers_ok = restore_backed_up_covers(old_song);
+    if covers_ok {
+        migrate_dir(&old_song.join("covers"), &target.join("wallpapers"))?;
+    }
     migrate_dir(&old_song.join("songbook"), &target.join("rices"))?;
     migrate_dir(&old_song.join("songbook-aside"), &target.join("rices-aside"))?;
     for rice in std::fs::read_dir(target.join("rices")).into_iter().flatten().flatten() {
@@ -448,15 +454,80 @@ fn migrate_rice_tree(old_song: &std::path::Path) -> std::io::Result<()> {
     mark_rice_tree_moved(old_song, &target)
 }
 
+/// Whether `covers.backup` is a real directory and `covers` is a symlink or
+/// absent: the state an older generation left, with the real library under the
+/// backup name. A real `covers` directory is not this state and moves as before.
+fn covers_in_backup(old_song: &std::path::Path) -> bool {
+    let covers_is_link_or_absent = match std::fs::symlink_metadata(old_song.join("covers")) {
+        Ok(m) => m.file_type().is_symlink(),
+        Err(e) => e.kind() == std::io::ErrorKind::NotFound,
+    };
+    let backup_is_dir = std::fs::symlink_metadata(old_song.join("covers.backup"))
+        .is_ok_and(|m| m.is_dir());
+    covers_is_link_or_absent && backup_is_dir
+}
+
+/// Puts the real library back when [`covers_in_backup`] holds. A `covers` link is
+/// set aside as `covers.link-aside` (a rename moves the link, never its target),
+/// an absent `covers` has nothing to set aside, the backup takes the name
+/// `covers`, and the set-aside link is removed. A failed rename is undone where it
+/// can be, and the images stay in `covers.backup`. Returns false when a step
+/// failed, so the move leaves `covers` where it is; true when there was nothing to
+/// repair or the repair worked.
+fn restore_backed_up_covers(old_song: &std::path::Path) -> bool {
+    if !covers_in_backup(old_song) {
+        return true;
+    }
+    let covers = old_song.join("covers");
+    let backup = old_song.join("covers.backup");
+    let aside = old_song.join("covers.link-aside");
+    let link_present = std::fs::symlink_metadata(&covers).is_ok();
+    if link_present {
+        if let Err(e) = std::fs::rename(&covers, &aside) {
+            eprintln!(
+                "aoide: could not set the link {} aside ({e}); the images stay in {}",
+                covers.display(),
+                backup.display()
+            );
+            return false;
+        }
+    }
+    if let Err(e) = std::fs::rename(&backup, &covers) {
+        eprintln!(
+            "aoide: could not rename {} to {} ({e}); the images stay in {}",
+            backup.display(),
+            covers.display(),
+            backup.display()
+        );
+        if link_present {
+            if let Err(back) = std::fs::rename(&aside, &covers) {
+                eprintln!(
+                    "aoide: could not put the link back at {} ({back}); it is at {}",
+                    covers.display(),
+                    aside.display()
+                );
+            }
+        }
+        return false;
+    }
+    if link_present {
+        if let Err(e) = std::fs::remove_file(&aside) {
+            eprintln!("aoide: could not remove the set-aside link {} ({e})", aside.display());
+        }
+    }
+    true
+}
+
 /// The rice folders the old tree carried. Anything else under `song/`
 /// is not rice state: a stray file there neither blocks a move nor counts as
 /// something one would refuse over.
 const OLD_RICE_FOLDERS: [&str; 5] = ["stage", "declared", "covers", "songbook", "songbook-aside"];
 
-/// Whether the old tree at `old_song` holds rice state (one of
-/// [`OLD_RICE_FOLDERS`] has a file at any depth).
+/// Whether the old tree at `old_song` holds rice state: one of
+/// [`OLD_RICE_FOLDERS`] has a file at any depth, or [`covers_in_backup`] holds.
 fn old_rice_held(old_song: &std::path::Path) -> bool {
     OLD_RICE_FOLDERS.iter().any(|folder| holds_state(&old_song.join(folder)))
+        || covers_in_backup(old_song)
 }
 
 /// Whether `dir` holds state: any file, symlink or dangling link at any
@@ -1706,6 +1777,251 @@ mod tests {
             read_json(&base.join("strillix").join("stage").join("wallpaper.json")),
             serde_json::json!({"kind": "static", "path": format!("{song_path}/covers/gone.jpg"), "pick": true, "rice": "barcarolle"})
         );
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// A `covers` link over a `covers.backup` directory: the backup is the real
+    /// library, it moves, the link's target keeps its files, and the stored
+    /// wallpaper path follows the moved file.
+    #[cfg(unix)]
+    #[test]
+    fn a_covers_link_over_its_backup_moves_the_backup() {
+        let _guard = aoide_test_support::env_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let _env = MigrationEnvGuard::capture_and_clear();
+        let base = rice_roots("covers-link");
+        let song = base.join("aoide").join("song");
+        let strillix = base.join("strillix");
+        let store = base.join("store").join("covers");
+        std::fs::create_dir_all(&store).unwrap();
+        std::fs::write(store.join("stale.jpg"), "stale").unwrap();
+        std::fs::create_dir_all(song.join("covers.backup")).unwrap();
+        std::fs::write(song.join("covers.backup").join("bliss.jpg"), "jpeg").unwrap();
+        std::os::unix::fs::symlink(&store, song.join("covers")).unwrap();
+        std::fs::create_dir_all(song.join("stage")).unwrap();
+        let song_path = song.display().to_string();
+        write_json(
+            &song.join("stage").join("mode.json"),
+            serde_json::json!({"song": "barcarolle"}),
+        );
+        write_json(
+            &song.join("stage").join("cover.json"),
+            serde_json::json!({
+                "kind": "static",
+                "path": format!("{song_path}/covers/bliss.jpg"),
+                "pick": true,
+                "song": "barcarolle"
+            }),
+        );
+
+        migrate_all().unwrap();
+
+        let wallpapers = strillix.join("wallpapers");
+        assert!(
+            wallpapers.is_dir() && !wallpapers.is_symlink(),
+            "wallpapers is the real library, not a link"
+        );
+        assert_eq!(std::fs::read_to_string(wallpapers.join("bliss.jpg")).unwrap(), "jpeg");
+        assert!(!wallpapers.join("stale.jpg").exists(), "the link's target is not the library");
+        assert!(song.is_file(), "the finished move leaves the marker");
+        assert!(store.join("stale.jpg").is_file(), "the link's target is never touched");
+        assert_eq!(
+            read_json(&strillix.join("stage").join("wallpaper.json")),
+            serde_json::json!({
+                "kind": "static",
+                "path": wallpapers.join("bliss.jpg").display().to_string(),
+                "pick": true,
+                "rice": "barcarolle"
+            })
+        );
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// A `covers` link over a `covers.backup` directory is rice state even when
+    /// nothing else is: `rice_status` reads it as due, and the move takes the real
+    /// library and leaves the marker.
+    #[cfg(unix)]
+    #[test]
+    fn a_lone_covers_link_over_its_backup_still_moves() {
+        let _guard = aoide_test_support::env_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let _env = MigrationEnvGuard::capture_and_clear();
+        let base = rice_roots("covers-lone");
+        let song = base.join("aoide").join("song");
+        let wallpapers = base.join("strillix").join("wallpapers");
+        let store = base.join("store").join("covers");
+        std::fs::create_dir_all(&store).unwrap();
+        std::fs::create_dir_all(song.join("covers.backup")).unwrap();
+        std::fs::write(song.join("covers.backup").join("bliss.jpg"), "jpeg").unwrap();
+        std::os::unix::fs::symlink(&store, song.join("covers")).unwrap();
+        assert!(
+            matches!(rice_status(), RiceStatus::Due(_)),
+            "a lone covers link over its backup is due"
+        );
+
+        migrate_all().unwrap();
+
+        assert!(
+            wallpapers.is_dir() && !wallpapers.is_symlink(),
+            "wallpapers is the real library, not a link"
+        );
+        assert_eq!(std::fs::read_to_string(wallpapers.join("bliss.jpg")).unwrap(), "jpeg");
+        assert!(song.is_file(), "the finished move leaves the marker");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// A repair whose first rename fails changes nothing: `song` is read-only, so
+    /// the link cannot be set aside. The link stays a link, the backup stays where
+    /// it is, and nothing lands in the strillix root. Skipped under root, which
+    /// writes into a read-only directory anyway.
+    #[cfg(unix)]
+    #[test]
+    fn a_covers_repair_that_fails_leaves_the_link_and_backup() {
+        use std::os::unix::fs::PermissionsExt;
+        let _guard = aoide_test_support::env_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let _env = MigrationEnvGuard::capture_and_clear();
+        let base = rice_roots("covers-repair-fails");
+        let song = base.join("aoide").join("song");
+        let wallpapers = base.join("strillix").join("wallpapers");
+        let store = base.join("store").join("covers");
+        std::fs::create_dir_all(&store).unwrap();
+        std::fs::create_dir_all(song.join("covers.backup")).unwrap();
+        std::fs::write(song.join("covers.backup").join("bliss.jpg"), "jpeg").unwrap();
+        std::os::unix::fs::symlink(&store, song.join("covers")).unwrap();
+        std::fs::set_permissions(&song, std::fs::Permissions::from_mode(0o555)).unwrap();
+        if std::fs::write(song.join("probe"), "").is_ok() {
+            std::fs::set_permissions(&song, std::fs::Permissions::from_mode(0o755)).unwrap();
+            let _ = std::fs::remove_dir_all(&base);
+            return;
+        }
+
+        let _ = migrate_all();
+
+        std::fs::set_permissions(&song, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(!wallpapers.exists(), "a failed repair moves no covers");
+        assert!(
+            std::fs::symlink_metadata(song.join("covers")).unwrap().file_type().is_symlink(),
+            "the link stays where it was"
+        );
+        assert!(!song.join("covers.link-aside").exists(), "no set-aside link is left behind");
+        let backup_bliss = song.join("covers.backup").join("bliss.jpg");
+        assert_eq!(std::fs::read_to_string(backup_bliss).unwrap(), "jpeg");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// A `covers.backup` directory beside an empty real `covers` directory, with
+    /// no link between them: `covers` moves, the backup stays in the old tree.
+    #[test]
+    fn a_covers_backup_without_a_link_stays() {
+        let _guard = aoide_test_support::env_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let _env = MigrationEnvGuard::capture_and_clear();
+        let base = rice_roots("covers-backup-only");
+        let song = base.join("aoide").join("song");
+        let wallpapers = base.join("strillix").join("wallpapers");
+        std::fs::create_dir_all(song.join("covers")).unwrap();
+        std::fs::write(song.join("covers").join("a.jpg"), "a").unwrap();
+        std::fs::create_dir_all(song.join("covers.backup")).unwrap();
+        std::fs::write(song.join("covers.backup").join("b.jpg"), "b").unwrap();
+        std::fs::create_dir_all(song.join("stage")).unwrap();
+        write_json(
+            &song.join("stage").join("mode.json"),
+            serde_json::json!({"song": "barcarolle"}),
+        );
+
+        migrate_all().unwrap();
+
+        assert_eq!(std::fs::read_to_string(wallpapers.join("a.jpg")).unwrap(), "a");
+        assert!(!wallpapers.join("b.jpg").exists(), "the backup is not moved");
+        let backup_b = song.join("covers.backup").join("b.jpg");
+        assert!(backup_b.is_file(), "the backup stays in the old tree");
+        assert!(song.is_dir(), "the leftover keeps song a directory");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// An empty `covers` directory beside a `covers.backup` directory is not the
+    /// repaired state either: it moves as it always did, and the backup stays.
+    #[test]
+    fn an_empty_covers_directory_beside_a_backup_leaves_the_backup() {
+        let _guard = aoide_test_support::env_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let _env = MigrationEnvGuard::capture_and_clear();
+        let base = rice_roots("covers-empty-dir");
+        let song = base.join("aoide").join("song");
+        let wallpapers = base.join("strillix").join("wallpapers");
+        std::fs::create_dir_all(song.join("covers")).unwrap();
+        std::fs::create_dir_all(song.join("covers.backup")).unwrap();
+        std::fs::write(song.join("covers.backup").join("b.jpg"), "b").unwrap();
+        std::fs::create_dir_all(song.join("stage")).unwrap();
+        write_json(
+            &song.join("stage").join("mode.json"),
+            serde_json::json!({"song": "barcarolle"}),
+        );
+
+        migrate_all().unwrap();
+
+        assert!(!wallpapers.join("b.jpg").exists(), "the backup is not moved");
+        assert_eq!(std::fs::read_to_string(song.join("covers.backup").join("b.jpg")).unwrap(), "b");
+        assert!(song.is_dir(), "the leftover keeps song a directory");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// A `covers.backup` directory with no `covers` at all is the same state with
+    /// the link gone: the backup is the real library and moves as `wallpapers`.
+    #[test]
+    fn a_covers_backup_with_no_covers_moves_as_the_library() {
+        let _guard = aoide_test_support::env_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let _env = MigrationEnvGuard::capture_and_clear();
+        let base = rice_roots("covers-backup-alone");
+        let song = base.join("aoide").join("song");
+        let wallpapers = base.join("strillix").join("wallpapers");
+        std::fs::create_dir_all(song.join("stage")).unwrap();
+        write_json(
+            &song.join("stage").join("mode.json"),
+            serde_json::json!({"song": "barcarolle"}),
+        );
+        std::fs::create_dir_all(song.join("covers.backup")).unwrap();
+        std::fs::write(song.join("covers.backup").join("bliss.jpg"), "jpeg").unwrap();
+
+        migrate_all().unwrap();
+
+        assert!(
+            wallpapers.is_dir() && !wallpapers.is_symlink(),
+            "wallpapers is the real library, not a link"
+        );
+        assert_eq!(std::fs::read_to_string(wallpapers.join("bliss.jpg")).unwrap(), "jpeg");
+        assert!(song.is_file(), "the finished move leaves the marker");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// A `covers.backup` that is itself a link is not the real library: with a
+    /// link at `covers` too, both links stay as they are and nothing is repaired.
+    #[cfg(unix)]
+    #[test]
+    fn a_covers_link_over_a_linked_backup_is_left_alone() {
+        let name = format!("aoide-covers-linked-backup-{}", std::process::id());
+        let base = std::env::temp_dir().join(name);
+        let _ = std::fs::remove_dir_all(&base);
+        let song = base.join("song");
+        let (target_a, target_b) = (base.join("a"), base.join("b"));
+        std::fs::create_dir_all(&song).unwrap();
+        std::fs::create_dir_all(&target_a).unwrap();
+        std::fs::create_dir_all(&target_b).unwrap();
+        std::os::unix::fs::symlink(&target_a, song.join("covers")).unwrap();
+        std::os::unix::fs::symlink(&target_b, song.join("covers.backup")).unwrap();
+
+        assert!(restore_backed_up_covers(&song), "nothing to repair is a success");
+
+        assert_eq!(std::fs::read_link(song.join("covers")).unwrap(), target_a);
+        assert_eq!(std::fs::read_link(song.join("covers.backup")).unwrap(), target_b);
         let _ = std::fs::remove_dir_all(&base);
     }
 

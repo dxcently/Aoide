@@ -40,7 +40,11 @@
   becomes `rice`, `stagingSong` becomes `stagingRice`, a history entry's `take`,
   `livery` and `cover` become `entry`, `theme` and `wallpaper`, and each path
   that moved is rewritten to where its file now sits. `declared/songbook/`
-  becomes `declared/rices/`, and `rices-aside/` is left as it was.
+  becomes `declared/rices/`, and `rices-aside/` is left as it was. A `covers`
+  link an older generation placed over the real library, or no `covers` at
+  all, is replaced by the `covers.backup` folder it kept, so the wallpapers
+  move with the rest. If that repair fails, both stay where they were and the
+  next run retries it.
 
 ### A host's theme value outranks only that value
 
