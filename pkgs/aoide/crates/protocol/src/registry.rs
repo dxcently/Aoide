@@ -1057,6 +1057,16 @@ mod tests {
     }
 
     #[test]
+    fn a_command_refuses_the_pair_door_before_its_handler_runs() {
+        runner!(RAN, runs);
+        let c = cmd!(path: ["shut", "down"], summary: "Shut.", args: [], flags: [], gated: false, implemented: true, handler: runs);
+        let o = c.invoke("aoide", &at(Door::Pair, &["shut", "down"], &[]));
+        assert_eq!(o.status, Status::Usage);
+        assert!(o.message.contains("is not open to the pair door"), "{}", o.message);
+        assert!(!took(&RAN), "the pair door must not reach the handler");
+    }
+
+    #[test]
     fn a_command_that_declares_only_cli_refuses_the_daemon_hop() {
         runner!(RAN, runs);
         let c = cmd!(path: ["secret", "add"], summary: "Add.", args: [], flags: [], gated: false, implemented: true, handler: runs, doors: &[Door::Cli]);

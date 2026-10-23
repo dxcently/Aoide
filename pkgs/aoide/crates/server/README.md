@@ -593,32 +593,32 @@ terminal's rights to its remote callers.
 - **Signed answers (relay-proof).** A JSON-RPC POST to `/` whose signature
   verified is answered with `X-Aoide-Answer-Signature`: the identity key signs
   `wire_auth::answer_string` over the request's own signature and nonce, the
-  status and the exact body bytes (`answer_headers`). A signed request is a
-  POST and nothing else: any other method is refused `-32007` before its
-  signature is checked. Everything else is unsigned, and each write site says
-  why in a comment there: an unparsed or unsigned request, every GET (the card
-  included), every refusal (`-32007`, `-32008`, `-32009`, `-32012` and `-32013`), the
-  `config-invalid` answer above, the busy 503s, and the SSE stream. That
-  answer is checked only against the raw charter in force: the charter a node
-  governs is read through the same config that failed to load
-  (`charter::governing`), so there is none to sign under. The door's key
-  signs nothing an unverified sender chose. A key that is not on disk, or will
-  not load, leaves the answer unsigned and audited (`a2a.answer-unsigned`),
-  and the answer path never mints one (`identity::load_existing`). The client
-  refuses an unsigned answer.
-- **Nonces are single-use in any letter case, per key.** `nonce_check` keys both the
-  pubkey and the nonce trimmed and lowercased, the form `canonical_string`
+  status and the exact body bytes (`answer_headers`). A signed request is a POST
+  and nothing else: any other method is refused `-32007` before its signature is
+  checked. Everything else is unsigned, and each write site says why in a
+  comment there: an unparsed or unsigned request, every GET (the card included),
+  every refusal (`-32007`, `-32008`, `-32009`, `-32012` and `-32013`), the
+  `config-invalid` answer above, the busy 503s, and the SSE stream. That answer
+  is checked only against the raw charter in force: the charter a node governs
+  is read through the same config that failed to load (`charter::governing`), so
+  there is none to sign under. The door's key signs nothing an unverified sender
+  chose. A key that is not on disk, or will not load, leaves the answer unsigned
+  and audited (`a2a.answer-unsigned`), and the answer path never mints one
+  (`identity::load_existing`). The client refuses an unsigned answer.
+- **Nonces are single-use in any letter case, per key.** `nonce_check` keys both
+  the pubkey and the nonce trimmed and lowercased, the form `canonical_string`
   signs, into that key's own set (`NONCE_SETS`). A captured request whose nonce
   header is upper-cased is therefore a replay, not a fresh nonce. Each set holds
-  at most `AOIDE_NONCE_PER_KEY` (default 512) unexpired entries; a key at its cap
-  is refused `-32013` over HTTP 503, unsigned, and nothing is recorded. A key's
-  expired entries are dropped when that key is next checked, and no key's flood
-  reaches another key's set.
+  at most `AOIDE_NONCE_PER_KEY` (default 512) unexpired entries; a key at its
+  cap is refused `-32013` over HTTP 503, unsigned, and nothing is recorded. A
+  key's expired entries are dropped when that key is next checked, and no key's
+  flood reaches another key's set.
 - **Start check.** A signed request stamped at or before the door's own start
-  (`serve` and `serve_mail` record it once, before they bind) is refused `-32008`,
-  naming both times. The nonce sets are process-local, so this is what keeps a
-  restart from re-admitting an old frame. A client whose clock runs behind the
-  door's is refused for up to that lag after a restart, and it retries.
+  (`serve` and `serve_mail` record it once, before they bind) is refused
+  `-32008`, naming both times. The nonce sets are process-local, so this is what
+  keeps a restart from re-admitting an old frame. A client whose clock runs
+  behind the door's is refused for up to that lag after a restart, and it
+  retries.
 - **The mail adapter (`aoide mail serve`, H1) — a second LISTENER, and not a
   second door.** `serve_mail` binds `127.0.0.1` and nothing else (no bind
   option, no flag, no env var: the front that faces the mesh is a

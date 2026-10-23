@@ -638,26 +638,26 @@ a2a spawn probe needs `/bin/sh` + `printf`'s byte-exact output.
   The gate never reads the ancestry for this door: a non-approving door parks
   its send before any identity is resolved (`Door::can_approve`,
   `graph/send.rs`).
-- **Nonce sets (P-P4) are per key, process-local, and bounded.** `NONCE_SETS` maps
-  each verifying PUBKEY to its own `BTreeMap<nonce, expiry>`, capped at
+- **Nonce sets (P-P4) are per key, process-local, and bounded.** `NONCE_SETS`
+  maps each verifying PUBKEY to its own `BTreeMap<nonce, expiry>`, capped at
   `AOIDE_NONCE_PER_KEY` (default 512) unexpired entries per key (`nonce_cap`,
   `parse_nonce_cap`). It lives in THIS crate (`a2a.rs`), not
   `aoide-storage::wire_auth`: it is the one piece of P-P4 state with no durable
-  file behind it, so it belongs beside its only consumer (`verify_signed_request`
-  and its rungs). Invariants:
+  file behind it, so it belongs beside its only consumer
+  (`verify_signed_request` and its rungs). Invariants:
   - `verify_signed_request` records a nonce ONLY after every cheaper check,
     including the signature itself, already passed. Don't move the
-    `consume_nonce` call earlier "to fail faster": a forged or garbage nonce must
-    never take a set entry.
+    `consume_nonce` call earlier "to fail faster": a forged or garbage nonce
+    must never take a set entry.
   - Every consumer goes through `consume_nonce`: the registry rung, the charter
-    rung, and `mail_unloadable_declaration`. Don't open-code a `nonce_check` at a
-    new call site. The refusal wording and the `-32013` mapping live in
+    rung, and `mail_unloadable_declaration`. Don't open-code a `nonce_check` at
+    a new call site. The refusal wording and the `-32013` mapping live in
     `consume_nonce`, and the status mapping lives in `refusal_status`.
   - A set is keyed on the VERIFYING PUBKEY, never a node name (#63 P-ID5):
-    `X-Aoide-Node` is outside the canonical string, so a name-keyed set would let
-    a captured request replay under a shared-key twin's name. Both halves are
-    trimmed and lowercased, the form `canonical_string` signs, so a nonce's letter
-    case is not part of its identity.
+    `X-Aoide-Node` is outside the canonical string, so a name-keyed set would
+    let a captured request replay under a shared-key twin's name. Both halves
+    are trimmed and lowercased, the form `canonical_string` signs, so a nonce's
+    letter case is not part of its identity.
   - Only THIS key's expired entries are dropped, and only when that key is
     checked. Never evict an unexpired entry to make room: a full set answers
     `-32013` busy (HTTP 503, unsigned) and records nothing. That is the per-key
@@ -670,10 +670,10 @@ a2a spawn probe needs `/bin/sh` + `printf`'s byte-exact output.
   `verify_signed_request`. A frame stamped at or before it is `-32008`, checked
   after the skew window and before any signature work. Don't drop it on the
   theory that the skew window already covers the restart gap: the sets are
-  cleared by every restart, and the start check is what closes that gap.
-  Tests that drive a REAL door (`raise_mail_adapter`, which calls `serve_mail`)
-  sign only after the clock has left the second the door was listening in, and
-  that helper is where that wait lives. `raise_a2a_door` passes `0` and needs no
+  cleared by every restart, and the start check is what closes that gap. Tests
+  that drive a REAL door (`raise_mail_adapter`, which calls `serve_mail`) sign
+  only after the clock has left the second the door was listening in, and that
+  helper is where that wait lives. `raise_a2a_door` passes `0` and needs no
   wait.
 - `handle_connection` calls `verify_signed_request` exactly ONCE per connection,
   strictly before both the streaming and the plain-JSON-RPC dispatch branches —
