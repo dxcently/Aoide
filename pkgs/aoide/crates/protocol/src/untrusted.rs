@@ -50,6 +50,37 @@ pub fn is_unsafe(c: char) -> bool {
     c.is_control() || is_format(c) || is_invisible(c)
 }
 
+/// The text an audit writer stores for a character no terminal may be handed.
+/// Only what a JSON writer leaves raw is spelled here: DEL, the C1 controls,
+/// `Cf` and the invisible set. A C0 control is already a JSON escape (`\u001b`,
+/// `\n`) and stays one, so a decoded value keeps the caller's text for it. The
+/// spelling is ASCII text, so the JSON writer escapes its backslash too: the
+/// raw line reads `\\u{202e}`, and a decoder hands back the visible `\u{202e}`,
+/// never the character itself.
+pub fn escape_for_log(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for c in text.chars() {
+        if u32::from(c) >= 0x7f && is_unsafe(c) {
+            out.extend(c.escape_unicode());
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
+/// [`escape_for_log`] over every string a JSON value holds, for a writer that
+/// serialises a `serde_json::Value` rather than a typed record.
+pub fn escape_for_log_value(value: &serde_json::Value) -> serde_json::Value {
+    use serde_json::Value;
+    match value {
+        Value::String(s) => Value::String(escape_for_log(s)),
+        Value::Array(items) => Value::Array(items.iter().map(escape_for_log_value).collect()),
+        Value::Object(map) => Value::Object(map.iter().map(|(k, v)| (k.clone(), escape_for_log_value(v))).collect()),
+        other => other.clone(),
+    }
+}
+
 /// Characters that render as NOTHING and are not `Cf` — the fillers a line can
 /// be padded with, and the variation selectors that attach invisibly to the
 /// glyph before them. They cannot reorder a line the way a bidi override can,

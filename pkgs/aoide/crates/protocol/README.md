@@ -77,8 +77,11 @@ other crate in this workspace sits above.
   value); `append_audit` structurally forbids `untrusted_data` on that one
   class, stripping it (with an `eprintln!`, never a panic — an audit call
   must never take its caller down) rather than trusting every call site to
-  never set it. `append_audit` also clamps `AuditRecord.message` to 512
-  bytes on a UTF-8 boundary, appending a truncation marker when it clamps:
+  never set it. `append_audit` escapes every string field first (DEL, C1,
+  `Cf` and the invisible set become `\u{hex}` text,
+  `untrusted::escape_for_log`), then clamps the escaped `AuditRecord.message`
+  to 512 bytes on a UTF-8 boundary, appending a truncation marker when it
+  clamps:
   the log records that an operation happened, not what it printed, so a
   command whose outcome message is also its rendered output (`aoide mail
   show`'s whole letter) never leaves a second, unbounded copy sitting in

@@ -2006,7 +2006,9 @@ fn append_own_log(secrets_home: &Path, record: &Value) -> std::io::Result<()> {
         std::fs::create_dir_all(parent)?;
     }
     let mut f = std::fs::OpenOptions::new().create(true).append(true).open(path)?;
-    let mut line = record.to_string();
+    // Escaped here for every caller, as `aoide_protocol::audit::append_audit`
+    // escapes the shared log.
+    let mut line = aoide_protocol::untrusted::escape_for_log_value(record).to_string();
     line.push('\n');
     f.write_all(line.as_bytes())
 }
@@ -2063,21 +2065,6 @@ fn append_events_feed(events_path: &Path, payload: &Value) {
     aoide_protocol::feed::FeedWriter::new(events_path.to_path_buf(), EVENTS_MAX_BYTES, EVENTS_CREATE_MODE).append(payload);
 }
 
-/// A wire text as an audit line holds it: each control, format and invisible
-/// character spelled `\u{hex}`, so no terminal that reads the log is rewritten
-/// by what a requester sent.
-fn audit_visible(text: &str) -> String {
-    let mut out = String::with_capacity(text.len());
-    for c in text.chars() {
-        if aoide_protocol::untrusted::is_unsafe(c) {
-            out.push_str(&format!("\\u{{{:x}}}", u32::from(c)));
-        } else {
-            out.push(c);
-        }
-    }
-    out
-}
-
 /// Write BOTH audit lines for one resolve attempt (module doc). Name-only,
 /// by construction: nothing passed here is ever the secret's value.
 /// **`peer_uid` (task #73) rides alongside the self-asserted `consumer`
@@ -2095,9 +2082,6 @@ fn audit_resolve(
     reason: Option<&String>,
     peer_uid: Option<&PeerUser>,
 ) {
-    let (secret, consumer) = (audit_visible(secret), audit_visible(consumer));
-    let argv0 = argv0.map(audit_visible);
-    let reason = reason.map(String::as_str).map(audit_visible);
     let record = json!({
         "ts": aoide_protocol::audit::now_secs(),
         "secret": secret,
@@ -5107,6 +5091,64 @@ mod tests {
                 .filter(|c| *c != '\n' && aoide_protocol::untrusted::is_unsafe(*c))
                 .collect();
             assert!(raw.is_empty(), "raw unsafe characters in {}: {raw:?}", log.display());
+        }
+        std::fs::remove_dir_all(&home).ok();
+    }
+
+    /// Each wire writer the review names (approve, dismiss, put and the admin
+    /// gate) writes a planted bidi override and C1 control escaped, in both logs.
+    #[test]
+    fn every_wire_writer_escapes_a_planted_bidi_override_and_c1_control() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let planted = "\u{202e}\u{9b}";
+        let cases = [
+            ("approve", format!(r#"{{"op":"approve","id":"x{planted}","totp":"123456"}}"#)),
+            ("dismiss", format!(r#"{{"op":"dismiss","id":"y{planted}"}}"#)),
+            ("put", format!(r#"{{"op":"put","secret":"t{planted}","value":"v"}}"#)),
+            ("admin", format!(r#"{{"op":"admin","command":"z{planted}"}}"#)),
+        ];
+        let mut leaks = Vec::new();
+        for (label, line) in cases {
+            let home = tmp_home(&format!("audit-escape-{label}"));
+            seed(&home, &[Policy::new("t", "scratch", "stored-value")]);
+            let parked = ParkRegistry::new();
+            let reply = with_redirected_audit_log(&home, || {
+                handle_line(&home, &home.join("events.jsonl"), &line, &parked, &mut Vec::new(), None)
+            });
+            assert_eq!(reply["ok"], false, "{label}: {reply}");
+            for log in [home.join("mirrored-aoide-log"), own_audit_log_path(&home)] {
+                let text = std::fs::read_to_string(&log).unwrap_or_default();
+                assert!(!text.is_empty(), "{label}: the refusal is audited to {}", log.display());
+                for raw in ['\u{202e}', '\u{9b}'] {
+                    if text.contains(raw) {
+                        leaks.push(format!("{label}: a raw {raw:?} reached {}: {text}", log.display()));
+                    }
+                }
+            }
+            std::fs::remove_dir_all(&home).ok();
+        }
+        assert!(leaks.is_empty(), "the log holds raw bytes a terminal would obey:\n{}", leaks.join("\n"));
+    }
+
+    /// The park's origin (comm, username, hostname) is process-controlled text:
+    /// a planted bidi override or C1 control in it reaches both logs escaped.
+    #[test]
+    fn a_park_writes_its_origin_escaped_in_both_logs() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let home = tmp_home("audit-escape-origin");
+        let origin = AskOrigin {
+            username: Some("khoa\u{202e}".to_string()),
+            pid: Some(42),
+            comm: Some("psql\u{9b}".to_string()),
+            hostname: Some("box\u{202e}".to_string()),
+        };
+        with_redirected_audit_log(&home, || audit_park(&home, "1", "t", "m", None, None, &origin));
+        for log in [home.join("mirrored-aoide-log"), own_audit_log_path(&home)] {
+            let text = std::fs::read_to_string(&log).unwrap_or_default();
+            assert!(!text.is_empty(), "the park is audited to {}", log.display());
+            for raw in ['\u{202e}', '\u{9b}'] {
+                assert!(!text.contains(raw), "a raw {raw:?} reached {}: {text}", log.display());
+            }
         }
         std::fs::remove_dir_all(&home).ok();
     }

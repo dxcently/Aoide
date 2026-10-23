@@ -9,6 +9,7 @@ use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
+use crate::untrusted::escape_for_log;
 
 /// Default audit-log path (mirrors `aoide.auditLog`, BUILD.md option table).
 ///
@@ -285,32 +286,32 @@ fn clamp_stored_message(msg: &str) -> Option<String> {
 /// its own outcome message before logging it. Only the STORED copy is
 /// bounded — the caller's own `Outcome` is never touched, so human and
 /// JSON output keep printing in full.
+///
+/// **Every string field is escaped** by [`escape_for_log`] before the write:
+/// a bidi override or C1 control in the command, status, message or forwarded
+/// text is stored as visible `\u{hex}` text, and no caller can skip it. The
+/// escape runs before the clamp, so the bound counts the text that is stored.
 pub fn append_audit(log_path: &Path, record: &AuditRecord) -> std::io::Result<()> {
     let strip_secret = record.class == EventClass::Secret && record.untrusted_data.is_some();
-    let clamped_message = clamp_stored_message(&record.message);
-
-    let owned;
-    let record: &AuditRecord = if strip_secret || clamped_message.is_some() {
-        if strip_secret {
-            eprintln!(
-                "[aoide/protocol] BUG: an EventClass::Secret audit record carried untrusted_data — stripping it before writing (command: {})",
-                record.command
-            );
-        }
-        owned = AuditRecord {
-            message: clamped_message.unwrap_or_else(|| record.message.clone()),
-            untrusted_data: if strip_secret { None } else { record.untrusted_data.clone() },
-            ..record.clone()
-        };
-        &owned
-    } else {
-        record
+    if strip_secret {
+        eprintln!(
+            "[aoide/protocol] BUG: an EventClass::Secret audit record carried untrusted_data — stripping it before writing (command: {})",
+            record.command
+        );
+    }
+    let message = escape_for_log(&record.message);
+    let record = AuditRecord {
+        command: escape_for_log(&record.command),
+        status: escape_for_log(&record.status),
+        message: clamp_stored_message(&message).unwrap_or(message),
+        untrusted_data: if strip_secret { None } else { record.untrusted_data.as_deref().map(escape_for_log) },
+        ..record.clone()
     };
 
     if let Some(parent) = log_path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let mut line = serde_json::to_string(record)
+    let mut line = serde_json::to_string(&record)
         .unwrap_or_else(|e| format!("{{\"ts\":{},\"error\":\"{e}\"}}", record.ts));
     line.push('\n');
     let mut f = OpenOptions::new()
@@ -623,5 +624,28 @@ mod tests {
         let expected = std::path::Path::new("/home").join(&name);
         assert_eq!(user_home(&name), expected);
         with_home_env(Some("/home/ignored"), Some(&name), || assert_eq!(aoide_home(), expected));
+    }
+
+    /// A bidi override (U+202E) and a C1 control (U+009B) in any string field
+    /// reach the log as escapes, not raw. The JSON writer leaves both raw, so
+    /// the writer escapes them for every caller.
+    #[test]
+    fn append_audit_escapes_a_bidi_override_and_a_c1_control_in_every_string_field() {
+        let log = tmp_log("escape-every-field");
+        let record = AuditRecord {
+            ts: 1,
+            door: Door::Cli,
+            class: EventClass::Notification,
+            command: "cmd\u{202e}".to_string(),
+            status: "ok\u{9b}".to_string(),
+            message: "msg\u{202e}\u{9b}".to_string(),
+            untrusted_data: Some("data\u{9b}".to_string()),
+        };
+        append_audit(&log, &record).unwrap();
+        let text = std::fs::read_to_string(&log).unwrap();
+        for raw in ['\u{202e}', '\u{9b}'] {
+            assert!(!text.contains(raw), "a raw {raw:?} reached the log: {text}");
+        }
+        assert!(text.contains(r"\u{202e}") && text.contains(r"\u{9b}"), "the escapes are written: {text}");
     }
 }

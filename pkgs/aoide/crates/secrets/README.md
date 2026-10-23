@@ -907,8 +907,9 @@ file live.
 **THREE destinations as of P-G4 (task #77 — the `ProtectHome` fix, see
 below).** `emit_notify` writes the SAME `payload` verbatim to all three: the
 broker's own structured `<secrets_home>/audit.log` (`append_own_log` —
-`tail -f <secrets_home>/audit.log` shows the five event shapes above exactly
-as written), the mirrored aoide log (`EventClass::Secret`, `command:
+`tail -f <secrets_home>/audit.log` shows the five event shapes above as
+written, each DEL, C1, `Cf` or invisible character spelled `\u{hex}`), the
+mirrored aoide log (`EventClass::Secret`, `command:
 "secrets.notify"`, `status` = the event kind, `message` = the same payload
 JSON stringified — `tail -f ~/Aoide/log | grep secrets.notify` is the
 cross-host-readable audit-trail half, UNCHANGED by P-G4), and NOW the

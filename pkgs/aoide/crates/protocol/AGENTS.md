@@ -126,6 +126,11 @@
   `resolve_executable_on_path` returns the spelling it ASKED for while
   `read_dir` reports the spelling on disk, so one file can be two
   case-differing strings.
+- **`audit::append_audit` is the one writer of the shared audit log, and it
+  escapes every string field.** `untrusted::escape_for_log` spells DEL, C1,
+  `Cf` and the invisible set as `\u{hex}` before serde_json would write them
+  raw; C0 stays serde's own escape. A second writer of the same log calls
+  `escape_for_log_value` first, as `aoide-secrets`' `append_own_log` does.
 - **`feed`'s identity question has ONE authority, and it is crate-visible
   for that reason.** `path_identity` returns one opaque, comparable
   `PathIdentity` (`(dev, ino)` on Unix, the native 128-bit id on Windows) and

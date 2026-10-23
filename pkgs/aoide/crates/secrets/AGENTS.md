@@ -42,13 +42,14 @@
   the wire reply. Don't add a second audit call on the client side "for
   completeness"; it would double-log every resolve and the client doesn't
   have the policy-gate reasoning to log honestly anyway.
-- **Every wire text an audit line holds goes through `audit_visible`.**
-  `audit_resolve` writes the secret, consumer, argv0 and reason with each
-  control, format and invisible character spelled `\u{hex}`, in both the
-  broker's own log and the mirrored aoide log. Both are JSON lines, and
-  serde_json escapes only C0 controls, so a format character such as U+202E
-  would otherwise go raw into the file. Don't write a wire field to an audit
-  line without that escape.
+- **The audit writers escape every string, so a caller cannot skip it.**
+  `aoide_protocol::audit::append_audit` (the mirrored aoide log) and
+  `append_own_log` (the broker's own `audit.log`) both spell DEL, the C1
+  controls, `Cf` and the invisible set as `\u{hex}` before the write
+  (`aoide_protocol::untrusted::escape_for_log` and `escape_for_log_value`).
+  serde_json would otherwise write those characters raw, so a U+202E in a
+  secret name, consumer, argv0 or reason stays text in the file. Don't add a
+  writer that bypasses these two.
 - **`EventClass::Secret` (the mirrored aoide-log event) forbids
   `untrusted_data`** — enforced in `aoide_protocol::audit::append_audit`
   itself (strips it, `eprintln!`s), not only by this crate's discipline.
