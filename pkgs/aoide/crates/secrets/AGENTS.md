@@ -37,11 +37,11 @@
   resolve` extracts it straight out of the reply's `serde_json::Value`
   into a local `String`, never a struct field.
 - **Audit happens BROKER-SIDE ONLY** (`broker::audit_resolve`), on every
-  resolve attempt, granted or denied. The CLIENT (`client.rs`) never calls
-  `aoide_protocol::audit` itself — it only ever learns granted/denied from
-  the wire reply. Don't add a second audit call on the client side "for
-  completeness"; it would double-log every resolve and the client doesn't
-  have the policy-gate reasoning to log honestly anyway.
+  resolve attempt, with the status words CONTRACTS.md lists under the approve
+  reply. The CLIENT (`client.rs`) never calls `aoide_protocol::audit` itself —
+  it only ever sees the wire reply. Don't add a second audit call on the
+  client side "for completeness"; it would double-log every resolve and the
+  client doesn't have the policy-gate reasoning to log honestly anyway.
 - **The audit writers escape every string, so a caller cannot skip it.**
   `aoide_protocol::audit::append_audit` (the mirrored aoide log) and
   `append_own_log` (the broker's own `audit.log`) both spell DEL, the C1
@@ -493,8 +493,9 @@
   and sends it straight down that channel — never holding it in the
   registry, never in `approve`'s own wire reply back to the operator. The
   parked connection writes the reply, then reports how the write went down a
-  receipt that `approve` waits on for at most 11 s, with no lock held. That
-  report decides the audit status (the approve reply in CONTRACTS.md).
+  receipt that `approve` waits on with no lock held and no timer of its own:
+  the parked write's reply budget (10 s) bounds that wait. That report decides
+  the audit status (the approve reply in CONTRACTS.md).
   Don't add a "cache the value once fetched, in case the connection reads
   slowly" optimization to `ParkedAsk` — the value must exist ONLY inside
   the one send/receive handoff, same as everywhere else in this crate.
@@ -585,12 +586,13 @@
     uid holds.
   - Same-uid holding (accepted, ruling 111): a process at the person's own
     uid that sends a complete request inside each read timeout keeps its
-    connection for as long as it sends. Sixteen of them refuse the person's
-    own `exec`, `pending` and `approve` calls with `this uid already holds its
-    16 connections; close one and retry`, approve included, while they run.
-    The person finds the holder with `ss -xp`, which names the process behind
-    each unix socket, and stops it, which frees its slots. Same-uid code can
-    already stop the conductor and the terminal (ruling 29).
+    connection for as long as it sends. An idle cap would be a made-up limit
+    (ruling 72), and it is beaten by sending sooner. Sixteen of them refuse
+    the person's own `exec`, `pending` and `approve` calls with `this uid
+    already holds its 16 connections; close one and retry`, approve included,
+    while they run. The person finds the holder with `ss -xp`, which names the
+    process behind each unix socket, and stops it, which frees its slots.
+    Same-uid code can already stop the conductor and the terminal (ruling 29).
   - 250 ms hang-up probe: one `poll(2)` per parked ask every 250 ms, which is
     also the detection latency. A client that only half-closes its write side
     is not treated as gone, so its park stays until the timer. Windows has no

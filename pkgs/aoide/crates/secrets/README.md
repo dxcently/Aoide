@@ -599,12 +599,12 @@ operator -> aoide secrets pending                          (a SEPARATE connectio
 
        -> valid, and the re-gate allows: the approve sends the value down
           the ORIGINAL connection, which writes its reply, then reports how
-          the write went. The approve waits at most 11 s for that report
-          (the 10 s reply budget and a 1 s allowance), holding no lock.
+          the write went. The approve waits at most the reply budget (10 s)
+          for that report, holding no lock.
             all bytes written -> {"ok":true}; both audit lines "granted"
             no byte written   -> "undelivered"
             part written      -> "partial", with "N of M bytes"
-            no report in time -> "unconfirmed"
+            parked side died  -> "unconfirmed" (no receipt: it was dropped)
 
        <- the agent's ORIGINAL resolve call returns
           {"ok":true,"value":"<value>"} only when every byte of it was
@@ -705,9 +705,10 @@ A process at the person's own uid that keeps sending complete requests, each
 inside the read timeout, is an accepted residual (ruling 111): sixteen of them
 refuse the person's own `exec`, `pending` and `approve` calls with `this uid
 already holds its 16 connections; close one and retry`, approve included, for
-as long as they run. The person finds the holder with `ss -xp`, which names the
-process behind each unix socket, and stops it. Same-uid code can already stop
-the conductor and the terminal (ruling 29).
+as long as they run. An idle cap would be a made-up limit (ruling 72), and it
+is beaten by sending sooner. The person finds the holder with `ss -xp`, which
+names the process behind each unix socket, and stops it. Same-uid code can
+already stop the conductor and the terminal (ruling 29).
 
 **Review fix, same commit as the fix below in git history: two
 read-modify-write sections the serial accept loop used to serialize for
@@ -2413,9 +2414,9 @@ the same commit as any change.
   value straight out of that `Value` into a local `String`. The enrolled
   TOTP secret follows the same rule from a different angle: `enroll::run`
   prints it directly to stdout, never through an `Outcome`.
-- Audit happens BROKER-SIDE ONLY, on every resolve attempt (granted or
-  denied) — never by the client, which only ever learns granted/denied
-  from the wire reply.
+- Audit happens BROKER-SIDE ONLY, on every resolve attempt, with the status
+  words CONTRACTS.md lists under the approve reply — never by the client,
+  which only ever sees the wire reply.
 - `EventClass::Secret` (the mirror to the aoide audit log) structurally
   forbids `untrusted_data` — enforced in `aoide_protocol::audit::
   append_audit`, not only by convention at the call site.

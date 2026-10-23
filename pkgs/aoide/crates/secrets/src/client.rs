@@ -2662,6 +2662,9 @@ mod tests {
         }
         let body = text.strip_prefix("\\u{")?;
         let raw = &body[..body.find('}')?];
+        if raw.starts_with('_') {
+            return None;
+        }
         let digits: String = raw.chars().filter(|&c| c != '_').collect();
         if digits.len() > 6 {
             return None;
@@ -2844,7 +2847,7 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(
             dir.join("escape.rs"),
-            "let tab = \"aoide secrets exec --totp\\t123456 -- psql\";\nlet newline = \"aoide secrets exec --totp\\n123456 -- psql\";\nlet hex = \"aoide secrets exec --totp\\x20123456 -- psql\";\nlet upper = \"aoide secrets exec --totp\\x0A123456 -- psql\";\nlet vt = \"aoide secrets exec --totp\\x0B123456 -- psql\";\nlet ff = \"aoide secrets exec --totp\\x0C123456 -- psql\";\nlet cr = \"aoide secrets exec --totp\\x0D123456 -- psql\";\nlet padded = \"aoide secrets exec --totp\\u{0009}123456 -- psql\";\nlet padded_lower = \"aoide secrets exec --totp\\u{000a}123456 -- psql\";\nlet padded_underscored = \"aoide secrets exec --totp\\u{00_0a}123456 -- psql\";\n",
+            "let tab = \"aoide secrets exec --totp\\t123456 -- psql\";\nlet newline = \"aoide secrets exec --totp\\n123456 -- psql\";\nlet hex = \"aoide secrets exec --totp\\x20123456 -- psql\";\nlet upper = \"aoide secrets exec --totp\\x0A123456 -- psql\";\nlet vt = \"aoide secrets exec --totp\\x0B123456 -- psql\";\nlet ff = \"aoide secrets exec --totp\\x0C123456 -- psql\";\nlet cr = \"aoide secrets exec --totp\\x0D123456 -- psql\";\nlet padded = \"aoide secrets exec --totp\\u{0009}123456 -- psql\";\nlet padded_lower = \"aoide secrets exec --totp\\u{000a}123456 -- psql\";\nlet padded_underscored = \"aoide secrets exec --totp\\u{00_0a}123456 -- psql\";\nlet leading_underscored = \"aoide secrets exec --totp\\u{_0a}123456 -- psql\";\n",
         )
         .unwrap();
         let mut hits = Vec::new();
@@ -2853,6 +2856,7 @@ mod tests {
         for line in 1..=10 {
             assert!(hits.iter().any(|h| h.starts_with(&format!("escape.rs:{line}:"))), "an escape after --totp must be flagged on line {line}: {hits:?}");
         }
+        assert!(!hits.iter().any(|h| h.starts_with("escape.rs:11:")), "an underscore right after the brace is not an escape: {hits:?}");
     }
 
     /// A test module ends at its first column-zero `}`, a comment after the brace

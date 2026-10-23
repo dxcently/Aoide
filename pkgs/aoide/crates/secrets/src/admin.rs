@@ -97,7 +97,7 @@ fn policy_io_error(home: &Path, err: std::io::Error) -> String {
 fn check_plain(what: &str, text: &str) -> Result<(), String> {
     if text.chars().any(aoide_protocol::untrusted::is_unsafe) {
         return Err(format!(
-            "refused: the {what} holds a control or invisible character. A {what} is shown to a person exactly as written, so send it as plain text"
+            "refused: the {what} holds a control or invisible character. A {what} is shown to a person, and such a character can make it read as other text, so send it as plain text"
         ));
     }
     Ok(())

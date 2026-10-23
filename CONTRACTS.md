@@ -6609,7 +6609,8 @@ SAME requesting connection, before ever blocking on the wait:
 `expiresAt` is the unix time the park ends, `now` plus `timeoutSecs`. A broker
 that predates it sends the line without the field, and a caller treats the
 field as optional. Then the final reply (granted/denied/dismissed/timed-out)
-comes as described below. Without this line a caller has no way to learn its own
+comes as described below, and the audit's status words are listed with the
+approve reply. Without this line a caller has no way to learn its own
 ask's id short of a separate `pending` call raced against the park — `aoide
 secrets exec` prints it to STDERR as `parked as ask <id> — complete with:
 aoide secrets approve <id>  (or dismiss <id>); times out in <N>s` so an
@@ -6643,10 +6644,11 @@ default park cap can carry up to about 384 KiB of consumer, reason and argv0
 10 s: about 39 KiB a second.
 
 A process at the person's own uid that keeps sending complete requests, each
-inside the read timeout, is an accepted residual (ruling 111). Sixteen of them
-refuse the person's own `exec`, `pending` and `approve` calls with
-`"this uid already holds its 16 connections; close one and retry"` for as long
-as they run, approve included. The person finds the holder with `ss -xp`,
+inside the read timeout, is an accepted residual (ruling 111). An idle cap
+would be a made-up limit (ruling 72), and it is beaten by sending sooner.
+Sixteen of them refuse the person's own `exec`, `pending` and `approve` calls
+with `"this uid already holds its 16 connections; close one and retry"` for as
+long as they run, approve included. The person finds the holder with `ss -xp`,
 which names the process behind each unix socket, and stops it. Same-uid code
 can already stop the conductor and the terminal (ruling 29).
 
@@ -6757,8 +6759,8 @@ budget's refusal (`"totp code invalid or expired"`,
 ...). This reply NEVER carries a `value` field — the value only ever
 reaches the ORIGINAL parked connection's own `resolve` reply. That connection
 writes the reply itself and reports how the write went. This reply waits at
-most 11 s for that report (the 10 s reply budget and a 1 s allowance), holding
-no lock. The reply is `{"ok":true}` only when every byte was written.
+most the reply budget (10 s) for that report, holding no lock. The reply is
+`{"ok":true}` only when every byte was written.
 Otherwise it is `"ok":false`, and the audit line's `status` says what the
 write did:
 
@@ -6770,13 +6772,18 @@ write did:
   The `error` is `"approved, but the reply was cut after N of M bytes: part
   of the value may have reached the client, so treat it as exposed"`, and
   the line says `N of M bytes`. The value counts as exposed.
-- `unconfirmed`: no report came within the wait. The `error` is `"approved,
-  but the client's reply was not confirmed in time: the value may have reached
-  the client, so treat it as exposed"`.
+- `unconfirmed`: the parked connection ended before it reported how the write
+  went, which happens only when it died: its receipt was dropped unsent. The
+  `error` is `"approved, but the parked connection ended before it reported how
+  the reply went: the value may have reached the client, so treat it as
+  exposed"`.
 
 `granted` is the only status with `"granted":true`. The parked resolve's own
-audit line carries the same `status`. `denied` is for a refusal only. No
-completed notice is sent unless the status is `granted`.
+audit line carries the same `status` (granted, partial or undelivered). A park
+that ends with no approve writes one of three words there instead: `timed-out`
+(its timer ended it), `hung-up` (its client closed the socket first) or
+`dismissed` (a `dismiss` ended it). `denied` is for a refusal only. No completed
+notice is sent unless the status is `granted`.
 
 On a pipe, `secrets approve` reads the code as one stdin line of at most 256
 bytes, newline excluded. A line past 256 bytes is refused,

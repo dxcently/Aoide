@@ -1164,14 +1164,14 @@ fn handle_resolve(
             };
             match outcome {
                 WaitResult::Approved(value, receipt) => {
-                    // This write decides the grant. The audit line and the
-                    // approver's answer both carry how it went, never a poll
-                    // taken before it.
+                    // The reply's write decides the grant. The receipt goes out
+                    // right after it, so the approver waits on that write and
+                    // nothing else; the audit lines follow.
                     let reply = json!({"ok": true, "value": value});
                     let delivery = write_json_line(interim_out, &reply);
+                    let _ = receipt.send(delivery);
                     let (status, reason) = grant_status(delivery);
                     audit_resolve(secrets_home, &secret, &consumer, argv0.as_deref(), status, reason.as_ref(), peer_uid);
-                    let _ = receipt.send(delivery);
                     Answer { reply, delivery: Some(delivery) }
                 }
                 WaitResult::Denied(reason) => {
@@ -1183,17 +1183,17 @@ fn handle_resolve(
                     // holding a valid socket connection can dismiss, not
                     // necessarily "an operator" in any privileged sense.
                     let reason = "the pending TOTP ask was dismissed before a code was provided".to_string();
-                    audit_resolve(secrets_home, &secret, &consumer, argv0.as_deref(), Status::Denied, Some(&reason), peer_uid);
+                    audit_resolve(secrets_home, &secret, &consumer, argv0.as_deref(), Status::Dismissed, Some(&reason), peer_uid);
                     Answer::plain(json!({"ok": false, "error": reason}))
                 }
                 WaitResult::HungUp => {
                     let reason = "the client hung up while its ask was parked, so the ask was dropped".to_string();
-                    audit_resolve(secrets_home, &secret, &consumer, argv0.as_deref(), Status::Denied, Some(&reason), peer_uid);
+                    audit_resolve(secrets_home, &secret, &consumer, argv0.as_deref(), Status::HungUp, Some(&reason), peer_uid);
                     Answer::plain(json!({"ok": false, "error": reason}))
                 }
                 WaitResult::TimedOut => {
                     let reason = park_timeout_message(&secret, timeout.as_secs());
-                    audit_resolve(secrets_home, &secret, &consumer, argv0.as_deref(), Status::Denied, Some(&reason), peer_uid);
+                    audit_resolve(secrets_home, &secret, &consumer, argv0.as_deref(), Status::TimedOut, Some(&reason), peer_uid);
                     emit_notify(
                         secrets_home,
                         events_path,
@@ -1378,20 +1378,14 @@ thread_local! {
 const UNDELIVERED: &str = "approved, but nothing reached the client: no byte \
     of the reply was written, so the value was not handed over";
 
-/// What an approver is told when the parked connection did not report how its
-/// reply went in time, so the value may have reached the client.
-const UNCONFIRMED: &str = "approved, but the client's reply was not confirmed \
-    in time: the value may have reached the client, so treat it as exposed";
+/// What an approver is told when the parked connection ended before it
+/// reported how its reply went: the value may have reached the client.
+const UNCONFIRMED: &str = "approved, but the parked connection ended before it \
+    reported how the reply went: the value may have reached the client, so \
+    treat it as exposed";
 
-/// How long an approver waits past [`WRITE_TIMEOUT`] for the parked
-/// connection's receipt. The reply's budget starts once that connection has
-/// woken and written the reply, after the approver began waiting. A wait of
-/// exactly `WRITE_TIMEOUT` would give up at the instant a budget-cut reply is
-/// cut, and report it unconfirmed instead of partial.
-const RECEIPT_ALLOWANCE: std::time::Duration = std::time::Duration::from_secs(1);
-
-/// The status word an audit line carries: what the reply's write did, or a
-/// refusal.
+/// The status word an audit line carries: what the reply's write did, what
+/// ended a park with no value, or a refusal.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Status {
     Granted,
@@ -1399,6 +1393,9 @@ enum Status {
     Undelivered,
     Unconfirmed,
     Denied,
+    TimedOut,
+    HungUp,
+    Dismissed,
 }
 
 impl Status {
@@ -1409,6 +1406,9 @@ impl Status {
             Status::Undelivered => "undelivered",
             Status::Unconfirmed => "unconfirmed",
             Status::Denied => "denied",
+            Status::TimedOut => "timed-out",
+            Status::HungUp => "hung-up",
+            Status::Dismissed => "dismissed",
         }
     }
 }
@@ -1523,14 +1523,17 @@ fn handle_approve(
     match fetch_secret_value(secrets_home, &secret) {
         Ok(value) => {
             let (receipt, answer) = std::sync::mpsc::channel();
-            // The parked connection writes the reply, then reports how the
-            // write went. `ask` is owned here, so no registry lock is held
-            // across this wait, which lasts at most WRITE_TIMEOUT plus
-            // RECEIPT_ALLOWANCE. A parked connection that is already gone was
-            // handed nothing.
+            // The parked connection writes the reply, then sends how the write
+            // went. `ask` is owned here, so no registry lock is held while this
+            // waits. The wait has no timer of its own: the parked side's trip
+            // from the outcome, through the reply write (one WRITE_TIMEOUT
+            // deadline, write_json_line), to the receipt ends within the reply
+            // budget. A parked connection that is already gone was handed
+            // nothing.
             let (status, reason) = if ask.send(ParkOutcome::Approved(value, receipt)) {
-                match answer.recv_timeout(WRITE_TIMEOUT + RECEIPT_ALLOWANCE) {
+                match answer.recv() {
                     Ok(delivery) => grant_status(delivery),
+                    // The receipt was dropped unsent: the parked side died.
                     Err(_) => (Status::Unconfirmed, Some(UNCONFIRMED.to_string())),
                 }
             } else {
@@ -5910,9 +5913,186 @@ mod tests {
         );
         let lines = own_log_lines(&home);
         assert!(
-            lines.iter().any(|l| l["status"] == "denied" && l["reason"].as_str().is_some_and(|r| r.contains("hung up"))),
+            lines.iter().any(|l| l["status"] == "hung-up" && l["reason"].as_str().is_some_and(|r| r.contains("hung up"))),
             "{lines:?}"
         );
+        std::fs::remove_dir_all(&home).ok();
+    }
+
+    /// A reply sink that takes `takes` bytes of the reply, then stalls for
+    /// `stall` and fails: the reply's budget runs out while its reader is stuck.
+    /// The interim line, write 0, goes through whole.
+    struct StalledReplySink {
+        writes: usize,
+        takes: usize,
+        stall: std::time::Duration,
+    }
+
+    impl Write for StalledReplySink {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            let made = self.writes;
+            self.writes += 1;
+            match made {
+                0 => Ok(buf.len()),
+                1 => Ok(buf.len().min(self.takes)),
+                _ => {
+                    std::thread::sleep(self.stall);
+                    Err(std::io::ErrorKind::TimedOut.into())
+                }
+            }
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl BoundedWrite for StalledReplySink {
+        fn bound_writes(&mut self, _budget: std::time::Duration) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl PeerHangUp for StalledReplySink {
+        fn hung_up(&self) -> bool {
+            false
+        }
+    }
+
+    /// The reply's reader stalls past the reply budget, then the write fails
+    /// after five bytes. The reply was cut at its budget, so both audit lines
+    /// say partial. The approver waits for the report however long the parked
+    /// side takes, so a slow but complete trip is never read as unconfirmed.
+    #[test]
+    fn a_reply_cut_at_its_budget_reads_partial_on_both_audit_lines() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let home = tmp_home("cut-at-budget");
+        let secret = seed_enrolled(&home, Policy::new("t", "scratch", "stored-value"));
+        let events = home.join("events.jsonl");
+        let parked = ParkRegistry::new();
+        let approved = with_redirected_audit_log(&home, || {
+            std::thread::scope(|s| {
+                let resolve = s.spawn(|| {
+                    let mut sink = StalledReplySink { writes: 0, takes: 5, stall: WRITE_TIMEOUT * 3 };
+                    handle_line(&home, &events, r#"{"op":"resolve","secret":"t","consumer":"m"}"#, &parked, &mut sink, None)
+                });
+                let id = parked_id(&parked);
+                let req = json!({"id": id, "totp": code_for_now(&secret, NOW)});
+                let approved = handle_approve(&home, &events, &parked, &req, None, NOW);
+                resolve.join().unwrap();
+                approved
+            })
+        });
+        let lines = own_log_lines(&home);
+        assert!(lines.iter().any(|l| l["op"] == "approve" && l["status"] == "partial"), "the approve line says partial: {lines:?}");
+        assert!(lines.iter().any(|l| l["op"].is_null() && l["status"] == "partial"), "the resolve line says partial: {lines:?}");
+        assert!(approved["error"].as_str().unwrap_or_default().contains("the reply was cut after 5 of"), "{approved}");
+        std::fs::remove_dir_all(&home).ok();
+    }
+
+    /// A parked side that takes the outcome and drops it unanswered takes its
+    /// receipt with it. The approver reads that as unconfirmed: the parked side
+    /// ended before it reported how its reply went.
+    #[test]
+    fn a_parked_side_dropped_with_no_receipt_reads_unconfirmed() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let home = tmp_home("dropped-receipt");
+        let secret = seed_enrolled(&home, Policy::new("t", "scratch", "stored-value"));
+        let events = home.join("events.jsonl");
+        let parked = ParkRegistry::new();
+        let (id, rx) = parked.park("t", "m", NOW);
+        let parked_side = std::thread::spawn(move || {
+            let outcome = rx.recv_timeout(std::time::Duration::from_secs(5));
+            let took = matches!(outcome, Ok(ParkOutcome::Approved(..)));
+            drop(outcome);
+            took
+        });
+        let req = json!({"id": id, "totp": code_for_now(&secret, NOW)});
+        let reply = with_redirected_audit_log(&home, || handle_approve(&home, &events, &parked, &req, None, NOW));
+        assert!(parked_side.join().unwrap(), "the parked side takes the approved outcome");
+        assert_eq!(reply["error"], UNCONFIRMED, "{reply}");
+        let lines = own_log_lines(&home);
+        assert!(lines.iter().any(|l| l["op"] == "approve" && l["status"] == "unconfirmed"), "{lines:?}");
+        std::fs::remove_dir_all(&home).ok();
+    }
+
+    /// A park whose timer ends with no approve is audited as timed-out: the
+    /// timer ended it, so the line does not say denied.
+    #[test]
+    fn a_parked_resolve_that_times_out_is_audited_timed_out() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved = std::env::var(crate::park::PARK_TIMEOUT_ENV).ok();
+        std::env::set_var(crate::park::PARK_TIMEOUT_ENV, "1");
+        let home = tmp_home("timed-out-word");
+        seed_enrolled(&home, Policy::new("t", "scratch", "stored-value"));
+        let events = home.join("events.jsonl");
+        let parked = ParkRegistry::new();
+        let reply = with_redirected_audit_log(&home, || {
+            handle_line(&home, &events, r#"{"op":"resolve","secret":"t","consumer":"m"}"#, &parked, &mut ReplySink { writes: 0, takes: 0 }, None)
+        });
+        match saved {
+            Some(v) => std::env::set_var(crate::park::PARK_TIMEOUT_ENV, v),
+            None => std::env::remove_var(crate::park::PARK_TIMEOUT_ENV),
+        }
+        assert_eq!(reply["ok"], false, "{reply}");
+        let lines = own_log_lines(&home);
+        assert!(lines.iter().any(|l| l["op"].is_null() && l["status"] == "timed-out" && l["granted"] == false), "{lines:?}");
+        std::fs::remove_dir_all(&home).ok();
+    }
+
+    /// A client that closes its socket while its resolve is parked frees the
+    /// park at the hang-up probe, and the audit line says hung-up, not denied.
+    #[test]
+    fn a_parked_resolve_whose_client_hangs_up_is_audited_hung_up() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved = std::env::var(crate::park::PARK_TIMEOUT_ENV).ok();
+        std::env::set_var(crate::park::PARK_TIMEOUT_ENV, "30");
+        let home = tmp_home("hung-up-word");
+        seed_enrolled(&home, Policy::new("t", "scratch", "stored-value"));
+        let events = home.join("events.jsonl");
+        let (mut client, server) = UnixStream::pair().expect("socketpair");
+        client.write_all(b"{\"op\":\"resolve\",\"secret\":\"t\",\"consumer\":\"m\"}\n").unwrap();
+        let parked = ParkRegistry::new();
+        let slots = UidSlots::new(PER_UID_CONNECTIONS);
+        with_redirected_audit_log(&home, || {
+            std::thread::scope(|s| {
+                let conn = s.spawn(|| handle_conn(&home, &events, server, &parked, &slots));
+                let _ = parked_id(&parked);
+                drop(client);
+                conn.join().unwrap();
+            });
+        });
+        match saved {
+            Some(v) => std::env::set_var(crate::park::PARK_TIMEOUT_ENV, v),
+            None => std::env::remove_var(crate::park::PARK_TIMEOUT_ENV),
+        }
+        let lines = own_log_lines(&home);
+        assert!(lines.iter().any(|l| l["op"].is_null() && l["status"] == "hung-up" && l["granted"] == false), "{lines:?}");
+        std::fs::remove_dir_all(&home).ok();
+    }
+
+    /// `secrets dismiss` ends a park with no code, and the resolve's audit line
+    /// says dismissed, not denied.
+    #[test]
+    fn a_parked_resolve_that_is_dismissed_is_audited_dismissed() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let home = tmp_home("dismissed-word");
+        seed_enrolled(&home, Policy::new("t", "scratch", "stored-value"));
+        let events = home.join("events.jsonl");
+        let parked = ParkRegistry::new();
+        with_redirected_audit_log(&home, || {
+            std::thread::scope(|s| {
+                let resolve = s.spawn(|| {
+                    handle_line(&home, &events, r#"{"op":"resolve","secret":"t","consumer":"m"}"#, &parked, &mut Vec::new(), None)
+                });
+                let id = parked_id(&parked);
+                let dismissed = handle_line(&home, &events, &format!(r#"{{"op":"dismiss","id":"{id}"}}"#), &parked, &mut Vec::new(), operator_peer());
+                assert_eq!(dismissed["ok"], true, "{dismissed}");
+                resolve.join().unwrap();
+            });
+        });
+        let lines = own_log_lines(&home);
+        assert!(lines.iter().any(|l| l["op"].is_null() && l["status"] == "dismissed" && l["granted"] == false), "{lines:?}");
         std::fs::remove_dir_all(&home).ok();
     }
 
