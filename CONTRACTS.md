@@ -6554,7 +6554,8 @@ until it times out (a corollary of the ask outliving that one socket).
 
 **`resolve`** — read a secret's value:
 ```text
--> {"op":"resolve","secret":"<name>","consumer":"<consumer>","argv0":"<cmd>"?,"reason":"<text>"?}
+-> {"op":"resolve","secret":"<name>","consumer":"<consumer>",
+    "argv0":"<cmd>"?,"reason":"<text>"?}
 <- {"ok":true,"value":"<value>"}
 <- {"ok":false,"error":"<message>"}
 ```
@@ -6596,7 +6597,8 @@ above) never parks either, exactly as it never required a code before.
 broker writes an INTERIM line (this section's Transport paragraph) down the
 SAME requesting connection, before ever blocking on the wait:
 ```text
-<- {"interim":true,"parked":true,"id":"<id>","timeoutSecs":<N>,"expiresAt":<unix-seconds>}
+<- {"interim":true,"parked":true,"id":"<id>",
+    "timeoutSecs":<N>,"expiresAt":<unix-seconds>}
 ```
 `expiresAt` is the unix time the park ends, `now` plus `timeoutSecs`. A broker
 that predates it sends the line without the field, and a caller treats the
@@ -6672,17 +6674,26 @@ in whole seconds — no config-file knob exists in the secrets home for this;
 env-only, same precedent as `AOIDE_SECRETS_HOME`/`AOIDE_SECRETS_SOCKET`),
 the parked connection gets:
 ```text
-<- {"ok":false,"error":"the pending TOTP ask for `<name>` timed out after <N>s (AOIDE_SECRETS_PARK_TIMEOUT to change the default) — run it again to park a new ask, or approve the next ask before it expires with `aoide secrets approve <id>`"}
+<- {"ok":false,"error":"the pending TOTP ask for `<name>` timed out after
+    <N>s (AOIDE_SECRETS_PARK_TIMEOUT to change the default) — run it again to
+    park a new ask, or approve the next ask before it expires with
+    `aoide secrets approve <id>`"}
 ```
-naming the timeout, the env knob, and BOTH completion paths — the ask is
-removed from the registry once timed out (a late `approve`/`dismiss` against
-that id then gets the same `"unknown pending id"` error a never-existed id
-would).
+naming the timeout, the env knob, and BOTH completion paths. The ask is
+removed from the registry once it times out, and its id is remembered among
+the 64 most recent timeouts. A late `approve` against that id gets
+`"ask `<id>` timed out before a code was given, so nothing is parked under
+it; run the resolve again"`. A late `dismiss` gets `"unknown pending id
+`<id>`"`, the error a never-existed id gets.
 
 **`pending`** — list every parked ask (never a value):
 ```text
 -> {"op":"pending"}
-<- {"ok":true,"pending":[{"id":"<id>","secret":"<name>","consumer":"<consumer>","requestedAt":<unix-seconds>,"peerUid":<uid-or-null>,"reason":<string-or-null>,"argv0":<string-or-null>,"origin":{"username":<string-or-null>,"pid":<int-or-null>,"comm":<string-or-null>,"hostname":<string-or-null>},"originLine":<string>},...]}
+<- {"ok":true,"pending":[{"id":"<id>","secret":"<name>","consumer":"<consumer>",
+    "requestedAt":<unix-seconds>,"peerUid":<uid-or-null>,
+    "reason":<string-or-null>,"argv0":<string-or-null>,
+    "origin":{"username":<string-or-null>,"pid":<int-or-null>,
+    "comm":<string-or-null>,"hostname":<string-or-null>}},...]}
 ```
 Never errors (an empty queue is `{"ok":true,"pending":[]}`); not audited —
 a read of in-memory state only, same precedent `session pending list` already
@@ -6696,12 +6707,14 @@ time from the SAME `SO_PEERCRED` stamp `peerUid` reads (username/pid/comm)
 plus the broker's own hostname — every field UNTRUSTED DISPLAY DATA,
 `null` per field when unknown, never an error.
 
-`argv0` (the program the wrapped command names, from `secrets exec`) and
-`originLine` (the origin as one display line, built from the cleaned origin
-fields) are additive too. A park refuses a `reason` or `argv0` that holds a
-control, format or invisible character, or one over 4 KiB or 60 lines, so
-what `pending` shows is what the requester sent. Both are the requester's own
-words. The conductor and `approve` label them as claims.
+`argv0` (the program the wrapped command names, from `secrets exec`) is
+additive too. A park refuses a `reason` or `argv0` that holds a control,
+format or invisible character, or one over 4 KiB or 60 lines, so what
+`pending` shows is what the requester sent. Both are the requester's own
+words. The conductor and `approve` label them as claims. The CLI adds
+`originLine` to each ask in `secrets pending --json`: the origin as one
+display line, built from the cleaned origin fields. The broker's wire does
+not carry it.
 
 **`approve`** — complete a parked ask with a code, releasing the value down
 the ORIGINAL parked connection (never this reply):
@@ -6717,8 +6730,9 @@ and the ledger UNBURNED, so a caller can simply retry with the right code,
 until the step's wrong-code budget is spent (ruling 44);
 only a code that validates resolves the ask one way or another. Errors:
 `"unknown pending id `<id>`"`; `"malformed request: `id` is required"`;
-`"malformed request: `totp` is required"`; plus every `resolve`-shaped TOTP
-error above, and the budget's refusal (`"totp code invalid or expired"`,
+`"malformed request: `totp` is required"`; the timed-out refusal above, for
+an ask that timed out; plus every `resolve`-shaped TOTP error above, and the
+budget's refusal (`"totp code invalid or expired"`,
 `"totp code already used"`,
 ...). This reply NEVER carries a `value` field — the value only ever
 reaches the ORIGINAL parked connection's own `resolve` reply.

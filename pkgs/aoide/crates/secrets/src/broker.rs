@@ -1119,8 +1119,9 @@ fn handle_resolve(
 /// without actually waiting out a real timeout (task requirement: name the
 /// timeout, the knob, and BOTH completion paths). Deliberately does NOT
 /// name the now-removed ask's id: by the time this fires the id is already
-/// gone from the registry, and `secrets approve <that-id>` would just get
-/// "unknown pending id" — a stale id would mislead, not help.
+/// gone from the registry, and a stale id would mislead, not help. A late
+/// `secrets approve <that-id>` gets `refuse_timed_out` while the id is still
+/// remembered (park.rs).
 fn park_timeout_message(secret: &str, timeout_secs: u64) -> String {
     format!(
         "the pending TOTP ask for `{secret}` timed out after {timeout_secs}s ({} to change the default) — \

@@ -577,9 +577,9 @@
     is not treated as gone, so its park stays until the timer. Windows has no
     probe, so a parked ask there ends only at its timer.
   - `AOIDE_SECRETS_PARK_CAP` (32 by default) bounds parked asks. A parked ask
-    holds a connection, so at most 32 of the 128 are parked. The cap reserves
-    nothing: the other 96 are shared with every other connection, and eight
-    uids holding 16 idle connections each fill all 128.
+    holds one of the 128 connection slots, so at most 32 of them are parked.
+    The cap reserves nothing: parked and unparked connections share all 128,
+    so eight uids holding 16 idle connections each fill it.
   A change to any number states its cost in the same commit.
 - **`resolve_gate` returns a `GateOutcome` (`Granted`/`Denied`/
   `NeedsTotp`), not a bare `Result` (P-N2 — replaced the old
