@@ -332,7 +332,7 @@
 //! the process's own primary/effective group. This module only ever touches
 //! the mode bits.
 
-use crate::park::{AskOrigin, ParkOutcome, ParkRegistry, WaitResult};
+use crate::park::{AskOrigin, Delivery, ParkOutcome, ParkRegistry, WaitResult};
 use crate::peercred::PeerUser;
 use serde_json::{json, Value};
 use std::io::{BufRead, BufReader, Read, Write};
@@ -660,7 +660,8 @@ fn admission_refusal(cap: usize, uid: Option<&PeerUser>) -> String {
     match uid {
         Some(_) => format!("this uid already holds its {cap} connections; close one and retry"),
         None => format!(
-            "this connection's peer uid could not be read, so it shares one bucket              of {cap} with the other unidentified connections; close one and retry"
+            "this connection's peer uid could not be read, so it shares one bucket \
+             of {cap} with the other unidentified connections; close one and retry"
         ),
     }
 }
@@ -728,8 +729,20 @@ fn handle_conn(secrets_home: &Path, events_path: &Path, stream: UnixStream, park
             continue;
         }
         armed = None;
-        let reply = handle_line(secrets_home, events_path, text, parked, &mut writer, peer.clone());
-        if write_json_line(&mut writer, &reply).is_err() {
+        let answer = handle_line_at(
+            secrets_home,
+            events_path,
+            text,
+            parked,
+            &mut writer,
+            peer.clone(),
+            aoide_protocol::audit::now_secs(),
+        );
+        let delivery = match answer.delivery {
+            Some(delivery) => delivery,
+            None => write_json_line(&mut writer, &answer.reply),
+        };
+        if delivery != Delivery::Whole {
             break;
         }
     }
@@ -790,32 +803,36 @@ fn read_request_line(
     }
 }
 
-/// Write ONE JSON value as a newline-terminated wire line — the ONE place
-/// this crate formats a reply/interim line for the socket (module doc's
-/// framing contract), shared by [`handle_conn`]'s own final-reply write and
-/// [`handle_resolve`]'s interim-line write (P-N2c) so both stay byte-for-
-/// byte the same shape. The whole line has one [`WRITE_TIMEOUT`] budget: each
-/// write call waits no longer than what is left of it, so a reader that takes
-/// the line slowly is cut off at the budget, not one call's worth at a time.
-fn write_json_line(writer: &mut impl BoundedWrite, value: &Value) -> std::io::Result<()> {
+/// Write ONE JSON value as a newline-terminated wire line, and report how much
+/// of it reached the writer. This is the ONE place this crate formats a reply
+/// or interim line for the socket (module doc's framing contract), shared by
+/// [`handle_conn`]'s own final-reply write and [`handle_resolve`]'s interim and
+/// parked-reply writes (P-N2c) so all stay byte-for-byte the same shape. The
+/// whole line has one [`WRITE_TIMEOUT`] budget: each write call waits no longer
+/// than what is left of it, so a reader that takes the line slowly is cut off
+/// at the budget, not one call's worth at a time.
+fn write_json_line(writer: &mut impl BoundedWrite, value: &Value) -> Delivery {
     let mut out = value.to_string().into_bytes();
     out.push(b'\n');
     let deadline = std::time::Instant::now() + WRITE_TIMEOUT;
     let mut sent = 0;
     while sent < out.len() {
         let left = deadline.saturating_duration_since(std::time::Instant::now());
-        if left.is_zero() {
-            return Err(std::io::ErrorKind::TimedOut.into());
+        if left.is_zero() || writer.bound_writes(left).is_err() {
+            break;
         }
-        writer.bound_writes(left)?;
         match writer.write(&out[sent..]) {
-            Ok(0) => return Err(std::io::ErrorKind::WriteZero.into()),
-            Ok(n) => sent += n,
+            Ok(0) => break,
+            Ok(n) => sent += n.min(out.len() - sent),
             Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
-            Err(e) => return Err(e),
+            Err(_) => break,
         }
     }
-    Ok(())
+    match sent {
+        0 => Delivery::Nothing,
+        written if written == out.len() => Delivery::Whole,
+        written => Delivery::Partial { written, total: out.len() },
+    }
 }
 
 /// A sink a reply is written to, with its write calls bounded in time.
@@ -833,6 +850,21 @@ impl BoundedWrite for Vec<u8> {
 impl BoundedWrite for UnixStream {
     fn bound_writes(&mut self, budget: std::time::Duration) -> std::io::Result<()> {
         self.set_write_timeout(Some(budget))
+    }
+}
+
+/// What one request line answers. `reply` is the line the client is owed. A
+/// parked resolve writes its own reply, because the approver's receipt waits
+/// on that write: then `delivery` is how it went, and `handle_conn` writes
+/// nothing more for the line.
+struct Answer {
+    reply: Value,
+    delivery: Option<Delivery>,
+}
+
+impl Answer {
+    fn plain(reply: Value) -> Self {
+        Answer { reply, delivery: None }
     }
 }
 
@@ -856,26 +888,26 @@ fn handle_line_at(
     interim_out: &mut (impl BoundedWrite + PeerHangUp),
     peer: Option<crate::peercred::PeerCred>,
     now_unix: u64,
-) -> Value {
+) -> Answer {
     let req: Value = match serde_json::from_str(line.trim()) {
         Ok(v) => v,
-        Err(_) => return json!({"ok": false, "error": "malformed request: not valid JSON"}),
+        Err(_) => return Answer::plain(json!({"ok": false, "error": "malformed request: not valid JSON"})),
     };
     match req.get("op").and_then(Value::as_str) {
         Some("resolve") => handle_resolve(secrets_home, events_path, &req, parked, interim_out, peer, now_unix),
-        Some("put") => handle_put(secrets_home, events_path, &req, peer),
-        Some("pending") => handle_pending(parked),
-        Some("status") => handle_status(secrets_home),
-        Some("approve") => handle_approve(secrets_home, events_path, parked, &req, peer, now_unix),
-        Some("dismiss") => handle_dismiss(secrets_home, events_path, parked, &req, peer),
-        Some("admin") => handle_admin(secrets_home, &req, peer),
-        Some(other) => json!({"ok": false, "error": format!("unknown op `{other}`")}),
-        None => json!({"ok": false, "error": "malformed request: missing `op`"}),
+        Some("put") => Answer::plain(handle_put(secrets_home, events_path, &req, peer)),
+        Some("pending") => Answer::plain(handle_pending(parked)),
+        Some("status") => Answer::plain(handle_status(secrets_home)),
+        Some("approve") => Answer::plain(handle_approve(secrets_home, events_path, parked, &req, peer, now_unix)),
+        Some("dismiss") => Answer::plain(handle_dismiss(secrets_home, events_path, parked, &req, peer)),
+        Some("admin") => Answer::plain(handle_admin(secrets_home, &req, peer)),
+        Some(other) => Answer::plain(json!({"ok": false, "error": format!("unknown op `{other}`")})),
+        None => Answer::plain(json!({"ok": false, "error": "malformed request: missing `op`"})),
     }
 }
 
-/// [`handle_line_at`] on the real clock: what `handle_conn` calls for every
-/// wire line. Tests that need a fixed TOTP step call `handle_line_at`.
+/// [`handle_line_at`] on the real clock, for tests that read the reply back.
+#[cfg(test)]
 fn handle_line(
     secrets_home: &Path,
     events_path: &Path,
@@ -884,7 +916,7 @@ fn handle_line(
     interim_out: &mut (impl BoundedWrite + PeerHangUp),
     peer: Option<crate::peercred::PeerCred>,
 ) -> Value {
-    handle_line_at(secrets_home, events_path, line, parked, interim_out, peer, aoide_protocol::audit::now_secs())
+    handle_line_at(secrets_home, events_path, line, parked, interim_out, peer, aoide_protocol::audit::now_secs()).reply
 }
 
 /// Render a peer uid for a taught error message or an audit line — `None`
@@ -959,10 +991,8 @@ fn origin_to_json(origin: &AskOrigin) -> Value {
 /// immediate refusal. **P-N2c:** the instant a park is registered, an
 /// INTERIM line (`{"interim":true,"parked":true,"id":...,"timeoutSecs":...,`
 /// `"expiresAt":...}`) writes down `interim_out` BEFORE this function blocks on
-/// `wait_for_outcome` — a write failure here (the caller already hung up)
-/// is swallowed, not propagated: the park proceeds regardless, since a
-/// gone caller learning its own id is moot but the ask itself is still a
-/// legitimate parked state an operator could dismiss.
+/// `wait_for_outcome`. A write that fails here means the client is gone, so
+/// the park ends at once, by the path a hang-up takes.
 fn handle_resolve(
     secrets_home: &Path,
     events_path: &Path,
@@ -971,7 +1001,7 @@ fn handle_resolve(
     interim_out: &mut (impl BoundedWrite + PeerHangUp),
     peer: Option<crate::peercred::PeerCred>,
     now_unix: u64,
-) -> Value {
+) -> Answer {
     let secret = req.get("secret").and_then(Value::as_str).unwrap_or("").to_string();
     let consumer = req.get("consumer").and_then(Value::as_str).unwrap_or("").to_string();
     let argv0 = req.get("argv0").and_then(Value::as_str).map(str::to_string);
@@ -987,15 +1017,15 @@ fn handle_resolve(
     let ask_reason = req.get("reason").and_then(Value::as_str).map(str::to_string);
 
     if secret.is_empty() || consumer.is_empty() {
-        return json!({"ok": false, "error": "malformed request: `secret` and `consumer` are required"});
+        return Answer::plain(json!({"ok": false, "error": "malformed request: `secret` and `consumer` are required"}));
     }
     if req.get("totp").is_some() {
         let reason = "refused: a resolve takes no `totp` code, so nothing was released. Send the resolve without \
                       it: it parks, and a code is typed only where aoide draws the claims from the broker's record, \
                       with `aoide secrets approve <id>`, the conductor or the app"
             .to_string();
-        audit_resolve(secrets_home, &secret, &consumer, argv0.as_deref(), false, Some(&reason), peer_uid);
-        return json!({"ok": false, "error": reason});
+        audit_resolve(secrets_home, &secret, &consumer, argv0.as_deref(), Status::Denied, Some(&reason), peer_uid);
+        return Answer::plain(json!({"ok": false, "error": reason}));
     }
 
     // The caller's attested origin is resolved here, once per resolve
@@ -1009,7 +1039,7 @@ fn handle_resolve(
         caller.as_ref().map(|(s, o)| (s.as_str(), o.as_str())),
     ) {
         GateOutcome::Granted { value } => {
-            audit_resolve(secrets_home, &secret, &consumer, argv0.as_deref(), true, None, peer_uid);
+            audit_resolve(secrets_home, &secret, &consumer, argv0.as_deref(), Status::Granted, None, peer_uid);
             // Fired AFTER `audit_resolve` (no lock held by either call) — see
             // `emit_notify`'s own doc.
             emit_notify(
@@ -1018,23 +1048,25 @@ fn handle_resolve(
                 "released",
                 json!({"event": "released", "secret": secret, "consumer": consumer}),
             );
-            json!({"ok": true, "value": value})
+            Answer::plain(json!({"ok": true, "value": value}))
         }
         GateOutcome::Denied(reason) => {
-            audit_resolve(secrets_home, &secret, &consumer, argv0.as_deref(), false, Some(&reason), peer_uid);
-            json!({"ok": false, "error": reason})
+            audit_resolve(secrets_home, &secret, &consumer, argv0.as_deref(), Status::Denied, Some(&reason), peer_uid);
+            Answer::plain(json!({"ok": false, "error": reason}))
         }
         GateOutcome::NeedsTotp => {
             if !wait {
                 let reason = "requireTotp is set but no totp code was provided".to_string();
-                audit_resolve(secrets_home, &secret, &consumer, argv0.as_deref(), false, Some(&reason), peer_uid);
-                return json!({"ok": false, "error": reason});
+                audit_resolve(secrets_home, &secret, &consumer, argv0.as_deref(), Status::Denied, Some(&reason), peer_uid);
+                return Answer::plain(json!({"ok": false, "error": reason}));
             }
-            // A parked ask is shown to a person exactly as written, so a request
-            // whose consumer, reason or argv0 is over the approve dialog's bound,
-            // or holds a control or invisible character, is refused here, before
-            // anything parks. The secret needs no check: `policy::valid_secret_name`
-            // admits no such character when a secret is added or put.
+            // `aoide secrets approve <id>` prints a parked ask whole, but the
+            // conductor cuts the consumer to one row. So a request whose
+            // consumer, reason or argv0 is over the approve dialog's bound, or
+            // holds a control or invisible character, is refused here, before
+            // anything parks. The secret needs no check:
+            // `policy::valid_secret_name` admits no such character when a
+            // secret is added or put.
             let oversized_field = [
                 ("consumer", Some(consumer.as_str())),
                 ("reason", ask_reason.as_deref()),
@@ -1045,11 +1077,11 @@ fn handle_resolve(
             if let Some((field, why)) = oversized_field {
                 let reason = format!(
                     "refused: the {field} {why}. `aoide secrets approve <id>` prints a parked \
-                     ask in full, but the conductor cuts a longer {field} to fit its screen, \
-                     so send a shorter {field}"
+                     ask whole, but the conductor cuts the consumer to one row, so send a \
+                     shorter {field}"
                 );
-                audit_resolve(secrets_home, &secret, &consumer, argv0.as_deref(), false, Some(&reason), peer_uid);
-                return json!({"ok": false, "error": reason});
+                audit_resolve(secrets_home, &secret, &consumer, argv0.as_deref(), Status::Denied, Some(&reason), peer_uid);
+                return Answer::plain(json!({"ok": false, "error": reason}));
             }
             let unsafe_field = [
                 ("consumer", Some(consumer.as_str())),
@@ -1061,12 +1093,12 @@ fn handle_resolve(
             .map(|(name, _)| name);
             if let Some(field) = unsafe_field {
                 let reason = format!(
-                    "refused: the {field} holds a control or invisible character. A parked ask \
-                     is shown to a person exactly as written, so send the {field} as plain \
-                     text: no escape sequences, no line breaks"
+                    "refused: the {field} holds a control or invisible character. `aoide \
+                     secrets approve <id>` prints a parked ask whole, so send the {field} as \
+                     plain text: no escape sequences, no line breaks"
                 );
-                audit_resolve(secrets_home, &secret, &consumer, argv0.as_deref(), false, Some(&reason), peer_uid);
-                return json!({"ok": false, "error": reason});
+                audit_resolve(secrets_home, &secret, &consumer, argv0.as_deref(), Status::Denied, Some(&reason), peer_uid);
+                return Answer::plain(json!({"ok": false, "error": reason}));
             }
             let cap = crate::park::park_cap();
             // #73: the requesting connection's own kernel-truth peer uid is
@@ -1090,8 +1122,8 @@ fn handle_resolve(
                      ({cap} parked already — {} to raise it); retry once an operator clears a pending ask",
                     crate::park::PARK_CAP_ENV
                 );
-                audit_resolve(secrets_home, &secret, &consumer, argv0.as_deref(), false, Some(&reason), peer_uid);
-                return json!({"ok": false, "error": reason});
+                audit_resolve(secrets_home, &secret, &consumer, argv0.as_deref(), Status::Denied, Some(&reason), peer_uid);
+                return Answer::plain(json!({"ok": false, "error": reason}));
             };
             audit_park(secrets_home, &id, &secret, &consumer, peer_uid, ask_reason.as_deref(), &origin);
             let timeout = crate::park::park_timeout();
@@ -1115,10 +1147,9 @@ fn handle_resolve(
                     "origin": origin_to_json(&origin),
                 }),
             );
-            // P-N2c FIX 1: announce the park BEFORE blocking — a write
-            // failure here (the caller already hung up) is swallowed, not
-            // propagated (this function's own doc): the ask stays
-            // legitimately parked either way.
+            // P-N2c FIX 1: announce the park BEFORE blocking. The interim line
+            // is this client's first write: when it fails, the client is gone,
+            // so the park ends at once, by the path a hang-up takes.
             let interim = json!({
                 "interim": true,
                 "parked": true,
@@ -1126,44 +1157,50 @@ fn handle_resolve(
                 "timeoutSecs": timeout.as_secs(),
                 "expiresAt": now_unix + timeout.as_secs(),
             });
-            let _ = write_json_line(interim_out, &interim);
-            match crate::park::wait_for_outcome(parked, &id, rx, timeout, &|| interim_out.hung_up()) {
-                WaitResult::Approved(value) => {
-                    audit_resolve(secrets_home, &secret, &consumer, argv0.as_deref(), true, None, peer_uid);
-                    json!({"ok": true, "value": value})
-                }
-                WaitResult::ApprovedUndelivered => {
-                    let reason = UNDELIVERED.to_string();
-                    audit_resolve(secrets_home, &secret, &consumer, argv0.as_deref(), false, Some(&reason), peer_uid);
-                    json!({"ok": false, "error": reason})
+            let outcome = if write_json_line(interim_out, &interim) == Delivery::Whole {
+                crate::park::wait_for_outcome(parked, &id, rx, timeout, &|| interim_out.hung_up())
+            } else {
+                crate::park::end_hung_up(parked, &id, rx)
+            };
+            match outcome {
+                WaitResult::Approved(value, receipt) => {
+                    // This write decides the grant. The audit line and the
+                    // approver's answer both carry how it went, never a poll
+                    // taken before it.
+                    let reply = json!({"ok": true, "value": value});
+                    let delivery = write_json_line(interim_out, &reply);
+                    let (status, reason) = grant_status(delivery);
+                    audit_resolve(secrets_home, &secret, &consumer, argv0.as_deref(), status, reason.as_ref(), peer_uid);
+                    let _ = receipt.send(delivery);
+                    Answer { reply, delivery: Some(delivery) }
                 }
                 WaitResult::Denied(reason) => {
-                    audit_resolve(secrets_home, &secret, &consumer, argv0.as_deref(), false, Some(&reason), peer_uid);
-                    json!({"ok": false, "error": reason})
+                    audit_resolve(secrets_home, &secret, &consumer, argv0.as_deref(), Status::Denied, Some(&reason), peer_uid);
+                    Answer::plain(json!({"ok": false, "error": reason}))
                 }
                 WaitResult::Dismissed => {
                     // FIX small-honesty: no actor claim — ANY group member
                     // holding a valid socket connection can dismiss, not
                     // necessarily "an operator" in any privileged sense.
                     let reason = "the pending TOTP ask was dismissed before a code was provided".to_string();
-                    audit_resolve(secrets_home, &secret, &consumer, argv0.as_deref(), false, Some(&reason), peer_uid);
-                    json!({"ok": false, "error": reason})
+                    audit_resolve(secrets_home, &secret, &consumer, argv0.as_deref(), Status::Denied, Some(&reason), peer_uid);
+                    Answer::plain(json!({"ok": false, "error": reason}))
                 }
                 WaitResult::HungUp => {
                     let reason = "the client hung up while its ask was parked, so the ask was dropped".to_string();
-                    audit_resolve(secrets_home, &secret, &consumer, argv0.as_deref(), false, Some(&reason), peer_uid);
-                    json!({"ok": false, "error": reason})
+                    audit_resolve(secrets_home, &secret, &consumer, argv0.as_deref(), Status::Denied, Some(&reason), peer_uid);
+                    Answer::plain(json!({"ok": false, "error": reason}))
                 }
                 WaitResult::TimedOut => {
                     let reason = park_timeout_message(&secret, timeout.as_secs());
-                    audit_resolve(secrets_home, &secret, &consumer, argv0.as_deref(), false, Some(&reason), peer_uid);
+                    audit_resolve(secrets_home, &secret, &consumer, argv0.as_deref(), Status::Denied, Some(&reason), peer_uid);
                     emit_notify(
                         secrets_home,
                         events_path,
                         "expired",
                         json!({"event": "expired", "id": id, "secret": secret, "consumer": consumer}),
                     );
-                    json!({"ok": false, "error": reason})
+                    Answer::plain(json!({"ok": false, "error": reason}))
                 }
             }
         }
@@ -1336,9 +1373,61 @@ thread_local! {
     static APPROVE_AFTER_PEEK: std::cell::RefCell<Option<std::sync::mpsc::Sender<()>>> = const { std::cell::RefCell::new(None) };
 }
 
-/// What an approver and the audit are told when an approved value reached no
-/// connected client.
-const UNDELIVERED: &str = "approved, client hung up before delivery";
+/// What an approver is told, and its audit line says, when no byte of an
+/// approved reply was written.
+const UNDELIVERED: &str = "approved, but nothing reached the client: no byte \
+    of the reply was written, so the value was not handed over";
+
+/// What an approver is told when the parked connection did not report how its
+/// reply went in time, so the value may have reached the client.
+const UNCONFIRMED: &str = "approved, but the client's reply was not confirmed \
+    in time: the value may have reached the client, so treat it as exposed";
+
+/// How long an approver waits past [`WRITE_TIMEOUT`] for the parked
+/// connection's receipt. The reply's budget starts once that connection has
+/// woken and written the reply, after the approver began waiting. A wait of
+/// exactly `WRITE_TIMEOUT` would give up at the instant a budget-cut reply is
+/// cut, and report it unconfirmed instead of partial.
+const RECEIPT_ALLOWANCE: std::time::Duration = std::time::Duration::from_secs(1);
+
+/// The status word an audit line carries: what the reply's write did, or a
+/// refusal.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Status {
+    Granted,
+    Partial,
+    Undelivered,
+    Unconfirmed,
+    Denied,
+}
+
+impl Status {
+    fn word(self) -> &'static str {
+        match self {
+            Status::Granted => "granted",
+            Status::Partial => "partial",
+            Status::Undelivered => "undelivered",
+            Status::Unconfirmed => "unconfirmed",
+            Status::Denied => "denied",
+        }
+    }
+}
+
+/// The status and the reason that a reply's write gets, by how the write went.
+/// A whole reply has no reason.
+fn grant_status(delivery: Delivery) -> (Status, Option<String>) {
+    match delivery {
+        Delivery::Whole => (Status::Granted, None),
+        Delivery::Partial { written, total } => (
+            Status::Partial,
+            Some(format!(
+                "approved, but the reply was cut after {written} of {total} bytes: \
+                 part of the value may have reached the client, so treat it as exposed"
+            )),
+        ),
+        Delivery::Nothing => (Status::Undelivered, Some(UNDELIVERED.to_string())),
+    }
+}
 
 /// `approve <id>` with its `totp`: validate the code
 /// with the SAME [`verify_totp_gate`] a fast-path `resolve` uses (same RFC
@@ -1380,7 +1469,7 @@ fn handle_approve(
     }
     let Some((secret, consumer, _ask_peer_uid)) = parked.peek(&id) else {
         let reason = if parked.timed_out(&id) { refuse_timed_out(&id) } else { format!("unknown pending id `{id}`") };
-        audit_approve(secrets_home, &id, None, false, &reason, approver_uid);
+        audit_approve(secrets_home, &id, None, Status::Denied, &reason, approver_uid);
         return json!({"ok": false, "error": reason});
     };
     #[cfg(test)]
@@ -1393,7 +1482,7 @@ fn handle_approve(
     let totp = req.get("totp").and_then(Value::as_str).map(str::trim).filter(|s| !s.is_empty());
     let Some(code) = totp else {
         let reason = "malformed request: `totp` is required".to_string();
-        audit_approve(secrets_home, &id, Some(&secret), false, &reason, approver_uid);
+        audit_approve(secrets_home, &id, Some(&secret), Status::Denied, &reason, approver_uid);
         return json!({"ok": false, "error": reason});
     };
 
@@ -1408,7 +1497,7 @@ fn handle_approve(
                 json!({"ok": false, "error": reason})
             }
             TotpRefusal::Failed(e) => {
-                audit_approve(secrets_home, &id, Some(&secret), false, &e, approver_uid);
+                audit_approve(secrets_home, &id, Some(&secret), Status::Denied, &e, approver_uid);
                 json!({"ok": false, "error": e})
             }
         };
@@ -1418,7 +1507,7 @@ fn handle_approve(
     // another from here, never stay parked.
     let Some(ask) = parked.take(&id) else {
         let reason = refuse_taken_after_check(&id);
-        audit_approve(secrets_home, &id, Some(&secret), false, &reason, approver_uid);
+        audit_approve(secrets_home, &id, Some(&secret), Status::Denied, &reason, approver_uid);
         return json!({"ok": false, "error": reason});
     };
 
@@ -1427,22 +1516,31 @@ fn handle_approve(
     // the release, not just a future one.
     if let Err(e) = authorize_release(secrets_home, &secret, &consumer) {
         ask.send(ParkOutcome::Denied(e.clone()));
-        audit_approve(secrets_home, &id, Some(&secret), false, &e, approver_uid);
+        audit_approve(secrets_home, &id, Some(&secret), Status::Denied, &e, approver_uid);
         return json!({"ok": false, "error": e});
     }
 
     match fetch_secret_value(secrets_home, &secret) {
         Ok(value) => {
             let (receipt, answer) = std::sync::mpsc::channel();
-            ask.send(ParkOutcome::Approved(value, receipt));
-            // The parked side answers once it has the value: `false` when its
-            // client is gone, or when the ask was dropped unread.
-            if !answer.recv().unwrap_or(false) {
-                let reason = UNDELIVERED.to_string();
-                audit_approve(secrets_home, &id, Some(&secret), false, &reason, approver_uid);
+            // The parked connection writes the reply, then reports how the
+            // write went. `ask` is owned here, so no registry lock is held
+            // across this wait, which lasts at most WRITE_TIMEOUT plus
+            // RECEIPT_ALLOWANCE. A parked connection that is already gone was
+            // handed nothing.
+            let (status, reason) = if ask.send(ParkOutcome::Approved(value, receipt)) {
+                match answer.recv_timeout(WRITE_TIMEOUT + RECEIPT_ALLOWANCE) {
+                    Ok(delivery) => grant_status(delivery),
+                    Err(_) => (Status::Unconfirmed, Some(UNCONFIRMED.to_string())),
+                }
+            } else {
+                grant_status(Delivery::Nothing)
+            };
+            let reason = reason.unwrap_or_default();
+            audit_approve(secrets_home, &id, Some(&secret), status, &reason, approver_uid);
+            if status != Status::Granted {
                 return json!({"ok": false, "error": reason});
             }
-            audit_approve(secrets_home, &id, Some(&secret), true, "", approver_uid);
             // P-N3: fired once, on the approver's own side — the ORIGINAL
             // parked caller's `resolve` return (`WaitResult::Approved` in
             // `handle_resolve`) does not fire a second one for the same
@@ -1457,7 +1555,7 @@ fn handle_approve(
         }
         Err(e) => {
             ask.send(ParkOutcome::Denied(e.clone()));
-            audit_approve(secrets_home, &id, Some(&secret), false, &e, approver_uid);
+            audit_approve(secrets_home, &id, Some(&secret), Status::Denied, &e, approver_uid);
             json!({"ok": false, "error": e})
         }
     }
@@ -2313,7 +2411,7 @@ fn audit_resolve(
     secret: &str,
     consumer: &str,
     argv0: Option<&str>,
-    granted: bool,
+    status: Status,
     reason: Option<&String>,
     peer_uid: Option<&PeerUser>,
 ) {
@@ -2323,21 +2421,22 @@ fn audit_resolve(
         "consumer": consumer,
         "peerUid": peer_uid_value(peer_uid),
         "argv0": argv0,
-        "granted": granted,
+        "granted": status == Status::Granted,
+        "status": status.word(),
         "reason": reason,
     });
     if let Err(e) = append_own_log(secrets_home, &with_peer_sid(record, peer_uid)) {
         eprintln!("[aoide/secrets] could not write the secrets audit log: {e}");
     }
 
-    let status = if granted { "granted" } else { "denied" };
+    let word = status.word();
     let message = match reason {
         Some(r) => format!(
-            "secret `{secret}` for consumer `{consumer}` (peer uid {}): {status} ({r})",
+            "secret `{secret}` for consumer `{consumer}` (peer uid {}): {word} ({r})",
             peer_uid_display(peer_uid)
         ),
         None => {
-            format!("secret `{secret}` for consumer `{consumer}` (peer uid {}): {status}", peer_uid_display(peer_uid))
+            format!("secret `{secret}` for consumer `{consumer}` (peer uid {}): {word}", peer_uid_display(peer_uid))
         }
     };
     let _ = aoide_protocol::audit(
@@ -2345,7 +2444,7 @@ fn audit_resolve(
         aoide_protocol::Door::Daemon,
         aoide_protocol::EventClass::Secret,
         "secrets.resolve",
-        status,
+        word,
         &message,
     );
 }
@@ -2450,32 +2549,33 @@ fn audit_park(
 /// eventual line on the PARKED caller's side. `secret` is `None` only for
 /// an unknown id (nothing to name). Never carries the typed code (untrusted
 /// input, module doc) or the released value.
-fn audit_approve(secrets_home: &Path, id: &str, secret: Option<&str>, granted: bool, reason: &str, peer_uid: Option<&PeerUser>) {
+fn audit_approve(secrets_home: &Path, id: &str, secret: Option<&str>, status: Status, reason: &str, peer_uid: Option<&PeerUser>) {
     let record = json!({
         "ts": aoide_protocol::audit::now_secs(),
         "op": "approve",
         "id": id,
         "secret": secret,
         "peerUid": peer_uid_value(peer_uid),
-        "granted": granted,
+        "granted": status == Status::Granted,
+        "status": status.word(),
         "reason": if reason.is_empty() { Value::Null } else { Value::String(reason.to_string()) },
     });
     if let Err(e) = append_own_log(secrets_home, &with_peer_sid(record, peer_uid)) {
         eprintln!("[aoide/secrets] could not write the secrets audit log: {e}");
     }
-    let status = if granted { "granted" } else { "denied" };
+    let word = status.word();
     let puid = peer_uid_display(peer_uid);
     let message = match secret {
-        Some(s) if !reason.is_empty() => format!("approve `{id}` for secret `{s}` (approver peer uid {puid}): {status} ({reason})"),
-        Some(s) => format!("approve `{id}` for secret `{s}` (approver peer uid {puid}): {status}"),
-        None => format!("approve `{id}` (approver peer uid {puid}): {status} ({reason})"),
+        Some(s) if !reason.is_empty() => format!("approve `{id}` for secret `{s}` (approver peer uid {puid}): {word} ({reason})"),
+        Some(s) => format!("approve `{id}` for secret `{s}` (approver peer uid {puid}): {word}"),
+        None => format!("approve `{id}` (approver peer uid {puid}): {word} ({reason})"),
     };
     let _ = aoide_protocol::audit(
         &aoide_protocol::default_audit_log(),
         aoide_protocol::Door::Daemon,
         aoide_protocol::EventClass::Secret,
         "secrets.approve",
-        status,
+        word,
         &message,
     );
 }
@@ -4480,7 +4580,7 @@ mod tests {
     /// `approve` as one wire line, at an injected step.
     fn approve_at(home: &Path, parked: &ParkRegistry, id: &str, code: &str, now: u64) -> Value {
         let line = format!(r#"{{"op":"approve","id":"{id}","totp":"{code}"}}"#);
-        handle_line_at(home, &home.join("events.jsonl"), &line, parked, &mut Vec::new(), None, now)
+        handle_line_at(home, &home.join("events.jsonl"), &line, parked, &mut Vec::new(), None, now).reply
     }
 
     /// Six digits that the verify window accepts at none of the previous,
@@ -4681,7 +4781,7 @@ mod tests {
         with_redirected_audit_log(&home, || {
             for _ in 0..5 {
                 let line = format!(r#"{{"op":"approve","id":"{id}"}}"#);
-                let reply = handle_line_at(&home, &home.join("events.jsonl"), &line, &parked, &mut Vec::new(), None, NOW);
+                let reply = handle_line_at(&home, &home.join("events.jsonl"), &line, &parked, &mut Vec::new(), None, NOW).reply;
                 assert_eq!(reply["ok"], false, "{reply}");
             }
             let granted = approve_at(&home, &parked, &id, &right, NOW);
@@ -5068,7 +5168,7 @@ mod tests {
         std::fs::remove_dir_all(&home).ok();
     }
 
-    /// A parked ask is shown to a person exactly as written, so a request
+    /// `aoide secrets approve <id>` prints a parked ask whole, so a request
     /// whose reason, consumer or argv0 holds a control or invisible character
     /// is refused at ingest: nothing parks, and the refusal names the rule and
     /// the field.
@@ -5195,14 +5295,18 @@ mod tests {
                     handle_approve(&home, &events, &parked, &req, None, NOW)
                 });
                 // The approve thread signals once it has peeked. Its sender
-                // lives in its own thread-local, so a return before the peek
-                // drops the channel, so this wait fails rather than hangs.
-                peeked_rx.recv_timeout(std::time::Duration::from_secs(5)).expect("the approve thread peeked the ask");
+                // lives in its own thread-local, so a missed signal times out
+                // here after 5 s. The take and the release run before the
+                // assert, so the approve thread is never left waiting on the
+                // budget lock this test holds while the scope joins it.
+                let peeked = peeked_rx.recv_timeout(std::time::Duration::from_secs(5));
                 // The take runs while this test holds the budget, so the check
                 // finds the ask gone.
                 drop(parked.take(&id));
                 drop(budget);
-                approve.join().unwrap()
+                let reply = approve.join().unwrap();
+                peeked.expect("the approve thread peeked the ask");
+                reply
             })
         });
         assert_eq!(reply["ok"], false, "{reply}");
@@ -5339,6 +5443,7 @@ mod tests {
     /// in the requester's comm reaches events.jsonl as its escape.
     #[test]
     fn the_events_feed_escapes_a_bidi_override_in_the_requesters_comm() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let home = tmp_home("feed-escape");
         let events = home.join("events.jsonl");
         append_events_feed(&events, &json!({"event": "parked", "origin": {"comm": "psql\u{202e}gpj"}}));
@@ -5489,7 +5594,10 @@ mod tests {
         let started = std::time::Instant::now();
         let result = write_json_line(&mut writer, &reply);
         let took = started.elapsed();
-        assert!(result.is_err(), "a reader taking one byte at a time must be cut off: {took:?}");
+        assert!(
+            matches!(result, Delivery::Partial { .. }),
+            "a reader taking one byte at a time must be cut off partway: {result:?} after {took:?}"
+        );
         assert!(took < std::time::Duration::from_secs(2), "the budget is the whole reply's, not one write call's: cut off after {took:?}");
     }
 
@@ -5570,42 +5678,37 @@ mod tests {
         assert!(reply["error"].as_str().unwrap_or("").contains("uid"), "the refusal names the cap: {reply}");
     }
 
-    /// An approve takes the ask as its client closes, so the park's probe loses
-    /// the race and the resolve settles on the value. The value reached no
-    /// connected client: the audit says so, and the approver is told.
+    /// The parked connection finds its client gone when the approve's reply
+    /// reaches it, so nothing is written: both audit lines say undelivered, and
+    /// the approver is told nothing reached the client.
     #[cfg(unix)]
     #[test]
     fn an_approve_that_takes_the_ask_as_its_client_hangs_up_is_told_so() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let home = tmp_home("hangup-race");
-        seed_enrolled(&home, Policy::new("t", "scratch", "stored-value"));
+        let secret = seed_enrolled(&home, Policy::new("t", "scratch", "stored-value"));
         let events = home.join("events.jsonl");
         let (mut client, server) = UnixStream::pair().expect("socketpair");
         client.write_all(b"{\"op\":\"resolve\",\"secret\":\"t\",\"consumer\":\"m\"}\n").unwrap();
         let parked = ParkRegistry::new();
         let slots = UidSlots::new(PER_UID_CONNECTIONS);
-        let reached = with_redirected_audit_log(&home, || {
+        let reply = with_redirected_audit_log(&home, || {
             std::thread::scope(|s| {
                 let conn = s.spawn(|| handle_conn(&home, &events, server, &parked, &slots));
-                let started = std::time::Instant::now();
-                while parked.list().is_empty() && started.elapsed() < std::time::Duration::from_secs(1) {
-                    std::thread::sleep(std::time::Duration::from_millis(10));
-                }
-                let (id, ..) = parked.list().remove(0);
-                let ask = parked.take(&id).expect("the approve takes the ask");
+                let id = parked_id(&parked);
                 drop(client);
-                let (receipt, answer) = std::sync::mpsc::channel();
-                ask.send(ParkOutcome::Approved("the-value".to_string(), receipt));
-                let reached = answer.recv_timeout(std::time::Duration::from_secs(2));
+                let req = json!({"id": id, "totp": code_for_now(&secret, NOW)});
+                let reply = handle_approve(&home, &events, &parked, &req, None, NOW);
                 conn.join().unwrap();
-                reached
+                reply
             })
         });
-        assert_eq!(reached, Ok(false), "the value reached no connected client");
+        assert_eq!(reply["error"], UNDELIVERED, "{reply}");
         let lines = own_log_lines(&home);
+        assert!(lines.iter().any(|l| l["op"] == "approve" && l["status"] == "undelivered"), "{lines:?}");
         assert!(
-            lines.iter().any(|l| l["reason"] == "approved, client hung up before delivery"),
-            "the audit names the release that reached no one: {lines:?}"
+            lines.iter().any(|l| l["op"].is_null() && l["status"] == "undelivered" && l["reason"] == UNDELIVERED),
+            "the resolve line says what reached no one: {lines:?}"
         );
         assert!(!lines.iter().any(|l| l["granted"] == true), "no grant is audited: {lines:?}");
         std::fs::remove_dir_all(&home).ok();
@@ -5625,7 +5728,231 @@ mod tests {
         let events = home.join("events.jsonl");
         let reply = with_redirected_audit_log(&home, || handle_approve(&home, &events, &parked, &req, None, NOW));
         assert_eq!(reply["ok"], false, "{reply}");
-        assert_eq!(reply["error"], "approved, client hung up before delivery", "{reply}");
+        assert_eq!(reply["error"], UNDELIVERED, "{reply}");
+        std::fs::remove_dir_all(&home).ok();
+    }
+
+    /// A reply sink for the outcome tests. `writes` counts the writes made so
+    /// far: the first one goes through whole (the interim line), the next takes
+    /// `takes` bytes, and every write after that fails.
+    struct ReplySink {
+        writes: usize,
+        takes: usize,
+    }
+
+    impl Write for ReplySink {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            let made = self.writes;
+            self.writes += 1;
+            match made {
+                0 => Ok(buf.len()),
+                1 => Ok(buf.len().min(self.takes)),
+                _ => Err(std::io::ErrorKind::BrokenPipe.into()),
+            }
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl BoundedWrite for ReplySink {
+        fn bound_writes(&mut self, _budget: std::time::Duration) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl PeerHangUp for ReplySink {
+        fn hung_up(&self) -> bool {
+            false
+        }
+    }
+
+    /// A sink whose client is gone: its first write, the interim line, fails.
+    struct GoneSink;
+
+    impl Write for GoneSink {
+        fn write(&mut self, _buf: &[u8]) -> std::io::Result<usize> {
+            Err(std::io::ErrorKind::BrokenPipe.into())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl BoundedWrite for GoneSink {
+        fn bound_writes(&mut self, _budget: std::time::Duration) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl PeerHangUp for GoneSink {
+        fn hung_up(&self) -> bool {
+            false
+        }
+    }
+
+    /// The id of the one ask a resolve has parked, once it has parked.
+    fn parked_id(parked: &ParkRegistry) -> String {
+        let started = std::time::Instant::now();
+        while parked.list().is_empty() && started.elapsed() < std::time::Duration::from_secs(5) {
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        let asks = parked.list();
+        asks.first().expect("the resolve parked an ask").0.clone()
+    }
+
+    /// The whole reply is written: the requester reads the interim line and the
+    /// value, both audit lines say granted, and the approver is told ok.
+    #[cfg(unix)]
+    #[test]
+    fn an_approve_whose_reply_is_written_whole_is_granted_on_both_sides() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let home = tmp_home("granted-whole");
+        let secret = seed_enrolled(&home, Policy::new("t", "scratch", "stored-value"));
+        let events = home.join("events.jsonl");
+        let (mut client, server) = UnixStream::pair().expect("socketpair");
+        client.write_all(b"{\"op\":\"resolve\",\"secret\":\"t\",\"consumer\":\"m\"}\n").unwrap();
+        client.set_read_timeout(Some(std::time::Duration::from_secs(5))).unwrap();
+        let parked = ParkRegistry::new();
+        let slots = UidSlots::new(PER_UID_CONNECTIONS);
+        let (approved, interim, reply) = with_redirected_audit_log(&home, || {
+            std::thread::scope(|s| {
+                let conn = s.spawn(|| handle_conn(&home, &events, server, &parked, &slots));
+                let id = parked_id(&parked);
+                let req = json!({"id": id, "totp": code_for_now(&secret, NOW)});
+                let approved = handle_approve(&home, &events, &parked, &req, None, NOW);
+                let mut reader = BufReader::new(client);
+                let mut interim = String::new();
+                reader.read_line(&mut interim).expect("the interim line");
+                let mut reply = String::new();
+                reader.read_line(&mut reply).expect("the reply line");
+                drop(reader);
+                conn.join().unwrap();
+                (approved, interim, reply)
+            })
+        });
+        assert_eq!(approved["ok"], true, "{approved}");
+        assert!(interim.contains("\"parked\":true"), "{interim}");
+        let reply: Value = serde_json::from_str(reply.trim()).unwrap();
+        assert_eq!(reply["value"], "stored-value", "{reply}");
+        let lines = own_log_lines(&home);
+        assert!(lines.iter().any(|l| l["op"].is_null() && l["status"] == "granted" && l["granted"] == true), "{lines:?}");
+        assert!(lines.iter().any(|l| l["op"] == "approve" && l["status"] == "granted" && l["granted"] == true), "{lines:?}");
+        std::fs::remove_dir_all(&home).ok();
+    }
+
+    /// The reply's write is cut by an error after five bytes: the value may be
+    /// partly out, so both audit lines say partial with the byte count, and the
+    /// approver is told the value may have reached the client.
+    #[test]
+    fn a_reply_cut_by_an_error_is_partial_on_both_sides() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let home = tmp_home("partial-cut");
+        let secret = seed_enrolled(&home, Policy::new("t", "scratch", "stored-value"));
+        let events = home.join("events.jsonl");
+        let parked = ParkRegistry::new();
+        let approved = with_redirected_audit_log(&home, || {
+            std::thread::scope(|s| {
+                let resolve = s.spawn(|| {
+                    let mut sink = ReplySink { writes: 0, takes: 5 };
+                    handle_line(&home, &events, r#"{"op":"resolve","secret":"t","consumer":"m"}"#, &parked, &mut sink, None)
+                });
+                let id = parked_id(&parked);
+                let req = json!({"id": id, "totp": code_for_now(&secret, NOW)});
+                let approved = handle_approve(&home, &events, &parked, &req, None, NOW);
+                resolve.join().unwrap();
+                approved
+            })
+        });
+        assert_eq!(approved["ok"], false, "{approved}");
+        let text = approved["error"].as_str().unwrap_or_default();
+        assert!(text.contains("the reply was cut after 5 of"), "{approved}");
+        assert!(text.contains("treat it as exposed"), "{approved}");
+        let lines = own_log_lines(&home);
+        assert!(
+            lines.iter().any(|l| l["op"].is_null()
+                && l["status"] == "partial"
+                && l["granted"] == false
+                && l["reason"].as_str().is_some_and(|r| r.contains("cut after 5 of"))),
+            "the resolve line says partial: {lines:?}"
+        );
+        assert!(lines.iter().any(|l| l["op"] == "approve" && l["status"] == "partial"), "{lines:?}");
+        std::fs::remove_dir_all(&home).ok();
+    }
+
+    /// The interim line cannot be written: the client is gone, so the park ends
+    /// at once by the hang-up path, not at its timer, and nothing stays parked.
+    #[test]
+    fn an_interim_write_that_fails_ends_the_park_at_once() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved = std::env::var(crate::park::PARK_TIMEOUT_ENV).ok();
+        std::env::set_var(crate::park::PARK_TIMEOUT_ENV, "30");
+        let home = tmp_home("interim-gone");
+        seed_enrolled(&home, Policy::new("t", "scratch", "stored-value"));
+        let events = home.join("events.jsonl");
+        let parked = ParkRegistry::new();
+        let started = std::time::Instant::now();
+        let reply = with_redirected_audit_log(&home, || {
+            handle_line(&home, &events, r#"{"op":"resolve","secret":"t","consumer":"m"}"#, &parked, &mut GoneSink, None)
+        });
+        let took = started.elapsed();
+        match saved {
+            Some(v) => std::env::set_var(crate::park::PARK_TIMEOUT_ENV, v),
+            None => std::env::remove_var(crate::park::PARK_TIMEOUT_ENV),
+        }
+        assert!(took < std::time::Duration::from_secs(5), "the park outlived its client by {took:?}");
+        assert_eq!(parked.list().len(), 0, "the ask stayed parked");
+        assert!(
+            reply["error"].as_str().unwrap_or_default().contains("the client hung up while its ask was parked"),
+            "{reply}"
+        );
+        let lines = own_log_lines(&home);
+        assert!(
+            lines.iter().any(|l| l["status"] == "denied" && l["reason"].as_str().is_some_and(|r| r.contains("hung up"))),
+            "{lines:?}"
+        );
+        std::fs::remove_dir_all(&home).ok();
+    }
+
+    /// A reply reports how much of it reached its writer: all of it, part of it
+    /// before an error, or none of it.
+    #[test]
+    fn a_reply_reports_how_much_of_it_reached_its_writer() {
+        let reply = json!({"ok": true});
+        let total = format!("{reply}\n").len();
+        assert_eq!(write_json_line(&mut Vec::new(), &reply), Delivery::Whole);
+        assert_eq!(
+            write_json_line(&mut ReplySink { writes: 1, takes: 5 }, &reply),
+            Delivery::Partial { written: 5, total }
+        );
+        assert_eq!(write_json_line(&mut ReplySink { writes: 1, takes: 0 }, &reply), Delivery::Nothing);
+    }
+
+    /// The broker's own audit log escapes each text once: a bidi override reads
+    /// as its escape, and a typed escape reads as the text it spells.
+    #[test]
+    fn the_own_audit_log_escapes_each_text_once() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let home = tmp_home("own-log-once");
+        append_own_log(&home, &json!({"bidi": "x\u{202e}y", "typed": "x\\u{202e}y"})).unwrap();
+        let logged = own_log_lines(&home);
+        assert_eq!(logged[0]["bidi"], "x\\u{202e}y", "{logged:?}");
+        assert_eq!(logged[0]["typed"], "x\\\\u{202e}y", "{logged:?}");
+        std::fs::remove_dir_all(&home).ok();
+    }
+
+    /// The events feed escapes each text once, as the audit logs do.
+    #[test]
+    fn the_events_feed_escapes_each_text_once() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let home = tmp_home("feed-once");
+        let events = home.join("events.jsonl");
+        append_events_feed(&events, &json!({"bidi": "x\u{202e}y", "typed": "x\\u{202e}y"}));
+        let fed: Value = serde_json::from_str(std::fs::read_to_string(&events).unwrap().trim()).unwrap();
+        assert_eq!(fed["bidi"], "x\\u{202e}y", "{fed}");
+        assert_eq!(fed["typed"], "x\\\\u{202e}y", "{fed}");
         std::fs::remove_dir_all(&home).ok();
     }
 
@@ -5855,13 +6182,13 @@ mod tests {
     // every single time.
 
     /// Plays the parked connection for a test: takes the one outcome a park
-    /// receives, answers the approver that the value reached it, and gives back
-    /// the value. An approver waits for that answer, so a test that approves a
-    /// park needs one of these reading the park's channel.
+    /// receives, reports that its reply was written whole, and gives back the
+    /// value. An approver waits for that report, so a test that approves a park
+    /// needs one of these reading the park's channel.
     fn answer_as_parked(rx: std::sync::mpsc::Receiver<ParkOutcome>) -> std::thread::JoinHandle<Option<String>> {
         std::thread::spawn(move || match rx.recv_timeout(std::time::Duration::from_secs(5)) {
             Ok(ParkOutcome::Approved(value, receipt)) => {
-                let _ = receipt.send(true);
+                let _ = receipt.send(Delivery::Whole);
                 Some(value)
             }
             _ => None,

@@ -2625,7 +2625,8 @@ mod tests {
     /// as a space: `\t`, `\n`, `\r`, and the `\x..` and `\u{..}` forms of those
     /// and of a space. A source file holds the escape, not the byte, so the
     /// scan reads each one as a space. Hex digits may be either case, and
-    /// `\u{..}` may be zero-padded.
+    /// `\u{..}` may be zero-padded or hold `_` after its first digit, as rustc
+    /// reads it.
     fn whitespace_escapes_as_spaces(line: &str) -> String {
         let mut out = String::with_capacity(line.len());
         let mut rest = line;
@@ -2660,11 +2661,12 @@ mod tests {
             return hex_value(hex.get(..2)?).map(|value| (4, value));
         }
         let body = text.strip_prefix("\\u{")?;
-        let digits = &body[..body.find('}')?];
+        let raw = &body[..body.find('}')?];
+        let digits: String = raw.chars().filter(|&c| c != '_').collect();
         if digits.len() > 6 {
             return None;
         }
-        hex_value(digits).map(|value| (3 + digits.len() + 1, value))
+        hex_value(&digits).map(|value| (3 + raw.len() + 1, value))
     }
 
     fn hex_value(digits: &str) -> Option<u32> {
@@ -2842,13 +2844,13 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(
             dir.join("escape.rs"),
-            "let tab = \"aoide secrets exec --totp\\t123456 -- psql\";\nlet newline = \"aoide secrets exec --totp\\n123456 -- psql\";\nlet hex = \"aoide secrets exec --totp\\x20123456 -- psql\";\nlet upper = \"aoide secrets exec --totp\\x0A123456 -- psql\";\nlet vt = \"aoide secrets exec --totp\\x0B123456 -- psql\";\nlet ff = \"aoide secrets exec --totp\\x0C123456 -- psql\";\nlet cr = \"aoide secrets exec --totp\\x0D123456 -- psql\";\nlet padded = \"aoide secrets exec --totp\\u{0009}123456 -- psql\";\nlet padded_lower = \"aoide secrets exec --totp\\u{000a}123456 -- psql\";\n",
+            "let tab = \"aoide secrets exec --totp\\t123456 -- psql\";\nlet newline = \"aoide secrets exec --totp\\n123456 -- psql\";\nlet hex = \"aoide secrets exec --totp\\x20123456 -- psql\";\nlet upper = \"aoide secrets exec --totp\\x0A123456 -- psql\";\nlet vt = \"aoide secrets exec --totp\\x0B123456 -- psql\";\nlet ff = \"aoide secrets exec --totp\\x0C123456 -- psql\";\nlet cr = \"aoide secrets exec --totp\\x0D123456 -- psql\";\nlet padded = \"aoide secrets exec --totp\\u{0009}123456 -- psql\";\nlet padded_lower = \"aoide secrets exec --totp\\u{000a}123456 -- psql\";\nlet padded_underscored = \"aoide secrets exec --totp\\u{00_0a}123456 -- psql\";\n",
         )
         .unwrap();
         let mut hits = Vec::new();
         totp_teaching_hits(&dir, &dir, &mut hits);
         std::fs::remove_dir_all(&dir).ok();
-        for line in 1..=9 {
+        for line in 1..=10 {
             assert!(hits.iter().any(|h| h.starts_with(&format!("escape.rs:{line}:"))), "an escape after --totp must be flagged on line {line}: {hits:?}");
         }
     }

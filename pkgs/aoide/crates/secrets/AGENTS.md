@@ -491,7 +491,10 @@
   through the backend ONLY after a code has already validated
   (`verify_totp_gate`, the one code check),
   and sends it straight down that channel — never holding it in the
-  registry, never in `approve`'s own wire reply back to the operator.
+  registry, never in `approve`'s own wire reply back to the operator. The
+  parked connection writes the reply, then reports how the write went down a
+  receipt that `approve` waits on for at most 11 s, with no lock held. That
+  report decides the audit status (the approve reply in CONTRACTS.md).
   Don't add a "cache the value once fetched, in case the connection reads
   slowly" optimization to `ParkedAsk` — the value must exist ONLY inside
   the one send/receive handoff, same as everywhere else in this crate.
@@ -551,7 +554,7 @@
   cannot be read shares one bucket). At `PER_UID_CONNECTIONS` (16; 8 under
   test) that uid is refused with the same shape of line, and no other uid is
   affected. An unidentified connection refused at its bucket's cap is told its
-  peer uid could not be read. `READ_TIMEOUT` (10 s; 1 s under test) bounds
+  peer uid could not be read. `READ_TIMEOUT` (10 s; 300 ms under test) bounds
   silence between bytes, and `WRITE_TIMEOUT` (10 s; 1 s under test) is one
   budget for a whole reply, however many writes it takes. A read
   that times out closes the connection with no reply. `REQUEST_DEADLINE`
@@ -573,13 +576,21 @@
     across its loop, each call bounded by what is left). A reader that takes
     it slower is dropped at the budget, so the broker thread waits at most
     10 s for each reply. A pending reply at the default park cap carries up
-    to about 256 KiB of reason and argv0 (32 parks at 4 KiB each), so it
-    needs a reader taking about 26 KiB a second.
+    to about 384 KiB of consumer, reason and argv0 (32 parks, 4 KiB each, in
+    three fields), so it needs a reader taking about 39 KiB a second.
   - 10 s request deadline: a request line not complete within 10 s of its
     first byte is dropped. There is no connection lifetime cap: a client that
     keeps sending complete requests keeps its connection for as long as it
     sends, and only the per-uid cap (16) bounds how many such connections one
     uid holds.
+  - Same-uid holding (accepted, ruling 111): a process at the person's own
+    uid that sends a complete request inside each read timeout keeps its
+    connection for as long as it sends. Sixteen of them refuse the person's
+    own `exec`, `pending` and `approve` calls with `this uid already holds its
+    16 connections; close one and retry`, approve included, while they run.
+    The person finds the holder with `ss -xp`, which names the process behind
+    each unix socket, and stops it, which frees its slots. Same-uid code can
+    already stop the conductor and the terminal (ruling 29).
   - 250 ms hang-up probe: one `poll(2)` per parked ask every 250 ms, which is
     also the detection latency. A client that only half-closes its write side
     is not treated as gone, so its park stays until the timer. Windows has no

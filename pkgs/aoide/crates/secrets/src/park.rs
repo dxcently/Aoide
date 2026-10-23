@@ -149,9 +149,9 @@ pub enum ParkOutcome {
     /// A valid code completed the ask; the broker already fetched the
     /// value fresh (`broker::fetch_secret_value`) — this is its ONE trip
     /// across the channel, never persisted anywhere in this module. The
-    /// second half answers the approver once: whether a connected client took
-    /// the value.
-    Approved(String, mpsc::Sender<bool>),
+    /// second half answers the approver once, with how the parked connection's
+    /// reply write went.
+    Approved(String, mpsc::Sender<Delivery>),
     /// The code validated, but the value could not be fetched afterward
     /// (e.g. the secret's policy was removed while parked) — a denial
     /// carrying the value-free reason, not a retryable park state; the
@@ -229,9 +229,9 @@ impl ParkedAsk {
     /// enforces the "exactly once" contract [`ParkRegistry::take`]'s
     /// removal already establishes at the registry level). A disconnected
     /// receiver (the parked connection dropped, e.g. the caller hung up
-    /// mid-park) is silently ignored — there is no one left to tell.
-    pub fn send(self, outcome: ParkOutcome) {
-        let _ = self.tx.send(outcome);
+    /// mid-park) is silently ignored, and `false` says nothing was handed over.
+    pub fn send(self, outcome: ParkOutcome) -> bool {
+        self.tx.send(outcome).is_ok()
     }
 }
 
@@ -447,13 +447,25 @@ impl ParkRegistry {
 /// frees its ask within one probe, so this is the detection latency.
 const HANGUP_PROBE: Duration = Duration::from_millis(250);
 
+/// How much of a reply reached its client. The reply's own write decides it,
+/// so the audit lines and the approver report what the write did.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Delivery {
+    /// Every byte was written.
+    Whole,
+    /// Some bytes were written, then the write failed or ran out of budget.
+    Partial { written: usize, total: usize },
+    /// No byte was written.
+    Nothing,
+}
+
 /// What [`wait_for_outcome`] resolves to: the parked connection's fate. It is
 /// one of [`ParkOutcome`]'s three, a timeout that never reaches the channel, or
 /// a hang-up that never reaches it either.
 pub enum WaitResult {
-    Approved(String),
-    /// Approved, but the client hung up before the value could reach it.
-    ApprovedUndelivered,
+    /// The value, and the receipt the approver waits on: the caller writes the
+    /// reply first, then sends how the write went.
+    Approved(String, mpsc::Sender<Delivery>),
     Denied(String),
     Dismissed,
     TimedOut,
@@ -505,14 +517,14 @@ pub fn wait_for_outcome(
     loop {
         let left = timeout.saturating_sub(started.elapsed());
         match rx.recv_timeout(left.min(HANGUP_PROBE)) {
-            Ok(outcome) => return from_outcome(outcome, hung_up),
+            Ok(outcome) => return from_outcome(outcome),
             // Unreachable in practice: a `ParkedAsk` is only removed by `take`,
             // whose caller always sends before its Sender drops. A safe
             // fallback rather than a panic.
             Err(mpsc::RecvTimeoutError::Disconnected) => return WaitResult::TimedOut,
             Err(mpsc::RecvTimeoutError::Timeout) if left.is_zero() => break,
             Err(mpsc::RecvTimeoutError::Timeout) if hung_up() => {
-                return if registry.remove_hung_up(id) { WaitResult::HungUp } else { settle(&rx, hung_up) };
+                return end_hung_up(registry, id, rx);
             }
             Err(mpsc::RecvTimeoutError::Timeout) => {}
         }
@@ -522,34 +534,34 @@ pub fn wait_for_outcome(
     } else {
         // Lost the race: an approve/dismiss already took the entry and is
         // sending (or has sent) right now.
-        settle(&rx, hung_up)
+        settle(&rx)
     }
 }
 
-/// Turn a completed ask into the parked connection's fate. An approval is
-/// answered back to the approver: it reached a client only if the client is
-/// still there to take it.
-fn from_outcome(outcome: ParkOutcome, hung_up: &dyn Fn() -> bool) -> WaitResult {
+/// Turn a completed ask into the parked connection's fate.
+fn from_outcome(outcome: ParkOutcome) -> WaitResult {
     match outcome {
-        ParkOutcome::Approved(v, receipt) => {
-            let reached = !hung_up();
-            let _ = receipt.send(reached);
-            if reached {
-                WaitResult::Approved(v)
-            } else {
-                WaitResult::ApprovedUndelivered
-            }
-        }
+        ParkOutcome::Approved(v, receipt) => WaitResult::Approved(v, receipt),
         ParkOutcome::Denied(e) => WaitResult::Denied(e),
         ParkOutcome::Dismissed => WaitResult::Dismissed,
     }
 }
 
+/// The path a hang-up takes: the ask is dropped with no timeout on record. If
+/// an approver already took it, that approver's outcome is read instead.
+pub fn end_hung_up(registry: &ParkRegistry, id: &str, rx: mpsc::Receiver<ParkOutcome>) -> WaitResult {
+    if registry.remove_hung_up(id) {
+        WaitResult::HungUp
+    } else {
+        settle(&rx)
+    }
+}
+
 /// The outcome a taker has committed to sending, read once this wait has lost
 /// the race to it.
-fn settle(rx: &mpsc::Receiver<ParkOutcome>, hung_up: &dyn Fn() -> bool) -> WaitResult {
+fn settle(rx: &mpsc::Receiver<ParkOutcome>) -> WaitResult {
     match rx.recv() {
-        Ok(outcome) => from_outcome(outcome, hung_up),
+        Ok(outcome) => from_outcome(outcome),
         // Unreachable in practice: the taker always sends before its Sender
         // drops. A safe fallback rather than a panic.
         Err(_) => WaitResult::TimedOut,
@@ -715,7 +727,7 @@ mod tests {
         let ask = reg.take(&id).unwrap();
         ask.send(ParkOutcome::Approved("the-value".to_string(), mpsc::channel().0));
         match wait_for_outcome(&reg, &id, rx, Duration::from_secs(5), &|| false) {
-            WaitResult::Approved(v) => assert_eq!(v, "the-value"),
+            WaitResult::Approved(v, _) => assert_eq!(v, "the-value"),
             _ => panic!("expected Approved"),
         }
     }
@@ -786,7 +798,7 @@ mod tests {
                     }
                 });
                 match wait_for_outcome(reg_ref, &id, rx, Duration::from_millis(10), &|| false) {
-                    WaitResult::Approved(v) => assert_eq!(v, "raced-value"),
+                    WaitResult::Approved(v, _) => assert_eq!(v, "raced-value"),
                     WaitResult::TimedOut => {} // also legitimate if the sender lost the race
                     _other => panic!("must be Approved or TimedOut, got a Dismissed/Denied"),
                 }

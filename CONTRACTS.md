@@ -6637,9 +6637,18 @@ The costs are part of the contract: a silent client holds a slot for up to
 10 s, so 128 of them refuse other callers for that window; there is no
 lifetime cap, so a client that keeps sending complete requests keeps its slot
 for as long as it sends, and only the per-uid cap bounds that; and a user
-running more than 16 connections at once is refused. A reply at the default
-park cap can carry up to about 256 KiB of reason and argv0, which its reader
-must take within 10 s.
+running more than 16 connections at once is refused. A pending reply at the
+default park cap can carry up to about 384 KiB of consumer, reason and argv0
+(32 parks, 4 KiB each, in three fields), which its reader must take within
+10 s: about 39 KiB a second.
+
+A process at the person's own uid that keeps sending complete requests, each
+inside the read timeout, is an accepted residual (ruling 111). Sixteen of them
+refuse the person's own `exec`, `pending` and `approve` calls with
+`"this uid already holds its 16 connections; close one and retry"` for as long
+as they run, approve included. The person finds the holder with `ss -xp`,
+which names the process behind each unix socket, and stops it. Same-uid code
+can already stop the conductor and the terminal (ruling 29).
 
 **A parked field is bounded.** A consumer, reason or argv0 over 4 KiB or 60
 lines is refused at park, and so is one holding a control or invisible
@@ -6746,11 +6755,28 @@ an ask that timed out; plus every `resolve`-shaped TOTP error above, and the
 budget's refusal (`"totp code invalid or expired"`,
 `"totp code already used"`,
 ...). This reply NEVER carries a `value` field — the value only ever
-reaches the ORIGINAL parked connection's own `resolve` reply. When the approved
-value reached no connected client, because its parked connection had hung up,
-the reply is `"ok":false` with `"error":"approved, client hung up before
-delivery"`; the audit records the approve as not granted with that reason, and
-no completed notice is sent.
+reaches the ORIGINAL parked connection's own `resolve` reply. That connection
+writes the reply itself and reports how the write went. This reply waits at
+most 11 s for that report (the 10 s reply budget and a 1 s allowance), holding
+no lock. The reply is `{"ok":true}` only when every byte was written.
+Otherwise it is `"ok":false`, and the audit line's `status` says what the
+write did:
+
+- `granted`: every byte was written. The value counts as handed over.
+- `undelivered`: no byte was written. The `error` is `"approved, but nothing
+  reached the client: no byte of the reply was written, so the value was not
+  handed over"`.
+- `partial`: the write failed or ran out of budget after part of the reply.
+  The `error` is `"approved, but the reply was cut after N of M bytes: part
+  of the value may have reached the client, so treat it as exposed"`, and
+  the line says `N of M bytes`. The value counts as exposed.
+- `unconfirmed`: no report came within the wait. The `error` is `"approved,
+  but the client's reply was not confirmed in time: the value may have reached
+  the client, so treat it as exposed"`.
+
+`granted` is the only status with `"granted":true`. The parked resolve's own
+audit line carries the same `status`. `denied` is for a refusal only. No
+completed notice is sent unless the status is `granted`.
 
 On a pipe, `secrets approve` reads the code as one stdin line of at most 256
 bytes, newline excluded. A line past 256 bytes is refused,

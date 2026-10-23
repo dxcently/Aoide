@@ -597,9 +597,18 @@ operator -> aoide secrets pending                          (a SEPARATE connectio
                resolve reply get the SAME denial; the ask is removed either
                way, never left dangling
 
-       <- the agent's ORIGINAL resolve call finally returns
-          {"ok":true,"value":"<value>"} — approve's own reply never
-          carried it
+       -> valid, and the re-gate allows: the approve sends the value down
+          the ORIGINAL connection, which writes its reply, then reports how
+          the write went. The approve waits at most 11 s for that report
+          (the 10 s reply budget and a 1 s allowance), holding no lock.
+            all bytes written -> {"ok":true}; both audit lines "granted"
+            no byte written   -> "undelivered"
+            part written      -> "partial", with "N of M bytes"
+            no report in time -> "unconfirmed"
+
+       <- the agent's ORIGINAL resolve call returns
+          {"ok":true,"value":"<value>"} only when every byte of it was
+          written; approve's own reply never carried it
 ```
 
 **The value never exists anywhere until the ask resolves.** Parking stores
@@ -691,6 +700,14 @@ Windows has no probe. The costs are the ones `AGENTS.md`'s accept-loop
 invariant states: a stalled client holds a slot for up to 10 s, a client that
 keeps sending complete requests keeps its slot, and a user running more than
 16 connections at once is refused.
+
+A process at the person's own uid that keeps sending complete requests, each
+inside the read timeout, is an accepted residual (ruling 111): sixteen of them
+refuse the person's own `exec`, `pending` and `approve` calls with `this uid
+already holds its 16 connections; close one and retry`, approve included, for
+as long as they run. The person finds the holder with `ss -xp`, which names the
+process behind each unix socket, and stops it. Same-uid code can already stop
+the conductor and the terminal (ruling 29).
 
 **Review fix, same commit as the fix below in git history: two
 read-modify-write sections the serial accept loop used to serialize for
