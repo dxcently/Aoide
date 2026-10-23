@@ -40,6 +40,44 @@ pub fn draw(f: &mut Frame, app: &App) {
     crate::board::draw(f, app);
 }
 
+/// The TOTP popup's fixed block draws each label before its value.
+const TOTP_SECRET_LABEL: &str = "TOTP for `";
+const TOTP_CONSUMER_LABEL: &str = "consumer (unverified): ";
+const TOTP_PROMPT_LABEL: &str = "totp: ";
+/// The fixed block's rows: the secret, the consumer, the prompt, a gap and the
+/// two-row hint.
+const TOTP_FIXED_ROWS: u16 = 6;
+/// The popup's minimum size, derived from the fixed block: its rows, one row for
+/// the marker and the two borders; its widest label, the two borders and one
+/// more column. Below either, the popup draws only [`totp_notice`].
+const TOTP_MIN_ROWS: u16 = TOTP_FIXED_ROWS + 1 + 2;
+const TOTP_MIN_COLUMNS: u16 =
+    longest_label(&[TOTP_SECRET_LABEL, TOTP_CONSUMER_LABEL, TOTP_PROMPT_LABEL]) as u16 + 2 + 1;
+
+const fn longest_label(labels: &[&str]) -> usize {
+    let mut widest = 0;
+    let mut i = 0;
+    while i < labels.len() {
+        if labels[i].len() > widest {
+            widest = labels[i].len();
+        }
+        i += 1;
+    }
+    widest
+}
+
+/// Whether the TOTP popup has room for its fixed block and its marker row. The
+/// prompt sends nothing when it does not (`App::handle_key`).
+pub(crate) fn totp_popup_fits(area: Rect) -> bool {
+    area.height >= TOTP_MIN_ROWS && area.width >= TOTP_MIN_COLUMNS
+}
+
+/// The one line the popup draws below its minimum: the command that shows the
+/// whole ask.
+fn totp_notice(id: &str) -> String {
+    format!("aoide secrets approve {id} shows the whole ask; this popup is too small")
+}
+
 pub(crate) fn draw_overlays(f: &mut Frame, app: &App) {
     let area = f.area();
     if app.help_open {
@@ -142,6 +180,11 @@ pub(crate) fn draw_overlays(f: &mut Frame, app: &App) {
                     popup,
                 );
             }
+            crate::app::InputKind::TotpCode { ask } if !totp_popup_fits(area) => {
+                let row = Rect::new(area.x, area.y + area.height / 2, area.width, area.height.min(1));
+                f.render_widget(Clear, row);
+                f.render_widget(Paragraph::new(cut_row(&totp_notice(&ask.id), usize::from(area.width))), row);
+            }
             crate::app::InputKind::TotpCode { ask } => {
                 // The claims wrap above a fixed block: the secret, the
                 // consumer, the `totp:` prompt, a gap and the hint. The secret
@@ -159,13 +202,12 @@ pub(crate) fn draw_overlays(f: &mut Frame, app: &App) {
                 above.push(ask.reason_claim());
                 above.push(ask.program_claim());
                 let rows = claim_rows(&above, inner_width);
-                const FIXED_ROWS: u16 = 6;
                 let height = area.height.min(
                     u16::try_from(rows.len())
                         .unwrap_or(u16::MAX)
-                        .saturating_add(FIXED_ROWS + 2),
+                        .saturating_add(TOTP_FIXED_ROWS + 2),
                 );
-                let room = usize::from(height.saturating_sub(FIXED_ROWS + 2));
+                let room = usize::from(height.saturating_sub(TOTP_FIXED_ROWS + 2));
                 let popup = Rect::new(
                     area.x + (area.width - width) / 2,
                     area.y + (area.height - height) / 2,
@@ -177,7 +219,7 @@ pub(crate) fn draw_overlays(f: &mut Frame, app: &App) {
                     .borders(Borders::ALL);
                 let [claims, fixed] = Layout::vertical([
                     Constraint::Min(0),
-                    Constraint::Length(FIXED_ROWS),
+                    Constraint::Length(TOTP_FIXED_ROWS),
                 ])
                 .areas(block.inner(popup));
                 let [secret, consumer, prompt, _gap, hint] =
@@ -195,19 +237,19 @@ pub(crate) fn draw_overlays(f: &mut Frame, app: &App) {
                     fit_claims(rows, room, inner_width, &ask.id).join("\n");
                 f.render_widget(Paragraph::new(claim_text), claims);
                 let secret_row = labelled_row(
-                    "TOTP for `",
+                    TOTP_SECRET_LABEL,
                     &format!("{}`", ask.secret),
                     inner_width,
                 );
                 f.render_widget(Paragraph::new(secret_row), secret);
                 let consumer_row = labelled_row(
-                    "consumer (unverified): ",
+                    TOTP_CONSUMER_LABEL,
                     &ask.consumer,
                     inner_width,
                 );
                 f.render_widget(Paragraph::new(consumer_row), consumer);
                 let typed = format!("{}▏", input.display_buffer());
-                let prompt_row = tail_row("totp: ", &typed, inner_width);
+                let prompt_row = tail_row(TOTP_PROMPT_LABEL, &typed, inner_width);
                 f.render_widget(Paragraph::new(prompt_row), prompt);
                 f.render_widget(
                     Paragraph::new(
@@ -1138,7 +1180,6 @@ fn fit_claims(
         Some(keep) => {
             rows.into_iter().take(keep).chain(marker(keep)).collect()
         }
-        None if room == 0 => Vec::new(),
         None => vec![cut_row(&marker_text(total, id), width)],
     }
 }
@@ -2444,6 +2485,39 @@ mod tests {
         for fixed in ["TOTP for `db`", "consumer (unverified): psql", "totp:"] {
             assert!(out.contains(fixed), "{fixed:?} stays on screen: {out}");
         }
+    }
+
+    /// At the popup's minimum, 26 columns by 9 rows, every fixed row and the
+    /// marker show, and no notice does.
+    #[test]
+    fn the_totp_popup_at_its_minimum_shows_every_fixed_row_and_the_marker() {
+        let reason = "r".repeat(300);
+        let a = totp_prompt_app("db", "c", &reason, "/usr/bin/psql");
+        let out = totp_popup_dump(&a, TOTP_MIN_COLUMNS, TOTP_MIN_ROWS);
+        for fixed in ["TOTP for `db`", "consumer (unverified): c", "totp:", "rows not shown"] {
+            assert!(out.contains(fixed), "{fixed:?} stays on screen: {out}");
+        }
+        assert!(!out.contains("this popup is too small"), "no notice at the minimum: {out}");
+    }
+
+    /// One row below the minimum height the popup draws only the notice, which
+    /// names the command that shows the whole ask: no fixed row is drawn.
+    #[test]
+    fn the_totp_popup_one_row_below_its_minimum_draws_the_notice() {
+        let a = totp_prompt_app("db", "c", "nightly", "/usr/bin/psql");
+        let out = totp_popup_dump(&a, 60, TOTP_MIN_ROWS - 1);
+        assert!(out.contains("aoide secrets approve 7"), "the notice names the command: {out}");
+        assert!(!out.contains("totp:"), "no fixed row below the minimum: {out}");
+    }
+
+    /// One column below the minimum width the popup draws only the notice, and
+    /// the command it names is cut by its end, never by its start.
+    #[test]
+    fn the_totp_popup_one_column_below_its_minimum_draws_the_notice() {
+        let a = totp_prompt_app("db", "c", "nightly", "/usr/bin/psql");
+        let out = totp_popup_dump(&a, TOTP_MIN_COLUMNS - 1, 20);
+        assert!(out.contains("aoide secrets approve 7"), "the notice names the command: {out}");
+        assert!(!out.contains("TOTP for"), "no fixed row below the minimum: {out}");
     }
 
     /// A wide reason wraps by display columns: no claim row is wider than the

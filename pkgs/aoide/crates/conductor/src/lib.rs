@@ -164,6 +164,7 @@ fn event_loop(terminal: &mut Terminal<CrosstermBackend<Stdout>>, app: &mut App) 
         // ratatui diffs against its previous buffer, so an unchanged frame is a
         // near no-op write — we can redraw every iteration and stay correct.
         terminal.draw(|f| ui::draw(f, app))?;
+        app.frame = terminal.size()?.into();
 
         if event::poll(TICK)? {
             match event::read()? {

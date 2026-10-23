@@ -399,10 +399,12 @@ impl ParkRegistry {
         removed
     }
 
-    /// Remove `id` because its client hung up. Nothing is sent and no timeout
-    /// is recorded, so the ask reads as dropped, not expired. Returns whether
-    /// this call removed it; `false` means an approve or dismiss took it first.
-    fn remove_hung_up(&self, id: &str) -> bool {
+    /// Remove `id` because its park ends with no timeout on record: its client
+    /// hung up, or its interim line could not be written whole. Nothing is sent
+    /// and no timeout is recorded, so the ask reads as dropped, not expired.
+    /// Returns whether this call removed it; `false` means an approve or
+    /// dismiss took it first.
+    fn remove_dropped(&self, id: &str) -> bool {
         self.parse_id(id).is_some_and(|n| self.lock().remove(&n).is_some())
     }
 
@@ -466,11 +468,22 @@ pub enum WaitResult {
     /// The value, and the receipt the approver waits on: the caller writes the
     /// reply first, then sends how the write went.
     Approved(String, mpsc::Sender<Delivery>),
+    /// Nothing was released: the ask was refused, or its approver ended without
+    /// answering ([`TAKER_ENDED`]).
     Denied(String),
     Dismissed,
     TimedOut,
+    /// The client closed its socket, and the hang-up probe saw it.
     HungUp,
+    /// The interim line did not reach the client whole, so the ask was dropped
+    /// before anything else could be written to that connection.
+    Unreachable,
 }
+
+/// The reason a park gives when the approver that took its ask ended without
+/// sending an outcome. Nothing was released, and no timer ran.
+pub const TAKER_ENDED: &str =
+    "the approve that took this ask ended without answering, so nothing was released; run the resolve again";
 
 /// Block the calling thread (a `handle_conn` connection thread — never the
 /// accept loop, which is why P-N2 moved `serve` to thread-per-connection in
@@ -518,10 +531,9 @@ pub fn wait_for_outcome(
         let left = timeout.saturating_sub(started.elapsed());
         match rx.recv_timeout(left.min(HANGUP_PROBE)) {
             Ok(outcome) => return from_outcome(outcome),
-            // Unreachable in practice: a `ParkedAsk` is only removed by `take`,
-            // whose caller always sends before its Sender drops. A safe
-            // fallback rather than a panic.
-            Err(mpsc::RecvTimeoutError::Disconnected) => return WaitResult::TimedOut,
+            // The taker's thread died between `take` and `send`, so its Sender
+            // dropped unsent. No timer ran, so this is not a timeout.
+            Err(mpsc::RecvTimeoutError::Disconnected) => return WaitResult::Denied(TAKER_ENDED.to_string()),
             Err(mpsc::RecvTimeoutError::Timeout) if left.is_zero() => break,
             Err(mpsc::RecvTimeoutError::Timeout) if hung_up() => {
                 return end_hung_up(registry, id, rx);
@@ -550,8 +562,19 @@ fn from_outcome(outcome: ParkOutcome) -> WaitResult {
 /// The path a hang-up takes: the ask is dropped with no timeout on record. If
 /// an approver already took it, that approver's outcome is read instead.
 pub fn end_hung_up(registry: &ParkRegistry, id: &str, rx: mpsc::Receiver<ParkOutcome>) -> WaitResult {
-    if registry.remove_hung_up(id) {
-        WaitResult::HungUp
+    end_dropped(registry, id, rx, WaitResult::HungUp)
+}
+
+/// The path an interim line that did not reach the client whole takes: the same
+/// drop as a hang-up, with its own word. If an approver already took the ask,
+/// that approver's outcome is read instead.
+pub fn end_unreachable(registry: &ParkRegistry, id: &str, rx: mpsc::Receiver<ParkOutcome>) -> WaitResult {
+    end_dropped(registry, id, rx, WaitResult::Unreachable)
+}
+
+fn end_dropped(registry: &ParkRegistry, id: &str, rx: mpsc::Receiver<ParkOutcome>, dropped: WaitResult) -> WaitResult {
+    if registry.remove_dropped(id) {
+        dropped
     } else {
         settle(&rx)
     }
@@ -562,9 +585,8 @@ pub fn end_hung_up(registry: &ParkRegistry, id: &str, rx: mpsc::Receiver<ParkOut
 fn settle(rx: &mpsc::Receiver<ParkOutcome>) -> WaitResult {
     match rx.recv() {
         Ok(outcome) => from_outcome(outcome),
-        // Unreachable in practice: the taker always sends before its Sender
-        // drops. A safe fallback rather than a panic.
-        Err(_) => WaitResult::TimedOut,
+        // The taker's thread died between `take` and `send`, so no outcome came.
+        Err(_) => WaitResult::Denied(TAKER_ENDED.to_string()),
     }
 }
 

@@ -356,6 +356,12 @@
   — the events feed can still miss a line (a truncation between polls, a
   process restart) in a way the broker's own in-memory `ParkRegistry`
   cannot.
+- **`watch`'s queue holds one form of each text field.** The events feed's
+  `parked` line is escaped once by the broker (`append_events_feed`), and the
+  `pending` reply is raw. `Queue::reconcile` escapes the text fields once with
+  `escape_for_log`, so an ask reads the same through either source (test
+  `an_ask_reads_the_same_through_the_feed_and_through_reconcile`). Don't escape
+  in `apply`, which would escape the feed twice, or in `approve`, which strips.
 - **The dialog substrate (`ZenityResult`/`locked_state`/`is_locked`/
   `run_entry_dialog`/`zenity_available`/`next_spawn_backoff`/
   `DISMISS_LABEL`/`strip_one_trailing_newline`) is a SHIM onto
@@ -493,9 +499,11 @@
   and sends it straight down that channel — never holding it in the
   registry, never in `approve`'s own wire reply back to the operator. The
   parked connection writes the reply, then reports how the write went down a
-  receipt that `approve` waits on with no lock held and no timer of its own:
-  the parked write's reply budget (10 s) bounds that wait. That report decides
-  the audit status (the approve reply in CONTRACTS.md).
+  receipt that `approve` waits on with no lock held and no timer of its own.
+  The parked side's writes bound that wait: the reply's budget (10 s) after the
+  reply's write starts, plus the rest of the interim line's write (at most
+  another 10 s) when the approve landed during it. That report decides the audit
+  status (the approve reply in CONTRACTS.md).
   Don't add a "cache the value once fetched, in case the connection reads
   slowly" optimization to `ParkedAsk` — the value must exist ONLY inside
   the one send/receive handoff, same as everywhere else in this crate.

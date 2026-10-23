@@ -297,7 +297,8 @@ cap plus one chunk.
                                                       the fast path)
 <- {"ok":true,"value":"<value>"}                    (granted — immediately,
                                                       or after a park completes)
-<- {"ok":false,"error":"<value-free message>"}      (denied/error/timeout/dismissed)
+<- {"ok":false,"error":"<value-free message>"}      (denied, error, timed-out,
+                                                      dismissed, unreachable)
 
 -> {"op":"put","secret":"<name>","value":"<value>","overwrite":<bool>?}
 <- {"ok":true,"replaced":<bool>}                    (stored — `replaced`
@@ -599,12 +600,16 @@ operator -> aoide secrets pending                          (a SEPARATE connectio
 
        -> valid, and the re-gate allows: the approve sends the value down
           the ORIGINAL connection, which writes its reply, then reports how
-          the write went. The approve waits at most the reply budget (10 s)
-          for that report, holding no lock.
+          the write went. The approve waits for that report, holding no lock:
+          at most the reply budget (10 s) after the reply's write starts. If
+          the approve landed while the interim line was still being written,
+          the wait also covers the rest of that line, at most another 10 s.
             all bytes written -> {"ok":true}; both audit lines "granted"
             no byte written   -> "undelivered"
             part written      -> "partial", with "N of M bytes"
             parked side died  -> "unconfirmed" (no receipt: it was dropped)
+            nothing released  -> "denied": refused, or a step failed; the
+                                 reason says which
 
        <- the agent's ORIGINAL resolve call returns
           {"ok":true,"value":"<value>"} only when every byte of it was

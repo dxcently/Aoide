@@ -237,9 +237,13 @@
   how many rows are not shown, and `aoide secrets approve <id>`, which prints
   the whole ask. If the room left is shorter than the marker's rows, the
   marker alone is drawn, cut to one row with an ellipsis. The minimum popup
-  height is 9 rows: 2 borders, the 6-row fixed block and 1 row for the marker.
-  At 8 rows it shows the fixed block with no claim row; below 8 it cannot show
-  the fixed block whole. `approve` draws its own context before its prompt.
+  is derived from the fixed block, not picked: 9 rows (the 6 fixed rows, one
+  row for the marker, 2 borders) and 26 columns (the widest fixed label,
+  `consumer (unverified): `, 23 columns, plus 2 borders and one more). Below
+  either, the popup draws one notice line naming `aoide secrets approve <id>`
+  and no fixed row, and Enter sends nothing: the prompt stays open with its
+  code. The prompt tests the size the last frame drew (`App::frame`).
+  `approve` draws its own context before its prompt.
   The conductor does not render the origin itself; the secrets crate does,
   once, as `originLine`.
 - While a pairing leg is in flight, no node write is advertised or dispatched:

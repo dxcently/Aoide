@@ -6758,9 +6758,12 @@ budget's refusal (`"totp code invalid or expired"`,
 `"totp code already used"`,
 ...). This reply NEVER carries a `value` field — the value only ever
 reaches the ORIGINAL parked connection's own `resolve` reply. That connection
-writes the reply itself and reports how the write went. This reply waits at
-most the reply budget (10 s) for that report, holding no lock. The reply is
-`{"ok":true}` only when every byte was written.
+writes the reply itself and reports how the write went. This reply waits for
+that report, holding no lock: at most the reply budget (10 s) after the reply's
+write starts. An approve that lands while the parked connection's interim line
+is still being written also waits for the rest of that line, at most another
+10 s, since each write has its own budget. The reply is `{"ok":true}` only when
+every byte was written.
 Otherwise it is `"ok":false`, and the audit line's `status` says what the
 write did:
 
@@ -6779,11 +6782,19 @@ write did:
   exposed"`.
 
 `granted` is the only status with `"granted":true`. The parked resolve's own
-audit line carries the same `status` (granted, partial or undelivered). A park
-that ends with no approve writes one of three words there instead: `timed-out`
-(its timer ended it), `hung-up` (its client closed the socket first) or
-`dismissed` (a `dismiss` ended it). `denied` is for a refusal only. No completed
-notice is sent unless the status is `granted`.
+audit line carries the same `status` for an approved ask (granted, partial or
+undelivered). A park that does not complete writes one of these words instead:
+
+- `timed-out`: its timer ended it.
+- `hung-up`: its client closed the socket, and the hang-up probe saw it.
+- `unreachable`: its interim line did not reach the client whole, so the ask
+  was dropped and no value was released.
+- `dismissed`: a `dismiss` ended it.
+- `denied`: nothing was released. The ask was refused, or a step failed (a
+  policy-file, TOTP-secret or backend read, or an approve that took the ask and
+  ended without answering). The reason says which.
+
+No completed notice is sent unless the status is `granted`.
 
 On a pipe, `secrets approve` reads the code as one stdin line of at most 256
 bytes, newline excluded. A line past 256 bytes is refused,

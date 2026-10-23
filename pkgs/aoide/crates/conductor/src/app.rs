@@ -962,6 +962,9 @@ impl StatusRow {
 /// The whole conductor state.
 pub struct App {
     pub panel: Panel,
+    /// The terminal's size as the last frame drew it. The TOTP prompt sends
+    /// nothing below its popup's minimum, so its Enter reads this.
+    pub frame: ratatui::layout::Rect,
     pub home_sel: usize,
     pub sidebar_focused: bool,
     pub sidebar_sel: usize,
@@ -1198,6 +1201,7 @@ impl App {
             sidebar_focused: true,
             sidebar_sel: 0,
             sidebar_scroll: 0,
+            frame: ratatui::layout::Rect::default(),
             sidebar_folded: HashSet::new(),
             sidebar_past_open: HashSet::new(),
             sidebar_section_folded: HashSet::new(),
@@ -5060,7 +5064,9 @@ impl App {
                 }
                 InputKind::TotpCode { ask } => {
                     let mut totp = input.buffer.trim().to_string();
-                    if totp.is_empty() {
+                    // Below the popup's minimum the claims cannot show, so nothing
+                    // is sent and the prompt stays open with its code.
+                    if totp.is_empty() || !crate::ui::totp_popup_fits(self.frame) {
                         self.input = Some(input);
                         return;
                     }
@@ -8224,6 +8230,7 @@ mod tests {
             .position(|r| matches!(r, ReviewRow::Ask(_)))
             .unwrap();
         app.select_review_row(ask);
+        app.frame = ratatui::layout::Rect::new(0, 0, 100, 40);
         app.handle_key(KeyEvent::from(KeyCode::Char('a')));
         for c in "123456".chars() {
             app.handle_key(KeyEvent::from(KeyCode::Char(c)));
@@ -8243,6 +8250,38 @@ mod tests {
             "the status line shows the child's result: {}",
             app.status_message()
         );
+    }
+
+    /// Below the popup's minimum the TOTP prompt sends nothing: Enter keeps the
+    /// prompt open with its code, and no approve starts, one row short of the
+    /// minimum height and one column short of its width.
+    #[test]
+    fn the_totp_prompt_sends_nothing_below_the_popup_minimum() {
+        let _t1 = T1_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        for frame in [ratatui::layout::Rect::new(0, 0, 60, 8), ratatui::layout::Rect::new(0, 0, 25, 20)] {
+            let env = SecretsEnv::new();
+            let requests = fake_approve_broker(&env.socket);
+            let mut app = t1_app();
+            app.approve_exe = aoide_test_support::built_aoide_bin();
+            app.select_panel(Panel::Pending);
+            settle_reads(&mut app);
+            let ask = app
+                .review_rows()
+                .iter()
+                .position(|r| matches!(r, ReviewRow::Ask(_)))
+                .unwrap();
+            app.select_review_row(ask);
+            app.frame = frame;
+            app.handle_key(KeyEvent::from(KeyCode::Char('a')));
+            for c in "123456".chars() {
+                app.handle_key(KeyEvent::from(KeyCode::Char(c)));
+            }
+            app.handle_key(KeyEvent::from(KeyCode::Enter));
+            assert!(app.input.is_some(), "the prompt stays open at {frame:?}");
+            assert!(app.secrets_action_busy().is_none(), "no approve starts at {frame:?}");
+            let sent = requests.lock().unwrap().clone();
+            assert!(sent.iter().all(|r| r["op"] != "approve"), "no approve reaches the broker at {frame:?}: {sent:?}");
+        }
     }
 
     /// Run a fixed number of ticks without waiting for any worker.

@@ -109,7 +109,7 @@ use aoide_protocol::dialog::{
     is_locked, locker_process_name, next_spawn_backoff, run_entry_dialog, sleep_backoff_interruptible,
     zenity_available, DISMISS_LABEL, SPAWN_BACKOFF_INITIAL, SPAWN_BACKOFF_MAX,
 };
-use aoide_protocol::untrusted::clean_line;
+use aoide_protocol::untrusted::{clean_line, escape_for_log};
 
 // ── P1: the pure fold ───────────────────────────────────────────────────
 
@@ -341,19 +341,30 @@ impl Queue {
     /// no `timeoutSecs` field at all. An ask already tracked (a `parked`
     /// line was seen for it) is left exactly as it was — reconcile never
     /// downgrades a KNOWN timeout back into an estimate.
+    ///
+    /// The `pending` reply is raw, and the events feed is escaped
+    /// ([`escape_for_log`]), so each text field is escaped here once, as the
+    /// feed escapes it. An ask then reads the same whichever of the two
+    /// reaches the queue first. The id stays as it is: the broker mints it, and
+    /// every later event matches on it.
     pub fn reconcile(&mut self, pending: &[PendingAsk], default_timeout_secs: u64) {
         self.asks.retain(|a| pending.iter().any(|p| p.id == a.id));
         for p in pending {
             if !self.asks.iter().any(|a| a.id == p.id) {
                 self.asks.push(Ask {
                     id: p.id.clone(),
-                    secret: p.secret.clone(),
-                    consumer: p.consumer.clone(),
+                    secret: escape_for_log(&p.secret),
+                    consumer: escape_for_log(&p.consumer),
                     requested_at: p.requested_at,
                     timeout_secs: default_timeout_secs,
                     estimated: true,
-                    reason: p.reason.clone(),
-                    origin: p.origin.clone(),
+                    reason: p.reason.as_deref().map(escape_for_log),
+                    origin: client::PendingOrigin {
+                        username: p.origin.username.as_deref().map(escape_for_log),
+                        pid: p.origin.pid,
+                        comm: p.origin.comm.as_deref().map(escape_for_log),
+                        hostname: p.origin.hostname.as_deref().map(escape_for_log),
+                    },
                 });
             }
         }
@@ -1278,6 +1289,54 @@ mod tests {
         let ask = q.get("1").unwrap();
         assert_eq!(ask.timeout_secs, 60);
         assert!(!ask.estimated);
+    }
+
+    /// One ask with a bidi character in its comm and a typed escape in its
+    /// reason reads the same through the feed (`apply`, the broker's escape
+    /// applied to the line) and through the pending reply (`reconcile`, raw).
+    #[test]
+    fn an_ask_reads_the_same_through_the_feed_and_through_reconcile() {
+        let raw_comm = "evil\u{202e}name";
+        let raw_reason = r"typed \u{202e} here";
+        let feed = aoide_protocol::untrusted::escape_for_log_value(&json!({
+            "event": "parked",
+            "id": "ab12-7",
+            "secret": "t",
+            "consumer": "m",
+            "timeoutSecs": 300,
+            "reason": raw_reason,
+            "origin": {"username": "khoa", "pid": 42, "comm": raw_comm, "hostname": "osaka"},
+        }));
+        let event = parse_notify_line(&feed.to_string(), 1_700_000_000).expect("the feed line parses");
+        let mut from_feed = Queue::new();
+        from_feed.apply(&event);
+
+        let pending = vec![PendingAsk {
+            id: "ab12-7".into(),
+            secret: "t".into(),
+            consumer: "m".into(),
+            requested_at: 1_700_000_000,
+            peer_uid: Some(1000),
+            peer_sid: None,
+            reason: Some(raw_reason.into()),
+            argv0: None,
+            origin: client::PendingOrigin {
+                username: Some("khoa".into()),
+                pid: Some(42),
+                comm: Some(raw_comm.into()),
+                hostname: Some("osaka".into()),
+            },
+        }];
+        let mut from_pending = Queue::new();
+        from_pending.reconcile(&pending, 300);
+
+        let fed = from_feed.get("ab12-7").expect("the feed's ask");
+        let reconciled = from_pending.get("ab12-7").expect("the reconciled ask");
+        assert!(popup_text(fed, 30).contains(r"\u{202e}name"), "{}", popup_text(fed, 30));
+        assert_eq!(popup_text(fed, 30), popup_text(reconciled, 30));
+        let mut aligned = fed.clone();
+        aligned.estimated = reconciled.estimated;
+        assert_eq!(format_prompt_header(&aligned, 30, 0), format_prompt_header(reconciled, 30, 0));
     }
 
     // ── pick_next (queue ordering) ───────────────────────────────────
