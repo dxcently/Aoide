@@ -4848,6 +4848,14 @@ mod tests {
         assert_refused_at_ingest("argv0", r#"{"op":"resolve","secret":"t","consumer":"m","argv0":"sh\u001b[2J"}"#);
     }
 
+    /// U+2028 breaks a line on screen, and `lines()` does not count it, so 61
+    /// of them pass the 60-line bound on their own. `is_unsafe` refuses them.
+    #[test]
+    fn a_reason_of_61_line_separators_is_refused_and_parks_nothing() {
+        let line = json!({"op": "resolve", "secret": "t", "consumer": "m", "reason": "\u{2028}".repeat(61)}).to_string();
+        assert_refused_at_ingest("reason", &line);
+    }
+
     /// A field over the approve dialog's bound is refused at park, so no
     /// person is shown a field that cannot be read on one screen.
     #[test]

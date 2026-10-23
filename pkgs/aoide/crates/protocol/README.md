@@ -52,7 +52,9 @@ other crate in this workspace sits above.
   did-you-mean, and `lead` (the first clause of a description).
 - `untrusted` — text this process did not write, made safe to print:
   `is_unsafe` (the one table — every control character, every Unicode `Cf`
-  mark, and the invisible fillers and variation selectors), `strip_unsafe`,
+  mark, the invisible fillers and variation selectors, the line and paragraph
+  separators, and the combining grapheme joiner and the Mongolian and Khmer
+  fillers), `strip_unsafe`,
   `clip_flat` (whitespace flattened, clipped by characters with `…`), and
   `clean_line` (the two at `LINE_MAX`, 200). Every door that prints a peer's
   bytes cleans them here: `aoide-client` the words of a far door's mail answer,

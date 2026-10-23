@@ -46,8 +46,11 @@ pub fn strip_unsafe(s: &str) -> String {
 /// `clean_block` for the multi-line texts (a letter body, a run's
 /// instructions), and its ping-back's `SAY_MAX`-clipped `clean` for a line
 /// bound for a composer.
+///
+/// The line and paragraph separators, U+2028 and U+2029, are unsafe as well: a
+/// terminal breaks a line at either, and [`str::lines`] does not count them.
 pub fn is_unsafe(c: char) -> bool {
-    c.is_control() || is_format(c) || is_invisible(c)
+    c.is_control() || is_format(c) || is_invisible(c) || matches!(c, '\u{2028}' | '\u{2029}')
 }
 
 /// The text an audit writer stores for a character no terminal may be handed.
@@ -97,6 +100,9 @@ fn is_invisible(c: char) -> bool {
         | '\u{ffa0}'                        // halfwidth Hangul filler
         | '\u{fe00}'..='\u{fe0f}'           // variation selectors 1-16
         | '\u{e0100}'..='\u{e01ef}'         // variation selectors supplement
+        | '\u{034f}'                        // combining grapheme joiner
+        | '\u{180b}'..='\u{180d}'           // Mongolian free variation selectors
+        | '\u{17b4}'..='\u{17b5}'           // Khmer vowel inherent aq, aa
     )
 }
 
@@ -190,6 +196,18 @@ mod tests {
         // form for vertical), U+2801 (braille pattern dots-1) and U+3163 are
         // real text and stay.
         assert_eq!(clean_line("\u{fe10}\u{2801}\u{3163}"), "\u{fe10}\u{2801}\u{3163}");
+    }
+
+    #[test]
+    fn line_separators_and_the_fillers_are_unsafe() {
+        for c in ['\u{2028}', '\u{2029}', '\u{34f}', '\u{180b}', '\u{180c}', '\u{180d}', '\u{17b4}', '\u{17b5}'] {
+            assert!(is_unsafe(c), "U+{:04X} must be unsafe", u32::from(c));
+        }
+    }
+
+    #[test]
+    fn clean_line_strips_the_combining_joiner_and_the_mongolian_and_khmer_fillers() {
+        assert_eq!(clean_line("a\u{34f}b\u{180b}c\u{180d}d\u{17b4}e\u{17b5}f"), "abcdef");
     }
 
     #[test]

@@ -1561,8 +1561,9 @@ in the message.
   tick. `deliver`'s gate label is a parameter: `autogate-child` for a local
   line, `autogate-child remote` for a pulled one. `clean`/`quote`/`reclean` all
   judge through `common::strip_unsafe` — control, Unicode `Cf`, AND the
-  invisible non-`Cf` fillers (`is_invisible`: variation selectors, Hangul and
-  braille blanks) — and a new sanitizer anywhere in this crate must too, never
+  invisible non-`Cf` fillers (`is_invisible`: variation selectors, Hangul,
+  braille, Mongolian and Khmer fillers, U+034F), and the line and paragraph
+  separators — and a new sanitizer anywhere in this crate must too, never
   a copied table (S9's own review found the local lane filtering `is_control`
   only, and the fillers missing). The table and its filters are
   `aoide_protocol::untrusted`'s, re-exported through `common` so these paths
