@@ -5368,6 +5368,7 @@ mod tests {
     /// per-read timeout, so only the whole-line deadline can close it.
     #[test]
     fn a_trickled_request_line_is_closed_at_its_deadline() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         assert_closed_at_deadline(b"{\"op\"");
     }
 
