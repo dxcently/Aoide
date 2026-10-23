@@ -2703,7 +2703,7 @@ mod tests {
         let home = tmp_home("origin-deny");
         seed(&home, &[Policy::new("t", "scratch", "stored-value")]);
         let (granted, result) = gate_outcome_as_result(resolve_gate(
-            &home, "t", "m", 
+            &home, "t", "m",
             Some(("remote-orch", "node:sakaki")),
         ));
         assert!(!granted);
@@ -2725,7 +2725,7 @@ mod tests {
         p.allow_remote_origin = true;
         seed(&home, &[p]);
         let (granted, result) = gate_outcome_as_result(resolve_gate(
-            &home, "t", "m", 
+            &home, "t", "m",
             Some(("remote-orch", "node:sakaki")),
         ));
         assert!(granted);
@@ -2744,7 +2744,7 @@ mod tests {
         seed(&home, &[Policy::new("t", "scratch", "stored-value")]);
 
         let (granted, result) = gate_outcome_as_result(resolve_gate(
-            &home, "t", "m", 
+            &home, "t", "m",
             Some(("local-orch", "local")),
         ));
         assert!(granted, "a local-origin attested caller is admitted");
@@ -2772,7 +2772,7 @@ mod tests {
         seed(&home, &[listed, totp_gated]);
 
         let (granted, result) = gate_outcome_as_result(resolve_gate(
-            &home, "t", "someone-else", 
+            &home, "t", "someone-else",
             Some(("remote-orch", "node:sakaki")),
         ));
         assert!(!granted);
