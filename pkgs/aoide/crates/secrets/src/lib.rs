@@ -136,7 +136,9 @@ pub mod watch;
 
 /// A crate-wide lock serialising every test that mutates process-global
 /// env (`AOIDE_SECRETS_HOME`, `AOIDE_SECRETS_SOCKET`, `AOIDE_AUDIT_LOG`) —
-/// same pattern as `aoide_conduct`/`aoide_storage`/`aoide_server`'s own
+/// and every test that reads `TMPDIR` through `tmp_home`, `tmp_path` or
+/// `write_shim`. A test takes it before any other test-only lock. Same
+/// pattern as `aoide_conduct`/`aoide_storage`/`aoide_server`'s own
 /// `env_lock()` (`pkgs/aoide/crates/AGENTS.md`'s per-crate-tests rule).
 /// Not delegated to `aoide-test-support`: this crate has no dev-dependency
 /// on it, and a two-line local mutex is cheaper than adding one.
