@@ -593,10 +593,19 @@ terminal's rights to its remote callers.
   signer, when the request is tagged. What it does not stop: an untagged call to
   one of the four methods, which stays open until the planned switch (not
   built). On the same listener its replay is refused by the nonce set. Across
-  listeners a deposit is filed once, by msgid, and a poll retires only what its
-  poller acknowledges, whichever listener serves it. Also not stopped: a process
-  running as this box's uid can sign as the box, since the key is on this box's
-  disk; and each listener process keeps its own nonce sets (see Nonces, below).
+  listeners the method's own check bounds it: a deposit is filed once per
+  mailbox, by msgid; a poll retires only what its poller acknowledges; a
+  superseded binding is refused as stale; a charterFetch changes nothing. An
+  untagged frame is not bound to a door, so a node holding a signer's untagged
+  frames from the last 120 seconds can replay them at another door that pairs
+  the same signer. That door applies the same checks to its own mailbox and
+  outbox, and each replay fills the signer's nonce set there; once the set holds
+  the cap (512 by default), the signer's own frames at that door are refused
+  -32013 until they expire. Also not stopped: PAIRPOLL records no nonce and has
+  no start check, so a replay inside its skew window re-releases this node's own
+  key and binding, a public read; a process running as this box's uid can sign
+  as the box, since the key is on this box's disk; and each listener process
+  keeps its own nonce sets (see Nonces, below).
 - **Signed answers (relay-proof).** A JSON-RPC POST to `/` whose signature
   verified is answered with `X-Aoide-Answer-Signature`: the identity key signs
   `wire_auth::answer_string` over the request's own signature and nonce, the
@@ -625,9 +634,11 @@ terminal's rights to its remote callers.
   bind) is refused `-32008`, naming both times. The nonce sets are per listener
   process and a restart clears them, so this is what keeps a restart from
   re-admitting a frame an earlier process accepted: such a frame is stamped at
-  most five seconds past its accept time. A client whose clock runs behind the
-  door's is refused for up to that lag after a restart, and its link backs off,
-  doubling, while it is refused.
+  most five seconds past its accept time. That holds while the door's clock does
+  not step back across a restart; if it steps back, such a frame can be accepted
+  again until its stamp plus 120 seconds. A client whose clock runs behind the
+  door's is refused for up to five seconds plus that lag after a restart, and
+  its link backs off, doubling, while it is refused.
 - **The mail adapter (`aoide mail serve`, H1) — a second LISTENER, and not a
   second door.** `serve_mail` binds `127.0.0.1` and nothing else (no bind
   option, no flag, no env var: the front that faces the mesh is a

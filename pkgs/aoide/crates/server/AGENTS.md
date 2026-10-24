@@ -681,7 +681,10 @@ a2a spawn probe needs `/bin/sh` + `printf`'s byte-exact output.
   `SKEW_AHEAD_SECS` (5s) is `-32008`, judged with the clock window in
   `time_refusal` before any signature work. Don't drop it on the theory that the
   skew window already covers the restart gap: the sets are cleared by every
-  restart, and the start check is what closes that gap. The in-process doors
+  restart, and the start check is what closes that gap, while the door's clock
+  does not step back across a restart. After a backward step, an earlier frame
+  passes the start check and is accepted again until its stamp plus 120s. The
+  in-process doors
   (`raise_mail_adapter`, `raise_a2a_door`) pass `0`. Helpers that spawn the real
   binary (`raise_door` in cli, the two-mesh launcher) wait until the clock is
   past their start plus 5s before they sign anything.

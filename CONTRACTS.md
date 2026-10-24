@@ -8620,12 +8620,16 @@ disqualified for a cheaper reason. Steps 1 to 6 verify the frame; steps 7 and
    caller's clock is fast. **Start check**, same step and same code: a timestamp
    at or before this process's start plus 5 seconds is `-32008` too, a taught
    error naming both times. `serve` and `serve_mail` record the start once,
-   before they bind. Both times are whole seconds. The nonce sets (step 7) are
+   before they bind. Both times are whole seconds. The nonce sets (step 8) are
    process-local and a restart clears them; the start check is what stops a
    frame an earlier process accepted from being accepted again. The 5 seconds
    ahead is what makes that enough: a frame an earlier process accepted was
    accepted no later than the restart, and stamped at most 5 seconds past its
-   accept time, so it is stamped at most 5 seconds past the restart.
+   accept time, so it is stamped at most 5 seconds past the restart. The bound
+   holds while the door's clock does not step back across a restart. If it
+   does, such a frame can pass the start check and be accepted again until its
+   stamp plus 120 seconds. No clock floor is persisted, because ruling 136 keeps
+   no replay memory on disk.
 5. **By-key resolution**: the signature — over the canonical string rebuilt
    from the VERIFIER's own parsed request (never trusting a wire-carried
    canonical string) — is tried against every `verified` node's stored
@@ -8707,12 +8711,18 @@ for every caller that never signs.
 signed request it was sent. A request carrying `to` cannot be used at a third
 door: that door's key is not the one it names, so step 7 refuses it. What `to`
 does not stop: (a) an untagged request to one of the four old-client methods,
-which is admitted without `to` and so is not audience-bound until the planned
-switch (not built). Its replay at another door inside the window is not refused
-by step 7. What bounds it is the method: a deposit is filed once, since its
-msgid is already in the mailbox and the second copy is answered `duplicate`; a
-poll retires only what its poller acknowledges, so a replayed poll hands over
-only what is still unacknowledged. (b) Each listener process keeps its own nonce
+which is admitted without `to` and so is not audience-bound while the old-client
+arm stands. Its replay at another door inside the window is not refused by
+step 7. At the listener that took the first copy, a replay inside the window is
+refused `-32009` by the nonce set (step 8, server `a2a.rs:5902`). Past that
+point the method's own check bounds a replay at each door it reaches. A deposit
+is filed once per mailbox, and the second copy is answered `duplicate`
+(`a2a.rs:3017`). A poll retires only the msgids its signed body names as
+acknowledged (`a2a.rs:3337`, `3396-3401`), so a replayed poll hands over only
+what is still unacknowledged. A binding goes to `learn_binding`
+(`a2a.rs:3824`), which refuses a superseded generation and takes a current one
+as a no-op (storage `seal.rs:613`). A charterFetch reads the in-force charter
+and never writes (`a2a.rs:4063`). (b) Each listener process keeps its own nonce
 sets, so a frame one listener admitted is not in the other's set. The same
 deposit replayed at the other listener is answered `duplicate` by the msgid
 check, as in (a); that is the bound the per-listener sets rest on. (c) A process
@@ -8724,15 +8734,24 @@ carries `to`.
 **What the nonce sets and the start check stop.** A paired node holds every
 signed request it was sent, and these two checks stop it reusing one. After a
 restart, a frame the earlier process accepted is refused by the start check,
-since the sets were cleared. Across keys, one key's flood fills only its own
-set, and no unexpired entry is ever evicted, so it cannot make another key's
-recorded nonce replayable. Each listener process keeps its own sets, so a frame
-one listener admitted is not in the other's set; **What `to` stops** says what
-that leaves open. What remains is self-limitation: a signer that sends more than
+since the sets were cleared, while the door's clock does not step back across
+the restart (step 4). Across keys, one key's flood fills only its own set, and
+no unexpired entry is ever evicted, so it cannot make another key's recorded
+nonce replayable. Each listener process keeps its own sets, so a frame one
+listener admitted is not in the other's set; **What `to` stops** says what that
+leaves open. What remains is the signer's own cap: a signer that sends more than
 `AOIDE_NONCE_CAP` requests (default 512) inside one skew window, about 4 a
 second sustained under the defaults, gets `-32013` for the excess until entries
-expire. That costs that signer throughput and nothing else. A process running as
-this box's uid can still sign as the box; that is out of scope here.
+expire, which costs that signer throughput at that door. Untagged frames add a
+cross-door fill: a node holding a signer's untagged frames from the last 120
+seconds can replay them at another door that pairs the same signer. Each replay
+fills that signer's set there, and once the set holds the cap, the signer's own
+frames at that door are refused `-32013` until they expire. PAIRPOLL is outside
+the sets. It records no nonce and has no start check, so its only bound is the
+skew window, 120 seconds behind and 5 ahead (server `a2a.rs:4480`). A replay
+inside that window re-releases this node's own pubkey and binding
+(`a2a.rs:4495-4513`), a public read. The pairing slice decides it. A process
+running as this box's uid can still sign as the box; that is out of scope here.
 
 **Nonce sets** (`aoide-server::a2a::NONCE_SETS`) — a bounded, in-memory,
 PER-LISTENER-PROCESS map from each verifying pubkey to its own set of `nonce
@@ -8750,9 +8769,11 @@ steps 7 and 8 reaches a set, and a set is never left empty in the map, because
 the check that empties one records its own nonce into it. The cost of the start
 check: for the first 5 seconds after each start, signed calls are refused
 `-32008`, and a caller whose clock runs more than 5 seconds fast is refused the
-same way. Its message names both times, and a retry goes through once the
-door's clock is past the bound and the caller's own clock is within 5 seconds
-of it.
+same way. Its message names both times, and a fast caller's retry goes through
+once the door's clock is past the bound and its own clock is within 5 seconds of
+it. A caller whose clock runs L seconds slow is refused the same way until the
+door's clock passes S + 5 + L, where S is the door's start: five seconds plus
+its lag.
 
 **Error codes**: `-32007` (signature verification failed — covers the
 malformed-header and ambiguous-signer shapes above, plus the single
