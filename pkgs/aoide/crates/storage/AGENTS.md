@@ -175,10 +175,19 @@
   relayed entry never does: `reseal_entry` seals it to its destination or
   withholds it (`Reseal::Withheld`, `HandOver::Withheld`), and the answer lists
   it under `withheld`. The hand-over is a pure read: nothing is marked, moved or
-  counted. The one write a poll makes on the hub is `defer_named`, which stamps
-  only the caller's own entries it names in `deferred`, never a returned own
-  letter (MAIL.md §Wire).
+  counted. A poll writes only what its caller named: `return_refused` returns a
+  held own letter the caller names in `refused` (before anything is offered),
+  and `defer_named` stamps only the caller's own entries it names in `deferred`,
+  never a returned own letter (MAIL.md §Wire).
 
+- **A poller's refusals are kept per node (`.refused`).** `record_refused`
+  stores each `{msgid, word}` a poll refused, keep-list words included, and
+  `refused_pending` is what the next ask carries. `clear_refused` drops only the
+  pairs that ask sent, so a refusal recorded while its answer was in flight is
+  kept. Nothing caps the file, as nothing caps `.filed`; one answer's containers
+  bound what it can hold. On the hub's side `return_refused` is the only reader
+  of a `refused` name, and it acts on a held own letter of the caller's own
+  spool alone (MAIL.md §Wire).
 - **Enduring identity is independent of knowledge configuration.** Bind an
   explicit `valid_node_name`-shaped key in `session::bind_enduring_agent`;
   do not infer it from a persona title, session name, or optional Mneme map.

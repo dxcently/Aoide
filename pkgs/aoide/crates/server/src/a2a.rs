@@ -3367,6 +3367,23 @@ fn mail_poll(params: &Value, ctx: &RequestCtx) -> Result<Value, (i64, String)> {
         return Err((-32602, "invalid params: node is required".to_string()));
     }
     let poller = ctx.signed_caller.map(|c| c.name.to_string()).unwrap_or_default();
+    // What the poller REFUSED, with the word that refused each (ruling 131): a
+    // held letter of this box's own that the poller names is returned to its
+    // sender at once, before `deferred` and the answer are built, so the answer
+    // does not offer it and the acknowledgements below find it no longer held.
+    let refused: Vec<aoide_storage::outbox::PollRefusal> = params
+        .get("refused")
+        .and_then(Value::as_array)
+        .map(|list| {
+            list.iter()
+                .filter_map(|item| serde_json::from_value::<aoide_storage::outbox::PollRefusal>(item.clone()).ok())
+                .collect()
+        })
+        .unwrap_or_default();
+    for refusal in &refused {
+        aoide_storage::outbox::return_refused(&poller, &refusal.msgid, &refusal.word)
+            .map_err(|e| (-32603_i64, format!("internal error: {e}")))?;
+    }
 
     // What the poller says it was handed and did NOT file (its box was full, or
     // it could not take the bytes yet). Each msgid that is a well-formed msgid
@@ -15902,6 +15919,83 @@ mod tests {
             "the ok line names what it retired: {log}"
         );
 
+        mail_deposit_cleanup(&root, saved_state, saved_stage);
+    }
+
+    /// **A letter the poller both files and refuses is returned, not retired.** The
+    /// refusal is applied before the acknowledgements, so the `filed` name finds the
+    /// letter no longer held: it is returned with its word, offered to nobody, and
+    /// not retired.
+    #[test]
+    fn a_letter_both_filed_and_refused_is_returned_not_retired() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
+        let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
+        let root = mail_deposit_root("refused-and-filed");
+        act_as(&root, "here");
+        let saved_audit = std::env::var("AOIDE_AUDIT_LOG").ok();
+        std::env::set_var("AOIDE_AUDIT_LOG", root.join("log"));
+
+        setup_signed_node_with_allows("box-b", &["message"]);
+        let envelope = aoide_storage::mail::mint_outbound_letter("alice", "box-b", "bob", "for b").unwrap();
+        let msgid = envelope.msgid.clone();
+        aoide_storage::outbox::write_entry("box-b", &aoide_storage::outbox::OutboxEntry::held(envelope)).unwrap();
+        let audit_log = root.join("log");
+        let ctx = mail_deposit_ctx(&audit_log, Some("box-b"));
+
+        let answer = mail_poll(
+            &json!({ "node": "box-b", "filed": [msgid], "refused": [{ "msgid": msgid, "word": "unknown-box" }] }),
+            &ctx,
+        )
+        .unwrap();
+        assert_eq!(answer["envelopes"].as_array().map_or(0, Vec::len), 0, "a returned letter is not offered: {answer}");
+        let entries = aoide_storage::outbox::list_entries("box-b").unwrap();
+        assert_eq!(entries.len(), 1, "returned, not retired");
+        assert!(entries[0].refused && !entries[0].is_held(), "marked returned");
+        assert_eq!(entries[0].last_outcome, "refused: unknown-box", "with the word that refused it");
+        let log = std::fs::read_to_string(&audit_log).unwrap_or_default();
+        assert!(log.contains("mail.outbox.returned"), "the return is in the log: {log}");
+        assert!(!log.contains("mail.outbox.filed"), "and nothing was retired: {log}");
+
+        match saved_audit {
+            Some(v) => std::env::set_var("AOIDE_AUDIT_LOG", v),
+            None => std::env::remove_var("AOIDE_AUDIT_LOG"),
+        }
+        mail_deposit_cleanup(&root, saved_state, saved_stage);
+    }
+
+    /// **A poll that names no refusals is the poll it always was.** Its `filed` name
+    /// ends a held letter as before, and nothing is returned.
+    #[test]
+    fn an_old_poll_without_refused_retires_as_before() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
+        let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
+        let root = mail_deposit_root("refused-old-poll");
+        act_as(&root, "here");
+        let saved_audit = std::env::var("AOIDE_AUDIT_LOG").ok();
+        std::env::set_var("AOIDE_AUDIT_LOG", root.join("log"));
+
+        setup_signed_node_with_allows("box-b", &["message"]);
+        let envelope = aoide_storage::mail::mint_outbound_letter("alice", "box-b", "bob", "for b").unwrap();
+        let msgid = envelope.msgid.clone();
+        aoide_storage::outbox::write_entry("box-b", &aoide_storage::outbox::OutboxEntry::held(envelope)).unwrap();
+        let audit_log = root.join("log");
+        let ctx = mail_deposit_ctx(&audit_log, Some("box-b"));
+
+        let _ = mail_poll(&json!({ "node": "box-b", "filed": [msgid] }), &ctx).unwrap();
+        assert!(
+            aoide_storage::outbox::list_entries("box-b").unwrap().is_empty(),
+            "named by filed alone, the held letter is retired as before"
+        );
+        let log = std::fs::read_to_string(&audit_log).unwrap_or_default();
+        assert!(log.contains("mail.outbox.filed"), "the retirement is in the log: {log}");
+        assert!(!log.contains("mail.outbox.returned"), "and nothing was returned: {log}");
+
+        match saved_audit {
+            Some(v) => std::env::set_var("AOIDE_AUDIT_LOG", v),
+            None => std::env::remove_var("AOIDE_AUDIT_LOG"),
+        }
         mail_deposit_cleanup(&root, saved_state, saved_stage);
     }
 

@@ -9620,6 +9620,11 @@ an ordinary body. A client that checks answers treats the two alike:
   an upgrade.
 - **Old client to a door with the header: works.** The header is one more
   response line, and an older client never reads it.
+- **A `refused` key crosses the versions as `filed` does.** An older hub reads
+  only `node`, `filed` and `deferred` from a poll and ignores the rest, so a
+  newer poller's `refused` is ignored, and a held letter it refuses is ended or
+  offered again as `filed` decides, as it is today. An older poller sends no
+  `refused`, which a newer hub reads as an empty list.
 
 A node's client and door upgrade together, so the rule is a door before the
 clients that dial it, in this order:
@@ -9971,6 +9976,16 @@ of this node — and the hub retires its own `transit` custody, and any held own
 `letter` it holds for this poller, of exactly those
 (`outbox::retire_acknowledged`) BEFORE it offers, which is why an entry whose
 response was lost is offered again rather than retired into silence. The request
+may also carry `refused` — `{msgid, word}` for each container the poller
+refused, keep-list words included, each with the word that refused it. The
+hub returns a held letter of its own that is named there, before it offers
+(`outbox::return_refused`): the letter is marked `refused` with the word
+(cleaned, and clipped to 120 characters), keeps its session, and one
+`mail.outbox.returned` line is written. A msgid named in both `filed` and
+`refused` is returned, not retired. A transit entry is never returned, so a
+`refused` name changes nothing for it. The list carries no count cap of its
+own, as `filed` has none.
+The request
 may also carry `deferred` — the msgids it was handed and did not settle — and
 each of the caller's own entries it names takes a `tries` stamp and a
 `deferred:` outcome, which holds it out of the next offers for its window

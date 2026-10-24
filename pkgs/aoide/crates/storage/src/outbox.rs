@@ -1192,6 +1192,118 @@ fn write_filed_unlocked(node: &str, pending: &[String]) -> Result<(), String> {
     crate::fs::atomic_write(&path, &json).map_err(|e| format!("{}: {e}", path.display()))
 }
 
+/// The most characters of a refusal word a holder keeps. The word is the
+/// poller's bytes, so [`return_refused`] cleans and clips it before it is stored
+/// or printed.
+pub const RETURNED_WORD_MAX: usize = 120;
+
+/// One refusal a poll carries to its holder (`aoide/mailPoll`'s `refused`,
+/// MAIL.md §Wire): the msgid the poller refused and the word that refused it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PollRefusal {
+    pub msgid: String,
+    pub word: String,
+}
+
+fn refused_path(node: &str) -> PathBuf {
+    node_dir(node).join(".refused")
+}
+
+/// The refusals this box has taken in `node`'s poll and not yet sent: the
+/// `refused` list the next `aoide/mailPoll` carries. Empty when there is none,
+/// and tolerant of a missing or unreadable file, as [`filed_pending`] is.
+pub fn refused_pending(node: &str) -> Result<Vec<PollRefusal>, String> {
+    read_refused_unlocked(node)
+}
+
+/// Record that `node`'s poll refused `msgid` with `word`. A pair already
+/// recorded is kept once.
+pub fn record_refused(node: &str, msgid: &str, word: &str) -> Result<(), String> {
+    let node = node.to_string();
+    let refusal = PollRefusal { msgid: msgid.to_string(), word: word.to_string() };
+    with_lock(move || {
+        let mut pending = read_refused_unlocked(&node)?;
+        if pending.contains(&refusal) {
+            return Ok(());
+        }
+        pending.push(refusal);
+        write_refused_unlocked(&node, &pending)
+    })
+}
+
+/// Drop the refusals the answered poll SENT, leaving any recorded since, as
+/// [`clear_filed`] does for the acknowledgements.
+pub fn clear_refused(node: &str, sent: &[PollRefusal]) -> Result<(), String> {
+    let node = node.to_string();
+    let sent = sent.to_vec();
+    with_lock(move || {
+        let mut pending = read_refused_unlocked(&node)?;
+        pending.retain(|held| !sent.contains(held));
+        write_refused_unlocked(&node, &pending)
+    })
+}
+
+fn read_refused_unlocked(node: &str) -> Result<Vec<PollRefusal>, String> {
+    let path = refused_path(node);
+    match std::fs::read_to_string(&path) {
+        Ok(raw) => Ok(serde_json::from_str::<Vec<PollRefusal>>(&raw).unwrap_or_default()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Vec::new()),
+        Err(e) => Err(format!("{}: {e}", path.display())),
+    }
+}
+
+fn write_refused_unlocked(node: &str, pending: &[PollRefusal]) -> Result<(), String> {
+    let path = refused_path(node);
+    if pending.is_empty() {
+        let _ = std::fs::remove_file(&path);
+        return Ok(());
+    }
+    let json = serde_json::to_string(pending).map_err(|e| e.to_string())?;
+    crate::fs::atomic_write(&path, &json).map_err(|e| format!("{}: {e}", path.display()))
+}
+
+/// **A poller's refusal of a letter of this box's own returns it.** A held
+/// letter of this box's own, spooled toward `node`, goes back to its sender at
+/// once: marked refused with `word` (cleaned and clipped to
+/// [`RETURNED_WORD_MAX`]), its session kept, one `mail.outbox.returned` line
+/// written (ruling 131). Nothing else changes: a `transit` entry is the hub's
+/// custody and ends on `filed` alone, a letter spooled toward another node is
+/// not `node`'s to return, and a letter already returned is not refused again.
+/// `Ok(false)` for each of those.
+pub fn return_refused(node: &str, msgid: &str, word: &str) -> Result<bool, String> {
+    let node = node.to_string();
+    let msgid = msgid.to_string();
+    let word = aoide_protocol::untrusted::clip_flat(
+        &aoide_protocol::untrusted::strip_unsafe(word),
+        RETURNED_WORD_MAX,
+    );
+    with_lock(move || {
+        let Some(mut entry) = list_entries_unlocked(&node)?.into_iter().find(|e| e.envelope.msgid == msgid) else {
+            return Ok(false);
+        };
+        if entry.is_transit() || entry.envelope.header.kind != crate::mail::ENTRY_TYPE_LETTER || !entry.is_held() {
+            return Ok(false);
+        }
+        aoide_protocol::audit::audit(
+            &aoide_protocol::audit::default_audit_log(),
+            aoide_protocol::Door::Cli,
+            aoide_protocol::audit::EventClass::Audit,
+            "mail.outbox.returned",
+            "refused",
+            &format!(
+                "letter {msgid} toward {node} returned ({word}), session {}",
+                entry.session.as_deref().unwrap_or("none"),
+            ),
+        )
+        .map_err(|e| format!("the audit log cannot be written, so the letter stays: {e}"))?;
+        entry.flavor = FLAVOR_NOW.to_string();
+        entry.refused = true;
+        entry.last_outcome = format!("refused: {word}");
+        write_entry_unlocked(&node, &entry)?;
+        Ok(true)
+    })
+}
+
 /// Most msgids one poll carries in `deferred`, and most one stored list keeps:
 /// the poll's own batch size, so a deferral list never outgrows what a poll
 /// offers.
@@ -2744,6 +2856,131 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+
+    /// **A held letter the poller refused returns to its sender, with the word
+    /// that refused it, and is not retired.** Ruling 131 returns it at once: the
+    /// session stays with it, and one `mail.outbox.returned` line is written.
+    fn a_refused_held_letter_returns_with_its_word(tag: &str, word: &str) {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root(tag);
+
+        write_entry("there", &own_letter("there", "msg-held", Some("sess-a"), true)).unwrap();
+        assert!(return_refused("there", "msg-held", word).unwrap(), "the held letter returns");
+
+        let entries = list_entries("there").unwrap();
+        assert_eq!(entries.len(), 1, "returned, not retired");
+        assert!(entries[0].refused && !entries[0].is_held(), "marked returned");
+        assert_eq!(entries[0].last_outcome, format!("refused: {word}"));
+        assert_eq!(entries[0].session.as_deref(), Some("sess-a"), "the session stays with it");
+        assert_eq!(audit_lines("mail.outbox.returned").len(), 1, "one line for the return");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_refused_held_letter_returns_marked_with_unknown_box() {
+        a_refused_held_letter_returns_with_its_word("outbox-refused-unknown-box", "unknown-box");
+    }
+
+    #[test]
+    fn a_refused_held_letter_returns_marked_with_unverified_origin() {
+        a_refused_held_letter_returns_with_its_word("outbox-refused-unverified", "unverified-origin");
+    }
+
+    #[test]
+    fn a_refused_held_letter_returns_marked_with_box_full() {
+        a_refused_held_letter_returns_with_its_word("outbox-refused-box-full", "box-full");
+    }
+
+    /// **A refusal reaches only a letter in the poller's own spool.** A letter
+    /// spooled toward another node is not `there`'s to return, and it returns when
+    /// the node it is spooled toward names it.
+    #[test]
+    fn a_refused_name_for_a_letter_toward_another_node_changes_nothing() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("outbox-refused-scope");
+
+        write_entry("elsewhere", &own_letter("elsewhere", "msg-held", Some("sess-a"), true)).unwrap();
+        assert!(!return_refused("there", "msg-held", "unknown-box").unwrap(), "not spooled toward `there`");
+        assert!(list_entries("elsewhere").unwrap()[0].is_held(), "the letter stays held");
+        assert!(return_refused("elsewhere", "msg-held", "unknown-box").unwrap(), "named by its own node, it returns");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **A transit entry is the hub's custody, and a refusal does not touch it.**
+    /// Its name ends it exactly as it does with no refusal in the same ask.
+    #[test]
+    fn a_refused_transit_entry_ends_as_it_does_without_the_refusal() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("outbox-refused-transit");
+
+        let msgid = "cd".repeat(32);
+        let container = crate::seal::Container {
+            v: crate::seal::CONTAINER_VERSION,
+            purpose: crate::seal::PURPOSE_MAIL.to_string(),
+            msgid: msgid.clone(),
+            generation: 1,
+            origin: crate::seal::Party { node: "osaka".to_string(), key: "aa".repeat(32) },
+            to: crate::seal::Destination { node: "there".to_string(), age: "age1x".to_string() },
+            origin_mesh: "home".to_string(),
+            mesh: "home".to_string(),
+            suite: crate::seal::SUITE_AGE_V1_X25519.to_string(),
+            ct: "00".to_string(),
+            sig: "00".to_string(),
+            transit: Vec::new(),
+            board: None,
+            epoch: None,
+        };
+        write_entry("there", &OutboxEntry::transit(container)).unwrap();
+
+        assert!(!return_refused("there", &msgid, "box-full").unwrap(), "a transit entry is never returned");
+        assert!(retire_acknowledged("there", &msgid).unwrap(), "its name ends it, as without the refusal");
+        assert!(list_entries("there").unwrap().is_empty());
+        assert!(audit_lines("mail.outbox.returned").is_empty(), "and no returned line is written");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **A word the poller sent is cleaned and clipped before the holder keeps it.**
+    /// Control characters are gone from the entry and from the audit line, and the
+    /// word is held to [`RETURNED_WORD_MAX`] characters.
+    #[test]
+    fn a_refused_word_is_stored_clean_and_clipped() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("outbox-refused-hostile-word");
+
+        write_entry("there", &own_letter("there", "msg-held", Some("sess-a"), true)).unwrap();
+        let hostile = format!("box-full\u{1b}[2J\r\n{}", "x".repeat(1000));
+        assert!(return_refused("there", "msg-held", &hostile).unwrap());
+
+        let stored = list_entries("there").unwrap().remove(0).last_outcome;
+        let word = stored.strip_prefix("refused: ").expect("the entry keeps the refused prefix");
+        assert!(word.chars().all(|c| !c.is_control()), "no control character is kept: {word:?}");
+        assert!(word.chars().count() <= RETURNED_WORD_MAX, "clipped: {} characters", word.chars().count());
+        assert!(word.starts_with("box-full"), "the word itself is kept: {word:?}");
+        assert!(
+            audit_lines("mail.outbox.returned").iter().all(|line| !line.contains('\u{1b}')),
+            "the audit line carries no escape"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **A returned letter is not offered on the next poll.** It is offered before
+    /// the refusal, and after it its poller is offered nothing.
+    #[test]
+    fn a_refused_letter_is_not_offered_on_the_next_poll() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("outbox-refused-not-offered");
+
+        write_entry("there", &own_letter("there", "msg-held", Some("sess-a"), true)).unwrap();
+        assert_eq!(poll_payloads("there").unwrap().len(), 1, "a held letter is offered before the refusal");
+        assert!(return_refused("there", "msg-held", "unknown-box").unwrap());
+        assert!(poll_payloads("there").unwrap().is_empty(), "and not after it");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     /// **An old-style receipt still ends a held letter**, through
     /// `retire_by_ack`.

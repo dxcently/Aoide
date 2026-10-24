@@ -596,7 +596,7 @@ door's audit name whitelist gains both names so they never log as bare
      relayed.
   Receipts (acks) are envelopes deposited through the same method — one
   routing path for everything, so acks traverse hubs for free.
-- **`aoide/mailPoll`** `{ node, filed?, deferred? }` → `{ envelopes[],
+- **`aoide/mailPoll`** `{ node, filed?, refused?, deferred? }` → `{ envelopes[],
   containers[] }`.
   The caller asks
   "anything waiting for me?" and receives every outbox entry spooled
@@ -630,7 +630,25 @@ door's audit name whitelist gains both names so they never log as bare
   refused container leaves the hub before the next offer, so it never blocks
   the poll behind it. A container held back by the poller's own state stays,
   and a backlog of those can fill the `POLL_BATCH_CAP` window until the state
-  clears; that is the price of keeping custody for it. **`deferred` is the
+  clears; that is the price of keeping custody for it.
+  **`refused` is the poller's word on each container it refused, and the word
+  with it.** The poll records every container refusal it makes
+  (`outbox::record_refused`), keep-list words included, beside what it files,
+  and sends the recorded pairs as `refused` on the next ask: `{msgid, word}`
+  for each. An answered poll clears what it sent, as it does for `filed`. The
+  hub returns a held letter of its own that is named there
+  (`outbox::return_refused`): it goes back to its sender at once, marked
+  refused with the word, its session kept, and one `mail.outbox.returned` line
+  written (ruling 131). A msgid named in both `filed` and `refused` is
+  returned, not retired. A transit entry is the hub's custody, and `refused`
+  never touches it: its custody ends on `filed` alone. A msgid spooled toward
+  another node changes nothing. The word is the poller's bytes: the hub strips
+  control characters and keeps at most 120 characters of it. The keep list
+  (`box-full`, `local-io` and the rest of that class) decides `filed` alone;
+  its words travel in `refused` too. The list has no count cap of its own, as
+  `filed` has none. An old poller sends no `refused`, and an old hub ignores
+  the key: across the switch a held letter a poller refuses is ended or offered
+  again as `filed` decides, as it is today. **`deferred` is the
   poller's word on what it was handed and did not settle.** It carries the
   msgids of the last answered poll that the poller neither filed, dedup'd, nor
   refused for good (a box-full letter, a container held back by its own state, a
@@ -1025,7 +1043,8 @@ poll of the hop it was spooled toward, which for a relayed letter is not its
 destination. A poller that names it in `filed` ends the sender's copy, as a
 relay's `accepted` does, so a hop that files a held letter and never hands it
 on loses it the same way. Its `filed` is not a receipt from the destination:
-only the destination's own receipt says the letter arrived.
+only the destination's own receipt says the letter arrived. A poller that
+refuses it instead (`refused`, §Wire) returns it to the sender with the word.
 
 At a hub, a deposit whose `to.node` is not self: run the keyless checks
 (§Wire, "Lane and payload"), keep no transit record, append the hub's chained hop signature naming the `next` node the route

@@ -795,7 +795,9 @@ by decision — no embedded database yet
   audit log and spools the container toward the next hop; the hub's own spool
   entry retires when that hop HAS the letter (`outbox::retire_acknowledged`
   when a poller names the msgid in `filed`, the deposit's own acceptance on a
-  drain) — never on the destination's receipt, which a hub never sees.
+  drain) — never on the destination's receipt, which a hub never sees. A
+  poller's refusal of a held letter of the hub's own returns it instead
+  (`outbox::return_refused`); a transit entry is never returned.
 
   P-M5a-1 adds the doorbell's own state and its safety floor: `arms(kind)`
   is the one place that decides which entry kinds ring (`letter` only,
