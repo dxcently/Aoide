@@ -126,8 +126,10 @@ const SAID_MAX: usize = 120;
 
 /// The most of a clock refusal's words (`-32008`) an answer carries, in
 /// characters. A clock refusal names both times and the bound it breaks, so its
-/// words are kept longer than [`SAID_MAX`]. Every other word clips to
-/// [`SAID_MAX`] ([`said_max`]).
+/// words are kept longer than [`SAID_MAX`]. The door names the code, so this
+/// bound is the door's own claim: a hostile door gets at most this many stored
+/// and [`LINE_MAX`] printed. Every other word clips to [`SAID_MAX`]
+/// ([`said_max`]).
 const DOOR_SAID_MAX: usize = 400;
 
 /// The door's own refusal codes: a stale or future frame (`-32008`), a replayed

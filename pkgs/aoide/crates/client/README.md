@@ -479,8 +479,11 @@ never the inbound/serve half (that's `aoide-server`).
   link backs off). The one thing an unsigned answer contributes is what it
   said, for the operator: its `error.message`, else its result's `reason`
   (`config-invalid` is a result), cleaned through `aoide_protocol::untrusted`
-  and clipped to 120 characters (400 for a clock refusal, `-32008`) before it
-  reaches the entry, the link record or the refusal. It is quoted, with `\`,
+  and clipped to 120 characters before it reaches the entry, the link record
+  or the refusal. A clock refusal (`-32008`) keeps up to 400 characters, which
+  is the door's own claim; every printed line is clipped to 200, so a long
+  clock refusal prints without its closing words, and a cut can end on a lone
+  backslash. It is quoted, with `\`,
   `"`, and the lookalikes U+201C, U+201D and U+FF02 escaped (as `\u{…}` text),
   and labelled `(it said: "…"; not acted on)`, so the words cannot close the
   quote or pass for aoide's own closing words. The guarantee is that they

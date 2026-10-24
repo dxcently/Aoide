@@ -1288,7 +1288,7 @@ fn read_container_seen() -> Result<Vec<ContainerSeen>, String> {
 /// Filed-then-recorded inverts both into the design's own discipline: a
 /// retry that was never filed RE-RUNS and re-answers, and a retry whose
 /// filing landed but whose record did not is re-opened once and answered
-/// `duplicate` from `seen.jsonl` (`mail::filed_kind`'s authority), which is
+/// `duplicate` from the box (`mail::filed_kind`'s authority), which is
 /// what re-spools the ack.
 pub fn record_admitted(container: &Container, digest: &str) -> Result<(), String> {
     record_seen(container, digest)
@@ -2884,7 +2884,7 @@ mod container_tests {
         let _ = mail::deposit(envelope.clone(), "self").unwrap();
 
         // The retry re-opens once — it is not recorded — and the filing is
-        // then answered from `seen.jsonl`, which is what re-spools the lost
+        // then answered from the box, which is what re-spools the lost
         // ack. The letter is never filed twice and never silently dropped.
         let reopened = match deposit_container(&container).unwrap() {
             ContainerOutcome::Opened { envelope, digest: again } => {

@@ -6210,8 +6210,11 @@ read, so a file left behind by a removed node simply fails to verify and is
 inert.
 
 The file IS the generation high-water mark: `seal::learn_binding` refuses a
-binding whose generation is not above the stored one (`stale-binding`), and
-refuses an equal generation carrying different bytes (a conflict nothing
+binding whose generation is not above the stored one (`stale-binding`), but
+only while the stored one still verifies under the pinned key. A stored binding
+signed by a key this node no longer holds is no predecessor, so after a re-key
+any binding signed by the current key is taken, an older generation included.
+An equal generation carrying different bytes is refused (a conflict nothing
 here can order). An equal generation with identical bytes is a replay of
 what is already in force and is a no-op. A binding whose signer is not the
 key this node has on record for that name is refused `binding-mismatch`, and
@@ -8578,7 +8581,10 @@ key to answer. A client refuses an unsigned answer.
 destination can be hostile and hold its own key, so the client strips every
 control and invisible character from any word of an answer before it is kept,
 returned or logged, and clips it: to 200 characters when the answer verified,
-and to 120 (400 for a clock refusal, `-32008`) when it did not. The words are
+and to 120 when it did not. A clock refusal (`-32008`) keeps up to 400
+characters, which is the door's own claim, and every printed line is clipped
+to 200, so a long clock refusal prints without its closing words, and a cut
+can end on a lone backslash. The words are
 quoted, `it said: "…"; not acted on`, and a refusal sentence quotes the far
 words it carries the same way (a refused container's `msgid` and `detail`).
 The quote's `\`, `"`, U+201C, U+201D and U+FF02 are escaped. The cleaning
@@ -8718,13 +8724,20 @@ arm stands. Its replay at another door inside the window is not refused by
 step 7. At the listener that took the first copy, a replay inside the window is
 refused `-32009` by the nonce set (step 8, server `a2a.rs:5902`). Past that
 point the method's own check bounds a replay at each door it reaches. A deposit
-is filed once per mailbox, and the second copy is answered `duplicate`
-(`a2a.rs:3017`). A poll retires only the msgids its signed body names as
+is filed once while its line stays in the box, and the second copy
+is answered `duplicate` (the check at `mail.rs:2072-2077`, the answer at
+`a2a.rs:3017`). A compaction or a prune that drops the line lets a re-offer
+file the letter again. A poll retires only the msgids its signed body names as
 acknowledged (`a2a.rs:3337`, `3396-3401`), so a replayed poll hands over only
 what is still unacknowledged. A binding goes to `learn_binding`
-(`a2a.rs:3824`), which refuses a superseded generation and takes a current one
-as a no-op (storage `seal.rs:613`). A charterFetch reads the in-force charter
-and never writes (`a2a.rs:4063`). (b) Each listener process keeps its own nonce
+(`a2a.rs:3824`), which refuses a generation below the stored one only while
+the stored binding still verifies under the pinned key (storage `seal.rs:613`,
+`639`, `671-677`). After a re-key the stored binding was signed by the dead
+key, so it is no predecessor: any binding signed by the current key is taken,
+an older generation included, until a newer one replaces it. An equal
+generation is a no-op when its bytes match and a refusal when they differ. A
+charterFetch changes no charter, key or grant and appends an audit line
+(`a2a.rs:4063`). (b) Each listener process keeps its own nonce
 sets, so a frame one listener admitted is not in the other's set. The same
 deposit replayed at the other listener is answered `duplicate` by the msgid
 check, as in (a); that is the bound the per-listener sets rest on. (c) A process

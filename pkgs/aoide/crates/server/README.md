@@ -593,9 +593,11 @@ terminal's rights to its remote callers.
   signer, when the request is tagged. What it does not stop: an untagged call to
   one of the four methods, which stays open until the planned switch (not
   built). On the same listener its replay is refused by the nonce set. Across
-  listeners the method's own check bounds it: a deposit is filed once per
-  mailbox, by msgid; a poll retires only what its poller acknowledges; a
-  superseded binding is refused as stale; a charterFetch changes nothing. An
+  listeners the method's own check bounds it: a deposit is filed once while
+  its line stays in the box, by msgid; a poll retires only what its poller
+  acknowledges; a binding older than the stored one is refused as stale only
+  while the stored one still verifies under the pinned key; a charterFetch
+  changes no charter, key or grant and appends an audit line. An
   untagged frame is not bound to a door, so a node holding a signer's untagged
   frames from the last 120 seconds can replay them at another door that pairs
   the same signer. That door applies the same checks to its own mailbox and

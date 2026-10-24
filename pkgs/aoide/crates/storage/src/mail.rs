@@ -737,9 +737,9 @@ impl Filed {
 /// A crash between appending row N and the rename below leaves `inbox.json`
 /// in place, so a retry re-enters this same loop over the same rows —
 /// [`seal`] is deterministic, so a row already filed recomputes the exact
-/// same `msgid`. Reading `seen.jsonl` into a set ONCE before the loop and
-/// skipping a row already in it is what makes that retry file each legacy
-/// row exactly once instead of duplicating rows `1..N`.
+/// same `msgid`. Reading the entries already filed into a set ONCE before
+/// the loop and skipping a row already in it is what makes that retry file
+/// each legacy row exactly once instead of duplicating rows `1..N`.
 fn migrate_if_needed() -> Result<(), String> {
     let old_path = legacy_inbox_path();
     let raw = match std::fs::read_to_string(&old_path) {
@@ -1956,8 +1956,8 @@ pub enum DepositOutcome {
     /// A fresh envelope, filed. `msgid` is its own, for the caller to ack
     /// (a letter) or simply acknowledge process (a receipt).
     Filed { msgid: String, kind: String },
-    /// A `msgid` already in `seen.jsonl`. `filed_letter` is `true` when the
-    /// ORIGINAL filing was a `letter` — the destination re-spools its ack
+    /// A `msgid` already on a line in the box. `filed_letter` is `true` when
+    /// the ORIGINAL filing was a `letter` — the destination re-spools its ack
     /// in that case (spec item 5: "a lost ack is the ordinary reason for a
     /// re-offer"), never for a duplicate receipt (nothing acks an ack).
     Duplicate { filed_letter: bool },
@@ -2601,9 +2601,9 @@ pub fn box_rm(name: &str, force: bool) -> Result<BoxRemoval, String> {
 /// `mail rm --older-than <Nd|Nh>`: the only pruning (MAIL.md "Store",
 /// "Keep-all"). Rewrites `base.jsonl` atomically with the survivors,
 /// preserving each one's original `seq` — never renumbers, so a reader's
-/// cursor comparisons stay valid across a prune. Never touches
-/// `seen.jsonl`: a pruned letter re-offered later is still a duplicate
-/// (the RFC 5537 §3.3 coupling MAIL.md names). An entry whose
+/// cursor comparisons stay valid across a prune. A pruned line takes its
+/// `msgid` with it, so a letter re-offered later is filed again: the box is
+/// the dedup memory (MAIL.md, "Dedup memory"). An entry whose
 /// `receivedAt` fails to parse is KEPT, not guessed at.
 pub fn rm_older_than(max_age_secs: u64) -> Result<usize, String> {
     with_lock(move || {

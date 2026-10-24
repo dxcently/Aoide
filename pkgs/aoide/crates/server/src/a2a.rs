@@ -4060,8 +4060,9 @@ fn emit_pairing_event(kind: &str, payload: Value) {
 ///
 /// A mesh this node itself has no charter for is refused with a taught
 /// message (the caller reached the wrong machine, or the name is a typo) —
-/// this method never mints, never signs and never writes: a LAN join must not
-/// be able to change the operator's machine.
+/// this method never mints and never signs, and it changes no charter, key or
+/// grant: a LAN join must not be able to change the operator's machine. It
+/// appends an audit line.
 fn charter_fetch(params: &Value, origin: ConnOrigin, audit_log: &Path) -> Result<Value, (i64, String)> {
     let mesh = params.get("mesh").and_then(Value::as_str).unwrap_or("");
     if !aoide_storage::node_store::valid_node_name(mesh) {
