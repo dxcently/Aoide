@@ -631,11 +631,12 @@ door's audit name whitelist gains both names so they never log as bare
   the poll behind it. A container held back by the poller's own state stays,
   and a backlog of those can fill the `POLL_BATCH_CAP` window until the state
   clears; that is the price of keeping custody for it.
-  **`refused` is the poller's word on each container it refused, and the word
-  with it.** The poll records every container refusal it makes
-  (`outbox::record_refused`), keep-list words included, beside what it files,
-  and sends the recorded pairs as `refused` on the next ask: `{msgid, word}`
-  for each. An answered poll clears what it sent, as it does for `filed`. The
+  **`refused` is the poller's word on each letter it refused, and the word
+  with it.** The poll records every refusal it makes, a container's or a
+  plaintext letter's (`outbox::record_refused`), keep-list words included,
+  beside what it files, and sends the recorded pairs as `refused` on the next
+  ask: `{msgid, word}` for each. An answered poll clears what it sent, as it
+  does for `filed`. The
   hub returns a held letter of its own that is named there
   (`outbox::return_refused`): it goes back to its sender at once, marked
   refused with the word, its session kept, and one `mail.outbox.returned` line

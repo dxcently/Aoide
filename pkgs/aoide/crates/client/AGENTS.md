@@ -739,9 +739,10 @@
   (`defer_named`). The list is a wait, not a custody word: it never ends a
   container's custody, which stays `record_filed`'s alone.
 - **The poll names each refusal with its word (`refused`).** `refuse_container`
-  records every container refusal (`outbox::record_refused`), keep-list words
-  included, and `poll_through` sends the stored list as `refused` on the next
-  ask. `clear_refused` drops what that ask sent once an answer arrives, as
+  and `refuse_envelope` record every refusal (`outbox::record_refused`),
+  keep-list words included, and `poll_through` sends the stored list as
+  `refused` on the next ask. `clear_refused` drops what that ask sent once an
+  answer arrives, as
   `filed` is cleared. The keep list decides `filed` alone: `record_filed` is
   written only for a non-keep-list word whose refusal was recorded, so a refusal
   that could not be recorded keeps the hub's custody rather than ending it. A

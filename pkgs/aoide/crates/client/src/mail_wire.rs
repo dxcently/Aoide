@@ -1291,9 +1291,14 @@ fn refuse_container(node_name: &str, msgid: &str, word: &str, detail: &str, refu
 }
 
 /// A plaintext envelope the poll refused: the same audit and report as a
-/// container, under its own event name.
+/// container, under its own event name, and the same record for the next ask
+/// (`outbox::record_refused`). A plaintext letter is not the hub's custody, so
+/// nothing is filed for it; the hub returns its own held letter on that word. If
+/// the record cannot be written the letter stays held, and the next ask offers and
+/// refuses it again.
 fn refuse_envelope(node_name: &str, msgid: &str, word: &str, detail: &str, refused: &mut Vec<String>) {
     refuse_named("envelope", node_name, msgid, word, detail, refused);
+    let _ = aoide_storage::outbox::record_refused(node_name, msgid, word);
 }
 
 fn refuse_named(what: &str, node_name: &str, msgid: &str, word: &str, detail: &str, refused: &mut Vec<String>) {
@@ -1643,7 +1648,7 @@ fn poll_through(node_name: &str, named: Option<&str>, target: PollTarget) -> Res
         };
         if let Some(word) = refusal {
             // A plaintext letter is not the hub's custody (it retires by ack, not
-            // by `filed`), so there is nothing to release here: it is named only.
+            // by `filed`), so only the refusal is recorded (`refuse_envelope`).
             refuse_envelope(node_name, &envelope.msgid, word, "", &mut refused);
         }
         if matches!(outcome, aoide_storage::mail::DepositOutcome::Filed { .. }) {
@@ -5779,6 +5784,121 @@ mod tests {
             last.contains("refused") && last.contains("bad-msgid"),
             "the next ask carries the refusal with its word: {last}"
         );
+
+        drop(listener);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The audit lines that name a poll's refusal of `msgid`, whatever its event.
+    fn poll_refusal_lines(dir: &std::path::Path, msgid: &str) -> usize {
+        std::fs::read_to_string(dir.join("log"))
+            .unwrap_or_default()
+            .lines()
+            .filter(|line| line.contains("mail.poll.") && line.contains("-refused") && line.contains(msgid))
+            .count()
+    }
+
+    /// **A poller's refusal of a held plaintext letter is recorded for the next
+    /// ask.** The envelope path named the refusal and dropped it, so the hub never
+    /// heard the word and its own letter stayed held, offered on every ask. Now the
+    /// pair waits for the next ask, as a refused container's does, and the hub
+    /// returns the letter with that word (ruling 131). The holder's side is pinned
+    /// by `a_letter_both_filed_and_refused_is_returned_not_retired`.
+    #[test]
+    fn a_plaintext_refusal_is_recorded_for_the_next_ask() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("plaintext-refusal-recorded");
+
+        let me = register_local_origin();
+        let saved = std::env::var("AOIDE_A2A_NODE_NAME").ok();
+        std::env::set_var("AOIDE_A2A_NODE_NAME", "relay");
+        // No box named `ghost` lives here, so the deposit refuses the letter.
+        let letter = aoide_storage::mail::mint_outbound_letter("alice", &me, "ghost", "no such box");
+        match saved {
+            Some(name) => std::env::set_var("AOIDE_A2A_NODE_NAME", name),
+            None => std::env::remove_var("AOIDE_A2A_NODE_NAME"),
+        }
+        let letter = letter.unwrap();
+        let msgid = letter.msgid.clone();
+
+        let (listener, port, seen) = recording_door(
+            r#"{"jsonrpc":"2.0","id":1,"result":{"status":"accepted"}}"#,
+            poll_answer(std::slice::from_ref(&letter)),
+        );
+        register_polled_relay(port);
+
+        let outcome = poll_node("relay", None).unwrap();
+        assert!(
+            outcome.refused.iter().any(|r| r.starts_with(&msgid) && r.contains("unknown-box")),
+            "the refusal is named: {:?}",
+            outcome.refused
+        );
+        assert_eq!(
+            aoide_storage::outbox::refused_pending("relay").unwrap(),
+            vec![aoide_storage::outbox::PollRefusal { msgid: msgid.clone(), word: "unknown-box".to_string() }],
+            "the refusal is recorded with the word that refused it"
+        );
+        assert_eq!(poll_refusal_lines(&dir, &msgid), 1, "one audit line for the refusal");
+
+        assert!(poll_node("relay", None).is_ok());
+        let asks = seen.lock().unwrap().clone();
+        let last = asks.iter().rev().find(|body| body.contains("aoide/mailPoll")).expect("a second ask was sent");
+        assert!(
+            last.contains(&msgid) && last.contains("unknown-box"),
+            "the next ask carries the refusal with its word: {last}"
+        );
+
+        drop(listener);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **A local fault refusing a held plaintext letter is recorded for the next
+    /// ask** (the envelope path's local-io call site). The box it files into is a
+    /// directory, so the append fails for a reason of this box's own state, and the
+    /// hub is told the word it returns the letter on.
+    #[test]
+    fn a_plaintext_refusal_by_a_local_fault_is_recorded_for_the_next_ask() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("plaintext-local-fault-recorded");
+
+        let me = register_local_origin();
+        aoide_storage::mail::box_add("bob").unwrap();
+        let saved = std::env::var("AOIDE_A2A_NODE_NAME").ok();
+        std::env::set_var("AOIDE_A2A_NODE_NAME", "relay");
+        let letter = aoide_storage::mail::mint_outbound_letter("alice", &me, "bob", "held by a local fault");
+        match saved {
+            Some(name) => std::env::set_var("AOIDE_A2A_NODE_NAME", name),
+            None => std::env::remove_var("AOIDE_A2A_NODE_NAME"),
+        }
+        let letter = letter.unwrap();
+        let msgid = letter.msgid.clone();
+        std::fs::remove_file(aoide_storage::mail::box_path("bob")).unwrap();
+        std::fs::create_dir_all(aoide_storage::mail::box_path("bob")).unwrap();
+
+        let (listener, port, seen) = recording_door(
+            r#"{"jsonrpc":"2.0","id":1,"result":{"status":"accepted"}}"#,
+            poll_answer(std::slice::from_ref(&letter)),
+        );
+        register_polled_relay(port);
+
+        let outcome = poll_node("relay", None).unwrap();
+        assert_eq!(outcome.filed, 0, "nothing is filed while the disk is unsound: {outcome:?}");
+        assert!(
+            outcome.refused.iter().any(|r| r.starts_with(&msgid) && r.contains("local-io")),
+            "the refusal is named as a local fault: {:?}",
+            outcome.refused
+        );
+        assert_eq!(
+            aoide_storage::outbox::refused_pending("relay").unwrap(),
+            vec![aoide_storage::outbox::PollRefusal { msgid: msgid.clone(), word: "local-io".to_string() }],
+            "the refusal is recorded with the word that refused it"
+        );
+        assert_eq!(poll_refusal_lines(&dir, &msgid), 1, "one audit line for the refusal");
+
+        assert!(poll_node("relay", None).is_ok());
+        let asks = seen.lock().unwrap().clone();
+        let last = asks.iter().rev().find(|body| body.contains("aoide/mailPoll")).expect("a second ask was sent");
+        assert!(last.contains(&msgid) && last.contains("local-io"), "the next ask carries the refusal: {last}");
 
         drop(listener);
         let _ = std::fs::remove_dir_all(&dir);
