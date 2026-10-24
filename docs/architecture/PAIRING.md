@@ -352,7 +352,8 @@ nodes:
   that mesh, as a sixth field appended after the digest. The executor
   writes the exact canonical form into CONTRACTS §6 in the same commit
   that lands it.
-- Replay guard: timestamp window (±120s default) + a bounded nonce
+- Replay guard: timestamp window (120s behind, 5s ahead; the window behind is
+  `AOIDE_SIGNATURE_SKEW_SECS`) + a bounded nonce
   cache. Clock skew beyond the window earns a taught error naming
   the skew.
 - **The wire is one-way across the mesh field, and there is no fallback.**

@@ -502,6 +502,16 @@ fn wait_until(what: &str, ready: impl Fn() -> bool) {
     }
 }
 
+/// The gate's mail adapter stamps its start second before it binds, and refuses a frame
+/// stamped at or before that second plus five. Once it answers, wait for the clock to pass
+/// `ready + 5`: `ready` is at or after that start, so the boxes' first signed frame lands
+/// past the bound.
+fn wait_out_start() {
+    let now = || std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+    let ready = now();
+    wait_until("the clock past the gate adapter's start bound", || now() > ready + 5);
+}
+
 fn tcp_up(port: u16) -> impl Fn() -> bool {
     move || TcpStream::connect(("127.0.0.1", port)).is_ok()
 }
@@ -622,6 +632,7 @@ impl Lab {
             let mut serve = g.aoide_cmd(&["mail", "serve", "--port", &mport.to_string()]);
             reaper.spawn(&mut serve, &dir.join("gate-mail.log"), "gate mail serve");
             wait_until("the gate's mail adapter", tcp_up(mport));
+            wait_out_start();
             let mut front = Command::new("socat");
             front
                 .arg(format!(

@@ -5391,8 +5391,8 @@ fn method_not_allowed(method: &str, path: &str) -> (u16, Vec<u8>, String) {
 /// `signature_skew_secs()`. PROCESS-LOCAL and never disk-persisted
 /// (`aoide-storage`'s `wire_auth` module doc gives the placement's reasoning).
 /// A restart clears it, and the start check in [`verify_signed_request`] closes
-/// that gap: a frame stamped at or before this process started is refused, so
-/// nothing an earlier process accepted can be accepted again here.
+/// that gap: a frame stamped at or before this process started plus five seconds
+/// is refused, so nothing an earlier process accepted can be accepted again here.
 ///
 /// Keyed on the PUBKEY that verified the request, not any node name (#63
 /// P-ID5): `X-Aoide-Node` is outside the canonical string, so a captured request
@@ -5567,6 +5567,49 @@ enum SignedRequestOutcome {
     Refused(i64, String),
 }
 
+/// The clock checks every signed frame passes before its signature is looked at.
+/// A frame more than the knob's window behind this instance's own
+/// "now", or more than [`SKEW_AHEAD_SECS`] ahead of it, is clock skew. A frame
+/// stamped at or before this door's start plus [`SKEW_AHEAD_SECS`] is refused too:
+/// the replay memory is per process and a restart clears it, so a frame an earlier
+/// process could have accepted (stamped at most that far past its own start) must
+/// not be accepted here. Both refusals are `-32008` and name both times.
+fn time_refusal(timestamp: &str, ts_epoch: i64, now_epoch: i64, started_epoch: i64) -> Option<(i64, String)> {
+    use aoide_storage::wire_auth::{HEADER_TIMESTAMP, SIGNATURE_SKEW_ENV, SKEW_AHEAD_SECS};
+
+    let window = aoide_storage::wire_auth::signature_skew_secs();
+    let now_text = aoide_storage::time::iso_utc_from_epoch(now_epoch);
+    if !aoide_storage::wire_auth::within_skew(now_epoch, ts_epoch, window) {
+        let detail = if ts_epoch > now_epoch {
+            format!(
+                "{} seconds ahead of this instance's own now (`{now_text}`); only {SKEW_AHEAD_SECS}s ahead is \
+                 accepted, so the caller's clock is fast",
+                ts_epoch - now_epoch
+            )
+        } else {
+            format!(
+                "{} seconds behind this instance's own now (`{now_text}`); the allowed window is {window}s behind \
+                 (`{SIGNATURE_SKEW_ENV}` raises it)",
+                now_epoch - ts_epoch
+            )
+        };
+        return Some((-32008, format!("clock skew too large: this request's `{HEADER_TIMESTAMP}` (`{timestamp}`) is {detail}")));
+    }
+    if ts_epoch <= started_epoch + SKEW_AHEAD_SECS {
+        return Some((
+            -32008,
+            format!(
+                "this request's `{HEADER_TIMESTAMP}` (`{timestamp}`) is not later than this door's start (`{}`) plus \
+                 {SKEW_AHEAD_SECS}s: the replay memory is cleared at every start, and a frame stamped up to \
+                 {SKEW_AHEAD_SECS}s after a start may be one an earlier process accepted, so it is refused; retry \
+                 with a fresh timestamp",
+                aoide_storage::time::iso_utc_from_epoch(started_epoch),
+            ),
+        ));
+    }
+    None
+}
+
 /// Verify a request's P-P4 signature headers, if it carries any (module doc
 /// above). Pure aside from two reads: the node registry
 /// (`aoide_storage::node_store::load_nodes`) and the process-local
@@ -5603,7 +5646,7 @@ enum SignedRequestOutcome {
 /// after a genuine signature match — a forged or garbage nonce never
 /// consumes a nonce-set entry.
 fn verify_signed_request(req: &HttpRequest, now_epoch: i64, started_epoch: i64) -> SignedRequestOutcome {
-    use aoide_storage::wire_auth::{HEADER_NONCE, HEADER_NODE, HEADER_SIGNATURE, HEADER_TIMESTAMP, SIGNATURE_SKEW_ENV};
+    use aoide_storage::wire_auth::{HEADER_NONCE, HEADER_NODE, HEADER_SIGNATURE, HEADER_TIMESTAMP};
 
     let claims_signed =
         req.signed_node.is_some() || req.signed_timestamp.is_some() || req.signed_nonce.is_some() || req.signed_signature.is_some();
@@ -5656,35 +5699,10 @@ fn verify_signed_request(req: &HttpRequest, now_epoch: i64, started_epoch: i64) 
     let Some(ts_epoch) = aoide_storage::time::parse_iso_utc(timestamp) else {
         return SignedRequestOutcome::Refused(-32007, format!("`{HEADER_TIMESTAMP}` is not a valid ISO-8601 timestamp: `{timestamp}`"));
     };
-    let window = aoide_storage::wire_auth::signature_skew_secs();
-    if !aoide_storage::wire_auth::within_skew(now_epoch, ts_epoch, window) {
-        let skew = now_epoch - ts_epoch;
-        return SignedRequestOutcome::Refused(
-            -32008,
-            format!(
-                "clock skew too large: this request's `{HEADER_TIMESTAMP}` (`{timestamp}`) is {skew}s \
-                 away from this instance's own now (`{}`) — the allowed window is ±{window}s \
-                 (`{SIGNATURE_SKEW_ENV}` raises it)",
-                aoide_storage::time::iso_utc_from_epoch(now_epoch),
-            ),
-        );
+    if let Some((code, message)) = time_refusal(timestamp, ts_epoch, now_epoch, started_epoch) {
+        return SignedRequestOutcome::Refused(code, message);
     }
 
-    // The start check. The nonce sets are process-local and a restart clears them,
-    // so a frame an earlier process accepted must not be accepted here. Both
-    // times are whole seconds, so a frame stamped in the start second is refused
-    // too (CONTRACTS.md section 6 names the cost).
-    if ts_epoch <= started_epoch {
-        return SignedRequestOutcome::Refused(
-            -32008,
-            format!(
-                "this request's `{HEADER_TIMESTAMP}` (`{}`) is not after this door's start (`{}`): the replay memory \
-                 is cleared at every start, so a frame stamped before it is refused; retry with a fresh timestamp",
-                aoide_storage::time::iso_utc_from_epoch(ts_epoch),
-                aoide_storage::time::iso_utc_from_epoch(started_epoch),
-            ),
-        );
-    }
     // `&req.method` (P-P4 review finding 2), not a hardcoded `"POST"`
     // literal: the OBSERVED method of THIS request, so the canonical
     // string is genuinely bound to what arrived, not a re-typed assumption
@@ -6366,7 +6384,13 @@ pub fn serve(
 /// concept here), discovery advertising (an adapter is not a discoverable
 /// agent), and `message/stream`.
 pub fn serve_mail(port: u16, audit_log: &Path, registry: &'static Registry) -> std::io::Result<()> {
-    let started_epoch = unix_ts_now() as i64;
+    serve_mail_from(port, audit_log, registry, unix_ts_now() as i64)
+}
+
+/// [`serve_mail`] with the start it records passed in. The caller stamps it before
+/// the bind, as `serve_mail` does. An in-process test door passes a start in the
+/// past, so a request signed at once is admitted.
+fn serve_mail_from(port: u16, audit_log: &Path, registry: &'static Registry, started_epoch: i64) -> std::io::Result<()> {
     let listener = TcpListener::bind((MAIL_ADAPTER_BIND, port))?;
     eprintln!(
         "aoide mail serve: listening on http://{MAIL_ADAPTER_BIND}:{port}/ (loopback only; TLS \
@@ -9458,8 +9482,8 @@ mod tests {
 
         let kp = setup_signed_node("box-b");
         let signed_at = 1_800_000_000_i64;
-        // The verifier's own "now" is 10 minutes later — well past the
-        // ±120s default window.
+        // The verifier's own "now" is 10 minutes later — well past the 120s
+        // window behind it.
         let verifier_now = signed_at + 600;
         let req = signed_request(&kp, "box-b", "/", b"{}", signed_at, &unique_nonce("skew"));
         match verify_signed_request(&req, verifier_now, 0) {
@@ -9764,11 +9788,12 @@ mod tests {
     }
 
     /// A frame minted before this door started is refused though the skew window
-    /// would admit it: the door holds no nonce from before its own start, so a
-    /// frame from before a restart cannot be replayed into the new process. A
-    /// frame minted after the start is accepted.
+    /// would admit it: the door holds no replay memory from before its own start,
+    /// so a frame from before a restart cannot be replayed into the new process.
+    /// Frames stamped up to the start bound (start + 5s) are refused, and a frame
+    /// stamped after it is accepted.
     #[test]
-    fn a_frame_minted_before_the_door_started_is_refused_and_one_after_it_is_accepted() {
+    fn a_frame_minted_before_the_door_started_is_refused_and_one_after_the_bound_is_accepted() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let (root, saved) = adapter_root("start-gate");
         let kp = setup_signed_node("box-b");
@@ -9786,10 +9811,85 @@ mod tests {
             matches!(verify_signed_request(&same_second, started, started), SignedRequestOutcome::Refused(-32008, _)),
             "a frame stamped in the start second is refused too: the start is whole seconds"
         );
-        let late = signed_request(&kp, "box-b", "/", b"{}", started + 1, &unique_nonce("start-late"));
+        let at_bound = signed_request(&kp, "box-b", "/", b"{}", started + 5, &unique_nonce("start-bound"));
         assert!(
-            matches!(verify_signed_request(&late, started + 1, started), SignedRequestOutcome::Verified { .. }),
-            "a frame minted after the start is accepted"
+            matches!(verify_signed_request(&at_bound, started + 5, started), SignedRequestOutcome::Refused(-32008, _)),
+            "a frame stamped at start + 5s is refused: the bound is inclusive"
+        );
+        let late = signed_request(&kp, "box-b", "/", b"{}", started + 6, &unique_nonce("start-late"));
+        assert!(
+            matches!(verify_signed_request(&late, started + 6, started), SignedRequestOutcome::Verified { .. }),
+            "a frame stamped after start + 5s is accepted"
+        );
+        adapter_cleanup(&root, saved);
+    }
+
+    /// The ahead bound is fixed at five seconds whatever the knob says. A frame five
+    /// seconds ahead of this door's clock is accepted; one six seconds ahead is
+    /// refused, naming both times, the bound, and that the caller's clock is fast.
+    #[test]
+    fn a_frame_five_seconds_ahead_is_accepted_and_one_six_seconds_ahead_is_refused_as_a_fast_clock() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (root, saved) = adapter_root("ahead-bound");
+        let kp = setup_signed_node("box-b");
+        let now = 1_800_000_000_i64;
+        let five = signed_request(&kp, "box-b", "/", b"{}", now + 5, &unique_nonce("ahead-five"));
+        assert!(
+            matches!(verify_signed_request(&five, now, 0), SignedRequestOutcome::Verified { .. }),
+            "a frame five seconds ahead is inside the bound"
+        );
+        let six = signed_request(&kp, "box-b", "/", b"{}", now + 6, &unique_nonce("ahead-six"));
+        match verify_signed_request(&six, now, 0) {
+            SignedRequestOutcome::Refused(-32008, message) => {
+                assert!(message.contains("fast"), "the caller's clock is fast: {message}");
+                assert!(message.contains("5s"), "names the bound: {message}");
+                assert!(message.contains(&aoide_storage::time::iso_utc_from_epoch(now + 6)), "names the frame's time: {message}");
+                assert!(message.contains(&aoide_storage::time::iso_utc_from_epoch(now)), "names this door's now: {message}");
+            }
+            other => panic!("a frame six seconds ahead is refused, got {other:?}"),
+        }
+        adapter_cleanup(&root, saved);
+    }
+
+    /// Case A: a frame an earlier process accepted, stamped as far ahead as the
+    /// bound allows, is refused by the restarted door. Accepted at `accepted`, it
+    /// is stamped at most `accepted + 5`; a restart at `restart >= accepted` refuses
+    /// every stamp up to `restart + 5`, so the same bytes stay refused after it.
+    #[test]
+    fn a_frame_accepted_before_a_restart_is_refused_after_it_at_the_full_ahead_bound() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (root, saved) = adapter_root("restart-case-a");
+        let kp = setup_signed_node("box-b");
+        let accepted = 1_800_000_000_i64;
+        let frame = signed_request(&kp, "box-b", "/", b"{}", accepted + 5, &unique_nonce("restart-a"));
+        assert!(
+            matches!(verify_signed_request(&frame, accepted, 0), SignedRequestOutcome::Verified { .. }),
+            "the earlier process accepts it, five seconds ahead"
+        );
+        let restart = accepted;
+        assert!(
+            matches!(verify_signed_request(&frame, restart, restart), SignedRequestOutcome::Refused(-32008, _)),
+            "the restarted door refuses the same bytes in the restart second"
+        );
+        assert!(
+            matches!(verify_signed_request(&frame, restart + 3, restart), SignedRequestOutcome::Refused(-32008, _)),
+            "and still refuses them a few seconds into the new process"
+        );
+        adapter_cleanup(&root, saved);
+    }
+
+    /// Case B: a frame minted before a door's start and never delivered anywhere is
+    /// refused once its stamp is within the start bound, whatever its signer meant.
+    #[test]
+    fn a_frame_minted_before_a_start_and_never_delivered_is_refused_at_the_bound() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (root, saved) = adapter_root("minted-case-b");
+        let kp = setup_signed_node("box-b");
+        let started = 1_800_000_000_i64;
+        let minted_before = signed_request(&kp, "box-b", "/", b"{}", started - 1 + 5, &unique_nonce("minted-b"));
+        assert!(
+            matches!(verify_signed_request(&minted_before, started + 1, started), SignedRequestOutcome::Refused(-32008, _)),
+            "a frame stamped at most start + 5s is refused, though it was never delivered before the start"
         );
         adapter_cleanup(&root, saved);
     }
@@ -18597,27 +18697,21 @@ mod tests {
         std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port()
     }
 
-    /// Raise a real `serve_mail` on a background thread and wait until it
-    /// answers a connect. The thread lives for the rest of the test process,
-    /// which is what `serve`'s own loop does by construction; the registry is
-    /// leaked because `serve_mail` takes it `&'static`, exactly as `a2a serve`
-    /// does. `audit_log` is the one the adapter writes through — a real file
-    /// for the tests that assert on its lines.
+    /// Raise the adapter's serve loop, `serve_mail_from`, on a background thread and
+    /// wait until it answers a connect. Its start is in the past, so a request signed
+    /// at once is admitted; the public `serve_mail` stamps its own start, and its
+    /// test waits that out. The thread lives for the rest of the test process, which
+    /// is what `serve`'s own loop does by construction. The registry is leaked
+    /// because `serve_mail_from` takes it `&'static`, exactly as `a2a serve` does.
+    /// `audit_log` is the one the adapter writes through.
     fn raise_mail_adapter(port: u16, audit_log: &Path) {
         let audit_log = audit_log.to_path_buf();
         std::thread::spawn(move || {
-            let _ = serve_mail(port, &audit_log, Box::leak(Box::new(full_card_registry())));
+            let _ = serve_mail_from(port, &audit_log, Box::leak(Box::new(full_card_registry())), 0);
         });
         let deadline = std::time::Instant::now() + Duration::from_secs(5);
         loop {
             if std::net::TcpStream::connect(("127.0.0.1", port)).is_ok() {
-                // A real `serve_mail` stamps its own start, so a request signed against it must be
-                // stamped after the second that start fell in. The start came before the bind, so
-                // the clock leaving the second the door was listening in leaves the start behind.
-                let ready = epoch_now();
-                while epoch_now() <= ready {
-                    std::thread::sleep(Duration::from_millis(20));
-                }
                 return;
             }
             assert!(std::time::Instant::now() < deadline, "the adapter never came up on 127.0.0.1:{port}");

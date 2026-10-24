@@ -8609,17 +8609,21 @@ for a cheaper reason:
 2. `X-Aoide-Node` is a well-formed name, else `-32007` — wire-format
    validity only; the VALUE never selects a record.
 3. `X-Aoide-Timestamp` parses as ISO-8601, else `-32007`.
-4. **Replay guard, timestamp half**: the timestamp is within
-   `aoide_storage::wire_auth::signature_skew_secs()` of this instance's own
-   "now" (±120s default, `AOIDE_SIGNATURE_SKEW_SECS` overrides) — else
-   `-32008`, a taught error naming BOTH timestamps (the request's claimed
-   time and this instance's own "now") and the configured window.
-   **Start check**, same step and same code: a timestamp at or before this
-   process's own start is `-32008` too, a taught error naming both times.
-   `serve` and `serve_mail` record the start once, before they bind. Both times
-   are whole seconds, so the start second itself is refused. The nonce sets
-   (step 7) are process-local and a restart clears them; this check is what
-   stops a frame an earlier process accepted from being accepted again.
+4. **Replay guard, timestamp half**: the timestamp is at most
+   `aoide_storage::wire_auth::signature_skew_secs()` behind this instance's own
+   "now" (120s default, `AOIDE_SIGNATURE_SKEW_SECS` overrides) and at most 5
+   seconds ahead of it (fixed, not a knob) — else `-32008`, a taught error
+   naming BOTH timestamps (the request's claimed time and this instance's own
+   "now"). A frame more than 5 seconds ahead names that bound and says the
+   caller's clock is fast. **Start check**, same step and same code: a timestamp
+   at or before this process's start plus 5 seconds is `-32008` too, a taught
+   error naming both times. `serve` and `serve_mail` record the start once,
+   before they bind. Both times are whole seconds. The nonce sets (step 7) are
+   process-local and a restart clears them; the start check is what stops a
+   frame an earlier process accepted from being accepted again. The 5 seconds
+   ahead is what makes that enough: a frame an earlier process accepted was
+   accepted no later than the restart, and stamped at most 5 seconds past its
+   accept time, so it is stamped at most 5 seconds past the restart.
 5. **By-key resolution**: the signature — over the canonical string rebuilt
    from the VERIFIER's own parsed request (never trusting a wire-carried
    canonical string) — is tried against every `verified` node's stored
@@ -8728,19 +8732,22 @@ the sets, unlike everything else this door's node and pairing state persists: an
 that safe. Memory is bounded by the signers that have authenticated, times the
 cap. Only a verified signature reaches a set, and a set is never left empty in
 the map, because the check that empties one records its own nonce into it. The
-cost of the start check: a client whose clock runs behind the door's can be
-refused `-32008` for up to that lag after a restart, and it retries. A client
-with a synchronised clock loses only the start second.
+cost of the start check: for the first 5 seconds
+after each start, signed calls are refused `-32008`, and a caller whose clock
+runs more than 5 seconds fast is refused the same way. Its message names both
+times, and a retry with a fresh timestamp goes through once the clock is past
+the bound.
 
 **Error codes**: `-32007` (signature verification failed — covers the
 malformed-header and ambiguous-signer shapes above, plus the single
 no-key-verifies refusal that unknown-key/unverified-node/keyless-
-record/bad-signature all collapse into), `-32008` (clock skew beyond the window,
-or a frame stamped at or before this door's start), `-32009` (nonce replay),
-`-32012` (audience: a `to` that is not this door's key, or no `to` on a method
-outside the old-client allow-list; always unsigned), `-32013` (busy: this key's
-nonce set holds its cap of unexpired nonces; HTTP 503, always unsigned, nothing
-recorded: the caller backs off and its letter stays live).
+record/bad-signature all collapse into), `-32008` (clock skew beyond the window
+or 5 seconds ahead, or a frame stamped at or before this door's start plus 5
+seconds), `-32009` (nonce replay), `-32012` (audience: a `to` that is not this
+door's key, or no `to` on a method outside the old-client allow-list; always
+unsigned), `-32013` (busy: this key's nonce set holds its cap of unexpired
+nonces; HTTP 503, always unsigned, nothing recorded: the caller backs off and
+its letter stays live).
 
 **Outbound (client side)** — `aoide-client::commands::sign_headers_for_node` is
 the ONE production call site that ever builds these headers: for a
@@ -10127,11 +10134,11 @@ TLS-terminating front — a Cloudflare Tunnel, a VPS with public 443, a tailnet
   internet.
 - **Shares the door's transport**: `MAX_CONN`/`MAX_BODY`/`MAX_LINE`/
   `MAX_HEADERS`/`MAX_REQUEST`, per-request signature verification with the same
-  per-key nonce sets, start check and the same ±`AOIDE_SIGNATURE_SKEW_SECS`
-  window, `write_http_response`, and the single audit log (house rule 6).
-  Refusals are the door's own: `-32007` signature, `-32008` skew, `-32009` nonce
-  replay, `-32010` admission, `-32013` busy. It carries no bearer and no spawn
-  configuration.
+  per-key nonce sets, start check and the same clock window
+  (`AOIDE_SIGNATURE_SKEW_SECS` behind, 5 seconds ahead), `write_http_response`,
+  and the single audit log (house rule 6). Refusals are the door's own: `-32007`
+  signature, `-32008` skew, `-32009` nonce replay, `-32010` admission, `-32013`
+  busy. It carries no bearer and no spawn configuration.
 - **The same admission, never a copy.** The three methods ARE the door's
   (`mail_rpc` is one function, called from both dispatch tables), so
   everything the door reads to admit a caller is read here unchanged: the

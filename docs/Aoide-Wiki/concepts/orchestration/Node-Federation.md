@@ -265,7 +265,8 @@ rungs (`CONTRACTS.md` §6 "Legacy escapes"):
   grants may differ; a key's effective grant set is therefore the UNION
   across every record sharing it — revoking a capability from a key means
   revoking it on every such record. Replay-guarded by a ±120s timestamp
-  window (`-32008`, a taught error naming both timestamps) and a bounded,
+  window (`-32008`, a taught error naming both timestamps; 120s behind, 5s
+  ahead) and a bounded,
   per-`a2a serve`-process nonce cache keyed on `(pubkey, nonce)`, capped
   at 4096 entries (`-32009`); the cache clears on restart, which is why
   both checks run independently. The ONLY rung Spawn accepts:

@@ -667,14 +667,14 @@ a2a spawn probe needs `/bin/sh` + `printf`'s byte-exact output.
     never `-32013`.
 - **The start check.** `serve` and `serve_mail` capture `started_epoch` once,
   before they bind, and pass it to `handle_connection`, which passes it to
-  `verify_signed_request`. A frame stamped at or before it is `-32008`, checked
-  after the skew window and before any signature work. Don't drop it on the
-  theory that the skew window already covers the restart gap: the sets are
-  cleared by every restart, and the start check is what closes that gap. Tests
-  that drive a REAL door (`raise_mail_adapter`, which calls `serve_mail`) sign
-  only after the clock has left the second the door was listening in, and that
-  helper is where that wait lives. `raise_a2a_door` passes `0` and needs no
-  wait.
+  `verify_signed_request`. A frame stamped at or before it plus
+  `SKEW_AHEAD_SECS` (5s) is `-32008`, judged with the clock window in
+  `time_refusal` before any signature work. Don't drop it on the theory that the
+  skew window already covers the restart gap: the sets are cleared by every
+  restart, and the start check is what closes that gap. The in-process doors
+  (`raise_mail_adapter`, `raise_a2a_door`) pass `0`. Helpers that spawn the real
+  binary (`raise_door` in cli, the two-mesh launcher) wait until the clock is
+  past their start plus 5s before they sign anything.
 - `handle_connection` calls `verify_signed_request` exactly ONCE per connection,
   strictly before both the streaming and the plain-JSON-RPC dispatch branches —
   don't duplicate that call inside `route`/`stream_task`/`handle_jsonrpc`;

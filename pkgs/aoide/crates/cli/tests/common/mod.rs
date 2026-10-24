@@ -141,10 +141,11 @@ pub fn raise_door(root: &std::path::Path, name: &str, port: u16) -> Door {
     loop {
         if std::net::TcpStream::connect(("127.0.0.1", port)).is_ok() {
             // The door stamps its start second before it binds, and refuses a frame stamped at or
-            // before that second. Wait for the clock to leave the second it came up in, so the
-            // first signed request built against this door is after its start.
+            // before that second plus five. `ready` is at or after that start, so waiting for the
+            // clock to pass `ready + 5` puts the first signed request built against this door past
+            // the bound.
             let ready = whole_second();
-            while whole_second() <= ready {
+            while whole_second() <= ready + 5 {
                 std::thread::sleep(std::time::Duration::from_millis(20));
             }
             return door;

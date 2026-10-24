@@ -43,9 +43,9 @@
 //! `aoide-server::a2a::verify_signed_request`'s own doc comment for the
 //! fail-closed handling this module's constants feed).
 //!
-//! **Replay guard split**: [`signature_skew_secs`] (the ±120s-default
-//! timestamp window, `AOIDE_SIGNATURE_SKEW_SECS` override) is a pure env
-//! read and lives here, next to the canonical string it bounds. The
+//! **Replay guard split**: [`signature_skew_secs`] (the 120s-default window
+//! behind "now", `AOIDE_SIGNATURE_SKEW_SECS` override; ahead of "now" the fixed
+//! [`SKEW_AHEAD_SECS`]) is a pure env read and lives here, next to the canonical string it bounds. The
 //! **nonce sets** do NOT live here — they are ephemeral, in-memory,
 //! per-`a2a serve`-PROCESS runtime state with no durable file behind them at
 //! all, unlike everything else this crate persists
@@ -107,17 +107,19 @@ pub const HEADER_ANSWER_SIGNATURE: &str = "X-Aoide-Answer-Signature";
 /// an answer.
 pub const ANSWER_TAG: &str = "ANSWER";
 
-/// Env override for the replay-guard's timestamp window, in seconds
-/// (PAIRING.md: "±120s default, env knob"). Same tolerant-fallback shape
-/// [`crate::pairing::pairing_timeout_secs`] already established for its own
-/// analogous knob: a blank/unparsable/non-positive value falls back to
+/// Env override for the window behind "now", in seconds (PAIRING.md: "120s behind
+/// now, env knob"). A blank, unparsable or non-positive value falls back to
 /// [`DEFAULT_SIGNATURE_SKEW_SECS`] rather than producing a zero or negative
-/// window.
+/// window, as [`crate::pairing::pairing_timeout_secs`] does for its own knob.
 pub const SIGNATURE_SKEW_ENV: &str = "AOIDE_SIGNATURE_SKEW_SECS";
 
-/// The default replay-guard window: 120 seconds either side of "now"
-/// (PAIRING.md's own default).
+/// The default window behind "now": 120 seconds (PAIRING.md's own default).
 pub const DEFAULT_SIGNATURE_SKEW_SECS: i64 = 120;
+
+/// How far AHEAD of "now" a door accepts a signed frame. Fixed, not a
+/// knob: the knob widens the window behind, and the start bound in
+/// `aoide-server::a2a` is this same five seconds.
+pub const SKEW_AHEAD_SECS: i64 = 5;
 
 /// Resolve the signature replay-guard window in seconds:
 /// [`SIGNATURE_SKEW_ENV`] when set to a valid positive integer, else
@@ -268,11 +270,12 @@ pub fn verify_answer(pubkey_hex: &str, request_signature: &str, request_nonce: &
     verify_signature_hex(pubkey_hex, answer_string(request_signature, request_nonce, status, body).as_bytes(), answer_signature)
 }
 
-/// Is `ts_epoch` within `window_secs` of `now_epoch`, either direction?
-/// Pure — `verify_signed_request` (`aoide-server::a2a`) is the one
-/// production caller, feeding it [`signature_skew_secs`]'s value.
+/// Is `ts_epoch` inside the clock window? At most `window_secs` behind `now_epoch`
+/// (the knob, [`signature_skew_secs`]) and at most [`SKEW_AHEAD_SECS`] ahead of it.
+/// Pure — `verify_signed_request` and PAIRPOLL (`aoide-server::a2a`) are the
+/// production callers.
 pub fn within_skew(now_epoch: i64, ts_epoch: i64, window_secs: i64) -> bool {
-    (now_epoch - ts_epoch).abs() <= window_secs
+    now_epoch - ts_epoch <= window_secs && ts_epoch - now_epoch <= SKEW_AHEAD_SECS
 }
 
 #[cfg(test)]
@@ -535,11 +538,13 @@ mod tests {
     // ── within_skew ───────────────────────────────────────────────────────
 
     #[test]
-    fn within_skew_covers_both_directions_and_the_boundary() {
+    fn within_skew_takes_the_knob_behind_and_five_seconds_ahead() {
         assert!(within_skew(1000, 1000, 120), "exact match");
-        assert!(within_skew(1000, 880, 120), "120s in the past — at the boundary, still inside");
-        assert!(within_skew(1000, 1120, 120), "120s in the future — at the boundary, still inside");
-        assert!(!within_skew(1000, 879, 120), "121s in the past — outside");
-        assert!(!within_skew(1000, 1121, 120), "121s in the future — outside");
+        assert!(within_skew(1000, 880, 120), "120s behind: the knob's window edge is inside");
+        assert!(!within_skew(1000, 879, 120), "121s behind: outside the knob's window");
+        assert!(within_skew(1000, 500, 600), "the knob does widen the window behind");
+        assert!(within_skew(1000, 1005, 120), "5s ahead: the fixed bound is inside");
+        assert!(!within_skew(1000, 1006, 120), "6s ahead: outside, whatever the window");
+        assert!(!within_skew(1000, 1006, 3600), "the knob never widens the bound ahead");
     }
 }
