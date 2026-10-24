@@ -9494,7 +9494,7 @@ signature, two of them, another key's, another request's) is
 nothing and backs off the link. Only a verified `accepted` or `duplicate`
 retires a receipt, a `charter` letter or a `transit` container. For a letter the
 sender dialled live, a verified `accepted` or `duplicate` is final: it delivers
-the letter, nothing is kept, and no receipt is awaited (MAIL.md §Transit, O1a).
+the letter, nothing is kept, and no receipt is awaited (MAIL.md §Transit).
 A verified refusal of any word is final for such a letter too: the letter comes
 back to its sender at once, with that word, and nothing is re-dialled after a
 verified answer. A verified JSON-RPC `error` parks a drained entry, an unsigned

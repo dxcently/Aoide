@@ -969,11 +969,12 @@ a2a spawn probe needs `/bin/sh` + `printf`'s byte-exact output.
   self-audit under `a2a.aoide/mailPoll` carrying the handed-over count. The
   hand-over writes nothing. The one write is `outbox::defer_named` on the
   `deferred` list the caller names: a `tries` stamp and a `deferred:` outcome on
-  ITS OWN entries, which holds them out of the window and nothing else. No
+  ITS OWN entries, never a returned own letter; the stamp holds them out of the
+  window and nothing else. No
   bookmark and no "already handed over" flag may be added here: the
   re-poll-before-ack idempotence comes from handing the SAME set over again, and
-  the entry retires only through a valid ack, a held own letter its
-  destination's poll files, `mail outbox rm`, or an own letter's session
+  the entry retires only through a valid ack, a held own letter the poll of the
+  hop it was spooled toward files, `mail outbox rm`, or an own letter's session
   ending (ruling 131), exactly as a pushed deposit's would.
   The answer is bounded by
   `aoide_storage::outbox::POLL_BATCH_CAP`; that bound is what keeps a big

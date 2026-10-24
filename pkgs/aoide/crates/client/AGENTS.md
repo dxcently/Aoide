@@ -707,8 +707,10 @@
   131). **Only a VERIFIED answer reaches it**: an unsigned, forged or replayed
   `accepted` leaves all three kinds spooled. Its write-back goes through
   `outbox::update_entry`, so an entry removed during the dial is not re-spooled;
-  every post-dial write in `drain_node` does the same. The reseal writes the
-  same way, and an entry is attempted only after `outbox::still_spooled` says it
+  every post-dial write in `drain_node` does the same, and so does the retry's
+  write-back (`resend_returned_letter`, which reports `removed`). The reseal
+  writes the same way, and an entry is attempted only after
+  `outbox::still_spooled` says it
   is spooled. The check comes AFTER the reseal, so a reseal write cannot
   re-spool an entry past it. A relayed entry the reseal withholds (no binding
   for its destination) is skipped: it stays spooled and unsent.
@@ -943,11 +945,12 @@
   DECLARED name in that mesh (`own_name_in` via `mint_outbound_letter_from`),
   because `from.node` is inside the signature every receiver and hop checks.
   The letter is built in memory with `spool_entry`, and `mail_wire::deliver_now`
-  dials its hop once with that entry in hand (a relayed letter is sealed to its
-  destination first, or returned undialled): nothing is on disk while it is in
-  flight, so no drain can race it, and the dial takes no link lock. A delivered
-  letter writes nothing. A returned one is written to the spool marked
-  `refused`, and the command is a refusal whose fix is
+  dials its hop with that entry in hand, up to twice (a relayed letter is sealed
+  to its destination first, or returned undialled): nothing is on disk while it
+  is in flight, so no drain can race it, and the dial takes no link lock. A
+  delivered letter writes nothing. A returned one is written to the spool marked
+  `refused`, and audited as `mail.outbox.returned` only after that write, so a
+  return that is not kept writes no line. The command is a refusal whose fix is
   `aoide mail outbox retry`. A held one (a `poll` or `hold` hop, or `--hold`) is
   written and never dialled. A letter whose mesh's declaration cannot be read is
   returned with that declaration's own word, before its hop is resolved.

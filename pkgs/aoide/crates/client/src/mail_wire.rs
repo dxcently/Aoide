@@ -6638,12 +6638,68 @@ mod tests {
     fn a_refused_connection_is_returned_after_the_one_re_dial() {
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let (_env, dir) = root("live-refused");
-        point_at("far", 1); // nothing listens on port 1
+        // A fake `curl` that refuses every connection (exit 7, as curl does when
+        // nothing listens) and logs each deposit it is asked to make. Module-local,
+        // like the other shims here: the deposit body arrives on stdin.
+        let shim_dir = dir.join("shim");
+        std::fs::create_dir_all(&shim_dir).unwrap();
+        let dials = dir.join("deposit-dials.log");
+        let shim = shim_dir.join("curl");
+        std::fs::write(
+            &shim,
+            format!(
+                "#!/bin/sh\nbody=$(cat)\ncase \"$body\" in *aoide/mailDeposit*) echo dial >> '{}' ;; esac\nexit 7\n",
+                dials.display()
+            ),
+        )
+        .unwrap();
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&shim, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let _path = aoide_test_support::EnvSaver::capture(&["PATH"]);
+        std::env::set_var("PATH", format!("{}:{}", shim_dir.display(), std::env::var("PATH").unwrap_or_default()));
+        point_at("far", 1);
 
         let Delivery::Returned(returned) = deliver_now("far", live_letter("far", "hi")) else {
             panic!("a refused connection must return the letter");
         };
+        let count = std::fs::read_to_string(&dials).unwrap_or_default().lines().count();
+        assert_eq!(count, 2, "the first dial and one re-dial, no more");
         assert!(returned.last_outcome.starts_with("transport:"), "{}", returned.last_outcome);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **L15 (review r1): a verified link refusal is not contact, on either path.**
+    /// `drain_node` and `deliver_now` both count only a verified answer about the
+    /// letter as contact, so neither polls the node after a `down` answer.
+    #[test]
+    fn a_verified_link_refusal_polls_nothing_on_either_path() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("link-refusal-no-poll");
+        let down = r#"{"jsonrpc":"2.0","id":1,"result":{"status":"refused","reason":"down","detail":"d"}}"#;
+        let (port, seen) = logged_door(move |r: &str| signed_for_method(r, down));
+        point_at("far", port);
+        let polls = |seen: &std::sync::Arc<std::sync::Mutex<Vec<String>>>| {
+            seen.lock().unwrap().iter().filter(|r| r.contains("aoide/mailPoll")).count()
+        };
+
+        let Delivery::Returned(_) = deliver_now("far", live_letter("far", "hi")) else {
+            panic!("a link refusal returns the letter");
+        };
+        assert_eq!(polls(&seen), 0, "the live dial does not poll after a link refusal");
+
+        let receipt = aoide_storage::mail::mint_ack(
+            "far",
+            aoide_storage::mail::Address { node: "far".to_string(), name: "bob".to_string() },
+            &"ab".repeat(32),
+        )
+        .unwrap();
+        aoide_storage::outbox::write_entry("far", &OutboxEntry::fresh(receipt)).unwrap();
+        drain_node("far").unwrap();
+        assert_eq!(polls(&seen), 0, "the drain does not poll after a link refusal either");
+        assert_eq!(aoide_storage::outbox::list_entries("far").unwrap().len(), 1, "and the receipt stays spooled");
 
         let _ = std::fs::remove_dir_all(&dir);
     }

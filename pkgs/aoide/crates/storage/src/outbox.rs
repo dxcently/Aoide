@@ -1230,7 +1230,8 @@ pub fn record_deferred(node: &str, msgids: &[String]) -> Result<(), String> {
 /// from now, so it is not offered again until the window passes. Only
 /// `node`'s directory is read or written, so a poller can never defer another
 /// node's entry. Each read-modify-write is one lock hold. Returns how many were
-/// deferred; a msgid this hub does not hold is skipped.
+/// deferred; a msgid this hub does not hold is skipped, and so is a returned own
+/// letter, which no poll offers.
 pub fn defer_named(node: &str, msgids: &[String]) -> Result<usize, String> {
     let node = node.to_string();
     let msgids = msgids.to_vec();
@@ -1239,6 +1240,9 @@ pub fn defer_named(node: &str, msgids: &[String]) -> Result<usize, String> {
         for msgid in msgids.iter().filter(|m| crate::mail::is_msgid(m)) {
             let Ok(raw) = std::fs::read_to_string(entry_path(&node, msgid)) else { continue };
             let Ok(mut entry) = serde_json::from_str::<OutboxEntry>(&raw) else { continue };
+            if entry.envelope.header.kind == crate::mail::ENTRY_TYPE_LETTER && !entry.is_held() {
+                continue;
+            }
             entry.tries = entry.tries.saturating_add(1);
             entry.last_try_at = crate::time::now_iso_utc();
             entry.last_outcome = format!("{DEFERRED_PREFIX} poller did not file");
@@ -1319,13 +1323,20 @@ pub fn retire_by_ack(ack: &Envelope) -> Result<Option<String>, String> {
     if ack.header.kind != crate::mail::ENTRY_TYPE_RECEIPT || !crate::mail::is_msgid(&ack.text) {
         return Ok(None);
     }
+    with_lock(|| retire_by_ack_unlocked(ack))
+}
+
+/// [`retire_by_ack`]'s body, run under one outbox lock hold: the check, the
+/// `mail.outbox.retired` line and the removal cannot interleave with another
+/// writer.
+fn retire_by_ack_unlocked(ack: &Envelope) -> Result<Option<String>, String> {
     let acked_msgid = ack.text.clone();
     let from = ack.header.from.node.clone();
-    for node in nodes_with_outbox()? {
+    for node in nodes_with_outbox_unlocked()? {
         if !entry_path(&node, &acked_msgid).exists() {
             continue;
         }
-        let mut found = list_entries(&node)?
+        let mut found = list_entries_unlocked(&node)?
             .into_iter()
             .find(|entry| entry.envelope.msgid == acked_msgid);
         // **The mesh has to match too.** A receipt is signed in ONE mesh
@@ -1343,8 +1354,21 @@ pub fn retire_by_ack(ack: &Envelope) -> Result<Option<String>, String> {
             }
         }
         if let Some(entry) = &found {
-            if entry.envelope.header.to.node == from && remove_entry(&node, &acked_msgid)? {
-                return Ok(Some(acked_msgid));
+            if entry.envelope.header.to.node == from {
+                if entry.envelope.header.kind == crate::mail::ENTRY_TYPE_LETTER {
+                    aoide_protocol::audit::audit(
+                        &aoide_protocol::audit::default_audit_log(),
+                        aoide_protocol::Door::Cli,
+                        aoide_protocol::audit::EventClass::Audit,
+                        "mail.outbox.retired",
+                        "ok",
+                        &format!("letter {acked_msgid} toward {from} retired: {from} sent a receipt"),
+                    )
+                    .map_err(|e| format!("the audit log cannot be written, so the letter stays: {e}"))?;
+                }
+                if remove_entry_unlocked(&node, &acked_msgid)? {
+                    return Ok(Some(acked_msgid));
+                }
             }
         }
     }
@@ -2431,6 +2455,87 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// **L1 (review r1): a receipt that retires an own letter says so, once.** A
+    /// returned or a held letter that a receipt retires writes one
+    /// `mail.outbox.retired` line naming the msgid, the node and `receipt`.
+    #[test]
+    fn a_receipt_that_retires_an_own_letter_writes_one_audit_line_naming_it() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("outbox-receipt-audit");
+        let (returned, held) = ("ab".repeat(32), "cd".repeat(32));
+
+        write_entry("there", &own_letter("there", &returned, Some("sess-a"), false)).unwrap();
+        write_entry("there", &own_letter("there", &held, Some("sess-a"), true)).unwrap();
+        assert_eq!(retire_by_ack(&ack_envelope("there", "here", &returned)).unwrap(), Some(returned.clone()));
+        assert_eq!(retire_by_ack(&ack_envelope("there", "here", &held)).unwrap(), Some(held.clone()));
+
+        let lines = audit_lines("mail.outbox.retired");
+        assert_eq!(lines.len(), 2, "one line per retired letter: {lines:?}");
+        for msgid in [&returned, &held] {
+            assert!(lines.iter().any(|l| l.contains(msgid.as_str()) && l.contains("there") && l.contains("receipt")), "{lines:?}");
+        }
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **L2 (review r1): a hop's `deferred` list leaves a returned own letter as it
+    /// is.** Only a held letter is deferred: a returned one is never offered, so
+    /// there is nothing for the hop to defer.
+    #[test]
+    fn defer_named_leaves_a_returned_own_letter_as_it_is() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("outbox-defer-returned");
+        let (returned, held) = ("ab".repeat(32), "cd".repeat(32));
+
+        write_entry("there", &own_letter("there", &returned, Some("sess-a"), false)).unwrap();
+        write_entry("there", &own_letter("there", &held, Some("sess-a"), true)).unwrap();
+        let before = serde_json::to_value(list_entries("there").unwrap()).unwrap();
+
+        assert_eq!(defer_named("there", std::slice::from_ref(&returned)).unwrap(), 0, "a returned letter is not deferred");
+        assert_eq!(serde_json::to_value(list_entries("there").unwrap()).unwrap(), before, "and it is not rewritten");
+        assert_eq!(defer_named("there", std::slice::from_ref(&held)).unwrap(), 1, "a held letter still is");
+        let deferred = list_entries("there").unwrap().into_iter().find(|e| e.envelope.msgid == held).unwrap();
+        assert_eq!(deferred.tries, 1, "{deferred:?}");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **A session's drop never takes transit custody.** A transit entry bound to
+    /// a session stays, as receipts and charters do: the drop takes letters only.
+    #[test]
+    fn a_session_drop_never_drops_transit_custody() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("outbox-drop-transit");
+        let mut transit = OutboxEntry::fresh(envelope("here", "there", &"ef".repeat(32)));
+        transit.envelope.header.kind = crate::mail::ENTRY_TYPE_TRANSIT.to_string();
+        transit.session = Some("sess-a".to_string());
+        write_entry("there", &transit).unwrap();
+
+        assert_eq!(drop_for_session("sess-a").unwrap(), 0);
+        assert_eq!(list_entries("there").unwrap().len(), 1, "the transit entry is still spooled");
+        assert!(audit_lines("mail.outbox.dropped").is_empty(), "and no drop line names it");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **A returned letter toward N is not in N's poll answer.** Only a held own
+    /// letter is offered; a returned one stays with its sender.
+    #[test]
+    fn a_returned_letter_toward_a_node_is_not_in_its_poll_answer() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("outbox-poll-returned");
+        let (returned, held) = ("ab".repeat(32), "cd".repeat(32));
+
+        write_entry("there", &own_letter("there", &returned, Some("sess-a"), false)).unwrap();
+        write_entry("there", &own_letter("there", &held, Some("sess-a"), true)).unwrap();
+        let offered: Vec<String> = poll_payloads("there").unwrap().into_iter().map(|(_, e)| e.msgid).collect();
+
+        assert!(offered.contains(&held), "the held letter is offered: {offered:?}");
+        assert!(!offered.contains(&returned), "the returned letter is not: {offered:?}");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// **A letter with no session (spooled before ruling 131) is dropped by the
     /// tick's sweep, with reason `pre-131`.** A letter bound to a session stays.
     #[test]
@@ -2493,7 +2598,7 @@ mod tests {
     fn bind_session_strips_control_characters_and_an_empty_result_binds_nothing() {
         assert_eq!(bind_session("sess-1").as_deref(), Some("sess-1"));
         let cleaned = bind_session("ses\u{7}s\n1\u{1b}").expect("something is left");
-        assert!(cleaned.starts_with("ses") && cleaned.chars().all(|c| !c.is_control()), "{cleaned:?}");
+        assert_eq!(cleaned, "sess1", "the control characters go and the rest stays");
         assert_eq!(bind_session("\u{7}\n"), None);
         assert_eq!(bind_session(""), None);
     }

@@ -410,6 +410,7 @@ fn chiyos_poll_files_the_letter_the_relay_held_and_the_origin_had_let_go() {
         aoide_storage::outbox::HandOver::Container(container) => *container,
         aoide_storage::outbox::HandOver::Envelope(_) => panic!("a sealed entry hands over the container"),
         aoide_storage::outbox::HandOver::Nothing => panic!("the entry is still spooled"),
+        aoide_storage::outbox::HandOver::Withheld(_) => panic!("a sealed entry for its destination is never withheld"),
     };
     assert_eq!(aoide_storage::outbox::poll_payloads("chiyo").unwrap().len(), 1, "…and re-offers it until then");
 

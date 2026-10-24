@@ -709,8 +709,10 @@ never the inbound/serve half (that's `aoide-server`).
   entries (tries and the signed envelope untouched), then calls
   `mail_wire::drain_node` ONCE per affected node. An own letter is not drained:
   its retry dials it live (`resend_returned_letter`, ruling 131). A delivered
-  one leaves the spool, a returned one is written back with its new word, and
-  a held one is refused (its node's poll moves it). `--refused` does the same
+  one leaves the spool, a returned one is written back with its new word
+  (`update_entry`: a letter that left the spool during its dial is not written
+  back, and the retry reports `removed`), and a held one is refused (its node's
+  poll moves it). `--refused` does the same
   for every returned letter, and leaves a held or sessionless (pre-131) letter
   as it is, undialled and unwritten, reporting it with its listed word. Each
   reports the `delivery` vocabulary `mail send`

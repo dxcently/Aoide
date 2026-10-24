@@ -106,9 +106,9 @@ one through its tunnel, at the far side's own door) instead of being silently
 skipped — so what a drain dials is a record when there is one and a declaration
 when there is not. **There is no version signal on the wire**, so a relay
 that cannot carry a container refuses it rather than announcing that it is
-old: the letter comes back to its sender, which keeps it until the relay is
-brought up to date and `aoide mail outbox retry` resends it
-(`docs/architecture/MAIL.md` §Transit). **Transit therefore deploys
+old: the letter comes back to its sender, which keeps it for as long as the
+session that sent it lasts (ruling 131). `aoide mail outbox retry` resends it
+once the relay is brought up to date (`docs/architecture/MAIL.md` §Transit). **Transit therefore deploys
 before the declaration that uses it**: `relays`, `[status]` and `[gates]` are
 declared only once every box of the mesh runs this version — a relay that
 predates it refuses a routed container outright, and a destination that
@@ -120,7 +120,7 @@ predates it refuses a two-entry hop chain, so the declaration comes last and
 | Topology | Behaviour |
 |---|---|
 | One host | This layer is not needed. Conducting and local `self/<name>` mail run with no mesh, relay or HTTPS. The HTTPS mesh is an add-on, never a prerequisite. |
-| One relay for a mesh, relay down | The relay is a single point of failure for **availability, not secrecy**. A letter that cannot be dialled comes back to its sender's outbox, marked refused, and `aoide mail outbox retry` resends it, so nothing is lost. LAN peers with a direct `ssh://` edge still deliver. |
+| One relay for a mesh, relay down | The relay is a single point of failure for **availability, not secrecy**. A letter that cannot be dialled comes back to its sender's outbox, marked refused, and `aoide mail outbox retry` resends it while the session that sent it lasts. The outage itself loses nothing, but that copy is dropped when the session ends (ruling 131), and a relay that accepts a letter and then loses it takes it with it (the `accepted` trade, MAIL.md §Transit). LAN peers with a direct `ssh://` edge still deliver. |
 | One relay for a mesh, relay compromised | Because letters are sealed and signed, it can drop, delay and observe metadata (who wrote to whom, size, time). It can never read or forge a letter, and never alter a charter. |
 | Several relays (`relays = ["a", "b"]`) | For availability. The sender takes the first relay, in declaration order, that it trusts in the mesh, can reach by address, and is not `down` (MAIL.md routing step 2). A relay that is unreachable but not declared `down` is still chosen, and the letter waits for it. Failing over automatically on unreachability is open. |
 | Relay that is also a node (sakaki) | The hub is a role. Its own mail files locally, like any destination's. |

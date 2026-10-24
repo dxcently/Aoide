@@ -176,7 +176,8 @@
   withholds it (`Reseal::Withheld`, `HandOver::Withheld`), and the answer lists
   it under `withheld`. The hand-over is a pure read: nothing is marked, moved or
   counted. The one write a poll makes on the hub is `defer_named`, which stamps
-  only the caller's own entries it names in `deferred` (MAIL.md §Wire).
+  only the caller's own entries it names in `deferred`, never a returned own
+  letter (MAIL.md §Wire).
 
 - **Enduring identity is independent of knowledge configuration.** Bind an
   explicit `valid_node_name`-shaped key in `session::bind_enduring_agent`;
@@ -1015,6 +1016,8 @@
   `outbox::retire_by_ack` is the "valid ack" half — it trusts its caller
   (`mail::deposit`) to have already proven the ack's origin signature
   genuine, and never re-verifies; don't call it on an unverified envelope.
+  It runs under one outbox lock hold, and an own letter it removes is audited
+  first (`mail.outbox.retired`), so the line and the removal cannot part.
   Its `text` must be exactly one msgid (`mail::is_msgid`) before anything
   is looked up: the text becomes a path, so a non-msgid retires nothing and
   builds no path.

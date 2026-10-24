@@ -625,7 +625,7 @@ door's audit name whitelist gains both names so they never log as bare
   hand-over itself is not an acknowledgement, and anything the poller has not
   yet named is offered again. **The cost of a permanent refusal:** the hub
   stops holding the container, so it cannot be re-offered from the hub. The
-  origin keeps no copy once the hub has accepted the letter (O1a), and the
+  origin keeps no copy once the hub has accepted the letter, and the
   poller refuses it again if it is still refused. A
   refused container leaves the hub before the next offer, so it never blocks
   the poll behind it. A container held back by the poller's own state stays,
@@ -650,8 +650,8 @@ door's audit name whitelist gains both names so they never log as bare
   the relay refuses as a different body for one msgid. The second ask answers
   that a poll is already in progress. Handed-over
   `letter` entries stay in the outbox until the poller names them in `filed`,
-  or an old-style receipt ends them; a re-poll before that re-hands them and
-  the receiver's dedup makes that harmless. **An HTTPS adapter's answer names
+  an old-style receipt ends them, or the session that sent them ends; a re-poll
+  before that re-hands them and the receiver's dedup makes that harmless. **An HTTPS adapter's answer names
   what it would not hand over**: an entry spooled before the poller published
   a binding is withheld (`sealed-required`) rather than carried in the clear.
   So is a relayed letter this box cannot seal to its destination: it seals to
@@ -705,7 +705,7 @@ door's audit name whitelist gains both names so they never log as bare
   `accepted` or `duplicate` retires a receipt, a `charter` letter or a
   `transit` container. A verified `accepted` or `duplicate` for a letter the
   sender dialled live delivers it: no copy is kept and no receipt is awaited
-  (O1a, §Transit).
+  (§Transit).
 - **Acks** are `receipt` envelopes minted by the destination on filing a
   `letter`: `to` = the origin, `text` = the acked `msgid`, signed by the
   destination. Routed like any letter, never themselves acked. The ack is
@@ -814,12 +814,14 @@ link.json       { "holdUntil": ts, "lastError": "…" }   per-link backoff
   Its worst wait is four capped calls, each at most 5 s to connect and 15 s in
   all: the binding exchange (only for a hop this box holds a pair record for,
   not one its charter declares), the two deposits, and one poll of the hop
-  after a verified answer, as the drain does (poll-on-contact).
+  after a verified answer about the letter, as the drain does (poll-on-contact);
+  a link refusal is no contact, so it is not polled. A via hop adds one tunnel
+  open, up to the tunnel-open timeout (8 s by default).
 - The drain runs on `aoided`'s existing timer tick (the reaper cadence)
   and immediately after any successful contact with that node. It dials only
-  the entries it may attempt, never an own letter, which its send dials once
-  (ruling 131). Because
-  the door is a separate process, "after contact" means the door
+  the entries it may attempt, never an own letter, which its send dials (up to
+  twice, ruling 131). Because the door is a separate process, "after contact"
+  means the door
   process drains under the same locks — the `.bsy` flock is what keeps
   the two drains from racing one link. It is taken non-blocking, the way
   BSO means it: a drain that finds a link busy skips that link and moves
@@ -882,10 +884,14 @@ link.json       { "holdUntil": ts, "lastError": "…" }   per-link backoff
   `aoide mail outbox rm <msgid>`. A verified `accepted` or `duplicate` for an
   own letter, which its send or a retry gets back, is the delivery itself and
   leaves nothing behind. `mail outbox retry` never retires anything by itself.
+  A receipt that retires an own letter writes one `mail.outbox.retired` audit
+  line.
   An own letter also leaves with its sending session: when that session leaves
   the roster (ended, reaped, or a hook death), every returned or held letter
   bound to it is dropped, one `mail.outbox.dropped` audit line each (reason
-  `session-ended`).
+  `session-ended`). A letter a live send returns after its session has already
+  left the roster is kept until the next daemon tick, which drops it (reason
+  `session-gone`).
   `aoide mail outbox [<node>]` answers "did it land" truthfully
   per entry via `data.delivery` — the same projection `aoide mail send`
   reports right after its own dial, so neither
@@ -1006,7 +1012,7 @@ refuses a two-entry hop chain. Nothing is lost while that happens — the
 letter comes back to its sender — but nothing moves either, so the declaration
 comes last and the drift report is the dry run.
 
-**A relay's verified `accepted` is the sender's delivery (O1a).** The sender
+**A relay's verified `accepted` is the sender's delivery.** The sender
 keeps no copy after it, so a relay that accepts a letter and then cannot hand
 it on loses it without a word to the origin. An accepted-then-dropped letter
 cannot be told from a delivery. That is the trade ruling 131 makes, and it is
@@ -1591,6 +1597,9 @@ authoritative first:
   dialled by this box, and leaves when that hop files it or its session ends.
 - `pre-131` — an own letter spooled before the session binding existed, so
   it has no session. The next tick drops it (reason `pre-131`).
+- `removed` — a retry's report only, never a listing's: the letter left the
+  outbox while its dial was in flight (an `rm`, or its session ending), so
+  nothing was written back. The retry refuses with the reason `removed`.
 - `refused` — a drained entry other than an own letter: its own `refused`
   flag is set (a policy refusal the far end sent back, never a transport
   failure, "Outbox" above). Automatic retries have already stopped for this

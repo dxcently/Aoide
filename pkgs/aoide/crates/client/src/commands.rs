@@ -5220,12 +5220,16 @@ fn delivery_status_unavailable(err: &str) -> Value {
 
 /// An own letter's delivery status, from its own flags alone (ruling 131).
 /// `held` while it waits for its node's own poll, `returned` with the word that
-/// ended its dial, and `pre-131` for a letter a build before the rule left in
-/// the spool, which the next daemon tick drops. An own letter never reads
-/// `accepted`, `ackPending` or `retrying`: no drain dials it, so no link state
-/// or attempt outcome applies. A genuine receipt for it reads `delivered`, and
-/// `delivery_projection` checks that first.
+/// ended its dial, and `pre-131` for a letter with no session, whatever its
+/// flags: a build before ruling 131 left it in the spool, and the next daemon
+/// tick drops it. An own letter never reads `accepted`, `ackPending` or
+/// `retrying`: no drain dials it, so no link state or attempt outcome applies. A
+/// genuine receipt for it reads `delivered`, and `delivery_projection` checks
+/// that first.
 fn own_letter_delivery(entry: &aoide_storage::outbox::OutboxEntry) -> Value {
+    if entry.session.is_none() {
+        return pre_131_delivery();
+    }
     if entry.is_held() {
         return held_delivery();
     }
@@ -5586,7 +5590,6 @@ fn handle_mail_send(inv: &Invocation) -> Outcome {
             }
             crate::mail_wire::Delivery::Returned(mut returned) => {
                 let word = crate::mail_wire::outcome_line(&returned.last_outcome);
-                audit_returned(&msgid, &next, word.as_deref(), session.as_deref());
                 let Some(session) = session else {
                     return Outcome::refuse(
                         cmd,
@@ -5607,6 +5610,7 @@ fn handle_mail_send(inv: &Invocation) -> Outcome {
                 if let Err(e) = aoide_storage::outbox::write_entry(&next, &returned) {
                     return teach::store_failed(cmd, "state/outbox", &e);
                 }
+                audit_returned(&msgid, &next, word.as_deref(), returned.session.as_deref());
                 (delivery_shape("returned", word.clone(), Some("entry"), None, false), None, Some(word))
             }
         }
@@ -6598,8 +6602,9 @@ fn poll_results(rows: &[Value]) -> Vec<String> {
 /// letter (ruling 131): the same bytes under the same msgid, through the path
 /// its send took. A verified `accepted` or `duplicate` delivers it and the
 /// entry leaves the box. A verified refusal, or no answer, keeps it returned,
-/// still bound to its own session, with the word that ended this dial. Returns
-/// the `data.delivery` the caller reports.
+/// still bound to its own session, with the word that ended this dial. A letter
+/// that left the outbox during the dial is not written back: its status is
+/// `removed`. Returns the `data.delivery` the caller reports.
 fn resend_returned_letter(node: &str, entry: aoide_storage::outbox::OutboxEntry) -> Result<Value, String> {
     let msgid = entry.envelope.msgid.clone();
     let mut attempt = entry;
@@ -6613,8 +6618,16 @@ fn resend_returned_letter(node: &str, entry: aoide_storage::outbox::OutboxEntry)
         }
         crate::mail_wire::Delivery::Returned(returned) => {
             let word = crate::mail_wire::outcome_line(&returned.last_outcome);
+            if !aoide_storage::outbox::update_entry(node, &returned)? {
+                return Ok(delivery_shape(
+                    "removed",
+                    Some("left the outbox during its dial, so nothing was written back".to_string()),
+                    Some("entry"),
+                    None,
+                    false,
+                ));
+            }
             audit_returned(&msgid, node, word.as_deref(), returned.session.as_deref());
-            aoide_storage::outbox::write_entry(node, &returned)?;
             Ok(delivery_shape("returned", word, Some("entry"), None, false))
         }
     }
@@ -6651,6 +6664,14 @@ fn retry_own_letter(cmd: &str, node: &str, entry: aoide_storage::outbox::OutboxE
         Ok(delivery) if delivery["status"] == "delivered" => Outcome::ok(cmd, format!("delivered {msgid} to {node} on retry"))
             .changed(vec![format!("state/outbox/{node}/{msgid}.json: removed")])
             .with_data(json!({ "node": node, "msgid": msgid, "delivery": delivery })),
+        Ok(delivery) if delivery["status"] == "removed" => Outcome::refuse(
+            cmd,
+            Kind::Refused,
+            format!("{msgid} was removed from {node}'s outbox while its dial was in flight, so nothing was written back"),
+            "the letter is no longer in this box",
+            Fix::None("nothing to run: the letter is gone"),
+        )
+        .with_fields(json!({ "reason": "removed", "node": node, "msgid": msgid })),
         Ok(delivery) => {
             let word = delivery["reason"].as_str().unwrap_or("no reason recorded").to_string();
             Outcome::refuse(
@@ -10509,6 +10530,15 @@ mod tests {
     /// reads whole (headers and the `Content-Length` body), so a test can compare
     /// what was sent with what was kept.
     fn spawn_recording_door(body: String) -> (std::net::TcpListener, u16, std::sync::Arc<std::sync::Mutex<Vec<String>>>) {
+        spawn_recording_door_then(body, |_| {})
+    }
+
+    /// [`spawn_recording_door`], running `before_reply` on each request before it
+    /// answers: a test uses it to change the spool while a dial is in flight.
+    fn spawn_recording_door_then(
+        body: String,
+        before_reply: impl Fn(&str) + Send + 'static,
+    ) -> (std::net::TcpListener, u16, std::sync::Arc<std::sync::Mutex<Vec<String>>>) {
         use std::io::{Read, Write};
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
@@ -10541,6 +10571,7 @@ mod tests {
             }
             let request = String::from_utf8_lossy(&data).to_string();
             kept.lock().unwrap().push(request.clone());
+            before_reply(&request);
             let _ = stream.write_all(signed_reply(&request, &own_test_key(), 200, &body).as_bytes());
         });
         (listener, port, seen)
@@ -10609,6 +10640,76 @@ mod tests {
                 "the envelope the door refused is the one kept"
             ),
         }
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// **L3 (review r1): a send outside a session writes no `returned` audit line.**
+    /// Nothing is kept, so nothing is returned to this box; a line here would name a
+    /// return the command then discards.
+    #[test]
+    fn a_send_outside_a_session_writes_no_returned_audit_line() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, root) = aoide_test_support::isolated_mail_root("mail-send-no-session-audit");
+        let _session = aoide_test_support::EnvSaver::capture(&["AOIDE_SESSION_ID"]);
+        std::env::remove_var("AOIDE_SESSION_ID");
+        let refusal = r#"{"jsonrpc":"2.0","id":1,"result":{"status":"refused","reason":"box-full","detail":"d"}}"#;
+        let (_door, port, _seen) = spawn_recording_door(refusal.to_string());
+        aoide_storage::node_store::save_nodes(&[verified_node("peer-node", &format!("http://127.0.0.1:{port}/"))]).unwrap();
+
+        let sent = handle_mail_send(&mail_inv_with_flags(&["mail", "send"], &["outside"], &[("to", "peer-node/bob")]));
+        assert_eq!(sent.status, aoide_protocol::output::Status::Error, "msg: {}", said(&sent));
+        let log = std::fs::read_to_string(aoide_protocol::audit::default_audit_log()).unwrap_or_default();
+        assert!(!log.contains("mail.outbox.returned"), "nothing was kept, so nothing is audited as returned: {log}");
+        assert!(aoide_storage::outbox::list_entries("peer-node").unwrap().is_empty(), "and nothing is written");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// **With no session and a closed port, `mail outbox` lists nothing.** A send
+    /// outside a session keeps nothing, so the listing has nothing to show.
+    #[test]
+    fn with_no_session_and_a_closed_port_mail_outbox_lists_nothing() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, root) = aoide_test_support::isolated_mail_root("mail-outbox-closed-no-session");
+        let _session = aoide_test_support::EnvSaver::capture(&["AOIDE_SESSION_ID"]);
+        std::env::remove_var("AOIDE_SESSION_ID");
+        aoide_storage::node_store::save_nodes(&[verified_node("peer-node", "http://127.0.0.1:1/")]).unwrap();
+
+        let sent = handle_mail_send(&mail_inv_with_flags(&["mail", "send"], &["closed"], &[("to", "peer-node/bob")]));
+        assert_eq!(sent.status, aoide_protocol::output::Status::Error, "msg: {}", said(&sent));
+        let listed = handle_mail_outbox(&mail_inv(&["mail", "outbox"], &[]));
+        assert!(listed.data.as_ref().unwrap()["entries"].as_array().unwrap().is_empty(), "{:?}", listed.data);
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// **L4 (review r1): a retry whose letter leaves the spool during its dial writes
+    /// nothing back.** The door refuses the letter, and a `mail outbox rm` (or a
+    /// session end) removes it while the dial is in flight. The write-back finds
+    /// nothing, so the letter is not re-spooled, and the report says it was removed.
+    #[test]
+    fn a_retry_whose_letter_leaves_during_the_dial_writes_nothing_back() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, root) = aoide_test_support::isolated_mail_root("mail-retry-removed");
+        let _session = aoide_test_support::EnvSaver::capture(&["AOIDE_SESSION_ID"]);
+        std::env::set_var("AOIDE_SESSION_ID", "sess-removed-1");
+        let refusal = r#"{"jsonrpc":"2.0","id":1,"result":{"status":"refused","reason":"box-full","detail":"d"}}"#;
+        let (_first, first_port, _seen) = spawn_recording_door(refusal.to_string());
+        aoide_storage::node_store::save_nodes(&[verified_node("peer-node", &format!("http://127.0.0.1:{first_port}/"))]).unwrap();
+        let sent = handle_mail_send(&mail_inv_with_flags(&["mail", "send"], &["leaves mid-dial"], &[("to", "peer-node/bob")]));
+        assert_eq!(sent.status, aoide_protocol::output::Status::Error, "msg: {}", said(&sent));
+        let msgid = sent.data.as_ref().unwrap()["msgid"].as_str().unwrap().to_string();
+
+        let leaving = msgid.clone();
+        let (_second, second_port, _seen) = spawn_recording_door_then(refusal.to_string(), move |_| {
+            let _ = aoide_storage::outbox::remove_entry("peer-node", &leaving);
+        });
+        aoide_storage::node_store::save_nodes(&[verified_node("peer-node", &format!("http://127.0.0.1:{second_port}/"))]).unwrap();
+        let retry = handle_mail_outbox_retry(&mail_inv(&["mail", "outbox", "retry"], &[msgid.as_str()]));
+        assert_eq!(retry.status, aoide_protocol::output::Status::Error, "msg: {}", said(&retry));
+        assert_eq!(retry.data.as_ref().unwrap()["reason"], "removed", "{:?}", retry.data);
+        assert!(aoide_storage::outbox::list_entries("peer-node").unwrap().is_empty(), "nothing is written back");
 
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -12360,12 +12461,37 @@ mod tests {
         let pre = delivery_projection(&[], "peer-node", &entry, Some(&link));
         assert_eq!(pre["status"], "pre-131", "{pre}");
         entry.refused = true;
+        entry.session = Some("sess-projection".to_string());
         let returned = delivery_projection(&[], "peer-node", &entry, Some(&link));
         assert_eq!(returned["status"], "returned", "{returned}");
         assert_eq!(returned["ackPending"], false, "{returned}");
         entry.flavor = aoide_storage::outbox::FLAVOR_HOLD.to_string();
         let held = delivery_projection(&[], "peer-node", &entry, Some(&link));
         assert_eq!(held["status"], "held", "a held letter is held whatever its refused flag says: {held}");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// **L7 (review r1): an own letter with no session lists as `pre-131`, whatever
+    /// its flags say.** The next tick drops it, and a retry refuses it with the same
+    /// word, so a listing that said `returned` would claim what the box then refuses.
+    #[test]
+    fn an_own_letter_with_no_session_lists_as_pre_131_whatever_its_flags() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, root) = aoide_test_support::isolated_mail_root("delivery-pre-131-flags");
+        let mut refused = aoide_storage::outbox::OutboxEntry::fresh(
+            aoide_storage::mail::mint_outbound_letter("here", "peer-node", "bob", "old").unwrap(),
+        );
+        refused.refused = true;
+        refused.tries = 1;
+        refused.last_outcome = "refused: box-full".to_string();
+        let shown = delivery_projection(&[], "peer-node", &refused, None);
+        assert_eq!(shown["status"], "pre-131", "a refused letter with no session: {shown}");
+        let held = aoide_storage::outbox::OutboxEntry::held(
+            aoide_storage::mail::mint_outbound_letter("here", "peer-node", "bob", "old too").unwrap(),
+        );
+        let shown = delivery_projection(&[], "peer-node", &held, None);
+        assert_eq!(shown["status"], "pre-131", "a held letter with no session is dropped by the tick: {shown}");
 
         let _ = std::fs::remove_dir_all(&root);
     }
