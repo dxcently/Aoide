@@ -1284,12 +1284,14 @@ fn refusal_clears_on_retry(word: &str) -> bool {
 /// A container the poll refused: audited and named to the caller, so `mail poll`
 /// reports why rather than answering "0 filed" (review N13, L9). What the refusal
 /// does to the hub's custody is decided by the caller, not here. The refusal is
-/// also recorded for the next ask (`outbox::record_refused`); the return is `false`
-/// when that record cannot be written, and the caller then keeps the hub's custody
-/// rather than end it.
+/// also recorded for the next ask (`outbox::record_refused`), and the return says
+/// whether that record is on record. It is `false` past the cap, for a msgid that
+/// is not well-formed, and when the record cannot be written: the caller then
+/// files nothing, so the hub keeps its custody and names the container in
+/// `deferred`.
 fn refuse_container(node_name: &str, msgid: &str, word: &str, detail: &str, refused: &mut Vec<String>) -> bool {
     refuse_named("container", node_name, msgid, word, detail, refused);
-    aoide_storage::outbox::record_refused(node_name, msgid, word).is_ok()
+    matches!(aoide_storage::outbox::record_refused(node_name, msgid, word), Ok(true))
 }
 
 /// The entries of one answer list the poll reads: the first `POLL_BATCH_CAP`,
@@ -1317,8 +1319,8 @@ fn answer_entries<'a>(result: &'a Value, key: &str, node_name: &str) -> impl Ite
 /// container, under its own event name, and the same record for the next ask
 /// (`outbox::record_refused`). A plaintext letter is not the hub's custody, so
 /// nothing is filed for it; the hub returns its own held letter on that word. If
-/// the record cannot be written the letter stays held, and the next ask offers and
-/// refuses it again.
+/// the record is not kept (past the cap, or it cannot be written) the letter stays
+/// held, and the next ask offers and refuses it again.
 fn refuse_envelope(node_name: &str, msgid: &str, word: &str, detail: &str, refused: &mut Vec<String>) {
     refuse_named("envelope", node_name, msgid, word, detail, refused);
     let _ = aoide_storage::outbox::record_refused(node_name, msgid, word);
@@ -6173,6 +6175,84 @@ mod tests {
         assert_eq!(refused_sent.len(), 3, "three asks were sent: {refused_sent:?}");
         assert_eq!(refused_sent[1], cap, "the next ask carries the stored cap");
         assert_eq!(refused_sent[2], 0, "nothing is stored past the cap: {refused_sent:?}");
+
+        drop(listener);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **A refusal past the cap is not on record, so its container is not filed.**
+    /// The stored `refused` list is full when the container is refused: the door
+    /// fills it while the answer is in flight, so the clear that follows the answer
+    /// does not take those pairs. The container stays the hub's, the next ask names
+    /// it in `deferred`, and its refusal is still audited.
+    #[test]
+    fn a_container_refused_past_the_cap_is_not_filed_and_is_named_deferred() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("refused-past-the-cap");
+
+        let me = register_local_origin();
+        let saved = std::env::var("AOIDE_A2A_NODE_NAME").ok();
+        std::env::set_var("AOIDE_A2A_NODE_NAME", "relay");
+        let receipt = aoide_storage::mail::mint_ack_in_mesh(
+            "bob",
+            aoide_storage::mail::Address { node: me.clone(), name: "alice".to_string() },
+            "not a msgid",
+            "home",
+        )
+        .unwrap();
+        let binding = aoide_storage::seal::publish_binding().unwrap();
+        let container = aoide_storage::seal::seal_envelope(
+            &receipt,
+            &binding,
+            "home",
+            "home",
+            &me,
+            &me,
+            &aoide_storage::time::now_iso_utc(),
+        )
+        .unwrap();
+        match saved {
+            Some(name) => std::env::set_var("AOIDE_A2A_NODE_NAME", name),
+            None => std::env::remove_var("AOIDE_A2A_NODE_NAME"),
+        }
+        let msgid = container.msgid.clone();
+        let answer = json!({"jsonrpc": "2.0", "id": 1, "result": {"containers": [container], "envelopes": []}});
+
+        let cap = aoide_storage::outbox::REFUSED_LIST_CAP;
+        let (listener, port, seen) = answering_door(move |body| {
+            if !body.contains("aoide/mailPoll") {
+                return r#"{"jsonrpc":"2.0","id":1,"result":{"status":"accepted"}}"#.to_string();
+            }
+            for i in 0..cap {
+                aoide_storage::outbox::record_refused("relay", &format!("{i:064x}"), "box-full").unwrap();
+            }
+            answer.to_string()
+        });
+        register_polled_relay(port);
+
+        let outcome = poll_node("relay", None).unwrap();
+        assert_eq!(outcome.filed, 0, "nothing is filed: {outcome:?}");
+        assert_eq!(outcome.refused.len(), 1, "the refusal is still named: {:?}", outcome.refused);
+        assert!(
+            !aoide_storage::outbox::filed_pending("relay").unwrap().contains(&msgid),
+            "a refusal that is not on record ends no custody"
+        );
+        assert_eq!(poll_refusal_lines(&dir, &msgid), 1, "and its audit line is still written");
+
+        poll_node("relay", None).unwrap();
+        let deferred_sent: Vec<Vec<String>> = seen
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|body| body.contains("aoide/mailPoll"))
+            .map(|body| {
+                let request: Value = serde_json::from_str(body).unwrap();
+                let params = request.get("params").unwrap_or(&request);
+                params["deferred"].as_array().unwrap().iter().filter_map(Value::as_str).map(str::to_string).collect()
+            })
+            .collect();
+        assert_eq!(deferred_sent.len(), 2, "two asks were sent: {deferred_sent:?}");
+        assert!(deferred_sent[1].contains(&msgid), "the next ask names it in deferred: {deferred_sent:?}");
 
         drop(listener);
         let _ = std::fs::remove_dir_all(&dir);

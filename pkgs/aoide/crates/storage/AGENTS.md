@@ -190,11 +190,12 @@
   `refused_pending` is what the next ask carries. `clear_refused` drops only the
   pairs that ask sent, so a refusal recorded while its answer was in flight is
   kept. `refused_pending` sends at most `REFUSED_LIST_CAP`, oldest first, and
-  the file keeps the rest for the next ask. `record_refused` keeps no msgid that
-  is not well-formed, and keeps nothing past `REFUSED_LIST_CAP`: a dropped
-  refusal's letter is still held, so the next poll records it again. On the
-  hub's side `return_refused` is the only reader of a `refused` name, and it
-  acts on a held own letter of the caller's own spool alone (MAIL.md §Wire).
+  the file keeps the rest for the next ask. `record_refused` returns whether the
+  pair is on record: a msgid that is not well-formed, or a pair past
+  `REFUSED_LIST_CAP`, is not, and a container whose refusal is not on record is
+  not filed, so the hub keeps it and names it in `deferred`. On the hub's side
+  `return_refused` is the only reader of a `refused` name, and it acts on a held
+  own letter of the caller's own spool alone (MAIL.md §Wire).
 - **Enduring identity is independent of knowledge configuration.** Bind an
   explicit `valid_node_name`-shaped key in `session::bind_enduring_agent`;
   do not infer it from a persona title, session name, or optional Mneme map.

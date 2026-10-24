@@ -653,7 +653,9 @@ door's audit name whitelist gains both names so they never log as bare
   is capped at `REFUSED_LIST_CAP` (fifty, the poll's own batch) at both ends.
   The poller stores no more than that many, sends its oldest first and keeps
   the rest for the next ask; a refusal past the cap is recorded by a later poll
-  if its letter is still held. The hub reads at most that many, one per
+  if its letter is still held. A container whose refusal is not on record (past
+  the cap, or a msgid that is not well-formed) is not filed: the hub keeps it
+  and names it in `deferred`. The hub reads at most that many, one per
   well-formed msgid, with the first word named for it. The poller reads at most
   fifty containers and fifty envelopes from one answer: the rest are left out,
   not filed, and the hub offers them again. An old poller sends no `refused`,

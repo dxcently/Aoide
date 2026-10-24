@@ -749,11 +749,12 @@
   containers and as many envelopes (`answer_entries`), the rest left out and
   audited once as `mail.poll.over-cap`.
   `clear_refused` drops what that ask sent once an answer arrives, as `filed` is
-  cleared. The keep list decides `filed` alone: `record_filed` is
-  written only for a non-keep-list word whose refusal was recorded, so a refusal
-  that could not be recorded keeps the hub's custody rather than ending it. A
-  local I/O failure is a word too (`local-io`), so the hub returns the held
-  letter with that word.
+  cleared. The keep list decides `filed` alone: `record_filed` is written only
+  for a non-keep-list word whose refusal is on record (`refuse_container`
+  returns that), so a refusal that is not on record, past the cap included,
+  keeps the hub's custody rather than ending it, and the container is named in
+  `deferred`. A local I/O failure is a word too (`local-io`), so the hub returns
+  the held letter with that word.
 - **Every mail answer is verified before it is read.** `post_signed` is the one
   path to a `SignedCall::Result`, and a node with no key on file is refused
   before it is dialled (`keyed_record`). Do not add a mail call that parses a

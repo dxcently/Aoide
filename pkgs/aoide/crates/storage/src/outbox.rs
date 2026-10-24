@@ -1261,23 +1261,30 @@ pub fn refused_pending(node: &str) -> Result<Vec<PollRefusal>, String> {
     Ok(read_refused_unlocked(node)?.into_iter().take(REFUSED_LIST_CAP).collect())
 }
 
-/// Record that `node`'s poll refused `msgid` with `word`. A pair already
-/// recorded is kept once. Past [`REFUSED_LIST_CAP`] nothing is recorded: the
-/// letter stays held, so the next poll offers it and records it again. A msgid
-/// that is not well-formed names no held letter, so nothing is kept for it.
-pub fn record_refused(node: &str, msgid: &str, word: &str) -> Result<(), String> {
+/// Record that `node`'s poll refused `msgid` with `word`, and report whether the
+/// refusal is on record: `true` when it is stored now or was already there. A
+/// pair already recorded is kept once. `false` past [`REFUSED_LIST_CAP`], and for
+/// a msgid that is not well-formed, which names no held letter. A refusal that is
+/// not on record ends nothing: a container stays the hub's and is named in
+/// `deferred`, and a letter stays held, so the next poll offers it and records it
+/// again.
+pub fn record_refused(node: &str, msgid: &str, word: &str) -> Result<bool, String> {
     if !crate::mail::is_msgid(msgid) {
-        return Ok(());
+        return Ok(false);
     }
     let node = node.to_string();
     let refusal = PollRefusal { msgid: msgid.to_string(), word: word.to_string() };
     with_lock(move || {
         let mut pending = read_refused_unlocked(&node)?;
-        if pending.contains(&refusal) || pending.len() >= REFUSED_LIST_CAP {
-            return Ok(());
+        if pending.contains(&refusal) {
+            return Ok(true);
+        }
+        if pending.len() >= REFUSED_LIST_CAP {
+            return Ok(false);
         }
         pending.push(refusal);
-        write_refused_unlocked(&node, &pending)
+        write_refused_unlocked(&node, &pending)?;
+        Ok(true)
     })
 }
 
@@ -3055,19 +3062,24 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// **A refused list stops at the cap.** One more distinct pair than the cap
-    /// is not stored, and the stored list is the first cap, oldest first. A
-    /// dropped pair costs nothing: its letter is still held, so the next poll
-    /// offers it and records it again.
+    /// **A refused list stops at the cap, and says so.** One more distinct pair
+    /// than the cap is not stored, and the stored list is the first cap, oldest
+    /// first. The pair past the cap is not on record; a pair already stored is.
+    /// Its letter is still held, so the next poll offers it and records it again.
     #[test]
     fn record_refused_stops_at_the_cap() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let (_env, dir) = root("outbox-refused-stops-at-the-cap");
 
         let cap = REFUSED_LIST_CAP;
-        for i in 0..=cap {
-            record_refused("relay", &format!("{i:064x}"), "box-full").unwrap();
+        for i in 0..cap {
+            let on_record = record_refused("relay", &format!("{i:064x}"), "box-full").unwrap();
+            assert!(on_record, "under the cap it is on record");
         }
+        let past = record_refused("relay", &format!("{cap:064x}"), "box-full").unwrap();
+        assert!(!past, "past the cap it is not");
+        let again = record_refused("relay", &format!("{:064x}", 0), "box-full").unwrap();
+        assert!(again, "a pair already stored is on record");
         let stored = read_refused_unlocked("relay").unwrap();
         assert_eq!(stored.len(), cap, "past the cap nothing is recorded: {}", stored.len());
         assert_eq!(stored[0].msgid, format!("{:064x}", 0), "the first cap are kept, oldest first");
@@ -3236,8 +3248,8 @@ mod tests {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let (_env, dir) = root("outbox-refused-malformed");
 
-        record_refused("there", "not-a-msgid", "box-full").unwrap();
-        assert!(refused_pending("there").unwrap().is_empty(), "a malformed msgid is not kept");
+        assert!(!record_refused("there", "not-a-msgid", "box-full").unwrap(), "a malformed msgid is not on record");
+        assert!(refused_pending("there").unwrap().is_empty(), "and is not kept");
 
         let _ = std::fs::remove_dir_all(&dir);
     }
