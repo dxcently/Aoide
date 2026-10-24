@@ -558,8 +558,8 @@ terminal's rights to its remote callers.
   been failing. **A poll writes NOTHING** — no `tries`, no bookmark, no new
   state file anywhere: hand-over leaves the entry exactly where it was, and it
   retires only the ways it always did (a valid ack, `mail outbox rm`), for a
-  held own letter its destination's poll files, and for an own letter its
-  session's end (ruling 131), which
+  held own letter the poll of the hop it was spooled toward files, and for an
+  own letter its session's end (ruling 131), which
   is what makes a re-poll before the ack hand the same envelopes over again by
   construction. It self-audits UNCONDITIONALLY under its own
   `a2a.aoide/mailPoll` label, carrying the caller and the handed-over COUNT —
@@ -620,7 +620,9 @@ terminal's rights to its remote callers.
   `mailPoll` is sealed-only in the pull direction as well as `mailDeposit` in
   the push one: an entry spooled toward a poller that held no binding is
   WITHHELD (named in the answer's `withheld` list with `sealed-required`, and
-  counted in the audit line) instead of crossing an HTTPS hop in the clear.
+  counted in the audit line) instead of crossing an HTTPS hop in the clear. A
+  relayed entry is WITHHELD the same way unless this box can seal it to its
+  destination (`reseal_entry`): the poller is the hop, not the destination.
   `handle_connection` takes a `Listener` (plus `Option<&InboundBearerConfig>`,
   `None` for the adapter) and is the ONE place that difference is checked, so
   the shared transport hardening (`MAX_BODY`/`MAX_LINE`/`MAX_HEADERS`/

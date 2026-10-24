@@ -710,7 +710,8 @@
   every post-dial write in `drain_node` does the same. The reseal writes the
   same way, and an entry is attempted only after `outbox::still_spooled` says it
   is spooled. The check comes AFTER the reseal, so a reseal write cannot
-  re-spool an entry past it.
+  re-spool an entry past it. A relayed entry the reseal withholds (no binding
+  for its destination) is skipped: it stays spooled and unsent.
 - **A receipt retires its letter on first filing, and on a duplicate of one.**
   `settle_deposit` calls `retire_by_ack` for a receipt in either outcome; the
   retire is idempotent. `mail::deposit` answers a second receipt from the same
@@ -880,6 +881,14 @@
   addressed to `dest` while the entry is dialled toward `next`, and a hop this
   box holds no record for is dialled at the address the DECLARATION gives it
   (`dial_node` → `charter::dial_of`) or held if that address is `poll`.
+  **A relayed letter is sealed to its destination, never to the hop**, and the
+  destination's binding is resolved in ONE place,
+  `aoide_storage::seal::destination_binding` (a learnt binding that matches the
+  declaration, else the declared one). `spool_entry` and the reseal use it, and
+  `deliver_now` seals a relayed letter through `seal_for_dial` before it dials.
+  With no binding, `spool_entry` parks the plaintext in this box's own spool,
+  refused with `relay_parked_reason`; every poll withholds it, and no dial
+  sends it: `deliver_now` returns it undialled with that reason.
   **A node the mesh declares `down` is never dialled either, and that is
   `mail_wire::record_forbidden_by_declaration`'s** — asked over the set, so no caller can
   forget it: `drain_node` returns before the link lock, `poll_node` returns
@@ -933,11 +942,12 @@
   from the declarations (`send_mesh`), and the letter is signed as this box's
   DECLARED name in that mesh (`own_name_in` via `mint_outbound_letter_from`),
   because `from.node` is inside the signature every receiver and hop checks.
-  The letter is built in memory with `spool_entry`, and
-  `mail_wire::deliver_now` dials its hop once with that entry in hand: nothing
-  is on disk while it is in flight, so no drain can race it, and the dial takes
-  no link lock. A delivered letter writes nothing. A returned one is written to
-  the spool marked `refused`, and the command is a refusal whose fix is
+  The letter is built in memory with `spool_entry`, and `mail_wire::deliver_now`
+  dials its hop once with that entry in hand (a relayed letter is sealed to its
+  destination first, or returned undialled): nothing is on disk while it is in
+  flight, so no drain can race it, and the dial takes no link lock. A delivered
+  letter writes nothing. A returned one is written to the spool marked
+  `refused`, and the command is a refusal whose fix is
   `aoide mail outbox retry`. A held one (a `poll` or `hold` hop, or `--hold`) is
   written and never dialled. A letter whose mesh's declaration cannot be read is
   returned with that declaration's own word, before its hop is resolved.

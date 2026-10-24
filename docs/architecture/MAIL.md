@@ -653,10 +653,15 @@ door's audit name whitelist gains both names so they never log as bare
   or an old-style receipt ends them; a re-poll before that re-hands them and
   the receiver's dedup makes that harmless. **An HTTPS adapter's answer names
   what it would not hand over**: an entry spooled before the poller published
-  a binding is withheld (`sealed-required`) rather than carried in the clear,
-  and the `withheld` list — `{msgid, reason, detail}` — is reported by
-  `aoide mail poll` on the caller's own side, so a stuck letter has a reason
-  the operator can read.
+  a binding is withheld (`sealed-required`) rather than carried in the clear.
+  So is a relayed letter this box cannot seal to its destination: it seals to
+  the destination with a learnt binding that matches the declaration, else with
+  the declared one, and with neither it is withheld. A relay carries sealed
+  containers only, so the hop never holds the envelope of a letter it cannot
+  seal for the destination. Once this box holds a binding for the destination,
+  the letter is handed over sealed to it. The `withheld` list — `{msgid,
+  reason, detail}` — is reported by `aoide mail poll` on the caller's own side,
+  so a stuck letter has a reason the operator can read.
 - **The ask has two triggers, and they are the same call.**
   `aoide mail poll [<node>]` dials the node named — or, with no argument,
   every paired node this box holds `message` for, and every relay a charter in
@@ -797,7 +802,9 @@ link.json       { "holdUntil": ts, "lastError": "…" }   per-link backoff
   too, the letter is returned. **Returned** means the letter itself is written
   to this box's own outbox, marked `refused` with the word that ended the
   dial, exactly as it was sent: `aoide mail outbox retry <msgid>` resends it
-  under the same msgid (sealed again first, if a binding has appeared since).
+  under the same msgid. It is sealed again first, to its destination, if a
+  binding has appeared since: a relayed letter is never sealed to the hop that
+  carries it.
   Only a send from a conducted session keeps a returned letter: the session is
   bound to the entry as `session` (from `AOIDE_SESSION_ID`, never `--from`).
   Outside one, nothing is written, the command fails with the reason, and a
@@ -850,7 +857,7 @@ link.json       { "holdUntil": ts, "lastError": "…" }   per-link backoff
 - `now` entries other than own letters are attempted on every drain (an own
   letter is dialled by its send, ruling 131). `hold` entries are never
   attempted — they leave only through the node's `mailPoll`, and a held own
-  letter leaves when its destination files it. A node
+  letter leaves when the hop it was spooled toward files it. A node
   declared `hold` in the mesh config makes every entry toward it `hold`
   regardless of the flag.
 - `link.json` is `.hld`: exponential backoff per link on failure,
@@ -1006,6 +1013,13 @@ cannot be told from a delivery. That is the trade ruling 131 makes, and it is
 stated here so that nobody reads `delivered` as a receipt from the destination.
 A destination's own receipt still comes back as it did, and it retires nothing
 for a letter the sender no longer holds.
+
+**A held letter's `filed` is the same trade.** A held letter is offered by the
+poll of the hop it was spooled toward, which for a relayed letter is not its
+destination. A poller that names it in `filed` ends the sender's copy, as a
+relay's `accepted` does, so a hop that files a held letter and never hands it
+on loses it the same way. Its `filed` is not a receipt from the destination:
+only the destination's own receipt says the letter arrived.
 
 At a hub, a deposit whose `to.node` is not self: run the keyless checks
 (§Wire, "Lane and payload"), keep no transit record, append the hub's chained hop signature naming the `next` node the route
@@ -1572,9 +1586,9 @@ authoritative first:
   rides beside it, the letter is marked `refused` and bound to its session,
   and automatic retries have stopped. `aoide mail outbox retry <msgid>`
   resends the same bytes under the same msgid (ruling 131).
-- `held` — an own letter waiting for its destination's own poll (a `poll`
-  or `hold` hop, or `--hold`). It is bound to its session, never dialled by
-  this box, and leaves when the destination files it or its session ends.
+- `held` — an own letter waiting for the poll of the hop it was spooled toward
+  (a `poll` or `hold` hop, or `--hold`). It is bound to its session, never
+  dialled by this box, and leaves when that hop files it or its session ends.
 - `pre-131` — an own letter spooled before the session binding existed, so
   it has no session. The next tick drops it (reason `pre-131`).
 - `refused` — a drained entry other than an own letter: its own `refused`
@@ -1705,7 +1719,7 @@ aoide mail box add <name>                                create an empty mailbox
 aoide mail box rm <name> [--force]                       remove a mailbox, its letters and its reader marks; refused while unread, audited first, and a failed removal is audited again (CLI only; `_legacy` by its own name)
 aoide mail outbox [<node>] [rm <msgid>]                  the spool, truthfully, per entry
 aoide mail outbox retry <msgid>                          resend a returned letter now, under its same msgid
-aoide mail outbox retry --refused [<node>]               resend every returned letter toward a node, each one live
+aoide mail outbox retry --refused [<node>]               resend every returned letter toward a node, each one live; held and pre-131 letters stay as they are
 aoide mail route <node>/<name> [--mesh <m>]              dry-run the four steps: the path, each step's reason, nothing sent
 aoide mail rm --older-than <Nd|Nh>                       prune the boxes (dedup goes with them)
 aoide mail export [--dir <path>]                         one Markdown note per thread (read-only)

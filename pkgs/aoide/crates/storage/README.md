@@ -18,8 +18,10 @@ by decision — no embedded database yet
   primitive every signed byte is built from), the node's own age X25519 key
   and its self-signed `Binding` with its generation high-water mark, retired
   keys and validity window, the per-peer binding store
-  (`binding_for`/`learn_binding`), `Container`/`Ctx` with
-  `seal_envelope`/`deposit_container`, and the hop-chain and dedup frames. It
+  (`binding_for`/`learn_binding`), `destination_binding` (the one resolution
+  of a destination's binding: a learnt one that matches the declaration, else
+  the declared one), `Container`/`Ctx` with `seal_envelope`/`deposit_container`,
+  and the hop-chain and dedup frames. It
   is the ONLY module in this workspace that depends on the `age` crate. Also
   the P-CHARTER half of the same container: `charter_sig_input` /
   `charter_sig_frame` (the operator's signature input and the detached `.sig`
@@ -857,6 +859,10 @@ by decision — no embedded database yet
   `BACKOFF_CEILING_SECS` (15 min) ceiling — deliberately not
   `aoide_protocol::dialog::SPAWN_BACKOFF_MAX`, which is sized for a
   respawned process, not a link stuck on a permanent transport failure).
+  `reseal_entry` and `hand_over` are the one seal step a dial and a poll take:
+  a direct entry is sealed to its spool node when that node has a binding, and
+  a relayed one to its destination or withheld (`Reseal::Withheld`), never to
+  the hop.
   `write_ack_if_absent` is the ack-redelivery gate the outbox fix (mail
   register §26) adds: it spools a freshly minted ack only when no ack for
   the same `(node, acked_msgid)` pair is ALREADY sitting undelivered in

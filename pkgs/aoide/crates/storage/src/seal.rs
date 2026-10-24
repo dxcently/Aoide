@@ -703,6 +703,49 @@ pub fn usable_binding_for(node_name: &str, now: &str) -> Option<Binding> {
     binding.suites.iter().any(|s| s == SUITE_AGE_V1_X25519).then_some(binding)
 }
 
+/// The age binding a letter to `dest` is sealed with, when this box can use one
+/// now: a learnt binding that matches the key the mesh declares for `dest`, else
+/// the binding the mesh declares. Every decision to seal a letter to its
+/// destination reads it here, so a letter is sealed the same way at mint, at the
+/// dial and at the poll.
+pub fn destination_binding(dest: &str, mesh: &str, now: &str) -> Option<Binding> {
+    usable_binding_for(dest, now)
+        .filter(|binding| binding_matches_the_declaration(binding, dest, mesh))
+        .or_else(|| declared_binding(dest, mesh, now))
+}
+
+/// Does this LEARNT binding belong to the key the mesh declares for `dest`? Where
+/// no declaration names it (a mesh the set does not hold, or a pair mesh whose
+/// section lists no nodes), nothing contradicts the binding: it was learnt against
+/// a pinned record, and [`learn_binding`] owns that rule.
+fn binding_matches_the_declaration(binding: &Binding, dest: &str, mesh: &str) -> bool {
+    let Ok(set) = crate::routing::declarations() else {
+        return false;
+    };
+    match crate::routing::key_in(&set, mesh, dest) {
+        Some(declared) => binding.identity_key.eq_ignore_ascii_case(&declared),
+        None => true,
+    }
+}
+
+/// The age binding the mesh DECLARES for `dest`, if it is usable now: a charter
+/// line's own `age` key, verified under that line's identity key and inside its
+/// window. `None` for a pair mesh, for a line that fails its own signature, and
+/// for one that is expired or not yet valid.
+fn declared_binding(dest: &str, mesh: &str, now: &str) -> Option<Binding> {
+    let set = crate::routing::declarations().ok()?;
+    let declaration = crate::routing::declaration_of(&set, mesh)?.as_ref().ok()?;
+    let binding = declaration.binding_of(dest)?.clone();
+    let key = crate::routing::key_in(&set, mesh, dest)?;
+    if !verify_binding(&binding, Some(&key)) {
+        return None;
+    }
+    if binding_expired(&binding, now) || binding_not_yet_valid(&binding, now) {
+        return None;
+    }
+    Some(binding)
+}
+
 // ── The charter's two frames (P-CHARTER) ─────────────────────────────────
 
 /// The bytes an operator key signs: `frame("aoide/charter", [mesh, version,

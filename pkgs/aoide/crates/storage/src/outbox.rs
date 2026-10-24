@@ -373,6 +373,10 @@ pub enum Reseal {
     /// means the caller persists this (parked) entry; either way the entry is
     /// **skipped, never sent in the clear**.
     NotUsable(Option<Box<OutboxEntry>>),
+    /// A relayed entry whose destination holds no binding this box can seal to.
+    /// Nothing is written, and the entry is neither sealed to the hop nor sent as
+    /// plaintext: a relay carries sealed containers only.
+    Withheld,
 }
 
 /// Re-seal one spooled entry, now that its destination's binding has
@@ -386,15 +390,23 @@ pub enum Reseal {
 /// pass that learned the binding. So every pass that is about to hand an
 /// entry over asks this first.
 ///
-/// The upgraded entry keeps the original's delivery bookkeeping (`flavor`,
-/// `tries`, `last_try_at`, `last_outcome`) — an upgrade is not an attempt —
-/// and **un-parks** an entry the unusable-binding arm had parked, because a
-/// binding that has become usable is exactly what that parking waited for.
-/// The parked `last_outcome` is left in place: it records what the last
-/// attempt found, which is still true.
+/// The upgraded entry keeps everything the original carries: its delivery
+/// bookkeeping (`flavor`, `tries`, `last_try_at`, `last_outcome`) and its
+/// `session`. An upgrade is not an attempt. It **un-parks** an entry the
+/// unusable-binding arm had parked, because a binding that has become usable is
+/// exactly what that parking waited for. The parked `last_outcome` is left in
+/// place: it records what the last attempt found, which is still true.
+///
+/// **A relayed entry is sealed to its DESTINATION, or it is withheld.** The hop
+/// it is spooled toward carries the container and never reads it (P-SEAL), so a
+/// relayed entry is never sealed to that hop. It is upgraded to its destination's
+/// binding when one is usable, and otherwise answers [`Reseal::Withheld`].
 pub fn reseal_entry(node: &str, entry: &OutboxEntry, now: &str) -> Result<Reseal, String> {
     if entry.container.is_some() {
         return Ok(Reseal::Sealed(None));
+    }
+    if entry.envelope.header.to.node != node {
+        return relayed_reseal(node, entry, now);
     }
     if crate::seal::binding_for(node).is_none() {
         return Ok(Reseal::NoBinding);
@@ -423,13 +435,33 @@ pub fn reseal_entry(node: &str, entry: &OutboxEntry, now: &str) -> Result<Reseal
         node,
         now,
     )?;
-    let mut upgraded = OutboxEntry::sealed(entry.envelope.clone(), container);
-    upgraded.flavor = entry.flavor.clone();
-    upgraded.tries = entry.tries;
-    upgraded.last_try_at = entry.last_try_at.clone();
-    upgraded.last_outcome = entry.last_outcome.clone();
+    Ok(Reseal::FreshlySealed(Box::new(sealed_upgrade(entry, container))))
+}
+
+/// The relayed arm of [`reseal_entry`]: seal `entry` to its destination, the way
+/// `spool_entry` seals at mint, or withhold it. Nothing is written here.
+fn relayed_reseal(hop: &str, entry: &OutboxEntry, now: &str) -> Result<Reseal, String> {
+    let dest = entry.envelope.header.to.node.as_str();
+    let origin_mesh = entry.envelope.header.origin_mesh.as_str();
+    let mesh = crate::routing::zone_name(origin_mesh);
+    let Some(binding) = crate::seal::destination_binding(dest, &mesh, now) else {
+        return Ok(Reseal::Withheld);
+    };
+    let container =
+        crate::seal::seal_envelope(&entry.envelope, &binding, origin_mesh, &mesh, dest, hop, now)?;
+    Ok(Reseal::FreshlySealed(Box::new(sealed_upgrade(entry, container))))
+}
+
+/// The entry as a sealed spool holds it: the container set, the envelope redacted
+/// ([`redacted_for_seal`]), the parked flag cleared, and every other field kept.
+/// Building a fresh [`OutboxEntry::sealed`] here dropped the session, so the next
+/// tick read the letter as pre-131.
+fn sealed_upgrade(entry: &OutboxEntry, container: crate::seal::Container) -> OutboxEntry {
+    let mut upgraded = entry.clone();
+    upgraded.envelope = redacted_for_seal(entry.envelope.clone());
+    upgraded.container = Some(container);
     upgraded.refused = false;
-    Ok(Reseal::FreshlySealed(Box::new(upgraded)))
+    upgraded
 }
 
 /// What one entry hands over on a **poll**, decided against the spool as it
@@ -446,6 +478,9 @@ pub enum HandOver {
     /// Hand over nothing: the entry is gone, or a binding is held and is not
     /// usable now.
     Nothing,
+    /// A relayed letter no binding for its destination can seal: withheld, and
+    /// named in the answer, never handed over.
+    Withheld(Box<crate::mail::Envelope>),
 }
 
 /// Decide one entry's hand-over against the live spool (H2's poll half).
@@ -456,6 +491,7 @@ pub fn hand_over(node: &str, msgid: &str) -> Result<HandOver, String> {
     };
     match reseal_entry(node, &current, &now)? {
         Reseal::NoBinding => Ok(HandOver::Envelope(Box::new(current.envelope))),
+        Reseal::Withheld => Ok(HandOver::Withheld(Box::new(current.envelope))),
         Reseal::Sealed(None) => match current.container {
             Some(container) => Ok(HandOver::Container(Box::new(container))),
             // Unreachable by construction — `Sealed(None)` means the entry
@@ -2233,6 +2269,101 @@ mod tests {
         };
         entry.session = session.map(str::to_string);
         entry
+    }
+
+    /// Pair `name` with this box's own key, and learn this box's own binding for it
+    /// when `learn` is set: a binding that really seals, so a reseal can use it.
+    fn pair_node(name: &str, learn: bool) {
+        let (kp, _) = crate::identity::load_or_mint().unwrap();
+        let now = crate::time::now_iso_utc();
+        let mut nodes = crate::node_store::load_nodes();
+        crate::node_store::upsert_paired_node(
+            &mut nodes,
+            name,
+            "http://127.0.0.1:1/",
+            &kp.info().pubkey_hex,
+            &now,
+            &["message".to_string()],
+            "home",
+        );
+        crate::node_store::save_nodes(&nodes).unwrap();
+        if learn {
+            crate::seal::learn_binding(name, &crate::seal::publish_binding().unwrap()).unwrap();
+        }
+    }
+
+    /// **H1 (review r1): a relayed letter whose destination holds no binding this box
+    /// can seal to is withheld, and is never sealed to the hop that carries it.** The
+    /// hop holds a binding of its own: the old reseal sealed to exactly that one.
+    #[test]
+    fn a_relayed_letter_with_no_destination_binding_is_withheld_not_sealed_to_the_hop() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("relay-withheld");
+        pair_node("hop-n", true);
+        let envelope = crate::mail::mint_outbound_letter("alice", "dest-m", "bob", "relayed").unwrap();
+        let msgid = envelope.msgid.clone();
+        let mut held = OutboxEntry::held(envelope);
+        held.refused = true;
+        write_entry("hop-n", &held).unwrap();
+
+        assert!(
+            matches!(hand_over("hop-n", &msgid).unwrap(), HandOver::Withheld(_)),
+            "a relay carries sealed containers only, and this letter has none to carry"
+        );
+        let spooled = list_entries("hop-n").unwrap();
+        assert_eq!(spooled.len(), 1, "a withheld letter stays spooled");
+        assert!(!spooled[0].is_sealed(), "and is not sealed to the hop: {spooled:?}");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **H1 (review r1): a withheld relayed letter is handed over sealed to its
+    /// destination once the destination's binding is held.** It is never sealed to
+    /// the hop on the way.
+    #[test]
+    fn a_withheld_relayed_letter_is_handed_over_sealed_to_its_destination_later() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("relay-later-binding");
+        pair_node("hop-n", false);
+        pair_node("dest-m", false);
+        let envelope = crate::mail::mint_outbound_letter("alice", "dest-m", "bob", "later").unwrap();
+        let msgid = envelope.msgid.clone();
+        let mut held = OutboxEntry::held(envelope);
+        held.refused = true;
+        write_entry("hop-n", &held).unwrap();
+        assert!(matches!(hand_over("hop-n", &msgid).unwrap(), HandOver::Withheld(_)), "no binding for the destination yet");
+
+        crate::seal::learn_binding("dest-m", &crate::seal::publish_binding().unwrap()).unwrap();
+        match hand_over("hop-n", &msgid).unwrap() {
+            HandOver::Container(container) => assert_eq!(container.to.node, "dest-m", "sealed to the destination"),
+            _ => panic!("the destination's binding now seals the letter"),
+        }
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **M1 (review r1): a held plaintext letter that a poll upgrades keeps its
+    /// session, so the next tick does not drop it as pre-131.** The upgrade builds a
+    /// fresh entry, and that entry used to lose the session.
+    #[test]
+    fn a_plaintext_letter_upgraded_by_a_poll_keeps_its_session_through_the_next_tick() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("upgrade-keeps-session");
+        pair_node("box-b", false);
+        let envelope = crate::mail::mint_outbound_letter("here", "box-b", "bob", "held before the binding").unwrap();
+        let msgid = envelope.msgid.clone();
+        let mut held = OutboxEntry::held(envelope);
+        held.session = Some("sess-upgrade".to_string());
+        write_entry("box-b", &held).unwrap();
+        crate::seal::learn_binding("box-b", &crate::seal::publish_binding().unwrap()).unwrap();
+
+        assert!(matches!(hand_over("box-b", &msgid).unwrap(), HandOver::Container(_)), "the binding seals it");
+        let spooled = list_entries("box-b").unwrap();
+        assert_eq!(spooled[0].session.as_deref(), Some("sess-upgrade"), "{spooled:?}");
+        assert_eq!(drop_letters_where(|l| l.session.is_none(), usize::MAX, "pre-131").unwrap(), 0, "nothing is pre-131");
+        assert!(audit_lines("pre-131").is_empty(), "and no pre-131 line is written");
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// **A bound entry carries its session; an unbound one has no such key at all**,

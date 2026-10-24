@@ -455,9 +455,10 @@ never the inbound/serve half (that's `aoide-server`).
   production while `aoide-conduct` already does), a door's own best-effort
   drain of the node it just heard from (`aoide-server::a2a::mail_deposit`,
   same bridge). `mail send` has its own dial, `mail_wire::deliver_now`, which
-  takes the one letter in hand and shares `attempt_deposit` with the drain
-  (ruling 131: the dial is the report, and a letter is written only if it
-  comes back).
+  takes the one letter in hand, seals a relayed letter to its destination
+  before it dials (or returns it undialled), and shares `attempt_deposit` with
+  the drain (ruling 131: the dial is the report, and a letter is written only
+  if it comes back).
   `attempt_deposit` builds and sends one `aoide/mailDeposit` POST,
   mirroring `spawn_on_node_via`'s exact shape (resolve bearer, sign, POST,
   parse, check `error`) with no `--via` override — a drain only ever dials
@@ -710,7 +711,9 @@ never the inbound/serve half (that's `aoide-server`).
   its retry dials it live (`resend_returned_letter`, ruling 131). A delivered
   one leaves the spool, a returned one is written back with its new word, and
   a held one is refused (its node's poll moves it). `--refused` does the same
-  for every returned letter. Each reports the `delivery` vocabulary `mail send`
+  for every returned letter, and leaves a held or sessionless (pre-131) letter
+  as it is, undialled and unwritten, reporting it with its listed word. Each
+  reports the `delivery` vocabulary `mail send`
   uses; nothing parked is a clean no-op, not an error. Neither `outbox`
   nor `outbox rm` WRITES to the
   mailbase (`aoide_storage::mail`) — `handle_mail_outbox`'s own delivery

@@ -9981,7 +9981,10 @@ hands the same envelopes over again (unless it deferred them), and why a held
 an older poller's receipt retires it (`outbox::retire_by_ack`), when its session
 ends, or through `aoide mail outbox rm <msgid>` (a `letter` filed by the poller
 mints a receipt exactly as a deposit would; an ack is an envelope, so the
-poller's own next drain carries it back). The
+poller's own next drain carries it back). A held `letter` the poller names in
+`filed` ends the sender's copy on its word alone, as a relay's verified
+`accepted` does (MAIL.md, §Transit). For a relayed letter the poller is
+the hop it was spooled toward, not the destination. The
 receiving side is the SAME receive path a pushed deposit takes —
 `aoide_client::mail_wire::poll_node` runs `mail::deposit`'s whole chain
 (recompute `msgid`, verify the ORIGIN against `header.from.node`'s own key,
@@ -10078,8 +10081,12 @@ TLS-terminating front — a Cloudflare Tunnel, a VPS with public 443, a tailnet
   held no binding when it was written is **withheld** rather than handed over
   as a plaintext envelope — it stays spooled, the answer names it in a
   `withheld` list (`{msgid, reason: "sealed-required", detail}`), and the
-  audit line counts it. The door's own poll, which is not an HTTPS hop, hands
-  that same entry over unchanged.
+  audit line counts it. A relayed entry is withheld the same way unless this
+  box can seal it to its destination (a learnt binding that matches the
+  declaration, else the declared one): the poller is the hop, not the
+  destination, and a relay carries sealed containers only. The door's own poll,
+  which is not an HTTPS hop, still hands a direct entry over unchanged; it
+  withholds a relayed one the same way.
 - **The card is the stripped three-key shape unconditionally** — `name`,
   `protocolVersion`, `url`. The door strips it only for an unauthorized caller;
   the mail profile has no door-wide token concept, so there is no caller to

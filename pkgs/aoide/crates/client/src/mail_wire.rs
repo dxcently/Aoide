@@ -617,17 +617,9 @@ pub fn spool_entry(
     // how a sender that never paired with the destination can seal to it at all.
     // A declared line is verified exactly as a learnt binding is (against that
     // line's own identity key, which the operator signed).
-    let binding = aoide_storage::seal::usable_binding_for(dest, &now)
-        // **A learnt binding is only usable if it is the DECLARED key's.** A
-        // binding is learnt per NAME, so a node whose key the mesh has since
-        // changed (or a stale file left by an earlier pairing) would otherwise
-        // seal a letter to a key this box no longer trusts that name for. Where
-        // the mesh names the node, the declaration decides; where it does not
-        // (a pair mesh with no declaration at all), the record the binding was
-        // learnt against is the whole authority, which `learn_binding` already
-        // pinned.
-        .filter(|binding| binding_matches_the_declaration(binding, dest, mesh))
-        .or_else(|| declared_binding(dest, mesh, &now));
+    // The one resolution every seal decision shares (`seal::destination_binding`):
+    // a learnt binding only where it is the declared key's, else the declared one.
+    let binding = aoide_storage::seal::destination_binding(dest, mesh, &now);
     // **Plaintext is the DIRECT lane's, and only the direct lane's.** A relay
     // carries sealed containers and nothing else ("no relay, hub or HTTPS hop
     // ever carries plaintext", HTTPS-MESH-API), so an entry whose `next` is not
@@ -674,15 +666,22 @@ pub fn spool_entry(
             entry.last_outcome = if direct {
                 "parked: the destination holds a binding that is not usable now".to_string()
             } else {
-                format!(
-                    "parked ({NO_BINDING_FOR_A_RELAY}): `{dest}` publishes no age binding this box can \
-                     use, and a relay carries sealed containers only — publish one (`aoide mail poll` \
-                     exchanges them), or pair with `{dest}`"
-                )
+                relay_parked_reason(dest)
             };
             Ok(entry)
         }
     }
+}
+
+/// The parked reason a relayed letter carries when its destination publishes no
+/// binding this box can use: spool time and the live dial both write it, so the
+/// letter says the same thing wherever it is refused.
+pub(crate) fn relay_parked_reason(dest: &str) -> String {
+    format!(
+        "parked ({NO_BINDING_FOR_A_RELAY}): `{dest}` publishes no age binding this box can \
+         use, and a relay carries sealed containers only — publish one (`aoide mail poll` \
+         exchanges them), or pair with `{dest}`"
+    )
 }
 
 /// **Is this box's hop one it must never dial** — a `poll` address, whether the
@@ -710,51 +709,6 @@ fn hop_is_never_dialled(node_name: &str, mesh: &str) -> bool {
 /// letter is parked, visible in `mail outbox`, and `mail outbox retry --refused`
 /// is the hand once a binding exists.
 pub const NO_BINDING_FOR_A_RELAY: &str = "sealed-required";
-
-/// Does this LEARNT binding belong to the key the mesh declares for `dest`? Where
-/// no declaration names it (a mesh the set does not hold, or a pair mesh whose
-/// section lists no nodes), nothing contradicts the binding: it was learnt
-/// against a pinned record and `learn_binding` owns that rule.
-fn binding_matches_the_declaration(
-    binding: &aoide_storage::seal::Binding,
-    dest: &str,
-    mesh: &str,
-) -> bool {
-    let Ok(set) = aoide_storage::routing::declarations() else {
-        return false;
-    };
-    match aoide_storage::routing::key_in(&set, mesh, dest) {
-        Some(declared) => binding.identity_key.eq_ignore_ascii_case(&declared),
-        None => true,
-    }
-}
-
-/// The age binding the mesh DECLARES for `dest`, if it is usable now — a charter
-/// line's own `age` key, verified under that line's identity key
-/// (`seal::verify_binding`, the same check [`aoide_storage::seal::learn_binding`]
-/// makes against a pinned record) and inside its window. `None` for a pair mesh
-/// (a record is not a source for a binding), for a line that fails its own
-/// signature, and for one that is expired or not yet valid — which is the parking
-/// arm in [`spool_entry`], never a downgrade to plaintext.
-fn declared_binding(
-    dest: &str,
-    mesh: &str,
-    now: &str,
-) -> Option<aoide_storage::seal::Binding> {
-    let set = aoide_storage::routing::declarations().ok()?;
-    let declaration = aoide_storage::routing::declaration_of(&set, mesh)?.as_ref().ok()?;
-    let binding = declaration.binding_of(dest)?.clone();
-    let key = aoide_storage::routing::key_in(&set, mesh, dest)?;
-    if !aoide_storage::seal::verify_binding(&binding, Some(&key)) {
-        return None;
-    }
-    if aoide_storage::seal::binding_expired(&binding, now)
-        || aoide_storage::seal::binding_not_yet_valid(&binding, now)
-    {
-        return None;
-    }
-    Some(binding)
-}
 
 /// Does the mesh give this box a binding to seal to `dest` — usable or not, and
 /// INCLUDING a mesh that cannot be read at all? The question
@@ -2068,6 +2022,9 @@ pub fn drain_node(node_name: &str) -> Result<(), String> {
                 }
                 continue;
             }
+            // A relayed entry no destination binding seals is skipped, never sent
+            // to the hop in the clear, and nothing is written.
+            Ok(Reseal::Withheld) => continue,
             // A seal that cannot be built is not a reason to send plaintext:
             // the entry stays spooled, un-attempted, and the next pass tries
             // again. Sending it in the clear is the one wrong answer.
@@ -2188,6 +2145,17 @@ pub fn deliver_now(node_name: &str, entry: aoide_storage::outbox::OutboxEntry) -
     if let Some(word) = mesh.as_deref().and_then(unreadable_declaration_word) {
         return returned(entry, format!("refused: {word}"));
     }
+    // A relayed letter is sealed to its destination before any contact with the hop,
+    // which never reads it. One that no destination binding seals comes back here,
+    // undialled, with the reason `spool_entry` parks it with.
+    let entry = if entry.envelope.header.to.node == node_name {
+        entry
+    } else {
+        match seal_for_dial(node_name, entry) {
+            Ok(sealed) => sealed,
+            Err(undialled) => return undialled,
+        }
+    };
     let Some((node, dial_only)) = dial_node(node_name, mesh.as_deref()) else {
         return returned(entry, "refused: no-address".to_string());
     };
@@ -2210,14 +2178,9 @@ pub fn deliver_now(node_name: &str, entry: aoide_storage::outbox::OutboxEntry) -
         }
     }
 
-    // Sealed to the binding as it is now. A seal that cannot be built is never a
-    // reason to send plaintext, so the letter comes back instead.
-    use aoide_storage::outbox::Reseal;
-    let entry = match aoide_storage::outbox::reseal_entry(node_name, &entry, &aoide_storage::time::now_iso_utc()) {
-        Ok(Reseal::NoBinding) | Ok(Reseal::Sealed(None)) => entry,
-        Ok(Reseal::Sealed(Some(upgraded))) | Ok(Reseal::FreshlySealed(upgraded)) => *upgraded,
-        Ok(Reseal::NotUsable(parked)) => return Delivery::Returned(parked.unwrap_or_else(|| Box::new(entry))),
-        Err(e) => return returned(entry, format!("refused: no-usable-seal: {e}")),
+    let entry = match seal_for_dial(node_name, entry) {
+        Ok(sealed) => sealed,
+        Err(undialled) => return undialled,
     };
 
     let attempt = match attempt_deposit(&node, &entry) {
@@ -2239,6 +2202,27 @@ pub fn deliver_now(node_name: &str, entry: aoide_storage::outbox::OutboxEntry) -
     match outcome {
         Ok(status) => Delivery::Delivered { status },
         Err(word) => returned(entry, word),
+    }
+}
+
+/// The seal a live dial sends a letter under: the binding as it stands now
+/// ([`aoide_storage::outbox::reseal_entry`]). A letter no binding can seal, or
+/// whose seal cannot be built, comes back undialled. A seal failure is never a
+/// reason to send plaintext.
+fn seal_for_dial(
+    node_name: &str,
+    entry: aoide_storage::outbox::OutboxEntry,
+) -> Result<aoide_storage::outbox::OutboxEntry, Delivery> {
+    use aoide_storage::outbox::Reseal;
+    match aoide_storage::outbox::reseal_entry(node_name, &entry, &aoide_storage::time::now_iso_utc()) {
+        Ok(Reseal::NoBinding) | Ok(Reseal::Sealed(None)) => Ok(entry),
+        Ok(Reseal::Sealed(Some(upgraded))) | Ok(Reseal::FreshlySealed(upgraded)) => Ok(*upgraded),
+        Ok(Reseal::NotUsable(parked)) => Err(Delivery::Returned(parked.unwrap_or_else(|| Box::new(entry)))),
+        Ok(Reseal::Withheld) => {
+            let reason = relay_parked_reason(&entry.envelope.header.to.node);
+            Err(returned(entry, reason))
+        }
+        Err(e) => Err(returned(entry, format!("refused: no-usable-seal: {e}"))),
     }
 }
 
@@ -2857,7 +2841,10 @@ mod tests {
         );
         let mut node = keyed_node("elsewhere");
         node.url = format!("http://127.0.0.1:{port}/");
-        aoide_storage::node_store::save_nodes(&[node]).unwrap();
+        aoide_storage::node_store::save_nodes(&[node, keyed_node("origin-node")]).unwrap();
+        // The receipts are addressed to origin-node, a relayed entry: they are
+        // sealed to origin-node or withheld, so its binding must be known.
+        aoide_storage::seal::learn_binding("origin-node", &aoide_storage::seal::publish_binding().unwrap()).unwrap();
 
         // More entries than the batch cap — every entry is a receipt, so a
         // `Delivered` outcome retires it outright; the number remaining
@@ -3083,7 +3070,8 @@ mod tests {
         let (listener, port) = fake_deposit_server(r#"{"jsonrpc":"2.0","id":1,"result":{}}"#);
         let mut node = keyed_node("elsewhere");
         node.url = format!("http://127.0.0.1:{port}/");
-        aoide_storage::node_store::save_nodes(&[node]).unwrap();
+        aoide_storage::node_store::save_nodes(&[node, keyed_node("origin-node")]).unwrap();
+        aoide_storage::seal::learn_binding("origin-node", &aoide_storage::seal::publish_binding().unwrap()).unwrap();
 
         let to = aoide_storage::mail::Address { node: "origin-node".to_string(), name: "bob".to_string() };
         let env = aoide_storage::mail::mint_ack("alice", to, "some-acked-msgid").unwrap();
@@ -6580,6 +6568,67 @@ mod tests {
         assert!(returned.refused, "{returned:?}");
         assert!(returned.last_outcome.starts_with("transport:"), "{}", returned.last_outcome);
         assert!(aoide_storage::outbox::list_entries("far").unwrap().is_empty(), "the live dial writes nothing");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The `aoide/mailDeposit` bodies a logged door was handed, parsed.
+    fn parsed_deposits(seen: &std::sync::Arc<std::sync::Mutex<Vec<String>>>) -> Vec<Value> {
+        seen.lock()
+            .unwrap()
+            .iter()
+            .filter_map(|raw| serde_json::from_str::<Value>(raw.split("\r\n\r\n").nth(1)?).ok())
+            .filter(|body| body["method"] == "aoide/mailDeposit")
+            .collect()
+    }
+
+    /// **H1 (review r1): a relayed letter no destination binding seals is returned
+    /// undialled, with its parked reason.** The hop is never contacted: it does not
+    /// read the letter, so there is no binding exchange to make and no deposit to send.
+    #[test]
+    fn a_relayed_letter_with_no_destination_binding_is_returned_undialled_with_its_reason() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("live-relay-no-binding");
+        let (port, seen) = logged_door(|r: &str| signed_for_method(r, ACCEPTED));
+        point_at("hop-n", port);
+
+        let mut entry = live_letter("dest-m", "no binding for me");
+        entry.refused = false;
+        let Delivery::Returned(returned) = deliver_now("hop-n", entry) else {
+            panic!("a relayed letter with no destination binding must come back");
+        };
+        assert!(returned.refused, "{returned:?}");
+        assert!(returned.last_outcome.contains(NO_BINDING_FOR_A_RELAY), "{}", returned.last_outcome);
+        assert!(seen.lock().unwrap().is_empty(), "the hop is never contacted: {:?}", seen.lock().unwrap());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **H1 (review r1): a retry of a relayed letter seals it to its destination.** The
+    /// hop receives a container addressed to the destination and sealed to its
+    /// binding, and no plaintext envelope rides the relay.
+    #[test]
+    fn a_retry_of_a_relayed_letter_is_sealed_to_its_destination_and_not_the_hop() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("live-relay-seals-to-dest");
+        let (port, seen) = logged_door(|r: &str| signed_for_method(r, ACCEPTED));
+        point_at("hop-n", port);
+        let mut nodes = aoide_storage::node_store::load_nodes();
+        nodes.retain(|n| n.name != "dest-m");
+        nodes.push(keyed_node("dest-m"));
+        aoide_storage::node_store::save_nodes(&nodes).unwrap();
+        let own = aoide_storage::seal::publish_binding().unwrap();
+        aoide_storage::seal::learn_binding("dest-m", &own).unwrap();
+
+        let mut entry = live_letter("dest-m", "sealed for the destination");
+        entry.refused = false;
+        assert!(matches!(deliver_now("hop-n", entry), Delivery::Delivered { .. }), "the hop accepts a container");
+        let deposits = parsed_deposits(&seen);
+        assert_eq!(deposits.len(), 1, "{deposits:?}");
+        let container = &deposits[0]["params"]["container"];
+        assert_eq!(container["to"]["node"], "dest-m", "addressed to the destination: {container}");
+        assert_eq!(container["to"]["age"], own.age_pubkey.as_str(), "sealed to the destination's binding");
+        assert!(deposits[0]["params"]["envelope"].is_null(), "no plaintext envelope rides the relay");
 
         let _ = std::fs::remove_dir_all(&dir);
     }

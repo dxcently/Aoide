@@ -3331,10 +3331,10 @@ fn mail_poll(params: &Value, ctx: &RequestCtx) -> Result<Value, (i64, String)> {
     };
     // What the poller says it FILED out of its last poll, if it says anything:
     // the acknowledgement that ends this box's custody of what it handed over
-    // (`outbox::retire_acknowledged`: a `transit` entry, or a held letter the
-    // poller is the destination of). A response can be lost, so the hand-over
-    // is not an acknowledgement, and an unacknowledged entry is offered again
-    // below.
+    // (`outbox::retire_acknowledged`: a `transit` entry, or a held letter whose
+    // hop is the poller, the hop it was spooled toward). A response can be lost,
+    // so the hand-over is not an acknowledgement, and an unacknowledged entry is
+    // offered again below.
     let acknowledged: Vec<String> = params
         .get("filed")
         .and_then(Value::as_array)
@@ -3460,6 +3460,18 @@ fn mail_poll(params: &Value, ctx: &RequestCtx) -> Result<Value, (i64, String)> {
                 }
             }
             aoide_storage::outbox::HandOver::Nothing => {}
+            aoide_storage::outbox::HandOver::Withheld(envelope) => {
+                withheld.push(json!({
+                    "msgid": envelope.msgid,
+                    "reason": SEALED_REQUIRED,
+                    "detail": format!(
+                        "a relay carries sealed containers only: this box holds no age binding for `{}` \
+                         that it can seal the letter to. Publish one (a signed `aoide/binding`, which an \
+                         `aoide mail poll` exchanges) and poll again — the entry stays spooled until then",
+                        envelope.header.to.node
+                    ),
+                }));
+            }
         }
     }
 
@@ -16481,6 +16493,41 @@ mod tests {
             .collect();
         assert_eq!(handed, vec![held_msgid], "the held letter, never the failing one: {answer}");
         assert_eq!(aoide_storage::outbox::list_entries("box-b").unwrap().len(), 2, "the poll retires neither");
+
+        mail_deposit_cleanup(&root, saved_state, saved_stage);
+    }
+
+    /// **H1 (review r1): a relayed held letter with no destination binding is never
+    /// handed over, sealed or plaintext, and the poll names it withheld.** The poller
+    /// holds no binding, which is the case the old reseal sent in the clear.
+    #[test]
+    fn a_poll_withholds_a_relayed_held_letter_and_hands_over_neither_envelope_nor_container() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
+        let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
+        let root = mail_deposit_root("poll-relayed-withheld");
+        act_as(&root, "here");
+
+        setup_signed_node_with_allows("box-b", &["message"]);
+        let relayed = aoide_storage::mail::mint_outbound_letter("alice", "dest-m", "bob", "relayed").unwrap();
+        let msgid = relayed.msgid.clone();
+        let mut held = aoide_storage::outbox::OutboxEntry::held(relayed);
+        held.refused = true;
+        aoide_storage::outbox::write_entry("box-b", &held).unwrap();
+
+        let audit_log = root.join("log");
+        let ctx = mail_deposit_ctx(&audit_log, Some("box-b"));
+        let answer = mail_poll(&json!({ "node": "box-b" }), &ctx).unwrap();
+        assert_eq!(answer["envelopes"], json!([]), "{answer}");
+        assert_eq!(answer["containers"], json!([]), "{answer}");
+        let withheld = answer["withheld"].as_array().expect("the relayed letter is named withheld");
+        assert_eq!(withheld.len(), 1, "{answer}");
+        assert_eq!(withheld[0]["msgid"], msgid.as_str());
+        assert_eq!(withheld[0]["reason"], SEALED_REQUIRED);
+        assert!(
+            withheld[0]["detail"].as_str().unwrap_or("").contains("a relay carries sealed containers only"),
+            "{answer}"
+        );
 
         mail_deposit_cleanup(&root, saved_state, saved_stage);
     }
