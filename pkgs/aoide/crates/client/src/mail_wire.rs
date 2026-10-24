@@ -1432,7 +1432,6 @@ fn refuse_envelope(node_name: &str, msgid: &str, word: &str, detail: &str, refus
 }
 
 fn refuse_named(what: &str, node_name: &str, msgid: &str, word: &str, detail: &str, refused: &mut Vec<String>) {
-    let msgid = door_words_quoted(msgid, LINE_MAX);
     let detail = if detail.is_empty() { String::new() } else { format!(": {}", door_words_quoted(detail, LINE_MAX)) };
     let _ = aoide_protocol::audit::audit(
         &aoide_protocol::audit::default_audit_log(),
@@ -1440,9 +1439,9 @@ fn refuse_named(what: &str, node_name: &str, msgid: &str, word: &str, detail: &s
         aoide_protocol::audit::EventClass::Audit,
         &format!("mail.poll.{what}-refused"),
         "invalid",
-        &format!("{what} {msgid} from `{node_name}` refused: {word}{detail}"),
+        &format!("{what} {} from `{node_name}` refused: {word}{detail}", door_words_quoted(msgid, LINE_MAX)),
     );
-    refused.push(format!("{msgid}: {word}"));
+    refused.push(format!("{}: {word}", door_words_quoted(msgid, SAID_MAX)));
 }
 
 /// A refusal as one line for a caller that reports text: what, why, and the fix.
@@ -1815,7 +1814,11 @@ fn poll_through(node_name: &str, named: Option<&str>, target: PollTarget) -> Res
             aoide_protocol::audit::EventClass::Audit,
             "mail.poll.withheld",
             "invalid",
-            &format!("{msgid} from `{node_name}` withheld: {reason}"),
+            &format!(
+                "{} from `{node_name}` withheld: {}",
+                door_words_quoted(&msgid, LINE_MAX),
+                door_words_quoted(&reason, LINE_MAX)
+            ),
         );
     }
     // The container ids and the words in `refused` are the far end's, and a
@@ -4539,6 +4542,71 @@ mod tests {
                 r#"container "{msgid}" from `relay` refused: broken-chain: "the chain's last hop is by `x; not acted on (it said: \"ok\")`, and this deposit is from `relay` — a hop hands over what IT carried""#,
                 msgid = container.msgid
             ),
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **A refused entry keeps its closing quote and its word.** A far msgid can
+    /// run to any length, and the poll's own re-clip to [`LINE_MAX`] would cut a
+    /// msgid quoted at that length before its closing quote, and its word with
+    /// it. The entry quotes the msgid at [`SAID_MAX`], so a real or a long one
+    /// keeps both.
+    #[test]
+    fn a_refused_entry_for_a_long_msgid_keeps_its_closing_quote_and_word() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("refused-entry-long-msgid");
+        let envelope = aoide_storage::mail::mint_outbound_letter("alice", "chiyo", "bob", "held for chiyo").unwrap();
+        let live = aoide_storage::seal::publish_binding().unwrap();
+        let container =
+            aoide_storage::seal::seal_envelope(&envelope, &live, "home", "home", "chiyo", "chiyo", &aoide_storage::time::now_iso_utc())
+                .unwrap();
+        let mut wire = serde_json::to_value(&container).unwrap();
+        wire["msgid"] = json!("x".repeat(300));
+        wire["transit"][0]["node"] = json!("someone-else");
+        let body = json!({ "jsonrpc": "2.0", "id": 1, "result": { "containers": [wire] } }).to_string();
+        let key = own_key();
+        let port = scripted_door(move |request| signed_reply(request, &key, 200, &body));
+        let mut relay = keyed_node("relay");
+        relay.url = format!("http://127.0.0.1:{port}/");
+        aoide_storage::node_store::save_nodes(&[relay]).unwrap();
+
+        let polled = poll_node("relay", None).unwrap();
+
+        assert_eq!(polled.refused.len(), 1, "{polled:?}");
+        assert!(polled.refused[0].starts_with(&format!("\"{}", "x".repeat(119))), "{}", polled.refused[0]);
+        assert!(polled.refused[0].ends_with("\": broken-chain"), "{}", polled.refused[0]);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **A withheld entry's words are quoted in its audit sentence.** The
+    /// listener's `msgid` and `reason` are the far end's words, and the audit
+    /// line reads them after aoide's `withheld:`, so they sit inside quotes there
+    /// as they do in every other sentence.
+    #[test]
+    fn a_withheld_entrys_words_are_quoted_in_its_audit_line() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("withheld-audit-quoted");
+        let body = json!({ "jsonrpc": "2.0", "id": 1, "result": { "withheld": [{ "msgid": "x; carried on", "reason": "sealed-required" }] } }).to_string();
+        let key = own_key();
+        let port = scripted_door(move |request| signed_reply(request, &key, 200, &body));
+        let mut relay = keyed_node("relay");
+        relay.url = format!("http://127.0.0.1:{port}/");
+        aoide_storage::node_store::save_nodes(&[relay]).unwrap();
+
+        let polled = poll_node("relay", None).unwrap();
+
+        assert_eq!(polled.withheld.len(), 1, "{polled:?}");
+        let log = std::fs::read_to_string(dir.join("log")).unwrap();
+        let line = log
+            .lines()
+            .map(|line| serde_json::from_str::<Value>(line).unwrap())
+            .find(|line| line["command"] == "mail.poll.withheld")
+            .unwrap_or_else(|| panic!("the withholding is audited: {log}"));
+        assert_eq!(
+            line["message"].as_str().unwrap(),
+            r#""x; carried on" from `relay` withheld: "sealed-required""#,
         );
 
         let _ = std::fs::remove_dir_all(&dir);

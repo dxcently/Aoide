@@ -495,8 +495,11 @@ never the inbound/serve half (that's `aoide-server`).
   (`foreign_words`), clipped to 200 characters: a refusal's `reason` and
   `detail`, a JSON-RPC `error`, a poll's own refusal, a `withheld` entry, and
   a refused container's `msgid`. A refused container's audit line quotes its
-  `msgid` and `detail`, since both sit inside a sentence; a line site prints a
-  whole far-sourced line after aoide's label, so it cleans but does not quote.
+  `msgid` and `detail`, since both sit inside a sentence, and its refused entry
+  quotes the `msgid` at 120 characters, so the poll's 200-character re-clip
+  keeps the closing quote. A withheld entry's audit line quotes its `msgid` and
+  `reason`. A line site prints a whole far-sourced line after aoide's label, so
+  it cleans but does not quote.
   So the entry's `last_outcome`, the link record, a poll's `Err`, a
   `PollOutcome` and the `mail.answer.*` and `mail.poll.*` audit lines hold none
   of a stranger's control characters, and a signature does not make a
