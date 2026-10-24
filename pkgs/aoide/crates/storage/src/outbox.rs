@@ -410,7 +410,7 @@ pub fn reseal_entry(node: &str, entry: &OutboxEntry, now: &str) -> Result<Reseal
     }
     let mesh = crate::routing::zone_name(&entry.envelope.header.origin_mesh);
     let Some(binding) = crate::seal::destination_binding(node, &mesh, now) else {
-        if crate::seal::binding_for(node).is_none() && !crate::seal::declares_a_binding(node, &mesh) {
+        if !crate::seal::binding_on_record(node) && !crate::seal::declares_a_binding(node, &mesh) {
             return Ok(Reseal::NoBinding);
         }
         // A binding is on record, learnt or declared, and none is usable now.
@@ -1390,8 +1390,9 @@ pub fn record_deferred(node: &str, msgids: &[String]) -> Result<(), String> {
 
 /// Defer the entries of `node`'s OWN spool that `poller` named as handed-over
 /// and unfiled: each is tried once more and waits its [`deferral_due`] window
-/// from now, so it is not offered again until the window passes. Only
-/// `node`'s directory is read or written, so a poller can never defer another
+/// from now, so it is not offered again until the window passes. A refused
+/// entry keeps its word: only its tries and last try move. Only `node`'s
+/// directory is read or written, so a poller can never defer another
 /// node's entry. Each read-modify-write is one lock hold. Returns how many were
 /// deferred; a msgid this hub does not hold is skipped, and so is a returned own
 /// letter, which no poll offers.
@@ -1408,7 +1409,12 @@ pub fn defer_named(node: &str, msgids: &[String]) -> Result<usize, String> {
             }
             entry.tries = entry.tries.saturating_add(1);
             entry.last_try_at = crate::time::now_iso_utc();
-            entry.last_outcome = format!("{DEFERRED_PREFIX} poller did not file");
+            // A refused entry keeps the word that refused it: the hop behind a
+            // parked container is told that word, and a parked letter keeps its
+            // reason.
+            if !entry.refused {
+                entry.last_outcome = format!("{DEFERRED_PREFIX} poller did not file");
+            }
             write_entry_unlocked(&node, &entry)?;
             deferred += 1;
         }
@@ -3115,6 +3121,60 @@ mod tests {
         let stored = list_entries("there").unwrap().remove(0);
         assert!(stored.refused && !stored.is_held(), "the letter stays returned");
         assert_eq!(stored.last_outcome, "refused: unknown-box", "with its word, not a parked reason");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **Naming a refused entry in `deferred` moves its tries and nothing
+    /// else.** A parked transit container keeps the word that refused it, so
+    /// the hop behind it is still told that word, and a parked held letter
+    /// keeps its "parked: ..." reason.
+    #[test]
+    fn defer_named_keeps_a_refused_entrys_word() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("outbox-defer-keeps-word");
+
+        let transit_msgid = "cd".repeat(32);
+        let container = crate::seal::Container {
+            v: crate::seal::CONTAINER_VERSION,
+            purpose: crate::seal::PURPOSE_MAIL.to_string(),
+            msgid: transit_msgid.clone(),
+            generation: 1,
+            origin: crate::seal::Party { node: "osaka".to_string(), key: "aa".repeat(32) },
+            to: crate::seal::Destination { node: "there".to_string(), age: "age1x".to_string() },
+            origin_mesh: "home".to_string(),
+            mesh: "home".to_string(),
+            suite: crate::seal::SUITE_AGE_V1_X25519.to_string(),
+            ct: "00".to_string(),
+            sig: "00".to_string(),
+            transit: Vec::new(),
+            board: None,
+            epoch: None,
+        };
+        let mut transit = OutboxEntry::transit(container);
+        transit.refused = true;
+        transit.last_outcome = "refused: box-full".to_string();
+        write_entry("there", &transit).unwrap();
+
+        let held_msgid = "ef".repeat(32);
+        let mut parked = own_letter("there", &held_msgid, Some("sess-a"), true);
+        parked.refused = true;
+        parked.last_outcome = "parked: the destination holds a binding that is not usable now".to_string();
+        write_entry("there", &parked).unwrap();
+
+        assert_eq!(defer_named("there", &[transit_msgid.clone(), held_msgid.clone()]).unwrap(), 2);
+
+        let entries = list_entries("there").unwrap();
+        let transit_now = entries.iter().find(|e| e.envelope.msgid == transit_msgid).unwrap();
+        assert_eq!(transit_now.tries, 1, "the try is counted");
+        assert_eq!(transit_now.last_outcome, "refused: box-full", "the recorded refusal keeps its word");
+        assert_eq!(
+            parked_transit_refusal(&transit_msgid).as_deref(),
+            Some("box-full"),
+            "so the hop behind it is told that word"
+        );
+        let held_now = entries.iter().find(|e| e.envelope.msgid == held_msgid).unwrap();
+        assert!(held_now.last_outcome.starts_with("parked:"), "a parked letter keeps its reason: {}", held_now.last_outcome);
 
         let _ = std::fs::remove_dir_all(&dir);
     }

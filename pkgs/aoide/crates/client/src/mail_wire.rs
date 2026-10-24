@@ -646,7 +646,7 @@ pub fn spool_entry(
             })
         }
         None if direct
-            && aoide_storage::seal::binding_for(dest).is_none()
+            && !aoide_storage::seal::binding_on_record(dest)
             && !aoide_storage::seal::declares_a_binding(dest, mesh) =>
         {
             Ok(if hold { OutboxEntry::held(envelope) } else { OutboxEntry::fresh(envelope) })
@@ -6989,6 +6989,61 @@ mod tests {
     /// One own letter, minted to `to` and not yet on disk, as the dial takes it.
     fn live_letter(to: &str, text: &str) -> OutboxEntry {
         OutboxEntry::fresh(aoide_storage::mail::mint_outbound_letter("alice", to, "bob", text).unwrap())
+    }
+
+    /// **A binding on record that no longer verifies parks a direct letter; it
+    /// is never sent in the clear.** The node published a binding under its old
+    /// key, then was re-paired under a new one, and the exchange learns
+    /// nothing. The letter is held, the door sees no deposit, and the entry
+    /// says why.
+    #[test]
+    fn a_stale_binding_on_record_parks_a_direct_letter_at_the_dial() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("stale-binding-dial");
+        let (port, seen) = logged_door(|r: &str| signed_for_method(r, ACCEPTED));
+        point_at("far", port);
+        let old = aoide_storage::seal::publish_binding().unwrap();
+        aoide_storage::seal::learn_binding("far", &old).unwrap();
+        let mut nodes = aoide_storage::node_store::load_nodes();
+        for node in nodes.iter_mut().filter(|n| n.name == "far") {
+            node.pubkey = Some(aoide_storage::identity::mint_ephemeral().unwrap().info().pubkey_hex);
+        }
+        aoide_storage::node_store::save_nodes(&nodes).unwrap();
+
+        let Delivery::Returned(returned) = deliver_now("far", live_letter("far", "hi")) else {
+            panic!("a letter with a stale binding on record must be parked, not dialled in the clear");
+        };
+        assert_eq!(deposits_seen(&seen), 0, "no deposit reaches the door, plaintext or otherwise");
+        assert!(returned.refused, "{returned:?}");
+        assert!(returned.last_outcome.starts_with("parked:"), "the reason is kept: {}", returned.last_outcome);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **The same park at mint: a letter to a node whose binding on record no
+    /// longer verifies is spooled parked, not as a plaintext entry.**
+    #[test]
+    fn a_stale_binding_on_record_parks_a_direct_letter_at_the_spool() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("stale-binding-spool");
+        let (port, _seen) = logged_door(|r: &str| signed_for_method(r, ACCEPTED));
+        point_at("far", port);
+        let old = aoide_storage::seal::publish_binding().unwrap();
+        aoide_storage::seal::learn_binding("far", &old).unwrap();
+        let mut nodes = aoide_storage::node_store::load_nodes();
+        for node in nodes.iter_mut().filter(|n| n.name == "far") {
+            node.pubkey = Some(aoide_storage::identity::mint_ephemeral().unwrap().info().pubkey_hex);
+        }
+        aoide_storage::node_store::save_nodes(&nodes).unwrap();
+
+        let letter = aoide_storage::mail::mint_outbound_letter("alice", "far", "bob", "hi").unwrap();
+        let mesh = letter.header.origin_mesh.clone();
+        let entry = spool_entry("far", "far", &mesh, letter, false).unwrap();
+        assert!(entry.refused, "a letter no usable binding seals is parked at mint: {entry:?}");
+        assert!(entry.last_outcome.starts_with("parked:"), "the reason is kept: {}", entry.last_outcome);
+        assert!(entry.container.is_none() && entry.refused, "and it is not spooled in the clear as a fresh letter");
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// **A letter a verified door accepts is delivered by the dial itself.** The

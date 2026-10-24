@@ -806,8 +806,8 @@ keyless checks — admission, the outer origin signature, the zone check, dedup
 — and only the destination opens `ct` and runs the `msgid` recomputation and
 the inner origin signature against the opened envelope (that document's "Two
 verification halves"). A hop never opens a letter. The one plaintext path left
-is the direct SSH lane to a destination with no binding, learnt or declared —
-and the receiver on THAT lane keeps accepting it, deliberately, so a peer
+is the direct SSH lane to a destination with no binding on record and none
+declared. The receiver on THAT lane keeps accepting it, deliberately, so a peer
 running an older aoide can still deliver; nothing plaintext ever enters
 transit, and the HTTPS adapter refuses a plaintext envelope
 (`sealed-required`, CONTRACTS §6), since no relay, hub or HTTPS hop ever

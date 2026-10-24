@@ -904,8 +904,10 @@
   `aoide_storage::seal::destination_binding` (a learnt binding that matches the
   declaration, else the declared one). `spool_entry` and the reseal use it, and
   `deliver_now` seals a relayed letter through `seal_for_dial` before it dials.
-  With no binding, `spool_entry` parks the plaintext in this box's own spool,
-  refused with `relay_parked_reason`; every poll withholds it, and no dial
+  A direct letter goes in the clear only when no binding is on record for its
+  destination and none is declared. Otherwise `spool_entry` parks it in this
+  box's own spool, refused with `relay_parked_reason` (a relayed letter's
+  reason, or the direct one); every poll withholds it, and no dial
   sends it: `deliver_now` returns it undialled with that reason.
   **A node the mesh declares `down` is never dialled either, and that is
   `mail_wire::record_forbidden_by_declaration`'s** — asked over the set, so no caller can

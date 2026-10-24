@@ -171,7 +171,7 @@
 - **`outbox::poll_payloads` is a poll's only hand-over point, and it returns
   pairs.** The container rides beside its envelope so the door can hand a
   sealed entry over as a container and NO plaintext. A direct entry with no
-  binding, learnt or declared, still appears as an envelope. A
+  binding on record and none declared still appears as an envelope. A
   relayed entry never does: `reseal_entry` seals it to its destination or
   withholds it (`Reseal::Withheld`, `HandOver::Withheld`), and the answer lists
   it under `withheld`. The hand-over writes nothing but a container sealed for
@@ -180,8 +180,8 @@
   written over, and nothing is handed over for it. A poll writes only what its
   caller named: `return_refused` returns a held own letter the caller names in
   `refused` (before anything is offered), and `defer_named` stamps only the
-  caller's own entries it names in `deferred`, never a returned own letter
-  (MAIL.md §Wire).
+  caller's own entries it names in `deferred`, never a returned own letter,
+  and a refused one keeps its word (MAIL.md §Wire).
 
 - **A poller's refusals are kept per node (`.refused`).** `record_refused`
   stores each `{msgid, word}` a poll refused, keep-list words included, and

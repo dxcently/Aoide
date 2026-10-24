@@ -676,6 +676,14 @@ pub fn binding_for(node_name: &str) -> Option<Binding> {
     verify_binding(&binding, Some(pinned)).then_some(binding)
 }
 
+/// Is a binding on record for `node_name`, whether or not it still verifies? A
+/// stored binding is one the node published, so a letter to it is parked when
+/// it no longer verifies (its signer is not the key on record now), never sent
+/// in the clear as though no binding had ever been published.
+pub fn binding_on_record(node_name: &str) -> bool {
+    stored_binding(node_name).is_some()
+}
+
 /// Drop a node's stored binding, because the node is gone. Returns whether
 /// there was one.
 ///
