@@ -758,9 +758,12 @@
   (`last_outcome`, the link record), a poll's `Err`, a `PollOutcome` line or an
   audit line (every `mail.answer.*` and `mail.poll.*` one, a container's
   `msgid` and a refusal's `detail` included): clipped to `LINE_MAX` (200) for a
-  verified answer, and to `SAID_MAX` (120) for an unsigned one, which is also
-  labelled. An error that quotes the answer (a serde error naming a binding's
-  value) is a word of the answer and passes through it too. A node or mesh
+  verified answer, and to `SAID_MAX` (120) for an unsigned one (`DOOR_SAID_MAX`,
+  400, for a clock refusal, `-32008`). An unsigned one is then quoted by
+  `door_words_quoted`, `\` and `"` escaped, inside its label
+  `(it said: "…"; not acted on)`. An error that quotes the answer (a serde
+  error naming a binding's value) is a word of the answer and passes through
+  it too. A node or mesh
   name in a line is one this box's own declarations hold and validated, so it
   is not one. Clean there, so every reader of a record this build writes is
   safe at once; never format a raw body word, signed or not, into anything a

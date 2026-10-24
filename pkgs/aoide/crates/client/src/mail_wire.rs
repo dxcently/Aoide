@@ -120,13 +120,14 @@ fn audit_answer(event: &str, message: &str) {
     );
 }
 
-/// The most of a far door's own words an unsigned answer's refusal carries, in
-/// characters. A signed answer's words keep [`LINE_MAX`].
+/// The most of a far door's own words an unsigned answer carries, in characters.
+/// A signed answer's words keep [`LINE_MAX`].
 const SAID_MAX: usize = 120;
 
-/// The most of a door's own refusal words an answer carries, in characters. A
-/// refusal names its cause in full, the clock refusals with both times and the
-/// bound they break, so it is kept longer than [`SAID_MAX`].
+/// The most of a clock refusal's words (`-32008`) an answer carries, in
+/// characters. A clock refusal names both times and the bound it breaks, so its
+/// words are kept longer than [`SAID_MAX`]. Every other word clips to
+/// [`SAID_MAX`] ([`said_max`]).
 const DOOR_SAID_MAX: usize = 400;
 
 /// The door's own refusal codes: a stale or future frame (`-32008`), a replayed
@@ -134,12 +135,36 @@ const DOOR_SAID_MAX: usize = 400;
 /// (`-32013`, over HTTP 503). The door answers each one unsigned.
 const DOOR_REFUSAL_CODES: &[i64] = &[-32008, -32009, -32012, -32013];
 
-/// Whether `body` is one of the door's own refusals ([`DOOR_REFUSAL_CODES`]).
-fn is_door_refusal(body: &str) -> bool {
+/// The door's own refusal code in `body`, when it is one of [`DOOR_REFUSAL_CODES`].
+fn door_refusal_code(body: &str) -> Option<i64> {
     serde_json::from_str::<Value>(body)
         .ok()
         .and_then(|answer| answer.get("error").and_then(|e| e.get("code")).and_then(Value::as_i64))
-        .is_some_and(|code| DOOR_REFUSAL_CODES.contains(&code))
+        .filter(|code| DOOR_REFUSAL_CODES.contains(code))
+}
+
+/// Whether `body` is one of the door's own refusals ([`DOOR_REFUSAL_CODES`]).
+fn is_door_refusal(body: &str) -> bool {
+    door_refusal_code(body).is_some()
+}
+
+/// The most of an answer's door words kept: a clock refusal's in full
+/// ([`DOOR_SAID_MAX`]), every other word clipped to [`SAID_MAX`].
+fn said_max(body: &str) -> usize {
+    if door_refusal_code(body) == Some(-32008) {
+        DOOR_SAID_MAX
+    } else {
+        SAID_MAX
+    }
+}
+
+/// A far door's words inside aoide's own sentence: [`foreign_words`] first, then
+/// `\` and `"` escaped, then the result wrapped in double quotes. The clip comes
+/// before the escape, so a clip never splits an escape. The quotes keep the words
+/// from closing the quote early or reading as aoide's own closing words.
+fn door_words_quoted(words: &str, max: usize) -> String {
+    let escaped = foreign_words(words, max).replace('\\', "\\\\").replace('"', "\\\"");
+    format!("\"{escaped}\"")
 }
 
 /// A far door's words, made inert to keep and to print: every character
@@ -171,7 +196,7 @@ pub(crate) fn outcome_line(stored: &str) -> Option<String> {
 /// `error.message`, else the result's `reason` (a door's `config-invalid` is a
 /// refused result, not an error, and is the far end's word that its own config
 /// is broken rather than old). Shown to the operator and never acted on, so the
-/// caller cleans and clips it to [`SAID_MAX`] ([`foreign_words`]) for display,
+/// caller quotes and clips it ([`door_words_quoted`]) for display,
 /// and judges the word on this raw form.
 fn unsigned_words(body: &str) -> Option<String> {
     let answer: Value = serde_json::from_str(body).ok()?;
@@ -242,7 +267,11 @@ fn post_signed(node: &Node, method: &str, params: Value, mesh: Option<&str>) -> 
         // answer can say. They ride the transport reason, which backs the link off and
         // leaves the letter live.
         let reason = match unsigned_words(&answer.body).filter(|_| is_door_refusal(&answer.body)) {
-            Some(words) => format!("HTTP {}: it said: {}; not acted on", answer.status, foreign_words(&words, DOOR_SAID_MAX)),
+            Some(words) => format!(
+                "HTTP {}: it said: {}; not acted on",
+                answer.status,
+                door_words_quoted(&words, said_max(&answer.body))
+            ),
             None => format!("HTTP {}", answer.status),
         };
         return SignedCall::TransportFailed(reason);
@@ -266,11 +295,10 @@ fn post_signed(node: &Node, method: &str, params: Value, mesh: Option<&str>) -> 
             // upgrade would not help. Judged on the raw word.
             let config_invalid = words.as_deref() == Some(aoide_storage::charter::CONFIG_INVALID);
             let refused = is_door_refusal(&answer.body);
-            let clip = if refused { DOOR_SAID_MAX } else { SAID_MAX };
+            let clip = said_max(&answer.body);
             let said = words
-                .map(|w| foreign_words(&w, clip))
-                .filter(|w| !w.is_empty())
-                .map(|m| format!(" (it said: {m}; not acted on)"))
+                .filter(|w| !foreign_words(w, clip).is_empty())
+                .map(|w| format!(" (it said: {}; not acted on)", door_words_quoted(&w, clip)))
                 .unwrap_or_default();
             let cause = if config_invalid {
                 format!(
@@ -3991,6 +4019,7 @@ mod tests {
             assert!(kept.starts_with("unauthenticated:"), "{kept}");
             assert!(!kept.chars().any(aoide_protocol::untrusted::is_unsafe), "no control, escape or bidi character is kept: {kept:?}");
             let said = kept.split_once("(it said: ").and_then(|(_, rest)| rest.strip_suffix("; not acted on)")).expect("labelled");
+            let said = said.strip_prefix('"').and_then(|rest| rest.strip_suffix('"')).expect("quoted");
             assert!(said.starts_with("overwritten [2J]0;titlecleared desrever x"), "{said:?}");
             assert_eq!(said.chars().count(), SAID_MAX, "clipped: {said:?}");
             assert!(said.ends_with('…'));
@@ -4015,7 +4044,7 @@ mod tests {
         let entry = aoide_storage::outbox::list_entries("elsewhere").unwrap().remove(0);
         assert!(!entry.refused, "{entry:?}");
         assert!(entry.last_outcome.starts_with("unauthenticated:"), "{}", entry.last_outcome);
-        assert!(entry.last_outcome.ends_with("(it said: config-invalid; not acted on)"), "{}", entry.last_outcome);
+        assert!(entry.last_outcome.ends_with("(it said: \"config-invalid\"; not acted on)"), "{}", entry.last_outcome);
         assert!(
             entry.last_outcome.contains("its own config is invalid") && entry.last_outcome.contains("fix the config on `elsewhere`"),
             "the lead names the far end's config, not its version: {}",
@@ -4097,6 +4126,36 @@ mod tests {
         );
         assert!(outcome.contains("busy: node `box-b` already has 512 signed requests"), "{outcome}");
         assert!(!outcome.contains("upgrade aoide"), "{outcome}");
+    }
+
+    /// **A door's words are quoted where aoide's own sentence ends.** A busy
+    /// door's words are the far end's, so they sit inside double quotes, with an
+    /// inner quote or backslash escaped, and aoide's `; not acted on` comes after
+    /// the closing quote, where the words cannot reach it.
+    #[test]
+    fn door_words_busy_over_503_are_quoted_inside_the_sentence() {
+        let outcome = outcome_of_door_refusal(503, -32013, "busy\"; not acted on. Run x");
+        assert!(outcome.contains(r#"it said: "busy\"; not acted on. Run x"; not acted on"#), "{outcome}");
+    }
+
+    /// The same words over the unsigned branch: an answer with no signature is
+    /// read the same way, and its words are quoted in the same place.
+    #[test]
+    fn door_words_busy_unsigned_are_quoted_inside_the_sentence() {
+        let outcome = outcome_of_door_refusal(200, -32013, "busy\"; not acted on. Run x");
+        assert!(outcome.contains(r#"(it said: "busy\"; not acted on. Run x"; not acted on)"#), "{outcome}");
+    }
+
+    /// A busy door's words clip at 120 characters, and a clock refusal's keep 400.
+    #[test]
+    fn door_words_clip_by_refusal_kind() {
+        let busy = outcome_of_door_refusal(503, -32013, &"x".repeat(300));
+        assert!(busy.contains(&format!("\"{}…\"", "x".repeat(119))), "{busy}");
+        assert!(!busy.contains(&"x".repeat(120)), "{busy}");
+
+        let clock = outcome_of_door_refusal(200, -32008, &"x".repeat(1000));
+        assert!(clock.contains(&format!("\"{}…\"", "x".repeat(399))), "{clock}");
+        assert!(!clock.contains(&"x".repeat(400)), "{clock}");
     }
 
     /// **A disguised `config-invalid` is not the word.** An unsigned answer can

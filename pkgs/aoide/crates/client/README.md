@@ -479,8 +479,10 @@ never the inbound/serve half (that's `aoide-server`).
   link backs off). The one thing an unsigned answer contributes is what it
   said, for the operator: its `error.message`, else its result's `reason`
   (`config-invalid` is a result), cleaned through `aoide_protocol::untrusted`
-  and clipped to 120 characters before it reaches the entry, the link record
-  or the refusal, and labelled `(it said: …; not acted on)`. For the word
+  and clipped to 120 characters (400 for a clock refusal, `-32008`) before it
+  reaches the entry, the link record or the refusal. It is quoted, with `\`
+  and `"` escaped, and labelled `(it said: "…"; not acted on)`, so the words
+  cannot close the quote or pass for aoide's own closing words. For the word
   `config-invalid` the lead says the far end's own config is invalid rather
   than that it needs an upgrade, since a door in that state never signs its
   answer. A signed answer's words get the same cleaning where they are read

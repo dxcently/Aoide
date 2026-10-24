@@ -8578,8 +8578,9 @@ key to answer. A client refuses an unsigned answer.
 destination can be hostile and hold its own key, so the client strips every
 control and invisible character from any word of an answer before it is kept,
 returned or logged, and clips it: to 200 characters when the answer verified,
-and to 120 (labelled `it said: …; not acted on`) when it did not. The cleaning
-happens where the word is read out of the answer, so the entry's `lastOutcome`,
+and to 120 (400 for a clock refusal, `-32008`) when it did not. The words are
+quoted, `it said: "…"; not acted on`, and the cleaning happens where the
+word is read out of the answer, so the entry's `lastOutcome`,
 the link record, a poll's error, its own refusal, its `refused` and `withheld`
 lines and every `mail.answer.*` and `mail.poll.*` audit line are inert for
 every reader. That includes an error that quotes the answer, such as the parse
