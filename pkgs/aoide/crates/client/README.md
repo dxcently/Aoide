@@ -475,8 +475,9 @@ never the inbound/serve half (that's `aoide-server`).
   response at all — the LINK is the suspect), `LinkRefused(reason)` (the far
   end answered with a word about its own state, `down` or `config-invalid`: the
   entry stays live and the link backs off), `Deferred(word)` (the far box is
-  full, `box-full`: the entry records `deferred: box-full`, stays live, waits
-  its own window, and the link is not backed off), and `Unauthenticated(reason)` (an
+  full, `box-full`: on the drain the entry records `deferred: box-full`, stays
+  live, waits its own window, and the link is not backed off), and
+  `Unauthenticated(reason)` (an
   answer that did not verify under the key on file: nothing in it is read, so
   the entry is recorded `unauthenticated:`, neither settled nor parked, and the
   link backs off). The one thing an unsigned answer contributes is what it

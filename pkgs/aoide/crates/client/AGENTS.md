@@ -725,7 +725,8 @@
   by `refuse_container` or `refuse_envelope`, and the `DepositOutcome` match in
   `poll_through` has no catch-all.
 - **Custody follows the refusal word (`refusal_clears_on_retry`).** A hub
-  keeps a container it cannot file now and may file later: `box-full` and the
+  keeps a transit container it cannot file now and may file later: `box-full`
+  and the
   local-state words (charter, config, disk). A refusal that is a fact about the
   container, such as `unknown-box`, `too-large` or a bad signature, releases
   custody, and the origin keeps its own copy and re-sends it on retry. The
@@ -736,7 +737,9 @@
   msgid the answer handed over that is neither in `filed_pending` nor a settled
   plaintext letter, and sends the stored list as `deferred` on the next ask.
   Only an answered poll replaces it. A hub defers its own entries for that list
-  (`defer_named`). The list is a wait, not a custody word: it never ends a
+  (`defer_named`): on a poll that is its transit custody. A held letter the
+  poller refused is already returned when the list is read, so it is skipped.
+  The list is a wait, not a custody word: it never ends a
   container's custody, which stays `record_filed`'s alone.
 - **The poll names each refusal with its word (`refused`).** `refuse_container`
   and `refuse_envelope` record every refusal (`outbox::record_refused`),
@@ -925,7 +928,8 @@
   `tries`/`lastOutcome` record the far end's own words under the same `refused:`
   word a policy refusal gets, the LINK backs off, and the next pass retries —
   while every other word takes the `Refused` arm and parks the entry, except
-  `box-full`, which takes `DepositAttempt::Deferred`: the far box is full, so the
+  `box-full`, which takes `DepositAttempt::Deferred` on the drain (the live
+  send returns the letter): the far box is full, so the
   entry records `deferred: box-full`, stays live, waits its own window
   (`outbox::deferral_due`), and the link is neither backed off nor parked. **`refused:`
   without the flag is not parked**: the word is how the spool records that an

@@ -962,15 +962,19 @@ a2a spawn probe needs `/bin/sh` + `printf`'s byte-exact output.
   the method once the config returns. Everything else keeps `-32007`, and the
   method is never dispatched with an unresolved caller
   (`mail_unloadable_declaration`'s own doc has the shape).
-  **`mail_poll` writes only the caller's own `deferred` stamps.** Its whole body
+  **`mail_poll` writes only what the caller names.** Its whole body
   is
   `aoide_storage::outbox::poll_payloads` (the ONE place the offer rule lives:
   held always, `now` only when its own attempts have been failing) plus a
   self-audit under `a2a.aoide/mailPoll` carrying the handed-over count. The
-  hand-over writes nothing. The one write is `outbox::defer_named` on the
-  `deferred` list the caller names: a `tries` stamp and a `deferred:` outcome on
-  ITS OWN entries, never a returned own letter; the stamp holds them out of the
-  window and nothing else. No
+  hand-over writes nothing. The named writes are three:
+  `outbox::retire_acknowledged`
+  for each `filed` msgid (the hub's own transit custody, or a held letter whose
+  hop is the poller), `outbox::return_refused` for each `refused` pair (a held
+  own letter, marked returned), and `outbox::defer_named` for each `deferred`
+  msgid: a `tries` stamp and a `deferred:` outcome on ITS OWN entries, never a
+  returned own letter; the stamp holds them out of the window and nothing
+  else. No
   bookmark and no "already handed over" flag may be added here: the
   re-poll-before-ack idempotence comes from handing the SAME set over again, and
   the entry retires only through a valid ack, a held own letter the poll of the

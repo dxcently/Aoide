@@ -9498,9 +9498,10 @@ the letter, nothing is kept, and no receipt is awaited (MAIL.md §Transit).
 A verified refusal of any word is final for such a letter too: the letter comes
 back to its sender at once, with that word, and nothing is re-dialled after a
 verified answer. A verified JSON-RPC `error` parks a drained entry, an unsigned
-one never does. A verified `refused` with `reason: "box-full"` defers the entry
-alone: it stays live, waits its own window, and the link is not backed off
-(MAIL.md §Outbox).
+one never does. On the drain, a verified `refused` with
+`reason: "box-full"` defers the
+entry alone: it stays live, waits its own window, and the link is not backed
+off (MAIL.md §Outbox).
 
 Every signed mail call dials with the same transport cap: 5 s to connect
 (`--connect-timeout 5`) and 15 s for the whole call (`--max-time 15`). That
@@ -9976,14 +9977,16 @@ of this node — and the hub retires its own `transit` custody, and any held own
 `letter` it holds for this poller, of exactly those
 (`outbox::retire_acknowledged`) BEFORE it offers, which is why an entry whose
 response was lost is offered again rather than retired into silence. The request
-may also carry `refused` — `{msgid, word}` for each container the poller
+may also carry `refused` — `{msgid, word}` for each letter the poller
 refused, keep-list words included, each with the word that refused it. The
 hub returns a held letter of its own that is named there, before it offers
 (`outbox::return_refused`): the letter is marked `refused` with the word
 (cleaned, and clipped to 120 characters), keeps its session, and one
 `mail.outbox.returned` line is written. A msgid named in both `filed` and
 `refused` is returned, not retired. A transit entry is never returned, so a
-`refused` name changes nothing for it. The list carries no count cap of its
+`refused` name changes nothing for it. On a poll a held own letter returns on
+any word, the keep list decides `filed` for containers alone, and `deferred`
+serves the hub's transit custody. The list carries no count cap of its
 own, as `filed` has none.
 The request
 may also carry `deferred` — the msgids it was handed and did not settle — and

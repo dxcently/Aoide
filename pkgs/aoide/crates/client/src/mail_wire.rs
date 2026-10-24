@@ -1388,14 +1388,14 @@ fn poll_through(node_name: &str, named: Option<&str>, target: PollTarget) -> Res
         // hand-over cannot be the acknowledgement, and anything not yet named
         // here is offered again.
         "filed": acknowledged.clone(),
-        // What THIS box was handed by the last answered poll and did not file:
-        // the hub defers those entries for this caller (`outbox::defer_named`).
-        // Replaced only by an answer, so a lost one carries the list again.
         // What THIS box refused out of its previous poll of this node, with the
         // word that refused each (`outbox::refused_pending`). The holder returns a
         // held letter of its own that is named here (ruling 131). Cleared only by
         // an answer, as `filed` is.
         "refused": refused_sent.clone(),
+        // What THIS box was handed by the last answered poll and did not file:
+        // the hub defers those entries for this caller (`outbox::defer_named`).
+        // Replaced only by an answer, so a lost one carries the list again.
         "deferred": deferred_sent,
     });
     let result = match post_signed(&node, "aoide/mailPoll", params, Some(&mesh)) {
@@ -5904,6 +5904,120 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// **A box-full refusal of a held plaintext letter is recorded for the next
+    /// ask, as every refusal is.** The box is filled to its cap, so the deposit
+    /// answers `box-full`; the pair waits for the next ask, and the hub returns its
+    /// letter with that word (ruling 131).
+    #[test]
+    fn a_box_full_plaintext_letter_is_recorded_for_the_next_ask() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("plaintext-box-full-recorded");
+
+        let me = register_local_origin();
+        aoide_storage::mail::box_add("bob").unwrap();
+        let saved = std::env::var("AOIDE_A2A_NODE_NAME").ok();
+        std::env::set_var("AOIDE_A2A_NODE_NAME", "relay");
+        let letter = aoide_storage::mail::mint_outbound_letter("alice", &me, "bob", "no room");
+        match saved {
+            Some(name) => std::env::set_var("AOIDE_A2A_NODE_NAME", name),
+            None => std::env::remove_var("AOIDE_A2A_NODE_NAME"),
+        }
+        let letter = letter.unwrap();
+        let msgid = letter.msgid.clone();
+        // Unparseable lines fill the box to its cap and compaction keeps them.
+        let line = format!("{}\n", "x".repeat(1023));
+        std::fs::write(
+            aoide_storage::mail::box_path("bob"),
+            line.repeat((aoide_storage::mail::BOX_MAX / 1024) as usize),
+        )
+        .unwrap();
+
+        let (listener, port, seen) = recording_door(
+            r#"{"jsonrpc":"2.0","id":1,"result":{"status":"accepted"}}"#,
+            poll_answer(std::slice::from_ref(&letter)),
+        );
+        register_polled_relay(port);
+
+        let outcome = poll_node("relay", None).unwrap();
+        assert_eq!(outcome.filed, 0, "nothing is filed into a full box: {outcome:?}");
+        assert!(
+            outcome.refused.iter().any(|r| r.starts_with(&msgid) && r.contains("box-full")),
+            "the refusal is named: {:?}",
+            outcome.refused
+        );
+        assert_eq!(
+            aoide_storage::outbox::refused_pending("relay").unwrap(),
+            vec![aoide_storage::outbox::PollRefusal { msgid: msgid.clone(), word: "box-full".to_string() }],
+            "the refusal is recorded with the word that refused it"
+        );
+        assert_eq!(poll_refusal_lines(&dir, &msgid), 1, "one audit line for the refusal");
+
+        assert!(poll_node("relay", None).is_ok());
+        let asks = seen.lock().unwrap().clone();
+        let last = asks.iter().rev().find(|body| body.contains("aoide/mailPoll")).expect("a second ask was sent");
+        assert!(last.contains(&msgid) && last.contains("box-full"), "the next ask carries the refusal: {last}");
+
+        drop(listener);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **A box-full refusal of a sealed letter is recorded for the next ask, and the
+    /// hub keeps custody of the container.** Box-full is a fact about this box, not
+    /// about the bytes, so the hub offers the container again once its window
+    /// passes (`refusal_clears_on_retry`).
+    #[test]
+    fn a_box_full_container_is_recorded_for_the_next_ask() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("container-box-full-recorded");
+
+        let me = register_local_origin();
+        aoide_storage::mail::box_add("bob").unwrap();
+        let saved = std::env::var("AOIDE_A2A_NODE_NAME").ok();
+        std::env::set_var("AOIDE_A2A_NODE_NAME", "relay");
+        let letter = aoide_storage::mail::mint_outbound_letter("alice", &me, "bob", "no room");
+        match saved {
+            Some(name) => std::env::set_var("AOIDE_A2A_NODE_NAME", name),
+            None => std::env::remove_var("AOIDE_A2A_NODE_NAME"),
+        }
+        let letter = letter.unwrap();
+        let msgid = letter.msgid.clone();
+        let binding = aoide_storage::seal::publish_binding().unwrap();
+        let mesh = letter.header.origin_mesh.clone();
+        let now = aoide_storage::time::now_iso_utc();
+        let container =
+            aoide_storage::seal::seal_envelope(&letter, &binding, &mesh, &mesh, &me, &me, &now).unwrap();
+        aoide_storage::outbox::write_entry("relay", &OutboxEntry::transit_held(container)).unwrap();
+        let line = format!("{}\n", "x".repeat(1023));
+        std::fs::write(
+            aoide_storage::mail::box_path("bob"),
+            line.repeat((aoide_storage::mail::BOX_MAX / 1024) as usize),
+        )
+        .unwrap();
+
+        let (_listener, port, _seen) = answering_door(|body| hub_answer("relay", body));
+        register_polled_relay(port);
+
+        let outcome = poll_node("relay", None).unwrap();
+        assert_eq!(outcome.filed, 0, "nothing is filed into a full box: {outcome:?}");
+        assert!(
+            outcome.refused.iter().any(|r| r.starts_with(&msgid) && r.contains("box-full")),
+            "the refusal is named: {:?}",
+            outcome.refused
+        );
+        assert_eq!(
+            aoide_storage::outbox::refused_pending("relay").unwrap(),
+            vec![aoide_storage::outbox::PollRefusal { msgid: msgid.clone(), word: "box-full".to_string() }],
+            "the refusal is recorded with the word that refused it"
+        );
+        assert!(
+            !aoide_storage::outbox::filed_pending("relay").unwrap().contains(&msgid),
+            "box-full keeps the hub's custody: the container is not named in filed"
+        );
+        assert_eq!(poll_refusal_lines(&dir, &msgid), 1, "one audit line for the refusal");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// **The list a poll SENDS is the list it clears** — with an acknowledgement
     /// recorded WHILE the answer was in flight. That is the only shape that tells
     /// the fix from the bug: reading `filed_pending` again after the response
@@ -6392,8 +6506,10 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// A `box-full` answer is a verdict on the BOX, not on the letter: it is
-    /// classified as a deferral, never a refusal, so the entry is not parked.
+    /// A `box-full` answer is a verdict on the BOX, not on the letter. The drain
+    /// (`drain_node`) classifies it as a deferral, never a refusal, so the entry is
+    /// not parked. The live send (`deliver_now`) maps the same answer to a returned
+    /// letter at once (ruling 131); this test pins the classifier both of them read.
     #[test]
     fn box_full_classifies_deferred_not_refused() {
         let answer = classify_deposit_response(&serde_json::json!({
@@ -6427,9 +6543,10 @@ mod tests {
         assert!(matches!(classify_deposit_response(&answer), DepositAttempt::Refused(_)), "parks, never defers");
     }
 
-    /// A `box-full` answer on one letter defers that letter alone: the link is
-    /// not backed off, the other letter to the same node is still delivered in
-    /// the same pass, and nothing is parked.
+    /// On the drain (`drain_node`), a `box-full` answer on one entry defers that
+    /// entry alone: the link is not backed off, the other entry to the same node is
+    /// still delivered in the same pass, and nothing is parked. Own letters are not
+    /// drained (`dialable_entries`), so the live send returns those (ruling 131).
     #[test]
     fn a_box_full_answer_defers_without_parking_or_backing_off_the_link() {
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());

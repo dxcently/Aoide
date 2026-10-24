@@ -128,7 +128,9 @@ FidoNet node could.
     letter over 256 KiB is `too-large`; a box holds 16 MiB; one origin key
     holds a quarter of a box and a quarter of the store; all boxes together
     hold 240 MiB. A full box
-    answers `box-full` and files nothing, so the sender keeps and retries.
+    answers `box-full` and files nothing: a live send returns the letter with
+    that word, the drain defers the entry, and a poll returns a held own letter
+    (§Outbox, §Wire).
     Nothing is evicted and nothing expires: the caps refuse, and only a
     read letter is ever reclaimed. A flooding node is declared `down`. The
     audit log's one line per deposit, with origin, is the detection.
@@ -616,9 +618,10 @@ door's audit name whitelist gains both names so they never log as bare
   refusals of the bytes themselves). A container refused for a reason of the
   poller's own state (its disk, its config, its charter, its box being full:
   `local-io`, `config-unreadable`, `no-charter-in-force`, `box-full`, and the
-  rest of that class) is never named in `filed`: its custody is kept, and it is
-  named in `deferred` (below), so the hub waits its window before it is offered
-  again. The hub retires
+  rest of that class) is never named in `filed`: the hub keeps its custody of
+  a transit container and offers it again once its window passes (`deferred`,
+  below). A held letter of the hub's own is returned instead (`refused`,
+  below). The hub retires
   its own custody of the named msgids (its spool entry, and only that)
   before it offers
   (`aoide_storage::outbox::filed_pending`). A response can be lost, so the
@@ -628,41 +631,43 @@ door's audit name whitelist gains both names so they never log as bare
   origin keeps no copy once the hub has accepted the letter, and the
   poller refuses it again if it is still refused. A
   refused container leaves the hub before the next offer, so it never blocks
-  the poll behind it. A container held back by the poller's own state stays,
-  and a backlog of those can fill the `POLL_BATCH_CAP` window until the state
-  clears; that is the price of keeping custody for it.
+  the poll behind it. A transit container held back by the poller's own state
+  stays, and a backlog of those can fill the `POLL_BATCH_CAP` window until the
+  state clears; that is the price of keeping custody for it.
   **`refused` is the poller's word on each letter it refused, and the word
   with it.** The poll records every refusal it makes, a container's or a
   plaintext letter's (`outbox::record_refused`), keep-list words included,
   beside what it files, and sends the recorded pairs as `refused` on the next
   ask: `{msgid, word}` for each. An answered poll clears what it sent, as it
-  does for `filed`. The
-  hub returns a held letter of its own that is named there
-  (`outbox::return_refused`): it goes back to its sender at once, marked
-  refused with the word, its session kept, and one `mail.outbox.returned` line
-  written (ruling 131). A msgid named in both `filed` and `refused` is
-  returned, not retired. A transit entry is the hub's custody, and `refused`
-  never touches it: its custody ends on `filed` alone. A msgid spooled toward
-  another node changes nothing. The word is the poller's bytes: the hub strips
-  control characters and keeps at most 120 characters of it. The keep list
-  (`box-full`, `local-io` and the rest of that class) decides `filed` alone;
-  its words travel in `refused` too. The list has no count cap of its own, as
-  `filed` has none. An old poller sends no `refused`, and an old hub ignores
-  the key: across the switch a held letter a poller refuses is ended or offered
-  again as `filed` decides, as it is today. **`deferred` is the
-  poller's word on what it was handed and did not settle.** It carries the
-  msgids of the last answered poll that the poller neither filed, dedup'd, nor
-  refused for good (a box-full letter, a container held back by its own state, a
-  plaintext letter it could not take): at most fifty, and only well-formed
-  msgids (lowercase 64-hex) are read, anything else is dropped. The hub defers
-  those of its OWN spool entries for this caller
+  does for `filed`. The hub returns a held letter of its own that is named
+  there (`outbox::return_refused`), whatever the word: it goes back to its
+  sender at once, marked refused with the word, its session kept, and one
+  `mail.outbox.returned` line written (ruling 131). A msgid named in both
+  `filed` and `refused` is returned, not retired. A transit entry is the hub's
+  custody, and `refused` never touches it: its custody ends on `filed` alone. A
+  msgid spooled toward another node changes nothing. The word is the poller's
+  bytes: the hub strips control characters and keeps at most 120 characters of
+  it. The keep list (`box-full`, `local-io` and the rest of that class) decides
+  `filed` for a container alone; its words travel in `refused` too. The list
+  has no count cap of its own, as `filed` has none. An old poller sends no
+  `refused`, and an old hub ignores the key: across the switch a held letter a
+  poller refuses is ended or offered again as `filed` decides, as it is today.
+  **`deferred` is the poller's word on what it was handed and did not settle,
+  and on a poll it serves the hub's transit custody.** It carries the msgids of
+  the last answered poll that the poller neither filed, dedup'd, nor refused for
+  good (a transit container it could not take yet, `box-full` among them): at
+  most fifty, and only well-formed msgids (lowercase 64-hex) are read, anything
+  else is dropped. The hub defers those of its OWN spool entries for this caller
   (`aoide_storage::outbox::defer_named`): each is tried once more and waits its
-  window (`deferral_due`) before it is handed again, so fifty unfileable letters
-  at the head of the spool cannot fill every batch. It defers no other node's
-  entry, and it never ends a container's custody. An old hub never reads the
-  key, so its answer is unchanged. The poller replaces its stored list with what
-  the answered poll left unfiled; a poll that got no answer keeps the old list
-  for the next ask. **One poll of a node runs at a time** (the `.poll` flock,
+  window (`deferral_due`) before it is handed again, so fifty unfileable
+  containers at the head of the spool cannot fill every batch. The hub reads
+  `refused` before `deferred`, so a held letter the poller refused is already
+  returned when `deferred` is read, and `defer_named` skips it. It defers no
+  other node's entry, and it never ends a container's custody. An old hub never
+  reads the key, so its answer is unchanged. The poller replaces its stored list
+  with what the answered poll left unfiled; a poll that got no answer keeps the
+  old list for the next ask. **One poll of a node runs at a time** (the
+  `.poll` flock,
   tried and
   never waited for): two overlapping asks would both read `filed` before either
   recorded it, be handed the same letter, and mint two receipts for it — which
@@ -866,9 +871,10 @@ link.json       { "holdUntil": ts, "lastError": "…" }   per-link backoff
   door: `https://` reaches a listener whose whole method set is mail, and
   the door — which parks every send — is never fronted by a
   TLS-terminating hop (H1).
-- A `box-full` answer defers that one drained entry, and nothing else. An own
-  letter that meets `box-full` is returned at once, like any verified refusal
-  (ruling 131). The far end
+- On the drain, a `box-full` answer defers that one drained entry, and
+  nothing else. Drained entries are receipts, charters and transit containers:
+  an own letter is never drained, and the live send returns one that meets
+  `box-full` at once (ruling 131). The far end
   answered, so the link is healthy and clears; the entry records
   `deferred: box-full`, keeps `refused` false, and waits its own window
   before its next attempt: `12 s` doubled per deferral, never past the
@@ -1056,7 +1062,7 @@ dropped. Deposit `refused` reasons — `no-route`, `unknown-mesh`,
 return to the
 depositing hop, which records `lastOutcome` on that entry and stops
 retrying it; the origin learns through `aoide mail outbox`. **`box-full` is not a verdict on the letter either**: the far box has no
-room for it, so the entry is deferred on its own window (§Outbox) and is
+room for it, so a drained entry is deferred on its own window (§Outbox) and is
 never parked. **Two other refused words are not verdicts on the letter**: `down` and `config-invalid` say something about
 the far end's own state, so the entry stays live, the LINK's ordinary back-off
 carries it back, and it is never parked (§Status).
