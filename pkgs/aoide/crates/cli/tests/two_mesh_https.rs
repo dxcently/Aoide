@@ -151,10 +151,17 @@ impl Ran {
         format!("exit {:?}\n--- stdout\n{}\n--- stderr\n{}", self.code, self.stdout, self.stderr)
     }
 
-    /// The command's JSON envelope. A refusal prints it on stderr, with exit 1.
+    /// The command's JSON envelope. A refusal prints it on stderr, with exit 1,
+    /// and the send's own helpers (socat) write notes on either side of it. The
+    /// envelope is the first JSON value that opens on a line of its own.
     fn json(&self, what: &str) -> Value {
         let text = if self.stdout.trim().is_empty() { self.stderr.trim() } else { self.stdout.trim() };
-        serde_json::from_str(text).unwrap_or_else(|e| panic!("{what}: not JSON ({e})\n{}", self.dump()))
+        let body: Vec<&str> = text.lines().skip_while(|l| !l.starts_with('{')).collect();
+        serde_json::Deserializer::from_str(&body.join("\n"))
+            .into_iter::<Value>()
+            .next()
+            .unwrap_or_else(|| panic!("{what}: no JSON\n{}", self.dump()))
+            .unwrap_or_else(|e| panic!("{what}: not JSON ({e})\n{}", self.dump()))
     }
 }
 
@@ -276,6 +283,13 @@ impl Root {
 
     fn run(&self, what: &str, args: &[&str]) -> Ran {
         let mut cmd = self.aoide_cmd(args);
+        run_to_end(&mut cmd, &self.runs, &format!("{}-{what}", self.name))
+    }
+
+    /// [`run`] with extra environment for this one run only.
+    fn run_with_env(&self, what: &str, args: &[&str], env: &[(&str, &str)]) -> Ran {
+        let mut cmd = self.aoide_cmd(args);
+        cmd.envs(env.iter().copied());
         run_to_end(&mut cmd, &self.runs, &format!("{}-{what}", self.name))
     }
 
@@ -818,7 +832,8 @@ impl Lab {
         }
     }
 
-    /// A3 and A4: homebox sends. The gate holds the letter for labbox in mesh lab.
+    /// A3, A6b and A4: homebox sends. The gate holds the letter for labbox in
+    /// mesh lab.
     fn a3_a4(&self) -> String {
         let sent = self.homebox.run(
             "a3-send",
@@ -829,9 +844,12 @@ impl Lab {
         let d = &send["data"];
         assert_eq!(d["next"], GATE, "A3: the next hop is the gate: {send}");
         assert_eq!(d["header"]["to"]["node"], LABBOX, "A3: the letter is for labbox: {send}");
-        assert_ne!(d["delivery"]["status"], "refused", "A3: the letter is not parked at homebox: {send}");
+        assert_eq!(d["delivery"]["status"], "delivered", "A3: the gate's verified accepted delivers the letter at the send: {send}");
         let msgid = d["msgid"].as_str().expect("A3: a msgid").to_string();
         pass("A3", format!("ok, next=gate, msgid {}, delivery {}", short(&msgid), d["delivery"]["status"]));
+        let home_out = outbox_of(&self.homebox, "a3-homebox-outbox");
+        assert!(!home_out.contains(&msgid), "A6b: the A3 letter left homebox's outbox on the hop's verified answer: {home_out:?}");
+        pass("A6b", format!("A3 letter {} left homebox's outbox on the gate's verified accepted, not on a receipt", short(&msgid)));
 
         if let Some(gate) = &self.gate.root {
             let ran = gate.run("a4-outbox", &["mail", "outbox", LABBOX, "--json"]);
@@ -894,10 +912,8 @@ impl Lab {
         pass("A5", format!("labbox files {} from homebox; origin verified against home's charter", short(msgid)));
     }
 
-    /// A6: labbox replies over the gate, and homebox files the reply. A6b, the receipt
-    /// for the A3 letter retiring from homebox's outbox, is recorded rather than
-    /// asserted, so A7 through A9a still run and the failure is reported at the end.
-    fn a6(&mut self, a3_msgid: &str) {
+    /// A6: labbox replies over the gate, and homebox files the reply.
+    fn a6(&mut self) {
         let sent = self.labbox.run(
             "a6-send",
             &["mail", "send", "--to", "homebox/conductor", "--mesh", "lab", "--json", "--", TEXT_LAB_TO_HOME],
@@ -918,16 +934,6 @@ impl Lab {
         assert_eq!(filed["envelope"]["text"], TEXT_LAB_TO_HOME, "A6: the reply's text: {filed}");
 
         pass("A6", format!("reply {} filed at homebox", short(&reply)));
-        let home_out = outbox_of(&self.homebox, "a6-homebox-outbox");
-        if home_out.iter().any(|m| m == a3_msgid) {
-            eprintln!(
-                "[A6b] FAIL: the receipt for the A3 letter did not return, so {} stays in homebox's outbox; the ack is parked at labbox as a hold entry (labbox is not a member of mesh home, so its route for the ack is refused not-a-member)",
-                short(a3_msgid)
-            );
-            self.failed.push("A6b");
-        } else {
-            pass("A6b", format!("labbox's receipt retired A3 letter {} from homebox's outbox", short(a3_msgid)));
-        }
     }
 
     /// A7: from inside each fence the bridge answers and nothing else. Each probe
@@ -1001,26 +1007,39 @@ impl Lab {
         pass("A8", "no CA: curl exit 60 with no body; labbox poll unreachable, filed 0");
     }
 
-    /// A8 (send): homebox's send without a CA stays spooled and undelivered. The test
-    /// then retires that letter by name, so later steps see a clean outbox.
+    /// A8 (send): homebox's send without a CA. Outside a session the send is
+    /// refused with the transport reason and the outbox gains nothing. Inside
+    /// one (the session id is set on this run only) the letter comes back,
+    /// `returned` with that reason and bound to the session, and
+    /// `mail outbox rm` retires it by name.
     fn a8_send_no_ca(&self) {
         let bare = self.homebox.without_ca();
-        let sent = bare.run(
-            "a8-send",
-            &["mail", "send", "--to", "labbox/conductor", "--mesh", "home", "--json", "--", "no CA here"],
-        );
-        let msgid = sent.json("A8 send")["data"]["msgid"].as_str().unwrap_or_default().to_string();
-        assert!(!msgid.is_empty(), "A8: the send wrote a letter: {}", sent.dump());
-        let after = self.homebox.run("a8-after", &["mail", "outbox", "--json"]);
-        let spooled: Vec<Value> = entries_of(&after, "A8 outbox")
+        let args = ["mail", "send", "--to", "labbox/conductor", "--mesh", "home", "--json", "--", "no CA here"];
+
+        let before = outbox_of(&self.homebox, "a8-before");
+        let sent = bare.run("a8-send", &args);
+        assert_ne!(sent.json("A8 send")["status"], "ok", "A8: a send without trust is refused outside a session: {}", sent.dump());
+        assert!(sent.dump().contains("transport"), "A8: the refusal names the transport reason: {}", sent.dump());
+        assert_eq!(outbox_of(&self.homebox, "a8-after"), before, "A8: outside a session the send spools nothing");
+        pass("A8-send", "no session: refused with the transport reason, and nothing spooled");
+
+        let session = "a8-session";
+        let sent = bare.run_with_env("a8-session-send", &args, &[("AOIDE_SESSION_ID", session)]);
+        assert_ne!(sent.json("A8 session send")["status"], "ok", "A8: a returned letter is not an ok send: {}", sent.dump());
+        let listed = self.homebox.run("a8-session-outbox", &["mail", "outbox", "--json"]);
+        let row = entries_of(&listed, "A8 session outbox")
             .into_iter()
-            .filter(|e| e["msgid"] == msgid.as_str())
-            .collect();
-        assert_eq!(spooled.len(), 1, "A8: the letter stays spooled in homebox's outbox: {}", after.dump());
-        assert_ne!(spooled[0]["delivery"]["status"], "delivered", "A8: nothing is delivered without trust: {}", spooled[0]);
+            .find(|e| e["session"] == session)
+            .unwrap_or_else(|| panic!("A8: the returned letter is kept, bound to its session: {}", listed.dump()));
+        assert_eq!(row["delivery"]["status"], "returned", "A8: the letter comes back: {row}");
+        assert!(
+            row["delivery"]["reason"].as_str().unwrap_or_default().contains("transport"),
+            "A8: it comes back with the transport reason: {row}"
+        );
+        let msgid = row["msgid"].as_str().expect("A8: a msgid").to_string();
         let removed = self.homebox.run("a8-rm", &["mail", "outbox", "rm", &msgid, "--json"]);
         assert_eq!(removed.json("A8 rm")["status"], "ok", "A8: the test retires its own letter: {}", removed.dump());
-        pass("A8-send", format!("no-CA send stays spooled (delivery {}), then retired by name", spooled[0]["delivery"]["status"]));
+        pass("A8-send", format!("in a session: listed returned with the transport reason, then removed by name ({})", short(&msgid)));
     }
 
     /// A9b: a third mesh with no gate. homebox's own route hands a far-bound letter to
@@ -1135,7 +1154,7 @@ fn two_mesh_mail_round_trips_over_https_with_443_only_boxes() {
     let msgid = lab.a3_a4();
     lab.a5n(&msgid);
     lab.a5(&msgid);
-    lab.a6(&msgid);
+    lab.a6();
     lab.a7();
     lab.a8_no_ca();
     lab.a8_send_no_ca();
