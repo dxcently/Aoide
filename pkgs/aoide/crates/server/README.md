@@ -578,30 +578,73 @@ terminal's rights to its remote callers.
   every caller**: where the request's signature verifies
   against the key its own `X-Aoide-Node` holds on the charter in force, the door
   answers the refused `config-invalid` result — fixed text, with the load error
-  audited only, never sent — and CONSUMES the nonce, so those bytes cannot be
-  replayed into the method once the config returns. A request whose signature
+  audited only, never sent — after the clock checks, the charter signature and
+  the same audience and nonce steps as any other frame. So a replay of those
+  bytes to this listener, once the config returns, is refused by its nonce set.
+  A request whose signature
   does not verify, or naming a node that charter does not carry, still reads
   `-32007`.
+- **Audience (`params.to`).** A verified request whose `params.to` is not this
+  door's own identity key is refused `-32012` whatever its method. A request
+  with no `to` is admitted only for the four old-client methods
+  (`aoide/mailDeposit`, `aoide/mailPoll`, `aoide/binding`,
+  `aoide/charterFetch`), audited `untagged`; for any other method it is refused
+  `-32012` with a line naming the upgrade. `admit_verified` runs this check
+  after verification and before the nonce, and a refusal here is unsigned and
+  records nothing. What it stops: a signed
+  request built for one door, replayed at another door that trusts the same
+  signer, when the request is tagged. What it does not stop: an untagged call to
+  one of the four methods, which stays open until the planned switch (not
+  built). On the same listener its replay is refused by the nonce set. Across
+  listeners the method's own check bounds it: a deposit is filed once while
+  its line stays in the box, by msgid; a poll retires only what its poller
+  acknowledges; a binding older than the stored one is refused as stale only
+  while the stored one still verifies under the pinned key; a charterFetch
+  changes no charter, key or grant. It audits a caller refused for not being
+  on the LAN and each answer it serves; its other refusals write no line. An
+  untagged frame is not bound to a door, so a node holding a signer's untagged
+  frames from the last 120 seconds can replay them at another door that pairs
+  the same signer. That door applies the same checks to its own mailbox and
+  outbox, and each replay fills the signer's nonce set there; once the set holds
+  the cap (512 by default), the signer's own frames at that door are refused
+  -32013 until they expire. Also not stopped: PAIRPOLL records no nonce and has
+  no start check, so a replay inside its skew window re-releases this node's own
+  key and binding, a public read; a process running as this box's uid can sign
+  as the box, since the key is on this box's disk; and each listener process
+  keeps its own nonce sets (see Nonces, below).
 - **Signed answers (relay-proof).** A JSON-RPC POST to `/` whose signature
   verified is answered with `X-Aoide-Answer-Signature`: the identity key signs
   `wire_auth::answer_string` over the request's own signature and nonce, the
-  status and the exact body bytes (`answer_headers`). A signed request is a
-  POST and nothing else: any other method is refused `-32007` before its
-  signature is checked. Everything else is unsigned, and each write site says
-  why in a comment there: an unparsed or unsigned request, every GET (the card
-  included), every refusal (`-32007`, `-32008`, and the replay `-32009`), the
-  `config-invalid` answer above, the busy 503s, and the SSE stream. That
-  answer is checked only against the raw charter in force: the charter a node
-  governs is read through the same config that failed to load
-  (`charter::governing`), so there is none to sign under. The door's key
-  signs nothing an unverified sender chose. A key that is not on disk, or will
-  not load, leaves the answer unsigned and audited (`a2a.answer-unsigned`),
-  and the answer path never mints one (`identity::load_existing`). The client
-  refuses an unsigned answer.
-- **Nonces are single-use in any letter case.** `nonce_is_replay` keys both the
-  pubkey and the nonce trimmed and lowercased, the form `canonical_string`
-  signs. A captured request whose nonce header is upper-cased is therefore a
-  replay, not a fresh nonce.
+  status and the exact body bytes (`answer_headers`). A signed request is a POST
+  and nothing else: any other method is refused `-32007` before its signature is
+  checked. Everything else is unsigned, and each write site says why in a
+  comment there: an unparsed or unsigned request, every GET (the card included),
+  every refusal (`-32007`, `-32008`, `-32009`, `-32012` and `-32013`), the
+  `config-invalid` answer above, the busy 503s, and the SSE stream. That answer
+  is checked only against the raw charter in force: the charter a node governs
+  is read through the same config that failed to load (`charter::governing`), so
+  there is none to sign under. The door's key signs nothing an unverified sender
+  chose. A key that is not on disk, or will not load, leaves the answer unsigned
+  and audited (`a2a.answer-unsigned`), and the answer path never mints one
+  (`identity::load_existing`). The client refuses an unsigned answer.
+- **Nonces are single-use in any letter case, per key.** `nonce_check` keys both
+  the pubkey and the nonce trimmed and lowercased, the form `canonical_string`
+  signs, into that key's own set (`NONCE_SETS`). A captured request whose nonce
+  header is upper-cased is therefore a replay, not a fresh nonce. Each set holds
+  at most `AOIDE_NONCE_CAP` (default 512) unexpired entries; a key at its
+  cap is refused `-32013` over HTTP 503, unsigned, and nothing is recorded. A
+  key's expired entries are dropped when that key is next checked, and no key's
+  flood reaches another key's set. Each listener process keeps its own sets.
+- **Start check.** A signed request stamped at or before the door's own start
+  plus five seconds (`serve` and `serve_mail` record the start once, before they
+  bind) is refused `-32008`, naming both times. The nonce sets are per listener
+  process and a restart clears them, so this is what keeps a restart from
+  re-admitting a frame an earlier process accepted: such a frame is stamped at
+  most five seconds past its accept time. That holds while the door's clock does
+  not step back across a restart; if it steps back, such a frame can be accepted
+  again until its stamp plus 120 seconds. A client whose clock runs behind the
+  door's is refused for up to five seconds plus that lag after a restart, and
+  its link backs off, doubling, while it is refused.
 - **The mail adapter (`aoide mail serve`, H1) — a second LISTENER, and not a
   second door.** `serve_mail` binds `127.0.0.1` and nothing else (no bind
   option, no flag, no env var: the front that faces the mesh is a
@@ -628,7 +671,7 @@ terminal's rights to its remote callers.
   `None` for the adapter) and is the ONE place that difference is checked, so
   the shared transport hardening (`MAX_BODY`/`MAX_LINE`/`MAX_HEADERS`/
   `MAX_REQUEST`/`MAX_CONN`, per-connection signature verification with its
-  process-local nonce cache, the single audit log) is inherited rather than
+  process-local nonce sets, the single audit log) is inherited rather than
   duplicated. Audit lines name their listener and the connection's origin
   (`HTTP {status} from loopback via mail-adapter`; the door's own detail stays
   exactly `HTTP {status}`) — the origin alone could not distinguish the two,

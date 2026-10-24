@@ -9,8 +9,8 @@
 mod common;
 
 use common::{
-    door_post, door_post_tampered, env_lock, fixture, free_port, raise_door, tls_front, trust_front_certificate, AWAY, HOME,
-    ONE_SIDED_GATE, OPERATOR, TWO_KEYS,
+    door_post, door_post_tampered, entered_key, env_lock, fixture, free_port, raise_door, tls_front,
+    trust_front_certificate, AWAY, HOME, ONE_SIDED_GATE, OPERATOR, TWO_KEYS,
 };
 
 use aoide::dispatch::{dispatch, Invocation};
@@ -730,7 +730,14 @@ fn the_fixtures_boxes_answer_on_their_own_doors() {
     // And a request signed by hand reaches the same door, which is what a
     // deposit AT A NAMED DOOR needs (the client's dial cannot open a `https://`
     // declaration with no TLS in front of it).
-    let answer = door_post(fx.ports["sakaki"], "osaka", HOME, "aoide/mailPoll", serde_json::json!({ "node": "osaka" }));
+    let answer = door_post(
+        fx.ports["sakaki"],
+        &fx.keys["sakaki"],
+        "osaka",
+        HOME,
+        "aoide/mailPoll",
+        serde_json::json!({ "node": "osaka" }),
+    );
     assert!(answer["result"].is_object(), "a hand-signed request verifies: {answer}");
     let relay_log = std::fs::read_to_string(fx.boxes["sakaki"].join("log")).unwrap_or_default();
     assert!(
@@ -829,7 +836,14 @@ fn the_whole_journey_runs_through_the_boxes_own_doors() {
     fx.enter("chiyo");
     let ack = aoide_storage::outbox::list_entries("osaka").unwrap()[0].container.clone().expect("the ack is sealed");
     assert_eq!(ack.transit.last().unwrap().node, "chiyo", "the ack's own hop is the recipient");
-    let filed_ack = door_post(fx.ports["osaka"], "chiyo", HOME, "aoide/mailDeposit", serde_json::json!({ "container": ack }));
+    let filed_ack = door_post(
+        fx.ports["osaka"],
+        &fx.keys["osaka"],
+        "chiyo",
+        HOME,
+        "aoide/mailDeposit",
+        serde_json::json!({ "container": ack }),
+    );
     let result = &filed_ack["result"];
     assert_eq!(result["status"], "duplicate", "a receipt files only for a letter the origin still spools: {filed_ack}");
 
@@ -857,7 +871,14 @@ fn the_gate_rewrites_the_mesh_and_its_hop_entry_verifies_at_the_next_door() {
     let _door = common::raise_door(&root, EVO, port);
 
     let container = two_mesh_container(&root, "other");
-    let answer = door_post(port, EVO, ALPHA, "aoide/mailDeposit", serde_json::json!({ "container": container }));
+    let answer = door_post(
+        port,
+        &entered_key(),
+        EVO,
+        ALPHA,
+        "aoide/mailDeposit",
+        serde_json::json!({ "container": container }),
+    );
     let result = &answer["result"];
     assert_eq!(result["status"], "accepted", "{answer}");
     assert_eq!(result["transit"]["next"], "other", "{answer}");
@@ -909,7 +930,14 @@ fn a_dual_member_that_is_not_the_gate_refuses_the_bridge_at_the_door() {
     let _door = common::raise_door(&root, EVO, port);
 
     let container = two_mesh_container(&root, "other");
-    let answer = door_post(port, EVO, ALPHA, "aoide/mailDeposit", serde_json::json!({ "container": container }));
+    let answer = door_post(
+        port,
+        &entered_key(),
+        EVO,
+        ALPHA,
+        "aoide/mailDeposit",
+        serde_json::json!({ "container": container }),
+    );
     let result = &answer["result"];
     assert_eq!(result["status"], "refused", "{answer}");
     assert_eq!(result["reason"], aoide_storage::seal::ZONE_VIOLATION, "{answer}");
@@ -950,7 +978,14 @@ fn a_rewritten_mesh_without_the_gates_signature_is_refused_at_the_door() {
         ),
     });
 
-    let answer = door_post(port, EVO, BETA, "aoide/mailDeposit", serde_json::json!({ "container": container }));
+    let answer = door_post(
+        port,
+        &entered_key(),
+        EVO,
+        BETA,
+        "aoide/mailDeposit",
+        serde_json::json!({ "container": container }),
+    );
     let result = &answer["result"];
     assert_eq!(result["status"], "refused", "{answer}");
     assert_eq!(result["reason"], aoide_storage::seal::ZONE_VIOLATION, "{answer}");
@@ -1102,6 +1137,7 @@ fn a_stranger_in_a_charter_mesh_is_told_not_a_member_at_the_door() {
     // At EVO's door — a member of `away`, a stranger in `home`.
     let answer = door_post(
         fx.ports["evo"],
+        &fx.keys["evo"],
         "osaka",
         HOME,
         "aoide/mailDeposit",
@@ -1232,7 +1268,14 @@ fn a_deposit_whose_last_hop_is_someone_else_is_refused() {
     // Signed as `sakaki` (the box the process is entered on), whose key `home`'s
     // charter carries.
     fx.enter("sakaki");
-    let answer = door_post(fx.ports["osaka"], "sakaki", HOME, "aoide/mailDeposit", serde_json::json!({ "container": container }));
+    let answer = door_post(
+        fx.ports["osaka"],
+        &fx.keys["osaka"],
+        "sakaki",
+        HOME,
+        "aoide/mailDeposit",
+        serde_json::json!({ "container": container }),
+    );
     let result = &answer["result"];
     assert_eq!(result["status"], "refused", "{answer}");
     assert_eq!(result["reason"], aoide_storage::seal::BROKEN_CHAIN, "{answer}");
@@ -1375,6 +1418,7 @@ fn a_down_nodes_requests_are_refused_at_the_door() {
     fx.enter("yomi");
     let answer = door_post(
         fx.ports["osaka"],
+        &fx.keys["osaka"],
         "yomi",
         HOME,
         "aoide/mailDeposit",
@@ -1395,13 +1439,27 @@ fn a_down_nodes_requests_are_refused_at_the_door() {
         aoide_storage::mail::mint_outbound_letter_from("yomi", "alice", "chiyo", "bob", "plaintext", HOME).unwrap(),
     )
     .unwrap();
-    let plain = door_post(fx.ports["osaka"], "yomi", HOME, "aoide/mailDeposit", serde_json::json!({ "envelope": plaintext }));
+    let plain = door_post(
+        fx.ports["osaka"],
+        &fx.keys["osaka"],
+        "yomi",
+        HOME,
+        "aoide/mailDeposit",
+        serde_json::json!({ "envelope": plaintext }),
+    );
     assert_eq!(plain["result"]["status"], "refused", "{plain}");
     assert_eq!(plain["result"]["reason"], aoide_storage::charter::STATUS_DOWN, "{plain}");
 
     // And the POLL arm: a `down` node asking for its own outbox is refused the
     // same way, before anything is retired or handed over.
-    let poll = door_post(fx.ports["osaka"], "yomi", HOME, "aoide/mailPoll", serde_json::json!({ "node": "yomi" }));
+    let poll = door_post(
+        fx.ports["osaka"],
+        &fx.keys["osaka"],
+        "yomi",
+        HOME,
+        "aoide/mailPoll",
+        serde_json::json!({ "node": "yomi" }),
+    );
     assert_eq!(poll["result"]["status"], "refused", "{poll}");
     assert_eq!(poll["result"]["reason"], aoide_storage::charter::STATUS_DOWN, "{poll}");
     let log = std::fs::read_to_string(fx.boxes["osaka"].join("log")).unwrap_or_default();
@@ -1432,7 +1490,14 @@ fn an_unloadable_declaration_refuses_both_mail_methods_and_nothing_else() {
     // line's key, so what the door owes it is the host's own broken state — the
     // declaration set it cannot load — and NOT a claim about `yomi`.
     fx.enter("yomi");
-    let deposit = door_post(fx.ports["osaka"], "yomi", HOME, "aoide/mailDeposit", serde_json::json!({ "container": {} }));
+    let deposit = door_post(
+        fx.ports["osaka"],
+        &fx.keys["osaka"],
+        "yomi",
+        HOME,
+        "aoide/mailDeposit",
+        serde_json::json!({ "container": {} }),
+    );
     assert_eq!(deposit["result"]["status"], "refused", "{deposit}");
     assert_eq!(deposit["result"]["reason"], "config-invalid", "{deposit}");
     // **The wire detail is fixed text.** The load error names this host's own
@@ -1447,20 +1512,34 @@ fn an_unloadable_declaration_refuses_both_mail_methods_and_nothing_else() {
         "no path, no structure: {deposit}"
     );
 
-    let poll = door_post(fx.ports["osaka"], "yomi", HOME, "aoide/mailPoll", serde_json::json!({ "node": "yomi" }));
+    let poll = door_post(
+        fx.ports["osaka"],
+        &fx.keys["osaka"],
+        "yomi",
+        HOME,
+        "aoide/mailPoll",
+        serde_json::json!({ "node": "yomi" }),
+    );
     assert_eq!(poll["result"]["status"], "refused", "{poll}");
     assert_eq!(poll["result"]["reason"], "config-invalid", "{poll}");
 
     // **A signature that does NOT check out keeps `-32007`.** The condition is
     // "once the signature checks out cryptographically"; a forged one is forged
     // whatever this host's config says.
-    let forged = door_post_tampered(fx.ports["osaka"], "yomi", HOME, "aoide/mailDeposit", serde_json::json!({ "container": {} }));
+    let forged = door_post_tampered(
+        fx.ports["osaka"],
+        &fx.keys["osaka"],
+        "yomi",
+        HOME,
+        "aoide/mailDeposit",
+        serde_json::json!({ "container": {} }),
+    );
     assert_eq!(forged["error"]["code"], serde_json::json!(-32007), "{forged}");
 
     // **And a method that is not one of the two mail methods is unchanged**: it
     // still reads `-32007`, because nothing about it is answered from the
     // declaration set.
-    let other = door_post(fx.ports["osaka"], "yomi", HOME, "aoide/binding", serde_json::json!({}));
+    let other = door_post(fx.ports["osaka"], &fx.keys["osaka"], "yomi", HOME, "aoide/binding", serde_json::json!({}));
     assert_eq!(other["error"]["code"], serde_json::json!(-32007), "a non-mail method is unchanged: {other}");
 
     let log = std::fs::read_to_string(fx.boxes["osaka"].join("log")).unwrap_or_default();
@@ -1488,7 +1567,14 @@ fn an_unloadable_declaration_refuses_both_mail_methods_and_nothing_else() {
     );
     aoide_storage::node_store::save_nodes(&nodes).unwrap();
     fx.enter("yomi");
-    let resolved = door_post(fx.ports["osaka"], "yomi", HOME, "aoide/mailPoll", serde_json::json!({ "node": "yomi" }));
+    let resolved = door_post(
+        fx.ports["osaka"],
+        &fx.keys["osaka"],
+        "yomi",
+        HOME,
+        "aoide/mailPoll",
+        serde_json::json!({ "node": "yomi" }),
+    );
     assert_eq!(resolved["result"]["reason"], "config-invalid", "{resolved}");
     assert_eq!(
         resolved["result"]["detail"], "this host's declaration will not load",
@@ -1511,6 +1597,7 @@ fn a_tampered_signature_over_a_broken_config_still_reads_32007() {
     fx.enter("yomi");
     let forged = door_post_tampered(
         fx.ports["osaka"],
+        &fx.keys["osaka"],
         "yomi",
         HOME,
         "aoide/mailDeposit",
@@ -1533,6 +1620,7 @@ fn a_caller_no_line_carries_over_a_broken_config_still_reads_32007() {
     fx.enter("evo");
     let stranger = door_post(
         fx.ports["osaka"],
+        &fx.keys["osaka"],
         "stranger",
         HOME,
         "aoide/mailDeposit",
@@ -1581,8 +1669,9 @@ fn a_replayed_mail_request_is_refused_while_the_config_is_broken() {
     break_osaka_config(&fx);
 
     fx.enter("yomi");
+    // Deliberately untagged: an old client's mailPoll, which the door still admits.
     let request =
-        common::signed_door_request("yomi", HOME, "aoide/mailPoll", serde_json::json!({ "node": "yomi" }), false);
+        common::signed_door_request_untagged("yomi", HOME, "aoide/mailPoll", serde_json::json!({ "node": "yomi" }));
 
     let first = common::door_post_raw(fx.ports["osaka"], &request);
     assert_eq!(first["result"]["reason"], "config-invalid", "{first}");
@@ -1618,6 +1707,7 @@ fn a_replayed_mail_request_is_refused_while_the_config_is_broken() {
         fx.enter("yomi");
         let other = door_post(
             fx.ports["osaka"],
+            &fx.keys["osaka"],
             "osaka",
             HOME,
             "aoide/mailDeposit",
@@ -2174,9 +2264,9 @@ fn a_poll_node_holding_only_the_charter_files_its_letter_through_the_relays_http
 
 /// **A charter's relay address answered by another machine is refused before
 /// anything moves.** The charter says `sakaki` is at this https address and holds
-/// its key, but `yomi`'s door is what answers there. `chiyo`'s identity check reads
-/// `yomi`'s signed binding, which is not the key the charter gives `sakaki`, so no
-/// poll is sent: `yomi`'s door sees the binding request and nothing else.
+/// its key, but `yomi`'s door is what answers there. `chiyo`'s identity check asks
+/// that door for its binding, addressed to the key the charter gives `sakaki`; the
+/// door refuses it as addressed to another door, so no poll is sent.
 #[test]
 fn a_charter_relay_whose_address_answers_as_another_machine_is_refused_before_any_poll() {
     let _lock = env_lock();
@@ -2193,7 +2283,7 @@ fn a_charter_relay_whose_address_answers_as_another_machine_is_refused_before_an
     let chiyo_log = std::fs::read_to_string(fx.boxes["chiyo"].join("log")).unwrap_or_default();
     assert!(chiyo_log.contains("mail.poll.relay-key-mismatch"), "the mismatch is audited: {chiyo_log}");
     let yomi_log = std::fs::read_to_string(fx.boxes["yomi"].join("log")).unwrap_or_default();
-    assert!(yomi_log.contains("a2a.aoide/binding"), "yomi's door answered the identity check: {yomi_log}");
+    assert!(yomi_log.contains("wrong-audience"), "yomi's door refused the identity check, addressed to sakaki: {yomi_log}");
     assert!(!yomi_log.contains("a2a.aoide/mailPoll"), "and no poll reached it: {yomi_log}");
 }
 

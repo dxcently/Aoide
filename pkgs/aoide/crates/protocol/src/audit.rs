@@ -161,6 +161,9 @@ pub enum Door {
     /// Every handled HTTP request is audited through this door, same as the
     /// other two.
     A2a,
+    /// A far call a pair partner made, forwarded through its own link
+    /// (gate-design.md §2.3).
+    Pair,
 }
 
 impl Door {
@@ -175,11 +178,13 @@ impl Door {
     /// attested like the CLI: a send whose MCP server runs under a sealed
     /// session earns that session's parent and sibling rules and delivers, and
     /// any other MCP send parks. Exhaustive on purpose, so a new door has to be
-    /// decided here rather than inherit an answer.
+    /// decided here rather than inherit an answer. `Pair` (a far call a pair
+    /// partner made) cannot either: the partner is not a decider at this box's
+    /// terminal.
     pub fn can_approve(self) -> bool {
         match self {
             Door::Cli | Door::Daemon => true,
-            Door::Mcp | Door::A2a => false,
+            Door::Mcp | Door::A2a | Door::Pair => false,
         }
     }
 }
@@ -372,6 +377,19 @@ mod tests {
             .lines()
             .map(|l| serde_json::from_str(l).unwrap())
             .collect()
+    }
+
+    /// The pair door approves nothing, and a call through it is audited
+    /// as `pair`.
+    #[test]
+    fn a_pair_call_approves_nothing_and_is_audited_as_pair() {
+        assert!(!Door::Pair.can_approve());
+        let log = tmp_log("pair-door");
+        audit(&log, Door::Pair, EventClass::Audit, "pair.call", "ok", "forwarded").unwrap();
+        let lines = read_lines(&log);
+        assert_eq!(lines.len(), 1);
+        assert_eq!(lines[0]["door"], "pair", "{:?}", lines[0]);
+        std::fs::remove_dir_all(log.parent().unwrap()).ok();
     }
 
     /// The normal `audit()` convenience path already never sets

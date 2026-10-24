@@ -533,7 +533,7 @@ fn seal(header: &Header, text: &str, kp: &identity::Keypair) -> (String, String)
 /// ([`crate::fs::try_stage_lock`]), runs [`migrate_if_needed`], then `f`.
 /// `try_stage_lock` is re-entrant on its thread, so a caller already inside
 /// `with_stage_lock` (the reaper's [`retire_readers`]) runs this in that same
-/// hold. Every raw helper below (`read_entries_unlocked`, `append_base_line`,
+/// hold. Every raw helper below (`read_entries_unlocked`, `append_entry`,
 /// `next_seq`, …) is written assuming its caller already holds this lock, and
 /// never calls `with_lock` itself: the migrations at its top are not meant to
 /// run twice in one operation.
@@ -737,9 +737,9 @@ impl Filed {
 /// A crash between appending row N and the rename below leaves `inbox.json`
 /// in place, so a retry re-enters this same loop over the same rows —
 /// [`seal`] is deterministic, so a row already filed recomputes the exact
-/// same `msgid`. Reading `seen.jsonl` into a set ONCE before the loop and
-/// skipping a row already in it is what makes that retry file each legacy
-/// row exactly once instead of duplicating rows `1..N`.
+/// same `msgid`. Reading the entries already filed into a set ONCE before
+/// the loop and skipping a row already in it is what makes that retry file
+/// each legacy row exactly once instead of duplicating rows `1..N`.
 fn migrate_if_needed() -> Result<(), String> {
     let old_path = legacy_inbox_path();
     let raw = match std::fs::read_to_string(&old_path) {
@@ -1588,11 +1588,10 @@ fn migrated_reader_key(name: &str, reader: String) -> String {
 /// — `via` names the hop that deposited it, `"self"` for everything this
 /// box mints for itself (P-M1's every caller; a remotely-deposited envelope
 /// is filed by [`file_received_entry`] instead, which skips minting
-/// entirely since the envelope already arrived signed). The one place
-/// [`append_base_line`] and [`append_seen_line`] are called together, in
-/// that order. Raw — called only from inside [`with_lock`]'s closure
-/// (`file_letter`/`file_receipt`/[`migrate_if_needed`]'s own inline copy of
-/// this same shape).
+/// entirely since the envelope already arrived signed). It writes the entry
+/// through [`append_entry`]. Raw — called only from inside [`with_lock`]'s
+/// closure (`file_letter`/`file_receipt`/[`migrate_if_needed`]'s own inline
+/// copy of this same shape).
 fn file_entry(kind: &str, from: Address, to: Address, text: &str, via: &str) -> Result<Entry, String> {
     let (kp, _) = identity::load_or_mint().map_err(|e| e.to_string())?;
     let header = Header {
@@ -1956,8 +1955,8 @@ pub enum DepositOutcome {
     /// A fresh envelope, filed. `msgid` is its own, for the caller to ack
     /// (a letter) or simply acknowledge process (a receipt).
     Filed { msgid: String, kind: String },
-    /// A `msgid` already in `seen.jsonl`. `filed_letter` is `true` when the
-    /// ORIGINAL filing was a `letter` — the destination re-spools its ack
+    /// A `msgid` already on a line in the box. `filed_letter` is `true` when
+    /// the ORIGINAL filing was a `letter` — the destination re-spools its ack
     /// in that case (spec item 5: "a lost ack is the ordinary reason for a
     /// re-offer"), never for a duplicate receipt (nothing acks an ack).
     Duplicate { filed_letter: bool },
@@ -2599,12 +2598,12 @@ pub fn box_rm(name: &str, force: bool) -> Result<BoxRemoval, String> {
 }
 
 /// `mail rm --older-than <Nd|Nh>`: the only pruning (MAIL.md "Store",
-/// "Keep-all"). Rewrites `base.jsonl` atomically with the survivors,
-/// preserving each one's original `seq` — never renumbers, so a reader's
-/// cursor comparisons stay valid across a prune. Never touches
-/// `seen.jsonl`: a pruned letter re-offered later is still a duplicate
-/// (the RFC 5537 §3.3 coupling MAIL.md names). An entry whose
-/// `receivedAt` fails to parse is KEPT, not guessed at.
+/// "Keep-all"). Rewrites each box log and the receipts file atomically with the
+/// survivors, preserving each one's original `seq` — never renumbers, so a
+/// reader's cursor comparisons stay valid across a prune. A pruned line takes
+/// its `msgid` with it, so a letter re-offered later is filed again: the box is
+/// the dedup memory (MAIL.md, "Dedup memory"). An entry whose `receivedAt`
+/// fails to parse is KEPT, not guessed at.
 pub fn rm_older_than(max_age_secs: u64) -> Result<usize, String> {
     with_lock(move || {
         let cutoff = parse_iso_utc(&now_iso_utc()).unwrap_or(0) - max_age_secs as i64;
@@ -3871,8 +3870,8 @@ mod tests {
 
         // Simulate a crash after row 1 was filed but before the rename:
         // hand-build exactly the entry a first partial attempt would have
-        // produced for row 1, and seed base.jsonl/seen.jsonl with it
-        // directly. inbox.json stays present, as it would after a real
+        // produced for row 1, and seed base.jsonl with it directly.
+        // inbox.json stays present, as it would after a real
         // crash — nothing here goes through `migrate_if_needed`.
         std::fs::create_dir_all(mail_dir()).unwrap();
         let node = display::local_node_name();

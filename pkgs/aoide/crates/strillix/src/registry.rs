@@ -38,6 +38,16 @@ mod tests {
         assert_eq!(run.doors, &[aoide_protocol::audit::Door::Cli][..], "--run is terminal-only");
     }
 
+    /// The pair door is closed: no command answers a far call a pair
+    /// partner made.
+    #[test]
+    fn no_command_opens_the_pair_door() {
+        let r = crate::commands::all();
+        for c in r.commands() {
+            assert!(!c.opens(aoide_protocol::audit::Door::Pair), "`{}` opens the pair door", c.path.join(" "));
+        }
+    }
+
     #[test]
     fn every_command_carries_the_json_flag_and_exit_codes() {
         let r = crate::commands::all();

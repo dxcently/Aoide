@@ -49,7 +49,12 @@
 - **`sign_headers_for_node` (P-P4) is the ONE production call site that
   ever builds the `X-Aoide-*` signature headers — every real node-POST
   function threads `post_json`'s `extra_headers` through it, never
-  hand-rolls a header set inline.** It returns `vec![]` for an
+  hand-rolls a header set inline.** It refuses (an `Err`) a body whose
+  `params.to` is missing or names another key than the record's `pubkey`: every
+  signed body is built through `commands::with_to`, which writes `to` from that
+  record, so a new call site that skips it fails loudly instead of signing a
+  body the far end would refuse. A verified record with no key is an `Err`
+  naming the record, never an unsigned call. It returns `vec![]` for an
   unverified/unpaired node, never a partial or malformed header set —
   `verify_signed_request` (`aoide-server`) refuses a request carrying SOME
   but not all four headers, so a future edit that adds a header
@@ -760,6 +765,12 @@
   path to a `SignedCall::Result`, and a node with no key on file is refused
   before it is dialled (`keyed_record`). Do not add a mail call that parses a
   response directly.
+- **A door's own refusal names its words.** A non-200 answer that is one of the
+  door's refusals (`DOOR_REFUSAL_CODES`: `-32008`, `-32009`, `-32012`, `-32013`)
+  is a `TransportFailed` whose reason carries the door's words, so the link
+  backs off and the letter stays live. An unsigned 200 that is a refusal is
+  named as one, never as an old aoide: `upgrade aoide` is only for answers that
+  are not refusals. The list must match the refusal codes in CONTRACTS.md §6.
 - **A far end's words are cleaned where they are read out of its answer,
   signed or not.** A signature says who spoke, never that the words are safe
   for a terminal: a relay or a destination can be hostile and hold its own
@@ -768,9 +779,12 @@
   (`last_outcome`, the link record), a poll's `Err`, a `PollOutcome` line or an
   audit line (every `mail.answer.*` and `mail.poll.*` one, a container's
   `msgid` and a refusal's `detail` included): clipped to `LINE_MAX` (200) for a
-  verified answer, and to `SAID_MAX` (120) for an unsigned one, which is also
-  labelled. An error that quotes the answer (a serde error naming a binding's
-  value) is a word of the answer and passes through it too. A node or mesh
+  verified answer, and to `SAID_MAX` (120) for an unsigned one (`DOOR_SAID_MAX`,
+  400, for a clock refusal, `-32008`). An unsigned one is then quoted by
+  `door_words_quoted`, `\` and `"` escaped, inside its label
+  `(it said: "…"; not acted on)`. An error that quotes the answer (a serde
+  error naming a binding's value) is a word of the answer and passes through
+  it too. A node or mesh
   name in a line is one this box's own declarations hold and validated, so it
   is not one. Clean there, so every reader of a record this build writes is
   safe at once; never format a raw body word, signed or not, into anything a

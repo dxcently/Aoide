@@ -72,25 +72,27 @@ other crate in this workspace sits above.
   their existing `skip_serializing_if`, so a field this crate omits on
   serialize (an empty `changed`, an absent `data`) still deserializes
   cleanly instead of erroring "missing field."
-- `audit` — `append_audit`/`audit`/`Door`/`EventClass`/`audit_log_path`, the
-  one audit log both doors write through (root `AGENTS.md` house rule 6).
-  `EventClass::Secret` (Workstream SECRETS, P-V2) is the secrets broker's
-  name-only mirror (secret name, consumer, granted/denied — never a
+- `audit` — `append_audit`/`audit`/`Door`/`EventClass`/`audit_log_path`, the one
+  audit log both doors write through (root `AGENTS.md` house rule 6). `Door` has
+  four callers (`Cli`, `Daemon`, `Mcp`, `A2a`) and one closed door, `Pair`: a
+  far call a pair partner made, forwarded through its own link (gate-design.md
+  §2.3). `Pair` approves nothing (`Door::can_approve`), no command declares it,
+  so `Command::check` refuses every command on it, and its audit line reads
+  `pair`. `EventClass::Secret` (Workstream SECRETS, P-V2) is the secrets
+  broker's name-only mirror (secret name, consumer, granted/denied — never a
   value); `append_audit` structurally forbids `untrusted_data` on that one
-  class, stripping it (with an `eprintln!`, never a panic — an audit call
-  must never take its caller down) rather than trusting every call site to
-  never set it. `append_audit` escapes every string field first (DEL, C1,
-  `Cf` and the invisible set become `\u{hex}` text, and a literal backslash
-  followed by `\`, `u` or a spelled character is doubled:
-  `untrusted::escape_for_log`, once per value), then clamps the escaped
-  `AuditRecord.message`
-  to 512 bytes on a UTF-8 boundary, appending a truncation marker when it
-  clamps:
-  the log records that an operation happened, not what it printed, so a
-  command whose outcome message is also its rendered output (`aoide mail
-  show`'s whole letter) never leaves a second, unbounded copy sitting in
-  the log. Only the stored copy is bounded — the `Outcome` itself, and
-  every door's human/JSON rendering of it, is untouched.
+  class, stripping it (with an `eprintln!`, never a panic — an audit call must
+  never take its caller down) rather than trusting every call site to never set
+  it. `append_audit` escapes every string field first (DEL, C1, `Cf` and the
+  invisible set become `\u{hex}` text, and a literal backslash followed by `\`,
+  `u` or a spelled character is doubled: `untrusted::escape_for_log`, once per
+  value), then clamps the escaped `AuditRecord.message` to 512 bytes on a UTF-8
+  boundary, appending a truncation marker when it clamps: the log records that
+  an operation happened, not what it printed, so a command whose outcome message
+  is also its rendered output (`aoide mail show`'s whole letter) never leaves a
+  second, unbounded copy sitting in the log. Only the stored copy is bounded —
+  the `Outcome` itself, and every door's human/JSON rendering of it, is
+  untouched.
 - `door` — the hand-rolled parse → dispatch → render run loop (`run`),
   parameterized by a `special` hook so each binary's one-shot exceptions
   (`mcp serve --stdio`, `a2a serve`, `conductor`, `guide`/`schema` raw

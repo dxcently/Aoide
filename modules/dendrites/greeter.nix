@@ -33,6 +33,11 @@
 #     the hyprland provider names it) — evaluation fails otherwise, never a
 #     guess. cage takes its keyboard layout from the host's
 #     `services.xserver.xkb`, so a password types as it will in the session.
+#     cage shows the greeter on the last-connected output, or, with
+#     `strillix.greeter.output` set, runs `-m extend` with every other output
+#     turned off by wlr-randr before Quickshell starts. A named output that is
+#     missing or disabled turns nothing off, so the greeter spans every
+#     connected output.
 #     `AOIDE_ROOT` and `STRILLIX_ROOT` point at the tree,
 #     so nothing reads /home and a staged rice never reaches the login screen.
 #     Authentication is greetd's: the host creates a session for the chosen
@@ -53,8 +58,9 @@
 # Filling the slot is the switch: a host that does not select it boots to the
 # tty it lands on. Reads the dress (`strillix.theme`), the rice selection
 # (`strillix.rice`, `strillix.rices.greeter`), the session the display manager
-# registers (`services.displayManager.sessionData`, which ly reads too) and
-# the host's keyboard (`services.xserver.xkb`) — root AGENTS.md house rule 5.
+# registers (`services.displayManager.sessionData`, which ly reads too), the
+# host's keyboard (`services.xserver.xkb`) and its own output
+# (`strillix.greeter.output`) — root AGENTS.md house rule 5.
 {
   config,
   lib,
@@ -73,6 +79,8 @@ let
   lyBold = hex: "0x01${lib.removePrefix "#" hex}";
 
   face = config.strillix.rices.greeter;
+  output = config.strillix.greeter.output;
+  cageMode = if output == null then "last" else "extend";
 
   quickshellPkg = aoideInputs.quickshell.packages.${pkgs.stdenv.hostPlatform.system}.default;
 
@@ -153,6 +161,25 @@ let
       '{command: [$w, $e], desktop: $d}' > "$out/session.json"
   '';
 
+  # Turns every output but `output` off before quickshell starts, so the
+  # greeter is on that one alone. Only enabled outputs are listed, so a named
+  # output that is missing or disabled takes the else branch and turns nothing
+  # off; cage runs as `-m extend` then, so the greeter spans every connected
+  # output. Empty when no output is named, so the script stays as it was.
+  outputOnly = lib.optionalString (output != null) ''
+    json=$(${pkgs.wlr-randr}/bin/wlr-randr --json) || { echo "aoide-greeter: wlr-randr failed; every output stays on" >&2; json=; }
+    names=$(printf '%s\n' "$json" | ${pkgs.jq}/bin/jq -r '.[] | select(.enabled) | .name') || { echo "aoide-greeter: could not read the outputs; every output stays on" >&2; names=; }
+    if printf '%s\n' "$names" | ${pkgs.gnugrep}/bin/grep -qxF ${lib.escapeShellArg output}; then
+      printf '%s\n' "$names" | while IFS= read -r name; do
+        [ -n "$name" ] && [ "$name" != ${lib.escapeShellArg output} ] || continue
+        ${pkgs.wlr-randr}/bin/wlr-randr --output "$name" --off ||
+          echo "aoide-greeter: could not turn $name off; it stays on" >&2
+      done
+    else
+      echo "aoide-greeter: output" ${lib.escapeShellArg output} "is not connected or enabled; cage runs -m extend, so the greeter spans every connected output" >&2
+    fi
+  '';
+
   # What cage runs as the greeter user. The cache goes under the greeter's
   # runtime dir: the greeter account has no home to write.
   greeterShell = pkgs.writeShellScript "aoide-greeter" ''
@@ -166,10 +193,24 @@ let
     export QT_WAYLAND_DISABLE_WINDOWDECORATION=1
     export QT_PLUGIN_PATH=${pkgs.qt6.qtimageformats}/lib/qt-6/plugins
     export XDG_CACHE_HOME="''${XDG_RUNTIME_DIR:-/tmp}/aoide-greeter-cache"
-    exec ${quickshellPkg}/bin/quickshell -p ${tree}/run/qml/shell.qml
+    ${outputOnly}exec ${quickshellPkg}/bin/quickshell -p ${tree}/run/qml/shell.qml
   '';
 in
 {
+  options.strillix.greeter.output = lib.mkOption {
+    type = lib.types.nullOr lib.types.nonEmptyStr;
+    default = null;
+    example = "DP-1";
+    description = ''
+      The output connector (as the compositor names it, e.g. `"DP-1"`) the
+      Quickshell greeter shows on; every other output is turned off while the
+      greeter runs. A named output that is missing or disabled turns nothing
+      off: cage runs as `-m extend`, so the greeter spans every connected
+      output. `null` leaves cage on the last-connected output. Only the
+      Quickshell greeter reads it; ly ignores it.
+    '';
+  };
+
   config = lib.mkMerge [
     {
       strillix.components.greeter.provider = "strillix";
@@ -181,7 +222,7 @@ in
         enable = true;
         settings.default_session = {
           user = "greeter";
-          command = "${pkgs.cage}/bin/cage -s -m last -- ${greeterShell}";
+          command = "${pkgs.cage}/bin/cage -s -m ${cageMode} -- ${greeterShell}";
         };
       };
     })

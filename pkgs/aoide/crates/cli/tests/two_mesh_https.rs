@@ -32,7 +32,7 @@
 
 mod common;
 
-use aoide_storage::{charter, node_store, seal};
+use aoide_storage::{charter, node_store, outbox, seal};
 use aoide_test_support::{built_aoide_bin, short_tmp, EnvSaver};
 use serde_json::Value;
 use std::collections::BTreeMap;
@@ -435,14 +435,6 @@ fn outbox_of(root: &Root, what: &str) -> Vec<String> {
     msgids_of(&entries_of(&ran, what))
 }
 
-fn read_base(root: &Path) -> Vec<Value> {
-    fs::read_to_string(root.join("state/mail/base.jsonl"))
-        .unwrap_or_default()
-        .lines()
-        .filter_map(|l| serde_json::from_str(l).ok())
-        .collect()
-}
-
 fn mesh_in<'a>(show: &'a Value, mesh: &str) -> &'a Value {
     show["data"]["meshes"]
         .as_array()
@@ -522,6 +514,16 @@ fn wait_until(what: &str, ready: impl Fn() -> bool) {
         assert!(Instant::now() < deadline, "{what} never came up");
         std::thread::sleep(Duration::from_millis(20));
     }
+}
+
+/// The gate's mail adapter stamps its start second before it binds, and refuses a frame
+/// stamped at or before that second plus five. Once it answers, wait for the clock to pass
+/// `ready + 5`: `ready` is at or after that start, so the boxes' first signed frame lands
+/// past the bound.
+fn wait_out_start() {
+    let now = || std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+    let ready = now();
+    wait_until("the clock past the gate adapter's start bound", || now() > ready + 5);
 }
 
 fn tcp_up(port: u16) -> impl Fn() -> bool {
@@ -644,6 +646,7 @@ impl Lab {
             let mut serve = g.aoide_cmd(&["mail", "serve", "--port", &mport.to_string()]);
             reaper.spawn(&mut serve, &dir.join("gate-mail.log"), "gate mail serve");
             wait_until("the gate's mail adapter", tcp_up(mport));
+            wait_out_start();
             let mut front = Command::new("socat");
             front
                 .arg(format!(
@@ -833,7 +836,9 @@ impl Lab {
     }
 
     /// A3, A6b and A4: homebox sends. The gate holds the letter for labbox in
-    /// mesh lab.
+    /// mesh lab. No transit line is filed (MAIL.md, "Transit"), so A4 reads
+    /// the gate's own outbox entry toward labbox: the hop is that entry, held,
+    /// and its container is the one the gate rewrote into lab.
     fn a3_a4(&self) -> String {
         let sent = self.homebox.run(
             "a3-send",
@@ -855,15 +860,18 @@ impl Lab {
             let ran = gate.run("a4-outbox", &["mail", "outbox", LABBOX, "--json"]);
             let held = msgids_of(&entries_of(&ran, "A4 outbox"));
             assert!(held.contains(&msgid), "A4: the gate holds the letter for labbox: {held:?}");
-            let transit = read_base(&gate.dir)
-                .into_iter()
-                .find(|e| e["type"] == "transit" && e["next"] == LABBOX)
-                .unwrap_or_else(|| panic!("A4: the gate filed a transit line toward labbox"));
-            assert_eq!(transit["mesh"], LAB, "A4: the transit line is in mesh lab: {transit}");
-            assert_eq!(transit["held"], true, "A4: labbox is held at the gate, not dialled: {transit}");
-            pass("A4", format!("gate holds {} for labbox; transit mesh=lab held=true", short(&msgid)));
+            let entries = in_root(&gate.dir, || outbox::list_entries(LABBOX))
+                .unwrap_or_else(|e| panic!("A4: the gate's outbox toward labbox reads: {e}"));
+            let entry = entries
+                .iter()
+                .find(|e| e.envelope.msgid == msgid)
+                .unwrap_or_else(|| panic!("A4: the gate spools the letter toward labbox"));
+            assert!(entry.is_held(), "A4: labbox is held at the gate, not dialled: flavor `{}`", entry.flavor);
+            let mesh = entry.container.as_ref().map(|c| c.mesh.as_str());
+            assert_eq!(mesh, Some(LAB), "A4: the container the gate spools is in mesh lab: {mesh:?}");
+            pass("A4", format!("gate holds {} for labbox; outbox entry held, container mesh=lab", short(&msgid)));
         } else {
-            skip("A4", "the gate is external, so its transit record is not here to read");
+            skip("A4", "the gate is external, so its outbox entry is not here to read");
         }
         msgid
     }

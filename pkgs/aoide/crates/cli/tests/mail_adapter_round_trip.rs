@@ -24,6 +24,8 @@
 //! built binary. `cargo test -p aoide-cli` builds the bins; run explicitly with
 //! `cargo test -p aoide-cli --test mail_adapter_round_trip -- --ignored`.
 
+mod common;
+
 use aoide::dispatch::dispatch;
 use aoide_protocol::output::Status;
 use aoide_protocol::Invocation;
@@ -94,13 +96,20 @@ fn verified_record(name: &str, url: &str, pubkey_hex: &str) -> aoide_storage::no
     }
 }
 
-/// The mailbase's filed entries, read straight off disk (no env switch) — the
-/// relay's own root is written by a child process this test does not own.
+/// The filed entries, read straight off disk (no env switch) — the relay's own
+/// root is written by a child process this test does not own. A letter files in
+/// its box's log (`state/mail/boxes/<name>.log`), a receipt in `receipts.log`.
 fn filed_entries(root: &Path) -> Vec<serde_json::Value> {
-    let raw = std::fs::read_to_string(root.join("state/mail/base.jsonl")).unwrap_or_default();
-    raw.lines()
+    let mut files: Vec<PathBuf> = std::fs::read_dir(root.join("state/mail/boxes"))
+        .map(|dir| dir.flatten().map(|entry| entry.path()).collect())
+        .unwrap_or_default();
+    files.sort();
+    files.push(root.join("state/mail/receipts.log"));
+    files
+        .iter()
+        .flat_map(|path| std::fs::read_to_string(path).unwrap_or_default().lines().map(str::to_owned).collect::<Vec<_>>())
         .filter(|l| !l.trim().is_empty())
-        .map(|l| serde_json::from_str::<serde_json::Value>(l).expect("a base line is JSON"))
+        .map(|l| serde_json::from_str::<serde_json::Value>(&l).expect("a filed line is JSON"))
         .collect()
 }
 
@@ -175,6 +184,12 @@ fn a_sealed_letter_and_its_ack_round_trip_through_the_mail_adapter() {
     aoide_storage::node_store::save_nodes(&[verified_record(&peer_name, "http://127.0.0.1:1/", &sender_pubkey)])
         .unwrap();
 
+    // The relay's `conductor` box, made the way an operator makes it. A far
+    // deposit to a name with no box is refused `unknown-box`, so the send below
+    // has nowhere to file without it.
+    let made = dispatch(&cli_invocation(&["mail", "box", "add"], &["conductor"], &[]));
+    assert_eq!(made.status, Status::Ok, "mail box add conductor on the relay: {}", made.message);
+
     std::env::set_var("AOIDE_ROOT", &sender_root);
 
     std::env::set_var("STRILLIX_ROOT", &sender_root);
@@ -197,6 +212,11 @@ fn a_sealed_letter_and_its_ack_round_trip_through_the_mail_adapter() {
         .spawn()
         .expect("the built aoide binary runs");
     wait_for_tcp_up(&format!("127.0.0.1:{port}"));
+    // The relay stamps its start second before it binds and refuses a frame stamped
+    // at or before that second plus five. Wait for the clock to pass `ready + 5`, as
+    // two_mesh_https.rs does, so the first signed call lands past the bound.
+    let ready = common::whole_second();
+    common::wait_past_start(ready);
 
     // ── Poll FIRST, send SECOND: a letter is sealed AT MINT when the
     // destination's binding is held, and this poll is what learns it

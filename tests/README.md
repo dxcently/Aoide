@@ -86,6 +86,11 @@ what those checks actually test.
   Aoide's own `sonata` through the `ricesRoot` export, and its strillix lane is
   handed that same directory. The contract it exercises is PACKAGE-LAYOUT's
   "The root flake — Strillix's export surface".
+  `greeter` and `greeter-output` perform `barcarolle` through the same
+  `ricesRoot` export, the built-in rice with a Quickshell greeter face: cage
+  runs `-m last` with the output unset, and `-m extend` with
+  `strillix.greeter.output = "DP-1"`, whose script is then read for its
+  wlr-randr off-loop.
   The value-slot proof: the consumer's own `bar`, `dock` and `lock` slots each
   name a provider of its own beside Aoide's `parts`. The `stubbed` host mixes
   its `bar` (a stub that brings no runtime) with Aoide's `dock`, and must give

@@ -52,6 +52,12 @@
   "missing field." A future field on `Outcome`/`Status` that skips
   serializing when absent/default needs the same pairing, or a daemon
   reply that omitted it stops parsing.
+- **`Door` is decided by name, never by a wildcard.** Every exhaustive `match`
+  on `Door` lists each variant (`can_approve` is the one today), and no `_` arm
+  is added to one: a new door has to be decided there rather than inherit an
+  answer. `Door::Pair` is closed: `can_approve` is false and no command declares
+  it, and the registry walks in `aoide-cli` and `strillix` assert that no
+  command opens it.
 - **`Command::check` is the one place argument rules and doors are enforced**,
   run by `door::parse` (so before any `special` hook) and by `Command::invoke`
   (which every `dispatch()` uses). It refuses a door the command does not

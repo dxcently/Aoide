@@ -71,6 +71,9 @@ pub struct Fixture {
     /// Every box's node line, as minted on its own machine: `sakaki`'s goes
     /// into both charters, which is the fixture's one-node-one-key case.
     pub lines: BTreeMap<&'static str, String>,
+    /// Node name → that box's identity key (lowercase hex): the `params.to` a
+    /// signed request for its door carries.
+    pub keys: BTreeMap<&'static str, String>,
     /// Node name → the loopback port that box's `https://` address names, where
     /// a REAL door can be raised (`Fixture::doors`). `chiyo` has one too, though
     /// its declared address is `poll` — nothing dials it.
@@ -108,8 +111,33 @@ impl Drop for Door {
     }
 }
 
-/// Raise one door on `port` for `root`, and wait until it answers TCP.
+/// The wall clock's whole second, the unit a door stamps its start in.
+pub fn whole_second() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
+}
+
+/// Raise one door on `port` for `root`, and wait until it answers TCP and is past
+/// its start bound.
 pub fn raise_door(root: &std::path::Path, name: &str, port: u16) -> Door {
+    let (door, ready) = spawn_door(root, name, port);
+    wait_past_start(ready);
+    door
+}
+
+/// Wait until the clock is past `ready + 5`, where `ready` is the whole second a door
+/// answered TCP in. The door stamped its start at or before `ready` and refuses a frame
+/// stamped at or before its start plus five seconds, so the first signed request built
+/// after this is past the bound of every door whose `ready` is at or before it.
+pub fn wait_past_start(ready: u64) {
+    while whole_second() <= ready + 5 {
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+}
+
+/// Spawn `aoide a2a serve` for a box and wait until it answers TCP, then return the door
+/// and that whole second. A caller that raises several doors waits once, after the last
+/// one, with [`wait_past_start`] on the latest of their seconds.
+pub fn spawn_door(root: &std::path::Path, name: &str, port: u16) -> (Door, u64) {
     let runtime = root.join("runtime");
     std::fs::create_dir_all(&runtime).unwrap();
     let child = std::process::Command::new(aoide_test_support::built_aoide_bin())
@@ -132,7 +160,8 @@ pub fn raise_door(root: &std::path::Path, name: &str, port: u16) -> Door {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
     loop {
         if std::net::TcpStream::connect(("127.0.0.1", port)).is_ok() {
-            return door;
+            // The start bound is waited out by `wait_past_start` on this second.
+            return (door, whole_second());
         }
         assert!(
             std::time::Instant::now() < deadline,
@@ -150,12 +179,13 @@ pub fn raise_door(root: &std::path::Path, name: &str, port: u16) -> Door {
 /// speaks the wire itself.
 pub fn door_post(
     port: u16,
+    to: &str,
     from: &str,
     mesh: &str,
     method: &str,
     params: serde_json::Value,
 ) -> serde_json::Value {
-    door_post_with(port, from, mesh, method, params, false)
+    door_post_with(port, to, from, mesh, method, params, false)
 }
 
 /// [`door_post`], with the request's signature CORRUPTED after it is computed —
@@ -163,12 +193,13 @@ pub fn door_post(
 /// make the door disbelieve an otherwise well-formed caller.
 pub fn door_post_tampered(
     port: u16,
+    to: &str,
     from: &str,
     mesh: &str,
     method: &str,
     params: serde_json::Value,
 ) -> serde_json::Value {
-    door_post_with(port, from, mesh, method, params, true)
+    door_post_with(port, to, from, mesh, method, params, true)
 }
 
 /// The same signature with its last hex digit changed: well-formed hex that
@@ -182,25 +213,40 @@ fn flip_last_hex(sig: &str) -> String {
 
 fn door_post_with(
     port: u16,
+    to: &str,
     from: &str,
     mesh: &str,
     method: &str,
     params: serde_json::Value,
     tamper: bool,
 ) -> serde_json::Value {
-    door_post_raw(port, &signed_door_request(from, mesh, method, params, tamper))
+    door_post_raw(port, &signed_door_request(to, from, mesh, method, params, tamper))
 }
 
 /// One signed JSON-RPC POST as the exact bytes that go on the wire — exposed so a
 /// test can send the SAME bytes twice: a replay is about the bytes, and re-signing
 /// would mint a fresh nonce and hide the very thing being tested.
 pub fn signed_door_request(
+    to: &str,
     from: &str,
     mesh: &str,
     method: &str,
-    params: serde_json::Value,
+    mut params: serde_json::Value,
     tamper: bool,
 ) -> String {
+    params["to"] = serde_json::json!(to);
+    signed_post(from, mesh, method, params, tamper)
+}
+
+/// [`signed_door_request`] with NO `params.to`: an old client's request. The door
+/// admits it only for the four allow-listed methods, so only a test of that arm
+/// uses this.
+pub fn signed_door_request_untagged(from: &str, mesh: &str, method: &str, params: serde_json::Value) -> String {
+    signed_post(from, mesh, method, params, false)
+}
+
+/// The JSON-RPC body, signed by this process's identity over the four headers.
+fn signed_post(from: &str, mesh: &str, method: &str, params: serde_json::Value, tamper: bool) -> String {
     let body = serde_json::json!({ "jsonrpc": "2.0", "id": 1, "method": method, "params": params }).to_string();
     let ts = aoide_storage::time::now_iso_utc();
     let nonce = aoide_storage::pairing::random_hex(16);
@@ -236,6 +282,12 @@ pub fn signed_door_request(
     request
 }
 
+/// The identity key of the box this process is entered on: the `to` a signed
+/// request for a door raised on that box's root carries.
+pub fn entered_key() -> String {
+    aoide_storage::identity::load_existing().unwrap().expect("the entered box has an identity").info().pubkey_hex
+}
+
 /// POST `request` verbatim to `port` and return the parsed answer.
 pub fn door_post_raw(port: u16, request: &str) -> serde_json::Value {
     use std::io::{Read, Write};
@@ -253,13 +305,17 @@ impl Fixture {
         format!("https://127.0.0.1:{}/", self.ports[name])
     }
 
-    /// Raise a real door for each name, and wait until each answers TCP.
+    /// Raise a real door for each name, then wait once until every one is past its
+    /// start bound. Waiting per door would cost each door its own five seconds.
     pub fn doors(&self, names: &[&'static str]) -> Doors {
-        let doors: Vec<Door> = names
+        let raised: Vec<(Door, u64)> = names
             .iter()
-            .map(|name| raise_door(&self.boxes[*name], name, self.ports[*name]))
+            .map(|name| spawn_door(&self.boxes[*name], name, self.ports[*name]))
             .collect();
-        Doors { doors }
+        if let Some(latest) = raised.iter().map(|(_, ready)| *ready).max() {
+            wait_past_start(latest);
+        }
+        Doors { doors: raised.into_iter().map(|(door, _)| door).collect() }
     }
 }
 
@@ -299,10 +355,12 @@ impl Fixture {
         let ports: BTreeMap<&'static str, u16> =
             BOXES.iter().map(|name| (*name, free_port())).collect();
         let mut lines = BTreeMap::new();
+        let mut keys = BTreeMap::new();
         for (name, dir) in &boxes {
             enter(dir, name);
             let line = line_at(&charter::node_line().unwrap(), &hop_of(name, ports[name]));
             lines.insert(*name, line);
+            keys.insert(*name, entered_key());
         }
 
         // The operator roots both meshes and signs both charters. `sakaki`'s
@@ -348,7 +406,7 @@ impl Fixture {
             })
             .collect();
 
-        let fixture = Fixture { root, operator: operator_root, boxes, operators, signed, lines, ports };
+        let fixture = Fixture { root, operator: operator_root, boxes, operators, signed, lines, keys, ports };
         // Every other box trusts the operator key and TAKES both charters —
         // the real path by which a signature reaches a machine.
         for name in BOXES {

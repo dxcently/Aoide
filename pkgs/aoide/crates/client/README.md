@@ -484,16 +484,29 @@ never the inbound/serve half (that's `aoide-server`).
   said, for the operator: its `error.message`, else its result's `reason`
   (`config-invalid` is a result), cleaned through `aoide_protocol::untrusted`
   and clipped to 120 characters before it reaches the entry, the link record
-  or the refusal, and labelled `(it said: …; not acted on)`. For the word
+  or the refusal. A clock refusal (`-32008`) keeps up to 400 characters after
+  the escape, plus the quotes, which is the door's own claim; every printed
+  line is clipped to 200, so a long clock refusal prints without its closing
+  words. It is quoted, with `\`, `"`, and the lookalikes U+201C, U+201D and
+  U+FF02 escaped (as `\u{…}` text), and labelled
+  `(it said: "…"; not acted on)`. The guarantee is that the words cannot close
+  aoide's ASCII quote: those three common lookalikes are escaped, and other
+  lookalike characters can still print. For the word
   `config-invalid` the lead says the far end's own config is invalid rather
   than that it needs an upgrade, since a door in that state never signs its
   answer. A signed answer's words get the same cleaning where they are read
   (`foreign_words`), clipped to 200 characters: a refusal's `reason` and
   `detail`, a JSON-RPC `error`, a poll's own refusal, a `withheld` entry, and
-  a refused container's `msgid`. So the entry's `last_outcome`, the link
-  record, a poll's `Err`, a `PollOutcome` and the `mail.answer.*` and
-  `mail.poll.*` audit lines hold none of a stranger's control characters, and a
-  signature does not make a stranger's text safe for a terminal. A record an
+  a refused container's `msgid`. A refused container's audit line quotes its
+  `msgid` and `detail`, since both sit inside a sentence, and its refused entry
+  quotes the `msgid` at 120 characters, so the poll's 200-character re-clip
+  keeps the closing quote. A withheld entry's audit line quotes its `msgid` and
+  `reason`. A line site prints a whole far-sourced line after aoide's label, so
+  it cleans but does not quote.
+  So the entry's `last_outcome`, the link record, a poll's `Err`, a
+  `PollOutcome` and the `mail.answer.*` and `mail.poll.*` audit lines hold none
+  of a stranger's control characters, and a signature does not make a
+  stranger's text safe for a terminal. A record an
   older build stored uncleaned is cleaned on the way out by `outcome_line`
   (`mail outbox`, a send's `delivery`, the charter drain row). The
   `down`/`config-invalid` classification is judged on the raw word first.
@@ -1114,11 +1127,16 @@ never the inbound/serve half (that's `aoide-server`).
   this fix the two carried independent `"POST"` literals that merely
   happened to agree; now there is exactly one value to drift from. An
   unverified/unpaired node gets an empty header list — byte-identical to
-  the pre-P-P4 transport. Wired into all four real node-POST call sites
-  (`pull_one_node`, `pull_node_live`, `send_message_to_node`,
-  `handle_node_spawn` — P-P5b, the FIRST of the four to ever sign a
-  `contextId`-less, spawn-shaped body); the pairing ceremony's own three
-  wire calls stay unauthenticated by design and always pass an empty
+  the pre-P-P4 transport. Every signed call names its callee: the body is built
+  through `commands::with_to`, which writes `params.to` from the record's key,
+  and `sign_headers_for_node` refuses (an `Err`) any body whose `params.to` is
+  missing or names another key. A verified record with no key is an `Err` naming
+  the record, never an unsigned call. The signed call sites are the mail calls
+  (`mail_wire::post_signed`), the graph-summary reads (`pull_one_node`,
+  `pull_node_live`), `message/send` (`send_message_to_node`), the `tasks/get`
+  frame and history reads (`task_get_on_node`, `task_history_on_node`), and
+  spawn (`spawn_on_node_via`). The pairing ceremony's
+  own three wire calls stay unauthenticated by design and always pass an empty
   slice. `post_json` threads `extra_headers` as plain `-H "<name>:
   <value>"` curl argv literals in EITHER the bearer or no-bearer branch —
   unlike the bearer token, nothing in a signature header is a secret worth

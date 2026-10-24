@@ -63,7 +63,7 @@ rest run unchanged, and a missing tool still fails the run.
 | A1 | Both charters verify on each box that holds them, at the signed version. The gate carries one key in both meshes. |
 | A2 | An end box routes to the other mesh's box through the gate as its relay (step 2). The gate crosses the letter into the destination mesh (step 3). |
 | A3 | A letter from one mesh is accepted by the gate, not parked at the sender. |
-| A4 | The gate holds the letter for the destination, held and in the destination's mesh. |
+| A4 | The gate holds the letter for the destination as a held outbox entry (never dialled), and the container that entry spools names the destination's mesh. |
 | A5n | Without the origin's charter the destination refuses the letter `unverified-origin`, and the gate keeps it. |
 | A5 | With the origin's charter the destination files exactly that letter, origin verified. |
 | A6 | A reply travels back the same way and is filed. |

@@ -13,10 +13,13 @@ tailscale, audio), and **the paint lanes** — what makes a machine paint at all
 the ten component slots — `bar`, `launcher`, `powermenu`, `notifications`,
 `wallpaper`, `dock`, `calendar`, `switcher`, `lock`, `greeter` — each a
 provider set whose `strillix` provider is that Quickshell component on the
-runtime's bridges (`strillix/README.md`; `wallpaper` also has the external engine,
-and `greeter` runs without the runtime). A paint lane
-reads only what root `AGENTS.md` house rule 5 lists; its
-config reads only the FACTS the nucleus contract declares, and a lane that is one sets its own fact `true`, so a consumer can ask "is there a shell here?" without reading the lane that made one.
+runtime's bridges (`strillix/README.md`; `wallpaper` also has the external
+engine, and `greeter` runs without the runtime, and `strillix.greeter.output`
+names the one output its login screen shows on). A paint lane reads only what
+root `AGENTS.md` house rule 5 lists; its config reads only the FACTS the
+nucleus contract declares, and a lane that is one sets its own fact `true`, so
+a consumer can ask "is there a shell here?" without reading the lane that made
+one.
 
 ## The shape (CONTRACTS.md §2)
 
