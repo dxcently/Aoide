@@ -3303,6 +3303,23 @@ fn poll_refusal(caller: Option<SignedCaller<'_>>, mesh: &str, claimed: &str, aud
     }
 }
 
+/// The first `cap` entries of one list a poll sent. The rest are ignored, and one
+/// `mail.poll.over-cap` line names the list and how many were left out.
+fn capped_poll_list<T>(list: &str, poller: &str, items: Vec<T>, cap: usize, audit_log: &Path) -> Vec<T> {
+    let left_out = items.len().saturating_sub(cap);
+    if left_out > 0 {
+        let _ = audit(
+            audit_log,
+            Door::A2a,
+            EventClass::Audit,
+            "mail.poll.over-cap",
+            "invalid",
+            &format!("{left_out} {list} from `{poller}` past the poll's cap of {cap} ignored"),
+        );
+    }
+    items.into_iter().take(cap).collect()
+}
+
 /// `aoide/mailPoll` (P-M3): `{ node }` → `{ envelopes: [ <Envelope>, … ] }`.
 /// Every outbox entry this box spooled toward `node` that `node` itself may
 /// take — all `hold`-flavored ones, and `now` ones whose own attempts have
@@ -3372,8 +3389,9 @@ fn mail_poll(params: &Value, ctx: &RequestCtx) -> Result<Value, (i64, String)> {
     // sender at once, before `deferred` and the answer are built, so the answer
     // does not offer it and the acknowledgements below find it no longer held.
     // Read as `deferred` is: well-formed msgids only, each once with the first
-    // word named for it, and at most `REFUSED_LIST_CAP` of them.
-    let refused: Vec<aoide_storage::outbox::PollRefusal> = params
+    // word named for it, and at most `REFUSED_LIST_CAP` of them; the rest are
+    // ignored and named in one `mail.poll.over-cap` line.
+    let refused_all: Vec<aoide_storage::outbox::PollRefusal> = params
         .get("refused")
         .and_then(Value::as_array)
         .map(|list| {
@@ -3382,10 +3400,11 @@ fn mail_poll(params: &Value, ctx: &RequestCtx) -> Result<Value, (i64, String)> {
                 .filter_map(|item| serde_json::from_value::<aoide_storage::outbox::PollRefusal>(item.clone()).ok())
                 .filter(|refusal| aoide_storage::mail::is_msgid(&refusal.msgid))
                 .filter(|refusal| seen.insert(refusal.msgid.clone()))
-                .take(aoide_storage::outbox::REFUSED_LIST_CAP)
                 .collect()
         })
         .unwrap_or_default();
+    let refused =
+        capped_poll_list("refused", &poller, refused_all, aoide_storage::outbox::REFUSED_LIST_CAP, ctx.audit_log);
     for refusal in &refused {
         // A return that fails is audited and skipped: one bad letter does not
         // stop the poll's other returns, its deferrals or its hand-over. The
@@ -3406,7 +3425,7 @@ fn mail_poll(params: &Value, ctx: &RequestCtx) -> Result<Value, (i64, String)> {
     // it could not take the bytes yet). Each msgid that is a well-formed msgid
     // defers that entry in THIS poller's own spool, so it is not offered again at
     // the head of every batch; an old hub never reads the key (MAIL.md §Wire).
-    let deferred: Vec<String> = params
+    let deferred_all: Vec<String> = params
         .get("deferred")
         .and_then(Value::as_array)
         .map(|list| {
@@ -3415,11 +3434,17 @@ fn mail_poll(params: &Value, ctx: &RequestCtx) -> Result<Value, (i64, String)> {
                 .filter_map(Value::as_str)
                 .filter(|text| aoide_storage::mail::is_msgid(text))
                 .filter(|text| seen.insert(*text))
-                .take(aoide_storage::outbox::DEFERRED_LIST_CAP)
                 .map(str::to_string)
                 .collect()
         })
         .unwrap_or_default();
+    let deferred = capped_poll_list(
+        "deferred",
+        &poller,
+        deferred_all,
+        aoide_storage::outbox::DEFERRED_LIST_CAP,
+        ctx.audit_log,
+    );
     aoide_storage::outbox::defer_named(&poller, &deferred)
         .map_err(|e| (-32603_i64, format!("internal error: {e}")))?;
     let payloads = aoide_storage::outbox::poll_payloads(&poller)
@@ -16019,6 +16044,40 @@ mod tests {
         assert_eq!(held[0].envelope.msgid, msgids[cap], "and it is the one past the cap");
         let first = entries.iter().find(|e| e.envelope.msgid == msgids[0]).unwrap();
         assert_eq!(first.last_outcome, "refused: unknown-box", "the first word named for a msgid is kept");
+
+        match saved_audit {
+            Some(v) => std::env::set_var("AOIDE_AUDIT_LOG", v),
+            None => std::env::remove_var("AOIDE_AUDIT_LOG"),
+        }
+        mail_deposit_cleanup(&root, saved_state, saved_stage);
+    }
+
+    /// **A poll over the refused cap names what it ignored.** Sixty well-formed
+    /// refusals are read as the first `REFUSED_LIST_CAP`, and the ten past it are
+    /// named in one `mail.poll.over-cap` line that says which list and how many.
+    #[test]
+    fn a_poll_over_the_refused_cap_names_the_list_and_the_count_it_ignored() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
+        let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
+        let root = mail_deposit_root("refused-over-cap");
+        act_as(&root, "here");
+        let saved_audit = std::env::var("AOIDE_AUDIT_LOG").ok();
+        std::env::set_var("AOIDE_AUDIT_LOG", root.join("log"));
+
+        setup_signed_node_with_allows("box-b", &["message"]);
+        let cap = aoide_storage::outbox::REFUSED_LIST_CAP;
+        let refused: Vec<Value> =
+            (0..cap + 10).map(|i| json!({ "msgid": format!("{i:064x}"), "word": "unknown-box" })).collect();
+        let audit_log = root.join("log");
+        let ctx = mail_deposit_ctx(&audit_log, Some("box-b"));
+
+        mail_poll(&json!({ "node": "box-b", "refused": refused }), &ctx).unwrap();
+
+        let log = std::fs::read_to_string(&audit_log).unwrap_or_default();
+        let over: Vec<&str> = log.lines().filter(|line| line.contains("mail.poll.over-cap")).collect();
+        assert_eq!(over.len(), 1, "one over-cap line for the list: {over:?}");
+        assert!(over[0].contains("10 refused"), "it names the list and the count it ignored: {}", over[0]);
 
         match saved_audit {
             Some(v) => std::env::set_var("AOIDE_AUDIT_LOG", v),

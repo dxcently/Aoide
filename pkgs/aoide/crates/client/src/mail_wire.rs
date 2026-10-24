@@ -7131,6 +7131,37 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// **A binding on record that cannot be read parks a direct letter too.** The
+    /// node's binding file is on record but holds garbage, so no binding can be
+    /// read from it. The read fault used to look like "no binding on record", and
+    /// the letter went out in the clear. The spool parks it, and the dial's reseal
+    /// refuses it the same way.
+    #[test]
+    fn an_unreadable_binding_on_record_parks_a_direct_letter_at_the_spool() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("unreadable-binding-spool");
+        let (port, _seen) = logged_door(|r: &str| signed_for_method(r, ACCEPTED));
+        point_at("far", port);
+        let bindings = aoide_storage::seal::peer_bindings_dir();
+        std::fs::create_dir_all(&bindings).unwrap();
+        std::fs::write(bindings.join("far.json"), "{ not a binding").unwrap();
+
+        let letter = aoide_storage::mail::mint_outbound_letter("alice", "far", "bob", "hi").unwrap();
+        let mesh = letter.header.origin_mesh.clone();
+        let entry = spool_entry("far", "far", &mesh, letter, false).unwrap();
+        assert!(entry.refused, "a letter with an unreadable binding on record is parked at mint: {entry:?}");
+        assert!(entry.last_outcome.starts_with("parked:"), "the reason is kept: {}", entry.last_outcome);
+        assert!(
+            matches!(
+                aoide_storage::outbox::reseal_entry("far", &entry, &aoide_storage::time::now_iso_utc()).unwrap(),
+                aoide_storage::outbox::Reseal::NotUsable(_)
+            ),
+            "and the dial's reseal parks it too"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// **A letter a verified door accepts is delivered by the dial itself.** The
     /// signed answer is the receipt: one dial, no entry, nothing written.
     #[test]

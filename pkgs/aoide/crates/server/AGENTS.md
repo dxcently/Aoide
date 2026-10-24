@@ -976,7 +976,9 @@ a2a spawn probe needs `/bin/sh` + `printf`'s byte-exact output.
   and `outbox::defer_named` for each `deferred` msgid: a `tries` stamp and a
   `deferred:` outcome on ITS OWN entries, never a
   returned own letter; the stamp holds them out of the window and nothing
-  else. No
+  else. Each list is cut at its cap (`REFUSED_LIST_CAP`, `DEFERRED_LIST_CAP`), and
+  a list past its cap writes one `mail.poll.over-cap` line that names the list and
+  the count it ignored. No
   bookmark and no "already handed over" flag may be added here: the
   re-poll-before-ack idempotence comes from handing the SAME set over again, and
   the entry retires only through a valid ack, a held own letter the poll of the

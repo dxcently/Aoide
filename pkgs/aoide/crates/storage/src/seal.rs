@@ -678,10 +678,12 @@ pub fn binding_for(node_name: &str) -> Option<Binding> {
 
 /// Is a binding on record for `node_name`, whether or not it still verifies? A
 /// stored binding is one the node published, so a letter to it is parked when
-/// it no longer verifies (its signer is not the key on record now), never sent
-/// in the clear as though no binding had ever been published.
+/// it no longer verifies (its signer is not the key on record now), and when its
+/// file cannot be read or parsed: a local fault never sends a letter in the clear
+/// as though no binding had ever been published. Only a file that is certainly
+/// absent is no binding; a path this box cannot stat counts as present.
 pub fn binding_on_record(node_name: &str) -> bool {
-    stored_binding(node_name).is_some()
+    peer_binding_path(node_name).try_exists().unwrap_or(true)
 }
 
 /// Drop a node's stored binding, because the node is gone. Returns whether
