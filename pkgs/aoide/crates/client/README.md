@@ -447,15 +447,16 @@ never the inbound/serve half (that's `aoide-server`).
   ONE place a spooled mail envelope actually dials out.
   `aoide_storage::outbox` owns the spool as pure file CRUD with no network;
   this module owns the wire half. `drain_node(node_name)` is called from
-  three places that all converge here so there is exactly one dial
+  two places that converge here, so the drain has exactly one dial
   implementation: the daemon's periodic tick (`aoide-server::daemon` via
   `aoide_conduct::mail_bridge`, a thin passthrough that exists only because
   `aoide-server` must not carry a hard `aoide-client` dependency in
   production while `aoide-conduct` already does), a door's own best-effort
   drain of the node it just heard from (`aoide-server::a2a::mail_deposit`,
-  same bridge), and `mail send`'s own one-shot attempt right after it
-  writes the outbox entry (`handle_mail_send` in `commands`, below — spec
-  item 8: the write is the report, delivery is the spool's job).
+  same bridge). `mail send` has its own dial, `mail_wire::deliver_now`, which
+  takes the one letter in hand and shares `attempt_deposit` with the drain
+  (ruling 131: the dial is the report, and a letter is written only if it
+  comes back).
   `attempt_deposit` builds and sends one `aoide/mailDeposit` POST,
   mirroring `spawn_on_node_via`'s exact shape (resolve bearer, sign, POST,
   parse, check `error`) with no `--via` override — a drain only ever dials

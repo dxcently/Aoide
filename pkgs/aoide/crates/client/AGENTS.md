@@ -798,11 +798,12 @@
     one writer of the in-force charter and its record.
 - **`mail_wire::drain_node` is the ONE place a spooled mail envelope is
   ever dialed out (P-M2) — never re-implement `attempt_deposit`'s POST at
-  a second call site.** Three callers converge on it — the daemon's
+  a second call site.** Two callers converge on it — the daemon's
   periodic tick and a door's own post-heard best-effort drain, both via
-  `aoide_conduct::mail_bridge`, and `handle_mail_send`'s one-shot attempt
-  right after it spools — so there is exactly one `aoide/mailDeposit` wire
-  implementation to keep in sync with the server side.
+  `aoide_conduct::mail_bridge`. A send's own dial, `deliver_now` (ruling 131),
+  shares `attempt_deposit` and `classify_deposit_response` with it, so there is
+  still one `aoide/mailDeposit` wire implementation to keep in sync with the
+  server side.
 - **`drain_node` never attempts more than `DRAIN_BATCH_CAP` (50) NON-PARKED
   entries in one call, and always records a `TransportFailed` on the entry it
   hit before backing off (mail register §26 outbox fix).** All three are
@@ -936,21 +937,16 @@
   from the declarations (`send_mesh`), and the letter is signed as this box's
   DECLARED name in that mesh (`own_name_in` via `mint_outbound_letter_from`),
   because `from.node` is inside the signature every receiver and hop checks.
-  Minting and spooling the outbox entry is what the command's
-  `Outcome` status describes; the best-effort `mail_wire::drain_node` call
-  after it is a latency shortcut only, and its `Err` (a genuine local I/O
-  failure inside the drain itself, never "remote unreachable") never
-  downgrades an already-durable spool to `Outcome::error`. What the drain
-  found IS read back, though — not for the `Outcome`, but to fill
-  `data.delivery` via `delivery_projection` (also used by `mail outbox`;
-  see `docs/architecture/MAIL.md` "Status and the nodelist view" for the
-  status vocabulary and its precedence). A post-spool read that itself
-  fails degrades `delivery` to `queued`/"status unavailable", never the
-  command's own `Ok`. Don't thread the drain's `Err` back into this
-  command's own return VALUE — that would make delivery latency (a
-  background daemon's schedule) leak into a command that already
-  succeeded at its own job; the drain's result is data for the projection,
-  not a verdict on the spool.
+  The letter is built in memory with `spool_entry`, and
+  `mail_wire::deliver_now` dials its hop once with that entry in hand: nothing
+  is on disk while it is in flight, so no drain can race it, and the dial takes
+  no link lock. A delivered letter writes nothing. A returned one is written to
+  the spool marked `refused`, and the command is a refusal whose fix is
+  `aoide mail outbox retry`. A held one (a `poll` or `hold` hop, or `--hold`) is
+  written and never dialled. `data.delivery` is built from that outcome
+  (`delivered`, `returned` or `held`; MAIL.md "Status and the nodelist view"),
+  never read back from the spool. The send never hands its letter to
+  `drain_node` after the dial, so the dial is the letter's only attempt there.
 - **`mail_route` is a READ, and it stays one.** It resolves the mesh off the
   mesh DECLARATIONS (`routing::declarations`, the same set the door and the
   drain read), runs `aoide_storage::routing::Letter::route`, prints the hop,

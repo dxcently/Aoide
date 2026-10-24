@@ -1079,20 +1079,7 @@ fn dial_node(node_name: &str, mesh: Option<&str>) -> Option<(aoide_storage::node
 /// `None` for an empty spool (nothing to dial anyway) and for a plaintext entry
 /// that names no mesh at all.
 fn spool_mesh(node_name: &str) -> Option<String> {
-    aoide_storage::outbox::list_entries(node_name)
-        .ok()?
-        .into_iter()
-        .find_map(|entry| {
-            entry
-                .container
-                .as_ref()
-                .map(|container| container.mesh.clone())
-                .or_else(|| Some(entry.envelope.header.origin_mesh.clone()))
-                // An EMPTY mesh is the home mesh (`routing::zone_name`), not a
-                // missing answer: a container minted before the mesh was carried
-                // rides home, and dropping it here would dial by the wrong name.
-                .map(|mesh| aoide_storage::routing::zone_name(&mesh))
-        })
+    aoide_storage::outbox::list_entries(node_name).ok()?.iter().find_map(entry_mesh)
 }
 
 /// Poll `node_name` once — the relay-first half of the model (MAIL.md §Wire,
@@ -2165,6 +2152,124 @@ pub fn drain_node(node_name: &str) -> Result<(), String> {
         let _ = poll_node(node_name, None);
     }
     Ok(())
+}
+
+/// What one live dial of an own letter came to. A letter that came back is marked
+/// `refused`, with the word that ended the dial in `last_outcome` (the spool's own
+/// vocabulary, as [`record_failed_attempt`] writes it), and the caller writes it into
+/// the sender's own box.
+#[derive(Debug)]
+pub enum Delivery {
+    /// A verified `accepted` or `duplicate`. Its signed answer is the receipt, so no
+    /// entry is written for it.
+    Delivered { status: String },
+    /// Not delivered: the letter, returned to its sender with the word that ended it.
+    Returned(Box<aoide_storage::outbox::OutboxEntry>),
+}
+
+/// Dial one own letter now (ruling 131, MAIL.md §Outbox). The letter is not on disk
+/// while it is in flight, so no drain can race it, and the dial takes no link lock:
+/// it ignores a `link.json` that holds the link off, and it records nothing on the
+/// link or the spool. The caller writes what comes back.
+///
+/// One verified answer decides it. `accepted` and `duplicate` deliver; any other
+/// verified answer returns the letter at once with its word, and a JSON-RPC `error`
+/// in a verified answer does too. An answer that never came, or does not verify, is
+/// dialled once more; a second such failure returns the letter. A hop its mesh
+/// declares `down`, a hop no address resolves for, and a letter parked at spool time
+/// are returned without a dial at all.
+pub fn deliver_now(node_name: &str, entry: aoide_storage::outbox::OutboxEntry) -> Delivery {
+    if entry.refused {
+        return Delivery::Returned(Box::new(entry));
+    }
+    let mesh = entry_mesh(&entry);
+    let Some((node, dial_only)) = dial_node(node_name, mesh.as_deref()) else {
+        return returned(entry, "refused: no-address".to_string());
+    };
+    if let Some(word) = mesh.as_deref().and_then(|mesh| forbidden_dial_word(mesh, &node)) {
+        return returned(entry, format!("refused: {word}"));
+    }
+    if node.never_dialled() {
+        return returned(entry, "refused: no-address".to_string());
+    }
+    let _tunnel_teardown = TunnelTeardownGuard(node_name.to_string());
+
+    // The binding exchange rides this dial's session before the first deposit, as
+    // drain_node's does. Best-effort, like there: a failed exchange is not a verdict.
+    if !dial_only {
+        match crate::commands::request_mesh(&node, None, "message") {
+            Ok(mesh) => {
+                let _ = exchange_bindings(&node, Some(&mesh));
+            }
+            Err(e) => return returned(entry, format!("refused: no-mesh: {e}")),
+        }
+    }
+
+    // Sealed to the binding as it is now. A seal that cannot be built is never a
+    // reason to send plaintext, so the letter comes back instead.
+    use aoide_storage::outbox::Reseal;
+    let entry = match aoide_storage::outbox::reseal_entry(node_name, &entry, &aoide_storage::time::now_iso_utc()) {
+        Ok(Reseal::NoBinding) | Ok(Reseal::Sealed(None)) => entry,
+        Ok(Reseal::Sealed(Some(upgraded))) | Ok(Reseal::FreshlySealed(upgraded)) => *upgraded,
+        Ok(Reseal::NotUsable(parked)) => return Delivery::Returned(parked.unwrap_or_else(|| Box::new(entry))),
+        Err(e) => return returned(entry, format!("refused: no-usable-seal: {e}")),
+    };
+
+    let attempt = match attempt_deposit(&node, &entry) {
+        DepositAttempt::TransportFailed(_) | DepositAttempt::Unauthenticated(_) => attempt_deposit(&node, &entry),
+        answered => answered,
+    };
+    let (answered, outcome) = match attempt {
+        DepositAttempt::Delivered { status } => (true, Ok(status)),
+        DepositAttempt::Refused(reason) | DepositAttempt::Deferred(reason) => (true, Err(format!("refused: {reason}"))),
+        DepositAttempt::LinkRefused(reason) => (false, Err(format!("refused: {reason}"))),
+        DepositAttempt::TransportFailed(reason) => (false, Err(format!("transport: {reason}"))),
+        DepositAttempt::Unauthenticated(reason) => (false, Err(format!("unauthenticated: {reason}"))),
+    };
+    // Poll-on-contact after a verified answer, as drain_node does (the same answers
+    // that make drain_node count the pass as contact).
+    if answered {
+        let _ = poll_node(node_name, None);
+    }
+    match outcome {
+        Ok(status) => Delivery::Delivered { status },
+        Err(word) => returned(entry, word),
+    }
+}
+
+/// The letter, returned to its sender: `refused`, with the word that ended its dial.
+fn returned(mut entry: aoide_storage::outbox::OutboxEntry, word: String) -> Delivery {
+    entry.tries += 1;
+    entry.last_try_at = aoide_storage::time::now_iso_utc();
+    entry.last_outcome = word;
+    entry.refused = true;
+    Delivery::Returned(Box::new(entry))
+}
+
+/// The mesh one spooled entry rides: a sealed container's `mesh`, else the
+/// envelope's signed `originMesh`, with an empty name read as the home mesh.
+fn entry_mesh(entry: &aoide_storage::outbox::OutboxEntry) -> Option<String> {
+    entry
+        .container
+        .as_ref()
+        .map(|container| container.mesh.clone())
+        .or_else(|| Some(entry.envelope.header.origin_mesh.clone()))
+        .map(|mesh| aoide_storage::routing::zone_name(&mesh))
+}
+
+/// The word a mesh's declaration gives for not dialling `node` in `mesh`: `down`
+/// where the declaration says so, or the declaration's own refusal word where the
+/// declaration cannot be read. `None` when the dial may go ahead.
+fn forbidden_dial_word(mesh: &str, node: &Node) -> Option<String> {
+    let set = match aoide_storage::routing::declarations() {
+        Ok(set) => set,
+        Err(refusal) => return Some(refusal.reason),
+    };
+    match aoide_storage::routing::declaration_of(&set, mesh) {
+        Some(Err(refusal)) => Some(refusal.reason.clone()),
+        _ if record_forbidden_by_declaration(mesh, node) => Some(aoide_storage::charter::STATUS_DOWN.to_string()),
+        _ => None,
+    }
 }
 
 /// The entries one pass of [`drain_node`] may attempt: spooled, oldest first,
@@ -6399,5 +6504,357 @@ mod tests {
         assert!(aoide_storage::outbox::list_entries("far").unwrap().is_empty(), "the duplicate retires it again");
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // ── items 1-2: the live dial (RED, written before the code) ───────────
+
+    const DUPLICATE: &str = r#"{"jsonrpc":"2.0","id":1,"result":{"status":"duplicate","msgid":"00"}}"#;
+
+    /// A door that logs every request it is handed, whole, and answers with
+    /// whatever `reply` writes for it. An empty answer is a connection that
+    /// closes with nothing said: a lost answer.
+    fn logged_door(
+        reply: impl Fn(&str) -> String + Send + 'static,
+    ) -> (u16, std::sync::Arc<std::sync::Mutex<Vec<String>>>) {
+        use std::io::Write;
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let log = seen.clone();
+        std::thread::spawn(move || {
+            while let Ok((mut stream, _)) = listener.accept() {
+                let request = read_full_request(&mut stream);
+                log.lock().unwrap().push(request.clone());
+                let _ = stream.write_all(reply(&request).as_bytes());
+            }
+        });
+        (port, seen)
+    }
+
+    /// How many `aoide/mailDeposit` requests a logged door was handed.
+    fn deposits_seen(seen: &std::sync::Arc<std::sync::Mutex<Vec<String>>>) -> usize {
+        seen.lock().unwrap().iter().filter(|r| r.contains("aoide/mailDeposit")).count()
+    }
+
+    /// A signed answer: `deposit` to `aoide/mailDeposit`, a method-not-found
+    /// error to the binding exchange and the poll.
+    fn signed_for_method(request: &str, deposit: &str) -> String {
+        let body = if request.contains("aoide/mailDeposit") { deposit } else { NO_SUCH_METHOD };
+        signed_reply(request, &own_key(), 200, body)
+    }
+
+    /// Point `name`'s verified record at a door on `port`.
+    fn point_at(name: &str, port: u16) {
+        let mut node = keyed_node(name);
+        node.url = format!("http://127.0.0.1:{port}/");
+        let mut nodes = aoide_storage::node_store::load_nodes();
+        nodes.retain(|n| n.name != name);
+        nodes.push(node);
+        aoide_storage::node_store::save_nodes(&nodes).unwrap();
+    }
+
+    /// One own letter, minted to `to` and not yet on disk, as the dial takes it.
+    fn live_letter(to: &str, text: &str) -> OutboxEntry {
+        OutboxEntry::fresh(aoide_storage::mail::mint_outbound_letter("alice", to, "bob", text).unwrap())
+    }
+
+    /// **A letter a verified door accepts is delivered by the dial itself.** The
+    /// signed answer is the receipt: one dial, no entry, nothing written.
+    #[test]
+    fn a_live_letter_the_door_accepts_is_delivered_and_leaves_no_entry() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("live-accepted");
+        let (port, seen) = logged_door(|r: &str| signed_for_method(r, ACCEPTED));
+        point_at("far", port);
+
+        let delivery = deliver_now("far", live_letter("far", "hi"));
+        assert!(matches!(&delivery, Delivery::Delivered { status } if status == "accepted"), "{delivery:?}");
+        assert_eq!(deposits_seen(&seen), 1, "one dial, and its answer settled it");
+        assert!(aoide_storage::outbox::list_entries("far").unwrap().is_empty());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **A door that never answers is dialled exactly twice, then the letter comes
+    /// back.** The live dial writes nothing; the command writes the returned letter.
+    #[test]
+    fn a_door_that_never_answers_is_dialled_twice_and_the_letter_is_returned() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("live-silent");
+        let (port, seen) = logged_door(|_r: &str| String::new());
+        point_at("far", port);
+
+        let Delivery::Returned(returned) = deliver_now("far", live_letter("far", "hi")) else {
+            panic!("a letter no door answers must come back");
+        };
+        assert_eq!(deposits_seen(&seen), 2, "the first dial and one re-dial, no more");
+        assert!(returned.refused, "{returned:?}");
+        assert!(returned.last_outcome.starts_with("transport:"), "{}", returned.last_outcome);
+        assert!(aoide_storage::outbox::list_entries("far").unwrap().is_empty(), "the live dial writes nothing");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A refused connection is returned the same way: one re-dial, then the letter.
+    #[test]
+    fn a_refused_connection_is_returned_after_the_one_re_dial() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("live-refused");
+        point_at("far", 1); // nothing listens on port 1
+
+        let Delivery::Returned(returned) = deliver_now("far", live_letter("far", "hi")) else {
+            panic!("a refused connection must return the letter");
+        };
+        assert!(returned.last_outcome.starts_with("transport:"), "{}", returned.last_outcome);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **An unsigned answer naming `accepted` is not a delivery.** It is dialled
+    /// twice, and the letter comes back with the unauthenticated reason.
+    #[test]
+    fn an_unsigned_accepted_answer_is_dialled_twice_and_returned_as_unauthenticated() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("live-unsigned");
+        let (port, seen) = logged_door(|_r: &str| reply_with(ACCEPTED, &[]));
+        point_at("far", port);
+
+        let delivery = deliver_now("far", live_letter("far", "hi"));
+        let Delivery::Returned(returned) = delivery else {
+            panic!("an unsigned accepted answer must not deliver: {delivery:?}");
+        };
+        assert_eq!(deposits_seen(&seen), 2, "unverified: one re-dial");
+        assert!(returned.last_outcome.starts_with("unauthenticated:"), "{}", returned.last_outcome);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **A re-dial after a lost answer is a fresh signed call, and it comes back
+    /// `duplicate`.** The first deposit landed; the second finds it and delivers.
+    #[test]
+    fn a_redial_after_a_lost_answer_is_a_fresh_signed_call_that_comes_back_duplicate() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("live-lost-answer");
+        let lost_once = std::sync::Arc::new(AtomicBool::new(false));
+        let first = lost_once.clone();
+        let (port, seen) = logged_door(move |r: &str| {
+            if r.contains("aoide/mailDeposit") && !first.swap(true, Ordering::SeqCst) {
+                return String::new(); // the deposit lands; its answer is lost
+            }
+            signed_for_method(r, DUPLICATE)
+        });
+        point_at("far", port);
+
+        let delivery = deliver_now("far", live_letter("far", "hi"));
+        assert!(matches!(&delivery, Delivery::Delivered { status } if status == "duplicate"), "{delivery:?}");
+        let deposits: Vec<String> =
+            seen.lock().unwrap().iter().filter(|r| r.contains("aoide/mailDeposit")).cloned().collect();
+        assert_eq!(deposits.len(), 2, "the lost answer is re-dialled once");
+        let nonce = |raw: &String| aoide_test_support::raw_header(raw, aoide_storage::wire_auth::HEADER_NONCE).unwrap();
+        assert_ne!(nonce(&deposits[0]), nonce(&deposits[1]), "the re-dial carries a new nonce");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **A link the box holds off does not stop a live send.** `link.json` is for
+    /// the drain; the letter is dialled now.
+    #[test]
+    fn a_link_held_off_does_not_stop_a_live_letter() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("live-link-held-off");
+        let (port, seen) = logged_door(|r: &str| signed_for_method(r, ACCEPTED));
+        point_at("far", port);
+        aoide_storage::outbox::back_off("far", unix_now(), "transport: earlier").unwrap();
+
+        let delivery = deliver_now("far", live_letter("far", "hi"));
+        assert!(matches!(delivery, Delivery::Delivered { .. }), "{delivery:?}");
+        assert_eq!(deposits_seen(&seen), 1, "dialled although the link is held off");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **Older receipts spooled toward the same node do not keep a live letter from
+    /// being dialled.** The receipts stay for the drain.
+    #[test]
+    fn sixty_older_receipts_toward_the_node_do_not_keep_a_live_letter_from_its_dial() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("live-receipts-ahead");
+        let me = register_local_origin();
+        let (port, seen) = logged_door(|r: &str| signed_for_method(r, ACCEPTED));
+        point_at("far", port);
+        let letter = aoide_storage::mail::mint_outbound_letter("alice", "far", "bob", "hi").unwrap();
+        for i in 0..60 {
+            let receipt = far_receipt("far", &me, &letter.header.origin_mesh, &format!("{i:064}"));
+            aoide_storage::outbox::write_entry("far", &OutboxEntry::fresh(receipt)).unwrap();
+        }
+
+        let delivery = deliver_now("far", OutboxEntry::fresh(letter));
+        assert!(matches!(delivery, Delivery::Delivered { .. }), "{delivery:?}");
+        assert_eq!(deposits_seen(&seen), 1);
+        assert_eq!(aoide_storage::outbox::list_entries("far").unwrap().len(), 60, "the receipts are untouched");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **Every verified refusal word returns the letter at once, with one dial.**
+    /// The link words (`down`, `config-invalid`) and `box-full` included.
+    #[test]
+    fn every_verified_refusal_word_returns_the_letter_at_once_with_one_dial() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("live-refusal-words");
+        for word in [
+            "down",
+            "config-invalid",
+            "box-full",
+            "zone-violation",
+            "broken-chain",
+            "bad-msgid",
+            "not-correspondence",
+            "unknown-box",
+        ] {
+            let answer = format!(r#"{{"jsonrpc":"2.0","id":1,"result":{{"status":"refused","reason":"{word}","detail":"d"}}}}"#);
+            let (port, seen) = logged_door(move |r: &str| signed_for_method(r, &answer));
+            point_at("far", port);
+
+            let delivery = deliver_now("far", live_letter("far", "hi"));
+            let Delivery::Returned(returned) = delivery else {
+                panic!("{word}: a verified refusal must return the letter, got {delivery:?}");
+            };
+            assert_eq!(deposits_seen(&seen), 1, "{word}: no re-dial after a verified answer");
+            assert!(returned.last_outcome.contains(word), "{word}: {}", returned.last_outcome);
+        }
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **A verified answer with no status is not a delivery.** It returns.
+    #[test]
+    fn a_verified_answer_with_no_status_returns_the_letter_and_never_delivers() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("live-missing-status");
+        let (port, seen) = logged_door(|r: &str| signed_for_method(r, r#"{"jsonrpc":"2.0","id":1,"result":{}}"#));
+        point_at("far", port);
+
+        let delivery = deliver_now("far", live_letter("far", "hi"));
+        let Delivery::Returned(returned) = delivery else {
+            panic!("a missing status is not a delivery: {delivery:?}");
+        };
+        assert_eq!(deposits_seen(&seen), 1, "a verified answer is final");
+        assert!(returned.last_outcome.contains("missing-status"), "{}", returned.last_outcome);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **A hop its mesh declares `down` is returned at once and never dialled.**
+    /// The declared address is a closed port, so a dial would say `transport`.
+    #[test]
+    fn a_hop_its_mesh_declares_down_is_returned_at_once_and_never_dialled() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("live-declared-down");
+        let (peer, _key, _) = mint_box(&dir.join("elsewhere-box"), "elsewhere");
+        aoide_storage::charter::init("home").unwrap();
+        let own_line = aoide_storage::charter::node_line().unwrap();
+        std::fs::write(
+            aoide_storage::charter::source_path("home"),
+            format!(
+                "mesh = \"home\"\nversion = 0\n\n[status]\nelsewhere = \"down\"\n\n[nodes]\n{own_line}\n{}\n",
+                line_at(&peer, "https://127.0.0.1:1/")
+            ),
+        )
+        .unwrap();
+        aoide_storage::charter::sign("home", None).unwrap();
+
+        let delivery = deliver_now("elsewhere", live_letter("elsewhere", "hi"));
+        let Delivery::Returned(returned) = delivery else {
+            panic!("a declared-down hop must return the letter: {delivery:?}");
+        };
+        assert!(returned.last_outcome.starts_with("refused: down"), "{}", returned.last_outcome);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A hop this box cannot resolve to any address is returned at once.
+    #[test]
+    fn a_hop_with_no_dial_address_is_returned_at_once() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("live-no-address");
+
+        let delivery = deliver_now("nowhere-hop", live_letter("nowhere-hop", "hi"));
+        let Delivery::Returned(returned) = delivery else {
+            panic!("an unresolvable hop must return the letter: {delivery:?}");
+        };
+        assert!(returned.last_outcome.starts_with("refused: no-address"), "{}", returned.last_outcome);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A parked letter (no usable seal, decided at spool time) is returned at once
+    /// with its own words, undialled.
+    #[test]
+    fn a_letter_parked_at_spool_time_is_returned_without_a_dial() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("live-parked");
+        let (port, seen) = logged_door(|r: &str| signed_for_method(r, ACCEPTED));
+        point_at("far", port);
+        let mut entry = live_letter("far", "hi");
+        entry.refused = true;
+        entry.last_outcome = "parked: the destination holds a binding that is not usable now".to_string();
+
+        let delivery = deliver_now("far", entry);
+        let Delivery::Returned(returned) = delivery else {
+            panic!("a parked letter is returned, not dialled: {delivery:?}");
+        };
+        assert_eq!(deposits_seen(&seen), 0, "undialled");
+        assert!(returned.last_outcome.starts_with("parked:"), "{}", returned.last_outcome);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **A verified answer polls the node once after the letter.** Poll-on-contact
+    /// stays: this box asks what the node holds for it.
+    #[test]
+    fn a_verified_answer_polls_the_node_once_after_the_letter() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("live-poll-on-contact");
+        let (port, seen) = logged_door(|r: &str| signed_for_method(r, ACCEPTED));
+        point_at("far", port);
+
+        let _ = deliver_now("far", live_letter("far", "hi"));
+        let polls = seen.lock().unwrap().iter().filter(|r| r.contains("aoide/mailPoll")).count();
+        assert_eq!(polls, 1, "poll-on-contact after a verified answer");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **The classifier's vocabulary, rewritten for the live dial.** Acceptance and
+    /// the duplicate word deliver. Every verified refusal, the link words and
+    /// `box-full` included, is a refusal the live dial returns. A missing status is
+    /// a refusal too. Nothing short of a verified answer is a verdict.
+    #[test]
+    fn only_acceptance_delivers_and_every_verified_refusal_is_a_refusal() {
+        let word = |reason: &str| {
+            classify_deposit_response(&serde_json::json!({ "status": "refused", "reason": reason, "detail": "d" }))
+        };
+        assert!(matches!(
+            classify_deposit_response(&serde_json::json!({ "status": "accepted" })),
+            DepositAttempt::Delivered { .. }
+        ));
+        assert!(matches!(
+            classify_deposit_response(&serde_json::json!({ "status": "duplicate" })),
+            DepositAttempt::Delivered { .. }
+        ));
+        for reason in ["down", "config-invalid", "box-full", "zone-violation", "broken-chain", "bad-msgid"] {
+            assert!(
+                matches!(word(reason), DepositAttempt::Refused(_) | DepositAttempt::LinkRefused(_) | DepositAttempt::Deferred(_)),
+                "{reason} is a verified refusal and returns the letter"
+            );
+        }
+        let missing = classify_deposit_response(&serde_json::json!({}));
+        assert!(!matches!(missing, DepositAttempt::Delivered { .. }), "a missing status never delivers");
+        assert!(
+            matches!(missing, DepositAttempt::Refused(_)),
+            "and it returns the letter"
+        );
     }
 }

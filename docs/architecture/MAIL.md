@@ -1,4 +1,4 @@
-# MAIL — store-and-forward letters between nodes, addressed by name, never by transport
+# MAIL — letters between nodes, addressed by name, never by transport
 
 The design authority for the mail workstream. Everything in "Settled
 decisions" was User-decided — the 2026-09-04 → 09-06 design grill (three
@@ -505,9 +505,9 @@ gaps are harmless.
   probe: a relay that sends letters learns which names have a box from
   which ones come back `unknown-box` and which come back filed or
   acknowledged. Nothing in the answer can hide that, so it is accepted,
-  not prevented. The sender parks the letter, and it is released by
-  `aoide mail outbox retry` once the box exists. A hub that handed the
-  container over releases its custody of it (`unknown-box` is a verdict on
+  not prevented. The sender's letter comes back with that word, and
+  `aoide mail outbox retry` resends it once the box exists. A hub that handed
+  the container over releases its custody of it (`unknown-box` is a verdict on
   the bytes' destination, so it is named in `filed` and offered no more);
   the origin keeps its own copy and re-sends it on retry. A local send to
   `self/<name>` and `aoide mail box add <name>` create the box, and so does
@@ -683,15 +683,19 @@ door's audit name whitelist gains both names so they never log as bare
   bytes and bound to the request it answers (CONTRACTS §6). An answer that does
   not verify (unsigned, signed by another key, made for another request, or
   carrying two signatures) is `unauthenticated`: nothing in it is used, the
-  attempt is recorded, and the link backs off. Its `accepted` retires nothing,
-  and its JSON-RPC `error` parks nothing. What it said (that error's message,
+  attempt is recorded, and the link backs off. For a letter the sender dialled
+  live it is no verdict: the sender dials once more, and the letter comes back
+  if that fails too (§Outbox). Its `accepted` delivers nothing, and its
+  JSON-RPC `error` parks nothing. What it said (that error's message,
   or a refused result's `reason`) is shown to the operator, stripped of
   control and invisible characters and clipped, and never acted on. A
   verified answer's words get the same stripping and a longer clip: a
   signature proves who spoke, not that a stranger's text is safe for a
   terminal. A node with no key on file is never dialled. A verified
   `accepted` or `duplicate` retires a receipt, a `charter` letter or a
-  `transit` container; a letter waits for its receipt.
+  `transit` container. A verified `accepted` or `duplicate` for a letter the
+  sender dialled live delivers it: no copy is kept and no receipt is awaited
+  (O1a, §Transit).
 - **Acks** are `receipt` envelopes minted by the destination on filing a
   `letter`: `to` = the origin, `text` = the acked `msgid`, signed by the
   destination. Routed like any letter, never themselves acked. The ack is
@@ -780,9 +784,19 @@ link.json       { "holdUntil": ts, "lastError": "…" }   per-link backoff
 .poll           flock'd while a poll of this node runs
 ```
 
-- `aoide mail send` writes the entry first, then attempts delivery. The
-  write is what the command reports; delivery is best-effort at that
-  moment and the spool's job afterwards. A dead node is files that wait.
+- `aoide mail send` dials the letter's first hop at once, in the sending
+  process (ruling 131). A verified `accepted` or `duplicate` delivers it and
+  nothing is written. A verified refusal of any word returns it at once. No
+  answer, or an answer that does not verify, earns one re-dial; if that fails
+  too, the letter is returned. **Returned** means the letter itself is written
+  to this box's own outbox, marked `refused` with the word that ended the
+  dial, exactly as it was sent: `aoide mail outbox retry <msgid>` resends it
+  under the same msgid (sealed again first, if a binding has appeared since).
+  A hop declared `down` is never dialled. The command waits for the outcome.
+  Its worst wait is four capped calls, each at most 5 s to connect and 15 s in
+  all: the binding exchange (only for a hop this box holds a pair record for,
+  not one its charter declares), the two deposits, and one poll of the hop
+  after a verified answer, as the drain does (poll-on-contact).
 - The drain runs on `aoided`'s existing timer tick (the reaper cadence)
   and immediately after any successful contact with that node. Because
   the door is a separate process, "after contact" means the door
@@ -818,13 +832,15 @@ link.json       { "holdUntil": ts, "lastError": "…" }   per-link backoff
 - `link.json` is `.hld`: exponential backoff per link on failure,
   cleared on success. Per-entry `tries`/`lastOutcome` live in the entry.
   A `refused` outcome parks that entry (drains skip it) and records the
-  reason — **except `down` and `config-invalid`, which are LINK states and
-  never park anything** (§Status): the entry stays live and the link's own
+  reason, for a transit, receipt or charter entry. A letter this box sent
+  never parks: a verified refusal returns it (above), `down` and
+  `config-invalid` included. **`down` and `config-invalid` are LINK states and
+  never park a drained entry** (§Status): it stays live and the link's own
   back-off brings it back. Parked is not condemned: the refusing grant is the RECEIVING
   node's record of the sender, so once that host runs `aoide node allow
   <sender> message on` (or the operator adds `message` to the sender's
   charter line), the sender runs `aoide mail outbox retry <msgid>` (or
-  `--refused [<node>]`) to un-park and dial at once.
+  `--refused [<node>]`) to resend or un-park and dial at once.
   The stored signed envelope is resent as-is, never re-minted, so the far
   end's msgid dedup still holds.
 - A `down` node's directory is skipped entirely; entries whose ORIGIN is
@@ -934,22 +950,29 @@ when it is also a declared relay — `relays` is the fallback in
 declaration order, never a mandatory chain. A routing change is a
 declaration change, so `aoide mail route` is the dry run before one.
 
-**A letter whose chosen relay refuses parks, it does not reroute.**
-(A refusal about the LINK rather than the letter — `down`, `config-invalid` —
-does not park: the sender keeps it live and retries on the link's own
-back-off, §Status.)
-Nothing on the wire names a peer's version, so an older relay is
-refused rather than recognised, and the origin's entry records
-`refused` and stops retrying (`aoide mail outbox retry --refused` is
-the hand). Holding is the honest answer while a mesh rolls out, and
+**A letter whose chosen relay refuses comes back to its sender; it does not
+reroute.** A verified refusal of any word, `down` and `config-invalid`
+included, returns the sender's letter at once (§Outbox): nothing waits at rest
+for a link to come back. Nothing on the wire names a peer's version, so an
+older relay is refused rather than recognised, and the letter comes back with
+that refusal; `aoide mail outbox retry <msgid>` resends it once the mesh has
+rolled out. Holding is the honest answer while a mesh rolls out, and
 `mail route` shows which hop a letter will be offered to before it is
 sent. **Transit makes the deploy order load-bearing twice over**: every box
 must already run the transit half before `relays`, `[status]` or `[gates]`
 are declared, because a relay that predates it refuses a routed container
 outright rather than passing it on, and a destination that predates it
 refuses a two-entry hop chain. Nothing is lost while that happens — the
-letter parks at its sender — but nothing moves either, so the declaration
+letter comes back to its sender — but nothing moves either, so the declaration
 comes last and the drift report is the dry run.
+
+**A relay's verified `accepted` is the sender's delivery (O1a).** The sender
+keeps no copy after it, so a relay that accepts a letter and then cannot hand
+it on loses it without a word to the origin. An accepted-then-dropped letter
+cannot be told from a delivery. That is the trade ruling 131 makes, and it is
+stated here so that nobody reads `delivered` as a receipt from the destination.
+A destination's own receipt still comes back as it did, and it retires nothing
+for a letter the sender no longer holds.
 
 At a hub, a deposit whose `to.node` is not self: run the keyless checks
 (§Wire, "Lane and payload"), keep no transit record, append the hub's chained hop signature naming the `next` node the route
@@ -1458,8 +1481,9 @@ dry run before a routing change. A later
 convenience allowed by this document, not required by it.
 
 `down` is enforced at the door, in routing (never a hop, never a
-destination — `no-route`), and in the drain (never dialled, and a letter
-already queued for it is KEPT, never dropped — no eviction is the
+destination — `no-route`), in the live send (a hop its mesh declares `down`
+is returned at once, never dialled), and in the drain (never dialled, and a
+letter already queued for it is KEPT, never dropped — no eviction is the
 flood-control rule, decision 14). A `down` origin's own door requests are
 refused and no new letter is accepted from it; what it queued before is
 not confiscated. **A `down` (or `config-invalid`) refusal is a state of the
@@ -1547,6 +1571,16 @@ authoritative first:
   reason rather than either an error or a normal-looking queue: the
   spool write already succeeded, or the entry is only being listed, so
   the failure is about REPORTING, never about the mail itself.
+
+`aoide mail send` reports a letter's own fate in `data.delivery`, one of three
+words, and they are the whole of its report: `delivered` (a verified
+`accepted` or `duplicate` came back, so nothing is kept), `returned` (the
+letter came back to this box, marked `refused`, with the word that ended the
+dial in `reason`; `aoide mail outbox retry` resends it) or `held` (the first
+hop is a `poll` or `hold` node, so the letter waits in this box's outbox for
+that node's own pull and no dial is made). A send's `delivered` is the verified
+answer itself, and it leaves no entry to list, so it is not the listing's
+`delivered` below.
 
 `mail route` does not speak that vocabulary: it reports a ROUTE — the next
 hop, the mesh the letter rides by then, and each step's reason — or ONE

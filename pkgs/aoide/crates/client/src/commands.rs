@@ -360,7 +360,8 @@ pub(crate) fn post_json_capped(
 
 /// [`post_json_capped`] that keeps the response's status line and headers:
 /// curl writes them ahead of the body, and [`parse_http_response`] splits them
-/// back out. A mail answer's signature header is read from here.
+/// back out. A mail answer's signature header is read from here, and every such
+/// call gets the 5 s connect cap (`--connect-timeout 5`, see [`post_json_args`]).
 pub(crate) fn post_json_answered(
     url: &str,
     body: &str,
@@ -387,7 +388,13 @@ fn post_json_args(
     include_head: bool,
 ) -> Result<(u16, String), String> {
     let header_args: Vec<String> = extra_headers.iter().flat_map(|(k, v)| ["-H".to_string(), format!("{k}: {v}")]).collect();
-    let head_args: &[&str] = if include_head { &["--include", "--suppress-connect-headers"] } else { &[] };
+    // The answered shape is the signed mail dial, so its connect is capped at 5 s;
+    // the whole call keeps `timeout_secs` (`--max-time`, run_curl_capped).
+    let head_args: &[&str] = if include_head {
+        &["--include", "--suppress-connect-headers", "--connect-timeout", "5"]
+    } else {
+        &[]
+    };
     match bearer {
         None => {
             let mut args: Vec<&str> = vec!["-X", HTTP_METHOD, "-H", "Content-Type: application/json"];
@@ -5487,32 +5494,9 @@ fn handle_mail_send(inv: &Invocation) -> Outcome {
         Ok(entry) => entry,
         Err(e) => return teach::store_failed(cmd, "state/outbox", &e),
     };
+    // L11 (the branch review): three states, not two. A parked letter is not sent in
+    // the clear, and says so; the sentence is built before the entry moves into the dial.
     let sealed = entry.is_sealed();
-    if let Err(e) = aoide_storage::outbox::write_entry(&next, &entry) {
-        return teach::store_failed(cmd, "state/outbox", &e);
-    }
-    // Best-effort — this command already reported the WRITE above and
-    // never lets a delivery outcome downgrade it (spec item 8). A dead
-    // node, a policy refusal, anything at all: the entry stays spooled,
-    // `data.delivery` below (and a later `mail outbox`) shows what
-    // happened, and the daemon's own periodic drain (or the next `mail
-    // send`/deposit from this node) tries again.
-    let delivery = match crate::mail_wire::drain_node(&next) {
-        Ok(()) => post_send_delivery(&next, &msgid),
-        Err(e) => delivery_shape("failed", Some(e), Some("local"), None, false),
-    };
-    let mut data = serde_json::to_value(&envelope).unwrap_or_default();
-    if let Some(obj) = data.as_object_mut() {
-        obj.insert("delivery".to_string(), delivery);
-        obj.insert("next".to_string(), json!(next));
-        obj.insert("nextMesh".to_string(), json!(hop.mesh));
-    }
-
-    // L11 (the branch review): three states, not two. `!is_sealed()` was
-    // reported as "plaintext" even for the PARKED arm — an entry waiting on a
-    // binding that is not usable yet and which will never be sent as plaintext
-    // at all. The delivery status said `refused` while the sentence said
-    // "plaintext", which reads as the leak the parking exists to prevent.
     let disposition = if sealed {
         "sealed"
     } else if entry.refused {
@@ -5520,21 +5504,58 @@ fn handle_mail_send(inv: &Invocation) -> Outcome {
     } else {
         "plaintext (the destination has published no binding)"
     };
-
+    // Dial now (ruling 131): the dial's answer is the report. A held letter is the
+    // exception; it waits for its node's own pull and is never dialled here.
+    let (delivery, sent, returned) = if entry.is_held() {
+        if let Err(e) = aoide_storage::outbox::write_entry(&next, &entry) {
+            return teach::store_failed(cmd, "state/outbox", &e);
+        }
+        (delivery_shape("held", None, None, None, false), None, None)
+    } else {
+        match crate::mail_wire::deliver_now(&next, entry) {
+            crate::mail_wire::Delivery::Delivered { status } => {
+                (delivery_shape("delivered", None, None, None, false), Some(status), None)
+            }
+            crate::mail_wire::Delivery::Returned(returned) => {
+                if let Err(e) = aoide_storage::outbox::write_entry(&next, &returned) {
+                    return teach::store_failed(cmd, "state/outbox", &e);
+                }
+                let word = crate::mail_wire::outcome_line(&returned.last_outcome);
+                (delivery_shape("returned", word.clone(), Some("entry"), None, false), None, Some(word))
+            }
+        }
+    };
+    let mut data = serde_json::to_value(&envelope).unwrap_or_default();
+    if let Some(obj) = data.as_object_mut() {
+        obj.insert("delivery".to_string(), delivery);
+        obj.insert("next".to_string(), json!(next));
+        obj.insert("nextMesh".to_string(), json!(hop.mesh));
+    }
+    if let Some(word) = returned {
+        return Outcome::refuse(
+            cmd,
+            Kind::Refused,
+            format!(
+                "{node}/{name} was not delivered: the letter came back to this box ({}) — msgid {msgid}",
+                word.as_deref().unwrap_or("no reason recorded")
+            ),
+            "it is kept in this box's outbox, marked returned, exactly as it was sent; `aoide mail outbox retry <msgid>` sends it again",
+            Fix::Run(format!("aoide mail outbox retry {msgid}")),
+        )
+        .changed(vec![format!("state/outbox/{next}/: +1 now entry")])
+        .with_data(data);
+    }
+    if let Some(status) = sent {
+        return Outcome::ok(cmd, format!("delivered to {node}/{name} (msgid {msgid}, {status})"))
+            .with_data(data);
+    }
     Outcome::ok(
         cmd,
-        if hold {
-            format!(
-                "held for {node}/{name} (msgid {msgid}, {disposition}) — a drain never dials it; it leaves when {next} polls"
-            )
-        } else {
-            format!("spooled to {node}/{name} (msgid {msgid}, {disposition})")
-        },
+        format!(
+            "held for {node}/{name} (msgid {msgid}, {disposition}) — a drain never dials it; it leaves when {next} polls"
+        ),
     )
-    .changed(vec![format!(
-        "state/outbox/{next}/: +1 {} entry",
-        if hold { "hold" } else { "now" }
-    )])
+    .changed(vec![format!("state/outbox/{next}/: +1 hold entry")])
     .with_data(data)
 }
 
@@ -10139,8 +10160,9 @@ mod tests {
         .unwrap();
 
         let out = handle_mail_send(&mail_inv_with_flags(&["mail", "send"], &["hi"], &[("to", "dave/bob")]));
-        assert_eq!(out.status, aoide_protocol::output::Status::Ok, "{}", out.message);
+        assert_eq!(out.status, aoide_protocol::output::Status::Error, "a refused dial returns the letter: {}", out.message);
         let data = out.data.unwrap();
+        assert_eq!(data["delivery"]["status"], "returned");
         assert_eq!(data["next"], "dave", "the direct edge is the only edge this mesh declares");
         assert_eq!(data["nextMesh"], "family");
         assert_eq!(aoide_storage::outbox::list_entries("dave").unwrap().len(), 1, "spooled to the peer itself");
@@ -10187,8 +10209,9 @@ mod tests {
         .unwrap();
 
         let out = handle_mail_send(&mail_inv_with_flags(&["mail", "send"], &["hi"], &[("to", "dave/bob")]));
-        assert_eq!(out.status, aoide_protocol::output::Status::Ok, "{}", out.message);
+        assert_eq!(out.status, aoide_protocol::output::Status::Error, "a parked letter comes back at once: {}", out.message);
         let data = out.data.unwrap();
+        assert_eq!(data["delivery"]["status"], "returned");
         assert_eq!(data["next"], "relay", "`dave` polls, so its relay carries it");
         assert_eq!(data["nextMesh"], "family");
         let spooled = aoide_storage::outbox::list_entries("relay").unwrap();
@@ -10211,19 +10234,96 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    #[test]
-    fn mail_send_to_a_verified_node_writes_the_entry_before_attempting_delivery() {
-        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let (_env, root) = aoide_test_support::isolated_mail_root("mail-send-verified");
 
+    /// **A letter the destination accepts is delivered by the send itself.** The
+    /// signed answer is the receipt: the command reports `delivered`, and nothing is
+    /// spooled.
+    #[test]
+    fn mail_send_to_an_accepting_node_delivers_live_and_spools_nothing() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, root) = aoide_test_support::isolated_mail_root("mail-send-live-accepted");
+        let (_listener, port, _seen) = spawn_fixed_answer_door(
+            r#"{"jsonrpc":"2.0","id":1,"result":{"status":"accepted","msgid":"00"}}"#.to_string(),
+        );
+        aoide_storage::node_store::save_nodes(&[verified_node("peer-node", &format!("http://127.0.0.1:{port}/"))]).unwrap();
+
+        let out = handle_mail_send(&mail_inv_with_flags(&["mail", "send"], &["hi", "peer-node"], &[("to", "peer-node/bob")]));
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok, "a delivered letter is Ok, msg: {}", said(&out));
+        assert_eq!(out.data.as_ref().unwrap()["delivery"]["status"], "delivered");
+        assert!(aoide_storage::outbox::list_entries("peer-node").unwrap().is_empty(), "no entry for a delivered letter");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// **A letter no door answers comes back to the sender, and the command says so.**
+    /// The refusal is the command's status; the returned letter is in the outbox.
+    #[test]
+    fn mail_send_to_a_closed_port_returns_the_letter_as_a_refusal() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, root) = aoide_test_support::isolated_mail_root("mail-send-returned");
         aoide_storage::node_store::save_nodes(&[verified_node("peer-node", "http://127.0.0.1:1/")]).unwrap();
 
         let out = handle_mail_send(&mail_inv_with_flags(&["mail", "send"], &["hi", "peer-node"], &[("to", "peer-node/bob")]));
-        assert_eq!(out.status, aoide_protocol::output::Status::Ok, "the WRITE succeeding is what this command reports, msg: {}", said(&out));
+        assert_eq!(out.status, aoide_protocol::output::Status::Error, "a returned letter is a refusal, msg: {}", said(&out));
+        assert_eq!(out.data.as_ref().unwrap()["delivery"]["status"], "returned");
 
         let spooled = aoide_storage::outbox::list_entries("peer-node").unwrap();
-        assert_eq!(spooled.len(), 1, "the entry is written even though peer-node's own address (127.0.0.1:1) refuses every connection");
-        assert_eq!(spooled[0].envelope.text, "hi peer-node");
+        assert_eq!(spooled.len(), 1, "the returned letter is in the sender's box");
+        assert!(spooled[0].refused, "marked returned");
+        assert!(spooled[0].last_outcome.starts_with("transport:"), "{}", spooled[0].last_outcome);
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// **A live dial takes no link lock.** A `.bsy` the drain would trip over does
+    /// not stop a send, because the send never waits on the link.
+    #[test]
+    fn mail_send_takes_no_link_lock_so_a_bsy_directory_does_not_stop_a_live_send() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, root) = aoide_test_support::isolated_mail_root("mail-send-no-link-lock");
+        let (_listener, port, _seen) = spawn_fixed_answer_door(
+            r#"{"jsonrpc":"2.0","id":1,"result":{"status":"accepted","msgid":"00"}}"#.to_string(),
+        );
+        aoide_storage::node_store::save_nodes(&[verified_node("peer-node", &format!("http://127.0.0.1:{port}/"))]).unwrap();
+        let bsy = aoide_storage::outbox::outbox_dir().join("peer-node").join(".bsy");
+        std::fs::create_dir_all(&bsy).unwrap();
+
+        let out = handle_mail_send(&mail_inv_with_flags(&["mail", "send"], &["hi"], &[("to", "peer-node/bob")]));
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok, "msg: {}", said(&out));
+        assert_eq!(out.data.as_ref().unwrap()["delivery"]["status"], "delivered");
+        assert!(aoide_storage::outbox::list_entries("peer-node").unwrap().is_empty());
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// **The answered POST runs curl with a 5 s connect cap and the 15 s call cap.**
+    /// The argument list is tested, not the clock: a fake `curl` on a private PATH
+    /// writes its argv down and answers nothing.
+    #[test]
+    fn the_answered_post_is_run_with_a_five_second_connect_cap_and_the_call_cap() {
+        use std::os::unix::fs::PermissionsExt;
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, root) = aoide_test_support::isolated_mail_root("answered-post-argv");
+        let bin = root.join("fake-bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        let argv_file = root.join("curl-argv.txt");
+        let script = bin.join("curl");
+        std::fs::write(
+            &script,
+            format!("#!/bin/sh\nprintf '%s\\n' \"$@\" > '{}'\ncat > /dev/null\nprintf '\\n000'\n", argv_file.display()),
+        )
+        .unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let _path = aoide_test_support::EnvSaver::capture(&["PATH"]);
+        let inherited = std::env::var("PATH").unwrap_or_default();
+        std::env::set_var("PATH", format!("{}:{inherited}", bin.display()));
+
+        let _ = post_json_answered("http://127.0.0.1:9/", "{}", None, &[], 15, 1024);
+
+        let argv: Vec<String> = std::fs::read_to_string(&argv_file).unwrap().lines().map(str::to_string).collect();
+        let value_of = |flag: &str| argv.iter().position(|a| a == flag).and_then(|i| argv.get(i + 1)).cloned();
+        assert_eq!(value_of("--connect-timeout").as_deref(), Some("5"), "the connect cap: {argv:?}");
+        assert_eq!(value_of("--max-time").as_deref(), Some("15"), "the call cap: {argv:?}");
 
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -11163,51 +11263,6 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// The independent-review LOW finding this pins: `handle_mail_send`'s
-    /// `Err(e) => delivery_shape("failed", …)` branch — the ONE case a
-    /// LOCAL I/O failure inside the drain attempt itself (never "the
-    /// remote node was unreachable," `mail_wire::drain_node`'s own module
-    /// doc) — had no direct test. Forces that exact `Err` the same way
-    /// `mail_wire`'s own module doc reserves it for: a genuine local I/O
-    /// failure, here `outbox::try_take_link_lock`'s `.bsy` file `open()`
-    /// failing EISDIR — done AFTER the spool write, never before, so only
-    /// the drain fails: `write_entry` only ever touches the node's own
-    /// entry file, never `.bsy` (`outbox::write_entry`'s own doc), so the
-    /// write still lands and the command still reports `Outcome::ok`
-    /// (spec item 8) with `data.delivery` alone showing the drain's local
-    /// failure.
-    #[test]
-    fn mail_send_reports_delivery_failed_when_the_drain_itself_hits_a_local_io_error() {
-        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let (_env, root) = aoide_test_support::isolated_mail_root("mail-send-drain-local-io-error");
-
-        aoide_storage::node_store::save_nodes(&[verified_node("peer-node", "http://127.0.0.1:1/")]).unwrap();
-
-        let bsy = aoide_storage::outbox::outbox_dir().join("peer-node").join(".bsy");
-        std::fs::create_dir_all(&bsy).unwrap();
-
-        let out = handle_mail_send(&mail_inv_with_flags(&["mail", "send"], &["hi"], &[("to", "peer-node/bob")]));
-        assert_eq!(
-            out.status,
-            aoide_protocol::output::Status::Ok,
-            "the write already succeeded — a drain-local I/O failure never downgrades it, msg: {}",
-            said(&out)
-        );
-
-        let spooled = aoide_storage::outbox::list_entries("peer-node").unwrap();
-        assert_eq!(spooled.len(), 1, "the entry is still spooled despite the drain's own local failure");
-
-        let data = out.data.unwrap();
-        assert_eq!(data["delivery"]["status"], "failed");
-        assert_eq!(data["delivery"]["reasonScope"], "local");
-        assert!(
-            data["delivery"]["reason"].as_str().unwrap().contains(".bsy"),
-            "the local I/O error text rides along, got: {:?}",
-            data["delivery"]["reason"]
-        );
-
-        let _ = std::fs::remove_dir_all(&root);
-    }
 
     #[test]
     fn post_send_delivery_degrades_to_status_unavailable_when_the_read_itself_fails() {

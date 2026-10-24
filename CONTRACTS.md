@@ -9480,11 +9480,22 @@ own signature and nonce (`wire_auth::answer_string`). Anything else (no
 signature, two of them, another key's, another request's) is
 `unauthenticated`: the client records the attempt, parks nothing, settles
 nothing and backs off the link. Only a verified `accepted` or `duplicate`
-retires a receipt, a `charter` letter or a `transit` container; a letter waits
-for its receipt. A verified JSON-RPC `error` parks the entry, an unsigned one
-never does. A verified `refused` with `reason: "box-full"` defers the entry
+retires a receipt, a `charter` letter or a `transit` container. For a letter the
+sender dialled live, a verified `accepted` or `duplicate` is final: it delivers
+the letter, nothing is kept, and no receipt is awaited (MAIL.md §Transit, O1a).
+A verified refusal of any word is final for such a letter too: the letter comes
+back to its sender at once, with that word, and nothing is re-dialled after a
+verified answer. A verified JSON-RPC `error` parks a drained entry, an unsigned
+one never does. A verified `refused` with `reason: "box-full"` defers the entry
 alone: it stays live, waits its own window, and the link is not backed off
 (MAIL.md §Outbox).
+
+Every signed mail call dials with the same transport cap: 5 s to connect
+(`--connect-timeout 5`) and 15 s for the whole call (`--max-time 15`). That
+covers `aoide/mailDeposit`, `aoide/mailPoll` and `aoide/binding`, because all
+three share the answered POST's argument list (`post_json_args`). A dial that
+fails the cap is an unanswered call, and an unanswered letter gets one re-dial
+before it is returned.
 
 A container takes a longer path than an envelope, and every step of it is
 still a REFUSED RESULT rather than a JSON-RPC error, because what became of
@@ -9834,9 +9845,10 @@ the origin signature, and `"not-correspondence"` when the envelope's `type` is
 neither `letter` nor `receipt` (a `charter` is applied from a sealed container's
 own payload, never filed as correspondence). A letter to a name with no box on
 this node answers `"unknown-box"`, with a fixed detail that names no box; the
-sender parks it (MAIL.md §Addressing), and a hub that handed the container over
-releases its custody of it (MAIL.md §Wire). `reason` is exactly the token
-MAIL.md §Transit names for each of these among its `refused` reasons; the rest
+sender's letter comes back with that word (MAIL.md §Addressing), and a hub that
+handed the container over releases its custody of it (MAIL.md §Wire).
+`reason` is exactly the token MAIL.md §Transit names for each of these among
+its `refused` reasons; the rest
 of that list — `no-route`, `down`, `unknown-mesh`, `zone-violation` — belongs to the transit
 lane and to a sealed charter container's own zone check, below, not to this one.
 **Two of those words are LINK states on the sender's side — `down` and
