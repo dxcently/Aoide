@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Greeter output
+
+- `strillix.greeter.output` picks the monitor the Quickshell login screen shows on (e.g. `"DP-1"`); the other monitors are turned off while it runs. If that monitor is missing or disabled, nothing is turned off and the login screen spans every connected monitor. Unset, the login screen keeps its old choice, the last-connected monitor.
+
 ### Split: Aoide is the engine, Strillix is the OS
 
 - Paint options leave `aoide.*` under the same names: `aoide.strillix.{enable,root,home}`,

@@ -118,6 +118,9 @@
       hosts = {
         consumer = mkHost "consumer" ./rices;
         aoide-rices = mkHost "aoide-rices" aoide.ricesRoot;
+        # Quickshell greeter face (barcarolle), with and without the output named.
+        greeter = mkHost "greeter" aoide.ricesRoot;
+        greeter-output = mkHost "greeter-output" aoide.ricesRoot;
         stubbed = mkHost "stubbed" ./rices;
         # Strillix with Aoide off: the desktop aggregation alone, no core and no nucleus.
         strillix-only = mkHost "strillix-only" ./rices;

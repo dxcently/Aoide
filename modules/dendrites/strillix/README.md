@@ -83,7 +83,11 @@ one shell, one bridge, one deployed tree.
 The greeter is the one exception to "a strillix provider imports the runtime":
 it runs in greetd, before any session, as the greeter user under cage in its
 own process on a store tree of its own, so `greeter.nix` does NOT import the
-runtime and fills its slot on a host with no shell. A rice with no greeter face gets `ly`.
+runtime and fills its slot on a host with no shell. A rice with no greeter face
+gets `ly`. `strillix.greeter.output` names the one output the Quickshell greeter
+shows on: cage runs `-m extend`, and every other output is turned off with
+wlr-randr before Quickshell starts. A named output that is missing or disabled
+turns nothing off, so the greeter spans every connected output.
 
 The surfaces no slot answers for — `osd`, `agentWidgets`, `sessionGraph` —
 stay the runtime's own. `runtime.nix` publishes the filled slots as
