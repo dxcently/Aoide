@@ -480,15 +480,14 @@ never the inbound/serve half (that's `aoide-server`).
   said, for the operator: its `error.message`, else its result's `reason`
   (`config-invalid` is a result), cleaned through `aoide_protocol::untrusted`
   and clipped to 120 characters before it reaches the entry, the link record
-  or the refusal. A clock refusal (`-32008`) keeps up to 400 characters, which
-  is the door's own claim; every printed line is clipped to 200, so a long
-  clock refusal prints without its closing words, and a cut can end on a lone
-  backslash. It is quoted, with `\`,
-  `"`, and the lookalikes U+201C, U+201D and U+FF02 escaped (as `\u{…}` text),
-  and labelled `(it said: "…"; not acted on)`, so the words cannot close the
-  quote or pass for aoide's own closing words. The guarantee is that they
-  cannot close aoide's ASCII quote: those three common lookalikes are escaped,
-  and other lookalike characters can still print. For the word
+  or the refusal. A clock refusal (`-32008`) keeps up to 400 characters after
+  the escape, plus the quotes, which is the door's own claim; every printed
+  line is clipped to 200, so a long clock refusal prints without its closing
+  words. It is quoted, with `\`, `"`, and the lookalikes U+201C, U+201D and
+  U+FF02 escaped (as `\u{…}` text), and labelled
+  `(it said: "…"; not acted on)`. The guarantee is that the words cannot close
+  aoide's ASCII quote: those three common lookalikes are escaped, and other
+  lookalike characters can still print. For the word
   `config-invalid` the lead says the far end's own config is invalid rather
   than that it needs an upgrade, since a door in that state never signs its
   answer. A signed answer's words get the same cleaning where they are read

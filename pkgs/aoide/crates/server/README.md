@@ -597,7 +597,8 @@ terminal's rights to its remote callers.
   its line stays in the box, by msgid; a poll retires only what its poller
   acknowledges; a binding older than the stored one is refused as stale only
   while the stored one still verifies under the pinned key; a charterFetch
-  changes no charter, key or grant and appends an audit line. An
+  changes no charter, key or grant. It audits a caller refused for not being
+  on the LAN and each answer it serves; its other refusals write no line. An
   untagged frame is not bound to a door, so a node holding a signer's untagged
   frames from the last 120 seconds can replay them at another door that pairs
   the same signer. That door applies the same checks to its own mailbox and

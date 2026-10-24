@@ -127,9 +127,10 @@ const SAID_MAX: usize = 120;
 /// The most of a clock refusal's words (`-32008`) an answer carries, in
 /// characters. A clock refusal names both times and the bound it breaks, so its
 /// words are kept longer than [`SAID_MAX`]. The door names the code, so this
-/// bound is the door's own claim: a hostile door gets at most this many stored
-/// and [`LINE_MAX`] printed. Every other word clips to [`SAID_MAX`]
-/// ([`said_max`]).
+/// bound is the door's own claim: a hostile door gets at most this many
+/// characters stored after the escape, plus the quotes. The poll's text line
+/// prints at most [`LINE_MAX`], so a long clock refusal prints without its
+/// closing words. Every other word clips to [`SAID_MAX`] ([`said_max`]).
 const DOOR_SAID_MAX: usize = 400;
 
 /// The door's own refusal codes: a stale or future frame (`-32008`), a replayed
@@ -1866,8 +1867,8 @@ fn poll_through(node_name: &str, named: Option<&str>, target: PollTarget) -> Res
 /// ordinary state — the letter still goes as plaintext over the direct
 /// lane, which is the per-peer upgrade path the design requires. A binding
 /// this call cannot learn is simply not learned; a binding already stored
-/// is never downgraded, because `learn_binding` refuses a generation that is
-/// not above the high-water mark.
+/// is never downgraded: `learn_binding` refuses a generation below the
+/// high-water mark, and an equal one whose bytes differ.
 pub fn exchange_bindings(node: &Node, named_mesh: Option<&str>) -> Result<aoide_storage::seal::Binding, String> {
     let mine = aoide_storage::seal::publish_binding()?;
     let params = json!({ "binding": mine });

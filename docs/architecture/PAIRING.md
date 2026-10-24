@@ -870,8 +870,8 @@ until one of them happens to drain an outbox or poll.
   gets none, and its pairing still completes.
 - Each side records the other's binding when the pairing commits:
   `seal::learn_binding`, which re-verifies it against the key now on record
-  and refuses `stale-binding` for a generation that is not above the stored
-  one.
+  and refuses `stale-binding` for a generation below the stored one, or equal
+  to it with different bytes. The same bytes are a no-op.
 - **The high-water mark is enforced at the carriage as well as at the
   commit.** A binding that is not newer than what the parked record already
   carries is dropped on arrival, so a replay cannot walk the record
