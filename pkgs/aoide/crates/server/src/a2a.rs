@@ -16497,7 +16497,7 @@ mod tests {
         mail_deposit_cleanup(&root, saved_state, saved_stage);
     }
 
-    /// **H1 (review r1): a relayed held letter with no destination binding is never
+    /// **A relayed held letter with no destination binding is never
     /// handed over, sealed or plaintext, and the poll names it withheld.** The poller
     /// holds no binding, which is the case the old reseal sent in the clear.
     #[test]

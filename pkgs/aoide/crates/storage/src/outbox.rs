@@ -953,7 +953,7 @@ fn pollable(entry: &OutboxEntry) -> bool {
     entry.is_held() || (entry.tries > 0 && !entry.last_attempt_reached_the_peer())
 }
 
-/// Retire one entry: a valid ack (spec item 7), a held own letter its poller
+/// Retire one entry: a valid ack, a held own letter its poller
 /// files ([`retire_acknowledged`]), explicit `mail outbox rm`, or the drop of
 /// an own letter with its session or by the tick's sweep (ruling 131). Nothing
 /// else evicts an entry (the kill-list: no auto-eviction). `Ok(false)` when
@@ -986,8 +986,8 @@ fn remove_entry_unlocked(node: &str, msgid: &str) -> Result<bool, String> {
             // An ordinary (letter) entry never carries a marker.
         }
         None => {
-            // The entry couldn't be read or parsed at all (review
-            // round 3 NIT) — rare (corruption, or a caller racing its
+            // The entry couldn't be read or parsed at all — rare
+            // (corruption, or a caller racing its
             // own prior removal). Its content can't tell us the
             // `acked_msgid` it covered, so fall back to a scan of
             // ONLY `.ack/` (never the whole node directory — removal
@@ -2317,7 +2317,7 @@ mod tests {
         }
     }
 
-    /// **H1 (review r1): a relayed letter whose destination holds no binding this box
+    /// **A relayed letter whose destination holds no binding this box
     /// can seal to is withheld, and is never sealed to the hop that carries it.** The
     /// hop holds a binding of its own: the old reseal sealed to exactly that one.
     #[test]
@@ -2342,7 +2342,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// **H1 (review r1): a withheld relayed letter is handed over sealed to its
+    /// **A withheld relayed letter is handed over sealed to its
     /// destination once the destination's binding is held.** It is never sealed to
     /// the hop on the way.
     #[test]
@@ -2455,7 +2455,7 @@ mod tests {
         }
     }
 
-    /// **M1 (review r1): a held plaintext letter that a poll upgrades keeps its
+    /// **A held plaintext letter that a poll upgrades keeps its
     /// session, so the next tick does not drop it as pre-131.** The upgrade builds a
     /// fresh entry, and that entry used to lose the session.
     #[test]
@@ -2544,7 +2544,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// **L1 (review r1): a receipt that retires an own letter says so, once.** A
+    /// **A receipt that retires an own letter says so, once.** A
     /// returned or a held letter that a receipt retires writes one
     /// `mail.outbox.retired` line naming the msgid, the node and `receipt`.
     #[test]
@@ -2567,7 +2567,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// **L2 (review r1): a hop's `deferred` list leaves a returned own letter as it
+    /// **A hop's `deferred` list leaves a returned own letter as it
     /// is.** Only a held letter is deferred: a returned one is never offered, so
     /// there is nothing for the hop to defer.
     #[test]

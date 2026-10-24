@@ -6565,7 +6565,7 @@ mod tests {
             .collect()
     }
 
-    /// **H1 (review r1): a relayed letter no destination binding seals is returned
+    /// **A relayed letter no destination binding seals is returned
     /// undialled, with its parked reason.** The hop is never contacted: it does not
     /// read the letter, so there is no binding exchange to make and no deposit to send.
     #[test]
@@ -6587,7 +6587,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// **H1 (review r1): a retry of a relayed letter seals it to its destination.** The
+    /// **A retry of a relayed letter seals it to its destination.** The
     /// hop receives a container addressed to the destination and sealed to its
     /// binding, and no plaintext envelope rides the relay.
     #[test]
@@ -6654,7 +6654,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// **L15 (review r1): a verified link refusal is not contact, on either path.**
+    /// **A verified link refusal is not contact, on either path.**
     /// `drain_node` and `deliver_now` both count only a verified answer about the
     /// letter as contact, so neither polls the node after a `down` answer.
     #[test]

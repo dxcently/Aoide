@@ -376,7 +376,7 @@ fn osaka_to_chiyo_routes_via_sakaki_and_the_chain_of_two_verifies_at_chiyo() {
 /// The same journey driven to its END: `chiyo` POLLS its relay, the hand-over
 /// files the letter (the poll's own seam: `outbox::hand_over` + the door's
 /// `deposit_container`), and `chiyo`'s receipt rides back to the origin. The
-/// origin let go of the letter on the relay's verified `accepted` (O1a), so the
+/// origin let go of the letter on the relay's verified `accepted`, so the
 /// receipt has no entry of its own to retire there.
 #[test]
 fn chiyos_poll_files_the_letter_the_relay_held_and_the_origin_had_let_go() {
@@ -1311,7 +1311,7 @@ fn a_polled_container_whose_last_hop_is_someone_else_is_refused() {
 /// carries osaka's letter on and holds it for `chiyo`; its own hop is the tail.
 /// Drop it, and the container `chiyo` is offered ends at `sakaki`, not at `chiyo`,
 /// so `chiyo` refuses it (`broken-chain`) and owes no ack: the letter is on no
-/// mailbox. The origin let go on the relay's verified `accepted` (O1a). That is
+/// mailbox. The origin let go on the relay's verified `accepted`. That is
 /// 131's trade, and MAIL.md says so: a relay that accepts and then drops the letter
 /// cannot be told from a delivery.
 #[test]

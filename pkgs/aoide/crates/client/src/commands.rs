@@ -5339,7 +5339,7 @@ fn delivery_projection(
 }
 
 /// The retry commands' read of `data.delivery`, taken AFTER their drain
-/// attempt returns successfully (spec item 8: the write is the report; this
+/// attempt returns successfully (the write is the report; this
 /// is additional, non-authoritative context).
 /// Never invents `"delivered"` from an entry that has simply vanished (a
 /// concurrent `mail outbox rm` racing this same command) — a missing
@@ -5570,7 +5570,7 @@ fn handle_mail_send(inv: &Invocation) -> Outcome {
         Ok(entry) => entry,
         Err(e) => return teach::store_failed(cmd, "state/outbox", &e),
     };
-    // L11 (the branch review): three states, not two. A parked letter is not sent in
+    // Three states, not two. A parked letter is not sent in
     // the clear, and says so; the sentence is built before the entry moves into the dial.
     let sealed = entry.is_sealed();
     let disposition = if sealed {
@@ -10660,7 +10660,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// **L3 (review r1): a send outside a session writes no `returned` audit line.**
+    /// **A send outside a session writes no `returned` audit line.**
     /// Nothing is kept, so nothing is returned to this box; a line here would name a
     /// return the command then discards.
     #[test]
@@ -10700,7 +10700,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// **L4 (review r1): a retry whose letter leaves the spool during its dial writes
+    /// **A retry whose letter leaves the spool during its dial writes
     /// nothing back.** The door refuses the letter, and a `mail outbox rm` (or a
     /// session end) removes it while the dial is in flight. The write-back finds
     /// nothing, so the letter is not re-spooled, and the report says it was removed.
@@ -12488,7 +12488,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// **L7 (review r1): an own letter with no session lists as `pre-131`, whatever
+    /// **An own letter with no session lists as `pre-131`, whatever
     /// its flags say.** The next tick drops it, and a retry refuses it with the same
     /// word, so a listing that said `returned` would claim what the box then refuses.
     #[test]
@@ -12613,7 +12613,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// **H2 (review r1): `retry --refused` never dials a held letter.** A held letter
+    /// **`retry --refused` never dials a held letter.** A held letter
     /// that is also refused is left as it is: no dial, no write, and the report says it
     /// is held and waiting for its node's poll.
     #[test]
@@ -12643,7 +12643,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// **M2 (review r1): a refused letter spooled before ruling 131 is never dialled.**
+    /// **A refused letter spooled before ruling 131 is never dialled.**
     /// Neither `retry <msgid>` nor `retry --refused` sends it: it has no session to
     /// keep it, and the next tick drops it.
     #[test]

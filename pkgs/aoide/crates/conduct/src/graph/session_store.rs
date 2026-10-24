@@ -3636,7 +3636,7 @@ mod tests {
     }
     /// **`session end` drops exactly that session's returned and held letters, one
     /// audit line each, and nothing of another session's.** A repeat end writes no
-    /// second line (item 4).
+    /// second line.
     #[test]
     fn session_end_drops_exactly_that_sessions_returned_and_held_letters() {
         use aoide_storage::mail::{Address, Envelope, Header};
