@@ -44,8 +44,9 @@ use serde_json::{json, Value};
 ///
 /// It counts attempts, so parked (`refused`) entries are filtered out before
 /// it applies. Counting them would starve the spool instead of bounding it:
-/// a parked entry is permanent until `mail outbox rm` retires it, and they
-/// sort oldest-first, so one batch's worth of them at the head would leave
+/// a parked entry is permanent until `mail outbox rm` retires it (an own letter
+/// also goes when its session ends), and they sort oldest-first, so one batch's
+/// worth of them at the head would leave
 /// every fresh letter behind them undialled forever.
 const DRAIN_BATCH_CAP: usize = 50;
 

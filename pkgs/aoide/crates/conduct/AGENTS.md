@@ -2919,6 +2919,14 @@ in the message.
   `aoide_client::mail_wire`, never a second implementation, and only after
   checking it truly cannot be called directly from `mail_wire` by whoever
   needs it.
+- **The session sweep and the roster-exit letter drop are not `mail_bridge`
+  functions, and do not become them.** They read the roster, so they live in
+  `graph/session_store.rs` (`sweep_session_letters`, `drop_ended_sessions`),
+  re-exported through `graph.rs`. Two orders hold there. The exit paths call
+  `drop_ended_sessions` after their roster write returns, never under the
+  roster lock. The sweep reads the sessions its letters name BEFORE the roster;
+  reversed, a live session's letter can look gone. A roster that cannot be read
+  skips the session pass; it is never taken as empty.
 
 ## Extension points
 

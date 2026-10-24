@@ -990,11 +990,12 @@ fn reap_pass(inv: &Invocation, closed: Option<&str>) -> Outcome {
             task_report.failed.len()
         );
     }
-    let ((mut outcome, tunnel_candidates, gone_remote), retired_readers) =
+    let ((mut outcome, tunnel_candidates, gone_remote, ended), retired_readers) =
         aoide_storage::fs::with_stage_lock(move || {
             let reaped = reap_inner(inv, closed);
             (reaped, retire_mail_readers())
         });
+    crate::graph::drop_ended_sessions(&ended);
     if !retired_readers.is_empty() {
         outcome.message = format!(
             "{}; retired {} mail reader mark(s)",
@@ -1358,8 +1359,10 @@ fn retire_mail_readers() -> Vec<(String, String)> {
 /// Returns the sweep's `Outcome`, the ssh tunnel candidates gathered under
 /// the stage lock (`orphan_tunnel_candidates`) — this function never kills or
 /// unlinks any of them itself, `reap` (the only caller) finishes that work
-/// AFTER `with_stage_lock` returns — and the END FACTS of every remote child
-/// that left the roster on this pass.
+/// AFTER `with_stage_lock` returns — the END FACTS of every remote child
+/// that left the roster on this pass, and the ids of every session this pass
+/// took off it, whose letters `reap_pass` drops once the lock is released
+/// (ruling 131).
 ///
 /// **Why a third return, and why it is not optional.** A remote child's exit
 /// is the one event its own node owes its far parent, and `pingback` (which
@@ -1384,15 +1387,15 @@ fn retire_mail_readers() -> Vec<(String, String)> {
 fn reap_inner(
     inv: &Invocation,
     closed: Option<&str>,
-) -> (Outcome, Vec<aoide_storage::tunnel::TunnelRecord>, Vec<DroppedEidolon>) {
+) -> (Outcome, Vec<aoide_storage::tunnel::TunnelRecord>, Vec<DroppedEidolon>, Vec<String>) {
     let cmd = "session.reap";
     let mut s_file: SessionsFile = match load_stage(&sessions_path()) {
         Ok(f) => f,
-        Err(e) => return (stage_error(cmd, e), Vec::new(), Vec::new()),
+        Err(e) => return (stage_error(cmd, e), Vec::new(), Vec::new(), Vec::new()),
     };
     let mut h_file: HooksFile = match load_stage(&hooks_path()) {
         Ok(f) => f,
-        Err(e) => return (stage_error(cmd, e), Vec::new(), Vec::new()),
+        Err(e) => return (stage_error(cmd, e), Vec::new(), Vec::new(), Vec::new()),
     };
 
     // Every remote child on the roster at the START of this pass, with the end
@@ -1722,12 +1725,14 @@ fn reap_inner(
             })),
             Vec::new(),
             Vec::new(),
+            Vec::new(),
         );
     }
 
     // Mark each reaped session done in BOTH files, then let prune_done drop them
     // (and any pre-existing `done`) + clear orphaned parentSessionIds.
     let dead: HashSet<&str> = reaped.iter().map(String::as_str).collect();
+    let mut ended: Vec<String> = Vec::new();
     for s in s_file.sessions.iter_mut() {
         if dead.contains(s.session_id.as_str()) {
             s.state = "done".to_string();
@@ -1754,6 +1759,7 @@ fn reap_inner(
             // exit routes through too (`doc.rs`'s `ledger_session_exit`), so
             // the two roster-exit paths can never double-write or diverge.
             ledger_session_exit(s, &now);
+            ended.push(s.session_id.clone());
         }
     }
     // A child whose death the tick has not claimed keeps its hook record as it
@@ -1850,13 +1856,13 @@ fn reap_inner(
         h_file.schema_version = STAGE_GRAPH_VERSION.to_string();
     }
     if let Err(e) = write_stage(&sessions_path(), &s_file) {
-        return (stage_error(cmd, e), Vec::new(), Vec::new());
+        return (stage_error(cmd, e), Vec::new(), Vec::new(), Vec::new());
     }
     // The roster is down; the ledger rows of every parent that just left it
     // follow it, never the other way round.
     drop_remote_child_rows(&gone_parents);
     if let Err(e) = write_stage(&hooks_path(), &h_file) {
-        return (stage_error(cmd, e), Vec::new(), Vec::new());
+        return (stage_error(cmd, e), Vec::new(), Vec::new(), ended);
     }
 
     let mut changed: Vec<String> = reaped
@@ -1907,7 +1913,7 @@ fn reap_inner(
     // under.
     match restage_graph() {
         Ok(g) => changed.push(g.to_string_lossy().into_owned()),
-        Err(e) => return (stage_error(cmd, e), Vec::new(), Vec::new()),
+        Err(e) => return (stage_error(cmd, e), Vec::new(), Vec::new(), ended),
     }
     let mut message = format!(
         "reaped {} dead session(s); dropped {} total; decayed {} stopped → idle; cleared {} orphaned parent link(s); dropped {} orphaned hook record(s); dropped {} superseded session(s); unlinked {} orphaned socket(s)",
@@ -1962,7 +1968,7 @@ fn reap_inner(
             outcome: r.outcome.clone(),
         })
         .collect();
-    (outcome, tunnel_candidates, gone_remote)
+    (outcome, tunnel_candidates, gone_remote, ended)
 }
 
 #[cfg(test)]
@@ -2992,6 +2998,66 @@ mod tests {
         let mine: Vec<_> = lines.iter().filter(|l| l.session_id == "dead-1").collect();
         assert_eq!(mine.len(), 1, "exactly one ledger line, never two: {lines:?}");
         assert!(!mine[0].ended_at.is_empty());
+
+        let _ = std::fs::remove_dir_all(&stage);
+    }
+
+    /// **A session the reap takes off the roster takes its letters with it, one audit
+    /// line each (ruling 131).** A returned letter bound to the reaped session goes; a
+    /// held letter bound to another session stays.
+    #[test]
+    fn reap_drops_the_letters_of_a_session_it_takes_off_the_roster() {
+        use aoide_storage::mail::{Address, Envelope, Header};
+        use aoide_storage::outbox::{list_entries, write_entry, OutboxEntry};
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = crate::graph::testutil::EnvVars::save(&["AOIDE_STAGE_DIR", "AOIDE_STATE_DIR", "AOIDE_AUDIT_LOG"]);
+        let stage = crate::graph::testutil::unique_stage("reap-letters");
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        std::env::set_var("AOIDE_STATE_DIR", stage.join("state"));
+        std::env::set_var("AOIDE_AUDIT_LOG", stage.join("audit.log"));
+        let _xdg = crate::graph::testutil::isolated_xdg_runtime("reap-letters-xdg");
+
+        let mut dead = hook_only("dead-1", "idle");
+        dead.started_at = "2000-01-01T00:00:00Z".into(); // long before any real boot
+        dead.cwd = "/nonexistent/pre-boot-ghost".into();
+        write_stage(&sessions_path(), &SessionsFile { schema_version: "0".into(), sessions: vec![dead] }).unwrap();
+
+        let letter = |msgid: &str, session: &str, held: bool| {
+            let envelope = Envelope {
+                header: Header {
+                    version: "1".into(),
+                    from: Address { node: "here".into(), name: "alice".into() },
+                    to: Address { node: "far".into(), name: "bob".into() },
+                    kind: "letter".into(),
+                    minted_at: "2026-10-23T00:00:00Z".into(),
+                    origin_mesh: String::new(),
+                },
+                text: "hi".into(),
+                sig: "ab".repeat(32),
+                msgid: msgid.into(),
+            };
+            let mut entry = if held {
+                OutboxEntry::held(envelope)
+            } else {
+                let mut entry = OutboxEntry::fresh(envelope);
+                entry.refused = true;
+                entry.last_outcome = "refused: down".into();
+                entry
+            };
+            entry.session = Some(session.into());
+            entry
+        };
+        write_entry("far", &letter("msg-reaped", "dead-1", false)).unwrap();
+        write_entry("far", &letter("msg-other", "other-1", true)).unwrap();
+
+        let out = reap(&crate::graph::testutil::invocation(&["session", "reap"], &[]));
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok, "msg: {}", out.message);
+        let left: Vec<String> = list_entries("far").unwrap().into_iter().map(|e| e.envelope.msgid).collect();
+        assert_eq!(left, vec!["msg-other".to_string()], "{left:?}");
+        let audit = std::fs::read_to_string(stage.join("audit.log")).unwrap_or_default();
+        let dropped: Vec<&str> = audit.lines().filter(|l| l.contains("mail.outbox.dropped")).collect();
+        assert_eq!(dropped.len(), 1, "one audit line for the one letter: {audit}");
+        assert!(dropped[0].contains("msg-reaped") && dropped[0].contains("session-ended"), "{}", dropped[0]);
 
         let _ = std::fs::remove_dir_all(&stage);
     }

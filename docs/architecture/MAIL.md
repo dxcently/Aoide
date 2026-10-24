@@ -778,7 +778,8 @@ carries plaintext.
 
 ```
 <msgid>.json    the envelope + local facts: flavor, route target, tries,
-                lastTry, lastOutcome
+                lastTry, lastOutcome, and for an own letter the `session`
+                that sent it
 link.json       { "holdUntil": ts, "lastError": "…" }   per-link backoff
 .bsy            flock'd while a drain session with this node runs
 .poll           flock'd while a poll of this node runs
@@ -792,6 +793,10 @@ link.json       { "holdUntil": ts, "lastError": "…" }   per-link backoff
   to this box's own outbox, marked `refused` with the word that ended the
   dial, exactly as it was sent: `aoide mail outbox retry <msgid>` resends it
   under the same msgid (sealed again first, if a binding has appeared since).
+  Only a send from a conducted session keeps a returned letter: the session is
+  bound to the entry as `session` (from `AOIDE_SESSION_ID`, never `--from`).
+  Outside one, nothing is written, the command fails with the reason, and a
+  letter to a `hold` node is refused `no-session` before any dial.
   A hop declared `down` is never dialled. The command waits for the outcome.
   Its worst wait is four capped calls, each at most 5 s to connect and 15 s in
   all: the binding exchange (only for a hop this box holds a pair record for,
@@ -805,6 +810,13 @@ link.json       { "holdUntil": ts, "lastError": "…" }   per-link backoff
   BSO means it: a drain that finds a link busy skips that link and moves
   to the next. Blocking would queue tick after tick behind one stalled
   ssh dial and starve every other link.
+- Each drain tick sweeps own letters before it drains (ruling 131). A
+  letter spooled before the rule has no session and goes (reason `pre-131`).
+  A letter whose session is off the roster or `done` goes too (reason
+  `session-gone`), unless the roster cannot be read: then that pass is skipped
+  and the pre-131 pass still runs. At most 500 letters go per pass, the rest
+  wait for the next tick, and each drop writes one `mail.outbox.dropped` audit
+  line.
 - Entries hold the envelope as minted — from P-SEAL, the sealed container
   — so a retry resends the same bytes on any transport.
 - A drain session reaches the node by its address's transport — an ssh
@@ -846,7 +858,11 @@ link.json       { "holdUntil": ts, "lastError": "…" }   per-link backoff
 - A `down` node's directory is skipped entirely; entries whose ORIGIN is
   `down` are dropped at the next drain.
 - An entry retires only on a valid ack (above) or `aoide mail outbox rm
-  <msgid>`; `mail outbox retry` never retires anything. `aoide mail outbox [<node>]` answers "did it land" truthfully
+  <msgid>`; `mail outbox retry` never retires anything. An own letter also
+  leaves with its sending session: when that session leaves the roster (ended,
+  reaped, or a hook death), every returned or held letter bound to it is
+  dropped, one `mail.outbox.dropped` audit line each (reason `session-ended`).
+  `aoide mail outbox [<node>]` answers "did it land" truthfully
   per entry via `data.delivery` — the same projection `aoide mail send`
   reports right after its own best-effort drain attempt, so neither
   command can drift from the other on what "queued"/"retrying"/etc. mean

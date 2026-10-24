@@ -810,7 +810,8 @@
   load-bearing: the cap bounds one tick's cost against an unbounded backlog
   rather than scaling with it; `refused` entries are filtered OUT BEFORE the
   cap applies, never skipped inside the loop (a parked entry is permanent
-  until `mail outbox rm` retires it and they sort oldest-first, so counting
+  until `mail outbox rm` retires it (an own letter also goes when its session
+  ends), and they sort oldest-first, so counting
   them against a cap the loop then skips leaves every fresh letter behind one
   batch's worth of them undialled forever —
   `a_wall_of_parked_entries_never_starves_a_fresh_letter_out_of_the_batch`

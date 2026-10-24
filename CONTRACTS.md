@@ -5420,6 +5420,15 @@ flavor is a LOCAL fact of the entry and never a field of the sealed
 envelope — the `msgid` covers every byte of the envelope, and the flavor
 is the sender's routing intent, not part of the letter.
 
+`session` is **v0+2 (ruling 131, additive)**: the id of the conducted session
+that sent an OWN letter (`aoide mail send` with `AOIDE_SESSION_ID` set; never
+`--from`), with control characters stripped. It is written only on a letter
+that is returned or held, and omitted from every other entry, so a pre-131
+spool file is byte-identical. The session's roster exit drops its letters
+(`mail.outbox.dropped`, reason `session-ended`); the tick sweep drops a letter
+with no session (`pre-131`) or whose session is off the roster or `done`
+(`session-gone`).
+
 **Amendment (P-CHARTER): a `poll` destination's entry is `hold`, decided for
 the caller.** The design's third transport member name is the ABSENCE of an
 inbound transport ("a node's address selects the transport by URL scheme";
@@ -5450,8 +5459,9 @@ set ONLY when a deposit attempt comes back a JSON-RPC REFUSAL (a transport
 failure backs the LINK off AND records the attempt on the entry it hit —
 `tries`/`lastTryAt`/`lastOutcome` — so an entry behind a dead link is
 never frozen at `tries: 0`, see below): a refused entry stays in the spool forever — no auto-eviction, no
-quota, no expiry, the kill-list — but a drain skips it on sight; only
-`mail outbox rm <msgid>` retires it.
+quota, no expiry, the kill-list — but a drain skips it on sight;
+`mail outbox rm <msgid>` retires it, and an own letter also leaves when its
+sending session does (ruling 131).
 
 **Two locks, two different jobs, never conflated.** Every entry/link-state
 read or write goes through this module's own copy of `mail`'s stage-lock

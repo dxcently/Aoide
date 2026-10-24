@@ -1852,14 +1852,28 @@ fn a_send_to_a_down_node_is_refused_at_the_route_and_nothing_is_dialled_or_kept(
 
 /// **A node declared `hold` spools every entry toward it held, and the drain
 /// never dials one.** The declaration decides the flavor at MINT — not the
-/// caller's `--hold` — so the route's own answer is what the spool carries.
+/// caller's `--hold` — so the route's own answer is what the spool carries. The
+/// held letter lasts as long as the session that sent it (ruling 131), so a send
+/// outside a session is refused before anything is written.
 #[test]
 fn an_entry_toward_a_declared_hold_node_is_spooled_held() {
     let _lock = env_lock();
     let (_env, fx) = fixture("hold-spool");
+    let _session = aoide_test_support::EnvSaver::capture(&["AOIDE_SESSION_ID"]);
     fx.set_home_status("osaka", &[("yomi", "hold")]);
 
     fx.enter("osaka");
+    std::env::remove_var("AOIDE_SESSION_ID");
+    let refused = dispatch(&cli_invocation(
+        &["mail", "send"],
+        &["held at the hop"],
+        &[("to", "yomi/conductor"), ("json", "true")],
+    ));
+    assert_eq!(refused.status, Status::Error, "{}", refused.message);
+    assert_eq!(refused.data.as_ref().unwrap()["reason"], "no-session", "{:?}", refused.data);
+    assert!(aoide_storage::outbox::list_entries("yomi").unwrap().is_empty(), "nothing is written outside a session");
+
+    std::env::set_var("AOIDE_SESSION_ID", "hold-spool-session");
     let sent = dispatch(&cli_invocation(
         &["mail", "send"],
         &["held at the hop"],
@@ -1878,6 +1892,7 @@ fn an_entry_toward_a_declared_hold_node_is_spooled_held() {
     let entries = aoide_storage::outbox::list_entries("yomi").unwrap();
     assert_eq!(entries.len(), 1, "{entries:?}");
     assert!(entries[0].is_held(), "spooled held, never dialled: {entries:?}");
+    assert_eq!(entries[0].session.as_deref(), Some("hold-spool-session"), "bound to the session that sent it: {entries:?}");
     assert_eq!(entries[0].tries, 0, "and the drain that followed did not dial it: {entries:?}");
 }
 
@@ -2069,11 +2084,12 @@ fn a_charter_signed_with_a_poll_node_lands_in_the_relays_hold_for_that_node() {
 /// **A `[status]` hold does not hold a charter letter.** The node a hold names
 /// must still receive the charter that holds it or lifts it, so the letters
 /// signed under `sakaki = "hold"` are spooled to be dialled, where an ordinary
-/// letter toward the same hop is held.
+/// letter toward the same hop is held, bound to the session that sent it.
 #[test]
 fn a_charter_letter_bypasses_a_status_hold() {
     let _lock = env_lock();
     let (_env, fx) = fixture("charter-hold");
+    let _session = aoide_test_support::EnvSaver::capture(&["AOIDE_SESSION_ID"]);
     fx.set_home_status("osaka", &[("sakaki", "hold")]);
 
     fx.enter(OPERATOR);
@@ -2082,11 +2098,17 @@ fn a_charter_letter_bypasses_a_status_hold() {
     assert!(entries.iter().all(|e| !e.is_held()), "never held by a status hold: {entries:?}");
 
     fx.enter("osaka");
+    std::env::set_var("AOIDE_SESSION_ID", "charter-hold-session");
     let sent = dispatch(&cli_invocation(&["mail", "send"], &["an ordinary letter"], &[("to", "chiyo/conductor"), ("json", "true")]));
     assert_eq!(sent.status, Status::Ok, "{}", sent.message);
+    let msgid = sent.data.as_ref().unwrap()["msgid"].as_str().unwrap().to_string();
+    let after = aoide_storage::outbox::list_entries("sakaki").unwrap();
+    let ordinary = after.iter().find(|e| e.envelope.msgid == msgid).expect("the ordinary letter is spooled toward the held hop");
+    assert!(ordinary.is_held(), "an ordinary letter toward the held hop is held: {ordinary:?}");
+    assert_eq!(ordinary.session.as_deref(), Some("charter-hold-session"), "{ordinary:?}");
     assert!(
-        aoide_storage::outbox::list_entries("sakaki").unwrap().iter().all(|e| e.is_held()),
-        "an ordinary letter toward the held hop is held"
+        after.iter().filter(|e| e.envelope.msgid != msgid).all(|e| !e.is_held()),
+        "the charters beside it are still dialled, never held: {after:?}"
     );
 }
 

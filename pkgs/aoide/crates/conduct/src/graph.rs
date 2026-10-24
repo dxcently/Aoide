@@ -332,6 +332,11 @@ pub(crate) use self::doc::{drop_remote_child_rows, drop_sessions, ledger_session
 pub(crate) use self::pingback::held_deaths;
 pub use self::doc::restage_graph;
 pub(crate) use self::model::{hooks_path, STAGE_GRAPH_VERSION};
+// The exit paths' letter drop (ruling 131) and the tick's sweep both read the
+// roster, so both live with it in `session_store`; `reap.rs` and the daemon
+// tick reach them here.
+pub(crate) use self::session_store::drop_ended_sessions;
+pub use self::session_store::sweep_session_letters;
 pub(crate) use self::session_store::{
     lineage_of, owned_by_live_wraps, refresh_subagent_says, refresh_transcript_fields, superseded_by, upsert_hook,
 };

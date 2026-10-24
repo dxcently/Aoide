@@ -1006,8 +1006,9 @@
   ssh dial. Don't relax `.bsy` to blocking, either — ruling 3 (P-M2 brief)
   is explicit that a busy link is SKIPPED, never queued behind, so one
   wedged drain can never starve every later one.
-- **An outbox entry retires ONLY on a valid ack or explicit `mail outbox
-  rm` (P-M2) — never auto-evicted, never expired, never capped.**
+- **An outbox entry retires ONLY on a valid ack, explicit `mail outbox rm`
+  (P-M2), or the drop of an own letter with its session (ruling 131) — never
+  auto-evicted, never expired, never capped.**
   `outbox::retire_by_ack` is the "valid ack" half — it trusts its caller
   (`mail::deposit`) to have already proven the ack's origin signature
   genuine, and never re-verifies; don't call it on an unverified envelope.
@@ -1095,8 +1096,10 @@
   best-effort net for a corrupted file, not the hot path). Every
   entry-removal call site — `mail_wire::drain_node`'s `Delivered`
   confirmation, `mail outbox rm`, `retire_by_ack`'s letter-entry removal
-  (a no-op marker-wise, since letters have no marker) — goes through this
-  one `remove_entry`, so none of them need their own awareness of the
+  (a no-op marker-wise, since letters have no marker), and the own-letter drop
+  (`drop_letters_where`, which takes the lock and calls the same
+  `remove_entry_unlocked`) — goes through one removal, so none of them need
+  their own awareness of the
   marker. Don't reintroduce a directory scan on the deposit path, and
   don't move marker creation ahead of the entry write.
 - **The gate self-heals an orphaned marker; an out-of-band mover need not

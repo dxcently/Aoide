@@ -1622,6 +1622,13 @@ blank one is refused too.
   the door and `mail_wire::poll_node`'s own hand-over loop cannot drift on
   what receiving a letter means.
 
+The tick's session sweep and the roster-exit letter drop (ruling 131) are not
+here. `graph::sweep_session_letters` and `graph::drop_ended_sessions` live in
+`graph/session_store.rs`, beside the roster they read. The drain tick runs the
+sweep, then `drain_all`. The reaper pass, a hook death and `session end` each
+call `drop_ended_sessions` after their roster write returns, never under the
+roster lock. `mail_bridge` stays passthroughs only.
+
 ## What it consumes
 
 `aoide-protocol`, `aoide-storage`, `aoide-upkeep` (`session hook`'s check-lane

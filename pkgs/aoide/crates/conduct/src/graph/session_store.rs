@@ -2056,12 +2056,13 @@ fn hosted_open_children(sessions: &[SessionRecord], hooks: &[HookRecord], host: 
 /// closed as `done`. A closed phase is left exactly as it is, and when nothing is
 /// open the files are not touched at all.
 pub(in crate::graph) fn record_hook_deaths(host: &str, host_pid: u32, end: &HookDeath) {
-    with_stage_lock(|| {
-        let Ok(mut sessions) = load_stage::<SessionsFile>(&sessions_path()) else { return };
-        let Ok(mut hooks) = load_stage::<HooksFile>(&hooks_path()) else { return };
+    let ended = with_stage_lock(|| {
+        let mut ended = Vec::new();
+        let Ok(mut sessions) = load_stage::<SessionsFile>(&sessions_path()) else { return ended };
+        let Ok(mut hooks) = load_stage::<HooksFile>(&hooks_path()) else { return ended };
         let doomed = hosted_open_children(&sessions.sessions, &hooks.hooks, host, host_pid);
         if doomed.is_empty() {
-            return;
+            return ended;
         }
         let now = now_iso_utc();
         let mut by_harness: BTreeMap<u32, Vec<&Doomed>> = BTreeMap::new();
@@ -2082,22 +2083,25 @@ pub(in crate::graph) fn record_hook_deaths(host: &str, host_pid: u32, end: &Hook
             s.activity = None;
             clear_screen_ask(s);
             ledger_session_exit(s, &now);
+            ended.push(s.session_id.clone());
         }
         if hooks.schema_version.is_empty() {
             hooks.schema_version = STAGE_GRAPH_VERSION.to_string();
         }
         if let Err(e) = write_stage(&hooks_path(), &hooks) {
             eprintln!("[aoide/conduct] hook death not recorded for `{host}`: {e}");
-            return;
+            return Vec::new();
         }
         if let Err(e) = write_stage(&sessions_path(), &sessions) {
             eprintln!("[aoide/conduct] hosted child not marked done for `{host}`: {e}");
-            return;
+            return Vec::new();
         }
         if let Err(e) = restage_graph() {
             eprintln!("[aoide/conduct] graph restage after hook death failed: {e}");
         }
+        ended
     });
+    drop_ended_sessions(&ended);
 }
 
 /// Core of `session end`: mark the session `done` (and its hook phase
@@ -2135,10 +2139,12 @@ pub(in crate::graph) fn record_hook_deaths(host: &str, host_pid: u32, end: &Hook
 /// reported failure. A refused end closes neither the tunnels nor the check
 /// lane's baseline: the session goes on using both.
 pub(in crate::graph) fn do_session_end(id: &str, caller: Option<i32>, attests_death: bool) -> Outcome {
+    let mut ended = Vec::new();
     let (outcome, anchor) = with_stage_lock(|| match live_harness_anchoring(id, caller) {
         Some(harness) => (anchored_refusal("session.end", id, harness), Some(harness)),
-        None => (do_session_end_inner(id, caller, attests_death), None),
+        None => (do_session_end_inner(id, caller, attests_death, &mut ended), None),
     });
+    drop_ended_sessions(&ended);
     if anchor.is_some() {
         return outcome;
     }
@@ -2179,7 +2185,7 @@ pub(in crate::graph) fn anchored_refusal(cmd: &str, id: &str, harness: u32) -> O
     .with_data(json!({ "sessionId": id, "reason": "harness-anchored", "harness": harness }))
 }
 
-fn do_session_end_inner(id: &str, caller: Option<i32>, attests_death: bool) -> Outcome {
+fn do_session_end_inner(id: &str, caller: Option<i32>, attests_death: bool, ended: &mut Vec<String>) -> Outcome {
     let cmd = "session.end";
     let mut s_file: SessionsFile = match load_stage(&sessions_path()) {
         Ok(f) => f,
@@ -2196,6 +2202,7 @@ fn do_session_end_inner(id: &str, caller: Option<i32>, attests_death: bool) -> O
         return out;
     }
     let now = now_iso_utc();
+    let transitioned = s_file.sessions.iter().any(|s| s.session_id == id && s.state != "done");
     let ended_mid_turn = s_file
         .sessions
         .iter()
@@ -2257,6 +2264,9 @@ fn do_session_end_inner(id: &str, caller: Option<i32>, attests_death: bool) -> O
     }
     if let Err(e) = write_stage(&sessions_path(), &s_file) {
         return stage_error(cmd, e);
+    }
+    if transitioned {
+        ended.push(id.to_string());
     }
 
     // Mirror the terminal state into hooks.json so the merged live phase agrees.
@@ -2424,6 +2434,73 @@ fn asking_pid(inv: &Invocation) -> Option<i32> {
 /// no daemon key, so it answers the same with a daemon or without one.
 pub(in crate::graph) fn live_wrap_refusal_for(id: &str) -> Option<String> {
     protected_wrap(id).map(|_| super::identity::live_wrap_refusal(id))
+}
+
+/// Own letters the tick's sweep may drop per pass. A spool written before
+/// ruling 131 can hold thousands (osaka's held 16.5k+), so the rest waits for
+/// the next tick and one tick never holds the outbox lock for long.
+const SWEEP_BATCH: usize = 500;
+
+/// The one roster-exit helper (ruling 131): drops the letters of sessions that
+/// have just left the roster, one audit line each. The exit paths call it after
+/// their roster write returns, never under the roster lock. A failure is
+/// reported; the exit stands.
+pub(crate) fn drop_ended_sessions(ids: &[String]) {
+    for id in ids {
+        if let Err(e) = aoide_storage::outbox::drop_for_session(id) {
+            eprintln!("[aoide/conduct] letters of ended session `{id}` not dropped: {e}");
+        }
+    }
+}
+
+/// The tick's session sweep, run before the mail drain (ruling 131). A letter
+/// spooled before the rule has no session and goes (`pre-131`). A letter whose
+/// session is off the roster or `done` goes too (`session-gone`), unless the
+/// roster cannot be read: that pass is skipped and the pre-131 pass still runs.
+pub fn sweep_session_letters() {
+    if let Err(e) = aoide_storage::outbox::drop_letters_where(|l| l.session.is_none(), SWEEP_BATCH, "pre-131") {
+        eprintln!("[aoide/conduct] pre-131 letters not swept: {e}");
+    }
+    // Letters first, roster second: a session's letter is written only while the
+    // session is on the roster, so every session the letters name is on the
+    // roster read next, unless it has since ended.
+    let bound = match aoide_storage::outbox::own_letter_sessions() {
+        Ok(bound) => bound,
+        Err(e) => {
+            eprintln!("[aoide/conduct] session letters not swept: {e}");
+            return;
+        }
+    };
+    let live = match roster_live_sessions() {
+        Ok(live) => live,
+        Err(e) => {
+            eprintln!("[aoide/conduct] session letters not swept, the roster cannot be read: {e}");
+            return;
+        }
+    };
+    let gone: HashSet<String> = bound.into_iter().filter(|id| !live.contains(id)).collect();
+    if gone.is_empty() {
+        return;
+    }
+    if let Err(e) = aoide_storage::outbox::drop_letters_where(
+        |l| l.session.as_ref().is_some_and(|id| gone.contains(id)),
+        SWEEP_BATCH,
+        "session-gone",
+    ) {
+        eprintln!("[aoide/conduct] session letters not swept: {e}");
+    }
+}
+
+/// The sessions on the roster that have not ended. A roster that is missing or
+/// unreadable is an error, never an empty roster: the sweep must not take a lost
+/// file for "every session is gone".
+fn roster_live_sessions() -> Result<HashSet<String>, String> {
+    let path = sessions_path();
+    if !path.exists() {
+        return Err(format!("{} is missing", path.display()));
+    }
+    let roster: SessionsFile = load_stage(&path)?;
+    Ok(roster.sessions.into_iter().filter(|s| s.state != "done").map(|s| s.session_id).collect())
 }
 
 #[cfg(test)]
@@ -3557,6 +3634,69 @@ mod tests {
         }
         let _ = std::fs::remove_dir_all(&stage);
     }
+    /// **`session end` drops exactly that session's returned and held letters, one
+    /// audit line each, and nothing of another session's.** A repeat end writes no
+    /// second line (item 4).
+    #[test]
+    fn session_end_drops_exactly_that_sessions_returned_and_held_letters() {
+        use aoide_storage::mail::{Address, Envelope, Header};
+        use aoide_storage::outbox::{list_entries, write_entry, OutboxEntry};
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&["AOIDE_STAGE_DIR", "AOIDE_STATE_DIR", "AOIDE_AUDIT_LOG"]);
+        let stage = unique_stage("sess-end-letters");
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        std::env::set_var("AOIDE_STATE_DIR", stage.join("state"));
+        std::env::set_var("AOIDE_AUDIT_LOG", stage.join("audit.log"));
+
+        for id in ["letters-ended-1", "letters-kept-1"] {
+            session_start(&flag_invocation(&["session", "start"], &[("id", id), ("agent", "claude"), ("cwd", "/w")]));
+        }
+        let letter = |msgid: &str, session: &str, held: bool| {
+            let envelope = Envelope {
+                header: Header {
+                    version: "1".to_string(),
+                    from: Address { node: "here".to_string(), name: "alice".to_string() },
+                    to: Address { node: "far".to_string(), name: "bob".to_string() },
+                    kind: "letter".to_string(),
+                    minted_at: "2026-10-23T00:00:00Z".to_string(),
+                    origin_mesh: String::new(),
+                },
+                text: "hi".to_string(),
+                sig: "ab".repeat(32),
+                msgid: msgid.to_string(),
+            };
+            let mut entry = if held {
+                OutboxEntry::held(envelope)
+            } else {
+                let mut entry = OutboxEntry::fresh(envelope);
+                entry.refused = true;
+                entry.last_outcome = "refused: down".to_string();
+                entry
+            };
+            entry.session = Some(session.to_string());
+            entry
+        };
+        write_entry("far", &letter("msg-returned", "letters-ended-1", false)).unwrap();
+        write_entry("far", &letter("msg-held", "letters-ended-1", true)).unwrap();
+        write_entry("far", &letter("msg-kept", "letters-kept-1", false)).unwrap();
+
+        let out = session_end(&flag_invocation(&["session", "end"], &[("id", "letters-ended-1")]));
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok, "msg: {}", out.message);
+        let left: Vec<String> = list_entries("far").unwrap().into_iter().map(|e| e.envelope.msgid).collect();
+        assert_eq!(left, vec!["msg-kept".to_string()], "{left:?}");
+        let audit = |tag: &str| {
+            std::fs::read_to_string(stage.join("audit.log"))
+                .unwrap_or_default()
+                .lines()
+                .filter(|l| l.contains("mail.outbox.dropped") && l.contains(tag))
+                .count()
+        };
+        assert_eq!(audit("msg-returned") + audit("msg-held"), 2, "one line per dropped letter");
+
+        let _ = session_end(&flag_invocation(&["session", "end"], &[("id", "letters-ended-1")]));
+        assert_eq!(audit("msg-returned") + audit("msg-held"), 2, "a repeat end writes no second line");
+    }
+
     #[test]
     fn session_end_appends_exactly_one_ledger_line() {
         // P-D8: the `do_session_end` half of "clean end and reap each
@@ -5140,6 +5280,80 @@ mod hosted_death_tests {
         }
         let _ = std::fs::remove_dir_all(&stage);
     }
+    /// **A hook death takes its children's letters with it, one audit line each
+    /// (ruling 131).** A letter bound to a session the death does not end stays.
+    #[test]
+    fn a_hook_death_drops_the_letters_of_each_child_it_ends() {
+        use aoide_storage::mail::{Address, Envelope, Header};
+        use aoide_storage::outbox::{list_entries, write_entry, OutboxEntry};
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = crate::graph::testutil::EnvVars::save(&["AOIDE_STAGE_DIR", "AOIDE_STATE_DIR", "AOIDE_AUDIT_LOG"]);
+        let stage = crate::graph::testutil::unique_stage("hook-death-letters");
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        std::env::set_var("AOIDE_STATE_DIR", stage.join("state"));
+        std::env::set_var("AOIDE_AUDIT_LOG", stage.join("audit.log"));
+        let me = 4242u32;
+        let child = |id: &str| {
+            let mut s = crate::graph::testutil::session(id, "/w", "working", "2026-10-07T10:00:00Z", Some("wrap"));
+            s.hook_ancestry = vec![999_999, me as i32];
+            s.activity = Some("Bash".into());
+            s
+        };
+        let bystander = crate::graph::testutil::session("bystander", "/w", "working", "2026-10-07T10:00:00Z", None);
+        write_stage(
+            &sessions_path(),
+            &SessionsFile { schema_version: STAGE_GRAPH_VERSION.into(), sessions: vec![child("old"), child("new"), bystander] },
+        )
+        .unwrap();
+        let hook = |id: &str| HookRecord {
+            session_id: id.into(),
+            phase: "working".into(),
+            updated_at: "2026-10-07T10:00:00Z".into(),
+            ..Default::default()
+        };
+        write_stage(
+            &hooks_path(),
+            &HooksFile { schema_version: STAGE_GRAPH_VERSION.into(), hooks: vec![hook("old"), hook("new")] },
+        )
+        .unwrap();
+        let letter = |msgid: &str, session: &str, held: bool| {
+            let envelope = Envelope {
+                header: Header {
+                    version: "1".into(),
+                    from: Address { node: "here".into(), name: "alice".into() },
+                    to: Address { node: "far".into(), name: "bob".into() },
+                    kind: "letter".into(),
+                    minted_at: "2026-10-23T00:00:00Z".into(),
+                    origin_mesh: String::new(),
+                },
+                text: "hi".into(),
+                sig: "ab".repeat(32),
+                msgid: msgid.into(),
+            };
+            let mut entry = if held {
+                OutboxEntry::held(envelope)
+            } else {
+                let mut entry = OutboxEntry::fresh(envelope);
+                entry.refused = true;
+                entry.last_outcome = "refused: down".into();
+                entry
+            };
+            entry.session = Some(session.into());
+            entry
+        };
+        write_entry("far", &letter("msg-old", "old", true)).unwrap();
+        write_entry("far", &letter("msg-new", "new", false)).unwrap();
+        write_entry("far", &letter("msg-bystander", "bystander", false)).unwrap();
+
+        record_hook_deaths("wrap", me, &HookDeath { outcome: Some("exit".into()), exit_code: Some(1), ..Default::default() });
+
+        let left: Vec<String> = list_entries("far").unwrap().into_iter().map(|e| e.envelope.msgid).collect();
+        assert_eq!(left, vec!["msg-bystander".to_string()], "{left:?}");
+        let audit = std::fs::read_to_string(stage.join("audit.log")).unwrap_or_default();
+        assert_eq!(audit.lines().filter(|l| l.contains("mail.outbox.dropped")).count(), 2, "one line per dropped letter: {audit}");
+
+        let _ = std::fs::remove_dir_all(&stage);
+    }
 }
 
 #[cfg(test)]
@@ -5906,3 +6120,120 @@ mod reserved_sub_ids {
     }
 }
 
+#[cfg(test)]
+mod letter_sweep_tests {
+    use super::*;
+    use aoide_storage::outbox::OutboxEntry;
+
+    fn root(tag: &str) -> (aoide_test_support::EnvSaver, std::path::PathBuf) {
+        aoide_test_support::isolated_mail_root(tag)
+    }
+
+    /// Write the roster as `(session id, state)` pairs.
+    fn roster(sessions: &[(&str, &str)]) {
+        use aoide_storage::records::{SessionRecord, SessionsFile};
+        use aoide_storage::stage::{sessions_path, write_stage};
+        let file = SessionsFile {
+            sessions: sessions
+                .iter()
+                .map(|(id, state)| SessionRecord {
+                    session_id: id.to_string(),
+                    state: state.to_string(),
+                    ..Default::default()
+                })
+                .collect(),
+            ..Default::default()
+        };
+        std::fs::create_dir_all(sessions_path().parent().unwrap()).unwrap();
+        write_stage(&sessions_path(), &file).unwrap();
+    }
+
+    /// One returned own letter toward `far`, bound to `session` (none for a letter
+    /// spooled before ruling 131).
+    fn returned_letter(msgid: &str, session: Option<&str>) -> OutboxEntry {
+        let mut entry = OutboxEntry::fresh(letter_envelope(msgid));
+        entry.refused = true;
+        entry.last_outcome = "refused: down".to_string();
+        entry.session = session.map(str::to_string);
+        entry
+    }
+
+    /// A letter's envelope, built by hand: no identity is minted in this test.
+    fn letter_envelope(msgid: &str) -> aoide_storage::mail::Envelope {
+        use aoide_storage::mail::{Address, Envelope, Header};
+        Envelope {
+            header: Header {
+                version: "1".to_string(),
+                from: Address { node: "here".to_string(), name: "alice".to_string() },
+                to: Address { node: "far".to_string(), name: "bob".to_string() },
+                kind: "letter".to_string(),
+                minted_at: "2026-10-23T00:00:00Z".to_string(),
+                origin_mesh: String::new(),
+            },
+            text: "hi".to_string(),
+            sig: "ab".repeat(32),
+            msgid: msgid.to_string(),
+        }
+    }
+
+    fn spooled_msgids() -> Vec<String> {
+        let mut msgids: Vec<String> =
+            aoide_storage::outbox::list_entries("far").unwrap().into_iter().map(|e| e.envelope.msgid).collect();
+        msgids.sort();
+        msgids
+    }
+
+    /// **The tick drops a letter whose session is off the roster or `done`, and a
+    /// letter spooled before ruling 131; a letter whose session is live stays.**
+    #[test]
+    fn the_tick_sweep_drops_ended_and_unknown_sessions_and_pre_131_letters() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("bridge-sweep");
+        roster(&[("live", "running"), ("ended", "done")]);
+        for (msgid, session) in [
+            ("msg-live", Some("live")),
+            ("msg-ended", Some("ended")),
+            ("msg-gone", Some("gone")),
+            ("msg-pre", None),
+        ] {
+            aoide_storage::outbox::write_entry("far", &returned_letter(msgid, session)).unwrap();
+        }
+
+        sweep_session_letters();
+
+        assert_eq!(spooled_msgids(), vec!["msg-live".to_string()]);
+        let lines = audit_lines("mail.outbox.dropped");
+        assert_eq!(lines.len(), 3, "one line per dropped letter: {lines:?}");
+        assert!(lines.iter().any(|l| l.contains("pre-131")), "{lines:?}");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **A roster that cannot be read skips the session pass, and only that pass.**
+    /// Bound letters stay; a pre-131 letter does not need the roster and goes.
+    #[test]
+    fn an_unreadable_roster_skips_the_session_pass_and_keeps_every_bound_letter() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("bridge-sweep-no-roster");
+        std::fs::create_dir_all(aoide_storage::stage::sessions_path().parent().unwrap()).unwrap();
+        std::fs::write(aoide_storage::stage::sessions_path(), "{not json").unwrap();
+        aoide_storage::outbox::write_entry("far", &returned_letter("msg-bound", Some("gone"))).unwrap();
+        aoide_storage::outbox::write_entry("far", &returned_letter("msg-pre", None)).unwrap();
+
+        sweep_session_letters();
+
+        assert_eq!(spooled_msgids(), vec!["msg-bound".to_string()]);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The audit lines one command wrote.
+    fn audit_lines(command: &str) -> Vec<String> {
+        std::fs::read_to_string(aoide_protocol::audit::default_audit_log())
+            .unwrap_or_default()
+            .lines()
+            .filter(|line| line.contains(command))
+            .map(str::to_string)
+            .collect()
+    }
+}

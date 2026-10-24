@@ -877,8 +877,8 @@ by decision — no embedded database yet
   entry's own removal (`remove_entry`, which reads the ONE file it is
   about to delete — never the directory — to decide whether to clear a
   marker), so every retirement path (a drain's delivery confirmation, an
-  explicit `mail outbox rm`) keeps the marker's presence exactly in sync
-  with the entry's. No network,
+  explicit `mail outbox rm`, an own letter's session drop) keeps the marker's
+  presence exactly in sync with the entry's. No network,
   no HTTP, no tunnel — the actual dial+POST lives in
   `aoide-client::mail_wire` (bounded to `DRAIN_BATCH_CAP` entries per
   `drain_node` call, and recording `tries`/`lastOutcome`/`lastTryAt` on
@@ -901,8 +901,9 @@ by decision — no embedded database yet
   peer — parked/refused ones included, a never-attempted one excluded
   because the drain owns it). **It writes nothing at all** — no `tries`,
   no bookmark, no new file: that is what makes a re-poll before the ack
-  hand the same envelopes over again, and why retirement stays exactly the
-  two paths it always had (a valid ack, `mail outbox rm`). The offer is
+  hand the same envelopes over again, and why an entry leaves the spool only
+  by a valid ack, `mail outbox rm`, or an own letter's session end (ruling
+  131). The offer is
   bounded at `POLL_BATCH_CAP` (50 — the drain's own batch size,
   re-derived rather than imported, since `storage` sits below `client` in
   the DAG), oldest first, and the cap applies AFTER the filter for the

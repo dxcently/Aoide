@@ -557,7 +557,8 @@ terminal's rights to its remote callers.
   `hold` entry toward that node plus every `now` entry whose own attempts have
   been failing. **A poll writes NOTHING** — no `tries`, no bookmark, no new
   state file anywhere: hand-over leaves the entry exactly where it was, and it
-  retires only the two ways it always did (a valid ack, `mail outbox rm`), which
+  retires only the ways it always did (a valid ack, `mail outbox rm`) and, for
+  an own letter, its session's end (ruling 131), which
   is what makes a re-poll before the ack hand the same envelopes over again by
   construction. It self-audits UNCONDITIONALLY under its own
   `a2a.aoide/mailPoll` label, carrying the caller and the handed-over COUNT —

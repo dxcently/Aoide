@@ -167,13 +167,19 @@ pub struct OutboxEntry {
     /// Set once a deposit attempt returns a JSON-RPC REFUSAL — never for a
     /// transport failure, which backs the LINK off instead (the drain
     /// pseudocode's own distinction). A refused entry stays in the spool
-    /// forever (the kill-list: no auto-eviction, no quota, no expiry) but
-    /// a drain skips it on sight. **Parked, not condemned**: a policy
+    /// (the kill-list: no auto-eviction, no quota, no expiry) and a drain
+    /// skips it on sight. **Parked, not condemned**: a policy
     /// refusal is remediable (the far end's `allows` can be granted), so
     /// [`unpark_entry`]/[`unpark_refused`] clear this flag and the next
-    /// drain attempts the entry again; only `mail outbox rm` retires it.
+    /// drain attempts the entry again. One exception to "no auto-eviction": a
+    /// returned own letter leaves with the session that sent it (ruling 131).
     #[serde(default)]
     pub refused: bool,
+    /// The session that sent this own `letter`, when it is returned or held
+    /// (ruling 131): the letter lives exactly as long as that session does. Set
+    /// from `AOIDE_SESSION_ID` and never from `--from`; absent on every other entry.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session: Option<String>,
 }
 
 impl OutboxEntry {
@@ -188,6 +194,7 @@ impl OutboxEntry {
             last_try_at: String::new(),
             last_outcome: String::new(),
             refused: false,
+            session: None,
         }
     }
 
@@ -221,6 +228,7 @@ impl OutboxEntry {
             last_try_at: String::new(),
             last_outcome: String::new(),
             refused: false,
+            session: None,
         }
     }
 
@@ -258,7 +266,7 @@ impl OutboxEntry {
             origin_mesh: container.origin_mesh.clone(),
         };
         let envelope = Envelope { header, text: String::new(), sig: String::new(), msgid: container.msgid.clone() };
-        Self { envelope, container: Some(container), flavor: flavor.to_string(), tries: 0, last_try_at: String::new(), last_outcome: String::new(), refused: false }
+        Self { envelope, container: Some(container), flavor: flavor.to_string(), tries: 0, last_try_at: String::new(), last_outcome: String::new(), refused: false, session: None }
     }
 
     /// What this entry hands the far end on a deposit: the container when
@@ -491,25 +499,29 @@ fn with_lock<T>(f: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
 /// `state/outbox/` (no node has ever had anything spooled) — an empty
 /// `Vec`, never an error.
 pub fn nodes_with_outbox() -> Result<Vec<String>, String> {
-    with_lock(|| {
-        let dir = outbox_dir();
-        let read_dir = match std::fs::read_dir(&dir) {
-            Ok(rd) => rd,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-            Err(e) => return Err(format!("{}: {e}", dir.display())),
-        };
-        let mut out = Vec::new();
-        for entry in read_dir {
-            let entry = entry.map_err(|e| format!("{}: {e}", dir.display()))?;
-            if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
-                if let Some(name) = entry.file_name().to_str() {
-                    out.push(name.to_string());
-                }
+    with_lock(nodes_with_outbox_unlocked)
+}
+
+/// [`nodes_with_outbox`]'s listing, for a caller that already holds the outbox
+/// lock.
+fn nodes_with_outbox_unlocked() -> Result<Vec<String>, String> {
+    let dir = outbox_dir();
+    let read_dir = match std::fs::read_dir(&dir) {
+        Ok(rd) => rd,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(e) => return Err(format!("{}: {e}", dir.display())),
+    };
+    let mut out = Vec::new();
+    for entry in read_dir {
+        let entry = entry.map_err(|e| format!("{}: {e}", dir.display()))?;
+        if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+            if let Some(name) = entry.file_name().to_str() {
+                out.push(name.to_string());
             }
         }
-        out.sort();
-        Ok(out)
-    })
+    }
+    out.sort();
+    Ok(out)
 }
 
 /// Raw write of one entry file — assumes the caller already holds the
@@ -678,40 +690,44 @@ pub fn write_ack_if_absent(node: &str, acked_msgid: &str, entry: &OutboxEntry) -
 /// directory (nothing ever spooled to this node) is an empty `Vec`.
 pub fn list_entries(node: &str) -> Result<Vec<OutboxEntry>, String> {
     let node = node.to_string();
-    with_lock(move || {
-        let dir = node_dir(&node);
-        let read_dir = match std::fs::read_dir(&dir) {
-            Ok(rd) => rd,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-            Err(e) => return Err(format!("{}: {e}", dir.display())),
-        };
-        let mut out = Vec::new();
-        for dir_entry in read_dir {
-            let dir_entry = dir_entry.map_err(|e| format!("{}: {e}", dir.display()))?;
-            let path = dir_entry.path();
-            if path.file_name().and_then(|n| n.to_str()) == Some("link.json") {
-                continue;
-            }
-            if matches!(path.file_name().and_then(|n| n.to_str()), Some(".bsy" | ".poll")) {
-                continue;
-            }
-            if path.extension().and_then(|e| e.to_str()) != Some("json") {
-                continue;
-            }
-            let Ok(raw) = std::fs::read_to_string(&path) else { continue };
-            if let Ok(parsed) = serde_json::from_str::<OutboxEntry>(&raw) {
-                out.push(parsed);
-            }
+    with_lock(move || list_entries_unlocked(&node))
+}
+
+/// [`list_entries`]'s read, for a caller that already holds the outbox lock:
+/// the sweeps read every node inside one locked section.
+fn list_entries_unlocked(node: &str) -> Result<Vec<OutboxEntry>, String> {
+    let dir = node_dir(&node);
+    let read_dir = match std::fs::read_dir(&dir) {
+        Ok(rd) => rd,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(e) => return Err(format!("{}: {e}", dir.display())),
+    };
+    let mut out = Vec::new();
+    for dir_entry in read_dir {
+        let dir_entry = dir_entry.map_err(|e| format!("{}: {e}", dir.display()))?;
+        let path = dir_entry.path();
+        if path.file_name().and_then(|n| n.to_str()) == Some("link.json") {
+            continue;
         }
-        out.sort_by(|a: &OutboxEntry, b: &OutboxEntry| {
-            a.envelope
-                .header
-                .minted_at
-                .cmp(&b.envelope.header.minted_at)
-                .then_with(|| a.envelope.msgid.cmp(&b.envelope.msgid))
-        });
-        Ok(out)
-    })
+        if matches!(path.file_name().and_then(|n| n.to_str()), Some(".bsy" | ".poll")) {
+            continue;
+        }
+        if path.extension().and_then(|e| e.to_str()) != Some("json") {
+            continue;
+        }
+        let Ok(raw) = std::fs::read_to_string(&path) else { continue };
+        if let Ok(parsed) = serde_json::from_str::<OutboxEntry>(&raw) {
+            out.push(parsed);
+        }
+    }
+    out.sort_by(|a: &OutboxEntry, b: &OutboxEntry| {
+        a.envelope
+            .header
+            .minted_at
+            .cmp(&b.envelope.header.minted_at)
+            .then_with(|| a.envelope.msgid.cmp(&b.envelope.msgid))
+    });
+    Ok(out)
 }
 
 /// The envelopes one node's own `aoide/mailPoll` receives (MAIL.md §Wire):
@@ -721,8 +737,9 @@ pub fn list_entries(node: &str) -> Result<Vec<OutboxEntry>, String> {
 /// **A poll is a READ.** Hand-over writes nothing at all: no `tries`, no
 /// `last_outcome`, no new state file. That is what makes a re-poll before
 /// the ack hand the same entries over again by construction (the predicate
-/// still holds), and it is why an entry leaves the spool only the two ways
-/// it always did — a valid ack ([`retire_by_ack`]) or `mail outbox rm`.
+/// still holds), and it is why an entry leaves the spool only by a valid ack
+/// ([`retire_by_ack`]), `mail outbox rm`, or an own letter's session ending
+/// (ruling 131).
 ///
 /// "Attempts have been failing" = the entry has been attempted at least
 /// once (`tries > 0`) and its last attempt did not reach the peer
@@ -808,6 +825,85 @@ fn now_epoch() -> i64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0)
 }
 
+/// Drop every own letter bound to `session`, returned or held: the session has
+/// ended, and a letter lives exactly as long as the session that sent it (ruling
+/// 131). One `mail.outbox.dropped` audit line each. Idempotent: a repeat finds
+/// nothing and writes no second line.
+pub fn drop_for_session(session: &str) -> Result<usize, String> {
+    drop_letters_where(
+        |entry| entry.session.as_deref() == Some(session),
+        usize::MAX,
+        "session-ended",
+    )
+}
+
+/// Drop at most `limit` own letters that `select` takes, one `mail.outbox.dropped`
+/// audit line each, carrying `reason`. Only `letter` entries are considered:
+/// receipts, charters and transit custody are never dropped here. Each line is
+/// written before its file is removed, so a letter whose line cannot be written
+/// stays spooled.
+pub fn drop_letters_where(
+    select: impl Fn(&OutboxEntry) -> bool,
+    limit: usize,
+    reason: &str,
+) -> Result<usize, String> {
+    with_lock(|| {
+        let mut dropped = 0;
+        for node in nodes_with_outbox_unlocked()? {
+            for entry in list_entries_unlocked(&node)? {
+                if dropped >= limit {
+                    return Ok(dropped);
+                }
+                if entry.envelope.header.kind != crate::mail::ENTRY_TYPE_LETTER || !select(&entry) {
+                    continue;
+                }
+                let msgid = entry.envelope.msgid.clone();
+                let bound = entry.session.as_deref().map(|s| format!(", session {s}")).unwrap_or_default();
+                aoide_protocol::audit::audit(
+                    &aoide_protocol::audit::default_audit_log(),
+                    aoide_protocol::Door::Cli,
+                    aoide_protocol::audit::EventClass::Audit,
+                    "mail.outbox.dropped",
+                    "ok",
+                    &format!("dropped letter {msgid} toward {node} ({reason}{bound})"),
+                )
+                .map_err(|e| format!("the audit log cannot be written, so the letter stays: {e}"))?;
+                if remove_entry_unlocked(&node, &msgid)? {
+                    dropped += 1;
+                }
+            }
+        }
+        Ok(dropped)
+    })
+}
+
+/// The sessions own letters are bound to, each once, sorted. The tick's sweep
+/// reads it to find the sessions whose letters may have outlived them.
+pub fn own_letter_sessions() -> Result<Vec<String>, String> {
+    with_lock(|| {
+        let mut sessions = std::collections::BTreeSet::new();
+        for node in nodes_with_outbox_unlocked()? {
+            for entry in list_entries_unlocked(&node)? {
+                if entry.envelope.header.kind == crate::mail::ENTRY_TYPE_LETTER {
+                    if let Some(session) = entry.session {
+                        sessions.insert(session);
+                    }
+                }
+            }
+        }
+        Ok(sessions.into_iter().collect())
+    })
+}
+
+/// The session a letter is bound to, from the raw `AOIDE_SESSION_ID`: control
+/// characters are stripped, and an id with nothing left binds nothing. The id is
+/// same-uid input (ruling 29): it names only the lifetime of the caller's own
+/// letters, and is cleaned before it reaches the JSON or the audit log.
+pub fn bind_session(raw: &str) -> Option<String> {
+    let cleaned: String = raw.chars().filter(|c| !c.is_control()).collect();
+    (!cleaned.is_empty()).then_some(cleaned)
+}
+
 /// Is one spooled entry offered to the node's own poll? See [`poll_payloads`]
 /// for the rule; held out-of-band so a test can pin each arm without a
 /// filesystem.
@@ -815,51 +911,55 @@ fn pollable(entry: &OutboxEntry) -> bool {
     entry.is_held() || (entry.tries > 0 && !entry.last_attempt_reached_the_peer())
 }
 
-/// Retire one entry — a valid ack (spec item 7) or explicit `mail outbox
-/// rm`, never anything else (the kill-list: no auto-eviction). `Ok(false)`
+/// Retire one entry — a valid ack (spec item 7), explicit `mail outbox rm`, or
+/// the drop of an own letter with its session (ruling 131). Nothing else
+/// evicts an entry (the kill-list: no auto-eviction). `Ok(false)`
 /// when nothing named `msgid` was spooled (already retired, or never was)
 /// — not an error, so a retry racing an ack's own retirement is a no-op,
 /// not a failure.
 pub fn remove_entry(node: &str, msgid: &str) -> Result<bool, String> {
     let node = node.to_string();
     let msgid = msgid.to_string();
-    with_lock(move || {
-        let path = entry_path(&node, &msgid);
-        // If this is an ack (receipt-kind) entry, clear its pending-ack
-        // marker in the SAME locked section — one file read (this entry
-        // only, never a directory scan), so every retirement path (a
-        // drain's own `Delivered` confirmation, an explicit `mail outbox
-        // rm`, a test's manual simulation of delivery) uniformly lets a
-        // later redelivery of the same acked_msgid correctly respool,
-        // without every caller needing to know about the marker at all.
-        // `has_pending_ack_unlocked`'s own self-healing already covers the
-        // ordinary "entry vanished out-of-band, marker never told" case —
-        // this is the fast path for when the entry is right here.
-        match std::fs::read_to_string(&path).ok().and_then(|raw| serde_json::from_str::<OutboxEntry>(&raw).ok()) {
-            Some(parsed) if parsed.envelope.header.kind == crate::mail::ENTRY_TYPE_RECEIPT => {
-                let _ = std::fs::remove_file(ack_marker_path(&node, &parsed.envelope.text));
-            }
-            Some(_) => {
-                // An ordinary (letter) entry never carries a marker.
-            }
-            None => {
-                // The entry couldn't be read or parsed at all (review
-                // round 3 NIT) — rare (corruption, or a caller racing its
-                // own prior removal). Its content can't tell us the
-                // `acked_msgid` it covered, so fall back to a scan of
-                // ONLY `.ack/` (never the whole node directory — removal
-                // is rare, unlike the hot deposit path this must stay
-                // O(1) for) looking for a marker whose content names
-                // THIS entry's own msgid, and clear it if found.
-                clear_marker_pointing_to_msgid(&node, &msgid);
-            }
+    with_lock(move || remove_entry_unlocked(&node, &msgid))
+}
+
+/// [`remove_entry`]'s body, for a caller that already holds the stage lock.
+fn remove_entry_unlocked(node: &str, msgid: &str) -> Result<bool, String> {
+    let path = entry_path(node, msgid);
+    // If this is an ack (receipt-kind) entry, clear its pending-ack
+    // marker in the SAME locked section — one file read (this entry
+    // only, never a directory scan), so every retirement path (a
+    // drain's own `Delivered` confirmation, an explicit `mail outbox
+    // rm`, a test's manual simulation of delivery) uniformly lets a
+    // later redelivery of the same acked_msgid correctly respool,
+    // without every caller needing to know about the marker at all.
+    // `has_pending_ack_unlocked`'s own self-healing already covers the
+    // ordinary "entry vanished out-of-band, marker never told" case —
+    // this is the fast path for when the entry is right here.
+    match std::fs::read_to_string(&path).ok().and_then(|raw| serde_json::from_str::<OutboxEntry>(&raw).ok()) {
+        Some(parsed) if parsed.envelope.header.kind == crate::mail::ENTRY_TYPE_RECEIPT => {
+            let _ = std::fs::remove_file(ack_marker_path(node, &parsed.envelope.text));
         }
-        match std::fs::remove_file(&path) {
-            Ok(()) => Ok(true),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
-            Err(e) => Err(format!("{}: {e}", path.display())),
+        Some(_) => {
+            // An ordinary (letter) entry never carries a marker.
         }
-    })
+        None => {
+            // The entry couldn't be read or parsed at all (review
+            // round 3 NIT) — rare (corruption, or a caller racing its
+            // own prior removal). Its content can't tell us the
+            // `acked_msgid` it covered, so fall back to a scan of
+            // ONLY `.ack/` (never the whole node directory — removal
+            // is rare, unlike the hot deposit path this must stay
+            // O(1) for) looking for a marker whose content names
+            // THIS entry's own msgid, and clear it if found.
+            clear_marker_pointing_to_msgid(node, msgid);
+        }
+    }
+    match std::fs::remove_file(&path) {
+        Ok(()) => Ok(true),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(e) => Err(format!("{}: {e}", path.display())),
+    }
 }
 
 /// Un-park one entry — the operator's answer to a remediable policy
@@ -2066,6 +2166,167 @@ mod tests {
 
         let _ = std::fs::remove_dir_all(&dir);
     }
+
+    // ── items 3-5 (RED): the session binding, the drop, the held pull ─────
+
+    /// The audit lines one command wrote, from the log the audit writes to.
+    fn audit_lines(command: &str) -> Vec<String> {
+        std::fs::read_to_string(aoide_protocol::audit::default_audit_log())
+            .unwrap_or_default()
+            .lines()
+            .filter(|line| line.contains(command))
+            .map(str::to_string)
+            .collect()
+    }
+
+    /// One own letter toward `node`, bound to `session`: `held`, or returned
+    /// (refused, with its word, as a dial leaves it).
+    fn own_letter(node: &str, msgid: &str, session: Option<&str>, held: bool) -> OutboxEntry {
+        let mut entry = if held {
+            OutboxEntry::held(envelope("here", node, msgid))
+        } else {
+            let mut entry = OutboxEntry::fresh(envelope("here", node, msgid));
+            entry.refused = true;
+            entry.tries = 1;
+            entry.last_outcome = "refused: down".to_string();
+            entry
+        };
+        entry.session = session.map(str::to_string);
+        entry
+    }
+
+    /// **A bound entry carries its session; an unbound one has no such key at all**,
+    /// so a spool written before the field existed reads, and reads back, unchanged.
+    #[test]
+    fn a_bound_entry_carries_its_session_and_an_unbound_one_omits_the_key() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("outbox-session-field");
+
+        write_entry("there", &own_letter("there", "msg-bound", Some("sess-1"), false)).unwrap();
+        write_entry("there", &OutboxEntry::fresh(envelope("here", "there", "msg-plain"))).unwrap();
+
+        let bound = std::fs::read_to_string(entry_path("there", "msg-bound")).unwrap();
+        assert!(bound.contains("\"session\": \"sess-1\""), "{bound}");
+        let plain = std::fs::read_to_string(entry_path("there", "msg-plain")).unwrap();
+        assert!(!plain.contains("session"), "an unbound entry keeps its old bytes: {plain}");
+        let listed = list_entries("there").unwrap();
+        let read = listed.iter().find(|e| e.envelope.msgid == "msg-bound").unwrap();
+        assert_eq!(read.session.as_deref(), Some("sess-1"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **A session's end drops exactly its own returned and held letters, one audit
+    /// line each.** Another session's letter, a receipt and a charter stay.
+    #[test]
+    fn drop_for_session_drops_only_that_sessions_letters_with_one_line_each() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("outbox-drop-session");
+
+        write_entry("there", &own_letter("there", "msg-returned", Some("sess-a"), false)).unwrap();
+        write_entry("there", &own_letter("there", "msg-held", Some("sess-a"), true)).unwrap();
+        write_entry("there", &own_letter("there", "msg-other", Some("sess-b"), false)).unwrap();
+        write_entry("there", &OutboxEntry::fresh(ack_envelope("there", "here", "msg-x"))).unwrap();
+        let mut charter = OutboxEntry::fresh(envelope("here", "there", "msg-charter"));
+        charter.envelope.header.kind = crate::mail::ENTRY_TYPE_CHARTER.to_string();
+        charter.session = Some("sess-a".to_string());
+        write_entry("there", &charter).unwrap();
+
+        assert_eq!(drop_for_session("sess-a").unwrap(), 2);
+        let mut left: Vec<String> = list_entries("there").unwrap().into_iter().map(|e| e.envelope.msgid).collect();
+        left.sort();
+        assert_eq!(left, vec!["ack-of-msg-x", "msg-charter", "msg-other"], "{left:?}");
+
+        let lines = audit_lines("mail.outbox.dropped");
+        assert_eq!(lines.len(), 2, "one line per dropped letter: {lines:?}");
+        assert!(lines.iter().all(|l| l.contains("session-ended")), "{lines:?}");
+        assert!(lines.iter().any(|l| l.contains("msg-returned")) && lines.iter().any(|l| l.contains("msg-held")));
+        assert!(!lines.iter().any(|l| l.contains("msg-other")), "another session's letter is named nowhere: {lines:?}");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **A repeated session end drops nothing and writes no second line.**
+    #[test]
+    fn a_repeated_session_end_drops_nothing_and_writes_no_second_line() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("outbox-drop-twice");
+
+        write_entry("there", &own_letter("there", "msg-once", Some("sess-a"), false)).unwrap();
+        assert_eq!(drop_for_session("sess-a").unwrap(), 1);
+        assert_eq!(drop_for_session("sess-a").unwrap(), 0, "the second end finds nothing");
+        assert_eq!(audit_lines("mail.outbox.dropped").len(), 1, "and writes no second line");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **A letter with no session (spooled before ruling 131) is dropped by the
+    /// tick's sweep, with reason `pre-131`.** A letter bound to a session stays.
+    #[test]
+    fn a_letter_with_no_session_is_dropped_by_the_sweep_with_its_reason() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("outbox-pre-131");
+
+        write_entry("there", &own_letter("there", "msg-old-returned", None, false)).unwrap();
+        write_entry("there", &own_letter("there", "msg-old-held", None, true)).unwrap();
+        write_entry("there", &own_letter("there", "msg-bound", Some("sess-a"), false)).unwrap();
+        write_entry("there", &OutboxEntry::fresh(ack_envelope("there", "here", "msg-y"))).unwrap();
+
+        assert_eq!(drop_letters_where(|e| e.session.is_none(), usize::MAX, "pre-131").unwrap(), 2);
+        let mut left: Vec<String> = list_entries("there").unwrap().into_iter().map(|e| e.envelope.msgid).collect();
+        left.sort();
+        assert_eq!(left, vec!["ack-of-msg-y", "msg-bound"], "{left:?}");
+        let lines = audit_lines("mail.outbox.dropped");
+        assert_eq!(lines.len(), 2, "{lines:?}");
+        assert!(lines.iter().all(|l| l.contains("pre-131")), "{lines:?}");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **A sweep takes at most its limit per tick; the rest waits for the next.**
+    #[test]
+    fn a_sweep_takes_at_most_its_limit_and_the_rest_waits_for_the_next_tick() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("outbox-sweep-limit");
+
+        for i in 0..3 {
+            write_entry("there", &own_letter("there", &format!("msg-{i}"), None, false)).unwrap();
+        }
+        assert_eq!(drop_letters_where(|e| e.session.is_none(), 2, "pre-131").unwrap(), 2);
+        assert_eq!(drop_letters_where(|e| e.session.is_none(), 2, "pre-131").unwrap(), 1);
+        assert!(list_entries("there").unwrap().is_empty());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The sessions the spool's own letters are bound to, each once.
+    #[test]
+    fn own_letter_sessions_names_each_session_a_letter_is_bound_to_once() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("outbox-letter-sessions");
+
+        write_entry("there", &own_letter("there", "msg-1", Some("sess-b"), false)).unwrap();
+        write_entry("there", &own_letter("there", "msg-2", Some("sess-a"), true)).unwrap();
+        write_entry("there", &own_letter("there", "msg-3", Some("sess-a"), false)).unwrap();
+        write_entry("there", &own_letter("there", "msg-4", None, false)).unwrap();
+        write_entry("there", &OutboxEntry::fresh(ack_envelope("there", "here", "msg-z"))).unwrap();
+
+        assert_eq!(own_letter_sessions().unwrap(), vec!["sess-a".to_string(), "sess-b".to_string()]);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **A session id is cleaned before it is stored or audited.** Control
+    /// characters go; an id that cleans to nothing binds nothing.
+    #[test]
+    fn bind_session_strips_control_characters_and_an_empty_result_binds_nothing() {
+        assert_eq!(bind_session("sess-1").as_deref(), Some("sess-1"));
+        let cleaned = bind_session("ses\u{7}s\n1\u{1b}").expect("something is left");
+        assert!(cleaned.starts_with("ses") && cleaned.chars().all(|c| !c.is_control()), "{cleaned:?}");
+        assert_eq!(bind_session("\u{7}\n"), None);
+        assert_eq!(bind_session(""), None);
+    }
+
 }
 
 /// P-SEAL: a sealed entry's spool holds no letter bytes, and every reader of

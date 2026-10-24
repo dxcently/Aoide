@@ -595,7 +595,9 @@ fn run_internal_reap() {
 /// unrelated, and only happen to share a cadence today.
 const DRAIN_EVERY_TICKS: u64 = 12;
 
-/// P-M2's in-daemon outbox sweep: [`aoide_conduct::mail_bridge::drain_all`]
+/// P-M2's in-daemon outbox sweep, run after the session sweep
+/// ([`aoide_conduct::graph::sweep_session_letters`]):
+/// [`aoide_conduct::mail_bridge::drain_all`]
 /// — every node with anything spooled gets one best-effort drain attempt
 /// per tick window. No hand-edit re-baseline needed afterward, unlike
 /// [`run_internal_reap`]: the outbox lives under `state/outbox/`, which
@@ -603,6 +605,7 @@ const DRAIN_EVERY_TICKS: u64 = 12;
 /// exactly `sessions.json`/`hooks.json`/`graph.json` — the outbox was never
 /// in scope for that mechanism).
 fn run_internal_mail_drain() {
+    aoide_conduct::graph::sweep_session_letters();
     let _ = aoide_conduct::mail_bridge::drain_all();
 }
 
