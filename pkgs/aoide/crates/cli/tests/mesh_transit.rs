@@ -1944,7 +1944,7 @@ fn a_down_node_is_neither_polled_nor_listed_under_any_name() {
 /// **A declaration this box cannot read is never dialled.** A set that will not
 /// load at all, and a mesh the set REFUSES (a charter tampered after signing),
 /// both mean "do not reach it" — the fail-closed direction the `poll`-address rule
-/// already takes — so a queued letter stays queued and no link is opened. The
+/// already takes — so a queued entry stays queued and no link is opened. The
 /// report says which of the two it is, and neither word claims the mesh declared
 /// the node `down`, because nobody can read it.
 #[test]
@@ -1975,7 +1975,7 @@ fn a_refused_or_unloadable_declaration_is_never_dialled() {
         )
     };
     let spool = |body: &str| {
-        let envelope = aoide_storage::mail::mint_outbound_letter_from("osaka", "alice", "yomi", "bob", body, HOME).unwrap();
+        let envelope = aoide_storage::mail::mint_charter_letter("yomi", body, HOME).unwrap();
         aoide_storage::outbox::write_entry("yomi", &aoide_storage::outbox::OutboxEntry::fresh(envelope)).unwrap();
     };
     let tries_of = |body: &str| {
@@ -1987,8 +1987,10 @@ fn a_refused_or_unloadable_declaration_is_never_dialled() {
             .tries
     };
 
-    // A declaration that reads and says nothing about `yomi`: the letter DIALS.
-    // This is the positive control the two negatives below are measured against.
+    // A declaration that reads and says nothing about `yomi`: the entry DIALS.
+    // A charter stands in for a drained entry: an own letter is never dialled
+    // by a drain (ruling 131), so it could not show the gate at all. This is
+    // the positive control the two negatives below are measured against.
     fx.set_home_status("osaka", &[]);
     spool("dials");
     aoide_client::mail_wire::drain_node("yomi").unwrap();

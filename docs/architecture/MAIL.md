@@ -98,7 +98,10 @@ FidoNet node could.
 9. **The full BSO outbox.** A per-node spool at the sender
    (`state/outbox/<node>/`), a transfer-invariant content-hash `msgid` on
    every envelope, flavors `now`/`hold`, per-link backoff/try state.
-   Entries live until the destination's end-to-end acknowledgement.
+   Transit entries and receipts live until the destination's end-to-end
+   acknowledgement. An own letter is dialled at once instead: it leaves the
+   box on a verified answer, waits there only when it is held, or comes back
+   to its sender when it is returned, until its session ends (ruling 131).
 10. **Envelopes are origin-signed.** The sending node signs the letter
     with its identity key; the destination verifies the ORIGIN regardless
     of path. A transit node can delay or drop — never read (decision 17)
@@ -598,7 +601,9 @@ door's audit name whitelist gains both names so they never log as bare
   The caller asks
   "anything waiting for me?" and receives every outbox entry spooled
   toward the caller's node — all `hold` ones, and `now` ones whose own
-  attempts have been failing — oldest first, at most fifty of them per
+  attempts have been failing, though never an own letter that is not held
+  (a returned letter is its sender's to resend, ruling 131) — oldest first,
+  at most fifty of them per
   answer (a bounded batch, like the drain's own; the poller's acks retire
   what it filed, so a spool bigger than one answer drains over the next
   asks instead of being declined as one oversized body). The caller's
@@ -620,8 +625,8 @@ door's audit name whitelist gains both names so they never log as bare
   hand-over itself is not an acknowledgement, and anything the poller has not
   yet named is offered again. **The cost of a permanent refusal:** the hub
   stops holding the container, so it cannot be re-offered from the hub. The
-  origin keeps its own retry copy until its receipt arrives, and its own
-  drains re-send it; the poller refuses it again if it is still refused. A
+  origin keeps no copy once the hub has accepted the letter (O1a), and the
+  poller refuses it again if it is still refused. A
   refused container leaves the hub before the next offer, so it never blocks
   the poll behind it. A container held back by the poller's own state stays,
   and a backlog of those can fill the `POLL_BATCH_CAP` window until the state
@@ -644,8 +649,8 @@ door's audit name whitelist gains both names so they never log as bare
   recorded it, be handed the same letter, and mint two receipts for it — which
   the relay refuses as a different body for one msgid. The second ask answers
   that a poll is already in progress. Handed-over
-  `letter` entries stay in the outbox
-  until acked like any other; a re-poll before the ack re-hands them and
+  `letter` entries stay in the outbox until the poller names them in `filed`,
+  or an old-style receipt ends them; a re-poll before that re-hands them and
   the receiver's dedup makes that harmless. **An HTTPS adapter's answer names
   what it would not hand over**: an entry spooled before the poller published
   a binding is withheld (`sealed-required`) rather than carried in the clear,
@@ -797,13 +802,16 @@ link.json       { "holdUntil": ts, "lastError": "…" }   per-link backoff
   bound to the entry as `session` (from `AOIDE_SESSION_ID`, never `--from`).
   Outside one, nothing is written, the command fails with the reason, and a
   letter to a `hold` node is refused `no-session` before any dial.
-  A hop declared `down` is never dialled. The command waits for the outcome.
+  A hop declared `down`, or one whose mesh declaration this box cannot read,
+  is returned at once and never dialled. The command waits for the outcome.
   Its worst wait is four capped calls, each at most 5 s to connect and 15 s in
   all: the binding exchange (only for a hop this box holds a pair record for,
   not one its charter declares), the two deposits, and one poll of the hop
   after a verified answer, as the drain does (poll-on-contact).
 - The drain runs on `aoided`'s existing timer tick (the reaper cadence)
-  and immediately after any successful contact with that node. Because
+  and immediately after any successful contact with that node. It dials only
+  the entries it may attempt, never an own letter, which its send dials once
+  (ruling 131). Because
   the door is a separate process, "after contact" means the door
   process drains under the same locks — the `.bsy` flock is what keeps
   the two drains from racing one link. It is taken non-blocking, the way
@@ -830,25 +838,30 @@ link.json       { "holdUntil": ts, "lastError": "…" }   per-link backoff
   door: `https://` reaches a listener whose whole method set is mail, and
   the door — which parks every send — is never fronted by a
   TLS-terminating hop (H1).
-- A `box-full` answer defers that one entry, and nothing else. The far end
+- A `box-full` answer defers that one drained entry, and nothing else. An own
+  letter that meets `box-full` is returned at once, like any verified refusal
+  (ruling 131). The far end
   answered, so the link is healthy and clears; the entry records
   `deferred: box-full`, keeps `refused` false, and waits its own window
   before its next attempt: `12 s` doubled per deferral, never past the
   ceiling. The drain goes on to the next entry in the same pass, and a
   deferred entry takes no place in the batch until its window passes.
   Deferred entries are offered to a poll on the same rule.
-- `now` entries are attempted on every drain; `hold` entries are never
-  attempted — they leave only through the node's `mailPoll`. A node
+- `now` entries other than own letters are attempted on every drain (an own
+  letter is dialled by its send, ruling 131). `hold` entries are never
+  attempted — they leave only through the node's `mailPoll`, and a held own
+  letter leaves when its destination files it. A node
   declared `hold` in the mesh config makes every entry toward it `hold`
   regardless of the flag.
 - `link.json` is `.hld`: exponential backoff per link on failure,
   cleared on success. Per-entry `tries`/`lastOutcome` live in the entry.
   A `refused` outcome parks that entry (drains skip it) and records the
-  reason, for a transit, receipt or charter entry. A letter this box sent
-  never parks: a verified refusal returns it (above), `down` and
-  `config-invalid` included. **`down` and `config-invalid` are LINK states and
-  never park a drained entry** (§Status): it stays live and the link's own
-  back-off brings it back. Parked is not condemned: the refusing grant is the RECEIVING
+  reason, for a transit, receipt or charter entry. An own letter never parks:
+  a verified refusal returns it (above), `down` and `config-invalid` included,
+  and a `down` hop is not dialled at all. **For a drained entry, `down` and
+  `config-invalid` are LINK states and never park it** (§Status): it stays
+  live and the link's own back-off brings it back. Parked is not condemned:
+  the refusing grant is the RECEIVING
   node's record of the sender, so once that host runs `aoide node allow
   <sender> message on` (or the operator adds `message` to the sender's
   charter line), the sender runs `aoide mail outbox retry <msgid>` (or
@@ -857,14 +870,18 @@ link.json       { "holdUntil": ts, "lastError": "…" }   per-link backoff
   end's msgid dedup still holds.
 - A `down` node's directory is skipped entirely; entries whose ORIGIN is
   `down` are dropped at the next drain.
-- An entry retires only on a valid ack (above) or `aoide mail outbox rm
-  <msgid>`; `mail outbox retry` never retires anything. An own letter also
-  leaves with its sending session: when that session leaves the roster (ended,
-  reaped, or a hook death), every returned or held letter bound to it is
-  dropped, one `mail.outbox.dropped` audit line each (reason `session-ended`).
+- An entry retires only on a valid ack (above), on its destination's poll
+  filing it (a held own letter, or a transit entry), or on
+  `aoide mail outbox rm <msgid>`. A verified `accepted` or `duplicate` for an
+  own letter, which its send or a retry gets back, is the delivery itself and
+  leaves nothing behind. `mail outbox retry` never retires anything by itself.
+  An own letter also leaves with its sending session: when that session leaves
+  the roster (ended, reaped, or a hook death), every returned or held letter
+  bound to it is dropped, one `mail.outbox.dropped` audit line each (reason
+  `session-ended`).
   `aoide mail outbox [<node>]` answers "did it land" truthfully
   per entry via `data.delivery` — the same projection `aoide mail send`
-  reports right after its own best-effort drain attempt, so neither
+  reports right after its own dial, so neither
   command can drift from the other on what "queued"/"retrying"/etc. mean
   (vocabulary and precedence: "Status and the nodelist view" below).
 
@@ -1550,13 +1567,23 @@ shared, read-only join of the outbox entry with its node's own link
 state, computed fresh on every call, never cached. Its vocabulary, most
 authoritative first:
 
-- `refused` — the entry's own `refused` flag is set (a policy refusal
-  the far end sent back, never a transport failure — "Outbox" above).
-  Automatic retries have already stopped for this ONE entry, and no
-  link state changes that. A `down` or `config-invalid` refusal is NOT
-  this: it is a state of the LINK, so the entry stays `retrying` on its
-  own back-off until the peer's declaration loads again or stops calling
-  the node `down`.
+- `returned` — an own letter this box keeps because its send, or a retry,
+  got no verified `accepted` or `duplicate`. The word that ended the dial
+  rides beside it, the letter is marked `refused` and bound to its session,
+  and automatic retries have stopped. `aoide mail outbox retry <msgid>`
+  resends the same bytes under the same msgid (ruling 131).
+- `held` — an own letter waiting for its destination's own poll (a `poll`
+  or `hold` hop, or `--hold`). It is bound to its session, never dialled by
+  this box, and leaves when the destination files it or its session ends.
+- `pre-131` — an own letter spooled before the session binding existed, so
+  it has no session. The next tick drops it (reason `pre-131`).
+- `refused` — a drained entry other than an own letter: its own `refused`
+  flag is set (a policy refusal the far end sent back, never a transport
+  failure, "Outbox" above). Automatic retries have already stopped for this
+  ONE entry, and no link state changes that. A `down` or `config-invalid`
+  refusal is NOT this: it is a state of the LINK, so the entry stays
+  `retrying` on its own back-off until the peer's declaration loads again or
+  stops calling the node `down`.
 - `delivered` — a real, destination-signed ack already sits in this
   box's own mailbase for this exact `msgid` (the ack mechanics: "Wire"
   and "Delivery and the doorbell" above). Never inferred from the
@@ -1566,12 +1593,14 @@ authoritative first:
   still waiting; once delivered, the receipt line in the sender's mailbase is
   where it shows.
 - `accepted` — the peer's own deposit response said accepted or
-  duplicate, but no ack has landed yet (`ackPending: true`). A LATER,
+  duplicate, but no ack has landed yet (`ackPending: true`; never for an own
+  letter, which reads `returned` or `held`). A LATER,
   unrelated link failure rides beside it — reason and `nextAttemptAt`
   from the link — without ever downgrading the status: this letter
   already reached the peer, and the link's later trouble is some other
   entry's problem.
-- `retrying` — the node's own link state still records an unresolved
+- `retrying` — for a drained entry other than an own letter, the node's own
+  link state still records an unresolved
   failure; its reason and `nextAttemptAt` (the earliest allowed retry,
   never a promised schedule) ride beside the status. An entry the far box
   deferred (`deferred: box-full`) is `retrying` too, with scope `entry` and
@@ -1675,6 +1704,8 @@ aoide mail mark --for <name>                            advance a cursor without
 aoide mail box add <name>                                create an empty mailbox so far mail to it can file (idempotent; CLI only)
 aoide mail box rm <name> [--force]                       remove a mailbox, its letters and its reader marks; refused while unread, audited first, and a failed removal is audited again (CLI only; `_legacy` by its own name)
 aoide mail outbox [<node>] [rm <msgid>]                  the spool, truthfully, per entry
+aoide mail outbox retry <msgid>                          resend a returned letter now, under its same msgid
+aoide mail outbox retry --refused [<node>]               resend every returned letter toward a node, each one live
 aoide mail route <node>/<name> [--mesh <m>]              dry-run the four steps: the path, each step's reason, nothing sent
 aoide mail rm --older-than <Nd|Nh>                       prune the boxes (dedup goes with them)
 aoide mail export [--dir <path>]                         one Markdown note per thread (read-only)

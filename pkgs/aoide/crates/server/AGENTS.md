@@ -972,8 +972,9 @@ a2a spawn probe needs `/bin/sh` + `printf`'s byte-exact output.
   ITS OWN entries, which holds them out of the window and nothing else. No
   bookmark and no "already handed over" flag may be added here: the
   re-poll-before-ack idempotence comes from handing the SAME set over again, and
-  the entry retires only through a valid ack, `mail outbox rm`, or an own
-  letter's session ending (ruling 131), exactly as a pushed deposit's would.
+  the entry retires only through a valid ack, a held own letter its
+  destination's poll files, `mail outbox rm`, or an own letter's session
+  ending (ruling 131), exactly as a pushed deposit's would.
   The answer is bounded by
   `aoide_storage::outbox::POLL_BATCH_CAP`; that bound is what keeps a big
   spool draining (the poller's acks retire the batch it took) and what

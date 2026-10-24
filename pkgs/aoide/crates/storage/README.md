@@ -876,9 +876,10 @@ by decision — no embedded database yet
   (`write_ack_if_absent`) and cleared in the same locked section as that
   entry's own removal (`remove_entry`, which reads the ONE file it is
   about to delete — never the directory — to decide whether to clear a
-  marker), so every retirement path (a drain's delivery confirmation, an
-  explicit `mail outbox rm`, an own letter's session drop) keeps the marker's
-  presence exactly in sync with the entry's. No network,
+  marker), so every retirement path (a delivered entry's confirmation, a held
+  letter's filed name, an explicit `mail outbox rm`, an own letter's session
+  drop) keeps the marker's presence exactly in sync with the entry's. No
+  network,
   no HTTP, no tunnel — the actual dial+POST lives in
   `aoide-client::mail_wire` (bounded to `DRAIN_BATCH_CAP` entries per
   `drain_node` call, and recording `tries`/`lastOutcome`/`lastTryAt` on
@@ -896,14 +897,16 @@ by decision — no embedded database yet
   being silently parked forever. `OutboxEntry::held` is the constructor a
   held entry is spooled with; `is_held` is the one spelling of the check.
   `poll_payloads` is the WHOLE offer rule for a poll, in one place: every
-  held entry toward that node, plus every `now` entry whose own attempts
+  held entry toward that node, plus every other entry whose own attempts
   have been failing (`tries > 0` and its last outcome did not reach the
   peer — parked/refused ones included, a never-attempted one excluded
-  because the drain owns it). **It writes nothing at all** — no `tries`,
-  no bookmark, no new file: that is what makes a re-poll before the ack
-  hand the same envelopes over again, and why an entry leaves the spool only
-  by a valid ack, `mail outbox rm`, or an own letter's session end (ruling
-  131). The offer is
+  because the drain owns it). An own letter is offered only while held: a
+  returned one is its sender's to resend (ruling 131). **It writes nothing
+  at all** — no `tries`, no bookmark, no new file: that is what makes a
+  re-poll before the ack hand the same envelopes over again, and why an entry
+  leaves the spool only by a valid ack, a held letter's filed name,
+  `mail outbox rm`, or an own letter's session end or the tick's sweep
+  (ruling 131). The offer is
   bounded at `POLL_BATCH_CAP` (50 — the drain's own batch size,
   re-derived rather than imported, since `storage` sits below `client` in
   the DAG), oldest first, and the cap applies AFTER the filter for the

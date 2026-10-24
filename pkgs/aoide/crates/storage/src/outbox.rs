@@ -168,11 +168,12 @@ pub struct OutboxEntry {
     /// transport failure, which backs the LINK off instead (the drain
     /// pseudocode's own distinction). A refused entry stays in the spool
     /// (the kill-list: no auto-eviction, no quota, no expiry) and a drain
-    /// skips it on sight. **Parked, not condemned**: a policy
-    /// refusal is remediable (the far end's `allows` can be granted), so
-    /// [`unpark_entry`]/[`unpark_refused`] clear this flag and the next
-    /// drain attempts the entry again. One exception to "no auto-eviction": a
-    /// returned own letter leaves with the session that sent it (ruling 131).
+    /// skips it on sight. **Parked, not condemned**: a policy refusal is
+    /// remediable (the far end's `allows` can be granted), so
+    /// [`unpark_entry`]/[`unpark_refused`] clear this flag and the next drain
+    /// attempts the entry again. An own letter differs on both counts (ruling
+    /// 131): a verified refusal RETURNS it to its sender, who resends it with
+    /// `mail outbox retry`, and it leaves with the session that sent it.
     #[serde(default)]
     pub refused: bool,
     /// The session that sent this own `letter`, when it is returned or held
@@ -906,17 +907,21 @@ pub fn bind_session(raw: &str) -> Option<String> {
 
 /// Is one spooled entry offered to the node's own poll? See [`poll_payloads`]
 /// for the rule; held out-of-band so a test can pin each arm without a
-/// filesystem.
+/// filesystem. An own letter is offered only while it is held: a returned one
+/// is its sender's to resend (ruling 131).
 fn pollable(entry: &OutboxEntry) -> bool {
+    if entry.envelope.header.kind == crate::mail::ENTRY_TYPE_LETTER {
+        return entry.is_held();
+    }
     entry.is_held() || (entry.tries > 0 && !entry.last_attempt_reached_the_peer())
 }
 
-/// Retire one entry — a valid ack (spec item 7), explicit `mail outbox rm`, or
-/// the drop of an own letter with its session (ruling 131). Nothing else
-/// evicts an entry (the kill-list: no auto-eviction). `Ok(false)`
-/// when nothing named `msgid` was spooled (already retired, or never was)
-/// — not an error, so a retry racing an ack's own retirement is a no-op,
-/// not a failure.
+/// Retire one entry: a valid ack (spec item 7), a held own letter its poller
+/// files ([`retire_acknowledged`]), explicit `mail outbox rm`, or the drop of
+/// an own letter with its session or by the tick's sweep (ruling 131). Nothing
+/// else evicts an entry (the kill-list: no auto-eviction). `Ok(false)` when
+/// nothing named `msgid` was spooled (already retired, or never was) — not an
+/// error, so a retry racing an ack's own retirement is a no-op, not a failure.
 pub fn remove_entry(node: &str, msgid: &str) -> Result<bool, String> {
     let node = node.to_string();
     let msgid = msgid.to_string();
@@ -976,7 +981,9 @@ fn remove_entry_unlocked(node: &str, msgid: &str) -> Result<bool, String> {
 /// counter counts ATTEMPTS, and an un-park performs none. `Ok(false)` when
 /// nothing named `msgid` was spooled, or it was there but was not parked
 /// at all (already un-parked, or never refused) — never an error, the same
-/// "a redundant ask is a clean no-op" discipline [`remove_entry`] holds.
+/// "a redundant ask is a clean no-op" discipline [`remove_entry`] holds. An own
+/// letter is never un-parked: a returned one is resent by `mail outbox retry`,
+/// which dials it now (ruling 131).
 ///
 /// Read-modify-write in ONE locked section, through the same
 /// [`write_entry_unlocked`] atomic path every other spool write uses, so a
@@ -988,7 +995,7 @@ pub fn unpark_entry(node: &str, msgid: &str) -> Result<bool, String> {
         let path = entry_path(&node, &msgid);
         let Ok(raw) = std::fs::read_to_string(&path) else { return Ok(false) };
         let Ok(mut entry) = serde_json::from_str::<OutboxEntry>(&raw) else { return Ok(false) };
-        if !entry.refused {
+        if !entry.refused || entry.envelope.header.kind == crate::mail::ENTRY_TYPE_LETTER {
             return Ok(false);
         }
         entry.refused = false;
@@ -1009,11 +1016,12 @@ pub fn unpark_entry(node: &str, msgid: &str) -> Result<bool, String> {
 /// whole sweep) nor lose an entry it is in the middle of recording (every
 /// mutation is read-modify-write of one file). An entry that vanishes
 /// between the listing and its own un-park (a concurrent `mail outbox rm`,
-/// or a real ack retiring it) simply does not count — no error.
+/// or a real ack retiring it) simply does not count — no error. Own letters are
+/// left out: a returned one is resent by `retry`, never by a sweep.
 pub fn unpark_refused(node: &str) -> Result<usize, String> {
     let parked: Vec<String> = list_entries(node)?
         .into_iter()
-        .filter(|e| e.refused)
+        .filter(|e| e.refused && e.envelope.header.kind != crate::mail::ENTRY_TYPE_LETTER)
         .map(|e| e.envelope.msgid)
         .collect();
     let mut n = 0;
@@ -1044,25 +1052,42 @@ fn clear_marker_pointing_to_msgid(node: &str, msgid: &str) {
     }
 }
 
-/// Retire a hub's OWN custody of a container the far end has **acknowledged
-/// filing** — and only that. A `transit` entry's obligation ends when the poller
-/// it is held for says it has the letter: a poll's response can be lost, so the
-/// hand-over itself is not an acknowledgement (retiring on the response would
-/// drop a letter whose response never arrived — exactly the loss the re-offer
-/// exists to prevent). The poller's NEXT poll carries what it filed
-/// ([`filed_pending`]), the hub retires those here, and anything not yet named is
-/// offered again. A `letter` is NOT retired here: it waits for the destination's
-/// receipt, which is the only thing that can say the far end FILED it without
-/// this box having to trust a claim. `Ok(false)` for anything else — a missing
-/// entry, or a kind that is not this hub's custody.
+/// Retire what a poller has filed out of its own spool: a hub's custody of a
+/// `transit` container, or a held own letter the poller is the destination of.
+/// A `transit` entry's obligation ends when the poller it is held for says it
+/// has the letter: a poll's response can be lost, so the hand-over itself is
+/// not an acknowledgement (retiring on the response would drop a letter whose
+/// response never arrived — exactly the loss the re-offer exists to prevent).
+/// The poller's NEXT poll carries what it filed ([`filed_pending`]), the hub
+/// retires those here, and anything not yet named is offered again. A held own
+/// letter ends on the same name, with one `mail.outbox.filed` audit line: the
+/// poller has named it, so it has it (ruling 131). A returned letter is never
+/// ended here, and a name for a letter spooled toward another node ends
+/// nothing. `Ok(false)` for anything else.
 pub fn retire_acknowledged(node: &str, msgid: &str) -> Result<bool, String> {
-    let Some(entry) = list_entries(node)?.into_iter().find(|e| e.envelope.msgid == msgid) else {
-        return Ok(false);
-    };
-    if !entry.is_transit() {
-        return Ok(false);
-    }
-    remove_entry(node, msgid)
+    let node = node.to_string();
+    let msgid = msgid.to_string();
+    with_lock(move || {
+        let Some(entry) = list_entries_unlocked(&node)?.into_iter().find(|e| e.envelope.msgid == msgid) else {
+            return Ok(false);
+        };
+        if entry.is_transit() {
+            return remove_entry_unlocked(&node, &msgid);
+        }
+        if entry.envelope.header.kind != crate::mail::ENTRY_TYPE_LETTER || !entry.is_held() {
+            return Ok(false);
+        }
+        aoide_protocol::audit::audit(
+            &aoide_protocol::audit::default_audit_log(),
+            aoide_protocol::Door::Cli,
+            aoide_protocol::audit::EventClass::Audit,
+            "mail.outbox.filed",
+            "ok",
+            &format!("held letter {msgid} toward {node} ended: {node} filed it"),
+        )
+        .map_err(|e| format!("the audit log cannot be written, so the letter stays: {e}"))?;
+        remove_entry_unlocked(&node, &msgid)
+    })
 }
 
 fn filed_path(node: &str) -> PathBuf {
@@ -1497,6 +1522,14 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// A charter-kind envelope: what the generic parked-entry tests need, where
+    /// [`envelope`] is an own letter, and an own letter is never un-parked.
+    fn charter_envelope(from_node: &str, to_node: &str, msgid: &str) -> Envelope {
+        let mut env = envelope(from_node, to_node, msgid);
+        env.header.kind = crate::mail::ENTRY_TYPE_CHARTER.to_string();
+        env
+    }
+
     fn envelope(from_node: &str, to_node: &str, msgid: &str) -> Envelope {
         Envelope {
             header: Header {
@@ -1562,7 +1595,7 @@ mod tests {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let (_env, dir) = root("outbox-unpark-entry");
 
-        let mut parked = OutboxEntry::fresh(envelope("here", "there", "msg-park"));
+        let mut parked = OutboxEntry::fresh(charter_envelope("here", "there", "msg-park"));
         parked.tries = 4;
         parked.last_try_at = "2026-09-07T00:00:00Z".to_string();
         parked.last_outcome = "refused: bad-msgid".to_string();
@@ -1606,17 +1639,17 @@ mod tests {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let (_env, dir) = root("outbox-unpark-refused-sweep");
 
-        let mut parked_a = OutboxEntry::fresh(envelope("here", "there", "msg-parked-a"));
+        let mut parked_a = OutboxEntry::fresh(charter_envelope("here", "there", "msg-parked-a"));
         parked_a.refused = true;
         parked_a.tries = 1;
-        let mut parked_b = OutboxEntry::fresh(envelope("here", "there", "msg-parked-b"));
+        let mut parked_b = OutboxEntry::fresh(charter_envelope("here", "there", "msg-parked-b"));
         parked_b.refused = true;
         write_entry("there", &parked_a).unwrap();
         write_entry("there", &parked_b).unwrap();
-        write_entry("there", &OutboxEntry::fresh(envelope("here", "there", "msg-never-refused"))).unwrap();
+        write_entry("there", &OutboxEntry::fresh(charter_envelope("here", "there", "msg-never-refused"))).unwrap();
 
         // Another node's parked entry is NEVER touched by a sweep of this one.
-        let mut elsewhere = OutboxEntry::fresh(envelope("here", "elsewhere", "msg-parked-elsewhere"));
+        let mut elsewhere = OutboxEntry::fresh(charter_envelope("here", "elsewhere", "msg-parked-elsewhere"));
         elsewhere.refused = true;
         write_entry("elsewhere", &elsewhere).unwrap();
 
@@ -2099,6 +2132,9 @@ mod tests {
         {
             entry.envelope.header.minted_at = format!("2026-09-07T00:00:{:02}Z", i + 1);
         }
+        for entry in [&mut fresh_now, &mut transport_failed, &mut refused, &mut accepted] {
+            entry.envelope.header.kind = crate::mail::ENTRY_TYPE_CHARTER.to_string();
+        }
         for entry in [&held, &fresh_now, &transport_failed, &refused, &accepted] {
             write_entry("there", entry).unwrap();
         }
@@ -2108,6 +2144,10 @@ mod tests {
         assert!(pollable(&transport_failed), "a failing transport attempt is what a poll exists to recover");
         assert!(pollable(&refused), "a parked entry's own attempts are failing too — the poller asking for its mail is a new fact");
         assert!(!pollable(&accepted), "an entry whose last attempt reached the peer is not failing");
+        let mut failing_letter = OutboxEntry::fresh(envelope("here", "there", "msg-letter-failing"));
+        failing_letter.tries = 2;
+        failing_letter.last_outcome = "transport: connection refused".to_string();
+        assert!(!pollable(&failing_letter), "an own letter is offered only while held: a returned one is its sender's to resend");
 
         let offered: Vec<String> = poll_payloads("there").unwrap().into_iter().map(|(_, e)| e.msgid).collect();
         assert_eq!(
@@ -2327,6 +2367,90 @@ mod tests {
         assert_eq!(bind_session(""), None);
     }
 
+
+    /// **A returned letter is never offered to its node's poll.** It is the
+    /// sender's to resend (ruling 131).
+    #[test]
+    fn a_returned_letter_is_not_in_its_nodes_poll_answer() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("outbox-returned-not-polled");
+
+        write_entry("there", &own_letter("there", "msg-returned", Some("sess-a"), false)).unwrap();
+        assert!(poll_payloads("there").unwrap().is_empty(), "a returned letter waits for its sender");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+
+    /// **A held letter is offered to its node's poll, and the node's `filed`
+    /// name ends it, with one audit line.**
+    #[test]
+    fn a_held_letter_is_offered_and_its_nodes_filed_name_ends_it() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("outbox-held-filed");
+
+        write_entry("there", &own_letter("there", "msg-held", Some("sess-a"), true)).unwrap();
+        let offered = poll_payloads("there").unwrap();
+        assert_eq!(offered.len(), 1, "a held letter is offered");
+
+        assert!(retire_acknowledged("there", "msg-held").unwrap(), "the node filed it");
+        assert!(list_entries("there").unwrap().is_empty());
+        assert_eq!(audit_lines("mail.outbox.filed").len(), 1);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+
+    /// **A poller ends only a letter held toward itself.** A name for a letter
+    /// spooled toward another node ends nothing, and a returned letter is not
+    /// ended by a name either.
+    #[test]
+    fn a_filed_name_ends_only_a_held_letter_in_the_pollers_own_spool() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("outbox-filed-scope");
+
+        write_entry("there", &own_letter("there", "msg-held", Some("sess-a"), true)).unwrap();
+        write_entry("there", &own_letter("there", "msg-returned", Some("sess-a"), false)).unwrap();
+        assert!(!retire_acknowledged("elsewhere", "msg-held").unwrap(), "not spooled toward `elsewhere`");
+        assert!(!retire_acknowledged("there", "msg-returned").unwrap(), "a returned letter is not ended by a name");
+        assert!(retire_acknowledged("there", "msg-held").unwrap(), "the held letter toward `there` is ended by its name");
+        assert_eq!(list_entries("there").unwrap().len(), 1, "and the returned one is still there");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+
+    /// **An old-style receipt still ends a held letter**, through
+    /// `retire_by_ack`.
+    #[test]
+    fn an_old_receipt_still_ends_a_held_letter() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("outbox-held-receipt");
+
+        let msgid = "cd".repeat(32);
+        write_entry("there", &own_letter("there", &msgid, Some("sess-a"), true)).unwrap();
+        let receipt = ack_envelope("there", "here", &msgid);
+        assert_eq!(retire_by_ack(&receipt).unwrap(), Some(msgid.clone()));
+        assert!(list_entries("there").unwrap().is_empty());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **A returned letter is the sender's to resend, so the un-park sweep
+    /// leaves it returned.** Clearing `refused` would turn it into a `now`
+    /// entry that no drain dials, and nothing would ever send it.
+    #[test]
+    fn unpark_leaves_a_returned_letter_returned() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("outbox-unpark-skips-letters");
+
+        write_entry("there", &own_letter("there", "msg-returned", Some("sess-a"), false)).unwrap();
+        assert_eq!(unpark_refused("there").unwrap(), 0, "the sweep un-parks no letter");
+        assert!(!unpark_entry("there", "msg-returned").unwrap(), "nor does its own msgid");
+        assert!(list_entries("there").unwrap()[0].refused, "it stays returned");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
 
 /// P-SEAL: a sealed entry's spool holds no letter bytes, and every reader of

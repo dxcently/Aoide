@@ -3330,10 +3330,11 @@ fn mail_poll(params: &Value, ctx: &RequestCtx) -> Result<Value, (i64, String)> {
         Err(refused) => return Ok(refused),
     };
     // What the poller says it FILED out of its last poll, if it says anything:
-    // the acknowledgement that ends this hub's custody of a container it handed
-    // over (`outbox::retire_acknowledged` — a `transit` entry, and nothing else).
-    // A response can be lost, so the hand-over is not an acknowledgement, and an
-    // unacknowledged entry is offered again below.
+    // the acknowledgement that ends this box's custody of what it handed over
+    // (`outbox::retire_acknowledged`: a `transit` entry, or a held letter the
+    // poller is the destination of). A response can be lost, so the hand-over
+    // is not an acknowledgement, and an unacknowledged entry is offered again
+    // below.
     let acknowledged: Vec<String> = params
         .get("filed")
         .and_then(Value::as_array)
@@ -16446,11 +16447,12 @@ mod tests {
         mail_deposit_cleanup(&root, saved_state, saved_stage);
     }
 
-    /// A `now` entry whose own attempts have been failing is a poll's
-    /// business too (MAIL.md §Wire): the peer asking for its own mail is the
-    /// way a stuck spool clears when the drain's own dials cannot.
+    /// An own letter is handed over by a poll only while it is held (ruling
+    /// 131). A `now` letter whose attempts are failing is its sender's to
+    /// resend, so the poll offers the held letter beside it and never the
+    /// failing one, and the poll retires neither.
     #[test]
-    fn a_poll_offers_a_failing_now_entry_beside_the_held_ones() {
+    fn a_poll_offers_a_held_letter_and_never_a_failing_now_letter() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
         let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
@@ -16463,10 +16465,10 @@ mod tests {
         );
         stuck.tries = 4;
         stuck.last_outcome = "transport: connection refused".to_string();
-        let stuck_msgid = stuck.envelope.msgid.clone();
         aoide_storage::outbox::write_entry("box-b", &stuck).unwrap();
-        let untried = aoide_storage::mail::mint_outbound_letter("alice", "box-b", "bob", "untried").unwrap();
-        aoide_storage::outbox::write_entry("box-b", &aoide_storage::outbox::OutboxEntry::fresh(untried)).unwrap();
+        let held = aoide_storage::mail::mint_outbound_letter("alice", "box-b", "bob", "held").unwrap();
+        let held_msgid = held.msgid.clone();
+        aoide_storage::outbox::write_entry("box-b", &aoide_storage::outbox::OutboxEntry::held(held)).unwrap();
 
         let audit_log = root.join("log");
         let ctx = mail_deposit_ctx(&audit_log, Some("box-b"));
@@ -16477,7 +16479,8 @@ mod tests {
             .iter()
             .map(|e| e["msgid"].as_str().unwrap_or("").to_string())
             .collect();
-        assert_eq!(handed, vec![stuck_msgid], "the failing entry, never the never-attempted one: {answer}");
+        assert_eq!(handed, vec![held_msgid], "the held letter, never the failing one: {answer}");
+        assert_eq!(aoide_storage::outbox::list_entries("box-b").unwrap().len(), 2, "the poll retires neither");
 
         mail_deposit_cleanup(&root, saved_state, saved_stage);
     }

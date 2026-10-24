@@ -698,19 +698,19 @@
   door that answers a word the sender was never taught parks a charter that
   already landed. A new outcome a door wants to report belongs in `data`, never
   as a fourth status.
-- **`settle_delivered`'s retire set is `receipt`, `charter` and `transit`, and
-  a letter waits.** A receipt's deposit outcome is its confirmation; a
+- - - **`settle_delivered`'s retire set is `receipt`, `charter` and `transit`,
+  and a letter waits.** A receipt's deposit outcome is its confirmation; a
   `charter` letter is applied rather than filed, so there is no mailbox on the
   far end to ack from and its own outcome is the whole confirmation there can
   be; a `transit` container is the hub's custody, ended by the next hop's
-  acceptance. Widening that set to letters would retire a letter on a delivery
-  nobody acked. **Only a VERIFIED answer reaches it**: an unsigned, forged or
-  replayed `accepted` leaves all three kinds spooled. Its letter write-back
-  goes through `outbox::update_entry`, so a letter a receipt retired during
-  the dial is not re-spooled; every post-dial write in `drain_node` does the
-  same. The reseal writes the same way, and an entry is attempted only after
-  `outbox::still_spooled` says it is spooled. The check comes AFTER the reseal,
-  so a reseal write cannot re-spool an entry past it.
+  acceptance. An own letter is not in that set: its send settles it (ruling
+  131). **Only a VERIFIED answer reaches it**: an unsigned, forged or replayed
+  `accepted` leaves all three kinds spooled. Its write-back goes through
+  `outbox::update_entry`, so an entry removed during the dial is not re-spooled;
+  every post-dial write in `drain_node` does the same. The reseal writes the
+  same way, and an entry is attempted only after `outbox::still_spooled` says it
+  is spooled. The check comes AFTER the reseal, so a reseal write cannot
+  re-spool an entry past it.
 - **A receipt retires its letter on first filing, and on a duplicate of one.**
   `settle_deposit` calls `retire_by_ack` for a receipt in either outcome; the
   retire is idempotent. `mail::deposit` answers a second receipt from the same
@@ -759,12 +759,12 @@
   through it. A word that is classified (`down`, `config-invalid`) is judged on
   the raw string BEFORE it is cleaned, because stripping a format character can
   turn one word into another.
-- **`drain_node` decides it has nothing to dial before the binding exchange.**
+- - **`drain_node` decides it has nothing to dial before the binding exchange.**
   The exchange is a dial, and an unsigned answer to it is an audit line. The
   daemon drains every node that ever had mail (its directory is never removed)
-  every few seconds, so above either check it would cost both on every tick:
-  the link's back-off, and `dialable_entries` (spooled, not parked, not held)
-  being empty. Keep every dial of a drain below both.
+  every few seconds, so above either check it would cost both on every tick: the
+  link's back-off, and `dialable_entries` (spooled, not an own letter, not
+  parked, not held) being empty. Keep every dial of a drain below both.
 - **`charter`'s handlers render; `aoide_storage::charter` acts (P-CHARTER).**
   The document, its validation, the five accept steps, the operator key, the
   trust record, the high-water mark and the spool all live in storage —
@@ -796,47 +796,42 @@
     the grant checks at a door are the trust-per-mesh slice's; this module
     writes `state/mesh/<mesh>/` only through `charter::accept`, which is the
     one writer of the in-force charter and its record.
-- **`mail_wire::drain_node` is the ONE place a spooled mail envelope is
-  ever dialed out (P-M2) — never re-implement `attempt_deposit`'s POST at
-  a second call site.** Two callers converge on it — the daemon's
-  periodic tick and a door's own post-heard best-effort drain, both via
-  `aoide_conduct::mail_bridge`. A send's own dial, `deliver_now` (ruling 131),
-  shares `attempt_deposit` and `classify_deposit_response` with it, so there is
-  still one `aoide/mailDeposit` wire implementation to keep in sync with the
-  server side.
-- **`drain_node` never attempts more than `DRAIN_BATCH_CAP` (50) NON-PARKED
-  entries in one call, and always records a `TransportFailed` on the entry it
-  hit before backing off (mail register §26 outbox fix).** All three are
-  load-bearing: the cap bounds one tick's cost against an unbounded backlog
-  rather than scaling with it; `refused` entries are filtered OUT BEFORE the
-  cap applies, never skipped inside the loop (a parked entry is permanent
-  until `mail outbox rm` retires it (an own letter also goes when its session
-  ends), and they sort oldest-first, so counting
-  them against a cap the loop then skips leaves every fresh letter behind one
-  batch's worth of them undialled forever —
-  `a_wall_of_parked_entries_never_starves_a_fresh_letter_out_of_the_batch`
-  pins it); and the per-entry bookkeeping (`tries`/`last_try_at`/
-  `last_outcome`, written via `outbox::write_entry` before the
-  `outbox::back_off` call) is what makes `mail outbox --json`'s tries
-  histogram and `lastOutcomeCounts` (see `commands::outbox_node_summary`)
-  meaningful for a link that has been dead a long time — don't move the
-  `back_off` call ahead of the entry write, and don't drop the cap without
-  re-checking `a_drain_never_attempts_more_than_the_batch_cap_per_call`.
-  **The entry write's own success is never a precondition for the
-  back-off, either.** `write_entry`'s `Result` is captured, not `?`-ed
-  away, so a local write failure — a full or read-only disk, the exact
-  condition under which the link is also likely failing — still lets
-  `back_off` run before that write's own error propagates to the caller;
-  an early `?` here used to skip `back_off` outright on that failure,
-  leaving the link un-backed-off and re-dialed every following tick
-  precisely when the box is already sick
-  (`a_link_backs_off_even_when_the_entrys_own_record_cannot_be_written`
-  pins it).
-  `drain_all`'s per-node loop is unaffected by any of them: one node's
+- - **`mail_wire::drain_node` is the ONE place a drain dials a spooled entry
+  (P-M2) — never re-implement `attempt_deposit`'s POST at a second call site.**
+  Two callers converge on it — the daemon's periodic tick and a door's own
+  post-heard best-effort drain, both via `aoide_conduct::mail_bridge`. A send's
+  own dial, `deliver_now` (ruling 131), shares `attempt_deposit` and
+  `classify_deposit_response` with it, so there is still one `aoide/mailDeposit`
+  wire implementation to keep in sync with the server side.
+- - **`drain_node` never attempts more than `DRAIN_BATCH_CAP` (50) NON-PARKED,
+  NON-LETTER entries in one call, and always records a `TransportFailed` on the
+  entry it hit before backing off (mail register §26 outbox fix).** All three
+  are load-bearing: the cap bounds one tick's cost against an unbounded backlog
+  rather than scaling with it; `refused` entries are filtered OUT BEFORE the cap
+  applies, never skipped inside the loop (a parked entry is permanent until
+  `mail outbox rm` retires it (an own letter also goes when its session ends),
+  and they sort oldest-first, so counting them against a cap the loop then skips
+  leaves every fresh letter behind one batch's worth of them undialled forever —
+  `a_wall_of_parked_entries_never_starves_a_fresh_letter_out_of_the_batch` pins
+  it); and the per-entry bookkeeping (`tries`/`last_try_at`/ `last_outcome`,
+  written via `outbox::write_entry` before the `outbox::back_off` call) is what
+  makes `mail outbox --json`'s tries histogram and `lastOutcomeCounts` (see
+  `commands::outbox_node_summary`) meaningful for a link that has been dead a
+  long time — don't move the `back_off` call ahead of the entry write, and don't
+  drop the cap without re-checking
+  `a_drain_never_attempts_more_than_the_batch_cap_per_call`. **The entry write's
+  own success is never a precondition for the back-off, either.**
+  `write_entry`'s `Result` is captured, not `?`-ed away, so a local write
+  failure — a full or read-only disk, the exact condition under which the link
+  is also likely failing — still lets `back_off` run before that write's own
+  error propagates to the caller; an early `?` here used to skip `back_off`
+  outright on that failure, leaving the link un-backed-off and re-dialed every
+  following tick precisely when the box is already sick
+  (`a_link_backs_off_even_when_the_entrys_own_record_cannot_be_written` pins
+  it). `drain_all`'s per-node loop is unaffected by any of them: one node's
   `TransportFailed` break stays scoped to that node's own iteration, never
-  short-circuiting the loop over other nodes (see
-  `aoide_conduct::mail_bridge`'s own
-  `one_dead_nodes_entries_never_block_another_nodes_drain`).
+  short-circuiting the loop over other nodes (see `aoide_conduct::mail_bridge`'s
+  own `one_dead_nodes_entries_never_block_another_nodes_drain`).
 - **Hold, poll, and poll-on-contact (P-M3) live in this same three-caller
   path — never at a fourth call site.** `drain_node` filters a `hold`
   entry the way it filters a parked one (BEFORE `DRAIN_BATCH_CAP`: held is

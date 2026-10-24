@@ -5282,9 +5282,11 @@ of its own, see its doc comment. A held A2A inject or opening turn files nothing
 until a human approves it through `session pending approve`, which re-drives it
 through `session_send`. An OUTBOUND `--to node/<x>` send (P-M2) files nothing
 into THIS box's own boxes at send time — it mints a signed envelope and
-spools it into `state/outbox/` instead (below), delivered over
-`aoide/mailDeposit` by a best-effort drain right after the write, the daemon's
-own periodic sweep, or a door's post-heard drain of that node. The letter lands
+dials it at once, in the sending process, over `aoide/mailDeposit`. It spools
+the envelope into `state/outbox/` (below) only when the dial returns it or the
+hop is a `hold` one: a delivered letter is written nowhere (ruling 131). The
+daemon's own periodic sweep and a door's post-heard drain carry the other
+entries (receipts, charters, transit) of that node. The letter lands
 in a box only on the FAR box, once ITS OWN `mail_deposit` files it;
 this box's own receipts gain an entry only when that far box's ack (a `receipt`) is
 deposited back here in turn.
@@ -9958,7 +9960,9 @@ them**: all `hold`-flavored ones, and `now` ones whose own attempts
 have been failing (`tries > 0` with a last outcome that did not reach the
 peer; parked/`refused` entries included, never-attempted ones excluded —
 the drain owns those, and offering one here would double-drive it from two
-callers). Nothing else rides the answer: no flavor, no tries, no route, and
+callers). An own letter is offered only while it is held: a returned one is
+its sender's to resend (ruling 131). Nothing else rides the answer: no
+flavor, no tries, no route, and
 no marker that a batch was ever handed over.
 
 **A poll writes only the caller's own word.** The

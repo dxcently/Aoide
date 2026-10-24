@@ -444,7 +444,8 @@ never the inbound/serve half (that's `aoide-server`).
   is exactly "nothing committed and nothing parked" and structurally
   carries no resumable id.
 - `mail_wire` (P-M2, `docs/architecture/MAIL.md`) — the outbox drain: the
-  ONE place a spooled mail envelope actually dials out.
+  ONE place a spooled entry dials out, and never an own letter, which its send
+  dials once (ruling 131).
   `aoide_storage::outbox` owns the spool as pure file CRUD with no network;
   this module owns the wire half. `drain_node(node_name)` is called from
   two places that converge here, so the drain has exactly one dial
@@ -647,17 +648,13 @@ never the inbound/serve half (that's `aoide-server`).
   split so the CLI keeps its order. The family lives here
   because `handle_mail_send`'s non-self branch now dials out and only this
   crate may hold that dial:** `handle_mail_send` mints and spools an outbound
-  letter through `aoide_storage::mail`/`outbox` exactly as before, then —
-  new at P-M2, for a non-self `to` — makes ONE best-effort call into
-  `mail_wire::drain_node` before returning; the spool's own success (the
-  WRITE) is the `Outcome`, never gated on what that dial did (spec item 8;
-  the periodic daemon tick and the door's own post-heard drain are what
-  actually guarantee delivery, this call is purely a latency shortcut).
-  What the dial found IS surfaced, though: `data.delivery` is filled in
-  after the drain attempt by `delivery_projection`, the same read-only
-  join of an outbox entry with its node's `read_link_state` that
-  `handle_mail_outbox` uses — see "Status and the nodelist view" in
-  `docs/architecture/MAIL.md` for the status vocabulary. A post-spool read
+  letter through `aoide_storage::mail`/`outbox` as before, then, for a non-self
+  `to`, dials the letter's first hop in this process (ruling 131,
+  `mail_wire::deliver_now`). A letter that comes back, or one held for a `hold`
+  hop, is spooled; a delivered one is written nowhere. `data.delivery` reports
+  that dial's own result (`delivered`, `returned` or `held`) and is never read
+  back from the spool (see "Status and the nodelist view" in
+  `docs/architecture/MAIL.md` for the vocabulary). A post-spool read
   that itself fails degrades `delivery` to `queued`/"status unavailable"
   without ever touching the spool's own `Ok`. Its node-branch gate
   is deliberately shallow — it requires `verified` off `node_store::
@@ -707,10 +704,14 @@ never the inbound/serve half (that's `aoide-server`).
   `outbox::remove_entry(node, msgid)` on each until one actually held that
   msgid, erroring `not-found` if none did. `handle_mail_outbox_retry`
   (`mail outbox retry <msgid> | --refused [<node>]`) is the un-park: it
-  clears `refused` via `outbox::unpark_entry`/`unpark_refused` (tries and
-  the signed envelope untouched), then calls `mail_wire::drain_node` ONCE
-  per affected node and reports the same `delivery` projection `mail send`
-  does; nothing parked is a clean no-op, not an error. Neither `outbox`
+  clears `refused` via `outbox::unpark_entry`/`unpark_refused` on the dialled
+  entries (tries and the signed envelope untouched), then calls
+  `mail_wire::drain_node` ONCE per affected node. An own letter is not drained:
+  its retry dials it live (`resend_returned_letter`, ruling 131). A delivered
+  one leaves the spool, a returned one is written back with its new word, and
+  a held one is refused (its node's poll moves it). `--refused` does the same
+  for every returned letter. Each reports the `delivery` vocabulary `mail send`
+  uses; nothing parked is a clean no-op, not an error. Neither `outbox`
   nor `outbox rm` WRITES to the
   mailbase (`aoide_storage::mail`) — `handle_mail_outbox`'s own delivery
   projection still reads it (above) — `handle_mail_export` (`mail export

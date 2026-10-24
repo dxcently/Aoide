@@ -644,6 +644,16 @@ blank one is refused too.
   which opens `state/sessions/<id>.log` the same as a headless one, so it
   carries a real touch signal and the timer can take it on its own —
   the gesture (`--now`) is no longer the only path in.
+
+  The roster exit also drops the session's own mail letters, returned or held,
+  one audit line each (ruling 131). `do_session_end_inner`, `record_hook_deaths`
+  and `reap_inner` collect the ids they leave the roster with, and
+  `drop_ended_sessions` drops their letters once the roster write has returned,
+  never under the roster lock. The daemon tick runs `sweep_session_letters`
+  before its mail drain: it drops own letters with no session (`pre-131`) and
+  those whose session is off the roster or `done` (`session-gone`), and it
+  skips the session pass when the roster cannot be read.
+
 - `graph/window.rs` — the session window record (`session window attach`,
   `session window closed`, `session window roster`, the untracked-terminal
   reconciler) PLUS the

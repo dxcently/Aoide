@@ -1006,9 +1006,10 @@
   ssh dial. Don't relax `.bsy` to blocking, either — ruling 3 (P-M2 brief)
   is explicit that a busy link is SKIPPED, never queued behind, so one
   wedged drain can never starve every later one.
-- **An outbox entry retires ONLY on a valid ack, explicit `mail outbox rm`
-  (P-M2), or the drop of an own letter with its session (ruling 131) — never
-  auto-evicted, never expired, never capped.**
+- **An outbox entry retires ONLY on a valid ack, a held own letter's filed
+  name (`retire_acknowledged`), explicit `mail outbox rm` (P-M2), or the drop
+  of an own letter with its session or by the tick's sweep (ruling 131) —
+  never auto-evicted, never expired, never capped.**
   `outbox::retire_by_ack` is the "valid ack" half — it trusts its caller
   (`mail::deposit`) to have already proven the ack's origin signature
   genuine, and never re-verifies; don't call it on an unverified envelope.
@@ -1035,10 +1036,11 @@
   nothing else should construct the flavor by hand.
 - **A poll is a READ, and `poll_payloads` is its only entry point (P-M3).**
   The offer rule lives there and nowhere else: every held entry toward the
-  node, plus every `now` entry with `tries > 0` whose last outcome did not
+  node, plus every other entry with `tries > 0` whose last outcome did not
   reach the peer (parked/`refused` ones included — a poller asking for its
-  own mail is a new fact; a never-attempted `now` entry excluded, the drain
-  owns it and offering it would double-drive one entry from two callers).
+  own mail is a new fact; a never-attempted entry excluded, the drain owns it
+  and offering it would double-drive one entry from two callers). An own
+  letter is offered only while held: a returned one is its sender's to resend.
   **Never add state to it**: no `tries` stamp, no `last_polled_at`, no
   handed-over bookmark. Re-poll-before-ack idempotence is a CONSEQUENCE of
   writing nothing (the same set is offered again) plus the receiver's
@@ -1093,15 +1095,15 @@
   a receipt-kind entry and, if so, which `acked_msgid` marker to drop
   (falling back to a scan scoped to `.ack/` ONLY, never the node
   directory, on the rare unreadable/unparsable-entry removal — a
-  best-effort net for a corrupted file, not the hot path). Every
-  entry-removal call site — `mail_wire::drain_node`'s `Delivered`
-  confirmation, `mail outbox rm`, `retire_by_ack`'s letter-entry removal
-  (a no-op marker-wise, since letters have no marker), and the own-letter drop
-  (`drop_letters_where`, which takes the lock and calls the same
-  `remove_entry_unlocked`) — goes through one removal, so none of them need
-  their own awareness of the
-  marker. Don't reintroduce a directory scan on the deposit path, and
-  don't move marker creation ahead of the entry write.
+  best-effort net for a corrupted file, not the hot path).
+  Every removal goes through `remove_entry` (or `remove_entry_unlocked` under a
+  held lock): `mail_wire::settle_delivered` for a delivered dialled entry,
+  `mail outbox rm`, `retire_by_ack` for a receipt that names its entry,
+  `retire_acknowledged` for a transit entry or a held own letter its destination
+  filed, and `drop_letters_where` for an own letter whose session ended or the
+  tick's sweep. None of them needs its own awareness of the marker. Don't
+  reintroduce a directory scan on the deposit path, and don't move marker
+  creation ahead of the entry write.
 - **The gate self-heals an orphaned marker; an out-of-band mover need not
   touch `.ack/` (review round 3).** `has_pending_ack_unlocked` never
   trusts the marker's mere existence — it reads the msgid the marker

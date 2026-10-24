@@ -977,6 +977,13 @@ in the message.
   fast-path kill didn't finish in time. A new leaving-kind under this same
   runtime directory joins the sweep the same way — never a separate cleanup
   mechanism.
+- **The roster exit drops letters after the roster write, never under it.**
+  `drop_ended_sessions` (`graph/session_store.rs`) is the one helper the three
+  exit paths (`do_session_end_inner`, `record_hook_deaths`, `reap_inner`) call
+  with the ids they ended, once their roster write has returned.
+  `sweep_session_letters` reads the bound sessions from the outbox before it
+  reads the roster, so no path holds both locks at once, and an unreadable
+  roster skips the session pass rather than reading as an empty one.
 - **Every session-write handler routes through `aoide_client::daemon::
   daemon_dispatch(inv)` FIRST, as its own first line, falling back to its
   pre-existing direct stage-write path byte-identically on `None` (P-D6,
