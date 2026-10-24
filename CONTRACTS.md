@@ -5262,9 +5262,9 @@ outside the home mesh (`docs/architecture/MAIL.md` §Transit; mint sites
 mesh with the home mesh not among them refuses the send
 (`mesh-ambiguous`, naming them) rather than minting with no mesh; `""` is
 carried by everything that never chose one — `mail send --to self/<name>`,
-every receipt this box files about itself, and a receipt for a letter that
-arrived UNNAMED, which rides that letter's own `originMesh` back — not a
-third mesh choice.
+every receipt this box files about itself, and a receipt an older build
+sends for a letter that arrived UNNAMED, which rides that letter's own
+`originMesh` back — not a third mesh choice.
 
 `seq` is local to the node, like an NNTP article number — never crosses a link;
 it is the next number of the `state/mail/seq` counter, issued under the lock
@@ -5288,8 +5288,8 @@ hop is a `hold` one: a delivered letter is written nowhere (ruling 131). The
 daemon's own periodic sweep and a door's post-heard drain carry the other
 entries (receipts, charters, transit) of that node. The letter lands
 in a box only on the FAR box, once ITS OWN `mail_deposit` files it;
-this box's own receipts gain an entry only when that far box's ack (a `receipt`) is
-deposited back here in turn.
+since ruling 131 no receipt entry is spooled for a letter this box files; an
+older build's receipt for it still lands here as a deposit.
 
 Every mutation of the mailbase runs under the stage lock and refuses when
 the lock is not held: `try_stage_lock` (`storage/src/fs.rs`) blocks for
@@ -5382,21 +5382,14 @@ state/outbox/<node>/link.json      that LINK's own backoff state (absent
                                     = not held off)
 state/outbox/<node>/.bsy           a drain's lock file — never data
 state/outbox/<node>/.poll          a poll's lock file — never data; one poll of a node at a time
-state/outbox/<node>/.ack/<acked>   pending-ack marker: its content is the
-                                    msgid of the receipt entry covering
-                                    letter <acked> — never data, never
-                                    drained
+state/outbox/<node>/.ack/<acked>   an older build's pending-ack marker. Nothing
+                                    writes one (ruling 131); a removal clears
+                                    the one its entry names
 ```
 
-The `.ack/<acked_msgid>` marker makes "is an ack for this letter already
-sitting undelivered" one stat plus one small read, never a scan of the
-node's directory, so a duplicate of a filed letter arriving while the
-link is dead re-spools nothing (MAIL.md item 5 still holds once the
-pending ack has actually gone out: the marker leaves with the entry).
-The marker is never authoritative on its own — a reader confirms the
-msgid it names is still spooled before treating it as pending, and a
-marker naming a msgid no longer on disk is stale: deleted on the next
-check, the ack re-spooled. A tool that moves or archives entries out of
+Nothing reads a `.ack/` marker to decide anything now: removing an entry
+clears the marker it names, and the markers an older build left are safe to
+delete by hand (MAIL.md, Acks). A tool that moves or archives entries out of
 `state/outbox/<node>/` need not know `.ack/` exists.
 
 ```json
@@ -5442,9 +5435,7 @@ node is `hold`-flavored. The hub never dials it, and only the node's own
 nothing else):
 
 - `aoide_client::mail_wire::spool_entry` holds the entry whatever its caller
-  asked for — so no caller has to remember, including `spool_and_drain_ack`,
-  whose own argument is a literal `false` and whose ack toward a `poll` origin
-  is held by this line;
+  asked for — so no caller has to remember;
 - `drain_node` returns without opening a link at all, BEFORE the binding
   exchange — a dial a held-entry filter runs too late to prevent;
 - `pollable_nodes` leaves such a node out of a bare `aoide mail poll`: polling
@@ -9981,11 +9972,9 @@ successful deposit answers:
 ```
 
 `"duplicate"` replaces `"accepted"` when `msgid` was already in
-the box — the far end's earlier attempt evidently landed even if ITS
-own ack never arrived, so a duplicate whose original filing was a
-**letter** re-sends the ack (never a duplicate **receipt** — that would
-ack an ack, and the `letter`/`receipt` vocabulary has no third shape to
-stop that ping-ponging forever). A rejected envelope answers instead:
+the box — the far end's earlier attempt evidently landed. A duplicate of a
+filed **letter** is answered `"duplicate"` and nothing more: no ack is sent
+back (ruling 131). A rejected envelope answers instead:
 
 ```json
 { "result": { "status": "refused", "reason": "bad-msgid",
@@ -10031,13 +10020,9 @@ per-command audit, so this is the only place a flood becomes visible, and
 volume must show whether every one of those deposits landed accepted,
 refused, or malformed.
 
-A filed **letter** mints an ack (a `receipt`) addressed back to the
-origin, spools it into that origin's own `state/outbox/`, and best-effort
-drains that node once, synchronously, reusing the SAME drain
-`aoide-server`'s own periodic sweep uses (`aoide_conduct::mail_bridge::
-drain_node` — one drain implementation, never a second dial built at the
-door). A filed **receipt** instead retires the LOCAL outbox entry it
-confirms (§4's `retire_by_ack`, spec item 7) — a forged or stale ack
+A filed **letter** mints nothing and spools nothing: the filing is its own
+answer (ruling 131). A filed **receipt** (from an older build) instead retires
+the LOCAL outbox entry it confirms (§4's `retire_by_ack`, spec item 7) — a forged or stale ack
 simply matches nothing and retires nothing; every `state/outbox/` call
 here runs strictly AFTER `mail::deposit` has already released its own
 lock, never nested inside it (`mail`'s and `outbox`'s stage locks are the
@@ -10135,8 +10120,8 @@ hands the same envelopes over again (unless it deferred them), and why a held
 `letter` leaves the spool only when the poller names its msgid in `filed`, when
 an older poller's receipt retires it (`outbox::retire_by_ack`), when its session
 ends, or through `aoide mail outbox rm <msgid>` (a `letter` filed by the poller
-mints a receipt exactly as a deposit would; an ack is an envelope, so the
-poller's own next drain carries it back). A held `letter` the poller names in
+mints nothing, since ruling 131: the filing is its own answer). A held `letter`
+the poller names in
 `filed` ends the sender's copy on its word alone, as a relay's verified
 `accepted` does (MAIL.md, §Transit). For a relayed letter the poller is
 the hop it was spooled toward, not the destination. The

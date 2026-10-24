@@ -623,7 +623,7 @@ destination. Steps, in order:
 8. Check membership: the origin in the mesh; for a post, the origin a member node of
    the board at that epoch.
 9. File the letter.
-10. Send the receipt and ring the doorbell.
+10. Ring the doorbell. The answer is `accepted`; no receipt is sent (ruling 131).
 
 This branch never runs the hop spool step, because a destination that misfiled would
 otherwise relay content addressed elsewhere. A mismatch refuses
@@ -632,9 +632,9 @@ and never re-spooled.
 
 **Outer signature and dedup are decided before anything is opened.** The outer
 signature needs no plaintext and no recipient private key. An unverified origin is
-refused. A previously admitted duplicate returns `duplicate` without opening. For a
-filed letter, the destination recovers receipt delivery from the durable filed
-record under the existing pending-receipt rule. Dedup never records a malformed or
+refused. A previously admitted duplicate returns `duplicate` without opening. A
+duplicate of a filed letter is answered from the durable filed record, and no
+receipt is sent back (ruling 131). Dedup never records a malformed or
 unverified container.
 
 The dedup lookup key is the authenticated `(origin.key, to.node, msgid)` tuple. A
@@ -1053,7 +1053,7 @@ prev_n    = sha256(frame("aoide/mail-hop-entry",
   `origin.node`, and it cannot forge the origin's signature. A relay that dropped the
   origin's entry is refused **`broken-chain`** — the origin is not erasable from the
   record of who handed the letter to whom.
-- A hop can still drop the tail, which drops the letter. No destination-signed ack
+- A hop can still drop the tail, which drops the letter. No verified `accepted`
   then reaches the origin, and the outbox reports the letter as undelivered.
 - The destination verifies the full chain. Per-hop zone checks at each door are
   unchanged.
@@ -1314,7 +1314,7 @@ not control access, and a session listing is not transcript access.
 |---|---|
 | `mail/deposit` | Deposit one sealed container and get back `accepted`, `duplicate` or `refused(reason)`. Also carries receipts, charters, wraps and board posts; there is no second ack method. |
 | `mail/poll` | Returns the caller's own spooled containers. The caller's identity must BE the node being polled. This is the only inbound path for a `poll` node. |
-| `mail/ack` | Semantic grouping for the receipt flow. One receipt per acked `msgid` while pending. A later redelivery after the first delivery may re-spool one (MAIL.md's actual rule). |
+| `mail/ack` | Semantic grouping for the receipt flow of older builds. No node sends a receipt now (ruling 131); one that arrives is answered like a deposit (MAIL.md, Acks). |
 | `state` | Authorized snapshot of hosts, projects, sessions, terminals, agents and relationships |
 | `events` | WSS subscription to permitted changes after a cursor; a bounded, recoverable stream |
 | `presence` | Expiring host connection and heartbeat state, distinct from process state |
@@ -1364,7 +1364,7 @@ acted.
 
 - Keep the queued, filed and fetched states distinct, and keep idempotency
   identifiers stable. A retry after a lost response must not duplicate work or
-  receipts.
+  filings.
 - The sealed container is fixed at mint time, so a retry is byte-identical and the
   `msgid` stays stable.
 - WSS is a transport stream, not durable storage. Recovery comes from cursors and
@@ -1515,8 +1515,7 @@ scheduler (`aoide mail poll`).
   - A crash between base and seen re-accepts exactly once.
   - A same-`msgid` collision with different immutable bytes, within the same origin
     and destination, is refused.
-  - A filed duplicate recovers a lost receipt without duplicating a receipt that is
-    already pending.
+  - A filed duplicate is answered `duplicate` and sends no receipt.
 - **Bindings:**
   - A binding signed by any key but the one it names is refused.
   - A new age binding is accepted without re-pairing.
@@ -1530,7 +1529,7 @@ scheduler (`aoide mail poll`).
   - An expired or unknown binding always parks and is reported.
   - `key-retired` reaches the origin's retry loop.
 - **Crash and recovery:** a torn tail is truncated, a resend is byte-identical, and no
-  receipt is duplicated. Already-filed letters survive loss of the age key.
+  letter is filed twice. Already-filed letters survive loss of the age key.
 - **Downgrade:** mixed suite components or an older accepted-suite entry is refused
   with a taught error and an audit line.
 
@@ -1578,8 +1577,8 @@ scheduler (`aoide mail poll`).
 - **Signed requests everywhere:** through the tunnel, an unsigned request, an
   unknown-key request, a request naming a mesh the caller is not in, and a replayed
   nonce are all refused. The observed loopback source grants nothing.
-- **Receipts:** one per acked `msgid` while pending. A later redelivery after delivery
-  may re-spool one. No receipt chain.
+- **Receipts:** a letter this node files sends no receipt (ruling 131). A receipt
+  from an older build is filed or answered like a deposit. No receipt chain.
 - **Windows and Linux, no SSH:** send, poll, fetch and ack work end to end with the
   relay node, with a `poll` node on each OS that has no SSH account or binary.
 - **Downgrade:** a plaintext request is refused with the taught word

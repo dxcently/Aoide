@@ -542,8 +542,7 @@ never the inbound/serve half (that's `aoide-server`).
   **P-CHARTER adds the `poll` address to the same three places, from ONE
   predicate** (`node_store::Node::never_dialled`, the record's address
   being `poll`): `spool_entry` holds such an entry whatever its caller asked
-  for — the ack path's own literal `false` is covered by that line rather than
-  by an argument it must remember — `drain_node` returns before the link lock
+  for, so no caller has to remember — `drain_node` returns before the link lock
   and before the binding exchange (a dial held entries are filtered too late
   for), and `pollable_nodes()` leaves such a node out, so a bare
   `aoide mail poll` never dials a node that has no inbound transport to answer
@@ -559,11 +558,9 @@ never the inbound/serve half (that's `aoide-server`).
   handed-over envelope through the SAME `aoide_storage::mail::deposit`
   chain a pushed deposit gets (hop = the node polled, origin = the
   envelope's own `header.from.node`), then through `settle_deposit`:
-  filing a letter spools its ack toward the letter's origin, a receipt
-  retires the entry it confirms, and a re-poll before the ack files
-  nothing twice and spools nothing twice. A re-ack of a letter already
-  filed files nothing either, and the write-back after a deposit never
-  re-spools a letter the ack has retired. **`aoide mail poll [<node>]` is
+  filing a letter owes nothing, a receipt from an older node retires the
+  entry it confirms, and a re-poll files nothing twice. A duplicate of a
+  letter already filed owes nothing either. **`aoide mail poll [<node>]` is
   the second caller of `poll_node`, and the reason it exists: an empty
   outbox never dials, so `drain_node`'s poll-on-contact can never reach a
   node with nothing to send — the one receive path the relay model needs
@@ -593,8 +590,8 @@ never the inbound/serve half (that's `aoide-server`).
   `unpaired-node`, and any other name takes its `poll_target` and refuses with
   the taught text, all BEFORE any dial. Hand-over is bounded by
   `aoide_storage::outbox::POLL_BATCH_CAP` (50, the drain's own batch), which
-  is safe because the acks retire what was filed and the next poll
-  advances. The `PollOutcome` it returns carries all three answers the command
+  is safe because the poller's `filed` names retire what it took and the next
+  poll advances. The `PollOutcome` it returns carries all three answers the command
   renders: `filed`, the `refused` containers (`<msgid>: <reason>`), and — H1 —
   the `withheld` entries a sealed-only listener would not hand over
   (`<msgid>: sealed-required — <detail>`), so a letter held at a relay for want

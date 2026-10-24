@@ -187,7 +187,7 @@ FidoNet node could.
 | outbox   | the sender-side per-node spool                                     | BSO flow files              |
 | flavor   | `now` (deliver or queue+retry) / `hold` (wait to be polled)        | `?ut` flavors               |
 | cursor   | a reader's high-water mark over the mailbase                       | `.newsrc`                   |
-| receipt  | an envelope of type `receipt`: a conduct-delivery record or an ack | ReturnReceipt               |
+| receipt  | an envelope of type `receipt`: a conduct-delivery record, or an ack from a build before ruling 131 | ReturnReceipt               |
 | thread   | a letter's reply chain (`threadId`); no members, no key            | reply chain                 |
 | board    | a group conversation: members, an owner, a key per epoch           | echomail area               |
 | post     | a letter on a board, sealed to the board's current epoch           | echomail message            |
@@ -416,7 +416,7 @@ The store is bounded by four caps, all `const`s in `storage/src/mail.rs`:
 | Key share | 60 MiB | the bytes one verified origin key holds across every box | `box-full` |
 | Store | 240 MiB | every box file together | `box-full` |
 
-Receipts, the containers gate and the re-ack record are not capped by these;
+Receipts and the containers gate are not capped by these;
 they rotate at their own caps (§Security model). A letter signed by this box's
 own identity key has no quarter, only the box and store caps, whichever hop
 brought it. Every other letter is held to the quarter of its verified origin
@@ -578,10 +578,9 @@ door's audit name whitelist gains both names so they never log as bare
      would then file under the wrong name. No key on record for that
      node → `unverified-origin`;
   5. dedup: a seen `msgid` returns `duplicate`, never an error — hops
-     retry freely. When the duplicate is a filed `letter`, the
-     destination re-spools its receipt: a lost ack is the common reason
-     for a re-offer, and answering with silence would leave the origin
-     retrying against a letter that already landed;
+     retry freely. A duplicate of a filed `letter` gets
+     `duplicate` and nothing more: the filing already answered the letter,
+     and a re-offer that finds it filed spools nothing (ruling 131);
   6. file (`letter` if `to.node` is self, else `transit`), ring the
      doorbell, and if `to.node` is not self, re-spool (§Transit). A
      `transit` filing rings nothing and owes NO ack: the hub appends its own
@@ -590,14 +589,12 @@ door's audit name whitelist gains both names so they never log as bare
      itself), and retires its own custody when that hop takes it — on a drain,
      by the deposit's acceptance; on a poll, by the poller's next poll naming
      the msgid in `filed`, since a hand-over it never acknowledged may have
-     been lost. The destination's own receipt is what ends the ORIGIN's
-     custody, and it reaches the origin by the same four steps the letter
-     travelled (a `poll` destination's receipt is spooled toward the hop the
-     route picks for it, exactly as its letters are); a hub waits
-     for none of it, or every hub would hold a copy of every letter it
-     relayed.
-  Receipts (acks) are envelopes deposited through the same method — one
-  routing path for everything, so acks traverse hubs for free.
+     been lost. The origin's custody ends on the next hop's verified
+     `accepted` or `duplicate` answer, and no receipt travels back to it
+     (ruling 131). A hub keeps its own copy only until its next hop takes it:
+     on a drain by that answer, on a poll by the poller's `filed`.
+  A receipt from an older build is a `receipt` envelope deposited through the
+  same method, so it traverses hubs like any letter.
 - **`aoide/mailPoll`** `{ node, filed?, refused?, deferred? }` → `{ envelopes[],
   containers[] }`.
   The caller asks
@@ -684,8 +681,8 @@ door's audit name whitelist gains both names so they never log as bare
   `.poll` flock,
   tried and
   never waited for): two overlapping asks would both read `filed` before either
-  recorded it, be handed the same letter, and mint two receipts for it — which
-  the relay refuses as a different body for one msgid. The second ask answers
+  recorded it, be handed the same letter, and both would file it. The second ask
+  answers
   that a poll is already in progress. Handed-over
   `letter` entries stay in the outbox until the poller names them in `filed`,
   an old-style receipt ends them, or the session that sent them ends; a re-poll
@@ -744,15 +741,17 @@ door's audit name whitelist gains both names so they never log as bare
   `transit` container. A verified `accepted` or `duplicate` for a letter the
   sender dialled live delivers it: no copy is kept and no receipt is awaited
   (§Transit).
-- **Acks** are `receipt` envelopes minted by the destination on filing a
-  `letter`: `to` = the origin, `text` = the acked `msgid`, signed by the
-  destination. Routed like any letter, never themselves acked. The ack is
-  signed as the destination's name IN THE LETTER'S MESH, by the same rule a
-  letter's sender uses: the name its charter line gives its identity key, or
-  its own name where the mesh is a pair mesh that no charter governs. Never the
-  OS hostname (a box named `chiyo-host` that holds the key of `chiyo` signs as
-  `chiyo`). A charter mesh whose lines do not carry the destination's key mints
-  no ack; the refusal is audited, and the origin keeps its own copy.
+- **Receipts.** A receipt is a `receipt` envelope: `to` = the origin, `text` =
+  the acked `msgid`, signed by the destination's name IN THE LETTER'S MESH, by
+  the rule a letter's sender uses: the name its charter line gives its identity
+  key, or its own name where the mesh is a pair mesh that no charter governs.
+  Never the OS hostname (a box named `chiyo-host` that holds the key of `chiyo`
+  signs as `chiyo`). Since ruling 131 the destination's verified answer is the
+  receipt, and no node sends a receipt letter: filing a letter, answering a
+  duplicate of a filed one, and filing from a poll owe the origin nothing and
+  spool nothing toward it. A receipt that arrives from a build before ruling
+  131 is still filed or answered under the rules below, and retires the letter
+  it names. That path stays until no such build is left.
   A receipt's `text` is exactly one msgid — 64 lowercase hex digits and
   nothing around them. Any other text is refused `bad-msgid` and files
   nothing, because the text names a letter and nothing else.
@@ -761,48 +760,39 @@ door's audit name whitelist gains both names so they never log as bare
   other receipt is answered `duplicate` and files nothing: nothing is filed
   and nothing is owed, so the sender retires its copy rather than parking it.
   A signer acknowledges a letter once per mesh: a second receipt from the same
-  signer, in the same mesh, for the same acked letter files nothing, however
-  many times the destination re-acks it (`receipts.log`). A receipt in
-  another mesh is a different acknowledgement and is filed.
-  **What is bounded, and what is not.** The receipts log gains at most one receipt
-  per letter this box sent, per signer and mesh; a flood of receipts for
-  letters it never sent is refused before anything is written. A letter this
-  box sent and has already retired is not spooled any longer, so a late
-  re-ack of it is refused the same way. No record of retired letters is kept
-  beyond the receipt index, so this box cannot tell a late re-ack of its own
+  signer, in the same mesh, for the same acked letter files nothing. A receipt
+  in another mesh is a different acknowledgement and is filed.
+  **What is bounded, and what is not.** The receipts log gains at most one
+  receipt per letter this box sent, per signer and mesh; a flood of receipts
+  for letters it never sent is refused before anything is written. A letter
+  this box sent and has already retired is not spooled any longer, so a late
+  receipt for it is refused the same way. No record of retired letters is kept
+  beyond the receipt index, so this box cannot tell a late receipt for its own
   letter from a receipt for a letter it never sent.
-  **An outbox entry retires when its delivery is confirmed, and what
-  counts as confirmation depends on what the entry is.** For a `letter`:
-  a receipt arrives whose verified signer is the entry's `to.node` and
-  whose text names the entry's `msgid`, and it retires the letter on its
-  first filing. For a `receipt`: the deposit
-  outcome itself, `accepted` or `duplicate` — an ack needs no ack
-  because an ack IS what confirmation looks like, and a lost one is
-  recovered by the origin's next re-offer, which re-spools a fresh
-  receipt. For a `charter` letter the same holds for a stronger reason:
-  the enclosed charter is APPLIED, not filed, so there is no mailbox on
-  the far end to ack from at all, and its own deposit outcome is the
-  whole confirmation there can be.
-  **A deposit's answer is written back only onto an entry still
-  spooled.** The far end may drain its receipt straight back to this box
-  before it answers the deposit, so a letter can be retired while the
-  drain that sent it is still waiting on the answer. The write-back that
-  follows is a no-op for a retired letter; it never re-spools it. A
-  letter re-spooled by its own answer would be re-offered on the next
-  drain, re-acked, and re-retired, once per drain, for ever.
-  **A re-ack is limited to one per hour.** The destination acks a letter when
-  it files it, and again when a duplicate of that letter arrives, because a
-  re-offer means the earlier ack may have been lost. Each key (origin node,
-  origin mesh, acked msgid) is acked at most once per hour: `state/mail/reacks.log`
-  holds the last ack time per key, rotates at 1 MiB, is read up to its cap,
-  and is written under the stage lock. N replays inside the hour spool one
-  ack between them; the first replay after the hour spools another. A record
-  that cannot be read or written acks anyway, because a withheld ack leaves
-  the origin re-offering with nothing to retire it.
-  Acks are still spooled like any entry, so an ack survives a
-  dead link instead of vanishing on it. A hub can mint a receipt; it
-  cannot sign as the destination, so it cannot make an origin stop
-  retrying.
+  **An outbox entry retires when its delivery is confirmed, and what counts as
+  confirmation depends on what the entry is.** For a `letter`: a receipt
+  arrives whose verified signer is the entry's `to.node` and whose text names
+  the entry's `msgid`, and it retires the letter on its first filing. For a
+  `receipt` entry, which only a build before ruling 131 spools: the deposit
+  outcome itself, `accepted` or `duplicate`. For a `charter` letter the same
+  holds for a stronger reason: the enclosed charter is APPLIED, not filed, so
+  there is no mailbox on the far end to ack from at all, and its own deposit
+  outcome is the whole confirmation there can be.
+  **A deposit's answer is written back only onto an entry still spooled.**
+  The far end may drain its receipt straight back to this box before it
+  answers the deposit, so a letter can be retired while the drain that sent it
+  is still waiting on the answer. The write-back that follows is a no-op for a
+  retired letter; it never re-spools it. A letter re-spooled by its own answer
+  would be re-offered on the next drain, and retired again, once per drain, for
+  ever.
+  **Older builds.** An older sender to a node that has ruling 131 keeps its
+  delivered letter and re-dials it, getting `duplicate`, until it is rebuilt;
+  the rebuilt sender's pre-131 pass then drops the letter. That wait is accepted.
+  **Inert files.** An older build's `state/mail/reacks.log` (and its `.1`) and
+  its `.ack/` markers are read by nothing, and no code removes them. They are
+  safe to delete by hand.
+  A hub cannot sign a receipt as the destination, so it cannot make an origin
+  stop retrying.
 
 **Lane and payload.** P-M2 built this wire with an origin-signed envelope
 whose `text` is plaintext, carried by the loopback/SSH transport. From P-SEAL
@@ -1054,17 +1044,16 @@ comes last and the drift report is the dry run.
 **A relay's verified `accepted` is the sender's delivery.** The sender
 keeps no copy after it, so a relay that accepts a letter and then cannot hand
 it on loses it without a word to the origin. An accepted-then-dropped letter
-cannot be told from a delivery. That is the trade ruling 131 makes, and it is
-stated here so that nobody reads `delivered` as a receipt from the destination.
-A destination's own receipt still comes back as it did, and it retires nothing
-for a letter the sender no longer holds.
+cannot be told from a delivery. That is the trade ruling 131 makes: the relay's
+verified answer is the receipt, and no receipt comes back from the destination,
+so nobody should read `delivered` as one.
 
 **A held letter's `filed` is the same trade.** A held letter is offered by the
 poll of the hop it was spooled toward, which for a relayed letter is not its
 destination. A poller that names it in `filed` ends the sender's copy, as a
 relay's `accepted` does, so a hop that files a held letter and never hands it
-on loses it the same way. Its `filed` is not a receipt from the destination:
-only the destination's own receipt says the letter arrived. A poller that
+on loses it the same way. Its `filed` is not a receipt from the destination,
+and no node sends one now (ruling 131). A poller that
 refuses it instead (`refused`, §Wire) returns it to the sender with the word.
 
 At a hub, a deposit whose `to.node` is not self: run the keyless checks
@@ -1745,8 +1734,8 @@ paired node that merely misbehaves.
   attacker text lands as a labeled, provenance-framed entry that a
   reader pulls on purpose. The doorbell carries none of it.
 - **Floods** are visible (one audit line per deposit, with origin) and
-  bounded only by disk until `down`. A hub amplifies roughly threefold
-  per letter — outbox copy, returning ack — and the boxes, receipts and
+  bounded only by disk until `down`. A hub amplifies per letter by its
+  outbox copy, and by a receipt an older build still returns; the boxes, receipts and
   outbox directories grow with the mail that is accepted. The boxes are
   capped (§Store), receipts rotate at 4 MiB, and a full box refuses. The
   doorbell latch keeps a flood off the pty; the audit log and the disk

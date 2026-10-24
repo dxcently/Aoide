@@ -12,9 +12,8 @@
 
 /// Drain one node's outbox once — a passthrough to
 /// [`aoide_client::mail_wire::drain_node`]. Called by the door
-/// (`aoide-server::a2a::mail_deposit`, best-effort, right after filing a
-/// letter or re-filing a duplicate's ack) and by [`drain_all`] below (the
-/// daemon tick's sweep).
+/// (`aoide-server::a2a::mail_deposit`, best-effort, right after it spools a
+/// hop) and by [`drain_all`] below (the daemon tick's sweep).
 pub fn drain_node(name: &str) -> Result<(), String> {
     aoide_client::mail_wire::drain_node(name)
 }

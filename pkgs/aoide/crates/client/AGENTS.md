@@ -9,7 +9,6 @@
   is a bypass of that clip, so do not add one.
 
 - A fresh structured letter mints one secure random thread ID before fanout; all copies share it. Replies explicitly retain the thread and name the parent; forwarding starts fresh.
-- **An ack is signed as `routing::own_name_in`'s name for this box in the letter's mesh** (`own_name`), the rule a letter's sender uses. A charter mesh that does not carry this box's key mints no ack and audits `mail.ack.withheld`; the hostname is never the fallback there.
 - Structured letter fanout reuses the scalar mail handler. Validate all recipients before effects, report every copy, and never retry accepted copies as a group. Metadata remains inside signed text, never unsigned envelope fields.
 
 - **`context` is daemon-owned and local-only.** The CLI must route to aoided
@@ -719,9 +718,10 @@
   is spooled. The check comes AFTER the reseal, so a reseal write cannot
   re-spool an entry past it. A relayed entry the reseal withholds (no binding
   for its destination) is skipped: it stays spooled and unsent.
-- **A receipt retires its letter on first filing, and on a duplicate of one.**
-  `settle_deposit` calls `retire_by_ack` for a receipt in either outcome; the
-  retire is idempotent. `mail::deposit` answers a second receipt from the same
+- **A receipt from an older node retires its letter, on first filing and on a
+  duplicate of one.** `settle_deposit` calls `retire_by_ack` for a receipt in
+  either outcome; the retire is idempotent. A letter owes nothing either way
+  (ruling 131): no receipt is minted, spooled or dialled for it. `mail::deposit` answers a second receipt from the same
   signer for the same msgid `duplicate` and files it nothing. **The hub's
   custody ends (`record_filed`) for a container this box filed, already held,
   or refused for good** (`refusal_clears_on_retry` decides "for good": every
@@ -899,18 +899,15 @@
   record the charter declares `down`; a charter-only relay declared `down` is
   refused taught by `charter_relay`. **A `poll` address is never dialled, and that
   is decided in ONE place: `spool_entry` computes the `hold` flavor itself
-  from `node_store::Node::never_dialled`, so no caller can forget it (the
-  ack path's literal `false` included), `drain_node` returns before the link
-  lock AND before the binding exchange, and `pollable_nodes` excludes such a
-  node.** Do not add a second address test for this, and do not push the
-  decision back out to callers. `settle_deposit` is the ONE place an outcome
-  turns into spool side effects (ack minted and spooled on a filed letter
-  or a letter duplicate, `retire_by_ack` on a receipt (filed, or a duplicate
-  of one), a `transit`
-  entry retired on the hop that took it); the door
-  reaches it through `aoide_conduct::mail_bridge::settle_deposit`, so
-  `aoide-server` never keeps a second copy — do not put the ack mint back
-  in `a2a.rs`. **A letter's spool directory is the HOP the route picked, not
+  from `node_store::Node::never_dialled`, so no caller can forget it,
+  `drain_node` returns before the link lock AND before the binding exchange,
+  and `pollable_nodes` excludes such a node.** Do not add a second address
+  test for this, and do not push the decision back out to callers.
+  `settle_deposit` is the ONE place an outcome turns into spool side effects
+  (`retire_by_ack` on a receipt from an older node, filed or duplicate; a
+  `transit` entry retired on the hop that took it); the door reaches it
+  through `aoide_conduct::mail_bridge::settle_deposit`, so `aoide-server`
+  never keeps a second copy. **A letter's spool directory is the HOP the route picked, not
   its destination** (`spool_entry(dest, next, mesh, …)`): the container stays
   addressed to `dest` while the entry is dialled toward `next`, and a hop this
   box holds no record for is dialled at the address the DECLARATION gives it
@@ -962,12 +959,12 @@
   A poll may ask this same crate to drain a node whose `.bsy`
   the CURRENT pass already holds (a relay handing back a letter it
   originated): `.bsy` is `LOCK_NB`, so that inner drain is skipped and the
-  ack waits for the next tick — correct, not a leak; never make `.bsy`
+  entries wait for the next tick — correct, not a leak; never make `.bsy`
   blocking to "fix" it.
   `poll_node` takes the node's `.poll` lock (tried, never waited for) before
   it reads `filed`: that read-ask-record cycle is what overlapping polls would
-  interleave, and the interleaving is how one letter got two receipts. It is a
-  different lock from `.bsy` because a poll's own acks are drained under `.bsy`
+  interleave, and the interleaving is how one letter got handed over twice. It
+  is a different lock from `.bsy` because a poll's own drains run under `.bsy`
   from inside it.
 - **`handle_mail_send` reports the WRITE, never the drain's outcome (spec
   item 8), and it READS THE ROUTE FIRST.** The four steps are asked before

@@ -913,9 +913,8 @@ a2a spawn probe needs `/bin/sh` + `printf`'s byte-exact output.
   Three things are forbidden there, and
   `a_container_addressed_elsewhere_is_hopped_and_never_acked` holds all three:
   nothing is filed as correspondence (`read_base` stays empty), no reader is rung
-  (the spool toward `next` holds one sealed container and no receipt), and no ACK
-  is minted back to the depositing hop (its spool stays empty) — only the
-  destination's own receipt may tell an origin otherwise. The audit
+  (the spool toward `next` holds one sealed container and no receipt), and no
+  receipt is owed back to the depositing hop (its spool stays empty). The audit
   stamp and the hop's own signature use the caller's DECLARED name for the
   request's mesh (`declared_caller_name` → `routing::declared_name`), never the
   record's `nodes.json` nickname — a charter line's name IS the policy name.
@@ -952,10 +951,9 @@ a2a spawn probe needs `/bin/sh` + `printf`'s byte-exact output.
   identical `fs::try_stage_lock`, a plain blocking `flock`, not
   re-entrant; nesting them across a lock boundary would deadlock a
   process against a lock it already holds, not merely contend for it. A
-  filed **letter** mints an ack addressed back to the origin, spools it,
-  and best-effort drains that node once, synchronously, reusing the SAME
-  `aoide_conduct::mail_bridge::drain_node` the daemon tick calls — one
-  drain implementation, never a duplicate dial built here. **Neither arm
+  filed **letter** owes nothing: its `accepted` answer is its receipt (ruling
+  131), so nothing is minted, spooled or dialled here, and a duplicate answers
+  `duplicate` and owes nothing either. **Neither arm
   of `mail_deposit` ever calls `ring`** (P-M5a-2c: the resident daemon is
   the policy and audit boundary for every ring, and this door is not the
   daemon). A remotely-deposited letter arms its readers exactly like a
@@ -963,31 +961,13 @@ a2a spawn probe needs `/bin/sh` + `printf`'s byte-exact output.
   that name — a reader's Stop hook, a local filing, `mail ring` by hand —
   until a later slice (P-M5b-2) gives this door its own forward path to
   the daemon; don't reach for `aoide_conduct::graph::ring` here to close
-  that gap early. A filed
-  **receipt** instead calls `aoide_storage::outbox::retire_by_ack` (spec
-  item 7) — a pure lookup keyed on the receipt's own verified
-  `from.node`/acked-msgid, so a forged or stale ack finds no matching
-  entry and retires nothing; don't add a second, independent verification
-  step here, the lookup itself already proves both of spec item 7's
-  checks (see that function's own doc). A **duplicate** whose original
-  filing was a letter re-sends the ack (the sender's earlier ack evidently
-  never arrived); every other duplicate is a silent no-op — the
-  `letter`/`receipt` vocabulary has no third shape to stop an ack-of-an-ack
-  from ping-ponging forever, so don't ack a receipt. **The resend goes
-  through `outbox::write_ack_if_absent`, never `write_entry` directly
-  (mail register §26 outbox fix)** — it mints via `mail::mint_ack` on
-  every duplicate as before, but only spools when no ack for the same
-  `(origin, acked_msgid)` is already sitting undelivered in that node's
-  outbox, so a link redelivering the same duplicate thousands of times
-  (a dead transport, e.g. a missing `ssh` binary) spools one ack instead
-  of one per redelivery. This is NOT a permanent "already acked" ledger:
-  once the pending ack's own entry retires (a real delivery, or `mail
-  outbox rm`), the next redelivery correctly finds nothing pending and
-  respools — preserving the "sender's earlier ack evidently never
-  arrived" invariant above for a genuine loss. Don't add a ledger that
-  survives the pending entry's own removal here; a prior attempt at
-  exactly that broke
-  `a2a::tests::a_duplicate_of_a_filed_letter_respools_its_ack`.
+  that gap early. A filed **receipt from an older node** instead calls
+  `aoide_storage::outbox::retire_by_ack` (spec item 7) — a pure lookup keyed on
+  the receipt's own verified `from.node`/acked-msgid, so a forged or stale
+  receipt finds no matching entry and retires nothing; don't add a second,
+  independent verification step here, the lookup itself already proves both of
+  spec item 7's checks (see that function's own doc). A **duplicate** receipt
+  retires its entry the same way.
 - **`aoide/mailPoll` (P-M3) is the SAME admission question asked one node
   narrower, and the hand-over side of mail rather than the deposit side.**
   `poll_admitted` = `may_message` PLUS `params.node == the resolved
@@ -1028,13 +1008,14 @@ a2a spawn probe needs `/bin/sh` + `printf`'s byte-exact output.
   a list past its cap writes one `mail.poll.over-cap` line that names the list and
   the count it ignored. No
   bookmark and no "already handed over" flag may be added here: the
-  re-poll-before-ack idempotence comes from handing the SAME set over again, and
-  the entry retires only through a valid ack, a held own letter the poll of the
-  hop it was spooled toward files, `mail outbox rm`, or an own letter's session
-  ending (ruling 131), exactly as a pushed deposit's would.
+  re-poll idempotence comes from handing the SAME set over again, and the entry
+  retires only on its confirmation: a valid receipt from an older node, a held
+  own letter the poll of the hop it was spooled toward files, `mail outbox rm`,
+  or an own letter's session ending (ruling 131), exactly as a pushed deposit's
+  would.
   The answer is bounded by
   `aoide_storage::outbox::POLL_BATCH_CAP`; that bound is what keeps a big
-  spool draining (the poller's acks retire the batch it took) and what
+  spool draining (the poller's `filed` names retire the batch it took) and what
   keeps the answer under the client's `MAX_RESPONSE_BYTES`. **The door has
   two triggers, and neither may grow a second receive path:** the explicit
   `aoide mail poll [<node>]` (which dials, then calls
@@ -1043,12 +1024,12 @@ a2a spawn probe needs `/bin/sh` + `printf`'s byte-exact output.
   in the connection handler gains this name beside `aoide/mailDeposit`'s,
   so no poll ever logs as bare `a2a.rpc`
   (`a2a::tests::every_poll_self_audits_under_its_own_label_with_the_count`).
-- **`spool_and_drain_ack` no longer lives in this crate.** The
-  outcome-follows side of a deposit (mint/spool the ack, `retire_by_ack`)
-  is `aoide_client::mail_wire::settle_deposit`, reached from `mail_deposit`
-  through `aoide_conduct::mail_bridge::settle_deposit`, because the poll's
-  own hand-over loop in `aoide-client` must receive envelopes through the
-  identical code. Never re-add a second copy of that dispatch in `a2a.rs`.
+- **The outcome side of a deposit lives in one place.**
+  `aoide_client::mail_wire::settle_deposit`, reached from `mail_deposit`
+  through `aoide_conduct::mail_bridge::settle_deposit`, decides what a filed
+  receipt or a duplicate does, because the poll's own hand-over loop in
+  `aoide-client` must receive envelopes through the identical code. Never
+  re-add a second copy of that dispatch in `a2a.rs`.
 
 ## Extension points
 

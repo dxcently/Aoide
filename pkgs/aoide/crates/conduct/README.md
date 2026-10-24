@@ -1627,8 +1627,8 @@ blank one is refused too.
   ordinary unreachable-node outcome) skip that node without stopping the
   sweep. `settle_deposit(envelope, outcome)` is P-M3's third: the one
   place an envelope's deposit OUTCOME turns into spool side effects (the
-  ack a filed letter owes its origin, the `retire_by_ack` a filed receipt
-  performs), reached by `aoide-server::a2a::mail_deposit` from here so that
+  `retire_by_ack` a filed receipt performs; a filed letter leaves nothing
+  behind, ruling 131), reached by `aoide-server::a2a::mail_deposit` from here so that
   the door and `mail_wire::poll_node`'s own hand-over loop cannot drift on
   what receiving a letter means.
 

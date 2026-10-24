@@ -537,50 +537,27 @@ fn classify_deposit_response(result: &Value) -> DepositAttempt {
 /// settle_deposit`) and by [`poll_node`]'s hand-over loop below, so the two
 /// can never drift on what a filed letter or a filed receipt does here.
 ///
-/// A filed **letter** mints and spools an ack toward its origin (via
-/// [`aoide_storage::outbox::write_ack_if_absent`], never the bare
-/// `write_entry`: a redelivery whose ack is STILL spooled must not mint a
-/// second, differently-`msgid`-ed one) and best-effort drains that node
-/// once. A **duplicate** whose original filing was a letter re-sends the ack
-/// (spec item 5: the sender's earlier ack evidently never arrived); every
-/// other duplicate is a silent no-op — acking an ack would ping-pong
-/// forever, which the `letter`/`receipt` vocabulary has no third shape to
-/// end. A filed **receipt** is the opposite leg: retire the LOCAL outbox
-/// entry it confirms (spec item 7) — a forged or stale ack simply finds no
-/// matching entry and retires nothing ([`aoide_storage::outbox::
-/// retire_by_ack`]'s own doc). A refused outcome does nothing.
+/// A **letter** owes nothing. Its answer, `accepted` or `duplicate`, is its
+/// receipt (ruling 131): nothing is minted, spooled, noted or dialled here,
+/// whether the letter was filed now or was a repeat of one already filed. The
+/// sender's own resend is the recovery for an answer that never arrived.
+///
+/// A filed **receipt** from an older node is still honoured: it retires the
+/// LOCAL outbox entry it confirms (spec item 7), and a repeat of one already
+/// filed does the same. A forged or stale receipt simply finds no matching
+/// entry and retires nothing ([`aoide_storage::outbox::retire_by_ack`]'s own
+/// doc). A refused outcome does nothing.
 ///
 /// The acked msgid is the ENVELOPE's own, never the outcome's copy of it:
 /// on the filed path the two are equal by construction (`mail::deposit`
 /// stamps `Filed{msgid}` from `envelope.msgid`), and the envelope is what
-/// the duplicate arm already had to use.
-///
-/// A re-drain of the same node from inside this call is skipped, not
-/// queued: the drain's `.bsy` lock is non-blocking and per-node, so an ack
-/// being spooled toward the very node the current drain session holds
-/// (a poll that just handed over that node's own letter) is left for the
-/// next tick rather than deadlocking against itself.
+/// `retire_by_ack` reads.
 pub fn settle_deposit(envelope: &Envelope, outcome: &aoide_storage::mail::DepositOutcome) {
     use aoide_storage::mail::DepositOutcome;
     match outcome {
-        DepositOutcome::Filed { kind, .. } if kind == aoide_storage::mail::ENTRY_TYPE_LETTER => {
-            let h = &envelope.header;
-            let _ = aoide_storage::mail::note_ack(&h.from.node, &h.origin_mesh, &envelope.msgid, unix_now() as u64);
-            spool_and_drain_ack(envelope, &envelope.msgid)
-        }
-        // A duplicate re-acks at most once per key per hour (`reack_due`). A
-        // record that cannot be read or written acks anyway: a withheld ack
-        // leaves the origin re-offering with nothing to retire it.
-        DepositOutcome::Duplicate { filed_letter: true } => {
-            let h = &envelope.header;
-            let due = aoide_storage::mail::reack_due(&h.from.node, &h.origin_mesh, &envelope.msgid, unix_now() as u64);
-            if due.unwrap_or(true) {
-                spool_and_drain_ack(envelope, &envelope.msgid);
-            }
-        }
-        // A receipt retires its letter whether this is its first filing or a
-        // re-ack of one already filed: retiring is idempotent, and the one place a
-        // verified receipt is allowed to act is here.
+        // An older node's receipt retires its letter whether this is its first
+        // filing or a repeat of one already filed: retiring is idempotent, and
+        // the one place a verified receipt is allowed to act is here.
         DepositOutcome::Filed { kind, .. } if kind == aoide_storage::mail::ENTRY_TYPE_RECEIPT => {
             let _ = aoide_storage::outbox::retire_by_ack(envelope);
         }
@@ -591,70 +568,6 @@ pub fn settle_deposit(envelope: &Envelope, outcome: &aoide_storage::mail::Deposi
         }
         _ => {}
     }
-}
-
-/// Mint an ack for `acked_msgid` (destination is `envelope.header.to`, the
-/// mailbox that just received it; origin is `envelope.header.from`, who it
-/// goes back to), spool it into that origin's outbox, and best-effort drain
-/// that node once.
-fn spool_and_drain_ack(envelope: &Envelope, acked_msgid: &str) {
-    // P-CHARTER: the ack rides the mesh the letter arrived in — the incoming
-    // envelope's own signed `origin_mesh` — so the receipt is depositable
-    // exactly where the letter was (review finding 1 covers acks too: an ack
-    // minted unnamed while its request is signed for another mesh can never
-    // land). It is signed as this box's name IN THAT MESH, the same rule a
-    // letter's `from.node` follows (`own_name`): the origin checks the ack
-    // against the key it holds for that name, never for the hostname. A charter
-    // mesh that does not carry this box's key mints nothing.
-    let mesh = envelope.header.origin_mesh.clone();
-    let Some(from_node) = own_name(&mesh) else {
-        audit_ack_withheld(acked_msgid, &envelope.header.from.node, &mesh);
-        return;
-    };
-    let Ok(ack) = aoide_storage::mail::mint_ack_from(
-        &from_node,
-        &envelope.header.to.name,
-        envelope.header.from.clone(),
-        acked_msgid,
-        &mesh,
-    ) else {
-        return;
-    };
-    let origin_node = envelope.header.from.node.clone();
-    // An ack is sealed like any other letter when the far end has published
-    // a binding, and stays plaintext over the direct lane when it has not.
-    //
-    // **And it leaves by the same four steps as a letter** — a receipt
-    // traverses hubs for free (MAIL.md §Wire), which is what lets an ack from a
-    // node behind a relay reach the origin. Where the declarations give no route
-    // at all, the direct edge is still tried: the ack is owed to a node this box
-    // could always dial, and a route read that fails must not cost the receipt.
-    let mesh = envelope.header.origin_mesh.clone();
-    let next = route_for(&origin_node, &mesh).map(|hop| hop.next).unwrap_or_else(|_| origin_node.clone());
-    let entry = match spool_entry(&origin_node, &next, &mesh, ack, false) {
-        Ok(entry) => entry,
-        Err(_) => return,
-    };
-    if aoide_storage::outbox::write_ack_if_absent(&next, acked_msgid, &entry) == Ok(true) {
-        let _ = drain_node(&next);
-    }
-}
-
-/// The audit line for an ack this box will not sign: its identity key has no
-/// name in the charter mesh the letter arrived in, so there is nothing honest to
-/// sign as. The hostname is never the fallback there (`routing::own_name_in`).
-fn audit_ack_withheld(acked_msgid: &str, origin: &str, mesh: &str) {
-    let _ = aoide_protocol::audit::audit(
-        &aoide_protocol::audit::default_audit_log(),
-        aoide_protocol::audit::Door::Cli,
-        aoide_protocol::audit::EventClass::Audit,
-        "mail.ack.withheld",
-        "invalid",
-        &format!(
-            "no ack for {} to `{origin}`: mesh `{mesh}` is a charter whose lines do not carry this box's identity key, so it has no name there to sign as",
-            foreign_words(acked_msgid, LINE_MAX)
-        ),
-    );
 }
 
 /// Build the outbox entry a letter leaves this node in (P-SEAL, MAIL.md's
@@ -689,10 +602,8 @@ pub fn spool_entry(
     // EVERY caller inherits it and none can forget it: "a hub's outbox entry for
     // a `poll` node is `hold`-flavored. The hub never dials it, and only the
     // node's own `mailPoll` drains it" (`docs/architecture/HTTPS-MESH-API.md`
-    // "Transports and relays"). [`spool_and_drain_ack`] is the caller this
-    // matters for most: it passes a literal `false`, and its ack toward a `poll`
-    // origin is held by this line rather than by an argument it would have to
-    // remember to compute.
+    // "Transports and relays"). A letter `mail send` spools toward a `poll`
+    // origin is held by this line, whatever `hold` the caller asked for.
     //
     // `dest` and `next` are different questions: the container is sealed to the
     // DESTINATION (whose binding is the one that opens it), while the entry is
@@ -1117,11 +1028,8 @@ fn spool_mesh(node_name: &str) -> Option<String> {
 /// SAME `mail::deposit` policy chain (recompute `msgid`, verify the ORIGIN
 /// signature in `header.from.node`'s own key, dedup, file — note that the
 /// hop here is the node we polled, matching the deposit path's two-lookup
-/// split) and then [`settle_deposit`]. A re-poll before the ack therefore
-/// files nothing a second time and re-acks nothing: dedup answers
-/// `Duplicate`, and the ack the first poll already spooled is still
-/// pending, so `write_ack_if_absent` spools nothing. That is the whole of
-/// "re-poll before ack is idempotent".
+/// split) and then [`settle_deposit`]. A re-poll files nothing a second time:
+/// dedup answers `Duplicate`, and a letter owes nothing either way (ruling 131).
 ///
 /// A hand-over that does not deserialize, or that `deposit` refuses
 /// (`bad-msgid`, `unverified-origin` — a letter whose ORIGIN this box holds
@@ -1623,22 +1531,14 @@ fn poll_through(node_name: &str, named: Option<&str>, target: PollTarget) -> Res
                 // the container is on this disk.
                 let _ = aoide_storage::outbox::record_filed(node_name, &container.msgid);
             }
-            aoide_storage::seal::ContainerOutcome::Duplicate { filed_letter } => {
+            aoide_storage::seal::ContainerOutcome::Duplicate { .. } => {
                 // **A duplicate is custody this box already has.** The hub is
                 // re-offering a letter this poller took on an earlier ask (its
                 // own `filed` never reached the hub, or the response did), so
                 // the poller says so again: without this, a hub whose spool
                 // answer was lost would hold that container forever, offering
-                // it on every ask.
+                // it on every ask. Nothing is owed back for it (ruling 131).
                 let _ = aoide_storage::outbox::record_filed(node_name, &container.msgid);
-                if filed_letter {
-                    if let Ok(Some(entry)) = aoide_storage::mail::show(&container.msgid) {
-                        settle_deposit(
-                            &entry.envelope,
-                            &aoide_storage::mail::DepositOutcome::Duplicate { filed_letter: true },
-                        );
-                    }
-                }
             }
             aoide_storage::seal::ContainerOutcome::Applied { mesh, version, rekeyed, digest } => {
                 // P-CHARTER: the enclosed charter verified and is in force —
@@ -1757,8 +1657,8 @@ fn poll_through(node_name: &str, named: Option<&str>, target: PollTarget) -> Res
             aoide_storage::mail::DepositOutcome::BoxFull => Some(aoide_storage::mail::REFUSAL_BOX_FULL),
         };
         if let Some(word) = refusal {
-            // A plaintext letter is not the hub's custody (it retires by ack, not
-            // by `filed`), so only the refusal is recorded (`refuse_envelope`).
+            // A plaintext letter is not the hub's custody: its own answer settles
+            // it, not `filed`, so only the refusal is recorded (`refuse_envelope`).
             refuse_envelope(node_name, &envelope.msgid, word, "", &mut refused);
         }
         if matches!(outcome, aoide_storage::mail::DepositOutcome::Filed { .. }) {
@@ -5020,10 +4920,7 @@ mod tests {
     ///    destination's address is `poll`;
     /// 2. `drain_node` — returns without opening a link at all, so the BINDING
     ///    EXCHANGE (a dial that a held-entry filter runs too late to prevent)
-    ///    never happens either;
-    /// 3. the ACK path — `spool_and_drain_ack` passes a literal `false`, and
-    ///    the ack toward a `poll` origin comes out held by the same line,
-    ///    which is the caller this rule exists to protect.
+    ///    never happens either.
     ///
     /// Nothing listens for `laptop` in this test, and nothing could: a `poll`
     /// node has no inbound transport.
@@ -5064,7 +4961,8 @@ mod tests {
             "no link was ever opened, so no link state was written"
         );
 
-        // 3. The same line covers the ack path's literal `false`.
+        // 3. Filing a letter from this poll node spools no receipt toward it:
+        // the filed letter is its own answer (ruling 131).
         let mut inbound = aoide_storage::mail::mint_outbound_letter("bob", "somewhere", "conductor", "hi").unwrap();
         inbound.header.from.node = "laptop".to_string();
         inbound.header.from.name = "bob".to_string();
@@ -5075,13 +4973,12 @@ mod tests {
                 kind: aoide_storage::mail::ENTRY_TYPE_LETTER.to_string(),
             },
         );
-        let ack = aoide_storage::outbox::list_entries("laptop")
+        let receipts = aoide_storage::outbox::list_entries("laptop")
             .unwrap()
             .into_iter()
-            .find(|e| e.envelope.header.kind == aoide_storage::mail::ENTRY_TYPE_RECEIPT)
-            .expect("the ack toward the `poll` origin was spooled");
-        assert!(ack.is_held(), "and it is held too — the ack path cannot get this wrong");
-        assert_eq!(ack.tries, 0);
+            .filter(|e| e.envelope.header.kind == aoide_storage::mail::ENTRY_TYPE_RECEIPT)
+            .count();
+        assert_eq!(receipts, 0, "and no receipt is spooled toward the poll origin (ruling 131)");
         assert!(
             !pollable_nodes().contains(&"laptop".to_string()),
             "and a bare `mail poll` does not ask a node that has no inbound transport"
@@ -5092,8 +4989,8 @@ mod tests {
 
     /// Poll-on-contact's receive half: what the node hands over is received
     /// exactly as a push would be — filed after full origin verification,
-    /// with an ack spooled back toward the letter's origin, and the poll
-    /// naming THIS box as the node it wants (never another's mailbox).
+    /// owing its origin nothing (ruling 131), and the poll naming THIS box as
+    /// the node it wants (never another's mailbox).
     #[test]
     fn poll_on_contact_files_what_the_node_hands_over() {
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
@@ -5120,27 +5017,23 @@ mod tests {
         assert_eq!(base[0].via, "relay", "via is the HOP's name — the node that was polled");
 
         let acks = aoide_storage::outbox::list_entries(&me).unwrap();
-        assert_eq!(acks.len(), 1, "filing a letter spools an ack toward its origin");
-        assert_eq!(acks[0].envelope.header.kind, aoide_storage::mail::ENTRY_TYPE_RECEIPT);
-        assert_eq!(acks[0].envelope.text, letter_msgid);
+        assert!(acks.is_empty(), "filing a letter spools no receipt toward its origin (ruling 131): {}", acks.len());
 
         drop(listener);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// Spec, P-M3: **re-poll before ack is idempotent.** The same answer
-    /// twice files one entry, reports `0` filed the second time, and spools
-    /// exactly one ack — the dedup plus `write_ack_if_absent` gate, never a
-    /// bookmark on the far end's spool (a poll writes nothing there).
+    /// Spec, P-M3: **a re-poll files nothing twice.** The same answer twice
+    /// files one entry, reports `0` filed the second time, and owes no ack: a
+    /// letter is answered by its filing, and nothing waits at rest (ruling 131).
     #[test]
-    fn a_repoll_before_the_ack_files_nothing_twice() {
+    fn a_repoll_files_nothing_twice_and_owes_no_ack() {
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let (_env, dir) = root("poll-repoll-idempotent");
 
         let me = register_local_origin();
         aoide_storage::mail::box_add("conductor").unwrap();
         let letter = aoide_storage::mail::mint_outbound_letter("alice", &me, "conductor", "once only").unwrap();
-        let letter_msgid = letter.msgid.clone();
         let (listener, port, _log) =
             recording_door(r#"{"jsonrpc":"2.0","id":1,"result":{"status":"accepted"}}"#, poll_answer(&[letter]));
         register_relay(format!("http://127.0.0.1:{port}/"));
@@ -5150,19 +5043,18 @@ mod tests {
 
         assert_eq!(aoide_storage::mail::read_base().unwrap().len(), 1, "one letter, however many polls");
         let acks = aoide_storage::outbox::list_entries(&me).unwrap();
-        assert_eq!(acks.len(), 1, "and exactly one pending ack: {acks:?}");
-        assert_eq!(acks[0].envelope.text, letter_msgid);
+        assert!(acks.is_empty(), "and no ack is spooled for it: {acks:?}");
 
         drop(listener);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// **Overlapping polls of one node file a letter and mint its receipt once.**
+    /// **Overlapping polls of one node file a letter once and owe it no receipt.**
     /// A poll in flight holds the node's poll lock; a second one answers that it
     /// is in progress and files nothing, so the hub never hands the letter to
-    /// both and no second receipt is minted for it.
+    /// both. The filed letter owes no receipt, from either poll (ruling 131).
     #[test]
-    fn overlapping_polls_of_one_node_mint_one_receipt() {
+    fn overlapping_polls_of_one_node_file_a_letter_and_owe_no_receipt() {
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let (_env, dir) = root("poll-overlap");
 
@@ -5180,8 +5072,8 @@ mod tests {
         drop(in_flight);
 
         assert_eq!(poll_node("relay", None).unwrap().filed, 1);
-        let receipts = aoide_storage::outbox::list_entries(&me).unwrap();
-        assert_eq!(receipts.len(), 1, "exactly one receipt for the letter: {receipts:?}");
+        let owed = aoide_storage::outbox::list_entries(&me).unwrap();
+        assert!(owed.is_empty(), "the filed letter owes no receipt: {owed:?}");
 
         drop(listener);
         let _ = std::fs::remove_dir_all(&dir);
@@ -7308,12 +7200,11 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// A container the destination already filed, offered again inside the hour,
-    /// is reopened and dedups against its box. Its ack is held back: the first
-    /// ack already went out, and a re-ack is limited to one per key per hour
-    /// (`reack_due`). The re-ack after the hour is proved in storage.
+    /// A container the destination already filed, offered again, is reopened and
+    /// dedups against its box. It owes no ack, with or without a `reacks.log`
+    /// record for it: the sender's own resend is its recovery (ruling 131).
     #[test]
-    fn a_reoffered_container_at_its_destination_is_reopened_and_its_reack_is_held_back() {
+    fn a_reoffered_container_at_its_destination_spools_no_ack() {
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let (_env, dir) = root("destination-reopen");
 
@@ -7341,6 +7232,8 @@ mod tests {
         }
         aoide_storage::outbox::write_entry("relay", &OutboxEntry::transit_held(container)).unwrap();
 
+        // No `reacks.log` record for the container, so the replay has no record to lean on.
+        let _ = std::fs::remove_file(aoide_storage::mail::mail_dir().join("reacks.log"));
         let before = mentions(&deposit_bodies(&seen), &msgid);
         let again = poll_node("relay", None).unwrap();
         assert_eq!(again.filed, 0, "nothing files twice: {again:?}");
@@ -7348,8 +7241,14 @@ mod tests {
         assert_eq!(
             mentions(&deposit_bodies(&seen), &msgid),
             before,
-            "a re-offer inside the hour sends no second ack"
+            "a re-offer sends no second ack"
         );
+        let owed: Vec<_> = aoide_storage::outbox::list_entries("relay")
+            .unwrap()
+            .into_iter()
+            .filter(|e| e.envelope.header.kind == aoide_storage::mail::ENTRY_TYPE_RECEIPT)
+            .collect();
+        assert!(owed.is_empty(), "the re-offer owes no ack: {owed:?}");
 
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -7377,6 +7276,86 @@ mod tests {
 
         assert!(aoide_storage::outbox::list_entries(&me).unwrap().is_empty(), "no ack for a letter not filed");
         assert!(aoide_storage::outbox::list_entries("relay").unwrap().is_empty());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A letter `far` mints for `me`, as its own box sends it: its origin is
+    /// `far`, so a receipt for it would go back to `far`.
+    fn letter_from_far(far: &str, me: &str) -> Envelope {
+        let saved = std::env::var("AOIDE_A2A_NODE_NAME").ok();
+        std::env::set_var("AOIDE_A2A_NODE_NAME", far);
+        aoide_storage::mail::box_add("bob").unwrap();
+        let letter = aoide_storage::mail::mint_outbound_letter("alice", me, "bob", "held for the destination");
+        match saved {
+            Some(name) => std::env::set_var("AOIDE_A2A_NODE_NAME", name),
+            None => std::env::remove_var("AOIDE_A2A_NODE_NAME"),
+        }
+        letter.unwrap()
+    }
+
+    /// **A replayed letter owes no ack, even with no `reacks.log` record.** A
+    /// duplicate of a letter already filed answers `duplicate`, and the sender's
+    /// own resend is its recovery (ruling 131), so settling it spools nothing.
+    #[test]
+    fn a_replayed_letter_spools_no_ack_even_with_no_reacks_record() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("replay-no-ack");
+
+        let me = register_local_origin();
+        let mut nodes = aoide_storage::node_store::load_nodes();
+        nodes.push(keyed_node("relay"));
+        aoide_storage::node_store::save_nodes(&nodes).unwrap();
+        let letter = letter_from_far("relay", &me);
+        let filed = aoide_storage::mail::deposit(letter.clone(), "relay").unwrap();
+        assert!(matches!(filed, aoide_storage::mail::DepositOutcome::Filed { .. }), "{filed:?}");
+
+        let _ = std::fs::remove_file(aoide_storage::mail::mail_dir().join("reacks.log"));
+        settle_deposit(&letter, &aoide_storage::mail::DepositOutcome::Duplicate { filed_letter: true });
+        assert!(aoide_storage::outbox::list_entries("relay").unwrap().is_empty(), "a replay owes no ack");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **A filed letter appends no `reacks.log` line.** Nothing reads that record
+    /// now (ruling 131), so filing a letter writes none.
+    #[test]
+    fn a_filed_letter_appends_no_reacks_log_line() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("filed-no-reacks");
+
+        let me = register_local_origin();
+        let mut nodes = aoide_storage::node_store::load_nodes();
+        nodes.push(keyed_node("relay"));
+        aoide_storage::node_store::save_nodes(&nodes).unwrap();
+        let letter = letter_from_far("relay", &me);
+        let outcome = aoide_storage::mail::deposit(letter.clone(), "relay").unwrap();
+        settle_deposit(&letter, &outcome);
+
+        assert!(!aoide_storage::mail::mail_dir().join("reacks.log").exists(), "a filed letter writes no reacks.log line");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **A letter filed from a `poll` origin owes that origin nothing held.** The
+    /// origin reaches its own letters by polling, so no ack is spooled toward it,
+    /// held or dialled.
+    #[test]
+    fn filing_a_letter_from_a_poll_origin_spools_no_held_ack() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("poll-origin-no-ack");
+
+        let me = register_local_origin();
+        let laptop = Node { url: aoide_storage::charter::DEFAULT_ADDRESS.to_string(), ..keyed_node("laptop") };
+        let mut nodes = aoide_storage::node_store::load_nodes();
+        nodes.push(laptop);
+        aoide_storage::node_store::save_nodes(&nodes).unwrap();
+        let letter = letter_from_far("laptop", &me);
+        let outcome = aoide_storage::mail::deposit(letter.clone(), "laptop").unwrap();
+        assert!(matches!(outcome, aoide_storage::mail::DepositOutcome::Filed { .. }), "{outcome:?}");
+        settle_deposit(&letter, &outcome);
+
+        assert!(aoide_storage::outbox::list_entries("laptop").unwrap().is_empty(), "no ack toward the poll origin");
 
         let _ = std::fs::remove_dir_all(&dir);
     }

@@ -11472,9 +11472,9 @@ mod tests {
     /// via `mail poll`.** This is the case `poll-on-contact` cannot reach —
     /// an empty outbox has no dial, so no contact, so no poll (the drain's
     /// own doc says so) — and it is the relay model's only receive path. The
-    /// poll files the envelope through the same chain a pushed deposit gets
-    /// and spools the ack back toward its origin, exactly as the hand-over
-    /// would if a drain had carried it.
+    /// poll files the envelope through the same chain a pushed deposit gets,
+    /// and owes its origin nothing: the filed letter is its own answer
+    /// (ruling 131), so no receipt is minted or spooled back.
     #[test]
     fn mail_poll_receives_a_held_letter_with_nothing_to_send() {
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
@@ -11484,8 +11484,8 @@ mod tests {
         // identity and stamped `from.node = local_host_name()`, so the
         // ORIGIN record this box must hold is one named exactly that (the
         // same one-process-plays-both-roles shortcut `mail_wire`'s own tests
-        // document). Its url points nowhere: the ack this poll spools has to
-        // STAY spooled for the assertion below.
+        // document). Its url points nowhere, so the sweep's own ask of it is
+        // reported unreachable below.
         let me = aoide_storage::display::local_node_name();
         let (kp, _) = aoide_storage::identity::load_or_mint().unwrap();
         aoide_storage::mail::box_add("conductor").unwrap();
@@ -11534,8 +11534,7 @@ mod tests {
         assert_eq!(base[0].via, "relay", "via is the node that was polled");
 
         let acks = aoide_storage::outbox::list_entries(&me).unwrap();
-        assert_eq!(acks.len(), 1, "and its ack is spooled back toward the origin");
-        assert_eq!(acks[0].envelope.header.kind, aoide_storage::mail::ENTRY_TYPE_RECEIPT);
+        assert!(acks.is_empty(), "and no receipt is spooled back toward the origin (ruling 131)");
 
         drop(listener);
         let _ = std::fs::remove_dir_all(&root);

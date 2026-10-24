@@ -46,7 +46,7 @@
   `$XDG_RUNTIME_DIR` override wins on BOTH hosts: every isolating fixture sets
   it, and an answer that ignored it on one host would read and write the
   machine's real per-user directory instead of the fixture's.
-- **An ack's `from.node` is this box's name in the letter's mesh, never its hostname.** `mint_ack_from` takes the name; `mint_ack_in_mesh` is the hostname form, for callers with no charter to read. The origin verifies the ack against the key it holds for that name, so a hostname-signed ack is refused and its letter never retires.
+- **A receipt's `from.node` is the signer's name in the letter's mesh, never its hostname.** `mint_ack_from` takes the name (an older-peer fixture, O-9); `mint_ack_in_mesh` is the hostname form, for tests with no charter to read. The origin verifies a receipt against the key it holds for that name, so a hostname-signed receipt is refused and its letter never retires.
 - Structured thread/reply IDs are signed context, not membership or delivery authority. Legacy four-field content remains valid.
 - Structured letter content is optional signed text, never a new transport header. Invalid or legacy content remains raw; decoding must not write or alter envelope identity.
 
@@ -157,9 +157,8 @@
   against its own box in `mail::deposit`, so it never reads or writes the gate.
   The record means **admitted AND filed**, and it is never written from inside
   `seal::deposit_container`. Whether a duplicate
-  was originally a letter — and so whether a lost receipt is owed — is read
-  back out of the boxes through `mail::filed_kind`/`mail::show`, never
-  remembered by the gate. Both halves of that ordering are load-bearing: record
+  was originally a letter is read back out of the boxes through
+  `mail::filed_kind`/`mail::show`, never remembered by the gate. Both halves of that ordering are load-bearing: record
   any earlier and a refusal past the gate answers `duplicate` forever instead
   of re-running, and a crash between the gate and the box append claims a filing
   that never happened.
@@ -942,9 +941,9 @@
   of the same file would block forever. An un-openable lock file still refuses
   the call, never runs it unlocked. The gate (`seal::check_seen`,
   `record_seen`) uses `try_stage_lock`, so it refuses without its lock.
-- **Rotating mail logs are read only to their cap.** `receipts.log`,
-  `containers.jsonl` and `reacks.log` are read with `feed::read_lines_up_to`
-  at `ROTATE_AT` (or `REACKS_MAX`), and an append rotates them first
+- **Rotating mail logs are read only to their cap.** `receipts.log` and
+  `containers.jsonl` are read with `feed::read_lines_up_to` at `ROTATE_AT`,
+  and an append rotates them first
   (`rotate_before_append`) so they stay under it. A file past its cap is read
   only up to it, never in full.
 - **The mailbase stage lock is held only inside `ring_targets`/
@@ -1028,10 +1027,12 @@
   ssh dial. Don't relax `.bsy` to blocking, either — ruling 3 (P-M2 brief)
   is explicit that a busy link is SKIPPED, never queued behind, so one
   wedged drain can never starve every later one.
-- **An outbox entry retires ONLY on a valid ack, a held own letter's filed
-  name (`retire_acknowledged`), explicit `mail outbox rm` (P-M2), or the drop
-  of an own letter with its session or by the tick's sweep (ruling 131) —
-  never auto-evicted, never expired, never capped.**
+- **An outbox entry retires ONLY on its confirmation: a verified `accepted`
+  or `duplicate` answer to its own live dial, a valid receipt from an older
+  node (`retire_by_ack`), a held own letter's filed name
+  (`retire_acknowledged`), explicit `mail outbox rm` (P-M2), or the drop of an
+  own letter with its session or by the tick's sweep (ruling 131) — never
+  auto-evicted, never expired, never capped.**
   `outbox::retire_by_ack` is the "valid ack" half — it trusts its caller
   (`mail::deposit`) to have already proven the ack's origin signature
   genuine, and never re-verifies; don't call it on an unverified envelope.
@@ -1066,9 +1067,8 @@
   and offering it would double-drive one entry from two callers). An own
   letter is offered only while held: a returned one is its sender's to resend.
   **Never add state to it**: no `tries` stamp, no `last_polled_at`, no
-  handed-over bookmark. Re-poll-before-ack idempotence is a CONSEQUENCE of
-  writing nothing (the same set is offered again) plus the receiver's
-  `msgid` dedup; a bookmark would be a second, drifting source of truth,
+  handed-over bookmark. Re-poll idempotence is a CONSEQUENCE of writing
+  nothing (the same set is offered again) plus the receiver's `msgid` dedup; a bookmark would be a second, drifting source of truth,
   and any `tries` stamp on a poll would silently change which entries the
   NEXT poll offers (the predicate reads exactly that field). The offer is
   CAPPED at `POLL_BATCH_CAP` (50) — the drain's own batch size, oldest
@@ -1078,8 +1078,8 @@
   unbounded answer is a single JSON array of whole envelopes and walks
   straight into the client's `MAX_RESPONSE_BYTES` refusal, which no retry
   can clear.
-- **A receipt is filed only against a spooled letter, and by a bounded
-  check.** `mail::deposit` calls `outbox::spooled_letter_sender` and compares
+- **A receipt from an older node is filed only against a spooled letter, by a
+  bounded check.** `mail::deposit` calls `outbox::spooled_letter_sender` and compares
   it with the receipt's `to.node`; that read is lock-free because the caller
   holds the stage lock, which the outbox lock shares and does not nest. Do not
   replace it with a base scan, and do not move the `to` check after the
@@ -1090,56 +1090,11 @@
   during the dial retires the entry first, and a plain `write_entry` would
   re-spool it. Every post-dial bookkeeping write in `mail_wire` goes through
   it; `write_entry` stays for entries the caller just created.
-- **`write_ack_if_absent` gates on PENDING state, never a permanent
-  ledger (mail register §26 outbox fix).** A duplicate letter redelivery
-  mints a fresh ack via `mail::mint_ack` on every call — the gate lives
-  entirely in `outbox::write_ack_if_absent`, which skips the spool only
-  when an ack for the same `(node, acked_msgid)` pair is CURRENTLY sitting
-  undelivered in that node's outbox, checked and written atomically under
-  the crate-wide stage lock. A permanent ledger keyed by `(node,
-  acked_msgid)` that never clears was tried first and rejected: it broke
-  the spec-mandated behavior that a duplicate whose ack genuinely never
-  arrived (the ack's spool entry was already retired/removed some other
-  way) must respool — MAIL.md item 5. Don't reintroduce a permanent
-  "already acked" ledger in this module without re-checking
-  `a2a::a_duplicate_of_a_filed_letter_respools_its_ack`.
-- **`has_pending_ack_unlocked` is a marker-file read-plus-one-stat, NEVER a
-  directory scan (review round 2 — the fix's first cut walked and parsed
-  every file in the node's spool under the crate-wide stage lock on every
-  ack deposit; the live osaka spool held 16.5k+ files, so that scan was
-  itself a fresh incident in the exact path this fix exists to close).**
-  `ack_marker_path(node, acked_msgid)` — `<node>/.ack/<acked_msgid>`,
-  content = the pending entry's own msgid, never empty — is written by
-  `write_ack_if_absent` in the SAME locked closure as the ack entry it
-  covers (entry first, marker second: a crash between the two leaves a
-  real entry with no marker, which just risks one harmless extra spool on
-  the next redelivery, never a marker with no entry that would block
-  respooling forever), and cleared by `remove_entry`, which reads the ONE
-  file it is about to delete (never the directory) to learn whether it's
-  a receipt-kind entry and, if so, which `acked_msgid` marker to drop
-  (falling back to a scan scoped to `.ack/` ONLY, never the node
-  directory, on the rare unreadable/unparsable-entry removal — a
-  best-effort net for a corrupted file, not the hot path).
-  Every removal goes through `remove_entry` (or `remove_entry_unlocked` under a
-  held lock): `mail_wire::settle_delivered` for a delivered dialled entry,
-  `mail outbox rm`, `retire_by_ack` for a receipt that names its entry,
-  `retire_acknowledged` for a transit entry or a held own letter its destination
-  filed, and `drop_letters_where` for an own letter whose session ended or the
-  tick's sweep. None of them needs its own awareness of the marker. Don't
-  reintroduce a directory scan on the deposit path, and don't move marker
-  creation ahead of the entry write.
-- **The gate self-heals an orphaned marker; an out-of-band mover need not
-  touch `.ack/` (review round 3).** `has_pending_ack_unlocked` never
-  trusts the marker's mere existence — it reads the msgid the marker
-  names and confirms `entry_path(node, that msgid)` still exists before
-  answering "pending," deleting the marker on the spot the moment it
-  finds one whose entry is gone (an unreadable/malformed marker is
-  treated identically). This matters because the planned archive/prune
-  step (explicitly out of scope for this pass) is expected to `mv`
-  receipt entries straight out of a node's directory with no idea `.ack/`
-  exists — it never has to know or care, since the very next deposit
-  attempt against that `acked_msgid` discovers and clears the orphan
-  itself rather than being silently suppressed forever.
+- **Nothing writes a `.ack/` marker now (ruling 131).** `ack_marker_path` names
+  the marker an older build left beside a spool. `remove_entry` still clears
+  the marker a receipt entry names, by reading the one file it is about to
+  delete; only an unreadable entry falls back to a scan of `.ack/` alone. Don't
+  add a writer: the answer is the receipt, and no ack is spooled.
 - **Backoff has a ceiling now (`BACKOFF_CEILING_SECS`, 15 min).**
   `back_off` still doubles from `DRAIN_BACKOFF_FLOOR_SECS` on every
   failure, but caps at the ceiling instead of doubling forever — a link

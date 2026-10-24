@@ -1,7 +1,8 @@
 //! `state/mail/` — the addressed, signed, append-only mailbase
 //! (`docs/architecture/MAIL.md`). Absorbs the old per-host `inbox.json`
 //! receipt log (MAIL.md decision 8): today's two LOCAL delivery seams
-//! (`conduct/graph/send.rs`, `server/a2a.rs`) file a `receipt` entry here,
+//! (`conduct/graph/send.rs`, `conduct/graph/doorbell.rs`) file a `receipt`
+//! entry here,
 //! and `mail send` files a `letter` — locally via [`file_letter`] for
 //! `self/<name>`, or over the wire for a direct paired edge (P-M2): the
 //! sender mints with [`mint_outbound_letter`] and spools the signed
@@ -126,8 +127,9 @@ use std::path::PathBuf;
 pub const ENVELOPE_VERSION: &str = "1";
 /// `Header.kind`/`Entry.kind`'s value for a `mail send`-filed letter.
 pub const ENTRY_TYPE_LETTER: &str = "letter";
-/// `Header.kind`/`Entry.kind`'s value for a delivery receipt (what
-/// `inbox.json` carried, per MAIL.md "Store").
+/// `Header.kind`/`Entry.kind`'s value for a receipt: the local delivery record
+/// `file_receipt` files, and the ack an older build sends back for a letter
+/// (ruling 131: no node sends one now).
 pub const ENTRY_TYPE_RECEIPT: &str = "receipt";
 /// The taught word for a `charter` envelope that arrived as PLAINTEXT: the
 /// kind exists, but a plaintext envelope carries no charter to apply, and
@@ -1445,80 +1447,15 @@ fn append_entry(entry: &Entry) -> Result<(), String> {
 
 /// The index a filed receipt is keyed on: the signer, the mesh the receipt is
 /// signed in, and the msgid of the letter it acknowledges. Its own msgid is not
-/// in it, since a re-ack is a new envelope.
+/// in it, since a repeat receipt is a new envelope.
 fn receipt_key(envelope: &Envelope) -> String {
     dedup_key(&envelope.header.from.node, &envelope.header.origin_mesh, &envelope.text)
 }
 
-/// The key a far acknowledgement is deduplicated on, and a re-ack is limited
-/// on: the origin node, the mesh, and the acked msgid. [`receipt_key`] is this
-/// key over a receipt's text.
+/// The key a far receipt is deduplicated on: the origin node, the mesh, and the
+/// acked msgid. [`receipt_key`] is this key over a receipt's text.
 fn dedup_key(origin_node: &str, origin_mesh: &str, acked_msgid: &str) -> String {
     serde_json::to_string(&(origin_node, origin_mesh, acked_msgid)).unwrap_or_default()
-}
-
-/// How long one re-ack per key is held back, in seconds.
-pub const REACK_WINDOW_SECS: u64 = 3600;
-/// The cap on `reacks.log`, which rotates to `.1` past it.
-pub const REACKS_MAX: u64 = 1024 * 1024;
-
-/// One line of `reacks.log`: the last time an ack for `key` was spooled.
-#[derive(Serialize, Deserialize)]
-struct ReAck {
-    key: String,
-    at: u64,
-}
-
-fn reacks_log_path() -> PathBuf {
-    mail_dir().join("reacks.log")
-}
-
-/// The last `at` recorded for `key` across both generations, if any. Each
-/// generation is read up to [`REACKS_MAX`].
-fn last_reack_unlocked(key: &str) -> Result<Option<u64>, String> {
-    let mut last: Option<u64> = None;
-    for path in [reacks_log_path(), PathBuf::from(format!("{}.1", reacks_log_path().display()))] {
-        let lines = feed::read_lines_up_to(&path, REACKS_MAX).map_err(|e| format!("{}: {e}", path.display()))?;
-        for line in lines {
-            if let Ok(r) = serde_json::from_slice::<ReAck>(&line) {
-                if r.key == key {
-                    last = Some(last.map_or(r.at, |l| l.max(r.at)));
-                }
-            }
-        }
-    }
-    Ok(last)
-}
-
-fn record_reack_unlocked(key: &str, at: u64) -> Result<(), String> {
-    let line = serde_json::to_string(&ReAck { key: key.to_string(), at }).map_err(|e| e.to_string())?;
-    let path = reacks_log_path();
-    ensure_mail_dir()?;
-    rotate_before_append(&path, REACKS_MAX, line.len() + 1)?;
-    feed::append_line(&path, line.as_bytes()).map_err(|e| format!("{}: {e}", path.display()))
-}
-
-/// Records that an ack for this letter was spooled at `now` (epoch seconds),
-/// so a duplicate of it inside [`REACK_WINDOW_SECS`] is held back.
-pub fn note_ack(origin_node: &str, origin_mesh: &str, acked_msgid: &str, now: u64) -> Result<(), String> {
-    with_lock(|| record_reack_unlocked(&dedup_key(origin_node, origin_mesh, acked_msgid), now))
-}
-
-/// Whether a duplicate letter's ack goes out now: at most one per key per
-/// [`REACK_WINDOW_SECS`], so N replays inside the window spool one ack between
-/// them. When it is due the spool is recorded under the same lock, so two
-/// concurrent duplicates cannot both pass.
-pub fn reack_due(origin_node: &str, origin_mesh: &str, acked_msgid: &str, now: u64) -> Result<bool, String> {
-    with_lock(|| {
-        let key = dedup_key(origin_node, origin_mesh, acked_msgid);
-        if let Some(at) = last_reack_unlocked(&key)? {
-            if now.saturating_sub(at) < REACK_WINDOW_SECS {
-                return Ok(false);
-            }
-        }
-        record_reack_unlocked(&key, now)?;
-        Ok(true)
-    })
 }
 
 /// Every receipt key already filed, across both generations of `receipts.log`.
@@ -1846,22 +1783,21 @@ pub fn mint_outbound_letter(from_name: &str, to_node: &str, to_name: &str, text:
 }
 
 /// [`mint_ack`]'s mesh-aware form, the same rule [`mint_outbound_letter_in_mesh`]
-/// states: an ack rides ONE mesh back to the origin, and the mesh its header
-/// names is a SIGNED value the destination compares against the request's.
-/// `spool_and_drain_ack` passes the incoming letter's own `origin_mesh`, so an
-/// ack travels in the mesh the letter arrived in. `from.node` is the OS
-/// hostname here; a caller whose box is named differently in that mesh uses
-/// [`mint_ack_from`].
+/// states: a receipt rides ONE mesh back to the origin, and the mesh its header
+/// names is a SIGNED value the destination compares against the request's. An
+/// older-peer fixture (O-9): no production path mints a receipt (ruling 131).
+/// `from.node` is the OS hostname here; a caller whose box is named differently
+/// in that mesh uses [`mint_ack_from`].
 pub fn mint_ack_in_mesh(from_name: &str, to: Address, acked_msgid: &str, mesh: &str) -> Result<Envelope, String> {
     mint_ack_from(&display::local_node_name(), from_name, to, acked_msgid, mesh)
 }
 
 /// [`mint_ack_in_mesh`] with the SENDER's node name stated explicitly, the
-/// receipt's twin of [`mint_outbound_letter_from`]: the origin checks the ack
+/// receipt's twin of [`mint_outbound_letter_from`]: the origin checks the receipt
 /// against the key it holds for `from.node`, so a box whose hostname is not its
-/// charter name must sign the ack as that name or the origin never retires its
-/// letter. Both mints share this body, so a letter and an ack can never
-/// disagree about what a mint signs.
+/// charter name must sign it as that name or the origin never retires its
+/// letter. An older-peer fixture (O-9). Both mints share this body, so a letter
+/// and a receipt can never disagree about what a mint signs.
 pub fn mint_ack_from(
     from_node: &str,
     from_name: &str,
@@ -1882,17 +1818,15 @@ pub fn mint_ack_from(
     Ok(Envelope { header, text: acked_msgid.to_string(), sig, msgid })
 }
 
-/// Mint a receipt envelope ACKing `acked_msgid` back to `to` — the ack this
-/// box spools to its own outbox once it has filed someone else's letter
-/// (MAIL.md, spec item 6: "acks are ordinary envelopes, type=receipt,
-/// to=origin, text=acked msgid, signed by destination"). `from_name` is the
-/// mailbox that received the letter (the identity doing the acking);
-/// `to` is the original letter's own `header.from` (origin, not hop —
-/// P-M2's two lookups stay distinct even here). Not filed into this box's
-/// own mailbase (an ack is outbound-only until IT is deposited somewhere,
-/// same as [`mint_outbound_letter`]). The mesh comes from the origin's own
-/// record ([`mesh_for_node`]); the ack-while-filing path names the incoming
-/// letter's mesh outright ([`mint_ack_in_mesh`]).
+/// Mint a receipt envelope ACKing `acked_msgid` back to `to`, signed as an older
+/// node signs one (MAIL.md: "type=receipt, to=origin, text=acked msgid, signed
+/// by destination"). `from_name` is the mailbox that received the letter (the
+/// identity doing the acking); `to` is the original letter's own `header.from`
+/// (origin, not hop — P-M2's two lookups stay distinct even here). Not filed
+/// into this box's own mailbase (a receipt is outbound-only until IT is
+/// deposited somewhere, same as [`mint_outbound_letter`]). The mesh comes from
+/// the origin's own record ([`mesh_for_node`]). An older-peer fixture (O-9): no
+/// production path mints a receipt (ruling 131).
 pub fn mint_ack(from_name: &str, to: Address, acked_msgid: &str) -> Result<Envelope, String> {
     let mesh = mesh_for_node(&to.node);
     mint_ack_in_mesh(from_name, to, acked_msgid, &mesh)
@@ -3105,9 +3039,9 @@ mod tests {
     }
 
     /// **A signer acknowledges a letter once.** A second receipt from the same
-    /// signer naming the same msgid — a re-ack minted in a later second, so a new
-    /// msgid — is answered `duplicate` and files nothing, however many times a
-    /// sender re-acks.
+    /// signer naming the same msgid — minted in a later second, so a new
+    /// envelope — is answered `duplicate` and files nothing, however many times
+    /// an older sender sends one.
     #[test]
     fn a_second_receipt_from_the_same_signer_for_the_same_letter_files_nothing() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
@@ -3118,10 +3052,10 @@ mod tests {
         spool_letter_sent_as_yomi(&letter);
         let first = alice_receipt(&letter, "2026-09-06T00:00:01Z", &alice);
         let again = alice_receipt(&letter, "2026-09-06T00:00:02Z", &alice);
-        assert_ne!(first.msgid, again.msgid, "a re-ack is a new envelope");
+        assert_ne!(first.msgid, again.msgid, "a second receipt is a new envelope");
         assert!(matches!(deposit(first, "alice-host").unwrap(), DepositOutcome::Filed { .. }));
         assert_eq!(deposit(again, "alice-host").unwrap(), DepositOutcome::Duplicate { filed_letter: false });
-        assert_eq!(read_base().unwrap().len(), 1, "one receipt for the letter, however many re-acks arrive");
+        assert_eq!(read_base().unwrap().len(), 1, "one receipt for the letter, however many arrive");
 
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -3495,10 +3429,10 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// A crash after the box's fsync leaves the letter filed and no ack sent. The
-    /// re-offer finds it in its box and answers duplicate, which re-acks it.
+    /// A crash after the box's fsync leaves the letter filed. The re-offer finds
+    /// it in its box and answers duplicate, and owes nothing (ruling 131).
     #[test]
-    fn a_crash_after_the_box_fsync_answers_duplicate_and_reacks() {
+    fn a_crash_after_the_box_fsync_answers_duplicate() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let (_env, dir) = root("crash-after-fsync");
         let alice = alice_on_record();
@@ -4412,53 +4346,6 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// N replays of one duplicate inside the hour spool one ack between them,
-    /// and the first replay after the hour spools another.
-    #[test]
-    fn replays_inside_the_hour_spool_one_ack_and_a_replay_after_it_spools_another() {
-        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let (_env, dir) = root("reack-window");
-        let t0 = 1_000_000;
-        let mut spooled = 0;
-        spooled += usize::from(reack_due("alice-host", "home", "ab", t0).unwrap());
-        for i in 1..=5 {
-            spooled += usize::from(reack_due("alice-host", "home", "ab", t0 + i).unwrap());
-        }
-        assert_eq!(spooled, 1, "N replays inside the hour spool one ack");
-        assert!(!reack_due("alice-host", "home", "ab", t0 + REACK_WINDOW_SECS - 1).unwrap());
-        assert!(reack_due("alice-host", "home", "ab", t0 + REACK_WINDOW_SECS).unwrap(), "a replay after the hour spools another");
-        assert!(!reack_due("alice-host", "home", "ab", t0 + REACK_WINDOW_SECS + 1).unwrap());
-        assert!(reack_due("alice-host", "other-mesh", "ab", t0).unwrap(), "the mesh is part of the key");
-        assert!(reack_due("alice-host", "home", "cd", t0).unwrap(), "the msgid is part of the key");
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    /// A first ack noted for a letter holds back its own duplicate inside the hour.
-    #[test]
-    fn a_noted_first_ack_holds_back_the_next_duplicate() {
-        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let (_env, dir) = root("reack-noted");
-        note_ack("alice-host", "home", "ab", 500).unwrap();
-        assert!(!reack_due("alice-host", "home", "ab", 501).unwrap());
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    /// The re-ack record rotates under its cap instead of growing past it.
-    #[test]
-    fn the_reack_record_rotates_under_its_cap() {
-        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let (_env, dir) = root("reack-cap");
-        std::fs::create_dir_all(mail_dir()).unwrap();
-        let mut full = vec![b'x'; REACKS_MAX as usize - 40];
-        full.push(b'\n');
-        std::fs::write(reacks_log_path(), full).unwrap();
-        assert!(reack_due("alice-host", "home", "ab", 1).unwrap());
-        assert!(PathBuf::from(format!("{}.1", reacks_log_path().display())).exists(), "the full generation rotated");
-        let len = std::fs::metadata(reacks_log_path()).unwrap().len();
-        assert!(len < REACKS_MAX, "reacks.log is {len} bytes, past the cap");
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
     #[test]
     fn a_local_receipt_stores_a_digest() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
@@ -4852,8 +4739,8 @@ mod tests {
     }
 
     /// A full box refuses `box-full` before any line is written: the box is
-    /// byte-for-byte unchanged, and the letter is not `Filed`, so no ack is owed
-    /// (the ack is spooled only on `Filed`, `client::mail_wire::settle_deposit`).
+    /// byte-for-byte unchanged, and the letter is not `Filed`, so nothing is owed
+    /// (`client::mail_wire::settle_deposit` has nothing to do for it).
     #[test]
     fn a_full_box_refuses_box_full_before_filing_and_before_any_ack() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());

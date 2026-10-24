@@ -739,14 +739,13 @@ by decision — no embedded database yet
   The box line IS the filing: its `msgid` is the dedup key, and there is no
   second index. Reads go through `feed::read_lines`, which works on bytes, so a
   torn multi-byte tail cannot wedge them. The rotating logs (`receipts.log`,
-  `containers.jsonl`, `reacks.log`) are read with `feed::read_lines_up_to`
+  `containers.jsonl`) are read with `feed::read_lines_up_to`
   at their cap, and rotated before an append so they stay under it; a box
   is not capped on read yet. The filing counter reads only `base.jsonl`'s
-  tail, never the boxes. `reacks.log` limits a duplicate's re-ack to one per
-  key per hour (`reack_due`, `note_ack`).
+  tail, never the boxes.
   `mail::file_receipt` is the shared seam `conduct`'s `deliver_local` files a
   delivered message through; `mail::file_letter` is `mail send`'s own engine.
-  Readers follow the files: `read_boxes` (letters), `read_receipts` (acks),
+  Readers follow the files: `read_boxes` (letters), `read_receipts` (receipts),
   `read_box(name)` and `read_for` (one box), `read_base` (both, by seq, for
   export and the audit views). Bare `mail` and `--all-names` use the boxes only.
   Keep-all: `mail rm --older-than` is the only pruning, and it takes the dedup
@@ -782,10 +781,9 @@ by decision — no embedded database yet
   verified node's key (a paired node signing as another paired node's
   name must not verify); `deposit` is the receiving side's whole admitted
   policy in one function — recompute `msgid`, verify the origin
-  signature, dedup against the box (a filed `letter`'s duplicate
-  reports whether it was ever filed, so the caller knows to re-spool the
-  ack), then file via the new `file_received_entry`. A receipt is filed
-  only against a letter still spooled here under its own name
+  signature, dedup against the box (a duplicate reports whether its original
+  was a filed letter), then file via `file_received_entry`. A receipt from an
+  older node is filed only against a letter still spooled here under its own name
   (`outbox::spooled_letter_sender`), and a repeat of one already filed is
   caught by `receipts.log`, keyed on (signer, mesh, acked msgid). Both mint
   functions and `deposit` carry neither `mesh` nor `transit` — P-M2's envelope is
@@ -795,7 +793,8 @@ by decision — no embedded database yet
   audit log and spools the container toward the next hop; the hub's own spool
   entry retires when that hop HAS the letter (`outbox::retire_acknowledged`
   when a poller names the msgid in `filed`, the deposit's own acceptance on a
-  drain) — never on the destination's receipt, which a hub never sees. A
+  drain) — never on a receipt from the destination (no node sends one now,
+  ruling 131). A
   poller's refusal of a held letter of the hub's own returns it instead
   (`outbox::return_refused`); a transit entry is never returned.
 
@@ -867,29 +866,10 @@ by decision — no embedded database yet
   usable, and otherwise travels as an envelope. A relayed one is sealed to its
   destination or withheld (`Reseal::Withheld`), never to
   the hop.
-  `write_ack_if_absent` is the ack-redelivery gate the outbox fix (mail
-  register §26) adds: it spools a freshly minted ack only when no ack for
-  the same `(node, acked_msgid)` pair is ALREADY sitting undelivered in
-  that node's spool, so a duplicate letter redelivered while its ack is
-  still in flight mints nothing new. It is deliberately not a permanent
-  ledger — once the pending ack is actually delivered and its entry
-  retired, the next redelivery finds nothing pending and correctly
-  respools, preserving MAIL.md item 5 (a duplicate re-sends the ack
-  because the sender's earlier one evidently never arrived). The pending
-  check is a single `exists()` stat on a per-`acked_msgid` marker file
-  (`<node>/.ack/<acked_msgid>`, zero bytes, never data) — NOT a directory
-  scan (review round 2): a live spool can hold tens of thousands of
-  entries, and walking/parsing every file in it under the crate-wide
-  stage lock on every ack deposit would itself become a fresh
-  latency/contention incident on exactly the node this fix is for. The
-  marker is written in the same locked section as the ack entry
-  (`write_ack_if_absent`) and cleared in the same locked section as that
-  entry's own removal (`remove_entry`, which reads the ONE file it is
-  about to delete — never the directory — to decide whether to clear a
-  marker), so every retirement path (a delivered entry's confirmation, a held
-  letter's filed name, an explicit `mail outbox rm`, an own letter's session
-  drop) keeps the marker's presence exactly in sync with the entry's. No
-  network,
+  `ack_marker_path` names the `<node>/.ack/<acked_msgid>` marker an older build
+  wrote beside a spool. Nothing writes one now (ruling 131); `remove_entry`
+  still clears the marker a receipt entry names, in the same locked section,
+  by reading the one file it is about to delete. No network,
   no HTTP, no tunnel — the actual dial+POST lives in
   `aoide-client::mail_wire` (bounded to `DRAIN_BATCH_CAP` entries per
   `drain_node` call, and recording `tries`/`lastOutcome`/`lastTryAt` on
@@ -914,9 +894,9 @@ by decision — no embedded database yet
   returned one is its sender's to resend (ruling 131). **A poll writes no `tries`,
   no bookmark and no new file**: its hand-over may write a sealed upgrade or a
   park (`hand_over`), and never a try or an outcome for a container it hands
-  over. That is what makes a re-poll before the ack hand the same envelopes over
-  again, and why an entry
-  leaves the spool only by a valid ack, a held letter's filed name,
+  over, which is why a re-poll hands the same envelopes over again. An entry
+  leaves the spool only on its confirmation: a valid receipt from an older
+  node, a held letter's filed name, a live dial's verified answer,
   `mail outbox rm`, or an own letter's session end or the tick's sweep
   (ruling 131). The offer is
   bounded at `POLL_BATCH_CAP` (50 — the drain's own batch size,
