@@ -714,6 +714,23 @@ pub fn destination_binding(dest: &str, mesh: &str, now: &str) -> Option<Binding>
         .or_else(|| declared_binding(dest, mesh, now))
 }
 
+/// Does the mesh declare a binding for `dest`, usable or not? A mesh this box
+/// cannot read counts as declaring one. Where it does, a letter to `dest` is
+/// parked rather than sent in the clear, at mint (`spool_entry`) and at the dial
+/// (`reseal_entry`): an expired declared binding holds the letter, and an
+/// unreadable mesh parks it instead of downgrading it. A binding this box cannot
+/// read is not a licence to send plaintext.
+pub fn declares_a_binding(dest: &str, mesh: &str) -> bool {
+    let Ok(set) = crate::routing::declarations() else {
+        return true;
+    };
+    match crate::routing::declaration_of(&set, mesh) {
+        Some(Ok(declaration)) => declaration.binding_of(dest).is_some(),
+        Some(Err(_)) => true,
+        None => false,
+    }
+}
+
 /// Does this LEARNT binding belong to the key the mesh declares for `dest`? Where
 /// no declaration names it (a mesh the set does not hold, or a pair mesh whose
 /// section lists no nodes), nothing contradicts the binding: it was learnt against

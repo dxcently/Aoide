@@ -860,8 +860,10 @@ by decision — no embedded database yet
   `aoide_protocol::dialog::SPAWN_BACKOFF_MAX`, which is sized for a
   respawned process, not a link stuck on a permanent transport failure).
   `reseal_entry` and `hand_over` are the one seal step a dial and a poll take:
-  a direct entry is sealed to its spool node when that node has a binding, and
-  a relayed one to its destination or withheld (`Reseal::Withheld`), never to
+  a direct entry is sealed to its destination's binding (`destination_binding`,
+  learnt or declared) when one is usable, parked when one is on record but not
+  usable, and otherwise travels as an envelope. A relayed one is sealed to its
+  destination or withheld (`Reseal::Withheld`), never to
   the hop.
   `write_ack_if_absent` is the ack-redelivery gate the outbox fix (mail
   register §26) adds: it spools a freshly minted ack only when no ack for

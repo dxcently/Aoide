@@ -647,7 +647,7 @@ pub fn spool_entry(
         }
         None if direct
             && aoide_storage::seal::binding_for(dest).is_none()
-            && !declares_a_binding(dest, mesh) =>
+            && !aoide_storage::seal::declares_a_binding(dest, mesh) =>
         {
             Ok(if hold { OutboxEntry::held(envelope) } else { OutboxEntry::fresh(envelope) })
         }
@@ -709,23 +709,6 @@ fn hop_is_never_dialled(node_name: &str, mesh: &str) -> bool {
 /// letter is parked, visible in `mail outbox`, and `mail outbox retry --refused`
 /// is the hand once a binding exists.
 pub const NO_BINDING_FOR_A_RELAY: &str = "sealed-required";
-
-/// Does the mesh give this box a binding to seal to `dest` — usable or not, and
-/// INCLUDING a mesh that cannot be read at all? The question
-/// [`spool_entry`]'s parking arm asks, so a destination whose declared binding
-/// is expired is held rather than sent in the clear, and an unreadable mesh
-/// parks the letter instead of downgrading it (a binding this box cannot read is
-/// not a licence to send plaintext).
-fn declares_a_binding(dest: &str, mesh: &str) -> bool {
-    let Ok(set) = aoide_storage::routing::declarations() else {
-        return true;
-    };
-    match aoide_storage::routing::declaration_of(&set, mesh) {
-        Some(Ok(declaration)) => declaration.binding_of(dest).is_some(),
-        Some(Err(_)) => true,
-        None => false,
-    }
-}
 
 /// The record half of [`hop_is_never_dialled`]: a node this box has paired with,
 /// whose own stored address reads `poll`.

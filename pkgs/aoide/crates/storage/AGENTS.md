@@ -170,8 +170,8 @@
   cannot act on is worse than no refusal.
 - **`outbox::poll_payloads` is a poll's only hand-over point, and it returns
   pairs.** The container rides beside its envelope so the door can hand a
-  sealed entry over as a container and NO plaintext. A direct entry spooled
-  before the destination published a binding still appears as an envelope. A
+  sealed entry over as a container and NO plaintext. A direct entry with no
+  binding, learnt or declared, still appears as an envelope. A
   relayed entry never does: `reseal_entry` seals it to its destination or
   withholds it (`Reseal::Withheld`, `HandOver::Withheld`), and the answer lists
   it under `withheld`. The hand-over is a pure read: nothing is marked, moved or

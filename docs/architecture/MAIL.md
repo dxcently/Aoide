@@ -775,7 +775,7 @@ keyless checks — admission, the outer origin signature, the zone check, dedup
 — and only the destination opens `ct` and runs the `msgid` recomputation and
 the inner origin signature against the opened envelope (that document's "Two
 verification halves"). A hop never opens a letter. The one plaintext path left
-is the direct SSH lane to a destination that has published no binding yet —
+is the direct SSH lane to a destination with no binding, learnt or declared —
 and the receiver on THAT lane keeps accepting it, deliberately, so a peer
 running an older aoide can still deliver; nothing plaintext ever enters
 transit, and the HTTPS adapter refuses a plaintext envelope
@@ -1597,6 +1597,10 @@ authoritative first:
   dialled by this box, and leaves when that hop files it or its session ends.
 - `pre-131` — an own letter spooled before the session binding existed, so
   it has no session. The next tick drops it (reason `pre-131`).
+- `queued` — an own letter that has its session and is neither held nor
+  refused. No send leaves one: a live letter is written only once its dial
+  has answered, and a held letter is held. The tick keeps a letter while its
+  session lives, so it never reads `pre-131`.
 - `removed` — a retry's report only, never a listing's: the letter left the
   outbox while its dial was in flight (an `rm`, or its session ending), so
   nothing was written back. The retry refuses with the reason `removed`.

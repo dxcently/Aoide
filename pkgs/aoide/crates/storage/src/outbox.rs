@@ -408,14 +408,15 @@ pub fn reseal_entry(node: &str, entry: &OutboxEntry, now: &str) -> Result<Reseal
     if entry.envelope.header.to.node != node {
         return relayed_reseal(node, entry, now);
     }
-    if crate::seal::binding_for(node).is_none() {
-        return Ok(Reseal::NoBinding);
-    }
-    let Some(binding) = crate::seal::usable_binding_for(node, now) else {
-        // A binding IS on record and is not usable now. Park, never plaintext
-        // — this is the arm H2 was about. An already-parked entry needs no
-        // rewrite (its reason is still true); a live one is parked here so it
-        // stops being dialed and the operator sees why.
+    let mesh = crate::routing::zone_name(&entry.envelope.header.origin_mesh);
+    let Some(binding) = crate::seal::destination_binding(node, &mesh, now) else {
+        if crate::seal::binding_for(node).is_none() && !crate::seal::declares_a_binding(node, &mesh) {
+            return Ok(Reseal::NoBinding);
+        }
+        // A binding is on record, learnt or declared, and none is usable now.
+        // Park, never plaintext. An already-parked entry needs no rewrite (its
+        // reason is still true); a live one is parked here so it stops being
+        // dialed and the operator sees why.
         if entry.refused {
             return Ok(Reseal::NotUsable(None));
         }
@@ -2364,6 +2365,94 @@ mod tests {
         }
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The age key the mesh declares for `node` in `home`, read the way the seal
+    /// decisions read it ([`crate::seal::destination_binding`]).
+    fn declared_age(node: &str) -> String {
+        let set = crate::routing::declarations().unwrap();
+        crate::routing::declaration_of(&set, "home").unwrap().as_ref().unwrap().binding_of(node).unwrap().age_pubkey.clone()
+    }
+
+    /// **A direct letter seals to its destination's declared binding when none is
+    /// learnt.** The mint and the dial read the same resolution, so the declaration
+    /// alone is enough for the dial to seal.
+    #[test]
+    fn a_direct_entry_whose_destination_has_only_a_declared_binding_is_sealed_to_it() {
+        use crate::routing::tests::{body, isolate, line_for, sign_on, Scratch};
+        let (_guard, _env) = isolate();
+        let scratch = Scratch::new("reseal-declared");
+        let line = line_for(&scratch.dir("dest"), "dest-d");
+        sign_on(&scratch.dir("operator"), "home", &body(&[], &[], &[], &[line]));
+        let declared = declared_age("dest-d");
+        let entry = OutboxEntry::fresh(crate::mail::mint_outbound_letter("alice", "dest-d", "bob", "hi").unwrap());
+        match reseal_entry("dest-d", &entry, &crate::time::now_iso_utc()).unwrap() {
+            Reseal::FreshlySealed(sealed) => {
+                assert_eq!(sealed.container.as_ref().unwrap().to.age, declared, "sealed to the declared key");
+            }
+            _ => panic!("a declared binding seals a direct letter"),
+        }
+    }
+
+    /// **A learnt binding that contradicts the mesh's declaration never seals a
+    /// direct letter.** The learnt key here is this box's own; the declared key is
+    /// the destination's, and only that one may be sealed to.
+    #[test]
+    fn a_direct_entry_whose_learnt_binding_contradicts_the_declaration_is_sealed_to_the_declared_one() {
+        use crate::routing::tests::{body, isolate, line_for, sign_on, Scratch};
+        let (_guard, _env) = isolate();
+        let scratch = Scratch::new("reseal-contradicts");
+        let line = line_for(&scratch.dir("dest"), "dest-d");
+        sign_on(&scratch.dir("operator"), "home", &body(&[], &[], &[], &[line]));
+        pair_node("dest-d", true);
+        let declared = declared_age("dest-d");
+        let learnt = crate::seal::publish_binding().unwrap().age_pubkey;
+        assert_ne!(declared, learnt, "two different keys");
+        let entry = OutboxEntry::fresh(crate::mail::mint_outbound_letter("alice", "dest-d", "bob", "hi").unwrap());
+        match reseal_entry("dest-d", &entry, &crate::time::now_iso_utc()).unwrap() {
+            Reseal::FreshlySealed(sealed) => {
+                let to = sealed.container.as_ref().unwrap().to.age.clone();
+                assert_eq!(to, declared, "sealed to the declared key");
+                assert_ne!(to, learnt, "never to the learnt one");
+            }
+            _ => panic!("the declared binding seals the letter"),
+        }
+    }
+
+    /// **A direct letter whose destination declares an expired binding is parked.**
+    /// `spool_entry` parks it at mint; the dial must park it as well, and never send
+    /// it in the clear.
+    #[test]
+    fn a_direct_entry_whose_destination_declares_an_expired_binding_is_parked() {
+        use crate::routing::tests::{body, isolate, machine, sign_on, Scratch};
+        let (_guard, _env) = isolate();
+        let scratch = Scratch::new("reseal-expired");
+        machine(&scratch.dir("dest"), "dest-d");
+        let (kp, _) = crate::identity::load_or_mint().unwrap();
+        let current = crate::seal::publish_binding().unwrap();
+        let now = crate::time::now_iso_utc();
+        let expired = crate::seal::mint_binding(
+            &kp,
+            &current.age_pubkey,
+            2,
+            &crate::time::shift_iso_utc(&now, -7200),
+            &crate::time::shift_iso_utc(&now, -3600),
+        )
+        .unwrap();
+        let line = crate::charter::node_line().unwrap();
+        let (head, rest) = line.split_once("age = '").unwrap();
+        let (_, tail) = rest.split_once("' }").unwrap();
+        let line = format!("{head}age = '{}' }}{tail}", serde_json::to_string(&expired).unwrap());
+        sign_on(&scratch.dir("operator"), "home", &body(&[], &[], &[], &[line]));
+        let entry = OutboxEntry::fresh(crate::mail::mint_outbound_letter("alice", "dest-d", "bob", "hi").unwrap());
+        match reseal_entry("dest-d", &entry, &crate::time::now_iso_utc()).unwrap() {
+            Reseal::NotUsable(Some(parked)) => {
+                assert!(parked.container.is_none(), "never sealed to an unusable key, never plaintext");
+                assert!(parked.refused, "the letter is parked");
+                assert!(parked.last_outcome.starts_with("parked:"), "{}", parked.last_outcome);
+            }
+            _ => panic!("an expired declared binding parks a direct letter"),
+        }
     }
 
     /// **M1 (review r1): a held plaintext letter that a poll upgrades keeps its

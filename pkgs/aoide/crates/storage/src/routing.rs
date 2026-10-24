@@ -950,7 +950,7 @@ fn reach(declaration: &Declaration, from: &str, node: &str) -> Result<Hop, Strin
 // ── Tests ───────────────────────────────────────────────────────────────
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use aoide_test_support::{unique_tmp, EnvSaver};
     use std::path::{Path, PathBuf};
@@ -958,18 +958,18 @@ mod tests {
 
     /// One test's scratch root, removed however the test ends — a panic leaves
     /// no fixture behind for the next run to trip over.
-    struct Scratch {
+    pub(crate) struct Scratch {
         root: PathBuf,
     }
 
     impl Scratch {
-        fn new(tag: &str) -> Scratch {
+        pub(crate) fn new(tag: &str) -> Scratch {
             Scratch { root: unique_tmp(&format!("routing-{tag}")) }
         }
 
         /// One "machine" under this root: its own directory, standing in for
         /// its own box.
-        fn dir(&self, name: &str) -> PathBuf {
+        pub(crate) fn dir(&self, name: &str) -> PathBuf {
             let dir = self.root.join(name);
             std::fs::create_dir_all(&dir).unwrap();
             dir
@@ -985,7 +985,7 @@ mod tests {
     /// Point every root at `dir` and name this "machine" `name` — the same
     /// switch `charter`'s own tests make, so `node_line` reads THIS machine's
     /// identity and produces THIS machine's line.
-    fn machine(dir: &Path, name: &str) {
+    pub(crate) fn machine(dir: &Path, name: &str) {
         std::env::set_var("AOIDE_ROOT", dir);
         std::env::set_var("STRILLIX_ROOT", dir);
         std::env::set_var("AOIDE_STATE_DIR", dir);
@@ -993,7 +993,7 @@ mod tests {
         std::env::set_var("AOIDE_A2A_NODE_NAME", name);
     }
 
-    fn isolate() -> (MutexGuard<'static, ()>, EnvSaver) {
+    pub(crate) fn isolate() -> (MutexGuard<'static, ()>, EnvSaver) {
         let guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saver = EnvSaver::capture(&[
             "AOIDE_ROOT",
@@ -1008,7 +1008,7 @@ mod tests {
     /// One node's charter line, minted on its own machine — `node_line` reads
     /// whatever root the env points at, so this is how a fixture gives a mesh
     /// more than one identity.
-    fn line_for(root: &Path, name: &str) -> String {
+    pub(crate) fn line_for(root: &Path, name: &str) -> String {
         machine(root, name);
         charter::node_line().unwrap()
     }
@@ -1036,7 +1036,7 @@ mod tests {
     /// applies it in force THERE. `body` is an argument, so a caller that needs
     /// node lines from other machines has already been and come back by the
     /// time the env is switched to the operator.
-    fn sign_on(dir: &Path, mesh: &str, body: &str) {
+    pub(crate) fn sign_on(dir: &Path, mesh: &str, body: &str) {
         machine(dir, "opbox");
         if !charter::source_path(mesh).exists() {
             charter::init(mesh).unwrap();
@@ -1048,7 +1048,7 @@ mod tests {
     /// A charter body: relays, then the node lines, then `[status]` and
     /// `[gates]` — the document `Charter` describes, assembled from the parts a
     /// test varies.
-    fn body(relays: &[&str], status: &[(&str, &str)], gates: &[(&str, &str)], nodes: &[String]) -> String {
+    pub(crate) fn body(relays: &[&str], status: &[(&str, &str)], gates: &[(&str, &str)], nodes: &[String]) -> String {
         let quoted: Vec<String> = relays.iter().map(|r| format!("\"{r}\"")).collect();
         let mut out = format!("relays = [{}]\n\n[nodes]\n{}\n", quoted.join(", "), nodes.join("\n"));
         if !status.is_empty() {
