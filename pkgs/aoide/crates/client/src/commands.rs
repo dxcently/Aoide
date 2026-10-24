@@ -6506,9 +6506,9 @@ fn poll_results(rows: &[Value]) -> Vec<String> {
             let status = r["status"].as_str().unwrap_or_default();
             match status {
                 "polled" => format!("{node}: polled, {} filed", r["filed"]),
-                "refused" => format!("{node}: refused — {}", r["reason"].as_str().unwrap_or_default()),
+                "refused" => format!("{node}: refused — {}", aoide_protocol::untrusted::clean_line(r["reason"].as_str().unwrap_or_default())),
                 "busy" => format!("{node}: busy — another poll of it is already running"),
-                "unreachable" => format!("{node}: unreachable — {}", r["reason"].as_str().unwrap_or_default()),
+                "unreachable" => format!("{node}: unreachable — {}", aoide_protocol::untrusted::clean_line(r["reason"].as_str().unwrap_or_default())),
                 _ => format!("{node}: not dialled ({})", r["reason"].as_str().unwrap_or("declared down")),
             }
         })
@@ -10734,6 +10734,18 @@ mod tests {
             assert_printable(line.as_str().unwrap());
         }
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// **An unreachable row's reason is one line.** A far end's words can run
+    /// far past a line, so the text line clips the reason; the JSON row keeps
+    /// it whole.
+    #[test]
+    fn poll_results_clips_an_unreachable_reason_to_one_line() {
+        let rows = [json!({ "node": "relay", "status": "unreachable", "filed": 0, "reason": "x".repeat(450) })];
+        let line = poll_results(&rows).remove(0);
+        let reason = line.strip_prefix("relay: unreachable — ").unwrap_or_else(|| panic!("{line}"));
+        assert!(reason.chars().count() <= 200, "{} characters: {line}", reason.chars().count());
+        assert_eq!(rows[0]["reason"].as_str().unwrap().len(), 450, "the JSON row keeps the reason whole");
     }
 
     #[test]

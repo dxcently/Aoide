@@ -160,18 +160,38 @@ fn said_max(body: &str) -> usize {
     }
 }
 
-/// A far door's words inside aoide's own sentence: [`foreign_words`] first, then
-/// `\` and `"` escaped, then the result wrapped in double quotes. The clip comes
-/// before the escape, so a clip never splits an escape. The quotes keep the words
-/// from closing the quote early or reading as aoide's own closing words.
+/// A far door's words inside aoide's own sentence: stripped and flattened as
+/// [`foreign_words`] does, then `\`, `"`, U+201C, U+201D and U+FF02 escaped,
+/// then wrapped in double quotes. The text between the quotes is at most `max`
+/// characters after the escape, not counting the quotes. A cut ends in one
+/// ellipsis, inside the closing quote, and never splits an escape. The escapes
+/// keep the words from closing aoide's ASCII quote.
 fn door_words_quoted(words: &str, max: usize) -> String {
-    let escaped = foreign_words(words, max)
-        .replace('\\', "\\\\")
-        .replace('"', "\\\"")
-        .replace('\u{201c}', "\\u{201c}")
-        .replace('\u{201d}', "\\u{201d}")
-        .replace('\u{ff02}', "\\u{ff02}");
-    format!("\"{escaped}\"")
+    let flat = aoide_protocol::untrusted::strip_unsafe(words).split_whitespace().collect::<Vec<_>>().join(" ");
+    let mut text = String::new();
+    let mut len = 0;
+    let mut room = 0;
+    for c in flat.chars() {
+        let mut buf = [0; 4];
+        let piece: &str = match c {
+            '\\' => r"\\",
+            '"' => r#"\""#,
+            '\u{201c}' => r"\u{201c}",
+            '\u{201d}' => r"\u{201d}",
+            '\u{ff02}' => r"\u{ff02}",
+            _ => c.encode_utf8(&mut buf),
+        };
+        let width = piece.chars().count();
+        if len + width > max {
+            return format!("\"{}…\"", &text[..room]);
+        }
+        text.push_str(piece);
+        len += width;
+        if len < max {
+            room = text.len();
+        }
+    }
+    format!("\"{text}\"")
 }
 
 /// A far door's words, made inert to keep and to print: every character
@@ -4181,6 +4201,19 @@ mod tests {
         }
     }
 
+    /// **The quoted words fit their bound after the escape.** A curly quote is
+    /// eight characters once escaped, so a bound taken before the escape lets a
+    /// far word run to eight times its length. The cut ends in one ellipsis,
+    /// inside the closing quote, and never splits an escape.
+    #[test]
+    fn door_words_quoted_bounds_the_escaped_text() {
+        let quoted = door_words_quoted(&"\u{201c}".repeat(1000), 400);
+        assert!(quoted.chars().count() <= 402, "{} characters: {quoted}", quoted.chars().count());
+        assert!(quoted.ends_with("…\""), "{quoted}");
+        let inside = &quoted[1..quoted.len() - "\"".len()];
+        assert!(inside.split("\\u{201c}").all(|part| !part.contains('\\')), "a partial escape: {quoted}");
+    }
+
     /// **A disguised `config-invalid` is not the word.** An unsigned answer can
     /// spell the word with a zero-width character or with fullwidth letters, and
     /// each reads as `config-invalid` once cleaned or on a screen. The lead that
@@ -4576,6 +4609,41 @@ mod tests {
         assert_eq!(polled.refused.len(), 1, "{polled:?}");
         assert!(polled.refused[0].starts_with(&format!("\"{}", "x".repeat(119))), "{}", polled.refused[0]);
         assert!(polled.refused[0].ends_with("\": broken-chain"), "{}", polled.refused[0]);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **A refused entry for an escape-heavy msgid keeps its closing quote and
+    /// its word.** Each curly quote in a far msgid is eight characters once
+    /// escaped, and each ASCII quote two, so the quoted msgid is bounded after
+    /// the escape, and the poll's re-clip to [`LINE_MAX`] never cuts the
+    /// closing quote or the word.
+    #[test]
+    fn a_refused_entry_for_an_escape_heavy_msgid_keeps_its_closing_quote_and_word() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("refused-entry-escape-heavy-msgid");
+        let envelope = aoide_storage::mail::mint_outbound_letter("alice", "chiyo", "bob", "held for chiyo").unwrap();
+        let live = aoide_storage::seal::publish_binding().unwrap();
+        let container =
+            aoide_storage::seal::seal_envelope(&envelope, &live, "home", "home", "chiyo", "chiyo", &aoide_storage::time::now_iso_utc())
+                .unwrap();
+        for msgid in ["\u{201c}".repeat(25), "\"".repeat(100)] {
+            let mut wire = serde_json::to_value(&container).unwrap();
+            wire["msgid"] = json!(msgid);
+            wire["transit"][0]["node"] = json!("someone-else");
+            let body = json!({ "jsonrpc": "2.0", "id": 1, "result": { "containers": [wire] } }).to_string();
+            let key = own_key();
+            let port = scripted_door(move |request| signed_reply(request, &key, 200, &body));
+            let mut relay = keyed_node("relay");
+            relay.url = format!("http://127.0.0.1:{port}/");
+            aoide_storage::node_store::save_nodes(&[relay]).unwrap();
+
+            let polled = poll_node("relay", None).unwrap();
+
+            assert_eq!(polled.refused.len(), 1, "{polled:?}");
+            assert!(polled.refused[0].ends_with("\": broken-chain"), "{}", polled.refused[0]);
+            assert!(polled.refused[0].chars().count() <= 200, "{}", polled.refused[0]);
+        }
 
         let _ = std::fs::remove_dir_all(&dir);
     }
