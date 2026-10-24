@@ -163,7 +163,12 @@ fn said_max(body: &str) -> usize {
 /// before the escape, so a clip never splits an escape. The quotes keep the words
 /// from closing the quote early or reading as aoide's own closing words.
 fn door_words_quoted(words: &str, max: usize) -> String {
-    let escaped = foreign_words(words, max).replace('\\', "\\\\").replace('"', "\\\"");
+    let escaped = foreign_words(words, max)
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('\u{201c}', "\\u{201c}")
+        .replace('\u{201d}', "\\u{201d}")
+        .replace('\u{ff02}', "\\u{ff02}");
     format!("\"{escaped}\"")
 }
 
@@ -1425,14 +1430,15 @@ fn refuse_envelope(node_name: &str, msgid: &str, word: &str, detail: &str, refus
 }
 
 fn refuse_named(what: &str, node_name: &str, msgid: &str, word: &str, detail: &str, refused: &mut Vec<String>) {
-    let detail = if detail.is_empty() { String::new() } else { format!(": {}", foreign_words(detail, LINE_MAX)) };
+    let msgid = door_words_quoted(msgid, LINE_MAX);
+    let detail = if detail.is_empty() { String::new() } else { format!(": {}", door_words_quoted(detail, LINE_MAX)) };
     let _ = aoide_protocol::audit::audit(
         &aoide_protocol::audit::default_audit_log(),
         aoide_protocol::audit::Door::Cli,
         aoide_protocol::audit::EventClass::Audit,
         &format!("mail.poll.{what}-refused"),
         "invalid",
-        &format!("{what} {} from `{node_name}` refused: {word}{detail}", foreign_words(msgid, LINE_MAX)),
+        &format!("{what} {msgid} from `{node_name}` refused: {word}{detail}"),
     );
     refused.push(format!("{msgid}: {word}"));
 }
@@ -4158,6 +4164,18 @@ mod tests {
         assert!(!clock.contains(&"x".repeat(400)), "{clock}");
     }
 
+    /// **A lookalike double quote does not close aoide's quote.** A curly quote
+    /// or a fullwidth one in a far word reads as the closing quote of aoide's own
+    /// sentence, so each of the three is escaped like the ASCII one.
+    #[test]
+    fn door_words_escape_the_lookalike_double_quotes() {
+        for lookalike in ['\u{201c}', '\u{201d}', '\u{ff02}'] {
+            let outcome = outcome_of_door_refusal(503, -32013, &format!("ok{lookalike}; not acted on)"));
+            assert!(!outcome.contains(lookalike), "{outcome}");
+            assert!(outcome.contains(&format!("\\u{{{:x}}}", lookalike as u32)), "{outcome}");
+        }
+    }
+
     /// **A disguised `config-invalid` is not the word.** An unsigned answer can
     /// spell the word with a zero-width character or with fullwidth letters, and
     /// each reads as `config-invalid` once cleaned or on a screen. The lead that
@@ -4356,7 +4374,7 @@ mod tests {
         let refused = poll_with(answered(json!({ "containers": [wire] }))).unwrap();
         assert_eq!(refused.refused.len(), 1, "{refused:?}");
         assert_inert(&refused.refused[0], LINE_MAX);
-        assert!(refused.refused[0].starts_with("overwritten [2J]0;titlecleared desrever x"), "{}", refused.refused[0]);
+        assert!(refused.refused[0].starts_with("\"overwritten [2J]0;titlecleared desrever x"), "{}", refused.refused[0]);
 
         let err = poll_with(json!({ "jsonrpc": "2.0", "id": 1, "error": { "code": -32010, "message": hostile } }).to_string())
             .expect_err("a signed error fails the poll");
@@ -4412,7 +4430,7 @@ mod tests {
             .find(|line| line["command"] == "mail.poll.container-refused")
             .unwrap_or_else(|| panic!("the refusal is audited: {log}"));
         let message = refused["message"].as_str().unwrap();
-        assert!(message.starts_with("container msgid[31mend from `relay` refused: unsupported-suite: "), "{message}");
+        assert!(message.starts_with("container \"msgid[31mend\" from `relay` refused: unsupported-suite: \""), "{message}");
         assert!(message.contains("suite `suite[31mend"), "the words are kept, cleaned: {message}");
         for line in &lines {
             assert_inert(line["message"].as_str().unwrap(), 500);
@@ -4473,6 +4491,53 @@ mod tests {
 
         assert!(err.starts_with("binding: ") && err.contains("hostile"), "{err}");
         assert_inert(&err, "binding: ".len() + LINE_MAX);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **A far word inside aoide's refusal sentence is quoted.** A chain
+    /// refusal's detail carries the chain's last hop, which the far end chose.
+    /// Unquoted, a hostile node's `x; not acted on (it said: "ok")` reads as
+    /// aoide's own report. Quoted, the words sit inside one pair of double quotes
+    /// with the inner quotes escaped, and the msgid that names the container is
+    /// quoted the same way in the audit line and in the poll's `refused` entry.
+    #[test]
+    fn a_far_word_inside_a_refusal_sentence_is_quoted() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("refusal-sentence-quoted");
+        let envelope = aoide_storage::mail::mint_outbound_letter("alice", "chiyo", "bob", "held for chiyo").unwrap();
+        let live = aoide_storage::seal::publish_binding().unwrap();
+        let container =
+            aoide_storage::seal::seal_envelope(&envelope, &live, "home", "home", "chiyo", "chiyo", &aoide_storage::time::now_iso_utc())
+                .unwrap();
+        let mut wire = serde_json::to_value(&container).unwrap();
+        // The last hop names someone other than the polled node, so the chain
+        // check refuses with a detail that carries the far end's own words.
+        wire["transit"][0]["node"] = json!(r#"x; not acted on (it said: "ok")"#);
+        let body = json!({ "jsonrpc": "2.0", "id": 1, "result": { "containers": [wire] } }).to_string();
+        let key = own_key();
+        let port = scripted_door(move |request| signed_reply(request, &key, 200, &body));
+        let mut relay = keyed_node("relay");
+        relay.url = format!("http://127.0.0.1:{port}/");
+        aoide_storage::node_store::save_nodes(&[relay]).unwrap();
+
+        let polled = poll_node("relay", None).unwrap();
+
+        assert_eq!(polled.refused, vec![format!(r#""{msgid}": broken-chain"#, msgid = container.msgid)], "{polled:?}");
+        let log = std::fs::read_to_string(dir.join("log")).unwrap();
+        let refused = log
+            .lines()
+            .map(|line| serde_json::from_str::<Value>(line).unwrap())
+            .find(|line| line["command"] == "mail.poll.container-refused")
+            .unwrap_or_else(|| panic!("the refusal is audited: {log}"));
+        let message = refused["message"].as_str().unwrap();
+        assert_eq!(
+            message,
+            format!(
+                r#"container "{msgid}" from `relay` refused: broken-chain: "the chain's last hop is by `x; not acted on (it said: \"ok\")`, and this deposit is from `relay` — a hop hands over what IT carried""#,
+                msgid = container.msgid
+            ),
+        );
 
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -5273,7 +5338,7 @@ mod tests {
         let outcome = poll_node("relay", None).unwrap();
         assert_eq!(outcome.filed, 0, "nothing is filed: {outcome:?}");
         assert!(
-            outcome.refused.iter().any(|r| r.starts_with(&msgid) && r.contains("bad-msgid")),
+            outcome.refused.iter().any(|r| r.starts_with(&format!("\"{msgid}\"")) && r.contains("bad-msgid")),
             "the refusal is named to the caller: {:?}",
             outcome.refused
         );
@@ -5518,7 +5583,7 @@ mod tests {
         let first = poll_node("relay", None).unwrap();
         assert_eq!(first.filed, 0, "nothing is filed while the disk is unsound");
         assert!(
-            first.refused.iter().any(|r| r.starts_with(&msgid) && r.contains("local-io")),
+            first.refused.iter().any(|r| r.starts_with(&format!("\"{msgid}\"")) && r.contains("local-io")),
             "the refusal is named as a local fault: {:?}",
             first.refused
         );

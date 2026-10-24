@@ -480,18 +480,24 @@ never the inbound/serve half (that's `aoide-server`).
   said, for the operator: its `error.message`, else its result's `reason`
   (`config-invalid` is a result), cleaned through `aoide_protocol::untrusted`
   and clipped to 120 characters (400 for a clock refusal, `-32008`) before it
-  reaches the entry, the link record or the refusal. It is quoted, with `\`
-  and `"` escaped, and labelled `(it said: "…"; not acted on)`, so the words
-  cannot close the quote or pass for aoide's own closing words. For the word
+  reaches the entry, the link record or the refusal. It is quoted, with `\`,
+  `"`, and the lookalikes U+201C, U+201D and U+FF02 escaped (as `\u{…}` text),
+  and labelled `(it said: "…"; not acted on)`, so the words cannot close the
+  quote or pass for aoide's own closing words. The guarantee is that they
+  cannot close aoide's ASCII quote: those three common lookalikes are escaped,
+  and other lookalike characters can still print. For the word
   `config-invalid` the lead says the far end's own config is invalid rather
   than that it needs an upgrade, since a door in that state never signs its
   answer. A signed answer's words get the same cleaning where they are read
   (`foreign_words`), clipped to 200 characters: a refusal's `reason` and
   `detail`, a JSON-RPC `error`, a poll's own refusal, a `withheld` entry, and
-  a refused container's `msgid`. So the entry's `last_outcome`, the link
-  record, a poll's `Err`, a `PollOutcome` and the `mail.answer.*` and
-  `mail.poll.*` audit lines hold none of a stranger's control characters, and a
-  signature does not make a stranger's text safe for a terminal. A record an
+  a refused container's `msgid`. A refused container's audit line quotes its
+  `msgid` and `detail`, since both sit inside a sentence; a line site prints a
+  whole far-sourced line after aoide's label, so it cleans but does not quote.
+  So the entry's `last_outcome`, the link record, a poll's `Err`, a
+  `PollOutcome` and the `mail.answer.*` and `mail.poll.*` audit lines hold none
+  of a stranger's control characters, and a signature does not make a
+  stranger's text safe for a terminal. A record an
   older build stored uncleaned is cleaned on the way out by `outcome_line`
   (`mail outbox`, a send's `delivery`, the charter drain row). The
   `down`/`config-invalid` classification is judged on the raw word first.

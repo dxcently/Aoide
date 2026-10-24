@@ -8579,8 +8579,10 @@ destination can be hostile and hold its own key, so the client strips every
 control and invisible character from any word of an answer before it is kept,
 returned or logged, and clips it: to 200 characters when the answer verified,
 and to 120 (400 for a clock refusal, `-32008`) when it did not. The words are
-quoted, `it said: "…"; not acted on`, and the cleaning happens where the
-word is read out of the answer, so the entry's `lastOutcome`,
+quoted, `it said: "…"; not acted on`, and a refusal sentence quotes the far
+words it carries the same way (a refused container's `msgid` and `detail`).
+The quote's `\`, `"`, U+201C, U+201D and U+FF02 are escaped. The cleaning
+happens where the word is read out of the answer, so the entry's `lastOutcome`,
 the link record, a poll's error, its own refusal, its `refused` and `withheld`
 lines and every `mail.answer.*` and `mail.poll.*` audit line are inert for
 every reader. That includes an error that quotes the answer, such as the parse
