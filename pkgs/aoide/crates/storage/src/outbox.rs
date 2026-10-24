@@ -849,12 +849,16 @@ fn list_entries_unlocked(node: &str) -> Result<Vec<OutboxEntry>, String> {
 /// the next batch, so a large spool drains in bounded steps instead of never.
 pub fn poll_payloads(node: &str) -> Result<Vec<(Option<crate::seal::Container>, Envelope)>, String> {
     let now = now_epoch();
-    Ok(list_entries(node)?
+    let mut entries: Vec<OutboxEntry> = list_entries(node)?
         .into_iter()
         .filter(|entry| pollable(entry) && deferral_due(entry, now))
-        .take(POLL_BATCH_CAP)
-        .map(|entry| (entry.container, entry.envelope))
-        .collect())
+        .collect();
+    // A parked (refused) letter is offered after every usable one, so a backlog
+    // of parked letters older than a usable one cannot fill the batch and
+    // starve it. The sort is stable: each group keeps the oldest-first order
+    // `list_entries` gives it.
+    entries.sort_by_key(|entry| entry.refused);
+    Ok(entries.into_iter().take(POLL_BATCH_CAP).map(|entry| (entry.container, entry.envelope)).collect())
 }
 
 /// The most envelopes one poll answers with — the deposit direction's own
@@ -1312,10 +1316,11 @@ fn write_refused_unlocked(node: &str, pending: &[PollRefusal]) -> Result<(), Str
 /// letter of this box's own, spooled toward `node`, goes back to its sender at
 /// once: marked refused with `word` (cleaned and clipped to
 /// [`RETURNED_WORD_MAX`]), its session kept, one `mail.outbox.returned` line
-/// written (ruling 131). Nothing else changes: a `transit` entry is the hub's
-/// custody and ends on `filed` alone, a letter spooled toward another node is
-/// not `node`'s to return, and a letter already returned is not refused again.
-/// `Ok(false)` for each of those.
+/// written (ruling 131). A write that then fails adds a
+/// `mail.outbox.return-failed` line, and the error is returned. Nothing else
+/// changes: a `transit` entry is the hub's custody and ends on `filed` alone, a
+/// letter spooled toward another node is not `node`'s to return, and a letter
+/// already returned is not refused again. `Ok(false)` for each of those.
 pub fn return_refused(node: &str, msgid: &str, word: &str) -> Result<bool, String> {
     let node = node.to_string();
     let msgid = msgid.to_string();
@@ -1345,7 +1350,19 @@ pub fn return_refused(node: &str, msgid: &str, word: &str) -> Result<bool, Strin
         entry.flavor = FLAVOR_NOW.to_string();
         entry.refused = true;
         entry.last_outcome = format!("refused: {word}");
-        write_entry_unlocked(&node, &entry)?;
+        if let Err(e) = write_entry_unlocked(&node, &entry) {
+            // The line above says the return happened; this one says it did
+            // not.
+            let _ = aoide_protocol::audit::audit(
+                &aoide_protocol::audit::default_audit_log(),
+                aoide_protocol::Door::Cli,
+                aoide_protocol::audit::EventClass::Audit,
+                "mail.outbox.return-failed",
+                "failed",
+                &format!("letter {msgid} toward {node} not returned ({word}): {e}"),
+            );
+            return Err(e);
+        }
         Ok(true)
     })
 }
@@ -3121,6 +3138,37 @@ mod tests {
         let stored = list_entries("there").unwrap().remove(0);
         assert!(stored.refused && !stored.is_held(), "the letter stays returned");
         assert_eq!(stored.last_outcome, "refused: unknown-box", "with its word, not a parked reason");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **A parked letter does not starve the batch.** Fifty refused held
+    /// letters older than one usable held letter to the same node fill no slot
+    /// the usable letter needs: the batch offers the usable letter, and the
+    /// parked ones after it.
+    #[test]
+    fn poll_payloads_offers_a_usable_letter_before_the_parked_ones() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("outbox-poll-parked-starve");
+
+        let cap = POLL_BATCH_CAP;
+        for i in 0..cap {
+            let mut parked = own_letter("there", &format!("parked-{i:03}"), Some("sess-a"), true);
+            parked.refused = true;
+            parked.last_outcome = "parked: the destination holds a binding that is not usable now".to_string();
+            parked.envelope.header.minted_at = format!("2026-09-07T00:00:{:02}Z", i % 60);
+            write_entry("there", &parked).unwrap();
+        }
+        let mut usable = own_letter("there", "usable", Some("sess-a"), true);
+        usable.envelope.header.minted_at = "2026-09-08T00:00:00Z".to_string();
+        write_entry("there", &usable).unwrap();
+
+        let batch = poll_payloads("there").unwrap();
+        assert_eq!(batch.len(), cap, "the batch is still bounded");
+        assert!(
+            batch.iter().any(|(_, envelope)| envelope.msgid == "usable"),
+            "the usable letter is in the batch, not behind {cap} parked ones"
+        );
 
         let _ = std::fs::remove_dir_all(&dir);
     }

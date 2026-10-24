@@ -3387,8 +3387,19 @@ fn mail_poll(params: &Value, ctx: &RequestCtx) -> Result<Value, (i64, String)> {
         })
         .unwrap_or_default();
     for refusal in &refused {
-        aoide_storage::outbox::return_refused(&poller, &refusal.msgid, &refusal.word)
-            .map_err(|e| (-32603_i64, format!("internal error: {e}")))?;
+        // A return that fails is audited and skipped: one bad letter does not
+        // stop the poll's other returns, its deferrals or its hand-over. The
+        // letter stays held, and the next poll offers it again.
+        if let Err(e) = aoide_storage::outbox::return_refused(&poller, &refusal.msgid, &refusal.word) {
+            let _ = aoide_protocol::audit::audit(
+                &aoide_protocol::audit::default_audit_log(),
+                aoide_protocol::Door::A2a,
+                aoide_protocol::audit::EventClass::Audit,
+                "mail.poll.return-failed",
+                "failed",
+                &format!("refused letter {} from `{poller}` not returned: {e}", refusal.msgid),
+            );
+        }
     }
 
     // What the poller says it was handed and did NOT file (its box was full, or
@@ -16008,6 +16019,61 @@ mod tests {
         assert_eq!(held[0].envelope.msgid, msgids[cap], "and it is the one past the cap");
         let first = entries.iter().find(|e| e.envelope.msgid == msgids[0]).unwrap();
         assert_eq!(first.last_outcome, "refused: unknown-box", "the first word named for a msgid is kept");
+
+        match saved_audit {
+            Some(v) => std::env::set_var("AOIDE_AUDIT_LOG", v),
+            None => std::env::remove_var("AOIDE_AUDIT_LOG"),
+        }
+        mail_deposit_cleanup(&root, saved_state, saved_stage);
+    }
+
+    /// **A return that fails does not stop the poll.** One refused letter's
+    /// write fails, because a directory sits where its temp file goes, so only
+    /// that entry is affected. The poll still returns the other refused letter,
+    /// still offers the held letter it was asked for, and audits the failure.
+    #[test]
+    fn a_failed_return_does_not_stop_the_poll() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
+        let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
+        let root = mail_deposit_root("refused-failed-return");
+        act_as(&root, "here");
+        let saved_audit = std::env::var("AOIDE_AUDIT_LOG").ok();
+        std::env::set_var("AOIDE_AUDIT_LOG", root.join("log"));
+
+        setup_signed_node_with_allows("box-b", &["message"]);
+        let mut held = Vec::new();
+        for text in ["blocked", "returned", "offered"] {
+            let envelope =
+                aoide_storage::mail::mint_outbound_letter("alice", "box-b", "bob", text).unwrap();
+            held.push(envelope.msgid.clone());
+            aoide_storage::outbox::write_entry("box-b", &aoide_storage::outbox::OutboxEntry::held(envelope)).unwrap();
+        }
+        let (blocked, returned, offered) = (&held[0], &held[1], &held[2]);
+        let temp = aoide_storage::outbox::outbox_dir()
+            .join("box-b")
+            .join(format!("{blocked}.tmp.{}", std::process::id()));
+        std::fs::create_dir_all(&temp).unwrap();
+        let refused = json!([
+            { "msgid": blocked, "word": "unknown-box" },
+            { "msgid": returned, "word": "unknown-box" },
+        ]);
+        let audit_log = root.join("log");
+        let ctx = mail_deposit_ctx(&audit_log, Some("box-b"));
+
+        let answer = mail_poll(&json!({ "node": "box-b", "refused": refused }), &ctx)
+            .expect("a failed return does not fail the poll");
+
+        let entries = aoide_storage::outbox::list_entries("box-b").unwrap();
+        let by_msgid = |msgid: &str| entries.iter().find(|e| e.envelope.msgid == msgid).unwrap();
+        assert!(by_msgid(returned).refused, "the refused letter after the failure is returned");
+        assert!(by_msgid(blocked).is_held(), "the letter whose write failed stays held");
+        assert!(answer.to_string().contains(offered.as_str()), "the poll still offers the held letter: {answer}");
+        let log = std::fs::read_to_string(&audit_log).unwrap_or_default();
+        assert!(
+            log.lines().any(|line| line.contains("return-failed") && line.contains(blocked.as_str())),
+            "the failure is audited, naming the letter"
+        );
 
         match saved_audit {
             Some(v) => std::env::set_var("AOIDE_AUDIT_LOG", v),

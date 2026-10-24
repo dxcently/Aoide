@@ -604,9 +604,10 @@ door's audit name whitelist gains both names so they never log as bare
   "anything waiting for me?" and receives every outbox entry spooled
   toward the caller's node — all `hold` ones, and `now` ones whose own
   attempts have been failing, though never an own letter that is not held
-  (a returned letter is its sender's to resend, ruling 131) — oldest first,
-  at most fifty of them per
-  answer (a bounded batch, like the drain's own; the poller's acks retire
+  (a returned letter is its sender's to resend, ruling 131) — usable ones
+  first, then parked ones (a refused held letter), each group oldest first, at
+  most fifty of them per answer (a bounded batch, like the drain's own; the
+  poller's acks retire
   what it filed, so a spool bigger than one answer drains over the next
   asks instead of being declined as one oversized body). The caller's
   verified identity must BE `node` (no polling on another's behalf), hold

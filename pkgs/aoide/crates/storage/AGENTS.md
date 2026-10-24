@@ -174,14 +174,16 @@
   binding on record and none declared still appears as an envelope. A
   relayed entry never does: `reseal_entry` seals it to its destination or
   withholds it (`Reseal::Withheld`, `HandOver::Withheld`), and the answer lists
-  it under `withheld`. The hand-over writes nothing but a container sealed for
+  it under `withheld`. Within the batch, usable entries come before parked
+  (refused) ones. The hand-over writes nothing but a container sealed for
   a letter still held, and it does so under the outbox lock: `hand_over` checks
   the entry again there, so a return that landed since the read is never
   written over, and nothing is handed over for it. A poll writes only what its
   caller named: `return_refused` returns a held own letter the caller names in
   `refused` (before anything is offered), and `defer_named` stamps only the
   caller's own entries it names in `deferred`, never a returned own letter,
-  and a refused one keeps its word (MAIL.md §Wire).
+  and a refused one keeps its word (MAIL.md §Wire). A return whose write fails
+  is audited again as `mail.outbox.return-failed`, and the poll skips it.
 
 - **A poller's refusals are kept per node (`.refused`).** `record_refused`
   stores each `{msgid, word}` a poll refused, keep-list words included, and
