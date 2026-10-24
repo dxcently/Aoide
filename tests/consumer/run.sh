@@ -100,6 +100,10 @@ expr="
     home = cfg.home-manager.users.\${cfg.aoide.user};
     envOf = units: unit: let u = units.\${unit} or { }; in u.serviceConfig.Environment or u.Service.Environment or [ ];
     aoideRices = out.nixosConfigurations.aoide-rices.config;
+    greeterCmd = out.nixosConfigurations.greeter.config.services.greetd.settings.default_session.command;
+    greeterOutCmd = out.nixosConfigurations.greeter-output.config.services.greetd.settings.default_session.command;
+    # The greeter script behind a command: its derivation, from the string context.
+    greeterScriptDrv = c: builtins.head (builtins.filter (k: builtins.match \".*aoide-greeter[.]drv\" k != null) (builtins.attrNames (builtins.getContext c)));
     # ── The front door (CONTRACTS.md §2, PACKAGE-LAYOUT) ──────────────────────
     # The stubbed host mixes value slots: the consumer's own bar and Aoide's dock
     # part. Its shell is read from the home it is built into, and its components
@@ -159,6 +163,12 @@ expr="
       bg = aoideRices.strillix.theme.palette.bg;
       gapsOut = aoideRices.strillix.theme.geometry.gapsOut;
       ricesIsExport = toString out.nixosConfigurations.aoide-rices._module.args.ricesRoot == toString flake.ricesRoot;
+    };
+    greeter = {
+      plain = greeterCmd;
+      output = greeterOutCmd;
+      plainDrv = greeterScriptDrv greeterCmd;
+      outputDrv = greeterScriptDrv greeterOutCmd;
     };
     merged = {
       drv = mergedCfg.system.build.toplevel.drvPath;
@@ -363,6 +373,28 @@ check "merged: its strillix lane reads the merged directory" "true" "$(o .merged
 
 printf '%-52s %s\n' "aoide-rices toplevel drvPath" "$(o .aoideRices.drv)"
 printf '%-52s %s\n' "merged toplevel drvPath" "$(o .merged.drv)"
+
+# ── 3b. The greeter's output ────────────────────────────────────────────────
+# `strillix.greeter.output` moves cage from `-m last` to `-m extend`, and its
+# greeter script turns the other outputs off. The scripts are realised (as the
+# strillix build above is) and read: the named one for its off-loop, the default
+# one for no wlr-randr at all. A full revert of greeter.nix shows up as the eval
+# failing: `strillix.greeter.output` is then an unknown option on greeter-output,
+# so the consumer expression fails before any check here runs.
+check "greeter: no output keeps cage on the last output" "true" \
+  "$(o '.greeter.plain | contains("cage -s -m last -- ")')"
+check "greeter: a named output extends cage"              "true" \
+  "$(o '.greeter.output | contains("cage -s -m extend -- ")')"
+plain_script=$(nix build --no-link --print-out-paths "$(o .greeter.plainDrv)^out" 2>"$tmp/greeter-plain.err") || plain_script=""
+check "greeter: the default script builds"               "true" "$([ -n "$plain_script" ] && echo true || echo false)"
+check "greeter: the default script has no wlr-randr"      "true" \
+  "$(grep -q wlr-randr "$plain_script" 2>/dev/null && echo false || echo true)"
+greeter_script=$(nix build --no-link --print-out-paths "$(o .greeter.outputDrv)^out" 2>"$tmp/greeter.err") || greeter_script=""
+check "greeter: the named output's script builds"         "true" "$([ -n "$greeter_script" ] && echo true || echo false)"
+check "greeter: its off-loop skips the named output"      "true" \
+  "$(grep -qF '[ "$name" != DP-1 ]' "$greeter_script" 2>/dev/null && echo true || echo false)"
+check "greeter: its off-loop turns other outputs off"     "true" \
+  "$(grep -qF 'wlr-randr --output "$name" --off' "$greeter_script" 2>/dev/null && echo true || echo false)"
 
 # ── 4. Strillix with Aoide off ──────────────────────────────────────────────
 # The desktop aggregation alone, with no core under it: the strillix lane
