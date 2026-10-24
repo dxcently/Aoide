@@ -1106,13 +1106,14 @@ never the inbound/serve half (that's `aoide-server`).
   happened to agree; now there is exactly one value to drift from. An
   unverified/unpaired node gets an empty header list — byte-identical to
   the pre-P-P4 transport. Every signed call names its callee: the body is built
-  through `commands::with_to`, which writes `params.to` from the record's key, and
-  `sign_headers_for_node` refuses (an `Err`) any body whose `params.to` is missing
-  or names another key. A keyless record signs nothing. The signed call sites are
-  the mail calls (`mail_wire::post_signed`), the graph-summary reads
-  (`pull_one_node`, `pull_node_live`), `message/send` (`send_message_to_node`), the
-  `tasks/get` frame and history reads (`task_get_on_node`,
-  `task_history_on_node`), and spawn (`spawn_on_node_via`). The pairing ceremony's
+  through `commands::with_to`, which writes `params.to` from the record's key,
+  and `sign_headers_for_node` refuses (an `Err`) any body whose `params.to` is
+  missing or names another key. A verified record with no key is an `Err` naming
+  the record, never an unsigned call. The signed call sites are the mail calls
+  (`mail_wire::post_signed`), the graph-summary reads (`pull_one_node`,
+  `pull_node_live`), `message/send` (`send_message_to_node`), the `tasks/get`
+  frame and history reads (`task_get_on_node`, `task_history_on_node`), and
+  spawn (`spawn_on_node_via`). The pairing ceremony's
   own three wire calls stay unauthenticated by design and always pass an empty
   slice. `post_json` threads `extra_headers` as plain `-H "<name>:
   <value>"` curl argv literals in EITHER the bearer or no-bearer branch —

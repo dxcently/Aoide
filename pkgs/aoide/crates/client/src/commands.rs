@@ -863,8 +863,9 @@ pub(crate) fn with_to(node: &aoide_storage::node_store::Node, mut body: Value) -
 /// key, lowercase hex (`with_to` writes it; a body without it, or with
 /// another key, is refused here, never signed). A far door refuses a request
 /// addressed to another key, so a relay cannot carry it on to a third node
-/// that trusts this caller. A record with no key has nothing to verify the
-/// request under, so nothing is signed.
+/// that trusts this caller. A verified record with no key has nothing to verify
+/// the request under, so it is refused with an error naming the record, never
+/// sent unsigned.
 pub(crate) fn sign_headers_for_node(
     node: &aoide_storage::node_store::Node,
     body: &str,
@@ -874,7 +875,13 @@ pub(crate) fn sign_headers_for_node(
     if !node.verified {
         return Ok(Vec::new());
     }
-    let Some(key) = callee_key(node) else { return Ok(Vec::new()) };
+    let Some(key) = callee_key(node) else {
+        return Err(format!(
+            "not signed: node `{}` is verified but holds no identity key, so its answers cannot be checked and nothing \
+             is signed for it; pair it again (`aoide pair {}`) or give its charter line a key",
+            node.name, node.name
+        ));
+    };
     let named = serde_json::from_str::<Value>(body)
         .ok()
         .and_then(|request| request.pointer("/params/to").and_then(Value::as_str).map(|to| to.trim().to_ascii_lowercase()));
@@ -7113,13 +7120,13 @@ mod tests {
     }
 
     #[test]
-    fn a_verified_record_with_no_key_signs_nothing() {
+    fn a_verified_record_with_no_key_is_refused_naming_the_record() {
         with_node_state("sign-keyless", || {
             let mut node = fixture_node(None);
             node.verified = true;
             let body = json!({ "jsonrpc": "2.0", "id": 1, "method": "tasks/get", "params": { "id": "x" } }).to_string();
-            let headers = sign_headers_for_node(&node, &body, None, "read").unwrap();
-            assert!(headers.is_empty(), "no key on file, so nothing is signed: {headers:?}");
+            let err = sign_headers_for_node(&node, &body, None, "read").expect_err("a verified record with no key is never sent unsigned");
+            assert!(err.contains(&node.name), "the refusal names the record: {err}");
         });
     }
 

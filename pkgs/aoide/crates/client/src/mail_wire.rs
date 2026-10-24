@@ -124,6 +124,24 @@ fn audit_answer(event: &str, message: &str) {
 /// characters. A signed answer's words keep [`LINE_MAX`].
 const SAID_MAX: usize = 120;
 
+/// The most of a door's own refusal words an answer carries, in characters. A
+/// refusal names its cause in full, the clock refusals with both times and the
+/// bound they break, so it is kept longer than [`SAID_MAX`].
+const DOOR_SAID_MAX: usize = 400;
+
+/// The door's own refusal codes: a stale or future frame (`-32008`), a replayed
+/// nonce (`-32009`), a frame addressed to another door (`-32012`) and a busy key
+/// (`-32013`, over HTTP 503). The door answers each one unsigned.
+const DOOR_REFUSAL_CODES: &[i64] = &[-32008, -32009, -32012, -32013];
+
+/// Whether `body` is one of the door's own refusals ([`DOOR_REFUSAL_CODES`]).
+fn is_door_refusal(body: &str) -> bool {
+    serde_json::from_str::<Value>(body)
+        .ok()
+        .and_then(|answer| answer.get("error").and_then(|e| e.get("code")).and_then(Value::as_i64))
+        .is_some_and(|code| DOOR_REFUSAL_CODES.contains(&code))
+}
+
 /// A far door's words, made inert to keep and to print: every character
 /// [`aoide_protocol::untrusted::is_unsafe`] refuses gone, whitespace flattened,
 /// clipped to `max` characters. **Every word a far door's answer puts in front of
@@ -220,7 +238,14 @@ fn post_signed(node: &Node, method: &str, params: Value, mesh: Option<&str>) -> 
         Err(e) => return SignedCall::TransportFailed(e),
     };
     if answer.status != 200 {
-        return SignedCall::TransportFailed(format!("HTTP {}", answer.status));
+        // A busy door answers HTTP 503 and never signs, so its own words are all this
+        // answer can say. They ride the transport reason, which backs the link off and
+        // leaves the letter live.
+        let reason = match unsigned_words(&answer.body).filter(|_| is_door_refusal(&answer.body)) {
+            Some(words) => format!("HTTP {}: it said: {}; not acted on", answer.status, foreign_words(&words, DOOR_SAID_MAX)),
+            None => format!("HTTP {}", answer.status),
+        };
+        return SignedCall::TransportFailed(reason);
     }
 
     // The one signature this answer may carry. None is an unsigned answer; two
@@ -240,8 +265,10 @@ fn post_signed(node: &Node, method: &str, params: Value, mesh: Option<&str>) -> 
             // never signs it, so for that word the cause is its config and an
             // upgrade would not help. Judged on the raw word.
             let config_invalid = words.as_deref() == Some(aoide_storage::charter::CONFIG_INVALID);
+            let refused = is_door_refusal(&answer.body);
+            let clip = if refused { DOOR_SAID_MAX } else { SAID_MAX };
             let said = words
-                .map(|w| foreign_words(&w, SAID_MAX))
+                .map(|w| foreign_words(&w, clip))
                 .filter(|w| !w.is_empty())
                 .map(|m| format!(" (it said: {m}; not acted on)"))
                 .unwrap_or_default();
@@ -251,6 +278,8 @@ fn post_signed(node: &Node, method: &str, params: Value, mesh: Option<&str>) -> 
                      fix the config on `{}`, not its version",
                     node.name
                 )
+            } else if refused {
+                "a refusal from the door itself, which a door never signs".to_string()
             } else {
                 format!(
                     "an aoide older than this box's answers unsigned, and so does anything else standing at {} — upgrade aoide on `{}`",
@@ -3995,6 +4024,79 @@ mod tests {
         assert!(!entry.last_outcome.contains("upgrade aoide"), "an upgrade would not help: {}", entry.last_outcome);
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// An answer with `status` carrying `body` and no answer signature.
+    fn reply_status(status: u16, body: &str) -> String {
+        format!(
+            "HTTP/1.1 {status} Refused\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        )
+    }
+
+    /// The `last_outcome` a letter gets when the door refuses it, unsigned, with
+    /// `code` and `message` over HTTP `status`.
+    fn outcome_of_door_refusal(status: u16, code: i64, message: &str) -> String {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root(&format!("door-refusal-{}", code.unsigned_abs()));
+        let body = json!({ "jsonrpc": "2.0", "id": 1, "error": { "code": code, "message": message } }).to_string();
+        spool_letter_to("elsewhere", scripted_door(move |_| reply_status(status, &body)));
+
+        drain_node("elsewhere").unwrap();
+
+        let entry = aoide_storage::outbox::list_entries("elsewhere").unwrap().remove(0);
+        let _ = std::fs::remove_dir_all(&dir);
+        entry.last_outcome
+    }
+
+    /// **A door's own refusal is named as its words, not as an old aoide.**
+    /// Each refusal code the door answers unsigned names its own message, and only
+    /// an answer that is not a door refusal is read as an upgrade.
+    #[test]
+    fn a_door_refusal_for_a_stale_frame_names_the_doors_own_words() {
+        let outcome = outcome_of_door_refusal(
+            200,
+            -32008,
+            "clock skew too large: this request's `X-Aoide-Timestamp` is 6 seconds ahead of this instance's own now; only 5s ahead is accepted, so the caller's clock is fast",
+        );
+        assert!(outcome.contains("clock skew too large"), "{outcome}");
+        assert!(outcome.contains("the caller's clock is fast"), "{outcome}");
+        assert!(!outcome.contains("upgrade aoide"), "{outcome}");
+    }
+
+    #[test]
+    fn a_door_refusal_for_a_replayed_nonce_names_the_doors_own_words() {
+        let outcome = outcome_of_door_refusal(
+            200,
+            -32009,
+            "nonce replay: node `box-b` reused a `X-Aoide-Nonce` value already seen within the current replay window",
+        );
+        assert!(outcome.contains("nonce replay: node `box-b` reused"), "{outcome}");
+        assert!(!outcome.contains("upgrade aoide"), "{outcome}");
+    }
+
+    #[test]
+    fn a_door_refusal_for_the_wrong_audience_names_the_doors_own_words() {
+        let outcome = outcome_of_door_refusal(
+            200,
+            -32012,
+            "wrong-audience: `params.to` is not this door's identity key, so this request was signed for another door",
+        );
+        assert!(outcome.contains("wrong-audience: `params.to` is not this door's identity key"), "{outcome}");
+        assert!(!outcome.contains("upgrade aoide"), "{outcome}");
+    }
+
+    /// Busy is answered over HTTP 503, which the transport path reads before any
+    /// signature, so the door's own words ride the transport reason.
+    #[test]
+    fn a_door_refusal_for_a_full_nonce_set_names_the_doors_own_words() {
+        let outcome = outcome_of_door_refusal(
+            503,
+            -32013,
+            "busy: node `box-b` already has 512 signed requests recorded in the current replay window, so this one is refused and not recorded",
+        );
+        assert!(outcome.contains("busy: node `box-b` already has 512 signed requests"), "{outcome}");
+        assert!(!outcome.contains("upgrade aoide"), "{outcome}");
     }
 
     /// **A disguised `config-invalid` is not the word.** An unsigned answer can

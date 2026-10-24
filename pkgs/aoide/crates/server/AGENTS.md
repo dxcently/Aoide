@@ -380,19 +380,24 @@ a2a spawn probe needs `/bin/sh` + `printf`'s byte-exact output.
   through the daemon process (they're separate processes) — don't thread
   a socket call through here to "unify" the two writers; the cap-truncate
   race that creates is already accepted (module doc, CONTRACTS.md §6).
-- **The audience step (`params.to`, CONTRACTS.md §6 step 8) runs once in
-  `handle_connection`, right after `verify_signed_request` and before either
-  dispatch path.** A `to` that is present must equal this door's own identity
-  key, for every method: `own_identity_key` reads it with `identity::load_existing`
-  (trimmed, lowercased, never minted), so a door with no key refuses every `to`.
-  A MISSING `to` is admitted only for `UNTAGGED_METHODS` (the four old-client
-  methods), audited `untagged`; any other signed method without `to` is refused
-  `-32012` with the upgrade line. The allow-list is closed: a new signed method is
-  refused until someone lists it there on purpose. Every `-32012` is written
-  UNSIGNED, because the door was not the one the request was addressed to. A batch
-  array has no `method`, so `audience` admits it and dispatch's empty-method arm
-  answers `-32600`: nothing in a batch reaches a method. Keep the check above the
-  streaming/one-shot split, or the two paths can disagree about who may call.
+- **The audience step (`params.to`, CONTRACTS.md §6 step 8) runs once per
+  verified frame, inside `admit_verified`: after the signature, before the
+  nonce.** `admit_verified` has two callers, `handle_connection` for a verified
+  frame and `mail_unloadable_declaration` for the config-invalid arm, and no
+  others. A `to` that is present must equal this door's own identity
+  key, for every method: `own_identity_key` reads it with
+  `identity::load_existing` (trimmed, lowercased, never minted), so a door
+  with no key refuses every `to`. A MISSING `to` is admitted only for
+  `UNTAGGED_METHODS` (the four old-client methods), audited `untagged`; any
+  other signed method without `to` is refused `-32012` with the upgrade line.
+  The allow-list is closed: a new signed method is refused until someone lists
+  it there on purpose. Every `-32012` is written UNSIGNED, because the door
+  was not the one the request was addressed to. A body that is not a JSON
+  object, or has no string `method` (a batch array among them), is refused by
+  `audience` before any nonce is recorded: `-32600` on the A2A door,
+  `-32601` on the mail adapter, unsigned. Nothing in a batch reaches a method.
+  Keep the check above the streaming/one-shot split, or the two paths can
+  disagree about who may call.
 - **`message_send`'s Spawn arm gates on `spawn_admitted`, which requires a
   resolved, paired, spawn-allowed node identified via its OWN PER-REQUEST
   SIGNATURE — never a bare token, and never the address rung (P-P3
@@ -640,19 +645,20 @@ a2a spawn probe needs `/bin/sh` + `printf`'s byte-exact output.
   `graph/send.rs`).
 - **Nonce sets (P-P4) are per key, process-local, and bounded.** `NONCE_SETS`
   maps each verifying PUBKEY to its own `BTreeMap<nonce, expiry>`, capped at
-  `AOIDE_NONCE_PER_KEY` (default 512) unexpired entries per key (`nonce_cap`,
+  `AOIDE_NONCE_CAP` (default 512) unexpired entries per key (`nonce_cap`,
   `parse_nonce_cap`). It lives in THIS crate (`a2a.rs`), not
   `aoide-storage::wire_auth`: it is the one piece of P-P4 state with no durable
-  file behind it, so it belongs beside its only consumer
-  (`verify_signed_request` and its rungs). Invariants:
-  - `verify_signed_request` records a nonce ONLY after every cheaper check,
-    including the signature itself, already passed. Don't move the
-    `consume_nonce` call earlier "to fail faster": a forged or garbage nonce
-    must never take a set entry.
-  - Every consumer goes through `consume_nonce`: the registry rung, the charter
-    rung, and `mail_unloadable_declaration`. Don't open-code a `nonce_check` at
-    a new call site. The refusal wording and the `-32013` mapping live in
-    `consume_nonce`, and the status mapping lives in `refusal_status`.
+  file behind it, so it belongs beside its only consumer (`admit_verified`).
+  Invariants:
+  - `verify_signed_request` records nothing. `admit_verified` consumes the nonce
+    after the audience step, so a frame refused for its clock, its signature,
+    its `to` or its shape leaves every set as it was. Don't move the
+    `consume_nonce` call earlier "to fail faster": a forged nonce, or one signed
+    for another door, must never take a set entry.
+  - `consume_nonce` has one caller, `admit_verified`. Don't open-code a
+    `nonce_check` at a new call site. The refusal wording and the `-32013`
+    mapping live in `consume_nonce`, and the status mapping lives in
+    `refusal_status`.
   - A set is keyed on the VERIFYING PUBKEY, never a node name (#63 P-ID5):
     `X-Aoide-Node` is outside the canonical string, so a name-keyed set would
     let a captured request replay under a shared-key twin's name. Both halves
@@ -665,6 +671,10 @@ a2a spawn probe needs `/bin/sh` + `printf`'s byte-exact output.
     replayable.
   - The replay check comes before the cap, so a replay at the cap is `-32009`,
     never `-32013`.
+  - Each listener process keeps its own sets. A deposit one listener files is a
+    `duplicate` at the other and is filed once, as the guard test for that case
+    pins. The sets are not shared, so msgid dedup is what bounds a replay across
+    them: don't share the sets between listeners without re-proving that guard.
 - **The start check.** `serve` and `serve_mail` capture `started_epoch` once,
   before they bind, and pass it to `handle_connection`, which passes it to
   `verify_signed_request`. A frame stamped at or before it plus
@@ -709,7 +719,9 @@ a2a spawn probe needs `/bin/sh` + `printf`'s byte-exact output.
   `verified.is_some()`. The `config-invalid` arm (`PreDispatch::Unloadable`)
   is never signed: `mail_unloadable_declaration` checks the request only
   against the raw charter in force, and the charter this node governs is read
-  through the config whose failure produces that arm. Don't widen the gate to
+  through the config whose failure produces that arm. Its frames take the same
+  clock, charter-signature and `admit_verified` steps as the verified path, and
+  only then get the config-invalid answer. Don't widen the gate to
   a refusal, a replay (`-32009`), the `config-invalid` arm, an unsigned or
   unparsed request, any GET (the card included), a busy 503, or an SSE event.
   Each of those is a write site a replayed or unsigned request can reach, and
@@ -736,7 +748,9 @@ a2a spawn probe needs `/bin/sh` + `printf`'s byte-exact output.
   the caller's grant with `grant_in_mesh` in the mesh the request SIGNED.
   There is therefore nothing adapter-shaped about admission to maintain: a
   charter-listed key is admitted and a revoked one refused through either
-  listener because both are the same calls. Do NOT add an adapter branch to
+  listener because both are the same calls. The nonce sets are not shared: each
+  listener process keeps its own (see Nonce sets above). Do NOT add an adapter
+  branch to
   any of it — a `ctx.sealed_only` check belongs to SEALING (whether bytes may
   be filed or handed over in the clear) and to nothing else, and a new
   admission rung must be added to `grant_in_mesh`'s one lookup, where the door

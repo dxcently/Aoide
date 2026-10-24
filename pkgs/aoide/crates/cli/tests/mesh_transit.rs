@@ -11,6 +11,7 @@ mod common;
 use common::{
     door_post, door_post_tampered, entered_key, env_lock, fixture, free_port, raise_door, tls_front,
     trust_front_certificate, AWAY, HOME, ONE_SIDED_GATE, OPERATOR, TWO_KEYS,
+    spawn_door, wait_past_start,
 };
 
 use aoide::dispatch::{dispatch, Invocation};
@@ -2236,9 +2237,10 @@ fn a_poll_node_holding_only_the_charter_files_its_letter_through_the_relays_http
     let _lock = env_lock();
     let (_env, fx) = fixture("charter-only-poll");
     trust_front_certificate();
-    let _osaka = fx.doors(&["osaka"]);
     let sakaki_door = free_port();
-    let _sakaki = raise_door(&fx.boxes["sakaki"], "sakaki", sakaki_door);
+    let (_sakaki, sakaki_ready) = spawn_door(&fx.boxes["sakaki"], "sakaki", sakaki_door);
+    let _osaka = fx.doors(&["osaka"]);
+    wait_past_start(sakaki_ready);
 
     fx.enter("osaka");
     let sent = dispatch(&cli_invocation(

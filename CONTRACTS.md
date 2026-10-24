@@ -8599,11 +8599,12 @@ RESOLVED name feeds every downstream consumer — the `allows` lookup and the
 therefore never breaks inbound signed requests from it, and two nodes
 colliding on a claimed name cannot cross-resolve.
 
-**Inbound verification** (`aoide-server::a2a::verify_signed_request`, called
-once per connection in `handle_connection`, strictly before EITHER the
-streaming or the plain-JSON-RPC dispatch path) — checks run cheapest-first,
-never spending a signature verification on a request already disqualified
-for a cheaper reason:
+**Inbound verification** (`aoide-server::a2a::verify_signed_request`, then
+`admit_verified`, called once per connection in `handle_connection`, strictly
+before EITHER the streaming or the plain-JSON-RPC dispatch path) — checks run
+cheapest-first, never spending a signature verification on a request already
+disqualified for a cheaper reason. Steps 1 to 6 verify the frame; steps 7 and
+8 admit it, and only step 8 records anything:
 
 1. All four headers present, else `-32007`.
 2. `X-Aoide-Node` is a well-formed name, else `-32007` — wire-format
@@ -8641,9 +8642,10 @@ for a cheaper reason:
    result — fixed text, never the load error (that goes to the audit line) —
    audited under the method's own label. A request whose signature does not
    verify, or whose named node that charter does not carry, still reads
-   `-32007`. That answer CONSUMES the nonce (step 7's own keying: the signer's
-   lowercase key hex plus the nonce), so the same bytes can never be replayed
-   into the method once the config returns.
+   `-32007`. That answer runs the step 4 clock checks, then steps 7 and 8 keyed
+   as they are (the signer's key hex plus the nonce). So the same bytes,
+   replayed to this listener once the config returns, are refused by its nonce
+   set; the other listener is bounded as **What `to` stops** (b) says.
 6. **Collision semantics**: exactly one record's key verifies → that record
    IS the caller. Multiple verified records sharing the verifying pubkey
    (possible — `upsert_paired_node` matches by name only, so one remote
@@ -8661,31 +8663,35 @@ for a cheaper reason:
    named. Revoking a capability from a
    key means revoking it on EVERY such record, or `node remove`-ing the
    duplicates.
-7. **Replay guard, nonce half**: `(verifying pubkey, nonce)` is checked against
-   that key's own nonce set (**Nonce sets**, below). Already present inside its
-   window is `-32009`; a set already holding its cap of unexpired nonces is
-   `-32013` busy, and the nonce is not recorded. Keyed on the PUBKEY, not any
-   name: `X-Aoide-Node` is outside the canonical string, so a captured request
-   replayed under a shared-key twin's name still lands on the same set. The
-   nonce is recorded ONLY after every earlier check (including the signature
-   itself) passes, so a forged or garbage nonce never takes a set entry. The
-   charter rung and the mail declaration path (`config-invalid`) run the same
-   step.
-8. **Audience** (`handle_connection`, once, after step 7 and before either dispatch
-   path, the streaming one and the one-shot one): a `params.to`, when present, must
-   be this door's own identity key, lowercase hex, compared trimmed and lowercased.
-   The key is read with `identity::load_existing`, never minted, so a door with no
-   key refuses every `to`. A present `to` that does not match is refused `-32012`
-   `wrong-audience` for every method. An absent `to` is admitted only for
-   `aoide/mailDeposit`, `aoide/mailPoll`, `aoide/binding` and `aoide/charterFetch`
-   (`UNTAGGED_METHODS`, the old-client allow-list), audited with status `untagged`
-   and the method's name. Any other signed method without `to` is refused `-32012`
-   with a line that names the method, says it needs `to`, and tells the caller to
-   upgrade. The allow-list is closed: a new signed method is refused until it is
-   listed. A body with no `method` (a batch array, or bytes that are not JSON) is
-   admitted to dispatch, which answers `-32600` or `-32700` and runs nothing, so no
-   element of a batch reaches a method. Every `-32012` is written unsigned: the
-   request was not addressed to this door, so the door signs nothing for it.
+7. **Audience** (`admit_verified`, once, after step 6 and before the nonce, in
+   the same order for both listeners and for the unloadable-declaration arm): a
+   `params.to`, when present, must be this door's own identity key, lowercase
+   hex, compared trimmed and lowercased. The key is read with
+   `identity::load_existing`, never minted, so a door with no key refuses every
+   `to`. A present `to` that does not match is refused `-32012` `wrong-audience`
+   for every method. An absent `to` is admitted only for `aoide/mailDeposit`,
+   `aoide/mailPoll`, `aoide/binding` and `aoide/charterFetch`
+   (`UNTAGGED_METHODS`, the old-client allow-list), audited with status
+   `untagged` and the method's name. Any other signed method without `to` is
+   refused `-32012` with a line that names the method, says it needs `to`, and
+   tells the caller to upgrade.
+   The allow-list is closed: a new signed method is refused until it is listed.
+   A body that is not a JSON object naming a `method` is refused here too,
+   before any nonce is taken: `-32700` for bytes that do not parse, `-32600` on
+   the A2A door and `-32601` on the mail adapter for the rest. Nothing runs, and
+   no element of a batch reaches a method.
+8. **Replay guard, nonce half** (`admit_verified`, after step 7): `(verifying
+   pubkey, nonce)` is checked against that key's own nonce set (**Nonce sets**,
+   below). Already present inside its window is `-32009`; a set already holding
+   its cap of unexpired nonces is `-32013` busy, and the nonce is not recorded.
+   Keyed on the PUBKEY, not any name: `X-Aoide-Node` is outside the canonical
+   string, so a captured request replayed under a shared-key twin's name still
+   lands on the same set. The nonce is recorded only after steps 1 to 7 pass, so
+   a frame refused for its signature or its audience takes no set entry, and a
+   forged or garbage nonce never does. The mail declaration path
+   (`config-invalid`) takes the same two steps, in the same order, before its
+   answer. Every refusal in steps 7 and 8 is written unsigned: the door signs
+   nothing for a frame it did not admit.
 
 A request that fails ANY of these fails CLOSED — no fallthrough to the
 addr/token resolution ladder for a request that claims to be a paired
@@ -8697,46 +8703,55 @@ arms, `tasks/get`, the AgentCard GET) apply unchanged,
 for every caller that never signs.
 
 **What `to` stops, and what it leaves open.** A hostile paired node holds every
-signed request it was sent. A request carrying `to` cannot be used at a third door:
-that door's key is not the one it names, so step 8 refuses it. What `to` does not
-stop: (a) an untagged request to one of the four old-client methods, which is
-admitted without `to` and so is not audience-bound until the planned switch (not
-built); its replay at another door is bounded only by the timestamp window; (b) a
-process running as this box's uid, which can sign as the box, because the key is on
-this box's disk. The switch is the planned end of the old-client arm: it refuses
-untagged requests on every method, and it lands once every host and launch carries
-`to`.
+signed request it was sent. A request carrying `to` cannot be used at a third
+door: that door's key is not the one it names, so step 7 refuses it. What `to`
+does not stop: (a) an untagged request to one of the four old-client methods,
+which is admitted without `to` and so is not audience-bound until the planned
+switch (not built). Its replay at another door inside the window is not refused
+by step 7. What bounds it is the method: a deposit is filed once, since its
+msgid is already in the mailbox and the second copy is answered `duplicate`; a
+poll retires only what its poller acknowledges, so a replayed poll hands over
+only what is still unacknowledged. (b) Each listener process keeps its own nonce
+sets, so a frame one listener admitted is not in the other's set. The same
+deposit replayed at the other listener is answered `duplicate` by the msgid
+check, as in (a); that is the bound the per-listener sets rest on. (c) A process
+running as this box's uid, which can sign as the box, because the key is on this
+box's disk. The switch is the planned end of the old-client arm: it refuses
+untagged requests on every method, and it lands once every host and launch
+carries `to`.
 
 **What the nonce sets and the start check stop.** A paired node holds every
 signed request it was sent, and these two checks stop it reusing one. After a
 restart, a frame the earlier process accepted is refused by the start check,
 since the sets were cleared. Across keys, one key's flood fills only its own
 set, and no unexpired entry is ever evicted, so it cannot make another key's
-recorded nonce replayable. What remains is self-limitation: a signer that sends
-more than `AOIDE_NONCE_PER_KEY` requests (default 512) inside one skew window,
-about 4 a second sustained under the defaults, gets `-32013` for the excess
-until entries expire. That costs that signer throughput and nothing else. A
-process running as this box's uid can still sign as the box (ruling 29); that is
-out of scope here.
+recorded nonce replayable. Each listener process keeps its own sets, so a frame
+one listener admitted is not in the other's set; **What `to` stops** says what
+that leaves open. What remains is self-limitation: a signer that sends more than
+`AOIDE_NONCE_CAP` requests (default 512) inside one skew window, about 4 a
+second sustained under the defaults, gets `-32013` for the excess until entries
+expire. That costs that signer throughput and nothing else. A process running as
+this box's uid can still sign as the box; that is out of scope here.
 
 **Nonce sets** (`aoide-server::a2a::NONCE_SETS`) — a bounded, in-memory,
-PER-`a2a serve`-PROCESS map from each verifying pubkey to its own set of `nonce
--> expiry`. An entry expires at its frame's own timestamp plus
-`signature_skew_secs()`. A key's expired entries are dropped when that key is
-next checked, and an unexpired entry is never evicted. A key whose set already
-holds `AOIDE_NONCE_PER_KEY` unexpired entries (default 512; unset, blank,
-non-numeric or zero all give the default) is refused `-32013` busy, answered
-over HTTP 503 and unsigned, and the nonce is not recorded. No file sits behind
-the sets, unlike everything else this door's node and pairing state persists: an
-`a2a serve` restart clears every set, and the start check (step 4) is what makes
-that safe. Memory is bounded by the signers that have authenticated, times the
-cap. Only a verified signature reaches a set, and a set is never left empty in
-the map, because the check that empties one records its own nonce into it. The
-cost of the start check: for the first 5 seconds
-after each start, signed calls are refused `-32008`, and a caller whose clock
-runs more than 5 seconds fast is refused the same way. Its message names both
-times, and a retry with a fresh timestamp goes through once the clock is past
-the bound.
+PER-LISTENER-PROCESS map from each verifying pubkey to its own set of `nonce
+-> expiry`: `aoide a2a serve` and `aoide mail serve` each keep one. An entry
+expires at its frame's own timestamp plus `signature_skew_secs()`. A key's
+expired entries are dropped when that key is next checked, and an unexpired
+entry is never evicted. A key whose set already holds `AOIDE_NONCE_CAP`
+unexpired entries (default 512; unset, blank, non-numeric or zero all give the
+default) is refused `-32013` busy, answered over HTTP 503 and unsigned, and the
+nonce is not recorded. No file sits behind the sets, unlike everything else this
+door's node and pairing state persists: an `a2a serve` restart clears every
+set, and the start check (step 4) is what makes that safe. Memory is bounded by
+the signers that have been admitted, times the cap. Only a frame that passed
+steps 7 and 8 reaches a set, and a set is never left empty in the map, because
+the check that empties one records its own nonce into it. The cost of the start
+check: for the first 5 seconds after each start, signed calls are refused
+`-32008`, and a caller whose clock runs more than 5 seconds fast is refused the
+same way. Its message names both times, and a retry goes through once the
+door's clock is past the bound and the caller's own clock is within 5 seconds
+of it.
 
 **Error codes**: `-32007` (signature verification failed — covers the
 malformed-header and ambiguous-signer shapes above, plus the single
@@ -8746,8 +8761,9 @@ or 5 seconds ahead, or a frame stamped at or before this door's start plus 5
 seconds), `-32009` (nonce replay), `-32012` (audience: a `to` that is not this
 door's key, or no `to` on a method outside the old-client allow-list; always
 unsigned), `-32013` (busy: this key's nonce set holds its cap of unexpired
-nonces; HTTP 503, always unsigned, nothing recorded: the caller backs off and
-its letter stays live).
+nonces; HTTP 503, always unsigned, nothing recorded: the link backs off,
+doubling per consecutive failure up to a 900-second ceiling, and its letter
+stays live).
 
 **Outbound (client side)** — `aoide-client::commands::sign_headers_for_node` is
 the ONE production call site that ever builds these headers: for a
@@ -8756,13 +8772,14 @@ the ONE production call site that ever builds these headers: for a
 the canonical string, and returns the four header pairs; for an
 unverified/unpaired node it returns an empty header list, leaving that call's
 transport byte-identical to an unsigned POST. It also refuses (an `Err` with a
-taught line) to sign a body whose `params.to` is missing or names a key other than
-the record's `pubkey`, and signs nothing for a keyless record, so no caller can
-forget `to`. Every signed body is built through `commands::with_to`, which sets
-`params.to` from that record's key: the mail calls (`mail_wire::post_signed`), the
-graph-summary reads (`pull_one_node`, `pull_node_live`), `message/send`
-(`send_message_to_node`, and spawn through `spawn_on_node_via`), and the `tasks/get`
-frame and history reads (`task_get_on_node`, `task_history_on_node`). The pairing
+taught line) to sign a body whose `params.to` is missing or names a key other
+than the record's `pubkey`, and refuses a verified record that holds no key (an
+`Err` naming it), so no caller can forget `to` or send unsigned. Every signed
+body is built through `commands::with_to`, which sets `params.to` from that
+record's key: the mail calls (`mail_wire::post_signed`), the graph-summary reads
+(`pull_one_node`, `pull_node_live`), `message/send` (`send_message_to_node`, and
+spawn through `spawn_on_node_via`), and the `tasks/get` frame and history reads
+(`task_get_on_node`, `task_history_on_node`). The pairing
 ceremony's own wire calls never pass through this function.
 `aoide/pairRequest`/`aoide/pairReveal` stay fully unauthenticated by design (see
 "Pairing wire" above) and always pass an empty header slice; `aoide/pairPoll`
@@ -9629,7 +9646,7 @@ operations cross which way is a rule of the wire, not of any command:
 | --- | --- | --- |
 | the pairing ceremony (`pairRequest`, `pairReveal`, `pairPoll`) | **works** — its own signatures carry no mesh (`wire_auth::canonical_string("PAIRPOLL", …, None)`, byte-identical on both sides) | **works** |
 | every signed command (`node pull`, `send` to `node/<q>`, `node spawn`, `tasks get`/`history` on a node, `aoide/mailDeposit`, `aoide/mailPoll`, `aoide/binding`) | **refused `-32007` "signature verification failed"** — the sixth field is not in the bytes the older verifier rebuilds | **works**, judged in `[pairing] homeMesh`, so a grant that lives only in a NAMED mesh is still refused |
-| the `to` audience tag (`params.to`, carried by every signed call this build makes) | **works**: an old door ignores `params.to` and verifies the same bytes, but it does not check the audience, so the tag protects only upgraded doors | **works** for `aoide/mailDeposit`, `aoide/mailPoll`, `aoide/binding` and `aoide/charterFetch` (audited `untagged`); every other signed command is **refused `-32012`**, with a line naming the upgrade |
+| the `to` audience tag (`params.to`, carried by every signed call this build makes) | **works**: an old door ignores `params.to` and verifies the same bytes, but it does not check the audience, so the tag protects only upgraded doors | **works** for `aoide/mailDeposit`, `aoide/mailPoll`, `aoide/binding` and `aoide/charterFetch` (audited `untagged` until the switch in **What `to` stops**); every other signed command is **refused `-32012`**, with a line naming the upgrade |
 
 So a pair across the versions succeeds and looks healthy in `node list` while
 being **one-way**: the older node reaches the newer one and the newer node
@@ -9643,10 +9660,10 @@ stop. **The remedy is upgrading every node**; the `aoide-storage` pin for it is
 `wire_auth::tests::wire_encoding_skew_the_five_and_six_field_signatures_never_interchange`.
 
 The `to` row is the one place the wire is two-way on purpose, and only for four
-methods: an old client's `aoide/mailDeposit`, `aoide/mailPoll`, `aoide/binding` and
-`aoide/charterFetch` reach an upgraded door without `to`, because the door admits
-them untagged. Until the planned switch refuses untagged requests on every method
-(see step 8 above), those four are the old-client arm, and every other old signed
+methods: an old client's `aoide/mailDeposit`, `aoide/mailPoll`, `aoide/binding`
+and `aoide/charterFetch` reach an upgraded door without `to`, because the door
+admits them untagged. Until the planned switch named under **What `to`
+stops** lands, those four are the old-client arm, and every other old signed
 command is refused.
 
 **The answer signature is a second boundary, named by its header, not by a

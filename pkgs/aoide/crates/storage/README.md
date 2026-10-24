@@ -1012,8 +1012,10 @@ by decision — no embedded database yet
   `verify_signature_hex` are thin hex-in/hex-out wrappers around
   `identity::Keypair`'s two entry points — neither `aoide-client` nor
   `aoide-server` touches `ed25519_dalek` types directly.
-  `signature_skew_secs` (`AOIDE_SIGNATURE_SKEW_SECS` env, 120s default)
-  and `within_skew` are the replay guard's timestamp half; the OTHER half
+  `signature_skew_secs` (`AOIDE_SIGNATURE_SKEW_SECS` env, 120s default) is the
+  window a signed timestamp may trail the clock by. `within_skew` also takes the
+  fixed `SKEW_AHEAD_SECS` (5s) a timestamp may lead it by. Together they are the
+  replay guard's timestamp half; the OTHER half
   (the nonce cache) is deliberately NOT here — it is ephemeral,
   process-local, per-`a2a serve` runtime state with no durable file behind
   it at all, unlike everything else this crate persists, so it lives in

@@ -116,8 +116,28 @@ fn whole_second() -> u64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
 }
 
-/// Raise one door on `port` for `root`, and wait until it answers TCP.
+/// Raise one door on `port` for `root`, and wait until it answers TCP and is past
+/// its start bound.
 pub fn raise_door(root: &std::path::Path, name: &str, port: u16) -> Door {
+    let (door, ready) = spawn_door(root, name, port);
+    wait_past_start(ready);
+    door
+}
+
+/// Wait until the clock is past `ready + 5`, where `ready` is the whole second a door
+/// answered TCP in. The door stamped its start at or before `ready` and refuses a frame
+/// stamped at or before its start plus five seconds, so the first signed request built
+/// after this is past the bound of every door whose `ready` is at or before it.
+pub fn wait_past_start(ready: u64) {
+    while whole_second() <= ready + 5 {
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+}
+
+/// Spawn `aoide a2a serve` for a box and wait until it answers TCP, then return the door
+/// and that whole second. A caller that raises several doors waits once, after the last
+/// one, with [`wait_past_start`] on the latest of their seconds.
+pub fn spawn_door(root: &std::path::Path, name: &str, port: u16) -> (Door, u64) {
     let runtime = root.join("runtime");
     std::fs::create_dir_all(&runtime).unwrap();
     let child = std::process::Command::new(aoide_test_support::built_aoide_bin())
@@ -140,15 +160,8 @@ pub fn raise_door(root: &std::path::Path, name: &str, port: u16) -> Door {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
     loop {
         if std::net::TcpStream::connect(("127.0.0.1", port)).is_ok() {
-            // The door stamps its start second before it binds, and refuses a frame stamped at or
-            // before that second plus five. `ready` is at or after that start, so waiting for the
-            // clock to pass `ready + 5` puts the first signed request built against this door past
-            // the bound.
-            let ready = whole_second();
-            while whole_second() <= ready + 5 {
-                std::thread::sleep(std::time::Duration::from_millis(20));
-            }
-            return door;
+            // The start bound is waited out by `wait_past_start` on this second.
+            return (door, whole_second());
         }
         assert!(
             std::time::Instant::now() < deadline,
@@ -292,13 +305,17 @@ impl Fixture {
         format!("https://127.0.0.1:{}/", self.ports[name])
     }
 
-    /// Raise a real door for each name, and wait until each answers TCP.
+    /// Raise a real door for each name, then wait once until every one is past its
+    /// start bound. Waiting per door would cost each door its own five seconds.
     pub fn doors(&self, names: &[&'static str]) -> Doors {
-        let doors: Vec<Door> = names
+        let raised: Vec<(Door, u64)> = names
             .iter()
-            .map(|name| raise_door(&self.boxes[*name], name, self.ports[*name]))
+            .map(|name| spawn_door(&self.boxes[*name], name, self.ports[*name]))
             .collect();
-        Doors { doors }
+        if let Some(latest) = raised.iter().map(|(_, ready)| *ready).max() {
+            wait_past_start(latest);
+        }
+        Doors { doors: raised.into_iter().map(|(door, _)| door).collect() }
     }
 }
 
