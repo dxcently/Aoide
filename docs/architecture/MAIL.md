@@ -1672,14 +1672,17 @@ authoritative first:
   deferred (`deferred: box-full`) is `retrying` too, with scope `entry` and
   its own `nextAttemptAt`, since the wait belongs to that entry and not to
   the link.
-- `queued` — none of the above: nothing has gone wrong, or nothing has
-  been attempted yet.
+- `queued` — none of the above, for an entry other than an own letter: nothing
+  has gone wrong, or nothing has been attempted yet. An own letter never reads
+  `queued` in normal operation: it reads `held`, `returned`, `pre-131` or
+  `delivered`.
 - `failed` — reserved for a genuine local I/O failure inside `mail
   send`'s OWN drain attempt (never "the remote node was unreachable,"
   which is an ordinary `retrying` outcome). A status READ that fails
-  outright instead — a corrupt `link.json`, a concurrently removed
-  entry — degrades to `queued` with an explicit "status unavailable"
-  reason rather than either an error or a normal-looking queue: the
+  outright instead — a corrupt `link.json`, or an entry removed while it is
+  read — degrades to `queued` with an explicit "status unavailable" reason, for
+  any entry, own letters included, rather than either an error or a
+  normal-looking queue: the
   spool write already succeeded, or the entry is only being listed, so
   the failure is about REPORTING, never about the mail itself.
 

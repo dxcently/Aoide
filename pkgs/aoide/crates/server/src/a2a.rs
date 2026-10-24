@@ -3237,9 +3237,10 @@ fn mail_deposit(params: &Value, ctx: &RequestCtx) -> Result<Value, (i64, String)
 // Admission is the deposit arm's own question, asked one node narrower:
 // `node_may_message`, plus "and you are asking for YOUR OWN node". Handed-over
 // entries stay in this box's outbox until the far end's normal ack retires
-// them, so the poll is a READ of local state — it writes nothing at all, which
-// is what makes a re-poll before the ack hand the same envelopes over again by
-// construction rather than by a bookmark.
+// them, so the poll is a READ of local state: it writes no try and no outcome
+// for what it hands over (a sealed upgrade or a park aside), which is what makes
+// a re-poll before the ack hand the same envelopes over again by construction
+// rather than by a bookmark.
 
 /// The poll arm's admission check. `caller` is the caller via a verified
 /// per-request signature ([`deposit_admitted`]'s own narrowing — signature

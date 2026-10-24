@@ -5527,7 +5527,9 @@ link state, never a promised schedule), `ackPending`. `delivered` is only
 ever a matching destination-signed ack, never an entry's absence; the
 node's link state is read once per listing and joined onto its rows; an
 unreadable state reports `queued` with `status unavailable` as the
-reason. `mail
+reason. That fallback is for any entry, own letters included, and for an entry
+removed while it is read; an own letter otherwise reads `held`, `returned`,
+`pre-131` or `delivered`, never `queued`, in normal operation. `mail
 outbox rm <msgid>` is an exact-msgid removal — it walks every node with an
 outbox and removes the first match, erroring `not-found` if none held it;
 NOT the mailbase `mail rm`'s age-based prune, and neither command ever

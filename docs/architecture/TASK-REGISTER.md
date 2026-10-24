@@ -1516,6 +1516,9 @@ project/parent inheritance across local/remote/app/subagents;
   queued + status unavailable. Proven cause 2026-09-12: the daemon
   drain's back-off in `state/outbox/<node>/link.json` silences the CLI's
   own attempt and the listing shows `tries 0` with no outcome.
+  Status: an own letter reads `held`, `returned`, `pre-131` or `delivered`
+  (ruling 131). `queued` is only the read-fault fallback, for any entry, with the
+  reason `status unavailable`. The UI trail at :1968-1971 is covered by this line.
 - Orphan `channel-<id>.sock` after a wrap exits: CONFIRMED live
   (`channel-db-wrap-2.sock`, 2026-09-12); `sweep_orphan_sockets` covers
   only `session-*.sock`. Unowned.

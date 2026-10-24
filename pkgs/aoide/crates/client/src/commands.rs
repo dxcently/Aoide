@@ -12502,11 +12502,11 @@ mod tests {
     #[test]
     fn an_own_letter_with_a_session_that_is_neither_held_nor_refused_lists_as_returned() {
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let (_env, root) = aoide_test_support::isolated_mail_root("delivery-own-queued");
+        let (_env, root) = aoide_test_support::isolated_mail_root("delivery-own-returned");
         let mut entry = aoide_storage::outbox::OutboxEntry::fresh(
             aoide_storage::mail::mint_outbound_letter("here", "peer-node", "bob", "in flight").unwrap(),
         );
-        entry.session = Some("sess-queued".to_string());
+        entry.session = Some("sess-returned".to_string());
         entry.last_outcome = "refused: box-full".to_string();
         let shown = delivery_projection(&[], "peer-node", &entry, None);
         assert_eq!(shown["status"], "returned", "{shown}");

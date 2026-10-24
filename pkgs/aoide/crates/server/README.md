@@ -555,9 +555,10 @@ terminal's rights to its remote callers.
   resolution at all). The answer is exactly `{envelopes: […]}` — the sealed
   envelopes, oldest first, from `aoide_storage::outbox::poll_payloads`: every
   `hold` entry toward that node plus every `now` entry whose own attempts have
-  been failing. **A poll writes NOTHING** — no `tries`, no bookmark, no new
-  state file anywhere: hand-over leaves the entry exactly where it was, and it
-  retires only the ways it always did (a valid ack, `mail outbox rm`), for a
+  been failing. **A poll writes no `tries`, no bookmark and no new state file
+  anywhere**: its hand-over may seal an entry or park it, and writes no try and
+  no outcome for a container it hands over. An entry retires only the ways it
+  always did (a valid ack, `mail outbox rm`), for a
   held own letter the poll of the hop it was spooled toward files, and for an
   own letter its session's end (ruling 131), which
   is what makes a re-poll before the ack hand the same envelopes over again by

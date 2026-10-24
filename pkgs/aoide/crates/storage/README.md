@@ -911,9 +911,11 @@ by decision — no embedded database yet
   have been failing (`tries > 0` and its last outcome did not reach the
   peer — parked/refused ones included, a never-attempted one excluded
   because the drain owns it). An own letter is offered only while held: a
-  returned one is its sender's to resend (ruling 131). **It writes nothing
-  at all** — no `tries`, no bookmark, no new file: that is what makes a
-  re-poll before the ack hand the same envelopes over again, and why an entry
+  returned one is its sender's to resend (ruling 131). **A poll writes no `tries`,
+  no bookmark and no new file**: its hand-over may write a sealed upgrade or a
+  park (`hand_over`), and never a try or an outcome for a container it hands
+  over. That is what makes a re-poll before the ack hand the same envelopes over
+  again, and why an entry
   leaves the spool only by a valid ack, a held letter's filed name,
   `mail outbox rm`, or an own letter's session end or the tick's sweep
   (ruling 131). The offer is

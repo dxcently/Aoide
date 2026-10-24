@@ -489,8 +489,15 @@ pub enum HandOver {
 /// Sealing runs outside the outbox lock (`destination_binding` may take the
 /// stage lock, which is not re-entrant), so the entry is checked again under
 /// the lock before anything is handed over and before anything is written back.
-/// A return that lands at any point after the read wins: its letter is no
-/// longer offered, and nothing of the read is written over it.
+/// A return that lands after the read and before this returns wins: its letter
+/// is no longer offered, and nothing of the read is written over it. A return
+/// that lands after this returns, while the poll's answer is still being built,
+/// does not stop that answer, and the window is accepted. It gives a poller
+/// nothing it lacks: `return_refused` acts only on the letters held for the
+/// poller that sent the refusal, so only a second, concurrent poll from that same
+/// poller can land one in the window, and that poller can already take a letter
+/// in one poll and refuse it in the next, which returns it to its sender (ruling
+/// 131). Closing the window would take a lock across the whole poll, for no gain.
 pub fn hand_over(node: &str, msgid: &str) -> Result<HandOver, String> {
     let now = crate::time::now_iso_utc();
     let Some(current) = list_entries(node)?.into_iter().find(|e| e.envelope.msgid == msgid && pollable(e)) else {
@@ -811,12 +818,14 @@ fn list_entries_unlocked(node: &str) -> Result<Vec<OutboxEntry>, String> {
 /// every `hold` entry spooled toward it, plus every `now` entry whose own
 /// attempts have been failing — in [`list_entries`]'s oldest-first order.
 ///
-/// **A poll is a READ.** Hand-over writes nothing at all: no `tries`, no
-/// `last_outcome`, no new state file. That is what makes a re-poll before
-/// the ack hand the same entries over again by construction (the predicate
-/// still holds), and it is why an entry leaves the spool only by a valid ack
-/// ([`retire_by_ack`]), `mail outbox rm`, or an own letter's session ending
-/// (ruling 131).
+/// **A poll is a READ, and a hand-over writes no try and no outcome for a
+/// container it hands over.** This function writes nothing. The hand-over may
+/// write a sealed upgrade (the entry gains its container, under the outbox lock)
+/// or a park (a reason on an entry no usable binding can seal, which hands over
+/// nothing), and no other write. That is what makes a re-poll before the ack hand
+/// the same entries over again by construction (the predicate still holds), and it
+/// is why an entry leaves the spool only by a valid ack ([`retire_by_ack`]),
+/// `mail outbox rm`, or an own letter's session ending (ruling 131).
 ///
 /// "Attempts have been failing" = the entry has been attempted at least
 /// once (`tries > 0`) and its last attempt did not reach the peer
@@ -837,16 +846,6 @@ fn list_entries_unlocked(node: &str) -> Result<Vec<OutboxEntry>, String> {
 /// the next batch, so a large spool drains in bounded steps instead of never.
 /// The hand-over a poll answers with: every entry the node may take, its
 /// sealed container (when it has one) beside its envelope.
-///
-/// The same shape and the same position (after the filter, so a backlog of
-/// held entries cannot be spent twice), for a different reason: a poll's
-/// answer is ONE JSON array of whole envelopes, and a hub holding more than
-/// `aoide_client`'s `MAX_RESPONSE_BYTES` (20 MiB) of held mail for one node
-/// would answer with a body the poller refuses outright — a permanent
-/// head-of-line stall that no retry could clear, since nothing at the hub
-/// changes. Capping is SAFE here precisely because retirement is by ack: the
-/// poller acks what it files, those entries retire, and the next poll gets
-/// the next batch, so a large spool drains in bounded steps instead of never.
 pub fn poll_payloads(node: &str) -> Result<Vec<(Option<crate::seal::Container>, Envelope)>, String> {
     let now = now_epoch();
     let mut entries: Vec<OutboxEntry> = list_entries(node)?
@@ -2409,7 +2408,8 @@ mod tests {
             "oldest-first, and only the three failing/held entries"
         );
 
-        // A poll is a READ: nothing about the spool changed by asking.
+        // The offer is a read: asking writes nothing. A hand-over may seal an entry
+        // or park it, and never writes a try or an outcome for a container it hands over.
         let after = list_entries("there").unwrap();
         assert_eq!(after.len(), 5, "polling retires nothing");
         assert_eq!(after.iter().find(|e| e.envelope.msgid == "msg-transport").unwrap().tries, 3, "a poll records no attempt");
@@ -3150,6 +3150,40 @@ mod tests {
         let stored = list_entries("there").unwrap().remove(0);
         assert!(stored.refused && !stored.is_held(), "the letter stays returned");
         assert_eq!(stored.last_outcome, "refused: unknown-box", "with its word, not a parked reason");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **A held direct letter under a dead key's binding is parked, and the poll
+    /// answers nothing for it.** The peer's stored binding is signed by a key this
+    /// node no longer holds, and the node is pinned to its own key. The letter has
+    /// no container, so the only thing a hand-over could send is the plaintext
+    /// envelope.
+    #[test]
+    fn a_held_direct_letter_under_a_dead_key_binding_is_parked_and_never_answered() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("outbox-hand-over-dead-key");
+        pair_node("box-b", false);
+        let dead = crate::identity::mint_ephemeral().unwrap();
+        let now = crate::time::now_iso_utc();
+        let stale = crate::seal::mint_binding(&dead, "age1deadkey", 1, &now, &crate::time::shift_iso_utc(&now, 3600)).unwrap();
+        let bindings = crate::seal::peer_bindings_dir();
+        std::fs::create_dir_all(&bindings).unwrap();
+        std::fs::write(bindings.join("box-b.json"), serde_json::to_string_pretty(&stale).unwrap()).unwrap();
+        let envelope = crate::mail::mint_outbound_letter("here", "box-b", "bob", "held under a dead key").unwrap();
+        write_entry("box-b", &OutboxEntry::held(envelope)).unwrap();
+
+        let offered = poll_payloads("box-b").unwrap();
+        assert_eq!(offered.len(), 1, "the held letter is offered to the poll");
+        for (_, envelope) in &offered {
+            assert!(
+                matches!(hand_over("box-b", &envelope.msgid).unwrap(), HandOver::Nothing),
+                "the poll answer carries no envelope and no container"
+            );
+        }
+        let stored = list_entries("box-b").unwrap().remove(0);
+        assert!(stored.refused, "the letter is parked");
+        assert!(stored.last_outcome.starts_with("parked:"), "with its reason: {}", stored.last_outcome);
 
         let _ = std::fs::remove_dir_all(&dir);
     }

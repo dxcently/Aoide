@@ -657,8 +657,9 @@ never the inbound/serve half (that's `aoide-server`).
   that dial's own result (`delivered`, `returned` or `held`) and is never read
   back from the spool (see "Status and the nodelist view" in
   `docs/architecture/MAIL.md` for the vocabulary). A post-spool read
-  that itself fails degrades `delivery` to `queued`/"status unavailable"
-  without ever touching the spool's own `Ok`. Its node-branch gate
+  that itself fails, or finds the entry already removed, degrades `delivery` to
+  `queued`/"status unavailable" (the read-fault fallback, for any entry, own
+  letters included) without ever touching the spool's own `Ok`. Its node-branch gate
   is deliberately shallow — it requires `verified` off `node_store::
   load_nodes()` and nothing more, the SAME "the client checks reachability
   of a record, never a granular capability" precedent `handle_node_spawn`

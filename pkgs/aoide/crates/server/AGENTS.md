@@ -967,7 +967,8 @@ a2a spawn probe needs `/bin/sh` + `printf`'s byte-exact output.
   `aoide_storage::outbox::poll_payloads` (the ONE place the offer rule lives:
   held always, `now` only when its own attempts have been failing) plus a
   self-audit under `a2a.aoide/mailPoll` carrying the handed-over count. The
-  hand-over writes nothing. The named writes are three:
+  hand-over writes only a sealed upgrade or a park, never a try or an outcome for
+  a container it hands over. The named writes are three:
   `outbox::retire_acknowledged`
   for each `filed` msgid (the hub's own transit custody, or a held letter whose
   hop is the poller), `outbox::return_refused` for each `refused` pair, at most

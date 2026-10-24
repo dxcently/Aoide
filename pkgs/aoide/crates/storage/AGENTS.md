@@ -175,10 +175,12 @@
   relayed entry never does: `reseal_entry` seals it to its destination or
   withholds it (`Reseal::Withheld`, `HandOver::Withheld`), and the answer lists
   it under `withheld`. Within the batch, usable entries come before parked
-  (refused) ones. The hand-over writes nothing but a container sealed for
-  a letter still held, and it does so under the outbox lock: `hand_over` checks
-  the entry again there, so a return that landed since the read is never
-  written over, and nothing is handed over for it. A poll writes only what its
+  (refused) ones. The hand-over writes only a sealed upgrade (a container sealed
+  for a letter still held) or a park (a reason, on a letter no usable binding can
+  seal, which hands over nothing), and it does so under the outbox lock:
+  `hand_over` checks the entry again there, so a return that landed since the
+  read is never written over, and nothing is handed over for it. A poll
+  writes only what its
   caller named: `return_refused` returns a held own letter the caller names in
   `refused` (before anything is offered), and `defer_named` stamps only the
   caller's own entries it names in `deferred`, never a returned own letter,

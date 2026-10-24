@@ -746,8 +746,9 @@
   keep-list words included, and `poll_through` sends the stored list as
   `refused` on the next ask, at most `REFUSED_LIST_CAP` of them, oldest first.
   The answer's own lists are read the same way: at most `POLL_BATCH_CAP`
-  containers and as many envelopes (`answer_entries`), the rest left out and
-  audited once as `mail.poll.over-cap`.
+  containers and as many envelopes (`answer_entries`), the rest left out, and
+  each list past its cap is audited once as `mail.poll.over-cap`, naming the list
+  and the count left out.
   `clear_refused` drops what that ask sent once an answer arrives, as `filed` is
   cleared. The keep list decides `filed` alone: `record_filed` is written only
   for a non-keep-list word whose refusal is on record (`refuse_container`
@@ -862,9 +863,9 @@
   **never poll a pass that got no response** (a second failure recorded
   nowhere), and **never dial for a held entry** to force that contact — a
   `--hold`-only spool is deliberately silent, and `mail send --hold`'s
-  `data.delivery` reading `queued` is correct rather than a missing
-  status word (MAIL.md §Status's vocabulary is closed; don't invent
-  `held` in `delivery_projection` without a doc amendment).
+  `data.delivery` reading `held` is the send's own word (one of the three a send
+  reports, MAIL.md §Status), not a missing status word. That vocabulary is
+  closed, so a new word needs a doc amendment first.
   `post_signed`/`SignedCall` is the one signed-POST implementation —
   `attempt_deposit` and `poll_node` read it, neither re-implements bearer
   resolve/sign/POST/parse. **`poll_node` has exactly two callers and must
