@@ -133,7 +133,7 @@ mod tests {
         );
         let mut healthy = keyed_node("healthy");
         healthy.url = format!("http://127.0.0.1:{port}/");
-        aoide_storage::node_store::save_nodes(&[keyed_node("dead"), healthy]).unwrap();
+        aoide_storage::node_store::save_nodes(&[keyed_node("dead"), healthy, keyed_node("origin-node")]).unwrap();
 
         let dead_env = aoide_storage::mail::mint_outbound_letter("alice", "dead", "bob", "hi").unwrap();
         aoide_storage::outbox::write_entry("dead", &OutboxEntry::fresh(dead_env)).unwrap();
@@ -141,6 +141,10 @@ mod tests {
         let to = aoide_storage::mail::Address { node: "origin-node".to_string(), name: "bob".to_string() };
         let healthy_env = aoide_storage::mail::mint_ack("alice", to, "acked-msgid").unwrap();
         aoide_storage::outbox::write_entry("healthy", &OutboxEntry::fresh(healthy_env)).unwrap();
+
+        // The receipts are addressed to origin-node, a relayed entry: they are
+        // sealed to origin-node or withheld, so its binding must be known.
+        aoide_storage::seal::learn_binding("origin-node", &aoide_storage::seal::publish_binding().unwrap()).unwrap();
 
         drain_all().unwrap();
 
