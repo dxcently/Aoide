@@ -9987,9 +9987,10 @@ hub returns a held letter of its own that is named there, before it offers
 `refused` name changes nothing for it. On a poll a held own letter returns on
 any word, the keep list decides `filed` for containers alone, and `deferred`
 serves the hub's transit custody. The list is capped at fifty
-(`REFUSED_LIST_CAP`, the poll's own batch): the hub reads at most that many
-well-formed msgids, each once with the first word named for it, and the poller
-sends its oldest first.
+(`REFUSED_LIST_CAP`, the poll's own batch): the poller stores no more than
+that many and sends its oldest first, and the hub reads at most that many
+well-formed msgids, each once with the first word named for it. The poller
+reads at most fifty containers and fifty envelopes from one answer.
 The request
 may also carry `deferred` — the msgids it was handed and did not settle — and
 each of the caller's own entries it names takes a `tries` stamp and a

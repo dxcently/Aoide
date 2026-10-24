@@ -476,35 +476,39 @@ fn sealed_upgrade(entry: &OutboxEntry, container: crate::seal::Container) -> Out
 pub enum HandOver {
     Container(Box<crate::seal::Container>),
     Envelope(Box<crate::mail::Envelope>),
-    /// Hand over nothing: the entry is gone, or a binding is held and is not
-    /// usable now.
+    /// Hand over nothing: the entry is gone, is no longer held (a return landed
+    /// since the spool was read), or a binding is held and is not usable now.
     Nothing,
     /// A relayed letter no binding for its destination can seal: withheld, and
     /// named in the answer, never handed over.
     Withheld(Box<crate::mail::Envelope>),
 }
 
-/// Decide one entry's hand-over against the live spool (H2's poll half).
+/// Decide one entry's hand-over against the live spool.
+///
+/// Sealing runs outside the outbox lock (`destination_binding` may take the
+/// stage lock, which is not re-entrant), so the entry is checked again under
+/// the lock before anything is handed over and before anything is written back.
+/// A return that lands at any point after the read wins: its letter is no
+/// longer offered, and nothing of the read is written over it.
 pub fn hand_over(node: &str, msgid: &str) -> Result<HandOver, String> {
     let now = crate::time::now_iso_utc();
-    let Some(current) = list_entries(node)?.into_iter().find(|e| e.envelope.msgid == msgid) else {
+    let Some(current) = list_entries(node)?.into_iter().find(|e| e.envelope.msgid == msgid && pollable(e)) else {
         return Ok(HandOver::Nothing);
     };
     match reseal_entry(node, &current, &now)? {
-        Reseal::NoBinding => Ok(HandOver::Envelope(Box::new(current.envelope))),
-        Reseal::Withheld => Ok(HandOver::Withheld(Box::new(current.envelope))),
+        Reseal::NoBinding => offered_or_nothing(node, msgid, HandOver::Envelope(Box::new(current.envelope))),
+        Reseal::Withheld => offered_or_nothing(node, msgid, HandOver::Withheld(Box::new(current.envelope))),
         Reseal::Sealed(None) => match current.container {
-            Some(container) => Ok(HandOver::Container(Box::new(container))),
+            Some(container) => offered_or_nothing(node, msgid, HandOver::Container(Box::new(container))),
             // Unreachable by construction — `Sealed(None)` means the entry
             // has one — and if it ever were, handing over nothing is the safe
             // direction.
             None => Ok(HandOver::Nothing),
         },
-        // `update_entry`, not `write_entry`: the entry was read a moment ago,
-        // and a receipt that retired it since must not be undone by this write.
         Reseal::Sealed(Some(entry)) | Reseal::FreshlySealed(entry) => {
             let container = entry.container.clone();
-            if !update_entry(node, &entry)? {
+            if !write_if_offered(node, &entry)? {
                 return Ok(HandOver::Nothing);
             }
             match container {
@@ -514,11 +518,46 @@ pub fn hand_over(node: &str, msgid: &str) -> Result<HandOver, String> {
         }
         Reseal::NotUsable(parked) => {
             if let Some(entry) = parked {
-                update_entry(node, &entry)?;
+                write_if_offered(node, &entry)?;
             }
             Ok(HandOver::Nothing)
         }
     }
+}
+
+/// `handed`, unless a return has ended the msgid since the read: then nothing.
+fn offered_or_nothing(node: &str, msgid: &str, handed: HandOver) -> Result<HandOver, String> {
+    if still_offered(node, msgid)? {
+        Ok(handed)
+    } else {
+        Ok(HandOver::Nothing)
+    }
+}
+
+/// Is `msgid` still offered by `node`'s spool (held, not returned or retired)?
+fn still_offered(node: &str, msgid: &str) -> Result<bool, String> {
+    let node = node.to_string();
+    let msgid = msgid.to_string();
+    with_lock(move || offered_unlocked(&node, &msgid))
+}
+
+fn offered_unlocked(node: &str, msgid: &str) -> Result<bool, String> {
+    Ok(list_entries_unlocked(node)?.iter().any(|e| e.envelope.msgid == msgid && pollable(e)))
+}
+
+/// Write `entry` only while the spool still offers its msgid: a return that
+/// landed since the read keeps its word, and `Ok(false)` says nothing was
+/// written.
+fn write_if_offered(node: &str, entry: &OutboxEntry) -> Result<bool, String> {
+    let node = node.to_string();
+    let entry = entry.clone();
+    with_lock(move || {
+        if !offered_unlocked(&node, &entry.envelope.msgid)? {
+            return Ok(false);
+        }
+        write_entry_unlocked(&node, &entry)?;
+        Ok(true)
+    })
 }
 
 /// This module's own fail-closed lock wrapper — see the module doc's "two
@@ -1219,8 +1258,9 @@ pub fn refused_pending(node: &str) -> Result<Vec<PollRefusal>, String> {
 }
 
 /// Record that `node`'s poll refused `msgid` with `word`. A pair already
-/// recorded is kept once. A msgid that is not well-formed names no held letter,
-/// so nothing is kept for it.
+/// recorded is kept once. Past [`REFUSED_LIST_CAP`] nothing is recorded: the
+/// letter stays held, so the next poll offers it and records it again. A msgid
+/// that is not well-formed names no held letter, so nothing is kept for it.
 pub fn record_refused(node: &str, msgid: &str, word: &str) -> Result<(), String> {
     if !crate::mail::is_msgid(msgid) {
         return Ok(());
@@ -1229,7 +1269,7 @@ pub fn record_refused(node: &str, msgid: &str, word: &str) -> Result<(), String>
     let refusal = PollRefusal { msgid: msgid.to_string(), word: word.to_string() };
     with_lock(move || {
         let mut pending = read_refused_unlocked(&node)?;
-        if pending.contains(&refusal) {
+        if pending.contains(&refusal) || pending.len() >= REFUSED_LIST_CAP {
             return Ok(());
         }
         pending.push(refusal);
@@ -2988,6 +3028,93 @@ mod tests {
         assert_eq!(poll_payloads("there").unwrap().len(), 1, "a held letter is offered before the refusal");
         assert!(return_refused("there", "msg-held", "unknown-box").unwrap());
         assert!(poll_payloads("there").unwrap().is_empty(), "and not after it");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **A refused list stops at the cap.** One more distinct pair than the cap
+    /// is not stored, and the stored list is the first cap, oldest first. A
+    /// dropped pair costs nothing: its letter is still held, so the next poll
+    /// offers it and records it again.
+    #[test]
+    fn record_refused_stops_at_the_cap() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("outbox-refused-stops-at-the-cap");
+
+        let cap = REFUSED_LIST_CAP;
+        for i in 0..=cap {
+            record_refused("relay", &format!("{i:064x}"), "box-full").unwrap();
+        }
+        let stored = read_refused_unlocked("relay").unwrap();
+        assert_eq!(stored.len(), cap, "past the cap nothing is recorded: {}", stored.len());
+        assert_eq!(stored[0].msgid, format!("{:064x}", 0), "the first cap are kept, oldest first");
+        assert!(!stored.iter().any(|r| r.msgid == format!("{cap:064x}")), "the pair past the cap is not");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **A hand-over never hands over a letter a return has ended.** The poll
+    /// reads a held letter, a poller returns it, and then the hand-over for
+    /// that letter runs. It hands over nothing, and the letter stays returned
+    /// with its word. This letter carries a container, which the hand-over
+    /// would return.
+    #[test]
+    fn a_hand_over_after_a_return_hands_over_nothing_with_a_container() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("outbox-hand-over-container");
+
+        let container = crate::seal::Container {
+            v: crate::seal::CONTAINER_VERSION,
+            purpose: crate::seal::PURPOSE_MAIL.to_string(),
+            msgid: "msg-held".to_string(),
+            generation: 1,
+            origin: crate::seal::Party { node: "here".to_string(), key: "aa".repeat(32) },
+            to: crate::seal::Destination { node: "there".to_string(), age: "age1x".to_string() },
+            origin_mesh: "home".to_string(),
+            mesh: "home".to_string(),
+            suite: crate::seal::SUITE_AGE_V1_X25519.to_string(),
+            ct: "00".to_string(),
+            sig: "00".to_string(),
+            transit: Vec::new(),
+            board: None,
+            epoch: None,
+        };
+        let mut entry = OutboxEntry::sealed_held(envelope("here", "there", "msg-held"), container);
+        entry.session = Some("sess-a".to_string());
+        write_entry("there", &entry).unwrap();
+
+        assert_eq!(poll_payloads("there").unwrap().len(), 1, "the held letter is offered");
+        assert!(return_refused("there", "msg-held", "unknown-box").unwrap());
+        assert!(
+            matches!(hand_over("there", "msg-held").unwrap(), HandOver::Nothing),
+            "a returned letter's container is not handed over"
+        );
+        let stored = list_entries("there").unwrap().remove(0);
+        assert!(stored.refused && !stored.is_held(), "the letter stays returned");
+        assert_eq!(stored.last_outcome, "refused: unknown-box", "with its word");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **The same hand-over, for a letter with no container.** Nothing is
+    /// handed over after the return, and the return's word is not overwritten
+    /// by a parked reason.
+    #[test]
+    fn a_hand_over_after_a_return_hands_over_nothing_without_a_container() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("outbox-hand-over-no-container");
+
+        write_entry("there", &own_letter("there", "msg-held", Some("sess-a"), true)).unwrap();
+
+        assert_eq!(poll_payloads("there").unwrap().len(), 1, "the held letter is offered");
+        assert!(return_refused("there", "msg-held", "unknown-box").unwrap());
+        assert!(
+            matches!(hand_over("there", "msg-held").unwrap(), HandOver::Nothing),
+            "a returned letter is not handed over in the clear"
+        );
+        let stored = list_entries("there").unwrap().remove(0);
+        assert!(stored.refused && !stored.is_held(), "the letter stays returned");
+        assert_eq!(stored.last_outcome, "refused: unknown-box", "with its word, not a parked reason");
 
         let _ = std::fs::remove_dir_all(&dir);
     }

@@ -745,6 +745,9 @@
   and `refuse_envelope` record every refusal (`outbox::record_refused`),
   keep-list words included, and `poll_through` sends the stored list as
   `refused` on the next ask, at most `REFUSED_LIST_CAP` of them, oldest first.
+  The answer's own lists are read the same way: at most `POLL_BATCH_CAP`
+  containers and as many envelopes (`answer_entries`), the rest left out and
+  audited once as `mail.poll.over-cap`.
   `clear_refused` drops what that ask sent once an answer arrives, as `filed` is
   cleared. The keep list decides `filed` alone: `record_filed` is
   written only for a non-keep-list word whose refusal was recorded, so a refusal

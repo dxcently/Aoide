@@ -1290,6 +1290,27 @@ fn refuse_container(node_name: &str, msgid: &str, word: &str, detail: &str, refu
     aoide_storage::outbox::record_refused(node_name, msgid, word).is_ok()
 }
 
+/// The entries of one answer list the poll reads: the first `POLL_BATCH_CAP`,
+/// the most an honest holder offers in one poll (`outbox::poll_payloads`). The
+/// rest are neither read, filed nor deferred, so the holder offers them again;
+/// one audit line names how many were left out.
+fn answer_entries<'a>(result: &'a Value, key: &str, node_name: &str) -> impl Iterator<Item = &'a Value> {
+    let items: Vec<&Value> = result.get(key).and_then(Value::as_array).into_iter().flatten().collect();
+    let cap = aoide_storage::outbox::POLL_BATCH_CAP;
+    let left_out = items.len().saturating_sub(cap);
+    if left_out > 0 {
+        let _ = aoide_protocol::audit::audit(
+            &aoide_protocol::audit::default_audit_log(),
+            aoide_protocol::audit::Door::Cli,
+            aoide_protocol::audit::EventClass::Audit,
+            "mail.poll.over-cap",
+            "invalid",
+            &format!("{left_out} {key} from `{node_name}` past the poll's cap of {cap} left out; offered again"),
+        );
+    }
+    items.into_iter().take(cap)
+}
+
 /// A plaintext envelope the poll refused: the same audit and report as a
 /// container, under its own event name, and the same record for the next ask
 /// (`outbox::record_refused`). A plaintext letter is not the hub's custody, so
@@ -1436,7 +1457,7 @@ fn poll_through(node_name: &str, named: Option<&str>, target: PollTarget) -> Res
     // `seal::deposit_container`, then handed to the SAME `mail::deposit`
     // the plaintext arm uses, so filing and the receipt rule have one
     // implementation.
-    for container in result.get("containers").and_then(Value::as_array).into_iter().flatten() {
+    for container in answer_entries(&result, "containers", node_name) {
         let Ok(container) = serde_json::from_value::<aoide_storage::seal::Container>(container.clone()) else {
             continue;
         };
@@ -1623,7 +1644,7 @@ fn poll_through(node_name: &str, named: Option<&str>, target: PollTarget) -> Res
         }
     }
 
-    for envelope in result.get("envelopes").and_then(Value::as_array).into_iter().flatten() {
+    for envelope in answer_entries(&result, "envelopes", node_name) {
         let Ok(envelope) = serde_json::from_value::<Envelope>(envelope.clone()) else { continue };
         handed.push(envelope.msgid.clone());
         let outcome = match aoide_storage::mail::deposit(envelope.clone(), node_name) {
@@ -6018,10 +6039,11 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// **A poll sends at most `REFUSED_LIST_CAP` refusals, oldest first, and
-    /// the rest on the next ask.** Two more refusals than one ask carries are
-    /// recorded. The first ask sends the first cap; an answered ask clears what
-    /// it sent, so the next carries the two left.
+    /// **A poll sends at most `REFUSED_LIST_CAP` refusals, oldest first.** The
+    /// store keeps no more than the cap, so two refusals past it are dropped when
+    /// they are recorded. The first ask sends the cap; an answered ask clears what
+    /// it sent. A later poll records the dropped two again, and the ask after
+    /// that carries them.
     #[test]
     fn refused_list_is_sent_in_capped_batches() {
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
@@ -6041,6 +6063,10 @@ mod tests {
 
         poll_node("relay", None).unwrap();
         poll_node("relay", None).unwrap();
+        for msgid in &msgids[cap..] {
+            aoide_storage::outbox::record_refused("relay", msgid, "box-full").unwrap();
+        }
+        poll_node("relay", None).unwrap();
 
         let asks: Vec<Vec<String>> = seen
             .lock()
@@ -6058,9 +6084,90 @@ mod tests {
                     .collect()
             })
             .collect();
-        assert_eq!(asks.len(), 2, "two asks were sent: {asks:?}");
+        assert_eq!(asks.len(), 3, "three asks were sent: {asks:?}");
         assert_eq!(asks[0], msgids[..cap].to_vec(), "the first ask carries the oldest {cap}");
-        assert_eq!(asks[1], msgids[cap..].to_vec(), "and the next carries the two left");
+        assert!(asks[1].is_empty(), "the next carries nothing: the two past the cap were not stored");
+        assert_eq!(asks[2], msgids[cap..].to_vec(), "and the ask after a later poll's records carries them");
+
+        drop(listener);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **An answer is read at most `POLL_BATCH_CAP` containers, and the
+    /// refusals it leaves stored are capped.** A hostile hub answers with twice
+    /// the cap of refusable containers on the first ask. The poll reads the
+    /// first cap, audits each refusal and one line for the rest, and stores at
+    /// most the refused cap: the next ask carries the cap, and the one after
+    /// carries nothing.
+    #[test]
+    fn an_answer_of_twice_the_cap_refusals_is_read_and_stored_at_the_cap() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("container-answer-the-cap");
+
+        let me = register_local_origin();
+        aoide_storage::mail::box_add("bob").unwrap();
+        let saved = std::env::var("AOIDE_A2A_NODE_NAME").ok();
+        std::env::set_var("AOIDE_A2A_NODE_NAME", "relay");
+        let letter = aoide_storage::mail::mint_outbound_letter("alice", &me, "bob", "many");
+        match saved {
+            Some(name) => std::env::set_var("AOIDE_A2A_NODE_NAME", name),
+            None => std::env::remove_var("AOIDE_A2A_NODE_NAME"),
+        }
+        let letter = letter.unwrap();
+        let binding = aoide_storage::seal::publish_binding().unwrap();
+        let mesh = letter.header.origin_mesh.clone();
+        let now = aoide_storage::time::now_iso_utc();
+        let container =
+            aoide_storage::seal::seal_envelope(&letter, &binding, &mesh, &mesh, &me, &me, &now).unwrap();
+
+        let cap = aoide_storage::outbox::POLL_BATCH_CAP;
+        let base = serde_json::to_value(&container).unwrap();
+        let containers: Vec<Value> = (0..2 * cap)
+            .map(|i| {
+                let mut each = base.clone();
+                each["msgid"] = json!(format!("{i:064x}"));
+                each
+            })
+            .collect();
+        let flood = json!({"jsonrpc": "2.0", "id": 1, "result": {"containers": containers, "envelopes": []}}).to_string();
+        let quiet = r#"{"jsonrpc":"2.0","id":1,"result":{"envelopes":[]}}"#.to_string();
+        let asked = std::sync::atomic::AtomicUsize::new(0);
+        let (listener, port, seen) = answering_door(move |body| {
+            if !body.contains("aoide/mailPoll") {
+                return r#"{"jsonrpc":"2.0","id":1,"result":{"status":"accepted"}}"#.to_string();
+            }
+            if asked.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 0 { flood.clone() } else { quiet.clone() }
+        });
+        register_polled_relay(port);
+
+        poll_node("relay", None).unwrap();
+
+        let log = std::fs::read_to_string(dir.join("log")).unwrap_or_default();
+        let poll_lines = log.lines().filter(|line| line.contains("mail.poll.")).count();
+        assert!(poll_lines <= cap + 1, "at most cap + 1 audit lines for the answer: {poll_lines}");
+        assert_eq!(
+            log.lines().filter(|line| line.contains("mail.poll.container-refused")).count(),
+            cap,
+            "the first cap containers are read, and each is refused once"
+        );
+
+        poll_node("relay", None).unwrap();
+        poll_node("relay", None).unwrap();
+
+        let refused_sent: Vec<usize> = seen
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|body| body.contains("aoide/mailPoll"))
+            .map(|body| {
+                let request: Value = serde_json::from_str(body).unwrap();
+                let params = request.get("params").unwrap_or(&request);
+                params["refused"].as_array().unwrap().len()
+            })
+            .collect();
+        assert_eq!(refused_sent.len(), 3, "three asks were sent: {refused_sent:?}");
+        assert_eq!(refused_sent[1], cap, "the next ask carries the stored cap");
+        assert_eq!(refused_sent[2], 0, "nothing is stored past the cap: {refused_sent:?}");
 
         drop(listener);
         let _ = std::fs::remove_dir_all(&dir);

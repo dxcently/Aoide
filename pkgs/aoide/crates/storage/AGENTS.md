@@ -174,11 +174,14 @@
   binding, learnt or declared, still appears as an envelope. A
   relayed entry never does: `reseal_entry` seals it to its destination or
   withholds it (`Reseal::Withheld`, `HandOver::Withheld`), and the answer lists
-  it under `withheld`. The hand-over is a pure read: nothing is marked, moved or
-  counted. A poll writes only what its caller named: `return_refused` returns a
-  held own letter the caller names in `refused` (before anything is offered),
-  and `defer_named` stamps only the caller's own entries it names in `deferred`,
-  never a returned own letter (MAIL.md §Wire).
+  it under `withheld`. The hand-over writes nothing but a container sealed for
+  a letter still held, and it does so under the outbox lock: `hand_over` checks
+  the entry again there, so a return that landed since the read is never
+  written over, and nothing is handed over for it. A poll writes only what its
+  caller named: `return_refused` returns a held own letter the caller names in
+  `refused` (before anything is offered), and `defer_named` stamps only the
+  caller's own entries it names in `deferred`, never a returned own letter
+  (MAIL.md §Wire).
 
 - **A poller's refusals are kept per node (`.refused`).** `record_refused`
   stores each `{msgid, word}` a poll refused, keep-list words included, and
@@ -186,9 +189,10 @@
   pairs that ask sent, so a refusal recorded while its answer was in flight is
   kept. `refused_pending` sends at most `REFUSED_LIST_CAP`, oldest first, and
   the file keeps the rest for the next ask. `record_refused` keeps no msgid that
-  is not well-formed. On the hub's side `return_refused` is the only reader
-  of a `refused` name, and it acts on a held own letter of the caller's own
-  spool alone (MAIL.md §Wire).
+  is not well-formed, and keeps nothing past `REFUSED_LIST_CAP`: a dropped
+  refusal's letter is still held, so the next poll records it again. On the
+  hub's side `return_refused` is the only reader of a `refused` name, and it
+  acts on a held own letter of the caller's own spool alone (MAIL.md §Wire).
 - **Enduring identity is independent of knowledge configuration.** Bind an
   explicit `valid_node_name`-shaped key in `session::bind_enduring_agent`;
   do not infer it from a persona title, session name, or optional Mneme map.
