@@ -1977,27 +1977,31 @@ fn a_refused_or_unloadable_declaration_is_never_dialled() {
             aoide_storage::charter::operator_line(&fx.operators[AWAY]),
         )
     };
-    let spool = |body: &str| {
+    let spool = |body: &str| -> String {
         let envelope = aoide_storage::mail::mint_charter_letter("yomi", body, HOME).unwrap();
+        let msgid = envelope.msgid.clone();
         aoide_storage::outbox::write_entry("yomi", &aoide_storage::outbox::OutboxEntry::fresh(envelope)).unwrap();
+        msgid
     };
-    let tries_of = |body: &str| {
+    // Entries are found by msgid: a sealed entry's envelope text is redacted.
+    let tries_of = |msgid: &str| {
         aoide_storage::outbox::list_entries("yomi")
             .unwrap()
             .into_iter()
-            .find(|e| e.envelope.text == body)
-            .unwrap_or_else(|| panic!("`{body}` is still spooled"))
+            .find(|e| e.envelope.msgid == msgid)
+            .unwrap_or_else(|| panic!("`{msgid}` is still spooled"))
             .tries
     };
 
-    // A declaration that reads and says nothing about `yomi`: the entry DIALS.
-    // A charter stands in for a drained entry: an own letter is never dialled
-    // by a drain (ruling 131), so it could not show the gate at all. This is
-    // the positive control the two negatives below are measured against.
+    // The positive control. Nothing declares `yomi` down, so the drain dials the
+    // letter once, and the refused dial leaves it spooled with one try. A charter
+    // stands in for the letter: an own letter is never dialled by a drain (ruling
+    // 131), so it could not show the gate at all. The HOME charter declares a
+    // binding for `yomi`, so the letter is sealed before it dials.
     fx.set_home_status("osaka", &[]);
-    spool("dials");
+    let dials = spool("dials");
     aoide_client::mail_wire::drain_node("yomi").unwrap();
-    assert_eq!(tries_of("dials"), 1, "nothing declares it down, so the drain tries it");
+    assert_eq!(tries_of(&dials), 1, "nothing declares it down, so the drain tries it");
     // The failure backed the link off; clear that so the next shape dials too
     // unless something stops it.
     aoide_storage::outbox::clear_link_state("yomi").unwrap();
@@ -2005,9 +2009,9 @@ fn a_refused_or_unloadable_declaration_is_never_dialled() {
     // (1) An unloadable SET: a `[status]` for a node `home` does not have, which
     // `validate_mesh` refuses whole — so `declarations()` itself fails.
     std::fs::write(fx.boxes["osaka"].join("config.toml"), "[pairing]\nhomeMesh = \"home\"\n\n[mesh.home.status]\nnobody = \"down\"\n").unwrap();
-    spool("unloadable");
+    let unloadable = spool("unloadable");
     aoide_client::mail_wire::drain_node("yomi").unwrap();
-    assert_eq!(tries_of("unloadable"), 0, "an unloadable set never dials");
+    assert_eq!(tries_of(&unloadable), 0, "an unloadable set never dials");
     assert!(aoide_storage::outbox::read_link_state("yomi").unwrap().is_none(), "and opens no link");
 
     // (2) A REFUSED mesh: one node name carrying two keys across `home` and
@@ -2018,9 +2022,9 @@ fn a_refused_or_unloadable_declaration_is_never_dialled() {
     std::fs::write(fx.boxes["osaka"].join("config.toml"), valid_config()).unwrap();
     fx.take_broken_away("osaka", TWO_KEYS);
 
-    spool("refused");
+    let refused = spool("refused");
     aoide_client::mail_wire::drain_node("yomi").unwrap();
-    let refused_tries = tries_of("refused");
+    let refused_tries = tries_of(&refused);
     let link = aoide_storage::outbox::read_link_state("yomi").unwrap();
     let spooled = aoide_storage::outbox::list_entries("yomi").unwrap();
     assert_eq!(refused_tries, 0, "a refused mesh never dials either: link={link:?} entries={spooled:?}");
