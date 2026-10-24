@@ -5219,16 +5219,16 @@ fn delivery_status_unavailable(err: &str) -> Value {
 }
 
 /// An own letter's delivery status, from its own flags alone (ruling 131).
-/// `held` while it waits for its node's own poll, `returned` with the word that
-/// ended its dial, and `pre-131` for a letter with no session, whatever its
-/// flags: a build before ruling 131 left it in the spool, and the next daemon
-/// tick drops it. `queued` for a letter with its session that is neither held
-/// nor refused. A send writes an own letter only once its dial has answered, or
-/// holds it, so no send leaves this state; the tick keeps such a letter for as
-/// long as its session lives. An own letter never reads `accepted`, `ackPending` or
-/// `retrying`: no drain dials it, so no link state or attempt outcome applies. A
-/// genuine receipt for it reads `delivered`, and `delivery_projection` checks
-/// that first.
+/// `held` while it waits for its node's own poll, and `pre-131` for a letter
+/// with no session, whatever its flags: a build before ruling 131 left it in
+/// the spool, and the next daemon tick drops it. Any other own letter reads
+/// `returned`, with the word its last dial kept. A send writes an own letter
+/// only once its dial has answered, or holds it, so no write leaves a letter
+/// that has its session and is neither held nor refused; were one found, it
+/// would list as `returned`, and a retry sends it. An own letter never reads
+/// `accepted`, `ackPending` or `retrying`: no drain dials it, so no link state
+/// or attempt outcome applies. A genuine receipt for it reads `delivered`, and
+/// `delivery_projection` checks that first.
 fn own_letter_delivery(entry: &aoide_storage::outbox::OutboxEntry) -> Value {
     if entry.session.is_none() {
         return pre_131_delivery();
@@ -5236,23 +5236,7 @@ fn own_letter_delivery(entry: &aoide_storage::outbox::OutboxEntry) -> Value {
     if entry.is_held() {
         return held_delivery();
     }
-    if entry.refused {
-        return delivery_shape("returned", crate::mail_wire::outcome_line(&entry.last_outcome), Some("entry"), None, false);
-    }
-    queued_delivery()
-}
-
-/// An own letter with its session, neither held nor refused. No send leaves one
-/// (see [`own_letter_delivery`]), so this reason names a state no send writes; the
-/// tick keeps the letter and never reads it as `pre-131`.
-fn queued_delivery() -> Value {
-    delivery_shape(
-        "queued",
-        Some("spooled, and its dial has not answered yet".to_string()),
-        Some("entry"),
-        None,
-        false,
-    )
+    delivery_shape("returned", crate::mail_wire::outcome_line(&entry.last_outcome), Some("entry"), None, false)
 }
 
 /// An own letter waiting for its node's own poll ([`own_letter_delivery`]).
@@ -5275,7 +5259,7 @@ fn pre_131_delivery() -> Value {
 /// One outbox entry's delivery status, joined with its node's own link
 /// state (MAIL.md "Outbox" / "Status and the nodelist view") — the ONE
 /// projection `mail outbox` and its retries render from, so they can never
-/// drift on what "queued"/"retrying"/etc. mean. An own letter has four states
+/// drift on what "queued"/"retrying"/etc. mean. An own letter has three states
 /// of its own (see [`own_letter_delivery`]). Vocabulary, in precedence order:
 ///
 /// - `refused` (`entry.refused`) beats everything else outright —
@@ -12512,20 +12496,21 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// **An own letter with its session, neither held nor refused, is queued, never
-    /// pre-131.** No send leaves one, but the tick keeps a letter with a live
-    /// session, so a label that says the tick will drop it would be false.
+    /// **An own letter with its session, neither held nor refused, lists as
+    /// returned with the word its last dial kept.** No write in this build
+    /// leaves that state. A retry sends it, as it sends any returned letter.
     #[test]
-    fn an_own_letter_with_a_session_that_is_neither_held_nor_refused_lists_as_queued() {
+    fn an_own_letter_with_a_session_that_is_neither_held_nor_refused_lists_as_returned() {
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let (_env, root) = aoide_test_support::isolated_mail_root("delivery-own-queued");
         let mut entry = aoide_storage::outbox::OutboxEntry::fresh(
             aoide_storage::mail::mint_outbound_letter("here", "peer-node", "bob", "in flight").unwrap(),
         );
         entry.session = Some("sess-queued".to_string());
+        entry.last_outcome = "refused: box-full".to_string();
         let shown = delivery_projection(&[], "peer-node", &entry, None);
-        assert_eq!(shown["status"], "queued", "{shown}");
-        assert_eq!(shown["reason"], "spooled, and its dial has not answered yet", "{shown}");
+        assert_eq!(shown["status"], "returned", "{shown}");
+        assert_eq!(shown["reason"], "refused: box-full", "{shown}");
 
         let _ = std::fs::remove_dir_all(&root);
     }

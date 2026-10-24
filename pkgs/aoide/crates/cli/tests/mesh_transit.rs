@@ -1997,11 +1997,15 @@ fn a_refused_or_unloadable_declaration_is_never_dialled() {
     // letter once, and the refused dial leaves it spooled with one try. A charter
     // stands in for the letter: an own letter is never dialled by a drain (ruling
     // 131), so it could not show the gate at all. The HOME charter declares a
-    // binding for `yomi`, so the letter is sealed before it dials.
+    // binding for `yomi`, so the letter is spooled sealed.
     fx.set_home_status("osaka", &[]);
     let dials = spool("dials");
     aoide_client::mail_wire::drain_node("yomi").unwrap();
     assert_eq!(tries_of(&dials), 1, "nothing declares it down, so the drain tries it");
+    assert!(
+        aoide_storage::outbox::list_entries("yomi").unwrap().iter().any(|e| e.envelope.msgid == dials && e.is_sealed()),
+        "the HOME binding seals the letter, and the refused dial leaves it sealed"
+    );
     // The failure backed the link off; clear that so the next shape dials too
     // unless something stops it.
     aoide_storage::outbox::clear_link_state("yomi").unwrap();
@@ -2009,6 +2013,7 @@ fn a_refused_or_unloadable_declaration_is_never_dialled() {
     // (1) An unloadable SET: a `[status]` for a node `home` does not have, which
     // `validate_mesh` refuses whole — so `declarations()` itself fails.
     std::fs::write(fx.boxes["osaka"].join("config.toml"), "[pairing]\nhomeMesh = \"home\"\n\n[mesh.home.status]\nnobody = \"down\"\n").unwrap();
+    assert!(routing::declarations().is_err(), "a set that will not load makes declarations() an error");
     let unloadable = spool("unloadable");
     aoide_client::mail_wire::drain_node("yomi").unwrap();
     assert_eq!(tries_of(&unloadable), 0, "an unloadable set never dials");
@@ -2021,6 +2026,7 @@ fn a_refused_or_unloadable_declaration_is_never_dialled() {
     // that document but does not re-verify its signature, so it stays honoured.)
     std::fs::write(fx.boxes["osaka"].join("config.toml"), valid_config()).unwrap();
     fx.take_broken_away("osaka", TWO_KEYS);
+    assert!(aoide_client::mail_wire::declaration_unreadable(HOME), "a refused mesh's declaration is unreadable");
 
     let refused = spool("refused");
     aoide_client::mail_wire::drain_node("yomi").unwrap();

@@ -327,9 +327,11 @@ enum DepositAttempt {
     /// which is what the spool records.
     Deferred(String),
     /// The far end ANSWERED, with a word about its own state rather than about
-    /// this letter (`down`, `config-invalid`) — so the entry is not parked, the
-    /// LINK backs off, and the next pass retries (the same treatment a transport
-    /// failure gets, because either way there is nothing wrong with the letter).
+    /// this letter (`down`, `config-invalid`). A drain keeps the entry live: it
+    /// is not parked, the LINK backs off, and the next pass retries (the same
+    /// treatment a transport failure gets, because either way there is nothing
+    /// wrong with the letter). A live send returns an own letter at once, as it
+    /// returns any verified refusal.
     LinkRefused(String),
     /// No JSON-RPC response at all — dial/tunnel/HTTP/parse failure. The
     /// LINK is the suspect, not this entry.
@@ -414,12 +416,12 @@ fn classify_deposit_response(result: &Value) -> DepositAttempt {
             let detail = result.get("detail").and_then(Value::as_str);
             // **A LINK state is not a verdict on the letter**.
             // `down` and `config-invalid` say something about the far end's own
-            // state — a node its mesh quarantined, a declaration set that will not
-            // load — and the sender's answer is the one it gives a link that
-            // cannot carry mail right now: the entry stays LIVE (never parked,
-            // never needing `retry --refused`) and the ordinary back-off carries
-            // it back, so it flows by itself once the peer is fixed or no longer
-            // `down`. Every other word (`zone-violation`, `broken-chain`,
+            // state — a node its mesh quarantined, a declaration set that will
+            // not load. A drain keeps such an entry LIVE (never parked, never
+            // needing `retry --refused`): the ordinary back-off carries it
+            // back, so it flows by itself once the peer is fixed or no longer
+            // `down`. A live send returns an own letter at once instead, with
+            // the word. Every other word (`zone-violation`, `broken-chain`,
             // `bad-msgid`, …) is a verdict on THIS letter and still parks it.
             // **Judged on the RAW word, before the words are cleaned**: a `down`
             // with a format character inside is not the word `down`, and
@@ -1717,9 +1719,11 @@ fn poll_through(node_name: &str, named: Option<&str>, target: PollTarget) -> Res
     }
     // The container ids and the words in `refused` are the far end's, and a
     // container that failed its check proved nothing about its own `msgid`.
-    // Named for the next poll: every letter this answer handed over that is
-    // still not filed, dedup'd or refused for good. Replaced whole, so an answer
-    // that files nothing new still says what is unfiled.
+    // Named for the next poll: every msgid this answer handed over that is not
+    // filed or dedup'd, refused ones included. The hub reads `refused` first,
+    // so a held letter refused here is already returned when it reads this
+    // list. Replaced whole, so an answer that files nothing new still says what
+    // is unfiled.
     let filed_now = aoide_storage::outbox::filed_pending(node_name).unwrap_or_default();
     let mut unfiled: Vec<String> = Vec::new();
     for msgid in handed {
@@ -2377,11 +2381,12 @@ mod tests {
     /// word about the link (`down`, `config-invalid`) leaves such an entry
     /// live, while every other word (`zone-violation`, `broken-chain`,
     /// `bad-msgid`, `not-correspondence`, …) parks it, because that one will
-    /// never be true. An own letter is not the drain's: a verified refusal of
-    /// any word returns it at once. What each verified answer means is pinned
-    /// by `only_acceptance_delivers_and_every_verified_refusal_is_a_refusal`.
-    /// The classifier is pure, so the whole vocabulary is provable here without
-    /// a door.
+    /// never be true. An own letter is not the drain's: the drain never dials
+    /// it, and a live send returns it at once on a verified refusal of any
+    /// word. What each verified answer means is pinned by
+    /// `only_acceptance_delivers_and_every_verified_refusal_is_a_refusal`. The
+    /// classifier is pure, so the whole vocabulary is provable here without a
+    /// door.
     #[test]
     fn a_drain_parks_a_non_letter_entry_only_on_a_verdict() {
         let word = |reason: &str| {
@@ -6386,7 +6391,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// H2, the drain path: a held-but-unusable binding parks the letter and
+    /// The drain path: a held-but-unusable binding parks the letter and
     /// **no deposit is attempted at all** — never a plaintext one.
     #[test]
     fn an_unusable_binding_parks_the_dialled_entry_and_nothing_is_dialed() {
@@ -6422,7 +6427,7 @@ mod tests {
 
         // A plaintext entry, exactly what `spool_entry` would have made
         // before the binding arrived.
-        let canary = "CANARY-H2-DRAIN-UNUSABLE";
+        let canary = "CANARY-DRAIN-UNUSABLE";
         let envelope = aoide_storage::mail::mint_charter_letter("liveb", canary, "home").unwrap();
         aoide_storage::outbox::write_entry("liveb", &OutboxEntry::fresh(envelope)).unwrap();
 
@@ -6443,7 +6448,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// H2, the poll path: an unusable binding and a vanished entry both hand
+    /// The poll path: an unusable binding and a vanished entry both hand
     /// over NOTHING, and a concurrently sealed entry hands over the CONTAINER
     /// rather than the snapshot's stale envelope.
     #[test]
@@ -6466,7 +6471,7 @@ mod tests {
         aoide_storage::node_store::save_nodes(&nodes).unwrap();
 
         let now = aoide_storage::time::now_iso_utc();
-        let canary = "CANARY-H2-POLL-UNUSABLE";
+        let canary = "CANARY-POLL-UNUSABLE";
         let envelope = aoide_storage::mail::mint_outbound_letter("alice", "liveb", "bob", canary).unwrap();
         let msgid = envelope.msgid.clone();
         aoide_storage::outbox::write_entry("liveb", &OutboxEntry::sealed_held(envelope.clone(), {
@@ -6511,7 +6516,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// L7 (the branch review): `spool_entry`'s three arms. The third is the
+    /// `spool_entry`'s three arms. The third is the
     /// one an operator actually sees — a node whose binding is held but not
     /// usable is PARKED, never sent in the clear — and no test covered any of
     /// them.
@@ -6584,7 +6589,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// **F1's client half.** The door's own reply for a landed charter, read by
+    /// **The client half.** The door's own reply for a landed charter, read by
     /// the client's OWN classifier and acted on by its OWN delivered-deposit
     /// arm.
     ///

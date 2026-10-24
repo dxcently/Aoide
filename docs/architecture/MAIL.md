@@ -660,21 +660,25 @@ door's audit name whitelist gains both names so they never log as bare
   and an old hub ignores the key: across
   the switch a held letter a poller refuses is ended or offered again as
   `filed` decides, as it is today.
-  **`deferred` is the poller's word on what it was handed and did not settle,
-  and on a poll it serves the hub's transit custody.** It carries the msgids of
-  the last answered poll that the poller neither filed, dedup'd, nor refused for
-  good (a transit container it could not take yet, `box-full` among them): at
-  most fifty, and only well-formed msgids (lowercase 64-hex) are read, anything
-  else is dropped. The hub defers those of its OWN spool entries for this caller
+  **`deferred` names what the poll was handed and did not file or dedup, and
+  the hub counts a try on each of its own entries it names, transit custody and
+  held letters alike.** It carries the msgids of the last answered poll that the
+  poller neither filed nor dedup'd, refused ones included (a transit container
+  it could not take yet, `box-full` among them): at most fifty, and only
+  well-formed msgids (lowercase 64-hex) are read, anything else is dropped. The
+  hub defers those of its OWN spool entries for this caller
   (`aoide_storage::outbox::defer_named`): each is tried once more and waits its
   window (`deferral_due`) before it is handed again, so fifty unfileable
   containers at the head of the spool cannot fill every batch. The hub reads
   `refused` before `deferred`, so a held letter the poller refused is already
-  returned when `deferred` is read, and `defer_named` skips it. It defers no
-  other node's entry, and it never ends a container's custody. An old hub never
-  reads the key, so its answer is unchanged. The poller replaces its stored list
-  with what the answered poll left unfiled; a poll that got no answer keeps the
-  old list for the next ask. **One poll of a node runs at a time** (the
+  returned when `deferred` is read, and `defer_named` skips it. A refused
+  container is named too: it counts a try and keeps its word. A hub that
+  predates `refused` does not read it first, so it counts a try on a refused
+  held letter as well. It defers no other node's entry, and it never ends a
+  container's custody. An old hub never reads the key, so its answer is
+  unchanged. The poller replaces its stored list with what the answered poll
+  left unfiled; a poll that got no answer keeps the old list for the next ask.
+  **One poll of a node runs at a time** (the
   `.poll` flock,
   tried and
   never waited for): two overlapping asks would both read `filed` before either
@@ -1621,20 +1625,19 @@ shared, read-only join of the outbox entry with its node's own link
 state, computed fresh on every call, never cached. Its vocabulary, most
 authoritative first:
 
-- `returned` — an own letter this box keeps because its send, or a retry,
-  got no verified `accepted` or `duplicate`. The word that ended the dial
-  rides beside it, the letter is marked `refused` and bound to its session,
-  and automatic retries have stopped. `aoide mail outbox retry <msgid>`
-  resends the same bytes under the same msgid (ruling 131).
+- `returned` — an own letter this box keeps once its send's dial, or a
+  retry's, has ended without a verified `accepted` or `duplicate`: a transport
+  failure returns it too. The word that ended the dial rides beside it, the
+  letter is marked `refused` and bound to its session, and automatic retries
+  have stopped. `aoide mail outbox retry <msgid>` resends the same bytes under
+  the same msgid (ruling 131). An own letter with its session that is neither
+  held nor refused reads `returned` too, with the word its last dial kept, if
+  any: no write leaves one, and a retry sends it.
 - `held` — an own letter waiting for the poll of the hop it was spooled toward
   (a `poll` or `hold` hop, or `--hold`). It is bound to its session, never
   dialled by this box, and leaves when that hop files it or its session ends.
 - `pre-131` — an own letter spooled before the session binding existed, so
   it has no session. The next tick drops it (reason `pre-131`).
-- `queued` — an own letter that has its session and is neither held nor
-  refused. No send leaves one: a live letter is written only once its dial
-  has answered, and a held letter is held. The tick keeps a letter while its
-  session lives, so it never reads `pre-131`.
 - `removed` — a retry's report only, never a listing's: the letter left the
   outbox while its dial was in flight (an `rm`, or its session ending), so
   nothing was written back. The retry refuses with the reason `removed`.

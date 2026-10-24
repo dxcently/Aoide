@@ -525,7 +525,7 @@ never the inbound/serve half (that's `aoide-server`).
   `TunnelTeardownGuard`: one contact, both directions. A pass that never
   got a response does not poll; and because nothing attemptable means no
   dial at all, a `--hold`-only spool does not contact the node (`mail send
-  --hold`'s own post-spool report therefore still reads `queued`).
+  --hold`'s own post-spool report therefore reads `held`).
   **P-CHARTER adds the `poll` address to the same three places, from ONE
   predicate** (`node_store::Node::never_dialled`, the record's address
   being `poll`): `spool_entry` holds such an entry whatever its caller asked
