@@ -489,15 +489,20 @@ pub enum HandOver {
 /// Sealing runs outside the outbox lock (`destination_binding` may take the
 /// stage lock, which is not re-entrant), so the entry is checked again under
 /// the lock before anything is handed over and before anything is written back.
-/// A return that lands after the read and before this returns wins: its letter
-/// is no longer offered, and nothing of the read is written over it. A return
-/// that lands after this returns, while the poll's answer is still being built,
-/// does not stop that answer, and the window is accepted. It gives a poller
-/// nothing it lacks: `return_refused` acts only on the letters held for the
-/// poller that sent the refusal, so only a second, concurrent poll from that same
-/// poller can land one in the window, and that poller can already take a letter
-/// in one poll and refuse it in the next, which returns it to its sender (ruling
-/// 131). Closing the window would take a lock across the whole poll, for no gain.
+/// A return or removal that lands before that check wins: the letter is no
+/// longer offered, and nothing of the read is written over it. Four things can
+/// end the letter's offer after this returns, while the poll's answer is still
+/// being built, and none of them stops that answer: a return by the poller
+/// (`return_refused`); the session-end drop (`drop_for_session`, reason
+/// `session-ended`, which takes held letters too); the tick's sweep
+/// (`sweep_session_letters` in conduct, through `drop_letters_where`, with the
+/// reasons `pre-131` and `session-gone`); and an rm (`remove_entry`, behind
+/// `mail outbox rm`). An answer that already holds the entry still carries it,
+/// so a `mail.outbox.dropped` line, or an rm that succeeded, does not by itself
+/// mean the letter went undelivered. The poller gains nothing from the timing:
+/// an entry is offered only to its own poller, and a poll a moment earlier would
+/// have taken it. Closing the window would take a lock across the whole poll,
+/// for no gain.
 pub fn hand_over(node: &str, msgid: &str) -> Result<HandOver, String> {
     let now = crate::time::now_iso_utc();
     let Some(current) = list_entries(node)?.into_iter().find(|e| e.envelope.msgid == msgid && pollable(e)) else {
