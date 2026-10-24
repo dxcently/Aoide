@@ -197,6 +197,14 @@ fn a_sealed_letter_and_its_ack_round_trip_through_the_mail_adapter() {
         .spawn()
         .expect("the built aoide binary runs");
     wait_for_tcp_up(&format!("127.0.0.1:{port}"));
+    // The relay stamps its start second before it binds and refuses a frame stamped
+    // at or before that second plus five. Wait for the clock to pass `ready + 5`, as
+    // two_mesh_https.rs does, so the first signed call lands past the bound.
+    let now = || std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+    let ready = now();
+    while now() <= ready + 5 {
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
 
     // ── Poll FIRST, send SECOND: a letter is sealed AT MINT when the
     // destination's binding is held, and this poll is what learns it

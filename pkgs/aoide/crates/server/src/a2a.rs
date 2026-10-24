@@ -9788,6 +9788,7 @@ mod tests {
     /// stays a replay however many nonces K records.
     #[test]
     fn a_flood_on_one_key_never_makes_another_keys_recorded_nonce_replayable() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let j = unique_nonce("flood-j");
         let k = unique_nonce("flood-k");
         let now = 1_800_000_000_i64;
@@ -10027,6 +10028,7 @@ mod tests {
 
     #[test]
     fn nonce_check_is_blind_to_letter_case_and_surrounding_space() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         // The signature folds the nonce (`canonical_string`), so the sets must
         // fold it too: every spelling of one nonce is one nonce, and so is every
         // spelling of one key.
@@ -15871,6 +15873,10 @@ mod tests {
         let spooled = aoide_storage::outbox::list_entries(&origin_name).unwrap().len();
 
         NONCE_SETS.lock().unwrap_or_else(|e| e.into_inner()).remove(&own.to_ascii_lowercase());
+        assert!(
+            !NONCE_SETS.lock().unwrap_or_else(|e| e.into_inner()).contains_key(&own.to_ascii_lowercase()),
+            "the first listener's nonce set is gone, so the replay below reaches the msgid check: {own}"
+        );
         let again = answer(send_raw(a2a_port, &request));
         assert_eq!(again["result"]["status"], "duplicate", "the same signed bytes at the other listener: {again}");
 
