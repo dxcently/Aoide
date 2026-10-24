@@ -365,9 +365,11 @@ impl Drop for EnvSaver {
 }
 
 /// Point `AOIDE_ROOT` at a fresh, isolated temp directory for the returned
-/// guard's lifetime, and clear `AOIDE_STATE_DIR`/`AOIDE_STAGE_DIR` so
-/// neither can leave a stale absolute override pointing somewhere else —
-/// restored on drop via [`EnvSaver`]. `aoide-storage`'s own `env_lock()`
+/// guard's lifetime, and clear `AOIDE_STATE_DIR`, `AOIDE_STAGE_DIR` and
+/// `AOIDE_AUDIT_LOG` so none of them can leave a stale absolute override
+/// pointing somewhere else — restored on drop via [`EnvSaver`]. An audit log
+/// left set by an earlier test in the same process would otherwise take this
+/// test's audit lines. `aoide-storage`'s own `env_lock()`
 /// floors nothing (unlike `aoide-conduct`'s and `aoide-server`'s own), so a
 /// storage test that sets only `AOIDE_STATE_DIR` still resolves
 /// `stage_dir()` — and so `try_stage_lock`'s `.stage.lock` — against the
@@ -395,28 +397,30 @@ impl Drop for EnvSaver {
 /// directory: the caller still removes it at the end of the test, the same
 /// way every `unique_tmp` caller already does.
 pub fn isolated_mail_root(tag: &str) -> (EnvSaver, PathBuf) {
-    let env = EnvSaver::capture(&["AOIDE_ROOT", "STRILLIX_ROOT", "AOIDE_STATE_DIR", "AOIDE_STAGE_DIR", "AOIDE_DAEMON_SOCKET"]);
+    let env = EnvSaver::capture(&["AOIDE_ROOT", "STRILLIX_ROOT", "AOIDE_STATE_DIR", "AOIDE_STAGE_DIR", "AOIDE_DAEMON_SOCKET", "AOIDE_AUDIT_LOG"]);
     let root = unique_tmp(tag);
     std::env::set_var("AOIDE_ROOT", &root);
     std::env::set_var("STRILLIX_ROOT", &root);
     std::env::remove_var("AOIDE_STATE_DIR");
     std::env::remove_var("AOIDE_STAGE_DIR");
+    std::env::remove_var("AOIDE_AUDIT_LOG");
     std::env::set_var("AOIDE_DAEMON_SOCKET", root.join("no-daemon.sock"));
     (env, root)
 }
 
 /// Point both runtime roots at `root` for the returned guard's lifetime:
 /// `AOIDE_ROOT` (core state, the conducting stage, `run/`) and `STRILLIX_ROOT`
-/// (the rice stage, `declared/`, `rices/`). Clears `AOIDE_STATE_DIR` and
-/// `AOIDE_STAGE_DIR` so no override can point outside `root`. Restored on
-/// drop. The caller holds [`env_lock`] and removes `root`, as with
-/// [`isolated_mail_root`].
+/// (the rice stage, `declared/`, `rices/`). Clears `AOIDE_STATE_DIR`,
+/// `AOIDE_STAGE_DIR` and `AOIDE_AUDIT_LOG` so no override can point outside
+/// `root`. Restored on drop. The caller holds [`env_lock`] and removes `root`,
+/// as with [`isolated_mail_root`].
 pub fn pin_roots(root: &std::path::Path) -> EnvSaver {
-    let env = EnvSaver::capture(&["AOIDE_ROOT", "STRILLIX_ROOT", "AOIDE_STATE_DIR", "AOIDE_STAGE_DIR"]);
+    let env = EnvSaver::capture(&["AOIDE_ROOT", "STRILLIX_ROOT", "AOIDE_STATE_DIR", "AOIDE_STAGE_DIR", "AOIDE_AUDIT_LOG"]);
     std::env::set_var("AOIDE_ROOT", root);
     std::env::set_var("STRILLIX_ROOT", root);
     std::env::remove_var("AOIDE_STATE_DIR");
     std::env::remove_var("AOIDE_STAGE_DIR");
+    std::env::remove_var("AOIDE_AUDIT_LOG");
     env
 }
 

@@ -2176,14 +2176,18 @@ pub enum Delivery {
 /// One verified answer decides it. `accepted` and `duplicate` deliver; any other
 /// verified answer returns the letter at once with its word, and a JSON-RPC `error`
 /// in a verified answer does too. An answer that never came, or does not verify, is
-/// dialled once more; a second such failure returns the letter. A hop its mesh
-/// declares `down`, a hop no address resolves for, and a letter parked at spool time
-/// are returned without a dial at all.
+/// dialled once more; a second such failure returns the letter. Without a dial
+/// at all, a letter comes back with its word when its mesh's declaration cannot
+/// be read, when its hop is declared `down`, when no address resolves for the
+/// hop, or when it was parked at spool time.
 pub fn deliver_now(node_name: &str, entry: aoide_storage::outbox::OutboxEntry) -> Delivery {
     if entry.refused {
         return Delivery::Returned(Box::new(entry));
     }
     let mesh = entry_mesh(&entry);
+    if let Some(word) = mesh.as_deref().and_then(unreadable_declaration_word) {
+        return returned(entry, format!("refused: {word}"));
+    }
     let Some((node, dial_only)) = dial_node(node_name, mesh.as_deref()) else {
         return returned(entry, "refused: no-address".to_string());
     };
@@ -2258,19 +2262,25 @@ fn entry_mesh(entry: &aoide_storage::outbox::OutboxEntry) -> Option<String> {
         .map(|mesh| aoide_storage::routing::zone_name(&mesh))
 }
 
-/// The word a mesh's declaration gives for not dialling `node` in `mesh`: `down`
-/// where the declaration says so, or the declaration's own refusal word where the
-/// declaration cannot be read. `None` when the dial may go ahead.
-fn forbidden_dial_word(mesh: &str, node: &Node) -> Option<String> {
-    let set = match aoide_storage::routing::declarations() {
-        Ok(set) => set,
-        Err(refusal) => return Some(refusal.reason),
-    };
-    match aoide_storage::routing::declaration_of(&set, mesh) {
-        Some(Err(refusal)) => Some(refusal.reason.clone()),
-        _ if record_forbidden_by_declaration(mesh, node) => Some(aoide_storage::charter::STATUS_DOWN.to_string()),
-        _ => None,
+/// The refusal word the declaration gives `mesh` when this box cannot read it.
+/// That is either the set failing to load, or the mesh's entry being refused.
+/// `None` where the mesh reads. Checked before the hop is resolved, so an
+/// unreadable declaration is never reported as a missing address.
+fn unreadable_declaration_word(mesh: &str) -> Option<String> {
+    match aoide_storage::routing::declarations() {
+        Err(refusal) => Some(refusal.reason),
+        Ok(set) => match aoide_storage::routing::declaration_of(&set, mesh) {
+            Some(Err(refusal)) => Some(refusal.reason.clone()),
+            _ => None,
+        },
     }
+}
+
+/// The word that keeps `node` undialled in `mesh`: `down`, where the
+/// declaration judges it `down`. `None` when the dial may go ahead. An
+/// unreadable declaration is refused first, by [`unreadable_declaration_word`].
+fn forbidden_dial_word(mesh: &str, node: &Node) -> Option<String> {
+    record_forbidden_by_declaration(mesh, node).then(|| aoide_storage::charter::STATUS_DOWN.to_string())
 }
 
 /// The entries one pass of [`drain_node`] may attempt: spooled, oldest first,
@@ -2358,14 +2368,18 @@ mod tests {
         aoide_test_support::isolated_mail_root(tag)
     }
 
-    /// **Only a refusal that is a verdict on the LETTER parks it.** A word about
-    /// the link (`down`, `config-invalid`) leaves the entry live
-    /// — while every other word (`zone-violation`, `broken-chain`, `bad-msgid`,
-    /// `not-correspondence`, …) parks it, because that one will never be true.
-    /// The classifier is pure, so the whole vocabulary is provable here without a
-    /// door.
+    /// **A drain parks a non-letter entry on a verdict, not on a link word.**
+    /// Receipts, charters and transit containers are the drain's to carry. A
+    /// word about the link (`down`, `config-invalid`) leaves such an entry
+    /// live, while every other word (`zone-violation`, `broken-chain`,
+    /// `bad-msgid`, `not-correspondence`, …) parks it, because that one will
+    /// never be true. An own letter is not the drain's: a verified refusal of
+    /// any word returns it at once. What each verified answer means is pinned
+    /// by `only_acceptance_delivers_and_every_verified_refusal_is_a_refusal`.
+    /// The classifier is pure, so the whole vocabulary is provable here without
+    /// a door.
     #[test]
-    fn only_a_verdict_on_the_letter_parks_it() {
+    fn a_drain_parks_a_non_letter_entry_only_on_a_verdict() {
         let word = |reason: &str| {
             classify_deposit_response(&serde_json::json!({
                 "status": "refused",
@@ -6604,6 +6618,30 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// **A mis-signed `accepted` is not a delivery.** The answer is signed, but
+    /// by a key this box holds for no node, so it does not verify, and it is
+    /// used: the letter is dialled twice and comes back. A forged receipt
+    /// cannot end the sender's copy. `post_signed` refuses such an answer
+    /// before any of it is read, and this test pins that.
+    #[test]
+    fn a_mis_signed_accepted_answer_is_dialled_twice_and_returned() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("live-mis-signed");
+        let stranger = aoide_storage::identity::mint_ephemeral().unwrap();
+        let (port, seen) = logged_door(move |r: &str| signed_reply(r, &stranger, 200, ACCEPTED));
+        point_at("far", port);
+
+        let delivery = deliver_now("far", live_letter("far", "hi"));
+        let Delivery::Returned(returned) = delivery else {
+            panic!("a mis-signed accepted answer must not deliver: {delivery:?}");
+        };
+        assert_eq!(deposits_seen(&seen), 2, "unverified: one re-dial");
+        assert!(returned.last_outcome.starts_with("unauthenticated:"), "{}", returned.last_outcome);
+        assert!(aoide_storage::outbox::list_entries("far").unwrap().is_empty(), "the live dial writes nothing");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// **A re-dial after a lost answer is a fresh signed call, and it comes back
     /// `duplicate`.** The first deposit landed; the second finds it and delivers.
     #[test]
@@ -6749,6 +6787,71 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// **A live letter in a mesh whose declaration cannot be read is returned
+    /// with that declaration's own word, and no door hears of it.** The door
+    /// would accept, so a dial would show as a deposit.
+    #[test]
+    fn a_live_letter_in_an_unreadable_declaration_is_returned_with_its_word_undialled() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("live-unreadable-declaration");
+        let letter = live_letter("elsewhere", "hi");
+        let (port, seen) = logged_door(|r: &str| signed_for_method(r, ACCEPTED));
+        // The same broken section the drain's unloadable-declaration test uses.
+        // The set will not load, so no mesh reads.
+        std::fs::write(
+            aoide_storage::config::source().path,
+            "[pairing]\nhomeMesh = \"home\"\n\n[mesh.home.status]\nnobody = \"down\"\n",
+        )
+        .unwrap();
+        let mut node = keyed_node("elsewhere");
+        node.url = format!("http://127.0.0.1:{port}/");
+        node.verified = true;
+        node.grants = aoide_storage::node_store::grants_in("home", &["message"]);
+        aoide_storage::node_store::save_nodes(&[node]).unwrap();
+
+        let delivery = deliver_now("elsewhere", letter);
+        let Delivery::Returned(returned) = delivery else {
+            panic!("an unreadable declaration must return the letter: {delivery:?}");
+        };
+        assert_eq!(deposits_seen(&seen), 0, "never dialled");
+        assert_eq!(
+            returned.last_outcome,
+            format!("refused: {}", aoide_storage::charter::CONFIG_UNREADABLE),
+            "the declaration's own word, not a missing address"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **A live letter in a mesh the set refuses comes back with the set's
+    /// word, and no record is needed.** An in-force charter that will not read
+    /// makes the mesh charter-shaped and refused. With no node record there
+    /// is no address either, so the word is the declaration's and never
+    /// `no-address`.
+    #[test]
+    fn a_live_letter_in_a_refused_mesh_comes_back_with_the_set_word() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("live-refused-mesh");
+        let letter = live_letter("nowhere-hop", "hi");
+        let mesh = entry_mesh(&letter).expect("a letter always rides a mesh");
+        let in_force = aoide_storage::charter::in_force_path(&mesh);
+        std::fs::create_dir_all(in_force.parent().unwrap()).unwrap();
+        std::fs::write(&in_force, "not a charter\n").unwrap();
+        let set = aoide_storage::routing::declarations().unwrap();
+        let Some(Err(refusal)) = aoide_storage::routing::declaration_of(&set, &mesh) else {
+            panic!("the set must refuse `{mesh}`'s declaration");
+        };
+        let word = refusal.reason.clone();
+
+        let delivery = deliver_now("nowhere-hop", letter);
+        let Delivery::Returned(returned) = delivery else {
+            panic!("a refused mesh must return the letter: {delivery:?}");
+        };
+        assert_eq!(returned.last_outcome, format!("refused: {word}"), "the set's own word, not a missing address");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// A hop this box cannot resolve to any address is returned at once.
     #[test]
     fn a_hop_with_no_dial_address_is_returned_at_once() {
@@ -6802,10 +6905,13 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// **The classifier's vocabulary, rewritten for the live dial.** Acceptance and
-    /// the duplicate word deliver. Every verified refusal, the link words and
-    /// `box-full` included, is a refusal the live dial returns. A missing status is
-    /// a refusal too. Nothing short of a verified answer is a verdict.
+    /// **The classifier's vocabulary, as the live dial reads it.** Acceptance
+    /// and the duplicate word deliver. Every verified refusal, the link words
+    /// and `box-full` included, is a refusal the live dial returns. A missing
+    /// status is a refusal too. Nothing short of a verified answer is a
+    /// verdict. An unsigned or mis-signed `accepted` never reaches this
+    /// classifier: `post_signed` refuses it first, and the live tests of both
+    /// say so.
     #[test]
     fn only_acceptance_delivers_and_every_verified_refusal_is_a_refusal() {
         let word = |reason: &str| {

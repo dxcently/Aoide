@@ -939,10 +939,12 @@
   no link lock. A delivered letter writes nothing. A returned one is written to
   the spool marked `refused`, and the command is a refusal whose fix is
   `aoide mail outbox retry`. A held one (a `poll` or `hold` hop, or `--hold`) is
-  written and never dialled. `data.delivery` is built from that outcome
-  (`delivered`, `returned` or `held`; MAIL.md "Status and the nodelist view"),
-  never read back from the spool. The send never hands its letter to
-  `drain_node` after the dial, so the dial is the letter's only attempt there.
+  written and never dialled. A letter whose mesh's declaration cannot be read is
+  returned with that declaration's own word, before its hop is resolved.
+  `data.delivery` is built from that outcome (`delivered`, `returned` or `held`;
+  MAIL.md "Status and the nodelist view"), never read back from the spool. The
+  send never hands its letter to `drain_node` after the dial, so the dial is the
+  letter's only attempt there.
 - **`mail_route` is a READ, and it stays one.** It resolves the mesh off the
   mesh DECLARATIONS (`routing::declarations`, the same set the door and the
   drain read), runs `aoide_storage::routing::Letter::route`, prints the hop,

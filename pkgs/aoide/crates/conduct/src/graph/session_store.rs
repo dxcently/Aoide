@@ -6227,6 +6227,33 @@ mod letter_sweep_tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// **A sessionless entry that is not a letter is never swept.** Receipts,
+    /// charters and transit containers are the drain's to carry, so neither the
+    /// pre-131 pass nor the session pass may touch them. Both passes filter on
+    /// the letter kind, and this test pins that.
+    #[test]
+    fn a_sessionless_non_letter_survives_the_sweep() {
+        use aoide_storage::mail::{ENTRY_TYPE_CHARTER, ENTRY_TYPE_RECEIPT, ENTRY_TYPE_TRANSIT};
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("bridge-sweep-non-letter");
+        roster(&[("live", "running")]);
+        for kind in [ENTRY_TYPE_RECEIPT, ENTRY_TYPE_CHARTER, ENTRY_TYPE_TRANSIT] {
+            let mut envelope = letter_envelope(&format!("msg-{kind}"));
+            envelope.header.kind = kind.to_string();
+            aoide_storage::outbox::write_entry("far", &OutboxEntry::fresh(envelope)).unwrap();
+        }
+
+        sweep_session_letters();
+
+        assert_eq!(
+            spooled_msgids(),
+            vec!["msg-charter".to_string(), "msg-receipt".to_string(), "msg-transit".to_string()],
+        );
+        assert!(audit_lines("mail.outbox.dropped").is_empty(), "nothing is dropped, so nothing is logged");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// The audit lines one command wrote.
     fn audit_lines(command: &str) -> Vec<String> {
         std::fs::read_to_string(aoide_protocol::audit::default_audit_log())

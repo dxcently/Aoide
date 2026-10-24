@@ -9967,7 +9967,8 @@ no marker that a batch was ever handed over.
 
 **A poll writes only the caller's own word.** The
 request may carry `filed` — the msgids the poller filed out of its previous poll
-of this node — and the hub retires its own `transit` custody of exactly those
+of this node — and the hub retires its own `transit` custody, and any held own
+`letter` it holds for this poller, of exactly those
 (`outbox::retire_acknowledged`) BEFORE it offers, which is why an entry whose
 response was lost is offered again rather than retired into silence. The request
 may also carry `deferred` — the msgids it was handed and did not settle — and
@@ -9975,11 +9976,12 @@ each of the caller's own entries it names takes a `tries` stamp and a
 `deferred:` outcome, which holds it out of the next offers for its window
 (`outbox::defer_named`). Nothing else is written: no `last_polled_at`, no
 "already handed over" bookmark — which is exactly why a re-poll before the ack
-hands the same envelopes over again (unless it deferred them), and why a
-`letter` entry still leaves the spool only when
-the far end's ordinary receipt retires it (a `letter` filed by the poller mints
-a receipt exactly as a deposit would; an ack is an envelope, so the poller's own
-next drain carries it back) or through `aoide mail outbox rm <msgid>`. The
+hands the same envelopes over again (unless it deferred them), and why a held
+`letter` leaves the spool only when the poller names its msgid in `filed`, when
+an older poller's receipt retires it (`outbox::retire_by_ack`), when its session
+ends, or through `aoide mail outbox rm <msgid>` (a `letter` filed by the poller
+mints a receipt exactly as a deposit would; an ack is an envelope, so the
+poller's own next drain carries it back). The
 receiving side is the SAME receive path a pushed deposit takes —
 `aoide_client::mail_wire::poll_node` runs `mail::deposit`'s whole chain
 (recompute `msgid`, verify the ORIGIN against `header.from.node`'s own key,

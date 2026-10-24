@@ -1843,6 +1843,8 @@ fn a_send_to_a_down_node_is_refused_at_the_route_and_nothing_is_dialled_or_kept(
     ));
     assert_eq!(sent.status, Status::Error, "{}", sent.message);
     assert_eq!(sent.data.as_ref().unwrap()["reason"], "no-route", "{:?}", sent.data);
+    let why = sent.data.as_ref().unwrap()["detail"].as_str().unwrap_or_default();
+    assert!(why.contains("declared `down`"), "the refusal names the word: {why}");
     assert!(aoide_storage::outbox::list_entries("yomi").unwrap().is_empty(), "nothing is spooled toward it");
     assert!(
         aoide_storage::outbox::read_link_state("yomi").unwrap().is_none(),
