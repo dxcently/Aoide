@@ -112,7 +112,7 @@ impl Drop for Door {
 }
 
 /// The wall clock's whole second, the unit a door stamps its start in.
-fn whole_second() -> u64 {
+pub fn whole_second() -> u64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
 }
 
