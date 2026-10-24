@@ -3371,12 +3371,18 @@ fn mail_poll(params: &Value, ctx: &RequestCtx) -> Result<Value, (i64, String)> {
     // held letter of this box's own that the poller names is returned to its
     // sender at once, before `deferred` and the answer are built, so the answer
     // does not offer it and the acknowledgements below find it no longer held.
+    // Read as `deferred` is: well-formed msgids only, each once with the first
+    // word named for it, and at most `REFUSED_LIST_CAP` of them.
     let refused: Vec<aoide_storage::outbox::PollRefusal> = params
         .get("refused")
         .and_then(Value::as_array)
         .map(|list| {
+            let mut seen = std::collections::HashSet::new();
             list.iter()
                 .filter_map(|item| serde_json::from_value::<aoide_storage::outbox::PollRefusal>(item.clone()).ok())
+                .filter(|refusal| aoide_storage::mail::is_msgid(&refusal.msgid))
+                .filter(|refusal| seen.insert(refusal.msgid.clone()))
+                .take(aoide_storage::outbox::REFUSED_LIST_CAP)
                 .collect()
         })
         .unwrap_or_default();
@@ -15956,6 +15962,52 @@ mod tests {
         let log = std::fs::read_to_string(&audit_log).unwrap_or_default();
         assert!(log.contains("mail.outbox.returned"), "the return is in the log: {log}");
         assert!(!log.contains("mail.outbox.filed"), "and nothing was retired: {log}");
+
+        match saved_audit {
+            Some(v) => std::env::set_var("AOIDE_AUDIT_LOG", v),
+            None => std::env::remove_var("AOIDE_AUDIT_LOG"),
+        }
+        mail_deposit_cleanup(&root, saved_state, saved_stage);
+    }
+
+    /// **The holder reads at most `REFUSED_LIST_CAP` refusals, one per msgid,
+    /// and keeps the first word named for each.** Fifty-one held letters are
+    /// named, and the first of them twice with two words: the first fifty
+    /// distinct msgids are returned with their first words, and the one past
+    /// the cap stays held.
+    #[test]
+    fn refused_list_is_read_once_per_msgid_and_capped() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
+        let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
+        let root = mail_deposit_root("refused-capped");
+        act_as(&root, "here");
+        let saved_audit = std::env::var("AOIDE_AUDIT_LOG").ok();
+        std::env::set_var("AOIDE_AUDIT_LOG", root.join("log"));
+
+        setup_signed_node_with_allows("box-b", &["message"]);
+        let cap = aoide_storage::outbox::REFUSED_LIST_CAP;
+        let mut msgids = Vec::new();
+        for i in 0..=cap {
+            let envelope =
+                aoide_storage::mail::mint_outbound_letter("alice", "box-b", "bob", &format!("for b {i}")).unwrap();
+            msgids.push(envelope.msgid.clone());
+            aoide_storage::outbox::write_entry("box-b", &aoide_storage::outbox::OutboxEntry::held(envelope)).unwrap();
+        }
+        let mut refused = vec![json!({ "msgid": msgids[0], "word": "unknown-box" })];
+        refused.push(json!({ "msgid": msgids[0], "word": "box-full" }));
+        refused.extend(msgids[1..].iter().map(|m| json!({ "msgid": m, "word": "unknown-box" })));
+        let audit_log = root.join("log");
+        let ctx = mail_deposit_ctx(&audit_log, Some("box-b"));
+
+        mail_poll(&json!({ "node": "box-b", "refused": refused }), &ctx).unwrap();
+
+        let entries = aoide_storage::outbox::list_entries("box-b").unwrap();
+        let held: Vec<&aoide_storage::outbox::OutboxEntry> = entries.iter().filter(|e| e.is_held()).collect();
+        assert_eq!(held.len(), 1, "the cap leaves the last named letter held: {}", held.len());
+        assert_eq!(held[0].envelope.msgid, msgids[cap], "and it is the one past the cap");
+        let first = entries.iter().find(|e| e.envelope.msgid == msgids[0]).unwrap();
+        assert_eq!(first.last_outcome, "refused: unknown-box", "the first word named for a msgid is kept");
 
         match saved_audit {
             Some(v) => std::env::set_var("AOIDE_AUDIT_LOG", v),

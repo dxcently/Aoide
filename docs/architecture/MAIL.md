@@ -649,9 +649,12 @@ door's audit name whitelist gains both names so they never log as bare
   bytes: the hub strips control characters and keeps at most 120 characters of
   it. The keep list (`box-full`, `local-io` and the rest of that class) decides
   `filed` for a container alone; its words travel in `refused` too. The list
-  has no count cap of its own, as `filed` has none. An old poller sends no
-  `refused`, and an old hub ignores the key: across the switch a held letter a
-  poller refuses is ended or offered again as `filed` decides, as it is today.
+  is capped at `REFUSED_LIST_CAP` (fifty, the poll's own batch): the hub reads
+  at most that many, one per well-formed msgid, with the first word named for
+  it, and the poller sends its oldest first and keeps the rest for the next
+  ask. An old poller sends no `refused`, and an old hub ignores the key: across
+  the switch a held letter a poller refuses is ended or offered again as
+  `filed` decides, as it is today.
   **`deferred` is the poller's word on what it was handed and did not settle,
   and on a poll it serves the hub's transit custody.** It carries the msgids of
   the last answered poll that the poller neither filed, dedup'd, nor refused for

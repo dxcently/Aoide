@@ -970,9 +970,10 @@ a2a spawn probe needs `/bin/sh` + `printf`'s byte-exact output.
   hand-over writes nothing. The named writes are three:
   `outbox::retire_acknowledged`
   for each `filed` msgid (the hub's own transit custody, or a held letter whose
-  hop is the poller), `outbox::return_refused` for each `refused` pair (a held
-  own letter, marked returned), and `outbox::defer_named` for each `deferred`
-  msgid: a `tries` stamp and a `deferred:` outcome on ITS OWN entries, never a
+  hop is the poller), `outbox::return_refused` for each `refused` pair, at most
+  `REFUSED_LIST_CAP` and one per msgid (a held own letter, marked returned),
+  and `outbox::defer_named` for each `deferred` msgid: a `tries` stamp and a
+  `deferred:` outcome on ITS OWN entries, never a
   returned own letter; the stamp holds them out of the window and nothing
   else. No
   bookmark and no "already handed over" flag may be added here: the

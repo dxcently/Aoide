@@ -1210,15 +1210,21 @@ fn refused_path(node: &str) -> PathBuf {
 }
 
 /// The refusals this box has taken in `node`'s poll and not yet sent: the
-/// `refused` list the next `aoide/mailPoll` carries. Empty when there is none,
-/// and tolerant of a missing or unreadable file, as [`filed_pending`] is.
+/// `refused` list the next `aoide/mailPoll` carries, at most
+/// [`REFUSED_LIST_CAP`], oldest first; the rest wait for a later ask. Empty
+/// when there is none, and tolerant of a missing or unreadable file, as
+/// [`filed_pending`] is.
 pub fn refused_pending(node: &str) -> Result<Vec<PollRefusal>, String> {
-    read_refused_unlocked(node)
+    Ok(read_refused_unlocked(node)?.into_iter().take(REFUSED_LIST_CAP).collect())
 }
 
 /// Record that `node`'s poll refused `msgid` with `word`. A pair already
-/// recorded is kept once.
+/// recorded is kept once. A msgid that is not well-formed names no held letter,
+/// so nothing is kept for it.
 pub fn record_refused(node: &str, msgid: &str, word: &str) -> Result<(), String> {
+    if !crate::mail::is_msgid(msgid) {
+        return Ok(());
+    }
     let node = node.to_string();
     let refusal = PollRefusal { msgid: msgid.to_string(), word: word.to_string() };
     with_lock(move || {
@@ -1308,6 +1314,10 @@ pub fn return_refused(node: &str, msgid: &str, word: &str) -> Result<bool, Strin
 /// the poll's own batch size, so a deferral list never outgrows what a poll
 /// offers.
 pub const DEFERRED_LIST_CAP: usize = POLL_BATCH_CAP;
+
+/// Most refusals one poll carries in `refused`, and most one stored list sends:
+/// the poll's own batch size, as [`DEFERRED_LIST_CAP`] is for `deferred`.
+pub const REFUSED_LIST_CAP: usize = POLL_BATCH_CAP;
 
 fn deferred_path(node: &str) -> PathBuf {
     node_dir(node).join(".deferred")
@@ -2978,6 +2988,21 @@ mod tests {
         assert_eq!(poll_payloads("there").unwrap().len(), 1, "a held letter is offered before the refusal");
         assert!(return_refused("there", "msg-held", "unknown-box").unwrap());
         assert!(poll_payloads("there").unwrap().is_empty(), "and not after it");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **A refusal of a msgid that names no held letter is not kept.** A
+    /// malformed msgid cannot name a letter in any spool, so the poller records
+    /// nothing for it: the refusal is still audited and reported by the poll,
+    /// and the list the next ask carries stays well-formed.
+    #[test]
+    fn refused_list_drops_a_malformed_msgid() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("outbox-refused-malformed");
+
+        record_refused("there", "not-a-msgid", "box-full").unwrap();
+        assert!(refused_pending("there").unwrap().is_empty(), "a malformed msgid is not kept");
 
         let _ = std::fs::remove_dir_all(&dir);
     }

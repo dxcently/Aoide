@@ -184,8 +184,9 @@
   stores each `{msgid, word}` a poll refused, keep-list words included, and
   `refused_pending` is what the next ask carries. `clear_refused` drops only the
   pairs that ask sent, so a refusal recorded while its answer was in flight is
-  kept. Nothing caps the file, as nothing caps `.filed`; one answer's containers
-  bound what it can hold. On the hub's side `return_refused` is the only reader
+  kept. `refused_pending` sends at most `REFUSED_LIST_CAP`, oldest first, and
+  the file keeps the rest for the next ask. `record_refused` keeps no msgid that
+  is not well-formed. On the hub's side `return_refused` is the only reader
   of a `refused` name, and it acts on a held own letter of the caller's own
   spool alone (MAIL.md §Wire).
 - **Enduring identity is independent of knowledge configuration.** Bind an

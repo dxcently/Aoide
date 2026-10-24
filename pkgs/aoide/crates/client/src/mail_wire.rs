@@ -6018,6 +6018,54 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// **A poll sends at most `REFUSED_LIST_CAP` refusals, oldest first, and
+    /// the rest on the next ask.** Two more refusals than one ask carries are
+    /// recorded. The first ask sends the first cap; an answered ask clears what
+    /// it sent, so the next carries the two left.
+    #[test]
+    fn refused_list_is_sent_in_capped_batches() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("refused-capped-batches");
+
+        let _me = register_local_origin();
+        let cap = aoide_storage::outbox::REFUSED_LIST_CAP;
+        let msgids: Vec<String> = (0..cap + 2).map(|i| format!("{i:064x}")).collect();
+        for msgid in &msgids {
+            aoide_storage::outbox::record_refused("relay", msgid, "box-full").unwrap();
+        }
+        let (listener, port, seen) = recording_door(
+            r#"{"jsonrpc":"2.0","id":1,"result":{"status":"accepted"}}"#,
+            r#"{"jsonrpc":"2.0","id":1,"result":{"envelopes":[]}}"#.to_string(),
+        );
+        register_polled_relay(port);
+
+        poll_node("relay", None).unwrap();
+        poll_node("relay", None).unwrap();
+
+        let asks: Vec<Vec<String>> = seen
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|body| body.contains("aoide/mailPoll"))
+            .map(|body| {
+                let request: Value = serde_json::from_str(body).unwrap();
+                let params = request.get("params").unwrap_or(&request);
+                params["refused"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|pair| pair["msgid"].as_str().unwrap().to_string())
+                    .collect()
+            })
+            .collect();
+        assert_eq!(asks.len(), 2, "two asks were sent: {asks:?}");
+        assert_eq!(asks[0], msgids[..cap].to_vec(), "the first ask carries the oldest {cap}");
+        assert_eq!(asks[1], msgids[cap..].to_vec(), "and the next carries the two left");
+
+        drop(listener);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// **The list a poll SENDS is the list it clears** — with an acknowledgement
     /// recorded WHILE the answer was in flight. That is the only shape that tells
     /// the fix from the bug: reading `filed_pending` again after the response
