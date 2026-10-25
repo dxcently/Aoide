@@ -13,10 +13,11 @@ crate.
   `std::net::TcpStream`, with no async runtime, no HTTP library and no GUI
   crate. Its dependencies are serde, serde_json and libc.
 - `crates/shell` (`aoide-desktop-shell`): the exec module, the one place the
-  app starts a process or sends a signal, and the app's own doors (`doors.rs`):
-  their launch, record, re-attach, watch and close. Its dependencies are serde,
-  serde_json, libc, the door crate and `aoide-protocol` (a path dependency, for
-  `is_unsafe` and `visible`).
+  app starts a process or sends a signal; the app's own doors (`doors.rs`):
+  their launch, record, re-attach, watch and close; and the asks a door raises
+  and the answers to them (`asks.rs`). Its dependencies are serde, serde_json,
+  libc, sha2 (a dialog's digest), the door crate and `aoide-protocol` (a path
+  dependency, for `is_unsafe` and `visible`).
 
 ## How the door composes
 
@@ -128,10 +129,10 @@ doors.rs    Doors::open(exec, eidolon, home, root, runtime, out)
   is dropped and never signalled, even when its pid is live. A record whose pin
   changed fails the command line check, so its door runs on, and the app keeps
   no record of it.
-- The watch thread only reads. It forwards each frame on the caller's channel
-  and never signals a door. A stream that ends while the door lives reopens
-  after a second. A stream that ends with the door gone drops the record and
-  sends `Gone`.
+- The watch thread only reads. It keeps the stream's asks, forwards each frame
+  on the caller's channel, and never signals a door. A stream that ends while
+  the door lives reopens after a second. A stream that ends with the door
+  gone drops the record and sends `Gone`.
 - The turn state is `Unknown` until a `turn-state` frame. The wire sends one
   only when the turn changes, and a new stream carries none.
 - A close reads the turn the stream last showed, ends the watch (2 s bound), and
@@ -148,8 +149,49 @@ doors.rs    Doors::open(exec, eidolon, home, root, runtime, out)
   reconnect the turn is `Unknown` until a frame arrives. A close after the turn
   is refused, a marked door stays marked, and a stop now closes on its 409.
 
+## How an ask is answered
+
+```
+asks.rs     Doors::prepare_answer(launch, ask, label)
+              |  refused unless this door's stream carries the ask,
+              |  and the ask offers the label
+              v
+            Prepared, with the dialog a yes shows (none for a no)
+              |
+              v
+            Doors::send_answer(prepared, shown)
+              +-- verify                the door's checks; a failure sends
+              |                         nothing
+              +-- dialog again          from the stored ask, not the screen
+              +-- digest == shown       else refused, nothing sent
+              +-- capped yes            refused, nothing sent
+              +-- POST /api/answer      204 Answered, 409 NotPending,
+                                        422 Rejected with the reason,
+                                        401 or other: an error
+```
+
+- The asks a stream carries are kept per door, by id. Each `ask` adds one, each
+  `ask-settled` removes it, and a new stream clears them before its replay.
+- A yes on an approval is confirmed on a dialog that shows the whole input: the
+  input as canonical JSON, keys sorted at every depth, each line through
+  `visible`. Above 4 KiB or 60 lines the dialog offers no yes, and shows the
+  curl line for this door instead. That line reads the token from its file,
+  names no token, and carries the label prepared, not the input.
+- A question's answer, and a no, skip the confirm. Only an approval's `yes`
+  approves, since eidolon gives its consent on that label alone.
+- A 204 leaves the ask listed until the door's `ask-settled` arrives. A 409
+  means nothing is pending under that id, a 422 refuses with the door's reason,
+  and a 401 or any other status is a `DoorError`. None of them removes the ask.
+- Between streams the last stream's asks stay listed, so an answer to one the
+  door settled in the gap comes back 409.
+
+## The fake eidolon
+
 The fake eidolon is `src/bin/fake-eidolon.rs`, behind the `fakes` feature. It
 takes `web --bind 127.0.0.1:0 --cwd DIR` and nothing else. A test drives it with
 control words in `DIR/.fake-turn`: `running`, `idle`, `end`, and `cancel-409`,
-which queues one 409 for the next cancel. It logs each control word applied,
-each request served, and the SIGTERM it receives, to `DIR/.fake-log`, in order.
+which queues one 409 for the next cancel. It raises an approval with
+`ask-approval ID JSON`, and settles one with `settle ID LABEL`. `answer-409`,
+`answer-422` and `answer-401` each queue one answer of that status. It logs each
+control word applied, each request served (an answer with its body), and the
+SIGTERM it receives, to `DIR/.fake-log`, in order.

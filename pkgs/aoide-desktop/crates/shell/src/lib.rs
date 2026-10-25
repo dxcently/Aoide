@@ -2,5 +2,6 @@
 //! module that starts a process or sends a signal.
 #![deny(unsafe_code)]
 
+pub mod asks;
 pub mod doors;
 pub mod exec;

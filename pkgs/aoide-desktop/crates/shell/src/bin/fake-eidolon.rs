@@ -11,13 +11,21 @@
 //! - `cancel-409` queues one `409` for the next `POST /api/cancel`, the answer
 //!   an idle door gives. A cancel served while running answers `204`, turns the
 //!   door idle and pushes `running=false`.
+//! - `ask-approval ID JSON` raises an approval under that id with that input,
+//!   and `settle ID LABEL` settles it. Either one rewrites the head, so a stream
+//!   opened later replays the asks still pending, and is pushed at once while a
+//!   stream is open.
+//! - `answer-409`, `answer-422` and `answer-401` queue one answer of that status
+//!   for the next `POST /api/answer`. An answer served as `204` leaves its ask
+//!   pending until a `settle` says otherwise.
 //!
-//! Each control word applied, each request served and each signal received is
-//! appended to `DIR/.fake-log` in order. On SIGTERM it waits, at most 20 s, until
-//! no events stream is open, removes its token file and exits 0. Past 20 s it
-//! exits 1 and leaves its token.
+//! Each control word applied, each request served (an answer with its body) and
+//! each signal received is appended to `DIR/.fake-log` in order. On SIGTERM it
+//! waits, at most 20 s, until no events stream is open, removes its token file
+//! and exits 0. Past 20 s it exits 1 and leaves its token.
 #![allow(unsafe_code)]
 
+use std::collections::BTreeMap;
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::PathBuf;
@@ -26,7 +34,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use aoide_desktop_door::fake::FakeDoor;
-use serde_json::json;
+use serde_json::{json, Value};
 
 const TOKEN: &str = "fake-door-token";
 const POLL: Duration = Duration::from_millis(20);
@@ -46,28 +54,45 @@ struct Core {
     seen: String,
     turn: Turn,
     pending: Option<Turn>,
+    hello: Value,
+    /// The asks pending on this door, each as the frame it was raised with, by id.
+    asks: BTreeMap<u64, Value>,
 }
 
 impl Core {
-    fn open(dir: PathBuf) -> Core {
+    fn open(dir: PathBuf, hello: Value) -> Core {
         let log = OpenOptions::new()
             .create(true)
             .append(true)
             .open(dir.join(".fake-log"))
             .expect("the log opens");
-        Core { dir, log, served: 0, seen: String::new(), turn: Turn::Idle, pending: None }
+        Core {
+            dir,
+            log,
+            served: 0,
+            seen: String::new(),
+            turn: Turn::Idle,
+            pending: None,
+            hello,
+            asks: BTreeMap::new(),
+        }
     }
 
     fn line(&mut self, text: &str) {
         writeln!(self.log, "{text}").expect("the log is written");
     }
 
-    /// Logs the requests served since the last call, and turns the door idle
-    /// when a cancel is served while it runs.
+    /// Logs the requests served since the last call, an answer with its body,
+    /// and turns the door idle when a cancel is served while it runs.
     fn sync(&mut self, door: &FakeDoor) {
         let requests = door.requests();
         for request in &requests[self.served..] {
-            self.line(&format!("{} {}", request.method, request.path));
+            let body = if request.path == "/api/answer" {
+                format!(" {}", String::from_utf8_lossy(&request.body))
+            } else {
+                String::new()
+            };
+            self.line(&format!("{} {}{body}", request.method, request.path));
             if request.method == "POST" && request.path == "/api/cancel" && self.turn == Turn::Running {
                 self.turn = Turn::Idle;
                 self.pending = Some(Turn::Idle);
@@ -97,10 +122,68 @@ impl Core {
                 }
             }
             "cancel-409" => door.reply("/api/cancel", 409, ""),
-            _ => return,
+            "answer-409" => door.reply("/api/answer", 409, ""),
+            "answer-422" => door.reply("/api/answer", 422, &json!({"error": "the ask is not taken"}).to_string()),
+            "answer-401" => door.reply("/api/answer", 401, ""),
+            _ => {
+                if let Some((id, input)) = word.strip_prefix("ask-approval ").and_then(|rest| rest.split_once(' ')) {
+                    let input: Value = serde_json::from_str(input).expect("the ask's input is JSON");
+                    self.raise(door, id.parse().expect("the ask id is a number"), input);
+                } else if let Some((id, label)) = word.strip_prefix("settle ").and_then(|rest| rest.split_once(' ')) {
+                    self.settle(door, id.parse().expect("the ask id is a number"), label);
+                } else {
+                    return;
+                }
+            }
         }
         self.seen = word.clone();
         self.line(&format!("control {word}"));
+    }
+
+    /// Puts the head in place: the hello, with its count of pending asks, then
+    /// each pending ask. A stream opened from now on replays it.
+    fn head(&self, door: &FakeDoor) {
+        let mut hello = self.hello.clone();
+        hello["pending"] = json!(self.asks.len());
+        let mut frames = vec![hello.to_string()];
+        frames.extend(self.asks.values().map(Value::to_string));
+        let frames: Vec<&str> = frames.iter().map(String::as_str).collect();
+        door.set_head(&frames);
+    }
+
+    /// Raises an approval under `id`, replacing any ask already there, and pushes
+    /// it while a stream is open.
+    fn raise(&mut self, door: &FakeDoor, id: u64, input: Value) {
+        let frame = json!({
+            "type": "ask",
+            "kind": "approval",
+            "ask_id": id,
+            "call_id": format!("tu{id}"),
+            "tool": "write",
+            "input": input,
+            "prompt": "write?",
+            "reason": null,
+            "structural": false,
+            "judged": null,
+            "yolo": false,
+            "answers": ["yes", "no"],
+        });
+        self.asks.insert(id, frame.clone());
+        self.head(door);
+        if door.streaming() {
+            door.push(&frame.to_string());
+        }
+    }
+
+    /// Settles the ask under `id`: it leaves the head, and its settle is pushed
+    /// while a stream is open.
+    fn settle(&mut self, door: &FakeDoor, id: u64, label: &str) {
+        self.asks.remove(&id);
+        self.head(door);
+        if door.streaming() {
+            let settled = json!({"type": "ask-settled", "ask_id": id, "how": "answered", "answer": label});
+            door.push(&settled.to_string());
+        }
     }
 
     /// Pushes a pending turn-state change once a stream is open to take it.
@@ -143,10 +226,9 @@ fn main() {
         "yolo": false,
         "pending": 0,
         "protocol": 1,
-    })
-    .to_string();
-    door.set_head(&[hello.as_str()]);
-    let core = Arc::new(Mutex::new(Core::open(dir)));
+    });
+    let core = Arc::new(Mutex::new(Core::open(dir, hello)));
+    core.lock().expect("the core lock").head(&door);
     println!("listening on http://{}/", door.addr());
     println!("token file: {}", door.token_file().display());
     {

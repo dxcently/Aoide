@@ -5,7 +5,9 @@
 //! `$AOIDE_ROOT/state/desktop/doors.json`. Each door has one watch thread that
 //! reads its events and forwards them. The watch never closes or signals a
 //! door: it updates the shared state and forwards. The caller acts on what it
-//! forwards, and `CloseDue` says a marked door's turn has ended.
+//! forwards, and `CloseDue` says a marked door's turn has ended. The asks a
+//! stream carries are held per door as well, and answered only at that door
+//! (asks.rs).
 //!
 //! Nothing here reads an environment variable. The runtime dir arrives as the
 //! value of `XDG_RUNTIME_DIR`, and `$AOIDE_ROOT` as a path.
@@ -26,11 +28,13 @@ use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use aoide_desktop_door::{
-    check_runtime, runtime_from_env, token_path, CancelOutcome, Closer, Door, DoorError, Events, Frame,
+    check_runtime, runtime_from_env, token_path, AnswerOutcome, Ask, CancelOutcome, Closer, Door, DoorError, Events,
+    Frame,
 };
 use aoide_protocol::untrusted::{is_unsafe, visible};
 use serde::{Deserialize, Serialize};
 
+use crate::asks::{self, Dialog, Prepared, Sent};
 use crate::exec::{check_pin, terminate, Exec, ExecError};
 
 /// How long a close waits for the watch thread to end.
@@ -59,8 +63,9 @@ pub enum TurnState {
 /// What the watch threads forward to the caller, on one channel.
 #[derive(Debug)]
 pub enum Event {
-    /// A frame from a door's events stream.
-    Frame { launch_id: String, frame: Frame },
+    /// A frame from a door's events stream. Boxed, since a frame is much larger
+    /// than the other variants.
+    Frame { launch_id: String, frame: Box<Frame> },
     /// A door marked for closing has gone idle. The caller answers `close_due`.
     CloseDue { launch_id: String },
     /// A door's stream ended and the door is gone. Its record is dropped.
@@ -106,6 +111,9 @@ pub enum DoorsError {
     Refused { pid: u32, log: PathBuf, why: String },
     /// A close the door's turn state does not allow yet.
     Turn(String),
+    /// An answer refused before any request: its door fails its checks, the
+    /// ask is not pending there, or the answer is not offered.
+    Ask(String),
     /// No watched door has this launch id, or the door could not be re-watched.
     Unknown(String),
 }
@@ -116,9 +124,11 @@ impl fmt::Display for DoorsError {
             DoorsError::Door(e) => write!(f, "{e}"),
             DoorsError::Exec(e) => write!(f, "{e}"),
             DoorsError::Io(e) => write!(f, "{e}"),
-            DoorsError::Plan(why) | DoorsError::Store(why) | DoorsError::Turn(why) | DoorsError::Unknown(why) => {
-                f.write_str(why)
-            }
+            DoorsError::Plan(why)
+            | DoorsError::Store(why)
+            | DoorsError::Turn(why)
+            | DoorsError::Ask(why)
+            | DoorsError::Unknown(why) => f.write_str(why),
             DoorsError::Refused { pid, log, why } => {
                 write!(f, "the door (pid {pid}) did not pass its checks: {why}; its log is {}", log.display())
             }
@@ -412,6 +422,51 @@ impl Doors {
         }
     }
 
+    /// The asks this door's stream carries, oldest first.
+    pub fn pending_asks(&self, id: &str) -> Result<Vec<Ask>, DoorsError> {
+        Ok(self.watch(id)?.link.state.lock().unwrap().asks.values().cloned().collect())
+    }
+
+    /// Prepares an answer to an ask this door's stream carries. Nothing is sent.
+    /// It refuses when no watched door carries the ask, or the ask does not
+    /// offer the label, so an answer aimed at another door never gets a request.
+    pub fn prepare_answer(&self, id: &str, ask_id: u64, label: &str) -> Result<Prepared, DoorsError> {
+        let watch = self.watch(id)?;
+        let ask = watch.link.state.lock().unwrap().asks.get(&ask_id).cloned();
+        let Some(ask) = ask else {
+            return Err(DoorsError::Ask(format!("ask {ask_id} is not pending at this door, so nothing was sent")));
+        };
+        if !asks::offers(&ask, label) {
+            return Err(DoorsError::Ask(format!("ask {ask_id} does not offer that answer, so nothing was sent")));
+        }
+        let dialog = asks::dialog(&ask, label, watch.addr, Path::new(&watch.entry.token_file));
+        Ok(Prepared { launch_id: id.to_owned(), ask_id, label: label.to_owned(), dialog })
+    }
+
+    /// Sends a prepared answer to the door that carried its ask, once the door
+    /// passes its checks. The dialog is built again from the stored ask, and
+    /// nothing is sent unless its digest is `shown`: the digest of the dialog on
+    /// screen, or None when the answer shows none. A yes above the cap is never sent.
+    pub fn send_answer(&self, prepared: &Prepared, shown: Option<[u8; 32]>) -> Result<Sent, DoorsError> {
+        let entry = self.watch(&prepared.launch_id)?.entry.clone();
+        self.verify(&entry)
+            .map_err(|why| DoorsError::Ask(format!("the door failed its checks, so nothing was sent: {why}")))?;
+        let fresh = self.prepare_answer(&prepared.launch_id, prepared.ask_id, &prepared.label)?;
+        if fresh.dialog.as_ref().map(Dialog::digest) != shown {
+            return Err(DoorsError::Ask("the ask on screen is not the one stored, so nothing was sent".into()));
+        }
+        if fresh.dialog.as_ref().is_some_and(Dialog::capped) {
+            return Err(DoorsError::Ask(
+                "no yes is offered above the dialog's cap, so nothing was sent; answer from a terminal".into(),
+            ));
+        }
+        match self.door(&prepared.launch_id)?.answer(prepared.ask_id, &prepared.label, None)? {
+            AnswerOutcome::Answered => Ok(Sent::Answered),
+            AnswerOutcome::NotPending => Ok(Sent::NotPending),
+            AnswerOutcome::Rejected { reason } => Ok(Sent::Rejected { reason }),
+        }
+    }
+
     fn watch(&self, id: &str) -> Result<&Watch, DoorsError> {
         self.watches
             .get(id)
@@ -598,6 +653,9 @@ struct Shared {
     closer: Option<Closer>,
     exited: bool,
     gone: bool,
+    /// The asks the current stream carried, by ask id: the replay on a new
+    /// stream rebuilds them, and a settled ask leaves them.
+    asks: BTreeMap<u64, Ask>,
 }
 
 /// The watch thread's half: it reads, updates the shared state, and forwards.
@@ -648,7 +706,10 @@ impl Worker {
         }
     }
 
+    /// Forwards one stream's frames. The stream's replay follows the opening, so
+    /// the asks are cleared first and rebuilt from the replay.
     fn drain(&self, events: Events) {
+        self.link.state.lock().unwrap().asks.clear();
         for frame in events {
             let Ok(frame) = frame else {
                 return;
@@ -657,21 +718,32 @@ impl Worker {
                 return;
             }
             let due = self.observe(&frame);
-            let _ = self.out.send(Event::Frame { launch_id: self.launch_id.clone(), frame });
+            let _ = self.out.send(Event::Frame { launch_id: self.launch_id.clone(), frame: Box::new(frame) });
             if due {
                 let _ = self.out.send(Event::CloseDue { launch_id: self.launch_id.clone() });
             }
         }
     }
 
-    /// Records a turn-state frame. Returns whether a marked door's turn has now ended.
+    /// Records what a frame changes: the turn state, an ask, or an ask settled.
+    /// Returns whether a marked door's turn has now ended.
     fn observe(&self, frame: &Frame) -> bool {
-        let Frame::TurnState { running } = frame else {
-            return false;
-        };
         let mut shared = self.link.state.lock().unwrap();
-        shared.turn = if *running { TurnState::Running } else { TurnState::Idle };
-        let due = !*running && shared.armed;
+        let due = match frame {
+            Frame::TurnState { running } => {
+                shared.turn = if *running { TurnState::Running } else { TurnState::Idle };
+                !*running && shared.armed
+            }
+            Frame::Ask(ask) => {
+                shared.asks.insert(asks::ask_id(ask), ask.clone());
+                false
+            }
+            Frame::AskSettled { ask_id, .. } => {
+                shared.asks.remove(ask_id);
+                false
+            }
+            _ => false,
+        };
         self.link.moved.notify_all();
         due
     }

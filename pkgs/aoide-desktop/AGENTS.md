@@ -95,12 +95,12 @@ README.md.
   start time and zombie state, its command line, and its token path. It opens
   no connection. `Doors::drop` signals nothing.
 - A request under a door's token goes out only after `verify` (launch,
-  re-attach, stop now), or from the watch thread's reconnect. The reconnect
-  checks the pid and its start time, the same check `live` makes, and nothing
-  more.
+  re-attach, stop now, answer), or from the watch thread's reconnect. The
+  reconnect checks the pid and its start time, the same check `live` makes, and
+  nothing more.
 - The watch thread only reads. It updates the shared state under one lock,
-  forwards each frame, and sends `CloseDue` when a marked door's turn has ended.
-  The caller answers with `close_due`.
+  keeps the door's pending asks, forwards each frame, and sends `CloseDue` when
+  a marked door's turn has ended. The caller answers with `close_due`.
 - The close is five steps: end the watch, re-check the door, SIGTERM, wait up to
   10 s on `/proc`, and remove the record. The wait never escalates. A door still
   live after 10 s keeps its record, and is no longer watched until the app next
@@ -116,6 +116,19 @@ README.md.
 - A record file that does not parse is refused and never rewritten.
 - The record and the door's log are created 0600 with `O_NOFOLLOW`, and the log
   with `create_new`. Their directories are made 0700.
+- An answer goes only to the door whose stream carried its ask. `prepare_answer`
+  refuses, with no request, when no watched door carries the ask, or the ask
+  does not offer the label.
+- `send_answer` runs `verify` before its request. It builds the dialog again
+  from the stored ask, and sends only when that dialog's digest is the digest
+  shown. A yes above the cap is never sent, and a changed ask is refused.
+- An ask leaves `pending_asks` only when the door's `ask-settled` arrives. A
+  204, 409, 422 or 401 leaves it listed.
+- A stream's asks are cleared when it opens, and rebuilt from its replay.
+- The dialog for a yes is the input as canonical JSON, each line through
+  `visible`. Above 4 KiB or 60 lines it is the curl line for this door instead.
+- The curl line never holds the token. It reads the token file with
+  `$(cat ...)`, and every value is one POSIX shell word.
 
 ## Tests
 
