@@ -2935,6 +2935,37 @@ in the message.
   roster lock. The sweep reads the sessions its letters name BEFORE the roster;
   reversed, a live session's letter can look gone. A roster that cannot be read
   skips the session pass; it is never taken as empty.
+- **Aoide writes only the unit pair it names and the record.** `add` refuses
+  a unit slot that is taken, a link included (`slot_taken`), and a unit
+  directory that is a link or a file (`prepare_unit_dir`), so nothing is
+  written through either. `remove` deletes only a unit that still hashes to
+  the record (`unit_state`). It refuses, deleting nothing, when a unit was
+  edited or is a link, and it skips a unit that is already gone. Pinned by
+  `a_symlinked_or_foreign_unit_in_the_way_is_refused_and_never_written_through`,
+  `a_job_whose_units_are_both_gone_is_removed_and_its_name_can_be_added_again`
+  and
+  `a_symlinked_unit_counts_as_changed_and_remove_refuses_it_and_deletes_nothing`
+- **A unit's text comes from `unit_texts` alone, one `quote_word` per argv
+  word.** `WorkingDirectory=` is unquoted with its `%` doubled, and it appears
+  only with `--cwd`. `ExecStart=` doubles `$` as well as `%`. `Environment=`
+  takes no variable expansion (systemd.exec(5)), so it doubles neither. Pinned
+  by `unit_texts_quote_each_word_the_systemd_way` and
+  `a_job_without_a_cwd_has_no_working_directory_line`.
+- **The four verbs open to the `Cli` and `Daemon` doors only.** `add` and
+  `remove` also refuse a door that cannot approve. Every verb refuses before
+  its first write when the host is not Linux or `systemctl --user show` fails:
+  `add_world` and `remove_world` probe first. Pinned by
+  `the_job_verbs_open_to_the_cli_and_daemon_doors_only`,
+  `a_host_that_is_not_linux_refuses_every_verb_and_writes_nothing` and
+  `a_failing_user_manager_probe_refuses_add_with_zero_files`.
+- **A journal line is data.** `runs` keeps a line only when its `MESSAGE` is
+  one JSON object with a known `status`. Its strings reach `--json` as JSON
+  strings, and the human rows pass through `visible`. Pinned by
+  `runs_turns_a_journal_fixture_into_rows_and_shows_their_text_visibly`.
+- **No test reaches the real user manager, journal or unit directory.** The
+  shimmed tests point `XDG_CONFIG_HOME` at their own root and put the
+  `systemctl`, `journalctl` and `systemd-analyze` shims first on `PATH`,
+  under the crate's env lock.
 
 ## Extension points
 
@@ -2974,12 +3005,20 @@ in the message.
   primitive (`aoide_protocol::pick::choose_many`) in this crate.
 - **A new hook event or harness profile** extends `aoide_protocol::agents`,
   not this crate — the harness-profile table lives one layer down.
+- **A new `job` verb** is a `fn(inv, host: Host)` beside the others in
+  `graph/job.rs`, reached through a `pub fn job_*(inv)` that passes `HOST`.
+  The `Host` argument is what lets a test run it as `Host::Other`. Its probe
+  runs before its first write. Its `cmd!` goes in `commands/job.rs` and is
+  wired into `cli`'s `commands::all()`, as any `commands/` entry is.
 
 ## Docs update required in the same commit
 
 - This `README.md` when a public module, seam, or charter-smudge reasoning
   changes.
 - `CONTRACTS.md` when a graph/session wire shape changes.
+- `graph/job.rs` changes to a unit text, the `jobs.json` shape or a verb's
+  output: `CONTRACTS.md`'s `state/stage/jobs.json` section, and the local-jobs
+  seam bullet in this crate's `README.md`.
 - `pkgs/aoide/crates/AGENTS.md` for cross-crate invariants — not restated
   here.
 - `doorbell.rs` changes update `docs/architecture/MAIL.md`'s "Delivery and

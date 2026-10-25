@@ -1641,6 +1641,17 @@ sweep, then `drain_all`. The reaper pass, a hook death and `session end` each
 call `drop_ended_sessions` after their roster write returns, never under the
 roster lock. `mail_bridge` stays passthroughs only.
 
+- **Local jobs (`aoide job`)**: `graph/job.rs` implements `job add --name=<name>
+  --on=<calendar> [--cwd=<dir>] -- <argv0> [<arg>...]`, `job remove
+  --name=<name>`, `job list [--json]` and `job runs [--name=<name>] [--json]`,
+  registered by `commands/job.rs`. A job is two unit files,
+  `aoide-job-<name>.timer` and `.service`, under
+  `$XDG_CONFIG_HOME/systemd/user/` (`~/.config/systemd/user/` when unset), and
+  one record, `state/stage/jobs.json` (`CONTRACTS.md` §4 has its shape).
+  `jobs_path()` names the record for the server's stage roster. A run's output
+  lands in the user journal; `runs` reads the workflow door's JSON line from
+  there and never writes.
+
 ## What it consumes
 
 `aoide-protocol`, `aoide-storage`, `aoide-upkeep` (`session hook`'s check-lane
@@ -1657,6 +1668,10 @@ daemon_dispatch`, P-D6; `mail_bridge`'s functions call
 — the ONE other edge
 this crate carries specifically so `aoide-server` never has to; see
 `client`'s own README for why that edge stays).
+
+The `job` seam runs `systemctl`, `journalctl` and `systemd-analyze` from PATH
+(`graph/job.rs`): the user manager's own tools, run as programs and never
+linked.
 
 ## How it composes
 

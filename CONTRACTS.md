@@ -1273,12 +1273,12 @@ applied to the stage tree itself):
   (`apps.json`; the `aoide-apps` user unit that keeps it current is planned) and QML itself
   (`grimoire.json`); read by Quickshell. This is strillix's tree.
 - **`state/stage/`** — CONDUCTING state: `sessions.json`, `hooks.json`,
-  `projects.json`, `graph.json`, `pending.json`, `notifications.json`. Written by
-  shellbridge and the `aoide`/`aoided` binaries (`aoide graph`, `aoide
-  notifications`); read by the conductor TUI and by Quickshell. This is core's
-  tree — the `aoide`/`aoided` binaries alone read and write it, never
-  `strillix`, and QML READS it (display only, CONTRACTS.md §0's corollary) but
-  never writes it.
+  `projects.json`, `graph.json`, `pending.json`, `notifications.json`,
+  `jobs.json`. Written by shellbridge and the `aoide`/`aoided` binaries
+  (`aoide graph`, `aoide notifications`, `aoide job`); read by the conductor TUI
+  and by Quickshell. This is core's tree — the `aoide`/`aoided` binaries alone
+  read and write it, never `strillix`, and QML READS it (display only,
+  CONTRACTS.md §0's corollary) but never writes it.
 
 `state/` is owner-only and is the privacy boundary for everything under it;
 file and subdirectory modes inside it are not relied on. Every storage write
@@ -4583,6 +4583,55 @@ answer like a permission-verdict digit never does), the payload is prefixed
 sent it — attribution, not authentication; both `--from` and
 `AOIDE_SESSION_ID` are ordinary same-user process state, spoofable by
 anyone who can already write to the target's control socket.
+
+### `state/stage/jobs.json` — **v0**
+
+The record of the local jobs `aoide job add` writes and `aoide job remove`
+drops. It is `{ "jobs": [ … ] }`, and each job is one object:
+
+- `name` — `[a-z0-9-]{1,48}`, unique. It names the unit files.
+- `calendar` — the `OnCalendar=` text that `systemd-analyze calendar` accepted.
+- `argv` — the absolute program path, then its arguments, verbatim.
+- `cwd` — an absolute directory, or `null` when no `--cwd` was given.
+- `timerSha256`, `serviceSha256` — the hex digest of each unit file as written.
+- `addedAt` — ISO-8601 UTC. `addedBy` — the door the add came through (`cli`
+  or `daemon`).
+
+The unit files live in `$XDG_CONFIG_HOME/systemd/user/` (default
+`~/.config/systemd/user/`), as `aoide-job-<name>.timer` and
+`aoide-job-<name>.service`. The timer's `Unit=` names the service, and there is
+no `Persistent=`. The service is `Type=oneshot`, with `WorkingDirectory=` only
+when a `cwd` was given, `Environment="AOIDE_ROOT=<root>"`, and `ExecStart=`
+running the recorded argv. Each word is double-quoted and escaped the way the
+unit format reads it; the golden test in `graph/job.rs` pins the exact bytes.
+Nothing is looked up on PATH except `systemctl`, `journalctl` and
+`systemd-analyze`.
+
+`add` runs the probe (`systemctl --user show --property=Version`) and checks
+the calendar. It then writes both units atomically, records their digests under
+the stage lock, runs `daemon-reload`, and runs `enable --now` on the timer. If
+systemd refuses after the record is written, the job stays recorded, and
+`remove` clears it. `remove` deletes each unit that still hashes to the record:
+it runs `disable --now` on the timer first, when that file is aoide's, deletes
+the units, runs `daemon-reload`, and drops the record. A unit already gone is
+skipped and named in the outcome. When the timer is gone, the outcome also
+prints `systemctl --user stop aoide-job-<name>.timer`, which aoide never runs
+itself. A unit that was edited, or is a link, makes `remove` refuse and delete
+nothing; the outcome then prints the lines that remove them by hand.
+
+`list` gives each job one status, the first of these that holds: `missing` (a
+unit is gone), `changed` (a unit's bytes differ from the record), `stale`
+(argv0 is gone or not executable), `inactive` (its timer is not active), or
+`ok`. It adds `foreign` for each `aoide-job-*` unit that no record names. Jobs
+fire only while the user manager runs, and aoide never enables linger.
+
+`runs` reads `journalctl --user -u aoide-job-<name>.service -o json --no-pager`,
+or every `aoide-job-*.service` when no name is given. An entry whose MESSAGE is
+one JSON object with a known `status` is a row: `completed` (`session`, `run`,
+`report`), `parked` (`session`, `run`, `question`), `failed` (`session`, `run`,
+`reason`), or `refused` (`error`). Each row has its job and the entry's time.
+Those texts are the run's own output, so they are untrusted: `--json` carries
+them as strings, and the text render shows them visibly.
 
 ### `state/stage/pingback.json` — **v0**
 

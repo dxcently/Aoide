@@ -111,10 +111,10 @@
 //! the SAME [`FeedWriter`] the startup line above already writes through —
 //! one writer per process, `docs/architecture/AOIDED.md`'s "L1" section);
 //! [`crate::producers::HandEditWatcher::sweep`] stat-sweeps [`stage_roster`]
-//! (the six broker-owned stage files) and appends one `class:"audit",
-//! kind:"hand-edit"` line per file whose `(mtime, len)` changed since the
-//! last tick — detection and narration only, this daemon never reverts a
-//! hand edit.
+//! (the seven broker-owned stage files, `jobs.json` among them) and appends
+//! one `class:"audit", kind:"hand-edit"` line per file whose `(mtime, len)`
+//! changed since the last tick — detection and narration only, this daemon
+//! never reverts a hand edit.
 //!
 //! **The watcher is shared with the `dispatch` door, not tick-private
 //! (task #92 fix).** A dispatched session command
@@ -133,7 +133,7 @@
 //! the same call the tick's own reconcile fold already made. This is
 //! deliberately roster-wide rather than a per-command "which files did this
 //! path write" table (a drift trap this workstream already forbids
-//! elsewhere) — stat-ing six files is cheap, and a dispatch that wrote
+//! elsewhere) — stat-ing seven files is cheap, and a dispatch that wrote
 //! nothing just re-baselines to the state that was already there.
 //! `serve_daemon` (the test-only, tick-less entry point) constructs its own
 //! private watcher the same way so `handle_conn`'s dispatch path never
@@ -323,12 +323,13 @@ pub fn events_path(socket_path: &Path) -> PathBuf {
 }
 
 /// The #69 hand-edit watcher's watched-file roster (`docs/architecture/
-/// AOIDED.md`'s "The first producer" section): the six broker-owned stage
-/// files. `pending.json`/`notifications.json` come from `aoide-conduct` (this
-/// crate already depends on it — `daemon.rs`'s own module doc), the other
-/// four from `aoide-storage`; every path is reached through its owning
-/// crate's own accessor rather than a second `stage_dir().join(...)`
-/// literal here (the workspace's "no cross-crate copying" convention).
+/// AOIDED.md`'s "The first producer" section): the seven broker-owned stage
+/// files. `pending.json`/`notifications.json`/`jobs.json` come from
+/// `aoide-conduct` (this crate already depends on it — `daemon.rs`'s own
+/// module doc), the other four from `aoide-storage`; every path is reached
+/// through its owning crate's own accessor rather than a second
+/// `stage_dir().join(...)` literal here (the workspace's "no cross-crate
+/// copying" convention).
 fn stage_roster() -> Vec<PathBuf> {
     vec![
         aoide_storage::stage::sessions_path(),
@@ -337,6 +338,7 @@ fn stage_roster() -> Vec<PathBuf> {
         aoide_storage::stage::graph_path(),
         aoide_conduct::graph::pending_path(),
         aoide_conduct::notifications::notifications_path(),
+        aoide_conduct::graph::jobs_path(),
     ]
 }
 

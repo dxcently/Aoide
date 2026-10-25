@@ -311,7 +311,7 @@ fn command_for<'a>(path: &[String], registry: &'a Registry) -> Option<&'a Comman
 /// desktop head: a `strillix` verb typed at `aoide` is an unknown command there.
 pub const AOIDE_ONLY_HEADS: &[&str] = &[
     "a2a", "adapter", "conduct", "conductor", "config", "content", "context", "daemon", "events", "graph",
-    "hooks", "identity", "mail", "make", "melete", "mesh", "node", "project", "resurrect", "send", "session",
+    "hooks", "identity", "job", "mail", "make", "melete", "mesh", "node", "project", "resurrect", "send", "session",
     "soundcheck", "spawn", "update", "usage", "workspace",
 ];
 pub const SHARED_HEADS: &[&str] = &["guide", "mcp", "onboard", "pair", "schema", "secrets"];
