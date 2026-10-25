@@ -2979,13 +2979,17 @@ in the message.
   stay open to a same-uid writer. `add` checks each slot, then renames its units
   into place: a file that appears in a slot after the check is replaced, and a
   link there is written through, since storage's `atomic_write` follows one link
-  at its target (the storage hardening lane takes that). `remove` runs a bounded
+  at its target. `remove` runs a bounded
   `disable --now` between its hash check and its delete, so a unit swapped into
   that gap is deleted, and `remove` still reports it removed. Pinned by
   `a_symlinked_or_foreign_unit_in_the_way_is_refused_and_never_written_through`,
   `a_job_whose_units_are_both_gone_is_removed_and_its_name_can_be_added_again`
   and
   `a_symlinked_unit_counts_as_changed_and_remove_refuses_it_and_deletes_nothing`
+- **The record holds job names only.** Every read of the record goes through
+  `load_jobs`, which refuses a record holding a name that is not a job name; a
+  named `runs` reads no record and checks `--name` with `valid_name` instead.
+  Pinned by `a_record_holding_a_name_that_is_not_a_job_name_refuses_each_verb`.
 - **A unit's text comes from `unit_texts` alone, one `quote_word` per argv
   word.** `WorkingDirectory=` is unquoted with its `%` doubled, and it appears
   only with `--cwd`. `ExecStart=` doubles `$` as well as `%`. `Environment=`
@@ -3008,12 +3012,18 @@ in the message.
   (`_SYSTEMD_USER_UNIT=`), so no job's window holds another's rows. It keeps a
   line only when its `MESSAGE` is one JSON object with a known status, and its
   own `_SYSTEMD_USER_UNIT` names the job: a `UNIT` or `USER_UNIT` field a client
-  sets names no job. A call that exits non-zero or gives no answer is `unread`
-  for an unnamed run and a refusal for a named one. Its strings reach `--json`
+  sets names no job. Without a name, a call that exits non-zero lists only its
+  own job under `unread`, and the first call that gives no answer also ends the
+  reads, so a silent journal costs one bound whatever the job count: each later
+  job is `unread` as not asked. When no call answers, the verb refuses with the
+  first failure; a named run refuses on any failure. Its strings reach `--json`
   as JSON strings, and the human rows pass through `visible`. Pinned by
   `runs_reads_each_job_on_its_own_and_orders_rows_oldest_first`,
   `runs_lists_a_job_whose_journal_call_exits_non_zero_under_unread`,
-  `runs_lists_a_job_whose_journal_call_never_exits_under_unread_within_the_bound`,
+  `runs_makes_one_silent_call_and_refuses_as_failed_when_nothing_answers`,
+  `runs_ends_its_reads_at_the_first_silent_call_and_lists_the_rest_as_not_asked`,
+  `runs_refuses_as_failed_when_every_recorded_job_exits_non_zero`,
+  `runs_with_no_recorded_job_makes_no_journal_call`,
   `runs_turns_a_journal_fixture_into_rows_and_shows_their_text_visibly` and
   `a_run_row_needs_its_own_unit_so_a_client_set_unit_field_gives_none`.
 - **No test reaches the real user manager, journal or unit directory.** The

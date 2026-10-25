@@ -1680,11 +1680,11 @@ roster lock. `mail_bridge` stays passthroughs only.
   `jobs_path()` names the record for the server's stage roster. A run's output
   lands in the user journal; `runs` reads each recorded job's own unit from
   there, the workflow door's JSON line, and never writes. Each `systemctl`,
-  `journalctl` and `systemd-analyze` call answers within a 10 s bound through
-  `shellbridge::run_bin_bounded`, and a call that gives no answer is never read
-  as a no. `add` and `remove` probe the user manager before they take the stage
-  lock; under the lock they run only the unit-changing calls (`daemon-reload`,
-  `enable --now` and `disable --now`).
+  `journalctl` and `systemd-analyze` call answers within a 10 s bound, plus up
+  to 2 s while its pipes drain, through `shellbridge::run_bin_bounded`, and a
+  call that gives no answer is never read as a no. `add` and `remove` probe the
+  user manager before they take the stage lock; under the lock they run only the
+  unit-changing calls (`daemon-reload`, `enable --now` and `disable --now`).
 
 ## What it consumes
 

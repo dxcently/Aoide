@@ -453,18 +453,43 @@ fn runs(inv: &Invocation, host: Host) -> Outcome {
             Err(out) => return out,
         },
     };
+    if names.is_empty() {
+        return Outcome::ok(CMD, "no local jobs".to_string()).with_data(json!({ "runs": [], "unread": [] }));
+    }
     let mut rows = Vec::new();
     let mut unread = Vec::new();
+    let mut answered = false;
+    let mut first_failure: Option<(Vec<String>, Tool)> = None;
+    let mut silent: Option<&str> = None;
     for job in &names {
+        if let Some(silent_job) = silent {
+            unread.push((job.clone(), format!("not asked: journalctl did not answer for {silent_job}")));
+            continue;
+        }
         let query = journal_query(job);
-        let args: Vec<&str> = query.iter().map(String::as_str).collect();
-        match run_tool("journalctl", &args) {
-            Ok(text) => rows.extend(run_lines(&text, Some(job.as_str()))),
-            Err(tool) if name.is_none() && !matches!(tool, Tool::Missing(_)) => unread.push((job.clone(), tool_said("journalctl", &tool))),
+        let result = {
+            let args: Vec<&str> = query.iter().map(String::as_str).collect();
+            run_tool("journalctl", &args)
+        };
+        match result {
+            Ok(text) => {
+                answered = true;
+                rows.extend(run_lines(&text, Some(job.as_str())));
+            }
+            Err(tool) if name.is_none() && !matches!(tool, Tool::Missing(_)) => {
+                unread.push((job.clone(), tool_said("journalctl", &tool)));
+                if matches!(tool, Tool::NoAnswer(_)) {
+                    silent = Some(job.as_str());
+                }
+                first_failure.get_or_insert((query, tool));
+            }
             Err(tool) => return journal_refused(CMD, &query, tool),
         }
     }
-    rows.sort_by(|a: &Run, b: &Run| a.micros.cmp(&b.micros).then_with(|| a.job.cmp(&b.job)));
+    if let Some((query, tool)) = first_failure.filter(|_| !answered) {
+        return journal_refused(CMD, &query, tool);
+    }
+    rows.sort_by(|a: &Run, b: &Run| a.micros.cmp(&b.micros));
     let mut lines: Vec<String> = rows.iter().map(run_text).collect();
     lines.extend(unread.iter().map(|(job, why)| format!("unread {job}: {why}")));
     let message = if lines.is_empty() {
@@ -485,14 +510,16 @@ fn journal_query(name: &str) -> Vec<String> {
     query
 }
 
-/// The refusal for a journal call that did not answer a named `runs`, and for
-/// a `journalctl` that is not on PATH. An unnamed call that fails is `unread`.
+/// The refusal for a journal call that failed: any call of a named `runs`, a
+/// `journalctl` that is not on PATH, and an unnamed `runs` in which no call
+/// answered. The why is the tool's line, as `tool_said` gives it.
 fn journal_refused(cmd: &str, query: &[String], tool: Tool) -> Outcome {
     let fix = Fix::Run(format!("journalctl {}", words(query)));
+    let why = tool_said("journalctl", &tool);
     match tool {
         Tool::Missing(detail) => Outcome::refuse(cmd, Kind::Refused, "journalctl is not on PATH", "the runs are read from the user journal", Fix::None("install systemd's tools, then retry")).with_detail(detail),
-        Tool::Exited(text) => Outcome::refuse(cmd, Kind::Failed, "the user journal failed", visible(&first_line(&text)), fix).with_detail(text),
-        Tool::NoAnswer(reason) => Outcome::refuse(cmd, Kind::Failed, "the user journal did not answer", visible(&first_line(&reason)), fix).with_detail(reason),
+        Tool::Exited(text) => Outcome::refuse(cmd, Kind::Failed, "the user journal failed", why, fix).with_detail(text),
+        Tool::NoAnswer(reason) => Outcome::refuse(cmd, Kind::Failed, "the user journal did not answer", why, fix).with_detail(reason),
     }
 }
 
@@ -570,9 +597,10 @@ fn unit_state(path: &Path, recorded: &str) -> Unit {
     }
 }
 
-/// The first of `missing`, `changed`, `stale`, `inactive`, `unknown`, `ok` that
-/// holds. `asking` is cleared by the first `is-active` that gives no answer:
-/// each later job that reaches that step is `unknown`, and is not asked.
+/// The first of `missing`, `changed` and `stale` that holds; else the timer's
+/// state read: `active` is `ok`, `inactive` and `failed` are `inactive`, and
+/// any other answer, or a non-zero exit, is `unknown`. A read that gives no
+/// answer ends the asking: each later job is `unknown`, and is not read.
 fn job_status(dir: &Path, job: &Job, asking: &mut bool) -> &'static str {
     let (timer_unit, service_unit) = unit_names(&job.name);
     let units = [
@@ -588,9 +616,13 @@ fn job_status(dir: &Path, job: &Job, asking: &mut bool) -> &'static str {
     } else if !*asking {
         "unknown"
     } else {
-        match systemctl(&["is-active", timer_unit.as_str()]) {
-            Ok(_) => "ok",
-            Err(Tool::Exited(_)) => "inactive",
+        match systemctl(&["show", "--property=ActiveState", "--value", timer_unit.as_str()]) {
+            Ok(state) => match state.trim() {
+                "active" => "ok",
+                "inactive" | "failed" => "inactive",
+                _ => "unknown",
+            },
+            Err(Tool::Exited(_)) => "unknown",
             Err(_) => {
                 *asking = false;
                 "unknown"
@@ -711,15 +743,23 @@ fn slot_taken(cmd: &str, path: &Path) -> Option<Outcome> {
 }
 
 fn load_jobs(cmd: &str) -> Result<JobsFile, Outcome> {
-    load_stage::<JobsFile>(&jobs_path()).map_err(|why| {
-        Outcome::refuse(
-            cmd,
-            Kind::Failed,
-            "the job record cannot be read",
-            visible(&why),
-            Fix::None("aoide does not rewrite a record it cannot read: repair or move it by hand"),
-        )
-    })
+    let file = load_stage::<JobsFile>(&jobs_path()).map_err(|why| unreadable_record(cmd, visible(&why)))?;
+    if let Some(name) = file.jobs.iter().find(|job| !valid_name(&job.name)).map(|job| job.name.clone()) {
+        return Err(unreadable_record(cmd, format!("it holds {}, which is not a job name", visible(&name))));
+    }
+    Ok(file)
+}
+
+/// The refusal for a record that no verb can read: one that does not parse,
+/// or one holding a name that is not a job name.
+fn unreadable_record(cmd: &str, why: String) -> Outcome {
+    Outcome::refuse(
+        cmd,
+        Kind::Failed,
+        "the job record cannot be read",
+        why,
+        Fix::None("aoide does not rewrite a record it cannot read: repair or move it by hand"),
+    )
 }
 
 /// The check on `--cwd`, each refusal taught (rulings 71, 74, 79).
@@ -808,8 +848,9 @@ fn audited(inv: &Invocation, cmd: &str, out: Outcome) -> Outcome {
 }
 
 /// A systemd or journal call that gave no complete answer. `Missing`: not on
-/// PATH. `Exited`: it ran and exited non-zero, and holds its stderr. `NoAnswer`:
-/// a path that is not UTF-8, a failed spawn, a timeout or a discarded read.
+/// PATH. `Exited`: it ran and exited non-zero, and holds its stderr.
+/// `NoAnswer`: a path that is not UTF-8, a failed spawn, a timeout or a
+/// discarded read.
 enum Tool {
     Missing(String),
     Exited(String),
@@ -826,7 +867,8 @@ impl Tool {
 
 /// One systemd or journal call: the program resolved the way `execvp` resolves
 /// it (`pty.rs`), run under [`JOB_TOOL_WAIT`]. Not found is `Missing`; a
-/// non-zero exit is `Exited`; any other call that gives no answer is `NoAnswer`.
+/// non-zero exit is `Exited`; any other call that gives no answer is
+/// `NoAnswer`.
 #[cfg(unix)]
 fn run_tool(program: &str, args: &[&str]) -> Result<String, Tool> {
     let Some(path) = super::pty::resolve_program(program) else {
@@ -856,12 +898,17 @@ fn systemctl(args: &[&str]) -> Result<String, Tool> {
 }
 
 /// A tool's failure in one line: `failed` when it ran and exited non-zero,
-/// `did not answer` when no complete answer came.
+/// `did not answer` when no complete answer came. The first line of its text
+/// follows after a colon, unless the text is empty.
 fn tool_said(program: &str, tool: &Tool) -> String {
-    match tool {
-        Tool::Missing(_) => format!("{program} is not on PATH"),
-        Tool::Exited(text) => format!("{program} failed: {}", visible(&first_line(text))),
-        Tool::NoAnswer(reason) => format!("{program} did not answer: {}", visible(&first_line(reason))),
+    let (said, text) = match tool {
+        Tool::Missing(_) => return format!("{program} is not on PATH"),
+        Tool::Exited(text) => ("failed", text),
+        Tool::NoAnswer(reason) => ("did not answer", reason),
+    };
+    match visible(&first_line(text)) {
+        line if line.is_empty() => format!("{program} {said}"),
+        line => format!("{program} {said}: {line}"),
     }
 }
 
@@ -1050,6 +1097,14 @@ mod tests {
         }
     }
 
+    #[test]
+    fn a_tool_failure_is_one_line_and_drops_the_colon_when_it_has_no_text() {
+        assert_eq!(tool_said("journalctl", &Tool::Exited("boom\nmore\n".into())), "journalctl failed: boom");
+        assert_eq!(tool_said("journalctl", &Tool::Exited(String::new())), "journalctl failed");
+        assert_eq!(tool_said("journalctl", &Tool::NoAnswer("timed out\n".into())), "journalctl did not answer: timed out");
+        assert_eq!(tool_said("journalctl", &Tool::NoAnswer(String::new())), "journalctl did not answer");
+    }
+
     #[cfg(unix)]
     mod shimmed {
         use super::*;
@@ -1062,12 +1117,18 @@ mod tests {
 d=${0%/*}
 printf '%s\n' "systemctl $*" >> "$d/calls.log"
 verb=$2
+[ "$3" = --property=ActiveState ] && verb=active-state
 [ -e "$d/hang-$verb" ] && { : > "$d/entered-$verb"; exec sleep 30; }
 [ -e "$d/fail-$verb" ] && { echo "Failed to connect to bus" >&2; exit 1; }
-if [ "$verb" = is-active ]; then
+if [ "$verb" = active-state ]; then
   for unit; do :; done
-  [ -e "$d/active-$unit" ] && exit 0
-  exit 3
+  if [ -e "$d/state-$unit" ]; then
+    read -r state < "$d/state-$unit"
+    echo "$state"
+  else
+    echo inactive
+  fi
+  exit 0
 fi
 exit 0
 "#;
@@ -1099,6 +1160,10 @@ exit 0
 "#;
         /// The probe's call, as `calls()` records it.
         const PROBE: &str = "systemctl --user show --property=Version";
+        /// One completed run of `alpha`, at 1700000090 seconds.
+        const ALPHA_ROW: &str = r#"{"MESSAGE":"{\"status\":\"completed\",\"session\":\"/s/a1\",\"run\":1}","__REALTIME_TIMESTAMP":"1700000090000000","_SYSTEMD_USER_UNIT":"aoide-job-alpha.service"}"#;
+        /// One completed run of `gamma`, at 1700000110 seconds.
+        const GAMMA_ROW: &str = r#"{"MESSAGE":"{\"status\":\"completed\",\"session\":\"/s/g1\",\"run\":1}","__REALTIME_TIMESTAMP":"1700000110000000","_SYSTEMD_USER_UNIT":"aoide-job-gamma.service"}"#;
         /// One completed run of `beta`, at 1700000100 seconds.
         const BETA_ROW: &str = r#"{"MESSAGE":"{\"status\":\"completed\",\"session\":\"/s/b1\",\"run\":1}","__REALTIME_TIMESTAMP":"1700000100000000","_SYSTEMD_USER_UNIT":"aoide-job-beta.service"}"#;
 
@@ -1123,8 +1188,9 @@ exit 0
                 }
                 let roots = pin_roots(&root);
                 let vars = EnvSaver::capture(&["PATH", "XDG_CONFIG_HOME"]);
-                // A hung shim runs `exec sleep 30`; the shims are its whole PATH,
-                // so `sleep` is linked in from the test's own PATH first.
+                // A hung shim runs `exec sleep 30`; the shims are its whole
+                // PATH, so `sleep` is linked in from the test's own PATH
+                // first.
                 if let Some(sleep) = std::env::var_os("PATH").and_then(|path| std::env::split_paths(&path).map(|dir| dir.join("sleep")).find(|p| p.is_file())) {
                     std::os::unix::fs::symlink(sleep, shims.join("sleep")).unwrap();
                 }
@@ -1158,12 +1224,13 @@ exit 0
                 std::fs::write(self.shims.join(format!("fail-{verb}")), "").unwrap();
             }
 
-            fn active(&self, unit: &str) {
-                std::fs::write(self.shims.join(format!("active-{unit}")), "").unwrap();
+            /// The timer's state, as `show --property=ActiveState` answers it.
+            fn state(&self, unit: &str, word: &str) {
+                std::fs::write(self.shims.join(format!("state-{unit}")), format!("{word}\n")).unwrap();
             }
 
-            /// The named tool's call hangs: its shim writes `entered-<verb>` and
-            /// then sleeps for 30 seconds.
+            /// The named tool's call hangs: its shim writes `entered-<verb>`
+            /// and then sleeps for 30 seconds.
             fn hang(&self, verb: &str) {
                 std::fs::write(self.shims.join(format!("hang-{verb}")), "").unwrap();
             }
@@ -1222,6 +1289,14 @@ exit 0
 
         fn calls_since(w: &World, before: usize) -> Vec<String> {
             w.calls()[before..].to_vec()
+        }
+
+        /// Rewrites the record's first job name, as a hand edit would.
+        fn rename_recorded_job(w: &World, name: &str) {
+            let path = w.root.join("state/stage/jobs.json");
+            let mut record: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+            record["jobs"][0]["name"] = json!(name);
+            std::fs::write(&path, record.to_string()).unwrap();
         }
 
         /// The query `runs` makes for one job's own unit.
@@ -1387,7 +1462,7 @@ exit 0
             ] {
                 assert_eq!(add(&add_inv(name, "daily", &[argv0]), Host::Linux).status, Status::Ok, "{name}");
             }
-            w.active("aoide-job-ok-job.timer");
+            w.state("aoide-job-ok-job.timer", "active");
             let edited = w.unit_dir().join("aoide-job-edit-job.timer");
             std::fs::write(&edited, format!("{}# edited\n", std::fs::read_to_string(&edited).unwrap())).unwrap();
             std::fs::remove_file(w.unit_dir().join("aoide-job-gone-job.service")).unwrap();
@@ -1502,8 +1577,8 @@ exit 0
         }
 
         /// A probe that never exits refuses `add` within the bound and writes
-        /// nothing. While it hangs, another thread takes the stage lock at once:
-        /// the probe runs before the lock, so it holds none.
+        /// nothing. While it hangs, another thread takes the stage lock at
+        /// once: the probe runs before the lock, so it holds none.
         #[test]
         fn a_probe_that_never_exits_refuses_add_in_bound_and_leaves_the_lock_free() {
             let _guard = lock();
@@ -1572,8 +1647,8 @@ exit 0
 
         /// A run row comes only from the job's own unit. A journal line whose
         /// client-set UNIT or USER_UNIT names the job, but whose
-        /// _SYSTEMD_USER_UNIT names another unit or none, gives no row, named or
-        /// unnamed; the named query matches on _SYSTEMD_USER_UNIT itself.
+        /// _SYSTEMD_USER_UNIT names another unit or none, gives no row, named
+        /// or unnamed; the named query matches on _SYSTEMD_USER_UNIT itself.
         #[test]
         fn a_run_row_needs_its_own_unit_so_a_client_set_unit_field_gives_none() {
             let _guard = lock();
@@ -1650,7 +1725,8 @@ exit 0
         }
 
         /// Two jobs: `runs` makes one call per job, each on its own unit, and
-        /// gives the rows oldest first. A tie in time is ordered by job name.
+        /// gives the rows oldest first. Rows are gathered in name order and
+        /// `sort_by` is stable, so a tie keeps name order.
         #[test]
         fn runs_reads_each_job_on_its_own_and_orders_rows_oldest_first() {
             let _guard = lock();
@@ -1713,48 +1789,98 @@ exit 0
             assert_eq!(calls_since(&w, before), want);
         }
 
-        /// One job's journal call never exits: within the bound it is listed
-        /// under `unread`, and the other job's row still shows.
+        /// Every journal call never exits: `runs` makes the first call only,
+        /// refuses as failed within the bound, and never asks the other jobs.
         #[test]
-        fn runs_lists_a_job_whose_journal_call_never_exits_under_unread_within_the_bound() {
+        fn runs_makes_one_silent_call_and_refuses_as_failed_when_nothing_answers() {
             let _guard = lock();
-            let w = World::new("job-unread-hang");
+            let w = World::new("job-all-silent");
             let tool = w.tool("job-tool");
-            for name in ["alpha", "beta"] {
+            for name in ["alpha", "beta", "gamma"] {
                 assert_eq!(add(&add_inv(name, "daily", &[tool.as_str()]), Host::Linux).status, Status::Ok, "{name}");
+                w.hang(&format!("journal-aoide-job-{name}.service"));
             }
-            w.hang("journal-aoide-job-alpha.service");
-            w.journal_unit("aoide-job-beta.service", &format!("{BETA_ROW}\n"));
+            let before = w.calls().len();
             let started = std::time::Instant::now();
             let out = runs(&invocation(&["job", "runs"], &[], &[], Door::Cli), Host::Linux);
             assert!(w.entered("journal-aoide-job-alpha.service"), "the journal never started");
+            assert_in_bound(started.elapsed());
+            assert_eq!(out.status, Status::Error, "{}", out.message);
+            assert_eq!(out.data.as_ref().unwrap()["refusal"]["kind"], "failed");
+            assert!(out.message.contains("did not answer"), "{}", out.message);
+            assert!(!w.entered("journal-aoide-job-beta.service"), "beta was asked after alpha was silent");
+            assert!(!w.entered("journal-aoide-job-gamma.service"), "gamma was asked after alpha was silent");
+            assert_eq!(calls_since(&w, before), [PROBE.to_string(), runs_query("alpha")]);
+        }
+
+        /// One job answers, one never exits, and the last has a row file of its
+        /// own. The reads end at the silent call: the answering job's row
+        /// shows, the silent job is `unread` with its why, and the last job is
+        /// `unread` as not asked, with no call made for it.
+        #[test]
+        fn runs_ends_its_reads_at_the_first_silent_call_and_lists_the_rest_as_not_asked() {
+            let _guard = lock();
+            let w = World::new("job-unread-hang");
+            let tool = w.tool("job-tool");
+            for name in ["alpha", "beta", "gamma"] {
+                assert_eq!(add(&add_inv(name, "daily", &[tool.as_str()]), Host::Linux).status, Status::Ok, "{name}");
+            }
+            w.journal_unit("aoide-job-alpha.service", &format!("{ALPHA_ROW}\n"));
+            w.hang("journal-aoide-job-beta.service");
+            w.journal_unit("aoide-job-gamma.service", &format!("{GAMMA_ROW}\n"));
+            let before = w.calls().len();
+            let started = std::time::Instant::now();
+            let out = runs(&invocation(&["job", "runs"], &[], &[], Door::Cli), Host::Linux);
+            assert!(w.entered("journal-aoide-job-beta.service"), "the journal never started");
             assert_in_bound(started.elapsed());
             assert_eq!(out.status, Status::Ok, "{}", out.message);
             let data = out.data.as_ref().unwrap();
             let rows = data["runs"].as_array().unwrap();
             assert_eq!(rows.len(), 1, "{rows:?}");
-            assert_eq!(rows[0]["job"], "beta");
+            assert_eq!(rows[0]["job"], "alpha");
             let unread = data["unread"].as_array().unwrap();
-            assert_eq!(unread.len(), 1, "{data}");
-            assert_eq!(unread[0]["name"], "alpha");
+            assert_eq!(unread.len(), 2, "{data}");
+            assert_eq!(unread[0]["name"], "beta");
             assert!(unread[0]["why"].as_str().unwrap().contains("did not answer"), "{data}");
+            assert_eq!(unread[1]["name"], "gamma");
+            let why = unread[1]["why"].as_str().unwrap();
+            assert!(why.contains("not asked") && why.contains("beta"), "{data}");
+            assert_eq!(calls_since(&w, before), [PROBE.to_string(), runs_query("alpha"), runs_query("beta")]);
         }
 
-        /// An `is-active` that never exits: the first job is `unknown` within
-        /// the bound, and the second is `unknown` with no second call asked.
+        /// Every journal call exits non-zero: no call answered, so `runs`
+        /// refuses as failed with the first failure, after making both calls.
         #[test]
-        fn an_is_active_that_never_exits_leaves_each_job_unknown_and_asks_once() {
+        fn runs_refuses_as_failed_when_every_recorded_job_exits_non_zero() {
             let _guard = lock();
-            let w = World::new("job-active-hang");
+            let w = World::new("job-all-exit");
+            let tool = w.tool("job-tool");
+            for name in ["alpha", "beta"] {
+                assert_eq!(add(&add_inv(name, "daily", &[tool.as_str()]), Host::Linux).status, Status::Ok, "{name}");
+                w.fail(&format!("journal-aoide-job-{name}.service"));
+            }
+            let before = w.calls().len();
+            let out = runs(&invocation(&["job", "runs"], &[], &[], Door::Cli), Host::Linux);
+            assert_eq!(out.status, Status::Error, "{}", out.message);
+            assert_eq!(out.data.as_ref().unwrap()["refusal"]["kind"], "failed");
+            assert_eq!(calls_since(&w, before), [PROBE.to_string(), runs_query("alpha"), runs_query("beta")]);
+        }
+
+        /// A state read that never exits: the first job is `unknown` within the
+        /// bound, and the second is `unknown` with no second read asked.
+        #[test]
+        fn a_state_read_that_never_exits_leaves_each_job_unknown_and_asks_once() {
+            let _guard = lock();
+            let w = World::new("job-state-hang");
             let tool = w.tool("job-tool");
             for name in ["first-job", "second-job"] {
                 assert_eq!(add(&add_inv(name, "daily", &[tool.as_str()]), Host::Linux).status, Status::Ok, "{name}");
             }
-            w.hang("is-active");
+            w.hang("active-state");
             let before = w.calls().len();
             let started = std::time::Instant::now();
             let out = list(&invocation(&["job", "list"], &[], &[], Door::Cli), Host::Linux);
-            assert!(w.entered("is-active"), "the is-active never started");
+            assert!(w.entered("active-state"), "the state read never started");
             assert_in_bound(started.elapsed());
             assert_eq!(out.status, Status::Ok, "{}", out.message);
             let want: BTreeMapStr = [("first-job", "unknown"), ("second-job", "unknown")]
@@ -1762,8 +1888,85 @@ exit 0
                 .map(|(name, status)| (name.to_string(), status.to_string()))
                 .collect();
             assert_eq!(statuses(&out), want);
-            let asked = calls_since(&w, before).iter().filter(|c| c.contains("is-active")).count();
+            let asked = calls_since(&w, before).iter().filter(|c| c.contains("--property=ActiveState")).count();
             assert_eq!(asked, 1, "{:?}", w.calls());
+        }
+
+        /// A state read that exits non-zero is `unknown`, and the asking goes
+        /// on: both jobs are read, and both are `unknown`.
+        #[test]
+        fn a_state_read_that_exits_non_zero_is_unknown_and_the_asking_goes_on() {
+            let _guard = lock();
+            let w = World::new("job-state-fail");
+            let tool = w.tool("job-tool");
+            for name in ["first-job", "second-job"] {
+                assert_eq!(add(&add_inv(name, "daily", &[tool.as_str()]), Host::Linux).status, Status::Ok, "{name}");
+            }
+            w.fail("active-state");
+            let before = w.calls().len();
+            let out = list(&invocation(&["job", "list"], &[], &[], Door::Cli), Host::Linux);
+            assert_eq!(out.status, Status::Ok, "{}", out.message);
+            let want: BTreeMapStr = [("first-job", "unknown"), ("second-job", "unknown")]
+                .into_iter()
+                .map(|(name, status)| (name.to_string(), status.to_string()))
+                .collect();
+            assert_eq!(statuses(&out), want);
+            let asked = calls_since(&w, before).iter().filter(|c| c.contains("--property=ActiveState")).count();
+            assert_eq!(asked, 2, "{:?}", w.calls());
+        }
+
+        /// Each timer state reads as its status: `active` is `ok`, `inactive`
+        /// and `failed` are `inactive`, and any other state is `unknown`.
+        #[test]
+        fn timer_states_active_failed_and_activating_read_ok_inactive_and_unknown() {
+            let _guard = lock();
+            let w = World::new("job-states");
+            let tool = w.tool("job-tool");
+            for name in ["alpha", "beta", "gamma"] {
+                assert_eq!(add(&add_inv(name, "daily", &[tool.as_str()]), Host::Linux).status, Status::Ok, "{name}");
+            }
+            w.state("aoide-job-alpha.timer", "active");
+            w.state("aoide-job-beta.timer", "failed");
+            w.state("aoide-job-gamma.timer", "activating");
+            let out = list(&invocation(&["job", "list"], &[], &[], Door::Cli), Host::Linux);
+            assert_eq!(out.status, Status::Ok, "{}", out.message);
+            let want: BTreeMapStr = [("alpha", "ok"), ("beta", "inactive"), ("gamma", "unknown")]
+                .into_iter()
+                .map(|(name, status)| (name.to_string(), status.to_string()))
+                .collect();
+            assert_eq!(statuses(&out), want);
+        }
+
+        /// A record holding a name that is not a job name refuses `list`,
+        /// `runs` and `remove` after their probe, and makes no other call: both
+        /// units stay. An escape in the name is shown with its escape made
+        /// visible.
+        #[test]
+        fn a_record_holding_a_name_that_is_not_a_job_name_refuses_each_verb() {
+            let _guard = lock();
+            let w = World::new("job-bad-name");
+            let tool = w.tool("job-tool");
+            assert_eq!(add(&add_inv("nightly", "daily", &[tool.as_str()]), Host::Linux).status, Status::Ok);
+            rename_recorded_job(&w, "x/../y");
+            let before = w.calls().len();
+            let outs = [
+                list(&invocation(&["job", "list"], &[], &[], Door::Cli), Host::Linux),
+                runs(&invocation(&["job", "runs"], &[], &[], Door::Cli), Host::Linux),
+                remove(&invocation(&["job", "remove"], &[], &[("name", "nightly")], Door::Cli), Host::Linux),
+            ];
+            for out in &outs {
+                assert_eq!(out.status, Status::Error, "{}", out.message);
+                assert_eq!(out.message, "the job record cannot be read");
+                let why = out.data.as_ref().unwrap()["refusal"]["why"].as_str().unwrap();
+                assert!(why.contains("not a job name"), "{why:?}");
+            }
+            assert_eq!(calls_since(&w, before), [PROBE.to_string(), PROBE.to_string(), PROBE.to_string()]);
+            assert!(w.unit_dir().join("aoide-job-nightly.timer").is_file());
+            assert!(w.unit_dir().join("aoide-job-nightly.service").is_file());
+            rename_recorded_job(&w, "a\u{1b}[2J");
+            let out = list(&invocation(&["job", "list"], &[], &[], Door::Cli), Host::Linux);
+            let why = out.data.as_ref().unwrap()["refusal"]["why"].as_str().unwrap();
+            assert!(why.contains("not a job name") && !why.contains('\u{1b}'), "{why:?}");
         }
 
         /// A `systemd-analyze` that never exits refuses `add` as failed, not as
@@ -1794,13 +1997,13 @@ exit 0
             let w = World::new("job-runs-none");
             let out = runs(&invocation(&["job", "runs"], &[], &[], Door::Cli), Host::Linux);
             assert_eq!(out.status, Status::Ok, "{}", out.message);
-            assert_eq!(out.message, "no local job runs in the user journal");
+            assert_eq!(out.message, "no local jobs");
             assert_eq!(w.calls(), [PROBE.to_string()]);
         }
 
-        /// A `journalctl` that is not on PATH refuses `runs`, named or not, even
-        /// with a job recorded: a missing tool is the verb's refusal, never an
-        /// unread job.
+        /// A `journalctl` that is not on PATH refuses `runs`, named or not,
+        /// even with a job recorded: a missing tool is the verb's refusal,
+        /// never an unread job.
         #[test]
         fn runs_refuses_when_journalctl_is_not_on_path_even_with_a_job_recorded() {
             let _guard = lock();
@@ -1834,8 +2037,9 @@ exit 0
             assert_eq!(out.status, Status::Error, "{}", out.message);
             assert_eq!(std::fs::read_to_string(&foreign).unwrap(), "mine\n");
             assert!(w.record().get("jobs").is_none());
-            // The positive control: remove both obstacles, and a valid add writes
-            // both units and the record. A refusing stub never gets here.
+            // The positive control: remove both obstacles, and a valid add
+            // writes both units and the record. A refusing stub never gets
+            // this far.
             std::fs::remove_file(w.unit_dir().join("aoide-job-link.timer")).unwrap();
             std::fs::remove_file(&foreign).unwrap();
             let out = add(&add_inv("plain", "daily", &[tool.as_str()]), Host::Linux);
@@ -1857,8 +2061,9 @@ exit 0
             let out = add(&add_inv("nightly", "daily", &[tool.as_str()]), Host::Linux);
             assert_eq!(out.status, Status::Error, "{}", out.message);
             assert!(std::fs::read_dir(&victim).unwrap().next().is_none(), "nothing written through the link");
-            // The positive control: with the link removed, the same World's valid
-            // add writes both units into a real directory. A refusing stub fails here.
+            // The positive control: with the link removed, the same World's
+            // valid add writes both units into a real directory. A refusing
+            // stub fails here.
             std::fs::remove_file(w.unit_dir()).unwrap();
             let out = add(&add_inv("nightly", "daily", &[tool.as_str()]), Host::Linux);
             assert_eq!(out.status, Status::Ok, "{}", out.message);
