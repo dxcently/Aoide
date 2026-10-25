@@ -1,0 +1,14 @@
+[package]
+name = "aoide-desktop-door"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[features]
+# The fake `eidolon web` (src/fake.rs), for this crate's tests and later crates'.
+fake = []
+
+[dependencies]
+libc.workspace = true
+serde.workspace = true
+serde_json.workspace = true
