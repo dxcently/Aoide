@@ -83,6 +83,8 @@ exec.rs     Exec::load(aoide, home, env)
 - `open_pidfd` opens a pidfd for a pid, and `terminate_pidfd` sends SIGTERM
   through one. The refusals and the reach of a pidfd are in AGENTS.md.
   `doors.rs` opens one when a door's pid arrives.
+- `pidfd_exited` polls a pidfd with no wait. It answers whether the process has
+  ended, and the watch uses it to decide whether its door still lives.
 - `door_env` is `child_env` for `eidolon web`, with `XDG_RUNTIME_DIR` set to the
   checked runtime dir. `spawn_door` starts the door through `spawn_detached`,
   with the `Pinned` program and its arguments. The door runs in a session of its
@@ -100,29 +102,31 @@ exec.rs     Exec::load(aoide, home, env)
 
 ```
 doors.rs    Doors::open(exec, eidolon, home, root, runtime, out)
-              |
+              |                    -> (Doors, Vec<Event>)
               +-- runtime_from_env, check_runtime  refused before any read
               +-- Store::load                      doors.json, or refused
-              +-- reattach, per record             verify, open_stream, watch
+              +-- reattach, per record             pidfd, verify, watch
               |
               v
             launch(plan)                 plan: launch_plan (pin and cwd)
               |
               +-- spawn_door               detached, its log under state/
-              +-- adopt                    pidfd and start time, as the pid arrives
+              +-- adopt                    pidfd and start time at arrival
               +-- await_banner             both banner lines, first 64 KiB, 30 s
               +-- verify                   pid, start time, cmdline, token
               +-- Store::update            the record, sessionId null
               +-- open_stream              hello's session fills the record
-              +-- start_watch              one watch thread per door
+              +-- start_watch              one watch thread, holding its pidfd
 ```
 
 - A failure up to and including `Store::update` refuses the launch. Its door is
   signalled through its pidfd and waited for up to 10 s, and the error names its
   pid and its log. Without a pidfd nothing is signalled, and the error says so.
-- A failure after `Store::update` keeps the record and returns the launch id.
-  `Event::Unwatched` says why. A failed hello leaves the record with a null
-  session, and the next open checks it again.
+- A launch that has written its record keeps the record and returns the launch
+  id. A stream that does not open at launch starts the watch unattached, and the
+  watch reports it. A launch for which no watch can start returns
+  `DoorsError::Unwatched { launch_id, why }`. Its record stays, and the next
+  open re-attaches it. Nothing goes on the channel from `launch`.
 - The record is `$AOIDE_ROOT/state/desktop/doors.json`, mode 0600. Each change
   is a read-modify-write under an exclusive lock on `doors.json.lock`, ending in
   a temp file, a sync, a rename and a directory sync. A file that does not parse
@@ -140,47 +144,62 @@ doors.rs    Doors::open(exec, eidolon, home, root, runtime, out)
   its port. `open_stream` also needs the first frame to be `hello`, and its
   session to be the recorded one when there is one.
 - A record whose pid is gone or a zombie, whose start time or command line
-  differs, or whose pin changed, is dropped and never signalled, and
-  `Event::Dropped` names its pid. Any other failure (a stream that does not open,
-  a hello that fails, an I/O error) keeps the record unwatched, sends
-  `Event::Unwatched`, and the next `Doors::open` tries again. Both events carry
-  `why` through `visible`.
-- The watch thread only reads. It keeps the stream's asks, forwards each frame on
-  the caller's channel with `try_send`, and never signals a door. A full channel
-  ends that stream, and the stream the watch opens next replays the asks still
-  pending: only display frames are lost, and the log keeps them. A `CloseDue`
-  the channel refuses stays owed, and the next frame sends it. A terminal notice
-  (`Gone`, `Dropped`, `Unwatched`) is retried every 20 ms until it is taken or the
-  watch stops. A door keeps at most 64 pending asks; an ask past that is not
-  kept, and the stream sends one `AsksOverflow`.
+  differs, or whose pin changed, fails its identity check. It is dropped and
+  never signalled, and `Event::Dropped` names its pid. Any other failure (a
+  stream that does not open, a hello that fails, a working directory that moved,
+  an I/O error) keeps the record. Both events carry `why` through `visible`.
+- `Doors::open` returns its events in the list it returns, and sends none on the
+  channel: one `Dropped` for each record that fails its identity check
+  (removed), and one `Unwatched` for each record no watch could start for (kept,
+  and the next open tries again).
+- A record whose check fails for any other reason is watched anyway, unattached.
+  Its watch sends `Event::Unwatched` once per failure streak, then tries again
+  every second (`REOPEN`) while its pidfd's process lives. The frames resume
+  when a try works. An identity failure on a try ends the watch with `Dropped`.
+- The watch holds the door's pidfd, which is opened before its checks, so the
+  checks and any signal name the same process. It reads the stream, updates the
+  shared state under one lock, keeps the door's pending asks, and reports each
+  event through `deliver`: frames, `CloseDue`, `AsksOverflow`, `Unwatched`,
+  `Dropped` and `Gone`. It never signals a door.
+- `deliver` waits for room. It retries `try_send` every 20 ms until the channel
+  takes the event or the watch stops, so nothing is dropped while a watch runs.
+  A full channel holds the watch on its current event, with its stream open.
+- A door keeps at most 64 pending asks. An ask past that is not kept, and the
+  stream sends one `AsksOverflow`.
 - A stream that ends while the door lives reopens after a second. A stream that
-  ends with the door gone drops the record and sends `Gone`. A watch that ended
-  is not watched: `launch_ids` leaves it out, and its calls are refused. An
-  unwatched door whose record is kept is re-attached by the next open.
+  ends with the door gone drops the record and sends `Gone`. A drop or a forget
+  whose store write fails keeps its record, and the next open checks it again
+  and reports it again.
+- A watch that ended is not watched: `launch_ids` leaves it out, and its calls
+  are refused. The next open re-attaches every record that is kept.
 - The turn state is `Unknown` until a `turn-state` frame. The wire sends one
   only when the turn changes, and a new stream carries none.
-- A close, in order: a pidfd for the recorded pid; `verify`, where a failure
-  drops the record and its watch and signals nothing; under the watch's lock, a
-  turn that is not `Idle` is `Busy`, and the watch is left as it was, turn state
-  included; an idle turn marks the watch closing and shuts its stream; SIGTERM
-  through the pidfd; then the exit is awaited for 10 s. An exit detaches the
-  watch (2 s bound) and removes the record: `Exited`. A door still live clears
-  the mark and keeps its record and its watch: `StillLive`. The wait never
-  escalates.
-- While the closing mark stands, the watch takes its stream's end as the close's:
-  it neither drops the door nor reconnects. Once the mark clears, a stream that
-  ended reopens, as any stream does while its door lives.
+- A close, in order: a pidfd for the recorded pid, held by the watch; then
+  `verify`. An identity failure drops the record and its watch, signals nothing,
+  and returns `Close::Dropped { pid, why }`. Any other failure keeps the record
+  and its watch, signals nothing, and returns `DoorsError::Unverified(why)`.
+  Under the watch's lock, a turn that is not `Idle` is `Busy`, and the watch is
+  left as it was, turn state included. An idle turn marks the watch closing and
+  shuts its stream. SIGTERM goes through the pidfd, and the exit is awaited for
+  10 s. An exit detaches the watch (2 s bound) and removes the record: `Exited`.
+  A door still live clears the mark and keeps its record and its watch:
+  `StillLive`. The wait never escalates.
+- While the closing mark stands, the watch takes its stream's end as the
+  close's: it neither drops the door nor reconnects. Once the mark clears, a
+  stream that ended reopens, as any stream does while its door lives.
 - A turn the door starts between the lock and the signal is cut. That is the
   residual of the close's order.
 - `close_after_turn` closes an `Idle` door now, marks a `Running` one (`Armed`),
   and refuses an `Unknown` one. A marked door whose turn ends sends `CloseDue`
-  once, and `close_due` closes it if the mark still stands; a turn still running
-  keeps the mark (`StaysArmed`). `revoke` withdraws a mark.
+  once, through `deliver`. `close_due` closes it if the mark still stands; a
+  turn still running keeps the mark (`StaysArmed`). `revoke` withdraws a mark.
 - Stop now re-checks the door before it cancels, so a door that fails the check
-  gets no request. A 204 from the cancel waits up to 10 s for the turn to end,
-  then the door closes. If the turn does not end, the result is `NoTurnEnd`: the
-  door keeps running, its record stays, and nothing is signalled. A 409 says the
-  door is idle, so the turn is taken as idle, and the door closes at once.
+  gets no request. That check takes the close's split: an identity failure is
+  `Close::Dropped`, and any other is `DoorsError::Unverified`. A 204 from the
+  cancel waits up to 10 s for the turn to end, then the door closes. If the turn
+  does not end, the result is `NoTurnEnd`: the door keeps running, its record
+  stays, and nothing is signalled. A 409 says the door is idle, so the turn is
+  taken as idle, and the door closes at once.
 - A turn that starts or ends while no stream is open is not seen. After a
   reconnect the turn is `Unknown` until a frame arrives. A mark stands across a
   reconnect until it is revoked or its door closes.
@@ -235,12 +254,12 @@ asks.rs     Doors::prepare_answer(launch, ask, label)
 `src/bin/fake-eidolon.rs` takes `web --bind 127.0.0.1:0 --cwd DIR` and nothing
 else. A test drives it with control words in `DIR/.fake-turn`: `running`,
 `idle`, `end`, `cancel-409`, `ask-approval ID JSON`, `settle ID LABEL`,
-`answer-409`, `answer-422`, `answer-401`, `flood N`, `asks N`, `hello-bad`,
-`hello-good` and `session NAME`. Its header says what each one does. The mode
-file `DIR/.fake-mode`, read once at start, picks a start-up: `exit-first`,
-`no-banner`, `remote-address`, `token-outside`, `token-space`, `banner-128k`,
-`ignore-sigterm` (the first SIGTERM is ignored, the second exits),
-`cancel-stuck` (a cancel answers 204 and keeps the turn running), or
+`answer-409`, `answer-422`, `answer-401`, `events-500`, `flood N`, `asks N`,
+`hello-bad`, `hello-good` and `session NAME`. Its header says what each one
+does. The mode file `DIR/.fake-mode`, read once at start, picks a start-up:
+`exit-first`, `no-banner`, `remote-address`, `token-outside`, `token-space`,
+`banner-128k`, `ignore-sigterm` (the first SIGTERM is ignored, the second
+exits), `cancel-stuck` (a cancel answers 204 and keeps the turn running), or
 `hello-bad`. It logs each control word applied, each request served (an answer
 with its body), and each SIGTERM it receives, to `DIR/.fake-log`, in order.
 

@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use aoide_desktop_door::{token_path, Ask, Door, DoorError};
+use aoide_desktop_door::{token_path, Ask, Door, DoorError, Frame};
 use aoide_desktop_shell::asks::{ask_id, Sent, Shown};
 use aoide_desktop_shell::doors::{launch_plan, Close, Doors, DoorsError, Event, LaunchPlan, TurnState, ASKS_BOUND, EVENTS_BOUND};
 use aoide_desktop_shell::exec::{check_pin, test_doors, Exec, ExecError, Pinned};
@@ -80,10 +80,17 @@ impl World {
         self.open_with(self.exec(), out)
     }
 
+    /// Opens the doors, and sends what the open found on the channel, as the
+    /// caller's loop receives it.
     fn open_with(&self, exec: Exec, out: SyncSender<Event>) -> Doors {
         let runtime = self.runtime();
-        Doors::open(exec, Path::new(FAKE_EIDOLON), &self.home(), &self.root(), Some(runtime.as_os_str()), out)
-            .expect("the doors open")
+        let (doors, events) =
+            Doors::open(exec, Path::new(FAKE_EIDOLON), &self.home(), &self.root(), Some(runtime.as_os_str()), out.clone())
+                .expect("the doors open");
+        for event in events {
+            out.try_send(event).expect("the channel takes the open's events");
+        }
+        doors
     }
 
     fn plan(&self) -> LaunchPlan {
@@ -250,6 +257,21 @@ fn event_where(rx: &Receiver<Event>, pick: impl Fn(&Event) -> bool) -> Event {
         let event = rx.recv_timeout(left).expect("the event arrives within 10 s");
         if pick(&event) {
             return event;
+        }
+    }
+}
+
+/// Takes events from the channel, in order, through the first one `last` picks.
+fn events_through(rx: &Receiver<Event>, last: impl Fn(&Event) -> bool) -> Vec<Event> {
+    let end = Instant::now() + Duration::from_secs(10);
+    let mut seen = Vec::new();
+    loop {
+        let left = end.saturating_duration_since(Instant::now());
+        let event = rx.recv_timeout(left).expect("the event arrives within 10 s");
+        let done = last(&event);
+        seen.push(event);
+        if done {
+            return seen;
         }
     }
 }
@@ -443,7 +465,7 @@ fn a_record_whose_hello_names_another_session_is_kept_unwatched_and_never_signal
     let (tx, rx) = mpsc::sync_channel(EVENTS_BOUND);
     let doors = world.open(tx);
     assert_eq!(world.record_ids(), vec!["forged".to_owned()], "the record is kept");
-    assert!(doors.launch_ids().is_empty(), "the door is not watched");
+    assert_eq!(doors.launch_ids(), vec!["forged".to_owned()], "the watch is kept, with no stream");
     event_where(&rx, |e| matches!(e, Event::Unwatched { .. }));
     assert!(alive(pid), "the door is left alone");
     assert_eq!(world.count("SIGTERM"), 0, "nothing signalled the door");
@@ -568,7 +590,7 @@ fn stop_now_on_a_door_that_fails_its_checks_sends_no_request() {
     let listener = std::net::TcpListener::bind(("127.0.0.1", port)).expect("the port is free");
     listener.set_nonblocking(true).unwrap();
     let outcome = doors.stop_now(&id).unwrap();
-    assert_eq!(outcome, Close::Dropped, "{outcome:?}");
+    assert!(matches!(outcome, Close::Dropped { pid: p, .. } if p == pid), "{outcome:?}");
     assert!(listener.accept().is_err(), "no connection reached the port");
     assert!(world.record_ids().is_empty(), "the record is dropped");
 }
@@ -910,16 +932,14 @@ fn overflows(events: &Mutex<Vec<Event>>) -> usize {
 }
 
 #[test]
-fn a_flood_that_nothing_drains_ends_the_stream_and_the_channel_holds_no_more_than_its_bound() {
+fn a_flood_that_nothing_drains_holds_the_stream_and_the_channel_holds_no_more_than_its_bound() {
     let world = World::new("flood");
     let (tx, rx) = mpsc::sync_channel(EVENTS_BOUND);
     let mut doors = world.open(tx);
     let id = world.launch(&mut doors);
     world.apply("flood 200");
-    assert!(
-        until(Duration::from_secs(10), || world.count("GET /api/events") >= 2),
-        "a full channel ends the stream, and the watch opens it again"
-    );
+    thread::sleep(Duration::from_millis(500));
+    assert_eq!(world.count("GET /api/events"), 1, "a full channel holds the stream: the watch waits for room");
     assert!(rx.try_iter().count() <= EVENTS_BOUND, "the channel never holds more than its bound");
     assert!(alive(world.pid(&id)), "the door runs");
 }
@@ -1005,19 +1025,19 @@ fn a_changed_pin_drops_each_record_with_an_event_naming_its_pid() {
     let plan = launch_plan(&eidolon, &world.home(), &world.cwd()).expect("the plan is made");
     let runtime = world.runtime();
     let (tx, _rx) = mpsc::sync_channel(EVENTS_BOUND);
-    let mut doors = Doors::open(world.exec(), &eidolon, &world.home(), &world.root(), Some(runtime.as_os_str()), tx)
+    let (mut doors, _) = Doors::open(world.exec(), &eidolon, &world.home(), &world.root(), Some(runtime.as_os_str()), tx)
         .expect("the doors open");
     let id = doors.launch(&plan).expect("the door launches");
     let pid = world.pid(&id);
     world.adopt(pid);
     drop(doors);
     fs::set_permissions(&eidolon, fs::Permissions::from_mode(0o600)).unwrap();
-    let (tx, rx) = mpsc::sync_channel(EVENTS_BOUND);
-    let doors = Doors::open(world.exec(), &eidolon, &world.home(), &world.root(), Some(runtime.as_os_str()), tx)
+    let (tx, _rx) = mpsc::sync_channel(EVENTS_BOUND);
+    let (doors, events) = Doors::open(world.exec(), &eidolon, &world.home(), &world.root(), Some(runtime.as_os_str()), tx)
         .expect("the doors open");
     assert!(doors.launch_ids().is_empty(), "the door is not watched under a changed pin");
     assert!(world.record().is_empty(), "the record is dropped");
-    event_where(&rx, |e| matches!(e, Event::Dropped { pid: p, .. } if *p == pid));
+    assert!(events.iter().any(|e| matches!(e, Event::Dropped { pid: p, .. } if *p == pid)), "{events:?}");
     assert!(alive(pid), "the door is left alone");
     assert_eq!(world.count("SIGTERM"), 0, "nothing signalled the door");
 }
@@ -1033,7 +1053,7 @@ fn a_wrong_token_path_keeps_its_record_unwatched_and_signals_nothing() {
     let (tx, rx) = mpsc::sync_channel(EVENTS_BOUND);
     let doors = world.open(tx);
     assert_eq!(world.record_ids(), vec!["wrong-token".to_owned()], "the record is kept");
-    assert!(doors.launch_ids().is_empty(), "the door is not watched");
+    assert_eq!(doors.launch_ids(), vec!["wrong-token".to_owned()], "the watch is kept, with no stream");
     event_where(&rx, |e| matches!(e, Event::Unwatched { .. }));
     assert!(alive(pid), "the door is left alone");
     assert_eq!(world.count("SIGTERM"), 0, "nothing signalled the door");
@@ -1049,7 +1069,7 @@ fn a_hello_that_fails_once_keeps_the_record_and_the_next_open_reattaches() {
     world.apply("hello-bad");
     let (tx, rx) = mpsc::sync_channel(EVENTS_BOUND);
     let doors = world.open(tx);
-    assert!(doors.launch_ids().is_empty(), "the door is not watched while its hello fails");
+    assert_eq!(doors.launch_ids(), vec![id.clone()], "the watch is kept, with no stream");
     assert_eq!(world.record_ids(), vec![id.clone()], "the record is kept");
     event_where(&rx, |e| matches!(e, Event::Unwatched { .. }));
     drop(doors);
@@ -1158,7 +1178,7 @@ fn a_launch_whose_hello_fails_keeps_its_record_unwatched_and_signals_nothing() {
     let mut doors = world.open(tx);
     let id = doors.launch(&world.plan()).expect("the launch keeps its door");
     assert_eq!(world.record_ids(), vec![id.clone()], "the record is kept");
-    assert!(doors.launch_ids().is_empty(), "the door is not watched");
+    assert_eq!(doors.launch_ids(), vec![id.clone()], "the watch is kept, with no stream");
     event_where(&rx, |e| matches!(e, Event::Unwatched { launch_id, .. } if *launch_id == id));
     assert!(alive(world.pid(&id)), "the door runs");
     assert_eq!(world.count("SIGTERM"), 0, "nothing signalled the door");
@@ -1171,7 +1191,7 @@ fn a_reconnect_whose_pin_changed_drops_the_record_and_signals_nothing() {
     fs::copy(FAKE_EIDOLON, &eidolon).unwrap();
     let plan = launch_plan(&eidolon, &world.home(), &world.cwd()).expect("the plan is made");
     let (tx, rx) = mpsc::sync_channel(EVENTS_BOUND);
-    let mut doors = Doors::open(
+    let (mut doors, _) = Doors::open(
         world.exec(),
         &eidolon,
         &world.home(),
@@ -1189,4 +1209,93 @@ fn a_reconnect_whose_pin_changed_drops_the_record_and_signals_nothing() {
     assert!(doors.launch_ids().is_empty(), "the door is no longer watched");
     assert!(alive(pid), "the door is left alone");
     assert_eq!(world.count("SIGTERM"), 0, "nothing signalled the door");
+}
+
+#[test]
+fn open_returns_a_later_records_dropped_while_the_channel_is_full() {
+    let world = World::new("open-full");
+    let eidolon = world.dir.join("pinned-eidolon");
+    fs::copy(FAKE_EIDOLON, &eidolon).unwrap();
+    let runtime = world.runtime();
+    let (earlier_cwd, later_cwd) = (world.dir.join("earlier"), world.dir.join("later"));
+    for dir in [&earlier_cwd, &later_cwd] {
+        fs::create_dir_all(dir).unwrap();
+    }
+    let (tx, rx) = mpsc::sync_channel(1);
+    let (mut doors, _) = Doors::open(world.exec(), &eidolon, &world.home(), &world.root(), Some(runtime.as_os_str()), tx.clone())
+        .expect("the doors open");
+    let plan = |cwd: &Path| launch_plan(&eidolon, &world.home(), cwd).expect("the plan is made");
+    let earlier = doors.launch(&plan(&earlier_cwd)).expect("the earlier door launches");
+    world.adopt(world.pid(&earlier));
+    let later = doors.launch(&plan(&later_cwd)).expect("the later door launches");
+    world.adopt(world.pid(&later));
+    let later_pid = world.pid(&later);
+    world.command_at(&earlier_cwd, "running");
+    assert!(until(Duration::from_secs(5), || matches!(doors.turn(&earlier), Ok(TurnState::Running))), "the earlier door runs a turn");
+    // The earlier door's running frame fills the one-slot channel, and nothing drains it.
+    fs::set_permissions(&eidolon, fs::Permissions::from_mode(0o600)).unwrap();
+    let (_, events) = Doors::open(world.exec(), &eidolon, &world.home(), &world.root(), Some(runtime.as_os_str()), tx)
+        .expect("the doors open");
+    assert!(events.iter().any(|e| matches!(e, Event::Dropped { pid, .. } if *pid == later_pid)), "{events:?}");
+    let held: Vec<Event> = rx.try_iter().collect();
+    assert!(matches!(held.as_slice(), [Event::Frame { .. }]), "open sends nothing on the channel: {held:?}");
+    assert!(alive(later_pid), "the later door is left running");
+    assert!(!world.log_at(&later_cwd).iter().any(|l| l == "SIGTERM"), "nothing signalled the later door");
+}
+
+#[test]
+fn a_close_whose_cwd_moved_is_unverified_and_keeps_the_record_and_the_watch() {
+    let world = World::new("cwd-moved");
+    let (tx, _rx) = mpsc::sync_channel(EVENTS_BOUND);
+    let mut doors = world.open(tx);
+    let id = world.launch(&mut doors);
+    world.apply("idle");
+    assert!(until(Duration::from_secs(5), || matches!(doors.turn(&id), Ok(TurnState::Idle))), "the door is idle");
+    let (cwd, moved) = (world.cwd(), world.dir.join("door-moved"));
+    fs::rename(&cwd, &moved).unwrap();
+    let refused = doors.close_after_turn(&id);
+    assert!(matches!(refused, Err(DoorsError::Unverified(_))), "{refused:?}");
+    assert_eq!(world.record_ids(), vec![id.clone()], "the record is kept");
+    assert_eq!(doors.launch_ids(), vec![id.clone()], "the watch is kept");
+    assert!(alive(world.pid(&id)), "the door runs, and nothing signalled it");
+    fs::rename(&moved, &cwd).unwrap();
+    assert!(matches!(doors.close_after_turn(&id), Ok(Close::Exited { .. })), "the door closes once its checks hold");
+    assert!(world.record_ids().is_empty(), "the record is dropped at the exit");
+}
+
+#[test]
+fn a_reconnect_answered_with_a_500_then_properly_delivers_one_unwatched_and_resumes() {
+    let world = World::new("reconnect-500");
+    let (tx, rx) = mpsc::sync_channel(EVENTS_BOUND);
+    let mut doors = world.open(tx);
+    let id = world.launch(&mut doors);
+    world.apply("events-500");
+    world.apply("end");
+    world.apply("running");
+    let seen = events_through(&rx, |e| matches!(e, Event::Frame { frame, .. } if matches!(**frame, Frame::TurnState { running: true })));
+    let unwatched = seen.iter().filter(|e| matches!(e, Event::Unwatched { launch_id, .. } if *launch_id == id)).count();
+    assert_eq!(unwatched, 1, "one Unwatched for the failure streak: {seen:?}");
+    assert!(!seen.iter().any(|e| matches!(e, Event::Dropped { .. } | Event::Gone { .. })), "{seen:?}");
+    assert_eq!(world.record_ids(), vec![id.clone()], "the record stays");
+    assert_eq!(doors.launch_ids(), vec![id.clone()], "the watch stays");
+}
+
+#[test]
+fn a_close_due_for_a_door_idle_while_the_channel_is_full_still_arrives() {
+    let world = World::new("close-due-full");
+    let (tx, rx) = mpsc::sync_channel(1);
+    let mut doors = world.open(tx);
+    let id = world.launch(&mut doors);
+    world.apply("running");
+    assert!(until(Duration::from_secs(5), || matches!(doors.turn(&id), Ok(TurnState::Running))), "the door runs a turn");
+    assert_eq!(doors.close_after_turn(&id).expect("the mark is set"), Close::Armed);
+    // The running frame fills the one-slot channel, so the idle frame waits for room.
+    world.apply("idle");
+    thread::sleep(Duration::from_millis(200));
+    let first = rx.recv_timeout(Duration::from_secs(10)).expect("the running frame arrives");
+    assert!(matches!(first, Event::Frame { .. }), "{first:?}");
+    // The idle frame takes the slot, and the CloseDue behind it finds the channel full.
+    thread::sleep(Duration::from_millis(200));
+    let seen = events_through(&rx, |e| matches!(e, Event::CloseDue { .. }));
+    assert!(matches!(seen.last(), Some(Event::CloseDue { launch_id }) if *launch_id == id), "{seen:?}");
 }

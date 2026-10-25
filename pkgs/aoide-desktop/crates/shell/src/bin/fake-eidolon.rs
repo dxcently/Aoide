@@ -18,6 +18,8 @@
 //! - `answer-409`, `answer-422` and `answer-401` queue one answer of that status
 //!   for the next `POST /api/answer`. An answer served as `204` leaves its ask
 //!   pending until a `settle` says otherwise.
+//! - `events-500` answers the next `GET /api/events` with `500`, so the next
+//!   reconnect of the watch fails once, and the one after it is answered.
 //! - `flood N` pushes up to N `text-delta` frames while a stream is open, and
 //!   stops when the stream closes under it.
 //! - `asks N` raises approvals under ids 1 to N, with the same input.
@@ -148,6 +150,7 @@ impl Core {
             "answer-409" => door.reply("/api/answer", 409, ""),
             "answer-422" => door.reply("/api/answer", 422, &json!({"error": "the ask is not taken"}).to_string()),
             "answer-401" => door.reply("/api/answer", 401, ""),
+            "events-500" => door.refuse_at_once("/api/events", 500, ""),
             "hello-bad" => {
                 self.hello_bad = true;
                 self.head(door);

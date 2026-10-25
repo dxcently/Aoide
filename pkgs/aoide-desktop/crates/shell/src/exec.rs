@@ -748,6 +748,15 @@ pub(crate) fn open_pidfd(pid: u32) -> io::Result<OwnedFd> {
     Ok(unsafe { OwnedFd::from_raw_fd(fd) })
 }
 
+/// Whether the process `fd` names has exited. A pidfd is readable once its
+/// process ends, so a zero-timeout poll answers without reading any pid.
+pub(crate) fn pidfd_exited(fd: &OwnedFd) -> bool {
+    let mut watch = libc::pollfd { fd: fd.as_raw_fd(), events: libc::POLLIN, revents: 0 };
+    // SAFETY: `watch` is one valid pollfd, and the count names exactly one.
+    let ready = unsafe { libc::poll(&mut watch, 1, 0) };
+    ready > 0 && (watch.revents & libc::POLLIN) != 0
+}
+
 /// Sends SIGTERM to the process `fd` names, and to no other.
 pub(crate) fn terminate_pidfd(fd: &OwnedFd) -> io::Result<()> {
     // SAFETY: a plain syscall taking a descriptor, a signal and a null siginfo.

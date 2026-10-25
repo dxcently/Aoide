@@ -11,6 +11,7 @@
 //! Nothing here reads an environment variable. The runtime dir arrives as the
 //! value of `XDG_RUNTIME_DIR`, and `$AOIDE_ROOT` as a path.
 
+use std::cell::Cell;
 use std::collections::BTreeMap;
 use std::ffi::{OsStr, OsString};
 use std::fmt;
@@ -35,7 +36,7 @@ use aoide_protocol::untrusted::{is_unsafe, visible};
 use serde::{Deserialize, Serialize};
 
 use crate::asks::{self, Prepared, Sent, Shown};
-use crate::exec::{check_pin, euid, open_pidfd, terminate_pidfd, Exec, ExecError, Pinned};
+use crate::exec::{check_pin, euid, open_pidfd, pidfd_exited, terminate_pidfd, Exec, ExecError, Pinned};
 
 /// The bound on the events channel. The caller creates the channel with this size.
 pub const EVENTS_BOUND: usize = 64;
@@ -82,8 +83,9 @@ pub enum Event {
     /// another start time, another command line, or a changed pin. The record
     /// is dropped, and the pid, which was not signalled, is named.
     Dropped { launch_id: String, pid: u32, why: String },
-    /// A door that could not be checked or used, for any other reason. Its
-    /// record is kept, unwatched, and the next open tries again.
+    /// A door that could not be checked or used, for any other reason. Sent once
+    /// per failure streak: its record is kept, and the watch tries again each
+    /// second while the process lives, resuming the frames when a try works.
     Unwatched { launch_id: String, why: String },
     /// An ask past `ASKS_BOUND`: shown, but not kept, so it cannot be answered
     /// at this door. Sent once per stream.
@@ -91,7 +93,7 @@ pub enum Event {
 }
 
 /// What a close did. Nothing is signalled unless the checks held at that moment.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Close {
     /// SIGTERM was sent and the door exited within 10 s. Its record and its
     /// watch are removed. `watch_joined` is false when the watch thread outlived
@@ -100,9 +102,10 @@ pub enum Close {
     /// SIGTERM was sent and the door was still live after 10 s. Its record and
     /// its watch stay, and the watch reopens the stream.
     StillLive,
-    /// The door no longer passes its checks. Nothing was signalled, and its
-    /// record and its watch are dropped.
-    Dropped,
+    /// The door's identity fails its checks: its pid is gone, another process,
+    /// or another command line. Nothing was signalled, and its record and its
+    /// watch are dropped. `why` names the failed check, through `visible`.
+    Dropped { pid: u32, why: String },
     /// The turn is not idle. Nothing was signalled, and the watch is left as it
     /// was, turn state included.
     Busy,
@@ -138,6 +141,12 @@ pub enum DoorsError {
     Ask(String),
     /// No watched door has this launch id.
     Unknown(String),
+    /// A close whose checks fail for a reason other than identity. The record and
+    /// the watch are kept, and nothing is signalled.
+    Unverified(String),
+    /// A launch whose record is written, for which no watch could start. The
+    /// record stays, and the next open re-attaches it.
+    Unwatched { launch_id: String, why: String },
 }
 
 impl fmt::Display for DoorsError {
@@ -153,6 +162,10 @@ impl fmt::Display for DoorsError {
             | DoorsError::Unknown(why) => f.write_str(why),
             DoorsError::Refused { pid, log, why } => {
                 write!(f, "the door (pid {pid}) did not pass its checks: {why}; its log is {}", log.display())
+            }
+            DoorsError::Unverified(why) => write!(f, "nothing was signalled: {why}"),
+            DoorsError::Unwatched { launch_id, why } => {
+                write!(f, "launch {launch_id} is recorded, but no watch could start for it: {why}")
             }
         }
     }
@@ -343,12 +356,15 @@ pub struct Doors {
 }
 
 impl Doors {
-    /// Reads the record and re-attaches each door. A record whose door is not the
-    /// one recorded is dropped, with `Event::Dropped`, and its door is never
-    /// signalled. Any other failure keeps the record, with `Event::Unwatched`.
-    /// An unset or refused runtime dir, a record that is a link or does not
-    /// parse, and a directory that is not private, refuse the open before
-    /// anything is touched.
+    /// Reads the record and re-attaches each door. Its events come back in the
+    /// list it returns, and none is sent on the channel: `Event::Dropped` for a
+    /// record whose door is not the one recorded, which is dropped and never
+    /// signalled, and `Event::Unwatched` for a record no watch could start for,
+    /// which is kept, so the next open tries again. A door whose check fails for
+    /// any other reason is watched anyway, and its watch reports the failure and
+    /// tries again. An unset or refused runtime dir, a record that is a link or
+    /// does not parse, and a directory that is not private, refuse the open
+    /// before anything is touched.
     pub fn open(
         exec: Exec,
         eidolon: &Path,
@@ -356,7 +372,7 @@ impl Doors {
         root: &Path,
         runtime: Option<&OsStr>,
         out: SyncSender<Event>,
-    ) -> Result<Doors, DoorsError> {
+    ) -> Result<(Doors, Vec<Event>), DoorsError> {
         let runtime = runtime_from_env(runtime)?;
         check_runtime(&runtime)?;
         let mut doors = Doors {
@@ -366,29 +382,30 @@ impl Doors {
             out,
             watches: BTreeMap::new(),
         };
+        let mut events = Vec::new();
         for entry in doors.store.load()? {
             match doors.reattach(&entry) {
-                Ok(watch) => {
-                    doors.watches.insert(entry.launch_id.clone(), watch);
-                }
+                Ok(()) => {}
                 Err(Check::Identity(why)) => {
                     let id = entry.launch_id.clone();
                     doors.store.update(|es| es.retain(|e| e.launch_id != id))?;
-                    doors.notify(Event::Dropped { launch_id: id, pid: entry.pid, why: visible(&why) });
+                    events.push(Event::Dropped { launch_id: id, pid: entry.pid, why: visible(&why) });
                 }
                 Err(Check::Other(why)) => {
-                    doors.notify(Event::Unwatched { launch_id: entry.launch_id.clone(), why: visible(&why) });
+                    events.push(Event::Unwatched { launch_id: entry.launch_id.clone(), why: visible(&why) });
                 }
             }
         }
-        Ok(doors)
+        Ok((doors, events))
     }
 
     /// Launches a door the user has confirmed. Its banner, its identity and its
     /// token path are checked before its record is written. A door that fails
     /// such a check is signalled through its own pidfd, is not recorded, and the
-    /// error names its pid and log. Once the record is written, a failure keeps
-    /// the record and sends `Event::Unwatched`, and the launch still succeeds.
+    /// error names its pid and log. Once the record is written, a stream that
+    /// does not open starts the watch unattached, which reports it. A launch for
+    /// which no watch can start keeps the record and returns
+    /// `DoorsError::Unwatched` with the launch id. Nothing is sent on the channel.
     pub fn launch(&mut self, plan: &LaunchPlan) -> Result<String, DoorsError> {
         check_runtime(&self.pins.runtime)?;
         self.exec.door_env(&self.pins.runtime)?;
@@ -415,28 +432,28 @@ impl Doors {
         };
         verify(&self.pins, &entry).map_err(|check| door.refuse(check.why()))?;
         self.store.update(|es| es.push(entry.clone())).map_err(|e| door.refuse(e.to_string()))?;
-        let (events, session) = match open_stream(&self.pins.runtime, &entry) {
-            Ok(opened) => opened,
-            Err(why) => {
-                self.notify(Event::Unwatched { launch_id: id.clone(), why: visible(&why) });
-                return Ok(id);
+        let pidfd = door.pidfd.ok().flatten().ok_or_else(|| DoorsError::Unwatched {
+            launch_id: id.clone(),
+            why: "its pidfd is not open".into(),
+        })?;
+        let first = match open_stream(&self.pins.runtime, &entry) {
+            Ok((events, session)) => {
+                entry.session_id = Some(session.clone());
+                self.store
+                    .update(|es| {
+                        for e in es.iter_mut().filter(|e| e.launch_id == id) {
+                            e.session_id = Some(session.clone());
+                        }
+                    })
+                    .map_err(|e| DoorsError::Unwatched { launch_id: id.clone(), why: e.to_string() })?;
+                Some(events)
             }
+            Err(_) => None,
         };
-        entry.session_id = Some(session.clone());
-        if let Err(e) = self.store.update(|es| {
-            for e in es.iter_mut().filter(|e| e.launch_id == id) {
-                e.session_id = Some(session.clone());
-            }
-        }) {
-            self.notify(Event::Unwatched { launch_id: id.clone(), why: visible(&e.to_string()) });
-            return Ok(id);
-        }
-        match self.start_watch(entry, banner.addr, events) {
-            Ok(watch) => {
-                self.watches.insert(id.clone(), watch);
-            }
-            Err(e) => self.notify(Event::Unwatched { launch_id: id.clone(), why: visible(&e.to_string()) }),
-        }
+        let watch = self
+            .start_watch(entry, banner.addr, first, pidfd)
+            .map_err(|e| DoorsError::Unwatched { launch_id: id.clone(), why: e.to_string() })?;
+        self.watches.insert(id.clone(), watch);
         Ok(id)
     }
 
@@ -569,26 +586,27 @@ impl Doors {
         Ok(shared.turn == want)
     }
 
-    /// The close, in order. A pidfd names the door first. Then the checks run: a
-    /// failure drops the record and the watch, and signals nothing. Under the
-    /// watch's lock, a turn that is not idle is `Busy`, and the watch is left as
-    /// it was. An idle turn marks the watch closing and shuts its stream, so the
-    /// door can drain. SIGTERM goes through the pidfd, and the exit is awaited for
-    /// `EXIT_BOUND`. An exit removes the record and the watch. A door still live
-    /// clears the mark, and keeps its record and its watch.
+    /// The close, in order. The pidfd the watch holds names the door. Then
+    /// `verify`: an identity failure drops the record and the watch and signals
+    /// nothing, and returns `Close::Dropped`; any other failure keeps both, signals
+    /// nothing, and returns `DoorsError::Unverified`. Under the watch's lock, a turn
+    /// that is not `Idle` is `Busy`, and the watch is left as it was. An idle turn
+    /// marks the watch closing and shuts its stream, so the door can drain. SIGTERM
+    /// goes through the pidfd, and the exit is awaited for `EXIT_BOUND`. An exit
+    /// removes the record and the watch. A door still live clears the mark, and
+    /// keeps its record and its watch.
     fn close_now(&mut self, id: &str) -> Result<Close, DoorsError> {
-        let (entry, link) = {
+        let (entry, link, pidfd) = {
             let watch = self.watch(id)?;
-            (watch.entry.clone(), watch.link.clone())
+            (watch.entry.clone(), watch.link.clone(), watch.pidfd.clone())
         };
-        let pidfd = match open_pidfd(entry.pid) {
-            Ok(fd) => Some(fd),
-            Err(e) if e.raw_os_error() == Some(libc::ESRCH) => None,
-            Err(e) => return Err(e.into()),
-        };
-        if verify(&self.pins, &entry).is_err() {
-            self.drop_watch(id)?;
-            return Ok(Close::Dropped);
+        match verify(&self.pins, &entry) {
+            Ok(()) => {}
+            Err(Check::Identity(why)) => {
+                self.drop_watch(id)?;
+                return Ok(Close::Dropped { pid: entry.pid, why: visible(&why) });
+            }
+            Err(Check::Other(why)) => return Err(DoorsError::Unverified(visible(&why))),
         }
         {
             let mut shared = link.state.lock().unwrap();
@@ -601,12 +619,10 @@ impl Doors {
             }
         }
         link.moved.notify_all();
-        if let Some(fd) = &pidfd {
-            if let Err(e) = terminate_pidfd(fd) {
-                if e.raw_os_error() != Some(libc::ESRCH) {
-                    clear_closing(&link);
-                    return Err(e.into());
-                }
+        if let Err(e) = terminate_pidfd(&pidfd) {
+            if e.raw_os_error() != Some(libc::ESRCH) {
+                clear_closing(&link);
+                return Err(e.into());
             }
         }
         if !exited_by(entry.pid, entry.starttime, Instant::now() + EXIT_BOUND) {
@@ -629,45 +645,72 @@ impl Doors {
         Ok(joined)
     }
 
-    /// Sends one notice from the caller's thread, without waiting. The watch
-    /// threads fill the same channel while doors open, so a notice past the
-    /// channel's bound is not sent; the record's own change still stands.
-    fn notify(&self, event: Event) {
-        let _ = self.out.try_send(event);
-    }
-
-    /// Re-attaches one record: its checks, then its stream, then its watch.
-    fn reattach(&self, entry: &Entry) -> Result<Watch, Check> {
-        verify(&self.pins, entry)?;
-        let (events, session) = open_stream(&self.pins.runtime, entry).map_err(Check::Other)?;
+    /// Re-attaches one record: its checks, then its stream, then its watch. A
+    /// check that fails for any reason but identity still starts the watch,
+    /// unattached, and the watch reports the failure and tries again. The pidfd is
+    /// opened before the checks, so they describe the process it names.
+    fn reattach(&mut self, entry: &Entry) -> Result<(), Check> {
+        let pidfd = match open_pidfd(entry.pid) {
+            Ok(fd) => Some(fd),
+            Err(e) if e.raw_os_error() == Some(libc::ESRCH) => None,
+            Err(e) => return Err(Check::Other(format!("its pidfd could not be opened ({e})"))),
+        };
+        let stream = match verify(&self.pins, entry) {
+            Ok(()) => open_stream(&self.pins.runtime, entry).map_err(Check::Other),
+            Err(check) => Err(check),
+        };
+        let pidfd = pidfd.ok_or_else(|| Check::Identity("the door is not running".into()))?;
         let addr = parse_addr(&entry.addr).map_err(Check::Other)?;
-        let mut entry = entry.clone();
-        if entry.session_id.is_none() {
-            let id = entry.launch_id.clone();
-            self.store
-                .update(|es| {
-                    for e in es.iter_mut().filter(|e| e.launch_id == id) {
-                        e.session_id = Some(session.clone());
-                    }
-                })
-                .map_err(|e| Check::Other(e.to_string()))?;
-            entry.session_id = Some(session);
-        }
-        self.start_watch(entry, addr, events).map_err(|e| Check::Other(e.to_string()))
+        let (first, entry) = match stream {
+            Ok((events, session)) => {
+                let mut entry = entry.clone();
+                if entry.session_id.is_none() {
+                    let id = entry.launch_id.clone();
+                    self.store
+                        .update(|es| {
+                            for e in es.iter_mut().filter(|e| e.launch_id == id) {
+                                e.session_id = Some(session.clone());
+                            }
+                        })
+                        .map_err(|e| Check::Other(e.to_string()))?;
+                    entry.session_id = Some(session);
+                }
+                (Some(events), entry)
+            }
+            Err(Check::Identity(why)) => return Err(Check::Identity(why)),
+            Err(Check::Other(_)) => (None, entry.clone()),
+        };
+        let id = entry.launch_id.clone();
+        let watch = self.start_watch(entry, addr, first, pidfd).map_err(|e| Check::Other(e.to_string()))?;
+        self.watches.insert(id, watch);
+        Ok(())
     }
 
-    fn start_watch(&self, entry: Entry, addr: SocketAddr, events: Events) -> Result<Watch, DoorsError> {
+    /// Starts the watch thread, which holds the door's pidfd. With a stream open
+    /// it reads that stream first; without one it begins by reconnecting.
+    fn start_watch(
+        &self,
+        entry: Entry,
+        addr: SocketAddr,
+        first: Option<Events>,
+        pidfd: OwnedFd,
+    ) -> Result<Watch, DoorsError> {
         let link = Arc::new(Link::default());
-        link.state.lock().unwrap().closer = Some(events.closer()?);
+        if let Some(events) = &first {
+            link.state.lock().unwrap().closer = Some(events.closer()?);
+        }
+        let pidfd = Arc::new(pidfd);
         let worker = Worker {
             link: link.clone(),
             entry: entry.clone(),
             pins: self.pins.clone(),
             store: self.store.clone(),
             out: self.out.clone(),
+            pidfd: pidfd.clone(),
+            failing: Cell::new(false),
         };
-        let thread = thread::Builder::new().spawn(move || worker.run(events))?;
-        Ok(Watch { entry, addr, link, thread: Some(thread) })
+        let thread = thread::Builder::new().spawn(move || worker.run(first))?;
+        Ok(Watch { entry, addr, link, pidfd, thread: Some(thread) })
     }
 }
 
@@ -730,6 +773,8 @@ struct Watch {
     entry: Entry,
     addr: SocketAddr,
     link: Arc<Link>,
+    /// The door's pidfd, opened before its checks. A close signals through it.
+    pidfd: Arc<OwnedFd>,
     thread: Option<JoinHandle<()>>,
 }
 
@@ -793,8 +838,6 @@ struct Shared {
     gone: bool,
     /// The current stream has reported an ask past `ASKS_BOUND`.
     overflowed: bool,
-    /// A marked door's turn has ended, and `CloseDue` is not yet sent.
-    due: bool,
     /// The asks the current stream carried, by ask id: the replay on a new
     /// stream rebuilds them, and a settled ask leaves them.
     asks: BTreeMap<u64, Ask>,
@@ -816,13 +859,17 @@ impl Drop for Ended {
     }
 }
 
-/// The watch thread's half: it reads, updates the shared state, and forwards.
+/// The watch thread's half: it reads, updates the shared state, and delivers what
+/// it finds. It holds the door's pidfd, which says whether the process lives.
 struct Worker {
     link: Arc<Link>,
     entry: Entry,
     pins: Pins,
     store: Store,
     out: SyncSender<Event>,
+    pidfd: Arc<OwnedFd>,
+    /// Whether the last reconnect failed, so `Unwatched` is sent once per streak.
+    failing: Cell<bool>,
 }
 
 /// What a reconnect leaves the watch to do next.
@@ -830,16 +877,19 @@ enum Next {
     Stream(Events),
     /// A close took the mark while the stream opened. The watch waits for it.
     Hold,
+    /// The reconnect failed for a reason other than identity. The watch tries again.
+    Retry,
     Stop,
 }
 
 impl Worker {
-    /// Reads the first stream, then reopens after each end while the door lives.
-    /// A door that is gone takes its record with it. A stream that ends while a
-    /// close holds the mark is the close's: the reader waits for the mark to clear.
-    fn run(self, first: Events) {
+    /// Reads the first stream when one is open, then reconnects after each end
+    /// while the door lives. A stream that ends while a close holds the mark is the
+    /// close's: the reader waits for the mark to clear. A door that is gone takes
+    /// its record with it.
+    fn run(self, first: Option<Events>) {
         let _ended = Ended(self.link.clone());
-        let mut next = Some(first);
+        let mut next = first;
         loop {
             if let Some(events) = next.take() {
                 self.drain(events);
@@ -848,22 +898,26 @@ impl Worker {
             if self.hold() || self.pause() {
                 return;
             }
-            if !live(self.entry.pid, self.entry.starttime) {
+            if !self.alive() {
                 self.forget();
                 return;
             }
             match self.reconnect() {
                 Next::Stream(events) => next = Some(events),
-                Next::Hold => {}
+                Next::Hold | Next::Retry => {}
                 Next::Stop => return,
             }
         }
     }
 
-    /// Forwards one stream's frames. The replay follows the opening, so the asks
-    /// are cleared first and rebuilt from the replay. A frame the channel cannot
-    /// take ends the stream: the reconnect's replay restores the asks, and only
-    /// the display frame is lost.
+    /// Whether the door's process lives, by the pidfd the watch holds.
+    fn alive(&self) -> bool {
+        !pidfd_exited(&self.pidfd)
+    }
+
+    /// Forwards one stream's frames, each through `deliver`, so the watch waits for
+    /// room rather than losing a frame. The asks are cleared first, and the
+    /// stream's replay rebuilds them.
     fn drain(&self, events: Events) {
         {
             let mut shared = self.link.state.lock().unwrap();
@@ -877,33 +931,29 @@ impl Worker {
             if self.stopped() {
                 return;
             }
-            let overflow = self.observe(&frame);
-            let event = Event::Frame { launch_id: self.entry.launch_id.clone(), frame: Box::new(frame) };
-            if !self.offer(event) {
-                return;
+            let (due, overflow) = self.observe(&frame);
+            self.deliver(Event::Frame { launch_id: self.entry.launch_id.clone(), frame: Box::new(frame) });
+            if overflow {
+                self.deliver(Event::AsksOverflow { launch_id: self.entry.launch_id.clone() });
             }
-            if overflow && !self.offer(Event::AsksOverflow { launch_id: self.entry.launch_id.clone() }) {
-                return;
-            }
-            if !self.flush_due() {
-                return;
+            if due {
+                self.deliver(Event::CloseDue { launch_id: self.entry.launch_id.clone() });
             }
         }
     }
 
     /// Records what a frame changes: the turn state, an ask, or an ask settled.
-    /// Returns whether this ask is the stream's first past `ASKS_BOUND`. A
-    /// marked door's turn that has now ended sets `due`, which `flush_due` sends.
-    fn observe(&self, frame: &Frame) -> bool {
+    /// Returns whether the frame ends a marked door's turn, and whether this ask is
+    /// the stream's first past `ASKS_BOUND`.
+    fn observe(&self, frame: &Frame) -> (bool, bool) {
+        let mut due = false;
         let mut overflow = false;
         {
             let mut shared = self.link.state.lock().unwrap();
             match frame {
                 Frame::TurnState { running } => {
                     shared.turn = if *running { TurnState::Running } else { TurnState::Idle };
-                    if !*running && shared.armed {
-                        shared.due = true;
-                    }
+                    due = !*running && shared.armed;
                 }
                 Frame::Ask(ask) => {
                     let id = asks::ask_id(ask);
@@ -920,20 +970,7 @@ impl Worker {
             }
         }
         self.link.moved.notify_all();
-        overflow
-    }
-
-    /// Sends `CloseDue` when one is owed. It stays owed until the channel takes
-    /// it, so a full channel never loses it: the next stream's hello sends it.
-    fn flush_due(&self) -> bool {
-        if !self.link.state.lock().unwrap().due {
-            return true;
-        }
-        if !self.offer(Event::CloseDue { launch_id: self.entry.launch_id.clone() }) {
-            return false;
-        }
-        self.link.state.lock().unwrap().due = false;
-        true
+        (due, overflow)
     }
 
     fn end_stream(&self) {
@@ -962,7 +999,7 @@ impl Worker {
     }
 
     /// Re-checks the door, then opens its stream and checks its hello, before the
-    /// stream is used. A failed check ends the watch through `fail`.
+    /// stream is used.
     fn reconnect(&self) -> Next {
         let opened = match verify(&self.pins, &self.entry) {
             Ok(()) => open_stream(&self.pins.runtime, &self.entry).map_err(Check::Other),
@@ -970,17 +1007,11 @@ impl Worker {
         };
         let events = match opened {
             Ok((events, _session)) => events,
-            Err(check) => {
-                self.fail(check);
-                return Next::Stop;
-            }
+            Err(check) => return self.failed(check),
         };
         let closer = match events.closer() {
             Ok(closer) => closer,
-            Err(e) => {
-                self.fail(Check::Other(e.to_string()));
-                return Next::Stop;
-            }
+            Err(e) => return self.failed(Check::Other(e.to_string())),
         };
         let mut shared = self.link.state.lock().unwrap();
         if shared.stop {
@@ -990,21 +1021,29 @@ impl Worker {
             return Next::Hold;
         }
         shared.closer = Some(closer);
+        self.failing.set(false);
         Next::Stream(events)
     }
 
-    /// Ends the watch after a failed check. An identity failure drops the record;
-    /// any other keeps it, unwatched. Either way the caller hears which.
-    fn fail(&self, check: Check) {
-        let id = self.entry.launch_id.clone();
-        let event = match check {
+    /// Handles a failed reconnect. An identity failure drops the record and ends the
+    /// watch, and says so. Any other failure is reported once per streak, and the
+    /// watch tries again.
+    fn failed(&self, check: Check) -> Next {
+        match check {
             Check::Identity(why) => {
+                let id = self.entry.launch_id.clone();
                 let _ = self.store.update(|es| es.retain(|e| e.launch_id != id));
-                Event::Dropped { launch_id: id, pid: self.entry.pid, why: visible(&why) }
+                self.deliver(Event::Dropped { launch_id: id, pid: self.entry.pid, why: visible(&why) });
+                Next::Stop
             }
-            Check::Other(why) => Event::Unwatched { launch_id: id, why: visible(&why) },
-        };
-        self.deliver(event);
+            Check::Other(why) => {
+                if !self.failing.replace(true) {
+                    let launch_id = self.entry.launch_id.clone();
+                    self.deliver(Event::Unwatched { launch_id, why: visible(&why) });
+                }
+                Next::Retry
+            }
+        }
     }
 
     /// The door is gone: its record goes, and the caller hears it.
@@ -1016,18 +1055,9 @@ impl Worker {
         self.deliver(Event::Gone { launch_id: id });
     }
 
-    /// Sends one frame or overflow notice without waiting. Returns false when the
-    /// channel is full, and the caller ends the stream. A channel whose receiver
-    /// is gone takes the event as sent, so the watch goes on until the caller stops it.
-    fn offer(&self, event: Event) -> bool {
-        match self.out.try_send(event) {
-            Ok(()) | Err(TrySendError::Disconnected(_)) => true,
-            Err(TrySendError::Full(_)) => false,
-        }
-    }
-
-    /// Sends a terminal notice: the watch has no stream open at that point, so it
-    /// retries `try_send` each 20 ms until the channel takes it or the watch stops.
+    /// Sends one event, waiting for room: the watch retries `try_send` each 20 ms
+    /// until the channel takes it or the watch stops. A channel whose receiver is
+    /// gone takes the event as sent.
     fn deliver(&self, event: Event) {
         let mut event = event;
         loop {
