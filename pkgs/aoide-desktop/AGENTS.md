@@ -34,10 +34,42 @@ README.md.
 - No `unsafe` in this crate: `#![deny(unsafe_code)]` is on. The effective uid
   comes from `/proc/self/status`. The open and the stat use std.
 
+## The exec module (crates/shell)
+
+- `exec.rs` is the only file that starts a process. `Command::new(`, `unsafe {`
+  and the `libc` calls live there. The grep gate in
+  `crates/shell/tests/gates.rs` holds the rest of the workspace to that.
+- Every child runs from a pinned path. `run` is private, and only `Exec` calls
+  it, after `check_pin`. Do not add a second way in.
+- No shell, ever. The argv is a vector of words, never a string handed to a
+  shell. A child runs by its absolute path with `env_clear()`.
+- The argv is `[aoide, <path words>, --json, <flags>, (-- <positionals>)]`. A
+  valued flag is `--name=value`. A bool flag is written bare, because aoide's
+  parser never lets a declared bool take the next word. A bare `--` ends flag
+  parsing, so `--` is written only when there are positionals.
+- A call that does not match the schema is refused before anything runs: an
+  unknown path, an undeclared flag, a bool given a value, a valued flag given
+  none, a missing required argument, or a NUL byte in any word.
+- An `eidolon` child loses `AOIDE_SESSION_ID`, every `AOIDE_MELETE_*` variable
+  and every vault key variable. An `aoide` child loses every `AOIDE_MELETE_*`
+  variable unless its first word is `melete`, and every vault key variable.
+- The vault key names come from `aoide config --json`. While they are unknown,
+  an `eidolon` launch is refused, and an `aoide` child keeps the vault variables
+  it inherited, since their names cannot be known. The config read that learns
+  the names runs under the same rule.
+- Each stream is kept up to 16 MiB. Past that, the child still runs to its end,
+  the extra bytes are dropped, and the call is refused.
+- A non-zero exit is not an error. `call` returns the child's status and its
+  stderr, verbatim, for the caller to show.
+- The gate forbids `aoided.sock`, `dispatch`, `subscribe`, `/api/launch` and
+  `sh -c` anywhere under `crates/`, and under `ui/` once it exists.
+
 ## Tests
 
-- Use `fake` only. Never the installed `eidolon`, and never a GUI.
-- The token and client tests create runtime directories under `TMPDIR`, so run
+- Use `fake` and the fake aoide only. Never the installed `eidolon` or `aoide`,
+  and never a GUI. The fake aoide is a bin with `required-features = ["fakes"]`,
+  so the exec tests need `--all-features`.
+- The token, client and exec tests create directories under `TMPDIR`, so run
   them with `TMPDIR` set to a directory the tests may write.
 - Every cargo command runs with `--offline`.
 
@@ -47,3 +79,8 @@ README.md.
   route, and test each status.
 - A new frame type goes in `frame.rs`: its name in `KNOWN`, a `Known` variant
   and a `Frame` variant, with a decode test. Until then it is `Frame::Other`.
+- A new aoide command needs no code. Its path, flags and arguments come from
+  `aoide schema --json`.
+- A new kind of child goes in `exec.rs`, with its own environment rule in
+  `child_env`. If it needs vault keys, it is refused while their names are
+  unknown.

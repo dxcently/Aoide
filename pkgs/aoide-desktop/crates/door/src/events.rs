@@ -50,7 +50,7 @@ impl Sse {
                 self.data.clear();
             }
         } else if line.is_empty() {
-            self.dispatch();
+            self.finish_event();
         } else if let Some(value) = line.strip_prefix(b"data:") {
             self.push_data(value.strip_prefix(b" ").unwrap_or(value));
         }
@@ -72,7 +72,7 @@ impl Sse {
         self.data.extend_from_slice(value);
     }
 
-    fn dispatch(&mut self) {
+    fn finish_event(&mut self) {
         let data = std::mem::take(&mut self.data);
         if std::mem::take(&mut self.event_long) {
             self.dropped += 1;

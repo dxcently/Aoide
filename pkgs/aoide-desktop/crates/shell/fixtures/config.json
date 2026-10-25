@@ -1,0 +1,24 @@
+{
+  "status": "ok",
+  "command": "config",
+  "message": "fixture",
+  "gated": false,
+  "data": {
+    "schemaVersion": "1",
+    "path": "/fixture/config.toml",
+    "managed": false,
+    "present": true,
+    "config": {
+      "context": {
+        "agents": {},
+        "vaults": {
+          "main": {
+            "endpoint": "https://vault.example",
+            "vault": "main",
+            "tokenEnv": "AOIDE_TEST_VAULT_TOKEN"
+          }
+        }
+      }
+    }
+  }
+}

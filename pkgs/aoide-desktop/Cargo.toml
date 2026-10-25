@@ -2,7 +2,7 @@
 # workspace. The requirements are pkgs/aoide/Cargo.toml's.
 [workspace]
 resolver = "2"
-members = ["crates/door"]
+members = ["crates/door", "crates/shell"]
 
 [workspace.dependencies]
 serde = { version = "1", features = ["derive"] }

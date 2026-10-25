@@ -1,0 +1,36 @@
+{
+  "schemaVersion": "0",
+  "aoide": "0.0.26",
+  "stageNotesVersion": "1",
+  "commands": [
+    {
+      "path": ["config"],
+      "summary": "Show the effective runtime config.",
+      "args": [],
+      "flags": [
+        {"name": "json", "type": "bool", "description": "Structured I/O."}
+      ]
+    },
+    {
+      "path": ["send"],
+      "summary": "Inject text into a conducted session.",
+      "args": [
+        {"name": "text", "type": "string", "required": true, "description": "The text to inject."}
+      ],
+      "flags": [
+        {"name": "json", "type": "bool", "description": "Structured I/O."},
+        {"name": "yes", "type": "bool", "description": "Deliver without the gate."},
+        {"name": "id", "type": "string", "description": "Target session id.", "value": "session-id"}
+      ]
+    },
+    {
+      "path": ["melete", "status"],
+      "summary": "Show the melete store.",
+      "args": [],
+      "flags": [
+        {"name": "json", "type": "bool", "description": "Structured I/O."},
+        {"name": "limit", "type": "int", "description": "Rows to show."}
+      ]
+    }
+  ]
+}
