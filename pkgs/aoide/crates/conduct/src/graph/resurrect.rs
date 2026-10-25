@@ -161,11 +161,13 @@
 //! [`dry_run_listing`], bare mode through [`dry_run_manifest`]. Each row's
 //! verdict comes from the helper its launch uses (`enrichment`, `clean_argv`,
 //! `summon_check`, `unresumed_reason`), so the listing and the launch agree.
-//! From an unattested caller on a door that cannot approve, a dry run is
-//! refused in both modes: bare with the launch's refusal, flag with
-//! `dry-run-not-held`, since the flag-mode launch holds and shows that caller
-//! nothing. Nothing is held, spawned or sent on any door. The handler writes
-//! three things and no others: the audit line (status `dry-run`); the one-time
+//! From an unattested caller on a door that cannot approve, a dry run gets what
+//! the call would give that caller, minus the launch: in bare mode the bare
+//! call's refusal; with `--id` or `--all` and no `--project`, the usage error
+//! the call gives; with `--project`, the `dry-run-not-held` refusal, since that
+//! call would hold and show the caller nothing. Nothing is held, spawned or
+//! sent on any door. The handler writes three things and no others: the audit
+//! line (status `dry-run`, at the points the real call audits); the one-time
 //! `carry.json` rename an undying read performs
 //! (`aoide_storage::undying::load_undying`), on a host that still holds the
 //! legacy file; and the one-time conducting-stage migration a stage read
@@ -778,8 +780,10 @@ fn caller_is_attested(
 /// every other caller has the whole command held in `pending.json` for a human
 /// to approve, with nothing launched. `--dry-run` lists the same selection
 /// instead, and launches, holds and sends nothing ([`dry_run_listing`],
-/// [`dry_run_manifest`]). From a caller that cannot approve, a dry run is
-/// refused in both modes instead.
+/// [`dry_run_manifest`]). From a caller that cannot approve, a dry run gets
+/// what the call gives without the launch: bare mode its refusal, `--id` or
+/// `--all` without `--project` the usage error, and `--project` the
+/// `dry-run-not-held` refusal.
 pub fn session_resurrect(inv: &Invocation) -> Outcome {
     session_resurrect_with(inv, real_attested_sender)
 }
@@ -788,11 +792,13 @@ pub fn session_resurrect(inv: &Invocation) -> Outcome {
 /// door's decision is testable without a live daemon.
 ///
 /// An unattested caller on a door that cannot approve gets `--project …` held
-/// whole, and its dry run is refused instead: a dry run shows no more than the
-/// call gives that caller, which is nothing. Bare mode is refused there instead
-/// of held, dry or not: it reads the working directory's manifest and launches
-/// the manifest's own commands, which an approver replaying from another
-/// directory would neither see in the held line nor find in the same place.
+/// whole, and its dry run is refused instead, since the call would hold it and
+/// show that caller nothing. With `--id` or `--all` and no `--project`, a dry
+/// run gets the usage error the call gives, since that call holds nothing.
+/// Bare mode is refused there instead of held, dry or not: it reads the
+/// working directory's manifest and launches the manifest's own commands, which
+/// an approver replaying from another directory would neither see in the held
+/// line nor find in the same place.
 fn session_resurrect_with(
     inv: &Invocation,
     resolve_caller: impl Fn(&[super::model::SessionRecord]) -> Option<String>,
@@ -814,7 +820,7 @@ fn session_resurrect_with(
             audit_resurrect(inv, "refused", &out.message);
             return out;
         }
-        if dry {
+        if dry && inv.flags.contains_key("project") {
             let out = Outcome::refuse(
                 cmd,
                 Kind::Refused,
@@ -3983,7 +3989,7 @@ mod tests {
 
     /// `resurrect` opens only to the CLI and daemon doors, so a door that
     /// cannot approve is reached only here, by calling the handler directly.
-    /// The real call holds the whole command; a dry run of any flag form is
+    /// The real call holds the whole command; a dry run with `--project` is
     /// refused instead, holding nothing, launching nothing and showing the
     /// caller no ledger field.
     #[cfg(unix)]
@@ -4034,6 +4040,46 @@ mod tests {
         let launched = session_resurrect(&flag_invocation(&["resurrect"], &[("project", "proj")]));
         assert_eq!(launched.status, aoide_protocol::output::Status::Ok, "msg: {}", launched.message);
         assert!(wait_for(&marker), "the real call launched on this fixture");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A dry run without `--project` from a door that cannot approve is the
+    /// real call's own usage error: the same status, message and data, with no
+    /// read, hold or launch before it. `--id` and `--all` are the two forms.
+    #[cfg(unix)]
+    #[test]
+    fn a_projectless_dry_run_gets_the_real_calls_outcome_and_holds_nothing() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(RESURRECT_ENV);
+        let (root, proj_path) = setup("resurrect-projectless-mcp");
+        std::env::remove_var("AOIDE_DAEMON_SOCKET");
+        std::env::remove_var("AOIDE_SESSION_ID");
+        let marker = marker_terminal(&root);
+        set_ledger(&[ledger_entry("u", "claude", &proj_path, "2026-08-20T01:00:00Z")]);
+        let mut undying = Vec::new();
+        aoide_storage::undying::set_undying(&mut undying, "u", true);
+        aoide_storage::undying::save_undying(&undying).unwrap();
+        let before = snapshot(&root);
+
+        for flags in [vec![("id", "u")], vec![("all", "true")]] {
+            let mut real = flag_invocation(&["resurrect"], &flags);
+            real.door = Door::Mcp;
+            let real_out = session_resurrect_with(&real, |_| None::<String>);
+            assert!(real_out.message.contains("missing required flag --project"), "{flags:?}: {}", real_out.message);
+
+            let mut dry_flags = flags.clone();
+            dry_flags.push(("dry-run", "true"));
+            let mut dry = flag_invocation(&["resurrect"], &dry_flags);
+            dry.door = Door::Mcp;
+            let dry_out = session_resurrect_with(&dry, |_| None::<String>);
+            assert_eq!(dry_out.status, real_out.status, "{flags:?}");
+            assert_eq!(dry_out.message, real_out.message, "{flags:?}");
+            assert_eq!(dry_out.data, real_out.data, "{flags:?}");
+        }
+        assert!(held_entries().is_empty(), "a dry run queued a hold: {:?}", held_entries());
+        assert_eq!(snapshot(&root), before, "a dry run wrote state");
+        no_marker_within_the_launch_wait(&marker);
 
         let _ = std::fs::remove_dir_all(&root);
     }

@@ -1188,10 +1188,12 @@ in the message.
   `dry_run_manifest_dispositions_match_the_real_launch_for_local_specs` pins
   the two together.
 - **A dry run is never held or sent, on any door. From an unattested caller on
-  a door that cannot approve, it is refused.** `session_resurrect_with` refuses
-  such a dry run in both modes: bare with the bare-mode refusal its launch
-  gives, flag with `dry-run-not-held`, since the flag-mode launch would hold and
-  show that caller nothing. `plan_spec` takes a non-local spec's verdict from
+  a door that cannot approve, it gets what the call would give, minus the
+  launch.** `session_resurrect_with` gives that: bare mode the refusal its
+  launch gives; `--id` or `--all` with no `--project` the usage error
+  `require_flag` gives, with no read before it; with `--project` the
+  `dry-run-not-held` refusal, since the flag-mode launch would hold and show
+  that caller nothing. `plan_spec` takes a non-local spec's verdict from
   `summon_check`, never from `spawn_on_node`. Don't route a dry run through
   `hold_whole`, `send_restore`, `launch_session` or the node client.
 - **On an `--all` or `--id` call, only a dry run reads the undying set in

@@ -1216,13 +1216,15 @@ blank one is refused too.
   launch's own `skipped[]` reports it. A remote spec is never sent: its row
   carries only the local pre-wire verdict. The message spells each line as the
   pending view spells a held plan (`visible_held`); the data stays raw. From an
-  unattested caller on a door that cannot approve, a dry run is refused in both
-  modes: a bare one with the launch's refusal, a flag-mode one with
-  `dry-run-not-held`, since the flag-mode launch would hold and show that caller
-  nothing. A dry run holds on no door. Its handler writes three things, and no
-  others: the audit line (status `dry-run`, at the points the real call audits;
-  none for a usage error or a stage miss); on a host that still holds the legacy
-  file, the one-time `carry.json` rename an undying read runs
+  unattested caller on a door that cannot approve, a dry run gets what the call
+  would give that caller, minus the launch: in bare mode the launch's refusal;
+  with `--id` or `--all` and no `--project`, the usage error the call gives;
+  with `--project`, the `dry-run-not-held` refusal, since the flag-mode launch
+  would hold and show that caller nothing. A dry run holds on no door. Its
+  handler writes three things, and no others: the audit line (status
+  `dry-run`, at the points the real call audits; none for a usage error or a
+  stage miss); on a host that still holds the legacy file, the one-time
+  `carry.json` rename an undying read runs
   (`aoide_storage::undying::load_undying`); and, on a host that still holds the
   legacy stage files, the one-time conducting-stage migration a stage read runs
   (`aoide_storage::fs::conducting_stage_dir`). The one write outside the handler
