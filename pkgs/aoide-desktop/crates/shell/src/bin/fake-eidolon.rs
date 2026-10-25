@@ -18,6 +18,24 @@
 //! - `answer-409`, `answer-422` and `answer-401` queue one answer of that status
 //!   for the next `POST /api/answer`. An answer served as `204` leaves its ask
 //!   pending until a `settle` says otherwise.
+//! - `flood N` pushes N `text-delta` frames while a stream is open.
+//! - `asks N` raises approvals under ids 1 to N, with the same input.
+//! - `hello-bad` makes the first frame of every head something other than a
+//!   `hello`; `hello-good` puts the hello back.
+//! - `session NAME` names the session in each hello from now on.
+//!
+//! `DIR/.fake-mode`, read once at start, changes the start-up:
+//!
+//! - `exit-first` exits 3 before it prints anything.
+//! - `no-banner` prints no banner, and runs until it is signalled.
+//! - `remote-address` names a non-loopback address in its banner.
+//! - `token-outside` names a token path outside the runtime dir.
+//! - `token-space` names a token path with a trailing space.
+//! - `banner-128k` prints 128 KiB before its banner.
+//! - `ignore-sigterm` ignores the first SIGTERM.
+//! - `cancel-stuck` answers a cancel `204` and keeps its turn running.
+//! - `hello-bad` makes the first frame of every head something other than a
+//!   `hello`, from the start.
 //!
 //! Each control word applied, each request served (an answer with its body) and
 //! each signal received is appended to `DIR/.fake-log` in order. On SIGTERM it
@@ -55,12 +73,14 @@ struct Core {
     turn: Turn,
     pending: Option<Turn>,
     hello: Value,
+    hello_bad: bool,
+    stuck: bool,
     /// The asks pending on this door, each as the frame it was raised with, by id.
     asks: BTreeMap<u64, Value>,
 }
 
 impl Core {
-    fn open(dir: PathBuf, hello: Value) -> Core {
+    fn open(dir: PathBuf, hello: Value, stuck: bool) -> Core {
         let log = OpenOptions::new()
             .create(true)
             .append(true)
@@ -74,6 +94,8 @@ impl Core {
             turn: Turn::Idle,
             pending: None,
             hello,
+            hello_bad: false,
+            stuck,
             asks: BTreeMap::new(),
         }
     }
@@ -93,7 +115,7 @@ impl Core {
                 String::new()
             };
             self.line(&format!("{} {}{body}", request.method, request.path));
-            if request.method == "POST" && request.path == "/api/cancel" && self.turn == Turn::Running {
+            if request.method == "POST" && request.path == "/api/cancel" && self.turn == Turn::Running && !self.stuck {
                 self.turn = Turn::Idle;
                 self.pending = Some(Turn::Idle);
             }
@@ -125,12 +147,33 @@ impl Core {
             "answer-409" => door.reply("/api/answer", 409, ""),
             "answer-422" => door.reply("/api/answer", 422, &json!({"error": "the ask is not taken"}).to_string()),
             "answer-401" => door.reply("/api/answer", 401, ""),
+            "hello-bad" => {
+                self.hello_bad = true;
+                self.head(door);
+            }
+            "hello-good" => {
+                self.hello_bad = false;
+                self.head(door);
+            }
             _ => {
                 if let Some((id, input)) = word.strip_prefix("ask-approval ").and_then(|rest| rest.split_once(' ')) {
                     let input: Value = serde_json::from_str(input).expect("the ask's input is JSON");
                     self.raise(door, id.parse().expect("the ask id is a number"), input);
                 } else if let Some((id, label)) = word.strip_prefix("settle ").and_then(|rest| rest.split_once(' ')) {
                     self.settle(door, id.parse().expect("the ask id is a number"), label);
+                } else if let Some(count) = word.strip_prefix("asks ") {
+                    for id in 1..=count.parse::<u64>().expect("asks takes a count") {
+                        self.raise(door, id, json!({"path": "a.txt"}));
+                    }
+                } else if let Some(count) = word.strip_prefix("flood ") {
+                    if door.streaming() {
+                        for _ in 0..count.parse::<usize>().expect("flood takes a count") {
+                            door.push(&json!({"type": "text-delta", "text": "x"}).to_string());
+                        }
+                    }
+                } else if let Some(name) = word.strip_prefix("session ") {
+                    self.hello["session"] = json!(name);
+                    self.head(door);
                 } else {
                     return;
                 }
@@ -145,7 +188,12 @@ impl Core {
     fn head(&self, door: &FakeDoor) {
         let mut hello = self.hello.clone();
         hello["pending"] = json!(self.asks.len());
-        let mut frames = vec![hello.to_string()];
+        let first = if self.hello_bad {
+            json!({"type": "turn-state", "running": false}).to_string()
+        } else {
+            hello.to_string()
+        };
+        let mut frames = vec![first];
         frames.extend(self.asks.values().map(Value::to_string));
         let frames: Vec<&str> = frames.iter().map(String::as_str).collect();
         door.set_head(&frames);
@@ -209,6 +257,10 @@ fn main() {
             std::process::exit(2);
         }
     };
+    let mode = fs::read_to_string(dir.join(".fake-mode")).unwrap_or_default().trim().to_owned();
+    if mode == "exit-first" {
+        std::process::exit(3);
+    }
     let runtime = PathBuf::from(std::env::var_os("XDG_RUNTIME_DIR").unwrap_or_default());
     // Blocked before any thread starts, so every thread inherits the block and
     // the signal is taken by sigwait.
@@ -227,13 +279,29 @@ fn main() {
         "pending": 0,
         "protocol": 1,
     });
-    let core = Arc::new(Mutex::new(Core::open(dir, hello)));
+    let core = Arc::new(Mutex::new(Core::open(dir.clone(), hello, mode == "cancel-stuck")));
+    core.lock().expect("the core lock").hello_bad = mode == "hello-bad";
     core.lock().expect("the core lock").head(&door);
-    println!("listening on http://{}/", door.addr());
-    println!("token file: {}", door.token_file().display());
+    if mode == "banner-128k" {
+        for _ in 0..65_536 {
+            println!("x");
+        }
+    }
+    if mode != "no-banner" {
+        let port = door.addr().port();
+        let addr = if mode == "remote-address" { format!("192.0.2.1:{port}") } else { door.addr().to_string() };
+        let token = match mode.as_str() {
+            "token-outside" => dir.join("elsewhere.token"),
+            "token-space" => PathBuf::from(format!("{} ", door.token_file().display())),
+            _ => door.token_file(),
+        };
+        println!("listening on http://{addr}/");
+        println!("token file: {}", token.display());
+    }
     {
         let (door, core) = (door.clone(), core.clone());
-        thread::spawn(move || await_term(&door, &core));
+        let ignore_first = mode == "ignore-sigterm";
+        thread::spawn(move || await_term(&door, &core, ignore_first));
     }
     loop {
         thread::sleep(POLL);
@@ -245,18 +313,26 @@ fn main() {
 }
 
 /// Waits for SIGTERM, logs it after the requests served before it, and exits
-/// once no events stream is open.
-fn await_term(door: &FakeDoor, core: &Mutex<Core>) {
+/// once no events stream is open. With `ignore_first`, the first SIGTERM is
+/// logged and ignored, and the second one is the one that exits.
+fn await_term(door: &FakeDoor, core: &Mutex<Core>, ignore_first: bool) {
     let set = term_set();
     let mut signal: libc::c_int = 0;
-    // SAFETY: `set` is a valid signal set, and `signal` is a valid out pointer.
-    unsafe {
-        libc::sigwait(&set, &mut signal);
-    }
-    {
-        let mut core = core.lock().expect("the core lock");
-        core.sync(door);
-        core.line("SIGTERM");
+    let mut ignore = ignore_first;
+    loop {
+        // SAFETY: `set` is a valid signal set, and `signal` is a valid out pointer.
+        unsafe {
+            libc::sigwait(&set, &mut signal);
+        }
+        {
+            let mut core = core.lock().expect("the core lock");
+            core.sync(door);
+            core.line("SIGTERM");
+        }
+        if !ignore {
+            break;
+        }
+        ignore = false;
     }
     let end = Instant::now() + DRAIN;
     while door.streaming() && Instant::now() < end {

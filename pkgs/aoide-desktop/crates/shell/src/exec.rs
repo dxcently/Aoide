@@ -667,9 +667,14 @@ pub(crate) fn terminate(pid: u32) -> io::Result<()> {
     }
 }
 
+/// The effective uid of this process. The app's private directories belong to it.
+pub(crate) fn euid() -> u32 {
+    // SAFETY: geteuid takes no arguments and cannot fail.
+    unsafe { libc::geteuid() }
+}
+
 /// A pidfd for `pid`: a descriptor that names one process, so a signal sent
 /// through it cannot reach a process that later takes the number.
-#[allow(dead_code)] // No caller until a door is closed through its pidfd.
 pub(crate) fn open_pidfd(pid: u32) -> io::Result<OwnedFd> {
     let pid = i32::try_from(pid)
         .ok()
@@ -686,7 +691,6 @@ pub(crate) fn open_pidfd(pid: u32) -> io::Result<OwnedFd> {
 }
 
 /// Sends SIGTERM to the process `fd` names, and to no other.
-#[allow(dead_code)] // No caller until a door is closed through its pidfd.
 pub(crate) fn terminate_pidfd(fd: &OwnedFd) -> io::Result<()> {
     // SAFETY: a plain syscall taking a descriptor, a signal and a null siginfo.
     let sent = unsafe {
@@ -736,6 +740,32 @@ pub mod test_doors {
     /// Sends SIGTERM to `pid`, as the app does to a child it started.
     pub fn terminate(pid: u32) -> io::Result<()> {
         super::terminate(pid)
+    }
+
+    /// Runs `program` with no arguments as a child of this process, and leaves
+    /// it unreaped. Returns its pid once it is a zombie, so the pid has exited.
+    pub fn zombie(program: &Path) -> io::Result<u32> {
+        let child = std::process::Command::new(program)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()?;
+        let pid = child.id();
+        std::mem::forget(child);
+        let end = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while !is_zombie(pid) {
+            if std::time::Instant::now() >= end {
+                return Err(io::Error::new(io::ErrorKind::TimedOut, "the child did not exit within 10 s"));
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        Ok(pid)
+    }
+
+    fn is_zombie(pid: u32) -> bool {
+        fs::read_to_string(format!("/proc/{pid}/stat")).is_ok_and(|text| {
+            text.rfind(')').and_then(|at| text[at + 1..].split_whitespace().next()) == Some("Z")
+        })
     }
 }
 

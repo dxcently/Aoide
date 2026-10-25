@@ -2,18 +2,18 @@
 #![cfg(feature = "fakes")]
 
 use std::ffi::OsString;
-use std::fs::{self, OpenOptions};
-use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+use std::fs::{self, DirBuilder, OpenOptions};
+use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::mpsc::{self, Receiver, Sender};
-use std::sync::Mutex;
+use std::sync::mpsc::{self, Receiver, SyncSender};
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use aoide_desktop_door::{token_path, Ask, DoorError};
+use aoide_desktop_door::{token_path, Ask, Door, DoorError};
 use aoide_desktop_shell::asks::{ask_id, Sent};
-use aoide_desktop_shell::doors::{launch_plan, Close, Doors, DoorsError, Event, LaunchPlan, TurnState};
+use aoide_desktop_shell::doors::{launch_plan, Close, Doors, DoorsError, Event, LaunchPlan, TurnState, ASKS_BOUND, EVENTS_BOUND};
 use aoide_desktop_shell::exec::{test_doors, Exec, ExecError};
 use serde_json::{json, Value};
 
@@ -77,11 +77,11 @@ impl World {
         Exec::load(Path::new(FAKE_AOIDE), &self.home(), env).expect("the fake aoide loads")
     }
 
-    fn open(&self, out: Sender<Event>) -> Doors {
+    fn open(&self, out: SyncSender<Event>) -> Doors {
         self.open_with(self.exec(), out)
     }
 
-    fn open_with(&self, exec: Exec, out: Sender<Event>) -> Doors {
+    fn open_with(&self, exec: Exec, out: SyncSender<Event>) -> Doors {
         let runtime = self.runtime();
         Doors::open(exec, Path::new(FAKE_EIDOLON), &self.home(), &self.root(), Some(runtime.as_os_str()), out)
             .expect("the doors open")
@@ -144,8 +144,13 @@ impl World {
         self.entry(id)["pid"].as_u64().expect("a pid") as u32
     }
 
+    /// Makes the store's directory as the app makes it: private, mode 0700.
+    fn make_store_dir(&self) {
+        DirBuilder::new().recursive(true).mode(0o700).create(self.store().parent().unwrap()).unwrap();
+    }
+
     fn write_record(&self, entries: Value) {
-        fs::create_dir_all(self.store().parent().unwrap()).unwrap();
+        self.make_store_dir();
         fs::write(self.store(), serde_json::to_vec(&entries).unwrap()).unwrap();
     }
 
@@ -287,7 +292,7 @@ fn start_door_outside(world: &World) -> (u32, String, PathBuf) {
 #[test]
 fn the_door_is_not_this_process_child_and_leads_a_session_of_its_own() {
     let world = World::new("session");
-    let (tx, _rx) = mpsc::channel();
+    let (tx, _rx) = mpsc::sync_channel(EVENTS_BOUND);
     let mut doors = world.open(tx);
     let id = world.launch(&mut doors);
     let stat = stat_of(world.pid(&id)).expect("the door runs");
@@ -298,7 +303,7 @@ fn the_door_is_not_this_process_child_and_leads_a_session_of_its_own() {
 #[test]
 fn the_record_holds_the_launch_fields_and_is_mode_0600() {
     let world = World::new("record");
-    let (tx, _rx) = mpsc::channel();
+    let (tx, _rx) = mpsc::sync_channel(EVENTS_BOUND);
     let mut doors = world.open(tx);
     let id = world.launch(&mut doors);
     let entry = world.entry(&id);
@@ -331,7 +336,7 @@ fn a_cwd_that_is_relative_missing_not_canonical_or_holds_u202e_is_refused() {
 #[test]
 fn an_unset_or_refused_runtime_dir_opens_nothing_and_starts_no_door() {
     let world = World::new("runtime");
-    let (tx, _rx) = mpsc::channel();
+    let (tx, _rx) = mpsc::sync_channel(EVENTS_BOUND);
     let unset = Doors::open(world.exec(), Path::new(FAKE_EIDOLON), &world.home(), &world.root(), None, tx.clone());
     assert!(unset.is_err(), "an unset runtime dir is refused");
     fs::set_permissions(world.runtime(), fs::Permissions::from_mode(0o755)).unwrap();
@@ -351,7 +356,7 @@ fn an_unset_or_refused_runtime_dir_opens_nothing_and_starts_no_door() {
 #[test]
 fn unknown_vault_names_refuse_a_launch_before_anything_starts() {
     let world = World::new("vault");
-    let (tx, _rx) = mpsc::channel();
+    let (tx, _rx) = mpsc::sync_channel(EVENTS_BOUND);
     let mut doors = world.open_with(world.exec_with(&[("FAKE_AOIDE_NO_CONFIG", "1")]), tx);
     let refused = doors.launch(&world.plan());
     assert!(matches!(refused, Err(DoorsError::Exec(ExecError::VaultKeysUnknown(_)))));
@@ -362,9 +367,9 @@ fn unknown_vault_names_refuse_a_launch_before_anything_starts() {
 #[test]
 fn a_doors_file_that_does_not_parse_is_refused_and_never_rewritten() {
     let world = World::new("corrupt");
-    fs::create_dir_all(world.store().parent().unwrap()).unwrap();
+    world.make_store_dir();
     fs::write(world.store(), b"{ not json").unwrap();
-    let (tx, _rx) = mpsc::channel();
+    let (tx, _rx) = mpsc::sync_channel(EVENTS_BOUND);
     let refused = Doors::open(
         world.exec(),
         Path::new(FAKE_EIDOLON),
@@ -389,7 +394,7 @@ fn a_forged_record_whose_cmdline_is_not_the_launch_argv_is_dropped_and_never_sig
         "launchId": "forged", "pid": pid, "starttime": stat_of(pid).unwrap().starttime,
         "addr": addr, "tokenFile": token, "sessionId": null, "cwd": other, "log": "x",
     }]));
-    let (tx, _rx) = mpsc::channel();
+    let (tx, _rx) = mpsc::sync_channel(EVENTS_BOUND);
     let _doors = world.open(tx);
     assert!(world.record().is_empty(), "the forged record is dropped");
     assert!(alive(pid), "the door is left alone");
@@ -404,7 +409,7 @@ fn a_forged_record_with_a_wrong_start_time_is_dropped_and_never_signalled() {
         "launchId": "forged", "pid": pid, "starttime": stat_of(pid).unwrap().starttime + 1,
         "addr": addr, "tokenFile": token, "sessionId": null, "cwd": world.cwd(), "log": "x",
     }]));
-    let (tx, _rx) = mpsc::channel();
+    let (tx, _rx) = mpsc::sync_channel(EVENTS_BOUND);
     let _doors = world.open(tx);
     assert!(world.record().is_empty(), "the forged record is dropped");
     assert!(alive(pid), "the door is left alone");
@@ -422,22 +427,24 @@ fn a_record_whose_pid_is_dead_is_dropped() {
         "launchId": "dead", "pid": pid, "starttime": starttime,
         "addr": addr, "tokenFile": token, "sessionId": null, "cwd": world.cwd(), "log": "x",
     }]));
-    let (tx, _rx) = mpsc::channel();
+    let (tx, _rx) = mpsc::sync_channel(EVENTS_BOUND);
     let _doors = world.open(tx);
     assert!(world.record().is_empty(), "the dead record is dropped");
 }
 
 #[test]
-fn a_record_whose_session_is_not_the_hello_session_is_dropped_and_never_signalled() {
+fn a_record_whose_hello_names_another_session_is_kept_unwatched_and_never_signalled() {
     let world = World::new("forged-session");
     let (pid, addr, token) = start_door_outside(&world);
     world.write_record(json!([{
         "launchId": "forged", "pid": pid, "starttime": stat_of(pid).unwrap().starttime,
         "addr": addr, "tokenFile": token, "sessionId": "/elsewhere.eid", "cwd": world.cwd(), "log": "x",
     }]));
-    let (tx, _rx) = mpsc::channel();
-    let _doors = world.open(tx);
-    assert!(world.record().is_empty(), "the record whose session differs is dropped");
+    let (tx, rx) = mpsc::sync_channel(EVENTS_BOUND);
+    let doors = world.open(tx);
+    assert_eq!(world.record_ids(), vec!["forged".to_owned()], "the record is kept");
+    assert!(doors.launch_ids().is_empty(), "the door is not watched");
+    event_where(&rx, |e| matches!(e, Event::Unwatched { .. }));
     assert!(alive(pid), "the door is left alone");
     assert_eq!(world.count("SIGTERM"), 0, "nothing signalled the door");
 }
@@ -445,12 +452,12 @@ fn a_record_whose_session_is_not_the_hello_session_is_dropped_and_never_signalle
 #[test]
 fn a_killed_apps_door_reattaches_from_the_record() {
     let world = World::new("reattach");
-    let (tx1, _rx1) = mpsc::channel();
+    let (tx1, _rx1) = mpsc::sync_channel(EVENTS_BOUND);
     let mut first = world.open(tx1);
     let id = world.launch(&mut first);
     drop(first);
     assert!(alive(world.pid(&id)), "the door outlives the app");
-    let (tx2, _rx2) = mpsc::channel();
+    let (tx2, _rx2) = mpsc::sync_channel(EVENTS_BOUND);
     let second = world.open(tx2);
     assert_eq!(second.launch_ids(), vec![id.clone()], "the door is attached again");
     assert_eq!(second.turn(&id).unwrap(), TurnState::Unknown, "its turn state is not known until a change");
@@ -463,7 +470,7 @@ fn a_killed_apps_door_reattaches_from_the_record() {
 #[test]
 fn an_idle_close_leaves_no_token_file_and_removes_the_record() {
     let world = World::new("idle");
-    let (tx, _rx) = mpsc::channel();
+    let (tx, _rx) = mpsc::sync_channel(EVENTS_BOUND);
     let mut doors = world.open(tx);
     let id = world.launch(&mut doors);
     let pid = world.pid(&id);
@@ -484,7 +491,7 @@ fn an_idle_close_leaves_no_token_file_and_removes_the_record() {
 #[test]
 fn close_after_turn_while_the_turn_state_is_unknown_is_refused_and_signals_nothing() {
     let world = World::new("unknown");
-    let (tx, _rx) = mpsc::channel();
+    let (tx, _rx) = mpsc::sync_channel(EVENTS_BOUND);
     let mut doors = world.open(tx);
     let id = world.launch(&mut doors);
     assert_eq!(doors.turn(&id).unwrap(), TurnState::Unknown);
@@ -497,7 +504,7 @@ fn close_after_turn_while_the_turn_state_is_unknown_is_refused_and_signals_nothi
 #[test]
 fn stop_now_cancels_before_it_signals() {
     let world = World::new("stop");
-    let (tx, _rx) = mpsc::channel();
+    let (tx, _rx) = mpsc::sync_channel(EVENTS_BOUND);
     let mut doors = world.open(tx);
     let id = world.launch(&mut doors);
     world.command("running");
@@ -512,7 +519,7 @@ fn stop_now_cancels_before_it_signals() {
 #[test]
 fn stop_now_on_an_idle_door_closes_at_once_on_a_409() {
     let world = World::new("stop-idle");
-    let (tx, _rx) = mpsc::channel();
+    let (tx, _rx) = mpsc::sync_channel(EVENTS_BOUND);
     let mut doors = world.open(tx);
     let id = world.launch(&mut doors);
     world.command("idle");
@@ -529,7 +536,7 @@ fn stop_now_on_an_idle_door_closes_at_once_on_a_409() {
 #[test]
 fn stop_now_after_a_reconnect_closes_on_the_409() {
     let world = World::new("stop-reconnect");
-    let (tx, _rx) = mpsc::channel();
+    let (tx, _rx) = mpsc::sync_channel(EVENTS_BOUND);
     let mut doors = world.open(tx);
     let id = world.launch(&mut doors);
     world.command("end");
@@ -544,7 +551,7 @@ fn stop_now_after_a_reconnect_closes_on_the_409() {
 #[test]
 fn stop_now_on_a_door_that_fails_its_checks_sends_no_request() {
     let world = World::new("stop-checks");
-    let (tx, _rx) = mpsc::channel();
+    let (tx, _rx) = mpsc::sync_channel(EVENTS_BOUND);
     let mut doors = world.open(tx);
     let id = world.launch(&mut doors);
     let port = port_of(&world.entry(&id));
@@ -569,7 +576,7 @@ fn stop_now_on_a_door_that_fails_its_checks_sends_no_request() {
 #[test]
 fn a_turn_extended_by_a_new_one_is_not_signalled_until_the_last_ends() {
     let world = World::new("mark");
-    let (tx, rx) = mpsc::channel();
+    let (tx, rx) = mpsc::sync_channel(EVENTS_BOUND);
     let mut doors = world.open(tx);
     let id = world.launch(&mut doors);
     let due = |e: &Event| matches!(e, Event::CloseDue { .. });
@@ -592,7 +599,7 @@ fn a_turn_extended_by_a_new_one_is_not_signalled_until_the_last_ends() {
 #[test]
 fn a_revoked_mark_is_never_signalled() {
     let world = World::new("revoked");
-    let (tx, _rx) = mpsc::channel();
+    let (tx, _rx) = mpsc::sync_channel(EVENTS_BOUND);
     let mut doors = world.open(tx);
     let id = world.launch(&mut doors);
     world.command("running");
@@ -609,7 +616,7 @@ fn a_revoked_mark_is_never_signalled() {
 #[test]
 fn a_stream_that_ends_while_its_door_lives_is_opened_again() {
     let world = World::new("reopen");
-    let (tx, _rx) = mpsc::channel();
+    let (tx, _rx) = mpsc::sync_channel(EVENTS_BOUND);
     let mut doors = world.open(tx);
     let id = world.launch(&mut doors);
     world.command("end");
@@ -625,7 +632,7 @@ fn a_stream_that_ends_while_its_door_lives_is_opened_again() {
 #[test]
 fn a_stream_that_ends_with_its_door_gone_drops_the_record() {
     let world = World::new("gone");
-    let (tx, rx) = mpsc::channel();
+    let (tx, rx) = mpsc::sync_channel(EVENTS_BOUND);
     let mut doors = world.open(tx);
     let id = world.launch(&mut doors);
     let pid = world.pid(&id);
@@ -669,17 +676,41 @@ fn answers_once(world: &World, cwd: &Path, count: usize) -> Vec<String> {
     answers_at(world, cwd)
 }
 
-/// The answers logged under `cwd` after a pause, so a request that was sent has
-/// time to be logged before the list is read.
-fn answers_after_a_pause(world: &World, cwd: &Path) -> Vec<String> {
-    thread::sleep(Duration::from_millis(200));
-    answers_at(world, cwd)
+/// The id of the sentinel answer a negative check sends. No ask carries it.
+const SENTINEL: u64 = 4_000_000_000;
+
+/// The answers the fake logged under `cwd` before a sentinel answer the test
+/// sends to `door`. The fake serves requests in the order they arrive, so a
+/// request the app sent before this call is logged before the sentinel. A
+/// negative check passes only when that list is empty.
+fn answers_before_sentinel(world: &World, cwd: &Path, door: &Door) -> Vec<String> {
+    let _ = door.answer(SENTINEL, "yes", None);
+    let sentinel = |line: &String| line.starts_with("POST /api/answer") && line.contains(&SENTINEL.to_string());
+    until(Duration::from_secs(5), || answers_at(world, cwd).iter().any(sentinel));
+    let logged = answers_at(world, cwd);
+    let at = logged.iter().position(sentinel).expect("the sentinel is logged");
+    logged[..at].to_vec()
+}
+
+/// The answers logged under `cwd` other than the sentinel, once there are `count` of them.
+fn answers_after_sentinel(world: &World, cwd: &Path, count: usize) -> Vec<String> {
+    let sentinel = SENTINEL.to_string();
+    let real = || answers_at(world, cwd).into_iter().filter(|line| !line.contains(&sentinel)).collect::<Vec<String>>();
+    until(Duration::from_secs(5), || real().len() == count);
+    real()
+}
+
+/// A `Door` for the record `id` names, built the way the app builds one.
+fn door_of(world: &World, id: &str) -> Door {
+    let entry = world.entry(id);
+    let addr = entry["addr"].as_str().unwrap().parse().unwrap();
+    Door::new(addr, &world.runtime(), Path::new(entry["tokenFile"].as_str().unwrap())).unwrap()
 }
 
 #[test]
 fn an_answer_goes_only_to_the_door_whose_stream_carried_its_ask() {
     let world = World::new("asks-route");
-    let (tx, _rx) = mpsc::channel();
+    let (tx, _rx) = mpsc::sync_channel(EVENTS_BOUND);
     let mut doors = world.open(tx);
     let first = world.launch(&mut doors);
     fs::create_dir_all(world.dir.join("other")).unwrap();
@@ -693,13 +724,13 @@ fn an_answer_goes_only_to_the_door_whose_stream_carried_its_ask() {
     let prepared = doors.prepare_answer(&first, 1, "no").expect("the first door prepares its answer");
     assert_eq!(doors.send_answer(&prepared, None).unwrap(), Sent::Answered);
     assert_eq!(answers_once(&world, &world.cwd(), 1), vec![answer_line(1, "no")], "the answer carries the ask and the label");
-    assert!(answers_after_a_pause(&world, &other).is_empty(), "no request reached the door that carries no such ask");
+    assert!(answers_before_sentinel(&world, &other, &door_of(&world, &second)).is_empty(), "no request reached the door that carries no such ask");
 }
 
 #[test]
 fn a_204_keeps_the_card_until_the_door_settles_the_ask() {
     let world = World::new("asks-204");
-    let (tx, _rx) = mpsc::channel();
+    let (tx, _rx) = mpsc::sync_channel(EVENTS_BOUND);
     let mut doors = world.open(tx);
     let id = world.launch(&mut doors);
     world.apply(&format!("ask-approval 1 {APPROVAL}"));
@@ -714,7 +745,7 @@ fn a_204_keeps_the_card_until_the_door_settles_the_ask() {
 #[test]
 fn a_409_is_not_pending_and_keeps_the_card_until_the_settle() {
     let world = World::new("asks-409");
-    let (tx, _rx) = mpsc::channel();
+    let (tx, _rx) = mpsc::sync_channel(EVENTS_BOUND);
     let mut doors = world.open(tx);
     let id = world.launch(&mut doors);
     world.apply(&format!("ask-approval 1 {APPROVAL}"));
@@ -729,7 +760,7 @@ fn a_409_is_not_pending_and_keeps_the_card_until_the_settle() {
 #[test]
 fn a_422_is_rejected_with_the_doors_reason_and_keeps_the_card() {
     let world = World::new("asks-422");
-    let (tx, _rx) = mpsc::channel();
+    let (tx, _rx) = mpsc::sync_channel(EVENTS_BOUND);
     let mut doors = world.open(tx);
     let id = world.launch(&mut doors);
     world.apply(&format!("ask-approval 1 {APPROVAL}"));
@@ -744,7 +775,7 @@ fn a_422_is_rejected_with_the_doors_reason_and_keeps_the_card() {
 #[test]
 fn a_401_is_an_error_and_keeps_the_card() {
     let world = World::new("asks-401");
-    let (tx, _rx) = mpsc::channel();
+    let (tx, _rx) = mpsc::sync_channel(EVENTS_BOUND);
     let mut doors = world.open(tx);
     let id = world.launch(&mut doors);
     world.apply(&format!("ask-approval 1 {APPROVAL}"));
@@ -759,7 +790,7 @@ fn a_401_is_an_error_and_keeps_the_card() {
 #[test]
 fn a_yes_above_the_cap_is_refused_before_any_request() {
     let world = World::new("asks-cap");
-    let (tx, _rx) = mpsc::channel();
+    let (tx, _rx) = mpsc::sync_channel(EVENTS_BOUND);
     let mut doors = world.open(tx);
     let id = world.launch(&mut doors);
     let big = json!({"blob": "x".repeat(5 * 1024)});
@@ -770,13 +801,13 @@ fn a_yes_above_the_cap_is_refused_before_any_request() {
     assert!(dialog.capped(), "a 5 KiB input is over the cap");
     let refused = doors.send_answer(&prepared, Some(dialog.digest())).expect_err("a capped yes is refused");
     assert!(matches!(refused, DoorsError::Ask(_)), "{refused}");
-    assert!(answers_after_a_pause(&world, &world.cwd()).is_empty(), "no answer was sent");
+    assert!(answers_before_sentinel(&world, &world.cwd(), &door_of(&world, &id)).is_empty(), "no answer was sent");
 }
 
 #[test]
 fn a_changed_ask_is_refused_and_a_yes_is_sent_only_with_the_digest_on_screen() {
     let world = World::new("asks-digest");
-    let (tx, _rx) = mpsc::channel();
+    let (tx, _rx) = mpsc::sync_channel(EVENTS_BOUND);
     let mut doors = world.open(tx);
     let id = world.launch(&mut doors);
     world.apply(&format!("ask-approval 1 {APPROVAL}"));
@@ -793,16 +824,16 @@ fn a_changed_ask_is_refused_and_a_yes_is_sent_only_with_the_digest_on_screen() {
     let fresh = doors.prepare_answer(&id, 1, "yes").unwrap();
     let refused = doors.send_answer(&fresh, None).expect_err("a yes shown with no digest is refused");
     assert!(matches!(refused, DoorsError::Ask(_)), "{refused}");
-    assert!(answers_after_a_pause(&world, &world.cwd()).is_empty(), "no answer was sent so far");
+    assert!(answers_before_sentinel(&world, &world.cwd(), &door_of(&world, &id)).is_empty(), "no answer was sent so far");
     let digest = fresh.dialog().expect("a yes has a dialog").digest();
     assert_eq!(doors.send_answer(&fresh, Some(digest)).unwrap(), Sent::Answered);
-    assert_eq!(answers_once(&world, &world.cwd(), 1), vec![answer_line(1, "yes")]);
+    assert_eq!(answers_after_sentinel(&world, &world.cwd(), 1), vec![answer_line(1, "yes")]);
 }
 
 #[test]
 fn an_ask_settled_while_the_stream_is_down_is_not_replayed_on_reopen() {
     let world = World::new("asks-replay");
-    let (tx, _rx) = mpsc::channel();
+    let (tx, _rx) = mpsc::sync_channel(EVENTS_BOUND);
     let mut doors = world.open(tx);
     let id = world.launch(&mut doors);
     world.apply(&format!("ask-approval 1 {APPROVAL}"));
@@ -820,7 +851,7 @@ fn an_ask_settled_while_the_stream_is_down_is_not_replayed_on_reopen() {
 #[test]
 fn an_answer_to_a_door_that_fails_its_checks_sends_no_request() {
     let world = World::new("asks-checks");
-    let (tx, _rx) = mpsc::channel();
+    let (tx, _rx) = mpsc::sync_channel(EVENTS_BOUND);
     let mut doors = world.open(tx);
     let id = world.launch(&mut doors);
     world.apply(&format!("ask-approval 1 {APPROVAL}"));
@@ -839,3 +870,317 @@ fn an_answer_to_a_door_that_fails_its_checks_sends_no_request() {
     assert!(listener.accept().is_err(), "no connection reached the port");
 }
 
+
+// --- the bounds, the banner, the close, the identity drops ---
+
+/// Sets the mode the fake reads when it starts, for the next door in the working dir.
+fn set_mode(world: &World, mode: &str) {
+    fs::write(world.cwd().join(".fake-mode"), mode).unwrap();
+}
+
+/// The pid of a launch refused with `needle` in its reason.
+fn refused_pid(result: &Result<String, DoorsError>, needle: &str) -> u32 {
+    match result {
+        Err(DoorsError::Refused { pid, why, .. }) => {
+            assert!(why.contains(needle), "the refusal names {needle:?}: {why}");
+            *pid
+        }
+        other => panic!("the launch is refused with {needle:?}: {other:?}"),
+    }
+}
+
+/// Takes every event a channel holds on a thread, so the channel never fills.
+fn collect(rx: Receiver<Event>) -> Arc<Mutex<Vec<Event>>> {
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let sink = events.clone();
+    thread::spawn(move || {
+        for event in rx {
+            sink.lock().unwrap().push(event);
+        }
+    });
+    events
+}
+
+fn overflows(events: &Mutex<Vec<Event>>) -> usize {
+    events.lock().unwrap().iter().filter(|e| matches!(e, Event::AsksOverflow { .. })).count()
+}
+
+#[test]
+fn a_flood_that_nothing_drains_ends_the_stream_and_the_channel_holds_no_more_than_its_bound() {
+    let world = World::new("flood");
+    let (tx, rx) = mpsc::sync_channel(EVENTS_BOUND);
+    let mut doors = world.open(tx);
+    let id = world.launch(&mut doors);
+    world.apply("flood 200");
+    assert!(
+        until(Duration::from_secs(10), || world.count("GET /api/events") >= 2),
+        "a full channel ends the stream, and the watch opens it again"
+    );
+    assert!(rx.try_iter().count() <= EVENTS_BOUND, "the channel never holds more than its bound");
+    assert!(alive(world.pid(&id)), "the door runs");
+}
+
+#[test]
+fn sixty_five_asks_keep_sixty_four_and_send_one_overflow() {
+    let world = World::new("asks-overflow");
+    let (tx, rx) = mpsc::sync_channel(EVENTS_BOUND);
+    let events = collect(rx);
+    let mut doors = world.open(tx);
+    let id = world.launch(&mut doors);
+    world.apply("asks 65");
+    assert!(until(Duration::from_secs(10), || ask_ids(&doors, &id).len() == ASKS_BOUND), "64 asks are kept");
+    assert_eq!(ask_ids(&doors, &id), (1..=64).collect::<Vec<u64>>(), "the first 64 asks are the ones kept");
+    assert!(until(Duration::from_secs(10), || overflows(&events) == 1), "one overflow is sent");
+    assert!(alive(world.pid(&id)), "the door runs");
+}
+
+#[test]
+fn a_banner_past_64_kib_is_refused_at_once_and_its_door_is_signalled() {
+    let world = World::new("banner-128k");
+    set_mode(&world, "banner-128k");
+    let (tx, _rx) = mpsc::sync_channel(EVENTS_BOUND);
+    let mut doors = world.open(tx);
+    let started = Instant::now();
+    let refused = doors.launch(&world.plan());
+    assert!(started.elapsed() < Duration::from_secs(5), "the refusal does not wait for the banner bound");
+    let pid = refused_pid(&refused, "not within the first 64 KiB");
+    assert!(until(Duration::from_secs(10), || !alive(pid)), "the refused door is signalled and exits");
+    assert!(world.record().is_empty(), "nothing was recorded");
+}
+
+#[test]
+fn every_banner_refusal_signals_its_own_door_and_names_the_refusal() {
+    let world = World::new("banner-refusals");
+    let (tx, _rx) = mpsc::sync_channel(EVENTS_BOUND);
+    let mut doors = world.open(tx);
+    let cases = [
+        ("exit-first", "exited before its"),
+        ("remote-address", "the door serves loopback only"),
+        ("token-outside", "not the token path of its port"),
+        ("token-space", "is not graphic ASCII"),
+    ];
+    for (mode, needle) in cases {
+        set_mode(&world, mode);
+        let refused = doors.launch(&world.plan());
+        let pid = refused_pid(&refused, needle);
+        assert!(until(Duration::from_secs(10), || !alive(pid)), "{mode}: the refused door exits");
+    }
+    assert!(world.record().is_empty(), "no refused launch was recorded");
+}
+
+#[test]
+fn no_banner_within_30_seconds_is_refused_and_its_door_is_signalled() {
+    let world = World::new("no-banner");
+    set_mode(&world, "no-banner");
+    let (tx, _rx) = mpsc::sync_channel(EVENTS_BOUND);
+    let mut doors = world.open(tx);
+    let refused = doors.launch(&world.plan());
+    let pid = refused_pid(&refused, "no banner came within 30 s");
+    assert!(until(Duration::from_secs(10), || !alive(pid)), "the refused door exits");
+}
+
+#[test]
+fn a_zombie_record_is_dropped_with_an_event_naming_its_pid() {
+    let world = World::new("zombie");
+    let pid = test_doors::zombie(Path::new("/bin/sh")).expect("a zombie is made");
+    world.write_record(json!([{
+        "launchId": "zombie", "pid": pid, "starttime": stat_of(pid).unwrap().starttime,
+        "addr": "127.0.0.1:1", "tokenFile": "/unused", "sessionId": null, "cwd": world.cwd(), "log": "x",
+    }]));
+    let (tx, rx) = mpsc::sync_channel(EVENTS_BOUND);
+    let _doors = world.open(tx);
+    assert!(world.record().is_empty(), "the zombie's record is dropped");
+    event_where(&rx, |e| matches!(e, Event::Dropped { pid: p, .. } if *p == pid));
+}
+
+#[test]
+fn a_changed_pin_drops_each_record_with_an_event_naming_its_pid() {
+    let world = World::new("pin");
+    let eidolon = world.dir.join("pinned-eidolon");
+    fs::copy(FAKE_EIDOLON, &eidolon).unwrap();
+    let plan = launch_plan(&eidolon, &world.home(), &world.cwd()).expect("the plan is made");
+    let runtime = world.runtime();
+    let (tx, _rx) = mpsc::sync_channel(EVENTS_BOUND);
+    let mut doors = Doors::open(world.exec(), &eidolon, &world.home(), &world.root(), Some(runtime.as_os_str()), tx)
+        .expect("the doors open");
+    let id = doors.launch(&plan).expect("the door launches");
+    let pid = world.pid(&id);
+    world.adopt(pid);
+    drop(doors);
+    fs::set_permissions(&eidolon, fs::Permissions::from_mode(0o600)).unwrap();
+    let (tx, rx) = mpsc::sync_channel(EVENTS_BOUND);
+    let doors = Doors::open(world.exec(), &eidolon, &world.home(), &world.root(), Some(runtime.as_os_str()), tx)
+        .expect("the doors open");
+    assert!(doors.launch_ids().is_empty(), "the door is not watched under a changed pin");
+    assert!(world.record().is_empty(), "the record is dropped");
+    event_where(&rx, |e| matches!(e, Event::Dropped { pid: p, .. } if *p == pid));
+    assert!(alive(pid), "the door is left alone");
+    assert_eq!(world.count("SIGTERM"), 0, "nothing signalled the door");
+}
+
+#[test]
+fn a_wrong_token_path_keeps_its_record_unwatched_and_signals_nothing() {
+    let world = World::new("token-path");
+    let (pid, addr, _token) = start_door_outside(&world);
+    world.write_record(json!([{
+        "launchId": "wrong-token", "pid": pid, "starttime": stat_of(pid).unwrap().starttime,
+        "addr": addr, "tokenFile": world.dir.join("wrong.token"), "sessionId": null, "cwd": world.cwd(), "log": "x",
+    }]));
+    let (tx, rx) = mpsc::sync_channel(EVENTS_BOUND);
+    let doors = world.open(tx);
+    assert_eq!(world.record_ids(), vec!["wrong-token".to_owned()], "the record is kept");
+    assert!(doors.launch_ids().is_empty(), "the door is not watched");
+    event_where(&rx, |e| matches!(e, Event::Unwatched { .. }));
+    assert!(alive(pid), "the door is left alone");
+    assert_eq!(world.count("SIGTERM"), 0, "nothing signalled the door");
+}
+
+#[test]
+fn a_hello_that_fails_once_keeps_the_record_and_the_next_open_reattaches() {
+    let world = World::new("hello-once");
+    let (tx, _rx) = mpsc::sync_channel(EVENTS_BOUND);
+    let mut doors = world.open(tx);
+    let id = world.launch(&mut doors);
+    drop(doors);
+    world.apply("hello-bad");
+    let (tx, rx) = mpsc::sync_channel(EVENTS_BOUND);
+    let doors = world.open(tx);
+    assert!(doors.launch_ids().is_empty(), "the door is not watched while its hello fails");
+    assert_eq!(world.record_ids(), vec![id.clone()], "the record is kept");
+    event_where(&rx, |e| matches!(e, Event::Unwatched { .. }));
+    drop(doors);
+    world.apply("hello-good");
+    let (tx, _rx) = mpsc::sync_channel(EVENTS_BOUND);
+    let doors = world.open(tx);
+    assert_eq!(doors.launch_ids(), vec![id], "the next open re-attaches the door");
+}
+
+#[test]
+fn a_reconnect_whose_hello_names_another_session_is_unwatched_and_keeps_its_record() {
+    let world = World::new("reconnect-session");
+    let (tx, rx) = mpsc::sync_channel(EVENTS_BOUND);
+    let mut doors = world.open(tx);
+    let id = world.launch(&mut doors);
+    world.apply("session elsewhere");
+    world.command("end");
+    event_where(&rx, |e| matches!(e, Event::Unwatched { launch_id, .. } if *launch_id == id));
+    assert_eq!(world.record_ids(), vec![id.clone()], "the record is kept");
+    assert!(alive(world.pid(&id)), "the door runs");
+    assert_eq!(world.count("SIGTERM"), 0, "nothing signalled the door");
+}
+
+#[test]
+fn a_busy_close_leaves_the_watch_and_its_turn_state() {
+    let world = World::new("busy");
+    let (tx, _rx) = mpsc::sync_channel(EVENTS_BOUND);
+    let mut doors = world.open(tx);
+    let id = world.launch(&mut doors);
+    world.apply("running");
+    assert!(until(Duration::from_secs(5), || doors.turn(&id).unwrap() == TurnState::Running), "the watch sees the turn");
+    assert_eq!(doors.close_after_turn(&id).unwrap(), Close::Armed);
+    assert_eq!(doors.close_due(&id).unwrap(), Close::StaysArmed, "a turn that runs is not closed");
+    assert_eq!(doors.turn(&id).unwrap(), TurnState::Running, "the turn state survives the refused close");
+    assert_eq!(doors.close_after_turn(&id).unwrap(), Close::Armed, "the next close is not refused as unknown");
+    assert!(alive(world.pid(&id)), "the door runs");
+    assert_eq!(world.count("SIGTERM"), 0, "nothing signalled the door");
+}
+
+#[test]
+fn a_door_that_ignores_its_first_sigterm_stays_watched_as_still_live() {
+    let world = World::new("still-live");
+    set_mode(&world, "ignore-sigterm");
+    let (tx, _rx) = mpsc::sync_channel(EVENTS_BOUND);
+    let mut doors = world.open(tx);
+    let id = world.launch(&mut doors);
+    world.apply("idle");
+    assert!(until(Duration::from_secs(5), || doors.turn(&id).unwrap() == TurnState::Idle), "the watch sees the turn");
+    assert_eq!(doors.close_after_turn(&id).unwrap(), Close::StillLive, "the door outlives its 10 s bound");
+    let pid = world.pid(&id);
+    assert!(alive(pid), "the door ignored its first SIGTERM");
+    assert_eq!(doors.launch_ids(), vec![id.clone()], "the door stays watched");
+    assert_eq!(world.record_ids(), vec![id.clone()], "the record stays");
+    assert_eq!(world.count("SIGTERM"), 1, "one SIGTERM was sent");
+    world.command("cancel-409");
+    assert!(until(Duration::from_secs(5), || world.count("control cancel-409") == 1), "the 409 is queued");
+    let second = doors.stop_now(&id).unwrap();
+    assert!(matches!(second, Close::Exited { .. }), "{second:?}");
+    assert!(!alive(pid), "the door exits on the second SIGTERM");
+    assert_eq!(world.count("SIGTERM"), 2, "two SIGTERMs were sent");
+    assert!(world.record_ids().is_empty(), "the exited door's record is removed");
+}
+
+#[test]
+fn a_cancel_whose_turn_never_ends_is_no_turn_end_and_signals_nothing() {
+    let world = World::new("no-turn-end");
+    set_mode(&world, "cancel-stuck");
+    let (tx, _rx) = mpsc::sync_channel(EVENTS_BOUND);
+    let mut doors = world.open(tx);
+    let id = world.launch(&mut doors);
+    world.apply("running");
+    assert!(until(Duration::from_secs(5), || doors.turn(&id).unwrap() == TurnState::Running), "the watch sees the turn");
+    assert_eq!(doors.stop_now(&id).unwrap(), Close::NoTurnEnd, "no running=false came within 10 s");
+    assert!(alive(world.pid(&id)), "the door runs");
+    assert_eq!(world.record_ids(), vec![id.clone()], "the record is kept");
+    assert_eq!(world.count("SIGTERM"), 0, "nothing was signalled");
+}
+
+#[test]
+fn a_symlinked_doors_json_is_refused_and_never_rewritten() {
+    let world = World::new("symlink");
+    world.make_store_dir();
+    let target = world.dir.join("target.json");
+    fs::write(&target, b"[]").unwrap();
+    std::os::unix::fs::symlink(&target, world.store()).unwrap();
+    let (tx, _rx) = mpsc::sync_channel(EVENTS_BOUND);
+    let refused = Doors::open(
+        world.exec(),
+        Path::new(FAKE_EIDOLON),
+        &world.home(),
+        &world.root(),
+        Some(world.runtime().as_os_str()),
+        tx,
+    );
+    assert!(refused.is_err(), "a linked record is refused");
+    assert_eq!(fs::read(&target).unwrap(), b"[]", "the target is not rewritten");
+}
+
+#[test]
+fn a_launch_whose_hello_fails_keeps_its_record_unwatched_and_signals_nothing() {
+    let world = World::new("launch-hello");
+    set_mode(&world, "hello-bad");
+    let (tx, rx) = mpsc::sync_channel(EVENTS_BOUND);
+    let mut doors = world.open(tx);
+    let id = doors.launch(&world.plan()).expect("the launch keeps its door");
+    assert_eq!(world.record_ids(), vec![id.clone()], "the record is kept");
+    assert!(doors.launch_ids().is_empty(), "the door is not watched");
+    event_where(&rx, |e| matches!(e, Event::Unwatched { launch_id, .. } if *launch_id == id));
+    assert!(alive(world.pid(&id)), "the door runs");
+    assert_eq!(world.count("SIGTERM"), 0, "nothing signalled the door");
+}
+
+#[test]
+fn a_reconnect_whose_pin_changed_drops_the_record_and_signals_nothing() {
+    let world = World::new("reconnect-pin");
+    let eidolon = world.dir.join("pinned-eidolon");
+    fs::copy(FAKE_EIDOLON, &eidolon).unwrap();
+    let plan = launch_plan(&eidolon, &world.home(), &world.cwd()).expect("the plan is made");
+    let (tx, rx) = mpsc::sync_channel(EVENTS_BOUND);
+    let mut doors = Doors::open(
+        world.exec(),
+        &eidolon,
+        &world.home(),
+        &world.root(),
+        Some(world.runtime().as_os_str()),
+        tx,
+    )
+    .expect("the doors open");
+    let id = doors.launch(&plan).expect("the door launches");
+    let pid = world.pid(&id);
+    fs::set_permissions(&eidolon, fs::Permissions::from_mode(0o600)).unwrap();
+    world.apply("end");
+    event_where(&rx, |e| matches!(e, Event::Dropped { pid: p, .. } if *p == pid));
+    assert!(until(Duration::from_secs(5), || world.record_ids().is_empty()), "the record is dropped");
+    assert!(doors.launch_ids().is_empty(), "the door is no longer watched");
+    assert!(alive(pid), "the door is left alone");
+    assert_eq!(world.count("SIGTERM"), 0, "nothing signalled the door");
+}
