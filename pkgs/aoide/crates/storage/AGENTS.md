@@ -46,12 +46,13 @@
   `$XDG_RUNTIME_DIR` override wins on BOTH hosts: every isolating fixture sets
   it, and an answer that ignored it on one host would read and write the
   machine's real per-user directory instead of the fixture's.
-- **A receipt's `from.node` is the signer's name in the letter's mesh, never
-  its hostname.** The origin verifies a receipt against the key it holds for
-  that name in that mesh, so a receipt whose `from.node` has no such key is
-  refused (`UnverifiedOrigin`) and its letter never retires.
-  `mint_ack_in_mesh` signs as `display::local_node_name()`, this box's own
-  name: an older-peer fixture for tests.
+- **A receipt's `from.node` is this box's node name, lowercased:
+  `AOIDE_A2A_NODE_NAME` if set, else the OS hostname, else `aoide`.** The origin
+  verifies a receipt against the key it holds for that name in that mesh, so a
+  receipt whose `from.node` has no such key is refused (`UnverifiedOrigin`) and
+  its letter never retires. `mint_ack_in_mesh` signs as
+  `display::local_node_name()`, this box's own name: an older-peer fixture for
+  tests.
 - Structured thread/reply IDs are signed context, not membership or delivery authority. Legacy four-field content remains valid.
 - Structured letter content is optional signed text, never a new transport header. Invalid or legacy content remains raw; decoding must not write or alter envelope identity.
 
@@ -1032,29 +1033,25 @@
   ssh dial. Don't relax `.bsy` to blocking, either — ruling 3 (P-M2 brief)
   is explicit that a busy link is SKIPPED, never queued behind, so one
   wedged drain can never starve every later one.
-- **An outbox entry retires ONLY on its confirmation: a verified `accepted`
-  or `duplicate` answer to its own live dial, a valid receipt from an older
-  node naming an own letter (`retire_by_ack`), a held own letter's or a
-  transit entry's filed name (`retire_acknowledged`), explicit `mail outbox rm`
-  (P-M2), or the drop of an own letter with its session, or the tick's sweep
-  taking a letter or a receipt (ruling 131) — never auto-evicted, never
-  expired, never capped.**
-  `outbox::retire_by_ack` is the "valid receipt" half, and it retires an own
-  letter only: a transit or charter entry with the same msgid stays spooled.
-  It trusts its caller (`mail::deposit`) to have already proven the ack's
-  origin signature genuine, and never re-verifies; don't call it on an
-  unverified envelope.
-  It runs under one outbox lock hold, and an own letter it removes is audited
-  first (`mail.outbox.retired`), so the line and the removal cannot part.
-  Its `text` must be exactly one msgid (`mail::is_msgid`) before anything
-  is looked up: the text becomes a path, so a non-msgid retires nothing and
-  builds no path.
-  A
-  `refused: bool` entry (a JSON-RPC admission refusal, distinct from an
-  ordinary transport failure) stops a drain from retrying it but still
-  does not remove it — the kill-list discipline `undying`/`manifest`
-  above hold for their own state applies here too: only an explicit
-  human action or a genuine delivery confirmation removes a record.
+- **An outbox entry retires ONLY on its confirmation: a verified `accepted` or
+  `duplicate` answer to its own live dial, a valid receipt from an older node
+  naming an own letter (`retire_by_ack`), a held own letter's or a transit
+  entry's filed name (`retire_acknowledged`), explicit `mail outbox rm` (P-M2),
+  or the drop of an own letter with its session, or the drain tick's sweep
+  taking a letter or a receipt (ruling 131) — never auto-evicted, never expired,
+  never capped.** `outbox::retire_by_ack` is the "valid receipt" half, and it
+  retires an own letter only: a transit or charter entry with the same msgid
+  stays spooled. It trusts its caller (`mail::deposit`) to have already proven
+  the ack's origin signature genuine, and never re-verifies; don't call it on an
+  unverified envelope. It runs under one outbox lock hold, and an own letter it
+  removes is audited first (`mail.outbox.retired`), so the line and the removal
+  cannot part. Its `text` must be exactly one msgid (`mail::is_msgid`) before
+  anything is looked up: the text becomes a path, so a non-msgid retires nothing
+  and builds no path. A `refused: bool` entry (a JSON-RPC admission refusal,
+  distinct from an ordinary transport failure) stops a drain from retrying it
+  but still does not remove it — the kill-list discipline `undying`/`manifest`
+  above hold for their own state applies here too: only an explicit human action
+  or a genuine delivery confirmation removes a record.
 - **`flavor` is a LOCAL entry fact, additive both ways (P-M3).** `now`
   (attempted on every drain) vs `hold` (never attempted — it leaves only
   through the destination's own `aoide/mailPoll`). The field must never
@@ -1104,8 +1101,8 @@
   hand, and no code removes them: removing an entry deletes that entry's file
   and nothing else. Don't add a writer or a reader: the answer is the receipt,
   and no ack is spooled.
-- **The tick's drop takes letters and receipts, and each selector decides the
-  rest (ruling 131).** `drop_letters_where` considers only `letter` and
+- **The drain tick's drop takes letters and receipts, and each selector decides
+  the rest (ruling 131).** `drop_letters_where` considers only `letter` and
   `receipt` entries. `drop_for_session` and the session-gone pass check the
   letter kind, so a session's end never takes a receipt; the pre-131 pass takes
   every receipt whatever its session. Don't widen a session selector to

@@ -96,14 +96,14 @@ FidoNet node could.
    become typed `receipt` entries in the mailbase; its two writer seams
    repoint; `inbox.json`, `INBOX_CAP`, and the `inbox` commands retire.
 9. **The full BSO outbox.** A per-node spool at the sender
-   (`state/outbox/<node>/`), a transfer-invariant content-hash `msgid` on
-   every envelope, flavors `now`/`hold`, per-link backoff/try state.
-   A transit entry lives until its next hop takes it: a drain ends it on that
-   hop's verified `accepted` or `duplicate`, a poll on the poller's `filed`. A
-   receipt is never dialled, offered or retried: the tick drops it. An own
-   letter is dialled at once instead: it leaves the box on a verified answer,
-   waits there only when it is held, or comes back to its sender when it is
-   returned, until its session ends (ruling 131).
+   (`state/outbox/<node>/`), a transfer-invariant content-hash `msgid` on every
+   envelope, flavors `now`/`hold`, per-link backoff/try state. A transit entry
+   lives until its next hop takes it: a drain ends it on that hop's verified
+   `accepted` or `duplicate`, a poll on the poller's `filed`. A receipt is never
+   dialled, offered or retried: the drain tick drops it. An own letter is
+   dialled at once instead: it leaves the box on a verified answer, waits there
+   only when it is held, or comes back to its sender when it is returned, until
+   its session ends (ruling 131).
 10. **Envelopes are origin-signed.** The sending node signs the letter
     with its identity key; the destination verifies the ORIGIN regardless
     of path. A transit node can delay or drop — never read (decision 17)
@@ -773,18 +773,17 @@ door's audit name whitelist gains both names so they never log as bare
   beyond the receipt index, so this box cannot tell a late receipt for its own
   letter from a receipt for a letter it never sent.
   **An outbox entry retires when its delivery is confirmed, and what counts as
-  confirmation depends on what the entry is.** A `letter` retires on its
-  dialled node's verified `accepted` or `duplicate`, or, when held, on the
-  poller's `filed` name (ruling 131). A receipt from a build before the rule
-  retires the own `letter` whose `to.node` is its verified signer, in the same
-  mesh, with text naming its `msgid`; no other entry kind is retired by one. A
-  `transit` container retires when its next hop takes it, on that hop's
-  verified `accepted` or `duplicate` or on the poller's `filed` name. A
-  `charter` letter is APPLIED, not filed, so
-  there is no far mailbox that could hold a receipt: its verified deposit
-  outcome is the whole confirmation there can be. A `receipt` entry is never
-  dialled (ruling 131): the tick drops one that a build before the rule
-  spooled.
+  confirmation depends on what the entry is.** A `letter` retires on its dialled
+  node's verified `accepted` or `duplicate`, or, when held, on the poller's
+  `filed` name (ruling 131). A receipt from a build before the rule retires the
+  own `letter` whose `to.node` is its verified signer, in the same mesh, with
+  text naming its `msgid`; no other entry kind is retired by one. A `transit`
+  container retires when its next hop takes it, on that hop's verified
+  `accepted` or `duplicate` or on the poller's `filed` name. A `charter` letter
+  is APPLIED, not filed, so there is no far mailbox that could hold a receipt:
+  its verified deposit outcome is the whole confirmation there can be. A
+  `receipt` entry is never dialled (ruling 131): the drain tick drops one that a
+  build before the rule spooled.
   **A deposit's answer is written back only onto an entry still spooled.**
   An older build's far end may drain its receipt straight back to this box
   before it answers the deposit, so a letter can be retired while the drain
@@ -864,15 +863,16 @@ link.json       { "holdUntil": ts, "lastError": "…" }   per-link backoff
   BSO means it: a drain that finds a link busy skips that link and moves
   to the next. Blocking would queue tick after tick behind one stalled
   ssh dial and starve every other link.
-- Each drain tick sweeps own letters and receipts before it drains (ruling
-  131). A letter spooled before the rule has no session and goes (reason
-  `pre-131`), and so does every receipt whatever its session: the verified
-  answer that filed its letter was the receipt, so nothing carries a spooled
-  one. A letter whose session is off the roster or `done` goes too (reason
-  `session-gone`), unless the roster cannot be read: then that pass is skipped
-  and the pre-131 pass still runs. At most 500 entries go per pass, the rest
-  wait for the next tick, and each drop writes one `mail.outbox.dropped` audit
-  line naming the entry's kind, `letter` or `receipt`.
+- Each drain tick sweeps own letters and receipts before it drains (ruling 131).
+  A letter spooled before the rule has no session and goes (reason `pre-131`),
+  and so does every receipt whatever its session: the verified answer that filed
+  its letter was the receipt, so nothing carries a spooled one. A letter whose
+  session is off the roster or `done` goes too (reason `session-gone`), unless
+  the roster cannot be read: then that pass is skipped and the pre-131 pass
+  still runs. Each of the drain's two drops (`pre-131`, then `session-gone`)
+  takes at most 500 entries, the rest wait for the next drain tick, and each
+  drop writes one `mail.outbox.dropped` audit line naming the entry's kind,
+  `letter` or `receipt`.
 - Entries hold the envelope as minted — from P-SEAL, the sealed container
   — so a retry resends the same bytes on any transport.
 - A drain session reaches the node by its address's transport — an ssh

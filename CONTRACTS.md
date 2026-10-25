@@ -5418,12 +5418,12 @@ is the sender's routing intent, not part of the letter.
 
 `session` is **v0+2 (ruling 131, additive)**: the id of the conducted session
 that sent an OWN letter (`aoide mail send` with `AOIDE_SESSION_ID` set; never
-`--from`), with control characters stripped. It is written only on a letter
-that is returned or held, and omitted from every other entry, so a pre-131
-spool file is byte-identical. The session's roster exit drops its letters
-(`mail.outbox.dropped`, reason `session-ended`); the tick sweep drops every
-receipt, whatever its session, and a letter with no session (`pre-131`), and a
-letter whose session is off the roster or `done` (`session-gone`).
+`--from`), with control characters stripped. It is written only on a letter that
+is returned or held, and omitted from every other entry, so a pre-131 spool file
+is byte-identical. The session's roster exit drops its letters
+(`mail.outbox.dropped`, reason `session-ended`); the drain tick sweep drops
+every receipt, whatever its session, and a letter with no session (`pre-131`),
+and a letter whose session is off the roster or `done` (`session-gone`).
 
 **Amendment (P-CHARTER): a `poll` destination's entry is `hold`, decided for
 the caller.** The design's third transport member name is the ABSENCE of an
@@ -5486,20 +5486,20 @@ or a REFUSAL, which is the entry's problem, not the link's — clears the
 backoff outright (`link.json` removed, never merely reset), the ordinary
 "not held off" state a drain reads as `None`.
 
-A **letter** whose dial comes back verified (`"accepted"` or
-`"duplicate"` — either way the far end has it) is removed at once: that answer
-is its receipt (ruling 131), and the sender keeps no copy after it. A
-**receipt** entry is never dialled (ruling 131): the verified answer that filed
-its letter was its confirmation, and the tick's pre-131 pass drops one still
-spooled. `retire_by_ack` is the older-build path: a receipt from an older build
-that deposits back in (`aoide/mailDeposit` on the ORIGIN's own door) retires the
-one own `letter` it confirms, and nothing else. The letter is found by its
-`msgid` across the spools; it goes only when its `to.node` is the receipt's
-verified signer and the receipt is in the letter's mesh, and each retirement
-writes one `mail.outbox.retired` line. A transit, charter or receipt entry with
-that `msgid` is never retired by it. `Ok(None)` — never an error — covers every
-way a receipt matches no own letter: not a receipt at all, a `msgid` no spooled
-letter holds, a signer that is not the letter's `to.node`, or another mesh.
+A **letter** whose dial comes back verified (`"accepted"` or `"duplicate"` —
+either way the far end has it) is removed at once: that answer is its receipt
+(ruling 131), and the sender keeps no copy after it. A **receipt** entry is
+never dialled (ruling 131): the verified answer that filed its letter was its
+confirmation, and the drain tick's pre-131 pass drops one still spooled.
+`retire_by_ack` is the older-build path: a receipt from an older build that
+deposits back in (`aoide/mailDeposit` on the ORIGIN's own door) retires the one
+own `letter` it confirms, and nothing else. The letter is found by its `msgid`
+across the spools; it goes only when its `to.node` is the receipt's verified
+signer and the receipt is in the letter's mesh, and each retirement writes one
+`mail.outbox.retired` line. A transit, charter or receipt entry with that
+`msgid` is never retired by it. `Ok(None)` — never an error — covers every way a
+receipt matches no own letter: not a receipt at all, a `msgid` no spooled letter
+holds, a signer that is not the letter's `to.node`, or another mesh.
 
 Read/resolved by `aoide mail outbox [node]`/`mail outbox rm <msgid>` —
 a separate CLI surface from the mailbase's own `mail` family above,
@@ -9729,26 +9729,26 @@ line. Every door without it answers unsigned. One before `0.0.26` refuses the
 new request `-32007`; a `0.0.26` door without the header answers `200` with
 an ordinary body. A client that checks answers treats the two alike:
 
-- **New client to a door without the header: held, never lost.** Every mail
-  answer is `unauthenticated` (`no answer signature … upgrade aoide on
-  <node>`). Charter letters and transit containers stay spooled and live:
-  nothing is parked or retired, the link backs off, and the drain asks again.
-  The drain never dials a letter: `dialable_entries` skips it. Its send dials
-  it again after an unsigned answer (`deliver_now`). A second unsigned answer
-  returns it with the `unauthenticated:` word, and `handle_mail_send` keeps it
-  on disk as `returned` under its session; sent outside a session, it is
-  refused and nothing is written. The send writes no link state. Only
-  `aoide mail outbox retry <msgid>` and `aoide mail outbox retry --refused`
-  dial a returned letter again (`resend_returned_letter`). A receipt is never
-  dialled: the tick drops it. A poll files
-  and clears nothing, so the far side keeps
-  what it holds and the record of what this box filed survives to the next
-  poll. A binding exchange learns nothing. `aoide mail outbox` reads
-  `retrying` with the `unauthenticated:` reason, and `aoide mail poll <node>`
-  reports the node unreachable with the same reason. When the far end's own
-  word is `config-invalid`, which a door in that state never signs, the reason
-  says its config is invalid (`fix the config on <node>`), not that it needs
-  an upgrade.
+- **New client to a door without the header: an unsigned answer retires
+  nothing.** Every mail answer is `unauthenticated` (`no answer signature …
+  upgrade aoide on <node>`). Charter letters and transit containers stay spooled
+  and live: nothing is parked or retired, the link backs off, and the drain asks
+  again. The drain never dials a letter: `dialable_entries` skips it. Its send
+  dials it again after an unsigned answer (`deliver_now`). A second unsigned
+  answer returns it with the `unauthenticated:` word, and `handle_mail_send`
+  keeps it on disk as `returned` under its session, and the letter is dropped
+  when that session ends: at its roster exit, or else by the drain tick's
+  `session-gone` pass; sent outside a session, it is refused and nothing is
+  written. The send writes no link state. Only `aoide mail outbox retry <msgid>`
+  and `aoide mail outbox retry --refused` dial a returned letter again
+  (`resend_returned_letter`). A receipt is never dialled: the drain tick drops
+  it. A poll files and clears nothing, so the far side keeps what it holds and
+  the record of what this box filed survives to the next poll. A binding
+  exchange learns nothing. `aoide mail outbox` reads `retrying` with the
+  `unauthenticated:` reason, and `aoide mail poll <node>` reports the node
+  unreachable with the same reason. When the far end's own word is
+  `config-invalid`, which a door in that state never signs, the reason says its
+  config is invalid (`fix the config on <node>`), not that it needs an upgrade.
 - **Old client to a door with the header: works.** The header is one more
   response line, and an older client never reads it.
 - **A `refused` key crosses the versions as `filed` does.** An older hub reads
