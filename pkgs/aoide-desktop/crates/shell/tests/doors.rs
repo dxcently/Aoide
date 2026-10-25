@@ -447,7 +447,7 @@ fn a_forged_record_whose_cmdline_is_not_the_launch_argv_is_dropped_and_never_sig
     }]));
     let (tx, _rx) = mpsc::sync_channel(EVENTS_BOUND);
     let _doors = world.open(tx);
-    no_signal_before_sentinel(&world, &door_at(&world, &addr, &token));
+    no_sigterm_in_whole_log_once_sentinel_served(&world, &door_at(&world, &addr, &token));
     assert!(world.record().is_empty(), "the forged record is dropped");
     assert!(alive(pid), "the door is left alone");
 }
@@ -462,7 +462,7 @@ fn a_forged_record_with_a_wrong_start_time_is_dropped_and_never_signalled() {
     }]));
     let (tx, _rx) = mpsc::sync_channel(EVENTS_BOUND);
     let _doors = world.open(tx);
-    no_signal_before_sentinel(&world, &door_at(&world, &addr, &token));
+    no_sigterm_in_whole_log_once_sentinel_served(&world, &door_at(&world, &addr, &token));
     assert!(world.record().is_empty(), "the forged record is dropped");
     assert!(alive(pid), "the door is left alone");
 }
@@ -478,7 +478,7 @@ fn a_record_whose_program_is_not_the_program_its_process_runs_is_dropped_and_nev
     }]));
     let (tx, _rx) = mpsc::sync_channel(EVENTS_BOUND);
     let _doors = world.open(tx);
-    no_signal_before_sentinel(&world, &door_at(&world, &addr, &token));
+    no_sigterm_in_whole_log_once_sentinel_served(&world, &door_at(&world, &addr, &token));
     assert!(world.record().is_empty(), "a record whose program is not the one its process runs is dropped");
     assert!(alive(pid), "the door is left alone");
 }
@@ -512,7 +512,7 @@ fn a_record_whose_hello_names_another_session_is_kept_unwatched_and_never_signal
     assert_eq!(world.record_ids(), vec!["forged".to_owned()], "the record is kept");
     assert_eq!(doors.launch_ids(), vec!["forged".to_owned()], "the watch is kept, with no stream");
     event_where(&rx, |e| matches!(e, Event::Unwatched { .. }));
-    no_signal_before_sentinel(&world, &door_at(&world, &addr, &token));
+    no_sigterm_in_whole_log_once_sentinel_served(&world, &door_at(&world, &addr, &token));
     assert!(alive(pid), "the door is left alone");
 }
 
@@ -668,7 +668,7 @@ fn stop_now_on_a_door_that_fails_its_checks_sends_no_request() {
     assert!(until(Duration::from_secs(25), || !alive(pid)), "the door exits");
     // A token left behind, and a listener on the door's own address: a stop now
     // must not send the door's token to that listener. The door serves on
-    // 127.0.0.2, where no other test's client takes a port.
+    // 127.0.0.2, so the listener takes the address the dead door held.
     fs::write(&token, &secret).expect("the token is left behind");
     fs::set_permissions(&token, fs::Permissions::from_mode(0o600)).unwrap();
     let addr: SocketAddr = world.entry(&id)["addr"].as_str().unwrap().parse().unwrap();
@@ -886,18 +886,15 @@ fn answers_before_sentinel(world: &World, cwd: &Path, door: &Door) -> Vec<String
     logged[..at].to_vec()
 }
 
-/// Sends a sentinel answer to `door`, waits until the fake has served it, and
-/// asserts the fake logged no SIGTERM before it. The fake logs a signal in order
-/// with the requests it serves, so a signal sent before this call is logged
-/// before the sentinel, and a door that was signalled and exited serves none.
-fn no_signal_before_sentinel(world: &World, door: &Door) {
+/// Sends a sentinel answer to `door` and waits until the fake has served it. Then
+/// asserts that no SIGTERM is anywhere in the fake's log. A door that was
+/// signalled and exited serves no sentinel, so the wait fails.
+fn no_sigterm_in_whole_log_once_sentinel_served(world: &World, door: &Door) {
     let _ = door.answer(SENTINEL, "yes", None);
     let sentinel = |line: &String| line.starts_with("POST /api/answer") && line.contains(&SENTINEL.to_string());
     assert!(until(Duration::from_secs(5), || world.log().iter().any(sentinel)), "the door serves the sentinel");
     let logged = world.log();
-    let at = logged.iter().position(sentinel).expect("the sentinel is logged");
-    let early = logged[..at].iter().any(|line| line.as_str() == "SIGTERM");
-    assert!(!early, "a SIGTERM came before the sentinel: {logged:?}");
+    assert!(!logged.iter().any(|line| line == "SIGTERM"), "a SIGTERM is in the log: {logged:?}");
 }
 
 /// The `Door` for a door `start_door_outside` started, from its banner.
@@ -1093,19 +1090,21 @@ fn an_ask_settled_while_the_stream_is_down_is_not_replayed_on_reopen() {
 #[test]
 fn an_answer_to_a_door_that_fails_its_checks_sends_no_request() {
     let world = World::new("asks-checks");
+    set_mode(&world, "loopback-2");
     let (tx, _rx) = mpsc::sync_channel(EVENTS_BOUND);
     let mut doors = world.open(tx);
     let id = world.launch(&mut doors);
     world.apply(&format!("ask-approval 1 {APPROVAL}"));
     assert!(until(Duration::from_secs(5), || ask_ids(&doors, &id) == vec![1]), "the door carries ask 1");
     let prepared = doors.prepare_answer(&id, 1, "no").unwrap();
-    let port = port_of(&world.entry(&id));
+    let addr: SocketAddr = world.entry(&id)["addr"].as_str().unwrap().parse().unwrap();
     let pid = world.pid(&id);
     world.apply("end");
     test_doors::terminate(pid).expect("the door takes SIGTERM");
     assert!(until(Duration::from_secs(25), || !alive(pid)), "the door exits");
-    // A listener on the door's port: an answer must not reach it.
-    let listener = std::net::TcpListener::bind(("127.0.0.1", port)).expect("the port is free");
+    assert_eq!(addr.ip(), Ipv4Addr::new(127, 0, 0, 2), "the door serves on its own address");
+    // A listener on the door's own address: an answer must not reach it.
+    let listener = std::net::TcpListener::bind(addr).expect("the port is free");
     listener.set_nonblocking(true).unwrap();
     let refused = doors.send_answer(&prepared, Shown::None).expect_err("a door that is gone is refused");
     assert!(matches!(refused, DoorsError::Ask(_)), "{refused}");
@@ -1281,7 +1280,7 @@ fn a_changed_pin_leaves_a_running_door_its_record_and_its_watch() {
     assert!(events.is_empty(), "the open finds nothing to drop: {events:?}");
     assert_eq!(doors.launch_ids(), vec![id.clone()], "the door is watched under a changed pin");
     assert_eq!(world.record_ids(), vec![id.clone()], "the record is kept");
-    no_signal_before_sentinel(&world, &door);
+    no_sigterm_in_whole_log_once_sentinel_served(&world, &door);
     assert!(alive(pid), "the door is left alone");
 }
 
@@ -1298,7 +1297,7 @@ fn a_wrong_token_path_keeps_its_record_unwatched_and_signals_nothing() {
     assert_eq!(world.record_ids(), vec!["wrong-token".to_owned()], "the record is kept");
     assert_eq!(doors.launch_ids(), vec!["wrong-token".to_owned()], "the watch is kept, with no stream");
     event_where(&rx, |e| matches!(e, Event::Unwatched { .. }));
-    no_signal_before_sentinel(&world, &door_at(&world, &addr, &token));
+    no_sigterm_in_whole_log_once_sentinel_served(&world, &door_at(&world, &addr, &token));
     assert!(alive(pid), "the door is left alone");
 }
 
@@ -1332,7 +1331,7 @@ fn a_reconnect_whose_hello_names_another_session_is_unwatched_and_keeps_its_reco
     world.command("end");
     event_where(&rx, |e| matches!(e, Event::Unwatched { launch_id, .. } if *launch_id == id));
     assert_eq!(world.record_ids(), vec![id.clone()], "the record is kept");
-    no_signal_before_sentinel(&world, &door_of(&world, &id));
+    no_sigterm_in_whole_log_once_sentinel_served(&world, &door_of(&world, &id));
     assert!(alive(world.pid(&id)), "the door runs");
 }
 
@@ -1542,6 +1541,9 @@ fn a_close_whose_cwd_moved_is_unverified_and_keeps_the_record_and_the_watch() {
     assert_eq!(world.record_ids(), vec![id.clone()], "the record is kept");
     assert_eq!(doors.launch_ids(), vec![id.clone()], "the watch is kept");
     assert!(alive(world.pid(&id)), "the door runs, and nothing signalled it");
+    let moved_log = world.log_at(&moved);
+    assert!(moved_log.iter().any(|line| line == "control idle"), "the moved log is the door's: {moved_log:?}");
+    assert!(!moved_log.iter().any(|line| line == "SIGTERM"), "the moved log holds no SIGTERM: {moved_log:?}");
     fs::rename(&moved, &cwd).unwrap();
     assert!(matches!(doors.close_after_turn(&id), Ok(Close::Exited { .. })), "the door closes once its checks hold");
     assert!(world.record_ids().is_empty(), "the record is dropped at the exit");

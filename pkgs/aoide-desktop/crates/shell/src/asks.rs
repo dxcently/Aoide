@@ -266,6 +266,27 @@ mod tests {
     }
 
     #[test]
+    fn two_asks_that_differ_only_in_key_order_have_one_dialog_and_one_digest() {
+        let ordered = dialog_of(json!({"a": 1, "b": 2}));
+        let reversed = dialog_of(json!({"b": 2, "a": 1}));
+        assert_eq!(ordered.text(), reversed.text(), "the keys are sorted: {}", ordered.text());
+        assert_eq!(ordered.digest(), reversed.digest());
+    }
+
+    #[test]
+    fn an_absent_reason_is_left_out_and_an_empty_one_is_shown_empty() {
+        let absent = dialog_of(json!({"path": "x"}));
+        assert!(!absent.text().contains("reason"), "{}", absent.text());
+        let mut empty = approval(json!({"path": "x"}));
+        if let Ask::Approval { reason, .. } = &mut empty {
+            *reason = Some(String::new());
+        }
+        let empty = dialog(&empty, "yes").expect("a yes has a dialog");
+        assert!(empty.text().contains("\"reason\": \"\""), "{}", empty.text());
+        assert_ne!(absent.digest(), empty.digest(), "a reason that is set is part of the dialog");
+    }
+
+    #[test]
     fn a_no_and_a_question_answer_have_no_dialog() {
         assert!(dialog(&approval(json!({})), "no").is_none());
         let question = Ask::Question {

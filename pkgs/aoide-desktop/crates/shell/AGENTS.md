@@ -252,17 +252,16 @@ are in README.md.
   `fakes`. It is the one way the tests reach `spawn_door` and `terminate`.
 - A negative check ends with a sentinel request the fake records, and passes
   only if nothing came before the sentinel. For a request, the test lists what
-  came first with `answers_before_sentinel`. For a SIGTERM, the test sends the
-  sentinel with `no_signal_before_sentinel` and asserts the fake logged no
-  SIGTERM before it. The fake logs a signal in order with the requests it
-  serves, and a door that was signalled and exited serves no sentinel, so that
+  came first with `answers_before_sentinel`. For a SIGTERM,
+  `no_sigterm_in_whole_log_once_sentinel_served` sends the sentinel, waits until
+  the fake has served it, and asserts that the fake's whole log holds no
+  SIGTERM. A door that was signalled and exited serves no sentinel, so that
   wait fails. Every positive wait is at least 5 s.
 - The door's port comes from the ephemeral pool that other tests' clients also
   draw from, so a bind on that 127.0.0.1 port can fail with `AddrInUse` after
   the door dies. `loopback-2` serves the door on 127.0.0.2, which no client
-  binds, so the stop-now test binds there. The sibling test
-  `an_answer_to_a_door_that_fails_its_checks_sends_no_request` still binds
-  127.0.0.1 and carries the same risk.
+  binds. The two tests that bind a dead door's address, the stop-now test and
+  `an_answer_to_a_door_that_fails_its_checks_sends_no_request`, both use it.
 - The fake eidolon's start-up modes are listed in README.md's fakes section.
 - The two hostile children in `exec.rs`'s tests are shell scripts that the test
   writes, pins and runs through `run`: a grandchild that holds stdout, and a
