@@ -49,14 +49,23 @@ pub fn runtime_from_env(value: Option<&OsStr>) -> Result<PathBuf, DoorError> {
     }
 }
 
+/// The token file of the door bound on `port`: `<runtime>/eidolon/web-<port>.token`.
+pub fn token_path(runtime: &Path, port: u16) -> PathBuf {
+    runtime.join("eidolon").join(format!("web-{port}.token"))
+}
+
+/// The runtime dir must be this user's, at mode 0700, and not a link.
+pub fn check_runtime(runtime: &Path) -> Result<(), DoorError> {
+    private_dir(runtime, euid()?)
+}
+
 /// The token of the door bound on `port`, read under A6's checks. The file
 /// must be exactly `<runtime>/eidolon/web-<port>.token`.
 pub(crate) fn read_token(runtime: &Path, token_file: &Path, port: u16) -> Result<Token, DoorError> {
+    check_runtime(runtime)?;
     let uid = euid()?;
-    private_dir(runtime, uid)?;
-    let eidolon = runtime.join("eidolon");
-    private_dir(&eidolon, uid)?;
-    let expected = eidolon.join(format!("web-{port}.token"));
+    private_dir(&runtime.join("eidolon"), uid)?;
+    let expected = token_path(runtime, port);
     if token_file != expected.as_path() {
         return Err(refused(token_file, "not the token path of the door bound on this port"));
     }

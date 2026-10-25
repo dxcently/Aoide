@@ -14,7 +14,9 @@ README.md.
   owned by the effective uid, at mode 0600, with one link and at most 4 KiB.
   It must be printable ASCII. Nothing is trimmed: the door writes no newline.
 - A relative or empty `XDG_RUNTIME_DIR` counts as unset. There is no temp-dir
-  fallback.
+  fallback. The runtime dir passes `runtime_from_env` and then `check_runtime`
+  before any path is built from it. The token path is `token_path`, and
+  `read_token` uses that same function.
 - The token travels only in `Authorization: Bearer`. It never goes in a URL, a
   log line, a `Debug` or `Display`, or an error.
 - The routes are `POST /api/say`, `POST /api/cancel`, `POST /api/answer` and
@@ -47,9 +49,19 @@ README.md.
 
 ## The exec module (crates/shell)
 
-- `exec.rs` is the only file that starts a process. `Command::new(`, `unsafe {`
-  and the `libc` calls live there. The grep gate in
-  `crates/shell/tests/gates.rs` holds the rest of the workspace to that.
+- `exec.rs` is the only file that starts a process or sends a signal. The words
+  `Command::new(`, `pre_exec`, `libc::fork`, `setsid`, `libc::kill`, `execv` and
+  `posix_spawn` may appear only there, and so may the `unsafe {` opener, with
+  one exception: the fake eidolon's signal wait. The grep gate in
+  `crates/shell/tests/gates.rs` holds the workspace to that.
+- `spawn_door` starts a door only from an absolute path. Its pre-exec closure
+  makes only `setsid`, `fork`, `write` and `_exit`, which POSIX lists as
+  async-signal-safe, and allocates nothing. `fork` runs glibc's atfork handlers,
+  which take malloc's locks before the fork and release them on both sides. The
+  closure runs in the intermediate, which has one thread, so those locks are
+  free. `spawn_detached`'s doc says the same.
+- The door's environment is `Exec::door_env`: `child_env(Child::Eidolon, "web",
+  ...)`, with `XDG_RUNTIME_DIR` replaced by the checked runtime dir.
 - Every child runs from a pinned path. `run` is private, and only `Exec` calls
   it, after `check_pin`. Do not add a second way in.
 - No shell, ever. The argv is a vector of words, never a string handed to a
@@ -72,14 +84,48 @@ README.md.
   the extra bytes are dropped, and the call is refused.
 - A non-zero exit is not an error. `call` returns the child's status and its
   stderr, verbatim, for the caller to show.
-- The gate forbids `aoided.sock`, `dispatch`, `subscribe`, `/api/launch` and
-  `sh -c` anywhere under `crates/`, and under `ui/` once it exists.
+- The gate forbids `aoided.sock`, `dispatch`, `subscribe`, `/api/launch`,
+  `sh -c` and SIGKILL anywhere under `crates/`, and under `ui/` once it exists.
+  No path sends SIGKILL. A door is ended by SIGTERM and a wait, never by force.
+
+## The doors (crates/shell/src/doors.rs)
+
+- A door is signalled only by `close_now`, and only after `verify` passes at
+  that moment. `verify` checks the pin and the working directory, the pid's
+  start time and zombie state, its command line, and its token path. It opens
+  no connection. `Doors::drop` signals nothing.
+- A request under a door's token goes out only after `verify` (launch,
+  re-attach, stop now), or from the watch thread's reconnect. The reconnect
+  checks the pid and its start time, the same check `live` makes, and nothing
+  more.
+- The watch thread only reads. It updates the shared state under one lock,
+  forwards each frame, and sends `CloseDue` when a marked door's turn has ended.
+  The caller answers with `close_due`.
+- The close is five steps: end the watch, re-check the door, SIGTERM, wait up to
+  10 s on `/proc`, and remove the record. The wait never escalates. A door still
+  live after 10 s keeps its record, and is no longer watched until the app next
+  opens.
+- A launch whose banner, identity or token path fails before the record is
+  written keeps its door running, unrecorded and unsignalled, and its error
+  names the pid and the log. A failed `hello` after the record is written leaves
+  the record with a null session, and the next open checks it again.
+- The turn state is known only from frames. A close needs `Idle` from the stream
+  it has, so a turn that starts or ends in a gap between streams is not seen. A
+  stop now takes the cancel's own answer: 409 means idle, and 204 waits for the
+  frames that say the turn ended.
+- A record file that does not parse is refused and never rewritten.
+- The record and the door's log are created 0600 with `O_NOFOLLOW`, and the log
+  with `create_new`. Their directories are made 0700.
 
 ## Tests
 
-- Use `fake` and the fake aoide only. Never the installed `eidolon` or `aoide`,
-  and never a GUI. The fake aoide is a bin with `required-features = ["fakes"]`,
-  so the exec tests need `--all-features`.
+- Use `fake` and the fakes only. Never the installed `eidolon` or `aoide`, and
+  never a GUI. The fake aoide and the fake eidolon are bins with
+  `required-features = ["fakes"]`, so the exec and door tests need
+  `--all-features`.
+- The fake eidolon waits up to 20 s for its events stream to close after
+  SIGTERM, then removes its token and exits 0. Past 20 s it exits 1 and leaves
+  its token. A test that signals it ends the stream first.
 - The token, client and exec tests create directories under `TMPDIR`, so run
   them with `TMPDIR` set to a directory the tests may write.
 - The fake door ends a stream its client has closed, as hyper does, so a test
@@ -97,3 +143,5 @@ README.md.
 - A new kind of child goes in `exec.rs`, with its own environment rule in
   `child_env`. If it needs vault keys, it is refused while their names are
   unknown.
+- A new door command goes in `doors.rs`. It calls `verify` before any request
+  under the token or any signal, and it has a test for each refusal.

@@ -9,7 +9,9 @@ use std::ffi::{CString, OsStr, OsString};
 use std::fmt;
 use std::fs;
 use std::io::{self, Read, Write};
+use std::os::fd::AsRawFd;
 use std::os::unix::ffi::OsStrExt;
+use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus, Stdio};
 use std::thread;
@@ -365,6 +367,28 @@ impl Exec {
         let env = child_env(Child::Aoide, first, &self.base_env, self.vault_keys.as_deref())?;
         run(&self.aoide, &line[1..], &env, stdin)
     }
+
+    /// The environment a door gets: the child env for `eidolon web`, with
+    /// `XDG_RUNTIME_DIR` set to the runtime dir the app checked, so the door
+    /// writes its token where the app reads it.
+    pub fn door_env(&self, runtime: &Path) -> Result<Vec<(OsString, OsString)>, ExecError> {
+        let mut env = child_env(Child::Eidolon, "web", &self.base_env, self.vault_keys.as_deref())?;
+        env.retain(|(name, _)| name.as_os_str() != "XDG_RUNTIME_DIR");
+        env.push((OsString::from("XDG_RUNTIME_DIR"), runtime.as_os_str().to_owned()));
+        Ok(env)
+    }
+
+    /// Starts `argv` as a door: detached, in a session of its own, with stdin
+    /// on /dev/null and stdout and stderr on `log`. Returns the door's pid.
+    /// `argv[0]` is the program `check_pin` returned.
+    pub fn spawn_door(&self, argv: &[OsString], runtime: &Path, log: fs::File) -> Result<u32, ExecError> {
+        let program = argv.first().map(PathBuf::from).unwrap_or_default();
+        if !program.is_absolute() {
+            return Err(ExecError::Pin(PinError::Relative(program)));
+        }
+        let env = self.door_env(runtime)?;
+        spawn_detached(argv, &env, log)
+    }
 }
 
 /// The one place a process starts. Only `Exec` reaches it, and only with a
@@ -513,3 +537,68 @@ impl fmt::Display for ExecError {
 }
 
 impl std::error::Error for ExecError {}
+
+/// Starts `argv` in a session of its own, outside this process's tree.
+///
+/// std forks a child (the intermediate), which calls `setsid`, forks the door,
+/// writes the door's pid to a pipe and exits. The app reaps the intermediate,
+/// so init adopts the door. Between fork and exec the door's side makes only
+/// `setsid`, `fork`, `write` and `_exit`, which POSIX lists as async-signal-safe,
+/// and allocates nothing. `fork` runs glibc's atfork handlers, which take
+/// malloc's locks before the fork and release them on both sides; the intermediate
+/// has one thread, so those locks are free when the closure runs. The door's own
+/// exec failure travels back through std's close-on-exec pipe as `spawn`'s error.
+fn spawn_detached(argv: &[OsString], env: &[(OsString, OsString)], log: fs::File) -> Result<u32, ExecError> {
+    let (mut pid_in, pid_out) = io::pipe().map_err(ExecError::Io)?;
+    let pid_fd = pid_out.as_raw_fd();
+    let stdout = log.try_clone().map_err(ExecError::Io)?;
+    let mut command = Command::new(&argv[0]);
+    command
+        .args(&argv[1..])
+        .env_clear()
+        .envs(env.iter().cloned())
+        .stdin(Stdio::null())
+        .stdout(Stdio::from(stdout))
+        .stderr(Stdio::from(log));
+    // SAFETY: the closure makes only async-signal-safe calls and allocates
+    // nothing; `pid_fd` stays open until the parent drops `pid_out`, after spawn.
+    unsafe {
+        command.pre_exec(move || {
+            if libc::setsid() < 0 {
+                return Err(io::Error::last_os_error());
+            }
+            match libc::fork() {
+                -1 => Err(io::Error::last_os_error()),
+                0 => Ok(()),
+                door => {
+                    let bytes = (door as u32).to_ne_bytes();
+                    let written = libc::write(pid_fd, bytes.as_ptr().cast(), bytes.len());
+                    libc::_exit(if written == bytes.len() as isize { 0 } else { 1 })
+                }
+            }
+        });
+    }
+    let mut intermediate = command.spawn().map_err(ExecError::Spawn)?;
+    drop(pid_out);
+    let mut bytes = [0u8; 4];
+    let read = pid_in.read_exact(&mut bytes);
+    let _ = intermediate.wait();
+    read.map_err(ExecError::Io)?;
+    Ok(u32::from_ne_bytes(bytes))
+}
+
+/// Sends SIGTERM to `pid`. The caller checks the start time and the command
+/// line at this moment, since a pid can be reused; this refuses the values
+/// `kill` would read as a process group or as no process at all.
+pub fn terminate(pid: u32) -> io::Result<()> {
+    let pid = i32::try_from(pid)
+        .ok()
+        .filter(|p| *p > 0)
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "a pid to signal is 1 to i32::MAX"))?;
+    // SAFETY: a plain syscall taking a pid and a signal number; no memory is passed.
+    if unsafe { libc::kill(pid, libc::SIGTERM) } == 0 {
+        Ok(())
+    } else {
+        Err(io::Error::last_os_error())
+    }
+}

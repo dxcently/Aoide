@@ -2,24 +2,32 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 const EXEC: &str = "crates/shell/src/exec.rs";
+const FAKE_EIDOLON: &str = "crates/shell/src/bin/fake-eidolon.rs";
 
 /// Words no source in the desktop workspace may hold.
-const EVERYWHERE: [&str; 5] = [
+const EVERYWHERE: [&str; 6] = [
     concat!("aoided", ".sock"),
     concat!("dis", "patch"),
     concat!("sub", "scribe"),
     concat!("/api/", "launch"),
     concat!("sh", " -c"),
+    concat!("SIG", "KILL"),
 ];
 
-/// Words that start a process, or open unsafe code, and may appear only in exec.
-const EXEC_ONLY: [&str; 5] = [
+/// Words that start a process or send a signal: exec only.
+const EXEC_ONLY: [&str; 7] = [
     concat!("Command", "::new("),
     concat!("libc", "::fork"),
     concat!("exec", "v"),
     concat!("posix", "_spawn"),
-    concat!("unsafe", " {"),
+    concat!("pre", "_exec"),
+    concat!("libc", "::kill"),
+    concat!("set", "sid"),
 ];
+
+/// The unsafe block opener: exec, and the fake eidolon's signal wait, only.
+const UNSAFE_BLOCK: &str = concat!("unsafe", " {");
+const UNSAFE_OK: [&str; 2] = [EXEC, FAKE_EIDOLON];
 
 fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
     for entry in fs::read_dir(dir).expect("the directory is read") {
@@ -52,9 +60,19 @@ fn sources() -> Vec<(String, String)> {
         .collect()
 }
 
+fn source(path: &str) -> String {
+    sources()
+        .into_iter()
+        .find(|(p, _)| p == path)
+        .map(|(_, text)| text)
+        .unwrap_or_else(|| panic!("{path} is scanned"))
+}
+
 #[test]
 fn the_scan_reads_the_sources() {
-    assert!(sources().iter().any(|(path, _)| path == EXEC), "the scan found no exec.rs");
+    let found = sources();
+    assert!(found.iter().any(|(path, _)| path == EXEC), "the scan found no exec.rs");
+    assert!(found.iter().any(|(path, _)| path == FAKE_EIDOLON), "the scan found no fake eidolon");
 }
 
 #[test]
@@ -79,10 +97,18 @@ fn process_starting_words_appear_only_in_exec() {
 }
 
 #[test]
-fn exec_holds_the_process_starting_word() {
-    let (_, text) = sources()
-        .into_iter()
-        .find(|(path, _)| path == EXEC)
-        .expect("exec.rs is scanned");
-    assert!(text.contains(EXEC_ONLY[0]), "exec.rs starts no process");
+fn exec_holds_the_process_starting_words() {
+    let text = source(EXEC);
+    for word in [EXEC_ONLY[0], EXEC_ONLY[1], EXEC_ONLY[4], EXEC_ONLY[5], EXEC_ONLY[6]] {
+        assert!(text.contains(word), "exec.rs does not hold `{word}`");
+    }
+}
+
+#[test]
+fn the_unsafe_block_opener_appears_only_in_exec_and_the_fake_eidolon() {
+    for (path, text) in sources() {
+        if !UNSAFE_OK.contains(&path.as_str()) {
+            assert!(!text.contains(UNSAFE_BLOCK), "{path} opens an unsafe block");
+        }
+    }
 }

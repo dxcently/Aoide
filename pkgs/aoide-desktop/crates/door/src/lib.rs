@@ -19,7 +19,7 @@ pub use client::{AnswerOutcome, CancelOutcome, Door, Mode, SayOutcome};
 pub use error::DoorError;
 pub use events::{Closer, Events};
 pub use frame::{Ask, AskOption, Frame, Timing, ToolUse, Usage};
-pub use token::runtime_from_env;
+pub use token::{check_runtime, runtime_from_env, token_path};
 
 /// The wire version `hello` carries (`eidolon/crates/web/src/lib.rs`).
 pub const PROTOCOL: u32 = 1;

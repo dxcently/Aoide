@@ -5,15 +5,22 @@ edition = "2021"
 publish = false
 
 [features]
-# The fake `aoide` (src/bin/fake-aoide.rs), for this crate's tests only.
-fakes = []
+# The fake `aoide` and fake `eidolon` (src/bin), for this crate's tests only.
+fakes = ["aoide-desktop-door/fake"]
 
 [[bin]]
 name = "fake-aoide"
 path = "src/bin/fake-aoide.rs"
 required-features = ["fakes"]
 
+[[bin]]
+name = "fake-eidolon"
+path = "src/bin/fake-eidolon.rs"
+required-features = ["fakes"]
+
 [dependencies]
+aoide-desktop-door = { path = "../door" }
+aoide-protocol = { path = "../../../aoide/crates/protocol" }
 libc.workspace = true
 serde.workspace = true
 serde_json.workspace = true
