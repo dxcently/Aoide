@@ -23,4 +23,13 @@ disallowed-methods = [
     { path = "libc::kill", reason = "only exec.rs sends a signal" },
     { path = "libc::setsid", reason = "only exec.rs starts a session" },
     { path = "libc::syscall", reason = "only exec.rs makes a raw syscall" },
+    { path = "libc::killpg", reason = "only exec.rs sends a signal" },
+    { path = "libc::tgkill", reason = "only exec.rs sends a signal" },
+    { path = "libc::sigqueue", reason = "only exec.rs sends a signal" },
+    { path = "libc::pthread_kill", reason = "only exec.rs sends a signal" },
+    { path = "libc::clone", reason = "only exec.rs forks" },
+    { path = "libc::daemon", reason = "only exec.rs starts a process" },
+    { path = "libc::execveat", reason = "only exec.rs replaces a process image" },
+    { path = "libc::fexecve", reason = "only exec.rs replaces a process image" },
+    { path = "libc::execvpe", reason = "only exec.rs replaces a process image" },
 ]

@@ -10,9 +10,10 @@ are in README.md.
   `Command::new(`, `pre_exec`, `libc::fork`, `setsid`, `libc::kill`, `execv` and
   `posix_spawn` appear only in `exec.rs`. The words `unsafe` and `unsafe_code`
   appear only in `exec.rs` and the fake eidolon's file. `disallowed_methods`,
-  `disallowed_types`, `clippy::all` and `clippy::style` appear only in
-  `exec.rs`, each matched as a whole word, so `clippy::allow_attributes` is not
-  `clippy::all`.
+  `disallowed_types`, `disallowed_method`, `disallowed_type`, `clippy::all` and
+  `clippy::style` appear only in `exec.rs`, each matched as a whole word on the
+  text with its ASCII whitespace removed, so `clippy::allow_attributes` is not
+  `clippy::all`. The forms `include!(` and `#[path` appear in no source.
 - `spawn_door` starts only the `Pinned` program it is given, at its canonical
   path. Its pre-exec closure makes only `setsid`, `fork`, `write`, `kill` and
   `_exit`, which POSIX lists as async-signal-safe, and allocates nothing. `fork`
