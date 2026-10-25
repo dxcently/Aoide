@@ -1207,18 +1207,24 @@ blank one is refused too.
   that an early return must never silently skip the audit line a full run
   gets.
   **Dry run (`--dry-run`):** the flag takes the selection the launch would
-  take and lists it, launching, holding and typing nothing. Flag mode lists
-  what `select_candidates` returns, with `pickedByBare` true on exactly the
-  rows the bare `--project P` form revives (`undying_selection`). Bare mode
-  lists one row per manifest spec, decided by the helpers the launch uses
-  (`enrichment`, `clean_argv`, `summon_check`, `unresumed_reason`). A
-  remote spec is never sent: its row carries only the local pre-wire
-  verdict. A dry run holds on no door and writes one audit line, status
-  `dry-run`, at the points the real call audits (none for a usage error or
-  a stage miss). Besides that line, its only write is the one-time
-  `carry.json` migration any undying read runs
-  (`aoide_storage::undying::load_undying`), on a host that still holds the
-  legacy file.
+  take and lists the rows the launch acts on, launching, holding and typing
+  nothing. Flag mode lists what `select_candidates` returns, with
+  `pickedByBare` true on exactly the rows the bare `--project P` form revives
+  (`undying_selection`). Bare mode lists one row per manifest spec, decided by
+  the helpers the launch uses (`enrichment`, `clean_argv`, `summon_check`,
+  `unresumed_reason`). A row the launch would skip lists as `skipped`, as the
+  launch's own `skipped[]` reports it. A remote spec is never sent: its row
+  carries only the local pre-wire verdict. The message spells each line as the
+  pending view spells a held plan (`visible_held`); the data stays raw. A bare
+  dry run from an unattested caller on a door that cannot approve is refused
+  with the launch's refusal; a flag-mode one lists there, as it holds nothing.
+  A dry run holds on no door and writes three things, and no others: the audit
+  line (status `dry-run`, at the points the real call audits; none for a usage
+  error or a stage miss); on a host that still holds the legacy file, the
+  one-time `carry.json` rename an undying read runs
+  (`aoide_storage::undying::load_undying`); and on such a host, the one-time
+  conducting-stage migration a stage read runs
+  (`aoide_storage::fs::conducting_stage_dir`).
 - **Terminal restore capture (P-C5, durable-sessions plan) — gated on the
   WRAPPED ARGV, never the agent label (task #100).**
   `session_conduct`'s `is_shell` (everything below this bullet: the ~1 Hz

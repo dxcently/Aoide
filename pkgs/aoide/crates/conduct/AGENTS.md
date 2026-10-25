@@ -1187,16 +1187,18 @@ in the message.
   also make, and don't copy a helper. The parity test
   `dry_run_manifest_dispositions_match_the_real_launch_for_local_specs` pins
   the two together.
-- **A dry run is never held, refused or sent, on any door.**
-  `session_resurrect_with` skips the hold and the bare-mode refusal when
-  `dry-run` is present. `plan_spec` takes a non-local spec's verdict from
-  `summon_check`, never from `spawn_on_node`. Don't route a dry run through
-  `hold_whole`, `send_restore`, `launch_session` or the node client.
-- **Only a dry run reads the undying set on an `--all` or `--id` call.**
-  `select_candidates` computes `pickedByBare` (`undying_picks`) only under
-  `dry-run`, because `load_undying` migrates a legacy `carry.json` on first
-  sight. A real `--all` or `--id` never reads the set, so it never triggers
-  that migration. Keep the read gated on the flag.
+- **A dry run is never held or sent, on any door, and is refused where its
+  launch is.** `session_resurrect_with` gives a bare dry run from an unattested
+  caller on a door that cannot approve the bare-mode refusal its launch gives,
+  and holds nothing for a flag-mode one, which lists instead. `plan_spec` takes
+  a non-local spec's verdict from `summon_check`, never from `spawn_on_node`.
+  Don't route a dry run through `hold_whole`, `send_restore`, `launch_session`
+  or the node client.
+- **On an `--all` or `--id` call, only a dry run reads the undying set in
+  `select_candidates`.** It computes `pickedByBare` (`undying_picks`) only under
+  `dry-run`. A real call reads the set per revival, in `resurrect_one`, where a
+  legacy `carry.json` migrates on the first read. Keep the picks read gated on
+  the flag: a real call has no use for `pickedByBare`.
 - **`pickedByBare` is per row, and `--id` takes the first ledger line for its
   id.** The bare form revives the newest ledger line of each undying id, so an
   `--all` row is picked only if it is that line. `--id` takes the first match
