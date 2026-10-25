@@ -1301,7 +1301,11 @@ fn a_launch_whose_hello_fails_keeps_its_record_unwatched_and_signals_nothing() {
     let id = doors.launch(&world.plan()).expect("the launch keeps its door");
     assert_eq!(world.record_ids(), vec![id.clone()], "the record is kept");
     assert_eq!(doors.launch_ids(), vec![id.clone()], "the watch is kept, with no stream");
-    event_where(&rx, |e| matches!(e, Event::Unwatched { launch_id, .. } if *launch_id == id));
+    let unwatched = event_where(&rx, |e| matches!(e, Event::Unwatched { launch_id, .. } if *launch_id == id));
+    assert!(
+        matches!(&unwatched, Event::Unwatched { why, .. } if why.contains("failed before its hello")),
+        "the why names the stream's error: {unwatched:?}"
+    );
     assert!(alive(world.pid(&id)), "the door runs");
     assert_eq!(world.count("SIGTERM"), 0, "nothing signalled the door");
 }

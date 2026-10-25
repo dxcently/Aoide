@@ -114,8 +114,10 @@ doors.rs    Doors::open(exec, eidolon, home, root, runtime, out)
 - A failure up to and including `Store::update` refuses the launch. Its door is
   signalled through its pidfd and waited for up to 10 s, and the error names its
   pid and its log. Without a pidfd nothing is signalled, and the error says so.
-  A launch that refuses on its banner blocks up to 40 s: the 30 s banner bound,
-  then the 10 s exit wait.
+  A launch that refuses the door blocks up to `BANNER_BOUND` + `EXIT_BOUND`
+  (30 + 10 s), and a launch whose stream opens up to `BANNER_BOUND` + `CONNECT` +
+  `IO` (30 + 5 + 30 s). The `Doors` lock is held that long, so another door's
+  call waits behind the launch.
 - A launch that has written its record keeps the record and returns the launch
   id. A stream that does not open at launch starts the watch unattached, and the
   watch reports it. A launch for which no watch can start returns
@@ -137,8 +139,9 @@ doors.rs    Doors::open(exec, eidolon, home, root, runtime, out)
 - A record is trusted only while `verify` passes. Its pid is live and not a
   zombie, with the recorded start time. Its command line is the launch argv for
   the current pin and the recorded cwd, and its token file is the token path of
-  its port. `open_stream` also needs the first frame to be `hello`, and its
-  session to be the recorded one when there is one.
+  its port. `open_stream` also needs the first frame to be `hello`, within the
+  stream's deadline, and its session to be the recorded one when there is one.
+  A stream whose hello does not come in time does not open.
 - A record whose pid is gone or a zombie, whose start time or command line
   differs, or whose pin changed, fails its identity check. It is dropped and
   never signalled, and `Event::Dropped` names its pid. Any other failure (a
@@ -163,7 +166,8 @@ doors.rs    Doors::open(exec, eidolon, home, root, runtime, out)
 - A door keeps at most 64 pending asks. An ask past that is neither kept nor
   forwarded, and the stream sends one `AsksOverflow`, naming the first ask it
   refused.
-- A stream that ends while the door lives reopens after a second. A stream that
+- A stream that ends while the door lives reopens after a second, and its hello
+  is bounded as a launch's is: `CONNECT` + `IO` (35 s) at most. A stream that
   ends with the door gone drops the record and sends `Gone`. A drop or a forget
   whose store write fails keeps its record, and the next open checks it again
   and reports it again.

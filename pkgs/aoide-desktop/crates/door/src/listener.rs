@@ -140,6 +140,17 @@ mod tests {
         assert_eq!(owner_in(&text, DOOR6.parse().unwrap(), CLIENT6.parse().unwrap()), Some(1000));
     }
 
+    /// A dual-stack listener's accepted socket is in tcp6, and its IPv4 address is
+    /// the mapped `::ffff:` form, so no V4 door owns that row.
+    #[test]
+    fn an_ipv4_mapped_row_is_a_v6_address_that_no_v4_door_owns() {
+        let mapped_door = "0000000000000000FFFF00000100007F:A1B2";
+        let mapped_client = "0000000000000000FFFF00000100007F:C350";
+        assert_eq!(parse_addr(mapped_door), Some("[::ffff:127.0.0.1]:41394".parse().unwrap()));
+        let text = table(&[row(mapped_door, mapped_client, 1000)]);
+        assert_eq!(owner_in(&text, DOOR4.parse().unwrap(), CLIENT4.parse().unwrap()), None);
+    }
+
     #[test]
     fn columns_parse_to_the_address_they_name() {
         assert_eq!(parse_addr(DOOR4_COLUMN), Some("127.0.0.1:41394".parse().unwrap()));
@@ -173,7 +184,7 @@ mod tests {
     #[test]
     fn decide_refuses_no_row_and_any_other_uid_root_included() {
         let door: SocketAddr = DOOR4.parse().unwrap();
-        for owner in [None, Some(0), Some(1001)] {
+        for owner in [None, Some(0), Some(1001), Some(u32::MAX)] {
             match decide(door, owner, 1000) {
                 Err(DoorError::Unowned { addr, uid }) => assert_eq!((addr, uid), (door, owner)),
                 other => panic!("{owner:?}: {other:?}"),

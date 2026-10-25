@@ -13,7 +13,8 @@ use crate::token::read_token;
 
 const CONNECT: Duration = Duration::from_secs(5);
 /// The deadline a request waits under, from its send: a call's send, head and body
-/// together, or an events stream's send and head (its body has none).
+/// together, or an events stream's send, head and hello (its body has none once
+/// the hello is read).
 const IO: Duration = Duration::from_secs(30);
 
 /// The longest reply a non-stream route reads.
@@ -80,10 +81,11 @@ impl Door {
         self.addr
     }
 
-    /// Shortens the deadline a request waits under, for the tests (30 s otherwise).
+    /// Shortens the deadline a request waits under, for the tests. It never
+    /// lengthens it past `IO`.
     #[cfg(feature = "fake")]
     pub fn with_timeout(mut self, timeout: Duration) -> Door {
-        self.timeout = timeout;
+        self.timeout = timeout.min(IO);
         self
     }
 
@@ -128,11 +130,11 @@ impl Door {
     }
 
     pub fn events(&self) -> Result<Events, DoorError> {
-        let (head, reader) = self.exchange("GET", "/api/events", None, true)?;
+        let (head, reader, hello_by) = self.exchange("GET", "/api/events", None, true)?;
         match head.status {
             200 => {
                 let socket = reader.get_ref().stream.try_clone()?;
-                Ok(Events::new(body_reader(&head, reader), socket))
+                Ok(Events::new(body_reader(&head, reader), socket, hello_by))
             }
             other => Err(common(other)),
         }
@@ -141,7 +143,7 @@ impl Door {
     /// One request whose reply is read whole: its send, head and body share one deadline.
     fn call(&self, method: &str, path: &str, body: Option<&Value>) -> Result<(u16, Vec<u8>), DoorError> {
         let bytes = body.map(|b| serde_json::to_vec(b).expect("a json value serializes"));
-        let (head, reader) = self.exchange(method, path, bytes.as_deref(), false)?;
+        let (head, reader, _) = self.exchange(method, path, bytes.as_deref(), false)?;
         // An error status is decided by its head: its length and a cut body are not errors.
         let capped = head.status < 400;
         if let Some(length) = head.length.filter(|length| capped && *length > MAX_REPLY) {
@@ -162,15 +164,15 @@ impl Door {
     /// written, then sends the request and reads the reply's head. One deadline
     /// starts before the send, and the writes and the head's reads share it. A
     /// write that fails is reported only if no reply came: a door may answer
-    /// (413) before it has read the whole body. An events stream keeps no
-    /// deadline once its head is read.
+    /// (413) before it has read the whole body. The deadline comes back with the
+    /// reader, so an events stream can hold it until its hello is read.
     fn exchange(
         &self,
         method: &str,
         path: &str,
         body: Option<&[u8]>,
         streaming: bool,
-    ) -> Result<(Head, BufReader<Wire>), DoorError> {
+    ) -> Result<(Head, BufReader<Wire>, Instant), DoorError> {
         let token = read_token(&self.runtime, &self.token_file, self.addr.port())?;
         let stream = TcpStream::connect_timeout(&self.addr, CONNECT)
             .map_err(|source| DoorError::Connect { addr: self.addr, source })?;
@@ -190,7 +192,7 @@ impl Door {
                 if streaming {
                     reader.get_mut().release()?;
                 }
-                Ok((head, reader))
+                Ok((head, reader, deadline))
             }
             Err(e) => Err(match sent {
                 Err(io) => DoorError::Io(io),

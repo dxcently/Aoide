@@ -761,6 +761,7 @@ fn open_stream(runtime: &Path, entry: &Entry) -> Result<(Events, String), String
     let mut events = door.events().map_err(|e| e.to_string())?;
     let session = match events.next() {
         Some(Ok(Frame::Hello { session, .. })) => session,
+        Some(Err(e)) => return Err(format!("the door's stream failed before its hello: {e}")),
         _ => return Err("the door's stream does not open with hello".into()),
     };
     if entry.session_id.as_deref().is_some_and(|recorded| recorded != session) {

@@ -7,6 +7,7 @@ use std::collections::VecDeque;
 use std::io::{self, Read};
 use std::net::{Shutdown, TcpStream};
 use std::sync::Arc;
+use std::time::Instant;
 
 use crate::error::DoorError;
 use crate::frame::{decode, Frame};
@@ -88,18 +89,36 @@ impl Sse {
 /// The frames of an open events stream. The first frame is `hello`. Iteration
 /// ends when the stream does, or after a frame that breaks the stream's rules:
 /// a first frame that is not `hello`, a second `hello`, or a `protocol` that is
-/// not 1 (each the item that says so).
+/// not 1 (each the item that says so). Until the hello is read, a body read that
+/// would start past the stream's deadline ends the stream with a timeout.
 pub struct Events {
     body: Box<dyn Read + Send>,
     sse: Sse,
     done: bool,
     greeted: bool,
     socket: TcpStream,
+    hello_by: Option<Instant>,
 }
 
 impl Events {
-    pub(crate) fn new(body: Box<dyn Read + Send>, socket: TcpStream) -> Events {
-        Events { body, sse: Sse::default(), done: false, greeted: false, socket }
+    pub(crate) fn new(body: Box<dyn Read + Send>, socket: TcpStream, hello_by: Instant) -> Events {
+        Events { body, sse: Sse::default(), done: false, greeted: false, socket, hello_by: Some(hello_by) }
+    }
+
+    /// Bounds the next body read. Until the hello is read, the socket waits no
+    /// longer than the time left to the deadline, and a read that would start
+    /// past it is a timeout. Once the hello is read, the bound is cleared, once.
+    fn bound(&mut self) -> io::Result<()> {
+        let Some(by) = self.hello_by else { return Ok(()) };
+        if !self.greeted {
+            let left = by.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                return Err(io::Error::new(io::ErrorKind::TimedOut, "the stream's hello ran past its deadline"));
+            }
+            return self.socket.set_read_timeout(Some(left));
+        }
+        self.hello_by = None;
+        self.socket.set_read_timeout(None)
     }
 
     /// One frame under the stream's rules; a rule that fails ends the stream.
@@ -170,7 +189,7 @@ impl Iterator for Events {
                 return Some(self.frame(&payload));
             }
             let mut buf = [0u8; 8192];
-            match self.body.read(&mut buf) {
+            match self.bound().and_then(|()| self.body.read(&mut buf)) {
                 Ok(0) => self.done = true,
                 Ok(n) => self.sse.feed(&buf[..n]),
                 Err(e) => {

@@ -14,10 +14,12 @@ are in README.md.
   `decide`: the effective uid passes, and no row or another uid (0 included) is
   `Unowned` and nothing is written. The table is read again, up to 50 tries 10
   ms apart, before no row is the answer. A V4 door's row is read from `tcp`
-  alone: Eidolon binds one loopback address, so a dual-stack listener's
-  accepted socket is in `tcp6`, finds no row, and is refused, which is
-  fail-closed. The check proves the listener runs as this user. It does not
-  prove the process is `eidolon`: a same-uid listener passes (ruling 29).
+  alone. Eidolon binds one loopback address, and its `host_matches` in
+  `crates/web/src/serve.rs` compares a request's Host with that address, so a
+  dual-stack listener's accepted socket is in `tcp6`, finds no row, and is
+  refused, which is fail-closed. The check proves the listener runs as this
+  user. It does not prove the process is `eidolon`: a same-uid listener passes
+  (ruling 29).
 - The token is read on every request. The runtime directory and its `eidolon`
   directory must be real directories (no symlinks), owned by the effective uid,
   at mode 0700. The token file must be exactly
@@ -51,8 +53,11 @@ are in README.md.
 - A request's send, and its reply's head and body, share one 30 s deadline that
   starts before the send. Each write's and read's timeout is the time left, and
   a write that would start past the deadline is refused as a timeout. An events
-  stream's send and head share its 30 s, and its body has none once the head is
-  read. The connect has 5 s.
+  stream's send, head and hello share its 30 s. Until the hello is read, each
+  body read waits no longer than the time left, and a read that would start past
+  the deadline is a timeout; once it is read, the body has none. The connect has
+  5 s. `with_timeout` takes the shorter of its duration and 30 s: a test can
+  shorten the deadline, never lengthen it.
 - A write that fails is reported only if no reply came: a door may answer 413
   before it has read the body.
 - A `data:` frame over 1 MiB is dropped and counted by `dropped_oversize()`,
@@ -63,7 +68,8 @@ are in README.md.
   number past u32 is refused. A first frame that is not `hello` is
   `Malformed`; a `protocol` other than 1 is `Protocol { got }`, whose message
   prints a number as it is and any other value by its JSON type. Each ends the
-  stream, and so does a second `hello` (`Malformed`). An unknown frame type is
+  stream, and so does a second `hello` (`Malformed`), and a hello that does not
+  come by the deadline (`Io`, a timeout). An unknown frame type is
   `Frame::Other`. An unknown field is ignored. Neither is an error.
 - No `unsafe` in this crate: the workspace denies `unsafe_code` for every
   target. The effective uid comes from `/proc/self/status`. The open and the
@@ -101,6 +107,8 @@ are in README.md.
 - `refuse_at_once` answers before the body is read and closes with the body
   unread. The kernel resets such a connection: the reply's head arrives, and
   its body may not, so the client decides an error by its head.
+- `set_head` sends `caught-up` after its frames even when there are none, so a
+  stream with no frame is `reply_raw` with the head alone.
 
 ## Extension points
 

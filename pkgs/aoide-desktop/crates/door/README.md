@@ -13,7 +13,9 @@ HTTP library and no GUI crate. Its dependencies are serde, serde_json and libc
 - `client.rs`: `Door`, with `say`, `cancel`, `answer` and `events`. Each
   route's statuses map to its outcome type or to a `DoorError`.
 - `events.rs`: `Events`, a blocking iterator of `Frame`s over the stream, and
-  `Closer`, which ends the stream from another thread.
+  `Closer`, which ends the stream from another thread. Until the hello is read,
+  the stream holds the request's deadline; after it, the stream waits as long as
+  the door takes.
 - `frame.rs`: `Frame`, `Ask` and the projections a transcript draws, and
   `decode` for one `data:` payload.
 - `token.rs`: `runtime_from_env`, `check_runtime`, `token_path`, and the token

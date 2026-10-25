@@ -153,12 +153,15 @@ are in README.md.
   path refuses the launch at once. A banner not within 30 s refuses it at that
   bound. Each refusal quotes the log's last 4 KiB, as data.
 - A refusal waits up to `EXIT_BOUND` (10 s) for the door's exit after its
-  SIGTERM, so a launch that refuses on its banner blocks up to 40 s.
-- Once the stream's head is in, `open_stream` reads the hello with no deadline:
-  the events stream drops the door's deadline once its head is read. A door that
-  answers 200 and sends no hello holds the launch until it sends one or closes.
-  The head itself is bounded by the door's 30 s deadline. No bound on the hello
-  is built.
+  SIGTERM. A launch that refuses the door blocks up to `BANNER_BOUND` +
+  `EXIT_BOUND` (30 + 10 s), and a launch whose stream opens blocks up to
+  `BANNER_BOUND` + `CONNECT` + `IO` (30 + 5 + 30 s). The `Doors` lock is held
+  that long, so another door's call waits behind the launch.
+- The stream's send, head and hello share the door's 30 s deadline, `IO`. The
+  events stream holds it until the hello is read, so a door that answers 200 and
+  sends no hello ends its stream at that deadline, and `open_stream` refuses it
+  with the error named. A watch's reopen is bounded the same way (`CONNECT` +
+  `IO`, 35 s).
 - The turn state is known only from frames. `close_after_turn` refuses an
   `Unknown` turn. A stop now takes the cancel's own answer: 409 means idle, and
   204 waits up to 10 s for the frames that say the turn ended. If none come, the
