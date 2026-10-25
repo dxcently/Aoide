@@ -4608,16 +4608,23 @@ Nothing is looked up on PATH except `systemctl`, `journalctl` and
 `systemd-analyze`.
 
 `add` runs the probe (`systemctl --user show --property=Version`) and checks
-the calendar. It then writes both units atomically, records their digests under
-the stage lock, runs `daemon-reload`, and runs `enable --now` on the timer. If
-systemd refuses after the record is written, the job stays recorded, and
-`remove` clears it. `remove` deletes each unit that still hashes to the record:
-it runs `disable --now` on the timer first, when that file is aoide's, deletes
-the units, runs `daemon-reload`, and drops the record. A unit already gone is
-skipped and named in the outcome. When the timer is gone, the outcome also
-prints `systemctl --user stop aoide-job-<name>.timer`, which aoide never runs
-itself. A unit that was edited, or is a link, makes `remove` refuse and delete
-nothing; the outcome then prints the lines that remove them by hand.
+the calendar before it takes the stage lock. An `--on` that starts with `-` or
+holds `%` is a usage error, refused before the probe. Under the lock, `add`
+writes both units atomically, records their digests, runs `daemon-reload`, and
+runs `enable --now` on the timer. If systemd refuses after the record is
+written, the job stays recorded, and `remove` clears it. `remove` runs the same
+probe before the lock. Under the lock it deletes each unit that still hashes to
+the record: it runs `disable --now` on the timer first, when that file is
+aoide's, deletes the units, runs `daemon-reload`, and drops the record. A unit
+already gone is skipped and named in the outcome. When the timer is gone, the
+outcome also prints `systemctl --user stop aoide-job-<name>.timer`, which aoide
+never runs itself. A unit that was edited, or is a link, makes `remove` refuse
+and delete nothing; the outcome then prints the lines that remove them by hand.
+
+Every `systemctl`, `journalctl` and `systemd-analyze` call has a 10 s bound. A
+call that does not answer in time is killed and reaped, and the verb reports it
+as a failure. So a wedged user manager stalls a stage writer for at most two
+bounds: `add` and `remove` each make at most two calls under the lock.
 
 `list` gives each job one status, the first of these that holds: `missing` (a
 unit is gone), `changed` (a unit's bytes differ from the record), `stale`
@@ -4625,13 +4632,18 @@ unit is gone), `changed` (a unit's bytes differ from the record), `stale`
 `ok`. It adds `foreign` for each `aoide-job-*` unit that no record names. Jobs
 fire only while the user manager runs, and aoide never enables linger.
 
-`runs` reads `journalctl --user -u aoide-job-<name>.service -o json --no-pager`,
-or every `aoide-job-*.service` when no name is given. An entry whose MESSAGE is
-one JSON object with a known `status` is a row: `completed` (`session`, `run`,
-`report`), `parked` (`session`, `run`, `question`), `failed` (`session`, `run`,
-`reason`), or `refused` (`error`). Each row has its job and the entry's time.
-Those texts are the run's own output, so they are untrusted: `--json` carries
-them as strings, and the text render shows them visibly.
+`runs` reads `journalctl --user _SYSTEMD_USER_UNIT=aoide-job-<name>.service -o
+json --no-pager -n 1000` for a name, or `journalctl --user -u
+aoide-job-*.service -o json --no-pager -n 1000` for every job. The `-n 1000`
+keeps the newest 1000 entries, so an older run drops out of the answer. An
+entry is a row when its MESSAGE is one JSON object with a known `status`
+(`completed`, `parked`, `failed` or `refused`) and its own
+`_SYSTEMD_USER_UNIT` is `aoide-job-<job>.service`. A `UNIT` or `USER_UNIT`
+field that a client sets names no job. A row carries its job, the entry's time,
+and any of `session`, `run`, `report`, `question`, `reason` and `error` that the
+object sets. A row is the job's own claim, and aoide does not attest it. Those
+texts are untrusted: `--json` carries them as strings, and the text render shows
+them visibly.
 
 ### `state/stage/pingback.json` — **v0**
 

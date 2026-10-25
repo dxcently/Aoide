@@ -66,38 +66,37 @@ terminal's rights to its remote callers.
   planned (`docs/architecture/AOIDED.md`'s "L2" section). `registry` still
   rides along the DI seam unused — no op resolves a dotted tool name
   against it the way MCP's `tools/call` does.
-- `producers` (P-D3, `docs/architecture/AOIDED.md`'s "L1" section) — the
-  daemon tick's two producers, both constructed once at `run_loop` startup
-  and ticked every iteration. `SecretsMirror` tails the secrets broker's
-  OWN events feed, its location resolved via `aoide_secrets::socket::
-  socket_path`/`events_path` (`daemon::run_loop`'s own construction site —
-  plain, wire-type-free `PathBuf` resolvers, reused rather than re-derived;
-  this crate's `aoide-secrets` dependency also covers the A2A door's
-  inbound bearer resolve). The mirror IS deliberately kept off that
-  crate's wire/record TYPES for parsing, so "never copy an unknown field"
-  is structural — `mirror_secrets_line` reads a bare `serde_json::Value`
-  and copies exactly four named fields, `id`/`secret`/`consumer`/
-  `timeoutSecs`, for one of the five recognized outcomes,
-  `released`/`parked`/`completed`/`dismissed`/`expired`) and re-publishes
-  each as a `class:"secret",source:"secrets-mirror"` record on the
-  daemon's own feed. `HandEditWatcher` stat-sweeps a fixed six-file roster
+- `producers` (P-D3, `docs/architecture/AOIDED.md`'s "L1" section) — the daemon
+  tick's two producers, both constructed once at `run_loop` startup and ticked
+  every iteration. `SecretsMirror` tails the secrets broker's OWN events feed,
+  its location resolved via `aoide_secrets::socket::socket_path`/`events_path`
+  (`daemon::run_loop`'s own construction site — plain, wire-type-free `PathBuf`
+  resolvers, reused rather than re-derived; this crate's `aoide-secrets`
+  dependency also covers the A2A door's inbound bearer resolve). The mirror IS
+  deliberately kept off that crate's wire/record TYPES for parsing, so "never
+  copy an unknown field" is structural — `mirror_secrets_line` reads a bare
+  `serde_json::Value` and copies exactly four named fields,
+  `id`/`secret`/`consumer`/ `timeoutSecs`, for one of the five recognized
+  outcomes, `released`/`parked`/`completed`/`dismissed`/`expired`) and
+  re-publishes each as a `class:"secret",source:"secrets-mirror"` record on the
+  daemon's own feed. `HandEditWatcher` stat-sweeps a fixed seven-file roster
   (`daemon::stage_roster`: `sessions.json`/`hooks.json`/`projects.json`/
-  `graph.json` from `aoide-storage`, `pending.json`/`notifications.json` from
-  `aoide-conduct`) each tick and fires a `class:"audit",kind:"hand-edit"`
-  event for any file whose `(mtime, len)` no longer matches its baseline
-  (the #69 hand-edit watcher) — detection and narration only, this daemon
-  never reverts a hand edit. `note_own_write` is the seam P-D6's own
-  tick-reconcile/reap writes (below) fold into so they are never reported
-  back as a hand edit. **The watcher itself is a single `Arc<Mutex<
-  HandEditWatcher>>` (task #92), shared between the tick thread and
-  `handle_conn`'s connection threads** — not tick-private: a dispatched
-  session command (`session start/end`/etc., `{"op":"dispatch"}`) writes
-  stage files on ITS OWN connection thread, not the tick's, so
-  `rebaseline_stage_roster` re-baselines the WHOLE roster after every
-  completed dispatch (roster-wide, not a per-command "which files did this
-  write" table) before that connection's reply goes out — closing the
-  window where the daemon's own routed write got reported back to itself as
-  a hand edit one tick later.
+  `graph.json` from `aoide-storage`,
+  `pending.json`/`notifications.json`/`jobs.json` from `aoide-conduct`) each
+  tick and fires a `class:"audit",kind:"hand-edit"` event for any file whose
+  `(mtime, len)` no longer matches its baseline (the #69 hand-edit watcher) —
+  detection and narration only, this daemon never reverts a hand edit.
+  `note_own_write` is the seam P-D6's own tick-reconcile/reap writes (below)
+  fold into so they are never reported back as a hand edit. **The watcher itself
+  is a single `Arc<Mutex<HandEditWatcher>>` (task #92), shared between the tick
+  thread and `handle_conn`'s connection threads** — not tick-private: a
+  dispatched session command (`session start/end`/etc., `{"op":"dispatch"}`)
+  writes stage files on ITS OWN connection thread, not the tick's, so
+  `rebaseline_stage_roster` re-baselines the WHOLE roster after every completed
+  dispatch (roster-wide, not a per-command "which files did this write" table)
+  before that connection's reply goes out — closing the window where the
+  daemon's own routed write got reported back to itself as a hand edit one tick
+  later.
 - **Graph residency (P-D6, `docs/architecture/AOIDED.md`'s "L4")** —
   `run_loop`'s tick, after narrating the hand-edit sweep above, does two
   more things every iteration: `reconcile_graph_projection(changed_files)`

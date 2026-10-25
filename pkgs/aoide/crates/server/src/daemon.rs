@@ -354,7 +354,7 @@ type SharedHandEditWatcher = Arc<Mutex<crate::producers::HandEditWatcher>>;
 /// own writes are folded into the watcher's baseline before the next tick's
 /// [`crate::producers::HandEditWatcher::sweep`] runs. Deliberately
 /// roster-wide rather than a per-command "which files did this write" table:
-/// six stats is cheap, and this is the exact call
+/// seven stats is cheap, and this is the exact call
 /// [`reconcile_graph_projection`]'s own caller already makes for the tick's
 /// two internal writers.
 fn rebaseline_stage_roster(watcher: &SharedHandEditWatcher) {
@@ -495,7 +495,7 @@ fn seal_freshly_registered_session(inv: &Invocation, outcome: &aoide_protocol::o
 /// real-world registration — `aoide conduct -- <agent>` — writes its
 /// record DIRECTLY (`aoide_conduct::graph::conduct::session_conduct`,
 /// never through `dispatch` at all), so under P-ID1 alone it was NEVER
-/// sealed. Run every tick (module doc's "six stats is cheap" precedent —
+/// sealed. Run every tick (module doc's "stat-ing seven files" precedent —
 /// a session roster is small, and gating this on the hand-edit watcher's
 /// own `sessions.json` detection would miss a session that was already
 /// live across a daemon restart, since the watcher's baseline seeds from

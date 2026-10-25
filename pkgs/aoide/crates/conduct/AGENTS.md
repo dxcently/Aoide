@@ -2940,7 +2940,12 @@ in the message.
   directory that is a link or a file (`prepare_unit_dir`), so nothing is
   written through either. `remove` deletes only a unit that still hashes to
   the record (`unit_state`). It refuses, deleting nothing, when a unit was
-  edited or is a link, and it skips a unit that is already gone. Pinned by
+  edited or is a link, and it skips a unit that is already gone. Two windows
+  stay open to a same-uid writer. `add` checks each slot, then renames its
+  units into place: a unit that appears after the check is replaced, not
+  written through. `remove` runs a bounded `disable --now` between its hash
+  check and its delete, so a unit swapped into that gap is deleted, and
+  `remove` still reports it removed. Pinned by
   `a_symlinked_or_foreign_unit_in_the_way_is_refused_and_never_written_through`,
   `a_job_whose_units_are_both_gone_is_removed_and_its_name_can_be_added_again`
   and
@@ -2948,20 +2953,25 @@ in the message.
 - **A unit's text comes from `unit_texts` alone, one `quote_word` per argv
   word.** `WorkingDirectory=` is unquoted with its `%` doubled, and it appears
   only with `--cwd`. `ExecStart=` doubles `$` as well as `%`. `Environment=`
-  takes no variable expansion (systemd.exec(5)), so it doubles neither. Pinned
-  by `unit_texts_quote_each_word_the_systemd_way` and
+  takes no variable expansion (systemd.exec(5)), so it doubles `%` and not `$`.
+  Pinned by `unit_texts_quote_each_word_the_systemd_way` and
   `a_job_without_a_cwd_has_no_working_directory_line`.
 - **The four verbs open to the `Cli` and `Daemon` doors only.** `add` and
   `remove` also refuse a door that cannot approve. Every verb refuses before
-  its first write when the host is not Linux or `systemctl --user show` fails:
-  `add_world` and `remove_world` probe first. Pinned by
+  its first write when the host is not Linux or `systemctl --user show` fails.
+  `add` and `remove` make that probe before they take the stage lock, and each
+  tool call is bounded by `JOB_TOOL_WAIT` (10 s). Pinned by
   `the_job_verbs_open_to_the_cli_and_daemon_doors_only`,
-  `a_host_that_is_not_linux_refuses_every_verb_and_writes_nothing` and
-  `a_failing_user_manager_probe_refuses_add_with_zero_files`.
+  `a_host_that_is_not_linux_refuses_every_verb_and_writes_nothing`,
+  `a_failing_user_manager_probe_refuses_add_with_zero_files` and
+  `a_probe_that_never_exits_refuses_add_in_bound_and_leaves_the_lock_free`.
 - **A journal line is data.** `runs` keeps a line only when its `MESSAGE` is
-  one JSON object with a known `status`. Its strings reach `--json` as JSON
-  strings, and the human rows pass through `visible`. Pinned by
-  `runs_turns_a_journal_fixture_into_rows_and_shows_their_text_visibly`.
+  one JSON object with a known `status`, and its own `_SYSTEMD_USER_UNIT` names
+  the job: a `UNIT` or `USER_UNIT` field a client sets names no job. Its strings
+  reach `--json` as JSON strings, and the human rows pass through `visible`.
+  Pinned by
+  `runs_turns_a_journal_fixture_into_rows_and_shows_their_text_visibly` and
+  `a_run_row_needs_its_own_unit_so_a_client_set_unit_field_gives_none`.
 - **No test reaches the real user manager, journal or unit directory.** The
   shimmed tests point `XDG_CONFIG_HOME` at their own root and put the
   `systemctl`, `journalctl` and `systemd-analyze` shims first on `PATH`,
