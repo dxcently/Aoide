@@ -34,8 +34,10 @@ and each crate's own invariants are in its AGENTS.md (`crates/door/AGENTS.md`,
   `unsafe_code`, `disallowed_methods` and `disallowed_types`. Door and shell
   take that table with `[lints] workspace = true`, so no attribute in either
   can lift the three, however it is spelled: rustc refuses the lift with
-  E0453. Exec's own table allows the three, so exec is the one crate where
-  `unsafe`, a process start or a signal can appear.
+  E0453. The `unsafe_code` forbid also refuses `#[no_mangle]`, `#[export_name]`,
+  `#[link_section]` and `global_asm!`, so no door or shell code defines a symbol
+  that a libc call in exec could reach. Exec's own table allows the three, so
+  exec is the one crate where `unsafe`, a process start or a signal can appear.
 - `clippy.toml` lists the std paths that start a process or send a signal:
   `Command` (the type), `Command::new`, `CommandExt::pre_exec`,
   `CommandExt::exec` and `Child::kill`, which sends SIGKILL. In door and shell,
@@ -51,25 +53,33 @@ and each crate's own invariants are in its AGENTS.md (`crates/door/AGENTS.md`,
   `aoided.sock`, `"dispatch"`, `"subscribe"`, `/api/launch`, `sh -c` and
   `SIGKILL`. It reads the raw text, so a split spelling passes it. The scan
   reads source text, not expansions, so it does not see a lift a macro writes;
-  the forbid refuses one that a `macro_rules!` macro writes (probe 3); a proc
-  macro comes only from a new member or a changed manifest, which moves a golden
-  manifest, or from a dependency, which is not linted.
+  the forbid refuses one that a `macro_rules!` macro writes; a proc macro comes
+  only from a new member or a changed manifest, which moves a golden manifest,
+  or from a dependency, which is not linted.
 - The config and member checks, in the same file:
   - no `build.rs` lies under this directory (`no_member_has_a_build_script`);
+  - no symbolic link lies under this directory, since a walk through one
+    could read outside it (every test that walks the tree);
   - the root's `clippy.toml` is the only one
     (`only_the_roots_clippy_config_is_read`);
-  - no `.cargo/config` or `.cargo/config.toml` lies in this directory or in
-    any ancestor up to the git root
+  - no `.cargo/config` or `.cargo/config.toml` lies in this directory, in any
+    ancestor up to `/`, or in `$CARGO_HOME`
     (`no_cargo_config_applies_to_the_workspace`);
   - exec's only `.rs` file is `src/lib.rs`, because cargo makes a target of any
     `.rs` under `src/bin`, `tests`, `examples` or `benches`, and exec's table
     allows the lints in each (`the_exec_crate_has_one_source_file`);
+  - every file rustc read to build exec is its `src/lib.rs`, the root's
+    `clippy.toml`, the root's `Cargo.toml` or exec's `Cargo.toml`, by the
+    dep-info files cargo leaves beside the test binary
+    (`the_exec_crate_compiles_only_its_lib_rs`). A `#[path]` module or an
+    `include!` in exec would compile another file under exec's table; in door
+    and shell, such a file compiles under the forbid;
   - exactly four `Cargo.toml` files lie under this directory, and each equals
     its golden text in the same file, less blank lines and comment lines
     (`the_manifests_are_the_golden_ones`). A new member brings its golden in
     the same commit.
-- The scan reads nothing outside this directory. A target whose path lies
-  outside it would change a golden manifest.
+- The scan reads nothing outside this directory but those dep-info files. A
+  target whose path lies outside it would change a golden manifest.
 - Dependencies are not linted. The lints and the scan cover the members only.
   `aoide-protocol` is a path dependency outside this workspace, and it starts
   processes of its own. The app reaches it only through the exec crate's
@@ -78,7 +88,7 @@ and each crate's own invariants are in its AGENTS.md (`crates/door/AGENTS.md`,
   `XDG_RUNTIME_DIR` and `CARGO_TARGET_DIR`, and it unsets `AOIDE_SESSION_ID`,
   `AOIDE_ROOT`, `RUSTFLAGS`, `CARGO_ENCODED_RUSTFLAGS`,
   `CARGO_BUILD_RUSTFLAGS`, the x86_64 Linux target's `RUSTFLAGS`,
-  `CLIPPY_CONF_DIR`, `RUSTC_BOOTSTRAP`, `RUSTC_WRAPPER` and
-  `RUSTC_WORKSPACE_WRAPPER`. Nothing scans the environment. `CARGO_HOME` holds
-  no config, which the gate assumes, since a config there would apply to every
-  build.
+  `CLIPPY_CONF_DIR`, `RUSTC_BOOTSTRAP`, `RUSTC_WRAPPER`,
+  `RUSTC_WORKSPACE_WRAPPER`, `CARGO_BUILD_RUSTC_WRAPPER`,
+  `CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER`, `RUSTC` and `CARGO_BUILD_RUSTC`.
+  Nothing scans the environment.

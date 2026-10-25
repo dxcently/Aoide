@@ -984,14 +984,14 @@ mod tests {
     #[test]
     fn a_pidfd_opens_for_a_live_child_and_not_for_a_pid_that_is_gone_or_refused() {
         let mut sleeper = Command::new("sleep").arg("30").spawn().expect("sleep starts");
-        assert!(open_pidfd(sleeper.id()).is_ok());
+        let fd = open_pidfd(sleeper.id()).expect("the pidfd opens");
         let gone = open_pidfd(i32::MAX as u32).expect_err("no process has that pid");
         assert_eq!(gone.raw_os_error(), Some(libc::ESRCH));
         for pid in [1, std::process::id()] {
             let refused = open_pidfd(pid).expect_err("pid 1 and this process are refused");
             assert_eq!(refused.kind(), io::ErrorKind::InvalidInput, "{pid}");
         }
-        let _ = sleeper.kill();
+        terminate_pidfd(&fd).expect("SIGTERM is sent");
         let _ = sleeper.wait();
     }
 
@@ -1021,12 +1021,14 @@ mod tests {
             assert_eq!(refused.kind(), io::ErrorKind::InvalidInput);
             return;
         }
-        let status = Command::new(std::env::current_exe().expect("the test binary is known"))
+        let output = Command::new(std::env::current_exe().expect("the test binary is known"))
             .args(["--exact", "tests::terminate_refuses_this_process_without_a_signal"])
             .env(CHILD, "1")
-            .status()
+            .output()
             .expect("the child runs");
-        assert!(status.success(), "the child's own pid was refused: {status}");
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(output.status.success(), "the child's own pid was refused: {}", output.status);
+        assert!(stdout.contains("1 passed"), "the child ran no test, so the refusal is unproven: {stdout}");
     }
 
     /// A fresh scratch dir for `tag`, mode 0700, named for this process.
@@ -1079,6 +1081,8 @@ mod tests {
     }
 
     /// A process that has not exited: its stat reads, and it is not a zombie.
+    /// It does not compare starttime, so a pid another process has taken reads
+    /// as alive; these tests hold their processes for seconds.
     fn alive(pid: i32) -> bool {
         u32::try_from(pid).is_ok_and(|pid| stat_of(pid).is_ok_and(|s| s.state != 'Z'))
     }

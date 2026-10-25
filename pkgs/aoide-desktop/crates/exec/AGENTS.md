@@ -9,11 +9,15 @@ are in README.md.
   `disallowed_types`. Every other member takes the workspace table, which
   forbids the three, so this is the one crate where `unsafe`, a process start
   or a signal can appear.
-- Every file in this crate lies inside that boundary. The gate holds the crate
-  to one source file, `src/lib.rs`: cargo makes a target of any `.rs` file
-  under `src/bin`, `tests`, `examples` or `benches`, and this table allows the
-  three lints in each. A module in this crate changes the test
-  `the_exec_crate_has_one_source_file`, in the same commit.
+- Every file this crate compiles lies inside that boundary. The gate holds the
+  crate to one source file, `src/lib.rs`: cargo makes a target of any `.rs`
+  file under `src/bin`, `tests`, `examples` or `benches`, and this table allows
+  the three lints in each (`the_exec_crate_has_one_source_file`). A `#[path]`
+  module or an `include!` would compile another file under this table, so the
+  gate also reads the dep-info rustc writes for this crate and refuses any file
+  in it but `src/lib.rs`, the root's `clippy.toml` and the two manifests
+  (`the_exec_crate_compiles_only_its_lib_rs`). A second file in this crate
+  changes both tests, in the same commit.
 
 ## The API
 
@@ -89,8 +93,10 @@ are in README.md.
   exited, while a process it started still holds its output pipe, is refused at
   the same deadline, and no signal is sent to that process. That process keeps
   the call's two reader threads and their pipes until it exits; freeing them at
-  the deadline is not implemented. Nothing sends SIGKILL: `Child::kill` is a
-  clippy disallowed method, and the word is barred from every source.
+  the deadline is not implemented. Nothing sends SIGKILL. The word is barred
+  from every source; in door and shell `Child::kill` is a clippy disallowed
+  method, and this crate, whose table allows it, calls it nowhere, its tests
+  included.
 - `open_pidfd` opens a pidfd for a pid, and `terminate_pidfd` sends SIGTERM
   through one, and only SIGTERM. Both refuse pid 0, pid 1, any pid past
   `i32::MAX`, and this process's own pid. A pidfd names one process, so the

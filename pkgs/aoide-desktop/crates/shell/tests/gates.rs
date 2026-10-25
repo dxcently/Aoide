@@ -93,11 +93,17 @@ fn root() -> PathBuf {
 }
 
 /// Every file under `dir`, but not under the root's own `target` directory.
+/// Each entry's own file type decides what it is, so the walk follows no
+/// symbolic link: it refuses one by name, since a walk through a link could
+/// read outside the root.
 fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
     let target = root().join("target");
     for entry in fs::read_dir(dir).expect("the directory is read") {
-        let path = entry.expect("a directory entry").path();
-        if !path.is_dir() {
+        let entry = entry.expect("a directory entry");
+        let path = entry.path();
+        let kind = entry.file_type().expect("the entry's file type is read");
+        assert!(!kind.is_symlink(), "{} is a symbolic link, and a walk through one could read outside the root", path.display());
+        if !kind.is_dir() {
             out.push(path);
         } else if path != target {
             walk(&path, out);
@@ -176,6 +182,45 @@ fn the_exec_crate_has_one_source_file() {
     );
 }
 
+/// The files rustc read to build exec are its `src/lib.rs`, the root's
+/// `clippy.toml`, the root's `Cargo.toml` and exec's `Cargo.toml`: clippy's
+/// check builds list the last three. rustc lists every file it read in the
+/// dep-info file beside the test binary, one `file:` line each, with `\ ` for
+/// a space. A `#[path]` module or an `include!` in exec would compile another
+/// file under exec's table, and this test names it.
+#[test]
+fn the_exec_crate_compiles_only_its_lib_rs() {
+    let root = fs::canonicalize(root()).expect("the root is read");
+    let deps = std::env::current_exe().expect("the test binary is known");
+    let deps = deps.parent().expect("the test binary lies in a directory").to_path_buf();
+    let allowed: Vec<PathBuf> = ["crates/exec/src/lib.rs", "clippy.toml", "Cargo.toml", "crates/exec/Cargo.toml"]
+        .iter()
+        .map(|rel| fs::canonicalize(root.join(rel)).unwrap_or_else(|_| root.join(rel)))
+        .collect();
+    let mut found = 0;
+    for entry in fs::read_dir(&deps).expect("the deps directory is read") {
+        let dep_info = entry.expect("a directory entry").path();
+        let name = dep_info.file_name().and_then(|name| name.to_str()).unwrap_or_default();
+        if !(name.starts_with("aoide_desktop_exec-") && name.ends_with(".d")) {
+            continue;
+        }
+        found += 1;
+        let text = fs::read_to_string(&dep_info).expect("a dep-info file is read");
+        for line in text.lines().filter(|line| !line.starts_with('#')) {
+            let Some(read) = line.strip_suffix(':') else { continue };
+            let joined = root.join(read.replace("\\ ", " "));
+            let read = fs::canonicalize(&joined).unwrap_or(joined);
+            assert!(
+                allowed.contains(&read),
+                "{} lists {}, which rustc read to build exec and which is not one of its four allowed files",
+                dep_info.display(),
+                read.display()
+            );
+        }
+    }
+    assert!(found > 0, "no aoide_desktop_exec-*.d dep-info file lies in {}", deps.display());
+}
+
 #[test]
 fn only_the_roots_clippy_config_is_read() {
     let root = root();
@@ -192,8 +237,9 @@ fn only_the_roots_clippy_config_is_read() {
     }
 }
 
-/// No cargo config applies to the workspace: none in the root, or in any
-/// ancestor up to the git root, the first one with a `.git` entry.
+/// No cargo config applies to the workspace: none in the root, in any ancestor
+/// up to `/` (a git root does not stop the walk), or in `$CARGO_HOME` when
+/// that is set.
 #[test]
 fn no_cargo_config_applies_to_the_workspace() {
     let mut dir = fs::canonicalize(root()).expect("the root is read");
@@ -202,8 +248,14 @@ fn no_cargo_config_applies_to_the_workspace() {
             let path = dir.join(name);
             assert!(!path.exists(), "{} would configure the gate's build", path.display());
         }
-        if dir.join(".git").exists() || !dir.pop() {
+        if !dir.pop() {
             break;
+        }
+    }
+    if let Some(home) = std::env::var_os("CARGO_HOME") {
+        for name in ["config", "config.toml"] {
+            let path = Path::new(&home).join(name);
+            assert!(!path.exists(), "{} would configure every build", path.display());
         }
     }
 }
