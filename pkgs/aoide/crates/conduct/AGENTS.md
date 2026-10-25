@@ -319,7 +319,8 @@ in the message.
   human view of a queued entry (`pending list`'s line, the answers of `approve`
   and `deny`, and across the crate boundary the conductor's PENDING rows) spells
   each character `is_unsafe` names, and any whitespace but a plain space, as
-  an escape through `visible` (`graph/common.rs`): `\n`, `\x1b`, `\u{202e}`,
+  an escape through `visible` (`aoide_protocol::untrusted`, re-exported by
+  `graph/common.rs`): `\n`, `\x1b`, `\u{202e}`,
   a backslash doubled, and the combining marks and default-ignorable code
   points `visible` lists. A send's line is its whole escaped text, never
   clipped. A held launch's line is `visible_held`: every non-ASCII character is

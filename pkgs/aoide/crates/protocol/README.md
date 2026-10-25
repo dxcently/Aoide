@@ -56,7 +56,10 @@ other crate in this workspace sits above.
   separators, and the combining grapheme joiner and the Mongolian and Khmer
   fillers), `strip_unsafe`,
   `clip_flat` (whitespace flattened, clipped by characters with `…`), and
-  `clean_line` (the two at `LINE_MAX`, 200). Every door that prints a peer's
+  `clean_line` (the two at `LINE_MAX`, 200). `visible` and `visible_held` are
+  the approver's escape over the same table: every character `is_unsafe`
+  names is spelled as an escape, never stripped, and `visible_held` spells
+  every non-ASCII character too. Every door that prints a peer's
   bytes cleans them here: `aoide-client` the words of a far door's mail answer,
   `aoide-conduct`'s graph views (re-exported as `graph::clean_line`), and
   `aoide-server`'s A2A door.
