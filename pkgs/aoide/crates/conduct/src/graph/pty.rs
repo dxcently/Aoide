@@ -633,7 +633,7 @@ impl From<libc::winsize> for WinSize {
 /// itself (no `#!`, no ELF magic): `execvp` runs that through `/bin/sh`, so the
 /// spawn keeps the bare name for it.
 #[cfg(unix)]
-fn resolve_program(program: &str) -> Option<std::path::PathBuf> {
+pub(crate) fn resolve_program(program: &str) -> Option<std::path::PathBuf> {
     resolve_in(program, std::env::var_os("PATH").as_deref())
 }
 

@@ -1009,8 +1009,9 @@ blank one is refused too.
   runs `project remove <name> --host <host>` and requires exactly one host.
   Two sockets, one loop (`serve(listener, &'static Socket)`). A `Socket` names
   its core arms (`core`), its verb table and the audit log its drops land in.
-  `run_core` (called by aoided's run loop after its own locks and socket) seeds the
-  stage files and serves `CORE` on `aoide/shellbridge.sock`. `run_on(path, socket)`
+  `seed_core_stage` (called by aoided's run loop after its own locks, before the
+  watcher's baseline) seeds the stage files; `run_core` serves `CORE` on
+  `aoide/shellbridge.sock`. `run_on(path, socket)`
   serves a binary's own socket; `strillix shellbridge --run` passes its `SOCKET`
   (`core: false`), so no core arm runs in the desktop process. A line that
   no arm or table claims goes to `drop_unparsed(log, …)`, which audits it to that
@@ -1719,6 +1720,22 @@ sweep, then `drain_all`. The reaper pass, a hook death and `session end` each
 call `drop_ended_sessions` after their roster write returns, never under the
 roster lock. `mail_bridge` stays passthroughs only.
 
+- **Local jobs (`aoide job`)**: `graph/job.rs` implements `job add --name=<name>
+  --on=<calendar> [--cwd=<dir>] -- <argv0> [<arg>...]`, `job remove
+  --name=<name>`, `job list [--json]` and `job runs [--name=<name>] [--json]`,
+  registered by `commands/job.rs`. A job is two unit files,
+  `aoide-job-<name>.timer` and `.service`, under
+  `$XDG_CONFIG_HOME/systemd/user/` (`~/.config/systemd/user/` when unset), and
+  one record, `state/stage/jobs.json` (`CONTRACTS.md` §4 has its shape).
+  `jobs_path()` names the record for the server's stage roster. A run's output
+  lands in the user journal; `runs` reads each recorded job's own unit from
+  there, the workflow door's JSON line, and never writes. Each `systemctl`,
+  `journalctl` and `systemd-analyze` call answers within a 10 s bound, plus up
+  to 2 s while its pipes drain, through `shellbridge::run_bin_bounded`, and a
+  call that gives no answer is never read as a no. `add` and `remove` probe the
+  user manager before they take the stage lock; under the lock they run only the
+  unit-changing calls (`daemon-reload`, `enable --now` and `disable --now`).
+
 ## What it consumes
 
 `aoide-protocol`, `aoide-storage`, `aoide-upkeep` (`session hook`'s check-lane
@@ -1735,6 +1752,11 @@ daemon_dispatch`, P-D6; `mail_bridge`'s functions call
 — the ONE other edge
 this crate carries specifically so `aoide-server` never has to; see
 `client`'s own README for why that edge stays).
+
+The `job` seam resolves `systemctl`, `journalctl` and `systemd-analyze` on PATH
+with `pty.rs`'s `resolve_program` (never copied) and runs each through
+`shellbridge::run_bin_bounded` (`graph/job.rs`). They are the user manager's own
+tools, run as programs and never linked.
 
 ## How it composes
 

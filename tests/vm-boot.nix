@@ -346,11 +346,12 @@ pkgs.testers.runNixOSTest {
         )
 
     assert_service_ran_ok("aoided.service")
-    # run_loop spawns run_core: it seeds the stage files, then binds the socket.
+    # run_loop seeds the stage files, then spawns run_core, which binds the
+    # socket.
     machine.wait_until_succeeds(f"test -S {runtime_dir}/aoide/shellbridge.sock", timeout=60)
 
-    # Stage dir: aoided's core shellbridge seeds sessions.json/hooks.json here
-    # before it binds its socket; the graph commands below create what they need
+    # Stage dir: run_loop seeds sessions.json/hooks.json here, before run_core
+    # binds its socket; the graph commands below create what they need
     # under this path via
     # AOIDE_STAGE_DIR. Only conducting files (sessions.json, graph.json) are
     # ever touched under it — quickshell is disabled in this VM (see the

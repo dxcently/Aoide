@@ -159,6 +159,13 @@ a2a spawn probe needs `/bin/sh` + `printf`'s byte-exact output.
   `run_loop`, so the state lock resolves under the migrated root; moving the
   migration after the locks would mean splitting `run_loop`, and was not done.
   The open hole is named once, in `docs/architecture/AOIDED.md` "Socket".
+- **`daemon::run_loop` seeds the core's stage files before the watcher's
+  baseline.** It calls `aoide_conduct::shellbridge::seed_core_stage` after the
+  locks and before `HandEditWatcher::new`, so the seed is part of the baseline:
+  no `state` line and no `hand-edit` line. Moving the seed after the baseline
+  makes the first tick report it as a hand edit. The `started` feed line comes
+  after the accept thread, so a client that waits for it finds the baseline and
+  the listener up.
 - **`daemon::accept_loop` refuses a CROSS-uid connection before it ever
   reaches `handle_conn` (LANE IDENTITY P-ID3, G8).** `cross_uid_gate` is a
   pure decision fn (`Option<PeerCred>` in, `Option<String>` refusal reason
@@ -197,19 +204,42 @@ a2a spawn probe needs `/bin/sh` + `printf`'s byte-exact output.
   already fails closed to `pending` — not because this fix re-derives the
   real caller's identity, but because the daemon's own ancestry is
   architecturally incapable of impersonating one.
-- **`producers::HandEditWatcher` is ONE shared `Arc<Mutex<..>>` instance
-  (`daemon::SharedHandEditWatcher`), not tick-private (task #92).** A
-  dispatched session command writes stage files on `handle_conn`'s own
-  connection thread, never the tick thread, so `daemon::run_loop` hands the
-  SAME watcher instance to `accept_loop`/`handle_conn` it ticks itself;
-  `daemon::rebaseline_stage_roster` re-baselines the WHOLE roster after
-  every completed `dispatch` op, unconditionally — never a per-command "which
-  files did this write" table (the same drift trap the door-policy
-  invariant above already forbids). Don't reintroduce a tick-private
-  `HandEditWatcher::new(..)` inside `run_loop`'s loop body or inside
-  `accept_loop`/`handle_conn` — a second instance means two baselines that
-  can each independently go stale against the other's writes, reopening
-  task #92 by a different door.
+- **The `state` cue has one writer and one clock.** `HandEditWatcher` writes
+  every `state` line itself, through the `FeedWriter` it was built with.
+  Every observation (`sweep`, and each write through the seam) that moves a
+  file raises an immediate line when the file's window is closed. Coalescing
+  is per roster file: a move inside `STATE_WINDOW` sets the file's `owed`
+  flag, and the first observation after the window closes writes it. A hand
+  edit is owed in `Watched::owed_edit`: an observation sets it, and only
+  `sweep` releases it, so the tick is the clock for `hand-edit` lines. A path
+  outside the roster raises nothing. `serve_daemon` runs no tick, so an owed
+  hand edit waits for a sweep that never comes; it is test-only.
+- **The fold lands at the rename, under the lock.** `around_write` observes
+  the file, runs the rename, then folds the file's new stat with its state
+  cue, all under the watcher's one lock. A sweep takes that lock too, so no
+  sweep sees a write between its rename and its fold. Never call anything
+  that writes through storage while holding that lock: it is not re-entrant,
+  so such a write deadlocks. The feed's append is protocol's and writes
+  nothing through storage.
+
+  A change `aoided` did not make keeps its `hand-edit` line, and so does a
+  foreign write that one of `aoided`'s own writes then replaces. The watcher
+  sees a change as a move in a file's length or mtime, so it misses a write that
+  keeps both: a same-uid writer can set the mtime back. It sees only what
+  happens while it is registered. A write made while `aoided` is down, or at
+  start before the watcher registers, is part of its first baseline and raises
+  no line: the start-up migration, and the seed of an absent or corrupt
+  `sessions.json` or `hooks.json`, which keeps no copy of the file it replaces.
+  One race remains: a foreign write that lands between the watcher's check and
+  its fold, around the rename of `aoided`'s own write, is folded, with one
+  `state` line and no `hand-edit` line.
+- **`producers::HandEditWatcher` is one instance, built by
+  `HandEditWatcher::registered`.** `daemon::run_loop` builds it once, after the
+  seed, and holds its `Arc` for the loop; the registration lasts as long as
+  that `Arc`. A second registered watcher over the same roster reports every
+  foreign change twice, so production builds exactly one. A unit test that
+  drives the methods directly uses `HandEditWatcher::new`, which registers
+  nothing.
 - **`daemon::seal_keypair` mints exactly ONE keypair per process, in a
   `OnceLock`, and it must NEVER be written to disk (LANE IDENTITY P-ID1,
   OQ1-A).** This is the daemon's own in-memory seal-signing key, deliberately
@@ -1078,3 +1108,4 @@ a2a spawn probe needs `/bin/sh` + `printf`'s byte-exact output.
   wire shape changes (`ping`/`subscribe`/`dispatch`).
 - `pkgs/aoide/crates/AGENTS.md` for cross-crate invariants — not restated
   here.
+

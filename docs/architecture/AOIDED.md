@@ -101,8 +101,8 @@ pub struct Follower { /* moved verbatim from secrets::watch */ }
 ```
 
 `class` is the existing `EventClass` kebab vocabulary
-(`protocol/src/audit.rs:73` — `audit`/`gate`/`rice`/`content`/
-`notification`/`secret`); `kind` is producer-specific; `payload` is
+(`protocol/src/audit.rs`, `EventClass` — `audit`/`gate`/`content`/
+`notification`/`secret`/`state`); `kind` is producer-specific; `payload` is
 name-only data. `EventClass::Secret`'s no-`untrusted_data` ban and
 `Notification`'s data-never-code rule carry over verbatim: a forwarded
 title rides inside `payload` as an opaque string field, never anywhere a
@@ -165,20 +165,50 @@ lossless record reaches for the audit log, never this feed.
 
 A tick-driven stat sweep over the broker-owned file roster — the stage files
 (`state/stage/sessions.json`, `hooks.json`, `projects.json`, `graph.json`,
-`pending.json`, `notifications.json`; paths from `aoide_storage::stage`,
-`storage/src/stage.rs:17-29`). The daemon records `(mtime, len)` after each
-of its own writes; a tick that finds a file changed with no daemon write in
-between emits `{"class":"audit","kind":"hand-edit","payload":{"file":"sessions.json"}}`
-and re-baselines. Detection and narration only — the daemon never reverts a
-hand edit.
+`pending.json`, `notifications.json`, `jobs.json`; the first four paths from
+`aoide_storage::stage`, `storage/src/stage.rs:17-29`, the last three from
+`aoide-conduct`). A tick that finds a file whose `(mtime, len)` moved since the
+last observation emits
+`{"class":"audit","kind":"hand-edit","payload":{"file":"sessions.json"}}` and
+re-baselines, unless an aoided write folded the move first (below). Detection
+and narration only — the daemon never reverts a hand edit.
+
+aoided knows its own writes at the rename. `run_loop` registers the watcher with
+storage's write seam (`fs::watch_writes`) after the seed. Every atomic stage
+write this process makes after the watcher registers, on any thread or from any
+crate, runs its rename inside the watcher: the watcher observes the file, runs
+the rename, and folds the file's new state, all under one lock that a sweep also
+takes. So no sweep sees one of aoided's writes between its rename and its fold,
+and a dispatch needs no re-baseline after it writes. A dispatched command runs
+three steps on its connection thread: the dispatch, the seal of a fresh `session
+start`, and the reply.
+
+A change `aoided` did not make keeps its `hand-edit` line, and so does a foreign
+write that one of `aoided`'s own writes then replaces. The watcher sees a change
+as a move in a file's length or mtime, so it misses a write that keeps both: a
+same-uid writer can set the mtime back. It sees only what happens while it is
+registered. A write made while `aoided` is down, or at start before the watcher
+registers, is part of its first baseline and raises no line: the start-up
+migration, and the seed of an absent or corrupt `sessions.json` or `hooks.json`,
+which keeps no copy of the file it replaces. One race remains: a foreign write
+that lands between the watcher's check and its fold, around the rename of
+`aoided`'s own write, is folded, with one `state` line and no `hand-edit` line.
+
+Every change the watcher finds raises a `class:"state"` line for its file, and
+so does a write of aoided's own that moves the file's stat. Both are coalesced
+to one line per file per second (CONTRACTS.md's "The `state` cue on aoided's
+events feed"). The hand-edit line is unchanged; the state line sits beside it.
 
 ### The loop and the unit
 
 `aoide_server::daemon` grows `serve(config) -> io::Result<!>`-shaped
 `run_loop`: lock `state/` owner-only, refusing to start when it cannot;
-take both locks and bind the socket (next section); spawn the accept
-thread; then tick (~1s): poll the secrets Follower, run the hand-edit
-sweep, run the periodic jobs L4 adds. Thread model mirrors the secrets
+take both locks and bind the socket (next section); seed `sessions.json`
+and `hooks.json` when absent or corrupt; take the hand-edit watcher's
+baseline; spawn the accept thread; start the core shellbridge; append the
+`started` line to the events feed; then tick (~1s): poll the secrets
+Follower, run the hand-edit sweep, run the periodic jobs L4 adds. Thread
+model mirrors the secrets
 broker (`broker.rs:315`): thread-per-connection via fallible
 `thread::Builder::spawn` (drop one connection, never unwind the accept
 loop), 250ms backoff on accept error. The `aoided` binary
@@ -764,3 +794,4 @@ Exactly one:
   and the daemon trigger already covers the headless case correctly.
   Whoever flips the flag on a desktop host builds the
   graphical-session unit then, with this paragraph as the design.
+

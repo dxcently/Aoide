@@ -3028,6 +3028,70 @@ in the message.
   roster lock. The sweep reads the sessions its letters name BEFORE the roster;
   reversed, a live session's letter can look gone. A roster that cannot be read
   skips the session pass; it is never taken as empty.
+- **Aoide writes only the unit pair it names and the record.** `add` refuses
+  a unit slot that is taken, a link included (`slot_taken`), and a unit
+  directory that is a link or a file (`prepare_unit_dir`), so nothing is
+  written through either. `remove` deletes only a unit that still hashes to
+  the record (`unit_state`). It refuses, deleting nothing, when a unit was
+  edited or is a link, and it skips a unit that is already gone. Two windows
+  stay open to a same-uid writer. `add` checks each slot, then renames its units
+  into place: a file that appears in a slot after the check is replaced, and a
+  link there is written through, since storage's `atomic_write` follows one link
+  at its target. `remove` runs a bounded
+  `disable --now` between its hash check and its delete, so a unit swapped into
+  that gap is deleted, and `remove` still reports it removed. Pinned by
+  `a_symlinked_or_foreign_unit_in_the_way_is_refused_and_never_written_through`,
+  `a_job_whose_units_are_both_gone_is_removed_and_its_name_can_be_added_again`
+  and
+  `a_symlinked_unit_counts_as_changed_and_remove_refuses_it_and_deletes_nothing`
+- **The record holds job names only, each once.** Every read of the record goes
+  through `load_jobs`, which refuses a record holding a name that is not a job
+  name, or one name twice; a named `runs` reads no record and checks `--name`
+  with `valid_name` instead. Pinned by
+  `a_record_holding_a_name_that_is_not_a_job_name_refuses_each_verb`,
+  `a_record_that_names_one_job_twice_refuses_each_verb` and
+  `a_record_holding_a_bad_name_refuses_add_before_any_write`.
+- **A unit's text comes from `unit_texts` alone, one `quote_word` per argv
+  word.** `WorkingDirectory=` is unquoted with its `%` doubled, and it appears
+  only with `--cwd`. `ExecStart=` doubles `$` as well as `%`. `Environment=`
+  takes no variable expansion (systemd.exec(5)), so it doubles `%` and not `$`.
+  Pinned by `unit_texts_quote_each_word_the_systemd_way` and
+  `a_job_without_a_cwd_has_no_working_directory_line`.
+- **The four verbs open to the `Cli` and `Daemon` doors only.** `add` and
+  `remove` also refuse a door that cannot approve. Every verb refuses before
+  its first write when the host is not Linux or `systemctl --user show` fails.
+  `add` and `remove` make that probe before they take the stage lock, and each
+  tool call is bounded by `JOB_TOOL_WAIT` (10 s, plus up to 2 s while its pipes
+  drain; a child in uninterruptible sleep is never reaped, and its call waits
+  with it). A call that gives no answer is never read as a no. Pinned by
+  `the_job_verbs_open_to_the_cli_and_daemon_doors_only`,
+  `a_host_that_is_not_linux_refuses_every_verb_and_writes_nothing`,
+  `a_failing_user_manager_probe_refuses_add_with_zero_files` and
+  `a_probe_that_never_exits_refuses_add_in_bound_and_leaves_the_lock_free`.
+- **A journal line is data, and a job's rows come from its own unit.** `runs`
+  asks the journal once per recorded job, in name order, until a call gives no
+  answer; each call is for that job's own unit (`_SYSTEMD_USER_UNIT=`), so no
+  job's window holds another's rows. It keeps a line only when its `MESSAGE` is
+  one JSON object with a known status, and its own `_SYSTEMD_USER_UNIT` names
+  the job: a `UNIT` or `USER_UNIT` field a client sets names no job. Without a
+  name, a call that exits non-zero lists only its own job under `unread`, and
+  the first call that gives no answer also ends the reads, so a silent journal
+  costs one bound whatever the job count: each later job is `unread` as not
+  asked. When no call answers, the verb refuses with the first failure; a named
+  run refuses on any failure. Its strings reach `--json` as JSON strings, and
+  the human rows pass through `visible`. Pinned by
+  `runs_reads_each_job_on_its_own_and_orders_rows_oldest_first`,
+  `runs_lists_a_job_whose_journal_call_exits_non_zero_under_unread`,
+  `runs_makes_one_silent_call_and_refuses_as_failed_when_nothing_answers`,
+  `runs_ends_its_reads_at_the_first_silent_call_and_lists_the_rest_as_not_asked`,
+  `runs_refuses_as_failed_when_every_recorded_job_exits_non_zero`,
+  `runs_with_no_recorded_job_makes_no_journal_call`,
+  `runs_turns_a_journal_fixture_into_rows_and_shows_their_text_visibly` and
+  `a_run_row_needs_its_own_unit_so_a_client_set_unit_field_gives_none`.
+- **No test reaches the real user manager, journal or unit directory.** The
+  shimmed tests point `XDG_CONFIG_HOME` at their own root and put the
+  `systemctl`, `journalctl` and `systemd-analyze` shims first on `PATH`,
+  under the crate's env lock.
 
 ## Extension points
 
@@ -3067,12 +3131,20 @@ in the message.
   primitive (`aoide_protocol::pick::choose_many`) in this crate.
 - **A new hook event or harness profile** extends `aoide_protocol::agents`,
   not this crate — the harness-profile table lives one layer down.
+- **A new `job` verb** is a `fn(inv, host: Host)` beside the others in
+  `graph/job.rs`, reached through a `pub fn job_*(inv)` that passes `HOST`.
+  The `Host` argument is what lets a test run it as `Host::Other`. Its probe
+  runs before its first write. Its `cmd!` goes in `commands/job.rs` and is
+  wired into `cli`'s `commands::all()`, as any `commands/` entry is.
 
 ## Docs update required in the same commit
 
 - This `README.md` when a public module, seam, or charter-smudge reasoning
   changes.
 - `CONTRACTS.md` when a graph/session wire shape changes.
+- `graph/job.rs` changes to a unit text, the `jobs.json` shape or a verb's
+  output: `CONTRACTS.md`'s `state/stage/jobs.json` section, and the local-jobs
+  seam bullet in this crate's `README.md`.
 - `pkgs/aoide/crates/AGENTS.md` for cross-crate invariants — not restated
   here.
 - `doorbell.rs` changes update `docs/architecture/MAIL.md`'s "Delivery and

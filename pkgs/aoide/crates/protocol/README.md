@@ -83,7 +83,10 @@ other crate in this workspace sits above.
   value); `append_audit` structurally forbids `untrusted_data` on that one
   class, stripping it (with an `eprintln!`, never a panic — an audit call must
   never take its caller down) rather than trusting every call site to never set
-  it. `append_audit` escapes every string field first (DEL, C1, `Cf` and the
+  it. `EventClass::State` is the stage-file state cue `aoide-server`'s watcher
+  writes: name-only, `kind` `changed`, `payload.files` the changed file's base
+  name. It is a cue to re-read, never a record of an operation.
+  `append_audit` escapes every string field first (DEL, C1, `Cf` and the
   invisible set become `\u{hex}` text, and a literal backslash followed by `\`,
   `u` or a spelled character is doubled: `untrusted::escape_for_log`, once per
   value), then clamps the escaped `AuditRecord.message` to 512 bytes on a UTF-8

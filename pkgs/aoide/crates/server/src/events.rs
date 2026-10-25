@@ -238,6 +238,37 @@ mod tests {
     }
 
     #[test]
+    fn poll_once_with_the_state_class_prints_only_the_state_lines() {
+        let path = short_tmp("poll-state").with_extension("jsonl");
+        empty_feed(&path);
+        let mut only_state = Follower::open_at_end(&path).unwrap();
+        let mut state_and_secret = Follower::open_at_end(&path).unwrap();
+        let feed = FeedWriter::new(path.clone(), 1024 * 1024, 0o600);
+
+        feed.append(&serde_json::json!({"class": "state", "kind": "changed", "source": "aoided", "payload": {"files": ["sessions.json"]}}));
+        feed.append(&serde_json::json!({"class": "audit", "kind": "hand-edit", "source": "aoided", "payload": {"file": "sessions.json"}}));
+        feed.append(&serde_json::json!({"class": "secret", "kind": "released", "source": "secrets-mirror", "payload": {}}));
+
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        let mut got = Vec::new();
+        while got.is_empty() {
+            got = poll_once(&mut only_state, &["state".to_string()], true).unwrap();
+            assert!(std::time::Instant::now() < deadline, "poll_once never saw the state line in time");
+            if got.is_empty() {
+                std::thread::sleep(Duration::from_millis(10));
+            }
+        }
+        assert_eq!(got.len(), 1, "--class state prints the state lines and no others: {got:?}");
+        assert!(got[0].contains("\"class\":\"state\""), "{got:?}");
+
+        // The lines were all appended before this poll, so one poll reads them all.
+        let both = poll_once(&mut state_and_secret, &["state".to_string(), "secret".to_string()], true).unwrap();
+        assert_eq!(both.len(), 2, "--class state,secret passes exactly the two named classes: {both:?}");
+
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
     fn poll_once_on_a_missing_file_errors_rather_than_panicking() {
         let path = short_tmp("poll-missing").with_extension("jsonl");
         std::fs::write(&path, b"x").unwrap();

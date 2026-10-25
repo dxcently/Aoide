@@ -852,9 +852,10 @@ count.
   backends" section for the full flow; `events tail`, appended newest, P-D3
   (`docs/architecture/AOIDED.md`) — a foreground, line-mode follow of
   `aoided`'s own events feed (the secrets-feed mirror's name-only lines,
-  the #69 hand-edit watcher, and any future tick producer), `--class`
-  filtering to matching event classes (comma-separated), blocking until
-  Ctrl-C; CLI-only, the same door-policy shape `secrets watch` already holds
+  the #69 hand-edit watcher and its `state` cues, and any future tick
+  producer), `--class` filtering to matching event classes (comma-
+  separated), blocking until Ctrl-C; CLI-only, the same door-policy shape
+  `secrets watch` already holds
   for a foreground/blocking command — see `crates/server/README.md`'s
   "Named seams" section for the producer/tail mechanism; `node hub`,
   appended newest, P-D5 (`docs/architecture/AOIDED.md`'s "The hub option")
@@ -1259,6 +1260,49 @@ other argv, and so is any argv the walk does not recognise. Held entries launch
 only through `pending approve` on a human door. Nothing is refused outright. A launched harness is an agent with its
 own shell, so it can steer its own child; that residual is accepted.
 
+### The `state` cue on aoided's events feed
+
+Every stage file `aoided` watches (the seven in `daemon::stage_roster`) raises
+a `class:"state"` line when its `(mtime, len)` moves, whoever moved it: a hand
+edit (which also raises its `hand-edit` audit line), a dispatched write, or the
+tick's own reconcile, seal and reap writes. The line keeps the feed's usual
+envelope:
+
+```json
+{"v":0,"ts":1756100000,"class":"state","kind":"changed","source":"aoided","payload":{"files":["sessions.json"]}}
+```
+
+`payload.files` names the file by base name, as a `hand-edit` line's
+`payload.file` does. The line is a cue to re-read and is name-only: it says
+that the file changed, never what changed. A subscriber receives it through
+`subscribe` with `"classes":["state"]`, and `aoide events tail --class state
+--json` prints it verbatim.
+
+Coalescing is per file: at most one `state` line per file per second. A change
+that lands inside that second writes nothing at once. The first observation
+after the second closes writes one line for the file: a sweep (the tick's), or
+the next atomic write of that file through aoided's write seam, so a burst
+cannot flood the feed. A write that changes two files raises one line for each,
+so one `session start`, which writes `sessions.json` and `graph.json`, raises
+two.
+
+A change `aoided` did not make keeps its `hand-edit` line, and so does a foreign
+write that one of `aoided`'s own writes then replaces. The watcher sees a change
+as a move in a file's length or mtime, so it misses a write that keeps both: a
+same-uid writer can set the mtime back. It sees only what happens while it is
+registered. A write made while `aoided` is down, or at start before the watcher
+registers, is part of its first baseline and raises no line: the start-up
+migration, and the seed of an absent or corrupt `sessions.json` or `hooks.json`,
+which keeps no copy of the file it replaces. One race remains: a foreign write
+that lands between the watcher's check and its fold, around the rename of
+`aoided`'s own write, is folded, with one `state` line and no `hand-edit` line.
+
+While `aoided` runs, no change the watcher sees is lost to the state cue: each
+change is written as a line or owed to one. Its watcher starts from what is on
+disk, so a consumer re-reads every file when it attaches.
+An unfiltered `aoide events tail` prints every class, `state` included; the
+`state` cue is what `--class state` prints.
+
 ---
 
 ## 4. Stage file formats — **v0**
@@ -1275,12 +1319,12 @@ applied to the stage tree itself):
   (`apps.json`; the `aoide-apps` user unit that keeps it current is planned) and QML itself
   (`grimoire.json`); read by Quickshell. This is strillix's tree.
 - **`state/stage/`** — CONDUCTING state: `sessions.json`, `hooks.json`,
-  `projects.json`, `graph.json`, `pending.json`, `notifications.json`. Written by
-  shellbridge and the `aoide`/`aoided` binaries (`aoide graph`, `aoide
-  notifications`); read by the conductor TUI and by Quickshell. This is core's
-  tree — the `aoide`/`aoided` binaries alone read and write it, never
-  `strillix`, and QML READS it (display only, CONTRACTS.md §0's corollary) but
-  never writes it.
+  `projects.json`, `graph.json`, `pending.json`, `notifications.json`,
+  `jobs.json`. Written by shellbridge and the `aoide`/`aoided` binaries
+  (`aoide graph`, `aoide notifications`, `aoide job`); read by the conductor TUI
+  and by Quickshell. This is core's tree — the `aoide`/`aoided` binaries alone
+  read and write it, never `strillix`, and QML READS it (display only,
+  CONTRACTS.md §0's corollary) but never writes it.
 
 `state/` is owner-only and is the privacy boundary for everything under it;
 file and subdirectory modes inside it are not relied on. Every storage write
@@ -4593,6 +4637,106 @@ answer like a permission-verdict digit never does), the payload is prefixed
 sent it — attribution, not authentication; both `--from` and
 `AOIDE_SESSION_ID` are ordinary same-user process state, spoofable by
 anyone who can already write to the target's control socket.
+
+### `state/stage/jobs.json` — **v0**
+
+The record of the local jobs `aoide job add` writes and `aoide job remove`
+drops. It is `{ "jobs": [ … ] }`, and each job is one object:
+
+- `name` — `[a-z0-9-]{1,48}`, unique. It names the unit files. A record that
+  holds any other name, or one name twice, is unreadable: `add`, `remove`,
+  `list` and an unnamed `runs` refuse it with `the job record cannot be read`,
+  and write nothing.
+- `calendar` — the `OnCalendar=` text that `systemd-analyze calendar` accepted.
+- `argv` — the absolute program path, then its arguments, verbatim.
+- `cwd` — an absolute directory, or `null` when no `--cwd` was given.
+- `timerSha256`, `serviceSha256` — the hex digest of each unit file as written.
+- `addedAt` — ISO-8601 UTC. `addedBy` — the door the add came through (`cli`
+  or `daemon`).
+
+The unit files live in `$XDG_CONFIG_HOME/systemd/user/` (default
+`~/.config/systemd/user/`), as `aoide-job-<name>.timer` and
+`aoide-job-<name>.service`. The timer's `Unit=` names the service, and there is
+no `Persistent=`. The service is `Type=oneshot`, with `WorkingDirectory=` only
+when a `cwd` was given, `Environment="AOIDE_ROOT=<root>"`, and `ExecStart=`
+running the recorded argv. Each word is double-quoted and escaped the way the
+unit format reads it; the golden test in `graph/job.rs` pins the exact bytes.
+Nothing is looked up on PATH except `systemctl`, `journalctl` and
+`systemd-analyze`.
+
+`add` runs the probe (`systemctl --user show --property=Version`) and checks the
+calendar before it takes the stage lock. An `--on` that starts with `-`, or
+holds `%` or `\`, is a usage error, refused before the probe. If
+`systemd-analyze` gives no answer, `add` refuses as failed, not as a usage
+error, and writes nothing. Under the lock, `add` writes both units atomically,
+records their digests, runs `daemon-reload`, and runs `enable --now` on the
+timer. If systemd refuses after the record is written, the job stays recorded,
+and `remove` clears it. `remove` runs the same probe before the lock. Under the
+lock it deletes each unit that still hashes to the record: it runs `disable
+--now` on the timer first, when that file is aoide's, deletes the units, runs
+`daemon-reload`, and drops the record. A unit already gone is skipped and named
+in the outcome. When the timer is gone, the outcome also prints `systemctl
+--user stop aoide-job-<name>.timer`, which aoide never runs itself. A unit that
+was edited, or is a link, makes `remove` refuse and delete nothing; the outcome
+then prints the lines that remove them by hand.
+
+Every `systemctl`, `journalctl` and `systemd-analyze` call answers within 10 s,
+plus up to 2 s while its pipes drain. A call that outlives its 10 s is killed
+and reaped. For a child that can be killed, a wedged user manager stalls a stage
+writer for about 24 s at most, since `add` and `remove` each make at most two
+calls under the lock. A child the kernel holds in uninterruptible sleep is never
+reaped, and its call waits with it; under the lock, the stage lock stays held
+until the child leaves that state. A call that gives no answer is never read as
+a no: `add` and `remove` refuse, `list` reads `unknown` and ends the asking, and
+`runs` lists the job under `unread` and ends its reads, or refuses when a name
+was asked for or no call answered. Only a call that gives no answer ends `runs`'
+reads or `list`'s asking. A tool that answers or fails slowly on every call
+costs each call its own bound, with no total budget.
+
+`list` gives each job one status. The first of `missing` (a unit is gone),
+`changed` (a unit's bytes differ from the record) and `stale` (argv0 is gone or
+not executable) that holds decides it. Otherwise the timer's state is read with
+`systemctl --user show --property=ActiveState --value <timer>`: `ok` when it
+answers `active`, `inactive` when it answers `inactive` or `failed`, and
+`unknown` for any other answer or a non-zero exit. A read that gives no answer
+is `unknown` and ends the asking: `list` makes no further state read, and each
+later job that reaches that step is `unknown`. It adds `foreign` for each
+`aoide-job-*` unit that no record names. Jobs fire only while the user manager
+runs, and aoide never enables linger.
+
+`runs` reads the user journal one job at a time. With a name it makes one call:
+`journalctl --user _SYSTEMD_USER_UNIT=aoide-job-<name>.service -o json
+--output-fields=MESSAGE,_SYSTEMD_USER_UNIT --all --no-pager -n 200`. Without a
+name it makes that same call for each recorded job, in name order, until a call
+gives no answer. When no job is recorded it makes none, and answers
+`no local jobs`. Each call's window is that one job's own unit, its newest 200
+entries, so no other job's rows can use it up. `--all` keeps a field over 4096
+bytes whole, since journalctl otherwise prints it as null. An answer past the 4
+MiB read ceiling is discarded, so its call gives no answer. An entry is a row
+when its MESSAGE is one JSON object with a known `status` (`completed`,
+`parked`, `failed` or `refused`) and its own `_SYSTEMD_USER_UNIT` is
+`aoide-job-<job>.service`. A `UNIT` or `USER_UNIT` field that a client sets
+names no job. A status line that journald split (longer than its `LineMax`, 48
+KiB by default) gives no row. Rows are sorted oldest first by the entry's
+`__REALTIME_TIMESTAMP`, and a tie keeps name order. A row carries its job, the
+entry's time, and any of `session`, `run`, `report`, `question`, `reason` and
+`error` that the object sets. A row is the job's own claim: it is read through
+the `journalctl` on PATH, and aoide attests neither that tool nor the claim. A
+job's own output shares its unit's 200-entry window, so a run that logs more
+than 200 lines after its status line pushes that row out of `runs`. A same-uid
+process can start a unit named `aoide-job-<name>.service` and write rows under
+that job's name.
+
+Without a name, a call that exits non-zero lists its own job under `unread` as
+`{"name": ..., "why": ...}`, and the reads go on. The first call that gives no
+answer lists its job under `unread` the same way, and it ends the reads: each
+later job is listed under `unread` as `not asked: journalctl did not answer for
+<silent job>`, and no further call is made. When no call answered, the verb
+refuses with the first failure, as the named form does; a read with some answers
+stays ok, with its `unread` rows. With a name, any failure refuses the verb. A
+`journalctl` that is not on PATH refuses the verb whenever a call is made. Those
+texts are untrusted: `--json` carries them as strings, and the text render shows
+them visibly.
 
 ### `state/stage/pingback.json` — **v0**
 
@@ -11079,3 +11223,4 @@ bump either — they move independently.
   `env!("CARGO_PKG_VERSION")` off the workspace version above) — the doc
   example a few sections up in this file tracks it and must be bumped in
   the same commit as any release bump.
+
