@@ -25,6 +25,7 @@ pub fn register(r: &mut Registry) {
             "job add --name=nightly --on=daily -- /usr/bin/true",
         ],
         brief: "Add a local job on a systemd user timer.",
+        approves: true, launches: true,
     ));
     r.insert(cmd!(
         path: ["job", "remove"],
@@ -40,6 +41,7 @@ pub fn register(r: &mut Registry) {
             "job remove --name=nightly",
         ],
         brief: "Remove a local job and its units.",
+        approves: true, launches: true,
     ));
     r.insert(cmd!(
         path: ["job", "list"],

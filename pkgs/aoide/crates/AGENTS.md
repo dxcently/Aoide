@@ -35,6 +35,16 @@ The MCP-open set has a second golden per app crate,
 command to MCP updates that list in the same commit; a command is closed to
 MCP until its own `doors` says otherwise.
 
+The approve and launch marks have two more goldens in the core binary,
+`approves_paths_match_the_golden_snapshot` and
+`launches_paths_match_the_golden_snapshot`, beside the MCP-open one. Each lists
+exactly the entries that carry its mark. `protocol/tests/approve_checks.rs`
+lists every production file holding a `can_approve()` or
+`refuse_unapproving_door(` call, with its count. That list is exact, not a
+ratchet: a new approve check fails it until the list and the marker move
+together, so the call's command gets `approves` and its path joins the approves
+golden in the same commit.
+
 ## No cross-crate copying
 
 Every crate born from the Phase 2–9 restructure carries a shim-discipline

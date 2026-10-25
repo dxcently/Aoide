@@ -158,6 +158,20 @@ pub struct Command {
     /// person, not capability from a consumer.
     #[serde(skip_serializing_if = "is_false")]
     pub internal: bool,
+    /// The verb approves or denies a hold, re-parents, answers for a person,
+    /// or types into a session; or it launches and checks its own door
+    /// (`resurrect`, `job add`, `job remove`). Additive (CONTRACTS.md §3):
+    /// skipped when `false`. The desktop app's floor reads it from
+    /// `schema --json` and refuses a grant that names the verb.
+    /// `Command::check` does not read it.
+    #[serde(skip_serializing_if = "is_false")]
+    pub approves: bool,
+    /// The verb starts an agent (`spawn`, `project add`, `node spawn`).
+    /// Additive (CONTRACTS.md §3): skipped when `false`. The desktop app's
+    /// floor reads it from `schema --json` and refuses a grant that names the
+    /// verb; `Command::check` does not read it.
+    #[serde(skip_serializing_if = "is_false")]
+    pub launches: bool,
     #[serde(rename = "exitCodes", serialize_with = "exit_codes")]
     pub exit_codes: (),
     /// Invocation examples shown by `<cmd> --help` (the human door only —
@@ -209,6 +223,8 @@ impl Command {
         gated: false,
         implemented: true,
         internal: false,
+        approves: false,
+        launches: false,
         exit_codes: (),
         examples: &[],
         one_of: &[],
@@ -536,9 +552,9 @@ pub struct ExternalCommand {
     pub path: String,
 }
 
-/// `serde(skip_serializing_if)` predicate for `internal` — skip the key
-/// entirely when false, so a non-internal command's schema is byte-identical
-/// to before the field existed.
+/// `serde(skip_serializing_if)` predicate for `internal`, `approves` and
+/// `launches` — skip the key entirely when false, so an unmarked command's
+/// schema is byte-identical to before the field existed.
 fn is_false(b: &bool) -> bool {
     !*b
 }

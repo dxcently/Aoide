@@ -69,6 +69,7 @@ pub fn register(r: &mut Registry) {
             "project add aoide ~/Aoide ~/Aoide-docs",
             "project add aoide ~/Aoide --new",
         ],
+        launches: true,
     ));
     r.insert(cmd!(
         path: ["project", "remove"],
@@ -104,6 +105,7 @@ pub fn register(r: &mut Registry) {
         gated: false,
         implemented: true,
         handler: crate::graph::link,
+        approves: true,
     ));
     r.insert({
         let mut c = cmd!(
@@ -120,6 +122,7 @@ pub fn register(r: &mut Registry) {
             gated: false,
             implemented: true,
             handler: crate::graph::session_start,
+            approves: true,
         );
         // Hook-plumbing, not an operator command — a harness's own lifecycle
         // drives it, never a human typing it directly (task #101 R1). Hidden
@@ -167,6 +170,7 @@ pub fn register(r: &mut Registry) {
             gated: false,
             implemented: true,
             handler: crate::graph::session_hook,
+            approves: true,
         );
         c.internal = true;
         c
@@ -197,6 +201,7 @@ pub fn register(r: &mut Registry) {
         ],
         brief: "Spawn an agent command as a detached, conducted session.",
         doors: &[Door::Cli, Door::Daemon, Door::Mcp],
+        launches: true,
     ));
     r.insert(cmd!(
         path: ["resurrect"],
@@ -217,6 +222,7 @@ pub fn register(r: &mut Registry) {
             "resurrect --project aoide --all",
         ],
         brief: "Revive sessions from the project's record.",
+        approves: true, launches: true,
     ));
     r.insert(cmd!(
         path: ["send"],
@@ -242,6 +248,7 @@ pub fn register(r: &mut Registry) {
         one_of: &[&["id", "to"]],
         brief: "Inject text into a conducted session (held for approval unless --yes).",
         doors: &[Door::Cli, Door::Daemon, Door::Mcp],
+        approves: true,
     ));
     r.insert(cmd!(
         path: ["session", "pending", "list"],
@@ -301,6 +308,7 @@ pub fn register(r: &mut Registry) {
         implemented: true,
         handler: crate::graph::pending_approve,
         examples: ["session pending approve 0 --expect <fingerprint>"],
+        approves: true,
     ));
     r.insert(cmd!(
         path: ["session", "pending", "deny"],
@@ -311,6 +319,7 @@ pub fn register(r: &mut Registry) {
         implemented: true,
         handler: crate::graph::pending_deny,
         examples: ["session pending deny 0 --expect <fingerprint>"],
+        approves: true,
     ));
     r.insert(cmd!(
         path: ["session", "permit"],
@@ -324,6 +333,7 @@ pub fn register(r: &mut Registry) {
         gated: false,
         implemented: true,
         handler: crate::graph::session_permit,
+        approves: true,
     ));
     r.insert(cmd!(
         path: ["session", "prune"],
@@ -371,6 +381,7 @@ pub fn register(r: &mut Registry) {
         implemented: true,
         handler: crate::graph::session_conduct,
         brief: "Run an agent command on its own PTY as a conductable session.",
+        approves: true,
     ));
     // ── bare `session`: the ROSTER (session-surface redesign, command-defrag
     // lane X, 2026-08-28 — supersedes both the U3 undying picker that used
@@ -577,6 +588,7 @@ pub fn register_mail_ring(r: &mut Registry) {
         implemented: true,
         handler: crate::graph::mail_ring,
         examples: ["mail ring --for claude-mail"],
+        approves: true,
     ));
     r.insert(cmd!(
         path: ["session", "project"],

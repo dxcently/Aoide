@@ -26,6 +26,9 @@ other crate in this workspace sits above.
   `Command` declares `one_of` and `brief`, and `doors` (which doors may call
   it; `CLI_DOORS` = `[cli, daemon]` when absent). `Flag` declares `doors` too
   (empty = the command's doors). `Command::opens(door)` is the predicate.
+  `Command` also carries the marks `approves` and `launches`, which the
+  desktop app's floor reads through `schema --json`; `Command::check` never
+  reads them.
   `Command::check` enforces the declarations (the door gate first, then the
   argument rules with defaults applied) and `Command::invoke` is
   check-then-handler, the entry every `dispatch()` uses. A door the command

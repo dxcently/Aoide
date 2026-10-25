@@ -101,6 +101,36 @@ mod tests {
         );
     }
 
+    /// `approves` and `launches` are additive (CONTRACTS.md §3), the same
+    /// discipline `internal` carries above: `schema --json` shows each key on
+    /// the entries that set it, as `true`, and on no other entry.
+    #[test]
+    fn approves_and_launches_keys_are_on_the_marked_entries_only() {
+        let r = crate::commands::all();
+        let find = |p: &str| serde_json::to_value(r.commands().find(|c| c.dotted() == p).unwrap()).unwrap();
+        assert_eq!(find("session.start")["approves"], true);
+        assert!(find("session.start").get("launches").is_none());
+        assert_eq!(find("project.add")["launches"], true);
+        assert!(find("project.add").get("approves").is_none());
+        assert_eq!(find("resurrect")["approves"], true);
+        assert_eq!(find("resurrect")["launches"], true);
+        for plain in ["graph", "session.prune"] {
+            let v = find(plain);
+            assert!(v.get("approves").is_none() && v.get("launches").is_none(), "{plain} carries neither key: {v}");
+        }
+        let doc = serde_json::to_value(r.schema("aoide")).unwrap();
+        let entries = doc["commands"].as_array().unwrap();
+        let marks = [
+            ("approves", r.commands().filter(|c| c.approves).count()),
+            ("launches", r.commands().filter(|c| c.launches).count()),
+        ];
+        for (key, marked) in marks {
+            let shown: Vec<&serde_json::Value> = entries.iter().filter_map(|v| v.get(key)).collect();
+            assert!(shown.iter().all(|v| **v == serde_json::json!(true)), "`{key}` is only ever true: {shown:?}");
+            assert_eq!(shown.len(), marked, "`{key}` shows on exactly the marked entries");
+        }
+    }
+
     /// `external` is additive too (task #138, CONTRACTS.md §3), same
     /// discipline `examples`/`internal` carry above, but at the SCHEMA level
     /// rather than per-command: a host with zero `aoide-*` plugins on `PATH`
@@ -677,6 +707,46 @@ mod tests {
         let mut expected = vec!["graph", "guide", "mail", "mail.mark", "mail.read", "mail.show", "schema", "send", "session", "session.find", "session.watch", "soundcheck", "spawn"];
         expected.sort();
         assert_eq!(got, expected, "MCP-open set drifted from the golden snapshot");
+    }
+
+    /// Golden snapshot: the commands that approve or deny a hold, re-parent,
+    /// answer for a person or type into a session, and the launch verbs that
+    /// check their own door. The desktop app's floor refuses a grant that
+    /// names one of them.
+    #[test]
+    fn approves_paths_match_the_golden_snapshot() {
+        let r = crate::commands::all();
+        let mut got: Vec<String> = r.commands().filter(|c| c.approves).map(|c| c.dotted()).collect();
+        got.sort();
+        let mut expected = vec![
+            "conduct",
+            "graph.link",
+            "job.add",
+            "job.remove",
+            "mail.ring",
+            "mail.send",
+            "resurrect",
+            "send",
+            "session.hook",
+            "session.pending.approve",
+            "session.pending.deny",
+            "session.permit",
+            "session.start",
+        ];
+        expected.sort();
+        assert_eq!(got, expected, "approves set drifted from the golden snapshot");
+    }
+
+    /// Golden snapshot: the commands that start an agent (`launches`). The
+    /// desktop app's floor refuses a grant that names one of them.
+    #[test]
+    fn launches_paths_match_the_golden_snapshot() {
+        let r = crate::commands::all();
+        let mut got: Vec<String> = r.commands().filter(|c| c.launches).map(|c| c.dotted()).collect();
+        got.sort();
+        let mut expected = vec!["job.add", "job.remove", "node.spawn", "project.add", "resurrect", "spawn"];
+        expected.sort();
+        assert_eq!(got, expected, "launches set drifted from the golden snapshot");
     }
 
     /// Findings 2 and 10: A2A opens no registry command, because its card
