@@ -53,21 +53,29 @@ pub fn is_unsafe(c: char) -> bool {
     c.is_control() || is_format(c) || is_invisible(c) || matches!(c, '\u{2028}' | '\u{2029}')
 }
 
+/// The one predicate for "[`visible`] spells this character": a backslash, every
+/// [`is_unsafe`] character, every whitespace but a plain space, and the marks and
+/// ignorables. `visible_char` and the JSON writers below all read it, so the
+/// table is never copied.
+fn would_spell(c: char) -> bool {
+    c == '\\' || is_unsafe(c) || (c.is_whitespace() && c != ' ') || is_mark_or_ignorable(c)
+}
+
 /// One character as a human reads it: itself when it is safe to print, else a
 /// visible escape. A backslash is doubled, so an escape in the output is never
 /// mistaken for text that spelled one (`printf '\x1b'` and a real ESC read
 /// differently).
 fn visible_char(c: char) -> String {
+    if !would_spell(c) {
+        return c.to_string();
+    }
     match c {
         '\\' => "\\\\".to_string(),
         '\n' => "\\n".to_string(),
         '\r' => "\\r".to_string(),
         '\t' => "\\t".to_string(),
         c if c.is_ascii() && c.is_control() => format!("\\x{:02x}", c as u32),
-        c if is_unsafe(c) || (c.is_whitespace() && c != ' ') || is_mark_or_ignorable(c) => {
-            format!("\\u{{{:x}}}", c as u32)
-        }
-        c => c.to_string(),
+        c => format!("\\u{{{:x}}}", c as u32),
     }
 }
 
@@ -90,6 +98,68 @@ pub fn visible_held(s: &str) -> String {
     s.chars()
         .map(|c| if c.is_ascii() { visible_char(c) } else { format!("\\u{{{:x}}}", c as u32) })
         .collect()
+}
+
+/// An untrusted JSON value as a dialog or a pane shows it: pretty, with every
+/// object's keys sorted at every depth, and every character [`visible`] would
+/// spell written as a JSON `\uXXXX` escape (a character past the BMP as its
+/// UTF-16 pair). JSON's own escapes are unchanged, so the text parses back to
+/// the same value, holds no raw character `visible` would spell, and doubles no
+/// backslash.
+pub fn visible_json(value: &serde_json::Value) -> String {
+    escape_json(&serde_json::to_string_pretty(&sorted(value)).expect("a json value serializes"))
+}
+
+/// [`visible_json`] on one line, for a command line's body.
+pub fn visible_json_line(value: &serde_json::Value) -> String {
+    escape_json(&serde_json::to_string(&sorted(value)).expect("a json value serializes"))
+}
+
+/// JSON text with each character [`would_spell`] names, inside a string, written
+/// as a JSON `\uXXXX` escape. A JSON escape is copied as it is, so no backslash
+/// is doubled, and structure outside a string (the pretty printer's newlines and
+/// indents) is never touched.
+fn escape_json(json: &str) -> String {
+    let mut out = String::with_capacity(json.len());
+    let mut in_string = false;
+    let mut chars = json.chars();
+    while let Some(c) = chars.next() {
+        match c {
+            '"' => {
+                in_string = !in_string;
+                out.push(c);
+            }
+            '\\' if in_string => {
+                out.push(c);
+                out.extend(chars.next());
+            }
+            c if in_string && would_spell(c) => {
+                let mut units = [0u16; 2];
+                for unit in c.encode_utf16(&mut units) {
+                    out.push_str(&format!("\\u{unit:04x}"));
+                }
+            }
+            c => out.push(c),
+        }
+    }
+    out
+}
+
+/// The value with every object's keys in sorted order, at every depth. The
+/// order is set here, not left to serde_json's map, which a `preserve_order`
+/// feature anywhere in the build would change.
+fn sorted(value: &serde_json::Value) -> serde_json::Value {
+    use serde_json::{Map, Value};
+    match value {
+        Value::Object(map) => {
+            let mut keys: Vec<&String> = map.keys().collect();
+            keys.sort();
+            let entries = keys.into_iter().map(|k| (k.clone(), sorted(&map[k])));
+            Value::Object(entries.collect::<Map<String, Value>>())
+        }
+        Value::Array(items) => Value::Array(items.iter().map(sorted).collect()),
+        other => other.clone(),
+    }
 }
 
 /// Marks that draw over or into their neighbours (combining diacritics, the
@@ -400,5 +470,102 @@ mod tests {
         assert_eq!(visible_held("/home/khoa/pr\u{43e}ject"), "/home/khoa/pr\\u{43e}ject");
         assert_eq!(visible_held("a b\nc"), "a b\\nc");
         assert_eq!(visible("/home/khoa/pr\u{43e}ject"), "/home/khoa/pr\u{43e}ject", "the general view keeps letters");
+    }
+
+    /// The characters a JSON writer must spell: ESC, CR, LF and TAB (JSON's own
+    /// escapes for the last three, `\u001b` for ESC), U+009B (raw in serde_json),
+    /// a bidi override, a zero-width space, a combining mark, a tag character past
+    /// the BMP, a backslash and a quote.
+    const JSON_SPELLED: [char; 11] =
+        ['\u{1b}', '\r', '\n', '\t', '\u{9b}', '\u{202e}', '\u{200b}', '\u{301}', '\u{e0001}', '\\', '"'];
+
+    /// The characters of `json` that [`would_spell`] names and that stand as
+    /// themselves: inside a string, outside a JSON escape.
+    fn raw_spelled(json: &str) -> Vec<char> {
+        let mut found = Vec::new();
+        let mut in_string = false;
+        let mut chars = json.chars();
+        while let Some(c) = chars.next() {
+            match c {
+                '"' => in_string = !in_string,
+                '\\' if in_string => {
+                    chars.next();
+                }
+                c if in_string && would_spell(c) => found.push(c),
+                _ => {}
+            }
+        }
+        found
+    }
+
+    /// Each character `visible` would spell, in a key and in a string, comes out
+    /// as one JSON escape: the output parses back to the input, holds no raw
+    /// spelled character, and shows a backslash once, never four times. The
+    /// backslash and the quote are JSON's own escapes.
+    #[test]
+    fn visible_json_escapes_each_spelled_character_in_a_key_and_a_string() {
+        for c in JSON_SPELLED {
+            let mut map = serde_json::Map::new();
+            map.insert(format!("k{c}"), serde_json::Value::String(format!("v{c}")));
+            let value = serde_json::Value::Object(map);
+            for out in [visible_json(&value), visible_json_line(&value)] {
+                assert_eq!(serde_json::from_str::<serde_json::Value>(&out).unwrap(), value, "{c:?}: {out}");
+                assert!(raw_spelled(&out).is_empty(), "{c:?}: {out}");
+                assert!(!out.contains(r"\\\\"), "{c:?}: {out}");
+                if c == '\\' {
+                    assert!(out.contains(r"\\"), "{c:?}: {out}");
+                }
+                if c == '"' {
+                    assert!(out.contains(r#"\""#), "{c:?}: {out}");
+                }
+            }
+        }
+    }
+
+    /// A character past the BMP is written as its UTF-16 pair, as JSON needs.
+    #[test]
+    fn visible_json_writes_a_character_past_the_bmp_as_a_surrogate_pair() {
+        assert_eq!(visible_json_line(&serde_json::json!("\u{e0001}")), r#""\udb40\udc01""#);
+    }
+
+    /// A backslash in a value is one JSON escape, and the escaper leaves it be.
+    #[test]
+    fn visible_json_does_not_double_a_backslash() {
+        assert_eq!(visible_json_line(&serde_json::json!({"path": "C:\\x"})), r#"{"path":"C:\\x"}"#);
+    }
+
+    /// The pretty form keeps its layout, with the newlines and indents outside
+    /// its strings, and the line form has no newline at all.
+    #[test]
+    fn visible_json_is_pretty_and_the_line_form_is_one_line() {
+        let value = serde_json::json!({"a": [1, {"b": "x\ny"}]});
+        let pretty = visible_json(&value);
+        assert!(pretty.contains("\n  \"a\": ["), "{pretty}");
+        assert!(pretty.contains(r#""x\ny""#), "{pretty}");
+        assert_eq!(serde_json::from_str::<serde_json::Value>(&pretty).unwrap(), value);
+        assert!(!visible_json_line(&value).contains('\n'));
+    }
+
+    /// Keys come out sorted at every depth. A serde_json map is a BTreeMap unless
+    /// the `preserve_order` feature is on, so this test exercises the sort only
+    /// where that feature is on, which neither lock enables today.
+    #[test]
+    fn visible_json_sorts_keys_at_every_depth() {
+        let value = serde_json::json!({"b": 1, "a": {"d": 2, "c": [{"z": 0, "y": 0}]}});
+        let out = visible_json_line(&value);
+        assert!(out.find(r#""a""#) < out.find(r#""b""#), "{out}");
+        assert!(out.find(r#""c""#) < out.find(r#""d""#), "{out}");
+        assert!(out.find(r#""y""#) < out.find(r#""z""#), "{out}");
+    }
+
+    /// `visible` spells a character exactly when [`would_spell`] names it, for
+    /// every scalar value. The JSON writers read that same predicate.
+    #[test]
+    fn visible_spells_exactly_the_characters_would_spell_names() {
+        for n in 0..=0x10_ffff_u32 {
+            let Some(c) = char::from_u32(n) else { continue };
+            let spelled = visible(&c.to_string()) != c.to_string();
+            assert_eq!(spelled, would_spell(c), "U+{n:04X}");
+        }
     }
 }

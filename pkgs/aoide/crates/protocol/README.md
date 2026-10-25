@@ -59,10 +59,13 @@ other crate in this workspace sits above.
   `clean_line` (the two at `LINE_MAX`, 200). `visible` and `visible_held` are
   the approver's escape over the same table: every character `is_unsafe`
   names is spelled as an escape, never stripped, and `visible_held` spells
-  every non-ASCII character too. Every door that prints a peer's
-  bytes cleans them here: `aoide-client` the words of a far door's mail answer,
-  `aoide-conduct`'s graph views (re-exported as `graph::clean_line`), and
-  `aoide-server`'s A2A door.
+  every non-ASCII character too. `visible_json` (pretty) and
+  `visible_json_line` (one line) are the same escape for an approver's JSON
+  value: object keys sorted at every depth, and every spelled character a
+  JSON `\uXXXX` escape, so the text parses back to the same value. Every door
+  that prints a peer's bytes cleans them here: `aoide-client` the words of a
+  far door's mail answer, `aoide-conduct`'s graph views (re-exported as
+  `graph::clean_line`), and `aoide-server`'s A2A door.
 - `invocation` — `Invocation`, the parsed call handed to a dispatcher.
 - `output` — `Outcome` + exit codes, the generic envelope every command
   returns; also the taught-error shape (`Outcome::refuse`, `Kind`, `Fix`,

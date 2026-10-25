@@ -88,8 +88,10 @@
   prints, stores or echoes bytes a peer sent cleans them through
   `untrusted` (`clean_line`, or `strip_unsafe` under a clip of its own) and
   never writes a second filter. The approver's escape is the same table's:
-  `visible` and `visible_held` spell what `is_unsafe` names, so a face that
-  shows a peer's text for an approval calls them, never a copy of their rule.
+  `visible`, `visible_held`, `visible_json` and `visible_json_line` spell
+  what `is_unsafe` names. An approver's JSON is shown through `visible_json`
+  (`visible_json_line` on one line), a plain string through `visible` or
+  `visible_held`, never a copy of their rule.
   A character a terminal renders as nothing or reads as an instruction is
   added to that table, once, and every caller gets it.
 - **`door::run`'s `special` hook is the only sanctioned one-shot escape.**
