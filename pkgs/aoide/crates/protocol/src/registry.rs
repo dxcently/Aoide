@@ -165,10 +165,12 @@ pub struct Command {
     /// verbs carry it, and refuses a grant that names the verb. The floor also
     /// refuses six classes by name: the custody, trust and self-change verbs,
     /// Melete's tools, Mneme's writes and any Eidolon exec. The verbs among
-    /// them carry neither mark, even where a rule fits one. A verb whose
-    /// interface routes each action through the dispatcher leaves the marks to
-    /// the verbs it dispatches. The golden snapshot in cli/src/registry.rs pins
-    /// them. `Command::check` does not read it.
+    /// them carry neither mark, even where a rule fits one. The floor refuses,
+    /// too, a grant for any call that carries `--node` or `--typed`. A verb is
+    /// marked for what its own handler does: an action it hands to the
+    /// dispatcher carries the marks of the verb it dispatches. The golden
+    /// snapshot in cli/src/registry.rs pins them. `Command::check` does not
+    /// read it.
     #[serde(skip_serializing_if = "is_false")]
     pub approves: bool,
     /// The verb starts an agent, or arms a timer, a sweep or a listener that
