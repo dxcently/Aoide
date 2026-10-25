@@ -199,7 +199,7 @@
 //! unless `AOIDE_STATE_DIR` is set, and its log unless `AOIDE_AUDIT_LOG` is set
 //! and not empty.
 
-use super::common::{is_unsafe, require_flag, stage_error};
+use super::common::{is_unsafe, require_flag, stage_error, strip_unsafe};
 use super::conduct::{program_is_a_shell, program_is_an_interactive_shell, runs_a_privilege_program};
 use super::model::{load_stage, projects_path, sessions_path, ProjectsFile, SessionsFile};
 use super::send::{deliver_local_with, real_attested_sender, PendingSpawn};
@@ -271,7 +271,7 @@ fn resolve_candidate(entry: aoide_storage::ledger::LedgerEntry) -> Candidate {
 /// dir. Anything else is the candidate's skip reason. The path itself stays out
 /// of the reason: it is ledger data.
 fn journal_of(entry: &aoide_storage::ledger::LedgerEntry) -> Result<String, String> {
-    let who = format!("session {} ({})", entry.session_id, entry.agent);
+    let who = format!("session {} ({})", strip_unsafe(&entry.session_id), entry.agent);
     let skip = |why: &str| Err(format!("{who} {why} — skipped rather than guessed"));
     let Some(log) = entry.log_path.as_deref() else {
         return skip("has no logPath, so its journal is unknown");
@@ -353,9 +353,9 @@ const CLAIM_CLOCK_SKEW_SECS: i64 = 5;
 
 /// A claim's verdict against the roster: its new id and its age while it is in
 /// flight, which is while its new id has a session that is not `done`, or has
-/// none yet and the claim is younger than [`RESUME_CLAIM_BOUND_SECS`]. A claim
-/// stamped more than [`CLAIM_CLOCK_SKEW_SECS`] ahead of `now` is stale; within
-/// that skew its age is 0. Anything else is stale and blocks nothing.
+/// none yet and the claim is younger than [`RESUME_CLAIM_BOUND_SECS`], and the
+/// claim is not stamped more than [`CLAIM_CLOCK_SKEW_SECS`] ahead of `now`.
+/// Within that skew its age is 0. Anything else is stale and blocks nothing.
 fn claim_in_flight(
     claim: &aoide_storage::resuming::Claim,
     sessions: &[aoide_storage::records::SessionRecord],
@@ -460,17 +460,21 @@ fn read_roster_and_claims() -> Result<(Vec<aoide_storage::records::SessionRecord
 
 /// The refusal for a candidate: `session <id> (<agent>)`, then why it is skipped.
 fn refused(entry: &aoide_storage::ledger::LedgerEntry, why: String) -> Refusal {
-    Refusal { reason: format!("session {} ({}) {why}", entry.session_id, entry.agent), named: None }
+    Refusal { reason: format!("session {} ({}) {why}", strip_unsafe(&entry.session_id), entry.agent), named: None }
 }
 
 /// The refusal for a blocked candidate, naming the live session or the claim.
 fn blocked_refusal(entry: &aoide_storage::ledger::LedgerEntry, blocked: Blocked) -> Refusal {
     match blocked {
-        Blocked::Live { live_id } => Refusal {
-            named: Some(("liveSessionId", live_id.clone())),
-            ..refused(entry, format!("is live as {live_id}, so it is not resumed again — skipped"))
-        },
+        Blocked::Live { live_id } => {
+            let live_id = strip_unsafe(&live_id);
+            Refusal {
+                named: Some(("liveSessionId", live_id.clone())),
+                ..refused(entry, format!("is live as {live_id}, so it is not resumed again — skipped"))
+            }
+        }
         Blocked::InFlight { new_id, age_secs, by_journal } => {
+            let new_id = strip_unsafe(&new_id);
             let held = if by_journal { "shares its journal with" } else { "has" };
             Refusal {
                 named: Some(("claimedBy", new_id.clone())),
@@ -5179,6 +5183,20 @@ mod tests {
             blocked(&entry, false, &[], &claims, &[], NOW),
             Some(Blocked::InFlight { new_id: "resurrect-9-3".into(), age_secs: 5, by_journal: false })
         );
+    }
+
+    #[test]
+    fn an_id_with_terminal_escapes_prints_stripped() {
+        use aoide_protocol::untrusted::is_unsafe;
+        let hostile = "\u{1b}[31m\u{202E}";
+        let entry = ledger_entry(&format!("ledger-claude{hostile}"), "claude", "/w", "2026-08-20T01:00:00Z");
+        let claims = [claim_taken(&entry.session_id, &format!("resurrect-9-6{hostile}"), 5)];
+        let verdict = blocked(&entry, false, &[], &claims, &[], NOW).expect("a young claim blocks its own session");
+        let refusal = blocked_refusal(&entry, verdict);
+        assert!(!refusal.reason.chars().any(is_unsafe), "the reason prints stripped: {:?}", refusal.reason);
+        let (key, named) = refusal.named.expect("an in-flight claim names its new id");
+        assert_eq!(key, "claimedBy");
+        assert!(!named.chars().any(is_unsafe), "claimedBy prints stripped: {named:?}");
     }
 
     #[test]

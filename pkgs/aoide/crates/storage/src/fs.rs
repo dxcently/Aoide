@@ -3969,8 +3969,6 @@ mod tests {
         in_session_logs(name, f)
     }
 
-    /// The scope of [`with_session_logs`], for a caller that already holds
-    /// `crate::env_lock()`.
     /// Restores `AOIDE_STATE_DIR` and removes the temp root when it drops, so a
     /// closure that panics leaves neither set.
     struct SessionLogsScope {
@@ -3988,7 +3986,7 @@ mod tests {
         }
     }
 
-    /// The scope of [`with_session_logs`], for a caller that already holds
+    /// The body of [`with_session_logs`], for a caller that already holds
     /// `crate::env_lock()`.
     fn in_session_logs<T>(name: &str, f: impl FnOnce(&std::path::Path) -> T) -> T {
         let root = std::env::temp_dir().join(format!("aoide-inside-{name}-{}", std::process::id()));
@@ -4004,17 +4002,25 @@ mod tests {
     fn a_panicking_session_logs_scope_leaves_the_state_dir_as_it_was() {
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let before = std::env::var("AOIDE_STATE_DIR").ok();
-        std::env::set_var("AOIDE_STATE_DIR", "/sentinel/state");
-        let caught = std::panic::catch_unwind(|| {
-            in_session_logs("panics", |_| -> () { panic!("the closure panics") });
-        });
-        let after = std::env::var("AOIDE_STATE_DIR").ok();
-        match before {
-            Some(v) => std::env::set_var("AOIDE_STATE_DIR", v),
-            None => std::env::remove_var("AOIDE_STATE_DIR"),
+        for (name, set) in [("panics-set", Some("/sentinel/state")), ("panics-unset", None)] {
+            match set {
+                Some(v) => std::env::set_var("AOIDE_STATE_DIR", v),
+                None => std::env::remove_var("AOIDE_STATE_DIR"),
+            }
+            let root = std::env::temp_dir().join(format!("aoide-inside-{name}-{}", std::process::id()));
+            let caught = std::panic::catch_unwind(|| {
+                in_session_logs(name, |_| -> () { panic!("the closure panics") });
+            });
+            let after = std::env::var("AOIDE_STATE_DIR").ok();
+            let root_left = root.exists();
+            match &before {
+                Some(v) => std::env::set_var("AOIDE_STATE_DIR", v),
+                None => std::env::remove_var("AOIDE_STATE_DIR"),
+            }
+            assert!(caught.is_err(), "the closure panics");
+            assert_eq!(after.as_deref(), set, "a panic leaves the state dir as it was");
+            assert!(!root_left, "a panic leaves no temp root: {}", root.display());
         }
-        assert!(caught.is_err(), "the closure panics");
-        assert_eq!(after.as_deref(), Some("/sentinel/state"), "a panic leaves the state dir set");
     }
 
     #[cfg(unix)]

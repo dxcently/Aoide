@@ -52,9 +52,9 @@ never the inbound/serve half (that's `aoide-server`).
   (`socket_path()` resolves `$AOIDE_DAEMON_SOCKET` →
   `$XDG_RUNTIME_DIR/aoide/aoided.sock`, the identical convention
   `aoide_server::daemon::socket_path` resolves — this crate sits BELOW
-  `aoide-server` in the DAG, so it is never imported from there; as of LANE
-  IDENTITY P-ID4 the derivation's body and the `daemon_seal_pubkey_hex` ping
-  fetch live in `aoide_storage::attest`, the bounded connect (`connect_bounded`,
+  `aoide-server` in the DAG, so it is never imported from there; the
+  derivation's body and the `daemon_seal_pubkey_hex` ping fetch live in
+  `aoide_storage::attest`, the bounded connect (`connect_bounded`,
   protocol's bounded unix connect, ~100ms) is protocol's, and this module's
   public seams delegate — the secrets broker's origin gate needs the same fetch
   and cannot depend on this crate). `None` means "nothing usable answered" — the

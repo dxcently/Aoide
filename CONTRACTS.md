@@ -6765,9 +6765,7 @@ instead of hanging on the connect syscall itself. The mechanism is a BOUNDED
 RETRY of the `connect(2)` syscall on `EAGAIN` (what Linux actually returns for a
 saturated `AF_UNIX` backlog — immediately, never `EINPROGRESS`, so there is no
 fd event to wait on), plus `poll()` on `EINPROGRESS` (a genuine half-open
-connection) — not a single poll loop; an earlier version of this function
-handled only the `EINPROGRESS` case and made the saturated-backlog scenario
-worse, caught and fixed on review.
+connection) — not a single poll loop.
 
 **Transport**: connect `$AOIDE_SECRETS_SOCKET` (else the canonical deployed
 path `/run/aoide-secrets/secrets.sock`, P-V4d — corrected from an earlier

@@ -2011,6 +2011,9 @@ mod tests {
             let out = render_any(&line, true);
             let bare = out.replace("\u{1b}[2m", "").replace("\u{1b}[0m", "");
             assert!(no_unsafe(&bare), "the dim pair must wrap stripped text only: {out:?}");
+            if line.contains(r#""type":"thinking""#) {
+                assert!(out.contains("\u{1b}[2m") && out.contains("\u{1b}[0m"), "a thinking line dims: {out:?}");
+            }
         }
     }
 
