@@ -220,7 +220,12 @@ carries whatever the journal carries; that fix is harnox's.
   adds a `tool_use`'s arguments — the details view's window. An unknown clip
   word, like a non-numeric `--tail`, is a taught usage error, never a silent
   widening. A trace line that is not a readable record contributes no step (it
-  keeps its `?` human line and its raw line in `data.lines`).
+  keeps its `?` human line and its raw line in `data.lines`). A session that
+  has left the roster, with no presence and no roster row, is named by its
+  ledger line when its `sessionId` is exactly the target. The line's `logPath`
+  is the journal the trace is read from, the human line says the session ended
+  and when, and `--follow` prints the window and returns. A `logPath` inside
+  the session logs dir is a terminal's transcript, and it is never the hint.
 - The read-only trace QUERY over the bridge — one answered shellbridge verb,
   `{"cmd":"sessiontrace","sessionId":…,"lines":N,"clip":"line|detail"}`, which
   re-execs exactly the command above (`--tail N --clip … --json`) and answers

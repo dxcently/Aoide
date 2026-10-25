@@ -3978,7 +3978,9 @@ last N records (default 50); `--follow` re-reads for new lines until Ctrl-C
 (CLI-only); `--json` passes the raw lines through unchanged. Read-only — no
 stage write, no daemon. A session whose harness keeps no trace, or whose
 presence names none, is a taught error naming which of the two it is, never
-an empty listing.
+an empty listing. A session that has left the roster is named by its ledger
+line, by exact `sessionId` only: its journal is the trace, its message says it
+ended and when, and `--follow` prints the window and returns.
 
 ### `state/stage/projects.json` — **v0**
 

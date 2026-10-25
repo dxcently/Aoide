@@ -807,6 +807,17 @@ fn stdout_is_terminal() -> bool {
     std::io::stdout().is_terminal()
 }
 
+/// The newest ledger line whose `sessionId` is exactly `target`: how a session
+/// that has left the roster is still named. Nothing else is matched against the
+/// ledger, so a petname or a prefix of an id is not an ended session.
+fn ledger_ended(target: &str) -> Option<aoide_storage::ledger::LedgerEntry> {
+    aoide_storage::ledger::read_ledger()
+        .ok()?
+        .into_iter()
+        .filter(|e| e.session_id == target)
+        .max_by_key(|e| aoide_storage::time::parse_iso_utc(&e.ended_at).unwrap_or(i64::MIN))
+}
+
 /// `session trace <id> [--tail N] [--follow] [--json]` — see the module doc.
 pub fn session_trace(inv: &Invocation) -> Outcome {
     let cmd = "session.trace";
@@ -848,8 +859,8 @@ pub fn session_trace(inv: &Invocation) -> Outcome {
     let nodes = aoide_storage::node_store::load_nodes();
     let node_names: Vec<&str> = nodes.iter().map(|p| p.name.as_str()).collect();
 
-    let id = match addr::resolve(&target, &host, &candidates, &node_names) {
-        Resolution::Local(id) => id,
+    let (id, ended) = match addr::resolve(&target, &host, &candidates, &node_names) {
+        Resolution::Local(id) => (id, None),
         Resolution::Remote { node, .. } => {
             return Outcome::error(
                 cmd,
@@ -871,17 +882,20 @@ pub fn session_trace(inv: &Invocation) -> Outcome {
             )
             .with_data(json!({ "reason": "ambiguous", "target": target, "candidates": found }));
         }
-        Resolution::NotFound => {
-            let hint = if !target.contains('/') && node_names.contains(&target.as_str()) {
-                format!(
-                    " (`{target}` names a known node, not a local session — did you mean `{target}/<session>`?)"
-                )
-            } else {
-                String::new()
-            };
-            return Outcome::error(cmd, format!("no session matches `{target}`{hint}"))
-                .with_data(json!({ "reason": "not-found", "target": target }));
-        }
+        Resolution::NotFound => match ledger_ended(&target) {
+            Some(entry) => (entry.session_id.clone(), Some(entry)),
+            None => {
+                let hint = if !target.contains('/') && node_names.contains(&target.as_str()) {
+                    format!(
+                        " (`{target}` names a known node, not a local session — did you mean `{target}/<session>`?)"
+                    )
+                } else {
+                    String::new()
+                };
+                return Outcome::error(cmd, format!("no session matches `{target}`{hint}"))
+                    .with_data(json!({ "reason": "not-found", "target": target }));
+            }
+        },
     };
 
     // The trace is a HARNESS CAPABILITY, never a name check: a profile whose
@@ -889,11 +903,10 @@ pub fn session_trace(inv: &Invocation) -> Outcome {
     // saying so is the honest answer (the capability test is why no consumer
     // here writes `if agent == "eidolon"`).
     let name = label(&id, &file.sessions, &ids, &host);
-    let agent = file
-        .sessions
-        .iter()
-        .find(|r| r.session_id == id)
+    let row = file.sessions.iter().find(|r| r.session_id == id);
+    let agent = row
         .map(|r| r.agent.clone())
+        .or_else(|| ended.as_ref().map(|e| e.agent.clone()))
         .unwrap_or_default();
     let Some(profile) = agent_profile(&agent) else {
         return Outcome::error(
@@ -922,13 +935,17 @@ pub fn session_trace(inv: &Invocation) -> Outcome {
     // The PATH is the same locator every other transcript reader uses: it
     // prefers the file the presence metadata names, and falls back to the
     // metadata itself when there is none.
-    let cwd = file
-        .sessions
-        .iter()
-        .find(|r| r.session_id == id)
+    let cwd = row
         .map(|r| r.cwd.clone())
+        .or_else(|| ended.as_ref().map(|e| e.cwd.clone()))
         .unwrap_or_default();
-    let Some(path) = (profile.transcript.locate)(&id, Some(&cwd), None) else {
+    // The journal the session named is the hint. A path inside the session logs
+    // dir is a terminal's transcript, never a journal, so it is never passed.
+    let log_path = row
+        .and_then(|r| r.log_path.clone())
+        .or_else(|| ended.as_ref().and_then(|e| e.log_path.clone()))
+        .filter(|p| !aoide_storage::fs::inside_session_logs(p));
+    let Some(path) = (profile.transcript.locate)(&id, Some(&cwd), log_path.as_deref()) else {
         return Outcome::error(
             cmd,
             format!(
@@ -955,7 +972,8 @@ pub fn session_trace(inv: &Invocation) -> Outcome {
         }));
     };
 
-    if follow {
+    // An ended session has no presence left to follow: its window is printed once.
+    if follow && ended.is_none() {
         return follow_trace(cmd, &id, &name, &path, read_trace, tail, json_mode);
     }
 
@@ -963,7 +981,10 @@ pub fn session_trace(inv: &Invocation) -> Outcome {
     let dim = stdout_is_terminal();
     let raw: Vec<String> = shown.iter().map(|l| (*l).clone()).collect();
     let body: Vec<String> = shown.iter().map(|l| render_any(l, dim)).collect();
-    let mut message = format!("{} record(s) · {name}", body.len());
+    let mut message = match &ended {
+        Some(entry) => format!("{} record(s) · {name} · ended {}", body.len(), entry.ended_at),
+        None => format!("{} record(s) · {name}", body.len()),
+    };
     if !json_mode && !body.is_empty() {
         message.push('\n');
         message.push_str(&body.join("\n"));
@@ -984,6 +1005,7 @@ pub fn session_trace(inv: &Invocation) -> Outcome {
             "clip": clip.name(),
             "steps": steps,
             "stepsOmitted": omitted,
+            "endedAt": ended.as_ref().map(|e| e.ended_at.clone()),
         }))
 }
 
@@ -1400,6 +1422,158 @@ mod tests {
         assert_eq!(out.status, Status::Ok, "msg: {}", out.message);
         assert_eq!(out.data.unwrap()["records"], 0);
         assert!(out.message.starts_with("0 record(s)"), "{}", out.message);
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    // -- An ended session: the ledger line and the journal it names --
+
+    /// An empty roster and no presence: the ledger is the only place a session
+    /// that has left can still be named.
+    fn roster_free_fixture(tag: &str) -> std::path::PathBuf {
+        let root = unique_stage(tag);
+        let stage = root.join("stage");
+        std::fs::create_dir_all(&stage).unwrap();
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        std::env::set_var("AOIDE_STATE_DIR", root.join("state"));
+        std::env::set_var("XDG_RUNTIME_DIR", &root);
+        std::fs::write(stage.join("sessions.json"), r#"{"schemaVersion":"0","sessions":[]}"#).unwrap();
+        root
+    }
+
+    /// A journal as eidolon leaves it: the `.eid` the presence named, and the
+    /// `.jsonl` mirror beside it, written second so the mirror is current.
+    fn journal_fixture(dir: &std::path::Path, name: &str, lines: &[&str]) -> String {
+        std::fs::create_dir_all(dir).unwrap();
+        let journal = dir.join(format!("{name}.eid"));
+        std::fs::write(&journal, "").unwrap();
+        std::fs::write(dir.join(format!("{name}.jsonl")), format!("{}\n", lines.join("\n"))).unwrap();
+        journal.display().to_string()
+    }
+
+    /// `sessions.json` holding one eidolon record in `state`, with `log_path`.
+    fn roster_with(root: &std::path::Path, id: &str, state: &str, log_path: &str) {
+        let body = serde_json::json!({
+            "schemaVersion": "0",
+            "sessions": [{
+                "sessionId": id,
+                "agent": "eidolon",
+                "cwd": "/home/khoa",
+                "state": state,
+                "logPath": log_path,
+            }],
+        });
+        std::fs::write(root.join("stage").join("sessions.json"), body.to_string()).unwrap();
+    }
+
+    /// Appends the ledger line an eidolon session leaves when it ends.
+    fn ended_eidolon(id: &str, petname: &str, log_path: &str) {
+        aoide_storage::ledger::append_ledger_entry(&aoide_storage::ledger::LedgerEntry {
+            session_id: id.into(),
+            agent: "eidolon".into(),
+            cwd: "/home/khoa".into(),
+            petname: Some(petname.into()),
+            ended_at: "2026-08-20T01:00:00Z".into(),
+            log_path: Some(log_path.into()),
+            ..Default::default()
+        })
+        .unwrap();
+    }
+
+    #[test]
+    fn a_ledger_only_eidolon_session_reads_its_trace_from_its_journal_and_says_it_ended() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&env_keys());
+        let root = roster_free_fixture("trace-ledger-only");
+        let lines = [START, USER, ASSISTANT, RESULT, BUDGET, SETTLED];
+        let journal = journal_fixture(&root.join("journals"), "Aoide-ended", &lines);
+        ended_eidolon("Aoide-ended", "quiet-finch", &journal);
+
+        let out = session_trace(&trace_invocation(&["Aoide-ended"], &[]));
+        assert_eq!(out.status, Status::Ok, "msg: {}", out.message);
+        let data = out.data.clone().unwrap();
+        assert_eq!(data["sessionId"], "Aoide-ended");
+        assert_eq!(data["records"], 6, "the journal's whole trace fits under the default tail");
+        assert_eq!(data["endedAt"], "2026-08-20T01:00:00Z");
+        assert!(out.message.contains("ended 2026-08-20T01:00:00Z"), "{}", out.message);
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_done_record_whose_presence_is_gone_reads_its_trace_through_its_log_path() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&env_keys());
+        let root = roster_free_fixture("trace-done-hint");
+        let lines = [START, USER, ASSISTANT, RESULT, BUDGET, SETTLED];
+        let journal = journal_fixture(&root.join("journals"), "Aoide-done", &lines);
+        roster_with(&root, "Aoide-done", "done", &journal);
+
+        let out = session_trace(&trace_invocation(&["Aoide-done"], &[]));
+        assert_eq!(out.status, Status::Ok, "msg: {}", out.message);
+        assert_eq!(out.data.clone().unwrap()["records"], 6);
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_log_path_inside_the_session_logs_dir_is_never_a_hint() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&env_keys());
+        let root = roster_free_fixture("trace-wrapper-hint");
+        // A journal-shaped pair under the session logs dir: the hint would
+        // reach it, were that dir not refused.
+        let lines = [START, USER, ASSISTANT, RESULT, BUDGET, SETTLED];
+        let wrapper = journal_fixture(&root.join("state").join("sessions"), "Aoide-wrapper", &lines);
+        roster_with(&root, "Aoide-wrapper", "done", &wrapper);
+
+        let out = session_trace(&trace_invocation(&["Aoide-wrapper"], &[]));
+        assert_eq!(out.status, Status::Error, "msg: {}", out.message);
+        assert_eq!(out.data.clone().unwrap()["reason"], "no-presence");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn an_id_that_is_not_an_exact_ledger_session_id_is_not_found() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&env_keys());
+        let root = roster_free_fixture("trace-not-found");
+        let journal = journal_fixture(&root.join("journals"), "Aoide-pet", &[START]);
+        ended_eidolon("Aoide-pet", "brave-otter-ledger", &journal);
+
+        // Neither an unknown id, nor a ledger petname, nor a prefix of a ledger
+        // id, names the ledger line: only its exact sessionId does.
+        for target in ["Aoide-nothing", "brave-otter-ledger", "Aoide-p"] {
+            let out = session_trace(&trace_invocation(&[target], &[]));
+            assert_eq!(out.status, Status::Error, "{target}: {}", out.message);
+            assert_eq!(out.data.clone().unwrap()["reason"], "not-found", "{target}: {}", out.message);
+        }
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn follow_on_a_ledger_only_session_prints_what_is_there_and_returns() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&env_keys());
+        let root = roster_free_fixture("trace-follow-ended");
+        let lines = [START, USER, ASSISTANT, RESULT, BUDGET, SETTLED];
+        let journal = journal_fixture(&root.join("journals"), "Aoide-follow-ended", &lines);
+        ended_eidolon("Aoide-follow-ended", "steady-lark", &journal);
+
+        // A follow that loops never returns: the deadline fails the test instead.
+        let inv = trace_invocation(&["Aoide-follow-ended"], &[("follow", "true")]);
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = tx.send(session_trace(&inv));
+        });
+        let out = rx
+            .recv_timeout(std::time::Duration::from_secs(30))
+            .expect("--follow on an ended session returns");
+        assert_eq!(out.status, Status::Ok, "msg: {}", out.message);
+        assert_eq!(out.data.clone().unwrap()["records"], 6);
+        assert!(out.message.contains("ended"), "{}", out.message);
 
         let _ = std::fs::remove_dir_all(&root);
     }

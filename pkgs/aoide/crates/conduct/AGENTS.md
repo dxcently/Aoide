@@ -808,6 +808,19 @@ in the message.
   the reaper's transcript refresh calls. `--follow` is CLI-only (a follow
   that parks a connection makes no sense over MCP/A2A/the daemon socket),
   with the `events tail`/`secrets watch` signal-loop shape.
+- **An ended session is named by its exact ledger `sessionId`, and by
+  nothing else.** When `addr::resolve` finds no roster row, `session_trace`
+  reads the newest ledger line whose `sessionId` equals the target
+  (`ledger_ended`). A petname or a prefix of an id names no ended session, so
+  the match stays exact. The line's `agent`, `cwd` and `logPath` stand in for
+  the roster row, the message says the session ended and when, and `--follow`
+  prints the window and returns: no presence is left to follow.
+- **A record's `logPath` is the trace's hint only outside
+  `session_logs_dir()`.** It goes to `TranscriptSpec::locate` as the hint,
+  the way `dropped_this_pass` passes it. A path inside `session_logs_dir()` is
+  a terminal's transcript, never a journal, so it is never passed. Without
+  that filter a wrapper record whose presence is gone would read a transcript
+  as a journal.
 - **`data.steps` is PROJECTED from the same window `data.lines` carries, and
   bounded before it is built (Phase B).** `steps_of` is the one projector: one
   step per non-empty content block in the record's own order, and `render_line`

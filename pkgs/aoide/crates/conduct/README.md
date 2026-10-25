@@ -1044,7 +1044,12 @@ blank one is refused too.
   whose harness keeps no trace, whose presence names none, or whose agent
   has no registered profile is a taught error naming which — never an empty
   listing; a trace that EXISTS and holds no records yet is an honest `0
-  record(s)`.
+  record(s)`. A session that has left the roster is named by its ledger line
+  when its `sessionId` is exactly the target: the line's agent, cwd and
+  `logPath` stand in for the roster row, the message says the session ended
+  and when, and `--follow` prints its window and returns. A `logPath` is the
+  hint unless it lies in `session_logs_dir()`. Nothing else is matched against
+  the ledger.
 - **The step projection (Phase B, `graph/trace.rs`) — the SAME window, as
   steps.** `data.steps` (beside the untouched `data.lines`) is one object per
   emitted content block, projected by `steps_of`/`steps_of_lines`: one step per
