@@ -88,7 +88,11 @@ terminal's rights to its remote callers.
   (the #69 hand-edit watcher) — detection and narration only, this daemon
   never reverts a hand edit. `note_own_write` is the seam P-D6's own
   tick-reconcile/reap writes (below) fold into so they are never reported
-  back as a hand edit. **The watcher itself is a single `Arc<Mutex<
+  back as a hand edit. Each change the watcher finds, and each
+  `note_own_write` of a moved file, also raises a `class:"state"` line for
+  that file: at most one per file per second, a change inside the second
+  written by the first sweep after it (`producers`' "The state cue").
+  **The watcher itself is a single `Arc<Mutex<
   HandEditWatcher>>` (task #92), shared between the tick thread and
   `handle_conn`'s connection threads** — not tick-private: a dispatched
   session command (`session start/end`/etc., `{"op":"dispatch"}`) writes

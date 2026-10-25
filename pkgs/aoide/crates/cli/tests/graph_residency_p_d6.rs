@@ -261,6 +261,17 @@ fn hand_edit_events_for(events_path: &Path, file_name: &str) -> Vec<serde_json::
         .collect()
 }
 
+/// The `state` lines in the daemon's own feed whose `payload.files` is exactly
+/// `[file_name]` — the `state` cue's counterpart to [`hand_edit_events_for`].
+fn state_events_for(events_path: &Path, file_name: &str) -> Vec<serde_json::Value> {
+    std::fs::read_to_string(events_path)
+        .unwrap_or_default()
+        .lines()
+        .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
+        .filter(|rec| rec["class"] == "state" && rec["payload"]["files"] == serde_json::json!([file_name]))
+        .collect()
+}
+
 /// Block until the wall clock crosses a fresh second boundary. Every stage
 /// timestamp in this tree is second-precision
 /// (`aoide_storage::time::now_iso_utc`, no test clock-injection seam exists
@@ -463,7 +474,9 @@ fn graph_reap_over_the_socket_reaps_a_dead_pid_session() {
 /// clean, then proves the watcher itself is still alive by making a truly
 /// out-of-band edit (bypassing the daemon entirely) and confirming THAT one
 /// still fires on the next tick — the fix re-baselines once per dispatch,
-/// it does not blind the watcher going forward.
+/// it does not blind the watcher going forward. It also pins the `state`
+/// cue: one line per file the routed write moved, and one more per file the
+/// genuine edit moved, with nothing further once the windows have closed.
 #[test]
 fn dispatched_session_start_produces_no_false_hand_edit_event() {
     let _guard = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
@@ -501,6 +514,9 @@ fn dispatched_session_start_produces_no_false_hand_edit_event() {
         daemon.child_is_alive(),
         "the resident run_loop child died mid-test — the routed call did not exercise it"
     );
+    // The routed write raised one `state` line per file it moved, before its reply.
+    assert_eq!(state_events_for(&events_path, "sessions.json").len(), 1, "{:?}", std::fs::read_to_string(&events_path));
+    assert_eq!(state_events_for(&events_path, "graph.json").len(), 1, "{:?}", std::fs::read_to_string(&events_path));
 
     // Several tick cycles' worth of headroom (~1s cadence) — long enough
     // that a stale-baseline false positive would reliably have landed in
@@ -532,8 +548,67 @@ fn dispatched_session_start_produces_no_false_hand_edit_event() {
     }
     assert!(fired, "a genuine out-of-band edit made after the dispatch must still fire a hand-edit event");
 
+    // The edit raises one more `state` line for sessions.json. The tick's
+    // reconcile then re-derives graph.json, which raises one for graph.json.
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while (state_events_for(&events_path, "sessions.json").len() < 2
+        || state_events_for(&events_path, "graph.json").len() < 2)
+        && Instant::now() < deadline
+    {
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    // A full window past the last line, so an owed line would have landed.
+    std::thread::sleep(Duration::from_millis(1500));
+    assert_eq!(state_events_for(&events_path, "sessions.json").len(), 2, "{:?}", std::fs::read_to_string(&events_path));
+    assert_eq!(state_events_for(&events_path, "graph.json").len(), 2, "{:?}", std::fs::read_to_string(&events_path));
+
     // Stop the resident loop BEFORE removing anything it writes to — the
     // guard kills and WAITS, so no tick can land in the tree below.
+    drop(daemon);
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+/// An out-of-band write to a stage file, with no daemon call and no CLI call,
+/// raises the hand-edit line the tick always raised, and beside it exactly one
+/// `state` line for that file. The tick's reconcile may cue `graph.json` too;
+/// this test asserts only the file it wrote.
+#[test]
+fn an_out_of_band_stage_write_raises_one_state_line_beside_its_hand_edit() {
+    let _guard = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+    let _saver = aoide_test_support::EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_DAEMON_SOCKET", "XDG_RUNTIME_DIR"]);
+
+    let dir = unique_dir("state-out-of-band");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::env::set_var("AOIDE_STAGE_DIR", &dir);
+
+    let mut daemon = RunLoopGuard::start("state-oob", &dir);
+    let events_path = daemon.events_path.clone();
+    assert!(daemon.child_is_alive(), "the resident run_loop child must be up before the write");
+    // The `events tail --class state --json` path reads the same feed from here on.
+    let mut tail = aoide_protocol::feed::Follower::open_at_end(&events_path).unwrap();
+    let state = ["state".to_string()];
+
+    std::fs::write(dir.join("sessions.json"), b"{}").unwrap();
+
+    let names_sessions = |lines: &[String]| lines.iter().filter(|l| l.contains(r#""files":["sessions.json"]"#)).count();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let mut printed: Vec<String> = Vec::new();
+    while Instant::now() < deadline && names_sessions(&printed) == 0 {
+        printed.extend(aoide_server::events::poll_once(&mut tail, &state, true).unwrap());
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    // A later tick runs first, so a second line for the same write would show.
+    std::thread::sleep(Duration::from_millis(1500));
+    printed.extend(aoide_server::events::poll_once(&mut tail, &state, true).unwrap());
+
+    assert_eq!(hand_edit_events_for(&events_path, "sessions.json").len(), 1, "{:?}", std::fs::read_to_string(&events_path));
+    assert_eq!(state_events_for(&events_path, "sessions.json").len(), 1, "{:?}", std::fs::read_to_string(&events_path));
+    assert_eq!(names_sessions(&printed), 1, "`events tail --class state --json` prints it once: {printed:?}");
+    for line in &printed {
+        let rec: serde_json::Value = serde_json::from_str(line).unwrap();
+        assert_eq!(rec["class"], "state", "`--class state` prints the state lines and no others: {line}");
+    }
+
     drop(daemon);
     std::fs::remove_dir_all(&dir).ok();
 }

@@ -114,7 +114,9 @@
 //! (the six broker-owned stage files) and appends one `class:"audit",
 //! kind:"hand-edit"` line per file whose `(mtime, len)` changed since the
 //! last tick — detection and narration only, this daemon never reverts a
-//! hand edit.
+//! hand edit. The same watcher also raises a `class:"state"` line for each
+//! file whose `(mtime, len)` moved, whoever moved it, coalesced to one line
+//! per file per second (`producers`' "The state cue").
 //!
 //! **The watcher is shared with the `dispatch` door, not tick-private
 //! (task #92 fix).** A dispatched session command
@@ -1004,7 +1006,10 @@ pub fn serve_daemon(
     // sweeps it, but `handle_conn`'s dispatch path re-baselines it the same
     // way regardless of caller (module doc's task #92 note): no
     // caller-conditional branch in `handle_conn` itself.
-    let watcher: SharedHandEditWatcher = Arc::new(Mutex::new(crate::producers::HandEditWatcher::new(stage_roster())));
+    let watcher: SharedHandEditWatcher = Arc::new(Mutex::new(crate::producers::HandEditWatcher::new(
+        stage_roster(),
+        FeedWriter::new(events_path.to_path_buf(), EVENTS_CAP_BYTES, 0o600),
+    )));
     accept_loop(listener, events_path.to_path_buf(), registry, dispatch, watcher);
     Ok(())
 }
@@ -1360,8 +1365,10 @@ pub fn run_loop(
     // tick-private one and a dispatch-private one, so a dispatched
     // invocation's re-baseline (`rebaseline_stage_roster`) and the tick's
     // own `sweep` observe the same baseline state.
-    let hand_edit_watcher: SharedHandEditWatcher =
-        Arc::new(Mutex::new(crate::producers::HandEditWatcher::new(stage_roster())));
+    let hand_edit_watcher: SharedHandEditWatcher = Arc::new(Mutex::new(crate::producers::HandEditWatcher::new(
+        stage_roster(),
+        FeedWriter::new(events_path.clone(), EVENTS_CAP_BYTES, 0o600),
+    )));
 
     let accept_events_path = events_path.clone();
     let accept_watcher = Arc::clone(&hand_edit_watcher);
@@ -1935,6 +1942,51 @@ mod tests {
 
         std::fs::remove_file(&socket_path).ok();
         std::fs::remove_file(&events_path).ok();
+    }
+
+    /// A [`DispatchFn`] whose one effect is writing `pending.json`, a roster
+    /// file, so the dispatch's re-baseline has a real change to cue.
+    fn write_pending_dispatch(inv: &Invocation) -> Outcome {
+        std::fs::write(aoide_conduct::graph::pending_path(), b"{}").unwrap();
+        noop_dispatch(inv)
+    }
+
+    /// A dispatched command that writes one roster file raises exactly one
+    /// `state` line for that file. `handle_conn` re-baselines before it
+    /// replies, so the line is already on the feed when the reply arrives.
+    #[test]
+    fn serve_daemon_dispatch_raises_one_state_line_for_the_file_it_wrote() {
+        let (_guard, stage, saved) = isolated_stage();
+        let socket_path = short_tmp("dispatch-state").with_extension("sock");
+        let events_path = short_tmp("dispatch-state-events").with_extension("jsonl");
+        let sp = socket_path.clone();
+        let ep = events_path.clone();
+        std::thread::spawn(move || {
+            let _ = serve_daemon(&sp, &ep, test_registry(), write_pending_dispatch);
+        });
+
+        let stream = connect_retrying(&socket_path);
+        let mut writer = stream.try_clone().unwrap();
+        let mut reader = BufReader::new(stream);
+        writer
+            .write_all(br#"{"v":0,"op":"dispatch","path":["foo","bar"],"args":[],"flags":{}}"#)
+            .unwrap();
+        writer.write_all(b"\n").unwrap();
+        let reply = read_one_line(&mut reader);
+        assert_eq!(reply["outcome"]["status"], "ok", "{reply}");
+
+        let state: Vec<Value> = std::fs::read_to_string(&events_path)
+            .unwrap_or_default()
+            .lines()
+            .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+            .filter(|v| v["class"] == "state")
+            .collect();
+        assert_eq!(state.len(), 1, "{state:?}");
+        assert_eq!(state[0]["payload"]["files"], json!(["pending.json"]), "{state:?}");
+
+        std::fs::remove_file(&socket_path).ok();
+        std::fs::remove_file(&events_path).ok();
+        restore_stage(&stage, saved);
     }
 
     /// A `dispatch` request missing its `path` array gets one error reply

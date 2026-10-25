@@ -47,13 +47,25 @@
 //! reconcile/reap writes (P-D6), and — through the shared watcher's
 //! roster-wide re-baseline (`daemon::rebaseline_stage_roster`, task #92)
 //! — every dispatched invocation's writes.
+//!
+//! ## The state cue
+//!
+//! The same watcher raises a `class:"state"` line whenever a watched file's
+//! `(mtime, len)` moves, whoever moved it: a sweep's hand edit, a write
+//! [`HandEditWatcher::note_own_write`] folds, a dispatch's roster-wide
+//! re-baseline. Its `kind` is `changed`, and its `payload.files` names the
+//! file by base name, as the hand-edit line does. Each file gets at most one
+//! such line per [`STATE_WINDOW`]. A change that lands inside a file's window
+//! owes one more line, written by the first sweep after the window closes, so
+//! a burst cannot flood the feed and no change is lost. The hand-edit line is
+//! unchanged; the state line sits beside it. A desktop view re-reads on the
+//! state line (`docs/architecture/AOIDED.md`'s "The first producer" section).
 
 use aoide_protocol::feed::{FeedWriter, Follower};
 use aoide_protocol::{audit::now_secs, EventClass};
 use serde_json::{json, Value};
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::time::SystemTime;
+use std::time::{Duration, Instant, SystemTime};
 
 // ── the secrets-feed mirror ──────────────────────────────────────────────
 //
@@ -165,34 +177,109 @@ fn stat(path: &Path) -> FileStat {
     Some((meta.modified().ok()?, meta.len()))
 }
 
+fn base_name(path: &Path) -> String {
+    path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| path.to_string_lossy().to_string())
+}
+
+/// The window one watched file's `state` cue is coalesced over: at most one
+/// line per file inside it (module doc's "The state cue").
+const STATE_WINDOW: Duration = Duration::from_secs(1);
+
+/// One watched file's `state`-cue bookkeeping.
+#[derive(Default)]
+struct StateCue {
+    /// When this file's last `state` line was written.
+    last: Option<Instant>,
+    /// A change landed inside the window `last` opened, and its line is owed.
+    owed: bool,
+}
+
+impl StateCue {
+    fn window_open(&self, now: Instant) -> bool {
+        self.last.is_some_and(|t| now.saturating_duration_since(t) < STATE_WINDOW)
+    }
+
+    /// A change was observed at `now`. `true`: write its line now. `false`:
+    /// the window is open, so the line is owed to the first sweep after it.
+    fn changed(&mut self, now: Instant) -> bool {
+        if self.window_open(now) {
+            self.owed = true;
+            return false;
+        }
+        self.last = Some(now);
+        self.owed = false;
+        true
+    }
+
+    /// `true` once a line is owed and its window has closed: write it now.
+    fn take_owed(&mut self, now: Instant) -> bool {
+        if !self.owed || self.window_open(now) {
+            return false;
+        }
+        self.last = Some(now);
+        self.owed = false;
+        true
+    }
+}
+
+/// One watched file: its roster path, its baseline, and its state cue.
+struct Watched {
+    path: PathBuf,
+    baseline: FileStat,
+    cue: StateCue,
+}
+
+/// The `state` line for one watched file (module doc's "The state cue"), in
+/// the same envelope as the feed's other lines, with the file's base name in
+/// `payload.files`.
+fn state_line(path: &Path) -> Value {
+    json!({
+        "v": 0,
+        "ts": now_secs(),
+        "class": serde_json::to_value(EventClass::State).unwrap_or_else(|_| json!("state")),
+        "kind": "changed",
+        "source": "aoided",
+        "payload": {"files": [base_name(path)]},
+    })
+}
+
 /// A tick-driven stat sweep over a fixed roster of broker-owned files
 /// (`docs/architecture/AOIDED.md`'s "The first producer: the hand-edit
 /// watcher (#69)" section) — [`crate::daemon::stage_roster`] supplies the
 /// six real stage-file paths in production; a test passes an arbitrary
-/// list of tempfiles instead.
+/// list of tempfiles instead. It also writes the `state` cue to `feed`.
 pub struct HandEditWatcher {
-    files: Vec<PathBuf>,
-    baseline: HashMap<PathBuf, FileStat>,
+    watched: Vec<Watched>,
+    feed: FeedWriter,
 }
 
 impl HandEditWatcher {
     /// The baseline is seeded from each file's CURRENT on-disk state —
     /// nothing fires for a pre-existing file's own history at daemon
     /// startup, only a change the watcher itself observes across two
-    /// ticks.
-    pub fn new(files: Vec<PathBuf>) -> Self {
-        let baseline = files.iter().map(|p| (p.clone(), stat(p))).collect();
-        Self { files, baseline }
+    /// ticks. `feed` is the daemon's own events feed.
+    pub fn new(files: Vec<PathBuf>, feed: FeedWriter) -> Self {
+        let watched = files.into_iter().map(|path| Watched { baseline: stat(&path), path, cue: StateCue::default() }).collect();
+        Self { watched, feed }
     }
 
-    /// Record that the daemon itself just wrote `path` — folds its
-    /// CURRENT on-disk state into the baseline so the next [`sweep`](Self::sweep)
-    /// does not treat this write as a hand edit. No daemon-side write path
-    /// exists yet this phase (P-D6's graph residency is the first one);
-    /// this method is the seam that phase wires into, proved by this
-    /// module's own tests rather than by a live caller yet.
+    /// Record that the daemon itself just wrote `path` — raises its `state`
+    /// cue if the write moved the file, then folds its CURRENT on-disk state
+    /// into the baseline so the next [`sweep`](Self::sweep) does not treat
+    /// this write as a hand edit. Every daemon-side writer calls this: the
+    /// tick's seal, reconcile and reap writes, and the dispatch re-baseline.
+    /// A path outside the roster is ignored.
     pub fn note_own_write(&mut self, path: &Path) {
-        self.baseline.insert(path.to_path_buf(), stat(path));
+        self.note_own_write_at(path, Instant::now());
+    }
+
+    fn note_own_write_at(&mut self, path: &Path, now: Instant) {
+        let Some(w) = self.watched.iter_mut().find(|w| w.path == path) else { return };
+        let current = stat(path);
+        if current != w.baseline && w.cue.changed(now) {
+            self.feed.append(&state_line(path));
+        }
+        w.baseline = current;
     }
 
     /// One sweep: for every watched file whose current `(mtime, len)`
@@ -203,15 +290,23 @@ impl HandEditWatcher {
     /// `{"file":"sessions.json"}`) of every file that changed, in roster
     /// order.
     pub fn sweep(&mut self) -> Vec<String> {
+        self.sweep_at(Instant::now())
+    }
+
+    fn sweep_at(&mut self, now: Instant) -> Vec<String> {
         let mut edited = Vec::new();
-        for path in &self.files {
-            let current = stat(path);
-            let previous = self.baseline.get(path).copied().flatten();
-            if current != previous {
-                let name = path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| path.to_string_lossy().to_string());
-                edited.push(name);
+        for w in &mut self.watched {
+            let current = stat(&w.path);
+            if current != w.baseline {
+                edited.push(base_name(&w.path));
+                if w.cue.changed(now) {
+                    self.feed.append(&state_line(&w.path));
+                }
             }
-            self.baseline.insert(path.clone(), current);
+            w.baseline = current;
+            if w.cue.take_owed(now) {
+                self.feed.append(&state_line(&w.path));
+            }
         }
         edited
     }
@@ -367,11 +462,29 @@ mod tests {
 
     // ── HandEditWatcher ───────────────────────────────────────────────────
 
+    /// A feed over a fresh scratch events file, and that file's path: a
+    /// watcher test reads back the `state` lines it raised from the path.
+    fn scratch_feed(tag: &str) -> (FeedWriter, PathBuf) {
+        let events = short_tmp(&format!("feed-{tag}")).with_extension("jsonl");
+        (FeedWriter::new(events.clone(), 1024 * 1024, 0o600), events)
+    }
+
+    /// Every `class:"state"` line in `events`, parsed. A missing file has none.
+    fn state_lines(events: &Path) -> Vec<Value> {
+        std::fs::read_to_string(events)
+            .unwrap_or_default()
+            .lines()
+            .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+            .filter(|v| v["class"] == "state")
+            .collect()
+    }
+
     #[test]
     fn hand_edit_watcher_fires_on_an_out_of_band_mtime_change() {
         let path = short_tmp("hand-edit");
         std::fs::write(&path, b"{}").unwrap();
-        let mut w = HandEditWatcher::new(vec![path.clone()]);
+        let (feed, events) = scratch_feed("hand-edit");
+        let mut w = HandEditWatcher::new(vec![path.clone()], feed);
 
         // Nothing changed since construction — no false positive on startup.
         assert_eq!(w.sweep(), Vec::<String>::new());
@@ -386,6 +499,7 @@ mod tests {
         assert_eq!(w.sweep(), Vec::<String>::new());
 
         std::fs::remove_file(&path).ok();
+        std::fs::remove_file(&events).ok();
     }
 
     /// The daemon's own write, folded in via `note_own_write`, must NOT
@@ -394,12 +508,13 @@ mod tests {
     fn hand_edit_watcher_does_not_fire_on_the_daemons_own_write() {
         let path = short_tmp("own-write");
         std::fs::write(&path, b"{}").unwrap();
-        let mut w = HandEditWatcher::new(vec![path.clone()]);
+        let (feed, events) = scratch_feed("own-write");
+        let mut w = HandEditWatcher::new(vec![path.clone()], feed);
         assert_eq!(w.sweep(), Vec::<String>::new());
 
         std::thread::sleep(std::time::Duration::from_millis(10));
         std::fs::write(&path, b"{\"daemon\":\"wrote-this\"}").unwrap();
-        w.note_own_write(&path); // simulates the future P-D6 write path
+        w.note_own_write(&path);
         assert_eq!(w.sweep(), Vec::<String>::new(), "the daemon's own write must not be reported as a hand edit");
 
         // A LATER out-of-band edit still fires normally — note_own_write
@@ -409,18 +524,22 @@ mod tests {
         assert_eq!(w.sweep().len(), 1);
 
         std::fs::remove_file(&path).ok();
+        std::fs::remove_file(&events).ok();
     }
 
     #[test]
     fn hand_edit_watcher_reports_a_deleted_file_once() {
         let path = short_tmp("deleted");
         std::fs::write(&path, b"{}").unwrap();
-        let mut w = HandEditWatcher::new(vec![path.clone()]);
+        let (feed, events) = scratch_feed("deleted");
+        let mut w = HandEditWatcher::new(vec![path.clone()], feed);
         assert_eq!(w.sweep(), Vec::<String>::new());
 
         std::fs::remove_file(&path).unwrap();
         assert_eq!(w.sweep().len(), 1, "a deletion is itself a change worth reporting");
         assert_eq!(w.sweep(), Vec::<String>::new(), "re-baselined to 'absent' — no repeat");
+
+        std::fs::remove_file(&events).ok();
     }
 
     #[test]
@@ -429,7 +548,8 @@ mod tests {
         let b = short_tmp("multi-b");
         std::fs::write(&a, b"{}").unwrap();
         std::fs::write(&b, b"{}").unwrap();
-        let mut w = HandEditWatcher::new(vec![a.clone(), b.clone()]);
+        let (feed, events) = scratch_feed("multi");
+        let mut w = HandEditWatcher::new(vec![a.clone(), b.clone()], feed);
         assert_eq!(w.sweep(), Vec::<String>::new());
 
         std::thread::sleep(std::time::Duration::from_millis(10));
@@ -439,5 +559,108 @@ mod tests {
 
         std::fs::remove_file(&a).ok();
         std::fs::remove_file(&b).ok();
+        std::fs::remove_file(&events).ok();
+    }
+
+    /// An out-of-band write is reported as a hand edit (the sweep's return,
+    /// which the tick turns into its own line) and raises one `state` line
+    /// beside it.
+    #[test]
+    fn an_out_of_band_write_raises_one_state_line_beside_its_hand_edit() {
+        let path = short_tmp("state-hand");
+        std::fs::write(&path, b"{}").unwrap();
+        let (feed, events) = scratch_feed("state-hand");
+        let mut w = HandEditWatcher::new(vec![path.clone()], feed);
+        let t0 = Instant::now();
+        assert_eq!(w.sweep_at(t0), Vec::<String>::new());
+        assert!(state_lines(&events).is_empty(), "nothing moved, so nothing is cued");
+
+        std::fs::write(&path, b"{\"hand\":\"edited\"}").unwrap();
+        assert_eq!(w.sweep_at(t0), vec![base_name(&path)]);
+        let state = state_lines(&events);
+        assert_eq!(state.len(), 1, "{state:?}");
+        assert_eq!(state[0]["kind"], "changed");
+        assert_eq!(state[0]["source"], "aoided");
+        assert_eq!(state[0]["payload"]["files"], json!([base_name(&path)]));
+
+        std::fs::remove_file(&path).ok();
+        std::fs::remove_file(&events).ok();
+    }
+
+    /// The daemon's own write raises one `state` line like any other write,
+    /// and is never reported back as a hand edit.
+    #[test]
+    fn a_daemon_own_write_raises_one_state_line_and_no_hand_edit() {
+        let path = short_tmp("state-own");
+        std::fs::write(&path, b"{}").unwrap();
+        let (feed, events) = scratch_feed("state-own");
+        let mut w = HandEditWatcher::new(vec![path.clone()], feed);
+        let t0 = Instant::now();
+        assert_eq!(w.sweep_at(t0), Vec::<String>::new());
+
+        std::fs::write(&path, b"{\"daemon\":\"wrote-this\"}").unwrap();
+        w.note_own_write_at(&path, t0);
+        assert_eq!(w.sweep_at(t0), Vec::<String>::new(), "the daemon's own write must not be reported as a hand edit");
+        assert_eq!(state_lines(&events).len(), 1, "{:?}", state_lines(&events));
+
+        std::fs::remove_file(&path).ok();
+        std::fs::remove_file(&events).ok();
+    }
+
+    /// Writes inside one window raise one line in that window. The change
+    /// that landed after that line is written once the window has closed,
+    /// and nothing more follows without another change.
+    #[test]
+    fn a_burst_within_one_second_raises_one_line_then_one_more_once_it_closes() {
+        let path = short_tmp("state-burst");
+        std::fs::write(&path, b"0").unwrap();
+        let (feed, events) = scratch_feed("state-burst");
+        let mut w = HandEditWatcher::new(vec![path.clone()], feed);
+        let t0 = Instant::now();
+        assert_eq!(w.sweep_at(t0), Vec::<String>::new());
+
+        // Each write changes the length, so each one moves the stat.
+        std::fs::write(&path, b"01").unwrap();
+        w.note_own_write_at(&path, t0);
+        std::fs::write(&path, b"012").unwrap();
+        w.note_own_write_at(&path, t0 + Duration::from_millis(200));
+        std::fs::write(&path, b"0123").unwrap();
+        assert_eq!(w.sweep_at(t0 + Duration::from_millis(400)), vec![base_name(&path)]);
+        assert_eq!(state_lines(&events).len(), 1, "the burst is one line inside its second");
+
+        assert_eq!(w.sweep_at(t0 + Duration::from_millis(1000)), Vec::<String>::new());
+        assert_eq!(state_lines(&events).len(), 2, "the change after the first line is owed, not lost");
+
+        assert_eq!(w.sweep_at(t0 + Duration::from_millis(2500)), Vec::<String>::new());
+        assert_eq!(state_lines(&events).len(), 2, "nothing is owed without a change");
+
+        std::fs::remove_file(&path).ok();
+        std::fs::remove_file(&events).ok();
+    }
+
+    /// The cue belongs to a roster file: a path outside the roster raises
+    /// nothing, and a roster file's own change still raises its line.
+    #[test]
+    fn a_path_outside_the_roster_raises_no_state_line() {
+        let watched = short_tmp("state-watched");
+        let outside = short_tmp("state-outside");
+        std::fs::write(&watched, b"{}").unwrap();
+        std::fs::write(&outside, b"{}").unwrap();
+        let (feed, events) = scratch_feed("state-roster");
+        let mut w = HandEditWatcher::new(vec![watched.clone()], feed);
+        let t0 = Instant::now();
+        assert_eq!(w.sweep_at(t0), Vec::<String>::new());
+
+        std::fs::write(&outside, b"{\"x\":1}").unwrap();
+        w.note_own_write_at(&outside, t0);
+        assert!(state_lines(&events).is_empty(), "{:?}", state_lines(&events));
+
+        std::fs::write(&watched, b"{\"x\":1}").unwrap();
+        assert_eq!(w.sweep_at(t0), vec![base_name(&watched)]);
+        assert_eq!(state_lines(&events).len(), 1);
+
+        std::fs::remove_file(&watched).ok();
+        std::fs::remove_file(&outside).ok();
+        std::fs::remove_file(&events).ok();
     }
 }

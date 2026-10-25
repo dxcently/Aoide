@@ -852,9 +852,10 @@ count.
   backends" section for the full flow; `events tail`, appended newest, P-D3
   (`docs/architecture/AOIDED.md`) — a foreground, line-mode follow of
   `aoided`'s own events feed (the secrets-feed mirror's name-only lines,
-  the #69 hand-edit watcher, and any future tick producer), `--class`
-  filtering to matching event classes (comma-separated), blocking until
-  Ctrl-C; CLI-only, the same door-policy shape `secrets watch` already holds
+  the #69 hand-edit watcher and its `state` cues, and any future tick
+  producer), `--class` filtering to matching event classes (comma-
+  separated), blocking until Ctrl-C; CLI-only, the same door-policy shape
+  `secrets watch` already holds
   for a foreground/blocking command — see `crates/server/README.md`'s
   "Named seams" section for the producer/tail mechanism; `node hub`,
   appended newest, P-D5 (`docs/architecture/AOIDED.md`'s "The hub option")
@@ -1256,6 +1257,31 @@ a harness (`/tmp/x/claude`, `./claude`, `env /tmp/x/claude`) is held like any
 other argv, and so is any argv the walk does not recognise. Held entries launch
 only through `pending approve` on a human door. Nothing is refused outright. A launched harness is an agent with its
 own shell, so it can steer its own child; that residual is accepted.
+
+### The `state` cue on aoided's events feed
+
+Every stage file `aoided` watches (the six in `daemon::stage_roster`) raises
+a `class:"state"` line when its `(mtime, len)` moves, whoever moved it: a hand
+edit (which also raises its `hand-edit` audit line), a dispatched write, or the
+tick's own reconcile, seal and reap writes. The line keeps the feed's usual
+envelope:
+
+```json
+{"v":0,"ts":1756100000,"class":"state","kind":"changed","source":"aoided","payload":{"files":["sessions.json"]}}
+```
+
+`payload.files` names the file by base name, as a `hand-edit` line's
+`payload.file` does. The line is a cue to re-read and is name-only: it says
+that the file changed, never what changed. A subscriber receives it through
+`subscribe` with `"classes":["state"]`, and `aoide events tail --class state
+--json` prints it verbatim.
+
+Coalescing is per file: at most one `state` line per file per second. A change
+that lands inside that second writes nothing at once. The first tick after the
+second closes writes one line for the file, so no change is lost and a burst
+cannot flood the feed. A write that changes two files raises one line for each,
+so one `session start`, which writes `sessions.json` and `graph.json`, raises
+two.
 
 ---
 

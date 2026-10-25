@@ -197,6 +197,15 @@ a2a spawn probe needs `/bin/sh` + `printf`'s byte-exact output.
   already fails closed to `pending` — not because this fix re-derives the
   real caller's identity, but because the daemon's own ancestry is
   architecturally incapable of impersonating one.
+- **The `state` cue has one writer and one clock.** `HandEditWatcher` writes
+  every `state` line itself, through the `FeedWriter` it was built with.
+  `note_own_write` and `sweep` each raise an immediate line when a roster
+  file moved and its window is closed. Coalescing is per roster file: a move
+  inside `STATE_WINDOW` sets the file's `owed` flag, and only `sweep` releases
+  an owed line, the first one after the window closes. Keep the release in
+  `sweep`, since the tick is the clock. A path outside the roster raises
+  nothing. `serve_daemon` never sweeps, so its owed lines wait; it is
+  test-only, and the production tick is the only release.
 - **`producers::HandEditWatcher` is ONE shared `Arc<Mutex<..>>` instance
   (`daemon::SharedHandEditWatcher`), not tick-private (task #92).** A
   dispatched session command writes stage files on `handle_conn`'s own

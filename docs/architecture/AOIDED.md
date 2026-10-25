@@ -101,8 +101,8 @@ pub struct Follower { /* moved verbatim from secrets::watch */ }
 ```
 
 `class` is the existing `EventClass` kebab vocabulary
-(`protocol/src/audit.rs:73` — `audit`/`gate`/`rice`/`content`/
-`notification`/`secret`); `kind` is producer-specific; `payload` is
+(`protocol/src/audit.rs`, `EventClass` — `audit`/`gate`/`content`/
+`notification`/`secret`/`state`); `kind` is producer-specific; `payload` is
 name-only data. `EventClass::Secret`'s no-`untrusted_data` ban and
 `Notification`'s data-never-code rule carry over verbatim: a forwarded
 title rides inside `payload` as an opaque string field, never anywhere a
@@ -171,6 +171,11 @@ of its own writes; a tick that finds a file changed with no daemon write in
 between emits `{"class":"audit","kind":"hand-edit","payload":{"file":"sessions.json"}}`
 and re-baselines. Detection and narration only — the daemon never reverts a
 hand edit.
+
+Every change the sweep finds, and every daemon-side write (`note_own_write`),
+also raises a `class:"state"` line for its file, coalesced to one per file per
+second (CONTRACTS.md's "The `state` cue on aoided's events feed"). The
+hand-edit line is unchanged; the state line sits beside it.
 
 ### The loop and the unit
 
