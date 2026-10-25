@@ -752,7 +752,9 @@ Contract guarantees:
   never at the MCP, A2A or aoided-socket doors, where an outcome is data;
   the global `--color=auto|always|never` (also `--color <mode>`), read once by
   the CLI door before parsing and ignored after a bare `--`, overrides the
-  environment but never `--json`.
+  environment but never `--json`. The trace's dim (`session trace`) follows this
+  rule, except that `--color` does not reach it: the trace builds its text
+  before the door renders.
 - **Exit codes and the refusal shape.** `2` means the invocation can never be
   valid whatever the world looks like: a missing, unknown or ill-typed
   argument, flag or value, or a command typed at the wrong binary (`strx spawn …` names `aoide spawn …`
@@ -3957,15 +3959,17 @@ unavailable or negative answer prevents that export. Probe and export are
 separate invocations; replacing the runtime between them can still race.
 
 The record in `state/stage/sessions.json` for such a session carries its
-`logPath`, the journal the session named. `aoide session trace` takes its
-sources in order: the presence metadata at
+`logPath`: for a session enrolled from its presence, the journal the session
+named; for a conducted session, its wrapper log, `session_logs_dir()/<id>.log`,
+which is never a journal. `aoide session trace` takes its sources in order: the
+presence metadata at
 `$XDG_RUNTIME_DIR/eidolon/<id>/meta.json`, whose `log` field every generation
 writes and whose `trace` field the installed one adds; then the record's
 `logPath`, or, for a session that has left the roster, the newest exact ledger
 line's `logPath`. Each `logPath` is a source only outside `session_logs_dir()`.
 Aoide's presence parse yields both, and
 `aoide_protocol::agents::eidolon_transcript_locate` answers the mirror while it
-is current, else the journal when the door is there, else `meta.json` as before.
+is current, else the journal when the door is there, else `meta.json`.
 `aoide session trace` resolves a path the same way, through
 `TranscriptSpec::locate` — never a path of its own.
 
@@ -4023,14 +4027,15 @@ shows its thinking (dimmed, cut) then its text then each `→ tool(name)`, a
 tool result shows its first line prefixed `!` when `is_error`, and a settled
 turn shows its stop reason and input/output tokens. `--tail N` shows the
 last N records (default 50); `--follow` re-reads for new lines until Ctrl-C
-(CLI-only); `--json` passes the lines through, each stripped of the characters
-a terminal may not be handed. Read-only — no
+(CLI-only); `--json` carries `data.lines`, the journal's own JSON lines: raw
+unsafe characters removed, JSON escapes kept, so a decoded line holds untrusted
+strings, and a consumer shows `data.steps`. Read-only — no
 stage write, no daemon. A session whose harness keeps no trace, or whose
 presence names none, is a taught error naming which of the two it is, never
 an empty listing. A session that has left the roster is named by its ledger
 line, by exact `sessionId` only: its journal is the trace, its message says it
 ended and when, and `--follow` prints the window and returns. A `done` record
-prints its window the same way, and `--follow` returns for it too.
+prints its window with no ended line, and `--follow` returns for it too.
 
 ### `state/stage/projects.json` — **v0**
 

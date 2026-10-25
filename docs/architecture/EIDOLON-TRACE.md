@@ -203,10 +203,11 @@ carries whatever the journal carries; that fix is harnox's.
   line per record (`#id  hh:mm:ss  kind  summary` — assistant: thinking dimmed
   and cut, text, tool names; tool result: first line, `!` on error;
   settled: stop reason, tokens), and the summary is RENDERED from the same
-  projector `--json` publishes, so the two cannot drift. `--json` passes the
-  lines through in `data.lines`, each stripped of the characters no terminal
-  may be handed, beside `data.steps`: the same
-  window PROJECTED, one object per emitted content block, in the record's own
+  projector `--json` publishes, so the two cannot drift. `--json` carries
+  `data.lines`, the journal's own JSON lines: raw unsafe characters removed and
+  JSON escapes kept, so a decoded line holds untrusted strings. Beside it,
+  `data.steps` is the same window PROJECTED, one object per emitted content
+  block, in the record's own
   order — `{ id, ts, kind, text, error, clipped }` with `kind` in `thinking ·
   say · tool · result · settled · user · other`, `id`/`ts` the record's own
   (`ts` epoch ms, null when the record carried none), `clipped` true when the

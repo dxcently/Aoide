@@ -3966,18 +3966,55 @@ mod tests {
     #[cfg(unix)]
     fn with_session_logs<T>(name: &str, f: impl FnOnce(&std::path::Path) -> T) -> T {
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let saved = std::env::var("AOIDE_STATE_DIR").ok();
+        in_session_logs(name, f)
+    }
+
+    /// The scope of [`with_session_logs`], for a caller that already holds
+    /// `crate::env_lock()`.
+    /// Restores `AOIDE_STATE_DIR` and removes the temp root when it drops, so a
+    /// closure that panics leaves neither set.
+    struct SessionLogsScope {
+        saved: Option<String>,
+        root: std::path::PathBuf,
+    }
+
+    impl Drop for SessionLogsScope {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.root);
+            match self.saved.take() {
+                Some(v) => std::env::set_var("AOIDE_STATE_DIR", v),
+                None => std::env::remove_var("AOIDE_STATE_DIR"),
+            }
+        }
+    }
+
+    /// The scope of [`with_session_logs`], for a caller that already holds
+    /// `crate::env_lock()`.
+    fn in_session_logs<T>(name: &str, f: impl FnOnce(&std::path::Path) -> T) -> T {
         let root = std::env::temp_dir().join(format!("aoide-inside-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
+        let _scope = SessionLogsScope { saved: std::env::var("AOIDE_STATE_DIR").ok(), root: root.clone() };
         std::env::set_var("AOIDE_STATE_DIR", root.join("state"));
         std::fs::create_dir_all(super::session_logs_dir()).unwrap();
-        let out = f(&root);
-        let _ = std::fs::remove_dir_all(&root);
-        match saved {
+        f(&root)
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_panicking_session_logs_scope_leaves_the_state_dir_as_it_was() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let before = std::env::var("AOIDE_STATE_DIR").ok();
+        std::env::set_var("AOIDE_STATE_DIR", "/sentinel/state");
+        let caught = std::panic::catch_unwind(|| {
+            in_session_logs("panics", |_| -> () { panic!("the closure panics") });
+        });
+        let after = std::env::var("AOIDE_STATE_DIR").ok();
+        match before {
             Some(v) => std::env::set_var("AOIDE_STATE_DIR", v),
             None => std::env::remove_var("AOIDE_STATE_DIR"),
         }
-        out
+        assert!(caught.is_err(), "the closure panics");
+        assert_eq!(after.as_deref(), Some("/sentinel/state"), "a panic leaves the state dir set");
     }
 
     #[cfg(unix)]

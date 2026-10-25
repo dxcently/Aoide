@@ -1042,12 +1042,14 @@ blank one is refused too.
   `#<id>  <hh:mm:ss local>  <kind>  <summary>` — an assistant message shows its
   thinking (dimmed, cut to 80) then its text then each `→ tool(name)`, a tool
   result shows its first line prefixed `!` when it errored, a settled turn shows
-  its stop reason and input/output tokens; `--json` passes the lines through,
-  each stripped of the characters no terminal may be handed, `--follow` re-reads
+  its stop reason and input/output tokens; `--json` carries `data.lines`, the
+  journal's own JSON lines (raw unsafe characters removed, JSON escapes kept, so
+  a decoded line holds untrusted strings; a consumer shows `data.steps`),
+  `--follow` re-reads
   every 500ms until Ctrl-C (CLI-only), `--tail N` shows the last N (default 50).
   The dim follows CONTRACTS's color rule (a tty only, never for `NO_COLOR`,
-  `TERM=dumb` or `--json`); the door's `--color` does not reach it, since the
-  trace builds its text before the door renders. **Read-only, and so outside
+  `TERM=dumb` or `--json`, and only at the CLI door); the door's `--color` does
+  not reach it, since the trace builds its text before the door renders. **Read-only, and so outside
   every other discipline in this file:** no stage write, no stage lock, no
   `daemon_dispatch` — unlike the L4 session-WRITE family above, there is nothing
   to route. `<id>` resolves through `aoide_storage::addr::resolve`, the SAME
@@ -1067,7 +1069,8 @@ blank one is refused too.
   unless it lies in `session_logs_dir()`. Nothing else is matched against the
   ledger. Every text the trace prints or puts in its data is stripped of the
   characters no terminal may be handed
-  (`aoide_protocol::untrusted::strip_unsafe`), under the trace's own clips.
+  (`aoide_protocol::untrusted::strip_unsafe`), under the trace's own clips,
+  except `data.lines` (above).
 - **The step projection (Phase B, `graph/trace.rs`) — the SAME window, as
   steps.** `data.steps` (beside `data.lines`) is one object per
   emitted content block, projected by `steps_of`/`steps_of_lines`: one step per

@@ -67,7 +67,7 @@ use aoide_protocol::agents::{agent_profile, eidolon_trace_record, TraceRecord};
 use aoide_protocol::output::Outcome;
 use aoide_protocol::style::{Color, Stream, Style};
 use aoide_protocol::untrusted::strip_unsafe;
-use aoide_protocol::Invocation;
+use aoide_protocol::{Door, Invocation};
 use aoide_storage::addr::{self, LocalCandidate, Resolution};
 use serde_json::{json, Value};
 use std::collections::HashSet;
@@ -838,6 +838,7 @@ pub fn session_trace(inv: &Invocation) -> Outcome {
     };
     let json_mode = inv.flag_present("json");
     let follow = inv.flag_present("follow");
+    let dim = inv.door == Door::Cli && Style::for_stream(Color::Auto, json_mode, Stream::Out) == Style::ON;
 
     // `<id>` resolves exactly like `send --to`: the ONE
     // `aoide_storage::addr::resolve`, over this box's live roster plus its
@@ -861,41 +862,44 @@ pub fn session_trace(inv: &Invocation) -> Outcome {
     let nodes = aoide_storage::node_store::load_nodes();
     let node_names: Vec<&str> = nodes.iter().map(|p| p.name.as_str()).collect();
 
+    let echo_target = strip_unsafe(&target);
     let (id, ended) = match addr::resolve(&target, &host, &candidates, &node_names) {
         Resolution::Local(id) => (id, None),
         Resolution::Remote { node, .. } => {
+            let node = strip_unsafe(&node);
             return Outcome::error(
                 cmd,
                 format!(
-                    "`{target}` resolves to a session on node `{node}` — a trace is a file on the \
+                    "`{echo_target}` resolves to a session on node `{node}` — a trace is a file on the \
                      node that wrote it, so run `session trace` there"
                 ),
             )
-            .with_data(json!({ "reason": "remote-target", "node": node, "target": target }));
+            .with_data(json!({ "reason": "remote-target", "node": node, "target": echo_target }));
         }
         Resolution::Ambiguous(found) => {
+            let found: Vec<String> = found.iter().map(|f| strip_unsafe(f)).collect();
             return Outcome::error(
                 cmd,
                 format!(
-                    "`{target}` is ambiguous — {} local session(s) match: {}",
+                    "`{echo_target}` is ambiguous — {} local session(s) match: {}",
                     found.len(),
                     found.join(", ")
                 ),
             )
-            .with_data(json!({ "reason": "ambiguous", "target": target, "candidates": found }));
+            .with_data(json!({ "reason": "ambiguous", "target": echo_target, "candidates": found }));
         }
         Resolution::NotFound => match ledger_ended(&target) {
             Some(entry) => (entry.session_id.clone(), Some(entry)),
             None => {
                 let hint = if !target.contains('/') && node_names.contains(&target.as_str()) {
                     format!(
-                        " (`{target}` names a known node, not a local session — did you mean `{target}/<session>`?)"
+                        " (`{echo_target}` names a known node, not a local session — did you mean `{echo_target}/<session>`?)"
                     )
                 } else {
                     String::new()
                 };
-                return Outcome::error(cmd, format!("no session matches `{target}`{hint}"))
-                    .with_data(json!({ "reason": "not-found", "target": target }));
+                return Outcome::error(cmd, format!("no session matches `{echo_target}`{hint}"))
+                    .with_data(json!({ "reason": "not-found", "target": echo_target }));
             }
         },
     };
@@ -978,15 +982,14 @@ pub fn session_trace(inv: &Invocation) -> Outcome {
 
     // An ended session has no presence left to follow: its window is printed once.
     if follow && ended.is_none() && !row.is_some_and(|r| r.state == "done") {
-        return follow_trace(cmd, &id, &name, &path, read_trace, tail, json_mode);
+        return follow_trace(cmd, &id, &name, &path, read_trace, tail, json_mode, dim);
     }
 
     let shown = last_lines(&lines, tail);
-    let dim = Style::for_stream(Color::Auto, json_mode, Stream::Out) == Style::ON;
     let raw: Vec<String> = shown.iter().map(|l| strip_unsafe(l.as_str())).collect();
     let body: Vec<String> = shown.iter().map(|l| render_any(l, dim)).collect();
     let mut message = match &ended {
-        Some(entry) => format!("{} record(s) · {name} · ended {}", body.len(), entry.ended_at),
+        Some(entry) => format!("{} record(s) · {name} · ended {}", body.len(), strip_unsafe(&entry.ended_at)),
         None => format!("{} record(s) · {name}", body.len()),
     };
     if !json_mode && !body.is_empty() {
@@ -1009,7 +1012,7 @@ pub fn session_trace(inv: &Invocation) -> Outcome {
             "clip": clip.name(),
             "steps": steps,
             "stepsOmitted": omitted,
-            "endedAt": ended.as_ref().map(|e| e.ended_at.clone()),
+            "endedAt": ended.as_ref().map(|e| strip_unsafe(&e.ended_at)),
         }))
 }
 
@@ -1037,12 +1040,12 @@ fn follow_trace(
     read_trace: fn(&Path) -> Option<Vec<String>>,
     tail: usize,
     json_mode: bool,
+    dim: bool,
 ) -> Outcome {
     use std::io::Write;
     unsafe {
         libc::signal(libc::SIGINT, on_sigint as *const () as libc::sighandler_t);
     }
-    let dim = Style::for_stream(Color::Auto, json_mode, Stream::Out) == Style::ON;
     let emit = |line: &str| {
         println!("{}", followed_line(line, json_mode, dim));
         let _ = std::io::stdout().flush();
@@ -1957,6 +1960,77 @@ mod tests {
                 assert!(no_unsafe(step[key].as_str().unwrap()), "{key}: {step}");
             }
         }
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_not_found_target_echoes_no_unsafe_character() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&env_keys());
+        let root = roster_free_fixture("trace-echo-not-found");
+
+        let out = session_trace(&trace_invocation(&["no\u{1b}such\u{202e}session"], &[]));
+        assert_eq!(out.status, Status::Error, "msg: {}", out.message);
+        assert!(out.message.chars().all(|c| c == '\n' || !is_unsafe(c)), "message: {:?}", out.message);
+        let data = out.data.clone().unwrap();
+        assert!(no_unsafe(data["target"].as_str().unwrap()), "data: {data}");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_ledger_ended_at_with_an_escape_echoes_no_unsafe_character() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&env_keys());
+        let root = roster_free_fixture("trace-echo-ended");
+        let journal = journal_fixture(&root.join("journals"), "Aoide-ended-esc", &[START, USER]);
+        aoide_storage::ledger::append_ledger_entry(&aoide_storage::ledger::LedgerEntry {
+            session_id: "Aoide-ended-esc".into(),
+            agent: "eidolon".into(),
+            cwd: "/home/khoa".into(),
+            petname: Some("quiet-finch".into()),
+            ended_at: "2026-08-20T01:00:00Z\u{1b}[31m".into(),
+            log_path: Some(journal),
+            ..Default::default()
+        })
+        .unwrap();
+
+        let out = session_trace(&trace_invocation(&["Aoide-ended-esc"], &[]));
+        assert_eq!(out.status, Status::Ok, "msg: {}", out.message);
+        assert!(out.message.chars().all(|c| c == '\n' || !is_unsafe(c)), "message: {:?}", out.message);
+        let data = out.data.clone().unwrap();
+        assert!(no_unsafe(data["endedAt"].as_str().unwrap()), "data: {data}");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_dimmed_render_of_a_hostile_line_wraps_only_stripped_text() {
+        for line in hostile_lines() {
+            let out = render_any(&line, true);
+            let bare = out.replace("\u{1b}[2m", "").replace("\u{1b}[0m", "");
+            assert!(no_unsafe(&bare), "the dim pair must wrap stripped text only: {out:?}");
+        }
+    }
+
+    #[test]
+    fn data_lines_keeps_the_journal_escapes_and_drops_the_raw_characters() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&env_keys());
+        let root = roster_free_fixture("trace-lines-pin");
+        let line = json!({"id": 1, "parent": 0, "ts_ms": 1789603005570u64, "kind": {"UserMessage": {"role": "user", "content": [{"type": "text", "text": "red \u{1b}[31mtext \u{202e}rtl"}]}}}).to_string();
+        let journal = journal_fixture(&root.join("journals"), "Aoide-lines", &[line.as_str()]);
+        ended_eidolon("Aoide-lines", "loud-wren", &journal);
+
+        let out = session_trace(&trace_invocation(&["Aoide-lines"], &[]));
+        assert_eq!(out.status, Status::Ok, "msg: {}", out.message);
+        let data = out.data.clone().unwrap();
+        let raw = data["lines"][0].as_str().unwrap();
+        assert!(raw.contains("\\u001b[31m"), "the escape stays as its six characters: {raw}");
+        assert!(no_unsafe(raw), "the raw bidi override is stripped: {raw:?}");
+        let text = data["steps"][0]["text"].as_str().unwrap();
+        assert!(no_unsafe(text), "{text:?}");
 
         let _ = std::fs::remove_dir_all(&root);
     }

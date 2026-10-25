@@ -829,9 +829,12 @@ in the message.
   follow.
 - **Trace text is stripped on the way out.** Every text `session_trace` prints
   or puts in its data passes `aoide_protocol::untrusted::strip_unsafe`, under
-  the trace's own clips: `one_line_clipped` counts what is shown, and
-  `clip_keep_ws` makes a tab one space first. `--follow --json` lines are
-  stripped too. A new text site the trace prints gets the same strip.
+  the trace's own clips, except `data.lines` and `--follow --json`: the
+  journal's own JSON lines, with raw unsafe characters removed and JSON escapes
+  kept, so a decoded line holds untrusted strings and a consumer shows
+  `data.steps`. `one_line_clipped` counts what is shown, and `clip_keep_ws`
+  makes a tab one space first. A new text site the trace prints gets the same
+  strip.
 - **A record's `logPath` is the trace's hint only outside
   `session_logs_dir()`.** It goes to `TranscriptSpec::locate` as the hint,
   the way `dropped_this_pass` passes it. A path inside `session_logs_dir()` is
@@ -2022,7 +2025,9 @@ in the message.
   symbolic link (its own sentence, read with `symlink_metadata`), or not a
   regular file. The refusal is the candidate's skip reason, the same sentence
   the launch and the dry run show. Don't give it a terminal-arm fallback, and
-  don't read a `logPath` under `session_logs_dir()` as a journal.
+  don't read a `logPath` under `session_logs_dir()` as a journal. The check is
+  not a lock: a link swapped in after it is followed by `eidolon tui` (same
+  uid, ruling 29).
 - **One engine per session is decided before the spawn, under the stage
   lock (`claim_resume`).** The claim is the only write a launch makes before
   its spawn, and it runs before `launch_session`. The presence scan is read
