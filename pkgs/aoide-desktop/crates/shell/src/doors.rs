@@ -77,11 +77,14 @@ pub enum Event {
     Frame { launch_id: String, frame: Box<Frame> },
     /// A door marked for closing has gone idle. The caller answers `close_due`.
     CloseDue { launch_id: String },
+    /// An armed door's mark was withdrawn, because the stream that carried its turn
+    /// ended and no close holds the mark. `why` says so, and nothing is closed.
+    Revoked { launch_id: String, why: String },
     /// A door's stream ended and the door is gone. Its record is dropped.
     Gone { launch_id: String },
     /// A record whose door is not the one recorded: the pid gone or a zombie,
-    /// another start time, another command line, or a changed pin. The record
-    /// is dropped, and the pid, which was not signalled, is named.
+    /// another start time, or another command line. The record is dropped, and
+    /// the pid, which was not signalled, is named.
     Dropped { launch_id: String, pid: u32, why: String },
     /// A door that could not be checked or used, for any other reason. Sent once
     /// per failure streak: its record is kept, and the watch tries again each
@@ -277,10 +280,14 @@ impl Store {
     }
 
     /// The record under the lock. A store directory that does not exist yet holds
-    /// no record, and opening the store makes no directory for it.
+    /// no record, and opening the store makes no directory for it. A link in its
+    /// place, dangling or not, is refused by the lock, as `make_private_dir`
+    /// refuses it.
     fn load(&self) -> Result<Vec<Entry>, DoorsError> {
-        if !self.dir.exists() {
-            return Ok(Vec::new());
+        match fs::symlink_metadata(&self.dir) {
+            Ok(_) => {}
+            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(e) => return Err(e.into()),
         }
         let _lock = self.lock()?;
         self.read()
@@ -360,11 +367,12 @@ impl Doors {
     /// list it returns, and none is sent on the channel: `Event::Dropped` for a
     /// record whose door is not the one recorded, which is dropped and never
     /// signalled, and `Event::Unwatched` for a record no watch could start for,
-    /// which is kept, so the next open tries again. A door whose check fails for
-    /// any other reason is watched anyway, and its watch reports the failure and
-    /// tries again. An unset or refused runtime dir, a record that is a link or
-    /// does not parse, and a directory that is not private, refuse the open
-    /// before anything is touched.
+    /// which is kept, so the next open tries again. A record whose removal cannot
+    /// be written is still reported, and the next open checks it again. A door
+    /// whose check fails for any other reason is watched anyway, and its watch
+    /// reports the failure and tries again. An unset or refused runtime dir, a
+    /// record that is a link or does not parse, and a directory that is not
+    /// private, refuse the open before anything is touched.
     pub fn open(
         exec: Exec,
         root: &Path,
@@ -386,7 +394,7 @@ impl Doors {
                 Ok(()) => {}
                 Err(Check::Identity(why)) => {
                     let id = entry.launch_id.clone();
-                    doors.store.update(|es| es.retain(|e| e.launch_id != id))?;
+                    let _ = doors.store.update(|es| es.retain(|e| e.launch_id != id));
                     events.push(Event::Dropped { launch_id: id, pid: entry.pid, why: visible(&why) });
                 }
                 Err(Check::Other(why)) => {
@@ -496,14 +504,20 @@ impl Doors {
     }
 
     /// The caller's answer to `CloseDue`: closes the door if its mark still
-    /// stands. A turn that is not idle keeps the mark armed.
+    /// stands. A turn that is not idle keeps the mark armed. Any other answer,
+    /// `StillLive` included, withdraws it, so a door that outlives its close is
+    /// not asked again.
     pub fn close_due(&mut self, id: &str) -> Result<Close, DoorsError> {
-        if !self.watch(id)?.link.state.lock().unwrap().armed {
+        let link = self.watch(id)?.link.clone();
+        if !link.state.lock().unwrap().armed {
             return Ok(Close::Revoked);
         }
         match self.close_now(id)? {
             Close::Busy => Ok(Close::StaysArmed),
-            other => Ok(other),
+            other => {
+                link.state.lock().unwrap().armed = false;
+                Ok(other)
+            }
         }
     }
 
@@ -994,11 +1008,26 @@ impl Worker {
         seen
     }
 
+    /// Ends a stream. A new stream's turn is unknown, so an armed mark is withdrawn
+    /// and the caller hears so, unless a close holds it, since that close shut this
+    /// stream itself, or the door has exited, which the watch reports as `Gone`.
     fn end_stream(&self) {
-        let mut shared = self.link.state.lock().unwrap();
-        shared.closer = None;
-        shared.turn = TurnState::Unknown;
+        let alive = self.alive();
+        let withdrawn = {
+            let mut shared = self.link.state.lock().unwrap();
+            shared.closer = None;
+            shared.turn = TurnState::Unknown;
+            let withdrawn = shared.armed && !shared.closing && alive;
+            if withdrawn {
+                shared.armed = false;
+            }
+            withdrawn
+        };
         self.link.moved.notify_all();
+        if withdrawn {
+            let why = "the door's stream ended, so the end of its turn cannot be seen";
+            self.deliver(Event::Revoked { launch_id: self.entry.launch_id.clone(), why: visible(why) });
+        }
     }
 
     fn stopped(&self) -> bool {
@@ -1077,17 +1106,17 @@ impl Worker {
     }
 
     /// Sends one event, waiting for room: the watch retries `try_send` each 20 ms
-    /// until the channel takes it or the watch stops. A channel whose receiver is
-    /// gone takes the event as sent.
+    /// until the channel takes it. A stopped watch sends nothing more, checked
+    /// before each try. A channel whose receiver is gone takes the event as sent.
     fn deliver(&self, event: Event) {
         let mut event = event;
         loop {
+            if self.stopped() {
+                return;
+            }
             match self.out.try_send(event) {
                 Ok(()) | Err(TrySendError::Disconnected(_)) => return,
                 Err(TrySendError::Full(back)) => {
-                    if self.stopped() {
-                        return;
-                    }
                     event = back;
                     thread::sleep(POLL);
                 }

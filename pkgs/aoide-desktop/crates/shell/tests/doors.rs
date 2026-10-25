@@ -751,6 +751,92 @@ fn a_stream_that_ends_with_its_door_gone_drops_the_record() {
     assert!(world.record_ids().is_empty(), "the record of a door that ended on its own is dropped");
 }
 
+#[test]
+fn a_stream_that_ends_in_a_turn_revokes_the_mark_and_no_close_is_due_after_its_reconnect() {
+    let world = World::new("gap");
+    let (tx, rx) = mpsc::sync_channel(EVENTS_BOUND);
+    let mut doors = world.open(tx);
+    let id = world.launch(&mut doors);
+    world.command("running");
+    assert!(until(Duration::from_secs(5), || doors.turn(&id).unwrap() == TurnState::Running));
+    assert_eq!(doors.close_after_turn(&id).unwrap(), Close::Armed);
+    world.command("end");
+    assert!(until(Duration::from_secs(10), || world.count("GET /api/events") == 2), "the stream reopens");
+    world.command("running");
+    assert!(until(Duration::from_secs(5), || doors.turn(&id).unwrap() == TurnState::Running));
+    world.command("idle");
+    let mut seen = events_through(&rx, |e| matches!(e, Event::Frame { frame, .. } if matches!(**frame, Frame::TurnState { running: false })));
+    thread::sleep(Duration::from_millis(200));
+    seen.extend(rx.try_iter());
+    let revoked = seen.iter().filter(|e| matches!(e, Event::Revoked { .. })).count();
+    assert_eq!(revoked, 1, "the stream's end revokes the mark once: {seen:?}");
+    assert!(!seen.iter().any(|e| matches!(e, Event::CloseDue { .. })), "no close is due for a mark the stream end withdrew: {seen:?}");
+    assert_eq!(world.count("SIGTERM"), 0, "nothing was signalled");
+    assert!(alive(world.pid(&id)), "the door still runs");
+}
+
+#[test]
+fn a_door_that_outlives_its_close_is_not_asked_to_close_again_when_a_later_turn_ends() {
+    let world = World::new("second-due");
+    set_mode(&world, "ignore-sigterm");
+    let (tx, rx) = mpsc::sync_channel(EVENTS_BOUND);
+    let mut doors = world.open(tx);
+    let id = world.launch(&mut doors);
+    world.command("running");
+    assert!(until(Duration::from_secs(5), || doors.turn(&id).unwrap() == TurnState::Running));
+    assert_eq!(doors.close_after_turn(&id).unwrap(), Close::Armed);
+    world.command("idle");
+    event_where(&rx, |e| matches!(e, Event::CloseDue { .. }));
+    assert_eq!(doors.close_due(&id).unwrap(), Close::StillLive, "the door outlives its 10 s bound");
+    assert!(until(Duration::from_secs(10), || world.count("GET /api/events") == 2), "the watch reopens its stream");
+    world.command("running");
+    assert!(until(Duration::from_secs(5), || doors.turn(&id).unwrap() == TurnState::Running));
+    world.command("idle");
+    let mut seen = events_through(&rx, |e| matches!(e, Event::Frame { frame, .. } if matches!(**frame, Frame::TurnState { running: false })));
+    thread::sleep(Duration::from_millis(200));
+    seen.extend(rx.try_iter());
+    world.command("cancel-409");
+    assert!(until(Duration::from_secs(5), || world.count("control cancel-409") == 1), "the 409 is queued");
+    let second = doors.stop_now(&id).unwrap();
+    assert!(!seen.iter().any(|e| matches!(e, Event::CloseDue { .. })), "a later idle turn asks for no second close: {seen:?}");
+    assert!(matches!(second, Close::Exited { .. }), "the door ignored its first SIGTERM and exits on the second: {second:?}");
+}
+
+#[test]
+fn stop_now_on_a_full_channel_drained_by_another_thread_closes_the_door() {
+    let world = World::new("stop-full");
+    let (tx, rx) = mpsc::sync_channel(1);
+    let mut doors = world.open(tx);
+    let id = world.launch(&mut doors);
+    world.command("running");
+    assert!(until(Duration::from_secs(5), || doors.turn(&id).unwrap() == TurnState::Running));
+    // The running frame fills the one-slot channel. Another thread drains it from
+    // shortly after, so the turn's end waits behind the frame, then is delivered.
+    let drain = thread::spawn(move || {
+        thread::sleep(Duration::from_millis(100));
+        rx.iter().count()
+    });
+    let outcome = doors.stop_now(&id).expect("stop now answers");
+    assert!(matches!(outcome, Close::Exited { .. }), "the turn's end is seen and the door closes: {outcome:?}");
+    drop(doors);
+    drain.join().expect("the other thread drains until the channel closes");
+}
+
+#[test]
+fn a_close_that_exits_sends_no_gone_or_dropped_within_a_second() {
+    let world = World::new("exit-quiet");
+    let (tx, rx) = mpsc::sync_channel(EVENTS_BOUND);
+    let mut doors = world.open(tx);
+    let id = world.launch(&mut doors);
+    world.command("idle");
+    assert!(until(Duration::from_secs(5), || doors.turn(&id).unwrap() == TurnState::Idle));
+    let outcome = doors.close_after_turn(&id).unwrap();
+    assert!(matches!(outcome, Close::Exited { .. }), "{outcome:?}");
+    thread::sleep(Duration::from_secs(1));
+    let after: Vec<Event> = rx.try_iter().collect();
+    assert!(!after.iter().any(|e| matches!(e, Event::Gone { .. } | Event::Dropped { .. })), "after the exit: {after:?}");
+}
+
 // --- the asks ---
 
 const APPROVAL: &str = r#"{"path":"a.txt"}"#;
@@ -1348,22 +1434,18 @@ fn a_store_directory_that_is_a_link_is_refused_and_nothing_is_written_through_it
 }
 
 #[test]
-fn a_store_directory_that_links_to_nothing_opens_empty_and_its_first_write_is_refused() {
+fn a_store_directory_that_links_to_nothing_refuses_the_open() {
     let world = World::new("dangling-dir");
     let target = world.dir.join("missing");
     fs::create_dir_all(world.store().parent().unwrap().parent().unwrap()).unwrap();
     std::os::unix::fs::symlink(&target, world.store().parent().unwrap()).unwrap();
     let (tx, _rx) = mpsc::sync_channel(EVENTS_BOUND);
-    let (mut doors, events) = Doors::open(
-        world.exec(),
-        &world.root(),
-        Some(world.runtime().as_os_str()),
-        tx,
-    )
-    .expect("the doors open with no record");
-    assert!(events.is_empty() && doors.launch_ids().is_empty());
-    let refused = doors.launch(&world.plan());
-    assert!(matches!(&refused, Err(DoorsError::Store(why)) if why.contains("is a link")), "{refused:?}");
+    let refused = Doors::open(world.exec(), &world.root(), Some(world.runtime().as_os_str()), tx);
+    assert!(
+        matches!(&refused, Err(DoorsError::Store(why)) if why.contains("is a link")),
+        "a store directory that links to nothing is refused at open: {:?}",
+        refused.map(|_| ())
+    );
     assert!(!target.exists(), "nothing is created through the link");
 }
 

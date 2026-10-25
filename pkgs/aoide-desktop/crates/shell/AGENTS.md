@@ -116,11 +116,16 @@ are in README.md.
 - `Doors::open` returns its events in a list and sends none on the channel.
   `launch` returns `DoorsError::Unwatched` for a record no watch could start
   for. Re-attach of a record whose check fails for another reason starts its
-  watch unattached, so the watch reports the failure.
+  watch unattached, so the watch reports the failure. The loop has no `?`: a
+  failed removal of a dropped record is ignored, its `Dropped` is still listed,
+  and every later record is still read.
 - The events channel is bounded at `EVENTS_BOUND` (64). Every watch event goes
   through `deliver`, which waits for room, retrying each 20 ms until the channel
-  takes it or the watch stops. A full channel holds the watch and its stream;
-  nothing is dropped while a watch runs.
+  takes it. A stopped watch sends nothing more, checked before each try. A full
+  channel holds the watch and its stream; nothing is dropped while a watch runs.
+  The drain is the caller's contract: a caller that stops draining holds the
+  watch on its next event, so a stop now that waits for a turn's end runs its
+  bound and reports `NoTurnEnd`.
 - `Unwatched` is sent once per failure streak. The watch then tries again every
   `REOPEN` while its pidfd's process lives, and the frames resume when a try
   works. An identity failure on a try sends `Dropped` and ends the watch.
@@ -132,6 +137,9 @@ are in README.md.
   an armed door's turn ends. The caller answers `CloseDue` with `close_due`. The
   watch writes the record in two places only: an identity failure (`failed`) and
   a door that is gone (`forget`), each through `Store::update`.
+- A stream's end withdraws an armed mark and sends `Event::Revoked`, unless a
+  close holds the mark (`closing`) or the door is gone. `close_due` withdraws the
+  mark after any answer but `Busy`.
 - A watch that ended is not watched. `launch_ids` leaves it out, and `watch`
   refuses it, so its calls send nothing.
 - A drop or a forget whose store write fails keeps its record. The next open
@@ -192,8 +200,8 @@ are in README.md.
   close that gap is not built: it opens the store's directory once with
   `O_NOFOLLOW | O_DIRECTORY`, checks it with `fstat`, and `openat`s the record,
   its lock and its temp file.
-- A store directory that is a link is refused at open. A dangling one opens with
-  no records, and its first write is refused.
+- A store directory that is a link is refused at open, dangling or not: `load`
+  reads its metadata without following it, and the lock refuses it.
 
 ## The asks (asks.rs)
 
@@ -281,6 +289,8 @@ are in README.md.
 - The session fill and the watch's start failing after the record is written: no
   seam makes the store's update or the thread's spawn fail. The hello failing at
   launch is tested.
+- `open`'s write of a dropped record failing, which `open` ignores: no seam makes
+  a store write fail between `load` and that write, so its loop is untested.
 - A record write that fails before the record is written, which refuses the
   launch: no seam makes the rename fail in a directory the test's uid owns.
 

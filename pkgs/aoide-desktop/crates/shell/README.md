@@ -134,7 +134,8 @@ doors.rs    Doors::open(exec, root, runtime, out)
   is refused, and it is never rewritten. A link in its place is refused
   (`O_NOFOLLOW`). The store's directory and the directories made under it are
   made 0700 and checked before use: not a link, owned by the euid, mode 0700.
-  The check is on each directory itself, not its parents.
+  The check is on each directory itself, not its parents. A store directory that
+  is a link, dangling or not, refuses the open.
 - The banner is read once through from the log's start, and both lines must lie
   in its first 64 KiB. A door that exits first, a banner past 64 KiB, an address
   that is not loopback, and a token path that is not graphic ASCII or not the
@@ -161,7 +162,8 @@ doors.rs    Doors::open(exec, root, runtime, out)
 - `Doors::open` returns its events in the list it returns, and sends none on the
   channel: one `Dropped` for each record that fails its identity check
   (removed), and one `Unwatched` for each record no watch could start for (kept,
-  and the next open tries again).
+  and the next open tries again). A removal that cannot be written is still
+  reported, and the next open checks that record again; every record is read.
 - A record whose check fails for any other reason is watched anyway, unattached.
   Its watch sends `Event::Unwatched` once per failure streak, then tries again
   every second (`REOPEN`) while its pidfd's process lives. The frames resume
@@ -169,11 +171,15 @@ doors.rs    Doors::open(exec, root, runtime, out)
 - The watch holds the door's pidfd, which is opened before its checks, so the
   checks and any signal name the same process. It reads the stream, updates the
   shared state under one lock, keeps the door's pending asks, and reports each
-  event through `deliver`: frames, `CloseDue`, `AsksOverflow`, `Unwatched`,
-  `Dropped` and `Gone`. It never signals a door.
+  event through `deliver`: frames, `CloseDue`, `Revoked`, `AsksOverflow`,
+  `Unwatched`, `Dropped` and `Gone`. It never signals a door.
 - `deliver` waits for room. It retries `try_send` every 20 ms until the channel
-  takes the event or the watch stops, so nothing is dropped while a watch runs.
-  A full channel holds the watch on its current event, with its stream open.
+  takes the event. A stopped watch delivers nothing, checked before each try, so
+  a close's detach never waits on a full channel. A full channel holds the watch
+  on its current event, with its stream open, and nothing is dropped while a
+  watch runs. The drain is the caller's contract: a caller that stops draining
+  holds the watch on whatever event is next, so a stop now that waits for a
+  turn's end runs its bound and reports `NoTurnEnd`.
 - A door keeps at most 64 pending asks. An ask past that is neither kept nor
   forwarded, and the stream sends one `AsksOverflow`, naming the first ask it
   refused.
@@ -204,7 +210,12 @@ doors.rs    Doors::open(exec, root, runtime, out)
 - `close_after_turn` closes an `Idle` door now, marks a `Running` one (`Armed`),
   and refuses an `Unknown` one. A marked door whose turn ends sends `CloseDue`
   once, through `deliver`. `close_due` closes it if the mark still stands; a
-  turn still running keeps the mark (`StaysArmed`). `revoke` withdraws a mark.
+  turn still running keeps the mark (`StaysArmed`), and any other answer,
+  `StillLive` included, withdraws it. `revoke` withdraws a mark.
+- A stream that ends withdraws an armed mark, and the watch sends
+  `Event::Revoked { launch_id, why }`, with `why` through `visible`. A close
+  holds the mark while it ends its own stream, and a door that is gone sends
+  `Gone` instead, so neither withdraws it.
 - Stop now re-checks the door before it cancels, so a door that fails the check
   gets no request. That check takes the close's split: an identity failure is
   `Close::Dropped`, and any other is `DoorsError::Unverified`. A 204 from the
