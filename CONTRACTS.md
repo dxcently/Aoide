@@ -4592,8 +4592,9 @@ The record of the local jobs `aoide job add` writes and `aoide job remove`
 drops. It is `{ "jobs": [ … ] }`, and each job is one object:
 
 - `name` — `[a-z0-9-]{1,48}`, unique. It names the unit files. A record that
-  holds any other name is unreadable: `add`, `remove`, `list` and an unnamed
-  `runs` refuse it with `the job record cannot be read`, and write nothing.
+  holds any other name, or one name twice, is unreadable: `add`, `remove`,
+  `list` and an unnamed `runs` refuse it with `the job record cannot be read`,
+  and write nothing.
 - `calendar` — the `OnCalendar=` text that `systemd-analyze calendar` accepted.
 - `argv` — the absolute program path, then its arguments, verbatim.
 - `cwd` — an absolute directory, or `null` when no `--cwd` was given.
@@ -4636,7 +4637,9 @@ reaped, and its call waits with it; under the lock, the stage lock stays held
 until the child leaves that state. A call that gives no answer is never read as
 a no: `add` and `remove` refuse, `list` reads `unknown` and ends the asking, and
 `runs` lists the job under `unread` and ends its reads, or refuses when a name
-was asked for or no call answered.
+was asked for or no call answered. Only a call that gives no answer ends `runs`'
+reads or `list`'s asking. A tool that answers or fails slowly on every call
+costs each call its own bound, with no total budget.
 
 `list` gives each job one status. The first of `missing` (a unit is gone),
 `changed` (a unit's bytes differ from the record) and `stale` (argv0 is gone or
@@ -4652,24 +4655,25 @@ runs, and aoide never enables linger.
 `runs` reads the user journal one job at a time. With a name it makes one call:
 `journalctl --user _SYSTEMD_USER_UNIT=aoide-job-<name>.service -o json
 --output-fields=MESSAGE,_SYSTEMD_USER_UNIT --all --no-pager -n 200`. Without a
-name it makes that same call for each recorded job, in name order. When no job
-is recorded it makes none, and answers `no local jobs`. Each call's window is
-that one job's own unit, its newest 200 entries, so no other job's rows can use
-it up. `--all` keeps a field over 4096 bytes whole, since journalctl otherwise
-prints it as null. An answer past the 4 MiB read ceiling is discarded, so its
-call gives no answer. An entry is a row when its MESSAGE is one JSON object with
-a known `status` (`completed`, `parked`, `failed` or `refused`) and its own
-`_SYSTEMD_USER_UNIT` is `aoide-job-<job>.service`. A `UNIT` or `USER_UNIT` field
-that a client sets names no job. A status line that journald split (longer than
-its `LineMax`, 48 KiB by default) gives no row. Rows are sorted oldest first by
-the entry's `__REALTIME_TIMESTAMP`, and a tie keeps name order. A row carries
-its job, the entry's time, and any of `session`, `run`, `report`, `question`,
-`reason` and `error` that the object sets. A row is the job's own claim: it is
-read through the `journalctl` on PATH, and aoide attests neither that tool nor
-the claim. A job's own output shares its unit's 200-entry window, so a run that
-logs more than 200 lines after its status line pushes that row out of `runs`. A
-same-uid process can start a unit named `aoide-job-<name>.service` and write
-rows under that job's name.
+name it makes that same call for each recorded job, in name order, until a call
+gives no answer. When no job is recorded it makes none, and answers
+`no local jobs`. Each call's window is that one job's own unit, its newest 200
+entries, so no other job's rows can use it up. `--all` keeps a field over 4096
+bytes whole, since journalctl otherwise prints it as null. An answer past the 4
+MiB read ceiling is discarded, so its call gives no answer. An entry is a row
+when its MESSAGE is one JSON object with a known `status` (`completed`,
+`parked`, `failed` or `refused`) and its own `_SYSTEMD_USER_UNIT` is
+`aoide-job-<job>.service`. A `UNIT` or `USER_UNIT` field that a client sets
+names no job. A status line that journald split (longer than its `LineMax`, 48
+KiB by default) gives no row. Rows are sorted oldest first by the entry's
+`__REALTIME_TIMESTAMP`, and a tie keeps name order. A row carries its job, the
+entry's time, and any of `session`, `run`, `report`, `question`, `reason` and
+`error` that the object sets. A row is the job's own claim: it is read through
+the `journalctl` on PATH, and aoide attests neither that tool nor the claim. A
+job's own output shares its unit's 200-entry window, so a run that logs more
+than 200 lines after its status line pushes that row out of `runs`. A same-uid
+process can start a unit named `aoide-job-<name>.service` and write rows under
+that job's name.
 
 Without a name, a call that exits non-zero lists its own job under `unread` as
 `{"name": ..., "why": ...}`, and the reads go on. The first call that gives no

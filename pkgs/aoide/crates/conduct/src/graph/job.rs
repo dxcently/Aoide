@@ -747,11 +747,15 @@ fn load_jobs(cmd: &str) -> Result<JobsFile, Outcome> {
     if let Some(name) = file.jobs.iter().find(|job| !valid_name(&job.name)).map(|job| job.name.clone()) {
         return Err(unreadable_record(cmd, format!("it holds {}, which is not a job name", visible(&name))));
     }
+    let mut seen = BTreeSet::new();
+    if let Some(name) = file.jobs.iter().map(|job| job.name.as_str()).find(|name| !seen.insert(*name)) {
+        return Err(unreadable_record(cmd, format!("it holds {} twice", visible(name))));
+    }
     Ok(file)
 }
 
 /// The refusal for a record that no verb can read: one that does not parse,
-/// or one holding a name that is not a job name.
+/// one holding a name that is not a job name, or one that names a job twice.
 fn unreadable_record(cmd: &str, why: String) -> Outcome {
     Outcome::refuse(
         cmd,
@@ -1134,7 +1138,9 @@ exit 0
 "#;
         /// The journal answers the call for the unit its `_SYSTEMD_USER_UNIT=`
         /// argument names: `journal-<unit>.jsonl` when there is one, else
-        /// `journal.jsonl`, else nothing.
+        /// `journal.jsonl`, else nothing. A unit whose `fail-journal-<unit>`
+        /// file exists exits 1 with that file's first line as its stderr, or
+        /// the fixed line when the file is empty.
         const JOURNALCTL: &str = r#"#!/bin/sh
 d=${0%/*}
 printf '%s\n' "journalctl $*" >> "$d/calls.log"
@@ -1143,7 +1149,7 @@ for arg; do
   case "$arg" in _SYSTEMD_USER_UNIT=*) unit=${arg#_SYSTEMD_USER_UNIT=} ;; esac
 done
 [ -e "$d/hang-journal-$unit" ] && { : > "$d/entered-journal-$unit"; exec sleep 30; }
-[ -e "$d/fail-journal-$unit" ] && { echo "Failed to connect to journal" >&2; exit 1; }
+[ -e "$d/fail-journal-$unit" ] && { if [ -s "$d/fail-journal-$unit" ]; then read -r text < "$d/fail-journal-$unit"; printf '%s\n' "$text" >&2; else echo "Failed to connect to journal" >&2; fi; exit 1; }
 src="$d/journal-$unit.jsonl"
 [ -e "$src" ] || src="$d/journal.jsonl"
 [ -e "$src" ] || exit 0
@@ -1224,6 +1230,11 @@ exit 0
                 std::fs::write(self.shims.join(format!("fail-{verb}")), "").unwrap();
             }
 
+            /// The named tool's call fails, with `text` as its stderr.
+            fn fail_with(&self, verb: &str, text: &str) {
+                std::fs::write(self.shims.join(format!("fail-{verb}")), text).unwrap();
+            }
+
             /// The timer's state, as `show --property=ActiveState` answers it.
             fn state(&self, unit: &str, word: &str) {
                 std::fs::write(self.shims.join(format!("state-{unit}")), format!("{word}\n")).unwrap();
@@ -1296,6 +1307,15 @@ exit 0
             let path = w.root.join("state/stage/jobs.json");
             let mut record: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
             record["jobs"][0]["name"] = json!(name);
+            std::fs::write(&path, record.to_string()).unwrap();
+        }
+
+        /// Writes the record's first job a second time, as a hand edit would.
+        fn duplicate_recorded_job(w: &World) {
+            let path = w.root.join("state/stage/jobs.json");
+            let mut record: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+            let first = record["jobs"][0].clone();
+            record["jobs"].as_array_mut().unwrap().push(first);
             std::fs::write(&path, record.to_string()).unwrap();
         }
 
@@ -1850,19 +1870,22 @@ exit 0
 
         /// Every journal call exits non-zero: no call answered, so `runs`
         /// refuses as failed with the first failure, after making both calls.
+        /// Its why holds alpha's stderr and not beta's.
         #[test]
         fn runs_refuses_as_failed_when_every_recorded_job_exits_non_zero() {
             let _guard = lock();
             let w = World::new("job-all-exit");
             let tool = w.tool("job-tool");
-            for name in ["alpha", "beta"] {
+            for (name, text) in [("alpha", "alpha-text"), ("beta", "beta-text")] {
                 assert_eq!(add(&add_inv(name, "daily", &[tool.as_str()]), Host::Linux).status, Status::Ok, "{name}");
-                w.fail(&format!("journal-aoide-job-{name}.service"));
+                w.fail_with(&format!("journal-aoide-job-{name}.service"), text);
             }
             let before = w.calls().len();
             let out = runs(&invocation(&["job", "runs"], &[], &[], Door::Cli), Host::Linux);
             assert_eq!(out.status, Status::Error, "{}", out.message);
             assert_eq!(out.data.as_ref().unwrap()["refusal"]["kind"], "failed");
+            let why = out.data.as_ref().unwrap()["refusal"]["why"].as_str().unwrap();
+            assert!(why.contains("alpha-text") && !why.contains("beta-text"), "{why:?}");
             assert_eq!(calls_since(&w, before), [PROBE.to_string(), runs_query("alpha"), runs_query("beta")]);
         }
 
@@ -1967,6 +1990,54 @@ exit 0
             let out = list(&invocation(&["job", "list"], &[], &[], Door::Cli), Host::Linux);
             let why = out.data.as_ref().unwrap()["refusal"]["why"].as_str().unwrap();
             assert!(why.contains("not a job name") && !why.contains('\u{1b}'), "{why:?}");
+        }
+
+        /// A record that names one job twice refuses `list`, an unnamed `runs`
+        /// and `remove` after their probe, and makes no other call: both units
+        /// stay.
+        #[test]
+        fn a_record_that_names_one_job_twice_refuses_each_verb() {
+            let _guard = lock();
+            let w = World::new("job-twice");
+            let tool = w.tool("job-tool");
+            assert_eq!(add(&add_inv("nightly", "daily", &[tool.as_str()]), Host::Linux).status, Status::Ok);
+            duplicate_recorded_job(&w);
+            let before = w.calls().len();
+            let outs = [
+                list(&invocation(&["job", "list"], &[], &[], Door::Cli), Host::Linux),
+                runs(&invocation(&["job", "runs"], &[], &[], Door::Cli), Host::Linux),
+                remove(&invocation(&["job", "remove"], &[], &[("name", "nightly")], Door::Cli), Host::Linux),
+            ];
+            for out in &outs {
+                assert_eq!(out.status, Status::Error, "{}", out.message);
+                assert_eq!(out.message, "the job record cannot be read");
+                let why = out.data.as_ref().unwrap()["refusal"]["why"].as_str().unwrap();
+                assert!(why.contains("twice"), "{why:?}");
+            }
+            assert_eq!(calls_since(&w, before), [PROBE.to_string(), PROBE.to_string(), PROBE.to_string()]);
+            assert!(w.unit_dir().join("aoide-job-nightly.timer").is_file());
+            assert!(w.unit_dir().join("aoide-job-nightly.service").is_file());
+        }
+
+        /// A record holding a name that is not a job name refuses `add` after
+        /// its probe and its calendar check, and writes no unit.
+        #[test]
+        fn a_record_holding_a_bad_name_refuses_add_before_any_write() {
+            let _guard = lock();
+            let w = World::new("job-add-bad-name");
+            let tool = w.tool("job-tool");
+            assert_eq!(add(&add_inv("nightly", "daily", &[tool.as_str()]), Host::Linux).status, Status::Ok);
+            rename_recorded_job(&w, "x/../y");
+            let before = w.calls().len();
+            let out = add(&add_inv("fresh", "daily", &[tool.as_str()]), Host::Linux);
+            assert_eq!(out.status, Status::Error, "{}", out.message);
+            assert_eq!(out.message, "the job record cannot be read");
+            let why = out.data.as_ref().unwrap()["refusal"]["why"].as_str().unwrap();
+            assert!(why.contains("not a job name"), "{why:?}");
+            assert_eq!(calls_since(&w, before), [PROBE.to_string(), "systemd-analyze calendar daily".to_string()]);
+            let fresh = std::fs::read_dir(w.unit_dir()).unwrap().any(|entry| entry.unwrap().file_name().to_string_lossy().starts_with("aoide-job-fresh"));
+            assert!(!fresh, "a unit for `fresh` was written");
+            assert_eq!(w.record()["jobs"][0]["name"], json!("x/../y"));
         }
 
         /// A `systemd-analyze` that never exits refuses `add` as failed, not as
