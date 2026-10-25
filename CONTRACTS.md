@@ -5501,37 +5501,35 @@ signer and the receipt is in the letter's mesh, and each retirement writes one
 receipt matches no own letter: not a receipt at all, a `msgid` no spooled letter
 holds, a signer that is not the letter's `to.node`, or another mesh.
 
-Read/resolved by `aoide mail outbox [node]`/`mail outbox rm <msgid>` —
-a separate CLI surface from the mailbase's own `mail` family above,
-touching `state/outbox/` only. `mail outbox` (no `node`) lists every
-node with a non-empty outbox; `mail outbox <node>` narrows to one; each
-row is `msgid`/`to`/`tries`/`lastTryAt`/`lastOutcome`/`refused` plus a
-`delivery` object — the same read-only projection `mail send --json`
-returns after its spool — `status` (`refused` > `delivered` > `accepted`
-> `retrying` > `queued`; `failed` only for a local I/O error observed by
-the reporting command), `reason`, `reasonScope` (`link` | `entry` |
-`local`), `nextAttemptAt` (the earliest allowed attempt from the node's
-link state, never a promised schedule), `ackPending`. A `receipt` entry reads
-`pre-131` whatever its flags. `delivered` is only ever a destination-signed
-receipt filed by an older build, never an entry's absence; the
-node's link state is read once per listing and joined onto its rows; an
-unreadable state reports `queued` with `status unavailable` as the
+Read/resolved by `aoide mail outbox [node]`/`mail outbox rm <msgid>` — a
+separate CLI surface from the mailbase's own `mail` family above, touching
+`state/outbox/` only. `mail outbox` (no `node`) lists every node with a
+non-empty outbox; `mail outbox <node>` narrows to one; each row is
+`msgid`/`to`/`tries`/`lastTryAt`/`lastOutcome`/`refused` plus a `delivery`
+object — the same read-only projection `mail send --json` returns after its
+spool — `status` (`refused` > `delivered` > `accepted` > `retrying` > `queued`;
+`failed` only for a local I/O error observed by the reporting command),
+`reason`, `reasonScope` (`link` | `entry` | `local`), `nextAttemptAt` (the
+earliest allowed attempt from the node's link state, never a promised schedule),
+`ackPending`. A `receipt` entry reads `pre-131` whatever its flags. `delivered`
+is only ever a destination-signed receipt filed by an older build, never an
+entry's absence; the node's link state is read once per listing and joined onto
+its rows; an unreadable state reports `queued` with `status unavailable` as the
 reason. That fallback is for any entry, own letters included, and for an entry
 removed while it is read; an own letter otherwise reads `held`, `returned`,
-`pre-131` or `delivered`, never `queued`, in normal operation. `mail
-outbox rm <msgid>` is an exact-msgid removal — it walks every node with an
-outbox and removes the first match, erroring `not-found` if none held it;
-NOT the mailbase `mail rm`'s age-based prune, and neither command ever
-touches `state/mail/`. `mail outbox --json` additionally carries
-`data.summary`, one entry per node whose outbox is non-empty (omitted for
-a node with nothing spooled, swept or named), shaped `{"depth": <count>,
-"oldestMintedAtAgeSecs": <secs|null>, "tries": {"<tries>": <count>},
-"lastOutcomeCounts": {"<outcome|(none)>": <count>}, "refused": <count>}`
-— additive to `rows`, no change to `OutboxEntry` or `link.json` on disk.
-See §6's `aoide/mailDeposit` for the wire method that actually drains
-this spool; one `drain_node` call attempts at most `DRAIN_BATCH_CAP` (50)
-entries, a per-call cost bound, so a deep backlog drains across ticks
-rather than in one.
+`pre-131` or `delivered`, never `queued`, in normal operation. `mail outbox rm
+<msgid>` is an exact-msgid removal — it walks every node with an outbox and
+removes the first match, erroring `not-found` if none held it; NOT the mailbase
+`mail rm`'s age-based prune, and neither command ever touches `state/mail/`.
+`mail outbox --json` additionally carries `data.summary`, one entry per node
+whose outbox is non-empty (omitted for a node with nothing spooled, swept or
+named), shaped `{"depth": <count>, "oldestMintedAtAgeSecs": <secs|null>,
+"tries": {"<tries>": <count>}, "lastOutcomeCounts": {"<outcome|(none)>":
+<count>}, "refused": <count>}` — additive to `rows`, no change to `OutboxEntry`
+or `link.json` on disk. See §6's `aoide/mailDeposit` for the wire method that
+actually drains this spool; one `drain_node` call attempts at most
+`DRAIN_BATCH_CAP` (50) entries, a per-call cost bound, so a deep backlog drains
+across drain ticks rather than in one.
 
 ### `state/usage.json` — **v0**
 
@@ -9738,12 +9736,13 @@ an ordinary body. A client that checks answers treats the two alike:
   answer returns it with the `unauthenticated:` word, and `handle_mail_send`
   keeps it on disk as `returned` under its session, and the letter is dropped
   when that session ends: at its roster exit, or else by the drain tick's
-  `session-gone` pass; sent outside a session, it is refused and nothing is
-  written. The send writes no link state. Only `aoide mail outbox retry <msgid>`
-  and `aoide mail outbox retry --refused` dial a returned letter again
-  (`resend_returned_letter`). A receipt is never dialled: the drain tick drops
-  it. A poll files and clears nothing, so the far side keeps what it holds and
-  the record of what this box filed survives to the next poll. A binding
+  `session-gone` pass, which waits while the roster or the list of letter-bound
+  sessions cannot be read; sent outside a session, it comes back `returned` and
+  nothing is written. The send writes no link state. Only `aoide mail outbox
+  retry <msgid>` and `aoide mail outbox retry --refused` dial a returned letter
+  again (`resend_returned_letter`). A receipt is never dialled: the drain tick
+  drops it. A poll files and clears nothing, so the far side keeps what it holds
+  and the record of what this box filed survives to the next poll. A binding
   exchange learns nothing. `aoide mail outbox` reads `retrying` with the
   `unauthenticated:` reason, and `aoide mail poll <node>` reports the node
   unreachable with the same reason. When the far end's own word is

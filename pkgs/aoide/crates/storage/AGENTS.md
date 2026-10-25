@@ -46,13 +46,14 @@
   `$XDG_RUNTIME_DIR` override wins on BOTH hosts: every isolating fixture sets
   it, and an answer that ignored it on one host would read and write the
   machine's real per-user directory instead of the fixture's.
-- **A receipt's `from.node` is this box's node name, lowercased:
-  `AOIDE_A2A_NODE_NAME` if set, else the OS hostname, else `aoide`.** The origin
-  verifies a receipt against the key it holds for that name in that mesh, so a
-  receipt whose `from.node` has no such key is refused (`UnverifiedOrigin`) and
-  its letter never retires. `mint_ack_in_mesh` signs as
-  `display::local_node_name()`, this box's own name: an older-peer fixture for
-  tests.
+- **A receipt's `from.node` is the minting node's name, lowercased:
+  `AOIDE_A2A_NODE_NAME` if set and non-empty, else the OS hostname, else
+  `aoide`; the door's `--node-name` flag is not read here (`local_node_name`,
+  storage/src/display.rs).** The origin verifies a receipt against the key it
+  holds for that name in that mesh, so a receipt whose `from.node` has no such
+  key is refused (`UnverifiedOrigin`) and its letter never retires.
+  `mint_ack_in_mesh` signs as `display::local_node_name()`, this box's own name:
+  an older-peer fixture for tests.
 - Structured thread/reply IDs are signed context, not membership or delivery authority. Legacy four-field content remains valid.
 - Structured letter content is optional signed text, never a new transport header. Invalid or legacy content remains raw; decoding must not write or alter envelope identity.
 
@@ -1039,8 +1040,9 @@
   entry's filed name (`retire_acknowledged`), explicit `mail outbox rm` (P-M2),
   or the drop of an own letter with its session, or the drain tick's sweep
   taking a letter or a receipt (ruling 131) — never auto-evicted, never expired,
-  never capped.** `outbox::retire_by_ack` is the "valid receipt" half, and it
-  retires an own letter only: a transit or charter entry with the same msgid
+  never evicted by a size or count limit; each of the sweep's two drops takes at
+  most 500 per pass.** `outbox::retire_by_ack` is the "valid receipt" half, and
+  it retires an own letter only: a transit or charter entry with the same msgid
   stays spooled. It trusts its caller (`mail::deposit`) to have already proven
   the ack's origin signature genuine, and never re-verifies; don't call it on an
   unverified envelope. It runs under one outbox lock hold, and an own letter it

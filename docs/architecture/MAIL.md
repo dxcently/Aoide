@@ -870,8 +870,8 @@ link.json       { "holdUntil": ts, "lastError": "…" }   per-link backoff
   the roster cannot be read: then that pass is skipped and the pre-131 pass
   still runs. Each of the drain's two drops (`pre-131`, then `session-gone`)
   takes at most 500 entries, the rest wait for the next drain tick, and each
-  drop writes one `mail.outbox.dropped` audit line naming the entry's kind,
-  `letter` or `receipt`.
+  dropped entry writes one `mail.outbox.dropped` audit line naming the entry's
+  kind, `letter` or `receipt`.
 - Entries hold the envelope as minted — from P-SEAL, the sealed container
   — so a retry resends the same bytes on any transport.
 - A drain session reaches the node by its address's transport — an ssh tunnel
@@ -1639,9 +1639,10 @@ authoritative first:
 - `held` — an own letter waiting for the poll of the hop it was spooled toward
   (a `poll` or `hold` hop, or `--hold`). It is bound to its session, never
   dialled by this box, and leaves when that hop files it or its session ends.
-- `pre-131` — an own letter spooled before the session binding existed, so
-  it has no session. The next drain tick drops it (reason `pre-131`), and drops
-  any receipt the same way, whatever its session.
+- `pre-131` — an own letter spooled before the session binding existed, so it
+  has no session. A drain tick drops it (reason `pre-131`), at most 500 to a
+  pass, the rest waiting for the next drain tick; it drops any receipt the same
+  way, whatever its session.
 - `removed` — a retry's report only, never a listing's: the letter left the
   outbox while its dial was in flight (an `rm`, or its session ending), so
   nothing was written back. The retry refuses with the reason `removed`.
