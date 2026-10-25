@@ -692,19 +692,21 @@ in the message.
 
 - **Eidolon liveness is the presence socket's answer to `{"op":"ping"}`,
   never a stat, never `/proc`.** `presence_probe` (`eidolon.rs`) takes the
-  scan's one deadline (its start plus `PRESENCE_DEADLINE`, 250ms) and bounds
-  every step by what is left of it: the connect through
+  scan's one deadline (the end of the listing plus `PRESENCE_DEADLINE`,
+  250ms) and bounds every step by what is left of it: the connect through
   `aoide_protocol::local_socket::connect_bounded`, then the write and each
   read. The scan probes every directory at once, one scoped thread each, and
   reads a `meta.json` only where a socket answered or was held aside. The
-  outcome sorts three ways. `Answered`: exactly `{"ok":true}`, live.
-  `NothingListens`: no socket file, or a connect that failed other than by
-  timing out; not live, never a scan failure, and its `meta.json` is never
-  read. `Silent`: held, but no reply by the deadline, a connect that timed
-  out on a full backlog, a reply over 4096 bytes, or any other reply. A
-  silent directory is held aside and is live only while its `meta.json`'s
-  `pid` is a row of the process table, as Eidolon's own sweep pairs silence
-  with the registration's pid. Residual: if another process reuses the pid
+  outcome sorts three ways. `Answered`: a reply whose top-level object has
+  `"ok": true`, live. `NothingListens`: no socket file, or a connect refused
+  (`connect_failure`); not live, never a scan failure, and its `meta.json` is
+  never read. `Silent`: held, but no reply by the deadline, a connect that
+  timed out on a full backlog, a connect that failed any other way (fd
+  pressure, a permission, a path the address cannot hold), a reply over 4096
+  bytes, or a reply whose `ok` is not `true`. A silent directory is held aside
+  and is live only while its `meta.json`'s `pid` is a row of the process
+  table, as Eidolon's own sweep pairs silence with the registration's pid.
+  Residual: if another process reuses the pid
   of a session whose socket is silent, that session stays live until that
   process exits, so the roster shows it and the resume gate skips its
   journal.
