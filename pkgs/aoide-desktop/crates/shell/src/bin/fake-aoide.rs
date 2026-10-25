@@ -1,4 +1,3 @@
-#![deny(unsafe_code)]
 //! A stand-in for `aoide`, for this crate's exec tests (feature `fakes`). It
 //! prints the fixture schema for `schema --json` and the fixture config for
 //! `config --json`, unless `FAKE_AOIDE_NO_SCHEMA` or `FAKE_AOIDE_NO_CONFIG` is

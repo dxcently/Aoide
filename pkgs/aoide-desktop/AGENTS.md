@@ -27,20 +27,29 @@ and each crate's own invariants are in its AGENTS.md (`crates/door/AGENTS.md`,
 
 ## The gate
 
-- The gate has two mechanisms, and clippy's lints are the main one.
-  `clippy.toml` here lists the paths no code may call: the process starters
-  (`std::process::Command`, `libc::fork`, `libc::execv`, ...), the signal
-  senders (`libc::kill`, and `std::process::Child::kill`, which sends SIGKILL)
-  and `libc::syscall`. The desktop gate's clippy run must report 0 warnings, so
-  a call through an alias of a listed path fails it. `exec.rs` holds the one
-  allow for those lints.
+- The gate has two mechanisms, and the lints are the main one. The workspace's
+  `[workspace.lints]`, in this directory's `Cargo.toml`, denies `unsafe_code`,
+  `disallowed_methods` and `disallowed_types` for every target, and each member
+  takes that table with `[lints] workspace = true`. `clippy.toml` here lists the
+  paths no code may call: the process starters (`std::process::Command`,
+  `libc::fork`, `libc::execv`, ...), the signal senders (`libc::kill`, and
+  `std::process::Child::kill`, which sends SIGKILL) and `libc::syscall`. The
+  gate runs clippy with `-D warnings`, and the lints are errors without it too,
+  so a call through an alias of a listed path fails either way. `exec.rs` holds
+  the one allow for those lints.
 - The text scan is the backstop, over the workspace's own sources. The
-  `crates/shell/tests/gates.rs` test reads every `.rs` under `crates/`, and
-  every file under `ui/` once that directory exists. It forbids `aoided.sock`,
-  `"dispatch"`, `"subscribe"`, `/api/launch`, `sh -c` and SIGKILL. It holds the
-  process-starting words to `exec.rs`; the word `unsafe`, and the lint allows,
-  to `exec.rs` and the fake eidolon's file; and `#![deny(unsafe_code)]` to every
-  crate root but the fake eidolon's.
+  `crates/shell/tests/gates.rs` test reads every `.rs` under this directory,
+  skipping any `target` directory, and every file under `ui/` once that
+  directory exists. It forbids `aoided.sock`, `"dispatch"`, `"subscribe"`,
+  `/api/launch`, `sh -c`, SIGKILL, `include!(` and `#[path`. It holds the
+  process-starting words to `exec.rs`. It holds `unsafe_code` and the word
+  `unsafe` to `exec.rs` and the fake eidolon's file, and holds
+  `disallowed_methods`, `disallowed_types`, `clippy::all` and `clippy::style` to
+  `exec.rs`, each matched as a whole word, so `clippy::allow_attributes` is not
+  `clippy::all`. It also checks that the workspace denies the three lints and
+  that each member takes them.
+- Residual: a target whose file lies outside this directory is not read by the
+  scan, though its crate's lints still apply to it.
 - Dependencies are not scanned, `aoide-protocol` included. The app calls only
   `untrusted`'s functions from it, and the protocol crate's own gates cover the
   rest of it.

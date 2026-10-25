@@ -1,4 +1,3 @@
-#![deny(unsafe_code)]
 use std::ffi::OsString;
 
 use aoide_desktop_shell::exec::{child_env, parse_vault_keys, Child, ExecError};

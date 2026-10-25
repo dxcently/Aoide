@@ -58,8 +58,9 @@ are in README.md.
   `Malformed`; a `protocol` other than 1 is `Protocol { got }`. Each ends the
   stream, and so does a second `hello` (`Malformed`). An unknown frame type is
   `Frame::Other`. An unknown field is ignored. Neither is an error.
-- No `unsafe` in this crate: `#![deny(unsafe_code)]` is on. The effective uid
-  comes from `/proc/self/status`. The open and the stat use std.
+- No `unsafe` in this crate: the workspace denies `unsafe_code` for every
+  target. The effective uid comes from `/proc/self/status`. The open and the
+  stat use std.
 - The crate's dependency tree names none of tauri, wry, tao, gtk, webkit2gtk,
   glib, soup, tokio or hyper (`cargo tree -p aoide-desktop-door`).
 - A stream is closed through its `Closer`, from any thread. Dropping `Events`

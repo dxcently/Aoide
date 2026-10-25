@@ -1,5 +1,3 @@
-#![deny(unsafe_code)]
-
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -27,38 +25,49 @@ const EXEC_ONLY: [&str; 7] = [
     concat!("set", "sid"),
 ];
 
-/// Attributes that lift a lint. Only exec and the fake eidolon may hold them.
-const LIFTS: [&str; 3] = [
-    concat!("allow(", "unsafe_code"),
-    concat!("allow(clippy::", "disallowed_methods"),
-    concat!("allow(clippy::", "disallowed_types"),
+/// Lints the workspace denies, and the groups that would lift them. Only exec
+/// may hold them, as whole words.
+const EXEC_LINTS: [&str; 4] = [
+    concat!("disallowed", "_methods"),
+    concat!("disallowed", "_types"),
+    concat!("clippy::", "all"),
+    concat!("clippy::", "style"),
 ];
-/// The keyword the unchecked surface is named by, spelled in pieces here.
+/// The lint the unchecked surface is kept out by, and the keyword it is named
+/// by, spelled in pieces here.
+const UNSAFE_CODE: &str = concat!("un", "safe", "_code");
 const WORD_UNSAFE: &str = concat!("un", "safe");
 const UNSAFE_OK: [&str; 2] = [EXEC, FAKE_EIDOLON];
-const DENY_ROOT: &str = concat!("#![deny(", "unsafe_code)]");
+/// The lines the workspace manifest holds under each table.
+const DENIES: [(&str, &str); 3] = [
+    ("[workspace.lints.rust]", concat!("un", "safe", "_code = \"deny\"")),
+    ("[workspace.lints.clippy]", concat!("disallowed", "_methods = \"deny\"")),
+    ("[workspace.lints.clippy]", concat!("disallowed", "_types = \"deny\"")),
+];
+
+fn root() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
+}
 
 fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
     for entry in fs::read_dir(dir).expect("the directory is read") {
         let path = entry.expect("a directory entry").path();
-        if path.is_dir() {
-            walk(&path, out);
-        } else {
+        if !path.is_dir() {
             out.push(path);
+        } else if !path.ends_with("target") {
+            walk(&path, out);
         }
     }
 }
 
-/// Each `.rs` under `crates/`, and each file under `ui/` once that exists, as
-/// its path relative to the desktop workspace and its text.
+/// Each `.rs` under the desktop workspace root, and each file under `ui/` once
+/// that exists, as its path relative to the root and its text.
 fn sources() -> Vec<(String, String)> {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let root = root();
+    let ui = root.join("ui");
     let mut paths = Vec::new();
-    walk(&root.join("crates"), &mut paths);
-    paths.retain(|p| p.extension().is_some_and(|e| e == "rs"));
-    if root.join("ui").is_dir() {
-        walk(&root.join("ui"), &mut paths);
-    }
+    walk(&root, &mut paths);
+    paths.retain(|p| p.extension().is_some_and(|e| e == "rs") || p.starts_with(&ui));
     paths
         .into_iter()
         .map(|p| {
@@ -75,6 +84,16 @@ fn source(path: &str) -> String {
         .find(|(p, _)| p == path)
         .map(|(_, text)| text)
         .unwrap_or_else(|| panic!("{path} is scanned"))
+}
+
+/// The lines under `header`, up to the next table.
+fn table<'a>(manifest: &'a str, header: &str) -> Vec<&'a str> {
+    manifest
+        .lines()
+        .skip_while(|line| *line != header)
+        .skip(1)
+        .take_while(|line| !line.starts_with('['))
+        .collect()
 }
 
 /// Whether `word` occurs in `text` as a whole word, not inside a longer name.
@@ -127,28 +146,43 @@ fn exec_holds_the_process_starting_words() {
 }
 
 #[test]
-fn lifts_and_the_word_unsafe_appear_only_in_exec_and_the_fake_eidolon() {
+fn lifts_and_the_word_unsafe_appear_only_where_allowed() {
     for (path, text) in sources() {
-        if UNSAFE_OK.contains(&path.as_str()) {
-            continue;
+        if !UNSAFE_OK.contains(&path.as_str()) {
+            assert!(!holds_word(&text, UNSAFE_CODE), "{path} holds `{UNSAFE_CODE}`");
+            assert!(!holds_word(&text, WORD_UNSAFE), "{path} holds the word {WORD_UNSAFE}");
         }
-        for lift in LIFTS {
-            assert!(!text.contains(lift), "{path} holds `{lift}`");
+        if path != EXEC {
+            for lint in EXEC_LINTS {
+                assert!(!holds_word(&text, lint), "{path} holds `{lint}`");
+            }
         }
-        assert!(!holds_word(&text, WORD_UNSAFE), "{path} holds the word {WORD_UNSAFE}");
     }
 }
 
 #[test]
-fn every_crate_root_denies_unsafe_code_but_the_fake_eidolon() {
-    let mut roots = 0;
+fn no_source_holds_an_include_or_a_path_attribute() {
     for (path, text) in sources() {
-        let root = path.ends_with("/src/lib.rs") || path.contains("/src/bin/") || path.contains("/tests/");
-        if !root || path == FAKE_EIDOLON {
-            continue;
+        for word in [concat!("include", "!("), concat!("#[", "path")] {
+            assert!(!text.contains(word), "{path} holds `{word}`");
         }
-        roots += 1;
-        assert!(text.contains(DENY_ROOT), "{path} does not deny unsafe_code");
     }
-    assert!(roots >= 10, "the scan found {roots} crate roots");
+}
+
+#[test]
+fn every_member_takes_the_workspace_lints() {
+    let root = root();
+    let workspace = fs::read_to_string(root.join("Cargo.toml")).expect("the workspace manifest is read");
+    for (header, line) in DENIES {
+        assert!(table(&workspace, header).contains(&line), "{header} does not hold `{line}`");
+    }
+    let mut manifests = Vec::new();
+    walk(&root.join("crates"), &mut manifests);
+    manifests.retain(|p| p.file_name().is_some_and(|name| name == "Cargo.toml"));
+    for path in &manifests {
+        let member = fs::read_to_string(path).expect("a member manifest is read");
+        let first = table(&member, "[lints]").first().copied();
+        assert_eq!(first, Some("workspace = true"), "{} does not take the workspace lints", path.display());
+    }
+    assert_eq!(manifests.len(), 2, "the scan found {} members", manifests.len());
 }

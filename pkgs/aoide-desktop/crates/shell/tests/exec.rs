@@ -1,4 +1,3 @@
-#![deny(unsafe_code)]
 #![cfg(feature = "fakes")]
 
 use std::ffi::OsString;

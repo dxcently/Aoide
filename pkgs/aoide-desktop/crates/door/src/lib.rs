@@ -6,7 +6,6 @@
 //! under A6's checks (`token`). The socket that answers is checked to belong to
 //! this user (`listener`) before a byte is written. The token is never printed
 //! or logged.
-#![deny(unsafe_code)]
 
 mod client;
 mod error;
