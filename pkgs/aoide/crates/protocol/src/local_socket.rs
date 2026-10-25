@@ -6,7 +6,7 @@
 #[cfg(unix)]
 use std::os::unix::ffi::OsStrExt;
 #[cfg(unix)]
-use std::os::unix::io::{FromRawFd, RawFd};
+use std::os::unix::io::{AsRawFd, FromRawFd, OwnedFd, RawFd};
 #[cfg(unix)]
 use std::os::unix::net::UnixStream;
 #[cfg(windows)]
@@ -16,20 +16,25 @@ use std::path::Path;
 use std::time::Duration;
 
 /// Put `fd` into (or out of) non-blocking mode, through `fcntl(F_GETFL)` and
-/// `fcntl(F_SETFL)`.
+/// `fcntl(F_SETFL)`. A failed `fcntl` is returned, never ignored: a connect
+/// left blocking would have no bound.
 #[cfg(unix)]
-fn set_fd_nonblocking(fd: RawFd, nonblocking: bool) {
+fn set_fd_nonblocking(fd: RawFd, nonblocking: bool) -> io::Result<()> {
     // SAFETY: `fd` is a fd this function's caller owns for the duration of
     // this call (a freshly created socket, never shared); `fcntl(F_GETFL)`/
     // `fcntl(F_SETFL)` are ordinary, always-defined operations on any fd
     // this process holds.
     unsafe {
         let flags = libc::fcntl(fd, libc::F_GETFL, 0);
-        if flags >= 0 {
-            let next = if nonblocking { flags | libc::O_NONBLOCK } else { flags & !libc::O_NONBLOCK };
-            libc::fcntl(fd, libc::F_SETFL, next);
+        if flags < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        let next = if nonblocking { flags | libc::O_NONBLOCK } else { flags & !libc::O_NONBLOCK };
+        if libc::fcntl(fd, libc::F_SETFL, next) < 0 {
+            return Err(io::Error::last_os_error());
         }
     }
+    Ok(())
 }
 
 /// Build a `sockaddr_un` for `path`, with the `socklen_t` the kernel reads
@@ -94,9 +99,10 @@ const CONNECT_RETRY_INTERVAL: Duration = Duration::from_millis(15);
 /// connects (aoided does) must not hand them the descriptor. Linux and Android
 /// take `SOCK_CLOEXEC` in `socket(2)`'s type, so the descriptor is never
 /// inheritable, not even for an instant. Elsewhere `FD_CLOEXEC` is set straight
-/// after `socket(2)`.
+/// after `socket(2)`. Its `OwnedFd` closes the socket on drop, so no error path
+/// can leak it.
 #[cfg(unix)]
-fn stream_socket() -> io::Result<RawFd> {
+fn stream_socket() -> io::Result<OwnedFd> {
     #[cfg(any(target_os = "linux", target_os = "android"))]
     let kind = libc::SOCK_STREAM | libc::SOCK_CLOEXEC;
     #[cfg(not(any(target_os = "linux", target_os = "android")))]
@@ -108,15 +114,14 @@ fn stream_socket() -> io::Result<RawFd> {
     if fd < 0 {
         return Err(io::Error::last_os_error());
     }
-    #[cfg(not(any(target_os = "linux", target_os = "android")))]
     // SAFETY: `fd` is the fresh socket made above, and nothing else holds it.
-    if unsafe { libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC) } < 0 {
-        let err = io::Error::last_os_error();
-        // SAFETY: `fd` was never handed to anything else.
-        unsafe { libc::close(fd) };
-        return Err(err);
+    let owned = unsafe { OwnedFd::from_raw_fd(fd) };
+    #[cfg(not(any(target_os = "linux", target_os = "android")))]
+    // SAFETY: `owned` is the open socket; `F_SETFD` takes no pointer.
+    if unsafe { libc::fcntl(owned.as_raw_fd(), libc::F_SETFD, libc::FD_CLOEXEC) } < 0 {
+        return Err(io::Error::last_os_error());
     }
-    Ok(fd)
+    Ok(owned)
 }
 
 /// Bounded replacement for `UnixStream::connect`, over TWO genuinely
@@ -138,17 +143,19 @@ fn stream_socket() -> io::Result<RawFd> {
 ///
 /// The result is the `io::Result<UnixStream>` that `UnixStream::connect`
 /// returns. A connect that runs out of `timeout` is `TimedOut`. When the
-/// backlog is what held it up, the message says so.
+/// backlog is what held it up, the message says so. A `timeout` the clock
+/// cannot hold is refused as `InvalidInput`, before any socket is made.
 #[cfg(unix)]
 pub fn connect_bounded(socket_path: &Path, timeout: Duration) -> io::Result<UnixStream> {
+    let deadline = std::time::Instant::now()
+        .checked_add(timeout)
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "timeout too large"))?;
     let (addr, addr_len) = unix_sockaddr(socket_path)?;
 
-    // From here on this function owns `fd`: `UnixStream::from_raw_fd` takes it
-    // on every success path below, and `libc::close` on every error path.
+    // `fd` owns the socket from here on. The success paths hand it to
+    // `UnixStream`, and every error path drops it, which closes it.
     let fd = stream_socket()?;
-    set_fd_nonblocking(fd, true);
-
-    let deadline = std::time::Instant::now() + timeout;
+    set_fd_nonblocking(fd.as_raw_fd(), true)?;
 
     // Phase 1: attempt the syscall itself, retrying on `EAGAIN`/`EINTR`
     // (both are about the ATTEMPT, not a queued connection) until it
@@ -158,13 +165,10 @@ pub fn connect_bounded(socket_path: &Path, timeout: Duration) -> io::Result<Unix
     loop {
         // SAFETY: `addr`/`addr_len` describe a valid, fully-initialized
         // `sockaddr_un` for this exact `fd`'s own address family.
-        let rc = unsafe { libc::connect(fd, &addr as *const libc::sockaddr_un as *const libc::sockaddr, addr_len) };
+        let rc = unsafe { libc::connect(fd.as_raw_fd(), &addr as *const libc::sockaddr_un as *const libc::sockaddr, addr_len) };
         if rc == 0 {
-            set_fd_nonblocking(fd, false);
-            // SAFETY: `fd` is connected and owned solely by this function
-            // up to this point; handing it to `UnixStream` transfers that
-            // ownership exactly once.
-            return Ok(unsafe { UnixStream::from_raw_fd(fd) });
+            set_fd_nonblocking(fd.as_raw_fd(), false)?;
+            return Ok(UnixStream::from(fd));
         }
 
         let err = io::Error::last_os_error();
@@ -173,8 +177,6 @@ pub fn connect_bounded(socket_path: &Path, timeout: Duration) -> io::Result<Unix
             Some(libc::EAGAIN) => {
                 let now = std::time::Instant::now();
                 if now >= deadline {
-                    // SAFETY: `fd` was never handed to anything else.
-                    unsafe { libc::close(fd) };
                     return Err(io::Error::new(
                         io::ErrorKind::TimedOut,
                         format!("timed out after {timeout:?} connecting (the listener's connection backlog is saturated)"),
@@ -184,11 +186,7 @@ pub fn connect_bounded(socket_path: &Path, timeout: Duration) -> io::Result<Unix
                 continue;
             }
             Some(libc::EINTR) => continue, // the syscall itself was interrupted — just retry it
-            _ => {
-                // SAFETY: `fd` was never handed to anything else.
-                unsafe { libc::close(fd) };
-                return Err(err);
-            }
+            _ => return Err(err),
         }
     }
 
@@ -200,18 +198,14 @@ pub fn connect_bounded(socket_path: &Path, timeout: Duration) -> io::Result<Unix
     loop {
         let remaining = deadline.saturating_duration_since(std::time::Instant::now());
         if remaining.is_zero() {
-            // SAFETY: `fd` was never handed to anything else.
-            unsafe { libc::close(fd) };
             return Err(io::Error::new(io::ErrorKind::TimedOut, format!("timed out after {timeout:?}")));
         }
         let millis = i32::try_from(remaining.as_millis()).unwrap_or(i32::MAX).max(1);
-        let mut pfd = libc::pollfd { fd, events: libc::POLLOUT, revents: 0 };
+        let mut pfd = libc::pollfd { fd: fd.as_raw_fd(), events: libc::POLLOUT, revents: 0 };
         // SAFETY: `pfd` names exactly the one fd this function owns,
         // polled for exactly one event.
         let poll_rc = unsafe { libc::poll(&mut pfd, 1, millis) };
         if poll_rc == 0 {
-            // SAFETY: `fd` was never handed to anything else.
-            unsafe { libc::close(fd) };
             return Err(io::Error::new(io::ErrorKind::TimedOut, format!("timed out after {timeout:?}")));
         }
         if poll_rc < 0 {
@@ -219,8 +213,6 @@ pub fn connect_bounded(socket_path: &Path, timeout: Duration) -> io::Result<Unix
             if e.kind() == io::ErrorKind::Interrupted {
                 continue;
             }
-            // SAFETY: `fd` was never handed to anything else.
-            unsafe { libc::close(fd) };
             return Err(e);
         }
         break;
@@ -233,7 +225,7 @@ pub fn connect_bounded(socket_path: &Path, timeout: Duration) -> io::Result<Unix
     // owned out-params for `SO_ERROR` on this function's own `fd`.
     let rc = unsafe {
         libc::getsockopt(
-            fd,
+            fd.as_raw_fd(),
             libc::SOL_SOCKET,
             libc::SO_ERROR,
             &mut sock_err as *mut libc::c_int as *mut libc::c_void,
@@ -241,20 +233,14 @@ pub fn connect_bounded(socket_path: &Path, timeout: Duration) -> io::Result<Unix
         )
     };
     if rc < 0 {
-        let e = io::Error::last_os_error();
-        // SAFETY: `fd` was never handed to anything else.
-        unsafe { libc::close(fd) };
-        return Err(e);
+        return Err(io::Error::last_os_error());
     }
     if sock_err != 0 {
-        // SAFETY: `fd` was never handed to anything else.
-        unsafe { libc::close(fd) };
         return Err(io::Error::from_raw_os_error(sock_err));
     }
 
-    set_fd_nonblocking(fd, false);
-    // SAFETY: same as the immediate-success path above.
-    Ok(unsafe { UnixStream::from_raw_fd(fd) })
+    set_fd_nonblocking(fd.as_raw_fd(), false)?;
+    Ok(UnixStream::from(fd))
 }
 
 /// The bounded connect, natively: `win_unix`'s own `connect_timeout`, which
@@ -286,6 +272,21 @@ mod tests {
         ));
         std::fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    /// Runs `f` on its own thread and panics unless it returns within `limit`.
+    /// A panic in `f` panics here too. `aoide-test-support`'s `finishes_within`
+    /// cannot be used: it depends on this crate.
+    fn within<T: Send + 'static>(limit: Duration, f: impl FnOnce() -> T + Send + 'static) -> T {
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = tx.send(f());
+        });
+        match rx.recv_timeout(limit) {
+            Ok(value) => value,
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => panic!("did not return within {limit:?}"),
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => panic!("the call panicked"),
+        }
     }
 
     /// A path too long for `sun_path` is a clean, immediate `Err` — never a
@@ -417,7 +418,8 @@ mod tests {
         assert_eq!(sock.as_os_str().as_bytes().len(), cap - 1);
 
         let _listener = UnixListener::bind(&sock).unwrap();
-        let stream = connect_bounded(&sock, Duration::from_secs(5)).unwrap();
+        let path = sock.clone();
+        let stream = within(Duration::from_secs(10), move || connect_bounded(&path, Duration::from_secs(5))).unwrap();
         drop(stream);
         std::fs::remove_file(&sock).ok();
     }
@@ -433,7 +435,7 @@ mod tests {
         let _listener = UnixListener::bind(&sock).unwrap();
 
         let start = std::time::Instant::now();
-        let stream = connect_bounded(&sock, Duration::from_secs(5)).unwrap();
+        let stream = within(Duration::from_secs(10), move || connect_bounded(&sock, Duration::from_secs(5))).unwrap();
         assert!(start.elapsed() < Duration::from_millis(500), "a live listener must connect near-instantly");
         drop(stream);
         std::fs::remove_dir_all(&dir).ok();
@@ -448,7 +450,7 @@ mod tests {
         let dir = tmp_socket_dir("dead");
         let dead = dir.join("nothing-here.sock");
         let start = std::time::Instant::now();
-        let err = connect_bounded(&dead, Duration::from_secs(5)).unwrap_err();
+        let err = within(Duration::from_secs(10), move || connect_bounded(&dead, Duration::from_secs(5))).unwrap_err();
         assert!(start.elapsed() < Duration::from_millis(500), "a dead path must fail near-instantly, not wait out the bound");
         assert_ne!(err.kind(), io::ErrorKind::TimedOut, "ENOENT is not a timeout");
         std::fs::remove_dir_all(&dir).ok();
@@ -501,7 +503,7 @@ mod tests {
             // the rejected attempt itself and closed immediately.
             let fd = unsafe { libc::socket(libc::AF_UNIX, libc::SOCK_STREAM, 0) };
             assert!(fd >= 0, "socket: {}", io::Error::last_os_error());
-            set_fd_nonblocking(fd, true);
+            set_fd_nonblocking(fd, true).unwrap();
             // SAFETY: same address-struct contract as the bind above.
             let rc = unsafe { libc::connect(fd, &addr as *const libc::sockaddr_un as *const libc::sockaddr, addr_len) };
             if rc == 0 {
@@ -563,7 +565,7 @@ mod tests {
         });
 
         let start = std::time::Instant::now();
-        let stream = connect_bounded(&sock, Duration::from_secs(3)).unwrap();
+        let stream = within(Duration::from_secs(10), move || connect_bounded(&sock, Duration::from_secs(3))).unwrap();
         let elapsed = start.elapsed();
         assert!(elapsed >= Duration::from_millis(60), "should have genuinely waited for the slot to free: {elapsed:?}");
         assert!(elapsed < Duration::from_secs(1), "should succeed well within the 3s bound once the slot frees: {elapsed:?}");
@@ -595,7 +597,7 @@ mod tests {
         let (listen_fd, fillers) = saturate_backlog_of_one(&sock);
 
         let start = std::time::Instant::now();
-        let err = connect_bounded(&sock, Duration::from_millis(200)).unwrap_err();
+        let err = within(Duration::from_secs(10), move || connect_bounded(&sock, Duration::from_millis(200))).unwrap_err();
         let elapsed = start.elapsed();
         assert_eq!(err.kind(), io::ErrorKind::TimedOut, "{err}");
         assert!(elapsed < Duration::from_millis(500), "must not overrun the bound by much: {elapsed:?}");
@@ -619,12 +621,47 @@ mod tests {
         let sock = dir.join("s.sock");
         let _listener = UnixListener::bind(&sock).unwrap();
 
-        let stream = connect_bounded(&sock, Duration::from_secs(5)).unwrap();
+        let stream = within(Duration::from_secs(10), move || connect_bounded(&sock, Duration::from_secs(5))).unwrap();
         // SAFETY: `stream` owns its descriptor for as long as it is alive.
         let flags = unsafe { libc::fcntl(stream.as_raw_fd(), libc::F_GETFD) };
         assert!(flags >= 0, "F_GETFD: {}", io::Error::last_os_error());
         assert_ne!(flags & libc::FD_CLOEXEC, 0, "a bounded connect's socket must be close-on-exec");
         drop(stream);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// A zero timeout against a full backlog is `TimedOut` at once: the first
+    /// refused attempt is already past the deadline.
+    #[test]
+    #[cfg(unix)]
+    fn a_zero_timeout_against_a_full_backlog_times_out() {
+        let dir = tmp_socket_dir("zero");
+        let sock = dir.join("s.sock");
+        let (listen_fd, fillers) = saturate_backlog_of_one(&sock);
+
+        let err = within(Duration::from_secs(1), move || connect_bounded(&sock, Duration::ZERO)).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::TimedOut, "{err}");
+
+        // SAFETY: none of these fds were ever handed to anything else.
+        unsafe { libc::close(listen_fd) };
+        for fd in fillers {
+            unsafe { libc::close(fd) };
+        }
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// A timeout the clock cannot hold is refused as `InvalidInput` before any
+    /// socket is made. `Instant + Duration::MAX` panics, so this pins the
+    /// checked add.
+    #[test]
+    #[cfg(unix)]
+    fn a_timeout_past_the_clock_is_refused() {
+        let dir = tmp_socket_dir("clock");
+        let sock = dir.join("s.sock");
+        let _listener = UnixListener::bind(&sock).unwrap();
+
+        let err = within(Duration::from_secs(1), move || connect_bounded(&sock, Duration::MAX)).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidInput, "{err}");
         std::fs::remove_dir_all(&dir).ok();
     }
 }
