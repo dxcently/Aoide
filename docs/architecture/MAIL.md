@@ -853,16 +853,15 @@ link.json       { "holdUntil": ts, "lastError": "…" }   per-link backoff
   after a verified answer about the letter, as the drain does (poll-on-contact);
   a link refusal is no contact, so it is not polled. A via hop adds one tunnel
   open, up to the tunnel-open timeout (8 s by default).
-- The drain runs on `aoided`'s existing timer tick (the reaper cadence)
-  and immediately after any successful contact with that node. It dials only the
+- The drain runs on `aoided`'s existing timer tick (the reaper cadence) and
+  immediately after any successful contact with that node. It dials only the
   entries it may attempt, never an own letter, which its send dials (up to
   twice, ruling 131), and never a receipt. Because the door is a separate
   process, "after contact" means the door process drains under the same locks —
-  the `.bsy` flock is what keeps
-  the two drains from racing one link. It is taken non-blocking, the way
-  BSO means it: a drain that finds a link busy skips that link and moves
-  to the next. Blocking would queue tick after tick behind one stalled
-  ssh dial and starve every other link.
+  the `.bsy` flock is what keeps the two drains from racing one link. It is
+  taken non-blocking, the way BSO means it: a drain that finds a link busy skips
+  that link and moves to the next. Blocking would hold every later drain tick
+  behind one stalled ssh dial and starve every other link.
 - Each drain tick sweeps own letters and receipts before it drains (ruling 131).
   A letter spooled before the rule has no session and goes (reason `pre-131`),
   and so does every receipt whatever its session: the verified answer that filed
@@ -875,17 +874,17 @@ link.json       { "holdUntil": ts, "lastError": "…" }   per-link backoff
   `letter` or `receipt`.
 - Entries hold the envelope as minted — from P-SEAL, the sealed container
   — so a retry resends the same bytes on any transport.
-- A drain session reaches the node by its address's transport — an ssh
-  tunnel for `ssh://`, an outbound HTTPS request for `https://` (H1); a
-  `poll` node is never dialed — deposits, and **tears any tunnel down
-  before it exits** — never leaves a forward standing for the next tick. A standing `ssh -L` is a loopback path into the far
-  door for any same-uid process. The door parks that caller's send in
-  `pending.json` like every other network send (CONTRACTS.md §6), so a
-  standing forward can queue a message but never deliver one. The front
-  that faces the mesh points at the mail adapter's port, never at the A2A
-  door: `https://` reaches a listener whose whole method set is mail, and
-  the door — which parks every send — is never fronted by a
-  TLS-terminating hop (H1).
+- A drain session reaches the node by its address's transport — an ssh tunnel
+  for `ssh://`, an outbound HTTPS request for `https://` (H1); a `poll` node is
+  never dialed — deposits, and **tears any tunnel down before it exits** — never
+  leaves a forward standing for the next drain tick. A standing `ssh -L` is a
+  loopback path into the far door for any same-uid process. The door parks that
+  caller's send in `pending.json` like every other network send (CONTRACTS.md
+  §6), so a standing forward can queue a message but never deliver one. The
+  front that faces the mesh points at the mail adapter's port, never at the A2A
+  door: `https://` reaches a listener whose whole method set is mail, and the
+  door — which parks every send — is never fronted by a TLS-terminating hop
+  (H1).
 - On the drain, a `box-full` answer defers that one drained entry, and
   nothing else. Drained entries are charters and transit containers:
   an own letter and a receipt are never drained, and the live send returns one
