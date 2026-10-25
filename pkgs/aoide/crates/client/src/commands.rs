@@ -2275,6 +2275,7 @@ pub fn register_nodes(r: &mut Registry) {
         handler: handle_node_spawn,
         examples: ["node spawn yomi-strix -- status check please"],
         brief: "Start a session on a paired node and type its first turn.",
+        approves: true, launches: true,
     ));
 }
 
@@ -5014,6 +5015,7 @@ pub fn register_mail_send(r: &mut Registry) {
         handler: handle_mail_send,
         examples: ["mail send --to self/conductor -- status?", "mail send --to yomi-strix/conductor -- build finished"],
         brief: "Send a letter to self/<name> or to <node>/<name>.",
+        approves: true,
     ));
 }
 

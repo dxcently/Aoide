@@ -65,6 +65,10 @@
   answer. `Door::Pair` is closed: `can_approve` is false and no command declares
   it, and the registry walks in `aoide-cli` and `strillix` assert that no
   command opens it.
+- **`approves` and `launches` are marks, not gates.** `Command::check` never
+  reads them. The approve gate is `can_approve()`, reached directly or through
+  `refuse_unapproving_door`, and the golden tests in `cli/src/registry.rs` pin
+  the marked paths.
 - **`Command::check` is the one place argument rules and doors are enforced**,
   run by `door::parse` (so before any `special` hook) and by `Command::invoke`
   (which every `dispatch()` uses). It refuses a door the command does not

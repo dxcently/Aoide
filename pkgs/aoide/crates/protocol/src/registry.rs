@@ -158,6 +158,29 @@ pub struct Command {
     /// person, not capability from a consumer.
     #[serde(skip_serializing_if = "is_false")]
     pub internal: bool,
+    /// The verb approves or denies a hold, re-parents, answers for a person, or
+    /// types into a session; or it reaches a check that refuses a door that
+    /// cannot approve. Additive (CONTRACTS.md §3): skipped when `false`. The
+    /// desktop app's floor reads it from `schema --json`, which shows which
+    /// verbs carry it, and refuses a grant that names the verb. The floor also
+    /// refuses six classes by name: the custody, trust and self-change verbs,
+    /// Melete's tools, Mneme's writes and any Eidolon exec. The verbs among
+    /// them carry neither mark, even where a rule fits one. The floor refuses,
+    /// too, a grant for any call that carries `--node` or `--typed`. A verb is
+    /// marked for what its own handler does: an action it hands to the
+    /// dispatcher carries the marks of the verb it dispatches. The golden
+    /// snapshot in cli/src/registry.rs pins them. `Command::check` does not
+    /// read it.
+    #[serde(skip_serializing_if = "is_false")]
+    pub approves: bool,
+    /// The verb starts an agent, or arms a timer, a sweep or a listener that
+    /// starts a program later. Additive (CONTRACTS.md §3): skipped when
+    /// `false`. The desktop app's floor reads it from `schema --json`, which
+    /// shows which verbs carry it, and refuses a grant that names the verb. The
+    /// golden snapshot in cli/src/registry.rs pins them. `Command::check` does
+    /// not read it.
+    #[serde(skip_serializing_if = "is_false")]
+    pub launches: bool,
     #[serde(rename = "exitCodes", serialize_with = "exit_codes")]
     pub exit_codes: (),
     /// Invocation examples shown by `<cmd> --help` (the human door only —
@@ -209,6 +232,8 @@ impl Command {
         gated: false,
         implemented: true,
         internal: false,
+        approves: false,
+        launches: false,
         exit_codes: (),
         examples: &[],
         one_of: &[],
@@ -536,9 +561,9 @@ pub struct ExternalCommand {
     pub path: String,
 }
 
-/// `serde(skip_serializing_if)` predicate for `internal` — skip the key
-/// entirely when false, so a non-internal command's schema is byte-identical
-/// to before the field existed.
+/// `serde(skip_serializing_if)` predicate for `internal`, `approves` and
+/// `launches` — skip the key entirely when false, so an unmarked command's
+/// schema is byte-identical to before the field existed.
 fn is_false(b: &bool) -> bool {
     !*b
 }
