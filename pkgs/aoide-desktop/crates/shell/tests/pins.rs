@@ -95,5 +95,33 @@ fn a_good_file_pins_to_its_canonical_path() {
     let link = dir.join("aoide-link");
     symlink(&file, &link).expect("the link is made");
     let pinned = check_pin(&link, &home).expect("a good file pins");
-    assert_eq!(pinned, fs::canonicalize(&file).expect("the file canonicalizes"));
+    assert_eq!(pinned.path(), fs::canonicalize(&file).expect("the file canonicalizes").as_path());
+}
+
+#[test]
+fn a_program_in_a_group_writable_directory_is_refused() {
+    let home = scratch("group-dir");
+    let bin = home.join("opt");
+    program(&bin.join("eidolon"), 0o755);
+    fs::set_permissions(&bin, fs::Permissions::from_mode(0o775)).expect("the directory is group-writable");
+    let err = check_pin(&bin.join("eidolon"), &home).expect_err("another user can write the directory");
+    assert!(matches!(err, PinError::Writable(_)), "{err:?}");
+}
+
+#[test]
+fn a_program_in_an_other_writable_directory_is_refused() {
+    let home = scratch("other-dir");
+    let bin = home.join("opt");
+    program(&bin.join("eidolon"), 0o755);
+    fs::set_permissions(&bin, fs::Permissions::from_mode(0o777)).expect("the directory is other-writable");
+    let err = check_pin(&bin.join("eidolon"), &home).expect_err("anyone can write the directory");
+    assert!(matches!(err, PinError::Writable(_)), "{err:?}");
+}
+
+#[test]
+fn a_group_writable_program_is_refused() {
+    let home = scratch("group-file");
+    program(&home.join("eidolon"), 0o775);
+    let err = check_pin(&home.join("eidolon"), &home).expect_err("another user can write the program");
+    assert!(matches!(err, PinError::Writable(_)), "{err:?}");
 }

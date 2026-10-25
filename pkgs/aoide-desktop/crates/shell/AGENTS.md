@@ -12,12 +12,12 @@ are in README.md.
   The words `Command::new(`, `pre_exec`, `libc::fork`, `setsid`, `libc::kill`,
   `execv` and `posix_spawn` appear only in `exec.rs`, and the word `unsafe`
   only in `exec.rs` and the fake eidolon's file.
-- `spawn_door` starts a door only from an absolute path. Its pre-exec closure
-  makes only `setsid`, `fork`, `write`, `kill` and `_exit`, which POSIX lists as
-  async-signal-safe, and allocates nothing. `fork` runs glibc's atfork handlers,
-  which take malloc's locks before the fork and release them on both sides. The
-  closure runs in the intermediate, which has one thread, so those locks are
-  free. `spawn_detached`'s doc says the same.
+- `spawn_door` starts only the `Pinned` program it is given, at its canonical
+  path. Its pre-exec closure makes only `setsid`, `fork`, `write`, `kill` and
+  `_exit`, which POSIX lists as async-signal-safe, and allocates nothing. `fork`
+  runs glibc's atfork handlers, which take malloc's locks before the fork and
+  release them on both sides. The closure runs in the intermediate, which has
+  one thread, so those locks are free. `spawn_detached`'s doc says the same.
 - Between fork and exec, in order: std's `pre_exec` makes std fork, and the
   child runs its atfork handlers; the closure then calls `setsid` and
   `libc::fork`, still in that one-threaded child; the grandchild returns from
@@ -26,8 +26,13 @@ are in README.md.
   because the child has one thread when the closure runs.
 - The door's environment is `Exec::door_env`: `child_env(Child::Eidolon, "web",
   ...)`, with `XDG_RUNTIME_DIR` replaced by the checked runtime dir.
-- Every child runs from a pinned path. `run` is private, and only `Exec` calls
-  it, after `check_pin`. Do not add a second way in.
+- Every child runs from a `Pinned` program. `check_pin` is the only maker of
+  one, and `run` and `spawn_door` take one. `run` is private, and only `Exec`
+  calls it. Do not add a second way in.
+- `check_pin` refuses a file, or the directory it lies in, that group or other
+  can write, and one owned by a uid that is neither root nor this user
+  (`PinError::Writable`, `PinError::Owner`). No test can make a directory
+  another uid owns, so the owner branch is not tested (see Not tested).
 - No shell, ever. The argv is a vector of words, never a string handed to a
   shell. A child runs by its absolute path with `env_clear()`.
 - The argv is `[aoide, <path words>, --json, <flags>, (-- <positionals>)]`. A
@@ -40,27 +45,36 @@ are in README.md.
 - An `eidolon` child loses `AOIDE_SESSION_ID`, every `AOIDE_MELETE_*` variable
   and every vault key variable. An `aoide` child loses every `AOIDE_MELETE_*`
   variable unless its first word is `melete`, and every vault key variable.
+  Names are compared as bytes, so a name that is not UTF-8 is scrubbed too.
 - The vault key names come from `aoide config --json`. While they are unknown,
   every call but `schema` and `config` is refused before a child starts, and an
   `eidolon` launch is refused too. The names are unknown when the config call
   fails or does not parse, or when a `tokenEnv` is not
   `[A-Za-z_][A-Za-z0-9_]*`, or names `PATH`, `HOME`, `XDG_RUNTIME_DIR` or
-  `AOIDE_ROOT`. A bad `tokenEnv` is shown through `visible`.
+  `AOIDE_ROOT`. A bad `tokenEnv` is shown through `visible`. The pattern has no
+  length bound and is case-sensitive, so a 10 KiB name and `path` pass, and
+  `HOME=x` does not.
 - Each stream is kept up to 16 MiB. Past that, the child still runs to its end,
   the extra bytes are dropped, and the call is refused.
-- Each call runs under one deadline, 30 s unless `Exec::deadline` shortens it,
-  from the spawn to the end of the reading of its output. A child still running
-  at the deadline is sent SIGTERM and has 5 s to exit, and the call is refused
-  as a timeout. A child that has exited, while a process it started still holds
-  its output pipe, is refused at the same deadline, and no signal is sent. A
-  child that ignores SIGTERM for 5 s is left running and unreaped. Nothing
-  sends SIGKILL: `Child::kill` is a clippy disallowed method, and the word is
-  barred from every source.
+- Each call runs under one deadline, 30 s, from the spawn to the end of the
+  reading of its output. `Exec::deadline` can only shorten it: the shorter of
+  the two is taken. A child still running at the deadline is sent SIGTERM and
+  has 5 s to exit, and the call is refused as a timeout. A child that has
+  exited, while a process it started still holds its output pipe, is refused at
+  the same deadline, and no signal is sent to that process. That process keeps
+  the call's two reader threads and their pipes until it exits; freeing them at
+  the deadline is not implemented. A child that ignores SIGTERM for 5 s is left
+  running and unreaped. Nothing sends SIGKILL: `Child::kill` is a clippy
+  disallowed method, and the word is barred from every source.
 - `open_pidfd` opens a pidfd for a pid, and `terminate_pidfd` sends SIGTERM
-  through one, and only SIGTERM. A pidfd names one process, so the signal
-  cannot reach a process that later takes the pid. Outside exec.rs's own tests,
-  the door code in `doors.rs` is the only caller: a door is signalled through
-  its pidfd and no other way.
+  through one, and only SIGTERM. Both refuse pid 0, pid 1, any pid past
+  `i32::MAX`, and this process's own pid. A pidfd names one process, so the
+  signal cannot reach a process that later takes the pid. Outside exec.rs's own
+  tests, the door code in `doors.rs` is the only caller: a door is signalled
+  through its pidfd and no other way, once its pid has arrived.
+- `terminate(pid)` sends SIGTERM to an unreaped child this process started, and
+  refuses the same pids. The caller checks the pid's start time and command line
+  at that moment. The door tests reach it through `test_doors::terminate`.
 - A non-zero exit is not an error. `call` returns the child's status and its
   stderr, verbatim, for the caller to show.
 
@@ -168,16 +182,17 @@ are in README.md.
   the fake records, and passes only if nothing came before the sentinel. Every
   positive wait is at least 5 s.
 - The fake eidolon's start-up modes are listed in README.md's fakes section.
+- The two hostile children in `exec.rs`'s tests are shell scripts that the test
+  writes, pins and runs through `run`: a grandchild that holds stdout, and a
+  child that ignores SIGTERM. Each is bounded and exits by itself within 8 s.
 
 ## Not tested
 
-- A child that exits while a grandchild holds its output pipe: the deadline
-  holds the call, but no test can start the grandchild. The text gate keeps
-  `Command::new(` in `exec.rs`, so no fake or test can start one.
 - The intermediate's failed pid write, which SIGTERMs the door and exits
   non-zero: no seam makes that write fail.
-- A child that ignores SIGTERM past the 5 s bound: the fake aoide exits on
-  SIGTERM, so the left-running path never runs.
+- `check_pin`'s owner branch, which refuses a target or directory owned by a uid
+  that is neither root nor this user: no test can make a directory another uid
+  owns. The mode rule is tested.
 - A reconnect's zombie, start time or command line failure: the same checks at
   open are tested, and a reconnect's pin change is tested. A door that dies under
   a watch is reaped by init, so no test holds its zombie, and a live pid's command
@@ -192,8 +207,8 @@ are in README.md.
 
 - A new aoide command needs no code. Its path, flags and arguments come from
   `aoide schema --json`.
-- A new kind of child goes in `exec.rs`, with its own environment rule in
-  `child_env`. If it needs vault keys, it is refused while their names are
-  unknown.
+- A new kind of child goes in `exec.rs`, runs only a `Pinned` program, and has
+  its own environment rule in `child_env`. If it needs vault keys, it is refused
+  while their names are unknown.
 - A new door command goes in `doors.rs`. It calls `verify` before any request
   under the token or any signal, and it has a test for each refusal.

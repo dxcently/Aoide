@@ -9,12 +9,12 @@ door crate, and `aoide-protocol` by path (for `is_unsafe` and `visible`).
 
 ## Seams
 
-- `exec.rs`: `check_pin`, `Schema`, `argv`, `child_env`, `Exec` (`load`,
-  `call`, `deadline`, `door_env`, `spawn_door`), `terminate`, and the pidfd
-  helpers `open_pidfd` and `terminate_pidfd`. Only this file starts a process
-  or sends a signal. Behind `fakes`, `make_fifo` makes the FIFO the token test
-  puts at the token path, and `test_doors` starts and signals a door for the
-  door tests.
+- `exec.rs`: `check_pin`, which returns a `Pinned` (the only maker of one),
+  `Schema`, `argv`, `child_env`, `Exec` (`load`, `call`, `deadline`,
+  `door_env`, `spawn_door`), `terminate`, and the pidfd helpers `open_pidfd`
+  and `terminate_pidfd`. Only this file starts a process or sends a signal.
+  Behind `fakes`, `make_fifo` makes the FIFO the token test puts at the token
+  path, and `test_doors` starts and signals a door for the door tests.
 - `doors.rs`: `Doors`, which keeps the app's record of its doors, launches one,
   re-attaches the records at start, watches each door's stream, and closes a
   door. Its watch threads send on a bounded channel of `EVENTS_BOUND` (64)
@@ -29,7 +29,9 @@ door crate, and `aoide-protocol` by path (for `is_unsafe` and `visible`).
 exec.rs     Exec::load(aoide, home, env)
               |
               +-- check_pin      absolute, a regular file this user can run,
-              |                  not under <home>/.local/bin
+              |                  not under <home>/.local/bin, and neither the
+              |                  file nor its directory writable by group or
+              |                  other, owned by root or this user
               +-- Schema::load   aoide schema --json
               +-- config         aoide config --json   -> vault key names
               |
@@ -48,8 +50,11 @@ exec.rs     Exec::load(aoide, home, env)
 ```
 
 - `check_pin` refuses a relative path, a missing one, a target that is not an
-  executable regular file, and any target under `<home>/.local/bin`. It returns
-  the canonical path, which is the only path the app runs.
+  executable regular file, and any target under `<home>/.local/bin`. It refuses
+  a file, or the directory it lies in, that group or other can write, and one
+  owned by a uid that is neither root nor this user (`PinError::Writable` and
+  `PinError::Owner`). It returns a `Pinned` of the canonical path, which is the
+  only path the app runs.
 - `argv` builds the argument list from `aoide schema --json`. It refuses, before
   anything runs, an unknown path, an undeclared flag, a bool flag given a value,
   a valued flag given none, a missing required argument, and a NUL byte.
@@ -57,35 +62,46 @@ exec.rs     Exec::load(aoide, home, env)
   the child must not see. An `eidolon` child loses `AOIDE_SESSION_ID`, the
   `AOIDE_MELETE_*` variables and the vault keys. An `aoide` child loses the
   `AOIDE_MELETE_*` variables unless its first word is `melete`, and the vault
-  keys.
+  keys. The names compare as bytes, so a name that is not UTF-8 meets the same
+  rules.
 - The vault key names are the `tokenEnv` names in `aoide config --json`. While
   they are unknown, every call but `schema` and `config` is refused before a
   child starts. The names are unknown when the config call fails or does not
   parse, or when a `tokenEnv` is not `[A-Za-z_][A-Za-z0-9_]*`, or names `PATH`,
   `HOME`, `XDG_RUNTIME_DIR` or `AOIDE_ROOT`. A bad `tokenEnv` is shown through
-  `visible`.
-- `run` is private. Only `Exec` reaches it, and only with the pinned path.
-- Each call runs under one deadline, 30 s unless `Exec::deadline` shortens it.
-  It covers the spawn, the child's exit and the reading of its output. A child
-  still running at the deadline is sent SIGTERM and has 5 s to exit, and the
-  call is refused as a timeout. A child that exits while a process it started
-  still holds its output pipe is refused at the same deadline, with no signal.
-  Nothing sends SIGKILL.
+  `visible`. The pattern has no length bound and is case-sensitive: a 10 KiB
+  name and a lowercase `path` are accepted, and `HOME=x` is refused.
+- `run` is private. Only `Exec` reaches it, and only with a `Pinned`.
+- Each call runs under one deadline, 30 s. `Exec::deadline` can only shorten
+  it: the shorter of the two is taken. The deadline covers the spawn, the
+  child's exit and the reading of its output. A child still running at the
+  deadline is sent SIGTERM and has 5 s to exit, and the call is refused as a
+  timeout. A child that exits while a process it started still holds its output
+  pipe is refused at the same deadline, with no signal to that process. That
+  process keeps the call's two reader threads and their pipes until it exits:
+  freeing them at the deadline is not implemented. Nothing sends SIGKILL.
 - `open_pidfd` opens a pidfd for a pid, and `terminate_pidfd` sends SIGTERM
-  through one. A pidfd names one process, so the signal cannot reach a process
-  that later takes the pid. `doors.rs` opens one when a door's pid arrives, and
-  signals a door only through it.
+  through one. Both refuse pid 0, pid 1, any pid past `i32::MAX`, and this
+  process's own pid. A pidfd names one process, so the signal cannot reach a
+  process that later takes the pid. `doors.rs` opens one when a door's pid
+  arrives, and signals a door only through it from then on.
 - `door_env` is `child_env` for `eidolon web`, with `XDG_RUNTIME_DIR` set to the
-  checked runtime dir. `spawn_door` starts a door through `spawn_detached`. The
-  door runs in a session of its own and is not the app's child: std's child,
-  the intermediate, calls `setsid`, forks the door and writes the door's pid to
-  a pipe. If that write fails, the intermediate SIGTERMs the door and exits
-  non-zero, so no door runs unnamed. Otherwise it exits zero, and init adopts
-  the door. The app reads the pid and reaps the intermediate. The door's stdin
-  is `/dev/null`, and its stdout and stderr are the door log. std's
-  close-on-exec pipe reports an exec failure of the door as `spawn`'s error.
-- `terminate` sends SIGTERM. It refuses pid 0 and any pid past `i32::MAX`. The
-  caller checks the pid's start time and command line at that moment.
+  checked runtime dir. `spawn_door` takes the `Pinned` program and its
+  arguments, and starts the door through `spawn_detached`, so the program is the
+  one `check_pin` checked. The door runs in a session of its own and is not the
+  app's child: std's child, the intermediate, calls `setsid`, forks the door and
+  writes the door's pid to a pipe. If that write fails, the intermediate
+  SIGTERMs the door and exits non-zero. A door that ignores that SIGTERM runs
+  unnamed. Otherwise the intermediate exits zero, and init adopts the door. The
+  app reads the pid and reaps the intermediate. The door's stdin is `/dev/null`,
+  and its stdout and stderr are the door log. std's close-on-exec pipe reports
+  an exec failure of the door as `spawn`'s error. Once the app has the pid, it
+  signals the door only through its pidfd.
+- `terminate` sends SIGTERM to an unreaped child this process started. It
+  refuses pid 0, pid 1, any pid past `i32::MAX`, and this process's own pid. The
+  caller checks the pid's start time and command line at that moment. `doors.rs`
+  signals a door through its pidfd and never through `terminate`; the door tests
+  reach it through `test_doors::terminate`, behind `fakes`.
 
 ## How a door is kept
 

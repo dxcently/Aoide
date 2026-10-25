@@ -6,7 +6,7 @@ use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use aoide_desktop_shell::exec::{test_doors, Exec, ExecError, PinError};
+use aoide_desktop_shell::exec::{check_pin, test_doors, Exec, ExecError};
 
 const FAKE_AOIDE: &str = env!("CARGO_BIN_EXE_fake-aoide");
 
@@ -41,21 +41,16 @@ fn log_file(dir: &Path) -> fs::File {
 }
 
 #[test]
-fn spawn_door_refuses_a_relative_program_and_starts_nothing() {
-    let dir = scratch("relative");
-    let exec = load(&dir, &[]);
-    let argv = vec![OsString::from("fake-eidolon"), OsString::from("web")];
-    let refused = test_doors::spawn(&exec, &argv, &dir.join("runtime"), log_file(&dir));
-    assert!(matches!(refused, Err(ExecError::Pin(PinError::Relative(_)))));
-    assert!(!dir.join("runtime/eidolon").exists(), "no door ran");
-}
-
-#[test]
 fn an_exec_failure_is_reported_as_an_error() {
     let dir = scratch("missing");
     let exec = load(&dir, &[]);
-    let argv = vec![OsString::from("/nonexistent/aoide-desktop-door"), OsString::from("web")];
-    let failed = test_doors::spawn(&exec, &argv, &dir.join("runtime"), log_file(&dir));
+    let program = dir.join("door");
+    fs::write(&program, "#!/bin/sh\n").expect("the door is written");
+    fs::set_permissions(&program, fs::Permissions::from_mode(0o755)).expect("the door is executable");
+    let pinned = check_pin(&program, &dir.join("home")).expect("the door pins");
+    fs::remove_file(&program).expect("the door is removed after it pins");
+    let args = [OsString::from("web")];
+    let failed = test_doors::spawn(&exec, &pinned, &args, &dir.join("runtime"), log_file(&dir));
     assert!(matches!(failed, Err(ExecError::Spawn(_))), "the exec failure comes back as an error");
 }
 

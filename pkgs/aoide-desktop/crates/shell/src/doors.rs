@@ -35,7 +35,7 @@ use aoide_protocol::untrusted::{is_unsafe, visible};
 use serde::{Deserialize, Serialize};
 
 use crate::asks::{self, Prepared, Sent, Shown};
-use crate::exec::{check_pin, euid, open_pidfd, terminate_pidfd, Exec, ExecError};
+use crate::exec::{check_pin, euid, open_pidfd, terminate_pidfd, Exec, ExecError, Pinned};
 
 /// The bound on the events channel. The caller creates the channel with this size.
 pub const EVENTS_BOUND: usize = 64;
@@ -178,19 +178,21 @@ impl From<ExecError> for DoorsError {
     }
 }
 
-/// What a launch runs: the pinned `eidolon` as `web --bind 127.0.0.1:0 --cwd D`.
-/// Only `launch_plan` builds one, and `Doors::launch` spawns its argv and no other.
+/// What a launch runs: the pinned `eidolon` with `web --bind 127.0.0.1:0 --cwd D`.
+/// Only `launch_plan` builds one, and `Doors::launch` spawns its program and args
+/// and no other.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LaunchPlan {
     cwd: PathBuf,
-    argv: Vec<OsString>,
+    program: Pinned,
+    args: Vec<OsString>,
 }
 
 /// Pins `eidolon`, and checks the working directory.
 pub fn launch_plan(eidolon: &Path, home: &Path, cwd: &Path) -> Result<LaunchPlan, DoorsError> {
     let pinned = check_pin(eidolon, home).map_err(|e| DoorsError::Exec(ExecError::Pin(e)))?;
     check_cwd(cwd).map_err(DoorsError::Plan)?;
-    Ok(LaunchPlan { cwd: cwd.to_path_buf(), argv: launch_argv(&pinned, cwd) })
+    Ok(LaunchPlan { cwd: cwd.to_path_buf(), program: pinned, args: launch_args(cwd) })
 }
 
 /// The working directory is absolute, canonical, an existing directory, and free
@@ -214,15 +216,9 @@ fn check_cwd(cwd: &Path) -> Result<(), String> {
     Ok(())
 }
 
-fn launch_argv(pinned: &Path, cwd: &Path) -> Vec<OsString> {
-    vec![
-        pinned.as_os_str().to_owned(),
-        "web".into(),
-        "--bind".into(),
-        "127.0.0.1:0".into(),
-        "--cwd".into(),
-        cwd.as_os_str().to_owned(),
-    ]
+/// The arguments of `eidolon web` for `cwd`, after the program.
+fn launch_args(cwd: &Path) -> Vec<OsString> {
+    vec!["web".into(), "--bind".into(), "127.0.0.1:0".into(), "--cwd".into(), cwd.as_os_str().to_owned()]
 }
 
 /// One door's record, as `doors.json` holds it.
@@ -401,7 +397,7 @@ impl Doors {
         make_private_dir(&dir)?;
         let log_path = dir.join(format!("{id}.log"));
         let log = create_private(&log_path)?;
-        let pid = self.exec.spawn_door(&plan.argv, &self.pins.runtime, log)?;
+        let pid = self.exec.spawn_door(&plan.program, &plan.args, &self.pins.runtime, log)?;
         let door = Unrecorded::adopt(pid, log_path.clone());
         let Some(starttime) = door.starttime else {
             return Err(door.refuse("it exited before its checks".into()));
@@ -683,7 +679,9 @@ fn verify(pins: &Pins, entry: &Entry) -> Result<(), Check> {
     let pinned = check_pin(&pins.eidolon, &pins.home)
         .map_err(|e| Check::Identity(format!("the pin no longer passes: {e}")))?;
     check_cwd(Path::new(&entry.cwd)).map_err(Check::Other)?;
-    let argv = launch_argv(&pinned, Path::new(&entry.cwd));
+    let argv: Vec<OsString> = std::iter::once(pinned.path().as_os_str().to_owned())
+        .chain(launch_args(Path::new(&entry.cwd)))
+        .collect();
     let stat = match stat_of(entry.pid) {
         Ok(stat) => stat,
         Err(e) if e.kind() == io::ErrorKind::NotFound => return Err(Check::Identity("the door is not running".into())),

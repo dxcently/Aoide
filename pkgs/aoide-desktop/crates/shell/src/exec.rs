@@ -14,6 +14,7 @@ use std::fs;
 use std::io::{self, Read, Write};
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
 use std::os::unix::ffi::OsStrExt;
+use std::os::unix::fs::MetadataExt;
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus, Stdio};
@@ -46,6 +47,11 @@ pub enum PinError {
     NotExecutable(PathBuf),
     /// The target lies under `<home>/.local/bin`, which is never pinned.
     InLocalBin(PathBuf),
+    /// `path`, the target or the directory it lies in, is writable by group or other.
+    Writable(PathBuf),
+    /// `path`, the target or the directory it lies in, is owned by `uid`, which is
+    /// neither root nor this user.
+    Owner { path: PathBuf, uid: u32 },
 }
 
 impl fmt::Display for PinError {
@@ -63,12 +69,32 @@ impl fmt::Display for PinError {
             Self::InLocalBin(path) => {
                 write!(f, "{} lies under .local/bin in the home directory, which is never pinned", path.display())
             }
+            Self::Writable(path) => write!(
+                f,
+                "{} is writable by group or other; a pin needs a path no other user can replace",
+                path.display()
+            ),
+            Self::Owner { path, uid } => {
+                write!(f, "{} is owned by uid {uid}, which is neither root nor this user", path.display())
+            }
         }
     }
 }
 
-/// Checks a program path before it is run, and returns its canonical path.
-pub fn check_pin(path: &Path, home: &Path) -> Result<PathBuf, PinError> {
+/// A program path that `check_pin` has checked. Only `check_pin` makes one, so a
+/// spawn takes a pinned program or nothing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Pinned(PathBuf);
+
+impl Pinned {
+    /// The canonical path of the checked program.
+    pub fn path(&self) -> &Path {
+        &self.0
+    }
+}
+
+/// Checks a program path before it is run, and returns it pinned at its canonical path.
+pub fn check_pin(path: &Path, home: &Path) -> Result<Pinned, PinError> {
     if !path.is_absolute() {
         return Err(PinError::Relative(path.to_path_buf()));
     }
@@ -84,7 +110,25 @@ pub fn check_pin(path: &Path, home: &Path) -> Result<PathBuf, PinError> {
             return Err(PinError::InLocalBin(canonical));
         }
     }
-    Ok(canonical)
+    let uid = euid();
+    check_owned(&canonical, uid)?;
+    if let Some(dir) = canonical.parent() {
+        check_owned(dir, uid)?;
+    }
+    Ok(Pinned(canonical))
+}
+
+/// Refuses a file or directory another user could replace: writable by group or
+/// other, or owned by a uid that is neither root nor `uid`.
+fn check_owned(path: &Path, uid: u32) -> Result<(), PinError> {
+    let meta = fs::metadata(path).map_err(|source| PinError::Missing { path: path.to_path_buf(), source })?;
+    if meta.mode() & 0o022 != 0 {
+        return Err(PinError::Writable(path.to_path_buf()));
+    }
+    if meta.uid() != 0 && meta.uid() != uid {
+        return Err(PinError::Owner { path: path.to_path_buf(), uid: meta.uid() });
+    }
+    Ok(())
 }
 
 fn can_execute(path: &Path) -> bool {
@@ -154,7 +198,7 @@ impl Schema {
     }
 
     /// Runs `aoide schema --json` once, with the environment a child gets.
-    fn load(aoide: &Path, base_env: &[(OsString, OsString)]) -> Result<Schema, ExecError> {
+    fn load(aoide: &Pinned, base_env: &[(OsString, OsString)]) -> Result<Schema, ExecError> {
         let env = child_env(Child::Aoide, "schema", base_env, Err("the vault names are not read yet"))?;
         let args = [OsString::from("schema"), OsString::from("--json")];
         let out = run(aoide, &args, &env, None, "schema --json", DEADLINE)?;
@@ -281,13 +325,13 @@ pub fn child_env(
         .collect())
 }
 
+/// Whether a child's environment drops `name`. Names compare as bytes, so a name
+/// that is not UTF-8 is scrubbed by the same three rules.
 fn scrubbed(child: Child, melete: bool, name: &OsStr, keys: &[String]) -> bool {
-    let Some(name) = name.to_str() else {
-        return false;
-    };
-    let melete_var = name.starts_with("AOIDE_MELETE_") && !melete;
-    let session = child == Child::Eidolon && name == "AOIDE_SESSION_ID";
-    melete_var || session || keys.iter().any(|key| key == name)
+    let name = name.as_bytes();
+    let melete_var = name.starts_with(b"AOIDE_MELETE_") && !melete;
+    let session = child == Child::Eidolon && name == b"AOIDE_SESSION_ID";
+    melete_var || session || keys.iter().any(|key| key.as_bytes() == name)
 }
 
 #[derive(Deserialize)]
@@ -341,7 +385,7 @@ pub struct Output {
 
 /// The aoide children the app starts, from one pinned program.
 pub struct Exec {
-    aoide: PathBuf,
+    aoide: Pinned,
     schema: Schema,
     vault_keys: Result<Vec<String>, String>,
     base_env: Vec<(OsString, OsString)>,
@@ -366,9 +410,10 @@ impl Exec {
         Ok(exec)
     }
 
-    /// Shortens the deadline a call runs under. The app keeps the default.
+    /// Shortens the deadline a call runs under: the shorter of `deadline` and the
+    /// default, so a call never outlasts the app's bound.
     pub fn deadline(mut self, deadline: Duration) -> Exec {
-        self.deadline = deadline;
+        self.deadline = deadline.min(DEADLINE);
         self
     }
 
@@ -384,7 +429,7 @@ impl Exec {
     ) -> Result<Output, ExecError> {
         let first = words.first().copied().unwrap_or("");
         let env = child_env(Child::Aoide, first, &self.base_env, self.keys())?;
-        let line = argv(&self.aoide, &self.schema, words, flags, positionals)?;
+        let line = argv(self.aoide.path(), &self.schema, words, flags, positionals)?;
         run(&self.aoide, &line[1..], &env, stdin, &words.join(" "), self.deadline)
     }
 
@@ -402,16 +447,18 @@ impl Exec {
         Ok(env)
     }
 
-    /// Starts `argv` as a door: detached, in a session of its own, with stdin
-    /// on /dev/null and stdout and stderr on `log`. Returns the door's pid.
-    /// `argv[0]` is the program `check_pin` returned.
-    pub(crate) fn spawn_door(&self, argv: &[OsString], runtime: &Path, log: fs::File) -> Result<u32, ExecError> {
-        let program = argv.first().map(PathBuf::from).unwrap_or_default();
-        if !program.is_absolute() {
-            return Err(ExecError::Pin(PinError::Relative(program)));
-        }
+    /// Starts `program` with `args` as a door: detached, in a session of its own,
+    /// with stdin on /dev/null and stdout and stderr on `log`. Returns the door's
+    /// pid. The program is the one `check_pin` pinned, and no other is started.
+    pub(crate) fn spawn_door(
+        &self,
+        program: &Pinned,
+        args: &[OsString],
+        runtime: &Path,
+        log: fs::File,
+    ) -> Result<u32, ExecError> {
         let env = self.door_env(runtime)?;
-        spawn_detached(argv, &env, log)
+        spawn_detached(program.path(), args, &env, log)
     }
 }
 
@@ -422,7 +469,7 @@ impl Exec {
 /// refused either way. A process the child started may hold an output pipe
 /// after the child exits; that holds the call to the same deadline.
 fn run(
-    program: &Path,
+    program: &Pinned,
     args: &[OsString],
     env: &[(OsString, OsString)],
     stdin: Option<&[u8]>,
@@ -430,7 +477,7 @@ fn run(
     deadline: Duration,
 ) -> Result<Output, ExecError> {
     let until = Instant::now() + deadline;
-    let mut child = Command::new(program)
+    let mut child = Command::new(program.path())
         .args(args)
         .env_clear()
         .envs(env.iter().cloned())
@@ -597,25 +644,31 @@ impl fmt::Display for ExecError {
 
 impl std::error::Error for ExecError {}
 
-/// Starts `argv` in a session of its own, outside this process's tree.
+/// Starts `program` with `args` in a session of its own, outside this process's
+/// tree.
 ///
 /// Between fork and exec, in order: std's `pre_exec` makes std fork, so the
 /// closure runs in the intermediate, a one-thread child of a larger process
 /// whose atfork handlers have run. The closure calls `setsid`, then `libc::fork`
 /// for the door. The intermediate writes the door's pid to the pipe and exits
-/// zero. If the write fails, it signals the door and exits non-zero, so no door
-/// runs unnamed. `write`, `kill`, `_exit` and `fork` are async-signal-safe, and
-/// the closure allocates nothing. libc 0.2.189 binds no `_Fork`, so the second
-/// fork is `libc::fork`: it is safe here because the intermediate has one thread
-/// when the closure runs. Std's close-on-exec pipe carries the door's own exec
-/// failure back to the caller as `spawn`'s error.
-fn spawn_detached(argv: &[OsString], env: &[(OsString, OsString)], log: fs::File) -> Result<u32, ExecError> {
+/// zero. If the write fails, it signals the door and exits non-zero. A door that
+/// ignores that SIGTERM runs unnamed. `write`, `kill`, `_exit` and `fork` are
+/// async-signal-safe, and the closure allocates nothing. libc 0.2.189 binds no
+/// `_Fork`, so the second fork is `libc::fork`: it is safe here because the
+/// intermediate has one thread when the closure runs. Std's close-on-exec pipe
+/// carries the door's own exec failure back to the caller as `spawn`'s error.
+fn spawn_detached(
+    program: &Path,
+    args: &[OsString],
+    env: &[(OsString, OsString)],
+    log: fs::File,
+) -> Result<u32, ExecError> {
     let (mut pid_in, pid_out) = io::pipe().map_err(ExecError::Io)?;
     let pid_fd = pid_out.as_raw_fd();
     let stdout = log.try_clone().map_err(ExecError::Io)?;
-    let mut command = Command::new(&argv[0]);
+    let mut command = Command::new(program);
     command
-        .args(&argv[1..])
+        .args(args)
         .env_clear()
         .envs(env.iter().cloned())
         .stdin(Stdio::null())
@@ -651,14 +704,20 @@ fn spawn_detached(argv: &[OsString], env: &[(OsString, OsString)], log: fs::File
     Ok(u32::from_ne_bytes(bytes))
 }
 
-/// Sends SIGTERM to `pid`. The caller checks the start time and the command
-/// line at this moment, since a pid can be reused; this refuses the values
-/// `kill` would read as a process group or as no process at all.
+/// The pid `kill` and `pidfd_open` take for `pid`, if it names a process this
+/// module may signal: not 0 or 1, not past `i32::MAX`, and not this process.
+fn signal_target(pid: u32) -> Option<i32> {
+    i32::try_from(pid).ok().filter(|p| *p > 1 && pid != std::process::id())
+}
+
+/// Sends SIGTERM to `pid`, an unreaped child this process started. The caller
+/// checks the start time and the command line at this moment, since a pid can be
+/// reused. This refuses the values `kill` would read as a process group, as init,
+/// as this process, or as no process at all.
 pub(crate) fn terminate(pid: u32) -> io::Result<()> {
-    let pid = i32::try_from(pid)
-        .ok()
-        .filter(|p| *p > 0)
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "a pid to signal is 1 to i32::MAX"))?;
+    let pid = signal_target(pid).ok_or_else(|| {
+        io::Error::new(io::ErrorKind::InvalidInput, "a pid to signal is 2 to i32::MAX, and not this process")
+    })?;
     // SAFETY: a plain syscall taking a pid and a signal number; no memory is passed.
     if unsafe { libc::kill(pid, libc::SIGTERM) } == 0 {
         Ok(())
@@ -676,10 +735,9 @@ pub(crate) fn euid() -> u32 {
 /// A pidfd for `pid`: a descriptor that names one process, so a signal sent
 /// through it cannot reach a process that later takes the number.
 pub(crate) fn open_pidfd(pid: u32) -> io::Result<OwnedFd> {
-    let pid = i32::try_from(pid)
-        .ok()
-        .filter(|p| *p > 0)
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "a pid to open is 1 to i32::MAX"))?;
+    let pid = signal_target(pid).ok_or_else(|| {
+        io::Error::new(io::ErrorKind::InvalidInput, "a pid to open is 2 to i32::MAX, and not this process")
+    })?;
     // SAFETY: a plain syscall taking a pid and flags; no memory is passed.
     let fd = unsafe { libc::syscall(libc::SYS_pidfd_open, pid, 0 as libc::c_uint) };
     if fd < 0 {
@@ -730,11 +788,17 @@ pub mod test_doors {
     use std::io;
     use std::path::Path;
 
-    use super::{Exec, ExecError};
+    use super::{Exec, ExecError, Pinned};
 
-    /// Starts `argv` as a door, as `Exec::spawn_door` does.
-    pub fn spawn(exec: &Exec, argv: &[OsString], runtime: &Path, log: fs::File) -> Result<u32, ExecError> {
-        exec.spawn_door(argv, runtime, log)
+    /// Starts `program` with `args` as a door, as `Exec::spawn_door` does.
+    pub fn spawn(
+        exec: &Exec,
+        program: &Pinned,
+        args: &[OsString],
+        runtime: &Path,
+        log: fs::File,
+    ) -> Result<u32, ExecError> {
+        exec.spawn_door(program, args, runtime, log)
     }
 
     /// Sends SIGTERM to `pid`, as the app does to a child it started.
@@ -794,15 +858,23 @@ fn is_variable_name(name: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use std::os::unix::fs::PermissionsExt;
     use std::os::unix::process::ExitStatusExt;
 
     use super::*;
 
     #[test]
-    fn a_pidfd_opens_for_a_live_process_and_not_for_a_pid_that_is_gone() {
-        assert!(open_pidfd(std::process::id()).is_ok());
+    fn a_pidfd_opens_for_a_live_child_and_not_for_a_pid_that_is_gone_or_refused() {
+        let mut sleeper = Command::new("sleep").arg("30").spawn().expect("sleep starts");
+        assert!(open_pidfd(sleeper.id()).is_ok());
         let gone = open_pidfd(i32::MAX as u32).expect_err("no process has that pid");
         assert_eq!(gone.raw_os_error(), Some(libc::ESRCH));
+        for pid in [1, std::process::id()] {
+            let refused = open_pidfd(pid).expect_err("pid 1 and this process are refused");
+            assert_eq!(refused.kind(), io::ErrorKind::InvalidInput, "{pid}");
+        }
+        let _ = sleeper.kill();
+        let _ = sleeper.wait();
     }
 
     #[test]
@@ -812,6 +884,86 @@ mod tests {
         terminate_pidfd(&fd).expect("SIGTERM is sent");
         let status = sleeper.wait().expect("the child is reaped");
         assert_eq!(status.signal(), Some(libc::SIGTERM));
+    }
+
+    #[test]
+    fn terminate_refuses_pid_one_without_a_signal() {
+        let refused = terminate(1).expect_err("pid 1 is refused");
+        assert_eq!(refused.kind(), io::ErrorKind::InvalidInput);
+    }
+
+    /// Set for the child that `terminate_refuses_this_process_without_a_signal` starts.
+    const CHILD: &str = "AOIDE_DESK_TERMINATE_CHILD";
+
+    #[test]
+    fn terminate_refuses_this_process_without_a_signal() {
+        if std::env::var_os(CHILD).is_some() {
+            // Without the refusal this child signals itself, and the parent sees it die.
+            let refused = terminate(std::process::id()).expect_err("this process is refused");
+            assert_eq!(refused.kind(), io::ErrorKind::InvalidInput);
+            return;
+        }
+        let status = Command::new(std::env::current_exe().expect("the test binary is known"))
+            .args(["--exact", "exec::tests::terminate_refuses_this_process_without_a_signal"])
+            .env(CHILD, "1")
+            .status()
+            .expect("the child runs");
+        assert!(status.success(), "the child's own pid was refused: {status}");
+    }
+
+    /// A program under a scratch dir only this user can enter, running `body`, pinned
+    /// as `check_pin` pins it.
+    fn hostile(tag: &str, body: &str) -> (PathBuf, Pinned) {
+        let dir = std::env::temp_dir().join(format!("aoide-desk-hostile-{tag}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).expect("the scratch dir is made");
+        fs::set_permissions(&dir, fs::Permissions::from_mode(0o700)).expect("the scratch dir is 0700");
+        let program = dir.join("child");
+        fs::write(&program, format!("#!/bin/sh\n{body}\n")).expect("the child is written");
+        fs::set_permissions(&program, fs::Permissions::from_mode(0o755)).expect("the child is executable");
+        let pinned = check_pin(&program, &dir.join("home")).expect("the child pins");
+        (dir, pinned)
+    }
+
+    fn path_env() -> Vec<(OsString, OsString)> {
+        vec![(OsString::from("PATH"), std::env::var_os("PATH").unwrap_or_else(|| "/usr/bin:/bin".into()))]
+    }
+
+    fn pid_in(pidfile: &Path) -> i32 {
+        fs::read_to_string(pidfile).expect("the pid is written").trim().parse().expect("a pid")
+    }
+
+    fn alive(pid: i32) -> bool {
+        unsafe { libc::kill(pid, 0) == 0 }
+    }
+
+    #[test]
+    fn a_grandchild_holding_stdout_is_refused_at_the_deadline_and_no_signal_reaches_it() {
+        let (dir, program) = hostile("grandchild", "sleep 3 &\necho $! > \"$1\"");
+        let pidfile = dir.join("grandchild.pid");
+        let started = Instant::now();
+        let args = [pidfile.clone().into_os_string()];
+        let err = run(&program, &args, &path_env(), None, "hostile", Duration::from_secs(1))
+            .expect_err("the call is refused");
+        assert!(matches!(err, ExecError::Timeout { .. }), "{err:?}");
+        assert!(started.elapsed() < Duration::from_secs(3), "refused at the deadline, not at the exit");
+        assert!(alive(pid_in(&pidfile)), "the grandchild is alive: no signal reached it");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_child_that_ignores_sigterm_is_refused_after_the_exit_bound_and_is_alive_then() {
+        let body = "trap '' TERM\necho $$ > \"$1\"\ni=0\nwhile [ $i -lt 80 ]; do sleep 0.1; i=$((i + 1)); done";
+        let (dir, program) = hostile("ignores-term", body);
+        let pidfile = dir.join("child.pid");
+        let started = Instant::now();
+        let args = [pidfile.clone().into_os_string()];
+        let err = run(&program, &args, &path_env(), None, "hostile", Duration::from_secs(1))
+            .expect_err("the call is refused");
+        assert!(matches!(err, ExecError::Timeout { .. }), "{err:?}");
+        assert!(started.elapsed() >= Duration::from_secs(1) + EXIT_BOUND, "{:?}", started.elapsed());
+        assert!(alive(pid_in(&pidfile)), "the child ignored SIGTERM and is alive");
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]

@@ -166,13 +166,34 @@ fn an_unreadable_config_refuses_every_verb_but_config_with_no_child() {
 
 #[test]
 fn a_token_env_the_app_may_not_read_refuses_every_verb_with_no_child() {
-    for name in ["1KEY", "BAD-NAME", "", "PATH", "HOME", "XDG_RUNTIME_DIR", "AOIDE_ROOT"] {
+    for name in ["1KEY", "BAD-NAME", "", "PATH", "HOME", "HOME=x", "XDG_RUNTIME_DIR", "AOIDE_ROOT"] {
         let (exec, record) = with_token_env("bad-name", name);
         let before = records(&record).len();
         let err = exec.call(&["send"], &[], &["hi"], None).expect_err("the verb is refused");
         assert!(matches!(err, ExecError::VaultKeysUnknown(_)), "{name:?}: {err:?}");
         assert_eq!(records(&record).len(), before, "{name:?}: no child started");
     }
+}
+
+#[test]
+fn a_token_env_of_any_length_or_in_lower_case_is_accepted_and_scrubbed() {
+    let long = "K".repeat(10 * 1024);
+    for name in ["path", long.as_str()] {
+        let config = json!({"data": {"config": {"context": {"vaults": {
+            "v": {"endpoint": "e", "vault": "v", "tokenEnv": name}}}}}});
+        let text = config.to_string();
+        let extra = [("FAKE_AOIDE_CONFIG", text.as_str()), (name, "vault-token")];
+        let (exec, record) = load("accepted-name", &extra);
+        exec.call(&["send"], &[], &["hi"], None).expect("the verb runs");
+        let last = records(&record).pop().expect("the send is recorded");
+        assert!(!env_keys(&last).iter().any(|key| key == name), "the vault key reaches no child");
+    }
+}
+
+#[test]
+fn a_deadline_longer_than_the_default_runs_under_the_default() {
+    let (exec, _) = load("deadline-max", &[]);
+    exec.deadline(Duration::MAX).call(&["send"], &[], &["hi"], None).expect("the call runs");
 }
 
 #[test]

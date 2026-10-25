@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 use aoide_desktop_door::{token_path, Ask, Door, DoorError};
 use aoide_desktop_shell::asks::{ask_id, Sent, Shown};
 use aoide_desktop_shell::doors::{launch_plan, Close, Doors, DoorsError, Event, LaunchPlan, TurnState, ASKS_BOUND, EVENTS_BOUND};
-use aoide_desktop_shell::exec::{test_doors, Exec, ExecError};
+use aoide_desktop_shell::exec::{check_pin, test_doors, Exec, ExecError, Pinned};
 use serde_json::{json, Value};
 
 const FAKE_AOIDE: &str = env!("CARGO_BIN_EXE_fake-aoide");
@@ -110,17 +110,17 @@ impl World {
         self.started.lock().unwrap().push((pid, starttime));
     }
 
-    /// The argv the launch plan makes, for a door started outside `Doors`.
-    fn argv(&self) -> Vec<OsString> {
-        let eidolon = fs::canonicalize(FAKE_EIDOLON).expect("the fake eidolon is found");
-        vec![
-            eidolon.into_os_string(),
+    /// The program and args the launch plan makes, for a door started outside `Doors`.
+    fn program_and_args(&self) -> (Pinned, Vec<OsString>) {
+        let eidolon = check_pin(Path::new(FAKE_EIDOLON), &self.home()).expect("the fake eidolon pins");
+        let args = vec![
             "web".into(),
             "--bind".into(),
             "127.0.0.1:0".into(),
             "--cwd".into(),
             self.cwd().into_os_string(),
-        ]
+        ];
+        (eidolon, args)
     }
 
     fn record(&self) -> Vec<Value> {
@@ -270,7 +270,8 @@ fn start_door_outside(world: &World) -> (u32, String, PathBuf) {
         .mode(0o600)
         .open(&log_path)
         .expect("the log opens");
-    let pid = test_doors::spawn(&world.exec(), &world.argv(), &world.runtime(), log).expect("the door starts");
+    let (program, args) = world.program_and_args();
+    let pid = test_doors::spawn(&world.exec(), &program, &args, &world.runtime(), log).expect("the door starts");
     world.adopt(pid);
     let mut text = String::new();
     until(Duration::from_secs(30), || {

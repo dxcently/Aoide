@@ -1,4 +1,5 @@
 use std::ffi::OsString;
+use std::os::unix::ffi::{OsStrExt, OsStringExt};
 
 use aoide_desktop_shell::exec::{child_env, parse_vault_keys, Child, ExecError};
 
@@ -92,4 +93,14 @@ fn a_config_that_does_not_parse_leaves_the_names_unknown() {
     assert!(matches!(err, ExecError::Config(_)), "{err:?}");
     let err = parse_vault_keys(r#"{"status":"ok"}"#).expect_err("a config without data is refused");
     assert!(matches!(err, ExecError::Config(_)), "{err:?}");
+}
+
+#[test]
+fn a_non_utf8_name_under_the_melete_prefix_is_scrubbed_unless_the_command_is_melete() {
+    let mut base = base();
+    base.push((OsString::from_vec(b"AOIDE_MELETE_\xff".to_vec()), OsString::from("x")));
+    let env = child_env(Child::Aoide, "send", &base, Ok(keys().as_slice())).expect("the env builds");
+    assert!(env.iter().all(|(name, _)| !name.as_bytes().starts_with(b"AOIDE_MELETE_")), "{env:?}");
+    let melete = child_env(Child::Aoide, "melete", &base, Ok(keys().as_slice())).expect("the env builds");
+    assert!(melete.iter().any(|(name, _)| name.as_bytes() == b"AOIDE_MELETE_\xff"), "{melete:?}");
 }
