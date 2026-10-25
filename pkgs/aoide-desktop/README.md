@@ -9,9 +9,9 @@ GUI-free libraries; the window is a later crate.
 
 - `crates/door` (`aoide-desktop-door`): the loopback door client. See
   `crates/door/README.md`.
-- `crates/shell` (`aoide-desktop-shell`): the one place the app starts a process
-  or sends a signal, and the app's own doors and asks. See
-  `crates/shell/README.md`.
+- `crates/shell` (`aoide-desktop-shell`): the shell is the one place in the app's
+  own sources that starts a process or sends a signal, and of aoide-protocol the
+  app calls only `untrusted`. See `crates/shell/README.md`.
 
 The window crate will call the shell. The door is the leaf both sit on, and
 it depends on nothing else in this directory.

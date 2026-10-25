@@ -60,6 +60,5 @@ and each crate's own invariants are in its AGENTS.md (`crates/door/AGENTS.md`,
   may be one. A target whose file lies outside this directory is not read by the
   scan, though its crate's lints still apply to it. The gate's environment is
   not scanned: `CARGO_HOME`'s config and any `RUSTFLAGS` apply to every build.
-- Dependencies are not scanned, `aoide-protocol` included. The app calls only
-  `untrusted`'s functions from it, and the protocol crate's own gates cover the
-  rest of it.
+- Dependencies are not scanned, `aoide-protocol` included. aoide-protocol starts
+  processes of its own, and the app calls only `untrusted`'s functions from it.
