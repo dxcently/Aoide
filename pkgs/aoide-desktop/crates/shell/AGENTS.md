@@ -131,16 +131,25 @@ are in README.md.
 - An answer goes only to the door whose stream carried its ask. `prepare_answer`
   refuses, with no request, when no watched door carries the ask, or the ask
   does not offer the label.
-- `send_answer` runs `verify` before its request. It builds the dialog again
-  from the stored ask, and sends only when that dialog's digest is the digest
-  shown. A yes above the cap is never sent, and a changed ask is refused.
+- `send_answer` runs `verify` before its request, builds the dialog again from
+  the stored ask, and sends only when `asks::permits` accepts what was shown: no
+  dialog for an answer that has none, and for a yes the digest of the dialog
+  built now. A capped yes is taken only as `Shown::Pane`; under `Shown::Confirm`
+  it is refused. Every refusal comes before any request.
+- The dialog is the input as `visible_json`: pretty, keys sorted at every depth,
+  and every character `visible` would spell written as a JSON `\u` escape. The
+  cap is 4 KiB or 60 lines of that text. The dialog is never a curl line.
+- The stream's JSON is Eidolon's own serialization of its value, so the dialog
+  shows the input the door sent. The sorting and the spelling are
+  `aoide-protocol`'s, which `asks.rs` calls.
+- `curl_line` returns None for an approval's yes. Its body is `visible_json_line`
+  of the answer, so it holds no raw character `visible` would spell. The token
+  path is quoted raw: the launch refuses a token path that is not graphic ASCII.
+- The curl line never holds the token. It reads the token file with `$(cat ...)`,
+  and every value is one POSIX shell word.
 - An ask leaves `pending_asks` only when the door's `ask-settled` arrives. A
   204, 409, 422 or 401 leaves it listed.
 - A stream's asks are cleared when it opens, and rebuilt from its replay.
-- The dialog for a yes is the input as canonical JSON, each line through
-  `visible`. Above 4 KiB or 60 lines it is the curl line for this door instead.
-- The curl line never holds the token. It reads the token file with
-  `$(cat ...)`, and every value is one POSIX shell word.
 
 ## The fakes and the tests
 

@@ -18,7 +18,8 @@
 //! - `answer-409`, `answer-422` and `answer-401` queue one answer of that status
 //!   for the next `POST /api/answer`. An answer served as `204` leaves its ask
 //!   pending until a `settle` says otherwise.
-//! - `flood N` pushes N `text-delta` frames while a stream is open.
+//! - `flood N` pushes up to N `text-delta` frames while a stream is open, and
+//!   stops when the stream closes under it.
 //! - `asks N` raises approvals under ids 1 to N, with the same input.
 //! - `hello-bad` makes the first frame of every head something other than a
 //!   `hello`; `hello-good` puts the hello back.
@@ -167,8 +168,11 @@ impl Core {
                     }
                 } else if let Some(count) = word.strip_prefix("flood ") {
                     if door.streaming() {
+                        let frame = json!({"type": "text-delta", "text": "x"}).to_string();
                         for _ in 0..count.parse::<usize>().expect("flood takes a count") {
-                            door.push(&json!({"type": "text-delta", "text": "x"}).to_string());
+                            if !door.try_push(&frame) {
+                                break;
+                            }
                         }
                     }
                 } else if let Some(name) = word.strip_prefix("session ") {

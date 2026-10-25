@@ -12,7 +12,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use aoide_desktop_door::{token_path, Ask, Door, DoorError};
-use aoide_desktop_shell::asks::{ask_id, Sent};
+use aoide_desktop_shell::asks::{ask_id, Sent, Shown};
 use aoide_desktop_shell::doors::{launch_plan, Close, Doors, DoorsError, Event, LaunchPlan, TurnState, ASKS_BOUND, EVENTS_BOUND};
 use aoide_desktop_shell::exec::{test_doors, Exec, ExecError};
 use serde_json::{json, Value};
@@ -722,7 +722,7 @@ fn an_answer_goes_only_to_the_door_whose_stream_carried_its_ask() {
     let refused = doors.prepare_answer(&second, 1, "no").expect_err("the second door prepares no answer");
     assert!(matches!(refused, DoorsError::Ask(_)), "{refused}");
     let prepared = doors.prepare_answer(&first, 1, "no").expect("the first door prepares its answer");
-    assert_eq!(doors.send_answer(&prepared, None).unwrap(), Sent::Answered);
+    assert_eq!(doors.send_answer(&prepared, Shown::None).unwrap(), Sent::Answered);
     assert_eq!(answers_once(&world, &world.cwd(), 1), vec![answer_line(1, "no")], "the answer carries the ask and the label");
     assert!(answers_before_sentinel(&world, &other, &door_of(&world, &second)).is_empty(), "no request reached the door that carries no such ask");
 }
@@ -736,7 +736,7 @@ fn a_204_keeps_the_card_until_the_door_settles_the_ask() {
     world.apply(&format!("ask-approval 1 {APPROVAL}"));
     assert!(until(Duration::from_secs(5), || ask_ids(&doors, &id) == vec![1]), "the door carries ask 1");
     let prepared = doors.prepare_answer(&id, 1, "no").unwrap();
-    assert_eq!(doors.send_answer(&prepared, None).unwrap(), Sent::Answered);
+    assert_eq!(doors.send_answer(&prepared, Shown::None).unwrap(), Sent::Answered);
     assert_eq!(ask_ids(&doors, &id), vec![1], "a 204 leaves the card until the door settles the ask");
     world.apply("settle 1 no");
     assert!(until(Duration::from_secs(5), || ask_ids(&doors, &id).is_empty()), "the settled ask leaves the card");
@@ -752,7 +752,7 @@ fn a_409_is_not_pending_and_keeps_the_card_until_the_settle() {
     assert!(until(Duration::from_secs(5), || ask_ids(&doors, &id) == vec![1]), "the door carries ask 1");
     world.apply("answer-409");
     let prepared = doors.prepare_answer(&id, 1, "no").unwrap();
-    assert_eq!(doors.send_answer(&prepared, None).unwrap(), Sent::NotPending);
+    assert_eq!(doors.send_answer(&prepared, Shown::None).unwrap(), Sent::NotPending);
     assert_eq!(answers_once(&world, &world.cwd(), 1), vec![answer_line(1, "no")], "the request was served");
     assert_eq!(ask_ids(&doors, &id), vec![1], "the card stays until the door settles the ask");
 }
@@ -767,7 +767,7 @@ fn a_422_is_rejected_with_the_doors_reason_and_keeps_the_card() {
     assert!(until(Duration::from_secs(5), || ask_ids(&doors, &id) == vec![1]), "the door carries ask 1");
     world.apply("answer-422");
     let prepared = doors.prepare_answer(&id, 1, "no").unwrap();
-    let outcome = doors.send_answer(&prepared, None).unwrap();
+    let outcome = doors.send_answer(&prepared, Shown::None).unwrap();
     assert_eq!(outcome, Sent::Rejected { reason: "the ask is not taken".into() });
     assert_eq!(ask_ids(&doors, &id), vec![1], "a rejected answer keeps the card");
 }
@@ -782,13 +782,13 @@ fn a_401_is_an_error_and_keeps_the_card() {
     assert!(until(Duration::from_secs(5), || ask_ids(&doors, &id) == vec![1]), "the door carries ask 1");
     world.apply("answer-401");
     let prepared = doors.prepare_answer(&id, 1, "no").unwrap();
-    let refused = doors.send_answer(&prepared, None).expect_err("a 401 is an error");
+    let refused = doors.send_answer(&prepared, Shown::None).expect_err("a 401 is an error");
     assert!(matches!(refused, DoorsError::Door(DoorError::Unauthorized)), "{refused}");
     assert_eq!(ask_ids(&doors, &id), vec![1], "an error keeps the card");
 }
 
 #[test]
-fn a_yes_above_the_cap_is_refused_before_any_request() {
+fn a_yes_above_the_cap_is_taken_only_in_the_apps_pane_under_its_digest() {
     let world = World::new("asks-cap");
     let (tx, _rx) = mpsc::sync_channel(EVENTS_BOUND);
     let mut doors = world.open(tx);
@@ -799,9 +799,13 @@ fn a_yes_above_the_cap_is_refused_before_any_request() {
     let prepared = doors.prepare_answer(&id, 1, "yes").unwrap();
     let dialog = prepared.dialog().expect("a yes on an approval has a dialog");
     assert!(dialog.capped(), "a 5 KiB input is over the cap");
-    let refused = doors.send_answer(&prepared, Some(dialog.digest())).expect_err("a capped yes is refused");
+    let refused = doors.send_answer(&prepared, Shown::Confirm(dialog.digest())).expect_err("the native confirm takes no capped yes");
+    assert!(matches!(refused, DoorsError::Ask(_)), "{refused}");
+    let refused = doors.send_answer(&prepared, Shown::Pane([0u8; 32])).expect_err("a pane digest of other text is refused");
     assert!(matches!(refused, DoorsError::Ask(_)), "{refused}");
     assert!(answers_before_sentinel(&world, &world.cwd(), &door_of(&world, &id)).is_empty(), "no answer was sent");
+    assert_eq!(doors.send_answer(&prepared, Shown::Pane(dialog.digest())).unwrap(), Sent::Answered);
+    assert_eq!(answers_after_sentinel(&world, &world.cwd(), 1), vec![answer_line(1, "yes")]);
 }
 
 #[test]
@@ -819,14 +823,14 @@ fn a_changed_ask_is_refused_and_a_yes_is_sent_only_with_the_digest_on_screen() {
         until(Duration::from_secs(5), || input_of(&doors, &id) == Some(json!({"path": "b.txt"}))),
         "the door carries the changed ask"
     );
-    let refused = doors.send_answer(&stale, Some(stale_digest)).expect_err("the changed ask is refused");
+    let refused = doors.send_answer(&stale, Shown::Confirm(stale_digest)).expect_err("the changed ask is refused");
     assert!(matches!(refused, DoorsError::Ask(_)), "{refused}");
     let fresh = doors.prepare_answer(&id, 1, "yes").unwrap();
-    let refused = doors.send_answer(&fresh, None).expect_err("a yes shown with no digest is refused");
+    let refused = doors.send_answer(&fresh, Shown::None).expect_err("a yes shown with no digest is refused");
     assert!(matches!(refused, DoorsError::Ask(_)), "{refused}");
     assert!(answers_before_sentinel(&world, &world.cwd(), &door_of(&world, &id)).is_empty(), "no answer was sent so far");
     let digest = fresh.dialog().expect("a yes has a dialog").digest();
-    assert_eq!(doors.send_answer(&fresh, Some(digest)).unwrap(), Sent::Answered);
+    assert_eq!(doors.send_answer(&fresh, Shown::Confirm(digest)).unwrap(), Sent::Answered);
     assert_eq!(answers_after_sentinel(&world, &world.cwd(), 1), vec![answer_line(1, "yes")]);
 }
 
@@ -865,7 +869,7 @@ fn an_answer_to_a_door_that_fails_its_checks_sends_no_request() {
     // A listener on the door's port: an answer must not reach it.
     let listener = std::net::TcpListener::bind(("127.0.0.1", port)).expect("the port is free");
     listener.set_nonblocking(true).unwrap();
-    let refused = doors.send_answer(&prepared, None).expect_err("a door that is gone is refused");
+    let refused = doors.send_answer(&prepared, Shown::None).expect_err("a door that is gone is refused");
     assert!(matches!(refused, DoorsError::Ask(_)), "{refused}");
     assert!(listener.accept().is_err(), "no connection reached the port");
 }

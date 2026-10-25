@@ -34,7 +34,7 @@ use aoide_desktop_door::{
 use aoide_protocol::untrusted::{is_unsafe, visible};
 use serde::{Deserialize, Serialize};
 
-use crate::asks::{self, Dialog, Prepared, Sent};
+use crate::asks::{self, Prepared, Sent, Shown};
 use crate::exec::{check_pin, euid, open_pidfd, terminate_pidfd, Exec, ExecError};
 
 /// The bound on the events channel. The caller creates the channel with this size.
@@ -529,28 +529,21 @@ impl Doors {
         if !asks::offers(&ask, label) {
             return Err(DoorsError::Ask(format!("ask {ask_id} does not offer that answer, so nothing was sent")));
         }
-        let dialog = asks::dialog(&ask, label, watch.addr, Path::new(&watch.entry.token_file));
+        let dialog = asks::dialog(&ask, label);
         Ok(Prepared { launch_id: id.to_owned(), ask_id, label: label.to_owned(), dialog })
     }
 
     /// Sends a prepared answer to the door that carried its ask, once the door
     /// passes its checks. The dialog is built again from the stored ask, and
-    /// nothing is sent unless its digest is `shown`: the digest of the dialog on
-    /// screen, or None when the answer shows none. A yes above the cap is never sent.
-    pub fn send_answer(&self, prepared: &Prepared, shown: Option<[u8; 32]>) -> Result<Sent, DoorsError> {
+    /// `shown` must permit it (`asks::permits`): a yes goes only under the digest
+    /// of the dialog on screen, and a capped yes only from the app's own pane.
+    pub fn send_answer(&self, prepared: &Prepared, shown: Shown) -> Result<Sent, DoorsError> {
         let entry = self.watch(&prepared.launch_id)?.entry.clone();
         verify(&self.pins, &entry).map_err(|check| {
             DoorsError::Ask(format!("the door failed its checks, so nothing was sent: {}", check.why()))
         })?;
         let fresh = self.prepare_answer(&prepared.launch_id, prepared.ask_id, &prepared.label)?;
-        if fresh.dialog.as_ref().map(Dialog::digest) != shown {
-            return Err(DoorsError::Ask("the ask on screen is not the one stored, so nothing was sent".into()));
-        }
-        if fresh.dialog.as_ref().is_some_and(Dialog::capped) {
-            return Err(DoorsError::Ask(
-                "no yes is offered above the dialog's cap, so nothing was sent; answer from a terminal".into(),
-            ));
-        }
+        asks::permits(fresh.dialog(), shown).map_err(DoorsError::Ask)?;
         match self.door(&prepared.launch_id)?.answer(prepared.ask_id, &prepared.label, None)? {
             AnswerOutcome::Answered => Ok(Sent::Answered),
             AnswerOutcome::NotPending => Ok(Sent::NotPending),

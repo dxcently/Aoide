@@ -160,6 +160,13 @@ impl FakeDoor {
         self.send(Live::Frame(frame.to_vec()));
     }
 
+    /// Sends one frame, as `push` does, but returns false, rather than panic, when
+    /// no events stream is open or its reader has gone.
+    pub fn try_push(&self, frame: &str) -> bool {
+        let guard = self.shared.live.lock().unwrap();
+        guard.as_ref().is_some_and(|(_, tx)| tx.send(Live::Frame(frame.as_bytes().to_vec())).is_ok())
+    }
+
     /// Ends the open events stream with its terminal chunk.
     pub fn end(&self) {
         self.send(Live::End);

@@ -86,6 +86,8 @@ are in README.md.
 
 - The fake door ends a stream its client has closed, as hyper does, so a test
   of a close sees the same drain the real door has.
+- `try_push` is `push` that returns false, rather than panic, once no stream is
+  open or its reader has gone. A flood can outlive its stream, so it uses `try_push`.
 - `refuse_at_once` answers before the body is read and closes with the body
   unread. The kernel resets such a connection: the reply's head arrives, and
   its body may not, so the client decides an error by its head.

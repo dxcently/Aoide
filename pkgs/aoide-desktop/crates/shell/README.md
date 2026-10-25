@@ -186,12 +186,13 @@ asks.rs     Doors::prepare_answer(launch, ask, label)
             Prepared, with the dialog a yes shows (none for a no)
               |
               v
-            Doors::send_answer(prepared, shown)
+            Doors::send_answer(prepared, shown: Shown)
               +-- verify                the door's checks; a failure sends
               |                         nothing
               +-- dialog again          from the stored ask, not the screen
-              +-- digest == shown       else refused, nothing sent
-              +-- capped yes            refused, nothing sent
+              +-- asks::permits         what was shown must match: a yes
+              |                         under its digest, a capped yes only
+              |                         as Shown::Pane
               +-- POST /api/answer      204 Answered, 409 NotPending,
                                         422 Rejected with the reason,
                                         401 or other: an error
@@ -199,16 +200,24 @@ asks.rs     Doors::prepare_answer(launch, ask, label)
 
 - The asks a stream carries are kept per door, by id. Each `ask` adds one, each
   `ask-settled` removes it, and a new stream clears them before its replay.
-- A yes on an approval is confirmed on a dialog that shows the whole input: the
-  input as canonical JSON, keys sorted at every depth, each line through
-  `visible`. Above 4 KiB or 60 lines the dialog offers no yes, and shows the
-  curl line for this door instead. That line reads the token from its file,
-  names no token, and carries the label prepared, not the input.
+- A yes on an approval shows the whole input as `visible_json` text: pretty,
+  keys sorted at every depth, and every hidden character spelled as a JSON
+  escape. That text is the dialog, and its SHA-256 is its digest. Above 4 KiB or
+  60 lines the dialog is capped.
+- What the app showed decides a yes (`Shown`). `None` is for a no and for a
+  question's answer. `Confirm(digest)` is the native confirm, which offers no
+  yes above the cap. `Pane(digest)` is the app's own pane, which shows the whole
+  input and takes a capped yes too. A yes is sent only under the digest of the
+  dialog built now from the stored ask. Every refusal comes before any request.
+- The curl line answers a no or a question's answer from a terminal. It is
+  never built for an approval's yes. Its body is the answer as
+  `visible_json_line`, and it reads the token from the token file, so it names
+  no token.
 - A question's answer, and a no, skip the confirm. Only an approval's `yes`
   approves, since eidolon gives its consent on that label alone.
-- A 204 leaves the ask listed until the door's `ask-settled` arrives. A 409
-  means nothing is pending under that id, a 422 refuses with the door's reason,
-  and a 401 or any other status is a `DoorError`. None of them removes the ask.
+- A 204 leaves the ask listed until the door's `ask-settled` arrives. A 409 means
+  nothing is pending under that id, a 422 refuses with the door's reason, and a
+  401 or any other status is a `DoorError`. None of them removes the ask.
 - Between streams the last stream's asks stay listed, so an answer to one the
   door settled in the gap comes back 409.
 
