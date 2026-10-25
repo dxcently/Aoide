@@ -838,8 +838,9 @@
 - **`undying.json` is written via plain `fs::atomic_write`, never
   `atomic_write_private` — deliberate, not an oversight.** It holds session
   ids, the same class of data `sessions.json`/`nodes.json` already keep
-  at default mode; `atomic_write_private` stays reserved for the
-  identity/secret lane above.
+  at default mode; `atomic_write_private` is kept for files that take the
+  private discipline: the identity and secret lane above, the tunnel
+  records, and `resuming.json`.
 - **`undying`'s legacy-migration check runs on every `load_undying` call,
   not behind a process-wide `Once` — deliberate, not an oversight
   (command-defrag lane U1, 2026-08-27).** Unlike
@@ -850,6 +851,15 @@
   simpler to test (no cross-test `Once` state to isolate). Don't add a
   `Once` guard here "for consistency" with `fs.rs` — that would reintroduce
   exactly the test-ordering fragility a per-call idempotent check avoids.
+- **`resuming::load_claims` returns `Ok` with no claims only for an absent
+  file (one engine per session).** An unreadable, unparseable or other-version
+  file, or a claim whose `at` is not ISO UTC, is `Err`, and conduct's claim
+  step refuses the candidate on it. Don't tolerate a bad file the way
+  `load_undying` tolerates a bad `undying.json`: an empty read lets a second
+  launch through.
+- **`resuming.json` is written at `0600`, as the tunnel records are, and
+  holds no secret.** It must never grow one (no key material, no bearer
+  token) without re-opening this decision.
 - **`manifest::save_manifest` validates EVERY `SessionSpec.dir` before
   writing anything, never partially (command-defrag lane U1).** The
   absolute-path check runs over the whole `sessions` vec first; a rejection

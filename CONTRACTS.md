@@ -5768,6 +5768,35 @@ this file's `resurrect` and `projects.json`/`autoResume` entries
 above for the full selection contract and the daemon's boot-sweep
 consumer.
 
+### `state/resuming.json` — **v1**
+
+The resume claims: one per ledger session that a launch is reviving under a
+fresh id. `resurrect` writes the claim before the spawn, so a second launch
+of the same session finds it and is refused. The shape, with one claim:
+
+```json
+{ "v": 1, "claims": [ { "sessionId": "ledger-claude", "newId": "resurrect-4242-1792927728", "at": "2026-10-25T10:00:00Z" } ] }
+```
+
+- **One claim per `sessionId`.** A new claim for a session replaces the old
+  one. A claim that is neither in flight nor live is stale, and the next
+  claim drops it.
+- **Writer and lock.** Only `resurrect` writes it, under the conducting
+  stage lock (`aoide_storage::fs::try_stage_lock`). A claim is written before
+  the spawn. A failed spawn removes its own claim, while the claim still names
+  its `newId`. A successful spawn keeps it. No spawn runs under the lock. A
+  dry run reads the file and writes nothing.
+- **Mode.** `0600`, written with `aoide_storage::fs::atomic_write_private`. It
+  holds no secret.
+- **Reading.** A missing file is no claims. A file that cannot be read or
+  parsed, has another `v`, or holds a claim whose `at` is not an ISO UTC time
+  is an error, and the candidate it would have decided is refused.
+- **In flight.** A claim is in flight while its `newId` names a session in
+  `sessions.json` that is not `done`, or while `newId` names no session and
+  the claim's `at` is under 60 seconds old. The bound is conduct's
+  `RESUME_CLAIM_BOUND_SECS`: a spawn's registration budget is 3 seconds, and a
+  terminal can take longer than that to register its session.
+
 ### `.aoide/project.json` — **v0** (command-defrag lane U1, 2026-08-27;
 consumed by `resurrect`'s bare mode at U2, same lane)
 

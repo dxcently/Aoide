@@ -1140,6 +1140,23 @@ blank one is refused too.
   The undying mark moves onto the new id in the same step, except for a
   `ByLog` revival: its mark stays on the ledger id, because the journal is
   the session and the terminal is only its window.
+  **One engine per session:** a candidate is never launched while its
+  session is live, or while a launch of it is in flight. The claim step
+  runs before each spawn. For a `ByLog` candidate it reads the presence scan
+  outside any lock, and a scan that cannot finish skips the candidate. Then,
+  under the stage lock, it reads `sessions.json` and `state/resuming.json`
+  and runs the block (`block_verdict`). The candidate is live when a session
+  that is not `done` holds its id, names it as `resumedFrom`, or sits on its
+  journal, and the refusal names that session as `liveSessionId`. It is in
+  flight when its claim's new id has a session that is not `done`, or none
+  yet while the claim is under 60 seconds old, and the refusal names the claim
+  as `claimedBy`. A free candidate's claim is written before its spawn. A
+  failed spawn drops it, and a successful spawn keeps it, so the claim goes
+  stale once its session is `done`, or once the bound passes with no session
+  registered under its id. The dry run runs the same block on the same reads
+  and writes nothing. Eidolon's own journal lock is not built:
+  `SessionLog::open` takes none, so a second engine on a live journal stays
+  possible until that lands.
   Never a hard `Outcome::error` over a per-candidate spawn failure (a
   headless host's taught "no `$AOIDE_TERMINAL`" error, for one) — every
   outcome folds into `resurrected`/`skipped`/`failed` and the command

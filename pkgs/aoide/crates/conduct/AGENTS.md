@@ -1993,6 +1993,23 @@ in the message.
   sentence the launch and the dry run show. Don't give it a terminal-arm
   fallback, and don't read a `logPath` under `session_logs_dir()` as a
   journal.
+- **One engine per session is decided before the spawn, under the stage
+  lock (`claim_resume`).** The claim is the only write a launch makes before
+  its spawn, and it runs before `launch_session`. The presence scan is read
+  outside the lock, the roster and the claims inside it, and no spawn runs
+  under it, because the new session registers under the same lock. Don't move
+  the claim after the spawn: a second process would find none. A claim's
+  verdict is its new id's record and its age, never a pid.
+  `release_resume_claim` drops a claim only while it still names its new id.
+  The gate sits in `resurrect_one`, so every mode that reaches it (bare,
+  `--all`, `--id`, a held replay) passes it. Manifest clean spawns take no
+  claim, since they are not ledger entries.
+- **A test that re-drives one ledger entry must end its first revival
+  first.** A claim is in flight for up to 60 seconds while no session holds
+  its id, and a fake terminal never registers one. Unless the first revival
+  is marked `done` in `sessions.json`, the second launch is refused as in
+  flight. `transfer_is_idempotent_when_the_pair_has_already_transferred` does
+  this.
 - **`reap`'s one carve-out into the shell kind gate is `restore.is_some()` +
   `spawned` + `state == "idle"`, never `pid`-liveness alone
   (`abandoned_spawned_shells`, `reap.rs`).** The kind gate every other

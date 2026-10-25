@@ -156,6 +156,7 @@ pub mod petname;
 pub mod pingback_remote;
 pub mod records;
 pub mod remote_children;
+pub mod resuming;
 pub mod routing;
 pub mod runtime_dir;
 pub mod seal;

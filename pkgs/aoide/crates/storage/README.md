@@ -611,6 +611,16 @@ by decision — no embedded database yet
   the pre-rename `state/carry.json`, idempotent by construction (a cheap
   `exists()` check, no process-wide `Once` needed for a single file) —
   narrated, never a clobber of a fresher `undying.json`.
+- `resuming` — the resume claims (one engine per session):
+  `state/resuming.json`, `{"v":1,"claims":[{"sessionId","newId","at"}]}`, one
+  claim per `sessionId`: the ledger session being resumed, the fresh id its
+  launch was given, and the ISO UTC time the claim was taken. `load_claims`
+  reads a missing file as no claims and every other unreadable state (an
+  unparseable file, another version, a claim whose `at` is not ISO UTC) as an
+  error, so the caller refuses. `save_claims` writes atomically at `0600`
+  (`fs::atomic_write_private`). `set_claim` and `remove_claim` are pure list
+  operations. What a claim blocks, and for how long, is conduct's
+  (`graph/resurrect.rs`); this module only stores it.
 - `pingback_remote` — the remote ping-back ring (remote sub-agents lane,
   P-RSA S8): `state/stage/pingback-remote.json` (CONTRACTS.md §4), per child,
   the events a child whose parent sits on ANOTHER node published for that
