@@ -172,20 +172,26 @@ moved since the last observation emits
 and re-baselines, unless an aoided write folded the move first (below).
 Detection and narration only — the daemon never reverts a hand edit.
 
-aoided knows its own writes at the rename. `run_loop` registers the watcher
-with storage's write seam (`fs::watch_writes`) after the seed. Every atomic
-stage write this process makes, on any thread or from any crate, runs its
-rename inside the watcher: the watcher observes the file, runs the rename, and
-folds the file's new state, all under one lock that a sweep also takes. So no
-sweep sees one of aoided's writes between its rename and its fold, and a
-dispatch needs no re-baseline after it writes. A dispatched command runs three
-steps on its connection thread: the dispatch, the seal of a fresh `session
+aoided knows its own writes at the rename. `run_loop` registers the watcher with
+storage's write seam (`fs::watch_writes`) after the seed. Every atomic stage
+write this process makes after the watcher registers, on any thread or from any
+crate, runs its rename inside the watcher: the watcher observes the file, runs
+the rename, and folds the file's new state, all under one lock that a sweep also
+takes. So no sweep sees one of aoided's writes between its rename and its fold,
+and a dispatch needs no re-baseline after it writes. A dispatched command runs
+three steps on its connection thread: the dispatch, the seal of a fresh `session
 start`, and the reply.
 
-A change aoided did not make keeps its `hand-edit` line, and so does a foreign
-write that one of aoided's writes then replaces. The one residual: a foreign
-write that lands between the watcher's check and its fold, around the rename of
-aoided's own write, is folded, with one `state` line and no `hand-edit` line.
+A change `aoided` did not make keeps its `hand-edit` line, and so does a foreign
+write that one of `aoided`'s own writes then replaces. The watcher sees a change
+as a move in a file's length or mtime, so it misses a write that keeps both: a
+same-uid writer can set the mtime back. It sees only what happens while it is
+registered. A write made while `aoided` is down, or at start before the watcher
+registers, is part of its first baseline and raises no line: the start-up
+migration, and the seed of an absent or corrupt `sessions.json` or `hooks.json`,
+which keeps no copy of the file it replaces. One race remains: a foreign write
+that lands between the watcher's check and its fold, around the rename of
+`aoided`'s own write, is folded, with one `state` line and no `hand-edit` line.
 
 Every change the watcher finds raises a `class:"state"` line for its file, and
 so does a write of aoided's own that moves the file's stat. Both are coalesced

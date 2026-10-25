@@ -27,12 +27,12 @@
 //! session sockets already own, and now the ONE `aoide_storage::runtime_dir`
 //! seam every core socket path goes through (that crate is below this one, so
 //! this is a downward edge; the earlier sibling copy here could only re-derive
-//! it because the only other spelling then lived in a crate ABOVE `aoide-server`,
-//! where an import would have inverted the DAG). [`bind_socket`] mirrors
-//! `aoide_secrets::broker::bind_socket` (create parent, remove a stale
-//! socket file, bind, chmod) but to `0600` — unlike the secrets socket there
-//! is no cross-uid audience, `$XDG_RUNTIME_DIR` is `0700` anyway, the chmod
-//! is belt-and-braces.
+//! it because the only other spelling then lived in a crate ABOVE
+//! `aoide-server`, where an import would have inverted the DAG).
+//! [`bind_socket`] mirrors `aoide_secrets::broker::bind_socket` (create parent,
+//! remove a stale socket file, bind, chmod) but to `0600` — unlike the secrets
+//! socket there is no cross-uid audience, `$XDG_RUNTIME_DIR` is `0700` anyway,
+//! the chmod is belt-and-braces.
 //!
 //! **Ownership is two locks, taken before the socket path is touched.**
 //! [`run_loop`] takes an exclusive, non-blocking `flock` on `<socket>.lock`
@@ -133,10 +133,17 @@
 //! (module doc's "Framing" `dispatch` op) runs three steps on its connection
 //! thread: the dispatch, the seal of a fresh `session start`, then the reply.
 //!
-//! A change aoided did not make keeps its hand-edit line, and so does a foreign
-//! write that one of aoided's writes then replaces. The one residual: a foreign
-//! write that lands between the watcher's check and its fold, around the rename
-//! of aoided's own write, is folded, with one state line and no hand-edit line.
+//! A change `aoided` did not make keeps its `hand-edit` line, and so does a
+//! foreign write that one of `aoided`'s own writes then replaces. The watcher
+//! sees a change as a move in a file's length or mtime, so it misses a write
+//! that keeps both: a same-uid writer can set the mtime back. It sees only what
+//! happens while it is registered. A write made while `aoided` is down, or at
+//! start before the watcher registers, is part of its first baseline and raises
+//! no line: the start-up migration, and the seed of an absent or corrupt
+//! `sessions.json` or `hooks.json`, which keeps no copy of the file it
+//! replaces. One race remains: a foreign write that lands between the watcher's
+//! check and its fold, around the rename of `aoided`'s own write, is folded,
+//! with one `state` line and no `hand-edit` line.
 //!
 //! ## Graph residency: reconcile + reap in the tick (P-D6)
 //!
@@ -2011,8 +2018,11 @@ mod tests {
     }
 
     /// A foreign write that aoided's own write then replaces is still a hand
-    /// edit. The write's rename observes the foreign change before it folds the
-    /// new state, so the change keeps its `hand-edit` line for the tick.
+    /// edit. The write observes the foreign change before its rename, so the
+    /// change keeps its `hand-edit` line for the tick. That observation raises
+    /// the one `state` line for the file before the tick. The rename's own
+    /// change falls inside that line's window, so it is owed one more `state`
+    /// line, written once the window closes.
     #[test]
     fn a_foreign_write_that_aoided_replaces_keeps_its_hand_edit_line() {
         let (_guard, stage, saved) = isolated_stage();
@@ -2028,6 +2038,13 @@ mod tests {
 
         let reply = dispatch_over(&socket_path, br#"{"v":0,"op":"dispatch","path":["foo","bar"],"args":[],"flags":{}}"#);
         assert_eq!(reply["outcome"]["status"], "ok", "{reply}");
+
+        let before_tick = feed_lines(&events_path);
+        let state_for_pending = before_tick
+            .iter()
+            .filter(|v| v["class"] == "state" && v["payload"]["files"] == json!(["pending.json"]))
+            .count();
+        assert_eq!(state_for_pending, 1, "{before_tick:?}");
 
         tick_hand_edits(&watcher, &FeedWriter::new(events_path.clone(), EVENTS_CAP_BYTES, 0o600));
 

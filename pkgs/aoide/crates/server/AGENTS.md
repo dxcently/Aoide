@@ -221,6 +221,18 @@ a2a spawn probe needs `/bin/sh` + `printf`'s byte-exact output.
   that writes through storage while holding that lock: it is not re-entrant,
   so such a write deadlocks. The feed's append is protocol's and writes
   nothing through storage.
+
+  A change `aoided` did not make keeps its `hand-edit` line, and so does a
+  foreign write that one of `aoided`'s own writes then replaces. The watcher
+  sees a change as a move in a file's length or mtime, so it misses a write that
+  keeps both: a same-uid writer can set the mtime back. It sees only what
+  happens while it is registered. A write made while `aoided` is down, or at
+  start before the watcher registers, is part of its first baseline and raises
+  no line: the start-up migration, and the seed of an absent or corrupt
+  `sessions.json` or `hooks.json`, which keeps no copy of the file it replaces.
+  One race remains: a foreign write that lands between the watcher's check and
+  its fold, around the rename of `aoided`'s own write, is folded, with one
+  `state` line and no `hand-edit` line.
 - **`producers::HandEditWatcher` is one instance, built by
   `HandEditWatcher::registered`.** `daemon::run_loop` builds it once, after the
   seed, and holds its `Arc` for the loop; the registration lasts as long as

@@ -255,8 +255,8 @@ fn run_loop_child_process() {
 
 /// Read every JSON line currently in the daemon's own events feed whose
 /// `kind` is `hand-edit` and whose `payload.file` is `file_name` — used by
-/// the task #92 tests below to assert presence/absence without caring about
-/// any other line the feed carries.
+/// the tests below to assert presence/absence without caring about any other
+/// line the feed carries.
 fn hand_edit_events_for(events_path: &Path, file_name: &str) -> Vec<serde_json::Value> {
     std::fs::read_to_string(events_path)
         .unwrap_or_default()

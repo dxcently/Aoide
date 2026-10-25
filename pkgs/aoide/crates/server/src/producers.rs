@@ -47,10 +47,17 @@
 //! new state is folded, all under the watcher's lock. A sweep takes the same
 //! lock, so it never sees one of aoided's writes between its rename and its
 //! fold. Any thread or crate may make the write; no writer calls the watcher.
-//! A change aoided did not make keeps its hand-edit line, and so does a foreign
-//! write that one of aoided's writes then replaces. The one residual: a foreign
-//! write that lands between the watcher's check and its fold, around the rename
-//! of aoided's own write, is folded, with one state line and no hand-edit line.
+//! A change `aoided` did not make keeps its `hand-edit` line, and so does a
+//! foreign write that one of `aoided`'s own writes then replaces. The watcher
+//! sees a change as a move in a file's length or mtime, so it misses a write
+//! that keeps both: a same-uid writer can set the mtime back. It sees only what
+//! happens while it is registered. A write made while `aoided` is down, or at
+//! start before the watcher registers, is part of its first baseline and raises
+//! no line: the start-up migration, and the seed of an absent or corrupt
+//! `sessions.json` or `hooks.json`, which keeps no copy of the file it
+//! replaces. One race remains: a foreign write that lands between the watcher's
+//! check and its fold, around the rename of `aoided`'s own write, is folded,
+//! with one `state` line and no `hand-edit` line.
 //!
 //! ## The state cue
 //!
@@ -60,9 +67,10 @@
 //! names the file by base name, as the hand-edit line does. Each file gets at
 //! most one such line per [`STATE_WINDOW`]. A change that lands inside a file's
 //! window owes one more line, written by the first observation after the window
-//! closes, so a burst cannot flood the feed and no change is lost. The hand-edit
-//! line is unchanged; the state line sits beside it. A desktop view re-reads on
-//! the state line (`docs/architecture/AOIDED.md`'s "The first producer" section).
+//! closes, so a burst cannot flood the feed and no change the watcher sees is
+//! lost. The hand-edit line is unchanged; the state line sits beside it. A
+//! desktop view re-reads on the state line (`docs/architecture/AOIDED.md`'s
+//! "The first producer" section).
 
 use aoide_protocol::feed::{FeedWriter, Follower};
 use aoide_protocol::{audit::now_secs, EventClass};
@@ -379,6 +387,7 @@ impl WriteWatch for HandEditWatcher {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicBool, Ordering};
 
     fn short_tmp(tag: &str) -> PathBuf {
         let nanos =
@@ -758,11 +767,20 @@ mod tests {
         let w = Arc::new(HandEditWatcher::new(vec![path.clone()], feed));
         let t0 = Instant::now();
         let mut swept = None;
+        let started = Arc::new(AtomicBool::new(false));
 
         w.around_write_at(&path, t0, &mut || {
             std::fs::write(&path, b"{\"own\":\"write\"}")?;
             let sweeper = Arc::clone(&w);
-            swept = Some(std::thread::spawn(move || sweeper.sweep_at(t0)));
+            let flag = Arc::clone(&started);
+            swept = Some(std::thread::spawn(move || {
+                flag.store(true, Ordering::SeqCst);
+                sweeper.sweep_at(t0)
+            }));
+            while !started.load(Ordering::SeqCst) {
+                std::thread::yield_now();
+            }
+            std::thread::sleep(Duration::from_millis(200));
             Ok(())
         })
         .unwrap();

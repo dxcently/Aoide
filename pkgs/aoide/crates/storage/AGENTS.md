@@ -554,7 +554,10 @@
   holding its own lock, since the rename runs inside that call. The registry
   lock is released before any watch runs, and a poisoned one is recovered. The
   temp, its removal on failure and the stale-temp sweep stay outside the seam,
-  so a write whose temp cannot be created never reaches a watch.
+  so a write whose temp cannot be created never reaches a watch. A stage write
+  that does not go through `atomic_write` is invisible to the seam, so a watcher
+  reads it as a hand edit. `fs::seed_if_absent`'s absent-path seed is one such
+  write, and it runs before `aoided` registers its watch.
 - **`fs.rs` carries five PUBLIC seams, each with one answer per host**, and a
   caller asks one of them rather than spelling a platform: `detach` (the
   detached-spawn posture — `setsid` in a `pre_exec`, or

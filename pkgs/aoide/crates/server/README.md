@@ -92,22 +92,29 @@ terminal's rights to its remote callers.
   (the #69 hand-edit watcher) — detection and narration only, this daemon
   never reverts a hand edit. Writes aoided makes itself are not hand edits:
   the watcher is registered with storage's write seam (`fs::watch_writes`), so
-  every atomic stage write this process makes folds into it at its rename,
-  whichever thread makes it. Each change the watcher finds, and each such write
-  that moves a file, also raises a `class:"state"` line for that file: at most
-  one per file per second, a change inside the second written by the first
-  observation after it (`producers`' "The state cue").
+  every atomic stage write this process makes after the watcher registers folds
+  into it at its rename, whichever thread makes it. Each change the watcher
+  finds, and each such write that moves a file, also raises a `class:"state"`
+  line for that file: at most one per file per second, a change inside the
+  second written by the first observation after it (`producers`' "The state
+  cue").
   **`run_loop` builds the one watcher after the seed and holds its `Arc` for the
   life of the loop** (`HandEditWatcher::registered`). A dispatched session
   command (`session start/end`/etc., `{"op":"dispatch"}`) writes stage files on
   its connection thread, and that write folds at its rename like any other, so
   the connection thread runs three steps: the dispatch, the seal of a fresh
   `session start`, and the reply. The tick writes every hand-edit line and runs
-  the reconcile on the files its sweep returns. A change aoided did not make
-  keeps its hand-edit line, and so does a foreign write that one of aoided's
-  writes then replaces. The one residual: a foreign write that lands between the
-  watcher's check and its fold, around the rename of aoided's own write, is
-  folded, with one state line and no hand-edit line.
+  the reconcile on the files its sweep returns. A change `aoided` did not make
+  keeps its `hand-edit` line, and so does a foreign write that one of `aoided`'s
+  own writes then replaces. The watcher sees a change as a move in a file's
+  length or mtime, so it misses a write that keeps both: a same-uid writer can
+  set the mtime back. It sees only what happens while it is registered. A write
+  made while `aoided` is down, or at start before the watcher registers, is part
+  of its first baseline and raises no line: the start-up migration, and the seed
+  of an absent or corrupt `sessions.json` or `hooks.json`, which keeps no copy
+  of the file it replaces. One race remains: a foreign write that lands between
+  the watcher's check and its fold, around the rename of `aoided`'s own write,
+  is folded, with one `state` line and no `hand-edit` line.
 - **Graph residency (P-D6, `docs/architecture/AOIDED.md`'s "L4")** —
   `run_loop`'s tick, after narrating the hand-edit sweep above, does two
   more things every iteration: `reconcile_graph_projection(changed_files)`

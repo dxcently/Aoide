@@ -1284,17 +1284,20 @@ cannot flood the feed. A write that changes two files raises one line for each,
 so one `session start`, which writes `sessions.json` and `graph.json`, raises
 two.
 
-A change `aoided` did not make is a hand edit and keeps its `hand-edit` line,
-and so does a foreign write that one of `aoided`'s own writes then replaces.
-The one residual: a foreign write that lands between the watcher's check and its
-fold, around the rename of `aoided`'s own write, is folded, with one `state`
-line and no `hand-edit` line.
+A change `aoided` did not make keeps its `hand-edit` line, and so does a foreign
+write that one of `aoided`'s own writes then replaces. The watcher sees a change
+as a move in a file's length or mtime, so it misses a write that keeps both: a
+same-uid writer can set the mtime back. It sees only what happens while it is
+registered. A write made while `aoided` is down, or at start before the watcher
+registers, is part of its first baseline and raises no line: the start-up
+migration, and the seed of an absent or corrupt `sessions.json` or `hooks.json`,
+which keeps no copy of the file it replaces. One race remains: a foreign write
+that lands between the watcher's check and its fold, around the rename of
+`aoided`'s own write, is folded, with one `state` line and no `hand-edit` line.
 
-While `aoided` runs, no change is lost to the state cue: each change is written
-as a line or owed to one. A write made while `aoided` is down raises no line,
-and its watcher starts from what is on disk, so a consumer re-reads every file
-when it attaches. The two files `aoided` seeds at its own start, when absent or
-corrupt, are part of the first baseline and raise no line.
+While `aoided` runs, no change the watcher sees is lost to the state cue: each
+change is written as a line or owed to one. Its watcher starts from what is on
+disk, so a consumer re-reads every file when it attaches.
 An unfiltered `aoide events tail` prints every class, `state` included; the
 `state` cue is what `--class state` prints.
 
