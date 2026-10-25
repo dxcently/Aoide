@@ -18,9 +18,12 @@
 //! and exited again). `--all` and `--id` are unchanged escapes: both widen
 //! or narrow past the undying set regardless of the mark. Each candidate is
 //! filtered through its harness's `AgentProfile.resume_args`
-//! (`aoide_protocol::agents`): `None` (an unregistered agent, or a harness
-//! whose resume argv has never been verified) skips that candidate with a
-//! taught message naming the harness, never a guessed invocation.
+//! (`aoide_protocol::agents`). `ById` resumes by the harness's own session
+//! id. `ByLog` (eidolon) resumes by the journal its ledger line's `logPath`
+//! names, and skips a line whose `logPath` names no journal ([`journal_of`]).
+//! `None` (an unregistered agent, or a harness whose resume argv has never
+//! been verified) skips that candidate with a taught message naming the
+//! harness, never a guessed invocation.
 //!
 //! A resurrected session is ALWAYS a fresh `sessionId` — ids are never
 //! recycled — spawned via the windowed path ([`super::spawn::session_spawn`]
@@ -31,7 +34,11 @@
 //! `resumed` edge beside `spawned`/`anchors` (CONTRACTS.md §4). If the old id
 //! was undying (`state/undying.json`, durable-sessions plan P-C3), the mark
 //! transfers onto the new id in the same step — never left on the now-dead
-//! old id, which would double-resurrect on the next sweep.
+//! old id, which would double-resurrect on the next sweep. A by-journal
+//! revival (`ByLog`) is the exception: its mark stays on the ledger id, and
+//! the new id gets none. The journal is the session and the terminal is only
+//! its window, so the next sweep must reopen that same journal, which the
+//! ledger id names.
 //!
 //! Never a hard `Outcome::error` over a per-candidate spawn failure (a
 //! headless host has no `$AOIDE_TERMINAL`/display — `session_spawn`'s own
@@ -50,7 +57,9 @@
 //! a `restore` snapshot (P-C5) is a conducted shell, not a harness, so it
 //! reopens as `[<login shell>, "-l"]` — the exact argv `kitty.nix`'s own
 //! wrapper execs — rather than a `--resume <id>` nobody could ever verify. A
-//! candidate with neither hits the pre-existing taught skip.
+//! candidate with neither hits the pre-existing taught skip. A `ByLog`
+//! harness never reaches the terminal arm: a line whose journal cannot be
+//! resumed is skipped with its own reason, `restore` or not.
 //!
 //! **Post-spawn delivery into a resurrected terminal (decision 8):** once a
 //! terminal candidate's spawn actually registers — and its harness is READY to
@@ -160,7 +169,7 @@
 //! take and answers with its rows instead of launching them: flag mode through
 //! [`dry_run_listing`], bare mode through [`dry_run_manifest`]. Each row's
 //! verdict comes from the helper its launch uses (`enrichment`, `clean_argv`,
-//! `summon_check`, `unresumed_reason`), so the listing and the launch agree.
+//! `summon_check`, `resolve_candidate`), so the listing and the launch agree.
 //! From an unattested caller on a door that cannot approve, a dry run gets what
 //! the call would give that caller, minus the launch: in bare mode the bare
 //! call's refusal; with `--id` or `--all` and no `--project`, the usage error
@@ -186,7 +195,7 @@ use super::model::{load_stage, projects_path, sessions_path, ProjectsFile, Sessi
 use super::send::{deliver_local_with, real_attested_sender, PendingSpawn};
 use super::session_store::{stamp_origin, stamp_resumed_from};
 use super::spawn::{hold_whole, launch_session, shell_join, Ready};
-use aoide_protocol::agents::agent_profile;
+use aoide_protocol::agents::{agent_profile, ResumeArgs};
 use aoide_protocol::output::{Fix, Kind, Outcome, Status};
 use aoide_protocol::{Door, Invocation};
 use aoide_storage::attest::is_node_origin;
@@ -204,32 +213,69 @@ fn mint_resurrected_id() -> String {
 }
 
 /// One selected, resumable ledger candidate, resolved down to what
-/// [`resurrect_one`] needs — the harness profile lookup and `harnessSessionId`
-/// fallback already done, so the spawn/skip decision below never re-derives
-/// them.
+/// [`resurrect_one`] needs — the harness profile lookup, `harnessSessionId`
+/// fallback and journal check already done, so the spawn/skip decision below
+/// never re-derives them.
 struct Candidate {
     entry: aoide_storage::ledger::LedgerEntry,
-    resume_argv: Option<Vec<String>>,
+    /// The argv the revival runs, or the taught line that skips it.
+    resume_argv: Result<Vec<String>, String>,
+    /// A by-journal revival: the undying mark stays on the ledger id.
+    by_log: bool,
 }
 
 fn resolve_candidate(entry: aoide_storage::ledger::LedgerEntry) -> Candidate {
-    let harness_argv = agent_profile(&entry.agent).and_then(|p| p.resume_args).map(|f| {
-        let harness_id = entry.harness_session_id.as_deref().unwrap_or(&entry.session_id);
-        f(harness_id)
-    });
-    if harness_argv.is_some() {
-        return Candidate { entry, resume_argv: harness_argv };
+    match agent_profile(&entry.agent).and_then(|p| p.resume_args) {
+        Some(ResumeArgs::ById(f)) => {
+            let harness_id = entry.harness_session_id.as_deref().unwrap_or(&entry.session_id);
+            let resume_argv = Ok(f(harness_id));
+            Candidate { entry, resume_argv, by_log: false }
+        }
+        // No terminal arm after a journal: a journal line that cannot name a
+        // journal is skipped, never reopened as a shell.
+        Some(ResumeArgs::ByLog(f)) => {
+            let resume_argv = journal_of(&entry).map(|log| f(&log));
+            Candidate { entry, resume_argv, by_log: true }
+        }
+        // Harness arm found nothing — try the TERMINAL arm (P-C6, durable-
+        // sessions plan). `agent == "shell"` is never a harness — it has no
+        // session id to `--resume` and no profile row (`agents.rs`'s own module
+        // doc refuses a guessed `SHELL_PROFILE` for exactly this reason) — what
+        // it carries instead is a `restore` snapshot (P-C5). `Some(restore)` is
+        // the whole test for "is this even a terminal candidate"; a `restore`
+        // -less entry (predating P-C5, or a harness this box has never
+        // verified) takes the pre-existing taught skip.
+        None => {
+            let resume_argv = if entry.restore.is_some() {
+                Ok(vec![login_shell(), "-l".to_string()])
+            } else {
+                Err(unresumed_reason(&entry.agent))
+            };
+            Candidate { entry, resume_argv, by_log: false }
+        }
     }
-    // Harness arm found nothing — try the TERMINAL arm (P-C6, durable-
-    // sessions plan). `agent == "shell"` is never a harness — it has no
-    // session id to `--resume` and no profile row (`agents.rs`'s own module
-    // doc refuses a guessed `SHELL_PROFILE` for exactly this reason) — what
-    // it carries instead is a `restore` snapshot (P-C5). `Some(restore)` is
-    // the whole test for "is this even a terminal candidate"; a `restore`
-    // -less entry (predating P-C5, or a harness this box has never
-    // verified) falls through to the pre-existing taught skip below.
-    let resume_argv = entry.restore.is_some().then(|| vec![login_shell(), "-l".to_string()]);
-    Candidate { entry, resume_argv }
+}
+
+/// The journal a by-journal revival reopens: its ledger line's `logPath`, when
+/// that is an absolute, plain path to a regular file outside the session logs
+/// dir. Anything else is the candidate's skip reason. The path itself stays out
+/// of the reason: it is ledger data.
+fn journal_of(entry: &aoide_storage::ledger::LedgerEntry) -> Result<String, String> {
+    let who = format!("session {} ({})", entry.session_id, entry.agent);
+    let skip = |why: &str| Err(format!("{who} {why} — skipped rather than guessed"));
+    let Some(log) = entry.log_path.as_deref() else {
+        return skip("has no logPath, so its journal is unknown");
+    };
+    if !Path::new(log).is_absolute() || log.chars().any(is_unsafe) {
+        return skip("has a logPath that is not an absolute, plain path");
+    }
+    if aoide_storage::fs::inside_session_logs(log) {
+        return skip("has a logPath inside the session logs dir, which holds terminal transcripts, not journals");
+    }
+    if !Path::new(log).is_file() {
+        return skip("has a logPath that names no regular file");
+    }
+    Ok(log.to_string())
 }
 
 /// The login shell a resurrected terminal candidate re-opens with `-l` —
@@ -532,13 +578,16 @@ fn resurrect_one(
     failed: &mut Vec<serde_json::Value>,
     changed: &mut Vec<String>,
 ) {
-    let Some(argv) = c.resume_argv else {
-        skipped.push(json!({
-            "sessionId": c.entry.session_id,
-            "agent": c.entry.agent,
-            "reason": unresumed_reason(&c.entry.agent),
-        }));
-        return;
+    let argv = match c.resume_argv {
+        Ok(argv) => argv,
+        Err(reason) => {
+            skipped.push(json!({
+                "sessionId": c.entry.session_id,
+                "agent": c.entry.agent,
+                "reason": reason,
+            }));
+            return;
+        }
     };
     let new_id = mint_resurrected_id();
     let mut flags = BTreeMap::new();
@@ -613,7 +662,9 @@ fn resurrect_one(
     // sweep once P-C4 selects off the undying set. A no-op when the old id
     // was never undying at all (this resurrect did not originate from the
     // undying set), so an ordinary `--all`/`--id` revive never starts
-    // marking sessions undying that nobody marked.
+    // marking sessions undying that nobody marked. A by-journal revival
+    // (`ByLog`) moves nothing: its mark stays on the ledger id, the module
+    // doc says why.
     //
     // Both mutations land in ONE in-memory vector before the SINGLE
     // `save_undying` write below — mark the new id BEFORE dropping the old
@@ -623,7 +674,7 @@ fn resurrect_one(
     // idempotent: re-running this on an already-transferred pair finds the
     // old id no longer undying and writes nothing.
     let mut undying = aoide_storage::undying::load_undying();
-    if aoide_storage::undying::is_undying(&undying, &c.entry.session_id) {
+    if !c.by_log && aoide_storage::undying::is_undying(&undying, &c.entry.session_id) {
         aoide_storage::undying::set_undying(&mut undying, &new_id, true);
         aoide_storage::undying::set_undying(&mut undying, &c.entry.session_id, false);
         let _ = aoide_storage::undying::save_undying(&undying);
@@ -1105,9 +1156,9 @@ fn dry_run_listing(inv: &Invocation, selection: &Selection) -> Outcome {
                 "pickedByBare": picked,
                 "disposition": "revived-from-ledger",
             });
-            if resolve_candidate(e.clone()).resume_argv.is_none() {
+            if let Err(reason) = resolve_candidate(e.clone()).resume_argv {
                 row["disposition"] = json!("skipped");
-                row["reason"] = json!(unresumed_reason(&e.agent));
+                row["reason"] = json!(reason);
             }
             row
         })
@@ -1520,7 +1571,7 @@ fn clean_spawn_from_spec(
 
 /// One manifest spec's dry-run row and its plan line. Each verdict comes from
 /// the helper the launch uses for that spec: `summon_check` for a non-local
-/// host; `resolve_spec_dir`, `enrichment`, `unresumed_reason` and `clean_argv`
+/// host; `resolve_spec_dir`, `enrichment`, `resolve_candidate` and `clean_argv`
 /// for a local one. Nothing is spawned or sent.
 fn plan_spec(
     root: &Path,
@@ -1552,8 +1603,8 @@ fn plan_spec(
     row["cwd"] = json!(dir_str);
     if let Some(entry) = enrichment(ledger, &dir_str, &spec.agent) {
         row["resumedFrom"] = json!(entry.session_id);
-        if resolve_candidate(entry.clone()).resume_argv.is_none() {
-            return not_launched(row, &label, "skipped", unresumed_reason(&entry.agent));
+        if let Err(reason) = resolve_candidate(entry.clone()).resume_argv {
+            return not_launched(row, &label, "skipped", reason);
         }
         let restore = restore_text(entry.restore.as_ref());
         row["restoreText"] = json!(restore);
@@ -1691,6 +1742,7 @@ mod tests {
             resumed_from: None,
             origin: None,
             restore: None,
+            log_path: None,
         }
     }
 
@@ -1704,7 +1756,25 @@ mod tests {
         ended_at: &str,
         restore: Option<RestoreSnapshot>,
     ) -> aoide_storage::ledger::LedgerEntry {
-        aoide_storage::ledger::LedgerEntry { restore, ..ledger_entry(session_id, agent, cwd, ended_at) }
+        aoide_storage::ledger::LedgerEntry {
+            restore,
+            log_path: None,
+            ..ledger_entry(session_id, agent, cwd, ended_at)
+        }
+    }
+
+    /// `ledger_entry` carrying a `logPath`, built through its JSON line so the
+    /// fixture has the shape `ledger_session_exit` writes.
+    fn ledger_entry_with_log(
+        session_id: &str,
+        agent: &str,
+        cwd: &str,
+        log_path: Option<&str>,
+    ) -> aoide_storage::ledger::LedgerEntry {
+        let mut line =
+            serde_json::to_value(ledger_entry(session_id, agent, cwd, "2026-08-20T01:00:00Z")).unwrap();
+        line["logPath"] = log_path.map_or(serde_json::Value::Null, |p| json!(p));
+        serde_json::from_value(line).unwrap()
     }
 
     /// Common env scaffolding every test below needs: an isolated stage +
@@ -1784,7 +1854,7 @@ mod tests {
     fn resolve_candidate_restore_less_shell_entry_still_hits_the_taught_skip() {
         let entry = ledger_entry_with_restore("ledger-no-restore", "shell", "/home/khoa/Aoide", "2026-08-20T01:00:00Z", None);
         let candidate = resolve_candidate(entry);
-        assert!(candidate.resume_argv.is_none(), "a restore-less shell entry must still be skipped");
+        assert!(candidate.resume_argv.is_err(), "a restore-less shell entry must still be skipped");
     }
 
     /// R1: a busy session's recorded argv is TYPED and never submitted. The
@@ -2271,6 +2341,7 @@ mod tests {
     fn resolve_candidate_preserves_the_ledger_entrys_origin() {
         let entry = aoide_storage::ledger::LedgerEntry {
             origin: Some("node:yomi-strix".to_string()),
+            log_path: None,
             ..ledger_entry("ledger-node-origin", "claude", "/home/khoa/Aoide", "2026-08-20T01:00:00Z")
         };
         let candidate = resolve_candidate(entry);
@@ -2330,6 +2401,7 @@ mod tests {
 
         let entry = aoide_storage::ledger::LedgerEntry {
             origin: Some("node:yomi-strix".to_string()),
+            log_path: None,
             ..ledger_entry("ledger-node-origin", "claude", &proj_path, "2026-08-20T01:00:00Z")
         };
         set_ledger(&[entry]);
@@ -4483,6 +4555,210 @@ mod tests {
         let held = session_resurrect_with(&real, |_| None::<String>);
         assert_eq!(held.data.as_ref().unwrap()["state"], "pending", "{}", held.message);
         assert_eq!(held_entries().len(), 2, "the real call adds exactly one held entry");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A recording `$AOIDE_TERMINAL`: each launch appends a `RUN` line, then one
+    /// line per argv word, so a test reads back exactly what the terminal was
+    /// handed. Unix only, like every launch test here.
+    #[cfg(unix)]
+    fn recording_terminal(root: &std::path::Path) -> std::path::PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+        let rec = root.join("terminal.rec");
+        let script = root.join("record-terminal.sh");
+        std::fs::write(
+            &script,
+            format!(
+                "#!/bin/sh\nprintf 'RUN\\n' >> '{rec}'\nfor a in \"$@\"; do printf '%s\\n' \"$a\" >> '{rec}'; done\n",
+                rec = rec.display()
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::env::set_var("AOIDE_TERMINAL", &script);
+        std::env::set_var("WAYLAND_DISPLAY", "wayland-0");
+        rec
+    }
+
+    /// Every launch the recording terminal saw, as its argv words in order.
+    #[cfg(unix)]
+    fn recorded_launches(rec: &std::path::Path) -> Vec<Vec<String>> {
+        let raw = std::fs::read_to_string(rec).unwrap_or_default();
+        let mut runs: Vec<Vec<String>> = Vec::new();
+        for line in raw.lines() {
+            if line == "RUN" {
+                runs.push(Vec::new());
+            } else if let Some(run) = runs.last_mut() {
+                run.push(line.to_string());
+            }
+        }
+        runs
+    }
+
+    /// An ended eidolon session with a journal named by its ledger line is
+    /// resumed once, as `eidolon tui --session <journal>`.
+    #[cfg(unix)]
+    #[test]
+    fn an_ended_eidolon_session_resumes_from_the_journal_its_ledger_line_names() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(RESURRECT_ENV);
+        let (root, proj_path) = setup("resurrect-by-log");
+        let rec = recording_terminal(&root);
+        let journal = root.join("s.eid");
+        std::fs::write(&journal, "").unwrap();
+        let journal = journal.to_string_lossy().into_owned();
+        set_ledger(&[ledger_entry_with_log("ledger-eid", "eidolon", &proj_path, Some(journal.as_str()))]);
+
+        let out = session_resurrect(&flag_invocation(&["resurrect"], &[("project", "proj"), ("id", "ledger-eid")]));
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok, "msg: {}", out.message);
+        let launches = recorded_launches(&rec);
+        assert_eq!(launches.len(), 1, "one launch; launches: {launches:?}, data: {:?}", out.data);
+        let argv = &launches[0];
+        let tail: Vec<&str> = argv[argv.len() - 4..].iter().map(String::as_str).collect();
+        assert_eq!(tail, ["eidolon", "tui", "--session", journal.as_str()]);
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The journal path reaches the terminal as one argv word, even with a
+    /// space and a quote in it.
+    #[cfg(unix)]
+    #[test]
+    fn a_journal_path_with_a_space_and_a_quote_stays_one_argv_word() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(RESURRECT_ENV);
+        let (root, proj_path) = setup("resurrect-by-log-awkward");
+        let rec = recording_terminal(&root);
+        let journal = root.join("my journal's.eid");
+        std::fs::write(&journal, "").unwrap();
+        let journal = journal.to_string_lossy().into_owned();
+        set_ledger(&[ledger_entry_with_log("ledger-eid", "eidolon", &proj_path, Some(journal.as_str()))]);
+
+        let out = session_resurrect(&flag_invocation(&["resurrect"], &[("project", "proj"), ("id", "ledger-eid")]));
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok, "msg: {}", out.message);
+        let launches = recorded_launches(&rec);
+        assert_eq!(launches.len(), 1, "one launch; launches: {launches:?}");
+        let argv = &launches[0];
+        assert_eq!(argv.last().unwrap(), &journal, "argv: {argv:?}");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A by-journal candidate whose ledger `logPath` is skipped by `log_path`'s
+    /// value launches nothing, and both its launch and a dry run give one
+    /// reason, which names the entry and the cause.
+    #[cfg(unix)]
+    fn assert_by_log_skip(
+        tag: &str,
+        log_path: impl FnOnce(&std::path::Path) -> Option<String>,
+        cause: &str,
+    ) {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(RESURRECT_ENV);
+        let (root, proj_path) = setup(tag);
+        let rec = recording_terminal(&root);
+        let log_path = log_path(&root);
+        set_ledger(&[ledger_entry_with_log("ledger-eid", "eidolon", &proj_path, log_path.as_deref())]);
+
+        let out = session_resurrect(&flag_invocation(&["resurrect"], &[("project", "proj"), ("id", "ledger-eid")]));
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok, "msg: {}", out.message);
+        let skipped = out.data.as_ref().unwrap()["skipped"].as_array().unwrap().clone();
+        assert_eq!(skipped.len(), 1, "data: {:?}", out.data);
+        let reason = skipped[0]["reason"].as_str().unwrap().to_string();
+        assert!(reason.contains("ledger-eid") && reason.contains(cause), "reason: {reason}");
+
+        let dry = session_resurrect(&flag_invocation(
+            &["resurrect"],
+            &[("project", "proj"), ("id", "ledger-eid"), ("dry-run", "true")],
+        ));
+        assert_eq!(dry.status, aoide_protocol::output::Status::Ok, "msg: {}", dry.message);
+        let row = &dry.data.as_ref().unwrap()["candidates"][0];
+        assert_eq!(row["disposition"], "skipped", "dry-run row: {row}");
+        assert_eq!(row["reason"].as_str().unwrap(), reason, "the dry run must give the launch's reason");
+
+        assert!(recorded_launches(&rec).is_empty(), "a skipped candidate launched a terminal");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_by_log_entry_without_a_log_path_is_skipped_with_its_reason() {
+        assert_by_log_skip("resurrect-no-log-path", |_| None, "has no logPath");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_by_log_entry_with_a_relative_log_path_is_skipped_with_its_reason() {
+        assert_by_log_skip(
+            "resurrect-relative-log",
+            |_| Some("relative/s.eid".to_string()),
+            "not an absolute, plain path",
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_by_log_entry_whose_log_path_holds_an_escape_is_skipped_with_its_reason() {
+        assert_by_log_skip(
+            "resurrect-esc-log",
+            |_| Some("/nonexistent-root/s\u{1b}.eid".to_string()),
+            "not an absolute, plain path",
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_by_log_entry_whose_log_path_is_a_terminal_transcript_is_skipped_with_its_reason() {
+        assert_by_log_skip(
+            "resurrect-transcript-log",
+            |root| {
+                let dir = root.join("state").join("sessions");
+                std::fs::create_dir_all(&dir).unwrap();
+                let transcript = dir.join("ledger-eid.log");
+                std::fs::write(&transcript, "transcript").unwrap();
+                Some(transcript.to_string_lossy().into_owned())
+            },
+            "session logs dir",
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_by_log_entry_whose_log_path_names_no_file_is_skipped_with_its_reason() {
+        assert_by_log_skip(
+            "resurrect-missing-log",
+            |root| Some(root.join("missing.eid").to_string_lossy().into_owned()),
+            "names no regular file",
+        );
+    }
+
+    /// The journal is the session, so a by-journal revival keeps the undying
+    /// mark on the ledger id, and its new id gets none.
+    #[cfg(unix)]
+    #[test]
+    fn an_undying_by_log_entry_keeps_its_mark_and_its_revival_gets_none() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(RESURRECT_ENV);
+        let (root, proj_path) = setup("resurrect-by-log-undying");
+        let _rec = recording_terminal(&root);
+        let journal = root.join("s.eid");
+        std::fs::write(&journal, "").unwrap();
+        let journal = journal.to_string_lossy().into_owned();
+        set_ledger(&[ledger_entry_with_log("ledger-eid", "eidolon", &proj_path, Some(journal.as_str()))]);
+        let mut undying = Vec::new();
+        aoide_storage::undying::set_undying(&mut undying, "ledger-eid", true);
+        aoide_storage::undying::save_undying(&undying).unwrap();
+
+        let out = session_resurrect(&flag_invocation(&["resurrect"], &[("project", "proj"), ("id", "ledger-eid")]));
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok, "msg: {}", out.message);
+        let resurrected = out.data.as_ref().unwrap()["resurrected"].as_array().unwrap().clone();
+        assert_eq!(resurrected.len(), 1, "data: {:?}", out.data);
+        let new_id = resurrected[0]["sessionId"].as_str().unwrap().to_string();
+
+        let undying = aoide_storage::undying::load_undying();
+        assert!(aoide_storage::undying::is_undying(&undying, "ledger-eid"), "the journal is the session: its mark stays");
+        assert!(!aoide_storage::undying::is_undying(&undying, &new_id), "the new id must get no mark");
 
         let _ = std::fs::remove_dir_all(&root);
     }

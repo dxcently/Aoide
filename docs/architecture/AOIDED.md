@@ -448,9 +448,16 @@ the "a new harness is a table entry, not a scatter of conditionals" charter:
 ```rust
 /// argv that launches this harness fresh (claude: &["claude"]).
 pub launch: &'static [&'static str],
-/// argv that resumes a prior harness session by ITS OWN id
-/// (claude: ["claude", "--resume", <id>]). None = harness cannot resume.
-pub resume_args: Option<fn(harness_session_id: &str) -> Vec<String>>,
+/// How this harness resumes a prior session: by ITS OWN id (claude:
+/// ["claude", "--resume", <id>]), or by the journal path its ledger line
+/// names (eidolon: ["eidolon", "tui", "--session", <journal>]). None =
+/// harness cannot resume.
+pub resume_args: Option<ResumeArgs>,
+
+pub enum ResumeArgs {
+    ById(fn(harness_session_id: &str) -> Vec<String>),
+    ByLog(fn(log: &str) -> Vec<String>),
+}
 ```
 
 ### Capturing the harness's own session id
@@ -472,7 +479,7 @@ line per session at the moment it leaves the roster (clean `session end`
 and reap both write it, which after L4 is one code path):
 
 ```json
-{"v":0,"sessionId":"…","agent":"claude","harnessSessionId":"…","cwd":"/home/khoa/Aoide","title":"…","petname":"…","startedAt":"…","endedAt":"…","resumedFrom":null}
+{"v":0,"sessionId":"…","enduringAgentId":null,"project":null,"agent":"claude","harnessSessionId":"…","cwd":"/home/khoa/Aoide","title":"…","petname":"…","startedAt":"…","endedAt":"…","resumedFrom":null,"origin":null,"restore":null,"logPath":null}
 ```
 
 Append-only, never truncated, never a lookup key for live state —
@@ -493,15 +500,20 @@ the append-only ledger). `--all` and `--id` are unchanged escapes: both
 widen or narrow past the undying set regardless of the mark. An empty
 bare-mode selection is an honest `Outcome::ok` no-op naming the undying set
 as empty for the project, never a silent success. Every surviving candidate
-then resolves through TWO arms (`resolve_candidate`, P-C6): the harness arm,
-unchanged, filters to harnesses with a verified `resume_args`; a candidate
+then resolves through TWO arms (`resolve_candidate`, P-C6): the harness arm
+resolves a harness with a verified `resume_args` (`ById` by the harness's own
+session id, `ByLog` by the journal its ledger line's `logPath` names); a
+candidate
 the harness arm finds nothing for falls to the TERMINAL arm — a `restore`
 snapshot present (P-C5) marks it a conducted shell, not a harness, so it
 resolves `[<login shell>, "-l"]` (the same `$SHELL` → passwd → `/bin/sh`
 order `modules/dendrites/kitty.nix`'s own wrapper uses to pick a shell for a
 brand-new terminal) rather than a `--resume <id>` no shell could ever honor.
 A candidate neither arm resolves is skipped with a taught message naming it,
-never a guessed invocation. Every resolved candidate spawns via the
+never a guessed invocation. A `ByLog` line whose `logPath` is absent, not
+absolute or unsafe, under `state/sessions/`, or not a regular file is skipped
+with a sentence that names the entry and the cause; it never falls to the
+terminal arm. Every resolved candidate spawns via the
 windowed path with its resolved argv. Rules:
 
 - The revived session is a NEW `sessionId` — ids are never recycled. The
@@ -510,6 +522,8 @@ windowed path with its resolved argv. Rules:
   edge beside `spawned`/`anchors` (`CONTRACTS.md §4`, graph.json — additive edge
   kind). If the old id was undying, the mark transfers onto the new id in
   the same step (one `save_undying` call, never left on the now-dead old id).
+  A `ByLog` revival keeps the mark on the ledger id instead: the journal is
+  the session, and the terminal is only its window.
 - **Post-spawn restore delivery (P-C6).** Once a terminal candidate's spawn
   actually registers, its `restore` snapshot decides what — if anything —
   lands in the new pty, through `session_send` in-process, never a direct

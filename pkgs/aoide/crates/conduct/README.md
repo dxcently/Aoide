@@ -1116,22 +1116,30 @@ blank one is refused too.
   selection is an honest `Outcome::ok` no-op naming the undying set as
   empty, never a silent success. Every surviving candidate then resolves
   through TWO arms
-  (`resolve_candidate`, P-C6): the harness arm, unchanged, filters to
-  harnesses with a verified `AgentProfile.resume_args`
-  (`aoide_protocol::agents`); a candidate the harness arm finds nothing for
-  falls to the TERMINAL arm — a `restore` snapshot present (P-C5) means it
+  (`resolve_candidate`, P-C6): the harness arm resolves a harness with a
+  verified `AgentProfile.resume_args` (`aoide_protocol::agents`) — `ById` by
+  the harness's own session id, `ByLog` (eidolon) by the journal its ledger
+  line's `logPath` names, through `journal_of`; a candidate the harness arm
+  finds nothing for falls to the TERMINAL arm — a `restore` snapshot present
+  (P-C5) means it
   is a conducted shell, not a harness, so it resolves `[<login shell>, "-l"]`
   (`login_shell`, the same `$SHELL` → passwd → `/bin/sh` order
   `modules/dendrites/kitty.nix`'s own wrapper uses) rather than a
   `--resume <id>` no shell could ever honor. A candidate neither arm
   resolves is skipped with a taught message naming it, never a guessed
-  invocation. Every resolved candidate spawns via the windowed path
+  invocation. A `ByLog` line whose `logPath` is absent, not absolute or
+  unsafe, inside `session_logs_dir()`, or not a regular file is skipped with
+  a sentence that names the entry and the cause, and never falls to the
+  terminal arm. Every resolved candidate spawns via the windowed path
   (`graph/spawn.rs`, P-D7) with its resolved argv and `--cwd` set to the
   ledger entry's own cwd.
   A resurrected session is ALWAYS a fresh `sessionId` — ids are never
   recycled — and gets stamped `resumedFrom` (`session_store.rs::
   stamp_resumed_from`) naming the ledger entry it continues; `build_graph`
   projects that as an additive `resumed` edge beside `spawned`/`anchors`.
+  The undying mark moves onto the new id in the same step, except for a
+  `ByLog` revival: its mark stays on the ledger id, because the journal is
+  the session and the terminal is only its window.
   Never a hard `Outcome::error` over a per-candidate spawn failure (a
   headless host's taught "no `$AOIDE_TERMINAL`" error, for one) — every
   outcome folds into `resurrected`/`skipped`/`failed` and the command
@@ -1214,7 +1222,7 @@ blank one is refused too.
   `pickedByBare` true on exactly the rows the bare `--project P` form revives
   (`undying_selection`). Bare mode lists one row per manifest spec, decided by
   the helpers the launch uses (`enrichment`, `clean_argv`, `summon_check`,
-  `unresumed_reason`). A row the launch would skip lists as `skipped`, as the
+  `resolve_candidate`). A row the launch would skip lists as `skipped`, as the
   launch's own `skipped[]` reports it. A remote spec is never sent: its row
   carries only the local pre-wire verdict. The message spells each line as the
   pending view spells a held plan (`visible_held`); the data stays raw. From an

@@ -2958,6 +2958,7 @@ mod tests {
             cwd: proj_path,
             started_at: "2026-08-20T00:00:00Z".to_string(),
             ended_at: "2026-08-20T01:00:00Z".to_string(),
+            log_path: None,
             ..Default::default()
         };
         aoide_storage::ledger::append_ledger_entry(&entry).unwrap();

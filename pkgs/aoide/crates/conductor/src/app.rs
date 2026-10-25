@@ -5332,6 +5332,7 @@ mod tests {
             cwd: "/work/src".into(),
             agent: "codex".into(),
             title: Some("Previous task".into()),
+            log_path: None,
             ..Default::default()
         }];
         assert!(matches!(
@@ -5367,11 +5368,13 @@ mod tests {
         app.history = vec![
             aoide_storage::ledger::LedgerEntry {
                 session_id: "current".into(),
+                log_path: None,
                 ..Default::default()
             },
             aoide_storage::ledger::LedgerEntry {
                 session_id: "old".into(),
                 project: Some("retired-project".into()),
+                log_path: None,
                 ..Default::default()
             },
         ];
@@ -8918,6 +8921,7 @@ mod tests {
             session_id: "ended-exact".into(),
             project: Some("archive".into()),
             harness_session_id: Some("native".into()),
+            log_path: None,
             ..Default::default()
         };
         app.open_context_for_history(entry.clone(), 0, 0);
@@ -8951,6 +8955,7 @@ mod tests {
             project: Some("retired".into()),
             cwd: "/archive".into(),
             harness_session_id: Some("native".into()),
+            log_path: None,
             ..Default::default()
         };
         app.open_context_for_history(entry, 0, 0);

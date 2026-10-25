@@ -5631,7 +5631,7 @@ state — a reader wanting "is this session still running" still asks
 `sessions.json`, never this file.
 
 ```json
-{"v":0,"sessionId":"s1","enduringAgentId":null,"project":null,"agent":"claude","harnessSessionId":"claude-uuid-123","cwd":"/home/khoa/Aoide","title":"fix the thing","petname":"brave-otter","startedAt":"2026-08-20T10:00:00Z","endedAt":"2026-08-20T12:00:00Z","resumedFrom":null,"origin":null,"restore":null}
+{"v":0,"sessionId":"s1","enduringAgentId":null,"project":null,"agent":"claude","harnessSessionId":"claude-uuid-123","cwd":"/home/khoa/Aoide","title":"fix the thing","petname":"brave-otter","startedAt":"2026-08-20T10:00:00Z","endedAt":"2026-08-20T12:00:00Z","resumedFrom":null,"origin":null,"restore":null,"logPath":null}
 ```
 
 Every field serializes unconditionally (no `skip_serializing_if`,
@@ -5662,6 +5662,17 @@ continuously-captured snapshot is the only honest source. A populated
 both `sessions.json`'s additive-optional field and this always-present one,
 so a caller reading a populated `restore` sees the identical complete shape
 in either file.
+
+`logPath` (ruling 161) is projected verbatim off `SessionRecord.log_path` at
+the same instant as `restore`. It is `null` for every session whose record
+had none, and for every line predating the field. Its referent is one of two
+things: a conducted terminal's pty transcript under `state/sessions/`, which
+is never a journal, or a harness's own journal, which for an
+`agent:"eidolon"` session is the journal its `meta.json` names. The file may
+be gone by the time anything reads the line. `aoide resurrect` reopens an
+Eidolon line from this path (`graph/resurrect.rs`'s `journal_of`), and skips
+a line whose path is absent, not absolute or unsafe, under `state/sessions/`,
+or not a regular file, with a sentence that names the entry.
 
 ### `state/undying.json` — **v0** (durable-sessions plan)
 

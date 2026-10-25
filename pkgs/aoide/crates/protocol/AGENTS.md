@@ -6,6 +6,13 @@
   another `aoide-*` crate — that would create a cycle back into a door this
   crate is supposed to be beneath. If a type feels like it needs a
   domain-crate fact, the fact belongs in the caller, not here.
+- **A resume argv is typed by its id space (`ResumeArgs`).** `ById` takes
+  the harness's own session id; `ByLog` takes the journal path a ledger
+  line's `logPath` names, because eidolon's `tui --session` takes a path and
+  never an id. The enum is the seam: a `ById` function is never handed a
+  path, and a `ByLog` function is never handed an id. Adding a third shape
+  means naming its id space here and in `docs/architecture/AOIDED.md`'s L5
+  section, in the same commit.
 - **`inquire` lives in THIS crate's `Cargo.toml` only** (ONBOARD.md decision
   9, P-I1 — the second User-authorized break of the zero-new-deps
   discipline, after ed25519-dalek). No other crate in the workspace may add

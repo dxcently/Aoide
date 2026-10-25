@@ -544,6 +544,19 @@ pub fn session_logs_dir() -> std::path::PathBuf {
     state_dir().join("sessions")
 }
 
+/// Whether `path` lies inside [`session_logs_dir`], by its raw spelling or, where
+/// both resolve, its canonical one. A path there is a conducted terminal's
+/// transcript, never a harness's journal, so a reader of a `logPath` refuses it.
+pub fn inside_session_logs(path: &str) -> bool {
+    let dir = session_logs_dir();
+    let canon_dir = std::fs::canonicalize(&dir).ok();
+    let inside = |p: &std::path::Path| {
+        p.starts_with(&dir) || canon_dir.as_deref().is_some_and(|d| p.starts_with(d))
+    };
+    let raw = std::path::Path::new(path);
+    inside(raw) || std::fs::canonicalize(raw).is_ok_and(|c| inside(&c))
+}
+
 
 /// The Aoide FLAKE root: the git checkout `nix eval` shells out against
 /// (`crate::widgets`'s rices manifest/registry regeneration, C4/W3) —

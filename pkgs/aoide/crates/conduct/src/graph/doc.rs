@@ -1091,6 +1091,11 @@ pub(crate) fn drop_sessions(
 /// `state = "done"`), so the record's own `restore` snapshot, captured
 /// continuously by the PTY tick while the session was alive, is the only
 /// honest source.
+///
+/// `logPath` (ruling 161) is projected the same way, verbatim off the record:
+/// the path it names is a conducted terminal's pty transcript under
+/// `session_logs_dir()`, or a harness's own journal (`records.rs:410-419`).
+/// The file may be gone by the time anything reads the line.
 pub(crate) fn ledger_session_exit(rec: &SessionRecord, ended_at: &str) {
     let entry = aoide_storage::ledger::LedgerEntry {
         v: 0,
@@ -1107,6 +1112,7 @@ pub(crate) fn ledger_session_exit(rec: &SessionRecord, ended_at: &str) {
         resumed_from: rec.resumed_from.clone(),
         origin: rec.origin.clone(),
         restore: rec.restore.clone(),
+        log_path: rec.log_path.clone(),
     };
     if let Err(e) = aoide_storage::ledger::append_ledger_entry(&entry) {
         eprintln!(
@@ -2243,6 +2249,24 @@ mod tests {
 
         let raw = std::fs::read_to_string(aoide_storage::ledger::session_ledger_path()).unwrap();
         assert!(raw.contains("\"restore\":null"), "line: {raw}");
+
+        let _ = std::fs::remove_dir_all(&state);
+    }
+
+    #[test]
+    fn ledger_session_exit_projects_the_records_log_path() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&["AOIDE_STATE_DIR"]);
+        let state = unique_stage("ledger-log-path");
+        std::env::set_var("AOIDE_STATE_DIR", &state);
+
+        let mut rec = session("eid-1", "/w", "done", "2026-01-01T00:00:00Z", None);
+        rec.log_path = Some("/r/eid-1.eid".to_string());
+        ledger_session_exit(&rec, "2026-01-01T01:00:00Z");
+
+        let raw = std::fs::read_to_string(aoide_storage::ledger::session_ledger_path()).unwrap();
+        let line: serde_json::Value = serde_json::from_str(raw.lines().last().unwrap()).unwrap();
+        assert_eq!(line["logPath"], "/r/eid-1.eid", "line: {raw}");
 
         let _ = std::fs::remove_dir_all(&state);
     }

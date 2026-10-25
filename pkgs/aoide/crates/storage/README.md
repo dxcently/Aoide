@@ -588,6 +588,14 @@ by decision — no embedded database yet
   otherwise be unrecoverable by the time `ledger_session_exit` runs.
   `aoide-conduct` is the sole writer (its PTY tick, ~1 Hz); this crate only
   holds the shape, never the capture logic.
+  `LedgerEntry.log_path` (`logPath`, ruling 161) is `SessionRecord.log_path`
+  projected verbatim at exit, as `restore` is, and always present (possibly
+  `null`). What it names is one of two things: a conducted terminal's pty
+  transcript under `fs::session_logs_dir()`, or a harness's own journal (an
+  `agent:"eidolon"` session's `meta.json` `log`). `fs::inside_session_logs`
+  tells the two apart, by raw and canonical spelling. The file may be gone by
+  the time anything reads the line, and a line written before the field has
+  no `logPath` key and reads as `None`.
 - `undying` — the undying mark (durable-sessions plan, P-C1; renamed from
   "carry" at command-defrag lane U1, 2026-08-27): `state/undying.json`, the
   set of session ids marked durable so a project's whole undying set can be

@@ -214,8 +214,10 @@ other crate in this workspace sits above.
 - `agents` — `agent_profile`, the per-harness knowledge table (hook
   vocabulary, model ceilings, transcript layout, the hook-settings and
   skills-directory locations, the argv that launches a harness fresh and,
-  where verified, the argv that resumes a prior session of it by its own
-  id — P-D7 — and, where a harness offers one, the argv that delivers a
+  where verified, the argv that resumes a prior session of it — P-D7 — as a
+  `ResumeArgs`: `ById` takes the harness's own session id, `ByLog` takes the
+  journal path (eidolon's `tui --session`), and no caller passes one where the
+  other is meant — and, where a harness offers one, the argv that delivers a
   message to a live session WITHOUT the pty composer at all —
   `native_send`, P-EIDOLON — plus the two launch-time facts a first turn
   needs: `readiness`, WHICH signal says a just-started process of this
@@ -238,7 +240,7 @@ other crate in this workspace sits above.
   config path only so `hooks install`'s Declarative refusal has something
   concrete to cite, its transcript is a single small swarm presence file
   (`meta.json`) rather than an append-only per-session log, so
-  `permission_keys`, `skills_dir`, `resume_args`, and the transcript's
+  `permission_keys`, `skills_dir`, and the transcript's
   `say`/`tool`/`context_tokens` are named-absent rather than filled — and
   it is the one profile so far with `native_send: Some(...)`, since a
   message to it never needs the pty composer a keystroke path would

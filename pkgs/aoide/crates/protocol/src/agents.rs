@@ -167,6 +167,19 @@ pub enum Readiness {
     OutputSettled,
 }
 
+/// How a harness resumes one of its own prior sessions. The two shapes are two
+/// id spaces: a harness that names its sessions by id resumes by that id, and
+/// eidolon, whose `tui --session` takes the journal path, resumes by the path.
+/// Each variant's function takes exactly what its variant names, so a session
+/// id never reaches a journal-path harness, or the reverse.
+#[derive(Clone, Copy)]
+pub enum ResumeArgs {
+    /// argv that resumes a session by the harness's own session id.
+    ById(fn(harness_session_id: &str) -> Vec<String>),
+    /// argv that resumes a session from its journal path.
+    ByLog(fn(log: &str) -> Vec<String>),
+}
+
 /// One agent harness's whole profile — the seam every agent-aware consumer
 /// dispatches through.
 pub struct AgentProfile {
@@ -224,7 +237,10 @@ pub struct AgentProfile {
     /// resume flag has not been verified against real CLI/extension
     /// material — never a guessed flag — so `graph resurrect` (P-D8) skips
     /// it with a taught message rather than typing a wrong invocation.
-    pub resume_args: Option<fn(harness_session_id: &str) -> Vec<String>>,
+    /// [`ResumeArgs::ById`] takes the harness's own session id;
+    /// [`ResumeArgs::ByLog`] takes the journal path a ledger line's `logPath`
+    /// names (eidolon: `["eidolon", "tui", "--session", <journal>]`).
+    pub resume_args: Option<ResumeArgs>,
     /// argv that delivers a message to a live session of this harness
     /// WITHOUT going through its pty composer at all — for a harness whose
     /// own native inter-session transport exists (eidolon: `eidolon send`).
@@ -801,7 +817,7 @@ pub static CLAUDE_PROFILE: AgentProfile = AgentProfile {
     // verbatim in this field's own doc comment in `docs/architecture/
     // AOIDED.md`'s L5 section — the design authority for this table, not a
     // guess made here.
-    resume_args: Some(claude_resume_args),
+    resume_args: Some(ResumeArgs::ById(claude_resume_args)),
     // Claude Code's only input surface is the pty composer every existing
     // keystroke path already reaches — no separate native transport.
     native_send: None,
@@ -1256,7 +1272,7 @@ pub static KIMI_PROFILE: AgentProfile = AgentProfile {
     // (not a guess — the flag's own help text names the id-resume case
     // explicitly, and the id kimi expects is the same `<session_id>` this
     // profile's transcript locator already keys `kimi_session_dir` on).
-    resume_args: Some(kimi_resume_args),
+    resume_args: Some(ResumeArgs::ById(kimi_resume_args)),
     // Kimi's only input surface is the pty composer every existing
     // keystroke path already reaches — no separate native transport.
     native_send: None,
@@ -1602,7 +1618,7 @@ pub static PI_PROFILE: AgentProfile = AgentProfile {
     // `--resume`/`-r` and `--session <path|id>` were not chosen: neither
     // takes a bare id + unambiguous continue semantics the way
     // `--session-id` demonstrably does.
-    resume_args: Some(pi_resume_args),
+    resume_args: Some(ResumeArgs::ById(pi_resume_args)),
     // pi's own sub-agent children aside, its only input surface is the pty
     // composer every existing keystroke path already reaches — no separate
     // native transport.
@@ -2893,6 +2909,17 @@ fn eidolon_native_send(to: &str) -> Vec<String> {
     ]
 }
 
+/// `eidolon tui --session <PATH>` reopens the session whose journal is PATH
+/// (`crates/cli/src/main.rs:411-425`). Each element is one argv word.
+fn eidolon_resume_args(log: &str) -> Vec<String> {
+    vec![
+        "eidolon".to_string(),
+        "tui".to_string(),
+        "--session".to_string(),
+        log.to_string(),
+    ]
+}
+
 /// The Eidolon profile (P-EIDOLON brief rev 3, slice E1a) — bounded
 /// metadata plus the TRACE. Eidolon has no hook file and fires no event that
 /// reaches the door ([`eidolon_hook_event`] below is `Unknown` for
@@ -2919,18 +2946,15 @@ fn eidolon_native_send(to: &str) -> Vec<String> {
 /// - `launch: &["eidolon"]` — the bare program name; no subcommand launches
 ///   the TUI (`main.rs:313-320`), same shape as every other profile's fresh
 ///   launch.
-/// - `resume_args: None` — `eidolon resume <SESSION:PathBuf>` and
-///   `eidolon tui --session <SESSION:PathBuf>` both take a LOG PATH
-///   (`main.rs:115-131`, `:242-256`), never the session id `resume_args`'s
-///   own `fn(harness_session_id: &str)` is typed to take, and `LedgerEntry`
-///   carries no log path today (P-EIDOLON brief §7, ruling R1's default
-///   (a)). The id-to-log-path mapping is slice E4's job, not "unsupported
-///   forever" — `graph resurrect` skips it with the existing taught
-///   message meanwhile, same as any other `None` here. A live TUI's own
-///   `:resume` is separately unsupported until eidolon's own P4 lands (the
+/// - `resume_args: Some(ResumeArgs::ByLog(eidolon_resume_args))` —
+///   `eidolon tui --session <SESSION:PathBuf>` takes a LOG PATH, never a
+///   session id, so a revival reopens the journal its ledger line's `logPath`
+///   names (ruling 161). `eidolon resume <SESSION:PathBuf>` is the headless
+///   form of the same argument, and a revival does not run it. A live TUI's
+///   own `:resume` is separately unsupported until eidolon's own P4 lands (the
 ///   presence id derives from the log path at launch, and adopting a
-///   different session in place never refreshes it — the record would go
-///   on describing the OLD log).
+///   different session in place never refreshes it — the record would go on
+///   describing the OLD log).
 /// - `native_send: Some(eidolon_native_send)` — see its own doc: the one
 ///   profile where a message never needs the pty composer at all.
 /// - `transcript.locate` answers the producer's own best evidence: a mirror
@@ -2993,8 +3017,7 @@ pub static EIDOLON_PROFILE: AgentProfile = AgentProfile {
     // No SKILL.md concept — see the profile doc above.
     skills_dir: None,
     launch: &["eidolon"],
-    // No `resume_args` — see the profile doc above (ruling R1, default (a)).
-    resume_args: None,
+    resume_args: Some(ResumeArgs::ByLog(eidolon_resume_args)),
     // The one profile with a native inter-session transport — see
     // `eidolon_native_send`'s own doc for the two contract halves a caller
     // must honour (stdin payload, accepted-not-consumed exit code).
@@ -3146,25 +3169,40 @@ mod tests {
         assert_eq!(PI_PROFILE.launch, &["pi"]);
     }
 
+    fn by_id(p: &AgentProfile) -> fn(&str) -> Vec<String> {
+        let Some(ResumeArgs::ById(argv)) = p.resume_args else {
+            panic!("{} resumes by its session id", p.name);
+        };
+        argv
+    }
+
     #[test]
     fn resume_args_produce_the_exact_verified_argv() {
         // claude: named verbatim in `docs/architecture/AOIDED.md`'s L5
         // section (the design authority for this table).
-        let claude = CLAUDE_PROFILE.resume_args.expect("claude resumes");
+        let claude = by_id(&CLAUDE_PROFILE);
         assert_eq!(claude("sess-123"), vec!["claude", "--resume", "sess-123"]);
 
         // kimi: verified against `kimi --help`'s own text on the exact
         // pinned 0.31.1 binary (`-S, --session [id]  Resume a session. With
         // ID: resume that session.`).
-        let kimi = KIMI_PROFILE.resume_args.expect("kimi resumes");
+        let kimi = by_id(&KIMI_PROFILE);
         assert_eq!(kimi("sess-456"), vec!["kimi", "--session", "sess-456"]);
 
         // pi: verified LIVE — `pi --session-id <id>` run twice against the
         // same id continued the same on-disk transcript (no new file, and
         // the second run recalled the first run's own prompt), rather than
         // starting a fresh session.
-        let pi = PI_PROFILE.resume_args.expect("pi resumes");
+        let pi = by_id(&PI_PROFILE);
         assert_eq!(pi("sess-789"), vec!["pi", "--session-id", "sess-789"]);
+    }
+
+    #[test]
+    fn eidolon_resumes_by_its_journal_path_as_one_argv_word() {
+        let Some(ResumeArgs::ByLog(argv)) = EIDOLON_PROFILE.resume_args else {
+            panic!("eidolon resumes from its journal path");
+        };
+        assert_eq!(argv("/r/s.eid"), vec!["eidolon", "tui", "--session", "/r/s.eid"]);
     }
 
     #[test]
@@ -4102,7 +4140,7 @@ mod tests {
         assert!(EIDOLON_PROFILE.permission_keys.is_none());
         assert_eq!(EIDOLON_PROFILE.submit_key, "\r");
         assert_eq!(EIDOLON_PROFILE.skills_dir, None);
-        assert!(EIDOLON_PROFILE.resume_args.is_none());
+        assert!(EIDOLON_PROFILE.resume_args.is_some(), "eidolon resumes from its journal path");
         assert_eq!(EIDOLON_PROFILE.launch, &["eidolon"]);
         assert_eq!(
             EIDOLON_PROFILE.hook_settings.relative_path,

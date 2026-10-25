@@ -1073,7 +1073,9 @@ in the message.
   must never start marking it undying, and a failed spawn must leave the old
   id exactly as it was. Don't split the add and the drop across two
   `save_undying` calls, and don't drop the check that the old id was
-  undying.
+  undying. A `ByLog` candidate (`Candidate.by_log`) never transfers: its
+  mark stays on the ledger id, and the `!c.by_log` guard is what keeps it
+  there.
 - **Bare `resurrect --project` selects the undying set, not a single
   "most recent" entry (P-C4, durable-sessions plan).** `resurrect.rs`'s
   `undying_selection` is the one place that reads `sessions.json` for
@@ -1182,7 +1184,7 @@ in the message.
   `--dry-run` has no rule of its own. Flag mode lists what
   `select_candidates` resolves, and `dry_run_listing` marks each row with the
   same `resume_argv` check `resurrect_one` makes. Bare mode decides each spec
-  in `plan_spec`, with `resolve_spec_dir`, `enrichment`, `unresumed_reason`,
+  in `plan_spec`, with `resolve_spec_dir`, `enrichment`, `resolve_candidate`,
   `clean_argv` and `summon_check`, the functions `resurrect_from_manifest`
   calls too. Don't write a verdict into the dry path that the launch does not
   also make, and don't copy a helper. The parity test
@@ -1982,6 +1984,15 @@ in the message.
   `restore`-less shell entry (predating P-C5) still hits the pre-existing
   taught skip; don't widen the gate to bare `agent == "shell"`, which would
   resolve a candidate this crate has no captured facts about.
+- **A `ByLog` harness (eidolon) never reaches the terminal arm, and its
+  journal is `journal_of`'s alone (ruling 161).** `resolve_candidate` matches
+  `ResumeArgs::ByLog` before the terminal arm, and `journal_of` refuses every
+  `logPath` that cannot name a journal: absent, not absolute or holding an
+  unsafe character, inside `session_logs_dir()` (a terminal transcript), or
+  not a regular file. The refusal is the candidate's skip reason, the same
+  sentence the launch and the dry run show. Don't give it a terminal-arm
+  fallback, and don't read a `logPath` under `session_logs_dir()` as a
+  journal.
 - **`reap`'s one carve-out into the shell kind gate is `restore.is_some()` +
   `spawned` + `state == "idle"`, never `pid`-liveness alone
   (`abandoned_spawned_shells`, `reap.rs`).** The kind gate every other

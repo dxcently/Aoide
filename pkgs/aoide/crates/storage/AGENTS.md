@@ -612,6 +612,14 @@
   Don't add a "compact the ledger" or "delete old entries" path without
   re-reading `docs/architecture/AOIDED.md`'s "L5" — the design leans on
   this file staying a complete, permanent record.
+- **`LedgerEntry.log_path` always serializes, and only a path outside the
+  session logs dir is a journal.** Like every ledger field it is written
+  `null` when absent, never omitted, and a line without the key reads as
+  `None` — never a default path. Its referent is either a conducted
+  terminal's pty transcript under `session_logs_dir()` or a harness journal.
+  The one resume reader, `aoide-conduct`'s `journal_of`, refuses the first
+  with `fs::inside_session_logs`, which tests the raw and the canonical
+  spelling. Don't add a second reader that skips that test.
 - **`RestoreSnapshot`'s own fields never carry `skip_serializing_if`, in
   EITHER of its two homes (P-C5, durable-sessions plan).** The type is
   embedded on both `SessionRecord.restore` (additive, the outer
