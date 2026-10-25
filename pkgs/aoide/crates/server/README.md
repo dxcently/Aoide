@@ -90,26 +90,24 @@ terminal's rights to its remote callers.
   `aoide-conduct`) each tick and fires a `class:"audit",kind:"hand-edit"`
   event for any file whose `(mtime, len)` no longer matches its baseline
   (the #69 hand-edit watcher) — detection and narration only, this daemon
-  never reverts a hand edit. `note_own_write` is the seam P-D6's own
-  tick-reconcile/reap writes (below) fold into so they are never reported
-  back as a hand edit. Each change the watcher finds, and each
-  `note_own_write` that moves a file, also raises a `class:"state"` line for
-  that file: at most one per file per second, a change inside the second
-  written by the first observation after it (`producers`' "The state cue").
-  **The watcher itself is a single `Arc<Mutex<
-  HandEditWatcher>>` (task #92), shared between the tick thread and
-  `handle_conn`'s connection threads** — not tick-private: a dispatched
-  session command (`session start/end`/etc., `{"op":"dispatch"}`) writes
-  stage files on ITS OWN connection thread, not the tick's. That thread runs
-  four steps: `keep_changes` keeps any foreign change the watcher finds, for
-  the tick's next sweep to report; the dispatch runs; a fresh `session start`
-  is sealed, before the re-baseline, so the seal's own write is folded in;
-  then `rebaseline_stage_roster` re-baselines the WHOLE roster (roster-wide,
-  not a per-command "which files did this write" table) before the reply
-  goes out, closing the window where the daemon's own routed write got
-  reported back to itself as a hand edit one tick later. The connection
-  thread writes no hand-edit line and runs no reconcile: the tick writes
-  every hand-edit line and runs the reconcile on the files its sweep returns.
+  never reverts a hand edit. Writes aoided makes itself are not hand edits:
+  the watcher is registered with storage's write seam (`fs::watch_writes`), so
+  every atomic stage write this process makes folds into it at its rename,
+  whichever thread makes it. Each change the watcher finds, and each such write
+  that moves a file, also raises a `class:"state"` line for that file: at most
+  one per file per second, a change inside the second written by the first
+  observation after it (`producers`' "The state cue").
+  **`run_loop` builds the one watcher after the seed and holds its `Arc` for the
+  life of the loop** (`HandEditWatcher::registered`). A dispatched session
+  command (`session start/end`/etc., `{"op":"dispatch"}`) writes stage files on
+  its connection thread, and that write folds at its rename like any other, so
+  the connection thread runs three steps: the dispatch, the seal of a fresh
+  `session start`, and the reply. The tick writes every hand-edit line and runs
+  the reconcile on the files its sweep returns. A change aoided did not make
+  keeps its hand-edit line, and so does a foreign write that one of aoided's
+  writes then replaces. The one residual: a foreign write that lands between the
+  watcher's check and its fold, around the rename of aoided's own write, is
+  folded, with one state line and no hand-edit line.
 - **Graph residency (P-D6, `docs/architecture/AOIDED.md`'s "L4")** —
   `run_loop`'s tick, after narrating the hand-edit sweep above, does two
   more things every iteration: `reconcile_graph_projection(changed_files)`
@@ -122,9 +120,9 @@ terminal's rights to its remote callers.
   on the very next tick rather than waiting for the next dispatch to touch
   it; `run_internal_reap` calls the SAME `aoide_conduct::reap::
   reap_and_announce` `session reap` always runs, every `REAP_EVERY_TICKS`
-  (12) ticks (~12s, matching the systemd timer's own cadence), re-baselining
-  `HandEditWatcher` via `note_own_write` for whatever it touched so its own
-  sweep is never mistaken for a hand edit next tick. Neither producer keeps
+  (12) ticks (~12s, matching the systemd timer's own cadence). Its writes fold
+  into `HandEditWatcher` at their rename, so its own sweep is never mistaken
+  for a hand edit next tick. Neither producer keeps
   a separate in-memory roster — every dispatch (routed or internal) reads
   the stage files fresh, so "fold in the newest write" falls directly out
   of "the file on disk is the single source of truth at every instant";
@@ -740,3 +738,4 @@ and `a2a::serve` take the assembled `Registry` and dispatcher as parameters
 rather than reaching for a crate-global singleton — that singleton doesn't
 exist until the app crate (`cli`/`strillix`) assembles it, and `server → cli`
 would invert the dependency direction the whole split exists to forbid.
+

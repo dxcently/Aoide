@@ -206,35 +206,28 @@ a2a spawn probe needs `/bin/sh` + `printf`'s byte-exact output.
   architecturally incapable of impersonating one.
 - **The `state` cue has one writer and one clock.** `HandEditWatcher` writes
   every `state` line itself, through the `FeedWriter` it was built with.
-  Every observation (`sweep`, and a dispatch's `keep_changes`) and every
-  `note_own_write` that moves a file raises an immediate line when the file's
-  window is closed. Coalescing is per roster file: a move inside
-  `STATE_WINDOW` sets the file's `owed` flag, and the first observation after
-  the window closes writes it. A hand edit is owed in `Watched::owed_edit`:
-  an observation sets it, and only `sweep` releases it, so the tick is the
-  clock for `hand-edit` lines. A path outside the roster raises nothing.
-  `serve_daemon` runs no tick, so an owed hand edit waits for a sweep that
-  never comes; it is test-only.
-- **The fold lands after the write.** A daemon write leaves the baseline
-  stale until its `note_own_write` lands. A sweep, or a dispatch's pre-sweep,
-  that observes the write inside that gap reports it as a hand edit. No lock
-  spans a write and its note, so the gap is open for the tick's own writes and
-  for a dispatch's alike. Closing it means holding the watcher lock across the
-  write, which the accept-loop discipline forbids for a dispatch.
-- **`producers::HandEditWatcher` is ONE shared `Arc<Mutex<..>>` instance
-  (`daemon::SharedHandEditWatcher`), not tick-private (task #92).** A
-  dispatched session command writes stage files on `handle_conn`'s own
-  connection thread, never the tick thread, so `daemon::run_loop` hands the
-  SAME watcher instance to `accept_loop`/`handle_conn` it ticks itself. Per
-  `dispatch` op, `handle_conn` calls `keep_changes`, then the dispatch, then
-  the seal, then `daemon::rebaseline_stage_roster`, which re-baselines the
-  WHOLE roster unconditionally, never a per-command "which files did this
-  write" table (the same drift trap the door-policy invariant above already
-  forbids). Don't reintroduce a tick-private
-  `HandEditWatcher::new(..)` inside `run_loop`'s loop body or inside
-  `accept_loop`/`handle_conn` — a second instance means two baselines that
-  can each independently go stale against the other's writes, reopening
-  task #92 by a different door.
+  Every observation (`sweep`, and each write through the seam) that moves a
+  file raises an immediate line when the file's window is closed. Coalescing
+  is per roster file: a move inside `STATE_WINDOW` sets the file's `owed`
+  flag, and the first observation after the window closes writes it. A hand
+  edit is owed in `Watched::owed_edit`: an observation sets it, and only
+  `sweep` releases it, so the tick is the clock for `hand-edit` lines. A path
+  outside the roster raises nothing. `serve_daemon` runs no tick, so an owed
+  hand edit waits for a sweep that never comes; it is test-only.
+- **The fold lands at the rename, under the lock.** `around_write` observes
+  the file, runs the rename, then folds the file's new stat with its state
+  cue, all under the watcher's one lock. A sweep takes that lock too, so no
+  sweep sees a write between its rename and its fold. Never call anything
+  that writes through storage while holding that lock: it is not re-entrant,
+  so such a write deadlocks. The feed's append is protocol's and writes
+  nothing through storage.
+- **`producers::HandEditWatcher` is one instance, built by
+  `HandEditWatcher::registered`.** `daemon::run_loop` builds it once, after the
+  seed, and holds its `Arc` for the loop; the registration lasts as long as
+  that `Arc`. A second registered watcher over the same roster reports every
+  foreign change twice, so production builds exactly one. A unit test that
+  drives the methods directly uses `HandEditWatcher::new`, which registers
+  nothing.
 - **`daemon::seal_keypair` mints exactly ONE keypair per process, in a
   `OnceLock`, and it must NEVER be written to disk (LANE IDENTITY P-ID1,
   OQ1-A).** This is the daemon's own in-memory seal-signing key, deliberately
@@ -1111,3 +1104,4 @@ a2a spawn probe needs `/bin/sh` + `printf`'s byte-exact output.
   wire shape changes (`ping`/`subscribe`/`dispatch`).
 - `pkgs/aoide/crates/AGENTS.md` for cross-crate invariants — not restated
   here.
+

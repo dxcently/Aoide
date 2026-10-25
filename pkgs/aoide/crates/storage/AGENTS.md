@@ -545,6 +545,16 @@
   `seed.<pid>` are deliberately distinct shapes and must stay out of the
   sweep. A new temp-file shape in this crate picks a separator that is NOT
   `.tmp.` unless it wants this sweep to own it.
+- **Every atomic write to a watched path renames inside its watch.**
+  `fs::watch_writes` registers a `WriteWatch` for a list of paths.
+  `atomic_write_bytes_impl` runs its rename inside each live watch for the path
+  the caller passed, before symlink resolution, the first registered outermost.
+  A watch calls `rename` exactly once and returns its result. It never writes a
+  watched path from inside `rename`, and it never writes through storage while
+  holding its own lock, since the rename runs inside that call. The registry
+  lock is released before any watch runs, and a poisoned one is recovered. The
+  temp, its removal on failure and the stale-temp sweep stay outside the seam,
+  so a write whose temp cannot be created never reaches a watch.
 - **`fs.rs` carries five PUBLIC seams, each with one answer per host**, and a
   caller asks one of them rather than spelling a platform: `detach` (the
   detached-spawn posture — `setsid` in a `pre_exec`, or
@@ -1272,6 +1282,8 @@
 ## Docs update required in the same commit
 
 - This `README.md` when a new module or stage-file shape is added.
+- `fs::WriteWatch` and `fs::watch_writes` (the write seam): the server crate's
+  README and AGENTS, and AOIDED.md's hand-edit section, in the same commit.
 - `CONTRACTS.md §4`/`§7` when a stage-file or node-registry wire shape
   changes — including `config.toml`'s own subsection when `config::SCHEMA`
   gains or loses a section/key, plus `modules/dendrites/aoide-config.nix` when the nix authoring front-end's
@@ -1280,3 +1292,4 @@
   pinned vectors change (P-P4).
 - `pkgs/aoide/crates/AGENTS.md` for cross-crate invariants (registry order,
   golden discipline) — not restated here.
+

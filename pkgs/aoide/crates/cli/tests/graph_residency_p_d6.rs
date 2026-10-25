@@ -478,10 +478,11 @@ fn graph_reap_over_the_socket_reaps_a_dead_pid_session() {
 /// reliably fired the false event by now) before asserting the feed is
 /// clean, then proves the watcher itself is still alive by making a truly
 /// out-of-band edit (bypassing the daemon entirely) and confirming THAT one
-/// still fires on the next tick — the fix re-baselines once per dispatch,
-/// it does not blind the watcher going forward. It also pins the `state`
-/// cue: one line per file the routed write moved, and one more per file the
-/// genuine edit moved, with nothing further once the windows have closed.
+/// still fires on the next tick — the write seam folds only aoided's own
+/// writes, so a dispatch never blinds the watcher going forward. It also pins
+/// the `state` cue: one line per file the routed write moved, and one more per
+/// file the genuine edit moved, with nothing further once the windows have
+/// closed.
 #[test]
 fn dispatched_session_start_produces_no_false_hand_edit_event() {
     let _guard = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
@@ -509,9 +510,9 @@ fn dispatched_session_start_produces_no_false_hand_edit_event() {
     // write and still pass.
     assert_eq!(aoide_client::daemon::socket_path(), daemon_socket);
 
-    // Routed `session start` — the write happens on the daemon's own
-    // accept thread (same as `routed_session_start_...` above), exactly the
-    // write task #92 mis-reported.
+    // Routed `session start` — the write happens on the daemon's own accept
+    // thread (same as `routed_session_start_...` above), and the seam folds it
+    // at its rename.
     let outcome = dispatch(&session_start_inv("pd92-hand-edit"));
     assert_eq!(outcome.status, aoide_protocol::output::Status::Ok, "{outcome:?}");
     assert!(dir.join("sessions.json").exists(), "the routed dispatch must have written sessions.json");
@@ -545,8 +546,8 @@ fn dispatched_session_start_produces_no_false_hand_edit_event() {
     );
 
     // A GENUINE out-of-band edit — made directly on disk, never through the
-    // daemon — must still fire on the next tick: the fix re-baselines after
-    // a dispatch, it doesn't suppress the watcher permanently.
+    // daemon — must still fire on the next tick: the seam folds only the
+    // daemon's own writes, so the dispatch above suppresses nothing for good.
     let sessions_path = dir.join("sessions.json");
     let mut sf: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&sessions_path).unwrap()).unwrap();
     sf["handEdited"] = serde_json::json!(true);
@@ -601,6 +602,7 @@ fn a_fresh_daemon_reports_no_hand_edit_for_its_own_seed() {
     // Several tick cycles (~1s each) after the seed has had its chance to land.
     std::thread::sleep(Duration::from_millis(3500));
 
+    assert!(dir.join("sessions.json").exists(), "the core seed must have written sessions.json, or this proves nothing");
     assert!(dir.join("hooks.json").exists(), "the core seed must have written hooks.json, or this proves nothing");
     for file in ["sessions.json", "hooks.json"] {
         let false_positives = hand_edit_events_for(&daemon.events_path, file);

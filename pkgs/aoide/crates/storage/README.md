@@ -135,6 +135,20 @@ by decision — no embedded database yet
   shell source path (`STRILLIX_SHELL_SRC`) live in `strillix-rice`'s `paths`.
   `atomic_symlink` is the retarget: a temp link renamed over the link.
 
+  **The write seam (`fs::watch_writes`).** Every atomic write (`atomic_write`,
+  `atomic_write_bytes`, `atomic_write_private`) to a watched path runs its
+  rename inside the live `WriteWatch`es registered for that path, outermost
+  first: `around_write` is called once with the rename as a closure, and returns
+  the rename's result. The registry is one process-wide list that holds each
+  watch weakly, so a registration lasts as long as the watch's last `Arc`; a
+  dead entry is dropped by the next write that scans the list. A watch sees the
+  path the caller passed, before symlink resolution. It calls `rename` exactly
+  once and never writes a watched path from inside it. A stage write that does
+  not go through `atomic_write` is invisible to the seam, so a watcher reads it
+  as a hand edit. `fs::seed_if_absent`'s absent-path seed is one such write: it
+  renames a `.seed.<pid>` temp into place with `rename_no_replace`, and it runs
+  before `aoided` registers its watch, so the baseline takes it.
+
   **The host split inside `fs`.** Two places, and both are seams rather than
   branches at the call sites: the private-write primitives keep their Windows
   spellings in `fs_windows.rs`, beside `fs.rs` the way
@@ -1103,3 +1117,4 @@ depend on it for durable state. **Charter smudge**: `history` and `mode` live
 here rather than in a paint-adjacent crate — zero dependency weight, and
 `mode` is read by `shellbridge`, which itself stays core-crate-resident in
 `conduct` (see `docs/architecture/PACKAGE-LAYOUT.md`, "Charter exceptions").
+

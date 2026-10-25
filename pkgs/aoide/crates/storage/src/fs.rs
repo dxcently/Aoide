@@ -601,6 +601,69 @@ pub fn atomic_symlink(target: &std::path::Path, link: &std::path::Path) -> std::
 }
 
 
+/// A watch over the atomic writes of some paths. [`atomic_write_bytes`] runs
+/// its rename inside [`around_write`](WriteWatch::around_write) of every live
+/// watch registered for the path ([`watch_writes`]). A watch calls `rename`
+/// exactly once and returns its result. It never writes a watched path from
+/// inside `rename`, nor while it holds its own lock around the call.
+pub trait WriteWatch: Send + Sync {
+    /// Runs `rename` once, with whatever this watch does around the write of
+    /// `path`, and returns `rename`'s result.
+    fn around_write(
+        &self,
+        path: &std::path::Path,
+        rename: &mut dyn FnMut() -> std::io::Result<()>,
+    ) -> std::io::Result<()>;
+}
+
+/// Every registered watch, in registration order. A registration holds its
+/// watch weakly, so it lasts as long as the watch's last `Arc`.
+static WRITE_WATCHES: std::sync::Mutex<Vec<WriteWatchEntry>> = std::sync::Mutex::new(Vec::new());
+
+struct WriteWatchEntry {
+    paths: Vec<std::path::PathBuf>,
+    watch: std::sync::Weak<dyn WriteWatch>,
+}
+
+/// Registers `watch` for the atomic writes of `paths`. The registration lasts
+/// as long as the watch's last `Arc`; a dead entry is dropped by the next write
+/// that scans the registry.
+pub fn watch_writes(paths: Vec<std::path::PathBuf>, watch: std::sync::Weak<dyn WriteWatch>) {
+    WRITE_WATCHES
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .push(WriteWatchEntry { paths, watch });
+}
+
+/// The live watches registered for `path`, in registration order. The registry
+/// lock is released before any of them runs.
+fn live_write_watches(path: &std::path::Path) -> Vec<std::sync::Arc<dyn WriteWatch>> {
+    let mut registry = WRITE_WATCHES.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut live = Vec::new();
+    registry.retain(|entry| {
+        let Some(watch) = entry.watch.upgrade() else {
+            return false;
+        };
+        if entry.paths.iter().any(|p| p == path) {
+            live.push(watch);
+        }
+        true
+    });
+    live
+}
+
+/// Runs `rename` inside each of `watches`, the first one outermost.
+fn around_write_watches(
+    path: &std::path::Path,
+    watches: &[std::sync::Arc<dyn WriteWatch>],
+    rename: &mut dyn FnMut() -> std::io::Result<()>,
+) -> std::io::Result<()> {
+    match watches.split_first() {
+        None => rename(),
+        Some((first, rest)) => first.around_write(path, &mut || around_write_watches(path, rest, rename)),
+    }
+}
+
 /// Atomic write-temp-then-rename into a file within a directory —
 /// symlink-transparent: if `path` is CURRENTLY a symlink, the temp is
 /// renamed into whatever it points at instead, leaving the symlink itself
@@ -630,7 +693,8 @@ pub fn atomic_symlink(target: &std::path::Path, link: &std::path::Path) -> std::
 /// Bytes-oriented; [`atomic_write`] is the `&str` convenience wrapper every
 /// existing JSON/text caller uses. Binary payloads (a widget QML file carried
 /// verbatim into the runtime tree, `crate::widgets`-equivalent callers) route
-/// through here directly instead of paying a lossy UTF-8 round-trip.
+/// through here directly instead of paying a lossy UTF-8 round-trip. The rename
+/// runs inside the live [`WriteWatch`]es of `path` ([`watch_writes`]).
 pub fn atomic_write_bytes(path: &std::path::Path, contents: &[u8]) -> std::io::Result<()> {
     atomic_write_bytes_impl(path, contents, None)
 }
@@ -672,7 +736,10 @@ fn atomic_write_bytes_impl(
     // stranded that way is worse than one the rename left: the file it belongs to
     // may never be written again (an outbox entry is keyed by a msgid that occurs
     // once), so nothing would ever come back for it.
-    let res = write_temp_file(&tmp, contents, create_mode).and_then(|()| std::fs::rename(&tmp, &target));
+    let res = match write_temp_file(&tmp, contents, create_mode) {
+        Ok(()) => around_write_watches(path, &live_write_watches(path), &mut || std::fs::rename(&tmp, &target)),
+        Err(e) => Err(e),
+    };
     if res.is_err() {
         let _ = std::fs::remove_file(&tmp);
     }
@@ -3875,6 +3942,133 @@ mod tests {
             .filter(|n| n.contains(".tmp-"))
             .collect();
         assert!(leftovers.is_empty(), "temp links left behind: {leftovers:?}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // ── the write watch (`watch_writes`) ─────────────────────────────────────
+
+    /// Records the bytes at its path before and after each rename, and the kind
+    /// of any error the rename returned, which it passes on.
+    struct Spy {
+        calls: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+        seen: std::sync::Mutex<Vec<Option<Vec<u8>>>>,
+        rename_error: std::sync::Mutex<Option<std::io::ErrorKind>>,
+    }
+
+    impl super::WriteWatch for Spy {
+        fn around_write(
+            &self,
+            path: &std::path::Path,
+            rename: &mut dyn FnMut() -> std::io::Result<()>,
+        ) -> std::io::Result<()> {
+            self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            self.seen.lock().unwrap().push(std::fs::read(path).ok());
+            let result = rename();
+            if let Err(e) = &result {
+                *self.rename_error.lock().unwrap() = Some(e.kind());
+            }
+            self.seen.lock().unwrap().push(std::fs::read(path).ok());
+            result
+        }
+    }
+
+    /// A fresh scratch directory for one write-watch test.
+    fn watch_dir(tag: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("aoide-write-watch-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// Registers a [`Spy`] for `path` and returns it. The caller's `Arc` keeps
+    /// the registration alive.
+    fn spy_on(path: &std::path::Path, calls: &std::sync::Arc<std::sync::atomic::AtomicUsize>) -> std::sync::Arc<Spy> {
+        let spy = std::sync::Arc::new(Spy {
+            calls: std::sync::Arc::clone(calls),
+            seen: std::sync::Mutex::new(Vec::new()),
+            rename_error: std::sync::Mutex::new(None),
+        });
+        let watch: std::sync::Arc<dyn super::WriteWatch> = spy.clone();
+        super::watch_writes(vec![path.to_path_buf()], std::sync::Arc::downgrade(&watch));
+        spy
+    }
+
+    fn new_calls() -> std::sync::Arc<std::sync::atomic::AtomicUsize> {
+        std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0))
+    }
+
+    #[test]
+    fn a_write_to_a_watched_path_renames_inside_its_watch() {
+        let dir = watch_dir("renames");
+        let path = dir.join("watched.json");
+        super::atomic_write(&path, "old").unwrap();
+        let calls = new_calls();
+        let spy = spy_on(&path, &calls);
+
+        super::atomic_write(&path, "new").unwrap();
+
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+        assert_eq!(*spy.seen.lock().unwrap(), vec![Some(b"old".to_vec()), Some(b"new".to_vec())]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_write_to_an_unwatched_path_never_calls_the_watch() {
+        let dir = watch_dir("unwatched");
+        let calls = new_calls();
+        let _spy = spy_on(&dir.join("watched.json"), &calls);
+
+        super::atomic_write(&dir.join("other.json"), "bytes").unwrap();
+
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 0);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_dropped_write_watch_is_never_called_again() {
+        let dir = watch_dir("dropped");
+        let path = dir.join("watched.json");
+        let calls = new_calls();
+        let spy = spy_on(&path, &calls);
+        super::atomic_write(&path, "first").unwrap();
+        drop(spy);
+
+        super::atomic_write(&path, "second").unwrap();
+
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_write_whose_temp_cannot_be_created_never_calls_its_watch() {
+        let dir = watch_dir("no-temp");
+        let path = dir.join("blocked.json");
+        // The temp is `<stem>.tmp.<pid>`; a directory of that name makes the
+        // create fail.
+        std::fs::create_dir_all(dir.join(format!("blocked.tmp.{}", std::process::id()))).unwrap();
+        let calls = new_calls();
+        let _spy = spy_on(&path, &calls);
+
+        assert!(super::atomic_write(&path, "x").is_err());
+
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 0);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_failed_rename_returns_its_error_through_its_watch() {
+        let dir = watch_dir("failed-rename");
+        // A file cannot be renamed onto a directory, so the rename fails after
+        // the temp is written.
+        let path = dir.join("is-a-dir");
+        std::fs::create_dir_all(&path).unwrap();
+        let calls = new_calls();
+        let spy = spy_on(&path, &calls);
+
+        let err = super::atomic_write(&path, "x").expect_err("a rename onto a directory must fail");
+
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+        assert_eq!(*spy.rename_error.lock().unwrap(), Some(err.kind()));
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

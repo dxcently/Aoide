@@ -166,25 +166,31 @@ lossless record reaches for the audit log, never this feed.
 A tick-driven stat sweep over the broker-owned file roster — the stage files
 (`state/stage/sessions.json`, `hooks.json`, `projects.json`, `graph.json`,
 `pending.json`, `notifications.json`; paths from `aoide_storage::stage`,
-`storage/src/stage.rs:17-29`). The daemon records `(mtime, len)` after each
-of its own writes; a tick that finds a file changed with no daemon write in
-between emits `{"class":"audit","kind":"hand-edit","payload":{"file":"sessions.json"}}`
-and re-baselines. Detection and narration only — the daemon never reverts a
-hand edit.
+`storage/src/stage.rs:17-29`). A tick that finds a file whose `(mtime, len)`
+moved since the last observation emits
+`{"class":"audit","kind":"hand-edit","payload":{"file":"sessions.json"}}`
+and re-baselines, unless an aoided write folded the move first (below).
+Detection and narration only — the daemon never reverts a hand edit.
 
-A dispatched command runs four steps on its connection thread. The watcher
-sweeps the roster and keeps any change it finds, owed to the tick's next sweep.
-The dispatch runs. A fresh `session start` is sealed. The watcher re-baselines
-the roster, and the reply goes out. So a foreign write made before a dispatch
-still gets its `hand-edit` line from the tick. The one gap is that a foreign
-write landing while a dispatch runs is folded into that dispatch's own
-re-baseline, so it gets one `state` line and no `hand-edit` line.
+aoided knows its own writes at the rename. `run_loop` registers the watcher
+with storage's write seam (`fs::watch_writes`) after the seed. Every atomic
+stage write this process makes, on any thread or from any crate, runs its
+rename inside the watcher: the watcher observes the file, runs the rename, and
+folds the file's new state, all under one lock that a sweep also takes. So no
+sweep sees one of aoided's writes between its rename and its fold, and a
+dispatch needs no re-baseline after it writes. A dispatched command runs three
+steps on its connection thread: the dispatch, the seal of a fresh `session
+start`, and the reply.
+
+A change aoided did not make keeps its `hand-edit` line, and so does a foreign
+write that one of aoided's writes then replaces. The one residual: a foreign
+write that lands between the watcher's check and its fold, around the rename of
+aoided's own write, is folded, with one `state` line and no `hand-edit` line.
 
 Every change the watcher finds raises a `class:"state"` line for its file, and
-so does a daemon-side write (`note_own_write`) that moves the file's stat. Both
-are coalesced to one line per file per second (CONTRACTS.md's "The `state` cue
-on aoided's events feed"). The hand-edit line is unchanged; the state line sits
-beside it.
+so does a write of aoided's own that moves the file's stat. Both are coalesced
+to one line per file per second (CONTRACTS.md's "The `state` cue on aoided's
+events feed"). The hand-edit line is unchanged; the state line sits beside it.
 
 ### The loop and the unit
 
@@ -767,3 +773,4 @@ Exactly one:
   and the daemon trigger already covers the headless case correctly.
   Whoever flips the flag on a desktop host builds the
   graphical-session unit then, with this paragraph as the design.
+

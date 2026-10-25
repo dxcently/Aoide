@@ -1277,17 +1277,24 @@ that the file changed, never what changed. A subscriber receives it through
 --json` prints it verbatim.
 
 Coalescing is per file: at most one `state` line per file per second. A change
-that lands inside that second writes nothing at once. The first sweep after the
-second closes writes one line for the file (a sweep is the tick's, or a
-dispatch's pre-sweep), so a burst cannot flood the feed. A write that changes
-two files raises one line for each, so one `session start`, which writes
-`sessions.json` and `graph.json`, raises two.
+that lands inside that second writes nothing at once. The first observation
+after the second closes writes one line for the file: a sweep (the tick's), or
+the next atomic write of that file through aoided's write seam, so a burst
+cannot flood the feed. A write that changes two files raises one line for each,
+so one `session start`, which writes `sessions.json` and `graph.json`, raises
+two.
 
-While `aoided` runs, no change is lost: each change is written as a line or
-owed to one. A write made while `aoided` is down raises no line, and its watcher
-starts from what is on disk, so a consumer re-reads every file when it attaches.
-The two files `aoided` seeds at its own start, when absent or corrupt, are part
-of the first baseline and raise no line.
+A change `aoided` did not make is a hand edit and keeps its `hand-edit` line,
+and so does a foreign write that one of `aoided`'s own writes then replaces.
+The one residual: a foreign write that lands between the watcher's check and its
+fold, around the rename of `aoided`'s own write, is folded, with one `state`
+line and no `hand-edit` line.
+
+While `aoided` runs, no change is lost to the state cue: each change is written
+as a line or owed to one. A write made while `aoided` is down raises no line,
+and its watcher starts from what is on disk, so a consumer re-reads every file
+when it attaches. The two files `aoided` seeds at its own start, when absent or
+corrupt, are part of the first baseline and raise no line.
 An unfiltered `aoide events tail` prints every class, `state` included; the
 `state` cue is what `--class state` prints.
 
@@ -11026,3 +11033,4 @@ bump either — they move independently.
   `env!("CARGO_PKG_VERSION")` off the workspace version above) — the doc
   example a few sections up in this file tracks it and must be bumped in
   the same commit as any release bump.
+
