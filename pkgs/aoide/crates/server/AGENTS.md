@@ -258,11 +258,12 @@ a2a spawn probe needs `/bin/sh` + `printf`'s byte-exact output.
   source of truth at every instant." Don't introduce a persistent
   `HashMap<SessionId, SessionRecord>` cache here "for performance" — it
   would reintroduce exactly the two-writer divergence this design avoids.
-- **The drain tick sweeps own letters before it drains (ruling 131).**
-  `run_internal_mail_drain` calls `aoide_conduct::graph::sweep_session_letters`
-  and only then `aoide_conduct::mail_bridge::drain_all`, so a letter whose
-  session has ended is never dialled. Keep that order: a drain first would dial
-  a letter the same tick is about to drop.
+- **The drain tick sweeps own letters and receipts before it drains (ruling
+  131).** `run_internal_mail_drain` calls
+  `aoide_conduct::graph::sweep_session_letters` and only then
+  `aoide_conduct::mail_bridge::drain_all`, so a letter whose session has ended,
+  and a receipt, is never dialled. Keep that order: a drain first would dial a
+  letter the same tick is about to drop.
 - **This crate's own `env_lock()` (`lib.rs`)'s first call in a test binary
   also floors `$AOIDE_STAGE_DIR` at a fresh private tempdir, unless a test
   already set one (P-D6 safety net).** `daemon::run_loop`'s tick now

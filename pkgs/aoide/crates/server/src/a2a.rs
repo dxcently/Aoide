@@ -3320,9 +3320,9 @@ fn capped_poll_list<T>(list: &str, poller: &str, items: Vec<T>, cap: usize, audi
 /// Every outbox entry this box spooled toward `node` that `node` itself may
 /// take — all `hold`-flavored ones, and `now` ones whose own attempts have
 /// been failing ([`aoide_storage::outbox::poll_payloads`]'s rule, and the ONE
-/// place that rule lives). Handed over oldest-first; nothing is marked,
-/// moved, or counted, and an entry leaves the spool only when its ack lands
-/// (`mail_deposit`'s receipt arm, the same retirement a push would earn).
+/// place that rule lives). A receipt is never among them (ruling 131). Handed
+/// over oldest-first; nothing is marked, moved, or counted, and an entry leaves
+/// the spool only when the poller names it as filed (`outbox::retire_acknowledged`).
 ///
 /// **Self-audits under its own `a2a.aoide/mailPoll` label, unconditionally**
 /// (MAIL.md item 13's one-door-one-inspection, per method name; the audit

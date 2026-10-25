@@ -46,7 +46,7 @@
   `$XDG_RUNTIME_DIR` override wins on BOTH hosts: every isolating fixture sets
   it, and an answer that ignored it on one host would read and write the
   machine's real per-user directory instead of the fixture's.
-- **A receipt's `from.node` is the signer's name in the letter's mesh, never its hostname.** `mint_ack_from` takes the name (an older-peer fixture, O-9); `mint_ack_in_mesh` is the hostname form, for tests with no charter to read. The origin verifies a receipt against the key it holds for that name, so a hostname-signed receipt is refused and its letter never retires.
+- **A receipt's `from.node` is the signer's name in the letter's mesh, never its hostname.** The origin verifies a receipt against the key it holds for that name, so a hostname-signed receipt is refused and its letter never retires. `mint_ack_in_mesh` is the hostname form, an older-peer fixture for tests (O-9).
 - Structured thread/reply IDs are signed context, not membership or delivery authority. Legacy four-field content remains valid.
 - Structured letter content is optional signed text, never a new transport header. Invalid or legacy content remains raw; decoding must not write or alter envelope identity.
 
@@ -1031,8 +1031,8 @@
   or `duplicate` answer to its own live dial, a valid receipt from an older
   node (`retire_by_ack`), a held own letter's filed name
   (`retire_acknowledged`), explicit `mail outbox rm` (P-M2), or the drop of an
-  own letter with its session or by the tick's sweep (ruling 131) — never
-  auto-evicted, never expired, never capped.**
+  own letter with its session, or the tick's sweep taking a letter or a receipt
+  (ruling 131) — never auto-evicted, never expired, never capped.**
   `outbox::retire_by_ack` is the "valid ack" half — it trusts its caller
   (`mail::deposit`) to have already proven the ack's origin signature
   genuine, and never re-verifies; don't call it on an unverified envelope.
@@ -1066,6 +1066,7 @@
   own mail is a new fact; a never-attempted entry excluded, the drain owns it
   and offering it would double-drive one entry from two callers). An own
   letter is offered only while held: a returned one is its sender's to resend.
+  A receipt is never offered (ruling 131).
   **Never add state to it**: no `tries` stamp, no `last_polled_at`, no
   handed-over bookmark. Re-poll idempotence is a CONSEQUENCE of writing
   nothing (the same set is offered again) plus the receiver's `msgid` dedup; a bookmark would be a second, drifting source of truth,
@@ -1095,6 +1096,13 @@
   the marker a receipt entry names, by reading the one file it is about to
   delete; only an unreadable entry falls back to a scan of `.ack/` alone. Don't
   add a writer: the answer is the receipt, and no ack is spooled.
+- **The tick's drop takes letters and receipts, and each selector decides the
+  rest (ruling 131).** `drop_letters_where` considers only `letter` and
+  `receipt` entries. `drop_for_session` and the session-gone pass check the
+  letter kind, so a session's end never takes a receipt; the pre-131 pass takes
+  every receipt whatever its session. Don't widen a session selector to
+  receipts: the pre-131 pass already takes them, and a session pass that did
+  would log them under the wrong reason.
 - **Backoff has a ceiling now (`BACKOFF_CEILING_SECS`, 15 min).**
   `back_off` still doubles from `DRAIN_BACKOFF_FLOOR_SECS` on every
   failure, but caps at the ceiling instead of doubling forever — a link

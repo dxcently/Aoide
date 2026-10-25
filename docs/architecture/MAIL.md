@@ -737,10 +737,10 @@ door's audit name whitelist gains both names so they never log as bare
   verified answer's words get the same stripping and a longer clip: a
   signature proves who spoke, not that a stranger's text is safe for a
   terminal. A node with no key on file is never dialled. A verified
-  `accepted` or `duplicate` retires a receipt, a `charter` letter or a
-  `transit` container. A verified `accepted` or `duplicate` for a letter the
-  sender dialled live delivers it: no copy is kept and no receipt is awaited
-  (§Transit).
+  `accepted` or `duplicate` retires a `charter` letter or a `transit` container.
+  A receipt is never dialled (ruling 131). A verified `accepted` or `duplicate`
+  for a letter the sender dialled live delivers it: no copy is kept and no
+  receipt is awaited (§Transit).
 - **Receipts.** A receipt is a `receipt` envelope: `to` = the origin, `text` =
   the acked `msgid`, signed by the destination's name IN THE LETTER'S MESH, by
   the rule a letter's sender uses: the name its charter line gives its identity
@@ -772,9 +772,9 @@ door's audit name whitelist gains both names so they never log as bare
   **An outbox entry retires when its delivery is confirmed, and what counts as
   confirmation depends on what the entry is.** For a `letter`: a receipt
   arrives whose verified signer is the entry's `to.node` and whose text names
-  the entry's `msgid`, and it retires the letter on its first filing. For a
-  `receipt` entry, which only a build before ruling 131 spools: the deposit
-  outcome itself, `accepted` or `duplicate`. For a `charter` letter the same
+  the entry's `msgid`, and it retires the letter on its first filing. A
+  `receipt` entry is never dialled (ruling 131): the tick drops one that a
+  build before the rule spooled. For a `charter` letter the same
   holds for a stronger reason: the enclosed charter is APPLIED, not filed, so
   there is no mailbox on the far end to ack from at all, and its own deposit
   outcome is the whole confirmation there can be.
@@ -846,22 +846,24 @@ link.json       { "holdUntil": ts, "lastError": "…" }   per-link backoff
   a link refusal is no contact, so it is not polled. A via hop adds one tunnel
   open, up to the tunnel-open timeout (8 s by default).
 - The drain runs on `aoided`'s existing timer tick (the reaper cadence)
-  and immediately after any successful contact with that node. It dials only
-  the entries it may attempt, never an own letter, which its send dials (up to
-  twice, ruling 131). Because the door is a separate process, "after contact"
-  means the door
-  process drains under the same locks — the `.bsy` flock is what keeps
+  and immediately after any successful contact with that node. It dials only the
+  entries it may attempt, never an own letter, which its send dials (up to
+  twice, ruling 131), and never a receipt. Because the door is a separate
+  process, "after contact" means the door process drains under the same locks —
+  the `.bsy` flock is what keeps
   the two drains from racing one link. It is taken non-blocking, the way
   BSO means it: a drain that finds a link busy skips that link and moves
   to the next. Blocking would queue tick after tick behind one stalled
   ssh dial and starve every other link.
-- Each drain tick sweeps own letters before it drains (ruling 131). A
-  letter spooled before the rule has no session and goes (reason `pre-131`).
-  A letter whose session is off the roster or `done` goes too (reason
+- Each drain tick sweeps own letters and receipts before it drains (ruling
+  131). A letter spooled before the rule has no session and goes (reason
+  `pre-131`), and so does every receipt whatever its session: the verified
+  answer that filed its letter was the receipt, so nothing carries a spooled
+  one. A letter whose session is off the roster or `done` goes too (reason
   `session-gone`), unless the roster cannot be read: then that pass is skipped
-  and the pre-131 pass still runs. At most 500 letters go per pass, the rest
+  and the pre-131 pass still runs. At most 500 entries go per pass, the rest
   wait for the next tick, and each drop writes one `mail.outbox.dropped` audit
-  line.
+  line naming the entry's kind, `letter` or `receipt`.
 - Entries hold the envelope as minted — from P-SEAL, the sealed container
   — so a retry resends the same bytes on any transport.
 - A drain session reaches the node by its address's transport — an ssh
@@ -876,8 +878,9 @@ link.json       { "holdUntil": ts, "lastError": "…" }   per-link backoff
   the door — which parks every send — is never fronted by a
   TLS-terminating hop (H1).
 - On the drain, a `box-full` answer defers that one drained entry, and
-  nothing else. Drained entries are receipts, charters and transit containers:
-  an own letter is never drained, and the live send returns one that meets
+  nothing else. Drained entries are charters and transit containers:
+  an own letter and a receipt are never drained, and the live send returns one
+  that meets
   `box-full` at once (ruling 131). The far end
   answered, so the link is healthy and clears; the entry records
   `deferred: box-full`, keeps `refused` false, and waits its own window
@@ -894,7 +897,7 @@ link.json       { "holdUntil": ts, "lastError": "…" }   per-link backoff
 - `link.json` is `.hld`: exponential backoff per link on failure,
   cleared on success. Per-entry `tries`/`lastOutcome` live in the entry.
   A `refused` outcome parks that entry (drains skip it) and records the
-  reason, for a transit, receipt or charter entry. An own letter never parks:
+  reason, for a transit or charter entry. An own letter never parks:
   a verified refusal returns it (above), `down` and `config-invalid` included,
   and a `down` hop is not dialled at all. **For a drained entry, `down` and
   `config-invalid` are LINK states and never park it** (§Status): it stays
@@ -1628,7 +1631,8 @@ authoritative first:
   (a `poll` or `hold` hop, or `--hold`). It is bound to its session, never
   dialled by this box, and leaves when that hop files it or its session ends.
 - `pre-131` — an own letter spooled before the session binding existed, so
-  it has no session. The next tick drops it (reason `pre-131`).
+  it has no session. The next tick drops it (reason `pre-131`), and drops any
+  receipt the same way, whatever its session.
 - `removed` — a retry's report only, never a listing's: the letter left the
   outbox while its dial was in flight (an `rm`, or its session ending), so
   nothing was written back. The retry refuses with the reason `removed`.

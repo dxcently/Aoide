@@ -5286,7 +5286,7 @@ dials it at once, in the sending process, over `aoide/mailDeposit`. It spools
 the envelope into `state/outbox/` (below) only when the dial returns it or the
 hop is a `hold` one: a delivered letter is written nowhere (ruling 131). The
 daemon's own periodic sweep and a door's post-heard drain carry the other
-entries (receipts, charters, transit) of that node. The letter lands
+entries (charters, transit) of that node. The letter lands
 in a box only on the FAR box, once ITS OWN `mail_deposit` files it;
 since ruling 131 no receipt entry is spooled for a letter this box files; an
 older build's receipt for it still lands here as a deposit.
@@ -5420,9 +5420,9 @@ that sent an OWN letter (`aoide mail send` with `AOIDE_SESSION_ID` set; never
 `--from`), with control characters stripped. It is written only on a letter
 that is returned or held, and omitted from every other entry, so a pre-131
 spool file is byte-identical. The session's roster exit drops its letters
-(`mail.outbox.dropped`, reason `session-ended`); the tick sweep drops a letter
-with no session (`pre-131`) or whose session is off the roster or `done`
-(`session-gone`).
+(`mail.outbox.dropped`, reason `session-ended`); the tick sweep drops every
+receipt, whatever its session, and a letter with no session (`pre-131`), and a
+letter whose session is off the roster or `done` (`session-gone`).
 
 **Amendment (P-CHARTER): a `poll` destination's entry is `hold`, decided for
 the caller.** The design's third transport member name is the ABSENCE of an
@@ -5488,11 +5488,11 @@ backoff outright (`link.json` removed, never merely reset), the ordinary
 A **letter** entry that comes back delivered (`"accepted"` or
 `"duplicate"` — either way the far end has it) is NOT removed: it waits
 for a REAL ack (spec item 7), only its `tries`/`lastTryAt`/`lastOutcome`
-bookkeeping advancing. A **receipt** entry's own successful deposit IS its
-confirmation (ruling 4: no separate ack-of-an-ack), so it is removed
-outright on delivery. `retire_by_ack` is the other half of that same
-ruling — the local outbox entry a genuine ack confirms is retired when a
-receipt deposits back in (`aoide/mailDeposit` on the ORIGIN's own door):
+bookkeeping advancing. A **receipt** entry is never dialled (ruling 131): the
+verified answer that filed its letter was its confirmation, and the tick's
+pre-131 pass drops one still spooled. `retire_by_ack` is the older-build path:
+the local outbox entry a genuine ack confirms is retired when a receipt from an
+older build deposits back in (`aoide/mailDeposit` on the ORIGIN's own door):
 its two checks ("verified signer is that entry's `to.node`" and "names
 that entry's `msgid`") collapse into ONE path lookup, since an entry is
 always spooled under the exact node its own `envelope.header.to.node`

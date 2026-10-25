@@ -810,20 +810,22 @@ fn now_epoch() -> i64 {
 /// Drop every own letter bound to `session`, returned or held: the session has
 /// ended, and a letter lives exactly as long as the session that sent it (ruling
 /// 131). One `mail.outbox.dropped` audit line each. Idempotent: a repeat finds
-/// nothing and writes no second line.
+/// nothing and writes no second line. A receipt bound to the session is left for
+/// the tick's pre-131 pass: a session's end takes letters only.
 pub fn drop_for_session(session: &str) -> Result<usize, String> {
     drop_letters_where(
-        |entry| entry.session.as_deref() == Some(session),
+        |entry| entry.envelope.header.kind == crate::mail::ENTRY_TYPE_LETTER && entry.session.as_deref() == Some(session),
         usize::MAX,
         "session-ended",
     )
 }
 
-/// Drop at most `limit` own letters that `select` takes, one `mail.outbox.dropped`
-/// audit line each, carrying `reason`. Only `letter` entries are considered:
-/// receipts, charters and transit custody are never dropped here. Each line is
-/// written before its file is removed, so a letter whose line cannot be written
-/// stays spooled.
+/// Drop at most `limit` own letters and receipts that `select` takes, one
+/// `mail.outbox.dropped` audit line each, naming the entry's kind and carrying
+/// `reason`. Only `letter` and `receipt` entries are considered: charters and
+/// transit custody are never dropped here, and a selector that must leave a
+/// receipt alone checks the kind itself. Each line is written before its file is
+/// removed, so an entry whose line cannot be written stays spooled.
 pub fn drop_letters_where(
     select: impl Fn(&OutboxEntry) -> bool,
     limit: usize,
@@ -836,7 +838,12 @@ pub fn drop_letters_where(
                 if dropped >= limit {
                     return Ok(dropped);
                 }
-                if entry.envelope.header.kind != crate::mail::ENTRY_TYPE_LETTER || !select(&entry) {
+                let kind = match entry.envelope.header.kind.as_str() {
+                    crate::mail::ENTRY_TYPE_LETTER => "letter",
+                    crate::mail::ENTRY_TYPE_RECEIPT => "receipt",
+                    _ => continue,
+                };
+                if !select(&entry) {
                     continue;
                 }
                 let msgid = entry.envelope.msgid.clone();
@@ -847,7 +854,7 @@ pub fn drop_letters_where(
                     aoide_protocol::audit::EventClass::Audit,
                     "mail.outbox.dropped",
                     "ok",
-                    &format!("dropped letter {msgid} toward {node} ({reason}{bound})"),
+                    &format!("dropped {kind} {msgid} toward {node} ({reason}{bound})"),
                 )
                 .map_err(|e| format!("the audit log cannot be written, so the letter stays: {e}"))?;
                 if remove_entry_unlocked(&node, &msgid)? {
@@ -889,12 +896,15 @@ pub fn bind_session(raw: &str) -> Option<String> {
 /// Is one spooled entry offered to the node's own poll? See [`poll_payloads`]
 /// for the rule; held out-of-band so a test can pin each arm without a
 /// filesystem. An own letter is offered only while it is held: a returned one
-/// is its sender's to resend (ruling 131).
+/// is its sender's to resend (ruling 131). A receipt is never offered: the
+/// verified answer that filed its letter was the receipt, and the tick's pre-131
+/// pass drops one still spooled.
 fn pollable(entry: &OutboxEntry) -> bool {
-    if entry.envelope.header.kind == crate::mail::ENTRY_TYPE_LETTER {
-        return entry.is_held();
+    match entry.envelope.header.kind.as_str() {
+        crate::mail::ENTRY_TYPE_RECEIPT => false,
+        crate::mail::ENTRY_TYPE_LETTER => entry.is_held(),
+        _ => entry.is_held() || (entry.tries > 0 && !entry.last_attempt_reached_the_peer()),
     }
-    entry.is_held() || (entry.tries > 0 && !entry.last_attempt_reached_the_peer())
 }
 
 /// Retire one entry: a valid ack, a held own letter its poller
@@ -2449,6 +2459,94 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// **A receipt is never offered to a poll, held or failing (ruling 131).** The
+    /// answer that filed a letter is its receipt, so a receipt left in the spool
+    /// waits for the tick's pre-131 pass, not for the far end's poll.
+    #[test]
+    fn a_receipt_is_never_offered_to_a_poll_held_or_failing() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("outbox-poll-receipts");
+        let held_letter = OutboxEntry::held(envelope("here", "there", "msg-held"));
+        let held_receipt = OutboxEntry::held(ack_envelope("there", "here", &"aa".repeat(32)));
+        let mut failing_receipt = OutboxEntry::fresh(ack_envelope("there", "here", &"bb".repeat(32)));
+        failing_receipt.tries = 2;
+        failing_receipt.last_outcome = "transport: connection refused".to_string();
+        for entry in [&held_letter, &held_receipt, &failing_receipt] {
+            write_entry("there", entry).unwrap();
+        }
+
+        assert!(pollable(&held_letter), "a held letter is offered");
+        assert!(!pollable(&held_receipt), "a held receipt is not");
+        assert!(!pollable(&failing_receipt), "a failing receipt is not");
+        let offered: Vec<String> = poll_payloads("there").unwrap().into_iter().map(|(_, e)| e.msgid).collect();
+        assert_eq!(offered, vec!["msg-held".to_string()], "{offered:?}");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **A held receipt survives a filed name unoffered, until the tick's pre-131
+    /// pass takes it (ruling 131).** A filed name ends a held letter and nothing
+    /// else, so the receipt stays spooled; no poll offers it, and the pass drops it.
+    #[test]
+    fn a_held_receipt_survives_a_filed_name_unoffered_until_the_pre_131_pass_takes_it() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("outbox-held-receipt-filed");
+        let receipt = ack_envelope("there", "here", &"cc".repeat(32));
+        let receipt_msgid = receipt.msgid.clone();
+        write_entry("there", &OutboxEntry::held(receipt)).unwrap();
+        write_entry("there", &own_letter("there", "msg-held", Some("sess-a"), true)).unwrap();
+
+        assert!(!retire_acknowledged("there", &receipt_msgid).unwrap(), "a filed name ends no receipt");
+        let offered: Vec<String> = poll_payloads("there").unwrap().into_iter().map(|(_, e)| e.msgid).collect();
+        assert_eq!(offered, vec!["msg-held".to_string()], "{offered:?}");
+
+        let pre_131 = |e: &OutboxEntry| e.envelope.header.kind == crate::mail::ENTRY_TYPE_RECEIPT || e.session.is_none();
+        assert_eq!(drop_letters_where(pre_131, usize::MAX, "pre-131").unwrap(), 1);
+        let left: Vec<String> = list_entries("there").unwrap().into_iter().map(|e| e.envelope.msgid).collect();
+        assert_eq!(left, vec!["msg-held".to_string()], "{left:?}");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **A dropped receipt's audit line names its msgid, its node and its reason,
+    /// and no letter text.** The acked msgid a receipt carries stays out of the log.
+    #[test]
+    fn a_dropped_receipt_is_logged_by_msgid_node_and_reason_and_no_text() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("outbox-drop-receipt-audit");
+        let acked = "dd".repeat(32);
+        let mut receipt = ack_envelope("there", "here", &acked);
+        receipt.msgid = "rcpt-audit-1".to_string();
+        let receipt_msgid = receipt.msgid.clone();
+        write_entry("there", &OutboxEntry::fresh(receipt)).unwrap();
+
+        let pre_131 = |e: &OutboxEntry| e.envelope.header.kind == crate::mail::ENTRY_TYPE_RECEIPT;
+        assert_eq!(drop_letters_where(pre_131, usize::MAX, "pre-131").unwrap(), 1);
+        let lines = audit_lines("mail.outbox.dropped");
+        assert_eq!(lines.len(), 1, "{lines:?}");
+        assert!(lines[0].contains(&format!("dropped receipt {receipt_msgid} toward there (pre-131)")), "{lines:?}");
+        assert!(!lines[0].contains(&acked), "the acked text is not logged: {lines:?}");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **A session end drops letters only: a receipt bound to that session is left
+    /// for the tick's pre-131 pass.** Only the letter kind is a session's to drop.
+    #[test]
+    fn a_session_end_never_drops_a_receipt_bound_to_it() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("outbox-drop-session-receipt");
+        let mut bound = OutboxEntry::fresh(ack_envelope("there", "here", &"ee".repeat(32)));
+        bound.session = Some("sess-a".to_string());
+        write_entry("there", &bound).unwrap();
+
+        assert_eq!(drop_for_session("sess-a").unwrap(), 0);
+        assert_eq!(list_entries("there").unwrap().len(), 1, "the receipt is still spooled");
+        assert!(audit_lines("mail.outbox.dropped").is_empty(), "and no drop line names it");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// **A receipt that retires an own letter says so, once.** A
     /// returned or a held letter that a receipt retires writes one
     /// `mail.outbox.retired` line naming the msgid, the node and `receipt`.
@@ -2530,8 +2628,8 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// **A letter with no session (spooled before ruling 131) is dropped by the
-    /// tick's sweep, with reason `pre-131`.** A letter bound to a session stays.
+    /// **A letter or receipt with no session (spooled before ruling 131) is dropped
+    /// by the tick's sweep, with reason `pre-131`.** A letter bound to a session stays.
     #[test]
     fn a_letter_with_no_session_is_dropped_by_the_sweep_with_its_reason() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
@@ -2542,13 +2640,15 @@ mod tests {
         write_entry("there", &own_letter("there", "msg-bound", Some("sess-a"), false)).unwrap();
         write_entry("there", &OutboxEntry::fresh(ack_envelope("there", "here", "msg-y"))).unwrap();
 
-        assert_eq!(drop_letters_where(|e| e.session.is_none(), usize::MAX, "pre-131").unwrap(), 2);
+        let pre_131 = |e: &OutboxEntry| e.envelope.header.kind == crate::mail::ENTRY_TYPE_RECEIPT || e.session.is_none();
+        assert_eq!(drop_letters_where(pre_131, usize::MAX, "pre-131").unwrap(), 3);
         let mut left: Vec<String> = list_entries("there").unwrap().into_iter().map(|e| e.envelope.msgid).collect();
         left.sort();
-        assert_eq!(left, vec!["ack-of-msg-y", "msg-bound"], "{left:?}");
+        assert_eq!(left, vec!["msg-bound"], "{left:?}");
         let lines = audit_lines("mail.outbox.dropped");
-        assert_eq!(lines.len(), 2, "{lines:?}");
+        assert_eq!(lines.len(), 3, "{lines:?}");
         assert!(lines.iter().all(|l| l.contains("pre-131")), "{lines:?}");
+        assert!(lines.iter().any(|l| l.contains("dropped receipt ack-of-msg-y")), "{lines:?}");
 
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -3050,6 +3150,16 @@ mod sealed_spool_tests {
     /// A sealed entry for a real container: this node sealed to itself, so
     /// the container is a genuine one rather than a hand-built stub.
     fn sealed_entry(body: &str) -> OutboxEntry {
+        sealed_self_entry(|me| {
+            let mut envelope = crate::mail::mint_outbound_letter("alice", me, "bob", body).unwrap();
+            envelope.header.from.name = "alice".to_string();
+            envelope
+        })
+    }
+
+    /// The entry for the envelope `mint` makes toward this node, sealed to this node
+    /// under its own pairing, so the container is a genuine one.
+    fn sealed_self_entry(mint: impl FnOnce(&str) -> crate::mail::Envelope) -> OutboxEntry {
         let me = crate::display::local_node_name();
         let kp = crate::identity::load_or_mint().unwrap().0;
         let mut nodes = crate::node_store::load_nodes();
@@ -3064,8 +3174,7 @@ mod sealed_spool_tests {
         );
         crate::node_store::save_nodes(&nodes).unwrap();
         let binding = crate::seal::publish_binding().unwrap();
-        let mut envelope = crate::mail::mint_outbound_letter("alice", &me, "bob", body).unwrap();
-        envelope.header.from.name = "alice".to_string();
+        let envelope = mint(&me);
         let container = crate::seal::seal_envelope(
             &envelope,
             &binding,
@@ -3107,6 +3216,25 @@ mod sealed_spool_tests {
             }
             other => panic!("the stored container opens: {other:?}"),
         }
+    }
+
+    /// **A sealed receipt is dropped by the pre-131 pass like a plain one.** The
+    /// kind stays on the spooled envelope, so the container does not hide it.
+    #[test]
+    fn a_sealed_receipt_is_dropped_by_the_pre_131_pass() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _s = EnvSaver::capture(&["AOIDE_STATE_DIR", "AOIDE_ROOT", "STRILLIX_ROOT"]);
+        env(&aoide_test_support::unique_tmp("outbox-sealed-receipt"));
+
+        let entry = sealed_self_entry(|me| {
+            let to = crate::mail::Address { node: me.to_string(), name: "bob".to_string() };
+            crate::mail::mint_ack("alice", to, &"ff".repeat(32)).unwrap()
+        });
+        write_entry("elsewhere", &entry).unwrap();
+
+        let pre_131 = |e: &OutboxEntry| e.envelope.header.kind == crate::mail::ENTRY_TYPE_RECEIPT || e.session.is_none();
+        assert_eq!(drop_letters_where(pre_131, usize::MAX, "pre-131").unwrap(), 1);
+        assert!(list_entries("elsewhere").unwrap().is_empty());
     }
 
     #[test]

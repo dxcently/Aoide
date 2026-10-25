@@ -650,9 +650,10 @@ blank one is refused too.
   and `reap_inner` collect the ids they leave the roster with, and
   `drop_ended_sessions` drops their letters once the roster write has returned,
   never under the roster lock. The daemon tick runs `sweep_session_letters`
-  before its mail drain: it drops own letters with no session (`pre-131`) and
-  those whose session is off the roster or `done` (`session-gone`), and it
-  skips the session pass when the roster cannot be read.
+  before its mail drain: it drops every receipt, whatever its session, and own
+  letters with no session (`pre-131`), and those whose session is off the roster
+  or `done` (`session-gone`); it skips the session pass when the roster cannot
+  be read.
 
 - `graph/window.rs` — the session window record (`session window attach`,
   `session window closed`, `session window roster`, the untracked-terminal

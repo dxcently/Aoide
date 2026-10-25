@@ -767,8 +767,8 @@ by decision — no embedded database yet
 
   P-M2 adds the wire for directly-paired nodes: `mint_outbound_letter`/
   `mint_ack` seal a fresh envelope with THIS instance's own identity key
-  (`from.node` is the name the caller states: `mint_outbound_letter_from` and
-  `mint_ack_from` take it, and the unnamed forms state `display::local_node_name()`
+  (`from.node` is the name the caller states: `mint_outbound_letter_from` takes
+  it, and the unnamed forms state `display::local_node_name()`
   — `self` never crosses the wire, and the form it crosses as is the ADDRESS
   one: an OS host name is case-preserved and native Windows' is
   conventionally upper-case while a node name is grammar-lowercase, so the
@@ -891,14 +891,15 @@ by decision — no embedded database yet
   have been failing (`tries > 0` and its last outcome did not reach the
   peer — parked/refused ones included, a never-attempted one excluded
   because the drain owns it). An own letter is offered only while held: a
-  returned one is its sender's to resend (ruling 131). **A poll writes no `tries`,
+  returned one is its sender's to resend (ruling 131), and a receipt is never
+  offered. **A poll writes no `tries`,
   no bookmark and no new file**: its hand-over may write a sealed upgrade or a
   park (`hand_over`), and never a try or an outcome for a container it hands
   over, which is why a re-poll hands the same envelopes over again. An entry
   leaves the spool only on its confirmation: a valid receipt from an older
   node, a held letter's filed name, a live dial's verified answer,
-  `mail outbox rm`, or an own letter's session end or the tick's sweep
-  (ruling 131). The offer is
+  `mail outbox rm`, or an own letter's session end or the tick's sweep of a
+  letter or a receipt (ruling 131). The offer is
   bounded at `POLL_BATCH_CAP` (50 — the drain's own batch size,
   re-derived rather than imported, since `storage` sits below `client` in
   the DAG), oldest first, and the cap applies AFTER the filter for the

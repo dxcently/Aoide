@@ -6765,9 +6765,7 @@ fn retry_refused_entries(cmd: &str, target: Option<&str>) -> Outcome {
     let mut per_node: Vec<Value> = Vec::new();
     for node in &nodes {
         // The parked set is read BEFORE the un-park so the report can say which
-        // entries were retried, and whether a vanished one was a receipt —
-        // whose own confirmed deposit IS its confirmation (ruling 4), the one
-        // case an absence legitimately means delivered.
+        // entries were retried.
         let entries = match aoide_storage::outbox::list_entries(node) {
             Ok(es) => es,
             Err(e) => return teach::store_failed(cmd, "state/outbox", &e),
@@ -6776,10 +6774,7 @@ fn retry_refused_entries(cmd: &str, target: Option<&str>) -> Outcome {
             .into_iter()
             .filter(|e| e.refused)
             .partition(|e| e.envelope.header.kind == aoide_storage::mail::ENTRY_TYPE_LETTER);
-        let parked: Vec<(String, bool)> = others
-            .into_iter()
-            .map(|e| (e.envelope.msgid, e.envelope.header.kind == aoide_storage::mail::ENTRY_TYPE_RECEIPT))
-            .collect();
+        let parked: Vec<String> = others.into_iter().map(|e| e.envelope.msgid).collect();
         if parked.is_empty() && letters.is_empty() {
             continue;
         }
@@ -6814,16 +6809,14 @@ fn retry_refused_entries(cmd: &str, target: Option<&str>) -> Outcome {
             // ONE post-drain read for the whole node, never one per entry — the
             // same single-read discipline `handle_mail_outbox` holds.
             let after = aoide_storage::outbox::list_entries(node);
-            for (msgid, was_receipt) in &parked {
+            for msgid in &parked {
                 let delivery = match &drain {
                     Err(e) => delivery_shape("failed", Some(e.clone()), Some("local"), None, false),
                     Ok(()) => match &after {
                         Ok(now) if now.iter().any(|e| e.envelope.msgid == *msgid) => post_send_delivery(node, msgid),
-                        // Gone from the spool: a receipt's own successful
-                        // deposit removes it outright, so that IS delivery;
-                        // anything else vanishing is not read from an absence
-                        // (the rule `post_send_delivery` holds).
-                        Ok(_) if *was_receipt => delivery_shape("delivered", None, None, None, false),
+                        // Gone from the spool is not read as delivered: an
+                        // absence is never a verdict (the rule `post_send_delivery`
+                        // holds).
                         Ok(_) => delivery_status_unavailable("entry no longer spooled"),
                         Err(e) => delivery_status_unavailable(e),
                     },
@@ -12747,6 +12740,37 @@ mod tests {
         assert_eq!(retry.data.as_ref().unwrap()["delivery"]["status"], "delivered", "{:?}", retry.data);
         assert!(aoide_storage::outbox::list_entries("peer-node").unwrap().is_empty(), "delivered, so the box keeps nothing");
         assert_eq!(deposits_heard(&seen).len(), 1, "one retry, one dial");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// **A parked receipt that a retry sweep un-parks is never reported delivered by
+    /// its absence (ruling 131).** A receipt is never dialled, so the sweep leaves it
+    /// spooled for the tick: its report is its status, and no dial reaches the far end.
+    #[test]
+    fn a_refused_retry_sweep_never_reports_a_parked_receipt_delivered() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, root) = aoide_test_support::isolated_mail_root("mail-refused-receipt");
+        let accepted = r#"{"jsonrpc":"2.0","id":1,"result":{"status":"accepted"}}"#;
+        let (_door, port, seen) = spawn_recording_door(accepted.to_string());
+        aoide_storage::node_store::save_nodes(&[verified_node("peer-node", &format!("http://127.0.0.1:{port}/"))]).unwrap();
+        // Addressed to peer-node, where it is spooled: a direct entry, sealed to
+        // peer-node's binding, so the retry's drain would dial it if it could.
+        aoide_storage::seal::learn_binding("peer-node", &aoide_storage::seal::publish_binding().unwrap()).unwrap();
+        let to = aoide_storage::mail::Address { node: "peer-node".to_string(), name: "alice".to_string() };
+        let receipt = aoide_storage::mail::mint_ack("bob", to, &"ab".repeat(32)).unwrap();
+        let mut parked = aoide_storage::outbox::OutboxEntry::fresh(receipt);
+        parked.refused = true;
+        parked.tries = 1;
+        parked.last_outcome = "refused: bad-msgid".to_string();
+        aoide_storage::outbox::write_entry("peer-node", &parked).unwrap();
+
+        let sweep = handle_mail_outbox_retry(&mail_inv_with_flag(&["mail", "outbox", "retry"], &[], "refused"));
+        assert_eq!(sweep.status, aoide_protocol::output::Status::Ok, "msg: {}", said(&sweep));
+        assert!(deposits_heard(&seen).is_empty(), "a receipt is never dialled by a sweep");
+        let status = sweep.data.as_ref().and_then(|d| d["nodes"][0]["retries"][0]["delivery"]["status"].as_str());
+        assert_ne!(status, Some("delivered"), "the receipt is still spooled, so it is not delivered: {:?}", sweep.data);
+        assert_eq!(aoide_storage::outbox::list_entries("peer-node").unwrap().len(), 1, "it stays spooled for the tick");
 
         let _ = std::fs::remove_dir_all(&root);
     }

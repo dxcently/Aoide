@@ -1786,29 +1786,12 @@ pub fn mint_outbound_letter(from_name: &str, to_node: &str, to_name: &str, text:
 /// states: a receipt rides ONE mesh back to the origin, and the mesh its header
 /// names is a SIGNED value the destination compares against the request's. An
 /// older-peer fixture (O-9): no production path mints a receipt (ruling 131).
-/// `from.node` is the OS hostname here; a caller whose box is named differently
-/// in that mesh uses [`mint_ack_from`].
+/// `from.node` is the OS hostname here.
 pub fn mint_ack_in_mesh(from_name: &str, to: Address, acked_msgid: &str, mesh: &str) -> Result<Envelope, String> {
-    mint_ack_from(&display::local_node_name(), from_name, to, acked_msgid, mesh)
-}
-
-/// [`mint_ack_in_mesh`] with the SENDER's node name stated explicitly, the
-/// receipt's twin of [`mint_outbound_letter_from`]: the origin checks the receipt
-/// against the key it holds for `from.node`, so a box whose hostname is not its
-/// charter name must sign it as that name or the origin never retires its
-/// letter. An older-peer fixture (O-9). Both mints share this body, so a letter
-/// and a receipt can never disagree about what a mint signs.
-pub fn mint_ack_from(
-    from_node: &str,
-    from_name: &str,
-    to: Address,
-    acked_msgid: &str,
-    mesh: &str,
-) -> Result<Envelope, String> {
     let (kp, _) = identity::load_or_mint().map_err(|e| e.to_string())?;
     let header = Header {
         version: ENVELOPE_VERSION.to_string(),
-        from: Address { node: from_node.to_string(), name: from_name.to_string() },
+        from: Address { node: display::local_node_name(), name: from_name.to_string() },
         to,
         kind: ENTRY_TYPE_RECEIPT.to_string(),
         minted_at: now_iso_utc(),
@@ -1886,13 +1869,14 @@ pub fn verified_origin_key_in(envelope: &Envelope, set: &[crate::routing::Loaded
 /// which this plaintext lane never rides: skipped by shape, not stubbed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DepositOutcome {
-    /// A fresh envelope, filed. `msgid` is its own, for the caller to ack
-    /// (a letter) or simply acknowledge process (a receipt).
+    /// A fresh envelope, filed. `msgid` is its own. The caller retires the
+    /// letter a filed receipt names; a filed letter owes its origin nothing
+    /// (ruling 131).
     Filed { msgid: String, kind: String },
     /// A `msgid` already on a line in the box. `filed_letter` is `true` when
-    /// the ORIGINAL filing was a `letter` — the destination re-spools its ack
-    /// in that case (spec item 5: "a lost ack is the ordinary reason for a
-    /// re-offer"), never for a duplicate receipt (nothing acks an ack).
+    /// the ORIGINAL filing was a `letter`, which owes nothing again (ruling
+    /// 131). `false` names a repeated receipt: the caller still retires the
+    /// letter that receipt names.
     Duplicate { filed_letter: bool },
     /// `msgid` does not recompute from `(header, text, sig)` — tampered or
     /// corrupt in transit.

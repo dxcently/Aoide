@@ -522,11 +522,9 @@ never the inbound/serve half (that's `aoide-server`).
   actually hit — `tries`/`last_try_at`/`last_outcome` — THEN calls
   `outbox::back_off`; previously the loop broke before touching that
   entry's own bookkeeping at all, leaving every entry behind a dead link
-  frozen at `tries: 0` forever. A receipt's own successful deposit —
-  accepted OR duplicate, either way the far end has it now — IS its
-  confirmation (ruling 4: no separate ack-of-an-ack), so `drain_node`
-  removes it outright (`settle_delivered` retires a `charter` letter and a
-  `transit` container on the same verified acceptance); an ordinary letter
+  frozen at `tries: 0` forever. `settle_delivered` retires a `charter` letter
+  and a `transit` container on a verified acceptance; a receipt is never
+  dialled (ruling 131), so no drain settles one; an ordinary letter
   waits for a REAL ack instead,
   only having its `tries`/`last_try_at`/`last_outcome` bookkeeping
   updated. **P-M3 adds hold, the poll, and poll-on-contact to this same
@@ -726,7 +724,9 @@ never the inbound/serve half (that's `aoide-server`).
   back, and the retry reports `removed`), and a held one is refused (its node's
   poll moves it). `--refused` does the same
   for every returned letter, and leaves a held or sessionless (pre-131) letter
-  as it is, undialled and unwritten, reporting it with its listed word. Each
+  as it is, undialled and unwritten, reporting it with its listed word. A
+  parked receipt it un-parks is never dialled either: it stays spooled for the
+  tick (ruling 131). Each
   reports the `delivery` vocabulary `mail send`
   uses; nothing parked is a clean no-op, not an error. Neither `outbox`
   nor `outbox rm` WRITES to the

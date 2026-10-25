@@ -702,14 +702,14 @@
   door that answers a word the sender was never taught parks a charter that
   already landed. A new outcome a door wants to report belongs in `data`, never
   as a fourth status.
-- - - **`settle_delivered`'s retire set is `receipt`, `charter` and `transit`,
-  and a letter waits.** A receipt's deposit outcome is its confirmation; a
-  `charter` letter is applied rather than filed, so there is no mailbox on the
-  far end to ack from and its own outcome is the whole confirmation there can
-  be; a `transit` container is the hub's custody, ended by the next hop's
-  acceptance. An own letter is not in that set: its send settles it (ruling
-  131). **Only a VERIFIED answer reaches it**: an unsigned, forged or replayed
-  `accepted` leaves all three kinds spooled. Its write-back goes through
+- - - **`settle_delivered`'s retire set is `charter` and `transit`, and a
+  letter waits.** A `charter` letter is applied rather than filed, so there is
+  no mailbox on the far end to ack from and its own outcome is the whole
+  confirmation there can be; a `transit` container is the hub's custody, ended
+  by the next hop's acceptance. An own letter is not in that set: its send
+  settles it (ruling 131). A receipt is not either: it is never dialled. **Only
+  a VERIFIED answer reaches it**: an unsigned, forged or replayed `accepted`
+  leaves both kinds spooled. Its write-back goes through
   `outbox::update_entry`, so an entry removed during the dial is not re-spooled;
   every post-dial write in `drain_node` does the same, and so does the retry's
   write-back (`resend_returned_letter`, which reports `removed`). The reseal
@@ -721,8 +721,10 @@
 - **A receipt from an older node retires its letter, on first filing and on a
   duplicate of one.** `settle_deposit` calls `retire_by_ack` for a receipt in
   either outcome; the retire is idempotent. A letter owes nothing either way
-  (ruling 131): no receipt is minted, spooled or dialled for it. `mail::deposit` answers a second receipt from the same
-  signer for the same msgid `duplicate` and files it nothing. **The hub's
+  (ruling 131): no receipt is minted or spooled for it, and a receipt still
+  spooled is never dialled, only dropped by the tick. `mail::deposit` answers a
+  second receipt from the same signer for the same msgid `duplicate` and files
+  it nothing. **The hub's
   custody ends (`record_filed`) for a container this box filed, already held,
   or refused for good** (`refusal_clears_on_retry` decides "for good": every
   refusal of the bytes, and not a refusal of the box's own state, which keeps
@@ -798,8 +800,9 @@
   The exchange is a dial, and an unsigned answer to it is an audit line. The
   daemon drains every node that ever had mail (its directory is never removed)
   every few seconds, so above either check it would cost both on every tick: the
-  link's back-off, and `dialable_entries` (spooled, not an own letter, not
-  parked, not held) being empty. Keep every dial of a drain below both.
+  link's back-off, and `dialable_entries` (spooled, not an own letter or a
+  receipt, not parked, not held) being empty. Keep every dial of a drain below
+  both.
 - **`charter`'s handlers render; `aoide_storage::charter` acts (P-CHARTER).**
   The document, its validation, the five accept steps, the operator key, the
   trust record, the high-water mark and the spool all live in storage —
