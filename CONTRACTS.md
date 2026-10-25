@@ -5915,17 +5915,21 @@ on any door. From an unattested caller on a door that cannot approve, it gets
 what the call would give that caller, minus the launch: in bare mode the bare
 call's refusal; with `--id` or `--all` and no `--project`, the usage error the
 call gives; with `--project`, the `dry-run-not-held` refusal, since that call
-would hold and show the caller nothing. Its audit line carries status
-`dry-run`, and so does the audit of a refusal the same call would give; a usage
-error is not audited. The handler writes three things, and no others: that
-audit line (none for a usage error); on a host that still holds the legacy
-file, the one-time `carry.json` rename an undying read runs; and, on a host
-that still holds the legacy stage files, the one-time conducting-stage
-migration a stage read runs. The one write outside the handler is the
-start-up migration both core binaries run,
-`aoide_storage::fs::migrate_root_once`: it moves the legacy `~/Aoide` state
-and log into `$AOIDE_ROOT`, renames old peer state files, and locks `state/`
-owner-only.
+would hold and show the caller nothing. The handler audits a dry run with
+status `dry-run` (a refusal the same call would give is audited the same
+way), beside the line the door writes for every call: `ok` for a listing,
+`usage` for a usage error. A usage error or a stage-file miss gets no handler
+line, only the door's. The handler writes three things, and no others: its
+audit line (none for a usage error or a stage-file miss); on a host that still
+holds the legacy file, the one-time `carry.json` rename an undying read runs;
+and, on a host that still holds the legacy stage files, the one-time
+conducting-stage migration a stage read runs. Two writes come with any call,
+dry or real, outside the handler: the door's audit line, and the start-up
+migration both core binaries run, `aoide_storage::fs::migrate_root_once`. It
+locks `state/` owner-only when it exists and renames old peer state files.
+When the legacy `~/Aoide` root is not `$AOIDE_ROOT`, it moves that root's state
+unless `AOIDE_STATE_DIR` is set, and its log unless `AOIDE_AUDIT_LOG` is set and
+not empty.
 
 **Remote summon (U4, command-defrag lane U).** A spec whose `host` names a
 DIFFERENT box than this one is summoned through the existing node door, not

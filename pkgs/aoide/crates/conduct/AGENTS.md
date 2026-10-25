@@ -1192,8 +1192,9 @@ in the message.
   a door that cannot approve, it gets what the call would give, minus the
   launch.** `session_resurrect_with` gives that: bare mode the refusal its
   launch gives; `--id` or `--all` with no `--project` the usage error
-  `require_flag` gives, with no read before it; with `--project` the
-  `dry-run-not-held` refusal, since the flag-mode launch would hold and show
+  `require_flag` gives, with no ledger, projects or manifest read before it (on
+  MCP, the attestation check reads the sessions stage first); with `--project`
+  the `dry-run-not-held` refusal, since the flag-mode launch would hold and show
   that caller nothing. `plan_spec` takes a non-local spec's verdict from
   `summon_check`, never from `spawn_on_node`. Don't route a dry run through
   `hold_whole`, `send_restore`, `launch_session` or the node client.

@@ -172,11 +172,13 @@
 //! (`aoide_storage::undying::load_undying`), on a host that still holds the
 //! legacy file; and the one-time conducting-stage migration a stage read
 //! performs (`aoide_storage::fs::conducting_stage_dir`), on a host that still
-//! holds the legacy stage files. The one write outside the handler is the
-//! start-up migration both core binaries run
-//! (`aoide_storage::fs::migrate_root_once`): it moves the legacy `~/Aoide`
-//! state and log into `$AOIDE_ROOT`, renames old peer state files and locks
-//! `state/` owner-only.
+//! holds the legacy stage files. Two writes come with any call, dry or real,
+//! outside the handler: the door's audit line, and the start-up migration both
+//! core binaries run (`aoide_storage::fs::migrate_root_once`). It locks
+//! `state/` owner-only when it exists and renames old peer state files. When
+//! the legacy `~/Aoide` root is not `$AOIDE_ROOT`, it moves that root's state
+//! unless `AOIDE_STATE_DIR` is set, and its log unless `AOIDE_AUDIT_LOG` is set
+//! and not empty.
 
 use super::common::{is_unsafe, require_flag, stage_error};
 use super::conduct::{program_is_a_shell, program_is_an_interactive_shell, runs_a_privilege_program};
@@ -777,13 +779,14 @@ fn caller_is_attested(
 /// A door that cannot approve launches only as an attested caller, the way
 /// `spawn` does ([`session_resurrect_with`]): an MCP server under a sealed
 /// session revives (its restore bytes are still held, see [`send_restore`]), and
-/// every other caller has the whole command held in `pending.json` for a human
-/// to approve, with nothing launched. `--dry-run` lists the same selection
-/// instead, and launches, holds and sends nothing ([`dry_run_listing`],
-/// [`dry_run_manifest`]). From a caller that cannot approve, a dry run gets
-/// what the call gives without the launch: bare mode its refusal, `--id` or
-/// `--all` without `--project` the usage error, and `--project` the
-/// `dry-run-not-held` refusal.
+/// every other caller has a `--project` call held whole in `pending.json`
+/// for a human to approve, with nothing launched. Bare mode is refused there,
+/// and `--id` or `--all` without `--project` is a usage error. `--dry-run`
+/// lists the same selection instead, and launches, holds and sends nothing
+/// ([`dry_run_listing`], [`dry_run_manifest`]). From a caller that cannot
+/// approve, a dry run gets what the call gives without the launch: bare mode
+/// its refusal, `--id` or `--all` without `--project` the usage error, and
+/// `--project` the `dry-run-not-held` refusal.
 pub fn session_resurrect(inv: &Invocation) -> Outcome {
     session_resurrect_with(inv, real_attested_sender)
 }
@@ -3421,9 +3424,9 @@ mod tests {
         marker
     }
 
-    /// The time a real call is given to launch. `wait_for` waits it out for a
-    /// positive control, and `no_marker_within_the_launch_wait` watches it for
-    /// a dry run.
+    /// `wait_for` waits this long for a positive control's terminal, and
+    /// `no_marker_within_the_launch_wait` watches this long for a dry run's. A
+    /// launch that starts later is not caught.
     #[cfg(unix)]
     const LAUNCH_WAIT: std::time::Duration = std::time::Duration::from_millis(5000);
 
@@ -3732,20 +3735,20 @@ mod tests {
     /// Every regular file under `dir` with its bytes, keyed by path. The audit
     /// log is left out: a call is allowed to append to it, nothing else.
     fn snapshot(dir: &std::path::Path) -> std::collections::BTreeMap<std::path::PathBuf, Vec<u8>> {
-        fn walk(dir: &std::path::Path, out: &mut std::collections::BTreeMap<std::path::PathBuf, Vec<u8>>) {
+        fn walk(root: &std::path::Path, dir: &std::path::Path, out: &mut std::collections::BTreeMap<std::path::PathBuf, Vec<u8>>) {
             for entry in std::fs::read_dir(dir).unwrap() {
                 let entry = entry.unwrap();
                 let path = entry.path();
                 let kind = entry.file_type().unwrap();
                 if kind.is_dir() {
-                    walk(&path, out);
-                } else if kind.is_file() && path.file_name() != Some(std::ffi::OsStr::new("log")) {
+                    walk(root, &path, out);
+                } else if kind.is_file() && path != root.join("log") {
                     out.insert(path.clone(), std::fs::read(&path).unwrap());
                 }
             }
         }
         let mut out = std::collections::BTreeMap::new();
-        walk(dir, &mut out);
+        walk(dir, dir, &mut out);
         out
     }
 
@@ -4046,7 +4049,7 @@ mod tests {
 
     /// A dry run without `--project` from a door that cannot approve is the
     /// real call's own usage error: the same status, message and data, with no
-    /// read, hold or launch before it. `--id` and `--all` are the two forms.
+    /// hold or launch before it. `--id` and `--all` are the two forms.
     #[cfg(unix)]
     #[test]
     fn a_projectless_dry_run_gets_the_real_calls_outcome_and_holds_nothing() {
@@ -4080,6 +4083,13 @@ mod tests {
         assert!(held_entries().is_empty(), "a dry run queued a hold: {:?}", held_entries());
         assert_eq!(snapshot(&root), before, "a dry run wrote state");
         no_marker_within_the_launch_wait(&marker);
+
+        // The positive control: the CLI door's real call launches the undying
+        // set on this fixture within `LAUNCH_WAIT`, so the check above would
+        // have caught such a launch.
+        let launched = session_resurrect(&flag_invocation(&["resurrect"], &[("project", "proj"), ("all", "true")]));
+        assert_eq!(launched.status, aoide_protocol::output::Status::Ok, "msg: {}", launched.message);
+        assert!(wait_for(&marker), "the real call launched on this fixture");
 
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -4390,6 +4400,13 @@ mod tests {
         assert_eq!(resurrect_audit_statuses(&root.join("log")), vec!["dry-run".to_string(); 2]);
         assert!(held_entries().is_empty(), "a dry run queued a hold: {:?}", held_entries());
         no_marker_within_the_launch_wait(&marker);
+
+        // The positive control: the CLI door's real call launches the anchored
+        // ledger rows on this fixture within `LAUNCH_WAIT`, so the check above
+        // would have caught such a launch.
+        let launched = session_resurrect(&flag_invocation(&["resurrect"], &[("project", "proj"), ("all", "true")]));
+        assert_eq!(launched.status, aoide_protocol::output::Status::Ok, "msg: {}", launched.message);
+        assert!(wait_for(&marker), "the real call launched on this fixture");
         drop(cwd);
         let _ = std::fs::remove_dir_all(&root);
     }

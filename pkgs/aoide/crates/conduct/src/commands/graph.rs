@@ -206,7 +206,7 @@ pub fn register(r: &mut Registry) {
             flag!("project", "string", "Project name to resurrect a session for; resolved against projects.json by exact name. Omit entirely, along with --all/--id, to use bare-manifest mode instead (walk up from cwd for .aoide/project.json)."),
             flag!("all", "bool", "Resurrect every anchored, resumable ledger entry instead of just the single most recent. Requires --project; ignores any .aoide/project.json."),
             flag!("id", "string", "Resurrect one specific ledger sessionId instead of the most recent (mutually exclusive with --all; --id wins if both given). Requires --project; ignores any .aoide/project.json."),
-            flag!("dry-run", "bool", "List the rows this resurrect would act on, launching, holding and typing nothing. Each row names its disposition, and pickedByBare marks the rows the bare --project form would revive. Writes one audit line, status dry-run. Where the call would be held for an approval, the dry run is refused instead."),
+            flag!("dry-run", "bool", "List the rows this resurrect would act on, launching, holding and typing nothing. Each row names its disposition, and pickedByBare marks the rows the bare --project form would revive. The handler audits it with status dry-run, beside the line the door writes for every call. Where the call would be held for an approval, the dry run is refused instead."),
         ],
         gated: false,
         implemented: true,
