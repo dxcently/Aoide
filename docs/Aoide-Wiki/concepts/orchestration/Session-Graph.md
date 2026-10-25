@@ -251,11 +251,13 @@ nothing" rule.
 **eidolon** (`conduct/src/graph/eidolon.rs`) is the on-box agent. Its swarm
 presence at `$XDG_RUNTIME_DIR/eidolon/<id>/{meta.json,sock}` is read, never
 swept — a stale directory is the producer's own to clean up — and liveness is
-the presence socket's answer to `{"op":"ping"}` inside a 250ms budget: never a
-stat, never `/proc`. A socket that answers `{"ok":true}` is live; one where
-nothing listens is not; a silent one is live while its pid is in the process
-table, as Eidolon's own sweep pairs silence with the pid. The residual: a
-silent socket whose pid another process reuses stays live until that process
+the presence socket's answer to `{"op":"ping"}`, inside one 250ms deadline
+that every probe shares, counted from the scan's start: never a stat, never
+`/proc`. A socket that answers `{"ok":true}` is live; one where nothing
+listens is not; a silent one (no reply by the deadline, or a connect that
+timed out on a full backlog) is live while its pid is in the process table,
+as Eidolon's own sweep pairs silence with the pid. The residual: a silent
+socket whose pid another process reuses stays live until that process
 exits, so the roster shows it and the resume gate skips its journal. Unlike a
 desktop Codex thread this
 IS an agent session (`kind:"agent"`), so it is a normal dedup/staleness

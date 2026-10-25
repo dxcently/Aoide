@@ -956,13 +956,18 @@ blank one is refused too.
   sock}` — the identical root eidolon's own `Presence::root()` derives, read
   and probed here, never swept: a stale directory is the PRODUCER's own to
   clean up. Liveness is the presence socket's answer to `{"op":"ping"}`,
-  inside the same 250ms budget eidolon's own client enforces — never a
-  stat, never `/proc`. A socket that answers `{"ok":true}` is live. A
-  directory where nothing listens contributes nothing to that pass's
-  observed set (not a scan failure), and never makes the scan read the
-  process table. A socket that accepts and stays silent is held aside: it
-  is live while its `meta.json`'s `pid` is a row of the process table, the
-  rule Eidolon's own sweep applies, since a busy session can miss the ping.
+  never a stat, never `/proc`. Every directory's socket is probed at once,
+  each on its own thread, and the probes share one 250ms deadline counted
+  from the scan's start, the connect included. Eidolon's own client has no
+  bound on its connect, so a presence that holds its socket without
+  answering would otherwise hang the pass. A socket that answers
+  `{"ok":true}` is live. A directory where nothing listens contributes
+  nothing to that pass's observed set (not a scan failure), its `meta.json`
+  is never read, and it never makes the scan read the process table. A
+  socket that stays silent, or whose connect times out on a full listen
+  backlog, is held aside: it is live while its `meta.json`'s `pid` is a row
+  of the process table, the rule Eidolon's own sweep applies, since a busy
+  session can miss the ping.
   Residual: if another process reuses the pid of a session whose socket is
   silent, that session stays live until that process exits, so the roster
   shows it and the resume gate skips its journal. A `meta.json` that cannot
