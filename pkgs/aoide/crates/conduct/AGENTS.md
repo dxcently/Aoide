@@ -819,7 +819,14 @@ in the message.
   (`ledger_ended`). A petname or a prefix of an id names no ended session, so
   the match stays exact. The line's `agent`, `cwd` and `logPath` stand in for
   the roster row, the message says the session ended and when, and `--follow`
-  prints the window and returns: no presence is left to follow.
+  prints the window and returns: no presence is left to follow. A `done`
+  record returns the same way: a session that has finished has nothing new to
+  follow.
+- **Trace text is stripped on the way out.** Every text `session_trace` prints
+  or puts in its data passes `aoide_protocol::untrusted::strip_unsafe`, under
+  the trace's own clips: `one_line_clipped` counts what is shown, and
+  `clip_keep_ws` makes a tab one space first. `--follow --json` lines are
+  stripped too. A new text site the trace prints gets the same strip.
 - **A record's `logPath` is the trace's hint only outside
   `session_logs_dir()`.** It goes to `TranscriptSpec::locate` as the hint,
   the way `dropped_this_pass` passes it. A path inside `session_logs_dir()` is
@@ -2006,18 +2013,23 @@ in the message.
   journal is `journal_of`'s alone (ruling 161).** `resolve_candidate` matches
   `ResumeArgs::ByLog` before the terminal arm, and `journal_of` refuses every
   `logPath` that cannot name a journal: absent, not absolute or holding an
-  unsafe character, inside `session_logs_dir()` (a terminal transcript), or
-  not a regular file. The refusal is the candidate's skip reason, the same
-  sentence the launch and the dry run show. Don't give it a terminal-arm
-  fallback, and don't read a `logPath` under `session_logs_dir()` as a
-  journal.
+  unsafe character, inside `session_logs_dir()` (a terminal transcript), a
+  symbolic link (its own sentence, read with `symlink_metadata`), or not a
+  regular file. The refusal is the candidate's skip reason, the same sentence
+  the launch and the dry run show. Don't give it a terminal-arm fallback, and
+  don't read a `logPath` under `session_logs_dir()` as a journal.
 - **One engine per session is decided before the spawn, under the stage
   lock (`claim_resume`).** The claim is the only write a launch makes before
   its spawn, and it runs before `launch_session`. The presence scan is read
   outside the lock, the roster and the claims inside it, and no spawn runs
   under it, because the new session registers under the same lock. Don't move
   the claim after the spawn: a second process would find none. A claim's
-  verdict is its new id's record and its age, never a pid.
+  verdict is its new id's record and its age, never a pid. A claim stamped
+  more than 5 seconds ahead of the clock is stale and blocks nothing; within
+  that skew its age reads as 0. A clock step of more than 5 seconds backward,
+  or more than 60 seconds forward, during a launch's registration is the
+  residual: it can let a second launch through. The block itself reads no
+  file; `Journal::of` resolves each journal once before it.
   `release_resume_claim` drops a claim only while it still names its new id.
   The gate sits in `resurrect_one`, so every mode that reaches it (bare,
   `--all`, `--id`, a held replay) passes it. Manifest clean spawns take no

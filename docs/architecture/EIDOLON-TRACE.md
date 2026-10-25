@@ -204,7 +204,8 @@ carries whatever the journal carries; that fix is harnox's.
   and cut, text, tool names; tool result: first line, `!` on error;
   settled: stop reason, tokens), and the summary is RENDERED from the same
   projector `--json` publishes, so the two cannot drift. `--json` passes the
-  lines through byte for byte in `data.lines`, beside `data.steps`: the same
+  lines through in `data.lines`, each stripped of the characters no terminal
+  may be handed, beside `data.steps`: the same
   window PROJECTED, one object per emitted content block, in the record's own
   order — `{ id, ts, kind, text, error, clipped }` with `kind` in `thinking ·
   say · tool · result · settled · user · other`, `id`/`ts` the record's own
@@ -220,12 +221,15 @@ carries whatever the journal carries; that fix is harnox's.
   adds a `tool_use`'s arguments — the details view's window. An unknown clip
   word, like a non-numeric `--tail`, is a taught usage error, never a silent
   widening. A trace line that is not a readable record contributes no step (it
-  keeps its `?` human line and its raw line in `data.lines`). A session that
+  keeps its `?` human line and its line in `data.lines`). A session that
   has left the roster, with no presence and no roster row, is named by its
   ledger line when its `sessionId` is exactly the target. The line's `logPath`
   is the journal the trace is read from, the human line says the session ended
-  and when, and `--follow` prints the window and returns. A `logPath` inside
-  the session logs dir is a terminal's transcript, and it is never the hint.
+  and when, and `--follow` prints the window and returns. A `done` record
+  prints its window the same way, and `--follow` returns for it too. A
+  `logPath` inside the session logs dir is a terminal's transcript, and it is
+  never the hint. `data.endedAt` is the ledger's `endedAt` for a session that
+  has left the roster, and null otherwise.
 - The read-only trace QUERY over the bridge — one answered shellbridge verb,
   `{"cmd":"sessiontrace","sessionId":…,"lines":N,"clip":"line|detail"}`, which
   re-execs exactly the command above (`--tail N --clip … --json`) and answers

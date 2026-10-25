@@ -1037,7 +1037,8 @@ blank one is refused too.
   its thinking (dimmed, cut to 80) then its text then each `→ tool(name)`,
   a tool result shows its first line prefixed `!` when it errored, a settled
   turn shows its stop reason and input/output tokens; `--json` passes the
-  raw lines through unchanged, `--follow` re-reads every 500ms until Ctrl-C
+  lines through, each stripped of the characters no terminal may be handed,
+  `--follow` re-reads every 500ms until Ctrl-C
   (CLI-only), `--tail N` shows the last N (default 50). **Read-only, and so
   outside every other discipline in this file:** no stage write, no stage
   lock, no `daemon_dispatch` — unlike the L4 session-WRITE family above,
@@ -1054,11 +1055,14 @@ blank one is refused too.
   record(s)`. A session that has left the roster is named by its ledger line
   when its `sessionId` is exactly the target: the line's agent, cwd and
   `logPath` stand in for the roster row, the message says the session ended
-  and when, and `--follow` prints its window and returns. A `logPath` is the
-  hint unless it lies in `session_logs_dir()`. Nothing else is matched against
-  the ledger.
+  and when, and `--follow` prints its window and returns. A `done` record
+  prints its window the same way, and `--follow` returns for it too. A
+  `logPath` is the hint unless it lies in `session_logs_dir()`. Nothing else is
+  matched against the ledger. Every text the trace prints or puts in its data
+  is stripped of the characters no terminal may be handed
+  (`aoide_protocol::untrusted::strip_unsafe`), under the trace's own clips.
 - **The step projection (Phase B, `graph/trace.rs`) — the SAME window, as
-  steps.** `data.steps` (beside the untouched `data.lines`) is one object per
+  steps.** `data.steps` (beside `data.lines`) is one object per
   emitted content block, projected by `steps_of`/`steps_of_lines`: one step per
   non-empty block of an `AssistantMessage`/`UserMessage` in the record's own
   order, one for a `ToolResult`'s own output, one for a settled turn or any
@@ -1140,9 +1144,11 @@ blank one is refused too.
   `--resume <id>` no shell could ever honor. A candidate neither arm
   resolves is skipped with a taught message naming it, never a guessed
   invocation. A `ByLog` line whose `logPath` is absent, not absolute or
-  unsafe, inside `session_logs_dir()`, or not a regular file is skipped with
-  a sentence that names the entry and the cause, and never falls to the
-  terminal arm. Every resolved candidate spawns via the windowed path
+  unsafe, inside `session_logs_dir()`, a symbolic link, or not a regular file
+  is skipped with a sentence that names the entry and the cause, and never
+  falls to the terminal arm. The regular-file check proves a regular file at
+  that path, by its own name, and not that the file is an Eidolon journal.
+  Every resolved candidate spawns via the windowed path
   (`graph/spawn.rs`, P-D7) with its resolved argv and `--cwd` set to the
   ledger entry's own cwd.
   A resurrected session is ALWAYS a fresh `sessionId` — ids are never
@@ -1157,7 +1163,8 @@ blank one is refused too.
   runs before each spawn. For a `ByLog` candidate it reads the presence scan
   outside any lock, and a scan that cannot finish skips the candidate. Then,
   under the stage lock, it reads `sessions.json` and `state/resuming.json`
-  and runs the block (`block_verdict`). The candidate is live when a session
+  and runs the block (`block_verdict`), which reads no file: the journals are
+  resolved once before it. The candidate is live when a session
   that is not `done` holds its id, names it as `resumedFrom`, or sits on its
   journal, and the refusal names that session as `liveSessionId`. It is in
   flight when its claim's new id has a session that is not `done`, or none
@@ -1165,8 +1172,12 @@ blank one is refused too.
   as `claimedBy`. A free candidate's claim is written before its spawn. A
   failed spawn drops it, and a successful spawn keeps it, so the claim goes
   stale once its session is `done`, or once the bound passes with no session
-  registered under its id. The dry run runs the same block on the same reads
-  and writes nothing. Eidolon's own journal lock is not built:
+  registered under its id. A claim stamped more than 5 seconds ahead of the
+  clock is stale too, and the claim step drops it. A clock step of more than 5
+  seconds backward, or more than 60 seconds forward, during a launch's
+  registration can let a second launch through. The dry run runs the same block
+  on the same reads and writes nothing. Eidolon's own journal lock is not
+  built:
   `SessionLog::open` takes none, so a second engine on a live journal stays
   possible until that lands.
   Never a hard `Outcome::error` over a per-candidate spawn failure (a

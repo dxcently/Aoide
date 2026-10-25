@@ -3890,4 +3890,53 @@ mod tests {
         assert!(leftovers.is_empty(), "temp links left behind: {leftovers:?}");
         let _ = std::fs::remove_dir_all(&dir);
     }
+
+    /// Runs `f` with `AOIDE_STATE_DIR` at a fresh dir whose session logs dir
+    /// exists, and restores the variable after.
+    #[cfg(unix)]
+    fn with_session_logs<T>(name: &str, f: impl FnOnce(&std::path::Path) -> T) -> T {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved = std::env::var("AOIDE_STATE_DIR").ok();
+        let root = std::env::temp_dir().join(format!("aoide-inside-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::env::set_var("AOIDE_STATE_DIR", root.join("state"));
+        std::fs::create_dir_all(super::session_logs_dir()).unwrap();
+        let out = f(&root);
+        let _ = std::fs::remove_dir_all(&root);
+        match saved {
+            Some(v) => std::env::set_var("AOIDE_STATE_DIR", v),
+            None => std::env::remove_var("AOIDE_STATE_DIR"),
+        }
+        out
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_raw_path_inside_the_session_logs_dir_is_inside() {
+        with_session_logs("raw", |_| {
+            let raw = super::session_logs_dir().join("t.log");
+            assert!(super::inside_session_logs(&raw.to_string_lossy()));
+        });
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_dotdot_path_that_comes_back_into_the_session_logs_dir_is_inside() {
+        with_session_logs("back-in", |_| {
+            let back = super::session_logs_dir().join("..").join("sessions").join("t.log");
+            assert!(super::inside_session_logs(&back.to_string_lossy()));
+        });
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_symlink_into_the_session_logs_dir_is_inside() {
+        with_session_logs("link-in", |root| {
+            let target = super::session_logs_dir().join("t.log");
+            std::fs::write(&target, "").unwrap();
+            let link = root.join("elsewhere.log");
+            std::os::unix::fs::symlink(&target, &link).unwrap();
+            assert!(super::inside_session_logs(&link.to_string_lossy()));
+        });
+    }
 }

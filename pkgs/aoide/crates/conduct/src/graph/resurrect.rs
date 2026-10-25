@@ -282,6 +282,9 @@ fn journal_of(entry: &aoide_storage::ledger::LedgerEntry) -> Result<String, Stri
     if aoide_storage::fs::inside_session_logs(log) {
         return skip("has a logPath inside the session logs dir, which holds terminal transcripts, not journals");
     }
+    if std::fs::symlink_metadata(log).is_ok_and(|m| m.file_type().is_symlink()) {
+        return skip("has a logPath that is a symbolic link");
+    }
     if !Path::new(log).is_file() {
         return skip("has a logPath that names no regular file");
     }
@@ -311,21 +314,51 @@ struct Refusal {
     named: Option<(&'static str, String)>,
 }
 
-/// Whether two journal paths name one file: equal as spelled, or equal once both
-/// resolve, so a symlink to a journal is that journal.
-fn same_journal(a: &str, b: &str) -> bool {
-    a == b || matches!((std::fs::canonicalize(a), std::fs::canonicalize(b)), (Ok(x), Ok(y)) if x == y)
+/// A journal path as the block compares it: spelled as the ledger, presence or
+/// roster names it, and resolved once to the file it names, when it resolves.
+/// The block compares these and never reads the filesystem; [`Journal::of`] is
+/// the one place a path is resolved.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Journal {
+    spelled: String,
+    resolved: Option<String>,
 }
+
+impl Journal {
+    fn of(path: &str) -> Journal {
+        Journal {
+            spelled: path.to_string(),
+            resolved: std::fs::canonicalize(path).ok().map(|p| p.to_string_lossy().into_owned()),
+        }
+    }
+
+    /// Whether two journals name one file: equal as spelled, or both resolved to
+    /// the same file, so a symlink to a journal is that journal.
+    fn names_the_file_of(&self, other: &Journal) -> bool {
+        self.spelled == other.spelled
+            || matches!((&self.resolved, &other.resolved), (Some(a), Some(b)) if a == b)
+    }
+}
+
+/// How far ahead of the clock a claim may be stamped and still count. Past this
+/// the stamp is a clock step or a hand edit, and the claim blocks nothing.
+const CLAIM_CLOCK_SKEW_SECS: i64 = 5;
 
 /// A claim's verdict against the roster: in flight while its new id has a session
 /// that is not `done`, or has none yet and the claim is younger than
-/// [`RESUME_CLAIM_BOUND_SECS`]. Anything else is stale and blocks nothing.
+/// [`RESUME_CLAIM_BOUND_SECS`]. A claim stamped more than
+/// [`CLAIM_CLOCK_SKEW_SECS`] ahead of `now` is stale; within that skew its age is
+/// 0. Anything else is stale and blocks nothing.
 fn claim_in_flight(
     claim: &aoide_storage::resuming::Claim,
     sessions: &[aoide_storage::records::SessionRecord],
     now: i64,
 ) -> Option<Blocked> {
-    let age_secs = now - aoide_storage::time::parse_iso_utc(&claim.at).unwrap_or(now);
+    let raw_age = now - aoide_storage::time::parse_iso_utc(&claim.at).unwrap_or(now);
+    if raw_age < -CLAIM_CLOCK_SKEW_SECS {
+        return None;
+    }
+    let age_secs = raw_age.max(0);
     let open = sessions.iter().any(|s| s.session_id == claim.new_id && s.state != "done");
     let seen = sessions.iter().any(|s| s.session_id == claim.new_id);
     (open || (!seen && age_secs < RESUME_CLAIM_BOUND_SECS))
@@ -333,28 +366,30 @@ fn claim_in_flight(
 }
 
 /// The block decision for a candidate, from the roster, the claims, the open
-/// journals (by-journal candidates only) and the clock. A live session is named
-/// before a launch in flight, so a running session reads as running.
+/// journals and the clock. `journal` is the candidate's own journal, for a
+/// by-journal candidate only, and `roster_journals` lines up with `sessions`. A
+/// live session is named before a launch in flight, so a running session reads as
+/// running. It compares what [`Journal`] holds and does no I/O.
 fn block_verdict(
     entry: &aoide_storage::ledger::LedgerEntry,
-    by_log: bool,
+    journal: Option<&Journal>,
     sessions: &[aoide_storage::records::SessionRecord],
+    roster_journals: &[Option<Journal>],
     claims: &[aoide_storage::resuming::Claim],
-    journals: &[(String, String)],
+    presence: &[(String, Journal)],
     now: i64,
 ) -> Option<Blocked> {
-    let journal = entry.log_path.as_deref().filter(|_| by_log);
-    let on_journal = |log: &str| journal.is_some_and(|j| same_journal(log, j));
-    let live = sessions.iter().find(|s| {
+    let on_journal = |log: &Journal| journal.is_some_and(|j| j.names_the_file_of(log));
+    let live = sessions.iter().zip(roster_journals).find(|(s, log)| {
         s.state != "done"
             && (s.session_id == entry.session_id
                 || s.resumed_from.as_deref() == Some(entry.session_id.as_str())
-                || s.log_path.as_deref().is_some_and(|log| on_journal(log)))
+                || log.as_ref().is_some_and(|l| on_journal(l)))
     });
-    if let Some(s) = live {
+    if let Some((s, _)) = live {
         return Some(Blocked::Live { live_id: s.session_id.clone() });
     }
-    if let Some((id, _)) = journals.iter().find(|(_, log)| on_journal(log.as_str())) {
+    if let Some((id, _)) = presence.iter().find(|(_, log)| on_journal(log)) {
         return Some(Blocked::Live { live_id: id.clone() });
     }
     claims
@@ -363,19 +398,33 @@ fn block_verdict(
         .and_then(|c| claim_in_flight(c, sessions, now))
 }
 
+/// The candidate's own journal, read once for the block, for a by-journal
+/// candidate only.
+fn candidate_journal(entry: &aoide_storage::ledger::LedgerEntry, by_log: bool) -> Option<Journal> {
+    entry.log_path.as_deref().filter(|_| by_log).map(Journal::of)
+}
+
+/// Each roster record's `logPath`, read once for the block, lined up with
+/// `sessions`.
+fn roster_journals(sessions: &[aoide_storage::records::SessionRecord]) -> Vec<Option<Journal>> {
+    sessions.iter().map(|s| s.log_path.as_deref().map(Journal::of)).collect()
+}
+
 /// The open journals a by-journal candidate is checked against, read from the
-/// presence scan outside any lock. A scan that cannot finish refuses the
-/// candidate, since Aoide cannot then tell whether the journal is open. A
-/// candidate that is not by-journal reads nothing.
+/// presence scan outside any lock, each one resolved once. A scan that cannot
+/// finish refuses the candidate, since Aoide cannot then tell whether the journal
+/// is open. A candidate that is not by-journal reads nothing.
 fn presence_journals(
     entry: &aoide_storage::ledger::LedgerEntry,
     by_log: bool,
-) -> Result<Vec<(String, String)>, Refusal> {
+) -> Result<Vec<(String, Journal)>, Refusal> {
     if !by_log {
         return Ok(Vec::new());
     }
     match super::eidolon::eidolon_presence_sessions() {
-        super::eidolon::PresenceScan::Observed(live) => Ok(live.into_iter().map(|s| (s.id, s.log)).collect()),
+        super::eidolon::PresenceScan::Observed(live) => {
+            Ok(live.into_iter().map(|s| (s.id, Journal::of(&s.log))).collect())
+        }
         super::eidolon::PresenceScan::Unknown(why) => Err(refused(
             entry,
             format!(
@@ -425,12 +474,15 @@ fn dry_verdict(c: &Candidate) -> Result<(), Refusal> {
 }
 
 fn dry_gate(entry: &aoide_storage::ledger::LedgerEntry, by_log: bool) -> Result<(), Refusal> {
-    let journals = presence_journals(entry, by_log)?;
+    let presence = presence_journals(entry, by_log)?;
+    let candidate = candidate_journal(entry, by_log);
     let (sessions, claims) = read_roster_and_claims().map_err(|e| {
         refused(entry, format!("cannot be checked: {e} — skipped rather than launched unchecked"))
     })?;
+    let roster = roster_journals(&sessions);
     let now = super::conduct::unix_ts() as i64;
-    block_verdict(entry, by_log, &sessions, &claims, &journals, now).map_or(Ok(()), |b| Err(blocked_refusal(entry, b)))
+    block_verdict(entry, candidate.as_ref(), &sessions, &roster, &claims, &presence, now)
+        .map_or(Ok(()), |b| Err(blocked_refusal(entry, b)))
 }
 
 /// The claim step, run before a launch: under the stage lock, the block and, when
@@ -441,13 +493,15 @@ fn claim_resume(
     by_log: bool,
     new_id: &str,
 ) -> Result<(), Refusal> {
-    let journals = presence_journals(entry, by_log)?;
+    let presence = presence_journals(entry, by_log)?;
+    let candidate = candidate_journal(entry, by_log);
     let now = super::conduct::unix_ts() as i64;
     let claimed = aoide_storage::fs::try_stage_lock(|| -> Result<(), Refusal> {
         let (sessions, mut claims) = read_roster_and_claims().map_err(|e| {
             refused(entry, format!("cannot be checked: {e} — skipped rather than launched unchecked"))
         })?;
-        if let Some(blocked) = block_verdict(entry, by_log, &sessions, &claims, &journals, now) {
+        let roster = roster_journals(&sessions);
+        if let Some(blocked) = block_verdict(entry, candidate.as_ref(), &sessions, &roster, &claims, &presence, now) {
             return Err(blocked_refusal(entry, blocked));
         }
         claims.retain(|c| claim_in_flight(c, &sessions, now).is_some());
@@ -1209,7 +1263,7 @@ fn select_candidates(inv: &Invocation, name: &str) -> Result<Selection, Outcome>
     let picks = if inv.flag_present("dry-run") { undying_picks(&anchored) } else { BTreeMap::new() };
     let picked_at = |i: usize| picks.values().any(|&j| j == i);
     let (selected, picked): (Vec<aoide_storage::ledger::LedgerEntry>, Vec<bool>) = if let Some(id) = inv.flags.get("id") {
-        match anchored.iter().position(|e| &e.session_id == id) {
+        match anchored.iter().rposition(|e| &e.session_id == id) {
             Some(i) => (vec![anchored[i].clone()], vec![picked_at(i)]),
             None => {
                 let out = Outcome::error(
@@ -2083,7 +2137,11 @@ mod tests {
     fn resolve_candidate_restore_less_shell_entry_still_hits_the_taught_skip() {
         let entry = ledger_entry_with_restore("ledger-no-restore", "shell", "/home/khoa/Aoide", "2026-08-20T01:00:00Z", None);
         let candidate = resolve_candidate(entry);
-        assert!(candidate.resume_argv.is_err(), "a restore-less shell entry must still be skipped");
+        assert_eq!(
+            candidate.resume_argv.unwrap_err(),
+            "harness `shell` has no verified resume argv — skipped rather than typing a guessed invocation",
+            "a restore-less shell entry must still be skipped with the taught line"
+        );
     }
 
     /// R1: a busy session's recorded argv is TYPED and never submitted. The
@@ -5021,12 +5079,30 @@ mod tests {
         }
     }
 
+    /// The block as these tests state it: the candidate's journal and the open
+    /// journals resolved once through [`Journal::of`], which resolves nothing for a
+    /// path that does not exist.
+    fn blocked(
+        entry: &aoide_storage::ledger::LedgerEntry,
+        by_log: bool,
+        sessions: &[aoide_storage::records::SessionRecord],
+        claims: &[aoide_storage::resuming::Claim],
+        presence: &[(String, String)],
+        now: i64,
+    ) -> Option<Blocked> {
+        let candidate = candidate_journal(entry, by_log);
+        let roster = roster_journals(sessions);
+        let presence: Vec<(String, Journal)> =
+            presence.iter().map(|(id, log)| (id.clone(), Journal::of(log))).collect();
+        block_verdict(entry, candidate.as_ref(), sessions, &roster, claims, &presence, now)
+    }
+
     #[test]
     fn a_live_record_under_the_candidates_own_id_blocks_it() {
         let entry = ledger_entry("ledger-claude", "claude", "/w", "2026-08-20T01:00:00Z");
         let sessions = [roster_record("ledger-claude", "running")];
         assert_eq!(
-            block_verdict(&entry, false, &sessions, &[], &[], NOW),
+            blocked(&entry, false, &sessions, &[], &[], NOW),
             Some(Blocked::Live { live_id: "ledger-claude".into() })
         );
     }
@@ -5037,7 +5113,7 @@ mod tests {
         let mut resumed = roster_record("resurrect-9-1", "idle");
         resumed.resumed_from = Some("ledger-claude".into());
         assert_eq!(
-            block_verdict(&entry, false, &[resumed], &[], &[], NOW),
+            blocked(&entry, false, &[resumed], &[], &[], NOW),
             Some(Blocked::Live { live_id: "resurrect-9-1".into() })
         );
     }
@@ -5048,7 +5124,7 @@ mod tests {
         let mut live = roster_record("eid-live", "running");
         live.log_path = Some("/r/s.eid".into());
         assert_eq!(
-            block_verdict(&entry, true, &[live], &[], &[], NOW),
+            blocked(&entry, true, &[live], &[], &[], NOW),
             Some(Blocked::Live { live_id: "eid-live".into() })
         );
     }
@@ -5058,7 +5134,7 @@ mod tests {
         let entry = ledger_entry_with_log("ledger-eid", "eidolon", "/w", Some("/r/s.eid"));
         let journals = [("eid-open".to_string(), "/r/s.eid".to_string())];
         assert_eq!(
-            block_verdict(&entry, true, &[], &[], &journals, NOW),
+            blocked(&entry, true, &[], &[], &journals, NOW),
             Some(Blocked::Live { live_id: "eid-open".into() })
         );
     }
@@ -5069,7 +5145,7 @@ mod tests {
         let claims = [claim_taken("ledger-claude", "resurrect-9-2", 5)];
         let sessions = [roster_record("resurrect-9-2", "running")];
         assert_eq!(
-            block_verdict(&entry, false, &sessions, &claims, &[], NOW),
+            blocked(&entry, false, &sessions, &claims, &[], NOW),
             Some(Blocked::InFlight { new_id: "resurrect-9-2".into(), age_secs: 5 })
         );
     }
@@ -5079,7 +5155,7 @@ mod tests {
         let entry = ledger_entry("ledger-claude", "claude", "/w", "2026-08-20T01:00:00Z");
         let claims = [claim_taken("ledger-claude", "resurrect-9-3", 5)];
         assert_eq!(
-            block_verdict(&entry, false, &[], &claims, &[], NOW),
+            blocked(&entry, false, &[], &claims, &[], NOW),
             Some(Blocked::InFlight { new_id: "resurrect-9-3".into(), age_secs: 5 })
         );
     }
@@ -5088,7 +5164,7 @@ mod tests {
     fn an_old_claim_with_an_unregistered_new_id_is_stale_and_blocks_nothing() {
         let entry = ledger_entry("ledger-claude", "claude", "/w", "2026-08-20T01:00:00Z");
         let claims = [claim_taken("ledger-claude", "resurrect-9-4", 3600)];
-        assert_eq!(block_verdict(&entry, false, &[], &claims, &[], NOW), None);
+        assert_eq!(blocked(&entry, false, &[], &claims, &[], NOW), None);
     }
 
     #[test]
@@ -5096,13 +5172,61 @@ mod tests {
         let entry = ledger_entry("ledger-claude", "claude", "/w", "2026-08-20T01:00:00Z");
         let claims = [claim_taken("ledger-claude", "resurrect-9-5", 5)];
         let sessions = [roster_record("resurrect-9-5", "done")];
-        assert_eq!(block_verdict(&entry, false, &sessions, &claims, &[], NOW), None);
+        assert_eq!(blocked(&entry, false, &sessions, &claims, &[], NOW), None);
     }
 
     #[test]
     fn a_candidate_with_nothing_against_it_is_free() {
         let entry = ledger_entry("ledger-claude", "claude", "/w", "2026-08-20T01:00:00Z");
-        assert_eq!(block_verdict(&entry, false, &[], &[], &[], NOW), None);
+        assert_eq!(blocked(&entry, false, &[], &[], &[], NOW), None);
+    }
+
+    #[test]
+    fn a_claim_stamped_three_seconds_ahead_blocks_and_its_age_reads_0s() {
+        let entry = ledger_entry("ledger-claude", "claude", "/w", "2026-08-20T01:00:00Z");
+        let claims = [claim_taken("ledger-claude", "resurrect-9-7", -3)];
+        assert_eq!(
+            blocked(&entry, false, &[], &claims, &[], NOW),
+            Some(Blocked::InFlight { new_id: "resurrect-9-7".into(), age_secs: 0 })
+        );
+    }
+
+    #[test]
+    fn a_claim_stamped_an_hour_ahead_blocks_nothing() {
+        let entry = ledger_entry("ledger-claude", "claude", "/w", "2026-08-20T01:00:00Z");
+        let claims = [claim_taken("ledger-claude", "resurrect-9-8", -3600)];
+        assert_eq!(blocked(&entry, false, &[], &claims, &[], NOW), None);
+    }
+
+    #[test]
+    fn a_journal_that_resolves_to_the_candidates_file_blocks_it_though_spelled_apart() {
+        let entry = ledger_entry_with_log("ledger-eid", "eidolon", "/w", Some("/r/s.eid"));
+        let candidate = Journal { spelled: "/r/s.eid".into(), resolved: Some("/real/s.eid".into()) };
+        let presence = [(
+            "eid-open".to_string(),
+            Journal { spelled: "/r/link.eid".into(), resolved: Some("/real/s.eid".into()) },
+        )];
+        assert_eq!(
+            block_verdict(&entry, Some(&candidate), &[], &[], &[], &presence, NOW),
+            Some(Blocked::Live { live_id: "eid-open".into() })
+        );
+    }
+
+    #[test]
+    fn a_roster_log_that_resolves_to_the_candidates_file_blocks_it_though_spelled_apart() {
+        let entry = ledger_entry_with_log("ledger-eid", "eidolon", "/w", Some("/r/s.eid"));
+        let candidate = Journal { spelled: "/r/s.eid".into(), resolved: Some("/real/s.eid".into()) };
+        let sessions = [aoide_storage::records::SessionRecord {
+            session_id: "eid-roster".into(),
+            state: "running".into(),
+            log_path: Some("/r/link.eid".into()),
+            ..Default::default()
+        }];
+        let roster = [Some(Journal { spelled: "/r/link.eid".into(), resolved: Some("/real/s.eid".into()) })];
+        assert_eq!(
+            block_verdict(&entry, Some(&candidate), &sessions, &roster, &[], &[], NOW),
+            Some(Blocked::Live { live_id: "eid-roster".into() })
+        );
     }
 
     /// A recording terminal that also copies the claims file at each launch
@@ -5269,6 +5393,128 @@ mod tests {
         let reason = skipped[0]["reason"].as_str().unwrap();
         assert!(reason.contains("is live as user-silent"), "the live sentence names the presence id: {reason}");
         assert!(recorded_launches(&rec).is_empty(), "a silent, pid-live presence launched a terminal");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A claim stamped an hour ahead of the clock is stale: it blocks nothing,
+    /// the claim step drops it, and the candidate launches once.
+    #[cfg(unix)]
+    #[test]
+    fn a_claim_stamped_an_hour_ahead_does_not_block_and_the_candidate_launches_once() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(RESURRECT_ENV);
+        let (root, proj_path) = setup("resurrect-claim-future");
+        set_ledger(&[ledger_entry("ledger-claude", "claude", &proj_path, "2026-08-20T01:00:00Z")]);
+        let future = aoide_storage::time::iso_utc_from_epoch(super::super::conduct::unix_ts() as i64 + 3600);
+        aoide_storage::resuming::save_claims(&[aoide_storage::resuming::Claim {
+            session_id: "ledger-claude".into(),
+            new_id: "resurrect-future-1".into(),
+            at: future,
+        }])
+        .unwrap();
+        let (rec, _dump) = recording_terminal_with_claims(&root);
+
+        let out = session_resurrect(&flag_invocation(&["resurrect"], &[("project", "proj"), ("id", "ledger-claude")]));
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok, "msg: {}", out.message);
+        assert_eq!(recorded_launches(&rec).len(), 1, "data: {:?}", out.data);
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Two ledger lines for one id: the older names no journal, the newer names
+    /// one. `--id` takes the newest line, so it launches once, by its journal.
+    #[cfg(unix)]
+    #[test]
+    fn an_id_with_two_ledger_lines_launches_once_by_the_newest_journal() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(RESURRECT_ENV);
+        let (root, proj_path) = setup("resurrect-id-newest");
+        let journal = root.join("s.eid");
+        std::fs::write(&journal, "").unwrap();
+        let journal = journal.to_string_lossy().into_owned();
+        set_ledger(&[
+            ledger_entry_with_log("ledger-eid", "eidolon", &proj_path, None),
+            ledger_entry_with_log("ledger-eid", "eidolon", &proj_path, Some(journal.as_str())),
+        ]);
+        let (rec, _dump) = recording_terminal_with_claims(&root);
+
+        let out = session_resurrect(&flag_invocation(&["resurrect"], &[("project", "proj"), ("id", "ledger-eid")]));
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok, "msg: {}", out.message);
+        let launches = recorded_launches(&rec);
+        assert_eq!(launches.len(), 1, "data: {:?}", out.data);
+        assert!(launches[0].contains(&journal), "launched by the newest line's journal: {:?}", launches[0]);
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A `logPath` that is a link to a regular journal is skipped by its own
+    /// sentence: the check reads the path without following the link.
+    #[cfg(unix)]
+    #[test]
+    fn a_log_path_that_is_a_link_to_a_journal_is_skipped_and_nothing_launches() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(RESURRECT_ENV);
+        let (root, proj_path) = setup("resurrect-journal-link");
+        let journal = root.join("s.eid");
+        std::fs::write(&journal, "").unwrap();
+        let link = root.join("link.eid");
+        std::os::unix::fs::symlink(&journal, &link).unwrap();
+        let link = link.to_string_lossy().into_owned();
+        set_ledger(&[ledger_entry_with_log("ledger-eid", "eidolon", &proj_path, Some(link.as_str()))]);
+        let (rec, _dump) = recording_terminal_with_claims(&root);
+
+        let out = session_resurrect(&flag_invocation(&["resurrect"], &[("project", "proj"), ("id", "ledger-eid")]));
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok, "msg: {}", out.message);
+        let skipped = out.data.as_ref().unwrap()["skipped"].as_array().unwrap().clone();
+        assert_eq!(skipped.len(), 1, "data: {:?}", out.data);
+        let reason = skipped[0]["reason"].as_str().unwrap();
+        assert!(reason.contains("has a logPath that is a symbolic link"), "reason: {reason}");
+        assert!(recorded_launches(&rec).is_empty(), "a link to a journal launched a terminal");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A quoted `'{cmd}'` template joins the launch into one shell line. A
+    /// journal path holding `$(id)`, a backtick, a `'` and a space must reach
+    /// the recorder as one argv word, byte for byte.
+    #[cfg(unix)]
+    #[test]
+    fn a_quoted_terminal_template_hands_a_hostile_journal_path_on_as_one_word() {
+        use std::os::unix::fs::PermissionsExt;
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(RESURRECT_ENV);
+        let (root, proj_path) = setup("resurrect-hostile-path");
+        let journal = root.join("it's $(id) `x` s.eid");
+        std::fs::write(&journal, "").unwrap();
+        let journal = journal.to_string_lossy().into_owned();
+        set_ledger(&[ledger_entry_with_log("ledger-eid", "eidolon", &proj_path, Some(journal.as_str()))]);
+        // The recorder takes the joined line as its one argument and splits it
+        // the way a shell would, so each word it prints is what the terminal runs.
+        let rec = root.join("terminal.rec");
+        let script = root.join("record-terminal.sh");
+        std::fs::write(
+            &script,
+            format!(
+                "#!/bin/sh\nprintf 'RUN\\n' >> '{rec}'\neval \"set -- $1\"\nfor a in \"$@\"; do printf '%s\\n' \"$a\" >> '{rec}'; done\n",
+                rec = rec.display()
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::env::set_var("AOIDE_TERMINAL", format!("{} '{{cmd}}'", script.display()));
+        std::env::set_var("WAYLAND_DISPLAY", "wayland-0");
+
+        let out = session_resurrect(&flag_invocation(&["resurrect"], &[("project", "proj"), ("id", "ledger-eid")]));
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok, "msg: {}", out.message);
+        let launches = recorded_launches(&rec);
+        assert_eq!(launches.len(), 1, "data: {:?}", out.data);
+        assert_eq!(
+            launches[0].last().map(String::as_str),
+            Some(journal.as_str()),
+            "the journal reaches the recorder as one word: {:?}",
+            launches[0]
+        );
 
         let _ = std::fs::remove_dir_all(&root);
     }

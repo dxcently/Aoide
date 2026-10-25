@@ -4134,7 +4134,7 @@ mod tests {
     }
 
     #[test]
-    fn eidolon_profile_pins_the_absent_fields_and_declarative_settings() {
+    fn eidolon_profile_pins_its_absent_fields_resume_arm_and_declarative_settings() {
         assert!(EIDOLON_PROFILE.permission_vocab.is_empty());
         assert!(EIDOLON_PROFILE.subagent_tools.is_empty());
         assert!(EIDOLON_PROFILE.permission_keys.is_none());

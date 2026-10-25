@@ -36,19 +36,20 @@
 //! **`--follow` blocks until Ctrl-C** and is CLI-only, the same shape
 //! `events tail`/`secrets watch` hold: a follow-style command makes no sense
 //! over MCP/A2A, where one connection would be parked until a human at the
-//! other end gave up. `--json` in follow mode prints each NEW record line
-//! verbatim (the line already IS the wire shape) rather than an envelope per
-//! tick.
+//! other end gave up. `--json` in follow mode prints each NEW record line,
+//! stripped of the characters no terminal may be handed (the line already IS
+//! the wire shape), rather than an envelope per tick.
 //!
-//! **`--json` carries `data.steps`, and `data.lines` stays exactly what it
-//! was.** `lines` is the raw records, byte for byte (unchanged, and what a
-//! `--follow` tick prints); `steps` is the same window PROJECTED — one object
-//! per emitted content block, in the record's own order, `{ id, ts, kind,
-//! text, error, clipped }` with `kind` in `thinking · say · tool · result ·
-//! settled · user · other`. It is bounded by construction, never by the
-//! journal: the `--tail` window, [`MAX_BLOCKS_PER_RECORD`] blocks of any one
-//! record, [`MAX_STEPS`] steps of the whole projection (`stepsOmitted` names
-//! how many the last bound dropped), and `clip` characters per step.
+//! **`--json` carries `data.steps`, and `data.lines` keeps the records' own
+//! shape.** `lines` is the records, each stripped of the characters no terminal
+//! may be handed (and what a `--follow` tick prints); `steps` is the same
+//! window PROJECTED — one object per emitted content block, in the record's own
+//! order, `{ id, ts, kind, text, error, clipped }` with `kind` in `thinking ·
+//! say · tool · result · settled · user · other`. It is bounded by
+//! construction, never by the journal: the `--tail` window,
+//! [`MAX_BLOCKS_PER_RECORD`] blocks of any one record, [`MAX_STEPS`] steps of
+//! the whole projection (`stepsOmitted` names how many the last bound dropped),
+//! and `clip` characters per step.
 //! `--clip detail` widens each block's text (the block's own line breaks kept,
 //! up to `DETAIL_MAX_LINES`, a few hundred characters) and adds a `tool_use`'s
 //! arguments; `line` (the default, and the only spelling the human body and
@@ -64,6 +65,7 @@ use super::common::{require_args, stage_error};
 use super::model::{load_stage, resolved_parent, sessions_path, SessionRecord, SessionsFile};
 use aoide_protocol::agents::{agent_profile, eidolon_trace_record, TraceRecord};
 use aoide_protocol::output::Outcome;
+use aoide_protocol::untrusted::strip_unsafe;
 use aoide_protocol::Invocation;
 use aoide_storage::addr::{self, LocalCandidate, Resolution};
 use serde_json::{json, Value};
@@ -226,10 +228,15 @@ fn clip_chars(s: &str, max: usize) -> (String, bool) {
     }
 }
 
+/// The text a line shows: flattened, then stripped. Every clip counts this, so
+/// the cut it reports is the cut of what is shown.
+fn flat_shown(s: &str) -> String {
+    strip_unsafe(&s.split_whitespace().collect::<Vec<_>>().join(" "))
+}
+
 /// [`one_line_clip`] with the cut reported.
 fn one_line_clipped(s: &str, max: usize) -> (String, bool) {
-    let flat = s.split_whitespace().collect::<Vec<_>>().join(" ");
-    clip_chars(&flat, max)
+    clip_chars(&flat_shown(s), max)
 }
 
 /// One whitespace-flattened line, clipped at a char boundary with a trailing
@@ -248,11 +255,8 @@ pub(in crate::graph) fn one_line_clip(s: &str, max: usize) -> String {
 /// paint a thousand-line step.
 fn detail_clipped(s: &str, max: usize) -> (String, bool) {
     let trimmed = s.trim_end();
-    let (kept, cut_lines) = if trimmed.lines().count() > DETAIL_MAX_LINES {
-        (trimmed.lines().take(DETAIL_MAX_LINES).collect::<Vec<_>>().join("\n"), true)
-    } else {
-        (trimmed.to_string(), false)
-    };
+    let cut_lines = trimmed.lines().count() > DETAIL_MAX_LINES;
+    let kept = trimmed.lines().take(DETAIL_MAX_LINES).map(strip_unsafe).collect::<Vec<_>>().join("\n");
     let (out, cut_chars) = clip_chars(&kept, max);
     (out, cut_lines || cut_chars)
 }
@@ -269,7 +273,12 @@ fn clip_block(text: &str, clip: Clip, max: usize) -> (String, bool) {
 /// the text's own internal whitespace — the tool-result first line, where a
 /// tab or a column of spaces is part of what the result printed.
 pub(in crate::graph) fn clip_keep_ws(s: &str, max: usize) -> String {
-    clip_chars(s, max).0
+    clip_chars(&kept_ws(s), max).0
+}
+
+/// A tab is one space, then the strip: what a kept line shows of its spacing.
+fn kept_ws(s: &str) -> String {
+    strip_unsafe(&s.replace('\t', " "))
 }
 
 /// One record's own timestamp as `hh:mm:ss` in LOCAL time — libc's
@@ -332,7 +341,7 @@ fn field(payload: Option<&Value>, key: &str, max: usize) -> String {
 fn assistant_steps(record: &TraceRecord, clip: Clip) -> Vec<Step> {
     let p = record.payload.as_ref();
     let step = |kind: &'static str, text: String, clipped: bool| Step {
-        id: record.id.clone(),
+        id: strip_unsafe(&record.id),
         ts_ms: record.ts_ms,
         kind,
         text,
@@ -373,7 +382,7 @@ fn assistant_steps(record: &TraceRecord, clip: Clip) -> Vec<Step> {
                     // step unbounded.
                     Clip::Detail => match block.get("input") {
                         Some(v) if !v.is_null() && v != &json!({}) => {
-                            let (args, cut) = clip_chars(&v.to_string(), DETAIL_ARGS_MAX);
+                            let (args, cut) = clip_chars(&strip_unsafe(&v.to_string()), DETAIL_ARGS_MAX);
                             (format!("{name} {args}"), name_clipped || cut)
                         }
                         _ => (name, name_clipped),
@@ -411,7 +420,7 @@ fn user_steps(record: &TraceRecord, clip: Clip) -> Vec<Step> {
         let (text, clipped) = clip_block(raw, clip, clip.text_max());
         if !text.is_empty() {
             steps.push(Step {
-                id: record.id.clone(),
+                id: strip_unsafe(&record.id),
                 ts_ms: record.ts_ms,
                 kind: "user",
                 text,
@@ -452,7 +461,7 @@ fn tool_result_text(payload: Option<&Value>, clip: Clip) -> (String, bool) {
             if first.is_empty() {
                 (String::new(), false)
             } else {
-                clip_chars(first, clip.result_max())
+                clip_chars(&kept_ws(first), clip.result_max())
             }
         }
     }
@@ -544,7 +553,7 @@ fn summary_text(record: &TraceRecord) -> (String, bool) {
     let cut = |key: &str| -> bool {
         p.and_then(|p| p.get(key))
             .and_then(Value::as_str)
-            .map(|s| s.split_whitespace().collect::<Vec<_>>().join(" ").chars().count() > TEXT_MAX)
+            .map(|s| flat_shown(s).chars().count() > TEXT_MAX)
             .unwrap_or(false)
     };
     match record.kind.as_str() {
@@ -606,7 +615,7 @@ fn steps_of(record: &TraceRecord, clip: Clip) -> Vec<Step> {
                 Vec::new()
             } else {
                 vec![Step {
-                    id: record.id.clone(),
+                    id: strip_unsafe(&record.id),
                     ts_ms: record.ts_ms,
                     kind: "result",
                     text,
@@ -621,7 +630,7 @@ fn steps_of(record: &TraceRecord, clip: Clip) -> Vec<Step> {
                 Vec::new()
             } else {
                 vec![Step {
-                    id: record.id.clone(),
+                    id: strip_unsafe(&record.id),
                     ts_ms: record.ts_ms,
                     kind: other_kind(&record.kind),
                     text,
@@ -637,7 +646,7 @@ fn steps_of(record: &TraceRecord, clip: Clip) -> Vec<Step> {
 /// the count dropped reported — the ONE place a whole window becomes steps, so
 /// the JSON and the renderer cannot disagree about a record's blocks. A line
 /// that is not a readable record contributes no step (it still gets its own `?`
-/// line in the human render, and its raw line in `data.lines`).
+/// line in the human render, and its line in `data.lines`).
 pub(in crate::graph) fn steps_of_lines(lines: &[&String], clip: Clip) -> (Vec<Step>, usize) {
     let mut steps: Vec<Step> = Vec::new();
     for line in lines {
@@ -705,9 +714,9 @@ fn prefixed_field(payload: Option<&Value>, key: &str, prefix: &str, max: usize) 
 fn render_line(record: &TraceRecord, dim: bool) -> String {
     let mut line = format!(
         "#{}  {}  {}",
-        record.id,
+        strip_unsafe(&record.id),
         hh_mm_ss_local(record.ts_ms),
-        record.kind
+        strip_unsafe(&record.kind)
     );
     let s = render_steps(&steps_of(record, Clip::Line), dim);
     if !s.is_empty() {
@@ -897,17 +906,19 @@ pub fn session_trace(inv: &Invocation) -> Outcome {
             }
         },
     };
+    let id = strip_unsafe(&id);
 
     // The trace is a HARNESS CAPABILITY, never a name check: a profile whose
     // `TranscriptSpec::trace` is `None` keeps no trace file at all, and
     // saying so is the honest answer (the capability test is why no consumer
     // here writes `if agent == "eidolon"`).
-    let name = label(&id, &file.sessions, &ids, &host);
+    let name = strip_unsafe(&label(&id, &file.sessions, &ids, &host));
     let row = file.sessions.iter().find(|r| r.session_id == id);
     let agent = row
         .map(|r| r.agent.clone())
         .or_else(|| ended.as_ref().map(|e| e.agent.clone()))
         .unwrap_or_default();
+    let agent = strip_unsafe(&agent);
     let Some(profile) = agent_profile(&agent) else {
         return Outcome::error(
             cmd,
@@ -962,24 +973,24 @@ pub fn session_trace(inv: &Invocation) -> Outcome {
                 "`{name}` has no readable trace at {} — nothing on this host resolves one for it: \
                  a producer that publishes its journal as records (a mirror file, or its own \
                  read-only export door) and a presence that names it",
-                path.display()
+                strip_unsafe(&path.to_string_lossy())
             ),
         )
         .with_data(json!({
             "reason": "no-trace",
             "sessionId": id,
-            "presence": path.to_string_lossy(),
+            "presence": strip_unsafe(&path.to_string_lossy()),
         }));
     };
 
     // An ended session has no presence left to follow: its window is printed once.
-    if follow && ended.is_none() {
+    if follow && ended.is_none() && !row.is_some_and(|r| r.state == "done") {
         return follow_trace(cmd, &id, &name, &path, read_trace, tail, json_mode);
     }
 
     let shown = last_lines(&lines, tail);
     let dim = stdout_is_terminal();
-    let raw: Vec<String> = shown.iter().map(|l| (*l).clone()).collect();
+    let raw: Vec<String> = shown.iter().map(|l| strip_unsafe(l.as_str())).collect();
     let body: Vec<String> = shown.iter().map(|l| render_any(l, dim)).collect();
     let mut message = match &ended {
         Some(entry) => format!("{} record(s) · {name} · ended {}", body.len(), entry.ended_at),
@@ -998,7 +1009,7 @@ pub fn session_trace(inv: &Invocation) -> Outcome {
     Outcome::ok(cmd, message)
         .with_data(json!({
             "sessionId": id,
-            "trace": path.to_string_lossy(),
+            "trace": strip_unsafe(&path.to_string_lossy()),
             "tail": tail,
             "records": body.len(),
             "lines": raw,
@@ -1007,6 +1018,16 @@ pub fn session_trace(inv: &Invocation) -> Outcome {
             "stepsOmitted": omitted,
             "endedAt": ended.as_ref().map(|e| e.ended_at.clone()),
         }))
+}
+
+/// What `--follow` prints for one trace line: the line, stripped, in JSON mode,
+/// else its human render.
+fn followed_line(line: &str, json_mode: bool, dim: bool) -> String {
+    if json_mode {
+        strip_unsafe(line)
+    } else {
+        render_any(line, dim)
+    }
 }
 
 /// `--follow`: print the current window, then re-read the trace every
@@ -1030,11 +1051,7 @@ fn follow_trace(
     }
     let dim = stdout_is_terminal();
     let emit = |line: &str| {
-        if json_mode {
-            println!("{line}");
-        } else {
-            println!("{}", render_any(line, dim));
-        }
+        println!("{}", followed_line(line, json_mode, dim));
         let _ = std::io::stdout().flush();
     };
 
@@ -1070,7 +1087,7 @@ fn follow_trace(
     Outcome::ok(cmd, format!("followed {printed} record(s) · {name}"))
         .with_data(json!({
             "sessionId": id,
-            "trace": path.to_string_lossy(),
+            "trace": strip_unsafe(&path.to_string_lossy()),
             "followed": true,
             "printed": printed,
         }))
@@ -1082,6 +1099,7 @@ mod tests {
     use aoide_protocol::Door;
     use crate::graph::testutil::{unique_stage, EnvVars};
     use aoide_protocol::output::Status;
+    use aoide_protocol::untrusted::is_unsafe;
     use std::collections::BTreeMap;
 
     // The design doc's own sample lines, verbatim (EIDOLON-TRACE.md's "Line"
@@ -1313,7 +1331,7 @@ mod tests {
         assert_eq!(data["records"], 6, "the whole short trace fits under the default tail");
         assert!(data["trace"].as_str().unwrap().ends_with("Aoide-7d23.jsonl"));
         let lines = data["lines"].as_array().unwrap();
-        assert_eq!(lines[0].as_str().unwrap(), START, "--json passes the raw lines through verbatim");
+        assert_eq!(lines[0].as_str().unwrap(), START, "--json passes a clean line through unchanged");
         assert!(out.message.contains("6 record(s)"), "{}", out.message);
         // The human body: one line per record, `#id  hh:mm:ss  kind  summary`.
         let body: Vec<&str> = out.message.lines().skip(1).collect();
@@ -1676,7 +1694,7 @@ mod tests {
         assert_eq!(ok.len(), 1);
         assert_eq!(ok[0].kind, "result");
         assert!(!ok[0].error);
-        assert_eq!(ok[0].text, "1\t# Per-rice widget slots", "first line only, no `!` prefix");
+        assert_eq!(ok[0].text, "1 # Per-rice widget slots", "first line only, no `!` prefix");
         assert!(!ok[0].text.contains("catalog"));
 
         let err = steps_of(&eidolon_trace_record(RESULT_ERR).unwrap(), Clip::Detail);
@@ -1757,7 +1775,7 @@ mod tests {
         assert!(!steps.iter().any(|s| s.text.starts_with("r0 ")));
 
         // A malformed line contributes no step (it keeps its `?` human line and
-        // its raw line in `data.lines`), and a readable one after it still does.
+        // its line in `data.lines`), and a readable one after it still does.
         let lines = vec!["{ not json".to_string(), START.to_string()];
         let refs: Vec<&String> = lines.iter().collect();
         let (steps, omitted) = steps_of_lines(&refs, Clip::Line);
@@ -1800,7 +1818,7 @@ mod tests {
         assert_eq!(steps[2]["id"], "2", "the record's own id");
         assert!(steps[2]["ts"].as_i64().unwrap() > 0);
         assert_eq!(steps[5]["error"], false);
-        // `data.lines` is untouched — raw records, byte for byte.
+        // `data.lines` is each record, stripped; a clean one is unchanged.
         let lines = data["lines"].as_array().unwrap();
         assert_eq!(lines[0].as_str().unwrap(), START);
         assert_eq!(lines[2].as_str().unwrap(), ASSISTANT);
@@ -1824,7 +1842,7 @@ mod tests {
         assert_eq!(detail["clip"], "detail");
         assert_eq!(
             detail["lines"], full_lines,
-            "the clip never touches the raw lines"
+            "the clip never touches the lines"
         );
         let tool = detail["steps"]
             .as_array()
@@ -1859,6 +1877,123 @@ mod tests {
             &[("clip", "line"), ("json", "true")],
         ));
         assert_eq!(plain.data.unwrap()["steps"], explicit.data.unwrap()["steps"]);
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    fn no_unsafe(s: &str) -> bool {
+        s.chars().all(|c| !is_unsafe(c))
+    }
+
+    /// Journal lines whose text, thinking, tool call and tool result carry what
+    /// no terminal may be handed: ESC, BEL, an OSC 52 clipboard write, U+009B
+    /// and the bidi override U+202E. The last line is not JSON and holds a raw
+    /// ESC.
+    fn hostile_lines() -> Vec<String> {
+        vec![
+            json!({"id": 1, "parent": 0, "ts_ms": 1789603005570u64, "kind": {"UserMessage": {"role": "user", "content": [{"type": "text", "text": "ask \u{1b}]52;c;cGF0aA==\u{7} visible \u{202e}rtl"}]}}}).to_string(),
+            json!({"id": 2, "parent": 1, "ts_ms": 1789603009102u64, "kind": {"AssistantMessage": {"role": "assistant", "content": [
+                {"type": "thinking", "thinking": "\u{1b}[2mvisible thought\u{7}\u{9b}31m"},
+                {"type": "text", "text": "visible say \u{202e}rtl"},
+                {"type": "tool_use", "id": "call_h", "name": "read\u{1b}", "input": {"path": "a\u{9b}b"}}
+            ]}}}).to_string(),
+            json!({"id": 3, "parent": 2, "ts_ms": 1789603009140u64, "kind": {"ToolResult": {"tool_use_id": "call_h", "content": "first \u{1b}[31mred\u{7} visible\nsecond \u{202e}", "is_error": false}}}).to_string(),
+            "torn \u{1b}[31m raw line, not json".to_string(),
+        ]
+    }
+
+    #[test]
+    fn a_line_clip_counts_what_it_shows_after_the_strip() {
+        assert_eq!(one_line_clipped("a\u{1b}bc", 3), ("abc".to_string(), false));
+    }
+
+    #[test]
+    fn a_detail_block_strips_each_kept_line_and_keeps_its_breaks() {
+        assert_eq!(detail_clipped("x\u{1b}y\nz\u{7}\n", 100), ("xy\nz".to_string(), false));
+    }
+
+    #[test]
+    fn a_kept_tab_is_one_space_and_a_control_goes_before_the_clip() {
+        assert_eq!(clip_keep_ws("a\tb\u{1b}c", 10), "a bc");
+    }
+
+    #[test]
+    fn a_tool_argument_holds_no_unsafe_character_in_the_detail_clip() {
+        let line = json!({"id": 9, "parent": 8, "ts_ms": 1789603009102u64, "kind": {"AssistantMessage": {"role": "assistant", "content": [{"type": "tool_use", "id": "call_t", "name": "read", "input": {"path": "a\u{202e}b"}}]}}}).to_string();
+        let (steps, _) = steps_of_lines(&[&line], Clip::Detail);
+        assert_eq!(steps.len(), 1, "{steps:?}");
+        assert!(no_unsafe(&steps[0].text), "{:?}", steps[0].text);
+        assert!(steps[0].text.contains("ab"), "{:?}", steps[0].text);
+    }
+
+    #[test]
+    fn a_run_of_controls_the_strip_removes_is_not_a_cut() {
+        let text = format!("{}ok", "\u{1b}".repeat(150));
+        let line = json!({"id": 5, "parent": 4, "ts_ms": 1789626700000u64, "kind": {"ExternalMessage": {"from": "orchestrator", "channel": null, "text": text}}}).to_string();
+        let (steps, _) = steps_of_lines(&[&line], Clip::Line);
+        assert_eq!(steps.len(), 1, "{steps:?}");
+        assert_eq!(steps[0].text, "orchestrator: ok");
+        assert!(!steps[0].clipped, "{steps:?}");
+    }
+
+    #[test]
+    fn a_hostile_journal_prints_no_unsafe_character_one_shot() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&env_keys());
+        let root = roster_free_fixture("trace-hostile-one");
+        let lines = hostile_lines();
+        let refs: Vec<&str> = lines.iter().map(String::as_str).collect();
+        let journal = journal_fixture(&root.join("journals"), "Aoide-hostile", &refs);
+        ended_eidolon("Aoide-hostile", "loud-wren", &journal);
+
+        let out = session_trace(&trace_invocation(&["Aoide-hostile"], &[]));
+        assert_eq!(out.status, Status::Ok, "msg: {}", out.message);
+        assert!(out.message.chars().all(|c| c == '\n' || !is_unsafe(c)), "message: {:?}", out.message);
+        assert!(out.message.contains("visible thought"), "{}", out.message);
+        assert!(out.message.contains("visible say"), "{}", out.message);
+        let data = out.data.clone().unwrap();
+        for raw in data["lines"].as_array().unwrap() {
+            assert!(no_unsafe(raw.as_str().unwrap()), "line: {raw}");
+        }
+        let steps = data["steps"].as_array().unwrap();
+        assert!(!steps.is_empty());
+        for step in steps {
+            for key in ["id", "kind", "text"] {
+                assert!(no_unsafe(step[key].as_str().unwrap()), "{key}: {step}");
+            }
+        }
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_followed_json_line_holds_no_unsafe_character() {
+        for line in hostile_lines() {
+            let printed = followed_line(&line, true, false);
+            assert!(no_unsafe(&printed), "{printed:?}");
+        }
+    }
+
+    #[test]
+    fn a_done_record_follows_its_window_and_returns() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&env_keys());
+        let root = roster_free_fixture("trace-follow-done");
+        let lines = [START, USER, ASSISTANT, RESULT, BUDGET, SETTLED];
+        let journal = journal_fixture(&root.join("journals"), "Aoide-follow-done", &lines);
+        roster_with(&root, "Aoide-follow-done", "done", &journal);
+
+        // A follow that loops never returns: the deadline fails the test instead.
+        let inv = trace_invocation(&["Aoide-follow-done"], &[("follow", "true")]);
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = tx.send(session_trace(&inv));
+        });
+        let out = rx
+            .recv_timeout(std::time::Duration::from_secs(30))
+            .expect("--follow on a done record returns");
+        assert_eq!(out.status, Status::Ok, "msg: {}", out.message);
+        assert_eq!(out.data.clone().unwrap()["records"], 6);
 
         let _ = std::fs::remove_dir_all(&root);
     }

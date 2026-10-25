@@ -3912,14 +3912,18 @@ listing `--after` — before each export, without caching the answer. An
 unavailable or negative answer prevents that export. Probe and export are
 separate invocations; replacing the runtime between them can still race.
 
-`state/stage/sessions.json`'s own record for such a session does not carry
-any path — the trace is resolved through the producer's presence metadata at
+The record in `state/stage/sessions.json` for such a session carries its
+`logPath`, the journal the session named. `aoide session trace` takes its
+sources in order: the presence metadata at
 `$XDG_RUNTIME_DIR/eidolon/<id>/meta.json`, whose `log` field every generation
-writes and whose `trace` field the installed one adds. Aoide's presence parse
-yields both, and `aoide_protocol::agents::eidolon_transcript_locate` answers the
-mirror while it is current, else the journal when the door is there, else
-`meta.json` as before. `aoide session trace` resolves a path
-the same way, through `TranscriptSpec::locate` — never a path of its own.
+writes and whose `trace` field the installed one adds; then the record's
+`logPath`, or, for a session that has left the roster, the newest exact ledger
+line's `logPath`. Each `logPath` is a source only outside `session_logs_dir()`.
+Aoide's presence parse yields both, and
+`aoide_protocol::agents::eidolon_transcript_locate` answers the mirror while it
+is current, else the journal when the door is there, else `meta.json` as before.
+`aoide session trace` resolves a path the same way, through
+`TranscriptSpec::locate` — never a path of its own.
 
 **Line.** `serde_json::to_string(&Record)` + `\n` — the record's own serde
 form, which `Record`/`RecordKind` already derive, so the shape is not
@@ -3975,12 +3979,14 @@ shows its thinking (dimmed, cut) then its text then each `→ tool(name)`, a
 tool result shows its first line prefixed `!` when `is_error`, and a settled
 turn shows its stop reason and input/output tokens. `--tail N` shows the
 last N records (default 50); `--follow` re-reads for new lines until Ctrl-C
-(CLI-only); `--json` passes the raw lines through unchanged. Read-only — no
+(CLI-only); `--json` passes the lines through, each stripped of the characters
+a terminal may not be handed. Read-only — no
 stage write, no daemon. A session whose harness keeps no trace, or whose
 presence names none, is a taught error naming which of the two it is, never
 an empty listing. A session that has left the roster is named by its ledger
 line, by exact `sessionId` only: its journal is the trace, its message says it
-ended and when, and `--follow` prints the window and returns.
+ended and when, and `--follow` prints the window and returns. A `done` record
+prints its window the same way, and `--follow` returns for it too.
 
 ### `state/stage/projects.json` — **v0**
 
@@ -5797,7 +5803,11 @@ of the same session finds it and is refused. The shape, with one claim:
   `sessions.json` that is not `done`, or while `newId` names no session and
   the claim's `at` is under 60 seconds old. The bound is conduct's
   `RESUME_CLAIM_BOUND_SECS`: a spawn's registration budget is 3 seconds, and a
-  terminal can take longer than that to register its session.
+  terminal can take longer than that to register its session. A claim stamped
+  more than 5 seconds ahead of the clock is stale and blocks nothing, and the
+  next claim drops it; within those 5 seconds its age reads as 0. A clock step
+  of more than 5 seconds backward, or more than 60 seconds forward, during a
+  launch's registration can let a second launch through.
 
 ### `.aoide/project.json` — **v0** (command-defrag lane U1, 2026-08-27;
 consumed by `resurrect`'s bare mode at U2, same lane)
