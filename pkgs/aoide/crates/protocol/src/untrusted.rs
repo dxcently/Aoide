@@ -473,11 +473,14 @@ mod tests {
     }
 
     /// The characters a JSON writer must spell: ESC, CR, LF and TAB (JSON's own
-    /// escapes for the last three, `\u001b` for ESC), U+009B (raw in serde_json),
-    /// a bidi override, a zero-width space, a combining mark, a tag character past
-    /// the BMP, a backslash and a quote.
-    const JSON_SPELLED: [char; 11] =
-        ['\u{1b}', '\r', '\n', '\t', '\u{9b}', '\u{202e}', '\u{200b}', '\u{301}', '\u{e0001}', '\\', '"'];
+    /// escapes for the last three, `\u001b` for ESC), DEL, U+009B and the two
+    /// line separators (each raw in serde_json), a bidi override, a zero-width
+    /// space, a combining mark, a tag character past the BMP, a backslash and a
+    /// quote.
+    const JSON_SPELLED: [char; 14] = [
+        '\u{1b}', '\r', '\n', '\t', '\u{7f}', '\u{9b}', '\u{2028}', '\u{2029}', '\u{202e}', '\u{200b}', '\u{301}',
+        '\u{e0001}', '\\', '"',
+    ];
 
     /// The characters of `json` that [`would_spell`] names and that stand as
     /// themselves: inside a string, outside a JSON escape.
@@ -522,6 +525,22 @@ mod tests {
         }
     }
 
+    /// DEL and the two line separators are each written as a JSON `\u` escape, in
+    /// a key and in a string, in both forms. The check names the escape itself,
+    /// not [`would_spell`], so a character that stopped being spelled fails here.
+    #[test]
+    fn visible_json_writes_del_and_the_line_separators_as_u_escapes() {
+        for (c, escape) in [('\u{7f}', r"\u007f"), ('\u{2028}', r"\u2028"), ('\u{2029}', r"\u2029")] {
+            let mut map = serde_json::Map::new();
+            map.insert(format!("k{c}"), serde_json::Value::String(format!("v{c}")));
+            let value = serde_json::Value::Object(map);
+            for out in [visible_json(&value), visible_json_line(&value)] {
+                assert_eq!(out.matches(escape).count(), 2, "{c:?}: {out}");
+                assert!(!out.contains(c), "{c:?}: {out}");
+            }
+        }
+    }
+
     /// A character past the BMP is written as its UTF-16 pair, as JSON needs.
     #[test]
     fn visible_json_writes_a_character_past_the_bmp_as_a_surrogate_pair() {
@@ -556,6 +575,19 @@ mod tests {
         assert!(out.find(r#""a""#) < out.find(r#""b""#), "{out}");
         assert!(out.find(r#""c""#) < out.find(r#""d""#), "{out}");
         assert!(out.find(r#""y""#) < out.find(r#""z""#), "{out}");
+    }
+
+    /// A two-key object prints its keys in sorted order, in both forms, whichever
+    /// order it was built in.
+    #[test]
+    fn visible_json_prints_a_two_key_object_sorted() {
+        let mut map = serde_json::Map::new();
+        map.insert("zeta".to_string(), serde_json::json!(1));
+        map.insert("alpha".to_string(), serde_json::json!(2));
+        let value = serde_json::Value::Object(map);
+        assert_eq!(visible_json_line(&value), r#"{"alpha":2,"zeta":1}"#);
+        let pretty = visible_json(&value);
+        assert!(pretty.find(r#""alpha""#) < pretty.find(r#""zeta""#), "{pretty}");
     }
 
     /// `visible` spells a character exactly when [`would_spell`] names it, for

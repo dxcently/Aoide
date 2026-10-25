@@ -50,22 +50,24 @@ other crate in this workspace sits above.
   `BRIEF_MAX`/`list_description` live here.
 - `suggest` — the one edit-distance matcher (`closest`) behind every
   did-you-mean, and `lead` (the first clause of a description).
-- `untrusted` — text this process did not write, made safe to print:
-  `is_unsafe` (the one table — every control character, every Unicode `Cf`
-  mark, the invisible fillers and variation selectors, the line and paragraph
-  separators, and the combining grapheme joiner and the Mongolian and Khmer
-  fillers), `strip_unsafe`,
-  `clip_flat` (whitespace flattened, clipped by characters with `…`), and
-  `clean_line` (the two at `LINE_MAX`, 200). `visible` and `visible_held` are
-  the approver's escape over the same table: every character `is_unsafe`
-  names is spelled as an escape, never stripped, and `visible_held` spells
-  every non-ASCII character too. `visible_json` (pretty) and
-  `visible_json_line` (one line) are the same escape for an approver's JSON
-  value: object keys sorted at every depth, and every spelled character a
-  JSON `\uXXXX` escape, so the text parses back to the same value. Every door
-  that prints a peer's bytes cleans them here: `aoide-client` the words of a
-  far door's mail answer, `aoide-conduct`'s graph views (re-exported as
-  `graph::clean_line`), and `aoide-server`'s A2A door.
+- `untrusted` — text this process did not write, made safe to print. The one
+  table is `would_spell`: every character `visible` and the JSON writers spell.
+  It is `is_unsafe` (every control character, every Unicode `Cf` mark, the
+  invisible fillers and variation selectors, the line and paragraph separators,
+  and the combining grapheme joiner and the Mongolian and Khmer fillers) plus
+  the backslash, every whitespace but a plain space, and the marks and
+  ignorables. `is_unsafe` is the subset that `strip_unsafe` removes.
+  `clip_flat` flattens whitespace and clips by characters with `…`, and
+  `clean_line` is the two at `LINE_MAX`, 200. `visible` and `visible_held` are
+  the approver's escape over the same table: every character `would_spell`
+  names is spelled as an escape, never stripped, and `visible_held` spells every
+  non-ASCII character too. `visible_json` (pretty) and `visible_json_line` (one
+  line) are the same escape for an approver's JSON value: object keys sorted at
+  every depth, and every spelled character a JSON `\uXXXX` escape, so the text
+  parses back to the same value. Every door that prints a peer's bytes cleans
+  them here: `aoide-client` the words of a far door's mail answer,
+  `aoide-conduct`'s graph views (re-exported as `graph::clean_line`), and
+  `aoide-server`'s A2A door.
 - `invocation` — `Invocation`, the parsed call handed to a dispatcher.
 - `output` — `Outcome` + exit codes, the generic envelope every command
   returns; also the taught-error shape (`Outcome::refuse`, `Kind`, `Fix`,
