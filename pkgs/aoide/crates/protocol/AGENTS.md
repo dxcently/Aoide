@@ -239,9 +239,11 @@
   `DIALOG_INFRA_FAILURE_EXIT` (3), shared by zenity and every provider.
 - **A unix connect that must not hang goes through
   `local_socket::connect_bounded`, never a bare `UnixStream::connect`.** A full
-  listen backlog makes the bare call wait forever. The socket `connect_bounded`
-  opens is close-on-exec, so a child spawned meanwhile never inherits it. Its
-  poll branch (`EINPROGRESS`) has no test: a Linux unix connect never returns
+  listen backlog makes the bare call wait forever. On Linux the socket
+  `connect_bounded` opens is close-on-exec from `socket(2)` on, so a child
+  spawned meanwhile never inherits it; elsewhere the flag is set just after
+  `socket(2)`, and a child spawned in that instant can. Its poll branch
+  (`EINPROGRESS`) has no test: a Linux unix connect never returns
   `EINPROGRESS`, so only other unix targets reach that branch.
 
 ## Extension points

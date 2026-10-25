@@ -697,19 +697,24 @@ in the message.
   `aoide_protocol::local_socket::connect_bounded`, then the write and each
   read. The scan probes every directory at once, one scoped thread each, and
   reads a `meta.json` only where a socket answered or was held aside. The
-  outcome sorts three ways. `Answered`: a reply whose top-level object has
-  `"ok": true`, live. `NothingListens`: no socket file, or a connect refused
-  (`connect_failure`); not live, never a scan failure, and its `meta.json` is
-  never read. `Silent`: held, but no reply by the deadline, a connect that
-  timed out on a full backlog, a connect that failed any other way (fd
-  pressure, a permission, a path the address cannot hold), a reply over 4096
-  bytes, or a reply whose `ok` is not `true`. A silent directory is held aside
-  and is live only while its `meta.json`'s `pid` is a row of the process
-  table, as Eidolon's own sweep pairs silence with the registration's pid.
-  Residual: if another process reuses the pid
-  of a session whose socket is silent, that session stays live until that
-  process exits, so the roster shows it and the resume gate skips its
-  journal.
+  deadline bounds the probes only: the listing before it (the root's
+  `read_dir` and each entry's stat), the `meta.json` reads after it and the
+  process table (`ps`) have no bound of their own. The outcome sorts three
+  ways. `Answered`: a reply whose top-level object has `"ok": true`, live.
+  `NothingListens`: no socket file, or a connect refused (`connect_failure`);
+  not live, never a scan failure, and its `meta.json` is never read.
+  `Silent`: held, but no reply by the deadline, a connect that timed out on a
+  full backlog, a connect that failed any other way (fd pressure, a
+  permission, a path the address cannot hold), a reply over 4096 bytes, or a
+  reply whose `ok` is not `true`. A silent directory is held aside and is live
+  only while its `meta.json`'s `pid` is a row of the process table, as
+  Eidolon's own sweep pairs silence with the registration's pid. A
+  `meta.json` read that fails for any reason but the file's absence, fd
+  pressure included, makes the whole pass `Unknown`: the sweep changes
+  nothing, and the resume gate skips every by-journal candidate for that
+  pass. Residual: if another process reuses the pid of a session whose socket
+  is silent, that session stays live until that process exits, so the roster
+  shows it and the resume gate skips its journal.
 
 - **Aoide never sweeps or writes under the eidolon presence root.**
   `$XDG_RUNTIME_DIR/eidolon` is read-only territory: this crate lists it and

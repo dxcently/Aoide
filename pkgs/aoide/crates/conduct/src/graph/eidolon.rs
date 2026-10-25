@@ -552,7 +552,9 @@ const PRESENCE_DEADLINE: Duration = Duration::from_millis(250);
 ///   * [`Probe::Answered`]: a reply whose top-level object has `"ok": true`
 ///     came back in time. Live.
 ///   * [`Probe::NothingListens`]: no socket file, or a connect refused
-///     ([`connect_failure`]). Not live, as a released flock is not.
+///     ([`connect_failure`]). Not live, as a released flock is not. A socket
+///     bound but not yet listening refuses a connect too, so a session in its
+///     first instant reads as nothing listening for that pass.
 ///   * [`Probe::Silent`]: the socket is held, but no such reply came back by
 ///     the deadline. That covers every other connect failure: fd pressure or
 ///     a permission error does not end a live session's record. It covers a
@@ -2094,7 +2096,11 @@ mod tests {
         let dir = unique_stage("eidolon-socket-silent");
         let held = dir.join("held");
         let _held_open = silent_socket(&held);
-        assert_eq!(presence_probe(&held, presence_deadline()), Probe::Silent, "accepted, never answered");
+        let (_took, probe) = aoide_test_support::finishes_within(Duration::from_secs(1), move || {
+            presence_probe(&held, presence_deadline())
+        })
+        .expect("a listener that never replies must not hang the probe");
+        assert_eq!(probe, Probe::Silent, "accepted, never answered");
         std::fs::remove_dir_all(dir).ok();
     }
 
@@ -2254,8 +2260,13 @@ mod tests {
         std::env::set_var("XDG_RUNTIME_DIR", &root);
         let refused = write_presence_meta(&presence_root(), "refused", 4242);
         let _refusing = silent_socket(&refused.join("sock"));
-        // Unreachable for this uid: the connect is EACCES (no root in tests).
         std::fs::set_permissions(refused.join("sock"), std::fs::Permissions::from_mode(0o000)).unwrap();
+        let connect = std::os::unix::net::UnixStream::connect(refused.join("sock"));
+        assert_eq!(
+            connect.err().map(|e| e.kind()),
+            Some(std::io::ErrorKind::PermissionDenied),
+            "the mode 000 socket must refuse this uid; this test cannot run as root"
+        );
         let answering = write_presence_meta(&presence_root(), "answering", 4343);
         let _answering = answering_socket(&answering.join("sock"));
 

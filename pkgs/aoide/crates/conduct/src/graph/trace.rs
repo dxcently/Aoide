@@ -986,7 +986,7 @@ pub fn session_trace(inv: &Invocation) -> Outcome {
     }
 
     let shown = last_lines(&lines, tail);
-    let raw: Vec<String> = shown.iter().map(|l| strip_unsafe(l.as_str())).collect();
+    let stripped: Vec<String> = shown.iter().map(|l| strip_unsafe(l.as_str())).collect();
     let body: Vec<String> = shown.iter().map(|l| render_any(l, dim)).collect();
     let mut message = match &ended {
         Some(entry) => format!("{} record(s) · {name} · ended {}", body.len(), strip_unsafe(&entry.ended_at)),
@@ -1008,7 +1008,7 @@ pub fn session_trace(inv: &Invocation) -> Outcome {
             "trace": strip_unsafe(&path.to_string_lossy()),
             "tail": tail,
             "records": body.len(),
-            "lines": raw,
+            "lines": stripped,
             "clip": clip.name(),
             "steps": steps,
             "stepsOmitted": omitted,

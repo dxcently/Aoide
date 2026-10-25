@@ -253,17 +253,18 @@ presence at `$XDG_RUNTIME_DIR/eidolon/<id>/{meta.json,sock}` is read, never
 swept — a stale directory is the producer's own to clean up — and liveness is
 the presence socket's answer to `{"op":"ping"}`, inside one 250ms deadline
 that every probe shares, counted from the end of the listing: never a stat,
-never `/proc`. A socket whose reply has a top-level `"ok": true` is live; one
-where nothing listens (no socket file, or a connect refused) is not; a silent
-one (no reply by the deadline, a connect that timed out on a full backlog, or
-any other connect failure) is live while its pid is in the process table, as
-Eidolon's own sweep pairs silence with the pid. The residual: a silent socket
-whose pid another process reuses stays live until that process exits, so the
-roster shows it and the resume gate skips its journal. Unlike a desktop Codex
-thread this
-IS an agent session (`kind:"agent"`), so it is a normal dedup/staleness
-candidate and its `parentSessionId` is resolved here (the first conducted
-ancestor up the presence pid's own process chain). The sweep owns only the
+never `/proc`. The deadline bounds the probes only: the listing, the
+`meta.json` reads and the process table are outside it. A socket whose reply
+has a top-level `"ok": true` is live; one where nothing listens (no socket
+file, or a connect refused) is not; a silent one (no reply by the deadline, a
+connect that timed out on a full backlog, or any other connect failure) is live
+while its pid is in the process table, as Eidolon's own sweep pairs silence
+with the pid. The residual: a silent socket whose pid another process reuses
+stays live until that process exits, so the roster shows it and the resume
+gate skips its journal. Unlike a desktop Codex thread this IS an agent session
+(`kind:"agent"`), so it is a normal dedup/staleness candidate and its
+`parentSessionId` is resolved here (the first conducted ancestor up the
+presence pid's own process chain). The sweep owns only the
 records it enrolled: `agent:"eidolon"` is a label a caller may choose for a
 conduct-owned wrapper of its own (`spawn --task … --agent eidolon -- eidolon
 run …`), so ownership is read off the record's own conduct facts (`conductable`,
