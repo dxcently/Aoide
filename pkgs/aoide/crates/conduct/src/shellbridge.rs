@@ -601,9 +601,12 @@ fn run_core_bounded(
     run_bin_bounded(&daemon::bin::core_bin(), argv, timeout)
 }
 
-/// Run `argv` through `bin` — a sibling resolver's answer
-/// (`daemon::bin::core_bin()`, or a caller's own sibling resolver), never a bare name relying on
-/// PATH alone — with a WALL-CLOCK bound that actually holds.
+/// Run `argv` through `bin`, an absolute path that the caller resolved, with
+/// a WALL-CLOCK bound that actually holds. Three kinds of caller resolve it:
+/// the core binary (`daemon::bin::core_bin()`), a caller's own sibling
+/// resolver, and a system tool with no sibling, which `graph/job.rs` finds on
+/// PATH with `pty.rs`'s `resolve_program`. No caller passes a bare name that
+/// relies on PATH alone.
 /// `Ok((exited_ok, stdout, stderr))`, or
 /// `Err(reason)` when no complete answer arrived: the child could not be
 /// spawned, it outlived `timeout` (killed and REAPED here — `wait`, so no

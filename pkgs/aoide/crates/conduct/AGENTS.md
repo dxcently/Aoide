@@ -2976,11 +2976,12 @@ in the message.
   written through either. `remove` deletes only a unit that still hashes to
   the record (`unit_state`). It refuses, deleting nothing, when a unit was
   edited or is a link, and it skips a unit that is already gone. Two windows
-  stay open to a same-uid writer. `add` checks each slot, then renames its
-  units into place: a unit that appears after the check is replaced, not
-  written through. `remove` runs a bounded `disable --now` between its hash
-  check and its delete, so a unit swapped into that gap is deleted, and
-  `remove` still reports it removed. Pinned by
+  stay open to a same-uid writer. `add` checks each slot, then renames its units
+  into place: a file that appears in a slot after the check is replaced, and a
+  link there is written through, since storage's `atomic_write` follows one link
+  at its target (the storage hardening lane takes that). `remove` runs a bounded
+  `disable --now` between its hash check and its delete, so a unit swapped into
+  that gap is deleted, and `remove` still reports it removed. Pinned by
   `a_symlinked_or_foreign_unit_in_the_way_is_refused_and_never_written_through`,
   `a_job_whose_units_are_both_gone_is_removed_and_its_name_can_be_added_again`
   and
@@ -2995,16 +2996,24 @@ in the message.
   `remove` also refuse a door that cannot approve. Every verb refuses before
   its first write when the host is not Linux or `systemctl --user show` fails.
   `add` and `remove` make that probe before they take the stage lock, and each
-  tool call is bounded by `JOB_TOOL_WAIT` (10 s). Pinned by
+  tool call is bounded by `JOB_TOOL_WAIT` (10 s, plus up to 2 s while its pipes
+  drain; a child in uninterruptible sleep is never reaped, and its call waits
+  with it). A call that gives no answer is never read as a no. Pinned by
   `the_job_verbs_open_to_the_cli_and_daemon_doors_only`,
   `a_host_that_is_not_linux_refuses_every_verb_and_writes_nothing`,
   `a_failing_user_manager_probe_refuses_add_with_zero_files` and
   `a_probe_that_never_exits_refuses_add_in_bound_and_leaves_the_lock_free`.
-- **A journal line is data.** `runs` keeps a line only when its `MESSAGE` is
-  one JSON object with a known `status`, and its own `_SYSTEMD_USER_UNIT` names
-  the job: a `UNIT` or `USER_UNIT` field a client sets names no job. Its strings
-  reach `--json` as JSON strings, and the human rows pass through `visible`.
-  Pinned by
+- **A journal line is data, and a job's rows come from its own unit.** `runs`
+  asks the journal once per recorded job, each call for that job's own unit
+  (`_SYSTEMD_USER_UNIT=`), so no job's window holds another's rows. It keeps a
+  line only when its `MESSAGE` is one JSON object with a known status, and its
+  own `_SYSTEMD_USER_UNIT` names the job: a `UNIT` or `USER_UNIT` field a client
+  sets names no job. A call that exits non-zero or gives no answer is `unread`
+  for an unnamed run and a refusal for a named one. Its strings reach `--json`
+  as JSON strings, and the human rows pass through `visible`. Pinned by
+  `runs_reads_each_job_on_its_own_and_orders_rows_oldest_first`,
+  `runs_lists_a_job_whose_journal_call_exits_non_zero_under_unread`,
+  `runs_lists_a_job_whose_journal_call_never_exits_under_unread_within_the_bound`,
   `runs_turns_a_journal_fixture_into_rows_and_shows_their_text_visibly` and
   `a_run_row_needs_its_own_unit_so_a_client_set_unit_field_gives_none`.
 - **No test reaches the real user manager, journal or unit directory.** The

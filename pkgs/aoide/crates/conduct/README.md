@@ -1678,12 +1678,13 @@ roster lock. `mail_bridge` stays passthroughs only.
   `$XDG_CONFIG_HOME/systemd/user/` (`~/.config/systemd/user/` when unset), and
   one record, `state/stage/jobs.json` (`CONTRACTS.md` §4 has its shape).
   `jobs_path()` names the record for the server's stage roster. A run's output
-  lands in the user journal; `runs` reads the workflow door's JSON line from
-  there and never writes. Each `systemctl`, `journalctl` and `systemd-analyze`
-  call runs under a 10 s bound through `shellbridge::run_bin_bounded`. `add` and
-  `remove` probe the user manager before they take the stage lock; under the
-  lock they run only the unit-changing calls (`daemon-reload`, `enable --now`
-  and `disable --now`).
+  lands in the user journal; `runs` reads each recorded job's own unit from
+  there, the workflow door's JSON line, and never writes. Each `systemctl`,
+  `journalctl` and `systemd-analyze` call answers within a 10 s bound through
+  `shellbridge::run_bin_bounded`, and a call that gives no answer is never read
+  as a no. `add` and `remove` probe the user manager before they take the stage
+  lock; under the lock they run only the unit-changing calls (`daemon-reload`,
+  `enable --now` and `disable --now`).
 
 ## What it consumes
 
