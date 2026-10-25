@@ -4,7 +4,9 @@
 //! [`MAX_FRAME`] is ever held whole.
 
 use std::collections::VecDeque;
-use std::io::Read;
+use std::io::{self, Read};
+use std::net::{Shutdown, TcpStream};
+use std::sync::Arc;
 
 use crate::error::DoorError;
 use crate::frame::{decode, Frame};
@@ -88,16 +90,35 @@ pub struct Events {
     body: Box<dyn Read + Send>,
     sse: Sse,
     done: bool,
+    socket: TcpStream,
 }
 
 impl Events {
-    pub(crate) fn new(body: Box<dyn Read + Send>) -> Events {
-        Events { body, sse: Sse::default(), done: false }
+    pub(crate) fn new(body: Box<dyn Read + Send>, socket: TcpStream) -> Events {
+        Events { body, sse: Sse::default(), done: false, socket }
     }
 
     /// Frames dropped for passing the cap, since the stream opened.
     pub fn dropped_oversize(&self) -> u64 {
         self.sse.dropped
+    }
+
+    /// A handle that closes this stream from another thread. A thread blocked
+    /// reading the body returns once [`Closer::close`] shuts the socket down,
+    /// and the iteration ends. Clones of the handle share the socket.
+    pub fn closer(&self) -> io::Result<Closer> {
+        Ok(Closer(Arc::new(self.socket.try_clone()?)))
+    }
+}
+
+/// Closes one events stream from any thread.
+#[derive(Clone)]
+pub struct Closer(Arc<TcpStream>);
+
+impl Closer {
+    /// Shuts the socket down both ways.
+    pub fn close(&self) -> io::Result<()> {
+        self.0.shutdown(Shutdown::Both)
     }
 }
 

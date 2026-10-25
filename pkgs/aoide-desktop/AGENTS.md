@@ -33,6 +33,17 @@ README.md.
   is ignored. Neither is an error.
 - No `unsafe` in this crate: `#![deny(unsafe_code)]` is on. The effective uid
   comes from `/proc/self/status`. The open and the stat use std.
+- A stream is closed through its `Closer`, from any thread. Dropping `Events`
+  is not a close: the thread reading an idle stream stays blocked on it, and
+  `Closer::close` shuts both halves down so that read returns. The client must
+  close its own stream before it signals a door. Eidolon's graceful shutdown
+  waits on every open connection (`crates/web/src/serve.rs`, `run`), and its
+  stream ends only on a goodbye or a closed channel. hyper 1.11.1 ends a
+  connection on read EOF mid-response only with half-close on
+  (`src/proto/h1/conn.rs:487-501`, off by default), and Eidolon builds the
+  plain `http1::Builder::new()` (`serve.rs:122`). So a SIGTERM to a door with
+  an attached stream waits, and its token is removed only after `run` returns
+  (`crates/web/src/lib.rs`).
 
 ## The exec module (crates/shell)
 
@@ -71,6 +82,8 @@ README.md.
   so the exec tests need `--all-features`.
 - The token, client and exec tests create directories under `TMPDIR`, so run
   them with `TMPDIR` set to a directory the tests may write.
+- The fake door ends a stream its client has closed, as hyper does, so a test
+  of a close sees the same drain the real door has.
 - Every cargo command runs with `--offline`.
 
 ## Extension points

@@ -119,7 +119,10 @@ impl Door {
     pub fn events(&self) -> Result<Events, DoorError> {
         let (head, reader) = self.exchange("GET", "/api/events", None, true)?;
         match head.status {
-            200 => Ok(Events::new(body_reader(&head, reader))),
+            200 => {
+                let socket = reader.get_ref().try_clone()?;
+                Ok(Events::new(body_reader(&head, reader), socket))
+            }
             other => Err(common(other)),
         }
     }

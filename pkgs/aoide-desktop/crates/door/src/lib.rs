@@ -17,7 +17,7 @@ mod token;
 
 pub use client::{AnswerOutcome, CancelOutcome, Door, Mode, SayOutcome};
 pub use error::DoorError;
-pub use events::Events;
+pub use events::{Closer, Events};
 pub use frame::{Ask, AskOption, Frame, Timing, ToolUse, Usage};
 pub use token::runtime_from_env;
 

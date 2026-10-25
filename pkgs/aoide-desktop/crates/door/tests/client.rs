@@ -4,6 +4,9 @@ use std::fs::{self, Permissions};
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::mpsc;
+use std::thread;
+use std::time::{Duration, Instant};
 
 use aoide_desktop_door::fake::{FakeDoor, MAX_BODY};
 use aoide_desktop_door::{AnswerOutcome, Ask, CancelOutcome, Door, DoorError, Frame, Mode, SayOutcome};
@@ -246,4 +249,51 @@ fn a_token_file_not_at_0600_is_refused_before_any_request() {
     fs::set_permissions(fake.token_file(), Permissions::from_mode(0o644)).unwrap();
     assert!(matches!(door.say("hi", Mode::Send), Err(DoorError::Refused { .. })));
     assert!(fake.requests().is_empty(), "A6 refuses before anything is sent");
+}
+
+const HELLO: &str = r#"{"type":"hello","session":"/s/t.eid","cwd":"/c","model":"m","yolo":false,"pending":0,"protocol":1}"#;
+
+/// Polls `ready` until it holds or `within` passes. The fake records its stream
+/// on its own thread, so a test waits for that instead of guessing a sleep.
+fn wait_until(within: Duration, ready: impl Fn() -> bool) -> bool {
+    let end = Instant::now() + within;
+    while Instant::now() < end {
+        if ready() {
+            return true;
+        }
+        thread::sleep(Duration::from_millis(5));
+    }
+    ready()
+}
+
+#[test]
+fn a_closer_ends_a_read_blocked_in_another_thread_within_two_seconds() {
+    let (_rt, fake, door) = fixture("closer");
+    fake.set_head(&[HELLO]);
+    let mut events = door.events().unwrap();
+    let closer = events.closer().unwrap();
+    let (head_read, head) = mpsc::channel();
+    let (done, ended) = mpsc::channel();
+    thread::spawn(move || {
+        let read: Vec<_> = events.by_ref().take(2).collect();
+        let _ = head_read.send(read.len());
+        let rest = events.count();
+        let _ = done.send(rest);
+    });
+    assert_eq!(head.recv_timeout(Duration::from_secs(2)).expect("hello and caught-up arrive"), 2);
+    closer.close().unwrap();
+    ended.recv_timeout(Duration::from_secs(2)).expect("the blocked read returns within 2 s of close");
+}
+
+#[test]
+fn streaming_is_true_while_a_client_holds_the_stream_and_false_within_a_second_of_its_close() {
+    let (_rt, fake, door) = fixture("streaming");
+    fake.set_head(&[HELLO]);
+    let events = door.events().unwrap();
+    let closer = events.closer().unwrap();
+    assert!(wait_until(Duration::from_secs(2), || fake.streaming()), "the stream opens");
+    assert!(fake.streaming(), "still open while the client holds it");
+    closer.close().unwrap();
+    assert!(wait_until(Duration::from_secs(1), || !fake.streaming()), "the fake sees the client close");
+    drop(events);
 }

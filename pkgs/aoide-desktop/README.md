@@ -38,10 +38,13 @@ http.rs     read_head, then the body reader: length, chunked, or to EOF
 
 - `token.rs` reads the bearer token from its file under the token-file rules.
   `Token` prints no value.
-- `events.rs` turns the stream into a blocking iterator of `Frame`s.
+- `events.rs` turns the stream into a blocking iterator of `Frame`s, and hands
+  out a `Closer` that shuts the stream's socket down from another thread.
 - `frame.rs` decodes one `data:` payload into a typed `Frame`.
 - `fake.rs`, behind the `fake` feature, is a std-thread door on 127.0.0.1. It
-  speaks the wire as far as the tests need and records every request.
+  speaks the wire as far as the tests need and records every request. A client
+  that closes an open stream ends it, and `streaming()` says whether one is
+  open.
 
 ## How a child starts
 

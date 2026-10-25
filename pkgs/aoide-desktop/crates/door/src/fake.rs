@@ -5,15 +5,21 @@
 //!
 //! Any other path answers 200 and is recorded, so a test can assert the client
 //! sent no request outside the four routes it uses.
+//!
+//! A client that closes an open stream ends it: between frames the fake peeks
+//! the socket, as hyper ends a connection whose client has gone
+//! (`hyper` 1.11.1, `src/proto/h1/conn.rs`, half-close off, the default).
 
 use std::fs::{self, OpenOptions, Permissions};
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::{channel, Sender};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::mpsc::{channel, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread;
+use std::time::Duration;
 
 use serde_json::json;
 
@@ -47,7 +53,10 @@ struct Shared {
     head: Mutex<Vec<String>>,
     replies: Mutex<Vec<(String, u16, String)>>,
     requests: Mutex<Vec<Recorded>>,
-    live: Mutex<Option<Sender<Live>>>,
+    /// The open stream's id and its channel. A stream clears it only while it
+    /// is still the one open.
+    live: Mutex<Option<(u64, Sender<Live>)>>,
+    streams: AtomicU64,
 }
 
 /// A fake door on `127.0.0.1:0`, serving on background threads until the test ends.
@@ -75,6 +84,7 @@ impl FakeDoor {
             replies: Mutex::new(Vec::new()),
             requests: Mutex::new(Vec::new()),
             live: Mutex::new(None),
+            streams: AtomicU64::new(0),
         });
         let accepting = shared.clone();
         thread::spawn(move || {
@@ -121,6 +131,12 @@ impl FakeDoor {
         self.send(Live::End);
     }
 
+    /// Whether an events stream is open: from a client's request until the
+    /// client closes it or the stream ends.
+    pub fn streaming(&self) -> bool {
+        self.shared.live.lock().unwrap().is_some()
+    }
+
     /// Every request so far, in order.
     pub fn requests(&self) -> Vec<Recorded> {
         self.shared.requests.lock().unwrap().clone()
@@ -128,7 +144,7 @@ impl FakeDoor {
 
     fn send(&self, live: Live) {
         let guard = self.shared.live.lock().unwrap();
-        let tx = guard.as_ref().expect("an events stream is open");
+        let (_, tx) = guard.as_ref().expect("an events stream is open");
         tx.send(live).expect("the events stream is still reading");
     }
 }
@@ -203,7 +219,7 @@ fn handle(stream: TcpStream, shared: &Shared) -> io::Result<()> {
     }
 
     if method == "GET" && path == "/api/events" {
-        return stream_events(&mut writer, shared);
+        return stream_events(&writer, shared);
     }
     let queued = {
         let mut replies = shared.replies.lock().unwrap();
@@ -264,12 +280,18 @@ fn chunk(w: &mut impl Write, data: &str) -> io::Result<()> {
     w.flush()
 }
 
+/// How often an open stream checks whether its client has closed it.
+const POLL: Duration = Duration::from_millis(20);
+
 /// Opens the stream (registering the live channel first, so a test that has
 /// read the head can push), sends the head frames and `caught-up`, then the
-/// pushed frames until an end.
-fn stream_events(w: &mut impl Write, shared: &Shared) -> io::Result<()> {
+/// pushed frames until an end, or until the client closes its end.
+fn stream_events(stream: &TcpStream, shared: &Shared) -> io::Result<()> {
     let (tx, rx) = channel();
-    *shared.live.lock().unwrap() = Some(tx);
+    let id = shared.streams.fetch_add(1, Ordering::Relaxed);
+    *shared.live.lock().unwrap() = Some((id, tx));
+    stream.set_read_timeout(Some(POLL))?;
+    let mut w = stream;
     let head: Vec<String> = shared.head.lock().unwrap().clone();
     w.write_all(
         b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-store\r\n\
@@ -277,13 +299,34 @@ fn stream_events(w: &mut impl Write, shared: &Shared) -> io::Result<()> {
     )?;
     w.flush()?;
     for frame in head.iter().map(String::as_str).chain(std::iter::once(r#"{"type":"caught-up"}"#)) {
-        chunk(w, &format!("data: {frame}\n\n"))?;
+        chunk(&mut w, &format!("data: {frame}\n\n"))?;
     }
-    while let Ok(Live::Frame(frame)) = rx.recv() {
-        chunk(w, &format!("data: {frame}\n\n"))?;
+    loop {
+        match rx.recv_timeout(POLL) {
+            Ok(Live::Frame(frame)) => chunk(&mut w, &format!("data: {frame}\n\n"))?,
+            Ok(Live::End) | Err(RecvTimeoutError::Disconnected) => {
+                w.write_all(b"0\r\n\r\n")?;
+                w.flush()?;
+                break;
+            }
+            Err(RecvTimeoutError::Timeout) if client_gone(stream) => break,
+            Err(RecvTimeoutError::Timeout) => {}
+        }
     }
-    w.write_all(b"0\r\n\r\n")?;
-    w.flush()?;
-    *shared.live.lock().unwrap() = None;
+    let mut live = shared.live.lock().unwrap();
+    if live.as_ref().is_some_and(|(open, _)| *open == id) {
+        *live = None;
+    }
     Ok(())
+}
+
+/// Whether the client has closed its end: a peek reads end of file. A peek
+/// that times out finds no byte and no close, so the client is still there.
+fn client_gone(stream: &TcpStream) -> bool {
+    let mut byte = [0u8; 1];
+    match stream.peek(&mut byte) {
+        Ok(0) => true,
+        Ok(_) => false,
+        Err(e) => !matches!(e.kind(), io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut),
+    }
 }
