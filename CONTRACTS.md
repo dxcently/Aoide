@@ -5924,15 +5924,24 @@ consumer.
 
 The resume claims: one per ledger session that a launch is reviving under a
 fresh id. `resurrect` writes the claim before the spawn, so a second launch
-of the same session finds it and is refused. The shape, with one claim:
+of the same session, or of a session on the same journal, finds it and is
+refused. The shape, with one by-journal claim:
 
 ```json
-{ "v": 1, "claims": [ { "sessionId": "ledger-claude", "newId": "resurrect-4242-1792927728", "at": "2026-10-25T10:00:00Z" } ] }
+{ "v": 1, "claims": [ {
+  "sessionId": "ledger-eid", "newId": "resurrect-4242-1792927728",
+  "at": "2026-10-25T10:00:00Z", "journal": "/abs/path/to/journal" } ] }
 ```
 
 - **One claim per `sessionId`.** A new claim for a session replaces the old
   one. A claim that is neither in flight nor live is stale, and the next
   claim drops it.
+- **`journal`.** A by-journal launch's claim carries the candidate's journal:
+  the file it resolves to, or the path as spelled when it does not resolve.
+  An id launch's claim has no `journal` key, and a claim without one loads as
+  a claim with none. While a claim is in flight, it blocks a candidate on the
+  same journal whichever session it names, and the refusal says the journal is
+  shared.
 - **Writer and lock.** Only `resurrect` writes it, under the conducting
   stage lock (`aoide_storage::fs::try_stage_lock`). A claim is written before
   the spawn. A failed spawn removes its own claim, while the claim still names

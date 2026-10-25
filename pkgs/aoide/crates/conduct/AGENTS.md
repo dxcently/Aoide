@@ -2029,12 +2029,15 @@ in the message.
   outside the lock, the roster and the claims inside it, and no spawn runs
   under it, because the new session registers under the same lock. Don't move
   the claim after the spawn: a second process would find none. A claim's
-  verdict is its new id's record and its age, never a pid. A claim stamped
-  more than 5 seconds ahead of the clock is stale and blocks nothing; within
-  that skew its age reads as 0. A clock step of more than 5 seconds backward,
-  or more than 60 seconds forward, during a launch's registration is the
-  residual: it can let a second launch through. The block itself reads no
-  file; `Journal::of` resolves each journal once before it.
+  verdict is its new id's record and its age, never a pid. A by-journal launch's
+  claim also names its journal (`Claim.journal`), and the block refuses a
+  candidate for any in-flight claim that names its session or its journal,
+  whichever session holds it (`Blocked::InFlight.by_journal` says which). A
+  claim stamped more than 5 seconds ahead of the clock is stale and blocks
+  nothing; within that skew its age reads as 0. A clock step of more than 5
+  seconds backward, or more than 60 seconds forward, during a launch's
+  registration is the residual: it can let a second launch through. The block
+  itself reads no file; `Journal::of` resolves each journal once before it.
   `release_resume_claim` drops a claim only while it still names its new id.
   The gate sits in `resurrect_one`, so every mode that reaches it (bare,
   `--all`, `--id`, a held replay) passes it. Manifest clean spawns take no

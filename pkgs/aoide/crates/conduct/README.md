@@ -1176,7 +1176,9 @@ blank one is refused too.
   journal, and the refusal names that session as `liveSessionId`. It is in
   flight when its claim's new id has a session that is not `done`, or none
   yet while the claim is under 60 seconds old, and the refusal names the claim
-  as `claimedBy`. A free candidate's claim is written before its spawn. A
+  as `claimedBy`. A by-journal launch's claim names its journal and blocks a
+  candidate on that journal whichever session it names; that refusal says the
+  journal is shared. A free candidate's claim is written before its spawn. A
   failed spawn drops it, and a successful spawn keeps it, so the claim goes
   stale once its session is `done`, or once the bound passes with no session
   registered under its id. A claim stamped more than 5 seconds ahead of the

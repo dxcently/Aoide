@@ -1,8 +1,9 @@
 //! The resume claims: `state/resuming.json` (v1). A resurrect that is about to
 //! launch a ledger session under a fresh id writes one claim first, naming the
-//! session and the new id, so a second launch of that session sees the claim
-//! and refuses (one engine per session). CONTRACTS.md's
-//! `state/resuming.json` section is the wire shape.
+//! session, the new id and, for a by-journal launch, the journal. A second
+//! launch is refused by the session or by its journal while the claim is in
+//! flight (one engine per session). CONTRACTS.md's `state/resuming.json`
+//! section is the wire shape.
 
 use serde::{Deserialize, Serialize};
 
@@ -16,6 +17,10 @@ pub struct Claim {
     pub session_id: String,
     pub new_id: String,
     pub at: String,
+    /// The candidate's journal: resolved, or as spelled when it does not
+    /// resolve. Absent for a candidate that is not by journal.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub journal: Option<String>,
 }
 
 /// The claims file path: `state/resuming.json`, under the same state dir as
@@ -97,7 +102,7 @@ mod tests {
     }
 
     fn claim(session_id: &str, new_id: &str, at: &str) -> Claim {
-        Claim { session_id: session_id.into(), new_id: new_id.into(), at: at.into() }
+        Claim { session_id: session_id.into(), new_id: new_id.into(), at: at.into(), journal: None }
     }
 
     #[test]
@@ -176,5 +181,21 @@ mod tests {
         assert!(!remove_claim(&mut claims, "s1", "someone-else"), "a claim naming another id stays");
         assert!(remove_claim(&mut claims, "s1", "mine"));
         assert_eq!(claims, vec![claim("s2", "theirs", "2026-10-25T10:00:00Z")]);
+    }
+
+    #[test]
+    fn a_v1_claim_without_a_journal_loads_with_none() {
+        with_temp_state_dir("v1-no-journal", |_| {
+            let path = resuming_path();
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(
+                &path,
+                r#"{"v":1,"claims":[{"sessionId":"s1","newId":"n1","at":"2026-10-25T10:00:00Z"}]}"#,
+            )
+            .unwrap();
+            let claims = load_claims().unwrap();
+            assert_eq!(claims, vec![claim("s1", "n1", "2026-10-25T10:00:00Z")]);
+            assert_eq!(claims[0].journal, None);
+        });
     }
 }
