@@ -510,20 +510,17 @@ impl Doors {
     }
 
     /// The caller's answer to `CloseDue`: closes the door if its mark still
-    /// stands. A turn that is not idle keeps the mark armed. Any other answer,
-    /// `StillLive` included, withdraws it, so a door that outlives its close is
-    /// not asked again.
+    /// stands. A turn that is not idle keeps the mark armed. Any other answer
+    /// leaves the mark as the close left it. A close that leaves its door live
+    /// withdraws the mark itself (`close_now`), so a door that outlives its close
+    /// is not asked again.
     pub fn close_due(&mut self, id: &str) -> Result<Close, DoorsError> {
-        let link = self.watch(id)?.link.clone();
-        if !link.state.lock().unwrap().armed {
+        if !self.watch(id)?.link.state.lock().unwrap().armed {
             return Ok(Close::Revoked);
         }
         match self.close_now(id)? {
             Close::Busy => Ok(Close::StaysArmed),
-            other => {
-                link.state.lock().unwrap().armed = false;
-                Ok(other)
-            }
+            other => Ok(other),
         }
     }
 
@@ -532,10 +529,10 @@ impl Doors {
     /// never sent to whatever answers at its address. Any other failed check ends
     /// the call as `Unverified`, with no request sent. An idle door answers the
     /// cancel with 409, which is its own word that it is idle, so it closes at
-    /// once. Once its close answers anything but `Busy`, stop now withdraws an
-    /// armed mark, so a door that outlives its close is not asked again. A stop
-    /// that sees no turn end, or fails before it closes, leaves the mark: the
-    /// turn it was set for still runs.
+    /// once. A close that leaves its door live withdraws an armed mark, so a door
+    /// that outlives its close is not asked again. A stop that sees no turn end,
+    /// that its close finds `Busy`, or that fails before it closes, leaves the
+    /// mark: the turn it was set for still runs.
     pub fn stop_now(&mut self, id: &str) -> Result<Close, DoorsError> {
         let entry = self.watch(id)?.entry.clone();
         let link = self.watch(id)?.link.clone();
@@ -555,9 +552,6 @@ impl Doors {
                 }
             }
         };
-        if close != Close::Busy {
-            link.state.lock().unwrap().armed = false;
-        }
         Ok(close)
     }
 
@@ -629,8 +623,8 @@ impl Doors {
     /// that is not `Idle` is `Busy`, and the watch is left as it was. An idle turn
     /// sets `closing` and shuts its stream, so the door can drain. SIGTERM
     /// goes through the pidfd, and the exit is awaited for `EXIT_BOUND`. An exit
-    /// removes the record and the watch. A door still live clears `closing`, and
-    /// keeps its record and its watch.
+    /// removes the record and the watch. A door still live clears `closing` and
+    /// withdraws an armed mark, and keeps its record and its watch.
     fn close_now(&mut self, id: &str) -> Result<Close, DoorsError> {
         let (entry, link, pidfd) = {
             let watch = self.watch(id)?;
@@ -662,7 +656,12 @@ impl Doors {
             }
         }
         if !exited_by(entry.pid, entry.starttime, Instant::now() + EXIT_BOUND) {
-            clear_closing(&link);
+            {
+                let mut shared = link.state.lock().unwrap();
+                shared.closing = false;
+                shared.armed = false;
+            }
+            link.moved.notify_all();
             return Ok(Close::StillLive);
         }
         let watch_joined = self.drop_watch(id)?;
@@ -1121,19 +1120,23 @@ impl Worker {
         self.deliver(Event::Gone { launch_id: id });
     }
 
-    /// Sends one event, waiting for room: the watch retries `try_send` each 20 ms
-    /// until the channel takes it. A stopped watch sends nothing more, checked
-    /// before each try. A channel whose receiver is gone takes the event as sent.
+    /// Sends one event, waiting for room. Each try takes the state lock, returns if
+    /// the watch is stopped, and calls `try_send` under that lock. On a full
+    /// channel the lock is dropped and the try is retried after `POLL`. `try_send`
+    /// never blocks, and `detach` sets `stop` under the same lock, so no event
+    /// follows a detach. A channel whose receiver is gone takes the event as sent.
     fn deliver(&self, event: Event) {
         let mut event = event;
         loop {
-            if self.stopped() {
+            let shared = self.link.state.lock().unwrap();
+            if shared.stop {
                 return;
             }
             match self.out.try_send(event) {
                 Ok(()) | Err(TrySendError::Disconnected(_)) => return,
                 Err(TrySendError::Full(back)) => {
                     event = back;
+                    drop(shared);
                     thread::sleep(POLL);
                 }
             }

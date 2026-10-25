@@ -99,13 +99,15 @@ doors.rs    Doors::open(exec, root, runtime, out)
   shared state under one lock, keeps the door's pending asks, and reports each
   event through `deliver`: frames, `CloseDue`, `Revoked`, `AsksOverflow`,
   `Unwatched`, `Dropped` and `Gone`. It never signals a door.
-- `deliver` waits for room. It retries `try_send` every 20 ms until the channel
-  takes the event. A stopped watch delivers nothing, checked before each try, so
-  a close's detach never waits on a full channel. A full channel holds the watch
-  on its current event, with its stream open, and nothing is dropped while a
-  watch runs. The drain is the caller's contract: a caller that stops draining
-  holds the watch on whatever event is next, so a stop now that waits for a
-  turn's end runs its bound and reports `NoTurnEnd`.
+- `deliver` waits for room. Each try takes the state lock, returns if the watch
+  is stopped, and calls `try_send` under that lock. On a full channel the lock
+  is dropped and the try is retried every 20 ms. `detach` sets `stop` under the
+  same lock, so no event follows a detach, and a close never waits on a full
+  channel. A full channel holds the watch on its current event, with its stream
+  open, and nothing is dropped while a watch runs. The drain is the caller's
+  contract: a caller that stops draining holds the watch on whatever event is
+  next, so a stop now that waits for a turn's end runs its bound and reports
+  `NoTurnEnd`.
 - A door keeps at most 64 pending asks. An ask past that is neither kept nor
   forwarded, and the stream sends one `AsksOverflow`, naming the first ask it
   refused. It stays hidden until the stream reopens, when its replay offers it
@@ -127,8 +129,8 @@ doors.rs    Doors::open(exec, root, runtime, out)
   left as it was, turn state included. An idle turn sets `closing` and
   shuts its stream. SIGTERM goes through the pidfd, and the exit is awaited for
   10 s. An exit detaches the watch (2 s bound) and removes the record: `Exited`.
-  A door still live clears `closing` and keeps its record and its watch:
-  `StillLive`. The wait never escalates.
+  A door still live clears `closing`, withdraws an armed mark, and keeps its
+  record and its watch: `StillLive`. The wait never escalates.
 - While `closing` stands, the watch takes its stream's end as the close's: it
   neither drops the door nor reconnects. Once `closing` clears, a stream that
   ended reopens, as any stream does while its door lives.
@@ -137,8 +139,10 @@ doors.rs    Doors::open(exec, root, runtime, out)
 - `close_after_turn` closes an `Idle` door now, marks a `Running` one (`Armed`),
   and refuses an `Unknown` one. A marked door whose turn ends sends `CloseDue`
   once, through `deliver`. `close_due` closes it if the mark still stands; a
-  turn still running keeps the mark (`StaysArmed`), and any other answer,
-  `StillLive` included, withdraws it. `revoke` withdraws a mark.
+  turn still running keeps the mark (`StaysArmed`), and any other answer leaves
+  the mark as the close left it. A close that leaves its door live withdraws the
+  mark, whichever call made the close, `close_after_turn`'s idle arm included.
+  `revoke` withdraws a mark.
 - A stream that ends withdraws an armed mark, and the watch sends
   `Event::Revoked { launch_id, why }`, with `why` through `visible`. A close
   holds the mark while it ends its own stream, and a door that is gone sends
@@ -151,7 +155,7 @@ doors.rs    Doors::open(exec, root, runtime, out)
   stays, and nothing is signalled. A 409 says the door is idle, so the turn is
   taken as idle, and the door closes at once. A turn that outlives every cancel
   is never closed by the app: the user ends it outside the app. A stop now that
-  reports `NoTurnEnd` leaves an armed mark standing; any other answer
+  reports `NoTurnEnd` or `Busy` leaves an armed mark standing; any other answer
   withdraws it.
 - A turn that starts or ends while no stream is open is not seen. After a
   reconnect the turn is `Unknown` until a frame arrives. A stream's end

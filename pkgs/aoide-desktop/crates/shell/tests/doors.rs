@@ -6,7 +6,7 @@ use std::net::{Ipv4Addr, SocketAddr};
 use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::mpsc::{self, Receiver, SyncSender};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError, SyncSender};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -824,27 +824,98 @@ fn a_stop_now_whose_close_leaves_the_door_live_withdraws_the_mark() {
     thread::sleep(Duration::from_millis(200));
     let seen: Vec<Event> = rx.try_iter().collect();
     let dues = seen.iter().filter(|e| matches!(e, Event::CloseDue { .. })).count();
-    assert!(dues <= 1, "no close is due after the stop's own turn end: {seen:?}");
+    assert!(dues <= 1, "the stop's own turn end may ask for one close, and the later idle turn asks for none: {seen:?}");
 }
 
 #[test]
-fn stop_now_on_a_full_channel_drained_by_another_thread_closes_the_door() {
-    let world = World::new("stop-full");
-    let (tx, rx) = mpsc::sync_channel(1);
+fn a_close_after_turn_that_leaves_the_door_live_withdraws_the_mark() {
+    let world = World::new("close-live");
+    set_mode(&world, "ignore-sigterm");
+    let (tx, rx) = mpsc::sync_channel(EVENTS_BOUND);
     let mut doors = world.open(tx);
     let id = world.launch(&mut doors);
     world.command("running");
     assert!(until(Duration::from_secs(5), || doors.turn(&id).unwrap() == TurnState::Running));
-    // The running frame fills the one-slot channel. Another thread drains it from
-    // shortly after, so the turn's end waits behind the frame, then is delivered.
+    assert_eq!(doors.close_after_turn(&id).unwrap(), Close::Armed);
+    world.command("idle");
+    event_where(&rx, |e| matches!(e, Event::CloseDue { .. }));
+    assert_eq!(doors.close_after_turn(&id).unwrap(), Close::StillLive, "the door outlives its 10 s bound");
+    assert!(until(Duration::from_secs(10), || world.count("GET /api/events") == 2), "the watch reopens its stream");
+    world.command("running");
+    assert!(until(Duration::from_secs(5), || doors.turn(&id).unwrap() == TurnState::Running));
+    world.command("idle");
+    assert!(until(Duration::from_secs(5), || doors.turn(&id).unwrap() == TurnState::Idle));
+    thread::sleep(Duration::from_millis(200));
+    let later: Vec<Event> = rx.try_iter().collect();
+    assert!(
+        !later.iter().any(|e| matches!(e, Event::CloseDue { .. })),
+        "the close left the door live, so its mark is gone and no close is due: {later:?}"
+    );
+    assert_eq!(doors.close_due(&id).unwrap(), Close::Revoked, "the close withdrew the mark");
+    thread::sleep(Duration::from_millis(200));
+    assert_eq!(world.count("SIGTERM"), 1, "the door was signalled once");
+}
+
+/// Leaves a watch held in `deliver` on a one-slot channel, and returns its doors,
+/// the receiver and the launch id. Each step makes the next one certain. Taking
+/// events through the stream's `CaughtUp` empties the slot the replay filled.
+/// `running` puts the turn frame in the empty slot. The ask after it is then read,
+/// and the watch waits in `deliver` for the slot to free.
+fn held_watch(world: &World) -> (Doors, Receiver<Event>, String) {
+    let (tx, rx) = mpsc::sync_channel(1);
+    let mut doors = world.open(tx);
+    let id = world.launch(&mut doors);
+    events_through(&rx, |e| matches!(e, Event::Frame { frame, .. } if matches!(**frame, Frame::CaughtUp)));
+    world.command("running");
+    assert!(until(Duration::from_secs(5), || doors.turn(&id).unwrap() == TurnState::Running));
+    world.apply(&format!("ask-approval 1 {APPROVAL}"));
+    assert!(until(Duration::from_secs(5), || doors.pending_asks(&id).unwrap().len() == 1), "the watch holds the ask");
+    (doors, rx, id)
+}
+
+#[test]
+fn a_stop_now_on_a_channel_nobody_reads_is_no_turn_end_and_the_door_lives() {
+    let world = World::new("stop-unread");
+    let (mut doors, _rx, id) = held_watch(&world);
+    assert_eq!(doors.stop_now(&id).unwrap(), Close::NoTurnEnd, "the turn's end waits behind the held ask");
+    assert!(alive(world.pid(&id)), "the door is alive");
+    assert_eq!(world.record_ids(), vec![id], "its record stays");
+}
+
+#[test]
+fn a_stop_now_on_a_channel_drained_after_a_pause_closes_the_door() {
+    let world = World::new("stop-drained");
+    let (mut doors, rx, id) = held_watch(&world);
     let drain = thread::spawn(move || {
         thread::sleep(Duration::from_millis(100));
         rx.iter().count()
     });
-    let outcome = doors.stop_now(&id).expect("stop now answers");
-    assert!(matches!(outcome, Close::Exited { .. }), "the turn's end is seen and the door closes: {outcome:?}");
+    assert_eq!(
+        doors.stop_now(&id).unwrap(),
+        Close::Exited { watch_joined: true },
+        "the turn's end is seen once the channel has room, and the door closes"
+    );
     drop(doors);
     drain.join().expect("the other thread drains until the channel closes");
+}
+
+#[test]
+fn a_stopped_watch_sends_nothing_once_its_doors_are_dropped() {
+    let world = World::new("stop-guard");
+    let (doors, rx, _id) = held_watch(&world);
+    drop(doors);
+    let mut seen = Vec::new();
+    loop {
+        match rx.recv_timeout(Duration::from_secs(5)) {
+            Ok(event) => seen.push(event),
+            Err(RecvTimeoutError::Disconnected) => break,
+            Err(RecvTimeoutError::Timeout) => panic!("the channel closes within 5 s"),
+        }
+    }
+    assert!(
+        seen.len() == 1 && matches!(&seen[0], Event::Frame { frame, .. } if matches!(**frame, Frame::TurnState { running: true })),
+        "only the running turn's frame arrives, never the held ask: {seen:?}"
+    );
 }
 
 #[test]
@@ -911,13 +982,15 @@ fn answers_before_sentinel(world: &World, cwd: &Path, door: &Door) -> Vec<String
     logged[..at].to_vec()
 }
 
-/// Sends a sentinel answer to `door` and waits until the fake has served it. Then
-/// asserts that no SIGTERM is anywhere in the fake's log. A door that was
+/// Sends a sentinel answer to `door` and waits until the fake has served it, then
+/// 200 ms more, so a SIGTERM the fake took just before the sentinel is logged by
+/// then. Asserts that no SIGTERM is anywhere in the fake's log. A door that was
 /// signalled and exited serves no sentinel, so the wait fails.
 fn no_sigterm_in_whole_log_once_sentinel_served(world: &World, door: &Door) {
     let _ = door.answer(SENTINEL, "yes", None);
     let sentinel = |line: &String| line.starts_with("POST /api/answer") && line.contains(&SENTINEL.to_string());
     assert!(until(Duration::from_secs(5), || world.log().iter().any(sentinel)), "the door serves the sentinel");
+    thread::sleep(Duration::from_millis(200));
     let logged = world.log();
     assert!(!logged.iter().any(|line| line == "SIGTERM"), "a SIGTERM is in the log: {logged:?}");
 }

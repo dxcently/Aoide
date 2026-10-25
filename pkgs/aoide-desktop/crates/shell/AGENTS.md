@@ -41,9 +41,11 @@ are in README.md.
   failed removal of a dropped record is ignored, its `Dropped` is still listed,
   and every later record is still read.
 - The events channel is bounded at `EVENTS_BOUND` (64). Every watch event goes
-  through `deliver`, which waits for room, retrying each 20 ms until the channel
-  takes it. A stopped watch sends nothing more, checked before each try. A full
-  channel holds the watch and its stream; nothing is dropped while a watch runs.
+  through `deliver`, which waits for room. Each try takes the state lock, checks
+  `stop`, and calls `try_send` under that lock; a full channel is retried each
+  20 ms with the lock dropped. `detach` sets `stop` under the same lock, so no
+  event follows a detach. A full channel holds the watch and its stream; nothing
+  is dropped while a watch runs.
   The drain is the caller's contract: a caller that stops draining holds the
   watch on its next event, so a stop now that waits for a turn's end runs its
   bound and reports `NoTurnEnd`.
@@ -60,9 +62,11 @@ are in README.md.
   watch writes the record in two places only: an identity failure (`failed`) and
   a door that is gone (`forget`), each through `Store::update`.
 - A stream's end withdraws an armed mark and sends `Event::Revoked`, unless a
-  close holds `closing` or the door is gone. `close_due` and stop now withdraw
-  the mark after any answer but `Busy`. A stop now that sees no turn end, or
-  fails before it closes, leaves it: the turn it was set for still runs.
+  close holds `closing` or the door is gone. A close that leaves its door live
+  (`StillLive`) withdraws an armed mark, whichever call made the close, so a
+  door that outlives its close is not asked again. A stop now that sees no turn
+  end, that its close finds `Busy`, or that fails before it closes, leaves the
+  mark: the turn it was set for still runs.
 - A watch that ended is not watched. `launch_ids` leaves it out, and `watch`
   refuses it, so its calls send nothing.
 - A drop or a forget whose store write fails keeps its record. The next open
@@ -75,8 +79,8 @@ are in README.md.
   turn state included. An idle turn sets `closing` and shuts its
   stream. SIGTERM goes through the pidfd, and the exit is awaited for
   `EXIT_BOUND` (10 s). An exit detaches the watch (2 s bound) and removes the
-  record: `Exited`. A door still live clears `closing` and keeps its record and
-  its watch: `StillLive`. The wait never escalates.
+  record: `Exited`. A door still live clears `closing`, withdraws an armed mark,
+  and keeps its record and its watch: `StillLive`. The wait never escalates.
 - While `closing` stands, the watch takes its stream's end as the close's. It
   neither drops the door nor reconnects. A stream that ended reopens once
   `closing` clears.
@@ -112,12 +116,12 @@ are in README.md.
   reports `NoTurnEnd`. A second stop now closes when the door answers 409, as an
   idle door does, and a 204 waits again. A turn that outlives every cancel is
   never closed by the app: the user ends it outside the app. A stop now that
-  reports `NoTurnEnd` leaves an armed mark standing; any other answer
+  reports `NoTurnEnd` or `Busy` leaves an armed mark standing; any other answer
   withdraws it.
 - A failed hello at launch or re-attach leaves the record with a null session,
-  and the watch checks it again on each try. A record with a null session takes
-  a hello's session only at the next open: a watch's reconnect does not write
-  it.
+  and the watch checks it again on each try. A reconnect checks the door's
+  identity and reads its hello, and takes no session from it, so a record with a
+  null session takes a hello's session only at the next open.
 - A record file that does not parse is refused and never rewritten. A record
   file that is a link is refused.
 - The record and the door's log are created 0600 with `O_NOFOLLOW`, and the log
@@ -181,9 +185,9 @@ are in README.md.
   only if nothing came before the sentinel. For a request, the test lists what
   came first with `answers_before_sentinel`. For a SIGTERM,
   `no_sigterm_in_whole_log_once_sentinel_served` sends the sentinel, waits until
-  the fake has served it, and asserts that the fake's whole log holds no
-  SIGTERM. A door that was signalled and exited serves no sentinel, so that
-  wait fails. Every positive wait is at least 5 s.
+  the fake has served it and 200 ms more, then asserts that the fake's whole log
+  holds no SIGTERM. A door that was signalled and exited serves no sentinel, so
+  that wait fails. Every positive wait is at least 5 s.
 - The door's port comes from the ephemeral pool that other tests' clients also
   draw from, so a bind on that 127.0.0.1 port can fail with `AddrInUse` after
   the door dies. `loopback-2` serves the door on 127.0.0.2, which no client
