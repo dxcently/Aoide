@@ -1,6 +1,6 @@
 # aoide-desktop-shell
 
-The one place the app starts a process or sends a signal (`exec.rs`), the app's
+The one module that calls the process and signal APIs (`exec.rs`), the app's
 own doors (`doors.rs`), and the asks a door raises and the answers to them
 (`asks.rs`). It is the layer the window calls; the window is a later crate.
 
@@ -12,7 +12,7 @@ door crate, and `aoide-protocol` by path (for `is_unsafe` and `visible`).
 - `exec.rs`: `check_pin`, which returns a `Pinned` (the only maker of one),
   `Schema`, `argv`, `child_env`, `Exec` (`load`, `call`, `deadline`,
   `door_env`, `spawn_door`), `terminate`, and the pidfd helpers `open_pidfd`
-  and `terminate_pidfd`. Only this file starts a process or sends a signal.
+  and `terminate_pidfd`. Only this file calls the process and signal APIs.
   Behind `fakes`, `make_fifo` makes the FIFO the token test puts at the token
   path, and `test_doors` starts and signals a door for the door tests.
 - `doors.rs`: `Doors`, which keeps the app's record of its doors, launches one,
@@ -92,8 +92,8 @@ exec.rs     Exec::load(aoide, home, env)
   pidfd and start time), and then reaps the intermediate. The door's stdin is
   `/dev/null`, and its stdout and stderr are the door log. std's close-on-exec
   pipe reports an exec failure of the door as `spawn`'s error.
-- `terminate` sends SIGTERM to a pid. Its refusals and the caller's check are
-  in AGENTS.md.
+- `terminate` sends SIGTERM to a pid. Its one production caller is `run`, on a
+  child it has not reaped. Its refusals are in AGENTS.md.
 
 ## How a door is kept
 
@@ -182,7 +182,8 @@ doors.rs    Doors::open(exec, root, runtime, out)
   turn's end runs its bound and reports `NoTurnEnd`.
 - A door keeps at most 64 pending asks. An ask past that is neither kept nor
   forwarded, and the stream sends one `AsksOverflow`, naming the first ask it
-  refused.
+  refused. It stays hidden until the stream reopens, when its replay offers it
+  again.
 - A stream that ends while the door lives reopens after a second, and its hello
   is bounded as a launch's is: `CONNECT` + `IO` (35 s) at most. A stream that
   ends with the door gone drops the record and sends `Gone`. A drop or a forget
@@ -197,14 +198,14 @@ doors.rs    Doors::open(exec, root, runtime, out)
   and returns `Close::Dropped { pid, why }`. Any other failure keeps the record
   and its watch, signals nothing, and returns `DoorsError::Unverified(why)`.
   Under the watch's lock, a turn that is not `Idle` is `Busy`, and the watch is
-  left as it was, turn state included. An idle turn marks the watch closing and
+  left as it was, turn state included. An idle turn sets `closing` and
   shuts its stream. SIGTERM goes through the pidfd, and the exit is awaited for
   10 s. An exit detaches the watch (2 s bound) and removes the record: `Exited`.
-  A door still live clears the mark and keeps its record and its watch:
+  A door still live clears `closing` and keeps its record and its watch:
   `StillLive`. The wait never escalates.
-- While the closing mark stands, the watch takes its stream's end as the
-  close's: it neither drops the door nor reconnects. Once the mark clears, a
-  stream that ended reopens, as any stream does while its door lives.
+- While `closing` stands, the watch takes its stream's end as the close's: it
+  neither drops the door nor reconnects. Once `closing` clears, a stream that
+  ended reopens, as any stream does while its door lives.
 - A turn the door starts between the lock and the signal is cut. That is the
   residual of the close's order.
 - `close_after_turn` closes an `Idle` door now, marks a `Running` one (`Armed`),
@@ -222,13 +223,16 @@ doors.rs    Doors::open(exec, root, runtime, out)
   cancel waits up to 10 s for the turn to end, then the door closes. If the turn
   does not end, the result is `NoTurnEnd`: the door keeps running, its record
   stays, and nothing is signalled. A 409 says the door is idle, so the turn is
-  taken as idle, and the door closes at once.
+  taken as idle, and the door closes at once. A turn that outlives every cancel
+  is never closed by the app: the user ends it outside the app. Stop now does
+  not withdraw an armed mark, so after a `StillLive` close the mark stands.
 - A turn that starts or ends while no stream is open is not seen. After a
-  reconnect the turn is `Unknown` until a frame arrives. A mark stands across a
-  reconnect until it is revoked or its door closes. A stop now across a
-  reconnect cannot see a turn that ended in the gap: its 204 waits the 10 s and
-  reports `NoTurnEnd`. A second stop now closes when the door answers 409, as an
-  idle door does.
+  reconnect the turn is `Unknown` until a frame arrives. A stream's end
+  withdraws an armed mark, unless a close holds `closing`, so the mark does not
+  stand across a reconnect. A stop now's `StillLive` close is the exception: it
+  leaves the mark standing. A stop now across a reconnect cannot see a turn that
+  ended in the gap: its 204 waits the 10 s and reports `NoTurnEnd`. A second
+  stop now closes when the door answers 409, as an idle door does.
 
 ## How an ask is answered
 

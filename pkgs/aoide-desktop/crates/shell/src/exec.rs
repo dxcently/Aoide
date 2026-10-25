@@ -1,5 +1,5 @@
-//! The one module in the desktop workspace that starts a process or sends a
-//! signal. Every child the app runs goes through here: its program is pinned by
+//! The one module in the desktop workspace that calls the process and signal
+//! APIs. Every child the app runs goes through here: its program is pinned by
 //! `check_pin`, its argv is built against the schema the program prints, its
 //! environment is scrubbed by `child_env` (which refuses every verb but `schema`
 //! and `config` while the vault names are unknown), it runs directly, never
@@ -475,7 +475,7 @@ impl Exec {
     }
 }
 
-/// The one place a process starts. Only `Exec` reaches it, and only with a
+/// Starts a child for one call and waits for it. Only `Exec` reaches it, and only with a
 /// pinned program. The call runs under `deadline` from its start, through the
 /// child's exit and the reading of its output. A child still running at the
 /// deadline is sent SIGTERM and given `EXIT_BOUND` to exit, and the call is
@@ -723,10 +723,11 @@ fn signal_target(pid: u32) -> Option<i32> {
     i32::try_from(pid).ok().filter(|p| *p > 1 && pid != std::process::id())
 }
 
-/// Sends SIGTERM to `pid`, an unreaped child this process started. The caller
-/// checks the start time and the command line at this moment, since a pid can be
-/// reused. This refuses the values `kill` would read as a process group, as init,
-/// as this process, or as no process at all.
+/// Sends SIGTERM to `pid`, an unreaped child this process started. Its one
+/// production caller is `run`, which signals a child it has not reaped, so the
+/// pid is still that child's. Doors are signalled through `terminate_pidfd`. This
+/// refuses the values `kill` would read as a process group, as init, as this
+/// process, or as no process at all.
 pub(crate) fn terminate(pid: u32) -> io::Result<()> {
     let pid = signal_target(pid).ok_or_else(|| {
         io::Error::new(io::ErrorKind::InvalidInput, "a pid to signal is 2 to i32::MAX, and not this process")

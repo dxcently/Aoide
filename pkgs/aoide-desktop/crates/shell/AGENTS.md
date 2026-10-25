@@ -5,7 +5,7 @@ are in README.md.
 
 ## The exec module (exec.rs)
 
-- `exec.rs` is the only file that starts a process or sends a signal. The gate
+- `exec.rs` is the only file that calls the process and signal APIs. The gate
   holds that: `pkgs/aoide-desktop/AGENTS.md` (The gate) says how. The words
   `Command::new(`, `pre_exec`, `libc::fork`, `setsid`, `libc::kill`, `execv` and
   `posix_spawn` appear only in `exec.rs`. The words `unsafe` and `unsafe_code`
@@ -19,7 +19,10 @@ are in README.md.
   `_exit`, which POSIX lists as async-signal-safe, and allocates nothing. `fork`
   runs glibc's atfork handlers, which take malloc's locks before the fork and
   release them on both sides. The closure runs in the intermediate, which has
-  one thread, so those locks are free. `spawn_detached`'s doc says the same.
+  one thread, so those locks are free. `spawn_detached`'s doc says the same. If
+  the write of the pid fails, the closure sends SIGTERM to that pid. The door is
+  the intermediate's unreaped child then, so the pid is its own. That is the one
+  signal not sent through a pidfd.
 - `spawn_door` returns the door as it arrived. `spawn_detached` opens the pidfd
   and reads the start time as the intermediate's pid comes off the pipe, before
   it reaps the intermediate. The window that is left runs from the write to that
@@ -82,12 +85,14 @@ are in README.md.
   `i32::MAX`, and this process's own pid. A pidfd names one process, so the
   signal cannot reach a process that later takes the pid. Outside exec.rs's own
   tests, `arrive` and the door code in `doors.rs` are the only callers: a door
-  is signalled through its pidfd and no other way.
+  is signalled through its pidfd, except for the pid signal in the spawn
+  closure.
 - `pidfd_exited` polls a pidfd with a zero timeout: it reports whether the
   process has ended, and never waits. Only the watch thread uses it.
 - `terminate(pid)` sends SIGTERM to an unreaped child this process started, and
-  refuses the same pids. The caller checks the pid's start time and command line
-  at that moment. The door tests reach it through `test_doors::terminate`.
+  refuses the same pids. Its one production caller is `run`, on the child it has
+  not reaped, so the pid is that child's. The door tests reach it through
+  `test_doors::terminate`.
 - A non-zero exit is not an error. `call` returns the child's status and its
   stderr, verbatim, for the caller to show.
 
@@ -131,15 +136,17 @@ are in README.md.
   works. An identity failure on a try sends `Dropped` and ends the watch.
 - A door keeps at most `ASKS_BOUND` (64) pending asks. An ask past that is
   neither kept nor forwarded, and the stream sends one `AsksOverflow` naming the
-  first ask it refused.
+  first ask it refused. It stays hidden until the stream reopens, when its
+  replay offers it again.
 - The watch thread reads the stream. It updates the shared state under one lock,
   keeps the door's pending asks, forwards each frame, and marks `CloseDue` when
   an armed door's turn ends. The caller answers `CloseDue` with `close_due`. The
   watch writes the record in two places only: an identity failure (`failed`) and
   a door that is gone (`forget`), each through `Store::update`.
 - A stream's end withdraws an armed mark and sends `Event::Revoked`, unless a
-  close holds the mark (`closing`) or the door is gone. `close_due` withdraws the
-  mark after any answer but `Busy`.
+  close holds `closing` or the door is gone. `close_due` withdraws the mark
+  after any answer but `Busy`. Stop now does not: after a `StillLive` close it
+  leaves the mark standing.
 - A watch that ended is not watched. `launch_ids` leaves it out, and `watch`
   refuses it, so its calls send nothing.
 - A drop or a forget whose store write fails keeps its record. The next open
@@ -149,16 +156,16 @@ are in README.md.
   `Close::Dropped`, and any other failure keeps both and returns
   `DoorsError::Unverified`, signalling nothing either way. Under the watch's
   lock, a turn that is not `Idle` is `Busy`, and the watch is left as it was,
-  turn state included. An idle turn marks the watch closing and shuts its
+  turn state included. An idle turn sets `closing` and shuts its
   stream. SIGTERM goes through the pidfd, and the exit is awaited for
   `EXIT_BOUND` (10 s). An exit detaches the watch (2 s bound) and removes the
-  record: `Exited`. A door still live clears the mark and keeps its record and
+  record: `Exited`. A door still live clears `closing` and keeps its record and
   its watch: `StillLive`. The wait never escalates.
-- While the closing mark stands, the watch takes its stream's end as the
-  close's. It neither drops the door nor reconnects. A stream that ended reopens
-  once the mark clears.
-- The close's residual (decision 35): a turn the door starts between the lock
-  and the signal is cut.
+- While `closing` stands, the watch takes its stream's end as the close's. It
+  neither drops the door nor reconnects. A stream that ended reopens once
+  `closing` clears.
+- The close's residual: it checks the turn under the lock and signals after it,
+  so a turn the door starts between the two is cut.
 - A launch that fails up to and including `Store::update` signals its door
   through the pidfd, waits up to 10 s, and returns an error that names its pid
   and its log. A launch that has written its record keeps it: a stream that does
@@ -186,9 +193,13 @@ are in README.md.
   nothing is signalled. After a reconnect the turn is `Unknown`, so a turn that
   ended in the gap is never seen: its stop now's 204 waits the same 10 s and
   reports `NoTurnEnd`. A second stop now closes when the door answers 409, as an
-  idle door does, and a 204 waits again.
+  idle door does, and a 204 waits again. A turn that outlives every cancel is
+  never closed by the app: the user ends it outside the app. Stop now does not
+  withdraw an armed mark, so after a `StillLive` close the mark stands.
 - A failed hello at launch or re-attach leaves the record with a null session,
-  and the watch checks it again on each try.
+  and the watch checks it again on each try. A record with a null session takes
+  a hello's session only at the next open: a watch's reconnect does not write
+  it.
 - A record file that does not parse is refused and never rewritten. A record
   file that is a link is refused.
 - The record and the door's log are created 0600 with `O_NOFOLLOW`, and the log
@@ -288,8 +299,9 @@ are in README.md.
 - The session fill and the watch's start failing after the record is written: no
   seam makes the store's update or the thread's spawn fail. The hello failing at
   launch is tested.
-- `open`'s write of a dropped record failing, which `open` ignores: no seam makes
-  a store write fail between `load` and that write, so its loop is untested.
+- `open`'s write of a dropped record failing, which `open` ignores: no seam
+  makes a store write fail between `load` and that write, so its loop is
+  untested.
 - A record write that fails before the record is written, which refuses the
   launch: no seam makes the rename fail in a directory the test's uid owns.
 

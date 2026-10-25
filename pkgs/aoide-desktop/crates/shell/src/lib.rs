@@ -1,5 +1,6 @@
 //! The desktop app's child processes and its own doors. `exec` is the one
-//! module that starts a process or sends a signal.
+//! module that calls the process and signal APIs; the others reach a process
+//! or a signal only through it.
 
 pub mod asks;
 pub mod doors;

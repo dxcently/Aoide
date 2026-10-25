@@ -1,12 +1,18 @@
 //! The app's own doors: launch, record, re-attach, watch and close (plan §2.6).
 //!
 //! A door is an `eidolon web` process this app started. A door is signalled
-//! only when its checks hold at that moment, and only through a pidfd that
-//! names it. The record is `$AOIDE_ROOT/state/desktop/doors.json`. Each door
-//! has one watch thread: it reads the door's events, updates the shared state,
-//! and forwards to the caller over a bounded channel. The watch never closes or
-//! signals a door. The asks a stream carries are held per door, and answered
-//! only at that door (asks.rs).
+//! only through a pidfd that names it: a close signals it after its checks hold
+//! at that moment, and a launch that fails before its record is written signals
+//! it. One signal goes by pid: if the intermediate in `exec`'s spawn cannot hand
+//! the door's pid over, it signals that pid itself. The record is
+//! `$AOIDE_ROOT/state/desktop/doors.json`. Each door has one watch thread: it
+//! reads the door's events, updates the shared state, and forwards to the caller
+//! over a bounded channel. The watch never closes or signals a door. Two flags
+//! steer it. `armed` is the caller's mark on the running turn: the watch sends
+//! `CloseDue` when that turn ends, and withdraws the mark when a stream ends.
+//! `closing` is set by a close while it shuts the door down, and the watch holds
+//! its stream's end for that close. The asks a stream carries are held per door,
+//! and answered only at that door (asks.rs).
 //!
 //! Nothing here reads an environment variable. The runtime dir arrives as the
 //! value of `XDG_RUNTIME_DIR`, and `$AOIDE_ROOT` as a path.
@@ -522,10 +528,12 @@ impl Doors {
     }
 
     /// Stop now: cancels the turn if one runs, waits for it to end, then closes.
-    /// A door that fails its checks is dropped before the cancel, so its token
-    /// is never sent to whatever answers at its address. An idle door answers
-    /// the cancel with 409, which is its own word that it is idle, so it closes
-    /// at once.
+    /// A door whose identity fails is dropped before the cancel, so its token is
+    /// never sent to whatever answers at its address. Any other failed check ends
+    /// the call as `Unverified`, with no request sent. An idle door answers the
+    /// cancel with 409, which is its own word that it is idle, so it closes at
+    /// once. Stop now does not withdraw an armed mark: after a `StillLive` close,
+    /// the mark stands.
     pub fn stop_now(&mut self, id: &str) -> Result<Close, DoorsError> {
         let entry = self.watch(id)?.entry.clone();
         if verify(&self.pins, &entry).is_err() {
@@ -611,9 +619,9 @@ impl Doors {
     /// nothing, and returns `Close::Dropped`; any other failure keeps both, signals
     /// nothing, and returns `DoorsError::Unverified`. Under the watch's lock, a turn
     /// that is not `Idle` is `Busy`, and the watch is left as it was. An idle turn
-    /// marks the watch closing and shuts its stream, so the door can drain. SIGTERM
+    /// sets `closing` and shuts its stream, so the door can drain. SIGTERM
     /// goes through the pidfd, and the exit is awaited for `EXIT_BOUND`. An exit
-    /// removes the record and the watch. A door still live clears the mark, and
+    /// removes the record and the watch. A door still live clears `closing`, and
     /// keeps its record and its watch.
     fn close_now(&mut self, id: &str) -> Result<Close, DoorsError> {
         let (entry, link, pidfd) = {
@@ -851,7 +859,7 @@ struct Link {
 struct Shared {
     turn: TurnState,
     armed: bool,
-    /// Set by a close that is taking the door down, until it clears the mark or
+    /// Set by a close that is taking the door down, until it clears this flag or
     /// drops the watch. While it stands, the stream's end is the close's.
     closing: bool,
     stop: bool,
@@ -907,7 +915,7 @@ struct Seen {
 /// What a reconnect leaves the watch to do next.
 enum Next {
     Stream(Events),
-    /// A close took the mark while the stream opened. The watch waits for it.
+    /// A close set `closing` while the stream opened. The watch waits for it.
     Hold,
     /// The reconnect failed for a reason other than identity. The watch tries again.
     Retry,
@@ -916,9 +924,9 @@ enum Next {
 
 impl Worker {
     /// Reads the first stream when one is open, then reconnects after each end
-    /// while the door lives. A stream that ends while a close holds the mark is the
-    /// close's: the reader waits for the mark to clear. A door that is gone takes
-    /// its record with it.
+    /// while the door lives. A stream that ends while a close holds `closing` is
+    /// the close's: the reader waits for `closing` to clear. A door that is gone
+    /// takes its record with it.
     fn run(self, first: Option<Events>) {
         let _ended = Ended(self.link.clone());
         let mut next = first;
@@ -1034,7 +1042,7 @@ impl Worker {
         self.link.state.lock().unwrap().stop
     }
 
-    /// Waits while a close holds the mark. Returns whether the watch stopped.
+    /// Waits while a close holds `closing`. Returns whether the watch stopped.
     fn hold(&self) -> bool {
         let shared = self.link.state.lock().unwrap();
         let shared = self.link.moved.wait_while(shared, |s| s.closing && !s.stop).unwrap();
