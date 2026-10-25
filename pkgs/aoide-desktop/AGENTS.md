@@ -7,8 +7,8 @@ and each crate's own invariants are in its AGENTS.md (`crates/door/AGENTS.md`,
 ## The workspace
 
 - This directory is its own Cargo workspace, with its own `Cargo.lock`. It is
-  never a member of `pkgs/aoide`'s workspace, and nothing here moves the core
-  lock.
+  never a member of `pkgs/aoide`'s workspace, so GUI crates never reach the core
+  lock, and nothing here moves it.
 - The shared requirements (serde, serde_json, libc, sha2) live in
   `[workspace.dependencies]`, with the requirements `pkgs/aoide` uses.
 - Every cargo command runs with `--offline`.
@@ -41,13 +41,10 @@ and each crate's own invariants are in its AGENTS.md (`crates/door/AGENTS.md`,
   `crates/shell/tests/gates.rs` test reads every `.rs` under this directory,
   skipping any `target` directory, and every file under `ui/` once that
   directory exists. It forbids `aoided.sock`, `"dispatch"`, `"subscribe"`,
-  `/api/launch`, `sh -c`, SIGKILL, `include!(` and `#[path`. It holds the
-  process-starting words to `exec.rs`. It holds `unsafe_code` and the word
-  `unsafe` to `exec.rs` and the fake eidolon's file, and holds
-  `disallowed_methods`, `disallowed_types`, `clippy::all` and `clippy::style` to
-  `exec.rs`, each matched as a whole word, so `clippy::allow_attributes` is not
-  `clippy::all`. It also checks that the workspace denies the three lints and
-  that each member takes them.
+  `/api/launch`, `sh -c`, SIGKILL, `include!(` and `#[path`. Which file may
+  hold which word is in `crates/shell/AGENTS.md`, with the whole-word rule. It
+  also checks that the workspace denies the three lints and that each member
+  takes them.
 - Residual: a target whose file lies outside this directory is not read by the
   scan, though its crate's lints still apply to it.
 - Dependencies are not scanned, `aoide-protocol` included. The app calls only

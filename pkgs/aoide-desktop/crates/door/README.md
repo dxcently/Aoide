@@ -50,10 +50,8 @@ http.rs     read_head under the deadline the send began, then the body reader:
   `token_path` is the one spelling of `<runtime>/eidolon/web-<port>.token`, and
   `check_runtime` is the runtime dir's check. `read_token` uses both. `Token`
   prints no value.
-- `listener.rs` finds the accepted socket's row in `/proc/net/tcp` (or
-  `tcp6`) and reads its owner. The row is matched by its local address (the
-  door) and its remote address (this client's), so it is the socket that
-  answers this connection.
+- `listener.rs` reads the owner of the socket that answers each connection.
+  Its rule, and the row it matches, are in AGENTS.md.
 - `events.rs` turns the stream into a blocking iterator of `Frame`s, and hands
   out a `Closer` that shuts the stream's socket down from another thread.
 - `frame.rs` decodes one `data:` payload into a typed `Frame`.

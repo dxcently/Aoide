@@ -5,13 +5,14 @@ are in README.md.
 
 ## The exec module (exec.rs)
 
-- `exec.rs` is the only file that starts a process or sends a signal. Clippy
-  holds that: `clippy.toml` at `pkgs/aoide-desktop/` lists the paths, the
-  workspace denies the lints that check them, so a call through an alias of one
-  is an error. The text scan in `crates/shell/tests/gates.rs` is the backstop.
-  The words `Command::new(`, `pre_exec`, `libc::fork`, `setsid`, `libc::kill`,
-  `execv` and `posix_spawn` appear only in `exec.rs`, and the word `unsafe`
-  only in `exec.rs` and the fake eidolon's file.
+- `exec.rs` is the only file that starts a process or sends a signal. The gate
+  holds that: `pkgs/aoide-desktop/AGENTS.md` (The gate) says how. The words
+  `Command::new(`, `pre_exec`, `libc::fork`, `setsid`, `libc::kill`, `execv` and
+  `posix_spawn` appear only in `exec.rs`. The words `unsafe` and `unsafe_code`
+  appear only in `exec.rs` and the fake eidolon's file. `disallowed_methods`,
+  `disallowed_types`, `clippy::all` and `clippy::style` appear only in
+  `exec.rs`, each matched as a whole word, so `clippy::allow_attributes` is not
+  `clippy::all`.
 - `spawn_door` starts only the `Pinned` program it is given, at its canonical
   path. Its pre-exec closure makes only `setsid`, `fork`, `write`, `kill` and
   `_exit`, which POSIX lists as async-signal-safe, and allocates nothing. `fork`

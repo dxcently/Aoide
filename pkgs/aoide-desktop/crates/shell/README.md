@@ -81,27 +81,20 @@ exec.rs     Exec::load(aoide, home, env)
   process keeps the call's two reader threads and their pipes until it exits:
   freeing them at the deadline is not implemented. Nothing sends SIGKILL.
 - `open_pidfd` opens a pidfd for a pid, and `terminate_pidfd` sends SIGTERM
-  through one. Both refuse pid 0, pid 1, any pid past `i32::MAX`, and this
-  process's own pid. A pidfd names one process, so the signal cannot reach a
-  process that later takes the pid. `doors.rs` opens one when a door's pid
-  arrives, and signals a door only through it from then on.
+  through one. The refusals and the reach of a pidfd are in AGENTS.md.
+  `doors.rs` opens one when a door's pid arrives.
 - `door_env` is `child_env` for `eidolon web`, with `XDG_RUNTIME_DIR` set to the
-  checked runtime dir. `spawn_door` takes the `Pinned` program and its
-  arguments, and starts the door through `spawn_detached`, so the program is the
-  one `check_pin` checked. The door runs in a session of its own and is not the
-  app's child: std's child, the intermediate, calls `setsid`, forks the door and
-  writes the door's pid to a pipe. If that write fails, the intermediate
-  SIGTERMs the door and exits non-zero. A door that ignores that SIGTERM runs
-  unnamed. Otherwise the intermediate exits zero, and init adopts the door. The
-  app reads the pid and reaps the intermediate. The door's stdin is `/dev/null`,
-  and its stdout and stderr are the door log. std's close-on-exec pipe reports
-  an exec failure of the door as `spawn`'s error. Once the app has the pid, it
-  signals the door only through its pidfd.
-- `terminate` sends SIGTERM to an unreaped child this process started. It
-  refuses pid 0, pid 1, any pid past `i32::MAX`, and this process's own pid. The
-  caller checks the pid's start time and command line at that moment. `doors.rs`
-  signals a door through its pidfd and never through `terminate`; the door tests
-  reach it through `test_doors::terminate`, behind `fakes`.
+  checked runtime dir. `spawn_door` starts the door through `spawn_detached`,
+  with the `Pinned` program and its arguments. The door runs in a session of its
+  own and is not the app's child: std's child, the intermediate, calls `setsid`,
+  forks the door and writes the door's pid to a pipe. If that write fails, the
+  intermediate SIGTERMs the door and exits non-zero. A door that ignores that
+  SIGTERM runs unnamed. Otherwise the intermediate exits zero, and init adopts
+  the door. The app reads the pid and reaps the intermediate. The door's stdin
+  is `/dev/null`, and its stdout and stderr are the door log. std's
+  close-on-exec pipe reports an exec failure of the door as `spawn`'s error.
+- `terminate` sends SIGTERM to a pid. Its refusals and the caller's check are
+  in AGENTS.md.
 
 ## How a door is kept
 
