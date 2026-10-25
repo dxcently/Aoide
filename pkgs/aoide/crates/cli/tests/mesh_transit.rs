@@ -375,9 +375,8 @@ fn osaka_to_chiyo_routes_via_sakaki_and_the_chain_of_two_verifies_at_chiyo() {
 
 /// The same journey driven to its END: `chiyo` POLLS its relay, the hand-over
 /// files the letter (the poll's own seam: `outbox::hand_over` + the door's
-/// `deposit_container`), and `chiyo`'s receipt rides back to the origin. The
-/// origin let go of the letter on the relay's verified `accepted`, so the
-/// receipt has no entry of its own to retire there.
+/// `deposit_container`), and no receipt comes back (ruling 131). The origin let
+/// go of the letter on the relay's verified `accepted`.
 #[test]
 fn chiyos_poll_files_the_letter_the_relay_held_and_the_origin_had_let_go() {
     let _lock = env_lock();
@@ -432,8 +431,8 @@ fn chiyos_poll_files_the_letter_the_relay_held_and_the_origin_had_let_go() {
     aoide_storage::seal::record_admitted(&container, &digest).unwrap();
     assert_eq!(aoide_storage::mail::filed_kind(&msgid).as_deref(), Some(aoide_storage::mail::ENTRY_TYPE_LETTER));
 
-    // `chiyo`'s receipt, deposited back at the origin. The origin holds no entry
-    // for the letter, so the receipt retires nothing there.
+    // A receipt an older build sent back, deposited at the origin. The origin
+    // holds no entry for the letter, so the receipt retires nothing there.
     let ack = aoide_storage::mail::mint_ack_in_mesh(
         "conductor",
         aoide_storage::mail::Address { node: "osaka".to_string(), name: "conductor".to_string() },
@@ -708,7 +707,7 @@ fn the_whole_journey_runs_through_the_boxes_own_doors() {
     );
 
     // `chiyo` asks its relay: the hand-over is a real deposit through `sakaki`'s
-    // door, the letter is filed, and the receipt is spooled back.
+    // door, the letter is filed, and no receipt is spooled back (ruling 131).
     fx.enter("chiyo");
     aoide_storage::mail::box_add("conductor").unwrap();
     let sakaki_key = aoide_storage::charter::governing(HOME).unwrap().nodes["sakaki"].key.clone();
@@ -750,9 +749,10 @@ fn the_whole_journey_runs_through_the_boxes_own_doors() {
     );
 
     // **And the receipt leg, through the door.** Nothing was spooled, so `chiyo`
-    // sends `osaka` no receipt of its own. A receipt that arrives anyway, minted on
-    // `chiyo` and sealed to `osaka`'s charter line, is still answered at the door: a
-    // real POST, signed as the hop that carried it, and answered `duplicate`.
+    // sends `osaka` no receipt of its own. A receipt an older build sends anyway,
+    // minted on `chiyo` and sealed to `osaka`'s charter line, is still answered
+    // at the door: a real POST, signed as the hop that carried it, and answered
+    // `duplicate`.
     fx.enter("chiyo");
     let osaka_binding = aoide_storage::charter::governing(HOME).unwrap().nodes["osaka"].age.clone();
     let receipt = aoide_storage::mail::mint_ack_in_mesh(
