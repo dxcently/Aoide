@@ -242,3 +242,7 @@ print nothing. Any other call sleeps `FAKE_AOIDE_SLEEP` seconds, writes
 `FAKE_AOIDE_STDOUT_BYTES` bytes to stdout, the text of `FAKE_AOIDE_STDERR` and
 `FAKE_AOIDE_STDERR_BYTES` bytes to stderr, and exits with `FAKE_AOIDE_EXIT`.
 Each call is appended to the file `FAKE_AOIDE_RECORD` names.
+
+A negative check ("no request reached the door") ends with a sentinel request
+the fake records, and passes only if nothing came before the sentinel. Every
+positive wait in the tests is at least 5 s.

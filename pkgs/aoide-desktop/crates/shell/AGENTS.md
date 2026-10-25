@@ -140,7 +140,9 @@ are in README.md.
   and every character `visible` would spell written as a JSON `\u` escape. The
   cap is 4 KiB or 60 lines of that text. The dialog is never a curl line.
 - The stream's JSON is Eidolon's own serialization of its value, so the dialog
-  shows the input the door sent. The sorting and the spelling are
+  shows the input the door sent. That value holds no duplicate key and no
+  number outside what serde_json keeps, so the stream is read without a
+  duplicate-key check and no code does one. The sorting and the spelling are
   `aoide-protocol`'s, which `asks.rs` calls.
 - `curl_line` returns None for an approval's yes. Its body is `visible_json_line`
   of the answer, so it holds no raw character `visible` would spell. The token
@@ -162,6 +164,10 @@ are in README.md.
   door crate forbids `unsafe`, so the FIFO is made here, in `exec.rs`.
 - The door tests start and signal a door through `exec::test_doors`, behind
   `fakes`. It is the one way the tests reach `spawn_door` and `terminate`.
+- A negative check ("no request reached the door") ends with a sentinel request
+  the fake records, and passes only if nothing came before the sentinel. Every
+  positive wait is at least 5 s.
+- The fake eidolon's start-up modes are listed in README.md's fakes section.
 
 ## Not tested
 
