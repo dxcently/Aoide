@@ -1098,7 +1098,9 @@ fn a_door_that_ignores_its_first_sigterm_stays_watched_as_still_live() {
     let id = world.launch(&mut doors);
     world.apply("idle");
     assert!(until(Duration::from_secs(5), || doors.turn(&id).unwrap() == TurnState::Idle), "the watch sees the turn");
+    let streams = world.count("GET /api/events");
     assert_eq!(doors.close_after_turn(&id).unwrap(), Close::StillLive, "the door outlives its 10 s bound");
+    assert_eq!(world.count("GET /api/events"), streams, "no stream opened while the close waited");
     let pid = world.pid(&id);
     assert!(alive(pid), "the door ignored its first SIGTERM");
     assert_eq!(doors.launch_ids(), vec![id.clone()], "the door stays watched");
