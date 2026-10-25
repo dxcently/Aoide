@@ -246,6 +246,8 @@ struct Entry {
     token_file: String,
     session_id: Option<String>,
     cwd: String,
+    /// The program the launch spawned, by its canonical path.
+    program: String,
     log: String,
 }
 
@@ -322,12 +324,9 @@ impl Store {
     }
 }
 
-/// What the checks read: the pinned eidolon, the home it is pinned under, and
-/// the runtime dir the door's token lives in.
+/// What the checks read: the runtime dir the door's token lives in.
 #[derive(Debug, Clone)]
 struct Pins {
-    eidolon: PathBuf,
-    home: PathBuf,
     runtime: PathBuf,
 }
 
@@ -368,8 +367,6 @@ impl Doors {
     /// before anything is touched.
     pub fn open(
         exec: Exec,
-        eidolon: &Path,
-        home: &Path,
         root: &Path,
         runtime: Option<&OsStr>,
         out: SyncSender<Event>,
@@ -378,7 +375,7 @@ impl Doors {
         check_runtime(&runtime)?;
         let mut doors = Doors {
             exec,
-            pins: Pins { eidolon: eidolon.to_path_buf(), home: home.to_path_buf(), runtime },
+            pins: Pins { runtime },
             store: Store::new(root),
             out,
             watches: BTreeMap::new(),
@@ -410,6 +407,12 @@ impl Doors {
     pub fn launch(&mut self, plan: &LaunchPlan) -> Result<String, DoorsError> {
         check_runtime(&self.pins.runtime)?;
         self.exec.door_env(&self.pins.runtime)?;
+        let program = plan
+            .program
+            .path()
+            .to_str()
+            .ok_or_else(|| DoorsError::Plan("the program's path is not UTF-8".into()))?
+            .to_owned();
         let id = unique();
         let dir = self.store.dir.join("doors");
         make_private_dir(&dir)?;
@@ -430,6 +433,7 @@ impl Doors {
             token_file: banner.token_file.to_string_lossy().into_owned(),
             session_id: None,
             cwd: plan.cwd.to_string_lossy().into_owned(),
+            program,
             log: log_path.to_string_lossy().into_owned(),
         };
         verify(&self.pins, &entry).map_err(|check| door.refuse(check.why()))?;
@@ -716,15 +720,16 @@ impl Doors {
     }
 }
 
-/// The checks that need no connection, in order: the pin, the working directory,
-/// the pid's state and start time, its command line, the recorded address, and
-/// the token file as the path of its port. A failure of the pin, the pid, the
-/// start time or the command line is an identity failure. Any other is not.
+/// The checks that need no connection, in order: the working directory, the
+/// pid's state and start time, its command line, the recorded address, and the
+/// token file as the path of its port. The command line must be the record's
+/// `program` with the launch's arguments. A failure of the pid, the start time or
+/// the command line is an identity failure. Any other is not. The pin is checked
+/// at launch alone, by `launch_plan`, so a door keeps the program it was spawned
+/// with.
 fn verify(pins: &Pins, entry: &Entry) -> Result<(), Check> {
-    let pinned = check_pin(&pins.eidolon, &pins.home)
-        .map_err(|e| Check::Identity(format!("the pin no longer passes: {e}")))?;
     check_cwd(Path::new(&entry.cwd)).map_err(Check::Other)?;
-    let argv: Vec<OsString> = std::iter::once(pinned.path().as_os_str().to_owned())
+    let argv: Vec<OsString> = std::iter::once(OsString::from(&entry.program))
         .chain(launch_args(Path::new(&entry.cwd)))
         .collect();
     let stat = match stat_of(entry.pid) {

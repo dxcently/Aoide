@@ -86,7 +86,7 @@ impl World {
     fn open_with(&self, exec: Exec, out: SyncSender<Event>) -> Doors {
         let runtime = self.runtime();
         let (doors, events) =
-            Doors::open(exec, Path::new(FAKE_EIDOLON), &self.home(), &self.root(), Some(runtime.as_os_str()), out.clone())
+            Doors::open(exec, &self.root(), Some(runtime.as_os_str()), out.clone())
                 .expect("the doors open");
         for event in events {
             out.try_send(event).expect("the channel takes the open's events");
@@ -281,6 +281,12 @@ fn port_of(entry: &Value) -> u16 {
     entry["addr"].as_str().unwrap().rsplit(':').next().unwrap().parse().unwrap()
 }
 
+/// The program a launch spawns: the fake eidolon's canonical path, which is what
+/// a record's `program` names.
+fn fake_program() -> String {
+    fs::canonicalize(FAKE_EIDOLON).expect("the fake eidolon canonicalizes").to_str().expect("its path is UTF-8").to_owned()
+}
+
 /// Starts a door without `Doors`, the way the app does, so a test can give a
 /// record a field the app never writes. Returns its pid, its address and its
 /// token file, as the banner names them.
@@ -336,6 +342,7 @@ fn the_record_holds_the_launch_fields_and_is_mode_0600() {
     assert_eq!(entry["tokenFile"].as_str().unwrap(), token_path(&world.runtime(), port_of(&entry)).to_str().unwrap());
     assert_eq!(entry["sessionId"].as_str().unwrap(), world.cwd().join("session.eid").to_str().unwrap());
     assert_eq!(entry["cwd"].as_str().unwrap(), world.cwd().to_str().unwrap());
+    assert_eq!(entry["program"].as_str().unwrap(), fake_program(), "the record names the program the launch spawned");
     let log = world.root().join(format!("state/desktop/doors/{id}.log"));
     assert_eq!(entry["log"].as_str().unwrap(), log.to_str().unwrap());
     let mode = fs::metadata(world.store()).unwrap().permissions().mode();
@@ -360,13 +367,11 @@ fn a_cwd_that_is_relative_missing_not_canonical_or_holds_u202e_is_refused() {
 fn an_unset_or_refused_runtime_dir_opens_nothing_and_starts_no_door() {
     let world = World::new("runtime");
     let (tx, _rx) = mpsc::sync_channel(EVENTS_BOUND);
-    let unset = Doors::open(world.exec(), Path::new(FAKE_EIDOLON), &world.home(), &world.root(), None, tx.clone());
+    let unset = Doors::open(world.exec(), &world.root(), None, tx.clone());
     assert!(unset.is_err(), "an unset runtime dir is refused");
     fs::set_permissions(world.runtime(), fs::Permissions::from_mode(0o755)).unwrap();
     let loose = Doors::open(
         world.exec(),
-        Path::new(FAKE_EIDOLON),
-        &world.home(),
         &world.root(),
         Some(world.runtime().as_os_str()),
         tx,
@@ -395,14 +400,37 @@ fn a_doors_file_that_does_not_parse_is_refused_and_never_rewritten() {
     let (tx, _rx) = mpsc::sync_channel(EVENTS_BOUND);
     let refused = Doors::open(
         world.exec(),
-        Path::new(FAKE_EIDOLON),
-        &world.home(),
         &world.root(),
         Some(world.runtime().as_os_str()),
         tx,
     );
     assert!(refused.is_err(), "the unparseable record is refused");
     assert_eq!(fs::read(world.store()).unwrap(), b"{ not json", "the record is not rewritten");
+}
+
+#[test]
+fn a_record_without_a_program_does_not_parse_and_the_open_is_refused() {
+    let world = World::new("no-program");
+    let (pid, addr, token) = start_door_outside(&world);
+    world.write_record(json!([{
+        "launchId": "old", "pid": pid, "starttime": stat_of(pid).unwrap().starttime,
+        "addr": addr, "tokenFile": token, "sessionId": null, "cwd": world.cwd(), "log": "x",
+    }]));
+    let before = fs::read(world.store()).unwrap();
+    let (tx, _rx) = mpsc::sync_channel(EVENTS_BOUND);
+    let refused = Doors::open(
+        world.exec(),
+        &world.root(),
+        Some(world.runtime().as_os_str()),
+        tx,
+    );
+    assert!(
+        matches!(&refused, Err(DoorsError::Store(why)) if why.contains("does not parse")),
+        "a record without a program does not parse: {:?}",
+        refused.map(|_| ())
+    );
+    assert_eq!(fs::read(world.store()).unwrap(), before, "the record is left as it is");
+    assert!(alive(pid), "the door is left alone");
 }
 
 // --- the record, at start ---
@@ -415,7 +443,7 @@ fn a_forged_record_whose_cmdline_is_not_the_launch_argv_is_dropped_and_never_sig
     fs::create_dir_all(&other).unwrap();
     world.write_record(json!([{
         "launchId": "forged", "pid": pid, "starttime": stat_of(pid).unwrap().starttime,
-        "addr": addr, "tokenFile": token, "sessionId": null, "cwd": other, "log": "x",
+        "addr": addr, "tokenFile": token, "sessionId": null, "cwd": other, "log": "x", "program": fake_program(),
     }]));
     let (tx, _rx) = mpsc::sync_channel(EVENTS_BOUND);
     let _doors = world.open(tx);
@@ -430,12 +458,28 @@ fn a_forged_record_with_a_wrong_start_time_is_dropped_and_never_signalled() {
     let (pid, addr, token) = start_door_outside(&world);
     world.write_record(json!([{
         "launchId": "forged", "pid": pid, "starttime": stat_of(pid).unwrap().starttime + 1,
-        "addr": addr, "tokenFile": token, "sessionId": null, "cwd": world.cwd(), "log": "x",
+        "addr": addr, "tokenFile": token, "sessionId": null, "cwd": world.cwd(), "log": "x", "program": fake_program(),
     }]));
     let (tx, _rx) = mpsc::sync_channel(EVENTS_BOUND);
     let _doors = world.open(tx);
     no_signal_before_sentinel(&world, &door_at(&world, &addr, &token));
     assert!(world.record().is_empty(), "the forged record is dropped");
+    assert!(alive(pid), "the door is left alone");
+}
+
+#[test]
+fn a_record_whose_program_is_not_the_program_its_process_runs_is_dropped_and_never_signalled() {
+    let world = World::new("forged-program");
+    let (pid, addr, token) = start_door_outside(&world);
+    world.write_record(json!([{
+        "launchId": "forged", "pid": pid, "starttime": stat_of(pid).unwrap().starttime,
+        "addr": addr, "tokenFile": token, "sessionId": null, "cwd": world.cwd(), "log": "x",
+        "program": world.dir.join("elsewhere-eidolon"),
+    }]));
+    let (tx, _rx) = mpsc::sync_channel(EVENTS_BOUND);
+    let _doors = world.open(tx);
+    no_signal_before_sentinel(&world, &door_at(&world, &addr, &token));
+    assert!(world.record().is_empty(), "a record whose program is not the one its process runs is dropped");
     assert!(alive(pid), "the door is left alone");
 }
 
@@ -448,7 +492,7 @@ fn a_record_whose_pid_is_dead_is_dropped() {
     assert!(until(Duration::from_secs(10), || !alive(pid)), "the door exits");
     world.write_record(json!([{
         "launchId": "dead", "pid": pid, "starttime": starttime,
-        "addr": addr, "tokenFile": token, "sessionId": null, "cwd": world.cwd(), "log": "x",
+        "addr": addr, "tokenFile": token, "sessionId": null, "cwd": world.cwd(), "log": "x", "program": fake_program(),
     }]));
     let (tx, _rx) = mpsc::sync_channel(EVENTS_BOUND);
     let _doors = world.open(tx);
@@ -461,7 +505,7 @@ fn a_record_whose_hello_names_another_session_is_kept_unwatched_and_never_signal
     let (pid, addr, token) = start_door_outside(&world);
     world.write_record(json!([{
         "launchId": "forged", "pid": pid, "starttime": stat_of(pid).unwrap().starttime,
-        "addr": addr, "tokenFile": token, "sessionId": "/elsewhere.eid", "cwd": world.cwd(), "log": "x",
+        "addr": addr, "tokenFile": token, "sessionId": "/elsewhere.eid", "cwd": world.cwd(), "log": "x", "program": fake_program(),
     }]));
     let (tx, rx) = mpsc::sync_channel(EVENTS_BOUND);
     let doors = world.open(tx);
@@ -537,6 +581,43 @@ fn stop_now_cancels_before_it_signals() {
     let cancel = world.position("POST /api/cancel").expect("the cancel was served");
     let signal = world.position("SIGTERM").expect("the door was signalled");
     assert!(cancel < signal, "the cancel comes before the signal: {:?}", world.log());
+}
+
+#[test]
+fn a_door_launched_through_a_link_is_closed_after_the_link_is_repointed() {
+    let world = World::new("repoint");
+    let link = world.dir.join("eidolon-link");
+    std::os::unix::fs::symlink(FAKE_EIDOLON, &link).expect("the link is made");
+    let copy = world.dir.join("eidolon-copy");
+    fs::copy(FAKE_EIDOLON, &copy).expect("the copy is made");
+    let (cwd_a, cwd_b) = (world.cwd(), world.dir.join("door-b"));
+    fs::create_dir_all(&cwd_b).unwrap();
+    let (tx, rx) = mpsc::sync_channel(EVENTS_BOUND);
+    let (mut doors, _) = Doors::open(
+        world.exec(),
+        &world.root(),
+        Some(world.runtime().as_os_str()),
+        tx,
+    )
+    .expect("the doors open");
+    let plan = |cwd: &Path| launch_plan(&link, &world.home(), cwd).expect("the plan is made");
+    let stopped = doors.launch(&plan(&cwd_a)).expect("the first door launches");
+    world.adopt(world.pid(&stopped));
+    let closed = doors.launch(&plan(&cwd_b)).expect("the second door launches");
+    world.adopt(world.pid(&closed));
+    fs::remove_file(&link).unwrap();
+    std::os::unix::fs::symlink(&copy, &link).unwrap();
+    world.command_at(&cwd_a, "running");
+    assert!(until(Duration::from_secs(5), || matches!(doors.turn(&stopped), Ok(TurnState::Running))), "the first door runs a turn");
+    let outcome = doors.stop_now(&stopped).expect("stop now answers");
+    assert!(matches!(outcome, Close::Exited { .. }), "stop now closes the door launched through the link: {outcome:?}");
+    world.command_at(&cwd_b, "idle");
+    assert!(until(Duration::from_secs(5), || matches!(doors.turn(&closed), Ok(TurnState::Idle))), "the second door is idle");
+    let outcome = doors.close_after_turn(&closed).expect("the close answers");
+    assert!(matches!(outcome, Close::Exited { .. }), "a close closes the door launched through the link: {outcome:?}");
+    let held: Vec<Event> = rx.try_iter().collect();
+    assert!(!held.iter().any(|e| matches!(e, Event::Dropped { .. })), "nothing is dropped: {held:?}");
+    assert!(world.record_ids().is_empty(), "both records are removed");
 }
 
 #[test]
@@ -1084,7 +1165,7 @@ fn a_zombie_record_is_dropped_with_an_event_naming_its_pid() {
     let pid = test_doors::zombie(Path::new("/bin/sh")).expect("a zombie is made");
     world.write_record(json!([{
         "launchId": "zombie", "pid": pid, "starttime": stat_of(pid).unwrap().starttime,
-        "addr": "127.0.0.1:1", "tokenFile": "/unused", "sessionId": null, "cwd": world.cwd(), "log": "x",
+        "addr": "127.0.0.1:1", "tokenFile": "/unused", "sessionId": null, "cwd": world.cwd(), "log": "x", "program": fake_program(),
     }]));
     let (tx, rx) = mpsc::sync_channel(EVENTS_BOUND);
     let _doors = world.open(tx);
@@ -1093,14 +1174,14 @@ fn a_zombie_record_is_dropped_with_an_event_naming_its_pid() {
 }
 
 #[test]
-fn a_changed_pin_drops_each_record_with_an_event_naming_its_pid() {
+fn a_changed_pin_leaves_a_running_door_its_record_and_its_watch() {
     let world = World::new("pin");
     let eidolon = world.dir.join("pinned-eidolon");
     fs::copy(FAKE_EIDOLON, &eidolon).unwrap();
     let plan = launch_plan(&eidolon, &world.home(), &world.cwd()).expect("the plan is made");
     let runtime = world.runtime();
     let (tx, _rx) = mpsc::sync_channel(EVENTS_BOUND);
-    let (mut doors, _) = Doors::open(world.exec(), &eidolon, &world.home(), &world.root(), Some(runtime.as_os_str()), tx)
+    let (mut doors, _) = Doors::open(world.exec(), &world.root(), Some(runtime.as_os_str()), tx)
         .expect("the doors open");
     let id = doors.launch(&plan).expect("the door launches");
     let pid = world.pid(&id);
@@ -1109,11 +1190,11 @@ fn a_changed_pin_drops_each_record_with_an_event_naming_its_pid() {
     drop(doors);
     fs::set_permissions(&eidolon, fs::Permissions::from_mode(0o600)).unwrap();
     let (tx, _rx) = mpsc::sync_channel(EVENTS_BOUND);
-    let (doors, events) = Doors::open(world.exec(), &eidolon, &world.home(), &world.root(), Some(runtime.as_os_str()), tx)
+    let (doors, events) = Doors::open(world.exec(), &world.root(), Some(runtime.as_os_str()), tx)
         .expect("the doors open");
-    assert!(doors.launch_ids().is_empty(), "the door is not watched under a changed pin");
-    assert!(world.record().is_empty(), "the record is dropped");
-    assert!(events.iter().any(|e| matches!(e, Event::Dropped { pid: p, .. } if *p == pid)), "{events:?}");
+    assert!(events.is_empty(), "the open finds nothing to drop: {events:?}");
+    assert_eq!(doors.launch_ids(), vec![id.clone()], "the door is watched under a changed pin");
+    assert_eq!(world.record_ids(), vec![id.clone()], "the record is kept");
     no_signal_before_sentinel(&world, &door);
     assert!(alive(pid), "the door is left alone");
 }
@@ -1124,7 +1205,7 @@ fn a_wrong_token_path_keeps_its_record_unwatched_and_signals_nothing() {
     let (pid, addr, token) = start_door_outside(&world);
     world.write_record(json!([{
         "launchId": "wrong-token", "pid": pid, "starttime": stat_of(pid).unwrap().starttime,
-        "addr": addr, "tokenFile": world.dir.join("wrong.token"), "sessionId": null, "cwd": world.cwd(), "log": "x",
+        "addr": addr, "tokenFile": world.dir.join("wrong.token"), "sessionId": null, "cwd": world.cwd(), "log": "x", "program": fake_program(),
     }]));
     let (tx, rx) = mpsc::sync_channel(EVENTS_BOUND);
     let doors = world.open(tx);
@@ -1236,8 +1317,6 @@ fn a_symlinked_doors_json_is_refused_and_never_rewritten() {
     let (tx, _rx) = mpsc::sync_channel(EVENTS_BOUND);
     let refused = Doors::open(
         world.exec(),
-        Path::new(FAKE_EIDOLON),
-        &world.home(),
         &world.root(),
         Some(world.runtime().as_os_str()),
         tx,
@@ -1257,8 +1336,6 @@ fn a_store_directory_that_is_a_link_is_refused_and_nothing_is_written_through_it
     let (tx, _rx) = mpsc::sync_channel(EVENTS_BOUND);
     let refused = Doors::open(
         world.exec(),
-        Path::new(FAKE_EIDOLON),
-        &world.home(),
         &world.root(),
         Some(world.runtime().as_os_str()),
         tx,
@@ -1279,8 +1356,6 @@ fn a_store_directory_that_links_to_nothing_opens_empty_and_its_first_write_is_re
     let (tx, _rx) = mpsc::sync_channel(EVENTS_BOUND);
     let (mut doors, events) = Doors::open(
         world.exec(),
-        Path::new(FAKE_EIDOLON),
-        &world.home(),
         &world.root(),
         Some(world.runtime().as_os_str()),
         tx,
@@ -1311,7 +1386,7 @@ fn a_launch_whose_hello_fails_keeps_its_record_unwatched_and_signals_nothing() {
 }
 
 #[test]
-fn a_reconnect_whose_pin_changed_drops_the_record_and_signals_nothing() {
+fn a_reconnect_after_a_changed_pin_keeps_the_door_and_its_record() {
     let world = World::new("reconnect-pin");
     let eidolon = world.dir.join("pinned-eidolon");
     fs::copy(FAKE_EIDOLON, &eidolon).unwrap();
@@ -1319,8 +1394,6 @@ fn a_reconnect_whose_pin_changed_drops_the_record_and_signals_nothing() {
     let (tx, rx) = mpsc::sync_channel(EVENTS_BOUND);
     let (mut doors, _) = Doors::open(
         world.exec(),
-        &eidolon,
-        &world.home(),
         &world.root(),
         Some(world.runtime().as_os_str()),
         tx,
@@ -1330,9 +1403,10 @@ fn a_reconnect_whose_pin_changed_drops_the_record_and_signals_nothing() {
     let pid = world.pid(&id);
     fs::set_permissions(&eidolon, fs::Permissions::from_mode(0o600)).unwrap();
     world.apply("end");
-    event_where(&rx, |e| matches!(e, Event::Dropped { pid: p, .. } if *p == pid));
-    assert!(until(Duration::from_secs(5), || world.record_ids().is_empty()), "the record is dropped");
-    assert!(doors.launch_ids().is_empty(), "the door is no longer watched");
+    assert!(until(Duration::from_secs(10), || world.count("GET /api/events") == 2), "the stream reopens under the changed pin");
+    assert_eq!(doors.launch_ids(), vec![id.clone()], "the door is still watched");
+    assert_eq!(world.record_ids(), vec![id.clone()], "the record is kept");
+    assert!(!rx.try_iter().any(|e| matches!(e, Event::Dropped { .. })), "no Dropped follows the reconnect");
     assert!(alive(pid), "the door is left alone");
     assert_eq!(world.count("SIGTERM"), 0, "nothing signalled the door");
 }
@@ -1340,17 +1414,15 @@ fn a_reconnect_whose_pin_changed_drops_the_record_and_signals_nothing() {
 #[test]
 fn open_returns_a_later_records_dropped_while_the_channel_is_full() {
     let world = World::new("open-full");
-    let eidolon = world.dir.join("pinned-eidolon");
-    fs::copy(FAKE_EIDOLON, &eidolon).unwrap();
     let runtime = world.runtime();
     let (earlier_cwd, later_cwd) = (world.dir.join("earlier"), world.dir.join("later"));
     for dir in [&earlier_cwd, &later_cwd] {
         fs::create_dir_all(dir).unwrap();
     }
     let (tx, rx) = mpsc::sync_channel(1);
-    let (mut doors, _) = Doors::open(world.exec(), &eidolon, &world.home(), &world.root(), Some(runtime.as_os_str()), tx.clone())
+    let (mut doors, _) = Doors::open(world.exec(), &world.root(), Some(runtime.as_os_str()), tx.clone())
         .expect("the doors open");
-    let plan = |cwd: &Path| launch_plan(&eidolon, &world.home(), cwd).expect("the plan is made");
+    let plan = |cwd: &Path| launch_plan(Path::new(FAKE_EIDOLON), &world.home(), cwd).expect("the plan is made");
     let earlier = doors.launch(&plan(&earlier_cwd)).expect("the earlier door launches");
     world.adopt(world.pid(&earlier));
     let later = doors.launch(&plan(&later_cwd)).expect("the later door launches");
@@ -1359,9 +1431,13 @@ fn open_returns_a_later_records_dropped_while_the_channel_is_full() {
     world.command_at(&earlier_cwd, "running");
     assert!(until(Duration::from_secs(5), || matches!(doors.turn(&earlier), Ok(TurnState::Running))), "the earlier door runs a turn");
     // The earlier door's running frame fills the one-slot channel, and nothing drains it.
-    fs::set_permissions(&eidolon, fs::Permissions::from_mode(0o600)).unwrap();
-    let (_, events) = Doors::open(world.exec(), &eidolon, &world.home(), &world.root(), Some(runtime.as_os_str()), tx)
-        .expect("the doors open");
+    // The later record names another program, so the open's identity check drops it.
+    let mut record = world.record();
+    for entry in record.iter_mut().filter(|e| e["launchId"] == later.as_str()) {
+        entry["program"] = json!(world.dir.join("elsewhere-eidolon"));
+    }
+    world.write_record(json!(record));
+    let (_, events) = Doors::open(world.exec(), &world.root(), Some(runtime.as_os_str()), tx).expect("the doors open");
     assert!(events.iter().any(|e| matches!(e, Event::Dropped { pid, .. } if *pid == later_pid)), "{events:?}");
     let held: Vec<Event> = rx.try_iter().collect();
     assert!(matches!(held.as_slice(), [Event::Frame { .. }]), "open sends nothing on the channel: {held:?}");

@@ -97,14 +97,19 @@ are in README.md.
   `refuse` (a launch that fails before its record is written). `close_now` runs
   `verify` first, at that moment. `refuse` runs none: its pidfd was opened as
   the pid arrived, so it names the process that pid named then, whatever the
-  banner says. `verify` checks the pin and the working directory, the pid's
-  start time and zombie state, its command line, and its token path. It opens
-  no connection. `Doors::drop` signals nothing.
+  banner says. `verify` checks the working directory, the pid's start time and
+  zombie state, its command line against the record's `program`, and its token
+  path. It opens no connection. `Doors::drop` signals nothing.
+- A door's identity is what its launch spawned. `launch` records the canonical
+  path `launch_plan` pinned as `program`, and `verify` requires the command line
+  to be that program with `launch_args` for the recorded cwd. `check_pin` runs
+  at launch only, so a rebuild or a re-pin leaves a running door its own. A
+  record without `program` does not parse, so the open is refused.
 - A request under a door's token goes out only after `verify` (launch,
   re-attach, stop now, answer), or from the watch thread's reconnect. The
   reconnect runs `verify` and the hello's session check before it uses the
   stream.
-- The identity checks (pid gone or zombie, start time, command line, pin) drop a
+- The identity checks (pid gone or zombie, start time, command line) drop a
   record and send `Event::Dropped`, which names the pid. Every other failure
   keeps the record and sends `Event::Unwatched` from its watch. Both events
   carry `why` through `visible`.
@@ -268,9 +273,8 @@ are in README.md.
   that is neither root nor this user: no test can make a directory another uid
   owns. The mode rule is tested.
 - A reconnect's zombie, start time or command line failure: the same checks at
-  open are tested, and a reconnect's pin change is tested. A door that dies
-  under a watch is reaped by init, so no test holds its zombie, and a live pid's
-  command line cannot change in a test.
+  open are tested. A door that dies under a watch is reaped by init, so no test
+  holds its zombie, and a live pid's command line cannot change in a test.
 - The owner check of the store's directory (`check_private`'s uid branch, for
   the store's directory and the directories made under it). No test can make a
   directory another uid owns. The link check is tested.

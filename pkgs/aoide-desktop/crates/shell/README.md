@@ -98,7 +98,7 @@ exec.rs     Exec::load(aoide, home, env)
 ## How a door is kept
 
 ```
-doors.rs    Doors::open(exec, eidolon, home, root, runtime, out)
+doors.rs    Doors::open(exec, root, runtime, out)
               |                    -> (Doors, Vec<Event>)
               +-- runtime_from_env, check_runtime  refused before any read
               +-- Store::load                      doors.json, or refused
@@ -110,7 +110,7 @@ doors.rs    Doors::open(exec, eidolon, home, root, runtime, out)
               +-- spawn_door               detached, its log under state/
               +-- adopt                    pidfd and start time at arrival
               +-- await_banner             both banner lines, first 64 KiB, 30 s
-              +-- verify                   pid, start time, cmdline, token
+              +-- verify                   cwd, pid, start time, cmdline, token
               +-- Store::update            the record, sessionId null
               +-- open_stream              hello's session fills the record
               +-- start_watch              one watch thread, holding its pidfd
@@ -142,13 +142,19 @@ doors.rs    Doors::open(exec, eidolon, home, root, runtime, out)
   30 s refuses it at that bound. Each refusal quotes the log's last 4 KiB, as
   data.
 - A record is trusted only while `verify` passes. Its pid is live and not a
-  zombie, with the recorded start time. Its command line is the launch argv for
-  the current pin and the recorded cwd, and its token file is the token path of
-  its port. `open_stream` also needs the first frame to be `hello`, within the
-  stream's deadline, and its session to be the recorded one when there is one.
-  A stream whose hello does not come in time does not open.
+  zombie, with the recorded start time. Its command line is the record's
+  `program` followed by the launch arguments for the recorded cwd, and its token
+  file is the token path of its port. `open_stream` also needs the first frame
+  to be `hello`, within the stream's deadline, and its session to be the
+  recorded one when there is one. A stream whose hello does not come in time
+  does not open.
+- A door's identity is what its launch spawned. `launch` records the canonical
+  path that `launch_plan` pinned as the record's `program`. The pin is checked
+  at launch only, so a rebuild or a re-pin leaves a running door its own, and a
+  door launched through a link stays its own when the link is re-pointed. A
+  record without `program` does not parse, so the open is refused.
 - A record whose pid is gone or a zombie, whose start time or command line
-  differs, or whose pin changed, fails its identity check. It is dropped and
+  differs, fails its identity check. It is dropped and
   never signalled, and `Event::Dropped` names its pid. Any other failure (a
   stream that does not open, a hello that fails, a working directory that moved,
   an I/O error) keeps the record. Both events carry `why` through `visible`.
