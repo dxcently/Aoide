@@ -71,7 +71,7 @@ are in README.md.
   stream, and so does a second `hello` (`Malformed`), and a hello that does not
   come by the deadline (`Io`, a timeout). An unknown frame type is
   `Frame::Other`. An unknown field is ignored. Neither is an error.
-- No `unsafe` in this crate: the workspace denies `unsafe_code` for every
+- No `unsafe` in this crate: the workspace forbids `unsafe_code` for every
   target. The effective uid comes from `/proc/self/status`. The open and the
   stat use std.
 - The crate's dependency tree names none of tauri, wry, tao, gtk, webkit2gtk,
@@ -94,8 +94,8 @@ are in README.md.
   another uid. Tests never run as root, so no file or socket of another uid
   can be made. The parser and `decide` tests in `listener.rs` cover another
   uid's row and verdict.
-- The FIFO refusal is tested in the shell crate, which can make a FIFO through
-  `exec`'s fakes-only helper. This crate forbids `unsafe`.
+- The FIFO refusal is tested in the shell crate, which can make a FIFO
+  through the exec crate's fakes-only helper. This crate forbids `unsafe`.
 
 ## The fake door
 

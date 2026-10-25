@@ -38,7 +38,7 @@ use aoide_desktop_door::{
     check_runtime, runtime_from_env, token_path, AnswerOutcome, Ask, CancelOutcome, Closer, Door, DoorError, Events,
     Frame,
 };
-use aoide_protocol::untrusted::{is_unsafe, visible};
+use crate::exec::untrusted::{is_unsafe, visible};
 use serde::{Deserialize, Serialize};
 
 use crate::asks::{self, Prepared, Sent, Shown};

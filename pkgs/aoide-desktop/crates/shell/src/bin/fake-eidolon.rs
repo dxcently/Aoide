@@ -48,7 +48,6 @@
 //! each signal received is appended to `DIR/.fake-log` in order. On SIGTERM it
 //! waits, at most 20 s, until no events stream is open, removes its token file
 //! and exits 0. Past 20 s it exits 1 and leaves its token.
-#![allow(unsafe_code)]
 
 use std::collections::BTreeMap;
 use std::fs::{self, OpenOptions};
@@ -60,6 +59,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use aoide_desktop_door::fake::FakeDoor;
+use aoide_desktop_exec::test_doors;
 use serde_json::{json, Value};
 
 const TOKEN: &str = "fake-door-token";
@@ -280,11 +280,7 @@ fn main() {
     let runtime = PathBuf::from(std::env::var_os("XDG_RUNTIME_DIR").unwrap_or_default());
     // Blocked before any thread starts, so every thread inherits the block and
     // the signal is taken by sigwait.
-    let set = term_set();
-    // SAFETY: `set` is a valid signal set; the block is set before any thread starts.
-    unsafe {
-        libc::pthread_sigmask(libc::SIG_BLOCK, &set, std::ptr::null_mut());
-    }
+    test_doors::block_sigterm().expect("SIGTERM is blocked");
     let ip = if mode == "loopback-2" { Ipv4Addr::new(127, 0, 0, 2) } else { Ipv4Addr::LOCALHOST };
     let door = Arc::new(FakeDoor::start_on(ip, &runtime, TOKEN));
     let hello = json!({
@@ -333,13 +329,11 @@ fn main() {
 /// once no events stream is open. With `ignore_first`, the first SIGTERM is
 /// logged and ignored, and the second one is the one that exits.
 fn await_term(door: &FakeDoor, core: &Mutex<Core>, ignore_first: bool) {
-    let set = term_set();
-    let mut signal: libc::c_int = 0;
     let mut ignore = ignore_first;
     loop {
-        // SAFETY: `set` is a valid signal set, and `signal` is a valid out pointer.
-        unsafe {
-            libc::sigwait(&set, &mut signal);
+        if let Err(e) = test_doors::wait_sigterm() {
+            eprintln!("fake-eidolon: sigwait failed: {e}");
+            std::process::exit(4);
         }
         {
             let mut core = core.lock().expect("the core lock");
@@ -360,14 +354,4 @@ fn await_term(door: &FakeDoor, core: &Mutex<Core>, ignore_first: bool) {
     }
     let _ = fs::remove_file(door.token_file());
     std::process::exit(0);
-}
-
-fn term_set() -> libc::sigset_t {
-    // SAFETY: a zeroed sigset_t is valid, and sigemptyset initializes it before sigaddset uses it.
-    unsafe {
-        let mut set: libc::sigset_t = std::mem::zeroed();
-        libc::sigemptyset(&mut set);
-        libc::sigaddset(&mut set, libc::SIGTERM);
-        set
-    }
 }

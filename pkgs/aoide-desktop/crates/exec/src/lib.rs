@@ -1,11 +1,9 @@
-//! The one module in the desktop workspace that calls the process and signal
-//! APIs. Every child the app runs goes through here: its program is pinned by
-//! `check_pin`, its argv is built against the schema the program prints, its
-//! environment is scrubbed by `child_env` (which refuses every verb but `schema`
-//! and `config` while the vault names are unknown), it runs directly, never
-//! through a shell, and each call runs under one deadline.
-#![allow(unsafe_code)]
-#![allow(clippy::disallowed_methods, clippy::disallowed_types)]
+//! The one crate in the desktop workspace that starts a process or sends a
+//! signal. Every child the app runs goes through here: its program is pinned
+//! by `check_pin`, its argv is built against the schema the program prints,
+//! its environment is scrubbed by `child_env` (which refuses every verb but
+//! `schema` and `config` while the vault names are unknown), it runs directly,
+//! never through a shell, and each call runs under one deadline.
 
 use std::collections::BTreeMap;
 use std::ffi::{CString, OsStr, OsString};
@@ -24,6 +22,10 @@ use std::time::{Duration, Instant};
 
 use aoide_protocol::untrusted::visible;
 use serde::Deserialize;
+
+/// The app reaches aoide-protocol only through this crate, and of it only
+/// `untrusted`.
+pub use aoide_protocol::untrusted;
 
 /// The most a child may write to one stream before its call is refused.
 pub const OUTPUT_CAP: usize = 16 * 1024 * 1024;
@@ -463,7 +465,7 @@ impl Exec {
     /// with stdin on /dev/null and stdout and stderr on `log`. Returns the door as
     /// it arrived, see `Arrived`. The program is the one `check_pin` pinned, and
     /// no other is started.
-    pub(crate) fn spawn_door(
+    pub fn spawn_door(
         &self,
         program: &Pinned,
         args: &[OsString],
@@ -741,14 +743,14 @@ pub(crate) fn terminate(pid: u32) -> io::Result<()> {
 }
 
 /// The effective uid of this process. The app's private directories belong to it.
-pub(crate) fn euid() -> u32 {
+pub fn euid() -> u32 {
     // SAFETY: geteuid takes no arguments and cannot fail.
     unsafe { libc::geteuid() }
 }
 
 /// A pidfd for `pid`: a descriptor that names one process, so a signal sent
 /// through it cannot reach a process that later takes the number.
-pub(crate) fn open_pidfd(pid: u32) -> io::Result<OwnedFd> {
+pub fn open_pidfd(pid: u32) -> io::Result<OwnedFd> {
     let pid = signal_target(pid).ok_or_else(|| {
         io::Error::new(io::ErrorKind::InvalidInput, "a pid to open is 2 to i32::MAX, and not this process")
     })?;
@@ -765,10 +767,10 @@ pub(crate) fn open_pidfd(pid: u32) -> io::Result<OwnedFd> {
 /// A door as its launch first sees it: the pid the intermediate wrote, a pidfd
 /// naming that pid, and its start time. A pid already gone has no pidfd and no
 /// start time.
-pub(crate) struct Arrived {
-    pub(crate) pid: u32,
-    pub(crate) pidfd: io::Result<Option<OwnedFd>>,
-    pub(crate) starttime: Option<u64>,
+pub struct Arrived {
+    pub pid: u32,
+    pub pidfd: io::Result<Option<OwnedFd>>,
+    pub starttime: Option<u64>,
 }
 
 /// Pins `pid` as it arrives. The pidfd names whichever process holds `pid` at
@@ -786,12 +788,12 @@ fn arrive(pid: u32) -> Arrived {
 
 /// The state and start time of `/proc/<pid>/stat`. Its fields are read after
 /// the last `)`, since the command name may hold one.
-pub(crate) struct Stat {
-    pub(crate) state: char,
-    pub(crate) starttime: u64,
+pub struct Stat {
+    pub state: char,
+    pub starttime: u64,
 }
 
-pub(crate) fn stat_of(pid: u32) -> io::Result<Stat> {
+pub fn stat_of(pid: u32) -> io::Result<Stat> {
     let malformed = || io::Error::new(io::ErrorKind::InvalidData, "the stat line is malformed");
     let text = fs::read_to_string(format!("/proc/{pid}/stat"))?;
     let after = text.rfind(')').ok_or_else(malformed)?;
@@ -803,7 +805,7 @@ pub(crate) fn stat_of(pid: u32) -> io::Result<Stat> {
 
 /// Whether the process `fd` names has exited. A pidfd is readable once its
 /// process ends, so a zero-timeout poll answers without reading any pid.
-pub(crate) fn pidfd_exited(fd: &OwnedFd) -> bool {
+pub fn pidfd_exited(fd: &OwnedFd) -> bool {
     let mut watch = libc::pollfd { fd: fd.as_raw_fd(), events: libc::POLLIN, revents: 0 };
     // SAFETY: `watch` is one valid pollfd, and the count names exactly one.
     let ready = unsafe { libc::poll(&mut watch, 1, 0) };
@@ -811,7 +813,7 @@ pub(crate) fn pidfd_exited(fd: &OwnedFd) -> bool {
 }
 
 /// Sends SIGTERM to the process `fd` names, and to no other.
-pub(crate) fn terminate_pidfd(fd: &OwnedFd) -> io::Result<()> {
+pub fn terminate_pidfd(fd: &OwnedFd) -> io::Result<()> {
     // SAFETY: a plain syscall taking a descriptor, a signal and a null siginfo.
     let sent = unsafe {
         libc::syscall(
@@ -893,6 +895,43 @@ pub mod test_doors {
             text.rfind(')').and_then(|at| text[at + 1..].split_whitespace().next()) == Some("Z")
         })
     }
+
+    /// The set that holds SIGTERM alone.
+    fn term_set() -> libc::sigset_t {
+        // SAFETY: a zeroed sigset_t is valid, and sigemptyset initializes it before sigaddset uses it.
+        unsafe {
+            let mut set: libc::sigset_t = std::mem::zeroed();
+            libc::sigemptyset(&mut set);
+            libc::sigaddset(&mut set, libc::SIGTERM);
+            set
+        }
+    }
+
+    /// Blocks SIGTERM for this thread and every thread it starts later, so that
+    /// `wait_sigterm` takes it. Both calls return an error number, not errno.
+    pub fn block_sigterm() -> io::Result<()> {
+        let set = term_set();
+        // SAFETY: `set` is a valid signal set; the block is set before any thread starts.
+        let rc = unsafe { libc::pthread_sigmask(libc::SIG_BLOCK, &set, std::ptr::null_mut()) };
+        if rc == 0 {
+            Ok(())
+        } else {
+            Err(io::Error::from_raw_os_error(rc))
+        }
+    }
+
+    /// Waits until a SIGTERM that `block_sigterm` blocked arrives, and takes it.
+    pub fn wait_sigterm() -> io::Result<()> {
+        let set = term_set();
+        let mut signal: libc::c_int = 0;
+        // SAFETY: `set` is a valid signal set, and `signal` is a valid out pointer.
+        let rc = unsafe { libc::sigwait(&set, &mut signal) };
+        if rc == 0 {
+            Ok(())
+        } else {
+            Err(io::Error::from_raw_os_error(rc))
+        }
+    }
 }
 
 /// The vault key names, or why they are unknown. A `tokenEnv` that is not a
@@ -966,7 +1005,7 @@ mod tests {
             return;
         }
         let status = Command::new(std::env::current_exe().expect("the test binary is known"))
-            .args(["--exact", "exec::tests::terminate_refuses_this_process_without_a_signal"])
+            .args(["--exact", "tests::terminate_refuses_this_process_without_a_signal"])
             .env(CHILD, "1")
             .status()
             .expect("the child runs");

@@ -1,7 +1,7 @@
-//! The desktop app's child processes and its own doors. `exec` is the one
-//! module that calls the process and signal APIs; the others reach a process
-//! or a signal only through it.
+//! The desktop app's own doors and the asks they raise. The shell reaches a
+//! process or a signal only through the exec crate, which it re-exports as
+//! `exec`.
 
 pub mod asks;
 pub mod doors;
-pub mod exec;
+pub use aoide_desktop_exec as exec;

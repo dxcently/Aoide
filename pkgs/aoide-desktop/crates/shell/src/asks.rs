@@ -14,7 +14,7 @@ use std::net::SocketAddr;
 use std::path::Path;
 
 use aoide_desktop_door::Ask;
-use aoide_protocol::untrusted::{visible_json, visible_json_line};
+use crate::exec::untrusted::{visible_json, visible_json_line};
 use serde_json::json;
 use sha2::{Digest, Sha256};
 
@@ -184,7 +184,7 @@ fn sq(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aoide_protocol::untrusted::is_unsafe;
+    use crate::exec::untrusted::is_unsafe;
     use serde_json::Value;
     use std::net::Ipv4Addr;
 
