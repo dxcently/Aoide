@@ -4,9 +4,11 @@
 //! `cli/src/registry.rs` pins the marked paths in
 //! `approves_paths_match_the_golden_snapshot`.
 //!
-//! This scans each crate's `src/` (every `.rs` file but those named `tests.rs`,
-//! each up to its inline `mod tests {`, comments skipped) and counts the lines
-//! naming either check. It does not read `tests/`, build scripts, examples or
+//! This scans each crate's `src/`: every `.rs` file but those named `tests.rs`.
+//! In each file it skips each line whose first non-blank characters are `//`,
+//! and stops at the first line that starts, after blanks, with `mod tests {` or
+//! `pub(crate) mod tests {`. It counts the lines naming either check among
+//! those it reads. It does not read `tests/`, build scripts, examples or
 //! benches. It enforces the list and nothing more. The list is exact, not a
 //! ratchet: a file whose count differs, and a file the list does not name,
 //! fails until the list moves. A new check moves the list in the same commit,
@@ -49,8 +51,9 @@ fn sources(dir: &Path, out: &mut Vec<PathBuf>) {
     }
 }
 
-/// Lines of production code (up to the file's inline `mod tests`, comments
-/// skipped) that name an approve check.
+/// Lines of production code that name an approve check. The walk skips each
+/// line whose first non-blank characters are `//`, and stops at the first line
+/// that starts, after blanks, with `mod tests {` or `pub(crate) mod tests {`.
 fn sites(path: &Path) -> usize {
     let text = std::fs::read_to_string(path).unwrap();
     text.lines()

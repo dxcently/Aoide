@@ -133,6 +133,7 @@ pub fn register_a2a_serve(r: &mut Registry) {
         implemented: true,
         handler: handle_a2a_serve,
         brief: "Serve conducted sessions over A2A (Agent2Agent).",
+        launches: true,
     ));
 }
 

@@ -122,6 +122,10 @@ mod tests {
         assert_eq!(find("node.spawn")["launches"], true);
         assert_eq!(find("conduct")["approves"], true);
         assert_eq!(find("conduct")["launches"], true);
+        assert_eq!(find("session.pending.approve")["approves"], true);
+        assert_eq!(find("session.pending.approve")["launches"], true);
+        assert_eq!(find("a2a.serve")["launches"], true);
+        assert!(find("a2a.serve").get("approves").is_none());
         for plain in ["graph", "session.prune"] {
             let v = find(plain);
             assert!(v.get("approves").is_none() && v.get("launches").is_none(), "{plain} carries neither key: {v}");
@@ -748,8 +752,8 @@ mod tests {
         assert_eq!(got, expected, "approves set drifted from the golden snapshot");
     }
 
-    /// Golden snapshot: the verbs that start an agent, or arm a timer or a
-    /// sweep that starts a program later (`launches`,
+    /// Golden snapshot: the verbs that start an agent, or arm a timer, a sweep
+    /// or a listener that starts a program later (`launches`,
     /// protocol/src/registry.rs). The desktop app's floor refuses a grant that
     /// names one of them.
     #[test]
@@ -757,7 +761,7 @@ mod tests {
         let r = crate::commands::all();
         let mut got: Vec<String> = r.commands().filter(|c| c.launches).map(|c| c.dotted()).collect();
         got.sort();
-        let mut expected = vec!["conduct", "job.add", "node.spawn", "project.add", "resurrect", "spawn"];
+        let mut expected = vec!["a2a.serve", "conduct", "job.add", "node.spawn", "project.add", "resurrect", "session.pending.approve", "spawn"];
         expected.sort();
         assert_eq!(got, expected, "launches set drifted from the golden snapshot");
     }

@@ -688,14 +688,16 @@ Contract guarantees:
   marks the desktop app reads to refuse a grant that names the verb. `approves`
   is set on a verb that approves or denies a hold, re-parents, answers for a
   person, or types into a session, or that reaches a check that refuses a door
-  that cannot approve. `launches` is set on a verb that starts an agent, or
-  arms a timer or a sweep that starts a program later. The desktop app's floor
-  refuses the custody, trust and self-change verbs by name; those verbs carry
-  neither mark, even where a rule fits one. `schema --json` shows which verbs
-  carry each mark, and the golden snapshots in cli/src/registry.rs pin them.
-  **Additive**, same discipline as `internal`: each key is omitted entirely when
-  `false`, so an unmarked command serializes byte-identical to before.
-  `Command::check` reads neither mark.
+  that cannot approve. `launches` is set on a verb that starts an agent, or arms
+  a timer, a sweep or a listener that starts a program later. The desktop app's
+  floor also refuses six classes by name: the custody, trust and self-change
+  verbs, Melete's tools, Mneme's writes and any Eidolon exec. The verbs among
+  them carry neither mark, even where a rule fits one. A verb whose interface
+  routes each action through the dispatcher leaves the marks to the verbs it
+  dispatches. `schema --json` shows which verbs carry each mark, and the golden
+  snapshots in cli/src/registry.rs pin them. **Additive**, same discipline as
+  `internal`: each key is omitted entirely when `false`, so an unmarked command
+  serializes byte-identical to before. `Command::check` reads neither mark.
 - `doors` (optional string array on a command, and on a flag) — the doors that
   may call the command, from `cli`, `daemon`, `mcp`, `a2a`. **Additive**, same
   discipline: omitted from `schema --json` when it is the default `["cli",

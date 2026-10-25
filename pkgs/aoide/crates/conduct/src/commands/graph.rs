@@ -308,7 +308,7 @@ pub fn register(r: &mut Registry) {
         implemented: true,
         handler: crate::graph::pending_approve,
         examples: ["session pending approve 0 --expect <fingerprint>"],
-        approves: true,
+        approves: true, launches: true,
     ));
     r.insert(cmd!(
         path: ["session", "pending", "deny"],
