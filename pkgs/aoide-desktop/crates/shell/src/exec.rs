@@ -47,11 +47,13 @@ pub enum PinError {
     NotExecutable(PathBuf),
     /// The target lies under `<home>/.local/bin`, which is never pinned.
     InLocalBin(PathBuf),
-    /// `path`, the target or the directory it lies in, is writable by group or other.
+    /// `path`, the target or a directory above it, is writable by group or other.
     Writable(PathBuf),
-    /// `path`, the target or the directory it lies in, is owned by `uid`, which is
+    /// `path`, the target or a directory above it, is owned by `uid`, which is
     /// neither root nor this user.
     Owner { path: PathBuf, uid: u32 },
+    /// The target has its setuid or setgid bit set, so it would run as another user.
+    SetId(PathBuf),
 }
 
 impl fmt::Display for PinError {
@@ -77,6 +79,9 @@ impl fmt::Display for PinError {
             Self::Owner { path, uid } => {
                 write!(f, "{} is owned by uid {uid}, which is neither root nor this user", path.display())
             }
+            Self::SetId(path) => {
+                write!(f, "{} has its setuid or setgid bit set, so it would run as another user", path.display())
+            }
         }
     }
 }
@@ -94,6 +99,7 @@ impl Pinned {
 }
 
 /// Checks a program path before it is run, and returns it pinned at its canonical path.
+/// Every directory above the path, up to `/`, is checked as well (see `check_owned`).
 pub fn check_pin(path: &Path, home: &Path) -> Result<Pinned, PinError> {
     if !path.is_absolute() {
         return Err(PinError::Relative(path.to_path_buf()));
@@ -111,19 +117,25 @@ pub fn check_pin(path: &Path, home: &Path) -> Result<Pinned, PinError> {
         }
     }
     let uid = euid();
-    check_owned(&canonical, uid)?;
-    if let Some(dir) = canonical.parent() {
-        check_owned(dir, uid)?;
+    for ancestor in canonical.ancestors() {
+        check_owned(ancestor, uid)?;
     }
     Ok(Pinned(canonical))
 }
 
-/// Refuses a file or directory another user could replace: writable by group or
-/// other, or owned by a uid that is neither root nor `uid`.
+/// Refuses a file or directory another user could replace: owned by a uid that is
+/// neither root nor `uid`, or writable by group or other. A directory whose sticky
+/// bit is set may be writable by other, as `/tmp` is; a file with its setuid or
+/// setgid bit set is refused.
 fn check_owned(path: &Path, uid: u32) -> Result<(), PinError> {
     let meta = fs::metadata(path).map_err(|source| PinError::Missing { path: path.to_path_buf(), source })?;
-    if meta.mode() & 0o022 != 0 {
+    let mode = meta.mode();
+    let sticky_dir = meta.is_dir() && mode & 0o1000 != 0;
+    if mode & 0o022 != 0 && !sticky_dir {
         return Err(PinError::Writable(path.to_path_buf()));
+    }
+    if !meta.is_dir() && mode & 0o6000 != 0 {
+        return Err(PinError::SetId(path.to_path_buf()));
     }
     if meta.uid() != 0 && meta.uid() != uid {
         return Err(PinError::Owner { path: path.to_path_buf(), uid: meta.uid() });
@@ -960,16 +972,34 @@ mod tests {
         assert!(status.success(), "the child's own pid was refused: {status}");
     }
 
-    /// A program under a scratch dir only this user can enter, running `body`, pinned
-    /// as `check_pin` pins it.
-    fn hostile(tag: &str, body: &str) -> (PathBuf, Pinned) {
-        let dir = std::env::temp_dir().join(format!("aoide-desk-hostile-{tag}-{}", std::process::id()));
+    /// A fresh scratch dir for `tag`, mode 0700, named for this process.
+    fn scratch(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("aoide-desk-{tag}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).expect("the scratch dir is made");
         fs::set_permissions(&dir, fs::Permissions::from_mode(0o700)).expect("the scratch dir is 0700");
+        dir
+    }
+
+    /// Writes `body` as a `#!/bin/sh` program at `path`, with `mode`.
+    fn write_program(path: &Path, body: &str, mode: u32) {
+        // A child writes it: a concurrent fork would hold this writer open, and the exec fails with ETXTBSY.
+        let status = Command::new("/bin/sh")
+            .args(["-c", "printf '%s' \"$1\" > \"$2\"", "sh"])
+            .arg(format!("#!/bin/sh\n{body}\n"))
+            .arg(path)
+            .status()
+            .expect("sh runs");
+        assert!(status.success(), "the program is written: {status}");
+        fs::set_permissions(path, fs::Permissions::from_mode(mode)).expect("the program's mode is set");
+    }
+
+    /// A program under a scratch dir only this user can enter, running `body`, pinned
+    /// as `check_pin` pins it.
+    fn hostile(tag: &str, body: &str) -> (PathBuf, Pinned) {
+        let dir = scratch(&format!("hostile-{tag}"));
         let program = dir.join("child");
-        fs::write(&program, format!("#!/bin/sh\n{body}\n")).expect("the child is written");
-        fs::set_permissions(&program, fs::Permissions::from_mode(0o755)).expect("the child is executable");
+        write_program(&program, body, 0o755);
         let pinned = check_pin(&program, &dir.join("home")).expect("the child pins");
         (dir, pinned)
     }
@@ -978,8 +1008,17 @@ mod tests {
         vec![(OsString::from("PATH"), std::env::var_os("PATH").unwrap_or_else(|| "/usr/bin:/bin".into()))]
     }
 
+    /// The pid the program wrote to `pidfile`. The call that starts the program may be
+    /// refused before the program writes it, so this polls for up to 5 s.
     fn pid_in(pidfile: &Path) -> i32 {
-        fs::read_to_string(pidfile).expect("the pid is written").trim().parse().expect("a pid")
+        let until = Instant::now() + Duration::from_secs(5);
+        loop {
+            if let Some(pid) = fs::read_to_string(pidfile).ok().and_then(|text| text.trim().parse::<i32>().ok()) {
+                return pid;
+            }
+            assert!(Instant::now() < until, "the pid is written within 5 s");
+            std::thread::sleep(POLL);
+        }
     }
 
     fn alive(pid: i32) -> bool {
@@ -1016,11 +1055,50 @@ mod tests {
     }
 
     #[test]
+    fn a_program_under_a_group_writable_grandparent_is_refused() {
+        let dir = scratch("grandparent");
+        let parent = dir.join("parent");
+        fs::create_dir_all(&parent).expect("the parent is made");
+        fs::set_permissions(&dir, fs::Permissions::from_mode(0o770)).expect("the grandparent is group-writable");
+        fs::set_permissions(&parent, fs::Permissions::from_mode(0o700)).expect("the parent is private");
+        let program = parent.join("child");
+        write_program(&program, "exit 0", 0o755);
+        let err = check_pin(&program, &dir.join("home")).expect_err("a group-writable grandparent is refused");
+        assert!(matches!(err, PinError::Writable(_)), "{err}");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_program_in_a_private_dir_under_a_sticky_other_writable_dir_is_pinned() {
+        let dir = scratch("sticky");
+        let private = dir.join("private");
+        fs::create_dir_all(&private).expect("the private dir is made");
+        fs::set_permissions(&dir, fs::Permissions::from_mode(0o1777)).expect("the sticky dir is set");
+        fs::set_permissions(&private, fs::Permissions::from_mode(0o700)).expect("the private dir is set");
+        let program = private.join("child");
+        write_program(&program, "exit 0", 0o755);
+        check_pin(&program, &dir.join("home")).expect("a sticky directory above the program does not refuse it");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_setuid_or_setgid_program_is_refused() {
+        for mode in [0o4755, 0o2755] {
+            let dir = scratch(&format!("setid-{mode:o}"));
+            let program = dir.join("child");
+            write_program(&program, "exit 0", mode);
+            let err = check_pin(&program, &dir.join("home")).expect_err("a setuid or setgid program is refused");
+            assert!(err.to_string().contains("setuid or setgid"), "{err}");
+            let _ = fs::remove_dir_all(&dir);
+        }
+    }
+
+    #[test]
     fn a_variable_name_is_a_letter_or_underscore_then_letters_digits_or_underscores() {
         for ok in ["KEY", "_K", "k_9"] {
             assert!(is_variable_name(ok), "{ok}");
         }
-        for bad in ["", "1KEY", "A-B", "A B", "KÉY", "A\nB"] {
+        for bad in ["", "1KEY", "A-B", "A B", "KÉY", "A\nB", "A=B", "A\0B"] {
             assert!(!is_variable_name(bad), "{bad:?}");
         }
     }

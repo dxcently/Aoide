@@ -29,9 +29,11 @@ door crate, and `aoide-protocol` by path (for `is_unsafe` and `visible`).
 exec.rs     Exec::load(aoide, home, env)
               |
               +-- check_pin      absolute, a regular file this user can run,
-              |                  not under <home>/.local/bin, and neither the
-              |                  file nor its directory writable by group or
-              |                  other, owned by root or this user
+              |                  not under <home>/.local/bin, with no setuid
+              |                  or setgid bit, and the file and each directory
+              |                  above it, up to /, owned by root or this user
+              |                  and not writable by group or other (a
+              |                  directory's sticky bit excepted)
               +-- Schema::load   aoide schema --json
               +-- config         aoide config --json   -> vault key names
               |
@@ -50,11 +52,14 @@ exec.rs     Exec::load(aoide, home, env)
 ```
 
 - `check_pin` refuses a relative path, a missing one, a target that is not an
-  executable regular file, and any target under `<home>/.local/bin`. It refuses
-  a file, or the directory it lies in, that group or other can write, and one
-  owned by a uid that is neither root nor this user (`PinError::Writable` and
-  `PinError::Owner`). It returns a `Pinned` of the canonical path, which is the
-  only path the app runs.
+  executable regular file, any target under `<home>/.local/bin`, and a target
+  with its setuid or setgid bit set (`PinError::SetId`). It checks the target
+  and every directory above it, up to `/`: one owned by a uid that is neither
+  root nor this user is refused (`PinError::Owner`), and so is one writable by
+  group or other (`PinError::Writable`). A directory with its sticky bit set is
+  exempt from the writable rule, since no other user may rename or remove its
+  entries, which is why `/nix/store` (1775, root) passes. It returns a `Pinned`
+  of the canonical path, which is the only path the app runs.
 - `argv` builds the argument list from `aoide schema --json`. It refuses, before
   anything runs, an unknown path, an undeclared flag, a bool flag given a value,
   a valued flag given none, a missing required argument, and a NUL byte.

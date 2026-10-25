@@ -37,10 +37,13 @@ are in README.md.
 - Every child runs from a `Pinned` program. `check_pin` is the only maker of
   one, and `run` and `spawn_door` take one. `run` is private, and only `Exec`
   calls it. Do not add a second way in.
-- `check_pin` refuses a file, or the directory it lies in, that group or other
-  can write, and one owned by a uid that is neither root nor this user
-  (`PinError::Writable`, `PinError::Owner`). No test can make a directory
-  another uid owns, so the owner branch is not tested (see Not tested).
+- `check_pin` checks the target and every directory above it, up to `/`: each
+  is owned by root or this user, and none is writable by group or other, unless
+  it is a directory with its sticky bit set. The target also has no setuid or
+  setgid bit (`PinError::Owner`, `PinError::Writable`, `PinError::SetId`). The
+  tests' scratch dirs lie under `TMPDIR`, so `TMPDIR`'s ancestors must pass the
+  same rule. No test can make a directory another uid owns, so the owner branch
+  is not tested (see Not tested).
 - No shell, ever. The argv is a vector of words, never a string handed to a
   shell. A child runs by its absolute path with `env_clear()`.
 - The argv is `[aoide, <path words>, --json, <flags>, (-- <positionals>)]`. A
@@ -251,6 +254,11 @@ are in README.md.
 - The two hostile children in `exec.rs`'s tests are shell scripts that the test
   writes, pins and runs through `run`: a grandchild that holds stdout, and a
   child that ignores SIGTERM. Each is bounded and exits by itself within 8 s.
+- A test that runs a program it wrote writes it through a child: `write_program`
+  runs `/bin/sh` to write the file. A concurrent test's fork would hold this
+  process's writer open until its own exec, and the program's exec would then
+  fail with ETXTBSY. The pid a program writes is polled for up to 5 s, since the
+  call that runs the program can be refused first.
 
 ## Not tested
 
