@@ -955,11 +955,18 @@ blank one is refused too.
   Discovery is read-only over `$XDG_RUNTIME_DIR/eidolon/<id>/{meta.json,
   sock}` — the identical root eidolon's own `Presence::root()` derives, read
   and probed here, never swept: a stale directory is the PRODUCER's own to
-  clean up. Liveness is the presence socket answering `{"op":"ping"}` with
-  `{"ok":true}` inside the same 250ms budget eidolon's own client enforces
-  — never a stat, never `/proc` — so a directory whose socket does not
-  answer simply contributes nothing to that pass's observed set (not a
-  scan failure). A `meta.json` that cannot be read or parsed for any other
+  clean up. Liveness is the presence socket's answer to `{"op":"ping"}`,
+  inside the same 250ms budget eidolon's own client enforces — never a
+  stat, never `/proc`. A socket that answers `{"ok":true}` is live. A
+  directory where nothing listens contributes nothing to that pass's
+  observed set (not a scan failure), and never makes the scan read the
+  process table. A socket that accepts and stays silent is held aside: it
+  is live while its `meta.json`'s `pid` is a row of the process table, the
+  rule Eidolon's own sweep applies, since a busy session can miss the ping.
+  Residual: if another process reuses the pid of a session whose socket is
+  silent, that session stays live until that process exits, so the roster
+  shows it and the resume gate skips its journal. A `meta.json` that cannot
+  be read or parsed for any other
   reason invalidates the WHOLE pass (`PresenceScan::Unknown`), the same
   "any single indeterminate step voids the observation" discipline
   `codex_app.rs` holds; `reconcile_eidolon_sessions` changes nothing on

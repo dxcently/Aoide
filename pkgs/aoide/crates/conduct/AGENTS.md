@@ -690,14 +690,19 @@ in the message.
   conducted-adjacent agent session, a normal dedup/staleness candidate once
   enrolled.
 
-- **Eidolon liveness is the presence socket answering `{"op":"ping"}` with
-  `{"ok":true}`, never a stat, never `/proc`.** `socket_answers`
-  (`eidolon.rs`) connects the `UnixStream`, applies the SAME 250ms
-  read/write timeout eidolon's own client enforces, and reads any other
-  outcome — no listener, a refused connection, a timeout, a reply that
-  isn't exactly `{"ok":true}` — as not live. A directory whose socket does
-  not answer simply contributes nothing to that pass's observed set; it is
-  never treated as a scan failure the way an unreadable `meta.json` is.
+- **Eidolon liveness is the presence socket's answer to `{"op":"ping"}`,
+  never a stat, never `/proc`.** `presence_probe` (`eidolon.rs`) connects
+  the `UnixStream`, applies the SAME 250ms read/write timeout eidolon's own
+  client enforces, and sorts the outcome three ways. `Answered`: exactly
+  `{"ok":true}`, live. `NothingListens`: no socket file, or the connect
+  failed; not live, never a scan failure, and the process table is not read
+  for it. `Silent`: connected, but a timeout, a failed write or read, or any
+  other reply. A silent directory is held aside and is live only while its
+  `meta.json`'s `pid` is a row of the process table, as Eidolon's own sweep
+  pairs silence with the registration's pid. Residual: if another process
+  reuses the pid of a session whose socket is silent, that session stays
+  live until that process exits, so the roster shows it and the resume gate
+  skips its journal.
 
 - **Aoide never sweeps or writes under the eidolon presence root.**
   `$XDG_RUNTIME_DIR/eidolon` is read-only territory: this crate lists it and
@@ -759,9 +764,9 @@ in the message.
   registered, a genuine fact); `Unknown` means the root could not be listed,
   a `meta.json` could not be read/parsed for a reason other than simply
   having vanished since the listing, or the process table came back absent
-  while at least one socket answered. `reconcile_eidolon_sessions` returns
-  `(sessions, false)` untouched on `Unknown`, and `sync_eidolon_sessions`
-  takes no stage lock and writes nothing either.
+  once a socket had answered or been held aside. `reconcile_eidolon_sessions`
+  returns `(sessions, false)` untouched on `Unknown`, and
+  `sync_eidolon_sessions` takes no stage lock and writes nothing either.
 
 - **The reaper dispatches an eidolon record's profile off `rec.agent` alone,
   never an env var.** `reap.rs::profile_for` already resolves any record

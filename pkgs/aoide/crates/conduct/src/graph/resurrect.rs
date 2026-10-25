@@ -5233,6 +5233,46 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    /// A by-journal candidate whose presence socket accepts and never answers is
+    /// still open: the presence's pid is this process, which the real `ps` lists,
+    /// so the session is live and nothing launches.
+    #[cfg(unix)]
+    #[test]
+    fn a_by_log_candidate_whose_presence_is_silent_is_skipped_as_live() {
+        use std::os::unix::net::UnixListener;
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(RESURRECT_ENV);
+        let (root, proj_path) = setup("resurrect-presence-silent");
+        let journal = root.join("s.eid");
+        std::fs::write(&journal, "").unwrap();
+        let journal = journal.to_string_lossy().into_owned();
+        let presence = root.join("eidolon").join("user-silent");
+        std::fs::create_dir_all(&presence).unwrap();
+        std::fs::write(
+            presence.join("meta.json"),
+            serde_json::json!({
+                "id": "user-silent", "pid": std::process::id(), "log": journal,
+                "cwd": proj_path, "repo": null, "model": "m", "started_ms": 0,
+                "title": "t", "busy": false
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let _held_open = UnixListener::bind(presence.join("sock")).unwrap();
+        set_ledger(&[ledger_entry_with_log("ledger-eid", "eidolon", &proj_path, Some(journal.as_str()))]);
+        let (rec, _dump) = recording_terminal_with_claims(&root);
+
+        let out = session_resurrect(&flag_invocation(&["resurrect"], &[("project", "proj"), ("id", "ledger-eid")]));
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok, "msg: {}", out.message);
+        let skipped = out.data.as_ref().unwrap()["skipped"].as_array().unwrap().clone();
+        assert_eq!(skipped.len(), 1, "data: {:?}", out.data);
+        let reason = skipped[0]["reason"].as_str().unwrap();
+        assert!(reason.contains("is live as user-silent"), "the live sentence names the presence id: {reason}");
+        assert!(recorded_launches(&rec).is_empty(), "a silent, pid-live presence launched a terminal");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     /// A conducting stage lock that cannot be taken refuses the candidate: the
     /// claim cannot be written under the lock, so nothing launches.
     #[cfg(unix)]
