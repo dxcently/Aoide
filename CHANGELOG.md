@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Desktop socket drops a misrouted sessiontrace
+
+- The desktop socket (`strillix shellbridge --run`) no longer answers a malformed `sessiontrace` line: it is audited `unparseable` and dropped like any line no verb serves. Only aoided's socket answers one, with the `bad-request` refusal.
+
 ### Greeter output
 
 - `strillix.greeter.output` picks the monitor the Quickshell login screen shows on (e.g. `"DP-1"`); the other monitors are turned off while it runs. If that monitor is missing or disabled, nothing is turned off and the login screen spans every connected monitor. Unset, the login screen keeps its old choice, the last-connected monitor.

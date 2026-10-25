@@ -492,7 +492,7 @@ in `docs/Aoide-Wiki/concepts/cli/Doors-and-Nodes.md`.
   (`{ok:false, action, reason, message}` — nothing was resolved to name), and
   both `workspace` and `action` are absent on a `bad-request` refusal
   (nothing parsed to echo) — and a malformed line that NAMES this verb is
-  ANSWERED with that refusal rather than dropped, the same rule
+  ANSWERED with that refusal rather than dropped, the rule the core socket's
   `sessiontrace` holds: one rule for every parked caller.
 
 - `{"cmd":"component","slot","verb","arg"?}` is a cross-component call,

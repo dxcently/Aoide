@@ -229,9 +229,11 @@ strx shellbridge [--run] [--json]
   audited (action `unparseable`, a byte count only, never the payload) and
   dropped — nothing kills the accept loop. The two verbs whose caller is
   PARKED on a reply (`sessiontrace`, `workspaceaction`) are the exceptions:
-  a line that names one of them and fails its own gate is answered with a
-  `bad-request` refusal instead of silence (`CONTRACTS.md` §4's
-  workspaceaction paragraph has the shapes).
+  a malformed `sessiontrace` line on the core socket and a malformed
+  `workspaceaction` line on the desktop socket are answered with a `bad-request`
+  refusal instead of silence (`CONTRACTS.md` §4's workspaceaction paragraph has
+  the shapes). The desktop socket drops a malformed `sessiontrace` like any line
+  no verb serves.
 - **Notes:** not gated. The `--run` flag is registered in the schema but the
   handler (`strillix/src/commands/shellbridge.rs::handle_shellbridge`) never
   consults it — bare `strx shellbridge` runs the blocking loop either way. The

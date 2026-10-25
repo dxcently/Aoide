@@ -420,9 +420,7 @@ pub(crate) fn serve_line(line: &str, reply: &mut Option<UnixStream>) -> Flow {
         }
 
     None => {
-        if drop_unparsed(&audit_log(), line, reply) == Flow::Answered {
-            return Flow::Answered;
-        }
+        drop_unparsed(&audit_log(), line);
         if wire_cmd(line).as_deref() == Some("workspaceaction") {
             if let Some(mut reply) = reply.take() {
                 // Nothing parsed, so the answer names nothing back:
@@ -504,5 +502,90 @@ mod tests {
         assert_eq!(parse_command(r#"{"cmd":"focuswindow","address":""}"#), None);
         assert_eq!(parse_command(r#"{"cmd":"focuswindow","address":"   "}"#), None);
         assert_eq!(parse_command(r#"{"cmd":"focuswindow"}"#), None);
+    }
+
+    /// The desktop socket answers no core verb. A `sessiontrace` line it cannot serve is
+    /// audited `unparseable` and dropped with no reply, and the connection stays open, so
+    /// the line returned `Flow::Next` and not `Answered`. A malformed `workspaceaction` on
+    /// that same connection still gets its own `bad-request` refusal.
+    #[test]
+    fn a_desktop_socket_drops_a_sessiontrace_silently_and_still_refuses_a_bad_workspaceaction() {
+        use crate::bridge::testutil::{env_lock, short_sock};
+        use aoide_conduct::shellbridge::serve;
+        use std::io::{BufRead, BufReader, Write};
+        use std::os::unix::net::UnixListener;
+
+        let _guard = env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = aoide_test_support::EnvSaver::capture(&[
+            "AOIDE_ROOT",
+            "STRILLIX_ROOT",
+            "AOIDE_AUDIT_LOG",
+            "AOIDE_STATE_DIR",
+            "AOIDE_STAGE_DIR",
+            "XDG_RUNTIME_DIR",
+            "AOIDE_CORE_BIN",
+        ]);
+        let root = aoide_test_support::unique_tmp("shellbridge-desktop-trace");
+        std::env::set_var("AOIDE_ROOT", &root);
+        std::env::set_var("STRILLIX_ROOT", &root);
+        std::env::set_var("AOIDE_AUDIT_LOG", root.join("log"));
+        std::env::set_var("AOIDE_STATE_DIR", &root);
+        aoide_test_support::pin_stage(root.join("stage"));
+        std::env::set_var("XDG_RUNTIME_DIR", &root);
+        std::env::set_var("AOIDE_CORE_BIN", "/nonexistent/aoide");
+
+        let sock = short_sock("desktop-trace");
+        let listener = UnixListener::bind(&sock).unwrap();
+        std::thread::spawn(move || serve(&listener, &SOCKET)); // not joined
+
+        let mut client = UnixStream::connect(&sock).unwrap();
+        let mut reader = BufReader::new(client.try_clone().unwrap());
+        let trace_line = r#"{"cmd":"sessiontrace","sessionId":"s1","clip":"detials"}"#;
+        let ws_line = r#"{"cmd":"workspaceaction","action":"clear","workspace":3,"project":"aoide"}"#;
+        client.write_all(format!("{trace_line}\n").as_bytes()).unwrap();
+        client.flush().unwrap();
+        client.set_read_timeout(Some(std::time::Duration::from_millis(400))).unwrap();
+        let mut heard = String::new();
+        let silence = reader.read_line(&mut heard);
+        assert!(
+            matches!(&silence, Err(e) if matches!(
+                e.kind(),
+                std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+            )),
+            "a desktop sessiontrace is never answered, and the connection stays open: {silence:?} {heard:?}"
+        );
+
+        client.write_all(format!("{ws_line}\n").as_bytes()).unwrap();
+        client.flush().unwrap();
+        client.set_read_timeout(Some(std::time::Duration::from_secs(5))).unwrap();
+        let mut answer = String::new();
+        reader.read_line(&mut answer).unwrap();
+        let reply: Value = serde_json::from_str(answer.trim()).expect("one JSON reply line");
+        assert_eq!(reply["ok"], false, "{reply}");
+        assert_eq!(reply["reason"], "bad-request", "{reply}");
+        assert!(reply.get("sessionId").is_none(), "a late sessiontrace refusal would carry one: {reply}");
+        assert!(
+            reply["message"].as_str().unwrap_or("").starts_with("a workspaceaction line"),
+            "{reply}"
+        );
+
+        let log = root.join("log");
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        let mut text = String::new();
+        while std::time::Instant::now() < deadline {
+            text = std::fs::read_to_string(&log).unwrap_or_default();
+            if text.matches("unparseable").count() >= 2 && text.contains("workspaceaction-refused") {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        let drops: Vec<&str> = text.lines().filter(|l| l.contains("unparseable")).collect();
+        assert_eq!(drops.len(), 2, "one audit entry per dropped line: {text}");
+        assert!(drops.iter().any(|l| l.contains(&format!("({} bytes)", trace_line.len()))), "{text}");
+        assert!(drops.iter().any(|l| l.contains(&format!("({} bytes)", ws_line.len()))), "{text}");
+        assert!(text.contains("workspaceaction-refused"), "{text}");
+        assert!(!text.contains("sessiontrace-refused"), "the desktop socket never refuses a sessiontrace: {text}");
+
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

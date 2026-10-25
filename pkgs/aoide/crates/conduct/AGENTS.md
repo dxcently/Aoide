@@ -868,13 +868,14 @@ in the message.
   cadence.** A polled read (`sessiontrace`) must answer or refuse on the
   connection; never leave a parked caller. `parse_command` refuses a blank
   `sessionId`, a nonsense `lines` and an unknown `clip` (clamping `lines` from
-  above only), and `handle_conn` still ANSWERS a line naming that verb which
-  fails its gate (`bad-request`) — silence is not an answer. `run_bin_bounded`
-  (`run_core_bounded` is its core-binary wrapper; the menu's read calls it
-  with `strillix`) is the only way this module runs a READ's child: a wall-clock
-  deadline with kill + `wait` (no zombie, no live child past the bound), pipes
-  drained by SLOT-COUNTED reader threads that are NEVER joined (`ReaderSlot`; a
-  descendant that inherited a pipe must cost a slot, never the deadline), and a
+  above only), and on the core socket `handle_conn` still ANSWERS a line naming
+  that verb which fails its gate (`bad-request`) — silence is not an answer.
+  `run_bin_bounded` (`run_core_bounded` is its core-binary wrapper; the menu's
+  read calls it with `strillix`) is the only way this module runs a READ's
+  child: a wall-clock deadline with kill + `wait` (no zombie, no live child past
+  the bound), pipes drained by SLOT-COUNTED reader threads that are NEVER joined
+  (`ReaderSlot`; a descendant that inherited a pipe must cost a slot, never the
+  deadline), and a
   partial read DISCARDED rather than parsed when EOF does not arrive inside the
   grace. Don't reintroduce a `join()` on a reader, and don't add a bound that
   one timed-out tick can outrun. Refusals are audited; a successful poll is not
@@ -899,12 +900,13 @@ in the message.
   full reasoning before touching either.
 - **The socket's verb table is a registration seam, not a second parser.**
   `run(verbs)` takes the binary's `&'static [Verb]`. A line that no core parser arm
-  claims goes to the first entry naming its `cmd`. With no entry, `drop_unparsed`
-  audits it and drops it, except that a line naming `sessiontrace` is answered.
-  Core registers nothing. A registered verb whose caller is parked on a reply calls
-  `drop_unparsed` itself for a line it cannot parse, so every drop is audited the
-  same way. The desktop verbs are strillix's (`pkgs/aoide/crates/strillix/AGENTS.md`);
-  don't re-add them here.
+  claims goes to the first entry naming its `cmd`. With no entry,
+  `drop_unparsed` audits it and drops it; it answers nothing. Only the core arm
+  answers a malformed `sessiontrace` (`refuse_bad_trace`), because `handle_conn`
+  gates that arm on `socket.core`. A registered verb whose caller is parked on a
+  reply answers its own malformed line and calls `drop_unparsed` for the audit,
+  so every drop is audited the same way. The desktop verbs are strillix's
+  (`pkgs/aoide/crates/strillix/AGENTS.md`); don't re-add them here.
 
 - **The bridge's action whitelists never become a translator.** It is no
   longer just five session actions: `session_action_args` (subject: a

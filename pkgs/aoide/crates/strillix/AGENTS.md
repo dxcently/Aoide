@@ -461,7 +461,7 @@
   `crate::hypr::NO_COMPOSITOR`, the adapter's own sentence, one authority
   for the text), never dropped: a well-formed click is parked on a reply, so
   even a malformed line that NAMES this verb is ANSWERED with a `bad-request`
-  refusal — the same rule `sessiontrace` holds, one rule for every parked
+  refusal — the rule the core socket's `sessiontrace` holds, one rule for every parked
   caller — while a malformed line that names some OTHER verb is dropped with
   none. The wire takes a
   NEGATIVE workspace id (`as_i64`), matching `SessionRecord.workspace` and

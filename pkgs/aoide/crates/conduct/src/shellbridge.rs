@@ -6,8 +6,8 @@
 //! trace query, the notification ledger, and the usage and session refreshes. A desktop
 //! process serves its own socket with [`run_on`] and a [`Socket`] of its verbs, and no
 //! core arm: core state is written through aoided. A line no table claims is
-//! audited to that socket's log as `unparseable` and dropped. A malformed `sessiontrace`
-//! line, whose caller is parked, is answered with a refusal instead of silence.
+//! audited to that socket's log as `unparseable` and dropped. Only the core socket answers
+//! a malformed `sessiontrace` line, whose caller is parked, with a refusal instead of silence.
 //!
 //! [`seed_core_stage`] seeds the stage files and [`run_core`] serves [`CORE`]. A
 //! malformed line, an unknown command, or a dropped connection is logged and
@@ -738,18 +738,17 @@ pub fn wire_cmd(line: &str) -> Option<String> {
         .map(str::to_string)
 }
 
-/// Does this raw wire line name `cmd`? `drop_unparsed` asks it of an unparseable
-/// line: a `sessiontrace` that failed its own gate must be answered, and every
-/// other unknown line keeps its plain drop-and-audit.
+/// Does this raw wire line name `cmd`? The core arm of `handle_conn` asks it of an
+/// unparseable line: a `sessiontrace` that failed its own gate is answered on the core
+/// socket alone, and every other unknown line keeps its plain drop-and-audit.
 fn wire_names(line: &str, cmd: &str) -> bool {
     wire_cmd(line).as_deref() == Some(cmd)
 }
 
-/// What a line no verb served leaves behind: the `unparseable` audit (a byte count,
-/// never the payload), then, for a `sessiontrace` line that names itself and fails its
-/// own gate, the refusal its parked caller is owed. A registered verb that claims a
-/// line it cannot parse calls this too, so every drop is audited alike.
-pub fn drop_unparsed(log: &Path, line: &str, reply: &mut Option<UnixStream>) -> Flow {
+/// What a line no verb served leaves behind on any socket: the `unparseable` audit (a
+/// byte count, never the payload). Every dropped line is audited alike, and it answers
+/// nothing: the core socket's refusal of a malformed `sessiontrace` is [`refuse_bad_trace`].
+pub fn drop_unparsed(log: &Path, line: &str) {
     let _ = daemon::audit(
         log,
         daemon::Door::Daemon,
@@ -758,32 +757,37 @@ pub fn drop_unparsed(log: &Path, line: &str, reply: &mut Option<UnixStream>) -> 
         "unparseable",
         &format!("dropped one unparseable or unknown command line ({} bytes)", line.len()),
     );
-    if wire_names(line, "sessiontrace") {
-        if let Some(mut reply) = reply.take() {
-            let answer = trace_refusal(
-                "",
-                "",
-                0,
-                "bad-request",
-                "a sessiontrace line takes a non-blank sessionId, a positive integer \
-                 `lines` (clamped to 40 from above), and `clip` line|detail",
-            );
-            let _ = daemon::audit(
-                log,
-                daemon::Door::Daemon,
-                daemon::EventClass::Audit,
-                "shellbridge",
-                "sessiontrace-refused",
-                "trace query refused: bad-request",
-            );
-            std::thread::spawn(move || {
-                use std::io::Write;
-                let _ = writeln!(reply, "{answer}");
-            });
-            return Flow::Answered;
-        }
-    }
-    Flow::Next
+}
+
+/// The core socket's answer to a malformed `sessiontrace`: the `unparseable` audit, then,
+/// while the connection still holds its reply channel, the refusal its parked caller is
+/// owed. Only aoided serves the trace query, so only the core arm of `handle_conn` calls this.
+fn refuse_bad_trace(log: &Path, line: &str, reply: &mut Option<UnixStream>) -> Flow {
+    drop_unparsed(log, line);
+    let Some(mut reply) = reply.take() else {
+        return Flow::Next;
+    };
+    let answer = trace_refusal(
+        "",
+        "",
+        0,
+        "bad-request",
+        "a sessiontrace line takes a non-blank sessionId, a positive integer \
+         `lines` (clamped to 40 from above), and `clip` line|detail",
+    );
+    let _ = daemon::audit(
+        log,
+        daemon::Door::Daemon,
+        daemon::EventClass::Audit,
+        "shellbridge",
+        "sessiontrace-refused",
+        "trace query refused: bad-request",
+    );
+    std::thread::spawn(move || {
+        use std::io::Write;
+        let _ = writeln!(reply, "{answer}");
+    });
+    Flow::Answered
 }
 
 /// The ONE JSON line a `sessiontrace` refusal answers with: the CLI's own
@@ -1893,7 +1897,13 @@ fn handle_conn(stream: UnixStream, socket: &'static Socket) {
             None => {
                 let flow = match wire_cmd(&line).and_then(|cmd| socket.verbs.iter().find(|v| v.cmd == cmd)) {
                     Some(verb) => (verb.serve)(&line, &mut reply),
-                    None => drop_unparsed(&(socket.log)(), &line, &mut reply),
+                    None if socket.core && wire_names(&line, "sessiontrace") => {
+                        refuse_bad_trace(&(socket.log)(), &line, &mut reply)
+                    }
+                    None => {
+                        drop_unparsed(&(socket.log)(), &line);
+                        Flow::Next
+                    }
                 };
                 if flow == Flow::Answered {
                     return;
@@ -3257,6 +3267,62 @@ exit 1
             std::thread::sleep(std::time::Duration::from_millis(20));
         }
         assert!(text.contains("unparseable"), "{text}");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The core socket answers a malformed `sessiontrace` with the bad-request refusal,
+    /// exactly as `trace_refusal` builds it: `sessionId`, `clip` and `lines` are the
+    /// empty shape (nothing resolved), and the audit holds `unparseable` then
+    /// `sessiontrace-refused`, in that order.
+    #[cfg(unix)]
+    #[test]
+    fn the_core_socket_answers_a_malformed_sessiontrace_with_the_bad_request_refusal() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = aoide_test_support::EnvSaver::capture(&["AOIDE_ROOT", "AOIDE_AUDIT_LOG", "XDG_RUNTIME_DIR"]);
+        let root = aoide_test_support::unique_tmp("shellbridge-core-trace");
+        std::env::set_var("AOIDE_ROOT", &root);
+        std::env::set_var("AOIDE_AUDIT_LOG", root.join("log"));
+        std::env::set_var("XDG_RUNTIME_DIR", &root);
+
+        let sock = short_sock("core-trace");
+        let listener = UnixListener::bind(&sock).unwrap();
+        std::thread::spawn(move || serve(&listener, &CORE)); // not joined
+
+        use std::io::Write;
+        let mut client = UnixStream::connect(&sock).unwrap();
+        client.write_all(b"{\"cmd\":\"sessiontrace\"}\n").unwrap();
+        client.flush().unwrap();
+        client.set_read_timeout(Some(std::time::Duration::from_secs(5))).unwrap();
+        let mut answer = String::new();
+        BufReader::new(&client).read_line(&mut answer).unwrap();
+        let reply: Value = serde_json::from_str(answer.trim()).expect("one JSON reply line");
+        assert_eq!(
+            reply,
+            json!({
+                "ok": false,
+                "sessionId": "",
+                "clip": "",
+                "lines": 0,
+                "reason": "bad-request",
+                "message": "a sessiontrace line takes a non-blank sessionId, a positive integer \
+                 `lines` (clamped to 40 from above), and `clip` line|detail",
+            }),
+        );
+
+        let log = root.join("log");
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        let mut text = String::new();
+        while std::time::Instant::now() < deadline {
+            text = std::fs::read_to_string(&log).unwrap_or_default();
+            if text.contains("sessiontrace-refused") {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        let unparsed = text.find("unparseable").expect(&text);
+        let refused = text.find("sessiontrace-refused").expect(&text);
+        assert!(unparsed < refused, "unparseable is audited first: {text}");
 
         let _ = std::fs::remove_dir_all(&root);
     }

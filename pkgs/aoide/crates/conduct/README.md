@@ -1021,8 +1021,10 @@ blank one is refused too.
   `aoide/shellbridge.sock`. `run_on(path, socket)`
   serves a binary's own socket; `strillix shellbridge --run` passes its `SOCKET`
   (`core: false`), so no core arm runs in the desktop process. A line that
-  no arm or table claims goes to `drop_unparsed(log, …)`, which audits it to that
-  socket's log and drops it, except that a line naming `sessiontrace` is answered.
+  no arm or table claims goes to `drop_unparsed(log, …)`, which audits it to
+  that socket's log and drops it, and answers nothing. Only the core socket
+  answers a malformed `sessiontrace` with a `bad-request` refusal; the desktop
+  socket drops it like any line no verb serves.
   The desktop's wire, replies and audit lines are in
   `pkgs/aoide/crates/strillix/README.md`.
 - `commands` — this crate's CLI commands, registered from one `register()`
@@ -1102,8 +1104,9 @@ blank one is refused too.
   `no-answer`/`bad-request`). The gate refuses what it cannot answer honestly:
   a blank/non-id-shaped `sessionId`, a non-numeric or `0` `lines`, an unknown
   `clip` (refused, never widened); `lines` is clamped to `TRACE_LINES_MAX` from
-  above, and a line NAMING this verb that fails that gate is answered with the
-  refusal rather than dropped silently, because its caller is parked on a reply.
+  above, and on the core socket, a line NAMING this verb that fails that gate is
+  answered with the refusal rather than dropped silently, because its caller is
+  parked on a reply.
   `run_core_bounded` holds the wall clock: a 10 s deadline (longer than the
   producer pull's own 5 s, so it never fires on a legitimate slow export), the
   child killed and reaped on expiry, both pipes read by SLOT-COUNTED reader

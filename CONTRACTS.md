@@ -4138,8 +4138,8 @@ data?}`, the CLI's own `message`/`data` verbatim, `project` only on `set`.
 `workspace` is ABSENT only on the `no-compositor` refusal (`{ok:false, action,
 reason, message}` — nothing was resolved to name), and BOTH `workspace` and
 `action` are absent on a `bad-request` refusal (nothing parsed to echo back). A
-malformed line that NAMES this verb is answered rather than dropped, the same
-rule `sessiontrace` holds — one rule for every parked caller.
+malformed line that NAMES this verb is answered rather than dropped, the rule
+the core socket's `sessiontrace` holds — one rule for every parked caller.
 The action resolves an omitted `workspace` to the focused one, then re-execs
 `aoide workspace set|clear` (an explicit id only) and writes nothing itself, so
 the invariant above holds no matter which door the mutation came through.
