@@ -124,8 +124,10 @@ impl RunLoopGuard {
         let events_path = unique_dir(&format!("{tag}-events")).with_extension("jsonl");
         let log_path = unique_dir(&format!("{tag}-log"));
         let state_dir = unique_dir(&format!("{tag}-state"));
+        let runtime_dir = unique_dir(&format!("{tag}-xdg"));
         std::fs::create_dir_all(stage_dir).expect("the fixture must stage its own dir");
         std::fs::create_dir_all(&state_dir).expect("the fixture must stage its own state dir");
+        std::fs::create_dir_all(&runtime_dir).expect("the fixture must stage its own runtime dir");
 
         // The routed CLIENT half of a test reads this process's env.
         std::env::set_var("AOIDE_DAEMON_SOCKET", &socket_path);
@@ -143,7 +145,10 @@ impl RunLoopGuard {
             .env(CHILD_LOG_ENV, &log_path)
             .env("AOIDE_STAGE_DIR", stage_dir)
             .env("AOIDE_STATE_DIR", &state_dir)
-            .env("AOIDE_DAEMON_SOCKET", &socket_path);
+            .env("AOIDE_DAEMON_SOCKET", &socket_path)
+            // Each child owns its core socket, `$XDG_RUNTIME_DIR/aoide/shellbridge.sock`;
+            // inherited, every child would rebind the one path the others serve.
+            .env("XDG_RUNTIME_DIR", &runtime_dir);
         if let Some(pid_file) = pid_file {
             cmd.env(CHILD_PID_FILE_ENV, pid_file);
         }
@@ -514,7 +519,17 @@ fn dispatched_session_start_produces_no_false_hand_edit_event() {
         daemon.child_is_alive(),
         "the resident run_loop child died mid-test — the routed call did not exercise it"
     );
-    // The routed write raised one `state` line per file it moved, before its reply.
+    // The routed write raised a `state` line for sessions.json, and the tick's reconcile one for
+    // graph.json. Wait for both, then settle a full window past the last, so a late duplicate
+    // (an owed line) would show in the counts.
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while (state_events_for(&events_path, "sessions.json").is_empty()
+        || state_events_for(&events_path, "graph.json").is_empty())
+        && Instant::now() < deadline
+    {
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    std::thread::sleep(Duration::from_millis(1500));
     assert_eq!(state_events_for(&events_path, "sessions.json").len(), 1, "{:?}", std::fs::read_to_string(&events_path));
     assert_eq!(state_events_for(&events_path, "graph.json").len(), 1, "{:?}", std::fs::read_to_string(&events_path));
 
@@ -564,6 +579,34 @@ fn dispatched_session_start_produces_no_false_hand_edit_event() {
 
     // Stop the resident loop BEFORE removing anything it writes to — the
     // guard kills and WAITS, so no tick can land in the tree below.
+    drop(daemon);
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+/// The resident daemon's own startup seed is not a hand edit. `run_loop` seeds
+/// `sessions.json` and `hooks.json` on a stage dir that has neither, before the
+/// watcher takes its baseline, so the seed is part of the baseline. No dispatch
+/// runs here, so no routed call can fold the seed before the tick sees it.
+#[test]
+fn a_fresh_daemon_reports_no_hand_edit_for_its_own_seed() {
+    let _guard = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+    let _saver = aoide_test_support::EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_DAEMON_SOCKET", "XDG_RUNTIME_DIR"]);
+
+    let dir = unique_dir("fresh-seed");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::env::set_var("AOIDE_STAGE_DIR", &dir);
+
+    let mut daemon = RunLoopGuard::start("fresh-seed", &dir);
+    assert!(daemon.child_is_alive(), "the resident run_loop child must be up");
+    // Several tick cycles (~1s each) after the seed has had its chance to land.
+    std::thread::sleep(Duration::from_millis(3500));
+
+    assert!(dir.join("hooks.json").exists(), "the core seed must have written hooks.json, or this proves nothing");
+    for file in ["sessions.json", "hooks.json"] {
+        let false_positives = hand_edit_events_for(&daemon.events_path, file);
+        assert!(false_positives.is_empty(), "the daemon's own startup seed is not a hand edit: {file}: {false_positives:?}");
+    }
+
     drop(daemon);
     std::fs::remove_dir_all(&dir).ok();
 }

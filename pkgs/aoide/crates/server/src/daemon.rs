@@ -128,12 +128,15 @@
 //! NEXT tick reported the daemon's own write back to itself as a hand edit.
 //! [`run_loop`] now constructs the watcher once as a
 //! [`SharedHandEditWatcher`] (`Arc<Mutex<HandEditWatcher>>`) and hands the
-//! SAME instance to `accept_loop`/`handle_conn`; after every dispatched
-//! invocation (module doc's "Framing" `dispatch` op) — success or failure,
-//! regardless of which command ran — [`rebaseline_stage_roster`] re-baselines
-//! the WHOLE roster via [`crate::producers::HandEditWatcher::note_own_write`],
-//! the same call the tick's own reconcile fold already made. This is
-//! deliberately roster-wide rather than a per-command "which files did this
+//! SAME instance to `accept_loop`/`handle_conn`. Each dispatched invocation
+//! (module doc's "Framing" `dispatch` op) runs four steps on its connection
+//! thread: `keep_changes` keeps any foreign change the watcher finds, for the
+//! tick's next sweep to report; the dispatch runs; a fresh `session start` is
+//! sealed; then [`rebaseline_stage_roster`] re-baselines the WHOLE roster via
+//! [`crate::producers::HandEditWatcher::note_own_write`], the same call the
+//! tick's own reconcile fold already made. The re-baseline runs after success
+//! or failure, regardless of which command ran. It is deliberately roster-wide
+//! rather than a per-command "which files did this
 //! path write" table (a drift trap this workstream already forbids
 //! elsewhere) — stat-ing six files is cheap, and a dispatch that wrote
 //! nothing just re-baselines to the state that was already there.
@@ -149,13 +152,13 @@
 //! tick's own `note_own_write` calls already accept for
 //! `reconcile_graph_projection`/`run_internal_reap`. Out of scope: the next
 //! genuine hand edit still fires on the following tick, same as always.
-//! The mirror-image window exists too and is equally accepted: the tick's
-//! `sweep` can interleave between the handler's write landing on disk and
-//! this re-baseline acquiring the lock, in which case the daemon's OWN
-//! write is (very rarely) still reported once — bounded now by the tail of
-//! one `dispatch()` call rather than the old full tick period, and closing
-//! it entirely would mean holding the watcher lock across dispatch, which
-//! the accept-loop discipline forbids.
+//! The mirror-image window exists too and is equally accepted: a sweep (the
+//! tick's, or another dispatch's pre-sweep) can interleave between a daemon
+//! write landing on disk and that writer's re-baseline acquiring the lock, in
+//! which case the daemon's OWN write is (very rarely) reported once. The window
+//! is the tail of one `dispatch()` call or one tick's reconcile, not a full tick
+//! period. Closing it entirely would mean holding the watcher lock across
+//! dispatch, which the accept-loop discipline forbids.
 //!
 //! ## Graph residency: reconcile + reap in the tick (P-D6)
 //!
@@ -263,7 +266,7 @@ pub fn run(log_path: PathBuf) -> serde_json::Value {
             "agentCanAdmit": false,
             "lastProposal": proposal.description,
         },
-        "eventClasses": ["audit", "gate", "content", "notification"],
+        "eventClasses": ["audit", "gate", "content", "notification", "secret", "state"],
     })
 }
 
@@ -361,6 +364,30 @@ fn rebaseline_stage_roster(watcher: &SharedHandEditWatcher) {
     let Ok(mut w) = watcher.lock() else { return };
     for path in stage_roster() {
         w.note_own_write(&path);
+    }
+}
+
+/// The tick's hand-edit step (module doc's "The tick's two producers"): one
+/// sweep, which also returns any change a dispatch's pre-sweep kept,
+/// one `hand-edit` line per file it returns, then the reconcile of those files
+/// into `graph.json`. A poisoned lock falls back to an empty sweep, so the tick
+/// still reaches its sleep.
+fn tick_hand_edits(watcher: &SharedHandEditWatcher, feed: &FeedWriter) {
+    let hand_edits = watcher.lock().map(|mut w| w.sweep()).unwrap_or_default();
+    for file in &hand_edits {
+        feed.append(&json!({
+            "v": 0,
+            "ts": aoide_protocol::audit::now_secs(),
+            "class": serde_json::to_value(EventClass::Audit).unwrap_or_else(|_| json!("audit")),
+            "kind": "hand-edit",
+            "source": "aoided",
+            "payload": {"file": file},
+        }));
+    }
+    if let Some(graph_path) = reconcile_graph_projection(&hand_edits) {
+        if let Ok(mut w) = watcher.lock() {
+            w.note_own_write(&graph_path);
+        }
     }
 }
 
@@ -1001,7 +1028,6 @@ pub fn serve_daemon(
     registry: &'static Registry,
     dispatch: DispatchFn,
 ) -> std::io::Result<()> {
-    let listener = bind_socket(socket_path)?;
     // A private watcher — this entry point never ticks, so nothing ever
     // sweeps it, but `handle_conn`'s dispatch path re-baselines it the same
     // way regardless of caller (module doc's task #92 note): no
@@ -1010,6 +1036,19 @@ pub fn serve_daemon(
         stage_roster(),
         FeedWriter::new(events_path.to_path_buf(), EVENTS_CAP_BYTES, 0o600),
     )));
+    serve_with_watcher(socket_path, events_path, registry, dispatch, watcher)
+}
+
+/// [`serve_daemon`] over a watcher the caller holds, so a test can run the
+/// tick's own step ([`tick_hand_edits`]) against the watcher this serves.
+fn serve_with_watcher(
+    socket_path: &Path,
+    events_path: &Path,
+    registry: &'static Registry,
+    dispatch: DispatchFn,
+    watcher: SharedHandEditWatcher,
+) -> std::io::Result<()> {
+    let listener = bind_socket(socket_path)?;
     accept_loop(listener, events_path.to_path_buf(), registry, dispatch, watcher);
     Ok(())
 }
@@ -1207,7 +1246,17 @@ fn handle_conn(
                 // door-specific policy lives here (module doc).
                 match invocation_from_dispatch_request(&req, door_pid) {
                     Ok(inv) => {
+                        // Keep the foreign changes this dispatch would
+                        // otherwise fold away, for the tick's next sweep to
+                        // report. This thread writes no hand-edit line.
+                        if let Ok(mut w) = watcher.lock() {
+                            w.keep_changes();
+                        }
                         let outcome = dispatch(&inv);
+                        // LANE IDENTITY P-ID1: seals a fresh registration once.
+                        // Before the re-baseline, so the seal's own write is
+                        // folded with the dispatch's.
+                        seal_freshly_registered_session(&inv, &outcome);
                         // task #92: this handler may have just written stage
                         // files via the SAME `do_session_*` code the CLI
                         // runs (module doc) — re-baseline the shared watcher
@@ -1216,8 +1265,6 @@ fn handle_conn(
                         // regardless of outcome/command (module doc: roster-wide,
                         // not a per-command table).
                         rebaseline_stage_roster(&watcher);
-                        // LANE IDENTITY P-ID1: seals a fresh registration once.
-                        seal_freshly_registered_session(&inv, &outcome);
                         if write_json_line(&mut writer, &json!({"outcome": outcome})).is_err() {
                             return;
                         }
@@ -1320,12 +1367,13 @@ fn tighten_state_tree() -> std::io::Result<()> {
 
 /// The resident daemon's own main loop (P-D2, `docs/architecture/
 /// AOIDED.md`'s "L1 — the event bus" section): bind the socket, append one
-/// `started` record to BOTH the single audit log (`log_path` — the same
-/// `audit()` call [`run`]'s one-shot skeleton already made, so a resident
-/// `aoided` keeps auditing its own startup exactly as the unit's
-/// `AOIDE_AUDIT_LOG` wiring already expects) and the daemon's own events
-/// feed (creating that file — module doc's "The events feed"), spawn the
-/// accept loop on its own thread, then tick forever (~1s). Bind happens
+/// `started` record to the single audit log (`log_path` — the same `audit()`
+/// call [`run`]'s one-shot skeleton already made, so a resident `aoided` keeps
+/// auditing its own startup exactly as the unit's `AOIDE_AUDIT_LOG` wiring
+/// already expects), seed the core's stage files, take the watcher's baseline,
+/// spawn the accept loop on its own thread, start the core shellbridge, append a
+/// `started` record to the daemon's own events feed (module doc's "The events
+/// feed"), then tick forever (~1s). Bind happens
 /// SYNCHRONOUSLY on this thread — a bind failure propagates straight to the
 /// caller (`bin/aoided.rs`'s `main`, under `Restart=on-failure`) rather than
 /// surfacing only inside a spawned thread's silent `eprintln!`. Only
@@ -1351,14 +1399,10 @@ pub fn run_loop(
     let _ = audit(&log_path, Door::Daemon, EventClass::Audit, "daemon", "started", "aoided resident loop online");
 
     let feed = FeedWriter::new(events_path.clone(), EVENTS_CAP_BYTES, 0o600);
-    feed.append(&json!({
-        "v": 0,
-        "ts": aoide_protocol::audit::now_secs(),
-        "class": serde_json::to_value(EventClass::Audit).unwrap_or_else(|_| json!("audit")),
-        "kind": "started",
-        "source": "aoided",
-        "payload": {},
-    }));
+
+    // Seeded before the baseline below, so the seed is part of the baseline: no
+    // `state` line and no `hand-edit` line for it.
+    aoide_conduct::shellbridge::seed_core_stage();
 
     // Shared with `accept_loop`/`handle_conn`'s `dispatch` op (task #92,
     // module doc's "The tick's two producers"): ONE watcher instance, not a
@@ -1379,6 +1423,17 @@ pub fn run_loop(
     // and socket are bound, so the stale-socket unlink inside it cannot hit a live one.
     // Not gated on strillix: core's widgets and notifications run with no desktop process.
     std::thread::Builder::new().spawn(aoide_conduct::shellbridge::run_core)?;
+
+    // `started` comes last: a client that waits for it finds the baseline taken
+    // and the accept loop up.
+    feed.append(&json!({
+        "v": 0,
+        "ts": aoide_protocol::audit::now_secs(),
+        "class": serde_json::to_value(EventClass::Audit).unwrap_or_else(|_| json!("audit")),
+        "kind": "started",
+        "source": "aoided",
+        "payload": {},
+    }));
 
     // P-D8 boot-time auto-resume (module doc's "Open knobs" — decided: daemon
     // start). Runs ONCE here, at `run_loop` entry — never inside the tick
@@ -1438,27 +1493,7 @@ pub fn run_loop(
                 w.note_own_write(&aoide_storage::stage::sessions_path());
             }
         }
-        // A poisoned lock (only possible if a dispatch-side re-baseline ever
-        // panicked mid-lock) is not this loop's problem to fix — fall back
-        // to an empty sweep rather than `continue`, so the tick still hits
-        // its sleep below instead of busy-spinning.
-        let hand_edits =
-            hand_edit_watcher.lock().map(|mut w| w.sweep()).unwrap_or_default();
-        for file in &hand_edits {
-            feed.append(&json!({
-                "v": 0,
-                "ts": aoide_protocol::audit::now_secs(),
-                "class": serde_json::to_value(EventClass::Audit).unwrap_or_else(|_| json!("audit")),
-                "kind": "hand-edit",
-                "source": "aoided",
-                "payload": {"file": file},
-            }));
-        }
-        if let Some(graph_path) = reconcile_graph_projection(&hand_edits) {
-            if let Ok(mut w) = hand_edit_watcher.lock() {
-                w.note_own_write(&graph_path);
-            }
-        }
+        tick_hand_edits(&hand_edit_watcher, &feed);
 
         ticks += 1;
         if ticks % REAP_EVERY_TICKS == 0 {
@@ -1987,6 +2022,156 @@ mod tests {
         std::fs::remove_file(&socket_path).ok();
         std::fs::remove_file(&events_path).ok();
         restore_stage(&stage, saved);
+    }
+
+    /// The feed at `events`, parsed. A missing file has none.
+    fn feed_lines(events: &Path) -> Vec<Value> {
+        std::fs::read_to_string(events)
+            .unwrap_or_default()
+            .lines()
+            .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+            .collect()
+    }
+
+    /// Serves one dispatch socket over `watcher` on its own thread, and returns
+    /// the socket path to connect to.
+    fn spawn_dispatch_server(watcher: &SharedHandEditWatcher, events_path: &Path, dispatch: DispatchFn) -> PathBuf {
+        let socket_path = short_tmp("dispatch-server").with_extension("sock");
+        let (sp, ep, w) = (socket_path.clone(), events_path.to_path_buf(), Arc::clone(watcher));
+        std::thread::spawn(move || {
+            let _ = serve_with_watcher(&sp, &ep, test_registry(), dispatch, w);
+        });
+        socket_path
+    }
+
+    /// Sends one dispatch request line over `socket` and returns its reply.
+    fn dispatch_over(socket: &Path, request: &[u8]) -> Value {
+        let stream = connect_retrying(socket);
+        let mut writer = stream.try_clone().unwrap();
+        let mut reader = BufReader::new(stream);
+        writer.write_all(request).unwrap();
+        writer.write_all(b"\n").unwrap();
+        read_one_line(&mut reader)
+    }
+
+    /// A [`DispatchFn`] for a routed `session start`: it writes the pid-carrying
+    /// record a registration leaves, which is what the seal stamps.
+    fn write_session_start_record(inv: &Invocation) -> Outcome {
+        let file = aoide_storage::records::SessionsFile {
+            schema_version: "0".to_string(),
+            sessions: vec![aoide_storage::records::SessionRecord {
+                session_id: inv.flags.get("id").cloned().unwrap_or_default(),
+                agent: "claude".to_string(),
+                state: "idle".to_string(),
+                started_at: "2026-01-01T00:00:00Z".to_string(),
+                pid: Some(std::process::id()),
+                origin: Some("local".to_string()),
+                ..Default::default()
+            }],
+        };
+        aoide_storage::stage::write_stage(&aoide_storage::stage::sessions_path(), &file).unwrap();
+        Outcome::ok("session.start", "started")
+    }
+
+    /// An out-of-band write that lands before a routed dispatch is still a hand
+    /// edit. The dispatch's pre-sweep keeps it for the tick, which reports it
+    /// once, with one `state` line for it and none for the dispatch's own
+    /// write.
+    #[test]
+    fn a_dispatch_keeps_an_out_of_band_hand_edit_for_the_tick() {
+        let (_guard, stage, saved) = isolated_stage();
+        let events_path = short_tmp("dispatch-keeps-events").with_extension("jsonl");
+        let watcher: SharedHandEditWatcher = Arc::new(Mutex::new(crate::producers::HandEditWatcher::new(
+            stage_roster(),
+            FeedWriter::new(events_path.clone(), EVENTS_CAP_BYTES, 0o600),
+        )));
+        let socket_path = spawn_dispatch_server(&watcher, &events_path, write_pending_dispatch);
+
+        // A write no daemon path made, after the watcher's baseline.
+        std::fs::write(aoide_storage::stage::sessions_path(), br#"{"schemaVersion":"0","sessions":[]}"#).unwrap();
+
+        let reply = dispatch_over(&socket_path, br#"{"v":0,"op":"dispatch","path":["foo","bar"],"args":[],"flags":{}}"#);
+        assert_eq!(reply["outcome"]["status"], "ok", "{reply}");
+
+        tick_hand_edits(&watcher, &FeedWriter::new(events_path.clone(), EVENTS_CAP_BYTES, 0o600));
+
+        let lines = feed_lines(&events_path);
+        let hand_edits: Vec<&Value> = lines.iter().filter(|v| v["kind"] == "hand-edit").collect();
+        assert_eq!(hand_edits.len(), 1, "{lines:?}");
+        assert_eq!(hand_edits[0]["payload"]["file"], "sessions.json", "{lines:?}");
+        let state_for_sessions =
+            lines.iter().filter(|v| v["class"] == "state" && v["payload"]["files"] == json!(["sessions.json"])).count();
+        assert_eq!(state_for_sessions, 1, "{lines:?}");
+
+        std::fs::remove_file(&socket_path).ok();
+        std::fs::remove_file(&events_path).ok();
+        restore_stage(&stage, saved);
+    }
+
+    /// A routed `session start` is sealed before the dispatch re-baselines, so
+    /// the seal's own write is folded with the dispatch's and the tick reports
+    /// no hand edit for it. The old order (re-baseline, then seal) left the seal
+    /// unfolded and the tick reported a false hand edit.
+    #[test]
+    fn a_dispatch_seals_before_it_rebaselines() {
+        let (_guard, stage, saved) = isolated_stage();
+        let events_path = short_tmp("dispatch-seal-events").with_extension("jsonl");
+        let watcher: SharedHandEditWatcher = Arc::new(Mutex::new(crate::producers::HandEditWatcher::new(
+            stage_roster(),
+            FeedWriter::new(events_path.clone(), EVENTS_CAP_BYTES, 0o600),
+        )));
+        let socket_path = spawn_dispatch_server(&watcher, &events_path, write_session_start_record);
+
+        let reply = dispatch_over(
+            &socket_path,
+            br#"{"v":0,"op":"dispatch","path":["session","start"],"args":[],"flags":{"id":"s1"}}"#,
+        );
+        assert_eq!(reply["outcome"]["status"], "ok", "{reply}");
+
+        tick_hand_edits(&watcher, &FeedWriter::new(events_path.clone(), EVENTS_CAP_BYTES, 0o600));
+
+        let lines = feed_lines(&events_path);
+        assert!(lines.iter().all(|v| v["kind"] != "hand-edit"), "the seal is the daemon's own write: {lines:?}");
+        let after: aoide_storage::records::SessionsFile =
+            aoide_storage::stage::load_stage(&aoide_storage::stage::sessions_path()).unwrap();
+        assert!(after.sessions.iter().any(|s| s.seal.is_some()), "the routed registration must be sealed");
+
+        std::fs::remove_file(&socket_path).ok();
+        std::fs::remove_file(&events_path).ok();
+        restore_stage(&stage, saved);
+    }
+
+    /// The status document's `eventClasses` names every `EventClass` by its wire
+    /// name. The exhaustive match fails this build for a new variant
+    /// until it is named here, and the list must then name it too.
+    #[test]
+    fn status_names_every_event_class() {
+        fn wire_name(class: EventClass) -> &'static str {
+            match class {
+                EventClass::Audit => "audit",
+                EventClass::Gate => "gate",
+                EventClass::Content => "content",
+                EventClass::Notification => "notification",
+                EventClass::Secret => "secret",
+                EventClass::State => "state",
+            }
+        }
+        let log = short_tmp("status-classes").with_extension("log");
+        let status = run(log.clone());
+        let listed: Vec<&str> = status["eventClasses"].as_array().unwrap().iter().filter_map(Value::as_str).collect();
+        for class in [
+            EventClass::Audit,
+            EventClass::Gate,
+            EventClass::Content,
+            EventClass::Notification,
+            EventClass::Secret,
+            EventClass::State,
+        ] {
+            let name = wire_name(class);
+            assert_eq!(serde_json::to_value(class).unwrap(), json!(name));
+            assert!(listed.contains(&name), "`{name}` is missing from eventClasses {listed:?}");
+        }
+        std::fs::remove_file(&log).ok();
     }
 
     /// A `dispatch` request missing its `path` array gets one error reply

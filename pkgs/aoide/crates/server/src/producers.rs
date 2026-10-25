@@ -36,30 +36,31 @@
 //! ## The hand-edit watcher (#69)
 //!
 //! [`HandEditWatcher`] holds a small (mtime, len) baseline per watched
-//! stage file and fires one event per file whose on-disk state no longer
-//! matches its baseline — [`HandEditWatcher::sweep`] then re-baselines
-//! every file it just checked, matching or not, so a genuine change is
-//! reported exactly once. [`HandEditWatcher::note_own_write`] lets a
-//! daemon-side writer update a single file's baseline without going
-//! through a full `sweep`, so a write the daemon itself just made is
-//! folded into the baseline instead of being reported back to itself as a
-//! "hand" edit on the very next tick. Two callers exist: the tick's own
-//! reconcile/reap writes (P-D6), and — through the shared watcher's
-//! roster-wide re-baseline (`daemon::rebaseline_stage_roster`, task #92)
-//! — every dispatched invocation's writes.
+//! stage file. [`HandEditWatcher::sweep`] returns, once each and in roster
+//! order, the files whose on-disk state no longer matches their baseline,
+//! and re-baselines them, so a genuine change is reported exactly once.
+//! [`HandEditWatcher::note_own_write`] lets a daemon-side writer fold its own
+//! write into a single file's baseline, so a write the daemon itself just made
+//! is never reported back to itself as a "hand" edit. Two callers note writes:
+//! the tick's own reconcile/reap writes (P-D6), and every dispatched
+//! invocation's writes, through the shared watcher's roster-wide re-baseline
+//! (`daemon::rebaseline_stage_roster`, task #92). A dispatch first calls
+//! [`HandEditWatcher::keep_changes`], which keeps a foreign change it finds as
+//! owed to the next sweep, so a change made before a dispatch still reaches
+//! the tick.
 //!
 //! ## The state cue
 //!
 //! The same watcher raises a `class:"state"` line whenever a watched file's
-//! `(mtime, len)` moves, whoever moved it: a sweep's hand edit, a write
-//! [`HandEditWatcher::note_own_write`] folds, a dispatch's roster-wide
-//! re-baseline. Its `kind` is `changed`, and its `payload.files` names the
-//! file by base name, as the hand-edit line does. Each file gets at most one
-//! such line per [`STATE_WINDOW`]. A change that lands inside a file's window
-//! owes one more line, written by the first sweep after the window closes, so
-//! a burst cannot flood the feed and no change is lost. The hand-edit line is
-//! unchanged; the state line sits beside it. A desktop view re-reads on the
-//! state line (`docs/architecture/AOIDED.md`'s "The first producer" section).
+//! `(mtime, len)` moves, whoever moved it: a sweep's or a dispatch's
+//! observation, a write [`HandEditWatcher::note_own_write`] folds, a dispatch's
+//! roster-wide re-baseline. Its `kind` is `changed`, and its `payload.files`
+//! names the file by base name, as the hand-edit line does. Each file gets at
+//! most one such line per [`STATE_WINDOW`]. A change that lands inside a file's
+//! window owes one more line, written by the first observation after the window
+//! closes, so a burst cannot flood the feed and no change is lost. The hand-edit
+//! line is unchanged; the state line sits beside it. A desktop view re-reads on
+//! the state line (`docs/architecture/AOIDED.md`'s "The first producer" section).
 
 use aoide_protocol::feed::{FeedWriter, Follower};
 use aoide_protocol::{audit::now_secs, EventClass};
@@ -222,11 +223,13 @@ impl StateCue {
     }
 }
 
-/// One watched file: its roster path, its baseline, and its state cue.
+/// One watched file: its roster path, its baseline, its state cue, and whether
+/// an observed hand edit is still owed to the next sweep.
 struct Watched {
     path: PathBuf,
     baseline: FileStat,
     cue: StateCue,
+    owed_edit: bool,
 }
 
 /// The `state` line for one watched file (module doc's "The state cue"), in
@@ -259,7 +262,10 @@ impl HandEditWatcher {
     /// startup, only a change the watcher itself observes across two
     /// ticks. `feed` is the daemon's own events feed.
     pub fn new(files: Vec<PathBuf>, feed: FeedWriter) -> Self {
-        let watched = files.into_iter().map(|path| Watched { baseline: stat(&path), path, cue: StateCue::default() }).collect();
+        let watched = files
+            .into_iter()
+            .map(|path| Watched { baseline: stat(&path), path, cue: StateCue::default(), owed_edit: false })
+            .collect();
         Self { watched, feed }
     }
 
@@ -282,23 +288,41 @@ impl HandEditWatcher {
         w.baseline = current;
     }
 
-    /// One sweep: for every watched file whose current `(mtime, len)`
-    /// differs from its baseline — created, deleted, or modified — record
-    /// it as a hand-edit and re-baseline to the new state, so the SAME
-    /// change is never reported twice. Returns the base filenames (never
-    /// the full path — `docs/architecture/AOIDED.md`'s own example payload,
-    /// `{"file":"sessions.json"}`) of every file that changed, in roster
-    /// order.
+    /// One sweep: observes the roster as [`observe_at`](Self::observe_at)
+    /// does, then returns the base filenames (never the full path —
+    /// `docs/architecture/AOIDED.md`'s own example payload,
+    /// `{"file":"sessions.json"}`) of every file owed a hand edit, in roster
+    /// order, each once. A file created, deleted or modified is owed when its
+    /// `(mtime, len)` moves off its baseline, so the SAME change is never
+    /// reported twice.
     pub fn sweep(&mut self) -> Vec<String> {
         self.sweep_at(Instant::now())
     }
 
+    /// The dispatch's pre-sweep: observes the roster as
+    /// [`sweep`](Self::sweep) does, but keeps each change it finds as an owed
+    /// hand edit for the next sweep to return. Writes no hand-edit line.
+    pub fn keep_changes(&mut self) {
+        self.observe_at(Instant::now());
+    }
+
     fn sweep_at(&mut self, now: Instant) -> Vec<String> {
-        let mut edited = Vec::new();
+        self.observe_at(now);
+        self.watched
+            .iter_mut()
+            .filter_map(|w| std::mem::take(&mut w.owed_edit).then(|| base_name(&w.path)))
+            .collect()
+    }
+
+    /// Observes every watched file at `now`. A file whose stat moved owes a
+    /// hand edit and raises its state cue, or owes that line when the window
+    /// is open. Its baseline folds to the new stat, and an owed state line
+    /// whose window has closed is written.
+    fn observe_at(&mut self, now: Instant) {
         for w in &mut self.watched {
             let current = stat(&w.path);
             if current != w.baseline {
-                edited.push(base_name(&w.path));
+                w.owed_edit = true;
                 if w.cue.changed(now) {
                     self.feed.append(&state_line(&w.path));
                 }
@@ -308,7 +332,6 @@ impl HandEditWatcher {
                 self.feed.append(&state_line(&w.path));
             }
         }
-        edited
     }
 }
 
@@ -477,6 +500,27 @@ mod tests {
             .filter_map(|l| serde_json::from_str::<Value>(l).ok())
             .filter(|v| v["class"] == "state")
             .collect()
+    }
+
+    /// A dispatch's pre-sweep keeps an out-of-band change as an owed hand edit,
+    /// and the dispatch's own write (noted after it) does not cancel it: the next
+    /// sweep returns the file once, and the sweep after that returns nothing.
+    #[test]
+    fn a_kept_hand_edit_is_returned_once_by_the_next_sweep() {
+        let path = short_tmp("kept");
+        std::fs::write(&path, b"{}").unwrap();
+        let (feed, _events) = scratch_feed("kept");
+        let mut w = HandEditWatcher::new(vec![path.clone()], feed);
+        let t0 = Instant::now();
+
+        std::fs::write(&path, br#"{"out":"of band"}"#).unwrap();
+        w.keep_changes();
+        std::fs::write(&path, br#"{"dispatch":"wrote"}"#).unwrap();
+        w.note_own_write_at(&path, t0 + Duration::from_millis(200));
+
+        assert_eq!(w.sweep_at(t0 + Duration::from_millis(300)), vec![base_name(&path)]);
+        assert!(w.sweep_at(t0 + Duration::from_millis(400)).is_empty());
+        std::fs::remove_file(&path).ok();
     }
 
     #[test]

@@ -1277,11 +1277,19 @@ that the file changed, never what changed. A subscriber receives it through
 --json` prints it verbatim.
 
 Coalescing is per file: at most one `state` line per file per second. A change
-that lands inside that second writes nothing at once. The first tick after the
-second closes writes one line for the file, so no change is lost and a burst
-cannot flood the feed. A write that changes two files raises one line for each,
-so one `session start`, which writes `sessions.json` and `graph.json`, raises
-two.
+that lands inside that second writes nothing at once. The first sweep after the
+second closes writes one line for the file (a sweep is the tick's, or a
+dispatch's pre-sweep), so a burst cannot flood the feed. A write that changes
+two files raises one line for each, so one `session start`, which writes
+`sessions.json` and `graph.json`, raises two.
+
+While `aoided` runs, no change is lost: each change is written as a line or
+owed to one. A write made while `aoided` is down raises no line, and its watcher
+starts from what is on disk, so a consumer re-reads every file when it attaches.
+The two files `aoided` seeds at its own start, when absent or corrupt, are part
+of the first baseline and raise no line.
+An unfiltered `aoide events tail` prints every class, `state` included; the
+`state` cue is what `--class state` prints.
 
 ---
 

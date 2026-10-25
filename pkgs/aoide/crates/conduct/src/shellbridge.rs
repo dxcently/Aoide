@@ -9,8 +9,9 @@
 //! audited to that socket's log as `unparseable` and dropped. A malformed `sessiontrace`
 //! line, whose caller is parked, is answered with a refusal instead of silence.
 //!
-//! [`run_core`] seeds the stage files and serves [`CORE`]. A malformed line, an unknown
-//! command, or a dropped connection is logged and skipped; nothing ever kills the service.
+//! [`seed_core_stage`] seeds the stage files and [`run_core`] serves [`CORE`]. A
+//! malformed line, an unknown command, or a dropped connection is logged and
+//! skipped; nothing ever kills the service.
 //!
 //! Moved here from root `src/shellbridge.rs` (Phase 3b restructure,
 //! docs/architecture/PACKAGE-LAYOUT.md); the stage-file FS substrate (`stage_dir`,
@@ -1473,12 +1474,11 @@ fn dispatch_session_action(subject: ActionSubject, action: &str, fields: &Value)
     last
 }
 
-/// aoided's shellbridge: seed the `sessions.json`/`hooks.json` stage files (v0 shapes)
-/// when absent or corrupt, so a populated roster survives a restart, then serve
-/// [`CORE`] on [`socket_path`] until the listener closes. The daemon's run loop calls
-/// this after it holds its own locks and has bound its own socket, so nothing here can
-/// unlink a live socket.
-pub fn run_core() {
+/// Seeds the `sessions.json`/`hooks.json` stage files (v0 shapes) when absent or
+/// corrupt, so a populated roster survives a restart. aoided's run loop calls this
+/// after it holds its own locks and before its hand-edit watcher takes the
+/// baseline, so the seed is part of the baseline.
+pub fn seed_core_stage() {
     let stage = conducting_stage_dir();
     let sessions = json!({
         "schemaVersion": "0",
@@ -1502,6 +1502,12 @@ pub fn run_core() {
         "sessions",
     );
     let _ = seed_if_absent(&stage.join("hooks.json"), &serde_json::to_string_pretty(&hooks).unwrap(), "hooks");
+}
+
+/// aoided's shellbridge: serve [`CORE`] on [`socket_path`] until the listener closes.
+/// The daemon's run loop calls this after it holds its own locks, has bound its own
+/// socket and has run [`seed_core_stage`], so nothing here can unlink a live socket.
+pub fn run_core() {
     run_on(&socket_path(), &CORE);
 }
 

@@ -172,18 +172,30 @@ between emits `{"class":"audit","kind":"hand-edit","payload":{"file":"sessions.j
 and re-baselines. Detection and narration only — the daemon never reverts a
 hand edit.
 
-Every change the sweep finds, and every daemon-side write (`note_own_write`),
-also raises a `class:"state"` line for its file, coalesced to one per file per
-second (CONTRACTS.md's "The `state` cue on aoided's events feed"). The
-hand-edit line is unchanged; the state line sits beside it.
+A dispatched command runs four steps on its connection thread. The watcher
+sweeps the roster and keeps any change it finds, owed to the tick's next sweep.
+The dispatch runs. A fresh `session start` is sealed. The watcher re-baselines
+the roster, and the reply goes out. So a foreign write made before a dispatch
+still gets its `hand-edit` line from the tick. The one gap is that a foreign
+write landing while a dispatch runs is folded into that dispatch's own
+re-baseline, so it gets one `state` line and no `hand-edit` line.
+
+Every change the watcher finds raises a `class:"state"` line for its file, and
+so does a daemon-side write (`note_own_write`) that moves the file's stat. Both
+are coalesced to one line per file per second (CONTRACTS.md's "The `state` cue
+on aoided's events feed"). The hand-edit line is unchanged; the state line sits
+beside it.
 
 ### The loop and the unit
 
 `aoide_server::daemon` grows `serve(config) -> io::Result<!>`-shaped
 `run_loop`: lock `state/` owner-only, refusing to start when it cannot;
-take both locks and bind the socket (next section); spawn the accept
-thread; then tick (~1s): poll the secrets Follower, run the hand-edit
-sweep, run the periodic jobs L4 adds. Thread model mirrors the secrets
+take both locks and bind the socket (next section); seed `sessions.json`
+and `hooks.json` when absent or corrupt; take the hand-edit watcher's
+baseline; spawn the accept thread; start the core shellbridge; append the
+`started` line to the events feed; then tick (~1s): poll the secrets
+Follower, run the hand-edit sweep, run the periodic jobs L4 adds. Thread
+model mirrors the secrets
 broker (`broker.rs:315`): thread-per-connection via fallible
 `thread::Builder::spawn` (drop one connection, never unwind the accept
 loop), 250ms backoff on accept error. The `aoided` binary

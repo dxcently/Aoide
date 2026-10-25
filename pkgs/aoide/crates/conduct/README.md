@@ -1001,8 +1001,9 @@ blank one is refused too.
   runs `project remove <name> --host <host>` and requires exactly one host.
   Two sockets, one loop (`serve(listener, &'static Socket)`). A `Socket` names
   its core arms (`core`), its verb table and the audit log its drops land in.
-  `run_core` (called by aoided's run loop after its own locks and socket) seeds the
-  stage files and serves `CORE` on `aoide/shellbridge.sock`. `run_on(path, socket)`
+  `seed_core_stage` (called by aoided's run loop after its own locks, before the
+  watcher's baseline) seeds the stage files; `run_core` serves `CORE` on
+  `aoide/shellbridge.sock`. `run_on(path, socket)`
   serves a binary's own socket; `strillix shellbridge --run` passes its `SOCKET`
   (`core: false`), so no core arm runs in the desktop process. A line that
   no arm or table claims goes to `drop_unparsed(log, …)`, which audits it to that

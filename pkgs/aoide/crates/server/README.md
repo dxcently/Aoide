@@ -33,6 +33,8 @@ terminal's rights to its remote callers.
 - The resident daemon also serves the core shellbridge: `run_loop` spawns
   `aoide_conduct::shellbridge::run_core` once its own socket is bound, so
   `aoide/shellbridge.sock` (the core arms, not gated on strillix) starts with aoided.
+  `run_loop` seeds the core's stage files (`seed_core_stage`) before it takes
+  the watcher's baseline, so the seed is part of the baseline.
 - `daemon` — the `aoided` daemon. `run` is the one-shot policy self-check
   `aoide daemon` still runs. `run_loop`/`serve_daemon` (P-D2,
   `docs/architecture/AOIDED.md`) are the RESIDENT daemon `bin/aoided.rs`
@@ -43,10 +45,12 @@ terminal's rights to its remote callers.
   non-blocking `flock`s held for the process's life, so a held lock
   refuses the start before anything is bound. Then bind the control socket
   (`$AOIDE_DAEMON_SOCKET`, else `$XDG_RUNTIME_DIR/aoide/aoided.sock`,
-  `daemon::socket_path`), spawn a thread-per-connection accept loop
-  (fallible `Builder::spawn`, accept-error backoff — the secrets broker's
-  own accept-loop discipline, reused by convention), then tick forever
-  (~1s; P-D3's two producers, below). Newline-delimited JSON, the secrets
+  `daemon::socket_path`), seed the core's stage files, take the watcher's
+  baseline, spawn a thread-per-connection accept loop (fallible
+  `Builder::spawn`, accept-error backoff — the secrets broker's own
+  accept-loop discipline, reused by convention), start the core shellbridge,
+  append the `started` line to the events feed, then tick forever (~1s;
+  P-D3's two producers, below). Newline-delimited JSON, the secrets
   wire framing verbatim, request lines read via `read_capped_line`'s
   `fill_buf`/`consume` loop (P-D4 — the byte cap is checked on every buffer
   fill, not only after a `\n` arrives, closing the P-D2-flagged gap where a
@@ -89,19 +93,23 @@ terminal's rights to its remote callers.
   never reverts a hand edit. `note_own_write` is the seam P-D6's own
   tick-reconcile/reap writes (below) fold into so they are never reported
   back as a hand edit. Each change the watcher finds, and each
-  `note_own_write` of a moved file, also raises a `class:"state"` line for
+  `note_own_write` that moves a file, also raises a `class:"state"` line for
   that file: at most one per file per second, a change inside the second
-  written by the first sweep after it (`producers`' "The state cue").
+  written by the first observation after it (`producers`' "The state cue").
   **The watcher itself is a single `Arc<Mutex<
   HandEditWatcher>>` (task #92), shared between the tick thread and
   `handle_conn`'s connection threads** — not tick-private: a dispatched
   session command (`session start/end`/etc., `{"op":"dispatch"}`) writes
-  stage files on ITS OWN connection thread, not the tick's, so
-  `rebaseline_stage_roster` re-baselines the WHOLE roster after every
-  completed dispatch (roster-wide, not a per-command "which files did this
-  write" table) before that connection's reply goes out — closing the
-  window where the daemon's own routed write got reported back to itself as
-  a hand edit one tick later.
+  stage files on ITS OWN connection thread, not the tick's. That thread runs
+  four steps: `keep_changes` keeps any foreign change the watcher finds, for
+  the tick's next sweep to report; the dispatch runs; a fresh `session start`
+  is sealed, before the re-baseline, so the seal's own write is folded in;
+  then `rebaseline_stage_roster` re-baselines the WHOLE roster (roster-wide,
+  not a per-command "which files did this write" table) before the reply
+  goes out, closing the window where the daemon's own routed write got
+  reported back to itself as a hand edit one tick later. The connection
+  thread writes no hand-edit line and runs no reconcile: the tick writes
+  every hand-edit line and runs the reconcile on the files its sweep returns.
 - **Graph residency (P-D6, `docs/architecture/AOIDED.md`'s "L4")** —
   `run_loop`'s tick, after narrating the hand-edit sweep above, does two
   more things every iteration: `reconcile_graph_projection(changed_files)`

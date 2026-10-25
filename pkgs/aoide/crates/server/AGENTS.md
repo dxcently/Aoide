@@ -159,6 +159,13 @@ a2a spawn probe needs `/bin/sh` + `printf`'s byte-exact output.
   `run_loop`, so the state lock resolves under the migrated root; moving the
   migration after the locks would mean splitting `run_loop`, and was not done.
   The open hole is named once, in `docs/architecture/AOIDED.md` "Socket".
+- **`daemon::run_loop` seeds the core's stage files before the watcher's
+  baseline.** It calls `aoide_conduct::shellbridge::seed_core_stage` after the
+  locks and before `HandEditWatcher::new`, so the seed is part of the baseline:
+  no `state` line and no `hand-edit` line. Moving the seed after the baseline
+  makes the first tick report it as a hand edit. The `started` feed line comes
+  after the accept thread, so a client that waits for it finds the baseline and
+  the listener up.
 - **`daemon::accept_loop` refuses a CROSS-uid connection before it ever
   reaches `handle_conn` (LANE IDENTITY P-ID3, G8).** `cross_uid_gate` is a
   pure decision fn (`Option<PeerCred>` in, `Option<String>` refusal reason
@@ -199,22 +206,31 @@ a2a spawn probe needs `/bin/sh` + `printf`'s byte-exact output.
   architecturally incapable of impersonating one.
 - **The `state` cue has one writer and one clock.** `HandEditWatcher` writes
   every `state` line itself, through the `FeedWriter` it was built with.
-  `note_own_write` and `sweep` each raise an immediate line when a roster
-  file moved and its window is closed. Coalescing is per roster file: a move
-  inside `STATE_WINDOW` sets the file's `owed` flag, and only `sweep` releases
-  an owed line, the first one after the window closes. Keep the release in
-  `sweep`, since the tick is the clock. A path outside the roster raises
-  nothing. `serve_daemon` never sweeps, so its owed lines wait; it is
-  test-only, and the production tick is the only release.
+  Every observation (`sweep`, and a dispatch's `keep_changes`) and every
+  `note_own_write` that moves a file raises an immediate line when the file's
+  window is closed. Coalescing is per roster file: a move inside
+  `STATE_WINDOW` sets the file's `owed` flag, and the first observation after
+  the window closes writes it. A hand edit is owed in `Watched::owed_edit`:
+  an observation sets it, and only `sweep` releases it, so the tick is the
+  clock for `hand-edit` lines. A path outside the roster raises nothing.
+  `serve_daemon` runs no tick, so an owed hand edit waits for a sweep that
+  never comes; it is test-only.
+- **The fold lands after the write.** A daemon write leaves the baseline
+  stale until its `note_own_write` lands. A sweep, or a dispatch's pre-sweep,
+  that observes the write inside that gap reports it as a hand edit. No lock
+  spans a write and its note, so the gap is open for the tick's own writes and
+  for a dispatch's alike. Closing it means holding the watcher lock across the
+  write, which the accept-loop discipline forbids for a dispatch.
 - **`producers::HandEditWatcher` is ONE shared `Arc<Mutex<..>>` instance
   (`daemon::SharedHandEditWatcher`), not tick-private (task #92).** A
   dispatched session command writes stage files on `handle_conn`'s own
   connection thread, never the tick thread, so `daemon::run_loop` hands the
-  SAME watcher instance to `accept_loop`/`handle_conn` it ticks itself;
-  `daemon::rebaseline_stage_roster` re-baselines the WHOLE roster after
-  every completed `dispatch` op, unconditionally — never a per-command "which
-  files did this write" table (the same drift trap the door-policy
-  invariant above already forbids). Don't reintroduce a tick-private
+  SAME watcher instance to `accept_loop`/`handle_conn` it ticks itself. Per
+  `dispatch` op, `handle_conn` calls `keep_changes`, then the dispatch, then
+  the seal, then `daemon::rebaseline_stage_roster`, which re-baselines the
+  WHOLE roster unconditionally, never a per-command "which files did this
+  write" table (the same drift trap the door-policy invariant above already
+  forbids). Don't reintroduce a tick-private
   `HandEditWatcher::new(..)` inside `run_loop`'s loop body or inside
   `accept_loop`/`handle_conn` — a second instance means two baselines that
   can each independently go stale against the other's writes, reopening
