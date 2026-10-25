@@ -650,9 +650,10 @@ blank one is refused too.
   and `reap_inner` collect the ids they leave the roster with, and
   `drop_ended_sessions` drops their letters once the roster write has returned,
   never under the roster lock. The daemon tick runs `sweep_session_letters`
-  before its mail drain: it drops own letters with no session (`pre-131`) and
-  those whose session is off the roster or `done` (`session-gone`), and it
-  skips the session pass when the roster cannot be read.
+  before its mail drain: it drops every receipt, whatever its session, and own
+  letters with no session (`pre-131`), and those whose session is off the roster
+  or `done` (`session-gone`); it skips the session pass when the roster cannot
+  be read.
 
 - `graph/window.rs` — the session window record (`session window attach`,
   `session window closed`, `session window roster`, the untracked-terminal
@@ -1203,10 +1204,39 @@ blank one is refused too.
   boot sweep finds the revived session in the undying set without
   re-walking the manifest — unconditional, unlike flag-mode's own TRANSFER
   a few paragraphs up, which only ever moves a PRE-existing mark. Every
-  outcome (both modes) is audited exactly once (`audit_resurrect`),
+  revival decision (both modes) gets one handler line (`audit_resurrect`),
   including an empty selection — the boot-sweep postmortem's own finding
   that an early return must never silently skip the audit line a full run
-  gets.
+  gets. A usage error or a stage-file miss gets none, and the door's line
+  comes with every call.
+  **Dry run (`--dry-run`):** the flag takes the selection the launch would
+  take and lists the rows the launch acts on, launching, holding and typing
+  nothing. Flag mode lists what `select_candidates` returns, with
+  `pickedByBare` true on exactly the rows the bare `--project P` form revives
+  (`undying_selection`). Bare mode lists one row per manifest spec, decided by
+  the helpers the launch uses (`enrichment`, `clean_argv`, `summon_check`,
+  `unresumed_reason`). A row the launch would skip lists as `skipped`, as the
+  launch's own `skipped[]` reports it. A remote spec is never sent: its row
+  carries only the local pre-wire verdict. The message spells each line as the
+  pending view spells a held plan (`visible_held`); the data stays raw. From an
+  unattested caller on a door that cannot approve, a dry run gets what the call
+  would give that caller, minus the launch: in bare mode the launch's refusal;
+  with `--id` or `--all` and no `--project`, the usage error the call gives;
+  with `--project`, the `dry-run-not-held` refusal, since the flag-mode launch
+  would hold and show that caller nothing. A dry run holds on no door. Its
+  handler writes three things, and no others: the audit line (status
+  `dry-run`, at the points the real call audits; none for a usage error or a
+  stage miss); on a host that still holds the legacy file, the one-time
+  `carry.json` rename an undying read runs
+  (`aoide_storage::undying::load_undying`); and, on a host that still holds the
+  legacy stage files, the one-time conducting-stage migration a stage read runs
+  (`aoide_storage::fs::conducting_stage_dir`). Two writes come with any call,
+  dry or real, outside the handler: the door's audit line, and the start-up
+  migration both core binaries run (`aoide_storage::fs::migrate_root_once`).
+  It locks `state/` owner-only when it exists and renames old peer state
+  files. When the legacy `~/Aoide` root is not `$AOIDE_ROOT`, it moves that
+  root's state unless `AOIDE_STATE_DIR` is set, and its log unless
+  `AOIDE_AUDIT_LOG` is set and not empty.
 - **Terminal restore capture (P-C5, durable-sessions plan) — gated on the
   WRAPPED ARGV, never the agent label (task #100).**
   `session_conduct`'s `is_shell` (everything below this bullet: the ~1 Hz
@@ -1628,9 +1658,10 @@ blank one is refused too.
   ordinary unreachable-node outcome) skip that node without stopping the
   sweep. `settle_deposit(envelope, outcome)` is P-M3's third: the one
   place an envelope's deposit OUTCOME turns into spool side effects (the
-  ack a filed letter owes its origin, the `retire_by_ack` a filed receipt
-  performs), reached by `aoide-server::a2a::mail_deposit` from here so that
-  the door and `mail_wire::poll_node`'s own hand-over loop cannot drift on
+  `retire_by_ack` a filed receipt performs, which retires only an own letter;
+  a filed letter leaves nothing
+  behind, ruling 131), reached by `aoide-server::a2a::mail_deposit` from here so
+  that the door and `mail_wire::poll_node`'s own hand-over loop cannot drift on
   what receiving a letter means.
 
 The tick's session sweep and the roster-exit letter drop (ruling 131) are not
@@ -1639,6 +1670,22 @@ here. `graph::sweep_session_letters` and `graph::drop_ended_sessions` live in
 sweep, then `drain_all`. The reaper pass, a hook death and `session end` each
 call `drop_ended_sessions` after their roster write returns, never under the
 roster lock. `mail_bridge` stays passthroughs only.
+
+- **Local jobs (`aoide job`)**: `graph/job.rs` implements `job add --name=<name>
+  --on=<calendar> [--cwd=<dir>] -- <argv0> [<arg>...]`, `job remove
+  --name=<name>`, `job list [--json]` and `job runs [--name=<name>] [--json]`,
+  registered by `commands/job.rs`. A job is two unit files,
+  `aoide-job-<name>.timer` and `.service`, under
+  `$XDG_CONFIG_HOME/systemd/user/` (`~/.config/systemd/user/` when unset), and
+  one record, `state/stage/jobs.json` (`CONTRACTS.md` §4 has its shape).
+  `jobs_path()` names the record for the server's stage roster. A run's output
+  lands in the user journal; `runs` reads each recorded job's own unit from
+  there, the workflow door's JSON line, and never writes. Each `systemctl`,
+  `journalctl` and `systemd-analyze` call answers within a 10 s bound, plus up
+  to 2 s while its pipes drain, through `shellbridge::run_bin_bounded`, and a
+  call that gives no answer is never read as a no. `add` and `remove` probe the
+  user manager before they take the stage lock; under the lock they run only the
+  unit-changing calls (`daemon-reload`, `enable --now` and `disable --now`).
 
 ## What it consumes
 
@@ -1656,6 +1703,11 @@ daemon_dispatch`, P-D6; `mail_bridge`'s functions call
 — the ONE other edge
 this crate carries specifically so `aoide-server` never has to; see
 `client`'s own README for why that edge stays).
+
+The `job` seam resolves `systemctl`, `journalctl` and `systemd-analyze` on PATH
+with `pty.rs`'s `resolve_program` (never copied) and runs each through
+`shellbridge::run_bin_bounded` (`graph/job.rs`). They are the user manager's own
+tools, run as programs and never linked.
 
 ## How it composes
 

@@ -190,7 +190,7 @@ A signed request whose key the receiving door's registry and in-force charter do
 not carry is refused `-32007`; an `ssh://` charter hop, which used to go out
 unsigned, meets that rule now.
 
-## 3. T1: osaka to yomi, delivered, with a receipt back
+## 3. T1: osaka to yomi, delivered
 
 osaka:
 
@@ -204,9 +204,10 @@ Expected: status ok, `data.next` is `sakaki`, a `msgid`. Then:
 aoide mail outbox sakaki --json
 ```
 
-Expected: one entry for that `msgid`, `delivery.status` `accepted` once the
-deposit to `https://aoide.necoconeco.net` answered `accepted`. `mail outbox`
-lists only entries still waiting: a delivered letter leaves it.
+Expected: no entry for that `msgid`. The deposit to
+`https://aoide.necoconeco.net` answered `accepted`, and that verified answer is
+the delivery (ruling 131), so the letter left the outbox. `mail outbox` lists
+only entries still waiting.
 
 sakaki (over ssh from osaka):
 
@@ -223,21 +224,19 @@ aoide mail read --for conductor
 ```
 
 Expected: `polled 1 node(s): 1 envelope(s) filed`, then the text
-`$M osaka-to-yomi`. yomi mints the destination's receipt, spools it toward
-sakaki, and aoided's drain deposits it.
+`$M osaka-to-yomi`. yomi mints no receipt: the poll files the letter and owes
+nothing back (ruling 131).
 
-osaka (the receipt waits at the relay for osaka's ask):
+osaka (no receipt comes back):
 
 ```sh
-aoide mail poll sakaki
 aoide mail outbox sakaki --json
 cat $AOIDE_ROOT/state/mail/receipts.log* | grep '"type":"receipt"' | grep -c <msgid of T1>
 ```
 
-Expected: `1 envelope(s) filed` (the receipt), the T1 entry gone from the outbox
-listing, and the count `1`. Delivered means a destination-signed receipt is in
-osaka's own mailbase (MAIL.md Status): the receipt retires the entry, so the
-mailbase line, not an outbox row, is what shows it.
+Expected: the T1 entry is still gone from the outbox listing, and the count is
+`0`: no node mints a receipt (ruling 131). The relay's own copy leaves its
+outbox when yomi's next poll names the msgid in `filed`.
 
 ## 4. T2: yomi to osaka, the same way
 
@@ -262,7 +261,8 @@ aoide mail read --for conductor
 Expected: the text `$M yomi-to-osaka`. Then on yomi, after its next timer
 tick (or `aoide mail poll sakaki`): the T2 entry is gone from
 `aoide mail outbox sakaki`, and `cat $AOIDE_ROOT/state/mail/receipts.log*
-| grep '"type":"receipt"' | grep -c <msgid of T2>` is `1`.
+| grep '"type":"receipt"' | grep -c <msgid of T2>` is `0`: no node mints a
+receipt (ruling 131).
 
 ## 5. T3: an unsigned request is refused
 

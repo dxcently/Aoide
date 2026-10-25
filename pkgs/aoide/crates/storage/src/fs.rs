@@ -384,10 +384,11 @@ pub fn state_dir() -> std::path::PathBuf {
 }
 
 /// The CONDUCTING stage directory: `$AOIDE_ROOT/state/stage/` (default
-/// `~/.aoide/state/stage/`), holding the six core roster files: sessions.json,
-/// hooks.json, projects.json, graph.json, pending.json and notifications.json.
-/// `aoide`/`aoided` alone read and write them (the "L4 dual-writer surface",
-/// `conduct/README.md`, mirrored by `server/src/daemon.rs::stage_roster`).
+/// `~/.aoide/state/stage/`), holding the seven core roster files:
+/// sessions.json, hooks.json, projects.json, graph.json, pending.json,
+/// notifications.json and jobs.json. `aoide`/`aoided` alone read and write them
+/// (the "L4 dual-writer surface", `conduct/README.md`, mirrored by
+/// `server/src/daemon.rs::stage_roster`).
 ///
 /// `$AOIDE_STAGE_DIR` wins when set to an absolute path, and names this
 /// directory and nothing else: the rice stage never follows it.
@@ -427,8 +428,9 @@ fn legacy_stage_dir() -> std::path::PathBuf {
         .join("stage")
 }
 
-/// The six core stage-file names [`conducting_stage_dir`] owns — the same
-/// roster `server/src/daemon.rs::stage_roster` watches, named here once so
+/// The six core stage-file names [`conducting_stage_dir`] owns from before the
+/// split: the roster `server/src/daemon.rs::stage_roster` watches, less
+/// jobs.json, which has no pre-split copy. Named here once so
 /// [`migrate_conducting_stage`] doesn't hand-copy the list a second place.
 const CONDUCTING_STAGE_FILES: &[&str] = &[
     "sessions.json",
@@ -1505,7 +1507,8 @@ impl Drop for HeldLock {
 
 /// Runs `f` under the CONDUCTING stage's lock (`state/stage/.stage.lock`, see
 /// [`conducting_stage_dir`]), held for the closure's duration. Every core writer
-/// of the six roster files and the `state/` records takes it.
+/// of the seven roster files (jobs.json among them) and the `state/` records
+/// takes it.
 ///
 /// Best-effort, and re-entrant on the thread that already holds it: a nested
 /// call runs its closure directly. Every other thread still waits, and two

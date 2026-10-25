@@ -409,7 +409,7 @@ fn strip_matching_quotes(tok: &str) -> Option<&str> {
 /// Single-quote `s` the POSIX way if it needs it (anything outside a
 /// conservative bare-safe set), so a `sh -c` re-split of the joined line
 /// yields back the exact same word.
-fn shell_quote(s: &str) -> String {
+pub(in crate::graph) fn shell_quote(s: &str) -> String {
     let bare_safe = !s.is_empty()
         && s.bytes()
             .all(|b| b.is_ascii_alphanumeric() || b"-_./:=@".contains(&b));

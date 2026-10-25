@@ -51,6 +51,7 @@ pub use self::find::session_find;
 pub(crate) mod identity;
 mod model;
 mod node_list;
+mod job;
 mod pending;
 // The PTY capability the conducted session runs on — the terminal a child
 // agent is spawned onto, plus the real console, the resize source and the
@@ -304,6 +305,7 @@ pub use self::who::{glyph, session_roster};
 // (`node_list.rs`'s module doc) — `node status` (aoide-client) keeps the
 // deep per-node view.
 pub use self::node_list::node_list;
+pub use self::job::{job_add, job_list, job_remove, job_runs, jobs_path};
 pub use self::window::{
     pid_ancestry, session_show, session_window_attach, session_window_closed, session_window_roster,
     windowless_by_lineage, TermWindow,

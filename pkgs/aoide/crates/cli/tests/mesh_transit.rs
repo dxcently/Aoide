@@ -375,9 +375,8 @@ fn osaka_to_chiyo_routes_via_sakaki_and_the_chain_of_two_verifies_at_chiyo() {
 
 /// The same journey driven to its END: `chiyo` POLLS its relay, the hand-over
 /// files the letter (the poll's own seam: `outbox::hand_over` + the door's
-/// `deposit_container`), and `chiyo`'s receipt rides back to the origin. The
-/// origin let go of the letter on the relay's verified `accepted`, so the
-/// receipt has no entry of its own to retire there.
+/// `deposit_container`), and no receipt comes back (ruling 131). The origin let
+/// go of the letter on the relay's verified `accepted`.
 #[test]
 fn chiyos_poll_files_the_letter_the_relay_held_and_the_origin_had_let_go() {
     let _lock = env_lock();
@@ -432,8 +431,8 @@ fn chiyos_poll_files_the_letter_the_relay_held_and_the_origin_had_let_go() {
     aoide_storage::seal::record_admitted(&container, &digest).unwrap();
     assert_eq!(aoide_storage::mail::filed_kind(&msgid).as_deref(), Some(aoide_storage::mail::ENTRY_TYPE_LETTER));
 
-    // `chiyo`'s receipt, deposited back at the origin. The origin holds no entry
-    // for the letter, so the receipt retires nothing there.
+    // A receipt an older build sent back, deposited at the origin. The origin
+    // holds no entry for the letter, so the receipt retires nothing there.
     let ack = aoide_storage::mail::mint_ack_in_mesh(
         "conductor",
         aoide_storage::mail::Address { node: "osaka".to_string(), name: "conductor".to_string() },
@@ -498,91 +497,12 @@ fn a_host_whose_name_is_not_its_charter_name_still_hops_and_still_receives() {
     }
 }
 
-/// **An ack is signed as the name this box holds IN THE LETTER'S MESH, not as its
-/// hostname.** `chiyo` files a letter from `osaka` in `home`, where its key is
-/// `chiyo`'s line, while its OS name is `chiyo-host`. The receipt the filing
-/// spools must say `chiyo`, or `osaka` checks it against a key it holds for
-/// `chiyo-host` (none), refuses it, and never retires its letter. Before the
-/// fix the ack carried `chiyo-host` and `retire_by_ack` returned nothing.
+/// **A filed letter in a charter mesh whose lines do not carry this box's key owes
+/// no ack, and writes no `mail.ack.withheld` line.** `evo` is a stranger in `home`;
+/// its hostname is set to `chiyo`, a member's name there. Ruling 131 leaves no
+/// receipt to be withheld, so nothing is minted and nothing is audited for it.
 #[test]
-fn a_host_whose_name_is_not_its_charter_name_acks_as_the_charter_name() {
-    let _lock = env_lock();
-    let (_env, fx) = fixture("ack-host-vs-line");
-    fx.enter("osaka");
-    let letter = aoide_storage::mail::mint_outbound_letter_from("osaka", "conductor", "chiyo", "conductor", "ack me", HOME)
-        .unwrap();
-    let msgid = letter.msgid.clone();
-    aoide_storage::outbox::write_entry("sakaki", &aoide_storage::outbox::OutboxEntry::fresh(letter.clone())).unwrap();
-
-    fx.enter("chiyo");
-    aoide_storage::mail::box_add("conductor").unwrap();
-    std::env::set_var("AOIDE_A2A_NODE_NAME", "chiyo-host");
-    let outcome = aoide_storage::mail::deposit(letter.clone(), "conductor").unwrap();
-    assert!(matches!(outcome, aoide_storage::mail::DepositOutcome::Filed { .. }), "{outcome:?}");
-    aoide_client::mail_wire::settle_deposit(&letter, &outcome);
-    // The spooled ack goes out sealed, so the wire carries its container and the
-    // outbox envelope is redacted. The origin opens the container, as the door does.
-    let entry = ["osaka", "sakaki", "chiyo"]
-        .iter()
-        .flat_map(|dest| aoide_storage::outbox::list_entries(dest).unwrap())
-        .find(|e| e.envelope.header.kind == aoide_storage::mail::ENTRY_TYPE_RECEIPT)
-        .expect("the filing spools an ack toward the origin");
-    assert_eq!(entry.envelope.header.from.node, "chiyo", "the ack is signed as the charter name, never the hostname");
-
-    fx.enter("osaka");
-    let ack = match entry.container.as_ref() {
-        Some(container) => match aoide_storage::seal::deposit_container(container, HOME).unwrap() {
-            aoide_storage::seal::ContainerOutcome::Opened { envelope, .. } => (*envelope).clone(),
-            other => panic!("the origin opens the ack's container: {other:?}"),
-        },
-        None => entry.envelope.clone(),
-    };
-    assert!(matches!(
-        aoide_storage::mail::deposit(ack.clone(), "conductor").unwrap(),
-        aoide_storage::mail::DepositOutcome::Filed { .. } | aoide_storage::mail::DepositOutcome::Duplicate { .. }
-    ));
-    assert_eq!(
-        aoide_storage::outbox::retire_by_ack(&ack).unwrap().as_deref(),
-        Some(msgid.as_str()),
-        "the origin verifies the ack against chiyo's key and retires its letter"
-    );
-}
-
-/// **A pair mesh names no charter, so its ack is signed as this box's own name
-/// there, which is the hostname.** The fallback `own_name_in` keeps for a mesh no
-/// charter governs; `family` has no declaration on this fixture.
-#[test]
-fn a_pair_mesh_ack_is_signed_as_the_boxs_own_name() {
-    let _lock = env_lock();
-    let (_env, fx) = fixture("ack-pair-mesh");
-    fx.enter("chiyo");
-    std::env::set_var("AOIDE_A2A_NODE_NAME", "chiyo-host");
-    let letter = aoide_storage::mail::mint_outbound_letter_from("osaka", "conductor", "chiyo", "conductor", "pair", "family")
-        .unwrap();
-    // The filing is taken as given: `family` holds no key for `osaka`, so a real
-    // deposit would stop at the origin check. This test is about the ack only.
-    let filed = aoide_storage::mail::DepositOutcome::Filed {
-        msgid: letter.msgid.clone(),
-        kind: aoide_storage::mail::ENTRY_TYPE_LETTER.to_string(),
-    };
-    aoide_client::mail_wire::settle_deposit(&letter, &filed);
-    let acks: Vec<_> = ["osaka", "sakaki"]
-        .iter()
-        .flat_map(|dest| aoide_storage::outbox::list_entries(dest).unwrap())
-        .map(|e| e.envelope)
-        .filter(|e| e.header.kind == aoide_storage::mail::ENTRY_TYPE_RECEIPT)
-        .collect();
-    assert_eq!(acks.len(), 1, "one ack spooled: {acks:?}");
-    assert_eq!(acks[0].header.from.node, "chiyo-host", "a pair mesh's ack carries this box's own name");
-    assert_eq!(acks[0].header.from.node, aoide_storage::display::local_node_name());
-}
-
-/// **A charter mesh whose lines do not carry this box's key mints no ack, and
-/// says why.** `evo` is a stranger in `home`; its hostname is set to `chiyo`, a
-/// member's name there, and the letter still gets no receipt. The refusal is
-/// written to the audit log, so an operator sees the stranger, not silence.
-#[test]
-fn a_charter_mesh_without_this_boxs_key_mints_no_ack_and_says_why() {
+fn a_filed_letter_in_a_charter_mesh_without_this_boxs_key_owes_no_ack() {
     let _lock = env_lock();
     let (_env, fx) = fixture("ack-stranger");
     fx.enter("evo");
@@ -600,12 +520,9 @@ fn a_charter_mesh_without_this_boxs_key_mints_no_ack_and_says_why() {
         .iter()
         .flat_map(|dest| aoide_storage::outbox::list_entries(dest).unwrap())
         .collect();
-    assert!(
-        spooled.iter().all(|e| e.envelope.header.kind != aoide_storage::mail::ENTRY_TYPE_RECEIPT),
-        "no ack is minted: {spooled:?}"
-    );
+    assert!(spooled.is_empty(), "no ack is minted or held: {spooled:?}");
     let audit = std::fs::read_to_string(aoide_protocol::audit::default_audit_log()).unwrap_or_default();
-    assert!(audit.contains("mail.ack.withheld"), "the withheld ack is audited: {audit}");
+    assert!(!audit.contains("mail.ack.withheld"), "no ack is withheld, so none is audited: {audit}");
 }
 
 /// **A learnt binding is only usable if it is the DECLARED key's.** A binding is
@@ -751,10 +668,10 @@ fn the_fixtures_boxes_answer_on_their_own_doors() {
 /// `osaka` sends live: `sakaki`'s door takes the container, carries it on with its
 /// own hop signature, and holds it for `chiyo`; the verified `accepted` is the
 /// delivery, so `osaka` keeps nothing. `chiyo` polls `sakaki`, files the letter and
-/// spools the receipt back. The receipt reaches `osaka`'s door and is answered
-/// `duplicate`: a receipt files only for a letter the origin still spools, and this
-/// origin spools none. Each box's own spool and audit are grepped on the way: a
-/// hub's records hold the routed container and no letter.
+/// owes `osaka` no receipt (ruling 131). A receipt that reaches `osaka`'s door
+/// anyway is answered `duplicate`: a receipt files only for a letter the origin
+/// still spools, and this origin spools none. Each box's own spool and audit are
+/// grepped on the way: a hub's records hold the routed container and no letter.
 #[test]
 fn the_whole_journey_runs_through_the_boxes_own_doors() {
     let _lock = env_lock();
@@ -790,7 +707,7 @@ fn the_whole_journey_runs_through_the_boxes_own_doors() {
     );
 
     // `chiyo` asks its relay: the hand-over is a real deposit through `sakaki`'s
-    // door, the letter is filed, and the receipt is spooled back.
+    // door, the letter is filed, and no receipt is spooled back (ruling 131).
     fx.enter("chiyo");
     aoide_storage::mail::box_add("conductor").unwrap();
     let sakaki_key = aoide_storage::charter::governing(HOME).unwrap().nodes["sakaki"].key.clone();
@@ -812,8 +729,10 @@ fn the_whole_journey_runs_through_the_boxes_own_doors() {
         Some(aoide_storage::mail::ENTRY_TYPE_LETTER),
         "the letter is in the destination's own mailbase"
     );
-    let ack_spooled = aoide_storage::outbox::nodes_with_outbox().unwrap();
-    assert!(ack_spooled.contains(&"osaka".to_string()), "the receipt is spooled toward the origin: {ack_spooled:?}");
+    assert!(
+        aoide_storage::outbox::list_entries("osaka").unwrap().is_empty(),
+        "filing owes the origin no receipt, so nothing is spooled toward osaka (ruling 131)"
+    );
     // The relay's custody ends on the next ask that names what it filed.
     let ask_again = aoide_client::mail_wire::poll_node("sakaki", None).unwrap();
     assert!(ask_again.refused.is_empty(), "{:?}", ask_again.refused);
@@ -829,13 +748,31 @@ fn the_whole_journey_runs_through_the_boxes_own_doors() {
         "the relay keeps nothing it was acknowledged for"
     );
 
-    // **And the receipt leg, through the door.** `chiyo`'s ack for that letter is
-    // spooled toward `osaka` (`settle_deposit` routes it with `route_for`), and the
-    // origin files it the same way any deposit arrives: a real POST at `osaka`'s
-    // door, signed as the hop that carried it.
+    // **And the receipt leg, through the door.** Nothing was spooled, so `chiyo`
+    // sends `osaka` no receipt of its own. A receipt an older build sends anyway,
+    // minted on `chiyo` and sealed to `osaka`'s charter line, is still answered
+    // at the door: a real POST, signed as the hop that carried it, and answered
+    // `duplicate`.
     fx.enter("chiyo");
-    let ack = aoide_storage::outbox::list_entries("osaka").unwrap()[0].container.clone().expect("the ack is sealed");
-    assert_eq!(ack.transit.last().unwrap().node, "chiyo", "the ack's own hop is the recipient");
+    let osaka_binding = aoide_storage::charter::governing(HOME).unwrap().nodes["osaka"].age.clone();
+    let receipt = aoide_storage::mail::mint_ack_in_mesh(
+        "conductor",
+        aoide_storage::mail::Address { node: "osaka".to_string(), name: "conductor".to_string() },
+        &msgid,
+        HOME,
+    )
+    .unwrap();
+    let ack = aoide_storage::seal::seal_envelope(
+        &receipt,
+        &osaka_binding,
+        HOME,
+        HOME,
+        "osaka",
+        "osaka",
+        &aoide_storage::time::now_iso_utc(),
+    )
+    .unwrap();
+    assert_eq!(ack.transit.last().unwrap().node, "chiyo", "the receipt's own hop is chiyo");
     let filed_ack = door_post(
         fx.ports["osaka"],
         &fx.keys["osaka"],

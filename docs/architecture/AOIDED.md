@@ -165,12 +165,13 @@ lossless record reaches for the audit log, never this feed.
 
 A tick-driven stat sweep over the broker-owned file roster — the stage files
 (`state/stage/sessions.json`, `hooks.json`, `projects.json`, `graph.json`,
-`pending.json`, `notifications.json`; paths from `aoide_storage::stage`,
-`storage/src/stage.rs:17-29`). A tick that finds a file whose `(mtime, len)`
-moved since the last observation emits
-`{"class":"audit","kind":"hand-edit","payload":{"file":"sessions.json"}}`
-and re-baselines, unless an aoided write folded the move first (below).
-Detection and narration only — the daemon never reverts a hand edit.
+`pending.json`, `notifications.json`, `jobs.json`; the first four paths from
+`aoide_storage::stage`, `storage/src/stage.rs:17-29`, the last three from
+`aoide-conduct`). A tick that finds a file whose `(mtime, len)` moved since the
+last observation emits
+`{"class":"audit","kind":"hand-edit","payload":{"file":"sessions.json"}}` and
+re-baselines, unless an aoided write folded the move first (below). Detection
+and narration only — the daemon never reverts a hand edit.
 
 aoided knows its own writes at the rename. `run_loop` registers the watcher with
 storage's write seam (`fs::watch_writes`) after the seed. Every atomic stage

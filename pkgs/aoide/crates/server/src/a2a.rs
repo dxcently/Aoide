@@ -3082,21 +3082,15 @@ fn deposit_answer(outcome: &aoide_storage::mail::DepositOutcome, from_node: &str
 /// `flock`, not re-entrant — nesting the two would deadlock a process
 /// against its own held lock, not merely contend.
 ///
-/// A filed **letter** mints and spools an ack addressed back to the
-/// origin, then best-effort drains that node once, synchronously, reusing
-/// the SAME [`aoide_conduct::mail_bridge::drain_node`] the daemon tick
-/// calls — one drain implementation, no duplicate dial logic. A filed
-/// **receipt** is the opposite leg: [`aoide_storage::outbox::retire_by_ack`]
-/// retires the local outbox entry it confirms (spec item 7) — a pure
-/// storage-crate lookup keyed on the receipt's own verified `from.node`
-/// and `text` (the acked msgid), so a forged or stale ack simply finds no
-/// matching entry and retires nothing (see that function's own doc for
-/// why the lookup alone proves both of spec item 7's checks). A
-/// **duplicate** whose original filing was a letter re-sends the ack
-/// (spec item 5: the sender's earlier ack evidently never arrived);
-/// every other duplicate is a silent no-op — acking an ack would ping-pong
-/// forever, which the vocabulary (`letter`/`receipt` only) has no third
-/// shape to end.
+/// A filed **letter** is answered `accepted` and nothing more: its filing is
+/// its own answer, so no receipt is minted or spooled toward the origin
+/// (ruling 131). A filed **receipt**, from an older build, is the other leg:
+/// [`aoide_storage::outbox::retire_by_ack`] retires the local own `letter` it
+/// confirms and nothing else. It is a storage-crate lookup keyed on the
+/// receipt's own verified `from.node` and `text` (the acked msgid), so a forged
+/// or stale receipt finds no such letter and retires nothing (see that
+/// function's own doc). A **duplicate** is answered `duplicate` and nothing
+/// more: the filing already answered the letter (spec item 5).
 fn mail_deposit(params: &Value, ctx: &RequestCtx) -> Result<Value, (i64, String)> {
     // MAIL.md §Status: the declarations are read ONCE per request, for the mail
     // methods only, and an unloadable set refuses here — before anything is
@@ -3213,12 +3207,12 @@ fn mail_deposit(params: &Value, ctx: &RequestCtx) -> Result<Value, (i64, String)
     };
     let _ = audit(ctx.audit_log, Door::A2a, EventClass::Audit, "a2a.aoide/mailDeposit", audit_status, &audit_detail);
 
-    // Everything a filed/duplicate envelope does here — mint and spool the
-    // ack, retire an entry this receipt confirms — hangs off the outcome
+    // Everything a filed/duplicate envelope does here hangs off the outcome
     // alone, so it lives in ONE shared function
     // (`aoide_client::mail_wire::settle_deposit`, through its bridge) that
-    // the poll's own hand-over loop calls too. This arm only SHAPES the
-    // answer.
+    // the poll's own hand-over loop calls too: a letter owes nothing, and an
+    // older build's receipt retires only the own letter it confirms. This arm
+    // only SHAPES the answer.
     aoide_conduct::mail_bridge::settle_deposit(&envelope, &outcome);
 
     Ok(deposit_answer(&outcome, &envelope.header.from.node))
@@ -3325,9 +3319,9 @@ fn capped_poll_list<T>(list: &str, poller: &str, items: Vec<T>, cap: usize, audi
 /// Every outbox entry this box spooled toward `node` that `node` itself may
 /// take — all `hold`-flavored ones, and `now` ones whose own attempts have
 /// been failing ([`aoide_storage::outbox::poll_payloads`]'s rule, and the ONE
-/// place that rule lives). Handed over oldest-first; nothing is marked,
-/// moved, or counted, and an entry leaves the spool only when its ack lands
-/// (`mail_deposit`'s receipt arm, the same retirement a push would earn).
+/// place that rule lives). A receipt is never among them (ruling 131). Handed
+/// over oldest-first; nothing is marked, moved, or counted, and an entry leaves
+/// the spool only when the poller names it as filed (`outbox::retire_acknowledged`).
 ///
 /// **Self-audits under its own `a2a.aoide/mailPoll` label, unconditionally**
 /// (MAIL.md item 13's one-door-one-inspection, per method name; the audit
@@ -3703,12 +3697,13 @@ fn deposit_sealed(
         aoide_storage::seal::ContainerOutcome::Refused { reason, detail } => {
             Ok(json!({ "status": "refused", "reason": reason, "detail": detail }))
         }
-        // A hop: nothing is filed as correspondence, no reader is rung and NO
-        // ACK is minted — the letter is not here, it is on its way, and only the
-        // destination's own receipt may tell an origin otherwise. The container
-        // is filed as `transit` and spooled toward `next`; the answer is the
-        // hop taking custody, which is exactly what `accepted` means to a drain
-        // (the entry stays spooled until a real receipt retires it).
+        // A hop: nothing is filed as correspondence, no reader is rung and no
+        // receipt is minted — the letter is not here, it is on its way, so this
+        // box answers for the custody it takes and no more. The container is
+        // filed as `transit` and spooled toward `next`; the answer is the hop
+        // taking custody, which is exactly what `accepted` means to a drain.
+        // The entry leaves this spool when the next hop's own verified answer
+        // takes it, never on a receipt from the destination.
         aoide_storage::seal::ContainerOutcome::Hopped(hop) => {
             // A charter letter for THIS box is admitted on its enclosed charter
             // alone (above); one for another node is this box's custody, and
@@ -3752,9 +3747,9 @@ fn deposit_sealed(
                 }
             }
             if !hop.held {
-                // Best-effort, exactly like the destination's own post-filing
-                // drain. The container is on this box's disk now, so a dial that
-                // fails costs a later pass (the daemon's sweep) and nothing else.
+                // Best-effort. The container is on this box's disk now, so a
+                // dial that fails costs a later pass (the daemon's tick,
+                // `drain_all`) and nothing else.
                 let _ = aoide_conduct::mail_bridge::drain_node(&hop.next);
             }
             Ok(json!({
@@ -3763,7 +3758,7 @@ fn deposit_sealed(
                 "transit": { "next": hop.next, "mesh": hop.mesh, "held": hop.held },
             }))
         }
-        aoide_storage::seal::ContainerOutcome::Duplicate { filed_letter } => {
+        aoide_storage::seal::ContainerOutcome::Duplicate { .. } => {
             // **A hub that is holding this container but cannot move it says so.**
             // Its own custody being parked — its next hop refused, an older relay
             // — is information the DEPOSITING hop needs: answering `duplicate`
@@ -3788,18 +3783,8 @@ fn deposit_sealed(
                 return Ok(json!({ "status": "refused", "reason": word, "detail": detail }));
             }
             // Nothing is opened here — that is the point of deciding dedup
-            // before the open. The receipt the first delivery never got is
-            // recovered from the FILED record instead, which is where the
-            // opened envelope already lives, so a lost ack costs no second
-            // open and no second filing.
-            if filed_letter {
-                if let Ok(Some(entry)) = aoide_storage::mail::show(&container.msgid) {
-                    aoide_conduct::mail_bridge::settle_deposit(
-                        &entry.envelope,
-                        &aoide_storage::mail::DepositOutcome::Duplicate { filed_letter: true },
-                    );
-                }
-            }
+            // before the open. A duplicate owes nothing: the letter's own filing
+            // answered it, and the sender's resend is its recovery (ruling 131).
             Ok(json!({ "status": "duplicate" }))
         }
         aoide_storage::seal::ContainerOutcome::Applied { mesh, version, rekeyed, digest } => {
@@ -15868,11 +15853,9 @@ mod tests {
         let root = mail_deposit_root("dup");
         act_as(&root, "here");
 
-        // `settle_deposit`'s best-effort drain must never hang or
-        // block this test — a dead loopback port refuses instantly, unlike
-        // the file's own `"http://node/"` placeholder (unresolvable
-        // hostname, fine for the pure-predicate tests above that never
-        // actually dial it, wrong for one that does).
+        // The origin's record points at a dead loopback port, not at the
+        // file's own `"http://node/"` placeholder: a stray dial then fails
+        // at once instead of hanging on an unresolvable host.
         let origin_name = setup_verifiable_origin(&["message"]);
         let mut nodes = aoide_storage::node_store::load_nodes();
         nodes[0].url = "http://127.0.0.1:1/".to_string();
@@ -15945,7 +15928,6 @@ mod tests {
 
         let filed = answer(send_raw(mail_port, &request));
         assert_eq!(filed["result"]["status"], "accepted", "the mail adapter files the deposit: {filed}");
-        let spooled = aoide_storage::outbox::list_entries(&origin_name).unwrap().len();
 
         NONCE_SETS.lock().unwrap_or_else(|e| e.into_inner()).remove(&own.to_ascii_lowercase());
         assert!(
@@ -15956,21 +15938,20 @@ mod tests {
         assert_eq!(again["result"]["status"], "duplicate", "the same signed bytes at the other listener: {again}");
 
         assert_eq!(aoide_storage::mail::read_base().unwrap().len(), 1, "filed once, across both listeners");
-        assert_eq!(
-            aoide_storage::outbox::list_entries(&origin_name).unwrap().len(),
-            spooled,
-            "and spooled no second time"
+        assert!(
+            aoide_storage::outbox::list_entries(&origin_name).unwrap().is_empty(),
+            "neither listener owes the origin anything for the letter"
         );
 
         mail_deposit_cleanup(&root, saved_state, saved_stage);
     }
 
     #[test]
-    fn a_duplicate_of_a_filed_letter_inside_the_hour_holds_its_reack_back() {
+    fn a_duplicate_of_a_filed_letter_owes_no_ack_with_or_without_a_reacks_record() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
         let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
-        let root = mail_deposit_root("dup-respool");
+        let root = mail_deposit_root("dup-no-ack");
         act_as(&root, "here");
 
         let origin_name = setup_verifiable_origin(&["message"]);
@@ -15985,37 +15966,29 @@ mod tests {
         let params = json!({ "envelope": envelope });
 
         mail_deposit(&params, &ctx).unwrap();
-        let before = aoide_storage::outbox::list_entries(&origin_name).unwrap();
-        assert_eq!(before.len(), 1, "filing a letter spools an ack toward the origin");
-        aoide_storage::outbox::remove_entry(&origin_name, &before[0].envelope.msgid).unwrap();
-        assert!(aoide_storage::outbox::list_entries(&origin_name).unwrap().is_empty(), "ack removed, simulating an earlier successful drain");
+        assert!(aoide_storage::outbox::list_entries(&origin_name).unwrap().is_empty(), "filing a letter owes no ack");
 
-        // The SAME envelope again, inside the hour: a duplicate re-acks at most
-        // once per key per hour (`mail::reack_due`), and the first ack already
-        // went out. The re-ack after the hour is proved in storage.
+        // The SAME envelope again. A duplicate owes no ack inside the hour or after
+        // it: the sender's own resend is its recovery (ruling 131).
+        let _ = std::fs::remove_file(aoide_storage::mail::mail_dir().join("reacks.log"));
         mail_deposit(&params, &ctx).unwrap();
         let after = aoide_storage::outbox::list_entries(&origin_name).unwrap();
-        assert!(after.is_empty(), "a duplicate inside the hour spools no second ack: {after:?}");
+        assert!(after.is_empty(), "a duplicate spools no ack: {after:?}");
 
         mail_deposit_cleanup(&root, saved_state, saved_stage);
     }
 
     #[test]
-    fn repeated_duplicate_redeliveries_spool_exactly_one_ack() {
-        // The outbox investigation's own root cause: a sender that never
-        // sees its ack redelivers the SAME letter, `mail::deposit`
-        // correctly classifies each redelivery as `Duplicate{filed_letter:
-        // true}`, and the old `spool_and_drain_ack` used to mint a BRAND-NEW ack
-        // envelope — new msgid, new file — on every single one, with the
-        // ack still sitting undelivered in the spool the whole time (never
-        // removed, so this never depends on `mail_deposit`'s own
-        // best-effort drain succeeding or failing). This pins the ledger
-        // fix: N redeliveries of the same letter must leave exactly ONE
-        // spooled ack for that (reader, msgid), not N.
+    fn repeated_duplicate_redeliveries_spool_no_ack() {
+        // The outbox investigation's root cause was a sender that never sees
+        // its ack and redelivers the SAME letter, each redelivery minting a
+        // fresh ack that sat in the spool. Ruling 131 removes the ack: the
+        // filing is the answer, and no redelivery spools anything toward the
+        // origin, however many times it arrives.
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
         let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
-        let root = mail_deposit_root("dup-flood-one-ack");
+        let root = mail_deposit_root("dup-flood-no-ack");
         act_as(&root, "here");
 
         let origin_name = setup_verifiable_origin(&["message"]);
@@ -16031,31 +16004,24 @@ mod tests {
 
         let first = mail_deposit(&params, &ctx).unwrap();
         assert_eq!(first["status"], "accepted");
-        let first_spool = aoide_storage::outbox::list_entries(&origin_name).unwrap();
-        assert_eq!(first_spool.len(), 1, "the first filing spools exactly one ack");
-        let ack_msgid = first_spool[0].envelope.msgid.clone();
 
-        // The ack is deliberately left in the spool (undelivered) across
-        // every redelivery below — exactly the "dead link" condition that
-        // produced 16.5k duplicates.
         for _ in 0..10 {
             let redelivered = mail_deposit(&params, &ctx).unwrap();
             assert_eq!(redelivered["status"], "duplicate");
         }
 
         let spool = aoide_storage::outbox::list_entries(&origin_name).unwrap();
-        assert_eq!(spool.len(), 1, "ten redeliveries must still leave exactly one spooled ack");
-        assert_eq!(spool[0].envelope.msgid, ack_msgid, "the surviving ack is the ORIGINAL one, never re-minted");
+        assert!(spool.is_empty(), "ten redeliveries spool no ack toward the origin: {spool:?}");
 
         mail_deposit_cleanup(&root, saved_state, saved_stage);
     }
 
     #[test]
-    fn filing_a_letter_spools_an_ack_signed_by_this_box() {
+    fn filing_a_letter_owes_no_ack_and_writes_no_reacks_record() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
         let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
-        let root = mail_deposit_root("ack-shape");
+        let root = mail_deposit_root("no-ack-on-filing");
         act_as(&root, "here");
 
         let origin_name = setup_verifiable_origin(&["message"]);
@@ -16069,15 +16035,10 @@ mod tests {
         let ctx = mail_deposit_ctx(&audit_log, Some(&origin_name));
         let params = json!({ "envelope": envelope });
         let result = mail_deposit(&params, &ctx).unwrap();
-        let msgid = result["msgid"].as_str().unwrap().to_string();
+        assert_eq!(result["status"], "accepted", "the letter files: {result}");
 
-        let spooled = aoide_storage::outbox::list_entries(&origin_name).unwrap();
-        assert_eq!(spooled.len(), 1);
-        let ack = &spooled[0].envelope;
-        assert_eq!(ack.header.kind, aoide_storage::mail::ENTRY_TYPE_RECEIPT);
-        assert_eq!(ack.header.to.node, origin_name, "the ack's `to` is the origin");
-        assert_eq!(ack.text, msgid, "the ack's text is the acked msgid");
-        assert_eq!(ack.header.from.node, aoide_storage::display::local_node_name(), "signed by this box");
+        assert!(aoide_storage::outbox::list_entries(&origin_name).unwrap().is_empty(), "filing spools no ack");
+        assert!(!aoide_storage::mail::mail_dir().join("reacks.log").exists(), "and writes no reacks.log record");
 
         mail_deposit_cleanup(&root, saved_state, saved_stage);
     }

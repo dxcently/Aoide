@@ -261,7 +261,7 @@ fn state_line(path: &Path) -> Value {
 /// A tick-driven stat sweep over a fixed roster of broker-owned files
 /// (`docs/architecture/AOIDED.md`'s "The first producer: the hand-edit
 /// watcher (#69)" section) — [`crate::daemon::stage_roster`] supplies the
-/// six real stage-file paths in production; a test passes an arbitrary
+/// seven real stage-file paths in production; a test passes an arbitrary
 /// list of tempfiles instead. It also writes the `state` cue to `feed`.
 ///
 /// It is also the [`WriteWatch`] for its roster once registered

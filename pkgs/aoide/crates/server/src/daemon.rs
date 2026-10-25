@@ -101,30 +101,30 @@
 //!
 //! ## The tick's two producers (P-D3)
 //!
-//! `run_loop`'s tick (~1s) now runs two producers every iteration, both
-//! defined in [`crate::producers`] and constructed once at `run_loop`
-//! startup (the same "construct once outside the loop, tick inside it"
-//! shape the [`aoide_protocol::feed::FeedWriter`]/socket listener already
-//! hold): [`crate::producers::SecretsMirror::tick`] tails the secrets
-//! broker's own events feed and re-publishes a name-only mirror record for
-//! each of its five recognized outcomes onto THIS daemon's own feed (via
-//! the SAME [`FeedWriter`] the startup line above already writes through —
-//! one writer per process, `docs/architecture/AOIDED.md`'s "L1" section);
+//! `run_loop`'s tick (~1s) now runs two producers every iteration, both defined
+//! in [`crate::producers`] and constructed once at `run_loop` startup (the same
+//! "construct once outside the loop, tick inside it" shape the
+//! [`aoide_protocol::feed::FeedWriter`]/socket listener already hold):
+//! [`crate::producers::SecretsMirror::tick`] tails the secrets broker's own
+//! events feed and re-publishes a name-only mirror record for each of its five
+//! recognized outcomes onto THIS daemon's own feed (via the SAME [`FeedWriter`]
+//! the startup line above already writes through — one writer per process,
+//! `docs/architecture/AOIDED.md`'s "L1" section);
 //! [`crate::producers::HandEditWatcher::sweep`] stat-sweeps [`stage_roster`]
-//! (the six broker-owned stage files) and appends one `class:"audit",
-//! kind:"hand-edit"` line per file whose `(mtime, len)` changed since the
-//! last tick — detection and narration only, this daemon never reverts a
-//! hand edit. The same watcher also raises a `class:"state"` line for each
-//! file whose `(mtime, len)` moved, whoever moved it, coalesced to one line
-//! per file per second (`producers`' "The state cue").
+//! (the seven broker-owned stage files, `jobs.json` among them) and appends one
+//! `class:"audit", kind:"hand-edit"` line per file whose `(mtime, len)` changed
+//! since the last tick — detection and narration only, this daemon never
+//! reverts a hand edit. The same watcher also raises a `class:"state"` line for
+//! each file whose `(mtime, len)` moved, whoever moved it, coalesced to one
+//! line per file per second (`producers`' "The state cue").
 //!
 //! **aoided knows its own writes at the rename.** [`run_loop`] registers ONE
-//! watcher, [`SharedHandEditWatcher`], over the six stage files, after the seed
-//! and before the accept loop and the core shellbridge start. It is the write
-//! seam's watch for those paths (`aoide_storage::fs::watch_writes`), so every
-//! atomic stage write this process makes, from any thread or crate, runs its
-//! rename inside the watcher: the file is observed, the rename runs, and the
-//! new state is folded, all under the watcher's lock. A dispatched command
+//! watcher, [`SharedHandEditWatcher`], over the seven stage files, after the
+//! seed and before the accept loop and the core shellbridge start. It is the
+//! write seam's watch for those paths (`aoide_storage::fs::watch_writes`), so
+//! every atomic stage write this process makes, from any thread or crate, runs
+//! its rename inside the watcher: the file is observed, the rename runs, and
+//! the new state is folded, all under the watcher's lock. A dispatched command
 //! (`session start/end`, etc., arriving over `{"op":"dispatch"}`, which runs
 //! the SAME `do_session_*` code the CLI runs), the tick's own writes and the
 //! core shellbridge's notification writes are therefore known at the write, and
@@ -313,12 +313,13 @@ pub fn events_path(socket_path: &Path) -> PathBuf {
 }
 
 /// The #69 hand-edit watcher's watched-file roster (`docs/architecture/
-/// AOIDED.md`'s "The first producer" section): the six broker-owned stage
-/// files. `pending.json`/`notifications.json` come from `aoide-conduct` (this
-/// crate already depends on it — `daemon.rs`'s own module doc), the other
-/// four from `aoide-storage`; every path is reached through its owning
-/// crate's own accessor rather than a second `stage_dir().join(...)`
-/// literal here (the workspace's "no cross-crate copying" convention).
+/// AOIDED.md`'s "The first producer" section): the seven broker-owned stage
+/// files. `pending.json`/`notifications.json`/`jobs.json` come from
+/// `aoide-conduct` (this crate already depends on it — `daemon.rs`'s own
+/// module doc), the other four from `aoide-storage`; every path is reached
+/// through its owning crate's own accessor rather than a second
+/// `stage_dir().join(...)` literal here (the workspace's "no cross-crate
+/// copying" convention).
 fn stage_roster() -> Vec<PathBuf> {
     vec![
         aoide_storage::stage::sessions_path(),
@@ -327,6 +328,7 @@ fn stage_roster() -> Vec<PathBuf> {
         aoide_storage::stage::graph_path(),
         aoide_conduct::graph::pending_path(),
         aoide_conduct::notifications::notifications_path(),
+        aoide_conduct::graph::jobs_path(),
     ]
 }
 
@@ -476,24 +478,23 @@ fn seal_freshly_registered_session(inv: &Invocation, outcome: &aoide_protocol::o
     aoide_conduct::graph::stamp_seal(id, &seal, issued_at, pid_starttime);
 }
 
-/// LANE IDENTITY P-ID2 (`CONTRACTS.md`'s identity section): mint+stamp a
-/// seal for every LIVE, pid-carrying session that doesn't have one yet —
-/// closes the gap P-ID1 shipped as scaffolding (`seal_freshly_registered_
-/// session`'s own doc): its ONE caller sits on the `dispatch` handler,
-/// reached only by a daemon-ROUTED `session start`, but the common
-/// real-world registration — `aoide conduct -- <agent>` — writes its
-/// record DIRECTLY (`aoide_conduct::graph::conduct::session_conduct`,
-/// never through `dispatch` at all), so under P-ID1 alone it was NEVER
-/// sealed. Run every tick (module doc's "six stats is cheap" precedent —
-/// a session roster is small, and gating this on the hand-edit watcher's
-/// own `sessions.json` detection would miss a session that was already
-/// live across a daemon restart, since the watcher's baseline seeds from
-/// current-on-disk state at construction). `done` sessions are skipped —
-/// no seal is minted for a session that has already exited, matching
-/// `stamp_origin`/`stamp_seal`'s own "birth fact" posture. Best-effort: a
-/// load/write failure here is silently skipped and retried next tick,
-/// same posture as every other tick producer in this loop. Its `sessions.json`
-/// write is storage's atomic write, so the watcher folds it at the rename.
+/// LANE IDENTITY P-ID2 (`CONTRACTS.md`'s identity section): mint+stamp a seal
+/// for every LIVE, pid-carrying session that doesn't have one yet — closes the
+/// gap P-ID1 shipped as scaffolding (`seal_freshly_registered_ session`'s own
+/// doc): its ONE caller sits on the `dispatch` handler, reached only by a
+/// daemon-ROUTED `session start`, but the common real-world registration —
+/// `aoide conduct -- <agent>` — writes its record DIRECTLY
+/// (`aoide_conduct::graph::conduct::session_conduct`, never through `dispatch`
+/// at all), so under P-ID1 alone it was NEVER sealed. Run every tick (a session
+/// roster is small, and gating this on the hand-edit watcher's own
+/// `sessions.json` detection would miss a session that was already live across
+/// a daemon restart, since the watcher's baseline seeds from current-on-disk
+/// state at construction). `done` sessions are skipped — no seal is minted for
+/// a session that has already exited, matching `stamp_origin`/`stamp_seal`'s
+/// own "birth fact" posture. Best-effort: a load/write failure here is silently
+/// skipped and retried next tick, same posture as every other tick producer in
+/// this loop. Its `sessions.json` write is storage's atomic write, so the
+/// watcher folds it at the rename.
 fn seal_unsealed_live_sessions() {
     let file: aoide_storage::records::SessionsFile =
         match aoide_storage::stage::load_stage(&aoide_storage::stage::sessions_path()) {
@@ -532,17 +533,16 @@ fn internal_invocation(path: &[&str]) -> Invocation {
     }
 }
 
-/// P-D6 fold: given the base filenames [`HandEditWatcher::sweep`] just
-/// reported changed, re-derive `graph.json` (via `aoide_conduct::graph::
-/// emit`, an internal-only function now — the CLI command was retired in
-/// favor of `session prune`) when `sessions.json` or
-/// `hooks.json` was among them — module doc's "Graph residency" explains
-/// why re-deriving from CURRENT content is the whole fold (no separate
-/// daemon-held roster exists to conflict with). A no-op (touches nothing) when
-/// neither file changed, so a hand-edit to
-/// `pending.json`/`notifications.json`/`projects.json` alone never triggers a
-/// spurious `graph.json` rewrite. The rewrite is storage's atomic write, so the
-/// watcher folds it at the rename.
+/// P-D6 fold: given the base filenames [`HandEditWatcher::sweep`] just reported
+/// changed, re-derive `graph.json` (via `aoide_conduct::graph:: emit`, an
+/// internal-only function now — the CLI command was retired in favor of
+/// `session prune`) when `sessions.json` or `hooks.json` was among them —
+/// module doc's "Graph residency" explains why re-deriving from CURRENT content
+/// is the whole fold (no separate daemon-held roster exists to conflict with).
+/// A no-op (touches nothing) when neither file changed, so a hand-edit to
+/// `pending.json`/`notifications.json`/`projects.json`/`jobs.json` alone never
+/// triggers a spurious `graph.json` rewrite. The rewrite is storage's atomic
+/// write, so the watcher folds it at the rename.
 fn reconcile_graph_projection(changed_files: &[String]) {
     if !changed_files.iter().any(|f| f == "sessions.json" || f == "hooks.json") {
         return;
@@ -581,7 +581,7 @@ const DRAIN_EVERY_TICKS: u64 = 12;
 /// [`aoide_conduct::mail_bridge::drain_all`]
 /// — every node with anything spooled gets one best-effort drain attempt
 /// per tick window. The outbox lives under `state/outbox/`, outside the
-/// watcher's roster (the six stage files).
+/// watcher's roster (the seven stage files).
 fn run_internal_mail_drain() {
     aoide_conduct::graph::sweep_session_letters();
     let _ = aoide_conduct::mail_bridge::drain_all();
