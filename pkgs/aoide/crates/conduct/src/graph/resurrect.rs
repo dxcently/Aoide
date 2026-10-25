@@ -5331,6 +5331,7 @@ mod tests {
 
     /// A by-journal candidate whose presence scan cannot say which journals are
     /// open is refused, and nothing launches.
+    /// It listens so its meta is read: nothing listening means skipped unread.
     #[cfg(unix)]
     #[test]
     fn a_by_log_candidate_with_an_unknown_presence_scan_is_skipped_and_nothing_launches() {
@@ -5342,6 +5343,7 @@ mod tests {
         let presence = root.join("eidolon").join("garbage");
         std::fs::create_dir_all(&presence).unwrap();
         std::fs::write(presence.join("meta.json"), "{ not json").unwrap();
+        let _held_open = std::os::unix::net::UnixListener::bind(presence.join("sock")).unwrap();
         let journal = journal.to_string_lossy().into_owned();
         set_ledger(&[ledger_entry_with_log("ledger-eid", "eidolon", &proj_path, Some(journal.as_str()))]);
         let (rec, _dump) = recording_terminal_with_claims(&root);

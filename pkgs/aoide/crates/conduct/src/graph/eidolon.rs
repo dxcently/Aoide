@@ -647,6 +647,34 @@ pub(crate) fn eidolon_presence_sessions() -> PresenceScan {
     eidolon_presence_sessions_with(process_table)
 }
 
+/// Probe each directory's `sock` at once, one scoped thread each, and return
+/// every directory with its probe, in the order given. The probes share
+/// `deadline` and run together, so a silent socket delays no probe after it.
+fn probe_presence_dirs(dirs: Vec<PathBuf>, deadline: Instant) -> Vec<(PathBuf, Probe)> {
+    std::thread::scope(|scope| {
+        let spawned: Vec<_> = dirs
+            .into_iter()
+            .map(|dir| {
+                let sock = dir.join("sock");
+                let on_this_thread = sock.clone();
+                let handle = std::thread::Builder::new()
+                    .spawn_scoped(scope, move || presence_probe(&sock, deadline));
+                (dir, handle.map_err(|_| on_this_thread))
+            })
+            .collect();
+        spawned
+            .into_iter()
+            .map(|(dir, handle)| {
+                let probe = match handle {
+                    Ok(handle) => handle.join().unwrap_or(Probe::Silent),
+                    Err(sock) => presence_probe(&sock, deadline),
+                };
+                (dir, probe)
+            })
+            .collect()
+    })
+}
+
 /// The testable core of [`eidolon_presence_sessions`]. A missing presence
 /// root is `Observed(empty)` — no eidolon session has ever registered on
 /// this box, a genuine fact, not a failed observation. An unreadable root,
@@ -681,28 +709,7 @@ fn eidolon_presence_sessions_with(process_table: impl Fn() -> Option<String>) ->
         .map(|entry| entry.path())
         .filter(|dir| dir.is_dir())
         .collect();
-    let probed: Vec<(PathBuf, Probe)> = std::thread::scope(|scope| {
-        let spawned: Vec<_> = dirs
-            .into_iter()
-            .map(|dir| {
-                let sock = dir.join("sock");
-                let on_this_thread = sock.clone();
-                let handle = std::thread::Builder::new()
-                    .spawn_scoped(scope, move || presence_probe(&sock, deadline));
-                (dir, handle.map_err(|_| on_this_thread))
-            })
-            .collect();
-        spawned
-            .into_iter()
-            .map(|(dir, handle)| {
-                let probe = match handle {
-                    Ok(handle) => handle.join().unwrap_or(Probe::Silent),
-                    Err(sock) => presence_probe(&sock, deadline),
-                };
-                (dir, probe)
-            })
-            .collect()
-    });
+    let probed = probe_presence_dirs(dirs, deadline);
 
     let mut live_meta = Vec::new();
     let mut silent_meta = Vec::new();
@@ -2256,6 +2263,30 @@ mod tests {
         assert!(
             matches!(scan, PresenceScan::Unknown(ScanFailure::MetaUnavailable)),
             "a live socket whose meta cannot be read is Unknown: {scan:?}"
+        );
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    /// A silent socket ahead of one that answers: the answer still comes, since
+    /// the probes run together and the silence delays nothing after it.
+    #[test]
+    fn a_silent_socket_does_not_starve_the_probe_after_it() {
+        let root = unique_stage("eidolon-probe-order");
+        let silent_dir = root.join("silent");
+        let answering_dir = root.join("answering");
+        std::fs::create_dir_all(&silent_dir).unwrap();
+        std::fs::create_dir_all(&answering_dir).unwrap();
+        let _held_open = silent_socket(&silent_dir.join("sock"));
+        let _answering = answering_socket(&answering_dir.join("sock"));
+
+        let (_took, probed) = aoide_test_support::finishes_within(Duration::from_secs(2), move || {
+            probe_presence_dirs(vec![silent_dir, answering_dir], presence_deadline())
+        })
+        .expect("two probes must not hang");
+        assert_eq!(
+            probed.iter().map(|(_, probe)| *probe).collect::<Vec<_>>(),
+            vec![Probe::Silent, Probe::Answered],
+            "each directory keeps its place in the order given"
         );
         std::fs::remove_dir_all(root).ok();
     }
