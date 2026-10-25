@@ -602,3 +602,16 @@ pub fn terminate(pid: u32) -> io::Result<()> {
         Err(io::Error::last_os_error())
     }
 }
+
+/// A FIFO at `path`, for the door's token-path test. Fakes only: the app makes
+/// no FIFO of its own, and the door crate may not call libc.
+#[cfg(feature = "fakes")]
+pub fn make_fifo(path: &Path) -> io::Result<()> {
+    let c = CString::new(path.as_os_str().as_bytes()).map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
+    // SAFETY: `c` is a NUL-terminated path that lives across the call.
+    if unsafe { libc::mkfifo(c.as_ptr(), 0o600) } == 0 {
+        Ok(())
+    } else {
+        Err(io::Error::last_os_error())
+    }
+}

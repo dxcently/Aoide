@@ -1,19 +1,60 @@
 //! Blocking HTTP/1.1 framing for the door. Every request says
 //! `Connection: close`, so a reply is one status line, its headers, then a body
 //! that is `Content-Length`, chunked, or read to the end of the stream.
+//!
+//! A head or a trailer block holds at most 100 header lines and 64 KiB in all,
+//! and one line at most 16 KiB. A framing failure (a head or chunk that does
+//! not parse, a body that ends before its length) is [`DoorError::Malformed`];
+//! a read that times out or fails is `Io`.
 
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::net::TcpStream;
+use std::time::{Duration, Instant};
 
 use crate::error::DoorError;
 
 /// The longest status line or header line read. Longer is malformed.
 const MAX_LINE: u64 = 16 * 1024;
+/// The header lines a head or a trailer block may hold, and the bytes in all.
+const MAX_HEAD_LINES: usize = 100;
+const MAX_HEAD_BYTES: u64 = 64 * 1024;
 
 pub(crate) struct Head {
     pub status: u16,
     pub chunked: bool,
     pub length: Option<u64>,
+}
+
+/// A connection whose reads share one deadline: each read's timeout is the time
+/// left, so a head and a body read together stay within it.
+pub(crate) struct Wire {
+    pub(crate) stream: TcpStream,
+    deadline: Option<Instant>,
+}
+
+impl Wire {
+    pub(crate) fn new(stream: TcpStream, within: Duration) -> Wire {
+        Wire { stream, deadline: Some(Instant::now() + within) }
+    }
+
+    /// Ends the deadline: later reads wait as long as the peer takes.
+    pub(crate) fn release(&mut self) -> io::Result<()> {
+        self.deadline = None;
+        self.stream.set_read_timeout(None)
+    }
+}
+
+impl Read for Wire {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        if let Some(deadline) = self.deadline {
+            let left = deadline.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                return Err(io::Error::new(io::ErrorKind::TimedOut, "the reply ran past its deadline"));
+            }
+            self.stream.set_read_timeout(Some(left))?;
+        }
+        self.stream.read(buf)
+    }
 }
 
 /// Writes one request. A body is JSON, sent with its Content-Type and length; no
@@ -40,9 +81,46 @@ pub(crate) fn write_request(
     w.flush()
 }
 
+/// What one head or trailer block has spent of its caps.
+#[derive(Default)]
+struct Spent {
+    lines: usize,
+    bytes: u64,
+}
+
+impl Spent {
+    /// One line of the block, counted against the byte cap.
+    fn take_line(&mut self, r: &mut impl BufRead) -> io::Result<String> {
+        let text = line(r)?;
+        self.bytes += text.len() as u64 + 2;
+        if self.bytes > MAX_HEAD_BYTES {
+            return Err(over_cap());
+        }
+        Ok(text)
+    }
+
+    /// One header line, counted against the line cap as well. The blank line
+    /// that ends the block is not a header and is not counted.
+    fn take_header(&mut self, r: &mut impl BufRead) -> io::Result<String> {
+        let text = self.take_line(r)?;
+        if !text.is_empty() {
+            self.lines += 1;
+            if self.lines > MAX_HEAD_LINES {
+                return Err(over_cap());
+            }
+        }
+        Ok(text)
+    }
+}
+
+fn over_cap() -> io::Error {
+    io::Error::new(io::ErrorKind::InvalidData, "a head or trailer block over 100 lines or 64 KiB")
+}
+
 /// Reads a status line and its headers; the body is left unread.
 pub(crate) fn read_head(r: &mut impl BufRead) -> Result<Head, DoorError> {
-    let status_line = line(r).map_err(head_error)?;
+    let mut spent = Spent::default();
+    let status_line = spent.take_line(r).map_err(framing_error)?;
     let mut words = status_line.split(' ');
     let version = words.next().unwrap_or_default();
     let status = words.next().and_then(|code| code.parse::<u16>().ok());
@@ -52,7 +130,7 @@ pub(crate) fn read_head(r: &mut impl BufRead) -> Result<Head, DoorError> {
     let mut chunked = false;
     let mut length = None;
     loop {
-        let header = line(r).map_err(head_error)?;
+        let header = spent.take_header(r).map_err(framing_error)?;
         if header.is_empty() {
             break;
         }
@@ -87,7 +165,8 @@ fn line(r: &mut impl BufRead) -> io::Result<String> {
     Ok(text.trim_end_matches(['\r', '\n']).to_string())
 }
 
-fn head_error(e: io::Error) -> DoorError {
+/// A framing failure is malformed; any other read failure is an I/O error.
+pub(crate) fn framing_error(e: io::Error) -> DoorError {
     match e.kind() {
         io::ErrorKind::UnexpectedEof | io::ErrorKind::InvalidData => DoorError::Malformed(e.to_string()),
         _ => DoorError::Io(e),
@@ -99,7 +178,7 @@ fn chunk_size(r: &mut impl BufRead) -> io::Result<u64> {
     let text = line(r)?;
     let digits = text.split(';').next().unwrap_or_default().trim();
     u64::from_str_radix(digits, 16)
-        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "a chunk size that is not hex"))
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "a chunk size that is not hex, or overflows"))
 }
 
 /// The CRLF that closes a chunk's data.
@@ -114,7 +193,8 @@ fn crlf(r: &mut impl BufRead) -> io::Result<()> {
 
 /// The trailer lines after the last chunk, through the blank line that ends them.
 fn trailers(r: &mut impl BufRead) -> io::Result<()> {
-    while !line(r)?.is_empty() {}
+    let mut spent = Spent::default();
+    while !spent.take_header(r)?.is_empty() {}
     Ok(())
 }
 
@@ -159,12 +239,34 @@ impl<R: BufRead> Read for Chunked<R> {
     }
 }
 
+/// A body framed by `Content-Length`. A reply that ends before its length is an
+/// error, so a short body is never read as a whole one.
+pub(crate) struct Exact<R> {
+    inner: R,
+    left: u64,
+}
+
+impl<R: Read> Read for Exact<R> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        if self.left == 0 || buf.is_empty() {
+            return Ok(0);
+        }
+        let want = buf.len().min(usize::try_from(self.left).unwrap_or(usize::MAX));
+        let n = self.inner.read(&mut buf[..want])?;
+        if n == 0 {
+            return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "the reply ended before its Content-Length"));
+        }
+        self.left -= n as u64;
+        Ok(n)
+    }
+}
+
 /// The body reader a head's framing calls for.
-pub(crate) fn body_reader(head: &Head, reader: BufReader<TcpStream>) -> Box<dyn Read + Send> {
+pub(crate) fn body_reader(head: &Head, reader: BufReader<Wire>) -> Box<dyn Read + Send> {
     if head.chunked {
         Box::new(Chunked::new(reader))
     } else if let Some(length) = head.length {
-        Box::new(reader.take(length))
+        Box::new(Exact { inner: reader, left: length })
     } else {
         Box::new(reader)
     }
@@ -202,12 +304,45 @@ mod tests {
     }
 
     #[test]
+    fn a_chunk_size_that_overflows_is_invalid_data() {
+        let mut body = Chunked::new(BufReader::new(Cursor::new(b"FFFFFFFFFFFFFFFFF\r\nx\r\n".to_vec())));
+        let err = body.read_to_end(&mut Vec::new()).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidData);
+    }
+
+    #[test]
+    fn trailers_past_100_lines_are_invalid_data() {
+        let mut wire = b"0\r\n".to_vec();
+        wire.extend((0..101).flat_map(|i| format!("X-{i}: v\r\n").into_bytes()));
+        wire.extend(b"\r\n");
+        let mut body = Chunked::new(BufReader::new(Cursor::new(wire)));
+        let err = body.read_to_end(&mut Vec::new()).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidData);
+    }
+
+    #[test]
+    fn a_body_that_ends_before_its_content_length_is_unexpected_eof() {
+        let mut body = Exact { inner: Cursor::new(b"abc".to_vec()), left: 10 };
+        let err = body.read_to_end(&mut Vec::new()).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::UnexpectedEof);
+    }
+
+    #[test]
     fn a_status_line_and_its_length_are_read() {
         let wire = b"HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_vec();
         let head = read_head(&mut BufReader::new(Cursor::new(wire))).unwrap();
         assert_eq!(head.status, 401);
         assert_eq!(head.length, Some(0));
         assert!(!head.chunked);
+    }
+
+    #[test]
+    fn a_head_of_101_header_lines_is_malformed() {
+        let mut wire = b"HTTP/1.1 200 OK\r\n".to_vec();
+        wire.extend((0..101).flat_map(|i| format!("X-{i}: v\r\n").into_bytes()));
+        wire.extend(b"\r\n");
+        let err = read_head(&mut BufReader::new(Cursor::new(wire))).err().unwrap();
+        assert!(matches!(err, DoorError::Malformed(_)), "{err}");
     }
 
     #[test]

@@ -6,7 +6,7 @@ routes, and it decodes what the door's events stream carries.
 
 It is blocking HTTP/1.1 over `std::net::TcpStream`, with no async runtime, no
 HTTP library and no GUI crate. Its dependencies are serde, serde_json and libc
-(for the `O_NOFOLLOW` flag on the token open).
+(for the `O_NOFOLLOW` and `O_NONBLOCK` flags of the token open).
 
 ## Seams
 
@@ -18,7 +18,10 @@ HTTP library and no GUI crate. Its dependencies are serde, serde_json and libc
   `decode` for one `data:` payload.
 - `token.rs`: `runtime_from_env`, `check_runtime`, `token_path`, and the token
   read that every request makes.
-- `http.rs`: the request writer, the reply head, and the three body framings.
+- `listener.rs`: `check`, which refuses a connection whose answering socket
+  another uid owns.
+- `http.rs`: the request writer, the reply head, the three body framings, and
+  the deadline a reply's reads share.
 - `error.rs`: `DoorError`, every way a call can fail.
 - `fake.rs`, behind the `fake` feature: a std-thread door on 127.0.0.1 that
   speaks the wire as far as the tests need, and records every request.
@@ -29,11 +32,11 @@ HTTP library and no GUI crate. Its dependencies are serde, serde_json and libc
 client.rs   Door::say, cancel, answer, events
               |
               v
-client.rs   exchange(): read the token (token.rs), connect, write (http.rs)
-              |
+client.rs   exchange(): read the token (token.rs), connect, check the
+              |             listener (listener.rs), write the request
               v
-http.rs     read_head, then the body reader: length, chunked, or to EOF
-              |
+http.rs     read_head under the request's deadline, then the body reader:
+              |             length, chunked, or to EOF
      +--------+-----------------------+
      |                                |
   call()                          events()
@@ -47,6 +50,10 @@ http.rs     read_head, then the body reader: length, chunked, or to EOF
   `token_path` is the one spelling of `<runtime>/eidolon/web-<port>.token`, and
   `check_runtime` is the runtime dir's check. `read_token` uses both. `Token`
   prints no value.
+- `listener.rs` finds the accepted socket's row in `/proc/net/tcp` (or
+  `tcp6`) and reads its owner. The row is matched by its local address (the
+  door) and its remote address (this client's), so it is the socket that
+  answers this connection.
 - `events.rs` turns the stream into a blocking iterator of `Frame`s, and hands
   out a `Closer` that shuts the stream's socket down from another thread.
 - `frame.rs` decodes one `data:` payload into a typed `Frame`.

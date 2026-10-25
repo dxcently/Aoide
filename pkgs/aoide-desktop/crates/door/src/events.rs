@@ -10,6 +10,7 @@ use std::sync::Arc;
 
 use crate::error::DoorError;
 use crate::frame::{decode, Frame};
+use crate::http::framing_error;
 
 /// A10: a frame larger than this is dropped and counted, and decoding resumes
 /// at the next frame boundary.
@@ -84,18 +85,53 @@ impl Sse {
     }
 }
 
-/// The frames of an open events stream. Iteration ends when the stream does,
-/// or after a `hello` whose protocol is not 1 (that item is the taught error).
+/// The frames of an open events stream. The first frame is `hello`. Iteration
+/// ends when the stream does, or after a frame that breaks the stream's rules:
+/// a first frame that is not `hello`, a second `hello`, or a `protocol` that is
+/// not 1 (each the item that says so).
 pub struct Events {
     body: Box<dyn Read + Send>,
     sse: Sse,
     done: bool,
+    greeted: bool,
     socket: TcpStream,
 }
 
 impl Events {
     pub(crate) fn new(body: Box<dyn Read + Send>, socket: TcpStream) -> Events {
-        Events { body, sse: Sse::default(), done: false, socket }
+        Events { body, sse: Sse::default(), done: false, greeted: false, socket }
+    }
+
+    /// One frame under the stream's rules; a rule that fails ends the stream.
+    fn frame(&mut self, payload: &[u8]) -> Result<Frame, DoorError> {
+        let decoded = decode(payload);
+        if !self.greeted {
+            return match decoded {
+                Ok(frame @ Frame::Hello { .. }) => {
+                    self.greeted = true;
+                    Ok(frame)
+                }
+                Err(e @ DoorError::Protocol { .. }) => {
+                    self.done = true;
+                    Err(e)
+                }
+                _ => {
+                    self.done = true;
+                    Err(DoorError::Malformed("the first frame is not hello".to_string()))
+                }
+            };
+        }
+        match decoded {
+            Ok(Frame::Hello { .. }) => {
+                self.done = true;
+                Err(DoorError::Malformed("a second hello".to_string()))
+            }
+            Err(e @ DoorError::Protocol { .. }) => {
+                self.done = true;
+                Err(e)
+            }
+            other => other,
+        }
     }
 
     /// Frames dropped for passing the cap, since the stream opened.
@@ -131,11 +167,7 @@ impl Iterator for Events {
                 return None;
             }
             if let Some(payload) = self.sse.ready.pop_front() {
-                let frame = decode(&payload);
-                if matches!(frame, Err(DoorError::Protocol { .. })) {
-                    self.done = true;
-                }
-                return Some(frame);
+                return Some(self.frame(&payload));
             }
             let mut buf = [0u8; 8192];
             match self.body.read(&mut buf) {
@@ -143,7 +175,7 @@ impl Iterator for Events {
                 Ok(n) => self.sse.feed(&buf[..n]),
                 Err(e) => {
                     self.done = true;
-                    return Some(Err(DoorError::Io(e)));
+                    return Some(Err(framing_error(e)));
                 }
             }
         }

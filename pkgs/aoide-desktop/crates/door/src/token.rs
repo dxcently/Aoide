@@ -69,9 +69,10 @@ pub(crate) fn read_token(runtime: &Path, token_file: &Path, port: u16) -> Result
     if token_file != expected.as_path() {
         return Err(refused(token_file, "not the token path of the door bound on this port"));
     }
+    // O_NONBLOCK: a FIFO opens without waiting for a writer, and the fstat below refuses it.
     let mut file = OpenOptions::new()
         .read(true)
-        .custom_flags(libc::O_NOFOLLOW)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
         .open(token_file)
         .map_err(|e| refused(token_file, &format!("cannot open it without following links: {e}")))?;
     let meta = file.metadata()?;
@@ -106,7 +107,7 @@ fn private_dir(path: &Path, uid: u32) -> Result<(), DoorError> {
 }
 
 /// The effective uid, from the `Uid:` line of `/proc/self/status`.
-fn euid() -> io::Result<u32> {
+pub(crate) fn euid() -> io::Result<u32> {
     let status = fs::read_to_string("/proc/self/status")?;
     status
         .lines()
@@ -259,10 +260,6 @@ mod tests {
         // The door bound port 8, so `web-8.token` is the only file it may name.
         assert!(refused(read_token(rt.path(), &file, 8)));
     }
-
-    #[test]
-    #[ignore = "needs root: a file owned by another uid cannot be made without it"]
-    fn a_token_owned_by_another_uid_is_refused() {}
 
     #[test]
     fn the_effective_uid_is_the_owner_of_a_file_this_process_makes() {

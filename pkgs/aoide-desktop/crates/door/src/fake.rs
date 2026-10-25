@@ -4,7 +4,9 @@
 //! SSE, and `/api/say`, `/api/cancel` and `/api/answer` with their statuses.
 //!
 //! Any other path answers 200 and is recorded, so a test can assert the client
-//! sent no request outside the four routes it uses.
+//! sent no request outside the four routes it uses. A test can also answer
+//! with bytes of its own: [`FakeDoor::reply_raw`] sends pieces as they are, and
+//! [`FakeDoor::refuse_at_once`] refuses before the request body is read.
 //!
 //! A client that closes an open stream ends it: between frames the fake peeks
 //! the socket, as hyper ends a connection whose client has gone
@@ -19,12 +21,16 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{channel, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde_json::json;
 
 /// The door's cap on a POST body (`eidolon/crates/web/src/serve.rs`'s `MAX_BODY`).
 pub const MAX_BODY: usize = 8 * 1024 * 1024;
+
+/// The hello a stream opens with unless a test sets its head.
+const HELLO: &str =
+    r#"{"type":"hello","session":"fake","cwd":"/","model":"fake","yolo":false,"pending":0,"protocol":1}"#;
 
 /// One request as the fake received it.
 #[derive(Debug, Clone)]
@@ -43,15 +49,21 @@ impl Recorded {
 }
 
 enum Live {
-    Frame(String),
+    Frame(Vec<u8>),
     End,
 }
+
+/// A raw reply: the pieces written as they are, each after its delay, and
+/// whether the connection closes after them (else it is held open).
+type Raw = (String, Vec<(Duration, Vec<u8>)>, bool);
 
 struct Shared {
     token: String,
     host: String,
     head: Mutex<Vec<String>>,
     replies: Mutex<Vec<(String, u16, String)>>,
+    at_once: Mutex<Vec<(String, u16, String)>>,
+    raw: Mutex<Vec<Raw>>,
     requests: Mutex<Vec<Recorded>>,
     /// The open stream's id and its channel. A stream clears it only while it
     /// is still the one open.
@@ -80,8 +92,10 @@ impl FakeDoor {
         let shared = Arc::new(Shared {
             token: token.to_string(),
             host: addr.to_string(),
-            head: Mutex::new(Vec::new()),
+            head: Mutex::new(vec![HELLO.to_string()]),
             replies: Mutex::new(Vec::new()),
+            at_once: Mutex::new(Vec::new()),
+            raw: Mutex::new(Vec::new()),
             requests: Mutex::new(Vec::new()),
             live: Mutex::new(None),
             streams: AtomicU64::new(0),
@@ -111,7 +125,8 @@ impl FakeDoor {
         write_private(&self.token_file, token);
     }
 
-    /// The frames sent before `caught-up`: hello, the replay, any pending asks.
+    /// The frames a stream opens with, before `caught-up`: hello, the replay,
+    /// any pending asks. Until a test sets it, the head is one valid hello.
     pub fn set_head(&self, frames: &[&str]) {
         *self.shared.head.lock().unwrap() = frames.iter().map(|f| f.to_string()).collect();
     }
@@ -121,9 +136,28 @@ impl FakeDoor {
         self.shared.replies.lock().unwrap().push((path.to_string(), status, body.to_string()));
     }
 
+    /// Makes the next request to `path` answer with `pieces` written as they
+    /// are, each after its delay. The connection then closes if `close` is set,
+    /// else it stays open until the client closes it (or for 10 s).
+    pub fn reply_raw(&self, path: &str, pieces: &[(Duration, &[u8])], close: bool) {
+        let pieces = pieces.iter().map(|(delay, bytes)| (*delay, bytes.to_vec())).collect();
+        self.shared.raw.lock().unwrap().push((path.to_string(), pieces, close));
+    }
+
+    /// Makes the next request to `path` answer `status` with `body` before its
+    /// body is read, then close: a refusal sent at once, such as a 413.
+    pub fn refuse_at_once(&self, path: &str, status: u16, body: &str) {
+        self.shared.at_once.lock().unwrap().push((path.to_string(), status, body.to_string()));
+    }
+
     /// Sends one frame, a JSON document, on the open events stream.
     pub fn push(&self, frame: &str) {
-        self.send(Live::Frame(frame.to_string()));
+        self.push_bytes(frame.as_bytes());
+    }
+
+    /// Sends one frame's bytes as they are on the open events stream.
+    pub fn push_bytes(&self, frame: &[u8]) {
+        self.send(Live::Frame(frame.to_vec()));
     }
 
     /// Ends the open events stream with its terminal chunk.
@@ -189,27 +223,27 @@ fn handle(stream: TcpStream, shared: &Shared) -> io::Result<()> {
         }
     }
     let length = header(&headers, "content-length").and_then(|v| v.parse::<usize>().ok()).unwrap_or(0);
-    let mut body = vec![0u8; length];
-    reader.read_exact(&mut body)?;
     let (path, query) = match target.split_once('?') {
         Some((p, q)) => (p.to_string(), q.to_string()),
         None => (target.clone(), String::new()),
     };
-    shared.requests.lock().unwrap().push(Recorded {
-        method: method.clone(),
-        path: path.clone(),
-        query,
-        headers: headers.clone(),
-        body: body.clone(),
-    });
-
-    if path == "/api" || path.starts_with("/api/") {
-        let want = format!("Bearer {}", shared.token);
-        if header(&headers, "authorization") != Some(want.as_str()) {
-            return respond(&mut writer, 401, &[], b"");
+    let authorized = !(path == "/api" || path.starts_with("/api/"))
+        || header(&headers, "authorization") == Some(format!("Bearer {}", shared.token).as_str());
+    let host_ok = method != "POST" || header(&headers, "host") == Some(shared.host.as_str());
+    if authorized && host_ok {
+        if let Some((status, body)) = take_at_once(shared, &path) {
+            record(shared, &method, &path, query, &headers, Vec::new());
+            return respond(&mut writer, status, &[("Content-Type", "application/json")], body.as_bytes());
         }
     }
-    if method == "POST" && header(&headers, "host") != Some(shared.host.as_str()) {
+    let mut body = vec![0u8; length];
+    reader.read_exact(&mut body)?;
+    record(shared, &method, &path, query, &headers, body.clone());
+
+    if !authorized {
+        return respond(&mut writer, 401, &[], b"");
+    }
+    if !host_ok {
         let refusal = json!({"error": "Host does not match the bound address"});
         return respond_json(&mut writer, 403, &refusal);
     }
@@ -217,7 +251,9 @@ fn handle(stream: TcpStream, shared: &Shared) -> io::Result<()> {
         let refusal = json!({"error": format!("a body over {MAX_BODY} bytes is not read")});
         return respond_json(&mut writer, 413, &refusal);
     }
-
+    if let Some((pieces, close)) = take_raw(shared, &path) {
+        return send_raw(&writer, &pieces, close);
+    }
     if method == "GET" && path == "/api/events" {
         return stream_events(&writer, shared);
     }
@@ -230,6 +266,51 @@ fn handle(stream: TcpStream, shared: &Shared) -> io::Result<()> {
         None => default_reply(&method, &path),
     };
     respond(&mut writer, status, &[("Content-Type", "application/json")], reply.as_bytes())
+}
+
+fn record(shared: &Shared, method: &str, path: &str, query: String, headers: &[(String, String)], body: Vec<u8>) {
+    shared.requests.lock().unwrap().push(Recorded {
+        method: method.to_string(),
+        path: path.to_string(),
+        query,
+        headers: headers.to_vec(),
+        body,
+    });
+}
+
+fn take_at_once(shared: &Shared, path: &str) -> Option<(u16, String)> {
+    let mut queue = shared.at_once.lock().unwrap();
+    let i = queue.iter().position(|(p, _, _)| p == path)?;
+    let (_, status, body) = queue.remove(i);
+    Some((status, body))
+}
+
+/// One raw reply's pieces, each written after its delay.
+type Pieces = Vec<(Duration, Vec<u8>)>;
+
+fn take_raw(shared: &Shared, path: &str) -> Option<(Pieces, bool)> {
+    let mut queue = shared.raw.lock().unwrap();
+    let i = queue.iter().position(|(p, _, _)| p == path)?;
+    let (_, pieces, close) = queue.remove(i);
+    Some((pieces, close))
+}
+
+/// Writes the pieces, then holds the connection until the client closes it (or
+/// for 10 s), or closes it at once when `close` is set.
+fn send_raw(stream: &TcpStream, pieces: &[(Duration, Vec<u8>)], close: bool) -> io::Result<()> {
+    let mut w = stream;
+    for (delay, bytes) in pieces {
+        thread::sleep(*delay);
+        w.write_all(bytes)?;
+        w.flush()?;
+    }
+    if close {
+        return Ok(());
+    }
+    stream.set_read_timeout(Some(POLL))?;
+    let until = Instant::now() + Duration::from_secs(10);
+    while Instant::now() < until && !client_gone(stream) {}
+    Ok(())
 }
 
 fn default_reply(method: &str, path: &str) -> (u16, String) {
@@ -275,8 +356,10 @@ fn respond_json(w: &mut impl Write, status: u16, value: &serde_json::Value) -> i
     respond(w, status, &[("Content-Type", "application/json")], value.to_string().as_bytes())
 }
 
-fn chunk(w: &mut impl Write, data: &str) -> io::Result<()> {
-    write!(w, "{:x}\r\n{data}\r\n", data.len())?;
+fn chunk(w: &mut impl Write, data: &[u8]) -> io::Result<()> {
+    write!(w, "{:x}\r\n", data.len())?;
+    w.write_all(data)?;
+    w.write_all(b"\r\n")?;
     w.flush()
 }
 
@@ -299,11 +382,13 @@ fn stream_events(stream: &TcpStream, shared: &Shared) -> io::Result<()> {
     )?;
     w.flush()?;
     for frame in head.iter().map(String::as_str).chain(std::iter::once(r#"{"type":"caught-up"}"#)) {
-        chunk(&mut w, &format!("data: {frame}\n\n"))?;
+        chunk(&mut w, format!("data: {frame}\n\n").as_bytes())?;
     }
     loop {
         match rx.recv_timeout(POLL) {
-            Ok(Live::Frame(frame)) => chunk(&mut w, &format!("data: {frame}\n\n"))?,
+            Ok(Live::Frame(frame)) => {
+                chunk(&mut w, &[b"data: ".as_slice(), frame.as_slice(), b"\n\n".as_slice()].concat())?
+            }
             Ok(Live::End) | Err(RecvTimeoutError::Disconnected) => {
                 w.write_all(b"0\r\n\r\n")?;
                 w.flush()?;

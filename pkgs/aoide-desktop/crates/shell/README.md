@@ -11,7 +11,8 @@ door crate, and `aoide-protocol` by path (for `is_unsafe` and `visible`).
 
 - `exec.rs`: `check_pin`, `Schema`, `argv`, `child_env`, `Exec` (`load`,
   `call`, `door_env`, `spawn_door`) and `terminate`. Only this file starts a
-  process or sends a signal.
+  process or sends a signal. Behind `fakes`, `make_fifo` makes the FIFO the
+  token test puts at the token path.
 - `doors.rs`: `Doors`, which keeps the app's record of its doors, launches one,
   re-attaches the records at start, watches each door's stream, and closes a
   door.

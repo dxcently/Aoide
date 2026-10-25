@@ -93,6 +93,8 @@ are in README.md.
   its token. A test that signals it ends the stream first.
 - The fake aoide and the fake eidolon are bins with `required-features =
   ["fakes"]`. Their tests run with `--all-features`.
+- `tests/token.rs` puts a FIFO at the token path with `exec::make_fifo`. The
+  door crate forbids `unsafe`, so the FIFO is made here, in `exec.rs`.
 
 ## Extension points
 

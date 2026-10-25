@@ -188,7 +188,7 @@ fn a_protocol_2_hello_ends_the_stream_with_a_taught_error() {
     fake.set_head(&[r#"{"type":"hello","session":"s","cwd":"/","model":"m","yolo":false,"pending":0,"protocol":2}"#]);
     let mut events = door.events().unwrap();
     let first = events.next().expect("one item");
-    assert!(matches!(first, Err(DoorError::Protocol { got: 2 })), "{first:?}");
+    assert!(matches!(&first, Err(DoorError::Protocol { got }) if *got == json!(2)), "{first:?}");
     assert!(events.next().is_none(), "the stream ends behind the refusal");
 }
 
@@ -196,6 +196,7 @@ fn a_protocol_2_hello_ends_the_stream_with_a_taught_error() {
 fn an_unknown_frame_and_an_unknown_field_arrive_as_data_and_do_not_end_the_stream() {
     let (_rt, fake, door) = fixture("unknown");
     let mut events = door.events().unwrap();
+    assert!(matches!(events.next().unwrap().unwrap(), Frame::Hello { .. }));
     assert_eq!(events.next().unwrap().unwrap(), Frame::CaughtUp);
     fake.push(r#"{"type":"future-frame","n":1}"#);
     match events.next().unwrap().unwrap() {
@@ -213,6 +214,7 @@ fn an_unknown_frame_and_an_unknown_field_arrive_as_data_and_do_not_end_the_strea
 fn a_2_mib_frame_is_dropped_and_counted_and_the_next_one_decodes() {
     let (_rt, fake, door) = fixture("oversize");
     let mut events = door.events().unwrap();
+    assert!(matches!(events.next().unwrap().unwrap(), Frame::Hello { .. }));
     assert_eq!(events.next().unwrap().unwrap(), Frame::CaughtUp);
     fake.push(&format!(r#"{{"type":"text-delta","text":"{}"}}"#, "x".repeat(2 << 20)));
     fake.push(r#"{"type":"turn-state","running":false}"#);
@@ -227,6 +229,7 @@ fn the_client_sends_four_routes_with_no_query_token_and_the_bound_host() {
     door.cancel().unwrap();
     door.answer(1, "yes", None).unwrap();
     let mut events = door.events().unwrap();
+    assert!(matches!(events.next().unwrap().unwrap(), Frame::Hello { .. }));
     assert_eq!(events.next().unwrap().unwrap(), Frame::CaughtUp);
     fake.end();
     assert!(events.next().is_none());
@@ -296,4 +299,219 @@ fn streaming_is_true_while_a_client_holds_the_stream_and_false_within_a_second_o
     closer.close().unwrap();
     assert!(wait_until(Duration::from_secs(1), || !fake.streaming()), "the fake sees the client close");
     drop(events);
+}
+
+/// `n` header lines, each a distinct name with `value`.
+fn many_headers(n: usize, value: &str) -> String {
+    (0..n).map(|i| format!("X-Filler-{i}: {value}\r\n")).collect()
+}
+
+const QUEUED: &str = r#"{"queued":true}"#;
+
+/// A 202 for `say`: `headers` before its Content-Length, then `body`.
+fn say_reply(headers: &str, body: &str) -> String {
+    format!("HTTP/1.1 202 Accepted\r\n{headers}Content-Length: {}\r\n\r\n{body}", body.len())
+}
+
+#[test]
+fn a_head_of_100_header_lines_is_read() {
+    let (_rt, fake, door) = fixture("head-100");
+    let head = say_reply(&many_headers(99, "v"), QUEUED);
+    fake.reply_raw("/api/say", &[(Duration::ZERO, head.as_bytes())], true);
+    assert_eq!(door.say("hi", Mode::Send).unwrap(), SayOutcome::Queued { queued: true });
+}
+
+#[test]
+fn a_head_of_more_than_100_header_lines_is_malformed() {
+    let (_rt, fake, door) = fixture("head-101");
+    let head = say_reply(&many_headers(100, "v"), QUEUED);
+    fake.reply_raw("/api/say", &[(Duration::ZERO, head.as_bytes())], true);
+    assert!(matches!(door.say("hi", Mode::Send), Err(DoorError::Malformed(_))));
+}
+
+#[test]
+fn a_head_over_64_kib_is_malformed_even_within_100_lines() {
+    let (_rt, fake, door) = fixture("head-bytes");
+    let head = say_reply(&many_headers(40, &"v".repeat(2000)), QUEUED);
+    fake.reply_raw("/api/say", &[(Duration::ZERO, head.as_bytes())], true);
+    assert!(matches!(door.say("hi", Mode::Send), Err(DoorError::Malformed(_))));
+}
+
+#[test]
+fn an_error_status_whose_body_is_cut_short_keeps_its_status() {
+    let (_rt, fake, door) = fixture("413-cut");
+    let head = "HTTP/1.1 413 Payload Too Large\r\nContent-Length: 100\r\n\r\n{\"error\"";
+    fake.reply_raw("/api/say", &[(Duration::ZERO, head.as_bytes())], true);
+    assert!(matches!(door.say("hi", Mode::Send), Err(DoorError::TooLarge)));
+}
+
+#[test]
+fn trailers_past_the_cap_are_malformed() {
+    let (_rt, fake, door) = fixture("trailers");
+    let head = format!(
+        "HTTP/1.1 202 Accepted\r\nTransfer-Encoding: chunked\r\n\r\n{:x}\r\n{QUEUED}\r\n0\r\n{}\r\n",
+        QUEUED.len(),
+        many_headers(101, "t"),
+    );
+    fake.reply_raw("/api/say", &[(Duration::ZERO, head.as_bytes())], true);
+    assert!(matches!(door.say("hi", Mode::Send), Err(DoorError::Malformed(_))));
+}
+
+#[test]
+fn a_chunk_size_that_overflows_is_malformed() {
+    let (_rt, fake, door) = fixture("chunk-overflow");
+    let head = "HTTP/1.1 202 Accepted\r\nTransfer-Encoding: chunked\r\n\r\nFFFFFFFFFFFFFFFFF\r\n{}\r\n0\r\n\r\n";
+    fake.reply_raw("/api/say", &[(Duration::ZERO, head.as_bytes())], true);
+    assert!(matches!(door.say("hi", Mode::Send), Err(DoorError::Malformed(_))));
+}
+
+#[test]
+fn a_chunked_body_cut_inside_a_chunk_is_malformed() {
+    let (_rt, fake, door) = fixture("chunk-cut");
+    let head = "HTTP/1.1 202 Accepted\r\nTransfer-Encoding: chunked\r\n\r\n14\r\n{\"queued\"";
+    fake.reply_raw("/api/say", &[(Duration::ZERO, head.as_bytes())], true);
+    assert!(matches!(door.say("hi", Mode::Send), Err(DoorError::Malformed(_))));
+}
+
+#[test]
+fn a_body_shorter_than_its_content_length_is_malformed() {
+    let (_rt, fake, door) = fixture("short-body");
+    let head = format!("HTTP/1.1 202 Accepted\r\nContent-Length: {}\r\n\r\n{QUEUED}", QUEUED.len() + 5);
+    fake.reply_raw("/api/say", &[(Duration::ZERO, head.as_bytes())], true);
+    assert!(matches!(door.say("hi", Mode::Send), Err(DoorError::Malformed(_))));
+}
+
+#[test]
+fn a_huge_content_length_is_refused_before_its_body_is_read() {
+    let (_rt, fake, door) = fixture("huge-length");
+    let head = "HTTP/1.1 202 Accepted\r\nContent-Length: 1000000000000\r\n\r\n";
+    fake.reply_raw("/api/say", &[(Duration::ZERO, head.as_bytes())], false);
+    let started = Instant::now();
+    assert!(matches!(door.say("hi", Mode::Send), Err(DoorError::Malformed(_))));
+    assert!(started.elapsed() < Duration::from_secs(2), "refused, not read to the deadline");
+}
+
+#[test]
+fn a_413_sent_at_once_before_the_body_is_read_is_too_large() {
+    let (_rt, fake, door) = fixture("413-at-once");
+    fake.refuse_at_once("/api/say", 413, r#"{"error":"a body over 8388608 bytes is not read"}"#);
+    let big = "x".repeat(32 << 20);
+    match door.say(&big, Mode::Send) {
+        Err(DoorError::TooLarge) => {}
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
+fn the_events_head_has_a_deadline() {
+    let (_rt, fake, door) = fixture("events-head");
+    let door = door.with_timeout(Duration::from_millis(300));
+    let head = b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n";
+    fake.reply_raw("/api/events", &[(Duration::ZERO, head.as_slice())], false);
+    let started = Instant::now();
+    assert!(door.events().is_err(), "a head that never completes is refused");
+    assert!(started.elapsed() < Duration::from_secs(2), "refused at the deadline");
+}
+
+#[test]
+fn the_events_body_has_no_deadline_once_its_head_is_read() {
+    let (_rt, fake, door) = fixture("events-body");
+    let door = door.with_timeout(Duration::from_millis(300));
+    let hello = format!("data: {HELLO}\n\n");
+    let head = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nTransfer-Encoding: chunked\r\n\r\n";
+    let first = format!("{:x}\r\n{hello}\r\n", hello.len());
+    let pieces: [(Duration, &[u8]); 3] = [
+        (Duration::ZERO, head.as_bytes()),
+        (Duration::ZERO, first.as_bytes()),
+        (Duration::from_millis(900), b"0\r\n\r\n"),
+    ];
+    fake.reply_raw("/api/events", &pieces, true);
+    let mut events = door.events().unwrap();
+    assert!(matches!(events.next(), Some(Ok(Frame::Hello { .. }))));
+    assert!(events.next().is_none(), "idle for three deadlines, then a clean end");
+}
+
+#[test]
+fn a_reply_has_one_deadline_across_its_head_and_body() {
+    let (_rt, fake, door) = fixture("total");
+    let door = door.with_timeout(Duration::from_millis(500));
+    let head = "HTTP/1.1 202 Accepted\r\nContent-Length: 100\r\n\r\n";
+    let mut pieces: Vec<(Duration, &[u8])> = vec![(Duration::ZERO, head.as_bytes())];
+    pieces.extend((0..10).map(|_| (Duration::from_millis(150), b"x".as_slice())));
+    fake.reply_raw("/api/say", &pieces, false);
+    let started = Instant::now();
+    assert!(matches!(door.say("hi", Mode::Send), Err(DoorError::Io(_))));
+    assert!(started.elapsed() < Duration::from_millis(1200), "one total deadline, not one per read");
+}
+
+#[test]
+fn a_first_frame_that_is_not_hello_is_malformed_and_ends_the_stream() {
+    let (_rt, fake, door) = fixture("first-not-hello");
+    fake.set_head(&[r#"{"type":"text-delta","text":"hi"}"#]);
+    let mut events = door.events().unwrap();
+    assert!(matches!(events.next(), Some(Err(DoorError::Malformed(_)))));
+    assert!(events.next().is_none(), "the stream ends behind it");
+}
+
+#[test]
+fn a_second_hello_is_malformed_and_ends_the_stream() {
+    let (_rt, fake, door) = fixture("second-hello");
+    fake.set_head(&[HELLO, HELLO]);
+    let mut events = door.events().unwrap();
+    assert!(matches!(events.next(), Some(Ok(Frame::Hello { .. }))));
+    assert!(matches!(events.next(), Some(Err(DoorError::Malformed(_)))));
+    assert!(events.next().is_none(), "the stream ends behind it");
+}
+
+#[test]
+fn a_protocol_that_is_not_a_number_is_a_protocol_error() {
+    let (_rt, fake, door) = fixture("protocol-string");
+    let hello = r#"{"type":"hello","session":"s","cwd":"/","model":"m","yolo":false,"pending":0,"protocol":"1"}"#;
+    fake.set_head(&[hello]);
+    let mut events = door.events().unwrap();
+    assert!(matches!(events.next(), Some(Err(DoorError::Protocol { .. }))));
+}
+
+#[test]
+fn a_protocol_beyond_u32_is_a_protocol_error() {
+    let (_rt, fake, door) = fixture("protocol-big");
+    let hello = r#"{"type":"hello","session":"s","cwd":"/","model":"m","yolo":false,"pending":0,"protocol":4294967297}"#;
+    fake.set_head(&[hello]);
+    let mut events = door.events().unwrap();
+    assert!(matches!(events.next(), Some(Err(DoorError::Protocol { .. }))));
+}
+
+#[test]
+fn a_frame_nested_10000_deep_is_malformed_and_does_not_overflow_the_stack() {
+    let (_rt, fake, door) = fixture("deep");
+    let mut events = door.events().unwrap();
+    assert!(matches!(events.next(), Some(Ok(Frame::Hello { .. }))));
+    assert_eq!(events.next().unwrap().unwrap(), Frame::CaughtUp);
+    fake.push(&format!("{}{}", "[".repeat(10_000), "]".repeat(10_000)));
+    assert!(matches!(events.next(), Some(Err(DoorError::Malformed(_)))));
+}
+
+#[test]
+fn a_frame_that_is_not_utf8_is_malformed() {
+    let (_rt, fake, door) = fixture("utf8");
+    let mut events = door.events().unwrap();
+    assert!(matches!(events.next(), Some(Ok(Frame::Hello { .. }))));
+    assert_eq!(events.next().unwrap().unwrap(), Frame::CaughtUp);
+    fake.push_bytes(b"{\"type\":\"text-delta\",\"text\":\"\xff\"}");
+    assert!(matches!(events.next(), Some(Err(DoorError::Malformed(_)))));
+}
+
+#[test]
+fn an_events_body_shorter_than_its_content_length_ends_in_malformed() {
+    let (_rt, fake, door) = fixture("events-short");
+    let hello = format!("data: {HELLO}\n\n");
+    let head = format!(
+        "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\n\r\n",
+        hello.len() + 40
+    );
+    let pieces: [(Duration, &[u8]); 2] = [(Duration::ZERO, head.as_bytes()), (Duration::ZERO, hello.as_bytes())];
+    fake.reply_raw("/api/events", &pieces, true);
+    let mut events = door.events().unwrap();
+    assert!(matches!(events.next(), Some(Ok(Frame::Hello { .. }))));
+    assert!(matches!(events.next(), Some(Err(DoorError::Malformed(_)))));
 }

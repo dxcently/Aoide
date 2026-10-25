@@ -3,6 +3,8 @@ use std::io;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 
+use serde_json::Value;
+
 use crate::PROTOCOL;
 
 /// Every way a door call can fail. The answers a route expects (see
@@ -15,12 +17,17 @@ pub enum DoorError {
     RuntimeUnset,
     /// A6 refused the runtime dir, the `eidolon` dir or the token file.
     Refused { path: PathBuf, why: String },
+    /// The listener check refused the socket that answers on `addr`: its owner
+    /// is `uid`, not this user, or no row for this connection is listed (`uid`
+    /// is `None`). Nothing was sent.
+    Unowned { addr: SocketAddr, uid: Option<u32> },
     Connect { addr: SocketAddr, source: io::Error },
     Io(io::Error),
-    /// A reply or frame that does not decode.
+    /// A reply or frame that does not decode, or whose framing breaks.
     Malformed(String),
-    /// A `hello` whose protocol is not [`PROTOCOL`]; the stream ends behind it.
-    Protocol { got: u64 },
+    /// A `hello` whose `protocol` is not [`PROTOCOL`], as the door sent it; the
+    /// stream ends behind it.
+    Protocol { got: Value },
     /// 401: the token presented is not the door's.
     Unauthorized,
     /// 403: the `Host` header is not the bound address.
@@ -41,6 +48,13 @@ impl fmt::Display for DoorError {
                 f.write_str("XDG_RUNTIME_DIR is not set; the door token has no other place to live")
             }
             DoorError::Refused { path, why } => write!(f, "refused {}: {why}", path.display()),
+            DoorError::Unowned { addr, uid: Some(uid) } => {
+                write!(f, "refusing {addr}: its listener runs as uid {uid}, not this user; nothing was sent")
+            }
+            DoorError::Unowned { addr, uid: None } => write!(
+                f,
+                "refusing {addr}: the kernel lists no socket for this connection; nothing was sent"
+            ),
             DoorError::Connect { addr, source } => write!(f, "cannot connect to {addr}: {source}"),
             DoorError::Io(e) => write!(f, "door i/o: {e}"),
             DoorError::Malformed(what) => write!(f, "malformed door data: {what}"),

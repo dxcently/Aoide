@@ -111,7 +111,7 @@ const KNOWN: &[&str] = &[
 #[derive(Deserialize)]
 #[serde(tag = "type", rename_all = "kebab-case")]
 enum Known {
-    Hello { session: String, cwd: String, model: String, yolo: bool, pending: u64, protocol: u32 },
+    Hello { session: String, cwd: String, model: String, yolo: bool, pending: u64, protocol: Value },
     CaughtUp {},
     TurnState { running: bool },
     Ask(Ask),
@@ -130,8 +130,9 @@ enum Known {
     Error { text: String },
 }
 
-/// Decodes one frame's JSON. A `hello` whose protocol is not [`PROTOCOL`] is
-/// [`DoorError::Protocol`]; unknown fields on a known frame are ignored.
+/// Decodes one frame's JSON. A `hello` whose protocol is not the number
+/// [`PROTOCOL`] is [`DoorError::Protocol`], holding the value as sent (read as
+/// JSON, so a non-number is one too). Unknown fields on a known frame are ignored.
 pub(crate) fn decode(bytes: &[u8]) -> Result<Frame, DoorError> {
     let json: Value = serde_json::from_slice(bytes).map_err(|e| DoorError::Malformed(e.to_string()))?;
     let kind = json.get("type").and_then(Value::as_str).unwrap_or_default().to_string();
@@ -141,10 +142,10 @@ pub(crate) fn decode(bytes: &[u8]) -> Result<Frame, DoorError> {
     let known: Known = serde_json::from_value(json).map_err(|e| DoorError::Malformed(format!("{kind}: {e}")))?;
     Ok(match known {
         Known::Hello { session, cwd, model, yolo, pending, protocol } => {
-            if protocol != PROTOCOL {
-                return Err(DoorError::Protocol { got: u64::from(protocol) });
+            if protocol.as_u64() != Some(u64::from(PROTOCOL)) {
+                return Err(DoorError::Protocol { got: protocol });
             }
-            Frame::Hello { session, cwd, model, yolo, pending, protocol }
+            Frame::Hello { session, cwd, model, yolo, pending, protocol: PROTOCOL }
         }
         Known::CaughtUp {} => Frame::CaughtUp,
         Known::TurnState { running } => Frame::TurnState { running },
@@ -382,7 +383,19 @@ mod tests {
     fn a_protocol_2_hello_is_refused() {
         let err = decode(br#"{"type":"hello","session":"s","cwd":"/","model":"m","yolo":false,"pending":0,"protocol":2}"#)
             .unwrap_err();
-        assert!(matches!(err, DoorError::Protocol { got: 2 }), "{err}");
+        assert!(matches!(&err, DoorError::Protocol { got } if *got == json!(2)), "{err}");
+    }
+
+    #[test]
+    fn a_protocol_that_is_not_the_number_1_is_refused_as_sent() {
+        for sent in [r#""1""#, "4294967297", "1.0"] {
+            let text = format!(
+                r#"{{"type":"hello","session":"s","cwd":"/","model":"m","yolo":false,"pending":0,"protocol":{sent}}}"#
+            );
+            let err = decode(text.as_bytes()).unwrap_err();
+            let want: serde_json::Value = serde_json::from_str(sent).unwrap();
+            assert!(matches!(&err, DoorError::Protocol { got } if *got == want), "{sent}: {err}");
+        }
     }
 
     #[test]

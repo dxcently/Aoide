@@ -3,7 +3,9 @@
 //!
 //! Blocking HTTP/1.1 over `std::net::TcpStream`: no async runtime, no HTTP
 //! library, no GUI crate. The token is read from its file on every request,
-//! under A6's checks (`token`), and is never printed or logged.
+//! under A6's checks (`token`). The socket that answers is checked to belong to
+//! this user (`listener`) before a byte is written. The token is never printed
+//! or logged.
 #![deny(unsafe_code)]
 
 mod client;
@@ -13,6 +15,7 @@ mod events;
 pub mod fake;
 mod frame;
 mod http;
+mod listener;
 mod token;
 
 pub use client::{AnswerOutcome, CancelOutcome, Door, Mode, SayOutcome};
