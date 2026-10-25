@@ -39,13 +39,13 @@
 //! doc for exactly how.
 //!
 //! `std`'s own `UnixStream::peer_cred` accessor is unstable
-//! (`unix_socket_peek`/`peer_credentials`-adjacent nightly-only APIs), so
-//! the Unix arm reads `SO_PEERCRED` directly via `libc` — already this
-//! crate's dependency (`client::connect_bounded`'s own module doc), zero
-//! new deps, matching this crate's house rule. The Windows arm reads the
-//! peer's pid with `SIO_AF_UNIX_GETPEERPID` (`aoide_protocol::win_unix`) and
-//! turns it into a token user through `aoide_protocol::win_proc`, which
-//! closes the pid-reuse window around that read.
+//! (`unix_socket_peek`/`peer_credentials`-adjacent nightly-only APIs), so the
+//! Unix arm reads `SO_PEERCRED` directly via `libc` — already this crate's
+//! dependency, zero new deps, matching this crate's house rule. The Windows arm
+//! reads the peer's pid with `SIO_AF_UNIX_GETPEERPID`
+//! (`aoide_protocol::win_unix`) and turns it into a token user through
+//! `aoide_protocol::win_proc`, which closes the pid-reuse window around that
+//! read.
 //!
 //! **`SO_PEERCRED` is a Linux/Android capability, not a POSIX one.** POSIX.1
 //! defines no peer-credential API, and BSD `getpeereid(3)` carries no pid —

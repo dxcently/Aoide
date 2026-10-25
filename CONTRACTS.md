@@ -6718,43 +6718,42 @@ successful empty inventory or a local-file fallback. This is the CLI-only
 operator read surface, with the same socket access boundary as `pending`;
 it changes no grant, custody, or secret availability state.
 
-Promoted out of "living in the crate only" (the promotion criterion this
-section states below) because P-V4c makes it explicit: the unix-socket
-JSON-lines wire is a FIRST-CLASS API, not merely `secrets exec`'s private
-implementation detail. A service (verba voluntia, an aoide-side Melete
-model) is meant to speak this wire DIRECTLY — connect the socket, write a
-request line, read a reply line — with no LLM and no `aoide` binary in the
-loop at all; `secrets exec`/`secrets put` are convenience wrappers over the
-same two ops for a human or an agent at a terminal, not the only door onto
-them. The canonical implementation (and the one place a wire CHANGE lands
-first) is still `crates/secrets/src/broker.rs`'s module doc — this section
-restates it for a consumer who never reads this repo's Rust. **The A2A door
-and its client are the first real machine consumers of this wire**
-(`aoide_secrets::client::resolve_bounded`, exported from this crate as a
-library function rather than copied into either caller, per the cross-crate
-"no copying" discipline `pkgs/aoide/crates/AGENTS.md` holds): the door
-resolves its own inbound `Authorization: Bearer` expectation as consumer
-`a2a-door` (§6's security posture), and its outbound node client resolves a
-per-node bearer to present as consumer `a2a-client` (§7's `Node.bearerSecret`)
-— both self-asserted, both subject to the "consumer is self-asserted" honesty
-note below, both using `resolve_bounded`'s bounded, `wait:false` shape so
-neither can be wedged parked on a misconfigured `requireTotp` secret the way
-a human at a terminal might tolerate. **The CONNECT itself is bounded too
-(rider task, alongside #75/#81/#82)** — every client-side op in
-`aoide_secrets::client` (`resolve`/`resolve_bounded`/`put`/`pending`/
-`approve`/`dismiss`) connects through a hand-rolled 5-second overall bound
-(`client::connect_bounded`, over `libc`, since `std`'s `UnixStream` has no
-`connect_timeout`), not only the reads `resolve_bounded`'s own
-`set_read_timeout` already bounded — a machine consumer hitting a broker
-with a saturated accept backlog (plausible when many callers legitimately
-hold a parked connection for up to `park::park_timeout()`, default 300s)
-now fails fast instead of hanging on the connect syscall itself. The
-mechanism is a BOUNDED RETRY of the `connect(2)` syscall on `EAGAIN` (what
-Linux actually returns for a saturated `AF_UNIX` backlog — immediately,
-never `EINPROGRESS`, so there is no fd event to wait on), plus `poll()` on
-`EINPROGRESS` (a genuine half-open connection) — not a single poll loop;
-an earlier version of this function handled only the `EINPROGRESS` case
-and made the saturated-backlog scenario worse, caught and fixed on review.
+Promoted out of "living in the crate only" (the promotion criterion this section
+states below) because P-V4c makes it explicit: the unix-socket JSON-lines wire
+is a FIRST-CLASS API, not merely `secrets exec`'s private implementation detail.
+A service (verba voluntia, an aoide-side Melete model) is meant to speak this
+wire DIRECTLY — connect the socket, write a request line, read a reply line —
+with no LLM and no `aoide` binary in the loop at all; `secrets exec`/`secrets
+put` are convenience wrappers over the same two ops for a human or an agent at a
+terminal, not the only door onto them. The canonical implementation (and the one
+place a wire CHANGE lands first) is still `crates/secrets/src/broker.rs`'s
+module doc — this section restates it for a consumer who never reads this repo's
+Rust. **The A2A door and its client are the first real machine consumers of this
+wire** (`aoide_secrets::client::resolve_bounded`, exported from this crate as a
+library function rather than copied into either caller, per the cross-crate "no
+copying" discipline `pkgs/aoide/crates/AGENTS.md` holds): the door resolves its
+own inbound `Authorization: Bearer` expectation as consumer `a2a-door` (§6's
+security posture), and its outbound node client resolves a per-node bearer to
+present as consumer `a2a-client` (§7's `Node.bearerSecret`) — both
+self-asserted, both subject to the "consumer is self-asserted" honesty note
+below, both using `resolve_bounded`'s bounded, `wait:false` shape so neither can
+be wedged parked on a misconfigured `requireTotp` secret the way a human at a
+terminal might tolerate. **The CONNECT itself is bounded too (rider task,
+alongside #75/#81/#82)** — every client-side op in `aoide_secrets::client`
+(`resolve`/`resolve_bounded`/`put`/`pending`/ `approve`/`dismiss`) connects
+through a hand-rolled 5-second overall bound
+(`aoide_protocol::local_socket::connect_bounded`, over `libc`, since `std`'s
+`UnixStream` has no `connect_timeout`), not only the reads `resolve_bounded`'s
+own `set_read_timeout` already bounded — a machine consumer hitting a broker
+with a saturated accept backlog (plausible when many callers legitimately hold a
+parked connection for up to `park::park_timeout()`, default 300s) now fails fast
+instead of hanging on the connect syscall itself. The mechanism is a BOUNDED
+RETRY of the `connect(2)` syscall on `EAGAIN` (what Linux actually returns for a
+saturated `AF_UNIX` backlog — immediately, never `EINPROGRESS`, so there is no
+fd event to wait on), plus `poll()` on `EINPROGRESS` (a genuine half-open
+connection) — not a single poll loop; an earlier version of this function
+handled only the `EINPROGRESS` case and made the saturated-backlog scenario
+worse, caught and fixed on review.
 
 **Transport**: connect `$AOIDE_SECRETS_SOCKET` (else the canonical deployed
 path `/run/aoide-secrets/secrets.sock`, P-V4d — corrected from an earlier

@@ -52,21 +52,20 @@ never the inbound/serve half (that's `aoide-server`).
   (`socket_path()` resolves `$AOIDE_DAEMON_SOCKET` →
   `$XDG_RUNTIME_DIR/aoide/aoided.sock`, the identical convention
   `aoide_server::daemon::socket_path` resolves — this crate sits BELOW
-  `aoide-server` in the DAG, so it is never imported from there; as of
-  LANE IDENTITY P-ID4 the derivation's body, the bounded connect
-  (`connect_bounded`, a background-thread-plus-channel race, ~100ms), and
-  the `daemon_seal_pubkey_hex` ping fetch all live in
-  `aoide_storage::attest`, with this module's public seams delegating —
-  the secrets broker's origin gate needs the same fetch and cannot depend
-  on this crate). `None` means "nothing usable answered" — the caller's own
-  pre-existing direct stage-write path runs unchanged; any OTHER failure
-  once a connection exists becomes `Some(Outcome::error(...))` instead of a
-  silent fallback, since a daemon that answered but broke is a real bug
-  worth surfacing. Only `Door::Cli` hops: every other door short-circuits
-  to `None` with no connect, because the wire carries no door and the
-  daemon runs each dispatch as `Door::Daemon` (MCP and A2A would arrive
-  holding the daemon's approvals). `Door::Daemon` is the reentrancy case: a
-  handler already running INSIDE the daemon never connects to itself.
+  `aoide-server` in the DAG, so it is never imported from there; as of LANE
+  IDENTITY P-ID4 the derivation's body and the `daemon_seal_pubkey_hex` ping
+  fetch live in `aoide_storage::attest`, the bounded connect (`connect_bounded`,
+  protocol's bounded unix connect, ~100ms) is protocol's, and this module's
+  public seams delegate — the secrets broker's origin gate needs the same fetch
+  and cannot depend on this crate). `None` means "nothing usable answered" — the
+  caller's own pre-existing direct stage-write path runs unchanged; any OTHER
+  failure once a connection exists becomes `Some(Outcome::error(...))` instead
+  of a silent fallback, since a daemon that answered but broke is a real bug
+  worth surfacing. Only `Door::Cli` hops: every other door short-circuits to
+  `None` with no connect, because the wire carries no door and the daemon runs
+  each dispatch as `Door::Daemon` (MCP and A2A would arrive holding the daemon's
+  approvals). `Door::Daemon` is the reentrancy case: a handler already running
+  INSIDE the daemon never connects to itself.
 - `wire` — client-side A2A JSON-RPC message builders
   (`build_message_send_body` and `resolve_card_url`).
 - `adapter` — the melete neutral-event adapter (consumes events, stays

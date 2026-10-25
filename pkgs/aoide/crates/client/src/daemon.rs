@@ -15,24 +15,6 @@
 //! than imported" call `aoide_server::daemon::socket_path`'s own module doc
 //! already makes for `aoide_conduct::graph::conduct_socket_path`.
 //!
-//! ## Why the connect isn't `aoide_secrets::client::connect_bounded`
-//!
-//! That function is the documented PRECEDENT for bounding a Unix-socket
-//! connect (`aoide-secrets/AGENTS.md`'s "every `client.rs` socket op bounds
-//! its connect" invariant) — checked first, per this phase's own brief —
-//! but it is private to `secrets::client` (not even `pub(crate)`), built
-//! for a socket whose accept backlog can legitimately saturate under
-//! long-parked TOTP asks holding connections open for minutes at a time.
-//! The daemon socket carries no such long-lived-connection producer (every
-//! `dispatch` round trip is a single request/reply, `subscribe`'s own
-//! long-lived connections aside), so [`connect_bounded`] below bounds the
-//! connect with a plain background-thread-plus-channel race instead of
-//! hand-rolling the `EINPROGRESS`/`EAGAIN` `libc` dance that function's own
-//! doc explains at length — the SAME bounded-connect INTENT, a simpler
-//! mechanism sized to this door's actual concurrency profile, no new crate
-//! dependency (no `libc`, no `unsafe`), and no edge into `aoide-secrets`'
-//! own module a generic utility doesn't belong inside.
-//!
 //! ## The contract
 //!
 //! [`daemon_dispatch`] returns `None` exactly when the hop is not taken (a
@@ -83,16 +65,10 @@ pub fn socket_path() -> PathBuf {
     aoide_storage::attest::daemon_socket_path()
 }
 
-/// Bounded replacement for `UnixStream::connect` (module doc's "Why the
-/// connect isn't..."): races the real (blocking) connect on a detached
-/// thread against `timeout`. A connect that resolves AFTER the caller has
-/// already given up just drops its result into a channel nobody reads —
-/// the thread itself still exits the moment the OS call returns, it is
-/// never left blocked forever.
+/// Bounded connect for the daemon socket: storage's
+/// [`aoide_storage::attest::connect_bounded`], which is protocol's bounded
+/// unix connect. `None` when the connect fails or `timeout` passes first.
 fn connect_bounded(socket_path: &std::path::Path, timeout: Duration) -> Option<UnixStream> {
-    // The thread-plus-channel race the module doc describes — its BODY
-    // moved to `aoide_storage::attest::connect_bounded` at LANE IDENTITY
-    // P-ID4 alongside the seal-pubkey fetch it bounds there.
     aoide_storage::attest::connect_bounded(socket_path, timeout)
 }
 
