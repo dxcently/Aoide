@@ -161,14 +161,20 @@
 //! [`dry_run_listing`], bare mode through [`dry_run_manifest`]. Each row's
 //! verdict comes from the helper its launch uses (`enrichment`, `clean_argv`,
 //! `summon_check`, `unresumed_reason`), so the listing and the launch agree.
-//! A bare dry run from an unattested caller on a door that cannot approve gets
-//! the launch's refusal, not a listing. Nothing is held, spawned or sent on any
-//! door. A dry run writes three things and no others: the audit line (status
-//! `dry-run`); the one-time `carry.json` rename an undying read performs
+//! From an unattested caller on a door that cannot approve, a dry run is
+//! refused in both modes: bare with the launch's refusal, flag with
+//! `dry-run-not-held`, since the flag-mode launch holds and shows that caller
+//! nothing. Nothing is held, spawned or sent on any door. The handler writes
+//! three things and no others: the audit line (status `dry-run`); the one-time
+//! `carry.json` rename an undying read performs
 //! (`aoide_storage::undying::load_undying`), on a host that still holds the
 //! legacy file; and the one-time conducting-stage migration a stage read
 //! performs (`aoide_storage::fs::conducting_stage_dir`), on a host that still
-//! holds the legacy stage files.
+//! holds the legacy stage files. The one write outside the handler is the
+//! start-up migration both core binaries run
+//! (`aoide_storage::fs::migrate_root_once`): it moves the legacy `~/Aoide`
+//! state and log into `$AOIDE_ROOT`, renames old peer state files and locks
+//! `state/` owner-only.
 
 use super::common::{is_unsafe, require_flag, stage_error};
 use super::conduct::{program_is_a_shell, program_is_an_interactive_shell, runs_a_privilege_program};
@@ -772,7 +778,8 @@ fn caller_is_attested(
 /// every other caller has the whole command held in `pending.json` for a human
 /// to approve, with nothing launched. `--dry-run` lists the same selection
 /// instead, and launches, holds and sends nothing ([`dry_run_listing`],
-/// [`dry_run_manifest`]); a bare one is refused wherever the bare call is.
+/// [`dry_run_manifest`]). From a caller that cannot approve, a dry run is
+/// refused in both modes instead.
 pub fn session_resurrect(inv: &Invocation) -> Outcome {
     session_resurrect_with(inv, real_attested_sender)
 }
@@ -781,11 +788,11 @@ pub fn session_resurrect(inv: &Invocation) -> Outcome {
 /// door's decision is testable without a live daemon.
 ///
 /// An unattested caller on a door that cannot approve gets `--project …` held
-/// whole, and its dry run lists instead, since a dry run holds nothing. Bare
-/// mode is refused there instead of held, dry or not: it reads the working
-/// directory's manifest and launches the manifest's own commands, which an
-/// approver replaying from another directory would neither see in the held
-/// line nor find in the same place.
+/// whole, and its dry run is refused instead: a dry run shows no more than the
+/// call gives that caller, which is nothing. Bare mode is refused there instead
+/// of held, dry or not: it reads the working directory's manifest and launches
+/// the manifest's own commands, which an approver replaying from another
+/// directory would neither see in the held line nor find in the same place.
 fn session_resurrect_with(
     inv: &Invocation,
     resolve_caller: impl Fn(&[super::model::SessionRecord]) -> Option<String>,
@@ -807,8 +814,21 @@ fn session_resurrect_with(
             audit_resurrect(inv, "refused", &out.message);
             return out;
         }
-        // A dry run holds nothing: it lists below instead.
-        if let Some(project) = inv.flags.get("project").filter(|_| !dry) {
+        if dry {
+            let out = Outcome::refuse(
+                cmd,
+                Kind::Refused,
+                "resurrect dry run not shown: this door cannot approve, and the call \
+                 would wait for a person",
+                "a dry run shows what its caller gets without an approval, and from this \
+                 door the call holds and shows that caller nothing",
+                Fix::Run("aoide resurrect --project <name>".to_string()),
+            )
+            .with_fields(json!({ "reason": "dry-run-not-held" }));
+            audit_resurrect(inv, "refused", &out.message);
+            return out;
+        }
+        if let Some(project) = inv.flags.get("project") {
             let held = PendingSpawn {
                 path: vec![cmd.to_string()],
                 args: inv.args.clone(),
@@ -3395,13 +3415,32 @@ mod tests {
         marker
     }
 
+    /// The time a real call is given to launch. `wait_for` waits it out for a
+    /// positive control, and `no_marker_within_the_launch_wait` watches it for
+    /// a dry run.
+    #[cfg(unix)]
+    const LAUNCH_WAIT: std::time::Duration = std::time::Duration::from_millis(5000);
+
     #[cfg(unix)]
     fn wait_for(path: &std::path::Path) -> bool {
-        let deadline = std::time::Instant::now() + std::time::Duration::from_millis(5000);
+        let deadline = std::time::Instant::now() + LAUNCH_WAIT;
         while std::time::Instant::now() < deadline && !path.exists() {
             std::thread::sleep(std::time::Duration::from_millis(50));
         }
         path.exists()
+    }
+
+    /// The negative side of `wait_for`: no terminal may open within
+    /// `LAUNCH_WAIT`. It fails the moment the marker appears, so a launch in
+    /// that time is what it catches.
+    #[cfg(unix)]
+    fn no_marker_within_the_launch_wait(marker: &std::path::Path) {
+        let deadline = std::time::Instant::now() + LAUNCH_WAIT;
+        while std::time::Instant::now() < deadline {
+            assert!(!marker.exists(), "a dry run opened a terminal");
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        assert!(!marker.exists(), "a dry run opened a terminal");
     }
 
     #[cfg(unix)]
@@ -3928,14 +3967,13 @@ mod tests {
             let out = session_resurrect(&flag_invocation(&["resurrect"], &flags));
             assert_eq!(out.status, aoide_protocol::output::Status::Ok, "{flags:?}: {}", out.message);
         }
-        std::thread::sleep(std::time::Duration::from_millis(600));
-        assert!(!marker.exists(), "a dry run opened a terminal");
+        no_marker_within_the_launch_wait(&marker);
         assert!(held_entries().is_empty(), "a dry run queued a hold: {:?}", held_entries());
         assert_eq!(snapshot(&root), before, "a dry run wrote state");
         assert_eq!(resurrect_audit_statuses(&root.join("log")), vec!["dry-run".to_string(); 3]);
 
-        // The positive control: the same fixture's real call launches, so the
-        // window above would have caught a launch.
+        // The positive control: the same fixture's real call launches within
+        // `LAUNCH_WAIT`, so the check above would have caught such a launch.
         let launched = session_resurrect(&flag_invocation(&["resurrect"], &[("project", "proj"), ("id", "p")]));
         assert_eq!(launched.status, aoide_protocol::output::Status::Ok, "msg: {}", launched.message);
         assert!(wait_for(&marker), "the real call launched on this fixture");
@@ -3945,8 +3983,9 @@ mod tests {
 
     /// `resurrect` opens only to the CLI and daemon doors, so a door that
     /// cannot approve is reached only here, by calling the handler directly.
-    /// The real call holds the whole command; the dry run holds nothing and
-    /// launches nothing, whoever the caller is.
+    /// The real call holds the whole command; a dry run of any flag form is
+    /// refused instead, holding nothing, launching nothing and showing the
+    /// caller no ledger field.
     #[cfg(unix)]
     #[test]
     fn dry_run_on_a_door_that_cannot_approve_holds_nothing_and_launches_nothing() {
@@ -3960,15 +3999,28 @@ mod tests {
         let mut undying = Vec::new();
         aoide_storage::undying::set_undying(&mut undying, "u", true);
         aoide_storage::undying::save_undying(&undying).unwrap();
+        let before = snapshot(&root);
 
-        let mut dry = flag_invocation(&["resurrect"], &[("project", "proj"), ("dry-run", "true")]);
-        dry.door = Door::Mcp;
-        let out = session_resurrect_with(&dry, |_| None::<String>);
-        assert_eq!(out.status, aoide_protocol::output::Status::Ok, "msg: {}", out.message);
-        assert_eq!(session_ids(&candidates(&out)), vec!["u"]);
+        for flags in [
+            vec![("project", "proj"), ("dry-run", "true")],
+            vec![("project", "proj"), ("all", "true"), ("dry-run", "true")],
+            vec![("project", "proj"), ("id", "u"), ("dry-run", "true")],
+        ] {
+            let mut dry = flag_invocation(&["resurrect"], &flags);
+            dry.door = Door::Mcp;
+            let out = session_resurrect_with(&dry, |_| None::<String>);
+            assert_eq!(out.status, aoide_protocol::output::Status::Error, "{flags:?}: {}", out.message);
+            assert_eq!(out.data.as_ref().unwrap()["reason"], "dry-run-not-held", "{flags:?}");
+            assert_eq!(out.data.as_ref().unwrap()["refusal"]["kind"], serde_json::json!(Kind::Refused), "{flags:?}");
+            let shown = serde_json::to_string(&out).unwrap();
+            for key in ["sessionId", "cwd", "restoreText", "agent"] {
+                assert!(!shown.contains(&format!("\"{key}\"")), "{flags:?} shows `{key}`: {shown}");
+            }
+        }
+        assert_eq!(resurrect_audit_statuses(&root.join("log")), vec!["dry-run".to_string(); 3]);
         assert!(held_entries().is_empty(), "a dry run queued a hold: {:?}", held_entries());
-        std::thread::sleep(std::time::Duration::from_millis(600));
-        assert!(!marker.exists(), "a dry run opened a terminal");
+        assert_eq!(snapshot(&root), before, "a dry run wrote state");
+        no_marker_within_the_launch_wait(&marker);
 
         let mut real = flag_invocation(&["resurrect"], &[("project", "proj")]);
         real.door = Door::Mcp;
@@ -3977,7 +4029,8 @@ mod tests {
         assert_eq!(held_entries().len(), 1, "the same call without the flag is the one hold");
 
         // The positive control: the CLI door's real call launches the undying
-        // set on this fixture, so the window above would have caught a launch.
+        // set on this fixture within `LAUNCH_WAIT`, so the check above would
+        // have caught such a launch.
         let launched = session_resurrect(&flag_invocation(&["resurrect"], &[("project", "proj")]));
         assert_eq!(launched.status, aoide_protocol::output::Status::Ok, "msg: {}", launched.message);
         assert!(wait_for(&marker), "the real call launched on this fixture");
@@ -3988,8 +4041,8 @@ mod tests {
     /// The bare form is refused from an unattested caller on a door that cannot
     /// approve, dry or not: a bare dry run gets the refusal the real call gets,
     /// writes one audit line marked `dry-run`, and launches and holds nothing.
-    /// The same fixture's CLI-door call launches, so the window below would
-    /// catch a launch.
+    /// The same fixture's CLI-door call launches within `LAUNCH_WAIT`, so the
+    /// check below would catch such a launch.
     #[cfg(unix)]
     #[test]
     fn a_bare_dry_run_from_an_unattested_door_gets_the_real_refusal_and_launches_nothing() {
@@ -4023,8 +4076,7 @@ mod tests {
         );
         assert!(held_entries().is_empty(), "nothing was held");
 
-        std::thread::sleep(std::time::Duration::from_millis(600));
-        assert!(!marker.exists(), "a dry run opened a terminal");
+        no_marker_within_the_launch_wait(&marker);
 
         let launched = session_resurrect(&flag_invocation(&["resurrect"], &[]));
         assert_eq!(launched.status, aoide_protocol::output::Status::Ok, "msg: {}", launched.message);
@@ -4038,7 +4090,7 @@ mod tests {
     /// whose local pre-wire check passes. A remote spec is never sent: the
     /// node's port takes no connection and nothing launches. From a door that
     /// cannot approve, a bare dry run is refused instead, as the real call is
-    /// (see `a_bare_dry_run_from_an_unattested_door_gets_the_real_refusal`).
+    /// (`a_bare_dry_run_from_an_unattested_door_gets_the_real_refusal_and_launches_nothing`).
     #[cfg(unix)]
     #[test]
     fn dry_run_bare_mode_lists_the_manifest_specs_and_launches_nothing() {
@@ -4086,12 +4138,12 @@ mod tests {
         assert!(held_entries().is_empty(), "a dry run queued a hold: {:?}", held_entries());
         assert_eq!(resurrect_audit_statuses(&root.join("log")), vec!["dry-run".to_string()], "one audit line");
 
-        std::thread::sleep(std::time::Duration::from_millis(600));
-        assert!(!marker.exists(), "a dry run opened a terminal");
+        no_marker_within_the_launch_wait(&marker);
         assert_eq!(snapshot(&root), before, "a dry run wrote state");
 
-        // The positive control: the same fixture's real call launches, so the
-        // window above would have caught a launch. The node is dropped first:
+        // The positive control: the same fixture's real call launches within
+        // `LAUNCH_WAIT`, so the check above would have caught such a launch.
+        // The node is dropped first:
         // a summon to a listening port that never answers would hang.
         drop(listener);
         let launched = session_resurrect(&flag_invocation(&["resurrect"], &[]));
@@ -4254,6 +4306,87 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    /// An attested MCP caller is not refused, dry or not: its bare dry run
+    /// lists the manifest's specs and its flag-mode dry run lists the ledger
+    /// rows. Neither launches. The ledger row anchors the spec's directory, so
+    /// the bare row is the revival the launch would make.
+    #[cfg(unix)]
+    #[test]
+    fn an_attested_mcp_dry_run_lists_and_launches_nothing() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(RESURRECT_ENV);
+        let this_host = aoide_storage::display::local_host_name();
+        let (root, cwd) = setup_manifest(
+            "resurrect-dry-attested",
+            vec![manifest_spec(&this_host, ".", "claude", Some("echo from-the-manifest"))],
+        );
+        std::env::remove_var("AOIDE_DAEMON_SOCKET");
+        std::env::remove_var("AOIDE_SESSION_ID");
+        let marker = marker_terminal(&root);
+        let root_str = root.to_str().unwrap().to_string();
+        let mut add = invocation(&["project", "add"], &["proj", &root_str]);
+        add.door = Door::Daemon;
+        assert_eq!(crate::graph::project_add(&add).status, aoide_protocol::output::Status::Ok);
+        set_ledger(&[ledger_entry("u", "claude", &root_str, "2026-08-20T01:00:00Z")]);
+
+        let mut bare = flag_invocation(&["resurrect"], &[("dry-run", "true")]);
+        bare.door = Door::Mcp;
+        let listed = session_resurrect_with(&bare, |_| Some("sess".to_string()));
+        assert_eq!(listed.status, aoide_protocol::output::Status::Ok, "msg: {}", listed.message);
+        assert_eq!(candidates(&listed)[0]["disposition"], "revived-from-ledger", "{}", listed.message);
+
+        let mut flag = flag_invocation(&["resurrect"], &[("project", "proj"), ("all", "true"), ("dry-run", "true")]);
+        flag.door = Door::Mcp;
+        let rows = session_resurrect_with(&flag, |_| Some("sess".to_string()));
+        assert_eq!(rows.status, aoide_protocol::output::Status::Ok, "msg: {}", rows.message);
+        assert_eq!(session_ids(&candidates(&rows)), vec!["u"]);
+
+        assert_eq!(resurrect_audit_statuses(&root.join("log")), vec!["dry-run".to_string(); 2]);
+        assert!(held_entries().is_empty(), "a dry run queued a hold: {:?}", held_entries());
+        no_marker_within_the_launch_wait(&marker);
+        drop(cwd);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A manifest root's own directory name is as untrusted as a spec's text.
+    /// A root named with ESC, CR and U+202E shows spelled in the header line of
+    /// a bare dry run's message, and `data.manifestRoot` keeps the raw path.
+    #[cfg(unix)]
+    #[test]
+    fn dry_run_spells_a_hostile_manifest_root_name_and_keeps_its_data_raw() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(RESURRECT_ENV);
+        let this_host = aoide_storage::display::local_host_name();
+        let specs = || vec![manifest_spec(&this_host, ".", "claude", Some("echo from-the-manifest"))];
+        let (root, cwd) = setup_manifest("resurrect-dry-hostile-root", specs());
+        let hostile = root.join("r\u{1b}\r\u{202e}t");
+        std::fs::create_dir_all(&hostile).unwrap();
+        aoide_storage::manifest::save_manifest(
+            &hostile,
+            &aoide_storage::manifest::Manifest { version: aoide_storage::manifest::MANIFEST_VERSION, sessions: specs() },
+        )
+        .unwrap();
+        let hostile_cwd = CwdGuard::enter(&hostile);
+        std::env::remove_var("AOIDE_DAEMON_SOCKET");
+        std::env::remove_var("AOIDE_SESSION_ID");
+
+        let out = session_resurrect(&flag_invocation(&["resurrect"], &[("dry-run", "true")]));
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok, "msg: {}", out.message);
+        let lines: Vec<&str> = out.message.split('\n').collect();
+        assert_eq!(lines.len(), 2, "a header line, then one line per spec: {}", out.message);
+        assert!(lines[0].contains("r\\x1b\\r\\u{202e}t"), "the header spells the root name: {}", lines[0]);
+        assert!(
+            out.message.chars().all(|c| c == '\n' || (' '..='~').contains(&c)),
+            "a raw control or format character in the message: {:?}",
+            out.message
+        );
+        assert_eq!(out.data.as_ref().unwrap()["manifestRoot"], hostile.to_str().unwrap());
+
+        drop(hostile_cwd);
+        drop(cwd);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     /// A dry run writes nothing to `pending.json`: a seeded file is unchanged
     /// byte for byte; the real call on the same door adds exactly one entry.
     #[cfg(unix)]
@@ -4279,7 +4412,7 @@ mod tests {
         let mut dry = flag_invocation(&["resurrect"], &[("project", "proj"), ("dry-run", "true")]);
         dry.door = Door::Mcp;
         let out = session_resurrect_with(&dry, |_| None::<String>);
-        assert_eq!(out.status, aoide_protocol::output::Status::Ok, "msg: {}", out.message);
+        assert_eq!(out.data.as_ref().unwrap()["reason"], "dry-run-not-held", "{}", out.message);
         assert_eq!(std::fs::read(crate::graph::send::pending_path()).unwrap(), before, "a dry run changed pending.json");
 
         let mut real = flag_invocation(&["resurrect"], &[("project", "proj")]);

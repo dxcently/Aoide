@@ -5924,13 +5924,18 @@ not alive now. A flag-mode `message` is the plan `plan_lines` words, one line
 per row; a bare-mode `message` is a header line, `manifest at ...`, then one
 line per spec. Each message line is spelled as the pending view spells a held
 plan line (`visible_held`); `data` stays raw. A dry run is never held or sent,
-on any door. A bare one from an unattested caller on a door that cannot approve
-is refused with the bare call's refusal, and a flag-mode one lists there. Its
-audit line carries status `dry-run`, and so does the audit of a refusal the same
-call would give. Its writes are three, and no others: that audit line; on a host
-that still holds the legacy file, the one-time `carry.json` rename an undying
-read runs; and on such a host, the one-time conducting-stage migration a stage
-read runs.
+on any door. From an unattested caller on a door that cannot approve, it is
+refused in both modes: a bare one with the bare call's refusal, a flag-mode one
+with `dry-run-not-held`, since the flag-mode call would hold and show that
+caller nothing. Its audit line carries status `dry-run`, and so does the audit
+of a refusal the same call would give. The handler writes three things, and no
+others: that audit line; on a host that still holds the legacy file, the
+one-time `carry.json` rename an undying read runs; and, on a host that still
+holds the legacy stage files, the one-time conducting-stage migration a stage
+read runs. The one write outside the handler is the start-up migration both
+core binaries run, `aoide_storage::fs::migrate_root_once`: it moves the legacy
+`~/Aoide` state and log into `$AOIDE_ROOT`, renames old peer state files, and
+locks `state/` owner-only.
 
 **Remote summon (U4, command-defrag lane U).** A spec whose `host` names a
 DIFFERENT box than this one is summoned through the existing node door, not
