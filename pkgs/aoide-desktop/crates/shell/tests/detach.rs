@@ -51,7 +51,10 @@ fn an_exec_failure_is_reported_as_an_error() {
     fs::remove_file(&program).expect("the door is removed after it pins");
     let args = [OsString::from("web")];
     let failed = test_doors::spawn(&exec, &pinned, &args, &dir.join("runtime"), log_file(&dir));
-    assert!(matches!(failed, Err(ExecError::Spawn(_))), "the exec failure comes back as an error");
+    assert!(
+        matches!(&failed, Err(ExecError::Spawn(e)) if e.kind() == std::io::ErrorKind::NotFound),
+        "the unlinked path is a spawn error of kind NotFound: {failed:?}"
+    );
 }
 
 #[test]

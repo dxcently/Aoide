@@ -1360,7 +1360,8 @@ fn a_zombie_record_is_dropped_with_an_event_naming_its_pid() {
 fn a_changed_pin_leaves_a_running_door_its_record_and_its_watch() {
     let world = World::new("pin");
     let eidolon = world.dir.join("pinned-eidolon");
-    fs::copy(FAKE_EIDOLON, &eidolon).unwrap();
+    test_doors::copy_program(Path::new(FAKE_EIDOLON), &eidolon).expect("the copy is made");
+    fs::set_permissions(&eidolon, fs::Permissions::from_mode(0o755)).unwrap();
     let plan = launch_plan(&eidolon, &world.home(), &world.cwd()).expect("the plan is made");
     let runtime = world.runtime();
     let (tx, _rx) = mpsc::sync_channel(EVENTS_BOUND);
@@ -1568,7 +1569,8 @@ fn a_launch_whose_hello_fails_keeps_its_record_unwatched_and_signals_nothing() {
 fn a_reconnect_after_a_changed_pin_keeps_the_door_and_its_record() {
     let world = World::new("reconnect-pin");
     let eidolon = world.dir.join("pinned-eidolon");
-    fs::copy(FAKE_EIDOLON, &eidolon).unwrap();
+    test_doors::copy_program(Path::new(FAKE_EIDOLON), &eidolon).expect("the copy is made");
+    fs::set_permissions(&eidolon, fs::Permissions::from_mode(0o755)).unwrap();
     let plan = launch_plan(&eidolon, &world.home(), &world.cwd()).expect("the plan is made");
     let (tx, rx) = mpsc::sync_channel(EVENTS_BOUND);
     let (mut doors, _) = Doors::open(

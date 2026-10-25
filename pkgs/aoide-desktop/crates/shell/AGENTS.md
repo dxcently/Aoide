@@ -181,6 +181,10 @@ are in README.md.
   ["fakes"]`. Their tests run with `--all-features`.
 - The FIFO and the door helpers the tests use, `make_fifo` and `test_doors`,
   are the exec crate's, and its AGENTS.md says what each is for.
+- A test that runs a program it wrote writes it through a child: exec's tests
+  use `write_program`, and the door tests use `test_doors::copy_program`. A
+  writer this process holds open is inherited by a concurrent test's fork, and
+  that test's exec of the program fails with ETXTBSY.
 - A negative check ends with a sentinel request the fake records, and passes
   only if nothing came before the sentinel. For a request, the test lists what
   came first with `answers_before_sentinel`. For a SIGTERM,

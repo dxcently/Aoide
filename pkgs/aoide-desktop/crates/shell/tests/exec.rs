@@ -215,6 +215,16 @@ fn a_call_past_its_deadline_is_refused_as_a_timeout() {
 }
 
 #[test]
+fn a_later_longer_deadline_does_not_lengthen_an_earlier_one() {
+    let (exec, _record) = load("deadline-chain", &[("FAKE_AOIDE_SLEEP", "30")]);
+    let exec = exec.deadline(Duration::from_millis(300)).deadline(Duration::MAX);
+    let started = Instant::now();
+    let err = exec.call(&["send"], &[], &["hi"], None).expect_err("the call is refused");
+    assert!(matches!(err, ExecError::Timeout { .. }), "{err:?}");
+    assert!(started.elapsed() < Duration::from_secs(5), "refused at the first deadline, not after the sleep");
+}
+
+#[test]
 fn a_program_that_will_not_print_its_schema_is_refused_at_load() {
     let dir = scratch("no-schema");
     let env = vec![

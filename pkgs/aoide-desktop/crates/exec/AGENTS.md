@@ -111,8 +111,9 @@ are in README.md.
 
 - `make_fifo` makes the FIFO that the shell's `tests/token.rs` puts at the
   token path. The door crate forbids `unsafe`, so the FIFO is made here.
-- The door tests start and signal a door through `test_doors`, behind
-  `fakes`. It is the one way the tests reach `spawn_door` and `terminate`.
+- The door tests start, copy and signal programs through `test_doors`, behind
+  `fakes`. It is the one way the tests reach `spawn_door`, `copy_program` and
+  `terminate`.
 - `block_sigterm` and `wait_sigterm` are the SIGTERM pair the fake eidolon
   uses. The fake blocks SIGTERM before any thread starts and waits for it on
   each pass, so the bin holds no libc call and no `unsafe`.

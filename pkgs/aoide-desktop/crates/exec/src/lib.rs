@@ -425,9 +425,9 @@ impl Exec {
     }
 
     /// Shortens the deadline a call runs under: the shorter of `deadline` and the
-    /// default, so a call never outlasts the app's bound.
+    /// deadline already set, so a later call never lengthens an earlier one.
     pub fn deadline(mut self, deadline: Duration) -> Exec {
-        self.deadline = deadline.min(DEADLINE);
+        self.deadline = self.deadline.min(deadline);
         self
     }
 
@@ -870,6 +870,23 @@ pub mod test_doors {
         super::terminate(pid)
     }
 
+    /// Copies `from` to `to` through a child, `cat "$1" > "$2"`, which must succeed.
+    /// This process never holds a writer of a program it runs: a concurrent test's
+    /// fork would carry the writer until its own exec, and the program's exec would
+    /// fail with ETXTBSY. The copy's mode is the one the child's write leaves.
+    pub fn copy_program(from: &Path, to: &Path) -> io::Result<()> {
+        let status = std::process::Command::new("/bin/sh")
+            .args(["-c", "cat \"$1\" > \"$2\"", "sh"])
+            .arg(from)
+            .arg(to)
+            .status()?;
+        if status.success() {
+            Ok(())
+        } else {
+            Err(io::Error::other(format!("the copy of {} failed: {status}", from.display())))
+        }
+    }
+
     /// Runs `program` with no arguments as a child of this process, and leaves
     /// it unreaped. Returns its pid once it is a zombie, so the pid has exited.
     pub fn zombie(program: &Path) -> io::Result<u32> {
@@ -1061,8 +1078,9 @@ mod tests {
         }
     }
 
+    /// A process that has not exited: its stat reads, and it is not a zombie.
     fn alive(pid: i32) -> bool {
-        unsafe { libc::kill(pid, 0) == 0 }
+        u32::try_from(pid).is_ok_and(|pid| stat_of(pid).is_ok_and(|s| s.state != 'Z'))
     }
 
     #[test]

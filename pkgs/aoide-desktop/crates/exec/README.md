@@ -16,16 +16,17 @@ reaches aoide-protocol only through here, and of it only `untrusted`.
 - `check_pin`, which returns a `Pinned` (the only maker of one), `Schema`,
   `argv`, `child_env`, `parse_vault_keys`, `Output`, `ExecError`, and `Exec`
   (`load`, `call`, `deadline`, `door_env`, `spawn_door`). `spawn_door` returns
-  an `Arrived`.
+  an `Arrived`. `deadline` only shortens: a later call never lengthens an
+  earlier one.
 - The door helpers the shell's door code calls, all `pub`: `euid`,
   `open_pidfd`, `terminate_pidfd`, `pidfd_exited`, `stat_of` (with its `Stat`)
   and `Arrived`. `terminate` stays crate-private: `run` is its one production
   caller.
 - Behind `fakes`, `make_fifo` makes the FIFO the token test puts at the token
-  path. `test_doors` starts a door (`spawn`), signals one (`terminate`), makes
-  a zombie (`zombie`), and blocks and waits for SIGTERM (`block_sigterm` and
-  `wait_sigterm`), which is how the fake eidolon takes its signal without a
-  libc call of its own.
+  path. `test_doors` starts a door (`spawn`), signals one (`terminate`), copies
+  a program through a child (`copy_program`), makes a zombie (`zombie`), and
+  blocks and waits for SIGTERM (`block_sigterm` and `wait_sigterm`), which is
+  how the fake eidolon takes its signal without a libc call of its own.
 
 ## How a child starts
 

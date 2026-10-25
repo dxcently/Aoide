@@ -49,9 +49,11 @@ and each crate's own invariants are in its AGENTS.md (`crates/door/AGENTS.md`,
   reads every `.rs` file under this directory, and every file under `ui/` once
   that exists, skipping the root's `target`. It bars six words in each one:
   `aoided.sock`, `"dispatch"`, `"subscribe"`, `/api/launch`, `sh -c` and
-  `SIGKILL`. It reads the raw text, so a split spelling passes it. It also
-  reads source text, not expansions, so a lift a macro writes is not seen by
-  it; the forbid still refuses that lift.
+  `SIGKILL`. It reads the raw text, so a split spelling passes it. The scan
+  reads source text, not expansions, so it does not see a lift a macro writes;
+  the forbid refuses one that a `macro_rules!` macro writes (probe 3); a proc
+  macro comes only from a new member or a changed manifest, which moves a golden
+  manifest, or from a dependency, which is not linted.
 - The config and member checks, in the same file:
   - no `build.rs` lies under this directory (`no_member_has_a_build_script`);
   - the root's `clippy.toml` is the only one
