@@ -14,7 +14,7 @@
 
 use std::fs::{self, OpenOptions, Permissions};
 use std::io::{self, BufRead, BufReader, Read, Write};
-use std::net::{SocketAddr, TcpListener, TcpStream};
+use std::net::{Ipv4Addr, SocketAddr, TcpListener, TcpStream};
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -79,10 +79,15 @@ pub struct FakeDoor {
 }
 
 impl FakeDoor {
-    /// Binds, and writes the token file as the door does: `0600`, named for the
-    /// port, under `runtime/eidolon`, which is made `0700` if missing.
+    /// Binds on 127.0.0.1 and writes the token file as the door does: `0600`,
+    /// named for the port, under `runtime/eidolon`, made `0700` if missing.
     pub fn start(runtime: &Path, token: &str) -> FakeDoor {
-        let listener = TcpListener::bind("127.0.0.1:0").expect("bind 127.0.0.1:0");
+        FakeDoor::start_on(Ipv4Addr::LOCALHOST, runtime, token)
+    }
+
+    /// `start`, bound on `ip` instead of 127.0.0.1.
+    pub fn start_on(ip: Ipv4Addr, runtime: &Path, token: &str) -> FakeDoor {
+        let listener = TcpListener::bind((ip, 0)).unwrap_or_else(|e| panic!("bind {ip}:0: {e}"));
         let addr = listener.local_addr().expect("the bound address");
         let eidolon = runtime.join("eidolon");
         fs::create_dir_all(&eidolon).expect("the eidolon dir");

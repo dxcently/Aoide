@@ -19,6 +19,12 @@ are in README.md.
   runs glibc's atfork handlers, which take malloc's locks before the fork and
   release them on both sides. The closure runs in the intermediate, which has
   one thread, so those locks are free. `spawn_detached`'s doc says the same.
+- `spawn_door` returns the door as it arrived. `spawn_detached` opens the pidfd
+  and reads the start time as the intermediate's pid comes off the pipe, before
+  it reaps the intermediate. The window that is left runs from the write to that
+  read: a door that exits and is reaped by init inside it can lose its pid to
+  another process. A launch that then refuses SIGTERMs that process through the
+  pidfd. No test reaches that window.
 - Between fork and exec, in order: std's `pre_exec` makes std fork, and the
   child runs its atfork handlers; the closure then calls `setsid` and
   `libc::fork`, still in that one-threaded child; the grandchild returns from
@@ -71,8 +77,8 @@ are in README.md.
   through one, and only SIGTERM. Both refuse pid 0, pid 1, any pid past
   `i32::MAX`, and this process's own pid. A pidfd names one process, so the
   signal cannot reach a process that later takes the pid. Outside exec.rs's own
-  tests, the door code in `doors.rs` is the only caller: a door is signalled
-  through its pidfd and no other way, once its pid has arrived.
+  tests, `arrive` and the door code in `doors.rs` are the only callers: a door
+  is signalled through its pidfd and no other way.
 - `pidfd_exited` polls a pidfd with a zero timeout: it reports whether the
   process has ended, and never waits. Only the watch thread uses it.
 - `terminate(pid)` sends SIGTERM to an unreaped child this process started, and
@@ -84,10 +90,12 @@ are in README.md.
 ## The doors (doors.rs)
 
 - A door is signalled only through its pidfd, by `close_now` (a close) or by
-  `refuse` (a launch that fails before its record is written). Each runs
-  `verify` first, at that moment. `verify` checks the pin and the working
-  directory, the pid's start time and zombie state, its command line, and its
-  token path. It opens no connection. `Doors::drop` signals nothing.
+  `refuse` (a launch that fails before its record is written). `close_now` runs
+  `verify` first, at that moment. `refuse` runs none: its pidfd was opened as
+  the pid arrived, so it names the process that pid named then, whatever the
+  banner says. `verify` checks the pin and the working directory, the pid's
+  start time and zombie state, its command line, and its token path. It opens
+  no connection. `Doors::drop` signals nothing.
 - A request under a door's token goes out only after `verify` (launch,
   re-attach, stop now, answer), or from the watch thread's reconnect. The
   reconnect runs `verify` and the hello's session check before it uses the
@@ -110,9 +118,11 @@ are in README.md.
 - A door keeps at most `ASKS_BOUND` (64) pending asks. An ask past that is
   neither kept nor forwarded, and the stream sends one `AsksOverflow` naming the
   first ask it refused.
-- The watch thread only reads. It updates the shared state under one lock, keeps
-  the door's pending asks, forwards each frame, and marks `CloseDue` when an
-  armed door's turn ends. The caller answers `CloseDue` with `close_due`.
+- The watch thread reads the stream. It updates the shared state under one lock,
+  keeps the door's pending asks, forwards each frame, and marks `CloseDue` when
+  an armed door's turn ends. The caller answers `CloseDue` with `close_due`. The
+  watch writes the record in two places only: an identity failure (`failed`) and
+  a door that is gone (`forget`), each through `Store::update`.
 - A watch that ended is not watched. `launch_ids` leaves it out, and `watch`
   refuses it, so its calls send nothing.
 - A drop or a forget whose store write fails keeps its record. The next open
@@ -138,21 +148,40 @@ are in README.md.
   not open starts the watch unattached, and a launch for which no watch can
   start returns `DoorsError::Unwatched`.
 - The banner is read once through from the log's start, both lines in its first
-  64 KiB. A door that exits first, a banner not within 30 s, a banner past 64
-  KiB, an address that is not loopback, or a token path that is not graphic
-  ASCII or not its port's token path, each refuses the launch at once. Each
-  refusal quotes the log's last 4 KiB, as data.
+  64 KiB. A door that exits first, a banner past 64 KiB, an address that is not
+  loopback, or a token path that is not graphic ASCII or not its port's token
+  path refuses the launch at once. A banner not within 30 s refuses it at that
+  bound. Each refusal quotes the log's last 4 KiB, as data.
+- A refusal waits up to `EXIT_BOUND` (10 s) for the door's exit after its
+  SIGTERM, so a launch that refuses on its banner blocks up to 40 s.
+- Once the stream's head is in, `open_stream` reads the hello with no deadline:
+  the events stream drops the door's deadline once its head is read. A door that
+  answers 200 and sends no hello holds the launch until it sends one or closes.
+  The head itself is bounded by the door's 30 s deadline. No bound on the hello
+  is built.
 - The turn state is known only from frames. `close_after_turn` refuses an
   `Unknown` turn. A stop now takes the cancel's own answer: 409 means idle, and
   204 waits up to 10 s for the frames that say the turn ended. If none come, the
   result is `NoTurnEnd`, and the door keeps running, its record stays, and
-  nothing is signalled.
+  nothing is signalled. After a reconnect the turn is `Unknown`, so a turn that
+  ended in the gap is never seen: its stop now's 204 waits the same 10 s and
+  reports `NoTurnEnd`. A second stop now closes when the door answers 409, as an
+  idle door does, and a 204 waits again.
 - A failed hello at launch or re-attach leaves the record with a null session,
   and the watch checks it again on each try.
 - A record file that does not parse is refused and never rewritten. A record
   file that is a link is refused.
 - The record and the door's log are created 0600 with `O_NOFOLLOW`, and the log
-  with `create_new`. Their directories are made 0700, and checked before use.
+  with `create_new`. The store's directory and the directories made under it are
+  made 0700 and checked before use: not a link, owned by the euid, mode 0700.
+- The check is on each directory itself. `make_private_dir` walks up from the
+  directory it is given to the first one that exists, and checks only that one
+  for a link; nothing above it is checked. The one-descriptor store that would
+  close that gap is not built: it opens the store's directory once with
+  `O_NOFOLLOW | O_DIRECTORY`, checks it with `fstat`, and `openat`s the record,
+  its lock and its temp file.
+- A store directory that is a link is refused at open. A dangling one opens with
+  no records, and its first write is refused.
 
 ## The asks (asks.rs)
 
@@ -179,11 +208,13 @@ are in README.md.
   number outside what serde_json keeps, so the stream is read without a
   duplicate-key check and no code does one. The sorting and the spelling are
   `aoide-protocol`'s, which `asks.rs` calls.
-- `curl_line` returns None for an approval's yes. Its body is `visible_json_line`
-  of the answer, so it holds no raw character `visible` would spell. The token
-  path is quoted raw: the launch refuses a token path that is not graphic ASCII.
-- The curl line never holds the token. It reads the token file with `$(cat ...)`,
-  and every value is one POSIX shell word.
+- `curl_line` returns None for an approval's yes. Its body is
+  `visible_json_line` of the answer, so it holds no raw character `visible`
+  would spell. Every value in the line, the token path included, is one
+  single-quoted POSIX shell word (`sq`). The launch refuses a token path that is
+  not graphic ASCII.
+- The curl line never holds the token. It reads the token file with
+  `$(cat ...)`.
 - An ask leaves `pending_asks` only when the door's `ask-settled` arrives. A
   204, 409, 422 or 401 leaves it listed.
 - A stream's asks are cleared when it opens, and rebuilt from its replay.
@@ -199,9 +230,19 @@ are in README.md.
   door crate forbids `unsafe`, so the FIFO is made here, in `exec.rs`.
 - The door tests start and signal a door through `exec::test_doors`, behind
   `fakes`. It is the one way the tests reach `spawn_door` and `terminate`.
-- A negative check ("no request reached the door") ends with a sentinel request
-  the fake records, and passes only if nothing came before the sentinel. Every
-  positive wait is at least 5 s.
+- A negative check ends with a sentinel request the fake records, and passes
+  only if nothing came before the sentinel. For a request, the test lists what
+  came first with `answers_before_sentinel`. For a SIGTERM, the test sends the
+  sentinel with `no_signal_before_sentinel` and asserts the fake logged no
+  SIGTERM before it. The fake logs a signal in order with the requests it
+  serves, and a door that was signalled and exited serves no sentinel, so that
+  wait fails. Every positive wait is at least 5 s.
+- The door's port comes from the ephemeral pool that other tests' clients also
+  draw from, so a bind on that 127.0.0.1 port can fail with `AddrInUse` after
+  the door dies. `loopback-2` serves the door on 127.0.0.2, which no client
+  binds, so the stop-now test binds there. The sibling test
+  `an_answer_to_a_door_that_fails_its_checks_sends_no_request` still binds
+  127.0.0.1 and carries the same risk.
 - The fake eidolon's start-up modes are listed in README.md's fakes section.
 - The two hostile children in `exec.rs`'s tests are shell scripts that the test
   writes, pins and runs through `run`: a grandchild that holds stdout, and a
@@ -215,9 +256,12 @@ are in README.md.
   that is neither root nor this user: no test can make a directory another uid
   owns. The mode rule is tested.
 - A reconnect's zombie, start time or command line failure: the same checks at
-  open are tested, and a reconnect's pin change is tested. A door that dies under
-  a watch is reaped by init, so no test holds its zombie, and a live pid's command
-  line cannot change in a test.
+  open are tested, and a reconnect's pin change is tested. A door that dies
+  under a watch is reaped by init, so no test holds its zombie, and a live pid's
+  command line cannot change in a test.
+- The owner check of the store's directory (`check_private`'s uid branch, for
+  the store's directory and the directories made under it). No test can make a
+  directory another uid owns. The link check is tested.
 - The session fill and the watch's start failing after the record is written: no
   seam makes the store's update or the thread's spawn fail. The hello failing at
   launch is tested.

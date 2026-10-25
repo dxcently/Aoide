@@ -42,6 +42,7 @@
 //! - `cancel-stuck` answers a cancel `204` and keeps its turn running.
 //! - `hello-bad` makes the first frame of every head something other than a
 //!   `hello`, from the start.
+//! - `loopback-2` serves the door on 127.0.0.2, whatever `--bind` names.
 //!
 //! Each control word applied, each request served (an answer with its body) and
 //! each signal received is appended to `DIR/.fake-log` in order. On SIGTERM it
@@ -52,6 +53,7 @@
 use std::collections::BTreeMap;
 use std::fs::{self, OpenOptions};
 use std::io::Write;
+use std::net::Ipv4Addr;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -283,7 +285,8 @@ fn main() {
     unsafe {
         libc::pthread_sigmask(libc::SIG_BLOCK, &set, std::ptr::null_mut());
     }
-    let door = Arc::new(FakeDoor::start(&runtime, TOKEN));
+    let ip = if mode == "loopback-2" { Ipv4Addr::new(127, 0, 0, 2) } else { Ipv4Addr::LOCALHOST };
+    let door = Arc::new(FakeDoor::start_on(ip, &runtime, TOKEN));
     let hello = json!({
         "type": "hello",
         "session": dir.join("session.eid").display().to_string(),

@@ -23,8 +23,9 @@ HTTP library and no GUI crate. Its dependencies are serde, serde_json and libc
 - `http.rs`: the request writer, the reply head, the three body framings, and
   the one deadline a request's send and its reply share (`Within`, `Wire`).
 - `error.rs`: `DoorError`, every way a call can fail.
-- `fake.rs`, behind the `fake` feature: a std-thread door on 127.0.0.1 that
-  speaks the wire as far as the tests need, and records every request.
+- `fake.rs`, behind the `fake` feature: a std-thread door on 127.0.0.1, or on
+  another address of 127/8 through `FakeDoor::start_on`. It speaks the wire as
+  far as the tests need, and records every request.
 
 ## How the door composes
 

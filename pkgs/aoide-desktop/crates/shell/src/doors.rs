@@ -36,7 +36,7 @@ use aoide_protocol::untrusted::{is_unsafe, visible};
 use serde::{Deserialize, Serialize};
 
 use crate::asks::{self, Prepared, Sent, Shown};
-use crate::exec::{check_pin, euid, open_pidfd, pidfd_exited, terminate_pidfd, Exec, ExecError, Pinned};
+use crate::exec::{check_pin, euid, open_pidfd, pidfd_exited, stat_of, terminate_pidfd, Arrived, Exec, ExecError, Pinned};
 
 /// The bound on the events channel. The caller creates the channel with this size.
 pub const EVENTS_BOUND: usize = 64;
@@ -415,8 +415,9 @@ impl Doors {
         make_private_dir(&dir)?;
         let log_path = dir.join(format!("{id}.log"));
         let log = create_private(&log_path)?;
-        let pid = self.exec.spawn_door(&plan.program, &plan.args, &self.pins.runtime, log)?;
-        let door = Unrecorded::adopt(pid, log_path.clone());
+        let arrived = self.exec.spawn_door(&plan.program, &plan.args, &self.pins.runtime, log)?;
+        let pid = arrived.pid;
+        let door = Unrecorded::adopt(arrived, log_path.clone());
         let Some(starttime) = door.starttime else {
             return Err(door.refuse("it exited before its checks".into()));
         };
@@ -1089,9 +1090,9 @@ impl Worker {
     }
 }
 
-/// A door a launch has started and not yet recorded. Its pidfd names the door
-/// from the moment its pid arrives, so every failure before the record signals
-/// that process and no other.
+/// A door a launch has started and not yet recorded. Its pidfd was opened as its
+/// pid arrived, so a failure before the record signals the process that pid
+/// named then.
 struct Unrecorded {
     pid: u32,
     log: PathBuf,
@@ -1100,15 +1101,10 @@ struct Unrecorded {
 }
 
 impl Unrecorded {
-    /// Opens the pidfd and reads the start time as the pid arrives. A pid already
-    /// gone has no pidfd, and nothing needs signalling.
-    fn adopt(pid: u32, log: PathBuf) -> Unrecorded {
-        let pidfd = match open_pidfd(pid) {
-            Ok(fd) => Ok(Some(fd)),
-            Err(e) if e.raw_os_error() == Some(libc::ESRCH) => Ok(None),
-            Err(e) => Err(e),
-        };
-        let starttime = stat_of(pid).ok().map(|s| s.starttime);
+    /// Takes the door as its launch pinned it. A pid already gone has no pidfd,
+    /// and nothing needs signalling.
+    fn adopt(arrived: Arrived, log: PathBuf) -> Unrecorded {
+        let Arrived { pid, pidfd, starttime } = arrived;
         Unrecorded { pid, log, pidfd, starttime }
     }
 
@@ -1234,23 +1230,6 @@ fn exited_by(pid: u32, starttime: u64, end: Instant) -> bool {
         }
         thread::sleep(POLL);
     }
-}
-
-/// The state and start time of `/proc/<pid>/stat`. Its fields are read after
-/// the last `)`, since the command name may hold one.
-struct Stat {
-    state: char,
-    starttime: u64,
-}
-
-fn stat_of(pid: u32) -> io::Result<Stat> {
-    let malformed = || io::Error::new(io::ErrorKind::InvalidData, "the stat line is malformed");
-    let text = fs::read_to_string(format!("/proc/{pid}/stat"))?;
-    let after = text.rfind(')').ok_or_else(malformed)?;
-    let fields: Vec<&str> = text[after + 1..].split_whitespace().collect();
-    let state = fields.first().and_then(|f| f.chars().next()).ok_or_else(malformed)?;
-    let starttime = fields.get(19).and_then(|f| f.parse::<u64>().ok()).ok_or_else(malformed)?;
-    Ok(Stat { state, starttime })
 }
 
 /// The command line as `/proc` holds it: each argument followed by a NUL.

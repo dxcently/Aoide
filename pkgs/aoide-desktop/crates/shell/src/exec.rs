@@ -448,15 +448,16 @@ impl Exec {
     }
 
     /// Starts `program` with `args` as a door: detached, in a session of its own,
-    /// with stdin on /dev/null and stdout and stderr on `log`. Returns the door's
-    /// pid. The program is the one `check_pin` pinned, and no other is started.
+    /// with stdin on /dev/null and stdout and stderr on `log`. Returns the door as
+    /// it arrived, see `Arrived`. The program is the one `check_pin` pinned, and
+    /// no other is started.
     pub(crate) fn spawn_door(
         &self,
         program: &Pinned,
         args: &[OsString],
         runtime: &Path,
         log: fs::File,
-    ) -> Result<u32, ExecError> {
+    ) -> Result<Arrived, ExecError> {
         let env = self.door_env(runtime)?;
         spawn_detached(program.path(), args, &env, log)
     }
@@ -657,12 +658,13 @@ impl std::error::Error for ExecError {}
 /// `_Fork`, so the second fork is `libc::fork`: it is safe here because the
 /// intermediate has one thread when the closure runs. Std's close-on-exec pipe
 /// carries the door's own exec failure back to the caller as `spawn`'s error.
+/// The door is pinned as its pid arrives, before the intermediate is reaped.
 fn spawn_detached(
     program: &Path,
     args: &[OsString],
     env: &[(OsString, OsString)],
     log: fs::File,
-) -> Result<u32, ExecError> {
+) -> Result<Arrived, ExecError> {
     let (mut pid_in, pid_out) = io::pipe().map_err(ExecError::Io)?;
     let pid_fd = pid_out.as_raw_fd();
     let stdout = log.try_clone().map_err(ExecError::Io)?;
@@ -698,10 +700,9 @@ fn spawn_detached(
     let mut intermediate = command.spawn().map_err(ExecError::Spawn)?;
     drop(pid_out);
     let mut bytes = [0u8; 4];
-    let read = pid_in.read_exact(&mut bytes);
+    let arrived = pid_in.read_exact(&mut bytes).map(|()| arrive(u32::from_ne_bytes(bytes)));
     let _ = intermediate.wait();
-    read.map_err(ExecError::Io)?;
-    Ok(u32::from_ne_bytes(bytes))
+    arrived.map_err(ExecError::Io)
 }
 
 /// The pid `kill` and `pidfd_open` take for `pid`, if it names a process this
@@ -746,6 +747,45 @@ pub(crate) fn open_pidfd(pid: u32) -> io::Result<OwnedFd> {
     let fd = libc::c_int::try_from(fd).map_err(io::Error::other)?;
     // SAFETY: the syscall returned `fd` as a new descriptor that nothing else owns.
     Ok(unsafe { OwnedFd::from_raw_fd(fd) })
+}
+
+/// A door as its launch first sees it: the pid the intermediate wrote, a pidfd
+/// naming that pid, and its start time. A pid already gone has no pidfd and no
+/// start time.
+pub(crate) struct Arrived {
+    pub(crate) pid: u32,
+    pub(crate) pidfd: io::Result<Option<OwnedFd>>,
+    pub(crate) starttime: Option<u64>,
+}
+
+/// Pins `pid` as it arrives. The pidfd names whichever process holds `pid` at
+/// this call, so a door reaped before this call can lose its pid to another
+/// process. The window is from the intermediate's write to this call.
+fn arrive(pid: u32) -> Arrived {
+    let pidfd = match open_pidfd(pid) {
+        Ok(fd) => Ok(Some(fd)),
+        Err(e) if e.raw_os_error() == Some(libc::ESRCH) => Ok(None),
+        Err(e) => Err(e),
+    };
+    let starttime = stat_of(pid).ok().map(|s| s.starttime);
+    Arrived { pid, pidfd, starttime }
+}
+
+/// The state and start time of `/proc/<pid>/stat`. Its fields are read after
+/// the last `)`, since the command name may hold one.
+pub(crate) struct Stat {
+    pub(crate) state: char,
+    pub(crate) starttime: u64,
+}
+
+pub(crate) fn stat_of(pid: u32) -> io::Result<Stat> {
+    let malformed = || io::Error::new(io::ErrorKind::InvalidData, "the stat line is malformed");
+    let text = fs::read_to_string(format!("/proc/{pid}/stat"))?;
+    let after = text.rfind(')').ok_or_else(malformed)?;
+    let fields: Vec<&str> = text[after + 1..].split_whitespace().collect();
+    let state = fields.first().and_then(|f| f.chars().next()).ok_or_else(malformed)?;
+    let starttime = fields.get(19).and_then(|f| f.parse::<u64>().ok()).ok_or_else(malformed)?;
+    Ok(Stat { state, starttime })
 }
 
 /// Whether the process `fd` names has exited. A pidfd is readable once its
@@ -807,7 +847,7 @@ pub mod test_doors {
         runtime: &Path,
         log: fs::File,
     ) -> Result<u32, ExecError> {
-        exec.spawn_door(program, args, runtime, log)
+        exec.spawn_door(program, args, runtime, log).map(|arrived| arrived.pid)
     }
 
     /// Sends SIGTERM to `pid`, as the app does to a child it started.

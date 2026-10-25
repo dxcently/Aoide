@@ -2,6 +2,7 @@
 
 use std::ffi::OsString;
 use std::fs::{self, DirBuilder, OpenOptions};
+use std::net::{Ipv4Addr, SocketAddr};
 use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -418,9 +419,9 @@ fn a_forged_record_whose_cmdline_is_not_the_launch_argv_is_dropped_and_never_sig
     }]));
     let (tx, _rx) = mpsc::sync_channel(EVENTS_BOUND);
     let _doors = world.open(tx);
+    no_signal_before_sentinel(&world, &door_at(&world, &addr, &token));
     assert!(world.record().is_empty(), "the forged record is dropped");
     assert!(alive(pid), "the door is left alone");
-    assert_eq!(world.count("SIGTERM"), 0, "nothing signalled the door");
 }
 
 #[test]
@@ -433,9 +434,9 @@ fn a_forged_record_with_a_wrong_start_time_is_dropped_and_never_signalled() {
     }]));
     let (tx, _rx) = mpsc::sync_channel(EVENTS_BOUND);
     let _doors = world.open(tx);
+    no_signal_before_sentinel(&world, &door_at(&world, &addr, &token));
     assert!(world.record().is_empty(), "the forged record is dropped");
     assert!(alive(pid), "the door is left alone");
-    assert_eq!(world.count("SIGTERM"), 0, "nothing signalled the door");
 }
 
 #[test]
@@ -467,8 +468,8 @@ fn a_record_whose_hello_names_another_session_is_kept_unwatched_and_never_signal
     assert_eq!(world.record_ids(), vec!["forged".to_owned()], "the record is kept");
     assert_eq!(doors.launch_ids(), vec!["forged".to_owned()], "the watch is kept, with no stream");
     event_where(&rx, |e| matches!(e, Event::Unwatched { .. }));
+    no_signal_before_sentinel(&world, &door_at(&world, &addr, &token));
     assert!(alive(pid), "the door is left alone");
-    assert_eq!(world.count("SIGTERM"), 0, "nothing signalled the door");
 }
 
 #[test]
@@ -573,6 +574,7 @@ fn stop_now_after_a_reconnect_closes_on_the_409() {
 #[test]
 fn stop_now_on_a_door_that_fails_its_checks_sends_no_request() {
     let world = World::new("stop-checks");
+    set_mode(&world, "loopback-2");
     let (tx, _rx) = mpsc::sync_channel(EVENTS_BOUND);
     let mut doors = world.open(tx);
     let id = world.launch(&mut doors);
@@ -583,11 +585,14 @@ fn stop_now_on_a_door_that_fails_its_checks_sends_no_request() {
     world.command("end");
     test_doors::terminate(pid).expect("the door takes SIGTERM");
     assert!(until(Duration::from_secs(25), || !alive(pid)), "the door exits");
-    // A token left behind, and a listener on the door's port: a stop now must
-    // not send the door's token to that listener.
+    // A token left behind, and a listener on the door's own address: a stop now
+    // must not send the door's token to that listener. The door serves on
+    // 127.0.0.2, where no other test's client takes a port.
     fs::write(&token, &secret).expect("the token is left behind");
     fs::set_permissions(&token, fs::Permissions::from_mode(0o600)).unwrap();
-    let listener = std::net::TcpListener::bind(("127.0.0.1", port)).expect("the port is free");
+    let addr: SocketAddr = world.entry(&id)["addr"].as_str().unwrap().parse().unwrap();
+    assert_eq!(addr.ip(), Ipv4Addr::new(127, 0, 0, 2), "the door serves on its own address");
+    let listener = std::net::TcpListener::bind(addr).expect("the port is free");
     listener.set_nonblocking(true).unwrap();
     let outcome = doors.stop_now(&id).unwrap();
     assert!(matches!(outcome, Close::Dropped { pid: p, .. } if p == pid), "{outcome:?}");
@@ -712,6 +717,25 @@ fn answers_before_sentinel(world: &World, cwd: &Path, door: &Door) -> Vec<String
     let logged = answers_at(world, cwd);
     let at = logged.iter().position(sentinel).expect("the sentinel is logged");
     logged[..at].to_vec()
+}
+
+/// Sends a sentinel answer to `door`, waits until the fake has served it, and
+/// asserts the fake logged no SIGTERM before it. The fake logs a signal in order
+/// with the requests it serves, so a signal sent before this call is logged
+/// before the sentinel, and a door that was signalled and exited serves none.
+fn no_signal_before_sentinel(world: &World, door: &Door) {
+    let _ = door.answer(SENTINEL, "yes", None);
+    let sentinel = |line: &String| line.starts_with("POST /api/answer") && line.contains(&SENTINEL.to_string());
+    assert!(until(Duration::from_secs(5), || world.log().iter().any(sentinel)), "the door serves the sentinel");
+    let logged = world.log();
+    let at = logged.iter().position(sentinel).expect("the sentinel is logged");
+    let early = logged[..at].iter().any(|line| line.as_str() == "SIGTERM");
+    assert!(!early, "a SIGTERM came before the sentinel: {logged:?}");
+}
+
+/// The `Door` for a door `start_door_outside` started, from its banner.
+fn door_at(world: &World, addr: &str, token: &Path) -> Door {
+    Door::new(addr.parse().unwrap(), &world.runtime(), token).unwrap()
 }
 
 /// The answers logged under `cwd` other than the sentinel, once there are `count` of them.
@@ -1081,6 +1105,7 @@ fn a_changed_pin_drops_each_record_with_an_event_naming_its_pid() {
     let id = doors.launch(&plan).expect("the door launches");
     let pid = world.pid(&id);
     world.adopt(pid);
+    let door = door_of(&world, &id);
     drop(doors);
     fs::set_permissions(&eidolon, fs::Permissions::from_mode(0o600)).unwrap();
     let (tx, _rx) = mpsc::sync_channel(EVENTS_BOUND);
@@ -1089,14 +1114,14 @@ fn a_changed_pin_drops_each_record_with_an_event_naming_its_pid() {
     assert!(doors.launch_ids().is_empty(), "the door is not watched under a changed pin");
     assert!(world.record().is_empty(), "the record is dropped");
     assert!(events.iter().any(|e| matches!(e, Event::Dropped { pid: p, .. } if *p == pid)), "{events:?}");
+    no_signal_before_sentinel(&world, &door);
     assert!(alive(pid), "the door is left alone");
-    assert_eq!(world.count("SIGTERM"), 0, "nothing signalled the door");
 }
 
 #[test]
 fn a_wrong_token_path_keeps_its_record_unwatched_and_signals_nothing() {
     let world = World::new("token-path");
-    let (pid, addr, _token) = start_door_outside(&world);
+    let (pid, addr, token) = start_door_outside(&world);
     world.write_record(json!([{
         "launchId": "wrong-token", "pid": pid, "starttime": stat_of(pid).unwrap().starttime,
         "addr": addr, "tokenFile": world.dir.join("wrong.token"), "sessionId": null, "cwd": world.cwd(), "log": "x",
@@ -1106,8 +1131,8 @@ fn a_wrong_token_path_keeps_its_record_unwatched_and_signals_nothing() {
     assert_eq!(world.record_ids(), vec!["wrong-token".to_owned()], "the record is kept");
     assert_eq!(doors.launch_ids(), vec!["wrong-token".to_owned()], "the watch is kept, with no stream");
     event_where(&rx, |e| matches!(e, Event::Unwatched { .. }));
+    no_signal_before_sentinel(&world, &door_at(&world, &addr, &token));
     assert!(alive(pid), "the door is left alone");
-    assert_eq!(world.count("SIGTERM"), 0, "nothing signalled the door");
 }
 
 #[test]
@@ -1140,8 +1165,8 @@ fn a_reconnect_whose_hello_names_another_session_is_unwatched_and_keeps_its_reco
     world.command("end");
     event_where(&rx, |e| matches!(e, Event::Unwatched { launch_id, .. } if *launch_id == id));
     assert_eq!(world.record_ids(), vec![id.clone()], "the record is kept");
+    no_signal_before_sentinel(&world, &door_of(&world, &id));
     assert!(alive(world.pid(&id)), "the door runs");
-    assert_eq!(world.count("SIGTERM"), 0, "nothing signalled the door");
 }
 
 #[test]
@@ -1219,6 +1244,52 @@ fn a_symlinked_doors_json_is_refused_and_never_rewritten() {
     );
     assert!(refused.is_err(), "a linked record is refused");
     assert_eq!(fs::read(&target).unwrap(), b"[]", "the target is not rewritten");
+}
+
+#[test]
+fn a_store_directory_that_is_a_link_is_refused_and_nothing_is_written_through_it() {
+    let world = World::new("symlink-dir");
+    let target = world.dir.join("elsewhere");
+    fs::create_dir_all(&target).unwrap();
+    fs::set_permissions(&target, fs::Permissions::from_mode(0o700)).unwrap();
+    fs::create_dir_all(world.store().parent().unwrap().parent().unwrap()).unwrap();
+    std::os::unix::fs::symlink(&target, world.store().parent().unwrap()).unwrap();
+    let (tx, _rx) = mpsc::sync_channel(EVENTS_BOUND);
+    let refused = Doors::open(
+        world.exec(),
+        Path::new(FAKE_EIDOLON),
+        &world.home(),
+        &world.root(),
+        Some(world.runtime().as_os_str()),
+        tx,
+    );
+    match refused {
+        Err(DoorsError::Store(why)) => assert!(why.contains("is a link"), "{why}"),
+        other => panic!("a linked store directory is refused: {:?}", other.map(|_| ())),
+    }
+    assert!(fs::read_dir(&target).unwrap().next().is_none(), "nothing is written through the link");
+}
+
+#[test]
+fn a_store_directory_that_links_to_nothing_opens_empty_and_its_first_write_is_refused() {
+    let world = World::new("dangling-dir");
+    let target = world.dir.join("missing");
+    fs::create_dir_all(world.store().parent().unwrap().parent().unwrap()).unwrap();
+    std::os::unix::fs::symlink(&target, world.store().parent().unwrap()).unwrap();
+    let (tx, _rx) = mpsc::sync_channel(EVENTS_BOUND);
+    let (mut doors, events) = Doors::open(
+        world.exec(),
+        Path::new(FAKE_EIDOLON),
+        &world.home(),
+        &world.root(),
+        Some(world.runtime().as_os_str()),
+        tx,
+    )
+    .expect("the doors open with no record");
+    assert!(events.is_empty() && doors.launch_ids().is_empty());
+    let refused = doors.launch(&world.plan());
+    assert!(matches!(&refused, Err(DoorsError::Store(why)) if why.contains("is a link")), "{refused:?}");
+    assert!(!target.exists(), "nothing is created through the link");
 }
 
 #[test]

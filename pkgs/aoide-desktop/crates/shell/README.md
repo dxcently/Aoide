@@ -71,18 +71,9 @@ exec.rs     Exec::load(aoide, home, env)
   `HOME`, `XDG_RUNTIME_DIR` or `AOIDE_ROOT`. A bad `tokenEnv` is shown through
   `visible`. The pattern has no length bound and is case-sensitive: a 10 KiB
   name and a lowercase `path` are accepted, and `HOME=x` is refused.
-- `run` is private. Only `Exec` reaches it, and only with a `Pinned`.
-- Each call runs under one deadline, 30 s. `Exec::deadline` can only shorten
-  it: the shorter of the two is taken. The deadline covers the spawn, the
-  child's exit and the reading of its output. A child still running at the
-  deadline is sent SIGTERM and has 5 s to exit, and the call is refused as a
-  timeout. A child that exits while a process it started still holds its output
-  pipe is refused at the same deadline, with no signal to that process. That
-  process keeps the call's two reader threads and their pipes until it exits:
-  freeing them at the deadline is not implemented. Nothing sends SIGKILL.
 - `open_pidfd` opens a pidfd for a pid, and `terminate_pidfd` sends SIGTERM
   through one. The refusals and the reach of a pidfd are in AGENTS.md.
-  `doors.rs` opens one when a door's pid arrives.
+  `spawn_door` opens one as the door's pid arrives.
 - `pidfd_exited` polls a pidfd with no wait. It answers whether the process has
   ended, and the watch uses it to decide whether its door still lives.
 - `door_env` is `child_env` for `eidolon web`, with `XDG_RUNTIME_DIR` set to the
@@ -92,9 +83,10 @@ exec.rs     Exec::load(aoide, home, env)
   forks the door and writes the door's pid to a pipe. If that write fails, the
   intermediate SIGTERMs the door and exits non-zero. A door that ignores that
   SIGTERM runs unnamed. Otherwise the intermediate exits zero, and init adopts
-  the door. The app reads the pid and reaps the intermediate. The door's stdin
-  is `/dev/null`, and its stdout and stderr are the door log. std's
-  close-on-exec pipe reports an exec failure of the door as `spawn`'s error.
+  the door. The app reads the pid, pins the door as it arrives (`arrive`: its
+  pidfd and start time), and then reaps the intermediate. The door's stdin is
+  `/dev/null`, and its stdout and stderr are the door log. std's close-on-exec
+  pipe reports an exec failure of the door as `spawn`'s error.
 - `terminate` sends SIGTERM to a pid. Its refusals and the caller's check are
   in AGENTS.md.
 
@@ -122,6 +114,8 @@ doors.rs    Doors::open(exec, eidolon, home, root, runtime, out)
 - A failure up to and including `Store::update` refuses the launch. Its door is
   signalled through its pidfd and waited for up to 10 s, and the error names its
   pid and its log. Without a pidfd nothing is signalled, and the error says so.
+  A launch that refuses on its banner blocks up to 40 s: the 30 s banner bound,
+  then the 10 s exit wait.
 - A launch that has written its record keeps the record and returns the launch
   id. A stream that does not open at launch starts the watch unattached, and the
   watch reports it. A launch for which no watch can start returns
@@ -131,13 +125,15 @@ doors.rs    Doors::open(exec, eidolon, home, root, runtime, out)
   is a read-modify-write under an exclusive lock on `doors.json.lock`, ending in
   a temp file, a sync, a rename and a directory sync. A file that does not parse
   is refused, and it is never rewritten. A link in its place is refused
-  (`O_NOFOLLOW`). The directories are made 0700, and each is checked before use:
-  not a link, owned by the euid, mode 0700.
+  (`O_NOFOLLOW`). The store's directory and the directories made under it are
+  made 0700 and checked before use: not a link, owned by the euid, mode 0700.
+  The check is on each directory itself, not its parents.
 - The banner is read once through from the log's start, and both lines must lie
-  in its first 64 KiB. A door that exits first, a banner not within 30 s, a
-  banner past 64 KiB, an address that is not loopback, and a token path that is
-  not graphic ASCII or not the token path of its port each refuse the launch at
-  once. Each refusal quotes the log's last 4 KiB, as data.
+  in its first 64 KiB. A door that exits first, a banner past 64 KiB, an address
+  that is not loopback, and a token path that is not graphic ASCII or not the
+  token path of its port each refuse the launch at once. A banner not within
+  30 s refuses it at that bound. Each refusal quotes the log's last 4 KiB, as
+  data.
 - A record is trusted only while `verify` passes. Its pid is live and not a
   zombie, with the recorded start time. Its command line is the launch argv for
   the current pin and the recorded cwd, and its token file is the token path of
@@ -203,7 +199,10 @@ doors.rs    Doors::open(exec, eidolon, home, root, runtime, out)
   taken as idle, and the door closes at once.
 - A turn that starts or ends while no stream is open is not seen. After a
   reconnect the turn is `Unknown` until a frame arrives. A mark stands across a
-  reconnect until it is revoked or its door closes.
+  reconnect until it is revoked or its door closes. A stop now across a
+  reconnect cannot see a turn that ended in the gap: its 204 waits the 10 s and
+  reports `NoTurnEnd`. A second stop now closes when the door answers 409, as an
+  idle door does.
 
 ## How an ask is answered
 
@@ -251,9 +250,9 @@ asks.rs     Doors::prepare_answer(launch, ask, label)
   no token.
 - A question's answer, and a no, skip the confirm. Only an approval's `yes`
   approves, since eidolon gives its consent on that label alone.
-- A 204 leaves the ask listed until the door's `ask-settled` arrives. A 409 means
-  nothing is pending under that id, a 422 refuses with the door's reason, and a
-  401 or any other status is a `DoorError`. None of them removes the ask.
+- A 204 leaves the ask listed until the door's `ask-settled` arrives. A 409
+  means nothing is pending under that id, a 422 refuses with the door's reason,
+  and a 401 or any other status is a `DoorError`. None of them removes the ask.
 - Between streams the last stream's asks stay listed, so an answer to one the
   door settled in the gap comes back 409.
 
@@ -268,8 +267,9 @@ says what each one does. The mode file `DIR/.fake-mode`, read once at start,
 picks a start-up: `exit-first`, `no-banner`, `remote-address`, `token-outside`,
 `token-space`, `banner-128k`, `ignore-sigterm` (the first SIGTERM is ignored,
 the second exits), `cancel-stuck` (a cancel answers 204 and keeps the turn
-running), or `hello-bad`. It logs each control word applied, each request served
-(an answer with its body), and each SIGTERM it receives, to `DIR/.fake-log`, in
+running), `hello-bad`, or `loopback-2` (the door serves on 127.0.0.2, whatever
+`--bind` names). It logs each control word applied, each request served (an
+answer with its body), and each SIGTERM it receives, to `DIR/.fake-log`, in
 order.
 
 `src/bin/fake-aoide.rs` prints the fixture schema for `schema --json` and the
@@ -279,7 +279,3 @@ print nothing. Any other call sleeps `FAKE_AOIDE_SLEEP` seconds, writes
 `FAKE_AOIDE_STDOUT_BYTES` bytes to stdout, the text of `FAKE_AOIDE_STDERR` and
 `FAKE_AOIDE_STDERR_BYTES` bytes to stderr, and exits with `FAKE_AOIDE_EXIT`.
 Each call is appended to the file `FAKE_AOIDE_RECORD` names.
-
-A negative check ("no request reached the door") ends with a sentinel request
-the fake records, and passes only if nothing came before the sentinel. Every
-positive wait in the tests is at least 5 s.
