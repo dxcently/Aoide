@@ -158,12 +158,11 @@ pub struct Command {
     /// person, not capability from a consumer.
     #[serde(skip_serializing_if = "is_false")]
     pub internal: bool,
-    /// The verb approves or denies a hold, re-parents, answers for a person,
-    /// or types into a session; or it launches and checks its own door
-    /// (`resurrect`, `job add`, `job remove`). Additive (CONTRACTS.md §3):
-    /// skipped when `false`. The desktop app's floor reads it from
-    /// `schema --json` and refuses a grant that names the verb.
-    /// `Command::check` does not read it.
+    /// The verb approves or denies a hold, re-parents, answers for a person, or
+    /// types into a session; or it launches and checks its door (`resurrect`,
+    /// `spawn`, `job add`, `job remove`). Additive (CONTRACTS.md §3): skipped
+    /// when `false`. The desktop app's floor reads it from `schema --json` and
+    /// refuses a grant that names the verb. `Command::check` does not read it.
     #[serde(skip_serializing_if = "is_false")]
     pub approves: bool,
     /// The verb starts an agent (`spawn`, `project add`, `node spawn`).

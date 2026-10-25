@@ -201,7 +201,7 @@ pub fn register(r: &mut Registry) {
         ],
         brief: "Spawn an agent command as a detached, conducted session.",
         doors: &[Door::Cli, Door::Daemon, Door::Mcp],
-        launches: true,
+        approves: true, launches: true,
     ));
     r.insert(cmd!(
         path: ["resurrect"],

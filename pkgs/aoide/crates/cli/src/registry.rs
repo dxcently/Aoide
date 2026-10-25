@@ -114,6 +114,8 @@ mod tests {
         assert!(find("project.add").get("approves").is_none());
         assert_eq!(find("resurrect")["approves"], true);
         assert_eq!(find("resurrect")["launches"], true);
+        assert_eq!(find("spawn")["approves"], true);
+        assert_eq!(find("spawn")["launches"], true);
         for plain in ["graph", "session.prune"] {
             let v = find(plain);
             assert!(v.get("approves").is_none() && v.get("launches").is_none(), "{plain} carries neither key: {v}");
@@ -711,8 +713,8 @@ mod tests {
 
     /// Golden snapshot: the commands that approve or deny a hold, re-parent,
     /// answer for a person or type into a session, and the launch verbs that
-    /// check their own door. The desktop app's floor refuses a grant that
-    /// names one of them.
+    /// check their door. The desktop app's floor refuses a grant that names one
+    /// of them.
     #[test]
     fn approves_paths_match_the_golden_snapshot() {
         let r = crate::commands::all();
@@ -732,6 +734,7 @@ mod tests {
             "session.pending.deny",
             "session.permit",
             "session.start",
+            "spawn",
         ];
         expected.sort();
         assert_eq!(got, expected, "approves set drifted from the golden snapshot");
