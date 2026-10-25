@@ -1203,10 +1203,39 @@ blank one is refused too.
   boot sweep finds the revived session in the undying set without
   re-walking the manifest — unconditional, unlike flag-mode's own TRANSFER
   a few paragraphs up, which only ever moves a PRE-existing mark. Every
-  outcome (both modes) is audited exactly once (`audit_resurrect`),
+  revival decision (both modes) gets one handler line (`audit_resurrect`),
   including an empty selection — the boot-sweep postmortem's own finding
   that an early return must never silently skip the audit line a full run
-  gets.
+  gets. A usage error or a stage-file miss gets none, and the door's line
+  comes with every call.
+  **Dry run (`--dry-run`):** the flag takes the selection the launch would
+  take and lists the rows the launch acts on, launching, holding and typing
+  nothing. Flag mode lists what `select_candidates` returns, with
+  `pickedByBare` true on exactly the rows the bare `--project P` form revives
+  (`undying_selection`). Bare mode lists one row per manifest spec, decided by
+  the helpers the launch uses (`enrichment`, `clean_argv`, `summon_check`,
+  `unresumed_reason`). A row the launch would skip lists as `skipped`, as the
+  launch's own `skipped[]` reports it. A remote spec is never sent: its row
+  carries only the local pre-wire verdict. The message spells each line as the
+  pending view spells a held plan (`visible_held`); the data stays raw. From an
+  unattested caller on a door that cannot approve, a dry run gets what the call
+  would give that caller, minus the launch: in bare mode the launch's refusal;
+  with `--id` or `--all` and no `--project`, the usage error the call gives;
+  with `--project`, the `dry-run-not-held` refusal, since the flag-mode launch
+  would hold and show that caller nothing. A dry run holds on no door. Its
+  handler writes three things, and no others: the audit line (status
+  `dry-run`, at the points the real call audits; none for a usage error or a
+  stage miss); on a host that still holds the legacy file, the one-time
+  `carry.json` rename an undying read runs
+  (`aoide_storage::undying::load_undying`); and, on a host that still holds the
+  legacy stage files, the one-time conducting-stage migration a stage read runs
+  (`aoide_storage::fs::conducting_stage_dir`). Two writes come with any call,
+  dry or real, outside the handler: the door's audit line, and the start-up
+  migration both core binaries run (`aoide_storage::fs::migrate_root_once`).
+  It locks `state/` owner-only when it exists and renames old peer state
+  files. When the legacy `~/Aoide` root is not `$AOIDE_ROOT`, it moves that
+  root's state unless `AOIDE_STATE_DIR` is set, and its log unless
+  `AOIDE_AUDIT_LOG` is set and not empty.
 - **Terminal restore capture (P-C5, durable-sessions plan) — gated on the
   WRAPPED ARGV, never the agent label (task #100).**
   `session_conduct`'s `is_shell` (everything below this bullet: the ~1 Hz

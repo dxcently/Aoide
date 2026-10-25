@@ -908,7 +908,9 @@ count.
   idle session included), `not-ready` (nothing typed), `skipped-unregistered`
   (no live pty) or `failed: <reason>` (the send failed).
   An idle session delivers nothing, its cwd
-  alone is restored. Also the command core the daemon's own boot-time
+  alone is restored. `--dry-run` lists the rows the same invocation would
+  act on and launches, holds and sends nothing; its data is in the bare
+  `resurrect` section below. Also the command core the daemon's own boot-time
   auto-resume trigger calls in-process — see `state/stage/projects.json`'s
   `autoResume` paragraph below for that trigger's own contract. `identity`,
   appended newest, P-P1 (`docs/architecture/PAIRING.md`) — this instance's
@@ -5948,6 +5950,48 @@ a consumer filtering the outcome by disposition never silently drops a row
 that fell through `resolve_candidate`/`resurrect_one`'s own flag-mode
 shapes.
 
+**`resurrect --dry-run`.** The flag lists the rows the same invocation would
+act on, in the order a launch acts on them, and launches, holds, types and
+sends nothing. Flag mode (`--project` with `--all`, `--id`, or neither) lists
+what `select_candidates` resolves; bare mode lists one row per manifest spec,
+each decided by the helpers its launch uses. `data` carries `candidates` and
+`dryRun: true`. A flag-mode row has `sessionId`, `agent`, `project`, `cwd`,
+`endedAt`, `restoreText`, `pickedByBare`, `disposition`, and `reason` on a
+skip. A bare-mode row has `host`, `dir`, `agent`, `command` and `disposition`,
+plus `cwd` (a local spec's resolved directory, once it resolves),
+`resumedFrom` and `restoreText` (when a ledger line enriches the spec), `argv`
+(a clean spawn), `text` (a summon), and `reason` (a skip or a failure); `data`
+also names `manifestRoot`. `disposition` takes the launch's own words:
+`revived-from-ledger`, `clean-spawned`, `summoned-remote` (the local pre-wire
+check passed; nothing is sent), `skipped` and `failed`. A row the launch would
+skip (no resume argv) lists as `skipped`, with its `reason`, as the launch's own
+`skipped[]` reports it: the listing is every row the launch acts on, each with
+the disposition it reaches. `pickedByBare` is true on exactly the rows the bare
+`--project` form would revive: the newest ledger line of each undying id that is
+not alive now. A flag-mode `message` is the plan `plan_lines` words, one line
+per row; a bare-mode `message` is a header line, `manifest at ...`, then one
+line per spec. Each message line is spelled as the pending view spells a held
+plan line (`visible_held`); `data` stays raw. A dry run is never held or sent,
+on any door. From an unattested caller on a door that cannot approve, it gets
+what the call would give that caller, minus the launch: in bare mode the bare
+call's refusal; with `--id` or `--all` and no `--project`, the usage error the
+call gives; with `--project`, the `dry-run-not-held` refusal, since that call
+would hold and show the caller nothing. The handler audits a dry run with
+status `dry-run` (a refusal the same call would give is audited the same
+way), beside the line the door writes for every call: `ok` for a listing,
+`usage` for a usage error. A usage error or a stage-file miss gets no handler
+line, only the door's. The handler writes three things, and no others: its
+audit line (none for a usage error or a stage-file miss); on a host that still
+holds the legacy file, the one-time `carry.json` rename an undying read runs;
+and, on a host that still holds the legacy stage files, the one-time
+conducting-stage migration a stage read runs. Two writes come with any call,
+dry or real, outside the handler: the door's audit line, and the start-up
+migration both core binaries run, `aoide_storage::fs::migrate_root_once`. It
+locks `state/` owner-only when it exists and renames old peer state files.
+When the legacy `~/Aoide` root is not `$AOIDE_ROOT`, it moves that root's state
+unless `AOIDE_STATE_DIR` is set, and its log unless `AOIDE_AUDIT_LOG` is set and
+not empty.
+
 **Remote summon (U4, command-defrag lane U).** A spec whose `host` names a
 DIFFERENT box than this one is summoned through the existing node door, not
 skipped: `spec.host` resolves against `state/nodes.json`
@@ -5999,12 +6043,12 @@ never touched here.
 **Manifest-revived sessions are marked undying (orchestrator design
 ruling, U2) — LOCAL revivals only.** A remote summon (U4,
 above) never reaches this: the resurrected id lives on the node, not here.
-Both the LOCAL enrichment path and the LOCAL clean-spawn
-path pass the same `--undying` flag `resurrect_one`/`clean_spawn_from_spec`
-hand to their own internal `spawn` invocation — the identical
-mark-after-registration mechanic `aoide spawn --undying` runs (above), not
-a re-implementation, and gated the same way (marked only once the new
-session actually registers). Rationale: the manifest spec IS the durable
+Both the LOCAL enrichment path (`resurrect_one`) and the LOCAL clean-spawn
+path (`clean_spawn_from_spec`) mark their new id once the spawn returns
+`Status::Ok`, whether or not the session has registered by then, in
+`mark_manifest_revival_undying`. Neither spawn passes `--undying`: the
+`aoide spawn --undying` mark waits for registration, and this one does not.
+Rationale: the manifest spec IS the durable
 declaration of what should exist — marking its revived session undying
 means a LATER bare `resurrect --project <name>` (or the daemon's boot
 sweep) finds it in the undying set without needing to re-walk or
@@ -6013,9 +6057,9 @@ converge on the SAME durable set instead of tracking two independent
 notions of "what this project wants running." This is deliberately
 DIFFERENT from flag-mode's own transfer rule immediately above (which only
 ever marks a NEW id when the OLD ledger id it replaces was already
-undying) — a manifest-mode revival marks unconditionally, because there is
-no ordinary-revive case to protect against here: every manifest-mode spawn
-already came from an explicit, operator-authored declaration.
+undying) — a manifest-mode revival marks on `Status::Ok` alone, because
+there is no ordinary-revive case to protect against here: every manifest-mode
+spawn already came from an explicit, operator-authored declaration.
 
 **The picker's node writer (U3, command-defrag lane U; fixed
 the batch-poisoning defect below, same phase; relocated to `aoide session

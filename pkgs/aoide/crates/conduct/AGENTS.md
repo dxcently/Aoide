@@ -1178,6 +1178,41 @@ in the message.
   harness/terminal-arm resolver for the manifest path. No match
   clean-spawns via `clean_spawn_from_spec`, which reuses `session_spawn`'s
   own windowed path — don't hand-roll a second spawn call here either.
+- **A dry run decides with the launch's own helpers and launches nothing.**
+  `--dry-run` has no rule of its own. Flag mode lists what
+  `select_candidates` resolves, and `dry_run_listing` marks each row with the
+  same `resume_argv` check `resurrect_one` makes. Bare mode decides each spec
+  in `plan_spec`, with `resolve_spec_dir`, `enrichment`, `unresumed_reason`,
+  `clean_argv` and `summon_check`, the functions `resurrect_from_manifest`
+  calls too. Don't write a verdict into the dry path that the launch does not
+  also make, and don't copy a helper. The parity test
+  `dry_run_manifest_dispositions_match_the_real_launch_for_local_specs` pins
+  the two together.
+- **A dry run is never held or sent, on any door. From an unattested caller on
+  a door that cannot approve, it gets what the call would give, minus the
+  launch.** `session_resurrect_with` gives that: bare mode the refusal its
+  launch gives; `--id` or `--all` with no `--project` the usage error
+  `require_flag` gives, with no ledger, projects or manifest read before it (on
+  MCP, the attestation check reads the sessions stage first); with `--project`
+  the `dry-run-not-held` refusal, since the flag-mode launch would hold and show
+  that caller nothing. `plan_spec` takes a non-local spec's verdict from
+  `summon_check`, never from `spawn_on_node`. Don't route a dry run through
+  `hold_whole`, `send_restore`, `launch_session` or the node client.
+- **On an `--all` or `--id` call, only a dry run reads the undying set in
+  `select_candidates`.** It computes `pickedByBare` (`undying_picks`) only under
+  `dry-run`. A real call reads the set per revival, in `resurrect_one`, where a
+  legacy `carry.json` migrates on the first read. Keep the picks read gated on
+  the flag: a real call has no use for `pickedByBare`.
+- **`pickedByBare` is per row, and `--id` takes the first ledger line for its
+  id.** The bare form revives the newest ledger line of each undying id, so an
+  `--all` row is picked only if it is that line. `--id` takes the first match
+  in ledger order, which is the oldest exit, and it always has. On an undying
+  id with two lines, `--id` lists the oldest and marks it not picked. The dry
+  run shows the launch's own choice, so don't move `--id` to the newest here:
+  that would change what a real `--id` revives.
+- **A dry run's refusals audit under `dry-run`, at the points the real call
+  audits.** `audit_resurrect` maps every status to `dry-run` while the flag is
+  present. A usage error or a stage miss writes no line, on either path.
 - **`resolve_spec_dir` (`aoide_storage::manifest`, U2) is the ONLY
   place a manifest spec's `dir` becomes a filesystem path.** It refuses,
   never clamps, a `..` that would resolve outside the project root after
