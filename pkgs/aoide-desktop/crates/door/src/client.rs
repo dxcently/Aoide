@@ -13,8 +13,9 @@ use crate::token::read_token;
 
 const CONNECT: Duration = Duration::from_secs(5);
 /// The deadline a request waits under, from its send: a call's send, head and body
-/// together, or an events stream's send, head and hello (its body has none once
-/// the hello is read).
+/// together. An events stream's send, head, and every read until its hello share
+/// it, chunk-size lines and trailers included. Its body has none once the hello
+/// is read.
 const IO: Duration = Duration::from_secs(30);
 
 /// The longest reply a non-stream route reads.
@@ -81,11 +82,11 @@ impl Door {
         self.addr
     }
 
-    /// Shortens the deadline a request waits under, for the tests. It never
-    /// lengthens it past `IO`.
+    /// Shortens the deadline a request waits under, for the tests. A later call
+    /// never lengthens an earlier one, and none lengthens it past `IO`.
     #[cfg(feature = "fake")]
     pub fn with_timeout(mut self, timeout: Duration) -> Door {
-        self.timeout = timeout.min(IO);
+        self.timeout = self.timeout.min(timeout);
         self
     }
 
@@ -130,11 +131,12 @@ impl Door {
     }
 
     pub fn events(&self) -> Result<Events, DoorError> {
-        let (head, reader, hello_by) = self.exchange("GET", "/api/events", None, true)?;
+        let (head, reader) = self.exchange("GET", "/api/events", None)?;
         match head.status {
             200 => {
                 let socket = reader.get_ref().stream.try_clone()?;
-                Ok(Events::new(body_reader(&head, reader), socket, hello_by))
+                let deadline = reader.get_ref().deadline();
+                Ok(Events::new(body_reader(&head, reader), socket, deadline))
             }
             other => Err(common(other)),
         }
@@ -143,7 +145,7 @@ impl Door {
     /// One request whose reply is read whole: its send, head and body share one deadline.
     fn call(&self, method: &str, path: &str, body: Option<&Value>) -> Result<(u16, Vec<u8>), DoorError> {
         let bytes = body.map(|b| serde_json::to_vec(b).expect("a json value serializes"));
-        let (head, reader, _) = self.exchange(method, path, bytes.as_deref(), false)?;
+        let (head, reader) = self.exchange(method, path, bytes.as_deref())?;
         // An error status is decided by its head: its length and a cut body are not errors.
         let capped = head.status < 400;
         if let Some(length) = head.length.filter(|length| capped && *length > MAX_REPLY) {
@@ -162,17 +164,11 @@ impl Door {
 
     /// Reads the token under A6, connects, checks the listener before a byte is
     /// written, then sends the request and reads the reply's head. One deadline
-    /// starts before the send, and the writes and the head's reads share it. A
-    /// write that fails is reported only if no reply came: a door may answer
-    /// (413) before it has read the whole body. The deadline comes back with the
-    /// reader, so an events stream can hold it until its hello is read.
-    fn exchange(
-        &self,
-        method: &str,
-        path: &str,
-        body: Option<&[u8]>,
-        streaming: bool,
-    ) -> Result<(Head, BufReader<Wire>, Instant), DoorError> {
+    /// starts before the send, and the writes and the reads up to the end of the
+    /// head share it. A write that fails is reported only if no reply came: a
+    /// door may answer (413) before it has read the whole body. The reader holds
+    /// the deadline, so an events stream holds it until its hello is read.
+    fn exchange(&self, method: &str, path: &str, body: Option<&[u8]>) -> Result<(Head, BufReader<Wire>), DoorError> {
         let token = read_token(&self.runtime, &self.token_file, self.addr.port())?;
         let stream = TcpStream::connect_timeout(&self.addr, CONNECT)
             .map_err(|source| DoorError::Connect { addr: self.addr, source })?;
@@ -188,12 +184,7 @@ impl Door {
         );
         let mut reader = BufReader::new(Wire::new(stream.try_clone()?, deadline));
         match read_head(&mut reader) {
-            Ok(head) => {
-                if streaming {
-                    reader.get_mut().release()?;
-                }
-                Ok((head, reader, deadline))
-            }
+            Ok(head) => Ok((head, reader)),
             Err(e) => Err(match sent {
                 Err(io) => DoorError::Io(io),
                 Ok(()) => e,

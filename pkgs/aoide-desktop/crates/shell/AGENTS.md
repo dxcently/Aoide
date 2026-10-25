@@ -97,10 +97,11 @@ are in README.md.
   `EXIT_BOUND` (30 + 10 s), and a launch whose stream opens blocks up to
   `BANNER_BOUND` + `CONNECT` + `IO` (30 + 5 + 30 s). The `Doors` lock is held
   that long, so another door's call waits behind the launch.
-- The stream's send, head and hello share the door's 30 s deadline, `IO`. The
-  events stream holds it until the hello is read, so a door that answers 200 and
-  sends no hello ends its stream at that deadline, and `open_stream` refuses it
-  with the error named. A watch's reopen is bounded the same way (`CONNECT` +
+- The stream's send, head and every read until its hello share the door's 30 s
+  deadline, `IO`. The events stream holds it until the hello is read, so a door
+  that answers 200 and sends no hello, or drips one, ends its stream at that
+  deadline, and `open_stream` refuses it with the error named. That keeps the
+  launch bounds above. A watch's reopen is bounded the same way (`CONNECT` +
   `IO`, 35 s).
 - The turn state is known only from frames. `close_after_turn` refuses an
   `Unknown` turn. A stop now takes the cancel's own answer: 409 means idle, and

@@ -9,6 +9,7 @@
 
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::net::TcpStream;
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Instant;
 
 use crate::error::DoorError;
@@ -25,28 +26,30 @@ pub(crate) struct Head {
     pub length: Option<u64>,
 }
 
-/// A connection whose reads share one deadline: each read's timeout is the time
-/// left, so a head and a body read together stay within it.
+/// A connection whose reads share one deadline, held in a handle that the reader
+/// and its stream share. A read waits no longer than the time left, and a read
+/// that would start past the deadline is a timeout. While the handle holds no
+/// deadline, a read sets no timeout and waits as long as the peer takes.
 pub(crate) struct Wire {
     pub(crate) stream: TcpStream,
-    deadline: Option<Instant>,
+    deadline: Arc<Mutex<Option<Instant>>>,
 }
 
 impl Wire {
     pub(crate) fn new(stream: TcpStream, deadline: Instant) -> Wire {
-        Wire { stream, deadline: Some(deadline) }
+        Wire { stream, deadline: Arc::new(Mutex::new(Some(deadline))) }
     }
 
-    /// Ends the deadline: later reads wait as long as the peer takes.
-    pub(crate) fn release(&mut self) -> io::Result<()> {
-        self.deadline = None;
-        self.stream.set_read_timeout(None)
+    /// The handle the reads share. Setting it to `None` ends the deadline.
+    pub(crate) fn deadline(&self) -> Arc<Mutex<Option<Instant>>> {
+        Arc::clone(&self.deadline)
     }
 }
 
 impl Read for Wire {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        if let Some(deadline) = self.deadline {
+        let deadline = *self.deadline.lock().unwrap_or_else(PoisonError::into_inner);
+        if let Some(deadline) = deadline {
             let left = deadline.saturating_duration_since(Instant::now());
             if left.is_zero() {
                 return Err(io::Error::new(io::ErrorKind::TimedOut, "the reply ran past its deadline"));

@@ -517,6 +517,45 @@ fn an_events_stream_whose_hello_never_comes_ends_in_an_error_at_its_deadline() {
     assert!(started.elapsed() < Duration::from_secs(2), "refused {:?} after the head, over 1 s plus 1 s", started.elapsed());
 }
 
+/// A hello that drips one byte every 400 ms, inside a chunk-size line that never
+/// ends. Each byte is a read, so the stream's deadline has to hold at every read,
+/// not only at the start of the one `next()` call.
+#[test]
+fn a_hello_that_drips_past_its_deadline_is_an_io_error_at_it() {
+    let (_rt, fake, door) = fixture("events-drip");
+    let door = door.with_timeout(Duration::from_secs(1));
+    let head = b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nTransfer-Encoding: chunked\r\n\r\n";
+    let mut pieces: Vec<(Duration, &[u8])> = vec![(Duration::ZERO, head.as_slice())];
+    pieces.extend((0..20).map(|_| (Duration::from_millis(400), b"0".as_slice())));
+    fake.reply_raw("/api/events", &pieces, false);
+    let started = Instant::now();
+    let mut events = door.events().expect("the head is 200");
+    let (tx, rx) = mpsc::channel();
+    thread::spawn(move || {
+        let _ = tx.send(events.next());
+    });
+    let item = rx.recv_timeout(Duration::from_secs(4)).expect("next() gives an item within 4 s");
+    assert!(matches!(item, Some(Err(DoorError::Io(_)))), "a drip past the deadline is an io error");
+    assert!(started.elapsed() < Duration::from_secs(2), "refused {:?} after the head, over 1 s", started.elapsed());
+}
+
+/// A shorter timeout given first is not lengthened by a longer one after it.
+#[test]
+fn a_later_longer_timeout_does_not_lengthen_an_earlier_one() {
+    let (_rt, fake, door) = fixture("events-chain");
+    let door = door.with_timeout(Duration::from_secs(1)).with_timeout(Duration::MAX);
+    let head = b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n";
+    fake.reply_raw("/api/events", &[(Duration::ZERO, head.as_slice())], false);
+    let started = Instant::now();
+    let (tx, rx) = mpsc::channel();
+    thread::spawn(move || {
+        let _ = tx.send(door.events().is_err());
+    });
+    let refused = rx.recv_timeout(Duration::from_secs(4)).expect("events() gives an answer within 4 s");
+    assert!(refused, "a head that never completes is refused");
+    assert!(started.elapsed() < Duration::from_secs(2), "refused {:?} after the send, over 1 s", started.elapsed());
+}
+
 #[test]
 fn a_timeout_too_long_to_add_to_an_instant_does_not_panic() {
     let (_rt, _fake, door) = fixture("timeout-max");

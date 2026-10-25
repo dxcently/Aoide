@@ -53,11 +53,11 @@ are in README.md.
 - A request's send, and its reply's head and body, share one 30 s deadline that
   starts before the send. Each write's and read's timeout is the time left, and
   a write that would start past the deadline is refused as a timeout. An events
-  stream's send, head and hello share its 30 s. Until the hello is read, each
-  body read waits no longer than the time left, and a read that would start past
-  the deadline is a timeout; once it is read, the body has none. The connect has
-  5 s. `with_timeout` takes the shorter of its duration and 30 s: a test can
-  shorten the deadline, never lengthen it.
+  stream's send, head and every read until its hello share its 30 s, chunk-size
+  lines and trailers included. Once the hello is read, the body has none. The
+  connect has 5 s. `with_timeout` takes the shorter of its duration and the
+  current deadline, so a test can shorten the deadline, and a later call never
+  lengthens an earlier one.
 - A write that fails is reported only if no reply came: a door may answer 413
   before it has read the body.
 - A `data:` frame over 1 MiB is dropped and counted by `dropped_oversize()`,
@@ -68,9 +68,10 @@ are in README.md.
   number past u32 is refused. A first frame that is not `hello` is
   `Malformed`; a `protocol` other than 1 is `Protocol { got }`, whose message
   prints a number as it is and any other value by its JSON type. Each ends the
-  stream, and so does a second `hello` (`Malformed`), and a hello that does not
-  come by the deadline (`Io`, a timeout). An unknown frame type is
-  `Frame::Other`. An unknown field is ignored. Neither is an error.
+  stream, and so does a second `hello` (`Malformed`). A hello that does not come
+  by the deadline ends the stream as `Io`, a timeout, however it is framed. An
+  unknown frame type is `Frame::Other`. An unknown field is ignored. Neither is
+  an error.
 - No `unsafe` in this crate: the workspace forbids `unsafe_code` for every
   target. The effective uid comes from `/proc/self/status`. The open and the
   stat use std.
