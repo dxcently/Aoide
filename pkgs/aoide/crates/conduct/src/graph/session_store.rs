@@ -6244,10 +6244,10 @@ mod letter_sweep_tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// **The tick drops every receipt, whatever its flavour or session, with one
-    /// line each (ruling 131).** A live, a held, a parked and a session-bound
-    /// receipt all go. A charter, a relayed receipt (transit custody) and a live
-    /// letter stay.
+    /// **The tick drops every receipt, whatever its flavour, session or seal,
+    /// with one line each (ruling 131).** A live, a held, a parked, a
+    /// session-bound and a sealed receipt all go. A charter, a transit entry
+    /// and a live letter stay.
     #[test]
     fn the_sweep_drops_every_receipt_and_keeps_charters_transit_and_live_letters() {
         use aoide_storage::mail::{ENTRY_TYPE_CHARTER, ENTRY_TYPE_TRANSIT};
@@ -6260,6 +6260,25 @@ mod letter_sweep_tests {
         parked.last_outcome = "refused: bad-msgid".to_string();
         let mut bound = OutboxEntry::fresh(receipt_envelope("rcpt-bound"));
         bound.session = Some("live".to_string());
+        let sealed_receipt = OutboxEntry::sealed(
+            receipt_envelope("rcpt-sealed"),
+            aoide_storage::seal::Container {
+                v: aoide_storage::seal::CONTAINER_VERSION,
+                purpose: aoide_storage::seal::PURPOSE_MAIL.to_string(),
+                msgid: "rcpt-sealed".to_string(),
+                generation: 1,
+                origin: aoide_storage::seal::Party { node: "here".to_string(), key: "aa".repeat(32) },
+                to: aoide_storage::seal::Destination { node: "far".to_string(), age: "age1x".to_string() },
+                origin_mesh: "home".to_string(),
+                mesh: "home".to_string(),
+                suite: aoide_storage::seal::SUITE_AGE_V1_X25519.to_string(),
+                ct: "00".to_string(),
+                sig: "00".to_string(),
+                transit: Vec::new(),
+                board: None,
+                epoch: None,
+            },
+        );
         let mut charter = OutboxEntry::fresh(letter_envelope("msg-charter"));
         charter.envelope.header.kind = ENTRY_TYPE_CHARTER.to_string();
         let mut transit = OutboxEntry::fresh(letter_envelope("msg-transit"));
@@ -6269,6 +6288,7 @@ mod letter_sweep_tests {
             OutboxEntry::held(receipt_envelope("rcpt-held")),
             parked,
             bound,
+            sealed_receipt,
             charter,
             transit,
             returned_letter("msg-live", Some("live")),
@@ -6283,8 +6303,8 @@ mod letter_sweep_tests {
             vec!["msg-charter".to_string(), "msg-live".to_string(), "msg-transit".to_string()],
         );
         let lines = audit_lines("mail.outbox.dropped");
-        assert_eq!(lines.len(), 4, "one line per dropped receipt: {lines:?}");
-        for msgid in ["rcpt-now", "rcpt-held", "rcpt-parked", "rcpt-bound"] {
+        assert_eq!(lines.len(), 5, "one line per dropped receipt: {lines:?}");
+        for msgid in ["rcpt-now", "rcpt-held", "rcpt-parked", "rcpt-bound", "rcpt-sealed"] {
             let line = format!("dropped receipt {msgid} toward far (pre-131");
             assert!(lines.iter().any(|l| l.contains(&line)), "{msgid}: {lines:?}");
         }
@@ -6313,14 +6333,16 @@ mod letter_sweep_tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// **A relayed receipt is transit custody, and the tick leaves it alone.** A
-    /// hub keeps someone else's receipt until the next hop accepts it; slice 11
-    /// owns that rule, and the pre-131 pass does not reach it.
+    /// **A transit-kind entry is hub custody, and the tick leaves it alone.**
+    /// The fixture is a letter envelope whose kind is set to transit. A hub
+    /// keeps someone else's container until the next hop takes it; slice 11
+    /// owns that
+    /// rule, and the pre-131 pass does not reach it.
     #[test]
-    fn a_relayed_receipt_is_transit_custody_and_survives_the_tick() {
+    fn a_transit_kind_entry_survives_the_tick() {
         use aoide_storage::mail::ENTRY_TYPE_TRANSIT;
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let (_env, dir) = root("bridge-sweep-relayed-receipt");
+        let (_env, dir) = root("bridge-sweep-transit-kind");
         roster(&[("live", "running")]);
         let mut relayed = letter_envelope("msg-relayed");
         relayed.header.kind = ENTRY_TYPE_TRANSIT.to_string();

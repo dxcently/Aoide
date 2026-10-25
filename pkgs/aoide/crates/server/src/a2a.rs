@@ -3085,13 +3085,12 @@ fn deposit_answer(outcome: &aoide_storage::mail::DepositOutcome, from_node: &str
 /// A filed **letter** is answered `accepted` and nothing more: its filing is
 /// its own answer, so no receipt is minted or spooled toward the origin
 /// (ruling 131). A filed **receipt**, from an older build, is the other leg:
-/// [`aoide_storage::outbox::retire_by_ack`] retires the local outbox entry it
-/// confirms (spec item 7) — a pure storage-crate lookup keyed on the receipt's
-/// own verified `from.node` and `text` (the acked msgid), so a forged or stale
-/// ack simply finds no matching entry and retires nothing (see that function's
-/// own doc for why the lookup alone proves both of spec item 7's checks). A
-/// **duplicate** is answered `duplicate` and nothing more: the filing already
-/// answered the letter (spec item 5).
+/// [`aoide_storage::outbox::retire_by_ack`] retires the local own `letter` it
+/// confirms and nothing else. It is a storage-crate lookup keyed on the
+/// receipt's own verified `from.node` and `text` (the acked msgid), so a forged
+/// or stale receipt finds no such letter and retires nothing (see that
+/// function's own doc). A **duplicate** is answered `duplicate` and nothing
+/// more: the filing already answered the letter (spec item 5).
 fn mail_deposit(params: &Value, ctx: &RequestCtx) -> Result<Value, (i64, String)> {
     // MAIL.md §Status: the declarations are read ONCE per request, for the mail
     // methods only, and an unloadable set refuses here — before anything is
@@ -3208,12 +3207,12 @@ fn mail_deposit(params: &Value, ctx: &RequestCtx) -> Result<Value, (i64, String)
     };
     let _ = audit(ctx.audit_log, Door::A2a, EventClass::Audit, "a2a.aoide/mailDeposit", audit_status, &audit_detail);
 
-    // Everything a filed/duplicate envelope does here — mint and spool the
-    // ack, retire an entry this receipt confirms — hangs off the outcome
+    // Everything a filed/duplicate envelope does here hangs off the outcome
     // alone, so it lives in ONE shared function
     // (`aoide_client::mail_wire::settle_deposit`, through its bridge) that
-    // the poll's own hand-over loop calls too. This arm only SHAPES the
-    // answer.
+    // the poll's own hand-over loop calls too: a letter owes nothing, and an
+    // older build's receipt retires only the own letter it confirms. This arm
+    // only SHAPES the answer.
     aoide_conduct::mail_bridge::settle_deposit(&envelope, &outcome);
 
     Ok(deposit_answer(&outcome, &envelope.header.from.node))
@@ -3698,12 +3697,13 @@ fn deposit_sealed(
         aoide_storage::seal::ContainerOutcome::Refused { reason, detail } => {
             Ok(json!({ "status": "refused", "reason": reason, "detail": detail }))
         }
-        // A hop: nothing is filed as correspondence, no reader is rung and NO
-        // ACK is minted — the letter is not here, it is on its way, and only the
-        // destination's own receipt may tell an origin otherwise. The container
-        // is filed as `transit` and spooled toward `next`; the answer is the
-        // hop taking custody, which is exactly what `accepted` means to a drain
-        // (the entry stays spooled until a real receipt retires it).
+        // A hop: nothing is filed as correspondence, no reader is rung and no
+        // receipt is minted — the letter is not here, it is on its way, so this
+        // box answers for the custody it takes and no more. The container is
+        // filed as `transit` and spooled toward `next`; the answer is the hop
+        // taking custody, which is exactly what `accepted` means to a drain.
+        // The entry leaves this spool when the next hop's own verified answer
+        // takes it, never on a receipt from the destination.
         aoide_storage::seal::ContainerOutcome::Hopped(hop) => {
             // A charter letter for THIS box is admitted on its enclosed charter
             // alone (above); one for another node is this box's custody, and
@@ -3747,9 +3747,9 @@ fn deposit_sealed(
                 }
             }
             if !hop.held {
-                // Best-effort, exactly like the destination's own post-filing
-                // drain. The container is on this box's disk now, so a dial that
-                // fails costs a later pass (the daemon's sweep) and nothing else.
+                // Best-effort. The container is on this box's disk now, so a
+                // dial that fails costs a later pass (the daemon's tick,
+                // `drain_all`) and nothing else.
                 let _ = aoide_conduct::mail_bridge::drain_node(&hop.next);
             }
             Ok(json!({

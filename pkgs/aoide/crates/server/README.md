@@ -514,18 +514,19 @@ terminal's rights to its remote callers.
   through the charter line (`declared_caller_name` → `routing::declared_name`),
   never the `nodes.json` nickname. It never rings the doorbell itself (P-M5a-2c:
   the resident daemon is the policy and audit boundary for every ring, so this
-  door files and acks and stops there) — a remotely-deposited letter arms its
+  door files and answers and stops there) — a remotely-deposited letter arms its
   readers exactly like a locally-filed one, but is rung only by the next
   daemon-side trigger for that name (a reader's Stop hook, a local filing, `mail
   ring` by hand), until a later slice (P-M5b-2) gives this door its own forward
   path to the daemon. A filed **receipt from an older node** never rings — it is
   not arming mail (`aoide_storage::mail`'s own `arms` predicate) — and instead
-  retires the local outbox entry it confirms via
-  `aoide_storage::outbox::retire_by_ack` (spec item 7 — a pure lookup keyed on
-  the receipt's own verified origin and acked msgid, so a forged or stale
-  receipt simply retires nothing). A duplicate receipt retires that entry the
-  same way. Every `outbox` call here runs strictly AFTER
-  `mail::deposit` has already released its own lock — `mail` and `outbox` share
+  retires the own letter it confirms, if any, via
+  `aoide_storage::outbox::retire_by_ack` (a lookup keyed on the receipt's own
+  verified origin and acked msgid; a forged or stale receipt retires nothing,
+  and a transit, charter or receipt entry is never retired by it). A duplicate
+  receipt goes through the same call. Every `outbox` call here runs strictly
+  AFTER `mail::deposit` has already released its own lock — `mail` and
+  `outbox` share
   the identical non-reentrant stage-lock primitive, so nesting one inside the
   other would deadlock a process against itself. **`aoide/mailPoll` (P-M3,
   `docs/architecture/MAIL.md`, CONTRACTS.md §6) is the relay-first half of the
@@ -546,7 +547,8 @@ terminal's rights to its remote callers.
   been failing. **A poll writes no `tries`, no bookmark and no new state file
   anywhere**: its hand-over may seal an entry or park it, and writes no try and
   no outcome for a container it hands over. An entry retires only on its
-  confirmation: a valid receipt from an older node, `mail outbox rm`, a held own
+  confirmation: a valid receipt from an older node naming an own letter,
+  `mail outbox rm`, a held own
   letter the poll of the hop it was spooled toward files, or an own letter whose
   session ended (ruling 131). A re-poll hands the same envelopes over again by
   construction. It self-audits UNCONDITIONALLY under its own

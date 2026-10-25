@@ -765,8 +765,10 @@ by decision — no embedded database yet
   while any reader has unread letters unless forced, and audited before the
   removal (a box whose audit cannot be written is kept).
 
-  P-M2 adds the wire for directly-paired nodes: `mint_outbound_letter`/
-  `mint_ack` seal a fresh envelope with THIS instance's own identity key
+  P-M2 adds the wire for directly-paired nodes: `mint_outbound_letter` seals a
+  fresh envelope with THIS instance's own identity key (`mint_ack` does the
+  same for a receipt, and only as an older-peer test fixture: no production
+  path mints one, ruling 131)
   (`from.node` is the name the caller states: `mint_outbound_letter_from` takes
   it, and the unnamed forms state `display::local_node_name()`
   — `self` never crosses the wire, and the form it crosses as is the ADDRESS
@@ -790,13 +792,13 @@ by decision — no embedded database yet
   exactly P-M1's shape, addressed at a real node instead of `self`.
 
   A hop writes no store line. `seal::file_transit_hop` records the hop in the
-  audit log and spools the container toward the next hop; the hub's own spool
-  entry retires when that hop HAS the letter (`outbox::retire_acknowledged`
-  when a poller names the msgid in `filed`, the deposit's own acceptance on a
-  drain) — never on a receipt from the destination (no node sends one now,
-  ruling 131). A
-  poller's refusal of a held letter of the hub's own returns it instead
-  (`outbox::return_refused`); a transit entry is never returned.
+  audit log and spools the container toward the next hop. The hub's own spool
+  entry retires when that hop HAS the letter: on a drain, by the hop's verified
+  `accepted` or `duplicate`; on a poll, when the poller names the msgid in
+  `filed` (`outbox::retire_acknowledged`). Never on a receipt from the
+  destination (no node sends one now, ruling 131). A poller's refusal of a held
+  letter of the hub's own returns it instead (`outbox::return_refused`); a
+  transit entry is never returned.
 
   P-M5a-1 adds the doorbell's own state and its safety floor: `arms(kind)`
   is the one place that decides which entry kinds ring (`letter` only,
@@ -849,12 +851,11 @@ by decision — no embedded database yet
   drain holds across its whole dial cycle — two locks, two jobs, never
   conflated (this module's own doc has the full reasoning). Pure spool
   CRUD only: `write_entry`/`update_entry`/`list_entries`/`remove_entry`,
-  `retire_by_ack` (spec item 7's two checks — verified signer is the
-  entry's `to.node`, text names the entry's `msgid` — folded into ONE path
-  lookup: an entry is always spooled under its own `to.node`, so indexing
-  by the ack's already-origin-verified `from.node` IS the signer check, and
-  keying by `msgid` makes a wrong `text` a plain miss; a `text` that is not
-  one msgid retires nothing before that lookup is made) and the link-state
+  `retire_by_ack` (the one own `letter` a receipt confirms, and nothing
+  else: the receipt's text must be one msgid naming a spooled letter whose
+  `to.node` is the receipt's verified `from.node`, in the receipt's mesh;
+  each retirement writes one `mail.outbox.retired` line first; a transit,
+  charter or receipt entry is never retired by it) and the link-state
   trio (`read_link_state`/`back_off`/`clear_link_state`, backoff off a
   `DRAIN_BACKOFF_FLOOR_SECS` floor doubling up to its own
   `BACKOFF_CEILING_SECS` (15 min) ceiling — deliberately not
@@ -865,12 +866,11 @@ by decision — no embedded database yet
   learnt or declared) when one is usable, parked when one is on record but not
   usable, and otherwise travels as an envelope. A relayed one is sealed to its
   destination or withheld (`Reseal::Withheld`), never to
-  the hop.
-  `ack_marker_path` names the `<node>/.ack/<acked_msgid>` marker an older build
-  wrote beside a spool. Nothing writes one now (ruling 131); `remove_entry`
-  still clears the marker a receipt entry names, in the same locked section,
-  by reading the one file it is about to delete. No network,
-  no HTTP, no tunnel — the actual dial+POST lives in
+  the hop. An older build's `<node>/.ack/<acked_msgid>` markers and
+  `reacks.log` are inert: nothing in this crate writes, reads or removes
+  them (ruling 131), and `remove_entry` deletes the one entry file it names
+  and nothing else. No network, no HTTP, no tunnel — the actual dial+POST
+  lives in
   `aoide-client::mail_wire` (bounded to `DRAIN_BATCH_CAP` entries per
   `drain_node` call, and recording `tries`/`lastOutcome`/`lastTryAt` on
   the entry a transport failure actually hit before backing off), a thin
@@ -896,10 +896,12 @@ by decision — no embedded database yet
   no bookmark and no new file**: its hand-over may write a sealed upgrade or a
   park (`hand_over`), and never a try or an outcome for a container it hands
   over, which is why a re-poll hands the same envelopes over again. An entry
-  leaves the spool only on its confirmation: a valid receipt from an older
-  node, a held letter's filed name, a live dial's verified answer,
-  `mail outbox rm`, or an own letter's session end or the tick's sweep of a
-  letter or a receipt (ruling 131). The offer is
+  leaves the spool only on its confirmation, and each kind has its own: an own
+  letter on a valid receipt from an older node, on its filed name in a poll,
+  or on a live dial's verified answer; a transit entry on its next hop's
+  verified answer or its poller's `filed` name; any entry by `mail outbox rm`;
+  an own letter when its session ends; and a letter or receipt the tick's
+  pre-131 sweep drops (ruling 131). The offer is
   bounded at `POLL_BATCH_CAP` (50 — the drain's own batch size,
   re-derived rather than imported, since `storage` sits below `client` in
   the DAG), oldest first, and the cap applies AFTER the filter for the

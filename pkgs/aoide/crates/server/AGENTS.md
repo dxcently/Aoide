@@ -264,6 +264,13 @@ a2a spawn probe needs `/bin/sh` + `printf`'s byte-exact output.
   `aoide_conduct::mail_bridge::drain_all`, so a letter whose session has ended,
   and a receipt, is never dialled. Keep that order: a drain first would dial a
   letter the same tick is about to drop.
+- **The door drains nothing after filing.** `settle_deposit` spools and dials
+  nothing, so a charter or transit entry toward the origin leaves on the
+  daemon's tick (`drain_all`) or on a hop's own drain: the hop arm of
+  `mail_deposit` drains the next hop unless the container is held. The door's
+  unit is bound to `aoided.service` (`modules/dendrites/aoided.nix`), which
+  runs the tick, so a door started without `aoided` leaves those entries until
+  a tick runs.
 - **This crate's own `env_lock()` (`lib.rs`)'s first call in a test binary
   also floors `$AOIDE_STAGE_DIR` at a fresh private tempdir, unless a test
   already set one (P-D6 safety net).** `daemon::run_loop`'s tick now
@@ -963,12 +970,12 @@ a2a spawn probe needs `/bin/sh` + `printf`'s byte-exact output.
   until a later slice (P-M5b-2) gives this door its own forward path to
   the daemon; don't reach for `aoide_conduct::graph::ring` here to close
   that gap early. A filed **receipt from an older node** instead calls
-  `aoide_storage::outbox::retire_by_ack` (spec item 7) — a pure lookup keyed on
-  the receipt's own verified `from.node`/acked-msgid, so a forged or stale
-  receipt finds no matching entry and retires nothing; don't add a second,
-  independent verification step here, the lookup itself already proves both of
-  spec item 7's checks (see that function's own doc). A **duplicate** receipt
-  retires its entry the same way.
+  `aoide_storage::outbox::retire_by_ack`, which retires only the own `letter` it
+  names (its `to.node` must be the receipt's verified signer, in the same mesh).
+  A forged or stale receipt finds no such letter and retires nothing. Don't add
+  a second verification step here: `mail::deposit` has already proven the
+  signer, and the lookup proves the rest (see that function's own doc). A
+  **duplicate** receipt goes through the same call.
 - **`aoide/mailPoll` (P-M3) is the SAME admission question asked one node
   narrower, and the hand-over side of mail rather than the deposit side.**
   `poll_admitted` = `may_message` PLUS `params.node == the resolved
@@ -1010,8 +1017,9 @@ a2a spawn probe needs `/bin/sh` + `printf`'s byte-exact output.
   the count it ignored. No
   bookmark and no "already handed over" flag may be added here: the
   re-poll idempotence comes from handing the SAME set over again, and the entry
-  retires only on its confirmation: a valid receipt from an older node, a held
-  own letter the poll of the hop it was spooled toward files, `mail outbox rm`,
+  retires only on its confirmation: a valid receipt from an older node naming
+  an own letter, a held own letter the poll of the hop it was spooled toward
+  files, `mail outbox rm`,
   or an own letter's session ending (ruling 131), exactly as a pushed deposit's
   would.
   The answer is bounded by

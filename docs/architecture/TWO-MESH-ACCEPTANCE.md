@@ -36,8 +36,8 @@ test would read as a pass. `openssl` is needed unless the run uses a live gate.
 A passing run removes its roots; a failing run keeps them and prints the path,
 with every command's stdout and stderr under `runs/`.
 
-Until the cross-mesh receipt route is built, the run fails on A6b alone. Every
-other assertion passes.
+Until transit and hub custody is built, the run fails on A5, and A6 never runs.
+Every other assertion passes.
 
 ## Run it against a live gate
 
@@ -67,7 +67,7 @@ rest run unchanged, and a missing tool still fails the run.
 | A5n | Without the origin's charter the destination refuses the letter `unverified-origin`, and the gate keeps it. |
 | A5 | With the origin's charter the destination files exactly that letter, origin verified. |
 | A6 | A reply travels back the same way and is filed. |
-| A6b | The receipt for the first letter returns to homebox and retires it from homebox's outbox: the ack takes the same four steps back across the gate. **Expected to fail until the cross-mesh receipt route is built.** |
+| A6b | The gate's verified `accepted` for the first letter retires it from homebox's outbox: that answer is the delivery, and no receipt travels back (ruling 131). |
 | A7 | From inside each fence the gate answers. 1.1.1.1:443, UDP 8.8.8.8:53, TCP port 22 (on 1.1.1.1 and on the gate's address), and the gate's front and adapter ports on 127.0.0.1 do not. The host reaches the front and the adapter, so the refusals are the fence's. |
 | A8 | With no CA bundle, https fails at verification (exit 60), nothing is filed, and a send stays spooled. |
 | A9b | A letter to a mesh with no gate is refused `no-route` at the gate. The sender hands it to its relay first. |

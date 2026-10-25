@@ -98,10 +98,12 @@ FidoNet node could.
 9. **The full BSO outbox.** A per-node spool at the sender
    (`state/outbox/<node>/`), a transfer-invariant content-hash `msgid` on
    every envelope, flavors `now`/`hold`, per-link backoff/try state.
-   Transit entries and receipts live until the destination's end-to-end
-   acknowledgement. An own letter is dialled at once instead: it leaves the
-   box on a verified answer, waits there only when it is held, or comes back
-   to its sender when it is returned, until its session ends (ruling 131).
+   A transit entry lives until its next hop takes it: a drain ends it on that
+   hop's verified `accepted` or `duplicate`, a poll on the poller's `filed`. A
+   receipt is never dialled, offered or retried: the tick drops it. An own
+   letter is dialled at once instead: it leaves the box on a verified answer,
+   waits there only when it is held, or comes back to its sender when it is
+   returned, until its session ends (ruling 131).
 10. **Envelopes are origin-signed.** The sending node signs the letter
     with its identity key; the destination verifies the ORIGIN regardless
     of path. A transit node can delay or drop — never read (decision 17)
@@ -328,8 +330,8 @@ An entry is an envelope plus local facts:
   section, so a second process opening concurrently finds either the
   old file or the finished base, never a half-copied one. The old
   per-entry read flag has no high-water counterpart and is not carried:
-  every migrated entry is unread once. Acks are receipts addressed back
-  to the origin.
+  every migrated entry is unread once. A receipt row is a `receipt` entry
+  addressed back to the origin.
 - `type=post` entries are opened board posts, filed once per node and
   carrying their board id (§Boards). A charter letter and a wrap are
   applied, not filed as correspondence: the charter to `state/mesh/`, the
@@ -432,8 +434,7 @@ reader of its box has read it: the floor is the lowest reader mark, zero when
 a box has no readers, so an unread letter is never reclaimed. A dead session's
 mark stops holding the floor down once the reaper retires it. A refused flood
 against a box nobody has read rewrites nothing. A full box refuses before
-anything is written and before any ack is owed, so the sender keeps the
-letter and retries.
+anything is written, so the sender keeps the letter and retries.
 
 **Lock-hold bounds.** A read or write of one box holds the stage lock for that
 box's size, at most 16 MiB. Some operations read every box and the receipts
@@ -583,11 +584,12 @@ door's audit name whitelist gains both names so they never log as bare
      and a re-offer that finds it filed spools nothing (ruling 131);
   6. file (`letter` if `to.node` is self, else `transit`), ring the
      doorbell, and if `to.node` is not self, re-spool (§Transit). A
-     `transit` filing rings nothing and owes NO ack: the hub appends its own
-     hop signature naming the `next` node the route picks, spools the
+     `transit` filing rings nothing and owes nothing back: the hub appends its
+     own hop signature naming the `next` node the route picks, spools the
      container toward that node (held when the route says the node asks for
-     itself), and retires its own custody when that hop takes it — on a drain,
-     by the deposit's acceptance; on a poll, by the poller's next poll naming
+     itself), and retires its own custody when that hop takes it: on a drain,
+     by that hop's verified `accepted` or `duplicate`; on a poll, by the
+     poller's next poll naming
      the msgid in `filed`, since a hand-over it never acknowledged may have
      been lost. The origin's custody ends on the next hop's verified
      `accepted` or `duplicate` answer, and no receipt travels back to it
@@ -750,8 +752,9 @@ door's audit name whitelist gains both names so they never log as bare
   receipt, and no node sends a receipt letter: filing a letter, answering a
   duplicate of a filed one, and filing from a poll owe the origin nothing and
   spool nothing toward it. A receipt that arrives from a build before ruling
-  131 is still filed or answered under the rules below, and retires the letter
-  it names. That path stays until no such build is left.
+  131 is still filed or answered under the rules below, and retires only the own
+  letter it names, and only when its signer is that letter's `to.node` in the
+  same mesh. That path stays until no such build is left.
   A receipt's `text` is exactly one msgid — 64 lowercase hex digits and
   nothing around them. Any other text is refused `bad-msgid` and files
   nothing, because the text names a letter and nothing else.
@@ -770,29 +773,34 @@ door's audit name whitelist gains both names so they never log as bare
   beyond the receipt index, so this box cannot tell a late receipt for its own
   letter from a receipt for a letter it never sent.
   **An outbox entry retires when its delivery is confirmed, and what counts as
-  confirmation depends on what the entry is.** For a `letter`: a receipt
-  arrives whose verified signer is the entry's `to.node` and whose text names
-  the entry's `msgid`, and it retires the letter on its first filing. A
-  `receipt` entry is never dialled (ruling 131): the tick drops one that a
-  build before the rule spooled. For a `charter` letter the same
-  holds for a stronger reason: the enclosed charter is APPLIED, not filed, so
-  there is no mailbox on the far end to ack from at all, and its own deposit
-  outcome is the whole confirmation there can be.
+  confirmation depends on what the entry is.** A `letter` retires on its
+  dialled node's verified `accepted` or `duplicate`, or, when held, on the
+  poller's `filed` name (ruling 131). A letter from a build before the rule
+  retires on a receipt whose verified signer is the entry's `to.node`, in the
+  letter's mesh, with text naming its `msgid`. A `transit` container retires
+  when its next hop takes it, on that hop's verified `accepted` or `duplicate`
+  or on the poller's `filed` name. A `charter` letter is APPLIED, not filed, so
+  there is no far mailbox that could hold a receipt: its verified deposit
+  outcome is the whole confirmation there can be. A `receipt` entry is never
+  dialled (ruling 131): the tick drops one that a build before the rule
+  spooled.
   **A deposit's answer is written back only onto an entry still spooled.**
-  The far end may drain its receipt straight back to this box before it
-  answers the deposit, so a letter can be retired while the drain that sent it
-  is still waiting on the answer. The write-back that follows is a no-op for a
-  retired letter; it never re-spools it. A letter re-spooled by its own answer
-  would be re-offered on the next drain, and retired again, once per drain, for
-  ever.
+  An older build's far end may drain its receipt straight back to this box
+  before it answers the deposit, so a letter can be retired while the drain
+  that sent it is still waiting on the answer. The write-back that follows is
+  a no-op for a retired letter; it never re-spools it. A letter re-spooled by
+  its own answer would be re-offered on the next drain, and retired again, once
+  per drain, for ever.
   **Older builds.** An older sender to a node that has ruling 131 keeps its
   delivered letter and re-dials it, getting `duplicate`, until it is rebuilt;
   the rebuilt sender's pre-131 pass then drops the letter. That wait is accepted.
   **Inert files.** An older build's `state/mail/reacks.log` (and its `.1`) and
   its `.ack/` markers are read by nothing, and no code removes them. They are
   safe to delete by hand.
-  A hub cannot sign a receipt as the destination, so it cannot make an origin
-  stop retrying.
+  A hub cannot sign a receipt as the destination. Its own verified `accepted`
+  still ends the sender's copy, so a hub that accepts a letter and then drops
+  it loses it without a word: the trade ruling 131 makes (§Transit, "A relay's
+  verified `accepted` is the sender's delivery").
 
 **Lane and payload.** P-M2 built this wire with an origin-signed envelope
 whose `text` is plaintext, carried by the loopback/SSH transport. From P-SEAL
@@ -888,8 +896,9 @@ link.json       { "holdUntil": ts, "lastError": "…" }   per-link backoff
   ceiling. The drain goes on to the next entry in the same pass, and a
   deferred entry takes no place in the batch until its window passes.
   Deferred entries are offered to a poll on the same rule.
-- `now` entries other than own letters are attempted on every drain (an own
-  letter is dialled by its send, ruling 131). `hold` entries are never
+- `now` entries other than own letters and receipts are attempted on every
+  drain (an own letter is dialled by its send, ruling 131; a receipt is never
+  dialled). `hold` entries are never
   attempted — they leave only through the node's `mailPoll`, and a held own
   letter leaves when the hop it was spooled toward files it. A node
   declared `hold` in the mesh config makes every entry toward it `hold`
@@ -911,13 +920,13 @@ link.json       { "holdUntil": ts, "lastError": "…" }   per-link backoff
   end's msgid dedup still holds.
 - A `down` node's directory is skipped entirely; entries whose ORIGIN is
   `down` are dropped at the next drain.
-- An entry retires only on a valid ack (above), on its destination's poll
-  filing it (a held own letter, or a transit entry), or on
+- An entry retires only on its confirmation (§Wire, "Receipts"), on the poll
+  that files it (a held own letter, or a transit entry), or on
   `aoide mail outbox rm <msgid>`. A verified `accepted` or `duplicate` for an
   own letter, which its send or a retry gets back, is the delivery itself and
   leaves nothing behind. `mail outbox retry` never retires anything by itself.
-  A receipt that retires an own letter writes one `mail.outbox.retired` audit
-  line.
+  A receipt from an older build that retires an own letter writes one
+  `mail.outbox.retired` audit line.
   An own letter also leaves with its sending session: when that session leaves
   the roster (ended, reaped, or a hook death), every returned or held letter
   bound to it is dropped, one `mail.outbox.dropped` audit line each (reason
@@ -1643,16 +1652,16 @@ authoritative first:
   refusal is NOT this: it is a state of the LINK, so the entry stays
   `retrying` on its own back-off until the peer's declaration loads again or
   stops calling the node `down`.
-- `delivered` — a real, destination-signed ack already sits in this
-  box's own mailbase for this exact `msgid` (the ack mechanics: "Wire"
-  and "Delivery and the doorbell" above). Never inferred from the
-  entry's own absence — an entry can vanish for other reasons too
-  (`aoide mail outbox rm`), so absence alone is never read as delivery. The
-  receipt also retires the entry, so `aoide mail outbox` lists only letters
-  still waiting; once delivered, the receipt line in the sender's mailbase is
-  where it shows.
+- `delivered` — a destination-signed receipt from an older build is filed in
+  this box's `receipts.log` for this exact `msgid` (`has_delivered_ack`; the
+  mechanics are in "Wire" and "Delivery and the doorbell" above). Never
+  inferred from the entry's own absence — an entry can vanish for other
+  reasons too (`aoide mail outbox rm`), so absence alone is never read as
+  delivery. A letter delivered under ruling 131 leaves the outbox on its
+  verified answer, so `aoide mail outbox` lists only letters still waiting.
 - `accepted` — the peer's own deposit response said accepted or
-  duplicate, but no ack has landed yet (`ackPending: true`; never for an own
+  duplicate, and the entry is still spooled (`ackPending: true`, the wire
+  field's name; no receipt is awaited, ruling 131; never for an own
   letter, which reads `returned` or `held`). A LATER,
   unrelated link failure rides beside it — reason and `nextAttemptAt`
   from the link — without ever downgrading the status: this letter
@@ -1710,9 +1719,13 @@ paired node that merely misbehaves.
   mesh — `read` (recon), `message` (deposit letters and posts — inert
   data), `spawn`/conduct (gated as ever), transit (carry sealed letters
   within its zones, never open them). Origin signatures stop
-  impersonation; sealing stops a hub reading; destination-signed acks
-  stop silent-drop-by-forged-ack; trust per mesh and the zone check at
-  every hop stop a compromise in one mesh reaching another except
+  impersonation; sealing stops a hub reading; a receipt retires an own letter
+  only when the letter's destination signed it, so no forged receipt ends one;
+  but a hub's own verified `accepted` ends the sender's copy, so a hub that
+  accepts a letter and then drops it loses it without a word (§Transit, "A
+  relay's verified `accepted` is the sender's delivery"); trust per mesh and
+  the zone check at every hop stop a compromise in one mesh reaching another
+  except
   through a declared gate; `down` is the quarantine gesture and keeps
   the pairing record for forensics; a charter re-sign without the node's
   line is its revocation.

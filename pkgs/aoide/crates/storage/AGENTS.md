@@ -46,7 +46,11 @@
   `$XDG_RUNTIME_DIR` override wins on BOTH hosts: every isolating fixture sets
   it, and an answer that ignored it on one host would read and write the
   machine's real per-user directory instead of the fixture's.
-- **A receipt's `from.node` is the signer's name in the letter's mesh, never its hostname.** The origin verifies a receipt against the key it holds for that name, so a hostname-signed receipt is refused and its letter never retires. `mint_ack_in_mesh` is the hostname form, an older-peer fixture for tests (O-9).
+- **A receipt's `from.node` is the signer's name in the letter's mesh, never
+  its hostname.** The origin verifies a receipt against the key it holds for
+  that name, so a hostname-signed receipt is refused and its letter never
+  retires. `mint_ack_in_mesh` is the hostname form, an older-peer fixture for
+  tests.
 - Structured thread/reply IDs are signed context, not membership or delivery authority. Legacy four-field content remains valid.
 - Structured letter content is optional signed text, never a new transport header. Invalid or legacy content remains raw; decoding must not write or alter envelope identity.
 
@@ -1029,13 +1033,16 @@
   wedged drain can never starve every later one.
 - **An outbox entry retires ONLY on its confirmation: a verified `accepted`
   or `duplicate` answer to its own live dial, a valid receipt from an older
-  node (`retire_by_ack`), a held own letter's filed name
-  (`retire_acknowledged`), explicit `mail outbox rm` (P-M2), or the drop of an
-  own letter with its session, or the tick's sweep taking a letter or a receipt
-  (ruling 131) — never auto-evicted, never expired, never capped.**
-  `outbox::retire_by_ack` is the "valid ack" half — it trusts its caller
-  (`mail::deposit`) to have already proven the ack's origin signature
-  genuine, and never re-verifies; don't call it on an unverified envelope.
+  node naming an own letter (`retire_by_ack`), a held own letter's or a
+  transit entry's filed name (`retire_acknowledged`), explicit `mail outbox rm`
+  (P-M2), or the drop of an own letter with its session, or the tick's sweep
+  taking a letter or a receipt (ruling 131) — never auto-evicted, never
+  expired, never capped.**
+  `outbox::retire_by_ack` is the "valid receipt" half, and it retires an own
+  letter only: a transit or charter entry with the same msgid stays spooled.
+  It trusts its caller (`mail::deposit`) to have already proven the ack's
+  origin signature genuine, and never re-verifies; don't call it on an
+  unverified envelope.
   It runs under one outbox lock hold, and an own letter it removes is audited
   first (`mail.outbox.retired`), so the line and the removal cannot part.
   Its `text` must be exactly one msgid (`mail::is_msgid`) before anything
@@ -1091,11 +1098,11 @@
   during the dial retires the entry first, and a plain `write_entry` would
   re-spool it. Every post-dial bookkeeping write in `mail_wire` goes through
   it; `write_entry` stays for entries the caller just created.
-- **Nothing writes a `.ack/` marker now (ruling 131).** `ack_marker_path` names
-  the marker an older build left beside a spool. `remove_entry` still clears
-  the marker a receipt entry names, by reading the one file it is about to
-  delete; only an unreadable entry falls back to a scan of `.ack/` alone. Don't
-  add a writer: the answer is the receipt, and no ack is spooled.
+- **Nothing writes or reads a `.ack/` marker or `reacks.log` now (ruling 131).**
+  An older build's markers and `reacks.log` are inert and safe to delete by
+  hand, and no code removes them: removing an entry deletes that entry's file
+  and nothing else. Don't add a writer or a reader: the answer is the receipt,
+  and no ack is spooled.
 - **The tick's drop takes letters and receipts, and each selector decides the
   rest (ruling 131).** `drop_letters_where` considers only `letter` and
   `receipt` entries. `drop_for_session` and the session-gone pass check the

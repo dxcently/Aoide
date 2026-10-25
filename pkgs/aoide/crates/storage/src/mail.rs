@@ -1785,7 +1785,7 @@ pub fn mint_outbound_letter(from_name: &str, to_node: &str, to_name: &str, text:
 /// [`mint_ack`]'s mesh-aware form, the same rule [`mint_outbound_letter_in_mesh`]
 /// states: a receipt rides ONE mesh back to the origin, and the mesh its header
 /// names is a SIGNED value the destination compares against the request's. An
-/// older-peer fixture (O-9): no production path mints a receipt (ruling 131).
+/// older-peer fixture: no production path mints a receipt (ruling 131).
 /// `from.node` is the OS hostname here.
 pub fn mint_ack_in_mesh(from_name: &str, to: Address, acked_msgid: &str, mesh: &str) -> Result<Envelope, String> {
     let (kp, _) = identity::load_or_mint().map_err(|e| e.to_string())?;
@@ -1808,7 +1808,7 @@ pub fn mint_ack_in_mesh(from_name: &str, to: Address, acked_msgid: &str, mesh: &
 /// (origin, not hop — P-M2's two lookups stay distinct even here). Not filed
 /// into this box's own mailbase (a receipt is outbound-only until IT is
 /// deposited somewhere, same as [`mint_outbound_letter`]). The mesh comes from
-/// the origin's own record ([`mesh_for_node`]). An older-peer fixture (O-9): no
+/// the origin's own record ([`mesh_for_node`]). An older-peer fixture: no
 /// production path mints a receipt (ruling 131).
 pub fn mint_ack(from_name: &str, to: Address, acked_msgid: &str) -> Result<Envelope, String> {
     let mesh = mesh_for_node(&to.node);

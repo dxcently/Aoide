@@ -718,13 +718,13 @@
   is spooled. The check comes AFTER the reseal, so a reseal write cannot
   re-spool an entry past it. A relayed entry the reseal withholds (no binding
   for its destination) is skipped: it stays spooled and unsent.
-- **A receipt from an older node retires its letter, on first filing and on a
-  duplicate of one.** `settle_deposit` calls `retire_by_ack` for a receipt in
-  either outcome; the retire is idempotent. A letter owes nothing either way
-  (ruling 131): no receipt is minted or spooled for it, and a receipt still
-  spooled is never dialled, only dropped by the tick. `mail::deposit` answers a
-  second receipt from the same signer for the same msgid `duplicate` and files
-  it nothing. **The hub's
+- **A receipt from an older node retires only its own letter, on first filing
+  and on a duplicate of one.** `settle_deposit` calls `retire_by_ack` for a
+  receipt in either outcome; the retire is idempotent. A letter owes nothing
+  either way (ruling 131): no receipt is minted or spooled for it, and a
+  receipt still spooled is never dialled, only dropped by the tick.
+  `mail::deposit` answers a second receipt from the same signer for the same
+  msgid `duplicate` and files it nothing. **The hub's
   custody ends (`record_filed`) for a container this box filed, already held,
   or refused for good** (`refusal_clears_on_retry` decides "for good": every
   refusal of the bytes, and not a refusal of the box's own state, which keeps
@@ -907,8 +907,8 @@
   and `pollable_nodes` excludes such a node.** Do not add a second address
   test for this, and do not push the decision back out to callers.
   `settle_deposit` is the ONE place an outcome turns into spool side effects
-  (`retire_by_ack` on a receipt from an older node, filed or duplicate; a
-  `transit` entry retired on the hop that took it); the door reaches it
+  (`retire_by_ack` on a receipt from an older node, filed or duplicate, which
+  retires only an own letter); the door reaches it
   through `aoide_conduct::mail_bridge::settle_deposit`, so `aoide-server`
   never keeps a second copy. **A letter's spool directory is the HOP the route picked, not
   its destination** (`spool_entry(dest, next, mesh, …)`): the container stays

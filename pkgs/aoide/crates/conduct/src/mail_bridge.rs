@@ -147,9 +147,9 @@ mod tests {
         charter.header.kind = aoide_storage::mail::ENTRY_TYPE_CHARTER.to_string();
         aoide_storage::outbox::write_entry("healthy", &OutboxEntry::fresh(charter)).unwrap();
 
-        // The receipt is addressed to origin-node, a relayed entry: it is sealed
-        // to origin-node or withheld, so its binding must be known. The charter
-        // goes to healthy itself.
+        // The legacy receipt is addressed to origin-node, so a drain would need
+        // that node's binding to seal it. Both bindings are learned, so no
+        // drain outcome turns on a missing one.
         let binding = aoide_storage::seal::publish_binding().unwrap();
         aoide_storage::seal::learn_binding("origin-node", &binding).unwrap();
         aoide_storage::seal::learn_binding("healthy", &binding).unwrap();
@@ -160,7 +160,10 @@ mod tests {
         assert_eq!(dead_remaining.len(), 1, "the dead node's entry survives a transport failure");
 
         let healthy_remaining = aoide_storage::outbox::list_entries("healthy").unwrap();
-        assert_eq!(healthy_remaining.len(), 1, "the charter drained, and the receipt did not: {healthy_remaining:?}");
+        let kind_count = |kind: &str| healthy_remaining.iter().filter(|e| e.envelope.header.kind == kind).count();
+        assert_eq!(kind_count(aoide_storage::mail::ENTRY_TYPE_CHARTER), 0, "the charter must drain: left {healthy_remaining:?}");
+        assert_eq!(kind_count(aoide_storage::mail::ENTRY_TYPE_RECEIPT), 1, "the receipt must stay unsent: left {healthy_remaining:?}");
+        assert_eq!(healthy_remaining.len(), 1, "nothing else may stay: left {healthy_remaining:?}");
         assert_eq!(healthy_remaining[0].envelope.msgid, legacy_msgid, "what is left is the receipt");
         assert_eq!(healthy_remaining[0].tries, 0, "the legacy receipt is never dialled");
 

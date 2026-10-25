@@ -1065,7 +1065,7 @@ security, and protection once an endpoint is compromised.
 
 | Adversary | Capability | Outcome |
 |---|---|---|
-| On-path observer or TLS-terminating front (for example Cloudflare) | Sees ciphertext, outer metadata and request signatures. Can drop, delay, reorder, replay. | No plaintext and no signing key. A replayed request nonce is refused. An admitted duplicate letter takes the receipt-recovery path without being opened. |
+| On-path observer or TLS-terminating front (for example Cloudflare) | Sees ciphertext, outer metadata and request signatures. Can drop, delay, reorder, replay. | No plaintext and no signing key. A replayed request nonce is refused. An admitted duplicate letter is answered `duplicate` without being opened. |
 | Anyone who finds a tunnel hostname | Can send arbitrary HTTPS | Access refuses the request at the edge. Behind Access, an unsigned or unknown-key request is refused before any handler runs. |
 | Unpermitted relay | Holds containers only | Cannot read, mutate, re-seal, re-sign, or forge a receipt. |
 | Authorized relay or hub (transit, `message`) | Verifies, spools, appends a chained hop signature, drops or delays | Routing authority is not edit authority. It cannot open, alter, forge, or cut and re-append the chain. |
@@ -1314,7 +1314,7 @@ not control access, and a session listing is not transcript access.
 |---|---|
 | `mail/deposit` | Deposit one sealed container and get back `accepted`, `duplicate` or `refused(reason)`. Also carries receipts, charters, wraps and board posts; there is no second ack method. |
 | `mail/poll` | Returns the caller's own spooled containers. The caller's identity must BE the node being polled. This is the only inbound path for a `poll` node. |
-| `mail/ack` | Semantic grouping for the receipt flow of older builds. No node sends a receipt now (ruling 131); one that arrives is answered like a deposit (MAIL.md, Acks). |
+| `mail/ack` | Semantic grouping for the receipt flow of older builds. No node sends a receipt now (ruling 131); one that arrives is answered like a deposit (MAIL.md, Wire, Receipts). |
 | `state` | Authorized snapshot of hosts, projects, sessions, terminals, agents and relationships |
 | `events` | WSS subscription to permitted changes after a cursor; a bounded, recoverable stream |
 | `presence` | Expiring host connection and heartbeat state, distinct from process state |
@@ -1572,14 +1572,14 @@ scheduler (`aoide mail poll`).
 
 - **Ciphertext at the relay:** a wire capture of the HTTPS hop, and the relay's spool,
   log and audit, contain no letter bytes, subject, body or mailbox names.
-- **Outbound only:** during a full send, poll and ack round trip, no home node holds a
-  listening socket on a routable address.
+- **Outbound only:** during a full send and poll round trip, no home node
+  holds a listening socket on a routable address.
 - **Signed requests everywhere:** through the tunnel, an unsigned request, an
   unknown-key request, a request naming a mesh the caller is not in, and a replayed
   nonce are all refused. The observed loopback source grants nothing.
 - **Receipts:** a letter this node files sends no receipt (ruling 131). A receipt
   from an older build is filed or answered like a deposit. No receipt chain.
-- **Windows and Linux, no SSH:** send, poll, fetch and ack work end to end with the
+- **Windows and Linux, no SSH:** send, poll and fetch work end to end with the
   relay node, with a `poll` node on each OS that has no SSH account or binary.
 - **Downgrade:** a plaintext request is refused with the taught word
   `sealed-required` and an audit line.
@@ -1600,7 +1600,15 @@ scheduler (`aoide mail poll`).
 - **Retry over another route:** the same immutable container over a different route
   dedups rather than colliding (the comparison excludes `mesh` and `transit`).
 - **No preclaim:** a different origin cannot preclaim a `msgid` at a relay.
-- **No forged receipt:** a hub cannot make an origin stop retrying.
+- **No forged receipt:** a receipt the letter's destination did not sign
+  retires nothing. A hub cannot sign one as the destination, but its own
+  verified `accepted` still ends the origin's copy, so a hub that accepts a
+  letter and then drops it loses it without a word: the trade ruling 131
+  makes (MAIL.md, Transit, "A relay's verified `accepted` is the sender's
+  delivery"). Proved by `an_ack_signed_by_the_wrong_node_retires_nothing`
+  (storage `outbox.rs`) and by
+  `an_unverified_or_tampered_receipt_retires_no_spooled_letter` (client
+  `commands.rs`).
 
 **P-BOARD tests** are MAIL.md P-BOARD's, plus: a relay holding a board log holds
 ciphertext and membership records only, and its audit names no mailbox. A takeover

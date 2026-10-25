@@ -524,12 +524,11 @@ never the inbound/serve half (that's `aoide-server`).
   entry's own bookkeeping at all, leaving every entry behind a dead link
   frozen at `tries: 0` forever. `settle_delivered` retires a `charter` letter
   and a `transit` container on a verified acceptance; a receipt is never
-  dialled (ruling 131), so no drain settles one; an ordinary letter
-  waits for a REAL ack instead,
-  only having its `tries`/`last_try_at`/`last_outcome` bookkeeping
-  updated. **P-M3 adds hold, the poll, and poll-on-contact to this same
-  function.** `drain_node` skips a `hold` entry exactly the way it skips a
-  parked one — filtered BEFORE the cap, since a held entry is permanent to
+  dialled (ruling 131), so no drain settles one, and an own letter is never
+  drained at all: its send dials it. **P-M3 adds hold, the poll, and
+  poll-on-contact to this same function.** `drain_node` skips a `hold` entry
+  exactly the way it skips a parked one — filtered BEFORE the cap, since a held
+  entry is permanent to
   a drain too — and a pass that reached the node at all (at least one
   deposit answered, delivered or refused) ends by calling `poll_node` on
   that same session, under the same `.bsy` lock and the same
@@ -556,8 +555,8 @@ never the inbound/serve half (that's `aoide-server`).
   handed-over envelope through the SAME `aoide_storage::mail::deposit`
   chain a pushed deposit gets (hop = the node polled, origin = the
   envelope's own `header.from.node`), then through `settle_deposit`:
-  filing a letter owes nothing, a receipt from an older node retires the
-  entry it confirms, and a re-poll files nothing twice. A duplicate of a
+  filing a letter owes nothing, a receipt from an older node retires only the
+  own letter it confirms, and a re-poll files nothing twice. A duplicate of a
   letter already filed owes nothing either. **`aoide mail poll [<node>]` is
   the second caller of `poll_node`, and the reason it exists: an empty
   outbox never dials, so `drain_node`'s poll-on-contact can never reach a
@@ -725,8 +724,8 @@ never the inbound/serve half (that's `aoide-server`).
   poll moves it). `--refused` does the same
   for every returned letter, and leaves a held or sessionless (pre-131) letter
   as it is, undialled and unwritten, reporting it with its listed word. A
-  parked receipt it un-parks is never dialled either: it stays spooled for the
-  tick (ruling 131). Each
+  parked receipt is neither un-parked nor dialled: its retry answers
+  `pre-131`, and it stays parked for the tick (ruling 131). Each
   reports the `delivery` vocabulary `mail send`
   uses; nothing parked is a clean no-op, not an error. Neither `outbox`
   nor `outbox rm` WRITES to the
