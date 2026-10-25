@@ -12,9 +12,8 @@
 
 /// Drain one node's outbox once — a passthrough to
 /// [`aoide_client::mail_wire::drain_node`]. Called by the door
-/// (`aoide-server::a2a::mail_deposit`, best-effort, right after filing a
-/// letter or re-filing a duplicate's ack) and by [`drain_all`] below (the
-/// daemon tick's sweep).
+/// (`aoide-server::a2a::mail_deposit`, best-effort, right after it spools a
+/// hop) and by [`drain_all`] below (the daemon tick's sweep).
 pub fn drain_node(name: &str) -> Result<(), String> {
     aoide_client::mail_wire::drain_node(name)
 }
@@ -122,7 +121,9 @@ mod tests {
     /// (`drain_node` never returns one for an unreachable node, see its own
     /// doc), so this pins the stronger, more common case directly: one
     /// dead node's entries staying stuck must never keep another node's
-    /// perfectly healthy entries from draining in the SAME sweep.
+    /// perfectly healthy charter from draining in the SAME sweep. The legacy
+    /// receipt in that healthy node is never dialled (ruling 131): the tick
+    /// drops it, and the sweep does not run here.
     #[test]
     fn one_dead_nodes_entries_never_block_another_nodes_drain() {
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
@@ -139,12 +140,19 @@ mod tests {
         aoide_storage::outbox::write_entry("dead", &OutboxEntry::fresh(dead_env)).unwrap();
 
         let to = aoide_storage::mail::Address { node: "origin-node".to_string(), name: "bob".to_string() };
-        let healthy_env = aoide_storage::mail::mint_ack("alice", to, "acked-msgid").unwrap();
-        aoide_storage::outbox::write_entry("healthy", &OutboxEntry::fresh(healthy_env)).unwrap();
+        let legacy_receipt = aoide_storage::mail::mint_ack("alice", to, "acked-msgid").unwrap();
+        let legacy_msgid = legacy_receipt.msgid.clone();
+        aoide_storage::outbox::write_entry("healthy", &OutboxEntry::fresh(legacy_receipt)).unwrap();
+        let mut charter = aoide_storage::mail::mint_outbound_letter("alice", "healthy", "bob", "charter").unwrap();
+        charter.header.kind = aoide_storage::mail::ENTRY_TYPE_CHARTER.to_string();
+        aoide_storage::outbox::write_entry("healthy", &OutboxEntry::fresh(charter)).unwrap();
 
-        // The receipts are addressed to origin-node, a relayed entry: they are
-        // sealed to origin-node or withheld, so its binding must be known.
-        aoide_storage::seal::learn_binding("origin-node", &aoide_storage::seal::publish_binding().unwrap()).unwrap();
+        // The legacy receipt is addressed to origin-node, so a drain would need
+        // that node's binding to seal it. Both bindings are learned, so no
+        // drain outcome turns on a missing one.
+        let binding = aoide_storage::seal::publish_binding().unwrap();
+        aoide_storage::seal::learn_binding("origin-node", &binding).unwrap();
+        aoide_storage::seal::learn_binding("healthy", &binding).unwrap();
 
         drain_all().unwrap();
 
@@ -152,10 +160,12 @@ mod tests {
         assert_eq!(dead_remaining.len(), 1, "the dead node's entry survives a transport failure");
 
         let healthy_remaining = aoide_storage::outbox::list_entries("healthy").unwrap();
-        assert!(
-            healthy_remaining.is_empty(),
-            "the healthy node's receipt must still retire even though 'dead' drained first"
-        );
+        let kind_count = |kind: &str| healthy_remaining.iter().filter(|e| e.envelope.header.kind == kind).count();
+        assert_eq!(kind_count(aoide_storage::mail::ENTRY_TYPE_CHARTER), 0, "the charter must drain: left {healthy_remaining:?}");
+        assert_eq!(kind_count(aoide_storage::mail::ENTRY_TYPE_RECEIPT), 1, "the receipt must stay unsent: left {healthy_remaining:?}");
+        assert_eq!(healthy_remaining.len(), 1, "nothing else may stay: left {healthy_remaining:?}");
+        assert_eq!(healthy_remaining[0].envelope.msgid, legacy_msgid, "what is left is the receipt");
+        assert_eq!(healthy_remaining[0].tries, 0, "the legacy receipt is never dialled");
 
         drop(listener);
         let _ = std::fs::remove_dir_all(&dir);

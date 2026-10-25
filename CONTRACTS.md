@@ -5264,9 +5264,9 @@ outside the home mesh (`docs/architecture/MAIL.md` §Transit; mint sites
 mesh with the home mesh not among them refuses the send
 (`mesh-ambiguous`, naming them) rather than minting with no mesh; `""` is
 carried by everything that never chose one — `mail send --to self/<name>`,
-every receipt this box files about itself, and a receipt for a letter that
-arrived UNNAMED, which rides that letter's own `originMesh` back — not a
-third mesh choice.
+every receipt this box files about itself, and a receipt an older build
+sends for a letter that arrived UNNAMED, which rides that letter's own
+`originMesh` back — not a third mesh choice.
 
 `seq` is local to the node, like an NNTP article number — never crosses a link;
 it is the next number of the `state/mail/seq` counter, issued under the lock
@@ -5287,11 +5287,12 @@ into THIS box's own boxes at send time — it mints a signed envelope and
 dials it at once, in the sending process, over `aoide/mailDeposit`. It spools
 the envelope into `state/outbox/` (below) only when the dial returns it or the
 hop is a `hold` one: a delivered letter is written nowhere (ruling 131). The
-daemon's own periodic sweep and a door's post-heard drain carry the other
-entries (receipts, charters, transit) of that node. The letter lands
+daemon's own periodic sweep carries the other entries (charters, transit) of
+that node, and a hop's drain carries a relayed container on at once. The letter
+lands
 in a box only on the FAR box, once ITS OWN `mail_deposit` files it;
-this box's own receipts gain an entry only when that far box's ack (a `receipt`) is
-deposited back here in turn.
+since ruling 131 no receipt entry is spooled for a letter this box files; an
+older build's receipt for it still lands here as a deposit.
 
 Every mutation of the mailbase runs under the stage lock and refuses when
 the lock is not held: `try_stage_lock` (`storage/src/fs.rs`) blocks for
@@ -5384,21 +5385,14 @@ state/outbox/<node>/link.json      that LINK's own backoff state (absent
                                     = not held off)
 state/outbox/<node>/.bsy           a drain's lock file — never data
 state/outbox/<node>/.poll          a poll's lock file — never data; one poll of a node at a time
-state/outbox/<node>/.ack/<acked>   pending-ack marker: its content is the
-                                    msgid of the receipt entry covering
-                                    letter <acked> — never data, never
-                                    drained
+state/outbox/<node>/.ack/<acked>   older build's marker, inert (ruling 131).
+                                   Nothing reads, writes or removes one.
 ```
 
-The `.ack/<acked_msgid>` marker makes "is an ack for this letter already
-sitting undelivered" one stat plus one small read, never a scan of the
-node's directory, so a duplicate of a filed letter arriving while the
-link is dead re-spools nothing (MAIL.md item 5 still holds once the
-pending ack has actually gone out: the marker leaves with the entry).
-The marker is never authoritative on its own — a reader confirms the
-msgid it names is still spooled before treating it as pending, and a
-marker naming a msgid no longer on disk is stale: deleted on the next
-check, the ack re-spooled. A tool that moves or archives entries out of
+Nothing reads a `.ack/` marker or `reacks.log` to decide anything, and nothing
+removes one: removing an entry deletes that entry's file and nothing else. The
+markers and `reacks.log` an older build left are inert and safe to delete by
+hand (MAIL.md, Wire, Inert files). A tool that moves or archives entries out of
 `state/outbox/<node>/` need not know `.ack/` exists.
 
 ```json
@@ -5426,12 +5420,12 @@ is the sender's routing intent, not part of the letter.
 
 `session` is **v0+2 (ruling 131, additive)**: the id of the conducted session
 that sent an OWN letter (`aoide mail send` with `AOIDE_SESSION_ID` set; never
-`--from`), with control characters stripped. It is written only on a letter
-that is returned or held, and omitted from every other entry, so a pre-131
-spool file is byte-identical. The session's roster exit drops its letters
-(`mail.outbox.dropped`, reason `session-ended`); the tick sweep drops a letter
-with no session (`pre-131`) or whose session is off the roster or `done`
-(`session-gone`).
+`--from`), with control characters stripped. It is written only on a letter that
+is returned or held, and omitted from every other entry, so a pre-131 spool file
+is byte-identical. The session's roster exit drops its letters
+(`mail.outbox.dropped`, reason `session-ended`); the drain tick sweep drops
+every receipt, whatever its session, and a letter with no session (`pre-131`),
+and a letter whose session is off the roster or `done` (`session-gone`).
 
 **Amendment (P-CHARTER): a `poll` destination's entry is `hold`, decided for
 the caller.** The design's third transport member name is the ABSENCE of an
@@ -5444,9 +5438,7 @@ node is `hold`-flavored. The hub never dials it, and only the node's own
 nothing else):
 
 - `aoide_client::mail_wire::spool_entry` holds the entry whatever its caller
-  asked for — so no caller has to remember, including `spool_and_drain_ack`,
-  whose own argument is a literal `false` and whose ack toward a `poll` origin
-  is held by this line;
+  asked for — so no caller has to remember;
 - `drain_node` returns without opening a link at all, BEFORE the binding
   exchange — a dial a held-entry filter runs too late to prevent;
 - `pollable_nodes` leaves such a node out of a bare `aoide mail poll`: polling
@@ -5496,55 +5488,50 @@ or a REFUSAL, which is the entry's problem, not the link's — clears the
 backoff outright (`link.json` removed, never merely reset), the ordinary
 "not held off" state a drain reads as `None`.
 
-A **letter** entry that comes back delivered (`"accepted"` or
-`"duplicate"` — either way the far end has it) is NOT removed: it waits
-for a REAL ack (spec item 7), only its `tries`/`lastTryAt`/`lastOutcome`
-bookkeeping advancing. A **receipt** entry's own successful deposit IS its
-confirmation (ruling 4: no separate ack-of-an-ack), so it is removed
-outright on delivery. `retire_by_ack` is the other half of that same
-ruling — the local outbox entry a genuine ack confirms is retired when a
-receipt deposits back in (`aoide/mailDeposit` on the ORIGIN's own door):
-its two checks ("verified signer is that entry's `to.node`" and "names
-that entry's `msgid`") collapse into ONE path lookup, since an entry is
-always spooled under the exact node its own `envelope.header.to.node`
-names — indexing by the receipt's already-origin-verified `from.node`
-(`mail::deposit` refuses a forged signer before `retire_by_ack` is ever
-reached) IS the first check, and keying the file by `msgid` makes the
-second a plain hit-or-miss, never a partial match. `Ok(None)` — never an
-error — covers every way an ack fails to match: not a receipt at all, no
-entry ever spooled under that node, or a `msgid` that node's spool
-doesn't hold.
+A **letter** whose dial comes back verified (`"accepted"` or `"duplicate"` —
+either way the far end has it) is removed at once: that answer is its receipt
+(ruling 131), and the sender keeps no copy after it. A **receipt** entry is
+never dialled (ruling 131): the verified answer that filed its letter was its
+confirmation, and the drain tick's pre-131 pass drops one still spooled.
+`retire_by_ack` is the older-build path: a receipt from an older build that
+deposits back in (`aoide/mailDeposit` on the ORIGIN's own door) retires the one
+own `letter` it confirms, and nothing else. The letter is found by its `msgid`
+across the spools; it goes only when its `to.node` is the receipt's verified
+signer and the receipt is in the letter's mesh, and each retirement writes one
+`mail.outbox.retired` line. A transit, charter or receipt entry with that
+`msgid` is never retired by it. `Ok(None)` — never an error — covers every way a
+receipt matches no own letter: not a receipt at all, a `msgid` no spooled letter
+holds, a signer that is not the letter's `to.node`, or another mesh.
 
-Read/resolved by `aoide mail outbox [node]`/`mail outbox rm <msgid>` —
-a separate CLI surface from the mailbase's own `mail` family above,
-touching `state/outbox/` only. `mail outbox` (no `node`) lists every
-node with a non-empty outbox; `mail outbox <node>` narrows to one; each
-row is `msgid`/`to`/`tries`/`lastTryAt`/`lastOutcome`/`refused` plus a
-`delivery` object — the same read-only projection `mail send --json`
-returns after its spool — `status` (`refused` > `delivered` > `accepted`
-> `retrying` > `queued`; `failed` only for a local I/O error observed by
-the reporting command), `reason`, `reasonScope` (`link` | `entry` |
-`local`), `nextAttemptAt` (the earliest allowed attempt from the node's
-link state, never a promised schedule), `ackPending`. `delivered` is only
-ever a matching destination-signed ack, never an entry's absence; the
-node's link state is read once per listing and joined onto its rows; an
-unreadable state reports `queued` with `status unavailable` as the
+Read/resolved by `aoide mail outbox [node]`/`mail outbox rm <msgid>` — a
+separate CLI surface from the mailbase's own `mail` family above, touching
+`state/outbox/` only. `mail outbox` (no `node`) lists every node with a
+non-empty outbox; `mail outbox <node>` narrows to one; each row is
+`msgid`/`to`/`tries`/`lastTryAt`/`lastOutcome`/`refused` plus a `delivery`
+object — the same read-only projection `mail send --json` returns after its
+spool — `status` (`refused` > `delivered` > `accepted` > `retrying` > `queued`;
+`failed` only for a local I/O error observed by the reporting command),
+`reason`, `reasonScope` (`link` | `entry` | `local`), `nextAttemptAt` (the
+earliest allowed attempt from the node's link state, never a promised schedule),
+`ackPending`. A `receipt` entry reads `pre-131` whatever its flags. `delivered`
+is only ever a destination-signed receipt filed by an older build, never an
+entry's absence; the node's link state is read once per listing and joined onto
+its rows; an unreadable state reports `queued` with `status unavailable` as the
 reason. That fallback is for any entry, own letters included, and for an entry
 removed while it is read; an own letter otherwise reads `held`, `returned`,
-`pre-131` or `delivered`, never `queued`, in normal operation. `mail
-outbox rm <msgid>` is an exact-msgid removal — it walks every node with an
-outbox and removes the first match, erroring `not-found` if none held it;
-NOT the mailbase `mail rm`'s age-based prune, and neither command ever
-touches `state/mail/`. `mail outbox --json` additionally carries
-`data.summary`, one entry per node whose outbox is non-empty (omitted for
-a node with nothing spooled, swept or named), shaped `{"depth": <count>,
-"oldestMintedAtAgeSecs": <secs|null>, "tries": {"<tries>": <count>},
-"lastOutcomeCounts": {"<outcome|(none)>": <count>}, "refused": <count>}`
-— additive to `rows`, no change to `OutboxEntry` or `link.json` on disk.
-See §6's `aoide/mailDeposit` for the wire method that actually drains
-this spool; one `drain_node` call attempts at most `DRAIN_BATCH_CAP` (50)
-entries, a per-call cost bound, so a deep backlog drains across ticks
-rather than in one.
+`pre-131` or `delivered`, never `queued`, in normal operation. `mail outbox rm
+<msgid>` is an exact-msgid removal — it walks every node with an outbox and
+removes the first match, erroring `not-found` if none held it; NOT the mailbase
+`mail rm`'s age-based prune, and neither command ever touches `state/mail/`.
+`mail outbox --json` additionally carries `data.summary`, one entry per node
+whose outbox is non-empty (omitted for a node with nothing spooled, swept or
+named), shaped `{"depth": <count>, "oldestMintedAtAgeSecs": <secs|null>,
+"tries": {"<tries>": <count>}, "lastOutcomeCounts": {"<outcome|(none)>":
+<count>}, "refused": <count>}` — additive to `rows`, no change to `OutboxEntry`
+or `link.json` on disk. See §6's `aoide/mailDeposit` for the wire method that
+actually drains this spool; one `drain_node` call attempts at most
+`DRAIN_BATCH_CAP` (50) entries, a per-call cost bound, so a deep backlog drains
+across drain ticks rather than in one.
 
 ### `state/usage.json` — **v0**
 
@@ -9657,7 +9644,7 @@ own signature and nonce (`wire_auth::answer_string`). Anything else (no
 signature, two of them, another key's, another request's) is
 `unauthenticated`: the client records the attempt, parks nothing, settles
 nothing and backs off the link. Only a verified `accepted` or `duplicate`
-retires a receipt, a `charter` letter or a `transit` container. For a letter the
+retires a `charter` letter or a `transit` container. For a letter the
 sender dialled live, a verified `accepted` or `duplicate` is final: it delivers
 the letter, nothing is kept, and no receipt is awaited (MAIL.md §Transit).
 A verified refusal of any word is final for such a letter too: the letter comes
@@ -9704,12 +9691,12 @@ container addressed to a node that is not this one is not this receiver's to
 open at all: it is a HOP, answered
 `{"status":"accepted","transit":{"next":…,"mesh":…,"held":…}}` after the
 container is filed as a `transit` entry and spooled toward `next` — no reader
-rung, nothing filed as correspondence, and NO ack, because the letter is not
-here.
+rung, nothing filed as correspondence, and no receipt minted, because the
+letter is not here.
 
 A container that passes all of it is handed to the SAME
 `aoide_storage::mail::deposit` an envelope is, so filing, the box dedup and
-the pending-receipt rule have one implementation. `aoide/mailPoll`'s answer
+the older-build receipt rule have one implementation. `aoide/mailPoll`'s answer
 becomes two lists, `containers` and `envelopes`: a sealed entry hands over
 its container and NO plaintext, and only an entry spooled before the
 destination published a binding appears in `envelopes`.
@@ -9780,18 +9767,27 @@ line. Every door without it answers unsigned. One before `0.0.26` refuses the
 new request `-32007`; a `0.0.26` door without the header answers `200` with
 an ordinary body. A client that checks answers treats the two alike:
 
-- **New client to a door without the header: held, never lost.** Every mail
-  answer is `unauthenticated` (`no answer signature … upgrade aoide on
-  <node>`). Letters, receipts, charter letters and transit containers stay
-  spooled and live: nothing is parked or retired, the link backs off, and the
-  drain asks again. A poll files and clears nothing, so the far side keeps
-  what it holds and the record of what this box filed survives to the next
-  poll. A binding exchange learns nothing. `aoide mail outbox` reads
-  `retrying` with the `unauthenticated:` reason, and `aoide mail poll <node>`
-  reports the node unreachable with the same reason. When the far end's own
-  word is `config-invalid`, which a door in that state never signs, the reason
-  says its config is invalid (`fix the config on <node>`), not that it needs
-  an upgrade.
+- **New client to a door without the header: an unsigned answer retires
+  nothing.** Every mail answer is `unauthenticated` (`no answer signature …
+  upgrade aoide on <node>`). Charter letters and transit containers stay spooled
+  and live: nothing is parked or retired, the link backs off, and the drain asks
+  again. The drain never dials a letter: `dialable_entries` skips it. Its send
+  dials it again after an unsigned answer (`deliver_now`). A second unsigned
+  answer returns it with the `unauthenticated:` word, and `handle_mail_send`
+  keeps it on disk as `returned` under its session, and the letter is dropped
+  when that session ends: at its roster exit, or else by the drain tick's
+  `session-gone` pass, which waits while the roster or the list of letter-bound
+  sessions cannot be read; sent outside a session, it comes back `returned` and
+  nothing is written. The send writes no link state. Only `aoide mail outbox
+  retry <msgid>` and `aoide mail outbox retry --refused` dial a returned letter
+  again (`resend_returned_letter`). A receipt is never dialled: the drain tick
+  drops it. A poll files and clears nothing, so the far side keeps what it holds
+  and the record of what this box filed survives to the next poll. A binding
+  exchange learns nothing. `aoide mail outbox` reads `retrying` with the
+  `unauthenticated:` reason, and `aoide mail poll <node>` reports the node
+  unreachable with the same reason. When the far end's own word is
+  `config-invalid`, which a door in that state never signs, the reason says its
+  config is invalid (`fix the config on <node>`), not that it needs an upgrade.
 - **Old client to a door with the header: works.** The header is one more
   response line, and an older client never reads it.
 - **A `refused` key crosses the versions as `filed` does.** An older hub reads
@@ -9955,7 +9951,7 @@ The rest of this section describes the plaintext arm, unchanged:
 The method rides the same A2A JSON-RPC/HTTP door (§6), with no new transport,
 server or port. It is capability-gated on `message`, not on `spawn`. A
 registered node's own outbox drain (`state/outbox/`, §4) POSTs this to deposit
-one signed letter or receipt into the target's mailbase:
+one signed letter or charter into the target's mailbase:
 
 ```json
 { "jsonrpc": "2.0", "id": 1, "method": "aoide/mailDeposit",
@@ -10021,11 +10017,9 @@ successful deposit answers:
 ```
 
 `"duplicate"` replaces `"accepted"` when `msgid` was already in
-the box — the far end's earlier attempt evidently landed even if ITS
-own ack never arrived, so a duplicate whose original filing was a
-**letter** re-sends the ack (never a duplicate **receipt** — that would
-ack an ack, and the `letter`/`receipt` vocabulary has no third shape to
-stop that ping-ponging forever). A rejected envelope answers instead:
+the box — the far end's earlier attempt evidently landed. A duplicate of a
+filed **letter** is answered `"duplicate"` and nothing more: no receipt is sent
+back (ruling 131). A rejected envelope answers instead:
 
 ```json
 { "result": { "status": "refused", "reason": "bad-msgid",
@@ -10058,7 +10052,7 @@ the container path answers `{"status": "accepted", "msgid": "<hex>",
 the charter's own detail in `data`, and never as the status itself,
 because a sender's classifier reads an unrecognised status as a
 REFUSAL and would park a charter that had already landed. An applied
-charter files nothing and acks nothing; its container is recorded in
+charter files nothing and owes nothing back; its container is recorded in
 `state/mail/containers.jsonl` once it is in force, so a re-offer is
 answered `"duplicate"`.
 
@@ -10071,17 +10065,13 @@ per-command audit, so this is the only place a flood becomes visible, and
 volume must show whether every one of those deposits landed accepted,
 refused, or malformed.
 
-A filed **letter** mints an ack (a `receipt`) addressed back to the
-origin, spools it into that origin's own `state/outbox/`, and best-effort
-drains that node once, synchronously, reusing the SAME drain
-`aoide-server`'s own periodic sweep uses (`aoide_conduct::mail_bridge::
-drain_node` — one drain implementation, never a second dial built at the
-door). A filed **receipt** instead retires the LOCAL outbox entry it
-confirms (§4's `retire_by_ack`, spec item 7) — a forged or stale ack
-simply matches nothing and retires nothing; every `state/outbox/` call
-here runs strictly AFTER `mail::deposit` has already released its own
-lock, never nested inside it (`mail`'s and `outbox`'s stage locks are the
-identical non-reentrant primitive).
+A filed **letter** mints nothing and spools nothing: the filing is its own
+answer (ruling 131). A filed **receipt** (from an older build) instead retires
+only the LOCAL own `letter` it confirms (§4's `retire_by_ack`): a forged or
+stale receipt matches no such letter and retires nothing; every
+`state/outbox/` call here runs strictly AFTER `mail::deposit` has already
+released its own lock, never nested inside it (`mail`'s and `outbox`'s stage
+locks are the identical non-reentrant primitive).
 
 ### `aoide/mailPoll` (P-M3, `docs/architecture/MAIL.md`)
 
@@ -10173,10 +10163,11 @@ each of the caller's own entries it names takes a `tries` stamp and a
 "already handed over" bookmark — which is exactly why a re-poll before the ack
 hands the same envelopes over again (unless it deferred them), and why a held
 `letter` leaves the spool only when the poller names its msgid in `filed`, when
-an older poller's receipt retires it (`outbox::retire_by_ack`), when its session
-ends, or through `aoide mail outbox rm <msgid>` (a `letter` filed by the poller
-mints a receipt exactly as a deposit would; an ack is an envelope, so the
-poller's own next drain carries it back). A held `letter` the poller names in
+an older build's receipt from its destination retires it
+(`outbox::retire_by_ack`), when its session ends, or through
+`aoide mail outbox rm <msgid>` (a `letter` filed by the poller mints nothing,
+since ruling 131: the filing is its own answer). A held `letter`
+the poller names in
 `filed` ends the sender's copy on its word alone, as a relay's verified
 `accepted` does (MAIL.md, §Transit). For a relayed letter the poller is
 the hop it was spooled toward, not the destination. The

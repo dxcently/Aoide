@@ -2225,7 +2225,7 @@ mod tests {
         seal::record_admitted(&container, &digest).unwrap();
         match seal::deposit_container(&container, &container.origin_mesh).unwrap() {
             seal::ContainerOutcome::Duplicate { filed_letter } => {
-                assert!(!filed_letter, "a charter is never filed, so it never owes an ack");
+                assert!(!filed_letter, "a charter is never filed, so it is never a filed letter");
             }
             other => panic!("expected a duplicate, got {other:?}"),
         }

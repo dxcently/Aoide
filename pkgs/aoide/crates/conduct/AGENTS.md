@@ -983,7 +983,8 @@ in the message.
   with the ids they ended, once their roster write has returned.
   `sweep_session_letters` reads the bound sessions from the outbox before it
   reads the roster, so no path holds both locks at once, and an unreadable
-  roster skips the session pass rather than reading as an empty one.
+  roster skips the session pass rather than reading as an empty one. The
+  pre-131 pass that runs first takes every receipt, whatever its session.
 - **Every session-write handler routes through `aoide_client::daemon::
   daemon_dispatch(inv)` FIRST, as its own first line, falling back to its
   pre-existing direct stage-write path byte-identically on `None` (P-D6,

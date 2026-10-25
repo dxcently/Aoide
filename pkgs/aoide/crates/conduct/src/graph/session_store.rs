@@ -2436,9 +2436,9 @@ pub(in crate::graph) fn live_wrap_refusal_for(id: &str) -> Option<String> {
     protected_wrap(id).map(|_| super::identity::live_wrap_refusal(id))
 }
 
-/// Own letters the tick's sweep may drop per pass. A spool written before
-/// ruling 131 can hold thousands (osaka's held 16.5k+), so the rest waits for
-/// the next tick and one tick never holds the outbox lock for long.
+/// Own letters and receipts the tick's sweep may drop per pass. A spool written
+/// before ruling 131 can hold thousands (osaka's held 16.5k+), so the rest waits
+/// for the next tick and one tick never holds the outbox lock for long.
 const SWEEP_BATCH: usize = 500;
 
 /// The one roster-exit helper (ruling 131): drops the letters of sessions that
@@ -2454,12 +2454,19 @@ pub(crate) fn drop_ended_sessions(ids: &[String]) {
 }
 
 /// The tick's session sweep, run before the mail drain (ruling 131). A letter
-/// spooled before the rule has no session and goes (`pre-131`). A letter whose
-/// session is off the roster or `done` goes too (`session-gone`), unless the
-/// roster cannot be read: that pass is skipped and the pre-131 pass still runs.
+/// spooled before the rule has no session and goes (`pre-131`), and so does every
+/// receipt whatever its session: the answer that filed its letter was the
+/// receipt, so a receipt still spooled has nothing left to carry it (`pre-131`).
+/// A letter whose session is off the roster or `done` goes too (`session-gone`),
+/// unless the roster cannot be read: that pass is skipped and the pre-131 pass
+/// still runs.
 pub fn sweep_session_letters() {
-    if let Err(e) = aoide_storage::outbox::drop_letters_where(|l| l.session.is_none(), SWEEP_BATCH, "pre-131") {
-        eprintln!("[aoide/conduct] pre-131 letters not swept: {e}");
+    if let Err(e) = aoide_storage::outbox::drop_letters_where(
+        |l| l.envelope.header.kind == aoide_storage::mail::ENTRY_TYPE_RECEIPT || l.session.is_none(),
+        SWEEP_BATCH,
+        "pre-131",
+    ) {
+        eprintln!("[aoide/conduct] pre-131 letters and receipts not swept: {e}");
     }
     // Letters first, roster second: a session's letter is written only while the
     // session is on the roster, so every session the letters name is on the
@@ -2483,7 +2490,10 @@ pub fn sweep_session_letters() {
         return;
     }
     if let Err(e) = aoide_storage::outbox::drop_letters_where(
-        |l| l.session.as_ref().is_some_and(|id| gone.contains(id)),
+        |l| {
+            l.envelope.header.kind == aoide_storage::mail::ENTRY_TYPE_LETTER
+                && l.session.as_ref().is_some_and(|id| gone.contains(id))
+        },
         SWEEP_BATCH,
         "session-gone",
     ) {
@@ -6158,6 +6168,13 @@ mod letter_sweep_tests {
         entry
     }
 
+    /// A receipt's envelope, built by hand: the legacy ack an older build spooled.
+    fn receipt_envelope(msgid: &str) -> aoide_storage::mail::Envelope {
+        let mut envelope = letter_envelope(msgid);
+        envelope.header.kind = aoide_storage::mail::ENTRY_TYPE_RECEIPT.to_string();
+        envelope
+    }
+
     /// A letter's envelope, built by hand: no identity is minted in this test.
     fn letter_envelope(msgid: &str) -> aoide_storage::mail::Envelope {
         use aoide_storage::mail::{Address, Envelope, Header};
@@ -6227,28 +6244,113 @@ mod letter_sweep_tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// **A sessionless entry that is not a letter is never swept.** Receipts,
-    /// charters and transit containers are the drain's to carry, so neither the
-    /// pre-131 pass nor the session pass may touch them. Both passes filter on
-    /// the letter kind, and this test pins that.
+    /// **The tick drops every receipt, whatever its flavour, session or seal,
+    /// with one line each (ruling 131).** A live, a held, a parked, a
+    /// session-bound and a sealed receipt all go. A charter, a transit entry
+    /// and a live letter stay.
     #[test]
-    fn a_sessionless_non_letter_survives_the_sweep() {
-        use aoide_storage::mail::{ENTRY_TYPE_CHARTER, ENTRY_TYPE_RECEIPT, ENTRY_TYPE_TRANSIT};
+    fn the_sweep_drops_every_receipt_and_keeps_charters_transit_and_live_letters() {
+        use aoide_storage::mail::{ENTRY_TYPE_CHARTER, ENTRY_TYPE_TRANSIT};
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let (_env, dir) = root("bridge-sweep-non-letter");
+        let (_env, dir) = root("bridge-sweep-receipts");
         roster(&[("live", "running")]);
-        for kind in [ENTRY_TYPE_RECEIPT, ENTRY_TYPE_CHARTER, ENTRY_TYPE_TRANSIT] {
-            let mut envelope = letter_envelope(&format!("msg-{kind}"));
-            envelope.header.kind = kind.to_string();
-            aoide_storage::outbox::write_entry("far", &OutboxEntry::fresh(envelope)).unwrap();
+        let mut parked = OutboxEntry::fresh(receipt_envelope("rcpt-parked"));
+        parked.refused = true;
+        parked.tries = 1;
+        parked.last_outcome = "refused: bad-msgid".to_string();
+        let mut bound = OutboxEntry::fresh(receipt_envelope("rcpt-bound"));
+        bound.session = Some("live".to_string());
+        let sealed_receipt = OutboxEntry::sealed(
+            receipt_envelope("rcpt-sealed"),
+            aoide_storage::seal::Container {
+                v: aoide_storage::seal::CONTAINER_VERSION,
+                purpose: aoide_storage::seal::PURPOSE_MAIL.to_string(),
+                msgid: "rcpt-sealed".to_string(),
+                generation: 1,
+                origin: aoide_storage::seal::Party { node: "here".to_string(), key: "aa".repeat(32) },
+                to: aoide_storage::seal::Destination { node: "far".to_string(), age: "age1x".to_string() },
+                origin_mesh: "home".to_string(),
+                mesh: "home".to_string(),
+                suite: aoide_storage::seal::SUITE_AGE_V1_X25519.to_string(),
+                ct: "00".to_string(),
+                sig: "00".to_string(),
+                transit: Vec::new(),
+                board: None,
+                epoch: None,
+            },
+        );
+        let mut charter = OutboxEntry::fresh(letter_envelope("msg-charter"));
+        charter.envelope.header.kind = ENTRY_TYPE_CHARTER.to_string();
+        let mut transit = OutboxEntry::fresh(letter_envelope("msg-transit"));
+        transit.envelope.header.kind = ENTRY_TYPE_TRANSIT.to_string();
+        for entry in [
+            OutboxEntry::fresh(receipt_envelope("rcpt-now")),
+            OutboxEntry::held(receipt_envelope("rcpt-held")),
+            parked,
+            bound,
+            sealed_receipt,
+            charter,
+            transit,
+            returned_letter("msg-live", Some("live")),
+        ] {
+            aoide_storage::outbox::write_entry("far", &entry).unwrap();
         }
 
         sweep_session_letters();
 
         assert_eq!(
             spooled_msgids(),
-            vec!["msg-charter".to_string(), "msg-receipt".to_string(), "msg-transit".to_string()],
+            vec!["msg-charter".to_string(), "msg-live".to_string(), "msg-transit".to_string()],
         );
+        let lines = audit_lines("mail.outbox.dropped");
+        assert_eq!(lines.len(), 5, "one line per dropped receipt: {lines:?}");
+        for msgid in ["rcpt-now", "rcpt-held", "rcpt-parked", "rcpt-bound", "rcpt-sealed"] {
+            let line = format!("dropped receipt {msgid} toward far (pre-131");
+            assert!(lines.iter().any(|l| l.contains(&line)), "{msgid}: {lines:?}");
+        }
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **A receipt the far end refused is parked, and the tick drops it.** A parked
+    /// receipt is never dialled again, so nothing else would ever take it.
+    #[test]
+    fn a_parked_receipt_is_dropped_by_the_tick() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("bridge-sweep-parked-receipt");
+        roster(&[("live", "running")]);
+        let mut parked = OutboxEntry::fresh(receipt_envelope("rcpt-parked"));
+        parked.refused = true;
+        parked.tries = 1;
+        parked.last_outcome = "refused: bad-msgid".to_string();
+        aoide_storage::outbox::write_entry("far", &parked).unwrap();
+
+        sweep_session_letters();
+
+        assert!(spooled_msgids().is_empty(), "{:?}", spooled_msgids());
+        assert_eq!(audit_lines("mail.outbox.dropped").len(), 1);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **A transit-kind entry is hub custody, and the tick leaves it alone.**
+    /// The fixture is a letter envelope whose kind is set to transit. A hub
+    /// keeps someone else's container until the next hop takes it; slice 11
+    /// owns that
+    /// rule, and the pre-131 pass does not reach it.
+    #[test]
+    fn a_transit_kind_entry_survives_the_tick() {
+        use aoide_storage::mail::ENTRY_TYPE_TRANSIT;
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("bridge-sweep-transit-kind");
+        roster(&[("live", "running")]);
+        let mut relayed = letter_envelope("msg-relayed");
+        relayed.header.kind = ENTRY_TYPE_TRANSIT.to_string();
+        aoide_storage::outbox::write_entry("far", &OutboxEntry::fresh(relayed)).unwrap();
+
+        sweep_session_letters();
+
+        assert_eq!(spooled_msgids(), vec!["msg-relayed".to_string()]);
         assert!(audit_lines("mail.outbox.dropped").is_empty(), "nothing is dropped, so nothing is logged");
 
         let _ = std::fs::remove_dir_all(&dir);

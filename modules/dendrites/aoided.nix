@@ -300,8 +300,9 @@ in
       # off THIS unit's PATH, not the operator's shell — `aoide.a2a.spawnPath`
       # names the packages explicitly (see the option's own live-incident
       # note; empty when spawning is disabled). openssh rides alongside because
-      # the door drains the outbox after every deposit (`spool_and_drain_ack`)
-      # and the tunnel spawns `ssh` by bare name — same gap the aoided unit closed.
+      # a hub drains a relayed container toward its next hop at once unless it
+      # is held (the hop arm in server a2a.rs), that hop can be an `ssh://`
+      # address, and the tunnel spawns `ssh` by bare name.
       path = [ pkgs.openssh ] ++ config.aoide.a2a.spawnPath;
 
       serviceConfig = {

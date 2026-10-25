@@ -1313,8 +1313,8 @@ fn check_seen(container: &Container, digest: &str) -> Result<Seen, String> {
         None => Ok(Seen::Fresh),
         Some(entry) if entry.digest == digest => Ok(Seen::Duplicate {
             // The truth about filing is the filed record itself, never the
-            // gate's own memory: a crash between filing and the gate's
-            // write must not lose the receipt.
+            // gate's own memory: a crash between filing and the gate's write must
+            // not misreport what was filed.
             filed_letter: mail::filed_kind(&container.msgid)
                 .map(|k| k == mail::ENTRY_TYPE_LETTER)
                 .unwrap_or(false),
@@ -2972,7 +2972,7 @@ mod container_tests {
         let second = mail::deposit((*reopened).clone(), "self").unwrap();
         match second {
             mail::DepositOutcome::Duplicate { filed_letter } => {
-                assert!(filed_letter, "re-accepted exactly once, and the ack is owed")
+                assert!(filed_letter, "re-accepted exactly once, and the filed letter says so")
             }
             other => panic!("a second filing is a duplicate, never a second filing: {other:?}"),
         }

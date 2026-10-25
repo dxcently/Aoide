@@ -650,9 +650,10 @@ blank one is refused too.
   and `reap_inner` collect the ids they leave the roster with, and
   `drop_ended_sessions` drops their letters once the roster write has returned,
   never under the roster lock. The daemon tick runs `sweep_session_letters`
-  before its mail drain: it drops own letters with no session (`pre-131`) and
-  those whose session is off the roster or `done` (`session-gone`), and it
-  skips the session pass when the roster cannot be read.
+  before its mail drain: it drops every receipt, whatever its session, and own
+  letters with no session (`pre-131`), and those whose session is off the roster
+  or `done` (`session-gone`); it skips the session pass when the roster cannot
+  be read.
 
 - `graph/window.rs` — the session window record (`session window attach`,
   `session window closed`, `session window roster`, the untracked-terminal
@@ -1653,9 +1654,10 @@ blank one is refused too.
   ordinary unreachable-node outcome) skip that node without stopping the
   sweep. `settle_deposit(envelope, outcome)` is P-M3's third: the one
   place an envelope's deposit OUTCOME turns into spool side effects (the
-  ack a filed letter owes its origin, the `retire_by_ack` a filed receipt
-  performs), reached by `aoide-server::a2a::mail_deposit` from here so that
-  the door and `mail_wire::poll_node`'s own hand-over loop cannot drift on
+  `retire_by_ack` a filed receipt performs, which retires only an own letter;
+  a filed letter leaves nothing
+  behind, ruling 131), reached by `aoide-server::a2a::mail_deposit` from here so
+  that the door and `mail_wire::poll_node`'s own hand-over loop cannot drift on
   what receiving a letter means.
 
 The tick's session sweep and the roster-exit letter drop (ruling 131) are not
