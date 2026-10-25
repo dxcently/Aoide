@@ -13,6 +13,7 @@ pub mod host_shell;
 /// `BCryptGenRandom` on native Windows) — no pool, no fallback.
 pub mod host_random;
 pub mod invocation;
+pub mod local_socket;
 pub mod model;
 /// The owner-only policy a native-Windows core attaches to a private file or
 /// directory — one implementation for `feed`'s writer and `aoide-storage`'s

@@ -233,6 +233,10 @@
   unit that runs a popup sets; no crate in this workspace names a desktop
   binary to spawn, and the exit code every dialog child speaks is
   `DIALOG_INFRA_FAILURE_EXIT` (3), shared by zenity and every provider.
+- **A unix connect that must not hang goes through
+  `local_socket::connect_bounded`, never a bare `UnixStream::connect`.** A full
+  listen backlog makes the bare call wait forever. The socket `connect_bounded`
+  opens is close-on-exec, so a child spawned meanwhile never inherits it.
 
 ## Extension points
 

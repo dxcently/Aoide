@@ -2016,8 +2016,9 @@ one function rather than each hand-rolling the diagnosis.
 
 **Every client call bounds the CONNECT itself, not only reads (rider
 task).** `std::os::unix::net::UnixStream` has no `connect_timeout` (unlike
-`TcpStream`) — `client::connect_bounded` hand-rolls it on `libc` (already
-a dependency, zero new deps). Every one of `resolve`/`resolve_bounded`/
+`TcpStream`) — `connect_bounded` in `aoide_protocol::local_socket` hand-rolls
+it on `libc` (already a dependency, zero new deps). Every one of
+`resolve`/`resolve_bounded`/
 `put`/`pending`/`approve`/`dismiss` routes through it with a fixed 5s
 overall bound, with the identical `io::Result<UnixStream>` shape
 `UnixStream::connect` always returned, so `describe_connect_error` needed
@@ -2049,8 +2050,9 @@ No env override, unlike `AOIDE_SECRETS_BACKEND_TIMEOUT`/
 `AOIDE_SECRETS_PARK_TIMEOUT` — a fixed defensive bound, not a tuned
 operational one, until real evidence says otherwise.
 
-**The address it connects to is built by `client::unix_sockaddr`, from this
-target's own struct (socket correctness fix).** The cap is `sun_path`'s own
+**The address it connects to is built by `unix_sockaddr` in
+`aoide_protocol::local_socket`, from this target's own struct (socket
+correctness fix).** The cap is `sun_path`'s own
 width — 108 on Linux, 104 on the BSDs, 126 on Haiku, 1023 on AIX — because a
 hardcoded 108 would let a 105..107-byte path onto a 104-byte BSD struct and
 hand the kernel a zero-filled name: a connect to a path nobody named. The

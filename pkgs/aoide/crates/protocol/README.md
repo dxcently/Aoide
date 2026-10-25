@@ -61,6 +61,10 @@ other crate in this workspace sits above.
   `aoide-conduct`'s graph views (re-exported as `graph::clean_line`), and
   `aoide-server`'s A2A door.
 - `invocation` — `Invocation`, the parsed call handed to a dispatcher.
+- `local_socket` — `connect_bounded`, a unix connect that cannot hang: a full
+  listen backlog, which makes a bare `UnixStream::connect` wait forever, times
+  out instead. The socket is close-on-exec, as `UnixStream::connect` makes it.
+  On Windows it is `win_unix`'s `connect_timeout`.
 - `output` — `Outcome` + exit codes, the generic envelope every command
   returns; also the taught-error shape (`Outcome::refuse`, `Kind`, `Fix`,
   `io_cause`/`serde_cause`) and the text render of `why`/`fix` and of an

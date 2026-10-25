@@ -1199,8 +1199,9 @@ mod tests {
         // Deliberately a SHORT, FIXED path, never `dir.join(...)`:
         // `std::env::temp_dir()` plus this function's own long, descriptive
         // tag/pid/nanosecond suffix can push a socket path past `AF_UNIX`'s
-        // 108-byte `sun_path` limit, which `client::unix_sockaddr` (rightly)
-        // refuses as `InvalidInput` — a genuine `AdminError::Other`, not
+        // 108-byte `sun_path` limit, which `aoide_protocol::local_socket`'s
+        // address builder (rightly) refuses as `InvalidInput` — a genuine
+        // `AdminError::Other`, not
         // `NoSocket`, which would skip the fallback branch entirely rather
         // than exercise it (found live: `migrate_onto_age_warns_that_age_
         // key_is_now_the_only_decryptor`'s tag alone was long enough to
