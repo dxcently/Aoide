@@ -532,25 +532,33 @@ impl Doors {
     /// never sent to whatever answers at its address. Any other failed check ends
     /// the call as `Unverified`, with no request sent. An idle door answers the
     /// cancel with 409, which is its own word that it is idle, so it closes at
-    /// once. Stop now does not withdraw an armed mark: after a `StillLive` close,
-    /// the mark stands.
+    /// once. Once its close answers anything but `Busy`, stop now withdraws an
+    /// armed mark, so a door that outlives its close is not asked again. A stop
+    /// that sees no turn end, or fails before it closes, leaves the mark: the
+    /// turn it was set for still runs.
     pub fn stop_now(&mut self, id: &str) -> Result<Close, DoorsError> {
         let entry = self.watch(id)?.entry.clone();
-        if verify(&self.pins, &entry).is_err() {
-            return self.close_now(id);
-        }
-        match self.door(id)?.cancel()? {
-            CancelOutcome::Idle => {
-                self.watch(id)?.link.state.lock().unwrap().turn = TurnState::Idle;
-                self.close_now(id)
-            }
-            CancelOutcome::Cancelled => {
-                if !self.wait_turn(id, TurnState::Idle)? {
-                    return Ok(Close::NoTurnEnd);
+        let link = self.watch(id)?.link.clone();
+        let close = if verify(&self.pins, &entry).is_err() {
+            self.close_now(id)?
+        } else {
+            match self.door(id)?.cancel()? {
+                CancelOutcome::Idle => {
+                    link.state.lock().unwrap().turn = TurnState::Idle;
+                    self.close_now(id)?
                 }
-                self.close_now(id)
+                CancelOutcome::Cancelled => {
+                    if !self.wait_turn(id, TurnState::Idle)? {
+                        return Ok(Close::NoTurnEnd);
+                    }
+                    self.close_now(id)?
+                }
             }
+        };
+        if close != Close::Busy {
+            link.state.lock().unwrap().armed = false;
         }
+        Ok(close)
     }
 
     /// The asks this door's stream carries, oldest first.

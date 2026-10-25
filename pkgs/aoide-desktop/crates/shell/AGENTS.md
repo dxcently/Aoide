@@ -144,9 +144,9 @@ are in README.md.
   watch writes the record in two places only: an identity failure (`failed`) and
   a door that is gone (`forget`), each through `Store::update`.
 - A stream's end withdraws an armed mark and sends `Event::Revoked`, unless a
-  close holds `closing` or the door is gone. `close_due` withdraws the mark
-  after any answer but `Busy`. Stop now does not: after a `StillLive` close it
-  leaves the mark standing.
+  close holds `closing` or the door is gone. `close_due` and stop now withdraw
+  the mark after any answer but `Busy`. A stop now that sees no turn end, or
+  fails before it closes, leaves it: the turn it was set for still runs.
 - A watch that ended is not watched. `launch_ids` leaves it out, and `watch`
   refuses it, so its calls send nothing.
 - A drop or a forget whose store write fails keeps its record. The next open
@@ -194,8 +194,9 @@ are in README.md.
   ended in the gap is never seen: its stop now's 204 waits the same 10 s and
   reports `NoTurnEnd`. A second stop now closes when the door answers 409, as an
   idle door does, and a 204 waits again. A turn that outlives every cancel is
-  never closed by the app: the user ends it outside the app. Stop now does not
-  withdraw an armed mark, so after a `StillLive` close the mark stands.
+  never closed by the app: the user ends it outside the app. A stop now that
+  reports `NoTurnEnd` leaves an armed mark standing; any other answer
+  withdraws it.
 - A failed hello at launch or re-attach leaves the record with a null session,
   and the watch checks it again on each try. A record with a null session takes
   a hello's session only at the next open: a watch's reconnect does not write

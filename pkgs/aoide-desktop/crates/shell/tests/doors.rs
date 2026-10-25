@@ -803,6 +803,31 @@ fn a_door_that_outlives_its_close_is_not_asked_to_close_again_when_a_later_turn_
 }
 
 #[test]
+fn a_stop_now_whose_close_leaves_the_door_live_withdraws_the_mark() {
+    let world = World::new("stop-live");
+    set_mode(&world, "ignore-sigterm");
+    let (tx, rx) = mpsc::sync_channel(EVENTS_BOUND);
+    let mut doors = world.open(tx);
+    let id = world.launch(&mut doors);
+    world.command("running");
+    assert!(until(Duration::from_secs(5), || doors.turn(&id).unwrap() == TurnState::Running));
+    assert_eq!(doors.close_after_turn(&id).unwrap(), Close::Armed);
+    assert_eq!(doors.stop_now(&id).unwrap(), Close::StillLive, "the door outlives its 10 s bound");
+    assert!(until(Duration::from_secs(10), || world.count("GET /api/events") == 2), "the watch reopens its stream");
+    world.command("idle");
+    assert!(until(Duration::from_secs(5), || doors.turn(&id).unwrap() == TurnState::Idle), "the door is idle again");
+    assert_eq!(doors.close_due(&id).unwrap(), Close::Revoked, "the stop withdrew the mark");
+    assert_eq!(world.count("SIGTERM"), 1, "the door was signalled once");
+    world.command("running");
+    assert!(until(Duration::from_secs(5), || doors.turn(&id).unwrap() == TurnState::Running));
+    world.command("idle");
+    thread::sleep(Duration::from_millis(200));
+    let seen: Vec<Event> = rx.try_iter().collect();
+    let dues = seen.iter().filter(|e| matches!(e, Event::CloseDue { .. })).count();
+    assert!(dues <= 1, "no close is due after the stop's own turn end: {seen:?}");
+}
+
+#[test]
 fn stop_now_on_a_full_channel_drained_by_another_thread_closes_the_door() {
     let world = World::new("stop-full");
     let (tx, rx) = mpsc::sync_channel(1);
