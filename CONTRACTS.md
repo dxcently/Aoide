@@ -6115,6 +6115,14 @@ a consumer filtering the outcome by disposition never silently drops a row
 that fell through `resolve_candidate`/`resurrect_one`'s own flag-mode
 shapes.
 
+**Text and data.** Each `message`, `changed` line, `reason` and stderr line
+resurrect writes names a ledger or claim id, an agent or an origin with its
+unsafe characters removed (`strip_unsafe`). A plan line keeps them, and is
+spelled where it is shown (`visible_held`). `data` carries each as the
+ledger, `state/resuming.json` or `sessions.json` holds it, `liveSessionId`
+and `claimedBy` included, so a consumer can name the id back; a consumer
+spells it at display.
+
 **`resurrect --dry-run`.** The flag lists the rows the same invocation would
 act on, in the order a launch acts on them, and launches, holds, types and
 sends nothing. Flag mode (`--project` with `--all`, `--id`, or neither) lists

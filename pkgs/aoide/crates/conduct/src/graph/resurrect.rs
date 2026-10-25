@@ -271,7 +271,7 @@ fn resolve_candidate(entry: aoide_storage::ledger::LedgerEntry) -> Candidate {
 /// dir. Anything else is the candidate's skip reason. The path itself stays out
 /// of the reason: it is ledger data.
 fn journal_of(entry: &aoide_storage::ledger::LedgerEntry) -> Result<String, String> {
-    let who = format!("session {} ({})", strip_unsafe(&entry.session_id), entry.agent);
+    let who = format!("session {} ({})", strip_unsafe(&entry.session_id), strip_unsafe(&entry.agent));
     let skip = |why: &str| Err(format!("{who} {why} — skipped rather than guessed"));
     let Some(log) = entry.log_path.as_deref() else {
         return skip("has no logPath, so its journal is unknown");
@@ -460,27 +460,27 @@ fn read_roster_and_claims() -> Result<(Vec<aoide_storage::records::SessionRecord
 
 /// The refusal for a candidate: `session <id> (<agent>)`, then why it is skipped.
 fn refused(entry: &aoide_storage::ledger::LedgerEntry, why: String) -> Refusal {
-    Refusal { reason: format!("session {} ({}) {why}", strip_unsafe(&entry.session_id), entry.agent), named: None }
+    Refusal { reason: format!("session {} ({}) {why}", strip_unsafe(&entry.session_id), strip_unsafe(&entry.agent)), named: None }
 }
 
 /// The refusal for a blocked candidate, naming the live session or the claim.
 fn blocked_refusal(entry: &aoide_storage::ledger::LedgerEntry, blocked: Blocked) -> Refusal {
     match blocked {
         Blocked::Live { live_id } => {
-            let live_id = strip_unsafe(&live_id);
+            let shown = strip_unsafe(&live_id);
             Refusal {
                 named: Some(("liveSessionId", live_id.clone())),
-                ..refused(entry, format!("is live as {live_id}, so it is not resumed again — skipped"))
+                ..refused(entry, format!("is live as {shown}, so it is not resumed again — skipped"))
             }
         }
         Blocked::InFlight { new_id, age_secs, by_journal } => {
-            let new_id = strip_unsafe(&new_id);
+            let shown = strip_unsafe(&new_id);
             let held = if by_journal { "shares its journal with" } else { "has" };
             Refusal {
                 named: Some(("claimedBy", new_id.clone())),
                 ..refused(
                     entry,
-                    format!("{held} a launch in flight as {new_id} (claimed {age_secs}s ago), so it is not resumed again — skipped"),
+                    format!("{held} a launch in flight as {shown} (claimed {age_secs}s ago), so it is not resumed again — skipped"),
                 )
             }
         }
@@ -860,7 +860,7 @@ fn origin_to_carry(ledger_origin: Option<&str>) -> OriginCarry<'_> {
 /// read by the launch and by a dry run alike: a taught line, never a guessed
 /// invocation.
 fn unresumed_reason(agent: &str) -> String {
-    format!("harness `{agent}` has no verified resume argv — skipped rather than typing a guessed invocation")
+    format!("harness `{}` has no verified resume argv — skipped rather than typing a guessed invocation", strip_unsafe(agent))
 }
 
 /// Spawn one candidate via the windowed path and fold the outcome into
@@ -951,8 +951,9 @@ fn resurrect_one(
     match origin_to_carry(c.entry.origin.as_deref()) {
         OriginCarry::Carry(origin) => stamp_origin(&new_id, origin),
         OriginCarry::RefusedNode(origin) => eprintln!(
-            "aoide resurrect: reviving `{}` as LOCAL-class — its ledger origin `{origin}` cannot be trusted from an unsealed ledger and is not carried forward (P-ID1's sealed credential closes this)",
-            c.entry.session_id
+            "aoide resurrect: reviving `{}` as LOCAL-class — its ledger origin `{}` cannot be trusted from an unsealed ledger and is not carried forward (P-ID1's sealed credential closes this)",
+            strip_unsafe(&c.entry.session_id),
+            strip_unsafe(&origin)
         ),
         OriginCarry::Nothing => {}
     }
@@ -1003,8 +1004,8 @@ fn resurrect_one(
 
     changed.push(format!(
         "session {new_id}: resurrected from {} ({}){}",
-        c.entry.session_id,
-        c.entry.agent,
+        strip_unsafe(&c.entry.session_id),
+        strip_unsafe(&c.entry.agent),
         if registered { "" } else { " (not yet registered)" }
     ));
     if let Restore::Typed { .. } = restore {
@@ -1013,7 +1014,7 @@ fn resurrect_one(
     if restore == Restore::NotReady {
         changed.push(format!(
             "session {new_id}: restore not injected — `{}` was not ready",
-            c.entry.agent
+            strip_unsafe(&c.entry.agent)
         ));
     }
     if restore == Restore::Held {
@@ -1292,7 +1293,7 @@ fn select_candidates(inv: &Invocation, name: &str) -> Result<Selection, Outcome>
             None => {
                 let out = Outcome::error(
                     cmd,
-                    format!("no ledger entry `{id}` anchored to project `{name}`"),
+                    format!("no ledger entry `{}` anchored to project `{name}`", strip_unsafe(id)),
                 )
                 .with_data(json!({ "reason": "unknown-ledger-id", "project": name, "id": id }));
                 audit_resurrect(inv, "error", &out.message);
@@ -1708,7 +1709,7 @@ fn summon_remote(
                 .to_string();
             changed.push(format!(
                 "session {session_id}: summoned on node `{}` (manifest spec, agent {})",
-                spec.host, spec.agent
+                spec.host, strip_unsafe(&spec.agent)
             ));
             resurrected.push(json!({
                 "sessionId": session_id,
@@ -1755,7 +1756,7 @@ fn summon_check(
     let text = summon_text(spec).ok_or_else(|| {
         format!(
             "no `command` given and no registered default launch for agent `{}` — add a `command` to the spec",
-            spec.agent
+            strip_unsafe(&spec.agent)
         )
     })?;
     Ok((node, text))
@@ -1797,7 +1798,7 @@ fn clean_argv(spec: &aoide_storage::manifest::SessionSpec) -> Result<Vec<String>
             _ => {
                 return Err(format!(
                     "no `command` given and no registered default launch for agent `{}` — add a `command` to the spec",
-                    spec.agent
+                    strip_unsafe(&spec.agent)
                 ))
             }
         },
@@ -1862,7 +1863,7 @@ fn clean_spawn_from_spec(
         .unwrap_or(false);
     changed.push(format!(
         "session {session_id}: clean-spawned from manifest spec ({}){}",
-        spec.agent,
+        strip_unsafe(&spec.agent),
         if registered { "" } else { " (not yet registered)" }
     ));
     resurrected.push(json!({
@@ -5186,17 +5187,60 @@ mod tests {
     }
 
     #[test]
-    fn an_id_with_terminal_escapes_prints_stripped() {
+    fn an_in_flight_refusal_strips_its_text_and_keeps_its_data() {
         use aoide_protocol::untrusted::is_unsafe;
         let hostile = "\u{1b}[31m\u{202E}";
-        let entry = ledger_entry(&format!("ledger-claude{hostile}"), "claude", "/w", "2026-08-20T01:00:00Z");
-        let claims = [claim_taken(&entry.session_id, &format!("resurrect-9-6{hostile}"), 5)];
+        let new_id = format!("resurrect-9-6{hostile}");
+        let entry = ledger_entry(&format!("ledger-claude{hostile}"), &format!("claude{hostile}"), "/w", "2026-08-20T01:00:00Z");
+        let claims = [claim_taken(&entry.session_id, &new_id, 5)];
         let verdict = blocked(&entry, false, &[], &claims, &[], NOW).expect("a young claim blocks its own session");
         let refusal = blocked_refusal(&entry, verdict);
         assert!(!refusal.reason.chars().any(is_unsafe), "the reason prints stripped: {:?}", refusal.reason);
-        let (key, named) = refusal.named.expect("an in-flight claim names its new id");
-        assert_eq!(key, "claimedBy");
-        assert!(!named.chars().any(is_unsafe), "claimedBy prints stripped: {named:?}");
+        assert_eq!(refusal.named.clone(), Some(("claimedBy", new_id.clone())), "claimedBy keeps the claim's bytes");
+        let row = refusal_row(&entry, refusal);
+        assert_eq!(row["sessionId"], json!(entry.session_id));
+        assert_eq!(row["agent"], json!(entry.agent));
+        assert_eq!(row["claimedBy"], json!(new_id));
+    }
+
+    #[test]
+    fn a_live_refusal_strips_its_text_and_keeps_its_data() {
+        use aoide_protocol::untrusted::is_unsafe;
+        let hostile = "\u{1b}[31m\u{202E}";
+        let live_id = format!("resurrect-9-8{hostile}");
+        let entry = ledger_entry(&format!("ledger-claude{hostile}"), &format!("claude{hostile}"), "/w", "2026-08-20T01:00:00Z");
+        let mut resumed = roster_record(&live_id, "idle");
+        resumed.resumed_from = Some(entry.session_id.clone());
+        let verdict = blocked(&entry, false, &[resumed], &[], &[], NOW).expect("a live resume blocks its source");
+        let refusal = blocked_refusal(&entry, verdict);
+        assert!(!refusal.reason.chars().any(is_unsafe), "the reason prints stripped: {:?}", refusal.reason);
+        assert_eq!(refusal.named, Some(("liveSessionId", live_id)));
+    }
+
+    #[test]
+    fn a_journal_skip_strips_the_id_and_the_agent() {
+        use aoide_protocol::untrusted::is_unsafe;
+        let hostile = "\u{1b}[31m\u{202E}";
+        let entry = ledger_entry(&format!("ledger-eid{hostile}"), &format!("eidolon{hostile}"), "/w", "2026-08-20T01:00:00Z");
+        let reason = journal_of(&entry).expect_err("a line with no logPath has no journal");
+        assert!(!reason.chars().any(is_unsafe), "the skip prints stripped: {reason:?}");
+    }
+
+    #[test]
+    fn an_unresumed_harness_prints_its_agent_stripped() {
+        use aoide_protocol::untrusted::is_unsafe;
+        let hostile = "\u{1b}[31m\u{202E}";
+        let reason = unresumed_reason(&format!("claude{hostile}"));
+        assert!(!reason.chars().any(is_unsafe), "the taught line prints stripped: {reason:?}");
+    }
+
+    #[test]
+    fn a_manifest_spec_with_no_launch_prints_its_agent_stripped() {
+        use aoide_protocol::untrusted::is_unsafe;
+        let hostile = "\u{1b}[31m\u{202E}";
+        let spec = manifest_spec("local", ".", &format!("claude{hostile}"), None);
+        let reason = clean_argv(&spec).expect_err("an agent with no launch and no command is refused");
+        assert!(!reason.chars().any(is_unsafe), "the refusal prints stripped: {reason:?}");
     }
 
     #[test]

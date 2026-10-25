@@ -1268,6 +1268,13 @@ blank one is refused too.
   that an early return must never silently skip the audit line a full run
   gets. A usage error or a stage-file miss gets none, and the door's line
   comes with every call.
+  **Text and data:** each message, changed line, reason and stderr line
+  resurrect writes names a ledger or claim id, an agent or an origin with
+  its unsafe characters removed (`strip_unsafe`). A plan line keeps them,
+  and is spelled where it is shown (`visible_held`). The data carries each
+  as the ledger, `state/resuming.json` or `sessions.json` holds it,
+  `liveSessionId` and `claimedBy` included, so a consumer can name the id
+  back; a consumer spells it at display.
   **Dry run (`--dry-run`):** the flag takes the selection the launch would
   take and lists the rows the launch acts on, launching, holding and typing
   nothing. Flag mode lists what `select_candidates` returns, with
