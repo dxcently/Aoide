@@ -10,19 +10,22 @@ are in README.md.
 - The listener is this user's. After the connect and before a byte is written,
   `listener::check` finds the accepted socket's row in `/proc/net/tcp` (`tcp6`
   for an IPv6 door): its local address is the door's, its remote address is
-  this connection's local address. Its owner, the row's eighth column, must be
-  the effective uid. Another uid, or no row after 50 tries 10 ms apart, is
-  `Unowned` and nothing is written. The check proves the listener runs as this
-  user. It does not prove the process is `eidolon`: a same-uid listener passes
-  (ruling 29).
+  this connection's local address. Its owner, the row's eighth column, goes to
+  `decide`: the effective uid passes, and no row or another uid (0 included) is
+  `Unowned` and nothing is written. The table is read again, up to 50 tries 10
+  ms apart, before no row is the answer. A V4 door's row is read from `tcp`
+  alone: Eidolon binds one loopback address, so a dual-stack listener's
+  accepted socket is in `tcp6`, finds no row, and is refused, which is
+  fail-closed. The check proves the listener runs as this user. It does not
+  prove the process is `eidolon`: a same-uid listener passes (ruling 29).
 - The token is read on every request. The runtime directory and its `eidolon`
   directory must be real directories (no symlinks), owned by the effective uid,
   at mode 0700. The token file must be exactly
   `<runtime>/eidolon/web-<port>.token`, a regular file owned by the effective
   uid, with no group or other bits, one link, and at most 4 KiB; a larger file
   is refused, not truncated. It must be graphic ASCII, with no space. Nothing
-  is trimmed: the door writes no newline. The open is `O_NOFOLLOW | O_NONBLOCK`,
-  so a FIFO is refused by the stat and never waited on.
+  is trimmed: the door writes no newline. The open is `O_NOFOLLOW | O_NONBLOCK`:
+  a FIFO opens at once, with no writer, and the stat refuses it.
 - A relative or empty `XDG_RUNTIME_DIR` counts as unset. There is no temp-dir
   fallback. The runtime dir passes `runtime_from_env` and then `check_runtime`
   before any path is built from it. The token path is `token_path`, and
@@ -39,14 +42,17 @@ are in README.md.
   `CancelOutcome` and `AnswerOutcome`. Any other status is `Unexpected`.
 - A reply over 64 KiB is refused, not cut short: `call` returns `Malformed`, and
   a `Content-Length` over 64 KiB is refused before its body is read. An error
-  status (400 and up) is decided by its head: a reset that cuts its body short
-  leaves the status, so a 413 is `TooLarge`.
+  status (400 and up) is decided by its head alone: whatever length it declares,
+  and however its body ends, the status stands, so a 413 is `TooLarge`. The cap
+  and the read-error rule hold under 400 only.
 - A head or a trailer block holds at most 100 header lines and 64 KiB in all,
   and a line at most 16 KiB. Over either cap is `Malformed`. A chunk size that
   overflows is `Malformed`, and so is a body shorter than its length.
-- A call's head and body share one 30 s deadline: each read's timeout is the
-  time left. An events stream's head has 30 s, and its body none once the head
-  is read. The connect has 5 s.
+- A request's send, and its reply's head and body, share one 30 s deadline that
+  starts before the send. Each write's and read's timeout is the time left, and
+  a write that would start past the deadline is refused as a timeout. An events
+  stream's send and head share its 30 s, and its body has none once the head is
+  read. The connect has 5 s.
 - A write that fails is reported only if no reply came: a door may answer 413
   before it has read the body.
 - A `data:` frame over 1 MiB is dropped and counted by `dropped_oversize()`,
@@ -55,7 +61,8 @@ are in README.md.
 - The first frame of an events stream is `hello`, and its `protocol` is
   exactly the number 1. It is read as a JSON value, so a string, a float or a
   number past u32 is refused. A first frame that is not `hello` is
-  `Malformed`; a `protocol` other than 1 is `Protocol { got }`. Each ends the
+  `Malformed`; a `protocol` other than 1 is `Protocol { got }`, whose message
+  prints a number as it is and any other value by its JSON type. Each ends the
   stream, and so does a second `hello` (`Malformed`). An unknown frame type is
   `Frame::Other`. An unknown field is ignored. Neither is an error.
 - No `unsafe` in this crate: the workspace denies `unsafe_code` for every
@@ -79,7 +86,8 @@ are in README.md.
 
 - The other-uid refusals: a listener of another uid, and a token file of
   another uid. Tests never run as root, so no file or socket of another uid
-  can be made. The parser tests in `listener.rs` cover another uid's row.
+  can be made. The parser and `decide` tests in `listener.rs` cover another
+  uid's row and verdict.
 - The FIFO refusal is tested in the shell crate, which can make a FIFO through
   `exec`'s fakes-only helper. This crate forbids `unsafe`.
 

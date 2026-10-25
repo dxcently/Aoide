@@ -45,6 +45,18 @@ fn fixture(tag: &str) -> (Runtime, FakeDoor, Door) {
     (rt, fake, door)
 }
 
+/// A token file for a door this test runs on `port` itself, made as `FakeDoor`
+/// makes one: `runtime/eidolon` at 0700, the file at 0600.
+fn own_token(rt: &Runtime, port: u16, token: &str) -> PathBuf {
+    let eidolon = rt.path().join("eidolon");
+    fs::create_dir_all(&eidolon).unwrap();
+    fs::set_permissions(&eidolon, Permissions::from_mode(0o700)).unwrap();
+    let file = eidolon.join(format!("web-{port}.token"));
+    fs::write(&file, token).unwrap();
+    fs::set_permissions(&file, Permissions::from_mode(0o600)).unwrap();
+    file
+}
+
 fn body_json(body: &[u8]) -> Value {
     serde_json::from_slice(body).expect("the request body is json")
 }
@@ -400,6 +412,48 @@ fn a_413_sent_at_once_before_the_body_is_read_is_too_large() {
         Err(DoorError::TooLarge) => {}
         other => panic!("{other:?}"),
     }
+}
+
+#[test]
+fn a_413_that_declares_a_huge_length_is_too_large() {
+    let (_rt, fake, door) = fixture("413-huge");
+    let head = "HTTP/1.1 413 Payload Too Large\r\nContent-Length: 1000000000000\r\n\r\n";
+    fake.reply_raw("/api/say", &[(Duration::ZERO, head.as_bytes())], true);
+    assert!(matches!(door.say("hi", Mode::Send), Err(DoorError::TooLarge)));
+}
+
+/// A door that accepts, takes the request's head, and never reads its body: the
+/// send cannot finish, so the call is refused within one deadline from the send's
+/// first byte. The body's encoding happens before the send and is not counted.
+#[test]
+fn a_send_nobody_reads_is_refused_within_one_deadline() {
+    use std::io::{BufRead, BufReader};
+
+    let rt = Runtime::new("send-deadline");
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    let token = own_token(&rt, addr.port(), "tok-123");
+    let (head_at, head_seen) = mpsc::channel();
+    thread::spawn(move || {
+        let (stream, _) = listener.accept().unwrap();
+        let mut reader = BufReader::new(&stream);
+        let mut line = String::new();
+        loop {
+            line.clear();
+            if reader.read_line(&mut line).unwrap() <= 2 {
+                break;
+            }
+        }
+        let _ = head_at.send(Instant::now());
+        thread::sleep(Duration::from_secs(10));
+    });
+    let door = Door::new(addr, rt.path(), &token).unwrap().with_timeout(Duration::from_secs(2));
+    let big = "x".repeat(32 << 20);
+    assert!(door.say(&big, Mode::Send).is_err(), "a send nobody reads is refused");
+    let refused_at = Instant::now();
+    let sent_at = head_seen.recv_timeout(Duration::from_secs(5)).expect("the head arrives");
+    let took = refused_at.duration_since(sent_at);
+    assert!(took < Duration::from_secs(3), "refused {took:?} after the send began, over 2 s plus 1 s");
 }
 
 #[test]

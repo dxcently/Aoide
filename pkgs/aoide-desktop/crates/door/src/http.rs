@@ -9,7 +9,7 @@
 
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::net::TcpStream;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use crate::error::DoorError;
 
@@ -33,8 +33,8 @@ pub(crate) struct Wire {
 }
 
 impl Wire {
-    pub(crate) fn new(stream: TcpStream, within: Duration) -> Wire {
-        Wire { stream, deadline: Some(Instant::now() + within) }
+    pub(crate) fn new(stream: TcpStream, deadline: Instant) -> Wire {
+        Wire { stream, deadline: Some(deadline) }
     }
 
     /// Ends the deadline: later reads wait as long as the peer takes.
@@ -54,6 +54,29 @@ impl Read for Wire {
             self.stream.set_read_timeout(Some(left))?;
         }
         self.stream.read(buf)
+    }
+}
+
+/// The writer of a request, under the deadline its reply shares: each write waits
+/// as long as the time left, and a write that would start past the deadline is
+/// refused as a timeout.
+pub(crate) struct Within<'a> {
+    pub(crate) stream: &'a TcpStream,
+    pub(crate) deadline: Instant,
+}
+
+impl Write for Within<'_> {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        let left = self.deadline.saturating_duration_since(Instant::now());
+        if left.is_zero() {
+            return Err(io::Error::new(io::ErrorKind::TimedOut, "the request ran past its deadline"));
+        }
+        self.stream.set_write_timeout(Some(left))?;
+        self.stream.write(buf)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.stream.flush()
     }
 }
 

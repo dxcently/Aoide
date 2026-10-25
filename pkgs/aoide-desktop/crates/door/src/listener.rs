@@ -8,6 +8,12 @@
 //! What it proves: the listener that answered this connection runs as this
 //! user. It does not prove the process is `eidolon`, and a same-uid listener
 //! passes it (ruling 29).
+//!
+//! A V4 door's row is in `tcp`, since Eidolon binds one loopback address and its
+//! accepted socket is an IPv4 socket. A dual-stack listener (an IPv6 socket that
+//! also takes IPv4) has its accepted socket in `tcp6`, which a V4 door's check
+//! does not read, so its connection finds no row and is refused. That is
+//! fail-closed.
 
 use std::fs;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
@@ -36,10 +42,15 @@ pub(crate) fn check(door: SocketAddr, client: SocketAddr) -> Result<(), DoorErro
         }
         thread::sleep(PAUSE);
     }
-    let me = euid()?;
+    decide(door, owner, euid()?)
+}
+
+/// The verdict on a row's owner: this user's listener passes. No row, and any
+/// other uid (root included), is refused as `Unowned`.
+pub(crate) fn decide(door: SocketAddr, owner: Option<u32>, me: u32) -> Result<(), DoorError> {
     match owner {
         Some(uid) if uid == me => Ok(()),
-        owner => Err(DoorError::Unowned { addr: door, uid: owner }),
+        uid => Err(DoorError::Unowned { addr: door, uid }),
     }
 }
 
@@ -149,5 +160,24 @@ mod tests {
         let door = listener.local_addr().unwrap();
         let client = std::net::TcpStream::connect(door).unwrap();
         assert!(check(door, client.local_addr().unwrap()).is_ok());
+    }
+
+    /// The verdict is this user's listener and nothing else: no row, and any other
+    /// uid with root's among them, is refused, and the door's address is named.
+    #[test]
+    fn decide_passes_only_this_users_listener() {
+        let door: SocketAddr = DOOR4.parse().unwrap();
+        assert!(decide(door, Some(1000), 1000).is_ok());
+    }
+
+    #[test]
+    fn decide_refuses_no_row_and_any_other_uid_root_included() {
+        let door: SocketAddr = DOOR4.parse().unwrap();
+        for owner in [None, Some(0), Some(1001)] {
+            match decide(door, owner, 1000) {
+                Err(DoorError::Unowned { addr, uid }) => assert_eq!((addr, uid), (door, owner)),
+                other => panic!("{owner:?}: {other:?}"),
+            }
+        }
     }
 }

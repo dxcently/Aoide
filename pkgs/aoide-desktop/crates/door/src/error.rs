@@ -25,8 +25,8 @@ pub enum DoorError {
     Io(io::Error),
     /// A reply or frame that does not decode, or whose framing breaks.
     Malformed(String),
-    /// A `hello` whose `protocol` is not [`PROTOCOL`], as the door sent it; the
-    /// stream ends behind it.
+    /// A `hello` whose `protocol` is not [`PROTOCOL`]; the stream ends behind it.
+    /// The message names the value by its type, so no text the door sent is printed.
     Protocol { got: Value },
     /// 401: the token presented is not the door's.
     Unauthorized,
@@ -59,7 +59,7 @@ impl fmt::Display for DoorError {
             DoorError::Io(e) => write!(f, "door i/o: {e}"),
             DoorError::Malformed(what) => write!(f, "malformed door data: {what}"),
             DoorError::Protocol { got } => {
-                write!(f, "the door speaks protocol {got}; this client speaks {PROTOCOL}")
+                write!(f, "the door speaks protocol {}; this client speaks {PROTOCOL}", protocol_word(got))
             }
             DoorError::Unauthorized => f.write_str("the door refused the token (401); the token file may be stale"),
             DoorError::HostRefused => f.write_str("the door refused the Host header (403)"),
@@ -71,10 +71,44 @@ impl fmt::Display for DoorError {
     }
 }
 
+/// A protocol value as the message names it: a number as it is, any other value
+/// by its JSON type.
+fn protocol_word(got: &Value) -> String {
+    match got {
+        Value::Number(n) => n.to_string(),
+        Value::Null => "null".to_string(),
+        Value::Bool(_) => "a boolean".to_string(),
+        Value::String(_) => "a string".to_string(),
+        Value::Array(_) => "an array".to_string(),
+        Value::Object(_) => "an object".to_string(),
+    }
+}
+
 impl std::error::Error for DoorError {}
 
 impl From<io::Error> for DoorError {
     fn from(e: io::Error) -> Self {
         DoorError::Io(e)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    /// A string the door sent is named by its type: the message has no ESC, and
+    /// says "a string".
+    #[test]
+    fn a_protocol_string_is_named_by_its_type_and_never_printed() {
+        let text = DoorError::Protocol { got: json!("\x1b[2Jpwned") }.to_string();
+        assert!(!text.contains('\x1b'), "{text}");
+        assert!(text.contains("a string"), "{text}");
+    }
+
+    #[test]
+    fn a_protocol_number_is_printed_as_it_is() {
+        let text = DoorError::Protocol { got: json!(2) }.to_string();
+        assert!(text.contains("protocol 2;"), "{text}");
     }
 }

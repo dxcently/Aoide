@@ -1,19 +1,19 @@
 use std::io::{BufReader, Read};
 use std::net::{SocketAddr, TcpStream};
 use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
 
 use crate::error::DoorError;
 use crate::events::Events;
-use crate::http::{body_reader, framing_error, read_head, write_request, Head, Wire};
+use crate::http::{body_reader, framing_error, read_head, write_request, Head, Wire, Within};
 use crate::listener;
 use crate::token::read_token;
 
 const CONNECT: Duration = Duration::from_secs(5);
-/// The deadline a request waits under: a call's head and body together, or an
-/// events stream's head (its body has none).
+/// The deadline a request waits under, from its send: a call's send, head and body
+/// together, or an events stream's send and head (its body has none).
 const IO: Duration = Duration::from_secs(30);
 
 /// The longest reply a non-stream route reads.
@@ -138,30 +138,32 @@ impl Door {
         }
     }
 
-    /// One request whose reply is read whole: its head and body share one deadline.
+    /// One request whose reply is read whole: its send, head and body share one deadline.
     fn call(&self, method: &str, path: &str, body: Option<&Value>) -> Result<(u16, Vec<u8>), DoorError> {
         let bytes = body.map(|b| serde_json::to_vec(b).expect("a json value serializes"));
         let (head, reader) = self.exchange(method, path, bytes.as_deref(), false)?;
-        if let Some(length) = head.length.filter(|length| *length > MAX_REPLY) {
+        // An error status is decided by its head: its length and a cut body are not errors.
+        let capped = head.status < 400;
+        if let Some(length) = head.length.filter(|length| capped && *length > MAX_REPLY) {
             return Err(DoorError::Malformed(format!("a reply of {length} bytes, over {MAX_REPLY}")));
         }
         let mut out = Vec::new();
         let read = body_reader(&head, reader).take(MAX_REPLY + 1).read_to_end(&mut out);
-        // An error status is decided by its head: a reset can cut its body short.
-        if let Some(e) = read.err().filter(|_| head.status < 400) {
+        if let Some(e) = read.err().filter(|_| capped) {
             return Err(framing_error(e));
         }
-        if out.len() as u64 > MAX_REPLY {
+        if capped && out.len() as u64 > MAX_REPLY {
             return Err(DoorError::Malformed(format!("a reply over {MAX_REPLY} bytes")));
         }
         Ok((head.status, out))
     }
 
     /// Reads the token under A6, connects, checks the listener before a byte is
-    /// written, writes the request and reads the reply's head. A write that
-    /// fails is reported only if no reply came: a door may answer (413) before
-    /// it has read the whole body. An events stream keeps no deadline once its
-    /// head is read.
+    /// written, then sends the request and reads the reply's head. One deadline
+    /// starts before the send, and the writes and the head's reads share it. A
+    /// write that fails is reported only if no reply came: a door may answer
+    /// (413) before it has read the whole body. An events stream keeps no
+    /// deadline once its head is read.
     fn exchange(
         &self,
         method: &str,
@@ -170,12 +172,19 @@ impl Door {
         streaming: bool,
     ) -> Result<(Head, BufReader<Wire>), DoorError> {
         let token = read_token(&self.runtime, &self.token_file, self.addr.port())?;
-        let mut stream = TcpStream::connect_timeout(&self.addr, CONNECT)
+        let stream = TcpStream::connect_timeout(&self.addr, CONNECT)
             .map_err(|source| DoorError::Connect { addr: self.addr, source })?;
         listener::check(self.addr, stream.local_addr()?)?;
-        stream.set_write_timeout(Some(self.timeout))?;
-        let sent = write_request(&mut stream, method, path, &self.addr.to_string(), token.as_str(), body);
-        let mut reader = BufReader::new(Wire::new(stream.try_clone()?, self.timeout));
+        let deadline = Instant::now() + self.timeout;
+        let sent = write_request(
+            &mut Within { stream: &stream, deadline },
+            method,
+            path,
+            &self.addr.to_string(),
+            token.as_str(),
+            body,
+        );
+        let mut reader = BufReader::new(Wire::new(stream.try_clone()?, deadline));
         match read_head(&mut reader) {
             Ok(head) => {
                 if streaming {

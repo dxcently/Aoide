@@ -3,8 +3,10 @@
 //! variable's value once, through [`runtime_from_env`].
 //!
 //! No libc FFI here: the effective uid comes from `/proc/self/status`, the
-//! open is `OpenOptions` with `O_NOFOLLOW` (std adds `O_CLOEXEC`), and the
-//! fstat is `File::metadata`.
+//! open is `OpenOptions` with `O_NOFOLLOW` and `O_NONBLOCK` (std adds
+//! `O_CLOEXEC`), and the fstat is `File::metadata`. `O_NONBLOCK` is why a FIFO
+//! is refused at once: it opens without waiting for a writer, and the fstat
+//! refuses it.
 
 use std::ffi::OsStr;
 use std::fmt;

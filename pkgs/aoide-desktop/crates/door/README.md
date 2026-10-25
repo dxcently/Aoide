@@ -19,9 +19,9 @@ HTTP library and no GUI crate. Its dependencies are serde, serde_json and libc
 - `token.rs`: `runtime_from_env`, `check_runtime`, `token_path`, and the token
   read that every request makes.
 - `listener.rs`: `check`, which refuses a connection whose answering socket
-  another uid owns.
+  another uid owns, and `decide`, the verdict on its owner.
 - `http.rs`: the request writer, the reply head, the three body framings, and
-  the deadline a reply's reads share.
+  the one deadline a request's send and its reply share (`Within`, `Wire`).
 - `error.rs`: `DoorError`, every way a call can fail.
 - `fake.rs`, behind the `fake` feature: a std-thread door on 127.0.0.1 that
   speaks the wire as far as the tests need, and records every request.
@@ -35,7 +35,7 @@ client.rs   Door::say, cancel, answer, events
 client.rs   exchange(): read the token (token.rs), connect, check the
               |             listener (listener.rs), write the request
               v
-http.rs     read_head under the request's deadline, then the body reader:
+http.rs     read_head under the deadline the send began, then the body reader:
               |             length, chunked, or to EOF
      +--------+-----------------------+
      |                                |
