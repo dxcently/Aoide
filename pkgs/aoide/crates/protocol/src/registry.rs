@@ -162,16 +162,19 @@ pub struct Command {
     /// types into a session; or it reaches a check that refuses a door that
     /// cannot approve. Additive (CONTRACTS.md §3): skipped when `false`. The
     /// desktop app's floor reads it from `schema --json`, which shows which
-    /// verbs carry it, and refuses a grant that names the verb. The golden
+    /// verbs carry it, and refuses a grant that names the verb. The floor
+    /// refuses the custody, trust and self-change verbs by name, and those
+    /// verbs carry neither mark, even where a rule fits one. The golden
     /// snapshot in cli/src/registry.rs pins them. `Command::check` does not
     /// read it.
     #[serde(skip_serializing_if = "is_false")]
     pub approves: bool,
-    /// The verb starts an agent. Additive (CONTRACTS.md §3): skipped when
-    /// `false`. The desktop app's floor reads it from `schema --json`, which
-    /// shows which verbs carry it, and refuses a grant that names the verb. The
-    /// golden snapshot in cli/src/registry.rs pins them. `Command::check` does
-    /// not read it.
+    /// The verb starts an agent, or arms a timer or a sweep that starts a
+    /// program later. Additive (CONTRACTS.md §3): skipped when `false`. The
+    /// desktop app's floor reads it from `schema --json`, which shows which
+    /// verbs carry it, and refuses a grant that names the verb. The golden
+    /// snapshot in cli/src/registry.rs pins them. `Command::check` does not
+    /// read it.
     #[serde(skip_serializing_if = "is_false")]
     pub launches: bool,
     #[serde(rename = "exitCodes", serialize_with = "exit_codes")]

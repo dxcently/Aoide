@@ -4,14 +4,19 @@
 //! `cli/src/registry.rs` pins the marked paths in
 //! `approves_paths_match_the_golden_snapshot`.
 //!
-//! This scans every crate's production source (up to the file's inline
-//! `mod tests {`, comments skipped) and counts the lines naming either check.
-//! It enforces the list and nothing more. The list is exact, not a ratchet: a
-//! file whose count differs, and a file the list does not name, fails until
-//! the list moves. A new or removed check moves the list in the same commit,
-//! and the command whose handler reaches the check gets `approves: true`, with
-//! its path in the approves golden. The scan cannot see which command a check
-//! serves, or a new caller of an existing check; review checks those.
+//! This scans each crate's `src/` (every `.rs` file but those named `tests.rs`,
+//! each up to its inline `mod tests {`, comments skipped) and counts the lines
+//! naming either check. It does not read `tests/`, build scripts, examples or
+//! benches. It enforces the list and nothing more. The list is exact, not a
+//! ratchet: a file whose count differs, and a file the list does not name,
+//! fails until the list moves. A new check moves the list in the same commit,
+//! and the command whose handler reaches it gets `approves: true`, with its
+//! path in the approves golden. A removed check's command loses `approves`, and
+//! its path leaves the golden, in the same commit, unless another limb of the
+//! rule still holds for it. The counts are per file, so a removed check and an
+//! added one in the same listed file keep the count and pass; review checks
+//! that. The scan cannot see which command a check serves, or a new caller of
+//! an existing check; review checks those.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -94,7 +99,9 @@ const MOVE: &str = "a new or removed approve check moves this list in the same \
     commit. The command whose handler reaches a new check gets \
     `approves: true` on its registry entry, and its path joins \
     `approves_paths_match_the_golden_snapshot` (cli/src/registry.rs) in that \
-    commit too. This list differs from the tree:";
+    commit too. A removed check's command loses `approves`, and its path \
+    leaves that golden in the same commit, unless another limb of the rule \
+    still holds for it. This list differs from the tree:";
 
 #[test]
 fn approve_checks_match_the_list() {
@@ -124,7 +131,6 @@ fn listed_tree(name: &str) -> PathBuf {
 fn a_new_approve_check_fails_the_scan() {
     let root = listed_tree("extra_call");
     let exact = drift(&root, CHECKS);
-    assert!(exact.is_empty(), "the fixture matches the list before the extra call: {exact:?}");
 
     let permit = root.join("conduct/src/graph/permit.rs");
     let mut text = std::fs::read_to_string(&permit).unwrap();
@@ -132,6 +138,7 @@ fn a_new_approve_check_fails_the_scan() {
     std::fs::write(&permit, text).unwrap();
     let diff = drift(&root, CHECKS);
     let _ = std::fs::remove_dir_all(&root);
+    assert!(exact.is_empty(), "the fixture matches the list before the extra call: {exact:?}");
     assert_eq!(diff, ["conduct/src/graph/permit.rs: 2 approve checks, 1 listed"]);
 }
 

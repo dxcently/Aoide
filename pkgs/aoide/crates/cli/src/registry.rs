@@ -110,6 +110,8 @@ mod tests {
         let find = |p: &str| serde_json::to_value(r.commands().find(|c| c.dotted() == p).unwrap()).unwrap();
         assert_eq!(find("session.start")["approves"], true);
         assert!(find("session.start").get("launches").is_none());
+        assert_eq!(find("job.remove")["approves"], true);
+        assert!(find("job.remove").get("launches").is_none());
         assert_eq!(find("project.add")["launches"], true);
         assert!(find("project.add").get("approves").is_none());
         assert_eq!(find("resurrect")["approves"], true);
@@ -746,7 +748,8 @@ mod tests {
         assert_eq!(got, expected, "approves set drifted from the golden snapshot");
     }
 
-    /// Golden snapshot: the verbs that start an agent (`launches`,
+    /// Golden snapshot: the verbs that start an agent, or arm a timer or a
+    /// sweep that starts a program later (`launches`,
     /// protocol/src/registry.rs). The desktop app's floor refuses a grant that
     /// names one of them.
     #[test]
@@ -754,7 +757,7 @@ mod tests {
         let r = crate::commands::all();
         let mut got: Vec<String> = r.commands().filter(|c| c.launches).map(|c| c.dotted()).collect();
         got.sort();
-        let mut expected = vec!["conduct", "job.add", "job.remove", "node.spawn", "project.add", "resurrect", "spawn"];
+        let mut expected = vec!["conduct", "job.add", "node.spawn", "project.add", "resurrect", "spawn"];
         expected.sort();
         assert_eq!(got, expected, "launches set drifted from the golden snapshot");
     }

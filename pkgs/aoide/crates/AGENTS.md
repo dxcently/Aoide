@@ -39,12 +39,18 @@ The approve and launch marks have two more goldens in the core binary,
 `approves_paths_match_the_golden_snapshot` and
 `launches_paths_match_the_golden_snapshot`, beside the MCP-open one. Each lists
 exactly the entries that carry its mark. `protocol/tests/approve_checks.rs`
-lists every production file that names `can_approve` or
-`refuse_unapproving_door`, with its count. That list is exact, not a ratchet: a
-new or removed approve check moves it in the same commit. The command whose
-handler reaches the check gets `approves`, and its path joins the approves
-golden in that commit too. The scan cannot see which command a check serves, or
-a new caller of an existing check, so review checks those.
+lists each file under a crate's `src/` that names `can_approve` or
+`refuse_unapproving_door`, with its count. The walk skips files named
+`tests.rs`, reads nothing below a file's inline `mod tests {`, and does not
+read a crate's `tests/`, build scripts, examples or benches. That list is
+exact, not a ratchet: a new or removed approve check moves it in the same
+commit. The command whose handler reaches a new check gets `approves`, and its
+path joins the approves golden in that commit too. A removed check's command
+loses `approves`, and its path leaves the golden in that commit too, unless
+another limb of the rule still holds for it. The counts are per file, so a
+removed check and an added one in the same listed file keep the count and the
+scan passes; review checks that. The scan cannot see which command a check
+serves, or a new caller of an existing check, so review checks those.
 
 ## No cross-crate copying
 

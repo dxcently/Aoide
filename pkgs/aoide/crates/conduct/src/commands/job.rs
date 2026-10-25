@@ -41,7 +41,7 @@ pub fn register(r: &mut Registry) {
             "job remove --name=nightly",
         ],
         brief: "Remove a local job and its units.",
-        approves: true, launches: true,
+        approves: true,
     ));
     r.insert(cmd!(
         path: ["job", "list"],
