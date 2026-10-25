@@ -233,7 +233,9 @@ fn stat_of(pid: u32) -> Option<Stat> {
     })
 }
 
-/// A zombie has exited, so it is not alive.
+/// A zombie has exited, so it is not alive. The starttime is not compared, so
+/// a pid another process has taken reads as alive; these tests hold their doors
+/// for seconds.
 fn alive(pid: u32) -> bool {
     stat_of(pid).is_some_and(|s| s.state != 'Z')
 }

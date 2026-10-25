@@ -44,11 +44,12 @@ are in README.md.
   through `deliver`, which waits for room. Each try takes the state lock, checks
   `stop`, and calls `try_send` under that lock; a full channel is retried each
   20 ms with the lock dropped. `detach` sets `stop` under the same lock, so no
-  event follows a detach. A full channel holds the watch and its stream; nothing
-  is dropped while a watch runs.
-  The drain is the caller's contract: a caller that stops draining holds the
-  watch on its next event, so a stop now that waits for a turn's end runs its
-  bound and reports `NoTurnEnd`.
+  event follows a detach. No test reaches the window between the stop check and
+  `try_send`, which the lock holds shut: a change that drops the lock between
+  them passes every test. A full channel holds the watch and its stream; nothing
+  is dropped while a watch runs. The drain is the caller's contract: a caller
+  that stops draining holds the watch on its next event, so a stop now that
+  waits for a turn's end runs its bound and reports `NoTurnEnd`.
 - `Unwatched` is sent once per failure streak. The watch then tries again every
   `REOPEN` while its pidfd's process lives, and the frames resume when a try
   works. An identity failure on a try sends `Dropped` and ends the watch.
@@ -62,25 +63,27 @@ are in README.md.
   watch writes the record in two places only: an identity failure (`failed`) and
   a door that is gone (`forget`), each through `Store::update`.
 - A stream's end withdraws an armed mark and sends `Event::Revoked`, unless a
-  close holds `closing` or the door is gone. A close that leaves its door live
-  (`StillLive`) withdraws an armed mark, whichever call made the close, so a
-  door that outlives its close is not asked again. A stop now that sees no turn
-  end, that its close finds `Busy`, or that fails before it closes, leaves the
-  mark: the turn it was set for still runs.
+  close holds `closing` or the door is gone. A close whose door outlives its
+  signal (`StillLive`) withdraws an armed mark, whichever call made the close,
+  so the door is not asked again. A close that fails with an error leaves the
+  mark, and the next turn end tries again. A stop now that sees no turn end, or
+  whose close finds `Busy`, leaves the mark: the turn it was set for still runs.
 - A watch that ended is not watched. `launch_ids` leaves it out, and `watch`
   refuses it, so its calls send nothing.
 - A drop or a forget whose store write fails keeps its record. The next open
   checks it again and reports it again.
 - The close is ordered: a pidfd for the recorded pid, held by the watch; then
-  `verify`, where an identity failure drops the record and its watch and returns
-  `Close::Dropped`, and any other failure keeps both and returns
-  `DoorsError::Unverified`, signalling nothing either way. Under the watch's
-  lock, a turn that is not `Idle` is `Busy`, and the watch is left as it was,
-  turn state included. An idle turn sets `closing` and shuts its
-  stream. SIGTERM goes through the pidfd, and the exit is awaited for
-  `EXIT_BOUND` (10 s). An exit detaches the watch (2 s bound) and removes the
-  record: `Exited`. A door still live clears `closing`, withdraws an armed mark,
-  and keeps its record and its watch: `StillLive`. The wait never escalates.
+  `verify`, where an identity failure drops the record and its watch and
+  returns `Close::Dropped`, and any other failure keeps both, and the mark, and
+  returns `DoorsError::Unverified`, signalling nothing either way. Under the
+  watch's lock, a turn that is not `Idle` is `Busy`, and the watch is left as
+  it was, turn state included. An idle turn sets `closing` and shuts its stream.
+  SIGTERM goes through the pidfd; a signal that fails, but for a door already
+  gone, clears `closing` and returns its error, and the record, the watch and
+  the mark stay. The exit is awaited for `EXIT_BOUND` (10 s). An exit detaches
+  the watch (2 s bound) and removes the record: `Exited`. A door still live
+  clears `closing`, withdraws an armed mark, and keeps its record and its watch:
+  `StillLive`. The wait never escalates.
 - While `closing` stands, the watch takes its stream's end as the close's. It
   neither drops the door nor reconnects. A stream that ended reopens once
   `closing` clears.
@@ -109,19 +112,19 @@ are in README.md.
   `IO`, 35 s).
 - The turn state is known only from frames. `close_after_turn` refuses an
   `Unknown` turn. A stop now takes the cancel's own answer: 409 means idle, and
-  204 waits up to 10 s for the frames that say the turn ended. If none come, the
-  result is `NoTurnEnd`, and the door keeps running, its record stays, and
+  204 waits up to 10 s for the frames that say the turn ended. If none come,
+  the result is `NoTurnEnd`, and the door keeps running, its record stays, and
   nothing is signalled. After a reconnect the turn is `Unknown`, so a turn that
   ended in the gap is never seen: its stop now's 204 waits the same 10 s and
-  reports `NoTurnEnd`. A second stop now closes when the door answers 409, as an
-  idle door does, and a 204 waits again. A turn that outlives every cancel is
-  never closed by the app: the user ends it outside the app. A stop now that
-  reports `NoTurnEnd` or `Busy` leaves an armed mark standing; any other answer
-  withdraws it.
-- A failed hello at launch or re-attach leaves the record with a null session,
-  and the watch checks it again on each try. A reconnect checks the door's
-  identity and reads its hello, and takes no session from it, so a record with a
-  null session takes a hello's session only at the next open.
+  reports `NoTurnEnd`. A second stop now closes when the door answers 409, as
+  an idle door does, and a 204 waits again. A turn that outlives every cancel
+  is never closed by the app: the user ends it outside the app. A stop now that
+  reports `NoTurnEnd` or `Busy`, or fails with an error, leaves an armed mark
+  standing; a close whose door outlives its signal withdraws it.
+- A failed hello at launch or re-attach leaves the record with a null session.
+  A reconnect checks the door's identity and reads its hello, and takes no
+  session from it, so a record with a null session takes a hello's session only
+  at the next open.
 - A record file that does not parse is refused and never rewritten. A record
   file that is a link is refused.
 - The record and the door's log are created 0600 with `O_NOFOLLOW`, and the log

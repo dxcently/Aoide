@@ -490,16 +490,21 @@ impl Doors {
     /// After this turn: an idle door closes now, a running one is marked, and an
     /// unknown one is refused, since its state is not known.
     pub fn close_after_turn(&mut self, id: &str) -> Result<Close, DoorsError> {
-        match self.turn(id)? {
+        let link = self.watch(id)?.link.clone();
+        let turn = {
+            let mut shared = link.state.lock().unwrap();
+            if shared.turn == TurnState::Running {
+                shared.armed = true;
+            }
+            shared.turn
+        };
+        match turn {
             TurnState::Unknown => Err(DoorsError::Turn(
                 "this door's turn state is not known until a turn starts or ends; stop now closes it, stopping a turn if one runs"
                     .into(),
             )),
             TurnState::Idle => self.close_now(id),
-            TurnState::Running => {
-                self.watch(id)?.link.state.lock().unwrap().armed = true;
-                Ok(Close::Armed)
-            }
+            TurnState::Running => Ok(Close::Armed),
         }
     }
 
@@ -511,9 +516,10 @@ impl Doors {
 
     /// The caller's answer to `CloseDue`: closes the door if its mark still
     /// stands. A turn that is not idle keeps the mark armed. Any other answer
-    /// leaves the mark as the close left it. A close that leaves its door live
-    /// withdraws the mark itself (`close_now`), so a door that outlives its close
-    /// is not asked again.
+    /// leaves the mark as the close left it. A close whose door outlives its
+    /// signal withdraws the mark itself (`close_now`), so the door is not
+    /// asked again; a close that fails with an error leaves it, and the next
+    /// turn end tries again.
     pub fn close_due(&mut self, id: &str) -> Result<Close, DoorsError> {
         if !self.watch(id)?.link.state.lock().unwrap().armed {
             return Ok(Close::Revoked);
@@ -524,15 +530,16 @@ impl Doors {
         }
     }
 
-    /// Stop now: cancels the turn if one runs, waits for it to end, then closes.
-    /// A door whose identity fails is dropped before the cancel, so its token is
-    /// never sent to whatever answers at its address. Any other failed check ends
-    /// the call as `Unverified`, with no request sent. An idle door answers the
-    /// cancel with 409, which is its own word that it is idle, so it closes at
-    /// once. A close that leaves its door live withdraws an armed mark, so a door
-    /// that outlives its close is not asked again. A stop that sees no turn end,
-    /// that its close finds `Busy`, or that fails before it closes, leaves the
-    /// mark: the turn it was set for still runs.
+    /// Stop now: cancels the turn if one runs, waits for it to end, then
+    /// closes. A door whose identity fails is dropped before the cancel, so
+    /// its token is never sent to whatever answers at its address. Any other
+    /// failed check ends the call as `Unverified`, with no request sent. An
+    /// idle door answers the cancel with 409, which is its own word that it is
+    /// idle, so it closes at once. A close whose door outlives its signal
+    /// withdraws an armed mark, so the door is not asked again. A stop that
+    /// sees no turn end, or whose close finds `Busy`, leaves the mark, since
+    /// the turn it was set for still runs; a stop that fails with an error
+    /// leaves it too.
     pub fn stop_now(&mut self, id: &str) -> Result<Close, DoorsError> {
         let entry = self.watch(id)?.entry.clone();
         let link = self.watch(id)?.link.clone();
@@ -617,14 +624,17 @@ impl Doors {
     }
 
     /// The close, in order. The pidfd the watch holds names the door. Then
-    /// `verify`: an identity failure drops the record and the watch and signals
-    /// nothing, and returns `Close::Dropped`; any other failure keeps both, signals
-    /// nothing, and returns `DoorsError::Unverified`. Under the watch's lock, a turn
-    /// that is not `Idle` is `Busy`, and the watch is left as it was. An idle turn
-    /// sets `closing` and shuts its stream, so the door can drain. SIGTERM
-    /// goes through the pidfd, and the exit is awaited for `EXIT_BOUND`. An exit
-    /// removes the record and the watch. A door still live clears `closing` and
-    /// withdraws an armed mark, and keeps its record and its watch.
+    /// `verify`: an identity failure drops the record and the watch and
+    /// signals nothing, and returns `Close::Dropped`; any other failure keeps
+    /// both and the mark, signals nothing, and returns
+    /// `DoorsError::Unverified`. Under the watch's lock, a turn that is not
+    /// `Idle` is `Busy`, and the watch is left as it was. An idle turn sets
+    /// `closing` and shuts its stream, so the door can drain. SIGTERM goes
+    /// through the pidfd; a signal that fails, but for a door already gone,
+    /// clears `closing` and returns its error, keeping the mark. The exit is
+    /// awaited for `EXIT_BOUND`. An exit removes the record and the watch. A
+    /// door still live clears `closing` and withdraws an armed mark, and keeps
+    /// its record and its watch.
     fn close_now(&mut self, id: &str) -> Result<Close, DoorsError> {
         let (entry, link, pidfd) = {
             let watch = self.watch(id)?;

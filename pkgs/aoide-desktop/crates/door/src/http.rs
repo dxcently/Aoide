@@ -29,7 +29,8 @@ pub(crate) struct Head {
 /// A connection whose reads share one deadline, held in a handle that the reader
 /// and its stream share. A read waits no longer than the time left, and a read
 /// that would start past the deadline is a timeout. While the handle holds no
-/// deadline, a read sets no timeout and waits as long as the peer takes.
+/// deadline, a read sets no timeout of its own, so it waits as long as the
+/// socket's own timeout lets it.
 pub(crate) struct Wire {
     pub(crate) stream: TcpStream,
     deadline: Arc<Mutex<Option<Instant>>>,
@@ -40,7 +41,9 @@ impl Wire {
         Wire { stream, deadline: Arc::new(Mutex::new(Some(deadline))) }
     }
 
-    /// The handle the reads share. Setting it to `None` ends the deadline.
+    /// The handle the reads share. Setting it to `None` ends the deadline; the
+    /// setter also clears the socket's read timeout, as `Events` does when it
+    /// reads the hello, or the last one set stays on the socket.
     pub(crate) fn deadline(&self) -> Arc<Mutex<Option<Instant>>> {
         Arc::clone(&self.deadline)
     }

@@ -123,26 +123,29 @@ doors.rs    Doors::open(exec, root, runtime, out)
   only when the turn changes, and a new stream carries none.
 - A close, in order: a pidfd for the recorded pid, held by the watch; then
   `verify`. An identity failure drops the record and its watch, signals nothing,
-  and returns `Close::Dropped { pid, why }`. Any other failure keeps the record
-  and its watch, signals nothing, and returns `DoorsError::Unverified(why)`.
-  Under the watch's lock, a turn that is not `Idle` is `Busy`, and the watch is
-  left as it was, turn state included. An idle turn sets `closing` and
-  shuts its stream. SIGTERM goes through the pidfd, and the exit is awaited for
-  10 s. An exit detaches the watch (2 s bound) and removes the record: `Exited`.
-  A door still live clears `closing`, withdraws an armed mark, and keeps its
-  record and its watch: `StillLive`. The wait never escalates.
+  and returns `Close::Dropped { pid, why }`. Any other failure keeps the record,
+  its watch and the mark, signals nothing, and returns
+  `DoorsError::Unverified(why)`. Under the watch's lock, a turn that is not
+  `Idle` is `Busy`, and the watch is left as it was, turn state included. An
+  idle turn sets `closing` and shuts its stream. SIGTERM goes through the
+  pidfd; a signal that fails, but for a door already gone, clears `closing` and
+  returns its error, and the record, the watch and the mark stay. The exit is
+  awaited for 10 s. An exit detaches the watch (2 s bound) and removes the
+  record: `Exited`. A door still live clears `closing`, withdraws an armed mark,
+  and keeps its record and its watch: `StillLive`. The wait never escalates.
 - While `closing` stands, the watch takes its stream's end as the close's: it
   neither drops the door nor reconnects. Once `closing` clears, a stream that
   ended reopens, as any stream does while its door lives.
 - A turn the door starts between the lock and the signal is cut. That is the
   residual of the close's order.
-- `close_after_turn` closes an `Idle` door now, marks a `Running` one (`Armed`),
-  and refuses an `Unknown` one. A marked door whose turn ends sends `CloseDue`
-  once, through `deliver`. `close_due` closes it if the mark still stands; a
-  turn still running keeps the mark (`StaysArmed`), and any other answer leaves
-  the mark as the close left it. A close that leaves its door live withdraws the
-  mark, whichever call made the close, `close_after_turn`'s idle arm included.
-  `revoke` withdraws a mark.
+- `close_after_turn` closes an `Idle` door now, marks a `Running` one
+  (`Armed`), and refuses an `Unknown` one. A marked door whose turn ends sends
+  `CloseDue` once, through `deliver`. `close_due` closes it if the mark still
+  stands; a turn still running keeps the mark (`StaysArmed`), and any other
+  answer leaves the mark as the close left it. A close whose door outlives its
+  signal withdraws the mark, whichever call made the close,
+  `close_after_turn`'s idle arm included; a close that fails with an error
+  leaves it, and the next turn end tries again. `revoke` withdraws a mark.
 - A stream that ends withdraws an armed mark, and the watch sends
   `Event::Revoked { launch_id, why }`, with `why` through `visible`. A close
   holds the mark while it ends its own stream, and a door that is gone sends
@@ -155,8 +158,8 @@ doors.rs    Doors::open(exec, root, runtime, out)
   stays, and nothing is signalled. A 409 says the door is idle, so the turn is
   taken as idle, and the door closes at once. A turn that outlives every cancel
   is never closed by the app: the user ends it outside the app. A stop now that
-  reports `NoTurnEnd` or `Busy` leaves an armed mark standing; any other answer
-  withdraws it.
+  reports `NoTurnEnd` or `Busy`, or fails with an error, leaves an armed mark
+  standing; a close whose door outlives its signal withdraws it.
 - A turn that starts or ends while no stream is open is not seen. After a
   reconnect the turn is `Unknown` until a frame arrives. A stream's end
   withdraws an armed mark, unless a close holds `closing`, so the mark does not
