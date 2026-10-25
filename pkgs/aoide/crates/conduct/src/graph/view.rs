@@ -25,7 +25,7 @@
 //! terminal's to obey. Raw PTY bytes are printed only when stdout really is a
 //! terminal — that is what the live terminal view means — and `--snapshot`,
 //! `--json` and every non-TTY stdout get the sanitized form
-//! (`trace.rs::stdout_is_terminal`'s own gate). Nothing read here is ever
+//! (`view`'s own `stdout_is_terminal` gate). Nothing read here is ever
 //! interpreted as a command, and no letter is ever relayed into the run's
 //! PTY: only an explicit `send` types into a session.
 //!
@@ -1347,7 +1347,7 @@ fn clean_block(s: &str) -> Vec<String> {
 }
 
 /// Is stdout a terminal? Raw PTY bytes are printed only here; every other
-/// sink gets the sanitized form (the same gate `trace.rs` uses for dimming).
+/// sink gets the sanitized form (this module's own gate, not trace's).
 fn stdout_is_terminal() -> bool {
     use std::io::IsTerminal;
     std::io::stdout().is_terminal()

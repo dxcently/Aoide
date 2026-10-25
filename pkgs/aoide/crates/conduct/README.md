@@ -1033,33 +1033,34 @@ blank one is refused too.
   `graph/trace.rs::session_trace`, the read surface over a harness's own TRACE:
   the whole run, record by record, where every other session command reads the
   roster or acts on a session. Human form is one line per record,
-  `#<id>  <hh:mm:ss local>  <kind>  <summary>` — an assistant message shows
-  its thinking (dimmed, cut to 80) then its text then each `→ tool(name)`,
-  a tool result shows its first line prefixed `!` when it errored, a settled
-  turn shows its stop reason and input/output tokens; `--json` passes the
-  lines through, each stripped of the characters no terminal may be handed,
-  `--follow` re-reads every 500ms until Ctrl-C
-  (CLI-only), `--tail N` shows the last N (default 50). **Read-only, and so
-  outside every other discipline in this file:** no stage write, no stage
-  lock, no `daemon_dispatch` — unlike the L4 session-WRITE family above,
-  there is nothing to route. `<id>` resolves through
-  `aoide_storage::addr::resolve`, the SAME resolver `send --to` and bare
-  `session`'s filter use (a `node/<rest>` target is a taught refusal: a
-  trace is a file on the node that wrote it, and the hub preference is
-  `send`'s routing rule, not a reader's); the trace is reached through the
-  harness CAPABILITY `TranscriptSpec::trace` and its path through
-  `TranscriptSpec::locate`, never by naming a harness by string. A session
-  whose harness keeps no trace, whose presence names none, or whose agent
-  has no registered profile is a taught error naming which — never an empty
-  listing; a trace that EXISTS and holds no records yet is an honest `0
-  record(s)`. A session that has left the roster is named by its ledger line
-  when its `sessionId` is exactly the target: the line's agent, cwd and
-  `logPath` stand in for the roster row, the message says the session ended
-  and when, and `--follow` prints its window and returns. A `done` record
-  prints its window the same way, and `--follow` returns for it too. A
-  `logPath` is the hint unless it lies in `session_logs_dir()`. Nothing else is
-  matched against the ledger. Every text the trace prints or puts in its data
-  is stripped of the characters no terminal may be handed
+  `#<id>  <hh:mm:ss local>  <kind>  <summary>` — an assistant message shows its
+  thinking (dimmed, cut to 80) then its text then each `→ tool(name)`, a tool
+  result shows its first line prefixed `!` when it errored, a settled turn shows
+  its stop reason and input/output tokens; `--json` passes the lines through,
+  each stripped of the characters no terminal may be handed, `--follow` re-reads
+  every 500ms until Ctrl-C (CLI-only), `--tail N` shows the last N (default 50).
+  The dim follows CONTRACTS's color rule (a tty only, never for `NO_COLOR`,
+  `TERM=dumb` or `--json`); the door's `--color` does not reach it, since the
+  trace builds its text before the door renders. **Read-only, and so outside
+  every other discipline in this file:** no stage write, no stage lock, no
+  `daemon_dispatch` — unlike the L4 session-WRITE family above, there is nothing
+  to route. `<id>` resolves through `aoide_storage::addr::resolve`, the SAME
+  resolver `send --to` and bare `session`'s filter use (a `node/<rest>` target
+  is a taught refusal: a trace is a file on the node that wrote it, and the hub
+  preference is `send`'s routing rule, not a reader's); the trace is reached
+  through the harness CAPABILITY `TranscriptSpec::trace` and its path through
+  `TranscriptSpec::locate`, never by naming a harness by string. A session whose
+  harness keeps no trace, whose presence names none, or whose agent has no
+  registered profile is a taught error naming which — never an empty listing; a
+  trace that EXISTS and holds no records yet is an honest `0 record(s)`. A
+  session that has left the roster is named by its ledger line when its
+  `sessionId` is exactly the target: the line's agent, cwd and `logPath` stand
+  in for the roster row, the message says the session ended and when, and
+  `--follow` prints its window and returns. A `done` record prints its window
+  the same way, and `--follow` returns for it too. A `logPath` is the hint
+  unless it lies in `session_logs_dir()`. Nothing else is matched against the
+  ledger. Every text the trace prints or puts in its data is stripped of the
+  characters no terminal may be handed
   (`aoide_protocol::untrusted::strip_unsafe`), under the trace's own clips.
 - **The step projection (Phase B, `graph/trace.rs`) — the SAME window, as
   steps.** `data.steps` (beside `data.lines`) is one object per

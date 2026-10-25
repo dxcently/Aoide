@@ -3939,4 +3939,15 @@ mod tests {
             assert!(super::inside_session_logs(&link.to_string_lossy()));
         });
     }
+
+    /// Inside by its raw spelling, so a `..` that leaves the dir is refused.
+    #[cfg(unix)]
+    #[test]
+    fn a_dotdot_path_that_leaves_the_dir_is_inside_by_its_spelling() {
+        with_session_logs("leaves", |root| {
+            std::fs::write(root.join("state").join("elsewhere.log"), "").unwrap();
+            let leaves = super::session_logs_dir().join("..").join("elsewhere.log");
+            assert!(super::inside_session_logs(&leaves.to_string_lossy()));
+        });
+    }
 }

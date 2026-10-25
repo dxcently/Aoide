@@ -65,6 +65,7 @@ use super::common::{require_args, stage_error};
 use super::model::{load_stage, resolved_parent, sessions_path, SessionRecord, SessionsFile};
 use aoide_protocol::agents::{agent_profile, eidolon_trace_record, TraceRecord};
 use aoide_protocol::output::Outcome;
+use aoide_protocol::style::{Color, Stream, Style};
 use aoide_protocol::untrusted::strip_unsafe;
 use aoide_protocol::Invocation;
 use aoide_storage::addr::{self, LocalCandidate, Resolution};
@@ -808,14 +809,6 @@ fn label(id: &str, records: &[SessionRecord], ids: &HashSet<&str>, host: &str) -
     }
 }
 
-/// Is stdout a terminal? Dimming an `AssistantMessage`'s thinking is a
-/// display nicety; a redirected/piped read gets plain text, the same
-/// discipline `aoide_protocol::pick` holds for its own ANSI.
-fn stdout_is_terminal() -> bool {
-    use std::io::IsTerminal;
-    std::io::stdout().is_terminal()
-}
-
 /// The newest ledger line whose `sessionId` is exactly `target`: how a session
 /// that has left the roster is still named. Nothing else is matched against the
 /// ledger, so a petname or a prefix of an id is not an ended session.
@@ -989,7 +982,7 @@ pub fn session_trace(inv: &Invocation) -> Outcome {
     }
 
     let shown = last_lines(&lines, tail);
-    let dim = stdout_is_terminal();
+    let dim = Style::for_stream(Color::Auto, json_mode, Stream::Out) == Style::ON;
     let raw: Vec<String> = shown.iter().map(|l| strip_unsafe(l.as_str())).collect();
     let body: Vec<String> = shown.iter().map(|l| render_any(l, dim)).collect();
     let mut message = match &ended {
@@ -1049,7 +1042,7 @@ fn follow_trace(
     unsafe {
         libc::signal(libc::SIGINT, on_sigint as *const () as libc::sighandler_t);
     }
-    let dim = stdout_is_terminal();
+    let dim = Style::for_stream(Color::Auto, json_mode, Stream::Out) == Style::ON;
     let emit = |line: &str| {
         println!("{}", followed_line(line, json_mode, dim));
         let _ = std::io::stdout().flush();
@@ -1181,13 +1174,14 @@ mod tests {
         root
     }
 
-    fn env_keys() -> [&'static str; 5] {
+    fn env_keys() -> [&'static str; 6] {
         [
             "AOIDE_STAGE_DIR",
             "AOIDE_STATE_DIR",
             "XDG_RUNTIME_DIR",
             "AOIDE_HOME",
             "HOME",
+            "NO_COLOR",
         ]
     }
 
@@ -1940,6 +1934,7 @@ mod tests {
     fn a_hostile_journal_prints_no_unsafe_character_one_shot() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _env = EnvVars::save(&env_keys());
+        std::env::set_var("NO_COLOR", "1");
         let root = roster_free_fixture("trace-hostile-one");
         let lines = hostile_lines();
         let refs: Vec<&str> = lines.iter().map(String::as_str).collect();
