@@ -272,7 +272,7 @@ pub struct Doors {
 impl Doors {
     /// Reads the record and re-attaches each door whose checks pass. A record
     /// that fails them is dropped, and its door is never signalled. An unset or
-    /// unsafe runtime dir, and a record file that does not parse, refuse the open
+    /// refused runtime dir, and a record file that does not parse, refuse the open
     /// before anything is touched.
     pub fn open(
         exec: Exec,

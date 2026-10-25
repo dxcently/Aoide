@@ -2,7 +2,7 @@
 //! parameter, so no test sets `XDG_RUNTIME_DIR`. Production passes the
 //! variable's value once, through [`runtime_from_env`].
 //!
-//! No `unsafe` here: the effective uid comes from `/proc/self/status`, the
+//! No libc FFI here: the effective uid comes from `/proc/self/status`, the
 //! open is `OpenOptions` with `O_NOFOLLOW` (std adds `O_CLOEXEC`), and the
 //! fstat is `File::metadata`.
 

@@ -1,9 +1,11 @@
+#![deny(unsafe_code)]
 use std::ffi::OsString;
 
 use aoide_desktop_shell::exec::{child_env, parse_vault_keys, Child, ExecError};
 
 const CONFIG: &str = include_str!("../fixtures/config.json");
 const VAULT: &str = "AOIDE_TEST_VAULT_TOKEN";
+const UNKNOWN: &str = "the config could not be read";
 
 fn base() -> Vec<(OsString, OsString)> {
     [
@@ -32,19 +34,19 @@ fn keys() -> Vec<String> {
 
 #[test]
 fn an_eidolon_child_loses_session_melete_and_vault_keys() {
-    let env = child_env(Child::Eidolon, "", &base(), Some(keys().as_slice())).expect("the env builds");
+    let env = child_env(Child::Eidolon, "", &base(), Ok(keys().as_slice())).expect("the env builds");
     assert_eq!(names(&env), ["PATH", "HOME", "AOIDE_ROOT"]);
 }
 
 #[test]
 fn an_aoide_child_loses_melete_and_vault_keys_but_keeps_its_session() {
-    let env = child_env(Child::Aoide, "send", &base(), Some(keys().as_slice())).expect("the env builds");
+    let env = child_env(Child::Aoide, "send", &base(), Ok(keys().as_slice())).expect("the env builds");
     assert_eq!(names(&env), ["PATH", "HOME", "AOIDE_SESSION_ID", "AOIDE_ROOT"]);
 }
 
 #[test]
 fn a_melete_command_keeps_the_melete_variables_and_still_loses_vault_keys() {
-    let env = child_env(Child::Aoide, "melete", &base(), Some(keys().as_slice())).expect("the env builds");
+    let env = child_env(Child::Aoide, "melete", &base(), Ok(keys().as_slice())).expect("the env builds");
     assert_eq!(
         names(&env),
         ["PATH", "HOME", "AOIDE_SESSION_ID", "AOIDE_MELETE_KEY", "AOIDE_MELETE_DB", "AOIDE_ROOT"]
@@ -53,16 +55,18 @@ fn a_melete_command_keeps_the_melete_variables_and_still_loses_vault_keys() {
 
 #[test]
 fn an_eidolon_launch_is_refused_while_the_vault_names_are_unknown() {
-    let err = child_env(Child::Eidolon, "", &base(), None).expect_err("the launch is refused");
-    assert!(matches!(err, ExecError::VaultKeysUnknown), "{err:?}");
+    let err = child_env(Child::Eidolon, "", &base(), Err(UNKNOWN)).expect_err("the launch is refused");
+    assert!(matches!(err, ExecError::VaultKeysUnknown(_)), "{err:?}");
 }
 
 #[test]
-fn an_aoide_child_still_runs_while_the_vault_names_are_unknown() {
-    let env = child_env(Child::Aoide, "send", &base(), None).expect("the aoide child still runs");
+fn while_the_vault_names_are_unknown_only_schema_and_config_run() {
+    let env = child_env(Child::Aoide, "config", &base(), Err(UNKNOWN)).expect("config still runs");
     let kept = names(&env);
     assert!(kept.iter().all(|n| !n.starts_with("AOIDE_MELETE_")));
     assert!(kept.contains(&VAULT.to_owned()), "an unknown name cannot be removed");
+    let err = child_env(Child::Aoide, "send", &base(), Err(UNKNOWN)).expect_err("a verb is refused");
+    assert!(matches!(err, ExecError::VaultKeysUnknown(_)), "{err:?}");
 }
 
 #[test]

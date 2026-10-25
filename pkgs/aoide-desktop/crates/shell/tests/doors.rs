@@ -1,3 +1,4 @@
+#![deny(unsafe_code)]
 #![cfg(feature = "fakes")]
 
 use std::ffi::OsString;
@@ -13,7 +14,7 @@ use std::time::{Duration, Instant};
 use aoide_desktop_door::{token_path, Ask, DoorError};
 use aoide_desktop_shell::asks::{ask_id, Sent};
 use aoide_desktop_shell::doors::{launch_plan, Close, Doors, DoorsError, Event, LaunchPlan, TurnState};
-use aoide_desktop_shell::exec::{terminate, Exec, ExecError};
+use aoide_desktop_shell::exec::{test_doors, Exec, ExecError};
 use serde_json::{json, Value};
 
 const FAKE_AOIDE: &str = env!("CARGO_BIN_EXE_fake-aoide");
@@ -192,7 +193,7 @@ impl Drop for World {
     fn drop(&mut self) {
         for (pid, starttime) in self.started.lock().unwrap().drain(..) {
             if stat_of(pid).is_some_and(|s| s.starttime == starttime && s.state != 'Z') {
-                let _ = terminate(pid);
+                let _ = test_doors::terminate(pid);
                 until(Duration::from_secs(25), || !alive(pid));
             }
         }
@@ -265,7 +266,7 @@ fn start_door_outside(world: &World) -> (u32, String, PathBuf) {
         .mode(0o600)
         .open(&log_path)
         .expect("the log opens");
-    let pid = world.exec().spawn_door(&world.argv(), &world.runtime(), log).expect("the door starts");
+    let pid = test_doors::spawn(&world.exec(), &world.argv(), &world.runtime(), log).expect("the door starts");
     world.adopt(pid);
     let mut text = String::new();
     until(Duration::from_secs(30), || {
@@ -328,7 +329,7 @@ fn a_cwd_that_is_relative_missing_not_canonical_or_holds_u202e_is_refused() {
 }
 
 #[test]
-fn an_unset_or_unsafe_runtime_dir_opens_nothing_and_starts_no_door() {
+fn an_unset_or_refused_runtime_dir_opens_nothing_and_starts_no_door() {
     let world = World::new("runtime");
     let (tx, _rx) = mpsc::channel();
     let unset = Doors::open(world.exec(), Path::new(FAKE_EIDOLON), &world.home(), &world.root(), None, tx.clone());
@@ -353,7 +354,7 @@ fn unknown_vault_names_refuse_a_launch_before_anything_starts() {
     let (tx, _rx) = mpsc::channel();
     let mut doors = world.open_with(world.exec_with(&[("FAKE_AOIDE_NO_CONFIG", "1")]), tx);
     let refused = doors.launch(&world.plan());
-    assert!(matches!(refused, Err(DoorsError::Exec(ExecError::VaultKeysUnknown))));
+    assert!(matches!(refused, Err(DoorsError::Exec(ExecError::VaultKeysUnknown(_)))));
     assert!(!world.root().join("state").exists(), "no log and no record were made");
     assert!(!world.cwd().join(".fake-log").exists(), "no door was started");
 }
@@ -415,7 +416,7 @@ fn a_record_whose_pid_is_dead_is_dropped() {
     let world = World::new("dead");
     let (pid, addr, token) = start_door_outside(&world);
     let starttime = stat_of(pid).unwrap().starttime;
-    terminate(pid).expect("the door takes SIGTERM");
+    test_doors::terminate(pid).expect("the door takes SIGTERM");
     assert!(until(Duration::from_secs(10), || !alive(pid)), "the door exits");
     world.write_record(json!([{
         "launchId": "dead", "pid": pid, "starttime": starttime,
@@ -551,7 +552,7 @@ fn stop_now_on_a_door_that_fails_its_checks_sends_no_request() {
     let secret = fs::read(&token).expect("the door's token is read");
     let pid = world.pid(&id);
     world.command("end");
-    terminate(pid).expect("the door takes SIGTERM");
+    test_doors::terminate(pid).expect("the door takes SIGTERM");
     assert!(until(Duration::from_secs(25), || !alive(pid)), "the door exits");
     // A token left behind, and a listener on the door's port: a stop now must
     // not send the door's token to that listener.
@@ -629,7 +630,7 @@ fn a_stream_that_ends_with_its_door_gone_drops_the_record() {
     let id = world.launch(&mut doors);
     let pid = world.pid(&id);
     world.command("end");
-    terminate(pid).expect("the door takes SIGTERM");
+    test_doors::terminate(pid).expect("the door takes SIGTERM");
     assert!(until(Duration::from_secs(10), || !alive(pid)), "the door exits");
     event_where(&rx, |e| matches!(e, Event::Gone { .. }));
     assert!(world.record_ids().is_empty(), "the record of a door that ended on its own is dropped");
@@ -828,7 +829,7 @@ fn an_answer_to_a_door_that_fails_its_checks_sends_no_request() {
     let port = port_of(&world.entry(&id));
     let pid = world.pid(&id);
     world.apply("end");
-    terminate(pid).expect("the door takes SIGTERM");
+    test_doors::terminate(pid).expect("the door takes SIGTERM");
     assert!(until(Duration::from_secs(25), || !alive(pid)), "the door exits");
     // A listener on the door's port: an answer must not reach it.
     let listener = std::net::TcpListener::bind(("127.0.0.1", port)).expect("the port is free");

@@ -10,9 +10,11 @@ door crate, and `aoide-protocol` by path (for `is_unsafe` and `visible`).
 ## Seams
 
 - `exec.rs`: `check_pin`, `Schema`, `argv`, `child_env`, `Exec` (`load`,
-  `call`, `door_env`, `spawn_door`) and `terminate`. Only this file starts a
-  process or sends a signal. Behind `fakes`, `make_fifo` makes the FIFO the
-  token test puts at the token path.
+  `call`, `deadline`, `door_env`, `spawn_door`), `terminate`, and the pidfd
+  helpers `open_pidfd` and `terminate_pidfd`. Only this file starts a process
+  or sends a signal. Behind `fakes`, `make_fifo` makes the FIFO the token test
+  puts at the token path, and `test_doors` starts and signals a door for the
+  door tests.
 - `doors.rs`: `Doors`, which keeps the app's record of its doors, launches one,
   re-attaches the records at start, watches each door's stream, and closes a
   door.
@@ -33,13 +35,15 @@ exec.rs     Exec::load(aoide, home, env)
               v
             Exec::call(words, flags, positionals, stdin)
               |
+              +-- child_env      refused while the vault names are unknown,
+              |                  unless the call is schema or config
               +-- argv           path must be in the schema, flags declared,
               |                  required arguments given, `--` before text
-              +-- child_env      base, minus what this child must not see
               |
               v
             run()              Command on the pinned path, env_clear,
-                               stdout and stderr each refused past 16 MiB
+                               one deadline (30 s): SIGTERM at it, 5 s to
+                               exit; stdout and stderr: 16 MiB each
 ```
 
 - `check_pin` refuses a relative path, a missing one, a target that is not an
@@ -53,16 +57,31 @@ exec.rs     Exec::load(aoide, home, env)
   `AOIDE_MELETE_*` variables and the vault keys. An `aoide` child loses the
   `AOIDE_MELETE_*` variables unless its first word is `melete`, and the vault
   keys.
-- The vault key names are the `tokenEnv` names in `aoide config --json`.
+- The vault key names are the `tokenEnv` names in `aoide config --json`. While
+  they are unknown, every call but `schema` and `config` is refused before a
+  child starts. The names are unknown when the config call fails or does not
+  parse, or when a `tokenEnv` is not `[A-Za-z_][A-Za-z0-9_]*`, or names `PATH`,
+  `HOME`, `XDG_RUNTIME_DIR` or `AOIDE_ROOT`. A bad `tokenEnv` is shown through
+  `visible`.
 - `run` is private. Only `Exec` reaches it, and only with the pinned path.
+- Each call runs under one deadline, 30 s unless `Exec::deadline` shortens it.
+  It covers the spawn, the child's exit and the reading of its output. A child
+  still running at the deadline is sent SIGTERM and has 5 s to exit, and the
+  call is refused as a timeout. A child that exits while a process it started
+  still holds its output pipe is refused at the same deadline, with no signal.
+  Nothing sends SIGKILL.
+- `open_pidfd` opens a pidfd for a pid, and `terminate_pidfd` sends SIGTERM
+  through one. A pidfd names one process, so the signal cannot reach a process
+  that later takes the pid. No caller in this crate uses them.
 - `door_env` is `child_env` for `eidolon web`, with `XDG_RUNTIME_DIR` set to the
   checked runtime dir. `spawn_door` starts a door through `spawn_detached`. The
   door runs in a session of its own and is not the app's child: std's child,
-  the intermediate, calls `setsid`, forks the door, writes the door's pid to a
-  pipe and exits, so init adopts the door. The app reads the pid and reaps the
-  intermediate. The door's stdin is `/dev/null`, and its stdout and stderr are
-  the door log. std's close-on-exec pipe reports an exec failure of the door as
-  `spawn`'s error.
+  the intermediate, calls `setsid`, forks the door and writes the door's pid to
+  a pipe. If that write fails, the intermediate SIGTERMs the door and exits
+  non-zero, so no door runs unnamed. Otherwise it exits zero, and init adopts
+  the door. The app reads the pid and reaps the intermediate. The door's stdin
+  is `/dev/null`, and its stdout and stderr are the door log. std's
+  close-on-exec pipe reports an exec failure of the door as `spawn`'s error.
 - `terminate` sends SIGTERM. It refuses pid 0 and any pid past `i32::MAX`. The
   caller checks the pid's start time and command line at that moment.
 
@@ -166,6 +185,9 @@ answer of that status. It logs each control word applied, each request served
 order.
 
 `src/bin/fake-aoide.rs` prints the fixture schema for `schema --json` and the
-fixture config for `config --json`. Any other call writes the bytes its
-environment names to stdout and stderr, and exits with the status it names. Each
-call is appended to the file `FAKE_AOIDE_RECORD` names.
+fixture config for `config --json`. `FAKE_AOIDE_CONFIG` replaces the config
+text, and `FAKE_AOIDE_NO_SCHEMA` or `FAKE_AOIDE_NO_CONFIG` makes that call
+print nothing. Any other call sleeps `FAKE_AOIDE_SLEEP` seconds, writes
+`FAKE_AOIDE_STDOUT_BYTES` bytes to stdout, the text of `FAKE_AOIDE_STDERR` and
+`FAKE_AOIDE_STDERR_BYTES` bytes to stderr, and exits with `FAKE_AOIDE_EXIT`.
+Each call is appended to the file `FAKE_AOIDE_RECORD` names.

@@ -1,3 +1,4 @@
+#![deny(unsafe_code)]
 #![cfg(feature = "fakes")]
 
 use std::ffi::OsString;
@@ -6,7 +7,7 @@ use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use aoide_desktop_shell::exec::{terminate, Exec, ExecError, PinError};
+use aoide_desktop_shell::exec::{test_doors, Exec, ExecError, PinError};
 
 const FAKE_AOIDE: &str = env!("CARGO_BIN_EXE_fake-aoide");
 
@@ -45,7 +46,7 @@ fn spawn_door_refuses_a_relative_program_and_starts_nothing() {
     let dir = scratch("relative");
     let exec = load(&dir, &[]);
     let argv = vec![OsString::from("fake-eidolon"), OsString::from("web")];
-    let refused = exec.spawn_door(&argv, &dir.join("runtime"), log_file(&dir));
+    let refused = test_doors::spawn(&exec, &argv, &dir.join("runtime"), log_file(&dir));
     assert!(matches!(refused, Err(ExecError::Pin(PinError::Relative(_)))));
     assert!(!dir.join("runtime/eidolon").exists(), "no door ran");
 }
@@ -55,7 +56,7 @@ fn an_exec_failure_is_reported_as_an_error() {
     let dir = scratch("missing");
     let exec = load(&dir, &[]);
     let argv = vec![OsString::from("/nonexistent/aoide-desktop-door"), OsString::from("web")];
-    let failed = exec.spawn_door(&argv, &dir.join("runtime"), log_file(&dir));
+    let failed = test_doors::spawn(&exec, &argv, &dir.join("runtime"), log_file(&dir));
     assert!(matches!(failed, Err(ExecError::Spawn(_))), "the exec failure comes back as an error");
 }
 
@@ -71,6 +72,6 @@ fn the_door_env_points_the_door_at_its_runtime_and_drops_the_session() {
 
 #[test]
 fn terminate_refuses_pid_zero_and_pids_past_i32() {
-    assert!(terminate(0).is_err(), "pid 0 would signal this process group");
-    assert!(terminate(u32::MAX).is_err(), "a pid past i32::MAX is refused");
+    assert!(test_doors::terminate(0).is_err(), "pid 0 would signal this process group");
+    assert!(test_doors::terminate(u32::MAX).is_err(), "a pid past i32::MAX is refused");
 }

@@ -1,25 +1,39 @@
-//! The one module in the desktop workspace that starts a process. Every child
-//! the app runs goes through here: its program is pinned by `check_pin`, its
-//! argv is built against the schema the program prints, its environment is
-//! scrubbed by `child_env`, and it runs directly, never through a shell.
+//! The one module in the desktop workspace that starts a process or sends a
+//! signal. Every child the app runs goes through here: its program is pinned by
+//! `check_pin`, its argv is built against the schema the program prints, its
+//! environment is scrubbed by `child_env` (which refuses every verb but `schema`
+//! and `config` while the vault names are unknown), it runs directly, never
+//! through a shell, and each call runs under one deadline.
 #![allow(unsafe_code)]
+#![allow(clippy::disallowed_methods, clippy::disallowed_types)]
 
 use std::collections::BTreeMap;
 use std::ffi::{CString, OsStr, OsString};
 use std::fmt;
 use std::fs;
 use std::io::{self, Read, Write};
-use std::os::fd::AsRawFd;
+use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus, Stdio};
+use std::sync::mpsc::{self, RecvTimeoutError};
 use std::thread;
+use std::time::{Duration, Instant};
 
+use aoide_protocol::untrusted::visible;
 use serde::Deserialize;
 
 /// The most a child may write to one stream before its call is refused.
 pub const OUTPUT_CAP: usize = 16 * 1024 * 1024;
+/// The deadline a call runs under, unless a test shortens it.
+const DEADLINE: Duration = Duration::from_secs(30);
+/// How long a child that was sent SIGTERM at its deadline has to exit.
+const EXIT_BOUND: Duration = Duration::from_secs(5);
+/// How often a call checks whether its child has exited.
+const POLL: Duration = Duration::from_millis(10);
+/// The names a vault key may not take: the app's own variables.
+const RESERVED: [&str; 4] = ["PATH", "HOME", "XDG_RUNTIME_DIR", "AOIDE_ROOT"];
 
 /// Why a program path was refused before it could be run.
 #[derive(Debug)]
@@ -141,9 +155,9 @@ impl Schema {
 
     /// Runs `aoide schema --json` once, with the environment a child gets.
     fn load(aoide: &Path, base_env: &[(OsString, OsString)]) -> Result<Schema, ExecError> {
-        let env = child_env(Child::Aoide, "schema", base_env, None)?;
+        let env = child_env(Child::Aoide, "schema", base_env, Err("the vault names are not read yet"))?;
         let args = [OsString::from("schema"), OsString::from("--json")];
-        let out = run(aoide, &args, &env, None)?;
+        let out = run(aoide, &args, &env, None, "schema --json", DEADLINE)?;
         if !out.status.success() {
             return Err(bootstrap("schema --json", &out));
         }
@@ -246,16 +260,18 @@ pub enum Child {
 }
 
 /// The environment a child gets: `base`, minus what that child must not see.
+/// While the vault names are unknown only `schema` and `config` run: any other
+/// aoide verb could pass the vault keys on to the agent it starts.
 pub fn child_env(
     child: Child,
     first_word: &str,
     base: &[(OsString, OsString)],
-    vault_keys: Option<&[String]>,
+    vault_keys: Result<&[String], &str>,
 ) -> Result<Vec<(OsString, OsString)>, ExecError> {
     let keys = match (child, vault_keys) {
-        (_, Some(keys)) => keys,
-        (Child::Eidolon, None) => return Err(ExecError::VaultKeysUnknown),
-        (Child::Aoide, None) => &[],
+        (_, Ok(keys)) => keys,
+        (Child::Aoide, Err(_)) if matches!(first_word, "schema" | "config") => &[],
+        (_, Err(why)) => return Err(ExecError::VaultKeysUnknown(why.to_owned())),
     };
     let melete = child == Child::Aoide && first_word == "melete";
     Ok(base
@@ -327,8 +343,9 @@ pub struct Output {
 pub struct Exec {
     aoide: PathBuf,
     schema: Schema,
-    vault_keys: Option<Vec<String>>,
+    vault_keys: Result<Vec<String>, String>,
     base_env: Vec<(OsString, OsString)>,
+    deadline: Duration,
 }
 
 impl Exec {
@@ -341,15 +358,18 @@ impl Exec {
         let mut exec = Exec {
             aoide,
             schema,
-            vault_keys: None,
+            vault_keys: Err("the config has not been read".to_owned()),
             base_env,
+            deadline: DEADLINE,
         };
-        exec.vault_keys = exec
-            .call(&["config"], &[], &[], None)
-            .ok()
-            .filter(|out| out.status.success())
-            .and_then(|out| std::str::from_utf8(&out.stdout).ok().and_then(|t| parse_vault_keys(t).ok()));
+        exec.vault_keys = vault_names(exec.call(&["config"], &[], &[], None));
         Ok(exec)
+    }
+
+    /// Shortens the deadline a call runs under. The app keeps the default.
+    pub fn deadline(mut self, deadline: Duration) -> Exec {
+        self.deadline = deadline;
+        self
     }
 
     /// Runs one aoide command. `words` is its path, `flags` its flags, and
@@ -362,17 +382,21 @@ impl Exec {
         positionals: &[&str],
         stdin: Option<&[u8]>,
     ) -> Result<Output, ExecError> {
-        let line = argv(&self.aoide, &self.schema, words, flags, positionals)?;
         let first = words.first().copied().unwrap_or("");
-        let env = child_env(Child::Aoide, first, &self.base_env, self.vault_keys.as_deref())?;
-        run(&self.aoide, &line[1..], &env, stdin)
+        let env = child_env(Child::Aoide, first, &self.base_env, self.keys())?;
+        let line = argv(&self.aoide, &self.schema, words, flags, positionals)?;
+        run(&self.aoide, &line[1..], &env, stdin, &words.join(" "), self.deadline)
+    }
+
+    fn keys(&self) -> Result<&[String], &str> {
+        self.vault_keys.as_deref().map_err(String::as_str)
     }
 
     /// The environment a door gets: the child env for `eidolon web`, with
     /// `XDG_RUNTIME_DIR` set to the runtime dir the app checked, so the door
     /// writes its token where the app reads it.
     pub fn door_env(&self, runtime: &Path) -> Result<Vec<(OsString, OsString)>, ExecError> {
-        let mut env = child_env(Child::Eidolon, "web", &self.base_env, self.vault_keys.as_deref())?;
+        let mut env = child_env(Child::Eidolon, "web", &self.base_env, self.keys())?;
         env.retain(|(name, _)| name.as_os_str() != "XDG_RUNTIME_DIR");
         env.push((OsString::from("XDG_RUNTIME_DIR"), runtime.as_os_str().to_owned()));
         Ok(env)
@@ -381,7 +405,7 @@ impl Exec {
     /// Starts `argv` as a door: detached, in a session of its own, with stdin
     /// on /dev/null and stdout and stderr on `log`. Returns the door's pid.
     /// `argv[0]` is the program `check_pin` returned.
-    pub fn spawn_door(&self, argv: &[OsString], runtime: &Path, log: fs::File) -> Result<u32, ExecError> {
+    pub(crate) fn spawn_door(&self, argv: &[OsString], runtime: &Path, log: fs::File) -> Result<u32, ExecError> {
         let program = argv.first().map(PathBuf::from).unwrap_or_default();
         if !program.is_absolute() {
             return Err(ExecError::Pin(PinError::Relative(program)));
@@ -392,13 +416,20 @@ impl Exec {
 }
 
 /// The one place a process starts. Only `Exec` reaches it, and only with a
-/// pinned program.
+/// pinned program. The call runs under `deadline` from its start, through the
+/// child's exit and the reading of its output. A child still running at the
+/// deadline is sent SIGTERM and given `EXIT_BOUND` to exit, and the call is
+/// refused either way. A process the child started may hold an output pipe
+/// after the child exits; that holds the call to the same deadline.
 fn run(
     program: &Path,
     args: &[OsString],
     env: &[(OsString, OsString)],
     stdin: Option<&[u8]>,
+    command: &str,
+    deadline: Duration,
 ) -> Result<Output, ExecError> {
+    let until = Instant::now() + deadline;
     let mut child = Command::new(program)
         .args(args)
         .env_clear()
@@ -410,19 +441,20 @@ fn run(
         .map_err(ExecError::Spawn)?;
     let stdout = child.stdout.take().ok_or_else(missing_pipe)?;
     let stderr = child.stderr.take().ok_or_else(missing_pipe)?;
-    let feeder = child
-        .stdin
-        .take()
-        .zip(stdin.map(<[u8]>::to_vec))
-        .map(|(mut pipe, bytes)| thread::spawn(move || pipe.write_all(&bytes)));
-    let out_reader = thread::spawn(move || capture(stdout));
-    let err_reader = thread::spawn(move || capture(stderr));
-    let status = child.wait().map_err(ExecError::Io)?;
-    if let Some(feeder) = feeder {
-        let _ = feeder.join();
+    if let Some((mut pipe, bytes)) = child.stdin.take().zip(stdin.map(<[u8]>::to_vec)) {
+        thread::spawn(move || pipe.write_all(&bytes));
     }
-    let (stdout, stdout_over) = join(out_reader)?;
-    let (stderr, stderr_over) = join(err_reader)?;
+    let (out_tx, out_rx) = mpsc::channel();
+    let (err_tx, err_rx) = mpsc::channel();
+    thread::spawn(move || out_tx.send(capture(stdout)));
+    thread::spawn(move || err_tx.send(capture(stderr)));
+    let Some(status) = wait_until(&mut child, until).map_err(ExecError::Io)? else {
+        terminate(child.id()).map_err(ExecError::Io)?;
+        let _ = wait_until(&mut child, Instant::now() + EXIT_BOUND);
+        return Err(ExecError::Timeout { command: command.to_owned(), deadline });
+    };
+    let (stdout, stdout_over) = collect(&out_rx, until, command, deadline)?;
+    let (stderr, stderr_over) = collect(&err_rx, until, command, deadline)?;
     if stdout_over {
         return Err(ExecError::OutputTooLarge { stream: "stdout" });
     }
@@ -430,6 +462,35 @@ fn run(
         return Err(ExecError::OutputTooLarge { stream: "stderr" });
     }
     Ok(Output { status, stdout, stderr })
+}
+
+/// The child's status once it exits, or `None` when `until` passes first.
+fn wait_until(child: &mut std::process::Child, until: Instant) -> io::Result<Option<ExitStatus>> {
+    loop {
+        if let Some(status) = child.try_wait()? {
+            return Ok(Some(status));
+        }
+        let left = until.saturating_duration_since(Instant::now());
+        if left.is_zero() {
+            return Ok(None);
+        }
+        thread::sleep(POLL.min(left));
+    }
+}
+
+/// One stream's bytes, and whether any were dropped past the cap. The reader
+/// must finish by `until`.
+fn collect(
+    reads: &mpsc::Receiver<io::Result<(Vec<u8>, bool)>>,
+    until: Instant,
+    command: &str,
+    deadline: Duration,
+) -> Result<(Vec<u8>, bool), ExecError> {
+    match reads.recv_timeout(until.saturating_duration_since(Instant::now())) {
+        Ok(read) => read.map_err(ExecError::Io),
+        Err(RecvTimeoutError::Timeout) => Err(ExecError::Timeout { command: command.to_owned(), deadline }),
+        Err(RecvTimeoutError::Disconnected) => Err(ExecError::Io(io::Error::other("an output reader panicked"))),
+    }
 }
 
 /// Reads a child's stream to its end, keeping at most `OUTPUT_CAP` bytes. Past
@@ -451,13 +512,6 @@ fn capture(mut pipe: impl Read) -> io::Result<(Vec<u8>, bool)> {
             Err(e) => return Err(e),
         }
     }
-}
-
-fn join<T>(reader: thread::JoinHandle<io::Result<T>>) -> Result<T, ExecError> {
-    reader
-        .join()
-        .map_err(|_| ExecError::Io(io::Error::other("an output reader panicked")))?
-        .map_err(ExecError::Io)
 }
 
 fn missing_pipe() -> ExecError {
@@ -496,8 +550,10 @@ pub enum ExecError {
     MissingArgument { command: String, name: String },
     /// A word holds a NUL byte, which an argv cannot carry.
     NulByte { what: &'static str },
-    /// An eidolon launch needs the vault names, and they are unknown.
-    VaultKeysUnknown,
+    /// The vault key names are unknown, so this call is refused.
+    VaultKeysUnknown(String),
+    /// The call did not finish within its deadline, and is refused.
+    Timeout { command: String, deadline: Duration },
     /// The child wrote more than [`OUTPUT_CAP`] bytes to this stream.
     OutputTooLarge { stream: &'static str },
     /// The program path was refused.
@@ -522,10 +578,13 @@ impl fmt::Display for ExecError {
             Self::FlagNeedsValue { command, flag } => write!(f, "--{flag} on `aoide {command}` needs a value"),
             Self::MissingArgument { command, name } => write!(f, "`aoide {command}` needs {name}"),
             Self::NulByte { what } => write!(f, "{what} holds a NUL byte, which a command line cannot carry"),
-            Self::VaultKeysUnknown => write!(
+            Self::VaultKeysUnknown(why) => write!(
                 f,
-                "the vault key names are unknown because aoide config could not be read, so eidolon is not launched"
+                "the vault key names are unknown ({why}), so this call is refused: only schema and config run until aoide config reads"
             ),
+            Self::Timeout { command, deadline } => {
+                write!(f, "aoide {command} did not finish within {deadline:?}; the call is refused and nothing is retried")
+            }
             Self::OutputTooLarge { stream } => {
                 write!(f, "the child wrote more than {OUTPUT_CAP} bytes to {stream}, so the call is refused")
             }
@@ -540,14 +599,16 @@ impl std::error::Error for ExecError {}
 
 /// Starts `argv` in a session of its own, outside this process's tree.
 ///
-/// std forks a child (the intermediate), which calls `setsid`, forks the door,
-/// writes the door's pid to a pipe and exits. The app reaps the intermediate,
-/// so init adopts the door. Between fork and exec the door's side makes only
-/// `setsid`, `fork`, `write` and `_exit`, which POSIX lists as async-signal-safe,
-/// and allocates nothing. `fork` runs glibc's atfork handlers, which take
-/// malloc's locks before the fork and release them on both sides; the intermediate
-/// has one thread, so those locks are free when the closure runs. The door's own
-/// exec failure travels back through std's close-on-exec pipe as `spawn`'s error.
+/// Between fork and exec, in order: std's `pre_exec` makes std fork, so the
+/// closure runs in the intermediate, a one-thread child of a larger process
+/// whose atfork handlers have run. The closure calls `setsid`, then `libc::fork`
+/// for the door. The intermediate writes the door's pid to the pipe and exits
+/// zero. If the write fails, it signals the door and exits non-zero, so no door
+/// runs unnamed. `write`, `kill`, `_exit` and `fork` are async-signal-safe, and
+/// the closure allocates nothing. libc 0.2.189 binds no `_Fork`, so the second
+/// fork is `libc::fork`: it is safe here because the intermediate has one thread
+/// when the closure runs. Std's close-on-exec pipe carries the door's own exec
+/// failure back to the caller as `spawn`'s error.
 fn spawn_detached(argv: &[OsString], env: &[(OsString, OsString)], log: fs::File) -> Result<u32, ExecError> {
     let (mut pid_in, pid_out) = io::pipe().map_err(ExecError::Io)?;
     let pid_fd = pid_out.as_raw_fd();
@@ -572,8 +633,11 @@ fn spawn_detached(argv: &[OsString], env: &[(OsString, OsString)], log: fs::File
                 0 => Ok(()),
                 door => {
                     let bytes = (door as u32).to_ne_bytes();
-                    let written = libc::write(pid_fd, bytes.as_ptr().cast(), bytes.len());
-                    libc::_exit(if written == bytes.len() as isize { 0 } else { 1 })
+                    if libc::write(pid_fd, bytes.as_ptr().cast(), bytes.len()) == bytes.len() as isize {
+                        libc::_exit(0)
+                    }
+                    libc::kill(door, libc::SIGTERM);
+                    libc::_exit(1)
                 }
             }
         });
@@ -590,13 +654,51 @@ fn spawn_detached(argv: &[OsString], env: &[(OsString, OsString)], log: fs::File
 /// Sends SIGTERM to `pid`. The caller checks the start time and the command
 /// line at this moment, since a pid can be reused; this refuses the values
 /// `kill` would read as a process group or as no process at all.
-pub fn terminate(pid: u32) -> io::Result<()> {
+pub(crate) fn terminate(pid: u32) -> io::Result<()> {
     let pid = i32::try_from(pid)
         .ok()
         .filter(|p| *p > 0)
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "a pid to signal is 1 to i32::MAX"))?;
     // SAFETY: a plain syscall taking a pid and a signal number; no memory is passed.
     if unsafe { libc::kill(pid, libc::SIGTERM) } == 0 {
+        Ok(())
+    } else {
+        Err(io::Error::last_os_error())
+    }
+}
+
+/// A pidfd for `pid`: a descriptor that names one process, so a signal sent
+/// through it cannot reach a process that later takes the number.
+#[allow(dead_code)] // No caller until a door is closed through its pidfd.
+pub(crate) fn open_pidfd(pid: u32) -> io::Result<OwnedFd> {
+    let pid = i32::try_from(pid)
+        .ok()
+        .filter(|p| *p > 0)
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "a pid to open is 1 to i32::MAX"))?;
+    // SAFETY: a plain syscall taking a pid and flags; no memory is passed.
+    let fd = unsafe { libc::syscall(libc::SYS_pidfd_open, pid, 0 as libc::c_uint) };
+    if fd < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    let fd = libc::c_int::try_from(fd).map_err(io::Error::other)?;
+    // SAFETY: the syscall returned `fd` as a new descriptor that nothing else owns.
+    Ok(unsafe { OwnedFd::from_raw_fd(fd) })
+}
+
+/// Sends SIGTERM to the process `fd` names, and to no other.
+#[allow(dead_code)] // No caller until a door is closed through its pidfd.
+pub(crate) fn terminate_pidfd(fd: &OwnedFd) -> io::Result<()> {
+    // SAFETY: a plain syscall taking a descriptor, a signal and a null siginfo.
+    let sent = unsafe {
+        libc::syscall(
+            libc::SYS_pidfd_send_signal,
+            fd.as_raw_fd(),
+            libc::SIGTERM,
+            std::ptr::null::<libc::siginfo_t>(),
+            0 as libc::c_uint,
+        )
+    };
+    if sent == 0 {
         Ok(())
     } else {
         Err(io::Error::last_os_error())
@@ -613,5 +715,82 @@ pub fn make_fifo(path: &Path) -> io::Result<()> {
         Ok(())
     } else {
         Err(io::Error::last_os_error())
+    }
+}
+
+/// What the door tests need, started and signalled the way the app does it.
+#[cfg(feature = "fakes")]
+pub mod test_doors {
+    use std::ffi::OsString;
+    use std::fs;
+    use std::io;
+    use std::path::Path;
+
+    use super::{Exec, ExecError};
+
+    /// Starts `argv` as a door, as `Exec::spawn_door` does.
+    pub fn spawn(exec: &Exec, argv: &[OsString], runtime: &Path, log: fs::File) -> Result<u32, ExecError> {
+        exec.spawn_door(argv, runtime, log)
+    }
+
+    /// Sends SIGTERM to `pid`, as the app does to a child it started.
+    pub fn terminate(pid: u32) -> io::Result<()> {
+        super::terminate(pid)
+    }
+}
+
+/// The vault key names, or why they are unknown. A `tokenEnv` that is not a
+/// variable name, or that names one of the app's own variables, makes them
+/// unknown; the reason shows the bad value as `visible` spells it.
+fn vault_names(out: Result<Output, ExecError>) -> Result<Vec<String>, String> {
+    let out = out.map_err(|e| format!("aoide config could not run: {e}"))?;
+    if !out.status.success() {
+        return Err(format!("aoide config exited with {}", out.status));
+    }
+    let text = std::str::from_utf8(&out.stdout).map_err(|_| "aoide config printed no UTF-8".to_owned())?;
+    let keys = parse_vault_keys(text).map_err(|e| e.to_string())?;
+    match keys.iter().find(|key| !is_variable_name(key) || RESERVED.contains(&key.as_str())) {
+        Some(bad) => Err(format!("tokenEnv {} names no key the app may read", visible(bad))),
+        None => Ok(keys),
+    }
+}
+
+/// `[A-Za-z_][A-Za-z0-9_]*`: the names a child can read from its environment.
+fn is_variable_name(name: &str) -> bool {
+    let mut chars = name.chars();
+    matches!(chars.next(), Some(c) if c.is_ascii_alphabetic() || c == '_')
+        && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
+}
+
+#[cfg(test)]
+mod tests {
+    use std::os::unix::process::ExitStatusExt;
+
+    use super::*;
+
+    #[test]
+    fn a_pidfd_opens_for_a_live_process_and_not_for_a_pid_that_is_gone() {
+        assert!(open_pidfd(std::process::id()).is_ok());
+        let gone = open_pidfd(i32::MAX as u32).expect_err("no process has that pid");
+        assert_eq!(gone.raw_os_error(), Some(libc::ESRCH));
+    }
+
+    #[test]
+    fn terminate_pidfd_signals_the_process_it_was_opened_for() {
+        let mut sleeper = Command::new("sleep").arg("30").spawn().expect("sleep starts");
+        let fd = open_pidfd(sleeper.id()).expect("the pidfd opens");
+        terminate_pidfd(&fd).expect("SIGTERM is sent");
+        let status = sleeper.wait().expect("the child is reaped");
+        assert_eq!(status.signal(), Some(libc::SIGTERM));
+    }
+
+    #[test]
+    fn a_variable_name_is_a_letter_or_underscore_then_letters_digits_or_underscores() {
+        for ok in ["KEY", "_K", "k_9"] {
+            assert!(is_variable_name(ok), "{ok}");
+        }
+        for bad in ["", "1KEY", "A-B", "A B", "KÉY", "A\nB"] {
+            assert!(!is_variable_name(bad), "{bad:?}");
+        }
     }
 }

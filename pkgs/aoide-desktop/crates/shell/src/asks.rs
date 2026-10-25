@@ -64,7 +64,7 @@ pub struct Dialog {
 }
 
 impl Dialog {
-    /// The text on screen, with every unsafe character spelled as an escape.
+    /// The text on screen, with every hidden character spelled as an escape.
     pub fn text(&self) -> &str {
         &self.text
     }
@@ -125,7 +125,7 @@ pub enum Sent {
 /// The curl line that sends `label` for this ask to this door. It reads the
 /// token from the token file itself, so the line names the file and never the
 /// token. Every value is one POSIX shell word, with `'` written `'\''`. The
-/// body is the JSON from serde_json, with each unsafe character spelled as a
+/// body is the JSON from serde_json, with each hidden character spelled as a
 /// JSON `\u` escape, so the JSON value is unchanged. The line is not passed
 /// through `visible` as a whole: that would double each backslash, and the
 /// shell escape and the JSON escapes would read as text no shell parses.
@@ -169,14 +169,14 @@ fn sq(text: &str) -> String {
     format!("'{}'", text.replace('\'', r"'\''"))
 }
 
-/// Text with each unsafe character spelled as `\u{hex}`. Nothing else changes.
+/// Text with each hidden character spelled as `\u{hex}`. Nothing else changes.
 fn spelled(text: &str) -> String {
     text.chars()
         .map(|c| if is_unsafe(c) { format!("\\u{{{:x}}}", c as u32) } else { c.to_string() })
         .collect()
 }
 
-/// JSON text with each unsafe character spelled as a JSON `\uXXXX` escape. A
+/// JSON text with each hidden character spelled as a JSON `\uXXXX` escape. A
 /// character past the BMP is written as its UTF-16 surrogate pair, as JSON needs.
 fn spell_json(json: &str) -> String {
     let mut out = String::with_capacity(json.len());

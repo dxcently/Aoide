@@ -1,9 +1,11 @@
+#![deny(unsafe_code)]
 #![cfg(feature = "fakes")]
 
 use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{Duration, Instant};
 
 use aoide_desktop_shell::exec::{Exec, ExecError, Flag, PinError, OUTPUT_CAP};
 use serde_json::{json, Value};
@@ -144,11 +146,52 @@ fn stderr_past_the_cap_is_refused() {
     assert!(matches!(err, ExecError::OutputTooLarge { stream: "stderr" }), "{err:?}");
 }
 
+/// Loads the fake with a config whose one vault names `token_env`.
+fn with_token_env(tag: &str, token_env: &str) -> (Exec, PathBuf) {
+    let config = json!({"data": {"config": {"context": {"vaults": {
+        "v": {"endpoint": "e", "vault": "v", "tokenEnv": token_env}}}}}});
+    let text = config.to_string();
+    load(tag, &[("FAKE_AOIDE_CONFIG", text.as_str())])
+}
+
 #[test]
-fn a_load_survives_an_unreadable_config() {
-    let (exec, _) = load("no-config", &[("FAKE_AOIDE_NO_CONFIG", "1"), ("FAKE_AOIDE_EXIT", "1")]);
-    let out = exec.call(&["send"], &[], &["hi"], None).expect("aoide children still run");
-    assert_eq!(out.status.code(), Some(1));
+fn an_unreadable_config_refuses_every_verb_but_config_with_no_child() {
+    let (exec, record) = load("no-config", &[("FAKE_AOIDE_NO_CONFIG", "1")]);
+    let before = records(&record).len();
+    let err = exec.call(&["send"], &[], &["hi"], None).expect_err("the verb is refused");
+    assert!(matches!(err, ExecError::VaultKeysUnknown(_)), "{err:?}");
+    assert_eq!(records(&record).len(), before, "no child started");
+    exec.call(&["config"], &[], &[], None).expect("config still runs, to read the names");
+    assert_eq!(records(&record).len(), before + 1);
+}
+
+#[test]
+fn a_token_env_the_app_may_not_read_refuses_every_verb_with_no_child() {
+    for name in ["1KEY", "BAD-NAME", "", "PATH", "HOME", "XDG_RUNTIME_DIR", "AOIDE_ROOT"] {
+        let (exec, record) = with_token_env("bad-name", name);
+        let before = records(&record).len();
+        let err = exec.call(&["send"], &[], &["hi"], None).expect_err("the verb is refused");
+        assert!(matches!(err, ExecError::VaultKeysUnknown(_)), "{name:?}: {err:?}");
+        assert_eq!(records(&record).len(), before, "{name:?}: no child started");
+    }
+}
+
+#[test]
+fn a_bad_token_env_is_shown_through_visible() {
+    let (exec, _) = with_token_env("spelled", "KEY\u{202e}X");
+    let text = exec.call(&["send"], &[], &["hi"], None).expect_err("refused").to_string();
+    assert!(text.contains("KEY\\u{202e}X") && !text.contains('\u{202e}'), "{text}");
+}
+
+#[test]
+fn a_call_past_its_deadline_is_refused_as_a_timeout() {
+    let (exec, record) = load("deadline", &[("FAKE_AOIDE_SLEEP", "30")]);
+    let exec = exec.deadline(Duration::from_millis(300));
+    let started = Instant::now();
+    let err = exec.call(&["send"], &[], &["hi"], None).expect_err("the call is refused");
+    assert!(matches!(err, ExecError::Timeout { .. }), "{err:?}");
+    assert!(started.elapsed() < Duration::from_secs(5), "refused at its deadline, not after the sleep");
+    assert_eq!(records(&record).len(), 3, "schema, config and the one call");
 }
 
 #[test]

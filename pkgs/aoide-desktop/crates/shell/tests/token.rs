@@ -1,3 +1,4 @@
+#![deny(unsafe_code)]
 #![cfg(feature = "fakes")]
 
 use std::fs::{self, Permissions};

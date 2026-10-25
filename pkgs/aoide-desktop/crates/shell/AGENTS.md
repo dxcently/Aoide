@@ -5,17 +5,25 @@ are in README.md.
 
 ## The exec module (exec.rs)
 
-- `exec.rs` is the only file that starts a process or sends a signal. The words
-  `Command::new(`, `pre_exec`, `libc::fork`, `setsid`, `libc::kill`, `execv` and
-  `posix_spawn` may appear only there, and so may the `unsafe {` opener, with
-  one exception: the fake eidolon's signal wait. The grep gate in
-  `crates/shell/tests/gates.rs` holds the workspace to that.
+- `exec.rs` is the only file that starts a process or sends a signal. Clippy
+  holds that: `clippy.toml` at `pkgs/aoide-desktop/` lists the paths, and a call
+  through an alias of one is a warning, which the gate refuses. The text scan in
+  `crates/shell/tests/gates.rs` is the backstop. The words `Command::new(`,
+  `pre_exec`, `libc::fork`, `setsid`, `libc::kill`, `execv` and `posix_spawn`
+  appear only in `exec.rs`, and the word `unsafe` only in `exec.rs` and the fake
+  eidolon's file.
 - `spawn_door` starts a door only from an absolute path. Its pre-exec closure
-  makes only `setsid`, `fork`, `write` and `_exit`, which POSIX lists as
+  makes only `setsid`, `fork`, `write`, `kill` and `_exit`, which POSIX lists as
   async-signal-safe, and allocates nothing. `fork` runs glibc's atfork handlers,
   which take malloc's locks before the fork and release them on both sides. The
   closure runs in the intermediate, which has one thread, so those locks are
   free. `spawn_detached`'s doc says the same.
+- Between fork and exec, in order: std's `pre_exec` makes std fork, and the
+  child runs its atfork handlers; the closure then calls `setsid` and
+  `libc::fork`, still in that one-threaded child; the grandchild returns from
+  the closure and execs the door. libc 0.2.189, the version the desktop lock
+  binds, has no `_Fork`, so the second fork is `libc::fork`, which is safe here
+  because the child has one thread when the closure runs.
 - The door's environment is `Exec::door_env`: `child_env(Child::Eidolon, "web",
   ...)`, with `XDG_RUNTIME_DIR` replaced by the checked runtime dir.
 - Every child runs from a pinned path. `run` is private, and only `Exec` calls
@@ -33,11 +41,25 @@ are in README.md.
   and every vault key variable. An `aoide` child loses every `AOIDE_MELETE_*`
   variable unless its first word is `melete`, and every vault key variable.
 - The vault key names come from `aoide config --json`. While they are unknown,
-  an `eidolon` launch is refused, and an `aoide` child keeps the vault variables
-  it inherited, since their names cannot be known. The config read that learns
-  the names runs under the same rule.
+  every call but `schema` and `config` is refused before a child starts, and an
+  `eidolon` launch is refused too. The names are unknown when the config call
+  fails or does not parse, or when a `tokenEnv` is not
+  `[A-Za-z_][A-Za-z0-9_]*`, or names `PATH`, `HOME`, `XDG_RUNTIME_DIR` or
+  `AOIDE_ROOT`. A bad `tokenEnv` is shown through `visible`.
 - Each stream is kept up to 16 MiB. Past that, the child still runs to its end,
   the extra bytes are dropped, and the call is refused.
+- Each call runs under one deadline, 30 s unless `Exec::deadline` shortens it,
+  from the spawn to the end of the reading of its output. A child still running
+  at the deadline is sent SIGTERM and has 5 s to exit, and the call is refused
+  as a timeout. A child that has exited, while a process it started still holds
+  its output pipe, is refused at the same deadline, and no signal is sent. A
+  child that ignores SIGTERM for 5 s is left running and unreaped. Nothing
+  sends SIGKILL: `Child::kill` is a clippy disallowed method, and the word is
+  barred from every source.
+- `open_pidfd` opens a pidfd for a pid, and `terminate_pidfd` sends SIGTERM
+  through one, and only SIGTERM. A pidfd names one process, so the signal
+  cannot reach a process that later takes the pid. Both carry
+  `#[allow(dead_code)]` while nothing in this crate calls them.
 - A non-zero exit is not an error. `call` returns the child's status and its
   stderr, verbatim, for the caller to show.
 
@@ -95,6 +117,18 @@ are in README.md.
   ["fakes"]`. Their tests run with `--all-features`.
 - `tests/token.rs` puts a FIFO at the token path with `exec::make_fifo`. The
   door crate forbids `unsafe`, so the FIFO is made here, in `exec.rs`.
+- The door tests start and signal a door through `exec::test_doors`, behind
+  `fakes`. It is the one way the tests reach `spawn_door` and `terminate`.
+
+## Not tested
+
+- A child that exits while a grandchild holds its output pipe: the deadline
+  holds the call, but no test can start the grandchild. The text gate keeps
+  `Command::new(` in `exec.rs`, so no fake or test can start one.
+- The intermediate's failed pid write, which SIGTERMs the door and exits
+  non-zero: no seam makes that write fail.
+- A child that ignores SIGTERM past the 5 s bound: the fake aoide exits on
+  SIGTERM, so the left-running path never runs.
 
 ## Extension points
 
