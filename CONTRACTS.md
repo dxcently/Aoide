@@ -9731,9 +9731,16 @@ an ordinary body. A client that checks answers treats the two alike:
 
 - **New client to a door without the header: held, never lost.** Every mail
   answer is `unauthenticated` (`no answer signature … upgrade aoide on
-  <node>`). Letters, charter letters and transit containers stay
-  spooled and live: nothing is parked or retired, the link backs off, and the
-  drain asks again. A receipt is never dialled: the tick drops it. A poll files
+  <node>`). Charter letters and transit containers stay spooled and live:
+  nothing is parked or retired, the link backs off, and the drain asks again.
+  The drain never dials a letter: `dialable_entries` skips it. Its send dials
+  it again after an unsigned answer (`deliver_now`). A second unsigned answer
+  returns it with the `unauthenticated:` word, and `handle_mail_send` keeps it
+  on disk as `returned` under its session; sent outside a session, it is
+  refused and nothing is written. The send writes no link state. Only
+  `aoide mail outbox retry <msgid>` and `aoide mail outbox retry --refused`
+  dial a returned letter again (`resend_returned_letter`). A receipt is never
+  dialled: the tick drops it. A poll files
   and clears nothing, so the far side keeps
   what it holds and the record of what this box filed survives to the next
   poll. A binding exchange learns nothing. `aoide mail outbox` reads
@@ -10117,9 +10124,10 @@ each of the caller's own entries it names takes a `tries` stamp and a
 "already handed over" bookmark — which is exactly why a re-poll before the ack
 hands the same envelopes over again (unless it deferred them), and why a held
 `letter` leaves the spool only when the poller names its msgid in `filed`, when
-an older poller's receipt retires it (`outbox::retire_by_ack`), when its session
-ends, or through `aoide mail outbox rm <msgid>` (a `letter` filed by the poller
-mints nothing, since ruling 131: the filing is its own answer). A held `letter`
+an older build's receipt from its destination retires it
+(`outbox::retire_by_ack`), when its session ends, or through
+`aoide mail outbox rm <msgid>` (a `letter` filed by the poller mints nothing,
+since ruling 131: the filing is its own answer). A held `letter`
 the poller names in
 `filed` ends the sender's copy on its word alone, as a relay's verified
 `accepted` does (MAIL.md, §Transit). For a relayed letter the poller is

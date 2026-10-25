@@ -48,9 +48,10 @@
   machine's real per-user directory instead of the fixture's.
 - **A receipt's `from.node` is the signer's name in the letter's mesh, never
   its hostname.** The origin verifies a receipt against the key it holds for
-  that name, so a hostname-signed receipt is refused and its letter never
-  retires. `mint_ack_in_mesh` is the hostname form, an older-peer fixture for
-  tests.
+  that name in that mesh, so a receipt whose `from.node` has no such key is
+  refused (`UnverifiedOrigin`) and its letter never retires.
+  `mint_ack_in_mesh` signs as `display::local_node_name()`, this box's own
+  name: an older-peer fixture for tests.
 - Structured thread/reply IDs are signed context, not membership or delivery authority. Legacy four-field content remains valid.
 - Structured letter content is optional signed text, never a new transport header. Invalid or legacy content remains raw; decoding must not write or alter envelope identity.
 
@@ -162,10 +163,10 @@
   The record means **admitted AND filed**, and it is never written from inside
   `seal::deposit_container`. Whether a duplicate
   was originally a letter is read back out of the boxes through
-  `mail::filed_kind`/`mail::show`, never remembered by the gate. Both halves of that ordering are load-bearing: record
-  any earlier and a refusal past the gate answers `duplicate` forever instead
-  of re-running, and a crash between the gate and the box append claims a filing
-  that never happened.
+  `mail::filed_kind`/`mail::show`, never remembered by the gate. Both halves of
+  that ordering are load-bearing: record any earlier and a refusal past the gate
+  answers `duplicate` forever instead of re-running, and a crash between the
+  gate and the box append claims a filing that never happened.
 - **Housekeeping never decides a refusal word.** `seal::sweep_retired_keys`
   runs only on the current key's own successful open — never before an
   attempt, never on a failure. Deleting a just-expired key first would turn
@@ -179,8 +180,8 @@
   withholds it (`Reseal::Withheld`, `HandOver::Withheld`), and the answer lists
   it under `withheld`. Within the batch, usable entries come before parked
   (refused) ones. The hand-over writes only a sealed upgrade (a container sealed
-  for a letter still held) or a park (a reason, on a letter no usable binding can
-  seal, which hands over nothing), and it does so under the outbox lock:
+  for a letter still held) or a park (a reason, on a letter no usable binding
+  can seal, which hands over nothing), and it does so under the outbox lock:
   `hand_over` checks the entry again there, so a return that landed since the
   read is never written over, and nothing is handed over for it. A poll
   writes only what its
@@ -1076,21 +1077,21 @@
   A receipt is never offered (ruling 131).
   **Never add state to it**: no `tries` stamp, no `last_polled_at`, no
   handed-over bookmark. Re-poll idempotence is a CONSEQUENCE of writing
-  nothing (the same set is offered again) plus the receiver's `msgid` dedup; a bookmark would be a second, drifting source of truth,
-  and any `tries` stamp on a poll would silently change which entries the
-  NEXT poll offers (the predicate reads exactly that field). The offer is
-  CAPPED at `POLL_BATCH_CAP` (50) — the drain's own batch size, oldest
-  first, capped after the filter, and it must stay capped: safe because the
-  poller acks what it files and those entries retire, so a large spool
-  advances a batch at a time rather than never; necessary because one
-  unbounded answer is a single JSON array of whole envelopes and walks
-  straight into the client's `MAX_RESPONSE_BYTES` refusal, which no retry
-  can clear.
+  nothing (the same set is offered again) plus the receiver's `msgid` dedup; a
+  bookmark would be a second, drifting source of truth, and any `tries` stamp on
+  a poll would silently change which entries the NEXT poll offers (the predicate
+  reads exactly that field). The offer is CAPPED at `POLL_BATCH_CAP` (50) — the
+  drain's own batch size, oldest first, capped after the filter, and it must
+  stay capped: safe because the poller acks what it files and those entries
+  retire, so a large spool advances a batch at a time rather than never;
+  necessary because one unbounded answer is a single JSON array of whole
+  envelopes and walks straight into the client's `MAX_RESPONSE_BYTES` refusal,
+  which no retry can clear.
 - **A receipt from an older node is filed only against a spooled letter, by a
-  bounded check.** `mail::deposit` calls `outbox::spooled_letter_sender` and compares
-  it with the receipt's `to.node`; that read is lock-free because the caller
-  holds the stage lock, which the outbox lock shares and does not nest. Do not
-  replace it with a base scan, and do not move the `to` check after the
+  bounded check.** `mail::deposit` calls `outbox::spooled_letter_sender` and
+  compares it with the receipt's `to.node`; that read is lock-free because the
+  caller holds the stage lock, which the outbox lock shares and does not nest.
+  Do not replace it with a base scan, and do not move the `to` check after the
   index: an unknown msgid must not reach a write.
 - **`update_entry` is the only write-back a drain makes to an entry it has
   already read.** It writes only when the entry is still spooled. The drain

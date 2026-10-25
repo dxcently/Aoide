@@ -108,12 +108,12 @@ when there is not. **There is no version signal on the wire**, so a relay
 that cannot carry a container refuses it rather than announcing that it is
 old: the letter comes back to its sender, which keeps it for as long as the
 session that sent it lasts (ruling 131). `aoide mail outbox retry` resends it
-once the relay is brought up to date (`docs/architecture/MAIL.md` §Transit). **Transit therefore deploys
-before the declaration that uses it**: `relays`, `[status]` and `[gates]` are
-declared only once every box of the mesh runs this version — a relay that
-predates it refuses a routed container outright, and a destination that
-predates it refuses a two-entry hop chain, so the declaration comes last and
-`aoide mail route` (plus the drift report) is the dry run.
+once the relay is brought up to date (`docs/architecture/MAIL.md` §Transit).
+**Transit therefore deploys before the declaration that uses it**: `relays`,
+`[status]` and `[gates]` are declared only once every box of the mesh runs this
+version — a relay that predates it refuses a routed container outright, and a
+destination that predates it refuses a two-entry hop chain, so the declaration
+comes last and `aoide mail route` (plus the drift report) is the dry run.
 
 ### Degenerate topologies
 
@@ -623,7 +623,8 @@ destination. Steps, in order:
 8. Check membership: the origin in the mesh; for a post, the origin a member node of
    the board at that epoch.
 9. File the letter.
-10. Ring the doorbell. The answer is `accepted`; no receipt is sent (ruling 131).
+10. Ring the doorbell. The answer is `accepted`; no receipt is sent (ruling
+    131).
 
 This branch never runs the hop spool step, because a destination that misfiled would
 otherwise relay content addressed elsewhere. A mismatch refuses
@@ -1314,7 +1315,6 @@ not control access, and a session listing is not transcript access.
 |---|---|
 | `mail/deposit` | Deposit one sealed container and get back `accepted`, `duplicate` or `refused(reason)`. Also carries receipts, charters, wraps and board posts; there is no second ack method. |
 | `mail/poll` | Returns the caller's own spooled containers. The caller's identity must BE the node being polled. This is the only inbound path for a `poll` node. |
-| `mail/ack` | Semantic grouping for the receipt flow of older builds. No node sends a receipt now (ruling 131); one that arrives is answered like a deposit (MAIL.md, Wire, Receipts). |
 | `state` | Authorized snapshot of hosts, projects, sessions, terminals, agents and relationships |
 | `events` | WSS subscription to permitted changes after a cursor; a bounded, recoverable stream |
 | `presence` | Expiring host connection and heartbeat state, distinct from process state |
@@ -1577,8 +1577,9 @@ scheduler (`aoide mail poll`).
 - **Signed requests everywhere:** through the tunnel, an unsigned request, an
   unknown-key request, a request naming a mesh the caller is not in, and a replayed
   nonce are all refused. The observed loopback source grants nothing.
-- **Receipts:** a letter this node files sends no receipt (ruling 131). A receipt
-  from an older build is filed or answered like a deposit. No receipt chain.
+- **Receipts:** a letter this node files sends no receipt (ruling 131). A
+  receipt from an older build is filed or answered like a deposit. No receipt
+  chain.
 - **Windows and Linux, no SSH:** send, poll and fetch work end to end with the
   relay node, with a `poll` node on each OS that has no SSH account or binary.
 - **Downgrade:** a plaintext request is refused with the taught word

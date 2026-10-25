@@ -754,8 +754,8 @@
   `refused` on the next ask, at most `REFUSED_LIST_CAP` of them, oldest first.
   The answer's own lists are read the same way: at most `POLL_BATCH_CAP`
   containers and as many envelopes (`answer_entries`), the rest left out, and
-  each list past its cap is audited once as `mail.poll.over-cap`, naming the list
-  and the count left out.
+  each list past its cap is audited once as `mail.poll.over-cap`, naming the
+  list and the count left out.
   `clear_refused` drops what that ask sent once an answer arrives, as `filed` is
   cleared. The keep list decides `filed` alone: `record_filed` is written only
   for a non-keep-list word whose refusal is on record (`refuse_container`
@@ -910,13 +910,13 @@
   (`retire_by_ack` on a receipt from an older node, filed or duplicate, which
   retires only an own letter); the door reaches it
   through `aoide_conduct::mail_bridge::settle_deposit`, so `aoide-server`
-  never keeps a second copy. **A letter's spool directory is the HOP the route picked, not
-  its destination** (`spool_entry(dest, next, mesh, …)`): the container stays
-  addressed to `dest` while the entry is dialled toward `next`, and a hop this
-  box holds no record for is dialled at the address the DECLARATION gives it
-  (`dial_node` → `charter::dial_of`) or held if that address is `poll`.
-  **A relayed letter is sealed to its destination, never to the hop**, and the
-  destination's binding is resolved in ONE place,
+  never keeps a second copy. **A letter's spool directory is the HOP the route
+  picked, not its destination** (`spool_entry(dest, next, mesh, …)`): the
+  container stays addressed to `dest` while the entry is dialled toward `next`,
+  and a hop this box holds no record for is dialled at the address the
+  DECLARATION gives it (`dial_node` → `charter::dial_of`) or held if that
+  address is `poll`. **A relayed letter is sealed to its destination, never to
+  the hop**, and the destination's binding is resolved in ONE place,
   `aoide_storage::seal::destination_binding` (a learnt binding that matches the
   declaration, else the declared one). `spool_entry` and the reseal use it, and
   `deliver_now` seals a relayed letter through `seal_for_dial` before it dials.

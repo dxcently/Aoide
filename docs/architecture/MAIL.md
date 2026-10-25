@@ -688,17 +688,17 @@ door's audit name whitelist gains both names so they never log as bare
   that a poll is already in progress. Handed-over
   `letter` entries stay in the outbox until the poller names them in `filed`,
   an old-style receipt ends them, or the session that sent them ends; a re-poll
-  before that re-hands them and the receiver's dedup makes that harmless. **An HTTPS adapter's answer names
-  what it would not hand over**: an entry spooled before the poller published
-  a binding is withheld (`sealed-required`) rather than carried in the clear.
-  So is a relayed letter this box cannot seal to its destination: it seals to
-  the destination with a learnt binding that matches the declaration, else with
-  the declared one, and with neither it is withheld. A relay carries sealed
-  containers only, so the hop never holds the envelope of a letter it cannot
-  seal for the destination. Once this box holds a binding for the destination,
-  the letter is handed over sealed to it. The `withheld` list — `{msgid,
-  reason, detail}` — is reported by `aoide mail poll` on the caller's own side,
-  so a stuck letter has a reason the operator can read.
+  before that re-hands them and the receiver's dedup makes that harmless. **An
+  HTTPS adapter's answer names what it would not hand over**: an entry spooled
+  before the poller published a binding is withheld (`sealed-required`) rather
+  than carried in the clear. So is a relayed letter this box cannot seal to its
+  destination: it seals to the destination with a learnt binding that matches
+  the declaration, else with the declared one, and with neither it is withheld.
+  A relay carries sealed containers only, so the hop never holds the envelope of
+  a letter it cannot seal for the destination. Once this box holds a binding for
+  the destination, the letter is handed over sealed to it. The `withheld` list —
+  `{msgid, reason, detail}` — is reported by `aoide mail poll` on the caller's
+  own side, so a stuck letter has a reason the operator can read.
 - **The ask has two triggers, and they are the same call.**
   `aoide mail poll [<node>]` dials the node named — or, with no argument,
   every paired node this box holds `message` for, and every relay a charter in
@@ -775,11 +775,12 @@ door's audit name whitelist gains both names so they never log as bare
   **An outbox entry retires when its delivery is confirmed, and what counts as
   confirmation depends on what the entry is.** A `letter` retires on its
   dialled node's verified `accepted` or `duplicate`, or, when held, on the
-  poller's `filed` name (ruling 131). A letter from a build before the rule
-  retires on a receipt whose verified signer is the entry's `to.node`, in the
-  letter's mesh, with text naming its `msgid`. A `transit` container retires
-  when its next hop takes it, on that hop's verified `accepted` or `duplicate`
-  or on the poller's `filed` name. A `charter` letter is APPLIED, not filed, so
+  poller's `filed` name (ruling 131). A receipt from a build before the rule
+  retires the own `letter` whose `to.node` is its verified signer, in the same
+  mesh, with text naming its `msgid`; no other entry kind is retired by one. A
+  `transit` container retires when its next hop takes it, on that hop's
+  verified `accepted` or `duplicate` or on the poller's `filed` name. A
+  `charter` letter is APPLIED, not filed, so
   there is no far mailbox that could hold a receipt: its verified deposit
   outcome is the whole confirmation there can be. A `receipt` entry is never
   dialled (ruling 131): the tick drops one that a build before the rule
@@ -793,10 +794,10 @@ door's audit name whitelist gains both names so they never log as bare
   per drain, for ever.
   **Older builds.** An older sender to a node that has ruling 131 keeps its
   delivered letter and re-dials it, getting `duplicate`, until it is rebuilt;
-  the rebuilt sender's pre-131 pass then drops the letter. That wait is accepted.
-  **Inert files.** An older build's `state/mail/reacks.log` (and its `.1`) and
-  its `.ack/` markers are read by nothing, and no code removes them. They are
-  safe to delete by hand.
+  the rebuilt sender's pre-131 pass then drops the letter. That wait is
+  accepted. **Inert files.** An older build's `state/mail/reacks.log` (and its
+  `.1`) and its `.ack/` markers are read by nothing, and no code removes them.
+  They are safe to delete by hand.
   A hub cannot sign a receipt as the destination. Its own verified `accepted`
   still ends the sender's copy, so a hub that accepts a letter and then drops
   it loses it without a word: the trade ruling 131 makes (§Transit, "A relay's
@@ -931,7 +932,7 @@ link.json       { "holdUntil": ts, "lastError": "…" }   per-link backoff
   the roster (ended, reaped, or a hook death), every returned or held letter
   bound to it is dropped, one `mail.outbox.dropped` audit line each (reason
   `session-ended`). A letter a live send returns after its session has already
-  left the roster is kept until the next daemon tick, which drops it (reason
+  left the roster is kept until the next drain tick, which drops it (reason
   `session-gone`).
   `aoide mail outbox [<node>]` answers "did it land" truthfully
   per entry via `data.delivery` — the same projection `aoide mail send`
@@ -1640,8 +1641,8 @@ authoritative first:
   (a `poll` or `hold` hop, or `--hold`). It is bound to its session, never
   dialled by this box, and leaves when that hop files it or its session ends.
 - `pre-131` — an own letter spooled before the session binding existed, so
-  it has no session. The next tick drops it (reason `pre-131`), and drops any
-  receipt the same way, whatever its session.
+  it has no session. The next drain tick drops it (reason `pre-131`), and drops
+  any receipt the same way, whatever its session.
 - `removed` — a retry's report only, never a listing's: the letter left the
   outbox while its dial was in flight (an `rm`, or its session ending), so
   nothing was written back. The retry refuses with the reason `removed`.
@@ -1752,9 +1753,9 @@ paired node that merely misbehaves.
   reader pulls on purpose. The doorbell carries none of it.
 - **Floods** are visible (one audit line per deposit, with origin) and
   bounded only by disk until `down`. A hub amplifies per letter by its
-  outbox copy, and by a receipt an older build still returns; the boxes, receipts and
-  outbox directories grow with the mail that is accepted. The boxes are
-  capped (§Store), receipts rotate at 4 MiB, and a full box refuses. The
+  outbox copy, and by a receipt an older build still returns; the boxes,
+  receipts and outbox directories grow with the mail that is accepted. The boxes
+  are capped (§Store), receipts rotate at 4 MiB, and a full box refuses. The
   doorbell latch keeps a flood off the pty; the audit log and the disk
   are where it is felt, and `node allow … message off` is the same-
   minute answer.

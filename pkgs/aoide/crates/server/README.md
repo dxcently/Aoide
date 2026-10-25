@@ -510,22 +510,22 @@ terminal's rights to its remote callers.
   hop in the audit log, spools it toward the node the four steps pick, best-effort drains that hop
   (never one the route said is HELD), and answers `accepted` with the hop named
   — nothing filed as correspondence, no reader armed, and no answer owed back,
-  because the letter is not here. The audit stamp and the chain agree on the caller's name
-  through the charter line (`declared_caller_name` → `routing::declared_name`),
-  never the `nodes.json` nickname. It never rings the doorbell itself (P-M5a-2c:
-  the resident daemon is the policy and audit boundary for every ring, so this
-  door files and answers and stops there) — a remotely-deposited letter arms its
-  readers exactly like a locally-filed one, but is rung only by the next
-  daemon-side trigger for that name (a reader's Stop hook, a local filing, `mail
-  ring` by hand), until a later slice (P-M5b-2) gives this door its own forward
-  path to the daemon. A filed **receipt from an older node** never rings — it is
-  not arming mail (`aoide_storage::mail`'s own `arms` predicate) — and instead
-  retires the own letter it confirms, if any, via
-  `aoide_storage::outbox::retire_by_ack` (a lookup keyed on the receipt's own
-  verified origin and acked msgid; a forged or stale receipt retires nothing,
-  and a transit, charter or receipt entry is never retired by it). A duplicate
-  receipt goes through the same call. Every `outbox` call here runs strictly
-  AFTER `mail::deposit` has already released its own lock — `mail` and
+  because the letter is not here. The audit stamp and the chain agree on the
+  caller's name through the charter line (`declared_caller_name` →
+  `routing::declared_name`), never the `nodes.json` nickname. It never rings the
+  doorbell itself (P-M5a-2c: the resident daemon is the policy and audit
+  boundary for every ring, so this door files and answers and stops there) — a
+  remotely-deposited letter arms its readers exactly like a locally-filed one,
+  but is rung only by the next daemon-side trigger for that name (a reader's
+  Stop hook, a local filing, `mail ring` by hand), until a later slice (P-M5b-2)
+  gives this door its own forward path to the daemon. A filed **receipt from an
+  older node** never rings — it is not arming mail (`aoide_storage::mail`'s own
+  `arms` predicate) — and instead retires the own letter it confirms, if any,
+  via `aoide_storage::outbox::retire_by_ack` (a lookup keyed on the receipt's
+  own verified origin and acked msgid; a forged or stale receipt retires
+  nothing, and a transit, charter or receipt entry is never retired by it). A
+  duplicate receipt goes through the same call. Every `outbox` call here runs
+  strictly AFTER `mail::deposit` has already released its own lock — `mail` and
   `outbox` share
   the identical non-reentrant stage-lock primitive, so nesting one inside the
   other would deadlock a process against itself. **`aoide/mailPoll` (P-M3,
@@ -555,16 +555,16 @@ terminal's rights to its remote callers.
   `a2a.aoide/mailPoll` label, carrying the caller and the handed-over COUNT —
   the pull direction's flood signal, visible at the node that spooled the
   letters. The answer is BOUNDED at `aoide_storage::outbox::POLL_BATCH_CAP`
-  (50), oldest first: the poller's `filed` names retire what it took, so the next poll advances,
-  and an unbounded batch would be a body the client's own `MAX_RESPONSE_BYTES`
-  refuses. **`down` is the door's now**: the two mail methods read the
-  declaration set once per request and refuse a caller their mesh declares
-  `down` with that word as a RESULT (audited), beside the `message` half — the
-  per-request quarantine `aoide node allow <node> message off` (MAIL.md
-  §Status). An UNLOADABLE set refuses both methods with `config-invalid` and
-  keeps serving everything else: no zone checks means no mail, never mail with
-  the walls down. **An unloadable set is answered BEFORE caller resolution, to
-  every caller**: where the request's signature verifies
+  (50), oldest first: the poller's `filed` names retire what it took, so the
+  next poll advances, and an unbounded batch would be a body the client's own
+  `MAX_RESPONSE_BYTES` refuses. **`down` is the door's now**: the two mail
+  methods read the declaration set once per request and refuse a caller their
+  mesh declares `down` with that word as a RESULT (audited), beside the
+  `message` half — the per-request quarantine `aoide node allow <node> message
+  off` (MAIL.md §Status). An UNLOADABLE set refuses both methods with
+  `config-invalid` and keeps serving everything else: no zone checks means no
+  mail, never mail with the walls down. **An unloadable set is answered BEFORE
+  caller resolution, to every caller**: where the request's signature verifies
   against the key its own `X-Aoide-Node` holds on the charter in force, the door
   answers the refused `config-invalid` result — fixed text, with the load error
   audited only, never sent — after the clock checks, the charter signature and

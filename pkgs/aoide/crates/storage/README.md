@@ -785,8 +785,8 @@ by decision — no embedded database yet
   policy in one function — recompute `msgid`, verify the origin
   signature, dedup against the box (a duplicate reports whether its original
   was a filed letter), then file via `file_received_entry`. A receipt from an
-  older node is filed only against a letter still spooled here under its own name
-  (`outbox::spooled_letter_sender`), and a repeat of one already filed is
+  older node is filed only against a letter still spooled here under its own
+  name (`outbox::spooled_letter_sender`), and a repeat of one already filed is
   caught by `receipts.log`, keyed on (signer, mesh, acked msgid). Both mint
   functions and `deposit` carry neither `mesh` nor `transit` — P-M2's envelope is
   exactly P-M1's shape, addressed at a real node instead of `self`.

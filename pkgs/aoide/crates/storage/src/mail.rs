@@ -1786,7 +1786,9 @@ pub fn mint_outbound_letter(from_name: &str, to_node: &str, to_name: &str, text:
 /// states: a receipt rides ONE mesh back to the origin, and the mesh its header
 /// names is a SIGNED value the destination compares against the request's. An
 /// older-peer fixture: no production path mints a receipt (ruling 131).
-/// `from.node` is the OS hostname here.
+/// `from.node` is `display::local_node_name()`: this box's node name,
+/// lowercased. It is `AOIDE_A2A_NODE_NAME` if set, else the OS hostname,
+/// else `aoide`.
 pub fn mint_ack_in_mesh(from_name: &str, to: Address, acked_msgid: &str, mesh: &str) -> Result<Envelope, String> {
     let (kp, _) = identity::load_or_mint().map_err(|e| e.to_string())?;
     let header = Header {
@@ -3102,6 +3104,58 @@ mod tests {
         assert!(matches!(deposit(home, "alice-host").unwrap(), DepositOutcome::Filed { .. }));
         assert!(matches!(deposit(far, "alice-host").unwrap(), DepositOutcome::Filed { .. }), "filed, not a duplicate");
         assert_eq!(read_base().unwrap().len(), 2);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **A receipt whose signed text was changed after signing fails the origin
+    /// signature and files nothing.** The text is replaced and the msgid
+    /// recomputed over it, so the msgid check passes and only the signature
+    /// over `header ‖ text` can refuse it: the origin gate, alone.
+    #[test]
+    fn a_tampered_receipt_fails_the_origin_signature_and_files_nothing() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("deposit-ack-tampered");
+        let alice = alice_on_record();
+        let signed = "ab".repeat(32);
+        let named = "cd".repeat(32);
+        spool_letter_sent_as_yomi(&signed);
+        spool_letter_sent_as_yomi(&named);
+
+        let mut ack = alice_receipt(&signed, "2026-09-06T00:00:01Z", &alice);
+        ack.text = named.clone();
+        ack.msgid = compute_msgid(&ack.header, &ack.text, &ack.sig).unwrap();
+        assert_eq!(deposit(ack, "alice-host").unwrap(), DepositOutcome::UnverifiedOrigin);
+        assert!(!receipts_log_path().exists(), "no receipt line is written");
+        assert!(read_base().unwrap().is_empty(), "nothing is filed");
+        assert!(
+            crate::outbox::list_entries("alice-host").unwrap().iter().any(|e| e.envelope.msgid == named),
+            "the letter the tampered text names is still spooled"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **A receipt from a signer with no key on record files nothing.** The
+    /// signature is genuine for the key that made it, but no key is on record
+    /// for `alice-host`, so the origin gate refuses it. The letter it names
+    /// stays spooled.
+    #[test]
+    fn a_receipt_from_a_signer_with_no_key_on_record_files_nothing() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("deposit-ack-unrecorded");
+        let letter = "ef".repeat(32);
+        spool_letter_sent_as_yomi(&letter);
+
+        let stranger = identity::mint_ephemeral().unwrap();
+        let ack = alice_receipt(&letter, "2026-09-06T00:00:01Z", &stranger);
+        assert_eq!(deposit(ack, "alice-host").unwrap(), DepositOutcome::UnverifiedOrigin);
+        assert!(!receipts_log_path().exists(), "no receipt line is written");
+        assert!(read_base().unwrap().is_empty(), "nothing is filed");
+        assert!(
+            crate::outbox::list_entries("alice-host").unwrap().iter().any(|e| e.envelope.msgid == letter),
+            "the letter it names is still spooled"
+        );
 
         let _ = std::fs::remove_dir_all(&dir);
     }

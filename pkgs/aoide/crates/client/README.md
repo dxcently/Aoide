@@ -588,9 +588,9 @@ never the inbound/serve half (that's `aoide-server`).
   the taught text, all BEFORE any dial. Hand-over is bounded by
   `aoide_storage::outbox::POLL_BATCH_CAP` (50, the drain's own batch), which
   is safe because the poller's `filed` names retire what it took and the next
-  poll advances. The `PollOutcome` it returns carries all three answers the command
-  renders: `filed`, the `refused` containers (`<msgid>: <reason>`), and — H1 —
-  the `withheld` entries a sealed-only listener would not hand over
+  poll advances. The `PollOutcome` it returns carries all three answers the
+  command renders: `filed`, the `refused` containers (`<msgid>: <reason>`), and
+  — H1 — the `withheld` entries a sealed-only listener would not hand over
   (`<msgid>: sealed-required — <detail>`), so a letter held at a relay for want
   of a binding is reported where the operator is looking instead of as a bare
   `0 envelope(s) filed`. `settle_deposit` is the ONLY
@@ -666,8 +666,8 @@ never the inbound/serve half (that's `aoide-server`).
   `docs/architecture/MAIL.md` for the vocabulary). A post-spool read
   that itself fails, or finds the entry already removed, degrades `delivery` to
   `queued`/"status unavailable" (the read-fault fallback, for any entry, own
-  letters included) without ever touching the spool's own `Ok`. Its node-branch gate
-  is deliberately shallow — it requires `verified` off `node_store::
+  letters included) without ever touching the spool's own `Ok`. Its node-branch
+  gate is deliberately shallow — it requires `verified` off `node_store::
   load_nodes()` and nothing more, the SAME "the client checks reachability
   of a record, never a granular capability" precedent `handle_node_spawn`
   already sets; whether this node actually GRANTS `message` is exclusively

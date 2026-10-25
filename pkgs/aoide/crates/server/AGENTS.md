@@ -262,15 +262,17 @@ a2a spawn probe needs `/bin/sh` + `printf`'s byte-exact output.
   131).** `run_internal_mail_drain` calls
   `aoide_conduct::graph::sweep_session_letters` and only then
   `aoide_conduct::mail_bridge::drain_all`, so a letter whose session has ended,
-  and a receipt, is never dialled. Keep that order: a drain first would dial a
-  letter the same tick is about to drop.
-- **The door drains nothing after filing.** `settle_deposit` spools and dials
-  nothing, so a charter or transit entry toward the origin leaves on the
-  daemon's tick (`drain_all`) or on a hop's own drain: the hop arm of
-  `mail_deposit` drains the next hop unless the container is held. The door's
-  unit is bound to `aoided.service` (`modules/dendrites/aoided.nix`), which
-  runs the tick, so a door started without `aoided` leaves those entries until
-  a tick runs.
+  and a receipt, is never dialled. The sweep runs first so the drain's pass
+  sees the spool after the drops; `dialable_entries` skips letters and
+  receipts in any case.
+- **The door drains nothing for a letter or receipt it files.**
+  `settle_deposit` spools and dials nothing, so a charter or transit entry
+  toward the origin leaves on the daemon's tick (`drain_all`) or on a hop's own
+  drain. The deposit path's only drain is the hop arm of `deposit_sealed`: a
+  transit container it takes drains its next hop unless the container is held.
+  The door's unit is bound to `aoided.service` (`modules/dendrites/aoided.nix`),
+  which runs the tick, so a door started without `aoided` leaves those entries
+  until a tick runs.
 - **This crate's own `env_lock()` (`lib.rs`)'s first call in a test binary
   also floors `$AOIDE_STAGE_DIR` at a fresh private tempdir, unless a test
   already set one (P-D6 safety net).** `daemon::run_loop`'s tick now
@@ -1002,8 +1004,8 @@ a2a spawn probe needs `/bin/sh` + `printf`'s byte-exact output.
   `aoide_storage::outbox::poll_payloads` (the ONE place the offer rule lives:
   held always, `now` only when its own attempts have been failing) plus a
   self-audit under `a2a.aoide/mailPoll` carrying the handed-over count. The
-  hand-over writes only a sealed upgrade or a park, never a try or an outcome for
-  a container it hands over. The named writes are three:
+  hand-over writes only a sealed upgrade or a park, never a try or an outcome
+  for a container it hands over. The named writes are three:
   `outbox::retire_acknowledged`
   for each `filed` msgid (the hub's own transit custody, or a held letter whose
   hop is the poller), `outbox::return_refused` for each `refused` pair, at most
@@ -1012,9 +1014,9 @@ a2a spawn probe needs `/bin/sh` + `printf`'s byte-exact output.
   and `outbox::defer_named` for each `deferred` msgid: a `tries` stamp and a
   `deferred:` outcome on ITS OWN entries, never a
   returned own letter; the stamp holds them out of the window and nothing
-  else. Each list is cut at its cap (`REFUSED_LIST_CAP`, `DEFERRED_LIST_CAP`), and
-  a list past its cap writes one `mail.poll.over-cap` line that names the list and
-  the count it ignored. No
+  else. Each list is cut at its cap (`REFUSED_LIST_CAP`, `DEFERRED_LIST_CAP`),
+  and a list past its cap writes one `mail.poll.over-cap` line that names the
+  list and the count it ignored. No
   bookmark and no "already handed over" flag may be added here: the
   re-poll idempotence comes from handing the SAME set over again, and the entry
   retires only on its confirmation: a valid receipt from an older node naming

@@ -1630,8 +1630,8 @@ blank one is refused too.
   place an envelope's deposit OUTCOME turns into spool side effects (the
   `retire_by_ack` a filed receipt performs, which retires only an own letter;
   a filed letter leaves nothing
-  behind, ruling 131), reached by `aoide-server::a2a::mail_deposit` from here so that
-  the door and `mail_wire::poll_node`'s own hand-over loop cannot drift on
+  behind, ruling 131), reached by `aoide-server::a2a::mail_deposit` from here so
+  that the door and `mail_wire::poll_node`'s own hand-over loop cannot drift on
   what receiving a letter means.
 
 The tick's session sweep and the roster-exit letter drop (ruling 131) are not
