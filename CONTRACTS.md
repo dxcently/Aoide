@@ -687,12 +687,12 @@ Contract guarantees:
 - `approves` and `launches` (optional bools, default omitted = `false`) — the
   marks the desktop app reads to refuse a grant that names the verb. `approves`
   is set on a verb that approves or denies a hold, re-parents, answers for a
-  person, or types into a session, and on a launch verb that checks its door
-  (`resurrect`, `spawn`, `job add`, `job remove`). `launches` is set on a verb
-  that starts an agent (`spawn`, `project add`, `node spawn`). **Additive**,
-  same discipline as `internal`: each key is omitted entirely when `false`, so
-  an unmarked command serializes byte-identical to before. `Command::check`
-  reads neither mark.
+  person, or types into a session, or that reaches a check that refuses a door
+  that cannot approve. `launches` is set on a verb that starts an agent.
+  `schema --json` shows which verbs carry each mark, and the golden snapshots in
+  cli/src/registry.rs pin them. **Additive**, same discipline as `internal`:
+  each key is omitted entirely when `false`, so an unmarked command serializes
+  byte-identical to before. `Command::check` reads neither mark.
 - `doors` (optional string array on a command, and on a flag) — the doors that
   may call the command, from `cli`, `daemon`, `mcp`, `a2a`. **Additive**, same
   discipline: omitted from `schema --json` when it is the default `["cli",

@@ -159,16 +159,19 @@ pub struct Command {
     #[serde(skip_serializing_if = "is_false")]
     pub internal: bool,
     /// The verb approves or denies a hold, re-parents, answers for a person, or
-    /// types into a session; or it launches and checks its door (`resurrect`,
-    /// `spawn`, `job add`, `job remove`). Additive (CONTRACTS.md §3): skipped
-    /// when `false`. The desktop app's floor reads it from `schema --json` and
-    /// refuses a grant that names the verb. `Command::check` does not read it.
+    /// types into a session; or it reaches a check that refuses a door that
+    /// cannot approve. Additive (CONTRACTS.md §3): skipped when `false`. The
+    /// desktop app's floor reads it from `schema --json`, which shows which
+    /// verbs carry it, and refuses a grant that names the verb. The golden
+    /// snapshot in cli/src/registry.rs pins them. `Command::check` does not
+    /// read it.
     #[serde(skip_serializing_if = "is_false")]
     pub approves: bool,
-    /// The verb starts an agent (`spawn`, `project add`, `node spawn`).
-    /// Additive (CONTRACTS.md §3): skipped when `false`. The desktop app's
-    /// floor reads it from `schema --json` and refuses a grant that names the
-    /// verb; `Command::check` does not read it.
+    /// The verb starts an agent. Additive (CONTRACTS.md §3): skipped when
+    /// `false`. The desktop app's floor reads it from `schema --json`, which
+    /// shows which verbs carry it, and refuses a grant that names the verb. The
+    /// golden snapshot in cli/src/registry.rs pins them. `Command::check` does
+    /// not read it.
     #[serde(skip_serializing_if = "is_false")]
     pub launches: bool,
     #[serde(rename = "exitCodes", serialize_with = "exit_codes")]

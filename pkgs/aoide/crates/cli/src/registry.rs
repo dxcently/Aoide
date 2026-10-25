@@ -116,6 +116,10 @@ mod tests {
         assert_eq!(find("resurrect")["launches"], true);
         assert_eq!(find("spawn")["approves"], true);
         assert_eq!(find("spawn")["launches"], true);
+        assert_eq!(find("node.spawn")["approves"], true);
+        assert_eq!(find("node.spawn")["launches"], true);
+        assert_eq!(find("conduct")["approves"], true);
+        assert_eq!(find("conduct")["launches"], true);
         for plain in ["graph", "session.prune"] {
             let v = find(plain);
             assert!(v.get("approves").is_none() && v.get("launches").is_none(), "{plain} carries neither key: {v}");
@@ -711,10 +715,11 @@ mod tests {
         assert_eq!(got, expected, "MCP-open set drifted from the golden snapshot");
     }
 
-    /// Golden snapshot: the commands that approve or deny a hold, re-parent,
-    /// answer for a person or type into a session, and the launch verbs that
-    /// check their door. The desktop app's floor refuses a grant that names one
-    /// of them.
+    /// Golden snapshot: the verbs that approve or deny a hold, re-parent,
+    /// answer for a person or type into a session, or reach a check that
+    /// refuses a door that cannot approve (`approves` in
+    /// protocol/src/registry.rs). The desktop app's floor refuses a grant
+    /// that names one of them.
     #[test]
     fn approves_paths_match_the_golden_snapshot() {
         let r = crate::commands::all();
@@ -727,6 +732,7 @@ mod tests {
             "job.remove",
             "mail.ring",
             "mail.send",
+            "node.spawn",
             "resurrect",
             "send",
             "session.hook",
@@ -740,14 +746,15 @@ mod tests {
         assert_eq!(got, expected, "approves set drifted from the golden snapshot");
     }
 
-    /// Golden snapshot: the commands that start an agent (`launches`). The
-    /// desktop app's floor refuses a grant that names one of them.
+    /// Golden snapshot: the verbs that start an agent (`launches`,
+    /// protocol/src/registry.rs). The desktop app's floor refuses a grant that
+    /// names one of them.
     #[test]
     fn launches_paths_match_the_golden_snapshot() {
         let r = crate::commands::all();
         let mut got: Vec<String> = r.commands().filter(|c| c.launches).map(|c| c.dotted()).collect();
         got.sort();
-        let mut expected = vec!["job.add", "job.remove", "node.spawn", "project.add", "resurrect", "spawn"];
+        let mut expected = vec!["conduct", "job.add", "job.remove", "node.spawn", "project.add", "resurrect", "spawn"];
         expected.sort();
         assert_eq!(got, expected, "launches set drifted from the golden snapshot");
     }

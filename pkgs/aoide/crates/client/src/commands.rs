@@ -2275,7 +2275,7 @@ pub fn register_nodes(r: &mut Registry) {
         handler: handle_node_spawn,
         examples: ["node spawn yomi-strix -- status check please"],
         brief: "Start a session on a paired node and type its first turn.",
-        launches: true,
+        approves: true, launches: true,
     ));
 }
 

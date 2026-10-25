@@ -381,7 +381,7 @@ pub fn register(r: &mut Registry) {
         implemented: true,
         handler: crate::graph::session_conduct,
         brief: "Run an agent command on its own PTY as a conductable session.",
-        approves: true,
+        approves: true, launches: true,
     ));
     // ── bare `session`: the ROSTER (session-surface redesign, command-defrag
     // lane X, 2026-08-28 — supersedes both the U3 undying picker that used

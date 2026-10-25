@@ -4,15 +4,19 @@
 //! `cli/src/registry.rs` pins the marked paths in
 //! `approves_paths_match_the_golden_snapshot`.
 //!
-//! This scans every crate's production source (up to the file's `mod tests`,
-//! comments skipped) and counts the lines holding either call. The list is
-//! exact, not a ratchet: a file whose count differs, and a file the list does
-//! not name, fails until the list and the command's mark move together.
+//! This scans every crate's production source (up to the file's inline
+//! `mod tests {`, comments skipped) and counts the lines naming either check.
+//! It enforces the list and nothing more. The list is exact, not a ratchet: a
+//! file whose count differs, and a file the list does not name, fails until
+//! the list moves. A new or removed check moves the list in the same commit,
+//! and the command whose handler reaches the check gets `approves: true`, with
+//! its path in the approves golden. The scan cannot see which command a check
+//! serves, or a new caller of an existing check; review checks those.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-const CALLS: [&str; 2] = ["can_approve()", "refuse_unapproving_door("];
+const CALLS: [&str; 2] = ["can_approve", "refuse_unapproving_door"];
 
 /// (path under `crates/`, number of lines holding an approve check).
 const CHECKS: &[(&str, usize)] = &[
@@ -20,12 +24,13 @@ const CHECKS: &[(&str, usize)] = &[
     ("conduct/src/graph/common.rs", 2),
     ("conduct/src/graph/conduct.rs", 1),
     ("conduct/src/graph/doorbell.rs", 1),
-    ("conduct/src/graph/job.rs", 2),
-    ("conduct/src/graph/pending.rs", 2),
+    ("conduct/src/graph/job.rs", 3),
+    ("conduct/src/graph/pending.rs", 3),
     ("conduct/src/graph/permit.rs", 1),
     ("conduct/src/graph/resurrect.rs", 1),
     ("conduct/src/graph/send.rs", 2),
-    ("conduct/src/graph/session_store.rs", 1),
+    ("conduct/src/graph/session_store.rs", 2),
+    ("protocol/src/audit.rs", 1),
 ];
 
 fn sources(dir: &Path, out: &mut Vec<PathBuf>) {
@@ -39,13 +44,13 @@ fn sources(dir: &Path, out: &mut Vec<PathBuf>) {
     }
 }
 
-/// Lines of production code (up to the file's `mod tests`, comments skipped)
-/// that hold an approve check.
+/// Lines of production code (up to the file's inline `mod tests`, comments
+/// skipped) that name an approve check.
 fn sites(path: &Path) -> usize {
     let text = std::fs::read_to_string(path).unwrap();
     text.lines()
         .map(str::trim)
-        .take_while(|l| !l.starts_with("mod tests") && !l.starts_with("pub(crate) mod tests"))
+        .take_while(|l| !l.starts_with("mod tests {") && !l.starts_with("pub(crate) mod tests {"))
         .filter(|l| !l.starts_with("//"))
         .filter(|l| CALLS.iter().any(|c| l.contains(c)))
         .count()
@@ -85,10 +90,11 @@ fn drift(crates: &Path, checks: &[(&str, usize)]) -> Vec<String> {
     out
 }
 
-const MOVE: &str = "a new approve check needs its command marked: the command whose handler \
-    reaches the call gets `approves: true` on its registry entry, its path joins \
-    `approves_paths_match_the_golden_snapshot` (cli/src/registry.rs), and this list \
-    moves with them in the same commit:";
+const MOVE: &str = "a new or removed approve check moves this list in the same \
+    commit. The command whose handler reaches a new check gets \
+    `approves: true` on its registry entry, and its path joins \
+    `approves_paths_match_the_golden_snapshot` (cli/src/registry.rs) in that \
+    commit too. This list differs from the tree:";
 
 #[test]
 fn approve_checks_match_the_list() {
@@ -97,26 +103,57 @@ fn approve_checks_match_the_list() {
     assert!(diff.is_empty(), "{MOVE}\n  {}", diff.join("\n  "));
 }
 
+const CALL: &str = "    let _ = inv.door.can_approve();\n";
+
+/// A fresh temp tree holding each `CHECKS` file with its listed count of
+/// calls. `name` keeps the tests' trees apart: they share one process.
+fn listed_tree(name: &str) -> PathBuf {
+    let root = std::env::temp_dir().join(format!("aoide_approve_checks_{name}_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    for (rel, n) in CHECKS {
+        let file = root.join(rel);
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        std::fs::write(&file, CALL.repeat(*n)).unwrap();
+    }
+    root
+}
+
 /// The scan's own proof: in a temp tree that matches the list exactly, one
 /// extra call in a listed file is the one drift reported.
 #[test]
 fn a_new_approve_check_fails_the_scan() {
-    let root = std::env::temp_dir().join(format!("aoide_approve_checks_{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&root);
-    let call = "    let _ = inv.door.can_approve();\n";
-    for (rel, n) in CHECKS {
-        let file = root.join(rel);
-        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
-        std::fs::write(&file, call.repeat(*n)).unwrap();
-    }
+    let root = listed_tree("extra_call");
     let exact = drift(&root, CHECKS);
     assert!(exact.is_empty(), "the fixture matches the list before the extra call: {exact:?}");
 
     let permit = root.join("conduct/src/graph/permit.rs");
     let mut text = std::fs::read_to_string(&permit).unwrap();
-    text.push_str(call);
+    text.push_str(CALL);
     std::fs::write(&permit, text).unwrap();
     let diff = drift(&root, CHECKS);
     let _ = std::fs::remove_dir_all(&root);
     assert_eq!(diff, ["conduct/src/graph/permit.rs: 2 approve checks, 1 listed"]);
+}
+
+/// A file the list does not name, holding one check, is the one drift
+/// reported, as `not listed`.
+#[test]
+fn a_new_file_with_a_check_is_not_listed() {
+    let root = listed_tree("new_file");
+    std::fs::write(root.join("conduct/src/graph/extra.rs"), CALL).unwrap();
+    let diff = drift(&root, CHECKS);
+    let _ = std::fs::remove_dir_all(&root);
+    assert_eq!(diff, ["conduct/src/graph/extra.rs: 1 approve checks, not listed"]);
+}
+
+/// A `mod tests;` declaration is not an inline module: the checks below it
+/// still count, so the tree still matches the list.
+#[test]
+fn a_mod_tests_declaration_does_not_stop_the_scan() {
+    let root = listed_tree("mod_decl");
+    let permit = root.join("conduct/src/graph/permit.rs");
+    std::fs::write(&permit, format!("mod tests;\n{CALL}")).unwrap();
+    let diff = drift(&root, CHECKS);
+    let _ = std::fs::remove_dir_all(&root);
+    assert!(diff.is_empty(), "a `mod tests;` line changes nothing: {diff:?}");
 }
