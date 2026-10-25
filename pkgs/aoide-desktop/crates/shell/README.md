@@ -164,8 +164,9 @@ doors.rs    Doors::open(exec, eidolon, home, root, runtime, out)
 - `deliver` waits for room. It retries `try_send` every 20 ms until the channel
   takes the event or the watch stops, so nothing is dropped while a watch runs.
   A full channel holds the watch on its current event, with its stream open.
-- A door keeps at most 64 pending asks. An ask past that is not kept, and the
-  stream sends one `AsksOverflow`.
+- A door keeps at most 64 pending asks. An ask past that is neither kept nor
+  forwarded, and the stream sends one `AsksOverflow`, naming the first ask it
+  refused.
 - A stream that ends while the door lives reopens after a second. A stream that
   ends with the door gone drops the record and sends `Gone`. A drop or a forget
   whose store write fails keeps its record, and the next open checks it again
@@ -228,10 +229,17 @@ asks.rs     Doors::prepare_answer(launch, ask, label)
 
 - The asks a stream carries are kept per door, by id. Each `ask` adds one, each
   `ask-settled` removes it, and a new stream clears them before its replay.
-- A yes on an approval shows the whole input as `visible_json` text: pretty,
-  keys sorted at every depth, and every hidden character spelled as a JSON
-  escape. That text is the dialog, and its SHA-256 is its digest. Above 4 KiB or
-  60 lines the dialog is capped.
+- A yes on an approval shows the call as `visible_json` text: one object holding
+  `callId`, `tool`, `prompt`, `reason` (only when it is set) and `input`,
+  pretty, keys sorted at every depth, and every hidden character spelled as a
+  JSON escape. That text is the dialog, and its SHA-256 is its digest. Above 4
+  KiB or 60 lines the dialog is capped. A same-id ask that the door sends again
+  replaces the stored one; a change to any of those fields gives it a new
+  digest, so a yes confirmed on the earlier text is refused.
+- A yes binds the call that was shown, under ruling 163. The residual: a door
+  that changes its pending ask after the check in `send_answer` and before the
+  answer lands applies the yes to the change. The shell cannot see that change,
+  so only Eidolon can close it.
 - What the app showed decides a yes (`Shown`). `None` is for a no and for a
   question's answer. `Confirm(digest)` is the native confirm, which offers no
   yes above the cap. `Pane(digest)` is the app's own pane, which shows the whole
@@ -253,15 +261,16 @@ asks.rs     Doors::prepare_answer(launch, ask, label)
 
 `src/bin/fake-eidolon.rs` takes `web --bind 127.0.0.1:0 --cwd DIR` and nothing
 else. A test drives it with control words in `DIR/.fake-turn`: `running`,
-`idle`, `end`, `cancel-409`, `ask-approval ID JSON`, `settle ID LABEL`,
-`answer-409`, `answer-422`, `answer-401`, `events-500`, `flood N`, `asks N`,
-`hello-bad`, `hello-good` and `session NAME`. Its header says what each one
-does. The mode file `DIR/.fake-mode`, read once at start, picks a start-up:
-`exit-first`, `no-banner`, `remote-address`, `token-outside`, `token-space`,
-`banner-128k`, `ignore-sigterm` (the first SIGTERM is ignored, the second
-exits), `cancel-stuck` (a cancel answers 204 and keeps the turn running), or
-`hello-bad`. It logs each control word applied, each request served (an answer
-with its body), and each SIGTERM it receives, to `DIR/.fake-log`, in order.
+`idle`, `end`, `cancel-409`, `ask-approval ID JSON`, `ask-tool ID TOOL JSON`,
+`settle ID LABEL`, `answer-409`, `answer-422`, `answer-401`, `events-500`,
+`flood N`, `asks N`, `hello-bad`, `hello-good` and `session NAME`. Its header
+says what each one does. The mode file `DIR/.fake-mode`, read once at start,
+picks a start-up: `exit-first`, `no-banner`, `remote-address`, `token-outside`,
+`token-space`, `banner-128k`, `ignore-sigterm` (the first SIGTERM is ignored,
+the second exits), `cancel-stuck` (a cancel answers 204 and keeps the turn
+running), or `hello-bad`. It logs each control word applied, each request served
+(an answer with its body), and each SIGTERM it receives, to `DIR/.fake-log`, in
+order.
 
 `src/bin/fake-aoide.rs` prints the fixture schema for `schema --json` and the
 fixture config for `config --json`. `FAKE_AOIDE_CONFIG` replaces the config

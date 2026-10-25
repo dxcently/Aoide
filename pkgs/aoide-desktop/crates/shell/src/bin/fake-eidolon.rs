@@ -15,6 +15,9 @@
 //!   and `settle ID LABEL` settles it. Either one rewrites the head, so a stream
 //!   opened later replays the asks still pending, and is pushed at once while a
 //!   stream is open.
+//! - `ask-tool ID TOOL JSON` raises the approval `ask-approval` would, under
+//!   that tool, so an ask under one id can differ from its earlier self in its
+//!   tool alone.
 //! - `answer-409`, `answer-422` and `answer-401` queue one answer of that status
 //!   for the next `POST /api/answer`. An answer served as `204` leaves its ask
 //!   pending until a `settle` says otherwise.
@@ -162,12 +165,16 @@ impl Core {
             _ => {
                 if let Some((id, input)) = word.strip_prefix("ask-approval ").and_then(|rest| rest.split_once(' ')) {
                     let input: Value = serde_json::from_str(input).expect("the ask's input is JSON");
-                    self.raise(door, id.parse().expect("the ask id is a number"), input);
+                    self.raise(door, id.parse().expect("the ask id is a number"), "write", input);
+                } else if let Some((id, rest)) = word.strip_prefix("ask-tool ").and_then(|rest| rest.split_once(' ')) {
+                    let (tool, input) = rest.split_once(' ').expect("ask-tool takes a tool and an input");
+                    let input: Value = serde_json::from_str(input).expect("the ask's input is JSON");
+                    self.raise(door, id.parse().expect("the ask id is a number"), tool, input);
                 } else if let Some((id, label)) = word.strip_prefix("settle ").and_then(|rest| rest.split_once(' ')) {
                     self.settle(door, id.parse().expect("the ask id is a number"), label);
                 } else if let Some(count) = word.strip_prefix("asks ") {
                     for id in 1..=count.parse::<u64>().expect("asks takes a count") {
-                        self.raise(door, id, json!({"path": "a.txt"}));
+                        self.raise(door, id, "write", json!({"path": "a.txt"}));
                     }
                 } else if let Some(count) = word.strip_prefix("flood ") {
                     if door.streaming() {
@@ -208,13 +215,13 @@ impl Core {
 
     /// Raises an approval under `id`, replacing any ask already there, and pushes
     /// it while a stream is open.
-    fn raise(&mut self, door: &FakeDoor, id: u64, input: Value) {
+    fn raise(&mut self, door: &FakeDoor, id: u64, tool: &str, input: Value) {
         let frame = json!({
             "type": "ask",
             "kind": "approval",
             "ask_id": id,
             "call_id": format!("tu{id}"),
-            "tool": "write",
+            "tool": tool,
             "input": input,
             "prompt": "write?",
             "reason": null,

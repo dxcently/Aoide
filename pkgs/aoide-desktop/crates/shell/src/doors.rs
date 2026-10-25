@@ -87,9 +87,10 @@ pub enum Event {
     /// per failure streak: its record is kept, and the watch tries again each
     /// second while the process lives, resuming the frames when a try works.
     Unwatched { launch_id: String, why: String },
-    /// An ask past `ASKS_BOUND`: shown, but not kept, so it cannot be answered
-    /// at this door. Sent once per stream.
-    AsksOverflow { launch_id: String },
+    /// An ask past `ASKS_BOUND`: it is not forwarded and not kept, so it cannot be
+    /// answered at this door. `ask_id` names the first ask a stream refused. Sent
+    /// once per stream.
+    AsksOverflow { launch_id: String, ask_id: u64 },
 }
 
 /// What a close did. Nothing is signalled unless the checks held at that moment.
@@ -872,6 +873,16 @@ struct Worker {
     failing: Cell<bool>,
 }
 
+/// What a frame leaves the watch to deliver, once the shared state is updated.
+struct Seen {
+    /// Whether the frame is forwarded. An ask past `ASKS_BOUND` is not.
+    forward: bool,
+    /// The first ask a stream refuses, named once per stream.
+    overflow: Option<u64>,
+    /// Whether an armed door's turn has just ended.
+    due: bool,
+}
+
 /// What a reconnect leaves the watch to do next.
 enum Next {
     Stream(Events),
@@ -931,36 +942,39 @@ impl Worker {
             if self.stopped() {
                 return;
             }
-            let (due, overflow) = self.observe(&frame);
-            self.deliver(Event::Frame { launch_id: self.entry.launch_id.clone(), frame: Box::new(frame) });
-            if overflow {
-                self.deliver(Event::AsksOverflow { launch_id: self.entry.launch_id.clone() });
+            let seen = self.observe(&frame);
+            if seen.forward {
+                self.deliver(Event::Frame { launch_id: self.entry.launch_id.clone(), frame: Box::new(frame) });
             }
-            if due {
+            if let Some(ask_id) = seen.overflow {
+                self.deliver(Event::AsksOverflow { launch_id: self.entry.launch_id.clone(), ask_id });
+            }
+            if seen.due {
                 self.deliver(Event::CloseDue { launch_id: self.entry.launch_id.clone() });
             }
         }
     }
 
     /// Records what a frame changes: the turn state, an ask, or an ask settled.
-    /// Returns whether the frame ends a marked door's turn, and whether this ask is
-    /// the stream's first past `ASKS_BOUND`.
-    fn observe(&self, frame: &Frame) -> (bool, bool) {
-        let mut due = false;
-        let mut overflow = false;
+    /// Returns what the watch delivers for it.
+    fn observe(&self, frame: &Frame) -> Seen {
+        let mut seen = Seen { forward: true, overflow: None, due: false };
         {
             let mut shared = self.link.state.lock().unwrap();
             match frame {
                 Frame::TurnState { running } => {
                     shared.turn = if *running { TurnState::Running } else { TurnState::Idle };
-                    due = !*running && shared.armed;
+                    seen.due = !*running && shared.armed;
                 }
                 Frame::Ask(ask) => {
                     let id = asks::ask_id(ask);
                     if shared.asks.contains_key(&id) || shared.asks.len() < ASKS_BOUND {
                         shared.asks.insert(id, ask.clone());
                     } else {
-                        overflow = !std::mem::replace(&mut shared.overflowed, true);
+                        seen.forward = false;
+                        if !std::mem::replace(&mut shared.overflowed, true) {
+                            seen.overflow = Some(id);
+                        }
                     }
                 }
                 Frame::AskSettled { ask_id, .. } => {
@@ -970,7 +984,7 @@ impl Worker {
             }
         }
         self.link.moved.notify_all();
-        (due, overflow)
+        seen
     }
 
     fn end_stream(&self) {

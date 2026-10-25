@@ -1,6 +1,6 @@
 //! The asks a door's stream carries, and the answer the app sends for one (plan
 //! 3.6; A1 and A2). An ask is answered only at the door whose stream carried it.
-//! A yes on an approval is confirmed on a dialog that shows the whole input, so
+//! A yes on an approval is confirmed on a dialog that shows the whole call, so
 //! a yes is never given on a view that is cut short. Above the cap the native
 //! confirm offers no yes; the app's own pane shows the whole input and takes the
 //! yes there, under the digest of exactly what it showed (ruling 163).
@@ -41,20 +41,26 @@ pub fn offers(ask: &Ask, label: &str) -> bool {
 }
 
 /// The dialog a yes on this ask shows, or None when the answer skips the confirm.
+/// The dialog is the call the approval asks about: its id, tool, prompt, reason
+/// when one is set, and input.
 pub(crate) fn dialog(ask: &Ask, label: &str) -> Option<Dialog> {
-    let Ask::Approval { input, .. } = ask else {
+    let Ask::Approval { call_id, tool, prompt, reason, input, .. } = ask else {
         return None;
     };
     if label != YES {
         return None;
     }
-    let text = visible_json(input);
+    let mut call = json!({"callId": call_id, "tool": tool, "prompt": prompt, "input": input});
+    if let Some(reason) = reason {
+        call["reason"] = json!(reason);
+    }
+    let text = visible_json(&call);
     let capped = text.len() > CAP_BYTES || text.lines().count() > CAP_LINES;
     let digest: [u8; 32] = Sha256::digest(text.as_bytes()).into();
     Some(Dialog { text, capped, digest })
 }
 
-/// The dialog a yes shows: the approval's whole input as `visible_json` text.
+/// The dialog a yes shows: the approval's call as `visible_json` text.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Dialog {
     text: String,
@@ -63,7 +69,7 @@ pub struct Dialog {
 }
 
 impl Dialog {
-    /// The text on screen: the input as `visible_json`, so every character
+    /// The text on screen: the call as `visible_json`, so every character
     /// `visible` would spell is written as an escape.
     pub fn text(&self) -> &str {
         &self.text
@@ -217,11 +223,11 @@ mod tests {
     }
 
     #[test]
-    fn a_61_line_input_is_capped_and_a_60_line_one_is_whole() {
-        let over = dialog_of(json!((0..59).collect::<Vec<u32>>()));
+    fn a_61_line_dialog_is_capped_and_a_60_line_one_is_whole() {
+        let over = dialog_of(json!((0..54).collect::<Vec<u32>>()));
         assert!(over.capped());
         assert_eq!(over.text().lines().count(), 61);
-        let whole = dialog_of(json!((0..58).collect::<Vec<u32>>()));
+        let whole = dialog_of(json!((0..53).collect::<Vec<u32>>()));
         assert!(!whole.capped());
         assert_eq!(whole.text().lines().count(), 60);
     }
@@ -238,6 +244,25 @@ mod tests {
         let d = dialog_of(json!({"path": "x"}));
         let expect: [u8; 32] = Sha256::digest(d.text().as_bytes()).into();
         assert_eq!(d.digest(), expect);
+    }
+
+    #[test]
+    fn the_dialog_is_the_call_with_its_reason_only_when_set() {
+        let write = dialog_of(json!({"path": "x"}));
+        assert!(write.text().contains("\"tool\": \"write\""), "{}", write.text());
+        assert!(!write.text().contains("reason"), "{}", write.text());
+        let mut read = approval(json!({"path": "x"}));
+        if let Ask::Approval { tool, .. } = &mut read {
+            *tool = "read".into();
+        }
+        let other = dialog(&read, "yes").expect("a yes has a dialog");
+        assert_ne!(other.digest(), write.digest(), "a changed tool is a changed dialog");
+        let mut reasoned = approval(json!({"path": "x"}));
+        if let Ask::Approval { reason, .. } = &mut reasoned {
+            *reason = Some("why".into());
+        }
+        let shown = dialog(&reasoned, "yes").expect("a yes has a dialog");
+        assert!(shown.text().contains("\"reason\": \"why\""), "{}", shown.text());
     }
 
     #[test]

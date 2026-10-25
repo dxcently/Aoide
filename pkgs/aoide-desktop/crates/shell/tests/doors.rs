@@ -857,6 +857,31 @@ fn a_changed_ask_is_refused_and_a_yes_is_sent_only_with_the_digest_on_screen() {
 }
 
 #[test]
+fn a_same_id_ask_sent_again_with_another_tool_is_refused_at_the_first_confirm() {
+    let world = World::new("asks-tool");
+    let (tx, _rx) = mpsc::sync_channel(EVENTS_BOUND);
+    let mut doors = world.open(tx);
+    let id = world.launch(&mut doors);
+    world.apply(&format!("ask-approval 1 {APPROVAL}"));
+    assert!(until(Duration::from_secs(5), || ask_ids(&doors, &id) == vec![1]), "the door carries ask 1");
+    let stale = doors.prepare_answer(&id, 1, "yes").unwrap();
+    let stale_digest = stale.dialog().expect("a yes has a dialog").digest();
+    world.apply(&format!("ask-tool 1 read {APPROVAL}"));
+    assert!(
+        until(Duration::from_secs(5), || matches!(
+            doors.pending_asks(&id).unwrap().first(),
+            Some(Ask::Approval { tool, .. }) if tool.as_str() == "read"
+        )),
+        "the door carries the ask under its new tool"
+    );
+    let fresh = doors.prepare_answer(&id, 1, "yes").unwrap();
+    assert_ne!(fresh.dialog().expect("a yes has a dialog").digest(), stale_digest, "the new tool is a new digest");
+    let refused = doors.send_answer(&stale, Shown::Confirm(stale_digest)).expect_err("the first text's confirm is refused");
+    assert!(matches!(refused, DoorsError::Ask(_)), "{refused}");
+    assert!(answers_before_sentinel(&world, &world.cwd(), &door_of(&world, &id)).is_empty(), "the fake records no answer");
+}
+
+#[test]
 fn an_ask_settled_while_the_stream_is_down_is_not_replayed_on_reopen() {
     let world = World::new("asks-replay");
     let (tx, _rx) = mpsc::sync_channel(EVENTS_BOUND);
@@ -927,8 +952,33 @@ fn collect(rx: Receiver<Event>) -> Arc<Mutex<Vec<Event>>> {
     events
 }
 
-fn overflows(events: &Mutex<Vec<Event>>) -> usize {
-    events.lock().unwrap().iter().filter(|e| matches!(e, Event::AsksOverflow { .. })).count()
+/// The ids the channel carried as asks, in order.
+fn asks_framed(events: &Mutex<Vec<Event>>) -> Vec<u64> {
+    events
+        .lock()
+        .unwrap()
+        .iter()
+        .filter_map(|e| match e {
+            Event::Frame { frame, .. } => match &**frame {
+                Frame::Ask(ask) => Some(ask_id(ask)),
+                _ => None,
+            },
+            _ => None,
+        })
+        .collect()
+}
+
+/// The ids named by the channel's `AsksOverflow` events, in order.
+fn overflow_ids(events: &Mutex<Vec<Event>>) -> Vec<u64> {
+    events
+        .lock()
+        .unwrap()
+        .iter()
+        .filter_map(|e| match e {
+            Event::AsksOverflow { ask_id, .. } => Some(*ask_id),
+            _ => None,
+        })
+        .collect()
 }
 
 #[test]
@@ -945,7 +995,7 @@ fn a_flood_that_nothing_drains_holds_the_stream_and_the_channel_holds_no_more_th
 }
 
 #[test]
-fn sixty_five_asks_keep_sixty_four_and_send_one_overflow() {
+fn sixty_five_asks_forward_sixty_four_and_send_one_overflow_for_the_65th() {
     let world = World::new("asks-overflow");
     let (tx, rx) = mpsc::sync_channel(EVENTS_BOUND);
     let events = collect(rx);
@@ -954,7 +1004,8 @@ fn sixty_five_asks_keep_sixty_four_and_send_one_overflow() {
     world.apply("asks 65");
     assert!(until(Duration::from_secs(10), || ask_ids(&doors, &id).len() == ASKS_BOUND), "64 asks are kept");
     assert_eq!(ask_ids(&doors, &id), (1..=64).collect::<Vec<u64>>(), "the first 64 asks are the ones kept");
-    assert!(until(Duration::from_secs(10), || overflows(&events) == 1), "one overflow is sent");
+    assert!(until(Duration::from_secs(10), || overflow_ids(&events) == vec![65]), "one overflow names the 65th ask");
+    assert_eq!(asks_framed(&events), (1..=64).collect::<Vec<u64>>(), "the 65th ask is not forwarded as a frame");
     assert!(alive(world.pid(&id)), "the door runs");
 }
 

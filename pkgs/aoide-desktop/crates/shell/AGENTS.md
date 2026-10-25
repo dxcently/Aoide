@@ -107,8 +107,9 @@ are in README.md.
 - `Unwatched` is sent once per failure streak. The watch then tries again every
   `REOPEN` while its pidfd's process lives, and the frames resume when a try
   works. An identity failure on a try sends `Dropped` and ends the watch.
-- A door keeps at most `ASKS_BOUND` (64) pending asks. An ask past that is not
-  kept, and the stream sends one `AsksOverflow`.
+- A door keeps at most `ASKS_BOUND` (64) pending asks. An ask past that is
+  neither kept nor forwarded, and the stream sends one `AsksOverflow` naming the
+  first ask it refused.
 - The watch thread only reads. It updates the shared state under one lock, keeps
   the door's pending asks, forwards each frame, and marks `CloseDue` when an
   armed door's turn ends. The caller answers `CloseDue` with `close_due`.
@@ -163,9 +164,16 @@ are in README.md.
   dialog for an answer that has none, and for a yes the digest of the dialog
   built now. A capped yes is taken only as `Shown::Pane`; under `Shown::Confirm`
   it is refused. Every refusal comes before any request.
-- The dialog is the input as `visible_json`: pretty, keys sorted at every depth,
-  and every character `visible` would spell written as a JSON `\u` escape. The
-  cap is 4 KiB or 60 lines of that text. The dialog is never a curl line.
+- The dialog is the call as `visible_json`: one object of `callId`, `tool`,
+  `prompt`, `reason` (only when set) and `input`, pretty, keys sorted at every
+  depth, and every character `visible` would spell written as a JSON `\u`
+  escape. The cap is 4 KiB or 60 lines of that text. The dialog is never a curl
+  line.
+- A same-id ask the door sends again replaces the stored one, and a change to
+  any of its call's fields gives it a new digest. A yes confirmed on the earlier
+  text is refused, since `send_answer` builds the dialog again from the stored
+  ask. Residual: a door that changes its pending ask after that check and before
+  the answer lands applies the yes to the change; only Eidolon can close that.
 - The stream's JSON is Eidolon's own serialization of its value, so the dialog
   shows the input the door sent. That value holds no duplicate key and no
   number outside what serde_json keeps, so the stream is read without a
