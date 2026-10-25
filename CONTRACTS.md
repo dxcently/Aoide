@@ -908,7 +908,9 @@ count.
   idle session included), `not-ready` (nothing typed), `skipped-unregistered`
   (no live pty) or `failed: <reason>` (the send failed).
   An idle session delivers nothing, its cwd
-  alone is restored. Also the command core the daemon's own boot-time
+  alone is restored. `--dry-run` (C7) lists the rows the same invocation would
+  act on and launches, holds and sends nothing; its data is in the bare
+  `resurrect` section below. Also the command core the daemon's own boot-time
   auto-resume trigger calls in-process — see `state/stage/projects.json`'s
   `autoResume` paragraph below for that trigger's own contract. `identity`,
   appended newest, P-P1 (`docs/architecture/PAIRING.md`) — this instance's
@@ -5899,6 +5901,28 @@ or `failed` — carries a `disposition` key naming which of these it is, so
 a consumer filtering the outcome by disposition never silently drops a row
 that fell through `resolve_candidate`/`resurrect_one`'s own flag-mode
 shapes.
+
+**`resurrect --dry-run` (C7).** The flag lists the rows the same invocation
+would act on, in the order a launch acts on them, and launches, holds, types
+and sends nothing. Flag mode (`--project` with `--all`, `--id`, or neither)
+lists what `select_candidates` resolves; bare mode lists one row per manifest
+spec, each decided by the helpers its launch uses. `data` carries `candidates`
+and `dryRun: true`. A flag-mode row has `sessionId`, `agent`, `project`, `cwd`,
+`endedAt`, `restoreText`, `pickedByBare`, `disposition`, and `reason` on a
+skip. A bare-mode row has `host`, `dir`, `agent`, `command` and `disposition`,
+plus `cwd` (a local spec's resolved directory, once it resolves),
+`resumedFrom` and `restoreText` (when a ledger line enriches the spec), `argv`
+(a clean spawn), `text` (a summon), and `reason` (a skip or a failure); `data`
+also names `manifestRoot`. `disposition` takes the launch's own words:
+`revived-from-ledger`, `clean-spawned`, `summoned-remote` (the local pre-wire
+check passed; nothing is sent), `skipped` and `failed`. `pickedByBare` is true
+on exactly the rows the bare `--project` form would revive: the newest ledger
+line of each undying id that is not alive now. A flag-mode `message` is the
+plan `plan_lines` words, one line per row; a bare-mode `message` has one line
+per spec. A dry run is never held, on any door, and bare mode is never refused
+for it. Its audit line carries status `dry-run`, and so does the audit of a
+refusal the same call would give. Its one write is the one-time `carry.json`
+migration an undying read runs.
 
 **Remote summon (U4, command-defrag lane U).** A spec whose `host` names a
 DIFFERENT box than this one is summoned through the existing node door, not
