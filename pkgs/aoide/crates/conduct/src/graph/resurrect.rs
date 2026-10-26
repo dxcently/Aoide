@@ -567,7 +567,7 @@ fn release_resume_claim(session_id: &str, new_id: &str) {
 /// The `skipped` row a refused candidate leaves. Its named id is the key the
 /// refusal names: `liveSessionId` or `claimedBy`.
 fn refusal_row(entry: &aoide_storage::ledger::LedgerEntry, refusal: Refusal) -> serde_json::Value {
-    let mut row = json!({ "sessionId": entry.session_id, "agent": entry.agent, "reason": refusal.reason });
+    let mut row = json!({ "sessionId": entry.session_id, "agent": entry.agent, "reason": strip_unsafe(&refusal.reason) });
     if let Some((key, id)) = refusal.named {
         row[key] = json!(id);
     }
@@ -880,7 +880,7 @@ fn resurrect_one(
             skipped.push(json!({
                 "sessionId": c.entry.session_id,
                 "agent": c.entry.agent,
-                "reason": reason,
+                "reason": strip_unsafe(&reason),
             }));
             return;
         }
@@ -915,7 +915,7 @@ fn resurrect_one(
         failed.push(json!({
             "sessionId": c.entry.session_id,
             "agent": c.entry.agent,
-            "reason": out.message,
+            "reason": strip_unsafe(&out.message),
         }));
         return;
     }
@@ -951,9 +951,11 @@ fn resurrect_one(
     match origin_to_carry(c.entry.origin.as_deref()) {
         OriginCarry::Carry(origin) => stamp_origin(&new_id, origin),
         OriginCarry::RefusedNode(origin) => eprintln!(
-            "aoide resurrect: reviving `{}` as LOCAL-class — its ledger origin `{}` cannot be trusted from an unsealed ledger and is not carried forward (P-ID1's sealed credential closes this)",
-            strip_unsafe(&c.entry.session_id),
-            strip_unsafe(&origin)
+            "{}",
+            strip_unsafe(&format!(
+                "aoide resurrect: reviving `{}` as LOCAL-class — its ledger origin `{}` cannot be trusted from an unsealed ledger and is not carried forward (P-ID1's sealed credential closes this)",
+                c.entry.session_id, origin
+            ))
         ),
         OriginCarry::Nothing => {}
     }
@@ -999,26 +1001,26 @@ fn resurrect_one(
         |inv| send_restore(inv, &new_id),
     );
     if let Restore::Refused(why) = &restore {
-        changed.push(format!("session {new_id}: restore refused — {why}"));
+        changed.push(strip_unsafe(&format!("session {new_id}: restore refused — {why}")));
     }
 
-    changed.push(format!(
+    changed.push(strip_unsafe(&format!(
         "session {new_id}: resurrected from {} ({}){}",
-        strip_unsafe(&c.entry.session_id),
-        strip_unsafe(&c.entry.agent),
+        c.entry.session_id,
+        c.entry.agent,
         if registered { "" } else { " (not yet registered)" }
-    ));
+    )));
     if let Restore::Typed { .. } = restore {
-        changed.push(format!("session {new_id}: restore {}", restore.label()));
+        changed.push(strip_unsafe(&format!("session {new_id}: restore {}", restore.label())));
     }
     if restore == Restore::NotReady {
-        changed.push(format!(
+        changed.push(strip_unsafe(&format!(
             "session {new_id}: restore not injected — `{}` was not ready",
-            strip_unsafe(&c.entry.agent)
-        ));
+            c.entry.agent
+        )));
     }
     if restore == Restore::Held {
-        changed.push(format!("session {new_id}: restore held pending approval"));
+        changed.push(strip_unsafe(&format!("session {new_id}: restore held pending approval")));
     }
     resurrected.push(json!({
         "sessionId": new_id,
@@ -1230,10 +1232,10 @@ fn session_resurrect_with(
                 .unwrap_or_else(|_| "?".to_string());
             return Outcome::usage(
                 cmd,
-                format!(
+                strip_unsafe(&format!(
                     "no .aoide/project.json above `{cwd}` and no --project/--all/--id given — \
                      run inside a project with a manifest, or pass --project <name>"
-                ),
+                )),
             );
         }
     };
@@ -1264,10 +1266,10 @@ fn select_candidates(inv: &Invocation, name: &str) -> Result<Selection, Outcome>
     let cmd = "resurrect";
     let projects: ProjectsFile = match load_stage(&projects_path()) {
         Ok(f) => f,
-        Err(e) => return Err(stage_error(cmd, e)),
+        Err(e) => return Err(stage_error(cmd, strip_unsafe(&e))),
     };
     let Some(target_idx) = projects.projects.iter().position(|p| p.name == name) else {
-        let out = Outcome::error(cmd, format!("no project named `{name}` — register it first with `project add`"))
+        let out = Outcome::error(cmd, strip_unsafe(&format!("no project named `{name}` — register it first with `project add`")))
             .with_data(json!({ "reason": "unknown-project", "project": name }));
         audit_resurrect(inv, "error", &out.message);
         return Err(out);
@@ -1275,7 +1277,7 @@ fn select_candidates(inv: &Invocation, name: &str) -> Result<Selection, Outcome>
 
     let ledger = match aoide_storage::ledger::read_ledger() {
         Ok(v) => v,
-        Err(e) => return Err(stage_error(cmd, e.to_string())),
+        Err(e) => return Err(stage_error(cmd, strip_unsafe(&e.to_string()))),
     };
     let anchored: Vec<aoide_storage::ledger::LedgerEntry> = ledger
         .into_iter()
@@ -1293,7 +1295,7 @@ fn select_candidates(inv: &Invocation, name: &str) -> Result<Selection, Outcome>
             None => {
                 let out = Outcome::error(
                     cmd,
-                    format!("no ledger entry `{}` anchored to project `{name}`", strip_unsafe(id)),
+                    strip_unsafe(&format!("no ledger entry `{id}` anchored to project `{name}`")),
                 )
                 .with_data(json!({ "reason": "unknown-ledger-id", "project": name, "id": id }));
                 audit_resurrect(inv, "error", &out.message);
@@ -1378,7 +1380,7 @@ pub(in crate::graph) fn approved_selection(launch: &Invocation, shown: &[String]
         let out = Outcome::refuse(
             "resurrect",
             Kind::Refused,
-            format!("held resurrect of `{name}` not launched: its candidates changed since it was shown"),
+            strip_unsafe(&format!("held resurrect of `{name}` not launched: its candidates changed since it was shown")),
             "what it would revive, and what each restore would type, is decided at approval, and it differs from the plan the entry was held with",
             Fix::None("deny this entry and hold the resurrect again to see the current plan"),
         )
@@ -1396,11 +1398,11 @@ pub(in crate::graph) fn launch_selection(inv: &Invocation, selection: &Selection
     let name = selection.name.as_str();
     if selection.selected.is_empty() {
         let bare = inv.flags.get("id").is_none() && !inv.flag_present("all");
-        let msg = if bare {
+        let msg = strip_unsafe(&if bare {
             format!("undying set is empty for project `{name}` — nothing to resurrect")
         } else {
             format!("no resumable session found for project `{name}`")
-        };
+        });
         audit_resurrect(inv, "ok", &msg);
         return Outcome::ok(cmd, msg)
             .with_data(json!({ "project": name, "resurrected": [], "skipped": [], "failed": [] }));
@@ -1416,12 +1418,12 @@ pub(in crate::graph) fn launch_selection(inv: &Invocation, selection: &Selection
 
     let out = Outcome::ok(
         cmd,
-        format!(
+        strip_unsafe(&format!(
             "project `{name}`: resurrected {}, skipped {}, failed {}",
             resurrected.len(),
             skipped.len(),
             failed.len(),
-        ),
+        )),
     )
     .changed(changed)
     .with_data(json!({
@@ -1460,7 +1462,7 @@ fn dry_run_listing(inv: &Invocation, selection: &Selection) -> Outcome {
             });
             if let Err(refusal) = dry_verdict(&resolve_candidate(e.clone())) {
                 row["disposition"] = json!("skipped");
-                row["reason"] = json!(refusal.reason);
+                row["reason"] = json!(strip_unsafe(&refusal.reason));
                 if let Some((key, id)) = refusal.named {
                     row[key] = json!(id);
                 }
@@ -1537,7 +1539,7 @@ fn resurrect_from_manifest(
     let this_host = aoide_storage::display::local_host_name();
     let ledger = match aoide_storage::ledger::read_ledger() {
         Ok(v) => v,
-        Err(e) => return stage_error(cmd, e.to_string()),
+        Err(e) => return stage_error(cmd, strip_unsafe(&e.to_string())),
     };
 
     let mut resurrected: Vec<serde_json::Value> = Vec::new();
@@ -1556,7 +1558,7 @@ fn resurrect_from_manifest(
             Err(e) => {
                 failed.push(json!({
                     "host": spec.host, "dir": spec.dir, "agent": spec.agent,
-                    "disposition": "failed", "reason": e,
+                    "disposition": "failed", "reason": strip_unsafe(&e),
                 }));
                 continue;
             }
@@ -1610,13 +1612,13 @@ fn resurrect_from_manifest(
 
     let out = Outcome::ok(
         cmd,
-        format!(
+        strip_unsafe(&format!(
             "manifest at `{}`: resurrected {}, skipped {}, failed {}",
             root.display(),
             resurrected.len(),
             skipped.len(),
             failed.len(),
-        ),
+        )),
     )
     .changed(changed)
     .with_data(json!({
@@ -1693,7 +1695,7 @@ fn summon_remote(
         Err(reason) => {
             failed.push(json!({
                 "host": spec.host, "dir": spec.dir, "agent": spec.agent,
-                "disposition": "failed", "reason": reason,
+                "disposition": "failed", "reason": strip_unsafe(&reason),
             }));
             return;
         }
@@ -1707,10 +1709,10 @@ fn summon_remote(
                 .and_then(serde_json::Value::as_str)
                 .unwrap_or("")
                 .to_string();
-            changed.push(format!(
+            changed.push(strip_unsafe(&format!(
                 "session {session_id}: summoned on node `{}` (manifest spec, agent {})",
-                spec.host, strip_unsafe(&spec.agent)
-            ));
+                spec.host, spec.agent
+            )));
             resurrected.push(json!({
                 "sessionId": session_id,
                 "host": spec.host,
@@ -1723,7 +1725,7 @@ fn summon_remote(
             failed.push(json!({
                 "host": spec.host, "dir": spec.dir, "agent": spec.agent,
                 "disposition": "failed",
-                "reason": format!("summoning on node `{}`: {e}", spec.host),
+                "reason": strip_unsafe(&format!("summoning on node `{}`: {e}", spec.host)),
             }));
         }
     }
@@ -1830,7 +1832,7 @@ fn clean_spawn_from_spec(
         Err(reason) => {
             failed.push(json!({
                 "host": spec.host, "dir": spec.dir, "agent": spec.agent,
-                "disposition": "failed", "reason": reason,
+                "disposition": "failed", "reason": strip_unsafe(&reason),
             }));
             return;
         }
@@ -1844,7 +1846,7 @@ fn clean_spawn_from_spec(
     if out.status != Status::Ok {
         failed.push(json!({
             "host": spec.host, "dir": spec.dir, "agent": spec.agent,
-            "disposition": "failed", "reason": out.message,
+            "disposition": "failed", "reason": strip_unsafe(&out.message),
         }));
         return;
     }
@@ -1861,11 +1863,11 @@ fn clean_spawn_from_spec(
         .and_then(|d| d.get("registered"))
         .and_then(serde_json::Value::as_bool)
         .unwrap_or(false);
-    changed.push(format!(
+    changed.push(strip_unsafe(&format!(
         "session {session_id}: clean-spawned from manifest spec ({}){}",
-        strip_unsafe(&spec.agent),
+        spec.agent,
         if registered { "" } else { " (not yet registered)" }
-    ));
+    )));
     resurrected.push(json!({
         "sessionId": session_id,
         "agent": spec.agent,
@@ -1937,7 +1939,7 @@ fn not_launched(
     reason: String,
 ) -> (serde_json::Value, String) {
     row["disposition"] = json!(disposition);
-    row["reason"] = json!(reason);
+    row["reason"] = json!(strip_unsafe(&reason));
     (row, format!("{label}: {disposition}, {reason}"))
 }
 
@@ -1950,7 +1952,7 @@ fn dry_run_manifest(inv: &Invocation, root: &Path, manifest: &aoide_storage::man
     let this_host = aoide_storage::display::local_host_name();
     let ledger = match aoide_storage::ledger::read_ledger() {
         Ok(v) => v,
-        Err(e) => return stage_error(cmd, e.to_string()),
+        Err(e) => return stage_error(cmd, strip_unsafe(&e.to_string())),
     };
     let (candidates, lines): (Vec<serde_json::Value>, Vec<String>) = manifest
         .sessions
@@ -5241,6 +5243,139 @@ mod tests {
         let spec = manifest_spec("local", ".", &format!("claude{hostile}"), None);
         let reason = clean_argv(&spec).expect_err("an agent with no launch and no command is refused");
         assert!(!reason.chars().any(is_unsafe), "the refusal prints stripped: {reason:?}");
+    }
+
+    #[test]
+    fn a_remote_spec_with_a_hostile_host_fails_stripped_and_keeps_its_host() {
+        use aoide_protocol::untrusted::is_unsafe;
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&["AOIDE_STAGE_DIR", "AOIDE_STATE_DIR", "XDG_RUNTIME_DIR", "AOIDE_AUDIT_LOG"]);
+        let hostile = "\u{1b}[31m\u{202E}";
+        let host = format!("some-other-host{hostile}");
+        let (root, cwd) = setup_manifest(
+            "resurrect-manifest-remote-hostile",
+            vec![manifest_spec(&host, ".", "claude", None)],
+        );
+
+        let out = session_resurrect(&flag_invocation(&["resurrect"], &[]));
+        drop(cwd);
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok, "msg: {}", out.message);
+        assert!(!out.message.chars().any(is_unsafe), "the message prints stripped: {:?}", out.message);
+        let data = out.data.as_ref().unwrap();
+        let failed = data["failed"].as_array().unwrap();
+        assert_eq!(failed.len(), 1, "data: {data}");
+        assert_eq!(failed[0]["disposition"], "failed");
+        assert_eq!(failed[0]["host"], json!(host), "the host keeps its bytes: {data}");
+        let reason = failed[0]["reason"].as_str().unwrap();
+        assert!(reason.contains("node add"), "reason must teach `node add`: {reason:?}");
+        assert!(!reason.chars().any(is_unsafe), "the reason prints stripped: {reason:?}");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_failed_summon_strips_its_reason_and_keeps_its_host() {
+        use aoide_protocol::untrusted::is_unsafe;
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&["AOIDE_STAGE_DIR", "AOIDE_STATE_DIR", "XDG_RUNTIME_DIR", "AOIDE_AUDIT_LOG"]);
+        let hostile = "\u{1b}[31m\u{202E}";
+        let host = format!("far{hostile}");
+        let (root, cwd) = setup_manifest(
+            "resurrect-manifest-summon-hostile",
+            vec![manifest_spec(&host, ".", "claude", Some("true"))],
+        );
+        aoide_storage::node_store::save_nodes(&[verified_node(&host, "http://127.0.0.1:9/")]).unwrap();
+
+        let out = session_resurrect(&flag_invocation(&["resurrect"], &[]));
+        drop(cwd);
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok, "msg: {}", out.message);
+        let data = out.data.as_ref().unwrap();
+        let failed = data["failed"].as_array().unwrap();
+        assert_eq!(failed.len(), 1, "data: {data}");
+        assert_eq!(failed[0]["host"], json!(host), "the host keeps its bytes: {data}");
+        let reason = failed[0]["reason"].as_str().unwrap();
+        assert!(reason.contains("summoning on node"), "reason: {reason:?}");
+        assert!(!reason.chars().any(is_unsafe), "the reason prints stripped: {reason:?}");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_spec_dir_that_escapes_a_hostile_root_fails_stripped_and_keeps_its_bytes() {
+        use aoide_protocol::untrusted::is_unsafe;
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&["AOIDE_STAGE_DIR", "AOIDE_STATE_DIR", "XDG_RUNTIME_DIR", "AOIDE_AUDIT_LOG"]);
+        let hostile = "\u{1b}[31m\u{202E}";
+        let (root, cwd) = setup_manifest("resurrect-manifest-hostile-root", vec![]);
+        let this_host = aoide_storage::display::local_host_name();
+        let dir = format!("../x{hostile}");
+        let manifest = aoide_storage::manifest::Manifest {
+            version: aoide_storage::manifest::MANIFEST_VERSION,
+            sessions: vec![manifest_spec(&this_host, &dir, "claude", None)],
+        };
+        let hostile_root = root.join(format!("p{hostile}"));
+
+        let out = resurrect_from_manifest(&flag_invocation(&["resurrect"], &[]), &hostile_root, &manifest);
+        drop(cwd);
+        assert!(!out.message.chars().any(is_unsafe), "the message prints stripped: {:?}", out.message);
+        let data = out.data.as_ref().unwrap();
+        assert_eq!(data["manifestRoot"], hostile_root.to_string_lossy().to_string());
+        let failed = data["failed"].as_array().unwrap();
+        assert_eq!(failed.len(), 1, "data: {data}");
+        assert_eq!(failed[0]["dir"], json!(dir), "the dir keeps its bytes: {data}");
+        let reason = failed[0]["reason"].as_str().unwrap();
+        assert!(reason.contains("escapes the project root"), "reason: {reason:?}");
+        assert!(!reason.chars().any(is_unsafe), "the reason prints stripped: {reason:?}");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn an_unknown_hostile_project_prints_stripped_and_keeps_its_name() {
+        use aoide_protocol::untrusted::is_unsafe;
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&["AOIDE_STAGE_DIR", "AOIDE_STATE_DIR", "XDG_RUNTIME_DIR", "AOIDE_AUDIT_LOG"]);
+        let hostile = "\u{1b}[31m\u{202E}";
+        let (root, _proj_path) = setup("resurrect-unknown-hostile-project");
+        let name = format!("nope{hostile}");
+
+        let out = session_resurrect(&flag_invocation(&["resurrect"], &[("project", name.as_str())]));
+        assert_eq!(out.status, aoide_protocol::output::Status::Error);
+        assert!(!out.message.chars().any(is_unsafe), "the message prints stripped: {:?}", out.message);
+        let data = out.data.as_ref().unwrap();
+        assert_eq!(data["project"], json!(name));
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_dry_run_strips_each_reason_and_spells_its_plan() {
+        use aoide_protocol::untrusted::is_unsafe;
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(RESURRECT_ENV);
+        let hostile = "\u{1b}[31m\u{202E}";
+        let host = format!("nowhere{hostile}");
+        let (root, cwd) = setup_manifest(
+            "resurrect-dry-hostile",
+            vec![manifest_spec(&host, ".", "claude", Some("true"))],
+        );
+        std::env::remove_var("AOIDE_DAEMON_SOCKET");
+        std::env::remove_var("AOIDE_SESSION_ID");
+
+        let out = session_resurrect(&flag_invocation(&["resurrect"], &[("dry-run", "true")]));
+        drop(cwd);
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok, "msg: {}", out.message);
+        let rows = candidates(&out);
+        assert_eq!(rows.len(), 1, "{rows:?}");
+        assert_eq!(rows[0]["disposition"], "failed", "{rows:?}");
+        assert_eq!(rows[0]["host"], json!(host), "{rows:?}");
+        let reason = rows[0]["reason"].as_str().unwrap();
+        assert!(reason.contains("not a registered node"), "{rows:?}");
+        assert!(!reason.chars().any(is_unsafe), "the reason prints stripped: {reason:?}");
+        assert!(out.message.split('\n').all(|l| !l.chars().any(is_unsafe)), "the message prints stripped: {:?}", out.message);
+        assert!(out.message.contains("\\x1b[31m"), "the plan line is spelled: {:?}", out.message);
+
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

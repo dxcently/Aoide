@@ -1268,13 +1268,22 @@ blank one is refused too.
   that an early return must never silently skip the audit line a full run
   gets. A usage error or a stage-file miss gets none, and the door's line
   comes with every call.
-  **Text and data:** each message, changed line, reason and stderr line
-  resurrect writes names a ledger or claim id, an agent or an origin with
-  its unsafe characters removed (`strip_unsafe`). A plan line keeps them,
-  and is spelled where it is shown (`visible_held`). The data carries each
-  as the ledger, `state/resuming.json` or `sessions.json` holds it,
-  `liveSessionId` and `claimedBy` included, so a consumer can name the id
-  back; a consumer spells it at display.
+
+  **Text and data:** each line resurrect writes for a person (its message,
+  each changed line, each reason, its stderr line) is stripped whole once
+  formatted (`strip_unsafe`), whatever it names: a ledger or claim id, an
+  agent, an origin, a project, a manifest's host, dir or root, a far node's
+  session id or error, a launch's refusal or a stage file's read error. A
+  plan line is the one exception: it keeps its bytes where it is stored and
+  compared, and is spelled where it is shown (`visible_held`), as each line
+  of a dry run's message is. Every other field of the data carries its value
+  as its source holds it (the ledger, `state/resuming.json`,
+  `sessions.json`, the manifest or the far node's answer), `liveSessionId`,
+  `claimedBy`, `host`, `dir` and `manifestRoot` included, so a consumer can
+  name it back; a consumer spells it at display. A held call answers with
+  the hold's own lines (`hold_whole`), which name the project as its caller
+  typed it.
+
   **Dry run (`--dry-run`):** the flag takes the selection the launch would
   take and lists the rows the launch acts on, launching, holding and typing
   nothing. Flag mode lists what `select_candidates` returns, with
@@ -1284,7 +1293,8 @@ blank one is refused too.
   `resolve_candidate`). A row the launch would skip lists as `skipped`, as the
   launch's own `skipped[]` reports it. A remote spec is never sent: its row
   carries only the local pre-wire verdict. The message spells each line as the
-  pending view spells a held plan (`visible_held`); the data stays raw. From an
+  pending view spells a held plan (`visible_held`); the data stays raw, but
+  each reason is text (above). From an
   unattested caller on a door that cannot approve, a dry run gets what the call
   would give that caller, minus the launch: in bare mode the launch's refusal;
   with `--id` or `--all` and no `--project`, the usage error the call gives;

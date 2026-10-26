@@ -6115,13 +6115,19 @@ a consumer filtering the outcome by disposition never silently drops a row
 that fell through `resolve_candidate`/`resurrect_one`'s own flag-mode
 shapes.
 
-**Text and data.** Each `message`, `changed` line, `reason` and stderr line
-resurrect writes names a ledger or claim id, an agent or an origin with its
-unsafe characters removed (`strip_unsafe`). A plan line keeps them, and is
-spelled where it is shown (`visible_held`). `data` carries each as the
-ledger, `state/resuming.json` or `sessions.json` holds it, `liveSessionId`
-and `claimedBy` included, so a consumer can name the id back; a consumer
-spells it at display.
+**Text and data.** Each line resurrect writes for a person (its `message`,
+each `changed` line, each `reason`, its stderr line) is stripped whole once
+formatted (`strip_unsafe`), whatever it names: a ledger or claim id, an
+agent, an origin, a project, a manifest's host, dir or root, a far node's
+session id or error, a launch's refusal or a stage file's read error. A plan
+line is the one exception: it keeps its bytes where it is stored and
+compared, and is spelled where it is shown (`visible_held`), as each line of
+a dry run's `message` is. Every other field of `data` carries its value as
+its source holds it (the ledger, `state/resuming.json`, `sessions.json`, the
+manifest or the far node's answer), `liveSessionId`, `claimedBy`, `host`,
+`dir` and `manifestRoot` included, so a consumer can name it back; a
+consumer spells it at display. A held call answers with the hold's own lines
+(`hold_whole`), which name the project as its caller typed it.
 
 **`resurrect --dry-run`.** The flag lists the rows the same invocation would
 act on, in the order a launch acts on them, and launches, holds, types and
@@ -6144,7 +6150,8 @@ the disposition it reaches. `pickedByBare` is true on exactly the rows the bare
 not alive now. A flag-mode `message` is the plan `plan_lines` words, one line
 per row; a bare-mode `message` is a header line, `manifest at ...`, then one
 line per spec. Each message line is spelled as the pending view spells a held
-plan line (`visible_held`); `data` stays raw. A dry run is never held or sent,
+plan line (`visible_held`); `data` stays raw, but each `reason` is text (Text
+and data, above). A dry run is never held or sent,
 on any door. From an unattested caller on a door that cannot approve, it gets
 what the call would give that caller, minus the launch: in bare mode the bare
 call's refusal; with `--id` or `--all` and no `--project`, the usage error the
