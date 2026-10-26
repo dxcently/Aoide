@@ -6120,14 +6120,15 @@ each `changed` line, each `reason`, its stderr line) is stripped whole once
 formatted (`strip_unsafe`), whatever it names: a ledger or claim id, an
 agent, an origin, a project, a manifest's host, dir or root, a far node's
 session id or error, a launch's refusal or a stage file's read error. A plan
-line is the one exception: it keeps its bytes where it is stored and
+line is one exception: it keeps its bytes where it is stored and
 compared, and is spelled where it is shown (`visible_held`), as each line of
 a dry run's `message` is. Every other field of `data` carries its value as
 its source holds it (the ledger, `state/resuming.json`, `sessions.json`, the
 manifest or the far node's answer), `liveSessionId`, `claimedBy`, `host`,
 `dir` and `manifestRoot` included, so a consumer can name it back; a
-consumer spells it at display. A held call answers with the hold's own lines
-(`hold_whole`), which name the project as its caller typed it.
+consumer spells it at display. The other exception is a held call's answer,
+the hold's own lines (`hold_whole`), which name the project as its caller
+typed it.
 
 **`resurrect --dry-run`.** The flag lists the rows the same invocation would
 act on, in the order a launch acts on them, and launches, holds, types and

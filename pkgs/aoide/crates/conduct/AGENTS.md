@@ -712,12 +712,12 @@ in the message.
   failures make the whole pass `Unknown` (`ScanFailure`): a presence root
   that exists but cannot be listed; a `meta.json` that cannot be read, for
   any reason but its absence (fd pressure included), or cannot be parsed;
-  and no process table (`ps` missing) once a socket answered or was held
-  aside. On `Unknown` the sweep changes nothing, and the resume gate skips
-  every by-journal candidate for that pass. Residual: if another process
-  reuses the pid of a session whose socket is silent, that session stays
-  live until that process exits, so the roster shows it and the resume gate
-  skips its journal.
+  and no process table (`process_table` returns `None`) once a socket
+  answered or was held aside. On `Unknown` the sweep changes nothing, and
+  the resume gate skips every by-journal candidate for that pass. Residual:
+  if another process reuses the pid of a session whose socket is silent,
+  that session stays live until that process exits, so the roster shows it
+  and the resume gate skips its journal.
 
 - **Aoide never sweeps or writes under the eidolon presence root.**
   `$XDG_RUNTIME_DIR/eidolon` is read-only territory: this crate lists it and
@@ -755,10 +755,10 @@ in the message.
   events live only on its own in-process event bus, never in `meta.json`.
 
 - **`parentSessionId` is resolved here, unlike a Codex-app record.** The
-  first ancestor up the presence pid's own `/proc` chain
+  nearest wrap at or above the presence pid, up its own `/proc` chain
   (`aoide_storage::attest::pid_ancestry` in production, injected as a pure
-  closure for tests) that is itself `conductable == Some(true)` and not
-  `done` becomes the parent; no such ancestor leaves the record top-level.
+  closure for tests), that is itself `conductable == Some(true)` and not
+  `done` becomes the parent; no such wrap leaves the record top-level.
   The wrap's own record — and its petname — is only ever READ by this walk,
   never written.
 
