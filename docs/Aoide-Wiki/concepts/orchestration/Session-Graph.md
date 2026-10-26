@@ -263,8 +263,8 @@ with the pid. The residual: a silent socket whose pid another process reuses
 stays live until that process exits, so the roster shows it and the resume
 gate skips its journal. Unlike a desktop Codex thread this IS an agent session
 (`kind:"agent"`), so it is a normal dedup/staleness candidate and its
-`parentSessionId` is resolved here (the first conducted ancestor up the
-presence pid's own process chain). The sweep owns only the
+`parentSessionId` is resolved here (the nearest conducted wrap at or above
+the presence pid in its own process chain). The sweep owns only the
 records it enrolled: `agent:"eidolon"` is a label a caller may choose for a
 conduct-owned wrapper of its own (`spawn --task … --agent eidolon -- eidolon
 run …`), so ownership is read off the record's own conduct facts (`conductable`,

@@ -911,9 +911,10 @@ blank one is refused too.
   non-`eidolon` record already claims left entirely alone) but differs in
   two ways eidolon's own contract forces: this IS an agent session
   (`kind:"agent"`, not `"app"`), so `parentSessionId` is resolved here — the
-  first conducted ancestor (`conductable == Some(true)`, not `done`) up an
-  injected `/proc` ancestry walk (production: `aoide_storage::attest::
-  pid_ancestry`) — and `state` is written by this SAME function on every
+  nearest conducted wrap (`conductable == Some(true)`, not `done`) at or
+  above the presence pid, up an injected `/proc` ancestry walk (production:
+  `aoide_storage::attest::pid_ancestry`) — and `state` is written by this
+  SAME function on every
   reconcile rather than deferred to a separate capture pass: a TUI owner's
   `busy` (`meta.json`) maps to `working`/`idle`, a non-TUI owner's `busy` is
   eidolon's own producer-side defect (never set outside the TUI) so such a

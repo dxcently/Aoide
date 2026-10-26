@@ -708,13 +708,16 @@ in the message.
   permission, a path the address cannot hold), a reply over 4096 bytes, or a
   reply whose `ok` is not `true`. A silent directory is held aside and is live
   only while its `meta.json`'s `pid` is a row of the process table, as
-  Eidolon's own sweep pairs silence with the registration's pid. A
-  `meta.json` read that fails for any reason but the file's absence, fd
-  pressure included, makes the whole pass `Unknown`: the sweep changes
-  nothing, and the resume gate skips every by-journal candidate for that
-  pass. Residual: if another process reuses the pid of a session whose socket
-  is silent, that session stays live until that process exits, so the roster
-  shows it and the resume gate skips its journal.
+  Eidolon's own sweep pairs silence with the registration's pid. Three
+  failures make the whole pass `Unknown` (`ScanFailure`): a presence root
+  that exists but cannot be listed; a `meta.json` that cannot be read, for
+  any reason but its absence (fd pressure included), or cannot be parsed;
+  and no process table (`ps` missing) once a socket answered or was held
+  aside. On `Unknown` the sweep changes nothing, and the resume gate skips
+  every by-journal candidate for that pass. Residual: if another process
+  reuses the pid of a session whose socket is silent, that session stays
+  live until that process exits, so the roster shows it and the resume gate
+  skips its journal.
 
 - **Aoide never sweeps or writes under the eidolon presence root.**
   `$XDG_RUNTIME_DIR/eidolon` is read-only territory: this crate lists it and
