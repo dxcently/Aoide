@@ -153,12 +153,27 @@ fn can_execute(path: &Path) -> bool {
     unsafe { libc::access(c.as_ptr(), libc::X_OK) == 0 }
 }
 
-/// One command as `aoide schema --json` declares it.
+/// One command as `aoide schema --json` declares it. A document that omits a mark
+/// reads it as false, and omitted `doors` reads as the CLI's pair.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommandSpec {
     pub args: Vec<Arg>,
     /// Each flag's name, with its declared type (`bool`, `string`, `int`, ...).
     pub flags: BTreeMap<String, String>,
+    /// The one-line brief: `brief` when the schema gives one, else `summary`.
+    pub brief: String,
+    /// The doors that may call it, by their names (`cli`, `daemon`, ...).
+    pub doors: Vec<String>,
+    /// The verb approves or denies a hold, re-parents, or types into a session.
+    pub approves: bool,
+    /// The verb starts an agent, or arms something that starts a program later.
+    pub launches: bool,
+    /// Hook plumbing that a harness drives, not an operator command.
+    pub internal: bool,
+    /// False for a stub. An omitted `implemented` reads false too.
+    pub implemented: bool,
+    /// The command's kind, when the schema names one.
+    pub kind: Option<String>,
 }
 
 /// One positional argument of a command.
@@ -184,9 +199,25 @@ struct SchemaDoc {
 struct CommandDoc {
     path: Vec<String>,
     #[serde(default)]
+    summary: String,
+    #[serde(default)]
+    brief: String,
+    #[serde(default)]
     args: Vec<Arg>,
     #[serde(default)]
     flags: Vec<FlagDoc>,
+    #[serde(default)]
+    doors: Option<Vec<String>>,
+    #[serde(default)]
+    approves: bool,
+    #[serde(default)]
+    launches: bool,
+    #[serde(default)]
+    internal: bool,
+    #[serde(default)]
+    implemented: bool,
+    #[serde(default)]
+    kind: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -205,7 +236,20 @@ impl Schema {
             .into_iter()
             .map(|c| {
                 let flags = c.flags.into_iter().map(|f| (f.name, f.kind)).collect();
-                (c.path, CommandSpec { args: c.args, flags })
+                let brief = if c.brief.is_empty() { c.summary } else { c.brief };
+                let doors = c.doors.unwrap_or_else(|| vec!["cli".to_owned(), "daemon".to_owned()]);
+                let spec = CommandSpec {
+                    args: c.args,
+                    flags,
+                    brief,
+                    doors,
+                    approves: c.approves,
+                    launches: c.launches,
+                    internal: c.internal,
+                    implemented: c.implemented,
+                    kind: c.kind,
+                };
+                (c.path, spec)
             })
             .collect();
         Ok(Schema { commands })
@@ -227,6 +271,11 @@ impl Schema {
     pub fn command(&self, words: &[&str]) -> Option<&CommandSpec> {
         let key: Vec<String> = words.iter().map(|w| (*w).to_owned()).collect();
         self.commands.get(&key)
+    }
+
+    /// Every command the schema declares, in path order.
+    pub fn commands(&self) -> impl Iterator<Item = (&[String], &CommandSpec)> {
+        self.commands.iter().map(|(path, spec)| (path.as_slice(), spec))
     }
 }
 
@@ -1217,6 +1266,38 @@ mod tests {
     use std::os::unix::process::ExitStatusExt;
 
     use super::*;
+
+    #[test]
+    fn a_command_keeps_its_brief_doors_marks_and_kind() {
+        let text = r#"{"commands":[
+            {"path":["send"],"summary":"Long.","brief":"Send text.","args":[],"flags":[],
+             "approves":true,"launches":false,"internal":false,"implemented":true,
+             "kind":"act","doors":["mcp"]},
+            {"path":["spawn"],"summary":"Start one.","args":[],"flags":[],"launches":true,
+             "implemented":true},
+            {"path":["session","hook"],"summary":"Hook.","args":[],"flags":[],"internal":true,
+             "implemented":true},
+            {"path":["content","approve"],"summary":"A stub.","args":[],"flags":[]},
+            {"path":["config"],"summary":"Show config.","args":[],"flags":[],"implemented":true}
+        ]}"#;
+        let schema = Schema::parse(text).expect("the schema parses");
+        let send = schema.command(&["send"]).expect("send is declared");
+        assert_eq!(send.brief, "Send text.");
+        assert_eq!(send.doors, ["mcp"]);
+        assert!(send.approves && !send.launches && !send.internal && send.implemented);
+        assert_eq!(send.kind.as_deref(), Some("act"));
+        let spawn = schema.command(&["spawn"]).expect("spawn is declared");
+        assert!(spawn.launches && !spawn.approves);
+        assert!(schema.command(&["session", "hook"]).expect("declared").internal);
+        let stub = schema.command(&["content", "approve"]).expect("declared");
+        assert!(!stub.implemented, "an omitted implemented reads false");
+        let config = schema.command(&["config"]).expect("config is declared");
+        assert_eq!(config.brief, "Show config.", "an omitted brief reads the summary");
+        assert_eq!(config.doors, ["cli", "daemon"], "omitted doors read the CLI's pair");
+        assert_eq!(config.kind, None);
+        assert!(!config.approves && !config.launches && !config.internal);
+        assert_eq!(schema.commands().count(), 5);
+    }
 
     #[test]
     fn a_pidfd_opens_for_a_live_child_and_not_for_a_pid_that_is_gone_or_refused() {

@@ -18,6 +18,10 @@ reaches aoide-protocol only through here, and of it only `untrusted`.
   (`load`, `call`, `follow`, `schema`, `deadline`, `door_env`, `spawn_door`).
   `spawn_door` returns an `Arrived`. `deadline` only shortens: a later call
   never lengthens an earlier one.
+- `Schema` keeps, per command, its `brief` (else its summary), `doors`
+  (`cli` and `daemon` when the schema omits them), the marks `approves`,
+  `launches`, `internal` and `implemented` (each false when omitted), and
+  `kind` when the schema names one. `Schema::commands` lists every command.
 - `follow` starts a held child and returns a `Follow`. `Follow::next` yields
   an `Event` (a `Line`, a `Dropped` line past `LINE_CAP`, or `Eof`), and
   `Follow::end` returns an `Ended`. `LINE_CAP` is 1 MiB.
