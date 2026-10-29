@@ -465,3 +465,33 @@ fn the_manifests_are_the_golden_ones() {
         "clippy.toml differs from its golden text; its golden moves with it, in the same commit"
     );
 }
+
+/// The normalizer is pinned by a table: the accepted lines normalize to the
+/// golden text, and each refused line does not, so the golden compare reds on it.
+#[test]
+fn the_config_normalizer_is_pinned_by_a_table_of_known_bad_paths() {
+    let vendor = "cargo-vendor-dir";
+    let hash = "0123456789abcdfghijklmnpqrsvwxyz";
+    let linker = "\"linker\" = \"<store-path>/bin/cc\"";
+    let dir = "directory = \"<vendor-dir>\"";
+    let accepted = [
+        (format!("\"linker\" = \"/nix/store/{hash}-cc/bin/cc\""), linker),
+        (format!("    \"linker\" = \"/nix/store/{hash}-cc/bin/cc\""), "    \"linker\" = \"<store-path>/bin/cc\""),
+        ("directory = \"cargo-vendor-dir\"".to_string(), dir),
+    ];
+    for (line, golden) in &accepted {
+        assert_eq!(normalize_nix_config(line, vendor), format!("{golden}\n"), "{line} is accepted");
+    }
+    let refused = [
+        ("\"linker\" = \"/nix/store/../bin/cc\"".to_string(), linker),
+        (format!("\"linker\" = \"/nix/store/{}-cc/bin/cc\"", &hash[..31]), linker),
+        (format!("\"linker\" = \"/nix/store/e{}-cc/bin/cc\"", &hash[1..]), linker),
+        (format!("\"linker\" = \"/nix/store/{hash}-cc\"/bin/cc"), linker),
+        (format!("\"linker\" = \"/nix/store/{hash}-cc/bin/cc/extra\""), linker),
+        ("directory = \"cargo-vendor-dir2\"".to_string(), dir),
+        ("directory = \"cargo-vendor-di\"".to_string(), dir),
+    ];
+    for (line, golden) in &refused {
+        assert_ne!(normalize_nix_config(line, vendor), format!("{golden}\n"), "{line} is refused");
+    }
+}
