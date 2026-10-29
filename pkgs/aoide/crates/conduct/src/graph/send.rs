@@ -732,7 +732,7 @@ pub(super) fn audit_log_of(inv: &Invocation) -> PathBuf {
 /// refusal keeps: no one reads an expired body back whole.
 fn audit_eviction(log: &HoldLog, dropped: &PendingSend, admitted: &str) {
     let from = dropped.from.as_deref().unwrap_or("unattributed");
-    let _ = aoide_protocol::append_audit(
+    if let Err(e) = aoide_protocol::append_audit(
         &log.path,
         &aoide_protocol::AuditRecord {
             ts: super::conduct::unix_ts(),
@@ -746,7 +746,9 @@ fn audit_eviction(log: &HoldLog, dropped: &PendingSend, admitted: &str) {
             ),
             untrusted_data: Some(dropped.text.chars().take(AUDIT_REFUSED_TEXT_MAX).collect()),
         },
-    );
+    ) {
+        eprintln!("[aoide/conduct] audit line lost for expired hold {}: {e}", dropped.session_id);
+    }
 }
 
 /// Append `entry` to `file` if it fits: under the entry cap, under its source's

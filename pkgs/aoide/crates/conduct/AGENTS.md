@@ -274,7 +274,9 @@ in the message.
   queued the hold (`hold_pending` binds the A2A door, `hold_spawn` the MCP
   door) to the log the queuing call passes in (`audit_log_of`, or the A2A
   worker's own log). The line is written once the file that dropped the entry
-  is on disk, so a failed write audits nothing; a failed append is not retried.
+  is on disk, so a failed write audits nothing. A failed append is not
+  retried: it prints `[aoide/conduct] audit line lost for expired hold <id>:
+  <err>` to stderr, and the eviction still stands.
   A queue at its file bound refuses a new
   hold, taught, and takes it once an expired entry is evicted. Assume breach:
   a process running as the user can edit `pending.json` and age a hold past
