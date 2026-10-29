@@ -72,7 +72,17 @@ use std::time::{Duration, Instant};
 /// The spawn itself has already succeeded (the process is running, detached,
 /// and will keep running) — this is only a best-effort "did it get far
 /// enough to be steerable yet" check, never a blocking guarantee.
+///
+/// 10 s under `cfg(test)`, 3 s otherwise. A child on a loaded machine can take
+/// longer than 3 s to bind its socket, and the unit suite starts many children
+/// at once. At 3 s this fails under that load:
+/// `spawn_registers_a_detached_headless_child_and_mirrors_its_log`. Only this
+/// crate's own unit tests see `cfg(test)`; the `aoide-cli` and `aoide-server`
+/// test binaries link the 3 s value.
+#[cfg(not(test))]
 const REGISTRATION_BUDGET: Duration = Duration::from_millis(3000);
+#[cfg(test)]
+const REGISTRATION_BUDGET: Duration = Duration::from_millis(10_000);
 const REGISTRATION_POLL: Duration = Duration::from_millis(25);
 
 /// How long a first-turn injection waits for its target to become READY to
