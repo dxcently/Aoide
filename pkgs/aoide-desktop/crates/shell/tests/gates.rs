@@ -92,6 +92,21 @@ sha2.workspace = true
 workspace = true
 "##;
 
+/// The root `clippy.toml`'s golden text, compared as the manifests' are.
+const CLIPPY_CONFIG: &str = r##"# The desktop gate's clippy run. A call through an alias of any path below
+# fails it. The exec crate's lints table allows these lints, and every other
+# member forbids them.
+disallowed-types = [
+    { path = "std::process::Command", reason = "only the exec crate starts a process" },
+]
+disallowed-methods = [
+    { path = "std::process::Command::new", reason = "only the exec crate starts a process" },
+    { path = "std::os::unix::process::CommandExt::pre_exec", reason = "only the exec crate runs code between fork and exec" },
+    { path = "std::os::unix::process::CommandExt::exec", reason = "only the exec crate replaces a process image" },
+    { path = "std::process::Child::kill", reason = "it sends the uncatchable signal; a child is signalled through the exec crate" },
+]
+"##;
+
 fn root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
 }
@@ -283,10 +298,11 @@ fn only_the_roots_clippy_config_is_read() {
     walk(&root, &mut files);
     for path in files {
         let name = path.file_name().and_then(|name| name.to_str()).unwrap_or_default();
-        let config = name == "clippy.toml" || name == ".clippy.toml";
+        let hidden = name == ".clippy.toml";
+        let stray = name == "clippy.toml" && path.parent() != Some(root.as_path());
         assert!(
-            !config || path.parent() == Some(root.as_path()),
-            "{} is a clippy config that is not the root's",
+            !hidden && !stray,
+            "{} is a clippy config, and the root's clippy.toml is the only one allowed",
             path.display()
         );
     }
@@ -363,4 +379,16 @@ fn the_manifests_are_the_golden_ones() {
             "{path} differs from its golden text; its golden moves with it, in the same commit"
         );
     }
+    let clippy = root.join("clippy.toml");
+    assert!(
+        fs::symlink_metadata(&clippy).is_ok_and(|meta| meta.is_file()),
+        "{} is not a file; the gate's clippy run reads no config without it",
+        clippy.display()
+    );
+    let text = fs::read_to_string(&clippy).expect("clippy.toml is read");
+    assert_eq!(
+        golden_lines(&text),
+        golden_lines(CLIPPY_CONFIG),
+        "clippy.toml differs from its golden text; its golden moves with it, in the same commit"
+    );
 }

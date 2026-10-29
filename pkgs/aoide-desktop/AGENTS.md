@@ -57,7 +57,9 @@ and each crate's own invariants are in its AGENTS.md (`crates/door/AGENTS.md`,
   `CommandExt::exec` and `Child::kill`, which sends SIGKILL. In door and shell,
   a call through an alias of any of them fails the clippy run. It lists no libc
   path, because every libc function is `unsafe` to call, so the `unsafe` forbid
-  already stops a libc call in door and shell.
+  already stops a libc call in door and shell. The gate compares `clippy.toml`
+  with its golden text in `gates.rs`, so a path dropped from it, or a missing
+  file, fails (`the_manifests_are_the_golden_ones`).
 - The forbids are errors on their own, and `-D warnings` makes every other
   warning fail the gate too. The pre-check form of the second clippy pass is
   `dk.sh clippy --offline --workspace --all-targets
@@ -75,7 +77,8 @@ and each crate's own invariants are in its AGENTS.md (`crates/door/AGENTS.md`,
   - no `build.rs` lies under this directory (`no_member_has_a_build_script`);
   - no symbolic link lies under this directory, since a walk through one
     could read outside it (every test that walks the tree);
-  - the root's `clippy.toml` is the only one
+  - the root's `clippy.toml` is the only clippy config: a `clippy.toml` below
+    the root, or a `.clippy.toml` anywhere, fails
     (`only_the_roots_clippy_config_is_read`);
   - no `.cargo/config` or `.cargo/config.toml` lies in this directory, in any
     ancestor up to `/`, or in `$CARGO_HOME`, with one exception: the file
