@@ -4244,7 +4244,7 @@ mod tests {
 
         let err = super::atomic_write(&path, "x").unwrap_err();
         #[cfg(unix)]
-        assert_eq!(err.kind(), std::io::ErrorKind::FilenameTooLong, "the create fails on the name, not elsewhere: {err}");
+        assert_eq!(err.raw_os_error(), Some(libc::ENAMETOOLONG), "the create fails on the name, not elsewhere: {err}");
 
         assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 0);
         let _ = std::fs::remove_dir_all(&dir);

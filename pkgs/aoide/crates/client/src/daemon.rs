@@ -296,7 +296,7 @@ mod tests {
             let outcome = Outcome::ok("session.start", "started session `slow`");
             let mut line = json!({ "outcome": outcome }).to_string();
             line.push('\n');
-            conn.write_all(line.as_bytes()).unwrap();
+            let _ = conn.write_all(line.as_bytes());
         });
 
         let saved = std::env::var("AOIDE_DAEMON_SOCKET").ok();
