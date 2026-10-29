@@ -30,6 +30,19 @@ fn is_cli_doors(d: &&'static [Door]) -> bool {
 
 /// Contract versions (CONTRACTS.md "Versioning").
 pub const SCHEMA_VERSION: &str = "0";
+
+/// The kind vocabulary (CONTRACTS.md §3, `kind`): the one list every command's
+/// `kind` is checked against, by `aoide-test-support`'s `registry_walk` in each
+/// app crate. `none` is the explicit "about no object". A new object adds one
+/// name here, then the commands that carry it.
+pub const KINDS: &[&str] = &[
+    "config", "content", "event", "graph", "hold", "job", "letter", "mailbox",
+    "melete", "mesh", "node", "none", "note", "outbox", "pairing", "project",
+    "secret", "secret-hold", "session", "usage", "workspace",
+];
+/// The verbs (CONTRACTS.md §3, `verb`): `list` a set, `show` one, `watch` a
+/// stream, `act` on one. `none` pairs with kind `none` and nothing else.
+pub const VERBS: &[&str] = &["list", "show", "watch", "act", "none"];
 /// The Aoide RELEASE version (prebeta `0.0.X`, root README.md's
 /// "Versioning" section) — derives from THIS crate's own Cargo.toml, which
 /// itself inherits `pkgs/aoide/Cargo.toml`'s `[workspace.package].version`
@@ -139,6 +152,15 @@ pub struct Command {
     /// The invocation path, e.g. `["rice", "gen"]`.
     pub path: &'static [&'static str],
     pub summary: &'static str,
+    /// The object this command is about: one name from [`KINDS`]. Additive
+    /// (CONTRACTS.md §3): skipped when blank, which means "not decided yet".
+    /// `Command::check` does not read it.
+    #[serde(skip_serializing_if = "is_blank")]
+    pub kind: &'static str,
+    /// What the command does to that object: one of [`VERBS`]. Same rules as
+    /// `kind`; a command about no object carries `none` for both.
+    #[serde(skip_serializing_if = "is_blank")]
+    pub verb: &'static str,
     pub args: &'static [Arg],
     pub flags: &'static [Flag],
     /// Routes through the user rebuild gate (CONTRACTS.md §3).
@@ -227,6 +249,8 @@ impl Command {
     pub const BLANK: Command = Command {
         path: &[],
         summary: "",
+        kind: "",
+        verb: "",
         args: &[],
         flags: &[],
         gated: false,
@@ -1016,6 +1040,20 @@ mod tests {
             fixture().synopsis("aoide", true),
             "aoide thing add <name> --key <key> (--id <value> | --to <value>) [options] [--json]"
         );
+    }
+
+    /// `kind` and `verb` are additive: a command that declares neither
+    /// serializes with no such keys, and one that declares both carries them.
+    #[test]
+    fn kind_and_verb_are_omitted_when_blank_and_carried_when_declared() {
+        let mut r = Registry::new();
+        r.insert(cmd!(path: ["a"], summary: "A.", args: [], flags: [], gated: false, implemented: true, handler: noop));
+        r.insert(cmd!(path: ["b"], summary: "B.", args: [], flags: [], gated: false, implemented: true, handler: noop, kind: "session", verb: "list"));
+        let schema = serde_json::to_value(r.schema("aoide")).unwrap();
+        let commands = schema["commands"].as_array().unwrap();
+        assert!(commands[0].get("kind").is_none() && commands[0].get("verb").is_none());
+        assert_eq!(commands[1]["kind"], "session");
+        assert_eq!(commands[1]["verb"], "list");
     }
 
     #[test]

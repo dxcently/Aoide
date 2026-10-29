@@ -8,7 +8,7 @@
 use aoide_protocol::door::{list_description, parse, BRIEF_MAX};
 use aoide_protocol::help;
 use aoide_protocol::style::{Style, Term};
-use aoide_protocol::registry::{Command, Registry};
+use aoide_protocol::registry::{Command, Registry, KINDS, VERBS};
 use aoide_protocol::{Door, Invocation};
 use aoide_protocol::output::{Outcome, Status};
 use std::cell::Cell;
@@ -371,5 +371,79 @@ pub fn suggestion_or_list(bin: &str, registry: &Registry) {
         args.push("--zzqq-nothing".into());
         let err = parse(&args, Door::Cli, bin, &sentinels).expect_err("an unknown flag is refused");
         assert!(render(&err).contains("it takes"), "garbage flag should list the flags: {}", err.message);
+    }
+}
+
+/// Every command declares a `kind` and a `verb`, each from the protocol's
+/// vocabulary (`KINDS`, `VERBS`; CONTRACTS.md §3). A blank kind is "not decided
+/// yet", and core refuses it; a `none` kind pairs with verb `none`, and any
+/// other kind takes list, show, watch or act. Both binaries call this (strillix
+/// once it tags its commands), so a misspelt kind is refused in each.
+pub fn every_command_has_a_kind(registry: &Registry) {
+    for c in registry.commands() {
+        let path = c.dotted();
+        assert!(!c.kind.is_empty(), "`{path}` has no kind: declare `kind:` on its cmd!");
+        assert!(KINDS.contains(&c.kind), "`{path}`: kind `{}` is not in aoide_protocol::registry::KINDS", c.kind);
+        assert!(!c.verb.is_empty(), "`{path}` has no verb: declare `verb:` on its cmd!");
+        assert!(VERBS.contains(&c.verb), "`{path}`: verb `{}` is not in aoide_protocol::registry::VERBS", c.verb);
+        assert_eq!(c.kind == "none", c.verb == "none", "`{path}`: kind `{}` and verb `{}` disagree about `none`", c.kind, c.verb);
+    }
+}
+
+#[cfg(test)]
+mod kind_tests {
+    use super::*;
+    use aoide_protocol::output::Outcome;
+    use aoide_protocol::Invocation;
+
+    fn noop(_: &Invocation) -> Outcome {
+        Outcome::ok("noop", "")
+    }
+
+    /// One command per case, declaring exactly the kind and verb it is given;
+    /// a blank string leaves the field off, as a command that never named it.
+    fn one(kind: &'static str, verb: &'static str) -> Registry {
+        let mut r = Registry::new();
+        r.insert(aoide_protocol::cmd!(
+            path: ["thing", "go"], summary: "A fixture.", args: [], flags: [],
+            gated: false, implemented: true, handler: noop, kind: kind, verb: verb
+        ));
+        r
+    }
+
+    #[test]
+    fn a_declared_kind_and_verb_pass() {
+        every_command_has_a_kind(&one("session", "list"));
+        every_command_has_a_kind(&one("none", "none"));
+    }
+
+    #[test]
+    #[should_panic(expected = "has no kind")]
+    fn an_untagged_command_fails() {
+        every_command_has_a_kind(&one("", "list"));
+    }
+
+    #[test]
+    #[should_panic(expected = "kind `secrets` is not in")]
+    fn a_misspelt_kind_fails() {
+        every_command_has_a_kind(&one("secrets", "list"));
+    }
+
+    #[test]
+    #[should_panic(expected = "has no verb")]
+    fn a_missing_verb_fails() {
+        every_command_has_a_kind(&one("session", ""));
+    }
+
+    #[test]
+    #[should_panic(expected = "verb `sho` is not in")]
+    fn a_misspelt_verb_fails() {
+        every_command_has_a_kind(&one("session", "sho"));
+    }
+
+    #[test]
+    #[should_panic(expected = "disagree about `none`")]
+    fn kind_none_with_a_real_verb_fails() {
+        every_command_has_a_kind(&one("none", "act"));
     }
 }
