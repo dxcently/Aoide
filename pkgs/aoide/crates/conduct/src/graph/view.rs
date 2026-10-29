@@ -1386,7 +1386,7 @@ fn stdout_is_terminal() -> bool {
 mod tests {
     use super::*;
     use crate::graph::model::{write_stage, HooksFile};
-    use crate::graph::testutil::{unique_stage, EnvVars};
+    use crate::graph::testutil::{built_aoide_bin, unique_stage, EnvVars};
     use aoide_storage::mail;
     use std::collections::BTreeMap;
 
@@ -1410,6 +1410,30 @@ mod tests {
         let end = stream_lines(true, "end", vec!["gone".into()], json!({ "reason": "run-ended" }));
         assert_eq!(serde_json::from_str::<serde_json::Value>(&end[0]).unwrap()["type"], "end");
         assert_eq!(stream_lines(false, "end", vec!["gone".into()], json!({})), vec!["gone".to_string()]);
+    }
+
+    /// A whole live `--json` run through the built binary: every stdout line,
+    /// the outcome envelope included, is one JSON object, and the envelope is
+    /// the last line, after the stream's own `end` object.
+    #[test]
+    fn a_whole_json_watch_run_is_one_object_per_stdout_line() {
+        let _lock = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (root, _guard) = isolated("json-whole-run");
+        let rec = finished_run(&root, "run-1", "fix-flaky", Some(0));
+        write_roster(vec![rec]);
+        let out = std::process::Command::new(built_aoide_bin())
+            .args(["session", "watch", "run-1", "--json"])
+            .output()
+            .expect("run the built aoide");
+        let stdout = String::from_utf8(out.stdout).unwrap();
+        let lines: Vec<serde_json::Value> = stdout
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap_or_else(|e| panic!("not one JSON object: {line}: {e}")))
+            .collect();
+        assert!(lines.len() >= 3, "{stdout}");
+        assert_eq!(lines[0]["type"], "frame", "{stdout}");
+        assert_eq!(lines[lines.len() - 2]["type"], "end", "{stdout}");
+        assert!(lines[lines.len() - 1].get("status").is_some(), "last line is the envelope: {stdout}");
     }
 
     /// A fresh isolated state/stage/runtime triple, held by the caller's

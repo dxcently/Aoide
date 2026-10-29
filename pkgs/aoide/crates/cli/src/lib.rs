@@ -315,6 +315,19 @@ pub fn run_cli(argv: &[String]) -> i32 {
         // `subscribe` op, which stays default-deny-per-class for its own
         // security reason; `handle_events_tail`'s doc has the full
         // reasoning).
+        // `session watch --json` (live) closes its stream with the outcome
+        // envelope on ONE line, so every stdout line of the run parses as a JSON
+        // object; the stream's own `end` object comes just before it. Only the
+        // success path writes stdout: a refusal goes through the door's emit.
+        if inv.path == ["session", "watch"] && json && !inv.flag_present("snapshot") {
+            let out = dispatch::dispatch(inv);
+            if out.status != output::Status::Ok {
+                return Some(protocol::door::emit(&out, json));
+            }
+            println!("{}", serde_json::to_string(&out).unwrap_or_default());
+            return Some(out.status.exit_code());
+        }
+
         if inv.path == ["events", "tail"] {
             let launch = dispatch::dispatch(inv);
             if launch.status != output::Status::Ok {

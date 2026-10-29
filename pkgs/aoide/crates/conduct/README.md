@@ -1806,7 +1806,7 @@ instructions are stored once beside the run's PTY log and handed to the child as
 watch <id>` is the read-only live view of such a run (instructions, the child's
 own unread queue, output, outcome; `--snapshot` for one bounded frame). Live
 `--json` is JSON lines: one object per event, tagged by `type` (`frame`,
-`output`, `mail`, `read`, `end`), then the outcome envelope the door prints. The run's
+`output`, `mail`, `read`, `end`), then the outcome envelope on one line, the last line of the run. The run's
 slug mailbox (`self/<slug>`) is the CHILD's inbox — only letters sent TO the
 subagent, read against the child's own cursor through the read-only
 `mail::unread_for` peek; the exit report goes to the REPORT mailbox
