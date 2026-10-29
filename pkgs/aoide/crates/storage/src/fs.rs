@@ -283,7 +283,7 @@ pub fn migrate_dir(old: &std::path::Path, new: &std::path::Path) -> std::io::Res
         return Ok(());
     }
     if std::fs::rename(old, new).is_err() {
-        let tmp = new.with_extension(format!("migrate-tmp.{}", std::process::id()));
+        let tmp = temp_path(new, "migrate-tmp", std::process::id());
         if copy_dir_recursive(old, &tmp).is_ok() && std::fs::rename(&tmp, new).is_ok() {
             let _ = std::fs::remove_dir_all(old);
         } else {
@@ -697,8 +697,11 @@ fn around_write_watches(
 /// general behavior, not draft-specific, since every stage-file writer in
 /// the codebase routes through here.
 ///
-/// The temp is `<stem>.tmp.<pid>`; on success the rename replaces the target and
-/// removes the temp in one step. A failure in EITHER half — the write dying
+/// The temp is `<stem>.<n>.tmp.<pid>`, `n` unique to this write. The write is
+/// atomic across processes and across the threads of one process: writers of
+/// one target each rename their own temp, so a reader sees one whole content.
+/// On success the rename replaces the target and removes the temp in one step.
+/// A failure in EITHER half — the write dying
 /// partway, or the rename refusing — strands the temp we just made, so both
 /// unlink it. And a write INTERRUPTED between create and rename — a SIGKILL, or a
 /// power-cut (a stale `graph.tmp.464255` was found on disk) — can never clean up
@@ -712,6 +715,18 @@ fn around_write_watches(
 /// runs inside the live [`WriteWatch`]es of `path` ([`watch_writes`]).
 pub fn atomic_write_bytes(path: &std::path::Path, contents: &[u8]) -> std::io::Result<()> {
     atomic_write_bytes_impl(path, contents, None)
+}
+
+/// Every temp this module names takes the next value of [`TEMP_SEQ`], so two
+/// writes in one process never share a temp, threads included.
+static TEMP_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// `target` with its extension replaced by `<n>.<kind>.<pid>`, `n` the next
+/// [`TEMP_SEQ`] value. The counter sits before `.tmp.`, so [`sweep_stale_temps`],
+/// which reads the pid after the last `.tmp.`, still reads the pid.
+fn temp_path(target: &std::path::Path, kind: &str, pid: u32) -> std::path::PathBuf {
+    let n = TEMP_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    target.with_extension(format!("{n}.{kind}.{pid}"))
 }
 
 /// Shared write-temp-then-rename core for [`atomic_write_bytes`] and
@@ -745,7 +760,7 @@ fn atomic_write_bytes_impl(
     if let Some(parent) = target.parent() {
         ensure_write_dir(parent)?;
     }
-    let tmp = target.with_extension(format!("tmp.{}", std::process::id()));
+    let tmp = temp_path(&target, "tmp", std::process::id());
     // ONE failure path for both halves. A write that dies partway (ENOSPC inside
     // `write_all`) strands its temp exactly as a failed rename does, and a temp
     // stranded that way is worse than one the rename left: the file it belongs to
@@ -1768,8 +1783,8 @@ pub enum Waited {
 }
 
 /// Remove leaked atomic-write temporaries from `path`'s DIRECTORY: any sibling
-/// named `<stem>.tmp.<pid>` whose `<pid>` is no longer a live process, whatever
-/// its stem. An atomic write interrupted between create and rename (SIGKILL,
+/// named `<stem>.<n>.tmp.<pid>` whose `<pid>` is no longer a live process,
+/// whatever its stem. An atomic write interrupted between create and rename (SIGKILL,
 /// power-loss, a write that failed mid-flight) can never unlink its own temp — a
 /// stale `graph.tmp.464255` sat on disk from a prior day — so the next successful
 /// writer of ANY file in that directory sweeps it.
@@ -1782,7 +1797,8 @@ pub enum Waited {
 /// every write; the old predicate simply threw away every orphan but its own.
 ///
 /// `.tmp.` is matched as a whole separator, so the deliberately distinct
-/// `<stem>.migrate-tmp.<pid>` and `<stem>.seed.<pid>` temps stay clear of it.
+/// `<stem>.<n>.migrate-tmp.<pid>` and `<stem>.<n>.seed.<pid>` temps stay clear
+/// of it.
 /// Best-effort and total: any read/parse/remove miss is ignored, and our OWN
 /// in-flight temp (live pid) plus every other file are left untouched, so a
 /// concurrent node's write is safe.
@@ -1801,7 +1817,7 @@ fn sweep_stale_temps(path: &std::path::Path) {
         let Some((_, pid_str)) = name.rsplit_once(".tmp.") else {
             continue;
         };
-        // Only a well-formed `<stem>.tmp.<pid>` whose pid is dead is swept; our
+        // Only a well-formed `<stem>.<n>.tmp.<pid>` whose pid is dead is swept; our
         // own in-flight temp (same pid) and any non-numeric suffix are spared.
         if let Ok(pid) = pid_str.parse::<u32>() {
             if pid != std::process::id() && !pid_is_alive(pid) {
@@ -1902,7 +1918,7 @@ pub fn seed_if_absent(path: &std::path::Path, empty_body: &str, key: &str) -> Op
         }
         Err(_) => {
             // Absent (or unreadable). Seed with create-if-absent so a roster that
-            // appeared mid-boot is never overwritten. A distinct `.seed.<pid>`
+            // appeared mid-boot is never overwritten. A distinct `<n>.seed.<pid>`
             // temp keeps it clear of `sweep_stale_temps`'s `.tmp.<pid>` pattern.
             if let Some(parent) = path.parent() {
                 if let Err(e) = ensure_write_dir(parent) {
@@ -1910,7 +1926,7 @@ pub fn seed_if_absent(path: &std::path::Path, empty_body: &str, key: &str) -> Op
                     return None;
                 }
             }
-            let tmp = path.with_extension(format!("seed.{}", std::process::id()));
+            let tmp = temp_path(path, "seed", std::process::id());
             let seeded = (|| -> std::io::Result<bool> {
                 {
                     let mut f = std::fs::File::create(&tmp)?;
@@ -2151,7 +2167,8 @@ mod tests {
     #[test]
     fn atomic_write_sweeps_a_leaked_temp_from_a_dead_pid() {
         // A power-cut / SIGKILL between create and rename leaves a stranded
-        // `<stem>.tmp.<pid>` (a real `graph.tmp.464255` was found on disk). The
+        // `<stem>.<n>.tmp.<pid>`, or the older `<stem>.tmp.<pid>` this test
+        // plants (a real `graph.tmp.464255` was found on disk). The
         // next successful write of the same file sweeps a dead pid's temp but
         // spares a live node's in-flight one.
         let dir = std::env::temp_dir().join(format!("aoide-tmpsweep-{}", std::process::id()));
@@ -2189,8 +2206,8 @@ mod tests {
         // Deliberately distinct temp shapes owned by other writers
         // (`migrate_state_tree`, `seed_if_absent`) — `.tmp.` is a whole
         // separator, so neither is ours to remove.
-        let migrate = dir.join(format!("cccc3333.migrate-tmp.{dead}"));
-        let seed = dir.join(format!("dddd4444.seed.{dead}"));
+        let migrate = temp_path(&dir.join("cccc3333"), "migrate-tmp", dead);
+        let seed = temp_path(&dir.join("dddd4444"), "seed", dead);
         for p in [&orphan, &in_flight, &migrate, &seed] {
             std::fs::write(p, "stranded").unwrap();
         }
@@ -2199,8 +2216,8 @@ mod tests {
 
         assert!(!orphan.exists(), "a dead pid's temp is swept whatever its stem");
         assert!(in_flight.exists(), "a live pid's in-flight temp is left untouched");
-        assert!(migrate.exists(), "`migrate-tmp.<pid>` is another writer's shape");
-        assert!(seed.exists(), "`seed.<pid>` is another writer's shape");
+        assert!(migrate.exists(), "`<n>.migrate-tmp.<pid>` is another writer's shape");
+        assert!(seed.exists(), "`<n>.seed.<pid>` is another writer's shape");
 
         // A write that cannot land leaves no temp of its own: renaming onto a
         // non-empty directory fails, and the same unlink covers it.
@@ -2208,11 +2225,39 @@ mod tests {
         std::fs::create_dir_all(&blocked).unwrap();
         std::fs::write(blocked.join("occupant"), "x").unwrap();
         assert!(atomic_write(&blocked, "{}").is_err());
+        let own_suffix = format!(".tmp.{}", std::process::id());
         assert!(
-            !dir.join(format!("blocked.tmp.{}", std::process::id())).exists(),
+            !std::fs::read_dir(&dir).unwrap().flatten().any(|e| {
+                let name = e.file_name().to_string_lossy().into_owned();
+                name.starts_with("blocked.") && name.ends_with(&own_suffix)
+            }),
             "a failed write never leaves its own temp behind"
         );
 
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_sweep_reads_the_pid_of_a_counter_named_temp() {
+        // The counter sits before `.tmp.`, so the sweep's split after the last
+        // `.tmp.` still reads the pid: a dead pid's temp goes, while ours and a
+        // live other pid's stay.
+        let dir = std::env::temp_dir().join(format!("aoide-tmpsweep-counter-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let target = dir.join("graph.json");
+        let dead = temp_path(&target, "tmp", u32::MAX); // pid above pid_max — never alive
+        let own = temp_path(&target, "tmp", std::process::id());
+        let live = temp_path(&target, "tmp", ALWAYS_LIVE_PID);
+        for p in [&dead, &own, &live] {
+            std::fs::write(p, "stranded").unwrap();
+        }
+
+        atomic_write(&target, "{}").unwrap();
+
+        assert!(!dead.exists(), "a dead pid's temp in the counter form is swept");
+        assert!(own.exists(), "our own in-flight temp is spared");
+        assert!(live.exists(), "a live other pid's temp is spared");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -2475,11 +2520,12 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let target = dir.join("ed25519.key");
-        let leftover = target.with_extension(format!("tmp.{}", std::process::id()));
+        let leftover = temp_path(&target, "tmp", std::process::id());
         std::fs::write(&leftover, b"stale bytes").unwrap();
         std::fs::set_permissions(&leftover, std::fs::Permissions::from_mode(0o644)).unwrap();
 
-        atomic_write_private(&target, b"private seed bytes").unwrap();
+        write_temp_file(&leftover, b"private seed bytes", Some(0o600)).unwrap();
+        std::fs::rename(&leftover, &target).unwrap();
 
         assert_eq!(std::fs::read(&target).unwrap(), b"private seed bytes");
         assert_eq!(unix_mode(&target), 0o600, "the published file took the leftover's wider mode");
@@ -2980,13 +3026,14 @@ mod tests {
     }
 
     /// Unix-only: a private write killed between its create and its rename
-    /// leaves `<target>.tmp.<pid>` behind at whatever mode it was made with.
-    /// A later process that reuses that pid writes to the same name, and
-    /// `O_TRUNC` keeps the leftover's mode rather than applying `0600` again,
-    /// so the rename would publish a wider file as the private one. This test
-    /// plants a `0644` leftover under our own pid (the reuse case, without a
-    /// dead process to stage it) and requires the private file to come out
-    /// `0600` with the new bytes.
+    /// leaves its temp behind at whatever mode it was made with. A later
+    /// process that reuses that pid, at the same counter value, writes to the
+    /// same name, and `O_TRUNC` keeps the leftover's mode rather than applying
+    /// `0600` again, so the rename would publish a wider file as the private
+    /// one. This test plants a `0644` leftover at the name a write by our own
+    /// pid takes (the reuse case, without a dead process to stage it), then
+    /// writes through the one temp creator and requires the file renamed over
+    /// the private name to come out `0600` with the new bytes.
     #[cfg(unix)]
     #[test]
     fn a_wider_leftover_temp_under_the_private_name_is_never_published() {
@@ -2995,11 +3042,12 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("sessions.json");
-        let leftover = path.with_extension(format!("tmp.{}", std::process::id()));
+        let leftover = temp_path(&path, "tmp", std::process::id());
         std::fs::write(&leftover, b"leftover").unwrap();
         std::fs::set_permissions(&leftover, std::fs::Permissions::from_mode(0o644)).unwrap();
 
-        atomic_write_private(&path, b"fresh").unwrap();
+        write_temp_file(&leftover, b"fresh", Some(0o600)).unwrap();
+        std::fs::rename(&leftover, &path).unwrap();
         assert_private_file(&path);
         assert_eq!(std::fs::read(&path).unwrap(), b"fresh");
 
@@ -4161,10 +4209,9 @@ mod tests {
     #[test]
     fn a_write_whose_temp_cannot_be_created_never_calls_its_watch() {
         let dir = watch_dir("no-temp");
-        let path = dir.join("blocked.json");
-        // The temp is `<stem>.tmp.<pid>`; a directory of that name makes the
-        // create fail.
-        std::fs::create_dir_all(dir.join(format!("blocked.tmp.{}", std::process::id()))).unwrap();
+        // A 250-byte stem puts `<stem>.<n>.tmp.<pid>` past NAME_MAX (255), so the
+        // create fails whatever the counter's value.
+        let path = dir.join(format!("{}.json", "b".repeat(250)));
         let calls = new_calls();
         let _spy = spy_on(&path, &calls);
 

@@ -539,16 +539,22 @@
   conventionally upper-case). Any new site that stamps, declares or compares
   this box as a NODE uses the folded form; the raw name stays for display and
   for an ssh target.
+- **Every temp this module names is unique to its write.** `temp_path` takes
+  the next value of a process-wide `AtomicU64` (`TEMP_SEQ`) and forms
+  `<stem>.<n>.tmp.<pid>`, so two writes in one process, threads included, never
+  share a temp and a rename never finds another writer's temp already moved.
+  The counter sits before `.tmp.`, so the sweep, which reads the pid after the
+  last `.tmp.`, still reads the pid.
 - **`fs::atomic_write`'s temp cleanup is directory-wide, and every failing
   half unlinks its own temp.** `sweep_stale_temps` reclaims any sibling
-  `<stem>.tmp.<pid>` whose pid is dead, not only temps sharing the target's
+  `<stem>.<n>.tmp.<pid>` whose pid is dead, not only temps sharing the target's
   stem — a stem-scoped sweep can only ever reclaim a temp whose own file is
   written again, which never happens for a write-once name (an outbox entry
   is keyed by a msgid minted once; 1519 zero-byte orphans accumulated in one
   node's `state/outbox/` that way). The `read_dir` was already paid on every
   write, so widening the predicate costs nothing. Match `.tmp.` as a whole
-  separator: `migrate_state_tree`'s `migrate-tmp.<pid>` and `seed_if_absent`'s
-  `seed.<pid>` are deliberately distinct shapes and must stay out of the
+  separator: `migrate_state_tree`'s `<n>.migrate-tmp.<pid>` and `seed_if_absent`'s
+  `<n>.seed.<pid>` are deliberately distinct shapes and must stay out of the
   sweep. A new temp-file shape in this crate picks a separator that is NOT
   `.tmp.` unless it wants this sweep to own it.
 - **Every atomic write to a watched path renames inside its watch.**
