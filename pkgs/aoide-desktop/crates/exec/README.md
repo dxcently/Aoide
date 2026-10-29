@@ -15,9 +15,12 @@ reaches aoide-protocol only through here, and of it only `untrusted`.
 
 - `check_pin`, which returns a `Pinned` (the only maker of one), `Schema`,
   `argv`, `child_env`, `parse_vault_keys`, `Output`, `ExecError`, and `Exec`
-  (`load`, `call`, `deadline`, `door_env`, `spawn_door`). `spawn_door` returns
-  an `Arrived`. `deadline` only shortens: a later call never lengthens an
-  earlier one.
+  (`load`, `call`, `follow`, `schema`, `deadline`, `door_env`, `spawn_door`).
+  `spawn_door` returns an `Arrived`. `deadline` only shortens: a later call
+  never lengthens an earlier one.
+- `follow` starts a held child and returns a `Follow`. `Follow::next` yields
+  an `Event` (a `Line`, a `Dropped` line past `LINE_CAP`, or `Eof`), and
+  `Follow::end` returns an `Ended`. `LINE_CAP` is 1 MiB.
 - The door helpers the shell's door code calls, all `pub`: `euid`,
   `open_pidfd`, `terminate_pidfd`, `pidfd_exited`, `stat_of` (with its `Stat`)
   and `Arrived`. `terminate` stays crate-private: `run` is its one production
@@ -26,7 +29,9 @@ reaches aoide-protocol only through here, and of it only `untrusted`.
   path. `test_doors` starts a door (`spawn`), signals one (`terminate`), copies
   a program through a child (`copy_program`), makes a zombie (`zombie`), and
   blocks and waits for SIGTERM (`block_sigterm` and `wait_sigterm`), which is
-  how the fake eidolon takes its signal without a libc call of its own.
+  how the fake eidolon takes its signal without a libc call of its own. The
+  SIGINT pair (`block_sigint` and `wait_sigint`) does the same for the fake
+  aoide's held children.
 
 ## How a child starts
 
@@ -97,6 +102,31 @@ lib.rs      Exec::load(aoide, home, env)
   pidfd and start time), and then reaps the intermediate. The door's stdin is
   `/dev/null`, and its stdout and stderr are the door log. std's close-on-exec
   pipe reports an exec failure of the door as `spawn`'s error.
+- A held child, from `Exec::follow`, runs the same argv and environment checks
+  as a call, under no deadline. Its stdout is read on one thread, a line at a
+  time, into a channel of 256 events. A line past `LINE_CAP` is read to its end
+  and reported as `Dropped` with its length. Its stderr is captured on another
+  thread, up to 16 MiB.
+
+```
+Exec::follow(words, flags, positionals)
+  |
+  +-- child_env, argv        as for a call
+  |
+  v
+spawn_held                   stdin closed, stdout and stderr piped
+  +-- open_pidfd             refused: the child is terminated and the call fails
+  +-- read_lines thread      Line | Dropped | Eof, to a channel of 256
+  +-- capture thread         stderr, up to 16 MiB
+  |
+  v
+Follow::next(wait)           Some(event), or None when none came in time
+Follow::end()                SIGINT through the pidfd; drains events until the
+                             child's stdout closes or 5 s pass; waits 5 s for
+                             the exit; returns Ended { status, rest, stderr }
+Drop for Follow              SIGINT through the pidfd; reaps on a thread
+```
+
 - `terminate` sends SIGTERM to a pid. Its one production caller is `run`, on a
   child it has not reaped. Its refusals are in AGENTS.md.
 

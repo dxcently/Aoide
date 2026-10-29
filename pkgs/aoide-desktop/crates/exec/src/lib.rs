@@ -451,6 +451,22 @@ impl Exec {
         self.vault_keys.as_deref().map_err(String::as_str)
     }
 
+    /// The schema the program printed, for the shell's palette and its floor.
+    pub fn schema(&self) -> &Schema {
+        &self.schema
+    }
+
+    /// Starts one aoide command as a held child, checked as `call` checks it. Its
+    /// stdout comes back a line at a time from `Follow::next`, until `Follow::end`
+    /// interrupts it. A held child runs under no deadline: it is the one that ends
+    /// when the caller ends it.
+    pub fn follow(&self, words: &[&str], flags: &[Flag<'_>], positionals: &[&str]) -> Result<Follow, ExecError> {
+        let first = words.first().copied().unwrap_or("");
+        let env = child_env(Child::Aoide, first, &self.base_env, self.keys())?;
+        let line = argv(self.aoide.path(), &self.schema, words, flags, positionals)?;
+        spawn_held(&self.aoide, &line[1..], &env)
+    }
+
     /// The environment a door gets: the child env for `eidolon web`, with
     /// `XDG_RUNTIME_DIR` set to the runtime dir the app checked, so the door
     /// writes its token where the app reads it.
@@ -475,6 +491,199 @@ impl Exec {
         let env = self.door_env(runtime)?;
         spawn_detached(program.path(), args, &env, log)
     }
+}
+
+/// The most a followed line may hold. A longer line is read to its end and
+/// sent as `Event::Dropped`, so one line cannot grow a buffer without bound.
+pub const LINE_CAP: usize = 1024 * 1024;
+/// How many events a followed child may run ahead of its reader.
+const LINES_BOUND: usize = 256;
+
+/// One thing a held child did, in order.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Event {
+    /// One line of the child's stdout, without its newline, as it was written.
+    Line(Vec<u8>),
+    /// A line past `LINE_CAP`, dropped unread: its length in bytes.
+    Dropped(usize),
+    /// The child closed its stdout.
+    Eof,
+}
+
+/// A held child, from `Exec::follow`. It runs until `end` interrupts it. A
+/// `Follow` dropped before `end` is interrupted the same way, and its child is
+/// reaped by a thread of its own.
+pub struct Follow {
+    child: Option<std::process::Child>,
+    pidfd: OwnedFd,
+    lines: mpsc::Receiver<Event>,
+    stderr: mpsc::Receiver<io::Result<(Vec<u8>, bool)>>,
+}
+
+/// How a followed child ended: its status, the events it printed after `end`
+/// was called, and its stderr.
+#[derive(Debug)]
+pub struct Ended {
+    /// `None` when the child was still running `EXIT_BOUND` after its interrupt.
+    /// It is then left running and unreaped, and `stderr` is empty.
+    pub status: Option<ExitStatus>,
+    /// The events from `end` on, up to the child's end of stdout or the bound.
+    pub rest: Vec<Event>,
+    pub stderr: Vec<u8>,
+}
+
+impl Follow {
+    /// The pid of the held child.
+    pub fn id(&self) -> u32 {
+        self.child.as_ref().map_or(0, std::process::Child::id)
+    }
+
+    /// The next event, or `None` when none comes within `wait`.
+    pub fn next(&self, wait: Duration) -> Option<Event> {
+        match self.lines.recv_timeout(wait) {
+            Ok(event) => Some(event),
+            Err(RecvTimeoutError::Timeout) => None,
+            Err(RecvTimeoutError::Disconnected) => Some(Event::Eof),
+        }
+    }
+
+    /// Interrupts the child through its pidfd, collects what it prints until its
+    /// stdout closes, and reaps it. The interrupt is SIGINT: core handles that
+    /// signal alone, so a followed command prints its end line on it.
+    pub fn end(mut self) -> Result<Ended, ExecError> {
+        let mut child = self.child.take().expect("a followed child is held until it ends");
+        signal_pidfd(&self.pidfd, libc::SIGINT).or_else(ignore_gone).map_err(ExecError::Io)?;
+        let until = Instant::now() + EXIT_BOUND;
+        let mut rest = Vec::new();
+        loop {
+            match self.lines.recv_timeout(until.saturating_duration_since(Instant::now())) {
+                Ok(Event::Eof) | Err(_) => break,
+                Ok(event) => rest.push(event),
+            }
+        }
+        let exit_by = Instant::now() + EXIT_BOUND;
+        let status = loop {
+            if let Some(status) = child.try_wait().map_err(ExecError::Io)? {
+                break Some(status);
+            }
+            if Instant::now() >= exit_by {
+                break None;
+            }
+            thread::sleep(POLL);
+        };
+        let stderr = match status {
+            Some(_) => self.stderr.recv_timeout(EXIT_BOUND).ok().and_then(Result::ok).map(|(b, _)| b).unwrap_or_default(),
+            None => {
+                thread::spawn(move || {
+                    let _ = child.wait();
+                });
+                Vec::new()
+            }
+        };
+        Ok(Ended { status, rest, stderr })
+    }
+}
+
+impl Drop for Follow {
+    fn drop(&mut self) {
+        if let Some(mut child) = self.child.take() {
+            let _ = signal_pidfd(&self.pidfd, libc::SIGINT);
+            thread::spawn(move || {
+                let _ = child.wait();
+            });
+        }
+    }
+}
+
+/// A process that has already exited is no error to interrupt.
+fn ignore_gone(e: io::Error) -> io::Result<()> {
+    if e.raw_os_error() == Some(libc::ESRCH) {
+        Ok(())
+    } else {
+        Err(e)
+    }
+}
+
+/// Starts `program` with `args` as a held child: stdin closed, stdout and stderr
+/// piped. Its stdout is read on a thread, one line at a time, into a bounded
+/// channel. Its stderr is captured to `OUTPUT_CAP` on another thread.
+fn spawn_held(program: &Pinned, args: &[OsString], env: &[(OsString, OsString)]) -> Result<Follow, ExecError> {
+    let mut child = Command::new(program.path())
+        .args(args)
+        .env_clear()
+        .envs(env.iter().cloned())
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(ExecError::Spawn)?;
+    let pidfd = match open_pidfd(child.id()) {
+        Ok(fd) => fd,
+        Err(e) => {
+            let _ = terminate(child.id());
+            return Err(ExecError::Io(e));
+        }
+    };
+    let stdout = child.stdout.take().ok_or_else(missing_pipe)?;
+    let stderr = child.stderr.take().ok_or_else(missing_pipe)?;
+    let (line_tx, lines) = mpsc::sync_channel(LINES_BOUND);
+    thread::spawn(move || {
+        let _ = read_lines(stdout, &line_tx);
+        let _ = line_tx.send(Event::Eof);
+    });
+    let (err_tx, stderr_rx) = mpsc::channel();
+    thread::spawn(move || err_tx.send(capture(stderr)));
+    Ok(Follow { child: Some(child), pidfd, lines, stderr: stderr_rx })
+}
+
+/// Splits `pipe` into lines and sends each on `out`. A line past `LINE_CAP` is
+/// still read to its newline, but its bytes past the cap are dropped, and it is
+/// sent as `Dropped`. Returns when the pipe ends or `out`'s receiver is gone.
+fn read_lines(mut pipe: impl Read, out: &mpsc::SyncSender<Event>) -> io::Result<()> {
+    let mut line = Vec::new();
+    let mut total = 0usize;
+    let mut buf = [0u8; 8192];
+    loop {
+        let n = match pipe.read(&mut buf) {
+            Ok(0) => break,
+            Ok(n) => n,
+            Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
+            Err(e) => return Err(e),
+        };
+        let mut piece = &buf[..n];
+        while let Some(at) = piece.iter().position(|&b| b == b'\n') {
+            absorb(&mut line, &mut total, &piece[..at]);
+            let event = take_line(&mut line, &mut total);
+            if out.send(event).is_err() {
+                return Ok(());
+            }
+            piece = &piece[at + 1..];
+        }
+        absorb(&mut line, &mut total, piece);
+    }
+    if total > 0 && out.send(take_line(&mut line, &mut total)).is_err() {
+        return Ok(());
+    }
+    Ok(())
+}
+
+/// Adds `piece` to the line: `total` counts every byte, `line` keeps up to the cap.
+fn absorb(line: &mut Vec<u8>, total: &mut usize, piece: &[u8]) {
+    *total += piece.len();
+    let room = LINE_CAP.saturating_sub(line.len());
+    line.extend_from_slice(&piece[..piece.len().min(room)]);
+}
+
+/// The finished line as its event, and the reader reset for the next one.
+fn take_line(line: &mut Vec<u8>, total: &mut usize) -> Event {
+    let event = if *total > LINE_CAP {
+        line.clear();
+        Event::Dropped(*total)
+    } else {
+        Event::Line(std::mem::take(line))
+    };
+    *total = 0;
+    event
 }
 
 /// Starts a child for one call and waits for it. Only `Exec` reaches it, and only with a
@@ -814,12 +1023,17 @@ pub fn pidfd_exited(fd: &OwnedFd) -> bool {
 
 /// Sends SIGTERM to the process `fd` names, and to no other.
 pub fn terminate_pidfd(fd: &OwnedFd) -> io::Result<()> {
+    signal_pidfd(fd, libc::SIGTERM)
+}
+
+/// Sends `signal` to the process `fd` names, and to no other.
+fn signal_pidfd(fd: &OwnedFd, signal: libc::c_int) -> io::Result<()> {
     // SAFETY: a plain syscall taking a descriptor, a signal and a null siginfo.
     let sent = unsafe {
         libc::syscall(
             libc::SYS_pidfd_send_signal,
             fd.as_raw_fd(),
-            libc::SIGTERM,
+            signal,
             std::ptr::null::<libc::siginfo_t>(),
             0 as libc::c_uint,
         )
@@ -913,21 +1127,21 @@ pub mod test_doors {
         })
     }
 
-    /// The set that holds SIGTERM alone.
-    fn term_set() -> libc::sigset_t {
+    /// The set that holds `signal` alone.
+    fn one_set(signal: libc::c_int) -> libc::sigset_t {
         // SAFETY: a zeroed sigset_t is valid, and sigemptyset initializes it before sigaddset uses it.
         unsafe {
             let mut set: libc::sigset_t = std::mem::zeroed();
             libc::sigemptyset(&mut set);
-            libc::sigaddset(&mut set, libc::SIGTERM);
+            libc::sigaddset(&mut set, signal);
             set
         }
     }
 
-    /// Blocks SIGTERM for this thread and every thread it starts later, so that
-    /// `wait_sigterm` takes it. Both calls return an error number, not errno.
-    pub fn block_sigterm() -> io::Result<()> {
-        let set = term_set();
+    /// Blocks `signal` for this thread and every thread it starts later, so that
+    /// `wait_signal` takes it. Both calls return an error number, not errno.
+    fn block_signal(signal: libc::c_int) -> io::Result<()> {
+        let set = one_set(signal);
         // SAFETY: `set` is a valid signal set; the block is set before any thread starts.
         let rc = unsafe { libc::pthread_sigmask(libc::SIG_BLOCK, &set, std::ptr::null_mut()) };
         if rc == 0 {
@@ -937,17 +1151,37 @@ pub mod test_doors {
         }
     }
 
-    /// Waits until a SIGTERM that `block_sigterm` blocked arrives, and takes it.
-    pub fn wait_sigterm() -> io::Result<()> {
-        let set = term_set();
-        let mut signal: libc::c_int = 0;
-        // SAFETY: `set` is a valid signal set, and `signal` is a valid out pointer.
-        let rc = unsafe { libc::sigwait(&set, &mut signal) };
+    /// Waits until a `signal` that `block_signal` blocked arrives, and takes it.
+    fn wait_signal(signal: libc::c_int) -> io::Result<()> {
+        let set = one_set(signal);
+        let mut taken: libc::c_int = 0;
+        // SAFETY: `set` is a valid signal set, and `taken` is a valid out pointer.
+        let rc = unsafe { libc::sigwait(&set, &mut taken) };
         if rc == 0 {
             Ok(())
         } else {
             Err(io::Error::from_raw_os_error(rc))
         }
+    }
+
+    /// Blocks SIGTERM for `wait_sigterm`; see `block_signal`.
+    pub fn block_sigterm() -> io::Result<()> {
+        block_signal(libc::SIGTERM)
+    }
+
+    /// Waits for the SIGTERM that `block_sigterm` blocked, and takes it.
+    pub fn wait_sigterm() -> io::Result<()> {
+        wait_signal(libc::SIGTERM)
+    }
+
+    /// Blocks SIGINT for `wait_sigint`, the signal a held child is ended with.
+    pub fn block_sigint() -> io::Result<()> {
+        block_signal(libc::SIGINT)
+    }
+
+    /// Waits for the SIGINT that `block_sigint` blocked, and takes it.
+    pub fn wait_sigint() -> io::Result<()> {
+        wait_signal(libc::SIGINT)
     }
 }
 

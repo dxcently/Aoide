@@ -27,6 +27,9 @@ are in README.md.
 - `terminate` stays `pub(crate)`, and `run` stays private. `run` is reached
   only through `Exec`, and `terminate` only through `run` and
   `test_doors::terminate`.
+- `Exec::follow` is the one way a held child starts. `spawn_held` is private to
+  this crate and only `follow` reaches it. `Follow::id` reads the pid; the
+  pidfd stays inside `Follow`, so a caller cannot signal the child.
 
 ## The spawn and the calls
 
@@ -86,6 +89,17 @@ are in README.md.
   `HOME=x` does not.
 - Each stream is kept up to 16 MiB. Past that, the child still runs to its end,
   the extra bytes are dropped, and the call is refused.
+- A held child runs under no deadline. It ends when `Follow::end` interrupts
+  it or when the `Follow` is dropped, and either path sends SIGINT through its
+  pidfd and no other signal. Core handles SIGINT alone, so a followed command
+  prints its end line on it. `end` waits `EXIT_BOUND` for the exit; a child
+  still running then is left running and unreaped, with no further signal, and
+  `Ended::status` is `None`. A dropped `Follow` hands its child to a reaper
+  thread, which waits until the child exits.
+- A held child's line is kept to `LINE_CAP` (1 MiB). The bytes past the cap
+  are read and dropped, and the line is reported as `Dropped` with its length,
+  so one line cannot grow a buffer without bound. A reader that stops draining
+  holds the child's stdout, and the channel's bound holds the reader.
 - Each call runs under one deadline, 30 s, from the spawn to the end of the
   reading of its output. `Exec::deadline` can only shorten it: the shorter of
   the two is taken. A child still running at the deadline is sent SIGTERM and
@@ -98,12 +112,13 @@ are in README.md.
   method, and this crate, whose table allows it, calls it nowhere, its tests
   included.
 - `open_pidfd` opens a pidfd for a pid, and `terminate_pidfd` sends SIGTERM
-  through one, and only SIGTERM. Both refuse pid 0, pid 1, any pid past
-  `i32::MAX`, and this process's own pid. A pidfd names one process, so the
-  signal cannot reach a process that later takes the pid. Outside this crate's
-  tests, `arrive` and the shell's door code in `doors.rs` are the only callers
-  of `open_pidfd`: a door is signalled through its pidfd, except for the pid
-  signal in the spawn closure.
+  through one, and only SIGTERM. A held child is ended with SIGINT through its
+  own pidfd, sent by `Follow` alone. Both `open_pidfd` and `terminate` refuse
+  pid 0, pid 1, any pid past `i32::MAX`, and this process's own pid. A pidfd
+  names one process, so the signal cannot reach a process that later takes the
+  pid. Outside this crate's tests, `arrive`, `spawn_held` and the shell's door
+  code in `doors.rs` are the only callers of `open_pidfd`: a door is signalled
+  through its pidfd, except for the pid signal in the spawn closure.
 - `pidfd_exited` polls a pidfd with a zero timeout: it reports whether the
   process has ended, and never waits. Only the watch thread uses it.
 - `terminate(pid)` sends SIGTERM to an unreaped child this process started, and
@@ -122,7 +137,9 @@ are in README.md.
   `terminate`.
 - `block_sigterm` and `wait_sigterm` are the SIGTERM pair the fake eidolon
   uses. The fake blocks SIGTERM before any thread starts and waits for it on
-  each pass, so the bin holds no libc call and no `unsafe`.
+  each pass, so the bin holds no libc call and no `unsafe`. `block_sigint` and
+  `wait_sigint` are the SIGINT pair the fake aoide's held children use, with
+  the same rule.
 - The two hostile children in this crate's tests are shell scripts that the
   test writes, pins and runs through `run`: a grandchild that holds stdout, and
   a child that ignores SIGTERM. Each is bounded and exits by itself within 8 s.

@@ -242,3 +242,10 @@ print nothing. Any other call sleeps `FAKE_AOIDE_SLEEP` seconds, writes
 `FAKE_AOIDE_STDOUT_BYTES` bytes to stdout, the text of `FAKE_AOIDE_STDERR` and
 `FAKE_AOIDE_STDERR_BYTES` bytes to stderr, and exits with `FAKE_AOIDE_EXIT`.
 Each call is appended to the file `FAKE_AOIDE_RECORD` names.
+
+A held follow is `session trace --follow` or `session watch`, on the id it
+names. An id starting `hook-` keeps no trace and no PTY, so both refuse; an id
+starting `pty-` keeps no trace, so only `session watch` answers. Its first
+line is a JSON frame. Each then prints the lines of the file
+`FAKE_AOIDE_FOLLOW_FILE` names, one every 30 ms, and waits. SIGINT ends it: it
+prints `{"ok":true,"followed":true}` and exits zero.

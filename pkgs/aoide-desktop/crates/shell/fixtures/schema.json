@@ -24,6 +24,28 @@
       ]
     },
     {
+      "path": ["session", "trace"],
+      "summary": "Show a session's trace.",
+      "args": [
+        {"name": "id", "type": "string", "required": true, "description": "The session."}
+      ],
+      "flags": [
+        {"name": "json", "type": "bool", "description": "Structured I/O."},
+        {"name": "follow", "type": "bool", "description": "Keep printing new records."},
+        {"name": "tail", "type": "int", "description": "Records to start from.", "value": "n"}
+      ]
+    },
+    {
+      "path": ["session", "watch"],
+      "summary": "Watch a session's run.",
+      "args": [
+        {"name": "id", "type": "string", "required": true, "description": "The session."}
+      ],
+      "flags": [
+        {"name": "json", "type": "bool", "description": "Structured I/O."}
+      ]
+    },
+    {
       "path": ["melete", "status"],
       "summary": "Show the melete store.",
       "args": [],

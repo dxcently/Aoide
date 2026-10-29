@@ -6,7 +6,9 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
-use aoide_desktop_shell::exec::{Exec, ExecError, Flag, PinError, OUTPUT_CAP};
+use std::os::unix::process::ExitStatusExt;
+
+use aoide_desktop_shell::exec::{Event, Exec, ExecError, Flag, PinError, LINE_CAP, OUTPUT_CAP};
 use serde_json::{json, Value};
 
 const FAKE: &str = env!("CARGO_BIN_EXE_fake-aoide");
@@ -241,4 +243,112 @@ fn a_relative_program_is_refused_at_load() {
     let dir = scratch("relative-load");
     let err = Exec::load(Path::new("aoide"), &dir, Vec::new()).err().expect("the load is refused");
     assert!(matches!(err, ExecError::Pin(PinError::Relative(_))), "{err:?}");
+}
+
+/// How long a test waits for one event from a held child before it fails.
+const WAIT: Duration = Duration::from_secs(5);
+
+/// Loads the fake with a follow file that holds `lines`, one per line, and `extra`
+/// on top. Returns the exec and the record file of every call.
+fn held(tag: &str, lines: &[Vec<u8>], extra: &[(&str, &str)]) -> (Exec, PathBuf) {
+    let dir = scratch(tag);
+    let follow_file = dir.join("follow.txt");
+    let mut bytes = Vec::new();
+    for line in lines {
+        bytes.extend_from_slice(line);
+        bytes.push(b'\n');
+    }
+    fs::write(&follow_file, bytes).expect("the follow file is written");
+    let record = dir.join("record.jsonl");
+    let mut env = vec![
+        (OsString::from("PATH"), OsString::from("/usr/bin:/bin")),
+        (OsString::from("FAKE_AOIDE_RECORD"), record.clone().into_os_string()),
+        (OsString::from("FAKE_AOIDE_FOLLOW_FILE"), follow_file.into_os_string()),
+    ];
+    env.extend(extra.iter().map(|(k, v)| (OsString::from(k), OsString::from(v))));
+    let exec = Exec::load(Path::new(FAKE), &dir.join("home"), env).expect("the fake loads");
+    (exec, record)
+}
+
+/// The `--follow` flag, the one flag a held trace is started with.
+const FOLLOW: Flag<'static> = Flag { name: "follow", value: None };
+
+/// Whether a process has not exited: its stat reads, and it is not a zombie.
+fn alive(pid: u32) -> bool {
+    fs::read_to_string(format!("/proc/{pid}/stat")).is_ok_and(|text| {
+        text.rfind(')').and_then(|at| text[at + 1..].split_whitespace().next()) != Some("Z")
+    })
+}
+
+#[test]
+fn a_held_child_streams_its_lines_before_it_exits() {
+    let lines = [b"one".to_vec(), b"two".to_vec(), b"three".to_vec()];
+    let (exec, _) = held("stream", &lines, &[]);
+    let follow = exec.follow(&["session", "trace"], &[FOLLOW], &["ab"]).expect("the follow starts");
+    let pid = follow.id();
+    for line in &lines {
+        assert_eq!(follow.next(WAIT), Some(Event::Line(line.clone())));
+    }
+    assert!(alive(pid), "the child still runs: its lines came before any exit");
+    follow.end().expect("the follow ends");
+}
+
+#[test]
+fn a_line_past_the_cap_is_dropped_and_counted_and_the_next_line_arrives() {
+    let long = vec![b'x'; 2 * 1024 * 1024];
+    assert!(long.len() > LINE_CAP, "the line is past the cap");
+    let (exec, _) = held("cap", &[b"before".to_vec(), long.clone(), b"after".to_vec()], &[]);
+    let follow = exec.follow(&["session", "trace"], &[FOLLOW], &["ab"]).expect("the follow starts");
+    assert_eq!(follow.next(WAIT), Some(Event::Line(b"before".to_vec())));
+    assert_eq!(follow.next(WAIT), Some(Event::Dropped(long.len())));
+    assert_eq!(follow.next(WAIT), Some(Event::Line(b"after".to_vec())));
+    follow.end().expect("the follow ends");
+}
+
+#[test]
+fn ending_a_follow_interrupts_the_child_which_prints_its_end_line_and_is_reaped() {
+    let (exec, _) = held("end", &[b"one".to_vec()], &[]);
+    let follow = exec.follow(&["session", "trace"], &[FOLLOW], &["ab"]).expect("the follow starts");
+    let pid = follow.id();
+    assert_eq!(follow.next(WAIT), Some(Event::Line(b"one".to_vec())));
+    let ended = follow.end().expect("the follow ends");
+    let status = ended.status.expect("the child exits within the bound");
+    assert_eq!(status.code(), Some(0), "it ended on the interrupt, which the fake answers with an exit of zero");
+    assert_ne!(status.signal(), Some(9), "the child was not killed");
+    assert_eq!(ended.rest, [Event::Line(br#"{"ok":true,"followed":true}"#.to_vec())]);
+    assert!(!Path::new(&format!("/proc/{pid}")).exists(), "the pid is gone once the call returns");
+}
+
+#[test]
+fn dropping_a_follow_interrupts_its_child_and_reaps_it() {
+    let (exec, _) = held("drop", &[b"one".to_vec()], &[]);
+    let follow = exec.follow(&["session", "trace"], &[FOLLOW], &["ab"]).expect("the follow starts");
+    let pid = follow.id();
+    assert_eq!(follow.next(WAIT), Some(Event::Line(b"one".to_vec())));
+    drop(follow);
+    let until = Instant::now() + Duration::from_secs(5);
+    while Path::new(&format!("/proc/{pid}")).exists() {
+        assert!(Instant::now() < until, "the dropped follow's child is gone within 5 s");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
+#[test]
+fn an_undeclared_flag_starts_no_held_child() {
+    let (exec, record) = held("held-undeclared", &[], &[]);
+    let before = records(&record).len();
+    let flags = [Flag { name: "nope", value: None }];
+    let err = exec.follow(&["session", "trace"], &flags, &["ab"]).err().expect("the follow is refused");
+    assert!(matches!(err, ExecError::Undeclared { .. }), "{err:?}");
+    assert_eq!(records(&record).len(), before, "a refused follow starts no child");
+}
+
+#[test]
+fn a_held_child_gets_only_its_scrubbed_environment() {
+    let (exec, record) = held("held-env", &[b"ready".to_vec()], &[("AOIDE_SESSION_ID", "sess-1"), ("AOIDE_MELETE_KEY", "k")]);
+    let follow = exec.follow(&["session", "trace"], &[FOLLOW], &["ab"]).expect("the follow starts");
+    assert_eq!(follow.next(WAIT), Some(Event::Line(b"ready".to_vec())));
+    follow.end().expect("the follow ends");
+    let held = records(&record).pop().expect("the held child is recorded");
+    assert_eq!(env_keys(&held), ["AOIDE_SESSION_ID", "FAKE_AOIDE_FOLLOW_FILE", "FAKE_AOIDE_RECORD", "PATH"]);
 }
