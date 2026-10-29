@@ -171,9 +171,10 @@ impl RunLoopGuard {
     /// startup (its events feed, the hand-edit sweep, the first resident tick)
     /// with the caller's request sitting unread in the backlog. Measured on
     /// native Windows: the first dispatch then outlived the hop's reply bound
-    /// (`ROUND_TRIP_TIMEOUT` in `client/src/daemon.rs`) and the caller reported `WSAETIMEDOUT` (os error 10060) — "the
-    /// connected party did not properly respond after a period of time" — which
-    /// reads as a dead daemon rather than a slow one. The readiness signal is
+    /// (`ROUND_TRIP_TIMEOUT` in `client/src/daemon.rs`) and the caller reported
+    /// `WSAETIMEDOUT` (os error 10060) — "the connected party did not properly
+    /// respond after a period of time" — which reads as a dead daemon rather
+    /// than a slow one. The readiness signal is
     /// therefore the daemon's OWN startup line in the events feed it was handed
     /// at spawn, which `run_loop` writes as it comes up (the same fact the
     /// server's `run_loop_creates_and_caps_the_events_feed` polls for).

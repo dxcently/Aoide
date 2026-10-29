@@ -309,13 +309,13 @@ the console", and a post-exit settle window a pty does not need — the WINDOWED
 launch and the compositor's focus discovery are their own degradations, since
 they are Hyprland's, not this capability's.
 
-**One measured limit worth stating**: `aoide-cli`'s
-`graph_residency_p_d6` binary passes single-threaded (6/0/1) and passes each test
-alone, but a fully PARALLEL run of that binary left one test red — six resident
-daemon children on one box, against the daemon hop's reply bound (`ROUND_TRIP_TIMEOUT` in
-`client/src/daemon.rs`). The
-tests already serialize on `aoide_test_support::env_lock`, so this is contention,
-not a code defect; it is recorded rather than papered over.
+**One measured limit worth stating**: `aoide-cli`'s `graph_residency_p_d6`
+binary passes single-threaded (6/0/1) and passes each test alone, but a fully
+PARALLEL run of that binary left one test red — six resident daemon children on
+one box, against the daemon hop's reply bound (`ROUND_TRIP_TIMEOUT` in
+`client/src/daemon.rs`). The tests already serialize on
+`aoide_test_support::env_lock`, so this is contention, not a code defect; it is
+recorded rather than papered over.
 
 - **Not run**: macOS/FreeBSD runtime checks, and the rest of the core's
   closure on native Windows (the "Next layer" table above is the measured
